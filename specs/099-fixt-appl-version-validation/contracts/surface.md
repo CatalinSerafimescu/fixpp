@@ -14,7 +14,7 @@
 | `Session::open()`, direct-constructed | a FIXT session with no adopted set walks in `open()` (data-model E-1), and stalls the thread running it for as long |
 | `SessionConfig`, `Session::open()` comments | state that the dictionary has no engine anchor and is required on the session (#651); the phrase `value_or(engine_anchor)` stays only for the axes that have one |
 
-`session.hpp` is installed and gains no public name: data-model E-6's, E-7's and E-10's members and nested types, and `RejectDecision`'s two fields, are private. `sizeof(Session)` moves (B-row).
+`session.hpp` is installed and gains no public name: data-model E-6's, E-7's and E-10's members and nested types, and `RejectDecision`'s flag, are private. `sizeof(Session)` moves (B-row).
 
 ## C ABI 1.14
 

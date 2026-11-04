@@ -158,7 +158,7 @@ A refusal is acted on only by a validating session. A non-validating session use
 | **A2** | same | `route.refusal` → Reject 371=1128, 373=4 for `empty_value`, else 5 |
 | **A3** | same | Today's 3/5 exemption, then the gate with the route: parse with its table; `application && !header_1128 && mv.get(1128)` has a value → Reject 373=14, 371=1128; then validate with its envelope |
 
-A1, A2 and A3's probe fill `RejectDecision`'s new RefMsgType and RefSeqNum: the third field's value and the first 34 (`fault_ref_seq_num`). The third field's value also keys `consume_rejected_seqnum_`. A non-FIXT session leaves both empty, and the arm reads `hdr` as today. A1, A2 and A3 run in that order at the gate's place, ahead of the arm's BeginString, CompID and SendingTime guards (read from source), so of two faults in Active the earlier step answers. LogoutSent gains no step: it drains every frame as today, scanned with the route's hooks.
+A1, A2 and A3's probe set `RejectDecision`'s new flag `names_third_field`, and the Active arm then takes RefMsgType and RefSeqNum from `hdr.fault_ref_msg_type` and `hdr.fault_ref_seq_num`: the third field's value and the first 34. The third field's value also keys `consume_rejected_seqnum_`. It stays a flag because the arm's other Rejects read `hdr.msg_type` and `hdr.msg_seq_num`, so applying the two unconditionally would change their endings. A non-FIXT session leaves it false, and the arm reads `hdr` as today. A1, A2 and A3 run in that order at the gate's place, ahead of the arm's BeginString, CompID and SendingTime guards (read from source), so of two faults in Active the earlier step answers. LogoutSent gains no step: it drains every frame as today, scanned with the route's hooks.
 
 ### The per-arm table
 

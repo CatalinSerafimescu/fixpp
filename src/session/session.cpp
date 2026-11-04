@@ -2922,7 +2922,7 @@ Session::inbound_route Session::select_route_(std::span<const std::byte> frame,
 //     it builds the resource (fixpp#564, `.specify/563-564-callback-send.md` §2.2)
 // [041 T014; data-model E-4; SC-005; simplify-triage FIX-1/FIX-2; const §VIII.5]
 Session::InboundValidation Session::validate_inbound_(
-    std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+    std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& /*hdr*/,
     inbound_route const& route) const noexcept {
     FIXPP_ASSERT_NO_CALLBACK_AT_PARSE_SITE();
     // 093 (data-model E-2): over the session's parse buffer B(L), upstream the spill
@@ -2965,10 +2965,8 @@ Session::InboundValidation Session::validate_inbound_(
     constexpr std::uint16_t kApplVerIdTag = 1128;
     if (route.application && !route.header_1128 && vg_mv_r->get(kApplVerIdTag).has_value()) {
         return {.outcome = validate_outcome::reject,
-                .reject = RejectDecision{.reason = 14,
-                                         .ref_tag_id = kApplVerIdTag,
-                                         .ref_msg_type = hdr.fault_ref_msg_type,
-                                         .ref_seq_num = hdr.fault_ref_seq_num}};
+                .reject = RejectDecision{
+                    .reason = 14, .ref_tag_id = kApplVerIdTag, .names_third_field = true}};
     }
     std::uint16_t vg_ref_tag = 0;
     auto val_r = route.entry.validator->validate(*vg_mv_r, &vg_scratch_mr, &vg_ref_tag,
@@ -3001,10 +2999,8 @@ Session::InboundValidation Session::refuse_active_frame_(
         return {.outcome = validate_outcome::pass};
     }
     return {.outcome = validate_outcome::reject,
-            .reject = RejectDecision{.reason = reason,
-                                     .ref_tag_id = ref_tag,
-                                     .ref_msg_type = hdr.fault_ref_msg_type,
-                                     .ref_seq_num = hdr.fault_ref_seq_num}};
+            .reject =
+                RejectDecision{.reason = reason, .ref_tag_id = ref_tag, .names_third_field = true}};
 }
 
 bool Session::logon_reject_disconnects_(fixpp::session::detail::FrameHeader const& hdr,
@@ -4937,9 +4933,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_valida
             }
         }
         // 099 (data-model E-7): a FIXT refusal names the frame by its third field and first 34.
-        bool const named = v.reject.ref_msg_type.data() != nullptr;
-        const seqnum_t rej_seq = parse_seqnum(named ? v.reject.ref_seq_num : hdr.msg_seq_num);
-        std::string_view const rej_type = named ? v.reject.ref_msg_type : hdr.msg_type;
+        bool const named = v.reject.names_third_field;
+        const seqnum_t rej_seq = parse_seqnum(named ? hdr.fault_ref_seq_num : hdr.msg_seq_num);
+        std::string_view const rej_type = named ? hdr.fault_ref_msg_type : hdr.msg_type;
         if (auto c = co_await consume_rejected_seqnum_(rej_seq, rej_type); !c) {
             co_return c;
         }

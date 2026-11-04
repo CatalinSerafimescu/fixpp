@@ -1329,10 +1329,10 @@ private:
         int reason = 0;
         int ref_tag_id = 0;
         // 099-fixt-appl-version-validation (data-model E-7, research R-9): a FIXT refusal's
-        // RefMsgType, which also keys the consume, and RefSeqNum: the third field's value and the
-        // first 34. Default-constructed everywhere else, and the arm then reads hdr.
-        std::string_view ref_msg_type{};
-        std::string_view ref_seq_num{};
+        // RefMsgType, which also keys the consume, and RefSeqNum are the third field's value and
+        // the first 34: the Active arm reads hdr.fault_ref_msg_type and hdr.fault_ref_seq_num.
+        // False everywhere else, and the arm reads hdr.msg_type and hdr.msg_seq_num.
+        bool names_third_field = false;
     };
     enum class validate_outcome : std::uint8_t { pass, reject, parse_failed };
     struct InboundValidation {
