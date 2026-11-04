@@ -28,6 +28,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <fixpp/core/clock.hpp>  // steady_time_point (T041 US3 liveness)
 #include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>  // expected_t
@@ -1124,11 +1125,17 @@ private:
     static constexpr std::size_t kMaxMsgTypeDefaultBytes = sizeof(msg_type_default::msg_type);
     std::vector<msg_type_default> msg_type_defaults_;
 
-    // What S3's block answers a Logon's group (data-model E-10's endings).
+    // What S3's block answers a Logon: on 1137 (data-model E-7's S3) or on its group (E-10's
+    // endings).
     struct logon_group_refusal {
         int reason;
         int ref_tag;
     };
+    // S3's decision, synchronous: the version 1137 resolved to, or the refusal. Each role's arm
+    // calls it at its own place, under its own gate.
+    [[nodiscard]] std::expected<fixpp::dict::application_version, logon_group_refusal>
+    logon_appl_version_(std::optional<std::string_view> default_appl_ver_id,
+                        std::span<const std::byte> frame) const noexcept;
     [[nodiscard]] std::optional<logon_group_refusal> refuse_msg_type_defaults_(
         std::span<const std::byte> frame) const noexcept;
     // The record site's half: clears, then keeps the subset E-10 names.

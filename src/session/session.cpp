@@ -2823,6 +2823,23 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
     co_return fixpp::core::expected_t<void>{};
 }
 
+namespace {
+
+// One parse of an ApplVerID value, for 1128, 1137 and 1130 (data-model E-7, E-10). A profile's
+// default answers only an empty value (resolve_application_version), and this one's is Unknown, so
+// an empty value fails and a non-empty one reads no default.
+[[nodiscard]] fixpp::core::expected_t<fixpp::dict::application_version> resolve_ref_appl_ver_id(
+    std::string_view value) noexcept {
+    return fixpp::dict::resolve_application_version(
+        fixpp::dict::version_profile{.session = fixpp::dict::session_version::vt11,
+                                     .default_appl = fixpp::dict::application_version::Unknown,
+                                     .has_per_message_override = false,
+                                     ._reserved = 0},
+        value);
+}
+
+}  // namespace
+
 // 099-fixt-appl-version-validation (data-model E-7, FR-001, FR-013): the frame's route. The step
 // numbers are E-7's. A non-FIXT session takes step 1, on a value fixed at open(), and reads
 // inbound_tv_ and validator_, whatever open() did: their owner pointer is never null. So
@@ -2853,13 +2870,8 @@ Session::inbound_route Session::select_route_(std::span<const std::byte> frame,
             route.refusal = route_refusal::empty_value;  // step 4
             return route;
         }
-        // Step 5. The value is not empty here, so the profile's default goes unread.
-        auto const resolved = fixpp::dict::resolve_application_version(
-            fixpp::dict::version_profile{.session = fixpp::dict::session_version::vt11,
-                                         .default_appl = route_negotiated_,
-                                         .has_per_message_override = true,
-                                         ._reserved = 0},
-            peek.appl_ver_id);
+        // Step 5. The value is not empty here, so no profile's default is read.
+        auto const resolved = resolve_ref_appl_ver_id(peek.appl_ver_id);
         if (!resolved) {
             route.refusal = route_refusal::unknown_value;
             return route;
@@ -3001,20 +3013,28 @@ bool Session::logon_reject_disconnects_(fixpp::session::detail::FrameHeader cons
            (ref_tag_id == 1137 || ref_tag_id == 1130 || ref_tag_id == 372);
 }
 
-namespace {
-
-// The record's and the block's one test of a 1130 value: data-model E-10's, 1137's resolver.
-[[nodiscard]] fixpp::core::expected_t<fixpp::dict::application_version> resolve_ref_appl_ver_id(
-    std::string_view value) noexcept {
-    return fixpp::dict::resolve_application_version(
-        fixpp::dict::version_profile{.session = fixpp::dict::session_version::vt11,
-                                     .default_appl = fixpp::dict::application_version::Unknown,
-                                     .has_per_message_override = false,
-                                     ._reserved = 0},
-        value);
+// data-model E-7's S3: the one 1137 decision both roles' blocks take, each at its own place in its
+// sequence and under its own gate. Absent is 373=1. Empty, unparseable, or failing the registry,
+// which is the test and not the slot, is 373=5. A validating session then reads the group's entries
+// (E-10). Precondition: app_version_registry_ is set.
+std::expected<fixpp::dict::application_version, Session::logon_group_refusal>
+Session::logon_appl_version_(std::optional<std::string_view> default_appl_ver_id,
+                             std::span<const std::byte> frame) const noexcept {
+    constexpr int kDefaultApplVerIdTag = 1137;
+    if (!default_appl_ver_id.has_value()) {
+        return std::unexpected(logon_group_refusal{.reason = 1, .ref_tag = kDefaultApplVerIdTag});
+    }
+    auto const resolved = resolve_ref_appl_ver_id(*default_appl_ver_id);
+    if (!resolved.has_value() || !app_version_registry_->get(*resolved).has_value()) {
+        return std::unexpected(logon_group_refusal{.reason = 5, .ref_tag = kDefaultApplVerIdTag});
+    }
+    if (cfg_.validate_inbound_messages) {
+        if (auto const group = refuse_msg_type_defaults_(frame)) {
+            return std::unexpected(*group);
+        }
+    }
+    return *resolved;
 }
-
-}  // namespace
 
 // data-model E-10's `**Endings, validating FIXT, either role**`, FR-031. Stores nothing. With two
 // faults among the entries the first one read answers, as FR-010's double faults may.
@@ -4077,38 +4097,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         // Both reject arms carry RefTagID(371)=1137 and differ ONLY in 373 — emitted by
         // the single parameterized block below (W2 asserts 373=1; W3 asserts
         // 373=5+371=1137).
-        std::optional<int> reject_reason;
-        int reject_tag = 1137;
-        if (!result->default_appl_ver_id.has_value()) {
-            reject_reason = 1;  // RequiredTagMissing
+        // 099 (data-model E-7's S3, E-10, FR-031): the decision also reads the group's entries.
+        auto const appl_version = logon_appl_version_(result->default_appl_ver_id, frame);
+        if (appl_version.has_value()) {
+            // (d) Set-once (FSM NotConnected gate → once per session).
+            negotiated_appl_version_ = *appl_version;
+            route_negotiated_ = *appl_version;  // 099 (FR-027): what selection reads
+            record_msg_type_defaults_(frame);
         } else {
-            const fixpp::dict::version_profile vt11_profile{
-                .session = fixpp::dict::session_version::vt11,
-                .default_appl = fixpp::dict::application_version::Unknown,
-                .has_per_message_override = false,
-                ._reserved = 0};
-            auto resolved = fixpp::dict::resolve_application_version(vt11_profile,
-                                                                     *result->default_appl_ver_id);
-            const bool serviceable =
-                resolved.has_value() && app_version_registry_->get(*resolved).has_value();
-            if (!serviceable) {
-                reject_reason = 5;  // ValueIsIncorrect
-            } else if (const auto group = cfg_.validate_inbound_messages
-                                              ? refuse_msg_type_defaults_(frame)
-                                              : std::nullopt) {
-                // 099 (data-model E-7's S3, E-10, FR-031): the block then reads the group's
-                // entries.
-                reject_reason = group->reason;
-                reject_tag = group->ref_tag;
-            } else {
-                // (d) Set-once (FSM NotConnected gate → once per session).
-                negotiated_appl_version_ = *resolved;
-                route_negotiated_ = *resolved;  // 099 (FR-027): what selection reads
-                record_msg_type_defaults_(frame);
-            }
-        }
-
-        if (reject_reason.has_value()) {
             // Session-level Reject(35=3, 371=reject_tag, 373=*reject_reason) + Disconnected.
             // toAdmin hook fires before store_then_emit (mirrors the reply-Logon path;
             // [[feedback_admin_emit_bypasses_fire_to_admin]]). As of 036 the shared
@@ -4121,10 +4117,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
             {
                 FIXPP_INBOUND_SPLIT_AWAIT(
                     r, tic,
-                    inbound_reject_leaf_(tic, parse_seqnum(hdr.msg_seq_num),
-                                         reject_tag,  // 1137, or data-model E-10's
-                                         "A",         // RefMsgType = Logon
-                                         *reject_reason, rj_st52.value, fsm_state::NotConnected));
+                    inbound_reject_leaf_(
+                        tic, parse_seqnum(hdr.msg_seq_num),
+                        appl_version.error().ref_tag,  // 1137, or data-model E-10's
+                        "A",                           // RefMsgType = Logon
+                        appl_version.error().reason, rj_st52.value, fsm_state::NotConnected));
                 if (!r) {
                     co_return r;
                 }
@@ -5885,35 +5882,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     // slot. Here and not at the record site below, behind the 141=Y reset unit: a reply with
     // `141=Y` and a bad 1137 would durably reset both stores and then be refused.
     if (fixt_routing_ && cfg_.validate_inbound_messages) {
-        std::optional<int> reject_reason;
-        int reject_tag = 1137;
-        if (!result->default_appl_ver_id.has_value()) {
-            reject_reason = 1;  // RequiredTagMissing
-        } else {
-            auto const resolved = fixpp::dict::resolve_application_version(
-                fixpp::dict::version_profile{
-                    .session = fixpp::dict::session_version::vt11,
-                    .default_appl = fixpp::dict::application_version::Unknown,
-                    .has_per_message_override = false,
-                    ._reserved = 0},
-                *result->default_appl_ver_id);
-            if (!resolved.has_value() || !app_version_registry_->get(*resolved).has_value()) {
-                reject_reason = 5;  // ValueIsIncorrect
-            } else if (const auto group = refuse_msg_type_defaults_(frame)) {
-                // Data-model E-10: the block then reads the group's entries, FR-031.
-                reject_reason = group->reason;
-                reject_tag = group->ref_tag;
-            }
-        }
-        if (reject_reason.has_value()) {
+        auto const appl_version = logon_appl_version_(result->default_appl_ver_id, frame);
+        if (!appl_version.has_value()) {
             const auto rj_st52 = effective_clock_ ? stamp_sending_time(*effective_clock_,
                                                                        cfg_.sending_time_precision)
                                                   : SendingTimeStamp{};
             {
                 FIXPP_INBOUND_SPLIT_AWAIT(
                     r, tic,
-                    inbound_reject_leaf_(tic, parse_seqnum(hdr.msg_seq_num), reject_tag, "A",
-                                         *reject_reason, rj_st52.value, fsm_state::LogonSent));
+                    inbound_reject_leaf_(
+                        tic, parse_seqnum(hdr.msg_seq_num), appl_version.error().ref_tag, "A",
+                        appl_version.error().reason, rj_st52.value, fsm_state::LogonSent));
                 if (!r) {
                     co_return r;
                 }
@@ -6106,13 +6085,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
         record_msg_type_defaults_(frame);  // data-model E-10: per connection, validating or not
     }
     if (cfg_.is_fixt() && result->default_appl_ver_id.has_value()) {
-        const fixpp::dict::version_profile vt11_profile{
-            .session = fixpp::dict::session_version::vt11,
-            .default_appl = fixpp::dict::application_version::Unknown,
-            .has_per_message_override = false,
-            ._reserved = 0};
-        auto resolved =
-            fixpp::dict::resolve_application_version(vt11_profile, *result->default_appl_ver_id);
+        auto const resolved = resolve_ref_appl_ver_id(*result->default_appl_ver_id);
         if (resolved.has_value()) {
             // Set-once: negotiated_appl_version_ starts Unknown; set here.
             negotiated_appl_version_ = *resolved;
