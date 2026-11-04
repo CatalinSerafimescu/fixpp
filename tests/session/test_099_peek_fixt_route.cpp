@@ -65,9 +65,25 @@ std::span<const std::byte> bytes(const std::string& frame) {
     return std::as_bytes(std::span{frame.data(), frame.size()});
 }
 
-fixt_route_peek peek_on(const DictPtr& s, const std::string& frame) {
+// A peek's views point into the frame, and a cell's frame is usually a temporary, so this owns
+// what it reports.
+struct Peeked {
+    std::string msg_type;
+    std::string appl_ver_id;
+    bool readable;
+    bool admin;
+    bool header_1128;
+};
+
+Peeked peek_on(const DictPtr& s, const std::string& frame) {
     const dd::table_view& table = table_of(s);
-    return peek_fixt_route(bytes(frame), wire::dict_hooks::for_table_view(table), table);
+    const fixt_route_peek p =
+        peek_fixt_route(bytes(frame), wire::dict_hooks::for_table_view(table), table);
+    return Peeked{.msg_type = std::string{p.msg_type},
+                  .appl_ver_id = std::string{p.appl_ver_id},
+                  .readable = p.readable,
+                  .admin = p.admin,
+                  .header_1128 = p.header_1128};
 }
 
 // T, A, L and a FIX 4.4 S: one rule on every shape.
@@ -87,7 +103,7 @@ const std::string kHead = "8=FIXT.1.1|9=0|";
 TEST(W21Peek, BodylessFrame_StopsAt93) {
     const std::string frame = soh(kHead + "35=D|93=1|89=x|1128=10|");
     for (const auto& [name, s] : every_s()) {
-        const fixt_route_peek p = peek_on(s, frame);
+        const Peeked p = peek_on(s, frame);
         EXPECT_TRUE(p.readable) << name;
         EXPECT_EQ(p.msg_type, "D") << name;
         EXPECT_FALSE(p.header_1128) << name << ": the peek read on past 93, to " << p.appl_ver_id;
@@ -97,7 +113,7 @@ TEST(W21Peek, BodylessFrame_StopsAt93) {
 TEST(W21Peek, Fix44S_ReadsHeader1128) {
     ASSERT_FALSE(table_of(fix44()).is_header_tag(1128))
         << "FIX44 declares 1128: this cell no longer shows the standard set answering";
-    const fixt_route_peek p = peek_on(fix44(), soh(kHead + "35=D|49=S|56=T|34=2|1128=6|11=x|"));
+    const Peeked p = peek_on(fix44(), soh(kHead + "35=D|49=S|56=T|34=2|1128=6|11=x|"));
     EXPECT_TRUE(p.readable);
     EXPECT_TRUE(p.header_1128);
     EXPECT_EQ(p.appl_ver_id, "6");
@@ -111,8 +127,7 @@ TEST(W21Peek, StandardPairOnA_DataEmbeds1128_TheHeaders1128Reads) {
         "x\x01"
         "1128=10\x01"
         "y";
-    const fixt_route_peek p =
-        peek_on(fix50sp2(), counted(kHead + "35=D|", 90, 91, data, "1128=9|11=x|"));
+    const Peeked p = peek_on(fix50sp2(), counted(kHead + "35=D|", 90, 91, data, "1128=9|11=x|"));
     EXPECT_TRUE(p.readable);
     EXPECT_TRUE(p.header_1128);
     EXPECT_EQ(p.appl_ver_id, "9");
@@ -123,7 +138,7 @@ TEST(W21Peek, StandardPairOnA_DataEmbeds1128_NoHeader1128) {
         "x\x01"
         "1128=10\x01"
         "y";
-    const fixt_route_peek p = peek_on(fix50sp2(), counted(kHead + "35=D|", 90, 91, data, "11=x|"));
+    const Peeked p = peek_on(fix50sp2(), counted(kHead + "35=D|", 90, 91, data, "11=x|"));
     EXPECT_TRUE(p.readable);
     EXPECT_FALSE(p.header_1128) << p.appl_ver_id;
 }
@@ -133,8 +148,7 @@ TEST(W21Peek, StandardPairOnA_DataOfNonTagBytes_Readable) {
         "\x01"
         "ab\x01"
         "cd";
-    const fixt_route_peek p =
-        peek_on(fix50sp2(), counted(kHead + "35=D|", 90, 91, data, "1128=9|11=x|"));
+    const Peeked p = peek_on(fix50sp2(), counted(kHead + "35=D|", 90, 91, data, "1128=9|11=x|"));
     EXPECT_TRUE(p.readable);
     EXPECT_EQ(p.appl_ver_id, "9");
 }
@@ -158,8 +172,8 @@ TEST(W21Peek, SsHeaderPair_DataEmbeds1128_TheHeaders1128Reads) {
         "x\x01"
         "1128=10\x01"
         "y";
-    const fixt_route_peek p = peek_on(fixt11_with_header_pair_and_tag(),
-                                      counted(kHead + "35=D|", 5030, 5031, data, "1128=9|"));
+    const Peeked p = peek_on(fixt11_with_header_pair_and_tag(),
+                             counted(kHead + "35=D|", 5030, 5031, data, "1128=9|"));
     EXPECT_TRUE(p.readable);
     EXPECT_EQ(p.appl_ver_id, "9");
 }
@@ -169,8 +183,8 @@ TEST(W21Peek, SsHeaderPair_DataOfNonTagBytes_Readable) {
         "\x01"
         "ab\x01"
         "cd";
-    const fixt_route_peek p = peek_on(fixt11_with_header_pair_and_tag(),
-                                      counted(kHead + "35=D|", 5030, 5031, data, "1128=9|"));
+    const Peeked p = peek_on(fixt11_with_header_pair_and_tag(),
+                             counted(kHead + "35=D|", 5030, 5031, data, "1128=9|"));
     EXPECT_TRUE(p.readable);
     EXPECT_EQ(p.appl_ver_id, "9");
 }
@@ -197,7 +211,7 @@ TEST(W21Peek, TheThirdFieldIsNot35_Unreadable) {
     for (const char* text :
          {"8=FIXT.1.1|35=D|9=0|", "8=FIXT.1.1|9=0|49=S|35=D|", "8=FIXT.1.1|9=0|", ""}) {
         const std::string frame = soh(text);
-        const fixt_route_peek p = peek_on(fixt11(), frame);
+        const Peeked p = peek_on(fixt11(), frame);
         EXPECT_FALSE(p.readable) << text;
         EXPECT_TRUE(p.msg_type.empty()) << text;
         EXPECT_FALSE(scan_frame_header(bytes(frame)).msg_type_is_third) << text;
@@ -231,7 +245,7 @@ TEST(W21Peek, AMalformedTagBeforeTheStop_Unreadable) {
 
 TEST(W21Peek, AFaultPastTheStop_Readable) {
     for (const char* tail : {"11=x|90=99|91=x|", "11=x|3a=1|"}) {
-        const fixt_route_peek p = peek_on(fixt11(), soh(kHead + "35=D|1128=9|" + tail));
+        const Peeked p = peek_on(fixt11(), soh(kHead + "35=D|1128=9|" + tail));
         EXPECT_TRUE(p.readable) << tail;
         EXPECT_EQ(p.msg_type, "D") << tail;
         EXPECT_EQ(p.appl_ver_id, "9") << tail;
@@ -242,7 +256,7 @@ TEST(W21Peek, AFaultPastTheStop_Readable) {
 // frame, so a stop ahead of the third field does not lose it. Nothing past that stop is read.
 TEST(W21Peek, AStopAheadOfTheThirdField_TheThirdFieldStillAnswers) {
     const std::string frame = soh("11=x|2=y|35=D|1128=9|");
-    const fixt_route_peek p = peek_on(fixt11(), frame);
+    const Peeked p = peek_on(fixt11(), frame);
     EXPECT_TRUE(p.readable);
     EXPECT_EQ(p.msg_type, "D");
     EXPECT_FALSE(p.header_1128);
@@ -252,7 +266,7 @@ TEST(W21Peek, AStopAheadOfTheThirdField_TheThirdFieldStillAnswers) {
 }
 
 TEST(W21Peek, A1128AfterAStopAheadOfTheThirdField_IsNotTheHeaders) {
-    const fixt_route_peek p = peek_on(fixt11(), soh("11=x|1128=9|35=D|"));
+    const Peeked p = peek_on(fixt11(), soh("11=x|1128=9|35=D|"));
     EXPECT_TRUE(p.readable);
     EXPECT_EQ(p.msg_type, "D");
     EXPECT_FALSE(p.header_1128);
@@ -263,7 +277,7 @@ TEST(W21Peek, A1128PastTheStop_IsNotTheHeaders) {
 }
 
 TEST(W21Peek, AnEmpty1128IsPresent_AnAbsentOneIsNot) {
-    const fixt_route_peek empty = peek_on(fixt11(), soh(kHead + "35=D|1128=|11=x|"));
+    const Peeked empty = peek_on(fixt11(), soh(kHead + "35=D|1128=|11=x|"));
     EXPECT_TRUE(empty.header_1128);
     EXPECT_TRUE(empty.appl_ver_id.empty());
     EXPECT_FALSE(peek_on(fixt11(), soh(kHead + "35=D|11=x|")).header_1128);
