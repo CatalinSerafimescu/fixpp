@@ -104,7 +104,7 @@ Each row: the code it changes, and the cell that goes RED on that change alone. 
 | M-44 | `build` maps a failure to a miss | W-20, build arm: a route with a hole, and no `out_of_memory` |
 | M-45 | the standard set keeps 10, 89, 93 | W-21, 93 then 1128: peek reads on |
 | M-46 | admin is `detail::is_admin_msgtype` | W-21, `A`; W-1, a Logon routed as application |
-| M-47 | a seeded delay on the non-FIXT path | W-22: proves the paired bench reports |
+| M-47 | a seeded delay on the non-FIXT path: a steady-clock spin in `Session::on_inbound_frame` when the session routes nothing, and in `validate`'s walk with no envelope, so that each of W-22's two benches reads it | W-22: proves the paired bench reports, each row moving by at least 20 % against the base |
 | M-48 | the overload populates framing for FIX Latest | W-17, the framing stores are empty for `vt11` and FIX Latest in both forms: `FramingStores_ByVersion/OrchestraFIXLatest`, its framing store not empty |
 | M-49 | S2: a gate Reject naming 1137 does not disconnect | `NC-e`, `LS-e`, absent: stays |
 | M-50 | S1 reduced to `!is_fixt_admin_msgtype(hdr.msg_type)`, the last MsgType, with no mismatch clause | `NC-a`, `D…A` with Logon fields: a gate Reject, stays, not Disconnected |
