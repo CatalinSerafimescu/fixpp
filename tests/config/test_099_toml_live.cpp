@@ -8,8 +8,8 @@
 // only FIX Latest declares, is delivered; the same frame with no 1128 draws 373=2, 371=3115. Its own
 // executable under [const §VII.8], because it runs threads and a socket.
 //
-// After Engine::start() every check is non-fatal until stop() has completed, because ~Engine's
-// precondition aborts on a fatal return in between.
+// Between the Engine's construction and a completed stop() every check is non-fatal, because
+// ~Engine's precondition aborts on a fatal return in between.
 
 #include <gtest/gtest.h>
 
@@ -144,17 +144,20 @@ TEST(W14Live, ReachesActive_1128Routes) {
     ec.application = app;
     fixpp::session::Engine engine{ioc.get_executor(), std::move(ec)};
     const auto registered = engine.register_session(loaded->sessions.at(0).config);
-    ASSERT_TRUE(registered.has_value()) << "register_session returned "
-                                        << static_cast<int>(registered.error());
-    const auto started = engine.start();
-    ASSERT_TRUE(started.has_value());
+    EXPECT_TRUE(registered.has_value())
+        << "register_session returned " << static_cast<int>(registered.error());
+    const bool started = registered.has_value() && engine.start().has_value();
+    EXPECT_TRUE(started);
 
+    // start() runs ahead of the worker, as the C ABI's fixpp_engine_start does.
     auto guard = asio::make_work_guard(ioc);
     std::thread worker{[&ioc] { ioc.run(); }};
 
     std::string reject;
     bool routed_delivered = false;
-    if (peer.accept(kStep)) {
+    if (!started) {
+        // stop() below is what ~Engine requires, whatever happened here.
+    } else if (peer.accept(kStep)) {
         const auto logon = peer.read_msg_type("A", kStep);
         EXPECT_TRUE(logon.has_value()) << "no Logon from the initiator";
         if (logon) {
