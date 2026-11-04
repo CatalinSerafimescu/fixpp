@@ -118,7 +118,7 @@ Each row: the code it changes, and the cell that goes RED on that change alone. 
 | M-61 | S3's initiator block moved to today's record site, behind the reset unit | W-5, `141=Y` with `1137=4`: `peek_outbound()` moves |
 | M-62 | S2 disconnects on any gate Reject of a Logon | W-5, the control: Disconnected, not stays |
 | M-62b | S2 drops `hdr.msg_type == "A"` | W-5, a Heartbeat carrying 1137: Disconnected, not stays |
-| M-63 | `build` makes no `{d, S}` entries | W-3 (f), validating, T, the frame routed by its 1128: E-6's slot rule finds no `{d, S}`, a miss, so selection's step 5 refuses and A2 answers `AC-b`'s no-dictionary ending, `R 5/1128 D`, not delivered |
+| M-63 | `build` makes no `{d, S}` entries | W-3 (f), validating, T, the frame routed by its 1128: `pair_source_` is read from the set, so it is null, and `find(d, nullptr)` answers the plain table, which does not know S's pair: on the non-tag Data the arm's fault ending, not delivered |
 | M-64 | step 6 skips `msg_type_defaults_` | W-25, after `MT-a`: 373=2, 371=3115 |
 | M-65 | the scan ignores 385 | W-25, `MT-j`, `385=R` on T with `1130=10`: FIX Latest answers |
 | M-66 | the scan ignores 1410 | W-25, `MT-j`, `1410=N` with `1130=10`: FIX Latest answers |
@@ -177,6 +177,7 @@ Each row: the code it changes, and the cell that goes RED on that change alone. 
 | M-118 | the cold path counts the third field as a repeat | `W21PeekColdPath.ASecond35InTheHeaderOnly`: `35=D\|49=S\|` repeated |
 | M-119 | the walk reads values with `dict_hooks::none()` | `W21Peek.SsHeaderPair_DataEmbeds1128_TheHeaders1128Reads`: 10, not 9; `W21Peek.SsHeaderPair_DataOfNonTagBytes_Readable`: not readable |
 | M-120 | the stop rule loses S's own header tags | `W21Peek.AHeaderTagOnlyS_DeclaresWalksOn_OnPlainSItStops`: no 1128 read |
+| M-121 | the arms do not disregard a frame on a FIXT session whose route block did not complete | `W8RefusedOpenFrames`, both paths: the Logon runs |
 
 Unused ids, none reused: M-12, M-18 to M-20, M-26, M-37.
 

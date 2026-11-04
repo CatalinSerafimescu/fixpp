@@ -101,11 +101,11 @@ route_entry {
   table_view const*                   envelope;    // S's table when this route's table is not S's, else null
 }
 
-fixt_routing_     bool: begin_string is FIXT.1.1 (the FIXT check has guaranteed the registry and default_appl_ver_id)
+fixt_routing_     bool: begin_string is FIXT.1.1. Behind a successful open() only, the FIXT check has guaranteed the registry and default_appl_ver_id
 route_negotiated_ application_version: selection's read of the negotiated version, outside the establishment arms only; written as
                   FR-027 says. negotiated_appl_version_ keeps today's writes (FR-027)
 msg_type_defaults_ E-10; written and read as route_negotiated_ is
-pair_source_      Dictionary const*: S when S declares a header pair, else null; the second argument of every find() but S's own entry's, which is find(S, nullptr), since E-1 builds {d, S} only for every other d
+pair_source_      Dictionary const*: S when the set holds a {d, S} entry, else null, read from the set so that open() has no fallible step after its first route write; the second argument of every find() but S's own entry's, which is find(S, nullptr), since E-1 builds {d, S} only for every other d
 routes_           shared_ptr<const fixt_route_set>: adopted from the Engine, or built in open(); null on a non-FIXT session
 app_routes_       array<route_entry, slot count>, indexed by application_version
 transport_route_  route_entry
@@ -134,11 +134,11 @@ inbound_route {
 }
 ```
 
-**The peek's oracle** (one clause, research R-5). Walks from the frame's start with S's hooks. MsgType is the third field's. It is unreadable when the third field is not 35, or when `read_value` faults before the stop, whether or not 35 was read. Stops at the first tag for which `inbound_tv_->is_header_tag(tag) || dict::is_fixt_standard_header_tag(tag)` is false; 10, 89 and 93 satisfy neither. Admin is `dict::is_fixt_admin_msgtype`. Whether a second 35 is in the header is read only on a mismatch: the cold path re-walks with the same stop rule.
+**The peek's oracle** (one clause, research R-5). Walks from the frame's start with S's hooks. MsgType is the third field's. It is unreadable when the third field is not 35, or when `read_value` faults before the stop, whether or not 35 was read, or when a tag before the stop is malformed (a non-digit, above 0xFFFF, empty, no `=`), as `scan_frame_header` reports `malformed_tag` on the same frames. Stops at the first tag for which `inbound_tv_->is_header_tag(tag) || dict::is_fixt_standard_header_tag(tag)` is false; 10, 89 and 93 satisfy neither. The stop is latched: the first three fields are still read, so the peek's MsgType equals the scan's `fault_ref_msg_type`, and no 1128 is taken after the stop. Admin is `dict::is_fixt_admin_msgtype`. Whether a second 35 is in the header is read only on a mismatch: the cold path re-walks with the same stop rule.
 
 **Selection,** once at arm entry, in every arm:
 
-1. Not `fixt_routing_` → `session_route_`.
+1. Not `fixt_routing_` → `{&inbound_tv_, validator_, null}`, what such a session has read since before this feature, whatever its `open()` did: the owner pointer is never null. A FIXT session with `session_route_.owner` null takes the same step: its `open()` refused at or ahead of the route block, whose first route write is that member and which has no fallible step after it. Every arm disregards that session's frame ahead of selection, so no route is read and nothing runs on a session with no store or strand behind it.
 2. Peek unreadable → `session_route_`; the arm's fault and garble dispositions run as today. Admin → `transport_route_`.
 3. An establishment arm (NotConnected, LogonSent) → `session_route_`, no refusal. The negotiated slot is not read.
 4. 1128 present and empty → refusal `empty_value`, `session_route_`.
