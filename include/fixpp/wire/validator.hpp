@@ -567,12 +567,7 @@ private:
             if constexpr (kEnvelope) {
                 if (envelope->is_header_tag(fld.tag) &&
                     !fixpp::dict::is_route_answered_header_tag(fld.tag)) {
-                    if (!envelope->enum_valid(fld.tag, fld.value)) {
-                        set_ref_tag(ref_tag_out, fld.tag);
-                        return core::expected_t<void>{std::unexpect,
-                                                      core::error::wire_field_value_out_of_range};
-                    }
-                    auto const check = check_field_type(*envelope, fld.tag, fld.value, scratch_mr);
+                    auto const check = check_value(*envelope, fld.tag, fld.value, scratch_mr);
                     if (!check) {
                         set_ref_tag(ref_tag_out, fld.tag);
                         return check;
@@ -593,15 +588,8 @@ private:
                 return core::expected_t<void>{std::unexpect, core::error::wire_unexpected_tag};
             }
 
-            // (b) Enum validity check
-            if (!dict_.enum_valid(fld.tag, fld.value)) {
-                set_ref_tag(ref_tag_out, fld.tag);
-                return core::expected_t<void>{std::unexpect,
-                                              core::error::wire_field_value_out_of_range};
-            }
-
-            // (c) Type structural check ([2b §6.5 rule 3])
-            auto const check = check_field_type(dict_, fld.tag, fld.value, scratch_mr);
+            // (b) and (c)
+            auto const check = check_value(dict_, fld.tag, fld.value, scratch_mr);
             if (!check) {
                 set_ref_tag(ref_tag_out, fld.tag);
                 return check;
@@ -611,6 +599,18 @@ private:
             return field_fault_error(it, ref_tag_out);
         }
         return {};
+    }
+
+    // One field's value by `table`'s answers: (b) enum validity, then (c) the type check.
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+    [[nodiscard]] static core::expected_t<void> check_value(
+        fixpp::dict::table_view const& table, std::uint16_t tag, std::span<const std::byte> value,
+        std::pmr::memory_resource* mr) noexcept {
+        if (!table.enum_valid(tag, value)) {
+            return core::expected_t<void>{std::unexpect,
+                                          core::error::wire_field_value_out_of_range};
+        }
+        return check_field_type(table, tag, value, mr);
     }
 
     // Structural type check for a single field value ([2b §6.5 rule 3]), by `table`'s type for it.
