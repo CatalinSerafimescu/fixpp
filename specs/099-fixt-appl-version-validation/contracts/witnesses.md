@@ -122,7 +122,7 @@ Each row: the code it changes, and the cell that goes RED on that change alone. 
 | M-61 | S3's initiator block moved to today's record site, behind the reset unit | W-5, `141=Y` with `1137=4`: `peek_outbound()` reads 2, and `session_event_sequence_numbers_reset` is present |
 | M-62 | S2 disconnects on any gate Reject of a Logon | W-5, the control: Disconnected, not stays |
 | M-62b | S2 drops `hdr.msg_type == "A"` | W-5, a Heartbeat carrying 1137: Disconnected, not stays |
-| M-63 | `build` makes no `{d, S}` entries | W-3 (f), validating, T, the frame routed by its 1128: `pair_source_` is read from the set, so it is null, and `find(d, nullptr)` answers the plain table, which does not know S's pair: on the non-tag Data the scan faults ahead of the frame's 34, so `dispose_unparseable_`'s D-7, `- | stays | k`, not delivered |
+| M-63 | `build` makes no `{d, S}` entries | W-3 (f), validating, T, the frame routed by its 1128: `bind_fixt_routes_`'s `pair_source` is read from the set, so it is null, and `find(d, nullptr)` answers the plain table, which does not know S's pair: on the non-tag Data the scan faults ahead of the frame's 34, so `dispose_unparseable_`'s D-7, `- | stays | k`, not delivered |
 | M-64 | step 6 skips `msg_type_defaults_` | W-25, after `MT-a`: 373=2, 371=3115 |
 | M-65 | the scan ignores 385 | W-25, `MT-j`, `385=R` on T with `1130=10`: FIX Latest answers |
 | M-66 | the scan ignores 1410 | W-25, `MT-j`, `1410=N` with `1130=10`: FIX Latest answers |

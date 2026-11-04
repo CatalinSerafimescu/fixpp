@@ -1382,8 +1382,12 @@ void Session::bind_fixt_routes_() noexcept {
     using fixpp::dict::application_version;
     fixpp::dict::version_registry const& registry = registry_or_empty(app_version_registry_);
     fixpp::dict::table_view const* const s_table = session_route_.owner->get();
-    auto const routed = [this, s_table](fixpp::dict::Dictionary const* d) noexcept {
-        detail::fixt_route_set::entry const* const e = routes_->find(d, pair_source_);
+    // S when the set holds a {d, S} entry, else null, read from the set, so this cannot fail: the
+    // second key of every lookup here. S's own entry is find(S, nullptr), as open() reads it.
+    fixpp::dict::Dictionary const* const pair_source =
+        routes_->has_pair_source(cfg_.dictionary.get()) ? cfg_.dictionary.get() : nullptr;
+    auto const routed = [this, s_table, pair_source](fixpp::dict::Dictionary const* d) noexcept {
+        detail::fixt_route_set::entry const* const e = routes_->find(d, pair_source);
         return e == nullptr
                    ? route_entry{}
                    : route_entry{
@@ -1686,8 +1690,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         if (!cfg_.dict_snapshot) {
             inbound_tv_ = own->owner;
         }
-        pair_source_ =
-            routes_->has_pair_source(cfg_.dictionary.get()) ? cfg_.dictionary.get() : nullptr;
         bind_fixt_routes_();
     }
 

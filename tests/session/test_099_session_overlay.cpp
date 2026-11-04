@@ -532,7 +532,8 @@ TEST_P(W3fPair, A_TransportRoute_DeliveredDataWhole) {
     EXPECT_EQ(seen.resolved, dd::application_version::Unknown) << "an admin message";
 }
 
-// One W-3 (f) cell keeps open()'s private build, for `pair_source_` (tasks.md T007).
+// One W-3 (f) cell keeps open()'s private build, for `bind_fixt_routes_`'s `pair_source` (tasks.md
+// T007).
 TEST(W3fPrivateBuild, T_RoutedByHeader1128_DeliveredDataWhole) {
     const std::string data = kEmbeddedSeq.data;
     Fixture f;

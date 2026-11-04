@@ -105,7 +105,6 @@ fixt_routing_     bool: begin_string is FIXT.1.1. Behind a successful open() onl
 route_negotiated_ application_version: selection's read of the negotiated version, outside the establishment arms only; written as
                   FR-027 says. negotiated_appl_version_ keeps today's writes (FR-027)
 msg_type_defaults_ E-10; written and read as route_negotiated_ is
-pair_source_      Dictionary const*: S when the set holds a {d, S} entry, else null, read from the set so that open() has no fallible step after its first route write; the second argument of every find() but S's own entry's, which is find(S, nullptr), since E-1 builds {d, S} only for every other d
 routes_           shared_ptr<const fixt_route_set>: adopted from the Engine, or built in open(); null on a non-FIXT session
 app_routes_       array<route_entry, slot count>, indexed by application_version
 transport_route_  route_entry
@@ -118,9 +117,11 @@ The gate's guard reads `session_route_.validator`, not `validator_`. `session_te
 
 **Written in `open()`, before the first observable mutation**, on the same side of the commit as the carry and parse blocks. Read on the session's strand with no lock; `route_negotiated_` and `msg_type_defaults_` are also written there, at Logon, and a test accessor reads them only while nothing pumps. A failed `open()` leaves `state_` at `never_opened`, and a retry may reassign a privately built `routes_`, under the same owner-object carve-out as `inbound_tv_`: no view exists then. An adopted `routes_` stays as adopted on a retry, and `open()` after a success returns `session_already_open` ahead of all this, as today. An adopted set with no entry for S is refused: `open()` returns `invalid_session_config` rather than read a null entry.
 
-**Slot rule (FR-002).** For each version `v`: `registry.get(v)` is a dictionary `d`, or `v` is S's own version, or neither. S's entry if `v` is S's own version or `d`'s `session_version` is S's. Otherwise `routes_->find(d, pair_source_)`, with the envelope. Otherwise a null owner, which is a miss.
+**`pair_source`.** A local of `bind_fixt_routes_`, open-time state with no later reader: S when the set holds a {d, S} entry, else null, read from the set so that `open()` has no fallible step after its first route write. It is the second argument of every `find()` but S's own entry's, which is `find(S, nullptr)`, since E-1 builds {d, S} only for every other d.
 
-**Transport route.** S's entry if `defines_fixt_admin(S)`. Otherwise `routes_->find(registry.transport(), pair_source_)`, if that dictionary passes the check, with the envelope. Otherwise, reachable only when not validating, S's entry.
+**Slot rule (FR-002).** For each version `v`: `registry.get(v)` is a dictionary `d`, or `v` is S's own version, or neither. S's entry if `v` is S's own version or `d`'s `session_version` is S's. Otherwise `routes_->find(d, pair_source)`, with the envelope. Otherwise a null owner, which is a miss.
+
+**Transport route.** S's entry if `defines_fixt_admin(S)`. Otherwise `routes_->find(registry.transport(), pair_source)`, if that dictionary passes the check, with the envelope. Otherwise, reachable only when not validating, S's entry.
 
 ## E-7 Per-frame route and what each arm does with it (internal)
 
