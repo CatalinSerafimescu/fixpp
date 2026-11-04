@@ -253,9 +253,10 @@ TEST(W20Engine, EachFiredAllocationFailsStartThenASecondStartSucceeds) {
         fired_runs += g_fired.load() != 0 ? 1 : 0;
         EXPECT_EQ(g_fired.load(), 1) << "N " << n << " is past this start()'s build";
         EXPECT_FALSE(first.has_value()) << "N " << n;
-        if (!first.has_value()) {
-            EXPECT_EQ(first.error(), error::out_of_memory) << "N " << n;
+        if (first.has_value()) {
+            continue;  // that start() spawned its loops, so a second one is not this arm's
         }
+        EXPECT_EQ(first.error(), error::out_of_memory) << "N " << n;
         EXPECT_EQ(engine_test_access::outstanding_loops(*rig.engine), 0) << "N " << n;
         EXPECT_EQ(engine_test_access::routes(*rig.engine), nullptr) << "N " << n;
         const auto second = rig.engine->start();
