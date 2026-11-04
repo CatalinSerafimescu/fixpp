@@ -2843,7 +2843,8 @@ namespace {
 // 099-fixt-appl-version-validation (data-model E-7, FR-001, FR-013): the frame's route. The step
 // numbers are E-7's. A non-FIXT session takes step 1, on a value fixed at open(), and reads
 // inbound_tv_ and validator_, whatever open() did: their owner pointer is never null. So
-// does a FIXT session whose route block did not complete, which no arm lets go further.
+// does a FIXT session whose route block did not complete, which on_inbound_active_ lets go no
+// further.
 Session::inbound_route Session::select_route_(std::span<const std::byte> frame,
                                               bool establishment_arm) const noexcept {
     if (!fixt_routing_ || session_route_.owner == nullptr) {
@@ -3683,9 +3684,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
     //
     // 099-fixt-appl-version-validation (data-model E-7, research R-7): the scan uses the frame's
     // route, selected here so that it lives in this frame.
-    if (fixt_routes_unbound_()) {
-        co_return fixpp::core::expected_t<void>{};
-    }
     inbound_route const route = select_route_(frame, /*establishment_arm=*/true);
     auto hdr = scan_frame_header(frame, session_hooks(*route.entry.owner));
     // 093 (contract C-2 step 1): a frame whose third field is not MsgType(35),
@@ -4341,6 +4339,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
     };
     bool caught_cancellation = false;
     try {
+        // 099-fixt-appl-version-validation (data-model E-7's step 1): ahead of the state test,
+        // since this is the one way into every arm, and ahead of any await.
+        if (fixt_routes_unbound_()) {
+            co_return fixpp::core::expected_t<void>{};
+        }
         // 093-inbound-frame-dispositions (FR-013, contract C-2) supersedes 070's S-030
         // check here, which disconnected an Active session whose inbound frame exceeded
         // the advertised MaxMessageSize(383) and exempted every frame before Active. The
@@ -4369,9 +4372,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
         // 099-fixt-appl-version-validation (data-model E-7, research R-7): the frame's route,
         // selected past the state test above, in this frame, which outlives every sub-arm it
         // awaits.
-        if (fixt_routes_unbound_()) {
-            co_return fixpp::core::expected_t<void>{};
-        }
         inbound_route const route = select_route_(frame, /*establishment_arm=*/false);
         auto hdr = scan_frame_header(frame, session_hooks(*route.entry.owner));
         inbound_slow_t slow{};
@@ -5641,9 +5641,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logout_sent_(
     //     (seqnum NOT advanced, no fromAdmin/fromApp dispatch)
     // 099-fixt-appl-version-validation (data-model E-7): scanned with the route's hooks, so a body
     // pair a route declares is not read as the reply. This arm gains no step.
-    if (fixt_routes_unbound_()) {
-        co_return fixpp::core::expected_t<void>{};
-    }
     inbound_route const route = select_route_(frame, /*establishment_arm=*/false);
     auto hdr = scan_frame_header(frame, session_hooks(*route.entry.owner));
     // 093 (contract C-2 step 1): a frame whose third field is not MsgType(35),
@@ -5701,9 +5698,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     //
     // 099-fixt-appl-version-validation (data-model E-7, research R-7): the scan uses the frame's
     // route, selected here so that it lives in this frame.
-    if (fixt_routes_unbound_()) {
-        co_return fixpp::core::expected_t<void>{};
-    }
     inbound_route const route = select_route_(frame, /*establishment_arm=*/true);
     auto hdr = scan_frame_header(frame, session_hooks(*route.entry.owner));
     // 093 (contract C-2 step 1): a frame whose third field is not MsgType(35),

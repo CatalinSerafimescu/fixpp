@@ -281,10 +281,10 @@ TEST(W8AdoptedSet, LackingS_Refused) {
 
 // ── A frame on a session whose open() refused ───────────────────────────────────────────
 
-// on_inbound_cold_ reads only fsm_state_, so a frame can reach an arm of a session whose open()
-// refused at the FIXT check. That session holds no route, on the C path with a table already in
-// inbound_tv_ and on the C++ path with none. The frame is disregarded: no arm reads a route it
-// does not have, and nothing runs on a session with no store or strand behind it.
+// A frame can reach on_inbound_active_ on a session whose open() refused at the FIXT check. That
+// session holds no route, on the C path with a table already in inbound_tv_ and on the C++ path
+// with none. The frame is disregarded: no arm reads a route it does not have, and nothing runs on
+// a session with no store or strand behind it.
 class W8RefusedOpenFrames : public testing::TestWithParam<bool> {};
 
 TEST_P(W8RefusedOpenFrames, DisregardedBeforeAnythingReadsARoute) {

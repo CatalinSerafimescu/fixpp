@@ -1162,8 +1162,8 @@ private:
     [[nodiscard]] inbound_route select_route_(std::span<const std::byte> frame,
                                               bool establishment_arm) const noexcept;
     // A FIXT session whose open() refused ahead of the route block, or in it. It holds no route,
-    // so an arm disregards the frame before anything reads one. session_route_.owner is the first
-    // route member open() writes, and nothing in that block can fail after it.
+    // so on_inbound_active_ disregards the frame before any arm reads one. session_route_.owner is
+    // the first route member open() writes, and nothing in that block can fail after it.
     [[nodiscard]] bool fixt_routes_unbound_() const noexcept {
         return fixt_routing_ && session_route_.owner == nullptr;
     }
