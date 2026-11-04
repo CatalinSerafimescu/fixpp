@@ -232,14 +232,19 @@ std::string shape_param_name(const testing::TestParamInfo<Shape>& i) { return sh
 INSTANTIATE_TEST_SUITE_P(Named, W5PerShape, testing::Values(Shape::T, Shape::A, Shape::L),
                          shape_param_name);
 
-// `141=Y` with `1137=4` on a validating initiator: refused ahead of the reset unit, so the
-// outbound counter open()'s Logon moved stays where it is; the reset would make it 1.
+// `141=Y` with `1137=4` on a validating initiator: refused ahead of the reset unit. open()'s Logon
+// took 1 and the Reject takes the next. Behind the reset unit, the reset would give the Reject 1, so
+// the two endings differ by this counter, and only that unit raises the event.
 TEST_P(W5PerShape, Initiator141YWith1137_4_NoReset) {
     const CellRun run =
         run_keyed_cell(GetParam(), true, Arm::LogonSent, input("Logon 141=Y 1137=4"));
     expect_ending(run, "R 5/1137 A 45=1 | Disc | c | app=0 adm=0");
     if (run.setup_failure.empty()) {
-        EXPECT_EQ(session_test_access::seqnum_mgr(*run.rig->sess).peek_outbound(), 2U);
+        EXPECT_EQ(session_test_access::seqnum_mgr(*run.rig->sess).peek_outbound(), 3U);
+        for (auto const& ev : run.rig->sess->recent_events()) {
+            EXPECT_FALSE(std::holds_alternative<session_event_sequence_numbers_reset>(ev))
+                << "the reset unit ran on a refused Logon";
+        }
     }
 }
 

@@ -9,12 +9,21 @@
 // production change of this feature. That is why these literals come from a run, and M-16 is the
 // mutant. No input carries a pair only a route's table declares: that is W-6's `off-pair`. Each
 // literal is read against 093's dispositions (Session::dispose_unparseable_ and the arms' garble
-// branch), so it is a pin of the dispositions, not a design.
+// branch), so it is a pin of the dispositions, not a design. No mutant of this feature moves these.
+//
+// M-16's cell is the one below them: validating, a frame the peek reads and refuses whose scan
+// faults past the header, so the two arm steps meet on one frame and the fault's comes first. Its
+// literal is 092 contract C-2's row D-5, read at Session::dispose_unparseable_: the number
+// consumed, then Reject 373=0 with no 371, 45 the first 34, 372 the third field. research R-18's
+// logs key no such input.
 
 #include <gtest/gtest.h>
 
+#include <span>
 #include <string>
 
+#include "session/peek_fixt_route.hpp"
+#include "session/scan_frame_header.hpp"
 #include "test_099_fixt_support.hpp"
 
 namespace fixpp::session::test099 {
@@ -101,6 +110,40 @@ INSTANTIATE_TEST_SUITE_P(W19, W19ScanSites, testing::ValuesIn(w19_params()),
                          [](const testing::TestParamInfo<W19Param>& i) {
                              return name_token(i.param.row.name) + "_" + arm_name(i.param.row.arm) +
                                     "_" + shape_name(i.param.shape);
+                         });
+
+class W19FaultPastTheStop : public testing::TestWithParam<Shape> {};
+
+TEST_P(W19FaultPastTheStop, TheFaultsDispositionNotTheRefusal) {
+    const Shape s = GetParam();
+    CellRun run = enter_arm(shape_fixture(s), Arm::Active, RigOptions{});
+    if (!run.setup_failure.empty()) {
+        ADD_FAILURE() << "setup: " << run.setup_failure;
+        return;
+    }
+    const std::string frame =
+        frame_35("D", run.rig->peer_ctx(2), kNos + "3a5=1\x01", "1128=99\x01");
+    const std::span<const std::byte> bytes{reinterpret_cast<const std::byte*>(frame.data()),
+                                           frame.size()};
+
+    // The premise, on this shape's S: the peek reads the frame, and the scan faults on it.
+    const auto& s_table =
+        *session_test_access::routes(*run.rig->sess)->find(shape_dict(s).get(), nullptr)->owner;
+    const auto hooks = fixpp::wire::dict_hooks::for_table_view(s_table);
+    const auto peek = detail::peek_fixt_route(bytes, hooks, s_table);
+    EXPECT_TRUE(peek.readable) << "the peek must read this frame, or the cell tests no refusal";
+    EXPECT_TRUE(peek.header_1128);
+    EXPECT_EQ(peek.appl_ver_id, "99");
+    EXPECT_EQ(detail::scan_frame_header(bytes, hooks).fault,
+              fixpp::wire::field_fault::malformed_tag);
+
+    run.ending = run.rig->deliver(frame);
+    expect_ending(run, "R 0/ D 45=2 | stays | c | app=0 adm=0");
+}
+
+INSTANTIATE_TEST_SUITE_P(W19, W19FaultPastTheStop, testing::Values(Shape::T, Shape::A, Shape::L),
+                         [](const testing::TestParamInfo<Shape>& i) {
+                             return std::string{shape_name(i.param)};
                          });
 
 }  // namespace
