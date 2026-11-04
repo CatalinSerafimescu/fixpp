@@ -225,7 +225,7 @@ TEST(W14Bad, EachBadEntryAddsItsOwn) {
     EXPECT_NE(d[1].message.find("[2]"), std::string::npos) << d[1].message;
 }
 
-// A kind other than `path` is refused at the kind, as at `c0a828ef`, and the key is not read.
+// A kind other than `path` is refused at the kind, as before this feature, and the key is not read.
 TEST(W14Bad, AnotherKindIsRefusedAtTheKind_TheKeyIsNotRead) {
     Loaded l{document("extra_paths = 7", {}, "version")};
     EXPECT_FALSE(l.result.has_value());

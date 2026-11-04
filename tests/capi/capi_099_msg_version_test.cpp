@@ -636,7 +636,7 @@ TEST(W10CBeginStringUnnamed, KindBy35_BothUnknown) {
                Row{kAdmin, FIXPP_SESSION_VER_UNKNOWN, kNone}, "an admin message");
 }
 
-// Tag 8 absent, as at `c0a828ef`: all zero, and the code.
+// Tag 8 absent, as before this feature: all zero, and the code.
 TEST(W10CNoTag8, AllZero_TagNotFound) {
     const std::string body = "35=D\x01";
     const std::string text = "9=" + std::to_string(body.size()) + "\x01" + body + "10=000\x01";
