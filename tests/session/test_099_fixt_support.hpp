@@ -14,9 +14,10 @@
 // A cell computes its ending, appends it to the trace in the log's form, and only then
 // asserts E-7's literal, so a RED cell still leaves its line.
 //
-// The cost of a cell (research R-3): dictionaries load once per process and each shape's
-// S is the shared registry's own Dictionary*. Until the route set exists (tasks.md T039)
-// `adopt_fixture_routes` is empty and every open() walks S, so a run on A and L is slow.
+// The cost of a cell (research R-3): dictionaries load once per process, each shape's S is
+// the shared registry's own Dictionary*, and `adopt_fixture_routes` hands every session a set
+// built once per (registry, S), so an open() walks nothing. A cell that sets
+// RigOptions::private_build keeps open()'s own build, and a test's direct `Session` does.
 
 #include <gtest/gtest.h>
 
@@ -50,16 +51,20 @@
 #include <future>
 #include <initializer_list>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <memory_resource>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
 
+#include "session/fixt_route_set.hpp"
 #include "support/session_test_access.hpp"
 
 namespace fixpp::session::test099 {
@@ -564,8 +569,19 @@ struct Fixture {
     const char* peer_1137 = "9";
 };
 
+// One registry per list of dictionaries, for the process: a registry is immutable, and a set is
+// built per registry (`adopt_fixture_routes`), so a fixture a cell makes again costs no new walk.
 inline std::shared_ptr<dd::version_registry> make_registry(std::vector<DictPtr> dicts) {
-    return std::make_shared<dd::version_registry>(dicts);
+    static std::map<std::vector<const dd::Dictionary*>, std::shared_ptr<dd::version_registry>> all;
+    std::vector<const dd::Dictionary*> key;
+    for (const DictPtr& d : dicts) {
+        key.push_back(d.get());
+    }
+    auto& slot = all[key];
+    if (!slot) {
+        slot = std::make_shared<dd::version_registry>(dicts);
+    }
+    return slot;
 }
 
 // Research R-18's configuration: FIXT11, FIX50SP2 and FIX Latest, default v50sp2.
@@ -595,9 +611,47 @@ inline Fixture own_fixture(Shape s, std::vector<DictPtr> dicts) {
     return Fixture{make_registry(std::move(dicts)), shape_dict(s)};
 }
 
-// Hands the fixture's route set to the session, right after construction and before open(),
-// as the role loops do. No such set exists until tasks.md T039, which fills this in.
-inline void adopt_fixture_routes(Session& /*session*/, const Fixture& /*fixture*/) {}
+// Hands the fixture's route set to the session, right after construction and before open(), as
+// the role loops do (tasks.md T007). Research R-18's registry has one set, over its three S's, as
+// an Engine with three FIXT sessions would; any other (registry, S) has its own, built once, each
+// holding its registry so that an address cannot come back as another's. Built here, outside any
+// pump. A fixture's set holds S, since no production path adopts one lacking it.
+inline void adopt_fixture_routes(Session& session, const Fixture& fixture) {
+    using Set = std::shared_ptr<const detail::fixt_route_set>;
+    struct Held {
+        std::shared_ptr<dd::version_registry> registry;
+        DictPtr session_dict;
+        Set routes;
+    };
+    static std::map<std::pair<const dd::version_registry*, const dd::Dictionary*>, Held> sets;
+
+    const bool shared_one = fixture.registry == shared_registry();
+    const dd::Dictionary* const key_s =
+        shared_one && (fixture.session_dict == fixt11() || fixture.session_dict == fix50sp2() ||
+                       fixture.session_dict == latest())
+            ? nullptr
+            : fixture.session_dict.get();
+    Held& held = sets[{fixture.registry.get(), key_s}];
+    if (!held.routes) {
+        const auto built =
+            key_s == nullptr
+                ? detail::fixt_route_set::build(
+                      *fixture.registry,
+                      std::vector<const dd::Dictionary*>{fixt11().get(), fix50sp2().get(),
+                                                         latest().get()})
+                : detail::fixt_route_set::build(*fixture.registry, std::views::single(key_s));
+        if (!built) {
+            ADD_FAILURE() << "the fixture's route set did not build";
+            return;
+        }
+        held = Held{fixture.registry, fixture.session_dict, *built};
+    }
+    if (held.routes->find(fixture.session_dict.get(), nullptr) == nullptr) {
+        ADD_FAILURE() << "the fixture's route set lacks its S";
+        return;
+    }
+    session_test_access::adopt_routes(session, held.routes);
+}
 
 // ── The trace ───────────────────────────────────────────────────────────────────────────
 

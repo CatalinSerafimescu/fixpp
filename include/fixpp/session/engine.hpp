@@ -44,6 +44,11 @@
 
 namespace fixpp::session {
 class Session;
+namespace detail {
+// 099-fixt-appl-version-validation (data-model E-1): held through a shared_ptr, so this header
+// gains no validator.hpp. Full definition in src/session/fixt_route_set.hpp.
+class fixt_route_set;
+}  // namespace detail
 }  // namespace fixpp::session
 
 namespace fixpp::transport {
@@ -196,7 +201,7 @@ struct SessionEntry {
 // state + registry).  Use unique_ptr<Engine> to move ownership if needed.
 //
 // Lifecycle:  constructed → started → stopping → stopped
-//   start()  once; stop()  idempotent from any state.
+//   start()  once successfully; stop()  idempotent from any state.
 //
 // Threading (023 two-domain design — MT-safe):
 //   register_session() is called before start() (single-threaded by contract).
@@ -220,7 +225,8 @@ struct SessionEntry {
 class Engine {
 public:
     /// Caller-supplied executor; the engine owns NO worker threads (clarify-Q3).
-    /// All loops co_spawn on exec; start() does NOT block or run the executor.
+    /// All loops co_spawn on exec; start() does not run the executor. On an engine with a
+    /// FIXT session it blocks for the route set's walks (see start()).
     Engine(asio::any_io_executor exec, fixpp::core::EngineConfig cfg);
 
     Engine(Engine const&) = delete;
@@ -235,6 +241,10 @@ public:
     /// FR-002: register a session from its config; records config + role ONLY.
     /// Does NOT construct a Session (lazy construction inside spawned loops).
     /// Duplicate SessionId::from_config(cfg) → session_invalid_argument (119).
+    /// A validating FIXT session failing the FIXT check → invalid_session_config, with no
+    /// entry made (099-fixt-appl-version-validation, data-model E-9, FR-004). A non-validating
+    /// one is not refused here: Session::open(), in its role loop, refuses it, and the loop
+    /// logs that through EngineConfig::logger.
     /// Must be called before start() in 015.  NO Application& parameter (FR-013).
     [[nodiscard]] fixpp::core::expected_t<void> register_session(SessionConfig cfg);
 
@@ -285,11 +295,15 @@ public:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send(
         SessionId const& id, std::span<const std::byte> app_payload);
 
-    /// FR-001/FR-003/FR-007 (041 T018): non-blocking.  Validates the
-    /// EngineConfig (clock not null — clock_not_set, slot 54) and returns an
-    /// error without spawning any loops if the config is invalid.  On success,
+    /// FR-001/FR-003/FR-007 (041 T018): validates the EngineConfig (clock not
+    /// null — clock_not_set, slot 54) and returns an error without spawning any
+    /// loops if the config is invalid.  On an engine with a FIXT session it then
+    /// builds the route set (099-fixt-appl-version-validation, data-model E-1): it
+    /// blocks for the walks, so a host calling it from a handler on exec stalls
+    /// that thread, and a failure returns out_of_memory (FR-028).  On success,
     /// co_spawns one connect loop per initiator and one accept loop per acceptor
-    /// on exec.  Legal to call once.
+    /// on exec.  A failure leaves the Engine as constructed, with nothing spawned,
+    /// and start() may be called again: it succeeds once.
     /// Each loop co_awaits Session::open() as its first async step (open()
     /// cannot run in this synchronous call — Gate A New-3).
     /// C-4 / SC-004: callers MUST check the returned result.
@@ -367,6 +381,11 @@ private:
     // type: dict::version_registry (complete type via engine_config.hpp include).
     // [033 data-model.md E2; research R2 threading; T006]
     fixpp::dict::version_registry app_version_registry_;
+
+    // 099-fixt-appl-version-validation (data-model E-1): written once, in start(), when a
+    // registered entry is FIXT, and read only when a role loop hands it to a session. stop()
+    // does not clear it; it dies with the last of the Engine and its sessions.
+    std::shared_ptr<const detail::fixt_route_set> fixt_routes_;
 
     // 017 owned amendment #2: engine-held trace_context snapshot seeded at
     // construction from EngineConfig::engine_trace_context ([2k App D §D.2]).

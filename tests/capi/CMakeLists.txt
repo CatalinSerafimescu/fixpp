@@ -706,3 +706,24 @@ add_test(NAME capi_recovery_liveness COMMAND capi_recovery_liveness_test)
 # ctest steps in .github/workflows/tier1.yml.
 set_tests_properties(capi_recovery_liveness PROPERTIES
   LABELS "capi;536;537;538" TIMEOUT 700)
+
+# 099-fixt-appl-version-validation W-20 (tasks.md T034), FR-028. Standalone ([const §VII.8]): it
+# replaces global operator new with a fail-at-N hook. Here and not in tests/session because its
+# C arm joins at tasks.md T108. TIMEOUT is explicit: a sweep is quadratic in the build's
+# allocations. Re-derive by timing `ctest --test-dir build/<preset> -R '^capi_099_route_set_oom_test$'`.
+add_executable(capi_099_route_set_oom_test capi_099_route_set_oom_test.cpp)
+target_link_libraries(capi_099_route_set_oom_test PRIVATE
+  fixpp_capi
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_099_route_set_oom_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+  "${CMAKE_SOURCE_DIR}/src"   # session/fixt_route_set.hpp
+)
+target_compile_definitions(capi_099_route_set_oom_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+add_test(NAME capi_099_route_set_oom_test COMMAND capi_099_route_set_oom_test)
+set_tests_properties(capi_099_route_set_oom_test PROPERTIES
+  LABELS "capi;099" TIMEOUT 300)

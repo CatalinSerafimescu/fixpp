@@ -160,6 +160,11 @@ Each row: the code it changes, and the cell that goes RED on that change alone. 
 | M-101 | `dict::header_length_pairs` loses its exclusion of the standard pairs | `W17Overload.VendoredFileDeclaresNoHeaderPair`: not empty, on a file whose header declares a standard pair |
 | M-102 | `as_table_view(fixt_framing, extra)` registers `extra` ahead of the dictionary's own pairs | `W17ExtraPairs.SPairWinsACollisionOnThatTable`: 5030 pairs with 5032, not 5031 |
 | M-103 | `as_table_view(fixt_framing, extra)` walks twice | `W17Overload.EveryFormIsOneWalk`: 4, not 3, on every vendored file |
+| M-104 | `Engine::start()` selects its entries by `begin_string`, not `is_fixt()` | `W15Mixed.ANonFixtSessionAndANoDefaultEntryTakeNoPart`: S of the entry with no default walked |
+| M-105 | the accept loop hands the set to a session whatever its `begin_string` | the same cell: a non-FIXT session holds a set |
+| M-106 | `Engine::start()` builds a set with no FIXT session registered | `W15AllFix44Engine.NoSet`: a walk after `start()` |
+| M-107 | `open()` builds its own set when an adopted one lacks S, and does not refuse | `W8AdoptedSet.LackingS_Refused`: opens |
+| M-108a, 108b | the accept loop's; the connect loop's log call removed, one edit per run | `W8LogLine`, that loop's cell: no error record |
 
 Unused ids, none reused: M-12, M-18 to M-20, M-26, M-37.
 

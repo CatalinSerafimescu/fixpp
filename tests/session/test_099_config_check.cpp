@@ -13,15 +13,26 @@
 
 #include <algorithm>
 #include <asio/co_spawn.hpp>
+#include <asio/ip/tcp.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
+#include <cstdint>
 #include <fixpp/core/error.hpp>
+#include <fixpp/log/format_registry.hpp>
+#include <fixpp/log/level.hpp>
+#include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
+#include <fixpp/session/security_profile.hpp>
+#include <fixpp/transport/endpoint.hpp>
 #include <optional>
+#include <ranges>
 #include <string>
+#include <system_error>
 #include <vector>
 
+#include "session/plain_engine_rig.hpp"
 #include "support/log_capture.hpp"
+#include "support/pump_until_ready.hpp"
 #include "support/validation_test_dictionary.hpp"
 #include "test_099_fixt_support.hpp"
 
@@ -236,6 +247,32 @@ TEST(W8Clause, NullRegistry_DirectOpenOnly) {
     EXPECT_EQ(session_test_access::lifecycle_value(s), kNeverOpened);
 }
 
+DictPtr overlay_of_fix44() {
+    static const DictPtr d =
+        overlay_on("FIX44.xml",
+                   "<fix type='FIX' major='4' minor='4' servicepack='0'><fields>"
+                   "<field number='5060' name='OtherOverlayTag' type='STRING' />"
+                   "</fields></fix>");
+    return d;
+}
+
+// data-model E-6: a set handed to a session must hold its S. No production path hands one that
+// does not, and open() refuses rather than dereference a missing entry.
+TEST(W8AdoptedSet, LackingS_Refused) {
+    DirectRig rig;
+    auto registry = make_registry({fixt11(), fix44()});
+    Session s{rig.engine, plain_fixt_config(rig.ioc, overlay_of_fix44(), true, AV::v44),
+              registry.get()};
+    const auto set =
+        detail::fixt_route_set::build(*registry, std::views::empty<const dd::Dictionary*>);
+    ASSERT_TRUE(set.has_value());
+    session_test_access::adopt_routes(s, *set);
+    const auto r = direct_open(rig.ioc, s);
+    ASSERT_FALSE(r.has_value()) << "opened on a set with no entry for its S";
+    EXPECT_EQ(r.error(), error::invalid_session_config);
+    EXPECT_EQ(session_test_access::lifecycle_value(s), kNeverOpened);
+}
+
 // ── The one-way fallback: `get` answers default 9 from the FIX Latest slot ──────────────
 
 TEST(W8OneWayFallback, DirectOpen_Opens) {
@@ -271,26 +308,97 @@ TEST(W8Registration, RefusalLeavesTheOtherEntry) {
 // ── The Log line ────────────────────────────────────────────────────────────────────────
 
 // A non-validating bad config on an Engine with a logger set: registration takes it, the role
-// loop's open() refuses it, and that is logged, not returned (owner item 5). Tasks.md T040 adds the
-// record and its format string, and pins the record's text here; the bundle fixes no literal.
-TEST(W8LogLine, NonValidatingBadConfig_RoleLoopLogsTheRefusal) {
+// loop's open() refuses it, and that is logged, not returned (owner item 5). The record's text is
+// the format string of src/log/format_registry.cpp, spelled out here and not read from it, with
+// its argument computed independently, so a string left out of the registry fails (M-56).
+constexpr std::uint32_t kRoleLoopOpenFailed =
+    FIXPP_FORMAT_ID("session role loop ended: Session::open() failed: error={}");
+
+std::string role_loop_open_failed_text() {
+    return "session role loop ended: Session::open() failed: error=" +
+           std::to_string(static_cast<std::uint64_t>(error::invalid_session_config));
+}
+
+// A role loop's record, as this witness reads it: exactly one error-level record in the run, and
+// it is that loop's, with that text.
+void expect_one_role_loop_record(fixpp::test_support::LogCapture& log) {
+    (void)log.logger->shutdown();
+    std::vector<fixpp::log::Record> errors;
+    for (auto const& rec : log.sink->records()) {
+        if (rec.level >= fixpp::log::Level::error) {
+            errors.push_back(rec);
+        }
+    }
+    ASSERT_EQ(errors.size(), 1U) << "the role loop's failed open() must leave one error record";
+    EXPECT_EQ(errors[0].format_id, kRoleLoopOpenFailed);
+    EXPECT_EQ(fixpp::log::detail::format_record(errors[0]), role_loop_open_failed_text());
+}
+
+// A connect loop opens first thing, so no peer is needed.
+TEST(W8LogLine, NonValidatingBadConfig_ConnectLoopLogsTheRefusal) {
     fixpp::test_support::LogCapture log;
     {
         EngineProbe probe{{fixt11()}, log.logger};
         auto cfg = plain_fixt_config(probe.ioc, fixt11(), false, std::nullopt);
-        ASSERT_TRUE(probe.engine->register_session(std::move(cfg)).has_value());
-        ASSERT_TRUE(probe.engine->start().has_value());
+        cfg.role = session_role::initiator;
+        EXPECT_TRUE(probe.engine->register_session(std::move(cfg)).has_value());
+        EXPECT_TRUE(probe.engine->start().has_value());
         for (int i = 0; i < 2000; ++i) {
             probe.ioc.restart();
             probe.ioc.poll();
         }
     }
-    (void)log.logger->shutdown();
-    std::size_t errors = 0;
-    for (auto const& rec : log.sink->records()) {
-        errors += rec.level >= fixpp::log::Level::error ? 1U : 0U;
+    expect_one_role_loop_record(log);
+}
+
+// An accept loop opens once a connection has sent a first frame that names this session, and
+// closes the connection when open() refuses, which is what the peer's read waits for.
+TEST(W8LogLine, NonValidatingBadConfig_AcceptLoopLogsTheRefusal) {
+    fixpp::test_support::LogCapture log;
+    bool peer_saw_the_close = false;
+    {
+        EngineProbe probe{{fixt11()}, log.logger};
+        auto cfg = plain_fixt_config(probe.ioc, fixt11(), false, std::nullopt);
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+        cfg.security_profile = SecurityProfile{SecurityProfile::kind::insecure_plain_tcp};
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+        cfg.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 0};
+        const SessionId id = SessionId::from_config(cfg);
+        EXPECT_TRUE(probe.engine->register_session(std::move(cfg)).has_value());
+        EXPECT_TRUE(probe.engine->start().has_value());
+        fixpp::test_support::plain_rig::Peer peer{probe.ioc};
+        const bool bound = fixpp::test_support::pump_until(
+            probe.ioc, [&] { return probe.engine->acceptor_bound_endpoint(id).port != 0; },
+            std::chrono::seconds{30}, std::chrono::milliseconds{1}, nullptr);
+        EXPECT_TRUE(bound);
+        if (bound) {
+            const auto port = probe.engine->acceptor_bound_endpoint(id).port;
+            peer.sock.async_connect(
+                asio::ip::tcp::endpoint{asio::ip::make_address("127.0.0.1"), port},
+                [&peer](std::error_code const& ec) {
+                    if (!ec) {
+                        peer.start_reading();
+                        peer.send(logon_frame(Ctx{"TW", "ISLD", 1}, {}));
+                    }
+                });
+            peer_saw_the_close = fixpp::test_support::pump_until(
+                probe.ioc, [&] { return peer.read_ended; }, std::chrono::seconds{30},
+                std::chrono::milliseconds{1}, nullptr);
+        }
+        peer.close();
     }
-    EXPECT_GE(errors, 1U) << "the role loop's failed open() left no error record";
+    EXPECT_TRUE(peer_saw_the_close) << "the accept loop never reached its open()";
+    expect_one_role_loop_record(log);
 }
 
 }  // namespace

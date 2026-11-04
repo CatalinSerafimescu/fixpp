@@ -13,6 +13,7 @@
 
 #include <fixpp/session/engine.hpp>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -51,6 +52,17 @@ struct engine_test_access {
         auto const it = e.registry_.find(id);
         if (it == e.registry_.end()) return std::nullopt;
         return it->second.live_transport != nullptr;
+    }
+
+    // The route set the Engine holds (099-fixt-appl-version-validation, W-15, W-20). It is written
+    // once, in start(), so read it only after start() has returned.
+    [[nodiscard]] static std::shared_ptr<const detail::fixt_route_set> routes(Engine const& e) {
+        return e.fixt_routes_;
+    }
+
+    // How many role loops are outstanding: zero until start() has spawned one (W-20).
+    [[nodiscard]] static int outstanding_loops(Engine const& e) {
+        return e.outstanding_counter_ ? e.outstanding_counter_->load() : 0;
     }
 };
 

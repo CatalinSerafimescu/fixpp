@@ -15,6 +15,8 @@
 
 #include <cstdint>
 #include <fixpp/session/session.hpp>
+#include <memory>
+#include <utility>
 
 namespace fixpp::session {
 
@@ -60,6 +62,12 @@ struct session_engine_access {
     // (`.specify/563-564-callback-send.md` §6, OD-3). Session strand.
     [[nodiscard]] static bool engine_stop_noted(Session const& s) noexcept {
         return s.engine_stop_requested_;
+    }
+    // 099-fixt-appl-version-validation (data-model E-1): hands the Engine's route set to a FIXT
+    // session, right after make_shared<Session> and before open(), which then walks nothing.
+    static void adopt_routes(Session& s,
+                             std::shared_ptr<const detail::fixt_route_set> routes) noexcept {
+        s.routes_ = std::move(routes);
     }
 };
 

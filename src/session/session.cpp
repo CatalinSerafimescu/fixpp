@@ -74,6 +74,8 @@
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/version_registry.hpp>
 
+#include "fixt_route_set.hpp"            // 099 data-model E-1
+#include "fixt_session_check.hpp"        // 099 data-model E-9
 #include "inbound_limit.hpp"             // 093 E-2: L, the carry and the parse buffer
 #include "msgtype_classifier.hpp"        // 019 T006: is_admin_msgtype (session-internal)
 #include "read_first_frame_bounded.hpp"  // 093 C-6: await_deadline for close()'s wait
@@ -1355,6 +1357,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
 // ── Phase-2 linkable placeholders — REPLACED per user story ─────────────
 // Marked so a later phase's task body substitutes (not appends to) these.
 
+namespace {
+
+// fixt_session_config_valid refuses a null registry ahead of this. Should that check ever lose its
+// clause, the session then routes on S alone rather than dereferencing null.
+const fixpp::dict::version_registry& registry_or_empty(
+    const fixpp::dict::version_registry* registry) noexcept {
+    static const fixpp::dict::version_registry empty;
+    return registry != nullptr ? *registry : empty;
+}
+
+}  // namespace
+
 asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     using fixpp::core::error;
 
@@ -1438,12 +1452,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // Owner-object site (session.hpp's inbound_tv_ comment). No assert that it
     // is unset: a failed open() leaves state_ at never_opened and a legitimate
     // retry reassigns it while no view exists.
+    //
+    // 099-fixt-appl-version-validation (data-model E-6): a FIXT session walks nothing here. It
+    // takes S's owner from the route set, below, after every refusal.
+    fixt_routing_ = cfg_.begin_string == "FIXT.1.1";
     if (cfg_.dict_snapshot) {
         if (cfg_.dict_snapshot->source() != cfg_.dictionary) {
             co_return std::unexpected(error::invalid_session_config);
         }
         inbound_tv_ = fixpp::dict::shared_dictionary_view(cfg_.dict_snapshot);
-    } else {
+    } else if (!fixt_routing_) {
         inbound_tv_ =
             std::make_shared<const fixpp::dict::table_view>(cfg_.dictionary->as_table_view());
     }
@@ -1488,40 +1506,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         }
     }
 
-    // gate-b/r1 FQ-1 (findings #1 + #2) + 042 (#3): FIXT.1.1 config validation.
-    //
-    // #1 (P1): begin_string=="FIXT.1.1" with no default_appl_ver_id → is_fixt()
-    //    returns false, so the session silently routes to the FIX.4.x path and emits
-    //    a FIXT.1.1 Logon with no 1137 field — a malformed wire frame. Enforcing here
-    //    fails-closed before any observable state mutation.
-    //    [session_config.hpp's `default_appl_ver_id` field; data-model.md E3; FR-001/FR-003]
-    //
-    // #2 (P2-defensive): begin_string=="FIXT.1.1" with is_fixt()=true but
-    //    app_version_registry_==nullptr → the acceptor serviceability gate at
-    //    inbound Logon (the 033 T018 DefaultApplVerID(1137) gate) is skipped. Structurally
-    //    unreachable in production (engine always passes non-null), but the test-ctor default is
-    //    null. Closing here at open()-time is cheaper than carrying a documented fail-open.
-    //    [session_config.hpp's `default_appl_ver_id` field; data-model.md E3; FR-004/FR-004a]
-    //
-    // #3 (042, production-reachable): begin_string=="FIXT.1.1" with a non-null
-    //    registry that does NOT carry an application dictionary for the configured
-    //    default_appl_ver_id — i.e. app_version_registry_->get(*default_appl_ver_id)
-    //    returns empty. Unlike #2 (null registry = unreachable in production), this
-    //    arm IS production-reachable: a real engine can hold a non-null registry that
-    //    simply lacks the dict for this session's configured default. Closes L-033-5:
-    //    without this guard, open() succeeds and every inbound FIXT Logon is silently
-    //    rejected (the inbound 033 T018 DefaultApplVerID(1137) gate catches it at
-    //    runtime but the operator has no config-load failure). The third disjunct is
-    //    short-circuit-safe: *cfg_.default_appl_ver_id is only dereffed when #1 is
-    //    false (has_value()=true), and ->get() is only called when #2 is false
-    //    (registry non-null). version_registry::get() is const noexcept.
-    //    [042 spec.md FR-001/FR-002; research.md D-1/D-5; contract W1/W2]
-    //
-    // Tested against begin_string directly (NOT is_fixt()) — is_fixt() encodes the
-    // default_appl_ver_id half but would MISS the begin_string-without-default case.
-    if (cfg_.begin_string == "FIXT.1.1" &&
-        (!cfg_.default_appl_ver_id.has_value() || app_version_registry_ == nullptr ||
-         !app_version_registry_->get(*cfg_.default_appl_ver_id).has_value())) {
+    // 099-fixt-appl-version-validation (data-model E-9, FR-003, FR-004): the FIXT check, one
+    // shared with Engine::register_session. Tested against begin_string directly, NOT is_fixt(),
+    // which encodes the default_appl_ver_id half and would MISS the begin_string-without-default
+    // case.
+    if (fixt_routing_ && !fixt_session_config_valid(cfg_, app_version_registry_)) {
         co_return std::unexpected(error::invalid_session_config);
     }
 
@@ -1614,6 +1603,30 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     owned_block parse_block{session_arena_, detail::parse_capacity::buffer_bytes(inbound_limit_)};
     if (!carry_block || !parse_block) {
         co_return std::unexpected(error::out_of_memory);
+    }
+
+    // 099-fixt-appl-version-validation (data-model E-6, FR-028): S's entry of the route set. Here
+    // so that a config any guard above refuses has walked nothing, and on the same side of the
+    // commit as the two blocks above. A session the Engine handed no set builds its own, over
+    // every registry slot and its own dictionary.
+    if (fixt_routing_) {
+        if (!routes_) {
+            auto built = detail::fixt_route_set::build(registry_or_empty(app_version_registry_),
+                                                       std::views::single(cfg_.dictionary.get()));
+            if (!built) {
+                co_return std::unexpected(built.error());
+            }
+            routes_ = std::move(*built);
+        }
+        const detail::fixt_route_set::entry* const own =
+            routes_->find(cfg_.dictionary.get(), nullptr);
+        if (own == nullptr) {
+            co_return std::unexpected(error::invalid_session_config);  // an adopted set lacks S
+        }
+        session_route_ = route_entry{.owner = &own->owner, .validator = own->validator.get()};
+        if (!cfg_.dict_snapshot) {
+            inbound_tv_ = own->owner;
+        }
     }
 
     // ── Executor binding — the single executor_not_serialised enforcement
@@ -1729,7 +1742,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // from the Dictionary (no re-traversal, no per-context key reconstruction,
     // no membership dedup rescans). One walk + one copy, where it used to be
     // two walks — and, on the C-ABI path, three.
-    if (cfg_.validate_inbound_messages) {
+    //
+    // 099-fixt-appl-version-validation (data-model E-6): on a FIXT session validator_ stays null,
+    // and S's validator is the route set's, set above.
+    if (cfg_.validate_inbound_messages && !fixt_routing_) {
         // Defensive: dictionary should be non-null here (open() rejects null-dict
         // above), but guard explicitly to avoid a null deref if the invariant drifts.
         // inbound_tv_ is non-null whenever cfg_.dictionary is — both are set by the
@@ -1742,6 +1758,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         // This matches R-6: "validation enabled + no dict = config error".
         // In practice this branch is unreachable in production (open() would
         // have returned invalid_session_config above).
+    }
+    if (!fixt_routing_) {
+        session_route_ = route_entry{.owner = &inbound_tv_, .validator = validator_.get()};
     }
 
     // 093 (data-model E-2): commit the blocks allocated above. Nothing below can fail:
@@ -2747,7 +2766,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 //
 // Extracted from the three verbatim validate-gate blocks (the NotConnected,
 // Active and LogonSent arms). Each block built the same stack parse arena, re-framed,
-// parsed, ran validator_->validate, and emitted a Reject. 093 (data-model E-2) moved the
+// parsed, ran the validator's validate, and emitted a Reject. 093 (data-model E-2) moved the
 // parse onto the session's parse buffer B(L), the one the dispatch sites use.
 // Now collapsed here; emit_session_reject_ is inlined at each call site so the
 // PASS path (returns validate_outcome::pass) is coroutine-frame-free and alloc-free.
@@ -2763,7 +2782,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 //
 // SYNCHRONOUS — no co_await anywhere. All arenas are stack-local.
 // PRECONDITIONS (callers guard):
-//   • cfg_.validate_inbound_messages && validator_ must hold
+//   • cfg_.validate_inbound_messages && session_route_.validator must hold
 //   • hdr.msg_type != "3" && hdr.msg_type != "5" (FR-004 no-reject-loop)
 //   • no callback of this session is on the stack: this is a parse site over the
 //     session's parse buffer, and on a build with assertions it asserts that before
@@ -2790,10 +2809,9 @@ Session::InboundValidation Session::validate_inbound_(
     // fixpp#426 (design §3, item 10): dict-backed over the same table_view
     // the validator holds a copy of, so the OffsetTable this parse builds
     // splits Length+Data pairs (including any dictionary-declared custom
-    // pair) the same way the validator's own field walk does. `validator_`
-    // non-null implies `inbound_tv_` non-null (both are set together at
-    // open(), guarded on `cfg_.dictionary && inbound_tv_` — see the ctor
-    // there) — mirrors the established `Parser<Index> pd_parser{*inbound_tv_}`
+    // pair) the same way the validator's own field walk does. A non-null
+    // `session_route_.validator` implies `inbound_tv_` non-null (open() sets
+    // both, or refuses) — mirrors the established `Parser<Index> pd_parser{*inbound_tv_}`
     // pattern in `parse_and_dispatch_` above.
     assert(inbound_tv_ != nullptr);
     fixpp::wire::Parser<fixpp::wire::access_mode::Index> vg_parser{*inbound_tv_};
@@ -2808,7 +2826,7 @@ Session::InboundValidation Session::validate_inbound_(
         return {.outcome = validate_outcome::parse_failed};
     }
     std::uint16_t vg_ref_tag = 0;
-    auto val_r = validator_->validate(*vg_mv_r, &vg_scratch_mr, &vg_ref_tag);
+    auto val_r = session_route_.validator->validate(*vg_mv_r, &vg_scratch_mr, &vg_ref_tag);
     if (!val_r) {
         const int vg_reason = fixpp::wire::wire_error_to_session_reject_reason(val_r.error());
         return {.outcome = validate_outcome::reject,
@@ -3394,8 +3412,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
     // ── 041-validation-gate-wiring T014: validate-first gate ──────────────
     // Run BEFORE interpret_logon so a dict-invalid Logon produces a Reject
     // instead of a silent Disconnect (C-2 rows a/c-i/validate-first ordering).
-    // Guard: outer cfg_.validate_inbound_messages + inner non-null validator_
-    // (built at open() when validate_inbound_messages && dictionary).
+    // Guard: outer cfg_.validate_inbound_messages + inner non-null session_route_.validator
+    // (set at open(); on a FIXT session it is non-null whether validating or not).
     // No-reject-loop: skip validate for 35=3 (Reject) and 35=5 (Logout) —
     // these are drained silently on this arm anyway (FR-004 no-loop guard).
     // Only a well-formed frame reaches here: a faulty one is refused above
@@ -3404,7 +3422,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
     // check_inbound — C-3 invariant). [041 T014; data-model E-4; SC-005]
     // Buffer: the gate parses over the session's parse buffer B(L), as dispatch
     // does, so it never under-parses relative to dispatch (093, data-model E-2).
-    if (cfg_.validate_inbound_messages && validator_) {
+    if (cfg_.validate_inbound_messages && session_route_.validator) {
         if (hdr.msg_type != "3" && hdr.msg_type != "5") {
             auto const v = validate_inbound_(frame, hdr);
             // 092 contract C-6: a late parse failure closes the session.
@@ -4088,7 +4106,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
             // No-reject-loop: 35=3 and 35=5 exempt (FR-004), for a well-formed frame
             // only; a faulty Reject or Logout is Rejected under C-2. [041 T014; E-4]
             // Buffer: the session's parse buffer B(L), as dispatch (093).
-            if (cfg_.validate_inbound_messages && validator_) {
+            if (cfg_.validate_inbound_messages && session_route_.validator) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
                     auto const v = validate_inbound_(frame, hdr);
                     if (v.outcome != validate_outcome::pass) {
@@ -5386,7 +5404,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     // C-2 refuses such a frame above (D-2).
     // Buffer: the session's parse buffer B(L), as dispatch (093).
     // [041 T014; data-model E-4; contracts/validation-gate.md C-2/C-3]
-    if (cfg_.validate_inbound_messages && validator_) {
+    if (cfg_.validate_inbound_messages && session_route_.validator) {
         if (hdr.msg_type != "3" && hdr.msg_type != "5") {
             auto const v = validate_inbound_(frame, hdr);
             // 092 contract C-6: a late parse failure closes the session.

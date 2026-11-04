@@ -89,6 +89,9 @@ class dictionary_driven_validator;
 }  // namespace fixpp::wire
 
 namespace fixpp::session::detail {
+// 099-fixt-appl-version-validation (data-model E-1): forward-declared so this installed header
+// gains no validator.hpp. Full definition in src/session/fixt_route_set.hpp.
+class fixt_route_set;
 // Forward-declare FrameHeader so session.hpp can reference it in the
 // validate_inbound_or_reject_ private helper declaration without including
 // scan_frame_header.hpp (an internal non-public header) here.
@@ -1026,6 +1029,9 @@ private:
     // forward-declaration above ([const §XV.9]). The out-of-line dtor in
     // session.cpp provides the delete expression where the full type is visible.
     // [041 T014; data-model E-2; research R-2; [const §VIII.5]/§XV.1]
+    //
+    // 099-fixt-appl-version-validation (data-model E-6): stays null on a FIXT session, whose
+    // validators live in routes_. Every reader goes through session_route_.
     std::unique_ptr<fixpp::wire::dictionary_driven_validator> validator_;
 
     // ── 066-dict-backed-inbound-parse T002 — inbound dict-membership table ──
@@ -1065,7 +1071,32 @@ private:
     // (state_ != never_opened rejects a second call) and reconnection is
     // driven by ReconnectFsm::drive_reconnect_attempt(), which does NOT
     // re-invoke open() — so no rebuild-during-parse hazard exists.
+    //
+    // 099-fixt-appl-version-validation (data-model E-6): on a FIXT session it is a copy of S's
+    // owner from routes_, unless cfg_.dict_snapshot supplies it, and this session walks nothing
+    // for it. A failed open() may leave it set; a retry reassigns it while no view exists.
     std::shared_ptr<const fixpp::dict::table_view> inbound_tv_;
+
+    // ── 099-fixt-appl-version-validation (data-model E-1, E-6) — the route set ─
+    //
+    // Written in open() before the first observable mutation, read on the session's strand with
+    // no lock. A failed open() leaves state_ at never_opened, and a retry keeps what is here.
+    struct route_entry {
+        // The parse route's owner object, under the owner-object rule at Parser's owned-route
+        // constructor: an entry of routes_, or &inbound_tv_ on a non-FIXT session.
+        std::shared_ptr<const fixpp::dict::table_view> const* owner = nullptr;
+        // Null only when not validating, on a non-FIXT session.
+        fixpp::wire::dictionary_driven_validator const* validator = nullptr;
+        // S's table when this route's table is not S's, else null.
+        fixpp::dict::table_view const* envelope = nullptr;
+    };
+    // begin_string is FIXT.1.1; the FIXT check has guaranteed the registry and the default.
+    bool fixt_routing_ = false;
+    // Adopted from the Engine through session_engine_access::adopt_routes, or built in open() on
+    // a directly constructed session. Null on a non-FIXT session.
+    std::shared_ptr<const detail::fixt_route_set> routes_;
+    // S's entry on a FIXT session; {&inbound_tv_, validator_.get(), nullptr} on any other.
+    route_entry session_route_{};
 
     // ── 029-persistent-seqnum-hydrate awaitable declarations ─────────────────
     //
@@ -1202,7 +1233,7 @@ private:
     // validate_inbound_ — synchronous dedup helper (041 simplify-triage FIX-1/FIX-2 +
     // per-message coroutine-frame alloc fix):
     // Parse `frame` over the session's parse buffer B(L) (093, data-model E-2), run
-    // validator_->validate(), and return the rejection decision WITHOUT emitting.
+    // session_route_.validator->validate(), and return the rejection decision WITHOUT emitting.
     //
     // Returns validate_outcome::pass when validation passes — caller continues
     // normally.
@@ -1215,7 +1246,7 @@ private:
     // 092-garbled-frame-reject contract C-6 (owner ruling O-2) replaced it.
     //
     // SYNCHRONOUS — no co_await, no sub-coroutine frame allocated on the pass path.
-    // PRECONDITION: cfg_.validate_inbound_messages && validator_ must hold
+    // PRECONDITION: cfg_.validate_inbound_messages && session_route_.validator must hold
     // (callers guard this — do NOT call without the guard).
     // PRECONDITION: hdr.msg_type != "3" && hdr.msg_type != "5" (3/5 exemption
     // must be checked by the caller before calling).

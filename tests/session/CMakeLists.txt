@@ -208,9 +208,11 @@ target_compile_definitions(session_pure_tests PRIVATE
   "FIXPP_098_FIXTURE_DIR=\"${CMAKE_SOURCE_DIR}/tests/dictionary/fixtures/098\""
 )
 add_test(NAME session_pure_tests COMMAND session_pure_tests)
+# 099: a reading of `ctest -R '^session_pure_tests$'` that reaches this TIMEOUT raises it by the
+# Budget rule in specs/099-fixt-appl-version-validation/tasks.md's Execution rules.
 set_tests_properties(session_pure_tests PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
-  TIMEOUT 120)
+  TIMEOUT 566)
 # 075 (tasks.md Test-binary discipline note): sets LABELS on the buckets it
 # joins/adds. session_pure_tests is a grouped add_test binary — one label set
 # covers the whole executable, not per-.cpp; the pre-existing 41 members ride
@@ -233,6 +235,36 @@ set_property(TEST session_pure_tests APPEND PROPERTY LABELS 098)
 # 099-fixt-appl-version-validation: label 099 (tasks.md T003). APPEND, after the last LABELS
 # setter for this entry, so the existing labels survive.
 set_property(TEST session_pure_tests APPEND PROPERTY LABELS 099)
+
+# 099-fixt-appl-version-validation W-15 (tasks.md T033). Standalone ([const §VII.8]): it replaces
+# global operator new to count heap, and one arm runs worker threads, which TSan judges. Label 099.
+# TIMEOUT is explicit: the cells open real sockets and walk dictionaries, under a sanitizer too.
+# Re-derive by timing `ctest --test-dir build/<preset> -R '^session_099_route_set_cost_test$'`.
+add_executable(session_099_route_set_cost_test test_099_route_set_cost.cpp)
+target_link_libraries(session_099_route_set_cost_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_099_route_set_cost_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"              # session/fixt_route_set.hpp
+  "${CMAKE_SOURCE_DIR}/src/dictionary"   # dictionary_internal.hpp, the walk counter
+)
+target_compile_definitions(session_099_route_set_cost_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME session_099_route_set_cost_test COMMAND session_099_route_set_cost_test)
+set_tests_properties(session_099_route_set_cost_test PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "session;099"
+  TIMEOUT 300)
 
 # ── Grouped bucket: session_store_tests (6 .cpp → 1 binary) ────────────────
 # Store-family witnesses that neither construct an asio::thread_pool nor carry

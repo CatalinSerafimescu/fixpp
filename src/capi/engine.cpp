@@ -7,7 +7,7 @@
 //
 // The structural novelty: the C++ Engine owns NO worker threads (engine.hpp — "the engine owns NO
 // worker threads"); the C-ABI boundary owns an internal io_context + worker thread(s) + a
-// work-guard (research D-2). Lifecycle = register-then-start-once:
+// work-guard (research D-2). Lifecycle = register, then start, which succeeds once:
 //   create → session_open ×N (= register_session, pre-start) → start (= Engine::start)
 //          → drive → session_close → destroy (= co_await stop() + join + ~Engine).
 //
@@ -193,7 +193,8 @@ fixpp_error_t fixpp_engine_create(fixpp_engine_config_t* cfg, uint16_t consumer_
 
         // LAST fallible step. Workers are NOT launched here — Engine::start() is
         // called (in fixpp_engine_start) while nothing polls the io_context (the
-        // canonical sequencing: start() only POSTS the role loops; they run once
+        // canonical sequencing: start() posts the role loops and blocks for nothing
+        // but the route set's walks, and they run once
         // a worker drives the io_context), then the workers launch. This sidesteps
         // any race between start()'s synchronous body and a freshly-spawned loop.
         e->state_->engine_.emplace(e->state_->ioc_.get_executor(), std::move(eng_cfg));
@@ -225,14 +226,15 @@ fixpp_error_t fixpp_engine_start(fixpp_engine_t* engine) {
         return FIXPP_ERR_INVALID_HANDLE;
     }
     if (engine->engine_started_) {
-        // Second call. Engine::start() is legal once (engine.hpp).
+        // Second call. Engine::start() succeeds once (engine.hpp).
         return fixpp_capi::detail::translate_for_consumer(
             fixpp_capi::detail::translate(fixpp::core::error::session_already_open),
             engine->consumer_minor);
     }
 
     // Run start() synchronously on THIS (consumer) thread while no worker polls
-    // the io_context — start() only co_spawns the role loops; nothing executes
+    // the io_context — start() walks the route set on an engine with a FIXT session and
+    // co_spawns the role loops; no loop executes
     // until a worker drives the loop. This matches the proven C++ test sequencing
     // (start() before ioc.run()) and avoids start()-vs-loop control-plane races.
     fixpp::core::expected_t<void> r = engine->state_->engine_->start();
