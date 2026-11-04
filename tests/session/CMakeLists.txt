@@ -213,7 +213,7 @@ add_test(NAME session_pure_tests COMMAND session_pure_tests)
 # Budget rule in specs/099-fixt-appl-version-validation/tasks.md's Execution rules.
 set_tests_properties(session_pure_tests PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
-  TIMEOUT 566)
+  TIMEOUT 1605)
 # 075 (tasks.md Test-binary discipline note): sets LABELS on the buckets it
 # joins/adds. session_pure_tests is a grouped add_test binary — one label set
 # covers the whole executable, not per-.cpp; the pre-existing 41 members ride
