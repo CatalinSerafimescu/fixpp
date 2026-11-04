@@ -1310,7 +1310,7 @@ private:
         std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
         inbound_route const& route) const noexcept;
     // 099-fixt-appl-version-validation (data-model E-7): A1 and A2, a validating FIXT session's
-    // Active refusals ahead of the 3/5 exemption.
+    // Active refusals, ahead of the exemption of Reject and Logout.
     [[nodiscard]] InboundValidation refuse_active_frame_(
         std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
         inbound_route const& route) const noexcept;

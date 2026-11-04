@@ -4281,8 +4281,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
             // only; a faulty Reject or Logout is Rejected under C-2. [041 T014; E-4]
             // Buffer: the session's parse buffer B(L), as dispatch (093).
             if (cfg_.validate_inbound_messages && session_route_.validator) {
-                // 099 (data-model E-7's A1, A2): ahead of the 3/5 exemption, since a repeated
-                // MsgType is what can make hdr.msg_type read 3 or 5.
+                // 099 (data-model E-7's A1, A2): ahead of the exemption of Reject and Logout, since
+                // a repeated MsgType is what can make hdr.msg_type read either.
                 if (fixt_routing_) {
                     auto const v = refuse_active_frame_(frame, hdr, route);
                     if (v.outcome != validate_outcome::pass) {
@@ -5740,9 +5740,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     }
 
     // 099-fixt-appl-version-validation (data-model E-7's S3, FR-010, `[const §XII.9]`): a
-    // validating initiator's 1137 test, the acceptor's, the registry and not the slot. Here and not
-    // at the record site below, which sits behind the 141=Y reset unit: a reply with `141=Y` and a
-    // bad 1137 would durably reset both stores and then be refused.
+    // validating initiator tests DefaultApplVerID as the acceptor does, on the registry and not the
+    // slot. Here and not at the record site below, behind the 141=Y reset unit: a reply with
+    // `141=Y` and a bad 1137 would durably reset both stores and then be refused.
     if (fixt_routing_ && cfg_.validate_inbound_messages) {
         std::optional<int> reject_reason;
         if (!result->default_appl_ver_id.has_value()) {
