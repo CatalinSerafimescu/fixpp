@@ -17,7 +17,9 @@
 #include <fixpp/session/session.hpp>
 #include <memory>
 #include <span>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace fixpp::session {
 
@@ -49,6 +51,23 @@ struct session_test_access {
     // loops do through session_engine_access (099, tasks.md T007, T039).
     static void adopt_routes(Session& s, std::shared_ptr<const detail::fixt_route_set> routes) {
         s.routes_ = std::move(routes);
+    }
+
+    // data-model E-10's msg_type_defaults_, in stored order, and its capacity (099, W-25). Read
+    // them while nothing pumps.
+    [[nodiscard]] static std::vector<std::pair<std::string, fixpp::dict::application_version>>
+    msg_type_defaults(Session const& s) {
+        std::vector<std::pair<std::string, fixpp::dict::application_version>> out;
+        for (auto const& e : s.msg_type_defaults_) {
+            out.emplace_back(std::string(e.msg_type, e.len), e.version);
+        }
+        return out;
+    }
+    [[nodiscard]] static std::size_t msg_type_defaults_capacity(Session const& s) noexcept {
+        return s.msg_type_defaults_.capacity();
+    }
+    [[nodiscard]] static void const* msg_type_defaults_block(Session const& s) noexcept {
+        return s.msg_type_defaults_.data();
     }
 
     // The route set the session holds: null on a non-FIXT session (099, W-15).

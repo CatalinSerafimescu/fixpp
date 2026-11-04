@@ -49,6 +49,7 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/fix_time.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/dict/version_profile.hpp>
 #include <fixpp/session/application.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/security_profile.hpp>
@@ -134,6 +135,9 @@ public:
     std::atomic<std::uint64_t> app_messages{0};
     std::atomic<std::uint64_t> completions{0};
     std::atomic<std::uint64_t> vetoed{0};
+    // What the last fromApp's view answered (099, W-16's second region).
+    std::atomic<fixpp::dict::application_version> last_resolved{
+        fixpp::dict::application_version::Unknown};
     // The timer a woken loop waits on; set before its first wake.
     std::atomic<asio::steady_timer*> wake{nullptr};
     // Sends `toApp` vetoes from now on; written only through a post to the strand.
@@ -157,8 +161,9 @@ public:
     }
 
     fixpp::core::expected_t<void> fromApp(
-        fixpp::wire::MessageView<fixpp::wire::access_mode::Index> const& /*msg*/,
+        fixpp::wire::MessageView<fixpp::wire::access_mode::Index> const& msg,
         fixpp::session::SessionId const& /*id*/) override {
+        last_resolved.store(msg.resolved_application_version(), std::memory_order_relaxed);
         app_messages.fetch_add(1, std::memory_order_relaxed);
         if (mode_ == hook::signal_from_app) {
             completions.fetch_add(1, std::memory_order_release);

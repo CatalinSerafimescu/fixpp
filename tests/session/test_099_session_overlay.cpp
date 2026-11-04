@@ -6,8 +6,7 @@
 // session's own dictionary and overlay survive routing, (a) to (h). Overlay fixtures are built from
 // strings here. Comparands: research R-6's table for (c) and (d); for (e) and (f) the Data length
 // against its count and 34 against the frame builder's; (g) and (h) their literals, (h) from
-// data-model E-3. The assertions on resolved_application_version() in (e) and (f) wait for tasks.md
-// T079.
+// data-model E-3. (e) and (f) also read resolved_application_version() against the frame's slot.
 //
 // (b)'s mutant is M-91. The evidence file's T020 record says which cells moved at `H0`.
 
@@ -401,6 +400,7 @@ struct PairSeen {
     std::string seq;
     std::string clone_data;
     std::string reify_data;
+    dd::application_version resolved = dd::application_version::Unknown;
 };
 
 // fixpp_msg_clone over the view, as the C engine's receive path wraps it, read by tag.
@@ -425,6 +425,7 @@ void watch_pair(Rig& r, PairSeen& seen) {
         ++seen.calls;
         seen.data = field_text(v, 5031);
         seen.seq = field_text(v, 34);
+        seen.resolved = v.resolved_application_version();
         seen.clone_data = clone_field_text(v, 5031);
         auto h = dd::reify(v,
                            dd::version_profile{dd::session_version::vt11,
@@ -482,6 +483,7 @@ TEST_P(W3ePair, OwnVersion_SelectionStaysS_DataWhole) {
     run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, pair_field(data)));
     expect_ending(run, kDelivered);
     expect_pair_whole(seen, data, 2);
+    EXPECT_EQ(seen.resolved, dd::application_version::v50sp2) << "1137's slot, S's own";
 }
 
 INSTANTIATE_TEST_SUITE_P(W3, W3ePair, testing::Values(kEmbeddedVersion, kNonTagBytes),
@@ -508,6 +510,7 @@ TEST_P(W3fPair, T_RoutedByHeader1128_DeliveredDataWhole) {
         frame_35("D", run.rig->peer_ctx(2), kNos, "1128=10\x01" + pair_field(data)));
     expect_ending(run, kDelivered);
     expect_pair_whole(seen, data, 2);
+    EXPECT_EQ(seen.resolved, dd::application_version::vlatest) << "the header's 1128";
 }
 
 // (f): the transport route of A: a Heartbeat judged by FIXT11, which does not declare the pair.
@@ -526,6 +529,7 @@ TEST_P(W3fPair, A_TransportRoute_DeliveredDataWhole) {
     run.ending = run.rig->deliver(frame_35("0", run.rig->peer_ctx(2), {}, pair_field(data)));
     expect_ending(run, "- | stays | c | app=0 adm=1");
     expect_pair_whole(seen, data, 2);
+    EXPECT_EQ(seen.resolved, dd::application_version::Unknown) << "an admin message";
 }
 
 // One W-3 (f) cell keeps open()'s private build, for `pair_source_` (tasks.md T007).
@@ -547,6 +551,7 @@ TEST(W3fPrivateBuild, T_RoutedByHeader1128_DeliveredDataWhole) {
         frame_35("D", run.rig->peer_ctx(2), kNos, "1128=10\x01" + pair_field(data)));
     expect_ending(run, kDelivered);
     expect_pair_whole(seen, data, 2);
+    EXPECT_EQ(seen.resolved, dd::application_version::vlatest) << "the header's 1128";
 }
 
 INSTANTIATE_TEST_SUITE_P(W3, W3fPair, testing::Values(kEmbeddedSeq, kEmbeddedVersion, kNonTagBytes),

@@ -10,8 +10,7 @@
 // dictionary, because a real one's copy makes a sweep take hours (research R-3). Not
 // pugi::set_memory_management_functions: as_table_view() reads a finished handle, so pugixml never
 // runs and that hook would never fire. Each arm fails unless the hook fired and its sweep saw both
-// outcomes, since an unfired hook reads green. tasks.md T071 adds open()'s reservation to the
-// Direct arm, T108 the C arm.
+// outcomes, since an unfired hook reads green. tasks.md T108 adds the C arm.
 
 #include <gtest/gtest.h>
 
@@ -75,6 +74,8 @@ std::atomic<long> g_fail_at{0};     // 0: none fails
 std::atomic<long> g_fired{0};       // how many the hook failed
 std::atomic<long> g_first_walk{0};  // the allocation at which the walk counter first moved
 std::atomic<std::uint64_t> g_walks_at_arm{0};
+std::atomic<long> g_watch_at{0};           // 0: none is watched
+std::atomic<std::size_t> g_watch_size{0};  // the size of the allocation at g_watch_at
 
 void arm(long fail_at) {
     g_seen.store(0);
@@ -100,6 +101,9 @@ void* operator new(std::size_t size) {
         if (g_first_walk.load() == 0 &&
             fixpp::dict::detail::as_table_view_call_count() != g_walks_at_arm.load()) {
             g_first_walk.store(seen);
+        }
+        if (seen == g_watch_at.load()) {
+            g_watch_size.store(size);
         }
         if (seen == g_fail_at.load()) {
             g_fired.fetch_add(1);
@@ -313,20 +317,20 @@ public:
     }
 };
 
+// A dry run: the allocations of open() ahead of its build. Past the build and the reservation,
+// open()'s other allocations throw through its noexcept, so N stays inside those two.
+long allocations_ahead_of_the_build(const BuildCount& build) {
+    DirectRig rig;
+    const auto opened = rig.run(armed_open(rig.session->open(), 0));
+    EXPECT_TRUE(opened.has_value());
+    return g_first_walk.load() - build.first_walk;
+}
+
 TEST(W20Direct, EachFiredAllocationOfTheBuildFailsOpenThenARetryOpens) {
     const BuildCount build = count_build();
     ASSERT_GT(build.allocations, 0);
-
-    // A dry run: the allocations of open() ahead of its build. Past the build, open()'s other
-    // allocations throw through its noexcept, so N stays inside the build's interval.
-    long ahead = 0;
-    {
-        DirectRig rig;
-        const auto opened = rig.run(armed_open(rig.session->open(), 0));
-        ahead = g_first_walk.load() - build.first_walk;
-        ASSERT_TRUE(opened.has_value());
-        ASSERT_GE(ahead, 0);
-    }
+    const long ahead = allocations_ahead_of_the_build(build);
+    ASSERT_GE(ahead, 0);
 
     long fired_runs = 0;
     long retries_opened = 0;
@@ -347,6 +351,38 @@ TEST(W20Direct, EachFiredAllocationOfTheBuildFailsOpenThenARetryOpens) {
     }
     EXPECT_EQ(fired_runs, build.allocations) << "an unfired hook reads green";
     EXPECT_EQ(retries_opened, build.allocations) << "the sweep must see both outcomes";
+}
+
+// data-model E-10's block: a failed reservation is FR-028's out_of_memory too. It is the allocation
+// after the build, by E-9's order, and kReservationBytes spells its size from E-10's block. A dry
+// run reads that allocation first, so that an N landing on any other allocation of open() is a
+// failed assertion here and not a throw through its noexcept.
+TEST(W20Direct, TheReservationFailsOpenThenARetryOpens) {
+    constexpr std::size_t kReservationBytes = 256U * 10U;
+    const BuildCount build = count_build();
+    ASSERT_GT(build.allocations, 0);
+    const long ahead = allocations_ahead_of_the_build(build);
+    ASSERT_GE(ahead, 0);
+    const long n = ahead + build.allocations + 1;
+    {
+        g_watch_at.store(n);
+        g_watch_size.store(0);
+        DirectRig rig;
+        const auto opened = rig.run(armed_open(rig.session->open(), 0));
+        g_watch_at.store(0);
+        ASSERT_TRUE(opened.has_value());
+        ASSERT_EQ(g_watch_size.load(), kReservationBytes)
+            << "allocation " << n << " of open() is not its reservation";
+    }
+    DirectRig rig;
+    const auto first = rig.run(armed_open(rig.session->open(), n));
+    EXPECT_EQ(g_fired.load(), 1) << "N " << n;
+    ASSERT_FALSE(first.has_value());
+    EXPECT_EQ(first.error(), error::out_of_memory);
+    EXPECT_EQ(session_test_access::lifecycle_value(*rig.session), 0)
+        << "a refused open() leaves never_opened";
+    const auto retry = rig.run(rig.session->open());
+    EXPECT_TRUE(retry.has_value());
 }
 
 }  // namespace

@@ -77,6 +77,7 @@
 #include "fixt_route_set.hpp"            // 099 data-model E-1
 #include "fixt_session_check.hpp"        // 099 data-model E-9
 #include "inbound_limit.hpp"             // 093 E-2: L, the carry and the parse buffer
+#include "logon_msg_type_defaults.hpp"   // 099 data-model E-10
 #include "msgtype_classifier.hpp"        // 019 T006: is_admin_msgtype (session-internal)
 #include "peek_fixt_route.hpp"           // 099 data-model E-7
 #include "read_first_frame_bounded.hpp"  // 093 C-6: await_deadline for close()'s wait
@@ -623,6 +624,9 @@ template <class CB>
                         fixpp::wire::OffsetTable::Config{.max_offset_entries = inbound_entry_cap_},
                         detail::parse_capacity::reserve_for(inbound_entry_cap_, frame.size()));
     if (!mv_r) return dispatch_outcome::parse_failed;
+
+    // 099 (data-model E-5): the version the frame's route resolved, for the callback's view.
+    fixpp::wire::detail::message_view_resolved_access::set(*mv_r, route.resolved);
 
     const SessionId sid = SessionId::from_config(cfg_);
     callback_dispatch_scope cs{*this};
@@ -1662,6 +1666,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
                 co_return std::unexpected(built.error());
             }
             routes_ = std::move(*built);
+        }
+        // data-model E-10: the one block a Logon writes into. Ahead of the first route write,
+        // which nothing fallible may follow.
+        try {
+            msg_type_defaults_.reserve(kMaxMsgTypeDefaults);
+        } catch (std::bad_alloc const&) {
+            co_return std::unexpected(error::out_of_memory);
         }
         const detail::fixt_route_set::entry* const own =
             routes_->find(cfg_.dictionary.get(), nullptr);
@@ -2833,7 +2844,7 @@ Session::inbound_route Session::select_route_(std::span<const std::byte> frame,
     if (establishment_arm) {
         return route;  // step 3: the negotiated slot is not read
     }
-    fixpp::dict::application_version version = route_negotiated_;  // step 6, but for 1128
+    fixpp::dict::application_version version = route_negotiated_;
     if (peek.header_1128) {
         if (peek.appl_ver_id.empty()) {
             route.refusal = route_refusal::empty_value;  // step 4
@@ -2851,6 +2862,12 @@ Session::inbound_route Session::select_route_(std::span<const std::byte> frame,
             return route;
         }
         version = *resolved;
+    } else if (!msg_type_defaults_.empty()) {
+        // Step 6: the MsgType's entry, else the negotiated version. Empty, it costs this test.
+        auto const entry = msg_type_default_for_(peek.msg_type);
+        if (entry != fixpp::dict::application_version::Unknown) {
+            version = entry;
+        }
     }
     route.resolved = version;
     route_entry const& slot = app_routes_[static_cast<std::size_t>(version)];
@@ -2977,7 +2994,118 @@ Session::InboundValidation Session::refuse_active_frame_(
 
 bool Session::logon_reject_disconnects_(fixpp::session::detail::FrameHeader const& hdr,
                                         int ref_tag_id) const noexcept {
-    return fixt_routing_ && hdr.msg_type == "A" && ref_tag_id == 1137;
+    return fixt_routing_ && hdr.msg_type == "A" &&
+           (ref_tag_id == 1137 || ref_tag_id == 1130 || ref_tag_id == 372);
+}
+
+namespace {
+
+// The record's and the block's one test of a 1130 value: data-model E-10's, 1137's resolver.
+[[nodiscard]] fixpp::core::expected_t<fixpp::dict::application_version> resolve_ref_appl_ver_id(
+    std::string_view value) noexcept {
+    return fixpp::dict::resolve_application_version(
+        fixpp::dict::version_profile{.session = fixpp::dict::session_version::vt11,
+                                     .default_appl = fixpp::dict::application_version::Unknown,
+                                     .has_per_message_override = false,
+                                     ._reserved = 0},
+        value);
+}
+
+}  // namespace
+
+// data-model E-10's `**Endings, validating FIXT, either role**`, FR-031. Stores nothing. With two
+// faults among the entries the first one read answers, as FR-010's double faults may.
+std::optional<Session::logon_group_refusal> Session::refuse_msg_type_defaults_(
+    std::span<const std::byte> frame) const noexcept {
+    std::optional<logon_group_refusal> refusal;
+    std::size_t counted = 0;
+    detail::scan_logon_msg_type_defaults(
+        frame, session_hooks(*transport_route_.owner),
+        [this, &refusal, &counted](detail::logon_msg_type_instance const& e) noexcept {
+            if (refusal) {
+                return;
+            }
+            if (!e.msg_direction) {
+                refusal = logon_group_refusal{.reason = 1, .ref_tag = 385};
+                return;
+            }
+            std::optional<fixpp::dict::application_version> version;
+            if (e.ref_appl_ver_id && !e.ref_appl_ver_id->empty()) {
+                auto const resolved = resolve_ref_appl_ver_id(*e.ref_appl_ver_id);
+                if (!resolved) {
+                    refusal = logon_group_refusal{.reason = 5, .ref_tag = 1130};
+                    return;
+                }
+                version = *resolved;
+            }
+            if (!e.counted()) {
+                return;
+            }
+            if (++counted > kMaxMsgTypeDefaults) {
+                refusal = logon_group_refusal{.reason = 5, .ref_tag = 384};
+                return;
+            }
+            if (e.ref_appl_ver_id &&
+                (!version || !app_version_registry_->get(*version).has_value())) {
+                refusal = logon_group_refusal{.reason = 5, .ref_tag = 1130};
+                return;
+            }
+            if (e.ref_msg_type.size() > kMaxMsgTypeDefaultBytes) {
+                refusal = logon_group_refusal{.reason = 5, .ref_tag = 372};
+            }
+        });
+    return refusal;
+}
+
+// data-model E-10: "each counted entry whose 1130 parses and whose 372 fits and is an application
+// message, within the first 256 counted; a later entry for one MsgType wins". The kept entries
+// never pass the cap counted entries are held to, so this draws nothing past open()'s reservation.
+void Session::record_msg_type_defaults_(std::span<const std::byte> frame) noexcept {
+    msg_type_defaults_.clear();
+    std::size_t counted = 0;
+    detail::scan_logon_msg_type_defaults(
+        frame, session_hooks(*transport_route_.owner),
+        [this, &counted](detail::logon_msg_type_instance const& e) noexcept {
+            if (!e.counted() || ++counted > kMaxMsgTypeDefaults) {
+                return;
+            }
+            std::string_view const mt = e.ref_msg_type;
+            if (mt.empty() || mt.size() > kMaxMsgTypeDefaultBytes ||
+                fixpp::dict::is_fixt_admin_msgtype(mt) || !e.ref_appl_ver_id ||
+                e.ref_appl_ver_id->empty()) {
+                return;
+            }
+            auto const resolved = resolve_ref_appl_ver_id(*e.ref_appl_ver_id);
+            if (!resolved) {
+                return;
+            }
+            auto const at =
+                std::lower_bound(msg_type_defaults_.begin(), msg_type_defaults_.end(), mt,
+                                 [](msg_type_default const& d, std::string_view key) noexcept {
+                                     return std::string_view{d.msg_type, d.len} < key;
+                                 });
+            if (at != msg_type_defaults_.end() && std::string_view{at->msg_type, at->len} == mt) {
+                at->version = *resolved;
+                return;
+            }
+            msg_type_default entry{};
+            std::copy(mt.begin(), mt.end(), entry.msg_type);
+            entry.len = static_cast<std::uint8_t>(mt.size());
+            entry.version = *resolved;
+            msg_type_defaults_.insert(at, entry);
+        });
+}
+
+fixpp::dict::application_version Session::msg_type_default_for_(
+    std::string_view msg_type) const noexcept {
+    auto const at = std::lower_bound(msg_type_defaults_.begin(), msg_type_defaults_.end(), msg_type,
+                                     [](msg_type_default const& d, std::string_view key) noexcept {
+                                         return std::string_view{d.msg_type, d.len} < key;
+                                     });
+    if (at != msg_type_defaults_.end() && std::string_view{at->msg_type, at->len} == msg_type) {
+        return at->version;
+    }
+    return fixpp::dict::application_version::Unknown;
 }
 
 // ── 013 T036 US2 — Logon-time CompID authorization helpers ───────────────────
@@ -3946,6 +4074,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         // the single parameterized block below (W2 asserts 373=1; W3 asserts
         // 373=5+371=1137).
         std::optional<int> reject_reason;
+        int reject_tag = 1137;
         if (!result->default_appl_ver_id.has_value()) {
             reject_reason = 1;  // RequiredTagMissing
         } else {
@@ -3960,15 +4089,23 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
                 resolved.has_value() && app_version_registry_->get(*resolved).has_value();
             if (!serviceable) {
                 reject_reason = 5;  // ValueIsIncorrect
+            } else if (const auto group = cfg_.validate_inbound_messages
+                                              ? refuse_msg_type_defaults_(frame)
+                                              : std::nullopt) {
+                // 099 (data-model E-7's S3, E-10, FR-031): the block then reads the group's
+                // entries.
+                reject_reason = group->reason;
+                reject_tag = group->ref_tag;
             } else {
                 // (d) Set-once (FSM NotConnected gate → once per session).
                 negotiated_appl_version_ = *resolved;
                 route_negotiated_ = *resolved;  // 099 (FR-027): what selection reads
+                record_msg_type_defaults_(frame);
             }
         }
 
         if (reject_reason.has_value()) {
-            // Session-level Reject(35=3, 371=1137, 373=*reject_reason) + Disconnected.
+            // Session-level Reject(35=3, 371=reject_tag, 373=*reject_reason) + Disconnected.
             // toAdmin hook fires before store_then_emit (mirrors the reply-Logon path;
             // [[feedback_admin_emit_bypasses_fire_to_admin]]). As of 036 the shared
             // emit_session_reject_ helper ALSO fires fire_to_admin_ (the 1137 path is kept
@@ -3981,8 +4118,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
                 FIXPP_INBOUND_SPLIT_AWAIT(
                     r, tic,
                     inbound_reject_leaf_(tic, parse_seqnum(hdr.msg_seq_num),
-                                         1137,  // RefTagID = 1137 (DefaultApplVerID)
-                                         "A",   // RefMsgType = Logon
+                                         reject_tag,  // 1137, or data-model E-10's
+                                         "A",         // RefMsgType = Logon
                                          *reject_reason, rj_st52.value, fsm_state::NotConnected));
                 if (!r) {
                     co_return r;
@@ -5745,6 +5882,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     // `141=Y` and a bad 1137 would durably reset both stores and then be refused.
     if (fixt_routing_ && cfg_.validate_inbound_messages) {
         std::optional<int> reject_reason;
+        int reject_tag = 1137;
         if (!result->default_appl_ver_id.has_value()) {
             reject_reason = 1;  // RequiredTagMissing
         } else {
@@ -5757,6 +5895,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
                 *result->default_appl_ver_id);
             if (!resolved.has_value() || !app_version_registry_->get(*resolved).has_value()) {
                 reject_reason = 5;  // ValueIsIncorrect
+            } else if (const auto group = refuse_msg_type_defaults_(frame)) {
+                // Data-model E-10: the block then reads the group's entries, FR-031.
+                reject_reason = group->reason;
+                reject_tag = group->ref_tag;
             }
         }
         if (reject_reason.has_value()) {
@@ -5766,7 +5908,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
             {
                 FIXPP_INBOUND_SPLIT_AWAIT(
                     r, tic,
-                    inbound_reject_leaf_(tic, parse_seqnum(hdr.msg_seq_num), 1137, "A",
+                    inbound_reject_leaf_(tic, parse_seqnum(hdr.msg_seq_num), reject_tag, "A",
                                          *reject_reason, rj_st52.value, fsm_state::LogonSent));
                 if (!r) {
                     co_return r;
@@ -5956,6 +6098,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     // negotiated_appl_version_ stays as the previous reply left it in that case, which is why the
     // two are separate.
     route_negotiated_ = fixpp::dict::application_version::Unknown;
+    if (fixt_routing_) {
+        record_msg_type_defaults_(frame);  // data-model E-10: per connection, validating or not
+    }
     if (cfg_.is_fixt() && result->default_appl_ver_id.has_value()) {
         const fixpp::dict::version_profile vt11_profile{
             .session = fixpp::dict::session_version::vt11,

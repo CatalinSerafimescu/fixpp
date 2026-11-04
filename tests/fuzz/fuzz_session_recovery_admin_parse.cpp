@@ -88,6 +88,7 @@
 // 092: the internal header is reached through ${CMAKE_SOURCE_DIR}/src.
 #include "fuzz_092_support.hpp"
 #include "session/fixt_route_set.hpp"
+#include "session/logon_msg_type_defaults.hpp"
 #include "session/peek_fixt_route.hpp"
 #include "session/scan_frame_header.hpp"
 #include "support/session_test_access.hpp"
@@ -309,12 +310,13 @@ fixt_arm_fixture& fixt_arm() {
 std::uint64_t g_fixt_peeked = 0;
 std::uint64_t g_fixt_active = 0;
 std::uint64_t g_fixt_seeded_logon_active = 0;  // the input itself established, on a first frame
+std::uint64_t g_fixt_scan_entries = 0;  // what scan_logon_msg_type_defaults returned, over the run
 
 void report_fixt_arm() {
     std::cerr << "[099 fuzz FIXT arm] peek compared " << g_fixt_peeked << ", reached Active "
               << g_fixt_active << ", a seeded Logon reached Active " << g_fixt_seeded_logon_active
-              << '\n';
-    if (g_fixt_peeked == 0 || g_fixt_seeded_logon_active == 0) {
+              << ", the scan returned " << g_fixt_scan_entries << " entries\n";
+    if (g_fixt_peeked == 0 || g_fixt_seeded_logon_active == 0 || g_fixt_scan_entries == 0) {
         std::cerr << "[099 fuzz FIXT arm] a counter read zero: the arm was bypassed\n";
         std::_Exit(1);
     }
@@ -357,6 +359,12 @@ void run_fixt_arm(std::uint8_t preamble, std::span<const std::byte> payload) {
     fixt_arm_fixture& fixture = fixt_arm();
     auto const& s = (preamble & kFixtApplicationSBit) != 0 ? fixture.application : fixture.fixt11;
     check_peek_against_scan(payload, *fixture.routes->find(s.get(), nullptr)->owner);
+    fixpp::session::detail::scan_logon_msg_type_defaults(
+        payload,
+        dict_hooks::for_table_view(*fixture.routes->find(fixture.fixt11.get(), nullptr)->owner),
+        [](fixpp::session::detail::logon_msg_type_instance const&) noexcept {
+            ++g_fixt_scan_entries;
+        });
 
     asio::io_context ioc;
     auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};

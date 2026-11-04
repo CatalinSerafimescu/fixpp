@@ -180,5 +180,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
       TARGET perf_099_fixt_inbound_alloc_guard_interposed
       CASE "W16NonOwnSlot.${_cell}"
       LABELS perf alloc_guard 099)
+    fixpp_add_release_mallocnesia_test(
+      NAME perf_099_fixt_inbound_default_${_cell_lower}_mallocnesia
+      TARGET perf_099_fixt_inbound_alloc_guard_interposed
+      CASE "W16MessageTypeDefault.${_cell}"
+      LABELS perf alloc_guard 099)
   endforeach()
 endif()

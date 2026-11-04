@@ -5,12 +5,21 @@
 // 099-fixt-appl-version-validation, contracts/witnesses.md W-6 (tasks.md T013): with validation off
 // every W-4 input ends as research R-18's `off` line says, a literal per cell, whose mutants are
 // M-28 and M-29. `off-pair` and `off-hops` are the two the row states differ from that log's tree.
-// The accessor cells and E-5's splits wait for tasks.md T079.
+// Then the accessor's cells and data-model E-5's splits against `dict::reify`.
 
 #include <gtest/gtest.h>
 
+#include <asio/co_spawn.hpp>
+#include <asio/use_future.hpp>
+#include <chrono>
+#include <fixpp/dict/reify.hpp>
+#include <memory>
+#include <memory_resource>
+#include <optional>
 #include <string>
+#include <tuple>
 
+#include "mock_reconnect_factory.hpp"
 #include "test_099_fixt_support.hpp"
 
 namespace fixpp::session::test099 {
@@ -158,6 +167,211 @@ TEST(W6AdminNoTransport, ShapeA_HeartbeatUsesS) {
     expect_ending(run, "- | stays | c | app=0 adm=1");
     EXPECT_EQ(data, embedded);
     EXPECT_EQ(seq, "2");
+}
+
+// ── The accessor, and data-model E-5's splits against `dict::reify` ─────────────────────
+
+using Version = dd::application_version;
+
+// What the callback's view said, and what `dict::reify` answered with `profile`.
+struct Answers {
+    int calls = 0;
+    Version accessor = Version::Unknown;
+    std::optional<dd::resolved_message_version> reified;
+    std::optional<fixpp::core::error> reify_error;
+};
+
+void watch_answers(Rig& r, Answers& a, dd::version_profile profile) {
+    const auto read = [&a, profile](const CountingApp::View& v) {
+        ++a.calls;
+        a.accessor = v.resolved_application_version();
+        auto h = dd::reify(v, profile, std::pmr::new_delete_resource());
+        if (h) {
+            a.reified = h->version();
+        } else {
+            a.reify_error = h.error();
+        }
+    };
+    r.app->on_app = read;
+    r.app->on_admin = read;
+}
+
+const dd::version_profile kVt11At50{dd::session_version::vt11, Version::v50sp2, true, 0};
+const dd::version_profile kVt11Unknown{dd::session_version::vt11, Version::Unknown, true, 0};
+
+struct ResolvedCase {
+    const char* name;
+    const char* before_34;
+    Version accessor;
+};
+
+const ResolvedCase kResolvedCases[] = {
+    {"Negotiated", "", Version::v50sp2},
+    {"Explicit9", "1128=9\x01", Version::v50sp2},
+    {"Explicit10", "1128=10\x01", Version::vlatest},
+};
+
+// Set when it resolved, on every shape, and `reify` agrees in all three bytes (E-5), with no help
+// from the profile, which here names neither.
+class W6Resolved : public testing::TestWithParam<std::tuple<Shape, ResolvedCase>> {};
+TEST_P(W6Resolved, AccessorAndReifyAgree) {
+    const auto& [shape, c] = GetParam();
+    RigOptions o;
+    o.validate = false;
+    CellRun run = enter_arm(shape_fixture(shape), Arm::Active, std::move(o));
+    ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
+    Answers a;
+    watch_answers(*run.rig, a,
+                  dd::version_profile{dd::session_version::v44, Version::v44, false, 0});
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, c.before_34));
+    expect_ending(run, "- | stays | c | app=1 adm=0");
+    EXPECT_EQ(a.accessor, c.accessor);
+    ASSERT_TRUE(a.reified.has_value());
+    EXPECT_EQ(a.reified->k, dd::resolved_message_version::kind::application);
+    EXPECT_EQ(a.reified->session, dd::session_version::vt11);
+    EXPECT_EQ(a.reified->application, c.accessor);
+}
+INSTANTIATE_TEST_SUITE_P(Named, W6Resolved,
+                         testing::Combine(testing::Values(Shape::T, Shape::A, Shape::L),
+                                          testing::ValuesIn(kResolvedCases)),
+                         [](const testing::TestParamInfo<std::tuple<Shape, ResolvedCase>>& i) {
+                             return std::string(shape_name(std::get<0>(i.param))) + "_" +
+                                    std::get<1>(i.param).name;
+                         });
+
+TEST_P(W6PerShape, AdminFrame_AccessorUnknown) {
+    RigOptions o;
+    o.validate = false;
+    CellRun run = enter_arm(shape_fixture(GetParam()), Arm::Active, std::move(o));
+    ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
+    Answers a;
+    a.accessor = Version::v40;  // a seed no answer here can be, so a callback that ran must write
+    watch_answers(*run.rig, a, kVt11At50);
+    run.ending = run.rig->deliver(frame_35("0", run.rig->peer_ctx(2)));
+    expect_ending(run, "- | stays | c | app=0 adm=1");
+    EXPECT_EQ(a.accessor, Version::Unknown);
+}
+
+// An empty `1128=`: refused by nothing on this session. The accessor is `Unknown`, and `reify`
+// passes the empty value to the resolver, whose rule means "use the default".
+TEST(W6Splits, EmptyApplVerId_AccessorUnknown_ReifyTheProfilesDefault) {
+    RigOptions o;
+    o.validate = false;
+    CellRun run = enter_arm(shape_fixture(Shape::T), Arm::Active, std::move(o));
+    ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
+    Answers a;
+    watch_answers(*run.rig, a, kVt11At50);
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, "1128=\x01"));
+    expect_ending(run, "- | stays | c | app=1 adm=0");
+    EXPECT_EQ(a.accessor, Version::Unknown);
+    ASSERT_TRUE(a.reified.has_value());
+    EXPECT_EQ(a.reified->application, Version::v50sp2);
+}
+
+// `1128=99`: the accessor is `Unknown`, and `reify` refuses with no handle.
+TEST(W6Splits, UnknownApplVerId_AccessorUnknown_ReifyNoHandle) {
+    RigOptions o;
+    o.validate = false;
+    CellRun run = enter_arm(shape_fixture(Shape::T), Arm::Active, std::move(o));
+    ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
+    Answers a;
+    watch_answers(*run.rig, a, kVt11At50);
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, "1128=99\x01"));
+    expect_ending(run, "- | stays | c | app=1 adm=0");
+    EXPECT_EQ(a.accessor, Version::Unknown);
+    EXPECT_FALSE(a.reified.has_value());
+    ASSERT_TRUE(a.reify_error.has_value());
+    EXPECT_EQ(*a.reify_error, fixpp::core::error::dict_unknown_appl_ver_id);
+}
+
+// A past-header 1128 with a negotiated version: the byte is set, so they agree.
+TEST(W6Splits, PastHeader1128_Negotiated_TheyAgree) {
+    RigOptions o;
+    o.validate = false;
+    CellRun run = enter_arm(shape_fixture(Shape::T), Arm::Active, std::move(o));
+    ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
+    Answers a;
+    watch_answers(*run.rig, a, kVt11At50);
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos + "1128=6\x01"));
+    expect_ending(run, "- | stays | c | app=1 adm=0");
+    EXPECT_EQ(a.accessor, Version::v50sp2);
+    ASSERT_TRUE(a.reified.has_value());
+    EXPECT_EQ(a.reified->application, Version::v50sp2);
+}
+
+// A past-header 1128 on an initiator whose reply had no 1137: step 6 leaves the byte `Unknown`, and
+// `reify` reads the first occurrence with no position test.
+TEST(W6Splits, PastHeader1128_ReplyWithNo1137_ReifyReadsIt) {
+    RigOptions o;
+    o.validate = false;
+    o.role = session_role::initiator;
+    CellRun run = enter_arm(shape_fixture(Shape::T), Arm::LogonSent, std::move(o));
+    ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
+    Rig& r = *run.rig;
+    (void)r.deliver(logon_frame(r.peer_ctx(1), ""));
+    ASSERT_EQ(r.sess->state(), fsm_state::Active);
+    Answers a;
+    watch_answers(r, a, kVt11Unknown);
+    run.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos + "1128=6\x01"));
+    expect_ending(run, "- | stays | c | app=1 adm=0");
+    EXPECT_EQ(a.accessor, Version::Unknown);
+    ASSERT_TRUE(a.reified.has_value());
+    EXPECT_EQ(a.reified->application, Version::v44);
+}
+
+// A negotiated miss: initiator, `1137=4`, no dictionary: S's view, and both name the version.
+TEST(W6Splits, NegotiatedMiss_SsView_AccessorV42_ReifyV42) {
+    RigOptions o;
+    o.validate = false;
+    o.role = session_role::initiator;
+    CellRun run = enter_arm(shape_fixture(Shape::T), Arm::LogonSent, std::move(o));
+    ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
+    Rig& r = *run.rig;
+    (void)r.deliver(logon_frame(r.peer_ctx(1), "1137=4\x01"));
+    ASSERT_EQ(r.sess->state(), fsm_state::Active);
+    Answers a;
+    watch_answers(r, a, kVt11Unknown);
+    run.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos));
+    expect_ending(run, "- | stays | c | app=1 adm=0");
+    EXPECT_EQ(a.accessor, Version::v42);
+    ASSERT_TRUE(a.reified.has_value());
+    EXPECT_EQ(a.reified->application, Version::v42);
+}
+
+// An initiator's reconnect whose reply has no 1137: the session's route is `Unknown`, while
+// negotiated_version_profile() keeps the previous value, so `reify` with that profile labels the
+// frame with the previous connection's version.
+TEST(W6Splits, ReconnectWithNo1137_AccessorUnknown_ReifyThePreviousVersion) {
+    RigOptions o;
+    o.validate = false;
+    o.role = session_role::initiator;
+    o.tweak = [](SessionConfig& cfg) {
+        cfg.transport_factory_override =
+            std::make_shared<fixpp::test_support::MockReconnectFactory>();
+        cfg.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 19099};
+    };
+    CellRun run = enter_arm(shape_fixture(Shape::T), Arm::LogonSent, std::move(o));
+    ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
+    Rig& r = *run.rig;
+    (void)r.deliver(logon_frame(r.peer_ctx(1), "1137=9\x01"));
+    ASSERT_EQ(r.sess->state(), fsm_state::Active);
+    auto fut = asio::co_spawn(r.ioc, r.sess->drive_reconnect(), asio::use_future);
+    ASSERT_TRUE(pump_ready(r.ioc, fut, std::chrono::seconds{30}));
+    ASSERT_TRUE(fut.get().has_value());
+    for (int i = 0; i < 4; ++i) {
+        r.ioc.restart();
+        r.ioc.poll();
+    }
+    ASSERT_EQ(r.sess->state(), fsm_state::LogonSent);
+    (void)r.deliver(logon_frame(r.peer_ctx(r.next_in()), ""));
+    ASSERT_EQ(r.sess->state(), fsm_state::Active);
+    Answers a;
+    watch_answers(r, a, r.sess->negotiated_version_profile());
+    run.ending = r.deliver(frame_35("D", r.peer_ctx(r.next_in()), kNos));
+    EXPECT_EQ(run.ending.from_app, 1) << log_form(run.ending);
+    EXPECT_EQ(a.accessor, Version::Unknown);
+    ASSERT_TRUE(a.reified.has_value());
+    EXPECT_EQ(a.reified->application, Version::v50sp2);
 }
 
 // No refusal at open() or at register_session when not validating (owner item 5): shape A with no

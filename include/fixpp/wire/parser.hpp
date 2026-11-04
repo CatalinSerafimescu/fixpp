@@ -37,6 +37,7 @@
 // (outside `namespace fixpp::wire { ... }` below) — see the mid-namespace
 // pitfall note at membership_copy()'s out-of-line definition.
 #include <fixpp/dict/table_view.hpp>
+#include <fixpp/dict/version_profile.hpp>  // 099: resolved_application_version()
 #include <memory>
 #include <memory_resource>
 #include <new>
@@ -87,6 +88,8 @@ inline fixpp::dict::table_view const& checked_owner(
 
 // Reaches MessageView's private shared_membership() (defined below).
 struct message_view_membership_access;
+// Writes MessageView's resolved application version (defined below).
+struct message_view_resolved_access;
 
 }  // namespace detail
 
@@ -473,11 +476,23 @@ public:
         return hooks_;
     }
 
+    // 099-fixt-appl-version-validation (data-model E-5, FR-014): the application version the
+    // session resolved for this inbound message. `Unknown` on a non-FIXT session, an admin message,
+    // an unresolved value, and any view that was not an inbound dispatch, which every Iter view is.
+    [[nodiscard]] fixpp::dict::application_version resolved_application_version() const noexcept {
+        if constexpr (Mode == access_mode::Index) {
+            return resolved_application_version_;
+        } else {
+            return fixpp::dict::application_version::Unknown;
+        }
+    }
+
 private:
     // fixpp#495: Parser seats `dict_owner_`; the accessor reaches shared_membership().
     template <access_mode>
     friend class Parser;
     friend struct detail::message_view_membership_access;
+    friend struct detail::message_view_resolved_access;
 
     // fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §2.3): the table this
     // view was parsed against, as a refcounted owner. Owned route (dict_owner_ still
@@ -534,6 +549,11 @@ private:
     // arena), so behaviour is unchanged on every lane.
     mutable std::pmr::vector<unknown_fields_view::kv> unk_items_{::fixpp::detail::arena_upstream()};
     mutable bool unk_items_built_ = false;
+    // 099 (data-model E-5): Index mode only, as `dict_owner_` is, so an Iter view stores nothing.
+    struct no_resolved_version_t {};
+    [[no_unique_address]] std::conditional_t<Mode == access_mode::Index,
+                                             fixpp::dict::application_version,
+                                             no_resolved_version_t> resolved_application_version_{};
     // fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §2.1): the owner object
     // of the table in `hooks_` when this view came from Parser's owned route, else
     // nullptr. A BORROWED pointer to the shared_ptr object, not a shared_ptr: no
@@ -690,6 +710,14 @@ struct message_view_membership_access {
     [[nodiscard]] static std::shared_ptr<const fixpp::dict::table_view> shared_membership(
         MessageView<M> const& v) {
         return v.shared_membership();
+    }
+};
+// 099 (data-model E-5): the one door to the byte. Only the session's dispatch and the two copy
+// writers E-5 names go through it.
+struct message_view_resolved_access {
+    static void set(MessageView<access_mode::Index>& v,
+                    fixpp::dict::application_version version) noexcept {
+        v.resolved_application_version_ = version;
     }
 };
 }  // namespace detail

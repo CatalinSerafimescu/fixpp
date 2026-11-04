@@ -9,7 +9,7 @@
 // off. Then the gate cell and the LogoutSent scan cell.
 //
 // The comparands are the frame builder's: MsgSeqNum and the Data bytes, and the group count
-// against the frame. The accessor assertion waits for tasks.md T079.
+// against the frame, the accessor against the resolved slot, `Unknown` on every admin frame.
 
 #include <gtest/gtest.h>
 
@@ -26,6 +26,7 @@ struct Seen {
     std::string seq;
     std::string data;
     int group_instances = -1;
+    dd::application_version resolved = dd::application_version::Unknown;
 };
 
 void watch(Rig& r, Seen& seen) {
@@ -34,6 +35,7 @@ void watch(Rig& r, Seen& seen) {
         seen.seq = field_text(v, 34);
         seen.data = field_text(v, 5031);
         seen.group_instances = static_cast<int>(v.offsets().group_slices(453).size());
+        seen.resolved = v.resolved_application_version();
     };
     r.app->on_app = read;
     r.app->on_admin = read;
@@ -66,6 +68,7 @@ void expect_view(const Seen& seen, unsigned seq) {
     EXPECT_EQ(seen.seq, std::to_string(seq)) << "MsgSeqNum against the frame builder's";
     EXPECT_EQ(seen.data, kEmbedded) << "the Data value whole";
     EXPECT_EQ(seen.group_instances, 1) << "the group count against the frame";
+    EXPECT_EQ(seen.resolved, dd::application_version::v50sp2) << "the slot 1137=9 resolved";
 }
 
 // D-2: `on_inbound_active_`'s fromApp.
@@ -151,6 +154,7 @@ void expect_admin_view(const Seen& seen, unsigned seq) {
     EXPECT_EQ(seen.calls, 1);
     EXPECT_EQ(seen.seq, std::to_string(seq)) << "MsgSeqNum against the frame builder's";
     EXPECT_EQ(seen.data, kEmbedded) << "the Data value whole";
+    EXPECT_EQ(seen.resolved, dd::application_version::Unknown) << "an admin message";
 }
 
 class W7Admin : public testing::TestWithParam<bool> {};

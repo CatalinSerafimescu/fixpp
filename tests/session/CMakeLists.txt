@@ -176,13 +176,15 @@ add_executable(session_pure_tests
   test_099_config_check.cpp                                             # 099 T015 (W-8)
   test_099_establishment_admission.cpp                                  # 099 T016 (W-9)
   test_099_scan_sites.cpp                                               # 099 T017 (W-19)
-  test_099_msg_type_default.cpp                                         # 099 T018 (W-25, first cell)
+  test_099_msg_type_default.cpp                                         # 099 T018, T069 (W-25)
   test_099_resolved_version.cpp                                         # 099 T019 (W-10, non-FIXT)
   test_099_peek_fixt_route.cpp                                          # 099 T043 (W-21, the peek)
   $<TARGET_OBJECTS:session_test_support>
 )
-# 099 W-5's reconnect cells drive drive_reconnect() through MockReconnectFactory, in that TU only.
-set_source_files_properties(test_099_establishment.cpp PROPERTIES
+# 099 W-5's, W-6's and W-25's reconnect cells drive drive_reconnect() through MockReconnectFactory,
+# in those TUs only.
+set_source_files_properties(
+  test_099_establishment.cpp test_099_validation_off.cpp test_099_msg_type_default.cpp PROPERTIES
   COMPILE_DEFINITIONS FIXPP_ALLOW_MOCK_TRANSPORT)
 target_link_libraries(session_pure_tests PRIVATE
   fixpp_session

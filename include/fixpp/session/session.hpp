@@ -51,6 +51,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 // (the unique_ptr<MessageStore> member's
 // nested type alias flush_hook_fn requires it).
 #include <fixpp/session/reconnect_fsm.hpp>   // 013 T023 — ReconnectFsm driver (FR-009 state owner)
@@ -1110,6 +1111,31 @@ private:
     // Selection's read of the negotiated version, outside the establishment arms only.
     // negotiated_appl_version_ keeps its own writes (FR-027).
     fixpp::dict::application_version route_negotiated_ = fixpp::dict::application_version::Unknown;
+
+    // data-model E-10: a peer's Message Type Defaults, written and read as route_negotiated_ is.
+    // Sorted by MsgType. One block per FIXT session, reserved in open(), so no Logon grows it, and
+    // empty on a non-FIXT session.
+    struct msg_type_default {
+        char msg_type[8];  // NOLINT(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        std::uint8_t len;
+        fixpp::dict::application_version version;
+    };
+    static constexpr std::size_t kMaxMsgTypeDefaults = 256;
+    static constexpr std::size_t kMaxMsgTypeDefaultBytes = sizeof(msg_type_default::msg_type);
+    std::vector<msg_type_default> msg_type_defaults_;
+
+    // What S3's block answers a Logon's group (data-model E-10's endings).
+    struct logon_group_refusal {
+        int reason;
+        int ref_tag;
+    };
+    [[nodiscard]] std::optional<logon_group_refusal> refuse_msg_type_defaults_(
+        std::span<const std::byte> frame) const noexcept;
+    // The record site's half: clears, then keeps the subset E-10 names.
+    void record_msg_type_defaults_(std::span<const std::byte> frame) noexcept;
+    // Selection's step 6: the MsgType's entry, or Unknown. A binary search, no heap.
+    [[nodiscard]] fixpp::dict::application_version msg_type_default_for_(
+        std::string_view msg_type) const noexcept;
 
     // data-model E-7: one frame's route, chosen once at arm entry.
     enum class route_refusal : std::uint8_t { none, empty_value, unknown_value, no_dictionary };

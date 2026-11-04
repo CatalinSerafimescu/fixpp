@@ -182,7 +182,10 @@ template <class Msg>
 //  1. peek MsgType(35).
 //  2. FIXT-admin hit → {session_admin, profile.session, Unknown} via
 //     _dispatch/reify_dispatch_fixt.hpp → vt11::owning_<Msg>.
-//  3. miss → read ApplVerID(1128); the wire-owned field-absent error from
+//  3. miss, 099-fixt-appl-version-validation (data-model E-5, FR-001): the view's
+//     resolved_application_version() set → {application, vt11, that version}, reading neither
+//     1128 nor the profile, via _dispatch/reify_dispatch_application.hpp.
+//  4. otherwise → read ApplVerID(1128); the wire-owned field-absent error from
 //     get<1128>() (NOT a 003 slot — cross-feature note in version_profile.hpp)
 //     maps to empty sv → dict::resolve_application_version(profile, value)
 //     [003-OWNED, RC#1; AC-VP1..AC-VP6] → {application, profile.session,

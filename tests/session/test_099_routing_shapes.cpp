@@ -55,6 +55,24 @@ INSTANTIATE_TEST_SUITE_P(W1, W1Logon, testing::Values(Shape::T, Shape::A, Shape:
                              return std::string{shape_name(i.param)};
                          });
 
+// A Heartbeat with a body field. A header-only one passes on an application table too, whose closed
+// MsgType holds 0 and whose framing surface answers the header, so only a body field shows which
+// table judged an admin frame in Active.
+class W1HeartbeatWithBody : public testing::TestWithParam<Shape> {};
+
+TEST_P(W1HeartbeatWithBody, Delivered) {
+    const Shape s = GetParam();
+    const CellRun run = run_own_cell(
+        std::string("W-1 Heartbeat 112 ") + shape_name(s), shape_fixture(s), /*validate=*/true,
+        Arm::Active, [](const Rig& r) { return frame_35("0", r.peer_ctx(2), "112=x\x01"); });
+    expect_ending(run, kAdminDelivered);
+}
+
+INSTANTIATE_TEST_SUITE_P(W1, W1HeartbeatWithBody, testing::Values(Shape::T, Shape::A, Shape::L),
+                         [](const testing::TestParamInfo<Shape>& i) {
+                             return std::string{shape_name(i.param)};
+                         });
+
 // ── `NOS 1128=6`: FIX44 registered on every shape, own registry (US1 scenario 4) ────────
 
 class W1Fix44Registered : public testing::TestWithParam<Shape> {};

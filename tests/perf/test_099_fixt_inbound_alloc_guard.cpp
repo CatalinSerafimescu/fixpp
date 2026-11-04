@@ -15,6 +15,10 @@
 //
 // Every cell asserts after Rig::stop(): the session reached Active, each frame reached fromApp, and
 // NextNumIn shows each processed, so a window that never ran the route cannot pass.
+//
+// The second region, `W16MessageTypeDefault` (tasks.md T070): after an `MT-a` Logon, a NOS that
+// takes the default. Validated, only that route delivers its 3115, so the delivered count fails
+// when the lookup does not answer.
 
 #include <gtest/gtest.h>
 
@@ -25,6 +29,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/load_any.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/session/session_fsm.hpp>
@@ -124,6 +129,14 @@ DictPtr load_vendored(char const* name) {
         dd::XmlLoader{}.load(std::filesystem::path{FIXPP_DICT_DATA_DIR} / name, &mr));
 }
 
+// FIX Latest, by the loader its Orchestra file takes.
+DictPtr const& fix_latest() {
+    static std::pmr::monotonic_buffer_resource mr;
+    static DictPtr const d = std::make_shared<const dd::Dictionary>(dd::load_any(
+        std::filesystem::path{FIXPP_DICT_DATA_DIR} / "orchestra/OrchestraFIXLatest.xml", &mr));
+    return d;
+}
+
 struct window_result {
     bool up = false;
     bool warmed = false;
@@ -133,17 +146,56 @@ struct window_result {
     std::uint64_t app_messages = 0;
     rt::session_snapshot snap;
     std::size_t new_calls = 0;
+    dd::application_version resolved = dd::application_version::Unknown;
+};
+
+// What differs between the two regions of contracts/witnesses.md W-16.
+struct window_cell {
+    bool validating = true;
+    std::string logon_group;   // follows 1137=9 on the Logon, which is outside the region
+    std::string frame_prefix;  // ahead of the frame's body
+    std::string frame_suffix;  // after the frame's body
+    bool fix_latest_in_engine = false;
 };
 
 // S is FIXT11 and the slot FIX 5.0 SP2's, so the route's table is not S's, and a validated frame
 // passes only on that route: S's table answers tag 8.
-window_result run_window(bool validating) {
+window_cell non_own_slot(bool validating) {
+    window_cell c;
+    c.validating = validating;
+    c.frame_prefix = "1128=9\x01";
+    return c;
+}
+
+// After an `MT-a` Logon, a NOS with no 1128 and with 3115 takes the default, which is the lookup
+// (NFR-002): FIX Latest's table alone declares 3115 there.
+window_cell msg_type_default_lookup(bool validating) {
+    window_cell c;
+    c.validating = validating;
+    c.logon_group =
+        "384=1\x01"
+        "372=D\x01"
+        "385=S\x01"
+        "1130=10\x01"
+        "1410=Y\x01";
+    c.frame_suffix = "3115=1.5\x01";
+    c.fix_latest_in_engine = true;
+    return c;
+}
+
+window_result run_window(window_cell const& cell) {
     static DictPtr const fixt11 = load_vendored("FIXT11.xml");
     static DictPtr const fix50sp2 = load_vendored("FIX50SP2.xml");
+    bool const validating = cell.validating;
 
     rt::options opt{.mode = rt::hook::signal_from_app};
-    opt.logon_extra = "1137=9\x01";
-    opt.shape_engine = [](fixpp::core::EngineConfig& e) { e.dictionaries = {fixt11, fix50sp2}; };
+    opt.logon_extra = "1137=9\x01" + cell.logon_group;
+    opt.shape_engine = [with_latest = cell.fix_latest_in_engine](fixpp::core::EngineConfig& e) {
+        e.dictionaries = {fixt11, fix50sp2};
+        if (with_latest) {
+            e.dictionaries.push_back(fix_latest());
+        }
+    };
     opt.shape_session = [validating](fixpp::session::SessionConfig& c) {
         c.dictionary = fixt11;
         c.default_appl_ver_id = dd::application_version::v50sp2;
@@ -160,16 +212,15 @@ window_result run_window(bool validating) {
     for (int i = 0; i < total; ++i) {
         auto const seq = static_cast<std::uint32_t>(2 + i);
         frames.push_back(rig.msg("D", seq,
-                                 "1128=9\x01"
-                                 "11=C" +
-                                     std::to_string(seq) +
+                                 cell.frame_prefix + "11=C" + std::to_string(seq) +
                                      "\x01"
                                      "21=1\x01"
                                      "55=X\x01"
                                      "54=1\x01"
                                      "60=20240101-00:00:00\x01"
                                      "40=1\x01"
-                                     "38=1\x01"));
+                                     "38=1\x01" +
+                                     cell.frame_suffix));
     }
 
     auto& done = rig.app->completions;
@@ -202,6 +253,7 @@ window_result run_window(bool validating) {
     r.stopped = rig.stop();
     r.completions = done.load();
     r.app_messages = rig.app->app_messages.load();
+    r.resolved = rig.app->last_resolved.load();
     return r;
 }
 
@@ -222,8 +274,22 @@ void expect_window(window_result const& r, bool validating) {
 #endif
 }
 
-TEST(W16NonOwnSlot, Validated) { expect_window(run_window(/*validating=*/true), true); }
+TEST(W16NonOwnSlot, Validated) { expect_window(run_window(non_own_slot(true)), true); }
 
-TEST(W16NonOwnSlot, NotValidated) { expect_window(run_window(/*validating=*/false), false); }
+TEST(W16NonOwnSlot, NotValidated) { expect_window(run_window(non_own_slot(false)), false); }
+
+// The accessor's half: a frame the entry answered says FIX Latest. Not validating, the delivered
+// count cannot tell the lookup ran; this can.
+TEST(W16MessageTypeDefault, Validated) {
+    window_result const r = run_window(msg_type_default_lookup(true));
+    expect_window(r, true);
+    EXPECT_EQ(r.resolved, dd::application_version::vlatest);
+}
+
+TEST(W16MessageTypeDefault, NotValidated) {
+    window_result const r = run_window(msg_type_default_lookup(false));
+    expect_window(r, false);
+    EXPECT_EQ(r.resolved, dd::application_version::vlatest);
+}
 
 }  // namespace

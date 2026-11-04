@@ -251,7 +251,11 @@ core::expected_t<owning_message_handle> owning_message_handle_from_frame(
 //     dict_reify_wire_body_not_ready).
 //  2. single-char FIXT-admin hit → reify_dispatch_fixt (→ {session_admin,
 //     profile.session, Unknown}).
-//  3. miss → read ApplVerID(1128) (field-absent → empty sv → profile default) →
+//  3. miss, 099-fixt-appl-version-validation (data-model E-5, FR-001): the view's resolved version
+//     set → reify_dispatch_application (→ {application, vt11, that version}), reading neither 1128
+//     nor the profile: only a FIXT session writes it, and it is what the session's route resolved,
+//     a Message Type Default among them.
+//  4. otherwise → read ApplVerID(1128) (field-absent → empty sv → profile default) →
 //     resolve_application_version → reify_dispatch_application (→ {application,
 //     profile.session, resolved}). Multi-char MsgTypes forward the full sv;
 //     the emitter's two-level dispatch resolves single- and 2-char arms.
@@ -273,7 +277,19 @@ core::expected_t<owning_message_handle> owning_message_handle_from_frame(
         return reify_dispatch_fixt(view, mt_sv.front(), profile, mr);
     }
 
-    // Step 3: application dispatch. Read ApplVerID(1128); field-absent → empty
+    // Step 3: the byte the session wrote. The profile handed on names only what the dispatch reads
+    // of it, so `session` is vt11 whatever the caller passed.
+    if (auto const byte = view.resolved_application_version();
+        byte != application_version::Unknown) {
+        return reify_dispatch_application(view, mt_sv, byte,
+                                          version_profile{.session = session_version::vt11,
+                                                          .default_appl = byte,
+                                                          .has_per_message_override = true,
+                                                          ._reserved = 0},
+                                          mr);
+    }
+
+    // Step 4: application dispatch. Read ApplVerID(1128); field-absent → empty
     // sv → profile default.
     std::string_view appl_ver_sv;
     auto appl_fv = view.template get<1128>();
