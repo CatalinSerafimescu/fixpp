@@ -309,8 +309,14 @@ TEST_P(W12Shape, ARefusedConfig_ThreadConfig_BuilderUnconsumed) {
     fixpp_engine_t* able = engine_over({fixt11(), fix50sp2(), latest()});
     fixpp_session_config_t* sc = fixt_config(shape, 1);
     fixpp_session_t* h = nullptr;
-    EXPECT_EQ(fixpp_session_open(refusing, sc, &h), FIXPP_ERR_THREAD_CONFIG);
+    const fixpp_error_t refused = fixpp_session_open(refusing, sc, &h);
+    EXPECT_EQ(refused, FIXPP_ERR_THREAD_CONFIG);
     EXPECT_EQ(h, nullptr);
+    if (h != nullptr) {  // it opened, so the builder went with it: no second call can read it
+        fixpp_engine_destroy(refusing);
+        fixpp_engine_destroy(able);
+        return;
+    }
 
     fixpp_session_t* opened = nullptr;
     EXPECT_EQ(fixpp_session_open(able, sc, &opened), FIXPP_ERR_OK)
@@ -339,7 +345,12 @@ TEST(W12Refusal, NoDefault_ThreadConfig_ThenTheSetterOpens) {
     EXPECT_EQ(fixpp_session_config_set_dictionary(sc, fix50sp2()), FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_validate_inbound_messages(sc, true), FIXPP_ERR_OK);
     fixpp_session_t* h = nullptr;
-    EXPECT_EQ(fixpp_session_open(e, sc, &h), FIXPP_ERR_THREAD_CONFIG);
+    const fixpp_error_t refused = fixpp_session_open(e, sc, &h);
+    EXPECT_EQ(refused, FIXPP_ERR_THREAD_CONFIG);
+    if (h != nullptr) {  // it opened, so the builder went with it: no second call can read it
+        fixpp_engine_destroy(e);
+        return;
+    }
     EXPECT_EQ(fixpp_session_config_set_default_appl_ver_id(sc, "9"), FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_open(e, sc, &h), FIXPP_ERR_OK);
     if (h == nullptr) {
