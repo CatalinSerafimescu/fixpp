@@ -10,9 +10,9 @@
 // dictionary, because a real one's copy makes a sweep take hours (research R-3). Not
 // pugi::set_memory_management_functions: as_table_view() reads a finished handle, so pugixml never
 // runs and that hook would never fire. Each arm fails unless the hook fired and its sweep saw both
-// outcomes, since an unfired hook reads green. The C arm (tasks.md T108) sweeps fixpp_engine_create,
-// whose failure leaves the builder with the caller, and fixpp_engine_start, whose failure leaves
-// the engine not started; its mutants are M-52 and M-95.
+// outcomes, since an unfired hook reads green. The C arm (tasks.md T108) sweeps
+// fixpp_engine_create, whose failure leaves the builder with the caller, and fixpp_engine_start,
+// whose failure leaves the engine not started; its mutants are M-52 and M-95.
 
 #include <gtest/gtest.h>
 

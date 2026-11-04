@@ -7,7 +7,7 @@
  * C-clean: no C++ symbols, no C++ syntax. Compiles as C11.
  *
  * The C-ABI engine owns an internal io_context + worker thread(s) (research D-2:
- * the C++ Engine "owns NO worker threads", engine.hpp:222 — a C consumer has no
+ * the C++ Engine "owns NO worker threads", Engine::Engine — a C consumer has no
  * asio executor to supply, so the boundary owns one). Lifecycle is register-then-
  * start, which succeeds once (research D-1):
  *
