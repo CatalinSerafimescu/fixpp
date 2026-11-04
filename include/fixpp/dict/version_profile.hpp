@@ -116,6 +116,13 @@ enum class application_version : std::uint8_t {
     }
 }
 
+// 099-fixt-appl-version-validation (data-model E-2, FR-008): the header tags a route's own table
+// answers, because they name the route, and which the session dictionary therefore does not judge
+// on another route.
+[[nodiscard]] constexpr bool is_route_answered_header_tag(std::uint16_t tag) noexcept {
+    return tag == 35 || tag == 1128 || tag == 1129 || tag == 1156;
+}
+
 // ─── 003-OWNED ADDITIONS (RC#1, re-/plan 2026-05-15) ────────────────────────
 // Appended below the unchanged 002 enums, non-renumbering. 002 deferred the
 // `version_profile` struct + `resolve_application_version` free function

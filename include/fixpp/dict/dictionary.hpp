@@ -276,9 +276,4 @@ private:
 // headers declare, so that one input has one ending in any field order.
 [[nodiscard]] bool is_fixt_standard_header_tag(std::uint16_t tag) noexcept;
 
-// 099-fixt-appl-version-validation (data-model E-2, FR-008): the header tags a route's own table
-// answers, because they name the route, and which the session dictionary therefore does not judge
-// on another route.
-[[nodiscard]] bool is_route_answered_header_tag(std::uint16_t tag) noexcept;
-
 }  // namespace fixpp::dict

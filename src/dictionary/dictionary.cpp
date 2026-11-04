@@ -853,8 +853,4 @@ bool is_fixt_standard_header_tag(std::uint16_t tag) noexcept {
             1U) != 0;
 }
 
-bool is_route_answered_header_tag(std::uint16_t tag) noexcept {
-    return tag == 35 || tag == 1128 || tag == 1129 || tag == 1156;
-}
-
 }  // namespace fixpp::dict

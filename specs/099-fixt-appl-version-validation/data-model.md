@@ -44,7 +44,7 @@ Registering a `vt11` dictionary no longer drops it. `get()` is unchanged: a `vt1
 | `session_to_application(session_version)` | moved from `version_registry.cpp`'s anonymous namespace to `version_profile.hpp` | `vt11` and `Unknown` map to `Unknown` |
 | `is_fixt_admin_msgtype(string_view) noexcept` | made public from `reify.cpp`'s `is_fixt_admin` | the seven-member set of the spec's Terminology; `reify.cpp` calls it |
 | `is_fixt_standard_header_tag(uint16_t) noexcept` | new, `dictionary.cpp`, a `constexpr` bitmap built from `kFixtFramingTable` minus 10, 89, 93, plus 370, so one bound check and one bit test | the peek's standard header set (research R-5 says why 370); `kFixtFramingTable` stays private to `src/dictionary/` |
-| `is_route_answered_header_tag(uint16_t) noexcept` | new, `dictionary.cpp` | 35, 1128, 1129, 1156: the header tags S does not judge on another route (FR-008) |
+| `is_route_answered_header_tag(uint16_t) noexcept` | new, inline `constexpr` in `version_profile.hpp`, beside `is_fixt_admin_msgtype`, so `validator.hpp` needs no `dictionary.hpp` | 35, 1128, 1129, 1156: the header tags S does not judge on another route (FR-008) |
 
 ## E-3 `Dictionary::as_table_view(fixt_framing)` (public overload)
 
