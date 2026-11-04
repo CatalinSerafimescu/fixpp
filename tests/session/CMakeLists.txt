@@ -2631,6 +2631,8 @@ set_property(TEST session_validate_gate_inbound APPEND PROPERTY LABELS 093)
 # if this entry times out there, size TIMEOUT from that job's own timing.
 add_threading_test(session_unparseable_frame_disposition
   unparseable_frame_disposition_test.cpp)
+target_compile_definitions(session_unparseable_frame_disposition PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 set_tests_properties(session_unparseable_frame_disposition PROPERTIES
   LABELS "092;session"
   TIMEOUT 300)

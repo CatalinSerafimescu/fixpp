@@ -56,6 +56,7 @@
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/transport/endpoint.hpp>
+#include <functional>
 #include <future>
 #include <memory>
 #include <memory_resource>
@@ -277,6 +278,11 @@ struct options {
     bool driven_by_test_thread = false;
     // A PMR arena for the session's message_arena, when a cell counts it.
     std::pmr::memory_resource* message_arena = nullptr;
+    // 099-fixt-appl-version-validation (W-16): a FIXT session. The session's config and the
+    // Engine's are shaped by the cell, ahead of registration; a Logon carries `logon_extra`.
+    std::function<void(fixpp::session::SessionConfig&)> shape_session{};
+    std::function<void(fixpp::core::EngineConfig&)> shape_engine{};
+    std::string logon_extra{};
 };
 
 // A snapshot of session state, read on the session strand.
@@ -359,7 +365,8 @@ public:
     [[nodiscard]] std::string logon() const {
         return msg("A", 1,
                    "98=0\x01"
-                   "108=30\x01");
+                   "108=30\x01" +
+                       opt.logon_extra);
     }
     [[nodiscard]] std::string heartbeat(std::uint32_t seq) const { return msg("0", seq); }
     // A NewOrderSingle the validation dictionary accepts: ClOrdID, Side and TransactTime.
@@ -411,6 +418,7 @@ public:
         c.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 0};
         c.transport_send = [](std::span<const std::byte>) {};
         if (opt.message_arena != nullptr) c.message_arena = opt.message_arena;
+        if (opt.shape_session) opt.shape_session(c);
         return c;
     }
 
@@ -422,6 +430,7 @@ public:
         ec.executor = engine_exec;
         ec.clock = clock;
         ec.application = app;
+        if (opt.shape_engine) opt.shape_engine(ec);
         engine = std::make_unique<fixpp::session::Engine>(engine_exec, std::move(ec));
         auto c = cfg();
         id = fixpp::session::SessionId::from_config(c);

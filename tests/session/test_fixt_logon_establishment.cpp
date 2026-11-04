@@ -1760,9 +1760,11 @@ using fixpp::test_support::extract_tag;
 // StandardHeader's declarations give it, so arm and control differ only in that one
 // field.
 [[nodiscard]] std::vector<std::byte> peer_new_order_single(std::string_view body_fields,
-                                                           bool with_1156) {
+                                                           bool with_1156,
+                                                           std::string_view after_msg_type = {}) {
     std::string body;
     body += "35=D\x01";
+    body += std::string(after_msg_type);
     if (with_1156) {
         body += "1156=303\x01";
     }
@@ -2257,27 +2259,24 @@ TEST(FixtLogonEstablishment097, W7d0_OrchestraLatest_No1156_DeliveredToFromApp) 
     expect_delivered(a, from);
 }
 
-// W-7 (e): the dictionary-decided reject. Session dictionary FIX4.x-shaped with 1137
-// declared and 1407 not, registry {FIX50SP2}: 1137=9 + 1407 → a session Reject, never
-// Active. 371 is the validator's ref tag; 373 is what the unexpected-tag error maps to
-// (include/fixpp/wire/reject_reason_map.hpp). A characterization pin of this tree.
-TEST(FixtLogonEstablishment097, W7e_Fix4xShaped_9With1407_SessionReject) {
-    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml)},
+// 099-fixt-appl-version-validation (research R-17): the four cells below are on FIXT behaviour that
+// changed. That S defines Heartbeat and Logon as its only admin messages, so a validating session
+// on it needs a transport dictionary, and FIXT11 judges the Logon.
+//
+// W-7 (e): the dictionary-decided reject, now the transport dictionary's: FIXT11 accepts 1407, so
+// the tag here is one it lacks. A characterization pin of this tree.
+TEST(FixtLogonEstablishment097, W7e_Fix4xShaped_9WithUndeclaredTag_SessionReject) {
+    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml), make_fixt11_dict()},
                   fixpp::test_support::fix44_dictionary_with_1137(),
                   /*validate=*/true};
     ASSERT_TRUE(a.open().has_value());
-    a.feed(peer_logon("9", /*with_1407=*/true));
-    const auto rj = find_msg_type(a.out, "3");
-    ASSERT_LT(rj, a.out.size()) << "expected a session Reject (35=3); observed " << a.observed();
-    EXPECT_EQ(extract_tag(a.out[rj], 371), "1407") << "observed " << a.observed();
-    EXPECT_EQ(extract_tag(a.out[rj], 373), "2") << "observed " << a.observed();
-    EXPECT_EQ(find_msg_type(a.out, "A"), a.out.size()) << "observed " << a.observed();
-    EXPECT_NE(a.sess->state(), fsm_state::Active) << "observed " << a.observed();
+    a.feed(peer_logon("9", /*with_1407=*/false, kUndeclaredLogonField));
+    expect_undeclared_tag_reject(a);
 }
 
-// W-7 (e0): control of (e), without 1407: established.
+// W-7 (e0): control of (e), without the undeclared tag: established.
 TEST(FixtLogonEstablishment097, W7e0_Fix4xShaped_9_Established) {
-    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml)},
+    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml), make_fixt11_dict()},
                   fixpp::test_support::fix44_dictionary_with_1137(),
                   /*validate=*/true};
     ASSERT_TRUE(a.open().has_value());
@@ -2285,31 +2284,30 @@ TEST(FixtLogonEstablishment097, W7e0_Fix4xShaped_9_Established) {
     expect_established(a);
 }
 
-// W-7 (f): on (e0)'s Active session, a NewOrderSingle with header 1156=303 → a session
-// Reject, not fromApp. That dictionary is a FIX 4.4 session version, so the FIXT framing
-// surface does not whitelist 1156 for it. 371 and 373 as for (e). A characterization pin.
-TEST(FixtLogonEstablishment097, W7f_Fix4xShaped_Header1156_SessionReject) {
-    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml)},
+// The header field that routes the NOS of (f) and (f0) to S's own version, which S answers with no
+// registry slot. establish_then_feed logs on with 1137=9, and the minimal FIX50SP2 defines no NOS.
+constexpr std::string_view kApplVerId44 = "1128=6\x01";
+
+// W-7 (f): on (e0)'s Active session, a NewOrderSingle with header 1156=303 routed to S: delivered.
+// S's table carries the FIXT framing surface (FR-007), which whitelists 1156.
+TEST(FixtLogonEstablishment097, W7f_Fix4xShaped_Header1156_DeliveredToFromApp) {
+    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml), make_fixt11_dict()},
                   fixpp::test_support::fix44_dictionary_with_1137(),
                   /*validate=*/true};
     ASSERT_TRUE(a.open().has_value());
-    const auto from =
-        establish_then_feed(a, peer_new_order_single(kFix4xNosFields, /*with_1156=*/true));
-    const auto rj = find_msg_type(a.out, "3", from);
-    ASSERT_LT(rj, a.out.size()) << "expected a session Reject (35=3); observed " << a.observed();
-    EXPECT_EQ(extract_tag(a.out[rj], 371), "1156") << "observed " << a.observed();
-    EXPECT_EQ(extract_tag(a.out[rj], 373), "2") << "observed " << a.observed();
-    EXPECT_EQ(a.app->from_app_calls, 0) << "observed " << a.observed();
+    const auto from = establish_then_feed(
+        a, peer_new_order_single(kFix4xNosFields, /*with_1156=*/true, kApplVerId44));
+    expect_delivered(a, from);
 }
 
 // W-7 (f0): control of (f), without 1156: delivered to fromApp.
 TEST(FixtLogonEstablishment097, W7f0_Fix4xShaped_No1156_DeliveredToFromApp) {
-    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml)},
+    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml), make_fixt11_dict()},
                   fixpp::test_support::fix44_dictionary_with_1137(),
                   /*validate=*/true};
     ASSERT_TRUE(a.open().has_value());
-    const auto from =
-        establish_then_feed(a, peer_new_order_single(kFix4xNosFields, /*with_1156=*/false));
+    const auto from = establish_then_feed(
+        a, peer_new_order_single(kFix4xNosFields, /*with_1156=*/false, kApplVerId44));
     expect_delivered(a, from);
 }
 

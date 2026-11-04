@@ -101,4 +101,8 @@ const fixt_route_set::entry* fixt_route_set::find(
     return nullptr;
 }
 
+bool fixt_route_set::has_pair_source(const fixpp::dict::Dictionary* s) const noexcept {
+    return std::ranges::any_of(entries_, [s](auto const& e) { return e->pair_source == s; });
+}
+
 }  // namespace fixpp::session::detail

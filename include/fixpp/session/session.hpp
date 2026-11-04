@@ -1098,8 +1098,8 @@ private:
     std::shared_ptr<const detail::fixt_route_set> routes_;
     // S's entry on a FIXT session; {&inbound_tv_, validator_.get(), nullptr} on any other.
     route_entry session_route_{};
-    // S when S declares a header pair, else null: the second key of every routes_ lookup but S's
-    // own entry's.
+    // S when routes_ holds a {d, S} entry, else null: the second key of every routes_ lookup but
+    // S's own entry's.
     fixpp::dict::Dictionary const* pair_source_ = nullptr;
     // One per application_version, indexed by its value, by data-model E-6's slot rule. A null
     // owner is a miss. An enumerator appended after vlatest must move this line.
@@ -1128,6 +1128,12 @@ private:
     // act on, and only a validating session does.
     [[nodiscard]] inbound_route select_route_(std::span<const std::byte> frame,
                                               bool establishment_arm) const noexcept;
+    // A FIXT session whose open() refused ahead of the route block, or in it. It holds no route,
+    // so an arm disregards the frame before anything reads one. session_route_.owner is the first
+    // route member open() writes, and nothing in that block can fail after it.
+    [[nodiscard]] bool fixt_routes_unbound_() const noexcept {
+        return fixt_routing_ && session_route_.owner == nullptr;
+    }
 
     // ── 029-persistent-seqnum-hydrate awaitable declarations ─────────────────
     //
@@ -1212,9 +1218,12 @@ private:
         explicit inbound_parse_t() = default;
     };
     static constexpr inbound_parse_t inbound_parse_buffer{};
+    // 099-fixt-appl-version-validation (research R-7): it parses with the frame's route, so the
+    // view a receive callback reads was split by the one table that judged the frame.
     template <class CB>
     [[nodiscard]] fixpp::core::expected_t<dispatch_outcome> parse_and_dispatch_(
-        std::span<const std::byte> frame, inbound_parse_t /*tag*/, CB&& cb) noexcept;
+        std::span<const std::byte> frame, inbound_parse_t /*tag*/, inbound_route const& route,
+        CB&& cb) noexcept;
 
     // close_on_late_parse_failure_ — 092-garbled-frame-reject contract C-6: the one
     // action every late inbound parse site takes when its parse fails (a
@@ -1286,6 +1295,11 @@ private:
     struct RejectDecision {
         int reason = 0;
         int ref_tag_id = 0;
+        // 099-fixt-appl-version-validation (data-model E-7, research R-9): a FIXT refusal's
+        // RefMsgType, which also keys the consume, and RefSeqNum: the third field's value and the
+        // first 34. Default-constructed everywhere else, and the arm then reads hdr as it did.
+        std::string_view ref_msg_type{};
+        std::string_view ref_seq_num{};
     };
     enum class validate_outcome : std::uint8_t { pass, reject, parse_failed };
     struct InboundValidation {
@@ -1293,8 +1307,17 @@ private:
         RejectDecision reject{};  // meaningful only when outcome == reject
     };
     [[nodiscard]] InboundValidation validate_inbound_(
-        std::span<const std::byte> frame,
-        fixpp::session::detail::FrameHeader const& hdr) const noexcept;
+        std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+        inbound_route const& route) const noexcept;
+    // 099-fixt-appl-version-validation (data-model E-7): A1 and A2, a validating FIXT session's
+    // Active refusals ahead of the 3/5 exemption.
+    [[nodiscard]] InboundValidation refuse_active_frame_(
+        std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+        inbound_route const& route) const noexcept;
+    // 099-fixt-appl-version-validation (data-model E-7's S2, FR-010): a validating FIXT session
+    // disconnects on a gate Reject of a Logon that names one of these tags.
+    [[nodiscard]] bool logon_reject_disconnects_(fixpp::session::detail::FrameHeader const& hdr,
+                                                 int ref_tag_id) const noexcept;
 
     // fixpp#544 (B35 Phase 4, `.specify/544-hot-path-zero-alloc.md` §2.2): on_inbound_frame's
     // split. on_inbound_frame is a non-coroutine that returns the Active arm's awaitable.
@@ -1346,15 +1369,15 @@ private:
     // A non-coroutine: returns the awaitable of the sub-arm `slow` names.
     [[nodiscard]] inbound_result_t on_inbound_active_slow_(
         bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
-        inbound_slow_t const& slow) noexcept;
+        inbound_slow_t const& slow, inbound_route const& route) noexcept;
     // The Active arm's sub-arms. An inbound_continue_t returns nullopt when the arm continues.
     [[nodiscard]] inbound_result_t on_inbound_active_validate_failed_(
         bool tic, fixpp::session::detail::FrameHeader const& hdr, InboundValidation v) noexcept;
     [[nodiscard]] inbound_result_t on_inbound_active_sending_time_reject_(
         bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
     [[nodiscard]] inbound_result_t on_inbound_active_sequence_reset_(
-        bool tic, std::span<const std::byte> frame,
-        fixpp::session::detail::FrameHeader const& hdr) noexcept;
+        bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+        inbound_route const& route) noexcept;
     // fixpp#537 (D-537-8): `hdr` is read for a Heartbeat that opens the gap.
     [[nodiscard]] inbound_result_t on_inbound_active_too_high_(
         bool tic, fixpp::session::detail::FrameHeader const& hdr, seqnum_t next_expected,
@@ -1366,13 +1389,13 @@ private:
     // resend is outstanding: the frame is ignored.
     [[nodiscard]] inbound_result_t on_inbound_active_out_of_sequence_(
         bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
-        fixpp::core::error chk_error) noexcept;
+        fixpp::core::error chk_error, inbound_route const& route) noexcept;
     [[nodiscard]] inbound_result_t on_inbound_active_gap_fill_(
-        bool tic, std::span<const std::byte> frame,
-        fixpp::session::detail::FrameHeader const& hdr) noexcept;
+        bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+        inbound_route const& route) noexcept;
     [[nodiscard]] inbound_result_t on_inbound_active_logout_(
-        bool tic, std::span<const std::byte> frame,
-        fixpp::session::detail::FrameHeader const& hdr) noexcept;
+        bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+        inbound_route const& route) noexcept;
     [[nodiscard]] inbound_result_t on_inbound_active_from_admin_failed_(
         bool tic, fixpp::session::detail::FrameHeader const& hdr,
         fixpp::core::expected_t<dispatch_outcome> cb_r) noexcept;

@@ -38,18 +38,30 @@
 // fault_ref_msg_type that is not the one entries() names. Only a resource-failure
 // build status is skipped, and those are counted (fuzz_092_support.hpp).
 //
+// 099-fixt-appl-version-validation (contracts/witnesses.md W-24): a FIXT arm, selected by
+// kFixtArmBit in the preamble, which no earlier seed sets, so they keep their arm. Re-derive: OR
+// the first byte of each file under tests/fuzz/corpus/session_recovery_admin_parse/ other than this
+// feature's `seed_099_*`. Its counters are checked at exit, and a zero fails the process.
+//
 // Build: cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON
 //   then: build/linux-clang-asan/bin/fuzz_session_recovery_admin_parse
 //         -max_len=512 -runs=10000
 
+#include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/dict/version_profile.hpp>
+#include <fixpp/dict/version_registry.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
@@ -58,11 +70,14 @@
 #include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/parser.hpp>  // dict_hooks::for_table_view
 #include <fixpp/wire/tag_scan.hpp>
+#include <iostream>
 #include <memory>
 #include <memory_resource>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string_view>
+#include <vector>
 
 // These headers are relative because fuzz binaries have
 //   target_include_directories(...PRIVATE "${CMAKE_SOURCE_DIR}/tests").
@@ -72,7 +87,10 @@
 
 // 092: the internal header is reached through ${CMAKE_SOURCE_DIR}/src.
 #include "fuzz_092_support.hpp"
+#include "session/fixt_route_set.hpp"
+#include "session/peek_fixt_route.hpp"
 #include "session/scan_frame_header.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 
@@ -229,6 +247,183 @@ void check_scan_agrees_with_build(std::span<const std::byte> buf) {
 
 }  // namespace
 
+// ── 099 W-24: the FIXT arm ────────────────────────────────────────────────────
+
+namespace {
+
+constexpr std::uint8_t kFixtArmBit = 0x80;
+constexpr std::uint8_t kFixtDriveLogonBit = 0x01;    // a Logon first, so the payload meets Active
+constexpr std::uint8_t kFixtApplicationSBit = 0x02;  // S is the application dictionary, not FIXT11
+
+constexpr std::string_view kSmallApplicationXml =
+    R"(<fix type='FIX' major='5' minor='0' servicepack='2'>)"
+    R"(<header><field name='BeginString' required='Y'/><field name='BodyLength' required='Y'/>)"
+    R"(<field name='MsgType' required='Y'/><field name='SenderCompID' required='Y'/>)"
+    R"(<field name='TargetCompID' required='Y'/><field name='MsgSeqNum' required='Y'/>)"
+    R"(<field name='SendingTime' required='Y'/></header>)"
+    R"(<trailer><field name='CheckSum' required='Y'/></trailer>)"
+    R"(<messages><message name='NewOrderSingle' msgtype='D' msgcat='app'>)"
+    R"(<field name='ClOrdID' required='Y'/><field name='Text' required='N'/></message></messages>)"
+    R"(<fields><field number='8' name='BeginString' type='STRING'/>)"
+    R"(<field number='9' name='BodyLength' type='LENGTH'/>)"
+    R"(<field number='10' name='CheckSum' type='STRING'/>)"
+    R"(<field number='11' name='ClOrdID' type='STRING'/>)"
+    R"(<field number='34' name='MsgSeqNum' type='SEQNUM'/>)"
+    R"(<field number='35' name='MsgType' type='STRING'/>)"
+    R"(<field number='49' name='SenderCompID' type='STRING'/>)"
+    R"(<field number='52' name='SendingTime' type='UTCTIMESTAMP'/>)"
+    R"(<field number='56' name='TargetCompID' type='STRING'/>)"
+    R"(<field number='58' name='Text' type='STRING'/></fields></fix>)";
+
+// The route set of the arm, built once per process, as an Engine builds one.
+struct fixt_arm_fixture {
+    std::pmr::monotonic_buffer_resource mr;
+    std::shared_ptr<const fixpp::dict::Dictionary> fixt11;
+    std::shared_ptr<const fixpp::dict::Dictionary> application;
+    std::unique_ptr<fixpp::dict::version_registry> registry;
+    std::shared_ptr<const fixpp::session::detail::fixt_route_set> routes;
+
+    fixt_arm_fixture() {
+        fixt11 = std::make_shared<const fixpp::dict::Dictionary>(fixpp::dict::XmlLoader{}.load(
+            std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIXT11.xml", &mr));
+        application = std::make_shared<const fixpp::dict::Dictionary>(
+            fixpp::dict::XmlLoader{}.load_from_string(kSmallApplicationXml, &mr));
+        registry = std::make_unique<fixpp::dict::version_registry>(
+            std::vector<std::shared_ptr<const fixpp::dict::Dictionary>>{fixt11, application});
+        const std::array<const fixpp::dict::Dictionary*, 2> listed{fixt11.get(), application.get()};
+        auto built = fixpp::session::detail::fixt_route_set::build(*registry, listed);
+        if (!built) {
+            __builtin_trap();
+        }
+        routes = *built;
+    }
+};
+
+fixt_arm_fixture& fixt_arm() {
+    static fixt_arm_fixture fixture;
+    return fixture;
+}
+
+// W-24's positive control. Registered ahead of the first input, so that an arm no input selected
+// reads zero and fails the run, which `ctest -L fuzz` (`-runs=0`) grades by exit code.
+std::uint64_t g_fixt_peeked = 0;
+std::uint64_t g_fixt_active = 0;
+
+void report_fixt_arm() {
+    std::cerr << "[099 fuzz FIXT arm] peek compared " << g_fixt_peeked << ", reached Active "
+              << g_fixt_active << '\n';
+    if (g_fixt_peeked == 0 || g_fixt_active == 0) {
+        std::cerr << "[099 fuzz FIXT arm] a counter read zero: the arm was bypassed\n";
+        std::_Exit(1);
+    }
+}
+
+[[maybe_unused]] const int g_fixt_report_registered = std::atexit(report_fixt_arm);
+
+// On a fault-free frame the peek and the scan name one MsgType, or the arm's routing and its
+// mismatch test read different frames (data-model E-7's oracle).
+void check_peek_against_scan(std::span<const std::byte> buf,
+                             fixpp::dict::table_view const& s_table) {
+    dict_hooks const hooks = dict_hooks::for_table_view(s_table);
+    FrameHeader const h = scan_frame_header(buf, hooks);
+    if (h.fault != field_fault::none || !h.msg_type_is_third) {
+        return;
+    }
+    auto const peek = fixpp::session::detail::peek_fixt_route(buf, hooks, s_table);
+    ++g_fixt_peeked;
+    if (!peek.readable || peek.msg_type != h.fault_ref_msg_type) {
+        __builtin_trap();
+    }
+}
+
+void feed_fixt(asio::io_context& ioc, fixpp::session::Session& sess,
+               std::span<const std::byte> buf) {
+    auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(buf), asio::use_future);
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "fuzz_admin_parse/fixt")) {
+        return;  // the disposition and its rationale are `fuzz_admin_parse/open`'s
+    }
+    try {
+        (void)fut.get();
+    } catch (...) {
+    }
+    if (sess.state() == fixpp::session::fsm_state::Active) {
+        ++g_fixt_active;
+    }
+}
+
+void run_fixt_arm(std::uint8_t preamble, std::span<const std::byte> payload) {
+    fixt_arm_fixture& fixture = fixt_arm();
+    auto const& s = (preamble & kFixtApplicationSBit) != 0 ? fixture.application : fixture.fixt11;
+    check_peek_against_scan(payload, *fixture.routes->find(s.get(), nullptr)->owner);
+
+    asio::io_context ioc;
+    auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
+    auto clk = std::make_shared<fixpp::core::mock_clock>(utc, fixpp::core::steady_time_point{},
+                                                         ioc.get_executor());
+    fixpp::core::EngineConfig engine;
+    engine.clock = clk;
+    engine.executor = ioc.get_executor();
+
+    fixpp::session::SessionConfig cfg;
+    cfg.sender_comp_id = "ISLD";
+    cfg.target_comp_id = "TW";
+    cfg.begin_string = "FIXT.1.1";
+    cfg.default_appl_ver_id = fixpp::dict::application_version::v50sp2;
+    cfg.validate_inbound_messages = true;
+    cfg.heartbeat_interval = 30s;
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    cfg.dictionary = s;
+    cfg.executor_override = ioc.get_executor();
+    cfg.transport_send = [](std::span<const std::byte>) {};
+    cfg.role = fixpp::session::session_role::acceptor;
+
+    fixpp::session::Session sess(engine, cfg, fixture.registry.get());
+    fixpp::session::session_test_access::adopt_routes(sess, fixture.routes);
+    {
+        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "fuzz_admin_parse/open")) {
+            return;
+        }
+        try {
+            if (!fut.get().has_value()) {
+                __builtin_trap();  // the arm is configured to open: anything else bypasses it
+            }
+        } catch (...) {
+            return;
+        }
+    }
+    if ((preamble & kFixtDriveLogonBit) != 0) {
+        constexpr std::string_view kBody =
+            "35=A\x01"
+            "34=1\x01"
+            "49=TW\x01"
+            "52=20240101-00:00:00.000\x01"
+            "56=ISLD\x01"
+            "98=0\x01"
+            "108=30\x01"
+            "1137=9\x01";
+        std::array<char, 256> full{};
+        int const head = snprintf(full.data(), full.size(),
+                                  "8=FIXT.1.1\x01"
+                                  "9=%zu\x01",
+                                  kBody.size());
+        std::memcpy(full.data() + head, kBody.data(), kBody.size());
+        std::size_t const body_end = static_cast<std::size_t>(head) + kBody.size();
+        unsigned int cs = 0;
+        for (std::size_t i = 0; i < body_end; ++i) {
+            cs += static_cast<unsigned char>(full[i]);
+        }
+        int const tail =
+            snprintf(full.data() + body_end, full.size() - body_end, "10=%03u\x01", cs & 0xFFU);
+        feed_fixt(ioc, sess,
+                  std::span<const std::byte>(reinterpret_cast<const std::byte*>(full.data()),
+                                             body_end + static_cast<std::size_t>(tail)));
+    }
+    feed_fixt(ioc, sess, payload);
+}
+
+}  // namespace
+
 // ── Per-invocation harness state ──────────────────────────────────────────────
 //
 // We allocate a fresh Session per LLVMFuzzerTestOneInput call to avoid
@@ -252,6 +447,12 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     // before any session code runs.
     check_scan_agrees_with_build(
         std::span<const std::byte>(reinterpret_cast<const std::byte*>(payload), payload_len));
+
+    if ((preamble & kFixtArmBit) != 0) {
+        run_fixt_arm(preamble, std::span<const std::byte>(
+                                   reinterpret_cast<const std::byte*>(payload), payload_len));
+        return 0;
+    }
 
     asio::io_context ioc;
     auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};

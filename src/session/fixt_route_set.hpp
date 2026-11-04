@@ -73,6 +73,10 @@ public:
     [[nodiscard]] const entry* find(const fixpp::dict::Dictionary* d,
                                     const fixpp::dict::Dictionary* pair_source) const noexcept;
 
+    // Whether any entry carries `s`'s header pairs. It reads what build() decided, so a session
+    // asks it without walking `s`, and cannot fail.
+    [[nodiscard]] bool has_pair_source(const fixpp::dict::Dictionary* s) const noexcept;
+
 private:
     struct keyed_entry {
         const fixpp::dict::Dictionary* d = nullptr;

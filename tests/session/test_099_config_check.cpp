@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cstdint>
 #include <fixpp/core/error.hpp>
+#include <fixpp/dict/dictionary_snapshot.hpp>
 #include <fixpp/log/format_registry.hpp>
 #include <fixpp/log/level.hpp>
 #include <fixpp/log/logger.hpp>
@@ -271,6 +272,77 @@ TEST(W8AdoptedSet, LackingS_Refused) {
     ASSERT_FALSE(r.has_value()) << "opened on a set with no entry for its S";
     EXPECT_EQ(r.error(), error::invalid_session_config);
     EXPECT_EQ(session_test_access::lifecycle_value(s), kNeverOpened);
+}
+
+// ── A frame on a session whose open() refused ───────────────────────────────────────────
+
+// on_inbound_cold_ reads only fsm_state_, so a frame can reach an arm of a session whose open()
+// refused at the FIXT check. That session holds no route, on the C path with a table already in
+// inbound_tv_ and on the C++ path with none. The frame is disregarded: no arm reads a route it
+// does not have, and nothing runs on a session with no store or strand behind it.
+class W8RefusedOpenFrames : public testing::TestWithParam<bool> {};
+
+TEST_P(W8RefusedOpenFrames, DisregardedBeforeAnythingReadsARoute) {
+    const bool c_path = GetParam();
+    DirectRig rig;
+    auto app = std::make_shared<CountingApp>();
+    rig.engine.application = app;
+    auto registry = make_registry({fixt11(), fix44()});
+    SessionConfig cfg = plain_fixt_config(rig.ioc, fixt11(), true, AV::v50sp2);
+    if (c_path) {
+        cfg.dict_snapshot = dd::make_dictionary_snapshot(cfg.dictionary);
+    }
+    Frames out;
+    cfg.transport_send = [&out](std::span<const std::byte> d) {
+        out.emplace_back(reinterpret_cast<const char*>(d.data()), d.size());
+    };
+    Session s{rig.engine, cfg, registry.get()};
+    const auto opened = direct_open(rig.ioc, s);
+    ASSERT_FALSE(opened.has_value()) << "the cell needs a refused open(): no FIX 5.0 SP2 slot";
+    EXPECT_EQ(opened.error(), error::invalid_session_config);
+
+    const fsm_state state_before = s.state();
+    const auto next_in_before = session_test_access::seqnum_mgr(s).next_inbound_unsafe();
+    const Ctx c{.snd = "TW", .tgt = "ISLD", .seq = 1};
+    for (const char* id :
+         {"Logon 1137=9", "NOS 1128=9", "Heartbeat", "rep35 0,D header", "Logout"}) {
+        const std::string frame = input(id).make(c);
+        auto fut =
+            asio::co_spawn(rig.ioc,
+                           s.on_inbound_frame(std::span<const std::byte>{
+                               reinterpret_cast<const std::byte*>(frame.data()), frame.size()}),
+                           asio::use_future);
+        ASSERT_TRUE(pump_ready(rig.ioc, fut, std::chrono::seconds{30})) << id;
+        EXPECT_TRUE(fut.get().has_value()) << id;
+        EXPECT_EQ(s.state(), state_before) << id;
+    }
+    EXPECT_TRUE(out.empty()) << "a frame on a refused session drew " << out.size() << " frame(s)";
+    EXPECT_EQ(session_test_access::seqnum_mgr(s).next_inbound_unsafe(), next_in_before);
+    EXPECT_EQ(app->app, 0);
+    EXPECT_EQ(app->admin, 0);
+}
+
+INSTANTIATE_TEST_SUITE_P(BothPaths, W8RefusedOpenFrames, testing::Bool(),
+                         [](const testing::TestParamInfo<bool>& info) {
+                             return info.param ? std::string{"DictSnapshot"}
+                                               : std::string{"NoSnapshot"};
+                         });
+
+// The control: with the slot registered, the same Logon on the same config establishes, so the
+// cell above does not pass on a frame nothing could have answered.
+TEST(W8RefusedOpenFrames_Control, TheSameLogonOnAnOpenedSessionEstablishes) {
+    DirectRig rig;
+    auto registry = make_registry({fixt11(), fix50sp2()});
+    Session s{rig.engine, plain_fixt_config(rig.ioc, fixt11(), true, AV::v50sp2), registry.get()};
+    ASSERT_TRUE(direct_open(rig.ioc, s).has_value());
+    const std::string frame = input("Logon 1137=9").make(Ctx{.snd = "TW", .tgt = "ISLD", .seq = 1});
+    auto fut = asio::co_spawn(rig.ioc,
+                              s.on_inbound_frame(std::span<const std::byte>{
+                                  reinterpret_cast<const std::byte*>(frame.data()), frame.size()}),
+                              asio::use_future);
+    ASSERT_TRUE(pump_ready(rig.ioc, fut, std::chrono::seconds{30}));
+    EXPECT_TRUE(fut.get().has_value());
+    EXPECT_EQ(s.state(), fsm_state::Active);
 }
 
 // ── The one-way fallback: `get` answers default 9 from the FIX Latest slot ──────────────

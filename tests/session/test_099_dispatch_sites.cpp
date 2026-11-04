@@ -212,10 +212,11 @@ TEST_P(W7Admin, D5_SequenceChecksOff) {
     expect_admin_view(seen, 9);
 }
 
-// D-6: `on_inbound_active_gap_fill_`.
+// D-6: `on_inbound_active_gap_fill_`, whose dispatch stands behind validate_sequence_numbers off.
 TEST_P(W7Admin, D6_GapFill) {
     RigOptions o;
     o.validate = GetParam();
+    o.tweak = [](SessionConfig& cfg) { cfg.validate_sequence_numbers = false; };
     CellRun run = enter_arm(a_with_admin_pair(), Arm::Active, std::move(o));
     if (!run.setup_failure.empty()) {
         ADD_FAILURE() << "setup: " << run.setup_failure;

@@ -599,7 +599,8 @@ template <class CB>
 // site asserts that (fixpp#564, `.specify/563-564-callback-send.md` §2.2).
 template <class CB>
 [[nodiscard]] fixpp::core::expected_t<Session::dispatch_outcome> Session::parse_and_dispatch_(
-    std::span<const std::byte> frame, inbound_parse_t /*tag*/, CB&& cb) noexcept {
+    std::span<const std::byte> frame, inbound_parse_t /*tag*/, inbound_route const& route,
+    CB&& cb) noexcept {
     FIXPP_ASSERT_NO_CALLBACK_AT_PARSE_SITE();
     std::pmr::monotonic_buffer_resource pa_mr{inbound_parse_buf_.data(), inbound_parse_buf_.size(),
                                               &parse_spill_witness_};
@@ -612,10 +613,11 @@ template <class CB>
     auto feed_r = pd_framer.feed(frame, carry, std::span<fixpp::wire::frame_view>{pd_out});
     if (!feed_r || feed_r->empty()) return dispatch_outcome::parse_failed;
 
-    assert(inbound_tv_ != nullptr);
-    // fixpp#495: the OWNED route, as in the stack overload above.
+    assert(*route.entry.owner != nullptr);
+    // fixpp#495: the OWNED route, as in the stack overload above. Its owner object is the route's,
+    // which is inbound_tv_ on a non-FIXT session (099, data-model E-6).
     fixpp::wire::Parser<fixpp::wire::access_mode::Index> pd_parser{
-        fixpp::wire::detail::owned_route_key{}, inbound_tv_};
+        fixpp::wire::detail::owned_route_key{}, *route.entry.owner};
     auto mv_r =
         pd_parser.parse((*feed_r)[0], &pa_mr,
                         fixpp::wire::OffsetTable::Config{.max_offset_entries = inbound_entry_cap_},
@@ -1368,16 +1370,6 @@ const fixpp::dict::version_registry& registry_or_empty(
     return registry != nullptr ? *registry : empty;
 }
 
-// Whether `s` declares a header pair (data-model E-1). dict::header_length_pairs allocates when it
-// answers one, and open(), which asks, is noexcept.
-fixpp::core::expected_t<bool> declares_header_pair(const fixpp::dict::Dictionary& s) noexcept {
-    try {
-        return !fixpp::dict::header_length_pairs(s).empty();
-    } catch (const std::bad_alloc&) {
-        return std::unexpected(fixpp::core::error::out_of_memory);
-    }
-}
-
 }  // namespace
 
 // 099-fixt-appl-version-validation (data-model E-6, FR-001, FR-002, FR-003): the slot rule and the
@@ -1680,11 +1672,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         if (!cfg_.dict_snapshot) {
             inbound_tv_ = own->owner;
         }
-        auto const has_pair = declares_header_pair(*cfg_.dictionary);
-        if (!has_pair) {
-            co_return std::unexpected(has_pair.error());
-        }
-        pair_source_ = *has_pair ? cfg_.dictionary.get() : nullptr;
+        pair_source_ =
+            routes_->has_pair_source(cfg_.dictionary.get()) ? cfg_.dictionary.get() : nullptr;
         bind_fixt_routes_();
     }
 
@@ -2821,14 +2810,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 }
 
 // 099-fixt-appl-version-validation (data-model E-7, FR-001, FR-013): the frame's route. The step
-// numbers are E-7's. A non-FIXT session takes step 1, on a value fixed at open(). So does a null
-// inbound_tv_: the peek has no table to read.
+// numbers are E-7's. A non-FIXT session takes step 1, on a value fixed at open(), and reads
+// inbound_tv_ and validator_ as it did, whatever open() did: their owner pointer is never null. So
+// does a FIXT session whose route block did not complete, which no arm lets go further.
 Session::inbound_route Session::select_route_(std::span<const std::byte> frame,
                                               bool establishment_arm) const noexcept {
-    inbound_route route{.entry = session_route_};
-    if (!fixt_routing_ || !inbound_tv_) {
-        return route;  // step 1
+    if (!fixt_routing_ || session_route_.owner == nullptr) {
+        return inbound_route{.entry = {.owner = &inbound_tv_, .validator = validator_.get()}};
     }
+    inbound_route route{.entry = session_route_};
     fixpp::session::detail::fixt_route_peek const peek =
         fixpp::session::detail::peek_fixt_route(frame, session_hooks(inbound_tv_), *inbound_tv_);
     if (!peek.readable) {
@@ -2900,8 +2890,8 @@ Session::inbound_route Session::select_route_(std::span<const std::byte> frame,
 //     it builds the resource (fixpp#564, `.specify/563-564-callback-send.md` §2.2)
 // [041 T014; data-model E-4; SC-005; simplify-triage FIX-1/FIX-2; const §VIII.5]
 Session::InboundValidation Session::validate_inbound_(
-    std::span<const std::byte> frame,
-    fixpp::session::detail::FrameHeader const& /*hdr*/) const noexcept {
+    std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+    inbound_route const& route) const noexcept {
     FIXPP_ASSERT_NO_CALLBACK_AT_PARSE_SITE();
     // 093 (data-model E-2): over the session's parse buffer B(L), upstream the spill
     // witness, as the inbound dispatch sites parse.
@@ -2921,11 +2911,13 @@ Session::InboundValidation Session::validate_inbound_(
     // the validator holds a copy of, so the OffsetTable this parse builds
     // splits Length+Data pairs (including any dictionary-declared custom
     // pair) the same way the validator's own field walk does. A non-null
-    // `session_route_.validator` implies `inbound_tv_` non-null (open() sets
-    // both, or refuses) — mirrors the established `Parser<Index> pd_parser{*inbound_tv_}`
-    // pattern in `parse_and_dispatch_` above.
-    assert(inbound_tv_ != nullptr);
-    fixpp::wire::Parser<fixpp::wire::access_mode::Index> vg_parser{*inbound_tv_};
+    // `session_route_.validator` implies the route's table is set (open() sets
+    // both, or refuses).
+    //
+    // 099-fixt-appl-version-validation (research R-7, FR-006, FR-012): the frame's route, whose
+    // table is the one its validator holds.
+    assert(*route.entry.owner != nullptr);
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> vg_parser{**route.entry.owner};
     std::array<std::byte, 512> vg_scratch_buf{};
     std::pmr::monotonic_buffer_resource vg_scratch_mr{vg_scratch_buf.data(), vg_scratch_buf.size(),
                                                       ::fixpp::detail::arena_upstream()};
@@ -2936,14 +2928,56 @@ Session::InboundValidation Session::validate_inbound_(
     if (!vg_mv_r) {
         return {.outcome = validate_outcome::parse_failed};
     }
+    // 099 (data-model E-7's A3, FR-026): a 1128 past the header on an application route, read
+    // ahead of the validator, whose walk has no rule for it. A non-FIXT route is not application.
+    constexpr std::uint16_t kApplVerIdTag = 1128;
+    if (route.application && !route.header_1128 && vg_mv_r->get(kApplVerIdTag).has_value()) {
+        return {.outcome = validate_outcome::reject,
+                .reject = RejectDecision{.reason = 14,
+                                         .ref_tag_id = kApplVerIdTag,
+                                         .ref_msg_type = hdr.fault_ref_msg_type,
+                                         .ref_seq_num = hdr.fault_ref_seq_num}};
+    }
     std::uint16_t vg_ref_tag = 0;
-    auto val_r = session_route_.validator->validate(*vg_mv_r, &vg_scratch_mr, &vg_ref_tag);
+    auto val_r = route.entry.validator->validate(*vg_mv_r, &vg_scratch_mr, &vg_ref_tag,
+                                                 route.entry.envelope);
     if (!val_r) {
         const int vg_reason = fixpp::wire::wire_error_to_session_reject_reason(val_r.error());
         return {.outcome = validate_outcome::reject,
                 .reject = RejectDecision{.reason = vg_reason, .ref_tag_id = vg_ref_tag}};
     }
     return {.outcome = validate_outcome::pass};
+}
+
+// 099-fixt-appl-version-validation (data-model E-7's A1, A2; FR-009, FR-025): their Reject names
+// the third field and the first 34, because hdr is last-wins on 35 and, on a frame whose route was
+// refused, was split by S's hooks. Which of 373=13 and 14 is read only on a mismatch.
+Session::InboundValidation Session::refuse_active_frame_(
+    std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+    inbound_route const& route) const noexcept {
+    int reason = 0;
+    int ref_tag = 0;
+    if (hdr.msg_type != hdr.fault_ref_msg_type) {
+        bool const in_header = fixpp::session::detail::fixt_header_repeats_msg_type(
+            frame, session_hooks(inbound_tv_), *inbound_tv_);
+        reason = in_header ? 13 : 14;
+        ref_tag = 35;
+    } else if (route.refusal != route_refusal::none) {
+        reason = route.refusal == route_refusal::empty_value ? 4 : 5;
+        ref_tag = 1128;
+    } else {
+        return {.outcome = validate_outcome::pass};
+    }
+    return {.outcome = validate_outcome::reject,
+            .reject = RejectDecision{.reason = reason,
+                                     .ref_tag_id = ref_tag,
+                                     .ref_msg_type = hdr.fault_ref_msg_type,
+                                     .ref_seq_num = hdr.fault_ref_seq_num}};
+}
+
+bool Session::logon_reject_disconnects_(fixpp::session::detail::FrameHeader const& hdr,
+                                        int ref_tag_id) const noexcept {
+    return fixt_routing_ && hdr.msg_type == "A" && ref_tag_id == 1137;
 }
 
 // ── 013 T036 US2 — Logon-time CompID authorization helpers ───────────────────
@@ -3498,7 +3532,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
     // 092 (data-model E-2, research R-3): the arm's one header scan, hoisted
     // here; later code in this arm reads `hdr` rather than scanning again.
     // A frame the scan could not read is refused (C-2 D-1).
-    auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+    //
+    // 099-fixt-appl-version-validation (data-model E-7, research R-7): the scan uses the frame's
+    // route, selected here so that it lives in this frame.
+    if (fixt_routes_unbound_()) {
+        co_return fixpp::core::expected_t<void>{};
+    }
+    inbound_route const route = select_route_(frame, /*establishment_arm=*/true);
+    auto hdr = scan_frame_header(frame, session_hooks(*route.entry.owner));
     // 093 (contract C-2 step 1): a frame whose third field is not MsgType(35),
     // faulty or not, is disregarded as garbled: counted, evented and logged, with
     // no Reject, NextNumIn kept and no liveness refresh. It runs before 092's
@@ -3520,6 +3561,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         co_return co_await dispose_unparseable_(hdr, fsm_state::NotConnected);
     }
 
+    // 099-fixt-appl-version-validation (data-model E-7's S1, FR-029, FR-005): on a validating FIXT
+    // session an application frame, or a frame with two MsgTypes, ends here with nothing sent. It
+    // reads the third field: interpret_logon reads the last 35, so it could not refuse `D…A`.
+    if (fixt_routing_ && cfg_.validate_inbound_messages &&
+        (route.application || hdr.msg_type != hdr.fault_ref_msg_type)) {
+        record_state_transition_(fsm_state::Disconnected);
+        co_return fixpp::core::expected_t<void>{};
+    }
+
     // ── 041-validation-gate-wiring T014: validate-first gate ──────────────
     // Run BEFORE interpret_logon so a dict-invalid Logon produces a Reject
     // instead of a silent Disconnect (C-2 rows a/c-i/validate-first ordering).
@@ -3535,15 +3585,20 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
     // does, so it never under-parses relative to dispatch (093, data-model E-2).
     if (cfg_.validate_inbound_messages && session_route_.validator) {
         if (hdr.msg_type != "3" && hdr.msg_type != "5") {
-            auto const v = validate_inbound_(frame, hdr);
+            auto const v = validate_inbound_(frame, hdr, route);
             // 092 contract C-6: a late parse failure closes the session.
             if (v.outcome == validate_outcome::parse_failed) {
                 co_return co_await close_on_late_parse_failure_();
             }
             if (v.outcome == validate_outcome::reject) {
-                co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
+                auto rj = co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
                                                         v.reject.reason, v.reject.ref_tag_id,
                                                         /*text=*/{}, fsm_state::NotConnected);
+                // 099 (data-model E-7's S2, FR-010): any other Reject stays in the arm.
+                if (rj && logon_reject_disconnects_(hdr, v.reject.ref_tag_id)) {
+                    disconnect_unless_superseded_(fsm_state::NotConnected);
+                }
+                co_return rj;
             }
         }
     }
@@ -3557,7 +3612,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         frame,
         cfg_.target_comp_id,  // expected_sender: peer's 49= is our target
         cfg_.sender_comp_id,  // expected_target: peer's 56= is our sender
-        cfg_.begin_string, session_hooks(inbound_tv_));
+        cfg_.begin_string, session_hooks(fixt_routing_ ? *transport_route_.owner : inbound_tv_));
 
     if (!result) {
         // Refusal — BeginString/CompID mismatch or not-Logon.
@@ -3908,6 +3963,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
             } else {
                 // (d) Set-once (FSM NotConnected gate → once per session).
                 negotiated_appl_version_ = *resolved;
+                route_negotiated_ = *resolved;  // 099 (FR-027): what selection reads
             }
         }
 
@@ -4176,7 +4232,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
         // (4) seqnum class
         // (5) message-type-for-state
 
-        auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+        // 099-fixt-appl-version-validation (data-model E-7, research R-7): the frame's route,
+        // selected past the state test above, in this frame, which outlives every sub-arm it
+        // awaits.
+        if (fixt_routes_unbound_()) {
+            co_return fixpp::core::expected_t<void>{};
+        }
+        inbound_route const route = select_route_(frame, /*establishment_arm=*/false);
+        auto hdr = scan_frame_header(frame, session_hooks(*route.entry.owner));
         inbound_slow_t slow{};
         do {
             // 093 (contract C-2 step 1): a frame whose third field is not MsgType(35),
@@ -4218,8 +4281,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
             // only; a faulty Reject or Logout is Rejected under C-2. [041 T014; E-4]
             // Buffer: the session's parse buffer B(L), as dispatch (093).
             if (cfg_.validate_inbound_messages && session_route_.validator) {
+                // 099 (data-model E-7's A1, A2): ahead of the 3/5 exemption, since a repeated
+                // MsgType is what can make hdr.msg_type read 3 or 5.
+                if (fixt_routing_) {
+                    auto const v = refuse_active_frame_(frame, hdr, route);
+                    if (v.outcome != validate_outcome::pass) {
+                        slow.k = inbound_slow_t::kind::validate_failed;
+                        slow.v = v;
+                        break;
+                    }
+                }
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
-                    auto const v = validate_inbound_(frame, hdr);
+                    auto const v = validate_inbound_(frame, hdr, route);
                     if (v.outcome != validate_outcome::pass) {
                         slow.k = inbound_slow_t::kind::validate_failed;
                         slow.v = v;
@@ -4398,8 +4471,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
                     // T019 note: parse_and_dispatch_'s callback_dispatch_scope ends
                     // before it returns, so the depth of all callbacks is back to its
                     // entry value when record_state_transition_ below enters onLogout.
-                    auto cb_r =
-                        parse_and_dispatch_(frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
+                    auto cb_r = parse_and_dispatch_(
+                        frame, inbound_parse_buffer, route, [&](auto& mv, auto& sid) {
                             return engine_.application->fromAdmin(mv, sid);
                         });
                     // 092 contract C-6: a late parse failure closes the session.
@@ -4527,7 +4600,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
                     // before it returns, so the depth of all callbacks is back to its
                     // entry value. (FR-003; research D3/D4/D8; [const §VIII.5])
                     auto cb_r = parse_and_dispatch_(
-                        frame, inbound_parse_buffer,
+                        frame, inbound_parse_buffer, route,
                         [&](auto& mv, auto& sid) { return engine_.application->fromApp(mv, sid); });
                     // 092 contract C-6: a late parse failure closes the session.
                     if (!cb_r || *cb_r == dispatch_outcome::parse_failed) {
@@ -4551,7 +4624,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
             // In-sequence: counter advanced. Remain in current state.
             co_return fixpp::core::expected_t<void>{};
         } while (false);
-        FIXPP_INBOUND_SPLIT_AWAIT(r, tic, on_inbound_active_slow_(tic, frame, hdr, slow));
+        FIXPP_INBOUND_SPLIT_AWAIT(r, tic, on_inbound_active_slow_(tic, frame, hdr, slow, route));
         co_return r;
     } catch (const asio::system_error& e) {
         caught_cancellation = e.code() == asio::error::operation_aborted;
@@ -4582,7 +4655,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
 // FIXPP_INBOUND_SPLIT_AWAIT awaits the sub-arm it returns.
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_slow_(
     bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
-    inbound_slow_t const& slow) noexcept {
+    inbound_slow_t const& slow, inbound_route const& route) noexcept {
     using kind = inbound_slow_t::kind;
     switch (slow.k) {
         case kind::validate_failed:
@@ -4590,15 +4663,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_slow_(
         case kind::sending_time_reject:
             return on_inbound_active_sending_time_reject_(tic, hdr);
         case kind::sequence_reset:
-            return on_inbound_active_sequence_reset_(tic, frame, hdr);
+            return on_inbound_active_sequence_reset_(tic, frame, hdr, route);
         case kind::too_high:
             return on_inbound_active_too_high_(tic, hdr, slow.next_expected, slow.seq);
         case kind::out_of_sequence:
-            return on_inbound_active_out_of_sequence_(tic, frame, hdr, slow.chk_error);
+            return on_inbound_active_out_of_sequence_(tic, frame, hdr, slow.chk_error, route);
         case kind::gap_fill:
-            return on_inbound_active_gap_fill_(tic, frame, hdr);
+            return on_inbound_active_gap_fill_(tic, frame, hdr, route);
         case kind::logout:
-            return on_inbound_active_logout_(tic, frame, hdr);
+            return on_inbound_active_logout_(tic, frame, hdr, route);
         case kind::from_admin_failed:
             return on_inbound_active_from_admin_failed_(tic, hdr, slow.cb_r);
         case kind::test_request:
@@ -4725,11 +4798,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_valida
                 co_return *expired;
             }
         }
-        const seqnum_t rej_seq = parse_seqnum(hdr.msg_seq_num);
-        if (auto c = co_await consume_rejected_seqnum_(rej_seq, hdr.msg_type); !c) {
+        // 099 (data-model E-7): a FIXT refusal names the frame by its third field and first 34.
+        bool const named = v.reject.ref_msg_type.data() != nullptr;
+        const seqnum_t rej_seq = parse_seqnum(named ? v.reject.ref_seq_num : hdr.msg_seq_num);
+        std::string_view const rej_type = named ? v.reject.ref_msg_type : hdr.msg_type;
+        if (auto c = co_await consume_rejected_seqnum_(rej_seq, rej_type); !c) {
             co_return c;
         }
-        co_return co_await emit_session_reject_(rej_seq, hdr.msg_type, v.reject.reason,
+        co_return co_await emit_session_reject_(rej_seq, rej_type, v.reject.reason,
                                                 v.reject.ref_tag_id);
     }
     co_return fixpp::core::expected_t<void>{};
@@ -4774,8 +4850,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_sendin
 
 // Inbound SequenceReset(35=4) in Reset mode (GapFillFlag ≠ Y).
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_sequence_reset_(
-    bool tic, std::span<const std::byte> frame,
-    fixpp::session::detail::FrameHeader const& hdr) noexcept {
+    bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+    inbound_route const& route) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
     // 019 T016 — fromAdmin completeness fix (FR-004):
     // Wire fromAdmin for inbound SequenceReset(Reset mode) AFTER the
@@ -4789,9 +4865,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_sequen
     // [019-app-callbacks T016; FR-004; research D3/D4]
     if (engine_.application != nullptr) {
         // The session's parse buffer B(L): any admitted frame parses (093).
-        auto cb_r = parse_and_dispatch_(frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
-            return engine_.application->fromAdmin(mv, sid);
-        });
+        auto cb_r = parse_and_dispatch_(
+            frame, inbound_parse_buffer, route,
+            [&](auto& mv, auto& sid) { return engine_.application->fromAdmin(mv, sid); });
         // 092 contract C-6: a late parse failure closes the session.
         if (cb_r && *cb_r == dispatch_outcome::parse_failed) {
             co_return co_await close_on_late_parse_failure_();
@@ -5030,7 +5106,7 @@ asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::on_inboun
 // NextNumIn: that frame is ignored, and an unfilled gap ends by its deadline (D-537-5).
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of_sequence_(
     bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
-    fixpp::core::error chk_error) noexcept {
+    fixpp::core::error chk_error, inbound_route const& route) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
     // 092 FR-019: an in-sequence message at NextNumIn = seqnum_max cannot be
     // consumed. Tested first: the Heartbeat, PossDup and knob-off arms below
@@ -5080,9 +5156,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
             // Same invocation pattern as the in-sequence fromApp dispatch
             // at the 019 T011 in-sequence fromApp dispatch. No seqnum advance
             // (INV-1).
-            auto cb_r = parse_and_dispatch_(frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
-                return engine_.application->fromApp(mv, sid);
-            });
+            auto cb_r = parse_and_dispatch_(
+                frame, inbound_parse_buffer, route,
+                [&](auto& mv, auto& sid) { return engine_.application->fromApp(mv, sid); });
             // 092 contract C-6: a late parse failure closes the session.
             if (cb_r && *cb_r == dispatch_outcome::parse_failed) {
                 co_return co_await close_on_late_parse_failure_();
@@ -5111,10 +5187,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
     if (!cfg_.validate_sequence_numbers) {
         if (engine_.application != nullptr) {
             const bool admin = detail::is_admin_msgtype(hdr.msg_type);
-            auto cb_r = parse_and_dispatch_(frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
-                return admin ? engine_.application->fromAdmin(mv, sid)
-                             : engine_.application->fromApp(mv, sid);
-            });
+            auto cb_r =
+                parse_and_dispatch_(frame, inbound_parse_buffer, route, [&](auto& mv, auto& sid) {
+                    return admin ? engine_.application->fromAdmin(mv, sid)
+                                 : engine_.application->fromApp(mv, sid);
+                });
             // 092 contract C-6: a late parse failure closes the session.
             if (cb_r && *cb_r == dispatch_outcome::parse_failed) {
                 co_return co_await close_on_late_parse_failure_();
@@ -5141,8 +5218,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
 
 // Inbound SequenceReset(35=4) in GapFill mode, after the seqnum gate.
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_gap_fill_(
-    bool tic, std::span<const std::byte> frame,
-    fixpp::session::detail::FrameHeader const& hdr) noexcept {
+    bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+    inbound_route const& route) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
     // 028 T011 (S7): when validate_sequence_numbers=false, bypass
     // apply_inbound_sequence_reset. An exact-match gapfill 35=4 has already
@@ -5153,9 +5230,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_gap_fi
     // [data-model S7, I-VCT-11, contract C2.7, FR-013]
     if (!cfg_.validate_sequence_numbers) {
         if (engine_.application != nullptr) {
-            auto cb_r = parse_and_dispatch_(frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
-                return engine_.application->fromAdmin(mv, sid);
-            });
+            auto cb_r = parse_and_dispatch_(
+                frame, inbound_parse_buffer, route,
+                [&](auto& mv, auto& sid) { return engine_.application->fromAdmin(mv, sid); });
             // 092 contract C-6: a late parse failure closes the session.
             if (cb_r && *cb_r == dispatch_outcome::parse_failed) {
                 co_return co_await close_on_late_parse_failure_();
@@ -5193,8 +5270,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_gap_fi
 
 // Inbound Logout(35=5) in Active/LogonReceived.
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout_(
-    bool tic, std::span<const std::byte> frame,
-    fixpp::session::detail::FrameHeader const& hdr) noexcept {
+    bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+    inbound_route const& route) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
     // 024 T013 (site b): mark that a peer Logout was received.
     // Set before any FSM action so close() can detect logout_seen_ even
@@ -5233,9 +5310,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
         // T019 note: parse_and_dispatch_'s callback_dispatch_scope ends
         // before it returns, so the depth of all callbacks is back to its
         // entry value when record_state_transition_ below enters onLogout.
-        auto cb_r = parse_and_dispatch_(frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
-            return engine_.application->fromAdmin(mv, sid);
-        });
+        auto cb_r = parse_and_dispatch_(
+            frame, inbound_parse_buffer, route,
+            [&](auto& mv, auto& sid) { return engine_.application->fromAdmin(mv, sid); });
         // 092 contract C-6: a late parse failure closes the session.
         if (cb_r && *cb_r == dispatch_outcome::parse_failed) {
             co_return co_await close_on_late_parse_failure_();
@@ -5428,7 +5505,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logout_sent_(
     //   inbound Logout → Disconnected (confirm)
     //   all other inbound → (drained) — silently accepted, no FSM change
     //     (seqnum NOT advanced, no fromAdmin/fromApp dispatch)
-    auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+    // 099-fixt-appl-version-validation (data-model E-7): scanned with the route's hooks, so a body
+    // pair a route declares is not read as the reply. This arm gains no step.
+    if (fixt_routes_unbound_()) {
+        co_return fixpp::core::expected_t<void>{};
+    }
+    inbound_route const route = select_route_(frame, /*establishment_arm=*/false);
+    auto hdr = scan_frame_header(frame, session_hooks(*route.entry.owner));
     // 093 (contract C-2 step 1): a frame whose third field is not MsgType(35),
     // faulty or not, is disregarded as garbled: counted, evented and logged, with
     // no Reject, NextNumIn kept and no liveness refresh. It runs before 092's
@@ -5481,7 +5564,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     // hdr.msg_seq_num for the RefSeqNum in any emitted Reject.
     // The hdr is reused for the SendingTime/seqnum guards below.
     // [041-validation-gate-wiring T014; data-model guard-precedence C-2]
-    auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+    //
+    // 099-fixt-appl-version-validation (data-model E-7, research R-7): the scan uses the frame's
+    // route, selected here so that it lives in this frame.
+    if (fixt_routes_unbound_()) {
+        co_return fixpp::core::expected_t<void>{};
+    }
+    inbound_route const route = select_route_(frame, /*establishment_arm=*/true);
+    auto hdr = scan_frame_header(frame, session_hooks(*route.entry.owner));
     // 093 (contract C-2 step 1): a frame whose third field is not MsgType(35),
     // faulty or not, is disregarded as garbled: counted, evented and logged, with
     // no Reject, NextNumIn kept and no liveness refresh. It runs before 092's
@@ -5504,6 +5594,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
         co_return co_await dispose_unparseable_(hdr, fsm_state::LogonSent);
     }
 
+    // 099-fixt-appl-version-validation (data-model E-7's S1, FR-029, FR-005): the acceptor's arm
+    // has the reason this reads the third field.
+    if (fixt_routing_ && cfg_.validate_inbound_messages &&
+        (route.application || hdr.msg_type != hdr.fault_ref_msg_type)) {
+        record_state_transition_(fsm_state::Disconnected);
+        co_return fixpp::core::expected_t<void>{};
+    }
+
     // ── 041-validation-gate-wiring T014: validate-first gate ──────────────
     // Run BEFORE interpret_logon: a dict-invalid Logon-ack produces a Reject
     // rather than a silent Disconnect (C-2 validate-first ordering, FR-003).
@@ -5517,21 +5615,27 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     // [041 T014; data-model E-4; contracts/validation-gate.md C-2/C-3]
     if (cfg_.validate_inbound_messages && session_route_.validator) {
         if (hdr.msg_type != "3" && hdr.msg_type != "5") {
-            auto const v = validate_inbound_(frame, hdr);
+            auto const v = validate_inbound_(frame, hdr, route);
             // 092 contract C-6: a late parse failure closes the session.
             if (v.outcome == validate_outcome::parse_failed) {
                 co_return co_await close_on_late_parse_failure_();
             }
             if (v.outcome == validate_outcome::reject) {
-                co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
+                auto rj = co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
                                                         v.reject.reason, v.reject.ref_tag_id,
                                                         /*text=*/{}, fsm_state::LogonSent);
+                // 099 (data-model E-7's S2, FR-010): any other Reject stays in the arm.
+                if (rj && logon_reject_disconnects_(hdr, v.reject.ref_tag_id)) {
+                    disconnect_unless_superseded_(fsm_state::LogonSent);
+                }
+                co_return rj;
             }
         }
     }
 
-    auto result = fixpp::session::interpret_logon(frame, cfg_.target_comp_id, cfg_.sender_comp_id,
-                                                  cfg_.begin_string, session_hooks(inbound_tv_));
+    auto result = fixpp::session::interpret_logon(
+        frame, cfg_.target_comp_id, cfg_.sender_comp_id, cfg_.begin_string,
+        session_hooks(fixt_routing_ ? *transport_route_.owner : inbound_tv_));
 
     if (!result) {
         // Either a refused Logon (CompID/BeginString) OR a non-Logon
@@ -5633,6 +5737,44 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
         // check_inbound succeeded: next_inbound_ advanced by 1.
         // [029 gate-b/r1; INV-H1 fix; triage root-cause #1/#2]
         logon_inbound_advanced_init = true;
+    }
+
+    // 099-fixt-appl-version-validation (data-model E-7's S3, FR-010, `[const §XII.9]`): a
+    // validating initiator's 1137 test, the acceptor's, the registry and not the slot. Here and not
+    // at the record site below, which sits behind the 141=Y reset unit: a reply with `141=Y` and a
+    // bad 1137 would durably reset both stores and then be refused.
+    if (fixt_routing_ && cfg_.validate_inbound_messages) {
+        std::optional<int> reject_reason;
+        if (!result->default_appl_ver_id.has_value()) {
+            reject_reason = 1;  // RequiredTagMissing
+        } else {
+            auto const resolved = fixpp::dict::resolve_application_version(
+                fixpp::dict::version_profile{
+                    .session = fixpp::dict::session_version::vt11,
+                    .default_appl = fixpp::dict::application_version::Unknown,
+                    .has_per_message_override = false,
+                    ._reserved = 0},
+                *result->default_appl_ver_id);
+            if (!resolved.has_value() || !app_version_registry_->get(*resolved).has_value()) {
+                reject_reason = 5;  // ValueIsIncorrect
+            }
+        }
+        if (reject_reason.has_value()) {
+            const auto rj_st52 = effective_clock_ ? stamp_sending_time(*effective_clock_,
+                                                                       cfg_.sending_time_precision)
+                                                  : SendingTimeStamp{};
+            {
+                FIXPP_INBOUND_SPLIT_AWAIT(
+                    r, tic,
+                    inbound_reject_leaf_(tic, parse_seqnum(hdr.msg_seq_num), 1137, "A",
+                                         *reject_reason, rj_st52.value, fsm_state::LogonSent));
+                if (!r) {
+                    co_return r;
+                }
+            }
+            disconnect_unless_superseded_(fsm_state::LogonSent);
+            co_return fixpp::core::expected_t<void>{};
+        }
     }
 
     // RC#C (gate-b/r1): bilateral_strict initiator path — symmetric to acceptor.
@@ -5807,6 +5949,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     // value — record whatever the peer advertises. No reject on this arm.
     // Gate: is_fixt() — registry present is not required (FR-004a is acceptor-only).
     // [033 contracts C3; data-model E2; FR-004a; research R1]
+    //
+    // 099-fixt-appl-version-validation (FR-027, FR-011): "does NOT refuse" holds for a
+    // non-validating initiator; a validating one refused above. route_negotiated_ is what selection
+    // reads, written on every Logon, Unknown when this reply resolves nothing.
+    // negotiated_appl_version_ stays as the previous reply left it in that case, which is why the
+    // two are separate.
+    route_negotiated_ = fixpp::dict::application_version::Unknown;
     if (cfg_.is_fixt() && result->default_appl_ver_id.has_value()) {
         const fixpp::dict::version_profile vt11_profile{
             .session = fixpp::dict::session_version::vt11,
@@ -5818,6 +5967,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
         if (resolved.has_value()) {
             // Set-once: negotiated_appl_version_ starts Unknown; set here.
             negotiated_appl_version_ = *resolved;
+            route_negotiated_ = *resolved;
         }
         // Unknown wire value → leave Unknown (cannot map to application_version).
     }
