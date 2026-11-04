@@ -2,8 +2,7 @@
 // src/session/fixt_session_check.hpp
 //
 // 099-fixt-appl-version-validation (data-model E-9, research R-2, FR-003, FR-004): the one check
-// Session::open() and Engine::register_session share. Superseding open()'s own guards of gate-b/r1
-// FQ-1 and 042, which it holds.
+// Session::open() and Engine::register_session share. It replaces open()'s own FIXT guards.
 #pragma once
 
 #include <array>

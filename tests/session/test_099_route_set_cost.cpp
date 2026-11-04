@@ -8,8 +8,8 @@
 // global operator new counter, and an arm that runs threads for TSan.
 //
 // M is computed here from the distinct Dictionary*, plus one per (S with a header pair, other
-// dictionary). The non-FIXT twin's delta and one copy's bytes are measured here too. Its mutants
-// are M-8, M-8b, M-41 and M-84.
+// dictionary). The non-FIXT twin's delta and one copy's bytes come from the same process. Its
+// mutants are M-8, M-8b, M-41 and M-84.
 
 #include <gtest/gtest.h>
 
@@ -448,8 +448,7 @@ TEST(W15NonFixtPass, OneWalkPerOpen) {
     EXPECT_EQ(after_opens, members.size()) << "one walk per open, as before this feature";
 }
 
-// Green on `c0a828ef`, stated: an engine with no FIXT session takes no part. It is what the set's
-// condition in start() has to keep.
+// An engine with no FIXT session takes no part: the set's condition in start() has to keep that.
 TEST(W15AllFix44Engine, NoSet) {
     const auto members = non_fixt_members("FIX.4.4", fix44());
     std::uint64_t after_start = 1;
