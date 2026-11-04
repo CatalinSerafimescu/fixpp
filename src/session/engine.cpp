@@ -1352,8 +1352,7 @@ fixpp::core::expected_t<void> Engine::start() {
 
     // 099-fixt-appl-version-validation (data-model E-1): ahead of this function's first
     // allocation. Over the entries is_fixt() selects, the ones the role loops hand the set to; a
-    // FIXT.1.1 entry with no default takes no part, since its open() refuses it. A view, so no
-    // list is collected.
+    // FIXT.1.1 entry with no default takes no part, since its open() refuses it.
     auto const fixt_entry = [](auto const& kv) { return kv.second.config.is_fixt(); };
     if (std::ranges::any_of(registry_, fixt_entry)) {
         auto built = detail::fixt_route_set::build(
