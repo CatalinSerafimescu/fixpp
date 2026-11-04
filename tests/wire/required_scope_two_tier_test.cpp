@@ -14,7 +14,7 @@
 //     real wire frame) and the typed tier (an equivalent PositionReportArgs)
 //     — asserting identical accept/reject verdicts.
 //   - v50sp2 (TradeCaptureReport/AE, NoSides(552)/Side(54)) and vlatest
-//     (PositionReport/AP): v50sp2 stays at the derivation tier it took while a
+//     (PositionReport/AP): v50sp2 stays at the derivation tier, chosen while a
 //     standalone full-frame `validate()` rejected the framing tag 8 on the empty
 //     FIXT `<header/>` (L-041-2/#203); 081's framing surface lifted that (B-081-1)
 //     and this file was not widened. vlatest's
@@ -532,8 +532,8 @@ TEST(RequiredScopeTwoTier, V44PositionReport_AllGroupInstancesComplete_BothTiers
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// v50sp2 — derivation-tier agreement (TradeCaptureReport/AE): the tier this
-// comparison took while a standalone full-frame validate() rejected tag 8 on the
+// v50sp2 — derivation-tier agreement (TradeCaptureReport/AE): the tier chosen for this
+// comparison while a standalone full-frame validate() rejected tag 8 on the
 // empty FIXT <header/> (L-041-2 / #203), which 081's framing surface lifted.
 // Compare the message-level required-tag SET directly.
 // ══════════════════════════════════════════════════════════════════════════
