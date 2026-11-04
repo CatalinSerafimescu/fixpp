@@ -372,6 +372,8 @@ void run_fixt_arm(std::uint8_t preamble, std::span<const std::byte> payload) {
     cfg.validate_inbound_messages = true;
     cfg.heartbeat_interval = 30s;
     cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    // The default policy requires a 141=Y this arm's Logon does not carry.
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     cfg.dictionary = s;
     cfg.executor_override = ioc.get_executor();
     cfg.transport_send = [](std::span<const std::byte>) {};
