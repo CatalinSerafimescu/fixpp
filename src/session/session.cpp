@@ -78,6 +78,7 @@
 #include "fixt_session_check.hpp"        // 099 data-model E-9
 #include "inbound_limit.hpp"             // 093 E-2: L, the carry and the parse buffer
 #include "msgtype_classifier.hpp"        // 019 T006: is_admin_msgtype (session-internal)
+#include "peek_fixt_route.hpp"           // 099 data-model E-7
 #include "read_first_frame_bounded.hpp"  // 093 C-6: await_deadline for close()'s wait
 #include "scan_frame_header.hpp"  // 040 US1: FrameHeader + scan_frame_header (moved from anon ns)
 #include "send_header_tags.hpp"   // 098: kSendHeaderTags + is_send_header_tag (moved from here)
@@ -1367,7 +1368,59 @@ const fixpp::dict::version_registry& registry_or_empty(
     return registry != nullptr ? *registry : empty;
 }
 
+// Whether `s` declares a header pair (data-model E-1). dict::header_length_pairs allocates when it
+// answers one, and open(), which asks, is noexcept.
+fixpp::core::expected_t<bool> declares_header_pair(const fixpp::dict::Dictionary& s) noexcept {
+    try {
+        return !fixpp::dict::header_length_pairs(s).empty();
+    } catch (const std::bad_alloc&) {
+        return std::unexpected(fixpp::core::error::out_of_memory);
+    }
+}
+
 }  // namespace
+
+// 099-fixt-appl-version-validation (data-model E-6, FR-001, FR-002, FR-003): the slot rule and the
+// transport route. Every entry but S's carries S's table as its envelope.
+void Session::bind_fixt_routes_() noexcept {
+    using fixpp::dict::application_version;
+    fixpp::dict::version_registry const& registry = registry_or_empty(app_version_registry_);
+    fixpp::dict::table_view const* const s_table = session_route_.owner->get();
+    auto const routed = [this, s_table](fixpp::dict::Dictionary const* d) noexcept {
+        detail::fixt_route_set::entry const* const e = routes_->find(d, pair_source_);
+        return e == nullptr
+                   ? route_entry{}
+                   : route_entry{
+                         .owner = &e->owner, .validator = e->validator.get(), .envelope = s_table};
+    };
+
+    auto const s_session = cfg_.dictionary->which_session_version();
+    auto const s_application = fixpp::dict::session_to_application(s_session);
+    for (auto slot = static_cast<std::size_t>(application_version::Unknown) + 1;
+         slot < app_routes_.size(); ++slot) {
+        auto const version = static_cast<application_version>(slot);
+        auto const d = registry.get(version);
+        route_entry route{};
+        if (version == s_application ||
+            (d.has_value() && (*d)->which_session_version() == s_session)) {
+            route = session_route_;
+        } else if (d.has_value()) {
+            route = routed(*d);
+        }
+        app_routes_[slot] = route;
+    }
+
+    transport_route_ = session_route_;
+    if (!defines_fixt_admin(*cfg_.dictionary)) {
+        auto const transport = registry.transport();
+        if (transport.has_value() && defines_fixt_admin(**transport)) {
+            route_entry const route = routed(*transport);
+            if (route.owner != nullptr) {
+                transport_route_ = route;
+            }
+        }
+    }
+}
 
 asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     using fixpp::core::error;
@@ -1627,6 +1680,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         if (!cfg_.dict_snapshot) {
             inbound_tv_ = own->owner;
         }
+        auto const has_pair = declares_header_pair(*cfg_.dictionary);
+        if (!has_pair) {
+            co_return std::unexpected(has_pair.error());
+        }
+        pair_source_ = *has_pair ? cfg_.dictionary.get() : nullptr;
+        bind_fixt_routes_();
     }
 
     // ── Executor binding — the single executor_not_serialised enforcement
@@ -2759,6 +2818,58 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
         }
     }
     co_return fixpp::core::expected_t<void>{};
+}
+
+// 099-fixt-appl-version-validation (data-model E-7, FR-001, FR-013): the frame's route. The step
+// numbers are E-7's. A non-FIXT session takes step 1, on a value fixed at open(). A FIXT session
+// whose open() failed holds no table, and takes it too.
+Session::inbound_route Session::select_route_(std::span<const std::byte> frame,
+                                              bool establishment_arm) const noexcept {
+    inbound_route route{.entry = session_route_};
+    if (!fixt_routing_ || !inbound_tv_) {
+        return route;  // step 1
+    }
+    fixpp::session::detail::fixt_route_peek const peek =
+        fixpp::session::detail::peek_fixt_route(frame, session_hooks(inbound_tv_), *inbound_tv_);
+    if (!peek.readable) {
+        return route;  // step 2: the arm's fault and garble dispositions run as today
+    }
+    route.application = !peek.admin;
+    route.header_1128 = peek.header_1128;
+    if (peek.admin) {
+        route.entry = transport_route_;  // step 2
+        return route;
+    }
+    if (establishment_arm) {
+        return route;  // step 3: the negotiated slot is not read
+    }
+    fixpp::dict::application_version version = route_negotiated_;  // step 6, but for 1128
+    if (peek.header_1128) {
+        if (peek.appl_ver_id.empty()) {
+            route.refusal = route_refusal::empty_value;  // step 4
+            return route;
+        }
+        // Step 5. The value is not empty here, so the profile's default goes unread.
+        auto const resolved = fixpp::dict::resolve_application_version(
+            fixpp::dict::version_profile{.session = fixpp::dict::session_version::vt11,
+                                         .default_appl = route_negotiated_,
+                                         .has_per_message_override = true,
+                                         ._reserved = 0},
+            peek.appl_ver_id);
+        if (!resolved) {
+            route.refusal = route_refusal::unknown_value;
+            return route;
+        }
+        version = *resolved;
+    }
+    route.resolved = version;
+    route_entry const& slot = app_routes_[static_cast<std::size_t>(version)];
+    if (slot.owner != nullptr) {
+        route.entry = slot;
+    } else if (peek.header_1128) {
+        route.refusal = route_refusal::no_dictionary;  // step 5
+    }
+    return route;  // step 6's Unknown and slot miss keep S's route
 }
 
 // ── 041-validation-gate-wiring FIX-2 + per-message-alloc fix:

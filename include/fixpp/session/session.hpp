@@ -1097,6 +1097,36 @@ private:
     std::shared_ptr<const detail::fixt_route_set> routes_;
     // S's entry on a FIXT session; {&inbound_tv_, validator_.get(), nullptr} on any other.
     route_entry session_route_{};
+    // S when S declares a header pair, else null: the second key of every routes_ lookup but S's
+    // own entry's.
+    fixpp::dict::Dictionary const* pair_source_ = nullptr;
+    // One per application_version, indexed by its value, by data-model E-6's slot rule. A null
+    // owner is a miss. An enumerator appended after vlatest must move this line.
+    std::array<route_entry, static_cast<std::size_t>(fixpp::dict::application_version::vlatest) + 1>
+        app_routes_{};
+    // What judges an admin frame, by data-model E-6's transport route.
+    route_entry transport_route_{};
+    // Selection's read of the negotiated version, outside the establishment arms only.
+    // negotiated_appl_version_ keeps its own writes (FR-027).
+    fixpp::dict::application_version route_negotiated_ = fixpp::dict::application_version::Unknown;
+
+    // data-model E-7: one frame's route, chosen once at arm entry.
+    enum class route_refusal : std::uint8_t { none, empty_value, unknown_value, no_dictionary };
+    struct inbound_route {
+        route_entry entry;
+        // Unknown: admin, non-FIXT, establishment arm, or not resolved.
+        fixpp::dict::application_version resolved = fixpp::dict::application_version::Unknown;
+        route_refusal refusal = route_refusal::none;
+        bool application = false;  // the third field's MsgType is not admin
+        bool header_1128 = false;  // the peek saw 1128 before stopping
+    };
+    // Fills app_routes_ and transport_route_ from routes_ and pair_source_. Precondition:
+    // session_route_ is S's entry and routes_ is set.
+    void bind_fixt_routes_() noexcept;
+    // Selection, data-model E-7's steps. It decides nothing on its own: a refusal is the arm's to
+    // act on, and only a validating session does.
+    [[nodiscard]] inbound_route select_route_(std::span<const std::byte> frame,
+                                              bool establishment_arm) const noexcept;
 
     // ── 029-persistent-seqnum-hydrate awaitable declarations ─────────────────
     //
