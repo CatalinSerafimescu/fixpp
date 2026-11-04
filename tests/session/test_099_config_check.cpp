@@ -304,8 +304,10 @@ TEST_P(W8RefusedOpenFrames, DisregardedBeforeAnythingReadsARoute) {
     const fsm_state state_before = s.state();
     const auto next_in_before = session_test_access::seqnum_mgr(s).next_inbound_unsafe();
     const Ctx c{.snd = "TW", .tgt = "ISLD", .seq = 1};
+    // The Logon last: under M-121 a Logon on this session runs on to a null table and aborts, which
+    // is no RED, and the NOS ahead of it has already moved the state.
     for (const char* id :
-         {"Logon 1137=9", "NOS 1128=9", "Heartbeat", "rep35 0,D header", "Logout"}) {
+         {"NOS 1128=9", "Heartbeat", "rep35 0,D header", "Logout", "Logon 1137=9"}) {
         const std::string frame = input(id).make(c);
         auto fut =
             asio::co_spawn(rig.ioc,
