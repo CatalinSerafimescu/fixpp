@@ -333,7 +333,7 @@ const GetterCase kGetterCases[] = {
 class W10CApplication : public testing::TestWithParam<std::tuple<Shape, bool, GetterCase>> {};
 
 // FIXT application message, resolved. `reify` reads no profile with the byte set, so kOtherProfile
-// names a version none of these frames has.
+// names another version than the frame's.
 TEST_P(W10CApplication, ThreeBytesAndReifyEqual) {
     const auto& [shape, validate, c] = GetParam();
     RigOptions o;
