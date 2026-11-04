@@ -363,6 +363,8 @@ trap as `path`, each failure a diagnostic at `dictionary.extra_paths`; a non-arr
 
 **Ruled by the owner:** add one peer-to-fixpp 35=BN to `fixt_app_script.yaml`. `send_conversation_message` builds from the script's intent in `quickfix-cpp/counterparty`, so a script-only step looks possible; QuickFIX/J's path is unverified end to end. It changes a digest-bound script and may need a counterparty image republish (`REMAINING-WORK.md` assumes one). Attempted without a republish first; back to the owner if one proves necessary. "First" means the pre-merge attempt only (plan.md, owner item 16).
 
+**The step's id is `B-02`.** Read from `interop_counterparty_main.cpp` and `InteropCounterparty.java`, and checked by `strings` in the image: `handle_conversation_fromApp` and `handleConversationFromApp` look up `("B-02", "peer")` at stage 0, the first inbound application frame, in both counterparties, and `P-01`, sent at logon, is QuickFIX-cpp's alone. So a step under another id is never sent, and that id is what needs no counterparty change.
+
 ## R-14 Performance gates (NFR-001, NFR-002, `[const §VIII.3]`)
 
 `bench/session/on_inbound_frame_bench.cpp` (`InSequence`, `InSequence_Validated`) and `scan_frame_header_bench.cpp` exist but are
