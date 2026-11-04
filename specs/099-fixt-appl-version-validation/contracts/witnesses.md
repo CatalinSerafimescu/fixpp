@@ -76,7 +76,7 @@ Each row: the code it changes, and the cell that goes RED on that change alone. 
 | M-16 | the Active arm's `refuse_active_frame_` read moves ahead of its garble and fault checks | `W19FaultPastTheStop`, a frame the peek reads and refuses and whose scan faults past the header: `R 5/1128 D`, not the fault's disposition `R 0/ D` |
 | M-17 | `validate_inbound_`'s parser keeps `inbound_tv_`: the #426 hazard | W-7, gate cell: `msg.get` finds the field in the Data |
 | M-21 | the peek allocates: a `std::string` of 256 bytes, past every small-string buffer, so it reaches `operator new` | W-16: non-zero |
-| M-22 | the peek walks with `dict_hooks::none()` | W-3 (e), non-tag bytes: unreadable |
+| M-22 | the peek walks with `dict_hooks::none()` | W-3 (f), non-tag bytes, the frame routed by its header 1128: unreadable, so S's route and not delivered. W-3 (e)'s own-version frame takes S's route read or unread, so it cannot tell |
 | M-23 | A3's probe removed | `AC-c`, `1128=6`: delivered, on T, A and L: the negotiated slot passes it (research R-9) |
 | M-24 | A1 removed | `AC-a`, `0…D`: delivered, on T, A and L: the transport validator passes it (research R-9) |
 | M-25 | A3's probe runs after the validator | `AC-c`, `1128=abc`: 373=5, on T, A and L: the negotiated slot answers it (research R-9) |
