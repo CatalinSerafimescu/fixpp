@@ -7,7 +7,7 @@
 // directly constructed session's open(), and never a route with a hole. Its mutant is M-44.
 //
 // A fail-at-N global operator new, armed around the call, on FIXT11 plus a minimal application
-// dictionary, because a real one's copy makes a sweep take hours (research R-3). Not
+// dictionary, because a sweep is quadratic in a copy's allocations (research R-3). Not
 // pugi::set_memory_management_functions: as_table_view() reads a finished handle, so pugixml never
 // runs and that hook would never fire. Each arm fails unless the hook fired and its sweep saw both
 // outcomes, since an unfired hook reads green. The C arm (tasks.md T108) sweeps
