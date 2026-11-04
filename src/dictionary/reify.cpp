@@ -44,18 +44,6 @@
 
 namespace fixpp::dict {
 
-// ─── FIXT admin detection ────────────────────────────────────────────────────
-// The 7 FIXT.1.1 admin MsgTypes per [FIXT §3] / [2c §6.3]. Hardcoded here (not
-// from the dispatch table) so this shipped TU implements the version-axis
-// resolution without including the build-tree generated dispatch headers.
-namespace {
-[[nodiscard]] constexpr bool is_fixt_admin(char mt) noexcept {
-    // '0'=Heartbeat '1'=TestRequest '2'=ResendRequest '3'=Reject
-    // '4'=SequenceReset '5'=Logout 'A'=Logon
-    return mt == '0' || mt == '1' || mt == '2' || mt == '3' || mt == '4' || mt == '5' || mt == 'A';
-}
-}  // namespace
-
 // ─── owning_message_handle implementation (057 live byte storage) ────────────
 // Storage mirrors a concrete owning_<Msg> minus the typed accessors: the full
 // validated frame span deep-copied into the caller mr, plus an EAGERLY
@@ -281,7 +269,7 @@ core::expected_t<owning_message_handle> owning_message_handle_from_frame(
     std::string_view const mt_sv = mt_fv->as_string();
 
     // Step 2: FIXT-admin detection (single-char admin MsgType).
-    if (mt_sv.size() == 1 && is_fixt_admin(mt_sv.front())) {
+    if (is_fixt_admin_msgtype(mt_sv)) {
         return reify_dispatch_fixt(view, mt_sv.front(), profile, mr);
     }
 

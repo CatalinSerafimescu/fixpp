@@ -115,10 +115,10 @@ using fixpp_test::required_scope_oracle::DictOracle;
 //
 // The counts are pins, not decoration: `expect_messages` / `expect_groups` are
 // what stop a scanner that parsed nothing from reading as agreement. v42's
-// 46 / 18 is FR-016's headline; 59 / 505 are T018's registered-after column
-// for FIX44 / FIX50SP2, so this gate independently corroborates it from
-// the *generated class tier* — a third derivation. FIXT11's count moved from that
-// column when 099 added NoMsgTypes to the vendored file (its research R-17).
+// row is FR-016's headline; FIX44's and FIX50SP2's are T018's registered-after
+// column, so this gate independently corroborates it from the *generated class
+// tier* — a third derivation. FIXT11's left that column when 099 added NoMsgTypes
+// to the vendored file (its research R-17).
 struct VersionCase {
     char const* ns;
     char const* xml;

@@ -446,7 +446,19 @@ void maybe_drop_first_group_ctx_delim_run_for_testing(dict_metadata_handle& h) n
 }
 }  // namespace detail
 
-table_view Dictionary::as_table_view() const {
+table_view Dictionary::as_table_view() const { return build_table_view(/*route_table=*/false, {}); }
+
+table_view Dictionary::as_table_view(fixt_framing_t /*form*/) const {
+    return build_table_view(/*route_table=*/true, {});
+}
+
+table_view Dictionary::as_table_view(fixt_framing_t /*form*/,
+                                     std::span<const core::detail::length_data_pair> extra) const {
+    return build_table_view(/*route_table=*/true, extra);
+}
+
+table_view Dictionary::build_table_view(
+    bool route_table, std::span<const core::detail::length_data_pair> extra) const {
     detail::bump_as_table_view_call_count();  // 083 T049 test seam (W-11a)
     if (!handle_) {
         return {};  // null handle (moved-from Dictionary) → empty table_view
@@ -725,12 +737,24 @@ table_view Dictionary::as_table_view() const {
     }
 
     // ── 081 Concern A (D-1/D-2, T009): validator-private FIXT.1.1 framing
-    // surface — v50/v50sp1/v50sp2 ONLY (empty `<header/>`). Baked constant,
-    // census-pinned to dictionaries/FIXT11.xml (fixt_framing_table.hpp).
-    // Does NOT touch valid_/required_/types_ above (D-1 load-bearing
-    // invariant: field_valid_for/valid_tags_for/field_type_of stay
-    // byte-identical whether strict validation is on or off).
+    // surface — v50/v50sp1/v50sp2 (empty `<header/>`), and v40 to v44 on a route
+    // table only (099-fixt-appl-version-validation, data-model E-3). vt11 and
+    // FIX Latest declare those tags themselves, and field_type_of_with_framing
+    // prefers the framing type, so the surface could only change their answers.
+    // Baked constant, census-pinned to dictionaries/FIXT11.xml
+    // (fixt_framing_table.hpp). Does NOT touch valid_/required_/types_ above
+    // (D-1 load-bearing invariant: field_valid_for/valid_tags_for/field_type_of
+    // stay byte-identical whether strict validation is on or off).
     switch (which_session_version()) {
+        case session_version::v40:
+        case session_version::v41:
+        case session_version::v42:
+        case session_version::v43:
+        case session_version::v44:
+            if (!route_table) {
+                break;
+            }
+            [[fallthrough]];
         case session_version::v50:
         case session_version::v50sp1:
         case session_version::v50sp2:
@@ -742,7 +766,68 @@ table_view Dictionary::as_table_view() const {
             break;  // all other versions: framing surface stays empty
     }
 
+    if (route_table) {
+        // 099-fixt-appl-version-validation (data-model E-3, FR-007): the framing surface carries
+        // tags, and the validator's group step asks the routed table for structure. So a table
+        // whose own header does not declare NoHops registers its metadata in the bare store, which
+        // group_first_field, group_member_tags and group_required_members fall to on a context
+        // miss. None of its members is required.
+        constexpr std::uint16_t kNoHops = 627;
+        if (!std::ranges::binary_search(handle_->header_tags_, kNoHops)) {
+            b.set_group_first(kNoHops, 628);
+            b.add_group_member(kNoHops, 629);
+            b.add_group_member(kNoHops, 630);
+        }
+        // Last, so that a pair here displaces one of the dictionary's own that shares a tag.
+        for (auto const& pair : extra) {
+            b.set_length_pair_data_tag(pair.length_tag, pair.data_tag);
+        }
+    }
+
     return std::move(b).build();
+}
+
+std::vector<core::detail::length_data_pair> header_length_pairs(const Dictionary& d) {
+    std::vector<core::detail::length_data_pair> out;
+    if (!d.handle_) {
+        return out;
+    }
+    auto const& header = d.handle_->header_tags_;
+    for (auto const& f : d.handle_->fields_) {
+        std::uint16_t const length = f.tag;
+        std::uint16_t const data = f.length_pair_data_tag;
+        if (data == 0 || core::detail::is_standard_pair_tag(length) ||
+            core::detail::is_standard_pair_tag(data)) {
+            continue;
+        }
+        if (!std::ranges::binary_search(header, length) &&
+            !std::ranges::binary_search(header, data)) {
+            continue;
+        }
+        auto const at =
+            std::ranges::lower_bound(out, length, {}, &core::detail::length_data_pair::length_tag);
+        if (at == out.end() || at->length_tag != length) {
+            out.insert(at, core::detail::length_data_pair{.length_tag = length, .data_tag = data});
+        }
+    }
+    return out;
+}
+
+bool is_fixt_standard_header_tag(std::uint16_t tag) noexcept {
+    constexpr std::uint16_t kOnBehalfOfSendingTime = 370;
+    if (tag == kOnBehalfOfSendingTime) {
+        return true;
+    }
+    // The framing table's three trailer tags: CheckSum, Signature, SignatureLength.
+    if (tag == 10 || tag == 89 || tag == 93) {
+        return false;
+    }
+    return std::ranges::any_of(detail::kFixtFramingTable,
+                               [tag](auto const& entry) { return entry.tag == tag; });
+}
+
+bool is_route_answered_header_tag(std::uint16_t tag) noexcept {
+    return tag == 35 || tag == 1128 || tag == 1129 || tag == 1156;
 }
 
 }  // namespace fixpp::dict

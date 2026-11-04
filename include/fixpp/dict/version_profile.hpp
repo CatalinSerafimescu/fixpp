@@ -61,6 +61,61 @@ enum class application_version : std::uint8_t {
     vlatest = 9,  // 097-fix-latest-applverid-10: FIX Latest, wire ApplVerID "10"
 };
 
+// 099-fixt-appl-version-validation (data-model E-2): the application version a session version
+// names. vt11 and Unknown name none, so they map to Unknown. FIX Latest has its own application
+// version (wire ApplVerID "10") and therefore its own registry slot.
+[[nodiscard]] constexpr application_version session_to_application(session_version sv) noexcept {
+    switch (sv) {
+        case session_version::v40:
+            return application_version::v40;
+        case session_version::v41:
+            return application_version::v41;
+        case session_version::v42:
+            return application_version::v42;
+        case session_version::v43:
+            return application_version::v43;
+        case session_version::v44:
+            return application_version::v44;
+        case session_version::v50:
+            return application_version::v50;
+        case session_version::v50sp1:
+            return application_version::v50sp1;
+        case session_version::v50sp2:
+            return application_version::v50sp2;
+        case session_version::vlatest:
+            return application_version::vlatest;
+        // NOLINTNEXTLINE(bugprone-branch-clone) - vt11 and Unknown are distinct semantic cases
+        case session_version::vt11:
+            return application_version::Unknown;
+        case session_version::Unknown:
+            return application_version::Unknown;
+    }
+    return application_version::Unknown;
+}
+
+// 099-fixt-appl-version-validation (data-model E-2): the 7 FIXT.1.1 admin MsgTypes per [FIXT §3] /
+// [2c §6.3]: 0 Heartbeat, 1 TestRequest, 2 ResendRequest, 3 Reject, 4 SequenceReset, 5 Logout,
+// A Logon. Hardcoded here, not from the dispatch table, so that dict::reify implements the
+// version-axis resolution without the build-tree generated dispatch headers. Not the session's
+// detail::is_admin_msgtype, which excludes A on purpose. n (XMLnonFIX) is application.
+[[nodiscard]] constexpr bool is_fixt_admin_msgtype(std::string_view msg_type) noexcept {
+    if (msg_type.size() != 1) {
+        return false;
+    }
+    switch (msg_type.front()) {
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case 'A':
+            return true;
+        default:
+            return false;
+    }
+}
+
 // ─── 003-OWNED ADDITIONS (RC#1, re-/plan 2026-05-15) ────────────────────────
 // Appended below the unchanged 002 enums, non-renumbering. 002 deferred the
 // `version_profile` struct + `resolve_application_version` free function

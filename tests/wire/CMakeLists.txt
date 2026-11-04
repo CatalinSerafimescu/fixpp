@@ -133,7 +133,8 @@ add_executable(wire_dict_tests
   typed_read_split_agreement_test.cpp                                 # T011 (083)
   length_data_pairs_drift_test.cpp                                    # fixpp#426 (D-1)
   dict_hooks_custom_pair_test.cpp                                     # fixpp#426 (D-2)
-  field_iterator_fault_test.cpp)                                      # 092 T055/T057 (FR-012)
+  field_iterator_fault_test.cpp                                       # 092 T055/T057 (FR-012)
+  test_099_validator_envelope.cpp)                                    # 099 T026 (W-3, unit half)
 target_link_libraries(wire_dict_tests PRIVATE
   fixpp_wire
   fixpp_dictionary
