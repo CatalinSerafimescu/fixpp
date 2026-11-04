@@ -233,8 +233,8 @@ INSTANTIATE_TEST_SUITE_P(Named, W5PerShape, testing::Values(Shape::T, Shape::A, 
                          shape_param_name);
 
 // `141=Y` with `1137=4` on a validating initiator: refused ahead of the reset unit. open()'s Logon
-// took 1 and the Reject takes the next. Behind the reset unit, the reset would give the Reject 1, so
-// the two endings differ by this counter, and only that unit raises the event.
+// took 1 and the Reject takes the next. Behind the reset unit, the reset would give the Reject 1,
+// so the two endings differ by this counter, and only that unit raises the event.
 TEST_P(W5PerShape, Initiator141YWith1137_4_NoReset) {
     const CellRun run =
         run_keyed_cell(GetParam(), true, Arm::LogonSent, input("Logon 141=Y 1137=4"));
