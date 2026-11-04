@@ -91,6 +91,8 @@ std::atomic<std::size_t> g_watch_size{0};  // the size of the allocation at g_wa
 // dereference inside asio (asio/detail/impl/strand_executor_service.ipp). An Engine's construction
 // makes one. So the C arm's create sweep has the hook pass an allocation of this size over; 0 is
 // none. The size comes from asio_pool_mutex_allocation_size, which makes asio's own call.
+// fixpp#660 is the condition under which this pass-over goes: once a throw from that allocation
+// no longer reaches ~strand_impl with service_ unset, the create sweep fails every N again.
 std::atomic<std::size_t> g_pass_over_size{0};
 
 void arm(long fail_at) {

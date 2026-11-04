@@ -231,6 +231,22 @@ What moved, from the table above: T's and A's Reject-and-stay on an application 
 | A `toApp` view on FIXT | by 35 | `vt11` | `FIXPP_APPL_VER_UNKNOWN`: no session wrote it |
 | Tag 8 absent | all zero, `FIXPP_ERR_TAG_NOT_FOUND`, as today | | |
 
+**"From BeginString"** is `session_of_begin_string`, in `src/capi/message_read.cpp`. Every spelling that names an enumerator of `dict::session_version` is named, those outside `framer.hpp`'s `supported_begin_strings` included, and any other BeginString answers `Unknown`:
+
+| BeginString | `session` |
+|---|---|
+| `FIX.4.0` | `v40` |
+| `FIX.4.1` | `v41` |
+| `FIX.4.2` | `v42` |
+| `FIX.4.3` | `v43` |
+| `FIX.4.4` | `v44` |
+| `FIX.5.0` | `v50` |
+| `FIX.5.0SP1` | `v50sp1` |
+| `FIX.5.0SP2` | `v50sp2` |
+| `FIX.Latest` | `vlatest` |
+| `FIXT.1.1` | `vt11` |
+| any other | `Unknown` |
+
 **Against `dict::reify(...).version()`,** on the rows a delivered frame can reach, each with a W-10 cell. A FIXT application message with the byte set, and a clone or reify view of one: all three bytes equal, whatever the profile, because `reify` reads none there (E-5). A FIXT admin message and both non-FIXT rows, where the byte is `Unknown`: `session` from `reify` is still the caller's profile's, as today, so W-10 passes a profile naming the frame's own version. Given `{Unknown, Unknown}`, what `negotiated_version_profile()` returns before a version is negotiated, `reify` says `session` `Unknown` on an admin message where the getter says `vt11` (read from source). That differs in `session` alone, and no research R-16 condition rests on it. No comparison on the other rows: the unresolved row is E-5's splits, and W-10 asserts the literal on the rest. Constant values are the enums' own, so the conversion is identity; static assertions pin it. Wire values do not coincide with them.
 
 ## E-9 Check helper
