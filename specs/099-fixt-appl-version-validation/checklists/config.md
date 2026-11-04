@@ -52,7 +52,7 @@ Rulings 2 and 4 and owner items 4, 5, 8a and 11 are settled. An item here asks w
 
 ## Refusals on an Engine route
 
-- [x] CHK024 For the role loop's new log line, are its level, its fields and the cause it names specified? FR-004 and FR-028 send two different causes down one failure branch. Can an operator tell them apart from the line? [Completeness, Spec §FR-004, Spec §FR-028, contracts surface.md, research R-2] — SPEC-FIXED: contracts/surface.md Disclosed: error level, names the session and the error, so the two causes read apart.
+- [x] CHK024 For the role loop's new log line, are its level, its fields and the cause it names specified? FR-004 and FR-028 send two different causes down one failure branch. Can an operator tell them apart from the line? [Completeness, Spec §FR-004, Spec §FR-028, contracts surface.md, research R-2] — SPEC-FIXED: contracts/surface.md Disclosed: error level, carries the session's three `SessionId` fields, each CompID cut at 15 bytes, and the error, so the two causes read apart.
 - [x] CHK025 What happens after the failure branch ends a role loop: is the Engine's state, its other sessions and what `lookup()` answers stated, so a host has an observable other than the log line? [Gap, Spec §FR-004 Limit, research R-2] — SPEC-FIXED: contracts/surface.md Disclosed: the loop ends, others run, `lookup()` answers null (read from engine.cpp's branch and comment).
 - [x] CHK026 Surface.md says `open()`'s reservation failing on an Engine route takes the same branch. Does the L-row of owner item 5 cover it? Quickstart's and T127's row names only the non-validating refusal. [Consistency, Spec §FR-028, contracts surface.md, quickstart.md, tasks T127] — SPEC-FIXED: quickstart.md and T127 (d): the reservation failure joins the non-validating refusal's L-row.
 - [x] CHK027 Is `register_session` after `start()` specified for a FIXT session? `engine.hpp`'s comments call the order a contract, and research R-3 relies on it. If the call is not refused, what does a session whose S is not in the set read from `find`? [Gap, research R-3, data-model E-1, data-model E-6] — PASS: read: `start()` spawns loops once over `registry_`, so a late entry gets no loop, no `Session`, no `find`; `engine.hpp` calls the order a contract, unchanged.
@@ -110,7 +110,7 @@ Rulings 2 and 4 and owner items 4, 5, 8a and 11 are settled. An item here asks w
 - CHK020 — data-model E-9: check, then private build, then reservation.
 - CHK021 — data-model E-9: at `register_session` the check sits with the other guards, ahead of the duplicate-id test, as engine.cpp's guards do.
 - CHK022 — contracts/surface.md "A refused config": one code in C++ and C, no finer report.
-- CHK024 — contracts/surface.md Disclosed: error level, names the session and the error, so the two causes read apart.
+- CHK024 — contracts/surface.md Disclosed: error level, carries the session's three `SessionId` fields, each CompID cut at 15 bytes, and the error, so the two causes read apart.
 - CHK025 — contracts/surface.md Disclosed: the loop ends, others run, `lookup()` answers null (read from engine.cpp's branch and comment).
 - CHK026 — quickstart.md and T127 (d): the reservation failure joins the non-validating refusal's L-row.
 - CHK028 — spec.md FR-003: the label finds the dictionary, the content check admits it.

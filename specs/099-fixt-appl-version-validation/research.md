@@ -43,7 +43,7 @@ Non-validating session with no transport dictionary: admin frames use S, as toda
 - A **non-validating** FIXT session keeps its refusal at `open()` only, because refusing it at registration turns a `fixpp_session_open`
   that returns `FIXPP_ERR_OK` today into a failing call, which `[const §X.7]` defines as a breaking change, against ruling 3's "additive". A validating
   session cannot reach that clause: C has no validation setter before this feature. The loop's failure branch gains an error log line through
-  `EngineConfig::logger`, so the refusal is at least visible when a logger is set. That residue gets a live L-row (owner item 5).
+  `SessionConfig::logger_override` ahead of `EngineConfig::logger`, so the refusal is at least visible when a logger is set. That residue gets a live L-row (owner item 5).
 
 ## R-3 Tables, ownership and cost (NFR-003)
 

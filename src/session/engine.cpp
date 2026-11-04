@@ -701,15 +701,22 @@ asio::awaitable<void> unpublish_entry(SessionEntry& entry) {
 // ── A role loop's open() failure (099-fixt-appl-version-validation, research R-2, FR-004) ──
 // The loop ends with no status to anyone, so this record is what an operator can see, when a
 // logger is set: what a non-validating FIXT session failing the FIXT check gets, since
-// register_session takes it. The loop runs on a bare strand, with no Session whose trace_context
-// it could read, so it reads current_trace_context ([const §XIII.3]). Its format string is
-// registered in src/log/format_registry.cpp.
+// register_session takes it. It names the session by its SessionId's fields, each copied into the
+// record, because the logger can outlive the engine that owns the strings: ArgValue's inline
+// string, so a value past its size is cut. The logger and the trace context are the session's, as
+// Session::open() resolves and seeds them. Its format string is registered in
+// src/log/format_registry.cpp.
 namespace {
-asio::awaitable<void> log_role_loop_open_failure(fixpp::core::EngineConfig const& engine_cfg,
-                                                 fixpp::core::error failure) {
-    auto const tc = co_await fixpp::current_trace_context();
-    FIXPP_SLOG(engine_cfg.logger.get(), error, tc, fixpp::log::cat::session,
-               "session role loop ended: Session::open() failed: error={}",
+void log_role_loop_open_failure(fixpp::core::EngineConfig const& engine_cfg,
+                                SessionConfig const& session_cfg, fixpp::core::error failure) {
+    auto const& logger =
+        session_cfg.logger_override ? session_cfg.logger_override : engine_cfg.logger;
+    FIXPP_SLOG(logger.get(), error, session_cfg.initial_trace_context, fixpp::log::cat::session,
+               "session role loop ended: Session::open() failed: begin_string={} "
+               "sender_comp_id={} target_comp_id={} error={}",
+               fixpp::log::ArgValue::from_inline(session_cfg.begin_string),
+               fixpp::log::ArgValue::from_inline(session_cfg.sender_comp_id),
+               fixpp::log::ArgValue::from_inline(session_cfg.target_comp_id),
                fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(failure)));
 }
 }  // namespace
@@ -1081,7 +1088,7 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             if (!res.has_value()) {
                 // Rejecting a pre-session connection: nothing consumes a close error.
                 (void)transport->close();
-                co_await log_role_loop_open_failure(engine_cfg, res.error());
+                log_role_loop_open_failure(engine_cfg, entry.config, res.error());
                 co_return;
             }
         }
@@ -1238,7 +1245,7 @@ asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_c
     // Step 2: open() — no Logon emitted (engine_managed initiator arm is a no-op).
     auto res = co_await local_session->open();
     if (!res.has_value()) {
-        co_await log_role_loop_open_failure(engine_cfg, res.error());
+        log_role_loop_open_failure(engine_cfg, entry.config, res.error());
         co_return;
     }
 

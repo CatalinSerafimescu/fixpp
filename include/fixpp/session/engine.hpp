@@ -244,7 +244,7 @@ public:
     /// A validating FIXT session failing the FIXT check → invalid_session_config, with no
     /// entry made (099-fixt-appl-version-validation, data-model E-9, FR-004). A non-validating
     /// one is not refused here: Session::open(), in its role loop, refuses it, and the loop
-    /// logs that through EngineConfig::logger.
+    /// logs that through SessionConfig::logger_override, else EngineConfig::logger.
     /// Must be called before start() in 015.  NO Application& parameter (FR-013).
     [[nodiscard]] fixpp::core::expected_t<void> register_session(SessionConfig cfg);
 

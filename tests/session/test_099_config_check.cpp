@@ -12,10 +12,13 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/ip/tcp.hpp>
 #include <asio/use_future.hpp>
+#include <bit>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/dictionary_snapshot.hpp>
@@ -25,10 +28,12 @@
 #include <fixpp/log/record.hpp>
 #include <fixpp/session/security_profile.hpp>
 #include <fixpp/transport/endpoint.hpp>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "session/plain_engine_rig.hpp"
@@ -384,18 +389,20 @@ TEST(W8Registration, RefusalLeavesTheOtherEntry) {
 // A non-validating bad config on an Engine with a logger set: registration takes it, the role
 // loop's open() refuses it, and that is logged, not returned (owner item 5). The record's text is
 // the format string of src/log/format_registry.cpp, spelled out here and not read from it, with
-// its argument computed independently, so a string left out of the registry fails (M-56).
-constexpr std::uint32_t kRoleLoopOpenFailed =
-    FIXPP_FORMAT_ID("session role loop ended: Session::open() failed: error={}");
+// its arguments computed independently, so a string left out of the registry fails (M-56).
+constexpr std::uint32_t kRoleLoopOpenFailed = FIXPP_FORMAT_ID(
+    "session role loop ended: Session::open() failed: begin_string={} "
+    "sender_comp_id={} target_comp_id={} error={}");
 
-std::string role_loop_open_failed_text() {
-    return "session role loop ended: Session::open() failed: error=" +
-           std::to_string(static_cast<std::uint64_t>(error::invalid_session_config));
+std::string role_loop_open_failed_text(const std::string& sender, const std::string& target) {
+    return "session role loop ended: Session::open() failed: begin_string=FIXT.1.1 "
+           "sender_comp_id=" +
+           sender + " target_comp_id=" + target +
+           " error=" + std::to_string(static_cast<std::uint64_t>(error::invalid_session_config));
 }
 
-// A role loop's record, as this witness reads it: exactly one error-level record in the run, and
-// it is that loop's, with that text.
-void expect_one_role_loop_record(fixpp::test_support::LogCapture& log) {
+// The error-level records one logger received, every one enqueued so far.
+std::vector<fixpp::log::Record> error_records(fixpp::test_support::LogCapture& log) {
     (void)log.logger->shutdown();
     std::vector<fixpp::log::Record> errors;
     for (auto const& rec : log.sink->records()) {
@@ -403,26 +410,87 @@ void expect_one_role_loop_record(fixpp::test_support::LogCapture& log) {
             errors.push_back(rec);
         }
     }
-    ASSERT_EQ(errors.size(), 1U) << "the role loop's failed open() must leave one error record";
-    EXPECT_EQ(errors[0].format_id, kRoleLoopOpenFailed);
-    EXPECT_EQ(fixpp::log::detail::format_record(errors[0]), role_loop_open_failed_text());
+    return errors;
 }
 
-// A connect loop opens first thing, so no peer is needed.
+// A role loop's record, as this witness reads it: exactly one error-level record in the run, and
+// it is that loop's, naming that session.
+void expect_one_role_loop_record(fixpp::test_support::LogCapture& log, const std::string& sender,
+                                 const std::string& target) {
+    const auto errors = error_records(log);
+    ASSERT_EQ(errors.size(), 1U) << "the role loop's failed open() must leave one error record";
+    EXPECT_EQ(errors[0].format_id, kRoleLoopOpenFailed);
+    EXPECT_EQ(fixpp::log::detail::format_record(errors[0]),
+              role_loop_open_failed_text(sender, target));
+}
+
+// A connect loop opens first thing, so no peer is needed. `edit` shapes the bad config.
+template <typename Edit>
+void run_connect_loop_refusal(std::shared_ptr<fixpp::core::Logger> engine_logger, Edit edit) {
+    EngineProbe probe{{fixt11()}, std::move(engine_logger)};
+    auto cfg = plain_fixt_config(probe.ioc, fixt11(), false, std::nullopt);
+    cfg.role = session_role::initiator;
+    edit(cfg);
+    EXPECT_TRUE(probe.engine->register_session(std::move(cfg)).has_value());
+    EXPECT_TRUE(probe.engine->start().has_value());
+    for (int i = 0; i < 2000; ++i) {
+        probe.ioc.restart();
+        probe.ioc.poll();
+    }
+}
+
 TEST(W8LogLine, NonValidatingBadConfig_ConnectLoopLogsTheRefusal) {
     fixpp::test_support::LogCapture log;
-    {
-        EngineProbe probe{{fixt11()}, log.logger};
-        auto cfg = plain_fixt_config(probe.ioc, fixt11(), false, std::nullopt);
-        cfg.role = session_role::initiator;
-        EXPECT_TRUE(probe.engine->register_session(std::move(cfg)).has_value());
-        EXPECT_TRUE(probe.engine->start().has_value());
-        for (int i = 0; i < 2000; ++i) {
-            probe.ioc.restart();
-            probe.ioc.poll();
-        }
-    }
-    expect_one_role_loop_record(log);
+    run_connect_loop_refusal(log.logger, [](SessionConfig&) {});
+    expect_one_role_loop_record(log, "ISLD", "TW");
+}
+
+// ArgValue's inline string holds 15 bytes (record.hpp), and a CompID has no length limit, so each
+// is cut there. The record outlives the engine that owned the strings, so it must hold a copy.
+TEST(W8LogLine, CompIdsPastTheInlineLimit_TheLineHoldsTheirFirstFifteenBytes) {
+    fixpp::test_support::LogCapture log;
+    run_connect_loop_refusal(log.logger, [](SessionConfig& cfg) {
+        cfg.sender_comp_id = "SENDER-PAST-THE-LIMIT";
+        cfg.target_comp_id = "TARGET-PAST-THE-LIMIT";
+    });
+    expect_one_role_loop_record(log, "SENDER-PAST-THE", "TARGET-PAST-THE");
+}
+
+// The logger Session::open() would have resolved: the session's override, ahead of the engine's.
+TEST(W8LogLine, SessionLoggerOverride_TakesTheRecordAheadOfTheEngines) {
+    fixpp::test_support::LogCapture engine_log;
+    fixpp::test_support::LogCapture session_log;
+    run_connect_loop_refusal(engine_log.logger, [&session_log](SessionConfig& cfg) {
+        cfg.logger_override = session_log.logger;
+    });
+    expect_one_role_loop_record(session_log, "ISLD", "TW");
+    EXPECT_TRUE(error_records(engine_log).empty()) << "the engine's logger took the record too";
+}
+
+TEST(W8LogLine, SessionLoggerOverride_LogsOnAnEngineWithNoLogger) {
+    fixpp::test_support::LogCapture session_log;
+    run_connect_loop_refusal(
+        nullptr, [&session_log](SessionConfig& cfg) { cfg.logger_override = session_log.logger; });
+    expect_one_role_loop_record(session_log, "ISLD", "TW");
+}
+
+// The record's trace fields are the session's own, what its other records carry.
+TEST(W8LogLine, RecordCarriesTheSessionsInitialTraceContext) {
+    fixpp::test_support::LogCapture log;
+    run_connect_loop_refusal(log.logger, [](SessionConfig& cfg) {
+        cfg.initial_trace_context.trace_id[0] = std::byte{0xA1};
+        cfg.initial_trace_context.trace_id[15] = std::byte{0xB2};
+        cfg.initial_trace_context.span_id[0] = std::byte{0xC3};
+    });
+    const auto errors = error_records(log);
+    ASSERT_EQ(errors.size(), 1U);
+    std::array<std::uint8_t, 16> expected_trace{};
+    expected_trace[0] = 0xA1;
+    expected_trace[15] = 0xB2;
+    EXPECT_EQ(errors[0].trace_id, expected_trace);
+    std::array<std::byte, 8> expected_span{};
+    expected_span[0] = std::byte{0xC3};
+    EXPECT_EQ(errors[0].span_id, std::bit_cast<std::uint64_t>(expected_span));
 }
 
 // An accept loop opens once a connection has sent a first frame that names this session, and
@@ -472,7 +540,7 @@ TEST(W8LogLine, NonValidatingBadConfig_AcceptLoopLogsTheRefusal) {
         peer.close();
     }
     EXPECT_TRUE(peer_saw_the_close) << "the accept loop never reached its open()";
-    expect_one_role_loop_record(log);
+    expect_one_role_loop_record(log, "ISLD", "TW");
 }
 
 }  // namespace
