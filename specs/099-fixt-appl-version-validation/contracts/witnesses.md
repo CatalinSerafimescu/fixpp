@@ -95,7 +95,7 @@ Each row: the code it changes, and the cell that goes RED on that change alone. 
 | M-38 | an extra overwrites `dictionaries.front()` | W-14, front is `path` |
 | M-39 | the overlay merges into every extra | W-14, overlay cell |
 | M-40 | extras pushed before `path` | W-14, order |
-| M-41 | `Engine::start` does not build the set | W-15: delta 0 after `start()`, N×M after the opens |
+| M-41 | `Engine::start` does not build the set | W-15: delta 0 after `start()`; each session then builds its own private set |
 | M-42 | the overload merges framing tags into `valid_` | W-17, store equality |
 | M-43 | plain `as_table_view()` gains the FIX 4.x surface | W-17: a non-FIXT session accepts 1128 |
 | M-44 | `build` maps a failure to a miss | W-20, build arm: a route with a hole, and no `out_of_memory` |

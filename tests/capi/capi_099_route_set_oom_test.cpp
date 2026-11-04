@@ -263,6 +263,7 @@ TEST(W20Engine, EachFiredAllocationFailsStartThenASecondStartSucceeds) {
         retries_started += second.has_value() ? 1 : 0;
         EXPECT_TRUE(second.has_value()) << "N " << n;
         EXPECT_NE(engine_test_access::routes(*rig.engine), nullptr) << "N " << n;
+        EXPECT_EQ(engine_test_access::outstanding_loops(*rig.engine), 1) << "N " << n;
     }
     EXPECT_EQ(fired_runs, build.allocations) << "an unfired hook reads green";
     EXPECT_EQ(retries_started, build.allocations) << "the sweep must see both outcomes";
