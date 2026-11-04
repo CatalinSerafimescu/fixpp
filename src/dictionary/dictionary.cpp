@@ -9,6 +9,7 @@
 // memory back to the originating `mr` (`[2c §4.3]` / C-R2-P1-1).
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -812,17 +813,44 @@ std::vector<core::detail::length_data_pair> header_length_pairs(const Dictionary
     return out;
 }
 
-bool is_fixt_standard_header_tag(std::uint16_t tag) noexcept {
-    constexpr std::uint16_t kOnBehalfOfSendingTime = 370;
-    if (tag == kOnBehalfOfSendingTime) {
-        return true;
+namespace {
+
+// One bit per tag, built at compile time, because the peek asks once per header field per inbound
+// frame. W-21 pins the answers against an independent walk of the XML.
+constexpr std::size_t kFixtHeaderBitsPerWord = 64;
+constexpr std::uint16_t kOnBehalfOfSendingTime = 370;
+constexpr std::size_t kFixtStandardHeaderTagBound = [] {
+    std::uint16_t max_tag = kOnBehalfOfSendingTime;
+    for (auto const& entry : detail::kFixtFramingTable) {
+        max_tag = std::max(max_tag, entry.tag);
     }
+    return static_cast<std::size_t>(max_tag) + 1;
+}();
+constexpr auto kFixtStandardHeaderBits = [] {
+    std::array<std::uint64_t,
+               (kFixtStandardHeaderTagBound + kFixtHeaderBitsPerWord - 1) / kFixtHeaderBitsPerWord>
+        bits{};
+    auto const bit = [](std::uint16_t tag) {
+        return std::uint64_t{1} << (tag % kFixtHeaderBitsPerWord);
+    };
+    for (auto const& entry : detail::kFixtFramingTable) {
+        bits[entry.tag / kFixtHeaderBitsPerWord] |= bit(entry.tag);
+    }
+    bits[kOnBehalfOfSendingTime / kFixtHeaderBitsPerWord] |= bit(kOnBehalfOfSendingTime);
     // The framing table's three trailer tags: CheckSum, Signature, SignatureLength.
-    if (tag == 10 || tag == 89 || tag == 93) {
-        return false;
+    for (std::uint16_t const trailer : {std::uint16_t{10}, std::uint16_t{89}, std::uint16_t{93}}) {
+        bits[trailer / kFixtHeaderBitsPerWord] &= ~bit(trailer);
     }
-    return std::ranges::any_of(detail::kFixtFramingTable,
-                               [tag](auto const& entry) { return entry.tag == tag; });
+    return bits;
+}();
+
+}  // namespace
+
+bool is_fixt_standard_header_tag(std::uint16_t tag) noexcept {
+    return tag < kFixtStandardHeaderTagBound &&
+           ((kFixtStandardHeaderBits[tag / kFixtHeaderBitsPerWord] >>
+             (tag % kFixtHeaderBitsPerWord)) &
+            1U) != 0;
 }
 
 bool is_route_answered_header_tag(std::uint16_t tag) noexcept {
