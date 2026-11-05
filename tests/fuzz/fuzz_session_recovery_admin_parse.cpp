@@ -305,19 +305,29 @@ fixt_arm_fixture& fixt_arm() {
     return fixture;
 }
 
-// W-24's positive control. Registered ahead of the first input, so that an arm no input selected
-// reads zero and fails the run, which `ctest -L fuzz` (`-runs=0`) grades by exit code.
+// W-24's positive control. Registered ahead of the first input, so that an arm on which no input
+// completes reads zero and fails the run, which `ctest -L fuzz` (`-runs=0`) grades by exit code.
+// A session counter is taken only after its frame's future is ready, because the state can read
+// Active with the frame still suspended on a later await.
 std::uint64_t g_fixt_peeked = 0;
 std::uint64_t g_fixt_active = 0;
-std::uint64_t g_fixt_seeded_logon_active = 0;  // the input itself established, on a first frame
+std::uint64_t g_fixt_seeded_logon_active = 0;  // a first frame completed with the session Active
+std::uint64_t g_fixt_frame_on_active = 0;  // an application frame completed after a driven Logon
 std::uint64_t g_fixt_scan_entries = 0;  // what scan_logon_msg_type_defaults returned, over the run
+// Printed, and never fails the run: a miss is a timing observation (`fuzz_admin_parse/open`'s
+// rationale). It is a separate counter so that the report tells a miss from a frame the session
+// refused.
+std::uint64_t g_fixt_missed = 0;
 
 void report_fixt_arm() {
-    std::cerr << "[099 fuzz FIXT arm] peek compared " << g_fixt_peeked << ", reached Active "
-              << g_fixt_active << ", a seeded Logon reached Active " << g_fixt_seeded_logon_active
-              << ", the scan returned " << g_fixt_scan_entries << " entries\n";
-    if (g_fixt_peeked == 0 || g_fixt_seeded_logon_active == 0 || g_fixt_scan_entries == 0) {
-        std::cerr << "[099 fuzz FIXT arm] a counter read zero: the arm was bypassed\n";
+    std::cerr << "[099 fuzz FIXT arm] peek compared " << g_fixt_peeked << ", completed Active "
+              << g_fixt_active << ", a seeded Logon's frame completed Active "
+              << g_fixt_seeded_logon_active << ", an application frame completed after a driven "
+              << "Logon " << g_fixt_frame_on_active << ", the scan returned " << g_fixt_scan_entries
+              << " entries, missed " << g_fixt_missed << "\n";
+    if (g_fixt_peeked == 0 || g_fixt_seeded_logon_active == 0 || g_fixt_frame_on_active == 0 ||
+        g_fixt_scan_entries == 0) {
+        std::cerr << "[099 fuzz FIXT arm] a counter read zero\n";
         std::_Exit(1);
     }
 }
@@ -340,25 +350,32 @@ void check_peek_against_scan(std::span<const std::byte> buf,
     }
 }
 
-void feed_fixt(asio::io_context& ioc, fixpp::session::Session& sess,
-               std::span<const std::byte> buf) {
+// False abandons the input: the caller must not pump again, because that would resume a suspended
+// frame whose span may point at a buffer that has gone. The disposition and its rationale are
+// `fuzz_admin_parse/open`'s.
+[[nodiscard]] bool feed_fixt(asio::io_context& ioc, fixpp::session::Session& sess,
+                             std::span<const std::byte> buf) {
     auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(buf), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "fuzz_admin_parse/fixt")) {
-        return;  // the disposition and its rationale are `fuzz_admin_parse/open`'s
+        ++g_fixt_missed;
+        return false;
     }
     try {
         (void)fut.get();
     } catch (...) {
+        return false;
     }
     if (sess.state() == fixpp::session::fsm_state::Active) {
         ++g_fixt_active;
     }
+    return true;
 }
 
 void run_fixt_arm(std::uint8_t preamble, std::span<const std::byte> payload) {
     fixt_arm_fixture& fixture = fixt_arm();
     auto const& s = (preamble & kFixtApplicationSBit) != 0 ? fixture.application : fixture.fixt11;
-    check_peek_against_scan(payload, *fixture.routes->find(s.get(), nullptr)->owner);
+    auto const& s_table = *fixture.routes->find(s.get(), nullptr)->owner;
+    check_peek_against_scan(payload, s_table);
     fixpp::session::detail::scan_logon_msg_type_defaults(
         payload,
         dict_hooks::for_table_view(*fixture.routes->find(fixture.fixt11.get(), nullptr)->owner),
@@ -395,6 +412,7 @@ void run_fixt_arm(std::uint8_t preamble, std::span<const std::byte> payload) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms,
                                                         "fuzz_admin_parse/fixt_open")) {
+            ++g_fixt_missed;
             return;
         }
         try {
@@ -405,7 +423,9 @@ void run_fixt_arm(std::uint8_t preamble, std::span<const std::byte> payload) {
             return;
         }
     }
-    if ((preamble & kFixtDriveLogonBit) != 0) {
+    bool const drive = (preamble & kFixtDriveLogonBit) != 0;
+    bool driven_active = false;
+    if (drive) {
         constexpr std::string_view kBody =
             "35=A\x01"
             "34=1\x01"
@@ -428,13 +448,25 @@ void run_fixt_arm(std::uint8_t preamble, std::span<const std::byte> payload) {
         }
         int const tail =
             snprintf(full.data() + body_end, full.size() - body_end, "10=%03u\x01", cs & 0xFFU);
-        feed_fixt(ioc, sess,
-                  std::span<const std::byte>(reinterpret_cast<const std::byte*>(full.data()),
-                                             body_end + static_cast<std::size_t>(tail)));
+        if (!feed_fixt(ioc, sess,
+                       std::span<const std::byte>(reinterpret_cast<const std::byte*>(full.data()),
+                                                  body_end + static_cast<std::size_t>(tail)))) {
+            return;
+        }
+        driven_active = sess.state() == fixpp::session::fsm_state::Active;
     }
-    feed_fixt(ioc, sess, payload);
-    if ((preamble & kFixtDriveLogonBit) == 0 && sess.state() == fixpp::session::fsm_state::Active) {
+    if (!feed_fixt(ioc, sess, payload)) {
+        return;
+    }
+    if (!drive && sess.state() == fixpp::session::fsm_state::Active) {
         ++g_fixt_seeded_logon_active;
+    }
+    // Only a readable, non-admin frame is one the session's route selection takes past its admin
+    // return, so an admin frame or dropped bytes after the Logon do not count here.
+    auto const peek = fixpp::session::detail::peek_fixt_route(
+        payload, dict_hooks::for_table_view(s_table), s_table);
+    if (driven_active && peek.readable && !peek.admin) {
+        ++g_fixt_frame_on_active;
     }
 }
 
