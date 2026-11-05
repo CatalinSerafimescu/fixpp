@@ -27,11 +27,10 @@
 
 namespace {
 
-// The dictionary-handle gate of fixpp_session_config_set_dictionary and
-// fixpp_engine_config_add_dictionary. Positive tag gate ([2i §4.2.2]): destroyed (DEAD) or
-// wrong-type handles return INVALID_HANDLE BEFORE the shared_ptr member is read. A DEAD tag means
-// dict was already destroyed; any non-DICT tag means a mismatched handle was cast. Returns the
-// wrapper, or nullptr and sets *err.
+// The gate of a builder call taking a dictionary handle. Positive tag gate ([2i §4.2.2]): destroyed
+// (DEAD) or wrong-type handles return INVALID_HANDLE BEFORE the shared_ptr member is read. A DEAD
+// tag means dict was already destroyed; any non-DICT tag means a mismatched handle was cast.
+// Returns the wrapper, or nullptr and sets *err.
 const fixpp_dict* check_dict_handle(fixpp_dict_t* dict, fixpp_error_t* err) noexcept {
     if (dict == nullptr) {
         *err = FIXPP_ERR_CAPI_CONFIG_INVALID;  // null outer handle — existing mapping preserved

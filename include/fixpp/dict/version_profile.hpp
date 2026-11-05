@@ -95,7 +95,7 @@ enum class application_version : std::uint8_t {
 }
 
 namespace detail {
-// The list is_fixt_admin_msgtype and the session's defines_fixt_admin share.
+// The FIXT.1.1 admin MsgTypes, in one place, so every test of the set reads one list.
 inline constexpr std::array<std::string_view, 7> kFixtAdminMsgTypes{"0", "1", "2", "3",
                                                                     "4", "5", "A"};
 }  // namespace detail
