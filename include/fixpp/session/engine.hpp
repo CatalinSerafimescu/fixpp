@@ -303,7 +303,7 @@ public:
     /// that thread, and a failure returns out_of_memory (FR-028).  On success,
     /// co_spawns one connect loop per initiator and one accept loop per acceptor
     /// on exec.  A failure leaves the Engine as constructed, with nothing spawned,
-    /// and start() may be called again: it succeeds once.
+    /// and start() may be called again. Calling it after a success is not supported.
     /// Each loop co_awaits Session::open() as its first async step (open()
     /// cannot run in this synchronous call — Gate A New-3).
     /// C-4 / SC-004: callers MUST check the returned result.

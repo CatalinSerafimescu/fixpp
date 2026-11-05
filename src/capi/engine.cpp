@@ -229,7 +229,8 @@ fixpp_error_t fixpp_engine_start(fixpp_engine_t* engine) {
         return FIXPP_ERR_INVALID_HANDLE;
     }
     if (engine->engine_started_) {
-        // Second call. Engine::start() succeeds once (engine.hpp).
+        // Second call: refused here, since Engine::start() must not be called after a success
+        // (engine.hpp).
         return fixpp_capi::detail::translate_for_consumer(
             fixpp_capi::detail::translate(fixpp::core::error::session_already_open),
             engine->consumer_minor);
