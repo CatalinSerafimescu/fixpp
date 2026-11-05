@@ -5,9 +5,10 @@
 // Session::open() and Engine::register_session share. It replaces open()'s own FIXT guards.
 #pragma once
 
-#include <array>
+#include <algorithm>
 #include <cstdint>
 #include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/version_registry.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <string_view>
@@ -20,18 +21,14 @@ namespace fixpp::session {
 // messages(), so configuration time only.
 [[nodiscard]] inline bool defines_fixt_admin(const fixpp::dict::Dictionary& d) noexcept {
     constexpr std::uint16_t kDefaultApplVerID = 1137;
-    constexpr std::array<std::string_view, 7> kAdmin{"0", "1", "2", "3", "4", "5", "A"};
     auto const messages = d.messages();
-    for (std::string_view const admin : kAdmin) {
-        bool found = false;
-        for (auto const& m : messages) {
-            found = found || m.msg_type == admin;
-        }
-        if (!found) {
-            return false;
-        }
-    }
-    return d.field_valid_for("A", kDefaultApplVerID);
+    return std::ranges::all_of(fixpp::dict::detail::kFixtAdminMsgTypes,
+                               [&messages](std::string_view admin) {
+                                   return std::ranges::any_of(messages, [admin](auto const& m) {
+                                       return m.msg_type == admin;
+                                   });
+                               }) &&
+           d.field_valid_for("A", kDefaultApplVerID);
 }
 
 // False when a FIXT.1.1 config cannot run, on any of data-model E-9's four clauses. The caller

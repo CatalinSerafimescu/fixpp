@@ -3006,6 +3006,12 @@ Session::InboundValidation Session::refuse_active_frame_(
                 RejectDecision{.reason = reason, .ref_tag_id = ref_tag, .names_third_field = true}};
 }
 
+bool Session::establishment_frame_refused_(
+    inbound_route const& route, fixpp::session::detail::FrameHeader const& hdr) const noexcept {
+    return fixt_routing_ && cfg_.validate_inbound_messages &&
+           (route.application || hdr.msg_type != hdr.fault_ref_msg_type);
+}
+
 bool Session::logon_reject_disconnects_(fixpp::session::detail::FrameHeader const& hdr,
                                         int ref_tag_id) const noexcept {
     return fixt_routing_ && hdr.msg_type == "A" &&
@@ -3079,6 +3085,21 @@ std::optional<Session::logon_group_refusal> Session::refuse_msg_type_defaults_(
     return refusal;
 }
 
+namespace {
+
+// data-model E-10's lookup over the sorted entries, no heap: where `key` stands or would be
+// inserted, and whether it stands there.
+template <class Entries>
+[[nodiscard]] auto find_msg_type_default(Entries& entries, std::string_view key) noexcept {
+    auto const at = std::lower_bound(entries.begin(), entries.end(), key,
+                                     [](auto const& d, std::string_view k) noexcept {
+                                         return std::string_view{d.msg_type, d.len} < k;
+                                     });
+    return std::pair{at, at != entries.end() && std::string_view{at->msg_type, at->len} == key};
+}
+
+}  // namespace
+
 // data-model E-10: each counted entry whose 1130 parses and whose 372 fits and is an application
 // message, within the first kMaxMsgTypeDefaults counted; a later entry for one MsgType wins. The
 // kept entries never pass the cap counted entries are held to, so this draws nothing past open()'s
@@ -3102,12 +3123,8 @@ void Session::record_msg_type_defaults_(std::span<const std::byte> frame) noexce
             if (!resolved) {
                 return;
             }
-            auto const at =
-                std::lower_bound(msg_type_defaults_.begin(), msg_type_defaults_.end(), mt,
-                                 [](msg_type_default const& d, std::string_view key) noexcept {
-                                     return std::string_view{d.msg_type, d.len} < key;
-                                 });
-            if (at != msg_type_defaults_.end() && std::string_view{at->msg_type, at->len} == mt) {
+            auto const [at, found] = find_msg_type_default(msg_type_defaults_, mt);
+            if (found) {
                 at->version = *resolved;
                 return;
             }
@@ -3121,14 +3138,8 @@ void Session::record_msg_type_defaults_(std::span<const std::byte> frame) noexce
 
 fixpp::dict::application_version Session::msg_type_default_for_(
     std::string_view msg_type) const noexcept {
-    auto const at = std::lower_bound(msg_type_defaults_.begin(), msg_type_defaults_.end(), msg_type,
-                                     [](msg_type_default const& d, std::string_view key) noexcept {
-                                         return std::string_view{d.msg_type, d.len} < key;
-                                     });
-    if (at != msg_type_defaults_.end() && std::string_view{at->msg_type, at->len} == msg_type) {
-        return at->version;
-    }
-    return fixpp::dict::application_version::Unknown;
+    auto const [at, found] = find_msg_type_default(msg_type_defaults_, msg_type);
+    return found ? at->version : fixpp::dict::application_version::Unknown;
 }
 
 // ── 013 T036 US2 — Logon-time CompID authorization helpers ───────────────────
@@ -3712,8 +3723,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
     // 099-fixt-appl-version-validation (data-model E-7's S1, FR-029, FR-005): on a validating FIXT
     // session an application frame, or a frame with two MsgTypes, ends here with nothing sent. It
     // reads the third field: interpret_logon reads the last 35, so it could not refuse `D…A`.
-    if (fixt_routing_ && cfg_.validate_inbound_messages &&
-        (route.application || hdr.msg_type != hdr.fault_ref_msg_type)) {
+    if (establishment_frame_refused_(route, hdr)) {
         record_state_transition_(fsm_state::Disconnected);
         co_return fixpp::core::expected_t<void>{};
     }
@@ -3760,7 +3770,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         frame,
         cfg_.target_comp_id,  // expected_sender: peer's 49= is our target
         cfg_.sender_comp_id,  // expected_target: peer's 56= is our sender
-        cfg_.begin_string, session_hooks(fixt_routing_ ? *transport_route_.owner : inbound_tv_));
+        cfg_.begin_string, session_hooks(interpret_logon_table_()));
 
     if (!result) {
         // Refusal — BeginString/CompID mismatch or not-Logon.
@@ -4419,21 +4429,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
             if (cfg_.validate_inbound_messages && session_route_.validator) {
                 // 099 (data-model E-7's A1, A2): ahead of the exemption of Reject and Logout, since
                 // a repeated MsgType is what can make hdr.msg_type read either.
+                InboundValidation v{};
                 if (fixt_routing_) {
-                    auto const v = refuse_active_frame_(frame, hdr, route);
-                    if (v.outcome != validate_outcome::pass) {
-                        slow.k = inbound_slow_t::kind::validate_failed;
-                        slow.v = v;
-                        break;
-                    }
+                    v = refuse_active_frame_(frame, hdr, route);
                 }
-                if (hdr.msg_type != "3" && hdr.msg_type != "5") {
-                    auto const v = validate_inbound_(frame, hdr, route);
-                    if (v.outcome != validate_outcome::pass) {
-                        slow.k = inbound_slow_t::kind::validate_failed;
-                        slow.v = v;
-                        break;
-                    }
+                if (v.outcome == validate_outcome::pass && hdr.msg_type != "3" &&
+                    hdr.msg_type != "5") {
+                    v = validate_inbound_(frame, hdr, route);
+                }
+                if (v.outcome != validate_outcome::pass) {
+                    slow.k = inbound_slow_t::kind::validate_failed;
+                    slow.v = v;
+                    break;
                 }
             }
 
@@ -5726,8 +5733,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
 
     // 099-fixt-appl-version-validation (data-model E-7's S1, FR-029, FR-005): the acceptor's arm
     // has the reason this reads the third field.
-    if (fixt_routing_ && cfg_.validate_inbound_messages &&
-        (route.application || hdr.msg_type != hdr.fault_ref_msg_type)) {
+    if (establishment_frame_refused_(route, hdr)) {
         record_state_transition_(fsm_state::Disconnected);
         co_return fixpp::core::expected_t<void>{};
     }
@@ -5763,9 +5769,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
         }
     }
 
-    auto result = fixpp::session::interpret_logon(
-        frame, cfg_.target_comp_id, cfg_.sender_comp_id, cfg_.begin_string,
-        session_hooks(fixt_routing_ ? *transport_route_.owner : inbound_tv_));
+    auto result =
+        fixpp::session::interpret_logon(frame, cfg_.target_comp_id, cfg_.sender_comp_id,
+                                        cfg_.begin_string, session_hooks(interpret_logon_table_()));
 
     if (!result) {
         // Either a refused Logon (CompID/BeginString) OR a non-Logon

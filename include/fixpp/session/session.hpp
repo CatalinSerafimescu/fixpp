@@ -1158,6 +1158,11 @@ private:
     // act on, and only a validating session does.
     [[nodiscard]] inbound_route select_route_(std::span<const std::byte> frame,
                                               bool establishment_arm) const noexcept;
+    // The table an establishment arm's interpret_logon reads with: the transport route's on FIXT.
+    [[nodiscard]] std::shared_ptr<const fixpp::dict::table_view> const& interpret_logon_table_()
+        const noexcept {
+        return fixt_routing_ ? *transport_route_.owner : inbound_tv_;
+    }
     // A FIXT session whose open() refused ahead of the route block, or in it. It holds no route,
     // so on_inbound_active_ disregards the frame before any arm reads one. session_route_.owner is
     // the first route member open() writes, and nothing in that block can fail after it.
@@ -1344,6 +1349,10 @@ private:
     [[nodiscard]] InboundValidation refuse_active_frame_(
         std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
         inbound_route const& route) const noexcept;
+    // 099-fixt-appl-version-validation (data-model E-7's S1, FR-029, FR-005): an establishment arm
+    // ends a validating FIXT session on an application frame, or a frame with two MsgTypes.
+    [[nodiscard]] bool establishment_frame_refused_(
+        inbound_route const& route, fixpp::session::detail::FrameHeader const& hdr) const noexcept;
     // 099-fixt-appl-version-validation (data-model E-7's S2, FR-010): a validating FIXT session
     // disconnects on a gate Reject of a Logon that names one of these tags.
     [[nodiscard]] bool logon_reject_disconnects_(fixpp::session::detail::FrameHeader const& hdr,

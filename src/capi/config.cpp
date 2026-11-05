@@ -25,6 +25,32 @@
 #include "fixpp/session/memory_store_factory.hpp"
 #include "fixpp/session/security_profile.hpp"
 
+namespace {
+
+// The dictionary-handle gate of fixpp_session_config_set_dictionary and
+// fixpp_engine_config_add_dictionary. Positive tag gate ([2i §4.2.2]): destroyed (DEAD) or
+// wrong-type handles return INVALID_HANDLE BEFORE the shared_ptr member is read. A DEAD tag means
+// dict was already destroyed; any non-DICT tag means a mismatched handle was cast. Returns the
+// wrapper, or nullptr and sets *err.
+const fixpp_dict* check_dict_handle(fixpp_dict_t* dict, fixpp_error_t* err) noexcept {
+    if (dict == nullptr) {
+        *err = FIXPP_ERR_CAPI_CONFIG_INVALID;  // null outer handle — existing mapping preserved
+        return nullptr;
+    }
+    const auto* h = reinterpret_cast<const fixpp_dict*>(dict);
+    if (h->tag_ != FIXPP_HANDLE_TAG_DICT) {
+        *err = FIXPP_ERR_INVALID_HANDLE;
+        return nullptr;
+    }
+    if (h->dict == nullptr) {
+        *err = FIXPP_ERR_CAPI_CONFIG_INVALID;  // empty dict wrapper
+        return nullptr;
+    }
+    return h;
+}
+
+}  // namespace
+
 extern "C" {
 
 // ── Engine-config builder ───────────────────────────────────────────────────
@@ -68,15 +94,10 @@ fixpp_error_t fixpp_engine_config_add_dictionary(fixpp_engine_config_t* cfg, fix
     if (cfg == nullptr) {
         return FIXPP_ERR_NULL_HANDLE;
     }
-    if (dict == nullptr) {
-        return FIXPP_ERR_CAPI_CONFIG_INVALID;
-    }
-    const auto* h = reinterpret_cast<const fixpp_dict*>(dict);
-    if (h->tag_ != FIXPP_HANDLE_TAG_DICT) {
-        return FIXPP_ERR_INVALID_HANDLE;
-    }
-    if (h->dict == nullptr) {
-        return FIXPP_ERR_CAPI_CONFIG_INVALID;
+    fixpp_error_t err = FIXPP_ERR_OK;
+    const fixpp_dict* const h = check_dict_handle(dict, &err);
+    if (h == nullptr) {
+        return err;
     }
     try {
         cfg->dictionaries.push_back(h->dict);
@@ -260,31 +281,23 @@ fixpp_error_t fixpp_session_config_set_dictionary(fixpp_session_config_t* cfg, f
     if (cfg == nullptr) {
         return FIXPP_ERR_NULL_HANDLE;
     }
-    if (dict == nullptr) {
-        return FIXPP_ERR_CAPI_CONFIG_INVALID;  // null outer handle — existing mapping preserved
-    }
-    // Positive tag gate ([2i §4.2.2]): destroyed (DEAD) or wrong-type handles return
-    // INVALID_HANDLE BEFORE the shared_ptr member is read.  A DEAD tag means dict was
-    // already destroyed; any non-DICT tag means a mismatched handle was cast.
-    const auto* h = reinterpret_cast<const fixpp_dict*>(dict);
-    if (h->tag_ != FIXPP_HANDLE_TAG_DICT) {
-        return FIXPP_ERR_INVALID_HANDLE;
-    }
-    if (h->dict == nullptr) {
-        return FIXPP_ERR_CAPI_CONFIG_INVALID;  // empty dict wrapper
+    fixpp_error_t err = FIXPP_ERR_OK;
+    const fixpp_dict* const h = check_dict_handle(dict, &err);
+    if (h == nullptr) {
+        return err;
     }
     cfg->cfg.dictionary = h->dict;  // thin pass-through (creation is Feature C / L-050-1)
     return FIXPP_ERR_OK;
 }
 
-// 099-fixt-appl-version-validation (FR-016): the ApplVerID wire value, by the one parser. The
-// profile is what makes an empty value "use the default", and it is refused ahead of that.
+// 099-fixt-appl-version-validation (FR-016): the ApplVerID wire value, by the one parser. This
+// profile's default is Unknown, so an empty value fails as an unparseable one does.
 fixpp_error_t fixpp_session_config_set_default_appl_ver_id(fixpp_session_config_t* cfg,
                                                            const char* wire_value) {
     if (cfg == nullptr) {
         return FIXPP_ERR_NULL_HANDLE;
     }
-    if (wire_value == nullptr || wire_value[0] == '\0') {
+    if (wire_value == nullptr) {
         return FIXPP_ERR_CAPI_CONFIG_INVALID;
     }
     const auto parsed = fixpp::dict::resolve_application_version(

@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <fixpp/core/error.hpp>  // fixpp::core::expected_t, fixpp::core::error
 #include <string_view>
@@ -93,6 +94,12 @@ enum class application_version : std::uint8_t {
     return application_version::Unknown;
 }
 
+namespace detail {
+// The list is_fixt_admin_msgtype and the session's defines_fixt_admin share.
+inline constexpr std::array<std::string_view, 7> kFixtAdminMsgTypes{"0", "1", "2", "3",
+                                                                    "4", "5", "A"};
+}  // namespace detail
+
 // 099-fixt-appl-version-validation (data-model E-2): the 7 FIXT.1.1 admin MsgTypes per [FIXT §3] /
 // [2c §6.3]: 0 Heartbeat, 1 TestRequest, 2 ResendRequest, 3 Reject, 4 SequenceReset, 5 Logout,
 // A Logon. Hardcoded here, not from the dispatch table, so that dict::reify implements the
@@ -102,18 +109,12 @@ enum class application_version : std::uint8_t {
     if (msg_type.size() != 1) {
         return false;
     }
-    switch (msg_type.front()) {
-        case '0':
-        case '1':
-        case '2':
-        case '3':
-        case '4':
-        case '5':
-        case 'A':
+    for (std::string_view const admin : detail::kFixtAdminMsgTypes) {
+        if (admin == msg_type) {
             return true;
-        default:
-            return false;
+        }
     }
+    return false;
 }
 
 // 099-fixt-appl-version-validation (data-model E-2, FR-008): the header tags a route's own table
