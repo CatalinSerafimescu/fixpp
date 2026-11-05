@@ -65,6 +65,7 @@
 #include <vector>
 
 #include "session/fixt_route_set.hpp"
+#include "support/fixt_raw_peer.hpp"
 #include "support/session_test_access.hpp"
 
 namespace fixpp::session::test099 {
@@ -76,15 +77,7 @@ using Frames = std::vector<std::string>;
 // ── Frames, as research R-18's harness builds them ──────────────────────────────────────
 
 inline std::string wire(const std::string& begin_string, const std::string& body) {
-    std::string s =
-        "8=" + begin_string + "\x01" + "9=" + std::to_string(body.size()) + "\x01" + body;
-    unsigned sum = 0;
-    for (unsigned char ch : s) {
-        sum += ch;
-    }
-    char trailer[16];
-    std::snprintf(trailer, sizeof trailer, "10=%03u\x01", sum % 256);
-    return s + trailer;
+    return fixpp::test_support::fix_frame(begin_string, body);
 }
 
 struct Ctx {
@@ -369,33 +362,31 @@ inline const DictPtr& fix42() {
     return d;
 }
 
+// A vendored file's text, empty when it cannot be read.
+inline std::string read_vendored(const std::filesystem::path& relative) {
+    std::ifstream in{std::filesystem::path{FIXPP_DICT_DATA_DIR} / relative, std::ios::binary};
+    return {std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
 // A dictionary a cell builds from a vendored file plus an overlay held in the test's own
 // strings. It lives for the process: a witness builds it once.
 inline DictPtr overlay_on(const char* vendored_relative, const std::string& overlay_xml) {
-    std::ifstream in{std::filesystem::path{FIXPP_DICT_DATA_DIR} / vendored_relative,
-                     std::ios::binary};
-    const std::string base{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
-    return std::make_shared<const dd::Dictionary>(
-        dd::XmlLoader{}.load_with_overlay_from_string(base, overlay_xml, dict_resource()));
+    return std::make_shared<const dd::Dictionary>(dd::XmlLoader{}.load_with_overlay_from_string(
+        read_vendored(vendored_relative), overlay_xml, dict_resource()));
 }
 
 inline DictPtr orchestra_overlay_on_latest(const std::string& overlay_xml) {
-    std::ifstream in{
-        std::filesystem::path{FIXPP_DICT_DATA_DIR} / "orchestra/OrchestraFIXLatest.xml",
-        std::ios::binary};
-    const std::string base{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
     return std::make_shared<const dd::Dictionary>(
-        dd::OrchestraLoader{}.load_with_overlay_from_string(base, overlay_xml, dict_resource()));
+        dd::OrchestraLoader{}.load_with_overlay_from_string(
+            read_vendored("orchestra/OrchestraFIXLatest.xml"), overlay_xml, dict_resource()));
 }
 
 // A dictionary built from a vendored file's text with one edit, for a cell whose transport
 // dictionary the vendored file is not: a partial FIXT11, or 1137 optional.
 inline DictPtr edited_vendored(const char* relative,
                                const std::function<std::string(std::string)>& edit) {
-    std::ifstream in{std::filesystem::path{FIXPP_DICT_DATA_DIR} / relative, std::ios::binary};
-    std::string text{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
     return std::make_shared<const dd::Dictionary>(
-        dd::XmlLoader{}.load_from_string(edit(std::move(text)), dict_resource()));
+        dd::XmlLoader{}.load_from_string(edit(read_vendored(relative)), dict_resource()));
 }
 
 // A value `d` accepts for the field: its first enum value, or one of its type. Empty for a type
@@ -670,13 +661,7 @@ inline void append_trace(const std::string& line) {
 // ── The ending as a value ───────────────────────────────────────────────────────────────
 
 inline std::string tag_value(const std::string& frame, int tag) {
-    const std::string needle = "\x01" + std::to_string(tag) + "=";
-    auto p = frame.find(needle);
-    if (p == std::string::npos) {
-        return {};
-    }
-    p += needle.size();
-    return frame.substr(p, frame.find('\x01', p) - p);
+    return fixpp::test_support::frame_field(frame, tag);
 }
 
 inline const char* state_name(fsm_state s) {

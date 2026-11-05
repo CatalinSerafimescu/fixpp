@@ -28,6 +28,8 @@
 #include <system_error>
 #include <thread>
 
+#include "support/extract_tag.hpp"
+
 namespace fixpp::test_support {
 
 // SendingTime(52) from the real clock, for a session on a real-time clock.
@@ -39,11 +41,11 @@ inline std::string fix_utc_now() {
     return r ? std::string{r->data(), r->size()} : std::string{};
 }
 
-// A whole frame with BeginString FIXT.1.1 around `body`, which starts at its 35.
-inline std::string fixt_frame(const std::string& body) {
-    std::string s = "8=FIXT.1.1\x01"
-                    "9=" +
-                    std::to_string(body.size()) + "\x01" + body;
+// A whole frame with `begin_string` around `body`, which starts at its 35: BodyLength and CheckSum
+// computed, so a test can spell whatever else the frame holds.
+inline std::string fix_frame(const std::string& begin_string, const std::string& body) {
+    std::string s =
+        "8=" + begin_string + "\x01" + "9=" + std::to_string(body.size()) + "\x01" + body;
     unsigned sum = 0;
     for (const unsigned char ch : s) {
         sum += ch;
@@ -53,16 +55,11 @@ inline std::string fixt_frame(const std::string& body) {
     return s + trailer.data();
 }
 
+inline std::string fixt_frame(const std::string& body) { return fix_frame("FIXT.1.1", body); }
+
 // The first value of `tag` in a frame, or the empty string. For frames holding no Data field.
 inline std::string frame_field(const std::string& frame, int tag) {
-    const std::string needle = "\x01" + std::to_string(tag) + "=";
-    const std::size_t at = frame.find(needle);
-    if (at == std::string::npos) {
-        return {};
-    }
-    const std::size_t from = at + needle.size();
-    const std::size_t end = frame.find('\x01', from);
-    return end == std::string::npos ? std::string{} : frame.substr(from, end - from);
+    return extract_tag(std::as_bytes(std::span{frame}), static_cast<std::uint32_t>(tag));
 }
 
 class FixtRawPeer {
@@ -122,7 +119,10 @@ public:
     // The next frame of MsgType `msg_type`.
     [[nodiscard]] std::optional<std::string> read_msg_type(std::string_view msg_type,
                                                            std::chrono::milliseconds budget) {
-        const std::string needle = "\x01" "35=" + std::string{msg_type} + "\x01";
+        const std::string needle =
+            "\x01"
+            "35=" +
+            std::string{msg_type} + "\x01";
         return read_until(
             [&needle](const std::string& f) { return f.find(needle) != std::string::npos; },
             budget);
@@ -148,7 +148,9 @@ public:
 
 private:
     std::optional<std::string> pop_frame() {
-        const std::size_t at = buf_.find("\x01" "10=");
+        const std::size_t at = buf_.find(
+            "\x01"
+            "10=");
         if (at == std::string::npos || buf_.size() < at + 8 || buf_[at + 7] != '\x01') {
             return std::nullopt;
         }

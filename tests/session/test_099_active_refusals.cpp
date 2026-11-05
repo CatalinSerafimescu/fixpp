@@ -13,9 +13,6 @@
 
 #include <gtest/gtest.h>
 
-#include <filesystem>
-#include <fstream>
-#include <iterator>
 #include <string>
 
 #include "test_099_fixt_support.hpp"
@@ -168,11 +165,6 @@ TEST(W4FirstSeqNum, PairDataNotTags_TheFaultDisposition) {
 }
 
 // ── 1128 is declared in no message body of the vendored files ───────────────────────────
-
-std::string read_vendored(const std::filesystem::path& relative) {
-    std::ifstream in{std::filesystem::path{FIXPP_DICT_DATA_DIR} / relative, std::ios::binary};
-    return {std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
-}
 
 // FR-026's limit: a QuickFIX-format file names ApplVerID in <header> only, never in <messages>
 // or <components>; the Orchestra file's one fieldRef of id 1128 is in StandardHeader (id 1024).
