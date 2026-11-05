@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <fixpp/core/error.hpp>  // fixpp::core::expected_t, fixpp::core::error
@@ -106,15 +107,9 @@ inline constexpr std::array<std::string_view, 7> kFixtAdminMsgTypes{"0", "1", "2
 // version-axis resolution without the build-tree generated dispatch headers. Not the session's
 // detail::is_admin_msgtype, which excludes A on purpose. n (XMLnonFIX) is application.
 [[nodiscard]] constexpr bool is_fixt_admin_msgtype(std::string_view msg_type) noexcept {
-    if (msg_type.size() != 1) {
-        return false;
-    }
-    for (std::string_view const admin : detail::kFixtAdminMsgTypes) {
-        if (admin == msg_type) {
-            return true;
-        }
-    }
-    return false;
+    return msg_type.size() == 1 &&
+           std::ranges::any_of(detail::kFixtAdminMsgTypes,
+                               [msg_type](std::string_view admin) { return admin == msg_type; });
 }
 
 // 099-fixt-appl-version-validation (data-model E-2, FR-008): the header tags a route's own table

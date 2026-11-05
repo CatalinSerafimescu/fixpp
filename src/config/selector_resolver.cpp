@@ -399,8 +399,8 @@ static void resolve_engine_dictionary(const toml::table& root_tbl,
         if (str == nullptr || str->get().empty()) {
             acc.add(LoadDiagnostic{
                 .key_path = std::string{kExtras},
-                .reason = str == nullptr ? reason_class::malformed_value
-                                         : reason_class::empty_required,
+                .reason =
+                    str == nullptr ? reason_class::malformed_value : reason_class::empty_required,
                 .message = entry + (str == nullptr ? " must be a string" : " must not be empty"),
             });
             continue;

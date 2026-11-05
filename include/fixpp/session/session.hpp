@@ -1114,8 +1114,8 @@ private:
     // Sorted by MsgType. One block per FIXT session, reserved in open(), so no Logon grows it, and
     // empty on a non-FIXT session.
     struct msg_type_default {
-        char msg_type[8];  // NOLINT(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-        std::uint8_t len;
+        char msg_type[8]{};  // NOLINT(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        std::uint8_t len{};
         fixpp::dict::application_version version;
     };
     static constexpr std::size_t kMaxMsgTypeDefaults = 256;

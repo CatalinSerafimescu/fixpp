@@ -1240,8 +1240,7 @@ public:
         return *this;
     }
 
-    table_view_builder& set_length_pair_data_tag(std::uint16_t length_tag,
-                                                 std::uint16_t data_tag) {
+    table_view_builder& set_length_pair_data_tag(std::uint16_t length_tag, std::uint16_t data_tag) {
         tv_.set_length_pair_data_tag(length_tag, data_tag);
         return *this;
     }

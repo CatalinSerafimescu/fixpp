@@ -31,6 +31,7 @@
 #include <new>
 #include <ranges>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace fixpp::session::detail {
@@ -57,7 +58,8 @@ public:
         Dictionaries&& session_dictionaries) noexcept {
         try {
             std::vector<const fixpp::dict::Dictionary*> listed;
-            for (const fixpp::dict::Dictionary* d : session_dictionaries) {
+            for (const fixpp::dict::Dictionary* d :
+                 std::forward<Dictionaries>(session_dictionaries)) {
                 if (d != nullptr) {
                     listed.push_back(d);
                 }

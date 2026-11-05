@@ -54,7 +54,7 @@ template <class OnField>
 [[nodiscard]] bool walk_fixt_header(std::span<const std::byte> frame,
                                     fixpp::wire::dict_hooks const& s_hooks,
                                     fixpp::dict::table_view const& s_table,
-                                    OnField&& on_field) noexcept {
+                                    OnField const& on_field) noexcept {
     const std::byte SOH{0x01};
     const std::byte EQ{static_cast<std::byte>('=')};
     const std::size_t n = frame.size();
@@ -62,7 +62,7 @@ template <class OnField>
     std::size_t i = 0;
     std::uint32_t field_no = 0;
     bool past_stop = false;
-    while (i < n && !(past_stop && field_no >= kMsgTypeField)) {
+    while (i < n && (!past_stop || field_no < kMsgTypeField)) {
         const std::size_t field_start = i;
         ++field_no;
         std::uint32_t tag = 0;

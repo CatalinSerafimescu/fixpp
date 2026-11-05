@@ -64,7 +64,7 @@ namespace msg_type_default_detail {
 
 template <class Out>
 void scan_logon_msg_type_defaults(std::span<const std::byte> frame,
-                                  fixpp::wire::dict_hooks const& hooks, Out&& out) noexcept {
+                                  fixpp::wire::dict_hooks const& hooks, Out const& out) noexcept {
     using iter_t = fixpp::wire::MessageView<fixpp::wire::access_mode::Iter>::field_iterator;
     constexpr std::uint16_t kNoMsgTypes = 384;
     constexpr std::uint16_t kRefMsgType = 372;

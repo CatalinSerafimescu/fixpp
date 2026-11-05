@@ -3129,7 +3129,7 @@ void Session::record_msg_type_defaults_(std::span<const std::byte> frame) noexce
                 return;
             }
             msg_type_default entry{};
-            std::copy(mt.begin(), mt.end(), entry.msg_type);
+            std::ranges::copy(mt, entry.msg_type);
             entry.len = static_cast<std::uint8_t>(mt.size());
             entry.version = *resolved;
             msg_type_defaults_.insert(at, entry);

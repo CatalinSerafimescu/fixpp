@@ -77,7 +77,7 @@ private:
     static constexpr std::size_t kTableSize =
         static_cast<std::size_t>(application_version::vlatest) + 1;
     std::shared_ptr<const Dictionary> entries_[kTableSize]{};
-    std::shared_ptr<const Dictionary> transport_{};
+    std::shared_ptr<const Dictionary> transport_;
 };
 
 }  // namespace fixpp::dict

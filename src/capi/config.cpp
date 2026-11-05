@@ -300,8 +300,10 @@ fixpp_error_t fixpp_session_config_set_default_appl_ver_id(fixpp_session_config_
         return FIXPP_ERR_CAPI_CONFIG_INVALID;
     }
     const auto parsed = fixpp::dict::resolve_application_version(
-        fixpp::dict::version_profile{fixpp::dict::session_version::Unknown,
-                                     fixpp::dict::application_version::Unknown, false, 0},
+        fixpp::dict::version_profile{.session = fixpp::dict::session_version::Unknown,
+                                     .default_appl = fixpp::dict::application_version::Unknown,
+                                     .has_per_message_override = false,
+                                     ._reserved = 0},
         wire_value);
     if (!parsed.has_value()) {
         return FIXPP_ERR_CAPI_CONFIG_INVALID;
