@@ -8,8 +8,8 @@
 //
 // A route table is `{d, null}` for every registry slot, the transport dictionary and each listed
 // session dictionary, and `{d, S}` for each listed S that declares a header pair and every other
-// `d`. Each is an as_table_view(fixt_framing) form moved into its validator, so one dictionary
-// has one table, and the parse route's owner is an aliasing shared_ptr onto it.
+// `d`. Each is an as_table_view(fixt_framing) form moved into its validator, so each entry holds
+// one table, and the parse route's owner is an aliasing shared_ptr onto it.
 //
 // Written once, in build(), and read-only after. It is handed out only after build() returns, so a
 // reader on another strand sees a fully built object: the edge is the role loop's co_spawn in
