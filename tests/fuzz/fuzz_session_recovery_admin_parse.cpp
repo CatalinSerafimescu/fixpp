@@ -393,7 +393,7 @@ void run_fixt_arm(std::uint8_t preamble, std::span<const std::byte> payload) {
     fixpp::session::session_test_access::adopt_routes(sess, fixture.routes);
     {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "fuzz_admin_parse/open")) {
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "fuzz_admin_parse/fixt_open")) {
             return;
         }
         try {
