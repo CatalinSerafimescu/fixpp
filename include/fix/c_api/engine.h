@@ -13,7 +13,7 @@
  *
  *   fixpp_engine_create                       (build EngineConfig; stand up the loop)
  *     → fixpp_session_open × N                (= Engine::register_session, BEFORE start)
- *     → fixpp_engine_start                    (= Engine::start(), which succeeds once; spawns role loops)
+ *     → fixpp_engine_start                    (= Engine::start(); spawns role loops)
  *     → drive (send / receive) ...
  *     → fixpp_session_close                   (per session)
  *     → fixpp_engine_destroy                  (co_await stop(); join workers; ~Engine)
