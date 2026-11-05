@@ -12,6 +12,7 @@ refs:
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2m-pybind.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/099-fixt-appl-version-validation-gatea.md
 codegraph_entry: []
 ---
 

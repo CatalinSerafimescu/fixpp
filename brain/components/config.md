@@ -10,6 +10,8 @@ refs:
   - src/config/selector_resolver.cpp
   - src/config/logger_resolver.cpp
   - specs/099-fixt-appl-version-validation/contracts/surface.md
+refs_external:
+  - research/G19-fix-fpml-iso20022/decisions/speckit/099-fixt-appl-version-validation-gatea.md
 codegraph_entry: [toml_config_loader, config_bundle, load_diagnostic]
 ---
 
