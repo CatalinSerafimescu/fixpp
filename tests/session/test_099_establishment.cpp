@@ -18,6 +18,7 @@
 #include <chrono>
 #include <fixpp/session/session_event.hpp>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <variant>
 
@@ -692,6 +693,80 @@ TEST(W5Named, Second1137_LastWins_Off) {
         EXPECT_EQ(run.rig->sess->negotiated_version_profile().default_appl,
                   dd::application_version::vlatest);
     }
+}
+
+// ── A Reject that cannot go out ────────────────────────────
+
+// toAdmin runs ahead of a Reject's transmit, so a throw there is how an establishment refusal's
+// emit fails with no fault in the transport. fire_to_admin_'s callers record Disconnected and
+// return app_callback_threw, and nothing is sent.
+std::string app_callback_threw_err() {
+    return "err=" + std::to_string(static_cast<int>(fixpp::core::error::app_callback_threw));
+}
+
+CellRun refused_with_throwing_to_admin(Shape shape, Arm arm, const char* id) {
+    RigOptions o;
+    o.validate = true;
+    o.role = role_of(arm);
+    CellRun run = enter_arm(shape_fixture(shape), arm, std::move(o));
+    if (run.setup_failure.empty()) {
+        Rig& r = *run.rig;
+        r.app->on_to_admin = [](const CountingApp::View&) {
+            throw std::runtime_error{"toAdmin throws"};
+        };
+        run.ending = r.deliver(input(id).make(r.peer_ctx(1)));
+    }
+    return run;
+}
+
+class W5RejectCannotGoOut : public testing::TestWithParam<Arm> {};
+INSTANTIATE_TEST_SUITE_P(BothArms, W5RejectCannotGoOut,
+                         testing::Values(Arm::NotConnected, Arm::LogonSent),
+                         [](const testing::TestParamInfo<Arm>& i) {
+                             return std::string{arm_name(i.param)};
+                         });
+
+// The gate's Reject on a Logon, E-7's S2: on L the gate names 1137, and the disconnect it would
+// take follows a Reject that went out.
+TEST_P(W5RejectCannotGoOut, GateReject_1137_TheErrorReturns) {
+    const CellRun run = refused_with_throwing_to_admin(Shape::L, GetParam(), "Logon 1137=99");
+    ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
+    EXPECT_EQ(run.ending.err, app_callback_threw_err()) << log_form(run.ending);
+    EXPECT_EQ(short_form(run.ending), "- | Disc | k | app=0 adm=0");
+}
+
+// A gate Reject that would stay in the arm: only the failed emit ends the session.
+TEST_P(W5RejectCannotGoOut, GateReject_Undeclared_TheErrorReturns) {
+    const CellRun run =
+        refused_with_throwing_to_admin(Shape::T, GetParam(), "Logon undeclared 5999");
+    ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
+    EXPECT_EQ(run.ending.err, app_callback_threw_err()) << log_form(run.ending);
+    EXPECT_EQ(short_form(run.ending), "- | Disc | k | app=0 adm=0");
+}
+
+// S3's initiator block, on T where the gate passes the Logon: the check of the number has run, so
+// this consumes as `LS-e` does.
+TEST(W5RejectCannotGoOutS3, Initiator_TheErrorReturns) {
+    const CellRun run = refused_with_throwing_to_admin(Shape::T, Arm::LogonSent, "Logon 1137=99");
+    ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
+    EXPECT_EQ(run.ending.err, app_callback_threw_err()) << log_form(run.ending);
+    EXPECT_EQ(short_form(run.ending), "- | Disc | c | app=0 adm=0");
+}
+
+// S3's initiator block with no clock: Session::open() resolves the clock and does not require one,
+// so a directly constructed session can have none. `LS-e`'s ending, with an empty SendingTime.
+TEST(W5NoClock, InitiatorS3_RefusesAndStampsNothing) {
+    RigOptions o;
+    o.validate = true;
+    o.role = session_role::initiator;
+    Rig r{shape_fixture(Shape::T), std::move(o)};
+    r.engine.clock = nullptr;
+    const auto setup = r.open();
+    ASSERT_FALSE(setup.has_value()) << *setup;
+    const Ending e = r.deliver(input("Logon 1137=99").make(r.peer_ctx(1)));
+    EXPECT_EQ(short_form(e), "R 5/1137 A 45=1 | Disc | c | app=0 adm=0");
+    ASSERT_EQ(e.out.size(), 1U);
+    EXPECT_TRUE(tag_value(e.out[0], 52).empty()) << tag_value(e.out[0], 52);
 }
 
 }  // namespace

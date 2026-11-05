@@ -820,7 +820,13 @@ public:
     std::function<void(const View&)> on_app;
     std::function<void(const View&)> on_admin;
     std::function<void(const View&)> on_to_app;
+    std::function<void(const View&)> on_to_admin;
 
+    void toAdmin(const View& v, const SessionId&) override {
+        if (on_to_admin) {
+            on_to_admin(v);
+        }
+    }
     expected_t<void> fromApp(const View& v, const SessionId&) override {
         ++app;
         if (on_app) {

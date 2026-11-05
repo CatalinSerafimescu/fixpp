@@ -236,7 +236,7 @@ TEST(W21Peek, AReadFaultBeforeTheStop_Unreadable) {
 }
 
 TEST(W21Peek, AMalformedTagBeforeTheStop_Unreadable) {
-    for (const char* tail : {"3a=1|", "=1|", "49", "65536=1|"}) {
+    for (const char* tail : {"3a=1|", "=1|", "49", "65536=1|", "49|", "/=1|"}) {
         const std::string frame = soh(kHead() + "35=D|" + tail);
         const dd::table_view& table = table_of(fixt11());
         const auto hooks = wire::dict_hooks::for_table_view(table);
@@ -253,6 +253,20 @@ TEST(W21Peek, AFaultPastTheStop_Readable) {
         EXPECT_EQ(p.msg_type, "D") << tail;
         EXPECT_EQ(p.appl_ver_id, "9") << tail;
     }
+}
+
+// A value that runs to the frame's end, as the third field and ahead of it. The Framer hands the
+// session a frame ending in SOH, so only a direct call holds one with no SOH to skip.
+TEST(W21Peek, AValueRunningToTheFrameEnd_ReadsAsTheScanDoes) {
+    const std::string ends_in_35 = soh("8=FIXT.1.1|9=0|") + "35=D";
+    const Peeked third = peek_on(fixt11(), ends_in_35);
+    EXPECT_TRUE(scan_frame_header(bytes(ends_in_35)).msg_type_is_third);
+    EXPECT_TRUE(third.readable);
+    EXPECT_EQ(third.msg_type, "D");
+
+    const std::string ends_at_9 = soh("8=FIXT.1.1|") + "9=0";
+    EXPECT_FALSE(scan_frame_header(bytes(ends_at_9)).msg_type_is_third);
+    EXPECT_FALSE(peek_on(fixt11(), ends_at_9).readable);
 }
 
 // The scan's third-field value is what W-24's harness compares the peek with, on any fault-free

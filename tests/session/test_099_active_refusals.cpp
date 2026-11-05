@@ -13,6 +13,9 @@
 
 #include <gtest/gtest.h>
 
+#include <asio/co_spawn.hpp>
+#include <asio/use_future.hpp>
+#include <chrono>
 #include <string>
 
 #include "test_099_fixt_support.hpp"
@@ -263,6 +266,28 @@ TEST(W4ApplVerIdRecompute, DeclaredInNoMessageBody) {
         at += ref.size();
     }
     EXPECT_EQ(refs, 1);
+}
+
+// A refused frame consumes its number, FIX-SL 2020 §4.5.4, and at the last number there is no next
+// one. consume_rejected_seqnum_ makes that session-fatal, so the Reject is not sent.
+TEST(W4ConsumeFails, RefusedFrameAtTheLastSeqNum_OverflowEndsTheSession) {
+    RigOptions o;
+    o.validate = true;
+    CellRun run = enter_arm(shape_fixture(Shape::T), Arm::Active, std::move(o));
+    ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
+    Rig& r = *run.rig;
+    auto seeded =
+        asio::co_spawn(r.ioc, session_test_access::seqnum_mgr(*r.sess).set_next_inbound(seqnum_max),
+                       asio::use_future);
+    ASSERT_TRUE(pump_ready(r.ioc, seeded, std::chrono::seconds{30}));
+    ASSERT_TRUE(seeded.get().has_value());
+    Ctx c = r.peer_ctx(2);
+    c.seq = seqnum_max;
+    const Ending e = r.deliver(frame_35("D", c, kNosNo11()));
+    EXPECT_EQ(e.err,
+              "err=" + std::to_string(static_cast<int>(fixpp::core::error::store_seqnum_overflow)))
+        << log_form(e);
+    EXPECT_EQ(short_form(e), "- | Disc | k | app=0 adm=0");
 }
 
 }  // namespace

@@ -37,6 +37,7 @@
 #include <vector>
 
 #include "mock_reconnect_factory.hpp"
+#include "session/logon_msg_type_defaults.hpp"
 #include "test_099_fixt_support.hpp"
 
 namespace fixpp::session::test099 {
@@ -669,6 +670,11 @@ const ShapeRole kShapeRoles[] = {
     {.shape = Shape::A, .acceptor = true}, {.shape = Shape::A, .acceptor = false},
     {.shape = Shape::L, .acceptor = true}, {.shape = Shape::L, .acceptor = false}};
 
+const ShapeRole kTA[] = {{.shape = Shape::T, .acceptor = true},
+                         {.shape = Shape::T, .acceptor = false},
+                         {.shape = Shape::A, .acceptor = true},
+                         {.shape = Shape::A, .acceptor = false}};
+
 class W25AfterMtA : public testing::TestWithParam<ShapeRole> {
 protected:
     // Validating, reached Active on MT-a's entry.
@@ -749,6 +755,32 @@ TEST_P(W25Named, BothFaults_No385And1130_99_EitherAnswers) {
     } else {
         EXPECT_TRUE(got == kNo385() || got == kBad1130Block()) << got;
     }
+}
+
+// E-10's `**Endings**`: one fault among the entries fixes the ending, whatever follows it. On T and
+// A, since L's gate answers 1130 and 372 first.
+class W25AfterARefusedEntry : public testing::TestWithParam<ShapeRole> {};
+INSTANTIATE_TEST_SUITE_P(W25, W25AfterARefusedEntry, testing::ValuesIn(kTA), shape_role_name);
+
+TEST_P(W25AfterARefusedEntry, AValidEntryAfter_TheRefusedOneAnswers) {
+    const ShapeRole p = GetParam();
+    CellRun run = open_cell(shape_fixture(p.shape), p.acceptor, true);
+    ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
+    Rig& r = *run.rig;
+    run.ending = r.deliver(reply(r, count("2") + E("D", "10", "-") + E("8", "10")));
+    expect_ending(run, kNo385());
+}
+
+// With two faults E-10 fixes only that one of them answers, once.
+TEST_P(W25AfterARefusedEntry, AnotherFaultyEntryAfter_EitherAnswersOnce) {
+    const ShapeRole p = GetParam();
+    CellRun run = open_cell(shape_fixture(p.shape), p.acceptor, true);
+    ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
+    Rig& r = *run.rig;
+    run.ending = r.deliver(reply(r, count("2") + E("D", "10", "-") + E("8", "99")));
+    const std::string got = short_form(run.ending);
+    EXPECT_TRUE(got == kNo385() || got == kBad1130Block()) << got;
+    EXPECT_EQ(run.ending.out.size(), 1U) << got;
 }
 
 TEST_P(W25Named, BothFaults_NotValidating_Establishes) {
@@ -967,10 +999,6 @@ TEST_P(W25DataCell, EmbeddedUnserviceable_NotRefused) {
 // An eight-byte MsgType FIX Latest does not declare: no delivery, on T and A, and the Reject's tag
 // differs by shape, so it is not asserted.
 class W25EightBytes : public testing::TestWithParam<ShapeRole> {};
-const ShapeRole kTA[] = {{.shape = Shape::T, .acceptor = true},
-                         {.shape = Shape::T, .acceptor = false},
-                         {.shape = Shape::A, .acceptor = true},
-                         {.shape = Shape::A, .acceptor = false}};
 INSTANTIATE_TEST_SUITE_P(W25, W25EightBytes, testing::ValuesIn(kTA), shape_role_name);
 
 TEST_P(W25EightBytes, UndeclaredOnFixLatest_NotDelivered) {
@@ -1175,6 +1203,51 @@ std::size_t count_occurrences(const std::string& text, const std::string& needle
 
 // E-10: kCapFromE10 exceeds every vendored dictionary's message count. Recomputed from the raw XML,
 // and the count is shown able to read a real dictionary's.
+// ── The group walk, called directly ────────────────────────────
+
+// What scan_logon_msg_type_defaults hands `out`, owned, from a `|`-separated frame.
+std::vector<detail::logon_msg_type_instance> scanned(const std::string& text) {
+    static const dd::table_view table = fixt11()->as_table_view();
+    std::string frame = text;
+    std::replace(frame.begin(), frame.end(), '|', '\x01');
+    // The views point into `frame`, so `kept_frames` holds each frame for the process.
+    static std::vector<std::unique_ptr<std::string>> kept_frames;
+    kept_frames.push_back(std::make_unique<std::string>(std::move(frame)));
+    std::vector<detail::logon_msg_type_instance> out;
+    detail::scan_logon_msg_type_defaults(
+        std::as_bytes(std::span{kept_frames.back()->data(), kept_frames.back()->size()}),
+        fixpp::wire::dict_hooks::for_table_view(table),
+        [&out](detail::logon_msg_type_instance const& e) { out.push_back(e); });
+    return out;
+}
+
+// logon_msg_type_defaults.hpp: a repeated member reads first-wins. The counting value comes first
+// and the one that would not count after it, so a last-wins read cannot count the entry.
+TEST(W25Scan, RepeatedMembers_TheFirstReads) {
+    const auto entries = scanned("384=1|372=D|385=S|385=R|1130=10|1410=Y|1410=N|10=000|");
+    ASSERT_EQ(entries.size(), 1U);
+    EXPECT_EQ(entries[0].msg_direction, std::string_view{"S"});
+    EXPECT_EQ(entries[0].default_ver, std::string_view{"Y"});
+    EXPECT_TRUE(entries[0].counted());
+}
+
+// 1131, RefCstmApplVerID, is a member the entry does not keep. A member after it is still read.
+TEST(W25Scan, RefCstmApplVerIdIsAMember_TheInstanceReadsOnPastIt) {
+    const auto entries = scanned("384=1|372=D|385=S|1131=x|1410=Y|10=000|");
+    ASSERT_EQ(entries.size(), 1U);
+    EXPECT_TRUE(entries[0].counted());
+}
+
+// The Framer hands the session a frame with a trailer, so only a direct call ends in the group.
+TEST(W25Scan, AFrameEndingInsideAnEntry_ThatEntryIsConsumed) {
+    const auto entries = scanned("384=1|372=D|385=S|1410=Y|");
+    ASSERT_EQ(entries.size(), 1U);
+    EXPECT_EQ(entries[0].ref_msg_type, "D");
+    EXPECT_TRUE(entries[0].counted());
+}
+
+TEST(W25Scan, AFrameEndingAtTheCount_NoEntry) { EXPECT_TRUE(scanned("384=1|").empty()); }
+
 TEST(W25Dictionary, CapExceedsTheLargestVendoredMessageCount) {
     std::size_t largest = 0;
     for (const auto& e : std::filesystem::recursive_directory_iterator{FIXPP_DICT_DATA_DIR}) {

@@ -47,6 +47,7 @@
 
 #include "dictionary_internal.hpp"  // as_table_view_call_count, the seam W-15 also reads
 #include "fixt_framing_table.hpp"   // kFixtFramingTable
+#include "support/dictionary_test_access.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/table_view_test_access.hpp"
 
@@ -557,6 +558,76 @@ TEST(W17HeaderLengthPairs, AnOverlaysHeaderPairIsAnswered) {
         EXPECT_EQ(pairs[0].length_tag, 5030) << file;
         EXPECT_EQ(pairs[0].data_tag, 5031) << file;
     }
+}
+
+// The function's contract: "either tag in its header". Here only the Data tag is, with its Length
+// a Logon member, since a pair is answered for a Length some container holds.
+TEST(W17HeaderLengthPairs, OnlyTheDataTagInTheHeader_IsAHeaderPair) {
+    const auto d = with_overlay("FIXT11.xml",
+                                "<fix type='FIXT' major='1' minor='1' servicepack='0'><header>"
+                                "<field name='VenuePairData' required='N' /></header><messages>"
+                                "<message name='Logon' msgtype='A' msgcat='admin'>"
+                                "<field name='VenuePairLen' required='N' /></message></messages>"
+                                "<fields><field number='5030' name='VenuePairLen' type='LENGTH' />"
+                                "<field number='5031' name='VenuePairData' type='DATA' />"
+                                "</fields></fix>");
+    ASSERT_TRUE(d->as_table_view().is_header_tag(5031));
+    ASSERT_FALSE(d->as_table_view().is_header_tag(5030));
+    const auto pairs = dd::header_length_pairs(*d);
+    ASSERT_EQ(pairs.size(), 1U);
+    EXPECT_EQ(pairs[0].length_tag, 5030);
+    EXPECT_EQ(pairs[0].data_tag, 5031);
+}
+
+// The function's contract: "by Length tag", whichever order the file declares the pairs in.
+TEST(W17HeaderLengthPairs, TwoPairsDeclaredDescending_AreByLengthTag) {
+    const auto d = with_overlay("FIXT11.xml",
+                                "<fix type='FIXT' major='1' minor='1' servicepack='0'><header>"
+                                "<field name='VenueHighLen' required='N' />"
+                                "<field name='VenueHighData' required='N' />"
+                                "<field name='VenueLowLen' required='N' />"
+                                "<field name='VenueLowData' required='N' /></header><fields>"
+                                "<field number='5040' name='VenueHighLen' type='LENGTH' />"
+                                "<field number='5041' name='VenueHighData' type='DATA' />"
+                                "<field number='5030' name='VenueLowLen' type='LENGTH' />"
+                                "<field number='5031' name='VenueLowData' type='DATA' />"
+                                "</fields></fix>");
+    const auto pairs = dd::header_length_pairs(*d);
+    ASSERT_EQ(pairs.size(), 2U);
+    EXPECT_EQ(pairs[0].length_tag, 5030);
+    EXPECT_EQ(pairs[0].data_tag, 5031);
+    EXPECT_EQ(pairs[1].length_tag, 5040);
+    EXPECT_EQ(pairs[1].data_tag, 5041);
+}
+
+// The function's contract: "non-standard". A pair whose Data tag is in the standard table is one
+// the standard table already answers for that tag, whatever its Length tag. EncodedIssuer(349),
+// which FIXT11.xml does not declare, so the overlay can put it in the header.
+TEST(W17HeaderLengthPairs, AStandardDataTag_IsNotAHeaderPair) {
+    const auto d = with_overlay("FIXT11.xml",
+                                "<fix type='FIXT' major='1' minor='1' servicepack='0'><header>"
+                                "<field name='VenuePairLen' required='N' />"
+                                "<field name='EncodedIssuer' required='N' /></header><fields>"
+                                "<field number='5030' name='VenuePairLen' type='LENGTH' />"
+                                "<field number='349' name='EncodedIssuer' type='DATA' />"
+                                "</fields></fix>");
+    ASSERT_EQ(d->length_pair_data_tag(5030), 349) << "the overlay must pair 5030 with 349";
+    EXPECT_TRUE(dd::header_length_pairs(*d).empty());
+}
+
+// Dictionary's default constructor is private, so a moved-from one is how a test holds a Dictionary
+// with no handle. Such a dictionary has no header, so it has no pair with a tag in one.
+TEST(W17HeaderLengthPairs, NoHandle_NoPairs) {
+    static std::pmr::monotonic_buffer_resource mr;
+    std::ifstream in{std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIXT11.xml", std::ios::binary};
+    const std::string text{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    dd::Dictionary moved_from = dd::XmlLoader{}.load_from_string(text, &mr);
+    const dd::Dictionary took{std::move(moved_from)};
+    ASSERT_NE(dd::dictionary_test_access::handle(took), nullptr);
+    // NOLINTBEGIN(bugprone-use-after-move,hicpp-invalid-access-moved)
+    ASSERT_EQ(dd::dictionary_test_access::handle(moved_from), nullptr);
+    EXPECT_TRUE(dd::header_length_pairs(moved_from).empty());
+    // NOLINTEND(bugprone-use-after-move,hicpp-invalid-access-moved)
 }
 
 // research R-20's scope: a body pair S's overlay adds is not composed.

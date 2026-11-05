@@ -313,6 +313,17 @@ TEST(W8Clause, NullRegistry_DirectOpenOnly) {
     EXPECT_EQ(session_test_access::lifecycle_value(s), kNeverOpened);
 }
 
+// The same refusal where S lacks FIXT's admin messages, so no_transport asks the registry too, and
+// transport_answers must not read a registry that is not there.
+TEST(W8Clause, NullRegistry_SLacksAdmin_DirectOpenOnly) {
+    DirectRig rig;
+    Session s{rig.engine, plain_fixt_config(rig.ioc, fix50sp2(), true, AV::v50sp2), nullptr};
+    const auto r = direct_open(rig.ioc, s);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::invalid_session_config);
+    EXPECT_EQ(session_test_access::lifecycle_value(s), kNeverOpened);
+}
+
 DictPtr overlay_of_fix44() {
     static const DictPtr d =
         overlay_on("FIX44.xml",
@@ -337,6 +348,17 @@ TEST(W8AdoptedSet, LackingS_Refused) {
     ASSERT_FALSE(r.has_value()) << "opened on a set with no entry for its S";
     EXPECT_EQ(r.error(), error::invalid_session_config);
     EXPECT_EQ(session_test_access::lifecycle_value(s), kNeverOpened);
+}
+
+// data-model E-6's "skipping null": a non-validating entry may have no dictionary, and its open()
+// refuses it, so Engine::start() still builds the other entries' set.
+TEST(W8RouteSet, ANullListedDictionaryIsSkipped) {
+    auto registry = make_registry({fixt11()});
+    const std::vector<const dd::Dictionary*> listed{nullptr, fixt11().get()};
+    const auto set = detail::fixt_route_set::build(*registry, listed);
+    ASSERT_TRUE(set.has_value());
+    EXPECT_NE((*set)->find(fixt11().get(), nullptr), nullptr);
+    EXPECT_EQ((*set)->find(nullptr, nullptr), nullptr);
 }
 
 // ── A frame on a session whose open() refused ───────────────────────────────────────────

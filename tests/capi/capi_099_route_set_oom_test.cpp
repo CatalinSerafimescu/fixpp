@@ -516,6 +516,49 @@ TEST(W20CArm, EachFiredAllocationOfCreate_ConfigInvalid_ThenTheSameBuilderOpensA
     EXPECT_TRUE(completed);
 }
 
+// engine.h's `Thunk split`: a config-builder symbol catches and returns a config code. A failed add
+// leaves the list as it was, so the retry and the session after it need only the one call again.
+TEST(W20CArm, EachFiredAllocationOfAddDictionary_ConfigInvalid_ThenARetryAccumulates) {
+    long fired_runs = 0;
+    long retries_opened = 0;
+    bool completed = false;
+    // Both load on first use, which the hook must not see.
+    fixpp_dict_t* const transport = fixt11_handle();
+    fixpp_dict_t* const application = application_handle();
+    for (long n = 1; !completed; ++n) {
+        fixpp_engine_config_t* ec = nullptr;
+        ASSERT_EQ(fixpp_engine_config_create(&ec), FIXPP_ERR_OK);
+        ASSERT_EQ(fixpp_engine_config_set_realtime_clock(ec), FIXPP_ERR_OK);
+        ASSERT_EQ(fixpp_engine_config_add_dictionary(ec, transport), FIXPP_ERR_OK);
+        arm(n);
+        const fixpp_error_t first = fixpp_engine_config_add_dictionary(ec, application);
+        disarm();
+        if (g_fired.load() == 0) {
+            completed = true;
+            EXPECT_EQ(first, FIXPP_ERR_OK) << "N " << n << ": no allocation failed";
+        } else {
+            ++fired_runs;
+            EXPECT_EQ(first, FIXPP_ERR_CAPI_CONFIG_INVALID) << "N " << n;
+            EXPECT_EQ(ec->dictionaries.size(), 1U)
+                << "N " << n << ": a failed add changed the list";
+            EXPECT_EQ(fixpp_engine_config_add_dictionary(ec, application), FIXPP_ERR_OK)
+                << "N " << n;
+        }
+        EXPECT_EQ(ec->dictionaries.size(), 2U) << "N " << n;
+        fixpp_engine_t* engine = nullptr;
+        ASSERT_EQ(
+            fixpp_engine_create(ec, FIXPP_C_ABI_VERSION_MAJOR, FIXPP_C_ABI_VERSION_MINOR, &engine),
+            FIXPP_ERR_OK)
+            << "N " << n;
+        const fixpp_error_t opened = open_fixt_session(engine);
+        EXPECT_EQ(opened, FIXPP_ERR_OK) << "N " << n;
+        retries_opened += g_fired.load() != 0 && opened == FIXPP_ERR_OK ? 1 : 0;
+        fixpp_engine_destroy(engine);
+    }
+    EXPECT_GT(fired_runs, 0) << "an unfired hook reads green";
+    EXPECT_EQ(retries_opened, fired_runs) << "the sweep must see both outcomes";
+}
+
 // A fresh engine with a FIXT session per N. N is bounded to this engine's own build, counted in a
 // dry run as the Direct arm counts, because past it the hook lands on the worker launch.
 TEST(W20CArm, EachFiredAllocationOfStart_Unknown_ThenARetrySucceeds) {
