@@ -93,23 +93,29 @@ std::vector<std::byte> wire(const std::string& body) {
     return out;
 }
 
-const std::string kHdr =
-    "34=2\x01"
-    "49=A\x01"
-    "52=20240101-00:00:00\x01"
-    "56=B\x01";
-const std::string kNosBody =
-    "11=C\x01"
-    "21=1\x01"
-    "55=X\x01"
-    "54=1\x01"
-    "60=20240101-00:00:00\x01"
-    "40=1\x01"
-    "38=1\x01";
+const std::string& kHdr() {
+    static const std::string value =
+        "34=2\x01"
+        "49=A\x01"
+        "52=20240101-00:00:00\x01"
+        "56=B\x01";
+    return value;
+}
+const std::string& kNosBody() {
+    static const std::string value =
+        "11=C\x01"
+        "21=1\x01"
+        "55=X\x01"
+        "54=1\x01"
+        "60=20240101-00:00:00\x01"
+        "40=1\x01"
+        "38=1\x01";
+    return value;
+}
 
 // A NewOrderSingle: `before_34` sits right after 35, as a route's 1128 does.
 std::string nos(const std::string& header_extra, const std::string& before_34 = "1128=9\x01") {
-    return "35=D\x01" + before_34 + kHdr + header_extra + kNosBody;
+    return "35=D\x01" + before_34 + kHdr() + header_extra + kNosBody();
 }
 
 struct Verdict {
@@ -181,18 +187,25 @@ const dd::table_view& envelope_header_tags() {
 }
 
 struct HeaderCell {
-    const char* name;
-    const char* field;
+    const char* name{};
+    const char* field{};
     Verdict with_envelope;
 };
 
-const HeaderCell kHeaderCells[] = {
-    {"Scalar", "5020=v\x01", kPass},
-    {"EnumValid", "5021=A\x01", kPass},
-    {"EnumInvalid", "5021=Z\x01", rejected(error::wire_field_value_out_of_range, 5021)},
-    {"IntValid", "5022=7\x01", kPass},
-    {"IntInvalid", "5022=abc\x01", rejected(error::wire_field_value_out_of_range, 5022)},
-};
+const std::vector<HeaderCell>& kHeaderCells() {
+    static const std::vector<HeaderCell> value = {
+        {.name = "Scalar", .field = "5020=v\x01", .with_envelope = kPass},
+        {.name = "EnumValid", .field = "5021=A\x01", .with_envelope = kPass},
+        {.name = "EnumInvalid",
+         .field = "5021=Z\x01",
+         .with_envelope = rejected(error::wire_field_value_out_of_range, 5021)},
+        {.name = "IntValid", .field = "5022=7\x01", .with_envelope = kPass},
+        {.name = "IntInvalid",
+         .field = "5022=abc\x01",
+         .with_envelope = rejected(error::wire_field_value_out_of_range, 5022)},
+    };
+    return value;
+}
 
 class W3UnitHeaderTag : public testing::TestWithParam<HeaderCell> {};
 
@@ -211,7 +224,7 @@ TEST_P(W3UnitHeaderTag, NoEnvelopeRoutedTableRefuses) {
               rejected(error::wire_unexpected_tag, tag));
 }
 
-INSTANTIATE_TEST_SUITE_P(W3Unit, W3UnitHeaderTag, testing::ValuesIn(kHeaderCells),
+INSTANTIATE_TEST_SUITE_P(W3Unit, W3UnitHeaderTag, testing::ValuesIn(kHeaderCells()),
                          [](const testing::TestParamInfo<HeaderCell>& i) { return i.param.name; });
 
 // A tag S's header does not declare is the routed table's to judge, with an envelope or without.
@@ -300,7 +313,7 @@ TEST(W3UnitFourTags, Tag35_OnFix44S_AFix50sp2OnlyMsgType) {
     EXPECT_EQ(run_validate(fix50sp2_route(),
                            "35=CU\x01"
                            "1128=9\x01" +
-                               kHdr,
+                               kHdr(),
                            &fix44),
               kPass);
 }
@@ -333,7 +346,7 @@ TEST(W3UnitFourTags, Tag1156_ByTheRoute) {
 // ── A null envelope equals the virtual validate ──────────────────────────────────────────────
 
 struct NullCell {
-    const char* name;
+    const char* name{};
     std::string body;
 };
 
@@ -374,11 +387,11 @@ INSTANTIATE_TEST_SUITE_P(W3Unit, W3UnitNullEnvelope,
                                                   "49=A\x01"
                                                   "52=20240101-00:00:00\x01"
                                                   "56=B\x01" +
-                                                      kNosBody},
+                                                      kNosBody()},
                                          NullCell{"RequiredMissing",
                                                   "35=D\x01"
                                                   "1128=9\x01" +
-                                                      kHdr}),
+                                                      kHdr()}),
                          [](const testing::TestParamInfo<NullCell>& i) { return i.param.name; });
 
 }  // namespace

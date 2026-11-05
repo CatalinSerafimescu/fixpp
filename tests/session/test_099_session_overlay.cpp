@@ -29,14 +29,20 @@ const char* const kFixtHead = "<fix type='FIXT' major='1' minor='1' servicepack=
 const char* const k50Head = "<fix type='FIX' major='5' minor='0' servicepack='2'>";
 
 // Header tags an overlay adds to S: scalar 5020, closed enum 5021 {A, B}, int 5022, research R-6's.
-const std::string kHeaderMembers =
-    "<field name='VenueHdrScalar' required='N' /><field name='VenueHdrEnum' required='N' />"
-    "<field name='VenueHdrInt' required='N' />";
-const std::string kHeaderDefs =
-    "<field number='5020' name='VenueHdrScalar' type='STRING' />"
-    "<field number='5021' name='VenueHdrEnum' type='CHAR'><value enum='A' description='ALPHA'/>"
-    "<value enum='B' description='BETA'/></field>"
-    "<field number='5022' name='VenueHdrInt' type='INT' />";
+const std::string& kHeaderMembers() {
+    static const std::string value =
+        "<field name='VenueHdrScalar' required='N' /><field name='VenueHdrEnum' required='N' />"
+        "<field name='VenueHdrInt' required='N' />";
+    return value;
+}
+const std::string& kHeaderDefs() {
+    static const std::string value =
+        "<field number='5020' name='VenueHdrScalar' type='STRING' />"
+        "<field number='5021' name='VenueHdrEnum' type='CHAR'><value enum='A' description='ALPHA'/>"
+        "<value enum='B' description='BETA'/></field>"
+        "<field number='5022' name='VenueHdrInt' type='INT' />";
+    return value;
+}
 
 // (a): merged FIX50SP2 S: a body field and a Required promotion, on NewOrderSingle.
 const DictPtr& fix50sp2_with_field_and_promotion() {
@@ -62,7 +68,7 @@ TEST(W3a, OwnVersion_FieldAccepted) {
     const CellRun run =
         run_own_cell("W-3a accepted", overlay_a_fixture(), true, Arm::Active, [](const Rig& r) {
             return frame_35("D", r.peer_ctx(2),
-                            kNos +
+                            kNos() +
                                 "1=ACC\x01"
                                 "5002=v\x01");
         });
@@ -72,7 +78,7 @@ TEST(W3a, OwnVersion_FieldAccepted) {
 TEST(W3a, OwnVersion_RequiredPromotionEnforced) {
     const CellRun run = run_own_cell(
         "W-3a promotion", overlay_a_fixture(), true, Arm::Active,
-        [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos + "5002=v\x01"); });
+        [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos() + "5002=v\x01"); });
     expect_ending(run, "R 1/1 D 45=2 | stays | c | app=0 adm=0");
 }
 
@@ -80,7 +86,7 @@ TEST(W3a, AnotherVersion_FieldRejected) {
     const CellRun run = run_own_cell("W-3a other version", overlay_a_fixture(), true, Arm::Active,
                                      [](const Rig& r) {
                                          return frame_35("D", r.peer_ctx(2),
-                                                         kNos +
+                                                         kNos() +
                                                              "1=ACC\x01"
                                                              "5002=v\x01",
                                                          "1128=6\x01");
@@ -107,7 +113,7 @@ TEST(W3b, OverlayFieldAcceptedOnTheFallbackVersion) {
     f.registry = make_registry({fixt11(), latest()});
     f.session_dict = latest_with_body_field();
     const CellRun run = run_own_cell("W-3b", std::move(f), true, Arm::Active, [](const Rig& r) {
-        return frame_35("D", r.peer_ctx(2), kNos + "5002=v\x01");
+        return frame_35("D", r.peer_ctx(2), kNos() + "5002=v\x01");
     });
     expect_ending(run, kDelivered);
 }
@@ -115,8 +121,8 @@ TEST(W3b, OverlayFieldAcceptedOnTheFallbackVersion) {
 // (c): T, an overlay's header tags on an application message routed to another table.
 const DictPtr& fixt11_with_header_tags() {
     static const DictPtr d =
-        overlay_on("FIXT11.xml", std::string(kFixtHead) + "<header>" + kHeaderMembers +
-                                     "</header><fields>" + kHeaderDefs + "</fields></fix>");
+        overlay_on("FIXT11.xml", std::string(kFixtHead) + "<header>" + kHeaderMembers() +
+                                     "</header><fields>" + kHeaderDefs() + "</fields></fix>");
     return d;
 }
 
@@ -134,11 +140,15 @@ struct HeaderCase {
 };
 
 const HeaderCase kHeaderCases[] = {
-    {"Scalar", "5020=v\x01", kDelivered},
-    {"EnumValid", "5021=A\x01", kDelivered},
-    {"EnumInvalid", "5021=Z\x01", "R 5/5021 D 45=2 | stays | c | app=0 adm=0"},
-    {"IntValid", "5022=7\x01", kDelivered},
-    {"IntInvalid", "5022=abc\x01", "R 5/5022 D 45=2 | stays | c | app=0 adm=0"},
+    {.name = "Scalar", .field = "5020=v\x01", .ending = kDelivered},
+    {.name = "EnumValid", .field = "5021=A\x01", .ending = kDelivered},
+    {.name = "EnumInvalid",
+     .field = "5021=Z\x01",
+     .ending = "R 5/5021 D 45=2 | stays | c | app=0 adm=0"},
+    {.name = "IntValid", .field = "5022=7\x01", .ending = kDelivered},
+    {.name = "IntInvalid",
+     .field = "5022=abc\x01",
+     .ending = "R 5/5022 D 45=2 | stays | c | app=0 adm=0"},
 };
 
 class W3cHeader : public testing::TestWithParam<HeaderCase> {};
@@ -147,7 +157,7 @@ TEST_P(W3cHeader, RoutedToAnotherTable) {
     const HeaderCase& c = GetParam();
     const CellRun run =
         run_own_cell(std::string("W-3c ") + c.name, t_overlay_fixture(), true, Arm::Active,
-                     [&](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos, c.field); });
+                     [&](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos(), c.field); });
     expect_ending(run, c.ending);
 }
 
@@ -160,7 +170,7 @@ INSTANTIATE_TEST_SUITE_P(W3, W3cHeader, testing::ValuesIn(kHeaderCases),
 TEST(W3c, PastTheBody_Passes) {
     const CellRun run = run_own_cell(
         "W-3c past the body", t_overlay_fixture(), true, Arm::Active,
-        [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos + "5020=v\x01"); });
+        [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos() + "5020=v\x01"); });
     expect_ending(run, kDelivered);
 }
 
@@ -203,24 +213,27 @@ Fixture collision_fixture() {
 }
 
 TEST(W3cCollision, SValuePasses) {
-    expect_ending(
-        run_own_cell("W-3c collision X", collision_fixture(), true, Arm::Active,
-                     [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos, "5040=X\x01"); }),
-        kDelivered);
+    expect_ending(run_own_cell("W-3c collision X", collision_fixture(), true, Arm::Active,
+                               [](const Rig& r) {
+                                   return frame_35("D", r.peer_ctx(2), kNos(), "5040=X\x01");
+                               }),
+                  kDelivered);
 }
 
 TEST(W3cCollision, RoutedValueRefused) {
-    expect_ending(
-        run_own_cell("W-3c collision Y", collision_fixture(), true, Arm::Active,
-                     [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos, "5040=Y\x01"); }),
-        "R 5/5040 D 45=2 | stays | c | app=0 adm=0");
+    expect_ending(run_own_cell("W-3c collision Y", collision_fixture(), true, Arm::Active,
+                               [](const Rig& r) {
+                                   return frame_35("D", r.peer_ctx(2), kNos(), "5040=Y\x01");
+                               }),
+                  "R 5/5040 D 45=2 | stays | c | app=0 adm=0");
 }
 
 TEST(W3cCollision, TagOnAnotherMsgTypeOnly_Control) {
-    expect_ending(
-        run_own_cell("W-3c collision control", collision_fixture(), true, Arm::Active,
-                     [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos, "5041=X\x01"); }),
-        kDelivered);
+    expect_ending(run_own_cell("W-3c collision control", collision_fixture(), true, Arm::Active,
+                               [](const Rig& r) {
+                                   return frame_35("D", r.peer_ctx(2), kNos(), "5041=X\x01");
+                               }),
+                  kDelivered);
 }
 
 // Standard tag: T, an overlay closing MessageEncoding(347) to {UTF-8}.
@@ -243,7 +256,7 @@ TEST(W3cStandardTag, RoutedNos_ClosedValueRefused) {
     ASSERT_FALSE(fixt11_closing_347()->enum_values(347).empty()) << "the overlay did not close it";
     expect_ending(run_own_cell("W-3c 347 refused", t_closing_347(), true, Arm::Active,
                                [](const Rig& r) {
-                                   return frame_35("D", r.peer_ctx(2), kNos, "347=Shift_JIS\x01");
+                                   return frame_35("D", r.peer_ctx(2), kNos(), "347=Shift_JIS\x01");
                                }),
                   "R 5/347 D 45=2 | stays | c | app=0 adm=0");
 }
@@ -251,7 +264,7 @@ TEST(W3cStandardTag, RoutedNos_ClosedValueRefused) {
 TEST(W3cStandardTag, RoutedNos_OpenValuePasses) {
     expect_ending(run_own_cell("W-3c 347 passes", t_closing_347(), true, Arm::Active,
                                [](const Rig& r) {
-                                   return frame_35("D", r.peer_ctx(2), kNos, "347=UTF-8\x01");
+                                   return frame_35("D", r.peer_ctx(2), kNos(), "347=UTF-8\x01");
                                }),
                   kDelivered);
 }
@@ -261,7 +274,7 @@ TEST(W3cStandardTag, Fix44Route_PlainT_Passes) {
         run_own_cell("W-3c 347 FIX44 T", own_fixture(Shape::T, {fixt11(), fix50sp2(), fix44()}),
                      true, Arm::Active,
                      [](const Rig& r) {
-                         return frame_35("D", r.peer_ctx(2), kNos,
+                         return frame_35("D", r.peer_ctx(2), kNos(),
                                          "1128=6\x01"
                                          "347=KOI8-R\x01");
                      }),
@@ -273,7 +286,7 @@ TEST(W3cStandardTag, Fix44Route_A_RefusedByTheRoute) {
         run_own_cell("W-3c 347 FIX44 A", own_fixture(Shape::A, {fixt11(), fix50sp2(), fix44()}),
                      true, Arm::Active,
                      [](const Rig& r) {
-                         return frame_35("D", r.peer_ctx(2), kNos,
+                         return frame_35("D", r.peer_ctx(2), kNos(),
                                          "1128=6\x01"
                                          "347=KOI8-R\x01");
                      }),
@@ -285,7 +298,7 @@ TEST(W3cFourTags, Tag1128_10_OnT_RoutesToLatest) {
     expect_ending(run_own_cell("W-3c 1128", own_fixture(Shape::T, {fixt11(), fix50sp2(), latest()}),
                                true, Arm::Active,
                                [](const Rig& r) {
-                                   return frame_35("D", r.peer_ctx(2), kNos + "3115=1.5\x01",
+                                   return frame_35("D", r.peer_ctx(2), kNos() + "3115=1.5\x01",
                                                    "1128=10\x01");
                                }),
                   kDelivered);
@@ -328,7 +341,7 @@ TEST(W3cFourTags, Tag1129_ByTheRoute) {
     f.session_dict = fixt11_closing_1129_1156();
     expect_ending(run_own_cell("W-3c 1129", std::move(f), true, Arm::Active,
                                [](const Rig& r) {
-                                   return frame_35("D", r.peer_ctx(2), kNos, "1129=other\x01");
+                                   return frame_35("D", r.peer_ctx(2), kNos(), "1129=other\x01");
                                }),
                   kDelivered);
 }
@@ -341,7 +354,7 @@ TEST(W3cFourTags, Tag1156_ByTheRoute) {
     f.session_dict = fixt11_closing_1129_1156();
     expect_ending(run_own_cell("W-3c 1156", std::move(f), true, Arm::Active,
                                [](const Rig& r) {
-                                   return frame_35("D", r.peer_ctx(2), kNos, "1156=303\x01");
+                                   return frame_35("D", r.peer_ctx(2), kNos(), "1156=303\x01");
                                }),
                   kDelivered);
 }
@@ -349,8 +362,8 @@ TEST(W3cFourTags, Tag1156_ByTheRoute) {
 // (d): A, an overlay's header tag on Logon and Heartbeat, through FIXT11.
 const DictPtr& fix50sp2_with_header_tags() {
     static const DictPtr d =
-        overlay_on("FIX50SP2.xml", std::string(k50Head) + "<header>" + kHeaderMembers +
-                                       "</header><fields>" + kHeaderDefs + "</fields></fix>");
+        overlay_on("FIX50SP2.xml", std::string(k50Head) + "<header>" + kHeaderMembers() +
+                                       "</header><fields>" + kHeaderDefs() + "</fields></fix>");
     return d;
 }
 
@@ -380,7 +393,7 @@ TEST(W3d, HeaderTagOnHeartbeat_Accepted) {
 
 // (e) and (f): a header pair.
 std::string header_pair_overlay(const char* head) {
-    return std::string(head) + "<header>" + kPairMembers + "</header>" + kPairFields + "</fix>";
+    return std::string(head) + "<header>" + kPairMembers() + "</header>" + kPairFields() + "</fix>";
 }
 
 const DictPtr& fix50sp2_with_header_pair() {
@@ -428,8 +441,10 @@ void watch_pair(Rig& r, PairSeen& seen) {
         seen.resolved = v.resolved_application_version();
         seen.clone_data = clone_field_text(v, 5031);
         auto h = dd::reify(v,
-                           dd::version_profile{dd::session_version::vt11,
-                                               dd::application_version::v50sp2, true, 0},
+                           dd::version_profile{.session = dd::session_version::vt11,
+                                               .default_appl = dd::application_version::v50sp2,
+                                               .has_per_message_override = true,
+                                               ._reserved = 0},
                            std::pmr::new_delete_resource());
         if (h) {
             seen.reify_data = field_text(h->view(), 5031);
@@ -455,15 +470,18 @@ struct PairData {
 };
 
 // The field's own terminator supplies the closing SOH of `SOH 1128=10 SOH`.
-const PairData kEmbeddedVersion{"Embedded1128",
+const PairData kEmbeddedVersion{.name = "Embedded1128",
+                                .data =
+                                    "\x01"
+                                    "1128=10"};
+const PairData kEmbeddedSeq{.name = "Embedded34",
+                            .data =
                                 "\x01"
-                                "1128=10"};
-const PairData kEmbeddedSeq{"Embedded34",
-                            "\x01"
-                            "34=7"};
-const PairData kNonTagBytes{"NonTagBytes",
-                            "ab\x01"
-                            "zz"};
+                                "34=7"};
+const PairData kNonTagBytes{.name = "NonTagBytes",
+                            .data =
+                                "ab\x01"
+                                "zz"};
 
 class W3ePair : public testing::TestWithParam<PairData> {};
 
@@ -480,7 +498,7 @@ TEST_P(W3ePair, OwnVersion_SelectionStaysS_DataWhole) {
     }
     PairSeen seen;
     watch_pair(*run.rig, seen);
-    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, pair_field(data)));
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos(), pair_field(data)));
     expect_ending(run, kDelivered);
     expect_pair_whole(seen, data, 2);
     EXPECT_EQ(seen.resolved, dd::application_version::v50sp2) << "1137's slot, S's own";
@@ -507,7 +525,7 @@ TEST_P(W3fPair, T_RoutedByHeader1128_DeliveredDataWhole) {
     PairSeen seen;
     watch_pair(*run.rig, seen);
     run.ending = run.rig->deliver(
-        frame_35("D", run.rig->peer_ctx(2), kNos, "1128=10\x01" + pair_field(data)));
+        frame_35("D", run.rig->peer_ctx(2), kNos(), "1128=10\x01" + pair_field(data)));
     expect_ending(run, kDelivered);
     expect_pair_whole(seen, data, 2);
     EXPECT_EQ(seen.resolved, dd::application_version::vlatest) << "the header's 1128";
@@ -549,7 +567,7 @@ TEST(W3fPrivateBuild, T_RoutedByHeader1128_DeliveredDataWhole) {
     PairSeen seen;
     watch_pair(*run.rig, seen);
     run.ending = run.rig->deliver(
-        frame_35("D", run.rig->peer_ctx(2), kNos, "1128=10\x01" + pair_field(data)));
+        frame_35("D", run.rig->peer_ctx(2), kNos(), "1128=10\x01" + pair_field(data)));
     expect_ending(run, kDelivered);
     expect_pair_whole(seen, data, 2);
     EXPECT_EQ(seen.resolved, dd::application_version::vlatest) << "the header's 1128";
@@ -588,7 +606,7 @@ TEST(W3fCollision, SHeaderPairReadsOverTheRoutedBodyPair) {
     const std::string data =
         "\x01"
         "34=7";
-    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, pair_field(data)));
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos(), pair_field(data)));
     expect_ending(run, kDelivered);
     expect_pair_whole(seen, data, 2);
 }
@@ -605,7 +623,7 @@ TEST(W3g, OverlayTrailerTag_RoutedFrame_Refused) {
     f.session_dict = s;
     expect_ending(run_own_cell("W-3g", std::move(f), true, Arm::Active,
                                [](const Rig& r) {
-                                   return frame_35("D", r.peer_ctx(2), kNos + "5050=v\x01");
+                                   return frame_35("D", r.peer_ctx(2), kNos() + "5050=v\x01");
                                }),
                   "R 2/5050 D 45=2 | stays | c | app=0 adm=0");
 }
@@ -618,11 +636,11 @@ struct HopsRoute {
 };
 
 const HopsRoute kHopsRoutes[] = {
-    {"T_FIX50SP2", Shape::T, ""},
-    {"T_FIX44", Shape::T, "1128=6\x01"},
-    {"T_FIX42", Shape::T, "1128=4\x01"},
-    {"T_Latest", Shape::T, "1128=10\x01"},
-    {"A_own", Shape::A, ""},
+    {.name = "T_FIX50SP2", .shape = Shape::T, .header_1128 = ""},
+    {.name = "T_FIX44", .shape = Shape::T, .header_1128 = "1128=6\x01"},
+    {.name = "T_FIX42", .shape = Shape::T, .header_1128 = "1128=4\x01"},
+    {.name = "T_Latest", .shape = Shape::T, .header_1128 = "1128=10\x01"},
+    {.name = "A_own", .shape = Shape::A, .header_1128 = ""},
 };
 
 Fixture hops_fixture(Shape s) {
@@ -632,7 +650,7 @@ Fixture hops_fixture(Shape s) {
 class W3hNoHops : public testing::TestWithParam<HopsRoute> {};
 
 std::string hops_frame(const Rig& r, const HopsRoute& route, const std::string& hops) {
-    return frame_35("D", r.peer_ctx(2), kNos, route.header_1128 + hops);
+    return frame_35("D", r.peer_ctx(2), kNos(), route.header_1128 + hops);
 }
 
 TEST_P(W3hNoHops, CountHigh_Refused) {

@@ -83,30 +83,42 @@ inline std::string wire(const std::string& begin_string, const std::string& body
 struct Ctx {
     std::string snd;
     std::string tgt;
-    unsigned seq;
+    unsigned seq{};
 };
 
 inline constexpr const char* kFresh = "20240101-00:00:00.000";
 inline constexpr const char* kStale = "20200101-00:00:00.000";
-inline const std::string kFT = "FIXT.1.1";
-inline const std::string kNos =
-    "11=C\x01"
-    "21=1\x01"
-    "55=X\x01"
-    "54=1\x01"
-    "60=20240101-00:00:00\x01"
-    "40=1\x01"
-    "38=1\x01";
-inline const std::string kNosNo11 =
-    "21=1\x01"
-    "55=X\x01"
-    "54=1\x01"
-    "60=20240101-00:00:00\x01"
-    "40=1\x01"
-    "38=1\x01";
-inline const std::string kLogonBody =
-    "98=0\x01"
-    "108=30\x01";
+inline const std::string& kFT() {
+    static const std::string value = "FIXT.1.1";
+    return value;
+}
+inline const std::string& kNos() {
+    static const std::string value =
+        "11=C\x01"
+        "21=1\x01"
+        "55=X\x01"
+        "54=1\x01"
+        "60=20240101-00:00:00\x01"
+        "40=1\x01"
+        "38=1\x01";
+    return value;
+}
+inline const std::string& kNosNo11() {
+    static const std::string value =
+        "21=1\x01"
+        "55=X\x01"
+        "54=1\x01"
+        "60=20240101-00:00:00\x01"
+        "40=1\x01"
+        "38=1\x01";
+    return value;
+}
+inline const std::string& kLogonBody() {
+    static const std::string value =
+        "98=0\x01"
+        "108=30\x01";
+    return value;
+}
 
 inline std::string hdr(const Ctx& c, const char* sending_time = kFresh) {
     return "34=" + std::to_string(c.seq) + "\x01" + "49=" + c.snd + "\x01" + "52=" + sending_time +
@@ -115,13 +127,13 @@ inline std::string hdr(const Ctx& c, const char* sending_time = kFresh) {
 
 inline std::string frame_35(const std::string& msg_type, const Ctx& c, const std::string& body = {},
                             const std::string& before_34 = {}) {
-    return wire(kFT, "35=" + msg_type + "\x01" + before_34 + hdr(c) + body);
+    return wire(kFT(), "35=" + msg_type + "\x01" + before_34 + hdr(c) + body);
 }
 
 inline std::string logon_frame(const Ctx& c, const std::string& extra,
                                const char* sending_time = kFresh,
-                               const std::string& begin_string = kFT) {
-    return wire(begin_string, "35=A\x01" + hdr(c, sending_time) + kLogonBody + extra);
+                               const std::string& begin_string = kFT()) {
+    return wire(begin_string, "35=A\x01" + hdr(c, sending_time) + kLogonBody() + extra);
 }
 
 // ── The keyed inputs: research R-18's ids, each spelled as its log spells it ────────────
@@ -136,7 +148,8 @@ struct Input {
 inline std::vector<Input> make_inputs() {
     std::vector<Input> v;
     auto add = [&](std::string id, std::function<std::string(const Ctx&)> f, bool mtls = false) {
-        v.push_back(Input{std::move(id), std::move(f), mtls, false});
+        v.push_back(
+            Input{.id = std::move(id), .make = std::move(f), .mtls = mtls, .posture = false});
     };
     auto logon = [](std::string extra, const char* st, std::string bs) {
         return [extra = std::move(extra), st, bs = std::move(bs)](const Ctx& c) {
@@ -147,8 +160,8 @@ inline std::vector<Input> make_inputs() {
         c.seq += 5;
         return c;
     };
-    const std::string nos = kNos;
-    const std::string bad = kNosNo11;
+    const std::string& nos = kNos();
+    const std::string& bad = kNosNo11();
     // Repeated 35.
     add("rep35 D..0 past", [=](const Ctx& c) { return frame_35("D", c, nos + "35=0\x01"); });
     add("rep35 D..3 past", [=](const Ctx& c) { return frame_35("D", c, nos + "35=3\x01"); });
@@ -177,30 +190,30 @@ inline std::vector<Input> make_inputs() {
     });
     add("rep35 A..0 past", [](const Ctx& c) {
         return frame_35("A", c,
-                        kLogonBody +
+                        kLogonBody() +
                             "1137=9\x01"
                             "35=0\x01");
     });
     add("rep35 D..A logon-fields", [](const Ctx& c) {
         return frame_35("D", c,
-                        kLogonBody +
+                        kLogonBody() +
                             "1137=9\x01"
                             "35=A\x01");
     });
     add("rep35 0..A logon-fields", [](const Ctx& c) {
         return frame_35("0", c,
-                        kLogonBody +
+                        kLogonBody() +
                             "1137=9\x01"
                             "35=A\x01");
     });
     add("rep35 0,D header", [](const Ctx& c) {
-        return wire(kFT,
+        return wire(kFT(),
                     "35=0\x01"
                     "35=D\x01" +
                         hdr(c));
     });
     add("rep35 D,D header", [=](const Ctx& c) {
-        return wire(kFT,
+        return wire(kFT(),
                     "35=D\x01"
                     "35=D\x01" +
                         hdr(c) + nos);
@@ -234,16 +247,16 @@ inline std::vector<Input> make_inputs() {
     add("TestRequest", [](const Ctx& c) { return frame_35("1", c, "112=x\x01"); });
     add("Logout", [](const Ctx& c) { return frame_35("5", c); });
     // Logon 1137.
-    add("Logon 1137=9", logon("1137=9\x01", kFresh, kFT));
-    add("Logon 1137=10", logon("1137=10\x01", kFresh, kFT));
-    add("Logon 1137 absent", logon("", kFresh, kFT));
-    add("Logon 1137=empty", logon("1137=\x01", kFresh, kFT));
-    add("Logon 1137=99", logon("1137=99\x01", kFresh, kFT));
+    add("Logon 1137=9", logon("1137=9\x01", kFresh, kFT()));
+    add("Logon 1137=10", logon("1137=10\x01", kFresh, kFT()));
+    add("Logon 1137 absent", logon("", kFresh, kFT()));
+    add("Logon 1137=empty", logon("1137=\x01", kFresh, kFT()));
+    add("Logon 1137=99", logon("1137=99\x01", kFresh, kFT()));
     add("Logon undeclared 5999", logon("1137=9\x01"
                                        "5999=1\x01",
-                                       kFresh, kFT));
-    add("Logon 1137=abc", logon("1137=abc\x01", kFresh, kFT));
-    add("Logon 1137=4", logon("1137=4\x01", kFresh, kFT));
+                                       kFresh, kFT()));
+    add("Logon 1137=abc", logon("1137=abc\x01", kFresh, kFT()));
+    add("Logon 1137=4", logon("1137=4\x01", kFresh, kFT()));
     // Wrong BeginString.
     add("wrongBS Logon 1137=9", logon("1137=9\x01", kFresh, "FIX.4.4"));
     add("wrongBS Logon 1137=99", logon("1137=99\x01", kFresh, "FIX.4.4"));
@@ -251,64 +264,65 @@ inline std::vector<Input> make_inputs() {
     add("wrongBS Logon 1137 absent", logon("", kFresh, "FIX.4.4"));
     add("wrongBS NOS", [=](const Ctx& c) { return wire("FIX.4.4", "35=D\x01" + hdr(c) + nos); });
     // Stale SendingTime.
-    add("stale Logon 1137=9", logon("1137=9\x01", kStale, kFT));
-    add("stale Logon 1137=99", logon("1137=99\x01", kStale, kFT));
-    add("stale Logon 1137=4", logon("1137=4\x01", kStale, kFT));
-    add("stale Logon 1137 absent", logon("", kStale, kFT));
-    add("stale NOS", [=](const Ctx& c) { return wire(kFT, "35=D\x01" + hdr(c, kStale) + nos); });
-    add("stale Heartbeat", [](const Ctx& c) { return wire(kFT, "35=0\x01" + hdr(c, kStale)); });
+    add("stale Logon 1137=9", logon("1137=9\x01", kStale, kFT()));
+    add("stale Logon 1137=99", logon("1137=99\x01", kStale, kFT()));
+    add("stale Logon 1137=4", logon("1137=4\x01", kStale, kFT()));
+    add("stale Logon 1137 absent", logon("", kStale, kFT()));
+    add("stale NOS", [=](const Ctx& c) { return wire(kFT(), "35=D\x01" + hdr(c, kStale) + nos); });
+    add("stale Heartbeat", [](const Ctx& c) { return wire(kFT(), "35=0\x01" + hdr(c, kStale)); });
     // Off-list mTLS identity: the frame is the Logon, the session mTLS with an off-list identity.
-    add("mTLS-offlist Logon 1137=9", logon("1137=9\x01", kFresh, kFT), true);
-    add("mTLS-offlist Logon 1137=99", logon("1137=99\x01", kFresh, kFT), true);
-    add("mTLS-offlist Logon 1137=4", logon("1137=4\x01", kFresh, kFT), true);
-    add("mTLS-offlist Logon 1137 absent", logon("", kFresh, kFT), true);
+    add("mTLS-offlist Logon 1137=9", logon("1137=9\x01", kFresh, kFT()), true);
+    add("mTLS-offlist Logon 1137=99", logon("1137=99\x01", kFresh, kFT()), true);
+    add("mTLS-offlist Logon 1137=4", logon("1137=4\x01", kFresh, kFT()), true);
+    add("mTLS-offlist Logon 1137 absent", logon("", kFresh, kFT()), true);
     // Posture: production posture, the peer's Logon says 464=Y.
     auto post = [&](std::string id, std::string extra) {
-        v.push_back(Input{std::move(id),
-                          [extra = std::move(extra)](const Ctx& c) {
-                              return logon_frame(c, extra + "464=Y\x01");
-                          },
-                          false, true});
+        v.push_back(Input{.id = std::move(id),
+                          .make = [extra = std::move(extra)](
+                                      const Ctx& c) { return logon_frame(c, extra + "464=Y\x01"); },
+                          .mtls = false,
+                          .posture = true});
     };
     post("posture-mismatch Logon 1137=9", "1137=9\x01");
     post("posture-mismatch Logon 1137=99", "1137=99\x01");
     post("posture-mismatch Logon 1137=4", "1137=4\x01");
     post("posture-mismatch Logon 1137 absent", "");
     // mtd.log's inputs.
-    add("Logon 1137 absent + 5999 after", logon("5999=1\x01", kFresh, kFT));
-    add("Logon 5999 + 1137 absent",
-        [](const Ctx& c) { return wire(kFT, "35=A\x01" + hdr(c) + "5999=1\x01" + kLogonBody); });
+    add("Logon 1137 absent + 5999 after", logon("5999=1\x01", kFresh, kFT()));
+    add("Logon 5999 + 1137 absent", [](const Ctx& c) {
+        return wire(kFT(), "35=A\x01" + hdr(c) + "5999=1\x01" + kLogonBody());
+    });
     add("Logon 1137=99 + 5999 after", logon("1137=99\x01"
                                             "5999=1\x01",
-                                            kFresh, kFT));
+                                            kFresh, kFT()));
     add("Logon 1137=4 + 5999 after", logon("1137=4\x01"
                                            "5999=1\x01",
-                                           kFresh, kFT));
+                                           kFresh, kFT()));
     add("Logon 141=Y 1137=4", logon("141=Y\x01"
                                     "1137=4\x01",
-                                    kFresh, kFT));
+                                    kFresh, kFT()));
     add("Logon 141=Y 1137=9", logon("141=Y\x01"
                                     "1137=9\x01",
-                                    kFresh, kFT));
+                                    kFresh, kFT()));
     add("Logon Message Type Default", logon("1137=9\x01"
                                             "384=1\x01"
                                             "372=D\x01"
                                             "1130=10\x01",
-                                            kFresh, kFT));
+                                            kFresh, kFT()));
     add("Logon Message Type Default 385=S 1410=Y", logon("1137=9\x01"
                                                          "384=1\x01"
                                                          "372=D\x01"
                                                          "385=S\x01"
                                                          "1130=10\x01"
                                                          "1410=Y\x01",
-                                                         kFresh, kFT));
+                                                         kFresh, kFT()));
     // E-7's inputs with no log line, read against their row.
     add("1128=0 hdr", [=](const Ctx& c) { return frame_35("D", c, nos, "1128=0\x01"); });
     add("1128=1 hdr", [=](const Ctx& c) { return frame_35("D", c, nos, "1128=1\x01"); });
     add("rep35 D..0 past 1128=99",
         [=](const Ctx& c) { return frame_35("D", c, nos + "35=0\x01", "1128=99\x01"); });
     add("1128=99 hdr stale", [=](const Ctx& c) {
-        return wire(kFT,
+        return wire(kFT(),
                     "35=D\x01"
                     "1128=99\x01" +
                         hdr(c, kStale) + nos);
@@ -451,8 +465,8 @@ inline OnlyPair only_pair(const dd::Dictionary& only,
         for (const dd::Dictionary* d : others) {
             shared = shared && !d->message_fields(m.msg_type).empty();
         }
-        const bool admin = m.msg_type.size() == 1 &&
-                           std::string_view{"012345A"}.find(m.msg_type) != std::string_view::npos;
+        const bool admin =
+            m.msg_type.size() == 1 && std::string_view{"012345A"}.contains(m.msg_type);
         if (!shared || admin) {
             continue;
         }
@@ -467,8 +481,10 @@ inline OnlyPair only_pair(const dd::Dictionary& only,
                 elsewhere = elsewhere || d->field_valid_for(m.msg_type, f.tag);
             }
             if (!elsewhere) {
-                return OnlyPair{std::string(m.msg_type), f.tag, f.group_no_tag,
-                                plain_value(only, f)};
+                return OnlyPair{.msg_type = std::string(m.msg_type),
+                                .tag = f.tag,
+                                .group_no_tag = f.group_no_tag,
+                                .value = plain_value(only, f)};
             }
         }
     }
@@ -498,13 +514,19 @@ inline std::string required_body(const dd::Dictionary& d, std::string_view msg_t
 // vendored dictionary can split a frame differently from another. A pair on a route therefore
 // comes from an overlay: 5030 and 5031, tags no vendored file declares.
 
-inline const std::string kPairFields =
-    "<fields>"
-    "<field number='5030' name='VenuePairLen' type='LENGTH' />"
-    "<field number='5031' name='VenuePairData' type='DATA' />"
-    "</fields>";
-inline const std::string kPairMembers =
-    "<field name='VenuePairLen' required='N' /><field name='VenuePairData' required='N' />";
+inline const std::string& kPairFields() {
+    static const std::string value =
+        "<fields>"
+        "<field number='5030' name='VenuePairLen' type='LENGTH' />"
+        "<field number='5031' name='VenuePairData' type='DATA' />"
+        "</fields>";
+    return value;
+}
+inline const std::string& kPairMembers() {
+    static const std::string value =
+        "<field name='VenuePairLen' required='N' /><field name='VenuePairData' required='N' />";
+    return value;
+}
 
 // `5030=<len>|5031=<data>|`.
 inline std::string pair_field(const std::string& data) {
@@ -517,7 +539,7 @@ inline const DictPtr& fix50sp2_with_body_pair() {
         overlay_on("FIX50SP2.xml",
                    "<fix type='FIX' major='5' minor='0' servicepack='2'><messages>"
                    "<message name='NewOrderSingle' msgtype='D' msgcat='app'>" +
-                       kPairMembers + "</message></messages>" + kPairFields + "</fix>");
+                       kPairMembers() + "</message></messages>" + kPairFields() + "</fix>");
     return d;
 }
 
@@ -568,6 +590,7 @@ inline std::shared_ptr<dd::version_registry> make_registry(std::vector<DictPtr> 
     (void)dict_resource();
     static std::map<std::vector<const dd::Dictionary*>, std::shared_ptr<dd::version_registry>> all;
     std::vector<const dd::Dictionary*> key;
+    key.reserve(dicts.size());
     for (const DictPtr& d : dicts) {
         key.push_back(d.get());
     }
@@ -597,12 +620,14 @@ inline const DictPtr& shape_dict(Shape s) {
     return fixt11();
 }
 
-inline Fixture shape_fixture(Shape s) { return Fixture{shared_registry(), shape_dict(s)}; }
+inline Fixture shape_fixture(Shape s) {
+    return Fixture{.registry = shared_registry(), .session_dict = shape_dict(s)};
+}
 
 // An own-registry fixture on a shape (tasks.md T007): the shape's S with these engine
 // dictionaries.
 inline Fixture own_fixture(Shape s, std::vector<DictPtr> dicts) {
-    return Fixture{make_registry(std::move(dicts)), shape_dict(s)};
+    return Fixture{.registry = make_registry(std::move(dicts)), .session_dict = shape_dict(s)};
 }
 
 // Hands the fixture's route set to the session, right after construction and before open(), as
@@ -638,7 +663,8 @@ inline void adopt_fixture_routes(Session& session, const Fixture& fixture) {
             ADD_FAILURE() << "the fixture's route set did not build";
             return;
         }
-        held = Held{fixture.registry, fixture.session_dict, *built};
+        held = Held{
+            .registry = fixture.registry, .session_dict = fixture.session_dict, .routes = *built};
     }
     if (held.routes->find(fixture.session_dict.get(), nullptr) == nullptr) {
         ADD_FAILURE() << "the fixture's route set lacks its S";
@@ -893,7 +919,7 @@ public:
         const bool acceptor = options.role == session_role::acceptor;
         cfg.sender_comp_id = acceptor ? "ISLD" : "TW";
         cfg.target_comp_id = acceptor ? "TW" : "ISLD";
-        cfg.begin_string = kFT;
+        cfg.begin_string = kFT();
         cfg.heartbeat_interval = std::chrono::seconds{30};
         cfg.security_profile = SecurityProfile{options.mtls ? SecurityProfile::kind::mtls_ca
                                                             : SecurityProfile::kind::one_way_ca};
@@ -949,8 +975,9 @@ public:
     }
 
     [[nodiscard]] Ctx peer_ctx(unsigned seq) const {
-        return Ctx{options.role == session_role::acceptor ? "TW" : "ISLD",
-                   options.role == session_role::acceptor ? "ISLD" : "TW", seq};
+        return Ctx{.snd = options.role == session_role::acceptor ? "TW" : "ISLD",
+                   .tgt = options.role == session_role::acceptor ? "ISLD" : "TW",
+                   .seq = seq};
     }
 
     // Feeds a frame and pumps what it posted. A pump miss is reported in err.
@@ -993,7 +1020,7 @@ public:
         return {};
     }
 
-    [[nodiscard]] unsigned next_in() {
+    [[nodiscard]] unsigned next_in() const {
         return static_cast<unsigned>(session_test_access::seqnum_mgr(*sess).next_inbound_unsafe());
     }
 
@@ -1195,16 +1222,14 @@ inline SessionConfig plain_fixt_config(asio::io_context& ioc, DictPtr s, bool va
     SessionConfig cfg;
     cfg.sender_comp_id = sender;
     cfg.target_comp_id = "TW";
-    cfg.begin_string = kFT;
+    cfg.begin_string = kFT();
     cfg.heartbeat_interval = std::chrono::seconds{30};
     cfg.security_profile = SecurityProfile{SecurityProfile::kind::one_way_ca};
     cfg.dictionary = std::move(s);
     cfg.executor_override = ioc.get_executor();
     cfg.role = session_role::acceptor;
     cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
-    if (default_appl) {
-        cfg.default_appl_ver_id = *default_appl;
-    }
+    cfg.default_appl_ver_id = default_appl;
     cfg.validate_inbound_messages = validate;
     cfg.transport_send = [](std::span<const std::byte>) {};
     return cfg;
@@ -1214,16 +1239,16 @@ inline SessionConfig plain_fixt_config(asio::io_context& ioc, DictPtr s, bool va
 
 // `a` null means "A answers as T" (E-7's `#### After`); `l` null means L answers as T too.
 struct KeyedRow {
-    const char* cell;  // E-7's cell id, or the witness's name for a row E-7 has no column for
-    const char* input;
-    const char* t;
+    const char* cell{};  // E-7's cell id, or the witness's name for a row E-7 has no column for
+    const char* input{};
+    const char* t{};
     const char* a = nullptr;
     const char* l = nullptr;
 };
 
 struct KeyedCell {
     KeyedRow row;
-    Shape shape;
+    Shape shape{};
 };
 
 inline std::string expected_on(const KeyedRow& r, Shape s) {

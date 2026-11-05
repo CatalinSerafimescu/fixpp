@@ -42,17 +42,29 @@ std::string vendored(std::string_view relative) {
 // A TOML basic string of a path, whatever the separators.
 std::string quoted(const std::string& s) { return "\"" + s + "\""; }
 
-const std::string kFix50Sp2 = vendored("FIX50SP2.xml");
-const std::string kFixt11 = vendored("FIXT11.xml");
-const std::string kFix44 = vendored("FIX44.xml");
-const std::string kLatest = vendored("orchestra/OrchestraFIXLatest.xml");
+const std::string& kFix50Sp2() {
+    static const std::string value = vendored("FIX50SP2.xml");
+    return value;
+}
+const std::string& kFixt11() {
+    static const std::string value = vendored("FIXT11.xml");
+    return value;
+}
+const std::string& kFix44() {
+    static const std::string value = vendored("FIX44.xml");
+    return value;
+}
+const std::string& kLatest() {
+    static const std::string value = vendored("orchestra/OrchestraFIXLatest.xml");
+    return value;
+}
 
 // A document with one validating FIXT session. `extra_paths` is the key's whole line, or empty;
 // `session_lines` goes into the session table.
 std::string document(const std::string& extra_paths, const std::string& session_lines = {},
                      const std::string& kind = "path") {
     return "[clock]\nkind = \"system\"\n\n[store]\nkind = \"memory\"\n\n[dictionary]\nkind = " +
-           quoted(kind) + "\npath = " + quoted(kFix50Sp2) + "\n" + extra_paths +
+           quoted(kind) + "\npath = " + quoted(kFix50Sp2()) + "\n" + extra_paths +
            "\n\n[[session]]\n"
            "sender_comp_id = \"ISLD\"\n"
            "target_comp_id = \"TW\"\n"
@@ -120,6 +132,7 @@ std::string all_diagnostics(const fixpp::config::LoadResult& r) {
 
 std::vector<dd::session_version> versions_of(const fixpp::config::ConfigBundle& b) {
     std::vector<dd::session_version> out;
+    out.reserve(b.engine.dictionaries.size());
     for (const auto& d : b.engine.dictionaries) {
         out.push_back(d->which_session_version());
     }
@@ -129,7 +142,7 @@ std::vector<dd::session_version> versions_of(const fixpp::config::ConfigBundle& 
 // ── extra_paths reaches the engine ──────────────────────────────────────────────────────
 
 TEST(W14ExtraPaths, ReachesTheEngineInOrder) {
-    Loaded l{document(list_of({kFixt11, kLatest}))};
+    Loaded l{document(list_of({kFixt11(), kLatest()}))};
     ASSERT_TRUE(l.result.has_value()) << all_diagnostics(l.result);
     const std::vector<dd::session_version> expected = {
         dd::session_version::v50sp2, dd::session_version::vt11, dd::session_version::vlatest};
@@ -137,7 +150,7 @@ TEST(W14ExtraPaths, ReachesTheEngineInOrder) {
 }
 
 TEST(W14ExtraPaths, FrontIsThePathFile_AndTheSessionsDefault) {
-    Loaded l{document(list_of({kFixt11, kLatest}))};
+    Loaded l{document(list_of({kFixt11(), kLatest()}))};
     ASSERT_TRUE(l.result.has_value()) << all_diagnostics(l.result);
     ASSERT_FALSE(l.result->engine.dictionaries.empty());
     const auto& front = l.result->engine.dictionaries.front();
@@ -148,7 +161,7 @@ TEST(W14ExtraPaths, FrontIsThePathFile_AndTheSessionsDefault) {
 }
 
 TEST(W14ExtraPaths, TheSessionValidates_ARealEngineRegistersIt) {
-    Loaded l{document(list_of({kFixt11, kLatest}))};
+    Loaded l{document(list_of({kFixt11(), kLatest()}))};
     ASSERT_TRUE(l.result.has_value()) << all_diagnostics(l.result);
     const SessionConfig cfg = l.result->sessions[0].config;
     EXPECT_TRUE(cfg.validate_inbound_messages);
@@ -158,7 +171,7 @@ TEST(W14ExtraPaths, TheSessionValidates_ARealEngineRegistersIt) {
 }
 
 TEST(W14ExtraPaths, ARepeatedFileIsLoadedAgain) {
-    Loaded l{document(list_of({kFixt11, kFixt11}))};
+    Loaded l{document(list_of({kFixt11(), kFixt11()}))};
     ASSERT_TRUE(l.result.has_value()) << all_diagnostics(l.result);
     ASSERT_EQ(l.result->engine.dictionaries.size(), 3U);
     EXPECT_NE(l.result->engine.dictionaries[1], l.result->engine.dictionaries[2]);
@@ -186,7 +199,7 @@ TEST(W14Absent, AnEmptyListIsAnAbsentKey) {
 // ── Diagnostics at the key ──────────────────────────────────────────────────────────────
 
 TEST(W14Bad, AFileThatDoesNotLoad_NamesItsIndex) {
-    Loaded l{document(list_of({kFixt11, vendored("no_such_file.xml")}))};
+    Loaded l{document(list_of({kFixt11(), vendored("no_such_file.xml")}))};
     EXPECT_FALSE(l.result.has_value()) << "a bad path loads";
     const auto d = at_key(l.result, kKey);
     ASSERT_EQ(d.size(), 1U) << all_diagnostics(l.result);
@@ -194,13 +207,13 @@ TEST(W14Bad, AFileThatDoesNotLoad_NamesItsIndex) {
 }
 
 TEST(W14Bad, NotAnArray) {
-    Loaded l{document("extra_paths = " + quoted(kFixt11))};
+    Loaded l{document("extra_paths = " + quoted(kFixt11()))};
     EXPECT_FALSE(l.result.has_value()) << "a string in place of the list loads";
     EXPECT_EQ(at_key(l.result, kKey).size(), 1U) << all_diagnostics(l.result);
 }
 
 TEST(W14Bad, ANonStringEntry_NamesItsIndex) {
-    Loaded l{document("extra_paths = [" + quoted(kFixt11) + ", 7]")};
+    Loaded l{document("extra_paths = [" + quoted(kFixt11()) + ", 7]")};
     EXPECT_FALSE(l.result.has_value()) << "a number in the list loads";
     const auto d = at_key(l.result, kKey);
     ASSERT_EQ(d.size(), 1U) << all_diagnostics(l.result);
@@ -208,7 +221,7 @@ TEST(W14Bad, ANonStringEntry_NamesItsIndex) {
 }
 
 TEST(W14Bad, AnEmptyEntry_NamesItsIndex) {
-    Loaded l{document("extra_paths = [\"\", " + quoted(kFixt11) + "]")};
+    Loaded l{document("extra_paths = [\"\", " + quoted(kFixt11()) + "]")};
     EXPECT_FALSE(l.result.has_value()) << "an empty entry loads";
     const auto d = at_key(l.result, kKey);
     ASSERT_EQ(d.size(), 1U) << all_diagnostics(l.result);
@@ -216,7 +229,7 @@ TEST(W14Bad, AnEmptyEntry_NamesItsIndex) {
 }
 
 TEST(W14Bad, EachBadEntryAddsItsOwn) {
-    Loaded l{document("extra_paths = [7, " + quoted(kFixt11) + ", " +
+    Loaded l{document("extra_paths = [7, " + quoted(kFixt11()) + ", " +
                       quoted(vendored("no_such_file.xml")) + "]")};
     EXPECT_FALSE(l.result.has_value()) << "two bad entries load";
     const auto d = at_key(l.result, kKey);
@@ -235,22 +248,26 @@ TEST(W14Bad, AnotherKindIsRefusedAtTheKind_TheKeyIsNotRead) {
 
 // ── FR-018: the overlay ─────────────────────────────────────────────────────────────────
 
-const std::string kOverlay =
-    "<fix type='FIX' major='5' minor='0' servicepack='2'>\n"
-    " <messages>\n"
-    "  <message name='NewOrderSingle' msgtype='D' msgcat='app'>\n"
-    "   <field name='Custom099Field' required='N' />\n"
-    "  </message>\n"
-    " </messages>\n"
-    " <fields>\n"
-    "  <field number='5001' name='Custom099Field' type='STRING' />\n"
-    " </fields>\n"
-    "</fix>\n";
+const std::string& kOverlay() {
+    static const std::string value =
+        "<fix type='FIX' major='5' minor='0' servicepack='2'>\n"
+        " <messages>\n"
+        "  <message name='NewOrderSingle' msgtype='D' msgcat='app'>\n"
+        "   <field name='Custom099Field' required='N' />\n"
+        "  </message>\n"
+        " </messages>\n"
+        " <fields>\n"
+        "  <field number='5001' name='Custom099Field' type='STRING' />\n"
+        " </fields>\n"
+        "</fix>\n";
+    return value;
+}
 
 // The session's own-version overlay survives, on a frame S answers. A non-own extra stays plain,
 // so the overlay's field is refused on a frame routed to the extra.
 TEST(W14Overlay, TheOwnVersionSurvives_ANonOwnExtraStaysPlain) {
-    Loaded l{document(list_of({kFixt11, kFix44}), "dialect_overlay = \"overlay.xml\"\n"), kOverlay};
+    Loaded l{document(list_of({kFixt11(), kFix44()}), "dialect_overlay = \"overlay.xml\"\n"),
+             kOverlay()};
     ASSERT_TRUE(l.result.has_value()) << all_diagnostics(l.result);
     const fixpp::config::ConfigBundle& b = *l.result;
     ASSERT_EQ(b.engine.dictionaries.size(), 3U);
@@ -258,19 +275,19 @@ TEST(W14Overlay, TheOwnVersionSurvives_ANonOwnExtraStaysPlain) {
     ASSERT_NE(s, nullptr);
     EXPECT_NE(s, b.engine.dictionaries.front()) << "the session holds the merged dictionary";
 
-    const Fixture fixture{make_registry(b.engine.dictionaries), s};
+    const Fixture fixture{.registry = make_registry(b.engine.dictionaries), .session_dict = s};
     const std::string custom = "5001=x\x01";
     {
         CellRun run = enter_arm(fixture, Arm::Active, {});
         ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
-        run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos + custom));
+        run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos() + custom));
         expect_ending(run, "- | stays | c | app=1 adm=0");
     }
     {
         CellRun run = enter_arm(fixture, Arm::Active, {});
         ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
         run.ending =
-            run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos + custom, "1128=6\x01"));
+            run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos() + custom, "1128=6\x01"));
         expect_ending(run, "R 2/5001 D 45=2 | stays | c | app=0 adm=0");
     }
 }
@@ -279,7 +296,7 @@ TEST(W14Overlay, TheOwnVersionSurvives_ANonOwnExtraStaysPlain) {
 
 // load_toml_config builds no engine and runs no FIXT transport check.
 TEST(W14Refusal, NoTransportDictionary_LoadsAndRegisterSessionRefuses) {
-    Loaded l{document(list_of({kLatest}))};
+    Loaded l{document(list_of({kLatest()}))};
     ASSERT_TRUE(l.result.has_value()) << all_diagnostics(l.result);
     EngineProbe probe{l.result->engine.dictionaries};
     const auto registered = probe.engine->register_session(l.result->sessions[0].config);

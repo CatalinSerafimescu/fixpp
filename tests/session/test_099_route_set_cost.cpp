@@ -69,7 +69,7 @@
 #include "test_099_fixt_support.hpp"
 
 // ASan, TSan and MSan own operator new. Under them the heap arm skips; the rest runs.
-#if defined(__has_feature)
+#ifdef __has_feature
 #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || \
     __has_feature(memory_sanitizer)
 #define FIXPP_SANITIZER_REPLACES_NEW 1
@@ -137,10 +137,11 @@ const DictPtr& overlay_s() {
 
 // FIX44 with a Length+Data pair in its header: the one S here that declares a header pair.
 const DictPtr& header_pair_s() {
-    static const DictPtr d = overlay_on("FIX44.xml",
-                                        "<fix type='FIX' major='4' minor='4' servicepack='0'>"
-                                        "<header>" +
-                                            kPairMembers + "</header>" + kPairFields + "</fix>");
+    static const DictPtr d =
+        overlay_on("FIX44.xml",
+                   "<fix type='FIX' major='4' minor='4' servicepack='0'>"
+                   "<header>" +
+                       kPairMembers() + "</header>" + kPairFields() + "</fix>");
     return d;
 }
 
@@ -149,7 +150,7 @@ struct Member {
     DictPtr s;
     session_role role = session_role::acceptor;
     bool validate = true;
-    std::string begin_string = kFT;
+    std::string begin_string = kFT();
     std::optional<AV> default_appl;
     bool declares_header_pair = false;
 };
@@ -180,9 +181,7 @@ SessionConfig config_of(const Member& m, std::uint16_t port) {
     c.heartbeat_interval = std::chrono::seconds{30};
     c.logout_disconnect_timeout_ms = 500;
     c.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", port};
-    if (m.default_appl) {
-        c.default_appl_ver_id = *m.default_appl;
-    }
+    c.default_appl_ver_id = m.default_appl;
     c.validate_inbound_messages = m.validate;
     c.transport_send = [](std::span<const std::byte>) {};
     return c;
@@ -243,7 +242,7 @@ public:
 
     bool registered_ok = true;
 
-    [[nodiscard]] SessionId id_of(const Member& m) const {
+    [[nodiscard]] static SessionId id_of(const Member& m) {
         return SessionId::from_config(config_of(m, 0));
     }
 
@@ -253,11 +252,11 @@ public:
             clock->now(), fixpp::core::fix_time_precision::millis, std::span<char>{buf});
         const std::string stamp = st ? std::string{st->data(), st->size()} : std::string{};
         return rig::message(m.begin_string, "A", 1, "TW" + m.sender, m.sender, stamp,
-                            m.begin_string == kFT ? "98=0\x01"
-                                                    "108=30\x01"
-                                                    "1137=6\x01"
-                                                  : "98=0\x01"
-                                                    "108=30\x01");
+                            m.begin_string == kFT() ? "98=0\x01"
+                                                      "108=30\x01"
+                                                      "1137=6\x01"
+                                                    : "98=0\x01"
+                                                      "108=30\x01");
     }
 
     // Connects each acceptor's peer and sends its first frame, and pumps until every session has
@@ -306,7 +305,7 @@ public:
                                                        "W15 Scene::stop")) {
                 std::abort();  // ~Engine would abort on its precondition anyway
             }
-            (void)fut.get();
+            fut.get();
         }
     }
 
@@ -320,12 +319,43 @@ std::vector<DictPtr> fixt_engine_dictionaries() { return {fixt11(), fix44(), fix
 
 std::vector<Member> fixt_members() {
     return {
-        Member{"T1", fixt11(), session_role::initiator, true, kFT, AV::v44},
-        Member{"T2", fixt11(), session_role::acceptor, true, kFT, AV::v44},
-        Member{"OV1", overlay_s(), session_role::initiator, true, kFT, AV::v44},
-        Member{"OV2", overlay_s(), session_role::acceptor, true, kFT, AV::v44},
-        Member{"PR1", header_pair_s(), session_role::acceptor, true, kFT, AV::v44, true},
-        Member{"NV1", fix42(), session_role::initiator, false, kFT, AV::v42},
+        Member{.sender = "T1",
+               .s = fixt11(),
+               .role = session_role::initiator,
+               .validate = true,
+               .begin_string = kFT(),
+               .default_appl = AV::v44},
+        Member{.sender = "T2",
+               .s = fixt11(),
+               .role = session_role::acceptor,
+               .validate = true,
+               .begin_string = kFT(),
+               .default_appl = AV::v44},
+        Member{.sender = "OV1",
+               .s = overlay_s(),
+               .role = session_role::initiator,
+               .validate = true,
+               .begin_string = kFT(),
+               .default_appl = AV::v44},
+        Member{.sender = "OV2",
+               .s = overlay_s(),
+               .role = session_role::acceptor,
+               .validate = true,
+               .begin_string = kFT(),
+               .default_appl = AV::v44},
+        Member{.sender = "PR1",
+               .s = header_pair_s(),
+               .role = session_role::acceptor,
+               .validate = true,
+               .begin_string = kFT(),
+               .default_appl = AV::v44,
+               .declares_header_pair = true},
+        Member{.sender = "NV1",
+               .s = fix42(),
+               .role = session_role::initiator,
+               .validate = false,
+               .begin_string = kFT(),
+               .default_appl = AV::v42},
     };
 }
 
@@ -333,7 +363,12 @@ std::vector<Member> fixt_members() {
 std::vector<Member> non_fixt_members(const std::string& begin_string, const DictPtr& s) {
     std::vector<Member> out;
     for (const Member& m : fixt_members()) {
-        out.push_back(Member{m.sender, s, m.role, m.validate, begin_string, std::nullopt});
+        out.push_back(Member{.sender = m.sender,
+                             .s = s,
+                             .role = m.role,
+                             .validate = m.validate,
+                             .begin_string = begin_string,
+                             .default_appl = std::nullopt});
     }
     return out;
 }
@@ -398,12 +433,20 @@ TEST(W15FixtPass, WalksMAfterStartAndStillMAfterEveryOpen) {
 // refuses: its S is not walked, and the log's cell in W-8 reads what that entry does.
 TEST(W15Mixed, ANonFixtSessionAndANoDefaultEntryTakeNoPart) {
     const std::vector<DictPtr> dictionaries{fixt11(), fix44()};
-    const std::vector<Member> fixt{
-        Member{"T1", fixt11(), session_role::acceptor, true, kFT, AV::v44}};
+    const std::vector<Member> fixt{Member{.sender = "T1",
+                                          .s = fixt11(),
+                                          .role = session_role::acceptor,
+                                          .validate = true,
+                                          .begin_string = kFT(),
+                                          .default_appl = AV::v44}};
     const std::uint64_t m = expected_walks(dictionaries, fixt);
     std::vector<Member> members = fixt;
-    members.push_back(
-        Member{"F44", fix44(), session_role::acceptor, true, "FIX.4.4", std::nullopt});
+    members.push_back(Member{.sender = "F44",
+                             .s = fix44(),
+                             .role = session_role::acceptor,
+                             .validate = true,
+                             .begin_string = "FIX.4.4",
+                             .default_appl = std::nullopt});
     std::uint64_t after_start = 0;
     std::uint64_t after_opens = 0;
     bool all_opened = false;
@@ -412,7 +455,12 @@ TEST(W15Mixed, ANonFixtSessionAndANoDefaultEntryTakeNoPart) {
     {
         Scene scene{dictionaries, members};
         EXPECT_TRUE(scene.registered_ok);
-        Member no_default{"ND", overlay_s(), session_role::initiator, false, kFT, std::nullopt};
+        Member no_default{.sender = "ND",
+                          .s = overlay_s(),
+                          .role = session_role::initiator,
+                          .validate = false,
+                          .begin_string = kFT(),
+                          .default_appl = std::nullopt};
         no_default_registered =
             scene.engine->register_session(config_of(no_default, 1)).has_value();
         reset_as_table_view_call_count();
@@ -562,7 +610,7 @@ constexpr int kThreadFrames = 16;
 bool read_until(asio::ip::tcp::socket& sock, std::string& seen, const std::string& needle) {
     const auto end = std::chrono::steady_clock::now() + std::chrono::seconds{60};
     std::array<char, 4096> buf{};
-    while (seen.find(needle) == std::string::npos) {
+    while (!seen.contains(needle)) {
         if (std::chrono::steady_clock::now() > end) {
             return false;
         }
@@ -585,6 +633,7 @@ bool read_until(asio::ip::tcp::socket& sock, std::string& seen, const std::strin
 void validate_on_threads(const detail::fixt_route_set::entry& route, const std::string& frame,
                          std::atomic<int>& passes, int threads, int frames_each) {
     std::vector<std::thread> validating;
+    validating.reserve(static_cast<std::size_t>(threads));
     for (int t = 0; t < threads; ++t) {
         validating.emplace_back([&route, &frame, &passes, frames_each] {
             const auto bytes = std::as_bytes(std::span{frame.data(), frame.size()});
@@ -625,9 +674,24 @@ void validate_on_threads(const detail::fixt_route_set::entry& route, const std::
 TEST(W15CRoute, WalksMPlusOnePerCSession_HeapReported) {
     const std::vector<DictPtr> dictionaries = fixt_engine_dictionaries();
     const std::vector<Member> members = {
-        Member{"CT", fixt11(), session_role::initiator, true, kFT, AV::v44},
-        Member{"CF", fix44(), session_role::initiator, true, kFT, AV::v44},
-        Member{"CO", overlay_s(), session_role::initiator, true, kFT, AV::v44},
+        Member{.sender = "CT",
+               .s = fixt11(),
+               .role = session_role::initiator,
+               .validate = true,
+               .begin_string = kFT(),
+               .default_appl = AV::v44},
+        Member{.sender = "CF",
+               .s = fix44(),
+               .role = session_role::initiator,
+               .validate = true,
+               .begin_string = kFT(),
+               .default_appl = AV::v44},
+        Member{.sender = "CO",
+               .s = overlay_s(),
+               .role = session_role::initiator,
+               .validate = true,
+               .begin_string = kFT(),
+               .default_appl = AV::v44},
     };
     const std::uint64_t m = expected_walks(dictionaries, members);
     const auto handle_of = [](const DictPtr& d) {
@@ -644,8 +708,9 @@ TEST(W15CRoute, WalksMPlusOnePerCSession_HeapReported) {
         ASSERT_EQ(fixpp_engine_config_add_dictionary(ec, handles.back()), FIXPP_ERR_OK);
     }
     fixpp_engine_t* engine = nullptr;
-    ASSERT_EQ(fixpp_engine_create(ec, FIXPP_C_ABI_VERSION_MAJOR, FIXPP_C_ABI_VERSION_MINOR, &engine),
-              FIXPP_ERR_OK);
+    ASSERT_EQ(
+        fixpp_engine_create(ec, FIXPP_C_ABI_VERSION_MAJOR, FIXPP_C_ABI_VERSION_MINOR, &engine),
+        FIXPP_ERR_OK);
 
     reset_as_table_view_call_count();
 #if !FIXPP_SANITIZER_REPLACES_NEW
@@ -699,7 +764,7 @@ TEST(W15CRoute, WalksMPlusOnePerCSession_HeapReported) {
 #endif
     fixpp_engine_destroy(engine);
     for (fixpp_dict_t* h : handles) {
-        delete reinterpret_cast<fixpp_dict*>(h);
+        fixpp_dict_destroy(h);
     }
 
     EXPECT_EQ(logons, static_cast<int>(members.size())) << "not every session opened";
@@ -720,9 +785,14 @@ TEST(W15Threads, WorkerThreadsAboveOne) {
     Engine engine{ioc.get_executor(), std::move(ec)};
 
     std::vector<Member> members;
+    members.reserve(kThreadSessions);
     for (int i = 0; i < kThreadSessions; ++i) {
-        members.push_back(
-            Member{"S" + std::to_string(i), fixt11(), session_role::acceptor, true, kFT, AV::v44});
+        members.push_back(Member{.sender = "S" + std::to_string(i),
+                                 .s = fixt11(),
+                                 .role = session_role::acceptor,
+                                 .validate = true,
+                                 .begin_string = kFT(),
+                                 .default_appl = AV::v44});
     }
     bool registered = true;
     for (const Member& mm : members) {
@@ -735,12 +805,14 @@ TEST(W15Threads, WorkerThreadsAboveOne) {
 
     auto guard = asio::make_work_guard(ioc);
     std::vector<std::thread> workers;
+    workers.reserve(3);
     for (int i = 0; i < 3; ++i) {
         workers.emplace_back([&ioc] { ioc.run(); });
     }
 
     // Everything between start() and the stop below stays non-fatal: ~Engine aborts unless stopped.
     std::vector<std::thread> peers;
+    peers.reserve(members.size());
     std::atomic<int> answered{0};
     for (const Member& mm : members) {
         peers.emplace_back([&, mm] {
@@ -781,15 +853,15 @@ TEST(W15Threads, WorkerThreadsAboveOne) {
             };
             const std::string peer_id = "TW" + mm.sender;
             std::uint32_t seq = 1;
-            send_all(rig::message(kFT, "A", seq++, peer_id, mm.sender, stamp(),
+            send_all(rig::message(kFT(), "A", seq++, peer_id, mm.sender, stamp(),
                                   "98=0\x01"
                                   "108=30\x01"
                                   "1137=6\x01"));
             std::string seen;
             for (int f = 0; f < kThreadFrames; ++f) {
-                send_all(rig::message(kFT, "D", seq++, peer_id, mm.sender, stamp(), kNos));
+                send_all(rig::message(kFT(), "D", seq++, peer_id, mm.sender, stamp(), kNos()));
             }
-            send_all(rig::message(kFT, "1", seq++, peer_id, mm.sender, stamp(), "112=last\x01"));
+            send_all(rig::message(kFT(), "1", seq++, peer_id, mm.sender, stamp(), "112=last\x01"));
             if (read_until(sock, seen,
                            "\x01"
                            "112=last\x01")) {
@@ -815,7 +887,7 @@ TEST(W15Threads, WorkerThreadsAboveOne) {
     std::atomic<int> passes{0};
     if (held && held->find(fixt11().get(), nullptr) != nullptr) {
         validate_on_threads(*held->find(fixt11().get(), nullptr),
-                            rig::message(kFT, "0", 1, "TW", "ISLD", "20240101-00:00:00.000"),
+                            rig::message(kFT(), "0", 1, "TW", "ISLD", "20240101-00:00:00.000"),
                             passes, kValidatingThreads, kFramesEach);
     }
 
@@ -824,7 +896,7 @@ TEST(W15Threads, WorkerThreadsAboveOne) {
     if (!stopped) {
         std::abort();  // ~Engine would abort on its precondition anyway
     }
-    (void)stop_fut.get();
+    stop_fut.get();
     guard.reset();
     for (auto& t : workers) {
         t.join();

@@ -32,12 +32,23 @@ using Resolved = dd::resolved_message_version;
 using Version = dd::application_version;
 using IndexView = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
 
-const dd::version_profile kFix44Profile{dd::session_version::v44, Version::v44, false, 0};
+const dd::version_profile kFix44Profile{.session = dd::session_version::v44,
+                                        .default_appl = Version::v44,
+                                        .has_per_message_override = false,
+                                        ._reserved = 0};
 // Names no version of the FIXT frames here: `reify` with the byte set reads none of it.
-const dd::version_profile kOtherProfile{dd::session_version::v42, Version::v42, false, 0};
-const dd::version_profile kVt11At50{dd::session_version::vt11, Version::v50sp2, true, 0};
-const dd::version_profile kNothingNegotiated{dd::session_version::Unknown, Version::Unknown, false,
-                                             0};
+const dd::version_profile kOtherProfile{.session = dd::session_version::v42,
+                                        .default_appl = Version::v42,
+                                        .has_per_message_override = false,
+                                        ._reserved = 0};
+const dd::version_profile kVt11At50{.session = dd::session_version::vt11,
+                                    .default_appl = Version::v50sp2,
+                                    .has_per_message_override = true,
+                                    ._reserved = 0};
+const dd::version_profile kNothingNegotiated{.session = dd::session_version::Unknown,
+                                             .default_appl = Version::Unknown,
+                                             .has_per_message_override = false,
+                                             ._reserved = 0};
 
 // What one callback's view said, through its accessor, through `reify` with `profile`, and through
 // that handle's view.
@@ -112,15 +123,15 @@ std::string shape_param_name(Shape s) { return shape_name(s); }
 // ── W-1's delivered cells on T, A and L, with S's own registry ──────────────────────────
 
 struct DeliveredCase {
-    const char* name;
-    const char* before_34;
+    const char* name{};
+    const char* before_34{};
     Version version;
 };
 
 const DeliveredCase kDeliveredCases[] = {
-    {"Negotiated", "", Version::v50sp2},
-    {"Explicit9", "1128=9\x01", Version::v50sp2},
-    {"Explicit10", "1128=10\x01", Version::vlatest},
+    {.name = "Negotiated", .before_34 = "", .version = Version::v50sp2},
+    {.name = "Explicit9", .before_34 = "1128=9\x01", .version = Version::v50sp2},
+    {.name = "Explicit10", .before_34 = "1128=10\x01", .version = Version::vlatest},
 };
 
 class W10Delivered : public testing::TestWithParam<std::tuple<Shape, bool, DeliveredCase>> {};
@@ -133,7 +144,7 @@ TEST_P(W10Delivered, NosAnswersItsRoutesVersion) {
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     ViewAnswers a;
     watch(*run.rig, a, kOtherProfile);
-    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, c.before_34));
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos(), c.before_34));
     expect_ending(run, "- | stays | c | app=1 adm=0");
     expect_application(a, c.version);
 }
@@ -155,7 +166,7 @@ TEST_P(W10Fix44Registered, Nos1128_6_AnswersV44) {
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     ViewAnswers a;
     watch(*run.rig, a, kOtherProfile);
-    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, "1128=6\x01"));
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos(), "1128=6\x01"));
     expect_ending(run, "- | stays | c | app=1 adm=0");
     expect_application(a, Version::v44);
 }
@@ -177,10 +188,10 @@ Fixture fix44_s_fixture() {
 }
 
 const DeliveredCase kFix44SCases[] = {
-    {"Negotiated", "", Version::v44},
-    {"Explicit6", "1128=6\x01", Version::v44},
-    {"Explicit9", "1128=9\x01", Version::v50sp2},
-    {"Explicit10", "1128=10\x01", Version::vlatest},
+    {.name = "Negotiated", .before_34 = "", .version = Version::v44},
+    {.name = "Explicit6", .before_34 = "1128=6\x01", .version = Version::v44},
+    {.name = "Explicit9", .before_34 = "1128=9\x01", .version = Version::v50sp2},
+    {.name = "Explicit10", .before_34 = "1128=10\x01", .version = Version::vlatest},
 };
 
 class W10Fix44S : public testing::TestWithParam<DeliveredCase> {};
@@ -190,7 +201,8 @@ TEST_P(W10Fix44S, NosAnswersItsRoutesVersion) {
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     ViewAnswers a;
     watch(*run.rig, a, kOtherProfile);
-    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, GetParam().before_34));
+    run.ending =
+        run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos(), GetParam().before_34));
     expect_ending(run, "- | stays | c | app=1 adm=0");
     expect_application(a, GetParam().version);
 }
@@ -211,7 +223,7 @@ TEST(W10OtherRegistries, Tag370_1128_4_AnswersV42) {
         ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
         ViewAnswers a;
         watch(*run.rig, a, kOtherProfile);
-        run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, before_34));
+        run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos(), before_34));
         expect_ending(run, "- | stays | c | app=1 adm=0");
         expect_application(a, Version::v42);
     }
@@ -224,7 +236,7 @@ TEST(W10OtherRegistries, OneWayFallback_AnswersTheNegotiatedVersion) {
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     ViewAnswers a;
     watch(*run.rig, a, kOtherProfile);
-    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos + "3115=1.5\x01"));
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos() + "3115=1.5\x01"));
     expect_ending(run, "- | stays | c | app=1 adm=0");
     expect_application(a, Version::v50sp2);
 }
@@ -238,9 +250,9 @@ struct AdminCase {
 };
 
 const AdminCase kAdminCases[] = {
-    {"Heartbeat", "0", ""},
-    {"HeartbeatWithBody", "0", "112=x\x01"},
-    {"TestRequest", "1", "112=x\x01"},
+    {.name = "Heartbeat", .msg_type = "0", .body = ""},
+    {.name = "HeartbeatWithBody", .msg_type = "0", .body = "112=x\x01"},
+    {.name = "TestRequest", .msg_type = "1", .body = "112=x\x01"},
 };
 
 class W10Admin : public testing::TestWithParam<std::tuple<Shape, AdminCase>> {};
@@ -308,7 +320,7 @@ TEST_P(W10PrivateBuild, AdminAndNosAnswerAsTheSharedCell) {
 
     ViewAnswers application;
     watch(r, application, kOtherProfile);
-    run.ending = r.deliver(frame_35("D", r.peer_ctx(3), kNos + "3115=1.5\x01", "1128=10\x01"));
+    run.ending = r.deliver(frame_35("D", r.peer_ctx(3), kNos() + "3115=1.5\x01", "1128=10\x01"));
     expect_application(application, Version::vlatest);
 }
 
@@ -339,7 +351,7 @@ TEST_P(W10MessageTypeDefault, AccessorAndReifySayTheDefault) {
     ASSERT_EQ(negotiated.default_appl, Version::v50sp2);
     ViewAnswers a;
     watch(r, a, negotiated);
-    run.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos + "3115=1.5\x01"));
+    run.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos() + "3115=1.5\x01"));
     expect_ending(run, "- | stays | c | app=1 adm=0");
     expect_application(a, Version::vlatest);
 }
@@ -360,7 +372,7 @@ TEST_P(W10Unresolved, UnknownValue_AccessorUnknown_ReifyRefuses) {
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     ViewAnswers a;
     watch(*run.rig, a, kVt11At50);
-    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, "1128=99\x01"));
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos(), "1128=99\x01"));
     expect_ending(run, "- | stays | c | app=1 adm=0");
     EXPECT_EQ(a.calls, 1);
     EXPECT_EQ(a.accessor, Version::Unknown);
@@ -376,7 +388,7 @@ TEST_P(W10Unresolved, EmptyValue_AccessorUnknown_HandleAsItsSource) {
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     ViewAnswers a;
     watch(*run.rig, a, kVt11At50);
-    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, "1128=\x01"));
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos(), "1128=\x01"));
     expect_ending(run, "- | stays | c | app=1 adm=0");
     EXPECT_EQ(a.calls, 1);
     EXPECT_EQ(a.accessor, Version::Unknown);
@@ -398,8 +410,8 @@ struct ToAppCase {
 };
 
 const ToAppCase kToAppCases[] = {
-    {"No1128", ""},
-    {"Header1128_10", "1128=10\x01"},
+    {.name = "No1128", .header = ""},
+    {.name = "Header1128_10", .header = "1128=10\x01"},
 };
 
 class W10ToApp : public testing::TestWithParam<std::tuple<Shape, ToAppCase>> {};
@@ -414,7 +426,7 @@ TEST_P(W10ToApp, AccessorUnknown) {
         ++calls;
         accessor = v.resolved_application_version();
     };
-    const std::string err = run.rig->send(std::string("35=D\x01") + c.header + kNos);
+    const std::string err = run.rig->send(std::string("35=D\x01") + c.header + kNos());
     EXPECT_EQ(err, "");
     EXPECT_EQ(calls, 1);
     EXPECT_EQ(accessor, Version::Unknown);
@@ -445,7 +457,7 @@ TEST_P(W10Profile, NothingNegotiated_ReifySaysVt11) {
     ASSERT_EQ(r.sess->state(), fsm_state::Active);
     ViewAnswers a;
     watch(r, a, kNothingNegotiated);
-    run.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos, "1128=9\x01"));
+    run.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos(), "1128=9\x01"));
     expect_ending(run, "- | stays | c | app=1 adm=0");
     expect_application(a, Version::v50sp2);
 }
@@ -459,8 +471,9 @@ INSTANTIATE_TEST_SUITE_P(W10, W10Profile, testing::Values(Shape::T, Shape::A, Sh
 
 // Holds a dict-free parse of a NOS whose 1128 says 9, and hands its view to `use`.
 template <class Use>
-void with_dict_free_view(Use&& use) {
-    const std::string frame = frame_35("D", Ctx{"TW", "ISLD", 2}, kNos, "1128=9\x01");
+void with_dict_free_view(const Use& use) {
+    const std::string frame =
+        frame_35("D", Ctx{.snd = "TW", .tgt = "ISLD", .seq = 2}, kNos(), "1128=9\x01");
     std::pmr::monotonic_buffer_resource carry_arena;
     std::pmr::monotonic_buffer_resource parse_arena;
     fixpp::wire::pmr_carry_buffer carry{0, &carry_arena};
@@ -516,14 +529,14 @@ struct Fix44Session {
             cfg.begin_string = "FIX.4.4";
             cfg.default_appl_ver_id.reset();
         };
-        Fixture f{make_registry({fix44()}), fix44()};
+        Fixture f{.registry = make_registry({fix44()}), .session_dict = fix44()};
         run = enter_arm(std::move(f), Arm::NotConnected, std::move(opts));
         if (!run.setup_failure.empty()) {
             return;
         }
         watch(*run.rig, seen, kFix44Profile);
         const auto ctx = run.rig->peer_ctx(1);
-        (void)run.rig->deliver(wire("FIX.4.4", "35=A\x01" + hdr(ctx) + kLogonBody));
+        (void)run.rig->deliver(wire("FIX.4.4", "35=A\x01" + hdr(ctx) + kLogonBody()));
         seen = ViewAnswers{};
     }
 };
@@ -532,7 +545,7 @@ TEST(W10NonFixtReify, ApplicationRow) {
     Fix44Session s;
     ASSERT_TRUE(s.run.setup_failure.empty()) << s.run.setup_failure;
     ASSERT_EQ(s.run.rig->sess->state(), fsm_state::Active);
-    (void)s.run.rig->deliver(wire("FIX.4.4", "35=D\x01" + hdr(s.run.rig->peer_ctx(2)) + kNos));
+    (void)s.run.rig->deliver(wire("FIX.4.4", "35=D\x01" + hdr(s.run.rig->peer_ctx(2)) + kNos()));
     EXPECT_EQ(s.seen.calls, 1);
     EXPECT_EQ(s.seen.accessor, Version::Unknown);
     ASSERT_TRUE(s.seen.reified.has_value()) << "fromApp did not run, or reify returned no handle";

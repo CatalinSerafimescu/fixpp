@@ -59,7 +59,7 @@
 #include "support/session_test_access.hpp"
 
 // ASan, TSan and MSan own operator new. Under them this file is one skipped cell.
-#if defined(__has_feature)
+#ifdef __has_feature
 #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || \
     __has_feature(memory_sanitizer)
 #define FIXPP_SANITIZER_REPLACES_NEW 1

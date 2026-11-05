@@ -26,58 +26,76 @@ namespace fixpp::session::test099 {
 namespace {
 
 const KeyedRow kActiveOff[] = {
-    {"AC-a", "rep35 D..0 past", "- | stays | c | app=0 adm=1"},
-    {"AC-a", "rep35 D..3 past", "- | stays | c | app=0 adm=0"},
-    {"AC-a", "rep35 D..4 past", "- | stays | k | app=0 adm=1"},
-    {"AC-a", "rep35 D..A past", "- | stays | c | app=1 adm=0"},
-    {"AC-a", "rep35 D..5 past", "Logout | Disc | c | app=0 adm=1"},
-    {"AC-a", "rep35 5..D past", "- | stays | c | app=1 adm=0"},
-    {"AC-a", "rep35 0..D past", "- | stays | c | app=1 adm=0"},
-    {"AC-a", "rep35 3..D past", "- | stays | c | app=1 adm=0"},
-    {"AC-a", "rep35 4..D past", "- | stays | c | app=1 adm=0"},
-    {"AC-a", "rep35 A..0 past", "- | stays | c | app=0 adm=1"},
-    {"AC-a", "rep35 D..A logon-fields", "- | stays | c | app=1 adm=0"},
-    {"AC-a", "rep35 0..A logon-fields", "- | stays | c | app=1 adm=0"},
-    {"AC-a", "rep35 0,D header", "- | stays | c | app=1 adm=0"},
-    {"AC-a", "rep35 D,D header", "- | stays | c | app=1 adm=0"},
-    {"AC-a", "rep35 D..0 past seq+5", "ResendRequest 2-0 | stays | k | app=0 adm=0"},
-    {"AC-b", "1128=99 hdr", "- | stays | c | app=1 adm=0"},
-    {"AC-b", "1128=abc hdr", "- | stays | c | app=1 adm=0"},
-    {"AC-b", "1128=4 hdr", "- | stays | c | app=1 adm=0"},
-    {"AC-b", "1128=empty hdr", "- | stays | c | app=1 adm=0"},
-    {"AC-c", "1128=6 past", "- | stays | c | app=1 adm=0"},
-    {"AC-c", "1128=abc past", "- | stays | c | app=1 adm=0"},
-    {"AC-d", "NOS", "- | stays | c | app=1 adm=0"},
-    {"AC-d", "NOS 1128=9", "- | stays | c | app=1 adm=0"},
-    {"AC-d", "NOS 1128=10", "- | stays | c | app=1 adm=0"},
-    {"AC-d", "NOS missing 11", "- | stays | c | app=1 adm=0"},
-    {"AC-d", "NOS missing 11 seq+5", "ResendRequest 2-0 | stays | k | app=0 adm=0"},
-    {"AC-e", "Logon 1137=9", "- | stays | c | app=1 adm=0"},
-    {"AC-e", "Logon 1137=10", "- | stays | c | app=1 adm=0"},
-    {"AC-e", "Logon 1137 absent", "- | stays | c | app=1 adm=0"},
-    {"AC-e", "Logon 1137=empty", "- | stays | c | app=1 adm=0"},
-    {"AC-e", "Logon 1137=99", "- | stays | c | app=1 adm=0"},
-    {"AC-e", "Logon undeclared 5999", "- | stays | c | app=1 adm=0"},
-    {"AC-e", "Logon 1137=abc", "- | stays | c | app=1 adm=0"},
-    {"AC-e", "Logon 1137=4", "- | stays | c | app=1 adm=0"},
-    {"AC-f", "wrongBS Logon 1137=9", "- | Disc | k | app=0 adm=0"},
-    {"AC-f", "wrongBS Logon 1137=99", "- | Disc | k | app=0 adm=0"},
-    {"AC-f", "wrongBS Logon 1137=4", "- | Disc | k | app=0 adm=0"},
-    {"AC-f", "wrongBS Logon 1137 absent", "- | Disc | k | app=0 adm=0"},
-    {"AC-f", "wrongBS NOS", "- | Disc | k | app=0 adm=0"},
-    {"AC-g", "stale Logon 1137=9", "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
-    {"AC-g", "stale Logon 1137=99", "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
-    {"AC-g", "stale Logon 1137=4", "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
-    {"AC-g", "stale Logon 1137 absent", "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
-    {"AC-g", "stale NOS", "R 10/52 D 45=2 + Logout | Disc | c | app=0 adm=0"},
-    {"AC-g", "stale Heartbeat", "R 10/52 0 45=2 + Logout | Disc | c | app=0 adm=0"},
-    {"AC-admin", "Heartbeat 1128=99 hdr", "- | stays | c | app=0 adm=1"},
-    {"AC-admin", "Heartbeat 1128=10 hdr", "- | stays | c | app=0 adm=1"},
-    {"AC-admin", "TestRequest 1128=6 past", "Heartbeat 112=x | stays | c | app=0 adm=1"},
-    {"AC-admin", "Heartbeat", "- | stays | c | app=0 adm=1"},
-    {"AC-admin", "TestRequest missing 112", "Heartbeat 112= | stays | c | app=0 adm=1"},
-    {"AC-admin", "TestRequest", "Heartbeat 112=x | stays | c | app=0 adm=1"},
-    {"AC-admin", "Logout", "Logout | Disc | c | app=0 adm=1"},
+    {.cell = "AC-a", .input = "rep35 D..0 past", .t = "- | stays | c | app=0 adm=1"},
+    {.cell = "AC-a", .input = "rep35 D..3 past", .t = "- | stays | c | app=0 adm=0"},
+    {.cell = "AC-a", .input = "rep35 D..4 past", .t = "- | stays | k | app=0 adm=1"},
+    {.cell = "AC-a", .input = "rep35 D..A past", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-a", .input = "rep35 D..5 past", .t = "Logout | Disc | c | app=0 adm=1"},
+    {.cell = "AC-a", .input = "rep35 5..D past", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-a", .input = "rep35 0..D past", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-a", .input = "rep35 3..D past", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-a", .input = "rep35 4..D past", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-a", .input = "rep35 A..0 past", .t = "- | stays | c | app=0 adm=1"},
+    {.cell = "AC-a", .input = "rep35 D..A logon-fields", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-a", .input = "rep35 0..A logon-fields", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-a", .input = "rep35 0,D header", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-a", .input = "rep35 D,D header", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-a",
+     .input = "rep35 D..0 past seq+5",
+     .t = "ResendRequest 2-0 | stays | k | app=0 adm=0"},
+    {.cell = "AC-b", .input = "1128=99 hdr", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-b", .input = "1128=abc hdr", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-b", .input = "1128=4 hdr", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-b", .input = "1128=empty hdr", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-c", .input = "1128=6 past", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-c", .input = "1128=abc past", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-d", .input = "NOS", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-d", .input = "NOS 1128=9", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-d", .input = "NOS 1128=10", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-d", .input = "NOS missing 11", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-d",
+     .input = "NOS missing 11 seq+5",
+     .t = "ResendRequest 2-0 | stays | k | app=0 adm=0"},
+    {.cell = "AC-e", .input = "Logon 1137=9", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-e", .input = "Logon 1137=10", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-e", .input = "Logon 1137 absent", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-e", .input = "Logon 1137=empty", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-e", .input = "Logon 1137=99", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-e", .input = "Logon undeclared 5999", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-e", .input = "Logon 1137=abc", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-e", .input = "Logon 1137=4", .t = "- | stays | c | app=1 adm=0"},
+    {.cell = "AC-f", .input = "wrongBS Logon 1137=9", .t = "- | Disc | k | app=0 adm=0"},
+    {.cell = "AC-f", .input = "wrongBS Logon 1137=99", .t = "- | Disc | k | app=0 adm=0"},
+    {.cell = "AC-f", .input = "wrongBS Logon 1137=4", .t = "- | Disc | k | app=0 adm=0"},
+    {.cell = "AC-f", .input = "wrongBS Logon 1137 absent", .t = "- | Disc | k | app=0 adm=0"},
+    {.cell = "AC-f", .input = "wrongBS NOS", .t = "- | Disc | k | app=0 adm=0"},
+    {.cell = "AC-g",
+     .input = "stale Logon 1137=9",
+     .t = "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
+    {.cell = "AC-g",
+     .input = "stale Logon 1137=99",
+     .t = "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
+    {.cell = "AC-g",
+     .input = "stale Logon 1137=4",
+     .t = "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
+    {.cell = "AC-g",
+     .input = "stale Logon 1137 absent",
+     .t = "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
+    {.cell = "AC-g", .input = "stale NOS", .t = "R 10/52 D 45=2 + Logout | Disc | c | app=0 adm=0"},
+    {.cell = "AC-g",
+     .input = "stale Heartbeat",
+     .t = "R 10/52 0 45=2 + Logout | Disc | c | app=0 adm=0"},
+    {.cell = "AC-admin", .input = "Heartbeat 1128=99 hdr", .t = "- | stays | c | app=0 adm=1"},
+    {.cell = "AC-admin", .input = "Heartbeat 1128=10 hdr", .t = "- | stays | c | app=0 adm=1"},
+    {.cell = "AC-admin",
+     .input = "TestRequest 1128=6 past",
+     .t = "Heartbeat 112=x | stays | c | app=0 adm=1"},
+    {.cell = "AC-admin", .input = "Heartbeat", .t = "- | stays | c | app=0 adm=1"},
+    {.cell = "AC-admin",
+     .input = "TestRequest missing 112",
+     .t = "Heartbeat 112= | stays | c | app=0 adm=1"},
+    {.cell = "AC-admin", .input = "TestRequest", .t = "Heartbeat 112=x | stays | c | app=0 adm=1"},
+    {.cell = "AC-admin", .input = "Logout", .t = "Logout | Disc | c | app=0 adm=1"},
 };
 
 class W6ActiveOff : public testing::TestWithParam<KeyedCell> {};
@@ -109,7 +127,7 @@ TEST(W6OffPair, MalformedRouteOnlyPair_FaultReject) {
         run_own_cell("W-6 off-pair", own_fixture(Shape::T, {fixt11(), fix50sp2_with_body_pair()}),
                      false, Arm::Active, [](const Rig& r) {
                          return frame_35("D", r.peer_ctx(2),
-                                         kNos +
+                                         kNos() +
                                              "5030=50\x01"
                                              "5031=x\x01");
                      });
@@ -132,8 +150,8 @@ TEST(W6OffHops, ShapeA_ViewReadsNoHops) {
         hop = field_text(v, 628);
     };
     run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2),
-                                           kNos + "627=1\x01"
-                                                  "628=X\x01"));
+                                           kNos() + "627=1\x01"
+                                                    "628=X\x01"));
     expect_ending(run, "- | stays | c | app=1 adm=0");
     EXPECT_EQ(hop, "X");
     EXPECT_EQ(instances, 1);
@@ -146,7 +164,7 @@ TEST(W6AdminNoTransport, ShapeA_HeartbeatUsesS) {
         overlay_on("FIX50SP2.xml",
                    "<fix type='FIX' major='5' minor='0' servicepack='2'><messages>"
                    "<message name='Heartbeat' msgtype='0' msgcat='admin'>" +
-                       kPairMembers + "</message></messages>" + kPairFields + "</fix>");
+                       kPairMembers() + "</message></messages>" + kPairFields() + "</fix>");
     Fixture f;
     f.registry = make_registry({s});
     f.session_dict = s;
@@ -196,19 +214,25 @@ void watch_answers(Rig& r, Answers& a, dd::version_profile profile) {
     r.app->on_admin = read;
 }
 
-const dd::version_profile kVt11At50{dd::session_version::vt11, Version::v50sp2, true, 0};
-const dd::version_profile kVt11Unknown{dd::session_version::vt11, Version::Unknown, true, 0};
+const dd::version_profile kVt11At50{.session = dd::session_version::vt11,
+                                    .default_appl = Version::v50sp2,
+                                    .has_per_message_override = true,
+                                    ._reserved = 0};
+const dd::version_profile kVt11Unknown{.session = dd::session_version::vt11,
+                                       .default_appl = Version::Unknown,
+                                       .has_per_message_override = true,
+                                       ._reserved = 0};
 
 struct ResolvedCase {
-    const char* name;
-    const char* before_34;
+    const char* name{};
+    const char* before_34{};
     Version accessor;
 };
 
 const ResolvedCase kResolvedCases[] = {
-    {"Negotiated", "", Version::v50sp2},
-    {"Explicit9", "1128=9\x01", Version::v50sp2},
-    {"Explicit10", "1128=10\x01", Version::vlatest},
+    {.name = "Negotiated", .before_34 = "", .accessor = Version::v50sp2},
+    {.name = "Explicit9", .before_34 = "1128=9\x01", .accessor = Version::v50sp2},
+    {.name = "Explicit10", .before_34 = "1128=10\x01", .accessor = Version::vlatest},
 };
 
 // Set when it resolved, on every shape, and `reify` agrees in all three bytes (E-5), with no help
@@ -222,8 +246,11 @@ TEST_P(W6Resolved, AccessorAndReifyAgree) {
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     Answers a;
     watch_answers(*run.rig, a,
-                  dd::version_profile{dd::session_version::v44, Version::v44, false, 0});
-    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, c.before_34));
+                  dd::version_profile{.session = dd::session_version::v44,
+                                      .default_appl = Version::v44,
+                                      .has_per_message_override = false,
+                                      ._reserved = 0});
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos(), c.before_34));
     expect_ending(run, "- | stays | c | app=1 adm=0");
     EXPECT_EQ(a.accessor, c.accessor);
     ASSERT_TRUE(a.reified.has_value());
@@ -261,7 +288,7 @@ TEST(W6Splits, EmptyApplVerId_AccessorUnknown_ReifyTheProfilesDefault) {
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     Answers a;
     watch_answers(*run.rig, a, kVt11At50);
-    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, "1128=\x01"));
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos(), "1128=\x01"));
     expect_ending(run, "- | stays | c | app=1 adm=0");
     EXPECT_EQ(a.accessor, Version::Unknown);
     ASSERT_TRUE(a.reified.has_value());
@@ -276,7 +303,7 @@ TEST(W6Splits, UnknownApplVerId_AccessorUnknown_ReifyNoHandle) {
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     Answers a;
     watch_answers(*run.rig, a, kVt11At50);
-    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, "1128=99\x01"));
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos(), "1128=99\x01"));
     expect_ending(run, "- | stays | c | app=1 adm=0");
     EXPECT_EQ(a.accessor, Version::Unknown);
     EXPECT_FALSE(a.reified.has_value());
@@ -292,7 +319,7 @@ TEST(W6Splits, PastHeader1128_Negotiated_TheyAgree) {
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     Answers a;
     watch_answers(*run.rig, a, kVt11At50);
-    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos + "1128=6\x01"));
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos() + "1128=6\x01"));
     expect_ending(run, "- | stays | c | app=1 adm=0");
     EXPECT_EQ(a.accessor, Version::v50sp2);
     ASSERT_TRUE(a.reified.has_value());
@@ -312,7 +339,7 @@ TEST(W6Splits, PastHeader1128_ReplyWithNo1137_ReifyReadsIt) {
     ASSERT_EQ(r.sess->state(), fsm_state::Active);
     Answers a;
     watch_answers(r, a, kVt11Unknown);
-    run.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos + "1128=6\x01"));
+    run.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos() + "1128=6\x01"));
     expect_ending(run, "- | stays | c | app=1 adm=0");
     EXPECT_EQ(a.accessor, Version::Unknown);
     ASSERT_TRUE(a.reified.has_value());
@@ -331,7 +358,7 @@ TEST(W6Splits, NegotiatedMiss_SsView_AccessorV42_ReifyV42) {
     ASSERT_EQ(r.sess->state(), fsm_state::Active);
     Answers a;
     watch_answers(r, a, kVt11Unknown);
-    run.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos));
+    run.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos()));
     expect_ending(run, "- | stays | c | app=1 adm=0");
     EXPECT_EQ(a.accessor, Version::v42);
     ASSERT_TRUE(a.reified.has_value());
@@ -367,7 +394,7 @@ TEST(W6Splits, ReconnectWithNo1137_AccessorUnknown_ReifyThePreviousVersion) {
     ASSERT_EQ(r.sess->state(), fsm_state::Active);
     Answers a;
     watch_answers(r, a, r.sess->negotiated_version_profile());
-    run.ending = r.deliver(frame_35("D", r.peer_ctx(r.next_in()), kNos));
+    run.ending = r.deliver(frame_35("D", r.peer_ctx(r.next_in()), kNos()));
     EXPECT_EQ(run.ending.from_app, 1) << log_form(run.ending);
     EXPECT_EQ(a.accessor, Version::Unknown);
     ASSERT_TRUE(a.reified.has_value());

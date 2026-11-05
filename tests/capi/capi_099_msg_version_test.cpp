@@ -105,15 +105,15 @@ std::string shape_param_name(Shape s) { return shape_name(s); }
 // ── The dict-backed branch: a view a Session dispatched ─────────────────────────────────
 
 struct CloneCase {
-    const char* name;
-    const char* before_34;
+    const char* name{};
+    const char* before_34{};
     Version version;
 };
 
 const CloneCase kCloneCases[] = {
-    {"Negotiated", "", Version::v50sp2},
-    {"Explicit9", "1128=9\x01", Version::v50sp2},
-    {"Explicit10", "1128=10\x01", Version::vlatest},
+    {.name = "Negotiated", .before_34 = "", .version = Version::v50sp2},
+    {.name = "Explicit9", .before_34 = "1128=9\x01", .version = Version::v50sp2},
+    {.name = "Explicit10", .before_34 = "1128=10\x01", .version = Version::vlatest},
 };
 
 class W10Clone : public testing::TestWithParam<std::tuple<Shape, CloneCase>> {};
@@ -124,7 +124,7 @@ TEST_P(W10Clone, DictBacked_AnswersAsItsSource) {
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     CloneAnswers a;
     watch(*run.rig, a);
-    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, c.before_34));
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos(), c.before_34));
     expect_ending(run, "- | stays | c | app=1 adm=0");
     expect_clones(a, c.version, /*dict_backed=*/true);
 }
@@ -154,7 +154,7 @@ TEST_P(W10CloneOfShape, MessageTypeDefault_DictBacked_AnswersTheDefault) {
     ASSERT_EQ(r.sess->state(), fsm_state::Active);
     CloneAnswers a;
     watch(r, a);
-    run.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos + "3115=1.5\x01"));
+    run.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos() + "3115=1.5\x01"));
     expect_ending(run, "- | stays | c | app=1 adm=0");
     expect_clones(a, Version::vlatest, /*dict_backed=*/true);
 }
@@ -177,8 +177,9 @@ INSTANTIATE_TEST_SUITE_P(W10, W10CloneOfShape, testing::Values(Shape::T, Shape::
 // ── The dict-free branch: a view parsed dict-free, its byte written by the test ─────────
 
 template <class Use>
-void with_dict_free_view(Use&& use) {
-    const std::string frame = frame_35("D", Ctx{"TW", "ISLD", 2}, kNos, "1128=9\x01");
+void with_dict_free_view(const Use& use) {
+    const std::string frame =
+        frame_35("D", Ctx{.snd = "TW", .tgt = "ISLD", .seq = 2}, kNos(), "1128=9\x01");
     std::pmr::monotonic_buffer_resource carry_arena;
     std::pmr::monotonic_buffer_resource parse_arena;
     fixpp::wire::pmr_carry_buffer carry{0, &carry_arena};
@@ -212,11 +213,22 @@ TEST(W10CloneDictFree, ByteUnknown_AnswersUnknown) {
 
 using Resolved = dd::resolved_message_version;
 
-const dd::version_profile kOtherProfile{dd::session_version::v42, Version::v42, false, 0};
-const dd::version_profile kVt11Profile{dd::session_version::vt11, Version::v50sp2, true, 0};
-const dd::version_profile kFix44Profile{dd::session_version::v44, Version::v44, false, 0};
-const dd::version_profile kNothingNegotiated{dd::session_version::Unknown, Version::Unknown, false,
-                                             0};
+const dd::version_profile kOtherProfile{.session = dd::session_version::v42,
+                                        .default_appl = Version::v42,
+                                        .has_per_message_override = false,
+                                        ._reserved = 0};
+const dd::version_profile kVt11Profile{.session = dd::session_version::vt11,
+                                       .default_appl = Version::v50sp2,
+                                       .has_per_message_override = true,
+                                       ._reserved = 0};
+const dd::version_profile kFix44Profile{.session = dd::session_version::v44,
+                                        .default_appl = Version::v44,
+                                        .has_per_message_override = false,
+                                        ._reserved = 0};
+const dd::version_profile kNothingNegotiated{.session = dd::session_version::Unknown,
+                                             .default_appl = Version::Unknown,
+                                             .has_per_message_override = false,
+                                             ._reserved = 0};
 
 // The row's three bytes, spelled at the cell.
 struct Row {
@@ -232,16 +244,17 @@ constexpr int kNone = FIXPP_APPL_VER_UNKNOWN;
 
 struct GetterRead {
     fixpp_error_t rc = FIXPP_ERR_UNKNOWN;
-    Row row{-1, -1, -1};
+    Row row{.kind = -1, .session = -1, .application = -1};
     int reserved = -1;
 };
 
 GetterRead read_getter(const fixpp_msg_t* m) {
     // Seeded non-zero, so that a zero can only be the call's.
-    fixpp_resolved_msg_version_t v{0xAA, 0xAA, 0xAA, 0xAA};
+    fixpp_resolved_msg_version_t v{
+        .kind = 0xAA, .session = 0xAA, .application = 0xAA, ._reserved = 0xAA};
     GetterRead r;
     r.rc = fixpp_msg_version(m, &v);
-    r.row = Row{v.kind, v.session, v.application};
+    r.row = Row{.kind = v.kind, .session = v.session, .application = v.application};
     r.reserved = v._reserved;
     return r;
 }
@@ -325,9 +338,9 @@ struct GetterCase {
 };
 
 const GetterCase kGetterCases[] = {
-    {"Negotiated", "", FIXPP_APPL_VER_FIX50SP2},
-    {"Explicit9", "1128=9\x01", FIXPP_APPL_VER_FIX50SP2},
-    {"Explicit10", "1128=10\x01", FIXPP_APPL_VER_FIXLATEST},
+    {.name = "Negotiated", .before_34 = "", .application = FIXPP_APPL_VER_FIX50SP2},
+    {.name = "Explicit9", .before_34 = "1128=9\x01", .application = FIXPP_APPL_VER_FIX50SP2},
+    {.name = "Explicit10", .before_34 = "1128=10\x01", .application = FIXPP_APPL_VER_FIXLATEST},
 };
 
 class W10CApplication : public testing::TestWithParam<std::tuple<Shape, bool, GetterCase>> {};
@@ -342,9 +355,9 @@ TEST_P(W10CApplication, ThreeBytesAndReifyEqual) {
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     GetterAnswers a;
     watch_getter(*run.rig, a, kOtherProfile);
-    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, c.before_34));
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos(), c.before_34));
     expect_ending(run, "- | stays | c | app=1 adm=0");
-    const Row want{kApp, kVt11, c.application};
+    const Row want{.kind = kApp, .session = kVt11, .application = c.application};
     expect_answers(a, want);
     expect_reify_equals(a, want);
 }
@@ -375,9 +388,9 @@ TEST_P(W10COfShape, MessageTypeDefault_AnswersTheDefault) {
     ASSERT_EQ(r.sess->state(), fsm_state::Active);
     GetterAnswers a;
     watch_getter(r, a, kOtherProfile);
-    run.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos + "3115=1.5\x01"));
+    run.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos() + "3115=1.5\x01"));
     expect_ending(run, "- | stays | c | app=1 adm=0");
-    const Row want{kApp, kVt11, FIXPP_APPL_VER_FIXLATEST};
+    const Row want{.kind = kApp, .session = kVt11, .application = FIXPP_APPL_VER_FIXLATEST};
     expect_answers(a, want);
     expect_reify_equals(a, want);
 }
@@ -391,7 +404,7 @@ TEST_P(W10COfShape, Admin_Heartbeat) {
     watch_getter(*run.rig, a, kVt11Profile);
     run.ending = run.rig->deliver(frame_35("0", run.rig->peer_ctx(2)));
     expect_ending(run, "- | stays | c | app=0 adm=1");
-    const Row want{kAdmin, kVt11, kNone};
+    const Row want{.kind = kAdmin, .session = kVt11, .application = kNone};
     expect_answers(a, want);
     expect_reify_equals(a, want);
 }
@@ -402,7 +415,7 @@ TEST_P(W10COfShape, Admin_TestRequest) {
     GetterAnswers a;
     watch_getter(*run.rig, a, kVt11Profile);
     (void)run.rig->deliver(frame_35("1", run.rig->peer_ctx(2), "112=T\x01"));
-    const Row want{kAdmin, kVt11, kNone};
+    const Row want{.kind = kAdmin, .session = kVt11, .application = kNone};
     expect_answers(a, want);
     expect_reify_equals(a, want);
 }
@@ -416,7 +429,7 @@ TEST_P(W10COfShape, Admin_NothingNegotiated_ReifyDiffersInSessionAlone) {
     watch_getter(*run.rig, a, kNothingNegotiated);
     run.ending = run.rig->deliver(frame_35("0", run.rig->peer_ctx(2)));
     expect_ending(run, "- | stays | c | app=0 adm=1");
-    expect_answers(a, Row{kAdmin, kVt11, kNone});
+    expect_answers(a, Row{.kind = kAdmin, .session = kVt11, .application = kNone});
     ASSERT_TRUE(a.reified.has_value()) << "reify returned no handle";
     EXPECT_EQ(a.reified->k, Resolved::kind::session_admin);
     EXPECT_EQ(a.reified->session, dd::session_version::Unknown);
@@ -432,9 +445,9 @@ TEST_P(W10COfShape, Unresolved_UnknownValue_ValidationOff) {
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     GetterAnswers a;
     watch_getter(*run.rig, a, kVt11Profile);
-    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, "1128=99\x01"));
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos(), "1128=99\x01"));
     expect_ending(run, "- | stays | c | app=1 adm=0");
-    expect_answers(a, Row{kApp, kVt11, kNone});
+    expect_answers(a, Row{.kind = kApp, .session = kVt11, .application = kNone});
 }
 
 TEST_P(W10COfShape, Unresolved_EmptyValue_ValidationOff) {
@@ -444,9 +457,9 @@ TEST_P(W10COfShape, Unresolved_EmptyValue_ValidationOff) {
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     GetterAnswers a;
     watch_getter(*run.rig, a, kVt11Profile);
-    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos, "1128=\x01"));
+    run.ending = run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos(), "1128=\x01"));
     expect_ending(run, "- | stays | c | app=1 adm=0");
-    expect_answers(a, Row{kApp, kVt11, kNone});
+    expect_answers(a, Row{.kind = kApp, .session = kVt11, .application = kNone});
 }
 
 // A non-validating initiator's reply with no 1137 leaves nothing resolved for a frame with no 1128.
@@ -461,9 +474,9 @@ TEST_P(W10COfShape, Unresolved_ReplyWithNo1137_NothingResolved) {
     ASSERT_EQ(r.sess->state(), fsm_state::Active);
     GetterAnswers a;
     watch_getter(r, a, kVt11Profile);
-    run.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos));
+    run.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos()));
     expect_ending(run, "- | stays | c | app=1 adm=0");
-    expect_answers(a, Row{kApp, kVt11, kNone});
+    expect_answers(a, Row{.kind = kApp, .session = kVt11, .application = kNone});
 }
 
 // A `toApp` view on FIXT: kind by 35, and no session wrote the byte, whatever 1128 the payload
@@ -480,9 +493,9 @@ TEST_P(W10COfShape, ToAppView_NoSessionWroteIt) {
             outbound_view.view = &v;
             got = read_getter(reinterpret_cast<const fixpp_msg_t*>(&outbound_view));
         };
-        EXPECT_EQ(run.rig->send(std::string("35=D\x01") + header + kNos), "");
+        EXPECT_EQ(run.rig->send(std::string("35=D\x01") + header + kNos()), "");
         EXPECT_EQ(calls, 1);
-        expect_row(got, Row{kApp, kVt11, kNone}, header);
+        expect_row(got, Row{.kind = kApp, .session = kVt11, .application = kNone}, header);
     }
 }
 
@@ -498,7 +511,8 @@ TEST(W10CDictFree, ByteSet_AnswersTheByte) {
         fixpp_msg inbound{};
         inbound.view = &view;
         expect_row(read_getter(reinterpret_cast<const fixpp_msg_t*>(&inbound)),
-                   Row{kApp, kVt11, FIXPP_APPL_VER_FIXLATEST}, "dict-free, byte set");
+                   Row{.kind = kApp, .session = kVt11, .application = FIXPP_APPL_VER_FIXLATEST},
+                   "dict-free, byte set");
     });
 }
 
@@ -507,7 +521,8 @@ TEST(W10CDictFree, ByteUnknown_AnswersUnknown_Whatever1128Says) {
         fixpp_msg inbound{};
         inbound.view = &view;
         expect_row(read_getter(reinterpret_cast<const fixpp_msg_t*>(&inbound)),
-                   Row{kApp, kVt11, kNone}, "dict-free, byte unset");
+                   Row{.kind = kApp, .session = kVt11, .application = kNone},
+                   "dict-free, byte unset");
     });
 }
 
@@ -524,14 +539,14 @@ struct Fix44Session {
             cfg.begin_string = "FIX.4.4";
             cfg.default_appl_ver_id.reset();
         };
-        Fixture f{make_registry({fix44()}), fix44()};
+        Fixture f{.registry = make_registry({fix44()}), .session_dict = fix44()};
         run = enter_arm(std::move(f), Arm::NotConnected, std::move(opts));
         if (!run.setup_failure.empty()) {
             return;
         }
         watch_getter(*run.rig, seen, kFix44Profile);
         const auto ctx = run.rig->peer_ctx(1);
-        (void)run.rig->deliver(wire("FIX.4.4", "35=A\x01" + hdr(ctx) + kLogonBody));
+        (void)run.rig->deliver(wire("FIX.4.4", "35=A\x01" + hdr(ctx) + kLogonBody()));
         seen = GetterAnswers{};
     }
 };
@@ -542,8 +557,8 @@ TEST(W10CNonFixt, ApplicationRow) {
     Fix44Session s;
     ASSERT_TRUE(s.run.setup_failure.empty()) << s.run.setup_failure;
     ASSERT_EQ(s.run.rig->sess->state(), fsm_state::Active);
-    (void)s.run.rig->deliver(wire("FIX.4.4", "35=D\x01" + hdr(s.run.rig->peer_ctx(2)) + kNos));
-    const Row want{kApp, kV44, FIXPP_APPL_VER_FIX44};
+    (void)s.run.rig->deliver(wire("FIX.4.4", "35=D\x01" + hdr(s.run.rig->peer_ctx(2)) + kNos()));
+    const Row want{.kind = kApp, .session = kV44, .application = FIXPP_APPL_VER_FIX44};
     expect_answers(s.seen, want);
     expect_reify_equals(s.seen, want);
 }
@@ -553,7 +568,7 @@ TEST(W10CNonFixt, AdminRow) {
     ASSERT_TRUE(s.run.setup_failure.empty()) << s.run.setup_failure;
     ASSERT_EQ(s.run.rig->sess->state(), fsm_state::Active);
     (void)s.run.rig->deliver(wire("FIX.4.4", "35=0\x01" + hdr(s.run.rig->peer_ctx(2))));
-    const Row want{kAdmin, kV44, kNone};
+    const Row want{.kind = kAdmin, .session = kV44, .application = kNone};
     expect_answers(s.seen, want);
     expect_reify_equals(s.seen, want);
 }
@@ -563,8 +578,8 @@ TEST(W10CNonFixt, AdminRow) {
 std::vector<std::byte> raw_frame(const std::string& begin_string, const std::string& body) {
     const std::string text = "8=" + begin_string + "\x01" + "9=" + std::to_string(body.size()) +
                              "\x01" + body + "10=000\x01";
-    const auto* bytes = reinterpret_cast<const std::byte*>(text.data());
-    return {bytes, bytes + text.size()};
+    const auto bytes = std::as_bytes(std::span{text});
+    return {bytes.begin(), bytes.end()};
 }
 
 GetterRead read_built(const std::vector<std::byte>& buf) {
@@ -589,18 +604,45 @@ struct BeginStringCase {
 };
 
 const BeginStringCase kSupportedBeginStrings[] = {
-    {"Fix40", "FIX.4.0", FIXPP_SESSION_VER_FIX40, FIXPP_APPL_VER_FIX40},
-    {"Fix41", "FIX.4.1", FIXPP_SESSION_VER_FIX41, FIXPP_APPL_VER_FIX41},
-    {"Fix42", "FIX.4.2", FIXPP_SESSION_VER_FIX42, FIXPP_APPL_VER_FIX42},
-    {"Fix43", "FIX.4.3", FIXPP_SESSION_VER_FIX43, FIXPP_APPL_VER_FIX43},
-    {"Fix44", "FIX.4.4", FIXPP_SESSION_VER_FIX44, FIXPP_APPL_VER_FIX44},
+    {.name = "Fix40",
+     .begin_string = "FIX.4.0",
+     .session = FIXPP_SESSION_VER_FIX40,
+     .application = FIXPP_APPL_VER_FIX40},
+    {.name = "Fix41",
+     .begin_string = "FIX.4.1",
+     .session = FIXPP_SESSION_VER_FIX41,
+     .application = FIXPP_APPL_VER_FIX41},
+    {.name = "Fix42",
+     .begin_string = "FIX.4.2",
+     .session = FIXPP_SESSION_VER_FIX42,
+     .application = FIXPP_APPL_VER_FIX42},
+    {.name = "Fix43",
+     .begin_string = "FIX.4.3",
+     .session = FIXPP_SESSION_VER_FIX43,
+     .application = FIXPP_APPL_VER_FIX43},
+    {.name = "Fix44",
+     .begin_string = "FIX.4.4",
+     .session = FIXPP_SESSION_VER_FIX44,
+     .application = FIXPP_APPL_VER_FIX44},
 };
 
 const BeginStringCase kOtherNamedBeginStrings[] = {
-    {"Fix50", "FIX.5.0", FIXPP_SESSION_VER_FIX50, FIXPP_APPL_VER_FIX50},
-    {"Fix50Sp1", "FIX.5.0SP1", FIXPP_SESSION_VER_FIX50SP1, FIXPP_APPL_VER_FIX50SP1},
-    {"Fix50Sp2", "FIX.5.0SP2", FIXPP_SESSION_VER_FIX50SP2, FIXPP_APPL_VER_FIX50SP2},
-    {"FixLatest", "FIX.Latest", FIXPP_SESSION_VER_FIXLATEST, FIXPP_APPL_VER_FIXLATEST},
+    {.name = "Fix50",
+     .begin_string = "FIX.5.0",
+     .session = FIXPP_SESSION_VER_FIX50,
+     .application = FIXPP_APPL_VER_FIX50},
+    {.name = "Fix50Sp1",
+     .begin_string = "FIX.5.0SP1",
+     .session = FIXPP_SESSION_VER_FIX50SP1,
+     .application = FIXPP_APPL_VER_FIX50SP1},
+    {.name = "Fix50Sp2",
+     .begin_string = "FIX.5.0SP2",
+     .session = FIXPP_SESSION_VER_FIX50SP2,
+     .application = FIXPP_APPL_VER_FIX50SP2},
+    {.name = "FixLatest",
+     .begin_string = "FIX.Latest",
+     .session = FIXPP_SESSION_VER_FIXLATEST,
+     .application = FIXPP_APPL_VER_FIXLATEST},
 };
 
 class W10CBeginString : public testing::TestWithParam<BeginStringCase> {};
@@ -608,9 +650,10 @@ class W10CBeginString : public testing::TestWithParam<BeginStringCase> {};
 TEST_P(W10CBeginString, ApplicationAndAdminRows) {
     const BeginStringCase& c = GetParam();
     expect_row(read_built(raw_frame(c.begin_string, "35=D\x01")),
-               Row{kApp, c.session, c.application}, "an application message");
-    expect_row(read_built(raw_frame(c.begin_string, "35=0\x01")), Row{kAdmin, c.session, kNone},
-               "an admin message");
+               Row{.kind = kApp, .session = c.session, .application = c.application},
+               "an application message");
+    expect_row(read_built(raw_frame(c.begin_string, "35=0\x01")),
+               Row{.kind = kAdmin, .session = c.session, .application = kNone}, "an admin message");
 }
 
 INSTANTIATE_TEST_SUITE_P(Supported, W10CBeginString, testing::ValuesIn(kSupportedBeginStrings),
@@ -625,15 +668,18 @@ INSTANTIATE_TEST_SUITE_P(OtherNamed, W10CBeginString, testing::ValuesIn(kOtherNa
 // `kind` by is_fixt_admin_msgtype on every row, a non-FIXT 35=A included. A view of one a test
 // builds, since the session delivers a Logon to no callback.
 TEST(W10CBeginString44, ALogonIsAdmin) {
-    expect_row(read_built(raw_frame("FIX.4.4", "35=A\x01")), Row{kAdmin, kV44, kNone}, "a Logon");
+    expect_row(read_built(raw_frame("FIX.4.4", "35=A\x01")),
+               Row{.kind = kAdmin, .session = kV44, .application = kNone}, "a Logon");
 }
 
 // A BeginString no enumerator names: `kind` by 35, and both versions Unknown.
 TEST(W10CBeginStringUnnamed, KindBy35_BothUnknown) {
     expect_row(read_built(raw_frame("FIX.9.9", "35=D\x01")),
-               Row{kApp, FIXPP_SESSION_VER_UNKNOWN, kNone}, "an application message");
+               Row{.kind = kApp, .session = FIXPP_SESSION_VER_UNKNOWN, .application = kNone},
+               "an application message");
     expect_row(read_built(raw_frame("FIX.9.9", "35=A\x01")),
-               Row{kAdmin, FIXPP_SESSION_VER_UNKNOWN, kNone}, "an admin message");
+               Row{.kind = kAdmin, .session = FIXPP_SESSION_VER_UNKNOWN, .application = kNone},
+               "an admin message");
 }
 
 // Tag 8 absent, as before this feature: all zero, and the code.

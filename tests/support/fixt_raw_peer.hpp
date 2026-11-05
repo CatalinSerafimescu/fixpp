@@ -123,9 +123,7 @@ public:
             "\x01"
             "35=" +
             std::string{msg_type} + "\x01";
-        return read_until(
-            [&needle](const std::string& f) { return f.find(needle) != std::string::npos; },
-            budget);
+        return read_until([&needle](const std::string& f) { return f.contains(needle); }, budget);
     }
 
     [[nodiscard]] bool write(const std::string& frame) {

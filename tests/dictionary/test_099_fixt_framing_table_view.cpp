@@ -109,6 +109,7 @@ std::string join_in_order(auto const& tags) {
 template <class Store>
 std::vector<std::string> msg_set_lines(Store const& store) {
     std::vector<std::string> lines;
+    lines.reserve(store.size());
     for (auto const& [key, value] : store) {
         lines.push_back(std::string(key) + ":" + join_sorted(value));
     }
@@ -118,6 +119,7 @@ std::vector<std::string> msg_set_lines(Store const& store) {
 template <class Store>
 std::vector<std::string> msg_list_lines(Store const& store) {
     std::vector<std::string> lines;
+    lines.reserve(store.size());
     for (auto const& [key, value] : store) {
         lines.push_back(std::string(key) + ":" + join_in_order(value));
     }
@@ -127,6 +129,7 @@ std::vector<std::string> msg_list_lines(Store const& store) {
 template <class Store>
 std::vector<std::string> tag_value_lines(Store const& store) {
     std::vector<std::string> lines;
+    lines.reserve(store.size());
     for (auto const& [key, value] : store) {
         lines.push_back(std::to_string(key) + ":" + std::to_string(static_cast<unsigned>(value)));
     }
@@ -136,6 +139,7 @@ std::vector<std::string> tag_value_lines(Store const& store) {
 template <class Store>
 std::vector<std::string> tag_list_lines(Store const& store) {
     std::vector<std::string> lines;
+    lines.reserve(store.size());
     for (auto const& [key, value] : store) {
         lines.push_back(std::to_string(key) + ":" + join_in_order(value));
     }
@@ -220,16 +224,16 @@ struct VendoredHash {
 // One row per file of dictionaries/, every file a loader reads. A literal is its file's
 // canonical dump's FNV-1a 64, recorded by tasks.md T006.
 const VendoredHash kVendored[] = {
-    {"FIX40.xml", 0xe84640c9433acba2ULL},
-    {"FIX41.xml", 0x7c58f6abfe64a108ULL},
-    {"FIX42.xml", 0xe5739dda716d8732ULL},
-    {"FIX43.xml", 0x6e4beab588e9e5d1ULL},
-    {"FIX44.xml", 0x645442c49557393aULL},
-    {"FIX50.xml", 0xe6be16b585a12850ULL},
-    {"FIX50SP1.xml", 0x33af764d534a765dULL},
-    {"FIX50SP2.xml", 0x85e0014214253c0bULL},
-    {"FIXT11.xml", 0x99a62ff60a54c244ULL},
-    {"orchestra/OrchestraFIXLatest.xml", 0xd55ac82e9e1883baULL},
+    {.file = "FIX40.xml", .literal = 0xe84640c9433acba2ULL},
+    {.file = "FIX41.xml", .literal = 0x7c58f6abfe64a108ULL},
+    {.file = "FIX42.xml", .literal = 0xe5739dda716d8732ULL},
+    {.file = "FIX43.xml", .literal = 0x6e4beab588e9e5d1ULL},
+    {.file = "FIX44.xml", .literal = 0x645442c49557393aULL},
+    {.file = "FIX50.xml", .literal = 0xe6be16b585a12850ULL},
+    {.file = "FIX50SP1.xml", .literal = 0x33af764d534a765dULL},
+    {.file = "FIX50SP2.xml", .literal = 0x85e0014214253c0bULL},
+    {.file = "FIXT11.xml", .literal = 0x99a62ff60a54c244ULL},
+    {.file = "orchestra/OrchestraFIXLatest.xml", .literal = 0xd55ac82e9e1883baULL},
 };
 
 class W17NoArgument : public testing::TestWithParam<VendoredHash> {};
@@ -305,10 +309,19 @@ std::map<std::string, std::string> by_store(const std::string& dump) {
 
 constexpr std::uint16_t kNoHops = 627;
 
-const std::set<std::string> kFramingStores{"fixt_framing_tags", "fixt_framing_types"};
-const std::set<std::string> kBareGroupStores{"group_first", "group_members", "group_bits"};
-const std::set<std::string> kPairStores{"length_pair_data_tag", "data_pair_length_tag",
-                                        "has_nonstandard_pair"};
+const std::set<std::string>& kFramingStores() {
+    static const std::set<std::string> value{"fixt_framing_tags", "fixt_framing_types"};
+    return value;
+}
+const std::set<std::string>& kBareGroupStores() {
+    static const std::set<std::string> value{"group_first", "group_members", "group_bits"};
+    return value;
+}
+const std::set<std::string>& kPairStores() {
+    static const std::set<std::string> value{"length_pair_data_tag", "data_pair_length_tag",
+                                             "has_nonstandard_pair"};
+    return value;
+}
 
 std::vector<std::uint64_t> without_bit(std::vector<std::uint64_t> words, std::uint16_t tag) {
     if (const std::size_t w = tag >> 6U; w < words.size()) {
@@ -335,10 +348,10 @@ TEST_P(W17Overload, EveryStoreEqualButTheNamedExceptions) {
 
     const bool own_header_declares = plain.is_header_tag(kNoHops);
     for (const auto& [store, text] : plain_stores) {
-        if (kFramingStores.contains(store)) {
+        if (kFramingStores().contains(store)) {
             continue;
         }
-        if (!own_header_declares && kBareGroupStores.contains(store)) {
+        if (!own_header_declares && kBareGroupStores().contains(store)) {
             continue;  // the next cell reads these, entry by entry
         }
         EXPECT_EQ(framed_stores.at(store), text) << GetParam().file << ": store " << store;
@@ -429,7 +442,7 @@ TEST_P(W17Overload, ExtraPairsFormDiffersInThePairStoresOnly) {
     const auto paired_stores = by_store(canonical_dump(paired));
     ASSERT_EQ(framed_stores.size(), paired_stores.size());
     for (const auto& [store, text] : framed_stores) {
-        if (!kPairStores.contains(store)) {
+        if (!kPairStores().contains(store)) {
             EXPECT_EQ(paired_stores.at(store), text) << GetParam().file << ": store " << store;
         }
     }

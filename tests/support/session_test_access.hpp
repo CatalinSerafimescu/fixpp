@@ -49,8 +49,8 @@ struct session_test_access {
 
     // Hands a route set to a session right after construction and before open(), as the role
     // loops do through session_engine_access (099, tasks.md T007, T039).
-    static void adopt_routes(Session& s, std::shared_ptr<const detail::fixt_route_set> routes) {
-        s.routes_ = std::move(routes);
+    static void adopt_routes(Session& s, std::shared_ptr<const detail::fixt_route_set> set) {
+        s.routes_ = std::move(set);
     }
 
     // data-model E-10's msg_type_defaults_, in stored order, and its capacity (099, W-25). Read
@@ -58,6 +58,7 @@ struct session_test_access {
     [[nodiscard]] static std::vector<std::pair<std::string, fixpp::dict::application_version>>
     msg_type_defaults(Session const& s) {
         std::vector<std::pair<std::string, fixpp::dict::application_version>> out;
+        out.reserve(s.msg_type_defaults_.size());
         for (auto const& e : s.msg_type_defaults_) {
             out.emplace_back(std::string(e.msg_type, e.len), e.version);
         }

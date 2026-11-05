@@ -42,17 +42,23 @@ void watch(Rig& r, Seen& seen) {
 }
 
 // A body pair whose Data embeds SOH, 34=7 and another version's 1128.
-const std::string kEmbedded =
-    "ab\x01"
-    "34=7\x01"
-    "1128=10";
-const std::string kOneParty =
-    "453=1\x01"
-    "448=P\x01"
-    "447=D\x01"
-    "452=1\x01";
+const std::string& kEmbedded() {
+    static const std::string value =
+        "ab\x01"
+        "34=7\x01"
+        "1128=10";
+    return value;
+}
+const std::string& kOneParty() {
+    static const std::string value =
+        "453=1\x01"
+        "448=P\x01"
+        "447=D\x01"
+        "452=1\x01";
+    return value;
+}
 
-std::string app_body() { return kNos + pair_field(kEmbedded) + kOneParty; }
+std::string app_body() { return kNos() + pair_field(kEmbedded()) + kOneParty(); }
 
 Fixture t_routed_pair() { return own_fixture(Shape::T, {fixt11(), fix50sp2_with_body_pair()}); }
 
@@ -66,7 +72,7 @@ INSTANTIATE_TEST_SUITE_P(W7, W7Application, testing::Bool(),
 void expect_view(const Seen& seen, unsigned seq) {
     EXPECT_EQ(seen.calls, 1);
     EXPECT_EQ(seen.seq, std::to_string(seq)) << "MsgSeqNum against the frame builder's";
-    EXPECT_EQ(seen.data, kEmbedded) << "the Data value whole";
+    EXPECT_EQ(seen.data, kEmbedded()) << "the Data value whole";
     EXPECT_EQ(seen.group_instances, 1) << "the group count against the frame";
     EXPECT_EQ(seen.resolved, dd::application_version::v50sp2) << "the slot 1137=9 resolved";
 }
@@ -98,14 +104,14 @@ TEST_P(W7Application, D4_PossDupRedelivery) {
         return;
     }
     Rig& r = *run.rig;
-    (void)r.deliver(frame_35("D", r.peer_ctx(2), kNos));
+    (void)r.deliver(frame_35("D", r.peer_ctx(2), kNos()));
     const int before = r.app->app;
     Seen seen;
     watch(r, seen);
-    const std::string possdup = wire(kFT, "35=D\x01" + hdr(r.peer_ctx(2)) +
-                                              "43=Y\x01"
-                                              "122=20240101-00:00:00.000\x01" +
-                                              app_body());
+    const std::string possdup = wire(kFT(), "35=D\x01" + hdr(r.peer_ctx(2)) +
+                                                "43=Y\x01"
+                                                "122=20240101-00:00:00.000\x01" +
+                                                app_body());
     run.ending = r.deliver(possdup);
     EXPECT_EQ(run.ending.from_app, before + 1) << log_form(run.ending);
     EXPECT_EQ(run.ending.next_in_after, run.ending.next_in_before) << log_form(run.ending);
@@ -136,10 +142,10 @@ const DictPtr& fixt11_with_admin_pair() {
         "FIXT11.xml",
         "<fix type='FIXT' major='1' minor='1' servicepack='0'><messages>"
         "<message name='Heartbeat' msgtype='0' msgcat='admin'>" +
-            kPairMembers + "</message><message name='TestRequest' msgtype='1' msgcat='admin'>" +
-            kPairMembers + "</message><message name='SequenceReset' msgtype='4' msgcat='admin'>" +
-            kPairMembers + "</message><message name='Logout' msgtype='5' msgcat='admin'>" +
-            kPairMembers + "</message></messages>" + kPairFields + "</fix>");
+            kPairMembers() + "</message><message name='TestRequest' msgtype='1' msgcat='admin'>" +
+            kPairMembers() + "</message><message name='SequenceReset' msgtype='4' msgcat='admin'>" +
+            kPairMembers() + "</message><message name='Logout' msgtype='5' msgcat='admin'>" +
+            kPairMembers() + "</message></messages>" + kPairFields() + "</fix>");
     return d;
 }
 
@@ -153,7 +159,7 @@ Fixture a_with_admin_pair() {
 void expect_admin_view(const Seen& seen, unsigned seq) {
     EXPECT_EQ(seen.calls, 1);
     EXPECT_EQ(seen.seq, std::to_string(seq)) << "MsgSeqNum against the frame builder's";
-    EXPECT_EQ(seen.data, kEmbedded) << "the Data value whole";
+    EXPECT_EQ(seen.data, kEmbedded()) << "the Data value whole";
     EXPECT_EQ(seen.resolved, dd::application_version::Unknown) << "an admin message";
 }
 
@@ -174,7 +180,7 @@ TEST_P(W7Admin, D1_Heartbeat) {
     }
     Seen seen;
     watch(*run.rig, seen);
-    run.ending = run.rig->deliver(frame_35("0", run.rig->peer_ctx(2), pair_field(kEmbedded)));
+    run.ending = run.rig->deliver(frame_35("0", run.rig->peer_ctx(2), pair_field(kEmbedded())));
     expect_ending(run, "- | stays | c | app=0 adm=1");
     expect_admin_view(seen, 2);
 }
@@ -191,7 +197,7 @@ TEST_P(W7Admin, D3_SequenceResetResetMode) {
     Seen seen;
     watch(*run.rig, seen);
     run.ending =
-        run.rig->deliver(frame_35("4", run.rig->peer_ctx(2), "36=9\x01" + pair_field(kEmbedded)));
+        run.rig->deliver(frame_35("4", run.rig->peer_ctx(2), "36=9\x01" + pair_field(kEmbedded())));
     expect_ending(run, "- | stays | c | app=0 adm=1");
     expect_admin_view(seen, 2);
     EXPECT_EQ(run.rig->next_in(), 9U) << "the reset's NewSeqNo";
@@ -210,8 +216,8 @@ TEST_P(W7Admin, D5_SequenceChecksOff) {
     }
     Seen seen;
     watch(*run.rig, seen);
-    run.ending =
-        run.rig->deliver(frame_35("1", run.rig->peer_ctx(9), "112=x\x01" + pair_field(kEmbedded)));
+    run.ending = run.rig->deliver(
+        frame_35("1", run.rig->peer_ctx(9), "112=x\x01" + pair_field(kEmbedded())));
     expect_ending(run, "- | stays | k | app=0 adm=1");
     expect_admin_view(seen, 9);
 }
@@ -231,7 +237,7 @@ TEST_P(W7Admin, D6_GapFill) {
     run.ending = run.rig->deliver(frame_35("4", run.rig->peer_ctx(2),
                                            "123=Y\x01"
                                            "36=9\x01" +
-                                               pair_field(kEmbedded)));
+                                               pair_field(kEmbedded())));
     expect_ending(run, "- | stays | c | app=0 adm=1");
     expect_admin_view(seen, 2);
 }
@@ -247,7 +253,7 @@ TEST_P(W7Admin, D7_Logout) {
     }
     Seen seen;
     watch(*run.rig, seen);
-    run.ending = run.rig->deliver(frame_35("5", run.rig->peer_ctx(2), pair_field(kEmbedded)));
+    run.ending = run.rig->deliver(frame_35("5", run.rig->peer_ctx(2), pair_field(kEmbedded())));
     expect_ending(run, "Logout | Disc | c | app=0 adm=1");
     expect_admin_view(seen, 2);
 }
@@ -260,8 +266,8 @@ TEST(W7Gate, RequiredFieldOnlyInsideAPairsData_Missing) {
     const CellRun run =
         run_own_cell("W-7 gate", t_routed_pair(), true, Arm::Active, [](const Rig& r) {
             return frame_35("D", r.peer_ctx(2),
-                            kNosNo11 + pair_field("\x01"
-                                                  "11=C"));
+                            kNosNo11() + pair_field("\x01"
+                                                    "11=C"));
         });
     expect_ending(run, "R 1/11 D 45=2 | stays | c | app=0 adm=0");
 }
@@ -272,8 +278,8 @@ TEST(W7LogoutSentScan, Data35Is5_NotTakenAsTheReply) {
     const CellRun run = run_own_cell("W-7 LogoutSent scan", t_routed_pair(), true, Arm::LogoutSent,
                                      [](const Rig& r) {
                                          return frame_35("D", r.peer_ctx(2),
-                                                         kNos + pair_field("\x01"
-                                                                           "35=5"));
+                                                         kNos() + pair_field("\x01"
+                                                                             "35=5"));
                                      });
     expect_ending(run, "- | stays | k | app=0 adm=0");
 }

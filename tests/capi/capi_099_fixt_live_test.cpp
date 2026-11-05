@@ -5,9 +5,10 @@
 // 099-fixt-appl-version-validation, contracts/witnesses.md W-12 (tasks.md T092), FR-014, FR-016,
 // NFR-004, SC-006: a FIXT session from pure C, on shapes T and A. A real TCP peer writes the frames
 // byte for byte; the session under test is a C-ABI initiator. The setters, add-dictionary, Active,
-// a routed Reject and an accept, a refused config at fixpp_session_open with the builder unconsumed,
-// and fixpp_msg_version in the callback and on a clone that a second thread reads while the worker
-// runs, which T134's TSan run judges. Error codes are the literals of contracts/surface.md.
+// a routed Reject and an accept, a refused config at fixpp_session_open with the builder
+// unconsumed, and fixpp_msg_version in the callback and on a clone that a second thread reads while
+// the worker runs, which T134's TSan run judges. Error codes are the literals of
+// contracts/surface.md.
 //
 // After the first fixpp_engine_start every check is non-fatal, so a failing check still reaches
 // the closes and destroys and the binary exits with a test failure.
@@ -152,10 +153,10 @@ TEST(W12Setters, DefaultApplVerId_RefusesWhatTheTableRefuses) {
 
 TEST(W12Setters, DefaultApplVerId_EachWireValueStoresItsVersion) {
     const std::vector<std::pair<const char*, dd::application_version>> wire = {
-        {"2", dd::application_version::v40},    {"3", dd::application_version::v41},
-        {"4", dd::application_version::v42},    {"5", dd::application_version::v43},
-        {"6", dd::application_version::v44},    {"7", dd::application_version::v50},
-        {"8", dd::application_version::v50sp1}, {"9", dd::application_version::v50sp2},
+        {"2", dd::application_version::v40},      {"3", dd::application_version::v41},
+        {"4", dd::application_version::v42},      {"5", dd::application_version::v43},
+        {"6", dd::application_version::v44},      {"7", dd::application_version::v50},
+        {"8", dd::application_version::v50sp1},   {"9", dd::application_version::v50sp2},
         {"10", dd::application_version::vlatest},
     };
     fixpp_session_config_t* sc = nullptr;
@@ -229,8 +230,9 @@ TEST(W12AddDictionary, TheHandleErrorsAreSetDictionarys) {
     EXPECT_EQ(fixpp_engine_config_add_dictionary(ec, nullptr), FIXPP_ERR_CAPI_CONFIG_INVALID);
 
     fixpp_dict empty_wrapper{nullptr};
-    EXPECT_EQ(fixpp_engine_config_add_dictionary(ec, reinterpret_cast<fixpp_dict_t*>(&empty_wrapper)),
-              FIXPP_ERR_CAPI_CONFIG_INVALID);
+    EXPECT_EQ(
+        fixpp_engine_config_add_dictionary(ec, reinterpret_cast<fixpp_dict_t*>(&empty_wrapper)),
+        FIXPP_ERR_CAPI_CONFIG_INVALID);
 
     fixpp_dict_t* destroyed = load_dict("FIXT11.xml");
     fixpp_dict_destroy(destroyed);
@@ -370,7 +372,8 @@ struct Bytes {
 };
 
 Bytes read_version(const fixpp_msg_t* m) {
-    fixpp_resolved_msg_version_t v{0xAA, 0xAA, 0xAA, 0xAA};
+    fixpp_resolved_msg_version_t v{
+        .kind = 0xAA, .session = 0xAA, .application = 0xAA, ._reserved = 0xAA};
     Bytes b;
     b.rc = fixpp_msg_version(m, &v);
     b.kind = v.kind;
@@ -398,7 +401,7 @@ struct CallbackLog {
 void on_message(const fixpp_msg_t* inbound, void* user) {
     auto* log = static_cast<CallbackLog*>(user);
     const int at = log->calls.load(std::memory_order_relaxed);
-    if (at < static_cast<int>(log->bytes.size())) {
+    if (std::cmp_less(at, log->bytes.size())) {
         log->bytes[static_cast<std::size_t>(at)] = read_version(inbound);
     }
     if (at == 0) {
@@ -415,20 +418,26 @@ std::string header(unsigned seq) {
            "56=ISLD\x01";
 }
 
-const std::string kNos =
-    "11=C\x01"
-    "21=1\x01"
-    "55=X\x01"
-    "54=1\x01"
-    "60=20240101-00:00:00\x01"
-    "40=1\x01"
-    "38=1\x01";
-
-std::string nos(unsigned seq, const std::string& before_34, const std::string& tail) {
-    return fixt_frame("35=D\x01" + before_34 + header(seq) + kNos + tail);
+const std::string& kNos() {
+    static const std::string value =
+        "11=C\x01"
+        "21=1\x01"
+        "55=X\x01"
+        "54=1\x01"
+        "60=20240101-00:00:00\x01"
+        "40=1\x01"
+        "38=1\x01";
+    return value;
 }
 
-const std::string k3115 = "3115=1.5\x01";
+std::string nos(unsigned seq, const std::string& before_34, const std::string& tail) {
+    return fixt_frame("35=D\x01" + before_34 + header(seq) + kNos() + tail);
+}
+
+const std::string& k3115() {
+    static const std::string value = "3115=1.5\x01";
+    return value;
+}
 
 // Waits until the callback has run `n` times.
 bool wait_calls(const CallbackLog& log, int n) {
@@ -463,8 +472,8 @@ TEST_P(W12Shape, ReachesActive_RoutesAccepts_RoutesRejects_ReadsItsVersion) {
         EXPECT_EQ(frame_field(logon.value_or(""), 1137), "9");
         // Answers 141 as the session's Logon asked, since the default policy wants both to say it.
         const std::string reset = frame_field(logon.value_or(""), 141) == "Y" ? "141=Y\x01" : "";
-        EXPECT_TRUE(peer.write(fixt_frame("35=A\x01" + header(1) + "98=0\x01" + "108=30\x01" +
-                                          "1137=9\x01" + reset)));
+        EXPECT_TRUE(peer.write(
+            fixt_frame("35=A\x01" + header(1) + "98=0\x01" + "108=30\x01" + "1137=9\x01" + reset)));
         bool established = false;
         EXPECT_TRUE(fixpp::test_support::wait_until_observed(
             [&] {
@@ -474,7 +483,7 @@ TEST_P(W12Shape, ReachesActive_RoutesAccepts_RoutesRejects_ReadsItsVersion) {
             << "the session did not reach Active";
 
         // An accept routed by 1128: only FIX Latest declares 3115.
-        EXPECT_TRUE(peer.write(nos(2, "1128=10\x01", k3115)));
+        EXPECT_TRUE(peer.write(nos(2, "1128=10\x01", k3115())));
         EXPECT_TRUE(wait_calls(log, 1)) << "the routed frame did not reach the callback";
 
         // A second thread reads the clone while the worker handles the frames below.
@@ -495,7 +504,7 @@ TEST_P(W12Shape, ReachesActive_RoutesAccepts_RoutesRejects_ReadsItsVersion) {
         EXPECT_TRUE(peer.write(nos(3, "", "")));
         EXPECT_TRUE(wait_calls(log, 2)) << "the plain NOS did not reach the callback";
         // Routed to FIX50SP2, which does not declare 3115.
-        EXPECT_TRUE(peer.write(nos(4, "", k3115)));
+        EXPECT_TRUE(peer.write(nos(4, "", k3115())));
         reject_3115 = peer.read_msg_type("3", kStep);
         // The validation setter's own cell: a non-validating session delivers this frame.
         EXPECT_TRUE(peer.write(nos(5, "1128=99\x01", "")));

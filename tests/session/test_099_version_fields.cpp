@@ -28,10 +28,15 @@ struct VersionField {
 VersionField fix50sp2_only() {
     const std::uint16_t tag = only_field(*fix50sp2(), "D", {fix44().get(), fixt11().get()});
     const auto field = fix50sp2()->field("D", tag);
-    return {"D", tag, field ? plain_value(*fix50sp2(), *field) : std::string{}, kNos};
+    return {.msg_type = "D",
+            .tag = tag,
+            .value = field ? plain_value(*fix50sp2(), *field) : std::string{},
+            .body = kNos()};
 }
 // In FIX Latest's NewOrderSingle and not in FIX50SP2's (the matrix's preamble).
-VersionField latest_only() { return {"D", 3115, "1.5", kNos}; }
+VersionField latest_only() {
+    return {.msg_type = "D", .tag = 3115, .value = "1.5", .body = kNos()};
+}
 // The FIX 4.4-only pair: recomputed, a MsgType and a tag FIX50SP2, the other route here, lacks
 // there.
 VersionField fix44_only() {
@@ -41,7 +46,8 @@ VersionField fix44_only() {
         if (p.group_no_tag != 0) {
             body += std::to_string(p.group_no_tag) + "=1\x01";
         }
-        return VersionField{p.msg_type, p.tag, p.value, std::move(body)};
+        return VersionField{
+            .msg_type = p.msg_type, .tag = p.tag, .value = p.value, .body = std::move(body)};
     }();
     return f;
 }
@@ -70,27 +76,45 @@ Fixture twin_of(const DictPtr& version_dict, dd::application_version v, const ch
 }
 
 struct W2Cell {
-    const char* name;
-    VersionField (*field)();
-    const char* to_b;      // the 1128 that resolves the frame to B, or empty for the negotiated one
-    const char* to_other;  // the 1128 that resolves it to another version
-    DictPtr (*other)();
+    const char* name{};
+    VersionField (*field)() = nullptr;
+    const char* to_b{};  // the 1128 that resolves the frame to B, or empty for the negotiated one
+    const char* to_other{};  // the 1128 that resolves it to another version
+    DictPtr (*other)() = nullptr;
     dd::application_version other_version;
-    const char* other_wire;
+    const char* other_wire{};
 };
 
 DictPtr fix44_ptr() { return fix44(); }
 DictPtr fix50sp2_ptr() { return fix50sp2(); }
 
 const W2Cell kCells[] = {
-    {"FIX50SP2", fix50sp2_only, "", "1128=6\x01", fix44_ptr, dd::application_version::v44, "6"},
-    {"Latest", latest_only, "1128=10\x01", "", fix50sp2_ptr, dd::application_version::v50sp2, "9"},
-    {"FIX44", fix44_only, "1128=6\x01", "", fix50sp2_ptr, dd::application_version::v50sp2, "9"},
+    {.name = "FIX50SP2",
+     .field = fix50sp2_only,
+     .to_b = "",
+     .to_other = "1128=6\x01",
+     .other = fix44_ptr,
+     .other_version = dd::application_version::v44,
+     .other_wire = "6"},
+    {.name = "Latest",
+     .field = latest_only,
+     .to_b = "1128=10\x01",
+     .to_other = "",
+     .other = fix50sp2_ptr,
+     .other_version = dd::application_version::v50sp2,
+     .other_wire = "9"},
+    {.name = "FIX44",
+     .field = fix44_only,
+     .to_b = "1128=6\x01",
+     .to_other = "",
+     .other = fix50sp2_ptr,
+     .other_version = dd::application_version::v50sp2,
+     .other_wire = "9"},
 };
 
 struct W2Param {
     W2Cell cell;
-    Shape shape;
+    Shape shape{};
 };
 
 class W2VersionFields : public testing::TestWithParam<W2Param> {};
@@ -124,7 +148,7 @@ std::vector<W2Param> w2_params() {
     std::vector<W2Param> p;
     for (Shape s : {Shape::T, Shape::A}) {
         for (const auto& c : kCells) {
-            p.push_back(W2Param{c, s});
+            p.push_back(W2Param{.cell = c, .shape = s});
         }
     }
     return p;
@@ -143,7 +167,7 @@ INSTANTIATE_TEST_SUITE_P(W2, W2VersionFields, testing::ValuesIn(w2_params()),
 TEST(W2SpuriousHit, T_FieldOnlyFixt11Has_RejectedOnTheRoute) {
     const CellRun run = run_own_cell(
         "W-2 spurious T", all_versions(Shape::T), /*validate=*/true, Arm::Active, [](const Rig& r) {
-            return frame_35("D", r.peer_ctx(2), kNos + "1137=9\x01", "1128=9\x01");
+            return frame_35("D", r.peer_ctx(2), kNos() + "1137=9\x01", "1128=9\x01");
         });
     expect_ending(run, "R 2/1137 D 45=2 | stays | c | app=0 adm=0");
 }

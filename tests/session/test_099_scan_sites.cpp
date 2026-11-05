@@ -30,27 +30,27 @@ namespace fixpp::session::test099 {
 namespace {
 
 // No MsgType at all: a frame the peek cannot read.
-std::string garbled(const Rig& r, unsigned seq) { return wire(kFT, hdr(r.peer_ctx(seq))); }
+std::string garbled(const Rig& r, unsigned seq) { return wire(kFT(), hdr(r.peer_ctx(seq))); }
 std::string malformed_tag(const Rig& r, unsigned seq) {
-    return wire(kFT, "35=0\x01" + hdr(r.peer_ctx(seq)) + "3a5=1\x01");
+    return wire(kFT(), "35=0\x01" + hdr(r.peer_ctx(seq)) + "3a5=1\x01");
 }
 std::string length_data_mismatch(const Rig& r, unsigned seq) {
-    return wire(kFT, "35=0\x01" + hdr(r.peer_ctx(seq)) +
-                         "95=50\x01"
-                         "96=x\x01");
+    return wire(kFT(), "35=0\x01" + hdr(r.peer_ctx(seq)) +
+                           "95=50\x01"
+                           "96=x\x01");
 }
 std::string third_field_not_35(const Rig& r, unsigned seq) {
-    return wire(kFT, "34=" + std::to_string(seq) +
-                         "\x01"
-                         "35=0\x01"
-                         "49=" +
-                         r.peer_ctx(seq).snd +
-                         "\x01"
-                         "52=" +
-                         kFresh +
-                         "\x01"
-                         "56=" +
-                         r.peer_ctx(seq).tgt + "\x01");
+    return wire(kFT(), "34=" + std::to_string(seq) +
+                           "\x01"
+                           "35=0\x01"
+                           "49=" +
+                           r.peer_ctx(seq).snd +
+                           "\x01"
+                           "52=" +
+                           kFresh +
+                           "\x01"
+                           "56=" +
+                           r.peer_ctx(seq).tgt + "\x01");
 }
 
 struct W19Row {
@@ -61,23 +61,70 @@ struct W19Row {
 };
 
 const W19Row kRows[] = {
-    {"garbled", garbled, Arm::NotConnected, "- | stays | k | app=0 adm=0"},
-    {"garbled", garbled, Arm::LogonSent, "- | stays | k | app=0 adm=0"},
-    {"garbled", garbled, Arm::Active, "- | stays | k | app=0 adm=0"},
-    {"garbled", garbled, Arm::LogoutSent, "- | stays | k | app=0 adm=0"},
-    {"malformed tag", malformed_tag, Arm::NotConnected, "- | Disc | k | app=0 adm=0"},
-    {"malformed tag", malformed_tag, Arm::LogonSent, "- | Disc | k | app=0 adm=0"},
-    {"malformed tag", malformed_tag, Arm::Active, "R 0/ 0 45=2 | stays | c | app=0 adm=0"},
-    {"malformed tag", malformed_tag, Arm::LogoutSent, "- | stays | k | app=0 adm=0"},
-    {"Length/Data mismatch", length_data_mismatch, Arm::NotConnected, "- | Disc | k | app=0 adm=0"},
-    {"Length/Data mismatch", length_data_mismatch, Arm::LogonSent, "- | Disc | k | app=0 adm=0"},
-    {"Length/Data mismatch", length_data_mismatch, Arm::Active,
-     "R 5/95 0 45=2 | stays | c | app=0 adm=0"},
-    {"Length/Data mismatch", length_data_mismatch, Arm::LogoutSent, "- | stays | k | app=0 adm=0"},
-    {"third field not 35", third_field_not_35, Arm::NotConnected, "- | stays | k | app=0 adm=0"},
-    {"third field not 35", third_field_not_35, Arm::LogonSent, "- | stays | k | app=0 adm=0"},
-    {"third field not 35", third_field_not_35, Arm::Active, "- | stays | k | app=0 adm=0"},
-    {"third field not 35", third_field_not_35, Arm::LogoutSent, "- | stays | k | app=0 adm=0"},
+    {.name = "garbled",
+     .make = garbled,
+     .arm = Arm::NotConnected,
+     .expected = "- | stays | k | app=0 adm=0"},
+    {.name = "garbled",
+     .make = garbled,
+     .arm = Arm::LogonSent,
+     .expected = "- | stays | k | app=0 adm=0"},
+    {.name = "garbled",
+     .make = garbled,
+     .arm = Arm::Active,
+     .expected = "- | stays | k | app=0 adm=0"},
+    {.name = "garbled",
+     .make = garbled,
+     .arm = Arm::LogoutSent,
+     .expected = "- | stays | k | app=0 adm=0"},
+    {.name = "malformed tag",
+     .make = malformed_tag,
+     .arm = Arm::NotConnected,
+     .expected = "- | Disc | k | app=0 adm=0"},
+    {.name = "malformed tag",
+     .make = malformed_tag,
+     .arm = Arm::LogonSent,
+     .expected = "- | Disc | k | app=0 adm=0"},
+    {.name = "malformed tag",
+     .make = malformed_tag,
+     .arm = Arm::Active,
+     .expected = "R 0/ 0 45=2 | stays | c | app=0 adm=0"},
+    {.name = "malformed tag",
+     .make = malformed_tag,
+     .arm = Arm::LogoutSent,
+     .expected = "- | stays | k | app=0 adm=0"},
+    {.name = "Length/Data mismatch",
+     .make = length_data_mismatch,
+     .arm = Arm::NotConnected,
+     .expected = "- | Disc | k | app=0 adm=0"},
+    {.name = "Length/Data mismatch",
+     .make = length_data_mismatch,
+     .arm = Arm::LogonSent,
+     .expected = "- | Disc | k | app=0 adm=0"},
+    {.name = "Length/Data mismatch",
+     .make = length_data_mismatch,
+     .arm = Arm::Active,
+     .expected = "R 5/95 0 45=2 | stays | c | app=0 adm=0"},
+    {.name = "Length/Data mismatch",
+     .make = length_data_mismatch,
+     .arm = Arm::LogoutSent,
+     .expected = "- | stays | k | app=0 adm=0"},
+    {.name = "third field not 35",
+     .make = third_field_not_35,
+     .arm = Arm::NotConnected,
+     .expected = "- | stays | k | app=0 adm=0"},
+    {.name = "third field not 35",
+     .make = third_field_not_35,
+     .arm = Arm::LogonSent,
+     .expected = "- | stays | k | app=0 adm=0"},
+    {.name = "third field not 35",
+     .make = third_field_not_35,
+     .arm = Arm::Active,
+     .expected = "- | stays | k | app=0 adm=0"},
+    {.name = "third field not 35",
+     .make = third_field_not_35,
+     .arm = Arm::LogoutSent,
+     .expected = "- | stays | k | app=0 adm=0"},
 };
 
 struct W19Param {
@@ -100,7 +147,7 @@ std::vector<W19Param> w19_params() {
     std::vector<W19Param> p;
     for (Shape s : {Shape::T, Shape::A, Shape::L}) {
         for (const auto& r : kRows) {
-            p.push_back(W19Param{r, s});
+            p.push_back(W19Param{.row = r, .shape = s});
         }
     }
     return p;
@@ -122,7 +169,7 @@ TEST_P(W19FaultPastTheStop, TheFaultsDispositionNotTheRefusal) {
         return;
     }
     const std::string frame =
-        frame_35("D", run.rig->peer_ctx(2), kNos + "3a5=1\x01", "1128=99\x01");
+        frame_35("D", run.rig->peer_ctx(2), kNos() + "3a5=1\x01", "1128=99\x01");
     const std::span<const std::byte> bytes{reinterpret_cast<const std::byte*>(frame.data()),
                                            frame.size()};
 

@@ -87,11 +87,11 @@ DictPtr fixt11_1137_optional() {
 }
 
 struct MatrixCell {
-    const char* name;
-    DictPtr (*s)();
-    std::vector<DictPtr> (*engine)();
+    const char* name{};
+    DictPtr (*s)() = nullptr;
+    std::vector<DictPtr> (*engine)() = nullptr;
     AV default_appl;
-    bool validating_refused;  // the literal: a validating session of this shape is refused
+    bool validating_refused{};  // the literal: a validating session of this shape is refused
 };
 
 DictPtr s_t() { return fixt11(); }
@@ -110,21 +110,81 @@ std::vector<DictPtr> e_no1137_50() { return {fixt11_logon_without_1137(), fix50s
 std::vector<DictPtr> e_optional_50() { return {fixt11_1137_optional(), fix50sp2()}; }
 
 const MatrixCell kMatrix[] = {
-    {"T", s_t, e_50, AV::v50sp2, false},
-    {"L", s_l, e_latest, AV::v50sp2, false},
-    {"A_with_FIXT11", s_a, e_t_50, AV::v50sp2, false},
-    {"A_without_FIXT11", s_a, e_50, AV::v50sp2, true},
-    {"FIX44_with_FIXT11", s_44, e_t_44, AV::v44, false},
-    {"FIX44_without_FIXT11", s_44, e_44, AV::v44, true},
-    {"PartialFIXT11_as_S", partial_fixt11, e_50, AV::v50sp2, true},
-    {"A_with_partial_FIXT11", s_a, e_partial_50, AV::v50sp2, true},
-    {"FIXT11NoLogon1137_as_S", fixt11_logon_without_1137, e_50, AV::v50sp2, true},
-    {"A_with_FIXT11NoLogon1137", s_a, e_no1137_50, AV::v50sp2, true},
-    {"Fix44With1137_no_FIXT11", s_44_1137, e_50, AV::v50sp2, true},
-    {"Fix44With1137_with_FIXT11", s_44_1137, e_t_50, AV::v50sp2, false},
-    {"Optional1137_as_S", fixt11_1137_optional, e_50, AV::v50sp2, false},
-    {"A_with_optional1137_transport", s_a, e_optional_50, AV::v50sp2, false},
-    {"A_base_unregistered", s_a, e_t_44, AV::v44, false},
+    {.name = "T",
+     .s = s_t,
+     .engine = e_50,
+     .default_appl = AV::v50sp2,
+     .validating_refused = false},
+    {.name = "L",
+     .s = s_l,
+     .engine = e_latest,
+     .default_appl = AV::v50sp2,
+     .validating_refused = false},
+    {.name = "A_with_FIXT11",
+     .s = s_a,
+     .engine = e_t_50,
+     .default_appl = AV::v50sp2,
+     .validating_refused = false},
+    {.name = "A_without_FIXT11",
+     .s = s_a,
+     .engine = e_50,
+     .default_appl = AV::v50sp2,
+     .validating_refused = true},
+    {.name = "FIX44_with_FIXT11",
+     .s = s_44,
+     .engine = e_t_44,
+     .default_appl = AV::v44,
+     .validating_refused = false},
+    {.name = "FIX44_without_FIXT11",
+     .s = s_44,
+     .engine = e_44,
+     .default_appl = AV::v44,
+     .validating_refused = true},
+    {.name = "PartialFIXT11_as_S",
+     .s = partial_fixt11,
+     .engine = e_50,
+     .default_appl = AV::v50sp2,
+     .validating_refused = true},
+    {.name = "A_with_partial_FIXT11",
+     .s = s_a,
+     .engine = e_partial_50,
+     .default_appl = AV::v50sp2,
+     .validating_refused = true},
+    {.name = "FIXT11NoLogon1137_as_S",
+     .s = fixt11_logon_without_1137,
+     .engine = e_50,
+     .default_appl = AV::v50sp2,
+     .validating_refused = true},
+    {.name = "A_with_FIXT11NoLogon1137",
+     .s = s_a,
+     .engine = e_no1137_50,
+     .default_appl = AV::v50sp2,
+     .validating_refused = true},
+    {.name = "Fix44With1137_no_FIXT11",
+     .s = s_44_1137,
+     .engine = e_50,
+     .default_appl = AV::v50sp2,
+     .validating_refused = true},
+    {.name = "Fix44With1137_with_FIXT11",
+     .s = s_44_1137,
+     .engine = e_t_50,
+     .default_appl = AV::v50sp2,
+     .validating_refused = false},
+    {.name = "Optional1137_as_S",
+     .s = fixt11_1137_optional,
+     .engine = e_50,
+     .default_appl = AV::v50sp2,
+     .validating_refused = false},
+    {.name = "A_with_optional1137_transport",
+     .s = s_a,
+     .engine = e_optional_50,
+     .default_appl = AV::v50sp2,
+     .validating_refused = false},
+    {.name = "A_base_unregistered",
+     .s = s_a,
+     .engine = e_t_44,
+     .default_appl = AV::v44,
+     .validating_refused = false},
 };
 
 class W8Matrix : public testing::TestWithParam<MatrixCell> {};
@@ -530,7 +590,7 @@ TEST(W8LogLine, NonValidatingBadConfig_AcceptLoopLogsTheRefusal) {
                 [&peer](std::error_code const& ec) {
                     if (!ec) {
                         peer.start_reading();
-                        peer.send(logon_frame(Ctx{"TW", "ISLD", 1}, {}));
+                        peer.send(logon_frame(Ctx{.snd = "TW", .tgt = "ISLD", .seq = 1}, {}));
                     }
                 });
             peer_saw_the_close = fixpp::test_support::pump_until(

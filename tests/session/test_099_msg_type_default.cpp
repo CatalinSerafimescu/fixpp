@@ -65,7 +65,10 @@ std::string E(const std::string& mt, const std::string& v, const std::string& di
 
 std::string count(const std::string& n) { return "384=" + n + "\x01"; }
 
-const std::string kOneEntryD10 = count("1") + E("D", "10");
+const std::string& kOneEntryD10() {
+    static const std::string value = count("1") + E("D", "10");
+    return value;
+}
 
 // `384=<n>` and n entries, `U0`, `U1`, ...
 std::string distinct_group(int n) {
@@ -109,13 +112,34 @@ constexpr const char* kActive = "Active";
 constexpr const char* kNone = "-";
 
 // E-10's literals. 1130's Reject consumes on the block's path and keeps on the gate's.
-const std::string kBad1130Block = "R 5/1130 A 45=1 | Disc | c | app=0 adm=0";
-const std::string kBad1130Gate = "R 5/1130 A 45=1 | Disc | k | app=0 adm=0";
-const std::string kCap = "R 5/384 A 45=1 | Disc | c | app=0 adm=0";
-const std::string kLong372Block = "R 5/372 A 45=1 | Disc | c | app=0 adm=0";
-const std::string kLong372Gate = "R 5/372 A 45=1 | Disc | k | app=0 adm=0";
-const std::string kNo385 = "R 1/385 A 45=1 | Disc | c | app=0 adm=0";
-const std::string kCountWrong = "R 1/372 A 45=1 | Disc | k | app=0 adm=0";
+const std::string& kBad1130Block() {
+    static const std::string value = "R 5/1130 A 45=1 | Disc | c | app=0 adm=0";
+    return value;
+}
+const std::string& kBad1130Gate() {
+    static const std::string value = "R 5/1130 A 45=1 | Disc | k | app=0 adm=0";
+    return value;
+}
+const std::string& kCap() {
+    static const std::string value = "R 5/384 A 45=1 | Disc | c | app=0 adm=0";
+    return value;
+}
+const std::string& kLong372Block() {
+    static const std::string value = "R 5/372 A 45=1 | Disc | c | app=0 adm=0";
+    return value;
+}
+const std::string& kLong372Gate() {
+    static const std::string value = "R 5/372 A 45=1 | Disc | k | app=0 adm=0";
+    return value;
+}
+const std::string& kNo385() {
+    static const std::string value = "R 1/385 A 45=1 | Disc | c | app=0 adm=0";
+    return value;
+}
+const std::string& kCountWrong() {
+    static const std::string value = "R 1/372 A 45=1 | Disc | k | app=0 adm=0";
+    return value;
+}
 
 std::string stays(const std::string& reason_tag) {
     return "R " + reason_tag + " A 45=1 | stays | k | app=0 adm=0";
@@ -136,110 +160,340 @@ const std::vector<MtRow>& rows() {
         const Kept d9{{"D", Version::v50sp2}};
         const Kept none{};
         std::vector<MtRow> v;
-        v.push_back({"MT-a", "MT-a", kOneEntryD10, kActive, kNone, d10});
-        v.push_back(
-            {"MT-b", "MT-b 99", count("1") + E("D", "99"), kBad1130Block, kBad1130Gate, none});
-        v.push_back(
-            {"MT-b", "MT-b abc", count("1") + E("D", "abc"), kBad1130Block, kBad1130Gate, none});
-        v.push_back({"MT-c", "MT-c 4", count("1") + E("D", "4"), kBad1130Block, kNone,
-                     Kept{{"D", Version::v42}}});
-        v.push_back({"MT-c", "MT-c empty", count("1") + E("D", ""), kBad1130Block, kNone, none});
-        v.push_back({"MT-d", "MT-d no 1130", count("1") + E("D", "-"), kActive, kNone, none});
-        v.push_back({"MT-e", "MT-e 257xD", repeated_d_group(257), kCap, kNone, d10});
-        v.push_back({"MT-e", "MT-e 257 distinct", distinct_group(257), kCap, kLong372Gate,
-                     distinct_kept(kCapFromE10)});
-        v.push_back({"MT-e", "256 distinct", distinct_group(kCapFromE10), kActive, kLong372Gate,
-                     distinct_kept(kCapFromE10)});
-        v.push_back({"MT-e", "256xD", repeated_d_group(kCapFromE10), kActive, kNone, d10});
-        v.push_back({"MT-f", "MT-f nine", count("1") + E("ABCDEFGHI", "10"), kLong372Block,
-                     kLong372Gate, none});
-        v.push_back({"MT-f", "eight bytes", count("1") + E("ABCDEFGH", "10"), kActive, kLong372Gate,
-                     Kept{{"ABCDEFGH", Version::vlatest}}});
-        v.push_back({"MT-g", "MT-g 372=0", count("1") + E("0", "10"), kActive, kNone, none});
-        v.push_back({"MT-g", "372=0 1130=4", count("1") + E("0", "4"), kBad1130Block, kNone, none});
-        v.push_back({"MT-g", "372=0 1130=99", count("1") + E("0", "99"), kBad1130Block,
-                     kBad1130Gate, none});
-        v.push_back(
-            {"MT-h", "MT-h two D", count("2") + E("D", "9") + E("D", "10"), kActive, kNone, d10});
-        v.push_back({"MT-h", "MT-h two D later 9", count("2") + E("D", "10") + E("D", "9"), kActive,
-                     kNone, d9});
-        v.push_back({"MT-i", "MT-i R 99", count("1") + E("D", "99", "R"), kBad1130Block,
-                     kBad1130Gate, none});
-        v.push_back({"MT-i", "MT-i 1410=N 99", count("1") + E("D", "99", "S", "N"), kBad1130Block,
-                     kBad1130Gate, none});
-        v.push_back({"MT-i", "MT-i no1410 99", count("1") + E("D", "99", "S", "-"), kBad1130Block,
-                     kBad1130Gate, none});
-        v.push_back({"MT-j", "MT-j R 10", count("1") + E("D", "10", "R"), kActive, kNone, none});
-        v.push_back({"MT-j", "MT-j R 4", count("1") + E("D", "4", "R"), kActive, kNone, none});
-        v.push_back({"MT-j", "MT-j R empty", count("1") + E("D", "", "R"), kActive, kNone, none});
-        v.push_back(
-            {"MT-j", "MT-j N 10", count("1") + E("D", "10", "S", "N"), kActive, kNone, none});
-        v.push_back({"MT-j", "MT-j N 4", count("1") + E("D", "4", "S", "N"), kActive, kNone, none});
-        v.push_back(
-            {"MT-j", "MT-j N empty", count("1") + E("D", "", "S", "N"), kActive, kNone, none});
-        v.push_back(
-            {"MT-j", "MT-j no1410 10", count("1") + E("D", "10", "S", "-"), kActive, kNone, none});
-        v.push_back(
-            {"MT-j", "MT-j no1410 4", count("1") + E("D", "4", "S", "-"), kActive, kNone, none});
-        v.push_back(
-            {"MT-j", "MT-j no1410 empty", count("1") + E("D", "", "S", "-"), kActive, kNone, none});
-        v.push_back({"MT-k", "MT-k no 385", count("1") + E("D", "10", "-"), kNo385, kNone, none});
-        v.push_back({"MT-l", "MT-l 384=0", count("0") + E("D", "10"), kActive, kNone, none});
-        v.push_back({"MT-l", "MT-l 384=-1", count("-1") + E("D", "10"), kActive, kNone, none});
-        v.push_back({"MT-l", "MT-l no 384", E("D", "10"), kActive, kNone, none});
-        v.push_back({"MT-l", "two blocks 384=0 then 384=1",
-                     count("0") + "553=u\x01" + count("1") + E("D", "10"), kActive, kNone, none});
-        v.push_back({"MT-m", "MT-m", count("1") + E("D", "9") + "553=u\x01" + E("D", "10"), kActive,
-                     kNone, d9});
+        v.push_back({.cell = "MT-a",
+                     .id = "MT-a",
+                     .group = kOneEntryD10(),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = d10});
+        v.push_back({.cell = "MT-b",
+                     .id = "MT-b 99",
+                     .group = count("1") + E("D", "99"),
+                     .ta = kBad1130Block(),
+                     .l = kBad1130Gate(),
+                     .kept = none});
+        v.push_back({.cell = "MT-b",
+                     .id = "MT-b abc",
+                     .group = count("1") + E("D", "abc"),
+                     .ta = kBad1130Block(),
+                     .l = kBad1130Gate(),
+                     .kept = none});
+        v.push_back({.cell = "MT-c",
+                     .id = "MT-c 4",
+                     .group = count("1") + E("D", "4"),
+                     .ta = kBad1130Block(),
+                     .l = kNone,
+                     .kept = Kept{{"D", Version::v42}}});
+        v.push_back({.cell = "MT-c",
+                     .id = "MT-c empty",
+                     .group = count("1") + E("D", ""),
+                     .ta = kBad1130Block(),
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-d",
+                     .id = "MT-d no 1130",
+                     .group = count("1") + E("D", "-"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-e",
+                     .id = "MT-e 257xD",
+                     .group = repeated_d_group(257),
+                     .ta = kCap(),
+                     .l = kNone,
+                     .kept = d10});
+        v.push_back({.cell = "MT-e",
+                     .id = "MT-e 257 distinct",
+                     .group = distinct_group(257),
+                     .ta = kCap(),
+                     .l = kLong372Gate(),
+                     .kept = distinct_kept(kCapFromE10)});
+        v.push_back({.cell = "MT-e",
+                     .id = "256 distinct",
+                     .group = distinct_group(kCapFromE10),
+                     .ta = kActive,
+                     .l = kLong372Gate(),
+                     .kept = distinct_kept(kCapFromE10)});
+        v.push_back({.cell = "MT-e",
+                     .id = "256xD",
+                     .group = repeated_d_group(kCapFromE10),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = d10});
+        v.push_back({.cell = "MT-f",
+                     .id = "MT-f nine",
+                     .group = count("1") + E("ABCDEFGHI", "10"),
+                     .ta = kLong372Block(),
+                     .l = kLong372Gate(),
+                     .kept = none});
+        v.push_back({.cell = "MT-f",
+                     .id = "eight bytes",
+                     .group = count("1") + E("ABCDEFGH", "10"),
+                     .ta = kActive,
+                     .l = kLong372Gate(),
+                     .kept = Kept{{"ABCDEFGH", Version::vlatest}}});
+        v.push_back({.cell = "MT-g",
+                     .id = "MT-g 372=0",
+                     .group = count("1") + E("0", "10"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-g",
+                     .id = "372=0 1130=4",
+                     .group = count("1") + E("0", "4"),
+                     .ta = kBad1130Block(),
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-g",
+                     .id = "372=0 1130=99",
+                     .group = count("1") + E("0", "99"),
+                     .ta = kBad1130Block(),
+                     .l = kBad1130Gate(),
+                     .kept = none});
+        v.push_back({.cell = "MT-h",
+                     .id = "MT-h two D",
+                     .group = count("2") + E("D", "9") + E("D", "10"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = d10});
+        v.push_back({.cell = "MT-h",
+                     .id = "MT-h two D later 9",
+                     .group = count("2") + E("D", "10") + E("D", "9"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = d9});
+        v.push_back({.cell = "MT-i",
+                     .id = "MT-i R 99",
+                     .group = count("1") + E("D", "99", "R"),
+                     .ta = kBad1130Block(),
+                     .l = kBad1130Gate(),
+                     .kept = none});
+        v.push_back({.cell = "MT-i",
+                     .id = "MT-i 1410=N 99",
+                     .group = count("1") + E("D", "99", "S", "N"),
+                     .ta = kBad1130Block(),
+                     .l = kBad1130Gate(),
+                     .kept = none});
+        v.push_back({.cell = "MT-i",
+                     .id = "MT-i no1410 99",
+                     .group = count("1") + E("D", "99", "S", "-"),
+                     .ta = kBad1130Block(),
+                     .l = kBad1130Gate(),
+                     .kept = none});
+        v.push_back({.cell = "MT-j",
+                     .id = "MT-j R 10",
+                     .group = count("1") + E("D", "10", "R"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-j",
+                     .id = "MT-j R 4",
+                     .group = count("1") + E("D", "4", "R"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-j",
+                     .id = "MT-j R empty",
+                     .group = count("1") + E("D", "", "R"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-j",
+                     .id = "MT-j N 10",
+                     .group = count("1") + E("D", "10", "S", "N"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-j",
+                     .id = "MT-j N 4",
+                     .group = count("1") + E("D", "4", "S", "N"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-j",
+                     .id = "MT-j N empty",
+                     .group = count("1") + E("D", "", "S", "N"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-j",
+                     .id = "MT-j no1410 10",
+                     .group = count("1") + E("D", "10", "S", "-"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-j",
+                     .id = "MT-j no1410 4",
+                     .group = count("1") + E("D", "4", "S", "-"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-j",
+                     .id = "MT-j no1410 empty",
+                     .group = count("1") + E("D", "", "S", "-"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-k",
+                     .id = "MT-k no 385",
+                     .group = count("1") + E("D", "10", "-"),
+                     .ta = kNo385(),
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-l",
+                     .id = "MT-l 384=0",
+                     .group = count("0") + E("D", "10"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-l",
+                     .id = "MT-l 384=-1",
+                     .group = count("-1") + E("D", "10"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-l",
+                     .id = "MT-l no 384",
+                     .group = E("D", "10"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-l",
+                     .id = "two blocks 384=0 then 384=1",
+                     .group = count("0") + "553=u\x01" + count("1") + E("D", "10"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-m",
+                     .id = "MT-m",
+                     .group = count("1") + E("D", "9") + "553=u\x01" + E("D", "10"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = d9});
         // Past a non-member the scan stops whatever the count still allows.
-        v.push_back({"MT-m", "MT-m count 2", count("2") + E("D", "9") + "553=u\x01" + E("D", "10"),
-                     kCountWrong, kNone, d9});
-        v.push_back({"MT-n", "MT-n 2 with 1", count("2") + E("D", "10"), kCountWrong, kNone, d10});
-        v.push_back({"MT-n", "MT-n 1 with 2", count("1") + E("D", "9") + E("D", "10"), kCountWrong,
-                     kNone, d9});
-        v.push_back({"MT-n", "385 first",
-                     count("1") + "385=S\x01"
-                                  "372=D\x01"
-                                  "1130=10\x01"
-                                  "1410=Y\x01",
-                     kCountWrong, kNone, none});
-        v.push_back({"MT-o", "MT-o advert 312", advert_group(), kActive, kNone, none});
-        v.push_back({"MT-o", "advert 070",
-                     count("2") + "372=D\x01"
-                                  "385=S\x01"
-                                  "372=8\x01"
-                                  "385=R\x01",
-                     kActive, kNone, none});
-        v.push_back({"MT-p", "384=abc", count("abc") + E("D", "10"), stays("5/384"), kNone, none});
-        v.push_back({"MT-p", "384= empty", count("") + E("D", "10"), stays("5/384"), kNone, none});
-        v.push_back({"MT-p", "384=1.5", count("1.5") + E("D", "10"), stays("5/384"), kNone, none});
-        v.push_back({"MT-p", "385=X", count("1") + E("D", "10", "X"), stays("5/385"), kNone, none});
-        v.push_back({"MT-p", "1410=X", count("1") + E("D", "10", "S", "X"), kActive, kNone, none});
+        v.push_back({.cell = "MT-m",
+                     .id = "MT-m count 2",
+                     .group = count("2") + E("D", "9") + "553=u\x01" + E("D", "10"),
+                     .ta = kCountWrong(),
+                     .l = kNone,
+                     .kept = d9});
+        v.push_back({.cell = "MT-n",
+                     .id = "MT-n 2 with 1",
+                     .group = count("2") + E("D", "10"),
+                     .ta = kCountWrong(),
+                     .l = kNone,
+                     .kept = d10});
+        v.push_back({.cell = "MT-n",
+                     .id = "MT-n 1 with 2",
+                     .group = count("1") + E("D", "9") + E("D", "10"),
+                     .ta = kCountWrong(),
+                     .l = kNone,
+                     .kept = d9});
+        v.push_back({.cell = "MT-n",
+                     .id = "385 first",
+                     .group = count("1") + "385=S\x01"
+                                           "372=D\x01"
+                                           "1130=10\x01"
+                                           "1410=Y\x01",
+                     .ta = kCountWrong(),
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-o",
+                     .id = "MT-o advert 312",
+                     .group = advert_group(),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-o",
+                     .id = "advert 070",
+                     .group = count("2") + "372=D\x01"
+                                           "385=S\x01"
+                                           "372=8\x01"
+                                           "385=R\x01",
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-p",
+                     .id = "384=abc",
+                     .group = count("abc") + E("D", "10"),
+                     .ta = stays("5/384"),
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-p",
+                     .id = "384= empty",
+                     .group = count("") + E("D", "10"),
+                     .ta = stays("5/384"),
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-p",
+                     .id = "384=1.5",
+                     .group = count("1.5") + E("D", "10"),
+                     .ta = stays("5/384"),
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-p",
+                     .id = "385=X",
+                     .group = count("1") + E("D", "10", "X"),
+                     .ta = stays("5/385"),
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "MT-p",
+                     .id = "1410=X",
+                     .group = count("1") + E("D", "10", "S", "X"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
         // Not cells of E-10's table: mtz2 keys them, and each follows E-10's rules.
-        v.push_back({"A 372 L closes", "372=U1 counted", count("1") + E("U1", "10"), kActive,
-                     kLong372Gate, Kept{{"U1", Version::vlatest}}});
-        v.push_back({"A 372 L closes", "372=U1 advert",
-                     count("1") + "372=U1\x01"
-                                  "385=S\x01",
-                     kActive, kLong372Gate, none});
-        v.push_back({"Other member", "1406=abc", count("1") + E("D", "10") + "1406=abc\x01",
-                     stays("5/1406"), kNone, d10});
+        v.push_back({.cell = "A 372 L closes",
+                     .id = "372=U1 counted",
+                     .group = count("1") + E("U1", "10"),
+                     .ta = kActive,
+                     .l = kLong372Gate(),
+                     .kept = Kept{{"U1", Version::vlatest}}});
+        v.push_back({.cell = "A 372 L closes",
+                     .id = "372=U1 advert",
+                     .group = count("1") + "372=U1\x01"
+                                           "385=S\x01",
+                     .ta = kActive,
+                     .l = kLong372Gate(),
+                     .kept = none});
+        v.push_back({.cell = "Other member",
+                     .id = "1406=abc",
+                     .group = count("1") + E("D", "10") + "1406=abc\x01",
+                     .ta = stays("5/1406"),
+                     .l = kNone,
+                     .kept = d10});
         // W-25's "Within an instance": a member repeated reads first-wins.
-        v.push_back({"Within an instance", "first 1130 answers",
-                     count("1") + "372=D\x01"
-                                  "385=S\x01"
-                                  "1130=10\x01"
-                                  "1130=9\x01"
-                                  "1410=Y\x01",
-                     kActive, kNone, d10});
-        v.push_back(
-            {"Within an instance", "372= empty", count("1") + E("", "10"), kActive, kNone, none});
-        v.push_back({"Within an instance", "1410= empty", count("1") + E("D", "10", "S", ""),
-                     kActive, kNone, none});
+        v.push_back({.cell = "Within an instance",
+                     .id = "first 1130 answers",
+                     .group = count("1") + "372=D\x01"
+                                           "385=S\x01"
+                                           "1130=10\x01"
+                                           "1130=9\x01"
+                                           "1410=Y\x01",
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = d10});
+        v.push_back({.cell = "Within an instance",
+                     .id = "372= empty",
+                     .group = count("1") + E("", "10"),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
+        v.push_back({.cell = "Within an instance",
+                     .id = "1410= empty",
+                     .group = count("1") + E("D", "10", "S", ""),
+                     .ta = kActive,
+                     .l = kNone,
+                     .kept = none});
         // mtz2.log's line for an empty 385, on both shapes: the gate names it, so on a validating
         // session the scan does not read it.
-        v.push_back({"Within an instance", "385= empty", count("1") + E("D", "10", ""),
-                     stays("5/385"), kNone, none});
+        v.push_back({.cell = "Within an instance",
+                     .id = "385= empty",
+                     .group = count("1") + E("D", "10", ""),
+                     .ta = stays("5/385"),
+                     .l = kNone,
+                     .kept = none});
         return v;
     }();
     return all;
@@ -258,7 +512,8 @@ std::vector<MtCell> all_cells() {
         for (const Shape s : {Shape::T, Shape::A, Shape::L}) {
             for (const bool acceptor : {true, false}) {
                 for (const bool validate : {true, false}) {
-                    cells.push_back(MtCell{&r, s, acceptor, validate});
+                    cells.push_back(
+                        MtCell{.row = &r, .shape = s, .acceptor = acceptor, .validate = validate});
                 }
             }
         }
@@ -290,7 +545,7 @@ std::string reply(const Rig& r, const std::string& group) {
 
 // A NewOrderSingle with no 1128, carrying the field only FIX Latest's table declares there.
 std::string nos_3115(const Rig& r, unsigned seq) {
-    return frame_35("D", r.peer_ctx(seq), kNos + "3115=1.5\x01");
+    return frame_35("D", r.peer_ctx(seq), kNos() + "3115=1.5\x01");
 }
 
 constexpr const char* kDelivered = "- | stays | c | app=1 adm=0";
@@ -307,7 +562,10 @@ Version answering_version(const Kept& kept) {
 }
 
 // A profile that is not the frame's: `reify` answers by the byte whatever it is passed.
-const dd::version_profile kOtherProfile{dd::session_version::v42, Version::v42, false, 0};
+const dd::version_profile kOtherProfile{.session = dd::session_version::v42,
+                                        .default_appl = Version::v42,
+                                        .has_per_message_override = false,
+                                        ._reserved = 0};
 
 // What one frame's view said.
 struct ViewSeen {
@@ -337,7 +595,7 @@ void expect_answered(const ViewSeen& seen, Version version) {
 }
 
 Kept sorted(Kept k) {
-    std::sort(k.begin(), k.end());
+    std::ranges::sort(k);
     return k;
 }
 
@@ -388,7 +646,7 @@ TEST(W25Walk, IdsWalkedEqualE10sCells) {
                                          "MT-m", "MT-n", "MT-o", "MT-p"};
     std::set<std::string> walked;
     for (const MtRow& r : rows()) {
-        if (r.cell.rfind("MT-", 0) == 0) {
+        if (r.cell.starts_with("MT-")) {
             walked.insert(r.cell);
         }
     }
@@ -406,8 +664,10 @@ std::string shape_role_name(const testing::TestParamInfo<ShapeRole>& i) {
     return std::string(shape_name(i.param.shape)) + (i.param.acceptor ? "_acceptor" : "_initiator");
 }
 
-const ShapeRole kShapeRoles[] = {{Shape::T, true},  {Shape::T, false}, {Shape::A, true},
-                                 {Shape::A, false}, {Shape::L, true},  {Shape::L, false}};
+const ShapeRole kShapeRoles[] = {
+    {.shape = Shape::T, .acceptor = true}, {.shape = Shape::T, .acceptor = false},
+    {.shape = Shape::A, .acceptor = true}, {.shape = Shape::A, .acceptor = false},
+    {.shape = Shape::L, .acceptor = true}, {.shape = Shape::L, .acceptor = false}};
 
 class W25AfterMtA : public testing::TestWithParam<ShapeRole> {
 protected:
@@ -416,7 +676,7 @@ protected:
     void SetUp() override {
         run_ = open_cell(shape_fixture(GetParam().shape), GetParam().acceptor, true);
         ASSERT_TRUE(run_.setup_failure.empty()) << run_.setup_failure;
-        (void)run_.rig->deliver(reply(*run_.rig, kOneEntryD10));
+        (void)run_.rig->deliver(reply(*run_.rig, kOneEntryD10()));
         ASSERT_EQ(run_.rig->sess->state(), fsm_state::Active);
     }
 };
@@ -426,24 +686,27 @@ INSTANTIATE_TEST_SUITE_P(W25, W25AfterMtA, testing::ValuesIn(kShapeRoles), shape
 // Explicit has precedence over the default.
 TEST_P(W25AfterMtA, Explicit1128_9_Answers) {
     Rig& r = *run_.rig;
-    run_.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos + "3115=1.5\x01", "1128=9\x01"));
+    run_.ending = r.deliver(frame_35("D", r.peer_ctx(2), kNos() + "3115=1.5\x01", "1128=9\x01"));
     expect_ending(run_, kRefused3115);
 }
 
 // FIX 5.0 SP2's OrderCancelRequest, whose required fields this frame carries.
-const std::string kCancelBody =
-    "41=O\x01"
-    "11=C\x01"
-    "55=X\x01"
-    "54=1\x01"
-    "60=20240101-00:00:00\x01";
+const std::string& kCancelBody() {
+    static const std::string value =
+        "41=O\x01"
+        "11=C\x01"
+        "55=X\x01"
+        "54=1\x01"
+        "60=20240101-00:00:00\x01";
+    return value;
+}
 
 // Another MsgType has no entry: 1137's slot takes it and FIX Latest's does not.
 TEST_P(W25AfterMtA, AnotherMsgType_1137sSlotAnswers) {
     Rig& r = *run_.rig;
     ViewSeen seen;
     watch_view(r, seen);
-    run_.ending = r.deliver(frame_35("F", r.peer_ctx(2), kCancelBody));
+    run_.ending = r.deliver(frame_35("F", r.peer_ctx(2), kCancelBody()));
     expect_ending(run_, kDelivered);
     expect_answered(seen, Version::v50sp2);
 }
@@ -464,7 +727,7 @@ TEST_P(W25AfterMtA, AnotherMsgType_FieldOnlyLatestDeclaresIsRefused) {
     ASSERT_TRUE(f.has_value());
     Rig& r = *run_.rig;
     const std::string field = std::to_string(tag) + "=" + plain_value(*latest(), *f) + "\x01";
-    run_.ending = r.deliver(frame_35("F", r.peer_ctx(2), kCancelBody + field));
+    run_.ending = r.deliver(frame_35("F", r.peer_ctx(2), kCancelBody() + field));
     expect_ending(run_, "R 2/" + std::to_string(tag) + " F 45=2 | stays | c | app=0 adm=0");
 }
 
@@ -482,9 +745,9 @@ TEST_P(W25Named, BothFaults_No385And1130_99_EitherAnswers) {
                  "\tboth faults: no 385, 1130=99\t" + log_form(run.ending));
     const std::string got = short_form(run.ending);
     if (p.shape == Shape::L) {
-        EXPECT_EQ(got, kBad1130Gate);
+        EXPECT_EQ(got, kBad1130Gate());
     } else {
-        EXPECT_TRUE(got == kNo385 || got == kBad1130Block) << got;
+        EXPECT_TRUE(got == kNo385() || got == kBad1130Block()) << got;
     }
 }
 
@@ -507,7 +770,7 @@ INSTANTIATE_TEST_SUITE_P(W25, W25Initiator, testing::Values(Shape::T, Shape::A, 
                              return std::string{shape_name(i.param)};
                          });
 
-std::string bad_1130_ending(Shape s) { return s == Shape::L ? kBad1130Gate : kBad1130Block; }
+std::string bad_1130_ending(Shape s) { return s == Shape::L ? kBad1130Gate() : kBad1130Block(); }
 
 // `141=Y` with a bad 1130: refused ahead of the reset unit, as W-5's cell with a bad 1137 is. The
 // Reject takes the number after open()'s Logon, and only that unit raises the event.
@@ -572,13 +835,19 @@ std::string reply_then_nos(Rig& r, const std::string& group) {
     (void)r.deliver(logon_frame(r.peer_ctx(r.next_in()), "1137=9\x01" + group));
     EXPECT_EQ(r.sess->state(), fsm_state::Active) << "the reply must establish";
     const int app_before = r.app->app;
-    const Ending e = r.deliver(frame_35("D", r.peer_ctx(r.next_in()), kNos + "3115=1.5\x01"));
+    const Ending e = r.deliver(frame_35("D", r.peer_ctx(r.next_in()), kNos() + "3115=1.5\x01"));
     return std::to_string(e.from_app - app_before) + " delivered, " +
            (e.next_in_after != e.next_in_before ? "c" : "k");
 }
 
-const std::string kDefaultAnswered = "1 delivered, c";
-const std::string kOtherTableRefused = "0 delivered, c";
+const std::string& kDefaultAnswered() {
+    static const std::string value = "1 delivered, c";
+    return value;
+}
+const std::string& kOtherTableRefused() {
+    static const std::string value = "0 delivered, c";
+    return value;
+}
 
 // Reconnect whose Logon declares none: 1137 answers, the previous connection's entry gone.
 TEST_P(W25Initiator, ReconnectDeclaringNone_1137Answers) {
@@ -587,11 +856,11 @@ TEST_P(W25Initiator, ReconnectDeclaringNone_1137Answers) {
     CellRun run = open_cell(shape_fixture(GetParam()), false, true, std::move(o));
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     Rig& r = *run.rig;
-    EXPECT_EQ(reply_then_nos(r, kOneEntryD10), kDefaultAnswered);
+    EXPECT_EQ(reply_then_nos(r, kOneEntryD10()), kDefaultAnswered());
     if (auto f = reconnect(r)) {
         FAIL() << *f;
     }
-    EXPECT_EQ(reply_then_nos(r, ""), kOtherTableRefused);
+    EXPECT_EQ(reply_then_nos(r, ""), kOtherTableRefused());
 }
 
 // A reply the block refuses stores nothing, and the next Logon clears what was there.
@@ -606,11 +875,11 @@ TEST_P(W25Initiator, RefusedThenValid) {
     if (auto f = reconnect(r)) {
         FAIL() << *f;
     }
-    EXPECT_EQ(reply_then_nos(r, ""), kOtherTableRefused);
+    EXPECT_EQ(reply_then_nos(r, ""), kOtherTableRefused());
     if (auto f = reconnect(r)) {
         FAIL() << *f;
     }
-    EXPECT_EQ(reply_then_nos(r, kOneEntryD10), kDefaultAnswered);
+    EXPECT_EQ(reply_then_nos(r, kOneEntryD10()), kDefaultAnswered());
 }
 
 // ── A body pair's Data: the scan uses the transport route's hooks ───────────────────────
@@ -620,7 +889,7 @@ const DictPtr& fixt11_with_logon_pair() {
         overlay_on("FIXT11.xml",
                    "<fix type='FIXT' major='1' minor='1' servicepack='0'><messages>"
                    "<message name='Logon' msgtype='A' msgcat='admin'>" +
-                       kPairMembers + "</message></messages>" + kPairFields + "</fix>");
+                       kPairMembers() + "</message></messages>" + kPairFields() + "</fix>");
     return d;
 }
 
@@ -698,7 +967,10 @@ TEST_P(W25DataCell, EmbeddedUnserviceable_NotRefused) {
 // An eight-byte MsgType FIX Latest does not declare: no delivery, on T and A, and the Reject's tag
 // differs by shape, so it is not asserted.
 class W25EightBytes : public testing::TestWithParam<ShapeRole> {};
-const ShapeRole kTA[] = {{Shape::T, true}, {Shape::T, false}, {Shape::A, true}, {Shape::A, false}};
+const ShapeRole kTA[] = {{.shape = Shape::T, .acceptor = true},
+                         {.shape = Shape::T, .acceptor = false},
+                         {.shape = Shape::A, .acceptor = true},
+                         {.shape = Shape::A, .acceptor = false}};
 INSTANTIATE_TEST_SUITE_P(W25, W25EightBytes, testing::ValuesIn(kTA), shape_role_name);
 
 TEST_P(W25EightBytes, UndeclaredOnFixLatest_NotDelivered) {
@@ -734,7 +1006,10 @@ Fixture eight_byte_fixture(Shape s) {
     return own_fixture(s, {fixt11(), fix50sp2(), fix44_with_eight_byte_types()});
 }
 
-const std::string kEightByteEntry = count("1") + E("ABCDEFGH", "6");
+const std::string& kEightByteEntry() {
+    static const std::string value = count("1") + E("ABCDEFGH", "6");
+    return value;
+}
 
 // The gate's answer: 373 and 371, state and consume. A Reject's 372 is not asserted (E-10).
 void expect_refused_on_35(const Ending& e) {
@@ -753,7 +1028,7 @@ protected:
     void SetUp() override {
         run_ = open_cell(eight_byte_fixture(GetParam().shape), GetParam().acceptor, true);
         ASSERT_TRUE(run_.setup_failure.empty()) << run_.setup_failure;
-        (void)run_.rig->deliver(reply(*run_.rig, kEightByteEntry));
+        (void)run_.rig->deliver(reply(*run_.rig, kEightByteEntry()));
         ASSERT_EQ(run_.rig->sess->state(), fsm_state::Active);
     }
 };
@@ -833,7 +1108,7 @@ TEST(W25StorageNonFixt, ReservesNothing) {
         cfg.begin_string = "FIX.4.4";
         cfg.default_appl_ver_id.reset();
     };
-    Fixture f{make_registry({fix44()}), fix44()};
+    Fixture f{.registry = make_registry({fix44()}), .session_dict = fix44()};
     const CellRun run = enter_arm(std::move(f), Arm::NotConnected, std::move(o));
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     EXPECT_EQ(session_test_access::msg_type_defaults_capacity(*run.rig->sess), 0U);

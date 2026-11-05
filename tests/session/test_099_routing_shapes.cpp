@@ -24,11 +24,11 @@ constexpr const char* kTestRequestAnswered = "Heartbeat 112=x | stays | c | app=
 constexpr const char* kDelivered = "- | stays | c | app=1 adm=0";
 
 const KeyedRow kSharedActive[] = {
-    {"W1", "Heartbeat", kAdminDelivered},
-    {"W1", "TestRequest", kTestRequestAnswered},
-    {"W1", "NOS", kDelivered},
-    {"W1", "NOS 1128=9", kDelivered},
-    {"W1", "NOS 1128=10", kDelivered},
+    {.cell = "W1", .input = "Heartbeat", .t = kAdminDelivered},
+    {.cell = "W1", .input = "TestRequest", .t = kTestRequestAnswered},
+    {.cell = "W1", .input = "NOS", .t = kDelivered},
+    {.cell = "W1", .input = "NOS 1128=9", .t = kDelivered},
+    {.cell = "W1", .input = "NOS 1128=10", .t = kDelivered},
 };
 
 class W1Shapes : public testing::TestWithParam<KeyedCell> {};
@@ -82,7 +82,7 @@ TEST_P(W1Fix44Registered, Nos1128_6_Delivered) {
     const CellRun run = run_own_cell(
         std::string("W-1 NOS 1128=6 ") + shape_name(s),
         own_fixture(s, {fixt11(), fix50sp2(), latest(), fix44()}), /*validate=*/true, Arm::Active,
-        [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos, "1128=6\x01"); });
+        [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos(), "1128=6\x01"); });
     expect_ending(run, kDelivered);
 }
 
@@ -126,28 +126,28 @@ TEST(W1Fix44S, TestRequest) {
 TEST(W1Fix44S, Nos) {
     const CellRun run =
         run_own_cell("W-1 FIX44 S NOS", fix44_s_fixture(), /*validate=*/true, Arm::Active,
-                     [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos); });
+                     [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos()); });
     expect_ending(run, kDelivered);
 }
 
 TEST(W1Fix44S, Nos1128_6) {
-    const CellRun run =
-        run_own_cell("W-1 FIX44 S NOS 1128=6", fix44_s_fixture(), /*validate=*/true, Arm::Active,
-                     [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos, "1128=6\x01"); });
+    const CellRun run = run_own_cell(
+        "W-1 FIX44 S NOS 1128=6", fix44_s_fixture(), /*validate=*/true, Arm::Active,
+        [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos(), "1128=6\x01"); });
     expect_ending(run, kDelivered);
 }
 
 TEST(W1Fix44S, Nos1128_9) {
-    const CellRun run =
-        run_own_cell("W-1 FIX44 S NOS 1128=9", fix44_s_fixture(), /*validate=*/true, Arm::Active,
-                     [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos, "1128=9\x01"); });
+    const CellRun run = run_own_cell(
+        "W-1 FIX44 S NOS 1128=9", fix44_s_fixture(), /*validate=*/true, Arm::Active,
+        [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos(), "1128=9\x01"); });
     expect_ending(run, kDelivered);
 }
 
 TEST(W1Fix44S, Nos1128_10) {
     const CellRun run = run_own_cell(
         "W-1 FIX44 S NOS 1128=10", fix44_s_fixture(), /*validate=*/true, Arm::Active,
-        [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos, "1128=10\x01"); });
+        [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos(), "1128=10\x01"); });
     expect_ending(run, kDelivered);
 }
 
@@ -158,7 +158,7 @@ Fixture t_with_fix42() { return own_fixture(Shape::T, {fixt11(), fix42(), fix50s
 constexpr const char* k370 = "370=20240101-00:00:00.000\x01";
 
 std::string nos_with_header(const Rig& r, const std::string& before_34) {
-    return frame_35("D", r.peer_ctx(2), kNos, before_34);
+    return frame_35("D", r.peer_ctx(2), kNos(), before_34);
 }
 
 TEST(W1Tag370, After1128_FIX42Route_Delivered) {
@@ -203,7 +203,7 @@ TEST(W1OneWayFallback, LogonNegotiates9) {
 TEST(W1OneWayFallback, NosNo1128RoutedToLatest) {
     const CellRun run = run_own_cell(
         "W-1 fallback NOS 3115", t_latest_only(), /*validate=*/true, Arm::Active,
-        [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos + "3115=1.5\x01"); });
+        [](const Rig& r) { return frame_35("D", r.peer_ctx(2), kNos() + "3115=1.5\x01"); });
     expect_ending(run, kDelivered);
 }
 
@@ -217,7 +217,7 @@ class W1PrivateBuild : public testing::TestWithParam<Shape> {};
 TEST_P(W1PrivateBuild, WalkEqualsTheSharedCell) {
     const Shape s = GetParam();
     const auto nos = [](const Rig& r) {
-        return frame_35("D", r.peer_ctx(3), kNos + "3115=1.5\x01", "1128=10\x01");
+        return frame_35("D", r.peer_ctx(3), kNos() + "3115=1.5\x01", "1128=10\x01");
     };
     const auto walk = [&](bool private_build) -> std::string {
         RigOptions o;

@@ -70,9 +70,9 @@ std::span<const std::byte> bytes(const std::string& frame) {
 struct Peeked {
     std::string msg_type;
     std::string appl_ver_id;
-    bool readable;
-    bool admin;
-    bool header_1128;
+    bool readable{};
+    bool admin{};
+    bool header_1128{};
 };
 
 Peeked peek_on(const DictPtr& s, const std::string& frame) {
@@ -98,10 +98,13 @@ std::string counted(const std::string& head, std::uint16_t length_tag, std::uint
            std::to_string(data_tag) + "=" + data + "\x01" + soh(tail);
 }
 
-const std::string kHead = "8=FIXT.1.1|9=0|";
+const std::string& kHead() {
+    static const std::string value = "8=FIXT.1.1|9=0|";
+    return value;
+}
 
 TEST(W21Peek, BodylessFrame_StopsAt93) {
-    const std::string frame = soh(kHead + "35=D|93=1|89=x|1128=10|");
+    const std::string frame = soh(kHead() + "35=D|93=1|89=x|1128=10|");
     for (const auto& [name, s] : every_s()) {
         const Peeked p = peek_on(s, frame);
         EXPECT_TRUE(p.readable) << name;
@@ -113,7 +116,7 @@ TEST(W21Peek, BodylessFrame_StopsAt93) {
 TEST(W21Peek, Fix44S_ReadsHeader1128) {
     ASSERT_FALSE(table_of(fix44()).is_header_tag(1128))
         << "FIX44 declares 1128: this cell no longer shows the standard set answering";
-    const Peeked p = peek_on(fix44(), soh(kHead + "35=D|49=S|56=T|34=2|1128=6|11=x|"));
+    const Peeked p = peek_on(fix44(), soh(kHead() + "35=D|49=S|56=T|34=2|1128=6|11=x|"));
     EXPECT_TRUE(p.readable);
     EXPECT_TRUE(p.header_1128);
     EXPECT_EQ(p.appl_ver_id, "6");
@@ -127,7 +130,7 @@ TEST(W21Peek, StandardPairOnA_DataEmbeds1128_TheHeaders1128Reads) {
         "x\x01"
         "1128=10\x01"
         "y";
-    const Peeked p = peek_on(fix50sp2(), counted(kHead + "35=D|", 90, 91, data, "1128=9|11=x|"));
+    const Peeked p = peek_on(fix50sp2(), counted(kHead() + "35=D|", 90, 91, data, "1128=9|11=x|"));
     EXPECT_TRUE(p.readable);
     EXPECT_TRUE(p.header_1128);
     EXPECT_EQ(p.appl_ver_id, "9");
@@ -138,7 +141,7 @@ TEST(W21Peek, StandardPairOnA_DataEmbeds1128_NoHeader1128) {
         "x\x01"
         "1128=10\x01"
         "y";
-    const Peeked p = peek_on(fix50sp2(), counted(kHead + "35=D|", 90, 91, data, "11=x|"));
+    const Peeked p = peek_on(fix50sp2(), counted(kHead() + "35=D|", 90, 91, data, "11=x|"));
     EXPECT_TRUE(p.readable);
     EXPECT_FALSE(p.header_1128) << p.appl_ver_id;
 }
@@ -148,7 +151,7 @@ TEST(W21Peek, StandardPairOnA_DataOfNonTagBytes_Readable) {
         "\x01"
         "ab\x01"
         "cd";
-    const Peeked p = peek_on(fix50sp2(), counted(kHead + "35=D|", 90, 91, data, "1128=9|11=x|"));
+    const Peeked p = peek_on(fix50sp2(), counted(kHead() + "35=D|", 90, 91, data, "1128=9|11=x|"));
     EXPECT_TRUE(p.readable);
     EXPECT_EQ(p.appl_ver_id, "9");
 }
@@ -158,7 +161,7 @@ TEST(W21Peek, StandardPairOnA_DataOfNonTagBytes_Readable) {
 const DictPtr& fixt11_with_header_pair_and_tag() {
     static const DictPtr d =
         overlay_on("FIXT11.xml", "<fix type='FIXT' major='1' minor='1' servicepack='0'><header>" +
-                                     kPairMembers +
+                                     kPairMembers() +
                                      "<field name='VenueHdrScalar' required='N' /></header><fields>"
                                      "<field number='5030' name='VenuePairLen' type='LENGTH' />"
                                      "<field number='5031' name='VenuePairData' type='DATA' />"
@@ -173,7 +176,7 @@ TEST(W21Peek, SsHeaderPair_DataEmbeds1128_TheHeaders1128Reads) {
         "1128=10\x01"
         "y";
     const Peeked p = peek_on(fixt11_with_header_pair_and_tag(),
-                             counted(kHead + "35=D|", 5030, 5031, data, "1128=9|"));
+                             counted(kHead() + "35=D|", 5030, 5031, data, "1128=9|"));
     EXPECT_TRUE(p.readable);
     EXPECT_EQ(p.appl_ver_id, "9");
 }
@@ -184,24 +187,24 @@ TEST(W21Peek, SsHeaderPair_DataOfNonTagBytes_Readable) {
         "ab\x01"
         "cd";
     const Peeked p = peek_on(fixt11_with_header_pair_and_tag(),
-                             counted(kHead + "35=D|", 5030, 5031, data, "1128=9|"));
+                             counted(kHead() + "35=D|", 5030, 5031, data, "1128=9|"));
     EXPECT_TRUE(p.readable);
     EXPECT_EQ(p.appl_ver_id, "9");
 }
 
 TEST(W21Peek, AHeaderTagOnlyS_DeclaresWalksOn_OnPlainSItStops) {
-    const std::string frame = soh(kHead + "35=D|5020=v|1128=9|");
+    const std::string frame = soh(kHead() + "35=D|5020=v|1128=9|");
     EXPECT_EQ(peek_on(fixt11_with_header_pair_and_tag(), frame).appl_ver_id, "9");
     EXPECT_FALSE(peek_on(fixt11(), frame).header_1128);
 }
 
 TEST(W21Peek, MsgTypeIsTheThirdFields) {
-    const auto adjacent = peek_on(fixt11(), soh(kHead + "35=0|35=D|"));
+    const auto adjacent = peek_on(fixt11(), soh(kHead() + "35=0|35=D|"));
     EXPECT_TRUE(adjacent.readable);
     EXPECT_EQ(adjacent.msg_type, "0");
     EXPECT_TRUE(adjacent.admin);
 
-    const auto past_header = peek_on(fixt11(), soh(kHead + "35=D|11=x|35=0|"));
+    const auto past_header = peek_on(fixt11(), soh(kHead() + "35=D|11=x|35=0|"));
     EXPECT_TRUE(past_header.readable);
     EXPECT_EQ(past_header.msg_type, "D");
     EXPECT_FALSE(past_header.admin);
@@ -221,7 +224,7 @@ TEST(W21Peek, TheThirdFieldIsNot35_Unreadable) {
 // Whether or not 35 was read: a count that runs past the frame, and one before the 35.
 TEST(W21Peek, AReadFaultBeforeTheStop_Unreadable) {
     for (const std::string& frame :
-         {soh(kHead + "35=D|1128=9|90=99|91=x|"), soh("8=FIXT.1.1|90=99|91=x|35=D|")}) {
+         {soh(kHead() + "35=D|1128=9|90=99|91=x|"), soh("8=FIXT.1.1|90=99|91=x|35=D|")}) {
         const dd::table_view& table = table_of(fixt11());
         const auto hooks = wire::dict_hooks::for_table_view(table);
         const fixt_route_peek p = peek_fixt_route(bytes(frame), hooks, table);
@@ -234,7 +237,7 @@ TEST(W21Peek, AReadFaultBeforeTheStop_Unreadable) {
 
 TEST(W21Peek, AMalformedTagBeforeTheStop_Unreadable) {
     for (const char* tail : {"3a=1|", "=1|", "49", "65536=1|"}) {
-        const std::string frame = soh(kHead + "35=D|" + tail);
+        const std::string frame = soh(kHead() + "35=D|" + tail);
         const dd::table_view& table = table_of(fixt11());
         const auto hooks = wire::dict_hooks::for_table_view(table);
         EXPECT_FALSE(peek_fixt_route(bytes(frame), hooks, table).readable) << tail;
@@ -245,7 +248,7 @@ TEST(W21Peek, AMalformedTagBeforeTheStop_Unreadable) {
 
 TEST(W21Peek, AFaultPastTheStop_Readable) {
     for (const char* tail : {"11=x|90=99|91=x|", "11=x|3a=1|"}) {
-        const Peeked p = peek_on(fixt11(), soh(kHead + "35=D|1128=9|" + tail));
+        const Peeked p = peek_on(fixt11(), soh(kHead() + "35=D|1128=9|" + tail));
         EXPECT_TRUE(p.readable) << tail;
         EXPECT_EQ(p.msg_type, "D") << tail;
         EXPECT_EQ(p.appl_ver_id, "9") << tail;
@@ -273,31 +276,33 @@ TEST(W21Peek, A1128AfterAStopAheadOfTheThirdField_IsNotTheHeaders) {
 }
 
 TEST(W21Peek, A1128PastTheStop_IsNotTheHeaders) {
-    EXPECT_FALSE(peek_on(fixt11(), soh(kHead + "35=D|11=x|1128=6|")).header_1128);
+    EXPECT_FALSE(peek_on(fixt11(), soh(kHead() + "35=D|11=x|1128=6|")).header_1128);
 }
 
 TEST(W21Peek, AnEmpty1128IsPresent_AnAbsentOneIsNot) {
-    const Peeked empty = peek_on(fixt11(), soh(kHead + "35=D|1128=|11=x|"));
+    const Peeked empty = peek_on(fixt11(), soh(kHead() + "35=D|1128=|11=x|"));
     EXPECT_TRUE(empty.header_1128);
     EXPECT_TRUE(empty.appl_ver_id.empty());
-    EXPECT_FALSE(peek_on(fixt11(), soh(kHead + "35=D|11=x|")).header_1128);
+    EXPECT_FALSE(peek_on(fixt11(), soh(kHead() + "35=D|11=x|")).header_1128);
 }
 
 TEST(W21Peek, TheFirst1128Reads) {
-    EXPECT_EQ(peek_on(fixt11(), soh(kHead + "35=D|1128=9|1128=6|")).appl_ver_id, "9");
+    EXPECT_EQ(peek_on(fixt11(), soh(kHead() + "35=D|1128=9|1128=6|")).appl_ver_id, "9");
 }
 
 // The peek's own literals, and then dict::reify's dispatch on the same frame. reify calls the same
 // predicate, so the literals are what a change to that predicate cannot move.
 TEST(W21Peek, AIsAdmin_DAndNAreApplication) {
-    EXPECT_TRUE(peek_on(fixt11(), soh(kHead + "35=A|")).admin);
-    EXPECT_FALSE(peek_on(fixt11(), soh(kHead + "35=D|")).admin);
-    EXPECT_FALSE(peek_on(fixt11(), soh(kHead + "35=n|")).admin);
+    EXPECT_TRUE(peek_on(fixt11(), soh(kHead() + "35=A|")).admin);
+    EXPECT_FALSE(peek_on(fixt11(), soh(kHead() + "35=D|")).admin);
+    EXPECT_FALSE(peek_on(fixt11(), soh(kHead() + "35=n|")).admin);
 }
 
 TEST(W21Peek, AdminAgreesWithReifysDispatchOnTheSameMsgType) {
-    constexpr dd::version_profile kProfile{dd::session_version::vt11, dd::application_version::v44,
-                                           true, 0};
+    constexpr dd::version_profile kProfile{.session = dd::session_version::vt11,
+                                           .default_appl = dd::application_version::v44,
+                                           .has_per_message_override = true,
+                                           ._reserved = 0};
     using Kind = dd::resolved_message_version::kind;
     for (const char* mt : {"0", "1", "2", "3", "4", "5", "A", "D", "8", "n"}) {
         const std::string frame = wire("FIXT.1.1", std::string{"35="} + mt +
@@ -349,7 +354,7 @@ TEST(W21Peek, EveryTagOfTheRawHeader_TheWalkReadsOnToA1128) {
     ASSERT_GT(tags.size(), 25U) << "the raw read did not reach the header";
     for (const auto& [name, s] : every_s()) {
         for (const std::uint16_t tag : tags) {
-            const auto p = peek_on(s, soh(kHead + "35=D|" + std::to_string(tag) + "=1|1128=9|"));
+            const auto p = peek_on(s, soh(kHead() + "35=D|" + std::to_string(tag) + "=1|1128=9|"));
             EXPECT_TRUE(p.readable) << name << " " << tag;
             // 1128 is itself a header tag, and the first one reads.
             EXPECT_EQ(p.appl_ver_id, tag == 1128 ? "1" : "9") << name << " " << tag;
@@ -362,7 +367,7 @@ TEST(W21Peek, EveryTagOfTheRawTrailer_TheWalkStops) {
     ASSERT_EQ(tags.size(), 3U) << "the raw read did not reach the trailer";
     for (const auto& [name, s] : every_s()) {
         for (const std::uint16_t tag : tags) {
-            const auto p = peek_on(s, soh(kHead + "35=D|" + std::to_string(tag) + "=1|1128=9|"));
+            const auto p = peek_on(s, soh(kHead() + "35=D|" + std::to_string(tag) + "=1|1128=9|"));
             EXPECT_TRUE(p.readable) << name << " " << tag;
             EXPECT_FALSE(p.header_1128) << name << " " << tag;
         }
@@ -371,7 +376,7 @@ TEST(W21Peek, EveryTagOfTheRawTrailer_TheWalkStops) {
 
 TEST(W21Peek, Tag370_TheWalkReadsOnToA1128) {
     for (const auto& [name, s] : every_s()) {
-        EXPECT_EQ(peek_on(s, soh(kHead + "35=D|370=x|1128=4|")).appl_ver_id, "4") << name;
+        EXPECT_EQ(peek_on(s, soh(kHead() + "35=D|370=x|1128=4|")).appl_ver_id, "4") << name;
     }
 }
 
@@ -382,15 +387,15 @@ bool repeats(const std::string& frame) {
 }
 
 TEST(W21PeekColdPath, ASecond35InTheHeaderOnly) {
-    EXPECT_TRUE(repeats(soh(kHead + "35=0|35=D|")));
-    EXPECT_TRUE(repeats(soh(kHead + "35=D|49=S|35=0|")));
-    EXPECT_FALSE(repeats(soh(kHead + "35=D|11=x|35=0|")));
-    EXPECT_FALSE(repeats(soh(kHead + "35=D|49=S|")));
+    EXPECT_TRUE(repeats(soh(kHead() + "35=0|35=D|")));
+    EXPECT_TRUE(repeats(soh(kHead() + "35=D|49=S|35=0|")));
+    EXPECT_FALSE(repeats(soh(kHead() + "35=D|11=x|35=0|")));
+    EXPECT_FALSE(repeats(soh(kHead() + "35=D|49=S|")));
     const std::string data =
         "x\x01"
         "35=0\x01"
         "y";
-    EXPECT_FALSE(repeats(counted(kHead + "35=D|", 90, 91, data, "11=x|")));
+    EXPECT_FALSE(repeats(counted(kHead() + "35=D|", 90, 91, data, "11=x|")));
 }
 
 }  // namespace

@@ -2,11 +2,11 @@
 //
 // tests/config/test_099_toml_live.cpp
 //
-// 099-fixt-appl-version-validation, contracts/witnesses.md W-14's live cell (tasks.md T095), FR-017:
-// a TOML bundle naming FIX50SP2.xml with extra_paths FIXT11.xml and FIX Latest, a real Engine on a
-// worker thread, and a raw TCP peer. The session reaches Active; `1128=10` is routed, so 3115, which
-// only FIX Latest declares, is delivered; the same frame with no 1128 draws 373=2, 371=3115. Its own
-// executable under [const §VII.8], because it runs threads and a socket.
+// 099-fixt-appl-version-validation, contracts/witnesses.md W-14's live cell (tasks.md T095),
+// FR-017: a TOML bundle naming FIX50SP2.xml with extra_paths FIXT11.xml and FIX Latest, a real
+// Engine on a worker thread, and a raw TCP peer. The session reaches Active; `1128=10` is routed,
+// so 3115, which only FIX Latest declares, is delivered; the same frame with no 1128 draws 373=2,
+// 371=3115. Its own executable under [const §VII.8], because it runs threads and a socket.
 //
 // Between the Engine's construction and a completed stop() every check is non-fatal, because
 // ~Engine's precondition aborts on a fatal return in between.
@@ -70,8 +70,7 @@ std::string bundle_text(std::uint16_t port) {
            "heartbeat_interval = \"30s\"\n"
            "validate_inbound_messages = true\n"
            "\n[session.transport]\nkind = \"plaintext\"\nhost = \"127.0.0.1\"\nport = " +
-           std::to_string(port) +
-           "\n\n[session.security_profile]\nkind = \"insecure_plain_tcp\"\n";
+           std::to_string(port) + "\n\n[session.security_profile]\nkind = \"insecure_plain_tcp\"\n";
 }
 
 class RecordingApp final : public fixpp::session::Application {
@@ -80,7 +79,8 @@ public:
     std::atomic<bool> active{false};
 
     void onLogon(const fixpp::session::SessionId&) override { active.store(true); }
-    fixpp::core::expected_t<void> fromApp(const View& v, const fixpp::session::SessionId&) override {
+    fixpp::core::expected_t<void> fromApp(const View& v,
+                                          const fixpp::session::SessionId&) override {
         const std::scoped_lock lock{mu_};
         ++delivered_;
         versions_.push_back(v.resolved_application_version());
@@ -96,7 +96,7 @@ public:
     };
     [[nodiscard]] Seen seen() const {
         const std::scoped_lock lock{mu_};
-        return Seen{delivered_, versions_, last_3115_};
+        return Seen{.delivered = delivered_, .versions = versions_, .last_3115 = last_3115_};
     }
 
 private:
@@ -111,15 +111,18 @@ std::string header(unsigned seq) {
            "56=ISLD\x01";
 }
 
-const std::string kNosWith3115 =
-    "11=C\x01"
-    "21=1\x01"
-    "55=X\x01"
-    "54=1\x01"
-    "60=20240101-00:00:00\x01"
-    "40=1\x01"
-    "38=1\x01"
-    "3115=1.5\x01";
+const std::string& kNosWith3115() {
+    static const std::string value =
+        "11=C\x01"
+        "21=1\x01"
+        "55=X\x01"
+        "54=1\x01"
+        "60=20240101-00:00:00\x01"
+        "40=1\x01"
+        "38=1\x01"
+        "3115=1.5\x01";
+    return value;
+}
 
 TEST(W14Live, ReachesActive_1128Routes) {
     FixtRawPeer peer;
@@ -164,18 +167,18 @@ TEST(W14Live, ReachesActive_1128Routes) {
             EXPECT_EQ(frame_field(*logon, 1137), "9");
             // Answers 141 as the session's Logon asked, since the default policy wants both to.
             const std::string reset = frame_field(*logon, 141) == "Y" ? "141=Y\x01" : "";
-            EXPECT_TRUE(peer.write(fixt_frame("35=A\x01" + header(1) + "98=0\x01" +
-                                              "108=30\x01" + "1137=9\x01" + reset)));
+            EXPECT_TRUE(peer.write(fixt_frame("35=A\x01" + header(1) + "98=0\x01" + "108=30\x01" +
+                                              "1137=9\x01" + reset)));
             const auto end = std::chrono::steady_clock::now() + kStep;
             while (!app->active.load() && std::chrono::steady_clock::now() < end) {
                 std::this_thread::sleep_for(2ms);
             }
             EXPECT_TRUE(app->active.load()) << "the session did not reach Active";
 
-            EXPECT_TRUE(peer.write(fixt_frame("35=D\x01" + std::string{"1128=10\x01"} + header(2) +
-                                              kNosWith3115)));
+            EXPECT_TRUE(peer.write(
+                fixt_frame("35=D\x01" + std::string{"1128=10\x01"} + header(2) + kNosWith3115())));
             // The frame after it is the fence: its Reject is written after the first was handled.
-            EXPECT_TRUE(peer.write(fixt_frame("35=D\x01" + header(3) + kNosWith3115)));
+            EXPECT_TRUE(peer.write(fixt_frame("35=D\x01" + header(3) + kNosWith3115())));
             const auto r = peer.read_msg_type("3", kStep);
             EXPECT_TRUE(r.has_value()) << "no Reject for the frame with no 1128";
             reject = r.value_or("");

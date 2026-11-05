@@ -1499,7 +1499,8 @@ TEST(MessageRead, VersionNoTag8) {
     h.msg.view = &mv;
 
     // Seeded non-zero, so that zeros can only be the call's.
-    fixpp_resolved_msg_version_t ver{0xAA, 0xAA, 0xAA, 0xAA};
+    fixpp_resolved_msg_version_t ver{
+        .kind = 0xAA, .session = 0xAA, .application = 0xAA, ._reserved = 0xAA};
     ASSERT_EQ(fixpp_msg_version(h.ptr(), &ver), FIXPP_ERR_TAG_NOT_FOUND);
     EXPECT_EQ(ver.kind, 0);
     EXPECT_EQ(ver.session, 0);
