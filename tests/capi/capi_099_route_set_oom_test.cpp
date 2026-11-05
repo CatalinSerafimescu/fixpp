@@ -13,6 +13,11 @@
 // outcomes, since an unfired hook reads green. The C arm (tasks.md T108) sweeps
 // fixpp_engine_create, whose failure leaves the builder with the caller, and fixpp_engine_start,
 // whose failure leaves the engine not started; its mutants are M-52 and M-95.
+//
+// On MSVC's debug STL a container's hidden proxy can be the allocation that fails, inside a
+// noexcept vector constructor, which terminates: the sweeps that reach one take
+// FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP(). To re-derive which, drop the macro from a cell and
+// run the binary on windows-msvc-debug.
 
 #include <gtest/gtest.h>
 
@@ -56,6 +61,7 @@
 #include "session/fixt_route_set.hpp"
 #include "support/engine_test_access.hpp"
 #include "support/minimal_dictionary.hpp"
+#include "support/msvc_debug_arena_skip.hpp"
 #include "support/session_test_access.hpp"
 
 // ASan, TSan and MSan own operator new. Under them this file is one skipped cell.
@@ -201,6 +207,7 @@ BuildCount count_build() {
 }
 
 TEST(W20Build, EveryFiredAllocationIsOutOfMemoryAndTheLastIsAUsableSet) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP();
     const dd::version_registry registry{engine_dictionaries()};
     long fired_runs = 0;
     long completed_runs = 0;
@@ -264,6 +271,7 @@ public:
 };
 
 TEST(W20Engine, EachFiredAllocationFailsStartThenASecondStartSucceeds) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP();
     const BuildCount build = count_build();
     ASSERT_GT(build.allocations, 0);
     long fired_runs = 0;
@@ -347,6 +355,7 @@ long allocations_ahead_of_the_build(const BuildCount& build) {
 }
 
 TEST(W20Direct, EachFiredAllocationOfTheBuildFailsOpenThenARetryOpens) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP();
     const BuildCount build = count_build();
     ASSERT_GT(build.allocations, 0);
     const long ahead = allocations_ahead_of_the_build(build);
@@ -470,6 +479,7 @@ std::size_t asio_pool_mutex_allocation_size() {
 // A version-mismatch failure returns before the copy and could not tell a copy from a move, so the
 // sweep is over allocations, from the first until a call completes with the hook unfired.
 TEST(W20CArm, EachFiredAllocationOfCreate_ConfigInvalid_ThenTheSameBuilderOpensAFixtSession) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP();
     long fired_runs = 0;
     long retries_opened = 0;
     bool completed = false;
@@ -562,6 +572,7 @@ TEST(W20CArm, EachFiredAllocationOfAddDictionary_ConfigInvalid_ThenARetryAccumul
 // A fresh engine with a FIXT session per N. N is bounded to this engine's own build, counted in a
 // dry run as the Direct arm counts, because past it the hook lands on the worker launch.
 TEST(W20CArm, EachFiredAllocationOfStart_Unknown_ThenARetrySucceeds) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP();
     const auto started_engine_parts = [] {
         fixpp_engine_t* engine = nullptr;
         EXPECT_EQ(fixpp_engine_create(builder_with_two(), FIXPP_C_ABI_VERSION_MAJOR,

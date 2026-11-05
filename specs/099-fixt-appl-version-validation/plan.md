@@ -105,6 +105,9 @@ tests/session/test_099_*.cpp, tests/wire/test_099_*.cpp, tests/capi/capi_099_*, 
 tests/{session,dictionary,wire,capi,config,perf}/CMakeLists.txt   (the `099` label and each new executable)
 tests/capi/message_read_test.cpp   (research R-17, the declared break)
 tests/support/session_test_access.hpp
+tests/support/{engine_test_access,run_thread_engine_rig}.hpp   (witness support)
+tests/support/msvc_debug_arena_skip.hpp   (the skips W-16 and W-20 take on MSVC's debug STL)
+tests/fuzz/CMakeLists.txt   (W-24's registration)
 tests/session/{test_fixt_logon_establishment,unparseable_frame_disposition_test}.cpp   (research R-17)
 tests/codegen/{read_tier_byte_diff_test.cmake,test_082_class_xml_consistency_test.cpp}, specs/003-dictionary-codegen/contracts/golden/vt11_Messages.golden.hpp   (research R-17, FR-032's edit)
 tests/dictionary/{reused_tag_census_test,xml_enum_codeset_test,required_scope_census_test}.cpp, tools/quickfix_required_golden/{golden,golden_groups}.csv   (research R-17, FR-032's edit)

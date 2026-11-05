@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/support/msvc_debug_arena_skip.hpp
 //
+// 099-fixt-appl-version-validation: W-16 and W-20 reach proxies outside a std::pmr container.
+//
 // FIXPP_SKIP_ON_MSVC_DEBUG_ARENA(): GTEST_SKIP a byte-exact arena-exhaustion
 // OOM-injection test on the MSVC debug/asan lanes.
 //
@@ -92,7 +94,7 @@ inline bool msvc_debug_stl_active() noexcept {
 //   - ..._GLOBAL_HEAP_GUARD is for a counter asserted to read *zero*; a sweep
 //     deliberately makes allocations fail and asserts the subject is unchanged.
 // The ROOT CAUSE is the same as both: MSVC's debug STL (_ITERATOR_DEBUG_LEVEL >= 1)
-// draws a hidden _Container_proxy per std::pmr container through GLOBAL operator
+// draws a hidden _Container_proxy per container, std::pmr or not, through GLOBAL operator
 // new. A sweep counts those proxy allocations as if they belonged to the operation
 // under test and duly fails one, so bad_alloc is thrown inside a container's
 // member-initialisation — before any noexcept ctor body can catch and degrade —
@@ -108,12 +110,12 @@ inline bool msvc_debug_stl_active() noexcept {
 // verified on windows-msvc-RELEASE (no debug iterators, no proxy) and on ALL Linux
 // lanes (debug/asan/tsan/ubsan/libc++); only the MSVC-debug-iterator interaction
 // is skipped.
-#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP()                                        \
-    if (!::fixpp::test_support::msvc_debug_stl_active()) {                                 \
-    } else                                                                                 \
-        GTEST_SKIP()                                                                       \
-            << "MSVC debug STL draws a hidden _Container_proxy per std::pmr container "    \
-               "through global operator new (_ITERATOR_DEBUG_LEVEL), so an allocation "    \
-               "sweep fails one of those instead of the operation's own and terminates "   \
-               "inside member-initialisation; the exception-safety behaviour is verified " \
+#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP()                                              \
+    if (!::fixpp::test_support::msvc_debug_stl_active()) {                                       \
+    } else                                                                                       \
+        GTEST_SKIP()                                                                             \
+            << "MSVC debug STL draws a hidden _Container_proxy per container, std::pmr or not, " \
+               "through global operator new (_ITERATOR_DEBUG_LEVEL), so an allocation "          \
+               "sweep fails one of those instead of the operation's own and terminates "         \
+               "inside member-initialisation; the exception-safety behaviour is verified "       \
                "on windows-msvc-release + all Linux lanes (debug/asan/tsan/ubsan/libc++)"
