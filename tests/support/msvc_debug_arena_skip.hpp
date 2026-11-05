@@ -56,15 +56,16 @@ inline bool msvc_debug_stl_active() noexcept {
 // assertion (a TU-local `operator new` counter that must read 0 across a
 // parse+read window) on the MSVC debug/asan lanes. Same _Container_proxy root
 // cause as the arena skip above: MSVC's debug STL (_ITERATOR_DEBUG_LEVEL >= 1)
-// heap-allocates a hidden _Container_proxy per std::pmr container, and per
-// std::string (099 W-16), at construction THROUGH global operator new, so the
-// counter observes those proxy allocations even though the code under test
-// draws nothing else from the heap. ⚠️ 389: this comment used to give the counts ("e.g. 8 for a
-// top-level dict-backed read, 2 for a nested descent"). Those are RESULTS, and #389 moved them — it
-// deleted `OffsetTable::group_slices_`, one std::pmr container per table, so every table now
-// constructs one fewer. The numbers are dropped rather than re-derived: the CONDITION (one proxy
-// per std::pmr container or std::string constructed inside the window) is what a reader needs, and
-// it cannot rot. To re-derive a count, run the guarded cell on an MSVC debug lane and read the
+// heap-allocates a hidden _Container_proxy per std::pmr container or std::string
+// at construction THROUGH global operator new, so the counter observes those
+// proxy allocations even though the code under test draws only from its stack
+// arena. ⚠️ 389: this comment used to give the counts ("e.g. 8 for a top-level
+// dict-backed read, 2 for a nested descent"). Those are RESULTS, and #389 moved
+// them — it deleted `OffsetTable::group_slices_`, one std::pmr container per
+// table, so every table now constructs one fewer. The numbers are dropped
+// rather than re-derived: the CONDITION (one proxy per std::pmr container or
+// std::string constructed inside the window) is what a reader needs, and it cannot rot.
+// To re-derive a count, run the guarded cell on an MSVC debug lane and read the
 // counter.
 // The zero-global-heap DISCIPLINE is fully verified on windows-msvc-release
 // (no debug iterators, no proxy) and on ALL Linux lanes
