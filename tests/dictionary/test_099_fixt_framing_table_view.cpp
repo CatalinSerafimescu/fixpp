@@ -579,15 +579,18 @@ TEST(W17HeaderLengthPairs, OnlyTheDataTagInTheHeader_IsAHeaderPair) {
     EXPECT_EQ(pairs[0].data_tag, 5031);
 }
 
-// The function's contract: "by Length tag", whichever order the file declares the pairs in.
-TEST(W17HeaderLengthPairs, TwoPairsDeclaredDescending_AreByLengthTag) {
+// The function's contract: "by Length tag". A message's own fields read in tag order, so the walk
+// meets the higher Length first only when an earlier message holds it and a later one the lower.
+TEST(W17HeaderLengthPairs, TheHigherLengthInAnEarlierMessage_AreByLengthTag) {
     const auto d = with_overlay("FIXT11.xml",
                                 "<fix type='FIXT' major='1' minor='1' servicepack='0'><header>"
-                                "<field name='VenueHighLen' required='N' />"
                                 "<field name='VenueHighData' required='N' />"
-                                "<field name='VenueLowLen' required='N' />"
-                                "<field name='VenueLowData' required='N' /></header><fields>"
-                                "<field number='5040' name='VenueHighLen' type='LENGTH' />"
+                                "<field name='VenueLowData' required='N' /></header><messages>"
+                                "<message name='Heartbeat' msgtype='0' msgcat='admin'>"
+                                "<field name='VenueHighLen' required='N' /></message>"
+                                "<message name='Logon' msgtype='A' msgcat='admin'>"
+                                "<field name='VenueLowLen' required='N' /></message></messages>"
+                                "<fields><field number='5040' name='VenueHighLen' type='LENGTH' />"
                                 "<field number='5041' name='VenueHighData' type='DATA' />"
                                 "<field number='5030' name='VenueLowLen' type='LENGTH' />"
                                 "<field number='5031' name='VenueLowData' type='DATA' />"
