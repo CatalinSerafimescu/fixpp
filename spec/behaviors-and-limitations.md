@@ -4044,3 +4044,9 @@ A FIXT.1.1 session now reads each inbound message with the dictionary of that me
 ### Limitations
 
 - **L-660-1 — `fixpp_engine_create` can crash on a failed allocation inside `make_strand`.** `Engine::Engine`'s `asio::make_strand(exec_)` reaches asio's `strand_executor_service::create_implementation`, which allocates a `strand_impl`, then its pool mutex when that slot is empty, and only later sets the impl's service pointer. If the mutex allocation throws, unwinding runs `~strand_impl`, which locks through the unset pointer: a null dereference inside asio, in a destructor during the unwind, so no `catch` in fixpp helps. The reach is a real allocation failure while creating an engine whose strand is the first to pick that pool slot. Pre-existing: 099 does not change `make_strand` or `control_strand_`, and it found this through W-20's C arm. W-20's `fixpp_engine_create` sweep passes over any allocation of that size, read by making the same call in the test (`asio_pool_mutex_allocation_size`). **Status: open defect, fixpp#660.**
+
+## fixpp#661 — a `SessionId` built per inbound frame (2026-11-05)
+
+### Limitations
+
+- **L-661-1 — A CompID or BeginString past the standard library's small-string buffer allocates per inbound application message.** `Session::parse_and_dispatch_` builds a `SessionId` per frame through `SessionId::from_config`, and `SessionId` holds three `std::string`s, so a value past that buffer reaches the global heap on every lane. `[const §XV.1]` allows no per-message allocation on the inbound path. Read from the types, not measured on a long CompID: W-16's fixture uses short ones, which fit the buffer, so it reads zero and cannot see this. MSVC's debug STL draws a `_Container_proxy` per string regardless, which is how it surfaced and why W-16 skips its count on that STL. Pre-existing: 099 does not change that call. **Status: open defect, fixpp#661.**

@@ -41,6 +41,7 @@
 #include <vector>
 
 #include "support/alloc_guard_markers.hpp"
+#include "support/msvc_debug_arena_skip.hpp"
 #include "support/run_thread_engine_rig.hpp"
 
 #ifdef __has_feature
@@ -270,6 +271,10 @@ void expect_window(window_result const& r, bool validating) {
     EXPECT_EQ(r.snap.next_inbound, static_cast<fixpp::session::seqnum_t>(2 + frames));
     EXPECT_EQ(r.snap.has_validator, validating);
 #if FIXPP_099_COUNTS_NEW
+    // Under MSVC's debug STL each std::string of the SessionId parse_and_dispatch_ builds draws a
+    // _Container_proxy, so only this zero is out of reach there. The cell reports skipped; the
+    // assertions above have run, and a cell's own after expect_window() still run.
+    FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD();
     EXPECT_EQ(r.new_calls, 0U) << "global operator new calls in the marked region";
 #endif
 }
