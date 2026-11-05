@@ -762,7 +762,7 @@ TEST(W5NoClock, InitiatorS3_RefusesAndStampsNothing) {
     Rig r{shape_fixture(Shape::T), std::move(o)};
     r.engine.clock = nullptr;
     const auto setup = r.open();
-    ASSERT_FALSE(setup.has_value()) << *setup;
+    ASSERT_FALSE(setup.has_value()) << setup.value_or("");
     const Ending e = r.deliver(input("Logon 1137=99").make(r.peer_ctx(1)));
     EXPECT_EQ(short_form(e), "R 5/1137 A 45=1 | Disc | c | app=0 adm=0");
     ASSERT_EQ(e.out.size(), 1U);

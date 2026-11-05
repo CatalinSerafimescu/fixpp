@@ -1209,7 +1209,7 @@ std::size_t count_occurrences(const std::string& text, const std::string& needle
 std::vector<detail::logon_msg_type_instance> scanned(const std::string& text) {
     static const dd::table_view table = fixt11()->as_table_view();
     std::string frame = text;
-    std::replace(frame.begin(), frame.end(), '|', '\x01');
+    std::ranges::replace(frame, '|', '\x01');
     // The views point into `frame`, so `kept_frames` holds each frame for the process.
     static std::vector<std::unique_ptr<std::string>> kept_frames;
     kept_frames.push_back(std::make_unique<std::string>(std::move(frame)));
