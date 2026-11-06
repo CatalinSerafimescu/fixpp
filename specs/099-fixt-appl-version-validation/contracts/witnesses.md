@@ -148,7 +148,7 @@ Each row: the code it changes, and the cell that goes RED on that change alone. 
 | M-86 | `dict::reify` with the byte `Unknown` returns an error, reading neither 1128 nor the profile | W-10, the FIX.4.4 rows: no handle |
 | M-87 | an absent `extra_paths` pushes the `path` dictionary a second time | W-14, absent key: two engine dictionaries |
 | M-88 | A2 answers 373=5 on every refusal | `AC-b`, empty: 373=5, not 373=4 |
-| M-89 | selection's step 4 removed: an empty 1128 reaches the resolver | `AC-b`, empty: delivered, not `R 4/1128 D` |
+| M-89 | selection's step 4 removed: an empty 1128 reaches the resolver | `AC-b`, empty: `R 5/1128 D`, not `R 4/1128 D`, the wrong reason. With step 4 gone, step 5's parse, `resolve_ref_appl_ver_id`, whose profile's default is `Unknown`, refuses the empty value as unknown, 373=5. This changed at `a504606c` (`/simplify` item 1): before it, step 5's profile defaulted to the negotiated version, and the frame was delivered. The unmutated ending is unchanged, because step 4 refuses an empty 1128 ahead of step 5, and `resolve_application_version` reads a profile's default only on an empty value |
 | M-90 | E-6's transport route tries the registry before S | W-4, `Heartbeat 1128=10` on L: 373=5, not delivered |
 | M-91 | E-6's slot rule loses the clause on `d`'s `session_version` | W-3 (b): the plain answer, the overlay field rejected |
 | M-92 | the record site runs on a validating session only | W-25, not validating, `384=2` with one entry: the entry not kept |
