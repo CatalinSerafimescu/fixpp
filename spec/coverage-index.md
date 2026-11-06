@@ -125,7 +125,7 @@ FIXT.1.1 is not a standalone online document; its normative session rules are un
 | Username(553)/Password(554) credentials on FIXT Logon | §4.3, [FIXS §2.6] | S-022 | **033**: `backlog → done`. Emit when configured + inbound parse + surface via `authorize_logon` seam (FR-007/FR-008); `554` redacted. Unit witnesses green (`test_fixt_credentials.cpp` W6/W7); live deferred (SC-003/SC-004). Acceptor-side validation deferred (FR-008a / L-033-2). |
 | ApplVerID(1128) per message — per-message app version override | §4.3.7, §5.3.5 | S-026 | **S-026 `done` via 099**: selects the frame's route, with validation on or off, and a validating session refuses one no dictionary answers (`Session::select_route_`; witnesses W-1, W-4, W-6). A non-validating session delivers such a frame (033 FR-010, witness W8 in `test_fixt_logon_establishment.cpp`). 097: ApplVerID 10 = FIX Latest. |
 | NoMsgTypes on Logon — supported message types advertisement | §4.3.8 | S-037 | MISSING → row added (S-037) |
-| Multiple application version support | §5.3.2 | S-026 | **S-026 `done` via 099** (W-1, W-2, W-3). The live cell, W-18: QuickFIX C++ and QuickFIX/J send an ExecutionAck (35=BN) over FIXT.1.1 to a validating session; T143's post-merge confirmation is pending. |
+| Multiple application version support | §5.3.2 | S-026 | **S-026 `done` via 099** (W-1, W-2, W-3). The live cell, W-18: QuickFIX C++ and QuickFIX/J send an ExecutionAck (35=BN) over FIXT.1.1 to a validating session, at T118 and again after the merge on the republished counterparty image (T143). |
 | Extension pack precedence rules | §5.3.6 | — | out-of-scope → dropped(post-1.0: EP precedence) |
 | Custom application version | §5.3.7 | — | out-of-scope → dropped(post-1.0) |
 
