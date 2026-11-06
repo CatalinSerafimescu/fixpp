@@ -13,7 +13,7 @@ Root: `~/Work/Programming/fixpp-parallel`; build trees on `/mnt/wsl/fixppbuild` 
 5. Paired bench, W-22, non-FIXT shape, B41's method (`research/probes/b41_563_564/ph7f_method.md`): `on_inbound_frame_bench`, `validator_bench`, with the new FIXT case reported for information.
 6. Live: W-18, through a copy of the parent's `phase-9-harness`, in tasks.md's `**Harness layout**`.
 7. Records: W-23, each recipe run on the pre-edit tree first.
-8. MSVC: take `.sandbox-lock` first, then build the feature's own targets, the C and Python ones included, with `-k 0` before the first labelled push, and run `session_pure_tests` once.
+8. MSVC: take `.sandbox-lock` first, then build the feature's own targets, the C and Python ones included, with `-k 0` before the first labelled push, and run each `session_099_*_tests` entry once (tasks.md's **Binaries**).
 
 ## Expected end state
 
