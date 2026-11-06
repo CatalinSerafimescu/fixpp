@@ -128,7 +128,7 @@ set_tests_properties(dictionary_overlay_tests PROPERTIES LABELS "dictionary;098"
 # ── 099-fixt-appl-version-validation: W-17 and W-21's dictionary half ─────────
 # Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); a bucket of
 # their own only because their cells are slow under msvc-asan, and one ctest entry must stay
-# under CI's per-test timeout (the owner's ruling of 2026-11-06, tasks.md's **Binaries**).
+# under CI's per-test timeout (the owner's ruling, tasks.md's **Binaries**).
 # Compiled as they were inside dictionary_pure_tests: the same link libraries, include
 # directories and definitions. No TIMEOUT property, so CI's `--timeout 1800` governs; the
 # condition is that this entry's run on CI's slowest lane stays under it. Re-derive from a CI
