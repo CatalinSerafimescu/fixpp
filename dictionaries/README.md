@@ -2,8 +2,23 @@
 
 Verbatim copies of the FIX data-dictionary XML files from upstream
 [`quickfix/quickfix`](https://github.com/quickfix/quickfix) at the pinned SHA
-recorded in `UPSTREAM.txt`. Consumed by `fixpp::dict::XmlLoader::load(...)` per
-`specs/002-dictionary-xml-loader/research.md` D-2.
+recorded in `UPSTREAM.txt`, with one exception: `FIXT11.xml`, below. Consumed by
+`fixpp::dict::XmlLoader::load(...)` per `specs/002-dictionary-xml-loader/research.md` D-2.
+
+**The exception, `FIXT11.xml` (099-fixt-appl-version-validation, FR-032).** It is the QuickFIX
+C++ file plus MsgTypeGrp on Logon, so that a Logon carrying a Message Type Default validates:
+
+- on Logon, as its last child after EncodedText, `<group name='NoMsgTypes' required='N'>` with
+  RefMsgType(372), MsgDirection(385), RefApplVerID(1130), RefApplExtID(1406),
+  RefCstmApplVerID(1131) and DefaultVerIndicator(1410), each `required='N'`. The existing empty
+  `MsgTypeGrp` component and Logon's reference to it stay as they are;
+- field definitions for NoMsgTypes(384) `NUMINGROUP`, MsgDirection(385) `CHAR` closed at `R` and
+  `S`, and DefaultVerIndicator(1410) `BOOLEAN`. 384 and 385 go directly after 383. 1410 goes
+  directly before 1409, out of numeric order, so that 1409 stays the last field: the `fields` hunk of
+  the patch fixture `FIXT11.patch` must match its context block exactly once
+  (`specs/099-fixt-appl-version-validation/research.md` R-17).
+
+Nothing else differs from upstream.
 
 ## Files
 
@@ -58,15 +73,58 @@ for f in FIX40.xml FIX41.xml FIX42.xml FIX43.xml FIX44.xml \
 done
 ```
 
-Then update `UPSTREAM.txt` to record the new SHA + date + (if any) the
-upstream tag, and run `ctest --preset linux-clang-debug -L dictionary` to
+Then re-apply the `FIXT11.xml` exception above, with its placement, which the download
+just overwrote:
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+
+GROUP = """   <group name='NoMsgTypes' required='N'>
+    <field name='RefMsgType' required='N' />
+    <field name='MsgDirection' required='N' />
+    <field name='RefApplVerID' required='N' />
+    <field name='RefApplExtID' required='N' />
+    <field name='RefCstmApplVerID' required='N' />
+    <field name='DefaultVerIndicator' required='N' />
+   </group>
+"""
+FIELDS_384_385 = """  <field number='384' name='NoMsgTypes' type='NUMINGROUP' />
+  <field number='385' name='MsgDirection' type='CHAR'>
+   <value enum='R' description='RECEIVE' />
+   <value enum='S' description='SEND' />
+  </field>
+"""
+FIELD_1410 = "  <field number='1410' name='DefaultVerIndicator' type='BOOLEAN' />\n"
+
+
+def insert(text, marker, before, addition):
+    if text.count(marker) != 1:
+        raise SystemExit(f"expected one {marker!r}, found {text.count(marker)}")
+    return text.replace(marker, addition + marker if before else marker + addition)
+
+
+p = Path("FIXT11.xml")
+t = p.read_text(encoding="utf-8")
+logon_end = t.index("</message>", t.index("msgtype='A'"))
+line_start = t.rindex("\n", 0, logon_end) + 1
+t = t[:line_start] + GROUP + t[line_start:]
+t = insert(t, "  <field number='383' name='MaxMessageSize' type='LENGTH' />\n", False, FIELDS_384_385)
+t = insert(t, "  <field number='1409' name='SessionStatus' type='INT'>\n", True, FIELD_1410)
+p.write_text(t, encoding="utf-8")
+PY
+```
+
+The recipe stops if upstream moved a field it anchors on. Then update `UPSTREAM.txt` to record the
+new SHA + date + (if any) the upstream tag, and run `ctest --preset linux-clang-debug -L dictionary` to
 confirm the loader still parses every file.
 
 ## License
 
 The dictionary XML files are copied **verbatim** from the upstream
 [`quickfix/quickfix`](https://github.com/quickfix/quickfix) repository at the SHA
-pinned in `UPSTREAM.txt`. They are **runtime data** consumed by
+pinned in `UPSTREAM.txt`, except `FIXT11.xml`'s addition described at the top of this
+file. They are **runtime data** consumed by
 `fixpp::dict::XmlLoader::load(...)` — not merely test fixtures.
 
 **Upstream license:** the **QuickFIX Software License, Version 1.0**

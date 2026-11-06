@@ -207,7 +207,7 @@ TEST(ReusedTagCensus, AllNineRuntimeDictsCensused) {
             static std::map<std::string_view, std::size_t> const kExpectedGroupTags{
                 {"FIX40.xml", 4},     {"FIX41.xml", 7},      {"FIX42.xml", 18},
                 {"FIX43.xml", 34},    {"FIX44.xml", 59},     {"FIX50.xml", 67},
-                {"FIX50SP1.xml", 97}, {"FIX50SP2.xml", 505}, {"FIXT11.xml", 1},
+                {"FIX50SP1.xml", 97}, {"FIX50SP2.xml", 505}, {"FIXT11.xml", 2},
             };
             EXPECT_EQ(oracle.group_tags.size(), kExpectedGroupTags.at(fname))
                 << fname << ": oracle group_tags count vs literal C2 registered-after constant";

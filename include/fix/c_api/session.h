@@ -153,6 +153,36 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_security(
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_dictionary(
     fixpp_session_config_t* cfg, fixpp_dict_t* dict);
 
+/** fixpp_session_config_set_default_appl_ver_id — the session's DefaultApplVerID.
+ *
+ *  `wire_value` is the ApplVerID wire value, "2" to "9" or "10", copied. A later valid
+ *  call replaces the earlier value, a rejected call leaves it, and a default cannot be
+ *  cleared: destroy the builder. (099-fixt-appl-version-validation, C-ABI 1.14.)
+ *
+ *  Reentrancy: single-thread.
+ *  @return FIXPP_ERR_OK
+ *  @return FIXPP_ERR_NULL_HANDLE          cfg is NULL
+ *  @return FIXPP_ERR_CAPI_CONFIG_INVALID  wire_value is NULL, empty or any other value
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_default_appl_ver_id(
+    fixpp_session_config_t* cfg, const char* wire_value);
+
+/** fixpp_session_config_set_validate_inbound_messages — validate inbound messages
+ *  against the dictionaries. Applies to every session the config opens, a non-FIXT one
+ *  included, where it is C++'s existing validation. (099-fixt-appl-version-validation,
+ *  C-ABI 1.14.)
+ *
+ *  A validating FIXT session the engine's dictionaries cannot answer is refused at
+ *  fixpp_session_open, which returns FIXPP_ERR_THREAD_CONFIG with the builder not
+ *  consumed. Nothing returns this cause from fixpp_engine_start.
+ *
+ *  Reentrancy: single-thread.
+ *  @return FIXPP_ERR_OK
+ *  @return FIXPP_ERR_NULL_HANDLE  cfg is NULL
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_validate_inbound_messages(
+    fixpp_session_config_t* cfg, bool validate);
+
 /** Reset sequence numbers on logon. Reentrancy: single-thread. */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_reset_on_logon(
     fixpp_session_config_t* cfg, bool reset_on_logon);
@@ -225,6 +255,12 @@ FIXPP_API_EXPORT void fixpp_session_config_destroy(fixpp_session_config_t* cfg);
  * error (C-ABI-enforced register-before-start). Returns a NON-owning handle keyed
  * by SessionId; open != connected (poll fixpp_session_is_established). `cfg` is
  * CONSUMED on success.
+ *
+ * C-ABI 1.14 (099-fixt-appl-version-validation): a validating FIXT session whose config
+ * fails the FIXT check (no default, a default with no dictionary, no transport dictionary
+ * among the engine's) returns FIXPP_ERR_THREAD_CONFIG here, and the builder is not
+ * consumed. Nothing returns this cause from fixpp_engine_start. The code does not say
+ * which clause refused: every invalid_session_config cause shares it.
  *
  * Reentrancy: single-thread. THUNK: construction-time (catch → *_CONFIG; never throws).
  */

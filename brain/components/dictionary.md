@@ -10,6 +10,9 @@ refs:
   - src/dictionary/version_registry.cpp
   - src/dictionary/reify.cpp
   - include/fixpp/dict/reify.hpp
+  - include/fixpp/dict/version_registry.hpp
+  - include/fixpp/dict/version_profile.hpp
+  - include/fixpp/dict/dictionary.hpp
   - .specify/2c-codegen.md
   - .specify/215-dictionary-view.md
   - .specify/495-493-486-dict-reify-copy.md
@@ -24,7 +27,10 @@ refs:
   - specs/057-behavioral-reify-unblock/plan.md
   - specs/057-behavioral-reify-unblock/research.md
   - specs/057-behavioral-reify-unblock/contracts/reify-dispatch-bridge.md
+  - specs/099-fixt-appl-version-validation/research.md
+  - specs/099-fixt-appl-version-validation/data-model.md
   - spec/behaviors-and-limitations.md
+  - dictionaries/README.md
   - docs/src/dictionary/codegen.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2c-codegen.md
@@ -35,6 +41,7 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/096-fix-latest-tail-evidence-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/097-fix-latest-applverid-10-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/098-dialect-overlay-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/099-fixt-appl-version-validation-gatea.md
 codegraph_entry: [Dictionary, xml_loader, orchestra_loader, field_traits, version_registry, table_view_builder]
 constitution: ["§I.1"]
 ---
@@ -362,9 +369,9 @@ verify against `capture_first_emission` in `orchestra_loader.cpp`. See [`test.md
 - ⚠️ **Superseded by 097 (`097-fix-latest-applverid-10`):** `specs/074-orchestra-native-reader/` — its reconcile (FIX Latest sharing the `v50sp2` application version and registry slot), FR-010 (the FIX50SP2 + FIX Latest fail-loud guard) and L-074-1 describe the model 097 replaced; L-074-1 now sits in the closed B&L file.
 - ⚠️ **Superseded by 097 (`097-fix-latest-applverid-10`):** `specs/076-fix-latest-typed-codegen/` prose describing the `vlatest` IR row's `.a = v50sp2` and `app_version_enum` mapping `vlatest` to `v50sp2`; since 097 the row reads `.a = vlatest` and the generated `fixpp::vlatest` classes report `application_version::vlatest` (B-097-2). The vlatest golden is a test oracle and is regenerated, not flagged.
 - ⚠️ **Superseded by 097 (`097-fix-latest-applverid-10`):** `specs/076-fix-latest-typed-codegen/contracts/build-and-verification.md` V-7 and `specs/076-fix-latest-typed-codegen/quickstart.md` claim the `_dispatch/` output is byte-identical between the `FIXPP_CODEGEN_FIX_LATEST` OFF and ON runs; since 097 `_dispatch/reify_dispatch_application.hpp` gains FIX Latest's arm in the ON run only, and `DeterminismTest.AdditiveOffOnByteDiff` asserts that one insertion for that file (097 contracts W-10).
-- ⚠️ **Superseded by 097 (`097-fix-latest-applverid-10`):** `specs/080-orchestra-runtime-load/` L-080-1 (a configuration listing both a FIX50SP2 and a FIX Latest dictionary aborts at `version_registry` construction); since 097 the two coexist in one registry, L-080-1 sits in the closed B&L file, and its config half continues as L-097-1.
+- ⚠️ **Superseded by 097 (`097-fix-latest-applverid-10`):** `specs/080-orchestra-runtime-load/` L-080-1 (a configuration listing both a FIX50SP2 and a FIX Latest dictionary aborts at `version_registry` construction); since 097 the two coexist in one registry, L-080-1 sits in the closed B&L file, and its config half continued as L-097-1, closed by 099.
 - `.specify/2c-codegen.md` (2c-codegen) carries in-place `Updated (097-fix-latest-applverid-10)` notes in §4.3 (the `application_version` enum sketch and the wire `ApplVerID(1128)` mapping table), §4.8 (the runtime-dispatch switch paragraph and the `reify_dispatch_application.hpp` sketch) and §6 (§6.3 step 3, §6.6 item 8); the text before each note is history.
-- C-ABI: 2c-codegen §5 item 5's application-version C-ABI constant set (`FIXPP_APPL_VER_*`) was never implemented, so 097 adds no FIX Latest C-ABI constant and does not change the C ABI (B-097-2). While that holds, `git grep -n FIXPP_APPL_VER -- include src bindings` prints nothing.
+- C-ABI: 2c-codegen §5 item 5's application-version C-ABI constant set (`FIXPP_APPL_VER_*`) was never implemented, so 097 adds no FIX Latest C-ABI constant and does not change the C ABI (B-097-2). While that holds, `git grep -n FIXPP_APPL_VER -- include src bindings` prints nothing. ⚠️ **Superseded by 099:** that grep now prints, because C-ABI 1.14 adds the constant set to `include/fix/c_api/dict.h`, with `FIXPP_APPL_VER_FIXLATEST` among them; see [`c-api.md`](./c-api.md).
 
 ## Dialect overlay (098) — superseded records, flagged in place
 
@@ -419,3 +426,19 @@ Records that describe the older design are flagged here and not rewritten. Each 
 - **Open from 098:** L-098-3 (the base load paths have no caps and no cycle guard, fixpp#650) and
   L-098-4 (the `std::uint16_t` side-table index wraps; the vendored FIX50SP2 component table already does,
   fixpp#654).
+
+## Two dictionaries on a FIXT session (099) — what this family gained, and what was rejected
+
+`099-fixt-appl-version-validation` is decided on [`session.md`](./session.md), whose section has the session half; this section keeps what lands here. Verify against `include/fixpp/dict/version_registry.hpp`, `include/fixpp/dict/dictionary.hpp`, `include/fixpp/dict/version_profile.hpp` and `include/fixpp/dict/reify.hpp`.
+
+**DECIDED — the registry keeps a FIXT.1.1 dictionary and answers `transport()`; `get()` is unchanged.** A session-layer dictionary is not an application version. **DECIDED — the content test, not the label** (`defines_fixt_admin`, research R-2): all seven admin messages and a Logon accepting 1137, because FIXT11 and FIX Latest pass, a FIX50-family file has no admin messages, and a FIX 4.4 file has them and rejects 1137. **DECIDED — `Dictionary::as_table_view(fixt_framing)` is an overload**, so a non-FIXT session's table cannot move: W-17 pins every store of the no-argument form to a literal per vendored file. **DECIDED — `dict::reify` takes the view's byte when the session wrote one** (research R-19), so the version validated and the version reified cannot differ.
+
+**REJECTED — the registry owning a validator or a table** (research R-3): `[arch §2.3]`, and [`session.md`](./session.md) has the rest. **REJECTED — replacing the session dictionary with the registry's for the same version** (research R-1): it loses the overlay. **REJECTED — composing two dictionaries into one `dict_hooks`** (research R-20): the nested cache keys on one dictionary pointer. The route table is built with S's header pairs instead, `as_table_view(fixt_framing, extra)`. **REJECTED — growing `version_profile` to hold per-MsgType defaults** (research R-19): it is a statically asserted 4-byte struct carried by value, which every `reify` caller and `negotiated_version_profile()` copy. **REJECTED — a `reify` overload taking a map** (research R-19): it leaves C with nothing to pass.
+
+**`FIXT11.xml` is no longer verbatim** (owner item 8a, research R-19, R-17). A stated exception in `dictionaries/README.md`, whose refresh recipe re-applies it: the group on Logon and its three missing fields, nothing else. **REJECTED — adopting QuickFIX/J's whole file:** a larger diff in the generated files, and it trips the same pins.
+
+**Records this supersedes, flagged here and not edited.**
+
+- ⚠️ **Superseded by 099:** `specs/003-dictionary-codegen/contracts/reify.hpp`'s resolution order, and `specs/003-dictionary-codegen/contracts/version_registry.hpp` where it has no `transport()`. `include/fixpp/dict/reify.hpp` and `include/fixpp/dict/version_registry.hpp` name 099 in their header comments.
+- `.specify/2c-codegen.md` carries in-place `Updated (099-fixt-appl-version-validation)` notes at §4.3, §4.6, §4.9 and §5; `.specify/2b-wire.md` at §6.5. The text before each note is history.
+- ⚠️ **Retired by 099:** L-041-2 and L-097-1, in the closed B&L file. L-041-2's accept-only divergence stays live as `B-081-1`. `L-098-1` stays open, reworded.

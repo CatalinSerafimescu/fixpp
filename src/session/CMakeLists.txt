@@ -14,6 +14,7 @@
 add_library(fixpp_session STATIC
   session.cpp
   engine.cpp             # 015-runtime-engine T006: Engine lifecycle substrate
+  fixt_route_set.cpp     # 099-fixt-appl-version-validation: data-model E-1
   session_executor.cpp   # fixpp::core::make_session_executor (T019; the
                          # core-namespace bridge defined session-side so
                          # core/ stays the asio-free leaf — [arch §2.3])

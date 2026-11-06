@@ -148,3 +148,42 @@ fixpp_add_release_mallocnesia_test(
   TARGET perf_session_recovery_alloc_guard
   CASE "SessionRecoveryAllocGuardTest.HeartbeatSteadyState_DualGate"
   LABELS perf alloc_guard 544)
+
+# 099-fixt-appl-version-validation W-16 (NFR-002, `[const §VII.8]`): a FIXT session's inbound
+# application frame on a non-own slot, on the run-thread rig. One source, two binaries, as
+# tests/alloc_guard/CMakeLists.txt's fixpp#544 block has it: `mallocnesia.c` refuses a process that
+# defines the allocator names, so the interceptor runs the build without a counter.
+add_executable(perf_099_fixt_inbound_alloc_guard test_099_fixt_inbound_alloc_guard.cpp)
+target_compile_definitions(perf_099_fixt_inbound_alloc_guard PRIVATE FIXPP_099_TU_COUNTER=1)
+set(_fixpp_099_alloc_targets perf_099_fixt_inbound_alloc_guard)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_executable(perf_099_fixt_inbound_alloc_guard_interposed test_099_fixt_inbound_alloc_guard.cpp)
+  list(APPEND _fixpp_099_alloc_targets perf_099_fixt_inbound_alloc_guard_interposed)
+endif()
+foreach(_t IN LISTS _fixpp_099_alloc_targets)
+  target_link_libraries(${_t} PRIVATE fixpp_session fixpp_mock_clock GTest::gtest GTest::gtest_main)
+  target_include_directories(${_t} PRIVATE "${CMAKE_SOURCE_DIR}/tests" "${CMAKE_SOURCE_DIR}/src")
+  target_compile_definitions(${_t} PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+  set_target_properties(${_t} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+endforeach()
+add_test(NAME perf_099_fixt_inbound_alloc_guard COMMAND perf_099_fixt_inbound_alloc_guard)
+set_tests_properties(perf_099_fixt_inbound_alloc_guard PROPERTIES
+  LABELS "099;perf;alloc_guard"
+  TIMEOUT 300
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  foreach(_cell IN ITEMS Validated NotValidated)
+    string(TOLOWER "${_cell}" _cell_lower)
+    fixpp_add_release_mallocnesia_test(
+      NAME perf_099_fixt_inbound_${_cell_lower}_mallocnesia
+      TARGET perf_099_fixt_inbound_alloc_guard_interposed
+      CASE "W16NonOwnSlot.${_cell}"
+      LABELS perf alloc_guard 099)
+    fixpp_add_release_mallocnesia_test(
+      NAME perf_099_fixt_inbound_default_${_cell_lower}_mallocnesia
+      TARGET perf_099_fixt_inbound_alloc_guard_interposed
+      CASE "W16MessageTypeDefault.${_cell}"
+      LABELS perf alloc_guard 099)
+  endforeach()
+endif()

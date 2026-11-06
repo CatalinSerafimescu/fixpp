@@ -279,7 +279,8 @@ static void resolve_engine_cert_source(const toml::table& root_tbl,
 // step-1 accepted kind: "path"
 // dict::load_any throws — use trap_throw_to_expected.
 // On success, `base_path` receives the resolved `dictionary.path` (the base of
-// every session overlay, resolve_session_dictionaries).
+// every session overlay, resolve_session_dictionaries). `extra_paths` follows
+// `path` in engine.dictionaries (099-fixt-appl-version-validation).
 // ─────────────────────────────────────────────────────────────────────────────
 static void resolve_engine_dictionary(const toml::table& root_tbl,
                                       const std::filesystem::path& base_dir,
@@ -375,6 +376,51 @@ static void resolve_engine_dictionary(const toml::table& root_tbl,
     }
     bundle.engine.dictionaries.push_back(std::move(*load_result));
     base_path = std::move(xml_path);
+
+    // 099-fixt-appl-version-validation (FR-017, contracts/surface.md's `## TOML`): after `path`, so
+    // engine.dictionaries.front() stays the session default. No overlay applies to an extra.
+    const toml::node* extras_n = dict_tbl->get("extra_paths");
+    if (extras_n == nullptr) {
+        return;
+    }
+    constexpr std::string_view kExtras = "dictionary.extra_paths";
+    const toml::array* extras = extras_n->as_array();
+    if (extras == nullptr) {
+        acc.add(LoadDiagnostic{
+            .key_path = std::string{kExtras},
+            .reason = reason_class::malformed_value,
+            .message = "dictionary.extra_paths must be an array of strings",
+        });
+        return;
+    }
+    for (std::size_t i = 0; i < extras->size(); ++i) {
+        const std::string entry = "dictionary.extra_paths[" + std::to_string(i) + "]";
+        const auto* str = extras->get(i)->as_string();
+        if (str == nullptr || str->get().empty()) {
+            acc.add(LoadDiagnostic{
+                .key_path = std::string{kExtras},
+                .reason =
+                    str == nullptr ? reason_class::malformed_value : reason_class::empty_required,
+                .message = entry + (str == nullptr ? " must be a string" : " must not be empty"),
+            });
+            continue;
+        }
+        // The join, the load and the insertion, in one trap at the key path (loader_internal.hpp).
+        auto added = trap_throw_to_expected(
+            std::string{kExtras}, reason_class::invalid_or_contradictory_selector, [&] {
+                const std::filesystem::path extra_path =
+                    resolve_path(base_dir, std::filesystem::path{std::string{str->get()}});
+                dict::Dictionary d = dict::load_any(extra_path, opts.resource);
+                bundle.engine.dictionaries.push_back(
+                    std::make_shared<const dict::Dictionary>(std::move(d)));
+                return true;
+            });
+        if (!added) {
+            LoadDiagnostic diag = std::move(added).error();
+            diag.message = entry + ": " + diag.message;
+            acc.add(std::move(diag));
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

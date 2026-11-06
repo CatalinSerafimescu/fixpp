@@ -208,6 +208,8 @@ Source: `library/.specify/2c-codegen.md` §6.5 Lifetime contract on typed-messag
 - **Commitment 3:** 2i picks the **tag-keyed** flavour for the v1.0 ABI surface (`fixpp_msg_get_int(msg, tag, ...)`, not a per-field-name `fixpp_NewOrderSingle_get_cl_ord_id`). Rationale in §4.6.
 - **Commitment 5:** `FIXPP_APPL_VER_*` constants live in `c_api/dict.h` (2c-owned); 2i re-exposes them via the umbrella header.
 
+  Updated (099-fixt-appl-version-validation): `c_api/dict.h` also holds `FIXPP_APPL_VER_FIXLATEST`, `FIXPP_SESSION_VER_*` and `FIXPP_MSG_KIND_*`.
+
 ### §3.11 From `[2d §6.7]` — threading errors + C-ABI coalescing
 
 The threading layer's 9 variants per `[2d §6.7]` (`executor_already_stopped`, `executor_not_serialised`, `clock_sleeps_cancelled`, `strand_dispatch_failed_oom`, `session_already_open`, `session_already_closed`, `invalid_session_config`, `clock_not_set`, `dispatch_aborted`) coalesce per `[2d §6.7]` into `FIXPP_ERR_THREAD_CONFIG` / `FIXPP_ERR_THREAD_SESSION_LIFECYCLE` / `FIXPP_ERR_THREAD_RUNTIME`, with cancellation (`clock_sleeps_cancelled`, `dispatch_aborted`) joining `FIXPP_ERR_CANCELLED`.
@@ -913,6 +915,10 @@ fixpp_error_t fixpp_msg_get_msg_type(const fixpp_msg_t* msg,
 **Type-mismatch handling.** When the dictionary knows the tag's type (always true for codegen-known tags; not always true for dialect-overlay-promoted tags or unknown-fields), the accessor checks the type and returns `FIXPP_ERR_TYPE_MISMATCH` if the caller asked for the wrong shape. For unknown / dialect-overlay-promoted tags, the type is **unknown at the C-ABI boundary**; the accessor returns `FIXPP_ERR_OK` with the requested-type interpretation if the bytes parse, or `FIXPP_ERR_WIRE_INVALID_FRAME` if they don't. Documented per-accessor.
 
 Updated (098-dialect-overlay): a field a dialect overlay adds is an ordinary field of the merged dictionary, with the type the overlay declares in the base's type vocabulary, so for this rule it is a tag the dictionary knows; there is no separate "dialect-overlay-promoted" class. Unknown tags are as described above.
+
+Updated (099-fixt-appl-version-validation): shipped in C-ABI 1.14, a declared break under `[const §X.7]`, with the three added symbols of `specs/099-fixt-appl-version-validation/contracts/surface.md`. "Set at parse time" reads: the session writes the byte after the parse and before the callback, on its strand, so no reader sees it change. The headers spell the token `thread-safe`, which `tools/check_capi_reentrancy.sh` counts; this document's `FIXPP_THREAD_SAFE` is that token.
+
+Updated (099-fixt-appl-version-validation): the C-ABI 1.14 additions. `fixpp_session_config_set_default_appl_ver_id(cfg, wire_value)` and `fixpp_session_config_set_validate_inbound_messages(cfg, validate)` in `c_api/session.h`, `fixpp_engine_config_add_dictionary(cfg, dict)` in `c_api/engine.h`, and the constants `FIXPP_APPL_VER_*`, `FIXPP_SESSION_VER_*` and `FIXPP_MSG_KIND_*` in `c_api/dict.h`. The contract of each is in that feature's `contracts/surface.md`.
 
 ### §4.7 Field setters (CA-009)
 

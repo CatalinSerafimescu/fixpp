@@ -58,6 +58,13 @@
 # Each earlier value of a pin: `git log -p -G'_expected_v50sp2_<artifact>' --
 # tests/codegen/read_tier_byte_diff_test.cmake`.
 #
+# 099-fixt-appl-version-validation (FR-032) intentionally rebaselines all FOUR vt11
+# hashes: the vendored FIXT11.xml gained NoMsgTypes on Logon and three field
+# definitions (dictionaries/README.md). Re-derive that this is the only change: run
+# the tool below on the FIXT11.xml of the commit before and of this one, and diff the
+# two vt11 trees. Every hunk must be an addition naming 384, 385, 1410 or another member
+# of that group, and the only line changed rather than added is Logon's rule-array extent.
+#
 # Which baseline each artifact is gated against is named by the banners above
 # and the 082 banner below; see the 091 banner for the v50sp2 pins. A mismatch
 # on any artifact, against its own baseline, is a real read-tier regression
@@ -139,10 +146,10 @@ set(_expected_v50sp2_Fields.hpp    c8b224285b5617b8a29ec8c79fa5478ee9de6e6910cae
 set(_expected_v50sp2_Messages.hpp  206f56d119be8fb096d753ab681a72c76d2ef3310908d8e8340f43ca112b5971)  # fixpp#426 (banner)
 set(_expected_v50sp2_Reify.hpp     c73e5253cfe5617565df979eeb71d8b5bd5e62a9b2e379b4f8a7f2a350f6cd36)
 set(_expected_v50sp2_Validator.hpp c68b15b6c075c271144f7a5b725237bac211880e88a91575708eb99ae90c0c9f)  # 091 (banner)
-set(_expected_vt11_Fields.hpp    18974c06c4608bef154c0c3b08db71c9a2e9290861bfbceb9abb26239d786cd4)
-set(_expected_vt11_Messages.hpp  8bdd4a770b2db391ed0fdc1781658b01ce3e66fd1d58114f8909e45c3ac3b9a4)  # fixpp#426 (banner)
-set(_expected_vt11_Reify.hpp     7532e100be52686a804f31dc66f5614651e356614c190a5e0795255bf9e0fb42)
-set(_expected_vt11_Validator.hpp c333ec70d3bdc654f7953686080bc1cac0e43abeab46a1d7386360d75b80f1ed)
+set(_expected_vt11_Fields.hpp    bb3b72ac99d067fc560bea7edeccd286ce952b758fe5735e7f88c2c259384292)  # 099 (banner)
+set(_expected_vt11_Messages.hpp  3b1845e06e62eedd6cb75b57c785ae6f7ac6851c4777206939b2f9430d87e2c3)  # 099 (banner)
+set(_expected_vt11_Reify.hpp     4ba3573ad33faa5bbc93679c9642bf41ccb0ccf558d6e534502c90e5c692c13e)  # 099 (banner)
+set(_expected_vt11_Validator.hpp f15e54c71135ddb812422fdf98473a5c36873eef11c44b8333826f6f5e870730)  # 099 (banner)
 
 # ── Regenerate the read tier into a fresh scratch dir ──────────────────────
 

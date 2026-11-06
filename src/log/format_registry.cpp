@@ -89,6 +89,12 @@ static const std::unordered_map<std::uint32_t, std::string_view>& get_registry()
             {.id = static_cast<std::uint32_t>(
                  crc32_str("inbound frame over the limit closed the session: kind={} limit={}")),
              .fmt = "inbound frame over the limit closed the session: kind={} limit={}"},
+            // 099 (research R-2, FR-004): the role loops' failed open(), in engine.cpp.
+            {.id = static_cast<std::uint32_t>(
+                 crc32_str("session role loop ended: Session::open() failed: begin_string={} "
+                           "sender_comp_id={} target_comp_id={} error={}")),
+             .fmt = "session role loop ended: Session::open() failed: begin_string={} "
+                    "sender_comp_id={} target_comp_id={} error={}"},
         };
 
         std::unordered_map<std::uint32_t, std::string_view> m;

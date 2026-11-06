@@ -7,6 +7,8 @@
  * fixpp_session_config_set_dictionary requires.  Implements the L-050-1 seam
  * replacement — the "make the seam real" goal of 052.
  *
+ * 099-fixt-appl-version-validation: also the constants fixpp_msg_version's bytes take.
+ *
  * C-clean: no C++ symbols, no C++ syntax.  Compiles as C11.
  */
 
@@ -16,6 +18,43 @@
 #include <fix/c_api/error.h>
 #include <fix/c_api/export.h>
 #include <fix/c_api/handles.h>
+
+/* ── The bytes of fixpp_resolved_msg_version_t ([2i §3.10]; message.h) ──────
+ *
+ * The values of dict::application_version, dict::session_version and
+ * dict::resolved_message_version::kind. They are not wire values, which do not
+ * coincide with them: 1137=9 is FIXPP_APPL_VER_FIX50SP2. No mapping call is added:
+ * a caller that wants the wire value reads the field with fixpp_msg_get_string.
+ *
+ * NOLINTBEGIN(cppcoreguidelines-macro-usage,cppcoreguidelines-macro-to-enum,
+ *             modernize-macro-to-enum) */
+#define FIXPP_APPL_VER_UNKNOWN 0
+#define FIXPP_APPL_VER_FIX40 1
+#define FIXPP_APPL_VER_FIX41 2
+#define FIXPP_APPL_VER_FIX42 3
+#define FIXPP_APPL_VER_FIX43 4
+#define FIXPP_APPL_VER_FIX44 5
+#define FIXPP_APPL_VER_FIX50 6
+#define FIXPP_APPL_VER_FIX50SP1 7
+#define FIXPP_APPL_VER_FIX50SP2 8
+#define FIXPP_APPL_VER_FIXLATEST 9
+
+#define FIXPP_SESSION_VER_UNKNOWN 0
+#define FIXPP_SESSION_VER_FIX40 1
+#define FIXPP_SESSION_VER_FIX41 2
+#define FIXPP_SESSION_VER_FIX42 3
+#define FIXPP_SESSION_VER_FIX43 4
+#define FIXPP_SESSION_VER_FIX44 5
+#define FIXPP_SESSION_VER_FIX50 6
+#define FIXPP_SESSION_VER_FIX50SP1 7
+#define FIXPP_SESSION_VER_FIX50SP2 8
+#define FIXPP_SESSION_VER_FIXT11 9
+#define FIXPP_SESSION_VER_FIXLATEST 10
+
+#define FIXPP_MSG_KIND_SESSION_ADMIN 0
+#define FIXPP_MSG_KIND_APPLICATION 1
+/* NOLINTEND(cppcoreguidelines-macro-usage,cppcoreguidelines-macro-to-enum,
+             modernize-macro-to-enum) */
 
 #ifdef __cplusplus
 extern "C" {

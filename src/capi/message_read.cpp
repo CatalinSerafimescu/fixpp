@@ -15,9 +15,11 @@
 #include <cassert>
 #include <cerrno>
 #include <charconv>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fixpp/core/error.hpp>
+#include <fixpp/dict/version_profile.hpp>
 #include <fixpp/wire/parser.hpp>  // MessageView, field_iterator, group_slice
 #include <memory_resource>
 #include <span>
@@ -25,10 +27,57 @@
 #include <system_error>
 
 #include "capi_internal.hpp"
+#include "fix/c_api/dict.h"
 #include "fix/c_api/export.h"
 #include "fix/c_api/message.h"
 
 namespace {
+
+// 099-fixt-appl-version-validation (data-model E-8): the constants are the enums' own values, so
+// the conversion in fixpp_msg_version is identity.
+namespace dd = fixpp::dict;
+static_assert(FIXPP_APPL_VER_UNKNOWN == static_cast<int>(dd::application_version::Unknown));
+static_assert(FIXPP_APPL_VER_FIX40 == static_cast<int>(dd::application_version::v40));
+static_assert(FIXPP_APPL_VER_FIX41 == static_cast<int>(dd::application_version::v41));
+static_assert(FIXPP_APPL_VER_FIX42 == static_cast<int>(dd::application_version::v42));
+static_assert(FIXPP_APPL_VER_FIX43 == static_cast<int>(dd::application_version::v43));
+static_assert(FIXPP_APPL_VER_FIX44 == static_cast<int>(dd::application_version::v44));
+static_assert(FIXPP_APPL_VER_FIX50 == static_cast<int>(dd::application_version::v50));
+static_assert(FIXPP_APPL_VER_FIX50SP1 == static_cast<int>(dd::application_version::v50sp1));
+static_assert(FIXPP_APPL_VER_FIX50SP2 == static_cast<int>(dd::application_version::v50sp2));
+static_assert(FIXPP_APPL_VER_FIXLATEST == static_cast<int>(dd::application_version::vlatest));
+static_assert(FIXPP_SESSION_VER_UNKNOWN == static_cast<int>(dd::session_version::Unknown));
+static_assert(FIXPP_SESSION_VER_FIX40 == static_cast<int>(dd::session_version::v40));
+static_assert(FIXPP_SESSION_VER_FIX41 == static_cast<int>(dd::session_version::v41));
+static_assert(FIXPP_SESSION_VER_FIX42 == static_cast<int>(dd::session_version::v42));
+static_assert(FIXPP_SESSION_VER_FIX43 == static_cast<int>(dd::session_version::v43));
+static_assert(FIXPP_SESSION_VER_FIX44 == static_cast<int>(dd::session_version::v44));
+static_assert(FIXPP_SESSION_VER_FIX50 == static_cast<int>(dd::session_version::v50));
+static_assert(FIXPP_SESSION_VER_FIX50SP1 == static_cast<int>(dd::session_version::v50sp1));
+static_assert(FIXPP_SESSION_VER_FIX50SP2 == static_cast<int>(dd::session_version::v50sp2));
+static_assert(FIXPP_SESSION_VER_FIXT11 == static_cast<int>(dd::session_version::vt11));
+static_assert(FIXPP_SESSION_VER_FIXLATEST == static_cast<int>(dd::session_version::vlatest));
+static_assert(FIXPP_MSG_KIND_SESSION_ADMIN ==
+              static_cast<int>(dd::resolved_message_version::kind::session_admin));
+static_assert(FIXPP_MSG_KIND_APPLICATION ==
+              static_cast<int>(dd::resolved_message_version::kind::application));
+static_assert(sizeof(fixpp_resolved_msg_version_t) == sizeof(dd::resolved_message_version));
+
+// The session version a BeginString names, Unknown when no enumerator does (data-model E-8).
+[[nodiscard]] dd::session_version session_of_begin_string(std::string_view begin_string) noexcept {
+    using sv = dd::session_version;
+    if (begin_string == "FIXT.1.1") return sv::vt11;
+    if (begin_string == "FIX.4.4") return sv::v44;
+    if (begin_string == "FIX.4.3") return sv::v43;
+    if (begin_string == "FIX.4.2") return sv::v42;
+    if (begin_string == "FIX.4.1") return sv::v41;
+    if (begin_string == "FIX.4.0") return sv::v40;
+    if (begin_string == "FIX.5.0SP2") return sv::v50sp2;
+    if (begin_string == "FIX.5.0SP1") return sv::v50sp1;
+    if (begin_string == "FIX.5.0") return sv::v50;
+    if (begin_string == "FIX.Latest") return sv::vlatest;
+    return sv::Unknown;
+}
 
 // ── Handle-validation helpers ───────────────────────────────────────────────
 
@@ -311,31 +360,27 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_version(const fixpp_msg_t* msg,
     const auto* view = check_inbound_msg(msg, &err);
     if (view == nullptr) return err;
 
-    // tag 8 = BeginString (always present in a valid FIX message)
+    // 099-fixt-appl-version-validation (data-model E-8): only `application` is stored, in the
+    // view's byte. `kind` and `session` are read here from the view's 35 and 8, so no session
+    // path gains a write.
     auto bs_res = view->get(8);
     if (!bs_res) {
-        // A message without tag 8 is structurally invalid; treat as WIRE_INVALID_FRAME
-        // but still fill defaults so the output is well-defined.
-        version_out->begin_string = nullptr;
-        version_out->begin_string_len = 0;
-        version_out->appl_ver_id = nullptr;
-        version_out->appl_ver_id_len = 0;
+        // A message without tag 8 is structurally invalid; the output is still well-defined.
+        *version_out = fixpp_resolved_msg_version_t{};
         return FIXPP_ERR_TAG_NOT_FOUND;
     }
-    auto bs_sv = bs_res->as_string();
-    version_out->begin_string = bs_sv.data();
-    version_out->begin_string_len = bs_sv.size();
-
-    // tag 1137 = DefaultApplVerID (optional; present only for FIXT sessions)
-    auto av_res = view->get(1137);
-    if (av_res) {
-        auto av_sv = av_res->as_string();
-        version_out->appl_ver_id = av_sv.data();
-        version_out->appl_ver_id_len = av_sv.size();
-    } else {
-        version_out->appl_ver_id = nullptr;
-        version_out->appl_ver_id_len = 0;
+    const dd::session_version session = session_of_begin_string(bs_res->as_string());
+    const bool admin = dd::is_fixt_admin_msgtype(view->msg_type());
+    dd::application_version application = dd::application_version::Unknown;
+    if (!admin) {
+        application = session == dd::session_version::vt11 ? view->resolved_application_version()
+                                                           : dd::session_to_application(session);
     }
+    version_out->kind = static_cast<std::uint8_t>(admin ? FIXPP_MSG_KIND_SESSION_ADMIN
+                                                        : FIXPP_MSG_KIND_APPLICATION);
+    version_out->session = static_cast<std::uint8_t>(session);
+    version_out->application = static_cast<std::uint8_t>(application);
+    version_out->_reserved = 0;
     return FIXPP_ERR_OK;
 }
 

@@ -1821,6 +1821,15 @@ std::shared_ptr<const fixpp::dict::Dictionary> make_profile_dictionary(Profile p
     return std::shared_ptr<const fixpp::dict::Dictionary>{owned, owned->dict.get()};
 }
 
+// The vendored FIXT11, loaded once per process.
+std::shared_ptr<const fixpp::dict::Dictionary> transport_dictionary() {
+    static std::pmr::monotonic_buffer_resource mr;
+    static auto const dict =
+        std::make_shared<const fixpp::dict::Dictionary>(fixpp::dict::XmlLoader{}.load(
+            std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIXT11.xml", &mr));
+    return dict;
+}
+
 // A session on `profile`, driven to Active at NextNumIn 2 by the peer's Logon at 1. Its
 // feeds wait for the frame's own completion and then run whatever it left ready, so no
 // fixed wall-clock window is spent per frame.
@@ -1844,8 +1853,13 @@ struct ProfileCell {
         cfg.dictionary = dict;
         if (profile == Profile::fixt11) {
             cfg.default_appl_ver_id = fixpp::dict::application_version::v44;
-            registry = std::make_unique<fixpp::dict::version_registry>(
-                std::vector<std::shared_ptr<const fixpp::dict::Dictionary>>{dict});
+            // 099-fixt-appl-version-validation (research R-17): this partial S lacks the admin
+            // messages, so a validating session on it needs a transport dictionary.
+            std::vector<std::shared_ptr<const fixpp::dict::Dictionary>> dicts{dict};
+            if (validate) {
+                dicts.push_back(transport_dictionary());
+            }
+            registry = std::make_unique<fixpp::dict::version_registry>(std::move(dicts));
         }
         sess = std::make_unique<Session>(fix.engine, cfg, registry.get());
     }

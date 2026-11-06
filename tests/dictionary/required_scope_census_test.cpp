@@ -835,7 +835,7 @@ TEST(RequiredScopeCensus, SixUnchangedDictionariesBareStoreExactSet) {
         {.label = "FIXT11.xml",
          .filename = "FIXT11.xml",
          .is_orchestra = false,
-         .expected_count = 1},
+         .expected_count = 2},
         {.label = "OrchestraFIXLatest.xml",
          .filename = "OrchestraFIXLatest.xml",
          .is_orchestra = true,

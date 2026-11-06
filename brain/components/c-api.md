@@ -26,6 +26,9 @@ refs:
   - specs/092-garbled-frame-reject/plan.md
   - specs/093-inbound-frame-dispositions/plan.md
   - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
+  - specs/099-fixt-appl-version-validation/contracts/surface.md
+  - specs/099-fixt-appl-version-validation/data-model.md
+  - specs/099-fixt-appl-version-validation/research.md
   - spec/behaviors-and-limitations.md
   - tests/capi/recovery_liveness_capi_witness_test.cpp
   - tools/check_layers.py
@@ -40,6 +43,7 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-evidence.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/099-fixt-appl-version-validation-gatea.md
 codegraph_entry: [fixpp_engine_t, fixpp_session_t, fixpp_msg_t, fixpp_strerror]
 constitution: ["§V.1", "§IV.2", "§X.1", "§X.4"]
 ---
@@ -369,6 +373,22 @@ state.
   gate files with `git grep -l -e 'include/fix/c_api' -- tools .github/workflows ci tests/abi`.
 
 Re-derive: `grep -n '1\.13' include/fix/c_api/*.h`.
+
+## C-ABI 1.14: FIXT from C, and `fixpp_msg_version` becomes the resolved version (099)
+
+One MINOR bump, declared BREAKING (`[const §X.7]`; no public release yet, so MINOR), with three added symbols and added constants, no error code minted. The user-facing rows are B&L `B-099-26` to `B-099-28`; `specs/099-fixt-appl-version-validation/contracts/surface.md` and data-model E-8 hold the contract. What follows is the half the headers do not state.
+
+- **Why BREAKING.** `[2c §5]` and `[2i §4.6]` always specified `{kind, session, application}`, and the shipped symbol returned BeginString and raw 1137, which meant an application message read `appl_ver_id` as null. The owner chose the binding text over the shipped one, with no separate getter (item 6).
+- **What is not BREAKING, and why.** The registration refusal is reachable only through the new validation setter, and `fixpp_engine_start`'s new failure and wait need an entry with a default, which C could not set before this. So no other call that succeeded now fails.
+- **Only `application` is stored.** `kind` and `session` are read in the getter from 35 and 8, so no session path gains a write. **Rejected:** a mapping call from wire value to constant (`dict.h`'s comment says none is added). `1137=9` is `FIXPP_APPL_VER_FIX50SP2`: wire values and constants do not coincide.
+- **A refused config returns from `fixpp_session_open`, as `FIXPP_ERR_THREAD_CONFIG`.** A misleading name, kept because the mapping is frozen; every `invalid_session_config` cause shares it. No finer report is added. Nothing returns this cause from `fixpp_engine_start`: an `open()` failure in the role loops reaches nobody, which is why `Engine::register_session` runs the check at all (research R-2, R-11).
+- **`fixpp_engine_create` copies the builder's dictionary list, it does not move it,** because `engine.h` promises the builder is untouched on failure. Only W-20's C arm can tell a copy from a move, since a version-mismatch failure returns before the copy.
+- **The token is `thread-safe`.** `[2i §4.6]`'s `FIXPP_THREAD_SAFE` is that class, in the spelling `tools/check_capi_reentrancy.sh` counts. The session writes the byte before the callback, so no reader sees it change; an inbound handle still ends with the callback.
+- **A limit found here:** a failed allocation inside `make_strand` during `fixpp_engine_create` is a null dereference inside asio (`L-660-1`, fixpp#660). W-20's sweep passes over that allocation size, and says so.
+- ⚠️ **Superseded by 099:** `specs/051-c-abi-message-accessors/contracts/message-read.md` and that bundle's `spec.md`, `plan.md`, `research.md` and checklists, for `fixpp_msg_version`'s layout and its `requires-session-lock` class; frozen and not edited. Re-derive with `git grep -n 'fixpp_msg_version' -- specs/051-c-abi-message-accessors`. `.specify/2i-capi.md` and `.specify/api-contract.md` carry in-place `Updated (099-fixt-appl-version-validation)` notes.
+- **Gate files.** Derive them as 098 did, with `git grep -l -e 'include/fix/c_api' -- tools .github/workflows ci tests/abi`.
+
+Re-derive: `grep -n '1\.14' include/fix/c_api/*.h`.
 
 ## ⚠️ What the ABI gate actually checks — and what it does not
 

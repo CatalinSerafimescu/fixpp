@@ -21,10 +21,10 @@
 # dictionary_sha1[FIX50]=341321604c10013757e51cb3d0cf4dd9bf17ac37
 # dictionary_sha1[FIX50SP1]=03c64c1c6837bd562855afcbc4d30c2ca890c95c
 # dictionary_sha1[FIX50SP2]=04a16954f51ccc2c7899d9a388f9da91b7af122c
-# dictionary_sha1[FIXT11]=966193332cdccce03e27eee69c1c7609f66175df
+# dictionary_sha1[FIXT11]=fd3d89ec6762c39d60e433effcd21a4fec2acb82
 # generator_source_hash=0e37d7ea0da470e7d01b6414fb1305429c2e7124
-# candidate_universe_hash=1aad26311c97c53a676da9e257abb24620c18de5
-# golden_groups_output_hash=714923610ea55789f6085ba98a4acf29232be246
+# candidate_universe_hash=8c1beaa4ba2acdd0554adeabafcc8cd0aec60c5d
+# golden_groups_output_hash=5d4448b713673396258c1b996c99e9b8b53a6330
 #
 # Hash algorithm: SHA-1 (OpenSSL EVP_sha1), 40 lowercase hex chars (see golden.csv's
 # own manifest comment for dictionary_sha1/generator_source_hash/candidate_universe_hash
@@ -29338,3 +29338,4 @@ FIX50SP2,z,"",42855,""
 FIX50SP2,z,"",42884,""
 FIX50SP2,z,"",43005,""
 FIX50SP2,z,"",43074,""
+FIXT11,A,"",384,""

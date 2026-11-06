@@ -19,10 +19,36 @@
 #include "capi_internal.hpp"
 #include "fix/c_api/engine.h"
 #include "fix/c_api/session.h"
+#include "fixpp/dict/version_profile.hpp"
 #include "fixpp/session/config_byte_floor.hpp"  // 090-capi-refusals (fixpp#452): contains_forbidden_config_byte (D-5b/FR-011)
 #include "fixpp/session/memory_store.hpp"
 #include "fixpp/session/memory_store_factory.hpp"
 #include "fixpp/session/security_profile.hpp"
+
+namespace {
+
+// The gate of a builder call taking a dictionary handle. Positive tag gate ([2i §4.2.2]): destroyed
+// (DEAD) or wrong-type handles return INVALID_HANDLE BEFORE the shared_ptr member is read. A DEAD
+// tag means dict was already destroyed; any non-DICT tag means a mismatched handle was cast.
+// Returns the wrapper, or nullptr and sets *err.
+const fixpp_dict* check_dict_handle(fixpp_dict_t* dict, fixpp_error_t* err) noexcept {
+    if (dict == nullptr) {
+        *err = FIXPP_ERR_CAPI_CONFIG_INVALID;  // null outer handle — existing mapping preserved
+        return nullptr;
+    }
+    const auto* h = reinterpret_cast<const fixpp_dict*>(dict);
+    if (h->tag_ != FIXPP_HANDLE_TAG_DICT) {
+        *err = FIXPP_ERR_INVALID_HANDLE;
+        return nullptr;
+    }
+    if (h->dict == nullptr) {
+        *err = FIXPP_ERR_CAPI_CONFIG_INVALID;  // empty dict wrapper
+        return nullptr;
+    }
+    return h;
+}
+
+}  // namespace
 
 extern "C" {
 
@@ -58,6 +84,25 @@ fixpp_error_t fixpp_engine_config_set_realtime_clock(fixpp_engine_config_t* cfg)
         return FIXPP_ERR_NULL_HANDLE;
     }
     cfg->want_realtime_clock = true;
+    return FIXPP_ERR_OK;
+}
+
+// 099-fixt-appl-version-validation (contracts/surface.md): the handle errors are
+// fixpp_session_config_set_dictionary's.
+fixpp_error_t fixpp_engine_config_add_dictionary(fixpp_engine_config_t* cfg, fixpp_dict_t* dict) {
+    if (cfg == nullptr) {
+        return FIXPP_ERR_NULL_HANDLE;
+    }
+    fixpp_error_t err = FIXPP_ERR_OK;
+    const fixpp_dict* const h = check_dict_handle(dict, &err);
+    if (h == nullptr) {
+        return err;
+    }
+    try {
+        cfg->dictionaries.push_back(h->dict);
+    } catch (...) {
+        return FIXPP_ERR_CAPI_CONFIG_INVALID;
+    }
     return FIXPP_ERR_OK;
 }
 
@@ -235,20 +280,44 @@ fixpp_error_t fixpp_session_config_set_dictionary(fixpp_session_config_t* cfg, f
     if (cfg == nullptr) {
         return FIXPP_ERR_NULL_HANDLE;
     }
-    if (dict == nullptr) {
-        return FIXPP_ERR_CAPI_CONFIG_INVALID;  // null outer handle — existing mapping preserved
-    }
-    // Positive tag gate ([2i §4.2.2]): destroyed (DEAD) or wrong-type handles return
-    // INVALID_HANDLE BEFORE the shared_ptr member is read.  A DEAD tag means dict was
-    // already destroyed; any non-DICT tag means a mismatched handle was cast.
-    const auto* h = reinterpret_cast<const fixpp_dict*>(dict);
-    if (h->tag_ != FIXPP_HANDLE_TAG_DICT) {
-        return FIXPP_ERR_INVALID_HANDLE;
-    }
-    if (h->dict == nullptr) {
-        return FIXPP_ERR_CAPI_CONFIG_INVALID;  // empty dict wrapper
+    fixpp_error_t err = FIXPP_ERR_OK;
+    const fixpp_dict* const h = check_dict_handle(dict, &err);
+    if (h == nullptr) {
+        return err;
     }
     cfg->cfg.dictionary = h->dict;  // thin pass-through (creation is Feature C / L-050-1)
+    return FIXPP_ERR_OK;
+}
+
+// 099-fixt-appl-version-validation (FR-016): the ApplVerID wire value, by the one parser. This
+// profile's default is Unknown, so an empty value fails as an unparseable one does.
+fixpp_error_t fixpp_session_config_set_default_appl_ver_id(fixpp_session_config_t* cfg,
+                                                           const char* wire_value) {
+    if (cfg == nullptr) {
+        return FIXPP_ERR_NULL_HANDLE;
+    }
+    if (wire_value == nullptr) {
+        return FIXPP_ERR_CAPI_CONFIG_INVALID;
+    }
+    const auto parsed = fixpp::dict::resolve_application_version(
+        fixpp::dict::version_profile{.session = fixpp::dict::session_version::Unknown,
+                                     .default_appl = fixpp::dict::application_version::Unknown,
+                                     .has_per_message_override = false,
+                                     ._reserved = 0},
+        wire_value);
+    if (!parsed.has_value()) {
+        return FIXPP_ERR_CAPI_CONFIG_INVALID;
+    }
+    cfg->cfg.default_appl_ver_id = *parsed;
+    return FIXPP_ERR_OK;
+}
+
+fixpp_error_t fixpp_session_config_set_validate_inbound_messages(fixpp_session_config_t* cfg,
+                                                                 bool validate) {
+    if (cfg == nullptr) {
+        return FIXPP_ERR_NULL_HANDLE;
+    }
+    cfg->cfg.validate_inbound_messages = validate;
     return FIXPP_ERR_OK;
 }
 

@@ -73,7 +73,7 @@ constexpr std::array<ExpectedCensusRow, 9> kExpectedCensus{{
     {.file = "FIX50.xml", .enum_backed_fields = 290, .total_codes = 2326},
     {.file = "FIX50SP1.xml", .enum_backed_fields = 327, .total_codes = 2640},
     {.file = "FIX50SP2.xml", .enum_backed_fields = 668, .total_codes = 5565},
-    {.file = "FIXT11.xml", .enum_backed_fields = 9, .total_codes = 56},
+    {.file = "FIXT11.xml", .enum_backed_fields = 10, .total_codes = 58},
 }};
 
 // Raw pugixml scan of a QuickFIX-XML `<fields>` section: how many `<field>`

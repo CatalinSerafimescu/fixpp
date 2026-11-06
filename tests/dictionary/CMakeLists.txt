@@ -90,6 +90,10 @@ set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 097)
 # LABELS setter for this entry, so the existing labels survive. negative_paths_test.cpp,
 # which stays in this bucket, holds a 098 coverage cell.
 set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 098)
+# 099-fixt-appl-version-validation: label 099 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive. reused_tag_census_test.cpp and
+# xml_enum_codeset_test.cpp, which stay in this bucket, hold expected values 099 updated.
+set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 099)
 
 # ── 098-dialect-overlay: the overlay witnesses W-0..W-4 and W-9's status-mapping rows ──
 # Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); a bucket of
@@ -120,6 +124,34 @@ target_compile_definitions(dictionary_overlay_tests PRIVATE
   FIXPP_TEST_HOOKS)
 add_test(NAME dictionary_overlay_tests COMMAND dictionary_overlay_tests)
 set_tests_properties(dictionary_overlay_tests PROPERTIES LABELS "dictionary;098")
+
+# ── 099-fixt-appl-version-validation: W-17 and W-21's dictionary half ─────────
+# Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); a bucket of
+# their own only because their cells are slow under msvc-asan, and one ctest entry must stay
+# under CI's per-test timeout (the owner's ruling, tasks.md's **Binaries**).
+# Compiled as they were inside dictionary_pure_tests: the same link libraries, include
+# directories and definitions. No TIMEOUT property, so CI's `--timeout 1800` governs; the
+# condition is that this entry's run on CI's slowest lane stays under it. Re-derive from a CI
+# log: `grep -E 'Test +#[0-9]+: dictionary_(pure|099)_tests '`.
+add_executable(dictionary_099_tests
+  test_099_fixt_framing_table_view.cpp  # 099 T006, T024 (W-17)
+  test_099_fixt_header_tag_sets.cpp     # 099 T025 (W-21, dictionary half)
+)
+target_link_libraries(dictionary_099_tests PRIVATE
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(dictionary_099_tests PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src/dictionary")
+target_compile_definitions(dictionary_099_tests PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+  "FIXPP_ORCHESTRA_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries/orchestra\""
+  FIXPP_TEST_HOOKS)
+add_test(NAME dictionary_099_tests COMMAND dictionary_099_tests)
+set_tests_properties(dictionary_099_tests PROPERTIES LABELS "dictionary;099")
 
 # ── Standalone: isolation-sensitive dictionary tests (FR-002) ─────────────────
 # Each keeps its own executable + add_test(NAME <target>) so its name, labels,

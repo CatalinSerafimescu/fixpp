@@ -215,6 +215,107 @@ set_property(TEST session_pure_tests APPEND PROPERTY LABELS 095)
 # LABELS setter for this entry, so the existing labels survive.
 set_property(TEST session_pure_tests APPEND PROPERTY LABELS 098)
 
+# ── 099-fixt-appl-version-validation: the session witnesses, in buckets of their own ──
+# Pure, single-threaded cells like session_pure_tests', so grouped ([const §VII.8]), and compiled as
+# they were inside it: the same link libraries, include directories, definitions and environment.
+# Buckets of their own only because their cells are slow under the sanitizer lanes and one ctest
+# entry must stay inside CI's per-test timeout; grouped by source file, never by cell.
+# No TIMEOUT property, so CI's `--timeout 1800` wedge guard governs each entry, as for
+# dictionary_overlay_tests in tests/dictionary/CMakeLists.txt. The condition: each entry's run on
+# the slowest of CI's linux-clang-tsan and windows-msvc-asan lanes stays at or under half of that
+# guard; an entry past it moves a file to another bucket here, and an entry of one file past it
+# stops for a decision, since cells are never split across entries. Re-derive from a CI log of each
+# lane: `grep -E 'Test +#[0-9]+: session_099_[a-z0-9_]+_tests '` gives each entry's time.
+function(add_session_099_bucket name)
+  add_executable(${name} ${ARGN} $<TARGET_OBJECTS:session_test_support>)
+  target_link_libraries(${name} PRIVATE
+    fixpp_session
+    fixpp_capi   # W-3 (f): a clone of a view a Session dispatched, through fixpp_msg_clone
+    fixpp_mock_clock
+    fixpp_transport
+    fixpp_tls
+    "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+    "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_TRANSPORT_ZLIB_LIB}"
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(${name} PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_SOURCE_DIR}/src"
+  )
+  target_compile_definitions(${name} PRIVATE
+    FIXPP_TEST_BINARY_DIR="${CMAKE_BINARY_DIR}"
+    FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+    "FIXPP_098_FIXTURE_DIR=\"${CMAKE_SOURCE_DIR}/tests/dictionary/fixtures/098\""
+  )
+  add_test(NAME ${name} COMMAND ${name})
+  set_tests_properties(${name} PROPERTIES
+    ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+    LABELS "session;099")
+endfunction()
+add_session_099_bucket(session_099_overlay_tests
+  test_099_session_overlay.cpp                                          # 099 T010 (W-3)
+)
+add_session_099_bucket(session_099_establishment_tests
+  test_099_active_refusals.cpp                                          # 099 T011 (W-4)
+  test_099_establishment.cpp                                            # 099 T012 (W-5)
+  test_099_validation_off.cpp                                           # 099 T013 (W-6)
+  test_099_config_check.cpp                                             # 099 T015 (W-8)
+  test_099_establishment_admission.cpp                                  # 099 T016 (W-9)
+)
+add_session_099_bucket(session_099_routing_tests
+  test_099_routing_shapes.cpp                                           # 099 T008 (W-1)
+  test_099_version_fields.cpp                                           # 099 T009 (W-2)
+  test_099_dispatch_sites.cpp                                           # 099 T014 (W-7)
+  test_099_scan_sites.cpp                                               # 099 T017 (W-19)
+  test_099_peek_fixt_route.cpp                                          # 099 T043 (W-21, the peek)
+)
+add_session_099_bucket(session_099_version_tests
+  test_099_msg_type_default.cpp                                         # 099 T018, T069 (W-25)
+  test_099_resolved_version.cpp                                         # 099 T019, T084 (W-10)
+  test_099_outbound_1128.cpp                                            # 099 T088 (W-11)
+)
+# 099 W-5's, W-6's and W-25's reconnect cells drive drive_reconnect() through MockReconnectFactory,
+# in those TUs only.
+set_source_files_properties(
+  test_099_establishment.cpp test_099_validation_off.cpp test_099_msg_type_default.cpp PROPERTIES
+  COMPILE_DEFINITIONS FIXPP_ALLOW_MOCK_TRANSPORT)
+
+# 099-fixt-appl-version-validation W-15 (tasks.md T033). Standalone ([const §VII.8]): it replaces
+# global operator new to count heap, and one arm runs worker threads, which TSan judges. Label 099.
+# TIMEOUT is explicit: the cells open real sockets and walk dictionaries, under a sanitizer too.
+# Re-derive by timing `ctest --test-dir build/<preset> -R '^session_099_route_set_cost_test$'`.
+add_executable(session_099_route_set_cost_test test_099_route_set_cost.cpp)
+target_link_libraries(session_099_route_set_cost_test PRIVATE
+  fixpp_capi   # the C route (tasks.md T107)
+  fixpp_session
+  fixpp_mock_clock
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_099_route_set_cost_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src/capi"         # capi_internal.hpp, a test's dictionary handle
+  "${CMAKE_SOURCE_DIR}/src"              # session/fixt_route_set.hpp
+  "${CMAKE_SOURCE_DIR}/src/dictionary"   # dictionary_internal.hpp, the walk counter
+)
+target_compile_definitions(session_099_route_set_cost_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME session_099_route_set_cost_test COMMAND session_099_route_set_cost_test)
+set_tests_properties(session_099_route_set_cost_test PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "session;099"
+  TIMEOUT 300)
+
 # ── Grouped bucket: session_store_tests (6 .cpp → 1 binary) ────────────────
 # Store-family witnesses that neither construct an asio::thread_pool nor carry
 # a LABELS override: the three reconcile fault-double table-driven witnesses,
@@ -2579,6 +2680,8 @@ set_property(TEST session_validate_gate_inbound APPEND PROPERTY LABELS 093)
 # if this entry times out there, size TIMEOUT from that job's own timing.
 add_threading_test(session_unparseable_frame_disposition
   unparseable_frame_disposition_test.cpp)
+target_compile_definitions(session_unparseable_frame_disposition PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 set_tests_properties(session_unparseable_frame_disposition PROPERTIES
   LABELS "092;session"
   TIMEOUT 300)

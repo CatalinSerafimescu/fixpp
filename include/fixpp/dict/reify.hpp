@@ -10,6 +10,10 @@
 // specs/003-dictionary-codegen/contracts/reify.hpp; data-model Entities 5/6;
 // spec §4.3/§4.4 AC-R1..AC-R8 / AC-D1..AC-D7 / AC-G7a.
 //
+// 099-fixt-appl-version-validation (data-model E-5, FR-001) supersedes [2c §4.8]'s
+// resolution for a view a session wrote: dict::reify then takes the view's byte and reads
+// neither 1128 nor the profile. Its declaration below lists the order.
+//
 // Bridge header (arch §2.4 v0.3 dual-compile carve-out, RC#3): #includes
 // message_view_contract.hpp which, post the 004 cutover (T028), re-exports
 // the REAL wire::MessageView/field_view surface, + the 003-owned
@@ -182,7 +186,10 @@ template <class Msg>
 //  1. peek MsgType(35).
 //  2. FIXT-admin hit → {session_admin, profile.session, Unknown} via
 //     _dispatch/reify_dispatch_fixt.hpp → vt11::owning_<Msg>.
-//  3. miss → read ApplVerID(1128); the wire-owned field-absent error from
+//  3. miss, 099-fixt-appl-version-validation (data-model E-5, FR-001): the view's
+//     resolved_application_version() set → {application, vt11, that version}, reading neither
+//     1128 nor the profile, via _dispatch/reify_dispatch_application.hpp.
+//  4. otherwise → read ApplVerID(1128); the wire-owned field-absent error from
 //     get<1128>() (NOT a 003 slot — cross-feature note in version_profile.hpp)
 //     maps to empty sv → dict::resolve_application_version(profile, value)
 //     [003-OWNED, RC#1; AC-VP1..AC-VP6] → {application, profile.session,

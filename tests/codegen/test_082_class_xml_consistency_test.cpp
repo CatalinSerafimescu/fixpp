@@ -115,9 +115,10 @@ using fixpp_test::required_scope_oracle::DictOracle;
 //
 // The counts are pins, not decoration: `expect_messages` / `expect_groups` are
 // what stop a scanner that parsed nothing from reading as agreement. v42's
-// 46 / 18 is FR-016's headline; 59 / 505 / 1 are T018's registered-after column
-// for FIX44 / FIX50SP2 / FIXT11, so this gate independently corroborates it from
-// the *generated class tier* — a third derivation.
+// row is FR-016's headline; FIX44's and FIX50SP2's are T018's registered-after
+// column, so this gate independently corroborates it from the *generated class
+// tier* — a third derivation. FIXT11's left that column when 099 added NoMsgTypes
+// to the vendored file (its research R-17).
 struct VersionCase {
     char const* ns;
     char const* xml;
@@ -129,7 +130,7 @@ constexpr std::array<VersionCase, 4> kCases{{
     {.ns = "v42", .xml = "FIX42.xml", .expect_messages = 46, .expect_groups = 18},
     {.ns = "v44", .xml = "FIX44.xml", .expect_messages = 93, .expect_groups = 59},
     {.ns = "v50sp2", .xml = "FIX50SP2.xml", .expect_messages = 156, .expect_groups = 505},
-    {.ns = "vt11", .xml = "FIXT11.xml", .expect_messages = 8, .expect_groups = 1},
+    {.ns = "vt11", .xml = "FIXT11.xml", .expect_messages = 8, .expect_groups = 2},
 }};
 
 [[nodiscard]] std::string read_file(std::filesystem::path const& p) {

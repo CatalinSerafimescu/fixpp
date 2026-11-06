@@ -8,6 +8,10 @@
 // interface ([const §XIV.2] N/A). Oracle:
 // specs/003-dictionary-codegen/contracts/version_registry.hpp; data-model
 // Entity 7.
+//
+// 099-fixt-appl-version-validation (data-model E-1a, FR-003): a FIXT.1.1 dictionary among the
+// engine dictionaries is no longer dropped. It answers transport(); get() is unchanged, since a
+// session-layer dictionary is not an application version.
 #pragma once
 #include <fixpp/core/error.hpp>            // expected_t, error
 #include <fixpp/dict/dictionary.hpp>       // Dictionary (002-shipped)
@@ -29,11 +33,11 @@ public:
     // of shared_ptr<const Dictionary> — the same element type as
     // EngineConfig::dictionaries. Non-FIXT.1.1 dicts are mapped by their
     // which_session_version() → the corresponding application_version.
-    // FIXT.1.1 session-layer dicts (session_version::vt11) are NOT
-    // registered in the application-version registry (they are session-admin;
-    // per-message ApplVerID(1128) selects the application dict). The
-    // borrowed pointers returned by get() alias the shared_ptr keepalives
-    // held in this registry's entries_ vector (lifetime = registry lifetime).
+    // A FIXT.1.1 session-layer dict (session_version::vt11) has no application
+    // version (per-message ApplVerID(1128) selects the application dict), so
+    // get() never returns it: transport() does. The borrowed pointers returned
+    // by get() and transport() alias the shared_ptr keepalives held in this
+    // registry (lifetime = registry lifetime).
     explicit version_registry(const std::vector<std::shared_ptr<const Dictionary>>& dicts) noexcept;
 
     version_registry(version_registry&&) noexcept = default;
@@ -59,6 +63,12 @@ public:
     [[nodiscard]] core::expected_t<Dictionary const*> get(application_version v) const noexcept
         [[clang::lifetimebound]];
 
+    // 099-fixt-appl-version-validation (data-model E-1a): the FIXT.1.1 dictionary among the
+    // engine dictionaries, last writer wins as for every slot.
+    // dict_no_dictionary_for_application_version if there is none.
+    [[nodiscard]] core::expected_t<Dictionary const*> transport() const noexcept
+        [[clang::lifetimebound]];
+
 private:
     // Keepalive + lookup table, one slot per application_version, indexed by its
     // value (Unknown is never stored). Null shared_ptr means not registered for that
@@ -67,6 +77,7 @@ private:
     static constexpr std::size_t kTableSize =
         static_cast<std::size_t>(application_version::vlatest) + 1;
     std::shared_ptr<const Dictionary> entries_[kTableSize]{};
+    std::shared_ptr<const Dictionary> transport_;
 };
 
 }  // namespace fixpp::dict

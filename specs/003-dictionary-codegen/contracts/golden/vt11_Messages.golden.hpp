@@ -37,6 +37,35 @@ namespace fixpp::vt11::groups {  // shared repeating-group flyweights (AC-G5/AC-
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
+    class G_384 {
+    public:
+        G_384() noexcept = default;
+        explicit G_384(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
+    [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
+    ref_msg_type() const noexcept [[clang::lifetimebound]]
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 372, ctx_.hooks, ctx_.gen)); }
+    [[nodiscard]] inline ::fixpp::core::expected_t<char>
+    msg_direction() const noexcept
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 385, ctx_.hooks, ctx_.gen)); }
+    [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
+    ref_appl_ver_id() const noexcept [[clang::lifetimebound]]
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 1130, ctx_.hooks, ctx_.gen)); }
+    [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
+    ref_cstm_appl_ver_id() const noexcept [[clang::lifetimebound]]
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 1131, ctx_.hooks, ctx_.gen)); }
+    [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
+    ref_appl_ext_id() const noexcept
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 1406, ctx_.hooks, ctx_.gen)); }
+    [[nodiscard]] inline ::fixpp::core::expected_t<bool>
+    default_ver_indicator() const noexcept
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 1410, ctx_.hooks, ctx_.gen)); }
+    [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
+    field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
+    private:
+        ::fixpp::wire::entry_context ctx_{};
+    };
 
 }  // namespace fixpp::vt11::groups
 
@@ -1002,6 +1031,9 @@ public:
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     session_status() const noexcept
     { return ::fixpp::dict::decode_field<::std::int32_t>(view_.template get<1409>()); }
+    [[nodiscard]] inline ::fixpp::wire::group_view<::fixpp::vt11::groups::G_384>
+    msg_types() const noexcept [[clang::lifetimebound]]
+    { return view_.template group<384, ::fixpp::vt11::groups::G_384>(); }
     [[nodiscard]] inline ::fixpp::wire::group_view<::fixpp::vt11::groups::G_627>
     hops() const noexcept [[clang::lifetimebound]]
     { return view_.template group<627, ::fixpp::vt11::groups::G_627>(); }

@@ -84,8 +84,8 @@ constexpr version_profile kFixtVlatestDefault{.session = session_version::vt11,
                                               ._reserved = 0};
 
 // The FIXT admin MsgTypes dict::reify intercepts before application dispatch
-// (src/dictionary/reify.cpp is_fixt_admin; that predicate is TU-local, so the set
-// is spelled out here independently).
+// (dict::is_fixt_admin_msgtype, fixpp/dict/version_profile.hpp). The set is spelled
+// out here independently of that predicate, so a change to it fails this test.
 constexpr std::array kFixtAdminMsgTypes{'0', '1', '2', '3', '4', '5', 'A'};
 
 [[nodiscard]] std::string read_dispatch_header() {

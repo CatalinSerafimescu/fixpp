@@ -102,9 +102,11 @@ add_executable(config_045_tests
     test_load_logger_overrides.cpp
     test_load_deferred_surface.cpp
     test_098_dialect_overlay.cpp  # 098 T006 (W-8)
+    test_099_extra_paths.cpp      # 099 T095 (W-14)
 )
 target_compile_definitions(config_045_tests PRIVATE
     FIXPP_CONFIG_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    FIXPP_DICT_DATA_DIR="${CMAKE_SOURCE_DIR}/dictionaries"  # 099 W-14
 )
 # White-box cells (T008_OtlpSinkCount et al.) call detail::resolve_engine_logger /
 # detail::construct_loggers_if_clean directly, which require mappers.hpp from
@@ -115,8 +117,10 @@ target_compile_definitions(config_045_tests PRIVATE
 target_include_directories(config_045_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/src/config"
     "${CMAKE_SOURCE_DIR}/tests"  # support/temp_dir.hpp (#404)
+    "${CMAKE_SOURCE_DIR}/src"    # 099 W-14: session/fixt_route_set.hpp, through the session witnesses' rig
 )
 target_link_libraries(config_045_tests PRIVATE
+    fixpp_mock_clock   # 099 W-14: a Session on a mock clock, pumped by the test
     fixpp::config_toml
     fixpp::session
     fixpp::core
@@ -146,3 +150,39 @@ set_tests_properties(config_045_tests PROPERTIES LABELS "config;045")
 # 098-dialect-overlay: label 098 (tasks.md, Expected ctest list). APPEND, after the last
 # LABELS setter for this entry, so the existing labels survive.
 set_property(TEST config_045_tests APPEND PROPERTY LABELS 098)
+# 099-fixt-appl-version-validation: label 099 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST config_045_tests APPEND PROPERTY LABELS 099)
+
+# 099-fixt-appl-version-validation W-14's live cell (tasks.md T095). Standalone ([const §VII.8]):
+# it runs threads and a socket, so it stays out of config_045_tests. TIMEOUT is explicit.
+# Re-derive by timing `ctest --test-dir build/<preset> -R '^config_099_toml_live_test$'` on every
+# lane.
+add_executable(config_099_toml_live_test test_099_toml_live.cpp)
+target_compile_definitions(config_099_toml_live_test PRIVATE
+    FIXPP_DICT_DATA_DIR="${CMAKE_SOURCE_DIR}/dictionaries"
+)
+target_include_directories(config_099_toml_live_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+)
+target_link_libraries(config_099_toml_live_test PRIVATE
+    fixpp::config_toml
+    fixpp::session
+    fixpp::core
+    fixpp::tls
+    fixpp::dictionary
+    fixpp::transport
+    GTest::gtest
+    GTest::gtest_main
+    "${FIXPP_CFG_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_CFG_OPENSSL_SSL_LIB}"
+    "${FIXPP_CFG_ZLIB_LIB}"
+)
+set_target_properties(config_099_toml_live_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+add_test(NAME config_099_toml_live_test COMMAND config_099_toml_live_test)
+set_tests_properties(config_099_toml_live_test PROPERTIES
+    LABELS "config;099"
+    TIMEOUT 300
+)

@@ -44,18 +44,6 @@
 
 namespace fixpp::dict {
 
-// ─── FIXT admin detection ────────────────────────────────────────────────────
-// The 7 FIXT.1.1 admin MsgTypes per [FIXT §3] / [2c §6.3]. Hardcoded here (not
-// from the dispatch table) so this shipped TU implements the version-axis
-// resolution without including the build-tree generated dispatch headers.
-namespace {
-[[nodiscard]] constexpr bool is_fixt_admin(char mt) noexcept {
-    // '0'=Heartbeat '1'=TestRequest '2'=ResendRequest '3'=Reject
-    // '4'=SequenceReset '5'=Logout 'A'=Logon
-    return mt == '0' || mt == '1' || mt == '2' || mt == '3' || mt == '4' || mt == '5' || mt == 'A';
-}
-}  // namespace
-
 // ─── owning_message_handle implementation (057 live byte storage) ────────────
 // Storage mirrors a concrete owning_<Msg> minus the typed accessors: the full
 // validated frame span deep-copied into the caller mr, plus an EAGERLY
@@ -172,6 +160,8 @@ core::expected_t<wire::field_view> owning_message_handle::field_value(
 // and a dict-free OffsetTable degradation are all RETAINED, exactly as
 // view()'s former lazy re-frame behaved (data-model.md §2.2 B/C). The
 // resulting handle is independent of the source parse buffer (FR-005).
+// 099-fixt-appl-version-validation (data-model E-5, FR-014): both re-parse branches copy the source
+// view's resolved application version, so the handle's view() answers as its source did.
 namespace detail {
 core::expected_t<owning_message_handle> owning_message_handle_from_frame(
     resolved_message_version rmv, wire::MessageView<wire::access_mode::Index> const& view,
@@ -227,6 +217,8 @@ core::expected_t<owning_message_handle> owning_message_handle_from_frame(
                     return std::unexpected{parsed.error()};
                 }
                 handle.pimpl_->view_cache_.emplace(std::move(*parsed));
+                wire::detail::message_view_resolved_access::set(
+                    *handle.pimpl_->view_cache_, view.resolved_application_version());
             } else {
                 // Dict-free source (data-model.md §2.2 B, RETAINED): the
                 // dict-free constructor never refuses -- OffsetTable::build
@@ -237,6 +229,8 @@ core::expected_t<owning_message_handle> owning_message_handle_from_frame(
                 // the root group context as a Parser{}-parsed source has it.
                 handle.pimpl_->view_cache_.emplace((*framed)[0], mr, view.offsets().config(),
                                                    wire::dict_hooks::none());
+                wire::detail::message_view_resolved_access::set(
+                    *handle.pimpl_->view_cache_, view.resolved_application_version());
             }
         } else {
             // Span frames to nothing, including a zero-byte span
@@ -263,7 +257,11 @@ core::expected_t<owning_message_handle> owning_message_handle_from_frame(
 //     dict_reify_wire_body_not_ready).
 //  2. single-char FIXT-admin hit → reify_dispatch_fixt (→ {session_admin,
 //     profile.session, Unknown}).
-//  3. miss → read ApplVerID(1128) (field-absent → empty sv → profile default) →
+//  3. miss, 099-fixt-appl-version-validation (data-model E-5, FR-001): the view's resolved version
+//     set → reify_dispatch_application (→ {application, vt11, that version}), reading neither 1128
+//     nor the profile: only a FIXT session writes it, and it is what the session's route resolved,
+//     a Message Type Default among them.
+//  4. otherwise → read ApplVerID(1128) (field-absent → empty sv → profile default) →
 //     resolve_application_version → reify_dispatch_application (→ {application,
 //     profile.session, resolved}). Multi-char MsgTypes forward the full sv;
 //     the emitter's two-level dispatch resolves single- and 2-char arms.
@@ -281,11 +279,23 @@ core::expected_t<owning_message_handle> owning_message_handle_from_frame(
     std::string_view const mt_sv = mt_fv->as_string();
 
     // Step 2: FIXT-admin detection (single-char admin MsgType).
-    if (mt_sv.size() == 1 && is_fixt_admin(mt_sv.front())) {
+    if (is_fixt_admin_msgtype(mt_sv)) {
         return reify_dispatch_fixt(view, mt_sv.front(), profile, mr);
     }
 
-    // Step 3: application dispatch. Read ApplVerID(1128); field-absent → empty
+    // Step 3: the byte the session wrote. The profile handed on names only what the dispatch reads
+    // of it, so `session` is vt11 whatever the caller passed.
+    if (auto const byte = view.resolved_application_version();
+        byte != application_version::Unknown) {
+        return reify_dispatch_application(view, mt_sv, byte,
+                                          version_profile{.session = session_version::vt11,
+                                                          .default_appl = byte,
+                                                          .has_per_message_override = true,
+                                                          ._reserved = 0},
+                                          mr);
+    }
+
+    // Step 4: application dispatch. Read ApplVerID(1128); field-absent → empty
     // sv → profile default.
     std::string_view appl_ver_sv;
     auto appl_fv = view.template get<1128>();

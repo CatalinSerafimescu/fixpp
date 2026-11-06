@@ -86,6 +86,8 @@ set(FIXPP_CAPI_FEATURE_B_INCLUDES
 #     `-L` selector to break.
 #   - dict_overlay_capi_test (098 W-9 pure rows): dictionary loads, the mapping
 #     function, and a session opened on an engine that is never started.
+#   - capi_099_msg_version_test (099 W-10's clone cells): a Session on an io_context
+#     the test pumps, no engine and no worker thread.
 add_executable(capi_pure_tests
   capi_group_delimiter_ctx_test.cpp   # 083 T049/T053: W-11/11a/11b/12/13
   capi_smoke_test.cpp
@@ -95,13 +97,18 @@ add_executable(capi_pure_tests
   thunk_split_test.cpp
   abi_symbol_golden_test.cpp
   dict_overlay_capi_test.cpp          # 098 W-9: the pure rows
+  capi_099_msg_version_test.cpp       # 099 T085: W-10's clone cells
 )
 target_link_libraries(capi_pure_tests PRIVATE
   fixpp_capi
+  fixpp_mock_clock   # 099 W-10: a Session on a mock clock, pumped by the test
   GTest::gtest
   GTest::gtest_main
 )
-target_include_directories(capi_pure_tests PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+target_include_directories(capi_pure_tests PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+  "${CMAKE_SOURCE_DIR}/src"   # 099 W-10: session/fixt_route_set.hpp, through the session witnesses' rig
+)
 target_compile_definitions(capi_pure_tests PRIVATE
   FIXPP_DICT_DATA_DIR="${CMAKE_SOURCE_DIR}/dictionaries"
   FIXPP_ORCHESTRA_DATA_DIR="${CMAKE_SOURCE_DIR}/dictionaries/orchestra"
@@ -132,6 +139,9 @@ set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 093)
 # 098-dialect-overlay: label 098 (tasks.md, Expected ctest list). APPEND, after the last
 # LABELS setter for this entry, so the existing labels survive.
 set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 098)
+# 099-fixt-appl-version-validation: label 099 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 099)
 
 # T004 (US1, SC-004) — 051 error-block foundational oracle (translate re-point +
 # strerror + per-code-minor downgrade).  T022 (US5) appends live end-to-end arms
@@ -703,3 +713,40 @@ add_test(NAME capi_recovery_liveness COMMAND capi_recovery_liveness_test)
 # ctest steps in .github/workflows/tier1.yml.
 set_tests_properties(capi_recovery_liveness PROPERTIES
   LABELS "capi;536;537;538" TIMEOUT 700)
+
+# 099-fixt-appl-version-validation W-20 (tasks.md T034), FR-028. Standalone ([const §VII.8]): it
+# replaces global operator new with a fail-at-N hook. Here and not in tests/session because its
+# C arm joins at tasks.md T108. TIMEOUT is explicit: a sweep is quadratic in the build's
+# allocations. Re-derive by timing `ctest --test-dir build/<preset> -R '^capi_099_route_set_oom_test$'`.
+add_executable(capi_099_route_set_oom_test capi_099_route_set_oom_test.cpp)
+target_link_libraries(capi_099_route_set_oom_test PRIVATE
+  fixpp_capi
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_099_route_set_oom_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+  "${CMAKE_SOURCE_DIR}/src"   # session/fixt_route_set.hpp
+)
+target_compile_definitions(capi_099_route_set_oom_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+add_test(NAME capi_099_route_set_oom_test COMMAND capi_099_route_set_oom_test)
+set_tests_properties(capi_099_route_set_oom_test PROPERTIES
+  LABELS "capi;099" TIMEOUT 300)
+
+# 099-fixt-appl-version-validation W-12 (tasks.md T092). Standalone ([const §VII.8]): threads and a
+# socket. TIMEOUT is explicit. Re-derive by timing
+# `ctest --test-dir build/<preset> -R '^capi_099_fixt_live_test$'` on every lane.
+add_executable(capi_099_fixt_live_test capi_099_fixt_live_test.cpp)
+target_link_libraries(capi_099_fixt_live_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_099_fixt_live_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+target_compile_definitions(capi_099_fixt_live_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+add_test(NAME capi_099_fixt_live_test COMMAND capi_099_fixt_live_test)
+set_tests_properties(capi_099_fixt_live_test PROPERTIES
+  LABELS "capi;099" TIMEOUT 300)

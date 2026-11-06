@@ -14,6 +14,10 @@ refs:
   - src/session/send_header_tags.hpp
   - src/session/engine.cpp
   - src/session/session_strand.cpp
+  - src/session/fixt_route_set.hpp
+  - src/session/peek_fixt_route.hpp
+  - src/session/fixt_session_check.hpp
+  - src/session/logon_msg_type_defaults.hpp
   - .specify/447-458-452-capi-refusals.md
   - .specify/544-hot-path-zero-alloc.md
   - .specify/536-537-538-recovery-liveness.md
@@ -25,6 +29,11 @@ refs:
   - specs/093-inbound-frame-dispositions/plan.md
   - specs/093-inbound-frame-dispositions/research.md
   - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
+  - specs/099-fixt-appl-version-validation/spec.md
+  - specs/099-fixt-appl-version-validation/plan.md
+  - specs/099-fixt-appl-version-validation/research.md
+  - specs/099-fixt-appl-version-validation/data-model.md
+  - specs/099-fixt-appl-version-validation/contracts/surface.md
   - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2d-threading.md
@@ -53,6 +62,8 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/563-564-callback-send-tasks.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/563-564-callback-send-verify.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/098-dialect-overlay-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/099-fixt-appl-version-validation-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/099-fixt-appl-version-validation-evidence.md
 codegraph_entry: [Session, fsm_state, SeqnumManager, Engine, on_inbound_frame]
 constitution: ["§XI.4", "§XV.4"]
 ---
@@ -105,7 +116,8 @@ The authority is therefore split three ways, and knowing the split is most of th
 | Resend answers (replay + GapFill) — how `build_replay_frame` / `build_sequence_reset_gapfill` build the wire frame | `specs/013-session-reconnect-binding/spec.md` FR-010; `specs/037-resend-reply-possdup-tags/` (43/122 emission). ⚠️ **037's `spec.md` Assumptions section, `research.md` D-3, `plan.md`, `data-model.md`, `contracts/resend-reply-wire.md`, and `checklists/wire-conformance.md` CHK010 all describe placing `43`/`122` AFTER the body as "order-safe" / "field order is unconstrained for interop" — FALSE, superseded by fixpp#419: a strict peer (QuickFIX-J `UseDataDictionary=Y`) rejects it (373=14). The bundle is a point-in-time record, left as-is; do not trust its field-order claims. See `spec/behaviors-and-limitations.md` `## fixpp#419` for current behaviour.** ⚠️ **037 FR-006 / SC-003 ("replayed application frames MUST be byte-identical to prior behavior") are also SUPERSEDED, by fixpp#420: a replay restamps `SendingTime(52)`. 013 FR-010's "byte-for-byte" clause governs `122` only and still holds.** See `## fixpp#420 / fixpp#424` in the same file. |
 | Reset & refresh on Logon | `specs/024-reset-refresh-on-logon/`, `specs/025-refresh-on-logon/` ⚠️ **025 `tasks.md` T041 (`[X]`, "the live standby-re-hydrate interop cell … capture the golden") and T002's "standby-re-hydrate live cell" are FALSE as result claims: the `StandbyRehydrate_Initiator` suite does not run live.** Flagged here and not edited (frozen `specs/` are not rewritten): no harness cell selects the interop suite named in this row — its ids are in the `unregistered-tracked` group of `tests/interop/live-cells-excluded.txt`, and fixpp#503 owns making it live. Re-derive the bundles' live-cell claims with `git grep -n -i -E -e 'live [a-z -]*cell' -e 'bidirectional-gap cell' -- specs/025-refresh-on-logon specs/027-next-expected-msgseqnum specs/029-persistent-seqnum-hydrate`; prospective `plan.md` / `spec.md` lines are design intent, not result claims. |
 | NextExpectedMsgSeqNum | `specs/027-next-expected-msgseqnum/` ⚠️ **027 `tasks.md` T022's "+ a bidirectional-gap cell" and its `## Notes` line "T022 the live cell" are FALSE as result claims for the bidirectional suite: `NextExpectedBidirectional` does not run live. T022's "recover an at-logon gap with zero `ResendRequest`" and contract C10's "recover an at-logon gap … all missed messages delivered in order" are ALSO false as result claims for the initiator and acceptor NE cells: those cells run live but seed no gap (parent `run_interop_cell.py` NE block, "no resend"), so they witness only 789 negotiation and in-sync honour, and fixpp#503 owns the gap cells.** Flagged here and not edited (frozen `specs/` are not rewritten): no harness cell selects the interop suite named in this row — its ids are in the `unregistered-tracked` group of `tests/interop/live-cells-excluded.txt`, and fixpp#503 owns making it live. Re-derive the bundles' live-cell claims with `git grep -n -i -E -e 'live [a-z -]*cell' -e 'bidirectional-gap cell' -e 'recover an at-logon gap' -- specs/025-refresh-on-logon specs/027-next-expected-msgseqnum specs/029-persistent-seqnum-hydrate`; prospective `plan.md` / `spec.md` lines are design intent, not result claims. |
-| FIXT / FIX50SP2, version serviceability | `specs/033-fixt-fix50sp2-session/`, `specs/042-fixt-version-serviceability-guard/` |
+| FIXT / FIX50SP2, version serviceability | `specs/033-fixt-fix50sp2-session/`, `specs/042-fixt-version-serviceability-guard/`. ⚠️ 033's "1128 tolerated, not routed" and 042's "config-load" are narrowed by 099: [below](#a-fixt-session-reads-each-message-with-that-messages-dictionary-099) |
+| Which dictionary answers a FIXT session's inbound frame, what each state does with it | `Session::select_route_`, `Session::bind_fixt_routes_` and `specs/099-fixt-appl-version-validation/data-model.md` E-6, E-7, E-10; the live B&L file's section `## 099`; why and what was rejected: [below](#a-fixt-session-reads-each-message-with-that-messages-dictionary-099) |
 | A second `close()` while one is in flight | `Session::close` and its comment in `session.hpp`; `specs/093-inbound-frame-dispositions/plan.md` OD-29. ⚠️ **`.specify/2d-threading.md` §4.7's and §6.5's "Idempotency" bullets and §4.7's code-block comment ("functionally a no-op for the second caller", "without side effects", "returns immediately with no error") are SUPERSEDED for terminal-on-graceful by 093 plan OD-29**: a terminal close that arrives while a graceful one is in flight escalates it, ending its grace wait or keeping its Logout exchange from starting. Each carries a dated erratum in place. ⚠️ **OD-29 is itself narrowed by fixpp#590** (`.specify/563-564-callback-send.md` §2.6, rulings R-8 and R-9; B&L `B-563-5`): a terminal close started inside the `toAdmin` of the graceful close's Logout cuts that Logout and joins without ending the grace wait. `.specify/2d-threading.md` has a document-level amendment for it at its end, and the frozen 093 bundle is flagged in the section on fixpp#563 below. The code-block comment's "returns immediately" did not hold before 093 either: the join awaits the in-flight close. Graceful-on-graceful still joins with no side effect. |
 | Recovery and liveness: a frame above the expected number while a resend is outstanding, the deadline of an unfilled gap, a too-high Heartbeat and a pending TestRequest, a resend answer whose store read fails, `retrieve` after a reset, one session's close and the other sessions' liveness | `.specify/536-537-538-recovery-liveness.md` §2 to §4 (fixpp#536, #537, #538; issue mode, no `specs/` bundle); the live B&L file's section `## fixpp#536 / #537 / #538 / #598`; why and what was rejected: [below](#recovery-liveness-and-a-cancellation-inside-the-session-fixpp536--537--538--598). ⚠️ **013's `spec.md` FR-009, a queue of inbound frames above the expected number during recovery, was never built and is now rejected** (the note's §4.4): a frame above NextNumIn while a resend is outstanding is ignored, and the peer's replay carries it (`B-537-1`). `ResendState::inbound_held` has no writer, and `L-013-2`, which said frames are held there, is corrected. 013 is frozen and not edited. |
 | A cancellation met inside the session: while an inbound frame is processed, at an outbound store call, at the graceful close's Logout, inside a `FileStore` call's offload | the note's §9, §10 and §11 (rulings R-14 to R-17, R-24 to R-27); B&L `B-538-4` to `B-538-7`, `B-598-1`, `B-598-2`, `L-598-1`; [below](#recovery-liveness-and-a-cancellation-inside-the-session-fixpp536--537--538--598) |
@@ -607,6 +619,46 @@ taken. Each item names the note's section that has the whole list.
   (no input reaches it, so nothing can hold it true); the handlers left as they were; making the whole
   store call uncancellable (it reverses R-15 for a call queued at the lock); undoing a completed write;
   repairing a damaged log at open (R-27; `L-598-1`).
+
+## A FIXT session reads each message with that message's dictionary (099)
+
+The design is `specs/099-fixt-appl-version-validation/`: research R-1, R-3, R-20 and R-5 give the half kept here, plan.md's `## Owner sign-off` the rulings, data-model E-7 and E-10 the endings per state and input. The behaviour a user must know is B&L `B-099-1` to `B-099-28`, `L-099-1` to `L-099-4`. Read `Session::select_route_` rather than this page. The dictionary half is on [`dictionary.md`](./dictionary.md), the surfaces on [`c-api.md`](./c-api.md), [`python-api.md`](./python-api.md) and [`config.md`](./config.md).
+
+**What was decided.**
+
+- **Two dictionaries, chosen per frame** (R-1, owner ruling 2), as QuickFIX C++ and J split them: a transport dictionary for admin messages, an application dictionary for application messages. The session dictionary answers its own version, so an overlay survives.
+- **A route is one table** (R-20): the frame scan, the validator and the parse that builds the view all take it, because a clone or `reify` re-parses from the owner's table and must split as the view did (fixpp#426).
+- **One shared set per Engine, built in `Engine::start()`** (R-3): `fixt_route_set`, in the session library, held through a `shared_ptr` by the Engine and each FIXT session.
+- **The peek walks with the session dictionary's hooks and stops at the header's end** (R-5), because the scan's own hooks are what the route decides. It is `peek_fixt_route`.
+- **A refusal, never an unchecked delivery** (owner ruling 1). This departs from QuickFIX C++ on purpose.
+
+**What was rejected, and why.**
+
+- **Replacing the session dictionary with the registry's for the same version** (R-1): it loses the overlay. This is the rule L-098-1 carried for this feature.
+- **Choosing "own version" by comparing to `default_appl_ver_id` or to the negotiated version** (R-1): a FIXT11 session dictionary has no version, and the negotiated version is not the session dictionary's.
+- **The registry owning validators, as Gate A's first review proposed** (R-3): `[arch §2.3]` lets `dictionary` include `core` only, and `tools/check_layers.py` enforces that on `src/dictionary/`. The CMake targets would not have stopped it, since the two link each other as a permitted archive cycle.
+- **The registry owning only tables, published by compare-exchange** (R-3): a heap cache in a `noexcept` constructor, null-cache answers, deleted move assignment and racing walks, all for a case a build in `Engine::start()` removes, and each table held twice.
+- **A `shared_ptr`-holding validator** (R-3): an indirection on every FIX 4.x validation, where 098 needed an owner ruling for a 24-byte layout change.
+- **Building in the Engine constructor** (R-3): a walk for engines that never use it, and no way to return an error. **A warm step in `register_session`** (R-3): one walk per call against entries still arriving, and no answer for a directly constructed session.
+- **`std::once_flag` or a mutex in `open()`** (R-3): a strand thread blocks inside a coroutine on another's walk. **Per-session tables** (R-3): sessions times dictionaries, the shape NFR-003 forbids.
+- **Composing two dictionaries into one `dict_hooks`** (R-20): `offset_table.hpp`'s nested cache keys on `dict_hooks::opaque_dict()`, a function of one dictionary pointer, and a clone or `reify` re-parses from the owner's table, so it would lose the second dictionary and split differently from the view. The overlay's header pair is registered into the route's table instead, before the seal.
+- **Selecting the table from the frame scan** (R-5): `scan_frame_header`'s hooks are chosen by the table, so a table-specific pair changes how it splits. **Peeking with `dict_hooks::none()`** (R-5, measured): a 1128 inside a header pair's Data is read as the header's.
+- **Leaving an application frame in an establishment arm to `interpret_logon`** (R-8, as that section first recommended): `interpret_logon` reads the last 35, so a frame `35=D … 35=A` with Logon fields would establish a validating session. Neither review caught it; a measurement did. A non-validating session still does this (`B-099-4`, fixpp#657).
+- **A session lookup from `fromApp`** (R-10): blocking in C, and no handle. **Reading the table's version** (R-10): with validation off and no dictionary the table is the session dictionary's, which is not the resolved version. The answer is one byte on the view, `resolved_application_version()`.
+
+**Records this supersedes, flagged here and not edited** (frozen `specs/` are not rewritten; each is a point-in-time record).
+
+- ⚠️ **Superseded by 099:** `specs/033-fixt-fix50sp2-session/spec.md`'s clarification that per-message 1128 routing is deferred, and `plan.md`'s "tolerated, not routed". L-033-1 sits in the closed B&L file. Its tolerance now holds only without validation (`W8` in `tests/session/test_fixt_logon_establishment.cpp`), and L-033-3's "never refuses on any value" is narrowed in place to a non-validating initiator.
+- ⚠️ **Superseded by 099:** `specs/041-validation-gate-wiring/spec.md`'s "Phase-1 validates against the session-held dictionary only" and its out-of-scope entry for FIXT two-dictionary validation. L-041-2 sits in the closed B&L file; `B-041-1` carries the condition.
+- ⚠️ **Narrowed by 099:** `specs/042-fixt-version-serviceability-guard/` and catalogue row S-043 say a misconfigured default "fails closed at config-load". That holds for a directly constructed session and for a validating one at `Engine::register_session`; a non-validating session on an Engine route is logged, not told (`L-099-4`). The closed `L-033-5` row is corrected in place.
+- ⚠️ **Superseded by 099 (fixpp#651):** `specs/007-threading-clock/`'s FR-016, I-13 and `contracts/session_config.hpp`, and `.specify/2d-threading.md`'s "Engine-anchor + session-override pattern", all claim `resolved = override.value_or(engine_anchor)` for a dictionary axis. It never held for the dictionary: it has no engine anchor and is required on the session. Re-derive with `git grep -n 'value_or(engine_anchor)' -- .specify specs`.
+- ⚠️ **Superseded by 099:** `specs/015-runtime-engine/`'s "`start()` non-blocking" (spec, `contracts/engine_api.md`, `contracts/realized-behavior.md`, `data-model.md`, `research.md`, `plan.md`, `quickstart.md`). On an engine with a FIXT session it blocks for the walks (`B-099-21`). Re-derive with `git grep -n -i -e 'non-blocking' -e 'does NOT block' -- specs/015-runtime-engine`.
+- ⚠️ **Superseded by 099:** `specs/095-tail-evidence-pass/contracts/live-cell-contract.md` and `spec.md`: the live cell's `arm="validation-off"`. The two cells now run validation on, with a peer-to-fixpp step (`B-095-1`).
+- ⚠️ **Superseded by 099:** `specs/097-fix-latest-applverid-10/spec.md`'s "validation still uses the session's own dictionary" and "decided by the session's own dictionary, as for every tag (L-041-2)". `B-097-1`, `B-097-3` and `B-097-4` are corrected; L-097-1 sits in the closed B&L file.
+- `.specify/2b-wire.md`, `.specify/2c-codegen.md`, `.specify/2i-capi.md`, `.specify/api-contract.md` and `.specify/architecture.md` carry in-place `Updated (099-fixt-appl-version-validation)` or `Since 099` notes; the text before each note is history. Re-derive with `git grep -n '099-fixt-appl-version-validation' -- .specify`.
+- **Not superseded:** `specs/098-dialect-overlay/spec.md`'s rule that the session dictionary keeps its own version. 099 keeps it, and `L-098-1` now says how. `specs/081-strict-validation-residuals/`'s framing surface stands and is extended to FIX 4.x, and its accept-only divergence stays as `B-081-1`.
+
+**Decided elsewhere, left open by 099.** `interpret_logon` reading the last 35 without validation (fixpp#657); a non-FIXT validating session's MsgType split (fixpp#658, byte-identical here by SC-005); a misspelt `[dictionary]` sub-key (fixpp#659); a failed allocation inside `make_strand` while creating an engine (fixpp#660, `L-660-1`).
 
 ## Runtime flows
 

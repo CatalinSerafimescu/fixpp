@@ -598,8 +598,9 @@ public:
 
     // ── 081 Concern A: validator-private FIXT.1.1 framing surface ──────────
     // (research.md D-1/D-2, data-model.md E-2). Populated by
-    // Dictionary::as_table_view() ONLY for v50/v50sp1/v50sp2 (empty
-    // `<header/>`), from the baked FIXT11.xml-census-pinned constant
+    // Dictionary::as_table_view() for v50/v50sp1/v50sp2 (empty `<header/>`), and
+    // by its fixt_framing overloads for v40 to v44 as well (099-fixt-appl-version-
+    // validation, data-model E-3), from the baked FIXT11.xml-census-pinned constant
     // (src/dictionary/fixt_framing_table.hpp). Read ONLY by the validator's
     // Step-1 gate + type-check arm (validator.hpp) — deliberately NOT the
     // shared `valid_`/`types_` stores, so `field_valid_for`/`valid_tags_for`/
@@ -857,8 +858,9 @@ private:
 
     // 081 Concern A (T009): registers `tag` as a FIXT framing tag with
     // structural type `ft`. Used EXCLUSIVELY by Dictionary::as_table_view()
-    // for v50/v50sp1/v50sp2, from the baked FIXT11.xml-census-pinned
-    // constant. Does NOT touch valid_/required_/types_ (D-1 invariant).
+    // for v50/v50sp1/v50sp2, and by its fixt_framing overloads for v40 to v44 as
+    // well, from the baked FIXT11.xml-census-pinned constant. Does NOT touch
+    // valid_/required_/types_ (D-1 invariant).
     void add_fixt_framing_tag(std::uint16_t tag, field_type ft) {
         fixt_framing_tags_.insert(tag);
         fixt_framing_types_[tag] = ft;
@@ -876,8 +878,9 @@ private:
         header_bits_[w] |= (std::uint64_t{1} << (static_cast<std::size_t>(tag) & 63U));
     }
 
-    // fixpp#426: registers `length_tag`'s dictionary-declared Data partner.
-    // Used EXCLUSIVELY by Dictionary::as_table_view(). A zero `data_tag` is a
+    // fixpp#426: registers `length_tag`'s dictionary-declared Data partner, and on
+    // as_table_view(fixt_framing, extra) each pair of `extra` after them (099, data-model
+    // E-3). Used EXCLUSIVELY by Dictionary::as_table_view()'s forms. A zero `data_tag` is a
     // no-op (`length_pair_data_tag` already answers 0 for an unregistered
     // key), so callers need not pre-filter FieldRef::length_pair_data_tag==0.
     void set_length_pair_data_tag(std::uint16_t length_tag, std::uint16_t data_tag) {
@@ -1069,7 +1072,8 @@ private:
     // surface — deliberately SEPARATE from valid_/types_ above (D-1 load-
     // bearing invariant: field_valid_for/valid_tags_for/field_type_of stay
     // byte-identical). Populated ONLY by Dictionary::as_table_view() for
-    // v50/v50sp1/v50sp2, from the baked census-pinned constant
+    // v50/v50sp1/v50sp2, and by its fixt_framing overloads for v40 to v44 as well,
+    // from the baked census-pinned constant
     // (src/dictionary/fixt_framing_table.hpp). Read ONLY by the validator's
     // Step-1 gate (is_fixt_framing_tag) and type-check arm
     // (field_type_of_with_framing).
@@ -1236,8 +1240,7 @@ public:
         return *this;
     }
 
-    table_view_builder& set_length_pair_data_tag(std::uint16_t length_tag,
-                                                 std::uint16_t data_tag) {
+    table_view_builder& set_length_pair_data_tag(std::uint16_t length_tag, std::uint16_t data_tag) {
         tv_.set_length_pair_data_tag(length_tag, data_tag);
         return *this;
     }

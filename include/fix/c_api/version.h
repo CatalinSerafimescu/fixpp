@@ -230,8 +230,23 @@
  *  (FIXPP_ERR_DICT_CONFIG, FIXPP_ERR_DICT_LIMIT_EXCEEDED, FIXPP_ERR_DICT_OOM);
  *  fixpp_dict_load_from_xml is unchanged. No error code is added.
  *  Added: fixpp_dict_load_from_xml_with_overlay (dict.h). */
+/*  1.14 (BREAKING, [const §X.7]; 099-fixt-appl-version-validation): fixpp_msg_version
+ *  and fixpp_resolved_msg_version_t (message.h). The struct is four bytes, {kind, session,
+ *  application, _reserved}, the resolved version of the message, where it held BeginString
+ *  and raw DefaultApplVerID(1137) as pointers into the wire. The symbol, its signature and
+ *  its handle errors stay.
+ *  Migration: a caller that read BeginString or raw 1137 reads
+ *  fixpp_msg_get_string(msg, 8, ...) or fixpp_msg_get_string(msg, 1137, ...). Those are
+ *  wire values, and the struct's bytes are the constants of dict.h, which do not coincide.
+ *  What a FIXT session validates by changes with this minor; the setters below are what
+ *  reach it from C. A refused config is reported by fixpp_session_open, and a table build
+ *  failure by fixpp_engine_start (session.h, engine.h).
+ *  Added: fixpp_session_config_set_default_appl_ver_id,
+ *  fixpp_session_config_set_validate_inbound_messages (session.h),
+ *  fixpp_engine_config_add_dictionary (engine.h), and the constants FIXPP_APPL_VER_*,
+ *  FIXPP_SESSION_VER_* and FIXPP_MSG_KIND_* (dict.h). No error code is added. */
 #define FIXPP_C_ABI_VERSION_MAJOR 1
-#define FIXPP_C_ABI_VERSION_MINOR 13 /* 1.13: dictionary overlay (098) */
+#define FIXPP_C_ABI_VERSION_MINOR 14 /* 1.14: FIXT application version (099), BREAKING */
 #define FIXPP_C_ABI_VERSION_PATCH 0
 
 /** Composite: (MAJOR<<16)|(MINOR<<8)|PATCH — single-integer compatibility check. */

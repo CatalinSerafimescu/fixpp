@@ -20,6 +20,10 @@
 // below and are instantiated wherever a complete table_view exists (now in
 // both production TUs via Dictionary::as_table_view() and test TUs).
 //
+// 099-fixt-appl-version-validation (data-model E-4, FR-008): dictionary_driven_validator gains a
+// non-virtual validate() taking the session dictionary's table as an envelope, and table(). Neither
+// is on `Validator`, and the class's layout does not move.
+//
 // §XV.9 guard: table_view.hpp and field_type.hpp have deliberately minimal
 // include graphs (no mutex, no heavy asio) — see their file headers.
 
@@ -30,6 +34,7 @@
 #include <fixpp/core/decimal_alias.hpp>    // fixpp::decimal_t
 #include <fixpp/core/decimal_helpers.hpp>  // core::detail::trap_throw (C1)
 #include <fixpp/core/error.hpp>
+#include <fixpp/dict/version_profile.hpp>  // is_route_answered_header_tag (099)
 #include <memory_resource>
 #include <span>
 #include <string_view>
@@ -150,6 +155,21 @@ public:
     [[nodiscard]] core::expected_t<void> validate(
         MessageView<access_mode::Index> const& msg, std::pmr::memory_resource* scratch_mr,
         std::uint16_t* ref_tag_out) const noexcept override {
+        return validate(msg, scratch_mr, ref_tag_out, nullptr);
+    }
+
+    // 099-fixt-appl-version-validation (data-model E-4, FR-008): the same walk, with the session
+    // dictionary's table as `envelope` on a route whose table is another one. Step 1 asks first,
+    // for each field, whether the envelope's header declares the tag and the route does not answer
+    // it (dict::is_route_answered_header_tag). If so the tag passes membership and its enum and
+    // type are checked against the envelope, whatever the routed table declares for it, wherever in
+    // the frame it appears. A null envelope is the walk the virtual runs: the branch that chooses
+    // is outside the field loop, so that walk pays nothing per field. Passed per call and not held,
+    // since one validator serves many sessions; `scratch_mr` and `ref_tag_out` are the caller's, so
+    // a validator shared across strands writes nothing of its own.
+    [[nodiscard]] core::expected_t<void> validate(
+        MessageView<access_mode::Index> const& msg, std::pmr::memory_resource* scratch_mr,
+        std::uint16_t* ref_tag_out, fixpp::dict::table_view const* envelope) const noexcept {
         std::string_view const msg_type = msg.msg_type();
         // fixpp#426 (design §3): walk with THIS validator's own dict_hooks,
         // not `msg`'s — `msg` may be dict-free even when `dict_` is not (or
@@ -209,48 +229,14 @@ public:
         // `contains()` is false for every tag — identical to field_valid_for
         // returning false for every tag.
         auto const valid_tags = dict_.valid_tags_for(msg_type);
-        // 092 (data-model E-5, FR-012): the iterator is hoisted out of the `for`
-        // init so its fault record is readable after the loop. The fault is
-        // checked at the top of each iteration — before the field checks, so an
-        // empty tag yielded as tag 0 is not reported as an unexpected tag — and
-        // once after the loop, for a walk that stopped on its fault. Steps 2
-        // onward do not run after a fault.
-        iter_t it{msg.bytes(), 0, hooks};
+        iter_t const begin{msg.bytes(), 0, hooks};
         iter_t const end{msg.bytes(), msg.bytes().size(), hooks};
-        for (; !(it == end); ++it) {
-            if (it.fault() != field_fault::none) {
-                return field_fault_error(it, ref_tag_out);
-            }
-            auto const& fld = *it;
-
-            // (a) Unexpected tag check. 081 Concern A (research.md D-1):
-            // `contains(tag)` is checked FIRST — cheap, and true for the
-            // overwhelming majority of fields — so the `is_fixt_framing_tag`
-            // term only runs on an already-failing lookup, adding no cost to
-            // the pre-081 accept path (T023 perf note). A FIXT framing tag
-            // (populated only for v50/v50sp1/v50sp2 — table_view.hpp) passes
-            // here instead of rejecting wire_unexpected_tag.
-            if (!valid_tags.contains(fld.tag) && !dict_.is_fixt_framing_tag(fld.tag)) {
-                set_ref_tag(ref_tag_out, fld.tag);
-                return core::expected_t<void>{std::unexpect, core::error::wire_unexpected_tag};
-            }
-
-            // (b) Enum validity check
-            if (!dict_.enum_valid(fld.tag, fld.value)) {
-                set_ref_tag(ref_tag_out, fld.tag);
-                return core::expected_t<void>{std::unexpect,
-                                              core::error::wire_field_value_out_of_range};
-            }
-
-            // (c) Type structural check ([2b §6.5 rule 3])
-            auto const check = check_field_type(fld.tag, fld.value, scratch_mr);
-            if (!check) {
-                set_ref_tag(ref_tag_out, fld.tag);
-                return check;
-            }
-        }
-        if (it.fault() != field_fault::none) {
-            return field_fault_error(it, ref_tag_out);
+        auto const fields =
+            envelope == nullptr
+                ? check_fields<false>(begin, end, valid_tags, scratch_mr, ref_tag_out, nullptr)
+                : check_fields<true>(begin, end, valid_tags, scratch_mr, ref_tag_out, envelope);
+        if (!fields) {
+            return fields;
         }
 
         // ── Step 2: required-fields scan ─────────────────────────────────
@@ -532,7 +518,7 @@ public:
             return core::expected_t<void>{std::unexpect,
                                           core::error::wire_field_value_out_of_range};
         }
-        return check_field_type(tag, value, nullptr);
+        return check_field_type(dict_, tag, value, nullptr);
     }
 
     [[nodiscard]] std::span<std::uint16_t const> required_fields(
@@ -549,16 +535,91 @@ public:
         return dict_.group_first_field(no_tag);
     }
 
+    // 099-fixt-appl-version-validation (data-model E-1, E-4): what a route's aliasing owner points
+    // at.
+    [[nodiscard]] fixpp::dict::table_view const& table() const noexcept [[clang::lifetimebound]] {
+        return dict_;
+    }
+
 private:
     fixpp::dict::table_view dict_;  // held BY VALUE (SC-007: no virtual edge)
 
-    // Structural type check for a single field value ([2b §6.5 rule 3]).
+    // Step 1. kEnvelope selects the walk at compile time, so that the walk with no envelope holds
+    // no envelope code at all.
+    template <bool kEnvelope>
+    [[nodiscard]] core::expected_t<void> check_fields(
+        MessageView<access_mode::Index>::field_iterator it,
+        MessageView<access_mode::Index>::field_iterator const& end,
+        fixpp::dict::valid_tag_set_view const& valid_tags, std::pmr::memory_resource* scratch_mr,
+        std::uint16_t* ref_tag_out, fixpp::dict::table_view const* envelope) const noexcept {
+        // 092 (data-model E-5, FR-012): the iterator lives outside the `for`
+        // init so its fault record is readable after the loop. The fault is
+        // checked at the top of each iteration — before the field checks, so an
+        // empty tag yielded as tag 0 is not reported as an unexpected tag — and
+        // once after the loop, for a walk that stopped on its fault. Steps 2
+        // onward do not run after a fault.
+        for (; !(it == end); ++it) {
+            if (it.fault() != field_fault::none) {
+                return field_fault_error(it, ref_tag_out);
+            }
+            auto const& fld = *it;
+
+            if constexpr (kEnvelope) {
+                if (envelope->is_header_tag(fld.tag) &&
+                    !fixpp::dict::is_route_answered_header_tag(fld.tag)) {
+                    if (!envelope->enum_valid(fld.tag, fld.value)) {
+                        set_ref_tag(ref_tag_out, fld.tag);
+                        return core::expected_t<void>{std::unexpect,
+                                                      core::error::wire_field_value_out_of_range};
+                    }
+                    auto const check = check_field_type(*envelope, fld.tag, fld.value, scratch_mr);
+                    if (!check) {
+                        set_ref_tag(ref_tag_out, fld.tag);
+                        return check;
+                    }
+                    continue;
+                }
+            }
+
+            // (a) Unexpected tag check. 081 Concern A (research.md D-1):
+            // `contains(tag)` is checked FIRST — cheap, and true for the
+            // overwhelming majority of fields — so the `is_fixt_framing_tag`
+            // term only runs on an already-failing lookup, adding no cost to
+            // the pre-081 accept path (T023 perf note). A FIXT framing tag
+            // (populated by Dictionary::as_table_view()'s forms — dictionary.hpp)
+            // passes here instead of rejecting wire_unexpected_tag.
+            if (!valid_tags.contains(fld.tag) && !dict_.is_fixt_framing_tag(fld.tag)) {
+                set_ref_tag(ref_tag_out, fld.tag);
+                return core::expected_t<void>{std::unexpect, core::error::wire_unexpected_tag};
+            }
+
+            // (b) Enum validity check
+            if (!dict_.enum_valid(fld.tag, fld.value)) {
+                set_ref_tag(ref_tag_out, fld.tag);
+                return core::expected_t<void>{std::unexpect,
+                                              core::error::wire_field_value_out_of_range};
+            }
+
+            // (c) Type structural check ([2b §6.5 rule 3])
+            auto const check = check_field_type(dict_, fld.tag, fld.value, scratch_mr);
+            if (!check) {
+                set_ref_tag(ref_tag_out, fld.tag);
+                return check;
+            }
+        }
+        if (it.fault() != field_fault::none) {
+            return field_fault_error(it, ref_tag_out);
+        }
+        return {};
+    }
+
+    // Structural type check for a single field value ([2b §6.5 rule 3]), by `table`'s type for it.
     // mr is only used for the Float/decimal parse path.
     // Returns success or a wire_* error; never throws.
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-    [[nodiscard]] core::expected_t<void> check_field_type(
-        std::uint16_t tag, std::span<const std::byte> value,
-        std::pmr::memory_resource* mr) const noexcept {
+    [[nodiscard]] static core::expected_t<void> check_field_type(
+        fixpp::dict::table_view const& table, std::uint16_t tag, std::span<const std::byte> value,
+        std::pmr::memory_resource* mr) noexcept {
         using ft = fixpp::dict::field_type;
         // 081 Concern A (research.md D-2 F2): a FIXT framing tag's type
         // resolves from the baked fixt_framing_types_ map FIRST — field_
@@ -566,7 +627,7 @@ private:
         // attached in a v50/v50sp1/v50sp2 dict, so never set_field_type'd),
         // silently under-constraining a malformed Int-typed header field
         // (34=abc, 1156=abc). No-op for every other tag/version.
-        switch (dict_.field_type_of_with_framing(tag)) {
+        switch (table.field_type_of_with_framing(tag)) {
             case ft::Float: {
                 // (C1) trap_throw fences the potentially-throwing 2a decode
                 // boundary (FR-013, [arch §5.3]). Result is

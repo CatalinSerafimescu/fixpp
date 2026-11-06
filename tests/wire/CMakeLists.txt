@@ -133,7 +133,8 @@ add_executable(wire_dict_tests
   typed_read_split_agreement_test.cpp                                 # T011 (083)
   length_data_pairs_drift_test.cpp                                    # fixpp#426 (D-1)
   dict_hooks_custom_pair_test.cpp                                     # fixpp#426 (D-2)
-  field_iterator_fault_test.cpp)                                      # 092 T055/T057 (FR-012)
+  field_iterator_fault_test.cpp                                       # 092 T055/T057 (FR-012)
+  test_099_validator_envelope.cpp)                                    # 099 T026 (W-3, unit half)
 target_link_libraries(wire_dict_tests PRIVATE
   fixpp_wire
   fixpp_dictionary
@@ -161,6 +162,9 @@ set_tests_properties(wire_dict_tests PROPERTIES LABELS "075;083;wire;091")
 # 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST wire_dict_tests APPEND PROPERTY LABELS 092)
+# 099-fixt-appl-version-validation: label 099 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST wire_dict_tests APPEND PROPERTY LABELS 099)
 # 083 T021 (W-10a leg 4, contracts/typed_read_splitter.md): a BACKSTOP, never
 # the discriminator. Leg 4's depth-capped chain fixture drives
 # consume_group_extent's outer loop with an attacker-shaped declared count; an

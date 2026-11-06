@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <fixpp/core/error.hpp>  // fixpp::core::expected_t, fixpp::core::error
 #include <string_view>
@@ -60,6 +61,68 @@ enum class application_version : std::uint8_t {
     v50sp2 = 8,
     vlatest = 9,  // 097-fix-latest-applverid-10: FIX Latest, wire ApplVerID "10"
 };
+
+// 099-fixt-appl-version-validation (data-model E-2): the application version a session version
+// names. vt11 and Unknown name none, so they map to Unknown. FIX Latest has its own application
+// version (wire ApplVerID "10") and therefore its own registry slot.
+[[nodiscard]] constexpr application_version session_to_application(session_version sv) noexcept {
+    switch (sv) {
+        case session_version::v40:
+            return application_version::v40;
+        case session_version::v41:
+            return application_version::v41;
+        case session_version::v42:
+            return application_version::v42;
+        case session_version::v43:
+            return application_version::v43;
+        case session_version::v44:
+            return application_version::v44;
+        case session_version::v50:
+            return application_version::v50;
+        case session_version::v50sp1:
+            return application_version::v50sp1;
+        case session_version::v50sp2:
+            return application_version::v50sp2;
+        case session_version::vlatest:
+            return application_version::vlatest;
+        // NOLINTNEXTLINE(bugprone-branch-clone) - vt11 and Unknown are distinct semantic cases
+        case session_version::vt11:
+            return application_version::Unknown;
+        case session_version::Unknown:
+            return application_version::Unknown;
+    }
+    return application_version::Unknown;
+}
+
+namespace detail {
+// The FIXT.1.1 admin MsgTypes, in one place, so every test of the set reads one list.
+inline constexpr std::array<std::string_view, 7> kFixtAdminMsgTypes{"0", "1", "2", "3",
+                                                                    "4", "5", "A"};
+}  // namespace detail
+
+// 099-fixt-appl-version-validation (data-model E-2): the 7 FIXT.1.1 admin MsgTypes per [FIXT §3] /
+// [2c §6.3]: 0 Heartbeat, 1 TestRequest, 2 ResendRequest, 3 Reject, 4 SequenceReset, 5 Logout,
+// A Logon. Hardcoded here, not from the dispatch table, so that dict::reify implements the
+// version-axis resolution without the build-tree generated dispatch headers. Not the session's
+// detail::is_admin_msgtype, which excludes A on purpose. n (XMLnonFIX) is application.
+[[nodiscard]] constexpr bool is_fixt_admin_msgtype(std::string_view msg_type) noexcept {
+    if (msg_type.size() != 1) {
+        return false;
+    }
+    for (std::string_view const admin : detail::kFixtAdminMsgTypes) {
+        if (admin == msg_type) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// 099-fixt-appl-version-validation (data-model E-2, FR-008): the header tags a route's own table
+// answers, because they name the route, and which the session dictionary therefore does not judge
+// on another route.
+[[nodiscard]] constexpr bool is_route_answered_header_tag(std::uint16_t tag) noexcept {
+    return tag == 35 || tag == 1128 || tag == 1129 || tag == 1156;
+}
 
 // ─── 003-OWNED ADDITIONS (RC#1, re-/plan 2026-05-15) ────────────────────────
 // Appended below the unchanged 002 enums, non-renumbering. 002 deferred the

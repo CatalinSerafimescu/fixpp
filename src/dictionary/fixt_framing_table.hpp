@@ -20,8 +20,10 @@
 // in include/fixpp/dict/dictionary.hpp): this table is consumed by
 // `Dictionary::as_table_view()` (dictionary.cpp) to populate the
 // validator-private `table_view::fixt_framing_tags_`/`fixt_framing_types_`
-// members (v50/v50sp1/v50sp2 ONLY — research.md D-1/D-2) AND directly by the
-// census test above. It is NOT part of the 6-method validator-facing
+// members (v50/v50sp1/v50sp2 — research.md D-1/D-2 — and, on the
+// `as_table_view(fixt_framing)` forms, v40 to v44 as well: 099-fixt-appl-version-
+// validation, data-model E-3), by `dict::is_fixt_standard_header_tag` (dictionary.cpp),
+// AND directly by the census test above. It is NOT part of the 6-method validator-facing
 // contract (table_view.hpp), NOT attached to `message_fields()`/`field_ref()`
 // /the shared `valid_`/`types_` stores, and NOT read by the parser.
 //

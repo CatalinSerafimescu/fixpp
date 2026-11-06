@@ -35,6 +35,7 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/engine.hpp>
+#include <ranges>
 // T044: full definitions needed to call shutdown() on lifecycle teardown.
 // These headers are included only in the .cpp (not in engine.hpp) to keep
 // the awaitable-header include-edge clean ([const §XV.9]).
@@ -82,7 +83,9 @@
 #include "read_first_frame_bounded.hpp"
 // 093-inbound-frame-dispositions: the inbound Framers' shared settings, and the
 // engine's seam into Session (data-model E-11).
-#include "inbound_limit.hpp"  // 093 E-2: L, before a Session exists
+#include "fixt_route_set.hpp"      // 099 data-model E-1
+#include "fixt_session_check.hpp"  // 099 data-model E-9
+#include "inbound_limit.hpp"       // 093 E-2: L, before a Session exists
 #include "read_pump.hpp"
 #include "session_engine_access.hpp"
 #include "session_strand.hpp"  // fixpp#544 §2.1: make_session_strand
@@ -238,6 +241,15 @@ expected_t<void> Engine::register_session(SessionConfig cfg) {
     // 093 (FR-010, plan OD-2): an advertised MaxMessageSize(383) outside its range is
     // refused before any registry mutation, as Session::open() refuses it.
     if (!fixpp::session::advertised_max_message_size_in_range(cfg)) {
+        return std::unexpected(error::invalid_session_config);
+    }
+
+    // 099-fixt-appl-version-validation (data-model E-9, FR-004): the FIXT check Session::open()
+    // runs, before any registry mutation, because a role loop's open() failure reaches nobody.
+    // On begin_string, not is_fixt(), which is false for the no-default config the check exists
+    // for. A non-validating session keeps its refusal at open() only (research R-2).
+    if (cfg.validate_inbound_messages && cfg.begin_string == "FIXT.1.1" &&
+        !fixpp::session::fixt_session_config_valid(cfg, &app_version_registry_)) {
         return std::unexpected(error::invalid_session_config);
     }
 
@@ -686,6 +698,29 @@ asio::awaitable<void> unpublish_entry(SessionEntry& entry) {
 
 }  // namespace
 
+// ── A role loop's open() failure (099-fixt-appl-version-validation, research R-2, FR-004) ──
+// The loop ends with no status to anyone, so this record is what an operator can see, when a
+// logger is set: what a non-validating FIXT session failing the FIXT check gets, since
+// register_session takes it. It names the session by its SessionId's fields, each copied into the
+// record, because the logger can outlive the engine that owns the strings: ArgValue's inline
+// string, so a value past its size is cut. The logger and the trace context are the session's, as
+// Session::open() resolves and seeds them. Its format string is registered in
+// src/log/format_registry.cpp.
+namespace {
+void log_role_loop_open_failure(fixpp::core::EngineConfig const& engine_cfg,
+                                SessionConfig const& session_cfg, fixpp::core::error failure) {
+    auto const& logger =
+        session_cfg.logger_override ? session_cfg.logger_override : engine_cfg.logger;
+    FIXPP_SLOG(logger.get(), error, session_cfg.initial_trace_context, fixpp::log::cat::session,
+               "session role loop ended: Session::open() failed: begin_string={} "
+               "sender_comp_id={} target_comp_id={} error={}",
+               fixpp::log::ArgValue::from_inline(session_cfg.begin_string),
+               fixpp::log::ArgValue::from_inline(session_cfg.sender_comp_id),
+               fixpp::log::ArgValue::from_inline(session_cfg.target_comp_id),
+               fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(failure)));
+}
+}  // namespace
+
 // ── run_accept_loop — T012/T013 production body ───────────────────────────────
 // Still inside namespace fixpp::session (the outer `namespace fixpp::session {`
 // opened at the top of this file). Defined here (not in the anonymous namespace)
@@ -1044,11 +1079,16 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // check application version serviceability at inbound FIXT Logon.
         auto local_session =
             std::make_shared<Session>(engine_cfg, entry.config, &engine.app_version_registry_);
+        // 099 (data-model E-1): the set start() built, so this open() walks nothing.
+        if (entry.config.is_fixt()) {
+            session_engine_access::adopt_routes(*local_session, engine.fixt_routes_);
+        }
         {
             auto res = co_await local_session->open();
             if (!res.has_value()) {
                 // Rejecting a pre-session connection: nothing consumes a close error.
                 (void)transport->close();
+                log_role_loop_open_failure(engine_cfg, entry.config, res.error());
                 co_return;
             }
         }
@@ -1197,10 +1237,15 @@ asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_c
     // application version serviceability at inbound FIXT Logon.
     auto local_session =
         std::make_shared<Session>(engine_cfg, entry.config, &engine.app_version_registry_);
+    // 099 (data-model E-1): the set start() built, so this open() walks nothing.
+    if (entry.config.is_fixt()) {
+        session_engine_access::adopt_routes(*local_session, engine.fixt_routes_);
+    }
 
     // Step 2: open() — no Logon emitted (engine_managed initiator arm is a no-op).
     auto res = co_await local_session->open();
     if (!res.has_value()) {
+        log_role_loop_open_failure(engine_cfg, entry.config, res.error());
         co_return;
     }
 
@@ -1287,8 +1332,11 @@ asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_c
 }
 
 // ── start (FR-001/FR-003/FR-007 / data-model "Public surface" / 041 T018) ─────
-// Non-blocking. Validates the EngineConfig (clock not null) before spawning.
+// Validates the EngineConfig (clock not null) before spawning.
 // Returns clock_not_set (slot 54) without spawning any loops if invalid.
+// With a FIXT session registered it builds the route set (099-fixt-appl-version-validation,
+// data-model E-1): it blocks for the walks, so a host calling it from a handler on exec_ stalls
+// that thread, and a failure returns out_of_memory with nothing spawned and no set held.
 // On success, co_spawns one per-role loop per registered session on exec_.
 // Each loop co_awaits open() itself — cannot run in this synchronous call.
 // C-4 / SC-004: [[nodiscard]] — callers MUST check the result.
@@ -1300,6 +1348,22 @@ fixpp::core::expected_t<void> Engine::start() {
     // operational state on failure.
     if (auto r = fixpp::core::validate_engine_config(engine_cfg_); !r) {
         return std::unexpected(r.error());
+    }
+
+    // 099-fixt-appl-version-validation (data-model E-1): ahead of this function's first
+    // allocation. Over the entries is_fixt() selects, the ones the role loops hand the set to; a
+    // FIXT.1.1 entry with no default takes no part, since its open() refuses it.
+    auto const fixt_entry = [](auto const& kv) { return kv.second.config.is_fixt(); };
+    if (std::ranges::any_of(registry_, fixt_entry)) {
+        auto built = detail::fixt_route_set::build(
+            app_version_registry_,
+            registry_ | std::views::filter(fixt_entry) | std::views::transform([](auto const& kv) {
+                return kv.second.config.dictionary.get();
+            }));
+        if (!built) {
+            return std::unexpected(built.error());
+        }
+        fixt_routes_ = std::move(*built);
     }
 
     auto counter = std::make_shared<std::atomic<int>>(0);

@@ -45,11 +45,17 @@
 // set to fault_length_tag(), and no fault (the build failed on a resource status,
 // or on a fault the validator's hooks do not see) must give neither of those two
 // codes. A faulted walk that validate() reports conformant traps as well.
+//
+// 099-fixt-appl-version-validation (contracts/witnesses.md W-24): every parsed input is also
+// validated with an envelope, a routed table with FIXT11's as S's. A process that validated none
+// exits non-zero.
 
 #include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <filesystem>
 #include <fixpp/core/error.hpp>
 #include <fixpp/wire/dict_hooks.hpp>
 #include <fixpp/wire/framer.hpp>
@@ -57,6 +63,7 @@
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/tag_scan.hpp>
 #include <fixpp/wire/validator.hpp>
+#include <iostream>
 #include <memory_resource>
 #include <span>
 
@@ -64,6 +71,7 @@
 // validator.hpp already includes table_view.hpp transitively; listed here for
 // clarity.
 #include <fixpp/dict/table_view.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 
 // Test-only frame factory (friend of frame_view).
 #include "support/frame_view_factory.hpp"
@@ -113,6 +121,38 @@ bool is_valid_wire_error(fixpp::core::error e) noexcept {
             return false;
     }
 }
+
+// 099 W-24: S's table is FIXT11's, and the route's the validation dictionary's, each in the form
+// a route set holds.
+fixpp::dict::table_view const& envelope_table() {
+    static std::pmr::monotonic_buffer_resource mr;
+    static fixpp::dict::Dictionary const fixt11 = fixpp::dict::XmlLoader{}.load(
+        std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIXT11.xml", &mr);
+    static fixpp::dict::table_view const tv = fixt11.as_table_view(fixpp::dict::fixt_framing);
+    return tv;
+}
+
+fixpp::wire::dictionary_driven_validator const& routed_validator() {
+    static const fixpp::wire::dictionary_driven_validator validator{
+        fixpp::test_support::make_validation_test_dictionary()->as_table_view(
+            fixpp::dict::fixt_framing)};
+    return validator;
+}
+
+// W-24's positive control. Registered ahead of the first input, so that no input reaching the arm
+// reads zero and fails the run.
+std::uint64_t g_validated_with_envelope = 0;
+
+void report_envelope_arm() {
+    std::cerr << "[099 fuzz envelope arm] validated with an envelope " << g_validated_with_envelope
+              << '\n';
+    if (g_validated_with_envelope == 0) {
+        std::cerr << "[099 fuzz envelope arm] the counter read zero: the arm was bypassed\n";
+        std::_Exit(1);
+    }
+}
+
+[[maybe_unused]] const int g_envelope_report_registered = std::atexit(report_envelope_arm);
 
 // 092 R-7: one (input, hooks) comparison of the iterator's fault record with
 // OffsetTable::build.
@@ -291,6 +331,18 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         if (!is_valid_wire_error(validate_result.error())) {
             __builtin_trap();
         }
+    }
+
+    // 099 W-24: the same input, with an envelope. The allowlist is the same.
+    std::array<std::byte, 4 * 1024> envelope_scratch_buf{};
+    std::pmr::monotonic_buffer_resource envelope_scratch_mr{
+        envelope_scratch_buf.data(), envelope_scratch_buf.size(), std::pmr::null_memory_resource()};
+    std::uint16_t envelope_ref = 0;
+    auto const envelope_result =
+        routed_validator().validate(mv, &envelope_scratch_mr, &envelope_ref, &envelope_table());
+    ++g_validated_with_envelope;
+    if (!envelope_result && !is_valid_wire_error(envelope_result.error())) {
+        __builtin_trap();
     }
 
     return 0;

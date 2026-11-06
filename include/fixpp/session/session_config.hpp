@@ -3,9 +3,13 @@
 // include/fixpp/session/session_config.hpp
 //
 // fixpp::session::SessionConfig — value-typed, FROZEN at Session::open
-// ([arch §5.6] — close-and-reopen only; I-13). The executor / clock /
-// dictionary axes follow ONE uniform pattern:
+// ([arch §5.6] — close-and-reopen only; I-13). The executor and clock axes
+// follow ONE uniform pattern:
 //     resolved = override.value_or(engine_anchor)
+// The dictionary has no engine anchor and is required on the session, with no
+// fallback: `Session::open()` refuses a null one. This corrects 007's FR-016
+// (099-fixt-appl-version-validation, FR-019, fixpp#651). EngineConfig::dictionaries
+// answers versions other than the session dictionary's own, through the registry.
 // Namespace-scoped threading_mode / lock_policy enums + the CLOSED, 2-value
 // nested SessionConfig::backpressure_mode (drop_oldest UNREPRESENTABLE on the
 // app/session message path — [const §XV.15] / [2d §6.4] / I-14). The frozen
@@ -486,11 +490,14 @@ struct SessionConfig {
 
     // 041 T002 / data-model E1 / contract C-5 — opt-in dictionary-driven inbound
     // message validation (FR-001). Default false = disabled = byte-identical
-    // prior-release behaviour (FR-002/FR-009). true = enable: every inbound
-    // message in the processing states (NotConnected/LogonSent/LogonReceived/
-    // Active) is validated against cfg.dictionary before the seqnum gate
-    // (QuickFIX parity). Requires dictionary != nullptr — register_session
-    // rejects validate_inbound_messages=true + null dictionary with
+    // prior-release behaviour (FR-002/FR-009), but for a FIXT session's frame,
+    // which its route's table scans and parses either way (099, FR-011). true =
+    // enable: every inbound message in the processing states (NotConnected/LogonSent/
+    // LogonReceived/Active) is validated before the seqnum gate (QuickFIX parity):
+    // against cfg.dictionary, or on a FIXT session against the dictionary of the frame's
+    // route (099-fixt-appl-version-validation, data-model E-7), where an establishment
+    // arm refuses an application frame unvalidated. Requires dictionary != nullptr —
+    // register_session rejects validate_inbound_messages=true + null dictionary with
     // invalid_session_config (C-5 fail-closed / FR-011). Note opposite polarity
     // vs validate_sequence_numbers (that defaults true, this defaults false —
     // this adds a new strictness rather than relaxing an existing one).

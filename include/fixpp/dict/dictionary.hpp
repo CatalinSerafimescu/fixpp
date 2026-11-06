@@ -25,6 +25,7 @@
 #pragma once
 
 #include <cstdint>
+#include <fixpp/core/length_data_pairs.hpp>
 #include <fixpp/dict/component_ref.hpp>
 #include <fixpp/dict/field_ref.hpp>
 #include <fixpp/dict/group_ref.hpp>
@@ -34,10 +35,18 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <vector>
 
 namespace fixpp::dict {
 
 class XmlLoader;
+
+// 099-fixt-appl-version-validation (data-model E-3, FR-007): selects the as_table_view() overloads
+// that build a route table for a FIXT session.
+struct fixt_framing_t {
+    explicit fixt_framing_t() = default;
+};
+inline constexpr fixt_framing_t fixt_framing{};
 
 namespace detail {
 // Heap-pinned metadata block. Defined in src/dictionary/dictionary.cpp.
@@ -218,7 +227,28 @@ public:
     // on the per-message hot path.
     [[nodiscard]] table_view as_table_view() const;
 
+    // 099-fixt-appl-version-validation (data-model E-3, FR-007): a route table for a FIXT session.
+    // It adds the validator-private framing surface for v40 to v44, which v50, v50sp1 and v50sp2
+    // have from as_table_view() already and vt11 and FIX Latest need not have, declaring those
+    // tags themselves. Where the table's own header does not declare NoHops, it also registers
+    // NoHops's group metadata in the bare group store. Its result equals as_table_view()'s on every
+    // other store, so a non-FIXT session, which calls as_table_view(), is unchanged.
+    // Same [const §XV.1] rule: construction only at config-time.
+    [[nodiscard]] table_view as_table_view(fixt_framing_t /*form*/) const;
+
+    // The same, plus `extra` registered after the dictionary's own pairs, so that a pair of `extra`
+    // wins a collision on this table. Its result differs from the form above only in the two pair
+    // stores and has_nonstandard_pair().
+    [[nodiscard]] table_view as_table_view(
+        fixt_framing_t /*form*/, std::span<const core::detail::length_data_pair> extra) const;
+
 private:
+    friend std::vector<core::detail::length_data_pair> header_length_pairs(const Dictionary& d);
+
+    // The one population path of every as_table_view() form, each of which is one walk.
+    [[nodiscard]] table_view build_table_view(
+        bool route_table, std::span<const core::detail::length_data_pair> extra) const;
+
     friend class XmlLoader;
     friend class OrchestraLoader;  // 074: native Orchestra reader shares the private handle-ctor
 
@@ -235,5 +265,15 @@ private:
 
     detail::dict_metadata_handle_ptr handle_;
 };
+
+// 099-fixt-appl-version-validation (data-model E-1, E-3): `d`'s non-standard Length+Data pairs with
+// either tag in its header, by Length tag. For a route table's `extra`, at configuration time only.
+// Not a walk of the kind as_table_view() is.
+[[nodiscard]] std::vector<core::detail::length_data_pair> header_length_pairs(const Dictionary& d);
+
+// 099-fixt-appl-version-validation (data-model E-2, research R-5): the tags the peek reads as a
+// standard header on every shape: the FIXT.1.1 header, plus 370, which only FIX 4.2's and 4.3's
+// headers declare, so that one input has one ending in any field order.
+[[nodiscard]] bool is_fixt_standard_header_tag(std::uint16_t tag) noexcept;
 
 }  // namespace fixpp::dict

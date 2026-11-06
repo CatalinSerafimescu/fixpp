@@ -254,6 +254,11 @@ target_include_directories(fuzz_session_recovery_admin_parse PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
   "${CMAKE_SOURCE_DIR}/src"   # 092 T066: "session/scan_frame_header.hpp" (internal)
 )
+# 099-fixt-appl-version-validation W-24: the FIXT arm and the envelope arm load the vendored FIXT11.
+target_compile_definitions(fuzz_session_recovery_admin_parse PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+target_compile_definitions(fuzz_wire_validator PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 set_target_properties(fuzz_session_recovery_admin_parse PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 

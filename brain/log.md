@@ -6,6 +6,12 @@ status: stable
 
 # Log
 
+- **2026-11-05 — 099-fixt-appl-version-validation, `/speckit-verify` (Step 10b): a FIXT session reads each message with
+  that message's dictionary.** `components/session.md` gains the section with what was decided (two dictionaries chosen
+  per frame, one route per table, a shared `fixt_route_set` built in `Engine::start()`), what was rejected, and which
+  records 099 supersedes, flagged and not edited; `components/dictionary.md`, `c-api.md`, `config.md` and
+  `python-api.md` follow. `config.md` and `python-api.md` cite the 099 Gate A record.
+
 - **2026-11-03 — 098-dialect-overlay close-out (PR #656): `failure-classes.md` gains class 22, a dependency's
   convenience overload that discards a failure result.** pugixml's named mutators drop `set_name`'s result,
   so a failed allocation left a nameless node and the splice reported success; the fix routes all splice

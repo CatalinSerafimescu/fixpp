@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/support/msvc_debug_arena_skip.hpp
 //
+// 099-fixt-appl-version-validation: W-16 and W-20 reach proxies outside a std::pmr container.
+//
 // FIXPP_SKIP_ON_MSVC_DEBUG_ARENA(): GTEST_SKIP a byte-exact arena-exhaustion
 // OOM-injection test on the MSVC debug/asan lanes.
 //
@@ -56,15 +58,15 @@ inline bool msvc_debug_stl_active() noexcept {
 // assertion (a TU-local `operator new` counter that must read 0 across a
 // parse+read window) on the MSVC debug/asan lanes. Same _Container_proxy root
 // cause as the arena skip above: MSVC's debug STL (_ITERATOR_DEBUG_LEVEL >= 1)
-// heap-allocates a hidden _Container_proxy per std::pmr container at
-// construction THROUGH global operator new, so the counter observes those
+// heap-allocates a hidden _Container_proxy per std::pmr container or std::string
+// at construction THROUGH global operator new, so the counter observes those
 // proxy allocations even though the code under test draws only from its stack
 // arena. ⚠️ 389: this comment used to give the counts ("e.g. 8 for a top-level
 // dict-backed read, 2 for a nested descent"). Those are RESULTS, and #389 moved
 // them — it deleted `OffsetTable::group_slices_`, one std::pmr container per
 // table, so every table now constructs one fewer. The numbers are dropped
-// rather than re-derived: the CONDITION (one proxy per std::pmr container
-// constructed inside the window) is what a reader needs, and it cannot rot.
+// rather than re-derived: the CONDITION (one proxy per std::pmr container or
+// std::string constructed inside the window) is what a reader needs, and it cannot rot.
 // To re-derive a count, run the guarded cell on an MSVC debug lane and read the
 // counter.
 // The zero-global-heap DISCIPLINE is fully verified on windows-msvc-release
@@ -72,13 +74,14 @@ inline bool msvc_debug_stl_active() noexcept {
 // (debug/asan/tsan/ubsan/libc++). Only the MSVC-debug-iterator interaction is
 // skipped. See feedback_operator_new_witness_breaks_sanitizers /
 // feedback_msvc_debug_container_proxy_null_memory_resource.
-#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD()                                              \
-    if (!::fixpp::test_support::msvc_debug_stl_active()) {                                        \
-    } else                                                                                        \
-        GTEST_SKIP() << "MSVC debug STL heap-allocates a hidden _Container_proxy per std::pmr "   \
-                        "container via global operator new (_ITERATOR_DEBUG_LEVEL), so a "        \
-                        "zero-global-heap read guard cannot hold; the discipline is verified on " \
-                        "windows-msvc-release + all Linux lanes (debug/asan/tsan/ubsan/libc++)"
+#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD()                                             \
+    if (!::fixpp::test_support::msvc_debug_stl_active()) {                                       \
+    } else                                                                                       \
+        GTEST_SKIP() << "MSVC debug STL heap-allocates a hidden _Container_proxy per std::pmr "  \
+                        "container or std::string via global operator new "                      \
+                        "(_ITERATOR_DEBUG_LEVEL), so a zero-global-heap guard cannot hold; the " \
+                        "discipline is verified on windows-msvc-release + all Linux lanes "      \
+                        "(debug/asan/tsan/ubsan/libc++)"
 
 // FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP(): GTEST_SKIP a test that SWEEPS a
 // global `operator new` override, failing the Nth allocation for every N in turn,
@@ -91,7 +94,7 @@ inline bool msvc_debug_stl_active() noexcept {
 //   - ..._GLOBAL_HEAP_GUARD is for a counter asserted to read *zero*; a sweep
 //     deliberately makes allocations fail and asserts the subject is unchanged.
 // The ROOT CAUSE is the same as both: MSVC's debug STL (_ITERATOR_DEBUG_LEVEL >= 1)
-// draws a hidden _Container_proxy per std::pmr container through GLOBAL operator
+// draws a hidden _Container_proxy per container, std::pmr or not, through GLOBAL operator
 // new. A sweep counts those proxy allocations as if they belonged to the operation
 // under test and duly fails one, so bad_alloc is thrown inside a container's
 // member-initialisation — before any noexcept ctor body can catch and degrade —
@@ -107,12 +110,12 @@ inline bool msvc_debug_stl_active() noexcept {
 // verified on windows-msvc-RELEASE (no debug iterators, no proxy) and on ALL Linux
 // lanes (debug/asan/tsan/ubsan/libc++); only the MSVC-debug-iterator interaction
 // is skipped.
-#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP()                                        \
-    if (!::fixpp::test_support::msvc_debug_stl_active()) {                                 \
-    } else                                                                                 \
-        GTEST_SKIP()                                                                       \
-            << "MSVC debug STL draws a hidden _Container_proxy per std::pmr container "    \
-               "through global operator new (_ITERATOR_DEBUG_LEVEL), so an allocation "    \
-               "sweep fails one of those instead of the operation's own and terminates "   \
-               "inside member-initialisation; the exception-safety behaviour is verified " \
+#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP()                                              \
+    if (!::fixpp::test_support::msvc_debug_stl_active()) {                                       \
+    } else                                                                                       \
+        GTEST_SKIP()                                                                             \
+            << "MSVC debug STL draws a hidden _Container_proxy per container, std::pmr or not, " \
+               "through global operator new (_ITERATOR_DEBUG_LEVEL), so an allocation "          \
+               "sweep fails one of those instead of the operation's own and terminates "         \
+               "inside member-initialisation; the exception-safety behaviour is verified "       \
                "on windows-msvc-release + all Linux lanes (debug/asan/tsan/ubsan/libc++)"

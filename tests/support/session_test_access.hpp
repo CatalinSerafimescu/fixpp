@@ -15,7 +15,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/session/session.hpp>
+#include <memory>
 #include <span>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace fixpp::session {
 
@@ -35,11 +39,41 @@ struct session_test_access {
         return s.store_then_emit(stamped_seq, frame);
     }
 
-    // True iff open() constructed the inbound validator (validate_inbound_messages
-    // and a dictionary). Lets 041 T016 (SC-005) prove the default path constructs
+    // True iff the session validates: validate_inbound_messages and open() set a route with a
+    // validator (099-fixt-appl-version-validation, data-model E-6). A FIXT session's route holds
+    // one whether it validates or not. Lets 041 T016 (SC-005) prove the default path constructs
     // none.
     [[nodiscard]] static bool has_validator(Session const& s) noexcept {
-        return s.validator_ != nullptr;
+        return s.cfg_.validate_inbound_messages && s.session_route_.validator != nullptr;
+    }
+
+    // Hands a route set to a session right after construction and before open(), as the role
+    // loops do through session_engine_access (099, tasks.md T007, T039).
+    static void adopt_routes(Session& s, std::shared_ptr<const detail::fixt_route_set> set) {
+        s.routes_ = std::move(set);
+    }
+
+    // data-model E-10's msg_type_defaults_, in stored order, and its capacity (099, W-25). Read
+    // them while nothing pumps.
+    [[nodiscard]] static std::vector<std::pair<std::string, fixpp::dict::application_version>>
+    msg_type_defaults(Session const& s) {
+        std::vector<std::pair<std::string, fixpp::dict::application_version>> out;
+        out.reserve(s.msg_type_defaults_.size());
+        for (auto const& e : s.msg_type_defaults_) {
+            out.emplace_back(std::string(e.msg_type, e.len), e.version);
+        }
+        return out;
+    }
+    [[nodiscard]] static std::size_t msg_type_defaults_capacity(Session const& s) noexcept {
+        return s.msg_type_defaults_.capacity();
+    }
+    [[nodiscard]] static void const* msg_type_defaults_block(Session const& s) noexcept {
+        return s.msg_type_defaults_.data();
+    }
+
+    // The route set the session holds: null on a non-FIXT session (099, W-15).
+    [[nodiscard]] static std::shared_ptr<const detail::fixt_route_set> routes(Session const& s) {
+        return s.routes_;
     }
 
     // True iff the session reached lifecycle::closed_drained. The issue #151 C-ABI

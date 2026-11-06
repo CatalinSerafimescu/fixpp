@@ -18,6 +18,15 @@
 // paired comparison also covers the inbound validator's parse. Added in a
 // bench-only commit before any production edit, for the same reason as above.
 //
+// 099-fixt-appl-version-validation (research R-14, `[const §VIII.3]`):
+// `..._Fixt_Validated` runs on a FIXT.1.1 session, FIXT11 as the session's dictionary and
+// FIX50SP2 as the engine's, as the live cell W-18 does: an in-sequence Heartbeat, a
+// NewOrderSingle with no 1128, and one with `1128=9`. It reports the peek's walk and the
+// envelope's per-field test, for information. It has no budget: the merge-base has no routed
+// frame to pair against, and there its application cases report the SkipWithError below,
+// because FIXT11 defines no NewOrderSingle and only route selection can deliver one. That is
+// what makes "fromApp ran once per frame, nothing sent" the reach proof for this case.
+//
 // Harness: the session test support used by tests/session/test_validate_gate_inbound.cpp
 // (a mock clock on one io_context, `transport_send` captured, the real FIX44
 // dictionary). Each iteration spawns one `on_inbound_frame` with a completion
@@ -41,11 +50,17 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/version_profile.hpp>
+#include <fixpp/dict/version_registry.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/session/application.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <memory>
+#include <memory_resource>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -61,7 +76,8 @@ using namespace std::chrono_literals;
 namespace {
 
 std::vector<std::byte> make_frame(std::string_view msg_type, std::uint32_t seq,
-                                  std::string const& extra_body) {
+                                  std::string const& extra_body,
+                                  std::string_view begin_string = "FIX.4.4") {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -70,7 +86,7 @@ std::vector<std::byte> make_frame(std::string_view msg_type, std::uint32_t seq,
     body += "56=ISLD\x01";
     body += extra_body;
 
-    std::string msg = "8=FIX.4.4\x01";
+    std::string msg = "8=" + std::string(begin_string) + "\x01";
     msg += "9=" + std::to_string(body.size()) + "\x01";
     msg += body;
     unsigned int cs = 0;
@@ -114,7 +130,12 @@ public:
     std::size_t from_app = 0;
 };
 
-enum class frame_kind : int { heartbeat = 0, nos = 1 };
+enum class frame_kind : int { heartbeat = 0, nos = 1, nos_1128 = 2 };
+
+std::shared_ptr<const fixpp::dict::Dictionary> load_dictionary(char const* basename) {
+    return std::make_shared<const fixpp::dict::Dictionary>(fixpp::dict::XmlLoader{}.load(
+        std::string(FIXPP_DICT_DATA_DIR) + "/" + basename, std::pmr::get_default_resource()));
+}
 
 // Upper bound on io_context polls for one on_inbound_frame to complete; a clean
 // in-sequence frame never waits on a timer or on I/O, so reaching it is a miss.
@@ -127,6 +148,7 @@ struct InboundBench {
     fixpp::core::EngineConfig engine;
     std::shared_ptr<CountingApplication> app = std::make_shared<CountingApplication>();
     std::size_t sent = 0;
+    std::optional<fixpp::dict::version_registry> registry;
     std::unique_ptr<fixpp::session::Session> sess;
     bool done = false;
     bool ok = false;
@@ -177,7 +199,41 @@ struct InboundBench {
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         cfg.validate_inbound_messages = validate;
         sess = std::make_unique<fixpp::session::Session>(engine, cfg);
+        return open_to_active(make_frame("A", 1,
+                                         "98=0\x01"
+                                         "108=30\x01"));
+    }
 
+    // Shape T, validating, with DefaultApplVerID 9. The session builds its own route set in open().
+    bool setup_fixt() {
+        engine.dictionaries = {load_dictionary("FIX50SP2.xml")};
+        auto built = fixpp::core::build_version_registry(engine);
+        if (!built) {
+            return false;
+        }
+        registry.emplace(std::move(*built));
+
+        fixpp::session::SessionConfig cfg;
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = "FIXT.1.1";
+        cfg.default_appl_ver_id = fixpp::dict::application_version::v50sp2;
+        cfg.heartbeat_interval = 30s;
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = load_dictionary("FIXT11.xml");
+        cfg.executor_override = ioc.get_executor();
+        cfg.transport_send = [this](std::span<const std::byte>) { ++sent; };
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        cfg.validate_inbound_messages = true;
+        sess = std::make_unique<fixpp::session::Session>(engine, cfg, &*registry);
+        return open_to_active(make_frame("A", 1,
+                                         "98=0\x01"
+                                         "108=30\x01"
+                                         "1137=9\x01",
+                                         "FIXT.1.1"));
+    }
+
+    bool open_to_active(std::vector<std::byte> const& logon) {
         done = false;
         ok = false;
         asio::co_spawn(ioc, sess->open(),
@@ -188,9 +244,6 @@ struct InboundBench {
         if (!pump() || !ok) {
             return false;
         }
-        auto const logon = make_frame("A", 1,
-                                      "98=0\x01"
-                                      "108=30\x01");
         if (!feed(logon)) {
             return false;
         }
@@ -199,19 +252,33 @@ struct InboundBench {
     }
 };
 
-void fill(std::vector<std::vector<std::byte>>& batch, frame_kind kind, std::uint32_t& next_seq) {
+void fill(std::vector<std::vector<std::byte>>& batch, frame_kind kind, std::uint32_t& next_seq,
+          std::string_view begin_string) {
     batch.clear();
     for (std::size_t i = 0; i < kBatch; ++i) {
-        batch.push_back(kind == frame_kind::heartbeat ? make_frame("0", next_seq, {})
-                                                      : make_frame("D", next_seq, nos_body()));
+        switch (kind) {
+            case frame_kind::heartbeat:
+                batch.push_back(make_frame("0", next_seq, {}, begin_string));
+                break;
+            case frame_kind::nos:
+                batch.push_back(make_frame("D", next_seq, nos_body(), begin_string));
+                break;
+            case frame_kind::nos_1128:
+                batch.push_back(make_frame("D", next_seq, "1128=9\x01" + nos_body(), begin_string));
+                break;
+        }
         ++next_seq;
     }
 }
 
-void run_in_sequence(benchmark::State& state, bool validate) {
+enum class session_shape : int { fix44, fix44_validated, fixt_validated };
+
+void run_in_sequence(benchmark::State& state, session_shape shape) {
     auto const kind = static_cast<frame_kind>(state.range(0));
     InboundBench b;
-    if (!b.setup(validate)) {
+    bool const fixt = shape == session_shape::fixt_validated;
+    std::string_view const begin_string = fixt ? "FIXT.1.1" : "FIX.4.4";
+    if (!(fixt ? b.setup_fixt() : b.setup(shape == session_shape::fix44_validated))) {
         state.SkipWithError("session did not reach Active");
         return;
     }
@@ -219,7 +286,7 @@ void run_in_sequence(benchmark::State& state, bool validate) {
     std::uint32_t next_seq = 2;
     std::vector<std::vector<std::byte>> batch;
     batch.reserve(kBatch);
-    fill(batch, kind, next_seq);
+    fill(batch, kind, next_seq, begin_string);
     std::size_t idx = 0;
     std::size_t fed = 0;
     bool all_ok = true;
@@ -229,7 +296,7 @@ void run_in_sequence(benchmark::State& state, bool validate) {
     for (auto _ : state) {
         if (idx == batch.size()) {
             state.PauseTiming();
-            fill(batch, kind, next_seq);
+            fill(batch, kind, next_seq, begin_string);
             idx = 0;
             state.ResumeTiming();
         }
@@ -244,13 +311,13 @@ void run_in_sequence(benchmark::State& state, bool validate) {
         state.SkipWithError("session left Active");
     } else if (b.sent != 0) {
         state.SkipWithError("session sent a frame (sequence gap or Reject): not the clean path");
-    } else if (kind == frame_kind::nos && b.app->from_app != fed) {
+    } else if (kind != frame_kind::heartbeat && b.app->from_app != fed) {
         state.SkipWithError("fromApp did not run once per NewOrderSingle");
     }
 }
 
 void BM_Session_OnInboundFrame_InSequence(benchmark::State& state) {
-    run_in_sequence(state, /*validate=*/false);
+    run_in_sequence(state, session_shape::fix44);
 }
 BENCHMARK(BM_Session_OnInboundFrame_InSequence)
     ->ArgName("frame")
@@ -258,11 +325,20 @@ BENCHMARK(BM_Session_OnInboundFrame_InSequence)
     ->Arg(static_cast<int>(frame_kind::nos));
 
 void BM_Session_OnInboundFrame_InSequence_Validated(benchmark::State& state) {
-    run_in_sequence(state, /*validate=*/true);
+    run_in_sequence(state, session_shape::fix44_validated);
 }
 BENCHMARK(BM_Session_OnInboundFrame_InSequence_Validated)
     ->ArgName("frame")
     ->Arg(static_cast<int>(frame_kind::heartbeat))
     ->Arg(static_cast<int>(frame_kind::nos));
+
+void BM_Session_OnInboundFrame_Fixt_Validated(benchmark::State& state) {
+    run_in_sequence(state, session_shape::fixt_validated);
+}
+BENCHMARK(BM_Session_OnInboundFrame_Fixt_Validated)
+    ->ArgName("frame")
+    ->Arg(static_cast<int>(frame_kind::heartbeat))
+    ->Arg(static_cast<int>(frame_kind::nos))
+    ->Arg(static_cast<int>(frame_kind::nos_1128));
 
 }  // namespace
