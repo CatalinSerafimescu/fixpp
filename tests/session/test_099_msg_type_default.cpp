@@ -1144,9 +1144,19 @@ TEST(W25StorageNonFixt, ReservesNothing) {
 
 // ── The dictionary and the cap ──────────────────────────────────────────────────────────
 
+// A file's text with each CRLF read as LF. A checkout may convert a vendored file's line endings
+// (git core.autocrlf); these cells compare and count its content, with anchors written in LF.
 std::string read_text(const std::filesystem::path& p) {
     std::ifstream in{p, std::ios::binary};
-    return {std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    const std::string raw{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    std::string text;
+    text.reserve(raw.size());
+    for (std::size_t i = 0; i < raw.size(); ++i) {
+        if (raw[i] != '\r' || i + 1 == raw.size() || raw[i + 1] != '\n') {
+            text.push_back(raw[i]);
+        }
+    }
+    return text;
 }
 
 // `added` goes between `before` and `after`, which the frozen file holds adjacent, once.
