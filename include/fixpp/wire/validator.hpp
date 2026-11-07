@@ -20,6 +20,10 @@
 // below and are instantiated wherever a complete table_view exists (now in
 // both production TUs via Dictionary::as_table_view() and test TUs).
 //
+// 101-inbound-reject-fidelity D2 supersedes the step order below Step 0: a MsgType the table does
+// not define is refused (wire_invalid_msg_type) after Step 0 and before Step 1, which reuses the
+// same valid-tag view.
+//
 // 099-fixt-appl-version-validation (data-model E-4, FR-008): dictionary_driven_validator gains a
 // non-virtual validate() taking the session dictionary's table as an envelope, and table(). Neither
 // is on `Validator`, and the class's layout does not move.
@@ -140,6 +144,9 @@ public:
 
     // [2b §6.5] Unconditional validation over every field present in `msg`.
     // Algorithm (per spec):
+    //   0. Header order (the first field after 8 and 9 is 35), then the
+    //      MsgType: one the table does not define → wire_invalid_msg_type
+    //      (101 D2), no RefTagID.
     //   1. Iterate each field via begin/end; for each:
     //      a. Unexpected tag  → wire_unexpected_tag (42)
     //      b. Enum violation  → wire_field_value_out_of_range (40)
@@ -179,8 +186,8 @@ public:
         using iter_t = MessageView<access_mode::Index>::field_iterator;
 
         // 092 T062a (FR-012, owner ruling on a failed-build view): a failed
-        // build leaves msg_type() empty, so Step 1 would reject the first field
-        // as an unexpected tag before its walk met the fault. When the build
+        // build leaves msg_type() empty, so the MsgType check below would refuse
+        // the frame before a walk met the fault. When the build
         // failed, walk to the end or the first fault and report the fault the
         // same way E-5 does. A build that failed for another reason (out of
         // memory, the offset-table cap) leaves a walk with no fault, and then
@@ -222,13 +229,20 @@ public:
             }
         }
 
+        // ── The MsgType check (101 D2, FR-001) ───────────────────────────
+        // After the failed-build fault scan and Step 0, before Step 1: a
+        // MsgType the table does not define (no `valid_` entry) is refused
+        // with no RefTagID. The view is fetched once and Step 1 reuses it, so
+        // a validated message pays one valid_.find(msg_type).
+        auto const valid_tags = dict_.valid_tags_for(msg_type);
+        if (!valid_tags.found()) {
+            return core::expected_t<void>{std::unexpect, core::error::wire_invalid_msg_type};
+        }
+
         // ── Step 1: iterate every present field ──────────────────────────
         // Hoist (perf): `field_valid_for(msg_type, tag)` re-hashes the
-        // loop-invariant msg_type on every field (valid_.find(msg_type)).
-        // Fetch the tag view once; an unknown msg_type yields a view whose
-        // `contains()` is false for every tag — identical to field_valid_for
-        // returning false for every tag.
-        auto const valid_tags = dict_.valid_tags_for(msg_type);
+        // loop-invariant msg_type on every field; Step 1 tests membership in
+        // the view fetched above instead.
         iter_t const begin{msg.bytes(), 0, hooks};
         iter_t const end{msg.bytes(), msg.bytes().size(), hooks};
         auto const fields =

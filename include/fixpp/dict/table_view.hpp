@@ -266,6 +266,12 @@ public:
         return set_ != nullptr && set_->contains(tag);
     }
 
+    // 101-inbound-reject-fidelity (research D2): true when the view refers to a `valid_` entry,
+    // i.e. the table defines the MsgType it was taken for (some add_valid(_tag) or
+    // add_required(_tag) named it; a group-context, per-tag, header or framing operation does
+    // not). The validator answers wire_invalid_msg_type on a view this is false for.
+    [[nodiscard]] bool found() const noexcept { return set_ != nullptr; }
+
 private:
     friend class table_view;
 
@@ -346,9 +352,10 @@ public:
     // Hot-path hoist (validator perf round): the per-msg_type valid-tag set,
     // fetched ONCE per message so validate()'s per-field loop pays a uint16
     // set-membership test instead of re-hashing the loop-invariant msg_type
-    // on every field. An unknown msg_type yields a view whose `contains()`
-    // returns false for every tag — the same behaviour as field_valid_for
-    // returning false for every tag on an unknown msg_type. The view aliases
+    // on every field. An unknown msg_type yields a view whose `found()` is
+    // false and whose `contains()` is false for every tag, as field_valid_for
+    // is; the validator refuses such a MsgType before its field walk reads the
+    // view (101 D2, wire_invalid_msg_type). The view aliases
     // storage owned by this table_view (stable for its lifetime; the map is
     // immutable after construction).
     [[nodiscard]] valid_tag_set_view valid_tags_for(std::string_view msg_type) const noexcept {

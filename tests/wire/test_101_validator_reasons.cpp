@@ -24,6 +24,7 @@
 #include <fixpp/wire/validator.hpp>
 #include <functional>
 #include <memory_resource>
+#include <optional>
 #include <ostream>
 #include <span>
 #include <string>
@@ -65,6 +66,7 @@ struct Verdict {
     int reason = -1;
     std::uint16_t ref = 0;
     bool parsed = false;
+    std::optional<fixpp::core::error> error;  // the validator's own result, when it failed
 };
 
 Verdict judge(table_view tv, std::string_view fields) {
@@ -91,6 +93,9 @@ Verdict judge(table_view tv, std::string_view fields) {
                                                 std::pmr::null_memory_resource()};
     const auto r = val.validate(*mv, &scratch, &v.ref);
     v.reason = r ? -1 : fixpp::wire::wire_error_to_session_reject_reason(r.error());
+    if (!r) {
+        v.error = r.error();
+    }
     return v;
 }
 
@@ -110,6 +115,7 @@ TEST(Validator101Reasons, W101_6_UndefinedMsgType_Reason11_NoRefTag) {
     ASSERT_TRUE(v.parsed);
     EXPECT_EQ(v.reason, 11);
     EXPECT_EQ(v.ref, 0) << "an undefined MsgType names no field";
+    EXPECT_EQ(v.error, fixpp::core::error::wire_invalid_msg_type);
 }
 
 // The header-order check runs before the MsgType check, so its fault is the answer.
@@ -130,6 +136,7 @@ TEST(Validator101Reasons, W101_6_UndefinedMsgTypeAndUndefinedTag_Reason11) {
     ASSERT_TRUE(v.parsed);
     EXPECT_EQ(v.reason, 11);
     EXPECT_EQ(v.ref, 0);
+    EXPECT_EQ(v.error, fixpp::core::error::wire_invalid_msg_type);
 }
 
 // ── W101-7: which operations define a MsgType on a hand-built table (research D2) ───────
@@ -153,6 +160,7 @@ TEST(Validator101Reasons, W101_7_ContextOnly_DoesNotDefineTheMsgType) {
     ASSERT_TRUE(v.parsed);
     EXPECT_EQ(v.reason, 11);
     EXPECT_EQ(v.ref, 0);
+    EXPECT_EQ(v.error, fixpp::core::error::wire_invalid_msg_type);
 }
 
 // ── W101-14: US2 scenario 5, one cell per population-operation class (research D1) ──────
