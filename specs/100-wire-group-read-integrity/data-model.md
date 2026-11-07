@@ -61,10 +61,13 @@ including `wire_group_too_large`.
 
 - **New** per-tag bitset "has a context key", beside `group_bits_`, set wherever a `group_ctx_` key is created (all
   three `_ctx` setters, `add_group_required_member_ctx` included); built once with the table.
+- **New** registration-only `(msg_type, parent_path, no_tag)` set filled from the per-message delimiter records
+  (`msg_group_ctx_delims`), which arm 1 reads with the `group_ctx_` keys of a hand-built table (research D2). It creates
+  no `group_ctx_` key. *(Added by Gate A round 4 hand-edit (owner, 2026-11-07).)*
 - **New** MsgType-free set of `(parent_path, no_tag)` section-group keys, filled by a new
   `table_view_builder::add_section_group(parent_path, no_tag)` that `as_table_view` calls from a new handle store
   (`dict_metadata_handle`, beside `header_tags_`); the loaders' header and trailer walks fill that store at every
-  depth. Built once with the table; no arena impact, since `table_view` is per dictionary. Section records do not set
+  depth, once per (definition, enclosing path) (research D2; Gate A round 4 hand-edit (owner, 2026-11-07)). Built once with the table; no arena impact, since `table_view` is per dictionary. Section records do not set
   the "has a context key" bitset. The section arm (research D2) reads this store, not `is_header_tag` or `group_bit`.
 - **New** `noexcept` accessor answering the registration predicate; its arms are stated in research D2.
 

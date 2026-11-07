@@ -15,6 +15,7 @@ cmake --build build/linux-clang-debug -j8 --target <each target found above>
 ctest --test-dir build/linux-clang-debug -L wire --output-on-failure
 ctest --test-dir build/linux-clang-debug -L capi --output-on-failure
 ctest --test-dir build/linux-clang-debug -L session --output-on-failure
+ctest --test-dir build/linux-clang-debug -L dictionary --output-on-failure   # loader section-group records, D2 sweep
 ctest --test-dir build/linux-clang-debug -L alloc_guard --output-on-failure   # inbound zero-allocation gates
 ctest --test-dir build/linux-clang-debug -L codegen --output-on-failure       # regenerated goldens (research census)
 ```

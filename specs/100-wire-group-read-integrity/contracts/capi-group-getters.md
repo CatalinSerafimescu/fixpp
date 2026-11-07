@@ -33,7 +33,7 @@ No exception leaves either function.
 Each is witnessed RED on `fa778a8e` (research D9).
 
 - Flat getter, row 4, a registered zero count mid-body or as the last body field (or a header or trailer group's count
-  tag holding 0, research D9 (ii-0)): was `TYPE_MISMATCH`.
+  tag holding 0, research D9 (ii-0), (ii-0h)): was `TYPE_MISMATCH`.
 - Flat getter, row 4, a registered lying count (`n ≥ 1`, next field not a member): was `TYPE_MISMATCH`. (The nested
   getter already answers `OK`/0 for it.)
 - Flat getter, row 3, a nested group's count tag read at the top level with a value `n ≥ 1` (for example 802 outside
@@ -43,8 +43,9 @@ Each is witnessed RED on `fa778a8e` (research D9).
   declare it, for example NoPartyIDs(453) in a declared message without Parties, or a message type the dictionary does
   not declare), with a value `n ≥ 1`: was a cursor through the bare member fallback (derived from source; the RED run
   confirms or corrects it). It now answers as QuickFIX `getGroup` does. Header or trailer groups, at any depth, are not
-  in this population (Unchanged). This includes a tag the header declares as a scalar and some message declares as a
-  body group (QuickFIX reads it as a header scalar).
+  in this population (Unchanged). The population includes a tag the header declares as a scalar and some message
+  declares as a body group, read in a message type that does not declare that group (research D9 (i-a); QuickFIX reads
+  it as a header scalar).
 - Flat getter, row 2: was `TYPE_MISMATCH` for slice exhaustion and group-too-large; was an escaping `std::bad_alloc`
   for the cursor shell.
 - Nested getter, row 3, a present scalar on an exhausted arena: was `WIRE_LIMIT_EXCEEDED` when the sub-table build or
@@ -74,6 +75,8 @@ Each is witnessed RED on `fa778a8e` (research D9).
   example NoHops(627) in a FIX 4.3, FIX 4.4 or FIXT 1.1 frame): a group, as QuickFIX C++ reads it (research D2's
   section arm); with n ≥ 1 instances, a cursor, as today. With count 0 it reads row 4, a change from 1.14 listed
   above.
+- A group count tag a declared message reaches at two parent paths, read at the message root when its surviving
+  occurrence is nested: a group, as today and as QuickFIX C++ reads it (research D2 arm 1).
 - Error code values and names; no symbol added or removed.
 
 ## Typed C++ (`MessageView::group<>()`, generated group accessors)

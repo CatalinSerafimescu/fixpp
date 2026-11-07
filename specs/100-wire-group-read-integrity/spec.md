@@ -84,7 +84,7 @@ the flat getter returns `TYPE_MISMATCH`; and a scalar that is the last field of 
   here (for example NoPartySubIDs(802), registered under `[453]`, read at the top level). The count's value, its
   position and the field after it never decide group-ness. The validator's own group detection is unchanged (FR-009);
   its remaining context-miss fallback is a lead to file, not fixed here. *Amended by Gate A round 2 (below, "Which
-  contexts does the predicate cover?"): a header arm is added, and arm 1 is "a context key exists". The predicate's
+  contexts does the predicate cover?"): a header arm is added, and arm 1 is "a context key exists" (superseded by Gate A round 4 hand-edit (owner, 2026-11-07): research D2's key set). The predicate's
   arms are stated once, in research D2.* *The header arm is replaced by the section arm: superseded by Gate A round 3
   hand-edit (owner, 2026-11-07), research D2.*
 - Q: What does a registered count tag whose instances do not follow read as? → A: A present group with zero instances
@@ -145,8 +145,9 @@ the flat getter returns `TYPE_MISMATCH`; and a scalar that is the last field of 
   group at the top level is a group in every message type, declared or not (QuickFIX C++ `_header_`, QuickFIX/J
   `HEADER_ID`), as it is today.~~ *Superseded by Gate A round 3 hand-edit (owner, 2026-11-07): a header or trailer
   group, at any depth inside its section, is a group in every message type, declared or not (QuickFIX C++ `_header_` /
-  `_trailer_`, QuickFIX/J `HEADER_ID`), as it is today.* Arm 1 holds when a context key exists for the tag, whatever its record holds (members,
-  delimiter, or required members only). The arms are stated in research D2.
+  `_trailer_`; QuickFIX/J `HEADER_ID` for the header), as it is today.* Arm 1 holds when a context key exists for the tag, whatever its record holds (members,
+  delimiter, or required members only). *(Arm 1 reads research D2's key set, which includes per-occurrence delimiter
+  records with no `group_ctx_` key: superseded by Gate A round 4 hand-edit (owner, 2026-11-07).)* The arms are stated in research D2.
 - ~~Q: Is a trailer arm needed? → A: No shipped dictionary declares a group in its trailer. This is a condition the D2
   sweep re-checks (research D9), not a count.~~ *Superseded by Gate A round 3 hand-edit (owner, 2026-11-07): the
   section arm covers header and trailer groups at every depth, from records the loaders keep (research D2).*
@@ -201,7 +202,7 @@ body field (followed only by CheckSum), and read the group through each read pat
 10. **Given** a header or trailer group, or a group nested in one (for example NoHops(627) in a FIX 4.3, FIX 4.4 or
     FIXT 1.1 frame), in a message type the dictionary does not declare, **When** the flat getter is called, **Then** it
     reads as a group: with n ≥ 1 instances, `OK` with a cursor, as today (control); with count 0, `OK`/0, as
-    scenario 1 (research D9 (ii-0)).
+    scenario 1 (research D9 (ii-0), (ii-0h)).
 11. **Given** any frame of scenarios 1 to 3, or a scalar of scenario 4, **When** the same read is made a second time on
     either path, **Then** the second answer is the first one.
 
@@ -334,9 +335,9 @@ parse it; separately parse frames of many distinct, non-consecutive tags that to
 - **SC-001**: Every cell named in the acceptance scenarios and in the contract's "Changes from 1.14" is RED on
   `fa778a8e` where today's behaviour differs (US1.1, US1.2, US1.4's nested scalar mid-instance and last in instance,
   US1.7, US1.8 and US1.9 with `n ≥ 1`, US1.11's twins of those cells, US2.1, US2.2, US2.3, US2.5, US2.6, US3.1, US3.2's
-  per-insert-cap frame, and research D9's section-arm cells (i-a) and (ii-0)) and GREEN on the feature head; the control
+  per-insert-cap frame, and research D9's section-arm cells (i-a), (ii-0), (ii-0h) and (ii-0-O)) and GREEN on the feature head; the control
   cells (including US1.3, which today's nested getter already answers `OK`/0 through its presence probe, US1.10 with
-  n ≥ 1, and research D9's section-arm cells (i-b), (i-c), (ii) and (iii), each proven live by its mutant) are GREEN on
+  n ≥ 1, and research D9's section-arm cells (i-b), (i-c), (ii), (iii), (iv), (v), (ii-O) and (iii-O), each proven live by its mutant) are GREEN on
   both. The verify record names, per cell, the lanes on which it shows RED and those on
   which it skips (the arena-exhaustion cells assert only where the arena's upstream is null; MSVC debug forwards to the
   heap).
@@ -356,7 +357,8 @@ parse it; separately parse frames of many distinct, non-consecutive tags that to
 - FR-001's predicate needs a dictionary structure that does not exist today: a per-tag "has a context key" bitset in
   `table_view`, set wherever a context key is created, and one `dict_hooks` callback that asks it. `table_view::group_bit`
   is set by the bare and the `_ctx` setters alike, so it cannot answer the bare-only arm. The section arm reads a new
-  MsgType-free section-group store, recorded by the loaders (research D2). The callback grows `dict_hooks` and every by-value holder of it, including
+  MsgType-free section-group store, recorded by the loaders (research D2). Arm 1 reads a registration-only key set
+  filled from the per-message delimiter records (research D2; Gate A round 4 hand-edit (owner, 2026-11-07)). The callback grows `dict_hooks` and every by-value holder of it, including
   `OffsetTable`; the census is in research.md.
 - The crafted probe-budget frame can be built deterministically for a known table seed in a test; the production seed
   is not weakened to make the test possible.

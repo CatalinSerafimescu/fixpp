@@ -38,13 +38,15 @@ read stopped by `wire_group_too_large` (D5) and a nested sub-table over its entr
 **Project Type**: C++ library: wire codec, dictionary view, C ABI.
 
 **Performance Goals**: no measurable change on the read path. D2 adds one registration-callback call per group read
-(a bit test, then one context-store probe); D1 adds a counter to the build loop; D3/D5 add by-value bytes; D11's scan
+(one context-store probe (arm 1's key set); on a miss, one section-store probe; on a miss, a bit test; each
+allocation-free, the section store probed by a non-owning query as `group_ctx_` is); D1 adds a counter to the build loop; D3/D5 add by-value bytes; D11's scan
 runs only on a failed nested read.
 
 **Constraints**: zero allocation per message on the inbound path (`[const §XV.1]`); every touched wire function stays
 `noexcept`, and the new callback and accessor are `noexcept`; result structs stay trivially copyable; `group_span` stays
 within its asserted 16 bytes. `sizeof(dict_hooks)` and `sizeof(OffsetTable)` grow by one function pointer (D2); the
-arena's size and upstream do not change (073), and the census in research.md re-checks every band tuned to the old size.
+arena's size and upstream do not change (073), and the census in research.md re-checks every band tuned to the old size. `table_view` and `dict_metadata_handle` grow by the section store, and
+`table_view` by arm 1's registration-only set (built once per dictionary; research census size-pin recipe).
 
 **Scale/Scope**: production `src/wire/offset_table.cpp`, `include/fixpp/wire/offset_table.hpp`,
 `include/fixpp/wire/dict_hooks.hpp`, `include/fixpp/wire/parser.hpp` (`for_table_view`, `MessageView::group<>()`),
@@ -68,7 +70,7 @@ regenerates (research census). Tests in `tests/wire/`, `tests/capi/`, `tests/ses
 | IX — coverage, sanitizers, static | touched modules ≥ 95/85 or per-line assessment | PASS planned: `/speckit-verify`; ASan on the cursor-shell path. |
 | **X — ABI** | §X.7: a breaking change before the first release bumps MINOR, declared BREAKING on each affected declaration, every in-repository consumer updated | **1.15 BREAKING** (D8): getters and session observers; freeze manifest and version test updated; Python consumes only the version macros (research census). |
 | XI — concurrency | — | N/A, no concurrency surface. The process-global seed hook is restored by RAII in every cell that sets it (D9). |
-| **XV.1** — no per-message heap | inbound path | PASS: no new allocation; the cursor shell keeps its arena allocation, now caught; D10 allocates less than today; D11's scan allocates nothing; the registration bitset is built with the dictionary view, never on the read path. |
+| **XV.1** — no per-message heap | inbound path | PASS: no new allocation; the cursor shell keeps its arena allocation, now caught; D10 allocates less than today; D11's scan allocates nothing; the registration bitset, arm 1's registration-only set and the section-group store are built with the dictionary view, never on the read path. |
 | XVII — gates | Gate A on public C-ABI behaviour | Gate A required: §XVII.1's public-API trigger fires. |
 
 **Initial gate: PASS.** **Post-design re-check: PASS.**
@@ -93,8 +95,12 @@ specs/100-wire-group-read-integrity/
 ### Source Code (library root)
 
 ```text
-include/fixpp/dict/table_view.hpp     # D2 context-record bitset + registration accessor
+include/fixpp/dict/table_view.hpp     # D2 context-record bitset, section-group store, registration accessor, add_section_group; arm 1 registration-only set
 include/fixpp/wire/dict_hooks.hpp     # D2 group_registered_fn
+src/dictionary/xml_loader.cpp          # D2 header and trailer section-group records, per (definition, path)
+src/dictionary/orchestra_loader.cpp    # D2 the same from components 1024 and 1025
+src/dictionary/dictionary_internal.hpp # D2 dict_metadata_handle section-group store
+src/dictionary/dictionary.cpp          # D2 build_table_view copies the store through add_section_group; fills arm 1's set from msg_group_ctx_delims
 include/fixpp/wire/offset_table.hpp   # D3 is_group; D5 group_read_status; group_span: + is_group
 src/wire/offset_table.cpp             # D1 per-build budget; D2 group() order; D5/D7 statuses;
                                       # D10 cache rule; D11 nested registration, then presence
@@ -153,7 +159,7 @@ binaries.
 
 | Item | Why | Simpler alternative rejected because |
 |---|---|---|
-| D2 adds a `table_view` bitset, the section store, and a `dict_hooks` callback | no existing accessor answers "context key here, section group at its path, or no context key anywhere" in O(1); `group_bit` is set by both setter families; the section store, because `is_header_tag ∧ group_bit` is not a section registration | the delimiter oracle's bare fallback fabricates cross-context groups (802 at the root); exact-only makes 099's NoHops not a group |
+| D2 adds a `table_view` bitset, the section store, arm 1's registration-only set (Gate A round 4), and a `dict_hooks` callback | no existing accessor answers "context key here, section group at its path, or no context key anywhere" in O(1); `group_bit` is set by both setter families; the section store, because `is_header_tag ∧ group_bit` is not a section registration | the delimiter oracle's bare fallback fabricates cross-context groups (802 at the root); exact-only makes 099's NoHops not a group |
 | D5 replaces `alloc_failed` with a status, changes one emitter token | typed nested readers must see a limit failure without `alloc_failed()` lying | widening `alloc_failed()`'s meaning makes a public accessor lie; two flags must be OR'd by every reader |
 | D1 changes the probe bound's unit | the per-insert cap is reached by non-crafted frames (measured) | the per-insert cap with a failing ending closes sessions on legitimate traffic, repeatedly while the seed lives |
 | D11 asks registration, then scans the instance, on a failed nested read | 073 FR-007: failure only for a present group; one ending for a present scalar | a contract note "exhausted + absent = `WIRE_LIMIT_EXCEEDED`" writes a 073 violation into the contract and depends on residual bytes |
@@ -199,6 +205,7 @@ Open items carried into Gate A round 1, with their dispositions:
   failure invariants and `is_group` in data-model `group_slices_result` / `nested_slices_result`, the cache rule in
   research D10.
 - Round 3 (2026-11-07): Codex P1=0 P2=1 P3=0; Opus post-judging P1=0 P2=1 P3=4. Loop exhausted (2 rewrites). Owner Step F ruling: targeted hand-edit (C3-1 section-group arm + 4 P3s), then an Opus-only confirmation round, no Codex. Reviews: research/reviews/codex_100-wire-group-read-integrity_gate_a_3_review.md, research/reviews/opus_100-wire-group-read-integrity_gate_a_3_adversarial_review.md.
+- Round 4 (2026-11-07): Opus-only confirmation round (owner Step F) P1=0 P2=2 P3=8 (research/reviews/opus_100-wire-group-read-integrity_gate_a_4_confirmation_review.md). A probe on today's tree (scratch, not committed) showed count >= 1 group reads ignore where the dictionary declares the group and every count-0 group reads TYPE_MISMATCH; the owner kept the exact-registration predicate and ruled a second hand-edit (N4-1, N4-2, the P3s), then a Codex round.
 
 ### Round 1 — disagreements
 
