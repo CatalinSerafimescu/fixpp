@@ -29,8 +29,7 @@
 // so each is an unknown field) to fill the frame, so the parse leaves only the
 // callback headroom. The assertions branch at runtime on the library's own condition,
 // the parse arena's upstream (fixpp::detail::arena_upstream()), and no arm is skipped:
-//   - null upstream: fixpp_msg_get_group reports FIXPP_ERR_TYPE_MISMATCH and
-//     fixpp_group_get_nested_group FIXPP_ERR_WIRE_LIMIT_EXCEEDED (contract C-8 L-5);
+//   - null upstream: each getter's exhaustion arm;
 //   - forwarding upstream (MSVC debug): each read succeeds and the spill witness
 //     records the spill.
 // Each arm has a control: the same group without the padding, which leaves the
@@ -445,6 +444,9 @@ GroupRun run_group_read(GroupReads& reads, std::string const& frame) {
     return r;
 }
 
+// 100-wire-group-read-integrity (FR-005, FR-007) supersedes this cell's former null-upstream
+// ending, FIXPP_ERR_TYPE_MISMATCH: a present, registered group whose read could not complete
+// answers FIXPP_ERR_WIRE_LIMIT_EXCEEDED.
 TEST(CapiInboundFrameDispositionsQ33, MsgGetGroupAtHeadroomExhaustion) {
     GroupReads reads;
     reads.read = Read::flat;
@@ -456,8 +458,10 @@ TEST(CapiInboundFrameDispositionsQ33, MsgGetGroupAtHeadroomExhaustion) {
     EXPECT_TRUE(r.next) << "the session processes the next frame";
     EXPECT_TRUE(r.established);
     if (null_upstream()) {
-        EXPECT_EQ(reads.group_rc.load(), FIXPP_ERR_TYPE_MISMATCH)
-            << "fixpp_msg_get_group reports exhaustion as FIXPP_ERR_TYPE_MISMATCH";
+        EXPECT_EQ(reads.group_rc.load(), FIXPP_ERR_WIRE_LIMIT_EXCEEDED)
+            << "FR-005: fixpp_msg_get_group reports exhaustion as FIXPP_ERR_WIRE_LIMIT_EXCEEDED; "
+               "actual "
+            << static_cast<int>(reads.group_rc.load());
     } else {
         EXPECT_EQ(reads.group_rc.load(), FIXPP_ERR_OK) << "the read succeeds from the heap";
         EXPECT_EQ(reads.group_count.load(), kInstances);
