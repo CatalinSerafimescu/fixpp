@@ -14,14 +14,24 @@ mutate-and-run recipes rebuild every test target and run `ctest` **unfiltered**,
 binaries are fresh, and are re-run after the last fix commit.
 
 Expected: the new cells GREEN, each RED on `fa778a8e` where today's behaviour differs and RED with its production change
-reverted; the manifest's cells rewritten with their superseding requirement; `ctest -L alloc_guard` GREEN;
-`git grep -n kMaxShippedMsgTypeLength -- src tests` empty.
+reverted; the manifest's cells rewritten with their superseding requirement; `ctest -L alloc_guard` GREEN, and research
+D9's run-thread allocation cells zero on a Release build (the mallocnesia registrations are Release and Linux only;
+the counter build runs everywhere) with their RED arm intercepted;
+`git grep -n kMaxShippedMsgTypeLength -- src tests` empty; the research Supersessions recipe re-run, every hit
+classified.
 
 Benchmarks (research D8, `[const §VIII.2]`): compute the base as `git merge-base HEAD origin/main` at measurement time;
 build `scan_frame_header_bench`, `on_inbound_frame_bench` and `validator_bench` at the base in a worktree whose path has
 the same length as the candidate's; run A-B-A-B on the same machine, four observations per tree; compare the
 **minimum** per tree; a slowdown above +5% fails. Record the merge-base, every observation, the minima and the ratios.
-`validator_bench`'s CI pairing is supplementary evidence only. Add the defined-tag store's bytes to
+`validator_bench`'s CI pairing is supplementary evidence only. `table_view_footprint_bench`'s timed
+`BM_TableView_Build*` and `BM_TableView_Copy*` rows run in the same A-B-A-B protocol with the same +5% rule (list them
+with `--benchmark_list_tests`; the binary stays unpaired in `bench/ci-suite.txt`). Add the defined-tag store's bytes to
 `table_view_footprint_bench` (FIX44, a FIXT route, FIX Latest, a high-tag overlay).
+
+Issues to file, each labelled at creation:
+- (b-L): echo 372 up to the inbound limit instead of `kSendFrameBytes`, which needs the outbound ceiling the resend
+  replay depends on lifted (research D7), for the owner;
+- a CompID length bound at `open()` (research D7, residual).
 
 MSVC: build the touched test targets in the sandbox (`.sandbox-lock` first) before the first labelled push.

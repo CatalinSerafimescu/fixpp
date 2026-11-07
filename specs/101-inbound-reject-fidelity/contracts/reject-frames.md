@@ -22,9 +22,11 @@ Texts are QuickFIX C++'s, in the FIX.4.2-and-later form, on every BeginString (r
 ## Repeated MsgType (a later 35 whose value differs from the first)
 
 "Differ" is sticky: `D…A…D` and `A…D…A` differ. A repeat with the **same** value only is not a conflict: unchanged.
-`R {13,14}/35 X` = Reject 371=35, 372 = X (the first 35), 45 = the first 34, **14 when any later 35 lies past the header,
-else 13**; the header is the session dictionary's ∪ the FIXT standard header set (research D5). "As X" = the ending of
-the same frame with every later 35 removed and re-framed (research D6).
+`R {13,14}/35 X` = Reject 371=35, 372 = X (the first 35), 45 = the first 34, 373 by research D5's three-clause rule
+(**14 when any later 35 lies past the header, else 13 when one lies in it, else 14**; a walk that faults answers 14);
+the header is the session dictionary's ∪ the FIXT standard header set, and the field that ends the header and every
+later field are read with the route's hooks (research D5). "As X" = the ending of the same frame with every later 35
+removed and re-framed (research D6).
 
 | Session | State | Before | After |
 |---|---|---|---|
@@ -45,10 +47,16 @@ Every inbound-fed Reject / BMR builder research D7's census recipe finds (at rou
 forms, `inbound_reject_leaf_`, `inbound_reject_best_effort_leaf_`, `inbound_business_reject_leaf_`); so the validation
 gate and the 092 disposer too.
 
-| Inbound MsgType | 372 |
-|---|---|
-| fits the message | verbatim, `=` included (`372=D=X`) — unchanged at the gate; **new at the 092 disposer** for a MsgType longer than the longest shipped one (before: omitted) |
-| does not fit | omitted; the Reject is sent (before: nothing sent). For the BusinessMessageReject, where 372 is required, this ending is **provisional** (spec Clarifications, Gate A round 1) |
+One rule for 372 on both messages (research D7): verbatim whenever the message fits the engine's outbound ceiling
+`Session::kSendFrameBytes`. "Site buffer" is the site's own fixed buffer; an overflow of it is rebuilt into the
+session's inbound reply slot, before any callback and before `assign_outbound`, with no allocation.
 
-Text(58) is never dropped to make room. With CompIDs long enough that a gate Reject's fixed fields plus 58 do not fit,
-the Reject is not sent, as before this feature for its other fields (disclosed residual, research D7).
+| Message with the inbound MsgType in 372 | Session Reject (35=3) | BusinessMessageReject (35=j) |
+|---|---|---|
+| fits the site buffer | 372 verbatim, `=` included (`372=D=X`): unchanged at the gate; **new at the 092 disposer** for a MsgType longer than the longest shipped one (before: omitted) | 372 verbatim: unchanged |
+| overflows the site buffer, fits `kSendFrameBytes` | 372 verbatim, rebuilt in the slot (before: nothing sent) | 372 verbatim, rebuilt in the slot; resent with 372 on a later ResendRequest (before: nothing sent) |
+| exceeds `kSendFrameBytes` | sent **without 372** (before: nothing sent) | **not sent**: no callback, no outbound number, the inbound consumed as today, the session in its state, one rate-bounded session log record (before: nothing sent, no record) |
+
+Text(58) is never dropped to make room. The slot rebuild also recovers a Reject whose own buffer overflowed because of
+long CompIDs or 58. A Reject that exceeds `kSendFrameBytes` even without 372 is not sent, with the same log record
+(disclosed residual, research D7).

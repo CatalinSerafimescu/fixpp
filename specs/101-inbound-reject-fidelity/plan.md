@@ -10,8 +10,11 @@ A validating session answers an undefined MsgType with 373=11 and an undefined t
 validation-gate Reject carries QuickFIX C++'s reason text (B85, owner-ruled). A frame has one MsgType, its first 35,
 for every reader; a frame with any later differing 35 is refused on every validating session (Reject with QuickFIX C++'s
 13/14 precedence after establishment, a disconnect in it), disconnected in establishment on any session, and handled as
-its first 35 otherwise (B88). Every inbound-fed Reject echoes the MsgType verbatim and is sent without 372 instead of not
-at all when the echo does not fit; 092's echo bound retires (B82, QuickFIX parity). Decisions D1–D10 and the merged
+its first 35 otherwise (B88). Every inbound-fed Reject and BusinessMessageReject echoes the MsgType verbatim whenever
+it fits the engine's outbound ceiling `kSendFrameBytes`, rebuilt into a session-owned slot (no allocation) when the
+site's own buffer overflows;
+above the ceiling the Reject is sent without 372 and the BMR is not sent, with a session log record. 092's echo bound
+retires (B82, QuickFIX parity up to the ceiling). Decisions D1–D10 and the merged
 clauses this supersedes, by name: [research.md](research.md). Endings: [contracts/reject-frames.md](contracts/reject-frames.md).
 
 ## Technical Context
@@ -40,7 +43,10 @@ kept — the clauses that do change are named in research's Supersessions table.
 **Scale/Scope**: production `src/session/scan_frame_header.hpp`, `src/session/peek_fixt_route.hpp`
 (`fixt_header_repeats_msg_type`), `src/session/admin_messages.cpp` (`interpret_logon`), `src/session/session.cpp` (gate
 sites, `refuse_active_frame_`, `establishment_frame_refused_`, `on_inbound_logout_sent_`, the Reject build helper and its
-every caller D7's census recipe finds, `dispose_unparseable_`), `include/fixpp/wire/validator.hpp`, `include/fixpp/wire/reject_reason_map.hpp`,
+every caller D7's census recipe finds, the slot-rebuild helper, `dispose_unparseable_`), `src/log/format_registry.cpp` (D7's
+record), `include/fixpp/session/session.hpp` (`inbound_reply_slot_`, `inbound_reply_slot_held_`, the record's rate state, and
+`on_inbound_frame`'s serialized-caller sentence),
+`include/fixpp/wire/validator.hpp`, `include/fixpp/wire/reject_reason_map.hpp`,
 `include/fixpp/dict/table_view.hpp` (+ its builder), `src/dictionary/dictionary.cpp` (`Dictionary::build_table_view`),
 `include/fixpp/core/error.hpp`, `src/capi/error.cpp`. Tests in `tests/session/`, `tests/wire/`, `tests/core/`,
 `tests/capi/`, `tests/fuzz/`, `tests/interop/happy/`. Bench `bench/dictionary/table_view_footprint_bench.cpp`.
@@ -53,10 +59,10 @@ every caller D7's census recipe finds, `dispose_unparseable_`), `include/fixpp/w
 |---|---|---|
 | I / VI | core tag-value FIX, spec coverage | PASS: spec `## Normative References` lists the coverage-index entries (`[const §VI.5]`); FIX-TC 2q, 14a, 14c endings; QuickFIX parity per the owner's rule, deviations disclosed (FR-009). |
 | VII | RED first, mutation-proven | PASS planned (research D9 and tasks). |
-| VIII | no regression | D8: Article VIII §2's protocol (A-B-A-B, min-per-tree, ≤ +5%, base = merge-base at measurement time) for `scan_frame_header_bench`, `on_inbound_frame_bench` and `validator_bench`; CI pairing supplementary. |
+| VIII | no regression | D8: Article VIII §2's protocol (A-B-A-B, min-per-tree, ≤ +5%, base = merge-base at measurement time) for `scan_frame_header_bench`, `on_inbound_frame_bench`, `validator_bench` and `table_view_footprint_bench`'s timed Build/Copy rows (D1 changes what they time); CI pairing supplementary; the footprint binary stays unpaired. |
 | IX | coverage, sanitizers, static | `/speckit-verify`. |
 | X | C ABI | PASS: two `core::error` slots map to the existing `FIXPP_ERR_WIRE_CONFORMANCE`; no code, symbol or struct added, so no version step (`[const §X.1]`, `[const §X.4]`; Codex and Opus agree). `expected_error_map.csv` and the completeness pins grow (D9). |
-| XV.1 | no per-message heap | PASS: the defined-tag store is built and sealed with the table; the D7 retry reuses the stack buffer. |
+| XV.1 | no per-message heap | PASS: the defined-tag store is built and sealed with the table; D7's overflowed replies rebuild into a session-owned `kSendFrameBytes` slot (allocated with the Session) with a non-coroutine helper and run the site's existing tail, so no reply allocates. The slot's exclusivity rests on `on_inbound_frame`'s serialized-caller precondition, which the Engine already honours, stated on the header and asserted in debug builds (research D7); witnessed by run-thread allocation cells with a RED arm (D9). |
 | XVII.1 | Gate A on public behaviour | Gate A required (session wire endings, public `core::error`, public `table_view`, public `interpret_logon`). |
 
 **Initial gate: PASS. Post-design re-check: PASS.**
@@ -90,7 +96,9 @@ src/capi/error.cpp                      # both → FIXPP_ERR_WIRE_CONFORMANCE
 src/session/scan_frame_header.hpp       # D4 first-wins + msg_type_conflict; kMaxShippedMsgTypeLength deleted
 src/session/peek_fixt_route.hpp         # D5 walk past the header stop: in-header / past-header
 src/session/admin_messages.cpp          # D4 interpret_logon first-wins
-src/session/session.cpp                 # D3 texts; D5/D6 refusal conditions; LogoutSent; D7 helper at every inbound-fed builder
+src/session/session.cpp                 # D3 texts; D5/D6 refusal conditions; LogoutSent; D7 helper + slot rebuild at every inbound-fed builder; FIXPP_ASSERT_INBOUND_REPLY_SLOT_FREE
+include/fixpp/session/session.hpp      # D7 inbound reply slot + held flag; record rate state; on_inbound_frame precondition
+src/log/format_registry.cpp             # D7's outbound-ceiling record (its CRC-collision static_assert stays green)
 bench/dictionary/                       # D8 footprint rows
 tests/session/                          # US1-US4 through a real Session; rewritten 092/098/099 cells
 tests/wire/                             # validator cells per slot; D1 population mutations
@@ -110,10 +118,16 @@ tests/interop/happy/golden/             # regenerated reject-invalid-admin golde
 3. **Texts** — D3 at the three gate sites; rewrite the cells and goldens recipe 1 finds.
 4. **One MsgType** — D4, D5, D6, LogoutSent; rewrite the 092 and 099 cells recipes 2–3 find, each naming its
    superseding FR and the superseded clause; header comments naming the supersessions (D10).
-5. **Echo** — D7's helper at every inbound-fed builder its census recipe finds; retire 092's bound.
-6. **Mutations, benches** — each change reverted alone, its cells RED; D8's paired runs and footprint rows.
-7. **Records** — B&L (L-452-2 closed; B-099-4's "Not validating" bullet, B-099-5, B-099-11 rewritten; FR-009's new
-   B-rows), catalogue/coverage index; false comments (D10) fixed, `check-comment-claims.py` on the diff.
+5. **Echo** — D7's helper, slot rebuild, slot assertion and outbound-ceiling record at every inbound-fed builder its census recipe
+   finds; `on_inbound_frame`'s precondition sentence; retire 092's bound; D9's D7 cells (thresholds derived by
+   building; the run-thread allocation cells and their RED arm; the slot death test).
+6. **Mutations, benches** — each change reverted alone, its cells RED; D8's paired runs (Build/Copy rows included) and
+   footprint rows.
+7. **Records** — B&L per FR-009 and research's Supersessions list (L-452-2 closed; B-092-3's 372 bullet; B-099-3,
+   B-099-4's headline and bullets, B-099-5, B-099-11 rewritten; the new B-rows), catalogue/coverage index; false
+   comments (D10) fixed, `check-comment-claims.py` on the diff. The SecondBrain edit of close-out row 3
+   (`brain/components/session.md`, `brain/components/inbound-message-path.md`) flags in place every clause in
+   research's Supersessions list, re-derived by its recipe. File quickstart's two issues.
 8. **Verify** — re-derive the census after the last fix commit; targeted ctest, sanitizers on `session_pure_tests`,
    MSVC build of touched targets, `/speckit-verify`.
 
@@ -121,7 +135,7 @@ tests/interop/happy/golden/             # regenerated reject-invalid-admin golde
 
 | Item | Why | Simpler alternative rejected because |
 |---|---|---|
-| D7's retry without 372 | a long MsgType made the Reject vanish | a fixed bound needs a number derived from the other fields' lengths, and 092's bound already went stale at 098 |
+| D7's slot rebuild into a session-owned `kSendFrameBytes` buffer | a long MsgType made the Reject and the BMR vanish; QuickFIX echoes 372 in both | a fixed bound needs a number derived from the other fields' lengths, and 092's bound already went stale at 098; enlarging each site's buffer grows every reply frame; a coroutine owning the buffer allocates per overflow (`[const §XV.1]`); full parity at the inbound limit breaks the replay's capture ceiling (follow-up) |
 | D4 widens 099's `last ≠ third` to "any later ≠ first" | one MsgType per frame | keeping the last-value comparison leaves `D…A…D` handled as D with a hidden A |
 | D5 walks past the header stop on the cold path | QuickFIX C++'s 14-before-13 precedence with three or more 35s | reusing the stop-at-header walk answers 13 where C++ answers 14 |
 
@@ -131,8 +145,10 @@ tests/interop/happy/golden/             # regenerated reject-invalid-admin golde
    differential oracle.
 2. D2's 373=0 inside a group: approved, and traced to QuickFIX C++ on 098's AS-2 layout; the other layouts' divergence
    is a B-row.
-3. D7's omit-372-on-overflow: approved as policy; the site census is now D7's recipe (every inbound-fed builder), the retry condition is
-   `wire_field_value_truncated`, and 092's bound retires.
+3. D7's echo: round 1 approved omit-372 for the session Reject; round 2 (Codex) blocked it for the BusinessMessageReject,
+   where 372 is required. Resolved at round 2 by orchestrator ruling: one rule for both, 372 verbatim up to
+   `kSendFrameBytes` through a rebuild into a session-owned slot; above it the Reject omits 372 and the BMR is not sent (research D7). The
+   site census is D7's recipe, the trigger is `wire_field_value_truncated`, and 092's bound retires.
 4. Article X: no C-ABI version step is owed (both reviewers).
 
 ## Gate A
@@ -157,8 +173,83 @@ tests/interop/happy/golden/             # regenerated reject-invalid-admin golde
   (research D5).
 - **Root cause #1, the BusinessMessageReject.** Opus's shape applies the omit-372 retry to the BMR twin, under the
   rationale that 372 is optional. That holds for Reject (35=3); in BusinessMessageReject (35=j) 372 is required in the
-  vendored dictionaries. The BMR ending is kept as Opus shaped it but marked provisional and raised for a ruling (spec
-  Clarifications, Gate A round 1; research D7).
+  vendored dictionaries. The BMR ending was left open for a ruling at round 1 and decided at round 2 (below).
 - **Root cause #4, the shared lookup.** Implemented as `valid_tag_set_view::found()` on the view `valid_tags_for`
   already returns, instead of a public `has_msg_type`, so no second query is added that nothing on the hot path would
   call (research D2).
+
+### Round 2 → rewrite 2 (2026-11-07)
+
+Codex P1=1 P2=3 P3=0; Opus post-judging P1=1 P2=3 P3=5. Reviews:
+research/reviews/codex_101-inbound-reject-fidelity_gate_a_2_review.md,
+research/reviews/opus_101-inbound-reject-fidelity_gate_a_2_adversarial_review.md (parent repo).
+
+- **Codex 1 (P1), the BusinessMessageReject sent without its required 372.** Decided by orchestrator ruling, on the
+  judge's (b-C) and unified across both messages, so 372 has one rule:
+  - 372 verbatim whenever the frame fits `Session::kSendFrameBytes`;
+  - an overflow of the site's buffer is rebuilt into a session-owned `kSendFrameBytes` inbound reply slot, before any
+    callback and before `assign_outbound` (the second ruling, below);
+  - above the ceiling, the Reject omits 372 and the BMR is not sent, with a rate-bounded session log record.
+
+  Changed: spec Clarifications (a round-2 session; the round-1 BMR entry and the 2026-11-07 #646 answer marked as
+  narrowed, not rewritten), US4 (six scenarios), FR-007 (a common clause, then (a) Reject and (b) BMR), FR-008,
+  FR-009; research D7 (rule, steps, tail, placement, ceiling ending, capture invariant, allocation, residual,
+  follow-up (b-L), alternatives), D9 (D7's witnesses), D10; the contract's echo table; data-model's helper; quickstart's
+  issues to file; this plan's Summary, Constitution Check, Scale/Scope, Phases 5–7, Complexity and open item 3. No
+  ending is left open for a ruling.
+
+  **Round-1 text the unified rule changed:**
+  - D7's "a bigger buffer moves the threshold" alternative now names the rejected form, enlarging each site's buffer.
+  - The two 092 `RefMsgTypeBound_LongMsgType_RejectWithout372_*` cells flip to 372 present: their MsgType fits the
+    ceiling. They move into D9's known cells, and an above-ceiling Reject cell keeps the omit-372 witness.
+  - D9's "long undefined MsgType through the gate, no 372" splits into a fits-the-ceiling cell and an above-it cell.
+  - The long-CompID residual shrinks to "above the ceiling", because the slot rebuild is triggered by any overflow.
+
+  **Source contradicted the judge in two places:**
+  1. The judge's cold leaf allocates. Its frame is over asio's recycler limit, as `send_fallback_leaf_`'s own comment
+     says of that leaf. The first pass of this rewrite disclosed that allocation under #544 R-10.
+     **Second orchestrator ruling** (still rewrite 2): no peer-triggerable allocation. `[const §XV.1]`'s hot path
+     includes a reply to an inbound frame, and R-10's engine-caused fallback does not carry over.
+     - D7 now rebuilds into a session-owned slot, with a non-coroutine helper and the site's existing tail.
+     - The slot's exclusivity rests on `on_inbound_frame`'s serialized-caller precondition. Source shows overlap is
+       already unsupported: `run_read_pump`, `run_accept_loop` and `run_connect_loop` await each frame;
+       `on_inbound_cold_` reads `fsm_state_` at entry, and `on_inbound_not_connected_` writes Active only after its
+       `co_await`s. The header's reentrancy contract states none of it.
+     - The implementation adds the sentence and a B-row, and asserts it the way the re-entry rule is asserted.
+     - #544 §2.2 had rejected a `Session`-member reply buffer shared with the strand's other chains. This slot is
+       limited to the inbound chain.
+     - FR-008, FR-009 (the allocation B-row dropped, the precondition B-row added), D7, D9 (run-thread allocation cells
+       with a RED arm, the slot death test, release on every exit), the contract, the data-model and the XV.1 row
+       (plain PASS) follow.
+  2. The `static_assert` cannot sit at namespace scope: `kSendFrameBytes` is a private member of `Session`, and
+     `CaptureVisitor` is in `session.cpp`'s anonymous namespace. It goes in the rebuild helper's body.
+
+  `tests/alloc_guard` had no reply-chain cell (#544's windows take no reply). D9's new cells are the first.
+- **Codex 2 (P2), D5's hook transition at the boundary field.**
+  - D5 is now a per-field algorithm: one carry; S's hooks before the stop; the route's hooks for the stopping field and
+    every later field.
+  - It states why: `read_value` arms the next field from the current call's hooks.
+  - It gives the chosen fault rule: a faulting walk answers 14, and the 35s it saw are discarded.
+  - `peek_fixt_route`'s walk and its stop are kept.
+  - D9 gains three boundary witnesses, each with the mutant that must go RED.
+- **Codex 3 (P2), D8's timed rows.** The existing `BM_TableView_Build*`/`Copy*` rows join the A-B-A-B run with the
+  +5% rule (D8, SC-004, quickstart, plan VIII row). The binary stays unpaired in `bench/ci-suite.txt`. Codex's new
+  timed rows (judged P3) are not added: the existing rows cover the changed functions.
+- **Codex 4 (P2), Supersessions incomplete.** The table is now a recipe plus its classified hits.
+  - The patterns were widened until every clause both reviewers named is a hit.
+  - Added: 092 FR-003's 372 sub-bullet and the contract's "Reject contents" 372 bullet; 099's Clarifications, US3
+    scenarios 7–8, the Edge Case, E-7's non-validating paragraph, "leaves it false", "gains no step", the
+    decisive-cells list and the `LO` row; `surface.md`'s non-FIXT split bullet; W-6's establishes clause; W-9's named
+    cells; B-092-3; B-099-3; B-099-4's headline and Repeated bullet.
+  - B-099-3 and `surface.md`'s second bullet were found by the recipe, not named by either reviewer.
+  - FR-009 names the B&L rows.
+- **Judge P3s.**
+  - P3-1 (FR-005 restated two clauses of D5's rule): FR-005, US3 scenario 7, the round-1 Clarification and the
+    contract cite D5's three-clause rule.
+  - P3-2 (D7 placement named `fire_to_admin_` for every site): placement names `toApp` for the BMR and covers the cold
+    rebuild.
+  - P3-3 (SecondBrain): Phase 7 points the close-out row 3 edit at the Supersessions list, and research says so.
+  - The Codex 3 extension: not added (above).
+  - The Codex 4 099 quickstart hit: classified as history in the recipe's kept classes.
+- **Not taken from the judge:** QuickFIX C++'s 380=3 and 58 text for `UnsupportedMessageType`. They are not needed for
+  the decision. The local QuickFIX read used here is the 372 echo (`2ce8a60`, `4969564`).

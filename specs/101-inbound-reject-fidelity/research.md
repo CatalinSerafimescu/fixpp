@@ -20,12 +20,17 @@ supersessions; the spec, plan, contract and data model point here instead of res
 | Reason map | required 1, unexpected 2, out_of_range 5, truncated 6, header_order 14, invalid_tag_number 0, length_data_mismatch 5; default 3 is a fail-closed arm its own comment calls dead on the in-contract path | `include/fixpp/wire/reject_reason_map.hpp` |
 | Gate Rejects | NotConnected, LogonSent and Active (`on_inbound_active_validate_failed_`) all pass an empty text | `session.cpp`; `RejectDecision{reason, ref_tag_id, names_third_field}` in `include/fixpp/session/session.hpp` |
 | Reject builder | `ref_tag_id > 0` writes 371; non-empty 372; non-empty text writes 58. A Writer overflow, including `commit`'s CheckSum room, returns `core::error::wire_field_value_truncated` | `build_reject_with_text`, `build_business_message_reject` (`src/session/admin_messages.cpp`); `Writer::append_raw`, `Writer::commit` (`src/wire/writer.cpp`) |
-| Reject buffers | fixed-size stack buffers in both `emit_session_reject_` overloads, `inbound_reject_leaf_`, `inbound_reject_best_effort_leaf_` and `inbound_business_reject_leaf_`; a failed build sends nothing and returns success | `session.cpp` |
+| Reject buffers | fixed-size stack buffers in both `emit_session_reject_` overloads, `inbound_reject_leaf_`, `inbound_reject_best_effort_leaf_` and `inbound_business_reject_leaf_`; a failed build sends nothing and returns success. The BMR leaf's `if (bmr_r)` has no `else`: no BMR, no `toApp`, no outbound number (`peek_outbound` only), no record, and the caller (`on_inbound_active_from_app_failed_`) persists the inbound advance | `session.cpp` |
+| Outbound frame ceiling | `Session::kSendFrameBytes` (a private static of `Session`): `Session::send` returns `wire_frame_too_large` above it; `send_fallback_leaf_` owns a buffer of that size in its own coroutine frame, "over asio's recycler limit", so it allocates (`.specify/544-hot-path-zero-alloc.md` R-10, §1(b)). The resend replay captures a stored frame with `CaptureVisitor` (`session.cpp`'s anonymous namespace), whose buffer is `kCapBufSize`; a larger stored frame sets `truncated` and `replay_outbound_range_` returns `dispatch_aborted`. 35=j is not in the replay's `is_admin_type` set, so a stored BMR is resent, never gap-filled | `include/fixpp/session/session.hpp`, `session.cpp` |
 | 092 echo bound | `dispose_unparseable_` passes `fault_ref_msg_type` only when no longer than `kMaxShippedMsgTypeLength` (092 research R-5: "the longest MsgType a shipped dictionary defines") | `scan_frame_header.hpp`, `session.cpp` |
 | Error slots | `wire_*` slots end at `wire_length_data_mismatch`; C mapping: unexpected/header-order/required/out-of-range → `FIXPP_ERR_WIRE_CONFORMANCE`, invalid_tag_number/length_data_mismatch → `FIXPP_ERR_WIRE_INVALID_FRAME`; `translate` is a total switch with no `default` | `include/fixpp/core/error.hpp`, `src/capi/error.cpp`; `tests/capi/expected_error_map.csv`, `tests/capi/error_surface_test.cpp`, the `test_0NN_error_completeness.cpp` files |
 | Benches | `scan_frame_header_bench`, `on_inbound_frame_bench` (in the CI suite, not paired); `validator_bench` (paired); `table_view_footprint_bench` | `bench/session/`, `bench/wire/`, `bench/dictionary/`, `bench/ci-suite.txt` |
 
-QuickFIX (read for this feature; facts in the spec's Context): C++ `2ce8a60`, QuickFIX/J `4969564`. QuickFIX/Go: no local
+QuickFIX (read for this feature; facts in the spec's Context): C++ `2ce8a60`, QuickFIX/J `4969564`. Both write the
+BusinessMessageReject's 372 from the inbound MsgType with no frame bound: C++ `Session::generateBusinessReject`
+(`reject.setField(RefMsgType(message.getHeader().getField<MsgType>()))`), J `Session.generateBusinessReject`
+(`reject.setString(RefMsgType.FIELD, msgType)`). RefMsgType(372) is `required='Y'` in the BusinessMessageReject of the
+vendored `dictionaries/FIX42.xml`, `FIX44.xml` and `FIX50SP2.xml`. QuickFIX/Go: no local
 checkout. The B85 ruling note records Go `eff945d` for 373=0/2/11; **Go was not read for #646** (the 372 echo), although
 that issue's "Done when" asks for all three engines. The C++ and J reads agree, and the ruling follows them.
 
@@ -138,14 +143,34 @@ consume key).
 - In the LogonReceived/Active gate, the repeat arm of `refuse_active_frame_` runs whether or not `fixt_routing_`; its
   1128 arm stays FIXT-only (a non-FIXT route never carries a refusal).
 - **13 or 14.** `fixt_header_repeats_msg_type` becomes one cold walk that does **not** end at the header's stop; it
-  reports whether a later 35 stands in the header and whether one stands past it. Up to the stop it reads with S's hooks
-  and S's table (`session_hooks(inbound_tv_)`, `*inbound_tv_`, as today: 099 judges the header by S). **Past the stop it
-  reads values with the route's hooks** (`*route.entry.owner`, the table the frame is parsed and validated with), which
-  are S's on a non-FIXT session. Reading the body with S's hooks would split a Data value the route declares, and one
-  embedding `SOH 35=` would show a phantom past-header 35 (refinement of Opus's fix shape, recorded in plan.md
-  `## Gate A`). `refuse_active_frame_` answers **14 when any
-  later 35 lies past the header, else 13 when one lies in it, else 14** (the last clause keeps today's answer when the
-  walk sees no later 35). This is QuickFIX C++'s `hasValidStructure`-before-`iterate` precedence. With exactly two 35s
+  reports whether a later 35 stands in the header and whether one stands past it. It is its own walk (or a parameter of
+  `peek_detail::walk_fixt_header` that only it passes): `peek_fixt_route`'s walk and its stop stay as they are. S's
+  hooks and table (`session_hooks(inbound_tv_)`, `*inbound_tv_`) judge the header, as today: 099 judges the header by
+  S. The route's hooks (`*route.entry.owner`, the table the frame is scanned, parsed and validated with; S's own on a
+  non-FIXT session) read the body. **The walk, field by field** (Gate A round 2; it replaces round 1's "up to the stop
+  … past the stop"):
+  1. It is one loop with one `length_data_carry`, never reset or replaced.
+  2. For each field in frame order, parse the tag.
+  3. Classify the tag with S's header union (`table_view::is_header_tag` ∪ `dict::is_fixt_standard_header_tag`). Once
+     a field is not a header field, `past_stop` stays true for it and every later field.
+  4. Read its value with `carry.read_value(frame, vstart, tag, hooks)`, where `hooks` is S's while `past_stop` is
+     false and the route's for **the stopping field itself** and every field after it.
+  5. A 35 after field 3 is in the header when `past_stop` was false for it, else past the header.
+
+  Why the stopping field takes the route's hooks: `length_data_carry::read_value` decides whether **this** field is
+  counted from what the **previous** call armed, then arms the next field from the hooks passed to **this** call. So
+  the hooks used on the first body field decide whether a Length there, which only the route declares, counts its
+  Data. With S's hooks that Data is split at its first SOH, and an embedded `SOH 35=` reads as a phantom past-header
+  35. The one carry is what lets an S header Length count its Data when that Data is the stopping field.
+
+  **The answer.** `refuse_active_frame_` answers **14 when any later 35 lies past the header, else 13 when one lies in
+  it, else 14** (the three-clause rule; the last clause keeps today's answer when the walk sees no later 35). **When the
+  walk faults** (`read_value` returns `nullopt` on a malformed count), the walk returns false, the 35s it saw before
+  the fault are discarded, and the answer is the default clause, 14. That fault rule is a chosen ending, not a derived
+  one: the frame reached the gate because the scan was clean, so the 092 disposer never runs for it, and the walk can
+  fault only where S's hooks and the route's disagree about a pair, so a partial walk is not trusted.
+
+  This is QuickFIX C++'s `hasValidStructure`-before-`iterate` precedence. With exactly two 35s
   it equals 099's answer; with three or more it can differ (`0,D(hdr)…0(past)` and `0,0(hdr)…D(past)` answer 14, where
   099's rule answers nothing and 13 respectively). The reason is decided from the walk alone: a count from
   `scan_frame_header` is never combined with the walk's: they are two walks, and nothing pins that they agree.
@@ -171,22 +196,124 @@ Application and Reject 373=3 without one). "No Reject" means no Reject **for the
 **Rationale:** the validation-off ending after Logon splits the engines (C++ rejects, QuickFIX/J delivers the first
 value); "validation off sends no validation Reject" keeps 099's owner ruling.
 
-### D7 — The RefMsgType echo has one owner (FR-007)
+### D7 — The RefMsgType echo has one owner and one rule (FR-007)
+
+**The rule (Gate A round 2, orchestrator ruling; one rule for 372 on both messages).** A session Reject and a
+BusinessMessageReject echo the inbound MsgType in 372 verbatim (`=` included) whenever the message fits the engine's
+outbound frame ceiling, `Session::kSendFrameBytes`. That is the bound `Session::send` already enforces
+(`wire_frame_too_large` above it) and the bound the resend replay's capture depends on (`CaptureVisitor::kCapBufSize`).
+Above the ceiling, the Reject is sent without 372 (372 is optional in 35=3, `Req'd N`; the #646 ruling), and the BMR is
+not sent (372 is required in 35=j).
 
 **Decision:** one internal helper in `session.cpp` owns the echo policy for a session Reject, and a twin owns it for the
 BusinessMessageReject (`build_business_message_reject`):
-1. Build with 372 = the inbound MsgType, verbatim (`=` included).
-2. If the build fails with `core::error::wire_field_value_truncated` and the MsgType is non-empty, build again with an
-   empty RefMsgType (372 omitted).
-3. Any other failure, or a second failure, keeps today's handling. Text(58) is never dropped to make room (FR-003).
+1. Build into the site's own fixed buffer with 372 = the inbound MsgType, verbatim. This is today's build, and the
+   path a fitting message takes is unchanged.
+2. If that build fails with `core::error::wire_field_value_truncated`, rebuild the message with 372 into the
+   session's **inbound reply slot**, `inbound_reply_slot_`: a `std::array<std::byte, kSendFrameBytes>` member of
+   `Session`, allocated with the Session as `send_frame_slot_` is. The rebuild is a non-coroutine helper (a class-1
+   build in #544 §2.2's terms: it neither suspends nor calls back). The peeked sequence number and the SendingTime
+   value the site already holds are passed in, so nothing is re-peeked or re-stamped.
+3. Reject only: if the rebuild also fails with `wire_field_value_truncated` and the MsgType is non-empty, the helper
+   builds once more into the slot with an empty RefMsgType (372 omitted). The BMR has no such step.
+4. Whatever still fails is not sent: the outbound-ceiling ending below. Text(58) is never dropped to make room
+   (FR-003).
 
-The code means "out of room", not "out of room because of 372"; retrying without 372 is still right, because it either
-fits or fails again into today's handling. `wire_frame_too_large` cannot fire at these buffer sizes (it needs a body
-beyond BodyLength's placeholder width), and the builders' own `render_u32` failures cannot fire either.
+The trigger is "out of room", whatever took the room. The slot rebuild therefore also recovers a Reject that
+overflowed its site's buffer because of long CompIDs or the Text(58) D3 adds, not only because of 372. Other codes
+cannot fire:
+- `wire_frame_too_large` needs a body beyond BodyLength's placeholder width. That width is the digits `Writer`
+  reserves for 9 (`src/wire/writer.cpp`), and no `kSendFrameBytes` buffer reaches it. Above the ceiling, the rebuild
+  therefore fails with `wire_field_value_truncated`.
+- The builders' own `render_u32` failures cannot fire either.
 
-**Placement:** the helper runs strictly after `seqnum_mgr_.peek_outbound()` and the SendingTime stamp and strictly before
-`assign_outbound()`, `fire_to_admin_` and `store_then_emit`, so a retry re-stamps nothing, re-assigns nothing and fires no
-callback twice. Every site already orders these so; the helper must sit between its build and its `if (rj_r)`.
+**One tail, in the site's own coroutine.** The site selects the span that holds the frame: its own buffer when step 1
+fit, the slot after step 2 or 3. It then runs its existing tail over that span. No tail is copied, and no coroutine
+is added on either path.
+- A Reject's tail is `assign_outbound()`, then `fire_to_admin_`, then `store_then_emit`. Each site keeps its own
+  failure handling unchanged:
+  - Disconnected on a failed assign, in both `emit_session_reject_` overloads and in `inbound_reject_leaf_`;
+  - the discarded emit error, in `inbound_reject_leaf_`;
+  - the best-effort assign, in `inbound_reject_best_effort_leaf_`.
+- The BMR's tail is `toApp` through `parse_and_dispatch_(…, kSendParseArena, …)`, with its veto and throw arms, then
+  `assign_outbound()`, then `store_then_emit`.
+- The site's frame keeps today's buffer and gains only the span and the slot holder below. It must still fit #544's
+  recycler limit; D9's allocation cells check it on the fitting twin.
+- A frame the built-frame parse cannot read returns `parse_failed`, and the built-frame sites ignore it. So a callback
+  that silently never fired on a rebuilt frame would show nothing, and D9 witnesses the callback at the ceiling.
+
+**Placement:** every build attempt, the slot rebuild included, runs strictly after `seqnum_mgr_.peek_outbound()` and
+the SendingTime stamp. It runs strictly before the site's first callback and before `assign_outbound()`:
+- for a Reject, `fire_to_admin_`, which every Reject site runs after `assign_outbound()`;
+- for the BMR, `toApp`, which fires before `assign_outbound()` (036 C2).
+
+So no attempt re-stamps, re-numbers or fires a callback twice.
+
+**The inbound reply slot: who uses it, and for how long.**
+- **Users.** Only the inbound-fed reply sites listed under "Sites" below. Each is called from an `on_inbound_*` arm, or
+  from `dispose_unparseable_`, which only inbound arms call. Re-derive this with the census recipe plus each caller's
+  enclosing function. Tasks pin it by reading every caller, not by counting.
+  - No other chain touches the slot. `run_liveness_loop`, `Session::send`, `close()` and the resend replay build in
+    their own storage.
+  - That restriction answers #544 §2.2's rejected "`Session`-member scratch buffer for the inbound reply blocks". That
+    rejection was of a buffer shared with the strand's other chains (its example: `run_liveness_loop`'s emits while a
+    reply is suspended in its write), for which no per-chain exclusivity argument existed. Here the only chain is the
+    inbound one, and its exclusivity is the precondition below.
+- **Held.** From the start of the slot rebuild until the site's tail returns, which is after `store_then_emit` returns.
+  The bytes must outlive the tail's `co_await`s:
+  - `store_then_emit` stores the frame, then transmits the caller's span after the store suspends (the reply-leaf
+    comment above `inbound_reject_leaf_`);
+  - the transmit goes through `live_write_serialized_`, which holds that span until its `async_write` completes;
+  - the BMR's `toApp` re-parse reads the slot synchronously before both.
+- **Released.** By an RAII holder's destructor on every exit of the tail: success, the Disconnected and error returns,
+  the throw arm, and destruction of the site's coroutine frame by a close.
+- **Nothing else can take the slot before release.**
+  1. Within one inbound frame, an arm `co_await`s each reply site to completion before its next statement, so the
+     reply sites of one frame are sequential.
+  2. A callback the tail fires (`toApp`, `toAdmin`) cannot begin an inbound frame: `FIXPP_ASSERT_NO_CALLBACK_AT_PARSE_SITE`
+     asserts at every inbound parse site. A `send()` or `close()` started from a callback begins after the callback
+     returns and uses its own storage (`on_inbound_frame`'s reentrancy contract in `session.hpp`).
+  3. Across frames, the next `on_inbound_frame` begins only after the current one returns: the serialized-caller
+     precondition.
+
+**The serialized-caller precondition.**
+- **Source: overlapping calls are already outside what the session supports.**
+  - **The Engine never overlaps them.** `run_read_pump` (`src/session/engine.cpp`) `co_await`s
+    `session.on_inbound_frame(...)` for each frame before it handles the next. `run_accept_loop` `co_await`s the
+    first Logon's delivery, then runs the pump inline. `run_connect_loop` runs the pump inline. So each Session has
+    one pump.
+  - **The arms mutate state across `co_await`s and are unsound under overlap.** `on_inbound_cold_` picks the arm from
+    `fsm_state_` at entry. `on_inbound_not_connected_` writes `fsm_state::Active` only after its own `co_await`s
+    (`ensure_hydrated_`, `seqnum_mgr_.check_inbound`, `run_reset_unit_`, `honor_peer_next_expected_`, the reply-Logon
+    leaf). So two overlapping Logons would both take the NotConnected arm and both answer. The inbound advance
+    (`persist_inbound_advance_`) likewise runs after the callback, across `co_await`s.
+  - **The public header does not say so.** `on_inbound_frame`'s reentrancy contract in
+    `include/fixpp/session/session.hpp` says "session-strand", nothing more.
+- **The implementation adds the sentence to that contract.** A caller `co_await`s each `on_inbound_frame` to
+  completion before it makes the next call; overlapping calls on one Session are outside the contract, and builds with
+  assertions assert on the route this feature adds. A B-row discloses it (FR-009).
+- **A violation is loud, mirroring the re-entry rule.** The re-entry rule is a debug `assert` macro at the site
+  (`FIXPP_ASSERT_NO_CALLBACK_AT_PARSE_SITE`), whose text no other assertion contains, over a plain member kept in every
+  build type (`callback_depth_`). This rule copies that form:
+  - a member `bool inbound_reply_slot_held_`, set and cleared by the holder, in every build type;
+  - `FIXPP_ASSERT_INBOUND_REPLY_SLOT_FREE()`, asserting it false where the holder takes the slot, with its own unique
+    text so a death test can match it.
+
+  Release builds compile it out, as they do the existing rule. The normal path keeps one ending.
+
+**The capture invariant.** `static_assert(kSendFrameBytes <= CaptureVisitor::kCapBufSize)` sits in the slot-rebuild
+helper's body. That relation is what makes every rebuilt frame capturable by the resend replay.
+- It cannot be written at namespace scope. `kSendFrameBytes` is a private member of `Session`, and `CaptureVisitor`
+  is in `session.cpp`'s anonymous namespace.
+- So the helper, a `Session` member function, is defined in `session.cpp` after `CaptureVisitor`.
+
+**Allocation (`[const §XV.1]`): none added.**
+- The slot is allocated once per Session, with the Session. `Session` grows by `kSendFrameBytes`, beside its three
+  send-path arrays of that size.
+- The rebuild is a non-coroutine.
+- The tail runs in the site's existing coroutine.
+- D9's allocation cells witness it, including a cell that must go RED with a coroutine-owned `kSendFrameBytes`
+  buffer.
 
 **Sites — every inbound-fed builder goes through it** (at round 1; the census recipe below decides): both `emit_session_reject_` overloads, `inbound_reject_leaf_`,
 `inbound_reject_best_effort_leaf_` and `inbound_business_reject_leaf_`. Reachability with an unbounded inbound MsgType:
@@ -203,33 +330,58 @@ and its recompute cell in `tests/session/session_reject_test.cpp` are deleted. I
 shipped dictionary defines") stopped being the population at 098, when an overlay may define a longer MsgType, so a
 faulty frame with a fitting 3-byte MsgType draws a Reject without 372 today. **Supersedes 092 research R-5's
 RefMsgType bound** (the bound and the sentence that the build cannot fail). 092's
-`UnparseableFrameDisposition.RefMsgTypeBound_LongMsgType_RejectWithout372_{MalformedTag,LengthDataMismatch}` still hold
-(their MsgType cannot fit), but their name and comment cite the retired mechanism and are renamed to cite FR-007.
+`UnparseableFrameDisposition.RefMsgTypeBound_LongMsgType_RejectWithout372_{MalformedTag,LengthDataMismatch}` **flip**:
+their MsgType overflows the disposer's buffer but fits `kSendFrameBytes`, so under the round-2 rule the Reject carries
+it in 372 (D9 lists them). The omit-372 ending keeps its own witness, a MsgType whose Reject exceeds the ceiling (D9).
 
 **Census recipe for the sites** (re-run at tasks and after the last fix commit):
 `git grep -nE 'build_reject(_with_text)?\(|build_business_message_reject\(' -- src/session`. Every hit outside
 `admin_messages.cpp` is the helper or carries a literal 372 (`apply_inbound_sequence_reset`'s `"4"`).
 `git grep -n kMaxShippedMsgTypeLength -- src tests` returns nothing after the change.
 
-**Residual (B-row, FR-009):** D3's 58 takes room in the same fixed buffer, and `open()` bounds CompIDs for forbidden bytes,
-not for length. With CompIDs long enough that a gate Reject's fixed fields plus 58 exceed the build buffer, the Reject is
-not sent even with a one-byte MsgType, and the retry does not recover it (it drops only 372). This is the local-config
-loss 092 R-5 put out of scope. Bounding CompID length at `open()` would close it at the source; that is a new config
-refusal and belongs to a follow-up issue.
+**Residual (B-row, FR-009), restated at round 2.** `open()` bounds CompIDs for forbidden bytes, not for length. D3's 58
+takes room too. At round 1, CompIDs long enough to overflow a gate Reject's own buffer lost the Reject even with a
+one-byte MsgType. The slot rebuild now recovers that case up to `kSendFrameBytes`. What remains is a Reject whose
+fixed fields, CompIDs and 58 exceed the ceiling even without 372. That is the outbound-ceiling ending above, the same
+ceiling every outbound frame obeys. The session's other admin frames are built in smaller fixed buffers, so they fail
+at shorter CompIDs than that (re-derive with `git grep -n 'std::array<std::byte, ' -- src/session/session.cpp`). A CompID length bound at `open()`
+stays a follow-up issue (quickstart).
 
-**Rationale:** in Reject (35=3), 372 is optional (`Req'd N`); the Reject's reason and 45 are what the peer needs. A
-retry on the failing path only costs nothing on the normal path; a length bound needs a number that is a function of the
-other fields.
+**Rationale:** QuickFIX C++ and J echo 372 in both messages with no frame bound. fixpp matches them up to its own
+outbound ceiling, the one bound every frame it sends already obeys and the one its resend replay depends on. Above it:
+- In Reject (35=3), 372 is optional (`Req'd N`). The Reject's reason and 45 are what the peer needs, so the Reject is
+  sent without 372.
+- In BusinessMessageReject (35=j), 372 is required (`required='Y'` in the vendored FIX 4.2, 4.4 and 5.0SP2
+  dictionaries), so a BMR without it would be one a validating peer refuses. The BMR is therefore not sent, as no
+  outbound frame above the ceiling is.
 
-**BusinessMessageReject — provisional, open for a ruling.** In BusinessMessageReject (35=j) RefMsgType(372) is
-**required** (`required='Y'` in the vendored FIX 4.2, 4.4 and 5.0SP2 dictionaries), so the optional-field rationale does
-not carry over. QuickFIX writes 372 from the inbound MsgType with no length limit, so it has no such case. Provisional
-ending, one per condition: a BMR whose echo does not fit is sent **without 372** (a non-conformant BMR, which a validating
-peer may answer with Reject 373=1, 371=372), rather than not at all, and a B-row discloses it. The alternative is to keep
-today's silent loss for the BMR only. Spec Clarifications (Gate A round 1) records the question.
+The work is on the failing path only and costs nothing on the normal path.
 
-**Alternatives:** a bigger buffer (moves the threshold, does not remove it); refusing the inbound frame (sends nothing,
-the defect itself); keeping 092's bound and carving the disposer out of FR-007 (two rules for one field).
+**Follow-up (b-L), for the owner.** Full parity echoes 372 up to the inbound limit L (`inbound_limit_for(cfg)`) instead
+of up to `kSendFrameBytes`. It needs lifting the outbound ceiling the replay depends on: a stored frame larger than
+`CaptureVisitor::kCapBufSize` aborts a later resend answer (`dispatch_aborted`). It also needs a buffer sized from L
+and the CompIDs, plus re-parse and store support above the ceiling. That is a scope and cost question for the owner, so
+it is a follow-up issue (quickstart), not part of this feature.
+
+**Alternatives:**
+- **Enlarge each site's own buffer.** It grows every reply leaf's frame on the normal path, past #544's recycler limit
+  at `kSendFrameBytes`, and a smaller size still leaves a threshold of its own. Round 1's "a bigger buffer moves the
+  threshold" holds against that form. The adopted slot rebuild moves the threshold to the engine's outbound ceiling,
+  which every outbound frame shares, and leaves the normal path as it is.
+- **A cold leaf coroutine that owns a `kSendFrameBytes` buffer**, shaped like `send_fallback_leaf_` (rewrite 2's first
+  shape). Its frame is over asio's recycler limit (#544 §1(b)), so it allocates one frame per overflowed reply, on a
+  path a peer can repeat. `[const §XV.1]` bans per-message heap on parse → validate → dispatch, and a reply to an
+  inbound frame is on that path. #544 R-10's disposition for `send_fallback_leaf_` does not carry over: that fallback
+  is caused by the engine's own call pattern (a send inside `toApp`, or one overlapping a suspended send), not by a
+  peer. Rejected by orchestrator ruling.
+- **Use the session-owned `send_frame_slot_`.** An in-flight `Session::send` may hold it.
+- **One buffer shared with the strand's other chains** (#544 §2.2's rejected form). No per-chain exclusivity argument
+  exists for it.
+- **Send the BMR without 372.** A validating peer answers that BMR with Reject 373=1, 371=372, so the business
+  information is lost anyway.
+- **Keep the BMR's silent no-send below the ceiling.** It splits one condition at a leaf's private buffer.
+- **Refuse the inbound frame.** It sends nothing, which is the defect itself.
+- **Keep 092's bound and carve the disposer out of FR-007.** That gives one field two rules.
 
 ### D8 — Benchmarks (FR-008, SC-004), `[const §VIII.2]`
 
@@ -238,8 +390,14 @@ the defect itself); keeping 092's bound and carving the disposer out of FR-007 (
   has the candidate's length. Record the merge-base, four observations per tree, the minima and the ratios.
 - **Binaries:** `scan_frame_header_bench`, `on_inbound_frame_bench` **and** `validator_bench`. `validator_bench`'s CI
   pairing is supplementary only (Article VIII §2: a green sentinel is not evidence of +5% compliance).
+- **Table-view build and copy (Gate A round 2).** D1 adds work to exactly what `table_view_footprint_bench`'s existing
+  timed rows measure: `Dictionary::build_table_view` populates, sorts and deduplicates the new store, and every
+  `table_view` copy copies it. So its `BM_TableView_Build*` and `BM_TableView_Copy*` rows (list them with
+  `--benchmark_list_tests`) join the same local A-B-A-B min-per-tree run, with the same +5% rule and the same Article
+  VIII §2 approval fallback. `bench/ci-suite.txt` keeps the binary's `none:…` comparand and its `no` pairing: making
+  it `paired` is irreversible (§2a) and out of scope.
 - **Footprint:** `table_view_footprint_bench` gains the defined-tag store's bytes for FIX44, a FIXT route, FIX Latest and
-  a high-tag overlay.
+  a high-tag overlay. No new timed rows: the existing Build/Copy rows cover the changed functions.
 - **Expected cost:** one comparison per later 35 in the scan; one hot `valid_.find` per validated message, as today (D2
   shares it); one cold `tag_defined` only on a field that has already failed; nothing on a validation-off frame with one
   MsgType.
@@ -298,6 +456,9 @@ many binaries: `session_pure_tests`, `wire_dict_tests`, the per-feature `error_0
   `W6PerShape.DThenAWithLogonFields_Establishes` (→ disconnect); the `rep35` rows of `test_099_validation_off.cpp`
   (→ the differential oracle of D6). `test_099_establishment.cpp`'s W5 off tables are checked by recipe 2/3.
 - 099: tag 3115 cells in `test_099_toml_live.cpp` / `capi_099_fixt_live_test.cpp` (3115 defined only in FIX Latest).
+- 092 echo: `UnparseableFrameDisposition.RefMsgTypeBound_LongMsgType_RejectWithout372_{MalformedTag,LengthDataMismatch}`
+  (→ 372 present and byte-equal to the inbound MsgType, which overflows the disposer's buffer but fits
+  `kSendFrameBytes`; renamed, citing FR-007).
 - Interop goldens `HP-QFj-{acc,init}-fix44-reject-invalid-admin.fix` (58 added, 9 and 10 move; regenerated).
 
 Each rewritten cell names its superseding requirement in the test.
@@ -309,17 +470,76 @@ reverted):
   last-vs-third mutant establishes; D4 disconnects). `D…A…D` alone does not discriminate in establishment.
 - D5: `0,D(hdr)…0(past)` → 14 and `0,0(hdr)…D(past)` → 14; validating non-FIXT 13 and 14; a FIXT-only header tag at the
   non-FIXT boundary (1128 before a later 35 → 13, as QuickFIX C++).
+- D5's boundary field (real FIXT `Session`, validating, Active; Gate A round 2):
+  - a Length only the route declares, as the first body field, whose Data embeds `SOH 35=X`, plus a real in-header
+    repeat → 13, not 14. A mutant reading the stopping field with S's hooks must go RED;
+  - an S header Length whose paired Data tag is not an S header tag, so the Data is the stopping field (a hand-built
+    table) → the Data counted across the transition, and the 13/14 answer as the frame's real 35s give it. A mutant
+    that resets or replaces the carry at the stop must go RED;
+  - a malformed-count variant of each → 14, whatever 35s the walk saw before the fault.
 - LogoutSent on validating and off, FIXT and non-FIXT: `D..5` stays, `5..D` confirms.
 - D6's differential oracle for every post-establishment validation-off row and every LogoutSent row, including X = 4
   and X = A.
 - Controls: a single MsgType in every affected arm; a same-value repeat; the 3/5 exemption ordering on validation off;
   the outbound Logon masking; the resend replay.
 - `interpret_logon` direct cell: `35=D … 35=A` → `session_invalid_logon`.
-- D7: a long undefined MsgType through the validation gate (373=11, no 372, 58 present); `inbound_reject_leaf_` via
-  PossDup Arm C on validation off (the session survives); the zero-argument emit (no Application); the BMR leaf
-  (`fromApp` rejects); the disposer with a fitting 3-byte overlay MsgType and a fault (372 present; none on
-  `fa778a8e`); a unit cell for `inbound_reject_best_effort_leaf_`; `35=D=X` echoed as `372=D=X` and read back by fixpp's
-  parser as one field.
+- D7. **Thresholds are derived at test time, never written as a MsgType length.** Call the site's builder, with the
+  session's CompIDs, SendingTime and (for a gate Reject) its 58, into a buffer of the site's size and into one of
+  `kSendFrameBytes`. The longest MsgType for which each build succeeds is that boundary.
+  - **Reject sites:** a long undefined MsgType through the validation gate; `inbound_reject_leaf_` via PossDup Arm C
+    on validation off (the session survives); the zero-argument emit (no Application); a unit cell for
+    `inbound_reject_best_effort_leaf_`. Each has three cells:
+    - a MsgType that overflows the site's buffer but fits the ceiling → 372 present, byte-equal to the inbound one,
+      every other field as for a short MsgType;
+    - a MsgType whose Reject exceeds the ceiling → the Reject sent without 372;
+    - boundary controls one byte under and one byte over the site's buffer, and one byte under and one byte over the
+      ceiling.
+  - **The BMR leaf** (validation-off acceptor; `fromApp` rejects):
+    - a MsgType that overflows the leaf's buffer but fits the ceiling → the BMR delivered with 372 byte-equal to the
+      inbound MsgType. It must be RED on `fa778a8e` (no BMR there) and RED with the slot rebuild removed;
+    - a ResendRequest covering that stored BMR, and one covering a BMR one byte under the ceiling → resent with 372;
+      not a disconnect, not a GapFill;
+    - a MsgType whose BMR exceeds the ceiling → no BMR, no `toApp`, no outbound number consumed, the inbound consumed,
+      the session Active, and the log record, captured through `SessionConfig::logger_override`. The no-BMR half is
+      GREEN on `fa778a8e`, which sends none; the record is the discriminating assertion. A second such message inside
+      the rate window writes no second record, and the next record carries the count;
+    - boundary controls one byte under and one byte over the leaf's buffer and the ceiling.
+  - **Callbacks at the ceiling:** a Reject one byte under the ceiling reaches `toAdmin`, and a BMR one byte under it
+    reaches `toApp`, each with 372 byte-equal. A built-frame parse failure skips the callback silently (D7), so this is
+    what shows the rebuilt frame parses.
+  - **Long CompIDs:** CompIDs and 58 that overflow a gate Reject's buffer with a one-byte MsgType → the Reject sent,
+    with 372. It must be RED with the slot rebuild removed. The session's own admin frames are built in smaller
+    buffers, so drive the cell in a gate arm such CompIDs can reach, found by running it.
+  - **Placement:** in every overflow cell, one outbound number per sent message and one callback. A mutant that
+    re-peeks or re-stamps in the slot rebuild must go RED.
+  - **Allocation (the zero, measured).** New cells in #544's run-thread rig (`tests/alloc_guard/test_544_run_thread_windows.cpp`
+    over `tests/support/run_thread_engine_rig.hpp`). That rig drives the real Engine read pump and counts allocations
+    two ways: the mallocnesia interceptor (Release, Linux, one gtest case per registration) and the operator-new counter
+    build (`FIXPP_B35_TU_COUNTER`). It is the closest existing harness that runs a Session's inbound path. #544's own
+    windows take no reply, so these cells are the first to gate a reply chain.
+    - A W-B-shaped window whose application rejects in `fromApp`, with a MsgType that overflows the BMR leaf's buffer
+      (each BMR rebuilt in the slot). Its twin uses a MsgType that fits.
+    - A Reject window: a validating rig and a long undefined MsgType, so each gate Reject is rebuilt in the slot. Its
+      twin uses a short undefined MsgType.
+    - Each asserts zero interceptions and a zero counter, plus its post-conditions: one reply per window frame, 372
+      byte-equal, the session still Active with the expected NextNumIn.
+    - **RED arm:** a mutant restoring rewrite 2's first shape, a coroutine that owns a `kSendFrameBytes` buffer, must
+      be intercepted, as #544's arm (e) is for `send_fallback_leaf_`.
+    - If a **fitting** twin is not zero, the cell is not weakened. #544 leaves reply chains ungated (§2.2 "The leaf's
+      own frame", §3), so that would be a pre-existing gap: tasks stop and report it.
+    - `ctest -L alloc_guard` stays GREEN as a regression control.
+  - **Slot discipline:**
+    - A death test, on a build with assertions, drives two overlapping `on_inbound_frame` calls on one Session. Each
+      draws an overflowed reply, with a store double that suspends the first call's store. It expects
+      `FIXPP_ASSERT_INBOUND_REPLY_SLOT_FREE()`'s text. A mutant with the assertion removed must go RED.
+    - Release on every exit: an overflowed BMR whose `toApp` vetoes, and one whose `toApp` throws; an overflowed
+      Reject whose `assign_outbound` fails. After each exit, `session_test_access` reads `inbound_reply_slot_held_`
+      as false. After the veto, whose session stays Active, a second overflowed BMR in the next frame is sent. A
+      mutant that releases only on success must go RED.
+    - The users census: every caller of the slot rebuild is an inbound-fed reply site (read each caller's enclosing
+      function at tasks).
+  - **092 disposer:** a fault with a fitting 3-byte overlay MsgType → 372 present (none on `fa778a8e`).
+  - **`35=D=X`:** echoed as `372=D=X` and read back by fixpp's parser as one field.
 - D1: one mutation per population path (dictionary-built; each hand-built op class).
 
 ### D10 — Comments the feature makes false
@@ -336,6 +556,9 @@ and `check-comment-claims.py` runs on the diff:
   behind the MsgType check;
 - `reject_reason_map.hpp`'s `wire_invalid_tag_number` comment, which must not suggest it serves the undefined tag;
 - `dispose_unparseable_`'s RefMsgType-bound comment;
+- `emit_session_reject_`'s header ("success or build-failure (not fatal if build fails)"), and any other reply-leaf
+  comment describing what a failed build does, where the slot rebuild now runs first;
+- `on_inbound_frame`'s reentrancy contract in `session.hpp`, which gains the serialized-caller sentence (D7);
 - the 098 test file's header recipe (B85 note).
 
 `scan_frame_header.hpp`'s header names **101 D4** as superseding 092 data-model E-1 / contract C-3 I-3 for `msg_type`,
@@ -343,21 +566,56 @@ and `session.cpp`'s `dispose_unparseable_` names **101 D7** as superseding 092 r
 
 ## Supersessions (by name)
 
-This feature changes clauses of merged features. Each is superseded for the part named, nothing more:
+This feature changes clauses of merged features. Each is superseded for the part named, nothing more. The list is a
+**recipe plus its classified hits** (Gate A round 2), as D9's census is. It is re-run at tasks and after the last fix
+commit, and every hit is classified as superseded (a row below) or kept (with its reason). It is not counted.
+
+```sh
+git grep -nE 'last MsgType|last 35|keeps? (the|its) (first-wins, last-wins )?(MsgType )?split|keeps both|kMaxShippedMsgTypeLength|longest MsgType|shipped dictionary|second 35|(D|0)(…|\.\.)A|(D|5)(…|\.\.)(5|D)|leaves it false|gains no step|last-wins' \
+  -- specs/092-garbled-frame-reject specs/099-fixt-appl-version-validation spec/behaviors-and-limitations.md
+```
+
+The patterns were widened at round 2 until every clause both reviewers named is a hit. A clause the recipe still
+misses, once found, widens the recipe; a hand addition to the table alone does not close it.
+
+**Kept, by class:**
+- 092's and 099's `tasks.md`, `plan.md`, `research.md`, `quickstart.md` and `checklists/` are history. They record
+  what each feature measured and planned when it merged, and are not rewritten (099's quickstart issues-to-file list
+  is the plan that filed #657/#658, which this feature closes).
+- Clauses that pass `fault_ref_msg_type` rather than the scan's last-wins `msg_type` (092 `spec.md` FR-003's 45/372
+  source, 092 contract C-2's "35 value"). The rule they state, "the third field's value", is the one D4 makes
+  universal, so they stay.
+- Unrelated hits (e.g. B-493-1's "keeps both … caps", the 083 splitter note).
+- 099's mutant rows (`witnesses.md` M-50, M-51, M-59, M-109, M-93) describe 099's mutants. They stay; where a mutated
+  line no longer exists after D4, tasks re-target or retire the mutant with its witness.
+
+**Superseded:**
 
 | Superseded clause | Part superseded | By |
 |---|---|---|
 | 092 `contracts/unparseable-frame-disposition.md` C-3 **I-3** ("the scan keeps last-wins for every existing member (E-1)") | `msg_type` only; `msg_seq_num` stays last-wins | D4, FR-004 |
 | 092 `data-model.md` **E-1** ("`msg_seq_num` and `msg_type` stay last-wins") | `msg_type` only | D4, FR-004 |
 | 092 `research.md` **R-5**, the RefMsgType bound (`kMaxShippedMsgTypeLength`) | the bound and its "cannot fail" premise | D7, FR-007 |
+| 092 `spec.md` **FR-003**, the RefMsgType sub-bullet ("omitted when longer than any MsgType a shipped dictionary defines") | the omission rule | D7, FR-007 |
+| 092 `contracts/unparseable-frame-disposition.md` **"Reject contents"**, the 372 bullet ("omitted when it is longer than the longest MsgType any shipped dictionary defines … cannot overflow the Reject's 512-byte buffer") | the omission rule and its no-overflow premise | D7, FR-007 |
 | 099 `spec.md` **FR-025**: "whose last MsgType differs from its third field's"; "373=13 when the second 35 is in the header, 373=14 when past it"; the **Limits** sentences "a last MsgType of 5 confirms the Logout" and "A non-validating session and a non-FIXT session keep the split" | the comparison (now any later differing 35), the 13/14 rule (D5's precedence), LogoutSent's reply test, the non-FIXT and validation-off carve-outs | D4, D5, D6; FR-004..FR-006 |
 | 099 `spec.md` **FR-029**: "whose last MsgType differs from its third field's"; "a validating FIXT session" for that clause | the comparison and its scope (every session, validating or not) | D5, D6; FR-005, FR-006 |
-| 099 `data-model.md` **E-7**, steps **S1** and **A1** | S1's condition and its "interpret_logon reads the last 35" rationale; A1's condition and 13/14 rule | D4, D5 |
-| 099 `contracts/surface.md`, the validation-off bullet ("establishes a session of either role, because `interpret_logon` reads the last 35 … LogoutSent takes a last MsgType of 5 as the reply") | the whole bullet | D4, D6 |
-| 099 `contracts/witnesses.md` **W-9**'s "`D…5` in LogoutSent: confirms the Logout" | that named cell | D4 |
+| 099 `spec.md` **Clarifications**: the Gate A round-1 Q on a last MsgType that differs ("A non-validating session stays as today"), the round-2 Qs on establishment ("`interpret_logon` reads the last 35"), on LogoutSent ("a frame whose last MsgType is 5 confirms the Logout"), and the after-loop-1 Q "Does a validating FIXT session reject a frame whose last MsgType differs" | the comparison, the non-validating carve-out, the `interpret_logon` rationale, LogoutSent's reply test | D4, D5, D6 |
+| 099 `spec.md` **US3** acceptance scenarios 7 ("last MsgType differs", 13 "with the second 35 in the header") and 8 (validating FIXT establishment, "last MsgType differs") | the comparison, the 13/14 rule, scenario 8's validating-FIXT scope for the conflict clause | D4, D5, D6 |
+| 099 `spec.md` **Edge Cases**, "MsgType repeated with a different value": "A non-FIXT validating session keeps the split …" | that sentence | D5, FR-005 |
+| 099 `data-model.md` **E-7**: steps **S1** and **A1**; the non-validating paragraph ("`D…A+L` is scanned with S and interpreted with the transport's table", as a path to establishment); "A non-FIXT session leaves it [`names_third_field`] false"; "LogoutSent gains no step: it drains every frame as today"; the decisive-cells list's "`D…A+L` and `0…A+L` establish", "`D…3` in Active is consumed in silence. `D…5` logs the session out"; the per-arm table's `LO` row "`D…5`: … as today"; the "Columns" note "last 35=0" naming | S1's condition and its "interpret_logon reads the last 35" rationale; A1's condition and 13/14 rule; the validation-off establishment path; the non-FIXT flag (D5 sets it there); LogoutSent's reply test (D4); the validation-off Active endings (D6's oracle) | D4, D5, D6 |
+| 099 `contracts/surface.md`, the validation-off bullet ("establishes a session of either role, because `interpret_logon` reads the last 35 … LogoutSent takes a last MsgType of 5 as the reply") and the bullet "A non-FIXT validating session keeps the first-wins, last-wins MsgType split" | both bullets | D4, D5, D6 |
+| 099 `contracts/witnesses.md` **W-6**'s "**`D…A` with Logon fields establishes,** pinned as disclosed" | that clause | D6, FR-006 |
+| 099 `contracts/witnesses.md` **W-9**: the named cells "`D…A` and `0…A` with Logon fields: Disconnected, not Active" (kept on a validating FIXT session, widened to every session) and "`D…5` in LogoutSent: confirms the Logout"; its walk of `LO-a` | the `D…5` cell, `LO-a`'s repeated-35 inputs, the scope of the establishment cells | D4, D6 |
 | 099 test tables: `kLogoutSent`/`kLogoutSentOff` `LO-a` `D..5`/`5..D`; `kNotConnectedOff` `NC-a` and `kLogonSentOff` `LS-a` `logon-fields` rows; `W6PerShape.DThenAWithLogonFields_Establishes` | their expected endings | D4, D6 |
-| B&L **B-099-4**'s "Not validating" bullet, **B-099-5**, **B-099-11** | each whole bullet/row, rewritten to the new endings | FR-009 |
+| B&L **B-092-3**, the RefMsgType(372) bullet (`kMaxShippedMsgTypeLength`, its recompute cell, "cannot overflow") | the whole bullet, rewritten to D7's rule | D7, FR-009 |
+| B&L **B-099-3**, "last MsgType differing from it", "a validating FIXT session" for the conflict clause | the comparison and its scope | D4, D6, FR-009 |
+| B&L **B-099-4**: its headline ("… once a validating FIXT session is past establishment; a non-validating session keeps both"), its "Repeated MsgType" bullet ("373=13 when the second 35 is in the header"), its "Not validating" bullet | the headline's scope, the 13/14 rule, the whole "Not validating" bullet | D4, D5, D6, FR-009 |
+| B&L **B-099-5**, **B-099-11** | each whole row, rewritten to the new endings | FR-009 |
 | B&L **L-452-2** | closed: the echo stays verbatim by ruling, and the silent loss is fixed | D7, FR-009 |
+
+SecondBrain: `brain/components/session.md` and `brain/components/inbound-message-path.md` flag each superseded clause
+above in place (CLAUDE.md, #334). Close-out row 3 makes that edit; plan.md Phase 7 points it at this list.
 
 **What 099 keeps:** its two-occurrence FIXT endings in LogonReceived and Active (Reject 373=13/14, 371=35, 372 = the
 third field, the consume key), its establishment disconnect on a validating FIXT session, and every 1128 refusal. What

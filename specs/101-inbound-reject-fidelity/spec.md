@@ -36,8 +36,10 @@ A counterparty, and the people reading its logs, see three things that differ fr
    value can mislead a counterparty's parser. Read for this feature: QuickFIX C++ (`2ce8a60`) and QuickFIX/J
    (`4969564`) split a field at its first `=` and write 372 back verbatim (`372=D=X`); every FIX parser reads that as
    one field, tag 372, value `D=X`. What the issue did not name, and the survey for this feature found: the inbound
-   Reject sites other than the disposer pass the inbound MsgType unbounded, and a value too long for the Reject's
-   build buffer makes the build fail, so **no Reject is sent at all**, silently.
+   Reject and BusinessMessageReject sites other than the disposer pass the inbound MsgType unbounded, and a value too
+   long for the site's build buffer makes the build fail, so **no Reject (or BMR) is sent at all**, silently. Nothing
+   upstream bounds a MsgType's length below the inbound limit, and on a validation-off session (the default) any
+   non-admin MsgType reaches `fromApp`, so the BMR case is reachable from the wire.
 
 ## Clarifications
 
@@ -59,6 +61,7 @@ A counterparty, and the people reading its logs, see three things that differ fr
 - Q: #646 — refuse, omit, or keep the `=`? → A: **keep the echo verbatim**, as QuickFIX C++ and J do; a value with `=`
   is one field to any FIX parser. Fix instead the silent loss the survey found: an inbound MsgType too long for the
   Reject is not echoed (372 is optional, `Req'd N` in FIX 4.4 and the 2020 Session Layer), and the Reject is sent.
+  *(Narrowed at Gate A round 2: not echoed only above `kSendFrameBytes`.)*
 - Q: #657/#658 — which MsgType is a frame? → A: **its third field's**, everywhere: the header scan, the Logon
   interpreter, dispatch, the validator and the message view read one value. This is the value 099's FR-025 already
   makes RefMsgType and the consume key.
@@ -83,8 +86,8 @@ Resolutions of the reviews' findings; the decisions they land in are research D1
   first 35 is 5: `D…5` no longer confirms, `5…D` does. No Reject. This follows from "the third field everywhere" and
   changes 099's pinned `LO-a` rows (research Supersessions).
 - Q: A frame with three or more 35s? → A: a conflict whenever **any** later 35 differs from the first (`D…A…D` is one).
-  The Reject is 373=14 when any later 35 lies past the header, else 373=13 when one lies in it — QuickFIX C++'s
-  structure-before-iterate precedence. With two 35s this equals 099's answer (D5).
+  The Reject is 373=14 when any later 35 lies past the header, else 373=13 when one lies in it, else 14 — QuickFIX
+  C++'s structure-before-iterate precedence (research D5's three-clause rule). With two 35s this equals 099's answer (D5).
 - Q: The header boundary for that choice on a non-FIXT session? → A: the session dictionary's header ∪ the FIXT standard
   header set, as on FIXT, which is the closer model of QuickFIX C++'s `isHeaderField`; the residual (tags fixpp's
   FIXT standard header set holds and QuickFIX C++'s static list lacks) is disclosed. Codex's dictionary-only boundary is not adopted (plan.md `## Gate A`, round 1 disagreements).
@@ -100,11 +103,36 @@ Resolutions of the reviews' findings; the decisions they land in are research D1
   371/373 as today). QuickFIX C++'s `<text> (<tag>)` form below 4.2, and its omission of 373 for reasons above 11 on 4.2,
   are disclosed (D3).
 - Q: Long CompIDs plus 58 overflow the Reject buffer? → A: disclosed as a residual; 58 is not dropped to make room (the
-  B85 ruling). A CompID length bound at `open()` is a follow-up issue (D7).
+  B85 ruling). A CompID length bound at `open()` is a follow-up issue (D7). *Narrowed at round 2 (below).*
 - Q: The BusinessMessageReject whose echo does not fit? In 35=j RefMsgType(372) is **required**, so the 2026-11-07
-  "372 is optional" rationale covers Reject (35=3) only. → A (**provisional, for an orchestrator/owner ruling**): send the
-  BMR without 372 rather than not at all, and disclose that such a BMR is non-conformant (a validating peer may answer it
-  with Reject 373=1, 371=372). The alternative is today's silent loss for the BMR only (D7).
+  "372 is optional" rationale covers Reject (35=3) only. → A: left open at round 1 for a ruling; **decided at round 2**
+  (below).
+
+### Session 2026-11-07 (Gate A round 2; orchestrator ruling on the owner's delegation)
+
+- Q: The BusinessMessageReject whose echo does not fit its leaf's buffer? → A: it **always carries 372 verbatim**
+  whenever its frame fits the engine's outbound ceiling `Session::kSendFrameBytes`, which is what QuickFIX C++ and J do
+  (they echo with no frame bound). On an overflow of the leaf's own buffer it is rebuilt, with 372, into a
+  session-owned `kSendFrameBytes` inbound reply slot, before `toApp` and `assign_outbound`. Above the ceiling it is not sent, as no
+  outbound frame above it is: one rate-bounded session log record, the session stays Active, and a B-row discloses it.
+  Full parity up to the inbound limit is a follow-up for the owner (research D7, "(b-L)").
+- Q: Does the session Reject follow the same rule? → A: yes, one rule for 372 on both messages. The Reject echoes 372
+  verbatim whenever it fits `kSendFrameBytes`, through the same slot rebuild. Above the ceiling it is sent without 372,
+  which is optional in 35=3. This **narrows** the 2026-11-07 orchestrator answer to #646 ("an inbound MsgType too long
+  for the Reject is not echoed … and the Reject is sent"): the echo is now dropped only above the ceiling. The #646
+  ruling (keep the echo verbatim; never lose the Reject for it) stands.
+- Q: Long CompIDs, now? → A: the slot rebuild recovers any overflow of a Reject's own buffer, CompIDs and 58 included,
+  up to `kSendFrameBytes`. The residual is a Reject that exceeds the ceiling even without 372: the outbound-ceiling
+  ending, disclosed. The CompID length bound at `open()` stays a follow-up issue.
+- Q: May the rebuild allocate (a coroutine owning the buffer allocates one frame per run)? → A: **no**. A reply to
+  an inbound frame is on `[const §XV.1]`'s parse → validate → dispatch path, a peer can repeat the overflow, and #544
+  R-10's disposition (an engine-caused fallback) does not carry over. The buffer is a session-owned slot used only by
+  the inbound-fed reply sites, sound under the precondition that a caller awaits each `on_inbound_frame` before the
+  next. The Engine already does so, and the arms are unsound under overlap. The precondition is stated on the public
+  header, asserted in debug builds and disclosed (research D7).
+- Q: Which hooks read the field that ends the header, in D5's 13/14 walk? → A: the route's, for that field and every
+  later one; S's before it; one `length_data_carry` throughout. A walk that faults answers 14, the 35s it saw discarded
+  (research D5).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -179,7 +207,7 @@ lets a frame be validated as one message and handled as another.
    not).
 7. **Given** any session, **When** a frame carries three or more 35s and any later one differs from the first (`D…A…D`,
    `A…D…A`), **Then** it is a conflict like any other: disconnect in establishment, FR-005's Reject on a validating
-   session after it, with 373=14 whenever a later 35 lies past the header.
+   session after it, with 373 by research D5's three-clause rule.
 8. **Given** a frame with one MsgType, or a repeat with the same value, **When** it arrives in any state, **Then**
    handling is unchanged.
 
@@ -187,16 +215,24 @@ lets a frame be validated as one message and handled as another.
 
 ### User Story 4 - A Reject is never dropped for its echo (Priority: P2)
 
-A peer sends a message whose MsgType value is long (hundreds of bytes) and which draws a session Reject.
+A peer sends a message whose MsgType value is long (hundreds of bytes or more) and which draws a session Reject or a
+BusinessMessageReject.
 
 **Acceptance Scenarios**:
 
-1. **Given** any inbound-fed Reject or BusinessMessageReject site, **When** the inbound MsgType does not fit the
-   message being built, **Then** the Reject is sent without 372, every other field as for a short MsgType.
-2. **Given** `35=D=X` drawing a Reject, **Then** the Reject carries `372=D=X` verbatim, and fixpp's own parser reads it
+1. **Given** any inbound-fed session Reject site, **When** the Reject with the inbound MsgType overflows the site's own
+   buffer but fits `kSendFrameBytes`, **Then** the Reject is sent with 372 verbatim, every other field as for a short
+   MsgType (today: no Reject).
+2. **Given** the same, **When** the Reject with 372 exceeds `kSendFrameBytes`, **Then** it is sent without 372.
+3. **Given** a validation-off session whose application rejects a message in `fromApp`, **When** the
+   BusinessMessageReject with the inbound MsgType overflows its leaf's buffer but fits `kSendFrameBytes`, **Then** the
+   BMR is sent with 372 verbatim (today: no BMR), and a later ResendRequest covering it resends it with 372.
+4. **Given** the same, **When** the BMR with 372 exceeds `kSendFrameBytes`, **Then** no BMR is sent, no outbound
+   number is consumed, the inbound message is consumed, the session stays Active, and the session log records it.
+5. **Given** `35=D=X` drawing a Reject, **Then** the Reject carries `372=D=X` verbatim, and fixpp's own parser reads it
    back as one field 372 with value `D=X`.
-3. **Given** a garbled frame (092's disposer) whose MsgType is three bytes or longer and fits, **Then** the Reject
-   carries it in 372 (today: 372 omitted for any MsgType longer than the longest shipped one).
+6. **Given** a garbled frame (092's disposer) whose MsgType fits `kSendFrameBytes`, **Then** the Reject carries it in
+   372 (today: 372 omitted for any MsgType longer than the longest shipped one).
 
 ### Edge Cases
 
@@ -234,8 +270,9 @@ A peer sends a message whose MsgType value is long (hundreds of bytes) and which
   message view, RefMsgType echo and the consume key. A frame's MsgTypes **differ** when any later 35's value differs
   from the first.
 - **FR-005** (#658): A validating session, FIXT or not, MUST refuse a frame whose MsgTypes differ: in LogonReceived and
-  Active with Reject 371=35, 372 = the first 35, 45 = the first 34, **373=14 when any later 35 lies past the header,
-  else 373=13**, ahead of the 3/5 exemption, consuming the frame as its first 35; in an establishment arm with a
+  Active with Reject 371=35, 372 = the first 35, 45 = the first 34, and 373 by research D5's three-clause rule (14
+  when any later 35 lies past the header, else 13 when one lies in it, else 14; a walk that faults answers 14), ahead
+  of the 3/5 exemption, consuming the frame as its first 35; in an establishment arm with a
   disconnect, sending nothing. This supersedes 099's FR-025/FR-029 comparison and carve-outs (research Supersessions).
 - **FR-006** (#657): A validation-off session in an establishment arm MUST refuse a frame whose MsgTypes differ with a
   disconnect, sending nothing. In LogonReceived, Active and LogoutSent a validation-off session MUST handle such a frame
@@ -244,19 +281,31 @@ A peer sends a message whose MsgType value is long (hundreds of bytes) and which
 - **FR-007** (#646): Every inbound-fed Reject and BusinessMessageReject builder — both `emit_session_reject_` forms,
   `inbound_reject_leaf_`, `inbound_reject_best_effort_leaf_`, `inbound_business_reject_leaf_` at round 1 (research D7's
   census recipe decides), and so the 092 disposer and the validation gate — MUST echo the inbound MsgType verbatim,
-  `=` included, and MUST send its message without 372 when the build runs out of room with it (for the
-  BusinessMessageReject, where 372 is required, provisionally: see Clarifications, Gate A round 1); the retry re-stamps
-  and re-assigns nothing and never drops 58.
-- **FR-008**: A frame not covered by FR-001..FR-007 MUST be handled byte-identically to today, on every session kind;
-  no per-message allocation is added to the inbound path (`[const §XV.1]`); and the paired benchmarks of research D8
-  show no slowdown above the `[const §VIII.2]` budget.
-- **FR-009** (records): The B&L rows for #646 (L-452-2, closed), #657/#658 (B-099-4's "Not validating" bullet,
-  B-099-5, B-099-11) move or change to the new endings. New B-rows disclose: fixpp's config loader ignores QuickFIX's
+  `=` included, in every message whose frame fits `Session::kSendFrameBytes`. A build that runs out of room in the
+  site's own buffer MUST be rebuilt into the session's inbound reply slot (a `kSendFrameBytes` member, used only by
+  the inbound-fed reply sites), and the site MUST run its unchanged tail over that frame. Every attempt runs after the outbound-number peek and the SendingTime stamp and before the site's first
+  callback (`toAdmin` for a Reject, `toApp` for the BMR) and `assign_outbound`, so nothing is re-stamped, re-numbered
+  or fired twice. Text(58) is never dropped to make room. Above the ceiling (research D7):
+  - (a) **session Reject (35=3):** it MUST be sent without 372. A Reject that exceeds the ceiling even without 372 is
+    not sent, and the session log records it;
+  - (b) **BusinessMessageReject (35=j):** it MUST NOT be sent without 372. It is not sent: no callback, no outbound
+    number, the inbound consumed as today, the session in its state, and the session log records it (rate-bounded).
+- **FR-008**: A frame not covered by FR-001..FR-007 MUST be handled byte-identically to today, on every session kind.
+  No per-message allocation is added to the inbound path, the overflowed replies of FR-007 included (`[const §XV.1]`).
+  `on_inbound_frame` MUST be documented as requiring each call to complete before the next on the same Session, and
+  a build with assertions MUST assert when the inbound reply slot is taken while held (research D7). The paired
+  benchmarks of research D8 show no slowdown above the `[const §VIII.2]` budget.
+- **FR-009** (records): The B&L rows for #646 (L-452-2, closed; B-092-3's RefMsgType bullet, rewritten to D7's rule) and
+  #657/#658 (B-099-3's conflict clause; B-099-4's headline, its "Repeated MsgType" bullet and its "Not validating"
+  bullet; B-099-5; B-099-11) move or change to the new endings. Research's Supersessions list is the complete set and
+  its recipe re-derives it. New B-rows disclose: fixpp's config loader ignores QuickFIX's
   `ValidateUserDefinedFields` and `AllowUnknownMsgFields`; the FIX.4.0–4.2 text and 373 differences (D3); the
   header-set residual against QuickFIX C++'s static list (D5); the group-layout divergence (D2); multi-defect
-  precedence (Edge Cases); `interpret_logon`'s first-wins change, public C++ (D4); the long-CompID residual (D7); a BMR
-  sent without its required 372 (D7, provisional); the new LogoutSent and validation-off endings. The new validator
-  error slots are in the error contract and its completeness tests.
+  precedence (Edge Cases); `interpret_logon`'s first-wins change, public C++ (D4); the outbound-ceiling ending (D7: a
+  BMR above `kSendFrameBytes` is not sent, where QuickFIX sends it; a Reject above it is sent without 372, or not at all
+  when it exceeds it even without 372, the long-CompID residual); `on_inbound_frame`'s serialized-caller
+  precondition, now stated and asserted (D7); the new LogoutSent and validation-off endings. The new validator error slots are in the error contract and
+  its completeness tests.
 
 ### Key Entities
 
@@ -278,7 +327,9 @@ A peer sends a message whose MsgType value is long (hundreds of bytes) and which
   derive at the head being accepted (re-derived after the last fix commit), each with the requirement that supersedes it
   and, where a merged feature's clause is superseded, that clause by name (research Supersessions).
 - **SC-004**: Research D8's paired runs (A-B-A-B, min-per-tree, base = the merge-base with `origin/main` at measurement
-  time) of `scan_frame_header_bench`, `on_inbound_frame_bench` and `validator_bench` show no slowdown above +5%.
+  time) of `scan_frame_header_bench`, `on_inbound_frame_bench`, `validator_bench` and the timed `BM_TableView_Build*` /
+  `BM_TableView_Copy*` rows of `table_view_footprint_bench` show no slowdown above +5%, or carry the `[const §VIII.2]`
+  approval.
 
 ## Assumptions
 

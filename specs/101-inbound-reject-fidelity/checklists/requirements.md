@@ -36,3 +36,7 @@
 - Gate A round 1 (2026-11-07): the spec gained `## Normative References` (`[const §VI.5]`) and a round-1 Clarifications
   session; FR-004..FR-007, FR-009 and SC-002..SC-004 were rewritten. The merged clauses this feature supersedes are
   named in research.md's Supersessions table, and SC-003's census is research D9's recipe, not a closed list.
+- Gate A round 2 (2026-11-07): FR-007 split into a Reject and a BusinessMessageReject clause under one 372 rule (the
+  orchestrator ruling, plan.md `## Gate A`); FR-005 cites D5's three-clause rule; FR-008, FR-009 and SC-004 rewritten.
+  A second orchestrator ruling in the same rewrite moved D7's rebuild to a session-owned slot (no allocation) under
+  `on_inbound_frame`'s serialized-caller precondition.

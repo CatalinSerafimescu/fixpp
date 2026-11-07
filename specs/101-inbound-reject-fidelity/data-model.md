@@ -39,5 +39,21 @@ empty otherwise. Called by the three validation-gate Reject sites only. `Session
 
 ## Reject build helper (internal, `src/session/session.cpp`)
 
-Build with 372; on `wire_field_value_truncated` with a non-empty MsgType, build once more without 372; otherwise today's
-handling. A twin for the BusinessMessageReject. Runs after `peek_outbound()` and the stamp, before `assign_outbound()`.
+The full sequence is research D7's; this table summarises it.
+
+| Step | Session Reject | BusinessMessageReject (twin) |
+|---|---|---|
+| 1 | build with 372 into the site's buffer | the same |
+| 2 | on `wire_field_value_truncated`: a non-coroutine helper rebuilds with 372 into `inbound_reply_slot_` (a `std::array<std::byte, Session::kSendFrameBytes>` member of `Session`), taking the peeked number and the SendingTime value as arguments | the same |
+| 3 | on `wire_field_value_truncated` again, MsgType non-empty: rebuild in the slot without 372 | none: 372 is required |
+| 4 | still failing: not sent, rate-bounded `FIXPP_SLOG` record | not sent, the same record |
+| tail | the site's own tail (`assign_outbound`, `fire_to_admin_`, `store_then_emit`, its own failure handling), unchanged, in the site's own coroutine, over the span that holds the frame | `toApp` (veto, throw), `assign_outbound`, `store_then_emit`; the same |
+
+Every attempt runs after `peek_outbound()` and the stamp and before the first callback and `assign_outbound()`. The
+rebuild helper's body holds `static_assert(kSendFrameBytes <= CaptureVisitor::kCapBufSize)`, so it is defined after
+`CaptureVisitor` in `session.cpp`.
+
+**Slot state.** An RAII holder holds the slot from the rebuild until the tail returns (after `store_then_emit`), and
+releases it on every exit. `bool inbound_reply_slot_held_` is kept in every build type, and
+`FIXPP_ASSERT_INBOUND_REPLY_SLOT_FREE()` asserts it false where the holder takes the slot. Precondition: each
+`on_inbound_frame` completes before the next on that Session (research D7). No allocation is added.
