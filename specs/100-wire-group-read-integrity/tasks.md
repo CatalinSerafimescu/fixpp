@@ -1,0 +1,369 @@
+---
+description: "Task list for 100-wire-group-read-integrity"
+---
+
+# Tasks: Wire group-read integrity — no silent loss, no exception across the C boundary
+
+**Input**: `specs/100-wire-group-read-integrity/`: spec.md (US1 to US3, FR-001 to FR-011, SC-001 to SC-004), plan.md (`## Phases`, `## Gate A`), research.md (Survey, Census, D1 to D11), data-model.md, contracts/capi-group-getters.md, quickstart.md. Gate A closed by owner ruling (2026-11-07) after round 5 / hand-edit 3; the design is not reopened here. Bundle at library commit `c66fc2d7`, whose library code equals `fa778a8e`.
+
+**Tests**: required (`[const §VII.3]`, `[const §VII.4]`). Every cell research D9 names, every acceptance scenario and every "Changes from 1.14" bullet of the contract has a task that writes it and shows it RED before the task that turns it GREEN. Cell text lives in research D9 and the contract and is pointed at, not restated. Each production change has a mutant in `## Mutant table`.
+
+**Organization**: plan phase 1 (RED) runs first, for every story, while the library is still `fa778a8e`. Then one shape phase every story needs, then one phase per user story in spec priority order, then the C-ABI declaration, mutants, records and close-out. `## User stories on the phases` says where each story lands.
+
+## Format: `[ID] [P?] [Story] Description`
+
+`[P]`: touches files no other open task in its phase touches, and depends on no incomplete task. `[US1]` to `[US3]`: the spec's user stories. Shape work, infrastructure, records and close-out carry no story label. Paths are relative to the library root (`$T`) unless marked PARENT (`/home/catalin/Work/Programming/Antreprenoriat/`).
+
+## Execution rules (apply to every task)
+
+- **Trees.** `$T` is `/home/catalin/Work/Programming/fixpp-parallel`, branch `100-wire-group-read-integrity`, the PR's tree. `$M` is `/mnt/wsl/fixppbuild/fixpp-100-mutants`, detached, the only place a mutant is ever applied. `$B` is `/mnt/wsl/fixppbuild/fixpp-100-base-<pad>`, detached at `fa778a8e`, with `<pad>` of `x` chosen so its path length equals `$T`'s, for the paired bench (PARENT memory: a base path of another length shifts code layout). The main checkout is never used.
+- **Git.** Never `git checkout` or `git switch` in any tree: `$M` moves with `git -C "$M" reset --hard "$H"`, and a mutant reverts with `git -C "$M" restore . && git -C "$M" clean -fd`. Never `git stash` (shared by every worktree). New commits only, no `--amend`, never `git commit -a` while another agent edits the tree. Check the branch before each commit batch. Extract a file from another commit with a literal `<sha>:<path>` argument, never one built from a shell variable, and assert the result's size is non-zero.
+- **Builds.** All on `/mnt/wsl/fixppbuild` (`$T`'s `build/` entries are symlinks onto it); `df -h /mnt/wsl/fixppbuild` before each; `export CCACHE_DIR=/mnt/wsl/fixppbuild/ccache`; `-j8` as quickstart.md's build line. One build owner per directory. Never a Windows and a Linux build at once. Long builds run detached (`setsid nohup <build> > <log> 2>&1; touch <marker>.done`) with one background waiter on the marker, never a foreground poll and never `pgrep -f`. `cat /mnt/c/temp/fixpp/.sandbox-lock` before the full `ctest` and before any MSVC run; MSVC takes that lock first.
+- **Selection.** Targeted runs are the default (owner preference): `ctest -L 100` and quickstart.md's labels, or one binary with `--gtest_filter` whose executed-test count is recorded and is at least the number of cells the filter names (a filter matching nothing passes). A label is checked against the entry's `LABELS` before it is relied on (`No tests were found` exits 0). The full `ctest` runs once, at T076.
+- **RED sources**, one per cell, as its task states:
+  - **`H0`**: the commit of T022, whose library code is still `fa778a8e`. Every cell written in Phase 2 compiles against today's API (the C ABI, `group_view::alloc_failed()`, the result structs' `alloc_failed` field, `Parser::parse`, the seed hook) and is RED there or stated as a control.
+  - **Pre-change head**: a cell that reads `status`, `is_group`, `read_failed()`, the registration callback or a new `table_view` accessor cannot compile at `H0`. It is written at the start of its story phase, built at the first head where what it reads exists and before the production change it witnesses, and is RED there; its task names that head (`H4` for Phase 5's cells, T034's head for Phase 4's).
+  - **Named mutant**: a cell that is GREEN at its pre-change head by construction (a store-content cell, a control) takes its RED from the mutant its `## Mutant table` row names.
+- **Stop rule.** A cell whose `H0` result disagrees with research D9's "Today" column, or with a contract bullet marked "derived from source; the RED run confirms or corrects it", stops for a decision: the run is recorded, the cell is not re-pointed silently, and the correction goes to the orchestrator. A precondition assertion that fails (D9's divergent-definition and (iv) preconditions) is a fixture defect, not RED.
+- **Mutant protocol.** For each row of `## Mutant table`:
+  1. `git -C "$M" rev-parse HEAD` equals the batch's `H`, and `git -C "$M" status --porcelain` is empty.
+  2. Apply the row's edit, alone, plus `[[gnu::used]] static const char k100_mut[] = "100-MUT-<id>";` in the edited translation unit.
+  3. Rebuild the row's binary; a row whose build or reconfigure failed proves nothing, so the row is gated on rc 0.
+  4. `strings <binary> | command grep -c 100-MUT-<id>` is non-zero (a stale binary fails toward clean).
+  5. Run the binary whole and unfiltered, under `timeout` of ten times its unmutated baseline and at least 60 s; exit 124 is recorded as a loop.
+  6. The row's named cell is RED by the message it names; a row that names a cell that must stay GREEN checks that too. Record mutant, build rc, test rc, message, collateral (any `[  FAILED  ]` name absent from the unmutated run at `H`), `H`.
+  7. Revert; `git -C "$M" status --porcelain` is empty.
+
+  A surviving mutant stops the batch: it is a witness defect. A row whose `H` is stale is void.
+- **Registration.** "Added to `<entry>`" in a task means the file belongs to that ctest entry; the task writes the file only. The CMake registration of a phase's new files is made by that phase's build task (T020 for Phase 2, T034 for T028), so no two `[P]` tasks edit one CMakeLists.txt.
+- **Evidence.** Until `/speckit-verify` runs, every record goes to `.specify/decisions/100-wire-group-read-integrity-evidence.md`: task ID, command, output or the message that fired, `git rev-parse HEAD`, and an empty `git status --porcelain` (or the mutant and `$M`'s `H`).
+- **Records and comments.** No line-number citation in any added line: cite a symbol, a heading or a quoted phrase. A comment may record a procedure and a condition, never a result: no count, no enumerated range, no pasted output, no measured figure; a limit is named by its constant. A refuted comment is deleted, not reworded. After each commit batch run `python3 tools/check_line_citations.py --range origin/main..HEAD`, and for added comments `python3 PARENT/.claude/scripts/check-comment-claims.py --root "$T" --base origin/main` (lexical: read inventories and runtime strings by hand). Each changed file whose decision this feature supersedes names 100 in a header comment.
+- **`/speckit-verify` and `/gate-b`.** Their SKILL.md files `cd` to the main checkout, so from a worktree they verify the wrong tree and report green (PARENT `research/G19-fix-fpml-iso20022/phases/phase-4/parallel-worktrees.md` §4). Wherever this file names them, `$T` is substituted for that path, and the record states the root it ran in.
+- **What stays out.** Arena size and upstream (073's ruling). The validator's group detection and `table_view::group_member_tags` / `group_first_field` (FR-009). The sub-table `Config` (spec Out of Scope). Shipped bundles `specs/004-wire-codec/` and `specs/073-nested-read-arena-failloud/` are flagged in the brain, never edited. The checked-in goldens are regenerated by the emitter, never hand-edited. `specs/` and `include/fix/c_api/*.h` are never run through a formatter.
+
+## User stories on the phases
+
+| Story | Priority | Foundation it needs | Its cells, written at | Goes GREEN at | Independent test |
+|---|---|---|---|---|---|
+| US1 zero-count group reads present and empty | P1 | Phase 3 | C ABI and typed: Phase 2 (`H0`); wire `is_group`, records, sweep: Phase 4 start | Phase 4 | spec.md US1 |
+| US2 a group read out of arena says so | P1 | Phase 3, US1's registration predicate (D11 asks it) | C ABI, typed `alloc_failed()`, wire `alloc_failed` field: Phase 2 (`H0`); `read_failed()`, `status`: Phase 5 start | Phase 5 | spec.md US2 |
+| US3 no parse succeeds with a field missing from its index | P2 | none beyond Phase 2 | Phase 2 (`H0`) | Phase 6 | spec.md US3 |
+
+MVP: US1 and US2 at the end of Phase 5; they are one C-ABI 1.15 break and ship together. US3 is independent of US1 and US2 and may run right after Phase 2, but it edits `src/wire/offset_table.cpp` as they do, so it is sequenced, not parallel.
+
+---
+
+## Phase 1: Setup
+
+**Purpose**: trees, labels, census re-derivation and baselines. Nothing here edits `src/`, `include/` or `tools/`.
+
+- [ ] T001 Pre-flight in `$T`: the branch is `100-wire-group-read-integrity`; `git diff --stat fa778a8e HEAD -- . ':!specs/100-wire-group-read-integrity' ':!.specify/feature.json'` is empty; `git status --porcelain` is empty; `readlink -f .specify/decisions` resolves under PARENT `research/G19-fix-fpml-iso20022/decisions/speckit`; `codegraph status --json` in `$T` names `$T` with a nonzero `fileCount` (else Read/Grep only). Create `.specify/decisions/100-wire-group-read-integrity-evidence.md` and record these.
+- [ ] T002 Create `$M` with `git -C "$T" worktree add --detach /mnt/wsl/fixppbuild/fixpp-100-mutants HEAD` and `$B` the same at `fa778a8e`, its path padded per Execution rules and checked with `echo ${#T}` against `echo ${#B}`. Configure `build/linux-clang-debug` in `$M`. Both are removed at close-out; neither is `fixpp-parallel` or the MSVC sandbox, which are never retired.
+- [ ] T003 ctest wiring (`[const §VII.8]`): append label `100` with `set_property(TEST <entry> APPEND PROPERTY LABELS 100)`, after each entry's last LABELS setter, to every ctest entry whose sources this feature adds or edits: `wire_pure_tests` and `wire_dict_tests` in tests/wire/CMakeLists.txt, `dictionary_pure_tests` in tests/dictionary/CMakeLists.txt, `capi_pure_tests`, `capi_message_read`, `capi_message_read_failloud` and `capi_inbound_frame_dispositions` in tests/capi/CMakeLists.txt, `session_unparseable_frame_disposition` in tests/session/CMakeLists.txt, and the codegen entries that hold `accessor_resolution_census_test.cpp`, `determinism_test.cpp` and `read_tier_byte_diff_test.cmake` in tests/codegen/CMakeLists.txt (entry names re-derived from that file). Add `FIXPP_DICT_DATA_DIR` to `capi_pure_tests` if it lacks it (T010, T011 load `dictionaries/`). `ctest --test-dir build/linux-clang-debug -N -L 100` lists exactly those entries; record the listing (T020 re-checks it with T014's entry added).
+- [ ] T004 Re-derive research.md's `**Code that changes shape**` recipes at this head, each proved able to report first, and record each output in the evidence file (never in this file):
+  - the `alloc_failed` readers, split into the **field** form `command grep -rnE '\.alloc_failed\b[^(]|\.alloc_failed$' include src tests tools specs`, which D5's rename breaks, and the **call** form `command grep -rnE '\.alloc_failed\(' include src tests tools`, which keeps compiling (research's single recipe conflates them); classify each field-form hit as code/test (edited, T024), live golden (regenerated, T025) or shipped bundle (flagged, T060);
+  - the `dict_hooks` holders, whose recipe must report `Parser`'s member first (the known positive), and the `nested_cache_row::hooks_key` sufficiency condition (T033);
+  - the size pins on `table_view` and `dict_metadata_handle`: in a scratch copy add a `sizeof(fixpp::dict::table_view)` line under `tests/`, see the recipe report it, delete the copy, then run it on `$T`;
+  - the `dict_hooks_test_access` callers, the null-delimiter fixtures among them (T033);
+  - the arena bands tuned to `sizeof(OffsetTable)`, with each file's header recipe for re-measuring its band (T037);
+  - the `.specify/2b-wire.md` sentences D1 falsifies (T048);
+  - the C-ABI headers `tools/capi_freeze.sha256` pins (T052), and the generated goldens that carry the nested accessor text (T025).
+- [ ] T005 Re-derive D2's open condition (research D2, "Cost, as conditions", third bullet): whether a shipped dictionary has a group member tag that is a group count tag elsewhere with no `group_ctx_` key under the child context. Recipe, in a scratch program linked against the library: for every shipped XML and Orchestra dictionary's `as_table_view()`, every declared message, every group occurrence and every member tag `t` of it, report `t` where `group_bit(t)` is set and `group_first_field_exact(msg, child_path, t)` is `nullopt`. Seeded positive first: a custom XML in the shape of `kScalarReuseXml` (tests/dictionary/loader_disposition_test.cpp) with the scalar reuse inside a group must be reported. Record the output; T071 reads it. Also run, with `python3 -I`, PARENT `research/reviews/scripts_100_gate_a/`'s `multipath_census.py`, `orch_census.py` and `section_vs_bare.py` (the "Census scripts" headings research D2 and D9 cite), each only after it reproduces its seeded positive (`seed.xml`, `seed_orch.xml`, `seed_div.xml`), and record each answer on the shipped dictionaries.
+- [ ] T006 Baseline: build `build/linux-clang-debug` for every entry of T003 and run each whole, unfiltered; record pass counts and any pre-existing failure per entry. This is the reading every later "nothing else moved" check compares with.
+
+**Checkpoint**: trees exist, label `100` selects the touched entries, every census recipe has reported at least once.
+
+---
+
+## Phase 2: RED witnesses at `fa778a8e` (plan phase 1; no production code)
+
+**Purpose**: every cell today's API can compile, captured while the library is `fa778a8e`. Files added here build at `H0`, so no grouped bucket is broken by a cell that needs a later shape.
+
+- [ ] T007 Write tests/support/probe_cluster_100.hpp (test-only): (a) research D9's window-cluster generator for a given seed and table size, using the mask of the real entry count with envelope tags included, taking the k distinct tags whose home slots are lowest and ordering them highest-home first, drawing only from tags that are not envelope or session-header tags and not standard Length/Data pair tags; (b) a seed guard that reads the current process seed and restores it on destruction, reading it through a new `offset_table_test_access` member in tests/support/wire_test_hooks.hpp that returns a built table's private `seed_` (a friend seam already exists; no `src/` change); (c) a per-insert-cap search after research D1's measurement recipe: for a fixed set of a few hundred distinct non-consecutive body tags, simulate the frame that is actually parsed (its envelope and header tags included, every tag in frame order, the mask from that frame's real entry count, as (a) requires), and search seeds up to a bound the header names until one makes the build's linear-probe loop reach `kMaxBuildProbe` on a single insert, mirroring `mix()` and `overlay_cap_for()` as tests/wire/hostile_input_hardening_test.cpp does; a search that finds none fails the caller's setup, it never skips. Every seed-setting cell of this feature uses (b).
+- [ ] T008 [P] [US3] Write tests/wire/test_100_probe_budget.cpp, added to `wire_pure_tests`: US3.1 the crafted cluster under its seed, at table sizes from 512 entries up within the entry cap and the inbound byte limit: `Parser::parse` fails with `wire_offset_table_full` (RED at `H0`: it parses and the target reads absent); US3.2 the frame T007 (c) finds, under its seed: parses and every tag is found (RED at `H0`); a within-budget control frame (GREEN on both). FR-008.
+- [ ] T009 [P] [US3] Rewrite `HostileInputHardening.CraftedCollisionSetSkipsTargetUnderMatchingSeed` in tests/wire/hostile_input_hardening_test.cpp to the new ending, build OK and target **found** (research census, FR-008: a single-slot collision set stays within the per-build budget), renamed to state that ending and naming FR-008 as the superseding requirement in its comment; give it and `CraftedCollisionSetDefeatedByDifferentSeed` (a control, unchanged ending) T007's seed guard. RED at `H0`. Record the old and new names.
+- [ ] T010 [P] [US1] Write tests/capi/test_100_group_getters.cpp, added to `capi_pure_tests`: FIX44 frames parsed by `Parser` with the shipped dictionary's `as_table_view()` and wrapped as `fixpp_msg` through `capi_internal.hpp`, as tests/capi/message_read_failloud_test.cpp does. Cells, each naming its scenario and FR, RED at `H0` unless marked control:
+  - US1.1 a registered count holding 0 mid-body (`268=0` then further body fields), flat getter `OK`/0, `*group_out` null; US1.2 the same as the last body field;
+  - US1.3 a nested zero count mid-instance, nested getter `OK`/0 (control);
+  - US1.4 a scalar holding 0: flat `TYPE_MISMATCH` (control); nested, a scalar mid-instance and a scalar last in its instance, `TYPE_MISMATCH`;
+  - US1.5 an absent tag on both getters, `TAG_NOT_FOUND` (control); CheckSum(10) on the flat getter, `TYPE_MISMATCH` (control);
+  - US1.7 a lying count (`n ≥ 1`, next field not a member): flat `OK`/0; nested `OK`/0 (control, contract);
+  - US1.8 NoPartySubIDs(802) at the root: value 0 `TYPE_MISMATCH` (control), value `n` `TYPE_MISMATCH`;
+  - US1.9 NoPartyIDs(453) with `n ≥ 1` in a declared FIX44 message that does not declare Parties, and a body group with `n ≥ 1` in a MsgType FIX44 does not declare: flat `TYPE_MISMATCH`;
+  - US1.10 NoHops(627) in an undeclared MsgType: `n ≥ 1` a cursor of n (control); count 0 `OK`/0 (D9 (ii-0h));
+  - the contract's nested bullet "a registered count tag read in a context it has no record for": nested `TYPE_MISMATCH`;
+  - US1.11 a twin of every RED cell above read twice on its getter, the second answer equal to the first, plus a scalar read twice on each getter (control);
+  - SC-004: one frame whose count tag is registered in its exact context and holds 0, accepted by `dictionary_driven_validator` with strict validation and read `OK`/0 by the flat getter.
+- [ ] T011 [P] [US1] Write tests/capi/test_100_section_divergent.cpp, added to `capi_pure_tests`, on custom dictionaries loaded with `XmlLoader{}.load_from_string` and the Orchestra loader's `load_from_string`, each read through the C getters as T010 does:
+  - research D9's section-arm table, rows (i-a), (i-b), (i-c), (ii), (ii-0), (iii) read with the nested getter from its parent's instance, (iv), (v), each with its "Today" ending as the `H0` expectation (RED where the table says RED, else control); the trailer group of (ii) read in its declared message (control);
+  - (iv)'s precondition first: the surviving `NoB` FieldRef has `group_no_tag == NoA`, read through the public `Dictionary::field_ref(msg_type, tag)` (include/fixpp/dict/field_ref.hpp's `group_no_tag`), before its ending;
+  - the Orchestra cells (ii-O), (ii-0-O) and (iii-O) as D9 states them;
+  - the divergent-definition shapes (A), (B), (C), one XML and one Orchestra dictionary each (XML two inline `<group>`s of one name; Orchestra two `fixr:group`s sharing a `fixr:numInGroup` id), n = 2 instances with distinct slice boundaries, asserting the cursor count and each slice's first and last tag through the C field getters;
+  - each divergent cell asserts its precondition first from the built `table_view`'s bare accessors (`group_member_tags(no_tag)`, `group_first_field(no_tag)` differ from the occurrence read), and (C) also asserts `group_first_field_exact(M, [], NoB)` is `nullopt`;
+  - the controls, GREEN on both trees: under (A) the parent whose definition equals the bare store's, members and delimiter both; under (C) `NoB` under `NoA`;
+  - every witness dictionary keeps the two member sets disjoint from each other and from the field after the group.
+  RED at `H0`: (i-a), (ii-0), (ii-0-O) and the non-control divergent cells. The (A)/(B)/(C) "`fa778a8e`" column is derived from source: the Stop rule applies.
+- [ ] T012 [US2] Append to tests/capi/test_100_group_getters.cpp (after T010) the exhaustion and limit cells. Construction: a `std::pmr::monotonic_buffer_resource` over `null_memory_resource()` as the parse arena, its room stepped across each allocation the cell targets; each cell skips where the arena's upstream is not null, by the condition the 073 failloud tests use (re-derive it from tests/wire/nested_group_slices_failloud_test.cpp). Cells, RED at `H0` unless marked control:
+  - US2.2 a top-level group whose slice allocation fails: flat `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`;
+  - US2.4 an ample arena, a group read many times: every call `OK` (control);
+  - US2.5 on an exhausted arena: an absent tag `TAG_NOT_FOUND` on both getters; a present scalar `TYPE_MISMATCH` on both, nested under each origin research D11 names (mode (a) no sub-table shell, mode (c) sub-build out of memory, D7 a sub-table over its entry cap); the flat scalar cell is a control (research D10);
+  - US2.6 each failing cell read twice, the second code equal to the first;
+  - D5 top level: a test-built `MessageView` with `max_offset_entries` raised above the default per-instance cap, an instance past that cap, read twice: flat `WIRE_LIMIT_EXCEEDED` both times;
+  - D7 (i): raised root caps over an instance larger than the sub-table's entry cap that carries a nested group, nested getter read twice: `WIRE_LIMIT_EXCEEDED` both; D7 (ii), **US3-dependent**: T007's generator against the sub-table's mask under its seed, on a test-built `table_view` registering more than `kMaxBuildProbe` distinct member tags for the group in the read's context, asserting root build OK and sub-build failed, nested getter twice: `WIRE_LIMIT_EXCEEDED`. The sub-build fails only through D1's budget, so this cell stays RED until T047 and goes GREEN at T049;
+  - D10: a registered group with n ≥ 1 whose row push fails, and one whose push fits and whose slices fail, each read twice: `WIRE_LIMIT_EXCEEDED` both times; a present, registered nested group whose `nested_cache_` push fails, twice: `WIRE_LIMIT_EXCEEDED`; a lane where no arena step separates the two allocations records the cell as skipped;
+  - row 0: the nested getter with a null `g` and both outputs non-null: `NULL_HANDLE`, outputs null/0; either getter with one out-pointer null: `NULL_HANDLE`, the other output untouched (control).
+  Contract row 3's malformed-data arm and D5's nested `wire_group_too_large`: try to construct each; record in the evidence file either the construction (and add its cell) or "defensive" with the condition that makes it unreachable.
+- [ ] T013 [P] [US2] Rewrite `CapiInboundFrameDispositionsQ33.MsgGetGroupAtHeadroomExhaustion` in tests/capi/inbound_frame_dispositions_capi_test.cpp to expect `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`, naming FR-005 and FR-007 as superseding requirements in its comment. RED at `H0`. Run it by `--gtest_filter` (its entry carries a long `TIMEOUT`).
+- [ ] T014 [P] [US2] Port `e10c8b80`'s tests/capi/group_cursor_shell_arena_exhaustion_capi_test.cpp (branch `b28-repro`) into the same path, registered standalone as that commit's tests/capi/CMakeLists.txt hunk does (a live engine against a raw TCP peer, isolation-sensitive under `[const §VII.8]`), with labels `capi;100`. Each claim cell asserts `last_rc == FIXPP_ERR_WIRE_LIMIT_EXCEEDED` besides `LoopEnd::by_error`, which alone accepts any non-OK; its controls stay. RED at `H0` (`by_throw`). SC-002, US2.3, FR-006.
+- [ ] T015 [P] [US2] Write tests/wire/test_100_group_read_status.cpp, added to `wire_dict_tests`, against today's result field `alloc_failed`: research D10 at the wire layer, a present scalar on an exhausted arena through `group_slices_status` reports `!alloc_failed` and no slices (RED); research D11 through `nested_group_slices`, an absent nested tag and a present scalar under modes (a), (c) and D7, each `!alloc_failed` (RED where today's mode fires); the D10 row cells of T012 at the wire layer (`alloc_failed` on the first and the repeat read). Arena rig and skip condition as T012. T024 renames the field mechanically; Phases 4 and 5 add the `is_group` and `status` assertions.
+- [ ] T016 [P] [US1] Write tests/wire/test_100_typed_reads.cpp, added to `wire_dict_tests`: T010's frames through `MessageView::group<>()`: size 0 and `!alloc_failed()` for the zero-count, last-field and lying-count frames, the count field reading 0 through `get`, and the fields after it reading as ordinary fields (US1.6; controls on `H0`); 802 at the root with value `n` and 453 undeclared with `n ≥ 1`, size 0 (RED: today a cursor); each read twice (US1.11). The typed nested reads go through a generated accessor, as an existing test that includes a generated `<ns>_Messages.hpp` does (find one with `command grep -rln 'Messages.hpp' tests/wire tests/codegen`).
+- [ ] T017 [US2] Append to tests/wire/test_100_typed_reads.cpp (after T016): US2.1's first half, a top-level group whose slice allocation fails (the Q33 null-upstream headroom rig, constructed as `InboundFrameDispositionsQ33.GroupSlicesAtHeadroomExhaustion` constructs it) read through `MessageView::group<>()`: `alloc_failed()` true (RED at `H0`), read twice. `read_failed()` joins in T040.
+- [ ] T018 [P] [US3] Write tests/session/test_100_probe_budget_session.cpp, added to `session_unparseable_frame_disposition`'s source list, on that file's 092 rig: the crafted cluster frame, with T007's guard setting the seed before the session's first parse, on each route the survey names (`dispatch_outcome::parse_failed` with validation off, `validate_outcome::parse_failed` with validation on): the session closes terminally, no Reject, no Logout, no callback (US3.3). RED at `H0`: the frame parses and the callback fires. That entry's CMake comment asks for its `TIMEOUT` to be re-derived before a slower member joins: time the entry with this file on every sanitizer lane `/speckit-verify` runs and on MSVC (T072), and size the `TIMEOUT` from the slowest, CI's sanitizer lanes included once a CI reading exists; record the readings.
+- [ ] T019 [P] Rewrite tests/capi/version_test.cpp's `CapiVersion.CApiVersionIsExactly_1_14_0` (renamed for 1.15) and `CapiVersion.CompositeMacroValue` to C-ABI 1.15 (research D8). RED at `H0`.
+- [ ] T020 Register every new Phase 2 file in the entry its task names (tests/wire/CMakeLists.txt, tests/capi/CMakeLists.txt, tests/session/CMakeLists.txt; T014's standalone entry with its labels, as that task says), with label `100` reaching T014's entry; `ctest -N -L 100` now lists T003's entries plus T014's. Build every entry of T003 plus T014's, and run each whole, unfiltered. Record per binary the `[  FAILED  ]` set as the `H0` RED baseline: every cell its task marks RED fails by the message its task names, every cell marked control passes, and every cell of T006's baseline still passes. A disagreement stops per the Stop rule. Record, per RED cell, the lane (`linux-clang-debug`) and any skip.
+- [ ] T021 `git diff fa778a8e -- src include tools` is empty: the RED commit holds tests, test support and CMake registrations only.
+- [ ] T022 Commit `100 P1: RED witnesses at fa778a8e`; that commit is `H0`. Then `python3 tools/check_line_citations.py --range origin/main..HEAD` passes.
+
+**Checkpoint**: every acceptance scenario and every "Changes from 1.14" bullet has at least one cell RED at `H0` or stated as a control; `src/`, `include/`, `tools/` are `fa778a8e`.
+
+---
+
+## Phase 3: Foundational shapes (plan phases 2 and 3, shape half; data-model `group_read_status`, result structs, `group_span`, `group_view`)
+
+**Purpose**: the by-value shapes every story reads, with no behaviour change. Every `H0` cell keeps its `H0` result.
+
+- [ ] T023 In include/fixpp/wire/offset_table.hpp add `enum class group_read_status : std::uint8_t { ok, alloc_failed, limit_exceeded }` (data-model, research D5); in `group_slices_result` and `nested_slices_result` replace `bool alloc_failed` with `group_read_status status` and add `bool is_group`; add `is_group` to `group_span`, keeping `sizeof(group_span) <= 16` asserted; keep both result structs trivially copyable, asserted. In src/wire/offset_table.cpp set `status = alloc_failed` exactly where `alloc_failed = true` is set today; `is_group` is value-initialized and nothing reads it until T035. Name 100 in the header comment of both files (073's `nested_slices_result` contract superseded).
+- [ ] T024 Rename every field-form `alloc_failed` reader from T004 to `status` with its meaning unchanged (`alloc_failed == true` becomes `status == group_read_status::alloc_failed`): src/capi/message_read.cpp (both getters still map it exactly as today), and the field-form test hits, tests/wire/test_100_group_read_status.cpp included. Call-form hits are untouched.
+- [ ] T025 In include/fixpp/wire/group_view.hpp: `alloc_failed()` returns `status == group_read_status::alloc_failed`; add `read_failed()` (`status != group_read_status::ok`), its doc telling typed readers to check it; keep both `bool` constructors as they are (`true` → `alloc_failed`); add two `group_read_status` constructors with **no** default argument, so `group_view{inst, ctx}` still selects a `bool` overload. Name 100 in the header comment (004's `group_view.hpp` contract superseded). In tools/codegen/fixpp-codegen/emit_messages.cpp change the nested accessor's `r.alloc_failed` token to `r.status`, and its comment; update the pinned literal in tests/codegen/accessor_resolution_census_test.cpp; regenerate `specs/003-dictionary-codegen/contracts/golden/` and `specs/076-fix-latest-typed-codegen/contracts/golden/` through the emitter by the regeneration path tests/codegen/determinism_test.cpp's `FIXPP_CODEGEN_GOLDEN_DIR` and `FIXPP_CODEGEN_076_GOLDEN_DIR` handling documents (never by hand, never formatted); see tests/codegen/read_tier_byte_diff_test.cmake fail on each changed hash first, then update those hashes from the failing assertion. Run `ctest -L codegen`. The emitter needs no mutant (research D5: a left-over field reference is a compile error).
+- [ ] T026 Build `-k 0` (every holder, every generated header), run `ctest -L 100` and quickstart.md's labels: every `H0` RED cell still fails by its `H0` message, every control and every T006 cell passes. Commit `100 P3: result status shape`; that commit is `H3`.
+
+**Checkpoint**: `status`, `is_group` and `read_failed()` exist; nothing reads them yet.
+
+---
+
+## Phase 4: User Story 1 — a zero-count group reads as a present, empty group (Priority: P1) 🎯 MVP
+
+**Goal**: one registration predicate decides group-ness on both read paths (FR-001 to FR-004, research D2, D3).
+
+**Independent test**: T010's, T011's and T016's cells, and T027 to T029's, GREEN; the D2 sweep GREEN on the shipped dictionaries.
+
+### Cells first (written before T029; built and RED at T034's head)
+
+- [ ] T027 [P] [US1] Append to tests/wire/test_100_group_read_status.cpp: `is_group` assertions on the wire-layer twins of T010's cells (zero count mid-body and last, lying count, scalar mid-instance and last, 802 at the root, 453 undeclared), through `group_slices_status` and `nested_group_slices`, each read twice (research D9 "Repeat reads"), plus a scalar read twice that is not a group both times (control against `is_group = true` everywhere); and the spec Clarification "a dict-aware hooks bundle without the registration callback", which research D9 has no cell for: a bundle built through `dict_hooks_test_access::make` with a membership callback and a null registration callback declines the group read, as a dict-free one does. RED at T034's head (after T033, before T035): `is_group` is never set and the null-callback cell reads a group. It compiles only after T033, so it is written now and built there.
+- [ ] T028 [P] [US1] Write tests/dictionary/test_100_registration_records.cpp, added to `dictionary_pure_tests`, against the accessors data-model `table_view registration` defines:
+  - the context-key bitset: a `table_view` fixture that registers a tag only through `add_group_required_member_ctx` under one context: registered there, not under a second context (research D9 "Context-key bitset");
+  - the section store per loader: equal to the header and trailer group declarations re-derived independently from the dictionary's XML or Orchestra source, at every depth, once per (definition, enclosing path);
+  - the arm-1 store: one key per occurrence the expansion reaches, from the delimiter records;
+  - each record's shape (data-model): the delimiter is the first tag emitted at the group's level, components inline; the members are the tags emitted at that level, the nested count tag included and nested groups' members excluded;
+  - research D9's D2 regression sweep, all four bullets, over every shipped dictionary and the route tables, plus the divergent-definition dictionaries of T011 (the `seed_div.xml` shape) as its seeded input. The oracle is re-derived from source, never read back from the capture pool, and enumerated from the per-occurrence expansion, never from `message_fields` or `immediate_parent`. Each "reported, not asserted" key is written to the test log, and T034 copies it to the evidence file. Any arm-2 or arm-3 tag the survey does not name is a finding to record, not a cell to adjust.
+  It compiles only after T033, so it is written now and built there; the stores exist at that head, so its cells are GREEN by construction and their RED source is the named mutants: M-13 to M-16 for the bitset and the sweep, M-05x to M-08 and M-12 for the stores and records.
+
+### Implementation
+
+- [ ] T029 [US1] In include/fixpp/dict/table_view.hpp (research D2 "It is backed by", "Per-occurrence records"; data-model): the per-tag "has a context key" bitset beside `group_bits_`, set in all three `_ctx` setters (`add_group_member_ctx`, `add_group_required_member_ctx`, `set_group_first_ctx`) and nowhere else; the arm-1 registration-only store keyed `(msg_type, parent_path, no_tag)`, each key holding its record `{delimiter, direct members}`, creating no `group_ctx_` key; the MsgType-free section store keyed `(parent_path, no_tag)` → record, filled by `table_view_builder::add_section_group(parent_path, no_tag, record)`, not setting the bitset; a `noexcept` accessor beside `group_first_field_exact` answering research D2's three arms, the one statement of them; `noexcept` wire-side membership and delimiter accessors that run the `group_bit` pre-filter, then the exact `group_ctx_` key, the arm-1 record, the section record, the bare store, each probe a non-owning query as `group_ctx_query` is. "Built once with the table, never on the read path." `group_member_tags(msg_type, parent_path, no_tag)` and `group_first_field(msg_type, parent_path, no_tag)` are unchanged. Name 100 in the header comment.
+- [ ] T030 [US1] In src/dictionary/dictionary_internal.hpp: the `dict_metadata_handle` section-group store beside `header_tags_`; the member runs parallel to `group_ctx_delim_pool_`, one per delimiter record; `DelimCapture`'s member stack parallel to `path` and `pending`; `CapturedDelim` carrying the members, so the capture that survives `flush_group_ctx_delims`' de-duplication carries one occurrence's delimiter and members; `flush_group_ctx_delims` writing the member runs.
+- [ ] T031 [P] [US1] In src/dictionary/xml_loader.cpp (after T030): append to the member stack at both emission points of the message-scoped `expand_field_list`, where `capture_first_emission` is called (the `<field>` push and the nested `<group>`'s count-tag push at the outer level), before `append_run` de-duplicates; add the header and trailer section walks beside `collect_header_tags`, carrying the enclosing path, visiting each component or group definition once per (definition, enclosing path), not gated by `walked` or `walked_groups`, skipping a definition already on the current path, recording each group once for every path of section groups that encloses it and never through a body context, the key clamped as `make_group_ctx_key` clamps it, each record per T029's shape.
+- [ ] T032 [P] [US1] In src/dictionary/orchestra_loader.cpp (after T030): the same capture at the `fixr:fieldRef` push and the `fixr:groupRef` count-tag push, and the same section walks over components 1024 and 1025.
+- [ ] T033 [US1] In src/dictionary/dictionary.cpp: `build_table_view` fills the arm-1 store from `msg_group_ctx_delims` (`dict_metadata_handle::msg_group_ctx_delims_impl`) with each occurrence's record; `as_table_view` copies the handle's section store through `add_section_group`. The route-table arm (099's NoHops, bare store only) is unchanged. Then in include/fixpp/wire/dict_hooks.hpp add `group_registered_fn_t = bool (*)(void const*, group_context const&, std::uint16_t)`, `noexcept`, null on `none()`, and the parameter on `dict_hooks_test_access::make` in tests/support/dict_hooks_test_access.hpp; in include/fixpp/wire/parser.hpp `for_table_view` always installs the callback from T029's accessor, and its membership and delimiter lambdas call T029's wire-side accessors; delete `for_table_view`'s "unreachable HERE" membership-lambda comment, not restated. Give each `dict_hooks_test_access::make` caller from T004 a registration stub that agrees with its membership stub, tests/fuzz/fuzz_wire_nested_slice.cpp included; the null-delimiter fixtures (tests/wire/nested_group_slices_cache_test.cpp, the `divergent_member_fn` probe of tests/wire/typed_read_split_agreement_test.cpp, the null-delimiter arm of tests/wire/offset_table_test.cpp) get a stub that keeps their pinned outcome. Re-derive `nested_cache_row::hooks_key`'s sufficiency condition with the callback added: no seam caller pairs one `opaque_dict` with two registration stubs; record it.
+- [ ] T034 [US1] Register tests/dictionary/test_100_registration_records.cpp in `dictionary_pure_tests`, build T027 and T028 at this head and run them: T027's cells and T028's sweep run; record their results as the RED (T027) and baseline (T028) at this head; T028's reported keys go to the evidence file.
+- [ ] T035 [US1] In src/wire/offset_table.cpp `OffsetTable::group()` evaluates research D2's order: (1) decline when the bundle is dict-free or has no registration callback; (2) locate the count entry, absent → absent; (3) `registered(stored context, no_tag)` false → not a group (`err_required_field_missing`); (4) only then the "count field is the last entry" shortcut → present, zero instances; (5) the next field not a member → present, zero instances (`group_index{no_tag, first, 0}`); (6) otherwise today's extent walk, unchanged. `group_slices_status` sets `is_group` per data-model `group_slices_result`, `group_span` caches it with the row, and the `group_index_` hit path answers the cached `is_group`; `nested_group_slices` takes the sub-table's `is_group` when no failure fired. The push placement stays as today (T041 moves it). The count's value is never read.
+- [ ] T036 [US1] In src/capi/message_read.cpp map `is_group` per contracts/capi-group-getters.md rows 3 to 5 and research D4: flat, `!is_group` → `TYPE_MISMATCH`, empty → `OK`/0 with `*group_out` null, else the cursor; nested, `!is_group` → the existing presence probe (`scan_slice_for_tag`), absent → `TAG_NOT_FOUND`, present → `TYPE_MISMATCH`; empty → `OK`/0. The status mapping and the shell catch are T044's.
+- [ ] T037 [US1] Size census (research D2 "Size census"): T004's holder list compiles; T004's size-pin recipe re-run; each arena band from T004 re-measured by its file's header recipe, the arena never resized; 093 C-8's `kCallbackReadHeadroom` condition (src/session/parse_capacity.hpp, 093 data-model E-2) re-read and recorded. A band that moved is re-pointed per its header, and the record says which.
+- [ ] T038 [US1] Run `ctest -L 100` and `-L wire`, `-L capi`, `-L dictionary`, `-L codegen`, `-L alloc_guard`: GREEN, every US1 cell of T010, T011, T016, T027, T028; still RED, the US2 and US3 cells. An existing cell that now fails is a census cell (research census, "Cells that flip", last two bullets): rewrite it to the new ending naming its superseding requirement (FR-001 to FR-004), and list it in the evidence file; a failure outside those conditions stops. The controls research.md lists stay GREEN by name. Commit `100 P4: registration predicate (US1)`; that commit is `H4`.
+
+**Checkpoint**: US1 is GREEN on its own; group-ness is decided by registration on both paths.
+
+---
+
+## Phase 5: User Story 2 — a group read that runs out of arena says so (Priority: P1)
+
+**Goal**: every read that could not complete is reported, the cache holds only completed reads, and no exception leaves a getter (FR-004 to FR-007, FR-011, research D4 to D7, D10, D11).
+
+**Independent test**: T012 to T015, T017 and T039 to T040 GREEN; T014's port completes every call with `OK` or `WIRE_LIMIT_EXCEEDED`.
+
+### Cells first (RED at `H4`)
+
+- [ ] T039 [P] [US2] Append to tests/wire/test_100_group_read_status.cpp: `status` and `is_group` assertions on T015's cells and T012's wire twins, per data-model's invariants (`status != ok ⇒ slices.empty() && !is_group`; nested `status != ok ⇒ present ∧ registered`); D5 top level read twice, `status == limit_exceeded`; D7 (i) at the wire layer, `limit_exceeded` first and repeat, and D7 (ii)'s wire twin, US3-dependent as in T012; D10's flat and nested row cells, the "repeat answers as the first" assertion stepped across the push and the following allocation. RED at `H4`.
+- [ ] T040 [P] [US2] Append to tests/wire/test_100_typed_reads.cpp: US2.1 `read_failed()` true beside T017's `alloc_failed()`; D5 top level through `MessageView::group<>()` read twice, `read_failed()` true and `alloc_failed()` false; D7's two constructions through the typed nested accessor, first and repeat, `read_failed()` true, (ii)'s twin US3-dependent as in T012; an absent nested tag on an exhausted arena through the typed nested accessor, `!read_failed()` (research D11). RED at `H4`.
+
+### Implementation
+
+- [ ] T041 [US2] In src/wire/offset_table.cpp `group_slices_status` (research D10, flat cache): for a registered group with n ≥ 1, push the row after the count pass and before `allocate()`; a throwing push fails the read `alloc_failed`; a throwing slice allocation pops the row; an answer needing no slices pushes in its own `try` and is served uncached when the push throws; `limit_exceeded` pushes nothing. Map `group()`'s `err_group_too_large` to `status = limit_exceeded` (research D5).
+- [ ] T042 [US2] In src/wire/offset_table.cpp `nested_group_slices` and `resolve_nested_result` (research D10 nested cache, D7, D11): push the nested row before the sub-table build, a failed push resolving as a null sub-table; reuse an earlier row's table and serve uncached when that push fails; widen mode (c) to a sub-build `wire_offset_table_full` → `limit_exceeded`; other sub-build errors keep 073's not-failed scope; `resolve_nested_result` takes the instance slice, the call's `ctx` and the caller's `hooks` at both exits (cache hit and final) and, on any failure, asks registration first through `hooks`' callback (not registered → `{empty, ok, !is_group}`), then scans the slice for `nested_no_tag` without allocating, splitting Length+Data through `hooks.data_tag_for_length` as `OffsetTable::build` does (absent → `{empty, ok, !is_group}`), and keeps the failure only for a present, registered tag. It never uses `this->hooks_`. Name 100 where the function's comment cites 073's modes.
+- [ ] T043 [US2] In include/fixpp/wire/parser.hpp `MessageView::group<>()` calls `group_slices_status(NoTag)` and builds `group_view{r.slices, ctx, r.status}` (research D6); the generated top-level accessors are unchanged.
+- [ ] T044 [US2] In src/capi/message_read.cpp (research D4): both getters map `status != ok` to `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` ahead of `is_group` (contract row 2 before row 3); the cursor-shell `new_object` sits in `try { … } catch (std::bad_alloc const&) { return FIXPP_ERR_WIRE_LIMIT_EXCEEDED; }` with the outputs left null/0; the nested getter checks its two out-pointers first (`NULL_HANDLE`, outputs untouched, when either is null), then writes null/0 to both before validating `g` and the index (row 0b). Name 100 in the file's header comment.
+- [ ] T045 [US2] Delete, not reword, the result claims Phase 5 falsifies in test comments: the "throws uncaught `bad_alloc` — out of scope" throw-window paragraph in the header of tests/capi/message_read_failloud_test.cpp (FR-006 removes the window; keep the band's condition and its re-measure recipe), after re-measuring that band per T037. Not in research's census.
+- [ ] T046 [US2] Run `ctest -L 100` and quickstart.md's labels, plus T014's entry: GREEN, every US2 cell except the US3-dependent D7 (ii) cells of T012, T039 and T040, which stay RED until T049; T014 completes every call with `OK` or `WIRE_LIMIT_EXCEEDED` on both getters (SC-002); still RED, the US3 cells and T019. Existing cells that now fail are handled as T038 says, naming FR-004 to FR-007 or FR-011 (look first in tests/wire/nested_group_slices_cache_test.cpp and the bands of T004). The controls research.md names stay GREEN by name, among them `MessageReadFailloud.PresentNestedGroup_ArenaExhausted_ReturnsWireLimitExceeded`, `MessageReadFailloud.RepeatedReadAfterArenaExhaustion_SignalsFailureBothTimes` and `InboundFrameDispositionsQ33.GroupSlicesAtHeadroomExhaustion`. Run the C-ABI targets once under `build/linux-clang-asan` (quickstart.md): no sanitizer finding. Commit `100 P5: fail-loud reads (US2)`; that commit is `H5`.
+
+**Checkpoint**: US1 and US2 GREEN; the C ABI answers from the contract's one table.
+
+---
+
+## Phase 6: User Story 3 — a parse never succeeds with a field missing from its index (Priority: P2)
+
+**Goal**: the probe bound is a per-build budget whose excess fails the build (FR-008, research D1).
+
+**Independent test**: T008, T009 and T018 GREEN.
+
+- [ ] T047 [US3] In src/wire/offset_table.cpp `OffsetTable::build`: replace the per-insert cap with a per-build probe budget of `kMaxBuildProbe` × `entries_.size()`, counted across the insert loop; when it is spent, `status_ = err_offset_table_full(); entries_.clear(); overlay_.clear(); return;`. `find()` is untouched. Delete the refuted comment claims ("only a crafted hostile frame can hit", "normal frames keep clusters far below the cap", "robin-hood overlay"), keeping only the condition; name 100.
+- [ ] T048 [US3] In the same change: an "Updated (100-wire-group-read-integrity): …" note, in the doc's existing convention, at each `.specify/2b-wire.md` hit of T004's recipe that states the error's cause or the overlay's probing; and delete the stale waiver bullet for `build()`'s `kMaxBuildProbe` break ("adversarial-only, waived") in the header of tests/wire/offset_table_error_path_test.cpp, since T008's cells now reach the budget arm (not in research's census). Run `check-comment-claims.py` on the diff.
+- [ ] T049 [US3] Run `ctest -L 100`, `-L wire`, `-L session`: GREEN, T008, T009, T018 and the D7 (ii) cells of T012, T039 and T040; `CraftedCollisionSetDefeatedByDifferentSeed` GREEN; nothing else moved against `H5`. Commit `100 P6: per-build probe budget (US3)`; that commit is `H6`.
+
+**Checkpoint**: all three stories GREEN; only T019 (version) is still RED.
+
+---
+
+## Phase 7: C-ABI 1.15, BREAKING (plan phase 4, D8 half; FR-010)
+
+- [ ] T050 In include/fix/c_api/message.h: the CA-010 block carries the contract's table and its "Changes from 1.14", marked BREAKING (1.15); `fixpp_msg_get_group` and `fixpp_group_get_nested_group` document their codes, `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` included; the header block's "Steady-state thunks: abort on any escaping C++ exception" is amended for the two getters, whose cursor-shell `bad_alloc` is now a documented return. No formatter.
+- [ ] T051 In include/fix/c_api/session.h: each session-observer clause that says "a frame the session admits always parses for dispatch" is amended in place, marked 1.15, for a frame crafted against the index seed (research D1). In include/fix/c_api/version.h: bump to 1.15 with a BREAKING history entry naming this feature, the two getters and the session observers, and amend the 1.11 entry. No formatter.
+- [ ] T052 Refresh tools/capi_freeze.sha256 for the headers T004 lists, by the refresh path `tools/check_capi_freeze.sh` documents; run `bash tools/check_capi_freeze.sh`. The SWIG build regenerates the Python module (the only in-repository consumer, `[const §X.7]`); build it once with `-DFIXPP_BUILD_PYTHON=ON` and SWIG at or above 4.5.1 first on `PATH`. `abi_symbol_golden_test` (in `capi_pure_tests`) is unchanged: no symbol is added.
+- [ ] T053 Run `ctest -L 100` and `-L capi`: T019 GREEN, nothing else moved against `H6`. Commit `100 P7: C-ABI 1.15 BREAKING`; that commit is `H7`.
+
+---
+
+## Phase 8: Mutants (plan phase 5)
+
+- [ ] T054 Run every row of `## Mutant table` in `$M` reset to `H7`, per Mutant protocol, and record each row. The divergent-definition mutants M-09 to M-11 run once per loader (XML and Orchestra cells judged separately). A surviving mutant stops the batch.
+- [ ] T055 Check the record: every M-id has one row with build rc 0 and its named cell RED (and its named GREEN cell GREEN where the row names one).
+
+---
+
+## Phase 9: Records, brain, issues (plan phase 6)
+
+- [ ] T056 In spec/behaviors-and-limitations.md and spec/behaviors-and-limitations-closed.md (a row is open only if it is in the live file; never grep across the pair): move L-458-1, L-073-1 and L-051-3 to the closed file, each naming its delivering cells (T008/T009/T018; T012/T013/T017/T040; T010/T016); retire L-093-17 to match FR-006 by moving it to the closed file, naming T014; update L-093-5's group bullets (empty span; the flat getter's `TYPE_MISMATCH` "misreport") and L-065-2's "top-level reads remain silent" clause to the new endings; amend B-093-6, B-092-6 and L-092-6 ("unreachable for a frame the session admits") in place for the crafted-frame case, naming T018.
+- [ ] T057 Add to the live spec/behaviors-and-limitations.md, numbered `B-100-n` / `L-100-n`, each with its reason (plan phase 6):
+  - a B-row for the 1.15 endings, marked BREAKING;
+  - a B-row for a body group read in a context its dictionary does not declare (`TYPE_MISMATCH`, was a group through the bare fallback; QuickFIX `getGroup`), marked BREAKING;
+  - a B-row for a group read at its occurrence's own definition where the dictionary defines the count tag differently elsewhere (a cursor, was `TYPE_MISMATCH` or lost instances), marked BREAKING;
+  - a B-row for the C++ source change of research D5, the result structs' `alloc_failed` field renamed to `status`, generated headers from an older emitter included;
+  - the L-row disclosed by owner ruling (2026-11-07) for the custom-dictionary shapes research D2 "What it does not fix" and "Not fixed, and not pre-existing in its ending" list, each named as a condition: a declared message reaching a count tag under two parents; one count tag at two occurrences with different definitions (one `group_ctx_` key, union of members); one count tag in the body and the trailer at one parent path (N5-1); one count tag with two definitions at one section key; the validator's bare fallback at these keys. It cites T064's issue.
+  Then `python3 PARENT/.claude/scripts/check_bl_delta.py --self-test`, `… gate --feature 100-wire-group-read-integrity --root "$T" --base origin/main`, and PARENT `.claude/scripts/check_bl_citations.py`.
+- [ ] T058 [P] In specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md amend C-3 I-1, I-4 and I-5 (the "C cursor shells are the exception" clause) in place, naming 100 (plan phase 6). Run `python3 tools/check_line_citations.py --range origin/main..HEAD` on it: an edit inside another bundle is charged by that gate.
+- [ ] T059 [P] In .specify/2i-capi.md: §4.8 / CA-010's endings per the contract; §5.2, §5.4 and §6.2's steady-state exception text for the two getters.
+- [ ] T060 [P] Update `brain/components/wire.md`: its L-458-1 paragraph and its "Every admitted frame parses" section name 100 as superseding them; flag `specs/004-wire-codec/contracts/group_view.hpp` and `specs/073-nested-read-arena-failloud/contracts/nested_slices_result.md` as superseded by 100 in its document list, in place; add 100's row with the decisions and what was rejected (research D1, D5, D10, D11 "Alternatives").
+- [ ] T061 [P] Update `brain/components/dictionary.md` with the registration predicate, the section store, the arm-1 store and the per-occurrence records, and what was rejected (research D2 "Alternatives", plan `### Round 2 — disagreements`); add 100's row to its document list. The plan names only the wire and C-ABI pages; D2's loader and `table_view` changes make this page's row due too.
+- [ ] T062 [P] Update `brain/components/c-api.md`: the getters' one ordered table, 1.15 BREAKING, and 100's row superseding the pages' earlier getter text; flag `.specify/2i-capi.md`'s pre-100 sections if any are left unamended.
+- [ ] T063 Header comments (close-out row 3): each file whose decision 100 supersedes names 100: src/wire/offset_table.cpp, include/fixpp/wire/offset_table.hpp, include/fixpp/wire/group_view.hpp, include/fixpp/dict/table_view.hpp, src/capi/message_read.cpp (T023, T025, T029, T042, T044 may already have done it; check each). Run the brain freshness wrapper PARENT `research/G19-fix-fpml-iso20022/tools/brain-external-sweep.sh` (self-test first; it must report a non-zero execution count) and the submodule's `brain-freshness` check locally.
+- [ ] T064 File the issue quickstart.md's "Issues to file" lists ("Dictionary layer: one count tag with two definitions at one context key", with every condition and the candidate fixes and recipe it lists), labelled at creation from `gh label list`; grep the body for a closing keyword first (it fires inside a negation). Record its number in the evidence file and cite it in T057's L-row. The spec also calls two leads "a lead to file" that quickstart's list does not carry: the validator's context-miss fallback (partly inside the issue's last bullet) and inheriting the root's `OffsetTable::Config` in nested sub-tables. For each, search open issues; record either the covering issue or "not filed, for the orchestrator's decision".
+- [ ] T065 Commit `100 P9: records, brain, issue`.
+
+---
+
+## Phase 10: Polish, verify, close-out
+
+- [ ] T066 [P] `python3 tools/check_line_citations.py --self-test`, then `--range origin/main..HEAD` and `--shift-audit origin/main..HEAD` (they charge this file, the whole bundle and T058's edit); `check-comment-claims.py --root "$T" --base origin/main`, reading added inventories and runtime strings by hand; `python3 tools/check_layers.py`. Record.
+- [ ] T067 Run `/simplify` over `git diff origin/main...HEAD` (src, include, tools, tests); its fixes are applied by the implementing agent, and after each the selection of T046 and T049 re-runs GREEN. Any production change it makes re-runs that change's mutant rows (T074).
+- [ ] T068 Sanitizers: `ctest -L 100` and the C-ABI and wire entries of quickstart.md under `build/linux-clang-asan` and `build/linux-clang-ubsan`. A finding is a real defect until disproven with a reproduction or a client-path analysis, stated with its command. Then `bash tools/check_capi_freeze.sh`, `bash tools/check_capi_reentrancy.sh`, `bash tools/check_capi_occupancy.sh`, each with its log.
+- [ ] T069 Fuzz (`[const §VII.7]`, parser-touching modules): derive the targets from tests/fuzz/CMakeLists.txt as every target linking the wire layer or a dictionary loader this feature edits (at least `fuzz_wire_parser`, `fuzz_wire_nested_slice`, `fuzz_dict_xml_loader`, `fuzz_orchestra_loader`). `cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON`, build, `ctest --preset linux-clang-asan -L fuzz --no-tests=error --output-on-failure`, then ten minutes per target from `$T` with an empty scratch corpus directory first and the target's seeds second, `-error_exitcode=1`, artifacts under the scratch directory. Positive control first: show the harness reaches T042's nested slice scan and T031/T032's section walks (a seeded input plus a coverage or counter reading), else extend the harness and its seed. Pass: exit 0, no `crash-`, `leak-`, `oom-` or `timeout-` artifact. Not through `/speckit-verify --fuzz-duration`, whose SKILL.md `cd`s to the main checkout.
+- [ ] T070 Run every tier-1 source-audit job locally, the list derived from `.github/workflows/tier1.yml` at this head (every `ci-script-pins` step included), plus clang-format, clang-tidy and cppcheck on the changed files (`[const §IX.4]`; never a formatter on `specs/` or `include/fix/c_api/*.h`); keep a job → rc table in the evidence file. Coverage of the touched modules at the thresholds or a per-line assessment of every uncovered line and untaken branch (`[const §IX.1]`), with `build/linux-clang-coverage`.
+- [ ] T071 Paired bench (`[const §VIII.2]`; plan Constitution Check VIII; research D2 "Cost"). The plan names "the read path's bench set" but not its binaries: derive it as the rows of bench/ci-suite.txt whose source calls `group_slices`, `group_slices_status`, `nested_group_slices`, `OffsetTable::build` or `Parser::parse` (`command grep -lE` over `bench/`), plus `on_inbound_frame_bench`. Move `$B` to `git merge-base origin/main HEAD` with `git -C "$B" reset --hard`; configure `build/linux-clang-release` with `-DFIXPP_BUILD_BENCH=ON` in `$T` and `$B`, rc 0 or stop; before the first run, `strings -n 12 <bin> | command grep -E '^/(home|mnt)'` shows each tree's root at equal length. Run base against head by B41's method (PARENT `research/G19-fix-fpml-iso20022/research/probes/b41_563_564/ph7f_method.md`). Prove the comparison can report first: a seeded delay in `$M` large enough to exceed the band shows. Read the result with T005's answer: where a shipped dictionary has the scalar-reuse member tags, the set-bit miss path is on the measured path. Pass: within the band as gated today; a larger slowdown needs that clause's measurement, rationale and non-author approval. Record.
+- [ ] T072 MSVC, before the first labelled push: `cat /mnt/c/temp/fixpp/.sandbox-lock`, then take the lock, per Step 0 of PARENT `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md` (a lock held by someone else means ask the owner); never alongside a Linux build. Rsync, then build with `-k 0` every target T003 lists plus T014's, `fuzz`-free, the codegen targets that regenerate the goldens, and the Python extension. Fix every compile failure before the first labelled push; a target the platform excludes is recorded with its reason. The exhaustion cells skip on MSVC debug (the heap upstream); record which. The lock is released at close-out (close-out.md row 18).
+- [ ] T073 SC-001's lane record: for every cell of Phase 2 and of T027, T028, T039, T040, the lanes on which it showed RED (`H0`, its pre-change head, or its mutant) and those on which it skips, from T020, T034, T054, T068 and T072.
+- [ ] T074 Mutant freshness: for each M-id's `H`, `git diff "$H"..HEAD -- src include tools tests`. A change to a file a row edits, or under `src`, `include` or the row binary's test directory, other than a hunk whose every changed line is a comment, re-runs those rows in `$M` reset to the new head. Re-run after each later source change, a Gate B fix included.
+- [ ] T075 `/speckit-verify`, with `$T` substituted (Execution rules), writing `.specify/decisions/100-wire-group-read-integrity-verify.md` with its stated root; it reads the evidence file's records.
+- [ ] T076 `[const §XVII.7]` at the final code head: `cat /mnt/c/temp/fixpp/.sandbox-lock` (a peer's MSVC window makes a full `ctest` a build risk; wait or ask), `df -h /mnt/wsl/fixppbuild`, then full build and one full `ctest --preset linux-clang-debug`, detached with one marker waiter, selection runs already done first. SC-003: every existing test file `git diff --diff-filter=M --name-only origin/main..HEAD -- tests` lists is a census cell (T009, T013, T019, T038, T046), a seam caller (T033), a field rename (T024), a band (T037, T045), a comment (T048) or the pinned literal (T025); anything else stops. Record for the PR body's `local build:` line.
+- [ ] T077 Draft in the evidence file, for the PR description: **BREAKING** C-ABI 1.15 with its migration line (`[const §X.7]`), naming the getters' changed endings and the session observers' amended clause; the C++ source change (D5's field rename); the flipped existing cells and the requirement superseding each. Grep the draft for a closing keyword inside a negation.
+- [ ] T078 Run `codegraph sync` in `$T`; `codegraph status --json` shows `$T` and a nonzero `fileCount`. Record.
+- [ ] T079 **POST-MERGE (orchestrator)**: `.specify/close-out.md` §1 and §2 rows, each dispositioned in the Gate B record: row 4 (parent gitlink bump, `git add`, commit without a pathspec, `ls-tree` equal to the submodule HEAD, `cat-file -t` says `commit`), row 9 (issues closed by `closingIssuesReferences`, states read after merge: #645, #644, #647, #541), rows 16 and 17 (detach `$T` at `origin/main`, purge the merged branch after the proof), row 18 (release the sandbox lock only if it names this session and PR), row 3b (brain sweep last). Remove `$M` and `$B`. *Open at the audit — waiver: post-merge.*
+- [ ] T080 **Catalogue close-out**: no OFFICIAL row is owned or flipped by this feature (CA-010 is `done` under 051). In spec/feature-catalogue.md add the delivering cells to CA-010's witness column (T010 to T014), and in spec/coverage-index.md the §3.2 repeating-groups entry gains 100's zero-count and fail-loud reads, or record `N/A — <reason>` per row in the evidence file. `[const §I.3]`.
+- [ ] T081 **Feature-completeness audit (the FINAL task)**: assert against the final tree that (i) every row of this file is `[X]` or carries an explicit waiver rationale; (ii) every FR and SC of spec.md, every acceptance scenario and every "Changes from 1.14" bullet maps to a landed cell and a landed implementation, walking `## Requirement map`; (iii) L-458-1, L-073-1 and L-051-3 are out of the live B&L file and L-093-17 retired, with T057's rows present; (iv) every cell has its RED record (T020, T034, T054) and every M-id its mutant row (T055, T074); (v) every path in `git diff --name-only origin/main...HEAD` is in plan.md's `## Project Structure` or carries a recorded reason: tests/support/, tests/fuzz/fuzz_wire_nested_slice.cpp (T033), tests/session/ (T018), spec/, brain/, .specify/2b-wire.md, .specify/2i-capi.md, specs/093-inbound-frame-dispositions/ (T058) and the CMake registrations are outside the plan's tree and are recorded here; (vi) the `/speckit-verify` record's stated root is `$T`. Record the verdict, 100 % or waived, in `.specify/decisions/100-wire-group-read-integrity-verify.md` under `## Completeness`, before `/gate-b` (its pre-flight 4d). Article XVII §8.
+
+---
+
+## Mutant table
+
+Each row: the edit, the binary, the cell that must turn RED. "D9" rows are research D9's; "tasks" rows are added under D9's rule that each production change has a mutation.
+
+| Id | Source | Edit (applied alone) | Binary | Cell that must go RED |
+|---|---|---|---|---|
+| M-01 | D9 #645 | restore the per-insert cap (`skip_insert`, build reports success) in `OffsetTable::build` | `wire_pure_tests`, `session_unparseable_frame_disposition` | T008's US3.1 and US3.2 cells; T018's cells (the callback fires) |
+| M-02 | D9 #647 | replace step 3's `registered(...)` and step 5 in `OffsetTable::group()` with today's next-field membership decision | `capi_pure_tests`, `wire_dict_tests` | the scalar-last and lying-count cells of T010 and T027 |
+| M-03 | tasks (D2 step 1) | drop the "no registration callback" decline | `wire_dict_tests` | T027's null-callback cell |
+| M-04 | D9 section arm | restore `parent_path.empty() ∧ is_header_tag ∧ group_bit` in place of the section arm | `capi_pure_tests` | T011's (i-b) and (i-c) |
+| M-05x / M-05o | D9 section arm | drop the trailer walk, XML / Orchestra | `capi_pure_tests`, `dictionary_pure_tests` | (ii) / (ii-O); T028's section-store cell |
+| M-06x / M-06o | D9 section arm | record root section groups only, without their path, XML / Orchestra | `capi_pure_tests` | (iii) / (iii-O) |
+| M-07 | D9 section arm | key arm 1 from `group_ctx_` only | `capi_pure_tests` | (iv) |
+| M-08 | D9 section arm | gate the section walk on `walked` | `capi_pure_tests` | (v) under one of its two parents |
+| M-09 | D9 divergent | restore today's lambdas (`group_ctx_`, then the bare store) | `capi_pure_tests`, `dictionary_pure_tests` | every non-control divergent cell of T011, per loader; T028's per-key definition check on the divergent input |
+| M-10 | D9 divergent | delete the arm-1 record step of the lookup | same | (C), per loader; T028's check |
+| M-11 | D9 divergent | delete the section record step of the lookup | same | (A) and (B), per loader; T028's check |
+| M-12 | tasks (D2 record shape) | leave the nested count tag out of a record's direct members | `capi_pure_tests` | (A) (instances lost) |
+| M-13 | D9 bitset | drop the bit-set in `add_group_required_member_ctx` | `dictionary_pure_tests` | T028's second-context cell |
+| M-14 | D9 sweep | delete the predicate's bare arm | `dictionary_pure_tests` | T028's sweep (route-table NoHops) |
+| M-15 | D9 sweep | key the predicate on a wrong parent path | `dictionary_pure_tests` | T028's sweep |
+| M-16 | D9 sweep | delete the section arm | `dictionary_pure_tests` | T028's sweep, undeclared-MsgType arm |
+| M-17 | D9 repeat | push the flat row with `is_group = false` | `capi_pure_tests`, `wire_dict_tests` | the repeat twins of T010 and T027 RED; their first reads GREEN |
+| M-18 | D9 D10 | move the flat push after the slice allocation | `capi_pure_tests`, `wire_dict_tests` | some arena step of T012's and T039's flat row cells: "repeat answers as the first" |
+| M-19 | D9 D10 | move the nested push after the sub-table build | same | the nested row cells of T012 and T039 |
+| M-20 | D9 D11 | delete the presence scan in `resolve_nested_result` | same | the absent-tag cells of T012, T015, T039 |
+| M-21 | D9 D11 | delete the registration check in `resolve_nested_result` | same | the present-scalar cells RED; the absent-tag cells GREEN |
+| M-22 | D9 D7 | delete D7's widening of mode (c) | same, and `wire_dict_tests` | T012's D7 cells; T039 and T040's D7 cells |
+| M-23 | tasks (D5) | map `err_group_too_large` back to an empty `ok` result | `capi_pure_tests`, `wire_dict_tests` | T012's and T039's D5 top-level cells; T040's D5 typed cell |
+| M-24 | tasks (D6) | `MessageView::group<>()` back to `group_view{table_.group_slices(NoTag), ctx}` | `wire_dict_tests` | T017's and T040's US2.1 cells |
+| M-25 | tasks (D4) | remove the catch around the flat getter's cursor shell | `capi_group_cursor_shell_exhaustion` (T014) | its flat claim cell (`by_throw`) |
+| M-26 | tasks (D4) | remove the catch around the nested getter's cursor shell | same | its nested claim cell |
+| M-27 | tasks (D4 row 0b) | restore the nested getter's early return on a null `g` before writing its outputs | `capi_pure_tests` | T012's row-0b cell |
+| M-28 | tasks (D4) | flat getter maps `status != ok` to `TYPE_MISMATCH` | `capi_pure_tests`, `capi_inbound_frame_dispositions` | T012's US2.2 cell; T013 |
+| M-29 | tasks (FR-003) | nested getter answers `OK`/0 for a present tag with `!is_group` | `capi_pure_tests` | T010's nested scalar cells |
+| M-30 | tasks (D3 in the getter) | flat getter ignores `is_group` (empty → `TYPE_MISMATCH`) | `capi_pure_tests` | T010's US1.1 and US1.2 cells |
+
+---
+
+## Requirement map
+
+| Requirement | Cells (RED source) | Implementation |
+|---|---|---|
+| FR-001 | T010, T011 (`H0`); T027 (T034's head); T028 (M-04 to M-16) | T029 to T035 |
+| FR-002 | T010 US1.1, US1.2, US1.7, US1.10 count 0; T011 (ii-0), (ii-0-O); T016 (`H0`); T027 | T035, T036 |
+| FR-003 | T010 US1.4, US1.8, US1.9, nested record miss (`H0`); M-29 | T035, T036 |
+| FR-004 | T012 US2.5 absent; T015 (`H0`); M-20 | T042, T044 |
+| FR-005 | T012 US2.2, T013, T017 (`H0`); T040 (`H4`) | T041, T043, T044 |
+| FR-006 | T014 (`H0`); M-25, M-26 | T044 |
+| FR-007 | T012 US2.6 and D10 cells, T015 (`H0`); T039 (`H4`); M-18, M-19 | T041, T042, T044 |
+| FR-008 | T008, T009, T018 (`H0`); M-01 | T047 |
+| FR-009 | T006 baseline; the controls of research's census by name (T038, T046, T049); T028's sweep; T071 | — |
+| FR-010 | T019 (`H0`); T056, T057 checks | T050 to T052, T056 to T059 |
+| FR-011 | T012 D5 and D7 cells (`H0`); T039, T040 (`H4`); M-22, M-23 | T041, T042 |
+| SC-001 | every cell above; T073's lane record | — |
+| SC-002 | T014 | T044 |
+| SC-003 | T076's diff check; T025's goldens | T024, T025 |
+| SC-004 | T010's agreement cell | T035 |
+
+Each acceptance scenario's cell: US1.1 to US1.11 in T010 (C ABI), T011 (US1.10's section and divergent rows), T016 (US1.6); US2.1 in T017 and T040; US2.2, US2.4 to US2.6 in T012; US2.3 in T014; US3.1 and US3.2 in T008; US3.3 in T018. Each "Changes from 1.14" bullet: T010 (flat rows 3 and 4, nested row 3), T011 (row 5, the header and trailer count-0 entries), T012 (row 2, row 1 exhausted, row 0b), T013 (flat row 2), T014 (cursor shell), T018 (session observers).
+
+---
+
+## Dependencies and execution order
+
+- Phase 1 → Phase 2 (`H0`) → Phase 3 (`H3`) → Phase 4 US1 (`H4`) → Phase 5 US2 (`H5`) → Phase 6 US3 (`H6`) → Phase 7 (`H7`) → Phase 8 → Phase 9 → Phase 10.
+- US3 (Phase 6) depends only on Phase 2. It may run before Phase 3 if US1 and US2 stall, but it edits `src/wire/offset_table.cpp` as they do, so never at the same time.
+- US2 depends on US1: research D11 asks US1's registration predicate.
+- Within Phase 4: T027 and T028 are written before T029; T030 before T031 and T032; T033 after T029 to T032; T035 and T036 after T033; T037 and T038 last.
+- Within Phase 5: T039 and T040 before T041; T041 → T042 (one file); T043 and T044 after T042.
+- T067 (`/simplify`) and every Gate B fix re-trigger T074.
+- T081 is last.
+
+## Parallel examples
+
+- Phase 2, after T007: T008, T009, T010, T011, T013, T014, T015, T016, T018, T019 touch disjoint files. T012 follows T010 and T017 follows T016 (same file).
+- Phase 4: T027 ∥ T028; then T031 ∥ T032 after T030.
+- Phase 5: T039 ∥ T040.
+- Phase 9: T056 to T062 touch disjoint files; T056 and T057 both edit the live B&L file, so run them as one editor or in sequence.
+
+## Implementation strategy
+
+1. Phases 1 and 2: every RED that `fa778a8e` can show, recorded before any production line.
+2. Phase 3: the shapes, proved behaviour-neutral by the unchanged `H0` set.
+3. Phase 4 (US1): the MVP core, the ruled v1.0 BUILD of #647; stop and check US1 alone.
+4. Phase 5 (US2): fail-loud reads and the shell catch; US1 and US2 form the 1.15 break.
+5. Phase 6 (US3): the probe budget.
+6. Phases 7 to 10: declaration, mutants, records, verification, close-out.
+
+## Notes (hard rules)
+
+- No `file:NNN` citation anywhere; symbols, headings and quoted phrases only.
+- No result in a comment or in this file; recipes and conditions only.
+- RED before GREEN for every cell; a cell first written after its production change is a Gate B blocker (`[const §VII.3]`).
+- Never `git checkout`, `git switch` or `git stash`; mutants only in `$M`.
+- MSVC `-k 0` build of the touched targets before the first labelled push; the full `ctest` once, at T076.
