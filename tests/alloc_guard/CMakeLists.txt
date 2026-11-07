@@ -467,6 +467,9 @@ if(WIN32)
   set_tests_properties(alloc_guard_544_run_thread PROPERTIES ENVIRONMENT
     "GTEST_FILTER=B35RunThreadWindows.WA_ActiveHeartbeat:B35RunThreadWindows.WB_ActiveAppMessage:B35RunThreadWindows.ArmA_TrackedExecutorFallback")
 endif()
+# 101-inbound-reject-fidelity: label 101 (tasks.md T019), for W101-45 (T014). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST alloc_guard_544_run_thread APPEND PROPERTY LABELS 101)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   # name | gtest case | expected entry (empty: the case must read zero)
@@ -484,8 +487,21 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     "alloc_guard_544_wa_bl_twin_mallocnesia|WA_BL_Twin_InLimitPlant|"
     "alloc_guard_544_wa_bs_arm_mallocnesia|WA_BS_Arm_NestOneOverSlots|aligned_alloc"
     "alloc_guard_544_wa_bs_twin_mallocnesia|WA_BS_Twin_NestFillsSlots|"
-    "alloc_guard_544_arm_s_run_one_for_mallocnesia|ArmS_RunOneForScope|aligned_alloc")
+    "alloc_guard_544_arm_s_run_one_for_mallocnesia|ArmS_RunOneForScope|aligned_alloc"
+    # 101-inbound-reject-fidelity (tasks.md T014, W101-45): the reply windows and their twins.
+    "alloc_guard_101_bmr_overflow_mallocnesia|W101_45_BmrOverflow|"
+    "alloc_guard_101_bmr_twin_mallocnesia|W101_45_BmrFittingTwin|"
+    "alloc_guard_101_reject_overflow_mallocnesia|W101_45_RejectOverflow|"
+    "alloc_guard_101_reject_twin_mallocnesia|W101_45_RejectFittingTwin|")
   _fixpp_b35_register_cells(test_544_run_thread_windows B35RunThreadWindows ${_b35_rig_cells})
+  # 101 (tasks.md T019): the W101-45 registrations exist only where the Release interceptor
+  # registers them.
+  foreach(_t101 alloc_guard_101_bmr_overflow_mallocnesia alloc_guard_101_bmr_twin_mallocnesia
+                alloc_guard_101_reject_overflow_mallocnesia alloc_guard_101_reject_twin_mallocnesia)
+    if(TEST ${_t101})
+      set_property(TEST ${_t101} APPEND PROPERTY LABELS 101)
+    endif()
+  endforeach()
 endif()
 
 # ── fixpp#544 (B35; §3, "The TLS diagnostic"; R-5): W-A's run-thread shape on a TLS

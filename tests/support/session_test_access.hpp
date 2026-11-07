@@ -193,6 +193,13 @@ struct session_test_access {
     // set itself, and the fallback leaf never writes it.
     [[nodiscard]] static bool& send_slot_in_use(Session& s) noexcept { return s.send_slot_in_use_; }
 
+    // The engine's outbound frame ceiling, Session::kSendFrameBytes, read by name so a cell
+    // sizes its inputs off it rather than off a typed number (101-inbound-reject-fidelity,
+    // tasks.md T005).
+    [[nodiscard]] static constexpr std::size_t send_frame_bytes() noexcept {
+        return Session::kSendFrameBytes;
+    }
+
     // Enters a callback_dispatch_scope on `s`, as a callback site of the session does,
     // without a callback running; the scope ends when the returned object is destroyed
     // (fixpp#564). The scope touches the guard's state only, so a session that was never
