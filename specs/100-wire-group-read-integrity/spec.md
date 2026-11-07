@@ -53,7 +53,15 @@ while the flat getter returns `TYPE_MISMATCH`.
 - Q: Should the arena be sized or grown so these failures cannot happen? → A: No. The bounded, null-upstream arena is the
   DoS property (073's ruling, kept). This feature makes each failure observable; it does not move the bound.
 - Q: Which ending does the probe cap take? → A: The parse fails with a wire-limit error, the ending a frame whose offset
-  table is over capacity takes today. The DoS bound stays: the build still stops probing at the cap.
+  table is over capacity takes today (`wire_offset_table_full`, C-ABI `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`; on an inbound
+  session, 092's late-parse-failure terminal close: no Reject, no Logout, no callback). The DoS bound stays: the build
+  still stops probing at the cap. A linear-scan fallback on a miss was rejected: it is the O(n²) the cap exists to stop.
+- Q: How is the C-ABI change versioned? → A: FR-003 changes an answer a caller can observe for the same input (nested
+  scalar `OK` → `TYPE_MISMATCH`), and FR-005/FR-007 change the flat getter's code on exhaustion (`TYPE_MISMATCH` →
+  `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`). Before the first public release a breaking C-ABI change bumps MINOR and is declared
+  BREAKING (`[const §X.7]`): C-ABI **1.15, BREAKING**. No new error code.
+- Q: Does a zero-count group return a cursor? → A: No: `OK`, count 0, `*group_out` null, as the nested getter already
+  answers a nested zero-count group today.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -161,8 +169,9 @@ reaches the cap; parse it.
   wire-limit error. The probe stays capped at the same constant; build cost stays linear in the number of occurrences.
 - **FR-009**: A frame that does not reach any of these conditions reads exactly as today: same fields, same group
   instances, same codes. No new allocation on the read path; no change to the arena's size or upstream.
-- **FR-010**: The B&L rows L-458-1, L-073-1 and L-051-3 move to the closed file with the delivering witnesses named, and
-  L-093-17's group-getter half is updated (or retired) to match FR-006. Any new or changed C-ABI code is documented in
+- **FR-010**: The B&L rows L-458-1, L-073-1 and L-051-3 move to the closed file with the delivering witnesses named;
+  L-093-17 is retired to match FR-006; L-093-5's group bullets (empty span, the flat getter's `TYPE_MISMATCH` "misreport")
+  and L-065-2's "top-level reads remain silent" clause are updated to the new endings. Any new or changed C-ABI code is documented in
   the C-ABI error contract and its completeness test, and the C-ABI version bumps per `[const §X.1]` if the observable
   contract changes.
 
