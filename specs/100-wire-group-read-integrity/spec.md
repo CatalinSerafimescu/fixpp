@@ -188,8 +188,8 @@ reaches the cap; parse it.
 ### Measurable Outcomes
 
 - **SC-001**: Every cell named in the acceptance scenarios is RED on `fa778a8e` where today's behaviour differs (US1.1,
-  US1.2, US1.3, FR-003's nested scalar, US2.1, US2.2, US2.3, US3.1) and GREEN on the feature head; the control cells are
-  GREEN on both.
+  US1.2, FR-003's nested scalar, US2.1, US2.2, US2.3, US3.1) and GREEN on the feature head; the control cells (including US1.3, which today's nested getter already answers `OK`/0 through its presence
+  probe) are GREEN on both.
 - **SC-002**: The B42 repro shape (repeat getter calls on a frame at the inbound limit) completes every call with a
   return code and no exception, on both getters.
 - **SC-003**: No existing test changes its expected outcome except the cells that pin today's defects (named in the plan
