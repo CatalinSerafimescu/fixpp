@@ -134,7 +134,19 @@ Resolutions of the reviews' findings; the decisions they land in are research D1
   header, asserted in debug builds and disclosed (research D7).
 - Q: Which hooks read the field that ends the header, in D5's 13/14 walk? → A: the route's, for that field and every
   later one; S's before it; one `length_data_carry` throughout. A walk that faults answers 14, the 35s it saw discarded
-  (research D5).
+  (research D5). *Superseded by the 2026-11-07 owner ruling (below).*
+
+### Session 2026-11-07 (owner ruling, checklist audit `msgtype-and-framing.md` CHK006, CHK008, CHK010)
+
+- Q: The inbound scan reads the whole frame with the route's hooks, and D5's walk read the header with S's: on a custom
+  S that pairs a non-standard Length on a FIXT-standard header tag its own `<header>` omits, the two split a field
+  differently (measured: unreachable on every shipped dictionary). Which reading wins? → A: **option (b): D5's walk
+  reads every field, header and body, with the selected route's hooks**, so the walk and the scan agree by construction
+  in both directions. S's header union still classifies the fields (099 judges the header by S); one
+  `length_data_carry` throughout. No shipped behaviour changes against D5 as Gate A converged it: on every shipped
+  pairing the route's hooks answer S's header pairs as S's do (`fixt_route_set::make` over `dict::header_length_pairs`,
+  099 R-20). D5's fault rule (14) stays, reachable only by a unit cell, since the route-hooked scan faults first and the
+  092 disposer takes the frame (research D5, "Owner ruling (2026-11-07)").
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -292,8 +304,10 @@ BusinessMessageReject.
   from the first.
 - **FR-005** (#658): A validating session, FIXT or not, MUST refuse a frame whose MsgTypes differ: in LogonReceived and
   Active with Reject 371=35, 372 = the first 35, 45 = the first 34, and 373 by research D5's three-clause rule (14
-  when any later 35 lies past the header, else 13 when one lies in it, else 14; a walk that faults answers 14), ahead
-  of the 3/5 exemption, consuming the frame as its first 35; in an establishment arm with a
+  when any later 35 lies past the header, else 13 when one lies in it, else 14; a walk that faults answers 14; the walk
+  reads every field with the selected route's hooks, the hooks the header scan read the frame with, so the two agree on
+  every fault-free frame, and classifies the header by the session dictionary's header ∪ the FIXT standard header set;
+  owner ruling 2026-11-07), ahead of the 3/5 exemption, consuming the frame as its first 35; in an establishment arm with a
   disconnect, sending nothing. "Consuming" is 099 FR-025's: the frame's MsgSeqNum is consumed as a rejected message's,
   keyed on the first 35, and none of the message's content is applied, whatever that MsgType (admin included), on FIXT
   and non-FIXT sessions alike. This supersedes 099's FR-025/FR-029 comparison and carve-outs (research Supersessions).
@@ -323,6 +337,9 @@ BusinessMessageReject.
     session log records it (rate-bounded);
   - (b) **BusinessMessageReject (35=j):** it MUST NOT be sent without 372. It is not sent: no callback, no outbound
     number, the inbound consumed as today, the session in its state, and the session log records it (rate-bounded).
+
+  "Consumed as today" in (a) and (b) is the site's own disposition today, the session in its state; in NotConnected and
+  LogonSent NextNumIn is not advanced.
 
   Each not-sent ending of (a) and (b) writes at most one session log record per max(HeartBtInt, 1 s) on
   `effective_clock_`, the rule of 093's garbled-frame record (`Session::note_garbles_`), with HeartBtInt resolved as

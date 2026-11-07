@@ -203,36 +203,74 @@ consume key).
   1128 arm stays FIXT-only (a non-FIXT route never carries a refusal).
 - **13 or 14.** `fixt_header_repeats_msg_type` becomes one cold walk that does **not** end at the header's stop; it
   reports whether a later 35 stands in the header and whether one stands past it. It is its own walk (or a parameter of
-  `peek_detail::walk_fixt_header` that only it passes): `peek_fixt_route`'s walk and its stop stay as they are. S's
-  hooks and table (`session_hooks(inbound_tv_)`, `*inbound_tv_`) judge the header, as today: 099 judges the header by
-  S. The route's hooks (`*route.entry.owner`, the table the frame is scanned, parsed and validated with; S's own on a
-  non-FIXT session) read the body. **The walk, field by field** (Gate A round 2; it replaces round 1's "up to the stop
-  … past the stop"):
+  `peek_detail::walk_fixt_header` that only it passes): `peek_fixt_route`'s walk and its stop stay as they are, on S's
+  hooks. **Every field, header and body, is read with the selected route's hooks** (`session_hooks(*route.entry.owner)`,
+  the hooks the inbound arm's `scan_frame_header` call used, and the table the frame is parsed and validated with; S's
+  own on a non-FIXT session, where `select_route_` returns `inbound_tv_`). **S's header union classifies** the fields
+  (`*inbound_tv_`): 099 judges the header by S. Owner ruling 2026-11-07, option (b) (below); it supersedes Gate A
+  round 2's "S's hooks before the stop, the route's from the stopping field". **The walk, field by field:**
   1. It is one loop with one `length_data_carry`, never reset or replaced.
   2. For each field in frame order, parse the tag.
   3. Classify the tag with S's header union (`table_view::is_header_tag` ∪ `dict::is_fixt_standard_header_tag`). Once
-     a field is not a header field, `past_stop` stays true for it and every later field.
-  4. Read its value with `carry.read_value(frame, vstart, tag, hooks)`, where `hooks` is S's while `past_stop` is
-     false and the route's for **the stopping field itself** and every field after it.
+     a field is not a header field, `past_stop` stays true for it and every later field. The ruling changes no part of
+     this step: the classifying table is S's, as in the converged D5 and in today's `walk_fixt_header` (`s_table`).
+  4. Read its value with `carry.read_value(frame, vstart, tag, route_hooks)`, the same hooks for every field.
   5. A 35 after field 3 is in the header when `past_stop` was false for it, else past the header.
 
-  Why the stopping field takes the route's hooks: `length_data_carry::read_value` decides whether **this** field is
-  counted from what the **previous** call armed, then arms the next field from the hooks passed to **this** call. So
-  the hooks used on the first body field decide whether a Length there, which only the route declares, counts its
-  Data. With S's hooks that Data is split at its first SOH, and an embedded `SOH 35=` reads as a phantom past-header
-  35. The one carry is what lets an S header Length count its Data when that Data is the stopping field.
+  Why one carry across the stop: `length_data_carry::read_value` decides whether **this** field is counted from what
+  the **previous** call armed. A Length in the header whose Data is the stopping field counts that Data only if the
+  carry survives the classification stop; a reset there splits the Data at its first SOH, and an embedded `SOH 35=`
+  reads as a phantom past-header 35 that the scan, which never resets, does not see.
+
+  **Scan and walk agree by construction.** The walk and `scan_frame_header` read with the same hooks, through the same
+  `length_data_carry::read_value` and the same tag-digit rule (`accumulate_tag_digit`, an `=` required, an empty tag a
+  fault), and `refuse_active_frame_` receives the `route` whose owner's hooks built `hdr` (each arm binds one `const`
+  `route` from `select_route_` and scans with it). So the two split every frame on the same boundaries: a later 35 the
+  scan's `msg_type_conflict` saw is a later 35 the walk sees, and the reverse.
 
   **The answer.** `refuse_active_frame_` answers **14 when any later 35 lies past the header, else 13 when one lies in
-  it, else 14** (the three-clause rule; the last clause keeps today's answer when the walk sees no later 35). **When the
-  walk faults** (`read_value` returns `nullopt` on a malformed count), the walk returns false, the 35s it saw before
-  the fault are discarded, and the answer is the default clause, 14. That fault rule is a chosen ending, not a derived
-  one: the frame reached the gate because the scan was clean, so the 092 disposer never runs for it, and the walk can
-  fault only where S's hooks and the route's disagree about a pair, so a partial walk is not trusted.
+  it, else 14** (the three-clause rule; the last clause is the answer for a walk that sees no later 35). **When the
+  walk faults** (`read_value` returns `nullopt` on a malformed count, or a tag is malformed), the walk returns false,
+  the 35s it saw before the fault are discarded, and the answer is the default clause, 14. That fault rule is a chosen
+  ending, kept so the function is total: through a real `Session` it cannot be reached, because the walk faults only
+  where the route-hooked scan faults at the same field, and a frame whose scan records a fault goes to the 092 disposer
+  (`dispose_unparseable_`, ahead of `refuse_active_frame_` and `establishment_frame_refused_` in every arm) and never
+  reaches the gate. Its witness is therefore a unit cell on `fixt_header_repeats_msg_type` (D9). For the same reason
+  the default clause ("else 14" for a walk that sees no later 35) is reached only through a fault: the unit cell
+  asserts the walk's report, not `refuse_active_frame_`'s mapping of it, so a mutant flipping that default has no
+  witness; this is accepted, not hidden.
 
   This is QuickFIX C++'s `hasValidStructure`-before-`iterate` precedence. With exactly two 35s
   it equals 099's answer; with three or more it can differ (`0,D(hdr)…0(past)` and `0,0(hdr)…D(past)` answer 14, where
   099's rule answers nothing and 13 respectively). The reason is decided from the walk alone: a count from
-  `scan_frame_header` is never combined with the walk's: they are two walks, and nothing pins that they agree.
+  `scan_frame_header` is never combined with the walk's; they agree by construction, but the walk is the one that
+  classifies.
+- **Owner ruling (2026-11-07), checklist `msgtype-and-framing.md` CHK006, CHK008, CHK010: option (b), the walk reads
+  every field with the route's hooks.**
+  - *Measured* (the reachability bullet below and that checklist's Audit Result): under Gate A's D5 (S's hooks for the
+    header) the scan and the walk disagreed on no shipped pairing, and on no dictionary where S's own `<header>` holds
+    the pair's Length or Data tag. They disagreed on a custom S that pairs a non-standard Length on a tag of
+    `dict::is_fixt_standard_header_tag` its own `<header>` omits: `dict::header_length_pairs` tests S's own
+    `header_tags_`, not the union the walk classifies by, so `fixt_route_set::make` does not merge that pair. The
+    route-hooked scan then split the Data and could flag a conflict the S-hooked walk did not see (a conformant frame,
+    by S's reading, drew 14 or a disconnect); the reverse could turn a real conflict's 13 into 14.
+  - *Why (b).* (a), widening `header_length_pairs` to S's header union, changes 099's merge rule and closes only the
+    direction that misfires. (c), keeping D5 and disclosing the residual, leaves two readings of one frame. (b) makes the
+    walk read as the scan, parser, validator and message view already do ("a route is one table", 099 research R-20),
+    so they agree in both directions on every dictionary, by construction rather than by measurement.
+  - *The residual's ruled ending.* On that custom S the frame is refused as the route reads it, like every other reader
+    of it: the split Data yields a later 35, 14 when the split lands past the stop (the Data tag outside S's header
+    union), 13 when it lands in the header, and a disconnect in an establishment arm. This is not a fault and not a B-row:
+    the route's parse sees two MsgTypes.
+  - *No shipped behaviour changes against D5 as Gate A converged it.* On every shipped pairing the route's hooks answer
+    every tag of S's header union as S's hooks do: a standard pair is answered from the standard table
+    (`dict_hooks::data_tag_for_length`); a pair S's own `<header>` holds is merged into every route
+    (`fixt_route_set::make` over `dict::header_length_pairs`, 099 R-20); no vendored file declares a header pair outside
+    the standard table (`W17Overload.VendoredFileDeclaresNoHeaderPair`); and the only non-standard pairs (FIX50SP2's and
+    FIX Latest's body pairs) are read with the route's hooks under both rules. On a non-FIXT session the two hook sets
+    are one. Re-derive by the next bullet's recipe.
+  - Retired with Gate A's rule: the "stopping field takes the route's hooks" boundary cell and its mutant (D9 re-aims
+    them); the old fault-rule witness through a real `Session` (D9 moves it to a unit cell).
 - The walk's header test stays `table_view::is_header_tag` ∪ `dict::is_fixt_standard_header_tag` on non-FIXT sessions
   too. That union is the closer model of QuickFIX C++'s `isHeaderField` (static list or session dictionary, every
   BeginString). The residual — the tags `is_fixt_standard_header_tag` holds and QuickFIX C++'s static list lacks (at
@@ -240,25 +278,25 @@ consume key).
   disclosed (FR-009), not excluded: a FIX.4.x frame carrying them in the header is already non-conformant.
 - `establishment_frame_refused_` becomes `hdr.msg_type_conflict || (fixt_routing_ && validate && route.application)`;
   the conflict clause holds whatever `validate_inbound_messages` is (D6).
-- **Where the scan's hooks and the walk's can disagree (checklist audit; a reachability statement, not a change to
-  this decision).** The inbound arms scan the whole frame with the route's hooks (`session_hooks(*route.entry.owner)`),
-  and `msg_type_conflict` comes from that scan; the walk reads the header with S's hooks. The two split a field
+- **Where the scan's hooks and Gate A's walk could disagree (checklist audit; the measured basis of the 2026-11-07
+  ruling above).** The inbound arms scan the whole frame with the route's hooks (`session_hooks(*route.entry.owner)`),
+  and `msg_type_conflict` comes from that scan; Gate A's walk read the header with S's hooks. The two split a field
   differently only where one hook set counts a Length+Data pair the other does not:
   - A standard pair is answered from the standard table whatever the dictionary (`dict_hooks::data_tag_for_length`),
     so only a pair outside it can differ.
   - S's header pairs are on every route's table: `fixt_route_set::make` registers each listed S's
     `dict::header_length_pairs` into every other dictionary's table, S winning a collision (099 research R-20), every
     FIXT session's dictionary is listed (`Engine::start`, or `Session::open()` for a direct session), and
-    `bind_fixt_routes_` picks the `{d, S}` entries.
+    `bind_fixt_routes_` picks the `{d, S}` entries. `dict::header_length_pairs` takes a pair when S's own `<header>`
+    holds its Length or its Data tag, so a pair on a tag only `dict::is_fixt_standard_header_tag` puts in the union is
+    not merged: that is the custom residual the ruling closes.
   - On the shipped dictionaries no file declares a header pair outside the standard table (pinned by
     `W17Overload.VendoredFileDeclaresNoHeaderPair`), and FIXT11 declares no pair outside it at all; the only such pairs
-    are FIX50SP2's and FIX Latest's body pairs, which the walk reads with the route's hooks, as the scan does, since a
+    are FIX50SP2's and FIX Latest's body pairs, which both rules read with the route's hooks, as the scan does, since a
     body tag ends the header. So on every shipped pairing the two agree.
   - Re-derive: `dict::header_length_pairs` over each dictionary a session lists, and the non-standard DATA fields of
     each (a QuickFIX-XML `type='DATA'` or Orchestra `type="data"` field whose tag the standard table lacks); known
     positive: a FIXT11 overlay adding a header pair (`W17HeaderLengthPairs.AnOverlaysHeaderPairIsAnswered`).
-  - What a custom dictionary can reach, and what to do about it, is the orchestrator's open question (checklist
-    `msgtype-and-framing.md` CHK006); this bullet decides nothing.
 
 ### D6 — Validation off: refuse in establishment, handle by the first 35 after (FR-006)
 
@@ -572,6 +610,8 @@ below), and for a tag cell whether the tag is dictionary-defined or wholly undef
 - `git grep -n -i "last-wins\|LastWins" -- tests/session` — 092's scan pins.
 - `is_valid_wire_error` in `tests/fuzz/fuzz_wire_validator.cpp` (it traps on any code outside its allowlist).
 - the `kMaxShippedMsgTypeLength` hits (D7).
+- `git grep -n fixt_header_repeats_msg_type -- tests` — the D5 walk's direct callers, whose report changes (D5); known
+  positive: `W21PeekColdPath` in tests/session/test_099_peek_fixt_route.cpp.
 
 **Mutate-and-run recipes** (grep is the wrong instrument where `58=` or a MsgType string matches nearly every Reject
 cell). The cells live in many binaries (`session_pure_tests`, `wire_dict_tests`, the per-feature
@@ -646,13 +686,25 @@ reverted):
   last-vs-third mutant establishes; D4 disconnects). `D…A…D` alone does not discriminate in establishment.
 - D5: `0,D(hdr)…0(past)` → 14 and `0,0(hdr)…D(past)` → 14; validating non-FIXT 13 and 14; a FIXT-only header tag at the
   non-FIXT boundary (1128 before a later 35 → 13, as QuickFIX C++).
-- D5's boundary field (real FIXT `Session`, validating, Active; Gate A round 2):
-  - a Length only the route declares, as the first body field, whose Data embeds `SOH 35=X`, plus a real in-header
-    repeat → 13, not 14. A mutant reading the stopping field with S's hooks must go RED;
-  - an S header Length whose paired Data tag is not an S header tag, so the Data is the stopping field (a hand-built
-    table) → the Data counted across the transition, and the 13/14 answer as the frame's real 35s give it. A mutant
-    that resets or replaces the carry at the stop must go RED;
-  - a malformed-count variant of each → 14, whatever 35s the walk saw before the fault.
+- D5's hooks and carry (real FIXT `Session`, validating, Active; Gate A round 2, re-aimed by the 2026-11-07 owner
+  ruling, D5):
+  - a Length only the route declares (a shipped FIX50SP2 or FIX Latest body pair), as the first body field, whose Data
+    embeds `SOH 35=X`, plus a real in-header repeat → 13, not 14. A mutant whose call site passes S's hooks
+    (`session_hooks(inbound_tv_)`) must go RED;
+  - an S header Length whose paired Data tag is outside S's header union, so the Data is the stopping field, built
+    through a `Dictionary` and the route set (an overlay header pair, as `W17HeaderLengthPairs.AnOverlaysHeaderPairIsAnswered`
+    builds one), so the route carries the pair; the Data embeds `SOH 35=X` → the Data counted across the stop, and the 13/14 answer as the frame's
+    real 35s give it. A mutant that resets the carry when `past_stop` latches must go RED;
+  - the residual the ruling closes: a custom S that pairs a non-standard Length on a tag of
+    `dict::is_fixt_standard_header_tag` its own `<header>` omits, with a Data tag outside S's header union and a Data
+    value embedding `SOH 35=X`, which the route's hooks split, plus a real in-header repeat → 14 (the split puts the
+    embedded 35 past the stop), not 13. A mutant that reads the
+    header-classified fields with S's hooks (Gate A's rule) must go RED. Through a real `Session` if such an S loads
+    through `fixt_route_set::make`; else a unit cell on `fixt_header_repeats_msg_type` with S's table and a route
+    table lacking the pair, written with the new walk (tasks T040). The mutant is an edit inside the walk either way.
+- D5's fault rule (a unit cell on `fixt_header_repeats_msg_type`; a real `Session` cannot reach it, D5): a real
+  in-header repeat before a malformed count → the walk reports neither an in-header nor a past-header 35, so the
+  answer is 14. A mutant that keeps the 35s a faulting walk saw must go RED.
 - LogoutSent on validating and off, FIXT and non-FIXT: `D..5` stays, `5..D` confirms.
 - D6's differential oracle for every post-establishment validation-off row and every LogoutSent row, including X = 4
   and X = A.
@@ -755,6 +807,8 @@ and `check-comment-claims.py` runs on the diff:
 - `emit_session_reject_`'s header ("success or build-failure (not fatal if build fails)"), and any other reply-leaf
   comment describing what a failed build does, where the slot rebuild now runs first;
 - `on_inbound_frame`'s reentrancy contract in `session.hpp`, which gains the serialized-caller sentence (D7);
+- `fixt_header_repeats_msg_type`'s comment ("by the same walk and the same stop"), and `peek_fixt_route.hpp`'s
+  header ("The walk uses S's hooks"), which after D5 holds for `peek_fixt_route`'s walk only;
 - the 098 test file's header recipe (B85 note);
 - the pre-fix note above `FixtHeaderValidateTest.WellFormedApplicationFrameAccepted` in
   `tests/wire/fixt_header_validate_test.cpp` ("rejected wire_unexpected_tag, ref_tag==8 … identical 'empty valid-tag

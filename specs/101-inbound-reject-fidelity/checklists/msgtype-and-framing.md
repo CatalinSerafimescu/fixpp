@@ -29,14 +29,14 @@ Gate A closed by owner ruling (2026-11-07), and tasks.md does not reopen the des
 
 ## Two walks, two sets of hooks (research D4, research D5)
 
-- [ ] CHK006 `msg_type_conflict` comes from the header scan alone. The inbound arms' scan calls in `session.cpp` read the whole frame with the selected route's hooks (`session_hooks(*route.entry.owner)`). D5's walk reads the header with S's hooks and the rest with the route's, and D5 says "nothing pins that they agree". Is the ending stated for each kind of disagreement? (i) The scan flags a conflict the walk cannot see. Example: S declares a header Length/Data pair the route does not, and its Data embeds `SOH 35=`, which the route's hooks split. In Active the default clause then answers 14 for a frame whose only "later 35" is inside a Data value; in an establishment arm, if a route other than S can be selected there, the frame would be disconnected (reachability is CHK007's question). (ii) The walk sees a later 35 the scan did not flag, so no refusal runs. [Gap, Conflict, research D5, research D4] — ESCALATED (not dispositioned; Gate A converged, so only the orchestrator can rule). Measured: unreachable on every shipped pairing, and unreachable for "S declares a header pair the route does not" on any dictionary (099 R-20 merges S's header pairs into every route). A custom-only residual remains, in which a conformant frame can draw 14 or a disconnect. Evidence and the fix options are in this file's Audit Result.
-- [x] CHK007 Can CHK006's disagreement happen on a shipped pairing (FIXT11 with a FIX50SP2 or FIX Latest route)? Is the set of Length/Data pairs one side declares and the other does not stated, or given by a recipe? [Coverage, research D5] — SPEC-FIXED: research D5 gains a reachability bullet (a statement only; D5's decision is unchanged) with its re-derive recipe and known positive. It states: standard pairs are answered identically by every hook set; S's header pairs are on every route (`fixt_route_set::make`, 099 R-20); no shipped file declares a non-standard header pair (`W17Overload.VendoredFileDeclaresNoHeaderPair`, and measured at the audit); FIXT11 declares no non-standard pair at all.
-- [ ] CHK008 Is it stated as a requirement that the scan's conflict and D5's "any later 35" agree on fault-free frames, with the hooks each uses named? Tasks T050's fuzz arm checks the scan against `entries()`, but no requirement says which hooks `entries()` is built with. [Measurability, tasks T050, research D5] — ESCALATED (not dispositioned): a requirement that the scan's conflict and D5's walk agree on fault-free frames is the question CHK006 escalates. It holds on shipped pairings and fails only in the custom residual, so stating it means choosing that ruling's fix.
+- [x] CHK006 `msg_type_conflict` comes from the header scan alone. The inbound arms' scan calls in `session.cpp` read the whole frame with the selected route's hooks (`session_hooks(*route.entry.owner)`). D5's walk reads the header with S's hooks and the rest with the route's, and D5 says "nothing pins that they agree". Is the ending stated for each kind of disagreement? (i) The scan flags a conflict the walk cannot see. Example: S declares a header Length/Data pair the route does not, and its Data embeds `SOH 35=`, which the route's hooks split. In Active the default clause then answers 14 for a frame whose only "later 35" is inside a Data value; in an establishment arm, if a route other than S can be selected there, the frame would be disconnected (reachability is CHK007's question). (ii) The walk sees a later 35 the scan did not flag, so no refusal runs. [Gap, Conflict, research D5, research D4] — DD-DECIDED (owner ruling 2026-11-07, option (b); research D5 "Owner ruling (2026-11-07)"; spec Clarifications). D5's walk reads every field with the selected route's hooks, the scan's, so the two split every frame alike and neither direction of disagreement exists. S's header union still classifies. Measured basis (escalated at the audit): unreachable on every shipped pairing; reachable only on a custom S pairing a non-standard Length on a FIXT-standard header tag its own `<header>` omits, whose ruled ending is now the route's reading (W101-29 (d), M101-40).
+- [x] CHK007 Can CHK006's disagreement happen on a shipped pairing (FIXT11 with a FIX50SP2 or FIX Latest route)? Is the set of Length/Data pairs one side declares and the other does not stated, or given by a recipe? [Coverage, research D5] — SPEC-FIXED: research D5 gains a reachability bullet (a statement only; D5's decision is unchanged) with its re-derive recipe and known positive. It states: standard pairs are answered identically by every hook set; S's header pairs are on every route (`fixt_route_set::make`, 099 R-20); no shipped file declares a non-standard header pair (`W17Overload.VendoredFileDeclaresNoHeaderPair`, and measured at the audit); FIXT11 declares no non-standard pair at all. (The 2026-11-07 owner ruling later changed D5's hooks, CHK006; this bullet is its measured basis.)
+- [x] CHK008 Is it stated as a requirement that the scan's conflict and D5's "any later 35" agree on fault-free frames, with the hooks each uses named? Tasks T050's fuzz arm checks the scan against `entries()`, but no requirement says which hooks `entries()` is built with. [Measurability, tasks T050, research D5] — DD-DECIDED (owner ruling 2026-11-07, option (b)): spec FR-005 now requires the walk to read every field with the selected route's hooks, the hooks the header scan used, so the two agree on every fault-free frame; research D5 states why by construction (same hooks, same `length_data_carry::read_value`, same tag rule, the same `route` object). Tasks T050's walk arm takes the harness's one `dict_hooks` value as the route's hooks.
 
 ## Validating refusal and the 13/14 rule (FR-005, research D5)
 
 - [x] CHK009 Is "the header" for the three-clause rule defined the same way in FR-005, the contract's notation paragraph and D5 step 3 (S's header union)? On a FIXT application route the frame itself is validated with the route's table, so does any of them define the header by that table instead? [Consistency, Spec §FR-005, research D5, contract "Repeated MsgType (a later 35 whose value differs from the first)"] — PASS: FR-005 defers to D5. The contract's notation ("the session dictionary's ∪ the FIXT standard header set") and D5 step 3 (S's header union; "099 judges the header by S") agree, and none defines the header by the route's table.
-- [ ] CHK010 D5's fault rule answers 14 and discards the 35s it saw. D5 also says the walk can fault only where S's and the route's hooks disagree. Is it stated that the fault ending cannot be reached on a non-FIXT session, where the two sets of hooks are the same? Is it stated on which FIXT shapes it can be reached, with W101-29 (c) as its witness? [Coverage, research D5] — ESCALATED (not dispositioned): the non-FIXT half holds (one hook set). On FIXT the fault rule cannot be reached through a real Session on route-set-built routes: wherever the walk would fault, the route-hooked scan faults first and the 092 disposer takes the frame. So W101-29 (c) and M101-24 have no reachable RED there except in CHK006's residual. This depends on CHK006's ruling; details are in the Audit Result.
+- [x] CHK010 D5's fault rule answers 14 and discards the 35s it saw. D5 also says the walk can fault only where S's and the route's hooks disagree. Is it stated that the fault ending cannot be reached on a non-FIXT session, where the two sets of hooks are the same? Is it stated on which FIXT shapes it can be reached, with W101-29 (c) as its witness? [Coverage, research D5] — DD-DECIDED (owner ruling 2026-11-07, option (b)): research D5 states that the fault rule is unreachable through a real Session on every session kind, FIXT or not: the walk faults only where the route-hooked scan faults at the same field, and the 092 disposer (`dispose_unparseable_`) takes that frame before `refuse_active_frame_`. The rule stays as a total-function ending; W101-29 (c) and M101-24 move to a unit cell on `fixt_header_repeats_msg_type` (tasks T040, suite `RepeatWalkUnit101`).
 - [x] CHK011 FR-005 puts the refusal "ahead of the 3/5 exemption" on non-FIXT sessions too. So a conflicting frame whose first 35 is 3 (a Reject) or 5 (a Logout) draws a Reject, and the Logout is not honoured. Is that consequence disclosed in a B-row, not only witnessed (W101-32)? [Completeness, Spec §FR-005, Spec "Edge Cases"] — SPEC-FIXED: tasks T059's B-099-4 rewrite now names the consequence: a conflicting frame whose first 35 is 3 or 5 draws the Reject, so a Logout so framed is not honoured.
 - [x] CHK012 FR-005 consumes the frame "as its first 35". When the first 35 is admin (A in Active, 4, 2 or 1), is "consumed" defined as the inbound number advanced with none of that message's content applied? Is that the same for FIXT and non-FIXT? [Clarity, Spec §FR-005] — SPEC-FIXED: spec FR-005 defines "consuming" as 099 FR-025's: the MsgSeqNum consumed as a rejected message's, keyed on the first 35, no content applied, admin or not, FIXT and non-FIXT alike.
 - [x] CHK013 FR-005 names LogonReceived and Active. The contract's LogoutSent row says "no Reject for the repeat" on any session, validating or not. Do FR-005 and FR-006 together state the validating LogoutSent ending, so that the absence of a Reject there is not left to the reader to infer? [Consistency, Spec §FR-005, Spec §FR-006, contract "Repeated MsgType (a later 35 whose value differs from the first)"] — SPEC-FIXED: spec FR-006 states that LogoutSent, validating or not, sends no Reject for the repeat (it has no validation gate).
@@ -64,21 +64,21 @@ Gate A closed by owner ruling (2026-11-07), and tasks.md does not reopen the des
 
 ## Audit Result
 
-Audited at library head `df0f5431` (pipeline step 9).
+Audited at library head `df0f5431` (pipeline step 9). Owner ruling on CHK006, CHK008, CHK010 applied at library head `15cc0fa4`.
 
 | Disposition | Count |
 |---|---|
 | PASS | 4 |
 | SPEC-FIXED | 16 |
-| DD-DECIDED | 0 |
+| DD-DECIDED | 3 |
 | WAIVED | 0 |
-| ESCALATED (unticked) | 3 |
+| ESCALATED (unticked) | 0 |
 | **Total** | 23 |
 
 ### SPEC-FIXED items
 - CHK001, CHK002, CHK003, CHK004 — byte inequality, the reader recipe, Disconnected, no conflict signal from `interpret_logon`; affected: `research.md:D4`, `tasks.md:T039`, `tasks.md:T060 (f)`.
 - CHK005 — a send-path guarantee; affected: `spec.md:Edge Cases`.
-- CHK007 — reachability on shipped pairings, with a recipe; affected: `research.md:D5` (new bullet; D5's decision unchanged).
+- CHK007 — reachability on shipped pairings, with a recipe; affected: `research.md:D5` (new bullet; D5's decision unchanged at the audit, changed by the 2026-11-07 owner ruling, CHK006).
 - CHK011 — 3/5 consequence in B-099-4's rewrite; affected: `tasks.md:T059`.
 - CHK012 — "consuming" defined; affected: `spec.md:FR-005`.
 - CHK013, CHK022 — validating LogoutSent, establishment arms, LogonReceived; affected: `spec.md:FR-006`.
@@ -88,12 +88,12 @@ Audited at library head `df0f5431` (pipeline step 9).
 - CHK021 — QuickFIX C++ and J named; affected: `tasks.md:T060 (j)`.
 
 ### DD-DECIDED items
-- none.
+- CHK006, CHK008, CHK010 — owner ruling 2026-11-07, option (b): D5's walk reads every field with the selected route's hooks; S's header union still classifies; the fault rule's witness is a unit cell. Affected: `research.md:D5` ("Owner ruling (2026-11-07)", the walk, the reachability bullet), `research.md:D9`, `research.md:D10`, `spec.md:Clarifications` and `spec.md:FR-005`, `contracts/reject-frames.md:Repeated MsgType`, `plan.md:Gate A` (pointers), `tasks.md:T011`, `tasks.md:T040`, `tasks.md:T042`, `tasks.md:T050`, the W101-29 row, M101-2, M101-3, M101-24, M101-40, the Requirement map and the Census manifest. `data-model.md` states no hooks and is unchanged.
 
 ### WAIVED items
 - none.
 
-### ESCALATED items (unticked; one root; only the orchestrator can rule, since Gate A converged)
+### Escalation record (CHK006, CHK008, CHK010; resolved by the owner ruling above, option (b))
 - CHK006, CHK008, CHK010 — the scan's hooks (the route's, whole frame) versus D5's walk (S's for the header, the route's from the stopping field).
   - **Shipped dictionaries: unreachable.** A standard pair is answered by the standard table whatever the hooks
     (`dict_hooks::data_tag_for_length`). No vendored file declares a header pair outside it
@@ -118,7 +118,7 @@ Audited at library head `df0f5431` (pipeline step 9).
     the 092 disposer takes the frame. So W101-29 (c) cannot reach D5's fault rule through a real Session, and M101-24
     would survive (a witness defect that stops T042's batch), unless the residual is built or the cell moves to a unit
     instrument with disagreeing hooks.
-  - **Fixes, each keeping one ending (not applied):** (a) widen `dict::header_length_pairs`'s header test to S's header
+  - **Fixes, each keeping one ending (the owner chose (b), 2026-11-07):** (a) widen `dict::header_length_pairs`'s header test to S's header
     union, a one-predicate change in 099's merge rule that leaves D5 intact and closes the direction that misfires;
     (b) read the walk with the route's hooks throughout ("a route is one table", R-20), so scan and walk split alike
     by construction in both directions, at the cost of D5's S-for-the-header rule, M101-2/M101-3 and W101-29's

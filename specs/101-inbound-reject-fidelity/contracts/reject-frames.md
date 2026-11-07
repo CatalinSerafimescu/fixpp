@@ -29,8 +29,8 @@ counterparty's diff is expected there (B-row, FR-009).
 "Differ" is sticky: `D…A…D` and `A…D…A` differ. A repeat with the **same** value only is not a conflict: unchanged.
 `R {13,14}/35 X` = Reject 371=35, 372 = X (the first 35), 45 = the first 34, 373 by research D5's three-clause rule
 (**14 when any later 35 lies past the header, else 13 when one lies in it, else 14**; a walk that faults answers 14);
-the header is the session dictionary's ∪ the FIXT standard header set, and the field that ends the header and every
-later field are read with the route's hooks (research D5). "As X" = the ending of the same frame with every later 35
+the header is the session dictionary's ∪ the FIXT standard header set, and every field, header and body, is read with
+the selected route's hooks, the hooks the header scan used (owner ruling 2026-11-07, research D5). "As X" = the ending of the same frame with every later 35
 removed and re-framed (research D6).
 
 | Session | State | Before | After |

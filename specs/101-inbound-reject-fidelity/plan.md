@@ -191,7 +191,8 @@ No open item remains. Each item's last verdict is Codex round 3's, accepted by t
 - **Root cause #2, the 13/14 walk's hooks.** Opus's shape walks the whole frame with S's hooks. Past the header stop the
   rewrite reads with the route's hooks instead (identical on a non-FIXT session): on a FIXT application route, S's hooks
   would split a body Data value the route declares, and one embedding `SOH 35=` would show a phantom past-header 35
-  (research D5).
+  (research D5). *Superseded by the 2026-11-07 owner ruling: every field is read with the route's
+  hooks (research D5, "Owner ruling (2026-11-07)").*
 - **Root cause #1, the BusinessMessageReject.** Opus's shape applies the omit-372 retry to the BMR twin, under the
   rationale that 372 is optional. That holds for Reject (35=3); in BusinessMessageReject (35=j) 372 is required in the
   vendored dictionaries. The BMR ending was left open for a ruling at round 1 and decided at round 2 (below).
@@ -248,7 +249,8 @@ research/reviews/opus_101-inbound-reject-fidelity_gate_a_2_adversarial_review.md
   `tests/alloc_guard` had no reply-chain cell (#544's windows take no reply). D9's new cells are the first.
 - **Codex 2 (P2), D5's hook transition at the boundary field.**
   - D5 is now a per-field algorithm: one carry; S's hooks before the stop; the route's hooks for the stopping field and
-    every later field.
+    every later field. *Superseded by the 2026-11-07 owner ruling: the route's hooks for
+    every field (research D5).*
   - It states why: `read_value` arms the next field from the current call's hooks.
   - It gives the chosen fault rule: a faulting walk answers 14, and the 35s it saw are discarded.
   - `peek_fixt_route`'s walk and its stop are kept.
