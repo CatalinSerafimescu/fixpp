@@ -15,6 +15,11 @@
 // requires that at least one room did so, except where a cell says a lane may skip.
 //
 // The frames are FIX 4.4 messages parsed with the shipped FIX44.xml's `as_table_view()`.
+//
+// T027 (US1; FR-001 to FR-003; research D2, D3, D9 "Repeat reads") adds the `is_group`
+// assertions on the wire-layer twins of tests/capi/test_100_group_getters.cpp's T010 cells, on
+// an ample arena, each read twice, and the spec Clarification's dict-aware bundle without the
+// registration callback.
 
 #include <gtest/gtest.h>
 
@@ -28,6 +33,9 @@
 #include <string>
 #include <vector>
 
+#include "support/context_group_delim_fn.hpp"
+#include "support/context_group_member_fn.hpp"
+#include "support/dict_hooks_test_access.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/group_read_100.hpp"
 
@@ -303,6 +311,157 @@ TEST(GroupReadStatus100, D10_NestedRowPushFails_FailedFirstAndRepeat) {
     auto const obs = step_rooms(body, {}, 3, outer_setup(453, 0), nested_read(453, 802));
     if (expect_at_kind(obs, alloc_kind::nested_row, true, "D10 nested row push") == 0U) {
         GTEST_SKIP() << "no room makes the nested_cache_ row the first failure on this lane";
+    }
+}
+
+// ── T027 (US1): `is_group` on the wire-layer twins of T010's cells ─────────────────
+// Each read is made twice: the second answers from the `group_index_` row (flat) or the
+// `nested_cache_` row (nested), so a repeat that differs from the first is a cache defect
+// (research D3).
+
+struct parsed44 {
+    std::vector<std::byte> buf;
+    std::optional<fixpp::wire::frame_view> fv;
+    std::pmr::monotonic_buffer_resource arena;
+    std::optional<view_t> mv;
+    explicit parsed44(std::string const& body) : buf(frame44(body)) {
+        if (auto f = fixpp::wire::test::make_frame_view(buf)) {
+            fv.emplace(*f);
+            Parser<access_mode::Index> parser{fix44().tv};
+            if (auto m = parser.parse(*fv, &arena)) {
+                mv.emplace(std::move(*m));
+            }
+        }
+    }
+};
+
+// A flat read of `tag`, twice: `is_group`, no slices, `status == ok` both times.
+void expect_flat_shape(std::string const& body, std::uint16_t tag, bool want_group,
+                       std::string const& what) {
+    parsed44 p{body};
+    ASSERT_TRUE(p.mv.has_value()) << "setup: " << what << " parses";
+    for (int read = 0; read < 2; ++read) {
+        auto const r = p.mv->offsets().group_slices_status(tag);
+        EXPECT_EQ(r.is_group, want_group)
+            << what << " (read " << read << "): is_group should be " << want_group;
+        EXPECT_EQ(r.slices.size(), 0U) << what << " (read " << read << "): no instances";
+        EXPECT_EQ(r.status, fixpp::wire::group_read_status::ok) << what << " (read " << read << ")";
+    }
+}
+// A nested read of `tag` from instance `i` of the top-level `outer_tag`, twice.
+void expect_nested_shape(std::string const& body, std::uint16_t outer_tag, std::size_t i,
+                         std::uint16_t tag, bool want_group, std::string const& what) {
+    parsed44 p{body};
+    ASSERT_TRUE(p.mv.has_value()) << "setup: " << what << " parses";
+    auto const outer = p.mv->offsets().group_slices_status(outer_tag);
+    ASSERT_GT(outer.slices.size(), i) << "setup: " << what << " has the outer instance";
+    auto const ctx = p.mv->offsets().group_context_for(outer_tag);
+    for (int read = 0; read < 2; ++read) {
+        auto const r = p.mv->offsets().nested_group_slices(outer.slices[i].data,
+                                                           outer.slices[i].len, tag, ctx);
+        EXPECT_EQ(r.is_group, want_group)
+            << what << " (read " << read << "): is_group should be " << want_group;
+        EXPECT_EQ(r.slices.size(), 0U) << what << " (read " << read << "): no instances";
+        EXPECT_EQ(r.status, fixpp::wire::group_read_status::ok) << what << " (read " << read << ")";
+    }
+}
+std::string ae_head() { return header44("AE") + "571=R1\x01"; }
+
+TEST(GroupReadStatus100, T027_FlatZeroCountMidBody_IsGroup) {
+    expect_flat_shape(header44("D") + kOrd +
+                          "453=0\x01"
+                          "54=1\x01"
+                          "38=100\x01",
+                      453, true, "US1.1 / FR-002 zero count mid-body");
+}
+TEST(GroupReadStatus100, T027_FlatZeroCountLastBodyField_IsGroup) {
+    expect_flat_shape(header44("D") + kOrd +
+                          "54=1\x01"
+                          "453=0\x01",
+                      453, true, "US1.2 / FR-002 zero count as the last body field");
+}
+TEST(GroupReadStatus100, T027_FlatZeroCountFollowedByMembers_IsGroup) {
+    expect_flat_shape(header44("D") + kOrd + "453=0\x01" + kParty + "54=1\x01", 453, true,
+                      "Edge Cases / FR-002 zero count followed by its members");
+}
+TEST(GroupReadStatus100, T027_FlatLyingCount_IsGroup) {
+    expect_flat_shape(header44("D") + kOrd +
+                          "453=2\x01"
+                          "54=1\x01",
+                      453, true, "US1.7 / FR-002 lying count");
+}
+TEST(GroupReadStatus100, T027_NestedZeroCountMidInstance_IsGroup) {
+    expect_nested_shape(ae_head() +
+                            "552=1\x01"
+                            "54=1\x01"
+                            "453=0\x01"
+                            "37=O1\x01",
+                        552, 0, 453, true, "US1.3 / FR-002 nested zero count mid-instance");
+}
+TEST(GroupReadStatus100, T027_NestedLyingCount_IsGroup) {
+    expect_nested_shape(ae_head() +
+                            "552=1\x01"
+                            "54=1\x01"
+                            "453=2\x01"
+                            "37=O1\x01",
+                        552, 0, 453, true, "US1.7 / FR-002 nested lying count");
+}
+TEST(GroupReadStatus100, T027_NestedScalarMidInstance_NotAGroup) {
+    expect_nested_shape(header44("D") + kOrd + "453=1\x01" + kParty + "54=1\x01", 453, 0, 447,
+                        false, "US1.4 / FR-003 nested scalar mid-instance");
+}
+TEST(GroupReadStatus100, T027_NestedScalarLastInInstance_NotAGroup) {
+    expect_nested_shape(header44("D") + kOrd + "453=1\x01" + kParty + "54=1\x01", 453, 0, 452,
+                        false, "US1.4 / FR-003 nested scalar last in its instance");
+}
+TEST(GroupReadStatus100, T027_Flat802AtRootValueN_NotAGroup) {
+    expect_flat_shape(header44("D") + kOrd +
+                          "802=2\x01"
+                          "523=S\x01"
+                          "803=1\x01"
+                          "523=T\x01"
+                          "803=2\x01"
+                          "54=1\x01",
+                      802, false, "US1.8 / FR-003 NoPartySubIDs(802) at the root");
+}
+TEST(GroupReadStatus100, T027_Flat453InDeclaredMessageWithoutParties_NotAGroup) {
+    expect_flat_shape(header44("B") +
+                          "148=H\x01"
+                          "453=1\x01" +
+                          kParty + "58=x\x01",
+                      453, false, "US1.9 / FR-003 NoPartyIDs(453) in News(B)");
+}
+// Control against a mutant that sets `is_group = true` everywhere (research D9 "Repeat reads").
+TEST(GroupReadStatus100, T027_Control_FlatScalarTwice_NotAGroup) {
+    expect_flat_shape(header44("D") + kOrd +
+                          "54=1\x01"
+                          "38=100\x01",
+                      54, false, "US1.11 flat scalar (control)");
+}
+
+// spec Clarification: a dict-aware bundle without the registration callback declines the
+// group read, as a dict-free one does (research D2 step 1).
+TEST(GroupReadStatus100, T027_NullRegistrationCallback_DeclinesTheGroupRead) {
+    auto const buf = frame44(header44("D") + kOrd + "453=1\x01" + kParty + "54=1\x01");
+    auto const fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value()) << "setup: frame";
+    auto const& tv = fix44().tv;
+    std::pmr::monotonic_buffer_resource arena;
+    OffsetTable t{*fv, &arena,
+                  fixpp::wire::dict_hooks_test_access::make(
+                      &tv, /*classify=*/nullptr, &fixpp_test_support::context_group_member_fn,
+                      &fixpp_test_support::context_group_delim_fn, /*length_pair=*/nullptr,
+                      /*group_registered=*/nullptr)};
+    ASSERT_TRUE(t.build_status().has_value()) << "setup: build";
+    t.set_group_context(fixpp::wire::group_context{.msg_type = "D"});
+    ASSERT_TRUE(t.find(453).has_value()) << "setup: the count tag is present";
+    auto const g = t.group(453);
+    EXPECT_FALSE(g.has_value()) << "a bundle with no registration callback declines group()";
+    for (int read = 0; read < 2; ++read) {
+        auto const r = t.group_slices_status(453);
+        EXPECT_EQ(r.slices.size(), 0U) << "read " << read << ": no instances";
+        EXPECT_FALSE(r.is_group) << "read " << read << ": not a group";
+        EXPECT_EQ(r.status, fixpp::wire::group_read_status::ok) << "read " << read;
     }
 }
 

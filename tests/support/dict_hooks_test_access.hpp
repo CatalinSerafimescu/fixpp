@@ -13,6 +13,9 @@
 // this header.
 // The friend declaration in dict_hooks.hpp is unconditional (fixpp#511), so
 // this struct is too: it needs no test macro.
+// 100: `group_registered` is the registration predicate (research D2); a caller passes
+// a stub that agrees with its membership stub, or null to build the bundle a
+// dict-aware read declines.
 
 #include <fixpp/wire/dict_hooks.hpp>
 
@@ -22,8 +25,10 @@ struct dict_hooks_test_access {
     [[nodiscard]] static constexpr dict_hooks make(
         void const* opaque_dict, dict_hooks::classify_fn_t classify,
         dict_hooks::group_member_fn_t group_member, dict_hooks::group_delim_fn_t group_delim,
-        dict_hooks::length_pair_fn_t length_pair) noexcept {
-        return dict_hooks{opaque_dict, classify, group_member, group_delim, length_pair};
+        dict_hooks::length_pair_fn_t length_pair,
+        dict_hooks::group_registered_fn_t group_registered) noexcept {
+        return dict_hooks{opaque_dict, classify,    group_member,
+                          group_delim, length_pair, group_registered};
     }
 };
 

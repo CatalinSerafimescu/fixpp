@@ -52,9 +52,11 @@ add_executable(dictionary_pure_tests
   test_072_delimiter_guard_test.cpp  # 072 US1: load-time nested==parent delimiter guard witness
   oom_injection_test.cpp          # local failing_pmr_resource seam — no global state
   dictionary_snapshot_test.cpp    # fixpp#215 item 1 (Option C): A1-A5 boundary pins + seam 4 alias identity
+  test_100_registration_records.cpp  # 100 T028: registration stores, records, D2 sweep
 )
 target_link_libraries(dictionary_pure_tests PRIVATE
   fixpp_dictionary
+  fixpp_wire  # 100 T028 reads the stores through dict_hooks::for_table_view (parser.hpp)
   pugixml::pugixml
   GTest::gtest
   GTest::gtest_main

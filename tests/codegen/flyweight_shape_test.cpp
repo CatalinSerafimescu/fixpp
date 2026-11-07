@@ -43,7 +43,9 @@ TEST(CodegenFlyweightShape, SizeofIsOnePointer) {
 // its sole member is an `entry_context`, so its size/align match exactly.
 // fixpp#426: `dict_hooks` (5 pointers) replaced `opaque_dict` +
 // `group_member_fn` (2 pointers), a deliberate +24 bytes.
-static_assert(sizeof(fixpp::wire::entry_context) == 144);
+// 100-wire-group-read-integrity (research D2 "Size census"): `dict_hooks` gains the
+// registration callback, one more pointer, a deliberate +8 bytes.
+static_assert(sizeof(fixpp::wire::entry_context) == 152);
 static_assert(alignof(fixpp::wire::entry_context) == 8);
 static_assert(sizeof(fixpp::v44::groups::G_295) == sizeof(fixpp::wire::entry_context));
 static_assert(alignof(fixpp::v44::groups::G_295) == alignof(fixpp::wire::entry_context));

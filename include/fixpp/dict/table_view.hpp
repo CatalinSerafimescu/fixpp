@@ -49,6 +49,14 @@
 // std::shared_mutex, or heavy asio into the closure. The dependency direction
 // is:  dictionary.hpp → table_view.hpp  (never the reverse).
 //
+// 100-wire-group-read-integrity (research D2): the registration predicate
+// `group_registered` and its stores (the "has a context key" bitset, the
+// per-occurrence and section-group records), and the wire-side membership and
+// delimiter accessors the read path asks. They supersede 063's statement that
+// the wire's membership lambda reaches the bare fallback only by a caller bug;
+// the validator's accessors (`group_member_tags`, `group_first_field`) are
+// unchanged.
+//
 // Minimal includes only — deliberate:
 
 #pragma once
@@ -214,6 +222,17 @@ struct group_ctx_entry {
     // fixpp#201: the group's DIRECT `required='Y'` members (excludes nested-
     // group members). The runtime validator checks these PER group instance.
     std::vector<std::uint16_t> required_members;
+};
+
+// 100 (research D2 "Per-occurrence records", data-model `table_view registration`):
+// one group occurrence's own definition. `delimiter` is the first tag emitted at the
+// group's level, components inline; `members` is every tag emitted at that level, a
+// nested group's own count tag included and the members of nested groups excluded
+// (the shape of `group_ctx_entry` without its required members). Built once with the
+// table, never on the read path.
+struct group_record {
+    std::uint16_t delimiter = 0;
+    std::vector<std::uint16_t> members;
 };
 
 // T017/T019 (data-model.md Entity B): enum-domain table entry. OWNS copies of
@@ -552,6 +571,83 @@ public:
         return group_required_members(no_tag);  // legacy bare fallback
     }
 
+    // ── 100 (research D2): the registration predicate ─────────────────────────
+    // `(msg_type, parent_path, no_tag)` is registered as a group when any arm holds:
+    //   1. context arm: `group_ctx_` or the per-occurrence store has the key;
+    //   2. section arm: the section store has `(parent_path, no_tag)`, whatever
+    //      the message type;
+    //   3. bare-only arm: `no_tag` has no `group_ctx_` key in any context (the
+    //      "has a context key" bitset) and its `group_bit` is set.
+    // research D2 is the one statement of the arms; this comment restates it so the
+    // body can be checked against it. The count's value never decides it. O(1) hash
+    // probes, no allocation. `group_ctx_` is probed only under a set `group_bit`,
+    // which every `group_ctx_` key sets; the other two stores are probed without
+    // that pre-filter, so a record cannot be hidden by it.
+    [[nodiscard]] bool group_registered(std::string_view msg_type,
+                                        std::span<std::uint16_t const> parent_path,
+                                        std::uint16_t no_tag) const noexcept {
+        auto const query = make_ctx_query(msg_type, parent_path, no_tag);
+        if (group_bit(no_tag) && group_ctx_.find(query) != group_ctx_.end()) {
+            return true;
+        }
+        if (occurrence_records_.find(query) != occurrence_records_.end()) {
+            return true;
+        }
+        if (section_records_.find(make_ctx_query({}, parent_path, no_tag)) !=
+            section_records_.end()) {
+            return true;
+        }
+        return !ctx_key_bit(no_tag) && group_bit(no_tag);
+    }
+
+    // 100 (research D2 "Lookup order"): the members the wire read splits and walks
+    // `no_tag` by in `(msg_type, parent_path)`. After the `group_bit` pre-filter, in
+    // order: the exact `group_ctx_` key, the per-occurrence record, the section record,
+    // the bare store. Read only by `wire::dict_hooks::for_table_view`'s membership
+    // lambda; the validator keeps `group_member_tags` above.
+    [[nodiscard]] std::span<std::uint16_t const> wire_group_member_tags(
+        std::string_view msg_type, std::span<std::uint16_t const> parent_path,
+        std::uint16_t no_tag) const noexcept {
+        if (!group_bit(no_tag)) {
+            return {};
+        }
+        auto const query = make_ctx_query(msg_type, parent_path, no_tag);
+        if (auto const it = group_ctx_.find(query); it != group_ctx_.end()) {
+            return {it->second.members.data(), it->second.members.size()};
+        }
+        if (auto const it = occurrence_records_.find(query); it != occurrence_records_.end()) {
+            return {it->second.members.data(), it->second.members.size()};
+        }
+        if (auto const it = section_records_.find(make_ctx_query({}, parent_path, no_tag));
+            it != section_records_.end()) {
+            return {it->second.members.data(), it->second.members.size()};
+        }
+        return group_member_tags(no_tag);
+    }
+
+    // 100: the delimiter twin of `wire_group_member_tags`, by the same lookup order.
+    // Read only by `wire::dict_hooks::for_table_view`'s delimiter lambda; the
+    // validator keeps `group_first_field` above.
+    [[nodiscard]] std::uint16_t wire_group_first_field(std::string_view msg_type,
+                                                       std::span<std::uint16_t const> parent_path,
+                                                       std::uint16_t no_tag) const noexcept {
+        if (!group_bit(no_tag)) {
+            return 0;
+        }
+        auto const query = make_ctx_query(msg_type, parent_path, no_tag);
+        if (auto const it = group_ctx_.find(query); it != group_ctx_.end()) {
+            return it->second.group_first;
+        }
+        if (auto const it = occurrence_records_.find(query); it != occurrence_records_.end()) {
+            return it->second.delimiter;
+        }
+        if (auto const it = section_records_.find(make_ctx_query({}, parent_path, no_tag));
+            it != section_records_.end()) {
+            return it->second.delimiter;
+        }
+        return group_first_field(no_tag);
+    }
+
     // fixpp#426 (design §3): the Data tag this dictionary pairs with
     // `length_tag`, or 0 when `length_tag` has no dictionary-declared pair.
     // Dictionary-wide (a tag's Length+Data pairing is a per-tag property, not
@@ -828,6 +924,7 @@ private:
     void add_group_member_ctx(std::string_view msg_type, std::span<std::uint16_t const> parent_path,
                               std::uint16_t no_tag, std::uint16_t member_tag) {
         set_group_bit(no_tag);
+        set_ctx_key_bit(no_tag);  // 100: every `group_ctx_` key sets it
         auto& entry = group_ctx_[make_group_ctx_key(msg_type, parent_path, no_tag)];
         for (auto const t : entry.members) {
             if (t == member_tag) return;  // dedup
@@ -840,6 +937,7 @@ private:
                                        std::span<std::uint16_t const> parent_path,
                                        std::uint16_t no_tag, std::uint16_t member_tag) {
         set_group_bit(no_tag);
+        set_ctx_key_bit(no_tag);  // 100: every `group_ctx_` key sets it
         auto& entry = group_ctx_[make_group_ctx_key(msg_type, parent_path, no_tag)];
         for (auto const t : entry.required_members) {
             if (t == member_tag) return;  // dedup
@@ -852,8 +950,43 @@ private:
     void set_group_first_ctx(std::string_view msg_type, std::span<std::uint16_t const> parent_path,
                              std::uint16_t no_tag, std::uint16_t first) {
         set_group_bit(no_tag);
+        set_ctx_key_bit(no_tag);  // 100: every `group_ctx_` key sets it
         group_ctx_[make_group_ctx_key(msg_type, parent_path, no_tag)].group_first = first;
         add_group_member_ctx(msg_type, parent_path, no_tag, first);
+    }
+
+    // ── 100 (research D2): the registration-only record stores ─────────────────
+    // Neither sets `group_bit` or the "has a context key" bitset, and neither
+    // creates a `group_ctx_` key, so the validator's accessors are unchanged
+    // (FR-009). A second record at a key already held keeps the first. `members` is
+    // stored without repeats, in the order given.
+    //
+    // The per-occurrence store (arm 1 and the record lookup): one key per group
+    // occurrence a declared message's expansion reaches, filled by
+    // `Dictionary::as_table_view()` from the loaders' delimiter records.
+    void add_occurrence_group(std::string_view msg_type, std::span<std::uint16_t const> parent_path,
+                              std::uint16_t no_tag, group_record const& record) {
+        occurrence_records_.try_emplace(make_group_ctx_key(msg_type, parent_path, no_tag),
+                                        without_repeats(record));
+    }
+
+    // The section store (arm 2): a header or trailer group of the dictionary at
+    // `(parent_path, no_tag)`, whatever the message type. Its key carries an empty
+    // msg_type.
+    void add_section_group(std::span<std::uint16_t const> parent_path, std::uint16_t no_tag,
+                           group_record const& record) {
+        section_records_.try_emplace(make_group_ctx_key({}, parent_path, no_tag),
+                                     without_repeats(record));
+    }
+
+    [[nodiscard]] static group_record without_repeats(group_record const& record) {
+        group_record out{.delimiter = record.delimiter, .members = {}};
+        for (auto const t : record.members) {
+            if (std::ranges::find(out.members, t) == out.members.end()) {
+                out.members.push_back(t);
+            }
+        }
+        return out;
     }
 
     // 081 Concern A (T009): registers `tag` as a FIXT framing tag with
@@ -1027,6 +1160,35 @@ private:
         }
         group_bits_[w] |= (std::uint64_t{1} << (static_cast<std::size_t>(no_tag) & 63U));
     }
+
+    // 100 (research D2 "It is backed by"): bit `no_tag` is set exactly when some
+    // `group_ctx_` key holds `no_tag`, by the three `_ctx` setters and nowhere else.
+    // Arm 3 of `group_registered` reads it. Sized like `group_bits_`.
+    std::vector<std::uint64_t> ctx_key_bits_;
+
+    [[nodiscard]] bool ctx_key_bit(std::uint16_t no_tag) const noexcept {
+        std::size_t const w = static_cast<std::size_t>(no_tag) >> 6U;
+        if (w >= ctx_key_bits_.size()) {
+            return false;
+        }
+        return ((ctx_key_bits_[w] >> (static_cast<std::size_t>(no_tag) & 63U)) & 1U) != 0U;
+    }
+    void set_ctx_key_bit(std::uint16_t no_tag) {
+        std::size_t const w = static_cast<std::size_t>(no_tag) >> 6U;
+        if (w >= ctx_key_bits_.size()) {
+            ctx_key_bits_.resize(w + 1, 0);
+        }
+        ctx_key_bits_[w] |= (std::uint64_t{1} << (static_cast<std::size_t>(no_tag) & 63U));
+    }
+
+    // 100 (research D2): the per-occurrence store, (msg_type, parent_path, no_tag) →
+    // that occurrence's record, and the section store, ("", parent_path, no_tag) →
+    // record. See `add_occurrence_group` / `add_section_group`. Written only while the
+    // table is built, read-only afterwards, as `group_ctx_` is.
+    std::unordered_map<group_ctx_key, group_record, group_ctx_hash, group_ctx_equal>
+        occurrence_records_;
+    std::unordered_map<group_ctx_key, group_record, group_ctx_hash, group_ctx_equal>
+        section_records_;
 
     // 063 Defect-A context-scoped store: (msg_type, parent_path, no_tag) →
     // {group_first, members}. Populated EXCLUSIVELY by
@@ -1227,6 +1389,20 @@ public:
                                             std::span<std::uint16_t const> parent_path,
                                             std::uint16_t no_tag, std::uint16_t first) {
         tv_.set_group_first_ctx(msg_type, parent_path, no_tag, first);
+        return *this;
+    }
+
+    // 100 (research D2): the two registration-only record stores.
+    table_view_builder& add_occurrence_group(std::string_view msg_type,
+                                             std::span<std::uint16_t const> parent_path,
+                                             std::uint16_t no_tag, group_record const& record) {
+        tv_.add_occurrence_group(msg_type, parent_path, no_tag, record);
+        return *this;
+    }
+
+    table_view_builder& add_section_group(std::span<std::uint16_t const> parent_path,
+                                          std::uint16_t no_tag, group_record const& record) {
+        tv_.add_section_group(parent_path, no_tag, record);
         return *this;
     }
 

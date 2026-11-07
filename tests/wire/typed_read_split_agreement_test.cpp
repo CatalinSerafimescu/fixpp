@@ -48,8 +48,9 @@
 #include <string_view>
 #include <vector>
 
-#include "support/context_group_delim_fn.hpp"  // 384: the production delimiter oracle
-#include "support/dict_hooks_test_access.hpp"  // fixpp#426: half-threaded dict_hooks bundles
+#include "support/context_group_delim_fn.hpp"       // 384: the production delimiter oracle
+#include "support/context_group_registered_fn.hpp"  // 100: the registration predicate
+#include "support/dict_hooks_test_access.hpp"       // fixpp#426: half-threaded dict_hooks bundles
 #include "support/frame_view_factory.hpp"
 #include "support/pmr_allocation_tracking_resource.hpp"
 
@@ -648,9 +649,10 @@ ChainRun run_chain(table_view const& tv, std::vector<std::byte> const& buf,
     // `group()` (the extent walk) and never reaches the splitter.
     fixpp::wire::OffsetTable table{
         *fv, mr,
-        fixpp::wire::dict_hooks_test_access::make(&tv, /*classify=*/nullptr, &counting_group_member,
-                                                  &fixpp_test_support::context_group_delim_fn,
-                                                  /*length_pair=*/nullptr)};
+        fixpp::wire::dict_hooks_test_access::make(
+            &tv, /*classify=*/nullptr, &counting_group_member,
+            &fixpp_test_support::context_group_delim_fn,
+            /*length_pair=*/nullptr, &fixpp_test_support::context_group_registered_fn)};
     auto const gi = table.group(kChainBase);
     out.probe_calls = g_probe_calls;
     out.group_too_large = !gi.has_value() && gi.error() == fixpp::core::error::wire_group_too_large;
@@ -944,9 +946,10 @@ TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
     std::pmr::monotonic_buffer_resource oracle_arena;
     fixpp::wire::OffsetTable pre{
         *fv, &oracle_arena,
-        fixpp::wire::dict_hooks_test_access::make(&tv, /*classify=*/nullptr, &divergent_member_fn,
-                                                  /*group_delim=*/nullptr,
-                                                  /*length_pair=*/nullptr)};
+        fixpp::wire::dict_hooks_test_access::make(
+            &tv, /*classify=*/nullptr, &divergent_member_fn,
+            /*group_delim=*/nullptr,
+            /*length_pair=*/nullptr, &fixpp_test_support::context_group_registered_fn)};
     ASSERT_TRUE(pre.build_status().has_value()) << "oracle table failed to build";
     // The ROOT context MessageView seeds unconditionally (its dict-aware ctor's `set_group_context`
     // call); reproduce it so the two tables differ in the delimiter callback ALONE.

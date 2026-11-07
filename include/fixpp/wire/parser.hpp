@@ -776,27 +776,24 @@ inline dict_hooks dict_hooks::for_table_view(fixpp::dict::table_view const& dict
         // (data-model.md "GroupMembership", Option A). Fixes Defect A: a
         // reused NumInGroup tag (e.g. FIX44 295) now resolves to the members
         // it has in THIS message/parent-path, not whichever variant the
-        // loader saw first, PROVIDED the context (msg_type + full
-        // parent-no_tag path) is supplied — which it always is on this call
-        // site (ctx comes from the stored OffsetTable context, seeded at
-        // MessageView::group<>() / build_nested_subview(), parser.hpp /
-        // offset_table.cpp). `table_view`'s context accessor falls back to
-        // the legacy bare-`no_tag` store on a MISS (table_view.hpp doc,
-        // amended hardening invariant) — unreachable HERE because this call
-        // site's ctx always matches the exact registration key.
+        // loader saw first. 100 (research D2 "Lookup order"): the members come
+        // from `wire_group_member_tags`, which answers a `group_ctx_` miss from the
+        // occurrence's own record before the bare store.
         [](void const* d, group_context const& ctx, std::uint16_t no_tag,
            std::uint16_t tag) noexcept -> bool {
-            auto const members = static_cast<fixpp::dict::table_view const*>(d)->group_member_tags(
-                ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth},
-                no_tag);
+            auto const members =
+                static_cast<fixpp::dict::table_view const*>(d)->wire_group_member_tags(
+                    ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth},
+                    no_tag);
             return std::ranges::any_of(
                 members, [tag](std::uint16_t const member_tag) { return member_tag == tag; });
         },
         // 083 T057 (C-8.1): the delimiter sibling of the membership lambda,
-        // resolving through the SAME opaque_dict and the SAME context key.
+        // resolving through the SAME opaque_dict and the SAME context key, by the
+        // same lookup order (100).
         [](void const* d, group_context const& ctx,
            std::uint16_t no_tag) noexcept -> std::uint16_t {
-            return static_cast<fixpp::dict::table_view const*>(d)->group_first_field(
+            return static_cast<fixpp::dict::table_view const*>(d)->wire_group_first_field(
                 ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth},
                 no_tag);
         },
@@ -812,7 +809,14 @@ inline dict_hooks dict_hooks::for_table_view(fixpp::dict::table_view const& dict
                   return from == dict_hooks::pair_side::length ? tv->length_pair_data_tag(tag)
                                                                : tv->data_pair_length_tag(tag);
               }
-            : static_cast<dict_hooks::length_pair_fn_t>(nullptr)};
+            : static_cast<dict_hooks::length_pair_fn_t>(nullptr),
+        // 100 (research D2): the registration predicate, always installed, through the
+        // SAME opaque_dict and the SAME context key.
+        [](void const* d, group_context const& ctx, std::uint16_t no_tag) noexcept -> bool {
+            return static_cast<fixpp::dict::table_view const*>(d)->group_registered(
+                ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth},
+                no_tag);
+        }};
 }
 
 template <access_mode Mode = access_mode::Index>

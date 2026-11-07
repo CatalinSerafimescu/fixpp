@@ -64,6 +64,10 @@ bool always_group_member(void const*, fixpp::wire::group_context const&, std::ui
                          std::uint16_t) noexcept {
     return true;
 }
+// 100: the registration stub that agrees with `always_group_member`.
+bool always_registered(void const*, fixpp::wire::group_context const&, std::uint16_t) noexcept {
+    return true;
+}
 
 // 063 T008: the new context arg — carried but unused in Phase 2.
 fixpp::wire::group_context const kTestCtx{.msg_type = "D"};
@@ -85,13 +89,13 @@ TEST(NestedGroupSlicesCache, NullSliceDataReturnsEmptySpan) {
     OffsetTable root{*fv, &arena};  // dict-free ctor: the null guard never
                                     // reaches dict-aware code.
     int dict_token = 0;
-    auto slices =
-        root.nested_group_slices(nullptr, 0, /*nested_no_tag=*/802,
-                                 fixpp::wire::dict_hooks_test_access::make(
-                                     &dict_token, /*classify=*/nullptr, &always_group_member,
-                                     /*group_delim=*/nullptr, /*length_pair=*/nullptr),
-                                 fv->token(), kTestCtx)
-            .slices;
+    auto slices = root.nested_group_slices(
+                          nullptr, 0, /*nested_no_tag=*/802,
+                          fixpp::wire::dict_hooks_test_access::make(
+                              &dict_token, /*classify=*/nullptr, &always_group_member,
+                              /*group_delim=*/nullptr, /*length_pair=*/nullptr, &always_registered),
+                          fv->token(), kTestCtx)
+                      .slices;
     EXPECT_TRUE(slices.empty());
 }
 

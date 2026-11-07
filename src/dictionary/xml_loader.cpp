@@ -36,6 +36,7 @@
 #include <optional>
 #include <pugixml.hpp>
 #include <ranges>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -280,6 +281,10 @@ private:
     // 098-dialect-overlay (FR-022, data-model §A.3): fills `h.header_tags_` from
     // `header_node_`. Defined beside `finalize`, which calls it.
     void collect_header_tags(detail::dict_metadata_handle& h) const;
+
+    // 100 (research D2 "Section records"): fills the handle's section-group records
+    // from `header_node_` and `trailer_node_`. Defined beside `collect_header_tags`.
+    void collect_section_groups(detail::dict_metadata_handle& h) const;
 
     [[nodiscard]] static pugi::xml_node fix_root(pugi::xml_document const& doc);
     void parse_version(pugi::xml_node const& root);
@@ -593,6 +598,7 @@ void LoaderState::expand_field_list(
             out.push_back(fr);
             // 083 D-1: first emission at the open group's level = its delimiter.
             detail::capture_first_emission(delim_cap, info.tag);
+            detail::capture_member_emission(delim_cap, info.tag);  // 100: a direct member
             if (req && !in_group && component_required) {  // fixpp#201: group-member requireds
                 required_out.push_back(info.tag);  // stay per-group; 079: optional-component AND
             }
@@ -647,6 +653,7 @@ void LoaderState::expand_field_list(
             // be the outer group's delimiter exactly as a scalar field is.
             // This is the #208 shape, and it needs no special case.
             detail::capture_first_emission(delim_cap, no_tag);
+            detail::capture_member_emission(delim_cap, no_tag);  // 100: a direct member
             if (greq && !in_group && component_required) {  // fixpp#201: a nested group's count
                 required_out.push_back(no_tag);  // field is not message-level required (per-
             }  // instance instead); 079: optional-component AND
@@ -717,6 +724,7 @@ void LoaderState::expand_field_list(
             if (delim_cap != nullptr) {
                 delim_cap->path.push_back(no_tag);
                 delim_cap->pending.push_back(0);
+                delim_cap->members.emplace_back();  // 100: this occurrence's members
             }
             expand_field_list(child, out, required_out, group_required_pairs_out, no_tag,
                               enclosing_component_index, delim_cap,
@@ -724,12 +732,15 @@ void LoaderState::expand_field_list(
                               /*group_scope_component_required=*/greq);
             if (delim_cap != nullptr) {
                 std::uint16_t const captured = delim_cap->pending.back();
+                std::vector<std::uint16_t> members = std::move(delim_cap->members.back());
+                delim_cap->members.pop_back();
                 delim_cap->pending.pop_back();
                 delim_cap->path.pop_back();
                 if (captured != 0) {
                     delim_cap->out.push_back(detail::CapturedDelim{
                         .rec = detail::make_group_ctx_delim(delim_cap->path, no_tag, captured),
-                        .full_path = delim_cap->path});
+                        .full_path = delim_cap->path,
+                        .members = std::move(members)});
                 }
                 // 083 T036 (FR-006 / C-6.1): `captured == 0` means this
                 // <group> emitted no first member at all, so its delimiter is
@@ -1003,6 +1014,87 @@ void LoaderState::collect_header_tags(detail::dict_metadata_handle& h) const {
     // cppcheck-suppress mismatchingContainerExpression
     tags.erase(std::ranges::unique(tags).begin(), tags.end());
     h.header_tags_.assign(tags.begin(), tags.end());
+}
+
+// 100 (research D2 "Section records"): every group declared in `<header>` or
+// `<trailer>`, at every depth, keyed by the count tags of the section groups that
+// enclose it (outermost first) and its own count tag, with its record: the first tag
+// emitted at its level as the delimiter, every tag emitted there as a member,
+// components inline, a nested group's count tag included and its members excluded.
+// The walk visits a component or group definition once per (definition, enclosing
+// path); it is NOT gated by `collect_header_tags`' `walked` set, which visits each
+// definition once and so would record one path only. A definition already on the
+// current path is skipped, which ends a cycle. A name the loader's maps cannot resolve
+// adds nothing, as in `collect_header_tags`. Header before trailer, declaration
+// order; the sink keeps the first record at a key.
+void LoaderState::collect_section_groups(detail::dict_metadata_handle& h) const {
+    detail::SectionGroupSink sink;
+    std::vector<std::uint16_t> path;
+    std::vector<void const*> on_path;
+    std::set<std::pair<void const*, std::vector<std::uint16_t>>> visited;
+    auto const tag_of = [&](pugi::xml_node const& n) -> std::optional<std::uint16_t> {
+        auto const it = by_name_.find(std::string{n.attribute("name").as_string("")});
+        if (it == by_name_.end()) {
+            return std::nullopt;
+        }
+        return it->second.tag;
+    };
+    auto const add = [](std::vector<std::uint16_t>* level, std::uint16_t tag) {
+        if (level != nullptr && std::ranges::find(*level, tag) == level->end()) {
+            level->push_back(tag);
+        }
+    };
+    auto walk = [&](auto& self, pugi::xml_node const& node,
+                    std::vector<std::uint16_t>* level) -> void {
+        for (auto const& child : node.children()) {
+            std::string_view const kind{child.name()};
+            if (kind == "field") {
+                if (auto const t = tag_of(child)) {
+                    add(level, *t);
+                }
+            } else if (kind == "component") {
+                auto const it = component_index_by_name_.find(
+                    std::string{child.attribute("name").as_string("")});
+                if (it == component_index_by_name_.end()) {
+                    continue;
+                }
+                auto const def = components_[it->second].node;
+                void const* const id = def.internal_object();
+                if (std::ranges::find(on_path, id) != on_path.end() ||
+                    !visited.emplace(id, path).second) {
+                    continue;
+                }
+                on_path.push_back(id);
+                self(self, def, level);
+                on_path.pop_back();
+            } else if (kind == "group") {
+                auto const t = tag_of(child);
+                if (!t) {
+                    continue;
+                }
+                add(level, *t);
+                void const* const id = child.internal_object();
+                if (std::ranges::find(on_path, id) != on_path.end() ||
+                    !visited.emplace(id, path).second) {
+                    continue;
+                }
+                std::vector<std::uint16_t> members;
+                path.push_back(*t);
+                on_path.push_back(id);
+                self(self, child, &members);
+                on_path.pop_back();
+                path.pop_back();
+                sink.record(path, *t, std::move(members));
+            }
+        }
+    };
+    if (header_node_ != nullptr) {
+        walk(walk, header_node_, nullptr);
+    }
+    if (trailer_node_ != nullptr) {
+        walk(walk, trailer_node_, nullptr);
+    }
+    sink.flush(h);
 }
 
 detail::dict_metadata_handle_ptr LoaderState::finalize() {
@@ -1489,7 +1581,8 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     }
     std::ranges::sort(h.enum_runs_, {}, &detail::EnumRun::tag);
 
-    collect_header_tags(h);  // 098 FR-022: after the message loop (see its comment)
+    collect_header_tags(h);     // 098 FR-022: after the message loop (see its comment)
+    collect_section_groups(h);  // 100: research D2 "Section records"
 
     return handle;
 }

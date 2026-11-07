@@ -24,6 +24,7 @@
 
 #include "support/context_group_delim_fn.hpp"
 #include "support/context_group_member_fn.hpp"
+#include "support/context_group_registered_fn.hpp"
 #include "support/dict_hooks_test_access.hpp"
 #include "support/expired_parser_parse.hpp"
 #include "support/frame_view_factory.hpp"
@@ -382,7 +383,8 @@ TEST(WireOffsetTable, DictFreeGroupDeclinesWhenMembershipFnMissing) {
     OffsetTable t{*fv, &arena,
                   dict_hooks_test_access::make(&dict, /*classify=*/nullptr,
                                                /*group_member=*/nullptr, /*group_delim=*/nullptr,
-                                               /*length_pair=*/nullptr)};
+                                               /*length_pair=*/nullptr,
+                                               &fixpp_test_support::context_group_registered_fn)};
     ASSERT_TRUE(t.build_status().has_value());
     ASSERT_TRUE(t.find(453).has_value())
         << "anti-vacuity: see DictFreeGroupDeclinesUnderDefaultConfig";
@@ -934,9 +936,11 @@ TEST(WireOffsetTable, GroupSlicesKeepsWireDelimiterWhenDelimStoreAnswersZero) {
     // `group_delim_fn_` entirely.
     {
         std::pmr::monotonic_buffer_resource arena;
-        OffsetTable t{*fv, &arena,
-                      dict_hooks_test_access::make(&dict, /*classify=*/nullptr, member_fn,
-                                                   &wrong_group_delim, /*length_pair=*/nullptr)};
+        OffsetTable t{
+            *fv, &arena,
+            dict_hooks_test_access::make(&dict, /*classify=*/nullptr, member_fn, &wrong_group_delim,
+                                         /*length_pair=*/nullptr,
+                                         &fixpp_test_support::context_group_registered_fn)};
         ASSERT_TRUE(t.build_status().has_value());
         auto const slices = t.group_slices(453);
         // The EXACT split, not `!= 2`. `EXPECT_NE(size, 2)` also holds at 0 and
@@ -957,10 +961,11 @@ TEST(WireOffsetTable, GroupSlicesKeepsWireDelimiterWhenDelimStoreAnswersZero) {
     // ── THE ARM: a zero answer leaves the wire-derived delimiter in place ───
     {
         std::pmr::monotonic_buffer_resource arena;
-        OffsetTable t{*fv, &arena,
-                      dict_hooks_test_access::make(&dict, /*classify=*/nullptr, member_fn,
-                                                   &fixpp_test_support::context_group_delim_fn,
-                                                   /*length_pair=*/nullptr)};
+        OffsetTable t{
+            *fv, &arena,
+            dict_hooks_test_access::make(
+                &dict, /*classify=*/nullptr, member_fn, &fixpp_test_support::context_group_delim_fn,
+                /*length_pair=*/nullptr, &fixpp_test_support::context_group_registered_fn)};
         ASSERT_TRUE(t.build_status().has_value());
         auto const slices = t.group_slices(453);
         EXPECT_EQ(slices.size(), 2U)
@@ -977,10 +982,12 @@ TEST(WireOffsetTable, GroupSlicesKeepsWireDelimiterWhenDelimStoreAnswersZero) {
     // offered as "threaded".
     {
         std::pmr::monotonic_buffer_resource arena;
-        OffsetTable t{*fv, &arena,
-                      dict_hooks_test_access::make(&dict, /*classify=*/nullptr, member_fn,
-                                                   /*group_delim=*/nullptr,
-                                                   /*length_pair=*/nullptr)};
+        OffsetTable t{
+            *fv, &arena,
+            dict_hooks_test_access::make(&dict, /*classify=*/nullptr, member_fn,
+                                         /*group_delim=*/nullptr,
+                                         /*length_pair=*/nullptr,
+                                         &fixpp_test_support::context_group_registered_fn)};
         ASSERT_TRUE(t.build_status().has_value());
         EXPECT_EQ(t.group_slices(453).size(), 2U)
             << "an explicit null oracle and a zero-answering one must agree — the equivalence "

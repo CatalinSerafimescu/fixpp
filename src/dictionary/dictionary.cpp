@@ -7,6 +7,10 @@
 // `XmlLoader::load*` via `std::allocate_shared` over
 // `std::pmr::polymorphic_allocator` so the control-block deallocator routes
 // memory back to the originating `mr` (`[2c §4.3]` / C-R2-P1-1).
+//
+// 100-wire-group-read-integrity (research D2): `as_table_view()` also fills the
+// table's per-occurrence store from the delimiter records and copies the handle's
+// section-group records; neither creates a `group_ctx_` key.
 
 #include <algorithm>
 #include <array>
@@ -683,6 +687,38 @@ table_view Dictionary::build_table_view(
                 b.add_group_required_member_ctx(mt, path, no_tag, req_tag);
             }
         }
+
+        // ── 100 (research D2 arm 1, "Arm-1 records"): one per-occurrence key per
+        // delimiter record this message's expansion captured, every occurrence with its
+        // full path (the loop above keys one parent per count tag), each holding that
+        // occurrence's record. No `group_ctx_` key is created, so the validator's
+        // accessors are unchanged (FR-009).
+        auto const delims = handle_->msg_group_ctx_delims_impl(mt);
+        auto const pool_base =
+            delims.empty()
+                ? std::size_t{0}
+                : static_cast<std::size_t>(delims.data() - handle_->group_ctx_delim_pool_.data());
+        for (std::size_t i = 0; i < delims.size(); ++i) {
+            auto const& rec = delims[i];
+            auto const members = handle_->group_ctx_members_at(pool_base + i);
+            b.add_occurrence_group(
+                mt, std::span<std::uint16_t const>{rec.parent_path.data(), rec.depth}, rec.no_tag,
+                group_record{
+                    .delimiter = rec.delimiter,
+                    .members = std::vector<std::uint16_t>(members.begin(), members.end())});
+        }
+    }
+
+    // ── 100 (research D2 arm 2, "Section records"): the dictionary's header and
+    // trailer groups at every depth, copied from the handle (filled at the loaders'
+    // finalize). MsgType-free.
+    for (std::size_t i = 0; i < handle_->section_group_pool_.size(); ++i) {
+        auto const& rec = handle_->section_group_pool_[i];
+        auto const members = handle_->section_group_members_at(i);
+        b.add_section_group(
+            std::span<std::uint16_t const>{rec.parent_path.data(), rec.depth}, rec.no_tag,
+            group_record{.delimiter = rec.delimiter,
+                         .members = std::vector<std::uint16_t>(members.begin(), members.end())});
     }
 
     // ── global tag→field_type map (+ T016 multi-value bit) ─────────────────

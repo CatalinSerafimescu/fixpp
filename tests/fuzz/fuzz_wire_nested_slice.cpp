@@ -88,6 +88,12 @@ bool always_group_member(void const*, fixpp::wire::group_context const&, std::ui
     return true;
 }
 
+// 100 (research D2): the registration stub that agrees with `always_group_member`:
+// every count tag is registered, so the harness keeps walking every group it did.
+bool always_registered(void const*, fixpp::wire::group_context const&, std::uint16_t) noexcept {
+    return true;
+}
+
 // 384: the delimiter oracle, fuzzer-driven. Before 384 this harness omitted
 // the callback entirely and took the default `nullptr`, so the ONLY splitter
 // shape it ever exercised was the wire-derived one — the half-threaded shape
@@ -205,7 +211,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // real table_view).
     auto const hooks = fixpp::wire::dict_hooks_test_access::make(
         &dict_token, /*classify=*/nullptr, &always_group_member, &fuzz_group_delim,
-        /*length_pair=*/nullptr);
+        /*length_pair=*/nullptr, &always_registered);
     OffsetTable root{*fv_or_err, &arena, hooks};
 
     // The slice-scoped input shape under test: `data[0 .. size-2]` is the

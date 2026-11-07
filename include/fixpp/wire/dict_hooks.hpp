@@ -17,6 +17,10 @@
 // `group_context` only by forward declaration (group_view.hpp owns the type and
 // includes offset_table.hpp). `for_table_view` is therefore DEFINED in parser.hpp,
 // where `group_context` and `table_view` are both complete.
+//
+// 100-wire-group-read-integrity (research D2, data-model `dict_hooks`): the bundle
+// also carries the registration predicate, which decides whether a count tag is a
+// group in a read's context. A dict-aware bundle without it declines group reads.
 
 #pragma once
 
@@ -41,6 +45,9 @@ public:
                                        std::uint16_t) noexcept;
     using group_delim_fn_t = std::uint16_t (*)(void const*, group_context const&,
                                                std::uint16_t) noexcept;
+    // 100 (research D2): whether `no_tag` is registered as a group in `ctx`.
+    using group_registered_fn_t = bool (*)(void const*, group_context const&,
+                                           std::uint16_t) noexcept;
     // Which half of a pair a dictionary lookup starts from.
     enum class pair_side : std::uint8_t { length, data };
     // Given one half of a dictionary-declared pair, the other half, or 0.
@@ -62,6 +69,10 @@ public:
     }
     [[nodiscard]] constexpr group_delim_fn_t group_delim_fn() const noexcept {
         return group_delim_;
+    }
+    // 100: null on `none()`. `OffsetTable::group()` declines when it is null.
+    [[nodiscard]] constexpr group_registered_fn_t group_registered_fn() const noexcept {
+        return group_registered_;
     }
     // Null when the dictionary declares no Length+Data pair of its own; the two
     // lookups below then answer from the standard table alone.
@@ -114,18 +125,21 @@ private:
 
     constexpr dict_hooks(void const* opaque_dict, classify_fn_t classify,
                          group_member_fn_t group_member, group_delim_fn_t group_delim,
-                         length_pair_fn_t length_pair) noexcept
+                         length_pair_fn_t length_pair,
+                         group_registered_fn_t group_registered) noexcept
         : opaque_dict_{opaque_dict},
           classify_{classify},
           group_member_{group_member},
           group_delim_{group_delim},
-          length_pair_{length_pair} {}
+          length_pair_{length_pair},
+          group_registered_{group_registered} {}
 
     void const* opaque_dict_ = nullptr;
     classify_fn_t classify_ = nullptr;
     group_member_fn_t group_member_ = nullptr;
     group_delim_fn_t group_delim_ = nullptr;
     length_pair_fn_t length_pair_ = nullptr;
+    group_registered_fn_t group_registered_ = nullptr;
 };
 
 // Every holder (OffsetTable, MessageView, entry_context, field_iterator)
