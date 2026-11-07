@@ -161,7 +161,7 @@ std::vector<std::byte> present_nested_group_frame() {
 // FIXPP_ERR_OK with entry-count 0. Asserted DIRECTLY on the returned code
 // (not an `nc == 0` proxy) per SC-001/SC-002 discrimination requirement.
 //
-// Mutation-proof: removing the `if (r.alloc_failed) return
+// Mutation-proof: removing the `if (r.status == …alloc_failed) return
 // WIRE_LIMIT_EXCEEDED;` arm in `fixpp_group_get_nested_group`
 // (that arm in `fixpp_group_get_nested_group`) makes this go RED — it falls through
 // to `scan_slice_for_tag` finding "539" present in the raw slice bytes and

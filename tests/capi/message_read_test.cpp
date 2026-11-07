@@ -2017,7 +2017,7 @@ TEST(MessageReadGroup, NestedTrailingMemberExcluded_Fix44LegsAsTableView) {
             auto const r = ctx_.parent_cache_owner->nested_group_slices(
                 ctx_.outer_occurrence_id, ctx_.span.size(), 604, ctx_.hooks, ctx_.gen,
                 ctx_.group_ctx);
-            return fixpp::wire::group_view<G604Entry>{r.slices, ctx_, r.alloc_failed};
+            return fixpp::wire::group_view<G604Entry>{r.slices, ctx_, r.status};
         }
         [[nodiscard]] fixpp::core::expected_t<fixpp::wire::field_view> field_value(
             std::uint16_t tag) const noexcept {

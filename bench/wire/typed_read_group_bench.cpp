@@ -188,7 +188,8 @@ void run_split_bench(benchmark::State& state, std::string const& body, unsigned 
             return;
         }
         auto const r = mv->offsets().group_slices_status(100);
-        if (r.alloc_failed || r.slices.size() != expect_slices) {
+        if (r.status == fixpp::wire::group_read_status::alloc_failed ||
+            r.slices.size() != expect_slices) {
             state.SkipWithError((std::string(label) + " fixture split into " +
                                  std::to_string(r.slices.size()) + " slices, expected " +
                                  std::to_string(expect_slices))

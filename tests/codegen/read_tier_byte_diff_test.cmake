@@ -65,6 +65,15 @@
 # two vt11 trees. Every hunk must be an addition naming 384, 385, 1410 or another member
 # of that group, and the only line changed rather than added is Logon's rule-array extent.
 #
+# 100-wire-group-read-integrity (research D5) intentionally rebaselines the THREE
+# Messages.hpp hashes whose dictionary has a nested group (v42/v44/v50sp2): the
+# nested group accessor passes the result's renamed `status` field where it passed
+# `alloc_failed` (`group_view<G_…>{r.slices, child_ctx, r.status}`). Re-derive that this
+# is the only change: diff the regenerated file against its pre-100 golden with
+# `--unified=0`: every removed line must carry `r.alloc_failed}`, and its added twin
+# must be that line with `r.alloc_failed}` replaced by `r.status}`. vt11 has no nested
+# group accessor, so its hash does not move.
+#
 # Which baseline each artifact is gated against is named by the banners above
 # and the 082 banner below; see the 091 banner for the v50sp2 pins. A mismatch
 # on any artifact, against its own baseline, is a real read-tier regression
@@ -135,15 +144,15 @@ set(_expected_v42_Fields.hpp     c8bb64b1be70acdfae7e8efcfeba8c512b19910ed9987eb
 # sha256 of the checked-in golden it corroborates (see banner): the two move as ONE
 # change unit, or `DeterminismTest.GeneratedMatchesGolden` goes red and the banner's
 # corroboration claim becomes false.
-set(_expected_v42_Messages.hpp   3d7665946e16c13d4617857acdd4ad66b00c6c8cf4559fd2c45fad3b560f0d3a)  # fixpp#426 (banner)
+set(_expected_v42_Messages.hpp   a7dffb7e39d8771d02a2dae4965062a1f90ba8d4903c48e74c253e7f3ff4703e)  # 100 (banner)
 set(_expected_v42_Reify.hpp      4c546c831bd0863a6a43dc0e8e958de72a280b033c918792d473a4c858082b1b)
 set(_expected_v42_Validator.hpp  b5d39106b4cc81eafd32ab65998d109b3bff1ae8198920634869f5765e88f096)
 set(_expected_v44_Fields.hpp     e39f240770bc4115c80fc425da35ebb20619502fe633bb3b62dcd44322be5fcb)
-set(_expected_v44_Messages.hpp   2e4cb0827eca8aa4a1572d451022b4c4ab78ef55cff2153101defca97c45b263)  # fixpp#426 (banner)
+set(_expected_v44_Messages.hpp   f47f36cccb6232a1577547699de7052c3c1b3465be8ae5c1d9582c776febd9b0)  # 100 (banner)
 set(_expected_v44_Reify.hpp      98eb06542f2dbfb8e424b502a6d077959a34f61e49be4b03f411e73e75825196)
 set(_expected_v44_Validator.hpp  ad49a4ec2d2441e6d15181b48fa42ab30d9a2226d41476bfdd9007f5d942e9c0)
 set(_expected_v50sp2_Fields.hpp    c8b224285b5617b8a29ec8c79fa5478ee9de6e6910cae37dd2fa43a10e66bd9c)  # 091 (banner)
-set(_expected_v50sp2_Messages.hpp  206f56d119be8fb096d753ab681a72c76d2ef3310908d8e8340f43ca112b5971)  # fixpp#426 (banner)
+set(_expected_v50sp2_Messages.hpp  954ae63e397745d5a58a537ef17485a6bc5317ff930c337ff3c0520f8646fe72)  # 100 (banner)
 set(_expected_v50sp2_Reify.hpp     c73e5253cfe5617565df979eeb71d8b5bd5e62a9b2e379b4f8a7f2a350f6cd36)
 set(_expected_v50sp2_Validator.hpp c68b15b6c075c271144f7a5b725237bac211880e88a91575708eb99ae90c0c9f)  # 091 (banner)
 set(_expected_vt11_Fields.hpp    bb3b72ac99d067fc560bea7edeccd286ce952b758fe5735e7f88c2c259384292)  # 099 (banner)

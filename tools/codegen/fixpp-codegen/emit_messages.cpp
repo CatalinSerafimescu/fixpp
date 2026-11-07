@@ -276,7 +276,8 @@ void emit_group_class(TemplateWriter& w, VersionIR const& ir, MemberMap const& m
             // push happens exactly once, here at mint; group_view::operator[] stays a verbatim
             // base_ctx_ copy (pushing there too would double-push). 073 T010: `r` is the
             // status-bearing `nested_slices_result` (contracts/nested_slices_result.md) —
-            // `r.alloc_failed` is threaded into the returned group_view so a typed caller can
+            // `r.status` (100: `group_read_status`, research D5) is threaded into the returned
+            // group_view so a typed caller can
             // distinguish a legitimately-empty group from a failed sub-view
             // allocation (D4).
             w.raw(
@@ -289,7 +290,7 @@ void emit_group_class(TemplateWriter& w, VersionIR const& ir, MemberMap const& m
                 ");\n      return "
                 "::fixpp::wire::group_view<");
             w.raw(group_cls(c));
-            w.raw(">{r.slices, child_ctx, r.alloc_failed}; }");
+            w.raw(">{r.slices, child_ctx, r.status}; }");
             w.line();
         }
     }

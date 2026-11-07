@@ -2,6 +2,8 @@
 // src/wire/offset_table.cpp — [2b §6.2] OffsetTable eager build + open-address
 // robin-hood overlay + lazy group sub-index. All storage from the captured
 // per-message memory_resource; DoS caps enforced with bounded memory.
+// 100-wire-group-read-integrity: group reads report a `group_read_status` and
+// `is_group` (research D3, D5), superseding 073's `alloc_failed` result field.
 
 #include <algorithm>
 #include <atomic>
@@ -655,7 +657,7 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
     // next group is materialized.
     for (auto const& gs : group_index_) {
         if (gs.no_tag == no_tag) {
-            return {.slices = {gs.data, gs.count}, .alloc_failed = false};
+            return {.slices = {gs.data, gs.count}, .status = group_read_status::ok};
         }
     }
     try {
@@ -861,13 +863,14 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
         }
         // The row is trivially copyable, so `group_index_` reallocation memcpys
         // it and the arena buffer it points at never moves.
-        group_index_.push_back(group_span{.data = slices, .count = n_written, .no_tag = no_tag});
-        return {.slices = {slices, n_written}, .alloc_failed = false};
+        group_index_.push_back(
+            group_span{.data = slices, .count = n_written, .no_tag = no_tag, .is_group = false});
+        return {.slices = {slices, n_written}, .status = group_read_status::ok};
     } catch (std::bad_alloc const&) {
         // 073 T003: this is the mode-(b) origin (FR-002) — the sub-table
         // built non-null but its own slice materialization exhausted the
         // arena. Degrade to "no instances", never throw (noexcept).
-        return {.slices = {}, .alloc_failed = true};
+        return {.slices = {}, .status = group_read_status::alloc_failed};
     }
 }
 
@@ -926,13 +929,16 @@ OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_
 static nested_slices_result resolve_nested_result(OffsetTable const* table,
                                                   std::uint16_t nested_no_tag) noexcept {
     if (table == nullptr) {
-        return nested_slices_result{.slices = {}, .alloc_failed = true};  // mode (a)
+        return nested_slices_result{.slices = {},
+                                    .status = group_read_status::alloc_failed};  // mode (a)
     }
     bool const sub_build_oom =  // mode (c)
         !table->build_status() && table->build_status().error() == core::error::out_of_memory;
     auto const s = table->group_slices_status(nested_no_tag);  // mode (b)
-    return nested_slices_result{.slices = s.slices,
-                                .alloc_failed = s.alloc_failed || sub_build_oom};
+    bool const failed = s.status == group_read_status::alloc_failed || sub_build_oom;
+    return nested_slices_result{
+        .slices = s.slices,
+        .status = failed ? group_read_status::alloc_failed : group_read_status::ok};
 }
 
 // 062 T006: single flat nested-subview cache (see offset_table.hpp for the
@@ -947,7 +953,8 @@ nested_slices_result OffsetTable::nested_group_slices(std::byte const* slice_dat
                                                       detail::generation_token gen,
                                                       group_context const& ctx) const noexcept {
     if (slice_data == nullptr) {
-        return nested_slices_result{.slices = {}, .alloc_failed = false};  // absent, not a failure
+        return nested_slices_result{.slices = {},
+                                    .status = group_read_status::ok};  // absent, not a failure
     }
     // Zero-length, alloc-free liveness check ([2b §6.4] INV-G6): the cache
     // scan below can return on a WARM (slice_data, bundle, nested_no_tag) hit
@@ -992,7 +999,7 @@ nested_slices_result OffsetTable::nested_group_slices(std::byte const* slice_dat
             // the function-scope local `table` — the local is still nullptr
             // for a same-no_tag match (only assigned from `row.table` in the
             // `!found_slice` branch below, which does not run for a matching
-            // row). Using the local here would report alloc_failed=true on
+            // row). Using the local here would report alloc_failed on
             // every warm cache-hit of a healthy group (FR-006/FR-007
             // violation). All three origins are OR'd inside resolve_nested_result.
             return resolve_nested_result(row.table, nested_no_tag);

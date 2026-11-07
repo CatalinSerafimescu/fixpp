@@ -8,6 +8,9 @@
 // per-message memory_resource. DoS caps: wire_offset_table_full (>4096 occ),
 // wire_tag_out_of_range, wire_group_too_large — bounded memory, no
 // unbounded growth ([2b §1.2]).
+// 100-wire-group-read-integrity: the group read results carry a
+// `group_read_status` and an `is_group` flag (research D3, D5), superseding
+// 073's `alloc_failed` field of `nested_slices_result` and `group_slices_result`.
 
 #include <array>
 #include <cstddef>
@@ -44,10 +47,18 @@ inline constexpr std::size_t default_max_group_entries_per_instance = 4096;
 // includes group_view.hpp for the complete type where it is actually constructed/consumed.
 struct group_context;
 
+// 100 (data-model `group_read_status`, research D5): why a group read did not
+// complete. A read ends at its first failure, so it carries exactly one status.
+//   ok             — the read completed (a group with its instances, a group with
+//                    zero instances, a not-a-group answer, or an absent tag);
+//   alloc_failed   — a `bad_alloc` was caught while reading;
+//   limit_exceeded — a group wire limit stopped the read.
+enum class group_read_status : std::uint8_t { ok, alloc_failed, limit_exceeded };
+
 // 073 T002: status-bearing return of both `nested_group_slices` overloads
 // (data-model.md §"nested_slices_result"; contracts/nested_slices_result.md).
-// `alloc_failed == true` iff a sub-view allocation failed via any of THREE
-// origins (research.md §D2, extended per
+// `status == group_read_status::alloc_failed` iff a sub-view allocation failed
+// via any of THREE origins (research.md §D2, extended per
 // feedback_status_origin_must_cover_all_alloc_catch_sites): (a) the
 // sub-OffsetTable shell allocation failed (`build_nested_subview` -> nullptr),
 // (b) the sub-table built non-null but its own `group_slices_status()` caught
@@ -58,11 +69,15 @@ struct group_context;
 // `table->build_status()` explicitly at both resolution exits (mode (c) is
 // otherwise silently indistinguishable from a legitimately absent/count-0
 // group, since a degraded table's `group()` call returns without throwing).
-// Trivially copyable (span + bool) — zero-alloc wire-read discipline
+// Trivially copyable (span + status + flag) — zero-alloc wire-read discipline
 // preserved.
+// 100: `status` replaces 073's `bool alloc_failed` (`alloc_failed == true` is
+// `status == group_read_status::alloc_failed`); `is_group` reports whether the
+// read established the tag as a group (data-model `nested_slices_result`).
 struct nested_slices_result {
     std::span<group_slice const> slices;
-    bool alloc_failed = false;
+    group_read_status status = group_read_status::ok;
+    bool is_group = false;
 };
 static_assert(std::is_trivially_copyable_v<nested_slices_result>);
 
@@ -72,9 +87,12 @@ static_assert(std::is_trivially_copyable_v<nested_slices_result>);
 // `group_slices(no_tag)` stays a span-returning one-line wrapper so every
 // top-level caller (C-ABI top-level group getter, `MessageView::group<>()`)
 // is unaffected (L-073-1, deferred).
+// 100: `status` and `is_group` as in `nested_slices_result` above
+// (data-model `group_slices_result`).
 struct group_slices_result {
     std::span<group_slice const> slices;
-    bool alloc_failed = false;
+    group_read_status status = group_read_status::ok;
+    bool is_group = false;
 };
 static_assert(std::is_trivially_copyable_v<group_slices_result>);
 
@@ -282,9 +300,9 @@ public:
     // 073 T002/T003: INTERNAL status-bearing form of group_slices() above
     // (data-model.md §"Internal group_slices_result"; research.md §D2 mode
     // (b), FR-002). Only `nested_group_slices` consumes this. Sets
-    // `alloc_failed = true` in the `catch (std::bad_alloc)` degrade path;
-    // `false` on a warm cache hit or a genuine (possibly count-0) materialized
-    // span. The public `group_slices()` above is unchanged and is a one-line
+    // `status = group_read_status::alloc_failed` in the `catch (std::bad_alloc)`
+    // degrade path; `ok` on a warm cache hit or a genuine (possibly count-0)
+    // materialized span. The public `group_slices()` above is unchanged and is a one-line
     // wrapper: `return group_slices_status(no_tag).slices;`.
     [[nodiscard]] group_slices_result group_slices_status(std::uint16_t no_tag) const noexcept
         [[clang::lifetimebound]];
@@ -511,6 +529,9 @@ private:
         group_slice const* data;  // arena-allocated, exactly `count` entries
         std::uint32_t count;
         std::uint16_t no_tag;
+        // 100 (research D3, data-model `group_span`): cached with the row so a
+        // repeat read answers as the first did; fits the existing padding.
+        bool is_group;
     };
     static_assert(std::is_trivially_copyable_v<group_span>,
                   "group_index_ reallocation must be a memcpy: a non-trivial member would "

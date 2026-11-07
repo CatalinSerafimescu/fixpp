@@ -321,9 +321,9 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg2Insta
 
     auto const res = mv->offsets().group_slices_status(100);
     // Guard the attribution: a bad_alloc degrade returns an EMPTY span with
-    // alloc_failed set (`group_slices_result::alloc_failed`). Without this, an arena
+    // `group_slices_result::status == group_read_status::alloc_failed`. Without this, an arena
     // exhaustion would read as "0 slices" and be misattributed to C-8.0c.
-    ASSERT_FALSE(res.alloc_failed)
+    ASSERT_FALSE(res.status == fixpp::wire::group_read_status::alloc_failed)
         << "group_slices_status degraded on allocation — this case's slice count would be "
            "measuring the arena, not the extent walk.";
 
@@ -364,7 +364,8 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg2OneIn
     ASSERT_TRUE(mv.has_value()) << "parser.parse failed";
 
     auto const res = mv->offsets().group_slices_status(100);
-    ASSERT_FALSE(res.alloc_failed) << "group_slices_status degraded on allocation";
+    ASSERT_FALSE(res.status == fixpp::wire::group_read_status::alloc_failed)
+        << "group_slices_status degraded on allocation";
 
     ASSERT_EQ(res.slices.size(), 1U)
         << "W-10a leg 2 regression guard: the ONE-instance form must still yield exactly one "
@@ -453,7 +454,8 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg3Valid
     ASSERT_TRUE(mv.has_value()) << "parser.parse failed";
 
     auto const res = mv->offsets().group_slices_status(100);
-    ASSERT_FALSE(res.alloc_failed) << "group_slices_status degraded on allocation";
+    ASSERT_FALSE(res.status == fixpp::wire::group_read_status::alloc_failed)
+        << "group_slices_status degraded on allocation";
 
     constexpr std::size_t kValidatedInstanceCount = 2;
     ASSERT_EQ(res.slices.size(), kValidatedInstanceCount)
@@ -499,7 +501,8 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Populated
     ASSERT_TRUE(mv.has_value()) << "parser.parse failed";
 
     auto const res = mv->offsets().group_slices_status(100);
-    ASSERT_FALSE(res.alloc_failed) << "group_slices_status degraded on allocation";
+    ASSERT_FALSE(res.status == fixpp::wire::group_read_status::alloc_failed)
+        << "group_slices_status degraded on allocation";
 
     ASSERT_EQ(res.slices.size(), 2U)
         << "W-10a legs 2/3 on a loader-produced dictionary: the descent must fire on the member "
@@ -1010,8 +1013,10 @@ TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
     // ── CHANGED probe: the split ────────────────────────────────────────────
     auto const post_res = post.group_slices_status(100);
     auto const pre_res = pre.group_slices_status(100);
-    ASSERT_FALSE(post_res.alloc_failed) << "post-083 splitter degraded on allocation";
-    ASSERT_FALSE(pre_res.alloc_failed) << "oracle splitter degraded on allocation";
+    ASSERT_FALSE(post_res.status == fixpp::wire::group_read_status::alloc_failed)
+        << "post-083 splitter degraded on allocation";
+    ASSERT_FALSE(pre_res.status == fixpp::wire::group_read_status::alloc_failed)
+        << "oracle splitter degraded on allocation";
 
     // Hand-derived from the fixture's bytes, NEVER captured. Pre-083 splits on
     // the wire's first tag (201): two instances. Post-083 splits on E's

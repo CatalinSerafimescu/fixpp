@@ -177,13 +177,14 @@ TEST(NestedGroupSlicesFailLoud, PresentNestedGroup_ArenaExhausted_ReportsFailLou
     auto const slice = outer[0];
 
     auto const r1 = offsets.nested_group_slices(slice.data, slice.len, kInnerNoTag, kTestCtx);
-    EXPECT_TRUE(r1.alloc_failed) << "read #1";
+    EXPECT_TRUE(r1.status == fixpp::wire::group_read_status::alloc_failed) << "read #1";
     EXPECT_TRUE(r1.slices.empty()) << "read #1";
 
     // Repeated-read (D2 cache-hit exit discriminator): the cached row must
     // fail loud again, not silently degrade to empty-without-signal.
     auto const r2 = offsets.nested_group_slices(slice.data, slice.len, kInnerNoTag, kTestCtx);
-    EXPECT_TRUE(r2.alloc_failed) << "read #2 (cache-hit exit)";
+    EXPECT_TRUE(r2.status == fixpp::wire::group_read_status::alloc_failed)
+        << "read #2 (cache-hit exit)";
     EXPECT_TRUE(r2.slices.empty()) << "read #2 (cache-hit exit)";
 
     // Soft introspection tally (NOT a hard precondition -- mode (a),
@@ -197,10 +198,11 @@ TEST(NestedGroupSlicesFailLoud, PresentNestedGroup_ArenaExhausted_ReportsFailLou
     if (sub != nullptr) {
         bool const ctor_oom = !sub->build_status() &&
                               sub->build_status().error() == fixpp::core::error::out_of_memory;
-        bool const slices_throw = sub->group_slices_status(kInnerNoTag).alloc_failed;
+        bool const slices_throw = sub->group_slices_status(kInnerNoTag).status ==
+                                  fixpp::wire::group_read_status::alloc_failed;
         EXPECT_TRUE(ctor_oom || slices_throw)
             << "sub-table built non-null but neither build_status()==out_of_memory nor "
-               "group_slices_status().alloc_failed -- kFailCap landed outside the intended "
+               "group_slices_status().status -- kFailCap landed outside the intended "
                "mode (b)/(c) band; re-derive against T006's fixture";
     }
 }
@@ -225,7 +227,7 @@ TEST(NestedGroupSlicesFailLoud, PresentNestedGroup_AmpleArena_ReturnsAllInstance
     auto const slice = outer[0];
 
     auto const r = offsets.nested_group_slices(slice.data, slice.len, kInnerNoTag, kTestCtx);
-    EXPECT_FALSE(r.alloc_failed);
+    EXPECT_FALSE(r.status == fixpp::wire::group_read_status::alloc_failed);
     EXPECT_EQ(r.slices.size(), static_cast<std::size_t>(kInnerInstances));
 }
 
@@ -243,7 +245,7 @@ TEST(NestedGroupSlicesFailLoud, ControlAbsentSliceDataNullNeverFails) {
     auto const& offsets = mv_res->offsets();
 
     auto const r = offsets.nested_group_slices(nullptr, 0, kInnerNoTag, kTestCtx);
-    EXPECT_FALSE(r.alloc_failed);
+    EXPECT_FALSE(r.status == fixpp::wire::group_read_status::alloc_failed);
     EXPECT_TRUE(r.slices.empty());
 }
 
@@ -274,8 +276,9 @@ TEST(NestedGroupSlicesFailLoud, ControlGenuineCountZeroNonNullOkNeverFails) {
         offsets, slice.data, fixpp::wire::dict_hooks::for_table_view(dict), kInnerNoTag);
     ASSERT_NE(sub, nullptr);
     ASSERT_TRUE(sub->build_status());
-    EXPECT_FALSE(sub->group_slices_status(kInnerNoTag).alloc_failed);
+    EXPECT_FALSE(sub->group_slices_status(kInnerNoTag).status ==
+                 fixpp::wire::group_read_status::alloc_failed);
 
-    EXPECT_FALSE(r.alloc_failed);
+    EXPECT_FALSE(r.status == fixpp::wire::group_read_status::alloc_failed);
     EXPECT_TRUE(r.slices.empty());
 }

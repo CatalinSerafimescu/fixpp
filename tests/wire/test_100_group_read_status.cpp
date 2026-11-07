@@ -2,7 +2,8 @@
 // tests/wire/test_100_group_read_status.cpp — 100-wire-group-read-integrity, tasks T015 (US2;
 // FR-004, FR-007; research D10, D11): the wire layer's group read results,
 // `OffsetTable::group_slices_status` and `OffsetTable::nested_group_slices`, on an exhausted
-// arena, read through today's result field `alloc_failed`.
+// arena, read through the results' `status` field: `status == group_read_status::alloc_failed`
+// is what 073's `alloc_failed` field reported.
 //
 // Construction (as tests/capi/test_100_group_getters.cpp's T012 cells): a
 // `test100::stepped_arena` (a fixed buffer as a monotonic_buffer_resource over
@@ -106,7 +107,7 @@ bool no_setup(view_t const& /*mv*/, std::optional<fixpp::wire::group_slice>& /*o
 auto outer_setup(std::uint16_t outer_tag, std::size_t i) {
     return [outer_tag, i](view_t const& mv, std::optional<fixpp::wire::group_slice>& outer) {
         auto const r = mv.offsets().group_slices_status(outer_tag);
-        if (r.alloc_failed || r.slices.size() <= i) {
+        if (r.status == fixpp::wire::group_read_status::alloc_failed || r.slices.size() <= i) {
             return false;
         }
         outer = r.slices[i];
@@ -116,16 +117,16 @@ auto outer_setup(std::uint16_t outer_tag, std::size_t i) {
 auto flat_read(std::uint16_t tag) {
     return [tag](view_t const& mv, std::optional<fixpp::wire::group_slice> const& /*outer*/) {
         auto const r = mv.offsets().group_slices_status(tag);
-        return wire_read{r.alloc_failed, r.slices.size()};
+        return wire_read{r.status == fixpp::wire::group_read_status::alloc_failed, r.slices.size()};
     };
 }
 auto nested_read(std::uint16_t outer_tag, std::uint16_t tag) {
-    return
-        [outer_tag, tag](view_t const& mv, std::optional<fixpp::wire::group_slice> const& outer) {
-            auto const ctx = mv.offsets().group_context_for(outer_tag);
-            auto const r = mv.offsets().nested_group_slices(outer->data, outer->len, tag, ctx);
-            return wire_read{r.alloc_failed, r.slices.size()};
-        };
+    return [outer_tag, tag](view_t const& mv,
+                            std::optional<fixpp::wire::group_slice> const& outer) {
+        auto const ctx = mv.offsets().group_context_for(outer_tag);
+        auto const r = mv.offsets().nested_group_slices(outer->data, outer->len, tag, ctx);
+        return wire_read{r.status == fixpp::wire::group_read_status::alloc_failed, r.slices.size()};
+    };
 }
 
 // At every room whose first failure is `kind`, both reads report `alloc_failed == want_failed`
@@ -261,7 +262,7 @@ wire_read d7_nested(std::uint16_t tag) {
     auto const ctx = mv->offsets().group_context_for(453);
     auto const r =
         mv->offsets().nested_group_slices(outer.slices[0].data, outer.slices[0].len, tag, ctx);
-    return {r.alloc_failed, r.slices.size()};
+    return {r.status == fixpp::wire::group_read_status::alloc_failed, r.slices.size()};
 }
 TEST(GroupReadStatus100, D11_NestedAbsentD7_NotFailed) {
     auto const r = d7_nested(9000);

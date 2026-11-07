@@ -564,7 +564,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
     // sub-mode, contracts/nested_slices_result.md) is fail-loud, distinct from
     // legitimately absent/count-0 — reported BEFORE the presence probe below
     // so it is never mistaken for TAG_NOT_FOUND.
-    if (r.alloc_failed) return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
+    if (r.status == fixpp::wire::group_read_status::alloc_failed)
+        return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
 
     auto slices = r.slices;
     if (slices.empty()) {

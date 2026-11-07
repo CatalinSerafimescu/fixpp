@@ -477,7 +477,7 @@ classified classify_group_member(std::string_view ret, std::string_view name,
                   "ctx_.group_ctx);\n"
                   "::fixpp::wire::entry_context child_ctx = ctx_;\n"
                   "child_ctx.group_ctx = ctx_.group_ctx.pushed(@N);\n"
-                  "return ::fixpp::wire::group_view<G_@N>{r.slices, child_ctx, r.alloc_failed}; }",
+                  "return ::fixpp::wire::group_view<G_@N>{r.slices, child_ctx, r.status}; }",
                   body, c) &&
             all_equal(c.nums)) {
             return {kind::nested, c.nums.front(), n.ids.front(), vkind::group};
@@ -1230,7 +1230,7 @@ namespace fixpp::vx::groups {  // shared repeating-group flyweights (AC-G5/AC-G6
       auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(539);
-      return ::fixpp::wire::group_view<G_539>{r.slices, child_ctx, r.alloc_failed}; }
+      return ::fixpp::wire::group_view<G_539>{r.slices, child_ctx, r.status}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
     { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
