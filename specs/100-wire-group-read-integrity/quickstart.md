@@ -52,7 +52,9 @@ MSVC: build the touched test targets on the sandbox (`.sandbox-lock` first) befo
 File each against fixpp with labels from `gh label list`, and name the issue in the verify record.
 
 - **Dictionary layer: one count tag with two definitions at one context key** (Gate A round 5, N5-1; research D2,
-  "Per-occurrence records"). The conditions:
+  "Per-occurrence records"; disclosed by owner ruling, 2026-11-07, as plan Phase 6's L-row). Custom dictionaries only;
+  shipped dictionaries reach none of these (census scripts in the parent repo's `research/reviews/scripts_100_gate_a/`).
+  The conditions:
   - In a declared message, one count tag in the body and in the trailer at the same parent path shares one key.
     `group_ctx_delim_less` leaves the delimiter out of the key. `flush_group_ctx_delims` keeps one capture after an
     unstable `std::ranges::sort` and `unique`, so which delimiter survives is unspecified. `group_ctx_`'s members for
@@ -64,7 +66,10 @@ File each against fixpp with labels from `gh label list`, and name the issue in 
     `group_ctx_` key whose members are the union of both definitions, so overlapping member sets merge or mis-split
     instances.
   - In the same issue: one count tag with two definitions at one section key `(parent_path, no_tag)`. The section
-    record keeps the first walked definition, so in an undeclared type the other occurrence reads `OK`/0.
+    record keeps the first walked definition (header and trailer both at the root, or two header components at one
+    level), so in an undeclared type the other occurrence reads `OK`/0 where `fa778a8e` answers `TYPE_MISMATCH`.
+  - In the same issue: the validator keeps its bare fallback on a context miss, so at these keys strict validation can
+    disagree with a read that now returns a cursor.
   - QuickFIX C++ keeps the definitions apart (`_header_`, `_trailer_`, a group `DataDictionary` per occurrence).
   - Candidate fixes: refuse the shape at `flush_group_ctx_delims` and at the section walk, with the definition in the
     comparison so a differing delimiter or member set is a clash; or carry a section discriminator and build

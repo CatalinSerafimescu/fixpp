@@ -152,10 +152,21 @@ binaries.
      group read in a context its dictionary does not declare (`TYPE_MISMATCH`, was a group through the bare fallback;
      QuickFIX `getGroup`), marked BREAKING; a B-row for a group read at its occurrence's own definition where the
      dictionary defines the count tag differently elsewhere (a cursor, was `TYPE_MISMATCH` or lost instances), marked
-     BREAKING, and an L-row for the shapes research D2 "Per-occurrence records" does not fix (a declared message's
-     second parent, the union at a count tag's one `group_ctx_` key, N5-1's shared key, a shared section key, the
-     validator's bare fallback); and the C++ source change of D5 (the result structs' `alloc_failed` field
-     renamed to `status`).
+     BREAKING; an L-row, disclosed by owner ruling (2026-11-07), for the custom-dictionary shapes research D2
+     "Per-occurrence records" does not fix, each named as a condition (shipped dictionaries reach none; Gate A closing
+     entry):
+     - a declared message that reaches a count tag under two parents: the second parent's `group_ctx_` members lack
+       the nested count tag;
+     - a count tag a declared message reaches at two occurrences with different definitions: its one `group_ctx_` key
+       holds the union of both member sets, so overlapping member sets merge or mis-split instances;
+     - one count tag in the body and the trailer of one declared message at one parent path (N5-1): one `group_ctx_`
+       key, members the union of both definitions, delimiter whichever capture `flush_group_ctx_delims` kept;
+     - one count tag with two definitions at one section key `(parent_path, no_tag)` (header and trailer both at the
+       root, or two header components at one level): the first walked definition wins, and in an undeclared MsgType a
+       read of the other occurrence ends `OK`/0 where `fa778a8e` answers `TYPE_MISMATCH`;
+     - the validator keeps its bare fallback on a context miss, so at these keys strict validation can disagree with a
+       read that now returns a cursor;
+     and the C++ source change of D5 (the result structs' `alloc_failed` field renamed to `status`).
    - 093 contract C-3 I-1, I-4 and I-5 (the "C cursor shells are the exception" clause) amended in place, naming 100.
    - `.specify/2i-capi.md`: §4.8 / CA-010 endings; §5.2, §5.4 and §6.2's steady-state exception text for the two
      getters.
@@ -180,13 +191,16 @@ binaries.
 
 ## Gate A
 
-Open items carried into Gate A round 1, with their dispositions:
+Items carried into Gate A round 1, with their dispositions and final verdicts:
 
 1. D2's oracle → the registration predicate (context record, or none anywhere plus bare registration); neither the
-   delimiter oracle with its fallback nor `group_first_field_exact` alone.
-2. D5's scope → approved; `read_failed()` beside an unchanged `alloc_failed()`, via a status enum.
-3. D8 → 1.15 BREAKING confirmed; population widened to the session observers.
-4. D9 #645 inbound cell → required: a real session cell with the window-cluster frame under the seed hook.
+   delimiter oracle with its fallback nor `group_first_field_exact` alone. Verdict: approved by owner ruling
+   (2026-11-07) with disclosed residuals (closing entry below).
+2. D5's scope → approved; `read_failed()` beside an unchanged `alloc_failed()`, via a status enum. Verdict: approved by
+   Codex round 3.
+3. D8 → 1.15 BREAKING confirmed; population widened to the session observers. Verdict: approved by Codex round 3.
+4. D9 #645 inbound cell → required: a real session cell with the window-cluster frame under the seed hook. Verdict:
+   approved by Codex round 3.
 
 - Round 1 applied 2026-11-07: Codex P1=4 P2=6 P3=2; Opus post-judging P1=5 P2=10 P3=6; rewrite addresses root causes
   #1 (group-ness as one context-exact predicate: D2, D3, contract rows 3–4, FR-001–FR-003), #2 (cache records only
@@ -225,7 +239,13 @@ Open items carried into Gate A round 1, with their dispositions:
   - N5-1 is a follow-up issue in quickstart. N5-2: US1.10 and D9 (iii) and (iii-O) name the nested getter.
   - Reviews: research/reviews/codex_100-wire-group-read-integrity_gate_a_5_review.md, research/reviews/opus_100-wire-group-read-integrity_gate_a_5_adversarial_review.md.
   - Two of the judge's cost claims were corrected against source. A miss costs up to two extra probes, not one. Misses also happen inside declared-message reads, through `consume_one`'s per-member membership query, not only in undeclared types and at arm-1 second paths.
-  - Open, for the owner or the Codex round: one count tag with two definitions at one section key. In an undeclared type, 100's step 5 still turns `TYPE_MISMATCH` into `OK`/0 there (research D2, "Not fixed, and not pre-existing in its ending").
+  - Disclosed residual (owner ruling, 2026-11-07; was logged here as unresolved): one count tag with two divergent definitions at one section key `(parent_path, no_tag)`, the header and the trailer both at the root, or two header components at one level. The first walked definition wins, so in an undeclared MsgType a read of the other occurrence ends `OK`/0 where `fa778a8e` answers `TYPE_MISMATCH` (research D2, "Not fixed, and not pre-existing in its ending"). It is a condition of Phase 6's L-row and of quickstart's follow-up issue.
+- Gate A closed by owner ruling (2026-11-07) after round 5 / hand-edit 3; no round 6. D2 approved by owner ruling with disclosed residuals; D5, D8 and D9 approved by Codex round 3. The custom-dictionary shapes research D2 lists under "What it does not fix" and "Not fixed, and not pre-existing in its ending" are disclosed limitations (Phase 6's L-row) plus one follow-up issue (quickstart, "Issues to file"), not further design work. Shipped dictionaries reach none of them; the census scripts that check this are in the parent repo's `research/reviews/scripts_100_gate_a/`. Review files, in `research/reviews/` (parent repo):
+  - `codex_100-wire-group-read-integrity_gate_a_review.md`, `opus_100-wire-group-read-integrity_gate_a_adversarial_review.md` (round 1);
+  - `codex_100-wire-group-read-integrity_gate_a_2_review.md`, `opus_100-wire-group-read-integrity_gate_a_2_adversarial_review.md` (round 2);
+  - `codex_100-wire-group-read-integrity_gate_a_3_review.md`, `opus_100-wire-group-read-integrity_gate_a_3_adversarial_review.md` (round 3);
+  - `opus_100-wire-group-read-integrity_gate_a_4_confirmation_review.md` (round 4);
+  - `codex_100-wire-group-read-integrity_gate_a_5_review.md`, `opus_100-wire-group-read-integrity_gate_a_5_adversarial_review.md` (round 5).
 
 ### Round 1 — disagreements
 
