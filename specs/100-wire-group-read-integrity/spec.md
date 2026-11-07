@@ -199,10 +199,16 @@ body field (followed only by CheckSum), and read the group through each read pat
 9. **Given** a body group's count tag in a message whose dictionary entry does not declare that group (for example
    NoPartyIDs(453) in a declared message without Parties), or in a message type the dictionary does not declare,
    **When** the flat getter is called, **Then** `TYPE_MISMATCH`, whatever its value.
-10. **Given** a header or trailer group, or a group nested in one (for example NoHops(627) in a FIX 4.3, FIX 4.4 or
-    FIXT 1.1 frame), in a message type the dictionary does not declare, **When** the flat getter is called, **Then** it
-    reads as a group: with n ≥ 1 instances, `OK` with a cursor, as today (control); with count 0, `OK`/0, as
-    scenario 1 (research D9 (ii-0), (ii-0h)).
+10. **Given** a header or trailer group (for example NoHops(627) in a FIX 4.3, FIX 4.4 or FIXT 1.1 frame), or a group
+    nested in one, in a message type the dictionary does not declare, **When** the flat getter is called for the
+    top-level group, or the nested getter for a group nested in one (read from its parent's instance), **Then** it reads
+    as a group at its own occurrence's definition (research D2, "Per-occurrence records"): with n ≥ 1 instances, `OK`
+    with a cursor of n instances split at that definition's delimiter; with count 0, `OK`/0, as scenario 1 (research D9
+    (ii-0), (ii-0h)). Where the definition read is the one the dictionary's bare store holds for that count tag, the
+    n ≥ 1 read is a control, a cursor on `fa778a8e` too. Where the dictionary defines the count tag differently
+    elsewhere, `fa778a8e` answers `TYPE_MISMATCH` or loses the instances (research D9, divergent definitions; contract
+    "Changes from 1.14"). *(The scenario read "the flat getter is called … with n ≥ 1 instances, `OK` with a cursor,
+    as today (control)": superseded by Gate A round 5 → hand-edit 3 (owner, 2026-11-07).)*
 11. **Given** any frame of scenarios 1 to 3, or a scalar of scenario 4, **When** the same read is made a second time on
     either path, **Then** the second answer is the first one.
 
@@ -269,6 +275,9 @@ parse it; separately parse frames of many distinct, non-consecutive tags that to
   (fixpp#220 declines them), so only the index arm applies.
 - A group read in a context the dictionary does not declare (US1.9, US1.10): a body group is not a group there; a header
   or trailer group, or a group nested in one, is, at its path inside its section.
+- A count tag the dictionary defines differently at two places (custom dictionaries only; the loaders accept it): each
+  registered key reads at its own occurrence's definition (research D2, "Per-occurrence records"), which lists the
+  shapes it does not fix.
 
 ## Requirements *(mandatory)*
 
@@ -335,9 +344,9 @@ parse it; separately parse frames of many distinct, non-consecutive tags that to
 - **SC-001**: Every cell named in the acceptance scenarios and in the contract's "Changes from 1.14" is RED on
   `fa778a8e` where today's behaviour differs (US1.1, US1.2, US1.4's nested scalar mid-instance and last in instance,
   US1.7, US1.8 and US1.9 with `n ≥ 1`, US1.11's twins of those cells, US2.1, US2.2, US2.3, US2.5, US2.6, US3.1, US3.2's
-  per-insert-cap frame, and research D9's section-arm cells (i-a), (ii-0), (ii-0h) and (ii-0-O)) and GREEN on the feature head; the control
+  per-insert-cap frame, research D9's section-arm cells (i-a), (ii-0), (ii-0h) and (ii-0-O), and research D9's divergent-definition cells other than their controls) and GREEN on the feature head; the control
   cells (including US1.3, which today's nested getter already answers `OK`/0 through its presence probe, US1.10 with
-  n ≥ 1, and research D9's section-arm cells (i-b), (i-c), (ii), (iii), (iv), (v), (ii-O) and (iii-O), each proven live by its mutant) are GREEN on
+  n ≥ 1 where the definition read is the bare store's, research D9's section-arm cells (i-b), (i-c), (ii), (iii), (iv), (v), (ii-O) and (iii-O), and the divergent-definition controls, each proven live by its mutant) are GREEN on
   both. The verify record names, per cell, the lanes on which it shows RED and those on
   which it skips (the arena-exhaustion cells assert only where the arena's upstream is null; MSVC debug forwards to the
   heap).
@@ -358,8 +367,10 @@ parse it; separately parse frames of many distinct, non-consecutive tags that to
   `table_view`, set wherever a context key is created, and one `dict_hooks` callback that asks it. `table_view::group_bit`
   is set by the bare and the `_ctx` setters alike, so it cannot answer the bare-only arm. The section arm reads a new
   MsgType-free section-group store, recorded by the loaders (research D2). Arm 1 reads a registration-only key set
-  filled from the per-message delimiter records (research D2; Gate A round 4 hand-edit (owner, 2026-11-07)). The callback grows `dict_hooks` and every by-value holder of it, including
-  `OffsetTable`; the census is in research.md.
+  filled from the per-message delimiter records (research D2; Gate A round 4 hand-edit (owner, 2026-11-07)). Each key of arm 1's set and of the section store carries its
+  occurrence's delimiter and direct members, which only the wire membership and delimiter lookups read (research D2,
+  "Per-occurrence records"; Gate A round 5 → hand-edit 3 (owner, 2026-11-07)). The callback grows `dict_hooks` and
+  every by-value holder of it, including `OffsetTable`; the records grow neither. The census is in research.md.
 - The crafted probe-budget frame can be built deterministically for a known table seed in a test; the production seed
   is not weakened to make the test possible.
 - Typed C++ group views have no "present" notion today; for FR-002 on the typed path, present-with-zero and absent both

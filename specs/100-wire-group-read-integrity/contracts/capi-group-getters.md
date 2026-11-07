@@ -62,6 +62,14 @@ Each is witnessed RED on `fa778a8e` (research D9).
 - Nested getter, row 3, a present tag in an instance whose sub-table build failed for another reason (073's
   malformed-data degradation): was `OK`/0. Whether a sub-table built over bytes the root already parsed, with the same
   bundle, can reach this arm is determined in the RED phase; if it cannot, the arm is defensive and says so.
+- Both getters, row 5, a registered group whose occurrence the dictionary defines differently from the definition its
+  bare store holds for that count tag (custom dictionaries only; research D2, "Per-occurrence records"): a header or
+  trailer group, or a group nested in one, read in a message type the dictionary does not declare, and a count tag a
+  declared message reaches at a second parent path, read at the path that has no `group_ctx_` key. Was
+  `TYPE_MISMATCH`, or a group whose instances were lost or mis-split (derived from source; the RED run confirms or
+  corrects it, research D9 divergent definitions). Now a cursor split at the occurrence's own definition, as QuickFIX
+  C++ reads it (`Message::setGroup` recurses with the group `DataDictionary` that `getGroup` returns). The shapes this
+  does not reach are listed in research D2. *(Added by Gate A round 5 → hand-edit 3 (owner, 2026-11-07).)*
 - Session observers (`include/fix/c_api/session.h`, the 1.11 clause "a frame the session admits always parses for
   dispatch"): a frame crafted against the index seed (research D1) now fails the parse and takes 092's late-parse
   terminal close.
@@ -72,11 +80,17 @@ Each is witnessed RED on `fa778a8e` (research D9).
 - The flat getter for CheckSum(10) (the root table's last entry): `TYPE_MISMATCH`.
 - A registered zero-count nested group (mid-instance or last): `OK`, count 0.
 - A header or trailer group, or a group nested in one, read in a message type the dictionary does not declare (for
-  example NoHops(627) in a FIX 4.3, FIX 4.4 or FIXT 1.1 frame): a group, as QuickFIX C++ reads it (research D2's
-  section arm); with n ≥ 1 instances, a cursor, as today. With count 0 it reads row 4, a change from 1.14 listed
-  above.
+  example NoHops(627) in a FIX 4.3, FIX 4.4 or FIXT 1.1 frame), where the occurrence's definition is the one the
+  dictionary's bare store holds for that count tag: a group, as QuickFIX C++ reads it (research D2's section arm);
+  with n ≥ 1 instances, a cursor, as on `fa778a8e`. With count 0 it reads row 4, and an occurrence defined
+  differently reads row 5 at its own definition: both are changes from 1.14 listed above.
 - A group count tag a declared message reaches at two parent paths, read at the message root when its surviving
-  occurrence is nested: a group, as today and as QuickFIX C++ reads it (research D2 arm 1).
+  occurrence is nested, where both paths share one definition (one component referenced twice, research D9 (iv)):
+  a group, with n ≥ 1 instances a cursor, as on `fa778a8e` and as QuickFIX C++ reads it (research D2 arm 1). Two
+  different definitions at the two paths read row 5 at the root's own definition, a change from 1.14 listed above.
+- *(The two bullets above read "with n ≥ 1 instances, a cursor, as today" and "a group, as today", which hold only
+  where the occurrence's definition is the bare store's: superseded by Gate A round 5 → hand-edit 3 (owner,
+  2026-11-07).)*
 - Error code values and names; no symbol added or removed.
 
 ## Typed C++ (`MessageView::group<>()`, generated group accessors)

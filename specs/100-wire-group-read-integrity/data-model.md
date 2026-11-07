@@ -61,15 +61,26 @@ including `wire_group_too_large`.
 
 - **New** per-tag bitset "has a context key", beside `group_bits_`, set wherever a `group_ctx_` key is created (all
   three `_ctx` setters, `add_group_required_member_ctx` included); built once with the table.
-- **New** registration-only `(msg_type, parent_path, no_tag)` set filled from the per-message delimiter records
-  (`msg_group_ctx_delims`), which arm 1 reads with the `group_ctx_` keys of a hand-built table (research D2). It creates
-  no `group_ctx_` key. *(Added by Gate A round 4 hand-edit (owner, 2026-11-07).)*
-- **New** MsgType-free set of `(parent_path, no_tag)` section-group keys, filled by a new
-  `table_view_builder::add_section_group(parent_path, no_tag)` that `as_table_view` calls from a new handle store
+- **New** registration-only `(msg_type, parent_path, no_tag)` store filled from the per-message delimiter records
+  (`msg_group_ctx_delims_impl`), which arm 1 reads with the `group_ctx_` keys of a hand-built table (research D2). It creates
+  no `group_ctx_` key. *(Added by Gate A round 4 hand-edit (owner, 2026-11-07).)* Each key holds its occurrence's
+  record (below); one store answers arm 1 and the record lookup. *(Gate A round 5 → hand-edit 3 (owner, 2026-11-07).)*
+- **New** MsgType-free store of `(parent_path, no_tag)` section-group keys, each holding its record (below), filled by a new
+  `table_view_builder::add_section_group(parent_path, no_tag, record)` that `as_table_view` calls from a new handle store
   (`dict_metadata_handle`, beside `header_tags_`); the loaders' header and trailer walks fill that store at every
   depth, once per (definition, enclosing path) (research D2; Gate A round 4 hand-edit (owner, 2026-11-07)). Built once with the table; no arena impact, since `table_view` is per dictionary. Section records do not set
   the "has a context key" bitset. The section arm (research D2) reads this store, not `is_header_tag` or `group_bit`.
 - **New** `noexcept` accessor answering the registration predicate; its arms are stated in research D2.
+- **New** per-occurrence record (research D2, "Per-occurrence records"; Gate A round 5 → hand-edit 3 (owner,
+  2026-11-07)): `{delimiter, direct members}`, the shape of `group_ctx_entry` without its required members. Arm-1
+  records take the delimiter from the occurrence's `GroupCtxDelim::delimiter` and the members from a capture beside
+  `DelimCapture` in both loaders, written by `flush_group_ctx_delims` to a handle store parallel to
+  `group_ctx_delim_pool_`. Section records come from the loaders' section walks. Built once with the table; no arena
+  impact.
+- **New** `noexcept` wire-side membership and delimiter accessors, called only by `dict_hooks::for_table_view`'s two
+  lambdas: the `group_bit` pre-filter, then the exact `group_ctx_` key, the arm-1 record, the section record, and the
+  bare store, in that order. `group_member_tags(msg_type, parent_path, no_tag)` and
+  `group_first_field(msg_type, parent_path, no_tag)`, which the validator calls, are unchanged.
 
 ## `dict_hooks` (`include/fixpp/wire/dict_hooks.hpp`)
 
@@ -77,6 +88,8 @@ including `wire_group_too_large`.
   filled by `for_table_view` from the accessor above. Null on `none()`. A dict-aware bundle with a null registration
   callback declines group reads as a dict-free one does.
 - Grows `sizeof(dict_hooks)` and every by-value holder of it; the holders and their recipe are in research.md's census.
+- The membership and delimiter callbacks keep their types; only `for_table_view`'s lambdas change (the record lookup
+  above), so the per-occurrence records add nothing to `sizeof(dict_hooks)`.
 
 ## `OffsetTable::build` status
 

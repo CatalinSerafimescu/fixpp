@@ -46,3 +46,28 @@ Lanes: the arena-exhaustion cells assert only where the arena's upstream is null
 record names, per cell, the lanes that showed RED and those that skipped.
 
 MSVC: build the touched test targets on the sandbox (`.sandbox-lock` first) before the first labelled push.
+
+## Issues to file
+
+File each against fixpp with labels from `gh label list`, and name the issue in the verify record.
+
+- **Dictionary layer: one count tag with two definitions at one context key** (Gate A round 5, N5-1; research D2,
+  "Per-occurrence records"). The conditions:
+  - In a declared message, one count tag in the body and in the trailer at the same parent path shares one key.
+    `group_ctx_delim_less` leaves the delimiter out of the key. `flush_group_ctx_delims` keeps one capture after an
+    unstable `std::ranges::sort` and `unique`, so which delimiter survives is unspecified. `group_ctx_`'s members for
+    the key are the union of both definitions. The flush's comment, which says such captures "agree by construction",
+    is false for this shape.
+  - In the same issue: a declared message that reaches a count tag under two parents loses the nested count tag from
+    the second parent's `group_ctx_` members.
+  - In the same issue: a count tag a declared message reaches at two occurrences with different definitions has one
+    `group_ctx_` key whose members are the union of both definitions, so overlapping member sets merge or mis-split
+    instances.
+  - In the same issue: one count tag with two definitions at one section key `(parent_path, no_tag)`. The section
+    record keeps the first walked definition, so in an undeclared type the other occurrence reads `OK`/0.
+  - QuickFIX C++ keeps the definitions apart (`_header_`, `_trailer_`, a group `DataDictionary` per occurrence).
+  - Candidate fixes: refuse the shape at `flush_group_ctx_delims` and at the section walk, with the definition in the
+    comparison so a differing delimiter or member set is a clash; or carry a section discriminator and build
+    `group_ctx_` per occurrence. Recipe to reach it: a custom XML with `<group name="NoT">` in a message body and in
+    `<trailer>` with different children (the `seed_div.xml` shape under the "Census scripts" heading of
+    `research/reviews/opus_100-wire-group-read-integrity_gate_a_5_adversarial_review.md`, parent repo).
