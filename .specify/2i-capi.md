@@ -1208,6 +1208,68 @@ fixpp_error_t fixpp_msg_group_end(fixpp_msg_t*           msg,
                                   fixpp_group_builder_t* builder);
 ```
 
+**C-ABI 1.15, BREAKING (100-wire-group-read-integrity, 2026-11-08): the two getters' endings.** The return-code comments of `fixpp_msg_get_group` and `fixpp_group_get_nested_group` in the code block above describe 1.14; `include/fix/c_api/message.h`'s CA-010 block is authoritative, and its table is the contract's (`specs/100-wire-group-read-integrity/contracts/capi-group-getters.md`). One table for both getters, evaluated in this order; the first condition that holds is the answer. "Registered" means research D2's registration predicate holds for the tag in the read's context `(msg_type, parent_path)`; "present" means the tag occurs anywhere in the bytes the read covers (the whole message for the flat getter, the whole instance slice for the nested getter, nested instances included).
+
+| # | Condition | Code | `*out` | `*count_out` |
+|---|---|---|---|---|
+| 0a | either out-parameter pointer is null | `NULL_HANDLE` (unchanged) | untouched | untouched |
+| 0b | both out-parameter pointers are non-null, and the handle is unusable or the instance index is out of range. Flat, in this order: a null `msg` → `NULL_HANDLE`; a `msg` that is not an inbound message handle (wrong handle tag, or no wire view) → `INVALID_HANDLE`. Nested, in this order: a null `g` → `NULL_HANDLE`; `i ≥` the cursor's count → `INDEX_OUT_OF_RANGE` (a `g` handle carries no tag to check) | the code named (unchanged codes) | null | 0 |
+| 1 | the tag is not in the message (flat) or not in instance `i` (nested), on an ample or an exhausted arena | `FIXPP_ERR_TAG_NOT_FOUND` | null | 0 |
+| 2 | the tag is present **and registered**, and the read could not complete: an allocation from the per-message arena failed (instance slices, a cache row, nested sub-table, cursor shell), or a group wire limit was hit (top level: instance entry cap, nesting depth; nested: the sub-table's `wire_offset_table_full`). A read that failed answers row 2 on the first and on every repeat read. A completed read answers row 2 on a repeat only when that call's cursor shell does not fit (FR-007). This includes a nested group whose sub-table could not be built, a zero-count one included | `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` | null | 0 |
+| 3 | the tag is present and not established as a group: not registered in this context, wherever it sits and whatever its value; or (nested) the instance's sub-table build failed for a reason other than an allocation or a wire limit | `FIXPP_ERR_TYPE_MISMATCH` | null | 0 |
+| 4 | the tag is registered and zero instances are read: declared count 0 (a value with no leading digit reads as 0), a count field last in its instance, or a declared count whose next field is not a member | `FIXPP_ERR_OK` | null | 0 |
+| 5 | the tag is registered and n ≥ 1 instances are read | `FIXPP_ERR_OK` | cursor | n |
+
+No exception leaves either getter: a cursor shell that does not fit returns row 2 (see §5.2, §5.4 and §6.2's 1.15 amendments). Changes from 1.14 (BREAKING), each witnessed RED on `fa778a8e` (100 research D9):
+
+Each is witnessed RED on `fa778a8e` (research D9).
+
+- Flat getter, row 4, a registered zero count mid-body or as the last body field, whether member or non-member fields
+  follow it (or a header or trailer group's count tag holding 0, research D9 (ii-0), (ii-0h)): was `TYPE_MISMATCH`.
+- Flat getter, row 4, a registered lying count (`n ≥ 1`, next field not a member): was `TYPE_MISMATCH`. (The nested
+  getter already answers `OK`/0 for it.)
+- Flat getter, row 3, a nested group's count tag read at the top level with a value `n ≥ 1` (for example 802 outside
+  its `[453]` parent): was a cursor through the bare member fallback (derived from source; the RED run confirms or
+  corrects it). With value 0 it was and stays `TYPE_MISMATCH`.
+- Flat getter, row 3, a body group read in a context its dictionary does not declare (a message whose entry does not
+  declare it, for example NoPartyIDs(453) in a declared message without Parties, or a message type the dictionary does
+  not declare), with a value `n ≥ 1`: was a cursor through the bare member fallback (derived from source; the RED run
+  confirms or corrects it). It now answers as QuickFIX `getGroup` does. Header or trailer groups, at any depth, are not
+  in this population (Unchanged). The population includes a tag the header declares as a scalar and some message
+  declares as a body group, read in a message type that does not declare that group (research D9 (i-a); QuickFIX reads
+  it as a header scalar).
+- Flat getter, row 2: was `TYPE_MISMATCH` for slice exhaustion and group-too-large; was an escaping `std::bad_alloc`
+  for the cursor shell.
+- Nested getter, row 3, a present scalar on an exhausted arena: was `WIRE_LIMIT_EXCEEDED` when the sub-table build or
+  its cache row did not fit, `OK`/0 when both did. (The flat getter drops the flag and already answers
+  `TYPE_MISMATCH`; it is a control.)
+- Nested getter, row 3, a present scalar mid-instance or last in its instance: was `OK`, count 0.
+- Nested getter, row 3, a registered count tag read in a context it has no record for: was `OK`/0 (or a cursor through
+  the bare fallback; derived from source, confirmed by the RED run).
+- Nested getter, row 1, an absent tag on an exhausted arena: was `WIRE_LIMIT_EXCEEDED` or `TAG_NOT_FOUND`, depending
+  on whether the sub-table build and the cache row fitted.
+- Nested getter, row 2: the cursor shell was an escaping `std::bad_alloc`; a nested sub-table over its entry cap read
+  `OK`/0.
+- Nested getter, row 0b: a null `g` with both out-parameters non-null returned `NULL_HANDLE` without writing them.
+- Nested getter, row 3, a present tag in an instance whose sub-table build failed for another reason (073's
+  malformed-data degradation): was `OK`/0. Constructible: a custom dictionary whose group delimiter is a Data tag whose
+  Length is the previous instance's last member, so the sub-table built over one instance splits the Data value the
+  root read by its count (witness `GroupGetters100.Row3_NestedSubBuildMalformed_TypeMismatch`). *(The sentence read
+  "Whether a sub-table built over bytes the root already parsed, with the same bundle, can reach this arm is determined
+  in the RED phase; if it cannot, the arm is defensive and says so": superseded by the RED phase's construction, T012,
+  orchestrator ruling 2026-11-07.)*
+- Both getters, row 5, a registered group whose occurrence the dictionary defines differently from the definition its
+  bare store holds for that count tag (custom dictionaries only; research D2, "Per-occurrence records"): a header or
+  trailer group, or a group nested in one, read in a message type the dictionary does not declare, and a count tag a
+  declared message reaches at a second parent path, read at the path that has no `group_ctx_` key. Was
+  `TYPE_MISMATCH`, or a group whose instances were lost or mis-split (derived from source; the RED run confirms or
+  corrects it, research D9 divergent definitions). Now a cursor split at the occurrence's own definition, as QuickFIX
+  C++ reads it (`Message::setGroup` recurses with the group `DataDictionary` that `getGroup` returns). The shapes this
+  does not reach are listed in research D2. *(Added by Gate A round 5 → hand-edit 3 (owner, 2026-11-07).)*
+- Session observers (`include/fix/c_api/session.h`, the 1.11 clause "a frame the session admits always parses for
+  dispatch"): a frame crafted against the index seed (research D1) now fails the parse and takes 092's late-parse
+  terminal close.
+
 **Cursor lifetime rule.** The `fixpp_group_t*` returned by `fixpp_msg_get_group` is **non-owning**; it points into the parent message's offset-table data structure. The cursor is invalidated when:
 
 - The parent `fixpp_msg_t` is destroyed (`fixpp_msg_destroy(msg)` for outbound, parse-window-end for inbound).
@@ -1296,7 +1358,7 @@ The `fixpp::capi::detail::*` namespace (private; `// detail: not API` per `[arch
 The C-ABI thunk surface inherits the split. **Two flavours of `guarded_call` are published**, and every `extern "C"` symbol is placed on exactly one side:
 
 - **Construction-time flavour (`guarded_call_construction`)** — used only by entry points whose invocation is the explicit C-ABI mirror of a constructor that may throw on bad config per `[arch §5.3]` carve-out. The whitelist for v1.0: `fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound`. These thunks **catch** `std::exception&` and translate to a domain-appropriate `FIXPP_ERR_*_CONFIG` (or the new `FIXPP_ERR_CAPI_CONFIG_INVALID`, produced by a C-ABI entry point that cannot complete — either an explicit refusal or a caught exception on a fallible construction/mutation step, and not exclusive to `guarded_call_construction` — see §6.5 below).
-- **Steady-state flavour (`guarded_call_steady`)** — used by every other public C-ABI symbol: every `fixpp_msg_get_*`, every `fixpp_msg_set_*`, every `fixpp_group_*`, `fixpp_msg_destroy`, `fixpp_strerror`, `fixpp_version`, `fixpp_msg_clone`, plus every shape-pinned-here entry point that 2j later publishes on the steady-state path (`fixpp_session_send`, callback-trampoline thunks). An exception escaping a steady-state thunk implies an `assert` failure at the C++ layer or a memory-corruption / PMR-allocator-bypass bug per `[arch §5.3]`'s invariant-violation rule (`std::bad_alloc` from a steady-state path means the project's `[2a §4.2]` `trap_throw` was bypassed — itself an invariant violation). These thunks log the exception at fatal level via `fixpp::core::Logger` (engine-internal) and **`std::abort()`**.
+- **Steady-state flavour (`guarded_call_steady`)** — used by every other public C-ABI symbol: every `fixpp_msg_get_*`, every `fixpp_msg_set_*`, every `fixpp_group_*`, `fixpp_msg_destroy`, `fixpp_strerror`, `fixpp_version`, `fixpp_msg_clone`, plus every shape-pinned-here entry point that 2j later publishes on the steady-state path (`fixpp_session_send`, callback-trampoline thunks). An exception escaping a steady-state thunk implies an `assert` failure at the C++ layer or a memory-corruption / PMR-allocator-bypass bug per `[arch §5.3]`'s invariant-violation rule (`std::bad_alloc` from a steady-state path means the project's `[2a §4.2]` `trap_throw` was bypassed — itself an invariant violation). These thunks log the exception at fatal level via `fixpp::core::Logger` (engine-internal) and **`std::abort()`**. *(Amended in C-ABI 1.15, 100-wire-group-read-integrity:)* `fixpp_msg_get_group` and `fixpp_group_get_nested_group` catch the `std::bad_alloc` of their cursor shell's allocation from the parse arena and return `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` with a null cursor and count 0 (§4.8's 1.15 table, row 2); for those two getters a cursor-shell `bad_alloc` is a documented return, not an invariant violation. Every other steady-state symbol is unchanged.
 
 The split matches `[arch §5.3]` exactly: construction-time exceptions are translated for ergonomics; steady-state exceptions are bugs not error returns and are surfaced via the architecturally-mandated `std::abort` path. The v0.1 uniform "translate to `FIXPP_ERR_UNKNOWN`" policy is **dropped** because (a) the steady-state hot path is exception-free per `[const §VIII.5]` — any escape is by definition an invariant violation; (b) translating to `FIXPP_ERR_UNKNOWN` lets the C consumer continue calling into the engine after potential memory corruption, which is a worst-of-both-worlds outcome (the bug is hidden, the consumer's recovery path is ad-hoc); (c) `[const §XV]` does not list "abort on invariant violation" as a banned pattern — the architecturally-mandated path is to `std::abort`.
 
@@ -1408,7 +1470,7 @@ Per §4.2.1, each opaque handle wraps either a `unique_ptr` (engine, dict) or a 
 - **Inside the thunk body:** `noexcept` lambdas only. The thunk body may call into engine C++ code that uses `expected_t<T>` per `[arch §5.3]` — never throws.
 - **Across the `extern "C"` boundary:** **no exception ever crosses.** Per the §5.2 split: construction-time thunks trap-and-translate to `FIXPP_ERR_*_CONFIG`; steady-state thunks `std::abort` after a fatal log.
 - **Construction-time exceptions** (e.g., `fixpp_engine_create` calling into engine code that throws on bad config; `fixpp_dict_load_from_xml` parsing a malformed XML; `fixpp_msg_create_outbound` rejecting an unknown `msg_type`) are caught by `guarded_call_construction` and translated to the appropriate `FIXPP_ERR_*_CONFIG` (or the new cross-cutting `FIXPP_ERR_CAPI_CONFIG_INVALID`, produced by a C-ABI entry point that cannot complete — either an explicit refusal or a caught exception on a fallible construction/mutation step, and not exclusive to engine creation — see §6.5) per `[arch §5.3]` carve-out.
-- **Steady-state thunk exceptions** (e.g., a `std::bad_alloc` escaping `fixpp_msg_get_string` despite the PMR `[2a §4.2]` `trap_throw`; a foreign exception escaping a callback-trampoline thunk) are caught by `guarded_call_steady` and `std::abort()`'d after a fatal-level log per `[arch §5.3]` invariant-violation rule. No `FIXPP_ERR_UNKNOWN` is returned on the steady-state path; the abort is the architecturally-mandated trap.
+- **Steady-state thunk exceptions** (e.g., a `std::bad_alloc` escaping `fixpp_msg_get_string` despite the PMR `[2a §4.2]` `trap_throw`; a foreign exception escaping a callback-trampoline thunk) are caught by `guarded_call_steady` and `std::abort()`'d after a fatal-level log per `[arch §5.3]` invariant-violation rule. No `FIXPP_ERR_UNKNOWN` is returned on the steady-state path; the abort is the architecturally-mandated trap. *(Amended in C-ABI 1.15, 100-wire-group-read-integrity:)* the two group getters catch their cursor shell's `std::bad_alloc` and return `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` (§5.2's amendment); that exception no longer reaches `guarded_call_steady` from them.
 
 ---
 
@@ -1432,7 +1494,7 @@ Per §4.2.1, each opaque handle wraps either a `unique_ptr` (engine, dict) or a 
 
 ### §6.2 Exception safety
 
-- **No exception crosses `extern "C"` from a steady-state thunk** — `std::abort` (with fatal log) is the trap, per the §5.2 / §5.4 construction-vs-steady split. The hot-path read accessor is the canonical steady-state thunk: it runs inside `fromApp`'s session strand per `[2d §7.6]`, and per `[const §VIII.5]` the parse-↔-`fromApp` window is exception-free; an exception escaping it is by definition an invariant violation per `[arch §5.3]`'s invariant-violation clause. Verified by §9 seam #5b (synthetic-throw on a steady-state thunk fires `SIGABRT`; the test fixture traps it).
+- **No exception crosses `extern "C"` from a steady-state thunk** — `std::abort` (with fatal log) is the trap, per the §5.2 / §5.4 construction-vs-steady split. The hot-path read accessor is the canonical steady-state thunk: it runs inside `fromApp`'s session strand per `[2d §7.6]`, and per `[const §VIII.5]` the parse-↔-`fromApp` window is exception-free; an exception escaping it is by definition an invariant violation per `[arch §5.3]`'s invariant-violation clause. Verified by §9 seam #5b (synthetic-throw on a steady-state thunk fires `SIGABRT`; the test fixture traps it). *(Amended in C-ABI 1.15, 100-wire-group-read-integrity:)* for `fixpp_msg_get_group` and `fixpp_group_get_nested_group`, a cursor shell that does not fit is a documented return, `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`, not the abort trap (§5.2's amendment).
 - **No exception crosses `extern "C"` from a construction-time thunk either.** Construction-time thunks (`fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound`) catch and translate to a domain-appropriate config code per `[arch §5.3]`'s construction-time carve-out; verified by §9 seam #5a (synthetic-throw on a construction thunk → `FIXPP_ERR_*_CONFIG`).
 - **The hot path is exception-free.** `[arch §5.3]` / `[const §VIII.5]` extends through the read-accessor C-ABI thunk (see §6.1 row 1); no `try/catch` overhead is paid on the happy path because modern compilers (clang ≥ 16, GCC ≥ 13, MSVC 19.40+) implement zero-cost exceptions. The steady-state `guarded_call_steady` wrapper costs zero on the happy path.
 - **Construction-time exceptions** in engine code are caught at the construction thunk and translated to `FIXPP_ERR_THREAD_CONFIG` / `FIXPP_ERR_DICT_CONFIG` / `FIXPP_ERR_TRANSPORT_CONFIG` / `FIXPP_ERR_CAPI_CONFIG_INVALID` / etc. per the source layer. The source-layer doc owns the list of construction-time error codes (see §4.3 block assignments and §6.5 below for the new `FIXPP_ERR_CAPI_CONFIG_INVALID` code introduced in v0.2).

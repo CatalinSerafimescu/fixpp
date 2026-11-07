@@ -643,6 +643,10 @@ template <class CB>
 // without invoking the receive callback. Returns success, as the session's other
 // Disconnected paths do: the close is the outcome, and run_read_pump's own later
 // close is idempotent.
+// 100-wire-group-read-integrity (research D1, FR-008) supersedes 093's "any admitted
+// frame parses" for a frame crafted against the index seed: its index build exceeds
+// the per-build probe budget, so its parse fails and it reaches this close with no
+// test seam.
 // [092 data-model E-3; contract C-6; research R-4; spec FR-016]
 asio::awaitable<fixpp::core::expected_t<void>> Session::close_on_late_parse_failure_() noexcept {
     (void)co_await close(close_mode::terminal);
