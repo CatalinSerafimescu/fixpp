@@ -17,7 +17,7 @@ Decisions: [research.md](research.md) D1–D7.
 
 | Query | Meaning |
 |---|---|
-| `valid_tags_for(msg_type).found()` | **new** on `valid_tag_set_view`: `valid_` holds this MsgType. The validator's one `valid_.find` per message answers both the MsgType check and the field walk |
+| `valid_tags_for(msg_type).found()` | **new** on `valid_tag_set_view`: `valid_` holds this MsgType, i.e. `add_valid(_tag)` or `add_required(_tag)` named it (a group-context operation does not). The validator's one `valid_.find` per message answers both the MsgType check and the field walk |
 | `tag_defined(tag)` | **new**: the tag is in the dictionary's merged field store (dictionary-built), or was named by any population operation (hand-built). A sorted `std::vector<std::uint16_t>`, binary search, sealed with the table; never a fixed tag-space bitset |
 
 ## `core::error` (`include/fixpp/core/error.hpp`)

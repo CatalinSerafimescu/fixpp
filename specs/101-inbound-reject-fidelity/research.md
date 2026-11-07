@@ -82,8 +82,11 @@ holds a `table_view`, not a `Dictionary`); a fixed tag-space bitset (footprint, 
 - After Step 0, the validator takes `valid_tags_for(msg_type)` **once** and tests whether the key was found:
   `valid_tag_set_view` gains `found() const noexcept` (true when the view refers to a `valid_` entry). A miss returns
   `wire_invalid_msg_type`, no ref tag. Step 1 reuses the same view, so the hot path keeps one `valid_.find` per message,
-  as today. "MsgType defined" means `valid_` holds it; on a hand-built table, `add_required_tag` alone does not define a
-  MsgType (no dictionary-built table is affected: every declared message gets its header tags as valid).
+  as today. "MsgType defined" means `valid_` holds the key, so a MsgType is defined exactly when some
+  `add_valid_tag`/`add_valid` or `add_required_tag`/`add_required` named it (`add_required_tag` writes both `required_`
+  and `valid_`). The group-context, per-tag, header and framing operations do not define a MsgType. On a
+  dictionary-built table every declared message gets its header tags as valid, so every declared MsgType is defined.
+  Re-derive the writers with `grep -n "valid_\[" include/fixpp/dict/table_view.hpp` (Gate A round 3).
 - Step 1(a): a tag outside the view (and not a FIXT framing tag) answers
   `dict_.tag_defined(tag) ? wire_unexpected_tag : wire_undefined_tag`, ref = the tag. The envelope arm is unchanged.
 - Two new `core::error` slots, `wire_invalid_msg_type` → 373=11 and `wire_undefined_tag` → 373=0, appended after the
@@ -437,8 +440,11 @@ many binaries: `session_pure_tests`, `wire_dict_tests`, the per-feature `error_0
 - `ValidateGateInbound.ManyFieldsBypassArena_Rejected_NotBypassed` (undefined tags → 0).
 - Wire: `ValidatorProductionTableView.UnknownMsgTypeRejectsLikePreHoistFieldValidFor` (→ `wire_invalid_msg_type`),
   `ValidatorTypeCheck.ValidateUnexpectedTagReturnsError`, `ValidatorPerVersion.UnexpectedTagRejected`,
-  `ValidatorDomain.UnexpectedTagRejected`, `tests/wire/conformance/w014_validate.csv` row `unexpected-tag-42`,
-  `W3Unit.TagSDoesNotDeclare_TheRouteAnswers` — each classified by D1.
+  `ValidatorDomain.UnexpectedTagRejected`, `W3Unit.TagSDoesNotDeclare_TheRouteAnswers` — each classified by D1.
+- W-014 (`tests/wire/conformance/w014_validate.csv`, judged by `make_heartbeat_grammar`, which names `"0"` only
+  through `add_required`): row `unexpected-tag-42` has one new ending, `wire_undefined_tag`, 371=9999 (no operation
+  in that grammar names 9999). Rows `conforming-heartbeat-42`, `conforming-heartbeat-50sp2` and
+  `conforming-heartbeat-t11` stay accept: they are the existing guard that `add_required` defines a MsgType (D2).
 - Fuzz: `is_valid_wire_error` gains both new slots.
 - Error slots: the sentinels in `test_017_error_completeness`, `test_019_error_completeness`,
   `test_020_error_completeness` and `AbiSymbolGolden.ErrorEnumUnchanged` move to one past `wire_undefined_tag`.
@@ -541,6 +547,13 @@ reverted):
   - **092 disposer:** a fault with a fitting 3-byte overlay MsgType → 372 present (none on `fa778a8e`).
   - **`35=D=X`:** echoed as `372=D=X` and read back by fixpp's parser as one field.
 - D1: one mutation per population path (dictionary-built; each hand-built op class).
+- D2's MsgType definition on a hand-built table (Gate A round 3):
+  - required-only: a table that names `"X"` only through `add_required("X", …)`; an `"X"` frame carrying only those
+    tags validates OK, not `wire_invalid_msg_type`;
+  - ctx-only: a table that names `"Y"` only through `table_view_builder::add_group_member_ctx("Y", …)`; a `"Y"` frame
+    returns `wire_invalid_msg_type` with no ref tag;
+  - mutant: drop the `valid_` insert from `add_required_tag` only. The required-only cell and the W-014
+    `conforming-heartbeat-*` rows must go RED.
 
 ### D10 — Comments the feature makes false
 
@@ -570,24 +583,53 @@ This feature changes clauses of merged features. Each is superseded for the part
 **recipe plus its classified hits** (Gate A round 2), as D9's census is. It is re-run at tasks and after the last fix
 commit, and every hit is classified as superseded (a row below) or kept (with its reason). It is not counted.
 
+One line per decision. Each hit is classified, not counted.
+
 ```sh
-git grep -nE 'last MsgType|last 35|keeps? (the|its) (first-wins, last-wins )?(MsgType )?split|keeps both|kMaxShippedMsgTypeLength|longest MsgType|shipped dictionary|second 35|(D|0)(…|\.\.)A|(D|5)(…|\.\.)(5|D)|leaves it false|gains no step|last-wins' \
-  -- specs/092-garbled-frame-reject specs/099-fixt-appl-version-validation spec/behaviors-and-limitations.md
+# D4/D5/D6/D7 — MsgType comparison, the 13/14 rule, the 372 bound (the round-2 pattern, plus first-wins and two paths: 098, brain)
+git grep -nE 'last MsgType|last 35|keeps? (the|its) (first-wins, last-wins )?(MsgType )?split|keeps both|kMaxShippedMsgTypeLength|longest MsgType|shipped dictionary|second 35|(D|0)(…|\.\.)A|(D|5)(…|\.\.)(5|D)|leaves it false|gains no step|last-wins|first-wins' \
+  -- specs/092-garbled-frame-reject specs/098-dialect-overlay specs/099-fixt-appl-version-validation spec/behaviors-and-limitations.md brain/components
+# D2 / 373 — an undefined tag moves 2 → 0. For each hit that names a tag, check whether the judging table's
+# dictionary defines it: ``number=['"]N['"]`` per dictionaries/*.xml (prove the regex on 370 → FIX42, FIX43),
+# the frozen FIXT11 at tests/fuzz/corpus/dict_xml_loader/seed_fixt11_real_dictionary.xml for an operator's copy,
+# `<fixr:field id=…>` for Orchestra. Undefined → superseded to 373=0; defined → kept.
+git grep -nE '373 ?= ?2\b|R 2/|\b2 unexpected|unexpected[- ]tag|wire_unexpected_tag|Rejects?/2\b|reason 2\b|SessionRejectReason\(373\) ?= ?2\b' \
+  -- specs/092-garbled-frame-reject specs/098-dialect-overlay specs/099-fixt-appl-version-validation spec/behaviors-and-limitations.md brain/components
+# D2 / 371 — an undefined MsgType carries no 371. Only a universal claim ("now carry", "names the field") is superseded.
+git grep -nE 'RefTagID|\b371\b' -- spec/behaviors-and-limitations.md brain/components
 ```
 
-The patterns were widened at round 2 until every clause both reviewers named is a hit. A clause the recipe still
-misses, once found, widens the recipe; a hand addition to the table alone does not close it.
+The vendored XML quotes attributes with single quotes, so a `number="N"` grep reports nothing for every tag; the
+quote-agnostic form above is the one to use. The patterns were widened at round 2 until every clause both reviewers
+named is a hit, and at round 3 by the D2 and 371 lines, which the round-2 vocabulary could not reach. A clause the
+recipe still misses, once found, widens the recipe; a hand addition to the table alone does not close it.
 
 **Kept, by class:**
-- 092's and 099's `tasks.md`, `plan.md`, `research.md`, `quickstart.md` and `checklists/` are history. They record
-  what each feature measured and planned when it merged, and are not rewritten (099's quickstart issues-to-file list
-  is the plan that filed #657/#658, which this feature closes).
+- 092's, 098's and 099's `tasks.md`, `plan.md`, `research.md`, `quickstart.md` and `checklists/` are history. They
+  record what each feature measured and planned when it merged, and are not rewritten (099's quickstart
+  issues-to-file list is the plan that filed #657/#658, which this feature closes). 098 `spec.md`'s out-of-scope entry
+  "fixpp's single `wire_unexpected_tag` against QuickFIX's 373=0 … / 373=2 … distinction (filed)" is the same class:
+  it records the filing of the divergence D2 closes.
 - Clauses that pass `fault_ref_msg_type` rather than the scan's last-wins `msg_type` (092 `spec.md` FR-003's 45/372
   source, 092 contract C-2's "35 value"). The rule they state, "the third field's value", is the one D4 makes
   universal, so they stay.
 - Unrelated hits (e.g. B-493-1's "keeps both … caps", the 083 splitter note).
 - 099's mutant rows (`witnesses.md` M-50, M-51, M-59, M-109, M-93) describe 099's mutants. They stay; where a mutated
   line no longer exists after D4, tasks re-target or retire the mutant with its witness.
+- Hits on the D2 line whose tag the judging table's dictionary defines (373=2 stays), and the outbound builder rows
+  (B-091's `wire_unexpected_tag` from `body_builder`, 098 `spec.md`'s "Sending a custom Data value" edge case), which
+  are not the validator. Hits on the 371 line that state a per-site 371 (B-009-3, B-021-1's OrigSendingTime arms,
+  B-038-1, B-092-3's fault Reject, B-097-1, B-099-*, B-420-1, B-422-1), not a universal one.
+- Every 099 `witnesses.md` M-row on the D2 line describes a 099 mutant, as the class above already says.
+- B-092-8 (the fault results), which D2 does not change.
+- Hits that are not a MsgType ending: B-099-22 and 099 `contracts/surface.md`'s "Two 1128s in the header read
+  first-wins" (1128, unaffected), 099 `data-model.md`'s `scan_logon_msg_type_defaults`, and the "keeps the split"
+  hits in `brain/components/session.md` and `brain/components/message-store-quiescence.md` (pool-thread ordering).
+- SecondBrain history and rejected alternatives: `brain/components/wire.md`'s "unexpected tag 8" (a history of T062a)
+  and its "shipped dictionary" lines (FR-018's drift arms); `brain/components/inbound-message-path.md`'s rejected
+  "making the whole scan first-wins", which stays true because D4 makes `msg_type` alone first-wins.
+  `brain/components/session.md`'s "`interpret_logon` reads the last 35" lines are superseded clauses, flagged in place
+  by the SecondBrain edit below.
 
 **Superseded:**
 
@@ -613,9 +655,48 @@ misses, once found, widens the recipe; a hand addition to the table alone does n
 | B&L **B-099-4**: its headline ("… once a validating FIXT session is past establishment; a non-validating session keeps both"), its "Repeated MsgType" bullet ("373=13 when the second 35 is in the header"), its "Not validating" bullet | the headline's scope, the 13/14 rule, the whole "Not validating" bullet | D4, D5, D6, FR-009 |
 | B&L **B-099-5**, **B-099-11** | each whole row, rewritten to the new endings | FR-009 |
 | B&L **L-452-2** | closed: the echo stays verbatim by ruling, and the silent loss is fixed | D7, FR-009 |
+| B&L **B-092-1**, "the scan keeps last-wins for the fields it already read" | `msg_type` only; MsgSeqNum(34) stays last-wins | D4, FR-004, FR-009 |
+| B&L **B-075-6**, its headline and "a strict-validating session's Reject now names the field that failed"; the 075 section's intro sentence "a validate-driven `Reject(35=3)` now carries `RefTagID(371)`" | the universal 371 claim | D2, FR-001, FR-009 |
+| B&L **B-041-1**, its `SessionRejectReason ∈ {…}` enumeration | the enumeration, replaced by a pointer to `wire_error_to_session_reject_reason` | D2, FR-001, FR-002, FR-009 |
+| B&L **B-099-2**, Double-fault limit, "an undeclared tag is 373=2" | 373=2 → 373=0 for a tag the transport dictionary does not define | D2, FR-002, FR-009 |
+| B&L **B-099-8**, "373=2, 371=370 on any other" | 373=0 where the route's dictionary does not define 370 | D2, FR-002, FR-009 |
+| B&L **B-099-25**, "`R 2/384 A`" | `R 0/384 A` for a dictionary that does not define 384 | D2, FR-002, FR-009 |
+| B&L **L-099-1**, "Such a trailer tag draws 373=2" | 373=0 where the answering table does not define it | D2, FR-002, FR-009 |
+| 099 `spec.md` **FR-010** Limits, `data-model.md` **E-7** `NC L` 5999 cell and §FIXT11's `R 2/384 A`, and every other merged-spec clause on the D2 recipe line whose tag the judging table does not define | 373=2 → 373=0 | D2, FR-002 |
+
+**B&L row rewrites (close-out row 3).** Each uses the file's "*(Amended <date>, 101:)*" convention and carries no
+count.
+- **B-092-1:** replace "the scan keeps last-wins for the fields it already read." with:
+  > the scan keeps last-wins for the fields it already read, MsgSeqNum(34) among them. *(Amended <date>, 101:)*
+  > MsgType(35) is first-wins: `FrameHeader::msg_type` is the first 35, and a later 35 with a different value sets
+  > `msg_type_conflict` (B-101-n).
+- **B-075-6:**
+  - Headline becomes: "Reject(35=3) frames driven by dictionary validation now carry `RefTagID(371)` when the failure
+    has a field — including the pre-existing type-arm rejects, for free."
+  - Append: "*(Amended <date>, 101:)* An undefined MsgType draws 373=11 with no 371 (`wire_invalid_msg_type`,
+    B-101-n), as a malformed tag draws 373=0 with none (B-092-8). An undefined tag draws 373=0 with 371 = the tag."
+  - The 075 section's intro sentence gains "when the failure has a field (B-075-6)".
+- **B-041-1:** replace the `SessionRejectReason ∈ {…}` enumeration with "the `SessionRejectReason` that
+  `wire_error_to_session_reject_reason` maps the validator's result to" and append "*(Amended <date>, 101:)* an
+  undefined tag answers 0 and an undefined MsgType 11 (B-101-n); 2 is a tag defined but not for this message." The
+  pointer does not rot; `brain/components/wire.md`'s session-layer seam withholds the mapping values for that reason.
+- **B-099-2**, Double-fault limit: replace "An absent 1137 with an undeclared tag is 373=2 naming that tag" with:
+  > An absent 1137 with a tag the transport dictionary does not define is 373=0 naming that tag (373=2 for one it
+  > defines elsewhere) *(amended <date>, 101)*
+- **B-099-8:** replace "373=2, 371=370 on any other" with:
+  > 373=0, 371=370 on a route whose dictionary does not define 370, which is every other vendored one (373=2 on one
+  > that defines it) *(amended <date>, 101)*
+- **B-099-25:** replace "answers such a Logon `R 2/384 A`" with:
+  > answers such a Logon `R 0/384 A` when it does not define 384, as QuickFIX C++'s copy does not, and `R 2/384 A` when
+  > it defines 384 without the group *(amended <date>, 101)*
+- **L-099-1:** replace "Such a trailer tag draws 373=2." with:
+  > Such a trailer tag draws 373=0 when the answering table's dictionary does not define it, 373=2 when it does
+  > *(amended <date>, 101)*.
 
 SecondBrain: `brain/components/session.md` and `brain/components/inbound-message-path.md` flag each superseded clause
-above in place (CLAUDE.md, #334). Close-out row 3 makes that edit; plan.md Phase 7 points it at this list.
+above in place (CLAUDE.md, #334), and `brain/components/wire.md` is checked too, because the validator's Step 1 lives
+there. Close-out row 3 makes that edit, re-running the D2 and 371 recipe lines over `brain/components`; plan.md Phase 7
+points it at this list.
 
 **What 099 keeps:** its two-occurrence FIXT endings in LogonReceived and Active (Reject 373=13/14, 371=35, 372 = the
 third field, the consume key), its establishment disconnect on a validating FIXT session, and every 1128 refusal. What

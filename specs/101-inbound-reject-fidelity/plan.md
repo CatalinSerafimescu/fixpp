@@ -124,10 +124,11 @@ tests/interop/happy/golden/             # regenerated reject-invalid-admin golde
 6. **Mutations, benches** — each change reverted alone, its cells RED; D8's paired runs (Build/Copy rows included) and
    footprint rows.
 7. **Records** — B&L per FR-009 and research's Supersessions list (L-452-2 closed; B-092-3's 372 bullet; B-099-3,
-   B-099-4's headline and bullets, B-099-5, B-099-11 rewritten; the new B-rows), catalogue/coverage index; false
-   comments (D10) fixed, `check-comment-claims.py` on the diff. The SecondBrain edit of close-out row 3
-   (`brain/components/session.md`, `brain/components/inbound-message-path.md`) flags in place every clause in
-   research's Supersessions list, re-derived by its recipe. File quickstart's two issues.
+   B-099-4's headline and bullets, B-099-5, B-099-11 rewritten; B-092-1, B-075-6 and the 075 intro, B-041-1, B-099-2,
+   B-099-8, B-099-25 and L-099-1 amended by research's planned rewrites; the new B-rows), catalogue/coverage index;
+   false comments (D10) fixed, `check-comment-claims.py` on the diff. The SecondBrain edit of close-out row 3
+   (`brain/components/session.md`, `brain/components/inbound-message-path.md`, `brain/components/wire.md`) flags in
+   place every clause in research's Supersessions list, re-derived by its recipe lines. File quickstart's two issues.
 8. **Verify** — re-derive the census after the last fix commit; targeted ctest, sanitizers on `session_pure_tests`,
    MSVC build of touched targets, `/speckit-verify`.
 
@@ -139,17 +140,22 @@ tests/interop/happy/golden/             # regenerated reject-invalid-admin golde
 | D4 widens 099's `last ≠ third` to "any later ≠ first" | one MsgType per frame | keeping the last-value comparison leaves `D…A…D` handled as D with a hidden A |
 | D5 walks past the header stop on the cold path | QuickFIX C++'s 14-before-13 precedence with three or more 35s | reusing the stop-at-header walk answers 13 where C++ answers 14 |
 
-## Open for Gate A — resolved at round 1
+## Open for Gate A — resolved (rounds 1–3)
+
+No open item remains. Each item's last verdict is Codex round 3's, accepted by the owner's ruling (§Gate A, round 3).
 
 1. D6's validation-off ending after Logon: approved by both reviewers; "handled as X" is now defined by D6's
-   differential oracle.
+   differential oracle. **Round 3 (Codex): sound.**
 2. D2's 373=0 inside a group: approved, and traced to QuickFIX C++ on 098's AS-2 layout; the other layouts' divergence
-   is a B-row.
+   is a B-row. **Round 3 (Codex): sound** (373=0 for the group layout); the hand-built MsgType-definition contradiction
+   it raised alongside is Finding 1, applied at round 3.
 3. D7's echo: round 1 approved omit-372 for the session Reject; round 2 (Codex) blocked it for the BusinessMessageReject,
    where 372 is required. Resolved at round 2 by orchestrator ruling: one rule for both, 372 verbatim up to
    `kSendFrameBytes` through a rebuild into a session-owned slot; above it the Reject omits 372 and the BMR is not sent (research D7). The
    site census is D7's recipe, the trigger is `wire_field_value_truncated`, and 092's bound retires.
-4. Article X: no C-ABI version step is owed (both reviewers).
+   **Round 3 (Codex): sound.**
+4. Article X: no C-ABI version step is owed (both reviewers). **Round 3 (Codex): sound**; the new slots map to the
+   existing `FIXPP_ERR_WIRE_CONFORMANCE`, and no public C enumerator or ABI shape changes.
 
 ## Gate A
 
@@ -253,3 +259,36 @@ research/reviews/opus_101-inbound-reject-fidelity_gate_a_2_adversarial_review.md
   - The Codex 4 099 quickstart hit: classified as history in the recipe's kept classes.
 - **Not taken from the judge:** QuickFIX C++'s 380=3 and 58 text for `UnsupportedMessageType`. They are not needed for
   the decision. The local QuickFIX read used here is the 372 echo (`2ce8a60`, `4969564`).
+
+### Round 3 → owner ruling (2026-11-07): apply fixes, accept; Gate A converged by owner ruling
+
+Codex P1=0 P2=2 P3=0; Opus post-judging P1=0 P2=2 P3=1. The owner ruled "apply fixes, accept": the judge's fixes
+are applied below and no further review round runs. Gate A converged by owner ruling.
+
+Reviews (parent repo, `research/reviews/`):
+- `codex_101-inbound-reject-fidelity_gate_a_review.md`, `opus_101-inbound-reject-fidelity_gate_a_adversarial_review.md`
+  (round 1);
+- `codex_101-inbound-reject-fidelity_gate_a_2_review.md`, `opus_101-inbound-reject-fidelity_gate_a_2_adversarial_review.md`
+  (round 2);
+- `codex_101-inbound-reject-fidelity_gate_a_3_review.md`, `opus_101-inbound-reject-fidelity_gate_a_3_adversarial_review.md`
+  (round 3).
+
+- **Finding 1 (P2), `add_required_tag` already defines the MsgType.** `table_view::add_required_tag` writes both
+  `required_` and `valid_`, so `found()` is true after it alone; round 2's sentence saying otherwise is replaced. The
+  existing API's ending is kept: a MsgType is defined when `add_valid(_tag)` or `add_required(_tag)` named it, and a
+  group-context operation does not define one. Changed: research D2's first bullet, data-model's `found()` row,
+  FR-001's hand-built clause; D9 gains the W-014 guard (`conforming-heartbeat-*` stay accept, `unexpected-tag-42` →
+  `wire_undefined_tag`, 371=9999), a required-only cell, a ctx-only cell and the `add_required_tag` mutant.
+- **Finding 2 (P2), the supersession census misses live B&L rows.** Codex round 3 reopened round 2's
+  "Supersessions closed" claim; this fix closes it. The round-2 recipe is keyed on D4/D7 vocabulary and could not see
+  D2's 2 → 0 move or the universal 371 claim. Research's recipe is now one line per decision (D4–D7, D2/373 with the
+  quote-agnostic dictionary check, D2/371), over 092, 098, 099, the live B&L and `brain/components`. Superseded rows
+  added: B-092-1, B-075-6 (and the 075 intro sentence), B-041-1, B-099-2, B-099-8, B-099-25, L-099-1, and 099's D2-line
+  clauses whose tag the judging table does not define; planned B&L rewrites for each; kept classes for every other
+  hit of the new lines; FR-009 names the rows; Phase 7 and research's SecondBrain paragraph add
+  `brain/components/wire.md`.
+- **P3-1 (judge), B-041-1's reason set.** Its enumeration is replaced by a pointer to
+  `wire_error_to_session_reject_reason`, with an amendment naming 101's 0 and 11 (research Supersessions).
+- **Beyond the judge's text.** The 075 section's intro sentence and B-041-1 are hits of the new 371 and D2 lines, so
+  they are table rows and FR-009 names them; the D4 line's new `first-wins` pattern and the widened paths gave hits
+  (098 history, brain pages, B-099-22) that are classified as kept.

@@ -257,7 +257,8 @@ BusinessMessageReject.
 
 - **FR-001** (#655): The validator MUST check that the dictionary it validates with defines the frame's MsgType, after
   the header-order check and before the field walk, sharing the field walk's one MsgType lookup, and MUST report an
-  undefined MsgType with its own result, mapped to 373=11 with no 371.
+  undefined MsgType with its own result, mapped to 373=11 with no 371. On a hand-built table a MsgType is defined
+  when `add_valid(_tag)` or `add_required(_tag)` named it, and not by any other population operation (research D2).
 - **FR-002** (#653): The validator MUST report a tag the dictionary does not define at all with its own result, mapped
   to 373=0 with 371 = the tag, and a tag the dictionary defines but not for this message (header, trailer and body
   sets as validated today) with 373=2, 371 = the tag. "Defined" means present in the dictionary's merged field store; on
@@ -297,8 +298,10 @@ BusinessMessageReject.
   benchmarks of research D8 show no slowdown above the `[const §VIII.2]` budget.
 - **FR-009** (records): The B&L rows for #646 (L-452-2, closed; B-092-3's RefMsgType bullet, rewritten to D7's rule) and
   #657/#658 (B-099-3's conflict clause; B-099-4's headline, its "Repeated MsgType" bullet and its "Not validating"
-  bullet; B-099-5; B-099-11) move or change to the new endings. Research's Supersessions list is the complete set and
-  its recipe re-derives it. New B-rows disclose: fixpp's config loader ignores QuickFIX's
+  bullet; B-099-5; B-099-11), and for #653/#655 B-075-6's headline (with the 075 section's intro sentence),
+  B-092-1's last-wins clause, B-041-1's reason enumeration, B-099-2's double-fault limit, B-099-8, B-099-25's
+  `R 2/384` clause and L-099-1's 373=2 (research Supersessions) move or change to the new endings. Research's
+  Supersessions list is the complete set and its recipe lines re-derive it. New B-rows disclose: fixpp's config loader ignores QuickFIX's
   `ValidateUserDefinedFields` and `AllowUnknownMsgFields`; the FIX.4.0–4.2 text and 373 differences (D3); the
   header-set residual against QuickFIX C++'s static list (D5); the group-layout divergence (D2); multi-defect
   precedence (Edge Cases); `interpret_logon`'s first-wins change, public C++ (D4); the outbound-ceiling ending (D7: a

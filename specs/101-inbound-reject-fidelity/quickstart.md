@@ -17,8 +17,8 @@ Expected: the new cells GREEN, each RED on `fa778a8e` where today's behaviour di
 reverted; the manifest's cells rewritten with their superseding requirement; `ctest -L alloc_guard` GREEN, and research
 D9's run-thread allocation cells zero on a Release build (the mallocnesia registrations are Release and Linux only;
 the counter build runs everywhere) with their RED arm intercepted;
-`git grep -n kMaxShippedMsgTypeLength -- src tests` empty; the research Supersessions recipe re-run, every hit
-classified.
+`git grep -n kMaxShippedMsgTypeLength -- src tests` empty; the research Supersessions recipe lines re-run, every
+hit classified.
 
 Benchmarks (research D8, `[const §VIII.2]`): compute the base as `git merge-base HEAD origin/main` at measurement time;
 build `scan_frame_header_bench`, `on_inbound_frame_bench` and `validator_bench` at the base in a worktree whose path has
