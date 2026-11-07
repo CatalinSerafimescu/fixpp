@@ -3,9 +3,10 @@
 // include/fixpp/wire/offset_table.hpp
 // [2b §4.4] OffsetTable + entry. Authority: .specify/2b-wire.md v0.2; shape
 // oracle contracts/offset_table.hpp. Eager entry[] in document order +
-// open-address robin-hood overlay for O(1)-by-tag first-occurrence find;
+// open-address overlay for O(1)-by-tag first-occurrence find;
 // lazy group sub-index on first group(no_tag). All storage from the captured
-// per-message memory_resource. DoS caps: wire_offset_table_full (>4096 occ),
+// per-message memory_resource. DoS caps: wire_offset_table_full (>4096 occ, or
+// an overlay build over its per-build probe budget, 100 research D1),
 // wire_tag_out_of_range, wire_group_too_large — bounded memory, no
 // unbounded growth ([2b §1.2]).
 // 100-wire-group-read-integrity: the group read results carry a
@@ -482,7 +483,7 @@ private:
     mutable std::array<std::uint16_t, kMaxGroupDepth> group_ctx_parent_path_{};
     mutable std::uint8_t group_ctx_depth_ = 0;
     std::pmr::vector<entry> entries_;
-    // Open-address robin-hood overlay: slot value = index into entries_ + 1
+    // Open-address overlay: slot value = index into entries_ + 1
     // (0 = empty). Holds the FIRST occurrence per tag.
     std::pmr::vector<std::uint32_t> overlay_;
     core::expected_t<void> status_;

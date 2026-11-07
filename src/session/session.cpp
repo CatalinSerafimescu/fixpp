@@ -4610,7 +4610,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
                 // Reject are dispatched here.
                 // [research D3/D4; FR-004; INV-6]
                 if (engine_.application != nullptr && detail::is_admin_msgtype(hdr.msg_type)) {
-                    // The session's parse buffer B(L): any admitted frame parses (093).
                     // T019 note: parse_and_dispatch_'s callback_dispatch_scope ends
                     // before it returns, so the depth of all callbacks is back to its
                     // entry value when record_state_transition_ below enters onLogout.
@@ -4738,7 +4737,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
                 // FR-003; research D3/D4/D8; [const §VIII.5] (no heap: the parse buffer
                 // open() allocated, 093).
                 if (engine_.application != nullptr) {
-                    // The session's parse buffer B(L): any admitted frame parses (093).
                     // T019 note: parse_and_dispatch_'s callback_dispatch_scope ends
                     // before it returns, so the depth of all callbacks is back to its
                     // entry value. (FR-003; research D3/D4/D8; [const §VIII.5])
@@ -5007,7 +5005,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_sequen
     // session Reject(35=3) per FR-005/D4.
     // [019-app-callbacks T016; FR-004; research D3/D4]
     if (engine_.application != nullptr) {
-        // The session's parse buffer B(L): any admitted frame parses (093).
         auto cb_r = parse_and_dispatch_(
             frame, inbound_parse_buffer, route,
             [&](auto& mv, auto& sid) { return engine_.application->fromAdmin(mv, sid); });
@@ -5449,7 +5446,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
     // A fromAdmin reject here emits session Reject(35=3) per FR-005/D4
     // but the session still disconnects (Logout has been confirmed).
     if (engine_.application != nullptr) {
-        // The session's parse buffer B(L): any admitted frame parses (093).
         // T019 note: parse_and_dispatch_'s callback_dispatch_scope ends
         // before it returns, so the depth of all callbacks is back to its
         // entry value when record_state_transition_ below enters onLogout.

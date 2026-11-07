@@ -11,7 +11,6 @@
 //     alloc_failed (its catch block)
 //
 // Sites NOT covered here (documented as unreachable/waived):
-//   - build()'s kMaxBuildProbe DoS bound (its insertion probe-cap break) — adversarial-only, waived
 //   - find()'s probe-cap break (its lookup probe-cap break) — unreachable under load-factor < 1,
 //     waived
 //

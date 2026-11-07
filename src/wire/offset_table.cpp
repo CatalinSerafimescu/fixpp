@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // src/wire/offset_table.cpp — [2b §6.2] OffsetTable eager build + open-address
-// robin-hood overlay + lazy group sub-index. All storage from the captured
+// overlay + lazy group sub-index. All storage from the captured
 // per-message memory_resource; DoS caps enforced with bounded memory.
 // 100-wire-group-read-integrity: group reads report a `group_read_status` and
-// `is_group` (research D3, D5), superseding 073's `alloc_failed` result field.
+// `is_group` (research D3, D5), superseding 073's `alloc_failed` result field;
+// the overlay build's probe bound is a per-build budget whose excess fails the
+// build (research D1), superseding the per-insert cap that left a tag un-indexed.
 
 #include <algorithm>
 #include <atomic>
@@ -317,36 +319,43 @@ void OffsetTable::build(frame_view const& frame, std::size_t reserve_entries) no
                                      .group_index_link = 0U});
         }
 
-        // Build the robin-hood overlay over first occurrences.
+        // Build the open-address overlay over first occurrences.
         std::size_t const cap = overlay_cap_for(entries_.size());
         overlay_.assign(cap, 0U);
         auto const mask = static_cast<std::uint32_t>(cap - 1U);
-        // DoS bound: a frame whose distinct tags adversarially hash-collide
-        // under mix() could make each insert probe O(occ), i.e. O(occ^2)
-        // total within the wire_offset_table_full cap. Cap the per-insert
-        // probe at a constant so build stays O(occ). On overflow the
-        // occurrence is left UN-indexed (skipped, never written to an
-        // occupied slot) — find() then reports that tag absent, a bounded,
-        // crash-free degradation that only a crafted hostile frame can hit
-        // (normal frames keep clusters far below the cap; load factor < 1).
+        // DoS bound: a frame whose distinct tags hash-collide under mix() could
+        // make each insert probe O(occ), i.e. O(occ^2) total within the
+        // wire_offset_table_full cap.
+        // 100 (research D1): the probes of the whole insert loop are counted
+        // against one per-build budget of `kMaxBuildProbe` per occurrence, so the
+        // build stays O(occ). A probe is one step past an occupied slot
+        // (inspecting the home slot costs none), and an occurrence whose tag is
+        // already indexed walks to that tag's slot, so its steps count too. The
+        // build fails at the step that takes the running total over the budget,
+        // as every other build-failure arm does (wire_offset_table_full, empty
+        // table), so a table that built indexes every distinct tag's first
+        // occurrence.
         constexpr std::size_t kMaxBuildProbe = 128;
+        std::size_t const probe_budget = kMaxBuildProbe * entries_.size();
+        std::size_t probes = 0;
         for (std::size_t e = 0; e < entries_.size(); ++e) {
             std::uint16_t const tag = entries_[e].tag;
             std::uint32_t slot = mix(tag, seed_) & mask;
-            bool skip_insert = false;
-            std::size_t probes = 0;
+            bool already_indexed = false;
             while (overlay_[slot] != 0U) {
                 if (entries_[overlay_[slot] - 1U].tag == tag) {
-                    skip_insert = true;  // keep FIRST occurrence
+                    already_indexed = true;  // keep FIRST occurrence
                     break;
                 }
                 slot = (slot + 1U) & mask;
-                if (++probes >= kMaxBuildProbe) {
-                    skip_insert = true;  // DoS bound: leave this occ un-indexed
-                    break;
+                if (++probes > probe_budget) {
+                    status_ = err_offset_table_full();
+                    entries_.clear();
+                    overlay_.clear();
+                    return;
                 }
             }
-            if (!skip_insert) {
+            if (!already_indexed) {
                 overlay_[slot] = static_cast<std::uint32_t>(e) + 1U;
             }
         }
