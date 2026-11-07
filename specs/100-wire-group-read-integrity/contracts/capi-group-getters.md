@@ -3,9 +3,8 @@
 Functions: `fixpp_msg_get_group(msg, group_tag, &group_out, &count_out)` and
 `fixpp_group_get_nested_group(g, i, nested_tag, &nested_out, &nested_count_out)` (`include/fix/c_api/message.h`).
 
-"Registered" below means the registration predicate of research D2 holds for the tag in the read's context
-`(msg_type, parent_path)`: a context record for the tag there, or no context record for it anywhere and a bare-store
-registration.
+"Registered" below means the registration predicate holds for the tag in the read's context `(msg_type,
+parent_path)`. Its arms are stated in research D2 only.
 
 ## Return codes
 
@@ -16,14 +15,16 @@ One table for both getters, evaluated in this order; the first condition that ho
 | 0a | either out-parameter pointer is null | `NULL_HANDLE` (unchanged) | untouched | untouched |
 | 0b | both out-parameter pointers are non-null, and the handle (`msg` / `g`) is null or invalid, or the instance index is out of range | `NULL_HANDLE` / handle error / `INDEX_OUT_OF_RANGE` (unchanged codes) | null | 0 |
 | 1 | the tag is not in the message (flat) or not in instance `i` (nested), on an ample or an exhausted arena | `FIXPP_ERR_TAG_NOT_FOUND` | null | 0 |
-| 2 | the tag is present and the read could not complete: an allocation from the per-message arena failed (instance slices, nested sub-table, cursor shell), or a group wire limit was hit (instance entry cap, nesting depth, a nested sub-table's `wire_offset_table_full`); on the first and on every repeat read | `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` | null | 0 |
+| 2 | the tag is present **and registered**, and the read could not complete: an allocation from the per-message arena failed (instance slices, a cache row, nested sub-table, cursor shell), or a group wire limit was hit (top level: instance entry cap, nesting depth; nested: the sub-table's `wire_offset_table_full`); on the first and on every repeat read. This includes a nested group whose sub-table could not be built, a zero-count one included | `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` | null | 0 |
 | 3 | the tag is present and not established as a group: not registered in this context, wherever it sits and whatever its value; or (nested) the instance's sub-table build failed for a reason other than an allocation or a wire limit | `FIXPP_ERR_TYPE_MISMATCH` | null | 0 |
 | 4 | the tag is registered and zero instances are read: declared count 0, a count field last in its instance, or a declared count whose next field is not a member | `FIXPP_ERR_OK` | null | 0 |
 | 5 | the tag is registered and n ≥ 1 instances are read | `FIXPP_ERR_OK` | cursor | n |
 
-Row 1 before row 2 holds for both getters: a read is reported failed only for a present tag (data-model
-`nested_slices_result`'s invariant), so an absent tag never answers `WIRE_LIMIT_EXCEEDED`. Rows 1 and 3 need no
-memory, so an exhausted arena does not change them.
+Row 1 before row 2, and row 2 before row 3, hold for both getters: a read is reported failed only for a present,
+registered tag (the invariants in data-model `group_slices_result` and `nested_slices_result`), so neither an absent tag
+nor a present scalar answers `WIRE_LIMIT_EXCEEDED`. Rows 1 and 3 need no memory, so an exhausted arena does not change
+them. A nested `wire_group_too_large` maps to row 2 too, but is defensive: no shipped construction reaches it (research
+D5).
 
 No exception leaves either function.
 
@@ -37,6 +38,11 @@ Each is witnessed RED on `fa778a8e` (research D9).
 - Flat getter, row 3, a nested group's count tag read at the top level with a value `n ≥ 1` (for example 802 outside
   its `[453]` parent): was a cursor through the bare member fallback (derived from source; the RED run confirms or
   corrects it). With value 0 it was and stays `TYPE_MISMATCH`.
+- Flat getter, row 3, a body group read in a context its dictionary does not declare (a message whose entry does not
+  declare it, for example NoPartyIDs(453) in a declared message without Parties, or a message type the dictionary does
+  not declare), with a value `n ≥ 1`: was a cursor through the bare member fallback (derived from source; the RED run
+  confirms or corrects it). It now answers as QuickFIX `getGroup` does. Header groups at the top level are not in this
+  population (Unchanged).
 - Flat getter, row 2: was `TYPE_MISMATCH` for slice exhaustion and group-too-large; was an escaping `std::bad_alloc`
   for the cursor shell.
 - Nested getter, row 3, a present scalar on an exhausted arena: was `WIRE_LIMIT_EXCEEDED` when the sub-table build or
@@ -48,7 +54,7 @@ Each is witnessed RED on `fa778a8e` (research D9).
 - Nested getter, row 1, an absent tag on an exhausted arena: was `WIRE_LIMIT_EXCEEDED` or `TAG_NOT_FOUND`, depending
   on whether the sub-table build and the cache row fitted.
 - Nested getter, row 2: the cursor shell was an escaping `std::bad_alloc`; a nested sub-table over its entry cap read
-  `OK`/0; a group-too-large inside the sub-table read `OK`/0.
+  `OK`/0.
 - Nested getter, row 0b: a null `g` with both out-parameters non-null returned `NULL_HANDLE` without writing them.
 - Nested getter, row 3, a present tag in an instance whose sub-table build failed for another reason (073's
   malformed-data degradation): was `OK`/0. Whether a sub-table built over bytes the root already parsed, with the same
@@ -62,14 +68,16 @@ Each is witnessed RED on `fa778a8e` (research D9).
 - A dict-free message: the flat getter answers `TYPE_MISMATCH` for any present tag (fixpp#220 declines group reads).
 - The flat getter for CheckSum(10) (the root table's last entry): `TYPE_MISMATCH`.
 - A registered zero-count nested group (mid-instance or last): `OK`, count 0.
+- A header group read at the top level in a message type the dictionary does not declare (for example NoHops(627) in a
+  FIX 4.x frame): a group, as today and as QuickFIX reads it (research D2's header arm).
 - Error code values and names; no symbol added or removed.
 
 ## Typed C++ (`MessageView::group<>()`, generated group accessors)
 
 | Condition | `size()` | `alloc_failed()` | `read_failed()` |
 |---|---|---|---|
-| absent / not established as a group / zero instances read, on an ample or an exhausted arena | 0 | false | false |
-| an allocation failed (row 2's allocation causes) | 0 | **true** (top level: was false) | true |
+| absent / not established as a group, on an ample or an exhausted arena; or zero instances read (the read completed) | 0 | false | false |
+| an allocation failed (row 2's allocation causes, including a nested group whose sub-table could not be built, a zero-count one included) | 0 | **true** (top level: was false) | true |
 | a group wire limit (row 2's limit causes) | 0 | false | **true** (was: empty, not failed) |
 | n instances | n | false | false |
 

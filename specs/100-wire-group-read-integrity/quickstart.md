@@ -16,6 +16,7 @@ ctest --test-dir build/linux-clang-debug -L wire --output-on-failure
 ctest --test-dir build/linux-clang-debug -L capi --output-on-failure
 ctest --test-dir build/linux-clang-debug -L session --output-on-failure
 ctest --test-dir build/linux-clang-debug -L alloc_guard --output-on-failure   # inbound zero-allocation gates
+ctest --test-dir build/linux-clang-debug -L codegen --output-on-failure       # regenerated goldens (research census)
 ```
 
 Check each label against the bucket's `LABELS` in its `CMakeLists.txt` before relying on it; a label that matches

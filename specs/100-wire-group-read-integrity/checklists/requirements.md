@@ -32,3 +32,8 @@
 ## Notes
 
 - FR-003 widens #647 to the nested getter's scalar answer (OK/0 today); flagged for Gate A as a behaviour change.
+- FR-003 also changes a body group read in a context its dictionary does not declare (a group today through the bare
+  fallback, `TYPE_MISMATCH` after, as QuickFIX `getGroup`; US1.9); flagged at Gate A round 2 as a behaviour change, with
+  a B&L row. A header group at the top level stays a group (US1.10).
+- "Requirements are testable and unambiguous" holds for FR-011 only with its nested `wire_group_too_large` clause
+  marked defensive (Gate A round 2); its nested witness is the sub-table's `wire_offset_table_full` (research D7).
