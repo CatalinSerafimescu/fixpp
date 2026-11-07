@@ -13,9 +13,11 @@
 // `fixr:structure` for Orchestra), and per dictionary from the header and trailer alone.
 //
 // Keys research D9 has the sweep report rather than assert are printed with the prefix
-// `T028-REPORTED`. On a shipped dictionary a reported key fails, because T005's census reports
-// none of those shapes there; on the divergent-definition dictionaries (the `seed_div.xml`
-// shape of tests/capi/test_100_section_divergent.cpp) they are expected.
+// `T028-REPORTED`. A sweep run with `shipped` set fails on any reported key: that is research
+// D9's criterion (a reported key fails where T005's census did not predict it) applied to
+// the shipped dictionaries, whose prediction tasks T005 re-derives. The divergent-definition
+// dictionaries (the `seed_div.xml` shape of tests/capi/test_100_section_divergent.cpp) run
+// without it.
 
 #include <gtest/gtest.h>
 

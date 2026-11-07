@@ -421,12 +421,16 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_get_group(const fixpp_msg_t* msg, uint1
         return FIXPP_ERR_TAG_NOT_FOUND;
     }
 
-    // Obtain group slices. If group_slices returns empty AND the tag was found,
-    // the tag is present as a scalar (not a NoXxx group delimiter) → TYPE_MISMATCH.
-    auto slices = offsets.group_slices(group_tag);
-    if (slices.empty()) {
-        // Tag found in offsets but no group slices → not a group tag → TYPE_MISMATCH
+    // 100 (contracts/capi-group-getters.md rows 3 to 5, research D4): a present tag
+    // not established as a group here -> TYPE_MISMATCH; a registered group with zero
+    // instances read -> OK with a null cursor and count 0; otherwise the cursor.
+    auto const r = offsets.group_slices_status(group_tag);
+    if (!r.is_group) {
         return FIXPP_ERR_TYPE_MISMATCH;
+    }
+    auto const slices = r.slices;
+    if (slices.empty()) {
+        return FIXPP_ERR_OK;  // *group_out == nullptr, *count_out == 0
     }
 
     // Allocate the fixpp_group cursor shell from the parse arena backing the
@@ -567,13 +571,17 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
     if (r.status == fixpp::wire::group_read_status::alloc_failed)
         return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
 
+    // 100 (contracts/capi-group-getters.md rows 1, 3 to 5, research D4): a tag the
+    // read did not establish as a group in this instance's context -> the
+    // membership-free presence probe over the parent entry slice decides: absent ->
+    // TAG_NOT_FOUND, present -> TYPE_MISMATCH. A registered group with zero instances
+    // read -> OK with count 0.
+    if (!r.is_group) {
+        if (!scan_slice_for_tag(*sl, nested_tag, hooks_for(g))) return FIXPP_ERR_TAG_NOT_FOUND;
+        return FIXPP_ERR_TYPE_MISMATCH;
+    }
     auto slices = r.slices;
     if (slices.empty()) {
-        // Membership-free presence probe over the parent entry slice
-        // (contract C3): nested_tag entirely absent -> TAG_NOT_FOUND
-        // (NestedGroupAbsentTag); present (count field last / declared count
-        // 0) -> OK with count 0 (NestedGroupEmptyGroupCountLastField).
-        if (!scan_slice_for_tag(*sl, nested_tag, hooks_for(g))) return FIXPP_ERR_TAG_NOT_FOUND;
         return FIXPP_ERR_OK;
     }
 

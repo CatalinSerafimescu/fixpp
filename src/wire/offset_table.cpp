@@ -527,7 +527,7 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     // oracle nothing in this frame can be established as a repeating group,
     // so this function does not answer for a dict-free table: it reports the
     // group ABSENT, which is the same answer the dict-aware path below gives
-    // when the dictionary does not recognise `delim` as a member of `no_tag`.
+    // for a tag not registered as a group in this table's context (100, step 3).
     // group_slices() then yields an empty span and the C-ABI reports
     // TYPE_MISMATCH -- the documented E-2 / CA-010-read result ("not a
     // spurious group instance", 066 contracts/inbound-parse.md).
@@ -551,9 +551,15 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     // Message::setGroup when DataDictionary::getGroup fails, forming no
     // Group at all; QuickFIX/J guards every parseGroup call site on a
     // non-null dictionary. Neither derives a group extent from the wire.
-    if (hooks_.opaque_dict() == nullptr || hooks_.group_member_fn() == nullptr) {
+    //
+    // 100 (research D2): the order below is D2's six steps. Step 1, the decline,
+    // also covers a dict-aware bundle with no registration callback, which only the
+    // test seam can build.
+    if (hooks_.opaque_dict() == nullptr || hooks_.group_member_fn() == nullptr ||
+        hooks_.group_registered_fn() == nullptr) {
         return err_required_field_missing<group_index>();
     }
+    // Step 2: locate the count entry; absent -> absent.
     std::size_t count_idx = entries_.size();
     for (std::size_t e = 0; e < entries_.size(); ++e) {
         if (entries_[e].tag == no_tag) {
@@ -564,28 +570,32 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     if (count_idx == entries_.size()) {
         return err_required_field_missing<group_index>();
     }
-    std::size_t const first = count_idx + 1U;
-    if (first >= entries_.size()) {
-        // Count field is the last entry; group is empty.
-        return group_index{no_tag, first, 0U};
-    }
-
-    std::uint16_t const delim = entries_[first].tag;
     // This table's stored membership context (msg_type + bounded parent
     // path). A ROOT table is seeded at `MessageView` construction time
     // (`MessageView::group<>()` re-applies the same value, idempotent);
     // a NESTED sub-table is seeded once by `build_nested_subview`.
     group_context const ctx = stored_group_context();
-    // Validate that `no_tag` is actually a group count field by confirming
-    // the dictionary recognises `delim` (the tag immediately following the
-    // count field) as a member of `no_tag`'s group.  If the dict does NOT
-    // know about this membership the count field is a plain scalar (e.g.
-    // SenderCompID=49) and we must return an absent result so that
-    // group_slices() yields an empty span → the thunk can report
-    // TYPE_MISMATCH (E-2 / CA-010-read contract).
-    if (!hooks_.group_member_fn()(hooks_.opaque_dict(), ctx, no_tag, delim)) {
+    // Step 3: registration decides group-ness, before anything reads the value or
+    // the next field. Not registered -> not a group, which answers as absent does
+    // (`err_required_field_missing`); `group_slices_status().is_group` and `find()`
+    // tell the two apart.
+    if (!hooks_.group_registered_fn()(hooks_.opaque_dict(), ctx, no_tag)) {
         return err_required_field_missing<group_index>();
     }
+    // Step 4: a registered count field that is the last entry -> present, zero
+    // instances.
+    std::size_t const first = count_idx + 1U;
+    if (first >= entries_.size()) {
+        return group_index{no_tag, first, 0U};
+    }
+    // Step 5: a registered count whose next field is not a member of its group ->
+    // present, zero instances. The value is not read: a declared 0, a value with no
+    // leading digit and a lying count all land here or in step 6.
+    std::uint16_t const delim = entries_[first].tag;
+    if (!hooks_.group_member_fn()(hooks_.opaque_dict(), ctx, no_tag, delim)) {
+        return group_index{no_tag, first, 0U};
+    }
+    // Step 6: the extent walk, unchanged.
     // 063 Defect B: nesting-aware extent. The pre-063 flat
     // `seen_in_instance` heuristic truncated a multi-entry NESTED group at
     // its 2nd entry (its repeated delimiter looked like a new outer
@@ -657,7 +667,9 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
     // next group is materialized.
     for (auto const& gs : group_index_) {
         if (gs.no_tag == no_tag) {
-            return {.slices = {gs.data, gs.count}, .status = group_read_status::ok};
+            return {.slices = {gs.data, gs.count},
+                    .status = group_read_status::ok,
+                    .is_group = gs.is_group};
         }
     }
     try {
@@ -675,6 +687,9 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
         group_slice* slices = nullptr;  // arena buffer, sized by the count pass
         std::uint32_t n_written = 0;
         auto gi = group(no_tag);
+        // 100 (research D3): the read established `no_tag` as a group (zero
+        // instances included). Cached with the row, so a repeat answers the same.
+        bool const is_group = gi.has_value();
         if (gi) {
             std::size_t const first = gi->first_entry();
             // group() now returns the bounded extent (excluding trailing
@@ -864,8 +879,9 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
         // The row is trivially copyable, so `group_index_` reallocation memcpys
         // it and the arena buffer it points at never moves.
         group_index_.push_back(
-            group_span{.data = slices, .count = n_written, .no_tag = no_tag, .is_group = false});
-        return {.slices = {slices, n_written}, .status = group_read_status::ok};
+            group_span{.data = slices, .count = n_written, .no_tag = no_tag, .is_group = is_group});
+        return {
+            .slices = {slices, n_written}, .status = group_read_status::ok, .is_group = is_group};
     } catch (std::bad_alloc const&) {
         // 073 T003: this is the mode-(b) origin (FR-002) — the sub-table
         // built non-null but its own slice materialization exhausted the
@@ -936,9 +952,11 @@ static nested_slices_result resolve_nested_result(OffsetTable const* table,
         !table->build_status() && table->build_status().error() == core::error::out_of_memory;
     auto const s = table->group_slices_status(nested_no_tag);  // mode (b)
     bool const failed = s.status == group_read_status::alloc_failed || sub_build_oom;
+    // 100 (research D3): without a failure, the sub-table's own answer.
     return nested_slices_result{
         .slices = s.slices,
-        .status = failed ? group_read_status::alloc_failed : group_read_status::ok};
+        .status = failed ? group_read_status::alloc_failed : group_read_status::ok,
+        .is_group = !failed && s.is_group};
 }
 
 // 062 T006: single flat nested-subview cache (see offset_table.hpp for the

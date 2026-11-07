@@ -257,7 +257,30 @@ TEST(DictHooksCustomPair, CustomPairSplitsThroughEveryDictAwarePath) {
     ASSERT_EQ(outer.size(), 1U);
     auto const& outer0 = outer[0];
 
-    fixpp::wire::group_context const outer_ctx{.msg_type = "T"};
+    // 100 (FR-001, FR-003; research D2): a nested read is context-exact. NoCustom(6001) is
+    // registered under NoOuter(7001) only, so read under the message root's context it is not
+    // a group there. A fresh parse, because `nested_cache_` rows are keyed without the context
+    // (research D11 "Condition"), so a second read of the same slice under another context
+    // would be answered by the first.
+    {
+        std::pmr::monotonic_buffer_resource probe_arena;
+        auto probe = parser.parse(*fv, &probe_arena);
+        ASSERT_TRUE(probe.has_value()) << "parser.parse failed";
+        auto const probe_outer = probe->offsets().group_slices(7001);
+        ASSERT_EQ(probe_outer.size(), 1U);
+        auto const under_root = probe->offsets().nested_group_slices(
+            probe_outer[0].data, probe_outer[0].len, /*nested_no_tag=*/6001, probe->hooks(),
+            fv->token(), fixpp::wire::group_context{.msg_type = "T"});
+        EXPECT_TRUE(under_root.slices.empty())
+            << "FR-001: NoCustom read under the message root, where the dictionary declares "
+               "none, reads no instances";
+        EXPECT_FALSE(under_root.is_group)
+            << "FR-003: NoCustom is not a group under the message root";
+    }
+
+    // The pair witnesses read NoCustom in its instance's own context, NoOuter's, as every
+    // production caller of `nested_group_slices` passes it.
+    fixpp::wire::group_context const outer_ctx = mv->offsets().group_context_for(7001);
 
     // 6-arg overload: explicit caller-supplied hooks.
     auto explicit_hooks_result =
