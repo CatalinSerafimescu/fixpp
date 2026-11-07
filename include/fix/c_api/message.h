@@ -5,6 +5,9 @@
  * 099-fixt-appl-version-validation: fixpp_msg_version returns the resolved version as four
  * bytes, BREAKING in C-ABI 1.14.
  *
+ * 100-wire-group-read-integrity: fixpp_msg_get_group and fixpp_group_get_nested_group answer
+ * from one ordered table of endings, BREAKING in C-ABI 1.15 (the CA-010 block).
+ *
  * [2i §4.6/§4.9/§4.10/§10] /
  * specs/051-c-abi-message-accessors/contracts/{message-read,message-write,toapp-callback}.md.
  * C-clean: no C++ symbols, no C++ syntax. Compiles as C11.
@@ -99,6 +102,10 @@ typedef struct fixpp_resolved_msg_version {
  *          (parser.hpp:200); get_decimal(tag, mr) (parser.hpp:215); msg_type()
  *          (parser.hpp:143). Steady-state thunks: abort on any escaping C++
  *          exception ([2i §5.2]). Zero global-heap (SC-003).
+ *          Amended in C-ABI 1.15 (100): fixpp_msg_get_group and
+ *          fixpp_group_get_nested_group catch the std::bad_alloc of their cursor
+ *          shell's allocation and return FIXPP_ERR_WIRE_LIMIT_EXCEEDED (the
+ *          CA-010 block); no exception leaves either.
  *
  * Return codes common to all accessors:
  *   FIXPP_ERR_OK              — success
@@ -223,7 +230,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_get_msg_type(const fixpp_msg_t* msg,
 
 /* ── CA-010 repeating-group read ───────────────────────────────────────────
  *
- * Backing: wire::OffsetTable::group_slices(group_tag) (D-4) — per-instance
+ * Backing: wire::OffsetTable::group_slices_status(group_tag) (D-4; 100) — per-instance
  * arena slices materialized once, cached. Per-entry field reads walk the
  * instance slice for the target tag via field_iterator. Nested groups recurse
  * on the sub-slice.
@@ -233,16 +240,144 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_get_msg_type(const fixpp_msg_t* msg,
  * dispatch window, or (for a detached clone) until fixpp_msg_destroy. NON-owning —
  * do NOT destroy.
  *
- * Error codes:
- *   FIXPP_ERR_TAG_NOT_FOUND      — group or field absent
- *   FIXPP_ERR_TYPE_MISMATCH      — group_tag is present but is not a group delimiter
- *                                  (i.e. the tag is found in the message but has no
- *                                  group slices — a scalar field used as a group tag)
+ * Error codes of the per-entry field reads (fixpp_group_get_field_*):
+ *   FIXPP_ERR_TAG_NOT_FOUND      — the field is absent from the entry
  *   FIXPP_ERR_INDEX_OUT_OF_RANGE — entry_index >= count
+ *
+ * BREAKING (C-ABI 1.15, [const §X.7]; 100-wire-group-read-integrity, fixpp#541,
+ * #644, #647): the two group getters, fixpp_msg_get_group and
+ * fixpp_group_get_nested_group, answer from one ordered table; the first
+ * condition that holds is the answer. "Registered" means the dictionary
+ * registers the tag as a group in the read's context (the message type and the
+ * enclosing groups). "Present" means the tag occurs anywhere in the bytes the
+ * read covers: the whole message for the flat getter, the whole instance i,
+ * nested instances included, for the nested getter (so a tag that occurs only
+ * inside a deeper nested instance is present in instance i, and reads row 3 if
+ * it is not registered there).
+ *   0a  either out-parameter pointer is NULL: FIXPP_ERR_NULL_HANDLE, both
+ *       outputs untouched.
+ *   0b  both out-parameter pointers are non-NULL, and the handle is unusable or
+ *       the instance index is out of range; both outputs are written NULL / 0.
+ *       Flat, in this order: a NULL msg -> FIXPP_ERR_NULL_HANDLE; a msg that is
+ *       not an inbound message handle (wrong handle tag, or no wire view) ->
+ *       FIXPP_ERR_INVALID_HANDLE. Nested, in this order: a NULL g ->
+ *       FIXPP_ERR_NULL_HANDLE; i >= the cursor's count ->
+ *       FIXPP_ERR_INDEX_OUT_OF_RANGE.
+ *   1   the tag is not in the message (flat) or not in instance i (nested), on
+ *       an ample or an exhausted arena: FIXPP_ERR_TAG_NOT_FOUND, NULL / 0.
+ *   2   the tag is present and registered, and the read could not complete: an
+ *       allocation from the per-message arena failed (instance slices, a cache
+ *       row, a nested sub-table, the cursor shell), or a group wire limit was
+ *       hit (top level: the per-instance entry cap, the nesting depth; nested:
+ *       the sub-table's wire_offset_table_full, its entry cap or its index probe
+ *       budget). A nested group whose sub-table could not be built is included,
+ *       a zero-count one too: FIXPP_ERR_WIRE_LIMIT_EXCEEDED, NULL / 0. A read
+ *       that failed answers row 2 on the first and on every repeat read. A
+ *       completed read answers row 2 on a repeat only when that call's cursor
+ *       shell does not fit.
+ *   3   the tag is present and not established as a group: not registered in
+ *       this context, wherever it sits and whatever its value; or (nested)
+ *       instance i's sub-table build failed for a reason other than an
+ *       allocation or a wire limit, such as malformed data (a custom dictionary
+ *       whose group delimiter is a Data tag whose Length is the previous
+ *       instance's last member splits that Data value differently in the
+ *       sub-table): FIXPP_ERR_TYPE_MISMATCH, NULL / 0.
+ *   4   the tag is registered and zero instances are read: a declared count of
+ *       0 (a value with no leading digit reads as 0), a count field last in its
+ *       instance, or a declared count whose next field is not a member:
+ *       FIXPP_ERR_OK, *out NULL, *count_out 0.
+ *   5   the tag is registered and one or more instances are read: FIXPP_ERR_OK,
+ *       the cursor, the instance count.
+ * A read is reported failed only for a present, registered tag, so neither an
+ * absent tag nor a present scalar answers FIXPP_ERR_WIRE_LIMIT_EXCEEDED; rows 1
+ * and 3 need no memory, so an exhausted arena does not change them. A nested
+ * group stopped by the per-instance entry cap or the nesting depth
+ * (wire_group_too_large) maps to row 2 too, and is defensive: a nested sub-table
+ * is built with the default entry cap, which equals the per-instance cap, so an
+ * instance that large fails the sub-table's build first; and a parent read that
+ * completed bounds the nested depth when the nested read uses the bundle the
+ * parent was read with, as both getters do. Row 4 has no cursor, so there is
+ * nothing to read with fixpp_group_get_*; a cursor is never released in any
+ * case. No exception leaves either getter; other reads over the same arena keep
+ * their own documented endings.
+ * Changes from 1.14:
+ *   - flat, row 4: a registered zero count mid-body or as the last body field,
+ *     whether member or non-member fields follow it (a header or trailer
+ *     group's count tag holding 0 included), was FIXPP_ERR_TYPE_MISMATCH;
+ *   - flat, row 4: a registered lying count (n >= 1, next field not a member)
+ *     was FIXPP_ERR_TYPE_MISMATCH (the nested getter already answered OK / 0);
+ *   - flat, row 3: a nested group's count tag read at the top level with a
+ *     value n >= 1 (NoPartySubIDs(802) outside its NoPartyIDs(453) parent, for
+ *     example) was a cursor; with value 0 it was and stays
+ *     FIXPP_ERR_TYPE_MISMATCH;
+ *   - flat, row 3: a body group read with a value n >= 1 in a context its
+ *     dictionary does not declare (a declared message whose entry does not
+ *     declare it, or an undeclared message type) was a cursor; it now answers
+ *     as QuickFIX getGroup does. Header and trailer groups, at any depth, are
+ *     outside this population; a tag the header declares as a scalar and some
+ *     message declares as a body group, read in a message type that does not
+ *     declare that group, is inside it (QuickFIX reads it as a header scalar);
+ *   - flat, row 2: was FIXPP_ERR_TYPE_MISMATCH for instance slices that did not
+ *     fit and for a group over a wire limit, and an escaping std::bad_alloc for
+ *     the cursor shell;
+ *   - nested, row 3: a present scalar on an exhausted arena was
+ *     FIXPP_ERR_WIRE_LIMIT_EXCEEDED when the sub-table build or its cache row did
+ *     not fit, OK / 0 when both did;
+ *   - nested, row 3: a present scalar mid-instance or last in its instance was
+ *     OK / 0;
+ *   - nested, row 3: a registered count tag read in a context it has no record
+ *     for was OK / 0, or a cursor;
+ *   - nested, row 1: an absent tag on an exhausted arena was
+ *     FIXPP_ERR_WIRE_LIMIT_EXCEEDED or FIXPP_ERR_TAG_NOT_FOUND, depending on
+ *     whether the sub-table build and its cache row fitted;
+ *   - nested, row 2: the cursor shell was an escaping std::bad_alloc; a nested
+ *     sub-table over its entry cap read OK / 0;
+ *   - nested, row 0b: a NULL g with both out-parameters non-NULL returned
+ *     FIXPP_ERR_NULL_HANDLE without writing them;
+ *   - nested, row 3: a present tag in an instance whose sub-table build failed
+ *     for malformed data (row 3's cause) was OK / 0;
+ *   - both, row 5 (custom dictionaries only): a registered group whose
+ *     occurrence the dictionary defines differently from the definition its bare
+ *     group store holds for that count tag (a header or trailer group, or a
+ *     group nested in one, read in a message type the dictionary does not
+ *     declare; a count tag a declared message reaches at a second parent path,
+ *     read at the path with no exact context entry) was FIXPP_ERR_TYPE_MISMATCH,
+ *     or a group whose instances were lost or mis-split; it is now a cursor
+ *     split at the occurrence's own definition, as QuickFIX C++ reads it;
+ *   - the session observers (session.h): a frame crafted against the index seed
+ *     now fails the parse (session.h's 1.15 notes).
+ * Migration from 1.14. Flat getter, FIXPP_ERR_TYPE_MISMATCH: a caller that read
+ * it as "zero instances" now gets FIXPP_ERR_OK with count 0 and a NULL cursor
+ * for a registered group; a caller that read it as "could not read" now gets
+ * FIXPP_ERR_WIRE_LIMIT_EXCEEDED; FIXPP_ERR_TYPE_MISMATCH now means only
+ * "present, not a group here". Nested getter, OK / 0: a caller that read it as
+ * "scalar or empty" now gets FIXPP_ERR_TYPE_MISMATCH for a scalar, and OK / 0
+ * only for a registered group with zero instances. Both getters: test
+ * FIXPP_ERR_OK with count 0 for an empty group, FIXPP_ERR_TYPE_MISMATCH for "not
+ * a group", FIXPP_ERR_TAG_NOT_FOUND for "absent", and
+ * FIXPP_ERR_WIRE_LIMIT_EXCEEDED for "could not complete", which includes a
+ * cursor shell that does not fit (in 1.14 an escaping exception).
  */
 
 /** Obtain the group cursor and instance count for group_tag (the NoXxx count field).
  *  *group_out aliases the parent message's parse arena.
+ *
+ *  Returns, BREAKING in C-ABI 1.15 (the ordered table in the CA-010 block):
+ *    FIXPP_ERR_NULL_HANDLE         — group_out or count_out is NULL (outputs
+ *                                    untouched), or msg is NULL (outputs NULL / 0)
+ *    FIXPP_ERR_INVALID_HANDLE      — msg is not an inbound message handle
+ *                                    (outputs NULL / 0)
+ *    FIXPP_ERR_TAG_NOT_FOUND       — group_tag is not in the message
+ *    FIXPP_ERR_WIRE_LIMIT_EXCEEDED — group_tag is present and registered and the
+ *                                    read could not complete: the arena did not
+ *                                    fit the instance slices, a cache row or the
+ *                                    cursor shell, or an instance exceeded the
+ *                                    per-instance entry cap or the nesting depth
+ *    FIXPP_ERR_TYPE_MISMATCH       — group_tag is present and not a group in the
+ *                                    message's context
+ *    FIXPP_ERR_OK                  — a registered group: *count_out instances,
+ *                                    *group_out NULL when there are none
+ *  No exception leaves this function.
  *
  *  Reentrancy: requires-session-lock
  */
@@ -282,6 +417,29 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_field_decimal(const fixpp_group_t
 
 /** Descend into a nested group `nested_tag` within entry `i` of cursor `g`.
  *  *nested_out aliases the parent cursor's backing; lifetime bounded by it.
+ *
+ *  Returns, BREAKING in C-ABI 1.15 (the ordered table in the CA-010 block):
+ *    FIXPP_ERR_NULL_HANDLE         — nested_out or nested_count_out is NULL
+ *                                    (outputs untouched), or g is NULL (outputs
+ *                                    NULL / 0)
+ *    FIXPP_ERR_INDEX_OUT_OF_RANGE  — i >= g's count (outputs NULL / 0)
+ *    FIXPP_ERR_TAG_NOT_FOUND       — nested_tag is not in instance i
+ *    FIXPP_ERR_WIRE_LIMIT_EXCEEDED — nested_tag is present in instance i and
+ *                                    registered there, and the read could not
+ *                                    complete: the arena did not fit the
+ *                                    sub-table, a cache row, the instance slices
+ *                                    or the cursor shell, or the sub-table's
+ *                                    build exceeded its entry cap or its index
+ *                                    probe budget (wire_offset_table_full). A
+ *                                    nested wire_group_too_large maps here too
+ *                                    and is defensive (the CA-010 block).
+ *    FIXPP_ERR_TYPE_MISMATCH       — nested_tag is present in instance i and not
+ *                                    a group there, or instance i's sub-table
+ *                                    build failed for malformed data
+ *    FIXPP_ERR_OK                  — a registered group: *nested_count_out
+ *                                    instances, *nested_out NULL when there are
+ *                                    none
+ *  No exception leaves this function.
  *
  *  Reentrancy: requires-session-lock
  */
