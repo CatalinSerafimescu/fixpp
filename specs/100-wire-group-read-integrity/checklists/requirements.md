@@ -27,7 +27,7 @@
 - [x] All functional requirements have clear acceptance criteria
 - [x] User scenarios cover primary flows
 - [x] Feature meets measurable outcomes defined in Success Criteria
-- [x] No implementation details leak into specification — FR-007 names the expected code, to be confirmed at plan
+- [x] No implementation details leak into specification — FR-007 names the code (`FIXPP_ERR_WIRE_LIMIT_EXCEEDED`, confirmed at Gate A round 1)
 
 ## Notes
 
