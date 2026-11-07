@@ -1039,12 +1039,16 @@ const std::string& kEightByteEntry() {
     return value;
 }
 
-// The gate's answer: 373 and 371, state and consume. A Reject's 372 is not asserted (E-10).
-void expect_refused_on_35(const Ending& e) {
+// The gate's answer: 373, 371 and 58, state and consume. A Reject's 372 is not asserted (E-10).
+// 101 FR-001 and FR-003 supersede this cell's 099 ending (373=5 on 35, the route table's enum for
+// MsgType): the routed table does not define the MsgType, so the validator refuses it as an
+// invalid MsgType, 373=11 with no 371 and QuickFIX C++'s text.
+void expect_refused_as_invalid_msg_type(const Ending& e) {
     ASSERT_EQ(e.out.size(), 1U) << log_form(e);
     EXPECT_EQ(tag_value(e.out[0], 35), "3");
-    EXPECT_EQ(tag_value(e.out[0], 373), "5") << log_form(e);
-    EXPECT_EQ(tag_value(e.out[0], 371), "35") << log_form(e);
+    EXPECT_EQ(tag_value(e.out[0], 373), "11") << log_form(e);
+    EXPECT_EQ(tag_value(e.out[0], 371), "") << log_form(e);
+    EXPECT_EQ(tag_value(e.out[0], 58), "Invalid MsgType") << log_form(e);
     EXPECT_EQ(e.after, fsm_state::Active);
     EXPECT_EQ(e.next_in_after, e.next_in_before + 1) << log_form(e);
     EXPECT_EQ(e.from_app, 0);
@@ -1076,12 +1080,13 @@ TEST_P(W25EightBytesDeclared, NoApplVerId_DeliveredOnTheDefaultsSlot) {
 
 TEST_P(W25EightBytesDeclared, Explicit1128_9_Refused) {
     Rig& r = *run_.rig;
-    expect_refused_on_35(r.deliver(frame_35("ABCDEFGH", r.peer_ctx(2), "58=x\x01", "1128=9\x01")));
+    expect_refused_as_invalid_msg_type(
+        r.deliver(frame_35("ABCDEFGH", r.peer_ctx(2), "58=x\x01", "1128=9\x01")));
 }
 
 TEST_P(W25EightBytesDeclared, Sibling_1137Answers_Refused) {
     Rig& r = *run_.rig;
-    expect_refused_on_35(r.deliver(frame_35("ABCDEFGX", r.peer_ctx(2), "58=x\x01")));
+    expect_refused_as_invalid_msg_type(r.deliver(frame_35("ABCDEFGX", r.peer_ctx(2), "58=x\x01")));
 }
 
 // Not validating, a named boundary cell: T, A and L.

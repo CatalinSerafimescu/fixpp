@@ -19,14 +19,15 @@
 //     any-other-type row consumes the number and sends Reject 373=0 with no 371
 //     and Text(58) "Malformed field: invalid tag";
 //   - otherwise the validate gate (`Session::validate_inbound_`) runs before any
-//     MsgType dispatch: `dictionary_driven_validator::validate` walks every field
-//     from BeginString(8) in document order (step 1: unexpected tag, then enum,
-//     then type), then the required fields (step 2), then the groups (step 3);
-//     its error maps to 373 through `wire_error_to_session_reject_reason`
-//     (include/fixpp/wire/reject_reason_map.hpp), its offending tag is 371, and
-//     `emit_session_reject_` writes 45 (the frame's 34) and 372 (its 35);
-//   - an unknown MsgType has an empty valid-tag set (`table_view::valid_tags_for`),
-//     so its first field, BeginString(8), is the unexpected tag;
+//     MsgType dispatch: `dictionary_driven_validator::validate` checks the header
+//     order, then refuses a MsgType the table does not define (101 FR-001: 373=11,
+//     no 371), then walks every field from BeginString(8) in document order
+//     (step 1: a tag outside the message, then enum, then type), then the required
+//     fields (step 2), then the groups (step 3); its error maps to 373 through
+//     `wire_error_to_session_reject_reason` (include/fixpp/wire/reject_reason_map.hpp),
+//     its offending tag is 371, and `emit_session_reject_` writes 45 (the frame's
+//     34), 372 (its 35) and Text(58), QuickFIX C++'s text for the 373 (101 FR-003,
+//     `session_reject_reason_text` in src/session/session.cpp);
 //   - a frame that passes the gate reaches Application::fromApp.
 // Every frame is fed to its own freshly established session at MsgSeqNum 2.
 
@@ -210,29 +211,37 @@ void expect_accepted(BaseRun const& run, std::string_view msg_type) {
     EXPECT_EQ(run.state, fsm_state::Active) << "the session stays Active";
 }
 
-// AS-1: step 1 meets 5001, not in NewOrderSingle's valid tags (unexpected tag).
+// AS-1: step 1 meets 5001, not in NewOrderSingle's valid tags (unexpected tag). 101 FR-003
+// adds the gate Reject's Text(58).
 TEST(DialectOverlayInboundBase098, AS1_CustomFieldOnNewOrderSingle_Rejected) {
     BaseFixture fx;
-    expect_reject(fx.feed_one(f098::frame_as1_custom_field(2)), "D", "2", "5001", "");
+    expect_reject(fx.feed_one(f098::frame_as1_custom_field(2)), "D", "2", "5001",
+                  "Tag not defined for this message type");
 }
 
 // AS-2: the parse has no group check, so it passes; step 1's walk is flat and
-// meets 5002 inside the Parties entry (unexpected tag).
+// meets 5002 inside the Parties entry (unexpected tag). 101 FR-003 adds the
+// gate Reject's Text(58).
 TEST(DialectOverlayInboundBase098, AS2_CustomPartiesMember_Rejected) {
     BaseFixture fx;
-    expect_reject(fx.feed_one(f098::frame_as2_parties_member(2)), "D", "2", "5002", "");
+    expect_reject(fx.feed_one(f098::frame_as2_parties_member(2)), "D", "2", "5002",
+                  "Tag not defined for this message type");
 }
 
-// AS-3: U1 is not a FIX44 MsgType, so step 1 rejects its first field, 8, with
-// or without U1's required field.
+// AS-3: U1 is not a FIX44 MsgType, so the validator refuses it as an invalid
+// MsgType, with or without U1's required field: 373=11, no 371, Text(58). 101
+// FR-001 and FR-003 supersede this cell's 098 ending (373=2 on BeginString(8),
+// B-075-6's universal 371).
 TEST(DialectOverlayInboundBase098, AS3_PrivateMsgTypeWithRequired_Rejected) {
     BaseFixture fx;
-    expect_reject(fx.feed_one(f098::frame_as3_private_with_required(2)), "U1", "2", "8", "");
+    expect_reject(fx.feed_one(f098::frame_as3_private_with_required(2)), "U1", "11", "",
+                  "Invalid MsgType");
 }
 
 TEST(DialectOverlayInboundBase098, AS3_PrivateMsgTypeMissingRequired_Rejected) {
     BaseFixture fx;
-    expect_reject(fx.feed_one(f098::frame_as3_private_missing_required(2)), "U1", "2", "8", "");
+    expect_reject(fx.feed_one(f098::frame_as3_private_missing_required(2)), "U1", "11", "",
+                  "Invalid MsgType");
 }
 
 // AS-4: FIX44 declares no Length+Data pair on 5010 and 5011, so the header scan
@@ -256,10 +265,12 @@ TEST(DialectOverlayInboundBase098, AS5_PromotedFieldMissingOnOtherMsgType_Accept
     expect_accepted(fx.feed_one(f098::frame_as5_other_msgtype(2)), "D");
 }
 
-// AS-6: step 1's enum check: Z is not among OrdType(40)'s FIX44 values.
+// AS-6: step 1's enum check: Z is not among OrdType(40)'s FIX44 values. 101
+// FR-003 adds the gate Reject's Text(58).
 TEST(DialectOverlayInboundBase098, AS6_CustomOrdTypeValue_Rejected) {
     BaseFixture fx;
-    expect_reject(fx.feed_one(f098::frame_as6_ordtype_custom(2)), "D", "5", "40", "");
+    expect_reject(fx.feed_one(f098::frame_as6_ordtype_custom(2)), "D", "5", "40",
+                  "Value is incorrect (out of range) for this tag");
 }
 
 // Enum closure: Text(58) declares no values in FIX44, so any value passes the

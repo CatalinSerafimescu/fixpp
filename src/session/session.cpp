@@ -2827,6 +2827,37 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 
 namespace {
 
+// 101-inbound-reject-fidelity (research D3, FR-003): Text(58) of a validation-gate Reject, a
+// function of its SessionRejectReason(373): QuickFIX C++'s SessionRejectReason_*_TEXT literal
+// (src/C++/Values.h at the commit the spec cites), empty for any other reason. The list is
+// derived, not kept: re-derive it from the reasons wire_error_to_session_reject_reason returns
+// from a named case, plus those refuse_active_frame_ and validate_inbound_'s 1128 arm set; a
+// reason found there that is missing here, other than the map's fail-closed default, is a defect.
+[[nodiscard]] std::string_view session_reject_reason_text(int reason) noexcept {
+    switch (reason) {
+        case 0:
+            return "Invalid tag number";
+        case 1:
+            return "Required tag missing";
+        case 2:
+            return "Tag not defined for this message type";
+        case 4:
+            return "Tag specified without a value";
+        case 5:
+            return "Value is incorrect (out of range) for this tag";
+        case 6:
+            return "Incorrect data format for value";
+        case 11:
+            return "Invalid MsgType";
+        case 13:
+            return "Tag appears more than once";
+        case 14:
+            return "Tag specified out of required order";
+        default:
+            return {};
+    }
+}
+
 // One parse of an ApplVerID value, for 1128, 1137 and 1130 (data-model E-7, E-10). A profile's
 // default answers only an empty value (resolve_application_version), and this one's is Unknown, so
 // an empty value fails and a non-empty one reads no default.
@@ -3749,9 +3780,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
                 co_return co_await close_on_late_parse_failure_();
             }
             if (v.outcome == validate_outcome::reject) {
-                auto rj = co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
-                                                        v.reject.reason, v.reject.ref_tag_id,
-                                                        /*text=*/{}, fsm_state::NotConnected);
+                auto rj = co_await emit_session_reject_(
+                    parse_seqnum(hdr.msg_seq_num), hdr.msg_type, v.reject.reason,
+                    v.reject.ref_tag_id, session_reject_reason_text(v.reject.reason),
+                    fsm_state::NotConnected);
                 // 099 (data-model E-7's S2, FR-010): any other Reject stays in the arm.
                 if (rj && logon_reject_disconnects_(hdr, v.reject.ref_tag_id)) {
                     disconnect_unless_superseded_(fsm_state::NotConnected);
@@ -4949,7 +4981,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_valida
             co_return c;
         }
         co_return co_await emit_session_reject_(rej_seq, rej_type, v.reject.reason,
-                                                v.reject.ref_tag_id);
+                                                v.reject.ref_tag_id,
+                                                session_reject_reason_text(v.reject.reason));
     }
     co_return fixpp::core::expected_t<void>{};
 }
@@ -5757,9 +5790,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
                 co_return co_await close_on_late_parse_failure_();
             }
             if (v.outcome == validate_outcome::reject) {
-                auto rj = co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
-                                                        v.reject.reason, v.reject.ref_tag_id,
-                                                        /*text=*/{}, fsm_state::LogonSent);
+                auto rj = co_await emit_session_reject_(
+                    parse_seqnum(hdr.msg_seq_num), hdr.msg_type, v.reject.reason,
+                    v.reject.ref_tag_id, session_reject_reason_text(v.reject.reason),
+                    fsm_state::LogonSent);
                 // 099 (data-model E-7's S2, FR-010): any other Reject stays in the arm.
                 if (rj && logon_reject_disconnects_(hdr, v.reject.ref_tag_id)) {
                     disconnect_unless_superseded_(fsm_state::LogonSent);

@@ -240,9 +240,9 @@ public:
         }
 
         // ── Step 1: iterate every present field ──────────────────────────
-        // Hoist (perf): `field_valid_for(msg_type, tag)` re-hashes the
-        // loop-invariant msg_type on every field; Step 1 tests membership in
-        // the view fetched above instead.
+        // Hoist (perf): `field_valid_for(msg_type, tag)` would re-hash the
+        // loop-invariant msg_type per field, so the walk below tests membership
+        // in the view fetched above instead.
         iter_t const begin{msg.bytes(), 0, hooks};
         iter_t const end{msg.bytes(), msg.bytes().size(), hooks};
         auto const fields =

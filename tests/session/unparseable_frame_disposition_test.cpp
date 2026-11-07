@@ -2698,9 +2698,14 @@ TEST(UnparseableFrameDisposition, LateSite_Control_BelowCeiling_ValidateGate_Par
     }
     int const app_before = c.app->from_app;
     c.fix.feed(*c.sess, make_raw_frame("D", 2, kNewOrderFields + filler(kControlFillerFields)));
-    expect_only_reject(
-        c.fix, {.ref_seq = "2", .ref_msg_type = "D", .reason = "2", .ref_tag = "5000", .text = ""},
-        "control: the validator's Reject of the first filler tag");
+    // 101 FR-003: a validation-gate Reject carries QuickFIX C++'s text for its 373.
+    expect_only_reject(c.fix,
+                       {.ref_seq = "2",
+                        .ref_msg_type = "D",
+                        .reason = "2",
+                        .ref_tag = "5000",
+                        .text = "Tag not defined for this message type"},
+                       "control: the validator's Reject of the first filler tag");
     EXPECT_TRUE(c.sess->is_open()) << "control: the session stays open";
     EXPECT_EQ(c.sess->state(), fsm_state::Active) << "control: state after the frame";
     EXPECT_EQ(c.app->from_app, app_before) << "control: a rejected message is not delivered";

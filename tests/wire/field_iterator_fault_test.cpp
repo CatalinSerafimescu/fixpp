@@ -479,8 +479,10 @@ TEST(ValidatorFieldFault, FailedBuild_OrdinaryDict_LengthDataMismatch) {
 }
 
 // A build that failed for a reason other than an encoding fault (here the
-// offset-table cap) leaves a walk with no fault, so validate behaves as it did
-// before the fault pre-scan: the empty MsgType makes tag 8 an unexpected tag.
+// offset-table cap) leaves a walk with no fault, so validate falls through the
+// fault pre-scan. The failed build leaves msg_type() empty, which the table does
+// not define, so 101 FR-001's MsgType check refuses it, with no RefTagID (101
+// research D2 supersedes the ending this cell pinned: tag 8 an unexpected tag).
 TEST(ValidatorFieldFault, FailedBuild_OrdinaryDict_CapWithNoFaultFallsThrough) {
     std::string body = "35=T|";
     for (std::size_t i = 0; i < fixpp::wire::default_max_offset_entries; ++i) {
@@ -500,8 +502,8 @@ TEST(ValidatorFieldFault, FailedBuild_OrdinaryDict_CapWithNoFaultFallsThrough) {
     std::uint16_t ref = kRefSentinel;
     auto const r = v.validate(mv, &mr, &ref);
     ASSERT_FALSE(r.has_value());
-    EXPECT_EQ(r.error(), error::wire_unexpected_tag);
-    EXPECT_EQ(ref, 8U);
+    EXPECT_EQ(r.error(), error::wire_invalid_msg_type);
+    EXPECT_EQ(ref, kRefSentinel) << "an undefined MsgType names no field";
 }
 
 // ── A malformed field inside a counted value (T062b) ────────────────────────
