@@ -58,6 +58,9 @@ if(FIXPP_CODEGEN_FIX_LATEST)
 endif()
 add_test(NAME codegen_pure_tests COMMAND codegen_pure_tests)
 set_tests_properties(codegen_pure_tests PROPERTIES LABELS codegen)
+# 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST codegen_pure_tests APPEND PROPERTY LABELS 100)
 
 # ── Standalone: isolation-sensitive codegen tests (FR-002) ───────────────────
 # codegen_group_entry_alloc_gate_test: in-TU global operator-new counter +
@@ -522,6 +525,9 @@ set_tests_properties(codegen_determinism_test PROPERTIES
 # 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
 # LABELS setter for this entry, so the existing labels survive.
 set_property(TEST codegen_determinism_test APPEND PROPERTY LABELS 097)
+# 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST codegen_determinism_test APPEND PROPERTY LABELS 100)
 
 # 077-builder-args-dedup T019 [US2]: only defined when THIS build was
 # configured with the tier ON -- MainTreeVlatestBuildersUnaffectedByOffPathWitness
@@ -598,6 +604,9 @@ add_test(
 )
 set_tests_properties("fixpp::dict::read-tier-byte-diff" PROPERTIES
   LABELS "codegen;077;read-tier-byte-diff;091")
+# 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST "fixpp::dict::read-tier-byte-diff" APPEND PROPERTY LABELS 100)
 
 # 078-precompiled-builder-libs T002 (research.md R2a — Phase-0 BLOCKING
 # prerequisite): hand-written ~30-line ODR / builder⟂validator (SC-003) probe.

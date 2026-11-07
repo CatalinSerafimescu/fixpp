@@ -84,6 +84,9 @@ set_tests_properties(wire_pure_tests PROPERTIES LABELS "079;wire")
 # 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST wire_pure_tests APPEND PROPERTY LABELS 093)
+# 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST wire_pure_tests APPEND PROPERTY LABELS 100)
 
 # ── Standalone: 061-slim body-builder alloc gate (FR-002) ────────────────────
 # in-TU global ::operator new / ::operator new[] allocation counter (D3).
@@ -165,6 +168,9 @@ set_property(TEST wire_dict_tests APPEND PROPERTY LABELS 092)
 # 099-fixt-appl-version-validation: label 099 (tasks.md T003). APPEND, after the last LABELS
 # setter for this entry, so the existing labels survive.
 set_property(TEST wire_dict_tests APPEND PROPERTY LABELS 099)
+# 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST wire_dict_tests APPEND PROPERTY LABELS 100)
 # 083 T021 (W-10a leg 4, contracts/typed_read_splitter.md): a BACKSTOP, never
 # the discriminator. Leg 4's depth-capped chain fixture drives
 # consume_group_extent's outer loop with an attacker-shaped declared count; an

@@ -142,6 +142,9 @@ set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 098)
 # 099-fixt-appl-version-validation: label 099 (tasks.md T003). APPEND, after the last LABELS
 # setter for this entry, so the existing labels survive.
 set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 099)
+# 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 100)
 
 # T004 (US1, SC-004) — 051 error-block foundational oracle (translate re-point +
 # strerror + per-code-minor downgrade).  T022 (US5) appends live end-to-end arms
@@ -266,6 +269,9 @@ target_link_libraries(capi_message_read_test PRIVATE
 target_include_directories(capi_message_read_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
 add_test(NAME capi_message_read COMMAND capi_message_read_test)
 set_tests_properties(capi_message_read PROPERTIES LABELS "capi;051")
+# 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST capi_message_read APPEND PROPERTY LABELS 100)
 
 # fixpp#428 / #426 (design .specify/426-428-length-data-pairs.md §5, §6): the C-ABI
 # Length+Data setters and commit-time pair rule, and a two-engine loopback whose
@@ -294,6 +300,9 @@ target_link_libraries(capi_message_read_failloud_test PRIVATE
 target_include_directories(capi_message_read_failloud_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
 add_test(NAME capi_message_read_failloud COMMAND capi_message_read_failloud_test)
 set_tests_properties(capi_message_read_failloud PROPERTIES LABELS "capi;073")
+# 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST capi_message_read_failloud APPEND PROPERTY LABELS 100)
 
 # message_write_test — CA-009/CA-010-write: outbound construct/populate/commit + group builder
 add_executable(capi_message_write_test message_write_test.cpp)
@@ -660,6 +669,9 @@ add_test(NAME capi_inbound_frame_dispositions COMMAND capi_inbound_frame_disposi
 # lane /speckit-verify runs and on MSVC debug and msvc-asan (re-measure on msvc-asan,
 # under the same -j the lane uses), and size from the slowest.
 set_tests_properties(capi_inbound_frame_dispositions PROPERTIES LABELS "capi;093" TIMEOUT 1200)
+# 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST capi_inbound_frame_dispositions APPEND PROPERTY LABELS 100)
 
 # 098-dialect-overlay W-9, the live arm: two C-ABI engines, each with its worker
 # thread, over loopback; standalone ([const §VII.8]). Each session's dictionary is

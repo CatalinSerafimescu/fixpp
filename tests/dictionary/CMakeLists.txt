@@ -94,6 +94,9 @@ set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 098)
 # setter for this entry, so the existing labels survive. reused_tag_census_test.cpp and
 # xml_enum_codeset_test.cpp, which stay in this bucket, hold expected values 099 updated.
 set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 099)
+# 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 100)
 
 # ── 098-dialect-overlay: the overlay witnesses W-0..W-4 and W-9's status-mapping rows ──
 # Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); a bucket of
