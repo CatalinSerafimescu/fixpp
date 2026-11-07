@@ -23,8 +23,8 @@ A counterparty, and the people reading its logs, see three things that differ fr
    defines but not for this MsgType; both answer 373=2. QuickFIX answers 373=0 (Invalid tag number) for the first and
    373=2 for the second, both with 371 = the tag. And fixpp's validator Rejects carry no Text(58); all three engines
    send QuickFIX's reason text.
-3. **Two MsgTypes in one frame (#657, #658).** The header scan keeps the **last** 35, the Logon interpreter reads the
-   last 35, and the validator and the message view read the **first**. So a validation-off session establishes on a
+3. **Two MsgTypes in one frame (#657, #658).** The header scan keeps the **last** 35, the Logon interpreter and
+   LogoutSent's reply test read the last 35, and the validator and the message view read the **first**. So a validation-off session establishes on a
    frame whose third field is `35=D` and which carries Logon fields and a later `35=A` (#657), and a non-FIXT validating
    session validates a frame by its first MsgType and dispatches it by its last (#658): third field `0` with a later
    `35=D` is validated as a Heartbeat and delivered to `fromApp`. Feature 099 closed this for a **validating FIXT**
@@ -73,6 +73,39 @@ A counterparty, and the people reading its logs, see three things that differ fr
 - Q: An undefined tag inside a repeating-group instance? → A: 373=0 with 371 = the tag, the same rule as anywhere else
   (QuickFIX/J answers 373=2, QuickFIX C++ answers 0, 2 or 16 by layout; one rule is chosen, confirmed at Gate A).
 
+### Session 2026-11-07 (Gate A round 1)
+
+Resolutions of the reviews' findings; the decisions they land in are research D1–D10 and its Supersessions table.
+
+- Q: What is "the third field's MsgType" in a reader that scans? → A: the **first 35**. On every frame a state arm
+  handles it is the third field, because 093 disregards any other frame first (D4).
+- Q: LogoutSent, which has no validation gate? → A: on every session kind, a frame is the Logout reply only when its
+  first 35 is 5: `D…5` no longer confirms, `5…D` does. No Reject. This follows from "the third field everywhere" and
+  changes 099's pinned `LO-a` rows (research Supersessions).
+- Q: A frame with three or more 35s? → A: a conflict whenever **any** later 35 differs from the first (`D…A…D` is one).
+  The Reject is 373=14 when any later 35 lies past the header, else 373=13 when one lies in it — QuickFIX C++'s
+  structure-before-iterate precedence. With two 35s this equals 099's answer (D5).
+- Q: The header boundary for that choice on a non-FIXT session? → A: the session dictionary's header ∪ the FIXT standard
+  header set, as on FIXT, which is the closer model of QuickFIX C++'s `isHeaderField`; the residual (tags fixpp's
+  FIXT standard header set holds and QuickFIX C++'s static list lacks) is disclosed. Codex's dictionary-only boundary is not adopted (plan.md `## Gate A`, round 1 disagreements).
+- Q: "Handled as X, no Reject" when X's own path can Reject (X = 4, X = A)? → A: defined by a differential oracle: the
+  ending equals that of the same frame with every later 35 removed and re-framed. "No Reject" means none for the repeat
+  (D6).
+- Q: An undefined tag inside a group — confirmed? → A: yes for the AS-2 layout (the tag last in a single instance):
+  QuickFIX C++ answers 373=0, 371 = the tag, as fixpp. Mid-instance or several instances, C++ can answer 2 or 16;
+  disclosed as a B-row (D2).
+- Q: 092's disposer bounds 372 at the longest shipped MsgType; does FR-007 reach it? → A: yes. The bound is retired and
+  the disposer echoes verbatim through the same helper (D7). One rule for 372.
+- Q: QuickFIX's text below FIX.4.2? → A: fixpp sends the FIX.4.2-and-later form on every BeginString (58 = the text, with
+  371/373 as today). QuickFIX C++'s `<text> (<tag>)` form below 4.2, and its omission of 373 for reasons above 11 on 4.2,
+  are disclosed (D3).
+- Q: Long CompIDs plus 58 overflow the Reject buffer? → A: disclosed as a residual; 58 is not dropped to make room (the
+  B85 ruling). A CompID length bound at `open()` is a follow-up issue (D7).
+- Q: The BusinessMessageReject whose echo does not fit? In 35=j RefMsgType(372) is **required**, so the 2026-11-07
+  "372 is optional" rationale covers Reject (35=3) only. → A (**provisional, for an orchestrator/owner ruling**): send the
+  BMR without 372 rather than not at all, and disclose that such a BMR is non-conformant (a validating peer may answer it
+  with Reject 373=1, 371=372). The alternative is today's silent loss for the BMR only (D7).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - A counterparty's invalid MsgType gets QuickFIX's Reject (Priority: P1)
@@ -111,8 +144,11 @@ message.
 2. **Given** the same, **When** a Heartbeat carries tag 44 (defined, not in Heartbeat), **Then** 373=2, 371=44,
    58=`Tag not defined for this message type`.
 3. **Given** the same, **When** any other validator reason fires (1, 5, 6, 13, 14, and 099's 4/5/14 on 1128), **Then**
-   the Reject carries QuickFIX C++'s text for that reason, and its other fields are unchanged.
+   the Reject carries QuickFIX C++'s text for that reason (the FIX.4.2-and-later form), and its other fields are
+   unchanged.
 4. **Given** an undefined tag inside a repeating-group instance, **Then** 373=0, 371 = the tag.
+5. **Given** a hand-built table that gives a tag a type, an enum or a group role but no message, **When** a message
+   carries that tag, **Then** 373=2 (the tag is defined), not 373=0.
 
 ---
 
@@ -130,15 +166,22 @@ lets a frame be validated as one message and handled as another.
 2. **Given** a validation-off initiator awaiting its Logon reply, **When** the reply is a frame whose MsgTypes differ,
    **Then** it disconnects, sends nothing.
 3. **Given** a validating non-FIXT session in Active, **When** a frame's third field is `35=0` and a later field is
-   `35=D`, **Then** Reject 373=14 (past the header) or 373=13 (inside it), 371=35, 372=`0`, the frame consumed as `0`,
-   no `fromApp` (today: delivered to `fromApp`).
+   `35=D`, **Then** Reject 373=14 (the later 35 past the header) or 373=13 (inside it), 371=35, 372=`0`, the frame
+   consumed as `0`, no `fromApp` (today: delivered to `fromApp`).
 4. **Given** a validating non-FIXT acceptor before Logon, **When** such a frame arrives, **Then** disconnect, nothing
    sent.
-5. **Given** a validation-off session in Active, **When** a frame's third field is `0` and a later 35 is `D`, **Then**
-   it is handled as a Heartbeat (today: `fromApp`); third field `D` with a later `35=5` is an application message
-   (today: logs the session out); third field `D` with a later `35=3` is an application message (today: consumed in
-   silence).
-6. **Given** a frame with one MsgType, **When** it arrives in any state, **Then** handling is unchanged.
+5. **Given** a validation-off session in Active, **When** a frame's MsgTypes differ, **Then** its ending equals that of
+   the same frame with every later 35 removed, and no Reject is sent for the repeat. Third field `0` with a later `35=D`
+   is a Heartbeat (today: `fromApp`); third field `D` with a later `35=5` is an application message (today: logs the
+   session out); third field `D` with a later `35=3` is an application message (today: consumed in silence).
+6. **Given** any session in LogoutSent, **When** a frame's third field is `35=D` and a later field is `35=5`, **Then**
+   it is not the Logout reply (today: confirms the Logout); third field `5` with a later `35=D` confirms it (today: does
+   not).
+7. **Given** any session, **When** a frame carries three or more 35s and any later one differs from the first (`D…A…D`,
+   `A…D…A`), **Then** it is a conflict like any other: disconnect in establishment, FR-005's Reject on a validating
+   session after it, with 373=14 whenever a later 35 lies past the header.
+8. **Given** a frame with one MsgType, or a repeat with the same value, **When** it arrives in any state, **Then**
+   handling is unchanged.
 
 ---
 
@@ -152,16 +195,22 @@ A peer sends a message whose MsgType value is long (hundreds of bytes) and which
    message being built, **Then** the Reject is sent without 372, every other field as for a short MsgType.
 2. **Given** `35=D=X` drawing a Reject, **Then** the Reject carries `372=D=X` verbatim, and fixpp's own parser reads it
    back as one field 372 with value `D=X`.
+3. **Given** a garbled frame (092's disposer) whose MsgType is three bytes or longer and fits, **Then** the Reject
+   carries it in 372 (today: 372 omitted for any MsgType longer than the longest shipped one).
 
 ### Edge Cases
 
-- MsgType repeated with the **same** value: one MsgType, so FR-004..FR-006 do not apply and handling is today's
+- MsgType repeated with the **same** value only: one MsgType, so FR-004..FR-006 do not apply and handling is today's
   (099's FR-025 compares values too). QuickFIX C++ answers a repeated tag with 373=13 whatever its value; a general
-  repeated-tag check is not this feature's (recorded at plan).
+  repeated-tag check is not this feature's (the existing row B-099-22 already discloses that the validator has no
+  repeated-tag rule).
 - A repeated 35 in a frame that also fails another check: the frame-level check order is 099's (FR-025 ahead of the
-  validator), extended to non-FIXT.
-- The resend replay and the outbound store masking also read the header scan's MsgType: they read the third field
-  after this feature; stored outbound frames have one MsgType, so their behaviour does not change.
+  validator), extended to non-FIXT. A frame with several defects can draw a different first reason from QuickFIX C++,
+  which checks required tags before the field walk and walks fields in tag order (disclosed, FR-009).
+- The resend replay and the outbound store masking also read the header scan's MsgType: they read the first 35 after
+  this feature; stored outbound frames have one MsgType, so their behaviour does not change (controls, research D9).
+- A FIXT-only header tag (1128, say) before a later 35 on a non-FIXT session keeps that 35 in the header (373=13), as
+  QuickFIX C++'s static header list does.
 - An unknown MsgType on an admin-length value (one character, e.g. `35=Z`): an unknown MsgType, 373=11.
 - FIXT: the MsgType check uses the dictionary the frame is validated with (099's resolved application version or the
   transport dictionary).
@@ -171,48 +220,65 @@ A peer sends a message whose MsgType value is long (hundreds of bytes) and which
 ### Functional Requirements
 
 - **FR-001** (#655): The validator MUST check that the dictionary it validates with defines the frame's MsgType, after
-  the header-order check and before the field walk, and MUST report an undefined MsgType with its own result, mapped to
-  373=11 with no 371.
+  the header-order check and before the field walk, sharing the field walk's one MsgType lookup, and MUST report an
+  undefined MsgType with its own result, mapped to 373=11 with no 371.
 - **FR-002** (#653): The validator MUST report a tag the dictionary does not define at all with its own result, mapped
   to 373=0 with 371 = the tag, and a tag the dictionary defines but not for this message (header, trailer and body
-  sets as validated today) with 373=2, 371 = the tag. "Defined" means present in the dictionary's field definitions.
+  sets as validated today) with 373=2, 371 = the tag. "Defined" means present in the dictionary's merged field store; on
+  a hand-built table, named by any population operation (research D1).
 - **FR-003** (B85 ruling): Every session Reject the inbound validation gate sends MUST carry Text(58) with QuickFIX
-  C++'s text for its reason (`SessionRejectReason_*_TEXT`). Rejects from other sites (the 092 disposer, the
-  sequence-reset and admin paths) keep their current text.
-- **FR-004** (#657, #658): A frame's MsgType MUST be its third field's value for every reader: header scan, Logon
-  interpretation, state-arm dispatch, validation, the message view, RefMsgType echo and the consume key.
-- **FR-005** (#658): A validating session, FIXT or not, MUST apply 099's FR-025 (Reject in LogonReceived and Active)
-  and FR-029 (disconnect in an establishment arm) to a frame whose MsgTypes differ.
+  C++'s text for its reason (`SessionRejectReason_*_TEXT`, the FIX.4.2-and-later form), derived from the reason at the
+  emit site. Rejects from other sites (the 092 disposer, the sequence-reset and admin paths) keep their current text.
+- **FR-004** (#657, #658): A frame's MsgType MUST be its first 35 — the third field on every frame a state arm handles —
+  for every reader: header scan, Logon interpretation, state-arm dispatch, LogoutSent's reply test, validation, the
+  message view, RefMsgType echo and the consume key. A frame's MsgTypes **differ** when any later 35's value differs
+  from the first.
+- **FR-005** (#658): A validating session, FIXT or not, MUST refuse a frame whose MsgTypes differ: in LogonReceived and
+  Active with Reject 371=35, 372 = the first 35, 45 = the first 34, **373=14 when any later 35 lies past the header,
+  else 373=13**, ahead of the 3/5 exemption, consuming the frame as its first 35; in an establishment arm with a
+  disconnect, sending nothing. This supersedes 099's FR-025/FR-029 comparison and carve-outs (research Supersessions).
 - **FR-006** (#657): A validation-off session in an establishment arm MUST refuse a frame whose MsgTypes differ with a
-  disconnect, sending nothing. In LogonReceived, Active and LogoutSent a validation-off session handles such a frame
-  as its third field's MsgType and sends no Reject for the repeat.
-- **FR-007** (#646): Every inbound-fed Reject and BusinessMessageReject site MUST send its message when the inbound
-  MsgType does not fit, omitting 372; a MsgType that fits is echoed verbatim, `=` included.
+  disconnect, sending nothing. In LogonReceived, Active and LogoutSent a validation-off session MUST handle such a frame
+  as the same frame with every later 35 removed would be handled, and send no Reject for the repeat. LogoutSent, on any
+  session, takes a frame as the Logout reply only when its first 35 is 5.
+- **FR-007** (#646): Every inbound-fed Reject and BusinessMessageReject builder — both `emit_session_reject_` forms,
+  `inbound_reject_leaf_`, `inbound_reject_best_effort_leaf_`, `inbound_business_reject_leaf_` at round 1 (research D7's
+  census recipe decides), and so the 092 disposer and the validation gate — MUST echo the inbound MsgType verbatim,
+  `=` included, and MUST send its message without 372 when the build runs out of room with it (for the
+  BusinessMessageReject, where 372 is required, provisionally: see Clarifications, Gate A round 1); the retry re-stamps
+  and re-assigns nothing and never drops 58.
 - **FR-008**: A frame not covered by FR-001..FR-007 MUST be handled byte-identically to today, on every session kind;
-  no per-message allocation is added to the inbound path (`[const §XV.1]`), and a paired benchmark of the header scan
-  and the inbound dispatch shows no regression beyond the paired gate's band.
-- **FR-009** (records): The B&L rows for #646 (L-452-2), #657/#658 (099's B-rows naming them) move or change to the new
-  endings; a B-row discloses that fixpp's config loader ignores QuickFIX's `ValidateUserDefinedFields` and
-  `AllowUnknownMsgFields`; the new validator error slots are in the error contract and its completeness tests.
+  no per-message allocation is added to the inbound path (`[const §XV.1]`); and the paired benchmarks of research D8
+  show no slowdown above the `[const §VIII.2]` budget.
+- **FR-009** (records): The B&L rows for #646 (L-452-2, closed), #657/#658 (B-099-4's "Not validating" bullet,
+  B-099-5, B-099-11) move or change to the new endings. New B-rows disclose: fixpp's config loader ignores QuickFIX's
+  `ValidateUserDefinedFields` and `AllowUnknownMsgFields`; the FIX.4.0–4.2 text and 373 differences (D3); the
+  header-set residual against QuickFIX C++'s static list (D5); the group-layout divergence (D2); multi-defect
+  precedence (Edge Cases); `interpret_logon`'s first-wins change, public C++ (D4); the long-CompID residual (D7); a BMR
+  sent without its required 372 (D7, provisional); the new LogoutSent and validation-off endings. The new validator
+  error slots are in the error contract and its completeness tests.
 
 ### Key Entities
 
 - **Validator result**: one per refusal cause; this feature adds "MsgType undefined" and "tag undefined".
-- **Reject decision**: reason, RefTagID, the third-field flag (099), and now a reason text.
-- **Frame header**: the MsgType (third field) and whether a later field repeats 35 with another value.
+- **Reject decision**: reason, RefTagID, the third-field flag (099); unchanged. The reason text is derived from the
+  reason at the emit site, not stored.
+- **Frame header**: the MsgType (the first 35) and whether any later 35 has another value.
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
 - **SC-001**: Each acceptance scenario has a witness that is RED on `fa778a8e` where today's behaviour differs and GREEN
-  on the feature head.
-- **SC-002**: The Reject frames for 373=0, 2 and 11 match QuickFIX C++'s acceptance definitions `14a_BadField`,
-  `14c_TagNotDefinedForMsgType` and `2q_MsgTypeNotValid` field for field (other than the session-specific values).
-- **SC-003**: No existing cell changes its expected outcome except those named in the plan, each with the requirement
-  that supersedes it (098's AS-1/AS-3, the validation-off rep35 rows, the cells and interop goldens that pin no 58).
-- **SC-004**: The paired header-scan and dispatch benchmarks, base `fa778a8e` against the head, stay within the paired
-  gate's band.
+  on the feature head, and RED with its production change reverted.
+- **SC-002**: For a frame with one defect, the Reject frames for 373=0, 2 and 11 match QuickFIX C++'s acceptance
+  definitions `14a_BadField`, `14c_TagNotDefinedForMsgType` and `2q_MsgTypeNotValid` field for field (other than the
+  session-specific values), on FIX.4.2 and later.
+- **SC-003**: No existing cell changes its expected outcome except those in the manifest that research D9's recipes
+  derive at the head being accepted (re-derived after the last fix commit), each with the requirement that supersedes it
+  and, where a merged feature's clause is superseded, that clause by name (research Supersessions).
+- **SC-004**: Research D8's paired runs (A-B-A-B, min-per-tree, base = the merge-base with `origin/main` at measurement
+  time) of `scan_frame_header_bench`, `on_inbound_frame_bench` and `validator_bench` show no slowdown above +5%.
 
 ## Assumptions
 
@@ -220,10 +286,29 @@ A peer sends a message whose MsgType value is long (hundreds of bytes) and which
   once per table, with no per-message cost.
 - QuickFIX/Go was not read for this feature (no local checkout); the owner's B85 ruling recorded Go's answers for 373=0,
   2 and 11.
-- 099's FIXT endings are kept exactly; this feature widens them to non-FIXT and fixes the shared reader.
+- 099's two-occurrence FIXT endings in LogonReceived and Active, its validating FIXT establishment disconnect and its
+  1128 refusals are kept. Its endings change for frames with three or more 35s (sticky conflict, 13/14 precedence), for
+  LogoutSent's reply test, and for validation-off establishment; each superseded clause is named in research's
+  Supersessions table.
+- QuickFIX/Go was not read for #646's echo; C++ and J agree.
 
 ## Out of Scope
 
 - B91 (#661, per-frame `SessionId`) and #549 (outbound parse arenas): the next session-lane feature.
 - QuickFIX's `ValidateUserDefinedFields` / `AllowUnknownMsgFields` behaviour (disclosed, not built).
 - Garbled-frame dispositions (092/093), which already carry their own texts.
+
+## Normative References
+
+- **Spec refs** (`[const §VI.5]` form, titles as `spec/coverage-index.md` spells them):
+  - `[FIX-SL §4.5.4] Rejecting invalid messages (Reject 35=3)` (S-007, S-034);
+  - `[FIX-SL §4.5.2] Garbled message processing` (the 092 disposer's echo; informative);
+  - `[FIX-TC §4 scenario 2] Receive Message Standard Header` (TC-002; sub-case 2q);
+  - `[FIX-TC §4 scenario 14] Receive application or session layer message` (TC-010; sub-cases 14a, 14c);
+  - `[FIX50SP2 §3] Message validator — required fields, type conformance, enum values, group structure` (W-014);
+  - `[FIX50SP2 §3.1] Standard header (BeginString/8, BodyLength/9, MsgType/35, mandatory ordering)` (W-002, W-004, W-005).
+- **QuickFIX reference behaviour** (cited, not vendored): QuickFIX C++ `2ce8a60` (`Session`, `Message`,
+  `DataDictionary`, `Values.h`), QuickFIX/J `4969564`, QuickFIX/Go `eff945d` per the B85 ruling note (not read for #646).
+- **Catalogue rows**: S-007, S-034, W-014, TC-002, TC-010.
+- **Constitution**: `[const §VI.5]`; `[const §VIII.2]`; `[const §X.1]`, `[const §X.4]` (no C-ABI version step: no `fixpp_error_t` code added);
+  `[const §XV.1]`; `[const §XVII.1]`. The whole check is in `plan.md`.

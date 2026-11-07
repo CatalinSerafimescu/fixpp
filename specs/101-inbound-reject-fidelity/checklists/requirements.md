@@ -31,4 +31,8 @@
 
 ## Notes
 
-- FR-006 and FR-007 carry orchestrator rulings made on the owner's delegation (QuickFIX read for this feature); Gate A confirms.
+- FR-006 and FR-007 carry orchestrator rulings made on the owner's delegation (QuickFIX read for this feature); Gate A
+  round 1 confirmed them (Codex and Opus).
+- Gate A round 1 (2026-11-07): the spec gained `## Normative References` (`[const §VI.5]`) and a round-1 Clarifications
+  session; FR-004..FR-007, FR-009 and SC-002..SC-004 were rewritten. The merged clauses this feature supersedes are
+  named in research.md's Supersessions table, and SC-003's census is research D9's recipe, not a closed list.
