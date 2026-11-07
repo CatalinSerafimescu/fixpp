@@ -124,7 +124,7 @@ TEST_P(OneMsgTypeOracle101, W101_24_ActiveOff_EndsAsTheStrippedTwin) {
 INSTANTIATE_TEST_SUITE_P(W101_24, OneMsgTypeOracle101, testing::ValuesIn(oracle_cells()),
                          cell_name);
 
-// Why W101-24 has no LogonReceived rows (orchestrator ruling R6): the acceptor enters LogonReceived
+// Why W101-24 has no LogonReceived rows: the acceptor enters LogonReceived
 // and leaves it inside the call that delivers the peer's Logon. The caller reads NotConnected
 // before that call and Active after it, so no frame is delivered in LogonReceived; the state is
 // visible only to a callback the call itself runs (the reply Logon's toAdmin samples it here), and

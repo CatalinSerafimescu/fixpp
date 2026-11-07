@@ -116,6 +116,8 @@ bool is_valid_wire_error(fixpp::core::error e) noexcept {
         case error::wire_field_value_truncated:     // reason 6
         case error::wire_invalid_tag_number:        // reason 0
         case error::wire_length_data_mismatch:      // reason 5
+        case error::wire_invalid_msg_type:          // reason 11
+        case error::wire_undefined_tag:             // reason 0
             return true;
         default:
             return false;

@@ -57,17 +57,17 @@ TEST(Error019Completeness, ExactSetEquality) {
     // Message-table boundary: later features append their own blocks after the
     // 019 [129,130] block, each pinned exactly by its own completeness gate
     // (test_0NN_*). The forward "unknown" boundary is the slot after the newest
-    // block's last enumerator (092's wire_length_data_mismatch); here we only
+    // block's last enumerator (101's wire_undefined_tag); here we only
     // assert the 019 block did not grow and that nothing exists beyond that
     // boundary. [const §X.4] append-only.
     // The cast names the slot one past the last enumerator on purpose: the
     // assertion is that the slot has no message.
     // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     EXPECT_EQ(fixpp::core::error_message(static_cast<error>(
-                  static_cast<std::uint8_t>(error::wire_length_data_mismatch) + 1U)),
+                  static_cast<std::uint8_t>(error::wire_undefined_tag) + 1U)),
               std::string_view{"unknown error"})
-        << "the slot after wire_length_data_mismatch carries a message — a "
-           "message-bearing enumerator was added beyond the 092 block; see "
+        << "the slot after wire_undefined_tag carries a message — a "
+           "message-bearing enumerator was added beyond the 101 block; see "
            "[const §X.4] append-only review";
 }
 

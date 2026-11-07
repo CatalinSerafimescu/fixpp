@@ -144,7 +144,7 @@ TEST(AbiSymbolGolden, ErrorEnumUnchanged) {
     using fixpp::core::error;
 
     // The boundary (see file header): the newest block's last enumerator
-    // (092's wire_length_data_mismatch) is the last message-bearing one, and
+    // (101's wire_undefined_tag) is the last message-bearing one, and
     // the slot after it is "unknown error". 062 must not have pushed this
     // boundary forward.
     EXPECT_EQ(static_cast<std::uint8_t>(error::app_payload_malformed), 131U)
@@ -153,8 +153,8 @@ TEST(AbiSymbolGolden, ErrorEnumUnchanged) {
     // assertion is that the slot has no message.
     // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     EXPECT_EQ(fixpp::core::error_message(static_cast<error>(
-                  static_cast<std::uint8_t>(error::wire_length_data_mismatch) + 1U)),
+                  static_cast<std::uint8_t>(error::wire_undefined_tag) + 1U)),
               std::string_view{"unknown error"})
-        << "the slot after wire_length_data_mismatch must remain unknown — 062 "
+        << "the slot after wire_undefined_tag must remain unknown — 062 "
            "introduces no error enumerator (FR-007)";
 }

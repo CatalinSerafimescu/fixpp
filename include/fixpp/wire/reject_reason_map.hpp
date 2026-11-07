@@ -18,7 +18,13 @@
 //
 // Mapping (faithful to what validate() actually emits):
 //   wire_header_out_of_order(39)   → 14  (tag out of required order)
-//   wire_unexpected_tag(42)        →  2  (tag not defined for msg type)
+//   wire_unexpected_tag(42)        →  2  (tag not defined for msg type: the
+//                                         table defines the tag, the message
+//                                         does not carry it)
+//   wire_invalid_msg_type          → 11  (invalid MsgType: the table does not
+//                                         define the MsgType; 101 FR-001)
+//   wire_undefined_tag             →  0  (invalid tag number: a well-formed tag
+//                                         the table does not define; 101 FR-002)
 //   wire_required_field_missing(38)→  1  (required tag missing; also group-
 //                                         structure failures, Phase-1 — the
 //                                         validator surfaces group errors as
@@ -31,7 +37,8 @@
 //                                         fired only on decimal_precision_loss
 //                                         remap, NOT a generic bad-format)
 //   wire_invalid_tag_number(132)   →  0  (invalid tag number — the field walk
-//                                         met a malformed tag; 092 FR-012)
+//                                         met a malformed tag, never a
+//                                         well-formed one; 092 FR-012)
 //   wire_length_data_mismatch(133) →  5  (value is incorrect — a Data value
 //                                         its Length field miscounts; 092
 //                                         FR-012)
@@ -82,8 +89,17 @@ namespace fixpp::wire {
             return 14;
         case error::wire_invalid_tag_number:
             // Reason 0: invalid tag number — the validator's field walk met a
-            // malformed tag (092 FR-012). No RefTagID is reported.
+            // malformed tag (092 FR-012). No RefTagID is reported. A well-formed
+            // tag the dictionary does not define is wire_undefined_tag's case.
             return 0;
+        case error::wire_undefined_tag:
+            // Reason 0: invalid tag number — a well-formed tag the validating
+            // table does not define (101 FR-002). RefTagID is the tag.
+            return 0;
+        case error::wire_invalid_msg_type:
+            // Reason 11: invalid MsgType — the validating table does not define
+            // the frame's MsgType (101 FR-001). No RefTagID is reported.
+            return 11;
         case error::wire_length_data_mismatch:
             // Reason 5: value is incorrect — a Data value its Length field
             // miscounts (092 FR-012). RefTagID is the Length tag.

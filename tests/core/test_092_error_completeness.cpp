@@ -34,18 +34,13 @@ TEST(Error092Completeness, ExactSetEquality) {
     // The slot before the block is 020's app_payload_malformed.
     EXPECT_EQ(static_cast<std::uint8_t>(error::app_payload_malformed), 131U);
 
-    // Message-table boundary: both 092 slots carry a message, and the slot
-    // after the block is unknown (nothing appended beyond 092).
+    // Message-table boundary: both 092 slots carry a message. The slot after
+    // the newest block is pinned by that block's gate (101 moved it to
+    // tests/core/test_101_error_completeness.cpp).
     EXPECT_NE(fixpp::core::error_message(error::wire_invalid_tag_number),
               std::string_view{"unknown error"});
     EXPECT_NE(fixpp::core::error_message(error::wire_length_data_mismatch),
               std::string_view{"unknown error"});
-    // The cast names the slot one past the last enumerator on purpose: the
-    // assertion is that the slot has no message.
-    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
-    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(134U)),
-              std::string_view{"unknown error"})
-        << "slot 134 must be unknown — nothing added beyond the 092 block";
 }
 
 // ── Messages: non-empty, distinct, to_string parity ─────────────────────────
