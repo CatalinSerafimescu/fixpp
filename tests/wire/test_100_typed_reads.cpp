@@ -13,6 +13,13 @@
 // reaches through a live session). The cell branches on that upstream as the Q33 cells do: where
 // it is null the read fails and `alloc_failed()` is the witness; where it forwards (MSVC debug)
 // the read succeeds, and that is what the cell asserts.
+//
+// T040 (US2; FR-005, FR-011, FR-004; research D5, D6, D7, D11): `read_failed()` beside
+// `alloc_failed()` on US2.1's rig; D5's top-level wire limit through `MessageView::group<>()`;
+// D7 (i) through the generated FIX 4.4 nested accessor; and an absent nested tag on an exhausted
+// arena through that accessor, on a `test100::stepped_arena`
+// (tests/wire/test_100_group_read_status.cpp states the construction). D7 (ii)'s typed twin sets
+// the overlay seed, so it lives in tests/wire/test_100_seed_hook_typed.cpp.
 
 #include <gtest/gtest.h>
 
@@ -238,6 +245,185 @@ TEST(TypedReads100, US2_1_TopLevelSliceAllocationFails_AllocFailedTwice) {
             EXPECT_FALSE(gv.alloc_failed());
         }
     }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// T040 (US2)
+// ════════════════════════════════════════════════════════════════════════════════
+
+// ── US2.1 (FR-005, research D6): `read_failed()` beside T017's `alloc_failed()` ─────
+// T017's rig: a fixed buffer over `fixpp::detail::arena_upstream()`, the parse's own footprint
+// plus half the group's slice array.
+TEST(TypedReads100, T040_US2_1_TopLevelSliceAllocationFails_ReadFailedTwice) {
+    auto const buf = frame44(header44("D") + kOrd + "54=1\x01" + headroom_group());
+    auto const fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    Parser<access_mode::Index> parser{fix44().tv};
+    fixpp::wire::OffsetTable::Config const cfg{.max_offset_entries = 8U * kHeadroomInstances};
+    std::size_t lo = 0;
+    std::size_t hi = std::size_t{1} << 22U;
+    while (lo < hi) {
+        std::size_t const mid = lo + ((hi - lo) / 2U);
+        std::vector<std::byte> b(mid == 0 ? 1 : mid);
+        std::pmr::monotonic_buffer_resource m{b.data(), mid, std::pmr::null_memory_resource()};
+        if (parser.parse(*fv, &m, cfg).has_value()) {
+            hi = mid;
+        } else {
+            lo = mid + 1U;
+        }
+    }
+    std::size_t const slice_bytes = kHeadroomInstances * sizeof(fixpp::wire::group_slice);
+    std::size_t const room = lo + (slice_bytes / 2U);
+    std::vector<std::byte> b(room);
+    std::pmr::monotonic_buffer_resource arena{b.data(), room, fixpp::detail::arena_upstream()};
+    auto const mv = parser.parse(*fv, &arena, cfg);
+    ASSERT_TRUE(mv.has_value()) << "setup: the parse fits its footprint";
+
+    bool const null_upstream = fixpp::detail::arena_upstream() == std::pmr::null_memory_resource();
+    for (int read = 0; read < 2; ++read) {
+        auto const gv = mv->group<453, G_453>();
+        if (null_upstream) {
+            EXPECT_EQ(gv.size(), 0U) << "US2.1, read " << read;
+            EXPECT_TRUE(gv.read_failed())
+                << "US2.1 / FR-005: a top-level read whose slices do not fit reports "
+                   "read_failed(); read "
+                << read;
+            EXPECT_TRUE(gv.alloc_failed()) << "US2.1, read " << read;
+        } else {
+            EXPECT_EQ(gv.size(), kHeadroomInstances)
+                << "the read succeeds from the heap; read " << read;
+            EXPECT_FALSE(gv.read_failed());
+        }
+    }
+}
+
+// An instance of NoPartyIDs(453) holding `members` PartyIDSource(447) fields, then `tail`.
+std::string oversized_party(std::size_t members, std::string const& tail) {
+    std::string b = header44("D") + kOrd +
+                    "453=1\x01"
+                    "448=P\x01";
+    for (std::size_t i = 0; i < members; ++i) {
+        b += "447=D\x01";
+    }
+    return b + tail + "54=1\x01";
+}
+constexpr std::size_t kPastInstanceCap = fixpp::wire::default_max_group_entries_per_instance + 8U;
+
+// ── D5 (FR-011): a top-level instance past the per-instance cap ────────────────────
+TEST(TypedReads100, T040_D5_TopLevelInstancePastPerInstanceCap_ReadFailedNotAllocFailedTwice) {
+    auto const buf = frame44(oversized_party(kPastInstanceCap, ""));
+    auto const fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    Parser<access_mode::Index> parser{fix44().tv};
+    auto const mv = parser.parse(
+        *fv, &arena, fixpp::wire::OffsetTable::Config{.max_offset_entries = 4U * kPastInstanceCap});
+    ASSERT_TRUE(mv.has_value()) << "setup: the raised entry cap admits the frame";
+    for (int read = 0; read < 2; ++read) {
+        auto const gv = mv->group<453, G_453>();
+        EXPECT_EQ(gv.size(), 0U) << "D5 typed, read " << read;
+        EXPECT_TRUE(gv.read_failed()) << "D5 typed / FR-011: a group wire limit reports "
+                                         "read_failed(); read "
+                                      << read;
+        EXPECT_FALSE(gv.alloc_failed())
+            << "D5 typed: a wire limit is not an allocation failure; read " << read;
+    }
+}
+
+// ── D7 (i) (FR-011): a nested sub-table over its entry cap, typed nested accessor ────
+// Raised root caps admit an instance larger than the sub-table's entry cap (the default Config);
+// the instance carries NoPartySubIDs(802), read through the generated `party_sub_i_ds()`.
+TEST(TypedReads100, T040_D7i_TypedNestedSubTableOverEntryCap_ReadFailedTwice) {
+    auto const buf = frame44(oversized_party(kPastInstanceCap,
+                                             "802=1\x01"
+                                             "523=S\x01"
+                                             "803=1\x01"));
+    auto const fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    Parser<access_mode::Index> parser{fix44().tv};
+    auto const mv = parser.parse(
+        *fv, &arena,
+        fixpp::wire::OffsetTable::Config{.max_offset_entries = 4U * kPastInstanceCap,
+                                         .max_group_entries_per_instance = 4U * kPastInstanceCap});
+    ASSERT_TRUE(mv.has_value()) << "setup: the raised caps admit the frame";
+    auto const parties = mv->group<453, G_453>();
+    ASSERT_EQ(parties.size(), 1U) << "setup: one NoPartyIDs instance";
+    G_453 const entry = parties[0];
+    for (int read = 0; read < 2; ++read) {
+        auto const subs = entry.party_sub_i_ds();
+        EXPECT_EQ(subs.size(), 0U) << "D7 (i) typed, read " << read;
+        EXPECT_TRUE(subs.read_failed()) << "D7 (i) typed / FR-011, read " << read;
+        EXPECT_FALSE(subs.alloc_failed()) << "D7 (i) typed: a wire limit; read " << read;
+    }
+}
+
+// ── D11 (FR-004): an absent nested tag on an exhausted arena, typed nested accessor ──
+// From instance 0 of a three-instance NoPartyIDs(453) with no NoPartySubIDs(802), the arena's
+// room is stepped as tests/wire/test_100_group_read_status.cpp's `step_rooms` steps it; at each
+// room the top-level typed read completes before the mark, then `party_sub_i_ds()` is read twice.
+std::string const kThreePartiesNo802 =
+    "453=3\x01"
+    "448=P1\x01"
+    "447=D\x01"
+    "452=1\x01"
+    "448=P2\x01"
+    "447=D\x01"
+    "452=1\x01"
+    "448=P3\x01"
+    "447=D\x01"
+    "452=1\x01";
+
+std::size_t typed_absent_nested_at(fixpp::test100::alloc_kind kind, std::string const& what) {
+    auto const buf = frame44(header44("D") + kOrd + kThreePartiesNo802 + "54=1\x01");
+    auto const fv = fixpp::wire::test::make_frame_view(buf);
+    if (!fv) {
+        ADD_FAILURE() << "setup: frame";
+        return 0;
+    }
+    Parser<access_mode::Index> parser{fix44().tv};
+    std::size_t hits = 0;
+    for (std::size_t room = 0; room <= (1U << 16U); ++room) {
+        fixpp::test100::stepped_arena arena{room};
+        auto const mv = parser.parse(*fv, arena.mr());
+        if (!mv) {
+            continue;
+        }
+        auto const parties = mv->group<453, G_453>();
+        if (parties.size() != 3U) {
+            continue;
+        }
+        G_453 const entry = parties[0];
+        arena.rec().mark();
+        auto const first = entry.party_sub_i_ds();
+        auto const k = fixpp::test100::classify_first_failure(arena.rec(), 0).kind;
+        auto const repeat = entry.party_sub_i_ds();
+        bool const complete = !arena.rec().first_failure().has_value();
+        if (k == kind) {
+            ++hits;
+            EXPECT_FALSE(first.read_failed())
+                << what << " (first read, room " << room << "): an absent tag is not a failed read";
+            EXPECT_FALSE(repeat.read_failed()) << what << " (repeat read, room " << room << ")";
+            EXPECT_EQ(first.size(), 0U) << what << " (room " << room << ")";
+            EXPECT_EQ(repeat.size(), 0U) << what << " (room " << room << ")";
+        }
+        if (complete) {
+            break;
+        }
+    }
+    return hits;
+}
+TEST(TypedReads100, T040_D11_TypedNestedAbsentModeA_NotReadFailed) {
+    EXPECT_GT(typed_absent_nested_at(fixpp::test100::alloc_kind::subtable,
+                                     "D11 typed nested absent, mode (a)"),
+              0U)
+        << "setup: no room made the sub-table shell the first to fail";
+}
+TEST(TypedReads100, T040_D11_TypedNestedAbsentModeC_NotReadFailed) {
+    EXPECT_GT(typed_absent_nested_at(fixpp::test100::alloc_kind::subtable_build,
+                                     "D11 typed nested absent, mode (c)"),
+              0U)
+        << "setup: no room made the sub-table build the first to fail";
 }
 
 }  // namespace

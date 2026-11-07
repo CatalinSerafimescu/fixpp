@@ -20,6 +20,14 @@
 // assertions on the wire-layer twins of tests/capi/test_100_group_getters.cpp's T010 cells, on
 // an ample arena, each read twice, and the spec Clarification's dict-aware bundle without the
 // registration callback.
+//
+// T039 (US2; FR-004, FR-005, FR-007, FR-011; research D5, D7, D10, D11) adds `status` and
+// `is_group` on T015's cells and on the wire-layer twins of tests/capi/test_100_group_getters.cpp's
+// T012 cells, each read twice, with data-model's invariants asserted on every read: a failed read
+// has no slices and is not a group, and on the nested path it means a tag that is present in the
+// instance and registered in the read's context. Each cell states presence and registration from
+// its own frame and the shipped FIX 4.4 dictionary, not through the code under test. Its D7 (ii)
+// twin sets the overlay seed, so it lives in tests/wire/test_100_seed_hook_status.cpp.
 
 #include <gtest/gtest.h>
 
@@ -59,6 +67,8 @@ constexpr std::size_t kMaxRoom = 1U << 16U;
 struct wire_read {
     bool alloc_failed = false;
     std::size_t slices = 0;
+    fixpp::wire::group_read_status status = fixpp::wire::group_read_status::ok;
+    bool is_group = false;
 };
 
 struct step_obs {
@@ -66,6 +76,8 @@ struct step_obs {
     alloc_kind kind = alloc_kind::none;
     wire_read first;
     wire_read repeat;
+    // The requests the first read made before its first failed one, in order.
+    std::vector<fixpp::test100::recording_resource::event> before_failure;
 };
 
 using view_t = MessageView<access_mode::Index>;
@@ -98,6 +110,12 @@ std::vector<step_obs> step_rooms(std::string const& body, OffsetTable::Config cf
         o.room = room;
         o.first = read(*mv, outer);
         o.kind = classify_first_failure(arena.rec(), n_slices).kind;
+        for (auto const& e : arena.rec().events_since_mark()) {
+            if (!e.ok) {
+                break;
+            }
+            o.before_failure.push_back(e);
+        }
         o.repeat = read(*mv, outer);
         bool const complete = !arena.rec().first_failure().has_value();
         out.push_back(o);
@@ -122,18 +140,21 @@ auto outer_setup(std::uint16_t outer_tag, std::size_t i) {
         return true;
     };
 }
+template <class Result>
+wire_read to_wire_read(Result const& r) {
+    return wire_read{r.status == fixpp::wire::group_read_status::alloc_failed, r.slices.size(),
+                     r.status, r.is_group};
+}
 auto flat_read(std::uint16_t tag) {
     return [tag](view_t const& mv, std::optional<fixpp::wire::group_slice> const& /*outer*/) {
-        auto const r = mv.offsets().group_slices_status(tag);
-        return wire_read{r.status == fixpp::wire::group_read_status::alloc_failed, r.slices.size()};
+        return to_wire_read(mv.offsets().group_slices_status(tag));
     };
 }
 auto nested_read(std::uint16_t outer_tag, std::uint16_t tag) {
     return [outer_tag, tag](view_t const& mv,
                             std::optional<fixpp::wire::group_slice> const& outer) {
         auto const ctx = mv.offsets().group_context_for(outer_tag);
-        auto const r = mv.offsets().nested_group_slices(outer->data, outer->len, tag, ctx);
-        return wire_read{r.status == fixpp::wire::group_read_status::alloc_failed, r.slices.size()};
+        return to_wire_read(mv.offsets().nested_group_slices(outer->data, outer->len, tag, ctx));
     };
 }
 
@@ -235,17 +256,20 @@ TEST(GroupReadStatus100, D11_NestedRecordMissModeA_NotFailed) {
 // D7: a sub-table over its entry cap (raised root caps admit an instance larger than the
 // sub-table's default entry cap). On an ample arena, so the only failure is the sub-build's.
 constexpr std::size_t kPastInstanceCap = fixpp::wire::default_max_group_entries_per_instance + 8U;
-wire_read d7_nested(std::uint16_t tag) {
+// `with_802`: the instance carries a NoPartySubIDs(802) group after its members.
+wire_read d7_nested(std::uint16_t tag, bool with_802 = true, bool repeat = false) {
     std::string b = header44("D") + kOrd +
                     "453=1\x01"
                     "448=P\x01";
     for (std::size_t i = 0; i < kPastInstanceCap; ++i) {
         b += "447=D\x01";
     }
-    b += "802=1\x01"
-         "523=S\x01"
-         "803=1\x01"
-         "54=1\x01";
+    if (with_802) {
+        b += "802=1\x01"
+             "523=S\x01"
+             "803=1\x01";
+    }
+    b += "54=1\x01";
     auto const buf = frame44(b);
     auto const fv = fixpp::wire::test::make_frame_view(buf);
     if (!fv) {
@@ -268,9 +292,11 @@ wire_read d7_nested(std::uint16_t tag) {
         return {};
     }
     auto const ctx = mv->offsets().group_context_for(453);
-    auto const r =
-        mv->offsets().nested_group_slices(outer.slices[0].data, outer.slices[0].len, tag, ctx);
-    return {r.status == fixpp::wire::group_read_status::alloc_failed, r.slices.size()};
+    auto r = mv->offsets().nested_group_slices(outer.slices[0].data, outer.slices[0].len, tag, ctx);
+    if (repeat) {
+        r = mv->offsets().nested_group_slices(outer.slices[0].data, outer.slices[0].len, tag, ctx);
+    }
+    return to_wire_read(r);
 }
 TEST(GroupReadStatus100, D11_NestedAbsentD7_NotFailed) {
     auto const r = d7_nested(9000);
@@ -462,6 +488,297 @@ TEST(GroupReadStatus100, T027_NullRegistrationCallback_DeclinesTheGroupRead) {
         EXPECT_EQ(r.slices.size(), 0U) << "read " << read << ": no instances";
         EXPECT_FALSE(r.is_group) << "read " << read << ": not a group";
         EXPECT_EQ(r.status, fixpp::wire::group_read_status::ok) << "read " << read;
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// T039 (US2): `status` and `is_group` on T015's cells and T012's wire twins.
+// ════════════════════════════════════════════════════════════════════════════════
+
+using fixpp::wire::group_read_status;
+
+char const* status_name(group_read_status s) {
+    switch (s) {
+        case group_read_status::ok:
+            return "ok";
+        case group_read_status::alloc_failed:
+            return "alloc_failed";
+        case group_read_status::limit_exceeded:
+            return "limit_exceeded";
+    }
+    return "?";
+}
+
+// data-model's invariants for one read. `present_and_registered` is the fixture's own statement
+// of whether its tag is in the bytes the read covers and registered in the read's context.
+void expect_invariants(wire_read const& r, bool present_and_registered, std::string const& what) {
+    if (r.status != group_read_status::ok) {
+        EXPECT_EQ(r.slices, 0U) << what << ": a failed read carries no slices";
+        EXPECT_FALSE(r.is_group) << what << ": a failed read is not a group";
+        EXPECT_TRUE(present_and_registered) << what << ": " << status_name(r.status)
+                                            << " for a tag that is not both present and registered";
+    }
+    if (!r.is_group) {
+        EXPECT_EQ(r.slices, 0U) << what << ": not a group, so no slices";
+    }
+}
+
+void expect_ending(wire_read const& r, group_read_status want_status, bool want_is_group,
+                   std::string const& what) {
+    EXPECT_EQ(r.status, want_status)
+        << what << ": status " << status_name(r.status) << ", want " << status_name(want_status);
+    EXPECT_EQ(r.is_group, want_is_group) << what << ": is_group";
+    EXPECT_EQ(r.slices, 0U) << what << ": no slices";
+}
+
+// Every read at every room keeps the invariants; at every room whose first failure is `kind`,
+// both reads end with `want_status`, `want_is_group` and no slices. Returns how many rooms had
+// `kind` first.
+std::size_t expect_ending_at_kind(std::vector<step_obs> const& obs, alloc_kind kind,
+                                  group_read_status want_status, bool want_is_group,
+                                  bool present_and_registered, std::string const& what) {
+    std::size_t hits = 0;
+    for (auto const& o : obs) {
+        std::string const at = what + " (room " + std::to_string(o.room) + ", " +
+                               alloc_kind_name(o.kind) + " failed first)";
+        expect_invariants(o.first, present_and_registered, at + ", first read");
+        expect_invariants(o.repeat, present_and_registered, at + ", repeat read");
+        if (o.kind != kind) {
+            continue;
+        }
+        ++hits;
+        expect_ending(o.first, want_status, want_is_group, at + ", first read");
+        expect_ending(o.repeat, want_status, want_is_group, at + ", repeat read");
+    }
+    return hits;
+}
+
+// D10 / FR-007: at every room the repeat read answers as the first did.
+void expect_repeat_as_first(std::vector<step_obs> const& obs, std::string const& what) {
+    for (auto const& o : obs) {
+        std::string const at = what + " (room " + std::to_string(o.room) + ", " +
+                               alloc_kind_name(o.kind) + " failed first)";
+        EXPECT_EQ(o.repeat.status, o.first.status)
+            << at << ": the repeat read's status " << status_name(o.repeat.status)
+            << ", the first read's " << status_name(o.first.status);
+        EXPECT_EQ(o.repeat.is_group, o.first.is_group) << at << ": is_group";
+        EXPECT_EQ(o.repeat.slices, o.first.slices) << at << ": instance count";
+    }
+}
+
+std::size_t count_kind(std::vector<step_obs> const& obs, alloc_kind kind) {
+    std::size_t n = 0;
+    for (auto const& o : obs) {
+        n += (o.kind == kind) ? 1U : 0U;
+    }
+    return n;
+}
+
+// ── D10 / FR-004: a present scalar whose cache row does not fit (T015's twin) ───────
+// 54 is in the message and FIX 4.4 registers no group at it.
+TEST(GroupReadStatus100, T039_D10_FlatPresentScalarRowPushFails_OkNotAGroup) {
+    auto const obs = step_rooms(order3(), {}, 3, no_setup, flat_read(54));
+    EXPECT_GT(expect_ending_at_kind(obs, alloc_kind::group_row, group_read_status::ok, false, false,
+                                    "D10 flat present scalar"),
+              0U)
+        << "setup: no room made the group_index_ row the first to fail";
+}
+
+// ── D11 / FR-004: nested reads under mode (a), mode (c) and D7 (T015's twins) ──────
+// From instance 0 of order3's NoPartyIDs(453): 802 is registered under [453] and absent from
+// the instance; 447 is present and is a member, not a group.
+TEST(GroupReadStatus100, T039_D11_NestedAbsentModeA_OkNotAGroup) {
+    auto const obs = step_rooms(order3(), {}, 0, outer_setup(453, 0), nested_read(453, 802));
+    EXPECT_GT(expect_ending_at_kind(obs, alloc_kind::subtable, group_read_status::ok, false, false,
+                                    "D11 nested absent, mode (a)"),
+              0U)
+        << "setup: no room made the sub-table shell the first to fail";
+}
+TEST(GroupReadStatus100, T039_D11_NestedAbsentModeC_OkNotAGroup) {
+    auto const obs = step_rooms(order3(), {}, 0, outer_setup(453, 0), nested_read(453, 802));
+    EXPECT_GT(expect_ending_at_kind(obs, alloc_kind::subtable_build, group_read_status::ok, false,
+                                    false, "D11 nested absent, mode (c)"),
+              0U)
+        << "setup: no room made the sub-table build the first to fail";
+}
+TEST(GroupReadStatus100, T039_D11_NestedPresentScalarModeA_OkNotAGroup) {
+    auto const obs = step_rooms(order3(), {}, 0, outer_setup(453, 0), nested_read(453, 447));
+    EXPECT_GT(expect_ending_at_kind(obs, alloc_kind::subtable, group_read_status::ok, false, false,
+                                    "D11 nested present scalar, mode (a)"),
+              0U)
+        << "setup: no room made the sub-table shell the first to fail";
+}
+TEST(GroupReadStatus100, T039_D11_NestedPresentScalarModeC_OkNotAGroup) {
+    auto const obs = step_rooms(order3(), {}, 0, outer_setup(453, 0), nested_read(453, 447));
+    EXPECT_GT(expect_ending_at_kind(obs, alloc_kind::subtable_build, group_read_status::ok, false,
+                                    false, "D11 nested present scalar, mode (c)"),
+              0U)
+        << "setup: no room made the sub-table build the first to fail";
+}
+// 802 occurs only inside the NoPartyIDs(453) instance nested in the NoSides(552) instance, so it
+// is present in the 552 instance, and FIX 4.4 registers it under [552, 453], not under [552].
+TEST(GroupReadStatus100, T039_D11_NestedRecordMissModeA_OkNotAGroup) {
+    std::string const body = header44("AE") +
+                             "571=R1\x01"
+                             "552=1\x01"
+                             "54=1\x01"
+                             "37=O1\x01"
+                             "453=1\x01" +
+                             kParty +
+                             "802=1\x01"
+                             "523=S\x01"
+                             "803=1\x01";
+    auto const obs = step_rooms(body, {}, 0, outer_setup(552, 0), nested_read(552, 802));
+    EXPECT_GT(expect_ending_at_kind(obs, alloc_kind::subtable, group_read_status::ok, false, false,
+                                    "D11 nested record miss, mode (a)"),
+              0U)
+        << "setup: no room made the sub-table shell the first to fail";
+}
+// D7 origin, on an ample arena: the sub-table is over its entry cap. Controls at `H4`, where the
+// sub-build's `wire_offset_table_full` is not yet a failure (tasks Mutant table: M-20 for the
+// absent tag, registered under [453]; M-21 for the present scalar).
+TEST(GroupReadStatus100, T039_D11_Control_NestedAbsentD7_OkNotAGroup) {
+    auto const first = d7_nested(802, /*with_802=*/false);
+    auto const repeat = d7_nested(802, /*with_802=*/false, /*repeat=*/true);
+    expect_invariants(first, false, "D11 nested absent, D7, first read");
+    expect_invariants(repeat, false, "D11 nested absent, D7, repeat read");
+    expect_ending(first, group_read_status::ok, false, "D11 nested absent, D7, first read");
+    expect_ending(repeat, group_read_status::ok, false, "D11 nested absent, D7, repeat read");
+}
+TEST(GroupReadStatus100, T039_D11_Control_NestedPresentScalarD7_OkNotAGroup) {
+    auto const first = d7_nested(447);
+    auto const repeat = d7_nested(447, /*with_802=*/true, /*repeat=*/true);
+    expect_invariants(first, false, "D11 nested present scalar, D7, first read");
+    expect_invariants(repeat, false, "D11 nested present scalar, D7, repeat read");
+    expect_ending(first, group_read_status::ok, false, "D11 nested present scalar, D7, first");
+    expect_ending(repeat, group_read_status::ok, false, "D11 nested present scalar, D7, repeat");
+}
+
+// ── D5 / FR-011: a top-level instance past the per-instance cap ──────────────────────
+TEST(GroupReadStatus100, T039_D5_FlatInstancePastPerInstanceCap_LimitExceededTwice) {
+    std::string b = header44("D") + kOrd +
+                    "453=1\x01"
+                    "448=P\x01";
+    for (std::size_t i = 0; i < kPastInstanceCap; ++i) {
+        b += "447=D\x01";
+    }
+    b += "54=1\x01";
+    auto const buf = frame44(b);
+    auto const fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    Parser<access_mode::Index> parser{fix44().tv};
+    auto const mv =
+        parser.parse(*fv, &arena, OffsetTable::Config{.max_offset_entries = 4U * kPastInstanceCap});
+    ASSERT_TRUE(mv.has_value()) << "setup: the raised entry cap admits the frame";
+    for (int read = 0; read < 2; ++read) {
+        std::string const what = "D5 top level, read " + std::to_string(read);
+        auto const r = to_wire_read(mv->offsets().group_slices_status(453));
+        expect_invariants(r, true, what);
+        expect_ending(r, group_read_status::limit_exceeded, false, what);
+    }
+}
+
+// ── D7 (i) / FR-011: a nested sub-table over its entry cap, at the wire layer ─────────
+// 802 is in the instance and registered under [453].
+TEST(GroupReadStatus100, T039_D7i_NestedSubTableOverEntryCap_LimitExceededTwice) {
+    auto const first = d7_nested(802);
+    auto const repeat = d7_nested(802, /*with_802=*/true, /*repeat=*/true);
+    expect_invariants(first, true, "D7 (i) first read");
+    expect_invariants(repeat, true, "D7 (i) repeat read");
+    expect_ending(first, group_read_status::limit_exceeded, false, "D7 (i) first read");
+    expect_ending(repeat, group_read_status::limit_exceeded, false, "D7 (i) repeat read");
+}
+
+// ── D11 step 1: a dict-aware bundle with no registration callback, under mode (a) ─────
+// The root is parsed with FIX 4.4's own bundle, so the outer read succeeds; the nested read
+// passes a bundle built through `dict_hooks_test_access::make` over the same table with the
+// membership and delimiter callbacks and a null registration callback. NoPartySubIDs(802) is in
+// the instance, so a presence scan would find it: the answer must come from step 1. No nested read
+// of that slice is made with any other bundle on that root.
+TEST(GroupReadStatus100, T039_D11_NullRegistrationCallbackModeA_OkNotAGroup) {
+    std::string const body = header44("D") + kOrd + "453=1\x01" + kParty +
+                             "802=1\x01"
+                             "523=S\x01"
+                             "803=1\x01"
+                             "54=1\x01";
+    auto const& tv = fix44().tv;
+    auto const no_registration = fixpp::wire::dict_hooks_test_access::make(
+        &tv, /*classify=*/nullptr, &fixpp_test_support::context_group_member_fn,
+        &fixpp_test_support::context_group_delim_fn, /*length_pair=*/nullptr,
+        /*group_registered=*/nullptr);
+    auto const read = [&no_registration](view_t const& mv,
+                                         std::optional<fixpp::wire::group_slice> const& outer) {
+        auto const ctx = mv.offsets().group_context_for(453);
+        // The generation token `test::make_frame_view` gives `step_rooms`' frame by default.
+        return to_wire_read(
+            mv.offsets().nested_group_slices(outer->data, outer->len, 802, no_registration,
+                                             fixpp::wire::detail::generation_token{}, ctx));
+    };
+    auto const obs = step_rooms(body, {}, 0, outer_setup(453, 0), read);
+    EXPECT_GT(expect_ending_at_kind(obs, alloc_kind::subtable, group_read_status::ok, false, false,
+                                    "D11 step 1, null registration callback, mode (a)"),
+              0U)
+        << "setup: no room made the sub-table shell the first to fail";
+}
+
+// ── D10 / FR-007: the cache rows, "repeat answers as the first" ──────────────────────
+// The arena's room is stepped across every value from the push of the row to the allocation
+// that follows it. D10 orders the flat row's push after the count pass and before the slice
+// allocation, and the nested row's push before the sub-table's build, so at a room where the push
+// is the first request to fail no slice array (flat) or sub-table shell (nested) was requested
+// before it. A lane where no room fails at the allocation after a push that fitted (the
+// separating step) records the cell as skipped.
+TEST(GroupReadStatus100, T039_D10_FlatRow_RepeatAnswersAsFirst) {
+    auto const obs = step_rooms(order3(), {}, 3, no_setup, flat_read(453));
+    std::string const what = "D10 flat row, NoPartyIDs(453) with 3 instances";
+    expect_repeat_as_first(obs, what);
+    EXPECT_GT(expect_ending_at_kind(obs, alloc_kind::group_row, group_read_status::alloc_failed,
+                                    false, true, what),
+              0U)
+        << "setup: no room made the group_index_ row the first to fail";
+    (void)expect_ending_at_kind(obs, alloc_kind::slices, group_read_status::alloc_failed, false,
+                                true, what);
+    constexpr std::size_t slice_bytes = 3U * sizeof(fixpp::wire::group_slice);
+    for (auto const& o : obs) {
+        if (o.kind != alloc_kind::group_row) {
+            continue;
+        }
+        for (auto const& e : o.before_failure) {
+            EXPECT_FALSE(e.bytes == slice_bytes && e.align == alignof(fixpp::wire::group_slice))
+                << what << " (room " << o.room
+                << "): the slice array was requested before the row was pushed";
+        }
+    }
+    if (count_kind(obs, alloc_kind::slices) == 0U) {
+        GTEST_SKIP() << "no room fails at the slice array after the row fitted on this lane";
+    }
+}
+// NoPartySubIDs(802) holds zero instances, as in T012's nested row cell: after its row is pushed
+// and its sub-table is built, the read needs only the sub-table's own group_index_ row.
+TEST(GroupReadStatus100, T039_D10_NestedRow_RepeatAnswersAsFirst) {
+    std::string const body = header44("D") + kOrd + "453=1\x01" + kParty +
+                             "802=0\x01"
+                             "54=1\x01";
+    auto const obs = step_rooms(body, {}, 0, outer_setup(453, 0), nested_read(453, 802));
+    std::string const what = "D10 nested row, NoPartySubIDs(802) with 0 instances";
+    expect_repeat_as_first(obs, what);
+    EXPECT_GT(expect_ending_at_kind(obs, alloc_kind::nested_row, group_read_status::alloc_failed,
+                                    false, true, what),
+              0U)
+        << "setup: no room made the nested_cache_ row the first to fail";
+    for (auto const& o : obs) {
+        if (o.kind != alloc_kind::nested_row) {
+            continue;
+        }
+        for (auto const& e : o.before_failure) {
+            EXPECT_FALSE(e.bytes == sizeof(OffsetTable) && e.align == alignof(OffsetTable))
+                << what << " (room " << o.room
+                << "): the sub-table shell was requested before the row was pushed";
+        }
+    }
+    if (count_kind(obs, alloc_kind::subtable) + count_kind(obs, alloc_kind::subtable_build) == 0U) {
+        GTEST_SKIP() << "no room fails at the sub-table after the row fitted on this lane";
     }
 }
 

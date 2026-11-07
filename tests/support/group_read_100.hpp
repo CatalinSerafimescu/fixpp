@@ -24,6 +24,7 @@
 #include <fixpp/wire/offset_table.hpp>
 #include <memory_resource>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -92,6 +93,10 @@ public:
         return std::nullopt;
     }
     [[nodiscard]] std::size_t requests_since_mark() const noexcept { return log_.size() - mark_; }
+    // The requests made after the mark, in order (T039: which allocation a read made first).
+    [[nodiscard]] std::span<event const> events_since_mark() const noexcept {
+        return {log_.data() + mark_, log_.size() - mark_};
+    }
 
 private:
     void* do_allocate(std::size_t bytes, std::size_t align) override {

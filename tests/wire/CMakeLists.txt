@@ -441,6 +441,8 @@ add_executable(wire_seed_hook_tests
   test_100_probe_budget.cpp                                           # T008 (100)
   ${CMAKE_SOURCE_DIR}/tests/session/test_100_probe_budget_session.cpp  # T018 (100)
   ${CMAKE_SOURCE_DIR}/tests/capi/test_100_seed_hook_capi.cpp          # T012 D7 (ii) (100)
+  test_100_seed_hook_status.cpp                                       # T039 D7 (ii) (100)
+  test_100_seed_hook_typed.cpp                                        # T040 D7 (ii) (100)
 )
 target_link_libraries(wire_seed_hook_tests PRIVATE
   fixpp_capi
