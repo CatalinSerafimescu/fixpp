@@ -219,6 +219,8 @@ std::vector<OpCell> op_cells() {
          std::to_string(kTag) + "=1\x01"},
         {"k_set_length_pair_data_tag_data",
          [](table_view_builder& b) { b.set_length_pair_data_tag(kOther, kTag); }, plain},
+        // l: the dictionary-built fill's forwarder (tasks.md T030), which names no role.
+        {"l_add_defined_tag", [](table_view_builder& b) { b.add_defined_tag(kTag); }, plain},
     };
 }
 

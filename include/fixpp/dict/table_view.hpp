@@ -588,6 +588,16 @@ public:
     // no scanner pays a lookup per field.
     [[nodiscard]] bool has_nonstandard_pair() const noexcept { return has_nonstandard_pair_; }
 
+    // 101-inbound-reject-fidelity (research D1, FR-002): true when the table's dictionary
+    // defines `tag`. On a dictionary-built table that is a field the dictionary declares (its
+    // merged field store, after any overlay), whether or not a message reaches it; on a
+    // hand-built one, a tag some population operation named. A binary search over
+    // `defined_tags_`, which `table_view_builder::build() &&` sorts and deduplicates. Cold: the
+    // validator asks only after a tag failed the message's set. No allocation.
+    [[nodiscard]] bool tag_defined(std::uint16_t tag) const noexcept {
+        return std::ranges::binary_search(defined_tags_, tag);
+    }
+
     // 098-dialect-overlay (FR-022, data-model §A.3): true when the dictionary declares
     // `tag` in its header: the tags data-model §A.3's visited-set walk collects from
     // QuickFIX `<header>` or Orchestra component 1024 (fields, component members,
@@ -745,18 +755,40 @@ private:
     // the receiver's name. Chaining lives on `table_view_builder`, whose
     // forwarders return `table_view_builder&`; nothing chains on this band.
 
+    // 101-inbound-reject-fidelity (research D1): records `tag` in the defined-tag store that
+    // tag_defined() reads. Every population operation that names a tag calls this for each tag
+    // it names, so a hand-built table defines every tag it was told anything about; an operation
+    // that only forwards to another (add_valid, add_required, set_type, set_group_first and its
+    // `_ctx` form) is covered by the one it calls. Re-derive the set of callers by listing the
+    // private mutators `table_view_builder` forwards to: a mutator added later calls it too.
+    // The store is sealed (sorted, deduplicated) once, by `table_view_builder::build() &&`.
+    void mark_defined(std::uint16_t tag) { defined_tags_.push_back(tag); }
+
+    void seal_defined_tags() noexcept {
+        std::ranges::sort(defined_tags_);
+        auto const dup = std::ranges::unique(defined_tags_);
+        defined_tags_.erase(dup.begin(), dup.end());
+    }
+
     void add_valid_tag(std::string_view msg_type, std::uint16_t tag) {
+        mark_defined(tag);
         valid_[std::string{msg_type}].insert(tag);
     }
 
     void add_required_tag(std::string_view msg_type, std::uint16_t tag) {
+        mark_defined(tag);
         required_[std::string{msg_type}].push_back(tag);
         valid_[std::string{msg_type}].insert(tag);
     }
 
-    void set_field_type(std::uint16_t tag, field_type ft) { types_[tag] = ft; }
+    void set_field_type(std::uint16_t tag, field_type ft) {
+        mark_defined(tag);
+        types_[tag] = ft;
+    }
 
     void add_group_member(std::uint16_t no_tag, std::uint16_t member_tag) {
+        mark_defined(no_tag);
+        mark_defined(member_tag);
         set_group_bit(no_tag);
         auto& members = group_members_[no_tag];
         for (auto const t : members) {
@@ -769,6 +801,8 @@ private:
     // `no_tag` (bare store). Does NOT add it to the member set — callers pair
     // this with add_group_member/set_group_first as needed.
     void add_group_required_member(std::uint16_t no_tag, std::uint16_t member_tag) {
+        mark_defined(no_tag);
+        mark_defined(member_tag);
         set_group_bit(no_tag);
         auto& req = group_required_members_[no_tag];
         for (auto const t : req) {
@@ -797,6 +831,7 @@ private:
     // `enum_domain` above for why the table owns them). Sorted-on-insert and
     // deduped, so enum_valid's binary search is valid regardless of call order.
     void add_enum(std::uint16_t tag, std::string_view value) {
+        mark_defined(tag);
         set_enum_bit(tag);
         auto& domain = enums_[tag];
         auto& codes = domain.codes;
@@ -823,17 +858,29 @@ private:
     // carry — without this, FR-004's tokenizer (T018) has no unit-level
     // witness that does not require a full XML load.
     void set_multi_value(std::uint16_t tag, bool multi = true) {
+        mark_defined(tag);
         set_enum_bit(tag);
         enums_[tag].multi_value = multi;
     }
 
     // ── 063 Defect-A: context-scoped population surface ───────────────────
+    // The `_ctx` operations name the ancestors' count tags, the group's own and the member.
+    void mark_defined_ctx(std::span<std::uint16_t const> parent_path, std::uint16_t no_tag,
+                          std::uint16_t member_tag) {
+        for (auto const t : parent_path) {
+            mark_defined(t);
+        }
+        mark_defined(no_tag);
+        mark_defined(member_tag);
+    }
+
     // Used EXCLUSIVELY by Dictionary::as_table_view() (dictionary.cpp) — the
     // hardening invariant documented on the context-aware accessors above
     // depends on real dictionaries registering HERE and ONLY here (never via
     // add_group_member/set_group_first).
     void add_group_member_ctx(std::string_view msg_type, std::span<std::uint16_t const> parent_path,
                               std::uint16_t no_tag, std::uint16_t member_tag) {
+        mark_defined_ctx(parent_path, no_tag, member_tag);
         set_group_bit(no_tag);
         auto& entry = group_ctx_[make_group_ctx_key(msg_type, parent_path, no_tag)];
         for (auto const t : entry.members) {
@@ -846,6 +893,7 @@ private:
     void add_group_required_member_ctx(std::string_view msg_type,
                                        std::span<std::uint16_t const> parent_path,
                                        std::uint16_t no_tag, std::uint16_t member_tag) {
+        mark_defined_ctx(parent_path, no_tag, member_tag);
         set_group_bit(no_tag);
         auto& entry = group_ctx_[make_group_ctx_key(msg_type, parent_path, no_tag)];
         for (auto const t : entry.required_members) {
@@ -869,6 +917,7 @@ private:
     // well, from the baked FIXT11.xml-census-pinned constant. Does NOT touch
     // valid_/required_/types_ (D-1 invariant).
     void add_fixt_framing_tag(std::uint16_t tag, field_type ft) {
+        mark_defined(tag);
         fixt_framing_tags_.insert(tag);
         fixt_framing_types_[tag] = ft;
     }
@@ -878,6 +927,7 @@ private:
     // metadata handle's declared header store. Grows `header_bits_` to the word
     // holding `tag`, at config time only.
     void add_header_tag(std::uint16_t tag) {
+        mark_defined(tag);
         std::size_t const w = static_cast<std::size_t>(tag) >> 6U;
         if (w >= header_bits_.size()) {
             header_bits_.resize(w + 1, 0);
@@ -899,6 +949,9 @@ private:
         if (length_tag == 0 || data_tag == 0) {
             return;
         }
+        // 101 (research D1): both tags are defined. Capacity is reserved before any store
+        // moves, so the two marks below cannot throw and the strong guarantee holds.
+        defined_tags_.reserve(defined_tags_.size() + 2);
         // Strong guarantee (Gate B r6 M-2) at O(1) (Gate B r7 N-1): capture what this
         // call would overwrite, insert forward, and insert inverse under a rollback.
         // Only the two insertions can throw, and only when they need a NEW node; the
@@ -934,6 +987,8 @@ private:
         if (displaced_length != 0 && displaced_length != length_tag) {
             length_pair_data_tag_.erase(displaced_length);
         }
+        mark_defined(length_tag);
+        mark_defined(data_tag);
         // Last, so the flag never describes a pair that did not land.
         if (!fixpp::core::detail::is_standard_pair_tag(length_tag) &&
             !fixpp::core::detail::is_standard_pair_tag(data_tag)) {
@@ -1102,6 +1157,12 @@ private:
     // highest set tag, so a FIX 5.0 QuickFIX-XML view (empty header) holds no words.
     // is_header_tag() is its only reader.
     std::vector<std::uint64_t> header_bits_;
+
+    // 101-inbound-reject-fidelity (research D1): the defined-tag store tag_defined() reads,
+    // sorted and deduplicated by `table_view_builder::build() &&`. A vector of tags rather than
+    // a tag-space bitset: it is copied with every validator's table, and a bitset sized to the
+    // tag space would cost every copy that much whatever the dictionary declares.
+    std::vector<std::uint16_t> defined_tags_;
 };
 
 // Move CONSTRUCTION is the property that became load-bearing when fixpp#456 deleted
@@ -1252,6 +1313,14 @@ public:
         return *this;
     }
 
+    // 101-inbound-reject-fidelity (research D1): the dictionary-built fill's entry point.
+    // `Dictionary::build_table_view` names here every field its dictionary declares, so a
+    // declared field no message reaches is defined. Names no message, type or role.
+    table_view_builder& add_defined_tag(std::uint16_t tag) {
+        tv_.mark_defined(tag);
+        return *this;
+    }
+
     // ── scalar readbacks, for the witnesses that assert BETWEEN mutations ─────
     // Scalars by design: a reference-returning accessor would alias storage that
     // `build() &&` moves from. See the `peek()` refusal above.
@@ -1267,7 +1336,11 @@ public:
 
     // Consumes the builder. The move is a member-to-return move, so NRVO cannot
     // apply; C++17 guaranteed elision then makes the caller's own return free.
-    [[nodiscard]] table_view build() && { return std::move(tv_); }
+    // 101 (research D1): seals the defined-tag store first.
+    [[nodiscard]] table_view build() && {
+        tv_.seal_defined_tags();
+        return std::move(tv_);
+    }
 
 private:
     table_view tv_;
