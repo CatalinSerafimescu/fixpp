@@ -1,8 +1,8 @@
 #pragma once
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/support/nested_probe_budget_100.hpp — TEST-ONLY support for 100-wire-group-read-integrity's
-// D7 (ii) twins (tasks T039, T040; research D7 witness (ii), D1): the construction of
-// tests/capi/test_100_seed_hook_capi.cpp's D7 (ii) cell, for the wire-layer and typed twins.
+// D7 (ii) cells (tasks T012, T039, T040; research D7 witness (ii), D1): the one construction of
+// tests/capi/test_100_seed_hook_capi.cpp's cell and of its wire-layer and typed twins.
 //
 // A test-built `table_view` whose group G registers, in the read's context, the delimiter, a
 // cluster of more than `kMaxBuildProbe` distinct member tags and a nested group N. The cluster is

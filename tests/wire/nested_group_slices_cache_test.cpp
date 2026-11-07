@@ -41,6 +41,7 @@
 #include "support/failing_pmr_resource.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
+#include "support/wire_test_hooks.hpp"  // offset_table_test_access (100)
 
 namespace {
 
@@ -278,6 +279,12 @@ TEST(NestedGroupSlicesCache, BuildNestedSubviewAllocFailureDegradesToEmpty) {
     EXPECT_TRUE(inner.empty())
         << "build_nested_subview's object allocation failing must "
            "degrade to an empty span (build_nested_subview's bad_alloc catch)";
+    // The refused request is the shell: the pushed row then holds no sub-table. A refusal
+    // inside the sub-build would leave a built table whose own build failed in that row.
+    EXPECT_EQ(fixpp::wire::offset_table_test_access::resolve(
+                  root, outer[0].data, fixpp::wire::dict_hooks::for_table_view(dict), 802),
+              nullptr)
+        << "the injected failure did not hit build_nested_subview's shell allocation";
 }
 
 // 100 (FR-007, research D10): the nested cache row's push. Before 100 a failed
