@@ -301,11 +301,15 @@ wire_read d7_nested(std::uint16_t tag, bool with_802 = true, bool repeat = false
 TEST(GroupReadStatus100, D11_NestedAbsentD7_NotFailed) {
     auto const r = d7_nested(9000);
     EXPECT_FALSE(r.alloc_failed) << "D11 nested absent, D7 sub-table over its entry cap";
+    EXPECT_EQ(r.status, fixpp::wire::group_read_status::ok)
+        << "D11 nested absent, D7 sub-table over its entry cap: not a failed read";
     EXPECT_EQ(r.slices, 0U);
 }
 TEST(GroupReadStatus100, D11_NestedPresentScalarD7_NotFailed) {
     auto const r = d7_nested(447);
     EXPECT_FALSE(r.alloc_failed) << "D11 nested present scalar, D7 sub-table over its entry cap";
+    EXPECT_EQ(r.status, fixpp::wire::group_read_status::ok)
+        << "D11 nested present scalar, D7 sub-table over its entry cap: not a failed read";
     EXPECT_EQ(r.slices, 0U);
 }
 

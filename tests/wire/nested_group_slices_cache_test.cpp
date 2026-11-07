@@ -276,6 +276,10 @@ TEST(NestedGroupSlicesCache, BuildNestedSubviewAllocFailureDegradesToEmpty) {
                                           fixpp::wire::dict_hooks::for_table_view(dict),
                                           fv->token(), kTestCtx)
                      .slices;
+    // The read makes exactly the row push and the refused shell request, so a refusal that
+    // lands on the row push (one request fewer) or inside the sub-build (more) fails here.
+    EXPECT_EQ(mr.allocate_calls(), baseline_calls + 2)
+        << "the nested read's requests: the cache row's push, then the refused sub-table shell";
     EXPECT_TRUE(inner.empty())
         << "build_nested_subview's object allocation failing must "
            "degrade to an empty span (build_nested_subview's bad_alloc catch)";
