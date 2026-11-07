@@ -61,8 +61,12 @@ including `wire_group_too_large`.
 
 - **New** per-tag bitset "has a context key", beside `group_bits_`, set wherever a `group_ctx_` key is created (all
   three `_ctx` setters, `add_group_required_member_ctx` included); built once with the table.
-- **New** `noexcept` accessor answering the registration predicate; its arms are stated in research D2. The header arm
-  reads the existing `is_header_tag`.
+- **New** MsgType-free set of `(parent_path, no_tag)` section-group keys, filled by a new
+  `table_view_builder::add_section_group(parent_path, no_tag)` that `as_table_view` calls from a new handle store
+  (`dict_metadata_handle`, beside `header_tags_`); the loaders' header and trailer walks fill that store at every
+  depth. Built once with the table; no arena impact, since `table_view` is per dictionary. Section records do not set
+  the "has a context key" bitset. The section arm (research D2) reads this store, not `is_header_tag` or `group_bit`.
+- **New** `noexcept` accessor answering the registration predicate; its arms are stated in research D2.
 
 ## `dict_hooks` (`include/fixpp/wire/dict_hooks.hpp`)
 

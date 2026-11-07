@@ -48,7 +48,9 @@ arena's size and upstream do not change (073), and the census in research.md re-
 
 **Scale/Scope**: production `src/wire/offset_table.cpp`, `include/fixpp/wire/offset_table.hpp`,
 `include/fixpp/wire/dict_hooks.hpp`, `include/fixpp/wire/parser.hpp` (`for_table_view`, `MessageView::group<>()`),
-`include/fixpp/wire/group_view.hpp`, `include/fixpp/dict/table_view.hpp`, `src/capi/message_read.cpp`,
+`include/fixpp/wire/group_view.hpp`, `include/fixpp/dict/table_view.hpp`, `src/dictionary/xml_loader.cpp`,
+`src/dictionary/orchestra_loader.cpp`, `src/dictionary/dictionary_internal.hpp`, `src/dictionary/dictionary.cpp` (D2's
+section-group records), `src/capi/message_read.cpp`,
 `include/fix/c_api/message.h`, `include/fix/c_api/session.h` (doc), `include/fix/c_api/version.h`,
 `tools/codegen/fixpp-codegen/emit_messages.cpp` (one token in the nested accessor, D5), and the checked-in goldens it
 regenerates (research census). Tests in `tests/wire/`, `tests/capi/`, `tests/session/`, `tests/codegen/`,
@@ -119,8 +121,8 @@ binaries.
 
 1. **RED** — one cell per issue and per D2/D5/D7/D10/D11 delta on today's tree, plus controls; record each RED reason
    and the lanes that show RED or skip.
-2. **Dictionary + wire** — D2 (bitset set in all three `_ctx` setters, the three-arm accessor, callback, `group()`
-   order), D1, D3, D5, D7, D10, D11 in `table_view` / `dict_hooks` / `offset_table`; the size census (research.md)
+2. **Dictionary + wire** — D2 (bitset set in all three `_ctx` setters, section-group records (loaders, handle,
+   builder, `table_view`), the three-arm accessor, callback, `group()` order), D1, D3, D5, D7, D10, D11 in `table_view` / `dict_hooks` / `offset_table`; the size census (research.md)
    re-checked, each `dict_hooks_test_access::make` caller given its registration stub. In the same change as D1's
    comment deletion: the "Updated (100-wire-group-read-integrity)" notes in `.specify/2b-wire.md` (research census
    recipe), and deletion of `for_table_view`'s refuted "unreachable HERE" membership-lambda comment, not restated
@@ -151,7 +153,7 @@ binaries.
 
 | Item | Why | Simpler alternative rejected because |
 |---|---|---|
-| D2 adds a `table_view` bitset and a `dict_hooks` callback | no existing accessor answers "context key here, header group at the root, or no context key anywhere" in O(1); `group_bit` is set by both setter families | the delimiter oracle's bare fallback fabricates cross-context groups (802 at the root); exact-only makes 099's NoHops not a group |
+| D2 adds a `table_view` bitset, the section store, and a `dict_hooks` callback | no existing accessor answers "context key here, section group at its path, or no context key anywhere" in O(1); `group_bit` is set by both setter families; the section store, because `is_header_tag ∧ group_bit` is not a section registration | the delimiter oracle's bare fallback fabricates cross-context groups (802 at the root); exact-only makes 099's NoHops not a group |
 | D5 replaces `alloc_failed` with a status, changes one emitter token | typed nested readers must see a limit failure without `alloc_failed()` lying | widening `alloc_failed()`'s meaning makes a public accessor lie; two flags must be OR'd by every reader |
 | D1 changes the probe bound's unit | the per-insert cap is reached by non-crafted frames (measured) | the per-insert cap with a failing ending closes sessions on legitimate traffic, repeatedly while the seed lives |
 | D11 asks registration, then scans the instance, on a failed nested read | 073 FR-007: failure only for a present group; one ending for a present scalar | a contract note "exhausted + absent = `WIRE_LIMIT_EXCEEDED`" writes a 073 violation into the contract and depends on residual bytes |
@@ -196,6 +198,7 @@ Open items carried into Gate A round 1, with their dispositions:
   reviewer saw this extension. (2) Facts stated twice were given one home: the predicate's arms in research D2, the
   failure invariants and `is_group` in data-model `group_slices_result` / `nested_slices_result`, the cache rule in
   research D10.
+- Round 3 (2026-11-07): Codex P1=0 P2=1 P3=0; Opus post-judging P1=0 P2=1 P3=4. Loop exhausted (2 rewrites). Owner Step F ruling: targeted hand-edit (C3-1 section-group arm + 4 P3s), then an Opus-only confirmation round, no Codex. Reviews: research/reviews/codex_100-wire-group-read-integrity_gate_a_3_review.md, research/reviews/opus_100-wire-group-read-integrity_gate_a_3_adversarial_review.md.
 
 ### Round 1 — disagreements
 
