@@ -14,6 +14,7 @@
 #include <fixpp/wire/errors.hpp>  // wire::err_* / fail<T> (module error vocab)
 #include <fixpp/wire/framer.hpp>
 #include <fixpp/wire/group_view.hpp>         // group_context complete type (063 T006/T008)
+#include <fixpp/wire/length_data_carry.hpp>  // presence scan's Length+Data split (100, D11)
 #include <fixpp/wire/length_data_pairs.hpp>  // standard Length+Data pairs (fixpp#426)
 #include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/tag_scan.hpp>  // accumulate_tag_digit (SC-004 / 040-inbound-tag-overflow)
@@ -657,9 +658,13 @@ std::span<group_slice const> OffsetTable::group_slices(std::uint16_t no_tag) con
     return group_slices_status(no_tag).slices;
 }
 
-// 073 T003: status-bearing internal form (research.md §D2 mode (b), FR-002
-// originate-at-failure). Body is the former `group_slices()` verbatim, with
-// each exit widened to also report `alloc_failed`.
+// 073 T003: status-bearing form (research.md §D2 mode (b), FR-002
+// originate-at-failure).
+// 100 (research D5, D10): a group wire limit reports `limit_exceeded` and caches
+// nothing; a group with instances pushes its cache row after the count pass and
+// before the slice allocation, and pops it when that allocation throws; an answer
+// that needs no slices is cached when its row fits and served uncached when it
+// does not. So the cache holds only completed reads.
 group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const noexcept {
     check_alive();
     // Already materialized for this no_tag — return its own array. 389: this
@@ -672,7 +677,10 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
                     .is_group = gs.is_group};
         }
     }
-    try {
+    // One scope for the read's locals. FR001_NoFlatInstanceWalkInGroup
+    // (tests/wire/offset_table_test.cpp) finds the splitter below by its
+    // indentation, so the scope keeps it where that test looks.
+    {
         // 389: this group's OWN exact-sized array. Nothing here can move a span
         // handed out for a different `no_tag` — those live in their own arrays.
         //
@@ -684,9 +692,16 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
         // pass is load-bearing, not an optimization — deleting it re-opens #181.
         // Magnitude deliberately omitted: it is a RESULT parameterized by the
         // STL's growth factor. B&L B-389-1 carries the figure and its platform.
-        group_slice* slices = nullptr;  // arena buffer, sized by the count pass
-        std::uint32_t n_written = 0;
         auto gi = group(no_tag);
+        // 100 (research D5): `group()` stopped at a group wire limit (the
+        // per-instance entry cap or the nesting depth). It allocates nothing, so
+        // the failure recurs on a repeat, and no row is pushed (research D10).
+        // Any other `group()` error (an absent tag, a tag that is not a group here,
+        // a table whose own build failed) answers as not a group; a nested read
+        // resolves a failed sub-build from the sub-table's build status (research D7).
+        if (!gi && gi.error() == core::error::wire_group_too_large) {
+            return {.slices = {}, .status = group_read_status::limit_exceeded};
+        }
         // 100 (research D3): the read established `no_tag` as a group (zero
         // instances included). Cached with the row, so a repeat answers the same.
         bool const is_group = gi.has_value();
@@ -824,9 +839,22 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
                         ++n_slices;
                     }
                 }
+                // 100 (research D10): the row is pushed now, after the count pass
+                // and before the slice allocation, so a read that cannot cache its
+                // row fails before it consumes the slices' bytes, and every repeat
+                // on a monotonic resource fails the same way. The row's span is
+                // written once the slices are filled.
+                try {
+                    group_index_.push_back(group_span{
+                        .data = nullptr, .count = 0, .no_tag = no_tag, .is_group = true});
+                } catch (std::bad_alloc const&) {
+                    return {.slices = {}, .status = group_read_status::alloc_failed};
+                }
+                group_slice* slices = nullptr;  // arena buffer, sized by the count pass
                 // Exactly `n_slices`, once. Throws `bad_alloc` on arena
-                // exhaustion, which the existing catch below turns into the
-                // 073 / L-065-2 `alloc_failed` degrade — unchanged semantics.
+                // exhaustion, which the catch around it turns into the 073 /
+                // L-065-2 `alloc_failed` degrade after popping the row pushed
+                // above, so the failed read caches nothing (100, research D10).
                 //
                 // ⚠️ The `n_slices == 0` arm is DEFENSIVE AND PROVABLY DEAD, the
                 // same shape as the `: 0U` ternary arm below. The enclosing
@@ -838,9 +866,19 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
                 // for it. The guard is kept so a future change to the boundary
                 // rule cannot silently reach `allocate(0, …)`.
                 if (n_slices > 0) {
-                    slices = static_cast<group_slice*>(
-                        resource()->allocate(n_slices * sizeof(group_slice), alignof(group_slice)));
+                    try {
+                        slices = static_cast<group_slice*>(resource()->allocate(
+                            n_slices * sizeof(group_slice), alignof(group_slice)));
+                    } catch (std::bad_alloc const&) {
+                        // 073 T003: on a nested sub-table this is the mode-(b)
+                        // origin (FR-002) — the sub-table built non-null but its
+                        // own slice materialization exhausted the arena.
+                        group_index_.pop_back();
+                        return {.slices = {}, .status = group_read_status::alloc_failed};
+                    }
                 }
+
+                std::uint32_t n_written = 0;
 
                 // ── PASS 2: fill ──
                 std::size_t inst_start = first;
@@ -874,19 +912,25 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
                         inst_start = k;
                     }
                 }
+                // The row is trivially copyable, so `group_index_` reallocation
+                // memcpys it and the arena buffer it points at never moves.
+                group_index_.back().data = slices;
+                group_index_.back().count = n_written;
+                return {.slices = {slices, n_written},
+                        .status = group_read_status::ok,
+                        .is_group = true};
             }
         }
-        // The row is trivially copyable, so `group_index_` reallocation memcpys
-        // it and the arena buffer it points at never moves.
-        group_index_.push_back(
-            group_span{.data = slices, .count = n_written, .no_tag = no_tag, .is_group = is_group});
-        return {
-            .slices = {slices, n_written}, .status = group_read_status::ok, .is_group = is_group};
-    } catch (std::bad_alloc const&) {
-        // 073 T003: this is the mode-(b) origin (FR-002) — the sub-table
-        // built non-null but its own slice materialization exhausted the
-        // arena. Degrade to "no instances", never throw (noexcept).
-        return {.slices = {}, .status = group_read_status::alloc_failed};
+        // 100 (research D10): an answer that needs no slices (absent, not a
+        // group, zero instances read). Recomputing it allocates nothing and
+        // yields the same answer, so a row that does not fit leaves it uncached.
+        try {
+            group_index_.push_back(
+                group_span{.data = nullptr, .count = 0, .no_tag = no_tag, .is_group = is_group});
+        } catch (std::bad_alloc const&) {
+            // Served uncached: the repeat recomputes the same answer.
+        }
+        return {.slices = {}, .status = group_read_status::ok, .is_group = is_group};
     }
 }
 
@@ -929,34 +973,96 @@ OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_
     }
 }
 
-// 073 (D2): resolve a built (or failed) nested sub-table pointer to the
-// status-bearing result, OR-ing all THREE arena-exhaustion origins in ONE
-// place so both empty-returning exits of nested_group_slices share a single
-// definition — the two-exit drift this centralises is exactly the class of
-// bug the T004 checklist audit caught (cache-hit vs final exit diverging).
-//   (a) t == nullptr           — shell alloc failed / cached failed build;
-//   (c) build_status() OOM     — ctor build() degraded to out_of_memory
-//                                (`OffsetTable::build`'s `catch (std::bad_alloc const&)`); scoped
-//                                to OOM so a malformed-data degradation stays not-failed (FR-007
-//                                disjointness);
-//   (b) group_slices_status()  — the sub-table's own slice materialization
-//                                caught bad_alloc (feedback_status_origin_
-//                                must_cover_all_alloc_catch_sites).
-static nested_slices_result resolve_nested_result(OffsetTable const* table,
-                                                  std::uint16_t nested_no_tag) noexcept {
-    if (table == nullptr) {
-        return nested_slices_result{.slices = {},
-                                    .status = group_read_status::alloc_failed};  // mode (a)
+// 100 (research D11 step 2): whether `tag` occurs anywhere in the instance slice,
+// nested instances included, by a field walk that allocates nothing and splits
+// Length+Data through `hooks`, as `OffsetTable::build` splits a frame. It walks the
+// bytes `build_nested_subview` hands the sub-table's build (`len + 1`, RC1). A field
+// the walk cannot read ends it with the tag not found, so it never reports a tag
+// the C getter's `field_iterator` scan of the same slice would not reach.
+static bool slice_has_tag(std::byte const* data, std::size_t len, std::uint16_t tag,
+                          dict_hooks const& hooks) noexcept {
+    std::span<std::byte const> const buf{data, len + 1U};
+    length_data_carry carry;
+    std::size_t i = 0;
+    while (i < buf.size()) {
+        std::size_t const tag_start = i;
+        std::uint32_t t = 0;
+        while (i < buf.size() && buf[i] != EQ && buf[i] != SOH) {
+            auto const c = static_cast<unsigned char>(buf[i]);
+            if (c < '0' || c > '9' || !fixpp::wire::accumulate_tag_digit(t, c)) {
+                return false;
+            }
+            ++i;
+        }
+        if (i >= buf.size() || buf[i] != EQ || i == tag_start) {
+            return false;
+        }
+        auto const field_tag = static_cast<std::uint16_t>(t);
+        if (field_tag == tag) {
+            return true;
+        }
+        auto const value = carry.read_value(buf, i + 1U, field_tag, hooks);
+        if (!value) {
+            return false;
+        }
+        i = value->end + 1U;
     }
-    bool const sub_build_oom =  // mode (c)
-        !table->build_status() && table->build_status().error() == core::error::out_of_memory;
-    auto const s = table->group_slices_status(nested_no_tag);  // mode (b)
-    bool const failed = s.status == group_read_status::alloc_failed || sub_build_oom;
-    // 100 (research D3): without a failure, the sub-table's own answer.
-    return nested_slices_result{
-        .slices = s.slices,
-        .status = failed ? group_read_status::alloc_failed : group_read_status::ok,
-        .is_group = !failed && s.is_group};
+    return false;
+}
+
+// 073 (D2): resolve a built (or failed) nested sub-table pointer to the
+// status-bearing result in ONE place, so both exits of nested_group_slices share
+// a single definition — the two-exit drift this centralises is exactly the class
+// of bug the T004 checklist audit caught (cache-hit vs final exit diverging).
+// A read ends at its first failure, in this order:
+//   (a) t == nullptr           — the shell allocation failed, or (100, research
+//                                D10) the call's cache row did not fit, so no
+//                                sub-table was built;
+//   (c) build_status() failed  — `out_of_memory` (`OffsetTable::build`'s
+//                                `catch (std::bad_alloc const&)`) is
+//                                `alloc_failed`; 100 (research D7):
+//                                `wire_offset_table_full` (the sub-table's entry
+//                                cap or its probe budget) is `limit_exceeded`. A
+//                                build that failed for any other reason keeps
+//                                073's not-failed scope (FR-007 disjointness): the
+//                                sub-table's `group()` answers it as not a group;
+//   (b) group_slices_status()  — the sub-table's own read failed
+//                                (feedback_status_origin_must_cover_all_alloc_catch_sites).
+// 100 (research D11): a failure is kept only for a tag registered in the call's
+// `ctx`, asked through the caller's `hooks` (a bundle with no registration
+// callback answers not registered, as `OffsetTable::group()`'s step 1 declines),
+// and present in the instance slice, in that order; otherwise the read answers
+// as for a tag it cannot establish as a group. It never reads the root table's
+// own `hooks_`, so the caller's split decides both (fixpp#426).
+static nested_slices_result resolve_nested_result(
+    OffsetTable const* table, std::byte const* slice_data, std::size_t slice_len,
+    std::uint16_t nested_no_tag, dict_hooks const& hooks, group_context const& ctx) noexcept {
+    group_read_status failure = group_read_status::ok;
+    if (table == nullptr) {
+        failure = group_read_status::alloc_failed;                  // mode (a)
+    } else if (auto const built = table->build_status(); !built) {  // mode (c)
+        if (built.error() == core::error::out_of_memory) {
+            failure = group_read_status::alloc_failed;
+        } else if (built.error() == core::error::wire_offset_table_full) {
+            failure = group_read_status::limit_exceeded;
+        }
+    }
+    if (failure == group_read_status::ok) {
+        auto const s = table->group_slices_status(nested_no_tag);  // mode (b)
+        if (s.status == group_read_status::ok) {
+            // 100 (research D3): without a failure, the sub-table's own answer.
+            return nested_slices_result{
+                .slices = s.slices, .status = group_read_status::ok, .is_group = s.is_group};
+        }
+        failure = s.status;
+    }
+    bool const registered = hooks.opaque_dict() != nullptr && hooks.group_member_fn() != nullptr &&
+                            hooks.group_registered_fn() != nullptr &&
+                            hooks.group_registered_fn()(hooks.opaque_dict(), ctx, nested_no_tag);
+    if (!registered || !slice_has_tag(slice_data, slice_len, nested_no_tag, hooks)) {
+        return nested_slices_result{.slices = {}, .status = group_read_status::ok};
+    }
+    return nested_slices_result{.slices = {}, .status = failure};
 }
 
 // 062 T006: single flat nested-subview cache (see offset_table.hpp for the
@@ -1019,8 +1125,10 @@ nested_slices_result OffsetTable::nested_group_slices(std::byte const* slice_dat
             // `!found_slice` branch below, which does not run for a matching
             // row). Using the local here would report alloc_failed on
             // every warm cache-hit of a healthy group (FR-006/FR-007
-            // violation). All three origins are OR'd inside resolve_nested_result.
-            return resolve_nested_result(row.table, nested_no_tag);
+            // violation). Every failure origin is resolved inside
+            // resolve_nested_result, the same way at both exits.
+            return resolve_nested_result(row.table, slice_data, slice_len, nested_no_tag, hooks,
+                                         ctx);
         }
         if (!found_slice) {
             table = row.table;
@@ -1028,6 +1136,19 @@ nested_slices_result OffsetTable::nested_group_slices(std::byte const* slice_dat
         }
     }
     if (table == nullptr) {
+        // 100 (research D10): the row is pushed BEFORE the build, so a call whose
+        // row does not fit builds nothing and fails as a null sub-table does
+        // (mode (a), through resolve_nested_result); its repeat fails the same
+        // way. The built table, or null, is written into the pushed row.
+        try {
+            nested_cache_.push_back(nested_cache_row{.slice_data = slice_data,
+                                                     .hooks_key = hooks_key,
+                                                     .nested_no_tag = nested_no_tag,
+                                                     .table = nullptr});
+        } catch (std::bad_alloc const&) {
+            return resolve_nested_result(nullptr, slice_data, slice_len, nested_no_tag, hooks, ctx);
+        }
+        std::size_t const row = nested_cache_.size() - 1U;
         // 083 T057 (C-8.1) / fixpp#426: `hooks` is the CALLER's bundle,
         // forwarded whole — never mixed with this table's own `hooks_`. A
         // caller passing a dictionary other than this table's own now gets
@@ -1035,19 +1156,23 @@ nested_slices_result OffsetTable::nested_group_slices(std::byte const* slice_dat
         // mismatched-pairing sibling brain/components/wire.md records
         // ("the DELIMITER oracle (#384)").
         table = build_nested_subview(slice_data, slice_len, resource(), hooks, gen, ctx);
-    }
-    try {
-        nested_cache_.push_back(nested_cache_row{.slice_data = slice_data,
-                                                 .hooks_key = hooks_key,
-                                                 .nested_no_tag = nested_no_tag,
-                                                 .table = table});
-    } catch (std::bad_alloc const&) {
-        // Cache insert failed; still serve this call from the built table —
-        // degrade to "rebuild next time" rather than lose this result.
+        nested_cache_[row].table = table;
+    } else {
+        // 100 (research D10): this call reuses an earlier row's sub-table for the
+        // same slice and bundle. A row that does not fit leaves the answer
+        // uncached; the repeat finds the same earlier row and the same table.
+        try {
+            nested_cache_.push_back(nested_cache_row{.slice_data = slice_data,
+                                                     .hooks_key = hooks_key,
+                                                     .nested_no_tag = nested_no_tag,
+                                                     .table = table});
+        } catch (std::bad_alloc const&) {
+            // Served uncached.
+        }
     }
     // 073 T004 (D2 final exit): resolve against the post-build local `table`
-    // (same three-origin OR as the cache-hit exit, shared via the helper).
-    return resolve_nested_result(table, nested_no_tag);
+    // (the same resolution as the cache-hit exit, shared via the helper).
+    return resolve_nested_result(table, slice_data, slice_len, nested_no_tag, hooks, ctx);
 }
 
 // 065 T004: convenience overload — forwards to the overload above using

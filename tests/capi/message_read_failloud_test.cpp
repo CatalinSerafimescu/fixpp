@@ -32,13 +32,6 @@
 //                window — unrelated to the nested sub-view build).
 //   cap in [3600, 4240]: top-level parses, but the OUTER group(453) read
 //                itself already comes back empty (also excluded).
-//   cap in [4280, 4320]: the UNRELATED top-level `fixpp_msg_get_group`/
-//                `fixpp_group_get_nested_group` cursor-shell
-//                `new_object<fixpp_group>()` allocation (a bare
-//                `std::pmr::polymorphic_allocator`, not `noexcept`-wrapped)
-//                itself throws uncaught `bad_alloc` — out of scope for this
-//                feature (which is specifically about the nested sub-view
-//                build); this narrow throw window must be avoided.
 //   cap >= 4360 (verified stable through 8000, the top of the sweep — the
 //                nested group's full 40-instance build needs far more than
 //                8000 bytes so the band does not close within the swept
@@ -50,7 +43,7 @@
 //                544-byte [576,1120] band).
 // kTinyCap = 6000 sits deep in the middle of [4360, 8000+] (1640 bytes of
 // margin below the nearest verified boundary, thousands above), clear of
-// both the throw window and the top-level-fails windows, so the fixture is
+// the top-level-fails windows, so the fixture is
 // robust to `sizeof(OffsetTable)` / allocator-overhead drift across
 // clang-debug / gcc-release / MSVC
 // ([[feedback_local_verify_clang_only_misses_gcc_release_ci_job]]).

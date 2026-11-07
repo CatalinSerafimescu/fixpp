@@ -3,7 +3,9 @@
 // src/capi/message_read.cpp — CA-008 (T006/US1) + CA-010-read (T013/US3)
 //
 // Thin thunks over wire::MessageView<Index>. All accessors:
-//   - abort on any escaping C++ exception ([2i §5.2] steady-state rule)
+//   - abort on any escaping C++ exception ([2i §5.2] steady-state rule), except
+//     the two group getters, which return FIXPP_ERR_WIRE_LIMIT_EXCEEDED when their
+//     cursor shell does not fit in the parse arena
 //   - allocate nothing on the global heap (SC-003 / [const §VIII.5])
 //   - return FIXPP_ERR_NULL_HANDLE for NULL msg or output pointers
 //   - return FIXPP_ERR_INVALID_HANDLE for dead/tombstoned handles or wrong flavour
@@ -11,6 +13,13 @@
 // Group cursors (fixpp_group_t) are stack-allocated in a local that lives in
 // the calling function's scope; the pointer returned to C is into an arena-
 // allocated copy so the consumer can keep it alive through the dispatch window.
+//
+// 100-wire-group-read-integrity: `fixpp_msg_get_group` and
+// `fixpp_group_get_nested_group` answer from the one ordered table of
+// specs/100-wire-group-read-integrity/contracts/capi-group-getters.md (research
+// D4), superseding 073's nested-only failure report and the flat getter's
+// TYPE_MISMATCH for an empty or failed read; the cursor-shell allocation is
+// caught (FR-006).
 
 #include <cassert>
 #include <cerrno>
@@ -22,9 +31,11 @@
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/wire/parser.hpp>  // MessageView, field_iterator, group_slice
 #include <memory_resource>
+#include <new>
 #include <span>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 
 #include "capi_internal.hpp"
 #include "fix/c_api/dict.h"
@@ -401,6 +412,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_get_msg_type(const fixpp_msg_t* msg,
 
 // ── CA-010-read implementation ───────────────────────────────────────────────
 
+// 100 (research D4): the cursor shells' `new_object` can throw only from the
+// allocation, which the getters catch, because constructing the shell cannot throw.
+static_assert(std::is_nothrow_default_constructible_v<fixpp_group>);
+
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_get_group(const fixpp_msg_t* msg, uint16_t group_tag,
                                                    const fixpp_group_t** group_out,
                                                    size_t* count_out) {
@@ -421,10 +436,15 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_get_group(const fixpp_msg_t* msg, uint1
         return FIXPP_ERR_TAG_NOT_FOUND;
     }
 
-    // 100 (contracts/capi-group-getters.md rows 3 to 5, research D4): a present tag
-    // not established as a group here -> TYPE_MISMATCH; a registered group with zero
-    // instances read -> OK with a null cursor and count 0; otherwise the cursor.
+    // 100 (contracts/capi-group-getters.md rows 2 to 5, research D4): a read that
+    // could not complete -> WIRE_LIMIT_EXCEEDED (only a present, registered tag
+    // fails, so this is row 2 after row 1); a present tag not established as a
+    // group here -> TYPE_MISMATCH; a registered group with zero instances read -> OK
+    // with a null cursor and count 0; otherwise the cursor.
     auto const r = offsets.group_slices_status(group_tag);
+    if (r.status != fixpp::wire::group_read_status::ok) {
+        return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
+    }
     if (!r.is_group) {
         return FIXPP_ERR_TYPE_MISMATCH;
     }
@@ -441,7 +461,14 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_get_group(const fixpp_msg_t* msg, uint1
     // explicit free needed.  [D5 deviation: OffsetTable::resource() exposes the
     // backing mr; deviation is recorded in .specify/2b-wire.md.]
     auto* arena = offsets.resource();
-    auto* grp = std::pmr::polymorphic_allocator<fixpp_group>(arena).new_object<fixpp_group>();
+    // 100 (research D4, FR-006): a shell that does not fit is a read that could not
+    // complete; the outputs stay null/0. Only the allocation can throw.
+    fixpp_group* grp = nullptr;
+    try {
+        grp = std::pmr::polymorphic_allocator<fixpp_group>(arena).new_object<fixpp_group>();
+    } catch (std::bad_alloc const&) {
+        return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
+    }
     grp->slices = slices;
     grp->parent_view = view;
     grp->arena = nullptr;  // not needed for scalar reads
@@ -542,8 +569,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
                                                             uint16_t nested_tag,
                                                             const fixpp_group_t** nested_out,
                                                             size_t* nested_count_out) {
-    if (g == nullptr || nested_out == nullptr || nested_count_out == nullptr)
-        return FIXPP_ERR_NULL_HANDLE;
+    // 100 (contract rows 0a and 0b): a null out-pointer leaves both outputs
+    // untouched; past that, both are written null/0 before `g` and `i` are checked.
+    if (nested_out == nullptr || nested_count_out == nullptr) return FIXPP_ERR_NULL_HANDLE;
     *nested_out = nullptr;
     *nested_count_out = 0;
 
@@ -564,12 +592,12 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
     auto r = parent_grp->parent_view->offsets().nested_group_slices(sl->data, sl->len, nested_tag,
                                                                     parent_grp->group_ctx);
 
-    // 073 T007 (D5): a present group whose sub-view allocation failed (either
-    // sub-mode, contracts/nested_slices_result.md) is fail-loud, distinct from
-    // legitimately absent/count-0 — reported BEFORE the presence probe below
-    // so it is never mistaken for TAG_NOT_FOUND.
-    if (r.status == fixpp::wire::group_read_status::alloc_failed)
-        return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
+    // 073 T007 (D5) / 100 (research D4, D11): a read that could not complete,
+    // for an allocation or a wire limit, is fail-loud, distinct from legitimately
+    // absent/count-0 — reported BEFORE the presence probe below. The wire layer
+    // reports a failure only for a tag present in the instance and registered in
+    // its context, so it is never mistaken for TAG_NOT_FOUND.
+    if (r.status != fixpp::wire::group_read_status::ok) return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
 
     // 100 (contracts/capi-group-getters.md rows 1, 3 to 5, research D4): a tag the
     // read did not establish as a group in this instance's context -> the
@@ -585,8 +613,14 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
         return FIXPP_ERR_OK;
     }
 
-    auto* nested_grp =
-        std::pmr::polymorphic_allocator<fixpp_group>(nested_arena).new_object<fixpp_group>();
+    // 100 (research D4, FR-006): as the flat getter's shell.
+    fixpp_group* nested_grp = nullptr;
+    try {
+        nested_grp =
+            std::pmr::polymorphic_allocator<fixpp_group>(nested_arena).new_object<fixpp_group>();
+    } catch (std::bad_alloc const&) {
+        return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
+    }
     nested_grp->slices = slices;
     nested_grp->parent_view = parent_grp->parent_view;
     nested_grp->arena = nullptr;

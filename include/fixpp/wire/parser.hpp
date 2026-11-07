@@ -9,6 +9,9 @@
 // too when the view carries a bundle — `Parser<Iter>::parse_iter()` threads
 // one, so Iter is NOT dict-free). Authority: .specify/2b-wire.md v0.2;
 // shape oracle contracts/parser.hpp.
+// 100-wire-group-read-integrity: `MessageView::group<>()` passes the read's
+// status to its `group_view` (research D6), superseding 073's span-only top-level
+// read (L-073-1).
 //
 // (U1) Every W-009 field type decodes/encodes strictly via the 2a
 // decimal<T> / 2c dict::field_traits<...> boundary — the wire layer performs
@@ -349,7 +352,7 @@ public:
             // nested_group_slices() (which mutates only its own `mutable` cache).
             // 063 T007: the ROOT context — {msg_type, path=[]} — is this message's
             // own context (depth 0, plan.md Context-propagation mechanism). Set on
-            // `table_` BEFORE group_slices() so group()'s membership predicate
+            // `table_` BEFORE the read so group()'s membership predicate
             // calls see it; the entry_context each returned entry carries gets the
             // context PUSHED with NoTag (its own container path + own no_tag), so
             // a later nested descent from one of these entries seeds the correct
@@ -362,7 +365,10 @@ public:
             ctx.gen = token();
             ctx.parent_cache_owner = &table_;
             ctx.group_ctx = root_ctx.pushed(NoTag);
-            return group_view<GroupT>{table_.group_slices(NoTag), ctx};
+            // 100 (research D6): the read's status reaches the view, so a top-level
+            // read that could not complete reports `read_failed()`.
+            auto const r = table_.group_slices_status(NoTag);
+            return group_view<GroupT>{r.slices, ctx, r.status};
         }
 
     // [2b §4.8] Contract: unknown_fields() uses the dict pointer threaded from the

@@ -57,8 +57,8 @@ enum class group_read_status : std::uint8_t { ok, alloc_failed, limit_exceeded }
 
 // 073 T002: status-bearing return of both `nested_group_slices` overloads
 // (data-model.md §"nested_slices_result"; contracts/nested_slices_result.md).
-// `status == group_read_status::alloc_failed` iff a sub-view allocation failed
-// via any of THREE origins (research.md §D2, extended per
+// `status == group_read_status::alloc_failed` reports a sub-view allocation that
+// failed via any of THREE origins (research.md §D2, extended per
 // feedback_status_origin_must_cover_all_alloc_catch_sites): (a) the
 // sub-OffsetTable shell allocation failed (`build_nested_subview` -> nullptr),
 // (b) the sub-table built non-null but its own `group_slices_status()` caught
@@ -73,7 +73,12 @@ enum class group_read_status : std::uint8_t { ok, alloc_failed, limit_exceeded }
 // preserved.
 // 100: `status` replaces 073's `bool alloc_failed` (`alloc_failed == true` is
 // `status == group_read_status::alloc_failed`); `is_group` reports whether the
-// read established the tag as a group (data-model `nested_slices_result`).
+// read established the tag as a group (data-model `nested_slices_result`). Mode (c)
+// also reports a sub-build that failed with `wire_offset_table_full`, as
+// `limit_exceeded` (research D7); a cache row that did not fit is a mode-(a)
+// failure (research D10); and a failure is reported only for a tag present in the
+// instance slice and registered in the call's context, otherwise the read answers
+// `ok` and not a group (research D11).
 struct nested_slices_result {
     std::span<group_slice const> slices;
     group_read_status status = group_read_status::ok;
@@ -300,9 +305,10 @@ public:
     // 073 T002/T003: status-bearing form of group_slices() above
     // (data-model.md §"Internal group_slices_result"; research.md §D2 mode
     // (b), FR-002); see `group_slices_result` for who reads it. Sets
-    // `status = group_read_status::alloc_failed` in the `catch (std::bad_alloc)`
-    // degrade path; `ok` on a warm cache hit or a genuine (possibly count-0)
-    // materialized span. The public `group_slices()` above is unchanged and is a one-line
+    // `status = group_read_status::alloc_failed` when the cache row or the slice
+    // array does not fit, `limit_exceeded` when `group()` stops at a group wire
+    // limit (100, research D5, D10), and `ok` on a warm cache hit or a completed
+    // (possibly count-0) read. The public `group_slices()` above is unchanged and is a one-line
     // wrapper: `return group_slices_status(no_tag).slices;`.
     [[nodiscard]] group_slices_result group_slices_status(std::uint16_t no_tag) const noexcept
         [[clang::lifetimebound]];
@@ -545,7 +551,9 @@ private:
     // 062 T006: single flat nested-subview cache row — see
     // `nested_group_slices()` above for the ownership/keying contract.
     // `table` is arena-allocated by `build_nested_subview` (T005) and never
-    // individually freed (reclaimed with the arena).
+    // individually freed (reclaimed with the arena). 100 (research D10): a row is
+    // pushed before its sub-table is built and `table` is written after the build,
+    // null when the build's shell did not fit.
     struct nested_cache_row {
         std::byte const* slice_data;
         // fixpp#426 (Gate B r9 R-1): the identity of the bundle this row's sub-table

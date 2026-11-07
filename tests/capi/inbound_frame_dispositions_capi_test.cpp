@@ -34,8 +34,7 @@
 //     records the spill.
 // Each arm has a control: the same group without the padding, which leaves the
 // headroom intact, so the getter returns OK with the group's count. The parent group
-// handle is taken while the headroom is intact: the C cursor shells allocate from the
-// parse arena with no catch (L-17, fixpp#541), which is outside 093.
+// handle is taken while the headroom is intact.
 
 #include <gtest/gtest.h>
 
