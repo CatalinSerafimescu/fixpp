@@ -231,7 +231,7 @@ MVP: US1 and US2 at the end of Phase 5; they are one C-ABI 1.15 break and ship t
 
 ## Phase 8: Mutants (plan phase 5)
 
-- [ ] T054 Run every row of `## Mutant table` in `$M` reset to `H7`, per Mutant protocol, and record each row. M-07x / M-07o (one edit, shared by both loaders) and the divergent-definition mutants M-09 to M-11 run once per loader (XML and Orchestra cells judged separately). Each loader's judgement is its own row: one loader's cell RED and the other's GREEN is a kill for the first and a survival for the second. A surviving mutant stops the batch.
+- [X] T054 Run every row of `## Mutant table` in `$M` reset to `H7`, per Mutant protocol, and record each row. M-07x / M-07o (one edit, shared by both loaders) and the divergent-definition mutants M-09 to M-11 run once per loader (XML and Orchestra cells judged separately). Each loader's judgement is its own row: one loader's cell RED and the other's GREEN is a kill for the first and a survival for the second. A surviving mutant stops the batch.
 - [ ] T055 Check the record: every M-id has one row with build rc 0 and its named cell RED (and its named GREEN cell GREEN where the row names one).
 
 ---
