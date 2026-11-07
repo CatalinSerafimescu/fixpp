@@ -253,8 +253,9 @@ parse it; separately parse frames of many distinct, non-consecutive tags that to
 
 **Acceptance Scenarios**:
 
-1. **Given** such a crafted frame, **When** it is parsed, **Then** the parse fails with a wire-limit error and no field
-   reads absent on a successful parse.
+1. **Given** such a crafted frame, inside the entry cap and the inbound byte limit so that only the budget can fail it
+   (research D9 "#645"), **When** it is parsed, **Then** the parse fails with a wire-limit error and no field reads
+   absent on a successful parse.
 2. **Given** a frame whose total probe work is within the budget (including one that reaches today's per-insert cap),
    **When** it is parsed, **Then** it parses and every tag is indexed.
 3. **Given** such a crafted frame on an inbound session, **When** it arrives, **Then** it takes the disposition a frame
@@ -264,13 +265,20 @@ parse it; separately parse frames of many distinct, non-consecutive tags that to
 
 - A zero-count group whose count tag is **also** used as a scalar in another context of the same message: group-ness is
   decided per context (message type and parent path) by the registration predicate.
-- A declared count of `0` followed by fields that **are** members of the group (a lying count): the read follows the
-  declared count, as today for any declared count; flagging the mismatch is the validator's job.
+- A declared count of `0` followed by fields that **are** members of the group (a lying count): registration makes it
+  a group, and the extent walk, unchanged, consumes at most the declared count of instances, as today for any declared
+  count (`consume_group_extent`'s zero-count arm, B-004-7; research D2 step 6). So it reads zero instances: `OK`/0 on
+  both getters, an empty, not-failed typed view. Flagging the mismatch is the validator's job.
+- A registered count field whose value has no leading digit (`""`, `abc`, `-1`): the extent walk reads its declared
+  count as 0 (`parse_bounded_u32` stops at the first non-digit), so it reads as the case above, or as a lying count
+  when the next field is not a member: `OK`/0 on both getters. The value never decides group-ness (FR-001).
 - A nested zero-count group that is the last field of its instance (`NestedGroupEmptyGroupCountLastField`): unchanged,
   `OK` with count 0.
 - A count field that is the last entry of the table it is read from occurs only inside an instance slice: the root
   table's last entry is always CheckSum(10). The flat getter for tag 10 stays `TYPE_MISMATCH`.
-- Arena exhaustion on the **first** read versus a **repeat** read of the same group: both return the same code.
+- Arena exhaustion on the **first** read versus a **repeat** read of the same group: both return the same code. This is
+  about a read that failed. A completed read with n ≥ 1 instances whose repeat cannot allocate its cursor shell is
+  FR-007's one exception.
 - The probe budget and a dict-free table: the budget applies to every table; a dict-free table has no group reads
   (fixpp#220 declines them), so only the index arm applies.
 - A group read in a context the dictionary does not declare (US1.9, US1.10): a body group is not a group there; a header
@@ -285,14 +293,22 @@ parse it; separately parse frames of many distinct, non-consecutive tags that to
 
 - **FR-001** (#647): A tag is a group, for every group read on both paths, exactly when the registration predicate
   (research D2) holds for it in the read's context (message type, parent path). The value of the count, the count
-  field's position, the field that follows it and whether an allocation succeeded do not decide it.
+  field's position, the field that follows it and whether an allocation succeeded do not decide it. The read's
+  context is the root table's stored context `(msg_type, [])` for a top-level read, and for a nested read the context
+  the `nested_group_slices` call carries (the C getter passes its cursor's `group_ctx`, a generated accessor its
+  `ctx_`), which `build_nested_subview` seeds into the sub-table (research D11). One exception, decided in the
+  Clarifications: a nested read whose instance sub-table build failed for a reason other than an allocation or a wire
+  limit (073's malformed-data scope) does not establish a group, and reads as FR-003 says.
 - **FR-002** (#647): A registered group count tag whose instances are not on the wire (declared `0`, a count field last
   in its instance, or a lying count) reads as a present group with zero instances: C-ABI `OK` with count 0 on both
   getters, and an empty, not-failed `group_view` on the typed path, wherever the count field sits in the message or
   instance.
 - **FR-003** (#647): A tag present in the message (or instance) that is not registered in the read's context reads
   `TYPE_MISMATCH` on **both** C-ABI getters, wherever it sits, whatever its value, and on an ample or an exhausted
-  arena. (Today the nested getter answers `OK`, count 0.)
+  arena. (Today the nested getter answers `OK`, count 0.) So does a registered tag on the nested getter whose instance
+  sub-table build failed for a reason other than an allocation or a wire limit (contract row 3; whether a shipped
+  construction reaches it is settled in the RED phase, tasks T012). On the typed path such a tag reads size 0, not
+  failed (contract "Typed C++").
 - **FR-004** (#647, 073 FR-007): A tag absent from the message (or from the instance, for the nested getter) reads
   `TAG_NOT_FOUND` on both getters, on an ample or an exhausted arena. A failed read is reported only for a present,
   registered tag.
@@ -305,11 +321,15 @@ parse it; separately parse frames of many distinct, non-consecutive tags that to
   not complete, whatever caused it (slices, sub-table, cache row, cursor shell, a group wire limit) and whether it is
   the first or a repeat read. The flat group cache (`group_index_`) never holds a failed read. A cached nested row is
   re-resolved through the same failure rule as a first read (research D11), so a repeat answers as the first read did.
-  A completed read's repeat fails only where the getter allocates a cursor shell.
+  A completed read's repeat fails only where the getter allocates a cursor shell. "A repeat fails the same way" holds
+  on a monotonic arena, which the session's parse arena is. A caller-supplied resource that reuses freed memory can
+  let a repeat complete where the first read failed (research D10).
 - **FR-008** (#645): The index build's total probe work is bounded by the same constant per occurrence
   (`kMaxBuildProbe` × occurrences). A build that exceeds the budget ends in a failed build status
-  (`wire_offset_table_full`), so the parse fails with a wire-limit error; a build within it indexes every distinct tag.
-  Build cost stays linear in the number of occurrences.
+  (`wire_offset_table_full`). For the root table the parse then fails with a wire-limit error. For a nested sub-table
+  the nested read fails (`limit_exceeded`, FR-011, research D7). A build within the budget indexes every distinct tag.
+  The budget applies to every `OffsetTable::build`: root, nested sub-table and dict-free tables alike. Build cost stays
+  linear in the number of occurrences.
 - **FR-009**: A frame that does not reach any of these conditions reads exactly as today: same fields, same group
   instances, same codes, except the cells named in the contract's "Changes from 1.14". No new allocation on the read
   path; the per-sub-table allocation grows by one function pointer (research D2), and bands tuned to
@@ -318,9 +338,19 @@ parse it; separately parse frames of many distinct, non-consecutive tags that to
 - **FR-010**: The B&L rows L-458-1, L-073-1 and L-051-3 move to the closed file with the delivering witnesses named;
   L-093-17 is retired to match FR-006; L-093-5's group bullets (empty span, the flat getter's `TYPE_MISMATCH`
   "misreport") and L-065-2's "top-level reads remain silent" clause are updated to the new endings; B-093-6, B-092-6
-  and L-092-6 ("unreachable for a frame the session admits") are amended in place for the crafted-frame case. Every
-  changed C-ABI ending is documented in `include/fix/c_api/message.h` and `.specify/2i-capi.md`, and the C-ABI version
-  bumps per `[const §X.7]` (1.15, BREAKING, marked on each affected declaration).
+  and L-092-6 ("unreachable for a frame the session admits") are amended in place for the crafted-frame case. New
+  `B-100-n` / `L-100-n` rows are added, as plan Phase 6 lists them:
+  - the 1.15 endings, the session observers' crafted-frame parse failure included;
+  - `Parser::parse`'s probe-budget ending (FR-008);
+  - a body group read in a context its dictionary does not declare;
+  - a group read at its occurrence's own definition;
+  - the typed C++ endings that change;
+  - D5's field rename;
+  - the custom-dictionary L-row.
+
+  Every changed C-ABI ending is documented in `include/fix/c_api/message.h` and `.specify/2i-capi.md`. The C-ABI
+  version bumps per `[const §X.7]`: 1.15, BREAKING, marked on each affected declaration, in the PR description and in
+  the B&L delta.
 - **FR-011** (found at plan, research D5): A group read stopped by a group wire limit reports a failed read:
   `read_failed()` true and `alloc_failed()` false on the typed path, `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` on the getter,
   on the first and every repeat read. At the top level the limit is `wire_group_too_large` (the per-instance entry cap
@@ -344,24 +374,35 @@ parse it; separately parse frames of many distinct, non-consecutive tags that to
 - **SC-001**: Every cell named in the acceptance scenarios and in the contract's "Changes from 1.14" is RED on
   `fa778a8e` where today's behaviour differs (US1.1, US1.2, US1.4's nested scalar mid-instance and last in instance,
   US1.7, US1.8 and US1.9 with `n ≥ 1`, US1.11's twins of those cells, US2.1, US2.2, US2.3, US2.5, US2.6, US3.1, US3.2's
-  per-insert-cap frame, research D9's section-arm cells (i-a), (ii-0), (ii-0h) and (ii-0-O), and research D9's divergent-definition cells other than their controls) and GREEN on the feature head; the control
-  cells (including US1.3, which today's nested getter already answers `OK`/0 through its presence probe, US1.10 with
-  n ≥ 1 where the definition read is the bare store's, research D9's section-arm cells (i-b), (i-c), (ii), (iii), (iv), (v), (ii-O), (iii-O), (iv-O) and (v-O), and the divergent-definition controls, each proven live by its mutant) are GREEN on
-  both. The verify record names, per cell, the lanes on which it shows RED and those on
+  per-insert-cap frame, research D9's section-arm cells (i-a), (ii-0), (ii-0h) and (ii-0-O), and research D9's divergent-definition cells other than their controls;
+  FR-011's cells (research D9 "D5", the top level, and "D7" construction (i)); research D9's "D10" and "D11" cells;
+  row 0b's null-`g` cell; and the flat cell for a registered count of 0 followed by member fields (Edge Cases)) and
+  GREEN on the feature head. D7 construction (ii)'s precondition (the sub-build fails) cannot hold before D1 lands, so its RED comes from its named mutant
+  (research D9 "D7"; tasks Stop rule). The control
+  cells are GREEN on both trees. They include US1.3, which today's nested getter already answers `OK`/0 through its
+  presence probe; US1.10 with n ≥ 1 where the definition read is the bare store's; and research D9's section-arm cells
+  (i-b), (i-c), (ii), (iii), (iv), (v), (ii-O), (iii-O), (iv-O) and (v-O). Each of these is proven live by the mutant
+  that tasks' Mutant table names for it. The divergent-definition controls also stay GREEN under the lookup mutants,
+  which proves that those mutants turn RED only the cells whose definition differs. The verify record names, per cell, the lanes on which it shows RED and those on
   which it skips. A cell that owns a null-upstream arena, as 073's failloud tests do, asserts on every lane; only the
   cells over the library's arena upstream (`fixpp::detail::arena_upstream()`: the Q33 headroom rig, which branches on
   it, and the live-engine cursor-shell port, which skips) assert their exhaustion arm only where that upstream is null
   (MSVC debug forwards it to the heap).
 - **SC-002**: The B42 repro shape (repeat getter calls on a frame at the inbound limit) completes every call with
   `FIXPP_ERR_OK` or `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` and no exception, on both getters.
-- **SC-003**: No existing test changes its expected outcome except the cells that pin today's defects (named in the
-  plan with the requirement that supersedes each), and the inbound zero-allocation gates stay green. The checked-in
+- **SC-003**: No existing test changes its expected outcome except the cells that pin today's defects, and the inbound
+  zero-allocation gates stay green. Those cells are the ones research.md's census names under "Cells that flip", plus
+  those its last two bullets' conditions find in the RED run. Each is rewritten by the task that owns it (tasks T009,
+  T013, T019, T038, T046), naming the requirement that supersedes it, and listed in the evidence file. A cell that flips
+  outside those conditions stops the run (tasks T038). The checked-in
   generated goldens that carry the nested accessor text (`specs/003-dictionary-codegen/contracts/golden/` and
   `specs/076-fix-latest-typed-codegen/contracts/golden/`, found by the recipe in research.md's census) are live oracles
   of the codegen tests; they are regenerated by the emitter, never hand-edited, and their accessor-text change is the
-  named exception.
-- **SC-004**: For a frame whose count tag is registered in its exact context, a validating session that accepts a
-  zero-count group and the C-ABI read of the same frame agree: the group is present with count 0.
+  named exception. Any other byte that changes in a regenerated golden is a failure (tasks T025).
+- **SC-004**: For a frame whose count tag is registered in its exact context, the dictionary-driven validator under
+  strict validation (`dictionary_driven_validator`, the check a validating session runs on the frame) accepts a
+  zero-count group, and the C-ABI read of the same frame agrees: the group is present with count 0. The witness calls
+  the validator directly (tasks T010).
 
 ## Assumptions
 
@@ -413,4 +454,5 @@ OFFICIAL catalogue row; `[const §VI.4]` not engaged.
 - Inheriting the root's `OffsetTable::Config` in nested sub-tables (a lead to file).
 - The session-side Reject and dispatch defects of row 7 (B82, B85, B88, B91, #549) and the dictionary/codegen ones (B84,
   B67): separate features.
-- fixpp#540 (`unknown_fields()` over the same arena), unless the plan finds it is the same fix.
+- fixpp#540 (`unknown_fields()` over the same arena), unless the plan finds it is the same fix. The plan records that
+  it is not (plan Summary).

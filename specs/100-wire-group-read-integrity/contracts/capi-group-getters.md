@@ -6,6 +6,11 @@ Functions: `fixpp_msg_get_group(msg, group_tag, &group_out, &count_out)` and
 "Registered" below means the registration predicate holds for the tag in the read's context `(msg_type,
 parent_path)`. Its arms are stated in research D2 only.
 
+"Present" means the tag occurs anywhere in the bytes the read covers. For the flat getter that is the whole message
+(`OffsetTable::find` over the root table). For the nested getter it is the whole instance slice `i`, nested instances
+included (`scan_slice_for_tag`, and research D11's scan). So a tag that occurs only inside a deeper nested instance is
+present in instance `i`: it reads row 3 if it is not registered there, never row 1.
+
 ## Return codes
 
 One table for both getters, evaluated in this order; the first condition that holds is the answer.
@@ -13,11 +18,11 @@ One table for both getters, evaluated in this order; the first condition that ho
 | # | Condition | Code | `*out` | `*count_out` |
 |---|---|---|---|---|
 | 0a | either out-parameter pointer is null | `NULL_HANDLE` (unchanged) | untouched | untouched |
-| 0b | both out-parameter pointers are non-null, and the handle (`msg` / `g`) is null or invalid, or the instance index is out of range | `NULL_HANDLE` / handle error / `INDEX_OUT_OF_RANGE` (unchanged codes) | null | 0 |
+| 0b | both out-parameter pointers are non-null, and the handle is unusable or the instance index is out of range. Flat, in this order: a null `msg` → `NULL_HANDLE`; a `msg` that is not an inbound message handle (wrong handle tag, or no wire view) → `INVALID_HANDLE`. Nested, in this order: a null `g` → `NULL_HANDLE`; `i ≥` the cursor's count → `INDEX_OUT_OF_RANGE` (a `g` handle carries no tag to check) | the code named (unchanged codes) | null | 0 |
 | 1 | the tag is not in the message (flat) or not in instance `i` (nested), on an ample or an exhausted arena | `FIXPP_ERR_TAG_NOT_FOUND` | null | 0 |
-| 2 | the tag is present **and registered**, and the read could not complete: an allocation from the per-message arena failed (instance slices, a cache row, nested sub-table, cursor shell), or a group wire limit was hit (top level: instance entry cap, nesting depth; nested: the sub-table's `wire_offset_table_full`); on the first and on every repeat read. This includes a nested group whose sub-table could not be built, a zero-count one included | `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` | null | 0 |
+| 2 | the tag is present **and registered**, and the read could not complete: an allocation from the per-message arena failed (instance slices, a cache row, nested sub-table, cursor shell), or a group wire limit was hit (top level: instance entry cap, nesting depth; nested: the sub-table's `wire_offset_table_full`). A read that failed answers row 2 on the first and on every repeat read. A completed read answers row 2 on a repeat only when that call's cursor shell does not fit (FR-007). This includes a nested group whose sub-table could not be built, a zero-count one included | `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` | null | 0 |
 | 3 | the tag is present and not established as a group: not registered in this context, wherever it sits and whatever its value; or (nested) the instance's sub-table build failed for a reason other than an allocation or a wire limit | `FIXPP_ERR_TYPE_MISMATCH` | null | 0 |
-| 4 | the tag is registered and zero instances are read: declared count 0, a count field last in its instance, or a declared count whose next field is not a member | `FIXPP_ERR_OK` | null | 0 |
+| 4 | the tag is registered and zero instances are read: declared count 0 (a value with no leading digit reads as 0), a count field last in its instance, or a declared count whose next field is not a member | `FIXPP_ERR_OK` | null | 0 |
 | 5 | the tag is registered and n ≥ 1 instances are read | `FIXPP_ERR_OK` | cursor | n |
 
 Row 1 before row 2, and row 2 before row 3, hold for both getters: a read is reported failed only for a present,
@@ -26,14 +31,19 @@ nor a present scalar answers `WIRE_LIMIT_EXCEEDED`. Rows 1 and 3 need no memory,
 them. A nested `wire_group_too_large` maps to row 2 too, but is defensive: no shipped construction reaches it (research
 D5).
 
-No exception leaves either function.
+Row 4 is the answer both getters give, and the one the nested getter already gives a zero-count group in 1.14. There is
+no cursor, so there is nothing to read with `fixpp_group_get_*`. A caller never releases a cursor in any case: cursors
+alias the parse arena and are non-owning (the CA-010 block in `message.h`).
+
+No exception leaves either function. The statement covers these two getters only. Other reads over the same arena keep
+their own documented endings.
 
 ## Changes from 1.14 (BREAKING)
 
 Each is witnessed RED on `fa778a8e` (research D9).
 
-- Flat getter, row 4, a registered zero count mid-body or as the last body field (or a header or trailer group's count
-  tag holding 0, research D9 (ii-0), (ii-0h)): was `TYPE_MISMATCH`.
+- Flat getter, row 4, a registered zero count mid-body or as the last body field, whether member or non-member fields
+  follow it (or a header or trailer group's count tag holding 0, research D9 (ii-0), (ii-0h)): was `TYPE_MISMATCH`.
 - Flat getter, row 4, a registered lying count (`n ≥ 1`, next field not a member): was `TYPE_MISMATCH`. (The nested
   getter already answers `OK`/0 for it.)
 - Flat getter, row 3, a nested group's count tag read at the top level with a value `n ≥ 1` (for example 802 outside
@@ -76,7 +86,11 @@ Each is witnessed RED on `fa778a8e` (research D9).
 
 ## Unchanged
 
-- A dict-free message: the flat getter answers `TYPE_MISMATCH` for any present tag (fixpp#220 declines group reads).
+- A dict-free message, or a bundle with no registration callback, which only the test seam can build (data-model
+  `dict_hooks`): the flat getter answers `TYPE_MISMATCH` for any present tag (fixpp#220 declines group reads). The
+  nested getter is not reachable, since no cursor is ever returned. The typed read is size 0, not failed.
+- The flat getter for a present scalar (`TYPE_MISMATCH`) and for an absent tag (`TAG_NOT_FOUND`), on an ample or an
+  exhausted arena.
 - The flat getter for CheckSum(10) (the root table's last entry): `TYPE_MISMATCH`.
 - A registered zero-count nested group (mid-instance or last): `OK`, count 0.
 - A header or trailer group, or a group nested in one, read in a message type the dictionary does not declare (for
@@ -93,6 +107,18 @@ Each is witnessed RED on `fa778a8e` (research D9).
   2026-11-07).)*
 - Error code values and names; no symbol added or removed.
 
+## Migration from 1.14
+
+For a C caller of the two getters:
+- **Flat getter, `TYPE_MISMATCH`.** A caller that read it as "zero instances" now gets `OK` with count 0 and a null
+  cursor for a registered group. A caller that read it as "could not read" now gets `WIRE_LIMIT_EXCEEDED`.
+  `TYPE_MISMATCH` now means only "present, not a group here".
+- **Nested getter, `OK`/0.** A caller that read it as "scalar or empty" now gets `TYPE_MISMATCH` for a scalar, and
+  `OK`/0 only for a registered group with zero instances.
+- **Both getters.** Test `OK` with count 0 for an empty group, `TYPE_MISMATCH` for "not a group", `TAG_NOT_FOUND` for
+  "absent", and `WIRE_LIMIT_EXCEEDED` for "could not complete". `WIRE_LIMIT_EXCEEDED` includes a cursor shell that does
+  not fit, which in 1.14 escaped as an exception.
+
 ## Typed C++ (`MessageView::group<>()`, generated group accessors)
 
 | Condition | `size()` | `alloc_failed()` | `read_failed()` |
@@ -103,6 +129,13 @@ Each is witnessed RED on `fa778a8e` (research D9).
 | n instances | n | false | false |
 
 `read_failed()` is new; `alloc_failed()` keeps its meaning.
+
+Changes a typed caller sees, each recorded in a B&L row (tasks T057):
+- a top-level read whose slices do not fit now reports `alloc_failed()` and `read_failed()` true, where it read empty
+  and not failed;
+- a group wire limit now reports `read_failed()` true;
+- a tag not registered in the read's context (802 at the root, 453 in a context that does not declare it) now reads
+  size 0, where it was a cursor through the bare member fallback.
 
 ## Parse
 

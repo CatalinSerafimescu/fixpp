@@ -12,15 +12,15 @@ a GoogleTest suite name is not a ctest name. For each touched or new test file, 
 
 ```sh
 cmake --build build/linux-clang-debug -j8 --target <each target found above>
-ctest --test-dir build/linux-clang-debug -L wire --output-on-failure
-ctest --test-dir build/linux-clang-debug -L capi --output-on-failure
-ctest --test-dir build/linux-clang-debug -L session --output-on-failure    # plus, by their own labels, the group-reading session entries with no `session` label (research census)
-ctest --test-dir build/linux-clang-debug -L dictionary --output-on-failure   # loader section-group records, D2 sweep
-ctest --test-dir build/linux-clang-debug -L alloc_guard --output-on-failure   # inbound zero-allocation gates
-ctest --test-dir build/linux-clang-debug -L codegen --output-on-failure       # regenerated goldens (research census)
+ctest --test-dir build/linux-clang-debug -L wire --no-tests=error --output-on-failure
+ctest --test-dir build/linux-clang-debug -L capi --no-tests=error --output-on-failure
+ctest --test-dir build/linux-clang-debug -L session --no-tests=error --output-on-failure    # plus, by their own labels, the group-reading session entries with no `session` label (research census)
+ctest --test-dir build/linux-clang-debug -L dictionary --no-tests=error --output-on-failure   # loader section-group records, D2 sweep
+ctest --test-dir build/linux-clang-debug -L alloc_guard --no-tests=error --output-on-failure   # inbound zero-allocation gates
+ctest --test-dir build/linux-clang-debug -L codegen --no-tests=error --output-on-failure       # regenerated goldens (research census)
 ```
 
-Check each label against the bucket's `LABELS` in its `CMakeLists.txt` before relying on it; a label that matches
+Check each label against the bucket's `LABELS` in its `CMakeLists.txt` before relying on it, and keep `--no-tests=error` on every run; without it a label that matches
 nothing prints "No tests were found" and exits 0.
 
 **Narrow run (per binary):**

@@ -23,6 +23,12 @@ C-ABI 1.15, BREAKING (`[const §X.7]`), covering the two getters and the session
 clause; no code, symbol or struct added to the C ABI. Two findings beyond the four issues, folded in: a top-level group
 read stopped by `wire_group_too_large` (D5) and a nested sub-table over its entry cap (D7) are both read as empty today.
 
+fixpp#540 (spec Out of Scope: "unless the plan finds it is the same fix") is not the same fix and needs none here. The
+issue is closed. 093 (its FR-015) put `MessageView::unknown_fields()`'s list build in a `try` that clears the partial
+list on exhaustion, so the function returns an empty view and no longer terminates (093 contract L-5; disclosed in
+B&L L-093-5's last bullet). That is a C++ read with its own disclosed ending, not a C-ABI group getter. Re-derive from
+the "093-inbound-frame-dispositions (FR-015, fixpp#540)" comment in `unknown_fields()` (`include/fixpp/wire/parser.hpp`).
+
 ## Technical Context
 
 **Language/Version**: C++23 (clang, gcc, MSVC per Article II).
@@ -76,11 +82,11 @@ regenerates (research census). Tests in `tests/wire/`, `tests/capi/`, `tests/ses
 |---|---|---|
 | I / VI — scope, spec coverage | core tag-value FIX | PASS. #647 brings the C-ABI read in line with FIX's zero count and TC-018 (ruling note, parent repo). |
 | VII — testing | RED first, mutation-proven; `ctest -L` selection (§VII.8) | PASS. Each cell RED on `fa778a8e` where behaviour differs, each production change mutated (D9); quickstart selects by label and by `--gtest_filter` with an executed-count floor. |
-| VIII — performance | no regression | PASS by construction (Technical Context). At verify (T071) the base-against-head run covers the rows of `bench/ci-suite.txt` this feature's code reaches: `bench/wire/parser_bench` (paired), `bench/wire/validator_bench` (paired), `bench/wire/offset_table_bench`, `bench/wire/typed_read_group_bench`, `bench/wire/fix42_group_parse_bench`, `bench/wire/validate_group_bench`, `bin/on_inbound_frame_bench`, and on the load path `bench/dictionary/xml_loader_bench` (paired), plus the scratch Orchestra load driver (Technical Context). "paired" is the row's tier-2 column in `bench/ci-suite.txt`. |
+| VIII — performance | no regression | PASS planned, not by construction. Research D2 "Cost" shows that set-bit misses can fall inside declared-message reads, and T005 re-derives whether a shipped dictionary has such tags. Whatever T005 finds, the pass criterion is `[const §VIII.2]`'s budget on the run below, and T071 names the row that reaches each changed cost. At verify (T071) the base-against-head run covers the rows of `bench/ci-suite.txt` this feature's code reaches: `bench/wire/parser_bench` (paired), `bench/wire/validator_bench` (paired), `bench/wire/offset_table_bench`, `bench/wire/typed_read_group_bench`, `bench/wire/fix42_group_parse_bench`, `bench/wire/validate_group_bench`, `bin/on_inbound_frame_bench`, and on the load path `bench/dictionary/xml_loader_bench` (paired), plus the scratch Orchestra load driver (Technical Context). "paired" is the row's tier-2 column in `bench/ci-suite.txt`. |
 | IX — coverage, sanitizers, static | touched modules ≥ 95/85 or per-line assessment | PASS planned: `/speckit-verify`; ASan on the cursor-shell path. |
-| **X — ABI** | §X.7: a breaking change before the first release bumps MINOR, declared BREAKING on each affected declaration, every in-repository consumer updated | **1.15 BREAKING** (D8): getters and session observers; freeze manifest and version test updated; Python consumes only the version macros (research census). |
+| **X — ABI** | §X.7: a breaking change before the first release bumps MINOR, declared BREAKING on each affected declaration, every in-repository consumer updated | **1.15 BREAKING** (D8): getters and session observers; freeze manifest and version test updated; Python consumes only the version macros, and the other in-repository consumers (tests, examples, interop harnesses) are found by the census recipe (research census, "Python" and "Other §X.7 consumers"). |
 | XI — concurrency | — | N/A, no concurrency surface. The process-global seed hook is restored by RAII in every cell that sets it (D9). |
-| **XV.1** — no per-message heap | inbound path | PASS: no new allocation; the cursor shell keeps its arena allocation, now caught; D10 allocates less than today; D11's scan allocates nothing; the registration bitset, the arm-1 store and the section-group store, with their per-occurrence records, are built with the dictionary view, never on the read path. |
+| **XV.1** — no per-message heap | inbound path | PASS: no new allocation; the cursor shell keeps its arena allocation, now caught; D10 allocates less than today; D11's scan allocates nothing; the registration bitset, the arm-1 store and the section-group store, with their per-occurrence records, are built with the dictionary view, never on the read path. Witness: the inbound zero-allocation gates (`-L alloc_guard`). Their `test_dict066_grouped_read_alloc_guard.cpp` runs a top-level and a nested group read over FIX44's `as_table_view()`, so D2's callback and lambdas are on the measured path. |
 | XVII — gates | Gate A on public C-ABI behaviour | Gate A required: §XVII.1's public-API trigger fires. |
 
 **Initial gate: PASS.** **Post-design re-check: PASS.**
@@ -168,12 +174,15 @@ ported from `e10c8b80` (a live engine against a raw TCP peer, isolation-sensitiv
      group read in a context its dictionary does not declare (`TYPE_MISMATCH`, was a group through the bare fallback;
      QuickFIX `getGroup`), marked BREAKING; a B-row for a group read at its occurrence's own definition where the
      dictionary defines the count tag differently elsewhere (a cursor, was `TYPE_MISMATCH` or lost instances), marked
-     BREAKING.
+     BREAKING; a B-row for the probe budget's C++ ending (`Parser::parse` fails for a frame over the budget, FR-008); a
+     B-row for the typed C++ endings that change (contract "Typed C++": top-level `alloc_failed()`, `read_failed()` on
+     a limit, size 0 for a tag not registered in the read's context). Each B-row and the amendments take the form tasks
+     T056 and T057 state.
    - an L-row, disclosed by owner ruling (2026-11-07), for the custom-dictionary shapes research D2 lists under "What
      it does not fix" and "Not fixed, and not pre-existing in its ending", each named as the condition stated there
      (that list is the one statement; shipped dictionaries reach none; Gate A closing entry).
    - a B-row for D5's C++ source change: the result structs' `alloc_failed` field renamed to `status`, generated
-     headers from an older emitter included.
+     headers from an older emitter included, with its migration line (tasks T057).
    - 093 contract C-3 I-1, I-4 and I-5 (the "C cursor shells are the exception" clause) amended in place, naming 100.
    - `.specify/2i-capi.md`: §4.8 / CA-010 endings; §5.2, §5.4 and §6.2's steady-state exception text for the two
      getters.
@@ -183,6 +192,8 @@ ported from `e10c8b80` (a live engine against a raw TCP peer, isolation-sensitiv
      parse"), `brain/components/session.md` (the late-parse close "no admitted frame reaches it, and the close is a
      defence") and `brain/components/dictionary.md` (its "Open residuals" L-458-1 bullet): flagged in place as
      superseded by 100 for a frame crafted against the seed; R-2 is kept as history.
+   - `brain/components/dictionary.md` also gains D2's content (the registration predicate, the section store, the arm-1
+     store, the per-occurrence records), what was rejected, and 100's row in its document list (tasks T061).
    - `brain/components/wire.md`: flag `specs/004-wire-codec/contracts/group_view.hpp` and
      `specs/073-nested-read-arena-failloud/contracts/nested_slices_result.md` (which defines `bool alloc_failed` and
      the mode semantics) as superseded by 100, in place. Neither shipped bundle is edited.

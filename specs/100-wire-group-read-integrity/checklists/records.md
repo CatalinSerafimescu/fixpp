@@ -21,43 +21,43 @@ Gate A closed by owner ruling (2026-11-07), and tasks.md does not reopen the des
 
 ## Behaviors and limitations
 
-- [ ] CHK001 FR-010 names the rows that are moved, retired, updated and amended. Plan Phase 6 adds B-rows (the 1.15 endings; a body group in an undeclared context; divergent definitions; D5's field rename) and one L-row. Does FR-010 match plan Phase 6, or are the added rows stated only in the plan? [Consistency, Spec §FR-010, plan "Phases"]
-- [ ] CHK002 Does the closed file name each closed row's delivering witness by test name rather than by task ID, so that the record outlives the bundle? [Clarity, Spec §FR-010, tasks T056]
-- [ ] CHK003 Is "retired" (L-093-17) told apart from "closed" in the B&L conventions, and is the retired row's destination stated? [Clarity, Spec §FR-010, tasks T056]
-- [ ] CHK004 The constitution's v2.0 Sync Impact Report calls B&L rows point-in-time records. Is amending B-093-6, B-092-6 and L-092-6 "in place" consistent with that? Is the amendment's form stated: a dated note naming 100, with the original text kept? [Consistency, Spec §FR-010, plan "Phases"]
-- [ ] CHK005 Is the new content of the L-093-5 and L-065-2 updates stated: which endings replace "empty span", the "misreport", and "top-level reads remain silent"? [Clarity, Spec §FR-010]
-- [ ] CHK006 Is the L-row stated as a copy of research D2's two lists, citing the filed issue numbers? Can its "no shipped dictionary reaches it" condition be re-derived from the census scripts? [Traceability, plan "Phases", research D2, tasks T057]
-- [ ] CHK007 Is a B-row stated for the typed C++ endings that change: top-level `alloc_failed()`, `read_failed()`, and size 0 for 802 at the root and 453 undeclared? [Gap, contract "Typed C++", plan "Phases"]
-- [ ] CHK008 Is a row or an amendment stated for the probe budget's own ending (a crafted frame that used to parse with a field missing now fails the parse), alongside the amended 093 and 092 rows? [Gap, Spec §FR-008, plan "Phases"]
+- [x] CHK001 FR-010 names the rows that are moved, retired, updated and amended. Plan Phase 6 adds B-rows (the 1.15 endings; a body group in an undeclared context; divergent definitions; D5's field rename) and one L-row. Does FR-010 match plan Phase 6, or are the added rows stated only in the plan? [Consistency, Spec §FR-010, plan "Phases"] — SPEC-FIXED: FR-010 now lists the new B-100/L-100 rows, matching plan Phase 6 (the typed-endings and probe-budget B-rows are also added to the plan).
+- [x] CHK002 Does the closed file name each closed row's delivering witness by test name rather than by task ID, so that the record outlives the bundle? [Clarity, Spec §FR-010, tasks T056] — SPEC-FIXED: T056 names delivering cells by `Suite.Test` name, never by task ID.
+- [x] CHK003 Is "retired" (L-093-17) told apart from "closed" in the B&L conventions, and is the retired row's destination stated? [Clarity, Spec §FR-010, tasks T056] — SPEC-FIXED: T056: mark `[RETIRED by 100 …]` in the live-file convention, then move to the closed file, whose header admits self-declared-gone rows.
+- [x] CHK004 The constitution's v2.0 Sync Impact Report calls B&L rows point-in-time records. Is amending B-093-6, B-092-6 and L-092-6 "in place" consistent with that? Is the amendment's form stated: a dated note naming 100, with the original text kept? [Consistency, Spec §FR-010, plan "Phases"] — SPEC-FIXED: T056 states the form, an `*(Amended <date>, 100:)*` note with the original text kept, which fits the rows' point-in-time status.
+- [x] CHK005 Is the new content of the L-093-5 and L-065-2 updates stated: which endings replace "empty span", the "misreport", and "top-level reads remain silent"? [Clarity, Spec §FR-010] — SPEC-FIXED: T056 states L-093-5's and L-065-2's new content per bullet.
+- [x] CHK006 Is the L-row stated as a copy of research D2's two lists, citing the filed issue numbers? Can its "no shipped dictionary reaches it" condition be re-derived from the census scripts? [Traceability, plan "Phases", research D2, tasks T057] — SPEC-FIXED: T057's L-row copies D2's lists, cites the issues, and names the census scripts as the re-derivation.
+- [x] CHK007 Is a B-row stated for the typed C++ endings that change: top-level `alloc_failed()`, `read_failed()`, and size 0 for 802 at the root and 453 undeclared? [Gap, contract "Typed C++", plan "Phases"] — SPEC-FIXED: T057 and plan Phase 6 add a B-row for the typed C++ endings.
+- [x] CHK008 Is a row or an amendment stated for the probe budget's own ending (a crafted frame that used to parse with a field missing now fails the parse), alongside the amended 093 and 092 rows? [Gap, Spec §FR-008, plan "Phases"] — SPEC-FIXED: T057 and plan Phase 6 add a B-row for `Parser::parse`'s probe-budget ending; the 1.15 B-row covers the observers' crafted-frame ending.
 
 ## Design documents and the 093 contract
 
-- [ ] CHK009 Is the scope of the "Updated (100-wire-group-read-integrity)" notes in `.specify/2b-wire.md` stated by a recipe? Is the narrowing (no notes for the predicate, the cache or the status) recorded, so that a later review does not raise it again? [Completeness, research "Census", plan "Round 2 — disagreements"]
-- [ ] CHK010 The 004 and 073 contracts are shipped history: they are flagged, never edited. Is amending 093 contract C-3 in place (I-1, I-4, I-5) consistent with that rule, and is the reason for the exception stated (B-093-6 cites C-3 as the live contract)? [Consistency, research "Census", plan "Phases"]
-- [ ] CHK011 Is the `.specify/2i-capi.md` §4.8 / CA-010 amendment stated to carry the contract's table and its "Changes from 1.14"? Is the §5.2, §5.4 and §6.2 amendment limited to the two getters? [Completeness, plan "Phases", tasks T059]
+- [x] CHK009 Is the scope of the "Updated (100-wire-group-read-integrity)" notes in `.specify/2b-wire.md` stated by a recipe? Is the narrowing (no notes for the predicate, the cache or the status) recorded, so that a later review does not raise it again? [Completeness, research "Census", plan "Round 2 — disagreements"] — PASS: the research census recipe for 2b-wire.md, and plan "Round 2 — disagreements" records the narrowing (Codex #5).
+- [x] CHK010 The 004 and 073 contracts are shipped history: they are flagged, never edited. Is amending 093 contract C-3 in place (I-1, I-4, I-5) consistent with that rule, and is the reason for the exception stated (B-093-6 cites C-3 as the live contract)? [Consistency, research "Census", plan "Phases"] — PASS: research census: "Never edited is scoped to 004 and 073", because B-093-6 cites C-3 as the live contract and the 1.11 clauses state its I-1.
+- [x] CHK011 Is the `.specify/2i-capi.md` §4.8 / CA-010 amendment stated to carry the contract's table and its "Changes from 1.14"? Is the §5.2, §5.4 and §6.2 amendment limited to the two getters? [Completeness, plan "Phases", tasks T059] — SPEC-FIXED: T059: CA-010 carries the table and "Changes from 1.14", and §5.2/§5.4/§6.2 are amended for the two getters only.
 
 ## Brain
 
-- [ ] CHK012 Is the set of brain pages derived by a recipe (the comment-claims grep over `brain`)? Do plan Phase 6 and tasks T060 to T062a list the same pages: wire, c-api, dictionary, inbound-message-path, session? [Consistency, plan "Phases", tasks T060, tasks T061, tasks T062a]
-- [ ] CHK013 Tasks T061 says "The plan names only the wire and C-ABI pages". Plan Phase 6 also names `brain/components/dictionary.md`, to flag its "Open residuals" L-458-1 bullet. Do the two agree on what that page needs: a flag only, or D2's content plus a document-list row? [Consistency, tasks T061, plan "Phases"]
-- [ ] CHK014 Does every component page that lists a superseded document flag it in place: 004's `group_view.hpp`, 073's `nested_slices_result.md`, and the pre-100 text of `.specify/2i-capi.md` and `.specify/2b-wire.md`? That covers wire, c-api and dictionary (project rule, issue #334). [Completeness, plan "Phases"]
-- [ ] CHK015 Is each page's "why" and "what was rejected" content for 100 stated: D1, D5, D10 and D11 alternatives on wire; D2's alternatives on dictionary; D4's alternatives on c-api? [Completeness, tasks T060, tasks T061, tasks T062]
+- [x] CHK012 Is the set of brain pages derived by a recipe (the comment-claims grep over `brain`)? Do plan Phase 6 and tasks T060 to T062a list the same pages: wire, c-api, dictionary, inbound-message-path, session? [Consistency, plan "Phases", tasks T060, tasks T061, tasks T062a] — PASS: plan Phase 6 and T060 to T062a list the same five pages; T062a also takes any other hit of the comment-claims recipe over brain.
+- [x] CHK013 Tasks T061 says "The plan names only the wire and C-ABI pages". Plan Phase 6 also names `brain/components/dictionary.md`, to flag its "Open residuals" L-458-1 bullet. Do the two agree on what that page needs: a flag only, or D2's content plus a document-list row? [Consistency, tasks T061, plan "Phases"] — SPEC-FIXED: T061's stale sentence deleted; plan Phase 6 now gives dictionary.md D2's content plus a document-list row, matching T061.
+- [x] CHK014 Does every component page that lists a superseded document flag it in place: 004's `group_view.hpp`, 073's `nested_slices_result.md`, and the pre-100 text of `.specify/2i-capi.md` and `.specify/2b-wire.md`? That covers wire, c-api and dictionary (project rule, issue #334). [Completeness, plan "Phases"] — SPEC-FIXED: T060 states the #334 rule with a recipe; the in-place-amended documents (2i-capi, 2b-wire, 093 C-3) are stated as current.
+- [x] CHK015 Is each page's "why" and "what was rejected" content for 100 stated: D1, D5, D10 and D11 alternatives on wire; D2's alternatives on dictionary; D4's alternatives on c-api? [Completeness, tasks T060, tasks T061, tasks T062] — SPEC-FIXED: T062 adds D4's "Alternatives"; T060 (D1/D5/D10/D11) and T061 (D2) already stated theirs.
 
 ## Header comments and comment claims
 
-- [ ] CHK016 Is there a derivation for "each file whose decision this feature supersedes names 100 in a header comment"? Does T063's list cover every changed file that supersedes a decision, including `dict_hooks.hpp`, `parser.hpp` (`for_table_view`), both loaders, `dictionary.cpp`, `dictionary_internal.hpp` and `emit_messages.cpp`? [Completeness, tasks T063, tasks "Execution rules"]
-- [ ] CHK017 Is the comment-claims rule (delete a refuted claim, never reword it) stated for every claim the census names? That includes the claims its recipe does not match: the Q33 `TYPE_MISMATCH` bullet, the `kMaxBuildProbe` waiver bullet, and the throw-window paragraph. [Completeness, research "Census", tasks T013, tasks T045, tasks T048]
+- [x] CHK016 Is there a derivation for "each file whose decision this feature supersedes names 100 in a header comment"? Does T063's list cover every changed file that supersedes a decision, including `dict_hooks.hpp`, `parser.hpp` (`for_table_view`), both loaders, `dictionary.cpp`, `dictionary_internal.hpp` and `emit_messages.cpp`? [Completeness, tasks T063, tasks "Execution rules"] — SPEC-FIXED: T063 gives a derivation rule and adds `parser.hpp` and `emit_messages.cpp`; files that only gain code name 100 where they add it.
+- [x] CHK017 Is the comment-claims rule (delete a refuted claim, never reword it) stated for every claim the census names? That includes the claims its recipe does not match: the Q33 `TYPE_MISMATCH` bullet, the `kMaxBuildProbe` waiver bullet, and the throw-window paragraph. [Completeness, research "Census", tasks T013, tasks T045, tasks T048] — PASS: T013 (the Q33 bullet), T048 (the waiver bullet) and T045 (the throw-window paragraph) each say "delete, not reword"; Execution rules "Records and comments".
 
 ## Catalogue and coverage index
 
-- [ ] CHK018 The spec's Normative References name the §3 wire row (W-001), the §3.2 row (W-006, W-007, D-010) and the validator row (W-014). T080 adds only CA-010's witness column and the §3.2 entry. Is a disposition stated for W-001, which covers FR-008's index change, and for W-014, which covers SC-004? [Consistency, Spec "Normative References", tasks T080]
-- [ ] CHK019 Does the "100 (<date>) closes <row>" amendment rule also cover sites outside the catalogue and the coverage index that cite the closed rows, such as brain pages and design documents? [Coverage, tasks T080]
+- [x] CHK018 The spec's Normative References name the §3 wire row (W-001), the §3.2 row (W-006, W-007, D-010) and the validator row (W-014). T080 adds only CA-010's witness column and the §3.2 entry. Is a disposition stated for W-001, which covers FR-008's index change, and for W-014, which covers SC-004? [Consistency, Spec "Normative References", tasks T080] — SPEC-FIXED: T080 adds W-001's entry (FR-008) and W-014's `N/A` with its reason.
+- [x] CHK019 Does the "100 (<date>) closes <row>" amendment rule also cover sites outside the catalogue and the coverage index that cite the closed rows, such as brain pages and design documents? [Coverage, tasks T080] — SPEC-FIXED: T080 runs the closed-row grep over brain and `.specify` too; hits take the amendment or the page flag.
 
 ## Issues
 
-- [ ] CHK020 Is each issue's required content stated (conditions, recipe, candidate fix), with the rule that an open issue covering it is cited instead? Is the order stated, filing before the L-row is written? (fixpp#540's disposition is `wire-read.md` CHK029.) [Completeness, quickstart "Issues to file", tasks T064]
-- [ ] CHK021 Are the issues the PR closes (#645, #644, #647, #541) stated? Is the closing-keyword-inside-a-negation check required for every place they appear, the PR body and the commit messages? Is the link between L-458-1, L-073-1, L-051-3 and those issues stated? [Completeness, tasks T077, tasks T079]
-- [ ] CHK022 Does the feature-completeness audit's check (iii) (T081) cover FR-010's full row list, including the amended rows and the new B-100 and L-100 rows? [Consistency, tasks T081, Spec §FR-010]
+- [x] CHK020 Is each issue's required content stated (conditions, recipe, candidate fix), with the rule that an open issue covering it is cited instead? Is the order stated, filing before the L-row is written? (fixpp#540's disposition is `wire-read.md` CHK029.) [Completeness, quickstart "Issues to file", tasks T064] — PASS: T064 covers content (from quickstart), the covering-open-issue rule, the order (before T056/T057) and the closing-keyword grep.
+- [x] CHK021 Are the issues the PR closes (#645, #644, #647, #541) stated? Is the closing-keyword-inside-a-negation check required for every place they appear, the PR body and the commit messages? Is the link between L-458-1, L-073-1, L-051-3 and those issues stated? [Completeness, tasks T077, tasks T079] — SPEC-FIXED: T077 names the closed issues beside their B&L rows and greps every branch commit message as well as the draft; T079 row 9.
+- [x] CHK022 Does the feature-completeness audit's check (iii) (T081) cover FR-010's full row list, including the amended rows and the new B-100 and L-100 rows? [Consistency, tasks T081, Spec §FR-010] — SPEC-FIXED: T081 (iii) adds the updated and amended rows and the B-100/L-100 rows.
 
 ## Notes
 
@@ -66,3 +66,40 @@ Gate A closed by owner ruling (2026-11-07), and tasks.md does not reopen the des
 - `/speckit-implement` reads checklist checkbox state as a gate and must not modify markers.
 - `checklists/requirements.md` has a separate built-in lifecycle maintained by `/speckit-specify` and `/speckit-clarify`.
 - Items are numbered sequentially for reference; add findings inline.
+
+## Audit Result
+
+| Disposition | Count |
+|---|---|
+| PASS | 5 |
+| SPEC-FIXED | 17 |
+| DD-DECIDED | 0 |
+| WAIVED | 0 |
+| **Total** | 22 |
+
+### SPEC-FIXED items
+- CHK001 — FR-010 now lists the new B-100/L-100 rows, matching plan Phase 6 (the typed-endings and probe-budget B-rows are also added to the plan).
+- CHK002 — T056 names delivering cells by `Suite.Test` name, never by task ID.
+- CHK003 — T056: mark `[RETIRED by 100 …]` in the live-file convention, then move to the closed file, whose header admits self-declared-gone rows.
+- CHK004 — T056 states the form, an `*(Amended <date>, 100:)*` note with the original text kept, which fits the rows' point-in-time status.
+- CHK005 — T056 states L-093-5's and L-065-2's new content per bullet.
+- CHK006 — T057's L-row copies D2's lists, cites the issues, and names the census scripts as the re-derivation.
+- CHK007 — T057 and plan Phase 6 add a B-row for the typed C++ endings.
+- CHK008 — T057 and plan Phase 6 add a B-row for `Parser::parse`'s probe-budget ending; the 1.15 B-row covers the observers' crafted-frame ending.
+- CHK011 — T059: CA-010 carries the table and "Changes from 1.14", and §5.2/§5.4/§6.2 are amended for the two getters only.
+- CHK013 — T061's stale sentence deleted; plan Phase 6 now gives dictionary.md D2's content plus a document-list row, matching T061.
+- CHK014 — T060 states the #334 rule with a recipe; the in-place-amended documents (2i-capi, 2b-wire, 093 C-3) are stated as current.
+- CHK015 — T062 adds D4's "Alternatives"; T060 (D1/D5/D10/D11) and T061 (D2) already stated theirs.
+- CHK016 — T063 gives a derivation rule and adds `parser.hpp` and `emit_messages.cpp`; files that only gain code name 100 where they add it.
+- CHK018 — T080 adds W-001's entry (FR-008) and W-014's `N/A` with its reason.
+- CHK019 — T080 runs the closed-row grep over brain and `.specify` too; hits take the amendment or the page flag.
+- CHK021 — T077 names the closed issues beside their B&L rows and greps every branch commit message as well as the draft; T079 row 9.
+- CHK022 — T081 (iii) adds the updated and amended rows and the B-100/L-100 rows.
+
+### DD-DECIDED items
+- none
+
+### WAIVED items
+- none
+
+Anchors spot-verified: research D1 to D11 and plan `## Gate A` (Gate A closed by owner ruling, 2026-11-07; the bundle's signed-off authority, as spec.md has no `Authority anchor` field); `[const §X.7]`, `§VI.4`, `§VI.5`, `§VII.3`, `§VII.7`, `§VII.8`, `§VIII.2`, `§IX.1`, `§IX.2`, `§XV.1`, `§XVII.1`, `§XVII.7`, Article XVII §8; `.specify/2i-capi.md` §4.8 (CA-010), §5.2, §5.4, §6.2; 093 contract C-3 (I-1, I-4, I-5), C-8, data-model E-2; 073 FR-007 and `contracts/nested_slices_result.md`; coverage-index §3, §3.2 and validator rows (W-001, W-006, W-007, D-010, W-014); B&L rows FR-010 names (all live); parent ruling note and `scripts_100_gate_a/`. All resolve.

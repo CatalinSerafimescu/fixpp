@@ -12,6 +12,10 @@ All shapes are by-value and trivially copyable; nothing here allocates.
 | `alloc_failed` | a `bad_alloc` was caught: instance slices, the cache row of a group with instances (research D10), the nested sub-table shell or its cache row (mode a), the sub-table's own slices (mode b), the sub-build's `out_of_memory` (mode c) |
 | `limit_exceeded` | `group()` returned `wire_group_too_large` (per-instance entry cap, nesting depth; inside a sub-table this is defensive, research D5), or the nested sub-build failed with `wire_offset_table_full` (research D7) |
 
+A read ends at its first failure, so it carries exactly one status and needs no precedence rule. `group()` allocates
+nothing, and a limit failure pushes no cache row (research D10), so `limit_exceeded` is never followed by an
+allocation. A sub-build reports the one error that stopped it.
+
 ## `group_slices_result`
 
 | Field | Today | After |
@@ -35,7 +39,8 @@ sub-table's `group_slices_status().is_group`. A sub-build that failed for any ot
 `{empty, ok, is_group = false}`. Both exits (cache hit and final) apply the same rule.
 
 Invariant (the one the contract's single table rests on, stated here only): `status != ok ⇒ nested_no_tag is in the
-instance slice AND registered in ctx`.
+instance slice AND registered in ctx`. "In the instance slice" means anywhere in it, nested instances included (research
+D11 step 2).
 
 ## `OffsetTable::group_span` (cache row, private)
 
@@ -51,11 +56,16 @@ including `wire_group_too_large`.
 ## `group_view<GroupT>` (`include/fixpp/wire/group_view.hpp`)
 
 - `alloc_failed()`: `status == group_read_status::alloc_failed`; its documented meaning is unchanged.
-- `read_failed()`: **new**, `status != group_read_status::ok`; the predicate typed readers check.
+- `read_failed()`: **new**, `noexcept`, `status != group_read_status::ok`; the predicate typed readers check.
 - Both `bool alloc_failed = false` constructors are kept unchanged (`true` → `alloc_failed`). Two constructors taking
   `group_read_status` are added with **no** default argument, so `group_view{inst, ctx}` still selects a `bool`
   overload. `MessageView::group<>()` (research D6) and the generated nested accessors (research D5) call the status
   constructors.
+- Overload selection, each selecting exactly one constructor:
+  - `group_view{inst, ctx}` and `{inst, ctx, true}` select a `bool` constructor;
+  - `{inst, ctx, group_read_status::…}` selects a status constructor. A scoped enum converts neither to `bool` nor
+    from it.
+  - an integer third argument selects a `bool` constructor, as today.
 
 ## `table_view` registration (`include/fixpp/dict/table_view.hpp`)
 
@@ -71,6 +81,8 @@ including `wire_group_too_large`.
   depth, once per (definition, enclosing path) (research D2; Gate A round 4 hand-edit (owner, 2026-11-07)). Built once with the table; no arena impact, since `table_view` is per dictionary. Section records do not set
   the "has a context key" bitset. The section arm (research D2) reads this store, not `is_header_tag` or `group_bit`.
 - **New** `noexcept` accessor answering the registration predicate; its arms are stated in research D2.
+- Every store and record in this section is written only while the table is built, and is read-only afterwards. Concurrent
+  readers of one published view need no synchronization (research D2, "Thread safety").
 - **New** per-occurrence record (research D2, "Per-occurrence records"; Gate A round 5 → hand-edit 3 (owner,
   2026-11-07)): `{delimiter, direct members}`, the shape of `group_ctx_entry` without its required members. Arm-1
   records take the delimiter from the occurrence's `GroupCtxDelim::delimiter` and the members from a capture beside
