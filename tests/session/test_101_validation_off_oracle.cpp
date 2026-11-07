@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <functional>
 #include <ostream>
 #include <string>
@@ -122,6 +123,31 @@ TEST_P(OneMsgTypeOracle101, W101_24_ActiveOff_EndsAsTheStrippedTwin) {
 
 INSTANTIATE_TEST_SUITE_P(W101_24, OneMsgTypeOracle101, testing::ValuesIn(oracle_cells()),
                          cell_name);
+
+// Why W101-24 has no LogonReceived rows (orchestrator ruling R6): the acceptor enters LogonReceived
+// and leaves it inside the call that delivers the peer's Logon. The caller reads NotConnected
+// before that call and Active after it, so no frame is delivered in LogonReceived; the state is
+// visible only to a callback the call itself runs (the reply Logon's toAdmin samples it here), and
+// the state history shows the call passed through it.
+TEST(OneMsgTypeOracle101Establishment, W101_24_AcceptorPassesLogonReceivedInsideTheLogonCall) {
+    for (const Kind k : {Kind::fix44, Kind::fixt}) {
+        SCOPED_TRACE(kind_name(k));
+        auto rig = started(spec(k).off(), Arm::NotConnected);
+        ASSERT_TRUE(rig);
+        std::vector<fsm_state> seen_in_to_admin;
+        rig->app->to_admin_probe = [&] { seen_in_to_admin.push_back(rig->session().state()); };
+        const Ending101 e = rig->deliver(rig->peer_logon(1));
+        EXPECT_EQ(e.before, fsm_state::NotConnected) << describe(e);
+        EXPECT_EQ(e.after, fsm_state::Active) << describe(e);
+        EXPECT_EQ(seen_in_to_admin, std::vector<fsm_state>{fsm_state::LogonReceived})
+            << "the reply Logon's toAdmin runs inside the call, in LogonReceived";
+        const auto h = rig->session().fsm_visit_history();
+        EXPECT_NE(std::find(h.begin(), h.end(), fsm_state::LogonReceived), h.end());
+        rig->app->to_admin_probe = nullptr;
+        const Ending101 next = rig->deliver(rig->frame("D", 2, t99::kNos()));
+        EXPECT_EQ(next.before, fsm_state::Active) << "the next frame is delivered in Active";
+    }
+}
 
 // ── W101-25: LogoutSent, validating and off, FIXT and non-FIXT ──────────────────────────
 

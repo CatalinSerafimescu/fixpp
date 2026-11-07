@@ -155,6 +155,7 @@ public:
     bool reject_from_app = false;  // fromApp answers app_do_not_send: a BusinessMessageReject
     std::vector<std::string> to_admin_372;  // RefMsgType(372) of each toAdmin view, or "<absent>"
     std::vector<std::string> to_app_372;
+    std::function<void()> to_admin_probe;  // run at each toAdmin, when a cell sets it
 
     expected_t<void> fromApp(const View&, const SessionId&) override {
         ++from_app;
@@ -170,6 +171,9 @@ public:
     void toAdmin(const View& v, const SessionId&) override {
         ++to_admin;
         to_admin_372.push_back(t99::field_text(v, 372));
+        if (to_admin_probe) {
+            to_admin_probe();
+        }
     }
     expected_t<void> toApp(const View& v, const SessionId&) override {
         ++to_app;

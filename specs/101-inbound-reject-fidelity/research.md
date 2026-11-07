@@ -690,7 +690,8 @@ reverted):
   non-FIXT boundary (1128 before a later 35 → 13, as QuickFIX C++).
 - D5's hooks and carry (real FIXT `Session`, validating, Active; Gate A round 2, re-aimed by the 2026-11-07 owner
   ruling, D5):
-  - a Length only the route declares (a shipped FIX50SP2 or FIX Latest body pair), as the first body field, whose Data
+  - a Length only the route declares (no shipped FIX50SP2 or FIX Latest dictionary has such a body pair, by D5's re-derive
+    recipe, so the routed dictionary is 099's `fix50sp2_with_body_pair` overlay; orchestrator ruling S4), as the first body field, whose Data
     embeds `SOH 35=X`, plus a real in-header repeat → 13, not 14. A mutant whose call site passes S's hooks
     (`session_hooks(inbound_tv_)`) must go RED;
   - an S header Length whose paired Data tag is outside S's header union, so the Data is the stopping field, built
