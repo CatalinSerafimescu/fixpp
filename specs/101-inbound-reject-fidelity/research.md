@@ -237,8 +237,9 @@ consume key).
   (`dispose_unparseable_`, ahead of `refuse_active_frame_` and `establishment_frame_refused_` in every arm) and never
   reaches the gate. Its witness is therefore a unit cell on `fixt_header_repeats_msg_type` (D9). For the same reason
   the default clause ("else 14" for a walk that sees no later 35) is reached only through a fault: the unit cell
-  asserts the walk's report, not `refuse_active_frame_`'s mapping of it, so a mutant flipping that default has no
-  witness; this is accepted, not hidden.
+  asserts the walk's report, not `refuse_active_frame_`'s mapping of it; the mapping's default clause is witnessed by a
+  direct `refuse_active_frame_` call through the test-side friend `session_test_access` on a faulting frame (tasks
+  W101-51, M101-41).
 
   This is QuickFIX C++'s `hasValidStructure`-before-`iterate` precedence. With exactly two 35s
   it equals 099's answer; with three or more it can differ (`0,D(hdr)…0(past)` and `0,0(hdr)…D(past)` answer 14, where
@@ -260,7 +261,8 @@ consume key).
     so they agree in both directions on every dictionary, by construction rather than by measurement.
   - *The residual's ruled ending.* On that custom S the frame is refused as the route reads it, like every other reader
     of it: the split Data yields a later 35, 14 when the split lands past the stop (the Data tag outside S's header
-    union), 13 when it lands in the header, and a disconnect in an establishment arm. This is not a fault and not a B-row:
+    union), 13 when it lands in the header, and a disconnect in an establishment arm, when every piece of the split Data is a well-formed field (e.g. `1=a<SOH>35=X<SOH>2=b`); otherwise the scan faults and the 092 disposer takes the frame. This is not a fault and
+    not a B-row:
     the route's parse sees two MsgTypes.
   - *No shipped behaviour changes against D5 as Gate A converged it.* On every shipped pairing the route's hooks answer
     every tag of S's header union as S's hooks do: a standard pair is answered from the standard table
@@ -692,13 +694,15 @@ reverted):
     embeds `SOH 35=X`, plus a real in-header repeat → 13, not 14. A mutant whose call site passes S's hooks
     (`session_hooks(inbound_tv_)`) must go RED;
   - an S header Length whose paired Data tag is outside S's header union, so the Data is the stopping field, built
-    through a `Dictionary` and the route set (an overlay header pair, as `W17HeaderLengthPairs.AnOverlaysHeaderPairIsAnswered`
-    builds one), so the route carries the pair; the Data embeds `SOH 35=X` → the Data counted across the stop, and the 13/14 answer as the frame's
-    real 35s give it. A mutant that resets the carry when `past_stop` latches must go RED;
+    through a `Dictionary` and the route set: through a FIXT11 overlay that puts the Length alone in `<header>`, the Data in a message, and declares the pair adjacent in `<fields>` (the mirror of `W17HeaderLengthPairs.OnlyTheDataTagInTheHeader_IsAHeaderPair`), so `dict::header_length_pairs` merges it into every route. The Data embeds `SOH 35=X` → the Data counted across
+    the stop, and the 13/14 answer as the frame's real 35s give it. A mutant that resets the carry when `past_stop`
+    latches must go RED. If that dictionary cannot be loaded through `fixt_route_set::make`, record why; (b) then becomes
+    a unit cell at T040, on `fixt_header_repeats_msg_type` with that S table and route hooks that carry the pair. Its
+    RED source is M101-3, named RED 'a past-header 35 reported';
   - the residual the ruling closes: a custom S that pairs a non-standard Length on a tag of
     `dict::is_fixt_standard_header_tag` its own `<header>` omits, with a Data tag outside S's header union and a Data
     value embedding `SOH 35=X`, which the route's hooks split, plus a real in-header repeat → 14 (the split puts the
-    embedded 35 past the stop), not 13. A mutant that reads the
+    embedded 35 past the stop), not 13, when every piece of the split Data is a well-formed field (e.g. `1=a<SOH>35=X<SOH>2=b`); otherwise the scan faults and the 092 disposer takes the frame. A mutant that reads the
     header-classified fields with S's hooks (Gate A's rule) must go RED. Through a real `Session` if such an S loads
     through `fixt_route_set::make`; else a unit cell on `fixt_header_repeats_msg_type` with S's table and a route
     table lacking the pair, written with the new walk (tasks T040). The mutant is an edit inside the walk either way.

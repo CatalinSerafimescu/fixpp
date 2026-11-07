@@ -134,7 +134,8 @@ Resolutions of the reviews' findings; the decisions they land in are research D1
   header, asserted in debug builds and disclosed (research D7).
 - Q: Which hooks read the field that ends the header, in D5's 13/14 walk? → A: the route's, for that field and every
   later one; S's before it; one `length_data_carry` throughout. A walk that faults answers 14, the 35s it saw discarded
-  (research D5). *Superseded by the 2026-11-07 owner ruling (below).*
+  (research D5). *Its hooks half is superseded by the 2026-11-07 owner ruling (below); the one carry and the fault rule
+  stand.*
 
 ### Session 2026-11-07 (owner ruling, checklist audit `msgtype-and-framing.md` CHK006, CHK008, CHK010)
 

@@ -87,7 +87,7 @@ specs/101-inbound-reject-fidelity/
 ├── contracts/
 │   └── reject-frames.md
 ├── checklists/
-│   └── requirements.md
+│   └── *.md            # requirements.md and the domain checklists
 └── tasks.md            # /speckit-tasks
 ```
 
@@ -249,8 +249,8 @@ research/reviews/opus_101-inbound-reject-fidelity_gate_a_2_adversarial_review.md
   `tests/alloc_guard` had no reply-chain cell (#544's windows take no reply). D9's new cells are the first.
 - **Codex 2 (P2), D5's hook transition at the boundary field.**
   - D5 is now a per-field algorithm: one carry; S's hooks before the stop; the route's hooks for the stopping field and
-    every later field. *Superseded by the 2026-11-07 owner ruling: the route's hooks for
-    every field (research D5).*
+    every later field. *Its hooks half is superseded by the 2026-11-07 owner ruling (the route's hooks
+    for every field, research D5); the one carry and the fault rule stand.*
   - It states why: `read_value` arms the next field from the current call's hooks.
   - It gives the chosen fault rule: a faulting walk answers 14, and the 35s it saw are discarded.
   - `peek_fixt_route`'s walk and its stop are kept.
