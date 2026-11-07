@@ -55,8 +55,13 @@ session's inbound reply slot, before any callback and before `assign_outbound`, 
 |---|---|---|
 | fits the site buffer | 372 verbatim, `=` included (`372=D=X`): unchanged at the gate; **new at the 092 disposer** for a MsgType longer than the longest shipped one (before: omitted) | 372 verbatim: unchanged |
 | overflows the site buffer, fits `kSendFrameBytes` | 372 verbatim, rebuilt in the slot (before: nothing sent) | 372 verbatim, rebuilt in the slot; resent with 372 on a later ResendRequest (before: nothing sent) |
-| exceeds `kSendFrameBytes` | sent **without 372** (before: nothing sent) | **not sent**: no callback, no outbound number, the inbound consumed as today, the session in its state, one rate-bounded session log record (before: nothing sent, no record) |
+| exceeds `kSendFrameBytes` | sent **without 372** (before: nothing sent) | **not sent**: no callback, no outbound number, the inbound consumed as today, the session in its state, one rate-bounded session log record (research D7, "Outbound-ceiling ending") (before: nothing sent, no record) |
 
-Text(58) is never dropped to make room. The slot rebuild also recovers a Reject whose own buffer overflowed because of
-long CompIDs or 58. A Reject that exceeds `kSendFrameBytes` even without 372 is not sent, with the same log record
-(disclosed residual, research D7).
+Text(58) is never dropped to make room. The slot rebuild also recovers a Reject built through the helper whose own
+buffer overflowed because of long CompIDs or 58. A Reject that exceeds `kSendFrameBytes` even without 372 is not sent:
+no callback, no outbound number, and the same log record (disclosed residual, research D7). Both not-sent endings
+share one rate state and one suppressed count: at most one record per max(HeartBtInt, 1 s) on `effective_clock_`
+(093's garbled-frame rule), each naming the message type not sent and the count suppressed since the previous record.
+*(Narrowed after tasks by orchestrator ruling, at `/speckit-analyze`: helper-built sites only;
+`apply_inbound_sequence_reset`'s literal-372 Reject, built in its own fixed buffer, is dropped with no record when long
+CompIDs overflow it — the CompID residual.)*

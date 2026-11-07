@@ -123,7 +123,9 @@ Resolutions of the reviews' findings; the decisions they land in are research D1
   ruling (keep the echo verbatim; never lose the Reject for it) stands.
 - Q: Long CompIDs, now? → A: the slot rebuild recovers any overflow of a Reject's own buffer, CompIDs and 58 included,
   up to `kSendFrameBytes`. The residual is a Reject that exceeds the ceiling even without 372: the outbound-ceiling
-  ending, disclosed. The CompID length bound at `open()` stays a follow-up issue.
+  ending, disclosed. The CompID length bound at `open()` stays a follow-up issue. *(Narrowed after tasks by
+  orchestrator ruling, at `/speckit-analyze`: helper-built sites only; `apply_inbound_sequence_reset`'s literal-372
+  Reject is the CompID residual.)*
 - Q: May the rebuild allocate (a coroutine owning the buffer allocates one frame per run)? → A: **no**. A reply to
   an inbound frame is on `[const §XV.1]`'s parse → validate → dispatch path, a peer can repeat the overflow, and #544
   R-10's disposition (an engine-caused fallback) does not carry over. The buffer is a session-owned slot used only by
@@ -233,6 +235,8 @@ BusinessMessageReject.
    back as one field 372 with value `D=X`.
 6. **Given** a garbled frame (092's disposer) whose MsgType fits `kSendFrameBytes`, **Then** the Reject carries it in
    372 (today: 372 omitted for any MsgType longer than the longest shipped one).
+7. **Given** any inbound-fed session Reject site, **When** the Reject exceeds `kSendFrameBytes` even without 372 (long
+   CompIDs), **Then** it is not sent, no outbound number is consumed, and the session log records it.
 
 ### Edge Cases
 
@@ -288,9 +292,17 @@ BusinessMessageReject.
   callback (`toAdmin` for a Reject, `toApp` for the BMR) and `assign_outbound`, so nothing is re-stamped, re-numbered
   or fired twice. Text(58) is never dropped to make room. Above the ceiling (research D7):
   - (a) **session Reject (35=3):** it MUST be sent without 372. A Reject that exceeds the ceiling even without 372 is
-    not sent, and the session log records it;
+    not sent: no callback, no outbound number, and the session log records it;
   - (b) **BusinessMessageReject (35=j):** it MUST NOT be sent without 372. It is not sent: no callback, no outbound
     number, the inbound consumed as today, the session in its state, and the session log records it (rate-bounded).
+
+  Each not-sent ending of (a) and (b) writes at most one session log record per max(HeartBtInt, 1 s) on
+  `effective_clock_`, the rule of 093's garbled-frame record (`Session::note_garbles_`), with HeartBtInt resolved as
+  `run_liveness_loop` resolves it. A record carries the count of not-sent messages suppressed since the previous
+  record. The two endings share **one** rate state and **one** suppressed count, because they have one cause: an
+  inbound frame whose reply cannot fit the outbound ceiling. Each record names the message type that was not sent
+  (Reject or BusinessMessageReject) and the count suppressed since the previous record (research D7,
+  "Outbound-ceiling ending").
 - **FR-008**: A frame not covered by FR-001..FR-007 MUST be handled byte-identically to today, on every session kind.
   No per-message allocation is added to the inbound path, the overflowed replies of FR-007 included (`[const §XV.1]`).
   `on_inbound_frame` MUST be documented as requiring each call to complete before the next on the same Session, and
@@ -306,9 +318,13 @@ BusinessMessageReject.
   header-set residual against QuickFIX C++'s static list (D5); the group-layout divergence (D2); multi-defect
   precedence (Edge Cases); `interpret_logon`'s first-wins change, public C++ (D4); the outbound-ceiling ending (D7: a
   BMR above `kSendFrameBytes` is not sent, where QuickFIX sends it; a Reject above it is sent without 372, or not at all
-  when it exceeds it even without 372, the long-CompID residual); `on_inbound_frame`'s serialized-caller
-  precondition, now stated and asserted (D7); the new LogoutSent and validation-off endings. The new validator error slots are in the error contract and
-  its completeness tests.
+  when it exceeds it even without 372, the long-CompID residual; and `apply_inbound_sequence_reset`'s literal-372
+  Reject, built outside the helper in its own fixed buffer, which long CompIDs that overflow it drop with no log
+  record); `on_inbound_frame`'s serialized-caller
+  precondition, now stated and asserted (D7); the new LogoutSent and validation-off endings; every validation-gate
+  Reject now carries 58 (FR-003); `sizeof(Session)` and `sizeof(table_view)` grow in installed headers (the inbound
+  reply slot, the defined-tag store; precedent B-544-3, B-099-18). The new validator error slots are in the error
+  contract and its completeness tests.
 
 ### Key Entities
 
@@ -323,9 +339,10 @@ BusinessMessageReject.
 
 - **SC-001**: Each acceptance scenario has a witness that is RED on `fa778a8e` where today's behaviour differs and GREEN
   on the feature head, and RED with its production change reverted.
-- **SC-002**: For a frame with one defect, the Reject frames for 373=0, 2 and 11 match QuickFIX C++'s acceptance
-  definitions `14a_BadField`, `14c_TagNotDefinedForMsgType` and `2q_MsgTypeNotValid` field for field (other than the
-  session-specific values), on FIX.4.2 and later.
+- **SC-002**: For a frame with one defect, the Reject frames for 373=0, 2 and 11 match `14a_BadField`'s undefined-tag
+  steps (371=999, 371=5000), `14c_TagNotDefinedForMsgType` and `2q_MsgTypeNotValid` (QuickFIX C++'s acceptance
+  definitions) as sets of tag=value pairs (field order not compared; session-specific values excluded) on FIX.4.2 and
+  later; 14a's malformed-tag steps (tags 0 and -1) are 092's disposer and out of scope.
 - **SC-003**: No existing cell changes its expected outcome except those in the manifest that research D9's recipes
   derive at the head being accepted (re-derived after the last fix commit), each with the requirement that supersedes it
   and, where a merged feature's clause is superseded, that clause by name (research Supersessions).

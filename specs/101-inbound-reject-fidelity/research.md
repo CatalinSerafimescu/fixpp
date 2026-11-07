@@ -222,8 +222,11 @@ BusinessMessageReject (`build_business_message_reject`):
 4. Whatever still fails is not sent: the outbound-ceiling ending below. Text(58) is never dropped to make room
    (FR-003).
 
-The trigger is "out of room", whatever took the room. The slot rebuild therefore also recovers a Reject that
-overflowed its site's buffer because of long CompIDs or the Text(58) D3 adds, not only because of 372. Other codes
+The trigger is "out of room", whatever took the room. The slot rebuild therefore also recovers a Reject built through
+the helper that overflowed its site's buffer because of long CompIDs or the Text(58) D3 adds, not only because of 372.
+Outside the helper, `apply_inbound_sequence_reset`'s Reject (a literal 372, not the inbound MsgType) is built in its
+own fixed buffer; long CompIDs that overflow it drop it with no record. That is the CompID-length residual, disclosed
+with the outbound-ceiling B-row and closed only by the follow-up CompID length bound at `open()`. Other codes
 cannot fire:
 - `wire_frame_too_large` needs a body beyond BodyLength's placeholder width. That width is the digits `Writer`
   reserves for 9 (`src/wire/writer.cpp`), and no `kSendFrameBytes` buffer reaches it. Above the ceiling, the rebuild
@@ -251,6 +254,21 @@ the SendingTime stamp. It runs strictly before the site's first callback and bef
 - for the BMR, `toApp`, which fires before `assign_outbound()` (036 C2).
 
 So no attempt re-stamps, re-numbers or fires a callback twice.
+
+**Outbound-ceiling ending.** What step 4 leaves is not sent: a Reject that exceeds `kSendFrameBytes` even without 372
+(FR-007 (a)) and a BMR that exceeds it with 372 (FR-007 (b)). (a): no callback, no outbound number, the record.
+(b): no callback, no outbound number, the inbound consumed as today, the session in its state, the record.
+- **Rate.** Each not-sent ending of (a) and (b) writes at most one session log record per max(HeartBtInt, 1 s) on
+  `effective_clock_`, the rule of 093's garbled-frame record (`Session::note_garbles_`), with HeartBtInt resolved as
+  `run_liveness_loop` resolves it. A record carries the count of not-sent messages suppressed since the previous
+  record.
+- **One rate state for both.** The two endings are one cause, an inbound frame whose reply cannot fit the outbound
+  ceiling, so they share **one** rate state and **one** suppressed count. Each record names the message type that was
+  not sent and the count suppressed since the previous record. The state is a set of `Session` members beside the
+  garble record's (`garble_logged_`, `garble_log_next_`, `garbles_unlogged_`), not those members: the garble record
+  counts a different cause.
+- **Format string.** Registered in `src/log/format_registry.cpp`, where 093's records are; its CRC-collision
+  `static_assert` stays green.
 
 **The inbound reply slot: who uses it, and for how long.**
 - **Users.** Only the inbound-fed reply sites listed under "Sites" below. Each is called from an `on_inbound_*` arm, or
@@ -347,8 +365,9 @@ takes room too. At round 1, CompIDs long enough to overflow a gate Reject's own 
 one-byte MsgType. The slot rebuild now recovers that case up to `kSendFrameBytes`. What remains is a Reject whose
 fixed fields, CompIDs and 58 exceed the ceiling even without 372. That is the outbound-ceiling ending above, the same
 ceiling every outbound frame obeys. The session's other admin frames are built in smaller fixed buffers, so they fail
-at shorter CompIDs than that (re-derive with `git grep -n 'std::array<std::byte, ' -- src/session/session.cpp`). A CompID length bound at `open()`
-stays a follow-up issue (quickstart).
+at shorter CompIDs than that (re-derive with `git grep -n 'std::array<std::byte, ' -- src/session/session.cpp`).
+`apply_inbound_sequence_reset`'s literal-372 Reject, outside the helper, is part of this residual (above). A CompID
+length bound at `open()` stays a follow-up issue (quickstart).
 
 **Rationale:** QuickFIX C++ and J echo 372 in both messages with no frame bound. fixpp matches them up to its own
 outbound ceiling, the one bound every frame it sends already obeys and the one its resend replay depends on. Above it:
@@ -423,16 +442,27 @@ below), and for a tag cell whether the tag is dictionary-defined or wholly undef
 - the `kMaxShippedMsgTypeLength` hits (D7).
 
 **Mutate-and-run recipes** (grep is the wrong instrument where `58=` or a MsgType string matches nearly every Reject
-cell). On a scratch commit (never a stash: it is shared by every worktree), apply one change alone; rebuild every test
-target; check with `strings` that the binaries are fresh; run the whole `ctest` suite **unfiltered** (the cells live in
-many binaries: `session_pure_tests`, `wire_dict_tests`, the per-feature `error_0NN_completeness` executables,
-`capi_pure_tests`, the interop executables, the fuzz harness); the RED set is the census for that change:
+cell). The cells live in many binaries (`session_pure_tests`, `wire_dict_tests`, the per-feature
+`error_0NN_completeness` executables, `capi_pure_tests`, the interop executables, the fuzz harness). In `$M` (tasks.md
+Execution rules) on a scratch commit at H (never a stash: it is shared by every worktree): build every test target
+unmutated and record each test executable's hash. Apply the recipe's change alone with its 101-MUT- marker. Rebuild
+every test target (-k 0; rc ≠ 0 voids the recipe). The affected binaries are the executables whose hash changed; each
+must pass `strings … | command grep -c 101-MUT-<id>`, and a changed binary without the marker stops the recipe. Run
+each affected binary whole and unfiltered under the mutant protocol's timeout. Where the ctest entry wraps a binary
+(interop golden checks), run the entry's registered command from `ctest -N -V`. No ctest run here; the one full ctest
+is T075. The RED set is the union of [  FAILED  ] names and must contain the recipe's known positive (recipe 1: the
+locally reachable HP-QFj-*-reject-invalid-admin golden checks), or the recipe is broken. The RED set is the census for
+that change:
 1. D3 alone (or a mutant passing a fixed non-empty text at the three gate sites) → the cells pinning no 58, plus the
    `HP-QFj-*-reject-invalid-admin` goldens.
 2. D4 alone (first-wins scan + `interpret_logon` + LogoutSent) → the 092 and 099 cells pinning last-wins endings.
 3. D6 alone (conflict clause without the `validate` term) → the validation-off establishment cells.
 4. D2 alone → the validator and session cells pinning 373=2 for an undefined tag or an undefined MsgType.
-5. Two placeholder enumerators appended to `core::error` → the RED set must equal the sentinel grep's hits.
+5. Two placeholder enumerators appended to `core::error` → the RED set must equal the sentinel grep's hits. `-Werror`
+   stays on (never disabled for a mutant). The change includes a case for each placeholder in every total switch the
+   build names: build the mutant once, read its `-Wswitch` errors, and map each placeholder exactly as its neighbouring
+   existing enumerator is mapped, so the mutant compiles. The recipe states that procedure, not a list of switches;
+   rc ≠ 0 still voids it.
 
 **Known at round 1, not exhaustive** (the recipes above decide; a cell missing here is not exempt):
 - 098: `DialectOverlayInboundBase098.AS3_*` (→ 11, no 371, 58) and `AS1`/`AS2` (undefined tags → 0, 58).
@@ -465,7 +495,10 @@ many binaries: `session_pure_tests`, `wire_dict_tests`, the per-feature `error_0
 - 092 echo: `UnparseableFrameDisposition.RefMsgTypeBound_LongMsgType_RejectWithout372_{MalformedTag,LengthDataMismatch}`
   (→ 372 present and byte-equal to the inbound MsgType, which overflows the disposer's buffer but fits
   `kSendFrameBytes`; renamed, citing FR-007).
-- Interop goldens `HP-QFj-{acc,init}-fix44-reject-invalid-admin.fix` (58 added, 9 and 10 move; regenerated).
+- Interop goldens (58 added, 9 and 10 move; regenerated, never hand-edited): the library's
+  `tests/interop/happy/golden/HP-QFj-{acc,init}-fix44-reject-invalid-admin.fix` and their `-capture.fix` twins, and
+  the PARENT's `research/G19-fix-fpml-iso20022/phase-9-harness/golden/HP-QF{j,cpp}-{acc,init}-fix44-reject-invalid-admin.fix`
+  copies. Tasks T052 regenerates them; the parent copies land in the post-merge parent commit, T080.
 
 Each rewritten cell names its superseding requirement in the test.
 
@@ -572,7 +605,11 @@ and `check-comment-claims.py` runs on the diff:
 - `emit_session_reject_`'s header ("success or build-failure (not fatal if build fails)"), and any other reply-leaf
   comment describing what a failed build does, where the slot rebuild now runs first;
 - `on_inbound_frame`'s reentrancy contract in `session.hpp`, which gains the serialized-caller sentence (D7);
-- the 098 test file's header recipe (B85 note).
+- the 098 test file's header recipe (B85 note);
+- the pre-fix note above `FixtHeaderValidateTest.WellFormedApplicationFrameAccepted` in
+  `tests/wire/fixt_header_validate_test.cpp` ("rejected wire_unexpected_tag, ref_tag==8 … identical 'empty valid-tag
+  view -> first field is 8' proof"), which cites `ValidatorProductionTableView.UnknownMsgTypeRejectsLikePreHoistFieldValidFor`
+  as the mechanism D2 replaces.
 
 `scan_frame_header.hpp`'s header names **101 D4** as superseding 092 data-model E-1 / contract C-3 I-3 for `msg_type`,
 and `session.cpp`'s `dispose_unparseable_` names **101 D7** as superseding 092 research R-5's bound.
@@ -593,6 +630,8 @@ git grep -nE 'last MsgType|last 35|keeps? (the|its) (first-wins, last-wins )?(Ms
 # dictionary defines it: ``number=['"]N['"]`` per dictionaries/*.xml (prove the regex on 370 → FIX42, FIX43),
 # the frozen FIXT11 at tests/fuzz/corpus/dict_xml_loader/seed_fixt11_real_dictionary.xml for an operator's copy,
 # `<fixr:field id=…>` for Orchestra. Undefined → superseded to 373=0; defined → kept.
+# A hit whose judged MsgType the judging table does not define (R 2/8, 371=8) → superseded to 373=11, no 371 (FR-001);
+# e.g. 099 data-model MT-f ("FIX Latest does not declare ABCDEFGH") and the MT-f cells in tests/session/test_099_msg_type_default.cpp.
 git grep -nE '373 ?= ?2\b|R 2/|\b2 unexpected|unexpected[- ]tag|wire_unexpected_tag|Rejects?/2\b|reason 2\b|SessionRejectReason\(373\) ?= ?2\b' \
   -- specs/092-garbled-frame-reject specs/098-dialect-overlay specs/099-fixt-appl-version-validation spec/behaviors-and-limitations.md brain/components
 # D2 / 371 — an undefined MsgType carries no 371. Only a universal claim ("now carry", "names the field") is superseded.
@@ -610,6 +649,8 @@ recipe still misses, once found, widens the recipe; a hand addition to the table
   issues-to-file list is the plan that filed #657/#658, which this feature closes). 098 `spec.md`'s out-of-scope entry
   "fixpp's single `wire_unexpected_tag` against QuickFIX's 373=0 … / 373=2 … distinction (filed)" is the same class:
   it records the filing of the divergence D2 closes.
+- A merged spec's description of behaviour before that feature (its Context "today" table), e.g. 099 `spec.md`'s
+  Context table and 099 `data-model.md`'s "T rejects every application frame … on tag 8, 373=2".
 - Clauses that pass `fault_ref_msg_type` rather than the scan's last-wins `msg_type` (092 `spec.md` FR-003's 45/372
   source, 092 contract C-2's "35 value"). The rule they state, "the third field's value", is the one D4 makes
   universal, so they stay.
@@ -619,7 +660,7 @@ recipe still misses, once found, widens the recipe; a hand addition to the table
 - Hits on the D2 line whose tag the judging table's dictionary defines (373=2 stays), and the outbound builder rows
   (B-091's `wire_unexpected_tag` from `body_builder`, 098 `spec.md`'s "Sending a custom Data value" edge case), which
   are not the validator. Hits on the 371 line that state a per-site 371 (B-009-3, B-021-1's OrigSendingTime arms,
-  B-038-1, B-092-3's fault Reject, B-097-1, B-099-*, B-420-1, B-422-1), not a universal one.
+  B-021-2, B-075-1, B-075-2, B-509-2, B-038-1, B-092-3's fault Reject, B-097-1, B-099-*, B-420-1, B-422-1), not a universal one.
 - Every 099 `witnesses.md` M-row on the D2 line describes a 099 mutant, as the class above already says.
 - B-092-8 (the fault results), which D2 does not change.
 - Hits that are not a MsgType ending: B-099-22 and 099 `contracts/surface.md`'s "Two 1128s in the header read

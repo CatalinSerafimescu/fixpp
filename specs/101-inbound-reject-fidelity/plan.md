@@ -59,6 +59,9 @@ record), `include/fixpp/session/session.hpp` (`inbound_reply_slot_`, `inbound_re
 |---|---|---|
 | I / VI | core tag-value FIX, spec coverage | PASS: spec `## Normative References` lists the coverage-index entries (`[const §VI.5]`); FIX-TC 2q, 14a, 14c endings; QuickFIX parity per the owner's rule, deviations disclosed (FR-009). |
 | VII | RED first, mutation-proven | PASS planned (research D9 and tasks). |
+| VII.7 | fuzzing on parser-touching code | PASS planned: tasks T015 (seeds), T050 (the scan and D5-walk oracle) and T071 (ten minutes each of `fuzz_wire_validator` and `fuzz_session_recovery_admin_parse`). |
+| VII.8 | grouped tests, selected by `ctest -L <label>` | PASS with the 099-precedent exception: the new Session cells go in a new grouped entry `session_101_tests` (`session_pure_tests` carries `TIMEOUT 120`); `error_101_completeness` (an exact-set completeness gate) and `session_101_reply_slot_death_test` (an `abort()` path) are standalone; feature tests are selected by `-L 101`. |
+| XI.7 / Appendix A | four mandatory controls | PASS: the triggers are a validator change, session FSM endings and the serialized-caller precondition; the controls are the clarify sessions (spec `## Clarifications`), this `/speckit-analyze`, Codex Gate A (`## Gate A`) and the owner's sign-off (`decisions/speckit/101-inbound-reject-fidelity-gatea.md`, parent repo). |
 | VIII | no regression | D8: Article VIII §2's protocol (A-B-A-B, min-per-tree, ≤ +5%, base = merge-base at measurement time) for `scan_frame_header_bench`, `on_inbound_frame_bench`, `validator_bench` and `table_view_footprint_bench`'s timed Build/Copy rows (D1 changes what they time); CI pairing supplementary; the footprint binary stays unpaired. |
 | IX | coverage, sanitizers, static | `/speckit-verify`. |
 | X | C ABI | PASS: two `core::error` slots map to the existing `FIXPP_ERR_WIRE_CONFORMANCE`; no code, symbol or struct added, so no version step (`[const §X.1]`, `[const §X.4]`; Codex and Opus agree). `expected_error_map.csv` and the completeness pins grow (D9). |
@@ -106,9 +109,16 @@ tests/core/                             # sentinels; test_101_error_completeness
 tests/capi/                             # expected_error_map.csv, error_surface_test, abi_symbol_golden_test
 tests/fuzz/                             # is_valid_wire_error
 tests/interop/happy/golden/             # regenerated reject-invalid-admin goldens
+tests/alloc_guard/                      # D9 run-thread allocation cells (W101-45)
+tests/dictionary/                       # D1 tag_defined cells
+tests/support/                          # session_test_access reads; run_thread_engine_rig extensions
+ci/expected-*.txt                       # eligible-tests and preset-conditional re-records
+spec/                                   # B&L rows, feature catalogue, coverage index (FR-009)
+brain/components/                       # SecondBrain flags of the Supersessions list
 ```
 
-**Structure Decision**: existing layout; new test files join existing binaries.
+**Structure Decision**: existing layout; new test files join existing binaries, except Session-level cells: a new
+`session_101_tests` entry (099 precedent; `session_pure_tests` carries `TIMEOUT 120`).
 
 ## Phases (for /speckit-tasks)
 
@@ -129,7 +139,8 @@ tests/interop/happy/golden/             # regenerated reject-invalid-admin golde
    false comments (D10) fixed, `check-comment-claims.py` on the diff. The SecondBrain edit of close-out row 3
    (`brain/components/session.md`, `brain/components/inbound-message-path.md`, `brain/components/wire.md`) flags in
    place every clause in research's Supersessions list, re-derived by its recipe lines. File quickstart's two issues.
-8. **Verify** — re-derive the census after the last fix commit; targeted ctest, sanitizers on `session_pure_tests`,
+8. **Verify** — re-derive the census after the last fix commit; targeted ctest (`-L 101`), sanitizers on
+   `session_101_tests` and `session_pure_tests`,
    MSVC build of touched targets, `/speckit-verify`.
 
 ## Complexity Tracking
