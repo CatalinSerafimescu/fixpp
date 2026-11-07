@@ -27,7 +27,9 @@ clauses this supersedes, by name: [research.md](research.md). Endings: [contract
 
 **Testing**: GoogleTest, through real `Session` objects for every ending (099's lesson: validator-level probes move a
 defect up one layer); RED on `fa778a8e` per cell; a mutation per production change; the census by research D9's
-recipes.
+recipes. Validator-level cells (tasks W101-6, W101-7, W101-14) are written only where the subject is the validator's own
+contract, which a Session cannot isolate: the order of its checks and a hand-built table's population rule. Every ending
+a counterparty sees has a Session-level cell (W101-1 to W101-5, W101-10 to W101-13, W101-16).
 
 **Target Platform**: Linux and Windows.
 
@@ -36,7 +38,9 @@ recipes.
 **Performance Goals**: no slowdown above `[const §VIII.2]`'s budget (D8): one comparison per later 35 in the scan; one hot
 `valid_.find` per validated message, as today; one cold `tag_defined` lookup on a field that has already failed.
 
-**Constraints**: no per-message allocation (`[const §XV.1]`); `noexcept` preserved; the C-ABI code set unchanged; 099's
+**Constraints**: no per-message allocation (`[const §XV.1]`); `noexcept` preserved, and every new function is
+`noexcept` (`table_view::tag_defined`, `valid_tag_set_view::found`, `session_reject_reason_text`, the slot-rebuild
+helper and its BMR twin, the slot holder's destructor, D5's walk); the C-ABI code set unchanged; 099's
 two-occurrence FIXT endings in LogonReceived/Active, its validating FIXT establishment disconnect and its 1128 refusals
 kept — the clauses that do change are named in research's Supersessions table.
 
@@ -303,3 +307,28 @@ Reviews (parent repo, `research/reviews/`):
 - **Beyond the judge's text.** The 075 section's intro sentence and B-041-1 are hits of the new 371 and D2 lines, so
   they are table rows and FR-009 names them; the D4 line's new `first-wins` pattern and the widened paths gave hits
   (098 history, brain pages, B-099-22) that are classified as kept.
+
+### After tasks — `/speckit-analyze` (orchestrator rulings, 2026-11-07)
+
+Gate A had converged; these rulings narrowed the bundle without reopening a decision. Each is applied where it bites,
+and listed here so a reader finds them in one place:
+- **Helper-built sites only** (F1): FR-007 holds every builder that echoes the inbound MsgType;
+  `apply_inbound_sequence_reset`'s literal-372 Reject is the CompID residual (spec Clarifications round 2, FR-007,
+  FR-009, research D7, the contract).
+- **TC-002 and TC-010 stay `backlog`**, with 101's partial evidence recorded (tasks T062, T082).
+- **Recipe 5 keeps `-Werror`**: the placeholder mutant adds a case per total switch the build names (research D9,
+  tasks T017).
+- **The mutate-and-run recipes rebuild every test target and run only the binaries whose hash changed**, with no
+  ctest run (F2; research D9, tasks Execution rules).
+- **The outbound-ceiling record's window and shared rate state** (B1; spec FR-007, research D7).
+
+### At the checklist audit (pipeline step 9; orchestrator rulings, 2026-11-07)
+
+Applied as SPEC-FIXED dispositions in `checklists/`, each recorded inline there:
+- the outbound-ceiling record's window before Logon is the configured HeartBtInt (spec FR-007, research D7);
+- the record does not echo the inbound MsgType; it records its length and the message type not sent (spec FR-007,
+  research D7, data-model, the contract, tasks T048);
+- FR-007 (a)'s not-sent Reject leaves the inbound frame consumed as today and the session in its state, as (b) does;
+- a Reject sent with 372 omitted is a sent message and writes no record;
+- QuickFIX/J's 371=35 on 373=11 is a disclosed divergence (spec FR-009, tasks T060 (m));
+- QuickFIX/Go was not read for #646: the closure note says so (tasks T079).

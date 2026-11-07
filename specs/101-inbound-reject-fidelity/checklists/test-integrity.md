@@ -22,52 +22,52 @@ Gate A closed by owner ruling (2026-11-07), and tasks.md does not reopen the des
 
 ## RED first (SC-001)
 
-- [ ] CHK001 SC-001 asks for each witness to be "RED on `fa778a8e` where today's behaviour differs … and RED with its production change reverted". Tasks read RED at `H0` and, for cells that cannot compile at `H0` or are GREEN by construction, from a named mutant. Is it stated that a named mutant counts as "its production change reverted"? Is the exemption for cells that only compile once a new symbol exists written into SC-001 itself? [Consistency, Spec §SC-001, tasks "Execution rules"]
-- [ ] CHK002 US1 scenario 3 ("today's handling, unchanged") and W101-27's controls are asserted from the ending recorded at `H0` (tasks T020). Is "today's handling" defined anywhere besides that recording? If not, a wrong `H0` ending would be pinned as correct. [Measurability, Spec §US1, tasks T020]
-- [ ] CHK003 Is it stated that `H0`'s premise (library code equal to `fa778a8e`) is re-checked at the head where the witnesses are written, by T001's diff, and that a non-empty diff stops Phase 2? [Assumption, tasks T001, tasks "Execution rules"]
+- [x] CHK001 SC-001 asks for each witness to be "RED on `fa778a8e` where today's behaviour differs … and RED with its production change reverted". Tasks read RED at `H0` and, for cells that cannot compile at `H0` or are GREEN by construction, from a named mutant. Is it stated that a named mutant counts as "its production change reverted"? Is the exemption for cells that only compile once a new symbol exists written into SC-001 itself? [Consistency, Spec §SC-001, tasks "Execution rules"] — SPEC-FIXED: spec SC-001 now states that the named mutant is "its production change reverted", and writes in the exemption for cells that cannot compile at `fa778a8e` or are GREEN there by construction.
+- [x] CHK002 US1 scenario 3 ("today's handling, unchanged") and W101-27's controls are asserted from the ending recorded at `H0` (tasks T020). Is "today's handling" defined anywhere besides that recording? If not, a wrong `H0` ending would be pinned as correct. [Measurability, Spec §US1, tasks T020] — PASS: US1 scenario 3 and FR-008 state the requirement as "unchanged" (byte-identical to `fa778a8e`), so T020's `H0` recording is the definition, not an approximation of it; an `H0` ending is today's by definition, and pinning it is FR-008.
+- [x] CHK003 Is it stated that `H0`'s premise (library code equal to `fa778a8e`) is re-checked at the head where the witnesses are written, by T001's diff, and that a non-empty diff stops Phase 2? [Assumption, tasks T001, tasks "Execution rules"] — SPEC-FIXED: tasks T001 (a non-empty diff or status stops Phase 1) and T020 (`git diff --stat fa778a8e HEAD -- src include` empty before the `H0` commit, or Phase 2 stops).
 
 ## Mutants and the mutate-and-run instrument (research D9)
 
-- [ ] CHK004 The mutate-and-run census takes as affected the binaries whose hash changed. Is it stated how the instrument fails in each direction? A hash change with no mutant cause (embedded build stamps) widens the set, which is safe. A mutant reaching a binary that does not change narrows it, which the `strings` marker check catches only for binaries that did change. [Measurability, research D9, tasks "Execution rules"]
-- [ ] CHK005 Recipe 1's known positive is "the locally reachable `HP-QFj-*-reject-invalid-admin` golden checks". Is the ending stated when none can run locally, for example because the counterparty binary is absent? Is the recipe then broken, or does W101-12 stand in as the positive? [Edge Case, research D9, quickstart]
-- [ ] CHK006 Research D9 recipe 5 says the RED set "must equal" the sentinel grep's hits. Tasks T017 allows "plus any completeness gate a translate switch's missing case trips". Is one rule stated for what "equal" admits? [Conflict, research D9, tasks T017]
-- [ ] CHK007 Does every `## Mutants` row name the failure message the named cell must report, or only the cell? The mutant protocol's step 6 requires "RED by the named message". [Clarity, tasks "Mutants", tasks "Execution rules"]
-- [ ] CHK008 M101-5's RED arm is that the mutant is intercepted, and only the mallocnesia registration intercepts (Release, Linux). Is the counter build's RED for M101-5 stated, so that the platforms without mallocnesia also have a RED arm? [Coverage, research D9, tasks T014]
-- [ ] CHK009 M101-34a to M101-34e give one mutant per round-1 census site. Is it stated that a site the D7 recipe finds beyond that list gets its own mutant and overflow cell? [Coverage, tasks "Mutants", research D7]
+- [x] CHK004 The mutate-and-run census takes as affected the binaries whose hash changed. Is it stated how the instrument fails in each direction? A hash change with no mutant cause (embedded build stamps) widens the set, which is safe. A mutant reaching a binary that does not change narrows it, which the `strings` marker check catches only for binaries that did change. [Measurability, research D9, tasks "Execution rules"] — SPEC-FIXED: tasks Execution rules "Mutate-and-run census" states both failure directions. A build stamp cannot widen the set silently, because a changed binary without the marker stops the recipe. Narrowing needs a shared library, so the census runs on `$M`'s static `build/linux-clang-debug`. Source: `CMakePresets.json` sets `BUILD_SHARED_LIBS` only on the sanitizer presets.
+- [x] CHK005 Recipe 1's known positive is "the locally reachable `HP-QFj-*-reject-invalid-admin` golden checks". Is the ending stated when none can run locally, for example because the counterparty binary is absent? Is the recipe then broken, or does W101-12 stand in as the positive? [Edge Case, research D9, quickstart] — SPEC-FIXED: research D9 and the Execution rules make W101-12's cells recipe 1's positive as well; when no golden check can run locally, the absence is recorded and the goldens are diffed at T052 only.
+- [x] CHK006 Research D9 recipe 5 says the RED set "must equal" the sentinel grep's hits. Tasks T017 allows "plus any completeness gate a translate switch's missing case trips". Is one rule stated for what "equal" admits? [Conflict, research D9, tasks T017] — SPEC-FIXED: research D9 recipe 5 and T017 now use one rule: the RED set must contain the sentinel hits, every other RED name (completeness gates or size pins that the switch cases trip) is classified in §A, and an empty set is broken.
+- [x] CHK007 Does every `## Mutants` row name the failure message the named cell must report, or only the cell? The mutant protocol's step 6 requires "RED by the named message". [Clarity, tasks "Mutants", tasks "Execution rules"] — SPEC-FIXED: the mutant protocol's step 6 defines the named message: the named cell's failing assertion on the value its row gives, or on the changed ending where only the cell is named. A RED from another assertion, a crash or a setup failure is not it.
+- [x] CHK008 M101-5's RED arm is that the mutant is intercepted, and only the mallocnesia registration intercepts (Release, Linux). Is the counter build's RED for M101-5 stated, so that the platforms without mallocnesia also have a RED arm? [Coverage, research D9, tasks T014] — SPEC-FIXED: research D9 and T014 state that M101-5's RED arm is the mallocnesia registration's only, and the counter build is class-(a) evidence only (#544 §3, "Why MSVC is class (a) only": an `operator new` counter cannot see class (b)).
+- [x] CHK009 M101-34a to M101-34e give one mutant per round-1 census site. Is it stated that a site the D7 recipe finds beyond that list gets its own mutant and overflow cell? [Coverage, tasks "Mutants", research D7] — SPEC-FIXED: tasks T043: an admitted beyond-list site gets its own M101-34 row and overflow cell.
 
 ## Allocation cells and the slot death test (research D9)
 
-- [ ] CHK010 If a fitting twin in W101-45 is not zero, the tasks "stop and report". Is it stated who decides next, and what the possible outcomes are (pre-existing gap filed as an issue, a waiver, or a block on the feature)? [Gap, research D9, tasks T014]
-- [ ] CHK011 Is it stated, for both registrations, that a zero from the new cells counts only after the RED arm has been intercepted on the same build (the instrument rule)? [Measurability, tasks "Execution rules", research D9]
-- [ ] CHK012 The death test needs "a store double that suspends the first call's store". Is it stated whether such a double exists today or must be written, and in which support file? [Dependency, Gap, research D9, tasks T045]
-- [ ] CHK013 The death test runs only on builds with assertions, under a preprocessor condition. Is it named which local and CI lanes actually run it? Without that, "witnessed" cannot be checked against a lane. [Coverage, tasks T045, plan "Constitution Check"]
-- [ ] CHK014 The death test calls `on_inbound_frame` in a way the new precondition rules out. Is it stated that this out-of-contract use is sanctioned only for this test, and that nothing tests what a release build does under such a violation? [Clarity, research D7 "The serialized-caller precondition"]
+- [x] CHK010 If a fitting twin in W101-45 is not zero, the tasks "stop and report". Is it stated who decides next, and what the possible outcomes are (pre-existing gap filed as an issue, a waiver, or a block on the feature)? [Gap, research D9, tasks T014] — SPEC-FIXED: research D9 and T014 state the outcome. The unweakened cell stays RED, so the feature does not merge until the orchestrator rules with the owner: fix the gap in 101, or file an issue and waive the cell with a recorded reason.
+- [x] CHK011 Is it stated, for both registrations, that a zero from the new cells counts only after the RED arm has been intercepted on the same build (the instrument rule)? [Measurability, tasks "Execution rules", research D9] — SPEC-FIXED: research D9 and T014: a zero counts only after the same build's positive reads non-zero (M101-5 for mallocnesia, #544's arm (a) for the counter build).
+- [x] CHK012 The death test needs "a store double that suspends the first call's store". Is it stated whether such a double exists today or must be written, and in which support file? [Dependency, Gap, research D9, tasks T045] — SPEC-FIXED: tasks T045 names the existing double, `HookedStore` in tests/support/hooked_store.hpp, whose `Hooks::on_outbound_store` holds an outbound store (present at `fa778a8e`, source); that file is extended only if it cannot hold the store.
+- [x] CHK013 The death test runs only on builds with assertions, under a preprocessor condition. Is it named which local and CI lanes actually run it? Without that, "witnessed" cannot be checked against a lane. [Coverage, tasks T045, plan "Constitution Check"] — SPEC-FIXED: research D7 and T045 name the condition (`NDEBUG`, as `FIXPP_ASSERT_NO_CALLBACK_AT_PARSE_SITE`'s plain `assert`) and the lanes (the presets that leave `NDEBUG` unset, recorded in the death test's `ci/expected-preset-conditional-tests.txt` row).
+- [x] CHK014 The death test calls `on_inbound_frame` in a way the new precondition rules out. Is it stated that this out-of-contract use is sanctioned only for this test, and that nothing tests what a release build does under such a violation? [Clarity, research D7 "The serialized-caller precondition"] — SPEC-FIXED: research D9 "Slot discipline" states that the death test is the one sanctioned out-of-contract call and that nothing tests a release build under a violation (B-row (h)).
 
 ## Grouping, selection and budget (`[const §VII.8]`)
 
-- [ ] CHK015 The new entry's budget is half of CI's `--timeout` guard on the slowest lane. Is it stated which reading decides before CI runs (local TSan), and what happens when CI's first wave disagrees with it? [Measurability, plan "Constitution Check", tasks "Execution rules"]
-- [ ] CHK016 The quickstart says "A label run is not the census", and tasks T069 adds the manifest's unlabelled entries. Is it stated in one place that `-L 101` alone is never accepted as evidence for SC-003? [Consistency, quickstart, tasks T069]
+- [x] CHK015 The new entry's budget is half of CI's `--timeout` guard on the slowest lane. Is it stated which reading decides before CI runs (local TSan), and what happens when CI's first wave disagrees with it? [Measurability, plan "Constitution Check", tasks "Execution rules"] — SPEC-FIXED: tasks Execution rules "Binaries": the condition is CI's; the local TSan reading predicts it before the first push, and CI's first wave decides when they disagree.
+- [x] CHK016 The quickstart says "A label run is not the census", and tasks T069 adds the manifest's unlabelled entries. Is it stated in one place that `-L 101` alone is never accepted as evidence for SC-003? [Consistency, quickstart, tasks T069] — PASS: quickstart ("A label run is not the census"), T068 (the census re-derived by research D9's recipes after the last fix commit) and T069 (`-L 101` plus the manifest's unlabelled entries) together rule out `-L 101` alone.
 
 ## Fuzz (`[const §VII.7]`)
 
-- [ ] CHK017 Tasks T071 requires "each harness's positive-control counter non-zero". Is it stated whether `fuzz_session_recovery_admin_parse` has such a counter today, or that adding one is part of T050? [Assumption, tasks T071, tasks T050]
-- [ ] CHK018 T050's second arm traps when the D5 walk reports a later 35 that `entries()` does not hold. Is it stated which hooks build `entries()`? Otherwise a Data value embedding `SOH 35=` can make the oracle trap on a correct walk, or stay silent on a wrong one. [Clarity, tasks T050, research D5]
+- [x] CHK017 Tasks T071 requires "each harness's positive-control counter non-zero". Is it stated whether `fuzz_session_recovery_admin_parse` has such a counter today, or that adding one is part of T050? [Assumption, tasks T071, tasks T050] — SPEC-FIXED: tasks T050 states that the harness has positive-control counters today, checked at exit with a zero failing the process (its header comment, source), and that each new arm registers one.
+- [x] CHK018 T050's second arm traps when the D5 walk reports a later 35 that `entries()` does not hold. Is it stated which hooks build `entries()`? Otherwise a Data value embedding `SOH 35=` can make the oracle trap on a correct walk, or stay silent on a wrong one. [Clarity, tasks T050, research D5] — SPEC-FIXED: tasks T050 names the hooks: the walk arm takes the harness's one `dict_hooks` value as both S's and the route's, which is the value `check_scan_agrees_with_build` builds `entries()` and the scan with (source), so all three split a frame alike.
 
 ## Interop goldens
 
-- [ ] CHK019 Tasks T052 accepts a regenerated golden only if "only 58 is added and 9 and 10 move". A regenerated capture also carries new session-specific values (52, and possibly 34). Is the diff rule stated as excluding them, so a correct regeneration is not stopped and a wrong one is not admitted? [Clarity, research D9, tasks T052]
-- [ ] CHK020 Interop-live is expected to be red on the reject-invalid-admin cells until the post-merge parent commit. Is it stated that the PR merges with no green interop evidence for those cells, and is that accepted by a named ruling? [Gap, tasks T052, tasks T080]
+- [x] CHK019 Tasks T052 accepts a regenerated golden only if "only 58 is added and 9 and 10 move". A regenerated capture also carries new session-specific values (52, and possibly 34). Is the diff rule stated as excluding them, so a correct regeneration is not stopped and a wrong one is not admitted? [Clarity, research D9, tasks T052] — SPEC-FIXED: tasks T052 compares under the golden's own normalization (`default_normalization_tags()`: 9, 10, 34, 52, 60, 112, 122, per the golden FORMAT.md, source). Only an added 58 is admitted, and any other difference in a compared field stops the task.
+- [x] CHK020 Interop-live is expected to be red on the reject-invalid-admin cells until the post-merge parent commit. Is it stated that the PR merges with no green interop evidence for those cells, and is that accepted by a named ruling? [Gap, tasks T052, tasks T080] — SPEC-FIXED: tasks T052 and T079 place it under 095's rule for parent harness edits as 099 applied it (099 plan.md owner items 15 and 16, its T142/T143). The PR merges without green `interop-live` for those cells, and T079 requires the orchestrator to record that acceptance before merge. The orchestrator confirms that this precedent covers 101.
 
 ## Derived instruments: thresholds and the oracle
 
-- [ ] CHK021 D7's thresholds are derived at test time by calling the site's builder. Is it required that the derivation use the exact MsgSeqNum, SendingTime and 58 the session will stamp? The digit count of 34 and 45 moves the boundary, so without this the one-byte-under and one-byte-over controls are not exact. [Clarity, research D9, tasks T013]
-- [ ] CHK022 W101-43 runs "in a gate arm such CompIDs can reach, found by running". Is the ending stated when no arm can reach it, for example because the session's own Logon overflows its smaller buffer first? [Edge Case, research D9, tasks T013]
-- [ ] CHK023 D6's oracle compares a frame's ending with the ending of `strip_later_35_and_reframe(frame)`. Is a witness of the oracle itself required, a frame whose stripped twin is known to end differently, so the oracle cannot compare equal by construction? [Measurability, research D6, tasks T005]
+- [x] CHK021 D7's thresholds are derived at test time by calling the site's builder. Is it required that the derivation use the exact MsgSeqNum, SendingTime and 58 the session will stamp? The digit count of 34 and 45 moves the boundary, so without this the one-byte-under and one-byte-over controls are not exact. [Clarity, research D9, tasks T013] — SPEC-FIXED: research D9's threshold derivation uses the exact 34 and 45 the frame under test will carry, besides the CompIDs, SendingTime and 58.
+- [x] CHK022 W101-43 runs "in a gate arm such CompIDs can reach, found by running". Is the ending stated when no arm can reach it, for example because the session's own Logon overflows its smaller buffer first? [Edge Case, research D9, tasks T013] — SPEC-FIXED: tasks T013: if no gate arm can reach such CompIDs (for W101-43 and W101-40 (iv)), the cell is not weakened; the implementer records it and stops for the orchestrator.
+- [x] CHK023 D6's oracle compares a frame's ending with the ending of `strip_later_35_and_reframe(frame)`. Is a witness of the oracle itself required, a frame whose stripped twin is known to end differently, so the oracle cannot compare equal by construction? [Measurability, research D6, tasks T005] — PASS: T010's W101-24 rows are RED on `H0` exactly where the `H0` ending differs from the stripped twin's (`0…D`, `D…5`, `D…3`), so the oracle reports "unequal" on known positives, and M101-26 turns it RED after the change; it cannot compare equal by construction.
 
 ## Census (SC-003)
 
-- [ ] CHK024 SC-003 allows a cell to change its expected outcome only through the manifest. Is a renamed cell, such as the flipped 092 `RefMsgTypeBound_*` cells, defined as one manifest row rather than a deletion plus an unlisted addition? [Clarity, Spec §SC-003, tasks T068]
-- [ ] CHK025 Plan "Technical Context" says every ending is tested through a real `Session`, "validator-level probes move a defect up one layer". W101-6, W101-7 and W101-14 are validator-level. Is it stated why those may be, and that each has a Session-level counterpart? [Consistency, plan "Technical Context", tasks T008]
+- [x] CHK024 SC-003 allows a cell to change its expected outcome only through the manifest. Is a renamed cell, such as the flipped 092 `RefMsgTypeBound_*` cells, defined as one manifest row rather than a deletion plus an unlisted addition? [Clarity, Spec §SC-003, tasks T068] — SPEC-FIXED: tasks `## Census manifest` preamble: a renamed cell is one row naming its old and its new name; a deletion plus an unlisted addition is not admitted.
+- [x] CHK025 Plan "Technical Context" says every ending is tested through a real `Session`, "validator-level probes move a defect up one layer". W101-6, W101-7 and W101-14 are validator-level. Is it stated why those may be, and that each has a Session-level counterpart? [Consistency, plan "Technical Context", tasks T008] — SPEC-FIXED: plan Testing states that validator-level cells cover only the validator's own contract (check order, hand-built population), which a Session cannot isolate, and that every counterparty-visible ending has a Session-level cell.
 
 ## Notes
 
@@ -76,3 +76,39 @@ Gate A closed by owner ruling (2026-11-07), and tasks.md does not reopen the des
 - `/speckit-implement` reads checklist checkbox state as a gate and must not modify markers.
 - `checklists/requirements.md` has a separate built-in lifecycle maintained by `/speckit-specify` and `/speckit-clarify`.
 - Items are numbered sequentially for reference; add findings inline.
+
+## Audit Result
+
+Audited at library head `df0f5431` (pipeline step 9).
+
+| Disposition | Count |
+|---|---|
+| PASS | 3 |
+| SPEC-FIXED | 22 |
+| DD-DECIDED | 0 |
+| WAIVED | 0 |
+| **Total** | 25 |
+
+### SPEC-FIXED items
+- CHK001 — the named mutant is "its production change reverted"; affected: `spec.md:SC-001`.
+- CHK003 — `H0` premise stops; affected: `tasks.md:T001`, `tasks.md:T020`.
+- CHK004, CHK007, CHK015 — the instrument's failure directions, the named message, the budget's decider; affected: `tasks.md:Execution rules`.
+- CHK005, CHK006 — recipe 1's positive and recipe 5's "contain"; affected: `research.md:D9`, `tasks.md:T017`, `tasks.md:Execution rules`.
+- CHK008, CHK010, CHK011 — M101-5's arm, the non-zero twin, zero after a positive; affected: `research.md:D9`, `tasks.md:T014`.
+- CHK009 — beyond-list site mutant; affected: `tasks.md:T043`.
+- CHK012, CHK013 — `HookedStore`, `NDEBUG` lanes; affected: `tasks.md:T045`, `research.md:D7`.
+- CHK014 — sanctioned out-of-contract call; affected: `research.md:D9`.
+- CHK017, CHK018 — fuzz counters and hooks; affected: `tasks.md:T050`.
+- CHK019, CHK020 — golden normalization, interop-live red under 095's rule; affected: `tasks.md:T052`, `tasks.md:T079`.
+- CHK021 — exact 34 and 45; affected: `research.md:D9`.
+- CHK022 — unreachable CompIDs stop; affected: `tasks.md:T013`.
+- CHK024 — renamed cell; affected: `tasks.md:Census manifest`.
+- CHK025 — validator-level cells; affected: `plan.md:Technical Context`.
+
+### DD-DECIDED items
+- none.
+
+### WAIVED items
+- none.
+
+Anchors spot-verified: research D1–D10 and "Supersessions (by name)" (this bundle; Gate A converged by owner ruling, 2026-11-07, plan `## Gate A`; spec.md carries no `Authority anchor` field, so research.md is the anchor); `.specify/constitution.md` §I.3, §VI.5, §VII.3, §VII.4, §VII.7, §VII.8, §VIII.2, §IX.1, §IX.4, §X.1, §X.4, §XI.7, §XIII.2, §XV.1, §XV.5, §XVI.6, §XVII.1, §XVII.7, §XVII.8 and Appendix A; `.specify/544-hot-path-zero-alloc.md` §1(b), §2.2 ("The leaf's own frame", the rejected `Session`-member scratch buffer), §2.5, §3 ("Why MSVC is class (a) only", arm (a)), R-10; 099 `research.md` R-20. All resolve in the revisions at library head `df0f5431`.

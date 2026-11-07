@@ -34,7 +34,9 @@ vendored `dictionaries/FIX42.xml`, `FIX44.xml` and `FIX50SP2.xml`. QuickFIX/Go: 
 checkout. The B85 ruling note records Go `eff945d` for 373=0/2/11; **Go was not read for #646** (the 372 echo), although
 that issue's "Done when" asks for all three engines. The C++ and J reads agree, and the ruling follows them.
 
-QuickFIX C++ reason texts (`src/C++/Values.h`, `SessionRejectReason_*_TEXT`), for the reasons the validation gate sends:
+QuickFIX C++ reason texts (`src/C++/Values.h`, `SessionRejectReason_*_TEXT`), for the reasons the validation gate sends.
+The strings quoted here, in the spec, the contract and the data model are informative; the authority is `Values.h` at
+`2ce8a60`, which tasks T004 transcribes, and a test literal is copied from that transcription:
 0 `Invalid tag number`, 1 `Required tag missing`, 2 `Tag not defined for this message type`, 4 `Tag specified without a
 value`, 5 `Value is incorrect (out of range) for this tag`, 6 `Incorrect data format for value`, 11 `Invalid MsgType`,
 13 `Tag appears more than once`, 14 `Tag specified out of required order`.
@@ -61,12 +63,32 @@ QuickFIX C++ behaviour this feature is judged against (read at the commit above)
 - **Dictionary-built tables:** `Dictionary::build_table_view` fills the store from the merged field store: the
   handle's field list after any 098 overlay merge, i.e. the QuickFIX-XML `<fields>` set or Orchestra's fields. Every
   `as_table_view` form (session, FIXT route, route plus `extra`) goes through that function, so none is missed.
+  - *Which store (checklist audit).* "The handle's field list" is the set of field definitions the loader keeps for the
+    whole dictionary, the one `Dictionary::field_name` and `field_by_name` read (`dict_metadata_handle::field_by_name_`,
+    filled from every QuickFIX-XML `<field number=…>` under `<fields>`, or every Orchestra `<fixr:field id=…>`). It is
+    **not** `dict_metadata_handle::fields_`, which holds per-message field runs, i.e. message reach, the meaning this
+    decision rejects. So a field declared under `<fields>` that no message references is defined (373=2, not 373=0),
+    and so is a field a 098 overlay adds without adding a message that reaches it: a peer can see 373=2 where the base
+    alone answers 373=0, depending on the overlay the operator loaded.
+  - The fill's own population operations call `mark_defined` too (they are the same operations as on a hand-built
+    table), so a dictionary-built table also defines every tag those operations name: its header tags, the
+    `fixt_framing` tags and NoHops metadata of a FIXT form, and `extra`'s pairs. A route's store is the routed
+    dictionary's field definitions plus those, not the transport dictionary's: an S header tag in an application frame
+    is judged by the validator's envelope arm, and a framing tag passes Step 1(a), before the 0/2 split runs (D2).
+  - A wire tag above 65535 never reaches `tag_defined(std::uint16_t)`: the scanners reject it as a malformed tag
+    (`wire::accumulate_tag_digit`), which is the 092 disposer's case, so no narrowing can alias it to a defined tag.
+  - A `table_view` is copied when a table is built or adopted (`Session::open()`, `fixt_route_set::make`, whose
+    validators hold their tables by value, a dictionary snapshot), never per message; the store's copy cost is
+    therefore an open-time cost, which D8's `BM_TableView_Copy*` rows time.
 - **Hand-built tables:** one private `mark_defined(tag)`, called by **every population operation that names a tag**.
   The census at round 1, re-derived by reading the private mutators `table_view_builder` forwards to:
   `add_valid_tag`/`add_valid`, `add_required_tag`/`add_required`, `set_field_type`/`set_type`, `add_enum`,
   `set_multi_value`, `add_group_member`, `add_group_required_member`, `set_group_first` and their `_ctx` forms,
   `add_header_tag`, `add_fixt_framing_tag`, and both tags of `set_length_pair_data_tag`. Re-derive it at tasks by
-  listing the mutators; a mutation cell (drop `mark_defined` from one op) must go RED.
+  listing the mutators; a mutation cell (drop `mark_defined` from one op) must go RED. The rule binds a population
+  operation added later too: the comment at `mark_defined` states it as a procedure (every population operation that
+  names a tag calls this; re-derive the set by listing the private mutators `table_view_builder` forwards to), and the
+  census, re-run at T068, finds an operation that does not call it.
 - The store is sealed (sorted, deduplicated) once, when the table is finished; no per-message cost.
 
 **Rationale:** "Defined" in QuickFIX is the dictionary's field list (`checkValidTagNumber` → `m_fields`), not message
@@ -86,7 +108,19 @@ holds a `table_view`, not a `Dictionary`); a fixed tag-space bitset (footprint, 
   `add_valid_tag`/`add_valid` or `add_required_tag`/`add_required` named it (`add_required_tag` writes both `required_`
   and `valid_`). The group-context, per-tag, header and framing operations do not define a MsgType. On a
   dictionary-built table every declared message gets its header tags as valid, so every declared MsgType is defined.
+  (That comes from `Dictionary::build_table_view` calling `add_valid` for each declared message's header tags, not from
+  the header operation itself, which defines no MsgType.)
   Re-derive the writers with `grep -n "valid_\[" include/fixpp/dict/table_view.hpp` (Gate A round 3).
+  Consequence on a hand-built table: one that names application messages but no admin message Rejects every admin
+  frame its validating session receives (other than 3 and 5, which the gate skips), as it does today (373=2, 371=8
+  today; 373=11 after). A hand-built validating table names every MsgType it accepts, admin included.
+- **Position (checklist audit).** The MsgType check sits after 092's failed-build fault scan and after Step 0, and
+  before Step 1, whose FIXT envelope arm is per field. 099's 1128 refusals and the repeat refusal (D5) are not the
+  validator's: `refuse_active_frame_` answers them at the gate, ahead of `validate_inbound_`. So an unknown MsgType on
+  a frame whose 1128 099 refuses answers the 1128 refusal (373=4 or 5, 371=1128); a frame whose 1128 resolves, or that
+  carries none, is validated with the resolved version's table, which answers 11 when it does not define the MsgType.
+  Step 0 tests only that the first field after 8 and 9 is 35, so an undefined tag among the header fields (9999
+  between 52 and 56) passes it and answers Step 1's 373=0.
 - Step 1(a): a tag outside the view (and not a FIXT framing tag) answers
   `dict_.tag_defined(tag) ? wire_unexpected_tag : wire_undefined_tag`, ref = the tag. The envelope arm is unchanged.
 - Two new `core::error` slots, `wire_invalid_msg_type` → 373=11 and `wire_undefined_tag` → 373=0, appended after the
@@ -94,7 +128,11 @@ holds a `table_view`, not a `Dictionary`); a fixed tag-space bitset (footprint, 
   both `FIXPP_ERR_WIRE_CONFORMANCE` (dictionary conformance results, as `wire_unexpected_tag` is). Error-slot test plan:
   D9.
 - An undefined tag inside a group instance: Step 1 walks every field of the message before Step 3, against a set that
-  includes group members, so it answers 373=0 there too, with no group-specific code. Traced against QuickFIX C++ on
+  includes group members, so it answers 373=0 there too, with no group-specific code. The walk is flat (one
+  `field_iterator` over the whole frame), so this holds at any nesting depth. A tag the dictionary defines that sits
+  inside a group instance it is not a member of is told apart the same way as outside a group: if the message's set
+  holds it elsewhere, Step 1 passes it and Step 3 gives the group-structure result; if the message's set does not
+  hold it, Step 1 answers 373=2. Traced against QuickFIX C++ on
   098's AS-2 frame (one Parties instance, the undefined tag last in it): `setGroup` ends the group there, the tag lands in
   the body, `iterate` reaches `checkValidTagNumber` → 373=0, 371 = the tag. The same answer. When the tag sits
   mid-instance, C++ answers 373=2 on the first later member by tag order, and with several instances it may answer 373=16
@@ -112,6 +150,15 @@ reasons and 099's FR-025/FR-026/1128 refusals, which share these sites. The map'
 in-contract path and gets no text. Other Reject sites keep their texts. The text is a function of the reason, derived at
 the emit site; `RejectDecision` does not grow.
 
+**The list is derived, not kept (checklist audit).** Re-derive it at tasks (T025) and after the last fix commit: every
+reason `wire_error_to_session_reject_reason` returns from a named case (read its `case`/`return` pairs, after T021 adds
+the two new slots), plus every reason `refuse_active_frame_` and its 1128 arms set, plus 099's other gate refusals at
+the three sites. Every reason so found other than the fail-closed 3 must be in the list; a reason missing from it
+stops T025. The validator's results all reach a named case (its group-structure results are `wire_required_field_missing`
+or `wire_field_value_out_of_range`, and a decimal-precision loss is re-mapped to `wire_field_value_truncated`), which is
+why 3 is unreachable on the in-contract path. A gate Reject for a reason outside the list (only 3, if the fail-closed arm
+ever ran) is sent with no 58, not refused.
+
 **Scope of "QuickFIX C++'s text":** the FIX.4.2-and-later form (58 = the text alone). Below FIX.4.2 QuickFIX C++ writes
 `<text> (<tag>)` and no 371/373; on FIX.4.2 it writes 373 only for reasons up to 11. fixpp writes 371/373 on every
 BeginString today and keeps doing so; the difference is a B-row (FR-009).
@@ -122,11 +169,20 @@ BeginString today and keeps doing so; the difference is a B-row (FR-009).
 093 disregards a frame whose third field is not 35 before any arm runs. Every reader reads that one value:
 - `scan_frame_header` keeps the first 35 in `msg_type` and sets a new `bool msg_type_conflict` when **any** later 35's
   value differs from it (sticky: `D…A…D` is a conflict). It is the only new `FrameHeader` member; the hot path adds one
-  comparison per later 35.
+  comparison per later 35. "Differs" is byte inequality of the two values as the scan slices them (the bytes after the
+  field's first `=`), with no case folding, trimming or other normalisation. The scan records no fault for an empty
+  value, so a later `35=` with an empty value differs from a non-empty first 35 and is a conflict.
 - `interpret_logon` (public C++) reads the first 35 likewise. Inside the session this is unobservable (D6 refuses every
   conflicting frame before either establishment arm calls it, and field 3 is read identically under any hooks), so it
   gets a direct unit cell and a B-row. A debug assertion at both arms that `interpret_logon`'s MsgType equals
-  `hdr.msg_type` is optional.
+  `hdr.msg_type` is optional. A direct caller of `interpret_logon` gets no conflict signal from it: `35=A … 35=D` with
+  Logon fields is accepted as a Logon. The conflict is `FrameHeader::msg_type_conflict`'s, which only the Session's
+  arms read; the B-row says so.
+- A frame that reaches the session in Disconnected is drained without a scan (`on_inbound_cold_`'s Disconnected row),
+  so no reader reads its MsgType; every other state's arm scans it.
+- **Readers, by recipe.** The reader list of FR-004 is re-derived, not kept: `command git grep -nE '\bmsg_type\b' --
+  src/session` (known positive: LogoutSent's `hdr.msg_type == "5"` in `on_inbound_logout_sent_`), each hit read in
+  its function, plus the callers of `MessageView::msg_type`; a reader the list does not name is classified at T039.
 - 099's `hdr.msg_type != hdr.fault_ref_msg_type` tests become `hdr.msg_type_conflict`.
 - LogoutSent's `hdr.msg_type == "5"` now reads the first 35, on every session kind: `D…5` no longer confirms the Logout,
   `5…D` does.
@@ -184,6 +240,25 @@ consume key).
   disclosed (FR-009), not excluded: a FIX.4.x frame carrying them in the header is already non-conformant.
 - `establishment_frame_refused_` becomes `hdr.msg_type_conflict || (fixt_routing_ && validate && route.application)`;
   the conflict clause holds whatever `validate_inbound_messages` is (D6).
+- **Where the scan's hooks and the walk's can disagree (checklist audit; a reachability statement, not a change to
+  this decision).** The inbound arms scan the whole frame with the route's hooks (`session_hooks(*route.entry.owner)`),
+  and `msg_type_conflict` comes from that scan; the walk reads the header with S's hooks. The two split a field
+  differently only where one hook set counts a Length+Data pair the other does not:
+  - A standard pair is answered from the standard table whatever the dictionary (`dict_hooks::data_tag_for_length`),
+    so only a pair outside it can differ.
+  - S's header pairs are on every route's table: `fixt_route_set::make` registers each listed S's
+    `dict::header_length_pairs` into every other dictionary's table, S winning a collision (099 research R-20), every
+    FIXT session's dictionary is listed (`Engine::start`, or `Session::open()` for a direct session), and
+    `bind_fixt_routes_` picks the `{d, S}` entries.
+  - On the shipped dictionaries no file declares a header pair outside the standard table (pinned by
+    `W17Overload.VendoredFileDeclaresNoHeaderPair`), and FIXT11 declares no pair outside it at all; the only such pairs
+    are FIX50SP2's and FIX Latest's body pairs, which the walk reads with the route's hooks, as the scan does, since a
+    body tag ends the header. So on every shipped pairing the two agree.
+  - Re-derive: `dict::header_length_pairs` over each dictionary a session lists, and the non-standard DATA fields of
+    each (a QuickFIX-XML `type='DATA'` or Orchestra `type="data"` field whose tag the standard table lacks); known
+    positive: a FIXT11 overlay adding a header pair (`W17HeaderLengthPairs.AnOverlaysHeaderPairIsAnswered`).
+  - What a custom dictionary can reach, and what to do about it, is the orchestrator's open question (checklist
+    `msgtype-and-framing.md` CHK006); this bullet decides nothing.
 
 ### D6 — Validation off: refuse in establishment, handle by the first 35 after (FR-006)
 
@@ -196,6 +271,16 @@ ending of the same frame with every later 35 removed and the frame re-framed (Bo
 own path can Reject (`4…D` is handled as a SequenceReset; `A…0` in Active is a 35=A, which reaches `fromApp` with an
 Application and Reject 373=3 without one). "No Reject" means no Reject **for the repeat**.
 
+**Terms (checklist audit).**
+- An *ending* is the value tasks T005's `ending_of` records: every outbound frame, each with the fields T005 decodes
+  (35, 34, 45, 58, 371, 372, 373); the callbacks fired, with their counts; the state; and NextNumIn. Two endings are
+  equal when each of those is, outbound frames compared field for field, so a Reject the stripped twin draws for
+  another cause must match the conflicting frame's Reject field for field.
+- A Reject *for the repeat* is one the conflicting frame draws and its stripped twin does not. A reader therefore
+  tells the two apart by building the twin, not from the frame alone, and the oracle is that test.
+- Every first frame reaches the conflict check: the Engine's first-frame path reads only the CompIDs
+  (`scan_first_frame_ids`) and hands the frame to `on_inbound_frame`, so the acceptor's NotConnected arm runs on it.
+
 **Rationale:** the validation-off ending after Logon splits the engines (C++ rejects, QuickFIX/J delivers the first
 value); "validation off sends no validation Reject" keeps 099's owner ruling.
 
@@ -203,10 +288,14 @@ value); "validation off sends no validation Reject" keeps 099's owner ruling.
 
 **The rule (Gate A round 2, orchestrator ruling; one rule for 372 on both messages).** A session Reject and a
 BusinessMessageReject echo the inbound MsgType in 372 verbatim (`=` included) whenever the message fits the engine's
-outbound frame ceiling, `Session::kSendFrameBytes`. That is the bound `Session::send` already enforces
+outbound frame ceiling, `Session::kSendFrameBytes`. Two edges of "verbatim" (checklist audit): a value that begins with
+`=` (`35==D`) is echoed like any other (`372==D`); an empty MsgType has nothing to echo, since the builders write 372
+only when it is non-empty (Survey), so such a Reject carries no 372 at any size and step 3 does not apply to it. That is the bound `Session::send` already enforces
 (`wire_frame_too_large` above it) and the bound the resend replay's capture depends on (`CaptureVisitor::kCapBufSize`).
 Above the ceiling, the Reject is sent without 372 (372 is optional in 35=3, `Req'd N`; the #646 ruling), and the BMR is
-not sent (372 is required in 35=j).
+not sent (372 is required in 35=j). On a later ResendRequest a stored Reject, rebuilt in the slot or sent without 372,
+is admin, so the replay answers it with a GapFill as it does every Reject today (the replay's `is_admin_type` set holds
+3); only the BMR is resent, with its 372 (US4 scenario 3).
 
 **Decision:** one internal helper in `session.cpp` owns the echo policy for a session Reject, and a twin owns it for the
 BusinessMessageReject (`build_business_message_reject`):
@@ -257,11 +346,22 @@ So no attempt re-stamps, re-numbers or fires a callback twice.
 
 **Outbound-ceiling ending.** What step 4 leaves is not sent: a Reject that exceeds `kSendFrameBytes` even without 372
 (FR-007 (a)) and a BMR that exceeds it with 372 (FR-007 (b)). (a): no callback, no outbound number, the record.
-(b): no callback, no outbound number, the inbound consumed as today, the session in its state, the record.
+(b): no callback, no outbound number, the inbound consumed as today, the session in its state, the record. For (a)
+the inbound frame is disposed of as for (b): consumed as today at that site (the gate consumes in LogonReceived and
+Active and not in an establishment arm), the session in its state. A Reject sent without 372 (step 3) is a sent
+message and writes no record; only the not-sent endings do.
 - **Rate.** Each not-sent ending of (a) and (b) writes at most one session log record per max(HeartBtInt, 1 s) on
   `effective_clock_`, the rule of 093's garbled-frame record (`Session::note_garbles_`), with HeartBtInt resolved as
   `run_liveness_loop` resolves it. A record carries the count of not-sent messages suppressed since the previous
-  record.
+  record. That HeartBtInt is the session's configured `SessionConfig::heartbeat_interval` (its default,
+  `kDefaultHeartBtInt`, when unset), never a value negotiated at Logon, so a not-sent ending before Logon (the
+  NotConnected and LogonSent gate arms, a 092 disposer reply before establishment) uses the same window as after it;
+  the 1 s floor bounds a HeartBtInt of 0. Like the garble record's members, the rate state is never reset: it carries
+  across connections of one Session.
+- **Bounded record.** A record does not echo the inbound MsgType, a peer-controlled value up to the inbound limit; it
+  records the MsgType's length and the message type not sent, plus the suppressed count. It is a `FIXPP_SLOG`
+  enqueue, as 093's garble record is: asynchronous (`[const §XIII.2]`, `[const §XV.5]`), with integer arguments and a
+  fixed name, so it formats nothing on the strand.
 - **One rate state for both.** The two endings are one cause, an inbound frame whose reply cannot fit the outbound
   ceiling, so they share **one** rate state and **one** suppressed count. Each record names the message type that was
   not sent and the count suppressed since the previous record. The state is a set of `Session` members beside the
@@ -296,6 +396,17 @@ So no attempt re-stamps, re-numbers or fires a callback twice.
      returns and uses its own storage (`on_inbound_frame`'s reentrancy contract in `session.hpp`).
   3. Across frames, the next `on_inbound_frame` begins only after the current one returns: the serialized-caller
      precondition.
+  4. The slot is a member of one Session, so sessions that share a strand or an executor never share a slot: another
+     session's frame, pumped while this one's reply is suspended, rebuilds into its own.
+- **Release before the next frame (checklist audit).** The holder is released on the tail's return, so before the
+  site, and so `on_inbound_frame`, returns; a reconnect's first frame comes through a new `on_inbound_frame` call,
+  which the precondition orders after the previous one completes. A close that destroys the site's coroutine frame
+  without resuming it releases the slot in the holder's destructor, as part of that destruction, before any later
+  call on that Session can begin. W101-46b's exits include a close during the store's suspension, followed by a next
+  frame whose overflowed reply is sent.
+- **Who must honour the precondition.** Only a direct C++ caller of `Session::on_inbound_frame`. Engine-managed
+  sessions meet it by construction (below), and no C-ABI or binding entry point calls `on_inbound_frame`: the C and
+  Python surfaces drive sessions through the Engine.
 
 **The serialized-caller precondition.**
 - **Source: overlapping calls are already outside what the session supports.**
@@ -321,6 +432,13 @@ So no attempt re-stamps, re-numbers or fires a callback twice.
     text so a death test can match it.
 
   Release builds compile it out, as they do the existing rule. The normal path keeps one ending.
+  - The build condition is the existing rule's: a plain `assert`, so it fires wherever `NDEBUG` is not defined, and the
+    death test's preprocessor condition is `NDEBUG` likewise. The lanes that check it are the presets whose build
+    type leaves `NDEBUG` unset (read `CMakePresets.json`), recorded by the death test's row in
+    `ci/expected-preset-conditional-tests.txt` (tasks T045).
+  - In a release build a violation is not caught: two overlapping calls that both overflow share the slot, so one
+    reply's bytes can be overwritten while its write is in flight, and a wrong or corrupted frame can reach the wire.
+    B-row (h) states that consequence; nothing tests a release build under a violation.
 
 **The capture invariant.** `static_assert(kSendFrameBytes <= CaptureVisitor::kCapBufSize)` sits in the slot-rebuild
 helper's body. That relation is what makes every rebuilt frame capturable by the resend replay.
@@ -423,6 +541,20 @@ it is a follow-up issue (quickstart), not part of this feature.
 - **Expected cost:** one comparison per later 35 in the scan; one hot `valid_.find` per validated message, as today (D2
   shares it); one cold `tag_defined` only on a field that has already failed; nothing on a validation-off frame with one
   MsgType.
+- **Which row measures which change (checklist audit).** The scan's comparison: `scan_frame_header_bench`. The MsgType
+  check on the shared lookup and the tag split: `validator_bench`. The gate's work on a passing frame:
+  `on_inbound_frame_bench`'s validated rows (`BM_Session_OnInboundFrame_InSequence_Validated`,
+  `BM_Session_OnInboundFrame_Fixt_Validated`), which run a validating session. D1's fill, sort and copy:
+  `table_view_footprint_bench`'s `BM_TableView_Build*` and `BM_TableView_Copy*`. No named bench feeds a frame with a
+  repeated 35: the conflict path (the refusal, D5's walk) runs only on a refused frame, which is cold, so it is not
+  measured; on a frame with one 35 the scan's added work is the branch that finds no later 35.
+- **Footprint rows are report-only.** They carry no acceptance threshold; `[const §VIII.2]`'s budget is on time. The
+  Build rows' cost from D1 (a fill linear in the field store, one sort and one dedup per build) is not predicted here:
+  T055 measures it, and a slowdown above +5% fails unless it carries `[const §VIII.2]`'s approval by someone other
+  than the author.
+- **Re-run on a peer's merge.** When a peer's merge into `origin/main` moves a measured function before 101 merges
+  (peer 100 edits `table_view.hpp` and `dictionary.cpp`), the paired runs are repeated at the new merge-base (tasks
+  T078).
 
 ### D9 — Cells that change (SC-003): a recipe, plus the cells known at round 1
 
@@ -451,14 +583,19 @@ must pass `strings … | command grep -c 101-MUT-<id>`, and a changed binary wit
 each affected binary whole and unfiltered under the mutant protocol's timeout. Where the ctest entry wraps a binary
 (interop golden checks), run the entry's registered command from `ctest -N -V`. No ctest run here; the one full ctest
 is T075. The RED set is the union of [  FAILED  ] names and must contain the recipe's known positive (recipe 1: the
-locally reachable HP-QFj-*-reject-invalid-admin golden checks), or the recipe is broken. The RED set is the census for
-that change:
+locally reachable HP-QFj-*-reject-invalid-admin golden checks), or the recipe is broken. Recipe 1's positive is also
+W101-12's cells, which the D3 change always turns RED (T024); when no golden check can run locally (a counterparty
+binary absent), W101-12 is the positive alone, the absence is recorded, and the goldens are diffed only at T052. The
+RED set is the census for that change:
 1. D3 alone (or a mutant passing a fixed non-empty text at the three gate sites) → the cells pinning no 58, plus the
    `HP-QFj-*-reject-invalid-admin` goldens.
 2. D4 alone (first-wins scan + `interpret_logon` + LogoutSent) → the 092 and 099 cells pinning last-wins endings.
 3. D6 alone (conflict clause without the `validate` term) → the validation-off establishment cells.
 4. D2 alone → the validator and session cells pinning 373=2 for an undefined tag or an undefined MsgType.
-5. Two placeholder enumerators appended to `core::error` → the RED set must equal the sentinel grep's hits. `-Werror`
+5. Two placeholder enumerators appended to `core::error` → the RED set must contain the sentinel grep's hits (its
+   known positive), as every other recipe's must contain its own; every other RED name (a completeness gate or size
+   pin the placeholders' switch cases trip, such as `kEnumTable`, `expected_error_map.csv` or `error_surface_test`'s
+   size pins) is classified in the manifest's §A, and an empty RED set means the recipe is broken. `-Werror`
    stays on (never disabled for a mutant). The change includes a case for each placeholder in every total switch the
    build names: build the mutant once, read its `-Wswitch` errors, and map each placeholder exactly as its neighbouring
    existing enumerator is mapped, so the mutant compiles. The recipe states that procedure, not a list of switches;
@@ -524,7 +661,9 @@ reverted):
 - `interpret_logon` direct cell: `35=D … 35=A` → `session_invalid_logon`.
 - D7. **Thresholds are derived at test time, never written as a MsgType length.** Call the site's builder, with the
   session's CompIDs, SendingTime and (for a gate Reject) its 58, into a buffer of the site's size and into one of
-  `kSendFrameBytes`. The longest MsgType for which each build succeeds is that boundary.
+  `kSendFrameBytes`. The longest MsgType for which each build succeeds is that boundary. The derivation uses the exact
+  values the frame under test will carry: the MsgSeqNum (34) the session will stamp and the 45 it will echo, besides
+  the CompIDs, SendingTime and 58, because their digit counts move the boundary; so the one-byte controls are exact.
   - **Reject sites:** a long undefined MsgType through the validation gate; `inbound_reject_leaf_` via PossDup Arm C
     on validation off (the session survives); the zero-argument emit (no Application); a unit cell for
     `inbound_reject_best_effort_leaf_`. Each has three cells:
@@ -563,14 +702,25 @@ reverted):
     - Each asserts zero interceptions and a zero counter, plus its post-conditions: one reply per window frame, 372
       byte-equal, the session still Active with the expected NextNumIn.
     - **RED arm:** a mutant restoring rewrite 2's first shape, a coroutine that owns a `kSendFrameBytes` buffer, must
-      be intercepted, as #544's arm (e) is for `send_fallback_leaf_`.
+      be intercepted, as #544's arm (e) is for `send_fallback_leaf_`. That arm is the mallocnesia registration's only:
+      an over-limit coroutine frame is a class-(b) request (`aligned_alloc`, `_aligned_malloc` on MSVC), which the
+      `operator new` counter cannot see on any platform (#544 §3, "Why MSVC is class (a) only"). So the counter build is
+      class-(a) evidence only, and on MSVC, where mallocnesia is not registered, W101-45 has no class-(b) evidence, as
+      #544's own windows have none there (#544 §3).
+    - A zero counts only after that registration's positive has read non-zero on the same build: M101-5 intercepted for
+      the mallocnesia registration, and #544's arm (a) (the configuration arm whose TU counter must read > 0) for the
+      counter build.
     - If a **fitting** twin is not zero, the cell is not weakened. #544 leaves reply chains ungated (§2.2 "The leaf's
-      own frame", §3), so that would be a pre-existing gap: tasks stop and report it.
+      own frame", §3), so that would be a pre-existing gap: tasks stop and report it. An unweakened cell that reads
+      non-zero stays RED, so the feature does not merge until the orchestrator rules (with the owner): fix the gap in
+      101, or file it as an issue and waive the cell with a recorded reason.
     - `ctest -L alloc_guard` stays GREEN as a regression control.
   - **Slot discipline:**
     - A death test, on a build with assertions, drives two overlapping `on_inbound_frame` calls on one Session. Each
       draws an overflowed reply, with a store double that suspends the first call's store. It expects
-      `FIXPP_ASSERT_INBOUND_REPLY_SLOT_FREE()`'s text. A mutant with the assertion removed must go RED.
+      `FIXPP_ASSERT_INBOUND_REPLY_SLOT_FREE()`'s text. A mutant with the assertion removed must go RED. This test is the
+      one sanctioned out-of-contract call of `on_inbound_frame`; nothing tests a release build under a violation (the
+      assertion is compiled out there; B-row (h) states the consequence).
     - Release on every exit: an overflowed BMR whose `toApp` vetoes, and one whose `toApp` throws; an overflowed
       Reject whose `assign_outbound` fails. After each exit, `session_test_access` reads `inbound_reply_slot_held_`
       as false. After the veto, whose session stays Active, a second overflowed BMR in the next frame is sent. A
@@ -611,8 +761,16 @@ and `check-comment-claims.py` runs on the diff:
   view -> first field is 8' proof"), which cites `ValidatorProductionTableView.UnknownMsgTypeRejectsLikePreHoistFieldValidFor`
   as the mechanism D2 replaces.
 
-`scan_frame_header.hpp`'s header names **101 D4** as superseding 092 data-model E-1 / contract C-3 I-3 for `msg_type`,
-and `session.cpp`'s `dispose_unparseable_` names **101 D7** as superseding 092 research R-5's bound.
+Each file whose decision this feature supersedes names the superseding 101 decision in a header comment (CLAUDE.md,
+#310); tasks T066 applies this list:
+- `scan_frame_header.hpp`'s header names **101 D4** as superseding 092 data-model E-1 / contract C-3 I-3 for
+  `msg_type`;
+- `session.cpp`'s `dispose_unparseable_` names **101 D7** as superseding 092 research R-5's bound;
+- `session.cpp`'s `refuse_active_frame_` names **101 D4/D5** as superseding 099 FR-025/FR-029's comparison and 13/14
+  rule;
+- `peek_fixt_route.hpp` names **101 D5** for `fixt_header_repeats_msg_type`;
+- `admin_messages.cpp`'s `interpret_logon` names **101 D4**;
+- `validator.hpp` names **101 D2** for the step order (the MsgType check, the undefined-tag split).
 
 ## Supersessions (by name)
 
@@ -642,6 +800,22 @@ The vendored XML quotes attributes with single quotes, so a `number="N"` grep re
 quote-agnostic form above is the one to use. The patterns were widened at round 2 until every clause both reviewers
 named is a hit, and at round 3 by the D2 and 371 lines, which the round-2 vocabulary could not reach. A clause the
 recipe still misses, once found, widens the recipe; a hand addition to the table alone does not close it.
+
+**A hit that fits nothing (checklist audit).** The task whose run finds it (T003 before Phase 2 ends, T064 after the
+records, T068 after the last fix commit) classifies it: a row below when a decision of this feature changes the
+clause, else a kept class with its reason. A hit whose clause would change in a way D1 to D7 do not reach stops that
+task for the orchestrator.
+
+**The path from a merged clause to its supersession.** Merged bundles are history and are not edited. A later reader
+gets from a superseded clause to 101 through two pointers only: the in-place flag on the brain component page
+(CLAUDE.md, #334) and the header comment naming the 101 decision in the source file (D10, CLAUDE.md, #310). The live
+B&L rows carry the operator-facing ending.
+
+**The live B&L file and `R 2/8`.** The D2 line's MsgType rule applies to the live file too: a live row that states
+373=2 with 371=8 as the current ending of an undefined MsgType is superseded to 373=11 with no 371 (FR-001). A row that
+records the behaviour before its own feature (B-081-1's "previously rejected on tag 8") is history and is kept. The
+check: `command grep -nE '371 ?= ?8\b|R 2/8|RefTagID\(371\) ?= ?8|tag 8' spec/behaviors-and-limitations.md` (known
+positive: B-081-1), re-run at T064.
 
 **Kept, by class:**
 - 092's, 098's and 099's `tasks.md`, `plan.md`, `research.md`, `quickstart.md` and `checklists/` are history. They
@@ -703,10 +877,14 @@ recipe still misses, once found, widens the recipe; a hand addition to the table
 | B&L **B-099-8**, "373=2, 371=370 on any other" | 373=0 where the route's dictionary does not define 370 | D2, FR-002, FR-009 |
 | B&L **B-099-25**, "`R 2/384 A`" | `R 0/384 A` for a dictionary that does not define 384 | D2, FR-002, FR-009 |
 | B&L **L-099-1**, "Such a trailer tag draws 373=2" | 373=0 where the answering table does not define it | D2, FR-002, FR-009 |
-| 099 `spec.md` **FR-010** Limits, `data-model.md` **E-7** `NC L` 5999 cell and §FIXT11's `R 2/384 A`, and every other merged-spec clause on the D2 recipe line whose tag the judging table does not define | 373=2 → 373=0 | D2, FR-002 |
+| 099 `spec.md` **FR-010** Limits, `data-model.md` **E-7** `NC L` 5999 cell and §FIXT11's `R 2/384 A`, and every other merged-spec clause on the D2 recipe line whose tag the judging table does not define (the per-hit list: tasks.md `## Census at tasks time`, then T064's run in the evidence file) | 373=2 → 373=0 | D2, FR-002 |
 
 **B&L row rewrites (close-out row 3).** Each uses the file's "*(Amended <date>, 101:)*" convention and carries no
-count.
+count. The rows rewritten to the new endings with no planned text here (B-092-3's 372 bullet, B-099-3, B-099-4, B-099-5,
+B-099-11) take their text from contracts/reject-frames.md's rows ("Repeated MsgType", "RefMsgType echo") and D4 to D7,
+and each rewritten clause is checked against that contract row. B-075-6's amendment states 371 and 373 only; the new
+row that every validation-gate Reject carries 58 (FR-009, tasks T060 (k)) owns that statement, and B-075-6 does not
+repeat it.
 - **B-092-1:** replace "the scan keeps last-wins for the fields it already read." with:
   > the scan keeps last-wins for the fields it already read, MsgSeqNum(34) among them. *(Amended <date>, 101:)*
   > MsgType(35) is first-wins: `FrameHeader::msg_type` is the first 35, and a later 35 with a different value sets
@@ -725,8 +903,8 @@ count.
   > An absent 1137 with a tag the transport dictionary does not define is 373=0 naming that tag (373=2 for one it
   > defines elsewhere) *(amended <date>, 101)*
 - **B-099-8:** replace "373=2, 371=370 on any other" with:
-  > 373=0, 371=370 on a route whose dictionary does not define 370, which is every other vendored one (373=2 on one
-  > that defines it) *(amended <date>, 101)*
+  > 373=0, 371=370 on a route whose dictionary does not define 370 (373=2 on one that defines it; which dictionaries
+  > define 370 is read from the dictionary, not listed here) *(amended <date>, 101)*
 - **B-099-25:** replace "answers such a Logon `R 2/384 A`" with:
   > answers such a Logon `R 0/384 A` when it does not define 384, as QuickFIX C++'s copy does not, and `R 2/384 A` when
   > it defines 384 without the group *(amended <date>, 101)*

@@ -33,12 +33,18 @@ the same length as the candidate's; run A-B-A-B on the same machine, four observ
 `validator_bench`'s CI pairing is supplementary evidence only. `table_view_footprint_bench`'s timed
 `BM_TableView_Build*` and `BM_TableView_Copy*` rows run in the same A-B-A-B protocol with the same +5% rule (list them
 with `--benchmark_list_tests`; the binary stays unpaired in `bench/ci-suite.txt`). Add the defined-tag store's bytes to
-`table_view_footprint_bench` (FIX44, a FIXT route, FIX Latest, a high-tag overlay).
+`table_view_footprint_bench` (FIX44, a FIXT route, FIX Latest, a high-tag overlay). When a peer's merge into
+`origin/main` moves a measured function before 101 merges, the paired runs are repeated at the new merge-base (research
+D8; tasks T078).
 
 Issues to file, each labelled at creation:
 - (b-L): echo 372 up to the inbound limit instead of `kSendFrameBytes`, which needs the outbound ceiling the resend
   replay depends on lifted (research D7), for the owner;
 - a CompID length bound at `open()` (research D7, residual), naming `apply_inbound_sequence_reset`'s literal-372
   Reject, which long CompIDs that overflow its own fixed buffer drop with no log record.
+
+No other disclosed divergence gets an issue: the validation-off split with QuickFIX C++, the group layouts, the form
+below FIX.4.2, the header-set residual and QuickFIX/J's 371=35 on 373=11 are deliberate behaviours, recorded as B-rows
+only (FR-009; the B&L file's convention for a deliberate divergence).
 
 MSVC: build the touched test targets in the sandbox (`.sandbox-lock` first) before the first labelled push.

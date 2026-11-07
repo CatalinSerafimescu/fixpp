@@ -20,37 +20,37 @@ Gate A closed by owner ruling (2026-11-07), and tasks.md does not reopen the des
 
 ## No per-message allocation (`[const §XV.1]`, FR-008)
 
-- [ ] CHK001 The outbound-ceiling record is written on a path a peer can repeat. Is it stated that writing it allocates nothing and is asynchronous (`[const §XV.5]`, Article XIII)? FR-008's "no per-message allocation" names the overflowed replies but not the record. [Gap, Spec §FR-008, research D7 "Outbound-ceiling ending"]
-- [ ] CHK002 The defined-tag store is a `std::vector` that is filled when a table is built and copied with every `table_view` copy. Is it stated when a `table_view` is copied (at `open()`, per route, per validator) and that no copy happens per message? D1's rejected alternative mentions a store "copied per validator". [Clarity, research D1, research D8]
-- [ ] CHK003 Each reply leaf's coroutine frame gains a span and a slot holder. Is it stated what happens if that growth pushes a leaf's frame past #544's recycler limit, which would mean an allocation on the normal, fitting path? Tasks T014 says "stop and report". Does the spec or research say whether that blocks the feature? [Edge Case, research D7 "One tail, in the site's own coroutine", research D9]
-- [ ] CHK004 Is it stated that D5's walk and D3's text lookup allocate nothing, and that FR-008's "inbound path" includes rejected and refused frames as well as delivered ones? [Coverage, Spec §FR-008, research D5, research D3]
-- [ ] CHK005 The allocation evidence has two registrations: mallocnesia (Release, Linux) and the operator-new counter build (everywhere). Is it stated that the counter build is the only allocation evidence on MSVC, and that this is accepted? [Coverage, quickstart, research D9]
+- [x] CHK001 The outbound-ceiling record is written on a path a peer can repeat. Is it stated that writing it allocates nothing and is asynchronous (`[const §XV.5]`, Article XIII)? FR-008's "no per-message allocation" names the overflowed replies but not the record. [Gap, Spec §FR-008, research D7 "Outbound-ceiling ending"] — SPEC-FIXED: research D7 "Bounded record": a `FIXPP_SLOG` enqueue, as 093's garble record is, asynchronous (`[const §XIII.2]`, `[const §XV.5]`), with integer arguments and a fixed name, so it formats nothing on the strand; it is rate-bounded and echoes no peer bytes.
+- [x] CHK002 The defined-tag store is a `std::vector` that is filled when a table is built and copied with every `table_view` copy. Is it stated when a `table_view` is copied (at `open()`, per route, per validator) and that no copy happens per message? D1's rejected alternative mentions a store "copied per validator". [Clarity, research D1, research D8] — SPEC-FIXED: research D1 states that a `table_view` is copied when a table is built or adopted (`Session::open()`, `fixt_route_set::make`, a snapshot), never per message; the copy cost is an open-time cost, which `BM_TableView_Copy*` times.
+- [x] CHK003 Each reply leaf's coroutine frame gains a span and a slot holder. Is it stated what happens if that growth pushes a leaf's frame past #544's recycler limit, which would mean an allocation on the normal, fitting path? Tasks T014 says "stop and report". Does the spec or research say whether that blocks the feature? [Edge Case, research D7 "One tail, in the site's own coroutine", research D9] — SPEC-FIXED: research D9 and T014: if the allocation cells read non-zero on the fitting path (including a frame grown past #544's limit), the cell is not weakened. It stays RED, so the feature does not merge until the orchestrator rules with the owner.
+- [x] CHK004 Is it stated that D5's walk and D3's text lookup allocate nothing, and that FR-008's "inbound path" includes rejected and refused frames as well as delivered ones? [Coverage, Spec §FR-008, research D5, research D3] — SPEC-FIXED: spec FR-008 defines the inbound path (every frame `on_inbound_frame` receives, whether delivered, rejected or refused) and states that D5's walk and D3's lookup allocate nothing.
+- [x] CHK005 The allocation evidence has two registrations: mallocnesia (Release, Linux) and the operator-new counter build (everywhere). Is it stated that the counter build is the only allocation evidence on MSVC, and that this is accepted? [Coverage, quickstart, research D9] — SPEC-FIXED: research D9 states that the counter build is class-(a) evidence only and that, on MSVC, W101-45 has no class-(b) evidence, as #544's windows have none (#544 §3).
 
 ## Benchmarks (`[const §VIII.2]`, SC-004, research D8)
 
-- [ ] CHK006 D8 expects "one comparison per later 35 in the scan". None of the named bench binaries is stated to feed a frame with a repeated 35. Is it stated that the conflict path is not measured, and why that is acceptable? [Coverage, research D8]
-- [ ] CHK007 Is each changed hot-path function mapped to the row that measures it? The scan's comparison goes to `scan_frame_header_bench`, and `found()` with the tag split goes to `validator_bench`. Does `on_inbound_frame_bench` run a validating session, so the gate's new work is in it? [Traceability, research D8, Spec §SC-004]
-- [ ] CHK008 Do the footprint rows (the store's bytes for FIX44, a FIXT route, FIX Latest and a high-tag overlay) have an acceptance criterion, or are they report-only? If they are report-only, is that stated? [Measurability, research D8 "Footprint"]
-- [ ] CHK009 D1 adds a fill, a sort and a dedup to every `Dictionary::build_table_view`, which the timed `BM_TableView_Build*` rows measure. Is the expected size of that cost stated, so that a +5% failure is foreseen rather than discovered? Is the approval path named (someone other than the author, `[const §VIII.2]`)? [Measurability, research D8, plan "Constitution Check"]
-- [ ] CHK010 The base is the merge-base at measurement time, and peer 100 edits `table_view.hpp` and `dictionary.cpp`. Is it stated that D8's runs are repeated when a peer's merge moves a measured function before 101 merges? Tasks T078 states it; research D8 and the quickstart do not. [Dependency, research D8, tasks T078]
+- [x] CHK006 D8 expects "one comparison per later 35 in the scan". None of the named bench binaries is stated to feed a frame with a repeated 35. Is it stated that the conflict path is not measured, and why that is acceptable? [Coverage, research D8] — SPEC-FIXED: research D8 states that no bench feeds a repeated 35, because the conflict path is cold (a refused frame), and that on a one-35 frame the scan adds only the branch that finds no later 35.
+- [x] CHK007 Is each changed hot-path function mapped to the row that measures it? The scan's comparison goes to `scan_frame_header_bench`, and `found()` with the tag split goes to `validator_bench`. Does `on_inbound_frame_bench` run a validating session, so the gate's new work is in it? [Traceability, research D8, Spec §SC-004] — SPEC-FIXED: research D8 maps each change to its row; `on_inbound_frame_bench`'s `_Validated` and `_Fixt_Validated` rows run a validating session (source: the bench sets `validate_inbound_messages`).
+- [x] CHK008 Do the footprint rows (the store's bytes for FIX44, a FIXT route, FIX Latest and a high-tag overlay) have an acceptance criterion, or are they report-only? If they are report-only, is that stated? [Measurability, research D8 "Footprint"] — SPEC-FIXED: research D8 states that the footprint rows are report-only (no threshold; `[const §VIII.2]` is on time).
+- [x] CHK009 D1 adds a fill, a sort and a dedup to every `Dictionary::build_table_view`, which the timed `BM_TableView_Build*` rows measure. Is the expected size of that cost stated, so that a +5% failure is foreseen rather than discovered? Is the approval path named (someone other than the author, `[const §VIII.2]`)? [Measurability, research D8, plan "Constitution Check"] — SPEC-FIXED: research D8 states that D1's Build cost is not predicted: T055 measures it, and a slowdown above +5% fails unless approved by someone other than the author (`[const §VIII.2]`).
+- [x] CHK010 The base is the merge-base at measurement time, and peer 100 edits `table_view.hpp` and `dictionary.cpp`. Is it stated that D8's runs are repeated when a peer's merge moves a measured function before 101 merges? Tasks T078 states it; research D8 and the quickstart do not. [Dependency, research D8, tasks T078] — SPEC-FIXED: research D8 and quickstart state the re-run at the new merge-base when a peer's merge moves a measured function (T078).
 
 ## Layout growth (FR-009)
 
-- [ ] CHK011 `Session` grows by a `kSendFrameBytes` slot, a flag and the record's rate state. B-row (l) names `sizeof` and how to print it. Is the per-engine memory consequence stated for an operator running many sessions? [Completeness, Spec §FR-009, research D7 "Allocation (`[const §XV.1]`): none added."]
-- [ ] CHK012 Is it stated whether the layout changes of `Session` and `table_view` in installed headers are BREAKING for public C++ (a downstream recompile), in the wording the precedents B-544-3 and B-099-18 use? [Clarity, Spec §FR-009]
+- [x] CHK011 `Session` grows by a `kSendFrameBytes` slot, a flag and the record's rate state. B-row (l) names `sizeof` and how to print it. Is the per-engine memory consequence stated for an operator running many sessions? [Completeness, Spec §FR-009, research D7 "Allocation (`[const §XV.1]`): none added."] — SPEC-FIXED: tasks T060 (l) states the per-Engine consequence as a rule (each Session holds one more `kSendFrameBytes` slot), not as a number.
+- [x] CHK012 Is it stated whether the layout changes of `Session` and `table_view` in installed headers are BREAKING for public C++ (a downstream recompile), in the wording the precedents B-544-3 and B-099-18 use? [Clarity, Spec §FR-009] — SPEC-FIXED: tasks T060 (l) uses B-544-3's words (a public class in an installed header, so a C++ layout change; not a C-ABI change). Source: B-544-3 and B-099-18 in the live B&L file.
 
 ## The serialized-caller precondition (research D7)
 
-- [ ] CHK013 `FIXPP_ASSERT_INBOUND_REPLY_SLOT_FREE()` is compiled out of release builds. Is the release consequence of a violation stated in B-row (h)? Two overflowed replies would share the slot, and a wrong or corrupted frame could reach the wire. [Gap, research D7 "The serialized-caller precondition", Spec §FR-009]
-- [ ] CHK014 Is it stated that the precondition binds direct C++ callers of `Session::on_inbound_frame` only, with no C-ABI or bindings entry point, and that Engine-managed sessions meet it by construction (`run_read_pump`, `run_accept_loop`, `run_connect_loop`)? [Clarity, research D7 "The serialized-caller precondition"]
-- [ ] CHK015 The slot belongs to one Session. Is the exclusivity argument stated to hold when sessions share a strand or an executor, where one session's reply can be suspended while another session's frame is pumped? [Coverage, research D7 "The inbound reply slot: who uses it, and for how long."]
-- [ ] CHK016 The holder releases the slot when a close destroys the site's coroutine frame. Is it stated that this release happens before the same Session can take its next inbound frame after a reconnect, so that a close during the store's suspension cannot leave the flag set? [Edge Case, research D7 "The inbound reply slot: who uses it, and for how long."]
-- [ ] CHK017 Is the build condition under which the assertion fires named? Is it `NDEBUG` alone, or the same condition as `FIXPP_ASSERT_NO_CALLBACK_AT_PARSE_SITE`, so the lanes that check the precondition are known? [Clarity, research D7 "The serialized-caller precondition"]
+- [x] CHK013 `FIXPP_ASSERT_INBOUND_REPLY_SLOT_FREE()` is compiled out of release builds. Is the release consequence of a violation stated in B-row (h)? Two overflowed replies would share the slot, and a wrong or corrupted frame could reach the wire. [Gap, research D7 "The serialized-caller precondition", Spec §FR-009] — SPEC-FIXED: research D7 and T060 (h) state the release consequence: two overflowing overlapping calls share the slot, so a wrong or corrupted frame can reach the wire.
+- [x] CHK014 Is it stated that the precondition binds direct C++ callers of `Session::on_inbound_frame` only, with no C-ABI or bindings entry point, and that Engine-managed sessions meet it by construction (`run_read_pump`, `run_accept_loop`, `run_connect_loop`)? [Clarity, research D7 "The serialized-caller precondition"] — SPEC-FIXED: research D7 "Who must honour the precondition" and T060 (h): direct C++ callers only, with Engine-managed sessions meeting it by construction and no C-ABI or binding caller (source).
+- [x] CHK015 The slot belongs to one Session. Is the exclusivity argument stated to hold when sessions share a strand or an executor, where one session's reply can be suspended while another session's frame is pumped? [Coverage, research D7 "The inbound reply slot: who uses it, and for how long."] — SPEC-FIXED: research D7 item 4: the slot is per Session, so sessions sharing a strand or executor never share one.
+- [x] CHK016 The holder releases the slot when a close destroys the site's coroutine frame. Is it stated that this release happens before the same Session can take its next inbound frame after a reconnect, so that a close during the store's suspension cannot leave the flag set? [Edge Case, research D7 "The inbound reply slot: who uses it, and for how long."] — SPEC-FIXED: research D7 "Release before the next frame" orders the release before the next call (on return, or in the holder's destructor when a close destroys the frame); T044's W101-46b gains a close-during-store-suspension exit followed by a next overflowed reply.
+- [x] CHK017 Is the build condition under which the assertion fires named? Is it `NDEBUG` alone, or the same condition as `FIXPP_ASSERT_NO_CALLBACK_AT_PARSE_SITE`, so the lanes that check the precondition are known? [Clarity, research D7 "The serialized-caller precondition"] — SPEC-FIXED: research D7 names the condition: a plain `assert` like `FIXPP_ASSERT_NO_CALLBACK_AT_PARSE_SITE` (source), so `NDEBUG`; the lanes are the presets that leave `NDEBUG` unset, recorded by the death test's preset-conditional row.
 
 ## `noexcept` and sanitizers
 
-- [ ] CHK018 Plan "Technical Context" says `noexcept` is preserved. Is `noexcept` stated for the new functions: the slot-rebuild helper and its BMR twin, `tag_defined`, `found()`, and D5's walk? `session_reject_reason_text` is stated. [Completeness, plan "Technical Context", data-model "Reject build helper"]
-- [ ] CHK019 The slot is shared state across `co_await`s. Is a TSan-visible witness of the normal, serialized path required (tasks T070 runs `session_101_tests` under TSan), and is it stated that the death test is not a TSan witness? [Coverage, tasks T070, research D7]
+- [x] CHK018 Plan "Technical Context" says `noexcept` is preserved. Is `noexcept` stated for the new functions: the slot-rebuild helper and its BMR twin, `tag_defined`, `found()`, and D5's walk? `session_reject_reason_text` is stated. [Completeness, plan "Technical Context", data-model "Reject build helper"] — SPEC-FIXED: plan Constraints lists `noexcept` for every new function (`tag_defined`, `found`, `session_reject_reason_text`, the rebuild helper and its twin, the holder's destructor, D5's walk).
+- [x] CHK019 The slot is shared state across `co_await`s. Is a TSan-visible witness of the normal, serialized path required (tasks T070 runs `session_101_tests` under TSan), and is it stated that the death test is not a TSan witness? [Coverage, tasks T070, research D7] — SPEC-FIXED: tasks T070 states that the TSan run of `session_101_tests` is the witness for the serialized path's slot use, and that the death test is not a TSan witness.
 
 ## Notes
 
@@ -59,3 +59,33 @@ Gate A closed by owner ruling (2026-11-07), and tasks.md does not reopen the des
 - `/speckit-implement` reads checklist checkbox state as a gate and must not modify markers.
 - `checklists/requirements.md` has a separate built-in lifecycle maintained by `/speckit-specify` and `/speckit-clarify`.
 - Items are numbered sequentially for reference; add findings inline.
+
+## Audit Result
+
+Audited at library head `df0f5431` (pipeline step 9).
+
+| Disposition | Count |
+|---|---|
+| PASS | 0 |
+| SPEC-FIXED | 19 |
+| DD-DECIDED | 0 |
+| WAIVED | 0 |
+| **Total** | 19 |
+
+### SPEC-FIXED items
+- CHK001, CHK013, CHK014, CHK015, CHK016, CHK017 — the record's cost, the release consequence, the audience, per-Session slot, release ordering, the assertion's condition; affected: `research.md:D7`, `tasks.md:T044`, `tasks.md:T060 (h)`.
+- CHK002 — copy timing; affected: `research.md:D1`.
+- CHK003, CHK005 — non-zero fitting path, class-(a)-only counter; affected: `research.md:D9`, `tasks.md:T014`.
+- CHK004 — the inbound path; affected: `spec.md:FR-008`.
+- CHK006 to CHK010 — benches: conflict path, row map, report-only footprint, approval, peer re-run; affected: `research.md:D8`, `quickstart.md`.
+- CHK011, CHK012 — layout rows; affected: `tasks.md:T060 (l)`.
+- CHK018 — `noexcept` list; affected: `plan.md:Technical Context` (Constraints).
+- CHK019 — the TSan witness; affected: `tasks.md:T070`.
+
+### DD-DECIDED items
+- none.
+
+### WAIVED items
+- none.
+
+Anchors spot-verified: research D1–D10 and "Supersessions (by name)" (this bundle; Gate A converged by owner ruling, 2026-11-07, plan `## Gate A`; spec.md carries no `Authority anchor` field, so research.md is the anchor); `.specify/constitution.md` §I.3, §VI.5, §VII.3, §VII.4, §VII.7, §VII.8, §VIII.2, §IX.1, §IX.4, §X.1, §X.4, §XI.7, §XIII.2, §XV.1, §XV.5, §XVI.6, §XVII.1, §XVII.7, §XVII.8 and Appendix A; `.specify/544-hot-path-zero-alloc.md` §1(b), §2.2 ("The leaf's own frame", the rejected `Session`-member scratch buffer), §2.5, §3 ("Why MSVC is class (a) only", arm (a)), R-10; 099 `research.md` R-20. All resolve in the revisions at library head `df0f5431`.

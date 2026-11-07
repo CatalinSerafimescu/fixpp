@@ -1,11 +1,16 @@
 # Contract: the Rejects and dispositions this feature changes
 
-Notation: `R <373>/<371> <372> 58="…"`; `Disc` = disconnect, nothing sent; 45 = the frame's MsgSeqNum unless stated.
+Notation: `R <373>/<371> <372> 58="…"`; `Disc` = disconnect, nothing sent: no Logout, no Reject, no store write, and the
+inbound number not advanced (the arm returns before its sequence check), one site for FR-005 and FR-006
+(`establishment_frame_refused_`); 45 = the frame's MsgSeqNum unless stated.
 Decisions and the merged clauses each row supersedes: [research.md](../research.md) (D1–D10, Supersessions).
 
 ## Validating session (FIXT or not), validation gate
 
-Texts are QuickFIX C++'s, in the FIX.4.2-and-later form, on every BeginString (research D3).
+Texts are QuickFIX C++'s, in the FIX.4.2-and-later form, on every BeginString (research D3). fixpp keeps writing 371
+and 373 on every BeginString, so on FIX.4.2 a 13 or 14 Reject carries the 373 that QuickFIX C++ leaves out above 11, and
+below FIX.4.2 58 is the text alone, where QuickFIX C++ writes `<text> (<tag>)` and no 371/373: a FIX.4.2 or older
+counterparty's diff is expected there (B-row, FR-009).
 
 | Inbound | Before | After |
 |---|---|---|
@@ -59,9 +64,13 @@ session's inbound reply slot, before any callback and before `assign_outbound`, 
 
 Text(58) is never dropped to make room. The slot rebuild also recovers a Reject built through the helper whose own
 buffer overflowed because of long CompIDs or 58. A Reject that exceeds `kSendFrameBytes` even without 372 is not sent:
-no callback, no outbound number, and the same log record (disclosed residual, research D7). Both not-sent endings
+no callback, no outbound number, and the same log record (disclosed residual, research D7). A Reject sent without 372
+is a sent message and writes no record. Both not-sent endings
 share one rate state and one suppressed count: at most one record per max(HeartBtInt, 1 s) on `effective_clock_`
-(093's garbled-frame rule), each naming the message type not sent and the count suppressed since the previous record.
+(093's garbled-frame rule; HeartBtInt is the configured value, so the window is the same before Logon), each naming
+the message type not sent, the inbound MsgType's length (never its value) and the count suppressed since the previous
+record. A stored Reject, rebuilt or sent without 372, is admin: a later ResendRequest gap-fills it, as every Reject
+today; only the BMR is resent.
 *(Narrowed after tasks by orchestrator ruling, at `/speckit-analyze`: helper-built sites only;
 `apply_inbound_sequence_reset`'s literal-372 Reject, built in its own fixed buffer, is dropped with no record when long
 CompIDs overflow it — the CompID residual.)*

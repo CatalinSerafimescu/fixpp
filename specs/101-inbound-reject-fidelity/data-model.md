@@ -8,7 +8,7 @@ Decisions: [research.md](research.md) D1–D7.
 |---|---|---|
 | `msg_type` | last 35 | **first** 35 (the third field on every frame a state arm handles; 093 disregards a frame whose third field is not 35). Supersedes 092 E-1 / C-3 I-3 for this member |
 | `msg_type_conflict` | — | **new** `bool`: any later 35 whose value differs from `msg_type` (sticky) |
-| `msg_seq_num` | last 34 | unchanged (last-wins) |
+| `msg_seq_num` | last 34 | unchanged (last-wins). So a validator Reject (373=0, 2, 11 and the rest) on a frame with two 34s carries 45 = the last 34, as today, while a frame-level refusal (`names_third_field`: the conflict Reject, 099's 1128 refusals) carries 45 = the first 34 (`fault_ref_seq_num`). The two rules differ on purpose: a refusal names the frame by its third field, as 099 does |
 | `msg_type_is_third`, `fault_ref_msg_type` | unchanged | unchanged |
 
 `kMaxShippedMsgTypeLength` is deleted (D7).
@@ -24,6 +24,7 @@ Decisions: [research.md](research.md) D1–D7.
 
 New slots are appended after the last enumerator at implement time; their values are pinned by the 101 completeness test,
 not here.
+Their message strings (`core::error_message`, and `to_string`, which returns the same view) follow the rule of the neighbouring `wire_*` slots: `wire: ` and a lower-case phrase naming the result, as `wire_unexpected_tag`'s does; the 101 completeness test pins the strings T021 writes, read from the code, not from here.
 
 | Slot | 373 | 371 | C-ABI |
 |---|---|---|---|
@@ -46,7 +47,7 @@ The full sequence is research D7's; this table summarises it.
 | 1 | build with 372 into the site's buffer | the same |
 | 2 | on `wire_field_value_truncated`: a non-coroutine helper rebuilds with 372 into `inbound_reply_slot_` (a `std::array<std::byte, Session::kSendFrameBytes>` member of `Session`), taking the peeked number and the SendingTime value as arguments | the same |
 | 3 | on `wire_field_value_truncated` again, MsgType non-empty: rebuild in the slot without 372 | none: 372 is required |
-| 4 | still failing: not sent (no callback, no outbound number); one `FIXPP_SLOG` record at most per max(HeartBtInt, 1 s), naming the type not sent and the count suppressed since the previous record (research D7, "Outbound-ceiling ending") | not sent, the same record; **one** rate state and suppressed count shared with the Reject's |
+| 4 | still failing: not sent (no callback, no outbound number); one `FIXPP_SLOG` record at most per max(HeartBtInt, 1 s), HeartBtInt being the configured value (the same window before Logon), naming the type not sent, the inbound MsgType's length (never the value) and the count suppressed since the previous record (research D7, "Outbound-ceiling ending") | not sent, the same record; **one** rate state and suppressed count shared with the Reject's |
 | tail | the site's own tail (`assign_outbound`, `fire_to_admin_`, `store_then_emit`, its own failure handling), unchanged, in the site's own coroutine, over the span that holds the frame | `toApp` (veto, throw), `assign_outbound`, `store_then_emit`; the same |
 
 Every attempt runs after `peek_outbound()` and the stamp and before the first callback and `assign_outbound()`. The

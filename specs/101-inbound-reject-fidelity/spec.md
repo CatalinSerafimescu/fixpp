@@ -176,7 +176,8 @@ message.
 3. **Given** the same, **When** any other validator reason fires (1, 5, 6, 13, 14, and 099's 4/5/14 on 1128), **Then**
    the Reject carries QuickFIX C++'s text for that reason (the FIX.4.2-and-later form), and its other fields are
    unchanged.
-4. **Given** an undefined tag inside a repeating-group instance, **Then** 373=0, 371 = the tag.
+4. **Given** an undefined tag inside a repeating-group instance, at any nesting depth, **Then** 373=0, 371 = the tag
+   (the validator's field walk is flat over every field of the frame, research D2).
 5. **Given** a hand-built table that gives a tag a type, an enum or a group role but no message, **When** a message
    carries that tag, **Then** 373=2 (the tag is defined), not 373=0.
 
@@ -249,6 +250,17 @@ BusinessMessageReject.
   which checks required tags before the field walk and walks fields in tag order (disclosed, FR-009).
 - The resend replay and the outbound store masking also read the header scan's MsgType: they read the first 35 after
   this feature; stored outbound frames have one MsgType, so their behaviour does not change (controls, research D9).
+  That is a guarantee of the send path, not an assumption: `Session::send` refuses an application payload carrying a
+  second 35 (`Session::build_send_frame_`'s "no DUPLICATE 35= field" check, `app_payload_malformed`), and every frame
+  the session builds itself carries one.
+- A validation-gate Reject changes only its 373, 371 and 58 (FR-001 to FR-003). What happens to the inbound message is
+  each gate site's ending today, unchanged: in LogonReceived and Active the message is consumed (NextNumIn advanced)
+  and the session continues (US1 scenario 1); in NotConnected and LogonSent the inbound number is not advanced, the
+  session stays in its arm and does not establish (041's validate-first gate), except that a validating FIXT session
+  whose Logon Reject names 1137, 1130 or 372 disconnects (099 FR-010). So a Logon carrying an undefined tag in
+  NotConnected draws 373=0 and the session does not establish.
+- A frame whose MsgTypes differ and whose header scan also records a fault is the 092 disposer's: in every arm the
+  fault branch (`dispose_unparseable_`) runs before the conflict check, as it does today.
 - A FIXT-only header tag (1128, say) before a later 35 on a non-FIXT session keeps that 35 in the header (373=13), as
   QuickFIX C++'s static header list does.
 - An unknown MsgType on an admin-length value (one character, e.g. `35=Z`): an unknown MsgType, 373=11.
@@ -267,9 +279,13 @@ BusinessMessageReject.
   to 373=0 with 371 = the tag, and a tag the dictionary defines but not for this message (header, trailer and body
   sets as validated today) with 373=2, 371 = the tag. "Defined" means present in the dictionary's merged field store; on
   a hand-built table, named by any population operation (research D1).
-- **FR-003** (B85 ruling): Every session Reject the inbound validation gate sends MUST carry Text(58) with QuickFIX
-  C++'s text for its reason (`SessionRejectReason_*_TEXT`, the FIX.4.2-and-later form), derived from the reason at the
-  emit site. Rejects from other sites (the 092 disposer, the sequence-reset and admin paths) keep their current text.
+- **FR-003** (B85 ruling): Every session Reject the inbound validation gate sends for a reason research D3 lists (0, 1,
+  2, 4, 5, 6, 11, 13, 14) MUST carry Text(58) with QuickFIX C++'s text for its reason (`SessionRejectReason_*_TEXT`,
+  the FIX.4.2-and-later form), derived from the reason at the emit site. The one other reason the gate can name is the
+  reason map's fail-closed default, 3, which D3 shows unreachable on the in-contract path; a Reject for it is sent
+  with no 58, not refused. Rejects from other sites (the 092 disposer, the sequence-reset and admin paths) keep their
+  current text, so a 373=0 from the disposer (a malformed tag) and one from the gate (an undefined tag) may carry
+  different 58s; that is intended.
 - **FR-004** (#657, #658): A frame's MsgType MUST be its first 35 — the third field on every frame a state arm handles —
   for every reader: header scan, Logon interpretation, state-arm dispatch, LogoutSent's reply test, validation, the
   message view, RefMsgType echo and the consume key. A frame's MsgTypes **differ** when any later 35's value differs
@@ -278,33 +294,51 @@ BusinessMessageReject.
   Active with Reject 371=35, 372 = the first 35, 45 = the first 34, and 373 by research D5's three-clause rule (14
   when any later 35 lies past the header, else 13 when one lies in it, else 14; a walk that faults answers 14), ahead
   of the 3/5 exemption, consuming the frame as its first 35; in an establishment arm with a
-  disconnect, sending nothing. This supersedes 099's FR-025/FR-029 comparison and carve-outs (research Supersessions).
+  disconnect, sending nothing. "Consuming" is 099 FR-025's: the frame's MsgSeqNum is consumed as a rejected message's,
+  keyed on the first 35, and none of the message's content is applied, whatever that MsgType (admin included), on FIXT
+  and non-FIXT sessions alike. This supersedes 099's FR-025/FR-029 comparison and carve-outs (research Supersessions).
 - **FR-006** (#657): A validation-off session in an establishment arm MUST refuse a frame whose MsgTypes differ with a
   disconnect, sending nothing. In LogonReceived, Active and LogoutSent a validation-off session MUST handle such a frame
   as the same frame with every later 35 removed would be handled, and send no Reject for the repeat. LogoutSent, on any
-  session, takes a frame as the Logout reply only when its first 35 is 5.
-- **FR-007** (#646): Every inbound-fed Reject and BusinessMessageReject builder — both `emit_session_reject_` forms,
-  `inbound_reject_leaf_`, `inbound_reject_best_effort_leaf_`, `inbound_business_reject_leaf_` at round 1 (research D7's
-  census recipe decides), and so the 092 disposer and the validation gate — MUST echo the inbound MsgType verbatim,
-  `=` included, in every message whose frame fits `Session::kSendFrameBytes`. A build that runs out of room in the
+  session, validating or not, takes a frame as the Logout reply only when its first 35 is 5, and sends no Reject for
+  the repeat (LogoutSent has no validation gate). The establishment arms are NotConnected (the acceptor before Logon)
+  and LogonSent (the initiator awaiting the reply). LogonReceived is the acceptor's state once it has replied to the
+  peer's Logon (`fsm_state::LogonReceived`); the initiator has no such state and goes from LogonSent to Active.
+- **FR-007** (#646): Every inbound-fed Reject and BusinessMessageReject builder that echoes the inbound MsgType —
+  both `emit_session_reject_` forms, `inbound_reject_leaf_`, `inbound_reject_best_effort_leaf_`,
+  `inbound_business_reject_leaf_` at round 1 (research D7's census recipe decides), and so the 092 disposer and the
+  validation gate — MUST echo the inbound MsgType verbatim, `=` included, in every message whose frame fits
+  `Session::kSendFrameBytes`. Outside this requirement: `apply_inbound_sequence_reset`'s Reject, which carries a
+  literal 372 (`4`), not the inbound MsgType, and is built in its own fixed buffer outside the helper; long CompIDs
+  that overflow that buffer drop it with no record, the CompID residual FR-009 discloses (narrowed at
+  `/speckit-analyze`, Clarifications round 2). A site the census recipe finds beyond the round-1 list stops
+  implementation for a decision (tasks T043); once admitted it is held to this requirement like the others. A build that runs out of room in the
   site's own buffer MUST be rebuilt into the session's inbound reply slot (a `kSendFrameBytes` member, used only by
   the inbound-fed reply sites), and the site MUST run its unchanged tail over that frame. Every attempt runs after the outbound-number peek and the SendingTime stamp and before the site's first
   callback (`toAdmin` for a Reject, `toApp` for the BMR) and `assign_outbound`, so nothing is re-stamped, re-numbered
   or fired twice. Text(58) is never dropped to make room. Above the ceiling (research D7):
-  - (a) **session Reject (35=3):** it MUST be sent without 372. A Reject that exceeds the ceiling even without 372 is
-    not sent: no callback, no outbound number, and the session log records it;
+  - (a) **session Reject (35=3):** it MUST be sent without 372. That Reject is a sent message: it writes no log record
+    (records come only from the not-sent endings). A Reject that exceeds the ceiling even without 372 is not sent: no
+    callback, no outbound number, the inbound frame consumed as today and the session in its state, as in (b), and the
+    session log records it (rate-bounded);
   - (b) **BusinessMessageReject (35=j):** it MUST NOT be sent without 372. It is not sent: no callback, no outbound
     number, the inbound consumed as today, the session in its state, and the session log records it (rate-bounded).
 
   Each not-sent ending of (a) and (b) writes at most one session log record per max(HeartBtInt, 1 s) on
   `effective_clock_`, the rule of 093's garbled-frame record (`Session::note_garbles_`), with HeartBtInt resolved as
-  `run_liveness_loop` resolves it. A record carries the count of not-sent messages suppressed since the previous
+  `run_liveness_loop` resolves it. That HeartBtInt is the session's configured value (`SessionConfig::heartbeat_interval`,
+  its default when unset), never one negotiated at Logon, so the window before Logon (the NotConnected and LogonSent
+  gate arms, a 092 disposer reply before establishment) is the same as after it; the 1 s floor bounds a HeartBtInt of 0.
+  A record carries the count of not-sent messages suppressed since the previous
   record. The two endings share **one** rate state and **one** suppressed count, because they have one cause: an
   inbound frame whose reply cannot fit the outbound ceiling. Each record names the message type that was not sent
   (Reject or BusinessMessageReject) and the count suppressed since the previous record (research D7,
-  "Outbound-ceiling ending").
+  "Outbound-ceiling ending"). A record is bounded: it does not echo the inbound MsgType, a peer-controlled value up to
+  the inbound limit; it records that value's length instead.
 - **FR-008**: A frame not covered by FR-001..FR-007 MUST be handled byte-identically to today, on every session kind.
   No per-message allocation is added to the inbound path, the overflowed replies of FR-007 included (`[const §XV.1]`).
+  The inbound path is every frame `on_inbound_frame` receives, whether delivered, rejected or refused; D5's walk (a
+  `length_data_carry` over the frame's span) and D3's text lookup (static literals) allocate nothing.
   `on_inbound_frame` MUST be documented as requiring each call to complete before the next on the same Session, and
   a build with assertions MUST assert when the inbound reply slot is taken while held (research D7). The paired
   benchmarks of research D8 show no slowdown above the `[const §VIII.2]` budget.
@@ -323,8 +357,11 @@ BusinessMessageReject.
   record); `on_inbound_frame`'s serialized-caller
   precondition, now stated and asserted (D7); the new LogoutSent and validation-off endings; every validation-gate
   Reject now carries 58 (FR-003); `sizeof(Session)` and `sizeof(table_view)` grow in installed headers (the inbound
-  reply slot, the defined-tag store; precedent B-544-3, B-099-18). The new validator error slots are in the error
-  contract and its completeness tests.
+  reply slot, the defined-tag store; precedent B-544-3, B-099-18); QuickFIX/J's 371=35 on its 373=11 Reject, which
+  fixpp does not send (the B85 ruling follows QuickFIX C++ and Go). Each new B-row that departs from QuickFIX names the
+  engines it matches and the ones it departs from, at the commits read (C++ `2ce8a60`, J `4969564`; Go `eff945d` only
+  where the B85 ruling note records it). The new validator error slots are in the error contract and its completeness
+  tests.
 
 ### Key Entities
 
@@ -338,11 +375,18 @@ BusinessMessageReject.
 ### Measurable Outcomes
 
 - **SC-001**: Each acceptance scenario has a witness that is RED on `fa778a8e` where today's behaviour differs and GREEN
-  on the feature head, and RED with its production change reverted.
+  on the feature head, and RED with its production change reverted. "Its production change reverted" is the cell's
+  named mutant in tasks `## Mutants`. A cell that names a symbol this feature adds (it cannot compile on `fa778a8e`)
+  or that is GREEN on `fa778a8e` by construction (a control) takes its RED from that mutant alone (tasks Execution
+  rules, `H0`).
 - **SC-002**: For a frame with one defect, the Reject frames for 373=0, 2 and 11 match `14a_BadField`'s undefined-tag
   steps (371=999, 371=5000), `14c_TagNotDefinedForMsgType` and `2q_MsgTypeNotValid` (QuickFIX C++'s acceptance
   definitions) as sets of tag=value pairs (field order not compared; session-specific values excluded) on FIX.4.2 and
-  later; 14a's malformed-tag steps (tags 0 and -1) are 092's disposer and out of scope.
+  later; 14a's malformed-tag steps (tags 0 and -1) are 092's disposer and out of scope. "Later" is the definitions
+  tasks T004 reads, `fix42`, `fix44` and `fix50sp2`; FIX.4.3, FIX 5.0 and 5.0SP1 are not compared. "Session-specific"
+  is a rule: a field whose value the session or the run supplies (BodyLength 9, CheckSum 10, MsgSeqNum 34,
+  SenderCompID 49, TargetCompID 56, SendingTime 52, and any 43, 97 or 122) is excluded; RefSeqNum(45) is compared, as
+  equal to the inbound message's own 34 in each harness.
 - **SC-003**: No existing cell changes its expected outcome except those in the manifest that research D9's recipes
   derive at the head being accepted (re-derived after the last fix commit), each with the requirement that supersedes it
   and, where a merged feature's clause is superseded, that clause by name (research Supersessions).
