@@ -38,18 +38,23 @@ read stopped by `wire_group_too_large` (D5) and a nested sub-table over its entr
 **Project Type**: C++ library: wire codec, dictionary view, C ABI.
 
 **Performance Goals**: no measurable change on the read path. D2 adds one registration-callback call per group read
-(one context-store probe (arm 1's key set); on a miss, one section-store probe; on a miss, a bit test; each
+(one context-store probe (the arm-1 store); on a miss, one section-store probe; on a miss, a bit test; each
 allocation-free, the section store probed by a non-owning query as `group_ctx_` is). The wire membership and
 delimiter lambdas cost nothing extra on a `group_ctx_` hit or a clear `group_bit`, and up to two non-owning probes
 (arm-1 record, section record) on a set-bit miss, which `consume_one` can reach inside a declared-message read too
 (research D2, "Per-occurrence records"; Gate A round 5 → hand-edit 3 (owner, 2026-11-07)); D1 adds a counter to the build loop; D3/D5 add by-value bytes; D11's scan
-runs only on a failed nested read.
+runs only on a failed nested read. The read path is measured by the bench set Constitution Check VIII names.
+
+Load path: D2 adds a member capture per group occurrence to both loaders' message expansion and a header and trailer
+section walk per (definition, enclosing path) (T031, T032), and `build_table_view` copies the records; measured by
+`bench/dictionary/xml_loader_bench` (paired) and, for the Orchestra loader, which has no bench binary, a scratch
+timing driver over `OrchestraLoader::load` run in both trees and not committed (T071).
 
 **Constraints**: zero allocation per message on the inbound path (`[const §XV.1]`); every touched wire function stays
 `noexcept`, and the new callback and accessor are `noexcept`; result structs stay trivially copyable; `group_span` stays
 within its asserted 16 bytes. `sizeof(dict_hooks)` and `sizeof(OffsetTable)` grow by one function pointer (D2); the
 arena's size and upstream do not change (073), and the census in research.md re-checks every band tuned to the old size. `table_view` and `dict_metadata_handle` grow by the section store, and
-`table_view` by arm 1's registration-only set, and both stores by their per-occurrence records, `dict_metadata_handle`
+`table_view` by the arm-1 store, and both stores by their per-occurrence records, `dict_metadata_handle`
 by the member runs beside `group_ctx_delim_pool_` (built once per dictionary; research census size-pin recipe). The
 records add nothing to `dict_hooks` or `OffsetTable`.
 
@@ -71,11 +76,11 @@ regenerates (research census). Tests in `tests/wire/`, `tests/capi/`, `tests/ses
 |---|---|---|
 | I / VI — scope, spec coverage | core tag-value FIX | PASS. #647 brings the C-ABI read in line with FIX's zero count and TC-018 (ruling note, parent repo). |
 | VII — testing | RED first, mutation-proven; `ctest -L` selection (§VII.8) | PASS. Each cell RED on `fa778a8e` where behaviour differs, each production change mutated (D9); quickstart selects by label and by `--gtest_filter` with an executed-count floor. |
-| VIII — performance | no regression | PASS by construction (Technical Context); the read path's bench set runs at verify. |
+| VIII — performance | no regression | PASS by construction (Technical Context). At verify (T071) the base-against-head run covers the rows of `bench/ci-suite.txt` this feature's code reaches: `bench/wire/parser_bench` (paired), `bench/wire/validator_bench` (paired), `bench/wire/offset_table_bench`, `bench/wire/typed_read_group_bench`, `bench/wire/fix42_group_parse_bench`, `bench/wire/validate_group_bench`, `bin/on_inbound_frame_bench`, and on the load path `bench/dictionary/xml_loader_bench` (paired), plus the scratch Orchestra load driver (Technical Context). "paired" is the row's tier-2 column in `bench/ci-suite.txt`. |
 | IX — coverage, sanitizers, static | touched modules ≥ 95/85 or per-line assessment | PASS planned: `/speckit-verify`; ASan on the cursor-shell path. |
 | **X — ABI** | §X.7: a breaking change before the first release bumps MINOR, declared BREAKING on each affected declaration, every in-repository consumer updated | **1.15 BREAKING** (D8): getters and session observers; freeze manifest and version test updated; Python consumes only the version macros (research census). |
 | XI — concurrency | — | N/A, no concurrency surface. The process-global seed hook is restored by RAII in every cell that sets it (D9). |
-| **XV.1** — no per-message heap | inbound path | PASS: no new allocation; the cursor shell keeps its arena allocation, now caught; D10 allocates less than today; D11's scan allocates nothing; the registration bitset, arm 1's registration-only set and the section-group store, with their per-occurrence records, are built with the dictionary view, never on the read path. |
+| **XV.1** — no per-message heap | inbound path | PASS: no new allocation; the cursor shell keeps its arena allocation, now caught; D10 allocates less than today; D11's scan allocates nothing; the registration bitset, the arm-1 store and the section-group store, with their per-occurrence records, are built with the dictionary view, never on the read path. |
 | XVII — gates | Gate A on public C-ABI behaviour | Gate A required: §XVII.1's public-API trigger fires. |
 
 **Initial gate: PASS.** **Post-design re-check: PASS.**
@@ -100,14 +105,15 @@ specs/100-wire-group-read-integrity/
 ### Source Code (library root)
 
 ```text
-include/fixpp/dict/table_view.hpp     # D2 context-record bitset, section-group store, registration accessor, add_section_group; arm 1 registration-only set;
+src/session/session.cpp               # D1 the "any admitted frame parses (093)" comments deleted (T048); no code change
+include/fixpp/dict/table_view.hpp     # D2 context-record bitset, section-group store, registration accessor, add_section_group; the arm-1 store;
                                       # per-occurrence records and the wire-side membership/delimiter accessors
 include/fixpp/wire/dict_hooks.hpp     # D2 group_registered_fn
 src/dictionary/xml_loader.cpp          # D2 header and trailer section-group records, per (definition, path); member capture
 src/dictionary/orchestra_loader.cpp    # D2 the same from components 1024 and 1025; member capture
 src/dictionary/dictionary_internal.hpp # D2 dict_metadata_handle section-group store; DelimCapture member stack, CapturedDelim
                                        # members, flush_group_ctx_delims writes the member runs
-src/dictionary/dictionary.cpp          # D2 build_table_view copies the store through add_section_group; fills arm 1's set from msg_group_ctx_delims
+src/dictionary/dictionary.cpp          # D2 build_table_view copies the store through add_section_group; fills the arm-1 store from msg_group_ctx_delims
 include/fixpp/wire/offset_table.hpp   # D3 is_group; D5 group_read_status; group_span: + is_group
 src/wire/offset_table.cpp             # D1 per-build budget; D2 group() order; D5/D7 statuses;
                                       # D10 cache rule; D11 nested registration, then presence
@@ -124,12 +130,22 @@ tests/wire/  tests/dictionary/        # D1, D2, D3, D5, D7, D10, D11 cells; flip
 tests/capi/                           # D4 table cells; b28-repro port; flipped Q33 and version cells
 tests/session/                        # D1 inbound ending
 tests/codegen/                        # D5 pinned accessor literal
+tests/support/                        # D9 window-cluster generator and seed guard; wire_test_hooks.hpp and
+                                      # dict_hooks_test_access.hpp seams (test-only)
+tests/fuzz/fuzz_wire_nested_slice.cpp # D2 registration stub at its dict_hooks_test_access call
+tests/*/CMakeLists.txt                # registrations of the new files and the standalone target; label 100
 specs/003-dictionary-codegen/contracts/golden/       # D5 regenerated by the emitter, never hand-edited
 specs/076-fix-latest-typed-codegen/contracts/golden/ # D5 likewise
+specs/093-inbound-frame-dispositions/contracts/      # D8 C-3 I-1, I-4, I-5 amended in place
+.specify/2b-wire.md                   # D1 "Updated (100-wire-group-read-integrity)" notes
+.specify/2i-capi.md                   # D8 §4.8 / CA-010 endings; §5.2, §5.4, §6.2 steady-state text
+spec/                                 # B&L rows, feature catalogue and coverage index (Phase 6)
+brain/                                # component pages flagged and amended (Phase 6)
 ```
 
-**Structure Decision**: existing layout; no new module or target, except new test files registered in the existing test
-binaries.
+**Structure Decision**: existing layout; no new module. New test files join the existing grouped test binaries, except
+one standalone target, `capi_group_cursor_shell_exhaustion_test` (ctest entry `capi_group_cursor_shell_exhaustion`),
+ported from `e10c8b80` (a live engine against a raw TCP peer, isolation-sensitive under `[const §VII.8]`).
 
 ## Phases (for /speckit-tasks)
 
@@ -152,30 +168,26 @@ binaries.
      group read in a context its dictionary does not declare (`TYPE_MISMATCH`, was a group through the bare fallback;
      QuickFIX `getGroup`), marked BREAKING; a B-row for a group read at its occurrence's own definition where the
      dictionary defines the count tag differently elsewhere (a cursor, was `TYPE_MISMATCH` or lost instances), marked
-     BREAKING; an L-row, disclosed by owner ruling (2026-11-07), for the custom-dictionary shapes research D2
-     "Per-occurrence records" does not fix, each named as a condition (shipped dictionaries reach none; Gate A closing
-     entry):
-     - a declared message that reaches a count tag under two parents: the second parent's `group_ctx_` members lack
-       the nested count tag;
-     - a count tag a declared message reaches at two occurrences with different definitions: its one `group_ctx_` key
-       holds the union of both member sets, so overlapping member sets merge or mis-split instances;
-     - one count tag in the body and the trailer of one declared message at one parent path (N5-1): one `group_ctx_`
-       key, members the union of both definitions, delimiter whichever capture `flush_group_ctx_delims` kept;
-     - one count tag with two definitions at one section key `(parent_path, no_tag)` (header and trailer both at the
-       root, or two header components at one level): the first walked definition wins, and in an undeclared MsgType a
-       read of the other occurrence ends `OK`/0 where `fa778a8e` answers `TYPE_MISMATCH`;
-     - the validator keeps its bare fallback on a context miss, so at these keys strict validation can disagree with a
-       read that now returns a cursor;
-     and the C++ source change of D5 (the result structs' `alloc_failed` field renamed to `status`).
+     BREAKING.
+   - an L-row, disclosed by owner ruling (2026-11-07), for the custom-dictionary shapes research D2 lists under "What
+     it does not fix" and "Not fixed, and not pre-existing in its ending", each named as the condition stated there
+     (that list is the one statement; shipped dictionaries reach none; Gate A closing entry).
+   - a B-row for D5's C++ source change: the result structs' `alloc_failed` field renamed to `status`, generated
+     headers from an older emitter included.
    - 093 contract C-3 I-1, I-4 and I-5 (the "C cursor shells are the exception" clause) amended in place, naming 100.
    - `.specify/2i-capi.md`: §4.8 / CA-010 endings; §5.2, §5.4 and §6.2's steady-state exception text for the two
      getters.
    - `brain/components/wire.md` (its L-458-1 paragraph and "Every admitted frame parses" section) and
      `brain/components/c-api.md`: name 100 as superseding them.
+   - `brain/components/inbound-message-path.md` (the "unreachable for an admitted frame" claim; R-2 "must always
+     parse"), `brain/components/session.md` (the late-parse close "no admitted frame reaches it, and the close is a
+     defence") and `brain/components/dictionary.md` (its "Open residuals" L-458-1 bullet): flagged in place as
+     superseded by 100 for a frame crafted against the seed; R-2 is kept as history.
    - `brain/components/wire.md`: flag `specs/004-wire-codec/contracts/group_view.hpp` and
      `specs/073-nested-read-arena-failloud/contracts/nested_slices_result.md` (which defines `bool alloc_failed` and
      the mode semantics) as superseded by 100, in place. Neither shipped bundle is edited.
-   - Catalogue and coverage-index entries for the delivering witnesses; C-ABI history comment.
+   - Catalogue and coverage-index entries for the delivering witnesses, and a "100 closes …" amendment at each site
+     there that cites L-051-3, L-073-1 or L-458-1; C-ABI history comment.
 7. **Verify** — targeted runs per quickstart, ASan/UBSan on the C-ABI targets, MSVC build of the touched targets,
    `/speckit-verify`.
 
@@ -183,7 +195,7 @@ binaries.
 
 | Item | Why | Simpler alternative rejected because |
 |---|---|---|
-| D2 adds a `table_view` bitset, the section store, arm 1's registration-only set (Gate A round 4), and a `dict_hooks` callback | no existing accessor answers "context key here, section group at its path, or no context key anywhere" in O(1); `group_bit` is set by both setter families; the section store, because `is_header_tag ∧ group_bit` is not a section registration | the delimiter oracle's bare fallback fabricates cross-context groups (802 at the root); exact-only makes 099's NoHops not a group |
+| D2 adds a `table_view` bitset, the section store, the arm-1 store (Gate A round 4), and a `dict_hooks` callback | no existing accessor answers "context key here, section group at its path, or no context key anywhere" in O(1); `group_bit` is set by both setter families; the section store, because `is_header_tag ∧ group_bit` is not a section registration | the delimiter oracle's bare fallback fabricates cross-context groups (802 at the root); exact-only makes 099's NoHops not a group |
 | D5 replaces `alloc_failed` with a status, changes one emitter token | typed nested readers must see a limit failure without `alloc_failed()` lying | widening `alloc_failed()`'s meaning makes a public accessor lie; two flags must be OR'd by every reader |
 | D1 changes the probe bound's unit | the per-insert cap is reached by non-crafted frames (measured) | the per-insert cap with a failing ending closes sessions on legitimate traffic, repeatedly while the seed lives |
 | D11 asks registration, then scans the instance, on a failed nested read | 073 FR-007: failure only for a present group; one ending for a present scalar | a contract note "exhausted + absent = `WIRE_LIMIT_EXCEEDED`" writes a 073 violation into the contract and depends on residual bytes |

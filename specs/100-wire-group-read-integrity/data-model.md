@@ -61,7 +61,7 @@ including `wire_group_too_large`.
 
 - **New** per-tag bitset "has a context key", beside `group_bits_`, set wherever a `group_ctx_` key is created (all
   three `_ctx` setters, `add_group_required_member_ctx` included); built once with the table.
-- **New** registration-only `(msg_type, parent_path, no_tag)` store filled from the per-message delimiter records
+- **New** arm-1 store, keyed `(msg_type, parent_path, no_tag)` and filled from the per-message delimiter records
   (`msg_group_ctx_delims_impl`), which arm 1 reads with the `group_ctx_` keys of a hand-built table (research D2). It creates
   no `group_ctx_` key. *(Added by Gate A round 4 hand-edit (owner, 2026-11-07).)* Each key holds its occurrence's
   record (below); one store answers arm 1 and the record lookup. *(Gate A round 5 → hand-edit 3 (owner, 2026-11-07).)*
