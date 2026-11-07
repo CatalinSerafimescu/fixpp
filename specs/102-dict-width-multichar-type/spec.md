@@ -88,9 +88,9 @@ the dictionary with the members read independently from the source file; for gen
    every component's name are compared with the raw file, **Then** all match.
 3. **Given** a base plus an overlay that adds definitions, **When** the merged dictionary is loaded, **Then** the same
    comparison holds and no side-table limit refuses it.
-4. **Given** a QuickFIX XML or Orchestra base of more than 65,536 components, **When** it is loaded, **Then** it loads,
-   and every component's `component_id`, `parent_component_id`, members, and each member's `component_index`, are its
-   own.
+4. **Given** a QuickFIX XML or Orchestra base of more than 65,536 components whose tables all stay below 2^32
+   entries (FR-001's condition; L-102-1), **When** it is loaded, **Then** it loads, and every component's
+   `component_id`, `parent_component_id`, members, and each member's `component_index`, are its own.
 5. **Given** an Orchestra document whose component and group ids pass 65535, **When** it is loaded, as a base or with
    an overlay naming those ids, and when the code generator reads it, **Then** it loads and every reference resolves to
    the definition it names.
@@ -132,15 +132,19 @@ accessor, or builds one through the typed builder.
 - **FR-001a** (#654): The component identity (`ComponentRef::component_id`, `parent_component_id`,
   `FieldRef::component_index`, and every loader-internal counter, map and one-based cast that carries it) is 32-bit in
   both loaders. No component count is refused. Each component's identity is exact while the component count stays
-  below 2^32 (FR-001's condition); at 2^32 the last component's one-based `parent_component_id` and
-  `component_index` would wrap to 0. An Orchestra base cannot reach it: its component ids are distinct `fixr:id_t`
+  below 2^32 (FR-001's condition). At exactly 2^32 components the last component's zero-based `component_id`
+  (`UINT32_MAX`) is still exact, but its one-based value does not fit in 32 bits: every `FieldRef` whose enclosing
+  component it is carries `component_index` 0, and every component whose parent it is carries `parent_component_id` 0
+  (both meaning "none"); if it has no members and is no component's parent, no value is wrong. Above 2^32 components
+  the zero-based `component_id`, and the XML loader's component index by name, wrap too. An Orchestra base cannot reach it: its component ids are distinct `fixr:id_t`
   values, so it holds at most 2^31 components. A QuickFIX XML base reaches it only with 2^32 distinct component names,
   which first puts the name pool past 2^32 bytes (L-102-1 (b)). Disclosed as L-102-1 (c); no guard.
 - **FR-001b** (#654): Orchestra component, group, componentRef and groupRef ids are read in the schema's `fixr:id_t`
   domain, by the loader, the overlay merge and the code generator alike. FIX tag ids stay 1..65535.
 - **FR-002** (#654): `Dictionary::component_fields` and `Dictionary::group_fields` MUST return each definition's own
   members, and `Dictionary::component` each component's own id, parent id and name offset, for every component and
-  group of every vendored base, with and without an overlay, and of a base of more than 65,536 components.
+  group of every vendored base, with and without an overlay, and of a base of more than 65,536 components whose tables
+  all stay below 2^32 entries (FR-001's condition: components, side-table entries, name-pool bytes; L-102-1 (a)–(c)).
 - **FR-003** (#654): 098's side-table fit refusal is removed; B-098-1 is amended and L-098-4 closed.
 - **FR-004** (#621): Every generated typed accessor of a MultiCharValue field (view and owning classes, top level and
   group entries) MUST return the same string type MultipleStringValue fields return, and decode any value.
@@ -170,11 +174,15 @@ accessor, or builds one through the typed builder.
   group of every vendored base.
 - **SC-002**: `exec_inst()` on `18=1 2` is RED on `fa778a8e` and GREEN on the head, on v50sp2 and vlatest; the builder
   round-trip of US2.3 likewise.
-- **SC-003**: Generating every tier with the `fa778a8e` and the head code generators and diffing the trees shows only
+- **SC-003**: Generating every tier with the base and the head code generators and diffing the trees shows only
   MultiCharValue hunks for tags {18, 286, 291, 292, 529, 546, 1308, 1384} and the `FieldRef` row-trailer change; the
-  filter is shown able to report a stray hunk; each moved pin names this feature.
-- **SC-004**: `xml_loader_bench`, paired against `fa778a8e` by Article VIII §2's local protocol, stays within +5% or
-  carries the §2 approval; the table-view footprint before and after is recorded.
+  filter is shown able to report a stray hunk; each moved pin names this feature. The base is the merge-base of the
+  candidate and its target branch at measurement time (`fa778a8e` until the D9 rebase); the deciding run is the one at
+  the integrated head, and the verify record names the base commit.
+- **SC-004**: `xml_loader_bench`, paired by Article VIII §2's local protocol against the merge-base of the candidate
+  and its target branch at measurement time (`fa778a8e` until the D9 rebase; the deciding run is the one at the
+  integrated head), stays within +5% or carries the §2 approval; the table-view footprint of that base and of the head
+  is recorded. The verify record names the base commit.
 - **SC-005**: The identity cells of US1.4 and US1.5 are RED on `fa778a8e` and GREEN on the head, for both formats.
 
 ## Assumptions
@@ -191,7 +199,9 @@ accessor, or builds one through the typed builder.
   paths.
 - The 32-bit residual, disclosed as L-102-1: (a) until B86, an unbounded base expansion can wrap a 32-bit run end;
   (b) a name pool past 2^32 bytes (4 GiB or more of names) gives wrong names, in bounds, and outlives B86;
-  (c) a QuickFIX XML base of 2^32 or more components gives wrong component identities, in bounds, with no error. It
+  (c) a QuickFIX XML base of 2^32 or more components can give wrong component identities, in bounds, with no error:
+  at exactly 2^32, the members and the children of the last component carry 0 for its one-based id
+  (`component_index`, `parent_component_id`); above 2^32, zero-based `component_id`s wrap too. It
   needs 2^32 distinct names, so (b) is reached first; an Orchestra base cannot reach it (distinct ids, at most 2^31).
   B86's budget does not bound the component count (a component with no members costs no step), and B86 adds no entry
   cap, so (c) outlives B86, as (b) does.

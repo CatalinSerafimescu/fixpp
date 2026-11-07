@@ -53,7 +53,8 @@ bounded by the NumInGroup tag domain (research Survey).
 ## Loader behaviour
 
 - No refusal is added. A QuickFIX XML or Orchestra base of any number of components loads (no count is refused); each
-  component's id, parent id, members and name are its own below 2^32 components (L-102-1 (c)).
+  component's id, parent id, members and name are its own while every table stays below 2^32 entries (FR-001's
+  condition: components, side-table entries, name-pool bytes; L-102-1 (a)–(c)).
 - Orchestra component and group ids (and their refs) are read in the schema's `id_t` domain, up to 2147483647; above it,
   or malformed, `orchestra_parse_error` as today. Field ids, `lengthId` and `numInGroup` ids stay FIX tags, 1..65535.
 - 098's side-table fit refusal is removed (research D2).

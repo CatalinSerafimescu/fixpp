@@ -137,11 +137,15 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
 - Groups: identity unchanged (bounded by the tag domain, Survey); starts and counts widen as above.
 - `FieldRef::condition_index` and `enum_table_index` stay 16-bit: never written.
 - **Enumerate the class; do not trust this list.** Every hit of
-  `git grep -nE 'uint16_t[^;,)]*(component|parent_comp_id|parent_of_|next_id)|static_cast<std::uint16_t>\((i|i \+ 1|[a-z_]+->second \+ 1|components_\.size\(\))\)' -- src/dictionary include/fixpp/dict tools/codegen tests/dictionary/dictionary_equivalence.hpp`
+  `git grep -nE 'uint16_t[^;,)]*(component|parent_comp_id|parent_of_|next_id)|static_cast<std::uint16_t>\((i|i \+ 1|[a-z_]+->second \+ 1|components_\.size\(\))\)' -- src/dictionary include/fixpp/dict tools/codegen tests bench`
   (the class stops at `,` and `)`, so a parameter list with a 16-bit tag before a widened index does not match) is
-  widened at tasks, and every clamp hit of `git grep -nE 'min<std::(size_t|uint32_t)>\([^)]*65535' -- src/dictionary`
-  is removed. Both recipes print nothing on the head, outside comments; `fa778a8e` is their known positive. The
-  surrogate-id keys are D1b's recipe, not this one.
+  classified as below, and every clamp hit of `git grep -nE 'min<std::(size_t|uint32_t)>\([^)]*65535' -- src/dictionary`
+  is removed. Every hit of the first recipe is classified **identity** (widened) or **tag** (a FIX tag or a list of
+  tags, kept 16-bit, for example `dictionary_equivalence.hpp`'s `raw_census::components` member-tag vectors) at tasks
+  and again after the last fix commit; no identity hit, in `src`, `include`, `tools` or in a test oracle, remains on
+  the head, and no 16-bit cast is applied to a component identity anywhere. The clamp recipe prints nothing on the
+  head. `fa778a8e` is the known positive of both (the first hits `lookup_test.cpp`'s parent-id comparison among the
+  loader holders). The surrogate-id keys are D1b's recipe, not this one.
 - Rationale: QuickFIX has no component count limit, so a 65,536-component file that QuickFIX loads loads here too.
   Widening costs the record sizes above and one generated-text token per `FieldRef` row (D5).
 - Alternatives:
@@ -173,7 +177,11 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
   installed header changes.
   - What it closes: a scoped enum does not convert implicitly to an integer, so a surrogate container or holder left
     `std::uint16_t` (`walked_groups.insert(id)`, a `find` on a 16-bit-keyed map) fails to compile instead of
-    narrowing silently. The class of container-width defects becomes a compile error by construction. It also forces
+    narrowing silently. A container-width defect fed directly from the parse becomes a compile error. One fed
+    through `std::to_underlying` (whose `std::uint32_t` result narrows into a 16-bit key or argument with no
+    diagnostic, there being no `-Wconversion`) or through an explicit cast does not; the cast-through mutants and the
+    alias-pair witnesses catch it (D4), and the `to_underlying` recipe below confines the underlying value to text.
+    It also forces
     the kind split at the reads that serve both kinds through one variable (`collect_header_tags`' `id_of`,
     `records_of`'s `has_id`), because a tag set and a surrogate map no longer accept the same type.
   - What it does not close: a surrogate parse that keeps the 16-bit bound while returning the wide type, and the
@@ -210,6 +218,12 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
     maps (surrogate), the tag-keyed holders (`fields_by_tag_`, `declared`, `first_seen_groups`, the header-trailer
     sets: tag) and `parent_of_` (identity, D1).
   A surrogate hit left 16-bit on the head is a defect.
+- A third recipe, the `to_underlying` sites, classified at tasks and again after the last fix commit:
+  `git grep -n 'to_underlying' -- src/dictionary/orchestra_loader.cpp src/dictionary/overlay_merge.cpp tools/codegen/fixpp-codegen/ir.cpp`.
+  Every `to_underlying` of a surrogate id converts it to text (an argument of `std::to_string`, or the id written into
+  a message or key string); one that does not is a defect. A `to_underlying` of another enum is classified "not a
+  surrogate id". `fa778a8e` has no hit, so the recipe is shown able to report by a planted
+  `walked_groups.insert(std::to_underlying(id))` in a copy, then removed.
 - Text the split makes false, restated per kind at tasks: the banner of `detail::try_parse_uint16` ("An Orchestra
   `id`, 0..65535"), the note above `parse_orchestra_id` and its banner, and in `tests/dictionary/orchestra_loader_test.cpp`
   the comment of `OrchestraFailClosed.ZeroStructuralXmlIdsAreStillAccepted` and the comment above the `lengthId`
@@ -488,7 +502,9 @@ changed.
     Orchestra base of more than 65,535 components loads with correct identities (below 2^32 components, (c));
   - new **L-102-1**: the 32-bit residual. (a) Until B86, an unbounded base expansion can wrap a 32-bit run end; B86's
     budget closes it. (b) A name pool past 2^32 bytes gives wrong names, in bounds; it outlives B86. (c) A QuickFIX XML
-    base of 2^32 or more components gives wrong component identities, in bounds, with no error. It needs 2^32 distinct
+    base of 2^32 or more components can give wrong component identities, in bounds, with no error: at exactly 2^32,
+    the members and the children of the last component carry 0 for its one-based id (`component_index`,
+    `parent_component_id`); above 2^32, zero-based `component_id`s wrap too. It needs 2^32 distinct
     names, so (b) is reached first; an Orchestra base cannot reach it (distinct ids, at most 2^31). B86's budget does
     not bound the component count (a component with no members costs no step), and B86 adds no entry cap, so (c)
     outlives B86, as (b) does (D2);
@@ -550,7 +566,7 @@ goldens); 101 adds a defined-tag store to `table_view`, filled in `Dictionary::b
 files (both loaders' `finalize`, `dictionary_internal.hpp`, `dictionary.cpp`) and the same pins. So 102 rebases (or
 merges) after both have merged, and at the integrated head, before its first labelled push:
 
-- re-runs the D1, D1b (both recipes), D2, D7 and D8 recipes, because 100's section walks and capture are new reads of
+- re-runs the D1, D1b (all three recipes), D2, D7 and D8 recipes, because 100's section walks and capture are new reads of
   the same records and ids;
 - republishes the goldens, the 078 trees and the read-tier hashes (D5) from the integrated tree, not by merging pins:
   100's nested-accessor text and 102's MultiCharValue and `Fields.hpp` text both move them;

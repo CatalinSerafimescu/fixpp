@@ -47,7 +47,7 @@ parser.
 | I / VI | dictionaries and codegen fidelity | PASS: every vendored base's members, names and identities correct; no component count is refused (QuickFIX parity); identities exact below 2^32 components (L-102-1 (c)); FIX's MultipleCharValue representable. |
 | VI §5 | Normative References | PASS: spec §Normative References. |
 | VII | RED first, mutation-proven | PASS planned (D4). |
-| VIII §2 | no regression | `xml_loader_bench` paired locally against `fa778a8e`, +5% budget, independent approval above it (D6). |
+| VIII §2 | no regression | `xml_loader_bench` paired locally against the merge-base of the candidate and its target branch at measurement time (`fa778a8e` until the D9 rebase; the deciding run is the one at the integrated head), +5% budget, independent approval above it (D6); the verify record names the base commit. |
 | IX | coverage, static | `/speckit-verify`; `tools/codegen/` is lint scope since #265. |
 | X | C ABI | C ABI unchanged: `fixpp_dict_t` opaque, `src/capi` reads `FieldRef::rule` and `type` (not widened), SWIG exposes none of the records. Article X does not govern the C++ break. |
 | XV.13 | hybrid codegen + runtime dictionary | unchanged. |
@@ -112,8 +112,10 @@ section flagging the superseded 098, 003 and 002 clauses; no merged bundle is ed
    the head, RED only under its mutant); the re-pointed side-table rows (D2; RED: refused); reader
    cell; MultiCharValue decode, group-entry, reified, builder and vlatest shape cells (RED: decode failure /
    compile-level shape check).
-2. **#654** — classify the hits of the D1, D1b (parse and holder), D2 and D7 recipes; D1 layouts and loader writes; D1b
-   id parse split and the surrogate-id type in the loader, `overlay_merge` and `ir.cpp`; the re-pointed
+2. **#654** — classify the hits of the D1, D1b (parse, holder and `to_underlying`), D2 and D7 recipes; repair the test
+   oracles the D1 recipe classifies as identity (`lookup_test.cpp`'s parent-id comparison: its expected value
+   `static_cast<std::uint16_t>(ins->component_id + 1U)` becomes `ins->component_id + 1U`, both sides `std::uint32_t`);
+   D1 layouts and loader writes; D1b id parse split and the surrogate-id type in the loader, `overlay_merge` and `ir.cpp`; the re-pointed
    `StructuralIdOutsideTheUint16RangeThrows`; D2 retirement with every surface D2 decides; D7 readers.
 3. **#621** — D3; `emit_fields` row; regenerate and republish per D5; update the census (kind and parser), the
    `validator_shape` check and the 077 sources.
@@ -134,15 +136,20 @@ section flagging the superseded 098, 003 and 002 clauses; no merged bundle is ed
 ## Open for Gate A
 
 1. *(Resolved in round 1.)* The component cap is dropped; the component identity is widened end to end, per the B86
-   owner ruling (spec Clarifications, Gate A round 1; research D1).
-2. *(Resolved in round 1.)* `std::string_view`, not a dedicated type (both reviewers; research D3).
+   owner ruling (spec Clarifications, Gate A round 1; research D1). Round 3: accepted with the qualifier (Codex
+   accepted it subject to its finding 2; US1.4, FR-002, FR-001a, L-102-1 (c), data-model and contract now state
+   FR-001's below-2^32 condition).
+2. *(Resolved in round 1.)* `std::string_view`, not a dedicated type (both reviewers; research D3). Round 3: accepted.
 3. *(Resolved in round 1.)* D2's retirement stands, with its premise restated as a condition and the 32-bit run
-   obligation handed to B86 (research D2).
+   obligation handed to B86 (research D2). Round 3: the side-table retirement is accepted.
 4. *(Resolved in round 2.)* D1b's source scope outside the loaders is accepted (both reviewers); its proof plan takes
-   the alias-pair rule, rows (a)–(g), the holder recipe and per-helper mutants (research D1b, D4).
-5. New in rewrite 2, for round 3 to check: the distinct surrogate-id type (research D1b), adopted from the judge's
+   the alias-pair rule, rows (a)–(g), the holder recipe and per-helper mutants (research D1b, D4). Round 3: Codex
+   accepted the alias-pair witnesses and the three mutant classes; the judge did not reopen it.
+5. *(Resolved in round 3.)* The distinct surrogate-id type (research D1b), adopted in rewrite 2 from the judge's
    optional suggestion. It stays internal (no installed header names a surrogate id) and turns the container-width
-   class into a compile error; the alias-pair witnesses stay.
+   class fed from the parse into a compile error (not one fed through `std::to_underlying` or an explicit cast, which
+   the alias-pair witnesses and the `to_underlying` recipe cover; research D1b); the alias-pair witnesses stay.
+   Round 3: accepted (Codex), with the `to_underlying` narrowing stated (judge N-1).
 
 ## Gate A
 
@@ -215,3 +222,31 @@ Where source contradicted or extended the judge:
   cycle" (re-derive: `git grep -n 'reference cycle' -- src`).
 - 2c's new notes shift line-anchored 2c citations outside 2c (`field_traits.hpp`, 003's data-model); D8 adds the
   shift audit and the recipe.
+
+### Round 3 → owner ruling (2026-11-07): apply fixes, accept
+
+Inputs: Codex round 3 (P1=0 P2=2 P3=1) and the Opus judgement (P1=0 P2=1 P3=3). The owner ruled "apply fixes,
+accept", with no further review round; the judge's exact replacements were applied. Review files, in
+`research/reviews/`:
+
+- `codex_102-dict-width-multichar-type_gate_a_review.md`, `opus_102-dict-width-multichar-type_gate_a_adversarial_review.md`;
+- `codex_102-dict-width-multichar-type_gate_a_2_review.md`, `opus_102-dict-width-multichar-type_gate_a_2_adversarial_review.md`;
+- `codex_102-dict-width-multichar-type_gate_a_3_review.md`, `opus_102-dict-width-multichar-type_gate_a_3_adversarial_review.md`.
+
+| Finding | Judged | Disposition |
+|---|---|---|
+| Codex 1, SC-003 / SC-004 / Constitution row VIII §2 comparand | P2 | SC-003, SC-004 and row VIII §2 name the merge-base of the candidate and its target branch at measurement time (`fa778a8e` until the D9 rebase), the deciding run at the integrated head, and the base commit in the verify record; matches D5, D6, D9 and Article VIII §2 / §2a. |
+| Codex 2, the 2^32 qualifier on US1.4 and FR-002; FR-001a's boundary | P3 | US1.4 and FR-002 qualified by FR-001's condition (components, side-table entries, name-pool bytes; L-102-1 (a)–(c)); FR-001a's boundary restated (at exactly 2^32 the one-based references to the last component read 0; above it the zero-based ids wrap); L-102-1 (c) in spec §Out of Scope and D8 restated; data-model §Loader behaviour and contract §2 widened from (c) to (a)–(c). |
+| Codex 3, `lookup_test.cpp`'s 16-bit parent-id oracle; D1's census scope | P3 | D1's pathspec widened to `tests bench`; the empty-output claim replaced by an identity / tag classification; plan phase 2 repairs the oracle (implementation item; `tests/` not edited in Gate A). |
+| Judge N-1, "compile error by construction" | P3 | D1b's "What it closes" narrowed to a defect fed directly from the parse; a third D1b recipe classifies every `to_underlying` site; D9 and plan phase 2 name all three D1b recipes; Open item 5 restated. |
+| Open item 5, the enum-class surrogate id | accepted | Accepted, with the `to_underlying` narrowing stated (N-1). |
+| D8 and D9 | accepted | D8's closure and C-ABI conclusion accepted; D9's merge order and integrated-head re-runs accepted, with finding 1 removing the text that contradicted them. |
+
+Where the applied text departs from the judge's:
+
+- D1's lead-in said the first recipe's hits are "widened at tasks", which would contradict the new identity / tag
+  classification; it now says "classified as below".
+- Plan phase 2 also states the oracle's concrete operand change, so the implementation item carries the judge's fix.
+- Open item 4 had no round-3 verdict in the ruling; Codex round 3 accepted it and the judge did not reopen it.
+
+**Gate A converged by owner ruling (2026-11-07). No open item remains.**
