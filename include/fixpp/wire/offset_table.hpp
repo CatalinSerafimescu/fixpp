@@ -81,12 +81,12 @@ struct nested_slices_result {
 };
 static_assert(std::is_trivially_copyable_v<nested_slices_result>);
 
-// 073 T002: INTERNAL status-bearing form of `OffsetTable::group_slices`
-// (research.md §D2 mode (b), FR-002 originate-at-failure). Only
-// `nested_group_slices` consumes this — NOT a public return type. The public
-// `group_slices(no_tag)` stays a span-returning one-line wrapper so every
-// top-level caller (C-ABI top-level group getter, `MessageView::group<>()`)
-// is unaffected (L-073-1, deferred).
+// 073 T002: status-bearing form of `OffsetTable::group_slices`, returned by
+// `group_slices_status` (research.md §D2 mode (b), FR-002 originate-at-failure).
+// The public `group_slices(no_tag)` stays a span-returning one-line wrapper that
+// drops `status` and `is_group`, so a reader that must tell a failed, an empty and
+// a not-a-group read apart calls `group_slices_status` (100, research D3). The
+// wrapper's callers: `command grep -rnE '\.group_slices\(' include src tools`.
 // 100: `status` and `is_group` as in `nested_slices_result` above
 // (data-model `group_slices_result`).
 struct group_slices_result {
@@ -297,9 +297,9 @@ public:
     [[nodiscard]] std::span<group_slice const> group_slices(std::uint16_t no_tag) const noexcept
         [[clang::lifetimebound]];
 
-    // 073 T002/T003: INTERNAL status-bearing form of group_slices() above
+    // 073 T002/T003: status-bearing form of group_slices() above
     // (data-model.md §"Internal group_slices_result"; research.md §D2 mode
-    // (b), FR-002). Only `nested_group_slices` consumes this. Sets
+    // (b), FR-002); see `group_slices_result` for who reads it. Sets
     // `status = group_read_status::alloc_failed` in the `catch (std::bad_alloc)`
     // degrade path; `ok` on a warm cache hit or a genuine (possibly count-0)
     // materialized span. The public `group_slices()` above is unchanged and is a one-line

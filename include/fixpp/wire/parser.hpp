@@ -139,8 +139,7 @@ public:
           unk_items_{mr} {
         // Gate B PR#176 r1 root cause #1: seed the ROOT group_context ({msg_type,
         // path=[]}) HERE, unconditionally, rather than lazily only in group<>()
-        // below. Every root group_slices(N) caller (C-ABI fixpp_msg_get_group,
-        // direct offsets().group_slices(), and the typed group<>() path) must
+        // below. Every root group read, whichever entry point makes it, must
         // agree on context so the no_tag-keyed cache (offset_table.cpp
         // group_index_) can never be poisoned by an unseeded call that runs
         // before the typed path seeds it (table_ is fully built by this point —

@@ -650,9 +650,9 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
 // no second place to keep in agreement. See the `group_span` comment in
 // offset_table.hpp and B&L B-389-1.
 
-// 073 T003: public span wrapper — UNCHANGED signature, one-line delegation.
-// Every top-level caller (C-ABI top-level group getter, MessageView::group<>())
-// keeps compiling and behaving identically (L-073-1, deferred).
+// 073 T003: public span wrapper — UNCHANGED signature, one-line delegation that
+// drops the status (see `group_slices_result` in offset_table.hpp for the reader
+// that needs it, and the grep that lists this wrapper's callers).
 std::span<group_slice const> OffsetTable::group_slices(std::uint16_t no_tag) const noexcept {
     return group_slices_status(no_tag).slices;
 }
