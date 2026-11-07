@@ -2,7 +2,8 @@
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-11-07
-**Re-ticked**: 2026-11-07, after Gate A rewrite 1 (the Normative References section now exists)
+**Re-ticked**: 2026-11-07, after Gate A rewrite 1 (the Normative References section now exists); again after Gate A
+rewrite 2 (FR-001a's 2^32 qualifier and L-102-1 (c); no new clarification marker)
 **Feature**: [spec.md](../spec.md)
 
 ## Content Quality
@@ -20,7 +21,7 @@
 - [x] Success criteria are technology-agnostic — stated as observable read results
 - [x] All acceptance scenarios are defined
 - [x] Edge cases are identified
-- [x] Scope is clearly bounded — residuals named in Out of Scope (L-102-1, the tag width, L-069-1)
+- [x] Scope is clearly bounded — residuals named in Out of Scope (L-102-1 (a)–(c), the tag width, L-069-1)
 - [x] Dependencies and assumptions identified — B86 inherits the 32-bit run obligation
 
 ## Feature Readiness

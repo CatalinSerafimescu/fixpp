@@ -68,7 +68,8 @@ recipe, not a list or a count, is authoritative.
   literal `, 0 },` for `_reserved`. `accessor_resolution_census_test.cpp`'s Fields parser requires nine numbers per
   row; `validator_shape_test.cpp` reads `_reserved` of a generated v44 row.
 - 098's overlay check: `kSideTableMax`, `side_table_fits`, and the refusal arms in `overlay_merge.cpp` (one per format)
-  refuse only when the base fits and the merged result does not; FIX50SP2's base already does not fit, so the check can
+  refuse only when the base fits and the merged result does not (the fits are carried in each walk result and in
+  `guard_outcome`, and `def_info::entries` exists only to feed them); FIX50SP2's base already does not fit, so the check can
   never fire there. Overlay caps bound new components and groups (`kMaxNewComponents`, `kMaxNewGroups`).
 - Public: the headers are installed; the C ABI is opaque (`fixpp_dict_t`; `src/capi` reads `FieldRef` members by
   name, `rule` and `type`, neither of them widened, re-derive with `grep -n 'fr\.' src/capi/*.cpp`); SWIG does not
@@ -77,7 +78,9 @@ recipe, not a list or a count, is authoritative.
   exclusions, its side-against-side `check` lambdas (16-bit parameters, so a 32-bit member would compare modulo 65,536,
   which is the wrap signature itself), and its `_reserved` comparisons and registry entries; the wrap probe in
   `overlay_equivalence_test.cpp`; the side-table refusal rows in `overlay_refusal_test.cpp`; readers in
-  `lookup_test.cpp` (a `static_cast<std::uint16_t>(… + 1U)` comparison), `xml_loader_test.cpp`, `round_trip_test.cpp`.
+  `lookup_test.cpp` (a `static_cast<std::uint16_t>(… + 1U)` comparison), `xml_loader_test.cpp`, `round_trip_test.cpp`;
+  `orchestra_loader_test.cpp`'s `OrchestraFailClosed.StructuralIdOutsideTheUint16RangeThrows`, which pins the 16-bit
+  surrogate parse (D1b).
 
 ### Codegen (#621)
 
@@ -157,26 +160,72 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
 
 - Split the parse by kind. Ids that are FIX tags (`<fixr:field id>`, `fieldRef`, `lengthId`, `numInGroup`) keep the
   16-bit tag parse: it is the library's tag type, and tag width is out of scope. Ids that are surrogate keys
-  (`<fixr:component>`, `<fixr:group>`, `componentRef`, `groupRef`) are parsed to `std::uint32_t` and admitted up to the
+  (`<fixr:component>`, `<fixr:group>`, `componentRef`, `groupRef`) are parsed to 32 bits and admitted up to the
   schema's `maxInclusive` (2147483647); above it, or malformed, they are `orchestra_parse_error` as today. That bound is
   the format's own rule, so the refusal above it is not a cap. 0 stays admitted (Survey).
+- **A distinct surrogate-id type** (Gate A round 2): every surrogate key and holder is an
+  `enum class` over `std::uint32_t` (for example `orch_ref_id`), not a bare integer, and the surrogate parse returns
+  it. Two definitions, both internal: one in `src/dictionary/dictionary_internal.hpp` (`detail`), used by the
+  Orchestra loader and `overlay_merge.cpp`; one in `ir.cpp`'s anonymous namespace, because the code generator includes
+  only installed `fixpp/dict` headers and its Orchestra walkers share no code with the loader by design (the banner
+  above `OrchestraComponentIndex`). No installed header names a surrogate id (re-derive:
+  `git grep -n -E 'xml_id|by_id|surrogate' -- include` prints nothing, while the same pattern over `src` hits), so no
+  installed header changes.
+  - What it closes: a scoped enum does not convert implicitly to an integer, so a surrogate container or holder left
+    `std::uint16_t` (`walked_groups.insert(id)`, a `find` on a 16-bit-keyed map) fails to compile instead of
+    narrowing silently. The class of container-width defects becomes a compile error by construction. It also forces
+    the kind split at the reads that serve both kinds through one variable (`collect_header_tags`' `id_of`,
+    `records_of`'s `has_id`), because a tag set and a surrogate map no longer accept the same type.
+  - What it does not close: a surrogate parse that keeps the 16-bit bound while returning the wide type, and the
+    overlay keys (`orch_id_key_of`, `orch_child_key`), which turn the id into a string. Those stay parse-width
+    mutants (D4).
+  - What it costs: the holders the recipes below classify as surrogate change type in either design; the enum adds
+    its two definitions and a `std::to_underlying` wherever a surrogate id becomes text (re-derive:
+    `git grep -n -E 'to_string\((xml_)?id\)' -- src/dictionary/orchestra_loader.cpp src/dictionary/overlay_merge.cpp tools/codegen/fixpp-codegen/ir.cpp`).
+    `std::hash` and the built-in comparisons are defined for scoped enums, so the `unordered_map` and `map` keys
+    need nothing else.
 - Every site that parses a surrogate id moves together. Most of them skip silently on a parse miss (`continue`,
   `std::nullopt`, no insert), so a site left 16-bit becomes a silent divergence, not an error:
   - the loader: `collect_components`, `collect_groups`, `expand_field_list`'s componentRef and groupRef arms, the
     parent-map pass's tolerant read, the `component_index_by_xml_id_` and `group_by_xml_id_` keys, and
-    `collect_header_tags`' `id_of`, which reads all three kinds through one width and is split by kind;
-  - `overlay_merge.cpp`: `orch_id_key_of`, `orch_child_key`, and the Orchestra graph build's `component_by_id`,
-    `group_by_id` and `records_of`'s `has_id` (a `fieldRef`'s and a `numInGroup`'s id stay tag-parsed);
-  - the code generator's `ir.cpp`: `try_parse_orchestra_uint16` at component and group sites, and the
-    `OrchestraComponentIndex` and `OrchestraGroupIndex` keys. A miss there is "defensive only, continue" and would
-    silently drop a component's members from the IR;
+    `collect_header_tags`, whose `id_of` reads the fieldRef, componentRef and groupRef ids and each group's
+    `numInGroup` id through one width, and whose `walked_groups` set holds group ids; both are split by kind;
+  - `overlay_merge.cpp`: `orch_id_key_of` (one helper for the field, component and group definition arms; the field
+    arm stays tag-parsed), `orch_child_key` (fieldRef, componentRef and groupRef; the fieldRef arm stays tag-parsed),
+    and the Orchestra graph build's `component_by_id`, `group_by_id` and `records_of`'s `has_id` (one read for all
+    three ref kinds; a `fieldRef`'s and a `numInGroup`'s id stay tag-parsed, and so does `declared`);
+  - the code generator's `ir.cpp`: `try_parse_orchestra_uint16` at the component and group sites of
+    `build_orchestra_component_index`, `build_orchestra_group_index`, `collect_orchestra_tags`,
+    `collect_orchestra_group_tags` and `walk_orchestra_level`, and the `OrchestraComponentIndex` and
+    `OrchestraGroupIndex` `by_id` keys. A miss there is "defensive only, continue": the index builders then drop the
+    component from `by_name` too, and the walkers drop its members from the IR;
   - the equivalence fixture's Orchestra raw reader. The independent oracles that already key by `std::uint32_t`
-    (`required_scope_oracle.hpp`) need no change.
-- Enumerate: every hit of
-  `git grep -nE 'try_parse_uint16|parse_orchestra_id|try_parse_orchestra_uint16|by_xml_id_|by_id\b|attribute\("id"\)\.as_u?int' -- src/dictionary tools/codegen tests/dictionary tests/codegen`
-  is classified tag or surrogate at tasks. A surrogate hit left 16-bit on the head is a defect.
-- Alternative: keep the 16-bit surrogate parse as a "format rule". Rejected: the schema says otherwise, and with the
-  index widened it would be the one place a 65,537th Orchestra component is refused, which is the cap B86 rejected.
+    (`required_scope_oracle.hpp`) or `unsigned` (`header_tags_test.cpp`'s `orchestra_header_walk`) need no change.
+- Enumerate, in two recipes, each hit classified tag or surrogate at tasks and again after the last fix commit:
+  - parse sites: `git grep -nE 'try_parse_uint16|parse_orchestra_id|try_parse_orchestra_uint16|by_xml_id_|by_id\b|attribute\("id"\)\.as_u?int' -- src/dictionary tools/codegen tests/dictionary tests/codegen`;
+  - holders, which the parse recipe cannot see (the GCC and Clang warning set in `cmake/Helpers.cmake` has no
+    `-Wconversion`, so a 32-bit id stored into a 16-bit holder narrows silently):
+    `git grep -nE '(unordered_)?(set|map)<std::uint16_t|std::uint16_t (id|xml_id|child_xml_id|no_tag)\b' -- src/dictionary/orchestra_loader.cpp src/dictionary/overlay_merge.cpp tools/codegen/fixpp-codegen/ir.cpp`.
+    `fa778a8e` is its known positive: it hits `walked_groups`, `component_by_id`, `group_by_id` and both `by_id`
+    maps (surrogate), the tag-keyed holders (`fields_by_tag_`, `declared`, `first_seen_groups`, the header-trailer
+    sets: tag) and `parent_of_` (identity, D1).
+  A surrogate hit left 16-bit on the head is a defect.
+- Text the split makes false, restated per kind at tasks: the banner of `detail::try_parse_uint16` ("An Orchestra
+  `id`, 0..65535"), the note above `parse_orchestra_id` and its banner, and in `tests/dictionary/orchestra_loader_test.cpp`
+  the comment of `OrchestraFailClosed.ZeroStructuralXmlIdsAreStillAccepted` and the comment above the `lengthId`
+  zero-tag cases, which describe a parse shared by tags and surrogate ids.
+- An existing row that pins the 16-bit surrogate parse goes RED on the head and is re-pointed, not deleted:
+  `OrchestraFailClosed.StructuralIdOutsideTheUint16RangeThrows` refuses a component id of `65536`; it becomes the
+  `id_t` range row (`-1` and `2147483648` refused, renamed), and `65536` joins the loads (D4's id-domain pair).
+  Re-derive the class: `git grep -n -E 'Uint16Range|"65536"' -- tests/dictionary tests/codegen`.
+- Alternatives:
+  - keep the 16-bit surrogate parse as a "format rule". Rejected: the schema says otherwise, and with the index
+    widened it would be the one place a 65,537th Orchestra component is refused, which is the cap B86 rejected;
+  - bare `std::uint32_t` for the surrogate ids, with the alias-pair witnesses (D4) as the only guard on container
+    width. Rejected in round 2 for the distinct type above: it stays internal, it touches the holders that change in
+    either design plus the text sites, and it turns the container-width class from a silent wrong answer, caught only
+    by a fixture that happens to declare an alias pair, into a compile error. The alias-pair witnesses stay either way,
+    as the test of the domain.
 
 ### D2 — Retire 098's side-table fit check (FR-003)
 
@@ -189,22 +238,65 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
 - On the overlay path today the step counter is armed at no more than the base's total plus `kExpansionBudget`, so a
   32-bit fit check could fire only on a base already within that budget of 2^32 entries. It would be error handling for
   an input no host can load, with no witness short of a test seam; it is not kept.
-- `kSideTableMax`, `side_table_fits`, the two refusal arms and their `overlay_limit_error` texts are removed. The
-  refusal rows in `overlay_refusal_test.cpp` that exercise the side-table arm are deleted, each named in the tasks.
-  Nothing replaces them: after D1 no 16-bit value is left for an overlay to push.
+- `kSideTableMax`, `side_table_fits`, the two refusal arms and their `overlay_limit_error` texts are removed, and so is
+  what only they read: `guard_outcome`'s `base_components_fit`, `base_groups_fit`, `merged_components_fit` and
+  `merged_groups_fit`, each walk result's `components_fit` and `groups_fit` and the `comp_counts` / `group_counts`
+  vectors that feed them (both formats), `def_info::entries` and its accumulation in `visit_definition` (it feeds only
+  those vectors), and `refusal_origin::side_table` with its case in `overlay_test_support.hpp`'s `origin_name`. Where
+  the fit check stood in `overlay_merge.cpp`, a header comment names 102 D2 as superseding 098 R-5 step 6's
+  side-table fit (D8).
+- Every surface that depends on the retired check is enumerated by recipe, not by this list, and each hit is
+  classified at tasks and again after the last fix commit:
+  - `git grep -n -E '(base|merged)_(components|groups)_fit|components_fit|groups_fit|expect_base_fits|refusal_origin::side_table|kSideTableMax|side_table_fits' -- src tests include`;
+  - `git grep -n -i 'side.\?table' -- tests ':!tests/fuzz/corpus'` (comments, row names, messages);
+  - `git ls-files -- tests/fuzz/corpus | grep -i 'side.\?table'` (seed file names, which a content grep cannot see).
+  `fa778a8e` is the known positive of each.
+- Per surface:
+  - **the side-table refusal rows** (`OverlayRefusalW3XmlSideTable` and `OverlayRefusalW3OrchSideTable`: the start
+    push, the new component's count and the low-tagged group): re-pointed, not deleted. Each keeps its base, whose
+    side tables fit, and its overlay, which pushes a start or a count past 65535; it now asserts that the overlay loads
+    at the prediction (`expect_loaded_at_prediction`) and that the definition whose start or count passed 65535
+    returns its own members, and is renamed for that. On `fa778a8e` each is RED (refused, side-table origin). They are
+    the witness of the retirement itself: the side-table arm restored alone turns them RED (D4). Their completeness
+    entry ("side-table fit") is renamed with them;
+  - **their just-inside controls** (the `…JustInsideTheTable…` rows of both formats): deleted, with their names in
+    the completeness entry. They bound a limit that no longer exists, and the re-pointed rows load past it;
+  - **the guard-order rows** `OverlayRefusalW3XmlOrder.BudgetIsReportedBeforeTheSideTableFit` and its Orchestra
+    twin, with their completeness entry ("guard order: budget before the side-table fit"): deleted. Each probes the
+    input its format's `DoublingBombRefusedByTheBudget` row probes (read the two bodies), and those rows already pin
+    the budget origin;
+  - **`expect_base_fits`**, the precondition of the doubling and empty-chain rows in both formats: removed. It kept
+    step 6's fit live behind the budget for 098's M-12; no fit check remains to precede or follow the budget;
+  - **the fuzz seeds** `seed_x_w3_BudgetIsReportedBeforeTheSideTableFit` and `seed_o_w3_…`: deleted when `cmp` shows
+    each byte-identical to its format's `…DoublingBombRefusedByTheBudget` seed (it does at `fa778a8e`), because a
+    rename would keep a duplicate corpus input; a seed that differs is renamed with no side-table claim and kept.
+    `tests/fuzz/CMakeLists.txt` consumes the corpus by directory, so no file names them;
+  - **comments and messages** (the `fuzz_dict_overlay.cpp` invariant list and its `accept_*_refusal` comments, the
+    `overlay_refusal_test.cpp` section banners, the wrap probe's "side table fits" line in
+    `overlay_equivalence_test.cpp`): restated without the check, each named in the tasks from the second recipe.
+- Nothing replaces the check: after D1 no 16-bit value is left for an overlay to push.
 - **Text for the orchestrator to add to `phases/phase-4/issue-batches.md` §B86** (102 does not edit that file):
-  > - **From 102 (B84), Gate A round 1, 2026-11-07.** 102 widens the component and group side-table starts and
+  > - **From 102 (B84), Gate A rounds 1 and 2, 2026-11-07.** 102 widens the component and group side-table starts and
   >   counts, the component name offset and the whole component identity to 32 bits, and retires 098's side-table fit
   >   check. The ruling note's refusal order "cycle, budget, depth, side-table fit" therefore becomes **cycle, budget,
   >   depth**. B86 owns the 32-bit obligation in its place: its absolute expansion budget must imply that every
   >   expansion-derived run end (each side table, and each per-message `MsgFieldsRun`) is at most `UINT32_MAX`. It does
   >   by construction (a walk step emits at most one entry, and the budget is far below 2^32); B86's shipped text states
-  >   that derivation, and B86 amends L-102-1 (a) when it lands. The name-pool leg, L-102-1 (b) (4 GiB or more of
-  >   names), outlives B86, per the ruling's "no byte caps".
+  >   that derivation, and B86 amends L-102-1 (a) when it lands. The budget does not bound the component count (an
+  >   empty definition costs no step); the component-identity boundary is L-102-1 (c), not B86's obligation. The
+  >   name-pool leg, L-102-1 (b) (4 GiB or more of names), outlives B86, per the ruling's "no byte caps".
 - The name pool: a pool past 2^32 bytes needs 4 GiB or more of host-chosen names; B86 rejected byte caps, so this
   residual outlives B86. Its effect is a wrong name, not an out-of-bounds read: a wrapped offset is smaller than the
   true one and a truncated length is shorter, so `dict_metadata_handle::name_at` stays inside the pool. Disclosed as
   L-102-1 (b); no guard.
+- The component identity: one-based values wrap at 2^32 components (FR-001a). B86's unit is one step per child a walk
+  visits (`visit_definition` adds a step per child record, and a component's total is its children's), so a component
+  with no members costs 0 steps and the budget does not bound the component count. Counting one step per definition
+  would be an entry cap, which the ruling rejects ("No byte, element-depth or entry caps"). A QuickFIX XML base needs
+  2^32 distinct non-empty component names (`collect_components` refuses an empty or repeated name), each interned
+  into the name pool without deduplication (`intern_name_in_pool`), so its pool is past 2^32 bytes, L-102-1 (b),
+  before its component count reaches 2^32; an Orchestra base holds at most 2^31 components (distinct ids in
+  0..2147483647, `collect_components` refuses a repeated id). Disclosed as L-102-1 (c); no guard.
 
 ### D3 — MultiCharValue is a string kind (FR-004, FR-005)
 
@@ -238,9 +330,60 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
     components' ids and members. The RED observation on `fa778a8e` is whichever 098 ending fires (the side-table
     refusal or the wrap), recorded as observed.
   - Orchestra overlay over a surrogate id past 65535: an overlay that adds a field to a base component whose id passes
-    65535 merges it into that component (RED with a 16-bit `overlay_merge` id parse).
+    65535 merges it into that component (RED with a 16-bit `orch_id_key_of` component arm).
   - Codegen: an IR build (`build_ir`) over a small Orchestra fixture whose component and group ids pass 65535 gives the
-    message the component's members and the group's order (RED with a 16-bit `ir.cpp` id parse).
+    message the component's members and the group's order (RED with a 16-bit `walk_orchestra_level` or index-builder
+    parse).
+- #654, surrogate ids: **the alias-pair rule.** Every fixture of the Orchestra identity cell and of rows (a)–(f) below
+  declares, for each surrogate-keyed container its row reaches, a high id H > 65535 **and** its alias H − 65536, both
+  referenced and with distinct members, and asserts that each member of the pair resolves to its own definition. A key
+  narrowed to 16 bits keeps one of the two and loses or swaps the other, so the assertion fails whichever it keeps; one
+  high id alone cannot show it. The containers: in the loader, `component_index_by_xml_id_`, `group_by_xml_id_` and
+  `collect_header_tags`' `walked_groups`; in the overlay graph build, `component_by_id` and `group_by_id`; in `ir.cpp`,
+  the two `by_id` maps. The holder recipe (D1b) re-derives the list.
+- #654, surrogate ids, one row per independent output. Rows (a)–(f) are each RED on `fa778a8e`, where the first id
+  past 65535 is an `orchestra_parse_error`; row (g) is a characterization pin, GREEN on `fa778a8e` and on the head,
+  RED only under its mutant:
+  - **(a) Loader, parent map.** In the Orchestra identity cell, a nested child reached through a `componentRef` whose
+    id passes 65535, and its alias child under another parent: each child's `parent_component_id` equals its own
+    parent's `component_id` + 1.
+  - **(b) Loader, header store.** An Orchestra fixture whose header component (`fixr:component id="1024"`, named
+    `StandardHeader`) references a high-id component holding a fieldRef T and a high-id group with NumInGroup N and a
+    member M, and both aliases, each with its own tags (T', N', M'), all reachable from the header. `walked_groups`
+    is a set, so a narrowed key skips the second group of the pair; each group must contribute its own tags. Assert
+    `is_header_tag` of T, N, M, T', N' and M' on the table view, and set equality with `header_tags_test.cpp`'s
+    `orchestra_header_walk` oracle, which keys by `unsigned`.
+  - **(c) Codegen, header classification.** `populate_orchestra_projection`, through `build_ir`, over row (b)'s
+    fixture: `ir.header_trailer_tags` ⊇ {T, N, M, T', N', M'} and `ir.group_tags` ∋ N, N'. The fixture's header
+    component carries both the id 1024 and the name `StandardHeader`: the loader finds the header by id and
+    `populate_orchestra_projection` by name. No message structure references the header component, so N and N' are
+    reachable only from `StandardHeader`: `walk_orchestra_level` walks a message's full structure, header included,
+    and `group_tags` is the union of every message's `group_order` with the header-trailer groups, so a message that
+    reached the header would put N into `group_tags` without `collect_orchestra_group_tags`, and that helper's mutant
+    could not go RED. Re-check this by reading `walk_orchestra_level` and `populate_orchestra_projection` at tasks.
+    The row sits beside the existing IR row.
+  - **(d) Overlay, definition key, group arm.** Besides the component row above, an Orchestra overlay that adds a
+    field to a base `<fixr:group id=H>` whose alias group also exists: it loads, `group_fields` of H's NumInGroup tag
+    contains the field, and the alias group's members are unchanged.
+  - **(e) Overlay, child key.** An Orchestra overlay that restates, in place, a base message's high-id `componentRef`
+    and `groupRef`: once identically, once with `presence="required"` (098 promotes any matched element whose base
+    presence is not Required, and refuses only a relaxation). It loads, the promotion applies, and each member occurs
+    once at its level (the ref was matched, not appended).
+  - **(f) Overlay, graph build.** Rows (d) and (e) reference the high-id component and group from a message, and
+    assert `expect_loaded_at_prediction` (counter equals prediction, through the seam). One more row closes a cycle
+    through a high-id `componentRef` and asserts the pre-walk's "component reference cycle" message naming the
+    high-id components, as `OverlayRefusalW3OrchWalk.CycleClosingThroughABaseComponent` does for small ids. With a
+    narrowed `has_id` or map, the pre-walk misses the cycle and the build counter or the loader ends the load instead.
+  - **(g) The kind split does not leak into tags.** A `<fixr:field id>`, a `fieldRef`, a `numInGroup` and a
+    `lengthId` above 65535 are each refused by the tag parse's range check, asserted by that refusal's own message for
+    the kind ("missing/invalid <…> id attribute" at `fa778a8e`), not by the exception type alone. Each id is chosen so
+    that a 16-bit truncation of it gives a path that loads: 65536 + T for a ref to a declared tag T (a declared
+    NumInGroup tag for `numInGroup`, the declared Length field for `lengthId`), and 65536 + U for a `<fixr:field id>`,
+    with U an otherwise valid, undeclared tag. A truncation to 0 would instead meet another refusal of the same type
+    (`parse_orchestra_field_tag`'s zero message, "not declared", the length pair's declaration check), and the row
+    would stay GREEN with the mutant live. Read each tag site's post-parse checks at tasks to confirm the chosen ids
+    reach a load. Where an existing `OrchestraFailClosed` row already pins a kind this way, it is named instead of
+    duplicated.
 - #654, readers (D7): an internal-access cell gives a handle a record whose start is near `UINT32_MAX`, a small count
   and a short table; every run reader returns an empty span.
 - #621:
@@ -253,14 +396,37 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
     accessor census covers v42, v44, v50sp2 and vt11 against `mapped_kind`; vlatest is outside it);
   - no lifetime cells after a move or after source destruction: the emitted text is the String kind's, shared with
     every MultipleStringValue field, and its lifetime contract is not new to 102.
-- Mutation: each change reverted alone turns its own cell RED, in particular:
+- Mutation: each change reverted alone turns its own cell RED. The list is per independent helper, not per
+  translation unit; each mutant is applied alone, from a copy, and its named row must go RED:
   - the side-table widening → the equivalence fixture at `RgstDistInstGrp`;
   - the name-offset widening → the name-offset oracle;
   - the XML component counter or index → the XML identity cell;
   - Orchestra's index, with the id parse kept wide → the Orchestra identity cell;
-  - each surrogate-id site alone (loader, `overlay_merge`, `ir.cpp`) → its own cell;
+  - the side-table arm restored (D2) → the re-pointed side-table rows;
   - one reader's `std::size_t` arithmetic → the reader cell;
   - `kind_of` → the decode cells and the census.
+  - **Parse width**: one helper keeps the 16-bit bound while everything else is wide (where a helper is split by kind,
+    its component arm and its group arm are separate mutants):
+    - the loader's surrogate parse at `collect_components`, `collect_groups` and `expand_field_list`'s ref arms →
+      the Orchestra identity cell (loud: `orchestra_parse_error`);
+    - the parent-map pass's tolerant read → row (a);
+    - `collect_header_tags`' `id_of`, component arm and group arm → row (b);
+    - `build_orchestra_component_index` and `build_orchestra_group_index` → the IR row and row (c);
+    - `collect_orchestra_tags` → row (c)'s `header_trailer_tags` half; `collect_orchestra_group_tags` → row (c)'s
+      `group_tags` half;
+    - `walk_orchestra_level` → the IR row;
+    - `orch_id_key_of`, component arm → the component overlay row; group arm → row (d);
+    - `orch_child_key` → row (e);
+    - the graph build's definition fills (`component_by_id`, `group_by_id`) and `records_of`'s `has_id` → row (f).
+  - **Container width**: the parse stays wide and one surrogate container's key is narrowed to `std::uint16_t`. With
+    the distinct surrogate-id type (D1b) this must fail to compile; each container's mutant is attempted and its
+    failing build output recorded (an attempt that compiles is a defect in the type's use). Each container's alias
+    pair is shown able to fail by a second mutant that narrows through an explicit cast at that container's insert and
+    lookup → that container's alias-pair assertion RED.
+  - **Kind collapse**: one tag-parse helper's range check is raised to the surrogate bound while it still truncates
+    into `std::uint16_t` → the row (g) pins of the kinds it serves RED (each such id truncates to a tag that loads, and
+    the pin asserts the range message, row (g)). (Swapping in the surrogate parser instead would
+    fail to compile against the tag holders, which proves nothing about row (g).)
 
 ### D5 — Republishing and the cross-revision differential (SC-003)
 
@@ -276,7 +442,8 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
 - The read-tier hashes that move: the four `Fields.hpp`, plus v50sp2 `Messages.hpp` and `Reify.hpp`. Each moved pin
   carries a 102 banner in `read_tier_byte_diff_test.cmake` stating the re-derivation below, in the 091/099 form.
 - **Differential, the SC-003 instrument.** Generate every tier (v42, v44, v50sp2, vt11, vlatest; read tier, builder tier
-  and `_dispatch/`) with the `fa778a8e` codegen and with the head codegen, and diff the trees recursively. The head is
+  and `_dispatch/`) with the base codegen and with the head codegen, and diff the trees recursively. The base is
+  `fa778a8e` while 102 sits on it, and the integrated merge-base once 102 is rebased after 100 and 101 (D9). The head is
   accepted only if:
   - every `Fields.hpp` equals the base's after the row-trailer transform (each row's `, 0 },` becomes ` },`), and
     nothing else changes in it;
@@ -291,7 +458,7 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
 - The records grow (`ComponentRef` from 12 to 20 bytes, `GroupRef` from 12 to 16; `FieldRef` stays 16); loader work is
   unchanged.
 - Timing: `bench/dictionary/xml_loader_bench` (a `paired` row in `bench/ci-suite.txt`), run locally paired against the
-  merge-base `fa778a8e` under Article VIII §2: release build of both trees, A-B-A-B, min-per-tree, the +5% budget; above
+  merge-base at measurement time (`fa778a8e` until the D9 rebase) under Article VIII §2: release build of both trees, A-B-A-B, min-per-tree, the +5% budget; above
   +5%, the measurement, a rationale and independent approval in the PR, per §2. A crashed or empty run is a failure.
   The bench's fixed `monotonic_buffer_resource` already falls back to its upstream on FIX50SP2 (the bench's own
   comment); larger records move more of the load onto that fallback, in both trees' terms, and the paired run measures
@@ -318,22 +485,86 @@ changed.
   - new **B-102-1**: the `ComponentRef`, `GroupRef` and `FieldRef` layouts, with the contract's migration;
   - new **B-102-2**: the MultiCharValue accessor and builder types;
   - new **B-102-3**: an Orchestra document whose component or group ids pass 65535 now loads; a QuickFIX XML or
-    Orchestra base of more than 65,535 components loads with correct identities;
+    Orchestra base of more than 65,535 components loads with correct identities (below 2^32 components, (c));
   - new **L-102-1**: the 32-bit residual. (a) Until B86, an unbounded base expansion can wrap a 32-bit run end; B86's
-    budget closes it. (b) A name pool past 2^32 bytes gives wrong names, in bounds; it outlives B86;
+    budget closes it. (b) A name pool past 2^32 bytes gives wrong names, in bounds; it outlives B86. (c) A QuickFIX XML
+    base of 2^32 or more components gives wrong component identities, in bounds, with no error. It needs 2^32 distinct
+    names, so (b) is reached first; an Orchestra base cannot reach it (distinct ids, at most 2^31). B86's budget does
+    not bound the component count (a component with no members costs no step), and B86 adds no entry cap, so (c)
+    outlives B86, as (b) does (D2);
   - L-098-3 gains a pointer to L-102-1 (a).
-- Amended in place with an `Updated (102-dict-width-multichar-type)` note:
-  - `.specify/2c-codegen.md` §4.1 and §4.2: the layouts, `alignof`, the `_reserved` discipline that no longer applies
-    to `FieldRef` and `ComponentRef`, and the lost `FIXPP_DICT_COMPONENTREF_RESERVED_USED` slot;
-  - `specs/002-dictionary-xml-loader/contracts/field_ref.hpp`, `component_ref.hpp`, `group_ref.hpp` and its
-    `data-model.md`: a superseded-by note, not a rewrite;
-  - `brain/components/dictionary.md`: 102 listed against 2c §4.1/§4.2, and the superseded 002 extracts flagged;
-  - the three installed headers' banners and `_reserved` paragraphs;
-  - `include/fixpp/dict/error.hpp` (`overlay_limit_error`'s "side table stop fitting 16 bits" cause),
-    `include/fixpp/dict/xml_loader.hpp` (`load_with_overlay`'s cause list) and `orchestra_loader.hpp` (which refers to
-    it);
-  - the comment above `parse_orchestra_field_tag` (D1b's split; the schema's `positiveInteger`).
+- **Live texts, amended** (they describe current behaviour, so they are not history):
+  - `.specify/2c-codegen.md`, each with an `Updated (102-dict-width-multichar-type)` note: §4.1 and §4.2 (the
+    layouts, `alignof`, the `_reserved` discipline that no longer applies to `FieldRef` and `ComponentRef`, and the
+    lost `FIXPP_DICT_COMPONENTREF_RESERVED_USED` slot); §1's "Field representation types" bullet and §4.1.3's
+    `field_traits.hpp` listing comment (both name a MultiCharValue / MultiStringValue split; after D3 both kinds
+    decode through `field_traits<std::string_view>`);
+  - the installed `include/fixpp/dict/field_traits.hpp`: its comment on the remaining specialisations names "the
+    MultiCharValue / MultiStringValue split", false after D3; amended, naming 102 D3;
+  - the three installed record headers' banners and `_reserved` paragraphs;
+  - `include/fixpp/dict/error.hpp` (`overlay_limit_error`'s "side table stop fitting 16 bits" cause) and
+    `include/fixpp/dict/xml_loader.hpp`'s `load_with_overlay` comment, both of its sentences: the guard order
+    ("… the expansion budget and side-table fit, then …", which breaks across a line) and the cause list.
+    `orchestra_loader.hpp` refers to `XmlLoader::load_with_overlay`'s list and has no side-table text of its own, so
+    it does not change;
+  - `src/dictionary/overlay_merge.hpp`'s guard-order banner and its comments on `guard_outcome` and `guard`, and in
+    `overlay_merge.cpp` a header comment where `side_table_fits` stood, naming 102 D2 as superseding 098 R-5 step 6's
+    side-table fit (CLAUDE.md, a pointer that names the new decision);
+  - the comment above `parse_orchestra_field_tag` (D1b's split; the schema's `positiveInteger`), and the helper
+    comments D1b lists.
+- **Line-anchored citations.** The notes inserted into `.specify/2c-codegen.md` move its lines, and line-anchored
+  citations of 2c exist outside it (`field_traits.hpp`'s own comments cite `[2c §4.1.3:…]` with a line range; 003's
+  data-model cites one too). The amended `field_traits.hpp` comment replaces its line anchor with a section or symbol
+  pointer, and the records phase runs `tools/check_line_citations.py --shift-audit` over 102's range and resolves
+  every citation it reports. Re-derive the set: `git grep -n -E '\[2c §[0-9.]+:[0-9]' -- ':!specs/102-*'`.
+- **Merged bundles, flagged, not edited.** Merged bundles are history (101's research §Supersessions; 100's plan;
+  098's records recipe excludes `':!specs/'`), and no live B&L row cites the clauses below as current (B-098-1 states
+  the behaviour itself and is amended above). `brain/components/dictionary.md` gains a 102 section in the form of its
+  099 section's "Records this supersedes, flagged here and not edited":
+  - ⚠️ **Superseded by 102 D2:** `specs/098-dialect-overlay/contracts/witnesses.md` (M-12's "the side-table fit stays"
+    and its side-table-origin RED, M-18, the N-3 side-table rows and the budget-before-fit order row),
+    `specs/098-dialect-overlay/tasks.md` (T019's side-table rows and order row, T037, T038's M-18) and
+    `specs/098-dialect-overlay/contracts/surface.md` (the `load_with_overlay` comment's side-table fit and cause);
+  - ⚠️ **Superseded by 102 D3:** `specs/003-dictionary-codegen/data-model.md` Entity 11's shape, `spec.md`'s AC-FT1 and
+    `contracts/field_traits.hpp`, where each names the MultiCharValue / MultiStringValue split;
+  - ⚠️ **Superseded by 102 D1:** `specs/002-dictionary-xml-loader/contracts/field_ref.hpp`, `component_ref.hpp`,
+    `group_ref.hpp` and `data-model.md` (the 16-bit layouts and `_reserved`); and 102 listed against 2c §4.1/§4.2.
+  The 002 extracts get no in-place note.
+- **Enumerate; do not trust the list above.** Every hit of
+  `git grep -n -i -E 'side.?table (fit|refusal|check)|side.?tables? *$|stop fitting|kSideTableMax|side_table_fits|MultiStringValue split|MultiCharValue( ?[/-] ?|, )MultiStringValue' -- ':!specs/102-*'`
+  is classified as **amended** (live text), **flagged** (a merged bundle, through the brain section), **kept** (still
+  true: the `field_data_type` enum listings, `table_view`'s `multi_value` comment) or **history** (draft and history
+  files), at tasks and again after the last fix commit. `fa778a8e` is its known positive: it hits every clause
+  above, `error.hpp`, both `xml_loader.hpp` sentences and the `overlay_merge.hpp` comments. The
+  `side.?tables? *$` alternative is not in the round-2 judgement's recipe; it was added because the guard-order
+  sentence in `xml_loader.hpp` breaks the line between "side-table" and "fit", which no single-line alternative of
+  that recipe matches. The `field_traits.hpp` comment is caught by the "MultiStringValue split" alternative.
 - Catalogue / coverage index: the D-007 and D-010 rows gain 102.
+
+### D9 — Integration after 100 and 101 (row 7's merge order)
+
+Row 7 merges 100, then 101, then 102. 100 changes `table_view` (a section-group store and an arm-1 store), the
+loaders' member capture (`DelimCapture` in `dictionary_internal.hpp`) and adds section walks to both loaders, and
+regenerates every nested accessor's text (its pinned literal in `accessor_resolution_census_test.cpp`, and the
+goldens); 101 adds a defined-tag store to `table_view`, filled in `Dictionary::build_table_view`. 102 edits the same
+files (both loaders' `finalize`, `dictionary_internal.hpp`, `dictionary.cpp`) and the same pins. So 102 rebases (or
+merges) after both have merged, and at the integrated head, before its first labelled push:
+
+- re-runs the D1, D1b (both recipes), D2, D7 and D8 recipes, because 100's section walks and capture are new reads of
+  the same records and ids;
+- republishes the goldens, the 078 trees and the read-tier hashes (D5) from the integrated tree, not by merging pins:
+  100's nested-accessor text and 102's MultiCharValue and `Fields.hpp` text both move them;
+- re-runs D5's differential with the **integrated merge-base**, not `fa778a8e`, as the base tree; otherwise 100's
+  nested-accessor change shows up as stray hunks;
+- re-runs the size pins, re-derived with
+  `git grep -n -E 'sizeof\((fixpp::)?(dict::)?(ComponentRef|GroupRef|FieldRef|table_view|dict_metadata_handle)\b' -- include src tests bench`
+  (the record headers' `static_assert`s, `ref_shape_test.cpp`, the footprint bench), and D6's paired bench and
+  footprint against the merge-base at measurement time;
+- re-runs the accessor census (`accessor_resolution_census_test.cpp`), which then carries 100's nested literal and
+  102's `mapped_kind` and Fields-row parser change.
+RED evidence stays on `fa778a8e` for the cells that 100 and 101 do not touch; a cell whose code path 100 or 101 changes
+(a loader walk, a `table_view` read, a generated accessor) records its RED on the integrated merge-base, and the
+verify record says which base each RED was shown on.
 
 ## Re-derivation recipes
 
@@ -342,5 +573,6 @@ changed.
   compare with 65535.
 - Component name offsets: follow the name pool's interning order (field names, enum values and descriptions, message
   types and names, then component names).
-- Component identity, surrogate ids, readers: the `git grep` recipes in D1, D1b and D7.
+- Component identity, surrogate ids and their holders, readers: the `git grep` recipes in D1, D1b and D7.
+- The retired check's dependents and the amendment set: the recipes in D2 and D8.
 - Scratch scripts used on 2026-11-07 are not part of the repository.

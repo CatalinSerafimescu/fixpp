@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-07
 
-**Status**: Draft (Gate A rewrite 1)
+**Status**: Draft (Gate A rewrite 2)
 
 **Input**: REMAINING-WORK ★ V1.0 FUNCTIONAL TRACK row 7, dictionary and codegen half: batch B84 (fixpp#654, L-098-4)
 and batch B67 (fixpp#621, L-621-1). Two places where the library returns the wrong answer for a valid dictionary or
@@ -58,6 +58,8 @@ a valid value, with no error.
   rejected cap in another place. FIX tags stay 1..65535 (research D1b).
 - Q: The 32-bit values that remain (side tables, message runs, the name pool)? → A: Not guarded. The run class is
   bounded by B86's budget, which 102 hands the obligation to; the name pool past 2^32 bytes is disclosed (L-102-1).
+  The component identity at 2^32 components is disclosed too (L-102-1 (c), added in Gate A round 2): B86 adds no
+  entry cap, and its budget does not count a component with no members.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -129,7 +131,11 @@ accessor, or builds one through the typed builder.
   No value is clamped. A 32-bit value is exact while its table stays below 2^32 entries (L-102-1).
 - **FR-001a** (#654): The component identity (`ComponentRef::component_id`, `parent_component_id`,
   `FieldRef::component_index`, and every loader-internal counter, map and one-based cast that carries it) is 32-bit in
-  both loaders. No component count is refused.
+  both loaders. No component count is refused. Each component's identity is exact while the component count stays
+  below 2^32 (FR-001's condition); at 2^32 the last component's one-based `parent_component_id` and
+  `component_index` would wrap to 0. An Orchestra base cannot reach it: its component ids are distinct `fixr:id_t`
+  values, so it holds at most 2^31 components. A QuickFIX XML base reaches it only with 2^32 distinct component names,
+  which first puts the name pool past 2^32 bytes (L-102-1 (b)). Disclosed as L-102-1 (c); no guard.
 - **FR-001b** (#654): Orchestra component, group, componentRef and groupRef ids are read in the schema's `fixr:id_t`
   domain, by the loader, the overlay merge and the code generator alike. FIX tag ids stay 1..65535.
 - **FR-002** (#654): `Dictionary::component_fields` and `Dictionary::group_fields` MUST return each definition's own
@@ -184,7 +190,11 @@ accessor, or builds one through the typed builder.
 - B86 (#650, base loader input caps and the component-cycle guard), which follows this feature on the same `finalize`
   paths.
 - The 32-bit residual, disclosed as L-102-1: (a) until B86, an unbounded base expansion can wrap a 32-bit run end;
-  (b) a name pool past 2^32 bytes (4 GiB or more of names) gives wrong names, in bounds, and outlives B86.
+  (b) a name pool past 2^32 bytes (4 GiB or more of names) gives wrong names, in bounds, and outlives B86;
+  (c) a QuickFIX XML base of 2^32 or more components gives wrong component identities, in bounds, with no error. It
+  needs 2^32 distinct names, so (b) is reached first; an Orchestra base cannot reach it (distinct ids, at most 2^31).
+  B86's budget does not bound the component count (a component with no members costs no step), and B86 adds no entry
+  cap, so (c) outlives B86, as (b) does.
 - The library's 16-bit FIX tag type (an Orchestra field id above 65535 stays refused).
 - An enum value-domain check for MultiCharValue fields (L-069-1, fixpp#637).
 
@@ -207,4 +217,6 @@ accessor, or builds one through the typed builder.
 - **Catalogue rows**: D-007 (the loaders), D-010 (components), D-011 (the Orchestra reader), W-009 (field data types).
 - **Constitution**: `[const §I]`; `[const §VI.5]`; `[const §VII]`; `[const §VIII.2]`; `[const §X.1]` (C ABI
   unchanged); `[const §XV.13]`; `[const §XVII.1]`. The whole check is in `plan.md`.
-- **Design documents**: `[2c §4.1]`, `[2c §4.2]` (the record layouts this feature amends; research D8).
+- **Design documents**: `[2c §4.1]`, `[2c §4.2]` (the record layouts this feature amends), `[2c §1]` and
+  `[2c §4.1.3]` (the field representation types and the `field_traits` listing, whose MultiCharValue / MultiStringValue
+  split this feature removes); research D8.

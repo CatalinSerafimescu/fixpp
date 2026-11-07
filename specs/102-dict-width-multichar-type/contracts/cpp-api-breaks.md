@@ -41,7 +41,8 @@ initializers.
 ## 2. Loads that now succeed (B-102-3)
 
 - A QuickFIX XML or Orchestra base of more than 65,535 components loads, each component with its own id, parent id,
-  members and name. Before, identities past that point wrapped silently.
+  members and name. Before, identities past that point wrapped silently. Identities are exact below 2^32 components
+  (L-102-1 (c)).
 - An Orchestra document whose component or group ids pass 65535 loads; before, it was `orchestra_parse_error`. Ids above
   2147483647 (the schema's `maxInclusive`) are still refused.
 
