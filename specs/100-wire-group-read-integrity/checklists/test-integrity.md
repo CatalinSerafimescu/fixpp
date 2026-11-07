@@ -55,7 +55,7 @@ Gate A closed by owner ruling (2026-11-07), and tasks.md does not reopen the des
 
 - [x] CHK021 Is the lane condition stated per cell rather than per rig? A reviewer should be able to tell which cells assert their exhaustion arm on MSVC debug (the null-upstream rigs) and which do not (the Q33 rig, T014). [Clarity, Spec §SC-001, research D9 "Lanes", tasks T072] — PASS: T072 names per task which cells take which arm on MSVC debug; T073 records lanes per cell.
 - [x] CHK022 On MSVC debug, US2.1's typed cell (T017) asserts success on the forwarding arm. Is it stated which lane carries US2.1's failure witness, and that one lane is enough? [Coverage, tasks T017, Spec §US2.1] — SPEC-FIXED: T017 states that US2.1's failure witness lives on the null-upstream (Linux) lanes, and why one kind of lane suffices; M-24 kills it.
-- [x] CHK023 `[const §VII.8]` counts process-global state as isolation-sensitive. Is the decision to keep the seed-setting cells in grouped binaries stated in the bundle with its condition (RAII restore, the `HostileInputHardening.*` precedent), or does it exist only as the record tasks T020 writes? [Consistency, const §VII.8, tasks T020, research D9 "#645"] — PASS: T020 states the decision with its condition (RAII restore, the `HostileInputHardening.*` precedent, orchestrator ruling) in tasks.md, part of the bundle; research D9 "#645".
+- [x] CHK023 `[const §VII.8]` counts process-global state as isolation-sensitive. Is the decision to keep the seed-setting cells in grouped binaries stated in the bundle with its condition (RAII restore, the `HostileInputHardening.*` precedent), or does it exist only as the record tasks T020 writes? [Consistency, const §VII.8, tasks T020, research D9 "#645"] — SPEC-FIXED (second `/speckit-analyze` remediation, orchestrator ruling; replaces the earlier PASS on the grouped-binary decision): the question is removed, not argued. The new seed-setting cells run in the standalone entry `wire_seed_hook_tests`, isolation-sensitive under `[const §VII.8]` (plan Structure Decision; tasks T020 records the ruling with its re-derivation recipe). The pre-existing `HostileInputHardening.*` cells, T009's rewrite among them, stay in `wire_pure_tests` with T007's RAII guard.
 - [x] CHK024 Is the seed guard's restore stated to hold when a cell ends early (a fatal assertion, an exception) and under `--gtest_shuffle` or `--gtest_repeat`? [Edge Case, tasks T007] — SPEC-FIXED: T007 (b): the guard is a local object of each cell, restoring on `ASSERT_*` returns and exceptions, and safe under shuffle and repeat.
 - [x] CHK025 Is T014's standalone registration justified by `[const §VII.8]`'s isolation-sensitive list (a live engine, raw TCP)? Is the way its ctest timeout is set stated? [Completeness, plan "Project Structure", tasks T014] — SPEC-FIXED: T014's `TIMEOUT` is the ported hunk's, re-derived as T018's; the plan's Structure Decision gives the §VII.8 justification.
 - [x] CHK026 T018 sizes the session entry's `TIMEOUT` from local readings, adding CI's sanitizer lanes "once a CI reading exists". Is the acceptance rule stated for the period before that reading? [Measurability, tasks T018] — SPEC-FIXED: T018: before a CI reading the `TIMEOUT` is at least twice the slowest local sanitizer reading, then re-sized from CI.
@@ -79,8 +79,8 @@ Gate A closed by owner ruling (2026-11-07), and tasks.md does not reopen the des
 
 | Disposition | Count |
 |---|---|
-| PASS | 9 |
-| SPEC-FIXED | 21 |
+| PASS | 8 |
+| SPEC-FIXED | 22 |
 | DD-DECIDED | 0 |
 | WAIVED | 0 |
 | **Total** | 30 |
@@ -102,6 +102,7 @@ Gate A closed by owner ruling (2026-11-07), and tasks.md does not reopen the des
 - CHK019 — T014: claim cells assert `FIXPP_ERR_OK` exactly on every call before the loop end, and the controls on every call.
 - CHK020 — quickstart and the Execution rules "Selection" add `--no-tests=error` to every label run; the narrow-run floor is already stated.
 - CHK022 — T017 states that US2.1's failure witness lives on the null-upstream (Linux) lanes, and why one kind of lane suffices; M-24 kills it.
+- CHK023 — orchestrator ruling (second `/speckit-analyze` remediation): the new seed-setting cells run in the standalone entry `wire_seed_hook_tests` (plan Structure Decision, tasks T020); the pre-existing `HostileInputHardening.*` cells stay in `wire_pure_tests`.
 - CHK024 — T007 (b): the guard is a local object of each cell, restoring on `ASSERT_*` returns and exceptions, and safe under shuffle and repeat.
 - CHK025 — T014's `TIMEOUT` is the ported hunk's, re-derived as T018's; the plan's Structure Decision gives the §VII.8 justification.
 - CHK026 — T018: before a CI reading the `TIMEOUT` is at least twice the slowest local sanitizer reading, then re-sized from CI.

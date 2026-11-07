@@ -85,3 +85,12 @@ File each against fixpp with labels from `gh label list`, and name the issue in 
   sub-table inherits the root's `Config`; it changes the caps nested reads run under, and D1's budget can still fail a
   sub-build. Recipe: research D7's witness (i), a test-built `MessageView` with raised root caps over an instance
   larger than the default entry cap that carries a nested group.
+- **Wire: `nested_group_slices`' cache and same-slice reuse are keyed without `ctx`** (orchestrator ruling, second
+  `/speckit-analyze` remediation; research D11, "Condition"). `nested_group_slices`' cache and same-slice reuse are
+  keyed without ctx, so the 6-arg public overload reading one slice under two contexts answers with the first context's
+  registration. The rows are keyed `(slice_data, hooks.opaque_dict(), nested_no_tag)`, and a sub-table's stored
+  context is seeded once at its build (`ctx` is ignored on a warm hit), while research D11's failure branch asks the
+  call's own `ctx`. 100 rests on every in-repository caller passing, for a given slice, the group context of the
+  cursor or view whose instance it is (re-derive by D11's recipe). Candidate fixes: add the context to the row key, or check on a
+  warm hit that the call's `ctx` equals the sub-table's stored one. Recipe to reach it: call the six-argument overload
+  twice over one instance slice with one bundle and two contexts that register the nested count tag differently.

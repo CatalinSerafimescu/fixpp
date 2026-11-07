@@ -30,7 +30,8 @@ is present and registered`, because `group()` asks registration before anything 
 
 ## `nested_slices_result`
 
-Same three fields. A failure is one of (a) no sub-table, or its cache row did not fit → `alloc_failed`; (c) the
+Same three fields. A failure is one of (a) no sub-table, or its cache row did not fit (when the call builds the
+sub-table; on reuse, served uncached, D10) → `alloc_failed`; (c) the
 sub-build failed with `out_of_memory` → `alloc_failed`, or with `wire_offset_table_full` → `limit_exceeded`; (b) the
 sub-table's `group_slices_status().status`. When one fires, `resolve_nested_result` keeps it only for a tag that is
 registered in the call's `ctx` (asked through the caller's `hooks`) **and** present in the instance slice, in that

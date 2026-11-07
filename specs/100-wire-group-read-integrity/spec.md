@@ -265,13 +265,13 @@ parse it; separately parse frames of many distinct, non-consecutive tags that to
 
 - A zero-count group whose count tag is **also** used as a scalar in another context of the same message: group-ness is
   decided per context (message type and parent path) by the registration predicate.
-- A declared count of `0` followed by fields that **are** members of the group (a lying count): registration makes it
+- A declared count of `0` followed by fields that **are** members of the group: registration makes it
   a group, and the extent walk, unchanged, consumes at most the declared count of instances, as today for any declared
   count (`consume_group_extent`'s zero-count arm, B-004-7; research D2 step 6). So it reads zero instances: `OK`/0 on
   both getters, an empty, not-failed typed view. Flagging the mismatch is the validator's job.
 - A registered count field whose value has no leading digit (`""`, `abc`, `-1`): the extent walk reads its declared
-  count as 0 (`parse_bounded_u32` stops at the first non-digit), so it reads as the case above, or as a lying count
-  when the next field is not a member: `OK`/0 on both getters. The value never decides group-ness (FR-001).
+  count as 0 (`parse_bounded_u32` stops at the first non-digit), so it reads as the case above, or, when the next field
+  is not a member, as a count read as 0 followed by a non-member: `OK`/0 on both getters. The value never decides group-ness (FR-001).
 - A nested zero-count group that is the last field of its instance (`NestedGroupEmptyGroupCountLastField`): unchanged,
   `OK` with count 0.
 - A count field that is the last entry of the table it is read from occurs only inside an instance slice: the root
@@ -296,7 +296,9 @@ parse it; separately parse frames of many distinct, non-consecutive tags that to
   field's position, the field that follows it and whether an allocation succeeded do not decide it. The read's
   context is the root table's stored context `(msg_type, [])` for a top-level read, and for a nested read the context
   the `nested_group_slices` call carries (the C getter passes its cursor's `group_ctx`, a generated accessor its
-  `ctx_`), which `build_nested_subview` seeds into the sub-table (research D11). One exception, decided in the
+  `ctx_`), which `build_nested_subview` seeds into the sub-table (research D11). That holds while one (slice, bundle)
+  is read under one `ctx`: the nested cache and the same-slice reuse are keyed without `ctx` (research D11,
+  "Condition", with its recipe over the six-argument overload's callers; a follow-up issue). One exception, decided in the
   Clarifications: a nested read whose instance sub-table build failed for a reason other than an allocation or a wire
   limit (073's malformed-data scope) does not establish a group, and reads as FR-003 says.
 - **FR-002** (#647): A registered group count tag whose instances are not on the wire (declared `0`, a count field last
@@ -375,8 +377,10 @@ parse it; separately parse frames of many distinct, non-consecutive tags that to
   `fa778a8e` where today's behaviour differs (US1.1, US1.2, US1.4's nested scalar mid-instance and last in instance,
   US1.7, US1.8 and US1.9 with `n ≥ 1`, US1.11's twins of those cells, US2.1, US2.2, US2.3, US2.5, US2.6, US3.1, US3.2's
   per-insert-cap frame, research D9's section-arm cells (i-a), (ii-0), (ii-0h) and (ii-0-O), and research D9's divergent-definition cells other than their controls;
-  FR-011's cells (research D9 "D5", the top level, and "D7" construction (i)); research D9's "D10" and "D11" cells;
-  row 0b's null-`g` cell; and the flat cell for a registered count of 0 followed by member fields (Edge Cases)) and
+  FR-011's cells (research D9 "D5", the top level, and "D7" construction (i)); research D9's "D10" cells other than its
+  flat scalar control, and its "D11" cells; row 0b's null-`g` cell; the flat cell for a registered count of 0 followed
+  by member fields (Edge Cases); and the flat cells for a registered count whose value has no leading digit, followed by
+  member fields and by a non-member (Edge Cases)) and
   GREEN on the feature head. D7 construction (ii)'s precondition (the sub-build fails) cannot hold before D1 lands, so its RED comes from its named mutant
   (research D9 "D7"; tasks Stop rule). The control
   cells are GREEN on both trees. They include US1.3, which today's nested getter already answers `OK`/0 through its
