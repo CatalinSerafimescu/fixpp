@@ -70,8 +70,12 @@ Each is witnessed RED on `fa778a8e` (research D9).
   `OK`/0.
 - Nested getter, row 0b: a null `g` with both out-parameters non-null returned `NULL_HANDLE` without writing them.
 - Nested getter, row 3, a present tag in an instance whose sub-table build failed for another reason (073's
-  malformed-data degradation): was `OK`/0. Whether a sub-table built over bytes the root already parsed, with the same
-  bundle, can reach this arm is determined in the RED phase; if it cannot, the arm is defensive and says so.
+  malformed-data degradation): was `OK`/0. Constructible: a custom dictionary whose group delimiter is a Data tag whose
+  Length is the previous instance's last member, so the sub-table built over one instance splits the Data value the
+  root read by its count (witness `GroupGetters100.Row3_NestedSubBuildMalformed_TypeMismatch`). *(The sentence read
+  "Whether a sub-table built over bytes the root already parsed, with the same bundle, can reach this arm is determined
+  in the RED phase; if it cannot, the arm is defensive and says so": superseded by the RED phase's construction, T012,
+  orchestrator ruling 2026-11-07.)*
 - Both getters, row 5, a registered group whose occurrence the dictionary defines differently from the definition its
   bare store holds for that count tag (custom dictionaries only; research D2, "Per-occurrence records"): a header or
   trailer group, or a group nested in one, read in a message type the dictionary does not declare, and a count tag a

@@ -129,7 +129,8 @@ the flat getter returns `TYPE_MISMATCH`; and a scalar that is the last field of 
   nested getter today checks `g` together with the out-pointers and returns before writing them, and changes to match.
 - Q: A nested read whose instance sub-table build failed for a reason other than an allocation or a wire limit (073's
   malformed-data degradation)? → A: Not failed (073's scope) and not established as a group: `TYPE_MISMATCH` for a
-  present tag (contract row 3). Its reachability is determined in the RED phase.
+  present tag (contract row 3). Its reachability is determined in the RED phase. *(Determined at T012: constructible,
+  witness `GroupGetters100.Row3_NestedSubBuildMalformed_TypeMismatch`; orchestrator ruling, 2026-11-07.)*
 
 ### Session 2026-11-07 (Gate A round 2)
 
