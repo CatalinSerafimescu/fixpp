@@ -129,8 +129,11 @@ TEST(ReplySlotRelease101, RejectAssignFails_ReleasesTheSlot) {
         },
         session_test_access::send_frame_bytes());
     ASSERT_TRUE(site);
+    clear_slot(*rig);
     const Ending101 e = rig->deliver(rig->frame(long_msg_type(*site + 1), 2));
     EXPECT_TRUE(e.of_type("3").empty()) << describe(e);
+    EXPECT_TRUE(slot_used(*rig)) << "the Reject was rebuilt in the slot before the assign";
+    EXPECT_EQ(e.after, fsm_state::Disconnected) << "the failed assign's ending";
     EXPECT_FALSE(session_test_access::inbound_reply_slot_held(rig->session()));
 }
 

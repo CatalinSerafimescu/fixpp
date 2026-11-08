@@ -570,6 +570,14 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell7_AssignOutboundFails_Disconnected) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Cell 8 — GENUINE build_reject build-FAILURE → fail-closed (no silent-success)
 //
+// 101-inbound-reject-fidelity D7 (FR-007) supersedes this cell's "no frame" ending: a Reject
+// that overflows its site's buffer for any reason, long CompIDs included, is rebuilt in the
+// session's inbound reply slot up to the outbound ceiling and sent; the session still ends
+// Disconnected, so the Logon is still refused (renamed from
+// Cell8_BuildRejectOverflow_FailClosed_NoFrame). A Reject over the ceiling itself is
+// W101-40 (iv)'s cell in tests/session/test_101_echo.cpp. The paragraph below is this cell's
+// history before 101.
+//
 // An oversized sender_comp_id (500 chars) overflows the guard's 512B build buffer,
 // so build_reject returns unexpected. The guard's `if (rj_r)` skips the emit and the
 // unconditional `record_state_transition_(Disconnected)` fires — FAIL CLOSED with NO
@@ -580,7 +588,7 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell7_AssignOutboundFails_Disconnected) {
 // [[feedback_fixed_buffer_build_failure_silent_success]] — this is the build-FAILURE
 // arm Cell 1 (build-success) does not cover.
 // ═══════════════════════════════════════════════════════════════════════════════
-TEST_F(AcceptorLogonSendingTimeTest, Cell8_BuildRejectOverflow_FailClosed_NoFrame) {
+TEST_F(AcceptorLogonSendingTimeTest, Cell8_LongCompId_RejectRebuiltInTheSlot_Sent_Disconnected101) {
     // 500-char sender_comp_id: build_reject body ≈ 90B fixed + 500 (49=) + len(56=TW)
     // ≈ 595B > 512B → wire_frame_too_large.
     const std::string long_sender(500, 'X');
@@ -606,11 +614,16 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell8_BuildRejectOverflow_FailClosed_NoFram
 
     // FAIL CLOSED: Disconnected, and NO frame emitted (build_reject overflowed → the
     // `if (rj_r)` guard skipped the emit; the unconditional Disconnected still fired).
-    // A silent-success bug would either establish or emit a truncated frame.
+    // The Logon is refused: Disconnected, never established.
     assert_disconnected(sess, "Cell8");
-    EXPECT_TRUE(captured_frames_.empty())
-        << "Cell8: build_reject overflow must emit NO frame (fail-closed); got "
-        << captured_frames_.size() << " frame(s)";
+    ASSERT_EQ(captured_frames_.size(), 1U) << "Cell8: the Reject, rebuilt in the slot, is sent";
+    const std::string rj(reinterpret_cast<const char*>(captured_frames_.front().data()),
+                         captured_frames_.front().size());
+    EXPECT_NE(rj.find("\x01" "35=3\x01"), std::string::npos) << rj;
+    EXPECT_NE(rj.find("\x01" "373=10\x01"), std::string::npos) << rj;
+    EXPECT_NE(rj.find("\x01" "371=52\x01"), std::string::npos) << rj;
+    EXPECT_NE(rj.find("\x01" "49=" + long_sender + "\x01"), std::string::npos)
+        << "the long CompID is carried whole";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

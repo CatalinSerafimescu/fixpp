@@ -145,6 +145,21 @@ class W6ActiveOffOracle : public testing::TestWithParam<RepeatCell> {};
 TEST_P(W6ActiveOffOracle, EndsAsTheStrippedTwin) {
     const RepeatCell& c = GetParam();
     const Input& in = input(c.input);
+    // The oracle's positive control: the input holds a later 35 and its twin holds none.
+    const Ctx probe{.snd = "S", .tgt = "T", .seq = 2};
+    const std::string frame = in.make(probe);
+    const std::string stripped = strip_later_35(frame);
+    auto count_35 = [](const std::string& f) {
+        std::size_t n = 0;
+        for (std::size_t p = f.find("\x01" "35="); p != std::string::npos;
+             p = f.find("\x01" "35=", p + 1)) {
+            ++n;
+        }
+        return n;
+    };
+    ASSERT_GE(count_35(frame), 2U) << "the input has two MsgTypes";
+    ASSERT_EQ(count_35(stripped), 1U) << "the twin has one";
+    ASSERT_NE(frame, stripped);
     const Input twin{.id = in.id + " stripped",
                      .make = [&in](const Ctx& ctx) { return strip_later_35(in.make(ctx)); }};
     const CellRun run = run_keyed_cell(c.shape, false, Arm::Active, in);
