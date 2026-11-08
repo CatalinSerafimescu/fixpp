@@ -144,7 +144,7 @@ inline std::string div_b_orch() {
         omsg("M", ofield(58) + ogroupref(2631)));
 }
 
-// (C): NoB(603) at the root of declared message M {R1, R2} and inside body group NoA {N1, N2};
+// (C): NoB(603) at the root of declared message M {642, 643} and inside body group NoA {640, 641};
 // message L holds only NoA.
 inline std::string div_c_xml() {
     return xml_dict(
