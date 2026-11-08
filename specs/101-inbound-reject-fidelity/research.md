@@ -485,6 +485,13 @@ helper's body. That relation is what makes every rebuilt frame capturable by the
 - It cannot be written at namespace scope. `kSendFrameBytes` is a private member of `Session`, and `CaptureVisitor`
   is in `session.cpp`'s anonymous namespace.
 - So the helper, a `Session` member function, is defined in `session.cpp` after `CaptureVisitor`.
+- **Replay growth (orchestrator ruling R8, implement).** The ceiling bounds what is built and stored. A resent frame
+  grows by PossDupFlag(43), OrigSendingTime(122) and a restamped or inserted SendingTime(52), each timestamp at most the
+  widest UTCTimestamp `utc_time_to_fix_string` writes (its nanos form); that growth must fit the replay rebuild
+  buffer's headroom, `kRpBufSize` − `CaptureVisitor::kCapBufSize`, and `replay_outbound_range_` asserts it
+  (`static_assert`, derived from those field widths). So a resent inbound-fed reply built at the ceiling may exceed
+  `kSendFrameBytes` by that growth, as every resent message already may (a `Session::send` frame replays through the
+  same path); the B-row states it (tasks T060).
 
 **Allocation (`[const §XV.1]`): none added.**
 - The slot is allocated once per Session, with the Session. `Session` grows by `kSendFrameBytes`, beside its three

@@ -7783,6 +7783,18 @@ asio::awaitable<fixpp::core::expected_t<Session::replay_outcome>> Session::repla
     // unbuildable (fixpp#424) runs into one GapFill; flush before each replay.
     static constexpr std::size_t kRpBufSize =
         CaptureVisitor::kCapBufSize + 256;  // capture + replay-tag overhead
+    // 101-inbound-reject-fidelity (research D7, "The capture invariant"): a captured frame, up to
+    // kCapBufSize, is rebuilt here by build_replay_frame, which adds PossDupFlag(43)=Y and
+    // OrigSendingTime(122) and restamps or inserts SendingTime(52). Each timestamp is at most the
+    // widest UTCTimestamp utc_time_to_fix_string writes, its nanos form in core/fix_time.hpp, so
+    // the growth is bounded by the two added fields plus a whole 52, and the headroom must hold
+    // it. A frame built at kSendFrameBytes therefore replays past that ceiling by at most this.
+    static constexpr std::size_t kMaxUtcTimestampChars = sizeof("YYYYMMDD-HH:MM:SS.sssssssss") - 1;
+    static constexpr std::size_t kReplayGrowthBytes =
+        (sizeof("43=Y\x01") - 1) + (sizeof("122=\x01") - 1) + kMaxUtcTimestampChars +
+        (sizeof("52=\x01") - 1) + kMaxUtcTimestampChars;
+    static_assert(kRpBufSize - CaptureVisitor::kCapBufSize >= kReplayGrowthBytes,
+                  "the replay buffer's headroom holds a replay's growth");
     bool gap_open = false;
     seqnum_t gap_start = 0;
     for (seqnum_t k = begin; k <= eff_end; ++k) {

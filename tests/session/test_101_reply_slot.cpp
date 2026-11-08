@@ -4,7 +4,8 @@
 //
 // 101-inbound-reject-fidelity, tasks.md T044 and T047 (research D7, FR-007, FR-008):
 //   ReplySlotRelease101 (W101-46b): the inbound reply slot is released on every exit of the
-//   site's tail, so a next overflowed reply is sent.
+//   site's tail (a veto, a throw, a failed assign, a close during the store), so a next
+//   overflowed reply is sent.
 //   EchoSiteBoundary101 (W101-49): at each reply site, the boundary between the site's own buffer
 //   and the slot, derived by building the site's message into a buffer of the site's size (read
 //   by name through session_test_access), with controls one byte under and over it: under, the
@@ -16,16 +17,19 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
+#include <fixpp/core/fix_time.hpp>
 #include <functional>
 #include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
 
+#include "support/hooked_store.hpp"
 #include "support/seqnum_manager_test_access.hpp"
 #include "test_101_support.hpp"
 
@@ -137,6 +141,66 @@ TEST(ReplySlotRelease101, RejectAssignFails_ReleasesTheSlot) {
     EXPECT_FALSE(session_test_access::inbound_reply_slot_held(rig->session()));
 }
 
+// A close while an overflowed reply's store is suspended (research D7, "Release before the next
+// frame"): the reply's coroutine holds the slot across the store; the close ends it, and the
+// holder releases the slot, so the next overflowed reply on the same Session takes it.
+TEST(ReplySlotRelease101, CloseWhileReplyStoreSuspended_ReleasesTheSlot_NextReplyTakesIt) {
+    bool armed = false;
+    auto factory = std::make_shared<fixpp::test_support::HookedStoreFactory>();
+    factory->hooks.on_outbound_store = [&armed] { return armed; };
+    factory->hooks.release_when = [] { return false; };
+    auto rig = std::make_unique<Rig101>(
+        spec(Kind::fix44).off().with([factory](SessionConfig& c) { c.store_factory = factory; }));
+    ASSERT_FALSE(rig->start(Arm::Active).has_value());
+    rig->note_sending_time();
+    rig->app->reject_from_app = true;
+    const RejectInputs in = inputs_of(*rig, 2, 0, 0, {});
+    const auto site = longest_fitting(
+        [&](std::size_t n) {
+            return bmr_fits(in, long_msg_type(n == 0 ? 1 : n), kSites.business_reject_leaf);
+        },
+        session_test_access::send_frame_bytes());
+    ASSERT_TRUE(site);
+    const std::string mt = long_msg_type(*site + 1);
+    auto& ioc = rig->r->ioc;
+    Session& sess = rig->session();
+
+    armed = true;
+    const std::string f1 = rig->frame(mt, 2);
+    auto reply =
+        asio::co_spawn(ioc, sess.on_inbound_frame(std::as_bytes(std::span{f1})), asio::use_future);
+    ioc.restart();
+    ioc.run_for(std::chrono::milliseconds{100});
+    ASSERT_TRUE(session_test_access::inbound_reply_slot_held(sess))
+        << "precondition: the reply is suspended in its store, holding the slot";
+    armed = false;
+    auto closed = asio::co_spawn(ioc, sess.close(close_mode::terminal), asio::use_future);
+    ASSERT_TRUE(t99::pump_ready(ioc, closed, std::chrono::seconds{30}));
+    ASSERT_TRUE(t99::pump_ready(ioc, reply, std::chrono::seconds{30}));
+    EXPECT_FALSE(session_test_access::inbound_reply_slot_held(sess)) << "released by the close";
+
+    clear_slot(*rig);
+    // A closed Session does not open again (open() answers session_already_open), so the next
+    // overflowed reply is drawn through a reply site directly: it takes the slot, which asserts,
+    // in builds with assertions, that no holder kept it.
+    const RejectInputs rin = inputs_of(*rig, 3, 3, 0, {});
+    const auto rsite = longest_fitting(
+        [&](std::size_t n) {
+            return reject_fits(rin, long_msg_type(n == 0 ? 1 : n), kSites.reject_best_effort);
+        },
+        session_test_access::send_frame_bytes());
+    ASSERT_TRUE(rsite);
+    const std::string rmt = long_msg_type(*rsite + 1);
+    const std::string st = rig->stamped_sending_time();
+    auto again =
+        asio::co_spawn(ioc, session_test_access::inbound_reject_best_effort_leaf(sess, 3, rmt, st),
+                       asio::use_future);
+    ASSERT_TRUE(t99::pump_ready(ioc, again, std::chrono::seconds{30}));
+    (void)again.get();
+    EXPECT_TRUE(slot_used(*rig)) << "the next reply was rebuilt in the slot";
+    EXPECT_FALSE(session_test_access::inbound_reply_slot_held(sess));
+}
+
 // ── EchoSiteBoundary101 (W101-49) ───────────────────────────────────────────────────────
 
 struct BoundarySite {
@@ -153,12 +217,28 @@ struct BoundarySite {
 std::vector<BoundarySite> boundary_sites() {
     return {
         {"gate", spec(Kind::fix44), 11, 0, kTextInvalidMsgType, {}, kSites.emit_reject_text},
-        {"inbound_reject_leaf_", spec(Kind::fix44).off(), 1, 122, {}, "43=Y\x01",
+        {"inbound_reject_leaf_",
+         spec(Kind::fix44).off(),
+         1,
+         122,
+         {},
+         "43=Y\x01",
          kSites.reject_leaf},
-        {"emit_session_reject_", spec(Kind::fix44).off().without_application(), 3, 0, {}, {},
+        {"emit_session_reject_",
+         spec(Kind::fix44).off().without_application(),
+         3,
+         0,
+         {},
+         {},
          kSites.emit_reject},
-        {"inbound_business_reject_leaf_", spec(Kind::fix44).off(), 0, 0, {}, {},
-         kSites.business_reject_leaf, true},
+        {"inbound_business_reject_leaf_",
+         spec(Kind::fix44).off(),
+         0,
+         0,
+         {},
+         {},
+         kSites.business_reject_leaf,
+         true},
     };
 }
 
@@ -185,8 +265,8 @@ void expect_reply(const BoundarySite& s, std::ptrdiff_t delta, bool in_slot) {
     }
     const auto boundary = site_boundary(s, *rig);
     ASSERT_TRUE(boundary);
-    const std::string mt = long_msg_type(static_cast<std::size_t>(
-        static_cast<std::ptrdiff_t>(*boundary) + delta));
+    const std::string mt =
+        long_msg_type(static_cast<std::size_t>(static_cast<std::ptrdiff_t>(*boundary) + delta));
     SCOPED_TRACE(std::string(s.name) + " n=" + std::to_string(mt.size()));
     clear_slot(*rig);
     const Ending101 e = rig->deliver(rig->frame(mt, 2, {}, s.before_34));
@@ -233,6 +313,26 @@ TEST(BestEffortLeaf101, OverflowingMsgTypeFitsTheCeiling_SentWith372) {
     EXPECT_FALSE(session_test_access::inbound_reply_slot_held(rig->session()));
 }
 
+// ── ReplayGrowth101 (orchestrator ruling R8) ────────────────────────────────────────────
+//
+// replay_outbound_range_ asserts that the replay buffer's headroom holds a replay's growth,
+// bounding each timestamp by the formatter's widest form, spelled there as the nanos grammar. This
+// cell checks that bound against the formatter itself: no precision writes a longer UTCTimestamp.
+TEST(ReplayGrowth101, NoPrecisionWritesALongerTimestampThanTheNanosForm) {
+    using fixpp::core::fix_time_precision;
+    const std::string_view widest = "YYYYMMDD-HH:MM:SS.sssssssss";
+    const fixpp::core::utc_time_point tp{std::chrono::seconds{4102444799} +
+                                         std::chrono::nanoseconds{999999999}};
+    std::size_t longest = 0;
+    for (auto p : {fix_time_precision::seconds, fix_time_precision::millis,
+                   fix_time_precision::micros, fix_time_precision::nanos}) {
+        std::array<char, 64> buf{};
+        auto r = fixpp::core::utc_time_to_fix_string(tp, p, std::span<char>{buf});
+        ASSERT_TRUE(r.has_value());
+        longest = std::max(longest, r->size());
+    }
+    EXPECT_EQ(longest, widest.size());
+}
+
 }  // namespace
 }  // namespace fixpp::session::test101
-
