@@ -253,6 +253,43 @@ const fixpp::wire::group_slice* group_entry(const fixpp_group_t* g, std::size_t 
     return &grp->slices[i];
 }
 
+// 100 (research D4, FR-006): the getters' cursor shell from `arena`, or nullptr when it
+// does not fit. Only the allocation can throw, because constructing the shell cannot.
+static_assert(std::is_nothrow_default_constructible_v<fixpp_group>);
+fixpp_group* new_cursor_shell(std::pmr::memory_resource* arena) noexcept {
+    try {
+        return std::pmr::polymorphic_allocator<fixpp_group>(arena).new_object<fixpp_group>();
+    } catch (std::bad_alloc const&) {
+        return nullptr;
+    }
+}
+
+// 100 (contracts/capi-group-getters.md rows 4 and 5, research D4): the two group
+// getters' common end, for a read that completed and established a group. Zero
+// instances read -> OK with the outputs left null/0; otherwise a cursor over `slices`
+// with its own membership context `ctx`, or WIRE_LIMIT_EXCEEDED, the outputs left
+// null/0, when the cursor's shell does not fit in `arena`.
+fixpp_error_t emit_group_cursor(
+    std::span<const fixpp::wire::group_slice> slices,
+    const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>* view,
+    fixpp::wire::group_context const& ctx, std::pmr::memory_resource* arena,
+    const fixpp_group_t** out, size_t* count_out) noexcept {
+    if (slices.empty()) {
+        return FIXPP_ERR_OK;
+    }
+    auto* grp = new_cursor_shell(arena);
+    if (grp == nullptr) {
+        return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
+    }
+    grp->slices = slices;
+    grp->parent_view = view;
+    grp->arena = nullptr;  // not needed for scalar reads
+    grp->group_ctx = ctx;
+    *out = reinterpret_cast<const fixpp_group_t*>(grp);
+    *count_out = slices.size();
+    return FIXPP_ERR_OK;
+}
+
 }  // namespace
 
 extern "C" {
@@ -412,10 +449,6 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_get_msg_type(const fixpp_msg_t* msg,
 
 // ── CA-010-read implementation ───────────────────────────────────────────────
 
-// 100 (research D4): the cursor shells' `new_object` can throw only from the
-// allocation, which the getters catch, because constructing the shell cannot throw.
-static_assert(std::is_nothrow_default_constructible_v<fixpp_group>);
-
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_get_group(const fixpp_msg_t* msg, uint16_t group_tag,
                                                    const fixpp_group_t** group_out,
                                                    size_t* count_out) {
@@ -439,8 +472,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_get_group(const fixpp_msg_t* msg, uint1
     // 100 (contracts/capi-group-getters.md rows 2 to 5, research D4): a read that
     // could not complete -> WIRE_LIMIT_EXCEEDED (only a present, registered tag
     // fails, so this is row 2 after row 1); a present tag not established as a
-    // group here -> TYPE_MISMATCH; a registered group with zero instances read -> OK
-    // with a null cursor and count 0; otherwise the cursor.
+    // group here -> TYPE_MISMATCH; past that, `emit_group_cursor` (rows 4 and 5).
     auto const r = offsets.group_slices_status(group_tag);
     if (r.status != fixpp::wire::group_read_status::ok) {
         return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
@@ -448,38 +480,19 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_get_group(const fixpp_msg_t* msg, uint1
     if (!r.is_group) {
         return FIXPP_ERR_TYPE_MISMATCH;
     }
-    auto const slices = r.slices;
-    if (slices.empty()) {
-        return FIXPP_ERR_OK;  // *group_out == nullptr, *count_out == 0
-    }
 
-    // Allocate the fixpp_group cursor shell from the parse arena backing the
+    // The fixpp_group cursor shell comes from the parse arena backing the
     // OffsetTable (the same per-message PMR resource that owns the group_slices
     // the cursor references).  The arena has dispatch-window lifetime and is
     // reclaimed wholesale when it resets or destructs, so the cursor is
     // automatically reclaimed — zero global-heap (FR-002 / SC-003) and no
     // explicit free needed.  [D5 deviation: OffsetTable::resource() exposes the
     // backing mr; deviation is recorded in .specify/2b-wire.md.]
-    auto* arena = offsets.resource();
-    // 100 (research D4, FR-006): a shell that does not fit is a read that could not
-    // complete; the outputs stay null/0. Only the allocation can throw.
-    fixpp_group* grp = nullptr;
-    try {
-        grp = std::pmr::polymorphic_allocator<fixpp_group>(arena).new_object<fixpp_group>();
-    } catch (std::bad_alloc const&) {
-        return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
-    }
-    grp->slices = slices;
-    grp->parent_view = view;
-    grp->arena = nullptr;  // not needed for scalar reads
-    // 065 T005: seed this cursor's own membership context (= {msg_type,
-    // [group_tag]}) so a further nested descent resolves membership via the
-    // exact context (research Decision 2).
-    grp->group_ctx = offsets.group_context_for(group_tag);
-
-    *group_out = reinterpret_cast<const fixpp_group_t*>(grp);
-    *count_out = slices.size();
-    return FIXPP_ERR_OK;
+    // 065 T005: the cursor's own membership context (= {msg_type, [group_tag]}),
+    // so a further nested descent resolves membership via the exact context
+    // (research Decision 2).
+    return emit_group_cursor(r.slices, view, offsets.group_context_for(group_tag),
+                             offsets.resource(), group_out, count_out);
 }
 
 FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_field_string(const fixpp_group_t* g, size_t i,
@@ -608,27 +621,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
         if (!scan_slice_for_tag(*sl, nested_tag, hooks_for(g))) return FIXPP_ERR_TAG_NOT_FOUND;
         return FIXPP_ERR_TYPE_MISMATCH;
     }
-    auto slices = r.slices;
-    if (slices.empty()) {
-        return FIXPP_ERR_OK;
-    }
-
-    // 100 (research D4, FR-006): as the flat getter's shell.
-    fixpp_group* nested_grp = nullptr;
-    try {
-        nested_grp =
-            std::pmr::polymorphic_allocator<fixpp_group>(nested_arena).new_object<fixpp_group>();
-    } catch (std::bad_alloc const&) {
-        return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
-    }
-    nested_grp->slices = slices;
-    nested_grp->parent_view = parent_grp->parent_view;
-    nested_grp->arena = nullptr;
-    nested_grp->group_ctx = parent_grp->group_ctx.pushed(nested_tag);
-
-    *nested_out = reinterpret_cast<const fixpp_group_t*>(nested_grp);
-    *nested_count_out = slices.size();
-    return FIXPP_ERR_OK;
+    return emit_group_cursor(r.slices, parent_grp->parent_view,
+                             parent_grp->group_ctx.pushed(nested_tag), nested_arena, nested_out,
+                             nested_count_out);
 }
 
 // ── CA-053 implementation (US3 field iteration) ──────────────────────────────
