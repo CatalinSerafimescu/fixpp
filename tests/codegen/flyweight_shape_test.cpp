@@ -18,6 +18,14 @@
 #include <fixpp/vt11/Messages.hpp>
 #include <fixpp/wire/group_view.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
+#include <fixpp/wire/parser.hpp>
+
+#include <cstddef>
+#include <span>
+#include <string>
+#include <type_traits>
+
+#include "support/frame_view_factory.hpp"
 
 namespace {
 using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
@@ -62,4 +70,53 @@ TEST(CodegenFlyweightShape, R6FrozenContractWellFormed) {
     EXPECT_FALSE(a.has_value());
     EXPECT_FALSE(b.has_value());
     EXPECT_FALSE(c.has_value());
+}
+
+// 100-wire-group-read-integrity (T071 fix, B-100-7): an Iter view and a field
+// iterator hold a POINTER to the `dict_hooks` bundle they read through, never a
+// copy of it, so `Parser<Iter>::parse_iter()` stores one pointer per view rather
+// than the whole bundle. Each pin below fails if a copy comes back:
+//   - the iterator's size is its scan state plus ONE pointer (the same 64-bit
+//     layout rules as the entry_context pin above: span=16, size_t=8, no STL
+//     container), so a by-value bundle moves it by sizeof(dict_hooks) - 8;
+//   - no constructor takes a bundle by value, so a caller passing one fails to
+//     compile instead of handing the holder a temporary to alias;
+//   - two views parsed by one parser expose the SAME bundle object, which two
+//     copies could not.
+namespace {
+using IterMV = fixpp::wire::MessageView<fixpp::wire::access_mode::Iter>;
+using FieldIt = IterMV::field_iterator;
+}  // namespace
+static_assert(sizeof(FieldIt) == 80);
+static_assert(std::is_constructible_v<FieldIt, std::span<std::byte const>, std::size_t,
+                                      fixpp::wire::dict_hooks const*>);
+static_assert(!std::is_constructible_v<FieldIt, std::span<std::byte const>, std::size_t,
+                                       fixpp::wire::dict_hooks>);
+static_assert(std::is_constructible_v<IterMV, fixpp::wire::frame_view const&,
+                                      fixpp::wire::dict_hooks const*>);
+static_assert(!std::is_constructible_v<IterMV, fixpp::wire::frame_view const&,
+                                       fixpp::wire::dict_hooks>);
+
+TEST(CodegenFlyweightShape, IterViewHoldsTheParsersBundleNotACopy) {
+    fixpp::dict::table_view const tv{};
+    fixpp::wire::Parser<fixpp::wire::access_mode::Iter> parser{tv};
+    std::string const raw =
+        "8=FIX.4.4\x01"
+        "9=5\x01"
+        "35=0\x01"
+        "10=000\x01";
+    auto const fv_or = fixpp::wire::test::make_frame_view(std::as_bytes(std::span{raw}));
+    ASSERT_TRUE(fv_or.has_value());
+    auto const& fv = *fv_or;
+    auto const a = parser.parse_iter(fv);
+    auto const b = parser.parse_iter(fv);
+    ASSERT_TRUE(a.has_value());
+    ASSERT_TRUE(b.has_value());
+    EXPECT_EQ(a->hooks().opaque_dict(), &tv) << "the view reads through the parser's dictionary";
+    EXPECT_EQ(&a->hooks(), &b->hooks())
+        << "two views of one parser must alias one bundle; distinct addresses mean each view "
+           "holds its own copy";
+    // A frame-only view has no parser to alias: it reads through no dictionary.
+    IterMV const bare{fv};
+    EXPECT_EQ(bare.hooks().opaque_dict(), nullptr);
 }

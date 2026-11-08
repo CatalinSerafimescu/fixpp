@@ -312,6 +312,8 @@ The two modes share `MessageView<>` via `requires`-constrained members; codegen 
 
 Updated (098-dialect-overlay): this paragraph predates fixpp#426. Since #426 `field_iterator` takes a `dict_hooks` value with no default and pairs Length+Data through it (`include/fixpp/wire/parser.hpp`), so Iter mode given a dictionary's hooks is not limited to the static table; 098 retired L-004-1, which still said it was. A pair an overlay adds between its own fields reaches Iter mode through those hooks; a site with no dictionary uses the standard table (L-426-1).
 
+Updated (100-wire-group-read-integrity): `field_iterator` and the dictionary-backed `MessageView<Iter>` constructor now take the bundle as `dict_hooks const*` and hold the pointer, not a `dict_hooks` value; the bundle must outlive the iterator or the view (B-100-7).
+
 ### 4.4 `OffsetTable` — `(tag, offset, length)` index
 
 ```cpp

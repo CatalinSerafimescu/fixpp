@@ -169,8 +169,8 @@ void check_iterator_fault_agrees_with_build(std::span<const std::byte> buf,
         ++counts.skipped;
         return;
     }
-    iter_t it{buf, 0, hooks};
-    iter_t const end{buf, buf.size(), hooks};
+    iter_t it{buf, 0, &hooks};
+    iter_t const end{buf, buf.size(), &hooks};
     while (!(it == end)) {
         ++it;
     }
@@ -214,8 +214,8 @@ void check_failed_build_prescan(fixpp::wire::frame_view const& fv,
     // The walk validate() runs: the view's bytes, under hooks of the validator's table.
     static fixpp::wire::dict_hooks const validator_hooks =
         fixpp::wire::dict_hooks::for_table_view(validation_table_view());
-    iter_t it{mv.bytes(), 0, validator_hooks};
-    iter_t const end{mv.bytes(), mv.bytes().size(), validator_hooks};
+    iter_t it{mv.bytes(), 0, &validator_hooks};
+    iter_t const end{mv.bytes(), mv.bytes().size(), &validator_hooks};
     while (!(it == end) && it.fault() == field_fault::none) {
         ++it;
     }

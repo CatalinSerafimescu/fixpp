@@ -205,9 +205,9 @@ std::optional<std::string_view> scan_slice_for_tag(const fixpp::wire::group_slic
     if (sl.data == nullptr || sl.len == 0) return std::nullopt;
     auto bytes = std::span<const std::byte>{sl.data, sl.len};
     // field_iterator scans tag=value<SOH> pairs over a byte span.
-    fixpp::wire::MessageView<fixpp::wire::access_mode::Iter>::field_iterator it{bytes, 0, hooks};
+    fixpp::wire::MessageView<fixpp::wire::access_mode::Iter>::field_iterator it{bytes, 0, &hooks};
     fixpp::wire::MessageView<fixpp::wire::access_mode::Iter>::field_iterator end_it{
-        bytes, bytes.size(), hooks};
+        bytes, bytes.size(), &hooks};
     while (!(it == end_it)) {
         auto const& f = *it;
         if (f.tag == tag) {

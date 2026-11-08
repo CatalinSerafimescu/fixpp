@@ -149,9 +149,17 @@ private:
     group_registered_fn_t group_registered_ = nullptr;
 };
 
-// Every holder (OffsetTable, MessageView, entry_context, field_iterator)
-// carries a dict_hooks by value (FR-004-class zero-alloc-by-value context) —
-// see group_context's identical requirement in group_view.hpp.
+// A holder that carries a dict_hooks by value copies it with no allocation
+// (FR-004-class zero-alloc-by-value context) — see group_context's identical
+// requirement in group_view.hpp. Re-derive the by-value holders with
+// `command grep -rnE 'dict_hooks +[A-Za-z_]+ *(\{ *\})?;|hooks_holder_t +[A-Za-z_]+' include src`.
 static_assert(std::is_trivially_copyable_v<dict_hooks>);
+
+namespace detail {
+// 100 (B-100-7): `dict_hooks::none()` as an object with static storage, for a
+// holder of a `dict_hooks const*` (an Iter view, a field iterator) built without
+// a dictionary, so that pointer is never null and never dangles.
+inline constexpr dict_hooks no_dict_hooks{};
+}  // namespace detail
 
 }  // namespace fixpp::wire

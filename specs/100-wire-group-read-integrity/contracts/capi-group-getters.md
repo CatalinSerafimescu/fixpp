@@ -139,7 +139,11 @@ Changes a typed caller sees, each recorded in a B&L row (tasks T057):
   and not failed;
 - a group wire limit now reports `read_failed()` true;
 - a tag not registered in the read's context (802 at the root, 453 in a context that does not declare it) now reads
-  size 0, where it was a cursor through the bare member fallback.
+  size 0, where it was a cursor through the bare member fallback;
+- C++ source change (B-100-7): `MessageView<Mode>::field_iterator` and the dictionary-backed `MessageView<Iter>`
+  constructor take `dict_hooks const*` in place of a `dict_hooks` by value, and hold that pointer, so the bundle must
+  outlive the iterator or the view (a `parse_iter()` view points at its parser's bundle). Migration: pass `&hooks`, or
+  `nullptr` for `dict_hooks::none()`.
 
 ## Parse
 

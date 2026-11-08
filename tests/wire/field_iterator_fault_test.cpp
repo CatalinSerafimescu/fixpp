@@ -83,8 +83,8 @@ struct walk_result {
 
 walk_result walk(std::span<std::byte const> buf, dict_hooks hooks) {
     walk_result r;
-    iter_t it{buf, 0, hooks};
-    iter_t const end{buf, buf.size(), hooks};
+    iter_t it{buf, 0, &hooks};
+    iter_t const end{buf, buf.size(), &hooks};
     for (; !(it == end); ++it) {
         std::string v;
         for (std::byte const b : (*it).value) {

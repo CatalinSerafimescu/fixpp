@@ -74,8 +74,8 @@ void scan_logon_msg_type_defaults(std::span<const std::byte> frame,
     constexpr std::uint16_t kRefCstmApplVerId = 1131;
     constexpr std::uint16_t kDefaultVerIndicator = 1410;
 
-    iter_t it{frame, 0, hooks};
-    iter_t const end{frame, frame.size(), hooks};
+    iter_t it{frame, 0, &hooks};
+    iter_t const end{frame, frame.size(), &hooks};
     while (!(it == end) && (*it).tag != kNoMsgTypes) {
         ++it;
     }
