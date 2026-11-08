@@ -442,8 +442,9 @@ message and writes no record; only the not-sent endings do.
   site, and so `on_inbound_frame`, returns; a reconnect's first frame comes through a new `on_inbound_frame` call,
   which the precondition orders after the previous one completes. A close that destroys the site's coroutine frame
   without resuming it releases the slot in the holder's destructor, as part of that destruction, before any later
-  call on that Session can begin. W101-46b's exits include a close during the store's suspension, followed by a next
-  frame whose overflowed reply is sent.
+  call on that Session can begin. W101-46b's exits include a close during the store's suspension, after which the slot is released before its next
+  use on the same Session (a Session is never reopened: `open()` refuses with `session_already_open`; orchestrator
+  ruling on the Phase 5-6 report).
 - **Who must honour the precondition.** Only a direct C++ caller of `Session::on_inbound_frame`. Engine-managed
   sessions meet it by construction (below), and no C-ABI or binding entry point calls `on_inbound_frame`: the C and
   Python surfaces drive sessions through the Engine.
