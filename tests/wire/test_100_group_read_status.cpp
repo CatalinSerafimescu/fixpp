@@ -38,6 +38,7 @@
 #include <fixpp/wire/parser.hpp>
 #include <memory_resource>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,7 @@
 #include "support/dict_hooks_test_access.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/group_read_100.hpp"
+#include "support/msvc_debug_arena_skip.hpp"
 
 namespace {
 
@@ -195,6 +197,7 @@ std::string order3() { return header44("D") + kOrd + kThreeParties + "54=1\x01";
 
 // ── D10 (FR-004): a present scalar on an exhausted arena is not a failed read ─────
 TEST(GroupReadStatus100, D10_FlatPresentScalarRowPushFails_NotFailed) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), {}, 3, no_setup, flat_read(54));
     EXPECT_GT(expect_at_kind(obs, alloc_kind::group_row, false, "D10 flat present scalar"), 0U)
         << "setup: no room made the group_index_ row the first to fail";
@@ -202,23 +205,27 @@ TEST(GroupReadStatus100, D10_FlatPresentScalarRowPushFails_NotFailed) {
 
 // ── D11 (FR-004): nested reads of an absent tag and of a present scalar ────────────
 TEST(GroupReadStatus100, D11_NestedAbsentModeA_NotFailed) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), {}, 0, outer_setup(453, 0), nested_read(453, 802));
     EXPECT_GT(expect_at_kind(obs, alloc_kind::subtable, false, "D11 nested absent, mode (a)"), 0U)
         << "setup: no room made the sub-table shell the first to fail";
 }
 TEST(GroupReadStatus100, D11_NestedAbsentModeC_NotFailed) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), {}, 0, outer_setup(453, 0), nested_read(453, 802));
     EXPECT_GT(expect_at_kind(obs, alloc_kind::subtable_build, false, "D11 nested absent, mode (c)"),
               0U)
         << "setup: no room made the sub-table build the first to fail";
 }
 TEST(GroupReadStatus100, D11_NestedPresentScalarModeA_NotFailed) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), {}, 0, outer_setup(453, 0), nested_read(453, 447));
     EXPECT_GT(
         expect_at_kind(obs, alloc_kind::subtable, false, "D11 nested present scalar, mode (a)"), 0U)
         << "setup: no room made the sub-table shell the first to fail";
 }
 TEST(GroupReadStatus100, D11_NestedPresentScalarModeC_NotFailed) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), {}, 0, outer_setup(453, 0), nested_read(453, 447));
     EXPECT_GT(expect_at_kind(obs, alloc_kind::subtable_build, false,
                              "D11 nested present scalar, mode (c)"),
@@ -228,6 +235,7 @@ TEST(GroupReadStatus100, D11_NestedPresentScalarModeC_NotFailed) {
 // T010's record-miss construction (802 only inside a deeper nested instance of a NoSides(552)
 // instance) under mode (a): registration answers "not registered" before any scan.
 TEST(GroupReadStatus100, D11_NestedRecordMissModeA_NotFailed) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     std::string const body = header44("AE") +
                              "571=R1\x01"
                              "552=1\x01"
@@ -300,18 +308,21 @@ TEST(GroupReadStatus100, D11_NestedPresentScalarD7_NotFailed) {
 // A lane where no room separates the push from the following allocation records the cell as
 // skipped.
 TEST(GroupReadStatus100, D10_FlatRowPushFails_FailedFirstAndRepeat) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), {}, 3, no_setup, flat_read(453));
     if (expect_at_kind(obs, alloc_kind::group_row, true, "D10 flat row push") == 0U) {
         GTEST_SKIP() << "no room makes the group_index_ row the first failure on this lane";
     }
 }
 TEST(GroupReadStatus100, D10_FlatSlicesFail_FailedFirstAndRepeat) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), {}, 3, no_setup, flat_read(453));
     if (expect_at_kind(obs, alloc_kind::slices, true, "D10 flat slices") == 0U) {
         GTEST_SKIP() << "no room makes the slice array the first failure on this lane";
     }
 }
 TEST(GroupReadStatus100, D10_NestedRowPushFails_FailedFirstAndRepeat) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     std::string const body = header44("D") + kOrd + "453=1\x01" + kParty +
                              "802=3\x01"
                              "523=S1\x01"
@@ -550,6 +561,7 @@ std::size_t count_kind(std::vector<step_obs> const& obs, alloc_kind kind) {
 // ── D10 / FR-004: a present scalar whose cache row does not fit (T015's twin) ───────
 // 54 is in the message and FIX 4.4 registers no group at it.
 TEST(GroupReadStatus100, T039_D10_FlatPresentScalarRowPushFails_OkNotAGroup) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), {}, 3, no_setup, flat_read(54));
     EXPECT_GT(expect_ending_at_kind(obs, alloc_kind::group_row, group_read_status::ok, false, false,
                                     "D10 flat present scalar"),
@@ -561,6 +573,7 @@ TEST(GroupReadStatus100, T039_D10_FlatPresentScalarRowPushFails_OkNotAGroup) {
 // From instance 0 of order3's NoPartyIDs(453): 802 is registered under [453] and absent from
 // the instance; 447 is present and is a member, not a group.
 TEST(GroupReadStatus100, T039_D11_NestedAbsentModeA_OkNotAGroup) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), {}, 0, outer_setup(453, 0), nested_read(453, 802));
     EXPECT_GT(expect_ending_at_kind(obs, alloc_kind::subtable, group_read_status::ok, false, false,
                                     "D11 nested absent, mode (a)"),
@@ -568,6 +581,7 @@ TEST(GroupReadStatus100, T039_D11_NestedAbsentModeA_OkNotAGroup) {
         << "setup: no room made the sub-table shell the first to fail";
 }
 TEST(GroupReadStatus100, T039_D11_NestedAbsentModeC_OkNotAGroup) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), {}, 0, outer_setup(453, 0), nested_read(453, 802));
     EXPECT_GT(expect_ending_at_kind(obs, alloc_kind::subtable_build, group_read_status::ok, false,
                                     false, "D11 nested absent, mode (c)"),
@@ -575,6 +589,7 @@ TEST(GroupReadStatus100, T039_D11_NestedAbsentModeC_OkNotAGroup) {
         << "setup: no room made the sub-table build the first to fail";
 }
 TEST(GroupReadStatus100, T039_D11_NestedPresentScalarModeA_OkNotAGroup) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), {}, 0, outer_setup(453, 0), nested_read(453, 447));
     EXPECT_GT(expect_ending_at_kind(obs, alloc_kind::subtable, group_read_status::ok, false, false,
                                     "D11 nested present scalar, mode (a)"),
@@ -582,6 +597,7 @@ TEST(GroupReadStatus100, T039_D11_NestedPresentScalarModeA_OkNotAGroup) {
         << "setup: no room made the sub-table shell the first to fail";
 }
 TEST(GroupReadStatus100, T039_D11_NestedPresentScalarModeC_OkNotAGroup) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), {}, 0, outer_setup(453, 0), nested_read(453, 447));
     EXPECT_GT(expect_ending_at_kind(obs, alloc_kind::subtable_build, group_read_status::ok, false,
                                     false, "D11 nested present scalar, mode (c)"),
@@ -591,6 +607,7 @@ TEST(GroupReadStatus100, T039_D11_NestedPresentScalarModeC_OkNotAGroup) {
 // 802 occurs only inside the NoPartyIDs(453) instance nested in the NoSides(552) instance, so it
 // is present in the 552 instance, and FIX 4.4 registers it under [552, 453], not under [552].
 TEST(GroupReadStatus100, T039_D11_NestedRecordMissModeA_OkNotAGroup) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     std::string const body = header44("AE") +
                              "571=R1\x01"
                              "552=1\x01"
@@ -663,6 +680,7 @@ TEST(GroupReadStatus100, T039_D7i_NestedSubTableOverEntryCap_LimitExceededTwice)
 // the instance, so a presence scan would find it: the answer must come from step 1. No nested read
 // of that slice is made with any other bundle on that root.
 TEST(GroupReadStatus100, T039_D11_NullRegistrationCallbackModeA_OkNotAGroup) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     std::string const body = header44("D") + kOrd + "453=1\x01" + kParty +
                              "802=1\x01"
                              "523=S\x01"
@@ -696,6 +714,7 @@ TEST(GroupReadStatus100, T039_D11_NullRegistrationCallbackModeA_OkNotAGroup) {
 // before it. A lane where no room fails at the allocation after a push that fitted (the
 // separating step) records the cell as skipped.
 TEST(GroupReadStatus100, T039_D10_FlatRow_RepeatAnswersAsFirst) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), {}, 3, no_setup, flat_read(453));
     std::string const what = "D10 flat row, NoPartyIDs(453) with 3 instances";
     expect_repeat_as_first(obs, what);
@@ -723,6 +742,7 @@ TEST(GroupReadStatus100, T039_D10_FlatRow_RepeatAnswersAsFirst) {
 // NoPartySubIDs(802) holds zero instances, as in T012's nested row cell: after its row is pushed
 // and its sub-table is built, the read needs only the sub-table's own group_index_ row.
 TEST(GroupReadStatus100, T039_D10_NestedRow_RepeatAnswersAsFirst) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     std::string const body = header44("D") + kOrd + "453=1\x01" + kParty +
                              "802=0\x01"
                              "54=1\x01";
@@ -748,4 +768,104 @@ TEST(GroupReadStatus100, T039_D10_NestedRow_RepeatAnswersAsFirst) {
     }
 }
 
+// ── T070 (`[const §IX.1]`): research D11's presence scan over a slice it cannot read ─────
+// A direct caller of the public `nested_group_slices` overload hands it any bytes. Each
+// slice opens with more fields than the sub-table's entry cap, so the sub-build fails
+// `wire_offset_table_full` before it reaches what follows, and the scan then decides the
+// read's ending. With the registered tag after a field the scan cannot read, the scan
+// stops there and the read is not failed; the same tag before that field keeps the
+// failure (the control).
+namespace scan100 {
+
+constexpr std::uint16_t kTag = 700;
+
+bool every_member(void const*, fixpp::wire::group_context const&, std::uint16_t,
+                  std::uint16_t) noexcept {
+    return true;
+}
+bool every_registered(void const*, fixpp::wire::group_context const&, std::uint16_t) noexcept {
+    return true;
+}
+
+// The read's status over `filler + tail`, followed by the trailing byte `last`.
+fixpp::wire::group_read_status read_status(std::string const& tail, char last = '\x01') {
+    std::string slice;
+    for (std::size_t i = 0; i <= fixpp::wire::default_max_offset_entries; ++i) {
+        slice += "100=x\x01";
+    }
+    slice += tail;
+    std::string bytes = slice + last;
+    static constexpr char kRootFrame[] =
+        "8=FIX.4.4\x01"
+        "9=5\x01"
+        "35=D\x01"
+        "10=000\x01";
+    auto const fv = fixpp::wire::test::make_frame_view(std::span<std::byte const>{
+        reinterpret_cast<std::byte const*>(kRootFrame), sizeof(kRootFrame) - 1});
+    EXPECT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    static constexpr int kDictToken = 0;  // a non-null dictionary: the bundle can establish groups
+    auto const hooks = fixpp::wire::dict_hooks_test_access::make(
+        &kDictToken, nullptr, &every_member, nullptr, nullptr, &every_registered);
+    fixpp::wire::OffsetTable const root{*fv, &arena, hooks};
+    fixpp::wire::group_read_status status{};
+    {
+        auto const r = root.nested_group_slices(
+            reinterpret_cast<std::byte const*>(bytes.data()), slice.size(), kTag, hooks,
+            fixpp::wire::detail::generation_token{}, fixpp::wire::group_context{});
+        EXPECT_TRUE(r.slices.empty());
+        EXPECT_FALSE(r.is_group);
+        status = r.status;
+    }
+    return status;
+}
+
+}  // namespace scan100
+
+TEST(GroupReadStatus100, T070_D11_ScanControl_TagBeforeUnreadableField_LimitExceeded) {
+    EXPECT_EQ(scan100::read_status("700=1\x01"
+                                   "1a=1\x01"),
+              fixpp::wire::group_read_status::limit_exceeded);
+}
+TEST(GroupReadStatus100, T070_D11_ScanStopsAtNonDigitTag_NotFailed) {
+    EXPECT_EQ(scan100::read_status("1a=1\x01"
+                                   "700=1\x01"),
+              fixpp::wire::group_read_status::ok);
+}
+TEST(GroupReadStatus100, T070_D11_ScanStopsAtTagOutOfRange_NotFailed) {
+    EXPECT_EQ(scan100::read_status("70000=1\x01"
+                                   "700=1\x01"),
+              fixpp::wire::group_read_status::ok);
+}
+TEST(GroupReadStatus100, T070_D11_ScanStopsAtTagWithoutEquals_NotFailed) {
+    EXPECT_EQ(scan100::read_status("12\x01"
+                                   "700=1\x01"),
+              fixpp::wire::group_read_status::ok);
+}
+TEST(GroupReadStatus100, T070_D11_ScanStopsAtEmptyTag_NotFailed) {
+    EXPECT_EQ(scan100::read_status("=1\x01"
+                                   "700=1\x01"),
+              fixpp::wire::group_read_status::ok);
+}
+// A tag that runs to the end of the scanned bytes. Nothing can follow it, so the ending
+// is the not-found one either way; the cell exercises the bound before the `=` read.
+TEST(GroupReadStatus100, T070_D11_ScanStopsAtTagRunningToTheEnd_NotFailed) {
+    EXPECT_EQ(scan100::read_status("12", '3'), fixpp::wire::group_read_status::ok);
+}
+// RawDataLength(95) / RawData(96) is a standard pair, counted whatever the bundle: a
+// count past the end of the bytes stops the scan; a true count steps over the Data
+// value's embedded SOH and reaches the tag (the control).
+TEST(GroupReadStatus100, T070_D11_ScanStopsAtLyingCount_NotFailed) {
+    EXPECT_EQ(scan100::read_status("95=50\x01"
+                                   "96=ab\x01"
+                                   "700=1\x01"),
+              fixpp::wire::group_read_status::ok);
+}
+TEST(GroupReadStatus100, T070_D11_ScanControl_TrueCount_LimitExceeded) {
+    EXPECT_EQ(scan100::read_status("95=3\x01"
+                                   "96=a\x01"
+                                   "b\x01"
+                                   "700=1\x01"),
+              fixpp::wire::group_read_status::limit_exceeded);
+}
 }  // namespace

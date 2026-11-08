@@ -36,6 +36,7 @@
 
 #include "support/frame_view_factory.hpp"
 #include "support/group_read_100.hpp"
+#include "support/msvc_debug_arena_skip.hpp"
 
 namespace {
 
@@ -185,6 +186,7 @@ std::string headroom_group() {
 }
 
 TEST(TypedReads100, US2_1_TopLevelSliceAllocationFails_AllocFailedTwice) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const buf = frame44(header44("D") + kOrd + "54=1\x01" + headroom_group());
     auto const fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
@@ -238,6 +240,7 @@ TEST(TypedReads100, US2_1_TopLevelSliceAllocationFails_AllocFailedTwice) {
 // T017's rig: a fixed buffer over `fixpp::detail::arena_upstream()`, the parse's own footprint
 // plus half the group's slice array.
 TEST(TypedReads100, T040_US2_1_TopLevelSliceAllocationFails_ReadFailedTwice) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const buf = frame44(header44("D") + kOrd + "54=1\x01" + headroom_group());
     auto const fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
@@ -380,12 +383,14 @@ std::size_t typed_absent_nested_at(fixpp::test100::alloc_kind kind, std::string 
     return hits;
 }
 TEST(TypedReads100, T040_D11_TypedNestedAbsentModeA_NotReadFailed) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     EXPECT_GT(typed_absent_nested_at(fixpp::test100::alloc_kind::subtable,
                                      "D11 typed nested absent, mode (a)"),
               0U)
         << "setup: no room made the sub-table shell the first to fail";
 }
 TEST(TypedReads100, T040_D11_TypedNestedAbsentModeC_NotReadFailed) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     EXPECT_GT(typed_absent_nested_at(fixpp::test100::alloc_kind::subtable_build,
                                      "D11 typed nested absent, mode (c)"),
               0U)

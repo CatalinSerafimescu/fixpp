@@ -28,6 +28,7 @@
 #include "group_getters_100_support.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/group_read_100.hpp"
+#include "support/msvc_debug_arena_skip.hpp"
 
 namespace {
 
@@ -570,6 +571,7 @@ std::string order3() { return header44("D") + kOrd + kThreeParties + "54=1\x01";
 
 // ── US2.2 (FR-005): a top-level group whose slice allocation fails ───────────────
 TEST(GroupGetters100, US2_2_FlatSliceAllocationFails_WireLimitExceeded) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), fix44().tv, {}, 3, no_setup, flat_read(453));
     EXPECT_GT(
         expect_at_kind(obs, alloc_kind::slices, FIXPP_ERR_WIRE_LIMIT_EXCEEDED, "US2.2 / FR-005"),
@@ -589,6 +591,7 @@ TEST(GroupGetters100, US2_4_Control_AmpleArenaRepeatedReadsAllOk) {
 
 // ── US2.5 (FR-004): reads that need no memory keep their answer on an exhausted arena ──
 TEST(GroupGetters100, US2_5_Control_FlatAbsentOnExhaustedArena_TagNotFound) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), fix44().tv, {}, 3, no_setup, flat_read(802));
     ASSERT_FALSE(obs.empty());
     for (auto const& o : obs) {
@@ -598,6 +601,7 @@ TEST(GroupGetters100, US2_5_Control_FlatAbsentOnExhaustedArena_TagNotFound) {
     }
 }
 TEST(GroupGetters100, US2_5_Control_FlatPresentScalarOnExhaustedArena_TypeMismatch) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), fix44().tv, {}, 3, no_setup, flat_read(54));
     std::size_t row_hits = 0;
     for (auto const& o : obs) {
@@ -612,6 +616,7 @@ TEST(GroupGetters100, US2_5_Control_FlatPresentScalarOnExhaustedArena_TypeMismat
 // Nested reads from instance 0 of a three-instance NoPartyIDs(453): an absent tag, and a
 // present scalar, under mode (a) (no sub-table shell) and mode (c) (sub-build out of memory).
 TEST(GroupGetters100, US2_5_NestedAbsentModeA_TagNotFound) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs =
         step_rooms(order3(), fix44().tv, {}, 0, outer_setup(453, 3), nested_read(0, 802));
     EXPECT_GT(expect_at_kind(obs, alloc_kind::subtable, FIXPP_ERR_TAG_NOT_FOUND,
@@ -620,6 +625,7 @@ TEST(GroupGetters100, US2_5_NestedAbsentModeA_TagNotFound) {
         << "setup: no room made the sub-table shell the first to fail";
 }
 TEST(GroupGetters100, US2_5_NestedAbsentModeC_TagNotFound) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs =
         step_rooms(order3(), fix44().tv, {}, 0, outer_setup(453, 3), nested_read(0, 802));
     EXPECT_GT(expect_at_kind(obs, alloc_kind::subtable_build, FIXPP_ERR_TAG_NOT_FOUND,
@@ -628,6 +634,7 @@ TEST(GroupGetters100, US2_5_NestedAbsentModeC_TagNotFound) {
         << "setup: no room made the sub-table build the first to fail";
 }
 TEST(GroupGetters100, US2_5_NestedPresentScalarModeA_TypeMismatch) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs =
         step_rooms(order3(), fix44().tv, {}, 0, outer_setup(453, 3), nested_read(0, 447));
     EXPECT_GT(expect_at_kind(obs, alloc_kind::subtable, FIXPP_ERR_TYPE_MISMATCH,
@@ -636,6 +643,7 @@ TEST(GroupGetters100, US2_5_NestedPresentScalarModeA_TypeMismatch) {
         << "setup: no room made the sub-table shell the first to fail";
 }
 TEST(GroupGetters100, US2_5_NestedPresentScalarModeC_TypeMismatch) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs =
         step_rooms(order3(), fix44().tv, {}, 0, outer_setup(453, 3), nested_read(0, 447));
     EXPECT_GT(expect_at_kind(obs, alloc_kind::subtable_build, FIXPP_ERR_TYPE_MISMATCH,
@@ -646,6 +654,7 @@ TEST(GroupGetters100, US2_5_NestedPresentScalarModeC_TypeMismatch) {
 // T010's record-miss construction under mode (a): registration answers "not registered", and
 // the presence probe, which walks nested instances, finds the tag.
 TEST(GroupGetters100, US2_5_NestedRecordMissModeA_TypeMismatch) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(ae_head() + kAeRecordMiss, fix44().tv, {}, 0, outer_setup(552, 1),
                                 nested_read(0, 802));
     EXPECT_GT(expect_at_kind(obs, alloc_kind::subtable, FIXPP_ERR_TYPE_MISMATCH,
@@ -723,6 +732,7 @@ TEST(GroupGetters100, US2_5_NestedPresentScalarD7_TypeMismatch) {
 // ── D10 (FR-007): the group cache records only completed reads ─────────────────────
 // A lane where no room separates the two allocations records the cell as skipped.
 TEST(GroupGetters100, D10_FlatRowPushFails_WireLimitExceededTwice) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), fix44().tv, {}, 3, no_setup, flat_read(453));
     if (expect_at_kind(obs, alloc_kind::group_row, FIXPP_ERR_WIRE_LIMIT_EXCEEDED,
                        "D10 flat row push / FR-007") == 0U) {
@@ -730,6 +740,7 @@ TEST(GroupGetters100, D10_FlatRowPushFails_WireLimitExceededTwice) {
     }
 }
 TEST(GroupGetters100, D10_FlatSlicesFailAfterRowFits_WireLimitExceededTwice) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto const obs = step_rooms(order3(), fix44().tv, {}, 3, no_setup, flat_read(453));
     if (expect_at_kind(obs, alloc_kind::slices, FIXPP_ERR_WIRE_LIMIT_EXCEEDED,
                        "D10 flat slices / FR-007") == 0U) {
@@ -741,6 +752,7 @@ TEST(GroupGetters100, D10_FlatSlicesFailAfterRowFits_WireLimitExceededTwice) {
 // too, which the same exhausted arena refuses, so that construction cannot tell the push's
 // failure from the slices'.
 TEST(GroupGetters100, D10_NestedRowPushFails_WireLimitExceededTwice) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     std::string const body = header44("D") + kOrd + "453=1\x01" + kParty +
                              "802=0\x01"
                              "54=1\x01";

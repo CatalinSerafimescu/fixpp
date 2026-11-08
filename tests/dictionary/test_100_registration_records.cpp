@@ -42,6 +42,7 @@
 #include <utility>
 #include <vector>
 
+#include "dictionary_internal.hpp"  // detail::SectionWalk
 #include "support/divergent_dicts_100.hpp"
 #include "support/table_view_test_access.hpp"
 
@@ -682,6 +683,186 @@ TEST(RegistrationRecords100, CtxKeyBit_SetGroupFirstCtx) {
     table_view_builder b;
     b.set_group_first_ctx("A", kRoot, kNo, kMember);
     expect_registered_in_one_context_only(std::move(b).build(), "set_group_first_ctx");
+}
+
+// ── T070 (`[const §IX.1]`): the record stores' edge arms ───────────────────────────────
+
+constexpr tag_t kDelimA = 701;
+constexpr tag_t kDelimB = 703;
+
+[[nodiscard]] std::vector<tag_t> as_vec(std::span<tag_t const> s) { return {s.begin(), s.end()}; }
+
+// `wire_group_first_field` / `wire_group_member_tags` answer nothing for a tag whose
+// `group_bit` is clear, even when a record holds it; with the bit set the record answers.
+TEST(RegistrationRecords100, WireLookup_RecordWithoutGroupBit_AnswersNothing) {
+    table_view_builder b;
+    b.add_occurrence_group("A", kRoot, kNo,
+                           fixpp::dict::group_record{.delimiter = kDelimA, .members = {kDelimA}});
+    auto const tv = std::move(b).build();
+    ASSERT_FALSE(table_view_test_access::group_bit(tv, kNo)) << "precondition: bit clear";
+    EXPECT_EQ(tv.wire_group_first_field("A", kRoot, kNo), 0U);
+    EXPECT_TRUE(tv.wire_group_member_tags("A", kRoot, kNo).empty());
+}
+TEST(RegistrationRecords100, WireLookup_RecordWithGroupBit_AnswersTheRecord) {
+    table_view_builder b;
+    b.set_group_first(kNo, kDelimB);
+    b.add_occurrence_group("A", kRoot, kNo,
+                           fixpp::dict::group_record{.delimiter = kDelimA, .members = {kDelimA}});
+    auto const tv = std::move(b).build();
+    EXPECT_EQ(tv.wire_group_first_field("A", kRoot, kNo), kDelimA);
+    EXPECT_EQ(as_vec(tv.wire_group_member_tags("A", kRoot, kNo)), (std::vector<tag_t>{kDelimA}));
+}
+
+// A second record at a key the store holds is dropped: the first record answers.
+TEST(RegistrationRecords100, AddRecord_SecondRecordAtAKey_FirstWins) {
+    table_view_builder b;
+    b.set_group_first(kNo, kDelimA);
+    b.add_occurrence_group(
+        "A", kRoot, kNo,
+        fixpp::dict::group_record{.delimiter = kDelimA, .members = {kDelimA, 702}});
+    b.add_occurrence_group("A", kRoot, kNo,
+                           fixpp::dict::group_record{.delimiter = kDelimB, .members = {kDelimB}});
+    b.add_section_group(kRoot, 705,
+                        fixpp::dict::group_record{.delimiter = kDelimA, .members = {kDelimA}});
+    b.add_section_group(kRoot, 705,
+                        fixpp::dict::group_record{.delimiter = kDelimB, .members = {kDelimB}});
+    b.set_group_first(705, kDelimA);
+    auto const tv = std::move(b).build();
+    EXPECT_EQ(tv.wire_group_first_field("A", kRoot, kNo), kDelimA);
+    EXPECT_EQ(as_vec(tv.wire_group_member_tags("A", kRoot, kNo)),
+              (std::vector<tag_t>{kDelimA, 702}));
+    EXPECT_EQ(tv.wire_group_first_field("A", kRoot, 705), kDelimA);
+    EXPECT_EQ(as_vec(tv.wire_group_member_tags("A", kRoot, 705)), (std::vector<tag_t>{kDelimA}));
+}
+
+// The loaders' section walks over malformed custom dictionaries. Each fixture puts a
+// resolvable section group AFTER the arm it exercises, so an arm that ended the walk
+// instead of skipping one child would lose that group's record.
+using fixpp::test100::div::kDivFields;
+using fixpp::test100::div::ocomp;
+using fixpp::test100::div::ocompref;
+using fixpp::test100::div::ofield;
+using fixpp::test100::div::ogroup;
+using fixpp::test100::div::ogroupref;
+using fixpp::test100::div::omsg;
+using fixpp::test100::div::orch_dict;
+using fixpp::test100::div::orch_types;
+using fixpp::test100::div::xcomp;
+using fixpp::test100::div::xfield;
+using fixpp::test100::div::xgroup;
+using fixpp::test100::div::xml_dict;
+using fixpp::test100::div::xmsg;
+
+[[nodiscard]] table_view load_xml_tv(std::string const& text,
+                                     fixpp::dict::unresolved_group_policy policy =
+                                         fixpp::dict::unresolved_group_policy::fail_closed) {
+    return fixpp::dict::XmlLoader{}
+        .load_from_string(text, std::pmr::get_default_resource(), policy)
+        .as_table_view();
+}
+[[nodiscard]] table_view load_orch_tv(std::string const& text,
+                                      fixpp::dict::unresolved_group_policy policy =
+                                          fixpp::dict::unresolved_group_policy::fail_closed) {
+    return fixpp::dict::OrchestraLoader{}
+        .load_from_string(text, std::pmr::get_default_resource(), policy)
+        .as_table_view();
+}
+// The section record at `(path, no_tag)`, or nullopt.
+[[nodiscard]] std::optional<fixpp::dict::group_record> section_record(table_view const& tv,
+                                                                      std::span<tag_t const> path,
+                                                                      tag_t no_tag) {
+    auto const& sec = table_view_test_access::section_records(tv);
+    auto const it = sec.find(fixpp::dict::make_ctx_query({}, path, no_tag));
+    if (it == sec.end()) {
+        return std::nullopt;
+    }
+    return it->second;
+}
+void expect_record(table_view const& tv, std::span<tag_t const> path, tag_t no_tag, tag_t delim,
+                   std::vector<tag_t> const& members, char const* what) {
+    auto const r = section_record(tv, path, no_tag);
+    ASSERT_TRUE(r.has_value()) << what << ": section record at no_tag " << no_tag;
+    EXPECT_EQ(r->delimiter, delim) << what;
+    EXPECT_EQ(r->members, members) << what;
+}
+
+// The XML loader resolves names in message expansions, so a dictionary that declares no
+// message reaches the walk with names it cannot resolve. An unknown field, component or
+// group name adds nothing, and the walk goes on to the next child.
+TEST(RegistrationRecords100, SectionWalkXml_UnresolvedNames_AreSkipped) {
+    std::string const nope = "<field name='Nope' required='N'/>";
+    auto const tv =
+        load_xml_tv(xml_dict(kDivFields,
+                             xcomp("Nope") + xgroup("NopeGroup", xfield("A1")) + nope +
+                                 xgroup("NoA", xfield("A1") + nope + xcomp("Nope") + xfield("X1")),
+                             "", ""));
+    expect_record(tv, kRoot, 601, 602, {602, 610}, "XML unresolved names");
+}
+// A section group with no member has no delimiter and stores no record (the tolerant
+// policy loads it).
+TEST(RegistrationRecords100, SectionWalkXml_GroupWithoutMember_StoresNoRecord) {
+    auto const tv = load_xml_tv(
+        xml_dict(kDivFields,
+                 "<group name='NoZ' required='N'></group>" + xgroup("NoA", xfield("A1")), "",
+                 xmsg("M", xfield("Text"))),
+        fixpp::dict::unresolved_group_policy::tolerant);
+    EXPECT_FALSE(section_record(tv, kRoot, 606).has_value());
+    expect_record(tv, kRoot, 601, 602, {602}, "XML group after the empty one");
+}
+// The same key in the header and the trailer: the header's record is kept.
+TEST(RegistrationRecords100, SectionWalkXml_SameKeyInHeaderAndTrailer_HeaderWins) {
+    auto const tv = load_xml_tv(xml_dict(kDivFields, xgroup("NoT", xfield("T1") + xfield("T2")),
+                                         xgroup("NoT", xfield("T3") + xfield("T4")),
+                                         xmsg("M", xfield("Text"))));
+    expect_record(tv, kRoot, 630, 631, {631, 632}, "XML header before trailer");
+}
+// A component referenced twice at one path is walked once. Line coverage of the
+// visited refusal: the sink's first-wins rule gives the same store without it.
+TEST(RegistrationRecords100, SectionWalkXml_ComponentTwiceAtOnePath_RecordedOnce) {
+    auto const tv = load_xml_tv(
+        xml_dict(kDivFields, xcomp("CA") + xcomp("CA"), "", xmsg("M", xfield("Text")),
+                 "<component name='CA'>" + xgroup("NoA", xfield("A1")) + "</component>"));
+    expect_record(tv, kRoot, 601, 602, {602}, "XML component twice");
+}
+
+TEST(RegistrationRecords100, SectionWalkOrchestra_GroupWithoutMember_StoresNoRecord) {
+    auto const tv = load_orch_tv(
+        orch_dict(orch_types(kDivFields), ogroupref(2606) + ogroupref(2601), "", "",
+                  ogroup(2606, 606, "") + ogroup(2601, 601, ofield(602)), omsg("M", ofield(58))),
+        fixpp::dict::unresolved_group_policy::tolerant);
+    EXPECT_FALSE(section_record(tv, kRoot, 606).has_value());
+    expect_record(tv, kRoot, 601, 602, {602}, "Orchestra group after the empty one");
+}
+// A group referenced twice at one path, and the trailer reached from inside the header:
+// each definition is walked once at a path. Line coverage of the refusals, as above.
+TEST(RegistrationRecords100, SectionWalkOrchestra_DefinitionTwiceAtOnePath_RecordedOnce) {
+    auto const tv = load_orch_tv(orch_dict(
+        orch_types(kDivFields), ogroupref(2601) + ogroupref(2601) + ocompref(1025), ogroupref(2630),
+        "", ogroup(2601, 601, ofield(602)) + ogroup(2630, 630, ofield(631)),
+        omsg("M", ofield(58))));
+    expect_record(tv, kRoot, 601, 602, {602}, "Orchestra group twice");
+    expect_record(tv, kRoot, 630, 631, {631}, "Orchestra trailer reached from the header");
+}
+// `detail::SectionWalk::enter` directly: a definition already on the current walk is
+// refused whatever the path, which ends a cycle; one visited at a path is refused at that
+// path only. Both loaders' base load paths crash on a component cycle before the walk
+// runs (fixpp#650), so no loader fixture reaches the cycle arm.
+TEST(RegistrationRecords100, SectionWalk_Enter_RefusesOnPathAndVisited) {
+    fixpp::dict::detail::SectionWalk w;
+    int const a = 0;
+    int const b = 0;
+    ASSERT_TRUE(w.enter(&a));
+    EXPECT_FALSE(w.enter(&a)) << "on the current walk, same path";
+    w.path.push_back(601);
+    EXPECT_FALSE(w.enter(&a)) << "on the current walk, another path";
+    EXPECT_TRUE(w.enter(&b)) << "another definition";
+    w.leave();
+    w.leave();
+    EXPECT_TRUE(w.enter(&a)) << "off the walk, a path not visited";
+    w.leave();
+    EXPECT_FALSE(w.enter(&a)) << "visited at this path";
+    w.path.pop_back();
+    EXPECT_FALSE(w.enter(&a)) << "visited at the empty path";
 }
 
 }  // namespace
