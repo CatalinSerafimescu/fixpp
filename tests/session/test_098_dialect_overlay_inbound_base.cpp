@@ -212,8 +212,9 @@ void expect_accepted(BaseRun const& run, std::string_view msg_type) {
     EXPECT_EQ(run.state, fsm_state::Active) << "the session stays Active";
 }
 
-// AS-1: step 1 meets 5001, not in NewOrderSingle's valid tags, and FIX44 does not define it:
-// an undefined tag, 373=0 (101 FR-002 supersedes this cell's 373=2). 101 FR-003 adds the gate
+// AS-1: step 1 meets 5001, not in NewOrderSingle's valid tags; the cell needs 5001 undefined
+// by FIX44 (re-derive with the field-definition grep): an undefined tag, 373=0 (101 FR-002
+// supersedes this cell's 373=2). 101 FR-003 adds the gate
 // Reject's Text(58).
 TEST(DialectOverlayInboundBase098, AS1_CustomFieldOnNewOrderSingle_Rejected) {
     BaseFixture fx;
@@ -222,8 +223,9 @@ TEST(DialectOverlayInboundBase098, AS1_CustomFieldOnNewOrderSingle_Rejected) {
 }
 
 // AS-2: the parse has no group check, so it passes; step 1's walk is flat and
-// meets 5002 inside the Parties entry, which FIX44 does not define: an undefined
-// tag, 373=0 (101 FR-002 supersedes this cell's 373=2). 101 FR-003 adds the gate
+// meets 5002 inside the Parties entry; the cell needs 5002 undefined by FIX44
+// (re-derive with the field-definition grep): an undefined tag, 373=0 (101 FR-002
+// supersedes this cell's 373=2). 101 FR-003 adds the gate
 // Reject's Text(58).
 TEST(DialectOverlayInboundBase098, AS2_CustomPartiesMember_Rejected) {
     BaseFixture fx;

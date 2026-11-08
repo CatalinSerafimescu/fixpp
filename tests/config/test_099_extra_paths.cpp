@@ -288,8 +288,8 @@ TEST(W14Overlay, TheOwnVersionSurvives_ANonOwnExtraStaysPlain) {
         ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
         run.ending =
             run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos() + custom, "1128=6\x01"));
-        // FIX44 (1128=6's route) does not define the extra dictionary's 5001: 373=0 (101 FR-002
-        // supersedes 2).
+        // The cell needs the extra dictionary's 5001 undefined by FIX44, 1128=6's route (re-derive
+        // with the field-definition grep): 373=0 (101 FR-002 supersedes 2).
         expect_ending(run, "R 0/5001 D 45=2 | stays | c | app=0 adm=0");
     }
 }

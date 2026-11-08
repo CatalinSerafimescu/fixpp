@@ -175,8 +175,8 @@ TEST(W1Tag370, Before1128_FIX42Route_Delivered) {
     expect_ending(run, kDelivered);
 }
 
-// 370 is defined by FIX42 and FIX43 only (field-definition grep), so FIX50SP2's route refuses it as
-// an undefined tag, 373=0 (101 FR-002 supersedes these cells' 373=2).
+// These cells need 370 undefined by FIX50SP2, the route (re-derive with the field-definition
+// grep), so it is refused as an undefined tag, 373=0 (101 FR-002 supersedes these cells' 373=2).
 TEST(W1Tag370, After1128_FIX50SP2Route_Rejected) {
     const CellRun run = run_own_cell(
         "W-1 1128=9 370", t_with_fix42(), /*validate=*/true, Arm::Active,

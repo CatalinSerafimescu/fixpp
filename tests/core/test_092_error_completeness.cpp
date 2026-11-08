@@ -35,8 +35,8 @@ TEST(Error092Completeness, ExactSetEquality) {
     EXPECT_EQ(static_cast<std::uint8_t>(error::app_payload_malformed), 131U);
 
     // Message-table boundary: both 092 slots carry a message. The slot after
-    // the newest block is pinned by that block's gate (101 moved it to
-    // tests/core/test_101_error_completeness.cpp).
+    // the newest block is pinned by that block's gate
+    // (tests/core/test_101_error_completeness.cpp).
     EXPECT_NE(fixpp::core::error_message(error::wire_invalid_tag_number),
               std::string_view{"unknown error"});
     EXPECT_NE(fixpp::core::error_message(error::wire_length_data_mismatch),

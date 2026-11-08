@@ -619,8 +619,8 @@ TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
     fix.open_to_active(sess);
 
     // ── (a) Feed violation frame: 280 undefined tags → must produce Reject(373=0) ──
-    // The tags are defined by no dictionary (101 FR-002 supersedes this cell's 373=2), re-derive
-    // with the field-definition grep over dictionaries/*.xml.
+    // The cell needs the tags undefined by the session dictionary (101 FR-002 supersedes this
+    // cell's 373=2); re-derive with the field-definition grep over dictionaries/*.xml.
     //
     // Total entries: 7 header fields (8,9,35,49,56,34,52) + 3 required body fields
     // (11,54,60) + 280 undefined (9000-9279) = 290.  Needs cap-512 (next power of 2

@@ -200,8 +200,8 @@ TEST(W14Live, ReachesActive_1128Routes) {
     ASSERT_EQ(seen.versions.size(), 1U);
     EXPECT_EQ(seen.versions[0], dd::application_version::vlatest);
     EXPECT_EQ(seen.last_3115, "1.5");
-    // The negotiated version, FIX50SP2, does not define 3115 (FIX Latest only, field-definition
-    // grep): an undefined tag, 373=0 (101 FR-002 supersedes 2).
+    // The cell needs 3115 undefined by the negotiated version, FIX50SP2 (re-derive with the
+    // field-definition grep): an undefined tag, 373=0 (101 FR-002 supersedes 2).
     EXPECT_EQ(frame_field(reject, 373), "0");
     EXPECT_EQ(frame_field(reject, 371), "3115");
     EXPECT_EQ(frame_field(reject, 372), "D");

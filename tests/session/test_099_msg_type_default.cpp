@@ -551,8 +551,8 @@ std::string nos_3115(const Rig& r, unsigned seq) {
 }
 
 constexpr const char* kDelivered = "- | stays | c | app=1 adm=0";
-// 3115 is defined by FIX Latest only (field-definition grep), and every route that refuses it is
-// another version's: 373=0 (101 FR-002 supersedes 2).
+// Every cell that expects this needs 3115 undefined by the route that refuses it (re-derive with
+// the field-definition grep): 373=0 (101 FR-002 supersedes 2).
 constexpr const char* kRefused3115 = "R 0/3115 D 45=2 | stays | c | app=0 adm=0";
 
 // D's entry among `kept`, or 1137's version, which every cell here negotiates.
@@ -737,7 +737,8 @@ TEST_P(W25AfterMtA, AnotherMsgType_FieldOnlyLatestDeclaresIsRefused) {
     Rig& r = *run_.rig;
     const std::string field = std::to_string(tag) + "=" + plain_value(*latest(), *f) + "\x01";
     run_.ending = r.deliver(frame_35("F", r.peer_ctx(2), kCancelBody() + field));
-    // 101 FR-002: 373 is 2 when FIX50SP2, the route, defines the tag, else 0 (test_101_tag_class.hpp).
+    // 101 FR-002: 373 is 2 when FIX50SP2, the route, defines the tag, else 0
+    // (test_101_tag_class.hpp).
     expect_ending(run_, "R " + test101::outside_tag_reason("FIX50SP2.xml", tag) + "/" +
                             std::to_string(tag) + " F 45=2 | stays | c | app=0 adm=0");
 }

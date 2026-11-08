@@ -23,8 +23,10 @@
 namespace fixpp::session::test099 {
 namespace {
 
-// 101 FR-002 supersedes the `5999` rows' 373=2: no dictionary defines 5999 (field-definition grep
-// over dictionaries/*.xml and the Orchestra file), so each is an undefined tag, 373=0.
+// 101 FR-002 supersedes the `5999` rows' 373=2: they need 5999 undefined by the judging
+// dictionary (re-derive with the field-definition grep, `<field number=…>` per
+// dictionaries/*.xml and `<fixr:field id=…>` in the Orchestra file), so each is an undefined tag,
+// 373=0.
 const KeyedRow kActiveRows[] = {
     {.cell = "AC-a", .input = "rep35 D..0 past", .t = "R 14/35 D 45=2 | stays | c | app=0 adm=0"},
     {.cell = "AC-a", .input = "rep35 D..3 past", .t = "R 14/35 D 45=2 | stays | c | app=0 adm=0"},

@@ -699,8 +699,8 @@ StrictVerdict validate_fix44_nos(dd::table_view table) {
     return out;
 }
 
-// FIX 4.4 does not define 1128, so the refusal is an undefined tag (101 FR-002 supersedes this
-// cell's wire_unexpected_tag).
+// The cell needs 1128 undefined by FIX 4.4 (re-derive with the field-definition grep), so the
+// refusal is an undefined tag (101 FR-002 supersedes this cell's wire_unexpected_tag).
 TEST(W17Fix44, PlainTableStrictValidationRejects1128) {
     const StrictVerdict v = validate_fix44_nos(vendored("FIX44.xml").as_table_view());
     EXPECT_FALSE(v.ok);

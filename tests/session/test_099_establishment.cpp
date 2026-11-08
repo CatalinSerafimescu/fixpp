@@ -30,9 +30,10 @@ namespace {
 
 // ── Validating ──────────────────────────────────────────────────────────────────────────
 
-// 101 FR-002 supersedes the `5999` rows' 373=2 here and in kLogonSent: no dictionary defines 5999
-// (field-definition grep over dictionaries/*.xml and the Orchestra file), so each is an undefined
-// tag, 373=0.
+// 101 FR-002 supersedes the `5999` rows' 373=2 here and in kLogonSent: they need 5999 undefined
+// by the judging dictionary (re-derive with the field-definition grep, `<field number=…>` per
+// dictionaries/*.xml and `<fixr:field id=…>` in the Orchestra file), so each is an undefined tag,
+// 373=0.
 const KeyedRow kNotConnected[] = {
     {.cell = "NC-e", .input = "Logon 1137 absent", .t = "R 1/1137 A 45=1 | Disc | k | app=0 adm=0"},
     {.cell = "NC-e", .input = "Logon 1137=empty", .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0"},
