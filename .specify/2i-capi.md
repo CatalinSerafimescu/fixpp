@@ -1220,7 +1220,7 @@ fixpp_error_t fixpp_msg_group_end(fixpp_msg_t*           msg,
 | 4 | the tag is registered and zero instances are read: declared count 0 (a value with no leading digit reads as 0), a count field last in its instance, or a declared count whose next field is not a member | `FIXPP_ERR_OK` | null | 0 |
 | 5 | the tag is registered and n ≥ 1 instances are read | `FIXPP_ERR_OK` | cursor | n |
 
-No exception leaves either getter: a cursor shell that does not fit returns row 2 (see §5.2, §5.4 and §6.2's 1.15 amendments). Changes from 1.14 (BREAKING), each witnessed RED on `fa778a8e` (100 research D9):
+No exception leaves either getter: a cursor shell that does not fit returns row 2 (see §5.2, §5.4 and §6.2's 1.15 amendments). Changes from 1.14 (BREAKING), each witnessed RED on `fa778a8e` (100 research D9); the endings marked "derived from source" below were confirmed by the RED run at `H0` (`95712716`), recorded in the 100 evidence file (`.specify/decisions/100-wire-group-read-integrity-evidence.md`, T020):
 
 Each is witnessed RED on `fa778a8e` (research D9).
 
