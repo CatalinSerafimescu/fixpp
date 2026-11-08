@@ -311,6 +311,14 @@ const void* Session::callback_thread_tag_() noexcept {
     assert(callback_depth_ == 0 &&                                      \
            "inbound parse begun inside a callback of the same session " \
            "(on_inbound_frame() called from an application callback?)")
+// 101-inbound-reject-fidelity D7 (FR-008): an inbound reply takes the session's inbound reply
+// slot only while the slot is free; on_inbound_frame calls that overlap on the same Session are
+// outside its contract. Evaluated by inbound_reply_slot_hold::take before it sets the flag.
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define FIXPP_ASSERT_INBOUND_REPLY_SLOT_FREE()                               \
+    assert(!s_->inbound_reply_slot_held_ &&                                  \
+           "inbound reply slot taken while another inbound reply holds it " \
+           "(overlapping on_inbound_frame() calls on one Session?)")
 // The stack-arena overload of parse_and_dispatch_ evaluates this after its
 // callback_dispatch_scope is constructed and before it raises the outbound depth.
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
@@ -2685,6 +2693,62 @@ public:
 
 }  // namespace
 
+// 101-inbound-reject-fidelity D7 (FR-007, FR-008): the inbound reply slot and the echo policy of
+// the inbound-fed Reject and BusinessMessageReject sites. Every build here runs after the site's
+// peek_outbound() and SendingTime stamp, which it is passed, and before the site's first
+// callback and assign_outbound(), so no attempt re-numbers, re-stamps or calls back twice.
+std::span<std::byte> Session::inbound_reply_slot_hold::take() noexcept {
+    if (!taken_) {
+        FIXPP_ASSERT_INBOUND_REPLY_SLOT_FREE();
+        s_->inbound_reply_slot_held_ = true;
+        taken_ = true;
+    }
+    return std::span<std::byte>{s_->inbound_reply_slot_};
+}
+
+fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_reject_(
+    std::span<std::byte> site, inbound_reply_slot_hold& hold, seqnum_t seq, seqnum_t ref_seq,
+    int ref_tag_id, std::string_view ref_msg_type, int reason, std::string_view sending_time,
+    std::string_view text) noexcept {
+    // Every frame rebuilt in the slot is one the resend replay can capture.
+    static_assert(kSendFrameBytes <= CaptureVisitor::kCapBufSize);
+    auto const build = [&](std::span<std::byte> out, std::string_view rmt) {
+        return fixpp::session::build_reject_with_text(out, seq, cfg_.sender_comp_id,
+                                                      cfg_.target_comp_id, ref_seq, ref_tag_id,
+                                                      rmt, reason, cfg_.begin_string,
+                                                      sending_time, text);
+    };
+    auto r = build(site, ref_msg_type);
+    if (r || r.error() != fixpp::core::error::wire_field_value_truncated) {
+        return r;
+    }
+    r = build(hold.take(), ref_msg_type);
+    if (r || r.error() != fixpp::core::error::wire_field_value_truncated || ref_msg_type.empty()) {
+        return r;
+    }
+    // 372 is optional in a Reject: above the ceiling it is sent without it; Text(58) stays.
+    return build(hold.take(), std::string_view{});
+}
+
+fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_business_reject_(
+    std::span<std::byte> site, inbound_reply_slot_hold& hold, seqnum_t seq, seqnum_t ref_seq,
+    std::string_view ref_msg_type, std::string_view sending_time) noexcept {
+    static_assert(kSendFrameBytes <= CaptureVisitor::kCapBufSize);
+    auto const build = [&](std::span<std::byte> out) {
+        return fixpp::session::build_business_message_reject(
+            out, seq, cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
+            ref_msg_type,  // RefMsgType(372)
+            0,             // BusinessRejectReason(380) = Other
+            cfg_.begin_string, sending_time);
+    };
+    auto r = build(site);
+    if (r || r.error() != fixpp::core::error::wire_field_value_truncated) {
+        return r;
+    }
+    // 372 is required in a BusinessMessageReject: there is no step without it.
+    return build(hold.take());
+}
+
 // 070-fix44-closeout S-029 — refuse an inbound Logon on a 464 posture mismatch (or
 // malformed 464): emit Logout(35=5) carrying reason_text, then Disconnected — the
 // session never reaches Active. Mirrors the Logon-time Logout+disconnect disposition
@@ -2736,23 +2800,24 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout
 // inline form — only the two sites with identical Disconnected-on-fail handling
 // are extracted here.
 //
-// Returns expected_t<void>{} on success or build-failure (not fatal if build fails).
+// Returns expected_t<void>{} on success, or when the Reject is not sent because it exceeds the
+// outbound ceiling even without 372 (101-inbound-reject-fidelity D7's outbound-ceiling ending; a
+// Reject that overflows only this site's buffer is rebuilt in the inbound reply slot and sent).
 // Returns unexpected(error) on assign_outbound / store_then_emit failure, after
 // recording Disconnected. Caller should propagate with co_return std::unexpected(…).
 // [019-app-callbacks T011/T016; FR-005; D4; INV-4]
 asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
     seqnum_t ref_seq, std::string_view ref_msg_type) noexcept {
-    std::array<std::byte, 512> rj_buf{};
+    std::array<std::byte, kEmitRejectBytes> rj_buf{};
+    inbound_reply_slot_hold hold{*this};
     const auto rj_st52 = effective_clock_
                              ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
                              : SendingTimeStamp{};
     const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
-    auto rj_r =
-        fixpp::session::build_reject(std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
-                                     cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
-                                     0,                // RefTagID: n/a for MsgType/veto rejection
-                                     ref_msg_type, 3,  // SessionRejectReason = 3
-                                     cfg_.begin_string, rj_st52.value);
+    auto rj_r = build_inbound_reject_(rj_buf, hold, rj_seq, ref_seq,
+                                      0,                // RefTagID: n/a for MsgType/veto rejection
+                                      ref_msg_type, 3,  // SessionRejectReason = 3
+                                      rj_st52.value, std::string_view{});
     if (rj_r) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
@@ -2796,15 +2861,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
     seqnum_t ref_seq, std::string_view ref_msg_type, int reason, int ref_tag_id,
     std::string_view text, std::optional<fsm_state> arm) noexcept {
-    std::array<std::byte, 512> rj_buf{};
+    std::array<std::byte, kEmitRejectTextBytes> rj_buf{};
+    inbound_reply_slot_hold hold{*this};
     const auto rj_st52 = effective_clock_
                              ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
                              : SendingTimeStamp{};
     const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
-    auto rj_r = fixpp::session::build_reject_with_text(
-        std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq, cfg_.sender_comp_id,
-        cfg_.target_comp_id, ref_seq, ref_tag_id, ref_msg_type, reason, cfg_.begin_string,
-        rj_st52.value, text);
+    auto rj_r = build_inbound_reject_(rj_buf, hold, rj_seq, ref_seq, ref_tag_id, ref_msg_type,
+                                      reason, rj_st52.value, text);
     if (rj_r) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
@@ -3324,9 +3388,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::dispose_unparseable_(
 // NOLINTEND(cppcoreguidelines-macro-usage,bugprone-macro-parentheses)
 
 // fixpp#544 §2.2 class 2: reply leaves. Each owns the buffer its frame is built in, because
-// store_then_emit transmits the caller's span after the store suspends. A leaf is awaited
-// directly by its arm, so the views it takes (sending_time, ref_msg_type, test_req_id) point
-// into storage that outlives the await.
+// store_then_emit transmits the caller's span after the store suspends; a Reject or
+// BusinessMessageReject that overflows that buffer is rebuilt in the inbound reply slot, which
+// the leaf's holder keeps until its tail returns (101-inbound-reject-fidelity D7). A leaf is
+// awaited directly by its arm, so the views it takes (sending_time, ref_msg_type, test_req_id)
+// point into storage that outlives the await.
 
 // Reject(35=3); assign_outbound before toAdmin. A failed assign or a throwing toAdmin
 // disconnects and returns the error; the emit's returned error is discarded (store_then_emit's
@@ -3335,12 +3401,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_reject_leaf_(
     bool tic, seqnum_t ref_seq, int ref_tag_id, std::string_view ref_msg_type, int reason,
     std::string_view sending_time, std::optional<fsm_state> arm) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
-    std::array<std::byte, 512> rj_buf{};
+    std::array<std::byte, kRejectLeafBytes> rj_buf{};
+    inbound_reply_slot_hold hold{*this};
     const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
-    auto rj_r =
-        fixpp::session::build_reject(std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
-                                     cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq, ref_tag_id,
-                                     ref_msg_type, reason, cfg_.begin_string, sending_time);
+    auto rj_r = build_inbound_reject_(rj_buf, hold, rj_seq, ref_seq, ref_tag_id, ref_msg_type,
+                                      reason, sending_time, std::string_view{});
     if (rj_r) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
@@ -3366,10 +3431,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_reject_best_effo
     std::string_view sending_time) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
     const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
-    std::array<std::byte, 512> rj_buf{};
-    auto rj_r = fixpp::session::build_reject(
-        std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq, cfg_.sender_comp_id,
-        cfg_.target_comp_id, ref_seq, 0, ref_msg_type, 3, cfg_.begin_string, sending_time);
+    std::array<std::byte, kRejectBestEffortBytes> rj_buf{};
+    inbound_reply_slot_hold hold{*this};
+    auto rj_r = build_inbound_reject_(rj_buf, hold, rj_seq, ref_seq, 0, ref_msg_type, 3,
+                                      sending_time, std::string_view{});
     if (rj_r) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (assign_r) {
@@ -3527,13 +3592,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_business_reject_
     std::string_view sending_time) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
     const seqnum_t bmr_seq = seqnum_mgr_.peek_outbound();
-    std::array<std::byte, 512> bmr_buf{};
-    auto bmr_r = fixpp::session::build_business_message_reject(
-        std::span<std::byte>{bmr_buf.data(), bmr_buf.size()}, bmr_seq, cfg_.sender_comp_id,
-        cfg_.target_comp_id, ref_seq,
-        ref_msg_type,  // RefMsgType(372)
-        0,             // BusinessRejectReason(380) = Other
-        cfg_.begin_string, sending_time);
+    std::array<std::byte, kBusinessRejectLeafBytes> bmr_buf{};
+    inbound_reply_slot_hold hold{*this};
+    auto bmr_r =
+        build_inbound_business_reject_(bmr_buf, hold, bmr_seq, ref_seq, ref_msg_type, sending_time);
     if (bmr_r) {
         // 036 C2: route 35=j through toApp before assign_outbound.
         // toApp fires BEFORE seqnum assignment so a veto consumes

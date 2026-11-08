@@ -25,6 +25,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -156,6 +157,8 @@ public:
     std::vector<std::string> to_admin_372;  // RefMsgType(372) of each toAdmin view, or "<absent>"
     std::vector<std::string> to_app_372;
     std::function<void()> to_admin_probe;  // run at each toAdmin, when a cell sets it
+    bool veto_to_app = false;              // toApp answers app_do_not_send
+    bool throw_to_app = false;             // toApp throws
 
     expected_t<void> fromApp(const View&, const SessionId&) override {
         ++from_app;
@@ -178,6 +181,12 @@ public:
     expected_t<void> toApp(const View& v, const SessionId&) override {
         ++to_app;
         to_app_372.push_back(t99::field_text(v, 372));
+        if (throw_to_app) {
+            throw std::runtime_error("toApp throws");
+        }
+        if (veto_to_app) {
+            return std::unexpected(fixpp::core::error::app_do_not_send);
+        }
         return {};
     }
 };

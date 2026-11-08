@@ -303,6 +303,12 @@ public:
     //   on_inbound_frame() — session-strand; engine's transport feeds it after
     //                        parse/frame-validate; inbound ordering: store(inbound)
     //                        completes BEFORE fromAdmin/fromApp is dispatched.
+    //                        A caller co_awaits each call to completion before it
+    //                        makes the next on the same Session; overlapping calls
+    //                        are outside this contract, and builds with assertions
+    //                        assert it where an inbound reply takes the session's
+    //                        inbound reply slot (101-inbound-reject-fidelity D7,
+    //                        FR-008).
     //   send()             — session-strand; durable-before-transmit (I-3):
     //                        store(seq, committed, outbound) BEFORE transport write.
     //                        Started inside toApp or toAdmin of this session it
@@ -2026,6 +2032,56 @@ private:
     std::array<std::byte, kSendFrameBytes> send_body_scratch_{};
     std::array<std::byte, kSendFrameBytes> send_frame_slot_{};
     bool send_slot_in_use_ = false;
+
+    // 101-inbound-reject-fidelity D7 (FR-007, FR-008): the inbound reply slot. A session Reject
+    // or BusinessMessageReject answering an inbound frame is built in its site's own buffer
+    // (the sizes below); when that build runs out of room it is rebuilt here, up to the
+    // outbound ceiling kSendFrameBytes. Allocated with the Session, as send_frame_slot_ is.
+    // Only the inbound reply sites use it, and the holder (inbound_reply_slot_hold) keeps
+    // inbound_reply_slot_held_ set from the rebuild until the site's tail returns.
+    std::array<std::byte, kSendFrameBytes> inbound_reply_slot_{};
+    bool inbound_reply_slot_held_ = false;
+    // Each inbound reply site's own buffer: a frame that fits is built there, as before.
+    static constexpr std::size_t kEmitRejectBytes = 512;          // emit_session_reject_ (2 args)
+    static constexpr std::size_t kEmitRejectTextBytes = 512;      // emit_session_reject_ (text)
+    static constexpr std::size_t kRejectLeafBytes = 512;          // inbound_reject_leaf_
+    static constexpr std::size_t kRejectBestEffortBytes = 512;    // the best-effort Reject leaf
+    static constexpr std::size_t kBusinessRejectLeafBytes = 512;  // inbound_business_reject_leaf_
+
+    // Sets inbound_reply_slot_held_ when a rebuild takes the slot, and clears it when the
+    // site's coroutine frame releases the holder: on every return, a throw, or the frame's
+    // destruction by a close.
+    class inbound_reply_slot_hold {
+    public:
+        explicit inbound_reply_slot_hold(Session& s) noexcept : s_(&s) {}
+        inbound_reply_slot_hold(const inbound_reply_slot_hold&) = delete;
+        inbound_reply_slot_hold& operator=(const inbound_reply_slot_hold&) = delete;
+        inbound_reply_slot_hold(inbound_reply_slot_hold&&) = delete;
+        inbound_reply_slot_hold& operator=(inbound_reply_slot_hold&&) = delete;
+        ~inbound_reply_slot_hold() {
+            if (taken_) {
+                s_->inbound_reply_slot_held_ = false;
+            }
+        }
+        // The slot, taken for this holder. Defined in session.cpp, where the assertion is.
+        [[nodiscard]] std::span<std::byte> take() noexcept;
+
+    private:
+        Session* s_;
+        bool taken_ = false;
+    };
+    // The echo policy (research D7 steps 1 to 4) for a session Reject and for a
+    // BusinessMessageReject: built in `site` with 372 = `ref_msg_type` verbatim; on
+    // wire_field_value_truncated, rebuilt with 372 in the slot `hold` takes; a Reject only,
+    // when that also runs out of room and the MsgType is not empty, rebuilt once more without
+    // 372. An error means nothing is sent. Non-coroutines: they neither suspend nor call back.
+    [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_inbound_reject_(
+        std::span<std::byte> site, inbound_reply_slot_hold& hold, seqnum_t seq, seqnum_t ref_seq,
+        int ref_tag_id, std::string_view ref_msg_type, int reason, std::string_view sending_time,
+        std::string_view text) noexcept;
+    [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_inbound_business_reject_(
+        std::span<std::byte> site, inbound_reply_slot_hold& hold, seqnum_t seq, seqnum_t ref_seq,
+        std::string_view ref_msg_type, std::string_view sending_time) noexcept;
 };
 
 }  // namespace fixpp::session

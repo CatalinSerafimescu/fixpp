@@ -213,6 +213,39 @@ struct session_test_access {
         return Session::kSendFrameBytes;
     }
 
+    // 101-inbound-reject-fidelity D7 (tasks.md T046): whether an inbound reply holds the inbound
+    // reply slot, and each inbound reply site's own buffer, read by name.
+    [[nodiscard]] static bool inbound_reply_slot_held(Session const& s) noexcept {
+        return s.inbound_reply_slot_held_;
+    }
+    // The slot's bytes: a cell clears them before a reply and reads afterwards whether the
+    // reply was rebuilt there.
+    [[nodiscard]] static std::span<std::byte> inbound_reply_slot(Session& s) noexcept {
+        return std::span<std::byte>{s.inbound_reply_slot_};
+    }
+    struct reply_site_bytes {
+        std::size_t emit_reject;
+        std::size_t emit_reject_text;
+        std::size_t reject_leaf;
+        std::size_t reject_best_effort;
+        std::size_t business_reject_leaf;
+    };
+    [[nodiscard]] static constexpr reply_site_bytes reply_site_buffer_bytes() noexcept {
+        return {.emit_reject = Session::kEmitRejectBytes,
+                .emit_reject_text = Session::kEmitRejectTextBytes,
+                .reject_leaf = Session::kRejectLeafBytes,
+                .reject_best_effort = Session::kRejectBestEffortBytes,
+                .business_reject_leaf = Session::kBusinessRejectLeafBytes};
+    }
+    // The best-effort Reject leaf (answers a fromAdmin reject of SequenceReset or Logout), for
+    // its unit cell (tasks.md T047): the awaitable, which the cell spawns on the session's
+    // executor.
+    [[nodiscard]] static asio::awaitable<fixpp::core::expected_t<void>>
+    inbound_reject_best_effort_leaf(Session& s, seqnum_t ref_seq, std::string_view ref_msg_type,
+                                    std::string_view sending_time) {
+        return s.inbound_reject_best_effort_leaf_(false, ref_seq, ref_msg_type, sending_time);
+    }
+
     // Enters a callback_dispatch_scope on `s`, as a callback site of the session does,
     // without a callback running; the scope ends when the returned object is destroyed
     // (fixpp#564). The scope touches the guard's state only, so a session that was never

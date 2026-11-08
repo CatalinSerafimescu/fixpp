@@ -318,6 +318,12 @@ add_session_101_bucket(session_101_tests
   test_101_repeat_walk.cpp                                              # 101 T011 (W101-29)
   test_101_interpret_logon.cpp                                          # 101 T012 (W101-30)
   test_101_echo.cpp                                                     # 101 T013 (W101-40..48)
+  test_101_reply_slot.cpp                                               # 101 T044 (W101-46b, 49)
+)
+# 101 T045 (W101-46a): an abort path, so its own executable ([const §VII.8]); its cell runs where
+# NDEBUG is not defined.
+add_session_101_bucket(session_101_reply_slot_death_test
+  test_101_reply_slot_death.cpp
 )
 
 # 099 W-5's, W-6's and W-25's reconnect cells drive drive_reconnect() through MockReconnectFactory,
