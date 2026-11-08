@@ -523,7 +523,9 @@ TEST_P(W12Shape, ReachesActive_RoutesAccepts_RoutesRejects_ReadsItsVersion) {
     }
 
     EXPECT_TRUE(reject_3115.has_value()) << "no Reject for 3115 on the negotiated version";
-    EXPECT_EQ(frame_field(reject_3115.value_or(""), 373), "2");
+    // FIX50SP2 does not define 3115 (FIX Latest only, field-definition grep): an undefined tag,
+    // 373=0 (101 FR-002 supersedes 2).
+    EXPECT_EQ(frame_field(reject_3115.value_or(""), 373), "0");
     EXPECT_EQ(frame_field(reject_3115.value_or(""), 371), "3115");
     EXPECT_EQ(frame_field(reject_3115.value_or(""), 372), "D");
     EXPECT_EQ(frame_field(reject_3115.value_or(""), 45), "4");

@@ -551,9 +551,12 @@ TEST(ValidatorTypeCheck, ValidateFieldIntNonDigitReturnsSpecificError) {
         << "expected wire_field_value_out_of_range (slot 40)";
 }
 
-// ── Round-2: validate() — unexpected tag → wire_unexpected_tag ───────────────
+// ── validate() — a tag outside the message ──────────────────────────────────
 // When a tag is present in the message but NOT in field_valid_for(), validate()
-// must return wire_unexpected_tag (42) on the first such field.
+// refuses the first such field: wire_unexpected_tag when the table defines the
+// tag, wire_undefined_tag when it does not (101 FR-002, research D1). Here no
+// population operation names 49, so it is undefined (101 supersedes this cell's
+// wire_unexpected_tag).
 
 TEST(ValidatorTypeCheck, ValidateUnexpectedTagReturnsError) {
     // Build a dict that knows msg_type "D" with only tags 8,9,10,35.
@@ -575,8 +578,7 @@ TEST(ValidatorTypeCheck, ValidateUnexpectedTagReturnsError) {
 
     auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value()) << "validate() must reject an unexpected tag";
-    EXPECT_EQ(result.error(), error::wire_unexpected_tag)
-        << "expected wire_unexpected_tag (slot 42)";
+    EXPECT_EQ(result.error(), error::wire_undefined_tag) << "expected wire_undefined_tag";
 }
 
 // ── Round-2: validate() — required field missing → wire_required_field_missing

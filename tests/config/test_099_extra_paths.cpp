@@ -288,7 +288,9 @@ TEST(W14Overlay, TheOwnVersionSurvives_ANonOwnExtraStaysPlain) {
         ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
         run.ending =
             run.rig->deliver(frame_35("D", run.rig->peer_ctx(2), kNos() + custom, "1128=6\x01"));
-        expect_ending(run, "R 2/5001 D 45=2 | stays | c | app=0 adm=0");
+        // FIX44 (1128=6's route) does not define the extra dictionary's 5001: 373=0 (101 FR-002
+        // supersedes 2).
+        expect_ending(run, "R 0/5001 D 45=2 | stays | c | app=0 adm=0");
     }
 }
 

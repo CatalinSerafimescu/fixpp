@@ -22,7 +22,8 @@
 //
 // 101-inbound-reject-fidelity D2 supersedes the step order below Step 0: a MsgType the table does
 // not define is refused (wire_invalid_msg_type) after Step 0 and before Step 1, which reuses the
-// same valid-tag view.
+// same valid-tag view; Step 1 refuses a tag outside the message as wire_unexpected_tag when the
+// table defines it and wire_undefined_tag when it does not.
 //
 // 099-fixt-appl-version-validation (data-model E-4, FR-008): dictionary_driven_validator gains a
 // non-virtual validate() taking the session dictionary's table as an envelope, and table(). Neither
@@ -148,7 +149,8 @@ public:
     //      MsgType: one the table does not define → wire_invalid_msg_type
     //      (101 D2), no RefTagID.
     //   1. Iterate each field via begin/end; for each:
-    //      a. Unexpected tag  → wire_unexpected_tag (42)
+    //      a. Tag outside the message → wire_unexpected_tag (42) when the
+    //         table defines it, wire_undefined_tag when it does not (101 D2)
     //      b. Enum violation  → wire_field_value_out_of_range (40)
     //      c. Type structural → wire_field_value_out_of_range (40) /
     //                           wire_field_value_truncated (41) [Float path]
@@ -601,10 +603,16 @@ private:
             // term only runs on an already-failing lookup, adding no cost to
             // the pre-081 accept path (T023 perf note). A FIXT framing tag
             // (populated by Dictionary::as_table_view()'s forms — dictionary.hpp)
-            // passes here instead of rejecting wire_unexpected_tag.
+            // passes here instead of being refused.
+            // 101 D2 (FR-002): a refused tag the table defines elsewhere answers
+            // wire_unexpected_tag (373=2), one it does not define wire_undefined_tag
+            // (373=0). The walk is flat, so a tag inside a group instance is told apart
+            // here too, with no group-specific code.
             if (!valid_tags.contains(fld.tag) && !dict_.is_fixt_framing_tag(fld.tag)) {
                 set_ref_tag(ref_tag_out, fld.tag);
-                return core::expected_t<void>{std::unexpect, core::error::wire_unexpected_tag};
+                return core::expected_t<void>{std::unexpect, dict_.tag_defined(fld.tag)
+                                                                 ? core::error::wire_unexpected_tag
+                                                                 : core::error::wire_undefined_tag};
             }
 
             // (b) Enum validity check

@@ -22,7 +22,8 @@
 //     MsgType dispatch: `dictionary_driven_validator::validate` checks the header
 //     order, then refuses a MsgType the table does not define (101 FR-001: 373=11,
 //     no 371), then walks every field from BeginString(8) in document order
-//     (step 1: a tag outside the message, then enum, then type), then the required
+//     (step 1: a tag outside the message, 373=0 when the table does not define it and 2 when it
+//     does (101 FR-002), then enum, then type), then the required
 //     fields (step 2), then the groups (step 3); its error maps to 373 through
 //     `wire_error_to_session_reject_reason` (include/fixpp/wire/reject_reason_map.hpp),
 //     its offending tag is 371, and `emit_session_reject_` writes 45 (the frame's
@@ -211,21 +212,23 @@ void expect_accepted(BaseRun const& run, std::string_view msg_type) {
     EXPECT_EQ(run.state, fsm_state::Active) << "the session stays Active";
 }
 
-// AS-1: step 1 meets 5001, not in NewOrderSingle's valid tags (unexpected tag). 101 FR-003
-// adds the gate Reject's Text(58).
+// AS-1: step 1 meets 5001, not in NewOrderSingle's valid tags, and FIX44 does not define it:
+// an undefined tag, 373=0 (101 FR-002 supersedes this cell's 373=2). 101 FR-003 adds the gate
+// Reject's Text(58).
 TEST(DialectOverlayInboundBase098, AS1_CustomFieldOnNewOrderSingle_Rejected) {
     BaseFixture fx;
-    expect_reject(fx.feed_one(f098::frame_as1_custom_field(2)), "D", "2", "5001",
-                  "Tag not defined for this message type");
+    expect_reject(fx.feed_one(f098::frame_as1_custom_field(2)), "D", "0", "5001",
+                  "Invalid tag number");
 }
 
 // AS-2: the parse has no group check, so it passes; step 1's walk is flat and
-// meets 5002 inside the Parties entry (unexpected tag). 101 FR-003 adds the
-// gate Reject's Text(58).
+// meets 5002 inside the Parties entry, which FIX44 does not define: an undefined
+// tag, 373=0 (101 FR-002 supersedes this cell's 373=2). 101 FR-003 adds the gate
+// Reject's Text(58).
 TEST(DialectOverlayInboundBase098, AS2_CustomPartiesMember_Rejected) {
     BaseFixture fx;
-    expect_reject(fx.feed_one(f098::frame_as2_parties_member(2)), "D", "2", "5002",
-                  "Tag not defined for this message type");
+    expect_reject(fx.feed_one(f098::frame_as2_parties_member(2)), "D", "0", "5002",
+                  "Invalid tag number");
 }
 
 // AS-3: U1 is not a FIX44 MsgType, so the validator refuses it as an invalid

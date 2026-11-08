@@ -216,21 +216,24 @@ TEST_P(W3UnitHeaderTag, JudgedByTheEnvelope) {
 }
 
 // The comparand: with no envelope the routed table, which does not declare the tag, refuses it. So
-// a pass above is the envelope's doing, not the route's.
+// a pass above is the envelope's doing, not the route's. FIX50SP2 does not define these custom
+// tags (field-definition grep), so the refusal is an undefined tag (101 FR-002 supersedes this cell's wire_unexpected_tag).
 TEST_P(W3UnitHeaderTag, NoEnvelopeRoutedTableRefuses) {
     const HeaderCell& c = GetParam();
     const std::uint16_t tag = static_cast<std::uint16_t>(std::stoi(std::string{c.field}));
     EXPECT_EQ(run_validate(fix50sp2_route(), nos(c.field), nullptr),
-              rejected(error::wire_unexpected_tag, tag));
+              rejected(error::wire_undefined_tag, tag));
 }
 
 INSTANTIATE_TEST_SUITE_P(W3Unit, W3UnitHeaderTag, testing::ValuesIn(kHeaderCells()),
                          [](const testing::TestParamInfo<HeaderCell>& i) { return i.param.name; });
 
 // A tag S's header does not declare is the routed table's to judge, with an envelope or without.
+// FIX50SP2 does not define 5099, so the route answers an undefined tag (101 FR-002 supersedes this
+// cell's wire_unexpected_tag).
 TEST(W3Unit, TagSDoesNotDeclare_TheRouteAnswers) {
     EXPECT_EQ(run_validate(fix50sp2_route(), nos("5099=v\x01"), &envelope_header_tags()),
-              rejected(error::wire_unexpected_tag, 5099));
+              rejected(error::wire_undefined_tag, 5099));
 }
 
 // ── Collision: S's header closes 5040 at {X}, the routed NewOrderSingle closes it at {Y} ─────

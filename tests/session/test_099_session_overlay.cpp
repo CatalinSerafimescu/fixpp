@@ -91,7 +91,8 @@ TEST(W3a, AnotherVersion_FieldRejected) {
                                                              "5002=v\x01",
                                                          "1128=6\x01");
                                      });
-    expect_ending(run, "R 2/5002 D 45=2 | stays | c | app=0 adm=0");
+    // FIX44 (1128=6's route) does not define the overlay's 5002: 373=0 (101 FR-002 supersedes 2).
+    expect_ending(run, "R 0/5002 D 45=2 | stays | c | app=0 adm=0");
 }
 
 // (b): merged FIX Latest S, plain FIX Latest registered, no FIX50SP2: resolved to FIX50SP2, S
@@ -625,7 +626,9 @@ TEST(W3g, OverlayTrailerTag_RoutedFrame_Refused) {
                                [](const Rig& r) {
                                    return frame_35("D", r.peer_ctx(2), kNos() + "5050=v\x01");
                                }),
-                  "R 2/5050 D 45=2 | stays | c | app=0 adm=0");
+                  // FIX50SP2, the route, does not define S's trailer tag 5050: 373=0 (101
+                  // FR-002 supersedes 2).
+                  "R 0/5050 D 45=2 | stays | c | app=0 adm=0");
 }
 
 // (h): NoHops's structure, on each route. Own registry: FIX44 and FIX42 are not in the shared set.

@@ -23,6 +23,8 @@
 namespace fixpp::session::test099 {
 namespace {
 
+// 101 FR-002 supersedes the `5999` rows' 373=2: no dictionary defines 5999 (field-definition grep
+// over dictionaries/*.xml and the Orchestra file), so each is an undefined tag, 373=0.
 const KeyedRow kActiveRows[] = {
     {.cell = "AC-a", .input = "rep35 D..0 past", .t = "R 14/35 D 45=2 | stays | c | app=0 adm=0"},
     {.cell = "AC-a", .input = "rep35 D..3 past", .t = "R 14/35 D 45=2 | stays | c | app=0 adm=0"},
@@ -65,19 +67,19 @@ const KeyedRow kActiveRows[] = {
      .t = "R 1/1137 A 45=2 | stays | k | app=0 adm=0"},
     {.cell = "AC-e",
      .input = "Logon undeclared 5999",
-     .t = "R 2/5999 A 45=2 | stays | k | app=0 adm=0"},
+     .t = "R 0/5999 A 45=2 | stays | k | app=0 adm=0"},
     {.cell = "AC-e",
      .input = "Logon 1137 absent + 5999 after",
-     .t = "R 2/5999 A 45=2 | stays | k | app=0 adm=0"},
+     .t = "R 0/5999 A 45=2 | stays | k | app=0 adm=0"},
     {.cell = "AC-e",
      .input = "Logon 5999 + 1137 absent",
-     .t = "R 2/5999 A 45=2 | stays | k | app=0 adm=0"},
+     .t = "R 0/5999 A 45=2 | stays | k | app=0 adm=0"},
     {.cell = "AC-e",
      .input = "Logon 1137=4 + 5999 after",
-     .t = "R 2/5999 A 45=2 | stays | k | app=0 adm=0"},
+     .t = "R 0/5999 A 45=2 | stays | k | app=0 adm=0"},
     {.cell = "AC-e",
      .input = "Logon 1137=99 + 5999 after",
-     .t = "R 2/5999 A 45=2 | stays | k | app=0 adm=0",
+     .t = "R 0/5999 A 45=2 | stays | k | app=0 adm=0",
      .a = nullptr,
      .l = "R 5/1137 A 45=2 | stays | k | app=0 adm=0"},
     {.cell = "AC-e", .input = "Logon 1137=9", .t = "- | stays | c | app=1 adm=0"},

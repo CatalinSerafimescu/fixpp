@@ -236,8 +236,10 @@ TEST_P(ValidatorPerVersion, BadEnumEncryptMethodRejected) {
         << static_cast<int>(result.error());
 }
 
-// ── 4. Unexpected tag → wire_unexpected_tag ───────────────────────────────────
-// Tag 9999 is not registered as valid for "0" (Heartbeat) in any version.
+// ── 4. Undefined tag → wire_undefined_tag ─────────────────────────────────────
+// Tag 9999 is not registered as valid for "0" (Heartbeat) in any version, and no
+// population operation of the grammar names it, so the table does not define it
+// (101 FR-002 and research D1 supersede this cell's wire_unexpected_tag).
 TEST_P(ValidatorPerVersion, UnexpectedTagRejected) {
     auto const& p = GetParam();
     SCOPED_TRACE(p.label);
@@ -253,9 +255,8 @@ TEST_P(ValidatorPerVersion, UnexpectedTagRejected) {
 
     auto result = do_validate(v, buf);
     ASSERT_FALSE(result.has_value()) << p.label << ": unexpected tag 9999 must be rejected";
-    EXPECT_EQ(result.error(), error::wire_unexpected_tag)
-        << p.label << ": expected wire_unexpected_tag (42), got "
-        << static_cast<int>(result.error());
+    EXPECT_EQ(result.error(), error::wire_undefined_tag)
+        << p.label << ": expected wire_undefined_tag, got " << static_cast<int>(result.error());
 }
 
 // ── 5. Malformed repeating-group count → wire_required_field_missing ──────────

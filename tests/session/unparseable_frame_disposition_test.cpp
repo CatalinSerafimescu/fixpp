@@ -2673,7 +2673,7 @@ TEST(UnparseableFrameDisposition, LateSite_Active_NewOrderSingle_FromApp_Closes)
 // parse ceiling parses. At a dispatch site the message is delivered and consumed, and
 // the durable read reports the advance. At the Active validate gate the validator runs
 // over the parsed frame and rejects the first filler tag, which the dictionary does not
-// define for the message. So a LateSite_* frame differs from a parseable one only in
+// define. So a LateSite_* frame differs from a parseable one only in
 // its field count, and the durable read can report an advance.
 TEST(UnparseableFrameDisposition, LateSite_Control_BelowCeiling_FromApp_DeliveredAndConsumed) {
     LateCell c{{}};
@@ -2698,13 +2698,14 @@ TEST(UnparseableFrameDisposition, LateSite_Control_BelowCeiling_ValidateGate_Par
     }
     int const app_before = c.app->from_app;
     c.fix.feed(*c.sess, make_raw_frame("D", 2, kNewOrderFields + filler(kControlFillerFields)));
-    // 101 FR-003: a validation-gate Reject carries QuickFIX C++'s text for its 373.
+    // 101 FR-003: a validation-gate Reject carries QuickFIX C++'s text for its 373. 101 FR-002:
+    // the session dictionary does not define 5000, so the reason is 0 (it was 2).
     expect_only_reject(c.fix,
                        {.ref_seq = "2",
                         .ref_msg_type = "D",
-                        .reason = "2",
+                        .reason = "0",
                         .ref_tag = "5000",
-                        .text = "Tag not defined for this message type"},
+                        .text = "Invalid tag number"},
                        "control: the validator's Reject of the first filler tag");
     EXPECT_TRUE(c.sess->is_open()) << "control: the session stays open";
     EXPECT_EQ(c.sess->state(), fsm_state::Active) << "control: state after the frame";

@@ -241,7 +241,9 @@ TEST(ValidatorDomain, MissingRequiredFieldRejected) {
         << "expected wire_required_field_missing (38), got " << static_cast<int>(result.error());
 }
 
-// (c) Field not valid for msg_type → wire_unexpected_tag.
+// (c) Field not valid for msg_type, and named by no population operation of the
+// hand-built grammar, so the table does not define it → wire_undefined_tag
+// (101 FR-002 and research D1 supersede this cell's wire_unexpected_tag).
 TEST(ValidatorDomain, UnexpectedTagRejected) {
     auto gram = make_d_grammar();
     dictionary_driven_validator v{std::move(gram)};
@@ -267,8 +269,8 @@ TEST(ValidatorDomain, UnexpectedTagRejected) {
 
     auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value()) << "message with unexpected tag 9999 must be rejected";
-    EXPECT_EQ(result.error(), error::wire_unexpected_tag)
-        << "expected wire_unexpected_tag (42), got " << static_cast<int>(result.error());
+    EXPECT_EQ(result.error(), error::wire_undefined_tag)
+        << "expected wire_undefined_tag, got " << static_cast<int>(result.error());
 }
 
 // (e) Malformed repeating-group: count > actual delimiter occurrences.

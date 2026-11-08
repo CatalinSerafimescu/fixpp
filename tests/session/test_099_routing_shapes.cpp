@@ -175,18 +175,20 @@ TEST(W1Tag370, Before1128_FIX42Route_Delivered) {
     expect_ending(run, kDelivered);
 }
 
+// 370 is defined by FIX42 and FIX43 only (field-definition grep), so FIX50SP2's route refuses it as
+// an undefined tag, 373=0 (101 FR-002 supersedes these cells' 373=2).
 TEST(W1Tag370, After1128_FIX50SP2Route_Rejected) {
     const CellRun run = run_own_cell(
         "W-1 1128=9 370", t_with_fix42(), /*validate=*/true, Arm::Active,
         [](const Rig& r) { return nos_with_header(r, std::string("1128=9\x01") + k370); });
-    expect_ending(run, "R 2/370 D 45=2 | stays | c | app=0 adm=0");
+    expect_ending(run, "R 0/370 D 45=2 | stays | c | app=0 adm=0");
 }
 
 TEST(W1Tag370, Before1128_FIX50SP2Route_Rejected) {
     const CellRun run = run_own_cell(
         "W-1 370 1128=9", t_with_fix42(), /*validate=*/true, Arm::Active,
         [](const Rig& r) { return nos_with_header(r, std::string(k370) + "1128=9\x01"); });
-    expect_ending(run, "R 2/370 D 45=2 | stays | c | app=0 adm=0");
+    expect_ending(run, "R 0/370 D 45=2 | stays | c | app=0 adm=0");
 }
 
 // ── The one-way fallback: T with registry {FIXT11, FIX Latest} ──────────────────────────

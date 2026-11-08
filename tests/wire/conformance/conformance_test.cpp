@@ -177,6 +177,13 @@ inline std::vector<CorpusRow> load_all() {
     if (name == "wire_unexpected_tag") {
         return E::wire_unexpected_tag;
     }
+    // 101 (research D2): the validator's undefined-tag and undefined-MsgType results.
+    if (name == "wire_undefined_tag") {
+        return E::wire_undefined_tag;
+    }
+    if (name == "wire_invalid_msg_type") {
+        return E::wire_invalid_msg_type;
+    }
     // fallback: return a sentinel that will never equal a real code
     return static_cast<E>(0);
 }
