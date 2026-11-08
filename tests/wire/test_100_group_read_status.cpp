@@ -831,6 +831,10 @@ TEST(GroupReadStatus100, T070_D11_ScanStopsAtNonDigitTag_NotFailed) {
     EXPECT_EQ(scan100::read_status("1a=1\x01"
                                    "700=1\x01"),
               fixpp::wire::group_read_status::ok);
+    EXPECT_EQ(scan100::read_status("1/=1\x01"
+                                   "700=1\x01"),
+              fixpp::wire::group_read_status::ok)
+        << "a byte below '0'";
 }
 TEST(GroupReadStatus100, T070_D11_ScanStopsAtTagOutOfRange_NotFailed) {
     EXPECT_EQ(scan100::read_status("70000=1\x01"

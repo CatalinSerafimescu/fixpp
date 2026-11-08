@@ -788,12 +788,13 @@ void expect_record(table_view const& tv, std::span<tag_t const> path, tag_t no_t
 
 // The XML loader resolves names in message expansions, so a dictionary that declares no
 // message reaches the walk with names it cannot resolve. An unknown field, component or
-// group name adds nothing, and the walk goes on to the next child.
+// group name adds nothing, as does an element of another kind, and the walk goes on to the
+// next child.
 TEST(RegistrationRecords100, SectionWalkXml_UnresolvedNames_AreSkipped) {
     std::string const nope = "<field name='Nope' required='N'/>";
     auto const tv =
         load_xml_tv(xml_dict(kDivFields,
-                             xcomp("Nope") + xgroup("NopeGroup", xfield("A1")) + nope +
+                             xcomp("Nope") + xgroup("NopeGroup", xfield("A1")) + nope + "<other/>" +
                                  xgroup("NoA", xfield("A1") + nope + xcomp("Nope") + xfield("X1")),
                              "", ""));
     expect_record(tv, kRoot, 601, 602, {602, 610}, "XML unresolved names");
@@ -837,10 +838,14 @@ TEST(RegistrationRecords100, SectionWalkOrchestra_GroupWithoutMember_StoresNoRec
 // each definition is walked once at a path. Line coverage of the refusals, as above.
 TEST(RegistrationRecords100, SectionWalkOrchestra_DefinitionTwiceAtOnePath_RecordedOnce) {
     auto const tv = load_orch_tv(orch_dict(
-        orch_types(kDivFields), ogroupref(2601) + ogroupref(2601) + ocompref(1025), ogroupref(2630),
-        "", ogroup(2601, 601, ofield(602)) + ogroup(2630, 630, ofield(631)),
+        orch_types(kDivFields),
+        ogroupref(2601) + ogroupref(2601) + ocompref(3002) + ocompref(3002) + ocompref(1025),
+        ogroupref(2630), ocomp(3002, ogroupref(2606)),
+        ogroup(2601, 601, ofield(602)) + ogroup(2630, 630, ofield(631)) +
+            ogroup(2606, 606, ofield(607)),
         omsg("M", ofield(58))));
     expect_record(tv, kRoot, 601, 602, {602}, "Orchestra group twice");
+    expect_record(tv, kRoot, 606, 607, {607}, "Orchestra component twice");
     expect_record(tv, kRoot, 630, 631, {631}, "Orchestra trailer reached from the header");
 }
 // `detail::SectionWalk::enter` directly: a definition already on the current walk is
