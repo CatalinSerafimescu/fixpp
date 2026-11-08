@@ -474,6 +474,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_get_group(const fixpp_msg_t* msg, uint1
     // fails, so this is row 2 after row 1); a present tag not established as a
     // group here -> TYPE_MISMATCH; past that, `emit_group_cursor` (rows 4 and 5).
     auto const r = offsets.group_slices_status(group_tag);
+    // Ahead of the not-a-group arm, because a failed read carries `is_group == false`.
     if (r.status != fixpp::wire::group_read_status::ok) {
         return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
     }
@@ -610,6 +611,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
     // absent/count-0 — reported BEFORE the presence probe below. The wire layer
     // reports a failure only for a tag present in the instance and registered in
     // its context, so it is never mistaken for TAG_NOT_FOUND.
+    // Ahead of the not-a-group arm, because a failed read carries `is_group == false`.
     if (r.status != fixpp::wire::group_read_status::ok) return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
 
     // 100 (contracts/capi-group-getters.md rows 1, 3 to 5, research D4): a tag the
