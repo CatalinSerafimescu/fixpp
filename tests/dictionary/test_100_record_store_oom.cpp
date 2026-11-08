@@ -11,12 +11,13 @@
 //
 // Mechanism: a TU-local global `operator new` that throws on one armed call number, the seam
 // tests/dictionary/table_view_pair_oom_test.cpp uses (`table_view`'s stores use the default
-// allocator). Compiled out under ASan/TSan/MSan, which own the allocator. The sweep length is
-// measured from the operation itself, so a different STL only changes how many indices run.
+// allocator). Compiled out under ASan/TSan/MSan, which own the allocator. The sweep runs over the
+// operation's own allocation count, counted on an unarmed call first, so a different STL only
+// changes how many indices run.
 //
 // Mutation procedure: insert the key first and fill its record after (`try_emplace(key)`, then
 // the members pushed into the stored record): a failure while the members are copied then leaves
-// a key holding a partial record, and the cells go RED.
+// a key holding a partial record, which the `store(tv).empty()` check rejects.
 
 #include <gtest/gtest.h>
 
