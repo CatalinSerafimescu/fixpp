@@ -394,22 +394,36 @@ TEST(W21Peek, Tag370_TheWalkReadsOnToA1128) {
     }
 }
 
-bool repeats(const std::string& frame) {
+// 101-inbound-reject-fidelity D5 (FR-005) supersedes this cell's 099 FR-025 reading: the walk no
+// longer ends at the header's stop and reports where later 35s stand, in the header and past it.
+// The table's own hooks are passed as the route's (the walk reads with a route's hooks, research
+// D5).
+detail::msg_type_repeat_report repeats(const std::string& frame) {
     const dd::table_view& table = table_of(fixt11());
     return fixt_header_repeats_msg_type(bytes(frame), wire::dict_hooks::for_table_view(table),
                                         table);
 }
 
-TEST(W21PeekColdPath, ASecond35InTheHeaderOnly) {
-    EXPECT_TRUE(repeats(soh(kHead() + "35=0|35=D|")));
-    EXPECT_TRUE(repeats(soh(kHead() + "35=D|49=S|35=0|")));
-    EXPECT_FALSE(repeats(soh(kHead() + "35=D|11=x|35=0|")));
-    EXPECT_FALSE(repeats(soh(kHead() + "35=D|49=S|")));
+TEST(W21PeekColdPath, ASecond35InTheHeader_AndPastIt) {
+    auto r = repeats(soh(kHead() + "35=0|35=D|"));
+    EXPECT_TRUE(r.in_header);
+    EXPECT_FALSE(r.past_header);
+    r = repeats(soh(kHead() + "35=D|49=S|35=0|"));
+    EXPECT_TRUE(r.in_header);
+    EXPECT_FALSE(r.past_header);
+    r = repeats(soh(kHead() + "35=D|11=x|35=0|"));
+    EXPECT_FALSE(r.in_header);
+    EXPECT_TRUE(r.past_header) << "a later 35 past the header is now reported";
+    r = repeats(soh(kHead() + "35=D|49=S|"));
+    EXPECT_FALSE(r.in_header);
+    EXPECT_FALSE(r.past_header);
     const std::string data =
         "x\x01"
         "35=0\x01"
         "y";
-    EXPECT_FALSE(repeats(counted(kHead() + "35=D|", 90, 91, data, "11=x|")));
+    r = repeats(counted(kHead() + "35=D|", 90, 91, data, "11=x|"));
+    EXPECT_FALSE(r.in_header) << "the counted Data is one value";
+    EXPECT_FALSE(r.past_header) << "the counted Data is one value";
 }
 
 }  // namespace

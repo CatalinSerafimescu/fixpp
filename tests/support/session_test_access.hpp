@@ -47,6 +47,19 @@ struct session_test_access {
         return s.cfg_.validate_inbound_messages && s.session_route_.validator != nullptr;
     }
 
+    // 101-inbound-reject-fidelity W101-51: refuse_active_frame_ called directly with the route
+    // the Active arm would select for `frame` and a header the cell builds. The SessionRejectReason
+    // of its refusal, or -1 when it passes the frame. A template so this header needs no include
+    // of the internal FrameHeader.
+    template <class FrameHeaderT>
+    [[nodiscard]] static int refuse_active_frame_reason(Session const& s,
+                                                        std::span<const std::byte> frame,
+                                                        FrameHeaderT const& hdr) noexcept {
+        auto const route = s.select_route_(frame, /*establishment_arm=*/false);
+        auto const v = s.refuse_active_frame_(frame, hdr, route);
+        return v.outcome == Session::validate_outcome::reject ? v.reject.reason : -1;
+    }
+
     // Hands a route set to a session right after construction and before open(), as the role
     // loops do through session_engine_access (099, tasks.md T007, T039).
     static void adopt_routes(Session& s, std::shared_ptr<const detail::fixt_route_set> set) {

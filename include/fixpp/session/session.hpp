@@ -1330,10 +1330,12 @@ private:
     struct RejectDecision {
         int reason = 0;
         int ref_tag_id = 0;
-        // 099-fixt-appl-version-validation (data-model E-7, research R-9): a FIXT refusal's
-        // RefMsgType, which also keys the consume, and RefSeqNum are the third field's value and
-        // the first 34: the Active arm reads hdr.fault_ref_msg_type and hdr.fault_ref_seq_num.
-        // False everywhere else, and the arm reads hdr.msg_type and hdr.msg_seq_num.
+        // 099-fixt-appl-version-validation (data-model E-7, research R-9): a refusal of
+        // refuse_active_frame_ names the third field's value as RefMsgType, which also keys the
+        // consume, and the first 34 as RefSeqNum: the Active arm reads hdr.fault_ref_msg_type and
+        // hdr.fault_ref_seq_num. Set on every session that refusal runs on (101 D5: non-FIXT
+        // too), since msg_seq_num is last-wins. False everywhere else, and the arm reads
+        // hdr.msg_type and hdr.msg_seq_num.
         bool names_third_field = false;
     };
     enum class validate_outcome : std::uint8_t { pass, reject, parse_failed };
@@ -1344,13 +1346,15 @@ private:
     [[nodiscard]] InboundValidation validate_inbound_(
         std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
         inbound_route const& route) const noexcept;
-    // 099-fixt-appl-version-validation (data-model E-7): A1 and A2, a validating FIXT session's
-    // Active refusals, ahead of the exemption of Reject and Logout.
+    // 099-fixt-appl-version-validation (data-model E-7): A1 and A2, the Active refusals, ahead of
+    // the exemption of Reject and Logout; 101 D5: the repeat refusal on every validating session,
+    // the 1128 refusal on a FIXT one.
     [[nodiscard]] InboundValidation refuse_active_frame_(
         std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
         inbound_route const& route) const noexcept;
     // 099-fixt-appl-version-validation (data-model E-7's S1, FR-029, FR-005): an establishment arm
-    // ends a validating FIXT session on an application frame, or a frame with two MsgTypes.
+    // ends a validating FIXT session on an application frame; 101 D6: and any session on a frame
+    // with two MsgTypes.
     [[nodiscard]] bool establishment_frame_refused_(
         inbound_route const& route, fixpp::session::detail::FrameHeader const& hdr) const noexcept;
     // 099-fixt-appl-version-validation (data-model E-7's S2, FR-010): a validating FIXT session

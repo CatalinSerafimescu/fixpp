@@ -306,6 +306,10 @@ namespace {
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
 // / begin matches the on-wire field order).
+//
+// 101-inbound-reject-fidelity D4 (FR-004): the MsgType read here is the frame's FIRST 35, as
+// every other reader's is. A later 35 gives no signal here: the conflict is
+// FrameHeader::msg_type_conflict's, which only the Session's arms read.
 [[nodiscard]] fixpp::core::expected_t<logon_interpret_result> interpret_logon(
     std::span<const std::byte> frame, std::string_view expected_sender,
     std::string_view expected_target, std::string_view expected_begin,
@@ -331,6 +335,7 @@ namespace {
 
     std::string_view begin_string_found;
     std::string_view msg_type_found;
+    bool msg_type_seen = false;  // 101 D4: the first 35 is kept
     std::string_view sender_found;
     std::string_view target_found;
     int heartbt_int_found = -1;
@@ -397,7 +402,10 @@ namespace {
                     begin_string_found = val;
                     break;
                 case 35:
-                    msg_type_found = val;
+                    if (!msg_type_seen) {
+                        msg_type_found = val;
+                        msg_type_seen = true;
+                    }
                     break;
                 case 49:
                     sender_found = val;

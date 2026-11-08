@@ -18,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <tuple>
+#include <vector>
 
 #include "mock_reconnect_factory.hpp"
 #include "test_099_fixt_support.hpp"
@@ -26,20 +27,6 @@ namespace fixpp::session::test099 {
 namespace {
 
 const KeyedRow kActiveOff[] = {
-    {.cell = "AC-a", .input = "rep35 D..0 past", .t = "- | stays | c | app=0 adm=1"},
-    {.cell = "AC-a", .input = "rep35 D..3 past", .t = "- | stays | c | app=0 adm=0"},
-    {.cell = "AC-a", .input = "rep35 D..4 past", .t = "- | stays | k | app=0 adm=1"},
-    {.cell = "AC-a", .input = "rep35 D..A past", .t = "- | stays | c | app=1 adm=0"},
-    {.cell = "AC-a", .input = "rep35 D..5 past", .t = "Logout | Disc | c | app=0 adm=1"},
-    {.cell = "AC-a", .input = "rep35 5..D past", .t = "- | stays | c | app=1 adm=0"},
-    {.cell = "AC-a", .input = "rep35 0..D past", .t = "- | stays | c | app=1 adm=0"},
-    {.cell = "AC-a", .input = "rep35 3..D past", .t = "- | stays | c | app=1 adm=0"},
-    {.cell = "AC-a", .input = "rep35 4..D past", .t = "- | stays | c | app=1 adm=0"},
-    {.cell = "AC-a", .input = "rep35 A..0 past", .t = "- | stays | c | app=0 adm=1"},
-    {.cell = "AC-a", .input = "rep35 D..A logon-fields", .t = "- | stays | c | app=1 adm=0"},
-    {.cell = "AC-a", .input = "rep35 0..A logon-fields", .t = "- | stays | c | app=1 adm=0"},
-    {.cell = "AC-a", .input = "rep35 0,D header", .t = "- | stays | c | app=1 adm=0"},
-    {.cell = "AC-a", .input = "rep35 D,D header", .t = "- | stays | c | app=1 adm=0"},
     {.cell = "AC-a",
      .input = "rep35 D..0 past seq+5",
      .t = "ResendRequest 2-0 | stays | k | app=0 adm=0"},
@@ -98,6 +85,80 @@ const KeyedRow kActiveOff[] = {
     {.cell = "AC-admin", .input = "Logout", .t = "Logout | Disc | c | app=0 adm=1"},
 };
 
+// 101-inbound-reject-fidelity D6 (FR-006) supersedes these rows' literals (099 W-6's `rep35`
+// endings, which read the last 35): on a validation-off session after establishment a frame with
+// two MsgTypes ends as the same frame with every later 35 removed and re-framed, its stripped twin.
+const char* const kActiveOffRepeat[] = {
+    "rep35 D..0 past",         "rep35 D..3 past",         "rep35 D..4 past",
+    "rep35 D..A past",         "rep35 D..5 past",         "rep35 5..D past",
+    "rep35 0..D past",         "rep35 3..D past",         "rep35 4..D past",
+    "rep35 A..0 past",         "rep35 D..A logon-fields", "rep35 0..A logon-fields",
+    "rep35 0,D header",        "rep35 D,D header",
+};
+
+// The frame with every 35 after the first removed, BodyLength and CheckSum recomputed. The
+// inputs above carry no Data field, so their fields are split at SOH.
+std::string strip_later_35(const std::string& frame) {
+    std::string begin;
+    std::string body;
+    bool seen_35 = false;
+    std::size_t i = 0;
+    while (i < frame.size()) {
+        const std::size_t end = frame.find('\x01', i);
+        const std::string field = frame.substr(i, end - i);
+        i = end == std::string::npos ? frame.size() : end + 1;
+        const std::string tag = field.substr(0, field.find('='));
+        if (tag == "8") {
+            begin = field.substr(2);
+            continue;
+        }
+        if (tag == "9" || tag == "10") {
+            continue;
+        }
+        if (tag == "35") {
+            if (seen_35) {
+                continue;
+            }
+            seen_35 = true;
+        }
+        body += field + "\x01";
+    }
+    return wire(begin, body);
+}
+
+struct RepeatCell {
+    Shape shape;
+    const char* input;
+};
+
+std::vector<RepeatCell> repeat_cells() {
+    std::vector<RepeatCell> v;
+    for (Shape sh : {Shape::T, Shape::A, Shape::L}) {
+        for (const char* in : kActiveOffRepeat) {
+            v.push_back({sh, in});
+        }
+    }
+    return v;
+}
+
+class W6ActiveOffOracle : public testing::TestWithParam<RepeatCell> {};
+TEST_P(W6ActiveOffOracle, EndsAsTheStrippedTwin) {
+    const RepeatCell& c = GetParam();
+    const Input& in = input(c.input);
+    const Input twin{.id = in.id + " stripped",
+                     .make = [&in](const Ctx& ctx) { return strip_later_35(in.make(ctx)); }};
+    const CellRun run = run_keyed_cell(c.shape, false, Arm::Active, in);
+    const CellRun twin_run = run_keyed_cell(c.shape, false, Arm::Active, twin);
+    ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
+    ASSERT_TRUE(twin_run.setup_failure.empty()) << twin_run.setup_failure;
+    EXPECT_EQ(log_form(run.ending), log_form(twin_run.ending));
+}
+INSTANTIATE_TEST_SUITE_P(Off, W6ActiveOffOracle, testing::ValuesIn(repeat_cells()),
+                         [](const testing::TestParamInfo<RepeatCell>& i) {
+                             return std::string{shape_name(i.param.shape)} + "_" +
+                                    name_token(i.param.input);
+                         });
+
 class W6ActiveOff : public testing::TestWithParam<KeyedCell> {};
 TEST_P(W6ActiveOff, Ending) {
     const KeyedCell& c = GetParam();
@@ -113,11 +174,13 @@ INSTANTIATE_TEST_SUITE_P(Named, W6PerShape, testing::Values(Shape::T, Shape::A, 
                              return std::string{shape_name(i.param)};
                          });
 
-// `D…A` with Logon fields establishes, pinned as disclosed (B-row).
-TEST_P(W6PerShape, DThenAWithLogonFields_Establishes) {
+// 101-inbound-reject-fidelity D6 (FR-006) supersedes 099 W-6's clause that `D…A` with Logon
+// fields establishes (its B-row): a frame with two MsgTypes is refused in establishment on every
+// session, so the acceptor disconnects with nothing sent.
+TEST_P(W6PerShape, DThenAWithLogonFields_Disconnects101) {
     expect_ending(
         run_keyed_cell(GetParam(), false, Arm::NotConnected, input("rep35 D..A logon-fields")),
-        "Logon | Active | c | app=0 adm=0");
+        "- | Disc | k | app=0 adm=0");
 }
 
 // `off-pair`: T, a malformed pair only the route's table declares takes dispose_unparseable_'s

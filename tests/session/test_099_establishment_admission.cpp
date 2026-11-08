@@ -11,6 +11,12 @@
 // Each cell's trace line compares with research R-18's `on` logs. The validation-off twin takes
 // the `off` logs' lines, which have the same ending but for `D…A` and `0…A` with Logon fields; its
 // mutants are contracts/witnesses.md's.
+//
+// 101-inbound-reject-fidelity supersedes three of those endings, each row marked with its FR:
+// LogoutSent takes the reply by the first 35 (D4, FR-004), so `D…5` stays and `5…D` disconnects,
+// validating or not; and a frame with two MsgTypes is refused in establishment on every session
+// (D6, FR-006, superseding 099 E-7's non-validating paragraph), so the off twin's `D…A` and `0…A`
+// with Logon fields disconnect as the validating rows do.
 
 #include <gtest/gtest.h>
 
@@ -118,8 +124,10 @@ const KeyedRow kLogoutSent[] = {
     {.cell = "LO-a", .input = "rep35 D..3 past", .t = "- | stays | k | app=0 adm=0"},
     {.cell = "LO-a", .input = "rep35 D..4 past", .t = "- | stays | k | app=0 adm=0"},
     {.cell = "LO-a", .input = "rep35 D..A past", .t = "- | stays | k | app=0 adm=0"},
-    {.cell = "LO-a", .input = "rep35 D..5 past", .t = "- | Disc | k | app=0 adm=0"},
-    {.cell = "LO-a", .input = "rep35 5..D past", .t = "- | stays | k | app=0 adm=0"},
+    // 101 FR-004
+    {.cell = "LO-a", .input = "rep35 D..5 past", .t = "- | stays | k | app=0 adm=0"},
+    // 101 FR-004
+    {.cell = "LO-a", .input = "rep35 5..D past", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "LO-a", .input = "rep35 0..D past", .t = "- | stays | k | app=0 adm=0"},
     {.cell = "LO-a", .input = "rep35 3..D past", .t = "- | stays | k | app=0 adm=0"},
     {.cell = "LO-a", .input = "rep35 4..D past", .t = "- | stays | k | app=0 adm=0"},
@@ -210,8 +218,10 @@ const KeyedRow kNotConnectedOff[] = {
     {.cell = "NC-a", .input = "rep35 3..D past", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "NC-a", .input = "rep35 4..D past", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "NC-a", .input = "rep35 A..0 past", .t = "- | Disc | k | app=0 adm=0"},
-    {.cell = "NC-a", .input = "rep35 D..A logon-fields", .t = "Logon | Active | c | app=0 adm=0"},
-    {.cell = "NC-a", .input = "rep35 0..A logon-fields", .t = "Logon | Active | c | app=0 adm=0"},
+    // 101 FR-006
+    {.cell = "NC-a", .input = "rep35 D..A logon-fields", .t = "- | Disc | k | app=0 adm=0"},
+    // 101 FR-006
+    {.cell = "NC-a", .input = "rep35 0..A logon-fields", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "NC-a", .input = "rep35 0,D header", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "NC-a", .input = "rep35 D,D header", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "NC-a", .input = "rep35 D..0 past seq+5", .t = "- | Disc | k | app=0 adm=0"},
@@ -246,8 +256,10 @@ const KeyedRow kLogonSentOff[] = {
     {.cell = "LS-a", .input = "rep35 3..D past", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "LS-a", .input = "rep35 4..D past", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "LS-a", .input = "rep35 A..0 past", .t = "- | Disc | k | app=0 adm=0"},
-    {.cell = "LS-a", .input = "rep35 D..A logon-fields", .t = "- | Active | c | app=0 adm=0"},
-    {.cell = "LS-a", .input = "rep35 0..A logon-fields", .t = "- | Active | c | app=0 adm=0"},
+    // 101 FR-006
+    {.cell = "LS-a", .input = "rep35 D..A logon-fields", .t = "- | Disc | k | app=0 adm=0"},
+    // 101 FR-006
+    {.cell = "LS-a", .input = "rep35 0..A logon-fields", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "LS-a", .input = "rep35 0,D header", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "LS-a", .input = "rep35 D,D header", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "LS-a", .input = "rep35 D..0 past seq+5", .t = "- | Disc | k | app=0 adm=0"},
@@ -276,8 +288,10 @@ const KeyedRow kLogoutSentOff[] = {
     {.cell = "LO-a", .input = "rep35 D..3 past", .t = "- | stays | k | app=0 adm=0"},
     {.cell = "LO-a", .input = "rep35 D..4 past", .t = "- | stays | k | app=0 adm=0"},
     {.cell = "LO-a", .input = "rep35 D..A past", .t = "- | stays | k | app=0 adm=0"},
-    {.cell = "LO-a", .input = "rep35 D..5 past", .t = "- | Disc | k | app=0 adm=0"},
-    {.cell = "LO-a", .input = "rep35 5..D past", .t = "- | stays | k | app=0 adm=0"},
+    // 101 FR-004
+    {.cell = "LO-a", .input = "rep35 D..5 past", .t = "- | stays | k | app=0 adm=0"},
+    // 101 FR-004
+    {.cell = "LO-a", .input = "rep35 5..D past", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "LO-a", .input = "rep35 0..D past", .t = "- | stays | k | app=0 adm=0"},
     {.cell = "LO-a", .input = "rep35 3..D past", .t = "- | stays | k | app=0 adm=0"},
     {.cell = "LO-a", .input = "rep35 4..D past", .t = "- | stays | k | app=0 adm=0"},

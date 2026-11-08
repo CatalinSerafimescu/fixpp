@@ -3014,19 +3014,25 @@ Session::InboundValidation Session::validate_inbound_(
 }
 
 // 099-fixt-appl-version-validation (data-model E-7's A1, A2; FR-009, FR-025): their Reject names
-// the third field and the first 34, because hdr is last-wins on 35 and, on a frame whose route was
-// refused, was split by S's hooks. Which of 373=13 and 14 is read only on a mismatch.
+// the third field and the first 34 (`names_third_field`).
+//
+// 101-inbound-reject-fidelity D5 (FR-005) supersedes 099 FR-025's choice between 373=13 and 14 and
+// its FIXT-only gate: the repeat arm runs on every validating session, on `hdr.msg_type_conflict`
+// (101 D4). The walk reads every field with the route's hooks (the hooks `hdr`'s scan used; the
+// owner ruling research D5 records) and classifies by S's header union; the answer is 14 when a
+// later 35 lies past the header, else 13 when one lies in it, else 14. The 1128 arm stays
+// FIXT-only.
 Session::InboundValidation Session::refuse_active_frame_(
     std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
     inbound_route const& route) const noexcept {
     int reason = 0;
     int ref_tag = 0;
-    if (hdr.msg_type != hdr.fault_ref_msg_type) {
-        bool const in_header = fixpp::session::detail::fixt_header_repeats_msg_type(
-            frame, session_hooks(inbound_tv_), *inbound_tv_);
-        reason = in_header ? 13 : 14;
+    if (hdr.msg_type_conflict) {
+        auto const seen = fixpp::session::detail::fixt_header_repeats_msg_type(
+            frame, session_hooks(*route.entry.owner), *inbound_tv_);
+        reason = seen.past_header ? 14 : (seen.in_header ? 13 : 14);
         ref_tag = 35;
-    } else if (route.refusal != route_refusal::none) {
+    } else if (fixt_routing_ && route.refusal != route_refusal::none) {
         reason = route.refusal == route_refusal::empty_value ? 4 : 5;
         ref_tag = 1128;
     } else {
@@ -3037,10 +3043,12 @@ Session::InboundValidation Session::refuse_active_frame_(
                 RejectDecision{.reason = reason, .ref_tag_id = ref_tag, .names_third_field = true}};
 }
 
+// 101-inbound-reject-fidelity D6 (FR-006): a frame with two MsgTypes is refused in establishment
+// on every session, validating or not; the application-frame clause stays 099's.
 bool Session::establishment_frame_refused_(
     inbound_route const& route, fixpp::session::detail::FrameHeader const& hdr) const noexcept {
-    return fixt_routing_ && cfg_.validate_inbound_messages &&
-           (route.application || hdr.msg_type != hdr.fault_ref_msg_type);
+    return hdr.msg_type_conflict ||
+           (fixt_routing_ && cfg_.validate_inbound_messages && route.application);
 }
 
 bool Session::logon_reject_disconnects_(fixpp::session::detail::FrameHeader const& hdr,
@@ -3752,8 +3760,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
     }
 
     // 099-fixt-appl-version-validation (data-model E-7's S1, FR-029, FR-005): on a validating FIXT
-    // session an application frame, or a frame with two MsgTypes, ends here with nothing sent. It
-    // reads the third field: interpret_logon reads the last 35, so it could not refuse `D…A`.
+    // session an application frame ends here with nothing sent; 101 D6 (FR-006): so does a frame
+    // with two MsgTypes, on every session.
     if (establishment_frame_refused_(route, hdr)) {
         record_state_transition_(fsm_state::Disconnected);
         co_return fixpp::core::expected_t<void>{};
@@ -4459,12 +4467,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
             // only; a faulty Reject or Logout is Rejected under C-2. [041 T014; E-4]
             // Buffer: the session's parse buffer B(L), as dispatch (093).
             if (cfg_.validate_inbound_messages && session_route_.validator) {
-                // 099 (data-model E-7's A1, A2): ahead of the exemption of Reject and Logout, since
-                // a repeated MsgType is what can make hdr.msg_type read either.
-                InboundValidation v{};
-                if (fixt_routing_) {
-                    v = refuse_active_frame_(frame, hdr, route);
-                }
+                // 099 (data-model E-7's A1, A2), widened by 101 D5 to every validating session:
+                // ahead of the exemption of Reject and Logout and of the validator, so a frame with
+                // two MsgTypes is refused whichever its first 35 is.
+                InboundValidation v = refuse_active_frame_(frame, hdr, route);
                 if (v.outcome == validate_outcome::pass && hdr.msg_type != "3" &&
                     hdr.msg_type != "5") {
                     v = validate_inbound_(frame, hdr, route);
@@ -4973,7 +4979,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_valida
                 co_return *expired;
             }
         }
-        // 099 (data-model E-7): a FIXT refusal names the frame by its third field and first 34.
+        // 099 (data-model E-7): a refuse_active_frame_ refusal names the frame by its third field
+        // and first 34 (101 D5: on every validating session).
         bool const named = v.reject.names_third_field;
         const seqnum_t rej_seq = parse_seqnum(named ? hdr.fault_ref_seq_num : hdr.msg_seq_num);
         std::string_view const rej_type = named ? hdr.fault_ref_msg_type : hdr.msg_type;
@@ -5764,8 +5771,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
         co_return co_await dispose_unparseable_(hdr, fsm_state::LogonSent);
     }
 
-    // 099-fixt-appl-version-validation (data-model E-7's S1, FR-029, FR-005): the acceptor's arm
-    // has the reason this reads the third field.
+    // 099-fixt-appl-version-validation (data-model E-7's S1, FR-029, FR-005) and 101 D6: as in the
+    // acceptor's arm.
     if (establishment_frame_refused_(route, hdr)) {
         record_state_transition_(fsm_state::Disconnected);
         co_return fixpp::core::expected_t<void>{};

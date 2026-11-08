@@ -2,7 +2,8 @@
 //
 // tests/session/test_101_repeat_walk.cpp
 //
-// 101-inbound-reject-fidelity, tasks.md T011 (W101-29 (a), (b), (d)): research D5's repeat walk
+// 101-inbound-reject-fidelity, tasks.md T011 (W101-29 (a), (b), (d)) and T040 (W101-29 (c),
+// W101-51, suite RepeatWalkUnit101): research D5's repeat walk
 // on a real validating FIXT Session in Active, under the owner ruling research D5 records: every
 // field, header and body, is read with the selected route's hooks, one Length+Data carry runs
 // across the header's stop, and S's header union classifies each field. The answer is 14 when a
@@ -22,9 +23,11 @@
 
 #include <cstdint>
 #include <fixpp/wire/dict_hooks.hpp>
+#include <span>
 #include <string>
 #include <string_view>
 
+#include "session/peek_fixt_route.hpp"
 #include "session/scan_frame_header.hpp"
 #include "test_101_support.hpp"
 
@@ -190,6 +193,70 @@ TEST(RepeatWalk101, W101_29d_CustomSPairOnStandardHeaderTag_RouteSplitsData_Reje
     EXPECT_EQ(hdr.fault, fixpp::wire::field_fault::none);
 
     expect_repeat_reject(rig->deliver(frame), "14", "D");
+}
+
+// ── (c) and W101-51: the fault rule (tasks T040) ────────────────────────────────────────
+//
+// A unit cell on the walk: a real Session cannot reach a faulting walk, because the walk faults
+// only where the route-hooked scan faults at the same field, and that frame goes to the 092
+// disposer before refuse_active_frame_ (research D5). FIXT11's table with its own hooks.
+
+detail::msg_type_repeat_report walk_on_fixt11(const std::string& wire) {
+    static const dd::table_view table = t99::fixt11()->as_table_view();
+    return detail::fixt_header_repeats_msg_type(std::as_bytes(std::span{wire.data(), wire.size()}),
+                                                fixpp::wire::dict_hooks::for_table_view(table),
+                                                table);
+}
+
+// A real in-header repeat (35=0 adjacent to the first), then a fault.
+std::string repeat_then(const std::string& tail) {
+    return "8=FIXT.1.1\x01"
+           "9=99\x01"
+           "35=D\x01"
+           "35=0\x01"
+           "34=2\x01"
+           "49=S\x01" +
+           tail;
+}
+
+TEST(RepeatWalkUnit101, W101_29c_InHeaderRepeat_ThenMalformedCount_ReportsNeither) {
+    // RawDataLength(95) is a standard Length; its count runs past the frame.
+    const auto r = walk_on_fixt11(repeat_then("95=999\x01"
+                                              "96=x\x01"));
+    EXPECT_FALSE(r.in_header) << "a faulting walk discards the 35s it saw";
+    EXPECT_FALSE(r.past_header);
+}
+
+TEST(RepeatWalkUnit101, W101_29c_InHeaderRepeat_ThenMalformedTag_ReportsNeither) {
+    const auto r = walk_on_fixt11(repeat_then("5x6=T\x01"));
+    EXPECT_FALSE(r.in_header) << "a faulting walk discards the 35s it saw";
+    EXPECT_FALSE(r.past_header);
+}
+
+// The positive control: the same repeat without the fault is reported in the header.
+TEST(RepeatWalkUnit101, W101_29c_Control_InHeaderRepeat_NoFault_Reported) {
+    const auto r = walk_on_fixt11(repeat_then("56=T\x01"));
+    EXPECT_TRUE(r.in_header);
+    EXPECT_FALSE(r.past_header);
+}
+
+// W101-51: refuse_active_frame_'s default clause, through the test-side friend. The header says the
+// frame has two MsgTypes; the frame's walk faults (W101-29 (c)'s malformed count), so it reports
+// no later 35, and the answer is 14.
+TEST(RepeatWalkUnit101, W101_51_ConflictWithFaultingWalk_Answers14) {
+    for (const Kind k : {Kind::fix44, Kind::fixt}) {
+        SCOPED_TRACE(kind_name(k));
+        auto rig = started(spec(k), Arm::Active);
+        ASSERT_TRUE(rig);
+        const std::string wire = rig->frame("D", 2, "95=999\x01" "96=x\x01", "35=0\x01");
+        const auto bytes = std::as_bytes(std::span{wire.data(), wire.size()});
+        detail::FrameHeader hdr{};
+        hdr.msg_type = "D";
+        hdr.fault_ref_msg_type = "D";
+        hdr.msg_type_is_third = true;
+        hdr.msg_type_conflict = true;
+        EXPECT_EQ(session_test_access::refuse_active_frame_reason(rig->session(), bytes, hdr), 14);
+    }
 }
 
 }  // namespace

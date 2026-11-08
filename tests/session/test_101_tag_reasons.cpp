@@ -66,7 +66,7 @@ TEST(Reject101Tag, W101_11_DefinedTagNotInMessage_Reason2) {
     EXPECT_EQ(e.next_in_after, e.next_in_before + 1) << "consumed";
 }
 
-// M101-10's named cell (orchestrator ruling on the Phase 3-4 report): a field the session's
+// M101-10's named cell: a field the session's
 // dictionary defines and no message names, so the defined-tag fill of Dictionary::build_table_view
 // is the only thing that defines it in the judging table. The base file must not define the tag
 // (field-definition recipe, `outside_tag_reason`), and the overlay declares it in `<fields>`

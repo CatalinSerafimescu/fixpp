@@ -12,7 +12,7 @@
 // The inputs are 099 data-model E-7 row `a`'s (`D…0`, `D…3`, `D…4`, `D…5`, `D…A`, `0…D`, `3…D`,
 // `4…D`, `5…D`, `A…0`, `0,D`) plus `D…A…D`, each built on the cell's own session kind, in Active
 // and in LogonReceived. An acceptor's Logon takes it through LogonReceived to Active within one
-// on_inbound_frame call, except on that call's superseded exit (orchestrator ruling R6), which
+// on_inbound_frame call, except on that call's superseded exit, which
 // returns in LogonReceived; the LogonReceived rows are delivered there.
 
 #include <gtest/gtest.h>
@@ -24,7 +24,7 @@
 #include <string>
 #include <vector>
 
-#include "session/session_engine_access.hpp"  // ruling R6: the engine-stop flag
+#include "session/session_engine_access.hpp"  // the engine-stop flag
 #include "test_101_support.hpp"
 
 namespace fixpp::session::test101 {
@@ -152,7 +152,7 @@ TEST(OneMsgTypeOracle101Establishment, W101_24_AcceptorPassesLogonReceivedInside
     }
 }
 
-// Orchestrator ruling R6: the Logon call's superseded exit. Engine::stop()'s step 1 sets the
+// The Logon call's superseded exit. Engine::stop()'s step 1 sets the
 // engine-stop flag on the session's strand; set here from the reply Logon's toAdmin, it is seen by
 // the arm's next superseded check, which returns success without a state write, so the call
 // returns with the session still in LogonReceived. The frame after it (the previous call has

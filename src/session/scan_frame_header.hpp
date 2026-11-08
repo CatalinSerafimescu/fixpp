@@ -21,6 +21,10 @@
 // research.md R-1) supersedes 040's skip-and-continue for a malformed tag: the
 // scan now stops at the first field it cannot read and records why in the
 // fault members below.
+//
+// 101-inbound-reject-fidelity D4 (FR-004) supersedes 092 data-model E-1 and contract C-3
+// I-3 for `msg_type`: it is the frame's FIRST 35, and `msg_type_conflict` records that a
+// later 35's value differs from it. Every other member keeps last-wins.
 #pragma once
 
 #include <cstddef>
@@ -47,7 +51,7 @@ struct FrameHeader {
     std::string_view sender_comp_id;
     std::string_view target_comp_id;
     std::string_view msg_seq_num;   // tag 34 raw string value
-    std::string_view msg_type;      // tag 35 raw string value (T041 US3)
+    std::string_view msg_type;      // the first tag 35's raw value (T041 US3; 101 D4)
     std::string_view sending_time;  // tag 52 raw string value (T055 US5)
     std::string_view test_req_id;   // tag 112 raw string value (T041 US3)
     // 013 Phase 3 — recovery / reset fields
@@ -66,7 +70,8 @@ struct FrameHeader {
         false;  // tag 789 was present in frame (even if value is empty) — 027
 
     // 092 E-1: the first-fault record and the positional header identification.
-    // The members above keep last-wins among the fields read before any fault.
+    // The members above, but `msg_type`, keep last-wins among the fields read before
+    // any fault; `msg_type` keeps the first 35 (101 D4).
     fixpp::wire::field_fault fault = fixpp::wire::field_fault::none;
     // For length_data_mismatch: the tag of the field right before the faulting
     // Data field (the Length that armed the count). Otherwise 0.
@@ -76,6 +81,9 @@ struct FrameHeader {
     std::uint32_t fault_offset = 0;
     // The third field is well-formed and its tag is 35.
     bool msg_type_is_third = false;
+    // 101 D4: a 35 after the first carries a value that differs from the first's, byte
+    // for byte as the scan slices it. Sticky: set by any such later 35.
+    bool msg_type_conflict = false;
     // The value of the FIRST well-formed 34, written once. Read by the disposition
     // only when `fault` is set; also written on a fault-free frame.
     std::string_view fault_ref_seq_num;
@@ -119,6 +127,7 @@ inline constexpr std::string_view kRejectTextLengthDataMismatch =
     std::uint16_t prev_tag = 0;  // the previous field's tag: a count's Length
     std::uint32_t field_no = 0;  // 1-based position of the field being read
     bool seen_34 = false;        // fault_ref_seq_num holds the first 34 once set
+    bool seen_35 = false;        // msg_type holds the first 35 once set (101 D4)
 
     // Every return names `h`, so the result is constructed in place on every path.
     const auto record_fault = [&h](fixpp::wire::field_fault kind,
@@ -182,7 +191,12 @@ inline constexpr std::string_view kRejectTextLengthDataMismatch =
                 }
                 break;
             case 35:
-                h.msg_type = val;
+                if (!seen_35) {
+                    h.msg_type = val;
+                    seen_35 = true;
+                } else if (val != h.msg_type) {
+                    h.msg_type_conflict = true;
+                }
                 if (field_no == 3) {
                     h.msg_type_is_third = true;
                     h.fault_ref_msg_type = val;
