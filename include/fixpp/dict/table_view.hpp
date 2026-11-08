@@ -587,14 +587,13 @@ public:
                                         std::span<std::uint16_t const> parent_path,
                                         std::uint16_t no_tag) const noexcept {
         auto const query = make_ctx_query(msg_type, parent_path, no_tag);
-        if (group_bit(no_tag) && group_ctx_.find(query) != group_ctx_.end()) {
+        if (group_bit(no_tag) && group_ctx_.contains(query)) {
             return true;
         }
-        if (occurrence_records_.find(query) != occurrence_records_.end()) {
+        if (occurrence_records_.contains(query)) {
             return true;
         }
-        if (section_records_.find(make_ctx_query({}, parent_path, no_tag)) !=
-            section_records_.end()) {
+        if (section_records_.contains(make_ctx_query({}, parent_path, no_tag))) {
             return true;
         }
         return !ctx_key_bit(no_tag) && group_bit(no_tag);
@@ -1183,7 +1182,7 @@ private:
     // never changes an answer. `wire_group_member_tags` and `wire_group_first_field`
     // each project one field of it, after their `group_bit` pre-filter.
     struct wire_group_def {
-        std::uint16_t delimiter;
+        std::uint16_t delimiter = 0;
         std::span<std::uint16_t const> members;
     };
     [[nodiscard]] std::optional<wire_group_def> wire_group_record(
@@ -1192,15 +1191,16 @@ private:
         auto const query = make_ctx_query(msg_type, parent_path, no_tag);
         if (ctx_key_bit(no_tag)) {
             if (auto const it = group_ctx_.find(query); it != group_ctx_.end()) {
-                return wire_group_def{it->second.group_first, it->second.members};
+                return wire_group_def{.delimiter = it->second.group_first,
+                                      .members = it->second.members};
             }
         }
         if (auto const it = occurrence_records_.find(query); it != occurrence_records_.end()) {
-            return wire_group_def{it->second.delimiter, it->second.members};
+            return wire_group_def{.delimiter = it->second.delimiter, .members = it->second.members};
         }
         if (auto const it = section_records_.find(make_ctx_query({}, parent_path, no_tag));
             it != section_records_.end()) {
-            return wire_group_def{it->second.delimiter, it->second.members};
+            return wire_group_def{.delimiter = it->second.delimiter, .members = it->second.members};
         }
         return std::nullopt;
     }

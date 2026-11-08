@@ -598,7 +598,7 @@ public:
     // order, with that record's direct members (`group_ctx_member_runs_` is parallel to
     // `group_ctx_delim_pool_`).
     template <class Fn>
-    void for_each_group_ctx_record(std::string_view msg_type, Fn&& fn) const {
+    void for_each_group_ctx_record(std::string_view msg_type, Fn const& fn) const {
         auto const run = msg_group_ctx_delim_run(msg_type);
         for (std::size_t i = run.start; i < std::size_t{run.start} + run.count; ++i) {
             fn(group_ctx_delim_pool_[i], run_at(group_ctx_member_runs_, group_ctx_member_pool_, i));
@@ -607,7 +607,7 @@ public:
 
     // 100: calls `fn(record, members)` for each section record, in pool order.
     template <class Fn>
-    void for_each_section_group_record(Fn&& fn) const {
+    void for_each_section_group_record(Fn const& fn) const {
         for (std::size_t i = 0; i < section_group_pool_.size(); ++i) {
             fn(section_group_pool_[i],
                run_at(section_group_member_runs_, section_group_member_pool_, i));
