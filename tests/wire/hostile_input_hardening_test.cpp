@@ -39,7 +39,7 @@
 
 #include "support/frame_view_factory.hpp"
 #include "support/probe_cluster_100.hpp"  // overlay_seed_guard (100 T009)
-#include "support/wire_test_hooks.hpp"  // detail::set_overlay_seed_for_testing (W-P3-2)
+#include "support/wire_test_hooks.hpp"    // detail::set_overlay_seed_for_testing (W-P3-2)
 
 namespace {
 
@@ -273,25 +273,14 @@ TEST(HostileInputHardening, StalePendingClearedIterYields43) {
 // ── W-P3-2: predictable mix() lets a crafted collision set force a present ─────
 // required field to read false-absent; a per-process seed defeats it. ──────────
 //
-// mix() and overlay_cap_for() are replicated here so the witness can compute a
-// slot-colliding tag set for a KNOWN seed (installed via the test hook), and show
+// mix() and overlay_cap_for() are replicated (test100's `mix_ref` and
+// `overlay_cap_ref`, tests/support/probe_cluster_100.hpp) so the witness can compute
+// a slot-colliding tag set for a KNOWN seed (installed via the test hook), and show
 // the seed makes a precomputed collision set useless under any other seed. Each
 // cell restores the prior seed through test100::overlay_seed_guard (100 T009).
 
-std::uint32_t mix_ref(std::uint16_t tag, std::uint32_t seed) {
-    std::uint32_t h = 2166136261U ^ seed;
-    h = (h ^ (static_cast<std::uint32_t>(tag) & 0xFFU)) * 16777619U;
-    h = (h ^ ((static_cast<std::uint32_t>(tag) >> 8U) & 0xFFU)) * 16777619U;
-    return h;
-}
-std::size_t overlay_cap_ref(std::size_t n) {
-    std::size_t want = ((n * 5U) / 4U) + 1U;
-    std::size_t cap = 8U;
-    while (cap < want) {
-        cap <<= 1U;
-    }
-    return cap;
-}
+using fixpp::wire::test100::mix_ref;
+using fixpp::wire::test100::overlay_cap_ref;
 // Collect `k` distinct tags whose mix()&mask lands on `target`'s slot for `seed`.
 std::vector<std::uint16_t> colliding_tags(std::uint16_t target, std::uint32_t seed,
                                           std::uint32_t mask, std::size_t k) {

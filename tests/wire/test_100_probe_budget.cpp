@@ -69,7 +69,7 @@ void run_crafted_cluster_cell(std::size_t entries) {
         << "setup: the crafted cluster must exceed kMaxBuildProbe x occurrences; total "
         << sim.total_probes << ", budget " << sim.budget();
 
-    auto const buf = t100::frame_with_body(cluster_body(cluster));
+    auto const buf = fixpp::test100::frame44(cluster_body(cluster));
     auto const fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     ASSERT_LE(buf.size(), std::size_t{65536}) << "setup: within the default inbound byte limit";
@@ -157,7 +157,7 @@ TEST(ProbeBudget100, US3_2_NonCraftedFrameAtPerInsertCapParsesAndIndexesEveryTag
     for (auto const t : tags) {
         body += std::to_string(t) + "=x\x01";
     }
-    auto const buf = t100::frame_with_body(body);
+    auto const buf = fixpp::test100::frame44(body);
     auto const fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
@@ -202,7 +202,7 @@ TEST(ProbeBudget100, Control_WithinBudgetFrameParsesAndIndexesEveryTag) {
     for (auto const t : tags) {
         body += std::to_string(t) + "=x\x01";
     }
-    auto const buf = t100::frame_with_body(body);
+    auto const buf = fixpp::test100::frame44(body);
     auto const fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 

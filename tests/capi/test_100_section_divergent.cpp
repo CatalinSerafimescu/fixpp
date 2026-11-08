@@ -35,25 +35,20 @@
 #include <vector>
 
 #include "group_getters_100_support.hpp"
+#include "support/divergent_dicts_100.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/group_read_100.hpp"
 
 namespace {
 
-using fixpp::test100::frame44;
 using fixpp::test100::get_group;
 using fixpp::test100::get_nested;
 using fixpp::test100::inbound_handle;
 using fixpp::test100::rc_name;
 using fixpp::test100::read_out;
-using fixpp::wire::access_mode;
-using fixpp::wire::MessageView;
-using fixpp::wire::Parser;
 
-struct custom_dict {
-    fixpp::dict::Dictionary dict;
-    fixpp::dict::table_view tv;
-};
+using custom_dict = fixpp::test100::loaded_dictionary;
+using namespace fixpp::test100::div;  // the dictionary-text builders and (A) to (C)
 
 custom_dict load_xml(std::string const& xml) {
     auto d = fixpp::dict::XmlLoader{}.load_from_string(xml, std::pmr::get_default_resource());
@@ -65,111 +60,6 @@ custom_dict load_orch(std::string const& xml) {
     auto tv = d.as_table_view();
     return {std::move(d), std::move(tv)};
 }
-
-// A FIX 4.4 XML dictionary: `fields` (number, name, type), `header`, `trailer`, `messages`,
-// `components` element bodies.
-struct xf {
-    int number;
-    char const* name;
-    char const* type;
-};
-std::string xml_dict(std::vector<xf> const& fields, std::string const& header,
-                     std::string const& trailer, std::string const& messages,
-                     std::string const& components = {}) {
-    std::string x = "<fix type='FIX' major='4' minor='4' servicepack='0'>";
-    x += "<header><field name='MsgType' required='N'/>" + header + "</header>";
-    x += "<trailer>" + trailer + "</trailer>";
-    x += "<messages>" + messages + "</messages>";
-    x += "<components>" + components + "</components><fields>";
-    x += "<field number='8' name='BeginString' type='STRING'/>";
-    x += "<field number='9' name='BodyLength' type='INT'/>";
-    x += "<field number='10' name='CheckSum' type='STRING'/>";
-    x += "<field number='35' name='MsgType' type='STRING'/>";
-    x += "<field number='58' name='Text' type='STRING'/>";
-    for (auto const& f : fields) {
-        x += "<field number='" + std::to_string(f.number) + "' name='" + f.name + "' type='" +
-             f.type + "'/>";
-    }
-    return x + "</fields></fix>";
-}
-std::string xfield(char const* name) {
-    return std::string{"<field name='"} + name + "' required='N'/>";
-}
-std::string xgroup(char const* name, std::string const& body) {
-    return std::string{"<group name='"} + name + "' required='N'>" + body + "</group>";
-}
-std::string xcomp(char const* name) {
-    return std::string{"<component name='"} + name + "' required='N'/>";
-}
-std::string xmsg(char const* type, std::string const& body) {
-    return std::string{"<message name='M"} + type + "' msgtype='" + type + "' msgcat='app'>" +
-           body + "</message>";
-}
-
-// An Orchestra repository: `fields` (id, name, type), then the components (1024 and 1025 are
-// the header and trailer), groups and messages element bodies.
-std::string orch_dict(std::vector<xf> const& fields, std::string const& header_refs,
-                      std::string const& trailer_refs, std::string const& components,
-                      std::string const& groups, std::string const& messages) {
-    std::string x =
-        "<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' "
-        "name='FIX' version='FIX.Latest_EP303'><fixr:datatypes><fixr:datatype name='String'/>"
-        "<fixr:datatype name='int'/><fixr:datatype name='NumInGroup'/><fixr:datatype "
-        "name='Length'/></fixr:datatypes><fixr:fields>"
-        "<fixr:field id='8' name='BeginString' type='String'/>"
-        "<fixr:field id='9' name='BodyLength' type='Length'/>"
-        "<fixr:field id='10' name='CheckSum' type='String'/>"
-        "<fixr:field id='35' name='MsgType' type='String'/>"
-        "<fixr:field id='58' name='Text' type='String'/>";
-    for (auto const& f : fields) {
-        x += "<fixr:field id='" + std::to_string(f.number) + "' name='" + f.name + "' type='" +
-             f.type + "'/>";
-    }
-    x += "</fixr:fields><fixr:components>";
-    x += "<fixr:component id='1024' name='StandardHeader'><fixr:fieldRef id='35'/>" + header_refs +
-         "</fixr:component>";
-    x += "<fixr:component id='1025' name='StandardTrailer'>" + trailer_refs + "</fixr:component>";
-    x += components + "</fixr:components><fixr:groups>" + groups + "</fixr:groups><fixr:messages>" +
-         messages + "</fixr:messages></fixr:repository>";
-    return x;
-}
-std::string ofield(int id) { return "<fixr:fieldRef id='" + std::to_string(id) + "'/>"; }
-std::string ogroupref(int id) { return "<fixr:groupRef id='" + std::to_string(id) + "'/>"; }
-std::string ocompref(int id) { return "<fixr:componentRef id='" + std::to_string(id) + "'/>"; }
-std::string ogroup(int id, int num_in_group, std::string const& body) {
-    return "<fixr:group id='" + std::to_string(id) + "' name='G" + std::to_string(id) +
-           "'><fixr:numInGroup id='" + std::to_string(num_in_group) + "'/>" + body +
-           "</fixr:group>";
-}
-std::string ocomp(int id, std::string const& body) {
-    return "<fixr:component id='" + std::to_string(id) + "' name='C" + std::to_string(id) + "'>" +
-           body + "</fixr:component>";
-}
-std::string omsg(char const* type, std::string const& body) {
-    return std::string{"<fixr:message name='M"} + type + "' msgType='" + type +
-           "'><fixr:structure>" + ocompref(1024) + body + ocompref(1025) +
-           "</fixr:structure></fixr:message>";
-}
-
-// A frame parsed with `tv`.
-struct parsed {
-    std::vector<std::byte> buf;
-    std::optional<fixpp::wire::frame_view> fv;
-    std::pmr::monotonic_buffer_resource arena;
-    std::optional<MessageView<access_mode::Index>> mv;
-    parsed(fixpp::dict::table_view const& tv, std::string const& body) : buf(frame44(body)) {
-        auto f = fixpp::wire::test::make_frame_view(buf);
-        if (!f) {
-            return;
-        }
-        fv.emplace(*f);
-        Parser<access_mode::Index> parser{tv};
-        auto r = parser.parse(*fv, &arena);
-        if (r) {
-            mv.emplace(std::move(*r));
-        }
-    }
-};
 
 std::string field_value(fixpp_group_t const* g, std::size_t i, std::uint16_t tag) {
     char const* v = nullptr;
@@ -213,7 +103,7 @@ void expect_read(read_out const& r, want const& w, std::string const& what) {
 // The flat read of `tag`, asserted against `w` while the view is alive.
 void flat_expect(custom_dict const& d, std::string const& body, std::uint16_t tag, want const& w,
                  std::string const& what) {
-    parsed const p{d.tv, body};
+    fixpp::test100::parsed44 const p{body, d.tv};
     ASSERT_TRUE(p.mv.has_value()) << what << ": setup: the frame did not parse";
     inbound_handle const h{*p.mv};
     expect_read(get_group(h.ptr(), tag), w, what);
@@ -223,7 +113,7 @@ void flat_expect(custom_dict const& d, std::string const& body, std::uint16_t ta
 // `w` while the view is alive.
 void nested_expect(custom_dict const& d, std::string const& body, std::uint16_t outer_tag,
                    std::uint16_t nested_tag, want const& w, std::string const& what) {
-    parsed const p{d.tv, body};
+    fixpp::test100::parsed44 const p{body, d.tv};
     ASSERT_TRUE(p.mv.has_value()) << what << ": setup: the frame did not parse";
     inbound_handle const h{*p.mv};
     auto const outer = get_group(h.ptr(), outer_tag);
@@ -491,37 +381,13 @@ TEST(SectionArm100, VO_Control_UnderNoZ_Cursor) {
 // Divergent definitions (research D9; D2 "Per-occurrence records")
 // ════════════════════════════════════════════════════════════════════════════════
 
-std::vector<xf> const kDivFields{
-    {601, "NoA", "NUMINGROUP"}, {602, "A1", "STRING"},  {603, "NoB", "NUMINGROUP"},
-    {606, "NoZ", "NUMINGROUP"}, {607, "Z1", "STRING"},  {610, "X1", "STRING"},
-    {611, "X2", "STRING"},      {9120, "Y1", "STRING"}, {9121, "Y2", "STRING"},
-    {630, "NoT", "NUMINGROUP"}, {631, "T1", "STRING"},  {632, "T2", "STRING"},
-    {633, "T3", "STRING"},      {634, "T4", "STRING"},  {640, "N1", "STRING"},
-    {641, "N2", "STRING"},      {642, "R1", "STRING"},  {643, "R2", "STRING"}};
-std::vector<xf> orch_types(std::vector<xf> v) {
-    for (auto& f : v) {
-        f.type = std::string_view{f.type} == "NUMINGROUP" ? "NumInGroup" : "String";
-    }
-    return v;
-}
-
 // (A): NoB nested under header groups NoA {X1, X2} and NoZ {Y1, Y2}.
-custom_dict const& div_a_xml() {
-    static custom_dict const d = load_xml(
-        xml_dict(kDivFields,
-                 xgroup("NoA", xfield("A1") + xgroup("NoB", xfield("X1") + xfield("X2"))) +
-                     xgroup("NoZ", xfield("Z1") + xgroup("NoB", xfield("Y1") + xfield("Y2"))),
-                 "", xmsg("M", xfield("Text"))));
+custom_dict const& div_a_xml_dict() {
+    static custom_dict const d = load_xml(div_a_xml());
     return d;
 }
-custom_dict const& div_a_orch() {
-    static custom_dict const d =
-        load_orch(orch_dict(orch_types(kDivFields), ogroupref(2601) + ogroupref(2606), "", "",
-                            ogroup(2601, 601, ofield(602) + ogroupref(2701)) +
-                                ogroup(2606, 606, ofield(607) + ogroupref(2702)) +
-                                ogroup(2701, 603, ofield(610) + ofield(611)) +
-                                ogroup(2702, 603, ofield(9120) + ofield(9121)),
-                            omsg("M", ofield(58))));
+custom_dict const& div_a_orch_dict() {
+    static custom_dict const d = load_orch(div_a_orch());
     return d;
 }
 std::string div_a_frame_under(std::uint16_t parent, std::uint16_t parent_member,
@@ -557,29 +423,26 @@ void run_div_a(custom_dict const& d, char const* loader, bool control) {
                                : " (A) under the parent the bare store does not hold"));
 }
 TEST(Divergent100, A_Xml_NestedUnderTheNonBareParentAtItsOwnDefinition) {
-    run_div_a(div_a_xml(), "XML", false);
+    run_div_a(div_a_xml_dict(), "XML", false);
 }
-TEST(Divergent100, A_Xml_Control_NestedUnderTheBareParent) { run_div_a(div_a_xml(), "XML", true); }
+TEST(Divergent100, A_Xml_Control_NestedUnderTheBareParent) {
+    run_div_a(div_a_xml_dict(), "XML", true);
+}
 TEST(Divergent100, A_Orchestra_NestedUnderTheNonBareParentAtItsOwnDefinition) {
-    run_div_a(div_a_orch(), "Orchestra", false);
+    run_div_a(div_a_orch_dict(), "Orchestra", false);
 }
 TEST(Divergent100, A_Orchestra_Control_NestedUnderTheBareParent) {
-    run_div_a(div_a_orch(), "Orchestra", true);
+    run_div_a(div_a_orch_dict(), "Orchestra", true);
 }
 
 // (B): NoT(630) in a declared message's body {T1, T2} and in the trailer {T3, T4}; the trailer
 // NoT read with the flat getter in an undeclared type.
-custom_dict const& div_b_xml() {
-    static custom_dict const d =
-        load_xml(xml_dict(kDivFields, "", xgroup("NoT", xfield("T3") + xfield("T4")),
-                          xmsg("M", xfield("Text") + xgroup("NoT", xfield("T1") + xfield("T2")))));
+custom_dict const& div_b_xml_dict() {
+    static custom_dict const d = load_xml(div_b_xml());
     return d;
 }
-custom_dict const& div_b_orch() {
-    static custom_dict const d = load_orch(orch_dict(
-        orch_types(kDivFields), "", ogroupref(2632), "",
-        ogroup(2631, 630, ofield(631) + ofield(632)) + ogroup(2632, 630, ofield(633) + ofield(634)),
-        omsg("M", ofield(58) + ogroupref(2631))));
+custom_dict const& div_b_orch_dict() {
+    static custom_dict const d = load_orch(div_b_orch());
     return d;
 }
 void run_div_b(custom_dict const& d, char const* loader) {
@@ -589,30 +452,21 @@ void run_div_b(custom_dict const& d, char const* loader) {
     flat_expect(d, head("ZZ") + kText + two_instances(630, 633, 634), 630,
                 {.n = 2, .first = 633, .last = 634}, L + " (B) trailer NoT in an undeclared type");
 }
-TEST(Divergent100, B_Xml_TrailerGroupAtTheTrailerDefinition) { run_div_b(div_b_xml(), "XML"); }
+TEST(Divergent100, B_Xml_TrailerGroupAtTheTrailerDefinition) { run_div_b(div_b_xml_dict(), "XML"); }
 TEST(Divergent100, B_Orchestra_TrailerGroupAtTheTrailerDefinition) {
-    run_div_b(div_b_orch(), "Orchestra");
+    run_div_b(div_b_orch_dict(), "Orchestra");
 }
 
 // (C): NoB(603) at the root of declared message M {642, 643} and inside body group NoA {640, 641};
 // the surviving NoB FieldRef is the nested one, so M has no group_ctx_ key at the root. Message
 // L, which holds only NoA, makes the nested definition the one the loader reaches first, so the
 // bare store holds it; the precondition asserts that rather than relying on the order.
-custom_dict const& div_c_xml() {
-    static custom_dict const d = load_xml(xml_dict(
-        kDivFields, "", "",
-        xmsg("L", xgroup("NoA", xfield("A1") + xgroup("NoB", xfield("N1") + xfield("N2")))) +
-            xmsg("M", xgroup("NoA", xfield("A1") + xgroup("NoB", xfield("N1") + xfield("N2"))) +
-                          xgroup("NoB", xfield("R1") + xfield("R2")) + xfield("Text"))));
+custom_dict const& div_c_xml_dict() {
+    static custom_dict const d = load_xml(div_c_xml());
     return d;
 }
-custom_dict const& div_c_orch() {
-    static custom_dict const d = load_orch(orch_dict(
-        orch_types(kDivFields), "", "", "",
-        ogroup(2601, 601, ofield(602) + ogroupref(2741)) +
-            ogroup(2741, 603, ofield(640) + ofield(641)) +
-            ogroup(2742, 603, ofield(642) + ofield(643)),
-        omsg("L", ogroupref(2601)) + omsg("M", ogroupref(2601) + ogroupref(2742) + ofield(58))));
+custom_dict const& div_c_orch_dict() {
+    static custom_dict const d = load_orch(div_c_orch());
     return d;
 }
 void run_div_c(custom_dict const& d, char const* loader) {
@@ -634,13 +488,13 @@ void run_div_c_control(custom_dict const& d, char const* loader) {
                   601, 603, {.n = 2, .first = 640, .last = 641},
                   L + " (C) control: NoB under NoA (a group_ctx_ hit)");
 }
-TEST(Divergent100, C_Xml_RootGroupAtTheRootDefinition) { run_div_c(div_c_xml(), "XML"); }
-TEST(Divergent100, C_Xml_Control_NestedUnderNoA) { run_div_c_control(div_c_xml(), "XML"); }
+TEST(Divergent100, C_Xml_RootGroupAtTheRootDefinition) { run_div_c(div_c_xml_dict(), "XML"); }
+TEST(Divergent100, C_Xml_Control_NestedUnderNoA) { run_div_c_control(div_c_xml_dict(), "XML"); }
 TEST(Divergent100, C_Orchestra_RootGroupAtTheRootDefinition) {
-    run_div_c(div_c_orch(), "Orchestra");
+    run_div_c(div_c_orch_dict(), "Orchestra");
 }
 TEST(Divergent100, C_Orchestra_Control_NestedUnderNoA) {
-    run_div_c_control(div_c_orch(), "Orchestra");
+    run_div_c_control(div_c_orch_dict(), "Orchestra");
 }
 
 }  // namespace

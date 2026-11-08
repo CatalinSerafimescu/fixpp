@@ -48,24 +48,7 @@ using fixpp::wire::access_mode;
 using fixpp::wire::MessageView;
 using fixpp::wire::Parser;
 
-struct parsed44 {
-    std::vector<std::byte> buf;
-    std::optional<fixpp::wire::frame_view> fv;
-    std::pmr::monotonic_buffer_resource arena;
-    std::optional<MessageView<access_mode::Index>> mv;
-    explicit parsed44(std::string const& body) : buf(frame44(body)) {
-        auto f = fixpp::wire::test::make_frame_view(buf);
-        if (!f) {
-            return;
-        }
-        fv.emplace(*f);
-        Parser<access_mode::Index> parser{fix44().tv};
-        auto r = parser.parse(*fv, &arena);
-        if (r) {
-            mv.emplace(std::move(*r));
-        }
-    }
-};
+using fixpp::test100::parsed44;
 
 std::string field(MessageView<access_mode::Index> const& mv, std::uint16_t tag) {
     auto const f = mv.get(tag);
@@ -297,21 +280,12 @@ TEST(TypedReads100, T040_US2_1_TopLevelSliceAllocationFails_ReadFailedTwice) {
     }
 }
 
-// An instance of NoPartyIDs(453) holding `members` PartyIDSource(447) fields, then `tail`.
-std::string oversized_party(std::size_t members, std::string const& tail) {
-    std::string b = header44("D") + kOrd +
-                    "453=1\x01"
-                    "448=P\x01";
-    for (std::size_t i = 0; i < members; ++i) {
-        b += "447=D\x01";
-    }
-    return b + tail + "54=1\x01";
-}
-constexpr std::size_t kPastInstanceCap = fixpp::wire::default_max_group_entries_per_instance + 8U;
+using fixpp::test100::kPastInstanceCap;
+using fixpp::test100::oversized_instance;
 
 // ── D5 (FR-011): a top-level instance past the per-instance cap ────────────────────
 TEST(TypedReads100, T040_D5_TopLevelInstancePastPerInstanceCap_ReadFailedNotAllocFailedTwice) {
-    auto const buf = frame44(oversized_party(kPastInstanceCap, ""));
+    auto const buf = frame44(oversized_instance(kPastInstanceCap, ""));
     auto const fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -334,10 +308,10 @@ TEST(TypedReads100, T040_D5_TopLevelInstancePastPerInstanceCap_ReadFailedNotAllo
 // Raised root caps admit an instance larger than the sub-table's entry cap (the default Config);
 // the instance carries NoPartySubIDs(802), read through the generated `party_sub_i_ds()`.
 TEST(TypedReads100, T040_D7i_TypedNestedSubTableOverEntryCap_ReadFailedTwice) {
-    auto const buf = frame44(oversized_party(kPastInstanceCap,
-                                             "802=1\x01"
-                                             "523=S\x01"
-                                             "803=1\x01"));
+    auto const buf = frame44(oversized_instance(kPastInstanceCap,
+                                                "802=1\x01"
+                                                "523=S\x01"
+                                                "803=1\x01"));
     auto const fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -375,41 +349,33 @@ std::string const kThreePartiesNo802 =
     "452=1\x01";
 
 std::size_t typed_absent_nested_at(fixpp::test100::alloc_kind kind, std::string const& what) {
-    auto const buf = frame44(header44("D") + kOrd + kThreePartiesNo802 + "54=1\x01");
-    auto const fv = fixpp::wire::test::make_frame_view(buf);
-    if (!fv) {
-        ADD_FAILURE() << "setup: frame";
-        return 0;
-    }
-    Parser<access_mode::Index> parser{fix44().tv};
     std::size_t hits = 0;
-    for (std::size_t room = 0; room <= (1U << 16U); ++room) {
-        fixpp::test100::stepped_arena arena{room};
-        auto const mv = parser.parse(*fv, arena.mr());
-        if (!mv) {
-            continue;
-        }
-        auto const parties = mv->group<453, G_453>();
-        if (parties.size() != 3U) {
-            continue;
-        }
-        G_453 const entry = parties[0];
-        arena.rec().mark();
-        auto const first = entry.party_sub_i_ds();
-        auto const k = fixpp::test100::classify_first_failure(arena.rec(), 0).kind;
-        auto const repeat = entry.party_sub_i_ds();
-        bool const complete = !arena.rec().first_failure().has_value();
-        if (k == kind) {
-            ++hits;
-            EXPECT_FALSE(first.read_failed())
-                << what << " (first read, room " << room << "): an absent tag is not a failed read";
-            EXPECT_FALSE(repeat.read_failed()) << what << " (repeat read, room " << room << ")";
-            EXPECT_EQ(first.size(), 0U) << what << " (room " << room << ")";
-            EXPECT_EQ(repeat.size(), 0U) << what << " (room " << room << ")";
-        }
-        if (complete) {
-            break;
-        }
+    bool const framed = fixpp::test100::step_parse_rooms(
+        header44("D") + kOrd + kThreePartiesNo802 + "54=1\x01", fix44().tv, std::nullopt, 1U << 16U,
+        [&](std::size_t room, fixpp::test100::stepped_arena& arena,
+            MessageView<access_mode::Index> const& mv) {
+            auto const parties = mv.group<453, G_453>();
+            if (parties.size() != 3U) {
+                return false;
+            }
+            G_453 const entry = parties[0];
+            arena.rec().mark();
+            auto const first = entry.party_sub_i_ds();
+            auto const k = fixpp::test100::classify_first_failure(arena.rec(), 0).kind;
+            auto const repeat = entry.party_sub_i_ds();
+            bool const complete = !arena.rec().first_failure().has_value();
+            if (k == kind) {
+                ++hits;
+                EXPECT_FALSE(first.read_failed()) << what << " (first read, room " << room
+                                                  << "): an absent tag is not a failed read";
+                EXPECT_FALSE(repeat.read_failed()) << what << " (repeat read, room " << room << ")";
+                EXPECT_EQ(first.size(), 0U) << what << " (room " << room << ")";
+                EXPECT_EQ(repeat.size(), 0U) << what << " (room " << room << ")";
+            }
+            return complete;
+        });
+    if (!framed) {
+        ADD_FAILURE() << "setup: frame";
     }
     return hits;
 }

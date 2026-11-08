@@ -40,29 +40,9 @@ using fixpp::test100::inbound_handle;
 using fixpp::test100::rc_name;
 using fixpp::test100::read_out;
 using fixpp::wire::access_mode;
-using fixpp::wire::MessageView;
 using fixpp::wire::Parser;
 
-// A frame parsed with FIX44's table view into its own arena.
-struct parsed44 {
-    std::vector<std::byte> buf;
-    std::optional<fixpp::wire::frame_view> fv;
-    std::pmr::monotonic_buffer_resource arena;
-    std::optional<MessageView<access_mode::Index>> mv;
-
-    explicit parsed44(std::string const& body) : buf(frame44(body)) {
-        auto f = fixpp::wire::test::make_frame_view(buf);
-        if (!f) {
-            return;
-        }
-        fv.emplace(*f);
-        Parser<access_mode::Index> parser{fix44().tv};
-        auto r = parser.parse(*fv, &arena);
-        if (r) {
-            mv.emplace(std::move(*r));
-        }
-    }
-};
+using fixpp::test100::parsed44;
 
 void expect_code(read_out const& r, int code, std::string const& what) {
     EXPECT_EQ(r.rc, code) << what << ": expected " << rc_name(code) << "; actual " << rc_name(r.rc)
@@ -501,37 +481,27 @@ std::vector<step_obs> step_rooms(std::string const& body, fixpp::dict::table_vie
                                  fixpp::wire::OffsetTable::Config cfg, std::size_t n_slices,
                                  Setup setup, Read read) {
     std::vector<step_obs> out;
-    auto const buf = frame44(body);
-    auto const fv = fixpp::wire::test::make_frame_view(buf);
-    if (!fv) {
+    bool const framed = fixpp::test100::step_parse_rooms(
+        body, tv, cfg, kMaxRoom, [&](std::size_t room, stepped_arena& arena, auto const& mv) {
+            inbound_handle const h{mv};
+            fixpp_group_t const* g = nullptr;
+            if (!setup(h, g)) {
+                return false;
+            }
+            arena.rec().mark();
+            step_obs o;
+            o.room = room;
+            o.first = read(h, g);
+            auto const c = classify_first_failure(arena.rec(), n_slices, sizeof(fixpp_group));
+            o.kind = c.kind;
+            o.shell = c.is_extra;
+            o.repeat = read(h, g);
+            bool const complete = !arena.rec().first_failure().has_value();
+            out.push_back(o);
+            return complete;
+        });
+    if (!framed) {
         ADD_FAILURE() << "setup: frame";
-        return out;
-    }
-    Parser<access_mode::Index> parser{tv};
-    for (std::size_t room = 0; room <= kMaxRoom; ++room) {
-        stepped_arena arena{room};
-        auto mv = parser.parse(*fv, arena.mr(), cfg);
-        if (!mv) {
-            continue;
-        }
-        inbound_handle const h{*mv};
-        fixpp_group_t const* g = nullptr;
-        if (!setup(h, g)) {
-            continue;
-        }
-        arena.rec().mark();
-        step_obs o;
-        o.room = room;
-        o.first = read(h, g);
-        auto const c = classify_first_failure(arena.rec(), n_slices, sizeof(fixpp_group));
-        o.kind = c.kind;
-        o.shell = c.is_extra;
-        o.repeat = read(h, g);
-        bool const complete = !arena.rec().first_failure().has_value();
-        out.push_back(o);
-        if (complete) {
-            break;
-        }
     }
     return out;
 }
@@ -685,16 +655,8 @@ TEST(GroupGetters100, US2_5_NestedRecordMissModeA_TypeMismatch) {
 }
 
 // ── D5 top level (FR-011): an instance past the per-instance cap ───────────────────
-std::string oversized_instance(std::size_t members, std::string const& tail) {
-    std::string b = header44("D") + kOrd +
-                    "453=1\x01"
-                    "448=P\x01";
-    for (std::size_t i = 0; i < members; ++i) {
-        b += "447=D\x01";
-    }
-    return b + tail + "54=1\x01";
-}
-constexpr std::size_t kPastInstanceCap = fixpp::wire::default_max_group_entries_per_instance + 8U;
+using fixpp::test100::kPastInstanceCap;
+using fixpp::test100::oversized_instance;
 
 TEST(GroupGetters100, D5_FlatInstancePastPerInstanceCap_WireLimitExceededTwice) {
     auto const buf = frame44(oversized_instance(kPastInstanceCap, ""));

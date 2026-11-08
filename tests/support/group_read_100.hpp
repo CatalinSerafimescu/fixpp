@@ -5,7 +5,12 @@
 //
 //   - `fix44()`: the shipped FIX 4.4 dictionary and its `as_table_view()`, loaded once per process
 //     from FIXPP_DICT_DATA_DIR (the including target defines it).
-//   - `frame44(body)`: a FIX.4.4 frame around `body` (8=, a correct 9=, `body`, 10=000).
+//   - `frame44(body)`: a FIX.4.4 frame around `body` (8=, a correct 9=, `body`, 10=000);
+//     `make_frame_view` does not check the checksum value.
+//   - `parsed44`: such a frame parsed with a table view (FIX 4.4's by default) into its own
+//     arena.
+//   - `oversized_instance(members, tail)` and `kPastInstanceCap`: a NewOrderSingle body whose
+//     one NoPartyIDs(453) instance is as large as the caller asks.
 //   - `recording_resource`: forwards to an upstream resource and records every allocation request
 //     (bytes, alignment, whether it succeeded), so an arena-stepping cell can name which
 //     allocation of a read was the first to fail.
@@ -13,6 +18,8 @@
 //     `null_memory_resource()` (the construction 073's failloud tests use), behind a
 //     `recording_resource`. The cell owns the arena, so it asserts on every lane (research D9
 //     "Lanes").
+//   - `step_parse_rooms`: parses one frame on a `stepped_arena` at each room from empty, one
+//     byte at a time, and hands each parsed view to the caller's cell.
 
 #include <cstddef>
 #include <cstdint>
@@ -22,12 +29,14 @@
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/wire/offset_table.hpp>
+#include <fixpp/wire/parser.hpp>
 #include <memory_resource>
 #include <optional>
 #include <span>
 #include <string>
 #include <vector>
 
+#include "support/frame_view_factory.hpp"
 #include "support/wire_test_hooks.hpp"
 
 namespace fixpp::test100 {
@@ -70,6 +79,47 @@ struct loaded_dictionary {
            "34=2\x01"
            "52=20240101-00:00:00.000\x01";
 }
+
+// `frame44(body)` parsed with `tv` into its own arena. `mv` is empty when the frame or the
+// parse failed.
+struct parsed44 {
+    std::vector<std::byte> buf;
+    std::optional<fixpp::wire::frame_view> fv;
+    std::pmr::monotonic_buffer_resource arena;
+    std::optional<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>> mv;
+
+    parsed44(std::string const& body, fixpp::dict::table_view const& tv) : buf(frame44(body)) {
+        auto f = fixpp::wire::test::make_frame_view(buf);
+        if (!f) {
+            return;
+        }
+        fv.emplace(*f);
+        fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{tv};
+        auto r = parser.parse(*fv, &arena);
+        if (r) {
+            mv.emplace(std::move(*r));
+        }
+    }
+#ifdef FIXPP_DICT_DATA_DIR
+    explicit parsed44(std::string const& body) : parsed44(body, fix44().tv) {}
+#endif
+};
+
+// A NewOrderSingle body whose one NoPartyIDs(453) instance holds PartyID(448) and `members`
+// PartyIDSource(447) fields, then `tail`, then Side(54) after the group.
+[[nodiscard]] inline std::string oversized_instance(std::size_t members, std::string const& tail) {
+    std::string b = header44("D") +
+                    "11=ORD1\x01"
+                    "453=1\x01"
+                    "448=P\x01";
+    for (std::size_t i = 0; i < members; ++i) {
+        b += "447=D\x01";
+    }
+    return b + tail + "54=1\x01";
+}
+// An instance member count past the default per-instance entry cap.
+inline constexpr std::size_t kPastInstanceCap =
+    fixpp::wire::default_max_group_entries_per_instance + 8U;
 
 class recording_resource final : public std::pmr::memory_resource {
 public:
@@ -138,6 +188,33 @@ private:
     std::pmr::monotonic_buffer_resource mono_;
     recording_resource rec_;
 };
+
+// Parses `frame44(body)` with `tv` (and `cfg`, when given) on a fresh `stepped_arena` at each
+// room from 0 to `max_room`, one byte at a time, and calls `at_room(room, arena, view)` at each
+// room whose parse succeeded; `at_room` returns true to stop the stepping. Returns false, having
+// stepped nothing, when the frame could not be built.
+template <class AtRoom>
+[[nodiscard]] bool step_parse_rooms(std::string const& body, fixpp::dict::table_view const& tv,
+                                    std::optional<fixpp::wire::OffsetTable::Config> cfg,
+                                    std::size_t max_room, AtRoom at_room) {
+    auto const buf = frame44(body);
+    auto const fv = fixpp::wire::test::make_frame_view(buf);
+    if (!fv) {
+        return false;
+    }
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{tv};
+    for (std::size_t room = 0; room <= max_room; ++room) {
+        stepped_arena arena{room};
+        auto mv = cfg ? parser.parse(*fv, arena.mr(), *cfg) : parser.parse(*fv, arena.mr());
+        if (!mv) {
+            continue;
+        }
+        if (at_room(room, arena, *mv)) {
+            break;
+        }
+    }
+    return true;
+}
 
 // The kinds of allocation a group read makes, named by the request's size and alignment.
 enum class alloc_kind : std::uint8_t {

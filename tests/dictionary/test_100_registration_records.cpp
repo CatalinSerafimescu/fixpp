@@ -42,6 +42,7 @@
 #include <utility>
 #include <vector>
 
+#include "support/divergent_dicts_100.hpp"
 #include "support/table_view_test_access.hpp"
 
 namespace {
@@ -622,116 +623,13 @@ TEST(RegistrationRecords100, Sweep_OrchestraFIXLatest) {
 }
 
 // ── The divergent-definition dictionaries (the seeded input of the definition check) ─────
-
-struct xf {
-    int number;
-    char const* name;
-    char const* type;
-};
-std::vector<xf> const kDivFields{
-    {601, "NoA", "NUMINGROUP"}, {602, "A1", "STRING"},  {603, "NoB", "NUMINGROUP"},
-    {606, "NoZ", "NUMINGROUP"}, {607, "Z1", "STRING"},  {610, "X1", "STRING"},
-    {611, "X2", "STRING"},      {9120, "Y1", "STRING"}, {9121, "Y2", "STRING"},
-    {630, "NoT", "NUMINGROUP"}, {631, "T1", "STRING"},  {632, "T2", "STRING"},
-    {633, "T3", "STRING"},      {634, "T4", "STRING"},  {640, "N1", "STRING"},
-    {641, "N2", "STRING"},      {642, "R1", "STRING"},  {643, "R2", "STRING"}};
-
-std::string xml_dict(std::string const& header, std::string const& trailer,
-                     std::string const& messages) {
-    std::string x = "<fix type='FIX' major='4' minor='4' servicepack='0'>";
-    x += "<header><field name='MsgType' required='N'/>" + header + "</header>";
-    x += "<trailer>" + trailer + "</trailer><messages>" + messages + "</messages>";
-    x += "<components/><fields>";
-    x += "<field number='35' name='MsgType' type='STRING'/>";
-    x += "<field number='58' name='Text' type='STRING'/>";
-    for (auto const& f : kDivFields) {
-        x += "<field number='" + std::to_string(f.number) + "' name='" + f.name + "' type='" +
-             f.type + "'/>";
-    }
-    return x + "</fields></fix>";
-}
-std::string xfield(char const* name) {
-    return std::string{"<field name='"} + name + "' required='N'/>";
-}
-std::string xgroup(char const* name, std::string const& body) {
-    return std::string{"<group name='"} + name + "' required='N'>" + body + "</group>";
-}
-std::string xmsg(char const* type, std::string const& body) {
-    return std::string{"<message name='M"} + type + "' msgtype='" + type + "' msgcat='app'>" +
-           body + "</message>";
-}
-
-std::string orch_dict(std::string const& header_refs, std::string const& trailer_refs,
-                      std::string const& groups, std::string const& messages) {
-    std::string x =
-        "<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' "
-        "name='FIX' version='FIX.Latest_EP303'><fixr:datatypes><fixr:datatype name='String'/>"
-        "<fixr:datatype name='NumInGroup'/></fixr:datatypes><fixr:fields>"
-        "<fixr:field id='35' name='MsgType' type='String'/>"
-        "<fixr:field id='58' name='Text' type='String'/>";
-    for (auto const& f : kDivFields) {
-        x += "<fixr:field id='" + std::to_string(f.number) + "' name='" + f.name + "' type='" +
-             (std::string_view{f.type} == "NUMINGROUP" ? "NumInGroup" : "String") + "'/>";
-    }
-    x += "</fixr:fields><fixr:components>";
-    x += "<fixr:component id='1024' name='StandardHeader'><fixr:fieldRef id='35'/>" + header_refs +
-         "</fixr:component>";
-    x += "<fixr:component id='1025' name='StandardTrailer'>" + trailer_refs + "</fixr:component>";
-    x += "</fixr:components><fixr:groups>" + groups + "</fixr:groups><fixr:messages>" + messages +
-         "</fixr:messages></fixr:repository>";
-    return x;
-}
-std::string ofield(int id) { return "<fixr:fieldRef id='" + std::to_string(id) + "'/>"; }
-std::string ogroupref(int id) { return "<fixr:groupRef id='" + std::to_string(id) + "'/>"; }
-std::string ogroup(int id, int num_in_group, std::string const& body) {
-    return "<fixr:group id='" + std::to_string(id) + "' name='G" + std::to_string(id) +
-           "'><fixr:numInGroup id='" + std::to_string(num_in_group) + "'/>" + body +
-           "</fixr:group>";
-}
-std::string omsg(char const* type, std::string const& body) {
-    return std::string{"<fixr:message name='M"} + type + "' msgType='" + type +
-           "'><fixr:structure><fixr:componentRef id='1024'/>" + body +
-           "<fixr:componentRef id='1025'/></fixr:structure></fixr:message>";
-}
-
-std::string div_a_xml() {
-    return xml_dict(xgroup("NoA", xfield("A1") + xgroup("NoB", xfield("X1") + xfield("X2"))) +
-                        xgroup("NoZ", xfield("Z1") + xgroup("NoB", xfield("Y1") + xfield("Y2"))),
-                    "", xmsg("M", xfield("Text")));
-}
-std::string div_b_xml() {
-    return xml_dict("", xgroup("NoT", xfield("T3") + xfield("T4")),
-                    xmsg("M", xfield("Text") + xgroup("NoT", xfield("T1") + xfield("T2"))));
-}
-std::string div_c_xml() {
-    return xml_dict(
-        "", "",
-        xmsg("L", xgroup("NoA", xfield("A1") + xgroup("NoB", xfield("N1") + xfield("N2")))) +
-            xmsg("M", xgroup("NoA", xfield("A1") + xgroup("NoB", xfield("N1") + xfield("N2"))) +
-                          xgroup("NoB", xfield("R1") + xfield("R2")) + xfield("Text")));
-}
-std::string div_a_orch() {
-    return orch_dict(ogroupref(2601) + ogroupref(2606), "",
-                     ogroup(2601, 601, ofield(602) + ogroupref(2701)) +
-                         ogroup(2606, 606, ofield(607) + ogroupref(2702)) +
-                         ogroup(2701, 603, ofield(610) + ofield(611)) +
-                         ogroup(2702, 603, ofield(9120) + ofield(9121)),
-                     omsg("M", ofield(58)));
-}
-std::string div_b_orch() {
-    return orch_dict(
-        "", ogroupref(2632),
-        ogroup(2631, 630, ofield(631) + ofield(632)) + ogroup(2632, 630, ofield(633) + ofield(634)),
-        omsg("M", ofield(58) + ogroupref(2631)));
-}
-std::string div_c_orch() {
-    return orch_dict(
-        "", "",
-        ogroup(2601, 601, ofield(602) + ogroupref(2741)) +
-            ogroup(2741, 603, ofield(640) + ofield(641)) +
-            ogroup(2742, 603, ofield(642) + ofield(643)),
-        omsg("L", ogroupref(2601)) + omsg("M", ogroupref(2601) + ogroupref(2742) + ofield(58)));
-}
+// research D9's (A), (B) and (C), per loader: tests/support/divergent_dicts_100.hpp.
+using fixpp::test100::div::div_a_orch;
+using fixpp::test100::div::div_a_xml;
+using fixpp::test100::div::div_b_orch;
+using fixpp::test100::div::div_b_xml;
+using fixpp::test100::div::div_c_orch;
+using fixpp::test100::div::div_c_xml;
 
 void sweep_divergent_xml(char const* shape, std::string const& text) {
     auto const d =

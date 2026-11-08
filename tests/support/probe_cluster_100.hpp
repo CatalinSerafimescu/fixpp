@@ -29,7 +29,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <fixpp/core/length_data_pairs.hpp>
 #include <fixpp/wire/offset_table.hpp>
 #include <memory_resource>
@@ -40,6 +39,7 @@
 #include <vector>
 
 #include "support/frame_view_factory.hpp"
+#include "support/group_read_100.hpp"  // frame44
 #include "support/wire_test_hooks.hpp"
 
 namespace fixpp::wire::test100 {
@@ -180,8 +180,8 @@ struct build_probe_sim {
     return sim;
 }
 
-// The tag sequence of the frame `frame_with_body` builds, in frame order: `8`, `9`, the body's
-// tags, `10`.
+// The tag sequence of the frame `fixpp::test100::frame44` builds, in frame order: `8`, `9`, the
+// body's tags, `10`.
 [[nodiscard]] inline std::vector<std::uint16_t> frame_tag_sequence(
     std::span<std::uint16_t const> body_tags) {
     std::vector<std::uint16_t> out;
@@ -193,21 +193,9 @@ struct build_probe_sim {
     return out;
 }
 
-// A FIX.4.4 frame around `body` (8=, a correct 9=, the body, 10=000), as the wire tests build
-// one; `make_frame_view` does not check the checksum value.
-[[nodiscard]] inline std::vector<std::byte> frame_with_body(std::string const& body) {
-    std::string full = "8=FIX.4.4\x01";
-    full += "9=" + std::to_string(body.size()) + "\x01";
-    full += body;
-    full += "10=000\x01";
-    std::vector<std::byte> out(full.size());
-    std::memcpy(out.data(), full.data(), full.size());
-    return out;
-}
-
 // The overlay seed in force now, read from a table built under it.
 [[nodiscard]] inline std::uint32_t current_overlay_seed() {
-    auto const buf = frame_with_body("35=0\x01");
+    auto const buf = ::fixpp::test100::frame44("35=0\x01");
     auto const fv = test::make_frame_view(buf);
     if (!fv) {
         return 0U;

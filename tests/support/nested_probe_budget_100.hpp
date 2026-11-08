@@ -101,7 +101,7 @@ struct plan {
         body += std::to_string(t) + "=c\x01";
     }
     body += std::to_string(kN) + "=1\x01" + std::to_string(kNMember) + "=y\x01";
-    return frame_with_body(body);
+    return ::fixpp::test100::frame44(body);
 }
 
 }  // namespace fixpp::wire::test100::nested_budget

@@ -88,40 +88,31 @@ template <class Setup, class Read>
 std::vector<step_obs> step_rooms(std::string const& body, OffsetTable::Config cfg,
                                  std::size_t n_slices, Setup setup, Read read) {
     std::vector<step_obs> out;
-    auto const buf = frame44(body);
-    auto const fv = fixpp::wire::test::make_frame_view(buf);
-    if (!fv) {
-        ADD_FAILURE() << "setup: frame";
-        return out;
-    }
-    Parser<access_mode::Index> parser{fix44().tv};
-    for (std::size_t room = 0; room <= kMaxRoom; ++room) {
-        stepped_arena arena{room};
-        auto mv = parser.parse(*fv, arena.mr(), cfg);
-        if (!mv) {
-            continue;
-        }
-        std::optional<fixpp::wire::group_slice> outer;
-        if (!setup(*mv, outer)) {
-            continue;
-        }
-        arena.rec().mark();
-        step_obs o;
-        o.room = room;
-        o.first = read(*mv, outer);
-        o.kind = classify_first_failure(arena.rec(), n_slices).kind;
-        for (auto const& e : arena.rec().events_since_mark()) {
-            if (!e.ok) {
-                break;
+    bool const framed = fixpp::test100::step_parse_rooms(
+        body, fix44().tv, cfg, kMaxRoom,
+        [&](std::size_t room, stepped_arena& arena, view_t const& mv) {
+            std::optional<fixpp::wire::group_slice> outer;
+            if (!setup(mv, outer)) {
+                return false;
             }
-            o.before_failure.push_back(e);
-        }
-        o.repeat = read(*mv, outer);
-        bool const complete = !arena.rec().first_failure().has_value();
-        out.push_back(o);
-        if (complete) {
-            break;
-        }
+            arena.rec().mark();
+            step_obs o;
+            o.room = room;
+            o.first = read(mv, outer);
+            o.kind = classify_first_failure(arena.rec(), n_slices).kind;
+            for (auto const& e : arena.rec().events_since_mark()) {
+                if (!e.ok) {
+                    break;
+                }
+                o.before_failure.push_back(e);
+            }
+            o.repeat = read(mv, outer);
+            bool const complete = !arena.rec().first_failure().has_value();
+            out.push_back(o);
+            return complete;
+        });
+    if (!framed) {
+        ADD_FAILURE() << "setup: frame";
     }
     return out;
 }
@@ -255,22 +246,14 @@ TEST(GroupReadStatus100, D11_NestedRecordMissModeA_NotFailed) {
 
 // D7: a sub-table over its entry cap (raised root caps admit an instance larger than the
 // sub-table's default entry cap). On an ample arena, so the only failure is the sub-build's.
-constexpr std::size_t kPastInstanceCap = fixpp::wire::default_max_group_entries_per_instance + 8U;
+using fixpp::test100::kPastInstanceCap;
 // `with_802`: the instance carries a NoPartySubIDs(802) group after its members.
 wire_read d7_nested(std::uint16_t tag, bool with_802 = true, bool repeat = false) {
-    std::string b = header44("D") + kOrd +
-                    "453=1\x01"
-                    "448=P\x01";
-    for (std::size_t i = 0; i < kPastInstanceCap; ++i) {
-        b += "447=D\x01";
-    }
-    if (with_802) {
-        b += "802=1\x01"
-             "523=S\x01"
-             "803=1\x01";
-    }
-    b += "54=1\x01";
-    auto const buf = frame44(b);
+    auto const buf =
+        frame44(fixpp::test100::oversized_instance(kPastInstanceCap, with_802 ? "802=1\x01"
+                                                                                "523=S\x01"
+                                                                                "803=1\x01"
+                                                                              : ""));
     auto const fv = fixpp::wire::test::make_frame_view(buf);
     if (!fv) {
         ADD_FAILURE() << "setup: frame";
@@ -349,21 +332,7 @@ TEST(GroupReadStatus100, D10_NestedRowPushFails_FailedFirstAndRepeat) {
 // `nested_cache_` row (nested), so a repeat that differs from the first is a cache defect
 // (research D3).
 
-struct parsed44 {
-    std::vector<std::byte> buf;
-    std::optional<fixpp::wire::frame_view> fv;
-    std::pmr::monotonic_buffer_resource arena;
-    std::optional<view_t> mv;
-    explicit parsed44(std::string const& body) : buf(frame44(body)) {
-        if (auto f = fixpp::wire::test::make_frame_view(buf)) {
-            fv.emplace(*f);
-            Parser<access_mode::Index> parser{fix44().tv};
-            if (auto m = parser.parse(*fv, &arena)) {
-                mv.emplace(std::move(*m));
-            }
-        }
-    }
-};
+using fixpp::test100::parsed44;
 
 // A flat read of `tag`, twice: `is_group`, no slices, `status == ok` both times.
 void expect_flat_shape(std::string const& body, std::uint16_t tag, bool want_group,
@@ -660,14 +629,7 @@ TEST(GroupReadStatus100, T039_D11_Control_NestedPresentScalarD7_OkNotAGroup) {
 
 // ── D5 / FR-011: a top-level instance past the per-instance cap ──────────────────────
 TEST(GroupReadStatus100, T039_D5_FlatInstancePastPerInstanceCap_LimitExceededTwice) {
-    std::string b = header44("D") + kOrd +
-                    "453=1\x01"
-                    "448=P\x01";
-    for (std::size_t i = 0; i < kPastInstanceCap; ++i) {
-        b += "447=D\x01";
-    }
-    b += "54=1\x01";
-    auto const buf = frame44(b);
+    auto const buf = frame44(fixpp::test100::oversized_instance(kPastInstanceCap, ""));
     auto const fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
