@@ -276,7 +276,7 @@ BusinessMessageReject.
   fault branch (`dispose_unparseable_`) runs before the conflict check, as it does today.
 - A FIXT-only header tag (1128, say) before a later 35 on a non-FIXT session keeps that 35 in the header (373=13), as
   QuickFIX C++'s static header list does.
-- An unknown MsgType on an admin-length value (one character, e.g. `35=Z`): an unknown MsgType, 373=11.
+- An unknown MsgType on an admin-length value (a one-character MsgType the judging dictionary does not define, chosen by recipe): an unknown MsgType, 373=11.
 - FIXT: the MsgType check uses the dictionary the frame is validated with (099's resolved application version or the
   transport dictionary).
 

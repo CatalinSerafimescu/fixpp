@@ -10,18 +10,21 @@
 // not is a Reject for the repeat, so the equality also says none is sent.
 //
 // The inputs are 099 data-model E-7 row `a`'s (`D…0`, `D…3`, `D…4`, `D…5`, `D…A`, `0…D`, `3…D`,
-// `4…D`, `5…D`, `A…0`, `0,D`) plus `D…A…D`, each built on the cell's own session kind. Active is
-// the post-establishment arm a cell can hold: an acceptor's Logon takes it through LogonReceived
-// to Active within one on_inbound_frame call.
+// `4…D`, `5…D`, `A…0`, `0,D`) plus `D…A…D`, each built on the cell's own session kind, in Active
+// and in LogonReceived. An acceptor's Logon takes it through LogonReceived to Active within one
+// on_inbound_frame call, except on that call's superseded exit (orchestrator ruling R6), which
+// returns in LogonReceived; the LogonReceived rows are delivered there.
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <functional>
+#include <memory>
 #include <ostream>
 #include <string>
 #include <vector>
 
+#include "session/session_engine_access.hpp"  // ruling R6: the engine-stop flag
 #include "test_101_support.hpp"
 
 namespace fixpp::session::test101 {
@@ -124,11 +127,11 @@ TEST_P(OneMsgTypeOracle101, W101_24_ActiveOff_EndsAsTheStrippedTwin) {
 INSTANTIATE_TEST_SUITE_P(W101_24, OneMsgTypeOracle101, testing::ValuesIn(oracle_cells()),
                          cell_name);
 
-// Why W101-24 has no LogonReceived rows: the acceptor enters LogonReceived
-// and leaves it inside the call that delivers the peer's Logon. The caller reads NotConnected
-// before that call and Active after it, so no frame is delivered in LogonReceived; the state is
-// visible only to a callback the call itself runs (the reply Logon's toAdmin samples it here), and
-// the state history shows the call passed through it.
+// On the Logon call's ordinary exits the acceptor enters LogonReceived and leaves it inside the
+// call that delivers the peer's Logon: the caller reads NotConnected before that call and Active
+// after it, and the state is visible to a callback the call itself runs (the reply Logon's toAdmin
+// samples it here). The call's superseded exit is the one that returns in LogonReceived; the cell
+// after this one reaches it, and W101-24's LogonReceived rows below are delivered there.
 TEST(OneMsgTypeOracle101Establishment, W101_24_AcceptorPassesLogonReceivedInsideTheLogonCall) {
     for (const Kind k : {Kind::fix44, Kind::fixt}) {
         SCOPED_TRACE(kind_name(k));
@@ -148,6 +151,70 @@ TEST(OneMsgTypeOracle101Establishment, W101_24_AcceptorPassesLogonReceivedInside
         EXPECT_EQ(next.before, fsm_state::Active) << "the next frame is delivered in Active";
     }
 }
+
+// Orchestrator ruling R6: the Logon call's superseded exit. Engine::stop()'s step 1 sets the
+// engine-stop flag on the session's strand; set here from the reply Logon's toAdmin, it is seen by
+// the arm's next superseded check, which returns success without a state write, so the call
+// returns with the session still in LogonReceived. The frame after it (the previous call has
+// completed, so this is inside on_inbound_frame's contract) is delivered in LogonReceived and
+// acted on: its MsgSeqNum is consumed.
+std::unique_ptr<Rig101> left_in_logon_received(const Spec& sp) {
+    auto rig = started(sp, Arm::NotConnected);
+    if (!rig) {
+        return nullptr;
+    }
+    rig->app->to_admin_probe = [r = rig.get()] {
+        fixpp::session::session_engine_access::note_engine_stop(r->session());
+    };
+    const Ending101 logon = rig->deliver(rig->peer_logon(1));
+    rig->app->to_admin_probe = nullptr;
+    if (logon.after != fsm_state::LogonReceived ||
+        !session_test_access::engine_stop_requested(rig->session())) {
+        ADD_FAILURE() << "setup: the superseded exit did not leave LogonReceived: "
+                      << describe(logon);
+        return nullptr;
+    }
+    return rig;
+}
+
+TEST(OneMsgTypeOracle101Establishment, W101_24_SupersededLogonCall_NextFrameDeliveredInIt) {
+    for (const Kind k : {Kind::fix44, Kind::fixt}) {
+        SCOPED_TRACE(kind_name(k));
+        auto rig = left_in_logon_received(spec(k).off());
+        ASSERT_TRUE(rig);
+        const Ending101 next = rig->deliver(rig->frame("D", 2, t99::kNos()));
+        EXPECT_EQ(next.before, fsm_state::LogonReceived) << describe(next);
+        EXPECT_EQ(next.next_in_after, next.next_in_before + 1)
+            << "the arm acted on the frame: " << describe(next);
+    }
+}
+
+// ── W101-24: LogonReceived, validation off (reached by the superseded exit above) ────────
+
+class OneMsgTypeOracle101LogonReceived : public testing::TestWithParam<OracleCell> {};
+
+Ending101 ending_in_logon_received(const Spec& sp, const OracleCell& c, bool strip) {
+    auto rig = left_in_logon_received(sp);
+    if (!rig) {
+        Ending101 e;
+        e.err = "setup failed";
+        return e;
+    }
+    const std::string f = rig->frame(c.shape.first, 2, c.shape.body(c.kind), c.shape.before_34);
+    return rig->deliver(strip ? strip_later_35_and_reframe(f) : f);
+}
+
+TEST_P(OneMsgTypeOracle101LogonReceived, W101_24_LogonReceivedOff_EndsAsTheStrippedTwin) {
+    const OracleCell& c = GetParam();
+    const Spec sp = spec(c.kind).off();
+    const Ending101 conflicting = ending_in_logon_received(sp, c, /*strip=*/false);
+    const Ending101 twin = ending_in_logon_received(sp, c, /*strip=*/true);
+    EXPECT_EQ(conflicting.before, fsm_state::LogonReceived) << describe(conflicting);
+    EXPECT_EQ(describe(conflicting), describe(twin));
+}
+
+INSTANTIATE_TEST_SUITE_P(W101_24, OneMsgTypeOracle101LogonReceived,
+                         testing::ValuesIn(oracle_cells()), cell_name);
 
 // ── W101-25: LogoutSent, validating and off, FIXT and non-FIXT ──────────────────────────
 

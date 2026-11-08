@@ -21,6 +21,7 @@
 
 #include "test_098_inbound_frames.hpp"
 #include "test_101_support.hpp"
+#include "test_101_tag_class.hpp"
 
 namespace fixpp::session::test101 {
 namespace {
@@ -62,6 +63,29 @@ TEST(Reject101Tag, W101_11_DefinedTagNotInMessage_Reason2) {
     ASSERT_TRUE(rig);
     const Ending101 e = rig->deliver(rig->frame("0", 2, "44=1\x01"));
     expect_gate_reject(e, "2", "44", "0", kTextTagNotDefined, 2);
+    EXPECT_EQ(e.next_in_after, e.next_in_before + 1) << "consumed";
+}
+
+// M101-10's named cell (orchestrator ruling on the Phase 3-4 report): a field the session's
+// dictionary defines and no message names, so the defined-tag fill of Dictionary::build_table_view
+// is the only thing that defines it in the judging table. The base file must not define the tag
+// (field-definition recipe, `outside_tag_reason`), and the overlay declares it in `<fields>`
+// only, so neither the base's messages nor the overlay's can reach it.
+TEST(Reject101Tag, W101_11_OverlayFieldInNoMessage_Reason2) {
+    constexpr std::uint16_t kTag = 5101;
+    ASSERT_EQ(outside_tag_reason("FIX44.xml", kTag), "0") << "the base must not define the tag";
+    static const DictPtr d = t99::overlay_on(
+        "FIX44.xml",
+        "<fix type='FIX' major='4' minor='4'><fields>"
+        "<field number='5101' name='Venue101FieldOnly' type='STRING' />"
+        "</fields></fix>");
+    ASSERT_TRUE(defined(*d, kTag));
+    t99::Fixture f;
+    f.session_dict = d;
+    auto rig = started(spec(Kind::fix44).with(std::move(f)), Arm::Active);
+    ASSERT_TRUE(rig);
+    const Ending101 e = rig->deliver(rig->frame("D", 2, t99::kNos() + "5101=x\x01"));
+    expect_gate_reject(e, "2", "5101", "D", kTextTagNotDefined, 2);
     EXPECT_EQ(e.next_in_after, e.next_in_before + 1) << "consumed";
 }
 
