@@ -618,11 +618,11 @@ public:
     }
 
     // 100 (T071 fix, one lookup per read): `group_registered`, `wire_group_first_field`
-    // and `wire_group_member_tags` at one key, from one walk of the stores. Each arm
-    // answers as those three answer it: a record registers its key whatever
-    // `group_bit` says, while the delimiter and the members are 0 and empty when
-    // `group_bit` is clear. Read only by `wire::dict_hooks::for_table_view`'s
-    // registration resolver.
+    // and `wire_group_member_tags` at one key, in one call, composed from the functions
+    // that answer them: the registration is `group_registered`'s, and the definition is
+    // `wire_group_record`'s, else the bare store's, or 0 and empty when `group_bit` is
+    // clear, as the two wire accessors answer. Read only by
+    // `wire::dict_hooks::for_table_view`'s registration resolver.
     struct wire_group_resolution {
         bool registered = false;
         std::uint16_t delimiter = 0;
@@ -631,34 +631,16 @@ public:
     [[nodiscard]] wire_group_resolution wire_group_resolve(
         std::string_view msg_type, std::span<std::uint16_t const> parent_path,
         std::uint16_t no_tag) const noexcept {
-        bool const grouped = group_bit(no_tag);
-        auto const defined = [grouped](std::uint16_t delimiter,
-                                       std::span<std::uint16_t const> members) noexcept {
-            return grouped ? wire_group_resolution{.registered = true,
-                                                   .delimiter = delimiter,
-                                                   .members = members}
-                           : wire_group_resolution{.registered = true, .delimiter = 0, .members = {}};
-        };
-        auto const query = make_ctx_query(msg_type, parent_path, no_tag);
-        if (ctx_key_bit(no_tag)) {
-            if (auto const it = group_ctx_.find(query); it != group_ctx_.end()) {
-                return defined(it->second.group_first,
-                               {it->second.members.data(), it->second.members.size()});
-            }
+        bool const registered = group_registered(msg_type, parent_path, no_tag);
+        if (!group_bit(no_tag)) {
+            return {.registered = registered, .delimiter = 0, .members = {}};
         }
-        if (auto const it = occurrence_records_.find(query); it != occurrence_records_.end()) {
-            return defined(it->second.delimiter, it->second.members);
+        if (auto const def = wire_group_record(msg_type, parent_path, no_tag)) {
+            return {.registered = registered, .delimiter = def->delimiter, .members = def->members};
         }
-        if (auto const it = section_records_.find(make_ctx_query({}, parent_path, no_tag));
-            it != section_records_.end()) {
-            return defined(it->second.delimiter, it->second.members);
-        }
-        if (!grouped) {
-            return {};
-        }
-        return wire_group_resolution{.registered = !ctx_key_bit(no_tag),
-                                     .delimiter = group_first_field(no_tag),
-                                     .members = group_member_tags(no_tag)};
+        return {.registered = registered,
+                .delimiter = group_first_field(no_tag),
+                .members = group_member_tags(no_tag)};
     }
 
     // 100: the delimiter twin of `wire_group_member_tags`, by the same lookup order.
