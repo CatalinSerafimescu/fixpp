@@ -245,6 +245,17 @@ target_link_libraries(dictionary_table_view_pair_oom_test PRIVATE
 add_test(NAME dictionary_table_view_pair_oom_test COMMAND dictionary_table_view_pair_oom_test)
 set_tests_properties(dictionary_table_view_pair_oom_test PROPERTIES LABELS "426;dictionary")
 
+# 100-wire-group-read-integrity (T067): the record stores' strong guarantee, one failed
+# allocation at a time, through the same TU-local global operator new seam.
+add_executable(dictionary_100_record_store_oom_test test_100_record_store_oom.cpp)
+target_link_libraries(dictionary_100_record_store_oom_test PRIVATE
+  fixpp_dictionary
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME dictionary_100_record_store_oom_test COMMAND dictionary_100_record_store_oom_test)
+set_tests_properties(dictionary_100_record_store_oom_test PROPERTIES LABELS "100;dictionary")
+
 # ── 098-dialect-overlay: the overlay splice under a failing pugixml allocator ──
 # Standalone, not in the pure bucket: it installs pugixml's process-global
 # allocation hook ([const §VII.8]'s isolation-sensitive carve-out), from its own

@@ -969,15 +969,19 @@ private:
     }
 
     // Stores `record` without repeats at `key` unless `store` already holds the key;
-    // the members are copied only when the key is new.
+    // the members are copied only when the key is new. Strong guarantee: the record is
+    // built before it is inserted, so a `std::bad_alloc` leaves `store` as it was
+    // (tests/dictionary/test_100_record_store_oom.cpp).
     template <class Store>
     static void add_record(Store& store, group_ctx_key key, group_record const& record) {
-        if (auto const [it, inserted] = store.try_emplace(std::move(key)); inserted) {
-            it->second.delimiter = record.delimiter;
-            for (auto const t : record.members) {
-                push_unique(it->second.members, t);
-            }
+        if (store.contains(key)) {
+            return;
         }
+        group_record stored{.delimiter = record.delimiter, .members = {}};
+        for (auto const t : record.members) {
+            push_unique(stored.members, t);
+        }
+        store.emplace(std::move(key), std::move(stored));
     }
 
     // 081 Concern A (T009): registers `tag` as a FIXT framing tag with
