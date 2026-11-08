@@ -36,7 +36,6 @@
 #include <optional>
 #include <pugixml.hpp>
 #include <ranges>
-#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -936,32 +935,15 @@ void OrchestraLoaderState::collect_header_tags(detail::dict_metadata_handle& h) 
 // `fixr:numInGroup` id, with its record (the first tag emitted at its level as the
 // delimiter, every tag emitted there as a member, components inline, a nested
 // group's count tag included and its members excluded). A component or group
-// definition is visited once per (definition, enclosing path), not gated by
-// `collect_header_tags`' `walked` / `walked_groups` sets; a definition already on the
-// current path is skipped. An id the maps cannot resolve adds nothing. Header before
-// trailer, declaration order; the sink keeps the first record at a key.
+// definition is visited once per enclosing path (`detail::SectionWalk`), not gated by
+// `collect_header_tags`' `walked` / `walked_groups` sets. An id the maps cannot resolve
+// adds nothing. Header before trailer, declaration order; the sink keeps the first
+// record at a key.
 void OrchestraLoaderState::collect_section_groups(detail::dict_metadata_handle& h) const {
     auto const id_of = [](pugi::xml_node const& n, std::uint16_t& out) {
         return detail::try_parse_uint16(std::string_view{n.attribute("id").as_string("")}, out);
     };
-    detail::SectionGroupSink sink;
-    std::vector<std::uint16_t> path;
-    std::vector<void const*> on_path;
-    std::set<std::pair<void const*, std::vector<std::uint16_t>>> visited;
-    auto const add = [](std::vector<std::uint16_t>* level, std::uint16_t tag) {
-        if (level != nullptr && std::ranges::find(*level, tag) == level->end()) {
-            level->push_back(tag);
-        }
-    };
-    // Enters `def` unless it is on the current path or was visited at this path.
-    auto const enter = [&](pugi::xml_node const& def) {
-        void const* const id = def.internal_object();
-        if (std::ranges::find(on_path, id) != on_path.end() || !visited.emplace(id, path).second) {
-            return false;
-        }
-        on_path.push_back(id);
-        return true;
-    };
+    detail::SectionWalk w;
     auto walk = [&](auto& self, pugi::xml_node const& node,
                     std::vector<std::uint16_t>* level) -> void {
         for (auto const& child : node.children()) {
@@ -972,7 +954,7 @@ void OrchestraLoaderState::collect_section_groups(detail::dict_metadata_handle& 
             }
             if (kind == "fixr:fieldRef") {
                 if (fields_by_tag_.contains(id)) {
-                    add(level, id);
+                    detail::SectionWalk::add(level, id);
                 }
             } else if (kind == "fixr:componentRef") {
                 auto const it = component_index_by_xml_id_.find(id);
@@ -980,9 +962,9 @@ void OrchestraLoaderState::collect_section_groups(detail::dict_metadata_handle& 
                     continue;
                 }
                 auto const def = components_[it->second].node;
-                if (enter(def)) {
+                if (w.enter(def.internal_object())) {
                     self(self, def, level);
-                    on_path.pop_back();
+                    w.leave();
                 }
             } else if (kind == "fixr:groupRef") {
                 auto const it = group_by_xml_id_.find(id);
@@ -994,16 +976,16 @@ void OrchestraLoaderState::collect_section_groups(detail::dict_metadata_handle& 
                     !fields_by_tag_.contains(no_tag)) {
                     continue;
                 }
-                add(level, no_tag);
-                if (!enter(it->second)) {
+                detail::SectionWalk::add(level, no_tag);
+                if (!w.enter(it->second.internal_object())) {
                     continue;
                 }
                 std::vector<std::uint16_t> members;
-                path.push_back(no_tag);
+                w.path.push_back(no_tag);
                 self(self, it->second, &members);
-                path.pop_back();
-                on_path.pop_back();
-                sink.record(path, no_tag, std::move(members));
+                w.path.pop_back();
+                w.leave();
+                w.sink.record(w.path, no_tag, std::move(members));
             }
         }
     };
@@ -1013,12 +995,12 @@ void OrchestraLoaderState::collect_section_groups(detail::dict_metadata_handle& 
             continue;
         }
         auto const def = components_[it->second].node;
-        if (enter(def)) {
+        if (w.enter(def.internal_object())) {
             walk(walk, def, nullptr);
-            on_path.pop_back();
+            w.leave();
         }
     }
-    sink.flush(h);
+    w.sink.flush(h);
 }
 
 detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {

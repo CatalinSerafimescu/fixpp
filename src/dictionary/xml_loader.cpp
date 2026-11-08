@@ -36,7 +36,6 @@
 #include <optional>
 #include <pugixml.hpp>
 #include <ranges>
-#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -1021,17 +1020,13 @@ void LoaderState::collect_header_tags(detail::dict_metadata_handle& h) const {
 // enclose it (outermost first) and its own count tag, with its record: the first tag
 // emitted at its level as the delimiter, every tag emitted there as a member,
 // components inline, a nested group's count tag included and its members excluded.
-// The walk visits a component or group definition once per (definition, enclosing
-// path); it is NOT gated by `collect_header_tags`' `walked` set, which visits each
-// definition once and so would record one path only. A definition already on the
-// current path is skipped, which ends a cycle. A name the loader's maps cannot resolve
-// adds nothing, as in `collect_header_tags`. Header before trailer, declaration
+// The walk is NOT gated by `collect_header_tags`' `walked` set, which visits each
+// definition once and so would record one path only; `detail::SectionWalk` visits a
+// definition once per enclosing path and ends a cycle. A name the loader's maps cannot
+// resolve adds nothing, as in `collect_header_tags`. Header before trailer, declaration
 // order; the sink keeps the first record at a key.
 void LoaderState::collect_section_groups(detail::dict_metadata_handle& h) const {
-    detail::SectionGroupSink sink;
-    std::vector<std::uint16_t> path;
-    std::vector<void const*> on_path;
-    std::set<std::pair<void const*, std::vector<std::uint16_t>>> visited;
+    detail::SectionWalk w;
     auto const tag_of = [&](pugi::xml_node const& n) -> std::optional<std::uint16_t> {
         auto const it = by_name_.find(std::string{n.attribute("name").as_string("")});
         if (it == by_name_.end()) {
@@ -1039,18 +1034,13 @@ void LoaderState::collect_section_groups(detail::dict_metadata_handle& h) const 
         }
         return it->second.tag;
     };
-    auto const add = [](std::vector<std::uint16_t>* level, std::uint16_t tag) {
-        if (level != nullptr && std::ranges::find(*level, tag) == level->end()) {
-            level->push_back(tag);
-        }
-    };
     auto walk = [&](auto& self, pugi::xml_node const& node,
                     std::vector<std::uint16_t>* level) -> void {
         for (auto const& child : node.children()) {
             std::string_view const kind{child.name()};
             if (kind == "field") {
                 if (auto const t = tag_of(child)) {
-                    add(level, *t);
+                    detail::SectionWalk::add(level, *t);
                 }
             } else if (kind == "component") {
                 auto const it = component_index_by_name_.find(
@@ -1059,32 +1049,26 @@ void LoaderState::collect_section_groups(detail::dict_metadata_handle& h) const 
                     continue;
                 }
                 auto const def = components_[it->second].node;
-                void const* const id = def.internal_object();
-                if (std::ranges::find(on_path, id) != on_path.end() ||
-                    !visited.emplace(id, path).second) {
+                if (!w.enter(def.internal_object())) {
                     continue;
                 }
-                on_path.push_back(id);
                 self(self, def, level);
-                on_path.pop_back();
+                w.leave();
             } else if (kind == "group") {
                 auto const t = tag_of(child);
                 if (!t) {
                     continue;
                 }
-                add(level, *t);
-                void const* const id = child.internal_object();
-                if (std::ranges::find(on_path, id) != on_path.end() ||
-                    !visited.emplace(id, path).second) {
+                detail::SectionWalk::add(level, *t);
+                if (!w.enter(child.internal_object())) {
                     continue;
                 }
                 std::vector<std::uint16_t> members;
-                path.push_back(*t);
-                on_path.push_back(id);
+                w.path.push_back(*t);
                 self(self, child, &members);
-                on_path.pop_back();
-                path.pop_back();
-                sink.record(path, *t, std::move(members));
+                w.leave();
+                w.path.pop_back();
+                w.sink.record(w.path, *t, std::move(members));
             }
         }
     };
@@ -1094,7 +1078,7 @@ void LoaderState::collect_section_groups(detail::dict_metadata_handle& h) const 
     if (trailer_node_ != nullptr) {
         walk(walk, trailer_node_, nullptr);
     }
-    sink.flush(h);
+    w.sink.flush(h);
 }
 
 detail::dict_metadata_handle_ptr LoaderState::finalize() {
