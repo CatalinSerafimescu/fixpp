@@ -2727,7 +2727,11 @@ fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_reject_(
         return r;
     }
     // 372 is optional in a Reject: above the ceiling it is sent without it; Text(58) stays.
-    return build(hold.take(), std::string_view{});
+    r = build(hold.take(), std::string_view{});
+    if (!r && r.error() == fixpp::core::error::wire_field_value_truncated) {
+        note_reply_over_ceiling_(/*business_reject=*/false, ref_msg_type.size());
+    }
+    return r;
 }
 
 fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_business_reject_(
@@ -2746,7 +2750,40 @@ fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_business_re
         return r;
     }
     // 372 is required in a BusinessMessageReject: there is no step without it.
-    return build(hold.take());
+    r = build(hold.take());
+    if (!r && r.error() == fixpp::core::error::wire_field_value_truncated) {
+        note_reply_over_ceiling_(/*business_reject=*/true, ref_msg_type.size());
+    }
+    return r;
+}
+
+void Session::note_reply_over_ceiling_(bool business_reject,
+                                       std::size_t ref_msg_type_len) noexcept {
+    auto const now =
+        effective_clock_ ? effective_clock_->steady_now() : fixpp::core::steady_time_point{};
+    if (reply_ceiling_logged_ && now < reply_ceiling_log_next_) {
+        ++reply_ceiling_unlogged_;
+        return;
+    }
+    auto const heartbt = cfg_.heartbeat_interval.value_or(kDefaultHeartBtInt);
+    // Saturates at steady_time_point::max() when not representable.
+    reply_ceiling_log_next_ =
+        detail::deadline_after(now, std::max(heartbt, std::chrono::seconds{1}));
+    reply_ceiling_logged_ = true;
+    auto const len = fixpp::log::ArgValue::from_u64(ref_msg_type_len);
+    auto const suppressed = fixpp::log::ArgValue::from_u64(reply_ceiling_unlogged_);
+    if (business_reject) {
+        FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
+                   "inbound reply over the outbound ceiling not sent: msg_type=j "
+                   "ref_msg_type_len={} suppressed={}",
+                   len, suppressed);
+    } else {
+        FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
+                   "inbound reply over the outbound ceiling not sent: msg_type=3 "
+                   "ref_msg_type_len={} suppressed={}",
+                   len, suppressed);
+    }
+    reply_ceiling_unlogged_ = 0;
 }
 
 // 070-fix44-closeout S-029 — refuse an inbound Logon on a 464 posture mismatch (or
@@ -3308,8 +3345,9 @@ fixpp::wire::garble_summary header_out_of_order_garble(std::span<const std::byte
 //     and persists only at the expected number, and a failed persist returns before
 //     the Reject), then the Reject. No ResendRequest, no too-low Logout, and
 //     PossDupFlag(43) is not read.
-// The Reject: 45 = the first 34 read; 372 = field 3's value when it is no longer
-// than kMaxShippedMsgTypeLength, else omitted; 373 = 0 without 371 for a malformed
+// The Reject: 45 = the first 34 read; 372 = field 3's value, verbatim (101-inbound-reject-
+// fidelity D7, superseding 092 research R-5's bound: the echo rule of every inbound-fed
+// Reject, so above the outbound ceiling it is omitted); 373 = 0 without 371 for a malformed
 // tag, 373 = 5 with 371 = the Length tag for a Length/Data mismatch; 58 = the fixed
 // Text for the fault kind.
 // No row writes last_inbound_steady_: a faulty frame never refreshes inbound
@@ -3345,10 +3383,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::dispose_unparseable_(
     }
 
     // D-4, D-5, D-6: the Reject.
-    const std::string_view ref_msg_type =
-        hdr.fault_ref_msg_type.size() <= fixpp::session::detail::kMaxShippedMsgTypeLength
-            ? hdr.fault_ref_msg_type
-            : std::string_view{};
+    const std::string_view ref_msg_type = hdr.fault_ref_msg_type;
     if (hdr.fault == fixpp::wire::field_fault::length_data_mismatch) {
         co_return co_await emit_session_reject_(
             ref_seq, ref_msg_type, /*reason=*/5, hdr.fault_length_tag,

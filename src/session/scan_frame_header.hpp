@@ -92,13 +92,9 @@ struct FrameHeader {
     std::string_view fault_ref_msg_type;
 };
 
-// 092 research R-5: the RefMsgType(372) bound for the Reject a faulty frame draws.
-// The disposition passes `fault_ref_msg_type` as 372 only when it is no longer than
-// this; otherwise it passes an empty 372, which build_reject_with_text omits. The
-// value is the length of the longest MsgType a shipped dictionary defines. Re-derive
-// it with the recompute cell in tests/session/session_reject_test.cpp, which reads
-// every dictionaries/*.xml.
-inline constexpr std::size_t kMaxShippedMsgTypeLength = 2;
+// 101-inbound-reject-fidelity D7 (FR-007) retires 092 research R-5's RefMsgType(372) bound:
+// the disposition passes `fault_ref_msg_type` verbatim, and the Reject's echo follows the
+// rule of every inbound-fed Reject (Session::build_inbound_reject_).
 
 // 092 research R-5: the fixed Text(58) of that Reject, one per field_fault kind.
 // Compile-time constants: they carry no offset and no peer bytes.

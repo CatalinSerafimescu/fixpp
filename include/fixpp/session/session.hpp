@@ -920,6 +920,17 @@ private:
     // max(HeartBtInt, 1 s). Session strand only.
     void note_garbles_(fixpp::wire::garble_summary const& g) noexcept;
 
+    // 101-inbound-reject-fidelity D7 (FR-007), the outbound-ceiling record: a Reject that exceeds
+    // kSendFrameBytes even without 372, or a BusinessMessageReject that exceeds it with 372, is not
+    // sent, and writes one session log record per max(HeartBtInt, 1 s) on effective_clock_, as the
+    // garble record does. One rate state and one suppressed count serve both message types (one
+    // cause), never reset, so they carry across connections. The record names the type not sent,
+    // the inbound MsgType's length (never its bytes) and the count suppressed since the last one.
+    bool reply_ceiling_logged_ = false;
+    fixpp::core::steady_time_point reply_ceiling_log_next_;
+    std::uint64_t reply_ceiling_unlogged_ = 0;
+    void note_reply_over_ceiling_(bool business_reject, std::size_t ref_msg_type_len) noexcept;
+
     // 093-inbound-frame-dispositions (FR-013, data-model E-12): a frame over L was
     // refused at framing once this Session exists. Writes one FIXPP_SLOG record with
     // the failure kind and L; the read pump then closes the session terminally.

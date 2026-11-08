@@ -100,7 +100,9 @@ TEST(ReplySlotRelease101, BmrToAppVeto_ReleasesTheSlot_NextOverflowedBmrSent) {
     const Ending101 vetoed = b.rig->deliver(b.rig->frame(b.mt, 2));
     EXPECT_TRUE(vetoed.of_type("j").empty()) << describe(vetoed);
     EXPECT_EQ(vetoed.to_app, 1) << "the rebuilt BMR reached toApp";
-    EXPECT_FALSE(session_test_access::inbound_reply_slot_held(b.rig->session()));
+    // Fatal here: a slot left held would make the next frame's rebuild assert (an abort), and
+    // the cell must report the held slot as its failure instead.
+    ASSERT_FALSE(session_test_access::inbound_reply_slot_held(b.rig->session()));
     EXPECT_EQ(vetoed.after, fsm_state::Active);
     b.rig->app->veto_to_app = false;
     const Ending101 next = b.rig->deliver(b.rig->frame(b.mt, 3));
@@ -313,7 +315,7 @@ TEST(BestEffortLeaf101, OverflowingMsgTypeFitsTheCeiling_SentWith372) {
     EXPECT_FALSE(session_test_access::inbound_reply_slot_held(rig->session()));
 }
 
-// ── ReplayGrowth101 (orchestrator ruling R8) ────────────────────────────────────────────
+// ── ReplayGrowth101 (research D7, replay growth) ────────────────────────────────────────────
 //
 // replay_outbound_range_ asserts that the replay buffer's headroom holds a replay's growth,
 // bounding each timestamp by the formatter's widest form, spelled there as the nanos grammar. This

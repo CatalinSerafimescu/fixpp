@@ -44,7 +44,6 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -53,11 +52,9 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
-#include <fstream>
 #include <future>
 #include <memory>
 #include <span>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -476,74 +473,8 @@ TEST(SessionReject, BuildRejectWithTextFailsClosedWhenTextDoesNotFit) {
     EXPECT_EQ(r.error(), fixpp::core::error::wire_field_value_truncated);
 }
 
-// ── 092 T018: the 372 bound and the fixed Text constants (research R-5) ──────
-
-#ifndef FIXPP_DICT_DATA_DIR
-#error "FIXPP_DICT_DATA_DIR must be set by CMake target_compile_definitions"
-#endif
-
-namespace {
-
-// Every `msgtype=` attribute value in a QuickFIX dictionary, in either quote
-// style (the shipped files use single quotes).
-std::vector<std::string> msgtype_attributes(const std::string& xml) {
-    std::vector<std::string> out;
-    constexpr std::string_view kAttr = "msgtype=";
-    std::size_t pos = 0;
-    while ((pos = xml.find(kAttr, pos)) != std::string::npos) {
-        pos += kAttr.size();
-        if (pos >= xml.size() || (xml[pos] != '\'' && xml[pos] != '"')) {
-            continue;
-        }
-        const char quote = xml[pos];
-        const std::size_t end = xml.find(quote, pos + 1);
-        if (end == std::string::npos) {
-            break;
-        }
-        out.emplace_back(xml.substr(pos + 1, end - pos - 1));
-        pos = end + 1;
-    }
-    return out;
-}
-
-}  // namespace
-
-// kMaxShippedMsgTypeLength equals the longest MsgType any dictionaries/*.xml
-// defines, recomputed from the files so the constant cannot drift. Each file
-// must yield at least one MsgType and FIX44.xml must be visited, so a scan that
-// reads nothing fails instead of reporting a bound of zero.
-TEST(SessionReject, MaxShippedMsgTypeLengthMatchesDictionaries) {
-    namespace fs = std::filesystem;
-    const fs::path dir{FIXPP_DICT_DATA_DIR};
-    ASSERT_TRUE(fs::is_directory(dir)) << dir;
-
-    std::size_t longest = 0;
-    std::string longest_where;
-    bool saw_fix44 = false;
-    for (const auto& entry : fs::directory_iterator(dir)) {
-        if (!entry.is_regular_file() || entry.path().extension() != ".xml") {
-            continue;
-        }
-        if (entry.path().filename() == "FIX44.xml") {
-            saw_fix44 = true;
-        }
-        std::ifstream in(entry.path(), std::ios::binary);
-        ASSERT_TRUE(in) << entry.path();
-        std::ostringstream ss;
-        ss << in.rdbuf();
-        const auto types = msgtype_attributes(ss.str());
-        EXPECT_FALSE(types.empty()) << entry.path() << ": no msgtype attribute read";
-        for (const auto& t : types) {
-            if (t.size() > longest) {
-                longest = t.size();
-                longest_where = entry.path().filename().string() + " msgtype=" + t;
-            }
-        }
-    }
-    ASSERT_TRUE(saw_fix44) << "FIX44.xml not found under " << dir;
-    EXPECT_EQ(fixpp::session::detail::kMaxShippedMsgTypeLength, longest)
-        << "longest shipped MsgType: " << longest_where;
-}
+// ── 092 T018: the fixed Text constants (research R-5; its 372 bound and that bound's
+// recompute cell are retired by 101-inbound-reject-fidelity D7) ──────────────────────
 
 // The two fixed Text(58) values, spelled out here so a change to either is made
 // twice, deliberately. They are printable ASCII with no digit (nothing that could

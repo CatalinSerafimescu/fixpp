@@ -135,6 +135,28 @@ bool names_entry(std::string_view v, std::span<const std::byte> buf, OffsetTable
     return v.data() == reinterpret_cast<char const*>(buf.data()) + e.offset && v.size() == e.length;
 }
 
+// 101-inbound-reject-fidelity (research D4, D5; tasks T050): the two arms' positive controls.
+// `g_101_msg_type_checked` counts fault-free frames whose first-35 / conflict check ran;
+// `g_101_walk_checked` counts D5 walks compared with entries(). Registered ahead of the first
+// input, so a run in which either never ran reads zero and fails, as the 099 arm's do.
+std::uint64_t g_101_msg_type_checked = 0;
+std::uint64_t g_101_walk_checked = 0;
+
+void report_101_arms() {
+    std::cerr << "[101 fuzz arms] first-35 checks " << g_101_msg_type_checked << ", D5 walks "
+              << g_101_walk_checked << "\n";
+    if (g_101_msg_type_checked == 0 || g_101_walk_checked == 0) {
+        std::cerr << "[101 fuzz arms] a counter read zero\n";
+        std::_Exit(1);
+    }
+}
+
+[[maybe_unused]] const int g_101_report_registered = std::atexit(report_101_arms);
+
+std::string_view entry_value(std::span<const std::byte> buf, OffsetTable::entry const& e) {
+    return {reinterpret_cast<char const*>(buf.data()) + e.offset, e.length};
+}
+
 // Fault-free payload: the header identification must be the one entries() gives
 // (research R-2: the oracle is entries(), not find()).
 void check_references_against_entries(FrameHeader const& h, std::span<const std::byte> buf,
@@ -166,6 +188,53 @@ void check_references_against_entries(FrameHeader const& h, std::span<const std:
     } else if (h.fault_ref_msg_type.data() != nullptr) {
         __builtin_trap();
     }
+
+    // 101 D4: `msg_type` is the first 35 entry; `msg_type_conflict` says some later 35
+    // entry's bytes differ from the first's.
+    OffsetTable::entry const* first_35 = nullptr;
+    bool later_differs = false;
+    for (auto const& e : entries) {
+        if (e.tag != 35) {
+            continue;
+        }
+        if (first_35 == nullptr) {
+            first_35 = &e;
+        } else if (entry_value(buf, e) != entry_value(buf, *first_35)) {
+            later_differs = true;
+        }
+    }
+    if (first_35 != nullptr) {
+        if (!names_entry(h.msg_type, buf, *first_35)) {
+            __builtin_trap();
+        }
+    } else if (h.msg_type.data() != nullptr) {
+        __builtin_trap();
+    }
+    if (h.msg_type_conflict != later_differs) {
+        __builtin_trap();
+    }
+    ++g_101_msg_type_checked;
+}
+
+// 101 D5 (tasks T050): on a fault-free frame, the repeat walk, given the hooks the scan and the
+// build used as the route's and the pair table as S's classifier, splits the frame as entries()
+// does, so it reports a later 35 only when entries() holds one after field 3.
+void check_repeat_walk_against_entries(std::span<const std::byte> buf, dict_hooks const& hooks,
+                                       OffsetTable const& table) {
+    auto const entries = table.entries();
+    bool later_35 = false;
+    for (std::size_t k = 3; k < entries.size(); ++k) {
+        later_35 = later_35 || entries[k].tag == 35;
+    }
+    auto const seen = fixpp::session::detail::fixt_header_repeats_msg_type(
+        buf, hooks, fixpp::fuzz092::pair_dict_table_view());
+    if ((seen.in_header || seen.past_header) && !later_35) {
+        __builtin_trap();  // a later 35 the entries do not hold
+    }
+    if (later_35 && !(seen.in_header || seen.past_header)) {
+        __builtin_trap();  // a later 35 the walk did not see
+    }
+    ++g_101_walk_checked;
 }
 
 // One (payload, hooks) comparison of the scan with OffsetTable::build.
@@ -187,6 +256,7 @@ void check_scan_agrees_with_build(std::span<const std::byte> buf, dict_hooks con
             __builtin_trap();  // the build found an encoding fault the scan did not
         }
         check_references_against_entries(h, buf, table);
+        check_repeat_walk_against_entries(buf, hooks, table);
         return;
     }
     if (status.has_value()) {
