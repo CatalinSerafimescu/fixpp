@@ -134,11 +134,8 @@ public:
     // passes the result's `status` to the status constructor below (100).
     group_view(std::span<slice const> instances, detail::generation_token gen,
                bool alloc_failed = false) noexcept
-        : View{instances.empty() ? nullptr : instances.front().data,
-               instances.empty() ? 0 : instances.front().len, gen},
-          instances_{instances},
-          base_ctx_{.span = {}, .gen = gen},
-          status_{alloc_failed ? group_read_status::alloc_failed : group_read_status::ok} {}
+        : group_view(instances, gen,
+                     alloc_failed ? group_read_status::alloc_failed : group_read_status::ok) {}
 
     // [2b §4.7] 062 T007: `base` carries everything a generated entry needs to
     // read its own fields/nested groups (mr, opaque_dict, group_member_fn,
@@ -148,11 +145,8 @@ public:
     // 073 T009: trailing `alloc_failed` (defaulted false), see above.
     group_view(std::span<slice const> instances, entry_context base,
                bool alloc_failed = false) noexcept
-        : View{instances.empty() ? nullptr : instances.front().data,
-               instances.empty() ? 0 : instances.front().len, base.gen},
-          instances_{instances},
-          base_ctx_{base},
-          status_{alloc_failed ? group_read_status::alloc_failed : group_read_status::ok} {}
+        : group_view(instances, base,
+                     alloc_failed ? group_read_status::alloc_failed : group_read_status::ok) {}
 
     // 100 (research D5): the status forms of the two constructors above. No
     // default argument, so `group_view{inst, ctx}` still selects a `bool`

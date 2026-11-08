@@ -74,6 +74,13 @@ public:
     [[nodiscard]] constexpr group_registered_fn_t group_registered_fn() const noexcept {
         return group_registered_;
     }
+    // 100 (research D2 step 1, D11 step 1): whether the bundle can establish a group:
+    // false when the dictionary, the membership callback or the registration callback
+    // is null. `OffsetTable::group()` declines a read without them, and a nested read
+    // keeps a failure only with them.
+    [[nodiscard]] constexpr bool can_establish_groups() const noexcept {
+        return opaque_dict_ != nullptr && group_member_ != nullptr && group_registered_ != nullptr;
+    }
     // Null when the dictionary declares no Length+Data pair of its own; the two
     // lookups below then answer from the standard table alone.
     [[nodiscard]] constexpr length_pair_fn_t length_pair_fn() const noexcept {

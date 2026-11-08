@@ -565,8 +565,7 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     // 100 (research D2): the order below is D2's six steps. Step 1, the decline,
     // also covers a dict-aware bundle with no registration callback, which only the
     // test seam can build.
-    if (hooks_.opaque_dict() == nullptr || hooks_.group_member_fn() == nullptr ||
-        hooks_.group_registered_fn() == nullptr) {
+    if (!hooks_.can_establish_groups()) {
         return err_required_field_missing<group_index>();
     }
     // Step 2: locate the count entry; absent -> absent.
@@ -686,261 +685,254 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
                     .is_group = gs.is_group};
         }
     }
-    // One scope for the read's locals. FR001_NoFlatInstanceWalkInGroup
-    // (tests/wire/offset_table_test.cpp) finds the splitter below by its
-    // indentation, so the scope keeps it where that test looks.
-    {
-        // 389: this group's OWN exact-sized array. Nothing here can move a span
-        // handed out for a different `no_tag` — those live in their own arrays.
-        //
-        // The single `allocate()` below is sized by a COUNT PASS using the same
-        // `is_boundary` the fill loop uses, so the allocation is EXACT. That is
-        // what keeps PR #181's arena constraint met: growing a vector instead —
-        // backed by the fixed null-upstream monotonic arena — strands every
-        // superseded buffer, since such a resource never reuses one. The count
-        // pass is load-bearing, not an optimization — deleting it re-opens #181.
-        // Magnitude deliberately omitted: it is a RESULT parameterized by the
-        // STL's growth factor. B&L B-389-1 carries the figure and its platform.
-        auto gi = group(no_tag);
-        // 100 (research D5): `group()` stopped at a group wire limit (the
-        // per-instance entry cap or the nesting depth). It allocates nothing, so
-        // the failure recurs on a repeat, and no row is pushed (research D10).
-        // Any other `group()` error (an absent tag, a tag that is not a group here,
-        // a table whose own build failed) answers as not a group; a nested read
-        // resolves a failed sub-build from the sub-table's build status (research D7).
-        if (!gi && gi.error() == core::error::wire_group_too_large) {
-            return {.slices = {}, .status = group_read_status::limit_exceeded};
-        }
-        // 100 (research D3): the read established `no_tag` as a group (zero
-        // instances included). Cached with the row, so a repeat answers the same.
-        bool const is_group = gi.has_value();
-        if (gi) {
-            std::size_t const first = gi->first_entry();
-            // group() now returns the bounded extent (excluding trailing
-            // top-level fields). Use gi->entry_count() to derive group_end so
-            // slices stay within the member-set boundary. ([PR68-09] fix.)
-            std::size_t const group_end = first + gi->entry_count();
-            if (first < entries_.size() && first < group_end) {
-                // Each reappearance of the group's first field (the entry
-                // after the count) starts a new occurrence; slice in document
-                // order from one delimiter up to (but excluding) the next.
-                // The loop is bounded by group_end, NOT entries_.size(), so
-                // trailing top-level fields are never included in the last
-                // instance slice. ([PR68-09] boundary fix.)
-                // 083 T058 (C-8.2 / C-8.4): the boundary delimiter is now
-                // resolved from the DICTIONARY, keyed on this table's STORED
-                // context — `(msg_type, stored_group_context().parent_path,
-                // no_tag)`, the SAME key the validator's descent uses, which is
-                // what makes FR-021b's agreement structural rather than
-                // coincidental.
-                //
-                // NOT `group_context_for(no_tag)`: that returns
-                // `stored_group_context().pushed(no_tag)` and would
-                // query one path element too long, violating Entity 1's
-                // "parent_path EXCLUDES no_tag" invariant.
-                //
-                // 384 RESOLVES C-8.4, whose two rows were BOTH stale here.
-                // The archaeology — which row said what, and why each went
-                // stale — is in the C-8.4 AMENDMENT dated 2026-09-07 and in
-                // brain/components/wire.md; what stays here is the CONDITION
-                // this code runs under.
-                //
-                // This fallback is not justified as CORRECT. The two
-                // constructions disagree on a divergent context — pinned by
-                // tests/wire/typed_read_split_agreement_test.cpp
-                // `OutOfScopeWireProbesUnchanged`, which builds the
-                // half-threaded table on purpose as its pre-083 oracle. It is
-                // justified as REQUESTED and BOUNDED:
-                //   - requested: 384 removed the `= nullptr` default from every
-                //     dict-aware OffsetTable/MessageView ctor, so this shape can
-                //     no longer be built by omission. ⚠️ Removing the default
-                //     does NOT remove the shape — a delimiter callback that
-                //     ANSWERS 0 reaches this same fallback without any caller
-                //     writing a null (see the guard's own comment). The default
-                //     removal narrows the accidental spelling; the answer space
-                //     still contains a value equivalent to absence.
-                //   - bounded: this `delim` is membership-VALIDATED before use.
-                //     group() proceeds only after group_member_fn_ confirms the
-                //     wire's first tag after the count IS a member of this group
-                //     in this context, so an arbitrary attacker-chosen tag can
-                //     never become the delimiter — unlike #220's extent, which
-                //     had no oracle at all. For a message that CONFORMS to FIX's
-                //     "every instance opens with the group's first field" rule
-                //     the wire tag and the dictionary's answer coincide; they
-                //     diverge only where the dictionary's per-context record
-                //     disagrees with the order actually on the wire, which is
-                //     precisely what the oracle a caller declined to supply
-                //     exists to arbitrate.
-                //
-                // There is deliberately no "or the context did not resolve"
-                // branch: the splitter cannot observe that state, since
-                // `group_first_field` has already fallen through to the bare
-                // global before it sees a value and returns a plain scalar with
-                // no discriminator.
-                std::uint16_t delim = entries_[first].tag;
-                if (hooks_.opaque_dict() != nullptr && hooks_.group_delim_fn() != nullptr) {
-                    group_context const ctx = stored_group_context();
-                    // 384 (C-8.4 row 2): a 0 answer means the store has no
-                    // delimiter record for `(msg_type, parent_path, no_tag)` —
-                    // `group_first_field` returns 0 both when `group_bit` is
-                    // clear and when the record's `group_first` is itself 0. We
-                    // are already past group()'s membership check, so the
-                    // dictionary has asserted that this no_tag HAS members in
-                    // this context; a missing delimiter record alongside a
-                    // non-empty member set is an INCONSISTENT dictionary, not an
-                    // absent group. Declining here would drop instances the
-                    // membership oracle just confirmed are present, so the
-                    // membership-validated wire tag is kept instead. Reachable
-                    // through the hand-built table_view surface
-                    // (`add_group_member` without `set_group_first` — pinned by
-                    // tests/wire/offset_table_test.cpp
-                    // `GroupSlicesKeepsWireDelimiterWhenDelimStoreAnswersZero`).
-                    // A LOADED dictionary cannot reach it, and the reason is
-                    // TWO loader facts, neither of them the one that comes to
-                    // mind first (`as_table_view()` does NOT read the capture
-                    // directly — it does a store lookup and writes back whatever
-                    // it gets, including 0):
-                    //   (1) neither loader ever STORES a record with delimiter
-                    //       0 — both guard the push on `captured != 0`
-                    //       (xml_loader.cpp / orchestra_loader.cpp, 083 T036 /
-                    //       FR-006 / C-6.1), so a 0 from the lookup can only
-                    //       mean NO RECORD; and
-                    //   (2) the FR-023 / C-3.4 completeness sweep in both
-                    //       loaders' finalize() THROWS if a context
-                    //       as_table_view() will register has no record.
-                    // (1)+(2) => the delimiter written is non-zero. ⚠️ An earlier
-                    // version of this comment said the FR-023 sweep was NOT
-                    // load-bearing "because it never inspects delimiter" — that
-                    // is backwards, and it pointed the reader away from the
-                    // guard that carries the claim. See B&L B-384-2, which keeps
-                    // both wrong versions on purpose.
-                    if (std::uint16_t const d =
-                            hooks_.group_delim_fn()(hooks_.opaque_dict(), ctx, no_tag);
-                        d != 0) {
-                        delim = d;
-                    }
+    // 389: this group's OWN exact-sized array. Nothing here can move a span
+    // handed out for a different `no_tag` — those live in their own arrays.
+    //
+    // The single `allocate()` below is sized by a COUNT PASS using the same
+    // `is_boundary` the fill loop uses, so the allocation is EXACT. That is
+    // what keeps PR #181's arena constraint met: growing a vector instead —
+    // backed by the fixed null-upstream monotonic arena — strands every
+    // superseded buffer, since such a resource never reuses one. The count
+    // pass is load-bearing, not an optimization — deleting it re-opens #181.
+    // Magnitude deliberately omitted: it is a RESULT parameterized by the
+    // STL's growth factor. B&L B-389-1 carries the figure and its platform.
+    auto gi = group(no_tag);
+    // 100 (research D5): `group()` stopped at a group wire limit (the
+    // per-instance entry cap or the nesting depth). It allocates nothing, so
+    // the failure recurs on a repeat, and no row is pushed (research D10).
+    // Any other `group()` error (an absent tag, a tag that is not a group here,
+    // a table whose own build failed) answers as not a group; a nested read
+    // resolves a failed sub-build from the sub-table's build status (research D7).
+    if (!gi && gi.error() == core::error::wire_group_too_large) {
+        return {.slices = {}, .status = group_read_status::limit_exceeded};
+    }
+    // 100 (research D3): the read established `no_tag` as a group (zero
+    // instances included). Cached with the row, so a repeat answers the same.
+    bool const is_group = gi.has_value();
+    if (gi) {
+        std::size_t const first = gi->first_entry();
+        // group() now returns the bounded extent (excluding trailing
+        // top-level fields). Use gi->entry_count() to derive group_end so
+        // slices stay within the member-set boundary. ([PR68-09] fix.)
+        std::size_t const group_end = first + gi->entry_count();
+        if (first < entries_.size() && first < group_end) {
+            // Each reappearance of the group's first field (the entry
+            // after the count) starts a new occurrence; slice in document
+            // order from one delimiter up to (but excluding) the next.
+            // The loop is bounded by group_end, NOT entries_.size(), so
+            // trailing top-level fields are never included in the last
+            // instance slice. ([PR68-09] boundary fix.)
+            // 083 T058 (C-8.2 / C-8.4): the boundary delimiter is now
+            // resolved from the DICTIONARY, keyed on this table's STORED
+            // context — `(msg_type, stored_group_context().parent_path,
+            // no_tag)`, the SAME key the validator's descent uses, which is
+            // what makes FR-021b's agreement structural rather than
+            // coincidental.
+            //
+            // NOT `group_context_for(no_tag)`: that returns
+            // `stored_group_context().pushed(no_tag)` and would
+            // query one path element too long, violating Entity 1's
+            // "parent_path EXCLUDES no_tag" invariant.
+            //
+            // 384 RESOLVES C-8.4, whose two rows were BOTH stale here.
+            // The archaeology — which row said what, and why each went
+            // stale — is in the C-8.4 AMENDMENT dated 2026-09-07 and in
+            // brain/components/wire.md; what stays here is the CONDITION
+            // this code runs under.
+            //
+            // This fallback is not justified as CORRECT. The two
+            // constructions disagree on a divergent context — pinned by
+            // tests/wire/typed_read_split_agreement_test.cpp
+            // `OutOfScopeWireProbesUnchanged`, which builds the
+            // half-threaded table on purpose as its pre-083 oracle. It is
+            // justified as REQUESTED and BOUNDED:
+            //   - requested: 384 removed the `= nullptr` default from every
+            //     dict-aware OffsetTable/MessageView ctor, so this shape can
+            //     no longer be built by omission. ⚠️ Removing the default
+            //     does NOT remove the shape — a delimiter callback that
+            //     ANSWERS 0 reaches this same fallback without any caller
+            //     writing a null (see the guard's own comment). The default
+            //     removal narrows the accidental spelling; the answer space
+            //     still contains a value equivalent to absence.
+            //   - bounded: this `delim` is membership-VALIDATED before use.
+            //     group() proceeds only after group_member_fn_ confirms the
+            //     wire's first tag after the count IS a member of this group
+            //     in this context, so an arbitrary attacker-chosen tag can
+            //     never become the delimiter — unlike #220's extent, which
+            //     had no oracle at all. For a message that CONFORMS to FIX's
+            //     "every instance opens with the group's first field" rule
+            //     the wire tag and the dictionary's answer coincide; they
+            //     diverge only where the dictionary's per-context record
+            //     disagrees with the order actually on the wire, which is
+            //     precisely what the oracle a caller declined to supply
+            //     exists to arbitrate.
+            //
+            // There is deliberately no "or the context did not resolve"
+            // branch: the splitter cannot observe that state, since
+            // `group_first_field` has already fallen through to the bare
+            // global before it sees a value and returns a plain scalar with
+            // no discriminator.
+            std::uint16_t delim = entries_[first].tag;
+            if (hooks_.opaque_dict() != nullptr && hooks_.group_delim_fn() != nullptr) {
+                group_context const ctx = stored_group_context();
+                // 384 (C-8.4 row 2): a 0 answer means the store has no
+                // delimiter record for `(msg_type, parent_path, no_tag)` —
+                // `group_first_field` returns 0 both when `group_bit` is
+                // clear and when the record's `group_first` is itself 0. We
+                // are already past group()'s membership check, so the
+                // dictionary has asserted that this no_tag HAS members in
+                // this context; a missing delimiter record alongside a
+                // non-empty member set is an INCONSISTENT dictionary, not an
+                // absent group. Declining here would drop instances the
+                // membership oracle just confirmed are present, so the
+                // membership-validated wire tag is kept instead. Reachable
+                // through the hand-built table_view surface
+                // (`add_group_member` without `set_group_first` — pinned by
+                // tests/wire/offset_table_test.cpp
+                // `GroupSlicesKeepsWireDelimiterWhenDelimStoreAnswersZero`).
+                // A LOADED dictionary cannot reach it, and the reason is
+                // TWO loader facts, neither of them the one that comes to
+                // mind first (`as_table_view()` does NOT read the capture
+                // directly — it does a store lookup and writes back whatever
+                // it gets, including 0):
+                //   (1) neither loader ever STORES a record with delimiter
+                //       0 — both guard the push on `captured != 0`
+                //       (xml_loader.cpp / orchestra_loader.cpp, 083 T036 /
+                //       FR-006 / C-6.1), so a 0 from the lookup can only
+                //       mean NO RECORD; and
+                //   (2) the FR-023 / C-3.4 completeness sweep in both
+                //       loaders' finalize() THROWS if a context
+                //       as_table_view() will register has no record.
+                // (1)+(2) => the delimiter written is non-zero. ⚠️ An earlier
+                // version of this comment said the FR-023 sweep was NOT
+                // load-bearing "because it never inspects delimiter" — that
+                // is backwards, and it pointed the reader away from the
+                // guard that carries the claim. See B&L B-384-2, which keeps
+                // both wrong versions on purpose.
+                if (std::uint16_t const d =
+                        hooks_.group_delim_fn()(hooks_.opaque_dict(), ctx, no_tag);
+                    d != 0) {
+                    delim = d;
                 }
-                // ── PASS 1 (389): count boundaries, reserve EXACTLY ──
-                // ONE definition of the boundary, used by BOTH passes. An
-                // earlier draft spelled the predicate twice and defended it as
-                // "a shared lambda would hide a divergence the way the deleted
-                // estimator did". ⚠️ That argument is BACKWARDS, and it is
-                // recorded because it nearly re-created the very defect it was
-                // invoked against: the estimator failed because two DIFFERENT
-                // computations lived in two FUNCTIONS across a feature boundary
-                // with nothing forcing agreement — a sum over wire-declared
-                // counts on one side, a delimiter-driven boundary scan on the
-                // other. One expression in one scope makes divergence
-                // structurally IMPOSSIBLE; that is the opposite shape, not the
-                // same one.
-                auto const is_boundary = [&](std::size_t k) noexcept {
-                    return (k == group_end) || (k > first && entries_[k].tag == delim);
-                };
-                //
-                //
-                // The count is EXACT, not an upper bound: the pushed ranges
-                // PARTITION [first, group_end). At every push `inst_start` is
-                // the previous boundary's `k`, and boundaries strictly increase,
-                // so `inst_start < k` always holds and no push is empty.
-                std::size_t n_slices = 0;
-                for (std::size_t k = first; k <= group_end; ++k) {
-                    if (is_boundary(k)) {
-                        ++n_slices;
-                    }
+            }
+            // ── PASS 1 (389): count boundaries, reserve EXACTLY ──
+            // ONE definition of the boundary, used by BOTH passes. An
+            // earlier draft spelled the predicate twice and defended it as
+            // "a shared lambda would hide a divergence the way the deleted
+            // estimator did". ⚠️ That argument is BACKWARDS, and it is
+            // recorded because it nearly re-created the very defect it was
+            // invoked against: the estimator failed because two DIFFERENT
+            // computations lived in two FUNCTIONS across a feature boundary
+            // with nothing forcing agreement — a sum over wire-declared
+            // counts on one side, a delimiter-driven boundary scan on the
+            // other. One expression in one scope makes divergence
+            // structurally IMPOSSIBLE; that is the opposite shape, not the
+            // same one.
+            auto const is_boundary = [&](std::size_t k) noexcept {
+                return (k == group_end) || (k > first && entries_[k].tag == delim);
+            };
+            //
+            //
+            // The count is EXACT, not an upper bound: the pushed ranges
+            // PARTITION [first, group_end). At every push `inst_start` is
+            // the previous boundary's `k`, and boundaries strictly increase,
+            // so `inst_start < k` always holds and no push is empty.
+            std::size_t n_slices = 0;
+            for (std::size_t k = first; k <= group_end; ++k) {
+                if (is_boundary(k)) {
+                    ++n_slices;
                 }
-                // 100 (research D10): the row is pushed now, after the count pass
-                // and before the slice allocation, so a read that cannot cache its
-                // row fails before it consumes the slices' bytes, and every repeat
-                // on a monotonic resource fails the same way. The row's span is
-                // written once the slices are filled.
+            }
+            // 100 (research D10): the row is pushed now, after the count pass
+            // and before the slice allocation, so a read that cannot cache its
+            // row fails before it consumes the slices' bytes, and every repeat
+            // on a monotonic resource fails the same way. The row's span is
+            // written once the slices are filled.
+            try {
+                group_index_.push_back(
+                    group_span{.data = nullptr, .count = 0, .no_tag = no_tag, .is_group = true});
+            } catch (std::bad_alloc const&) {
+                return {.slices = {}, .status = group_read_status::alloc_failed};
+            }
+            group_slice* slices = nullptr;  // arena buffer, sized by the count pass
+            // Exactly `n_slices`, once. Throws `bad_alloc` on arena
+            // exhaustion, which the catch around it turns into the 073 /
+            // L-065-2 `alloc_failed` degrade after popping the row pushed
+            // above, so the failed read caches nothing (100, research D10).
+            //
+            // ⚠️ The `n_slices == 0` arm is DEFENSIVE AND PROVABLY DEAD, the
+            // same shape as the `: 0U` ternary arm below. The enclosing
+            // guard establishes `first < group_end`, so the count loop runs
+            // at least once, and `is_boundary(group_end)` is UNCONDITIONALLY
+            // true — therefore `n_slices >= 1` here, always. Codecov reports
+            // this line as a PARTIAL branch for exactly that reason; it is
+            // not a coverage gap and MUST NOT be "fixed" by inventing a test
+            // for it. The guard is kept so a future change to the boundary
+            // rule cannot silently reach `allocate(0, …)`.
+            if (n_slices > 0) {
                 try {
-                    group_index_.push_back(group_span{
-                        .data = nullptr, .count = 0, .no_tag = no_tag, .is_group = true});
+                    slices = static_cast<group_slice*>(
+                        resource()->allocate(n_slices * sizeof(group_slice), alignof(group_slice)));
                 } catch (std::bad_alloc const&) {
+                    // 073 T003: on a nested sub-table this is the mode-(b)
+                    // origin (FR-002) — the sub-table built non-null but its
+                    // own slice materialization exhausted the arena.
+                    group_index_.pop_back();
                     return {.slices = {}, .status = group_read_status::alloc_failed};
                 }
-                group_slice* slices = nullptr;  // arena buffer, sized by the count pass
-                // Exactly `n_slices`, once. Throws `bad_alloc` on arena
-                // exhaustion, which the catch around it turns into the 073 /
-                // L-065-2 `alloc_failed` degrade after popping the row pushed
-                // above, so the failed read caches nothing (100, research D10).
-                //
-                // ⚠️ The `n_slices == 0` arm is DEFENSIVE AND PROVABLY DEAD, the
-                // same shape as the `: 0U` ternary arm below. The enclosing
-                // guard establishes `first < group_end`, so the count loop runs
-                // at least once, and `is_boundary(group_end)` is UNCONDITIONALLY
-                // true — therefore `n_slices >= 1` here, always. Codecov reports
-                // this line as a PARTIAL branch for exactly that reason; it is
-                // not a coverage gap and MUST NOT be "fixed" by inventing a test
-                // for it. The guard is kept so a future change to the boundary
-                // rule cannot silently reach `allocate(0, …)`.
-                if (n_slices > 0) {
-                    try {
-                        slices = static_cast<group_slice*>(resource()->allocate(
-                            n_slices * sizeof(group_slice), alignof(group_slice)));
-                    } catch (std::bad_alloc const&) {
-                        // 073 T003: on a nested sub-table this is the mode-(b)
-                        // origin (FR-002) — the sub-table built non-null but its
-                        // own slice materialization exhausted the arena.
-                        group_index_.pop_back();
-                        return {.slices = {}, .status = group_read_status::alloc_failed};
-                    }
-                }
-
-                std::uint32_t n_written = 0;
-
-                // ── PASS 2: fill ──
-                std::size_t inst_start = first;
-                for (std::size_t k = first; k <= group_end; ++k) {
-                    if (is_boundary(k)) {
-                        // RC#2 fix: slice must begin at the delimiter's "tag="
-                        // prefix, NOT at its value. Walk back from val_start to
-                        // find the first digit of the tag ([2b §4.7]).
-                        std::uint32_t const fs =
-                            field_start_from_val(frame_base_, entries_[inst_start].offset);
-                        std::byte const* d = frame_base_ + fs;
-                        // End = one past the last value byte of the last field
-                        // in this instance (which terminates before the trailing
-                        // SOH — length is exclusive of SOH by contract).
-                        std::uint32_t const end_off =
-                            entries_[k - 1U].offset + entries_[k - 1U].length;
-                        // The `: 0U` arm is DEFENSIVE AND PROVABLY DEAD, which
-                        // is why it shows as the one uncovered line in this
-                        // function. `inst_start` is only ever set to a previous
-                        // boundary's `k`, and boundaries strictly increase, so
-                        // `inst_start < k` at every push ⇒ `entries_[k - 1U]` is
-                        // at or after `entries_[inst_start]` ⇒ `end_off > fs`.
-                        // Kept rather than removed: it costs nothing, and the
-                        // alternative is an unchecked subtraction. Two
-                        // independent instruments agree it cannot fire — the
-                        // partition argument above, and llvm-cov measuring zero
-                        // executions across the wire and C-ABI suites.
-                        std::size_t const len =
-                            (end_off > fs) ? static_cast<std::size_t>(end_off - fs) : 0U;
-                        slices[n_written++] = group_slice{.data = d, .len = len};
-                        inst_start = k;
-                    }
-                }
-                // The row is trivially copyable, so `group_index_` reallocation
-                // memcpys it and the arena buffer it points at never moves.
-                group_index_.back().data = slices;
-                group_index_.back().count = n_written;
-                return {.slices = {slices, n_written},
-                        .status = group_read_status::ok,
-                        .is_group = true};
             }
+
+            std::uint32_t n_written = 0;
+
+            // ── PASS 2: fill ──
+            std::size_t inst_start = first;
+            for (std::size_t k = first; k <= group_end; ++k) {
+                if (is_boundary(k)) {
+                    // RC#2 fix: slice must begin at the delimiter's "tag="
+                    // prefix, NOT at its value. Walk back from val_start to
+                    // find the first digit of the tag ([2b §4.7]).
+                    std::uint32_t const fs =
+                        field_start_from_val(frame_base_, entries_[inst_start].offset);
+                    std::byte const* d = frame_base_ + fs;
+                    // End = one past the last value byte of the last field
+                    // in this instance (which terminates before the trailing
+                    // SOH — length is exclusive of SOH by contract).
+                    std::uint32_t const end_off = entries_[k - 1U].offset + entries_[k - 1U].length;
+                    // The `: 0U` arm is DEFENSIVE AND PROVABLY DEAD, which
+                    // is why it shows as the one uncovered line in this
+                    // function. `inst_start` is only ever set to a previous
+                    // boundary's `k`, and boundaries strictly increase, so
+                    // `inst_start < k` at every push ⇒ `entries_[k - 1U]` is
+                    // at or after `entries_[inst_start]` ⇒ `end_off > fs`.
+                    // Kept rather than removed: it costs nothing, and the
+                    // alternative is an unchecked subtraction. Two
+                    // independent instruments agree it cannot fire — the
+                    // partition argument above, and llvm-cov measuring zero
+                    // executions across the wire and C-ABI suites.
+                    std::size_t const len =
+                        (end_off > fs) ? static_cast<std::size_t>(end_off - fs) : 0U;
+                    slices[n_written++] = group_slice{.data = d, .len = len};
+                    inst_start = k;
+                }
+            }
+            // The row is trivially copyable, so `group_index_` reallocation
+            // memcpys it and the arena buffer it points at never moves.
+            group_index_.back().data = slices;
+            group_index_.back().count = n_written;
+            return {
+                .slices = {slices, n_written}, .status = group_read_status::ok, .is_group = true};
         }
-        // 100 (research D10): an answer that needs no slices (absent, not a
-        // group, zero instances read). Recomputing it allocates nothing and
-        // yields the same answer, so a row that does not fit leaves it uncached.
-        try {
-            group_index_.push_back(
-                group_span{.data = nullptr, .count = 0, .no_tag = no_tag, .is_group = is_group});
-        } catch (std::bad_alloc const&) {
-            // Served uncached: the repeat recomputes the same answer.
-        }
-        return {.slices = {}, .status = group_read_status::ok, .is_group = is_group};
     }
+    // 100 (research D10): an answer that needs no slices (absent, not a
+    // group, zero instances read). Recomputing it allocates nothing and
+    // yields the same answer, so a row that does not fit leaves it uncached.
+    try {
+        group_index_.push_back(
+            group_span{.data = nullptr, .count = 0, .no_tag = no_tag, .is_group = is_group});
+    } catch (std::bad_alloc const&) {
+        // Served uncached: the repeat recomputes the same answer.
+    }
+    return {.slices = {}, .status = group_read_status::ok, .is_group = is_group};
 }
 
 // 062 T005: dict-aware sub-view-over-slice builder (see offset_table.hpp for
@@ -1065,8 +1057,7 @@ static nested_slices_result resolve_nested_result(
         }
         failure = s.status;
     }
-    bool const registered = hooks.opaque_dict() != nullptr && hooks.group_member_fn() != nullptr &&
-                            hooks.group_registered_fn() != nullptr &&
+    bool const registered = hooks.can_establish_groups() &&
                             hooks.group_registered_fn()(hooks.opaque_dict(), ctx, nested_no_tag);
     if (!registered || !slice_has_tag(slice_data, slice_len, nested_no_tag, hooks)) {
         return nested_slices_result{.slices = {}, .status = group_read_status::ok};
