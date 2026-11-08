@@ -839,12 +839,19 @@ inline dict_hooks dict_hooks::for_table_view(fixpp::dict::table_view const& dict
                                                                : tv->data_pair_length_tag(tag);
               }
             : static_cast<dict_hooks::length_pair_fn_t>(nullptr),
-        // 100 (research D2): the registration predicate, always installed, through the
-        // SAME opaque_dict and the SAME context key.
-        [](void const* d, group_context const& ctx, std::uint16_t no_tag) noexcept -> bool {
-            return static_cast<fixpp::dict::table_view const*>(d)->group_registered(
+        // 100 (research D2): the registration resolver, always installed, through the
+        // SAME opaque_dict and the SAME context key. It names the definition, so a read
+        // makes one lookup (T071 fix): the delimiter and members it returns are the
+        // answers of the two lambdas above at the same key (`wire_group_resolve`).
+        [](void const* d, group_context const& ctx,
+           std::uint16_t no_tag) noexcept -> dict_hooks::group_resolution {
+            auto const r = static_cast<fixpp::dict::table_view const*>(d)->wire_group_resolve(
                 ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth},
                 no_tag);
+            return dict_hooks::group_resolution{.registered = r.registered,
+                                                .definition_known = true,
+                                                .delimiter = r.delimiter,
+                                                .members = r.members};
         }};
 }
 

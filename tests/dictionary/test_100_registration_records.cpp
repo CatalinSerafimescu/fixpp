@@ -369,6 +369,29 @@ void expect_wire_definition(fixpp::wire::dict_hooks const& h, std::string_view m
     }
 }
 
+// T071 fix (one lookup per read): the resolver `for_table_view` installs answers what the
+// three lookups it replaces answer at the same key: `group_registered`,
+// `wire_group_first_field` and `wire_group_member_tags`, and it names the definition.
+void expect_resolve_is_the_three_lookups(table_view const& tv,
+                                         fixpp::wire::dict_hooks const& hooks,
+                                         std::string_view mt, path_t const& path, tag_t no_tag,
+                                         std::string const& what, std::size_t& mismatches) {
+    auto const r = hooks.group_resolve_fn()(hooks.opaque_dict(), ctx_of(mt, path), no_tag);
+    auto const members = tv.wire_group_member_tags(mt, path, no_tag);
+    bool const same = r.definition_known && r.registered == tv.group_registered(mt, path, no_tag) &&
+                      r.delimiter == tv.wire_group_first_field(mt, path, no_tag) &&
+                      std::ranges::equal(r.members, members);
+    if (!same && ++mismatches <= 5) {
+        ADD_FAILURE() << what << ": the resolver answers registered=" << r.registered
+                      << " delimiter=" << r.delimiter << " members=" << r.members.size()
+                      << " known=" << r.definition_known
+                      << "; the three lookups answer registered="
+                      << tv.group_registered(mt, path, no_tag)
+                      << " delimiter=" << tv.wire_group_first_field(mt, path, no_tag)
+                      << " members=" << members.size();
+    }
+}
+
 void report(std::string const& dict_name, std::string const& what, std::string_view mt,
             path_t const& path, tag_t no_tag) {
     std::cout << "T028-REPORTED " << dict_name << " " << what << " msg=" << mt << " path=[";
@@ -383,7 +406,7 @@ void report(std::string const& dict_name, std::string const& what, std::string_v
 void sweep(std::string const& name, table_view const& tv, oracle const& o, bool route_table,
            bool shipped) {
     auto const hooks = fixpp::wire::dict_hooks::for_table_view(tv);
-    ASSERT_NE(hooks.group_registered_fn(), nullptr) << name << ": for_table_view installs it";
+    ASSERT_NE(hooks.group_resolve_fn(), nullptr) << name << ": for_table_view installs it";
     auto const& occ_store = table_view_test_access::occurrence_records(tv);
     auto const& sec_store = table_view_test_access::section_records(tv);
     std::size_t mismatches = 0;
@@ -453,6 +476,9 @@ void sweep(std::string const& name, table_view const& tv, oracle const& o, bool 
 
         for (auto const& [k, defs] : defs_at) {
             auto const& [path, no_tag] = k;
+            expect_resolve_is_the_three_lookups(
+                tv, hooks, mt, path, no_tag,
+                name + " msg " + mt + " no_tag " + std::to_string(no_tag), mismatches);
             // Record shape: the stored record is one of the definitions at its key.
             auto const rec = stored_record(occ_store, mt, path, no_tag);
             EXPECT_TRUE(rec && std::ranges::find(defs, *rec) != defs.end())
@@ -563,7 +589,21 @@ void sweep(std::string const& name, table_view const& tv, oracle const& o, bool 
             }
         }
     }
+    for (auto const& [k, defs] : sec_defs) {
+        expect_resolve_is_the_three_lookups(tv, hooks, undeclared, k.first, k.second,
+                                            name + " section no_tag " + std::to_string(k.second),
+                                            mismatches);
+    }
+    // Every tag at the root of an undeclared type: count tags, bare-only tags and tags that
+    // are no group's.
+    for (unsigned t = 1; t <= 0xFFFFU; ++t) {
+        expect_resolve_is_the_three_lookups(tv, hooks, undeclared, {}, static_cast<tag_t>(t),
+                                            name + " root tag " + std::to_string(t), mismatches);
+    }
     for (auto const& [path, no_tag] : body_keys) {
+        expect_resolve_is_the_three_lookups(tv, hooks, undeclared, path, no_tag,
+                                            name + " body no_tag " + std::to_string(no_tag),
+                                            mismatches);
         EXPECT_EQ(tv.group_registered(undeclared, path, no_tag), arm3.contains(no_tag))
             << name << " body no_tag " << no_tag
             << ": a body group is not registered in an undeclared type unless bare-only";
@@ -702,6 +742,11 @@ TEST(RegistrationRecords100, WireLookup_RecordWithoutGroupBit_AnswersNothing) {
     ASSERT_FALSE(table_view_test_access::group_bit(tv, kNo)) << "precondition: bit clear";
     EXPECT_EQ(tv.wire_group_first_field("A", kRoot, kNo), 0U);
     EXPECT_TRUE(tv.wire_group_member_tags("A", kRoot, kNo).empty());
+    // T071 fix: the resolver registers the key and names no members, as the three do.
+    auto const r = tv.wire_group_resolve("A", kRoot, kNo);
+    EXPECT_TRUE(r.registered);
+    EXPECT_EQ(r.delimiter, 0U);
+    EXPECT_TRUE(r.members.empty());
 }
 TEST(RegistrationRecords100, WireLookup_RecordWithGroupBit_AnswersTheRecord) {
     table_view_builder b;
@@ -711,6 +756,51 @@ TEST(RegistrationRecords100, WireLookup_RecordWithGroupBit_AnswersTheRecord) {
     auto const tv = std::move(b).build();
     EXPECT_EQ(tv.wire_group_first_field("A", kRoot, kNo), kDelimA);
     EXPECT_EQ(as_vec(tv.wire_group_member_tags("A", kRoot, kNo)), (std::vector<tag_t>{kDelimA}));
+    auto const r = tv.wire_group_resolve("A", kRoot, kNo);
+    std::vector<tag_t> const want_members{kDelimA};
+    EXPECT_TRUE(r.registered);
+    EXPECT_EQ(r.delimiter, kDelimA);
+    EXPECT_EQ(as_vec(r.members), want_members);
+}
+
+// T071 fix: the resolver's other arms, each spelt out. The bare-only arm (no context key
+// anywhere) registers and answers the bare store; a context key answers its own entry and
+// leaves another context unregistered with the bare store's definition; a tag with no
+// group bit answers nothing.
+TEST(RegistrationRecords100, WireResolve_BareOnly_RegistersFromTheBareStore) {
+    table_view_builder b;
+    b.set_group_first(kNo, kDelimB);
+    auto const tv = std::move(b).build();
+    auto const r = tv.wire_group_resolve("A", kRoot, kNo);
+    std::vector<tag_t> const want_members{kDelimB};
+    EXPECT_TRUE(r.registered);
+    EXPECT_EQ(r.delimiter, kDelimB);
+    EXPECT_EQ(as_vec(r.members), want_members);
+}
+TEST(RegistrationRecords100, WireResolve_ContextKey_AnswersItsEntryAndNotAnotherContext) {
+    table_view_builder b;
+    b.set_group_first(kNo, kDelimB);
+    b.set_group_first_ctx("A", kRoot, kNo, kDelimA);
+    auto const tv = std::move(b).build();
+    auto const in_a = tv.wire_group_resolve("A", kRoot, kNo);
+    std::vector<tag_t> const want_a{kDelimA};
+    EXPECT_TRUE(in_a.registered);
+    EXPECT_EQ(in_a.delimiter, kDelimA);
+    EXPECT_EQ(as_vec(in_a.members), want_a);
+    auto const in_b = tv.wire_group_resolve("B", kRoot, kNo);
+    std::vector<tag_t> const want_b{kDelimB};
+    EXPECT_FALSE(in_b.registered);
+    EXPECT_EQ(in_b.delimiter, kDelimB);
+    EXPECT_EQ(as_vec(in_b.members), want_b);
+}
+TEST(RegistrationRecords100, WireResolve_NoGroupBit_AnswersNothing) {
+    table_view_builder b;
+    b.set_group_first(kNo, kDelimB);
+    auto const tv = std::move(b).build();
+    auto const r = tv.wire_group_resolve("A", kRoot, kMember);
+    EXPECT_FALSE(r.registered);
+    EXPECT_EQ(r.delimiter, 0U);
+    EXPECT_TRUE(r.members.empty());
 }
 
 // A second record at a key the store holds is dropped: the first record answers.

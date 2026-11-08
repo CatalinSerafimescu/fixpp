@@ -90,8 +90,11 @@ bool always_group_member(void const*, fixpp::wire::group_context const&, std::ui
 
 // 100 (research D2): the registration stub that agrees with `always_group_member`:
 // every count tag is registered, so the harness keeps walking every group it did.
-bool always_registered(void const*, fixpp::wire::group_context const&, std::uint16_t) noexcept {
-    return true;
+fixpp::wire::dict_hooks::group_resolution always_registered(void const*,
+                                                            fixpp::wire::group_context const&,
+                                                            std::uint16_t) noexcept {
+    // Names no definition: the walk asks the member stub.
+    return {.registered = true, .definition_known = false, .delimiter = 0, .members = {}};
 }
 
 // 384: the delimiter oracle, fuzzer-driven. Before 384 this harness omitted

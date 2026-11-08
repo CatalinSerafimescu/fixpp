@@ -97,9 +97,17 @@ including `wire_group_too_large`.
 
 ## `dict_hooks` (`include/fixpp/wire/dict_hooks.hpp`)
 
-- **New** `noexcept` callback `group_registered_fn_t = bool (*)(void const*, group_context const&, std::uint16_t)`,
-  filled by `for_table_view` from the accessor above. Null on `none()`. A dict-aware bundle with a null registration
-  callback declines group reads as a dict-free one does.
+- **New** `noexcept` registration callback, filled by `for_table_view` from the accessor above. Null on `none()`. A
+  dict-aware bundle with a null registration callback declines group reads as a dict-free one does. *Updated (T071
+  fix, owner ruling 2026-11-08, one lookup per read):* the callback is the resolver `group_resolve_fn_t =
+  group_resolution (*)(void const*, group_context const&, std::uint16_t)`, where `group_resolution` is `{registered,
+  definition_known, delimiter, members}`. `for_table_view`'s resolver answers from `table_view::wire_group_resolve`,
+  which equals `group_registered`, `wire_group_first_field` and `wire_group_member_tags` at the same key, and sets
+  `definition_known`. `OffsetTable::group()` calls it once per read: step 3 reads `registered`; step 5, the extent
+  walk's same-context membership tests and `group_slices_status()`'s delimiter read the definition when it is known,
+  else the membership and delimiter callbacks (a test seam's stubs name no definition). A nested group the walk
+  descends into is resolved once at its own level. The type replaces `group_registered_fn_t = bool (*)(…)` in place,
+  so `sizeof(dict_hooks)` is unchanged by it.
 - Grows `sizeof(dict_hooks)` and every by-value holder of it; the holders and their recipe are in research.md's census.
 - The membership and delimiter callbacks keep their types; only `for_table_view`'s lambdas change (the record lookup
   above), so the per-occurrence records add nothing to `sizeof(dict_hooks)`.

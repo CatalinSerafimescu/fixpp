@@ -783,8 +783,11 @@ bool every_member(void const*, fixpp::wire::group_context const&, std::uint16_t,
                   std::uint16_t) noexcept {
     return true;
 }
-bool every_registered(void const*, fixpp::wire::group_context const&, std::uint16_t) noexcept {
-    return true;
+fixpp::wire::dict_hooks::group_resolution every_registered(void const*,
+                                                           fixpp::wire::group_context const&,
+                                                           std::uint16_t) noexcept {
+    // Names no definition: the walk asks `every_member`.
+    return {.registered = true, .definition_known = false, .delimiter = 0, .members = {}};
 }
 
 // The read's status over `filler + tail`, followed by the trailing byte `last`.

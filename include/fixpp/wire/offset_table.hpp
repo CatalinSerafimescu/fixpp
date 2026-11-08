@@ -393,6 +393,25 @@ private:
     void build(frame_view const& frame, std::size_t reserve_entries = 0) noexcept;
     void check_alive() const noexcept;
 
+    // 100 (T071 fix, one lookup per read): `group()`, which also writes the
+    // registration resolver's answer for `(stored context, no_tag)` to `def`, so
+    // `group_slices_status()` takes its delimiter from the same lookup. `def` is left
+    // as given when the read declines before resolving.
+    [[nodiscard]] core::expected_t<group_index> group_resolved(
+        std::uint16_t no_tag, dict_hooks::group_resolution& def) const noexcept;
+    // `consume_group_extent` with `def`, the definition of the group at `count_idx`
+    // in `ctx`: its same-context membership tests read `def.members` when
+    // `def.definition_known`, else ask the membership callback.
+    [[nodiscard]] std::size_t consume_group_extent(std::size_t count_idx, group_context const& ctx,
+                                                   dict_hooks::group_resolution const& def,
+                                                   std::uint8_t depth,
+                                                   bool& overflow) const noexcept;
+    // Whether `tag` is a member of group `no_tag` in `ctx`, from `def` when it is
+    // known, else from the membership callback.
+    [[nodiscard]] bool is_group_member(dict_hooks::group_resolution const& def,
+                                       group_context const& ctx, std::uint16_t no_tag,
+                                       std::uint16_t tag) const noexcept;
+
     // 062 T005: dict-aware sub-view-over-slice builder. Placement-constructs
     // a sub-OffsetTable into `mr` (an arena-owned pointer; never freed
     // individually — reclaimed wholesale with the arena, same lifetime

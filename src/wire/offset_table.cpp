@@ -431,7 +431,24 @@ static std::uint32_t parse_declared_count(std::byte const* base,
     return parse_bounded_u32(std::span<std::byte const>{base + e.offset, e.length});
 }
 
+// 100 (T071 fix): the public form asks the membership callback at every level's
+// own tests, as it always did (a default `group_resolution` names no definition).
 std::size_t OffsetTable::consume_group_extent(std::size_t count_idx, group_context const& ctx,
+                                              std::uint8_t depth, bool& overflow) const noexcept {
+    return consume_group_extent(count_idx, ctx, dict_hooks::group_resolution{}, depth, overflow);
+}
+
+bool OffsetTable::is_group_member(dict_hooks::group_resolution const& def,
+                                  group_context const& ctx, std::uint16_t no_tag,
+                                  std::uint16_t tag) const noexcept {
+    if (def.definition_known) {
+        return std::ranges::find(def.members, tag) != def.members.end();
+    }
+    return hooks_.group_member_fn()(hooks_.opaque_dict(), ctx, no_tag, tag);
+}
+
+std::size_t OffsetTable::consume_group_extent(std::size_t count_idx, group_context const& ctx,
+                                              dict_hooks::group_resolution const& def,
                                               std::uint8_t depth, bool& overflow) const noexcept {
     if (depth >= kMaxGroupDepth) {
         overflow = true;  // T022: nesting deeper than K=16 -> err_group_too_large
@@ -448,7 +465,7 @@ std::size_t OffsetTable::consume_group_extent(std::size_t count_idx, group_conte
     std::uint16_t const delim = entries_[first].tag;
     // Confirm this count field really heads a group in-context (its delimiter
     // is a member); otherwise it is a plain scalar -> zero extent.
-    if (!hooks_.group_member_fn()(hooks_.opaque_dict(), ctx, group_no_tag, delim)) {
+    if (!is_group_member(def, ctx, group_no_tag, delim)) {
         return first;
     }
     std::uint32_t const declared = parse_declared_count(frame_base_, entries_[count_idx]);
@@ -482,11 +499,21 @@ std::size_t OffsetTable::consume_group_extent(std::size_t count_idx, group_conte
     // the overflow check written only in the descent branch. Checking it after
     // BOTH branches is equivalent: `overflow` is false on entry (every setter
     // returns immediately) and the non-descent branch cannot set it.
+    //
+    // 100 (T071 fix): whether a tag opens a nested group is still asked of the
+    // membership callback, which a tag that is no group's count tag answers without a
+    // store lookup. A nested group it confirms is resolved once, and that level's own
+    // tests read the definition (when the resolver names one).
     auto consume_one = [&](std::size_t at) noexcept -> std::size_t {
         if (at + 1U < entries_.size() &&
             hooks_.group_member_fn()(hooks_.opaque_dict(), child, entries_[at].tag,
                                      entries_[at + 1U].tag)) {
-            return consume_group_extent(at, child, static_cast<std::uint8_t>(depth + 1U), overflow);
+            dict_hooks::group_resolution const nested =
+                hooks_.group_resolve_fn() != nullptr
+                    ? hooks_.group_resolve_fn()(hooks_.opaque_dict(), child, entries_[at].tag)
+                    : dict_hooks::group_resolution{};
+            return consume_group_extent(at, child, nested, static_cast<std::uint8_t>(depth + 1U),
+                                        overflow);
         }
         return at + 1U;  // ordinary tag — no nested descent
     };
@@ -509,8 +536,7 @@ std::size_t OffsetTable::consume_group_extent(std::size_t count_idx, group_conte
             // inside an instance): a non-member ends this instance, and the
             // group. Only once the tag is known to belong does `consume_one`
             // decide whether it also OPENS a nested group.
-            if (!hooks_.group_member_fn()(hooks_.opaque_dict(), ctx, group_no_tag,
-                                          entries_[k].tag)) {
+            if (!is_group_member(def, ctx, group_no_tag, entries_[k].tag)) {
                 break;
             }
             // 083 C-8.0c: position 2 — an ordinary member inside an instance.
@@ -529,6 +555,12 @@ std::size_t OffsetTable::consume_group_extent(std::size_t count_idx, group_conte
 }
 
 core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_tag) const noexcept {
+    dict_hooks::group_resolution def{};
+    return group_resolved(no_tag, def);
+}
+
+core::expected_t<OffsetTable::group_index> OffsetTable::group_resolved(
+    std::uint16_t no_tag, dict_hooks::group_resolution& def) const noexcept {
     check_alive();
     if (!status_) {
         return fail<group_index>(status_.error());
@@ -588,7 +620,10 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     // the next field. Not registered -> not a group, which answers as absent does
     // (`err_required_field_missing`); `group_slices_status().is_group` and `find()`
     // tell the two apart.
-    if (!hooks_.group_registered_fn()(hooks_.opaque_dict(), ctx, no_tag)) {
+    // 100 (T071 fix): one resolver call answers step 3, and its definition (when it
+    // names one) answers step 5 and the walk's same-context membership tests.
+    def = hooks_.group_resolve_fn()(hooks_.opaque_dict(), ctx, no_tag);
+    if (!def.registered) {
         return err_required_field_missing<group_index>();
     }
     // Step 4: a registered count field that is the last entry -> present, zero
@@ -601,7 +636,7 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     // present, zero instances. The value is not read: a declared 0, a value with no
     // leading digit and a lying count all land here or in step 6.
     std::uint16_t const delim = entries_[first].tag;
-    if (!hooks_.group_member_fn()(hooks_.opaque_dict(), ctx, no_tag, delim)) {
+    if (!is_group_member(def, ctx, no_tag, delim)) {
         return group_index{no_tag, first, 0U};
     }
     // Step 6: the extent walk, unchanged.
@@ -611,7 +646,7 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     // instance). consume_group_extent recursively consumes each nested
     // group's full declared extent so the outer slice encloses all of it.
     bool overflow = false;
-    std::size_t const group_end = consume_group_extent(count_idx, ctx, ctx.depth, overflow);
+    std::size_t const group_end = consume_group_extent(count_idx, ctx, def, ctx.depth, overflow);
     if (overflow) {
         return err_group_too_large<group_index>();
     }
@@ -696,7 +731,8 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
     // pass is load-bearing, not an optimization — deleting it re-opens #181.
     // Magnitude deliberately omitted: it is a RESULT parameterized by the
     // STL's growth factor. B&L B-389-1 carries the figure and its platform.
-    auto gi = group(no_tag);
+    dict_hooks::group_resolution def{};
+    auto gi = group_resolved(no_tag, def);
     // 100 (research D5): `group()` stopped at a group wire limit (the
     // per-instance entry cap or the nesting depth). It allocates nothing, so
     // the failure recurs on a repeat, and no row is pushed (research D10).
@@ -809,8 +845,13 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
                 // is backwards, and it pointed the reader away from the
                 // guard that carries the claim. See B&L B-384-2, which keeps
                 // both wrong versions on purpose.
+                // 100 (T071 fix): the resolver's delimiter, from `group()`'s one
+                // lookup, when it names the definition; the delimiter callback answers
+                // the same key the same way.
                 if (std::uint16_t const d =
-                        hooks_.group_delim_fn()(hooks_.opaque_dict(), ctx, no_tag);
+                        def.definition_known
+                            ? def.delimiter
+                            : hooks_.group_delim_fn()(hooks_.opaque_dict(), ctx, no_tag);
                     d != 0) {
                     delim = d;
                 }
@@ -1057,8 +1098,9 @@ static nested_slices_result resolve_nested_result(
         }
         failure = s.status;
     }
-    bool const registered = hooks.can_establish_groups() &&
-                            hooks.group_registered_fn()(hooks.opaque_dict(), ctx, nested_no_tag);
+    bool const registered =
+        hooks.can_establish_groups() &&
+        hooks.group_resolve_fn()(hooks.opaque_dict(), ctx, nested_no_tag).registered;
     if (!registered || !slice_has_tag(slice_data, slice_len, nested_no_tag, hooks)) {
         return nested_slices_result{.slices = {}, .status = group_read_status::ok};
     }

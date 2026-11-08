@@ -63,8 +63,11 @@ bool always_group_member(void const*, fixpp::wire::group_context const&, std::ui
     return true;
 }
 // 100: the registration stub that agrees with `always_group_member`.
-bool always_registered(void const*, fixpp::wire::group_context const&, std::uint16_t) noexcept {
-    return true;
+fixpp::wire::dict_hooks::group_resolution always_registered(void const*,
+                                                            fixpp::wire::group_context const&,
+                                                            std::uint16_t) noexcept {
+    // Names no definition: the walk asks the member stub.
+    return {.registered = true, .definition_known = false, .delimiter = 0, .members = {}};
 }
 
 // 063 T008: the new context arg — carried but unused in Phase 2.
