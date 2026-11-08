@@ -749,6 +749,9 @@ std::string slurp(std::filesystem::path const& p) {
 // Keyed on content, not indentation (100-wire-group-read-integrity T067): each
 // function's body is cut from the TU between its definition's signature and
 // the "\n}\n" that closes it, and the needles are counted inside that body.
+// "group()'s body" below is the body of `group_resolved()`, which `group()`
+// forwards to (100-wire-group-read-integrity T071 fix), so that is the signature
+// the matcher cuts.
 //
 // ANTI-VACUITY. Anything that stops the matcher seeing the TU the way it
 // expects — CRLF, a rename, a truncated read — drives the counts to 0, and
@@ -788,8 +791,8 @@ TEST(WireOffsetTable, FR001_NoFlatInstanceWalkInGroup) {
     };
 
     std::string const group_body = body_of(
-        "core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_tag) "
-        "const noexcept {\n");
+        "core::expected_t<OffsetTable::group_index> OffsetTable::group_resolved(\n"
+        "    std::uint16_t no_tag, dict_hooks::group_resolution& def) const noexcept {\n");
     std::string const sibling_body = body_of(
         "group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const "
         "noexcept {\n");
