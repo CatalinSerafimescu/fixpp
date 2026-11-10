@@ -59,7 +59,7 @@ bool slot_used(Rig101& rig) {
     return std::ranges::any_of(slot, [](std::byte b) { return b != std::byte{0}; });
 }
 
-constexpr auto kSites = session_test_access::reply_site_buffer_bytes();
+constexpr std::size_t kSite = session_test_access::reply_site_buffer_bytes();
 
 // ── ReplySlotRelease101 (W101-46b) ──────────────────────────────────────────────────────
 
@@ -79,9 +79,7 @@ BmrRig bmr_rig() {
     b.rig->app->reject_from_app = true;
     const RejectInputs in = inputs_of(*b.rig, 2, 0, 0, {});
     const auto site = longest_fitting(
-        [&](std::size_t n) {
-            return bmr_fits(in, long_msg_type(n == 0 ? 1 : n), kSites.business_reject_leaf);
-        },
+        [&](std::size_t n) { return bmr_fits(in, long_msg_type(n == 0 ? 1 : n), kSite); },
         session_test_access::send_frame_bytes());
     const auto ceiling = longest_bmr_msg_type(in);
     if (!site || !ceiling || *ceiling <= *site + 1) {
@@ -130,9 +128,7 @@ TEST(ReplySlotRelease101, RejectAssignFails_ReleasesTheSlot) {
                                              std::numeric_limits<seqnum_t>::max());
     const RejectInputs in = inputs_of(*rig, 2, 11, 0, kTextInvalidMsgType);
     const auto site = longest_fitting(
-        [&](std::size_t n) {
-            return reject_fits(in, long_msg_type(n == 0 ? 1 : n), kSites.emit_reject_text);
-        },
+        [&](std::size_t n) { return reject_fits(in, long_msg_type(n == 0 ? 1 : n), kSite); },
         session_test_access::send_frame_bytes());
     ASSERT_TRUE(site);
     clear_slot(*rig);
@@ -158,9 +154,7 @@ TEST(ReplySlotRelease101, CloseWhileReplyStoreSuspended_ReleasesTheSlot_NextRepl
     rig->app->reject_from_app = true;
     const RejectInputs in = inputs_of(*rig, 2, 0, 0, {});
     const auto site = longest_fitting(
-        [&](std::size_t n) {
-            return bmr_fits(in, long_msg_type(n == 0 ? 1 : n), kSites.business_reject_leaf);
-        },
+        [&](std::size_t n) { return bmr_fits(in, long_msg_type(n == 0 ? 1 : n), kSite); },
         session_test_access::send_frame_bytes());
     ASSERT_TRUE(site);
     const std::string mt = long_msg_type(*site + 1);
@@ -187,9 +181,7 @@ TEST(ReplySlotRelease101, CloseWhileReplyStoreSuspended_ReleasesTheSlot_NextRepl
     // in builds with assertions, that no holder kept it.
     const RejectInputs rin = inputs_of(*rig, 3, 3, 0, {});
     const auto rsite = longest_fitting(
-        [&](std::size_t n) {
-            return reject_fits(rin, long_msg_type(n == 0 ? 1 : n), kSites.reject_best_effort);
-        },
+        [&](std::size_t n) { return reject_fits(rin, long_msg_type(n == 0 ? 1 : n), kSite); },
         session_test_access::send_frame_bytes());
     ASSERT_TRUE(rsite);
     const std::string rmt = long_msg_type(*rsite + 1);
@@ -218,29 +210,16 @@ struct BoundarySite {
 
 std::vector<BoundarySite> boundary_sites() {
     return {
-        {"gate", spec(Kind::fix44), 11, 0, kTextInvalidMsgType, {}, kSites.emit_reject_text},
-        {"inbound_reject_leaf_",
-         spec(Kind::fix44).off(),
-         1,
-         122,
-         {},
-         "43=Y\x01",
-         kSites.reject_leaf},
+        {"gate", spec(Kind::fix44), 11, 0, kTextInvalidMsgType, {}, kSite},
+        {"inbound_reject_leaf_", spec(Kind::fix44).off(), 1, 122, {}, "43=Y\x01", kSite},
         {"emit_session_reject_",
          spec(Kind::fix44).off().without_application(),
          3,
          0,
          {},
          {},
-         kSites.emit_reject},
-        {"inbound_business_reject_leaf_",
-         spec(Kind::fix44).off(),
-         0,
-         0,
-         {},
-         {},
-         kSites.business_reject_leaf,
-         true},
+         kSite},
+        {"inbound_business_reject_leaf_", spec(Kind::fix44).off(), 0, 0, {}, {}, kSite, true},
     };
 }
 
@@ -294,9 +273,7 @@ TEST(BestEffortLeaf101, OverflowingMsgTypeFitsTheCeiling_SentWith372) {
     ASSERT_TRUE(rig);
     const RejectInputs in = inputs_of(*rig, 2, 3, 0, {});
     const auto site = longest_fitting(
-        [&](std::size_t n) {
-            return reject_fits(in, long_msg_type(n == 0 ? 1 : n), kSites.reject_best_effort);
-        },
+        [&](std::size_t n) { return reject_fits(in, long_msg_type(n == 0 ? 1 : n), kSite); },
         session_test_access::send_frame_bytes());
     ASSERT_TRUE(site);
     const std::string mt = long_msg_type(*site + 1);

@@ -223,19 +223,9 @@ struct session_test_access {
     [[nodiscard]] static std::span<std::byte> inbound_reply_slot(Session& s) noexcept {
         return std::span<std::byte>{s.inbound_reply_slot_};
     }
-    struct reply_site_bytes {
-        std::size_t emit_reject;
-        std::size_t emit_reject_text;
-        std::size_t reject_leaf;
-        std::size_t reject_best_effort;
-        std::size_t business_reject_leaf;
-    };
-    [[nodiscard]] static constexpr reply_site_bytes reply_site_buffer_bytes() noexcept {
-        return {.emit_reject = Session::kEmitRejectBytes,
-                .emit_reject_text = Session::kEmitRejectTextBytes,
-                .reject_leaf = Session::kRejectLeafBytes,
-                .reject_best_effort = Session::kRejectBestEffortBytes,
-                .business_reject_leaf = Session::kBusinessRejectLeafBytes};
+    // The size of every inbound reply site's own buffer.
+    [[nodiscard]] static constexpr std::size_t reply_site_buffer_bytes() noexcept {
+        return Session::kInboundReplySiteBytes;
     }
     // The best-effort Reject leaf (answers a fromAdmin reject of SequenceReset or Logout), for
     // its unit cell (tasks.md T047): the awaitable, which the cell spawns on the session's

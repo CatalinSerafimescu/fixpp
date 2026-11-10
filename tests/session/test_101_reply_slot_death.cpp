@@ -38,7 +38,7 @@ void overlap_two_overflowed_replies() {
     if (rig->start(Arm::Active)) {
         return;  // no death: the cell fails on the missing assertion text
     }
-    const auto site = session_test_access::reply_site_buffer_bytes().emit_reject_text;
+    const auto site = session_test_access::reply_site_buffer_bytes();
     const std::string mt = long_msg_type(site);
     armed = true;
     auto& ioc = rig->r->ioc;

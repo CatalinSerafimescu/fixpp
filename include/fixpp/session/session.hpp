@@ -2062,12 +2062,9 @@ private:
     // inbound_reply_slot_held_ set from the rebuild until the site's tail returns.
     std::array<std::byte, kSendFrameBytes> inbound_reply_slot_{};
     bool inbound_reply_slot_held_ = false;
-    // Each inbound reply site's own buffer: a frame that fits is built there, as before.
-    static constexpr std::size_t kEmitRejectBytes = 512;          // emit_session_reject_ (2 args)
-    static constexpr std::size_t kEmitRejectTextBytes = 512;      // emit_session_reject_ (text)
-    static constexpr std::size_t kRejectLeafBytes = 512;          // inbound_reject_leaf_
-    static constexpr std::size_t kRejectBestEffortBytes = 512;    // the best-effort Reject leaf
-    static constexpr std::size_t kBusinessRejectLeafBytes = 512;  // inbound_business_reject_leaf_
+    // Each inbound reply site's own buffer, one size for every site: a frame that fits is built
+    // there, as before.
+    static constexpr std::size_t kInboundReplySiteBytes = 512;
 
     // Sets inbound_reply_slot_held_ when a rebuild takes the slot, and clears it when the
     // site's coroutine frame releases the holder: on every return, a throw, or the frame's
