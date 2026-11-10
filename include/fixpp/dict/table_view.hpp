@@ -617,11 +617,19 @@ public:
         return group_member_tags(no_tag);
     }
 
-    // 100 (T071 fix, one lookup per read): `group_registered`, `wire_group_first_field`
-    // and `wire_group_member_tags` at one key, in one call, composed from the functions
-    // that answer them: the registration is `group_registered`'s, and the definition is
-    // `wire_group_record`'s, else the bare store's, or 0 and empty when `group_bit` is
-    // clear, as the two wire accessors answer. Read only by
+    // 100 (T071 fix, one lookup per read): what `group_registered`, `wire_group_first_field`
+    // and `wire_group_member_tags` answer at one key, from one walk of the stores in
+    // their shared order (`group_ctx_`, the per-occurrence record, the section record),
+    // each store probed at most once and none after both answers are known; so a
+    // `group_ctx_` hit is one probe. Each hit supplies the registration and the
+    // definition under the gates those functions apply: the `group_ctx_` hit registers
+    // under `group_bit` and defines under `ctx_key_bit`, so the one probe runs when
+    // either is set (every key goes through `ctx_entry`, which sets both). The
+    // definition falls back to the bare store, and is 0 and empty when `group_bit` is
+    // clear; the registration falls back to arm 3. Those functions stay separate
+    // implementations, not callers of this walk: the cells in
+    // tests/dictionary/test_100_registration_records.cpp compare the walk against them
+    // at every key of every shipped dictionary. Read only by
     // `wire::dict_hooks::for_table_view`'s registration resolver.
     struct wire_group_resolution {
         bool registered = false;
@@ -631,11 +639,46 @@ public:
     [[nodiscard]] wire_group_resolution wire_group_resolve(
         std::string_view msg_type, std::span<std::uint16_t const> parent_path,
         std::uint16_t no_tag) const noexcept {
-        bool const registered = group_registered(msg_type, parent_path, no_tag);
-        if (!group_bit(no_tag)) {
+        bool const has_group_bit = group_bit(no_tag);
+        bool const has_ctx_key_bit = ctx_key_bit(no_tag);
+        auto const query = make_ctx_query(msg_type, parent_path, no_tag);
+        bool registered = false;
+        std::optional<wire_group_def> def;
+        if (has_group_bit || has_ctx_key_bit) {
+            if (auto const it = group_ctx_.find(query); it != group_ctx_.end()) {
+                registered = has_group_bit;
+                if (has_ctx_key_bit) {
+                    def = wire_group_def{.delimiter = it->second.group_first,
+                                         .members = it->second.members};
+                }
+            }
+        }
+        if (!registered || !def) {
+            if (auto const it = occurrence_records_.find(query); it != occurrence_records_.end()) {
+                registered = true;
+                if (!def) {
+                    def = wire_group_def{.delimiter = it->second.delimiter,
+                                         .members = it->second.members};
+                }
+            }
+        }
+        if (!registered || !def) {
+            if (auto const it = section_records_.find(make_ctx_query({}, parent_path, no_tag));
+                it != section_records_.end()) {
+                registered = true;
+                if (!def) {
+                    def = wire_group_def{.delimiter = it->second.delimiter,
+                                         .members = it->second.members};
+                }
+            }
+        }
+        if (!registered) {
+            registered = !has_ctx_key_bit && has_group_bit;
+        }
+        if (!has_group_bit) {
             return {.registered = registered, .delimiter = 0, .members = {}};
         }
-        if (auto const def = wire_group_record(msg_type, parent_path, no_tag)) {
+        if (def) {
             return {.registered = registered, .delimiter = def->delimiter, .members = def->members};
         }
         return {.registered = registered,
@@ -1192,7 +1235,8 @@ private:
     // 100 (research D2 "It is backed by"): bit `no_tag` is set exactly when some
     // `group_ctx_` key holds `no_tag`, by `ctx_entry`, through which every write to
     // `group_ctx_` goes, and nowhere else. Arm 3 of `group_registered` reads it, and
-    // `wire_group_record` probes `group_ctx_` only under it. Sized like `group_bits_`.
+    // `wire_group_record` probes `group_ctx_` only under it (`wire_group_resolve` reads
+    // it for both). Sized like `group_bits_`.
     std::vector<std::uint64_t> ctx_key_bits_;
 
     [[nodiscard]] bool ctx_key_bit(std::uint16_t no_tag) const noexcept {
