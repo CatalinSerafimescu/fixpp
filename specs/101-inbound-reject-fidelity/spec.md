@@ -53,7 +53,7 @@ A counterparty, and the people reading its logs, see three things that differ fr
 - Q: A new slot or reuse `wire_invalid_tag_number` for an undefined tag? → A: a new validator error slot;
   `wire_invalid_tag_number` keeps its contract (a malformed tag, no 371).
 - Q: QuickFIX's `ValidateUserDefinedFields` / `AllowUnknownMsgFields`? → A: nothing to implement (their defaults check
-  every tag, as fixpp does); disclose that fixpp has no setting for either key. *Updated (101 P8):* the TOML loader refuses a key by either name with `unknown_key` (witness `LoadDeferredSurface.T020_TypoDistinction`), and no `.cfg` importer exists.
+  every tag, as fixpp does); disclose that fixpp has no setting for either key. *Updated (101 P8):* the TOML loader refuses a key by either name with `unknown_key` (witness `LoadDeferredSurface.T020_TypoDistinction`). *Corrected (101 P9):* the QuickFIX `.cfg` reader, `fixpp::session::quickfix_compat::cfg_to_file_store_factory` (`cfg_loader.hpp`, B-008-6), builds only a `FileStoreFactory` from FileStorePath, SenderCompID and TargetCompID and does not read either key (`parse_cfg`'s key loop in `src/session/quickfix_compat/cfg_loader.cpp`; no witness), so a `.cfg` line naming one is not acted on.
 - Q: Where does the MsgType check go? → A: after the header-order check (373=14), before the field walk.
 
 ### Session 2026-11-07 (orchestrator, owner-delegated; QuickFIX read for this feature)
@@ -366,7 +366,7 @@ BusinessMessageReject.
   B-092-1's last-wins clause, B-041-1's reason enumeration, B-099-2's double-fault limit, B-099-8, B-099-25's
   `R 2/384` clause and L-099-1's 373=2 (research Supersessions) move or change to the new endings. Research's
   Supersessions list is the complete set and its recipe lines re-derive it. New B-rows disclose: fixpp has no setting for QuickFIX's
-  `ValidateUserDefinedFields` and `AllowUnknownMsgFields` (*Updated (101 P8):* the TOML loader refuses a key by either name with `unknown_key` (witness `LoadDeferredSurface.T020_TypoDistinction`), and no `.cfg` importer exists); the FIX.4.0–4.2 text and 373 differences (D3); the
+  `ValidateUserDefinedFields` and `AllowUnknownMsgFields` (*Updated (101 P8):* the TOML loader refuses a key by either name with `unknown_key` (witness `LoadDeferredSurface.T020_TypoDistinction`). *Corrected (101 P9):* the QuickFIX `.cfg` reader, `fixpp::session::quickfix_compat::cfg_to_file_store_factory` (`cfg_loader.hpp`, B-008-6), builds only a `FileStoreFactory` from FileStorePath, SenderCompID and TargetCompID and does not read either key (`parse_cfg`'s key loop in `src/session/quickfix_compat/cfg_loader.cpp`; no witness), so a `.cfg` line naming one is not acted on.); the FIX.4.0–4.2 text and 373 differences (D3); the
   header-set residual against QuickFIX C++'s static list (D5); the group-layout divergence (D2); multi-defect
   precedence (Edge Cases); `interpret_logon`'s first-wins change, public C++ (D4); the outbound-ceiling ending (D7: a
   BMR above `kSendFrameBytes` is not sent, where QuickFIX sends it; a Reject above it is sent without 372, or not at all
