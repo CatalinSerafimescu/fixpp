@@ -313,10 +313,10 @@ void OffsetTable::build(frame_view const& frame, std::size_t reserve_entries) no
                 entries_.clear();
                 return;
             }
-            // 100 (T071): constructed in place. A temporary `entry` is written as
-            // two 2-byte stores (`tag`, `group_index_link`) that the vector's copy
-            // reads back as one 4-byte load, which cannot store-forward. In-place
-            // construction stores each member once, into the slot.
+            // 100 (T071): constructed in place, so each member is stored once, into
+            // the slot. Copying in a temporary instead lets the narrow stores of
+            // `tag` and `group_index_link` be reread as one wider load, which
+            // cannot store-forward.
             entries_.emplace_back(static_cast<std::uint32_t>(val_start),
                                   static_cast<std::uint32_t>(val_len),
                                   static_cast<std::uint16_t>(tag), std::uint16_t{0});
