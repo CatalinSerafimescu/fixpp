@@ -902,15 +902,27 @@ private:
     // Session ever serves a second connection, this placement must be re-derived.
     std::atomic<std::uint64_t> garbled_frames_{0};
 
+    // The rate state of a session log record written at most once per max(HeartBtInt, 1 s) on
+    // effective_clock_: whether one has been written, the earliest time of the next, and the
+    // occurrences suppressed since the last. One instance per record; admit_log_record_ is its
+    // only writer.
+    struct log_rate_gate {
+        bool logged = false;
+        fixpp::core::steady_time_point next{};
+        std::uint64_t unlogged = 0;
+    };
+    // Admits a record now, returning the occurrences suppressed since the previous one (and
+    // starting the next window), or counts `occurrences` as suppressed and returns nullopt.
+    [[nodiscard]] std::optional<std::uint64_t> admit_log_record_(
+        log_rate_gate& gate, std::uint64_t occurrences) noexcept;
+
     // 093 (data-model E-12): the logger, resolved once at open() from
     // cfg_.logger_override, else the engine's; null when neither is set. And the
-    // garble log's rate state: whether a garble record has been written, the earliest
-    // time of the next one on effective_clock_, and the regions of rate-suppressed
-    // summaries since the last record (plan OD-21).
+    // garble log's rate state (a log_rate_gate since 101): whether a garble record has been
+    // written, the earliest time of the next one on effective_clock_, and the regions of
+    // rate-suppressed summaries since the last record (plan OD-21).
     std::shared_ptr<fixpp::log::Logger> logger_;
-    bool garble_logged_ = false;
-    fixpp::core::steady_time_point garble_log_next_;
-    std::uint64_t garbles_unlogged_ = 0;
+    log_rate_gate garble_log_gate_;
 
     // note_garbles_ — 093 (data-model E-4, E-12): accounts one summary of disregarded
     // inbound bytes. Reached from the engine through session_engine_access (the read
@@ -926,9 +938,7 @@ private:
     // garble record does. One rate state and one suppressed count serve both message types (one
     // cause), never reset, so they carry across connections. The record names the type not sent,
     // the inbound MsgType's length (never its bytes) and the count suppressed since the last one.
-    bool reply_ceiling_logged_ = false;
-    fixpp::core::steady_time_point reply_ceiling_log_next_;
-    std::uint64_t reply_ceiling_unlogged_ = 0;
+    log_rate_gate reply_ceiling_log_gate_;
     void note_reply_over_ceiling_(bool business_reject, std::size_t ref_msg_type_len) noexcept;
 
     // 093-inbound-frame-dispositions (FR-013, data-model E-12): a frame over L was

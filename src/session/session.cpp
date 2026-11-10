@@ -453,24 +453,32 @@ void Session::note_garbles_(fixpp::wire::garble_summary const& g) noexcept {
     emit_event(session_event_garbled_frame{
         .first_kind = g.first_kind, .frames = g.regions, .discarded_bytes = bytes});
 
-    auto const now =
-        effective_clock_ ? effective_clock_->steady_now() : fixpp::core::steady_time_point{};
-    if (garble_logged_ && now < garble_log_next_) {
-        garbles_unlogged_ += g.regions;
+    auto const suppressed = admit_log_record_(garble_log_gate_, g.regions);
+    if (!suppressed) {
         return;
     }
-    auto const heartbt = cfg_.heartbeat_interval.value_or(kDefaultHeartBtInt);
-    // Saturates at steady_time_point::max() when not representable.
-    garble_log_next_ = detail::deadline_after(now, std::max(heartbt, std::chrono::seconds{1}));
-    garble_logged_ = true;
-    std::uint64_t const unnamed = garbles_unlogged_ + (g.regions - 1U);
+    std::uint64_t const unnamed = *suppressed + (g.regions - 1U);
     FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
                "inbound garbled frame disregarded: kind={} discarded_bytes={} "
                "suppressed_since_last={}",
                fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(g.first_kind)),
                fixpp::log::ArgValue::from_u64(g.discarded),
                fixpp::log::ArgValue::from_u64(unnamed));
-    garbles_unlogged_ = 0;
+}
+
+std::optional<std::uint64_t> Session::admit_log_record_(log_rate_gate& gate,
+                                                        std::uint64_t occurrences) noexcept {
+    auto const now =
+        effective_clock_ ? effective_clock_->steady_now() : fixpp::core::steady_time_point{};
+    if (gate.logged && now < gate.next) {
+        gate.unlogged += occurrences;
+        return std::nullopt;
+    }
+    auto const heartbt = cfg_.heartbeat_interval.value_or(kDefaultHeartBtInt);
+    // Saturates at steady_time_point::max() when not representable.
+    gate.next = detail::deadline_after(now, std::max(heartbt, std::chrono::seconds{1}));
+    gate.logged = true;
+    return std::exchange(gate.unlogged, 0);
 }
 
 // ── 093-inbound-frame-dispositions — the establishment timeout (contract C-4;
@@ -2759,19 +2767,12 @@ fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_business_re
 
 void Session::note_reply_over_ceiling_(bool business_reject,
                                        std::size_t ref_msg_type_len) noexcept {
-    auto const now =
-        effective_clock_ ? effective_clock_->steady_now() : fixpp::core::steady_time_point{};
-    if (reply_ceiling_logged_ && now < reply_ceiling_log_next_) {
-        ++reply_ceiling_unlogged_;
+    auto const unlogged = admit_log_record_(reply_ceiling_log_gate_, 1);
+    if (!unlogged) {
         return;
     }
-    auto const heartbt = cfg_.heartbeat_interval.value_or(kDefaultHeartBtInt);
-    // Saturates at steady_time_point::max() when not representable.
-    reply_ceiling_log_next_ =
-        detail::deadline_after(now, std::max(heartbt, std::chrono::seconds{1}));
-    reply_ceiling_logged_ = true;
     auto const len = fixpp::log::ArgValue::from_u64(ref_msg_type_len);
-    auto const suppressed = fixpp::log::ArgValue::from_u64(reply_ceiling_unlogged_);
+    auto const suppressed = fixpp::log::ArgValue::from_u64(*unlogged);
     if (business_reject) {
         FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
                    "inbound reply over the outbound ceiling not sent: msg_type=j "
@@ -2783,7 +2784,6 @@ void Session::note_reply_over_ceiling_(bool business_reject,
                    "ref_msg_type_len={} suppressed={}",
                    len, suppressed);
     }
-    reply_ceiling_unlogged_ = 0;
 }
 
 // 070-fix44-closeout S-029 — refuse an inbound Logon on a 464 posture mismatch (or
