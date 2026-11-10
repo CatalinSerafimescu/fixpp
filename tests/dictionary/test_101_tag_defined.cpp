@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "fixt_framing_table.hpp"  // kFixtFramingTable (src/dictionary)
+#include "support/table_view_test_access.hpp"
 
 namespace {
 
@@ -140,6 +141,36 @@ TEST(TagDefined101, FixLatest_DefinesExactlyTheFieldDefinitions) {
     const auto defs = field_definitions(slurp(p), true);
     ASSERT_TRUE(defs.contains(3115)) << "precondition: FIX Latest declares 3115";
     expect_defined_set(d.as_table_view(), defs);
+}
+
+// ── The seal releases the store's excess capacity ───────────────────────────────────────
+//
+// Every population operation pushes a tag before the seal deduplicates, so the store's
+// capacity before the seal follows the push count, not the tag count. A view returned by
+// as_table_view() is moved out of the builder, so it keeps whatever capacity the seal leaves;
+// a Session and each FIXT route hold that moved view. The seal therefore releases the excess:
+// a dictionary-built view's store has capacity equal to its size.
+
+void expect_store_compact(const table_view& tv) {
+    const auto& store = dd::table_view_test_access::defined_tags(tv);
+    ASSERT_FALSE(store.empty()) << "precondition: the store holds the dictionary's tags";
+    EXPECT_EQ(store.capacity(), store.size())
+        << "a moved-out view keeps the capacity the seal leaves";
+}
+
+TEST(TagDefined101, SealReleasesExcessCapacity_Fix44) {
+    const dd::Dictionary d = load(kDicts / "FIX44.xml");
+    expect_store_compact(d.as_table_view());
+}
+
+TEST(TagDefined101, SealReleasesExcessCapacity_FixtRouteFix50sp2) {
+    const dd::Dictionary d = load(kDicts / "FIX50SP2.xml");
+    expect_store_compact(d.as_table_view(dd::fixt_framing));
+}
+
+TEST(TagDefined101, SealReleasesExcessCapacity_FixLatest) {
+    const dd::Dictionary d = load(kOrch / "OrchestraFIXLatest.xml");
+    expect_store_compact(d.as_table_view());
 }
 
 // A field a 098 overlay adds without a message that reaches it, and one at a high tag.

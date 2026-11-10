@@ -764,10 +764,20 @@ private:
     // The store is sealed (sorted, deduplicated) once, by `table_view_builder::build() &&`.
     void mark_defined(std::uint16_t tag) { defined_tags_.push_back(tag); }
 
+    // The seal also releases the store's excess capacity. Every population operation pushes
+    // before the seal deduplicates, so the capacity before it follows the push count, not the
+    // tag count; a view `build() &&` moves out keeps whatever capacity the seal leaves, and a
+    // Session and each FIXT route hold such a view. Load-time only, never on the inbound path.
+    // shrink_to_fit may allocate; a failed allocation leaves the store as sorted and correct,
+    // with its capacity kept, so it is not propagated out of this noexcept seal.
     void seal_defined_tags() noexcept {
         std::ranges::sort(defined_tags_);
         auto const dup = std::ranges::unique(defined_tags_);
         defined_tags_.erase(dup.begin(), dup.end());
+        try {
+            defined_tags_.shrink_to_fit();
+        } catch (...) {  // NOLINT(bugprone-empty-catch): capacity kept, contents unchanged
+        }
     }
 
     void add_valid_tag(std::string_view msg_type, std::uint16_t tag) {
