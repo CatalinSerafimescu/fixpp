@@ -632,6 +632,8 @@ The Phase 2 measurement spike (§10 Q1) confirms the eager-mode footprint on a r
 
 Updated (099-fixt-appl-version-validation): `dictionary_driven_validator` gains a non-virtual `validate` overload taking an envelope table and a `table()` accessor. `Validator` keeps its five pure virtuals (`[const §XIV.2]`), and the class adds no data member.
 
+*Updated (101-inbound-reject-fidelity):* the validator also produces `wire_invalid_msg_type` (the table does not define the frame's MsgType) and `wire_undefined_tag` (a tag the table's dictionary does not define at all; `wire_unexpected_tag` keeps the tag the dictionary defines but not for this message). The list above and the table below predate them and are history; the current set is `fixpp::core::error` in `include/fixpp/core/error.hpp`, and the 373 each maps to is `wire_error_to_session_reject_reason` in `include/fixpp/wire/reject_reason_map.hpp`.
+
 ### 6.6 Allocation, exceptions, threading
 
 #### Arenas — three lifetime classes, pinned

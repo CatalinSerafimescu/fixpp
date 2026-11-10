@@ -686,6 +686,7 @@ RED set is the census for that change:
   `tests/interop/happy/golden/HP-QFj-{acc,init}-fix44-reject-invalid-admin.fix` and their `-capture.fix` twins, and
   the PARENT's `research/G19-fix-fpml-iso20022/phase-9-harness/golden/HP-QF{j,cpp}-{acc,init}-fix44-reject-invalid-admin.fix`
   copies. Tasks T052 regenerates them; the parent copies land in the post-merge parent commit, T080.
+  *Updated (101 P8):* the `-capture.fix` twins are gitignored stale sidecars that nothing reads (the harness writes its capture into the run directory), so they are not regenerated; and the PARENT QFcpp goldens did not change, because no live cell writes them (QFcpp is not generated for this chain).
 
 Each rewritten cell names its superseding requirement in the test.
 
