@@ -202,14 +202,10 @@ struct Decoded {
     [[nodiscard]] bool has(int tag) const {
         return std::ranges::any_of(fields, [tag](auto const& f) { return f.first == tag; });
     }
-    // The first value of `tag`, or "<absent>".
+    // The first value of `tag`, or "<absent>" when the frame has no such field (a present,
+    // empty value reads as empty).
     [[nodiscard]] std::string get(int tag) const {
-        for (auto const& f : fields) {
-            if (f.first == tag) {
-                return f.second;
-            }
-        }
-        return "<absent>";
+        return has(tag) ? fixpp::test_support::frame_field(raw, tag) : std::string("<absent>");
     }
 };
 
@@ -560,6 +556,38 @@ struct RejectInputs {
     int reason = 0;
     std::string text;  // Text(58), empty for none
 };
+
+// The values a Reject the session builds next takes from it, for a frame at MsgSeqNum `ref_seq`.
+inline RejectInputs inputs_of(const Rig101& rig, unsigned ref_seq, int reason, int ref_tag,
+                              std::string_view text) {
+    return RejectInputs{.sender = rig.r->cfg.sender_comp_id,
+                        .target = rig.r->cfg.target_comp_id,
+                        .begin = rig.begin(),
+                        .sending_time = rig.stamped_sending_time(),
+                        .seq = rig.next_out(),
+                        .ref_seq = ref_seq,
+                        .ref_tag = ref_tag,
+                        .reason = reason,
+                        .text = std::string(text)};
+}
+
+// A Logon without SendingTime(52), from the rig's CompIDs: the validator's required-field miss.
+inline std::string logon_without_52(const Rig101& rig) {
+    const t99::Ctx c = rig.ctx(1);
+    return t99::wire(rig.begin(),
+                     "35=A\x01"
+                     "34=1\x01"
+                     "49=" +
+                         c.snd +
+                         "\x01"
+                         "56=" +
+                         c.tgt + "\x01" + t99::kLogonBody());
+}
+
+// The Logon fields, with FIXT's 1137.
+inline std::string logon_fields(Kind k) {
+    return t99::kLogonBody() + (k == Kind::fixt ? std::string("1137=9\x01") : std::string());
+}
 
 inline bool reject_fits(const RejectInputs& in, std::string_view ref_msg_type,
                         std::size_t buffer_bytes) {

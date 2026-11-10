@@ -37,10 +37,6 @@ struct Shape35 {
     const char* before_34 = "";             // a later 35 adjacent to the first, in the header
 };
 
-std::string logon_fields(Kind k) {
-    return t99::kLogonBody() + (k == Kind::fixt ? std::string("1137=9\x01") : std::string());
-}
-
 std::vector<Shape35> shapes() {
     auto nos_then = [](const char* later) {
         return [later](Kind) { return t99::kNos() + "35=" + later + "\x01"; };

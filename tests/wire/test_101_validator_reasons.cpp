@@ -14,8 +14,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
-#include <cstring>
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/field_type.hpp>
 #include <fixpp/dict/table_view.hpp>
@@ -32,6 +30,7 @@
 #include <vector>
 
 #include "support/frame_view_factory.hpp"
+#include "support/reify_test_frame.hpp"
 
 namespace {
 
@@ -41,24 +40,6 @@ using fixpp::dict::table_view_builder;
 using fixpp::wire::access_mode;
 using fixpp::wire::dictionary_driven_validator;
 using fixpp::wire::Parser;
-
-// A frame of `fields` (each `tag=value`, SOH-terminated) after 8 and 9, CheckSum computed.
-std::vector<std::byte> make_frame(std::string_view fields) {
-    std::string pre =
-        "8=FIX.4.4\x01"
-        "9=" +
-        std::to_string(fields.size()) + "\x01" + std::string(fields);
-    unsigned sum = 0;
-    for (unsigned char c : pre) {
-        sum += c;
-    }
-    char cs[8];
-    std::snprintf(cs, sizeof cs, "10=%03u\x01", sum % 256U);
-    pre += cs;
-    std::vector<std::byte> out(pre.size());
-    std::memcpy(out.data(), pre.data(), pre.size());
-    return out;
-}
 
 // What the Session's gate reads: the mapped SessionRejectReason (-1 when the frame validates),
 // and the RefTagID the validator wrote (0 when it wrote none).
@@ -70,7 +51,9 @@ struct Verdict {
 };
 
 Verdict judge(table_view tv, std::string_view fields) {
-    const std::vector<std::byte> buf = make_frame(fields);
+    // `fields` (each `tag=value`, SOH-terminated) after 8 and 9, CheckSum computed.
+    const std::vector<std::byte> buf =
+        fixpp::test_support::assemble_frame("8=FIX.4.4\x01", std::string(fields));
     std::array<std::byte, 8192> arena_buf{};
     std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
                                               std::pmr::null_memory_resource()};

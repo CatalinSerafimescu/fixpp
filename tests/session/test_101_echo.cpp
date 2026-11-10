@@ -38,20 +38,6 @@ namespace {
 
 using fixpp::test_support::LogCapture;
 
-// The values a Reject the session builds next takes from it, for a frame at MsgSeqNum `ref_seq`.
-RejectInputs inputs_of(const Rig101& rig, unsigned ref_seq, int reason, int ref_tag,
-                       std::string_view text) {
-    return RejectInputs{.sender = rig.r->cfg.sender_comp_id,
-                        .target = rig.r->cfg.target_comp_id,
-                        .begin = rig.begin(),
-                        .sending_time = rig.stamped_sending_time(),
-                        .seq = rig.next_out(),
-                        .ref_seq = ref_seq,
-                        .ref_tag = ref_tag,
-                        .reason = reason,
-                        .text = std::string(text)};
-}
-
 // A frame's fields other than BodyLength, CheckSum, SendingTime and 372.
 std::vector<std::string> fields_but_372(const Decoded& d) {
     std::vector<std::string> v = field_set(d);
@@ -294,18 +280,6 @@ TEST(Echo101, W101_41_Bmr_OverCeiling_NotSent_OneRecord_RateBounded) {
 //
 // The acceptor sends nothing before the peer's Logon, so a gate Reject is the first frame its
 // CompIDs size. The peer's Logon omits SendingTime(52): the gate's required-field Reject.
-
-std::string logon_without_52(const Rig101& rig) {
-    const t99::Ctx c = rig.ctx(1);
-    return t99::wire(rig.begin(),
-                     "35=A\x01"
-                     "34=1\x01"
-                     "49=" +
-                         c.snd +
-                         "\x01"
-                         "56=" +
-                         c.tgt + "\x01" + t99::kLogonBody());
-}
 
 // The CompID length (both CompIDs equal) whose gate Reject, with 372 or without it, is the
 // longest that builds into the ceiling.

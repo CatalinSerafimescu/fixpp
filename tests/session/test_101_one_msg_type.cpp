@@ -53,11 +53,6 @@ void expect_refused(const Ending101& e) {
     EXPECT_EQ(e.from_app + e.from_admin, 0);
 }
 
-// The Logon fields, with FIXT's 1137.
-std::string logon_fields(Kind k) {
-    return t99::kLogonBody() + (k == Kind::fixt ? std::string("1137=9\x01") : std::string());
-}
-
 // ── W101-20: US3 scenario 1, a validation-off acceptor before Logon ─────────────────────
 
 void w101_20(Kind k) {

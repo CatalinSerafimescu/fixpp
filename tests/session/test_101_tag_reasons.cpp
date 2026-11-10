@@ -171,17 +171,6 @@ TEST(Reject101Tag, W101_12_Fix44_Active_Reason5) {
 
 // A FIX 4.4 Logon without SendingTime(52): the validator's required-field miss, at the two
 // establishment gate sites.
-std::string logon_without_52(const Rig101& rig) {
-    const t99::Ctx c = rig.ctx(1);
-    return t99::wire(rig.begin(),
-                     "35=A\x01"
-                     "34=1\x01"
-                     "49=" +
-                         c.snd +
-                         "\x01"
-                         "56=" +
-                         c.tgt + "\x01" + t99::kLogonBody());
-}
 TEST(Reject101Tag, W101_12_Fix44_NotConnected_Reason1) {
     auto rig = started(spec(Kind::fix44), Arm::NotConnected);
     ASSERT_TRUE(rig);

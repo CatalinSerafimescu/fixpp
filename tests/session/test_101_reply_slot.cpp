@@ -36,19 +36,6 @@
 namespace fixpp::session::test101 {
 namespace {
 
-RejectInputs inputs_of(const Rig101& rig, unsigned ref_seq, int reason, int ref_tag,
-                       std::string_view text) {
-    return RejectInputs{.sender = rig.r->cfg.sender_comp_id,
-                        .target = rig.r->cfg.target_comp_id,
-                        .begin = rig.begin(),
-                        .sending_time = rig.stamped_sending_time(),
-                        .seq = rig.next_out(),
-                        .ref_seq = ref_seq,
-                        .ref_tag = ref_tag,
-                        .reason = reason,
-                        .text = std::string(text)};
-}
-
 void clear_slot(Rig101& rig) {
     auto slot = session_test_access::inbound_reply_slot(rig.session());
     std::ranges::fill(slot, std::byte{0});
