@@ -798,7 +798,7 @@ void OrchestraLoaderState::expand_field_list(
             if (delim_cap != nullptr) {
                 delim_cap->path.push_back(no_tag);
                 delim_cap->pending.push_back(0);
-                delim_cap->members.emplace_back();  // 100: this occurrence's members
+                detail::open_member_level(*delim_cap);  // 100: this occurrence's members
             }
             expand_field_list(group_node, out, required_out, group_required_pairs_out, no_tag,
                               enclosing_component_index, delim_cap,
@@ -806,15 +806,14 @@ void OrchestraLoaderState::expand_field_list(
                               /*group_scope_component_required=*/greq);  // 081 D-3
             if (delim_cap != nullptr) {
                 std::uint16_t const captured = delim_cap->pending.back();
-                std::vector<std::uint16_t> members = std::move(delim_cap->members.back());
-                delim_cap->members.pop_back();
+                detail::MsgFieldsRun const members = detail::close_member_level(*delim_cap);
                 delim_cap->pending.pop_back();
                 delim_cap->path.pop_back();
                 if (captured != 0) {
                     delim_cap->out.push_back(detail::CapturedDelim{
                         .rec = detail::make_group_ctx_delim(delim_cap->path, no_tag, captured),
                         .full_path = delim_cap->path,
-                        .members = std::move(members)});
+                        .members = members});
                 }
                 // 083 T036 (FR-006 / C-6.1), symmetric with xml_loader.cpp:
                 // `captured == 0` means this group emitted no first member, so

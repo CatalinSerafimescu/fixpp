@@ -328,18 +328,25 @@ struct GroupCtxDelim {
 struct CapturedDelim {
     GroupCtxDelim rec;
     std::vector<std::uint16_t> full_path;  // ancestors, outermost first, UNCLAMPED
-    // 100: the direct members of the same occurrence (`capture_member_emission`), so
-    // the capture that survives `flush_group_ctx_delims`' key de-duplication carries
-    // one occurrence's delimiter and members.
-    std::vector<std::uint16_t> members;
+    // 100: the direct members of the same occurrence (`capture_member_emission`), a
+    // run of `DelimCapture::member_pool`, so the capture that survives
+    // `flush_group_ctx_delims`' key de-duplication carries one occurrence's delimiter
+    // and members.
+    MsgFieldsRun members;
 };
 
 struct DelimCapture {
     std::vector<std::uint16_t> path;     // ancestors, outermost first
     std::vector<std::uint16_t> pending;  // parallel to `path`; 0 = not yet captured
-    // 100: parallel to `path` and `pending`: the tags emitted so far at each open
-    // group's own level.
+    // 100: the tags emitted so far at each open group's own level, one buffer per depth;
+    // the first `open_levels` are open, parallel to `path` and `pending`. A closed
+    // level's buffer stays for the next group opened at that depth, so a message's
+    // occurrences reuse its storage rather than each allocating its own
+    // (`open_member_level` / `close_member_level`).
     std::vector<std::vector<std::uint16_t>> members;
+    std::size_t open_levels = 0;
+    // 100: every closed occurrence's members, one run per `CapturedDelim`.
+    std::vector<std::uint16_t> member_pool;
     std::vector<CapturedDelim> out;  // this message's records
 };
 
@@ -362,10 +369,30 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
 // de-duplicates the message's run; a tag the run later drops as a duplicate is still
 // a member here. A repeat is kept: the table's record stores drop it.
 inline void capture_member_emission(DelimCapture* cap, std::uint16_t tag) {
-    if (cap == nullptr || cap->members.empty()) {
+    if (cap == nullptr || cap->open_levels == 0) {
         return;
     }
-    cap->members.back().push_back(tag);
+    cap->members[cap->open_levels - 1].push_back(tag);
+}
+
+// 100: opens the member level of a group the loader descends into, beside the push
+// of its count tag onto `path`.
+inline void open_member_level(DelimCapture& cap) {
+    if (cap.members.size() == cap.open_levels) {
+        cap.members.emplace_back();
+    }
+    cap.members[cap.open_levels].clear();
+    ++cap.open_levels;
+}
+
+// 100: closes the innermost member level, beside the pop of `path`: appends its
+// members to `member_pool` and returns their run.
+inline MsgFieldsRun close_member_level(DelimCapture& cap) {
+    auto const& level = cap.members[--cap.open_levels];
+    MsgFieldsRun const run{.start = static_cast<std::uint32_t>(cap.member_pool.size()),
+                           .count = static_cast<std::uint32_t>(level.size())};
+    cap.member_pool.insert(cap.member_pool.end(), level.begin(), level.end());
+    return run;
 }
 
 // 083 T041 — the FR-023 / C-3.4 completeness invariant, shared by both loaders
@@ -836,7 +863,9 @@ void maybe_drop_first_group_ctx_delim_run_for_testing(dict_metadata_handle& h) n
     for (auto const& captured : cap.out) {
         h.group_ctx_delim_pool_.push_back(captured.rec);
         // 100: the same occurrence's members, in a run parallel to the pool.
-        push_run(h.group_ctx_member_runs_, h.group_ctx_member_pool_, captured.members);
+        push_run(h.group_ctx_member_runs_, h.group_ctx_member_pool_,
+                 std::span<std::uint16_t const>{cap.member_pool}.subspan(captured.members.start,
+                                                                         captured.members.count));
     }
     h.per_msg_group_ctx_delim_offsets_.push_back(run);
     return std::nullopt;

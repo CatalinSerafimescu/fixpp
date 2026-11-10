@@ -960,4 +960,44 @@ TEST(RegistrationRecords100, SectionWalk_Enter_RefusesOnPathAndVisited) {
     EXPECT_FALSE(w.enter(&a)) << "visited at the empty path";
 }
 
+// T071 fix 3: the delimiter capture's member levels. A tag emitted at an open level is
+// a member of that level only (an outer level keeps emitting after a nested one
+// closes), a closed level's run holds exactly its members, and a level reopened at a
+// depth whose buffer an earlier group used starts empty. No level open: nothing is
+// captured.
+TEST(RegistrationRecords100, DelimCapture_MemberLevels_EachRunHoldsItsOwnLevel) {
+    using fixpp::dict::detail::DelimCapture;
+    using fixpp::dict::detail::MsgFieldsRun;
+    DelimCapture cap;
+    auto const emit = [&](tag_t t) { fixpp::dict::detail::capture_member_emission(&cap, t); };
+    auto const run_tags = [&](MsgFieldsRun r) {
+        return std::vector<tag_t>(cap.member_pool.begin() + r.start,
+                                  cap.member_pool.begin() + r.start + r.count);
+    };
+    emit(1);  // no level open
+    fixpp::dict::detail::open_member_level(cap);
+    emit(10);
+    fixpp::dict::detail::open_member_level(cap);
+    emit(20);
+    emit(21);
+    MsgFieldsRun const inner = fixpp::dict::detail::close_member_level(cap);
+    emit(11);
+    MsgFieldsRun const outer = fixpp::dict::detail::close_member_level(cap);
+    fixpp::dict::detail::open_member_level(cap);
+    fixpp::dict::detail::open_member_level(cap);
+    emit(30);
+    MsgFieldsRun const reopened = fixpp::dict::detail::close_member_level(cap);
+    MsgFieldsRun const empty_outer = fixpp::dict::detail::close_member_level(cap);
+    emit(2);  // no level open
+    std::vector<tag_t> const want_inner{20, 21};
+    std::vector<tag_t> const want_outer{10, 11};
+    std::vector<tag_t> const want_reopened{30};
+    EXPECT_EQ(run_tags(inner), want_inner);
+    EXPECT_EQ(run_tags(outer), want_outer);
+    EXPECT_EQ(run_tags(reopened), want_reopened) << "a reused level buffer starts empty";
+    EXPECT_EQ(empty_outer.count, 0U);
+    EXPECT_EQ(cap.member_pool.size(), want_inner.size() + want_outer.size() + want_reopened.size())
+        << "a tag emitted with no level open is captured nowhere";
+}
+
 }  // namespace
