@@ -104,26 +104,50 @@ dd::Dictionary load(const std::filesystem::path& p) {
     return dd::load_any(p, &mr);
 }
 
+// Each shipped dictionary the cells read, and each view form they read from it, is loaded and
+// built once for the binary; every view is `as_table_view`'s result as returned.
+const dd::Dictionary& fix44() {
+    static const dd::Dictionary d = load(kDicts / "FIX44.xml");
+    return d;
+}
+const dd::Dictionary& fix50sp2() {
+    static const dd::Dictionary d = load(kDicts / "FIX50SP2.xml");
+    return d;
+}
+const dd::Dictionary& fix_latest() {
+    static const dd::Dictionary d = load(kOrch / "OrchestraFIXLatest.xml");
+    return d;
+}
+const table_view& fix44_view() {
+    static const table_view tv = fix44().as_table_view();
+    return tv;
+}
+const table_view& fix50sp2_route_view() {
+    static const table_view tv = fix50sp2().as_table_view(dd::fixt_framing);
+    return tv;
+}
+const table_view& fix_latest_view() {
+    static const table_view tv = fix_latest().as_table_view();
+    return tv;
+}
+
 // ── Dictionary-built tables: each as_table_view form ────────────────────────────────────
 
 TEST(TagDefined101, Fix44_PlainForm_DefinesExactlyTheFieldDefinitions) {
-    const dd::Dictionary d = load(kDicts / "FIX44.xml");
     const auto defs = field_definitions(slurp(kDicts / "FIX44.xml"), false);
     ASSERT_TRUE(defs.contains(55));
     ASSERT_FALSE(defs.contains(1128)) << "precondition: FIX 4.4 declares no ApplVerID";
-    expect_defined_set(d.as_table_view(), defs);
+    expect_defined_set(fix44_view(), defs);
 }
 
 TEST(TagDefined101, Fix50sp2_RouteForm_DefinesTheFieldsAndTheFramingTags) {
-    const dd::Dictionary d = load(kDicts / "FIX50SP2.xml");
     auto expected = field_definitions(slurp(kDicts / "FIX50SP2.xml"), false);
     const auto framing = framing_tags();
     expected.insert(framing.begin(), framing.end());
-    expect_defined_set(d.as_table_view(dd::fixt_framing), expected);
+    expect_defined_set(fix50sp2_route_view(), expected);
 }
 
 TEST(TagDefined101, Fix50sp2_RouteFormWithExtra_DefinesTheExtraPairToo) {
-    const dd::Dictionary d = load(kDicts / "FIX50SP2.xml");
     auto expected = field_definitions(slurp(kDicts / "FIX50SP2.xml"), false);
     ASSERT_FALSE(expected.contains(5030)) << "precondition: FIX50SP2 does not declare 5030";
     ASSERT_FALSE(expected.contains(5031)) << "precondition: FIX50SP2 does not declare 5031";
@@ -132,24 +156,21 @@ TEST(TagDefined101, Fix50sp2_RouteFormWithExtra_DefinesTheExtraPairToo) {
     expected.insert({5030, 5031});
     const std::array<fixpp::core::detail::length_data_pair, 1> extra{
         {{.length_tag = 5030, .data_tag = 5031}}};
-    expect_defined_set(d.as_table_view(dd::fixt_framing, extra), expected);
+    expect_defined_set(fix50sp2().as_table_view(dd::fixt_framing, extra), expected);
 }
 
 TEST(TagDefined101, FixLatest_DefinesExactlyTheFieldDefinitions) {
-    const std::filesystem::path p = kOrch / "OrchestraFIXLatest.xml";
-    const dd::Dictionary d = load(p);
-    const auto defs = field_definitions(slurp(p), true);
+    const auto defs = field_definitions(slurp(kOrch / "OrchestraFIXLatest.xml"), true);
     ASSERT_TRUE(defs.contains(3115)) << "precondition: FIX Latest declares 3115";
-    expect_defined_set(d.as_table_view(), defs);
+    expect_defined_set(fix_latest_view(), defs);
 }
 
-// ── The seal releases the store's excess capacity ───────────────────────────────────────
+// ── The seal writes the store at exact size ─────────────────────────────────────────────
 //
-// Every population operation pushes a tag before the seal deduplicates, so the store's
-// capacity before the seal follows the push count, not the tag count. A view returned by
-// as_table_view() is moved out of the builder, so it keeps whatever capacity the seal leaves;
-// a Session and each FIXT route hold that moved view. The seal therefore releases the excess:
-// a dictionary-built view's store has capacity equal to its size.
+// A view returned by as_table_view() is moved out of the builder, so it keeps whatever
+// capacity the seal leaves; a Session and each FIXT route hold that moved view. The seal
+// writes the store in one allocation of the defined tags' count, so a dictionary-built view's
+// store has capacity equal to its size.
 
 void expect_store_compact(const table_view& tv) {
     const auto& store = dd::table_view_test_access::defined_tags(tv);
@@ -158,19 +179,14 @@ void expect_store_compact(const table_view& tv) {
         << "a moved-out view keeps the capacity the seal leaves";
 }
 
-TEST(TagDefined101, SealReleasesExcessCapacity_Fix44) {
-    const dd::Dictionary d = load(kDicts / "FIX44.xml");
-    expect_store_compact(d.as_table_view());
-}
+TEST(TagDefined101, SealReleasesExcessCapacity_Fix44) { expect_store_compact(fix44_view()); }
 
 TEST(TagDefined101, SealReleasesExcessCapacity_FixtRouteFix50sp2) {
-    const dd::Dictionary d = load(kDicts / "FIX50SP2.xml");
-    expect_store_compact(d.as_table_view(dd::fixt_framing));
+    expect_store_compact(fix50sp2_route_view());
 }
 
 TEST(TagDefined101, SealReleasesExcessCapacity_FixLatest) {
-    const dd::Dictionary d = load(kOrch / "OrchestraFIXLatest.xml");
-    expect_store_compact(d.as_table_view());
+    expect_store_compact(fix_latest_view());
 }
 
 // A field a 098 overlay adds without a message that reaches it, and one at a high tag.

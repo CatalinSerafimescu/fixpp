@@ -55,12 +55,14 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/length_data_pairs.hpp>  // is_standard_pair_tag (the standard pairs)
 #include <fixpp/dict/field_type.hpp>         // field_type (7-value enum)
 #include <functional>
+#include <limits>
 #include <optional>  // group_first_field_exact (fixpp#215 item 2) — header-only, alloc-free
 #include <span>
 #include <string>
@@ -591,7 +593,7 @@ public:
     // defines `tag`. On a dictionary-built table that is a field the dictionary declares (its
     // merged field store, after any overlay), whether or not a message reaches it; on a
     // hand-built one, a tag some population operation named. A binary search over
-    // `defined_tags_`, which `table_view_builder::build() &&` sorts and deduplicates. Cold: the
+    // `defined_tags_`, which `table_view_builder::build() &&` writes in ascending order. Cold: the
     // validator asks only after a tag failed the message's set. No allocation.
     [[nodiscard]] bool tag_defined(std::uint16_t tag) const noexcept {
         return std::ranges::binary_search(defined_tags_, tag);
@@ -760,23 +762,39 @@ private:
     // that only forwards to another (add_valid, add_required, set_type, set_group_first and its
     // `_ctx` form) is covered by the one it calls. Re-derive the set of callers by listing the
     // private mutators `table_view_builder` forwards to: a mutator added later calls it too.
-    // The store is sealed (sorted, deduplicated) once, by `table_view_builder::build() &&`.
-    void mark_defined(std::uint16_t tag) { defined_tags_.push_back(tag); }
+    // It sets the tag's bit in `defined_bits_`, which `table_view_builder`'s constructor sized
+    // before the first population operation, so it cannot throw; the store is written once,
+    // from the bits, by `table_view_builder::build() &&`.
+    void mark_defined(std::uint16_t tag) noexcept {
+        defined_bits_[tag >> 6U] |= std::uint64_t{1} << (tag & 63U);
+    }
 
-    // The seal also releases the store's excess capacity. Every population operation pushes
-    // before the seal deduplicates, so the capacity before it follows the push count, not the
-    // tag count; a view `build() &&` moves out keeps whatever capacity the seal leaves, and a
-    // Session and each FIXT route hold such a view. Load-time only, never on the inbound path.
-    // shrink_to_fit may allocate; a failed allocation leaves the store as sorted and correct,
-    // with its capacity kept, so it is not propagated out of this noexcept seal.
-    void seal_defined_tags() noexcept {
-        std::ranges::sort(defined_tags_);
-        auto const dup = std::ranges::unique(defined_tags_);
-        defined_tags_.erase(dup.begin(), dup.end());
-        try {
-            defined_tags_.shrink_to_fit();
-        } catch (...) {  // NOLINT(bugprone-empty-catch): capacity kept, contents unchanged
+    // One bit per value of the store's tag type.
+    [[nodiscard]] static constexpr std::size_t defined_bit_words() noexcept {
+        using tag_t = decltype(defined_tags_)::value_type;
+        return (std::size_t{std::numeric_limits<tag_t>::max()} + 1U) / 64U;
+    }
+
+    // The seal (101 T067): writes the store from the bits, the defined tags in ascending order
+    // at exact size (one allocation of the set bits' count), then releases the bits, so a built
+    // view, and each copy of it, holds the sorted vector and no bit words. Load-time only, never
+    // on the inbound path. It allocates, and a failure propagates out of `build() &&` with the
+    // builder's view unchanged.
+    void seal_defined_tags() {
+        std::size_t count = 0;
+        for (auto const word : defined_bits_) {
+            count += static_cast<std::size_t>(std::popcount(word));
         }
+        std::vector<std::uint16_t> tags;
+        tags.reserve(count);
+        for (std::size_t w = 0; w < defined_bits_.size(); ++w) {
+            for (auto bits = defined_bits_[w]; bits != 0; bits &= bits - 1U) {
+                tags.push_back(static_cast<std::uint16_t>(
+                    (w << 6U) | static_cast<std::size_t>(std::countr_zero(bits))));
+            }
+        }
+        defined_tags_ = std::move(tags);
+        defined_bits_ = std::vector<std::uint64_t>{};
     }
 
     void add_valid_tag(std::string_view msg_type, std::uint16_t tag) {
@@ -958,9 +976,6 @@ private:
         if (length_tag == 0 || data_tag == 0) {
             return;
         }
-        // 101 (research D1): both tags are defined. Capacity is reserved before any store
-        // moves, so the two marks below cannot throw and the strong guarantee holds.
-        defined_tags_.reserve(defined_tags_.size() + 2);
         // Strong guarantee (Gate B r6 M-2) at O(1) (Gate B r7 N-1): capture what this
         // call would overwrite, insert forward, and insert inverse under a rollback.
         // Only the two insertions can throw, and only when they need a NEW node; the
@@ -1168,10 +1183,13 @@ private:
     std::vector<std::uint64_t> header_bits_;
 
     // 101-inbound-reject-fidelity (research D1): the defined-tag store tag_defined() reads,
-    // sorted and deduplicated by `table_view_builder::build() &&`. A vector of tags rather than
-    // a tag-space bitset: it is copied with every validator's table, and a bitset sized to the
-    // tag space would cost every copy that much whatever the dictionary declares.
+    // written in ascending order by `table_view_builder::build() &&`. A vector of tags rather
+    // than a tag-space bitset: it is copied with every validator's table, and a bitset sized to
+    // the tag space would cost every copy that much whatever the dictionary declares.
     std::vector<std::uint16_t> defined_tags_;
+    // The build-time bits mark_defined sets (101 T067): sized by `table_view_builder`'s
+    // constructor to defined_bit_words(), emptied by the seal, so a built view holds none.
+    std::vector<std::uint64_t> defined_bits_;
 };
 
 // Move CONSTRUCTION is the property that became load-bearing when fixpp#456 deleted
@@ -1229,6 +1247,10 @@ private:
 // is `return std::move(tv_);` and checks nothing.
 class table_view_builder {
 public:
+    // 101 (research D1, T067): sizes the view's defined-tag bits before any population
+    // operation, so mark_defined cannot throw inside one.
+    table_view_builder() { tv_.defined_bits_.resize(table_view::defined_bit_words()); }
+
     // ── the forwarders, each returning *this for chaining ───────────────────
     table_view_builder& add_valid_tag(std::string_view msg_type, std::uint16_t tag) {
         tv_.add_valid_tag(msg_type, tag);
@@ -1345,7 +1367,8 @@ public:
 
     // Consumes the builder. The move is a member-to-return move, so NRVO cannot
     // apply; C++17 guaranteed elision then makes the caller's own return free.
-    // 101 (research D1): seals the defined-tag store first.
+    // 101 (research D1): seals the defined-tag store first; the seal allocates, so this can
+    // throw, and then the builder is unchanged.
     [[nodiscard]] table_view build() && {
         tv_.seal_defined_tags();
         return std::move(tv_);
