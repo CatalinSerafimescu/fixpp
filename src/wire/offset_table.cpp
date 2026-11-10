@@ -313,10 +313,13 @@ void OffsetTable::build(frame_view const& frame, std::size_t reserve_entries) no
                 entries_.clear();
                 return;
             }
-            entries_.push_back(entry{.offset = static_cast<std::uint32_t>(val_start),
-                                     .length = static_cast<std::uint32_t>(val_len),
-                                     .tag = static_cast<std::uint16_t>(tag),
-                                     .group_index_link = 0U});
+            // 100 (T071): constructed in place. A temporary `entry` is written as
+            // two 2-byte stores (`tag`, `group_index_link`) that the vector's copy
+            // reads back as one 4-byte load, which cannot store-forward. In-place
+            // construction stores each member once, into the slot.
+            entries_.emplace_back(static_cast<std::uint32_t>(val_start),
+                                  static_cast<std::uint32_t>(val_len),
+                                  static_cast<std::uint16_t>(tag), std::uint16_t{0});
         }
 
         // Build the open-address overlay over first occurrences.
