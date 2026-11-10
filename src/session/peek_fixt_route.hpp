@@ -7,10 +7,11 @@
 // will. `scan_frame_header` cannot do this: its hooks come from that table, so what it splits
 // depends on the answer.
 //
-// One rule on every shape. The walk uses S's hooks through `length_data_carry::read_value`, the
-// primitive `scan_frame_header` uses, and reads a tag exactly as that scan does, so a frame this
-// cannot read is one the scan, on S's route, faults or garbles on in the same place. It stops at
-// the first tag that is neither a header tag of S nor a standard header tag.
+// One rule on every shape. peek_fixt_route's walk uses S's hooks through
+// `length_data_carry::read_value`, the primitive `scan_frame_header` uses, and reads a tag exactly
+// as that scan does, so a frame this cannot read is one the scan, on S's route, faults or garbles
+// on in the same place. It stops at the first tag that is neither a header tag of S nor a standard
+// header tag.
 //
 // MsgType is the third field's even when a tag ahead of it stopped the walk: `FrameHeader`'s
 // `fault_ref_msg_type` is the third field's value on any fault-free frame, and the two must agree.
