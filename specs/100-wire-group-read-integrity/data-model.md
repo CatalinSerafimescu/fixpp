@@ -103,7 +103,11 @@ including `wire_group_too_large`.
   group_resolution (*)(void const*, group_context const&, std::uint16_t)`, where `group_resolution` is `{registered,
   definition_known, delimiter, members}`. `for_table_view`'s resolver answers from `table_view::wire_group_resolve`,
   which equals `group_registered`, `wire_group_first_field` and `wire_group_member_tags` at the same key, and sets
-  `definition_known`. `OffsetTable::group()` calls it once per read: step 3 reads `registered`; step 5, the extent
+  `definition_known`. *Updated (T071 fix 3):* `wire_group_resolve` walks the stores once, in the lookup order
+  (`group_ctx_`, the per-occurrence record, the section record), and stops once the registration and the definition are
+  both known, falling back to the bare store and to arm 3 after the walk; the three accessors stay
+  separate implementations, which `tests/dictionary/test_100_registration_records.cpp` compares it against at every
+  sweep key. `OffsetTable::group()` calls it once per read: step 3 reads `registered`; step 5, the extent
   walk's same-context membership tests and `group_slices_status()`'s delimiter read the definition when it is known,
   else the membership and delimiter callbacks (a test seam's stubs name no definition). A nested group the walk
   descends into is resolved once at its own level. The type replaces `group_registered_fn_t = bool (*)(…)` in place,
