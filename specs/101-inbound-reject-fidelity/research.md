@@ -59,7 +59,8 @@ QuickFIX C++ behaviour this feature is judged against (read at the commit above)
 - `table_view` gains `tag_defined(std::uint16_t) const noexcept`, backed by a **sorted `std::vector<std::uint16_t>` read
   by binary search**. The lookup is cold (D2 calls it only after `valid_tags.contains` has already failed), so the
   smaller store wins over a word vector on FIX Latest and on high-tag overlays. A fixed tag-space bitset is rejected for
-  the reason the existing per-tag stores' comment gives.
+  the reason the existing per-tag stores' comment gives (as the stored form; *Updated (101 T067):* the build is done in
+  one, released by the seal).
 - **Dictionary-built tables:** `Dictionary::build_table_view` fills the store from the merged field store: the
   handle's field list after any 098 overlay merge, i.e. the QuickFIX-XML `<fields>` set or Orchestra's fields. Every
   `as_table_view` form (session, FIXT route, route plus `extra`) goes through that function, so none is missed.
@@ -89,14 +90,14 @@ QuickFIX C++ behaviour this feature is judged against (read at the commit above)
   operation added later too: the comment at `mark_defined` states it as a procedure (every population operation that
   names a tag calls this; re-derive the set by listing the private mutators `table_view_builder` forwards to), and the
   census, re-run at T068, finds an operation that does not call it.
-- The store is sealed (sorted, deduplicated) once, when the table is finished; no per-message cost.
+- The store is sealed (sorted, deduplicated) once, when the table is finished; no per-message cost. *Updated (101 T067):* `mark_defined` sets a bit in a build-time bitset, one bit per value of the store's tag type, which `table_view_builder` sizes before the first population operation; `build() &&` writes the set tags in ascending order at exact size and releases the bitset, so the stored and copied form is still the sorted vector.
 
 **Rationale:** "Defined" in QuickFIX is the dictionary's field list (`checkValidTagNumber` → `m_fields`), not message
 reach. A hand-built table answers "defined" for every tag it was told anything about, so a test table that gives a tag a
 type cannot answer 373=0 for it.
 
 **Alternatives:** `field_type_of` (cannot tell unknown from String); query `Dictionary` at validate time (the validator
-holds a `table_view`, not a `Dictionary`); a fixed tag-space bitset (footprint, copied per validator).
+holds a `table_view`, not a `Dictionary`); a fixed tag-space bitset (footprint, copied per validator) as the stored form.
 
 ### D2 — Validator: an undefined MsgType, then an undefined tag (FR-001, FR-002)
 
@@ -579,7 +580,8 @@ it is a follow-up issue (quickstart), not part of this feature.
 - **Binaries:** `scan_frame_header_bench`, `on_inbound_frame_bench` **and** `validator_bench`. `validator_bench`'s CI
   pairing is supplementary only (Article VIII §2: a green sentinel is not evidence of +5% compliance).
 - **Table-view build and copy (Gate A round 2).** D1 adds work to exactly what `table_view_footprint_bench`'s existing
-  timed rows measure: `Dictionary::build_table_view` populates, sorts and deduplicates the new store, and every
+  timed rows measure: `Dictionary::build_table_view` populates the new store (*Updated (101 T067):* a build-time bitset, then one ascending
+  write at exact size), and every
   `table_view` copy copies it. So its `BM_TableView_Build*` and `BM_TableView_Copy*` rows (list them with
   `--benchmark_list_tests`) join the same local A-B-A-B min-per-tree run, with the same +5% rule and the same Article
   VIII §2 approval fallback. `bench/ci-suite.txt` keeps the binary's `none:…` comparand and its `no` pairing: making

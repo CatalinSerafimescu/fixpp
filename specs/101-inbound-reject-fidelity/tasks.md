@@ -235,8 +235,8 @@ MVP: US1 and US2 at the end of Phase 4 (373=11 and 373=0 with QuickFIX's text). 
 | W101-11 | US2 sc2; FR-002, FR-003; SC-002 (14c); its overlay cell (a field no message names) | `session_101_tests` :: `Reject101Tag` | RED; overlay cell written at the Phase 3-4 rulings | M101-10 (overlay cell) |
 | W101-12 | US2 sc3; FR-003 | `session_101_tests` :: `Reject101Tag` | RED | M101-17a to M101-17c |
 | W101-13 | US2 sc4; FR-002 | `session_101_tests` :: `Reject101Tag` | RED | M101-14 |
-| W101-14 | US2 sc5; FR-002 (D1 population) | `wire_dict_tests` :: `Validator101Reasons` | op cells GREEN; no-op tag RED | M101-9a to M101-9l |
-| W101-15 | FR-002 (D1 store) | `dictionary_pure_tests` :: `TagDefined101` | written at T029 | M101-9, M101-10, M101-12 |
+| W101-14 | US2 sc5; FR-002 (D1 population) | `wire_dict_tests` :: `Validator101Reasons` | op cells GREEN; no-op tag RED | M101-9a to M101-9l, M101-46 |
+| W101-15 | FR-002 (D1 store) | `dictionary_pure_tests` :: `TagDefined101` | written at T029 | M101-9, M101-10, M101-12, M101-46 |
 | W101-16 | SC-002 (both 14a undefined-tag steps, 14c) | `session_101_tests` :: `Reject101Tag` | RED | M101-14 |
 | W101-17 | FR-001, FR-002 (W-014) | `wire_pure_tests` :: conformance CSV | written at T033 | M101-11, M101-14 |
 | W101-20 | US3 sc1; FR-006 | `session_101_tests` :: `OneMsgType101` | RED | M101-43 (after D4 both the conflict term and `interpret_logon`'s first 35 refuse `D…A`, so no single-change row changes its ending) |
@@ -284,7 +284,7 @@ Origin **D9** = research D9 names it; **tasks** = added here, one per production
 | M101-9a to M101-9l | D9 | drop `mark_defined` from one population-op class of D1's census (one row each: a `add_valid(_tag)`; b `add_required(_tag)`; c `set_field_type`/`set_type`; d `add_enum`; e `set_multi_value`; f `add_group_member`, `add_group_required_member`, `set_group_first`; g their `_ctx` forms; h `add_header_tag`; i `add_fixt_framing_tag`; j `set_length_pair_data_tag`'s Length tag; k its Data tag; l T030's builder forwarder) | W101-14's cell for that class: 0, not 2; W101-15. Row i (`add_fixt_framing_tag`): W101-15 only (orchestrator ruling S3): Step 1(a) passes a FIXT framing tag on any message, so no W101-14 cell can show that operation's definition |
 | M101-10 | D9 | `Dictionary::build_table_view` does not fill the store | W101-11's overlay cell `Reject101Tag.W101_11_OverlayFieldInNoMessage_Reason2`: 0, not 2; W101-15 |
 | M101-11 | D9 | drop the `valid_` insert from `add_required_tag` only | W101-7 required-only; W-014 `conforming-heartbeat-*` rows |
-| M101-12 | tasks | the store is not sorted or deduplicated at `build() &&` | W101-15 descending-population cell |
+| M101-12 | tasks (re-targeted at T067: the seal no longer sorts) | the seal writes the store in descending order (`std::ranges::reverse` before the store is set) | W101-15 descending-population cell |
 | M101-13 | tasks | the MsgType check removed (Step 1 runs on the empty view) | W101-1, W101-2, W101-4, W101-5, W101-6 |
 | M101-14 | tasks | the tag split collapsed to `wire_unexpected_tag` | W101-10, W101-13, W101-16 |
 | M101-15a | tasks | `wire_invalid_msg_type`'s case removed from `wire_error_to_session_reject_reason` (default 3) | W101-1 |
@@ -319,7 +319,8 @@ Origin **D9** = research D9 names it; **tasks** = added here, one per production
 | M101-40 | D9 (owner ruling 2026-11-07) | inside the D5 walk, fields read while `past_stop` is false use `dict_hooks::for_table_view(s_table)` (S's hooks: `session_hooks` returns exactly that for a non-null table), the route's after (Gate A's superseded rule) | W101-29 (d): (Session) 13, not 14; (unit fallback) an in-header 35 reported and no past-header 35 |
 | M101-41 | tasks | `refuse_active_frame_`'s default clause (a walk that reports no later 35) answers 13 | W101-51: 13, not 14 |
 | M101-44 | tasks (orchestrator ruling on the Phase 5-6 report) | the helper builds every reply in the slot (step 1 skipped) | W101-49 `EchoSiteBoundary101.*AtTheSiteBuffer_BuiltInPlace`: slot used |
-| M101-45 | tasks (orchestrator ruling on the T054 finding) | `seal_defined_tags()` without its `shrink_to_fit()` | W101-52 `TagDefined101.SealReleasesExcessCapacity_*`: capacity ≠ size on each of the three |
+| M101-45 | tasks (orchestrator ruling on the T054 finding; re-targeted at T067: the seal no longer shrinks) | the seal reserves one more than the set bits' count | W101-52 `TagDefined101.SealReleasesExcessCapacity_*`: capacity ≠ size on each of the three |
+| M101-46 | tasks (orchestrator ruling on T067) | the seal skips every set bit at index 34 of its word (the bit `kTag` 6050 sits at) | W101-14 `Validator101OpClass.W101_14_DefinesItsTag_Reason2/*`: 0, not 2; W101-15 `TagDefined101Op.TheOperationDefinesItsTag/*` |
 | M101-34a to M101-34e | tasks | one census site builds without the helper (each `emit_session_reject_` overload; `inbound_reject_leaf_`; `inbound_reject_best_effort_leaf_`; `inbound_business_reject_leaf_`) | that site's overflow cell in W101-40 or W101-41 (the best-effort leaf's unit cell, written at T047) |
 
 ## Census manifest
