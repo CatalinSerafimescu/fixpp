@@ -91,14 +91,9 @@ static const std::unordered_map<std::uint32_t, std::string_view>& get_registry()
              .fmt = "inbound frame over the limit closed the session: kind={} limit={}"},
             // 101-inbound-reject-fidelity (research D7, FR-007): Session::note_reply_over_ceiling_.
             {.id = static_cast<std::uint32_t>(
-                 crc32_str("inbound reply over the outbound ceiling not sent: msg_type=3 "
+                 crc32_str("inbound reply over the outbound ceiling not sent: msg_type={} "
                            "ref_msg_type_len={} suppressed={}")),
-             .fmt = "inbound reply over the outbound ceiling not sent: msg_type=3 "
-                    "ref_msg_type_len={} suppressed={}"},
-            {.id = static_cast<std::uint32_t>(
-                 crc32_str("inbound reply over the outbound ceiling not sent: msg_type=j "
-                           "ref_msg_type_len={} suppressed={}")),
-             .fmt = "inbound reply over the outbound ceiling not sent: msg_type=j "
+             .fmt = "inbound reply over the outbound ceiling not sent: msg_type={} "
                     "ref_msg_type_len={} suppressed={}"},
             // 099 (research R-2, FR-004): the role loops' failed open(), in engine.cpp.
             {.id = static_cast<std::uint32_t>(

@@ -2782,17 +2782,10 @@ void Session::note_reply_over_ceiling_(bool business_reject,
     }
     auto const len = fixpp::log::ArgValue::from_u64(ref_msg_type_len);
     auto const suppressed = fixpp::log::ArgValue::from_u64(*unlogged);
-    if (business_reject) {
-        FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
-                   "inbound reply over the outbound ceiling not sent: msg_type=j "
-                   "ref_msg_type_len={} suppressed={}",
-                   len, suppressed);
-    } else {
-        FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
-                   "inbound reply over the outbound ceiling not sent: msg_type=3 "
-                   "ref_msg_type_len={} suppressed={}",
-                   len, suppressed);
-    }
+    FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
+               "inbound reply over the outbound ceiling not sent: msg_type={} "
+               "ref_msg_type_len={} suppressed={}",
+               business_reject ? FIXPP_SLIT("j") : FIXPP_SLIT("3"), len, suppressed);
 }
 
 // 070-fix44-closeout S-029 — refuse an inbound Logon on a 464 posture mismatch (or

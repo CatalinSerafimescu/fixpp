@@ -605,14 +605,12 @@ inline std::string long_msg_type(std::size_t n) {
 
 // ── The outbound-ceiling record (research D7, "Outbound-ceiling ending") ─────────────────
 //
-// Spelled here independently of the format registry. One format per message type not sent; its
-// integer arguments are the inbound MsgType's length and the count of such messages suppressed
-// since the previous record, in that order. The record never carries the MsgType's bytes.
-inline constexpr char kCeilingRecordReject[] =
-    "inbound reply over the outbound ceiling not sent: msg_type=3 ref_msg_type_len={} "
-    "suppressed={}";
-inline constexpr char kCeilingRecordBmr[] =
-    "inbound reply over the outbound ceiling not sent: msg_type=j ref_msg_type_len={} "
+// Spelled here independently of the format registry. One format; its arguments are the
+// message type not sent (a static string, "3" or "j"), the inbound MsgType's length and the
+// count of such messages suppressed since the previous record, in that order. The record never
+// carries the MsgType's bytes.
+inline constexpr char kCeilingRecord[] =
+    "inbound reply over the outbound ceiling not sent: msg_type={} ref_msg_type_len={} "
     "suppressed={}";
 
 struct CeilingRecord {
@@ -620,18 +618,23 @@ struct CeilingRecord {
     std::uint64_t suppressed = 0;
 };
 
-// The ceiling records of one format the logger captured. Shuts the logger down: read once, at
-// the end of a cell.
+// The ceiling records the logger captured for the message type `msg_type` not sent ("3" or
+// "j", compared by content). Shuts the logger down: read once, at the end of a cell.
 inline std::vector<CeilingRecord> ceiling_records(fixpp::test_support::LogCapture& log,
-                                                  std::uint32_t format_id) {
+                                                  std::string_view msg_type) {
     std::vector<CeilingRecord> out;
-    for (auto const& rec : log.records_of(format_id)) {
-        CeilingRecord c;
-        if (rec.arg_count >= 1 && rec.args[0].kind == fixpp::log::ArgValue::Kind::u64) {
-            c.ref_msg_type_len = rec.args[0].u64;
+    for (auto const& rec : log.records_of(FIXPP_FORMAT_ID(kCeilingRecord))) {
+        if (rec.arg_count < 1 || rec.args[0].kind != fixpp::log::ArgValue::Kind::static_str ||
+            rec.args[0].static_ptr == nullptr ||
+            std::string_view{rec.args[0].static_ptr} != msg_type) {
+            continue;
         }
+        CeilingRecord c;
         if (rec.arg_count >= 2 && rec.args[1].kind == fixpp::log::ArgValue::Kind::u64) {
-            c.suppressed = rec.args[1].u64;
+            c.ref_msg_type_len = rec.args[1].u64;
+        }
+        if (rec.arg_count >= 3 && rec.args[2].kind == fixpp::log::ArgValue::Kind::u64) {
+            c.suppressed = rec.args[2].u64;
         }
         out.push_back(c);
     }

@@ -282,7 +282,7 @@ TEST(Echo101, W101_41_Bmr_OverCeiling_NotSent_OneRecord_RateBounded) {
     ASSERT_TRUE(past_record_window(*b.rig)) << "the clock's move changed the session's state";
     const Ending101 third = b.rig->deliver(b.rig->frame(mt, 4));
     EXPECT_TRUE(third.of_type("j").empty()) << describe(third);
-    const auto recs = ceiling_records(*b.log, FIXPP_FORMAT_ID(kCeilingRecordBmr));
+    const auto recs = ceiling_records(*b.log, "j");
     ASSERT_EQ(recs.size(), 2U) << "one record per window";
     EXPECT_EQ(recs[0].ref_msg_type_len, mt.size());
     EXPECT_EQ(recs[0].suppressed, 0U);
@@ -381,7 +381,7 @@ TEST(Echo101, W101_40iv_RejectOverCeilingWithout372_NotSent_OneRecord) {
         (void)rig->deliver(logon_without_52(*rig));
         expected_records = 2;
     }
-    const auto recs = ceiling_records(*log, FIXPP_FORMAT_ID(kCeilingRecordReject));
+    const auto recs = ceiling_records(*log, "3");
     ASSERT_EQ(recs.size(), expected_records);
     EXPECT_EQ(recs[0].ref_msg_type_len, 1U) << "the inbound MsgType's length";
     EXPECT_EQ(recs[0].suppressed, 0U);
