@@ -29,6 +29,8 @@ refs:
   - specs/057-behavioral-reify-unblock/contracts/reify-dispatch-bridge.md
   - specs/099-fixt-appl-version-validation/research.md
   - specs/099-fixt-appl-version-validation/data-model.md
+  - specs/101-inbound-reject-fidelity/research.md
+  - specs/101-inbound-reject-fidelity/data-model.md
   - spec/behaviors-and-limitations.md
   - dictionaries/README.md
   - docs/src/dictionary/codegen.md
@@ -442,3 +444,11 @@ Records that describe the older design are flagged here and not rewritten. Each 
 - ⚠️ **Superseded by 099:** `specs/003-dictionary-codegen/contracts/reify.hpp`'s resolution order, and `specs/003-dictionary-codegen/contracts/version_registry.hpp` where it has no `transport()`. `include/fixpp/dict/reify.hpp` and `include/fixpp/dict/version_registry.hpp` name 099 in their header comments.
 - `.specify/2c-codegen.md` carries in-place `Updated (099-fixt-appl-version-validation)` notes at §4.3, §4.6, §4.9 and §5; `.specify/2b-wire.md` at §6.5. The text before each note is history.
 - ⚠️ **Retired by 099:** L-041-2 and L-097-1, in the closed B&L file. L-041-2's accept-only divergence stays live as `B-081-1`. `L-098-1` stays open, reworded.
+
+## A defined-tag store on `table_view` (101) — what was decided, and what was rejected
+
+Design: `specs/101-inbound-reject-fidelity/research.md` D1; the validator that reads it is on [`wire.md`](./wire.md); behaviour: B&L `B-101-1`, `B-101-14`. Verify against `include/fixpp/dict/table_view.hpp` (`tag_defined`, `mark_defined`, `seal_defined_tags`) and `Dictionary::build_table_view` in `src/dictionary/dictionary.cpp`.
+
+**DECIDED — "defined" is the dictionary's field list, not message reach**, as QuickFIX's `checkValidTagNumber` reads `m_fields`. `Dictionary::build_table_view` fills the store from `dict_metadata_handle::field_by_name_` (every QuickFIX-XML `<field number=…>` under `<fields>`, or every Orchestra `<fixr:field id=…>`, after any 098 overlay merge), through `table_view_builder::add_defined_tag`, never from `fields_`, the per-message runs. So a field declared and reached by no message answers 373=2, not 373=0, and so does one an overlay adds; every `as_table_view` form comes through that one function. **DECIDED — every population operation that names a tag calls `mark_defined`**, so a hand-built table defines every tag it was told anything about; the rule is stated at `mark_defined` as a procedure (list the private mutators `table_view_builder` forwards to). **DECIDED — a sorted `std::vector<std::uint16_t>`, binary-searched, sealed (sorted and deduplicated) once by `build() &&`**: the lookup is cold, and the store is copied with every validator's table.
+
+**REJECTED — `field_type_of`** (it cannot tell an unknown tag from a String field). **REJECTED — asking the `Dictionary` at validate time** (the validator holds a `table_view`, not a `Dictionary`). **REJECTED — a fixed tag-space bitset**: copied with every validator's table, it would cost every copy the whole tag space's words whatever the dictionary declares, the reason the per-tag stores' comment gives.

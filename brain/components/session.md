@@ -34,6 +34,10 @@ refs:
   - specs/099-fixt-appl-version-validation/research.md
   - specs/099-fixt-appl-version-validation/data-model.md
   - specs/099-fixt-appl-version-validation/contracts/surface.md
+  - specs/101-inbound-reject-fidelity/spec.md
+  - specs/101-inbound-reject-fidelity/research.md
+  - specs/101-inbound-reject-fidelity/data-model.md
+  - specs/101-inbound-reject-fidelity/contracts/reject-frames.md
   - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2d-threading.md
@@ -64,6 +68,8 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/098-dialect-overlay-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/099-fixt-appl-version-validation-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/099-fixt-appl-version-validation-evidence.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/101-inbound-reject-fidelity-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/101-inbound-reject-fidelity-evidence.md
 codegraph_entry: [Session, fsm_state, SeqnumManager, Engine, on_inbound_frame]
 constitution: ["§XI.4", "§XV.4"]
 ---
@@ -643,7 +649,7 @@ The design is `specs/099-fixt-appl-version-validation/`: research R-1, R-3, R-20
 - **`std::once_flag` or a mutex in `open()`** (R-3): a strand thread blocks inside a coroutine on another's walk. **Per-session tables** (R-3): sessions times dictionaries, the shape NFR-003 forbids.
 - **Composing two dictionaries into one `dict_hooks`** (R-20): `offset_table.hpp`'s nested cache keys on `dict_hooks::opaque_dict()`, a function of one dictionary pointer, and a clone or `reify` re-parses from the owner's table, so it would lose the second dictionary and split differently from the view. The overlay's header pair is registered into the route's table instead, before the seal.
 - **Selecting the table from the frame scan** (R-5): `scan_frame_header`'s hooks are chosen by the table, so a table-specific pair changes how it splits. **Peeking with `dict_hooks::none()`** (R-5, measured): a 1128 inside a header pair's Data is read as the header's.
-- **Leaving an application frame in an establishment arm to `interpret_logon`** (R-8, as that section first recommended): `interpret_logon` reads the last 35, so a frame `35=D … 35=A` with Logon fields would establish a validating session. Neither review caught it; a measurement did. A non-validating session still does this (`B-099-4`, fixpp#657).
+- **Leaving an application frame in an establishment arm to `interpret_logon`** (R-8, as that section first recommended): `interpret_logon` reads the last 35, so a frame `35=D … 35=A` with Logon fields would establish a validating session. Neither review caught it; a measurement did. A non-validating session still does this (`B-099-4`, fixpp#657). ⚠️ **Superseded by 101 (research D4, D6):** `interpret_logon` reads the first 35, and every session, validating or not, refuses a frame whose MsgTypes differ in an establishment arm (`B-099-3`, `B-101-8`). The rejection itself stands.
 - **A session lookup from `fromApp`** (R-10): blocking in C, and no handle. **Reading the table's version** (R-10): with validation off and no dictionary the table is the session dictionary's, which is not the resolved version. The answer is one byte on the view, `resolved_application_version()`.
 
 **Records this supersedes, flagged here and not edited** (frozen `specs/` are not rewritten; each is a point-in-time record).
@@ -658,7 +664,35 @@ The design is `specs/099-fixt-appl-version-validation/`: research R-1, R-3, R-20
 - `.specify/2b-wire.md`, `.specify/2c-codegen.md`, `.specify/2i-capi.md`, `.specify/api-contract.md` and `.specify/architecture.md` carry in-place `Updated (099-fixt-appl-version-validation)` or `Since 099` notes; the text before each note is history. Re-derive with `git grep -n '099-fixt-appl-version-validation' -- .specify`.
 - **Not superseded:** `specs/098-dialect-overlay/spec.md`'s rule that the session dictionary keeps its own version. 099 keeps it, and `L-098-1` now says how. `specs/081-strict-validation-residuals/`'s framing surface stands and is extended to FIX 4.x, and its accept-only divergence stays as `B-081-1`.
 
-**Decided elsewhere, left open by 099.** `interpret_logon` reading the last 35 without validation (fixpp#657); a non-FIXT validating session's MsgType split (fixpp#658, byte-identical here by SC-005); a misspelt `[dictionary]` sub-key (fixpp#659); a failed allocation inside `make_strand` while creating an engine (fixpp#660, `L-660-1`).
+**Decided elsewhere, left open by 099.** `interpret_logon` reading the last 35 without validation (fixpp#657); a non-FIXT validating session's MsgType split (fixpp#658, byte-identical here by SC-005) ⚠️ *(both since decided by 101, the next section)*; a misspelt `[dictionary]` sub-key (fixpp#659); a failed allocation inside `make_strand` while creating an engine (fixpp#660, `L-660-1`).
+
+## One MsgType per frame, QuickFIX's reject reasons, and a reply that is never lost to its echo (101)
+
+The design is `specs/101-inbound-reject-fidelity/`: research D4 to D7 decide the session half, contracts/reject-frames.md gives the endings, and the behaviour a user must know is B&L `B-101-1` to `B-101-15` with the amended `B-099-3`, `B-099-4`, `B-099-5`, `B-099-11` and `B-092-3`. Read `Session::refuse_active_frame_`, `Session::establishment_frame_refused_` and the two reply helpers in `src/session/session.cpp` rather than this page. The validator half is on [`wire.md`](./wire.md), the defined-tag store on [`dictionary.md`](./dictionary.md), the inbound-chain parts on [`inbound-message-path.md`](./inbound-message-path.md).
+
+**What was decided.**
+
+- **A frame's MsgType is its first 35, for every reader** (D4). `FrameHeader::msg_type` is the first 35 and `msg_type_conflict` records any later 35 with other bytes, sticky. The message view and the validator already read the first; the header scan, `interpret_logon` and LogoutSent's reply test were the readers that disagreed. Re-derive the readers with D4's recipe, `git grep -nE '\bmsg_type\b' -- src/session`.
+- **The repeat refusal runs on every validating session** (D5), with QuickFIX C++'s structure-before-iterate precedence: 14 when any later 35 lies past the header, else 13 when one lies in it, else 14. The 13/14 walk is its own walk, which does not stop at the header; `peek_fixt_route`'s walk and its stop are unchanged. The header is S's header ∪ the FIXT standard header set, and **every field is read with the selected route's hooks** (owner ruling 2026-11-07, option (b)), so the walk splits a frame exactly as the scan that set `msg_type_conflict` did.
+- **Validation off: refused in establishment, handled as the first 35 after** (D6). "Handled as" is a differential oracle, not a table: the ending equals that of the frame with every later 35 removed and re-framed.
+- **One owner of the RefMsgType echo, one rule for 372** (D7): verbatim up to `Session::kSendFrameBytes`. A reply that overflows its site's buffer is rebuilt, before any callback and before `assign_outbound`, in the session's inbound reply slot, a `kSendFrameBytes` member; above the ceiling a Reject goes without 372 and a BusinessMessageReject is not sent, with one rate-bounded record.
+- **The slot is the inbound chain's alone**, which is what lets it exist (#544 §2.2 rejected a scratch buffer shared with the strand's other chains). Its exclusivity rests on `on_inbound_frame`'s serialized-caller precondition, now stated in `session.hpp` and asserted in builds with assertions (`B-101-10`).
+
+**What was rejected, and why.**
+
+- **Keeping last-wins and moving the first-wins readers** (D4): it reverses the message view's index rule and 099's consume key.
+- **The repeat walk on S's hooks before the header's stop and the route's after** (Gate A round 2's rule, superseded by the owner ruling of 2026-11-07). On a custom S that pairs a non-standard Length on a standard-header tag its own `<header>` omits, the scan and the walk split the frame differently. **(a) widening `dict::header_length_pairs` to S's header union**: it changes 099's merge rule and closes only the direction that misfires. **(c) keeping the rule and disclosing the residual**: two readings of one frame.
+- **A dictionary-only header boundary on a non-FIXT session** (Gate A round 1, Codex 4, not applied): QuickFIX C++'s `isHeaderField` is its static list or the session dictionary, so the union is the closer model; the residual is `B-101-5`.
+- **Enlarging each site's own buffer** (D7): it grows every reply leaf's frame on the normal path past #544's recycler limit and leaves a threshold of its own. **A cold leaf coroutine owning a `kSendFrameBytes` buffer**: its frame is over asio's recycler limit, so a peer could make it allocate per message (`[const §XV.1]`); orchestrator ruling. **`send_frame_slot_`**: an in-flight `Session::send` may hold it. **A BMR without 372**: a validating peer Rejects it (373=1, 371=372). **Refusing the frame**: it sends nothing, which was the defect. **Keeping 092's bound for the disposer**: one field, two rules.
+
+**Records this supersedes, flagged here and not edited** (frozen `specs/` are not rewritten; research's Supersessions table is the full list and its recipe re-derives it).
+
+- ⚠️ **Superseded by 101:** `specs/099-fixt-appl-version-validation/spec.md`'s FR-025 ("whose last MsgType differs from its third field's", the 13/14 rule, the Limits sentences on LogoutSent and on non-validating and non-FIXT sessions keeping the split), FR-029's comparison and scope, the Clarifications on `interpret_logon` reading the last 35 and on LogoutSent, US3 scenarios 7 and 8, and the Edge Cases sentence on a non-FIXT validating session.
+- ⚠️ **Superseded by 101:** `specs/099-fixt-appl-version-validation/data-model.md` E-7's S1 and A1, its non-validating establishment paragraph, "A non-FIXT session leaves it false", "LogoutSent gains no step", and the decisive cells and `LO` row that follow from them; `contracts/surface.md`'s validation-off bullet and "A non-FIXT validating session keeps the … split"; `contracts/witnesses.md` W-6's "`D…A` with Logon fields establishes" and W-9's `D…5` cell.
+- ⚠️ **Superseded by 101:** `specs/092-garbled-frame-reject/research.md` R-5's RefMsgType bound (`kMaxShippedMsgTypeLength`, deleted) and its "cannot fail" premise, `spec.md` FR-003's omission sub-bullet, and `contracts/unparseable-frame-disposition.md`'s 372 bullet under "Reject contents".
+- **Not superseded:** 099's two-occurrence FIXT endings in LogonReceived and Active, its validating FIXT establishment disconnect, and every 1128 refusal.
+
+**Left open by 101.** Echoing 372 beyond the outbound ceiling, up to the inbound limit (fixpp#669, for the owner); a CompID length bound at `open()`, and `apply_inbound_sequence_reset`'s literal-372 Reject dropped unlogged when long CompIDs overflow its buffer (fixpp#670).
 
 ## Runtime flows
 

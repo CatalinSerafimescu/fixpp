@@ -27,6 +27,10 @@ refs:
   - specs/093-inbound-frame-dispositions/plan.md
   - specs/093-inbound-frame-dispositions/research.md
   - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
+  - specs/101-inbound-reject-fidelity/spec.md
+  - specs/101-inbound-reject-fidelity/research.md
+  - specs/101-inbound-reject-fidelity/data-model.md
+  - specs/101-inbound-reject-fidelity/contracts/reject-frames.md
   - spec/behaviors-and-limitations.md
   - tests/session/read_first_frame_bounded_test.cpp
   - tests/alloc_guard/test_544_run_thread_windows.cpp
@@ -38,6 +42,8 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-tasks.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-evidence.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/101-inbound-reject-fidelity-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/101-inbound-reject-fidelity-evidence.md
 codegraph_entry: [run_read_pump, Framer, on_inbound_frame, on_inbound_active_, make_session_strand, Session, scan_frame_header, dispose_unparseable_, inbound_framer_config, note_garbles_, read_first_frame_bounded]
 constitution: ["§VIII.5", "§XI.2"]
 ---
@@ -169,7 +175,8 @@ inbound frames end an established session. No symbol or code changes. The carrie
 - **Keying the Reject on "a 35 was seen"**, or making the whole scan first-wins. The first would
   Reject and advance a frame whose MsgType is not third, against ruling row 1. The second changed
   fault-free frames: a duplicate 34 went from delivered to too-low (research R-1). The scan records
-  the first 34 and the positional 35 in fault-only members instead.
+  the first 34 and the positional 35 in fault-only members instead. *(Still true since 101: D4 makes
+  `msg_type` alone first-wins, with `msg_type_conflict`; every other member stays last-wins.)*
 - **C-ABI witnesses for every BREAKING effect.** The T020 ruling relies on the C++ session cells for
   the effects without C-ABI cells, because the C observers read the session state through the thin
   `src/capi` layer. This follows 091's 1.9 precedent. Which effects have C-ABI cells is stated in
@@ -180,7 +187,11 @@ table, row 4 ("garbled … no Reject, no advance"). Row 1's "Ignore … Unchange
 disregard fixpp did not do until 093 shipped it (fixpp#514; `L-004-4` is now in the closed B&L
 file). 092's `spec.md`, contract C-2 (rows D-1/D-2 for a third field that is not 35, and D-8) and
 contract C-6's "a late parse can still fail" are point-in-time records of 092, superseded by 093's
-contract C-2 step 1 and C-3; they are not edited.
+contract C-2 step 1 and C-3; they are not edited. ⚠️ **Superseded by 101:** 092 contract C-3 **I-3**
+("the scan keeps last-wins for every existing member") and `data-model.md` **E-1**, for `msg_type`
+only (research D4; MsgSeqNum stays last-wins); research **R-5**'s RefMsgType bound, FR-003's
+omission sub-bullet and contract C-2's 372 bullet under "Reject contents" (research D7; the disposer
+passes `fault_ref_msg_type` verbatim and `kMaxShippedMsgTypeLength` is deleted).
 
 ## Garbled frames, one inbound limit, and a bounded establishment (093, fixpp#514, #515, #516)
 
@@ -260,6 +271,15 @@ These are plan.md's ODs and research R-2 to R-4, R-9, open to review then and se
 overflows", which plan OD-23 makes unreachable in the pump (`L-093-1` has the re-derivation), and
 spec FR-013 says an over-L close is recorded "with an event and a log", which OD-24 narrowed to a
 log record.
+
+## One MsgType per frame and the inbound reply slot (101, fixpp#646, #657, #658)
+
+The session half is on [`session`](./session.md); this section keeps what the inbound chain carries. Design: `specs/101-inbound-reject-fidelity/` research D4 and D7; behaviour: B&L `B-101-2`, `B-101-9`, `B-101-10`.
+
+- **Every arm reads one MsgType** (D4). `scan_frame_header` keeps the first 35 and sets `msg_type_conflict`; the arms test the flag ahead of the validate gate (`establishment_frame_refused_` in NotConnected and LogonSent, `refuse_active_frame_` in LogonReceived and Active), and in every arm the 092 fault branch runs first, so a frame that is both faulty and conflicting is the disposer's. A Disconnected frame is drained without a scan, so nothing reads its MsgType.
+- **An overflowed reply is rebuilt in a per-Session slot, on the inbound chain only** (D7). Every inbound-fed Reject and BusinessMessageReject builder goes through one helper; the census recipe is `git grep -nE 'build_reject(_with_text)?\(|build_business_message_reject\(' -- src/session`, every hit outside `admin_messages.cpp` either the helper or a literal-372 site. The slot is held from the rebuild until the site's tail returns, after `store_then_emit`, and released by an RAII holder on every exit, a close that destroys the coroutine frame included.
+- **Why nothing else can take the slot.** Within a frame the reply sites run one after another; a callback cannot begin an inbound frame (`FIXPP_ASSERT_NO_CALLBACK_AT_PARSE_SITE`); across frames the next `on_inbound_frame` begins only after the current one returns, the serialized-caller precondition the Engine's read pump meets by construction; and the slot is per Session, so sessions sharing a strand never share one. A violation asserts in builds with assertions (`FIXPP_ASSERT_INBOUND_REPLY_SLOT_FREE`); a release build does not catch it (`B-101-10`).
+- **Rejected:** a coroutine-owned buffer per overflowed reply (a peer-repeatable allocation on the inbound path, `[const §XV.1]`), `send_frame_slot_` (a send may hold it), and one buffer shared with the strand's other chains (#544 §2.2). [`session`](./session.md) has the rest of D7's list.
 
 ## A timestamp the time type cannot hold (fixpp#509)
 
