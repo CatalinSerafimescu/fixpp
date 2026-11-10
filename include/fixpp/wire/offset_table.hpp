@@ -172,7 +172,8 @@ public:
     // wire-derived split; what is gone is doing it by omission. See C-8.4 and
     // `group_slices_status()`.
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
-                std::pmr::memory_resource* mr [[clang::lifetimebound]], dict_hooks hooks) noexcept;
+                std::pmr::memory_resource* mr [[clang::lifetimebound]],
+                dict_hooks const& hooks) noexcept;
 
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]], Config cfg) noexcept;
@@ -180,7 +181,7 @@ public:
     // 384 / fixpp#426: same no-default rule as the sibling ctor above.
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]], Config cfg,
-                dict_hooks hooks) noexcept;
+                dict_hooks const& hooks) noexcept;
 
     // 093-inbound-frame-dispositions (data-model E-3): as above, and the entries are
     // reserved once, up front, for `reserve_entries` fields (at most
@@ -190,7 +191,7 @@ public:
     // the build (build_status() = out_of_memory).
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]], Config cfg,
-                dict_hooks hooks, std::size_t reserve_entries) noexcept;
+                dict_hooks const& hooks, std::size_t reserve_entries) noexcept;
 
     // Non-RED build status (ok, or the wire_* cap/format error hit).
     [[nodiscard]] core::expected_t<void> build_status() const noexcept { return status_; }
