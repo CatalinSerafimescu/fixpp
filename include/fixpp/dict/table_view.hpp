@@ -354,8 +354,7 @@ public:
     // set-membership test instead of re-hashing the loop-invariant msg_type
     // on every field. An unknown msg_type yields a view whose `found()` is
     // false and whose `contains()` is false for every tag, as field_valid_for
-    // is; the validator refuses such a MsgType before its field walk reads the
-    // view (101 D2, wire_invalid_msg_type). The view aliases
+    // is (101 D2: the validator's algorithm list). The view aliases
     // storage owned by this table_view (stable for its lifetime; the map is
     // immutable after construction).
     [[nodiscard]] valid_tag_set_view valid_tags_for(std::string_view msg_type) const noexcept {
