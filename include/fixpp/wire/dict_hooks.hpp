@@ -145,8 +145,7 @@ private:
 
     constexpr dict_hooks(void const* opaque_dict, classify_fn_t classify,
                          group_member_fn_t group_member, group_delim_fn_t group_delim,
-                         length_pair_fn_t length_pair,
-                         group_resolve_fn_t group_resolve) noexcept
+                         length_pair_fn_t length_pair, group_resolve_fn_t group_resolve) noexcept
         : opaque_dict_{opaque_dict},
           classify_{classify},
           group_member_{group_member},

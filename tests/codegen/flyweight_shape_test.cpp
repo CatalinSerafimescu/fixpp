@@ -12,6 +12,7 @@
 // reify suites once Reify.hpp is generated — not here.
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <fixpp/v42/Messages.hpp>
 #include <fixpp/v44/Messages.hpp>
 #include <fixpp/v50sp2/Messages.hpp>
@@ -19,8 +20,6 @@
 #include <fixpp/wire/group_view.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
 #include <fixpp/wire/parser.hpp>
-
-#include <cstddef>
 #include <span>
 #include <string>
 #include <type_traits>
@@ -94,8 +93,8 @@ static_assert(!std::is_constructible_v<FieldIt, std::span<std::byte const>, std:
                                        fixpp::wire::dict_hooks>);
 static_assert(std::is_constructible_v<IterMV, fixpp::wire::frame_view const&,
                                       fixpp::wire::dict_hooks const*>);
-static_assert(!std::is_constructible_v<IterMV, fixpp::wire::frame_view const&,
-                                       fixpp::wire::dict_hooks>);
+static_assert(
+    !std::is_constructible_v<IterMV, fixpp::wire::frame_view const&, fixpp::wire::dict_hooks>);
 
 TEST(CodegenFlyweightShape, IterViewHoldsTheParsersBundleNotACopy) {
     fixpp::dict::table_view const tv{};

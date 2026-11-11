@@ -441,9 +441,8 @@ std::size_t OffsetTable::consume_group_extent(std::size_t count_idx, group_conte
     return consume_group_extent(count_idx, ctx, dict_hooks::group_resolution{}, depth, overflow);
 }
 
-bool OffsetTable::is_group_member(dict_hooks::group_resolution const& def,
-                                  group_context const& ctx, std::uint16_t no_tag,
-                                  std::uint16_t tag) const noexcept {
+bool OffsetTable::is_group_member(dict_hooks::group_resolution const& def, group_context const& ctx,
+                                  std::uint16_t no_tag, std::uint16_t tag) const noexcept {
     if (def.definition_known) {
         return std::ranges::find(def.members, tag) != def.members.end();
     }

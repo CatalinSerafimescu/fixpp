@@ -372,8 +372,7 @@ void expect_wire_definition(fixpp::wire::dict_hooks const& h, std::string_view m
 // T071 fix (one lookup per read): the resolver `for_table_view` installs answers what the
 // three lookups it replaces answer at the same key: `group_registered`,
 // `wire_group_first_field` and `wire_group_member_tags`, and it names the definition.
-void expect_resolve_is_the_three_lookups(table_view const& tv,
-                                         fixpp::wire::dict_hooks const& hooks,
+void expect_resolve_is_the_three_lookups(table_view const& tv, fixpp::wire::dict_hooks const& hooks,
                                          std::string_view mt, path_t const& path, tag_t no_tag,
                                          std::string const& what, std::size_t& mismatches) {
     auto const r = hooks.group_resolve_fn()(hooks.opaque_dict(), ctx_of(mt, path), no_tag);
@@ -384,8 +383,7 @@ void expect_resolve_is_the_three_lookups(table_view const& tv,
     if (!same && ++mismatches <= 5) {
         ADD_FAILURE() << what << ": the resolver answers registered=" << r.registered
                       << " delimiter=" << r.delimiter << " members=" << r.members.size()
-                      << " known=" << r.definition_known
-                      << "; the three lookups answer registered="
+                      << " known=" << r.definition_known << "; the three lookups answer registered="
                       << tv.group_registered(mt, path, no_tag)
                       << " delimiter=" << tv.wire_group_first_field(mt, path, no_tag)
                       << " members=" << members.size();
