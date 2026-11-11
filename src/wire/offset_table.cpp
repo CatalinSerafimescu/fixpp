@@ -135,7 +135,7 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr)
 }
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
-                         dict_hooks const& hooks) noexcept
+                         dict_hooks hooks) noexcept
     :
 #ifndef NDEBUG
       gen_{frame.token()},
@@ -165,11 +165,11 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
 }
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr, Config cfg,
-                         dict_hooks const& hooks) noexcept
+                         dict_hooks hooks) noexcept
     : OffsetTable(frame, mr, cfg, hooks, 0) {}
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr, Config cfg,
-                         dict_hooks const& hooks, std::size_t reserve_entries) noexcept
+                         dict_hooks hooks, std::size_t reserve_entries) noexcept
     :
 #ifndef NDEBUG
       gen_{frame.token()},

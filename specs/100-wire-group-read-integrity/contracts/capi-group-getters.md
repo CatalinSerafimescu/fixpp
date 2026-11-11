@@ -144,9 +144,6 @@ Changes a typed caller sees, each recorded in a B&L row (tasks T057):
   constructor take `dict_hooks const*` in place of a `dict_hooks` by value, and hold that pointer, so the bundle must
   outlive the iterator or the view (a `parse_iter()` view points at its parser's bundle). Migration: pass `&hooks`, or
   `nullptr` for `dict_hooks::none()`.
-- C++ signature change, source compatible (B-100-8): the `OffsetTable` constructors take `dict_hooks const&` in
-  place of a `dict_hooks` by value; the table still copies the bundle, so the argument need not outlive it. Migration:
-  none for callers.
 
 ## Parse
 
