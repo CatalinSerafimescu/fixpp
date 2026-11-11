@@ -12,6 +12,8 @@ refs:
   - src/capi/fixpp_capi.map
   - src/capi/message_write.cpp
   - src/capi/config.cpp
+  - include/fix/c_api/message.h
+  - src/capi/message_read.cpp
   - .specify/2i-capi.md
   - .specify/447-458-452-capi-refusals.md
   - .specify/536-537-538-recovery-liveness.md
@@ -29,6 +31,8 @@ refs:
   - specs/099-fixt-appl-version-validation/contracts/surface.md
   - specs/099-fixt-appl-version-validation/data-model.md
   - specs/099-fixt-appl-version-validation/research.md
+  - specs/100-wire-group-read-integrity/contracts/capi-group-getters.md
+  - specs/100-wire-group-read-integrity/research.md
   - spec/behaviors-and-limitations.md
   - tests/capi/recovery_liveness_capi_witness_test.cpp
   - tools/check_layers.py
@@ -44,6 +48,7 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/099-fixt-appl-version-validation-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/100-wire-group-read-integrity-gatea.md
 codegraph_entry: [fixpp_engine_t, fixpp_session_t, fixpp_msg_t, fixpp_strerror]
 constitution: ["§V.1", "§IV.2", "§X.1", "§X.4"]
 ---
@@ -389,6 +394,41 @@ One MINOR bump, declared BREAKING (`[const §X.7]`; no public release yet, so MI
 - **Gate files.** Derive them as 098 did, with `git grep -l -e 'include/fix/c_api' -- tools .github/workflows ci tests/abi`.
 
 Re-derive: `grep -n '1\.14' include/fix/c_api/*.h`.
+
+## C-ABI 1.15: the two group getters answer by one ordered table (100, fixpp#647, #644, #541)
+
+One MINOR bump, declared BREAKING (`[const §X.7]`), with no symbol and no error code added. The
+user-facing row is B&L `B-100-1`; the contract is
+`specs/100-wire-group-read-integrity/contracts/capi-group-getters.md`, whose table `message.h`'s
+CA-010 block carries. What follows is the half the headers do not state.
+
+- **One ordered table for both getters** (research D4): argument errors; absent → `TAG_NOT_FOUND`; a
+  present, registered tag whose read could not complete → `WIRE_LIMIT_EXCEEDED`; present and not a
+  group → `TYPE_MISMATCH`; registered with zero instances → `OK`/0 with a null cursor; n ≥ 1 → a
+  cursor. It holds for both because a failed read means a present, registered tag (research D11), so
+  the nested getter can test the status before its presence probe.
+- **One code for "could not complete"**: `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`, what the nested getter
+  already returned and what the wire limits already map to; the cursor shell's `bad_alloc` is caught
+  and returns it too, so no exception leaves either getter (`.specify/2i-capi.md` §5.2's 1.15
+  amendment narrows the steady-state abort for these two only). **Rejected** (research D4
+  "Alternatives"): an out-of-memory style code (the arena is a fixed per-message bound, not process
+  memory, and the nested getter's shipped answer would change); separate tables per getter with
+  "exhausted and absent nested is `WIRE_LIMIT_EXCEEDED`" (an ending 073 FR-007 forbids, and one that
+  depends on residual arena bytes).
+- **The session observers' 1.11 clause** ("a frame the session admits always parses for dispatch")
+  is amended in place, marked 1.15, for a frame crafted against the index seed; that clause is
+  witnessed through the C++ session only (`B-100-1`).
+- ⚠️ **Superseded by 100 (`100-wire-group-read-integrity`):** the getter codes in
+  `specs/051-c-abi-message-accessors/contracts/message-read.md` and that bundle's `spec.md`,
+  `research.md`, `quickstart.md` and `tasks.md`, in
+  `specs/065-cabi-nested-group-membership/contracts/cabi-nested-read.md` and that bundle, and in
+  `specs/073-nested-read-arena-failloud/contracts/nested_slices_result.md`; frozen and not edited.
+  Re-derive with `git grep -l -e 'fixpp_msg_get_group' -e 'fixpp_group_get_nested_group' -- 'specs/0*'`.
+  `include/fix/c_api/message.h` is current; `.specify/2i-capi.md` §4.8, §5.2, §5.4 and §6.2 carry
+  in-place 1.15 notes, so they are not flagged.
+- Retired by 100: `L-093-17` (the cursor shells' missing catch), in the closed B&L file.
+
+Re-derive: `grep -n '1\.15' include/fix/c_api/*.h`.
 
 ## ⚠️ What the ABI gate actually checks — and what it does not
 

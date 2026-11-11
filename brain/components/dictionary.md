@@ -13,6 +13,7 @@ refs:
   - include/fixpp/dict/version_registry.hpp
   - include/fixpp/dict/version_profile.hpp
   - include/fixpp/dict/dictionary.hpp
+  - include/fixpp/dict/table_view.hpp
   - .specify/2c-codegen.md
   - .specify/215-dictionary-view.md
   - .specify/495-493-486-dict-reify-copy.md
@@ -29,6 +30,8 @@ refs:
   - specs/057-behavioral-reify-unblock/contracts/reify-dispatch-bridge.md
   - specs/099-fixt-appl-version-validation/research.md
   - specs/099-fixt-appl-version-validation/data-model.md
+  - specs/100-wire-group-read-integrity/research.md
+  - specs/100-wire-group-read-integrity/plan.md
   - spec/behaviors-and-limitations.md
   - dictionaries/README.md
   - docs/src/dictionary/codegen.md
@@ -42,6 +45,7 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/097-fix-latest-applverid-10-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/098-dialect-overlay-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/099-fixt-appl-version-validation-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/100-wire-group-read-integrity-gatea.md
 codegraph_entry: [Dictionary, xml_loader, orchestra_loader, field_traits, version_registry, table_view_builder]
 constitution: ["§I.1"]
 ---
@@ -337,7 +341,9 @@ direct C++ caller. The C-ABI twin is `fixpp_msg_clone`; see [`c-api.md`](./c-api
   with `git grep -n -i 'heap pimpl' -- specs/057-behavioral-reify-unblock`.
 - ⚠️ **Open residuals:** `L-458-1` covers a dict-backed build that under-indexes near the probe cap
   while reporting success; `L-495-1` the borrowed-route copy. Check the live B&L file before
-  treating either as open.
+  treating either as open. ⚠️ **Superseded by 100 (`100-wire-group-read-integrity`) for `L-458-1`:**
+  the index build has a per-build probe budget and fails over it, and `L-458-1` is in the closed B&L
+  file (`B-100-2`); see [`wire.md`](./wire.md).
 
 > ⚠️ **Before you write "immutable" about a `table_view`, read that banner.** #456 took three Gate B
 > rounds and found **zero** code defects across all three; every finding was prose claiming more than
@@ -442,3 +448,37 @@ Records that describe the older design are flagged here and not rewritten. Each 
 - ⚠️ **Superseded by 099:** `specs/003-dictionary-codegen/contracts/reify.hpp`'s resolution order, and `specs/003-dictionary-codegen/contracts/version_registry.hpp` where it has no `transport()`. `include/fixpp/dict/reify.hpp` and `include/fixpp/dict/version_registry.hpp` name 099 in their header comments.
 - `.specify/2c-codegen.md` carries in-place `Updated (099-fixt-appl-version-validation)` notes at §4.3, §4.6, §4.9 and §5; `.specify/2b-wire.md` at §6.5. The text before each note is history.
 - ⚠️ **Retired by 099:** L-041-2 and L-097-1, in the closed B&L file. L-041-2's accept-only divergence stays live as `B-081-1`. `L-098-1` stays open, reworded.
+
+## Group registration in a context (100) — what this family gained, and what was rejected
+
+`100-wire-group-read-integrity` (research D2, the one statement of the predicate) makes a group read
+answer by whether the dictionary registers the count tag in the read's context. Verify against
+`include/fixpp/dict/table_view.hpp` (`group_registered`, `wire_group_member_tags`,
+`wire_group_first_field`), `src/dictionary/dictionary.cpp` (`build_table_view`) and both loaders'
+`collect_section_groups`.
+
+**DECIDED — one context-exact predicate, asked before anything else.** `table_view::group_registered`
+holds for `(msg_type, parent_path, no_tag)` when any of three arms holds: the context arm (a
+`group_ctx_` key, or a key of the arm-1 store, which `build_table_view` fills from the loaders'
+per-occurrence delimiter records so that a count tag reached at two parent paths is keyed at both);
+the section arm (a section record for `(parent_path, no_tag)`, from the loaders' header and trailer
+walks, whatever the message type); the bare-only arm (no context key anywhere, and `group_bit` set).
+The wire reaches it through `dict_hooks`' registration callback. The count's value never decides it.
+
+**DECIDED — per-occurrence records.** Each arm-1 key and each section key carries its occurrence's
+delimiter and direct-member set, and the wire's membership and delimiter lambdas read `group_ctx_`,
+then the arm-1 record, then the section record, then the bare store. So a group whose occurrence the
+dictionary defines differently from its bare store's definition reads at its own definition
+(`B-100-4`). The records are written while the table is built and are read-only after.
+
+**REJECTED** (research D2 "Alternatives"): the delimiter oracle with its bare fallback (context-blind,
+so 802 at the root becomes a phantom group); `group_first_field_exact` alone, or exact registration
+with a fallback only when a table has no contextual records (makes 099's NoHops not a group on route
+tables); deciding by the value 0 (a scalar `0` becomes a phantom group, and the count parser reads
+`""`, `abc` and `-1` as 0). **REJECTED at Gate A round 2** (plan `### Round 2 — disagreements`):
+folding registration into `group_delim_fn`'s result to keep `sizeof(dict_hooks)` unchanged, because
+shipped fixtures pass a null delimiter callback with a membership callback and would flip.
+
+**Not fixed: custom dictionaries that define one count tag differently at one key** (`L-100-1`,
+fixpp#665; the validator's bare fallback is fixpp#666). The census scripts of research D2's recipe
+re-derive that shipped dictionaries reach none of them.

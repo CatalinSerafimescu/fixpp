@@ -12,9 +12,10 @@
 //   W-P2-1(b) — pending Length→Data state must be cleared when the immediately
 //               following field is not the paired Data tag (no stale carry).
 //   regression — a truthful RawDataLength (embedded SOH) still round-trips.
-//   W-P3-2   — a per-process mix() seed defeats a precomputed 128-collision set
-//               (present required field would otherwise read false-absent); the
-//               kMaxBuildProbe skip mechanism is exercised deterministically.
+//   W-P3-2   — a per-process mix() seed defeats a precomputed 128-collision set.
+//               Superseded in part by 100-wire-group-read-integrity (FR-008): under
+//               the matching seed a single-slot collision set stays within the
+//               per-build probe budget, so the build succeeds and the target is found.
 
 #include <gtest/gtest.h>
 
@@ -37,7 +38,8 @@
 #include <fixpp/wire/parser.hpp>
 
 #include "support/frame_view_factory.hpp"
-#include "support/wire_test_hooks.hpp"  // detail::set_overlay_seed_for_testing (W-P3-2)
+#include "support/probe_cluster_100.hpp"  // overlay_seed_guard (100 T009)
+#include "support/wire_test_hooks.hpp"    // detail::set_overlay_seed_for_testing (W-P3-2)
 
 namespace {
 
@@ -271,27 +273,14 @@ TEST(HostileInputHardening, StalePendingClearedIterYields43) {
 // ── W-P3-2: predictable mix() lets a crafted collision set force a present ─────
 // required field to read false-absent; a per-process seed defeats it. ──────────
 //
-// mix() and overlay_cap_for() are replicated here so the witness can compute a
-// slot-colliding tag set for a KNOWN seed (installed via the test hook). This
-// both exercises the kMaxBuildProbe skip branch deterministically (discharging
-// the standing coverage waiver at offset_table_error_path_test.cpp's kMaxBuildProbe note) and
-// proves the seed makes a precomputed collision set useless under any other
-// seed.
+// mix() and overlay_cap_for() are replicated (test100's `mix_ref` and
+// `overlay_cap_ref`, tests/support/probe_cluster_100.hpp) so the witness can compute
+// a slot-colliding tag set for a KNOWN seed (installed via the test hook), and show
+// the seed makes a precomputed collision set useless under any other seed. Each
+// cell restores the prior seed through test100::overlay_seed_guard (100 T009).
 
-std::uint32_t mix_ref(std::uint16_t tag, std::uint32_t seed) {
-    std::uint32_t h = 2166136261U ^ seed;
-    h = (h ^ (static_cast<std::uint32_t>(tag) & 0xFFU)) * 16777619U;
-    h = (h ^ ((static_cast<std::uint32_t>(tag) >> 8U) & 0xFFU)) * 16777619U;
-    return h;
-}
-std::size_t overlay_cap_ref(std::size_t n) {
-    std::size_t want = ((n * 5U) / 4U) + 1U;
-    std::size_t cap = 8U;
-    while (cap < want) {
-        cap <<= 1U;
-    }
-    return cap;
-}
+using fixpp::wire::test100::mix_ref;
+using fixpp::wire::test100::overlay_cap_ref;
 // Collect `k` distinct tags whose mix()&mask lands on `target`'s slot for `seed`.
 std::vector<std::uint16_t> colliding_tags(std::uint16_t target, std::uint32_t seed,
                                           std::uint32_t mask, std::size_t k) {
@@ -328,7 +317,12 @@ constexpr std::uint32_t kSeedB = 0x12345678U;
 constexpr std::uint16_t kTarget = 100;
 constexpr std::size_t kCollisions = 150;  // > kMaxBuildProbe(128), margin for envelope
 
-TEST(HostileInputHardening, CraftedCollisionSetSkipsTargetUnderMatchingSeed) {
+// 100-wire-group-read-integrity (FR-008, research D1) supersedes this cell's former
+// ending, "target absent under the matching seed": a single-slot collision set's total
+// probe work stays within the per-build budget of kMaxBuildProbe x occurrences, so the
+// build succeeds and every distinct tag, the target included, is found.
+TEST(HostileInputHardening, CraftedCollisionSetWithinBuildBudgetFindsTargetUnderMatchingSeed) {
+    fixpp::wire::test100::overlay_seed_guard const guard;
     fixpp::wire::detail::set_overlay_seed_for_testing(kSeedA);
     auto tags = colliding_tags(kTarget, kSeedA, /*mask=*/255U, kCollisions);
     ASSERT_EQ(tags.size(), kCollisions) << "test setup: not enough colliding tags found";
@@ -339,7 +333,9 @@ TEST(HostileInputHardening, CraftedCollisionSetSkipsTargetUnderMatchingSeed) {
 
     std::pmr::monotonic_buffer_resource arena;
     OffsetTable t{*fv, &arena};
-    ASSERT_TRUE(t.build_status().has_value());
+    ASSERT_TRUE(t.build_status().has_value())
+        << "FR-008: a single-slot collision set stays within the per-build budget, so the "
+           "build succeeds";
     ASSERT_EQ(overlay_cap_ref(t.size()), 256U)
         << "test setup: overlay cap must be 256 so mask=255 matches the collision set";
 
@@ -352,16 +348,18 @@ TEST(HostileInputHardening, CraftedCollisionSetSkipsTargetUnderMatchingSeed) {
     }
     ASSERT_TRUE(present_in_entries) << "target field must be in the eager entry list";
 
-    // ...but the crafted collisions push it past kMaxBuildProbe, so find() (the
-    // O(1) overlay path) reports it ABSENT — the availability defect this test
-    // exercises (kMaxBuildProbe skip branch, coverage waiver discharged).
+    // ...and the overlay finds it, however far the collisions placed it from its home slot.
     auto found = t.find(kTarget);
-    EXPECT_FALSE(found.has_value())
-        << "under the matching seed, the crafted collision set forces the present "
-           "target field to read false-absent (kMaxBuildProbe skip)";
+    EXPECT_TRUE(found.has_value())
+        << "FR-008: under the matching seed the crafted collision set must not make the "
+           "present target read absent";
+    if (found.has_value()) {
+        EXPECT_EQ(found->tag, kTarget);
+    }
 }
 
 TEST(HostileInputHardening, CraftedCollisionSetDefeatedByDifferentSeed) {
+    fixpp::wire::test100::overlay_seed_guard const guard;
     // The attacker precomputes a collision set for seed A...
     auto tags = colliding_tags(kTarget, kSeedA, /*mask=*/255U, kCollisions);
     ASSERT_EQ(tags.size(), kCollisions);

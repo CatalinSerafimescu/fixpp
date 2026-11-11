@@ -163,6 +163,9 @@ with the flag on (plan.md OD-4).
   `Parser::parse` succeeds without `out_of_memory` and without `err_offset_table_full`, on every lane.
   The sites are the validate gate in three arms and dispatch at seven sites. Re-derive them with 092
   contract C-6's command.
+  *(Amended 2026-11-08, 100-wire-group-read-integrity:)* a frame crafted against the index seed (100 research D1) is the exception: its
+  index build exceeds 100's per-build probe budget, so `Parser::parse` fails with
+  `wire_offset_table_full` (100 FR-008, B&L `B-100-2`). Every other admitted frame parses as stated.
 - **I-2.** The parse's resource is a fresh `monotonic_buffer_resource` per call over the session's
   B(L) span. Its upstream is a spill witness, so a spill is detectable on every lane, MSVC debug
   included.
@@ -173,6 +176,9 @@ with the flag on (plan.md OD-4).
   entry cap (`lower_inbound_entry_cap`), which fails the parse on every lane; Q-15 shrinks the buffer's
   bytes (`shrink_parse_buffer`), which fails the parse only where the spill witness is null, and on
   MSVC debug records the spill instead.
+  *(Amended 2026-11-08, 100-wire-group-read-integrity:)* a frame crafted against the index seed reaches the close with no test seam (I-1's
+  amendment); witnesses `ProbeBudgetSession100.US3_3_CraftedFrameValidationOff_TerminalCloseNoCallback`
+  and `ProbeBudgetSession100.US3_3_CraftedFrameValidationOn_TerminalCloseNoCallback`.
 - **I-5.** Lazy reads inside a callback draw on `kCallbackReadHeadroom`, in the same span. Exhausting
   it in a read that reports a status (every row below except the C cursor shells) never ends the
   session. The C cursor shells are the exception: an exhaustion there ends the session, or the
@@ -195,6 +201,14 @@ with the flag on (plan.md OD-4).
 
   An empty `unknown_fields()` view after exhaustion cannot be told from a frame with no unknown
   fields (L-5).
+
+  *(Amended 2026-11-08, 100-wire-group-read-integrity:)* this invariant's "The C cursor shells are the exception" clause, and the table's
+  rows for the typed `group<>()`, `fixpp_msg_get_group` and the C cursor shells, describe C-ABI 1.14.
+  Since 100 (C-ABI 1.15) the typed `group<>()` reports the failure (`alloc_failed()` and
+  `read_failed()`), `fixpp_msg_get_group` returns `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`, and neither C getter
+  lets an exception leave it: a cursor shell that does not fit returns `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`
+  with a null cursor and count 0 (100 FR-005, FR-006; B&L `B-100-1`, L-093-17 retired). So no read in
+  the table ends the session. `OffsetTable::group_slices()` keeps its empty span.
 - **I-6.** The admin and outbound parse sites keep their stack arenas, and 093 does not change them.
   Their size is not derived from what those sites parse. A dense outbound body near `Session::send`'s
   body-buffer size can need more offset-table space than the stack arena holds. Those sites ignore
@@ -478,7 +492,8 @@ delta carry the same BREAKING list.
 - **L-4.** `close()`'s wait can expire. For a default-body store whose unit is still running, the
   teardown reset can then interleave with it, and the (1, 1) row is not guaranteed.
 - **L-5.** A callback-time lazy read beyond the headroom that reports a status fails that read, never
-  the session; the C cursor shells are the exception (L-17). On MSVC debug the spill witness forwards,
+  the session; the C cursor shells are the exception (L-17). *(Amended 2026-11-08, 100-wire-group-read-integrity:)* C-3 I-5's amendment
+  gives the 1.15 reports; the cursor-shell exception no longer holds. On MSVC debug the spill witness forwards,
   so the read succeeds and the spill is recorded. Its report is per API (C-3 I-5): `group_slices()` gives an empty span, indistinguishable from an absent group;
   `fixpp_msg_get_group` reports `FIXPP_ERR_TYPE_MISMATCH`; the nested getter reports
   `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`; `unknown_fields()` gives an empty view, indistinguishable from a
@@ -514,7 +529,8 @@ delta carry the same BREAKING list.
   that does not begin with `FIX` frames its frames at a frame boundary as today, but after a garble it
   finds no next frame start, so it discards every later byte until the establishment deadline or the
   liveness loop ends it. No supported profile has such a BeginString.
-- **L-17.** The C cursor shells that `fixpp_msg_get_group` and `fixpp_group_get_nested_group` allocate
+- **L-17.** *(Amended 2026-11-08, 100-wire-group-read-integrity:)* retired: neither getter lets an exception leave it since C-ABI 1.15
+  (C-3 I-5's amendment; B&L L-093-17, closed). The C cursor shells that `fixpp_msg_get_group` and `fixpp_group_get_nested_group` allocate
   from the parse arena have no catch, so exhausting the headroom there lets a `bad_alloc` escape the C
   function. Neither function is `noexcept`. Where the unwind reaches the callback guard, the session
   ends with `app_callback_threw`; where the C caller's frame cannot be unwound, the process

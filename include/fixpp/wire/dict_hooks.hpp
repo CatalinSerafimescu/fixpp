@@ -17,10 +17,16 @@
 // `group_context` only by forward declaration (group_view.hpp owns the type and
 // includes offset_table.hpp). `for_table_view` is therefore DEFINED in parser.hpp,
 // where `group_context` and `table_view` are both complete.
+//
+// 100-wire-group-read-integrity (research D2, data-model `dict_hooks`): the bundle
+// also carries the registration resolver, which decides whether a count tag is a
+// group in a read's context and may name the group's definition there with the
+// same lookup. A dict-aware bundle without it declines group reads.
 
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <string_view>
 #include <type_traits>
 
@@ -41,6 +47,20 @@ public:
                                        std::uint16_t) noexcept;
     using group_delim_fn_t = std::uint16_t (*)(void const*, group_context const&,
                                                std::uint16_t) noexcept;
+    // 100 (research D2; T071 fix, one lookup per read): what a read in `ctx` needs
+    // about `no_tag`. `registered`: whether `no_tag` is registered as a group in
+    // `ctx`. `definition_known`: whether `delimiter` and `members` are supplied; they
+    // are then the answers the delimiter callback and the membership callback give
+    // for `(ctx, no_tag)`, and a read uses them in place of those callbacks. False:
+    // the read asks those callbacks, as a test seam's stubs need.
+    struct group_resolution {
+        bool registered = false;
+        bool definition_known = false;
+        std::uint16_t delimiter = 0;
+        std::span<std::uint16_t const> members;
+    };
+    using group_resolve_fn_t = group_resolution (*)(void const*, group_context const&,
+                                                    std::uint16_t) noexcept;
     // Which half of a pair a dictionary lookup starts from.
     enum class pair_side : std::uint8_t { length, data };
     // Given one half of a dictionary-declared pair, the other half, or 0.
@@ -62,6 +82,17 @@ public:
     }
     [[nodiscard]] constexpr group_delim_fn_t group_delim_fn() const noexcept {
         return group_delim_;
+    }
+    // 100: null on `none()`. `OffsetTable::group()` declines when it is null.
+    [[nodiscard]] constexpr group_resolve_fn_t group_resolve_fn() const noexcept {
+        return group_resolve_;
+    }
+    // 100 (research D2 step 1, D11 step 1): whether the bundle can establish a group:
+    // false when the dictionary, the membership callback or the registration resolver
+    // is null. `OffsetTable::group()` declines a read without them, and a nested read
+    // keeps a failure only with them.
+    [[nodiscard]] constexpr bool can_establish_groups() const noexcept {
+        return opaque_dict_ != nullptr && group_member_ != nullptr && group_resolve_ != nullptr;
     }
     // Null when the dictionary declares no Length+Data pair of its own; the two
     // lookups below then answer from the standard table alone.
@@ -114,23 +145,33 @@ private:
 
     constexpr dict_hooks(void const* opaque_dict, classify_fn_t classify,
                          group_member_fn_t group_member, group_delim_fn_t group_delim,
-                         length_pair_fn_t length_pair) noexcept
+                         length_pair_fn_t length_pair, group_resolve_fn_t group_resolve) noexcept
         : opaque_dict_{opaque_dict},
           classify_{classify},
           group_member_{group_member},
           group_delim_{group_delim},
-          length_pair_{length_pair} {}
+          length_pair_{length_pair},
+          group_resolve_{group_resolve} {}
 
     void const* opaque_dict_ = nullptr;
     classify_fn_t classify_ = nullptr;
     group_member_fn_t group_member_ = nullptr;
     group_delim_fn_t group_delim_ = nullptr;
     length_pair_fn_t length_pair_ = nullptr;
+    group_resolve_fn_t group_resolve_ = nullptr;
 };
 
-// Every holder (OffsetTable, MessageView, entry_context, field_iterator)
-// carries a dict_hooks by value (FR-004-class zero-alloc-by-value context) —
-// see group_context's identical requirement in group_view.hpp.
+// A holder that carries a dict_hooks by value copies it with no allocation
+// (FR-004-class zero-alloc-by-value context) — see group_context's identical
+// requirement in group_view.hpp. Re-derive the by-value holders with
+// `command grep -rnE 'dict_hooks +[A-Za-z_]+ *(\{ *\})?;|hooks_holder_t +[A-Za-z_]+' include src`.
 static_assert(std::is_trivially_copyable_v<dict_hooks>);
+
+namespace detail {
+// 100 (B-100-7): `dict_hooks::none()` as an object with static storage, for a
+// holder of a `dict_hooks const*` (an Iter view, a field iterator) built without
+// a dictionary, so that pointer is never null and never dangles.
+inline constexpr dict_hooks no_dict_hooks{};
+}  // namespace detail
 
 }  // namespace fixpp::wire

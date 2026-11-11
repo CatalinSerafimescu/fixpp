@@ -13,7 +13,7 @@
 // (NoQuoteSets(296) -> NoQuoteEntries(295)), the exact codepath at
 // build/<preset>/_codegen/include/fixpp/v44/Messages.hpp:3544-3550, which
 // binds `auto const r = …nested_group_slices(…)` and returns
-// `group_view<G_295>{r.slices, child_ctx, r.alloc_failed}`.
+// `group_view<G_295>{r.slices, child_ctx, r.status}`.
 //
 // Unlike the wire-level T001 witness (which holds the `OffsetTable` directly
 // and can introspect the sub-table to pin one of the three arena-exhaustion

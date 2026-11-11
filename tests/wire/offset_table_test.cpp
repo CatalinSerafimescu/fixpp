@@ -24,6 +24,7 @@
 
 #include "support/context_group_delim_fn.hpp"
 #include "support/context_group_member_fn.hpp"
+#include "support/context_group_registered_fn.hpp"
 #include "support/dict_hooks_test_access.hpp"
 #include "support/expired_parser_parse.hpp"
 #include "support/frame_view_factory.hpp"
@@ -382,7 +383,8 @@ TEST(WireOffsetTable, DictFreeGroupDeclinesWhenMembershipFnMissing) {
     OffsetTable t{*fv, &arena,
                   dict_hooks_test_access::make(&dict, /*classify=*/nullptr,
                                                /*group_member=*/nullptr, /*group_delim=*/nullptr,
-                                               /*length_pair=*/nullptr)};
+                                               /*length_pair=*/nullptr,
+                                               &fixpp_test_support::context_group_registered_fn)};
     ASSERT_TRUE(t.build_status().has_value());
     ASSERT_TRUE(t.find(453).has_value())
         << "anti-vacuity: see DictFreeGroupDeclinesUnderDefaultConfig";
@@ -704,16 +706,13 @@ TEST(WireOffsetTable, GroupExtentSupportsMoreThanThirtyTwoDistinctMembers) {
 //
 // The read is binary (no CRT text-mode translation), and the windows-msvc
 // runners check out with core.autocrlf=true, so on Windows this file arrives
-// with "\r\n" line endings. The FR-001b needles below anchor on "\n" at BOTH
-// ends in order to key on leading indentation, so without this normalisation
-// none of them matches on Windows — and the failure is asymmetric: the two
-// "expect 0" assertions pass VACUOUSLY while only the two "expect 1" ones fail.
-// A pin that cannot distinguish "the block moved" from "the file is unreadable
-// to my matcher" is no pin at all. Normalising here (rather than pinning
-// src/wire/offset_table.cpp to -text in .gitattributes) keeps line endings a
-// non-contract for a live source file: what FR-001b pins is indentation and
-// occurrence counts, and "\r" is incidental to both. No effect on Linux, so the
-// Article VII §3 RED->GREEN transcript recorded there still stands unchanged.
+// with "\r\n" line endings. The FR-001b pin below finds a function's end by the
+// "\n}\n" that closes it, so without this normalisation it finds no function
+// body on Windows. A pin that cannot distinguish "the block moved" from "the
+// file is unreadable to my matcher" is no pin at all. Normalising here (rather
+// than pinning src/wire/offset_table.cpp to -text in .gitattributes) keeps line
+// endings a non-contract for a live source file: what FR-001b pins is which
+// function holds which statement, and "\r" is incidental to it.
 std::string slurp(std::filesystem::path const& p) {
     std::ifstream in(p, std::ios::binary);
     std::string s{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
@@ -730,13 +729,13 @@ std::string slurp(std::filesystem::path const& p) {
 // assertion ("exactly 1 occurrence at 8-space") pins a block that must no
 // longer exist. It is re-keyed rather than retired, because the property it
 // really guards is still live: 085's flat instance-walk block must not
-// reappear in group() at either indentation it has ever occupied.
+// reappear in group().
 //
 // ⚠️ WHAT THIS PIN DOES *NOT* DO — stated, rather than left to be discovered.
-// It matches four EXACT strings. A flat wire-derived walk reintroduced with a
-// different variable name, an inverted `if (boundary)` shape, or a third
-// indentation would pass it. That is not a gap to close by adding needles:
-// each new needle is another coverage claim for the next rewrite to falsify,
+// It matches two EXACT statements inside group()'s body, at any indentation. A
+// flat wire-derived walk reintroduced with a different variable name or an
+// inverted `if (boundary)` shape would pass it. That is not a gap to close by
+// adding needles: each new needle is another coverage claim for the next rewrite to falsify,
 // which is exactly how 085's own version of this pin came to assert something
 // untrue. Treat it as a tripwire for the SPECIFIC block 085 moved and #220
 // deleted; re-derive by reading group() if you need the general property.
@@ -747,20 +746,25 @@ std::string slurp(std::filesystem::path const& p) {
 // re-walk would be redundant-not-wrong there and every behavioural test would
 // stay green. Only reading the source can tell.
 //
-// ANTI-VACUITY. Every needle below is indentation-keyed and anchored on "\n"
-// at both ends, so anything that stops the matcher seeing the TU the way it
-// expects — CRLF, a reformat, a rename, a truncated read — drives all counts
-// to 0. For 085 that was survivable, because it asserted a count of 1
-// somewhere. Here EVERY group() assertion is "expect 0", so an unreadable TU
-// would satisfy all of them vacuously. The witness is therefore the SIBLING
-// walk that must still exist: group_slices_status()'s own instance splitter
-// (L-063-4 leg 1, deliberately still flat and out of #220's scope) declares
-// `inst_start` at 16-space and defines the POSITIVE `is_boundary` lambda at
-// 16-space. Asserting those FIRST proves the matcher can see this TU and can
-// report a non-zero count, before any zero below is believed.
-// ⚠️ 389: this paragraph said `if (boundary) {` at 20-space, which is the
-// needle the diff replaced 15 lines below — a re-anchored needle must be
-// re-stated in the prose that JUSTIFIES it, not only where it is used.
+// Keyed on content, not indentation (100-wire-group-read-integrity T067): each
+// function's body is cut from the TU between its definition's signature and
+// the "\n}\n" that closes it, and the needles are counted inside that body.
+// "group()'s body" below is the body of `group_resolved()`, which `group()`
+// forwards to (100-wire-group-read-integrity T071 fix), so that is the signature
+// the matcher cuts.
+//
+// ANTI-VACUITY. Anything that stops the matcher seeing the TU the way it
+// expects — CRLF, a rename, a truncated read — drives the counts to 0, and
+// EVERY group() assertion is "expect 0", so an unreadable TU would satisfy all
+// of them vacuously. So the pin first asserts that group()'s body was found
+// (it calls consume_group_extent), and then the SIBLING walk that must still
+// exist: group_slices_status()'s own instance splitter (L-063-4 leg 1,
+// deliberately still flat and out of #220's scope) declares `inst_start` and
+// defines the POSITIVE `is_boundary` lambda inside its body. Asserting those
+// FIRST proves the matcher can see this TU and can report a non-zero count,
+// before any zero below is believed.
+// ⚠️ 389: a re-anchored needle must be re-stated in the prose that JUSTIFIES
+// it, not only where it is used.
 TEST(WireOffsetTable, FR001_NoFlatInstanceWalkInGroup) {
     std::filesystem::path const src{FIXPP_SRC_DIR};
     std::string const tu = slurp(src / "wire" / "offset_table.cpp");
@@ -774,55 +778,64 @@ TEST(WireOffsetTable, FR001_NoFlatInstanceWalkInGroup) {
         }
         return n;
     };
+    // The body of the definition whose signature is `signature`: from the
+    // signature to the "\n}\n" that closes it (a function's closing brace is the
+    // only "}" at column 0 inside it). Empty when the TU holds no such definition.
+    auto body_of = [&tu](std::string const& signature) -> std::string {
+        std::size_t const at = tu.find(signature);
+        if (at == std::string::npos) {
+            return {};
+        }
+        std::size_t const end = tu.find("\n}\n", at);
+        return end == std::string::npos ? std::string{} : tu.substr(at, end - at);
+    };
 
-    // ── Non-vacuity witness: the sibling splitter in group_slices_status. ──
-    std::size_t const sibling_inst_start_16space =
-        count_occurrences(tu, "\n                std::size_t inst_start = first;\n");
-    // 389: this needle was `if (boundary) {` at 20-space. The splitter now
-    // computes the boundary ONCE, in an `is_boundary` lambda shared by its count
-    // pass and its fill pass, so that spelling is gone AND the call site occurs
-    // TWICE — swapping the needle alone would have broken the `== 1` below too.
+    std::string const group_body = body_of(
+        "core::expected_t<OffsetTable::group_index> OffsetTable::group_resolved(\n"
+        "    std::uint16_t no_tag, dict_hooks::group_resolution& def) const noexcept {\n");
+    std::string const sibling_body = body_of(
+        "group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const "
+        "noexcept {\n");
+
+    // ── Non-vacuity witnesses: group()'s body was found, and the sibling
+    //    splitter in group_slices_status is readable inside its own body. ──
+    ASSERT_NE(group_body.find("consume_group_extent("), std::string::npos)
+        << "group()'s body was not found (or no longer calls consume_group_extent) — every "
+           "'expect 0' below would pass vacuously. Fix the matcher before trusting the zeros.";
+    std::size_t const sibling_inst_start =
+        count_occurrences(sibling_body, "std::size_t inst_start = first;\n");
+    // 389: this needle was `if (boundary) {`. The splitter now computes the
+    // boundary ONCE, in an `is_boundary` lambda shared by its count pass and its
+    // fill pass, so that spelling is gone AND the call site occurs TWICE.
     // Anchored on the lambda's single DEFINITION instead, which is both unique
     // and the thing the witness actually cares about: that this TU is readable
     // and its splitter still resolves instance boundaries.
-    std::size_t const sibling_boundary_defn_16space = count_occurrences(
-        tu, "\n                auto const is_boundary = [&](std::size_t k) noexcept {\n");
+    std::size_t const sibling_boundary_defn =
+        count_occurrences(sibling_body, "auto const is_boundary = [&](std::size_t k) noexcept {\n");
 
-    ASSERT_EQ(sibling_inst_start_16space, 1U)
-        << "group_slices_status's sibling instance walk was not found at 16-space (found "
-        << sibling_inst_start_16space
+    ASSERT_EQ(sibling_inst_start, 1U)
+        << "group_slices_status's sibling instance walk was not found in its body (found "
+        << sibling_inst_start
         << ") — the matcher cannot see this TU, so every 'expect 0' below would pass "
            "vacuously. Fix the matcher (or this needle) before trusting the zeros.";
-    ASSERT_EQ(sibling_boundary_defn_16space, 1U)
-        << "group_slices_status's boundary predicate definition was not found at 16-space (found "
-        << sibling_boundary_defn_16space << ") — same vacuity risk as above.";
+    ASSERT_EQ(sibling_boundary_defn, 1U)
+        << "group_slices_status's boundary predicate definition was not found in its body "
+           "(found "
+        << sibling_boundary_defn << ") — same vacuity risk as above.";
 
-    // ── The assertions proper: 085's flat cap block is at neither of the
-    //    indentations it has occupied. See the scope caveat in the header. ──
-    // 4-space = function body (085's pre-move home); 8-space = the dict-free
-    // else body (085's post-move home). #220 removed both.
-    std::size_t const inst_start_4space =
-        count_occurrences(tu, "\n    std::size_t inst_start = first;\n");
-    std::size_t const inst_start_8space =
-        count_occurrences(tu, "\n        std::size_t inst_start = first;\n");
-    std::size_t const boundary_guard_8space = count_occurrences(tu, "\n        if (!boundary) {\n");
-    std::size_t const boundary_guard_12space =
-        count_occurrences(tu, "\n            if (!boundary) {\n");
+    // ── The assertions proper: 085's flat cap block is not in group()'s body,
+    //    at any indentation. See the scope caveat in the header. ──
+    std::size_t const inst_start_in_group =
+        count_occurrences(group_body, "std::size_t inst_start = first;\n");
+    std::size_t const boundary_guard_in_group = count_occurrences(group_body, "if (!boundary) {\n");
 
-    EXPECT_EQ(inst_start_4space, 0U)
-        << "4-space (function-body) inst_start occurrences: " << inst_start_4space
+    EXPECT_EQ(inst_start_in_group, 0U)
+        << "inst_start occurrences in group(): " << inst_start_in_group
         << " — a flat instance walk is back in group()'s body; group() must derive its extent "
            "only from consume_group_extent";
-    EXPECT_EQ(inst_start_8space, 0U)
-        << "8-space inst_start occurrences: " << inst_start_8space
-        << " — 085's dict-free else body is gone (#220); a block at this indentation means a "
-           "second arm has been re-introduced into group()";
-    EXPECT_EQ(boundary_guard_8space, 0U)
-        << "8-space 'if (!boundary) {' occurrences: " << boundary_guard_8space
+    EXPECT_EQ(boundary_guard_in_group, 0U)
+        << "'if (!boundary) {' occurrences in group(): " << boundary_guard_in_group
         << " — the flat early-continue guard is back in group()";
-    EXPECT_EQ(boundary_guard_12space, 0U)
-        << "12-space 'if (!boundary) {' occurrences: " << boundary_guard_12space
-        << " — the flat early-continue guard is back in a nested arm of group()";
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -934,9 +947,11 @@ TEST(WireOffsetTable, GroupSlicesKeepsWireDelimiterWhenDelimStoreAnswersZero) {
     // `group_delim_fn_` entirely.
     {
         std::pmr::monotonic_buffer_resource arena;
-        OffsetTable t{*fv, &arena,
-                      dict_hooks_test_access::make(&dict, /*classify=*/nullptr, member_fn,
-                                                   &wrong_group_delim, /*length_pair=*/nullptr)};
+        OffsetTable t{
+            *fv, &arena,
+            dict_hooks_test_access::make(&dict, /*classify=*/nullptr, member_fn, &wrong_group_delim,
+                                         /*length_pair=*/nullptr,
+                                         &fixpp_test_support::context_group_registered_fn)};
         ASSERT_TRUE(t.build_status().has_value());
         auto const slices = t.group_slices(453);
         // The EXACT split, not `!= 2`. `EXPECT_NE(size, 2)` also holds at 0 and
@@ -957,10 +972,11 @@ TEST(WireOffsetTable, GroupSlicesKeepsWireDelimiterWhenDelimStoreAnswersZero) {
     // ── THE ARM: a zero answer leaves the wire-derived delimiter in place ───
     {
         std::pmr::monotonic_buffer_resource arena;
-        OffsetTable t{*fv, &arena,
-                      dict_hooks_test_access::make(&dict, /*classify=*/nullptr, member_fn,
-                                                   &fixpp_test_support::context_group_delim_fn,
-                                                   /*length_pair=*/nullptr)};
+        OffsetTable t{
+            *fv, &arena,
+            dict_hooks_test_access::make(
+                &dict, /*classify=*/nullptr, member_fn, &fixpp_test_support::context_group_delim_fn,
+                /*length_pair=*/nullptr, &fixpp_test_support::context_group_registered_fn)};
         ASSERT_TRUE(t.build_status().has_value());
         auto const slices = t.group_slices(453);
         EXPECT_EQ(slices.size(), 2U)
@@ -977,10 +993,12 @@ TEST(WireOffsetTable, GroupSlicesKeepsWireDelimiterWhenDelimStoreAnswersZero) {
     // offered as "threaded".
     {
         std::pmr::monotonic_buffer_resource arena;
-        OffsetTable t{*fv, &arena,
-                      dict_hooks_test_access::make(&dict, /*classify=*/nullptr, member_fn,
-                                                   /*group_delim=*/nullptr,
-                                                   /*length_pair=*/nullptr)};
+        OffsetTable t{
+            *fv, &arena,
+            dict_hooks_test_access::make(&dict, /*classify=*/nullptr, member_fn,
+                                         /*group_delim=*/nullptr,
+                                         /*length_pair=*/nullptr,
+                                         &fixpp_test_support::context_group_registered_fn)};
         ASSERT_TRUE(t.build_status().has_value());
         EXPECT_EQ(t.group_slices(453).size(), 2U)
             << "an explicit null oracle and a zero-answering one must agree — the equivalence "

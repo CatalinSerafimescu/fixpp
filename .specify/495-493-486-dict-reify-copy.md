@@ -1112,7 +1112,7 @@ Builds are owner-approved before they run (`[const §XVII.7]`); check `df -h /mn
 ## 14. Not in scope
 
 Sharing the validator's table (SC-007, §5); unifying `fixpp_msg::session_tv_` with `owned_tv_`;
-`L-458-1`; the `BM_Reify_Dispatch_20tag` placement effect (owner-approved in #494); the MSVC cost of
+`L-458-1` *(100 (2026-11-11) closes L-458-1)*; the `BM_Reify_Dispatch_20tag` placement effect (owner-approved in #494); the MSVC cost of
 `table_view` moves in `as_table_view()` / `build() &&`; `owning_<Msg>::from_view` / `reify_as`;
 making `vg_parser` owned; a mallocnesia gate over `Session` dispatch (T-15); a public owned route for
 C++ callers' own parses (§8); other `get_default_resource()` captures (§7.1).

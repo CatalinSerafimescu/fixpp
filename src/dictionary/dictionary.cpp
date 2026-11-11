@@ -7,6 +7,10 @@
 // `XmlLoader::load*` via `std::allocate_shared` over
 // `std::pmr::polymorphic_allocator` so the control-block deallocator routes
 // memory back to the originating `mr` (`[2c §4.3]` / C-R2-P1-1).
+//
+// 100-wire-group-read-integrity (research D2): `as_table_view()` also fills the
+// table's per-occurrence store from the delimiter records and copies the handle's
+// section-group records; neither creates a `group_ctx_` key.
 
 #include <algorithm>
 #include <array>
@@ -217,7 +221,7 @@ dict_metadata_handle::msg_group_required_pairs_impl(std::string_view msg_type) c
 
 // 083 T025 (Entity 2). Same run-lookup shape as msg_group_required_pairs_impl
 // above — the message scoping IS the run.
-std::span<GroupCtxDelim const> dict_metadata_handle::msg_group_ctx_delims_impl(
+MsgFieldsRun dict_metadata_handle::msg_group_ctx_delim_run(
     std::string_view msg_type) const noexcept {
     auto const idx = find_msg_index(messages_, msg_type);
     if (idx == SIZE_MAX || idx >= per_msg_group_ctx_delim_offsets_.size()) {
@@ -225,6 +229,15 @@ std::span<GroupCtxDelim const> dict_metadata_handle::msg_group_ctx_delims_impl(
     }
     auto const run = per_msg_group_ctx_delim_offsets_[idx];
     if (run.count == 0 || run.start + run.count > group_ctx_delim_pool_.size()) {
+        return {};
+    }
+    return run;
+}
+
+std::span<GroupCtxDelim const> dict_metadata_handle::msg_group_ctx_delims_impl(
+    std::string_view msg_type) const noexcept {
+    auto const run = msg_group_ctx_delim_run(msg_type);
+    if (run.count == 0) {
         return {};
     }
     return std::span<GroupCtxDelim const>{group_ctx_delim_pool_.data() + run.start, run.count};
@@ -683,7 +696,32 @@ table_view Dictionary::build_table_view(
                 b.add_group_required_member_ctx(mt, path, no_tag, req_tag);
             }
         }
+
+        // ── 100 (research D2 arm 1, "Arm-1 records"): one per-occurrence key per
+        // delimiter record this message's expansion captured, every occurrence with its
+        // full path (the loop above keys one parent per count tag), each holding that
+        // occurrence's record. No `group_ctx_` key is created, so the validator's
+        // accessors are unchanged (FR-009).
+        handle_->for_each_group_ctx_record(mt, [&](auto const& rec,
+                                                   std::span<std::uint16_t const> members) {
+            b.add_occurrence_group(
+                mt, std::span<std::uint16_t const>{rec.parent_path.data(), rec.depth}, rec.no_tag,
+                group_record{
+                    .delimiter = rec.delimiter,
+                    .members = std::vector<std::uint16_t>(members.begin(), members.end())});
+        });
     }
+
+    // ── 100 (research D2 arm 2, "Section records"): the dictionary's header and
+    // trailer groups at every depth, copied from the handle (filled at the loaders'
+    // finalize). MsgType-free.
+    handle_->for_each_section_group_record([&](auto const& rec,
+                                               std::span<std::uint16_t const> members) {
+        b.add_section_group(
+            std::span<std::uint16_t const>{rec.parent_path.data(), rec.depth}, rec.no_tag,
+            group_record{.delimiter = rec.delimiter,
+                         .members = std::vector<std::uint16_t>(members.begin(), members.end())});
+    });
 
     // ── global tag→field_type map (+ T016 multi-value bit) ─────────────────
     // Walk every FieldRef across all message field runs; the first

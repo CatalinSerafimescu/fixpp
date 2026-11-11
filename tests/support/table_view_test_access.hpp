@@ -79,6 +79,24 @@ struct table_view_test_access {
     [[nodiscard]] static bit_store const& header_bits(table_view const& tv) noexcept {
         return tv.header_bits_;
     }
+
+    // 100-wire-group-read-integrity (research D2): the registration stores.
+    using record_store = decltype(table_view::occurrence_records_);
+    [[nodiscard]] static bit_store const& ctx_key_bits(table_view const& tv) noexcept {
+        return tv.ctx_key_bits_;
+    }
+    [[nodiscard]] static record_store const& occurrence_records(table_view const& tv) noexcept {
+        return tv.occurrence_records_;
+    }
+    [[nodiscard]] static record_store const& section_records(table_view const& tv) noexcept {
+        return tv.section_records_;
+    }
+    [[nodiscard]] static bool group_bit(table_view const& tv, std::uint16_t no_tag) noexcept {
+        return tv.group_bit(no_tag);
+    }
+    [[nodiscard]] static bool ctx_key_bit(table_view const& tv, std::uint16_t no_tag) noexcept {
+        return tv.ctx_key_bit(no_tag);
+    }
 };
 
 }  // namespace fixpp::dict

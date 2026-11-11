@@ -84,6 +84,9 @@ set_tests_properties(wire_pure_tests PROPERTIES LABELS "079;wire")
 # 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST wire_pure_tests APPEND PROPERTY LABELS 093)
+# 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST wire_pure_tests APPEND PROPERTY LABELS 100)
 
 # ── Standalone: 061-slim body-builder alloc gate (FR-002) ────────────────────
 # in-TU global ::operator new / ::operator new[] allocation counter (D3).
@@ -134,7 +137,9 @@ add_executable(wire_dict_tests
   length_data_pairs_drift_test.cpp                                    # fixpp#426 (D-1)
   dict_hooks_custom_pair_test.cpp                                     # fixpp#426 (D-2)
   field_iterator_fault_test.cpp                                       # 092 T055/T057 (FR-012)
-  test_099_validator_envelope.cpp)                                    # 099 T026 (W-3, unit half)
+  test_099_validator_envelope.cpp                                     # 099 T026 (W-3, unit half)
+  test_100_group_read_status.cpp                                      # 100 T015
+  test_100_typed_reads.cpp)                                           # 100 T016/T017
 target_link_libraries(wire_dict_tests PRIVATE
   fixpp_wire
   fixpp_dictionary
@@ -144,6 +149,12 @@ target_include_directories(wire_dict_tests PRIVATE
   "${CMAKE_SOURCE_DIR}/tests")
 target_compile_definitions(wire_dict_tests PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+# 100-wire-group-read-integrity (tasks T016): test_100_typed_reads.cpp reads groups through the
+# generated FIX 4.4 accessors, as wire_codegen_tests' members do.
+if(TARGET fixpp_codegen_generate)
+  add_dependencies(wire_dict_tests fixpp_codegen_generate)
+  target_include_directories(wire_dict_tests PRIVATE "${CMAKE_BINARY_DIR}/_codegen/include")
+endif()
 # fixpp#426: typed_read_split_agreement_test.cpp's half-threaded dict_hooks
 # probes build their bundles through tests/support/dict_hooks_test_access.hpp.
 add_test(NAME wire_dict_tests COMMAND wire_dict_tests)
@@ -165,6 +176,9 @@ set_property(TEST wire_dict_tests APPEND PROPERTY LABELS 092)
 # 099-fixt-appl-version-validation: label 099 (tasks.md T003). APPEND, after the last LABELS
 # setter for this entry, so the existing labels survive.
 set_property(TEST wire_dict_tests APPEND PROPERTY LABELS 099)
+# 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST wire_dict_tests APPEND PROPERTY LABELS 100)
 # 083 T021 (W-10a leg 4, contracts/typed_read_splitter.md): a BACKSTOP, never
 # the discriminator. Leg 4's depth-capped chain fixture drives
 # consume_group_extent's outer loop with an attacker-shaped declared count; an
@@ -409,3 +423,52 @@ if(TARGET fixpp_codegen_generate)
   add_test(NAME required_scope_two_tier_test COMMAND required_scope_two_tier_test)
   set_tests_properties(required_scope_two_tier_test PROPERTIES LABELS "079;wire;two-tier")
 endif()
+
+# ── 100-wire-group-read-integrity: wire_seed_hook_tests (plan Structure Decision) ──
+# Standalone, isolation-sensitive under [const §VII.8]: every member cell sets the
+# process-global overlay seed through set_overlay_seed_for_testing, so no grouped binary
+# gains that process-global state (orchestrator ruling, second /speckit-analyze
+# remediation). Each cell restores the prior seed through probe_cluster_100.hpp's guard.
+# Members span three layers (wire, the C ABI, a live Session), so the entry carries the
+# properties and compile definitions each member's former host sets for it:
+# add_wire_test's FIXPP_WIRE_CONFORMANCE_DIR, add_threading_test's TSan suppressions
+# (tests/session/CMakeLists.txt), and the data directories and FIXPP_TEST_HOOKS of
+# wire_pure_tests and capi_pure_tests. To re-derive, read the set_tests_properties,
+# set_property and target_compile_definitions calls of wire_pure_tests, capi_pure_tests
+# and session_unparseable_frame_disposition. Every new seed setter belongs here: compare
+# `grep -rln set_overlay_seed_for_testing tests` with the same grep at `git merge-base origin/main HEAD`.
+add_executable(wire_seed_hook_tests
+  test_100_probe_budget.cpp                                           # T008 (100)
+  ${CMAKE_SOURCE_DIR}/tests/session/test_100_probe_budget_session.cpp  # T018 (100)
+  ${CMAKE_SOURCE_DIR}/tests/capi/test_100_seed_hook_capi.cpp          # T012 D7 (ii) (100)
+  test_100_seed_hook_status.cpp                                       # T039 D7 (ii) (100)
+  test_100_seed_hook_typed.cpp                                        # T040 D7 (ii) (100)
+)
+target_link_libraries(wire_seed_hook_tests PRIVATE
+  fixpp_capi
+  fixpp_session
+  fixpp_wire
+  fixpp_dictionary
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main)
+target_include_directories(wire_seed_hook_tests PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/tests/capi"
+  "${CMAKE_SOURCE_DIR}/tests/session"
+  "${CMAKE_SOURCE_DIR}/src/capi"
+  "${CMAKE_SOURCE_DIR}/src")
+target_compile_definitions(wire_seed_hook_tests PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  "FIXPP_ORCHESTRA_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries/orchestra\""
+  "FIXPP_SRC_DIR=\"${CMAKE_SOURCE_DIR}/src\""
+  FIXPP_TEST_HOOKS)
+add_test(NAME wire_seed_hook_tests COMMAND wire_seed_hook_tests)
+# TIMEOUT: the session member makes this a live-session entry; it is sized by the rule
+# session_unparseable_frame_disposition's CMake comment gives (time the entry on every
+# sanitizer lane /speckit-verify runs and on MSVC, size from the slowest), and until a CI
+# reading exists it is at least twice the slowest local sanitizer reading (tasks T018).
+set_tests_properties(wire_seed_hook_tests PROPERTIES
+  LABELS "100;wire;capi;session"
+  ENVIRONMENT "FIXPP_WIRE_CONFORMANCE_DIR=${WIRE_CONFORMANCE_DIR};TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  TIMEOUT 300)

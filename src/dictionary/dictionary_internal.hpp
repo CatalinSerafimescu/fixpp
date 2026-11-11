@@ -10,6 +10,11 @@
 //
 // Not exposed from `include/fixpp/dict/`; included only by
 // `src/dictionary/dictionary.cpp` and `src/dictionary/xml_loader.cpp`.
+//
+// 100-wire-group-read-integrity (research D2 "Per-occurrence records"): the
+// delimiter capture also records each occurrence's direct members, and the handle
+// holds them beside the delimiter pool, together with the loaders' header and
+// trailer section-group records.
 
 #pragma once
 
@@ -24,6 +29,7 @@
 #include <fixpp/dict/version_profile.hpp>
 #include <memory_resource>
 #include <optional>
+#include <set>
 #include <span>
 #include <string_view>
 #include <system_error>
@@ -100,6 +106,33 @@ struct MsgFieldsRun {
     std::uint32_t start{0};
     std::uint32_t count{0};
 };
+
+// 100: one record's run in a flat pool (a delimiter record's members, a section
+// record's members): appends `items` to `pool` and its extent to `runs`, which stays
+// parallel to the records it describes.
+template <class T, class Items>
+void push_run(std::pmr::vector<MsgFieldsRun>& runs, std::pmr::vector<T>& pool, Items const& items) {
+    runs.push_back(MsgFieldsRun{.start = static_cast<std::uint32_t>(pool.size()),
+                                .count = static_cast<std::uint32_t>(items.size())});
+    pool.insert(pool.end(), items.begin(), items.end());
+}
+
+// 100: the run at `index` of `runs`, read from `pool`; empty when `index` has no run or
+// the run reaches past the pool's end (the guard the per-message run readers in
+// dictionary.cpp apply).
+template <class T>
+[[nodiscard]] std::span<T const> run_at(std::pmr::vector<MsgFieldsRun> const& runs,
+                                        std::pmr::vector<T> const& pool,
+                                        std::size_t index) noexcept {
+    if (index >= runs.size()) {
+        return {};
+    }
+    auto const run = runs[index];
+    if (std::size_t{run.start} + run.count > pool.size()) {
+        return {};
+    }
+    return {pool.data() + run.start, run.count};
+}
 
 // Lookup helper: a name (slice into the pool) bound to a payload index.
 struct NamedIndex {
@@ -295,12 +328,26 @@ struct GroupCtxDelim {
 struct CapturedDelim {
     GroupCtxDelim rec;
     std::vector<std::uint16_t> full_path;  // ancestors, outermost first, UNCLAMPED
+    // 100: the direct members of the same occurrence (`capture_member_emission`), a
+    // run of `DelimCapture::member_pool`, so the capture that survives
+    // `flush_group_ctx_delims`' key de-duplication carries one occurrence's delimiter
+    // and members.
+    MsgFieldsRun members;
 };
 
 struct DelimCapture {
     std::vector<std::uint16_t> path;     // ancestors, outermost first
     std::vector<std::uint16_t> pending;  // parallel to `path`; 0 = not yet captured
-    std::vector<CapturedDelim> out;      // this message's records
+    // 100: the tags emitted so far at each open group's own level, one buffer per depth;
+    // the first `open_levels` are open, parallel to `path` and `pending`. A closed
+    // level's buffer stays for the next group opened at that depth, so a message's
+    // occurrences reuse its storage rather than each allocating its own
+    // (`open_member_level` / `close_member_level`).
+    std::vector<std::vector<std::uint16_t>> members;
+    std::size_t open_levels = 0;
+    // 100: every closed occurrence's members, one run per `CapturedDelim`.
+    std::vector<std::uint16_t> member_pool;
+    std::vector<CapturedDelim> out;  // this message's records
 };
 
 // The FIRST emission at the currently-open group's level wins. Called at every
@@ -313,6 +360,39 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
     if (cap != nullptr && !cap->pending.empty() && cap->pending.back() == 0) {
         cap->pending.back() = tag;
     }
+}
+
+// 100 (research D2 "Arm-1 records"): every emission at the currently-open group's
+// level is a direct member of that occurrence, a nested group's own count tag
+// included (it is emitted at the outer level, before the descent). Called beside
+// `capture_first_emission` at the same sites, so it runs before `append_run`
+// de-duplicates the message's run; a tag the run later drops as a duplicate is still
+// a member here. A repeat is kept: the table's record stores drop it.
+inline void capture_member_emission(DelimCapture* cap, std::uint16_t tag) {
+    if (cap == nullptr || cap->open_levels == 0) {
+        return;
+    }
+    cap->members[cap->open_levels - 1].push_back(tag);
+}
+
+// 100: opens the member level of a group the loader descends into, beside the push
+// of its count tag onto `path`.
+inline void open_member_level(DelimCapture& cap) {
+    if (cap.members.size() == cap.open_levels) {
+        cap.members.emplace_back();
+    }
+    cap.members[cap.open_levels].clear();
+    ++cap.open_levels;
+}
+
+// 100: closes the innermost member level, beside the pop of `path`: appends its
+// members to `member_pool` and returns their run.
+inline MsgFieldsRun close_member_level(DelimCapture& cap) {
+    auto const& level = cap.members[--cap.open_levels];
+    MsgFieldsRun const run{.start = static_cast<std::uint32_t>(cap.member_pool.size()),
+                           .count = static_cast<std::uint32_t>(level.size())};
+    cap.member_pool.insert(cap.member_pool.end(), level.begin(), level.end());
+    return run;
 }
 
 // 083 T041 — the FR-023 / C-3.4 completeness invariant, shared by both loaders
@@ -442,6 +522,11 @@ public:
           per_msg_group_required_offsets_(mr),
           group_ctx_delim_pool_(mr),
           per_msg_group_ctx_delim_offsets_(mr),
+          group_ctx_member_runs_(mr),
+          group_ctx_member_pool_(mr),
+          section_group_pool_(mr),
+          section_group_member_runs_(mr),
+          section_group_member_pool_(mr),
           enum_values_(mr),
           enum_runs_(mr),
           messages_(mr),
@@ -521,6 +606,10 @@ public:
     [[nodiscard]] std::span<GroupCtxDelim const> msg_group_ctx_delims_impl(
         std::string_view msg_type) const noexcept;
 
+    // 100: the run of `group_ctx_delim_pool_` that `msg_group_ctx_delims_impl` returns,
+    // as indices; `count == 0` when it returns an empty span.
+    [[nodiscard]] MsgFieldsRun msg_group_ctx_delim_run(std::string_view msg_type) const noexcept;
+
     // 083 T025 (Entity 2): the delimiter for ONE context. Returns 0 when no
     // record exists — which is distinguishable from a real answer because a
     // stored record's delimiter is never 0 (FR-006). There is deliberately NO
@@ -531,6 +620,34 @@ public:
     [[nodiscard]] std::uint16_t group_ctx_delimiter_impl(std::string_view msg_type,
                                                          std::span<std::uint16_t const> parent_path,
                                                          std::uint16_t no_tag) const noexcept;
+
+    // 100: calls `fn(record, members)` for each delimiter record of `msg_type`, in pool
+    // order, with that record's direct members (`group_ctx_member_runs_` is parallel to
+    // `group_ctx_delim_pool_`).
+    template <class Fn>
+    void for_each_group_ctx_record(std::string_view msg_type, Fn const& fn) const {
+        auto const run = msg_group_ctx_delim_run(msg_type);
+        for (std::size_t i = run.start; i < std::size_t{run.start} + run.count; ++i) {
+            fn(group_ctx_delim_pool_[i], run_at(group_ctx_member_runs_, group_ctx_member_pool_, i));
+        }
+    }
+
+    // 100: calls `fn(record, members)` for each section record, in pool order.
+    template <class Fn>
+    void for_each_section_group_record(Fn const& fn) const {
+        for (std::size_t i = 0; i < section_group_pool_.size(); ++i) {
+            fn(section_group_pool_[i],
+               run_at(section_group_member_runs_, section_group_member_pool_, i));
+        }
+    }
+
+    // 100: appends one section record. The caller (`collect_section_groups`) passes
+    // each key once.
+    void add_section_group_record(GroupCtxDelim const& key_and_delimiter,
+                                  std::span<std::uint16_t const> members) {
+        section_group_pool_.push_back(key_and_delimiter);
+        push_run(section_group_member_runs_, section_group_member_pool_, members);
+    }
 
     // 074 (FR-002): enum {value, description} pairs for `tag`; empty span if the
     // tag has no codeset entry. Binary-searches `enum_runs_` (sorted by tag).
@@ -609,6 +726,20 @@ public:
     // no setter anywhere in `include/fixpp/dict/`.
     std::pmr::vector<GroupCtxDelim> group_ctx_delim_pool_;
     std::pmr::vector<MsgFieldsRun> per_msg_group_ctx_delim_offsets_;
+
+    // 100 (research D2 "Arm-1 records"): one member run per delimiter record, parallel
+    // to `group_ctx_delim_pool_`, into `group_ctx_member_pool_`. Written by
+    // `flush_group_ctx_delims`; read by `Dictionary::as_table_view()`.
+    std::pmr::vector<MsgFieldsRun> group_ctx_member_runs_;
+    std::pmr::vector<std::uint16_t> group_ctx_member_pool_;
+
+    // 100 (research D2 "Section records"): the header and trailer section-group
+    // records the loaders' section walks fill, at every depth: each record's key
+    // (`parent_path`, `no_tag`) and delimiter, its members in a parallel run into
+    // `section_group_member_pool_`. Copied into `table_view` by `as_table_view()`.
+    std::pmr::vector<GroupCtxDelim> section_group_pool_;
+    std::pmr::vector<MsgFieldsRun> section_group_member_runs_;
+    std::pmr::vector<std::uint16_t> section_group_member_pool_;
 
     // 074 (FR-002): flat enum-value store (value+description string_views into
     // the FROZEN name_pool_ — bound in finalize() after the pool is stable) and
@@ -731,10 +862,88 @@ void maybe_drop_first_group_ctx_delim_run_for_testing(dict_metadata_handle& h) n
                            .count = static_cast<std::uint32_t>(cap.out.size())};
     for (auto const& captured : cap.out) {
         h.group_ctx_delim_pool_.push_back(captured.rec);
+        // 100: the same occurrence's members, in a run parallel to the pool.
+        push_run(h.group_ctx_member_runs_, h.group_ctx_member_pool_,
+                 std::span<std::uint16_t const>{cap.member_pool}.subspan(captured.members.start,
+                                                                         captured.members.count));
     }
     h.per_msg_group_ctx_delim_offsets_.push_back(run);
     return std::nullopt;
 }
+
+// 100 (research D2 "Section records"): the loaders' header and trailer walks record
+// each section group through this sink, which keys a record by the clamped
+// `(parent_path, no_tag)` as `make_group_ctx_key` clamps it and keeps the first record
+// at a key (header before trailer, declaration order). A record with no member has no
+// delimiter and is not stored. Shared by both loaders so the two walks agree on the
+// key, the clamp and the first-wins rule.
+class SectionGroupSink {
+public:
+    // `path`: the enclosing section groups' count tags, outermost first, unclamped.
+    void record(std::span<std::uint16_t const> path, std::uint16_t no_tag,
+                std::vector<std::uint16_t> members) {
+        if (members.empty()) {
+            return;
+        }
+        GroupCtxDelim const key = make_group_ctx_delim(path, no_tag, members.front());
+        if (keys_.insert(key).second) {
+            out_.emplace_back(key, std::move(members));
+        }
+    }
+
+    void flush(dict_metadata_handle& h) const {
+        for (auto const& [key, members] : out_) {
+            h.add_section_group_record(key, members);
+        }
+    }
+
+private:
+    struct key_less {
+        [[nodiscard]] bool operator()(GroupCtxDelim const& a,
+                                      GroupCtxDelim const& b) const noexcept {
+            return group_ctx_delim_less(a, b);
+        }
+    };
+    std::set<GroupCtxDelim, key_less> keys_;
+    std::vector<std::pair<GroupCtxDelim, std::vector<std::uint16_t>>> out_;
+};
+
+// 100 (research D2 "Section records"): the walk state both loaders' section walks share.
+// `path` holds the count tags of the section groups enclosing the walk, outermost first,
+// unclamped; `sink` receives each group's record. A component or group definition is
+// visited once per (definition, enclosing path), and a definition already on the
+// current walk is skipped, which ends a cycle. Each loader keeps its format's child
+// dispatch.
+class SectionWalk {
+public:
+    SectionGroupSink sink;
+    std::vector<std::uint16_t> path;
+
+    // Enters the definition `def` (a pugixml node's `internal_object()`) unless it is on
+    // the current walk or was visited at this `path`. The caller calls `leave()` after
+    // walking an entered definition.
+    [[nodiscard]] bool enter(void const* def) {
+        if (std::ranges::find(on_path_, def) != on_path_.end() ||
+            !visited_.emplace(def, path).second) {
+            return false;
+        }
+        on_path_.push_back(def);
+        return true;
+    }
+    void leave() noexcept { on_path_.pop_back(); }
+
+    // A tag emitted at the open group's level. `level` is null at a section's own level,
+    // which belongs to no group. A repeat is kept: the table's record stores drop it.
+    static void add(std::vector<std::uint16_t>* level, std::uint16_t tag) {
+        if (level != nullptr) {
+            level->push_back(tag);
+        }
+    }
+
+private:
+    std::vector<void const*> on_path_;
+    std::set<std::pair<void const*, std::vector<std::uint16_t>>> visited_;
+};
 
 // FR-023 / C-3.4 completeness sweep over every message. Returns the FIRST
 // violation as `(message index, offending NumInGroup tag)`, or `nullopt` when

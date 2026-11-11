@@ -643,6 +643,10 @@ template <class CB>
 // without invoking the receive callback. Returns success, as the session's other
 // Disconnected paths do: the close is the outcome, and run_read_pump's own later
 // close is idempotent.
+// 100-wire-group-read-integrity (research D1, FR-008) supersedes 093's "any admitted
+// frame parses" for a frame crafted against the index seed: its index build exceeds
+// the per-build probe budget, so its parse fails and it reaches this close with no
+// test seam.
 // [092 data-model E-3; contract C-6; research R-4; spec FR-016]
 asio::awaitable<fixpp::core::expected_t<void>> Session::close_on_late_parse_failure_() noexcept {
     (void)co_await close(close_mode::terminal);
@@ -4610,7 +4614,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
                 // Reject are dispatched here.
                 // [research D3/D4; FR-004; INV-6]
                 if (engine_.application != nullptr && detail::is_admin_msgtype(hdr.msg_type)) {
-                    // The session's parse buffer B(L): any admitted frame parses (093).
                     // T019 note: parse_and_dispatch_'s callback_dispatch_scope ends
                     // before it returns, so the depth of all callbacks is back to its
                     // entry value when record_state_transition_ below enters onLogout.
@@ -4738,7 +4741,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
                 // FR-003; research D3/D4/D8; [const §VIII.5] (no heap: the parse buffer
                 // open() allocated, 093).
                 if (engine_.application != nullptr) {
-                    // The session's parse buffer B(L): any admitted frame parses (093).
                     // T019 note: parse_and_dispatch_'s callback_dispatch_scope ends
                     // before it returns, so the depth of all callbacks is back to its
                     // entry value. (FR-003; research D3/D4/D8; [const §VIII.5])
@@ -5007,7 +5009,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_sequen
     // session Reject(35=3) per FR-005/D4.
     // [019-app-callbacks T016; FR-004; research D3/D4]
     if (engine_.application != nullptr) {
-        // The session's parse buffer B(L): any admitted frame parses (093).
         auto cb_r = parse_and_dispatch_(
             frame, inbound_parse_buffer, route,
             [&](auto& mv, auto& sid) { return engine_.application->fromAdmin(mv, sid); });
@@ -5449,7 +5450,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
     // A fromAdmin reject here emits session Reject(35=3) per FR-005/D4
     // but the session still disconnects (Logout has been confirmed).
     if (engine_.application != nullptr) {
-        // The session's parse buffer B(L): any admitted frame parses (093).
         // T019 note: parse_and_dispatch_'s callback_dispatch_scope ends
         // before it returns, so the depth of all callbacks is back to its
         // entry value when record_state_transition_ below enters onLogout.

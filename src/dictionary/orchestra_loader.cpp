@@ -297,6 +297,10 @@ private:
     // component 1024 (StandardHeader). Defined beside `finalize`, which calls it.
     void collect_header_tags(detail::dict_metadata_handle& h) const;
 
+    // 100 (research D2 "Section records"): fills the handle's section-group records
+    // from components 1024 and 1025. Defined beside `collect_header_tags`.
+    void collect_section_groups(detail::dict_metadata_handle& h) const;
+
     // Expand a list of <fixr:fieldRef>/<fixr:componentRef>/<fixr:groupRef>
     // child rows into a flat FieldRef vector. componentRefs are resolved
     // recursively (inline). groupRefs emit a GroupRef (first-seen wins per
@@ -665,6 +669,7 @@ void OrchestraLoaderState::expand_field_list(
             out.push_back(fr);
             // 083 D-1: first emission at the open group's level = its delimiter.
             detail::capture_first_emission(delim_cap, tag);
+            detail::capture_member_emission(delim_cap, tag);  // 100: a direct member
             // 079 T020 (component-AND, symmetric with xml_loader): a field
             // `presence='required'` only inside an OPTIONAL componentRef must
             // not enter the message-level required set — EXCEPT the structural
@@ -735,6 +740,7 @@ void OrchestraLoaderState::expand_field_list(
             // the OUTER level, BEFORE the descent below — so it is eligible to
             // be the outer group's delimiter exactly as a scalar field is.
             detail::capture_first_emission(delim_cap, no_tag);
+            detail::capture_member_emission(delim_cap, no_tag);  // 100: a direct member
             // fixpp#201: nested-group count field is per-instance, not
             // message-level required; 079 T020: nor is a group inside an
             // optional component (a NumInGroup count is never a header/trailer
@@ -792,6 +798,7 @@ void OrchestraLoaderState::expand_field_list(
             if (delim_cap != nullptr) {
                 delim_cap->path.push_back(no_tag);
                 delim_cap->pending.push_back(0);
+                detail::open_member_level(*delim_cap);  // 100: this occurrence's members
             }
             expand_field_list(group_node, out, required_out, group_required_pairs_out, no_tag,
                               enclosing_component_index, delim_cap,
@@ -799,12 +806,14 @@ void OrchestraLoaderState::expand_field_list(
                               /*group_scope_component_required=*/greq);  // 081 D-3
             if (delim_cap != nullptr) {
                 std::uint16_t const captured = delim_cap->pending.back();
+                detail::MsgFieldsRun const members = detail::close_member_level(*delim_cap);
                 delim_cap->pending.pop_back();
                 delim_cap->path.pop_back();
                 if (captured != 0) {
                     delim_cap->out.push_back(detail::CapturedDelim{
                         .rec = detail::make_group_ctx_delim(delim_cap->path, no_tag, captured),
-                        .full_path = delim_cap->path});
+                        .full_path = delim_cap->path,
+                        .members = members});
                 }
                 // 083 T036 (FR-006 / C-6.1), symmetric with xml_loader.cpp:
                 // `captured == 0` means this group emitted no first member, so
@@ -916,6 +925,81 @@ void OrchestraLoaderState::collect_header_tags(detail::dict_metadata_handle& h) 
     // cppcheck-suppress mismatchingContainerExpression
     tags.erase(std::ranges::unique(tags).begin(), tags.end());
     h.header_tags_.assign(tags.begin(), tags.end());
+}
+
+// 100 (research D2 "Section records"): the Orchestra twin of xml_loader.cpp's
+// `LoaderState::collect_section_groups`, over components 1024 (header) and 1025
+// (trailer): every `fixr:groupRef` reached from them, at every depth, keyed by the
+// count tags of the section groups that enclose it (outermost first) and its own
+// `fixr:numInGroup` id, with its record (the first tag emitted at its level as the
+// delimiter, every tag emitted there as a member, components inline, a nested
+// group's count tag included and its members excluded). A component or group
+// definition is visited once per enclosing path (`detail::SectionWalk`), not gated by
+// `collect_header_tags`' `walked` / `walked_groups` sets. An id the maps cannot resolve
+// adds nothing. Header before trailer, declaration order; the sink keeps the first
+// record at a key.
+void OrchestraLoaderState::collect_section_groups(detail::dict_metadata_handle& h) const {
+    auto const id_of = [](pugi::xml_node const& n, std::uint16_t& out) {
+        return detail::try_parse_uint16(std::string_view{n.attribute("id").as_string("")}, out);
+    };
+    detail::SectionWalk w;
+    auto walk = [&](auto& self, pugi::xml_node const& node,
+                    std::vector<std::uint16_t>* level) -> void {
+        for (auto const& child : node.children()) {
+            std::string_view const kind{child.name()};
+            std::uint16_t id = 0;
+            if (!id_of(child, id)) {
+                continue;
+            }
+            if (kind == "fixr:fieldRef") {
+                if (fields_by_tag_.contains(id)) {
+                    detail::SectionWalk::add(level, id);
+                }
+            } else if (kind == "fixr:componentRef") {
+                auto const it = component_index_by_xml_id_.find(id);
+                if (it == component_index_by_xml_id_.end()) {
+                    continue;
+                }
+                auto const def = components_[it->second].node;
+                if (w.enter(def.internal_object())) {
+                    self(self, def, level);
+                    w.leave();
+                }
+            } else if (kind == "fixr:groupRef") {
+                auto const it = group_by_xml_id_.find(id);
+                if (it == group_by_xml_id_.end()) {
+                    continue;
+                }
+                std::uint16_t no_tag = 0;
+                if (!id_of(it->second.child("fixr:numInGroup"), no_tag) ||
+                    !fields_by_tag_.contains(no_tag)) {
+                    continue;
+                }
+                detail::SectionWalk::add(level, no_tag);
+                if (!w.enter(it->second.internal_object())) {
+                    continue;
+                }
+                std::vector<std::uint16_t> members;
+                w.path.push_back(no_tag);
+                self(self, it->second, &members);
+                w.path.pop_back();
+                w.leave();
+                w.sink.record(w.path, no_tag, std::move(members));
+            }
+        }
+    };
+    for (std::uint16_t const section : {std::uint16_t{1024}, std::uint16_t{1025}}) {
+        auto const it = component_index_by_xml_id_.find(section);
+        if (it == component_index_by_xml_id_.end()) {
+            continue;
+        }
+        auto const def = components_[it->second].node;
+        if (w.enter(def.internal_object())) {
+            walk(walk, def, nullptr);
+            w.leave();
+        }
+    }
+    w.sink.flush(h);
 }
 
 detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
@@ -1347,7 +1431,8 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
     }
     std::ranges::sort(h.enum_runs_, {}, &detail::EnumRun::tag);
 
-    collect_header_tags(h);  // 098 FR-022: after the message loop (see its comment)
+    collect_header_tags(h);     // 098 FR-022: after the message loop (see its comment)
+    collect_section_groups(h);  // 100: research D2 "Section records"
 
     return handle;
 }

@@ -88,6 +88,15 @@ bool always_group_member(void const*, fixpp::wire::group_context const&, std::ui
     return true;
 }
 
+// 100 (research D2): the registration stub that agrees with `always_group_member`:
+// every count tag is registered, so the harness keeps walking every group it did.
+fixpp::wire::dict_hooks::group_resolution always_registered(void const*,
+                                                            fixpp::wire::group_context const&,
+                                                            std::uint16_t) noexcept {
+    // Names no definition: the walk asks the member stub.
+    return {.registered = true, .definition_known = false, .delimiter = 0, .members = {}};
+}
+
 // 384: the delimiter oracle, fuzzer-driven. Before 384 this harness omitted
 // the callback entirely and took the default `nullptr`, so the ONLY splitter
 // shape it ever exercised was the wire-derived one — the half-threaded shape
@@ -205,7 +214,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // real table_view).
     auto const hooks = fixpp::wire::dict_hooks_test_access::make(
         &dict_token, /*classify=*/nullptr, &always_group_member, &fuzz_group_delim,
-        /*length_pair=*/nullptr);
+        /*length_pair=*/nullptr, &always_registered);
     OffsetTable root{*fv_or_err, &arena, hooks};
 
     // The slice-scoped input shape under test: `data[0 .. size-2]` is the
@@ -260,9 +269,12 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // content after the zero-count group).
     constexpr std::uint16_t kZeroCountTag = 900;
     constexpr char kZeroCountPrefix[] = "900=0\x01";
-    std::array<std::byte, sizeof(kZeroCountPrefix) - 1 + 4096> zc_buf{};
+    // 100: the buffer keeps one byte past the slice, the RC1 trailing byte the
+    // sub-table's build reads (`len + 1`), so an input longer than the suffix
+    // room is truncated to leave that byte in bounds.
+    std::array<std::byte, sizeof(kZeroCountPrefix) - 1 + 4096 + 1> zc_buf{};
     std::size_t const prefix_len = sizeof(kZeroCountPrefix) - 1;
-    std::size_t const suffix_len = std::min(slice_len, zc_buf.size() - prefix_len);
+    std::size_t const suffix_len = std::min(slice_len, zc_buf.size() - prefix_len - 1U);
     std::memcpy(zc_buf.data(), kZeroCountPrefix, prefix_len);
     if (suffix_len > 0) {
         std::memcpy(zc_buf.data() + prefix_len, slice_data, suffix_len);

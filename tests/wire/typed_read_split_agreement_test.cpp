@@ -48,8 +48,9 @@
 #include <string_view>
 #include <vector>
 
-#include "support/context_group_delim_fn.hpp"  // 384: the production delimiter oracle
-#include "support/dict_hooks_test_access.hpp"  // fixpp#426: half-threaded dict_hooks bundles
+#include "support/context_group_delim_fn.hpp"       // 384: the production delimiter oracle
+#include "support/context_group_registered_fn.hpp"  // 100: the registration predicate
+#include "support/dict_hooks_test_access.hpp"       // fixpp#426: half-threaded dict_hooks bundles
 #include "support/frame_view_factory.hpp"
 #include "support/pmr_allocation_tracking_resource.hpp"
 
@@ -321,9 +322,9 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg2Insta
 
     auto const res = mv->offsets().group_slices_status(100);
     // Guard the attribution: a bad_alloc degrade returns an EMPTY span with
-    // alloc_failed set (`group_slices_result::alloc_failed`). Without this, an arena
+    // `group_slices_result::status == group_read_status::alloc_failed`. Without this, an arena
     // exhaustion would read as "0 slices" and be misattributed to C-8.0c.
-    ASSERT_FALSE(res.alloc_failed)
+    ASSERT_FALSE(res.status == fixpp::wire::group_read_status::alloc_failed)
         << "group_slices_status degraded on allocation — this case's slice count would be "
            "measuring the arena, not the extent walk.";
 
@@ -364,7 +365,8 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg2OneIn
     ASSERT_TRUE(mv.has_value()) << "parser.parse failed";
 
     auto const res = mv->offsets().group_slices_status(100);
-    ASSERT_FALSE(res.alloc_failed) << "group_slices_status degraded on allocation";
+    ASSERT_FALSE(res.status == fixpp::wire::group_read_status::alloc_failed)
+        << "group_slices_status degraded on allocation";
 
     ASSERT_EQ(res.slices.size(), 1U)
         << "W-10a leg 2 regression guard: the ONE-instance form must still yield exactly one "
@@ -453,7 +455,8 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg3Valid
     ASSERT_TRUE(mv.has_value()) << "parser.parse failed";
 
     auto const res = mv->offsets().group_slices_status(100);
-    ASSERT_FALSE(res.alloc_failed) << "group_slices_status degraded on allocation";
+    ASSERT_FALSE(res.status == fixpp::wire::group_read_status::alloc_failed)
+        << "group_slices_status degraded on allocation";
 
     constexpr std::size_t kValidatedInstanceCount = 2;
     ASSERT_EQ(res.slices.size(), kValidatedInstanceCount)
@@ -499,7 +502,8 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Populated
     ASSERT_TRUE(mv.has_value()) << "parser.parse failed";
 
     auto const res = mv->offsets().group_slices_status(100);
-    ASSERT_FALSE(res.alloc_failed) << "group_slices_status degraded on allocation";
+    ASSERT_FALSE(res.status == fixpp::wire::group_read_status::alloc_failed)
+        << "group_slices_status degraded on allocation";
 
     ASSERT_EQ(res.slices.size(), 2U)
         << "W-10a legs 2/3 on a loader-produced dictionary: the descent must fire on the member "
@@ -645,9 +649,10 @@ ChainRun run_chain(table_view const& tv, std::vector<std::byte> const& buf,
     // `group()` (the extent walk) and never reaches the splitter.
     fixpp::wire::OffsetTable table{
         *fv, mr,
-        fixpp::wire::dict_hooks_test_access::make(&tv, /*classify=*/nullptr, &counting_group_member,
-                                                  &fixpp_test_support::context_group_delim_fn,
-                                                  /*length_pair=*/nullptr)};
+        fixpp::wire::dict_hooks_test_access::make(
+            &tv, /*classify=*/nullptr, &counting_group_member,
+            &fixpp_test_support::context_group_delim_fn,
+            /*length_pair=*/nullptr, &fixpp_test_support::context_group_registered_fn)};
     auto const gi = table.group(kChainBase);
     out.probe_calls = g_probe_calls;
     out.group_too_large = !gi.has_value() && gi.error() == fixpp::core::error::wire_group_too_large;
@@ -941,9 +946,10 @@ TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
     std::pmr::monotonic_buffer_resource oracle_arena;
     fixpp::wire::OffsetTable pre{
         *fv, &oracle_arena,
-        fixpp::wire::dict_hooks_test_access::make(&tv, /*classify=*/nullptr, &divergent_member_fn,
-                                                  /*group_delim=*/nullptr,
-                                                  /*length_pair=*/nullptr)};
+        fixpp::wire::dict_hooks_test_access::make(
+            &tv, /*classify=*/nullptr, &divergent_member_fn,
+            /*group_delim=*/nullptr,
+            /*length_pair=*/nullptr, &fixpp_test_support::context_group_registered_fn)};
     ASSERT_TRUE(pre.build_status().has_value()) << "oracle table failed to build";
     // The ROOT context MessageView seeds unconditionally (its dict-aware ctor's `set_group_context`
     // call); reproduce it so the two tables differ in the delimiter callback ALONE.
@@ -1010,8 +1016,10 @@ TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
     // ── CHANGED probe: the split ────────────────────────────────────────────
     auto const post_res = post.group_slices_status(100);
     auto const pre_res = pre.group_slices_status(100);
-    ASSERT_FALSE(post_res.alloc_failed) << "post-083 splitter degraded on allocation";
-    ASSERT_FALSE(pre_res.alloc_failed) << "oracle splitter degraded on allocation";
+    ASSERT_FALSE(post_res.status == fixpp::wire::group_read_status::alloc_failed)
+        << "post-083 splitter degraded on allocation";
+    ASSERT_FALSE(pre_res.status == fixpp::wire::group_read_status::alloc_failed)
+        << "oracle splitter degraded on allocation";
 
     // Hand-derived from the fixture's bytes, NEVER captured. Pre-083 splits on
     // the wire's first tag (201): two instances. Post-083 splits on E's

@@ -38,6 +38,7 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-tasks.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-evidence.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/100-wire-group-read-integrity-gatea.md
 codegraph_entry: [run_read_pump, Framer, on_inbound_frame, on_inbound_active_, make_session_strand, Session, scan_frame_header, dispose_unparseable_, inbound_framer_config, note_garbles_, read_first_frame_bounded]
 constitution: ["§VIII.5", "§XI.2"]
 ---
@@ -138,7 +139,7 @@ site the session closes terminally, through `close_on_late_parse_failure_`. Ther
 the callback is not invoked. Effects already taken at the site stand. ⚠️ **Since 093 (fixpp#515)
 the failure is unreachable for an admitted frame**, because every inbound parse is sized for the
 densest frame of L bytes; the close stays as a defence (093 FR-014). #515 was settled by removing
-the failure, not by moving the decision ahead of the effects (B&L `L-092-6`).
+the failure, not by moving the decision ahead of the effects (B&L `L-092-6`). ⚠️ **Superseded by 100 (`100-wire-group-read-integrity`) for a frame crafted against the index seed** (100 research D1): such a frame now fails its parse at the per-build probe budget and reaches the late-parse close, with no test seam (B&L `B-100-2`, and the 100 amendments of `B-093-6` and `L-092-6`).
 
 **NextNumIn never wraps** (FR-019). `SeqnumManager::check_inbound` refuses to advance from
 `seqnum_max` with `store_seqnum_overflow`, and every consuming caller then ends the session
@@ -196,6 +197,7 @@ an early return in the Active arm did not count as inbound traffic, so a busy pe
 - **R-2 (#515):** a frame the read pump admits must always parse. One limit L, from the advertised
   MaxMessageSize(383) or else 64 KiB, sizes the carry and the parse capacity, and a frame over it is
   refused at framing with a loud close. The parse index moves to a per-session buffer allocated once.
+  Kept as history. ⚠️ **Superseded by 100 (`100-wire-group-read-integrity`) for a frame crafted against the index seed** (100 research D1): such a frame now fails its parse at the per-build probe budget and reaches the late-parse close, with no test seam (B&L `B-100-2`, and the 100 amendments of `B-093-6` and `L-092-6`).
 - **R-3 (#524):** a new `MessageStore` virtual with a default body; recorded on
   [`session`](./session.md) and [`message-store-quiescence`](./message-store-quiescence.md).
 - **R-4 (#514):** an establishment timeout, `logon_timeout_ms`, with a C-ABI setter; on expiry the

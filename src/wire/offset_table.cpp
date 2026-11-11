@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // src/wire/offset_table.cpp — [2b §6.2] OffsetTable eager build + open-address
-// robin-hood overlay + lazy group sub-index. All storage from the captured
+// overlay + lazy group sub-index. All storage from the captured
 // per-message memory_resource; DoS caps enforced with bounded memory.
+// 100-wire-group-read-integrity: group reads report a `group_read_status` and
+// `is_group` (research D3, D5), superseding 073's `alloc_failed` result field;
+// the overlay build's probe bound is a per-build budget whose excess fails the
+// build (research D1), superseding the per-insert cap that left a tag un-indexed.
 
 #include <algorithm>
 #include <atomic>
@@ -12,6 +16,7 @@
 #include <fixpp/wire/errors.hpp>  // wire::err_* / fail<T> (module error vocab)
 #include <fixpp/wire/framer.hpp>
 #include <fixpp/wire/group_view.hpp>         // group_context complete type (063 T006/T008)
+#include <fixpp/wire/length_data_carry.hpp>  // presence scan's Length+Data split (100, D11)
 #include <fixpp/wire/length_data_pairs.hpp>  // standard Length+Data pairs (fixpp#426)
 #include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/tag_scan.hpp>  // accumulate_tag_digit (SC-004 / 040-inbound-tag-overflow)
@@ -308,42 +313,52 @@ void OffsetTable::build(frame_view const& frame, std::size_t reserve_entries) no
                 entries_.clear();
                 return;
             }
-            entries_.push_back(entry{.offset = static_cast<std::uint32_t>(val_start),
-                                     .length = static_cast<std::uint32_t>(val_len),
-                                     .tag = static_cast<std::uint16_t>(tag),
-                                     .group_index_link = 0U});
+            // 100 (T071): constructed in place, so each member is stored once, into
+            // the slot. Copying in a temporary instead lets the narrow stores of
+            // `tag` and `group_index_link` be reread as one wider load, which
+            // cannot store-forward.
+            entries_.emplace_back(static_cast<std::uint32_t>(val_start),
+                                  static_cast<std::uint32_t>(val_len),
+                                  static_cast<std::uint16_t>(tag), std::uint16_t{0});
         }
 
-        // Build the robin-hood overlay over first occurrences.
+        // Build the open-address overlay over first occurrences.
         std::size_t const cap = overlay_cap_for(entries_.size());
         overlay_.assign(cap, 0U);
         auto const mask = static_cast<std::uint32_t>(cap - 1U);
-        // DoS bound: a frame whose distinct tags adversarially hash-collide
-        // under mix() could make each insert probe O(occ), i.e. O(occ^2)
-        // total within the wire_offset_table_full cap. Cap the per-insert
-        // probe at a constant so build stays O(occ). On overflow the
-        // occurrence is left UN-indexed (skipped, never written to an
-        // occupied slot) — find() then reports that tag absent, a bounded,
-        // crash-free degradation that only a crafted hostile frame can hit
-        // (normal frames keep clusters far below the cap; load factor < 1).
+        // DoS bound: a frame whose distinct tags hash-collide under mix() could
+        // make each insert probe O(occ), i.e. O(occ^2) total within the
+        // wire_offset_table_full cap.
+        // 100 (research D1): the probes of the whole insert loop are counted
+        // against one per-build budget of `kMaxBuildProbe` per occurrence, so the
+        // build stays O(occ). A probe is one step past an occupied slot
+        // (inspecting the home slot costs none), and an occurrence whose tag is
+        // already indexed walks to that tag's slot, so its steps count too. The
+        // build fails at the step that takes the running total over the budget,
+        // as every other build-failure arm does (wire_offset_table_full, empty
+        // table), so a table that built indexes every distinct tag's first
+        // occurrence.
         constexpr std::size_t kMaxBuildProbe = 128;
+        std::size_t const probe_budget = kMaxBuildProbe * entries_.size();
+        std::size_t probes = 0;
         for (std::size_t e = 0; e < entries_.size(); ++e) {
             std::uint16_t const tag = entries_[e].tag;
             std::uint32_t slot = mix(tag, seed_) & mask;
-            bool skip_insert = false;
-            std::size_t probes = 0;
+            bool already_indexed = false;
             while (overlay_[slot] != 0U) {
                 if (entries_[overlay_[slot] - 1U].tag == tag) {
-                    skip_insert = true;  // keep FIRST occurrence
+                    already_indexed = true;  // keep FIRST occurrence
                     break;
                 }
                 slot = (slot + 1U) & mask;
-                if (++probes >= kMaxBuildProbe) {
-                    skip_insert = true;  // DoS bound: leave this occ un-indexed
-                    break;
+                if (++probes > probe_budget) {
+                    status_ = err_offset_table_full();
+                    entries_.clear();
+                    overlay_.clear();
+                    return;
                 }
             }
-            if (!skip_insert) {
+            if (!already_indexed) {
                 overlay_[slot] = static_cast<std::uint32_t>(e) + 1U;
             }
         }
@@ -419,7 +434,23 @@ static std::uint32_t parse_declared_count(std::byte const* base,
     return parse_bounded_u32(std::span<std::byte const>{base + e.offset, e.length});
 }
 
+// 100 (T071 fix): the public form asks the membership callback at every level's
+// own tests, as it always did (a default `group_resolution` names no definition).
 std::size_t OffsetTable::consume_group_extent(std::size_t count_idx, group_context const& ctx,
+                                              std::uint8_t depth, bool& overflow) const noexcept {
+    return consume_group_extent(count_idx, ctx, dict_hooks::group_resolution{}, depth, overflow);
+}
+
+bool OffsetTable::is_group_member(dict_hooks::group_resolution const& def, group_context const& ctx,
+                                  std::uint16_t no_tag, std::uint16_t tag) const noexcept {
+    if (def.definition_known) {
+        return std::ranges::find(def.members, tag) != def.members.end();
+    }
+    return hooks_.group_member_fn()(hooks_.opaque_dict(), ctx, no_tag, tag);
+}
+
+std::size_t OffsetTable::consume_group_extent(std::size_t count_idx, group_context const& ctx,
+                                              dict_hooks::group_resolution const& def,
                                               std::uint8_t depth, bool& overflow) const noexcept {
     if (depth >= kMaxGroupDepth) {
         overflow = true;  // T022: nesting deeper than K=16 -> err_group_too_large
@@ -436,7 +467,7 @@ std::size_t OffsetTable::consume_group_extent(std::size_t count_idx, group_conte
     std::uint16_t const delim = entries_[first].tag;
     // Confirm this count field really heads a group in-context (its delimiter
     // is a member); otherwise it is a plain scalar -> zero extent.
-    if (!hooks_.group_member_fn()(hooks_.opaque_dict(), ctx, group_no_tag, delim)) {
+    if (!is_group_member(def, ctx, group_no_tag, delim)) {
         return first;
     }
     std::uint32_t const declared = parse_declared_count(frame_base_, entries_[count_idx]);
@@ -470,11 +501,21 @@ std::size_t OffsetTable::consume_group_extent(std::size_t count_idx, group_conte
     // the overflow check written only in the descent branch. Checking it after
     // BOTH branches is equivalent: `overflow` is false on entry (every setter
     // returns immediately) and the non-descent branch cannot set it.
+    //
+    // 100 (T071 fix): whether a tag opens a nested group is still asked of the
+    // membership callback, which a tag that is no group's count tag answers without a
+    // store lookup. A nested group it confirms is resolved once, and that level's own
+    // tests read the definition (when the resolver names one).
     auto consume_one = [&](std::size_t at) noexcept -> std::size_t {
         if (at + 1U < entries_.size() &&
             hooks_.group_member_fn()(hooks_.opaque_dict(), child, entries_[at].tag,
                                      entries_[at + 1U].tag)) {
-            return consume_group_extent(at, child, static_cast<std::uint8_t>(depth + 1U), overflow);
+            dict_hooks::group_resolution const nested =
+                hooks_.group_resolve_fn() != nullptr
+                    ? hooks_.group_resolve_fn()(hooks_.opaque_dict(), child, entries_[at].tag)
+                    : dict_hooks::group_resolution{};
+            return consume_group_extent(at, child, nested, static_cast<std::uint8_t>(depth + 1U),
+                                        overflow);
         }
         return at + 1U;  // ordinary tag — no nested descent
     };
@@ -497,8 +538,7 @@ std::size_t OffsetTable::consume_group_extent(std::size_t count_idx, group_conte
             // inside an instance): a non-member ends this instance, and the
             // group. Only once the tag is known to belong does `consume_one`
             // decide whether it also OPENS a nested group.
-            if (!hooks_.group_member_fn()(hooks_.opaque_dict(), ctx, group_no_tag,
-                                          entries_[k].tag)) {
+            if (!is_group_member(def, ctx, group_no_tag, entries_[k].tag)) {
                 break;
             }
             // 083 C-8.0c: position 2 — an ordinary member inside an instance.
@@ -517,6 +557,12 @@ std::size_t OffsetTable::consume_group_extent(std::size_t count_idx, group_conte
 }
 
 core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_tag) const noexcept {
+    dict_hooks::group_resolution def{};
+    return group_resolved(no_tag, def);
+}
+
+core::expected_t<OffsetTable::group_index> OffsetTable::group_resolved(
+    std::uint16_t no_tag, dict_hooks::group_resolution& def) const noexcept {
     check_alive();
     if (!status_) {
         return fail<group_index>(status_.error());
@@ -525,7 +571,7 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     // oracle nothing in this frame can be established as a repeating group,
     // so this function does not answer for a dict-free table: it reports the
     // group ABSENT, which is the same answer the dict-aware path below gives
-    // when the dictionary does not recognise `delim` as a member of `no_tag`.
+    // for a tag not registered as a group in this table's context (100, step 3).
     // group_slices() then yields an empty span and the C-ABI reports
     // TYPE_MISMATCH -- the documented E-2 / CA-010-read result ("not a
     // spurious group instance", 066 contracts/inbound-parse.md).
@@ -549,9 +595,14 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     // Message::setGroup when DataDictionary::getGroup fails, forming no
     // Group at all; QuickFIX/J guards every parseGroup call site on a
     // non-null dictionary. Neither derives a group extent from the wire.
-    if (hooks_.opaque_dict() == nullptr || hooks_.group_member_fn() == nullptr) {
+    //
+    // 100 (research D2): the order below is D2's six steps. Step 1, the decline,
+    // also covers a dict-aware bundle with no registration callback, which only the
+    // test seam can build.
+    if (!hooks_.can_establish_groups()) {
         return err_required_field_missing<group_index>();
     }
+    // Step 2: locate the count entry; absent -> absent.
     std::size_t count_idx = entries_.size();
     for (std::size_t e = 0; e < entries_.size(); ++e) {
         if (entries_[e].tag == no_tag) {
@@ -562,35 +613,42 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     if (count_idx == entries_.size()) {
         return err_required_field_missing<group_index>();
     }
-    std::size_t const first = count_idx + 1U;
-    if (first >= entries_.size()) {
-        // Count field is the last entry; group is empty.
-        return group_index{no_tag, first, 0U};
-    }
-
-    std::uint16_t const delim = entries_[first].tag;
     // This table's stored membership context (msg_type + bounded parent
     // path). A ROOT table is seeded at `MessageView` construction time
     // (`MessageView::group<>()` re-applies the same value, idempotent);
     // a NESTED sub-table is seeded once by `build_nested_subview`.
     group_context const ctx = stored_group_context();
-    // Validate that `no_tag` is actually a group count field by confirming
-    // the dictionary recognises `delim` (the tag immediately following the
-    // count field) as a member of `no_tag`'s group.  If the dict does NOT
-    // know about this membership the count field is a plain scalar (e.g.
-    // SenderCompID=49) and we must return an absent result so that
-    // group_slices() yields an empty span → the thunk can report
-    // TYPE_MISMATCH (E-2 / CA-010-read contract).
-    if (!hooks_.group_member_fn()(hooks_.opaque_dict(), ctx, no_tag, delim)) {
+    // Step 3: registration decides group-ness, before anything reads the value or
+    // the next field. Not registered -> not a group, which answers as absent does
+    // (`err_required_field_missing`); `group_slices_status().is_group` and `find()`
+    // tell the two apart.
+    // 100 (T071 fix): one resolver call answers step 3, and its definition (when it
+    // names one) answers step 5 and the walk's same-context membership tests.
+    def = hooks_.group_resolve_fn()(hooks_.opaque_dict(), ctx, no_tag);
+    if (!def.registered) {
         return err_required_field_missing<group_index>();
     }
+    // Step 4: a registered count field that is the last entry -> present, zero
+    // instances.
+    std::size_t const first = count_idx + 1U;
+    if (first >= entries_.size()) {
+        return group_index{no_tag, first, 0U};
+    }
+    // Step 5: a registered count whose next field is not a member of its group ->
+    // present, zero instances. The value is not read: a declared 0, a value with no
+    // leading digit and a lying count all land here or in step 6.
+    std::uint16_t const delim = entries_[first].tag;
+    if (!is_group_member(def, ctx, no_tag, delim)) {
+        return group_index{no_tag, first, 0U};
+    }
+    // Step 6: the extent walk, unchanged.
     // 063 Defect B: nesting-aware extent. The pre-063 flat
     // `seen_in_instance` heuristic truncated a multi-entry NESTED group at
     // its 2nd entry (its repeated delimiter looked like a new outer
     // instance). consume_group_extent recursively consumes each nested
     // group's full declared extent so the outer slice encloses all of it.
     bool overflow = false;
-    std::size_t const group_end = consume_group_extent(count_idx, ctx, ctx.depth, overflow);
+    std::size_t const group_end = consume_group_extent(count_idx, ctx, def, ctx.depth, overflow);
     if (overflow) {
         return err_group_too_large<group_index>();
     }
@@ -638,16 +696,20 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
 // no second place to keep in agreement. See the `group_span` comment in
 // offset_table.hpp and B&L B-389-1.
 
-// 073 T003: public span wrapper — UNCHANGED signature, one-line delegation.
-// Every top-level caller (C-ABI top-level group getter, MessageView::group<>())
-// keeps compiling and behaving identically (L-073-1, deferred).
+// 073 T003: public span wrapper — UNCHANGED signature, one-line delegation that
+// drops the status (see `group_slices_result` in offset_table.hpp for the reader
+// that needs it, and the grep that lists this wrapper's callers).
 std::span<group_slice const> OffsetTable::group_slices(std::uint16_t no_tag) const noexcept {
     return group_slices_status(no_tag).slices;
 }
 
-// 073 T003: status-bearing internal form (research.md §D2 mode (b), FR-002
-// originate-at-failure). Body is the former `group_slices()` verbatim, with
-// each exit widened to also report `alloc_failed`.
+// 073 T003: status-bearing form (research.md §D2 mode (b), FR-002
+// originate-at-failure).
+// 100 (research D5, D10): a group wire limit reports `limit_exceeded` and caches
+// nothing; a group with instances pushes its cache row after the count pass and
+// before the slice allocation, and pops it when that allocation throws; an answer
+// that needs no slices is cached when its row fits and served uncached when it
+// does not. So the cache holds only completed reads.
 group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const noexcept {
     check_alive();
     // Already materialized for this no_tag — return its own array. 389: this
@@ -655,220 +717,260 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
     // next group is materialized.
     for (auto const& gs : group_index_) {
         if (gs.no_tag == no_tag) {
-            return {.slices = {gs.data, gs.count}, .alloc_failed = false};
+            return {.slices = {gs.data, gs.count},
+                    .status = group_read_status::ok,
+                    .is_group = gs.is_group};
         }
     }
-    try {
-        // 389: this group's OWN exact-sized array. Nothing here can move a span
-        // handed out for a different `no_tag` — those live in their own arrays.
-        //
-        // The single `allocate()` below is sized by a COUNT PASS using the same
-        // `is_boundary` the fill loop uses, so the allocation is EXACT. That is
-        // what keeps PR #181's arena constraint met: growing a vector instead —
-        // backed by the fixed null-upstream monotonic arena — strands every
-        // superseded buffer, since such a resource never reuses one. The count
-        // pass is load-bearing, not an optimization — deleting it re-opens #181.
-        // Magnitude deliberately omitted: it is a RESULT parameterized by the
-        // STL's growth factor. B&L B-389-1 carries the figure and its platform.
-        group_slice* slices = nullptr;  // arena buffer, sized by the count pass
-        std::uint32_t n_written = 0;
-        auto gi = group(no_tag);
-        if (gi) {
-            std::size_t const first = gi->first_entry();
-            // group() now returns the bounded extent (excluding trailing
-            // top-level fields). Use gi->entry_count() to derive group_end so
-            // slices stay within the member-set boundary. ([PR68-09] fix.)
-            std::size_t const group_end = first + gi->entry_count();
-            if (first < entries_.size() && first < group_end) {
-                // Each reappearance of the group's first field (the entry
-                // after the count) starts a new occurrence; slice in document
-                // order from one delimiter up to (but excluding) the next.
-                // The loop is bounded by group_end, NOT entries_.size(), so
-                // trailing top-level fields are never included in the last
-                // instance slice. ([PR68-09] boundary fix.)
-                // 083 T058 (C-8.2 / C-8.4): the boundary delimiter is now
-                // resolved from the DICTIONARY, keyed on this table's STORED
-                // context — `(msg_type, stored_group_context().parent_path,
-                // no_tag)`, the SAME key the validator's descent uses, which is
-                // what makes FR-021b's agreement structural rather than
-                // coincidental.
-                //
-                // NOT `group_context_for(no_tag)`: that returns
-                // `stored_group_context().pushed(no_tag)` and would
-                // query one path element too long, violating Entity 1's
-                // "parent_path EXCLUDES no_tag" invariant.
-                //
-                // 384 RESOLVES C-8.4, whose two rows were BOTH stale here.
-                // The archaeology — which row said what, and why each went
-                // stale — is in the C-8.4 AMENDMENT dated 2026-09-07 and in
-                // brain/components/wire.md; what stays here is the CONDITION
-                // this code runs under.
-                //
-                // This fallback is not justified as CORRECT. The two
-                // constructions disagree on a divergent context — pinned by
-                // tests/wire/typed_read_split_agreement_test.cpp
-                // `OutOfScopeWireProbesUnchanged`, which builds the
-                // half-threaded table on purpose as its pre-083 oracle. It is
-                // justified as REQUESTED and BOUNDED:
-                //   - requested: 384 removed the `= nullptr` default from every
-                //     dict-aware OffsetTable/MessageView ctor, so this shape can
-                //     no longer be built by omission. ⚠️ Removing the default
-                //     does NOT remove the shape — a delimiter callback that
-                //     ANSWERS 0 reaches this same fallback without any caller
-                //     writing a null (see the guard's own comment). The default
-                //     removal narrows the accidental spelling; the answer space
-                //     still contains a value equivalent to absence.
-                //   - bounded: this `delim` is membership-VALIDATED before use.
-                //     group() proceeds only after group_member_fn_ confirms the
-                //     wire's first tag after the count IS a member of this group
-                //     in this context, so an arbitrary attacker-chosen tag can
-                //     never become the delimiter — unlike #220's extent, which
-                //     had no oracle at all. For a message that CONFORMS to FIX's
-                //     "every instance opens with the group's first field" rule
-                //     the wire tag and the dictionary's answer coincide; they
-                //     diverge only where the dictionary's per-context record
-                //     disagrees with the order actually on the wire, which is
-                //     precisely what the oracle a caller declined to supply
-                //     exists to arbitrate.
-                //
-                // There is deliberately no "or the context did not resolve"
-                // branch: the splitter cannot observe that state, since
-                // `group_first_field` has already fallen through to the bare
-                // global before it sees a value and returns a plain scalar with
-                // no discriminator.
-                std::uint16_t delim = entries_[first].tag;
-                if (hooks_.opaque_dict() != nullptr && hooks_.group_delim_fn() != nullptr) {
-                    group_context const ctx = stored_group_context();
-                    // 384 (C-8.4 row 2): a 0 answer means the store has no
-                    // delimiter record for `(msg_type, parent_path, no_tag)` —
-                    // `group_first_field` returns 0 both when `group_bit` is
-                    // clear and when the record's `group_first` is itself 0. We
-                    // are already past group()'s membership check, so the
-                    // dictionary has asserted that this no_tag HAS members in
-                    // this context; a missing delimiter record alongside a
-                    // non-empty member set is an INCONSISTENT dictionary, not an
-                    // absent group. Declining here would drop instances the
-                    // membership oracle just confirmed are present, so the
-                    // membership-validated wire tag is kept instead. Reachable
-                    // through the hand-built table_view surface
-                    // (`add_group_member` without `set_group_first` — pinned by
-                    // tests/wire/offset_table_test.cpp
-                    // `GroupSlicesKeepsWireDelimiterWhenDelimStoreAnswersZero`).
-                    // A LOADED dictionary cannot reach it, and the reason is
-                    // TWO loader facts, neither of them the one that comes to
-                    // mind first (`as_table_view()` does NOT read the capture
-                    // directly — it does a store lookup and writes back whatever
-                    // it gets, including 0):
-                    //   (1) neither loader ever STORES a record with delimiter
-                    //       0 — both guard the push on `captured != 0`
-                    //       (xml_loader.cpp / orchestra_loader.cpp, 083 T036 /
-                    //       FR-006 / C-6.1), so a 0 from the lookup can only
-                    //       mean NO RECORD; and
-                    //   (2) the FR-023 / C-3.4 completeness sweep in both
-                    //       loaders' finalize() THROWS if a context
-                    //       as_table_view() will register has no record.
-                    // (1)+(2) => the delimiter written is non-zero. ⚠️ An earlier
-                    // version of this comment said the FR-023 sweep was NOT
-                    // load-bearing "because it never inspects delimiter" — that
-                    // is backwards, and it pointed the reader away from the
-                    // guard that carries the claim. See B&L B-384-2, which keeps
-                    // both wrong versions on purpose.
-                    if (std::uint16_t const d =
-                            hooks_.group_delim_fn()(hooks_.opaque_dict(), ctx, no_tag);
-                        d != 0) {
-                        delim = d;
-                    }
-                }
-                // ── PASS 1 (389): count boundaries, reserve EXACTLY ──
-                // ONE definition of the boundary, used by BOTH passes. An
-                // earlier draft spelled the predicate twice and defended it as
-                // "a shared lambda would hide a divergence the way the deleted
-                // estimator did". ⚠️ That argument is BACKWARDS, and it is
-                // recorded because it nearly re-created the very defect it was
-                // invoked against: the estimator failed because two DIFFERENT
-                // computations lived in two FUNCTIONS across a feature boundary
-                // with nothing forcing agreement — a sum over wire-declared
-                // counts on one side, a delimiter-driven boundary scan on the
-                // other. One expression in one scope makes divergence
-                // structurally IMPOSSIBLE; that is the opposite shape, not the
-                // same one.
-                auto const is_boundary = [&](std::size_t k) noexcept {
-                    return (k == group_end) || (k > first && entries_[k].tag == delim);
-                };
-                //
-                //
-                // The count is EXACT, not an upper bound: the pushed ranges
-                // PARTITION [first, group_end). At every push `inst_start` is
-                // the previous boundary's `k`, and boundaries strictly increase,
-                // so `inst_start < k` always holds and no push is empty.
-                std::size_t n_slices = 0;
-                for (std::size_t k = first; k <= group_end; ++k) {
-                    if (is_boundary(k)) {
-                        ++n_slices;
-                    }
-                }
-                // Exactly `n_slices`, once. Throws `bad_alloc` on arena
-                // exhaustion, which the existing catch below turns into the
-                // 073 / L-065-2 `alloc_failed` degrade — unchanged semantics.
-                //
-                // ⚠️ The `n_slices == 0` arm is DEFENSIVE AND PROVABLY DEAD, the
-                // same shape as the `: 0U` ternary arm below. The enclosing
-                // guard establishes `first < group_end`, so the count loop runs
-                // at least once, and `is_boundary(group_end)` is UNCONDITIONALLY
-                // true — therefore `n_slices >= 1` here, always. Codecov reports
-                // this line as a PARTIAL branch for exactly that reason; it is
-                // not a coverage gap and MUST NOT be "fixed" by inventing a test
-                // for it. The guard is kept so a future change to the boundary
-                // rule cannot silently reach `allocate(0, …)`.
-                if (n_slices > 0) {
-                    slices = static_cast<group_slice*>(
-                        resource()->allocate(n_slices * sizeof(group_slice), alignof(group_slice)));
-                }
-
-                // ── PASS 2: fill ──
-                std::size_t inst_start = first;
-                for (std::size_t k = first; k <= group_end; ++k) {
-                    if (is_boundary(k)) {
-                        // RC#2 fix: slice must begin at the delimiter's "tag="
-                        // prefix, NOT at its value. Walk back from val_start to
-                        // find the first digit of the tag ([2b §4.7]).
-                        std::uint32_t const fs =
-                            field_start_from_val(frame_base_, entries_[inst_start].offset);
-                        std::byte const* d = frame_base_ + fs;
-                        // End = one past the last value byte of the last field
-                        // in this instance (which terminates before the trailing
-                        // SOH — length is exclusive of SOH by contract).
-                        std::uint32_t const end_off =
-                            entries_[k - 1U].offset + entries_[k - 1U].length;
-                        // The `: 0U` arm is DEFENSIVE AND PROVABLY DEAD, which
-                        // is why it shows as the one uncovered line in this
-                        // function. `inst_start` is only ever set to a previous
-                        // boundary's `k`, and boundaries strictly increase, so
-                        // `inst_start < k` at every push ⇒ `entries_[k - 1U]` is
-                        // at or after `entries_[inst_start]` ⇒ `end_off > fs`.
-                        // Kept rather than removed: it costs nothing, and the
-                        // alternative is an unchecked subtraction. Two
-                        // independent instruments agree it cannot fire — the
-                        // partition argument above, and llvm-cov measuring zero
-                        // executions across the wire and C-ABI suites.
-                        std::size_t const len =
-                            (end_off > fs) ? static_cast<std::size_t>(end_off - fs) : 0U;
-                        slices[n_written++] = group_slice{.data = d, .len = len};
-                        inst_start = k;
-                    }
+    // 389: this group's OWN exact-sized array. Nothing here can move a span
+    // handed out for a different `no_tag` — those live in their own arrays.
+    //
+    // The single `allocate()` below is sized by a COUNT PASS using the same
+    // `is_boundary` the fill loop uses, so the allocation is EXACT. That is
+    // what keeps PR #181's arena constraint met: growing a vector instead —
+    // backed by the fixed null-upstream monotonic arena — strands every
+    // superseded buffer, since such a resource never reuses one. The count
+    // pass is load-bearing, not an optimization — deleting it re-opens #181.
+    // Magnitude deliberately omitted: it is a RESULT parameterized by the
+    // STL's growth factor. B&L B-389-1 carries the figure and its platform.
+    dict_hooks::group_resolution def{};
+    auto gi = group_resolved(no_tag, def);
+    // 100 (research D5): `group()` stopped at a group wire limit (the
+    // per-instance entry cap or the nesting depth). It allocates nothing, so
+    // the failure recurs on a repeat, and no row is pushed (research D10).
+    // Any other `group()` error (an absent tag, a tag that is not a group here,
+    // a table whose own build failed) answers as not a group; a nested read
+    // resolves a failed sub-build from the sub-table's build status (research D7).
+    if (!gi && gi.error() == core::error::wire_group_too_large) {
+        return {.slices = {}, .status = group_read_status::limit_exceeded};
+    }
+    // 100 (research D3): the read established `no_tag` as a group (zero
+    // instances included). Cached with the row, so a repeat answers the same.
+    bool const is_group = gi.has_value();
+    if (gi) {
+        std::size_t const first = gi->first_entry();
+        // group() now returns the bounded extent (excluding trailing
+        // top-level fields). Use gi->entry_count() to derive group_end so
+        // slices stay within the member-set boundary. ([PR68-09] fix.)
+        std::size_t const group_end = first + gi->entry_count();
+        if (first < entries_.size() && first < group_end) {
+            // Each reappearance of the group's first field (the entry
+            // after the count) starts a new occurrence; slice in document
+            // order from one delimiter up to (but excluding) the next.
+            // The loop is bounded by group_end, NOT entries_.size(), so
+            // trailing top-level fields are never included in the last
+            // instance slice. ([PR68-09] boundary fix.)
+            // 083 T058 (C-8.2 / C-8.4): the boundary delimiter is now
+            // resolved from the DICTIONARY, keyed on this table's STORED
+            // context — `(msg_type, stored_group_context().parent_path,
+            // no_tag)`, the SAME key the validator's descent uses, which is
+            // what makes FR-021b's agreement structural rather than
+            // coincidental.
+            //
+            // NOT `group_context_for(no_tag)`: that returns
+            // `stored_group_context().pushed(no_tag)` and would
+            // query one path element too long, violating Entity 1's
+            // "parent_path EXCLUDES no_tag" invariant.
+            //
+            // 384 RESOLVES C-8.4, whose two rows were BOTH stale here.
+            // The archaeology — which row said what, and why each went
+            // stale — is in the C-8.4 AMENDMENT dated 2026-09-07 and in
+            // brain/components/wire.md; what stays here is the CONDITION
+            // this code runs under.
+            //
+            // This fallback is not justified as CORRECT. The two
+            // constructions disagree on a divergent context — pinned by
+            // tests/wire/typed_read_split_agreement_test.cpp
+            // `OutOfScopeWireProbesUnchanged`, which builds the
+            // half-threaded table on purpose as its pre-083 oracle. It is
+            // justified as REQUESTED and BOUNDED:
+            //   - requested: 384 removed the `= nullptr` default from every
+            //     dict-aware OffsetTable/MessageView ctor, so this shape can
+            //     no longer be built by omission. ⚠️ Removing the default
+            //     does NOT remove the shape — a delimiter callback that
+            //     ANSWERS 0 reaches this same fallback without any caller
+            //     writing a null (see the guard's own comment). The default
+            //     removal narrows the accidental spelling; the answer space
+            //     still contains a value equivalent to absence.
+            //   - bounded: this `delim` is membership-VALIDATED before use.
+            //     group() proceeds only after confirming the
+            //     wire's first tag after the count IS a member of this group
+            //     in this context, so an arbitrary attacker-chosen tag can
+            //     never become the delimiter — unlike #220's extent, which
+            //     had no oracle at all. For a message that CONFORMS to FIX's
+            //     "every instance opens with the group's first field" rule
+            //     the wire tag and the dictionary's answer coincide; they
+            //     diverge only where the dictionary's per-context record
+            //     disagrees with the order actually on the wire, which is
+            //     precisely what the oracle a caller declined to supply
+            //     exists to arbitrate.
+            //
+            // There is deliberately no "or the context did not resolve"
+            // branch: the splitter cannot observe that state.
+            std::uint16_t delim = entries_[first].tag;
+            if (hooks_.opaque_dict() != nullptr && hooks_.group_delim_fn() != nullptr) {
+                group_context const ctx = stored_group_context();
+                // 384 (C-8.4 row 2): a 0 answer means the store has no
+                // delimiter record for `(msg_type, parent_path, no_tag)`. We
+                // are already past group()'s membership check, so the
+                // dictionary has asserted that this no_tag HAS members in
+                // this context; a missing delimiter record alongside a
+                // non-empty member set is an INCONSISTENT dictionary, not an
+                // absent group. Declining here would drop instances the
+                // membership oracle just confirmed are present, so the
+                // membership-validated wire tag is kept instead. Reachable
+                // through the hand-built table_view surface
+                // (`add_group_member` without `set_group_first` — pinned by
+                // tests/wire/offset_table_test.cpp
+                // `GroupSlicesKeepsWireDelimiterWhenDelimStoreAnswersZero`).
+                // A LOADED dictionary cannot reach it, and the reason is
+                // TWO loader facts, neither of them the one that comes to
+                // mind first (`as_table_view()` does NOT read the capture
+                // directly — it does a store lookup and writes back whatever
+                // it gets, including 0):
+                //   (1) neither loader ever STORES a record with delimiter
+                //       0 — both guard the push on `captured != 0`
+                //       (xml_loader.cpp / orchestra_loader.cpp, 083 T036 /
+                //       FR-006 / C-6.1), so a 0 from the lookup can only
+                //       mean NO RECORD; and
+                //   (2) the FR-023 / C-3.4 completeness sweep in both
+                //       loaders' finalize() THROWS if a context
+                //       as_table_view() will register has no record.
+                // (1)+(2) => the delimiter written is non-zero. ⚠️ An earlier
+                // version of this comment said the FR-023 sweep was NOT
+                // load-bearing "because it never inspects delimiter" — that
+                // is backwards, and it pointed the reader away from the
+                // guard that carries the claim. See B&L B-384-2, which keeps
+                // both wrong versions on purpose.
+                // 100 (T071 fix): the resolver's delimiter, from `group()`'s one
+                // lookup, when it names the definition; the delimiter callback answers
+                // the same key the same way.
+                if (std::uint16_t const d =
+                        def.definition_known
+                            ? def.delimiter
+                            : hooks_.group_delim_fn()(hooks_.opaque_dict(), ctx, no_tag);
+                    d != 0) {
+                    delim = d;
                 }
             }
+            // ── PASS 1 (389): count boundaries, reserve EXACTLY ──
+            // ONE definition of the boundary, used by BOTH passes. An
+            // earlier draft spelled the predicate twice and defended it as
+            // "a shared lambda would hide a divergence the way the deleted
+            // estimator did". ⚠️ That argument is BACKWARDS, and it is
+            // recorded because it nearly re-created the very defect it was
+            // invoked against: the estimator failed because two DIFFERENT
+            // computations lived in two FUNCTIONS across a feature boundary
+            // with nothing forcing agreement — a sum over wire-declared
+            // counts on one side, a delimiter-driven boundary scan on the
+            // other. One expression in one scope makes divergence
+            // structurally IMPOSSIBLE; that is the opposite shape, not the
+            // same one.
+            auto const is_boundary = [&](std::size_t k) noexcept {
+                return (k == group_end) || (k > first && entries_[k].tag == delim);
+            };
+            //
+            //
+            // The count is EXACT, not an upper bound: the pushed ranges
+            // PARTITION [first, group_end). At every push `inst_start` is
+            // the previous boundary's `k`, and boundaries strictly increase,
+            // so `inst_start < k` always holds and no push is empty.
+            std::size_t n_slices = 0;
+            for (std::size_t k = first; k <= group_end; ++k) {
+                if (is_boundary(k)) {
+                    ++n_slices;
+                }
+            }
+            // 100 (research D10): the row is pushed now, after the count pass
+            // and before the slice allocation, so a read that cannot cache its
+            // row fails before it consumes the slices' bytes, and every repeat
+            // on a monotonic resource fails the same way. The row's span is
+            // written once the slices are filled.
+            try {
+                group_index_.push_back(
+                    group_span{.data = nullptr, .count = 0, .no_tag = no_tag, .is_group = true});
+            } catch (std::bad_alloc const&) {
+                return {.slices = {}, .status = group_read_status::alloc_failed};
+            }
+            group_slice* slices = nullptr;  // arena buffer, sized by the count pass
+            // Exactly `n_slices`, once. Throws `bad_alloc` on arena
+            // exhaustion, which the catch around it turns into the 073 /
+            // L-065-2 `alloc_failed` degrade after popping the row pushed
+            // above, so the failed read caches nothing (100, research D10).
+            //
+            // ⚠️ The `n_slices == 0` arm is DEFENSIVE AND PROVABLY DEAD, the
+            // same shape as the `: 0U` ternary arm below. The enclosing
+            // guard establishes `first < group_end`, so the count loop runs
+            // at least once, and `is_boundary(group_end)` is UNCONDITIONALLY
+            // true — therefore `n_slices >= 1` here, always. Codecov reports
+            // this line as a PARTIAL branch for exactly that reason; it is
+            // not a coverage gap and MUST NOT be "fixed" by inventing a test
+            // for it. The guard is kept so a future change to the boundary
+            // rule cannot silently reach `allocate(0, …)`.
+            if (n_slices > 0) {
+                try {
+                    slices = static_cast<group_slice*>(
+                        resource()->allocate(n_slices * sizeof(group_slice), alignof(group_slice)));
+                } catch (std::bad_alloc const&) {
+                    // 073 T003: on a nested sub-table this is the mode-(b)
+                    // origin (FR-002) — the sub-table built non-null but its
+                    // own slice materialization exhausted the arena.
+                    group_index_.pop_back();
+                    return {.slices = {}, .status = group_read_status::alloc_failed};
+                }
+            }
+
+            std::uint32_t n_written = 0;
+
+            // ── PASS 2: fill ──
+            std::size_t inst_start = first;
+            for (std::size_t k = first; k <= group_end; ++k) {
+                if (is_boundary(k)) {
+                    // RC#2 fix: slice must begin at the delimiter's "tag="
+                    // prefix, NOT at its value. Walk back from val_start to
+                    // find the first digit of the tag ([2b §4.7]).
+                    std::uint32_t const fs =
+                        field_start_from_val(frame_base_, entries_[inst_start].offset);
+                    std::byte const* d = frame_base_ + fs;
+                    // End = one past the last value byte of the last field
+                    // in this instance (which terminates before the trailing
+                    // SOH — length is exclusive of SOH by contract).
+                    std::uint32_t const end_off = entries_[k - 1U].offset + entries_[k - 1U].length;
+                    // The `: 0U` arm is DEFENSIVE AND PROVABLY DEAD, which
+                    // is why it shows as the one uncovered line in this
+                    // function. `inst_start` is only ever set to a previous
+                    // boundary's `k`, and boundaries strictly increase, so
+                    // `inst_start < k` at every push ⇒ `entries_[k - 1U]` is
+                    // at or after `entries_[inst_start]` ⇒ `end_off > fs`.
+                    // Kept rather than removed: it costs nothing, and the
+                    // alternative is an unchecked subtraction. Two
+                    // independent instruments agree it cannot fire — the
+                    // partition argument above, and llvm-cov measuring zero
+                    // executions across the wire and C-ABI suites.
+                    std::size_t const len =
+                        (end_off > fs) ? static_cast<std::size_t>(end_off - fs) : 0U;
+                    slices[n_written++] = group_slice{.data = d, .len = len};
+                    inst_start = k;
+                }
+            }
+            // The row is trivially copyable, so `group_index_` reallocation
+            // memcpys it and the arena buffer it points at never moves.
+            group_index_.back().data = slices;
+            group_index_.back().count = n_written;
+            return {
+                .slices = {slices, n_written}, .status = group_read_status::ok, .is_group = true};
         }
-        // The row is trivially copyable, so `group_index_` reallocation memcpys
-        // it and the arena buffer it points at never moves.
-        group_index_.push_back(group_span{.data = slices, .count = n_written, .no_tag = no_tag});
-        return {.slices = {slices, n_written}, .alloc_failed = false};
-    } catch (std::bad_alloc const&) {
-        // 073 T003: this is the mode-(b) origin (FR-002) — the sub-table
-        // built non-null but its own slice materialization exhausted the
-        // arena. Degrade to "no instances", never throw (noexcept).
-        return {.slices = {}, .alloc_failed = true};
     }
+    // 100 (research D10): an answer that needs no slices (absent, not a
+    // group, zero instances read). Recomputing it allocates nothing and
+    // yields the same answer, so a row that does not fit leaves it uncached.
+    try {
+        group_index_.push_back(
+            group_span{.data = nullptr, .count = 0, .no_tag = no_tag, .is_group = is_group});
+    } catch (std::bad_alloc const&) {
+        // Served uncached: the repeat recomputes the same answer.
+    }
+    return {.slices = {}, .status = group_read_status::ok, .is_group = is_group};
 }
 
 // 062 T005: dict-aware sub-view-over-slice builder (see offset_table.hpp for
@@ -910,29 +1012,96 @@ OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_
     }
 }
 
-// 073 (D2): resolve a built (or failed) nested sub-table pointer to the
-// status-bearing result, OR-ing all THREE arena-exhaustion origins in ONE
-// place so both empty-returning exits of nested_group_slices share a single
-// definition — the two-exit drift this centralises is exactly the class of
-// bug the T004 checklist audit caught (cache-hit vs final exit diverging).
-//   (a) t == nullptr           — shell alloc failed / cached failed build;
-//   (c) build_status() OOM     — ctor build() degraded to out_of_memory
-//                                (`OffsetTable::build`'s `catch (std::bad_alloc const&)`); scoped
-//                                to OOM so a malformed-data degradation stays not-failed (FR-007
-//                                disjointness);
-//   (b) group_slices_status()  — the sub-table's own slice materialization
-//                                caught bad_alloc (feedback_status_origin_
-//                                must_cover_all_alloc_catch_sites).
-static nested_slices_result resolve_nested_result(OffsetTable const* table,
-                                                  std::uint16_t nested_no_tag) noexcept {
-    if (table == nullptr) {
-        return nested_slices_result{.slices = {}, .alloc_failed = true};  // mode (a)
+// 100 (research D11 step 2): whether `tag` occurs anywhere in the instance slice,
+// nested instances included, by a field walk that allocates nothing and splits
+// Length+Data through `hooks`, as `OffsetTable::build` splits a frame. It walks the
+// bytes `build_nested_subview` hands the sub-table's build (`len + 1`, RC1). A field
+// the walk cannot read ends it with the tag not found, so it never reports a tag
+// the C getter's `field_iterator` scan of the same slice would not reach.
+static bool slice_has_tag(std::byte const* data, std::size_t len, std::uint16_t tag,
+                          dict_hooks const& hooks) noexcept {
+    std::span<std::byte const> const buf{data, len + 1U};
+    length_data_carry carry;
+    std::size_t i = 0;
+    while (i < buf.size()) {
+        std::size_t const tag_start = i;
+        std::uint32_t t = 0;
+        while (i < buf.size() && buf[i] != EQ && buf[i] != SOH) {
+            auto const c = static_cast<unsigned char>(buf[i]);
+            if (c < '0' || c > '9' || !fixpp::wire::accumulate_tag_digit(t, c)) {
+                return false;
+            }
+            ++i;
+        }
+        if (i >= buf.size() || buf[i] != EQ || i == tag_start) {
+            return false;
+        }
+        auto const field_tag = static_cast<std::uint16_t>(t);
+        if (field_tag == tag) {
+            return true;
+        }
+        auto const value = carry.read_value(buf, i + 1U, field_tag, hooks);
+        if (!value) {
+            return false;
+        }
+        i = value->end + 1U;
     }
-    bool const sub_build_oom =  // mode (c)
-        !table->build_status() && table->build_status().error() == core::error::out_of_memory;
-    auto const s = table->group_slices_status(nested_no_tag);  // mode (b)
-    return nested_slices_result{.slices = s.slices,
-                                .alloc_failed = s.alloc_failed || sub_build_oom};
+    return false;
+}
+
+// 073 (D2): resolve a built (or failed) nested sub-table pointer to the
+// status-bearing result in ONE place, so both exits of nested_group_slices share
+// a single definition — the two-exit drift this centralises is exactly the class
+// of bug the T004 checklist audit caught (cache-hit vs final exit diverging).
+// A read ends at its first failure, in this order:
+//   (a) t == nullptr           — the shell allocation failed, or (100, research
+//                                D10) the call's cache row did not fit, so no
+//                                sub-table was built;
+//   (c) build_status() failed  — `out_of_memory` (`OffsetTable::build`'s
+//                                `catch (std::bad_alloc const&)`) is
+//                                `alloc_failed`; 100 (research D7):
+//                                `wire_offset_table_full` (the sub-table's entry
+//                                cap or its probe budget) is `limit_exceeded`. A
+//                                build that failed for any other reason keeps
+//                                073's not-failed scope (FR-007 disjointness): the
+//                                sub-table's `group()` answers it as not a group;
+//   (b) group_slices_status()  — the sub-table's own read failed
+//                                (feedback_status_origin_must_cover_all_alloc_catch_sites).
+// 100 (research D11): a failure is kept only for a tag registered in the call's
+// `ctx`, asked through the caller's `hooks` (a bundle with no registration
+// callback answers not registered, as `OffsetTable::group()`'s step 1 declines),
+// and present in the instance slice, in that order; otherwise the read answers
+// as for a tag it cannot establish as a group. It never reads the root table's
+// own `hooks_`, so the caller's split decides both (fixpp#426).
+static nested_slices_result resolve_nested_result(
+    OffsetTable const* table, std::byte const* slice_data, std::size_t slice_len,
+    std::uint16_t nested_no_tag, dict_hooks const& hooks, group_context const& ctx) noexcept {
+    group_read_status failure = group_read_status::ok;
+    if (table == nullptr) {
+        failure = group_read_status::alloc_failed;                  // mode (a)
+    } else if (auto const built = table->build_status(); !built) {  // mode (c)
+        if (built.error() == core::error::out_of_memory) {
+            failure = group_read_status::alloc_failed;
+        } else if (built.error() == core::error::wire_offset_table_full) {
+            failure = group_read_status::limit_exceeded;
+        }
+    }
+    if (failure == group_read_status::ok) {
+        auto const s = table->group_slices_status(nested_no_tag);  // mode (b)
+        if (s.status == group_read_status::ok) {
+            // 100 (research D3): without a failure, the sub-table's own answer.
+            return nested_slices_result{
+                .slices = s.slices, .status = group_read_status::ok, .is_group = s.is_group};
+        }
+        failure = s.status;
+    }
+    bool const registered =
+        hooks.can_establish_groups() &&
+        hooks.group_resolve_fn()(hooks.opaque_dict(), ctx, nested_no_tag).registered;
+    if (!registered || !slice_has_tag(slice_data, slice_len, nested_no_tag, hooks)) {
+        return nested_slices_result{.slices = {}, .status = group_read_status::ok};
+    }
+    return nested_slices_result{.slices = {}, .status = failure};
 }
 
 // 062 T006: single flat nested-subview cache (see offset_table.hpp for the
@@ -947,7 +1116,8 @@ nested_slices_result OffsetTable::nested_group_slices(std::byte const* slice_dat
                                                       detail::generation_token gen,
                                                       group_context const& ctx) const noexcept {
     if (slice_data == nullptr) {
-        return nested_slices_result{.slices = {}, .alloc_failed = false};  // absent, not a failure
+        return nested_slices_result{.slices = {},
+                                    .status = group_read_status::ok};  // absent, not a failure
     }
     // Zero-length, alloc-free liveness check ([2b §6.4] INV-G6): the cache
     // scan below can return on a WARM (slice_data, bundle, nested_no_tag) hit
@@ -992,10 +1162,12 @@ nested_slices_result OffsetTable::nested_group_slices(std::byte const* slice_dat
             // the function-scope local `table` — the local is still nullptr
             // for a same-no_tag match (only assigned from `row.table` in the
             // `!found_slice` branch below, which does not run for a matching
-            // row). Using the local here would report alloc_failed=true on
+            // row). Using the local here would report alloc_failed on
             // every warm cache-hit of a healthy group (FR-006/FR-007
-            // violation). All three origins are OR'd inside resolve_nested_result.
-            return resolve_nested_result(row.table, nested_no_tag);
+            // violation). Every failure origin is resolved inside
+            // resolve_nested_result, the same way at both exits.
+            return resolve_nested_result(row.table, slice_data, slice_len, nested_no_tag, hooks,
+                                         ctx);
         }
         if (!found_slice) {
             table = row.table;
@@ -1003,6 +1175,19 @@ nested_slices_result OffsetTable::nested_group_slices(std::byte const* slice_dat
         }
     }
     if (table == nullptr) {
+        // 100 (research D10): the row is pushed BEFORE the build, so a call whose
+        // row does not fit builds nothing and fails as a null sub-table does
+        // (mode (a), through resolve_nested_result); its repeat fails the same
+        // way. The built table, or null, is written into the pushed row.
+        try {
+            nested_cache_.push_back(nested_cache_row{.slice_data = slice_data,
+                                                     .hooks_key = hooks_key,
+                                                     .nested_no_tag = nested_no_tag,
+                                                     .table = nullptr});
+        } catch (std::bad_alloc const&) {
+            return resolve_nested_result(nullptr, slice_data, slice_len, nested_no_tag, hooks, ctx);
+        }
+        std::size_t const row = nested_cache_.size() - 1U;
         // 083 T057 (C-8.1) / fixpp#426: `hooks` is the CALLER's bundle,
         // forwarded whole — never mixed with this table's own `hooks_`. A
         // caller passing a dictionary other than this table's own now gets
@@ -1010,19 +1195,23 @@ nested_slices_result OffsetTable::nested_group_slices(std::byte const* slice_dat
         // mismatched-pairing sibling brain/components/wire.md records
         // ("the DELIMITER oracle (#384)").
         table = build_nested_subview(slice_data, slice_len, resource(), hooks, gen, ctx);
-    }
-    try {
-        nested_cache_.push_back(nested_cache_row{.slice_data = slice_data,
-                                                 .hooks_key = hooks_key,
-                                                 .nested_no_tag = nested_no_tag,
-                                                 .table = table});
-    } catch (std::bad_alloc const&) {
-        // Cache insert failed; still serve this call from the built table —
-        // degrade to "rebuild next time" rather than lose this result.
+        nested_cache_[row].table = table;
+    } else {
+        // 100 (research D10): this call reuses an earlier row's sub-table for the
+        // same slice and bundle. A row that does not fit leaves the answer
+        // uncached; the repeat finds the same earlier row and the same table.
+        try {
+            nested_cache_.push_back(nested_cache_row{.slice_data = slice_data,
+                                                     .hooks_key = hooks_key,
+                                                     .nested_no_tag = nested_no_tag,
+                                                     .table = table});
+        } catch (std::bad_alloc const&) {
+            // Served uncached.
+        }
     }
     // 073 T004 (D2 final exit): resolve against the post-build local `table`
-    // (same three-origin OR as the cache-hit exit, shared via the helper).
-    return resolve_nested_result(table, nested_no_tag);
+    // (the same resolution as the cache-hit exit, shared via the helper).
+    return resolve_nested_result(table, slice_data, slice_len, nested_no_tag, hooks, ctx);
 }
 
 // 065 T004: convenience overload — forwards to the overload above using

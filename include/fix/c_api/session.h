@@ -326,8 +326,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  *     admitted however the stream is split into reads, where some near that
  *     size ended the session; a frame over the limit ends the connection, in
  *     every state, as soon as its BodyLength(9) is read;
- *   - a frame the session admits always parses for dispatch, where one dense
- *     with fields could exhaust the parse buffer and end the session;
+ *   - a frame the session admits always parses for dispatch (amended in C-ABI 1.15, 100: not one crafted
+ *     against the index seed, whose index build exceeds its probe budget: it
+ *     fails the parse and the session ends, with no Reject, no Logout and no
+ *     callback), where one dense with fields could exhaust the parse buffer and
+ *     end the session;
  *   - a connection not logged on by the establishment timeout
  *     (fixpp_session_config_set_logon_timeout_ms; 10 s by default) is
  *     closed, including one whose Logon was refused, where it stayed open; a
@@ -463,8 +466,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *     the session cannot parse for dispatch (one that exhausts the per-message
  *     parse arena, for example), which was dropped while the session
  *     continued, ends the session (amended in C-ABI 1.11, 093: a frame the
- *     session admits now always parses for dispatch, so this no longer
- *     occurs);
+ *     session admits now always parses for dispatch (amended in C-ABI 1.15, 100: except one crafted
+ *     against the index seed, whose index build exceeds its probe budget), so
+ *     this no longer occurs; amended in C-ABI 1.15, 100: that crafted frame fails
+ *     the parse and ends the session, with no Reject, no Logout and no
+ *     callback);
  *   - an inbound message that would advance the expected inbound sequence
  *     number past its maximum (4294967295), where that number wrapped to 0 and
  *     the session continued, ends the session with no Reject and no Logout
@@ -491,8 +497,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *     admitted however the stream is split into reads, where some near that
  *     size ended the session; a frame over the limit ends the connection, in
  *     every state, as soon as its BodyLength(9) is read;
- *   - a frame the session admits always parses for dispatch, where one dense
- *     with fields could exhaust the parse buffer and end the session;
+ *   - a frame the session admits always parses for dispatch (amended in C-ABI 1.15, 100: not one crafted
+ *     against the index seed, whose index build exceeds its probe budget: it
+ *     fails the parse and the session ends, with no Reject, no Logout and no
+ *     callback), where one dense with fields could exhaust the parse buffer and
+ *     end the session;
  *   - a connection not logged on by the establishment timeout
  *     (fixpp_session_config_set_logon_timeout_ms; 10 s by default) is
  *     closed, including one whose Logon was refused, where it stayed open; a
@@ -686,8 +695,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  *     the session cannot parse for dispatch (one that exhausts the per-message
  *     parse arena, for example), which was dropped while the session
  *     continued, ends the session (amended in C-ABI 1.11, 093: a frame the
- *     session admits now always parses for dispatch, so this no longer
- *     occurs);
+ *     session admits now always parses for dispatch (amended in C-ABI 1.15, 100: except one crafted
+ *     against the index seed, whose index build exceeds its probe budget), so
+ *     this no longer occurs; amended in C-ABI 1.15, 100: that crafted frame fails
+ *     the parse and ends the session, with no Reject, no Logout and no
+ *     callback);
  *   - an inbound message that would advance the expected inbound sequence
  *     number past its maximum (4294967295), where that number wrapped to 0 and
  *     the session continued, ends the session with no Reject and no Logout
@@ -715,8 +727,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  *     admitted however the stream is split into reads, where some near that
  *     size ended the session; a frame over the limit ends the connection, in
  *     every state, as soon as its BodyLength(9) is read;
- *   - a frame the session admits always parses for dispatch, where one dense
- *     with fields could exhaust the parse buffer and end the session;
+ *   - a frame the session admits always parses for dispatch (amended in C-ABI 1.15, 100: not one crafted
+ *     against the index seed, whose index build exceeds its probe budget: it
+ *     fails the parse and the session ends, with no Reject, no Logout and no
+ *     callback), where one dense with fields could exhaust the parse buffer and
+ *     end the session;
  *   - a connection not logged on by the establishment timeout
  *     (fixpp_session_config_set_logon_timeout_ms; 10 s by default) is
  *     closed, including one whose Logon was refused, where it stayed open; a
@@ -864,8 +879,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  *     the session cannot parse for dispatch (one that exhausts the per-message
  *     parse arena, for example), which was dropped while the session
  *     continued, ends the session (amended in C-ABI 1.11, 093: a frame the
- *     session admits now always parses for dispatch, so this no longer
- *     occurs);
+ *     session admits now always parses for dispatch (amended in C-ABI 1.15, 100: except one crafted
+ *     against the index seed, whose index build exceeds its probe budget), so
+ *     this no longer occurs; amended in C-ABI 1.15, 100: that crafted frame fails
+ *     the parse and ends the session, with no Reject, no Logout and no
+ *     callback);
  *   - an inbound message that would advance the expected inbound sequence
  *     number past its maximum (4294967295), where that number wrapped to 0 and
  *     the session continued, ends the session with no Reject and no Logout
@@ -892,8 +910,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  *     admitted however the stream is split into reads, where some near that
  *     size ended the session; a frame over the limit ends the connection, in
  *     every state, as soon as its BodyLength(9) is read;
- *   - a frame the session admits always parses for dispatch, where one dense
- *     with fields could exhaust the parse buffer and end the session;
+ *   - a frame the session admits always parses for dispatch (amended in C-ABI 1.15, 100: not one crafted
+ *     against the index seed, whose index build exceeds its probe budget: it
+ *     fails the parse and the session ends, with no Reject, no Logout and no
+ *     callback), where one dense with fields could exhaust the parse buffer and
+ *     end the session;
  *   - a connection not logged on by the establishment timeout
  *     (fixpp_session_config_set_logon_timeout_ms; 10 s by default) is
  *     closed, including one whose Logon was refused, where it stayed open; a
@@ -1026,8 +1047,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  *     the session cannot parse for dispatch (one that exhausts the per-message
  *     parse arena, for example), which was dropped while the session
  *     continued, ends the session (amended in C-ABI 1.11, 093: a frame the
- *     session admits now always parses for dispatch, so this no longer
- *     occurs);
+ *     session admits now always parses for dispatch (amended in C-ABI 1.15, 100: except one crafted
+ *     against the index seed, whose index build exceeds its probe budget), so
+ *     this no longer occurs; amended in C-ABI 1.15, 100: that crafted frame fails
+ *     the parse and ends the session, with no Reject, no Logout and no
+ *     callback);
  *   - an inbound message that would advance the expected inbound sequence
  *     number past its maximum (4294967295), where that number wrapped to 0 and
  *     the session continued, ends the session with no Reject and no Logout
@@ -1054,8 +1078,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  *     admitted however the stream is split into reads, where some near that
  *     size ended the session; a frame over the limit ends the connection, in
  *     every state, as soon as its BodyLength(9) is read;
- *   - a frame the session admits always parses for dispatch, where one dense
- *     with fields could exhaust the parse buffer and end the session;
+ *   - a frame the session admits always parses for dispatch (amended in C-ABI 1.15, 100: not one crafted
+ *     against the index seed, whose index build exceeds its probe budget: it
+ *     fails the parse and the session ends, with no Reject, no Logout and no
+ *     callback), where one dense with fields could exhaust the parse buffer and
+ *     end the session;
  *   - a connection not logged on by the establishment timeout
  *     (fixpp_session_config_set_logon_timeout_ms; 10 s by default) is
  *     closed, including one whose Logon was refused, where it stayed open; a

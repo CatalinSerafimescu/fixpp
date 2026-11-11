@@ -64,6 +64,19 @@ struct offset_table_test_access {
         }
         return nullptr;
     }
+
+    // 100 (tasks T007 (b)): the overlay seed a built table snapshotted at build(). The process
+    // seed has no getter, so `probe_cluster_100.hpp`'s seed guard builds a small table and reads
+    // its seed here to learn the seed in force before a cell replaces it.
+    [[nodiscard]] static std::uint32_t seed_of(OffsetTable const& table) noexcept {
+        return table.seed_;
+    }
+
+    // 100 (tasks T012, T015): the sizes of the two cache rows, so an arena-stepping cell can
+    // name which allocation of a group read failed (a `group_index_` row, a `nested_cache_`
+    // row) without restating the private structs' layout.
+    static constexpr std::size_t group_span_size = sizeof(OffsetTable::group_span);
+    static constexpr std::size_t nested_cache_row_size = sizeof(OffsetTable::nested_cache_row);
 };
 // 389: `reserve_bound_access_for_testing` was DELETED here along with
 // `OffsetTable::group_slices_reserve_bound()` itself. There is no reservation

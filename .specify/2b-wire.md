@@ -44,6 +44,7 @@ Wire owns the *wire format mechanics* — bytes-in / bytes-out, structural valid
   - 1000-strike option-chain `MarketDataIncrementalRefresh`: ~200 KiB → ~1.28× headroom. Same caveat — raise the cap.
   - Default 256 KiB is *not* "10× headroom for everyone"; it's "comfortable for FX/equities, tight for options, raise for derivatives". Document this trade so users tune for their venue.
 - **Offset-table entries.** Default cap of **4096 total field occurrences per message** in the offset table (`default_max_offset_entries`); configurable. Above → `error::wire_offset_table_full`. This is the load-bearing memory bound — a 4096-entry table is `4096 × 12 = 48 KiB` of arena (§4.4) plus a `8192-slot` open-address pointer overlay (32 KiB on a 4-byte slot). At the cap the offset table consumes ~80 KiB of the per-message arena before any hash-overlay rehash growth.
+  Updated (100-wire-group-read-integrity): `error::wire_offset_table_full` has a second cause. The overlay build counts its probes against one per-build budget of `kMaxBuildProbe` per occurrence and fails with `wire_offset_table_full` when the budget is spent, clearing the table as the entry cap does (`OffsetTable::build`, research D1 of `specs/100-wire-group-read-integrity/`). Only a frame crafted against the per-process overlay seed reaches the budget; a frame within it indexes every distinct tag.
 - **Repeating-group entries per instance.** Default cap of **4096 entries per group instance** (`default_max_group_entries_per_instance`); configurable. Above → `error::wire_group_too_large`. Per-instance, not aggregate (a `NewOrderList` with 100 orders × 50 legs each is allowed because no single instance exceeds 4096; a single 8192-entry leg block is not). Real-venue caveat: CME / equity-options `SecurityList` responses on full options chains can produce single group instances > 4096 (e.g., CME SPX equity options ≈ 3000 active strikes; some venue snapshots include inactive strikes pushing past 5000). Users on those venues raise to 65535 (the natural `uint16_t` saturation, since `NoXxx` is a FIX `NumInGroup` integer field) and accept the per-message-arena footprint that follows.
 - **Tag numeric range.** `uint16_t` (0..65535) — covers FIX standard tag space (1..~5000) plus user-defined custom tags (5000..9999) plus dialect overlay headroom. Above → `error::wire_tag_out_of_range`. The offset-table entry is **12 bytes** (§4.4 — `uint16_t tag + uint32_t offset + uint32_t length + 2-byte group sub-index tail`), pinned by `static_assert` at the same site. *No separate distinct-tag cap*; the v0.1 "4096 distinct tags per message" cap is **deleted** — distinct-tag count was never the cost driver, and the `uint16_t` storage shape already saturates at 65535.
 
@@ -311,6 +312,8 @@ The two modes share `MessageView<>` via `requires`-constrained members; codegen 
 
 Updated (098-dialect-overlay): this paragraph predates fixpp#426. Since #426 `field_iterator` takes a `dict_hooks` value with no default and pairs Length+Data through it (`include/fixpp/wire/parser.hpp`), so Iter mode given a dictionary's hooks is not limited to the static table; 098 retired L-004-1, which still said it was. A pair an overlay adds between its own fields reaches Iter mode through those hooks; a site with no dictionary uses the standard table (L-426-1).
 
+Updated (100-wire-group-read-integrity): `field_iterator` and the dictionary-backed `MessageView<Iter>` constructor now take the bundle as `dict_hooks const*` and hold the pointer, not a `dict_hooks` value; the bundle must outlive the iterator or the view (B-100-7).
+
 ### 4.4 `OffsetTable` — `(tag, offset, length)` index
 
 ```cpp
@@ -370,6 +373,7 @@ Memory shape (occurrence-keyed, per §1.2):
   - MarketDataIncrementalRefresh (100 instruments × 10 levels): ~6000 entries ⇒ ~72 KiB raw + ~32 KiB hash overlay = ~104 KiB. **Past the 4096 default cap** — a venue producing this needs `default_max_offset_entries` raised; users on options/derivatives venues must tune.
   - Worst-case at the default cap: 4096 entries × 12 B + 8192-slot pointer overlay ≈ 80 KiB.
 - The lookup overlay is open-addressing robin-hood, capacity = next-power-of-two ≥ 1.25 × n. Average O(1); worst case O(n). The spike (§10 Q1) confirms the chosen load factor against the venue corpora named in §1.2.
+  Updated (100-wire-group-read-integrity): the overlay is open addressing with linear probing that keeps each tag's first occurrence; it does not displace entries, so it is not robin-hood. The build's total probe work is bounded by the per-build probe budget (the §1.2 note); `find()` is unchanged.
 - The group sub-index is a `pmr::vector<pmr::vector<entry>>`-shaped structure on the same arena: outer vector is one entry per group instance, inner vectors are the entries for that instance. Built on demand for the requested `no_tag` only — `MessageView` instances that touch only the typed accessors don't pay for groups they don't read. Reused across subsequent `group<>()` calls within the same `MessageView` lifetime.
 
 ### 4.5 `Writer` — serializer
@@ -697,6 +701,8 @@ Per Opus adversarial NEW P2: v0.1 named ~13 wire-layer errors throughout §6 wit
 | `wire_field_value_out_of_range` | §6.5 rule 3 | conformance error — Session-Reject |
 | `wire_field_value_truncated` | from 2a §6.4 (raised by decimal traits; surfaced unchanged) | precision-loss in field representation — Session-Reject + log |
 | `wire_unexpected_tag` | §6.5 rule 5 | dictionary-known tag invalid for this MsgType — Session-Reject SessionRejectReason 2 per `[FIX50SP2 §2.1]` |
+
+Updated (100-wire-group-read-integrity): `wire_offset_table_full` is also the error of an overlay build that spends its per-build probe budget (the §1.2 note), so its row's cause reads "peer exceeded the entry cap, or sent a frame crafted against the overlay seed". On an inbound session a frame that fails on the budget takes 092's late-parse-failure terminal close, with no Reject, no Logout and no callback (research D1 and the contract's "Parse" section in `specs/100-wire-group-read-integrity/`).
 
 (13 variants. The v0.1-implicit `wire_tag_count_exceeded` is *deleted* — it was the dropped distinct-tag cap from §1.2's wrong-dimension model.)
 
