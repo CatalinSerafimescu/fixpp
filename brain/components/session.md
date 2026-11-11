@@ -64,6 +64,7 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/098-dialect-overlay-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/099-fixt-appl-version-validation-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/099-fixt-appl-version-validation-evidence.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/100-wire-group-read-integrity-gatea.md
 codegraph_entry: [Session, fsm_state, SeqnumManager, Engine, on_inbound_frame]
 constitution: ["§XI.4", "§XV.4"]
 ---

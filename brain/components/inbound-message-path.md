@@ -38,6 +38,7 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-tasks.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-evidence.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/100-wire-group-read-integrity-gatea.md
 codegraph_entry: [run_read_pump, Framer, on_inbound_frame, on_inbound_active_, make_session_strand, Session, scan_frame_header, dispose_unparseable_, inbound_framer_config, note_garbles_, read_first_frame_bounded]
 constitution: ["§VIII.5", "§XI.2"]
 ---
