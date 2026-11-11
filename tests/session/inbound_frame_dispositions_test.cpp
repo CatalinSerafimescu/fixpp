@@ -2807,7 +2807,7 @@ TEST(InboundFrameDispositionsQ6, Control_FrameOfExactlyLIsDelivered) {
 //   - null upstream: each read reports its exhaustion (an empty span, an empty view);
 //   - forwarding upstream (MSVC debug): each read succeeds and the spill is recorded.
 // Either way the session stays Active and processes the next frame. The C arms are
-// T091's (Phase 8); the C cursor shells are L-17 (fixpp#541).
+// T091's (Phase 8).
 //
 // The frame's density is chosen for B(L): on the base, whose callback reads draw on a
 // 16 KiB stack arena, the frame does not parse at all, so the base run uses a scratch

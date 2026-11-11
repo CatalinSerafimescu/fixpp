@@ -9,6 +9,9 @@
 // too when the view carries a bundle — `Parser<Iter>::parse_iter()` threads
 // one, so Iter is NOT dict-free). Authority: .specify/2b-wire.md v0.2;
 // shape oracle contracts/parser.hpp.
+// 100-wire-group-read-integrity: `MessageView::group<>()` passes the read's
+// status to its `group_view` (research D6), superseding 073's span-only top-level
+// read (L-073-1).
 //
 // (U1) Every W-009 field type decodes/encodes strictly via the 2a
 // decimal<T> / 2c dict::field_traits<...> boundary — the wire layer performs
@@ -139,8 +142,7 @@ public:
           unk_items_{mr} {
         // Gate B PR#176 r1 root cause #1: seed the ROOT group_context ({msg_type,
         // path=[]}) HERE, unconditionally, rather than lazily only in group<>()
-        // below. Every root group_slices(N) caller (C-ABI fixpp_msg_get_group,
-        // direct offsets().group_slices(), and the typed group<>() path) must
+        // below. Every root group read, whichever entry point makes it, must
         // agree on context so the no_tag-keyed cache (offset_table.cpp
         // group_index_) can never be poisoned by an unseeded call that runs
         // before the typed path seeds it (table_ is fully built by this point —
@@ -196,9 +198,13 @@ public:
     // the streaming scanner — the standard table split those frames, the dictionary's
     // pairs did not. `hooks` aliases the caller-owned dictionary, exactly as in the
     // Index ctors above.
-    MessageView(frame_view const& frame, dict_hooks hooks) noexcept
+    // 100 (B-100-7): the view holds `hooks` itself, not a copy of the bundle, so
+    // `*hooks` must outlive the view (`parse_iter()` passes its own, and is
+    // lifetime-bound to the parser). A null `hooks` reads through no dictionary.
+    MessageView(frame_view const& frame, dict_hooks const* hooks) noexcept
         requires(Mode == access_mode::Iter)
-        : View{frame.bytes().data(), frame.bytes().size(), frame.token()}, hooks_{hooks} {}
+        : View{frame.bytes().data(), frame.bytes().size(), frame.token()},
+          hooks_{hooks != nullptr ? hooks : &detail::no_dict_hooks} {}
 
     [[nodiscard]] std::string_view msg_type() const noexcept [[clang::lifetimebound]] {
         return field_string(detail::tag_msg_type);
@@ -224,8 +230,12 @@ public:
         // the view it returns (Gate B r8 P-1 — it used to drop them, and the
         // test that claimed to cover the Iter path was walking a
         // `MessageView<Index>` iterator).
-        field_iterator(std::span<const std::byte> buf, std::size_t pos, dict_hooks hooks) noexcept
-            : buf_{buf}, pos_{pos}, hooks_{hooks} {
+        // 100 (B-100-7): the iterator holds `hooks` itself, not a copy of the
+        // bundle, so `*hooks` must outlive the iterator; a null `hooks` reads
+        // through no dictionary. `begin()`/`end()` pass the view's own bundle.
+        field_iterator(std::span<const std::byte> buf, std::size_t pos,
+                       dict_hooks const* hooks) noexcept
+            : buf_{buf}, pos_{pos}, hooks_{hooks != nullptr ? hooks : &detail::no_dict_hooks} {
             advance();
         }
         [[nodiscard]] field const& operator*() const noexcept { return cur_; }
@@ -276,7 +286,7 @@ public:
         // tag, so the next (Data) field is read by fixed length.
         std::uint16_t prev_data_tag_ = 0;
         std::uint32_t prev_data_len_ = 0;
-        dict_hooks hooks_{};
+        dict_hooks const* hooks_;
     };
 
     // fixpp#426: passes THIS view's own `hooks_` — `none()` on a dict-free view,
@@ -284,10 +294,10 @@ public:
     // builds one WITH hooks (Gate B r8 P-1), so a dictionary-backed streaming walk
     // splits by that dictionary's pairs too.
     [[nodiscard]] field_iterator begin() const noexcept [[clang::lifetimebound]] {
-        return field_iterator{bytes(), 0, hooks_};
+        return field_iterator{bytes(), 0, &hooks()};
     }
     [[nodiscard]] field_iterator end() const noexcept [[clang::lifetimebound]] {
-        return field_iterator{bytes(), bytes().size(), hooks_};
+        return field_iterator{bytes(), bytes().size(), &hooks()};
     }
 
     // ---- Index random access ---------------------------------------------
@@ -350,7 +360,7 @@ public:
             // nested_group_slices() (which mutates only its own `mutable` cache).
             // 063 T007: the ROOT context — {msg_type, path=[]} — is this message's
             // own context (depth 0, plan.md Context-propagation mechanism). Set on
-            // `table_` BEFORE group_slices() so group()'s membership predicate
+            // `table_` BEFORE the read so group()'s membership predicate
             // calls see it; the entry_context each returned entry carries gets the
             // context PUSHED with NoTag (its own container path + own no_tag), so
             // a later nested descent from one of these entries seeds the correct
@@ -359,11 +369,14 @@ public:
             table_.set_group_context(root_ctx);
             entry_context ctx{};
             ctx.mr = mr_;
-            ctx.hooks = hooks_;
+            ctx.hooks = hooks();
             ctx.gen = token();
             ctx.parent_cache_owner = &table_;
             ctx.group_ctx = root_ctx.pushed(NoTag);
-            return group_view<GroupT>{table_.group_slices(NoTag), ctx};
+            // 100 (research D6): the read's status reaches the view, so a top-level
+            // read that could not complete reports `read_failed()`.
+            auto const r = table_.group_slices_status(NoTag);
+            return group_view<GroupT>{r.slices, ctx, r.status};
         }
 
     // [2b §4.8] Contract: unknown_fields() uses the dict pointer threaded from the
@@ -402,8 +415,8 @@ public:
                     // hooks_.classify_fn() is nullptr for dict-free views (all
                     // non-framing = unknown); otherwise classify via the bound
                     // fn + opaque dict.
-                    bool const known = (hooks_.classify_fn() != nullptr) &&
-                                       hooks_.classify_fn()(hooks_.opaque_dict(), mtype, e.tag);
+                    bool const known = (hooks().classify_fn() != nullptr) &&
+                                       hooks().classify_fn()(hooks().opaque_dict(), mtype, e.tag);
                     if (!known) {
                         unk_items_.push_back(unknown_fields_view::kv{
                             .tag = e.tag, .data = raw.data() + e.offset, .len = e.length});
@@ -464,7 +477,7 @@ public:
     // It remains load-bearing for the non-group reasons this method also
     // gates — field classification and unknown_fields(), which do read table
     // CONTENT and so do differ between "no dictionary" and "an empty one".
-    [[nodiscard]] bool is_dict_backed() const noexcept { return hooks_.opaque_dict() != nullptr; }
+    [[nodiscard]] bool is_dict_backed() const noexcept { return hooks().opaque_dict() != nullptr; }
 
     // fixpp#426: this view's own dict_hooks bundle — `none()` only for a view
     // constructed without one (default/frame-only construction), NOT for every
@@ -473,7 +486,11 @@ public:
     // (e.g. a nested/C-ABI scan) can reuse the EXACT dictionary this view was
     // built with.
     [[nodiscard]] dict_hooks const& hooks() const noexcept [[clang::lifetimebound]] {
-        return hooks_;
+        if constexpr (Mode == access_mode::Index) {
+            return hooks_;
+        } else {
+            return *hooks_;
+        }
     }
 
     // 099-fixt-appl-version-validation (data-model E-5, FR-014): the application version the
@@ -536,7 +553,19 @@ private:
     // path (all non-framing = unknown). Threaded into every entry_context
     // minted by group<>() below (the dict-driven predicates a nested descent
     // needs to build a dict-aware sub-OffsetTable). ([PR68-02] fix.)
-    dict_hooks hooks_{};
+    // 100 (B-100-7): an Index view holds the bundle by value; an Iter view holds
+    // a pointer to its parser's bundle, or to `detail::no_dict_hooks`, so
+    // `parse_iter()` stores one pointer rather than the whole bundle.
+    using hooks_holder_t =
+        std::conditional_t<Mode == access_mode::Index, dict_hooks, dict_hooks const*>;
+    static constexpr hooks_holder_t no_hooks() noexcept {
+        if constexpr (Mode == access_mode::Index) {
+            return dict_hooks::none();
+        } else {
+            return &detail::no_dict_hooks;
+        }
+    }
+    hooks_holder_t hooks_{no_hooks()};
     // unk_items_: lazily built unknown-fields kv list in the per-message arena.
     // An Index-mode ctor overrides this default with the real arena
     // (`unk_items_{mr}`), but a default-constructed view and EVERY Iter-mode view
@@ -660,7 +689,7 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
     cur_ = field{static_cast<std::uint16_t>(tag), buf_.subspan(vstart, i - vstart)};
     next_ = (i < buf_.size()) ? i + 1 : i;
 
-    if (std::uint16_t dt = hooks_.data_tag_for_length(static_cast<std::uint16_t>(tag)); dt != 0) {
+    if (std::uint16_t dt = hooks_->data_tag_for_length(static_cast<std::uint16_t>(tag)); dt != 0) {
         prev_data_tag_ = dt;
         prev_data_len_ = parse_bounded_u32(cur_.value);
     }
@@ -676,30 +705,30 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
 // nest <unordered_set>'s `namespace std` under `fixpp::wire::std`.
 template <access_mode Mode>
 fixpp::dict::table_view MessageView<Mode>::membership_copy() const {
-    if (hooks_.opaque_dict() == nullptr) {
+    if (hooks().opaque_dict() == nullptr) {
         return fixpp::dict::table_view{};
     }
     // Copy-constructs (deep-copies the owned tables, table_view.hpp's copy-ctor note)
     // — the result is self-contained and outlives the source session/
     // Dictionary/table_view.
-    return *static_cast<fixpp::dict::table_view const*>(hooks_.opaque_dict());
+    return *static_cast<fixpp::dict::table_view const*>(hooks().opaque_dict());
 }
 
 // fixpp#495: MessageView<Mode>::shared_membership() — see the declaration.
 template <access_mode Mode>
 std::shared_ptr<const fixpp::dict::table_view> MessageView<Mode>::shared_membership() const {
-    if (hooks_.opaque_dict() == nullptr) {
+    if (hooks().opaque_dict() == nullptr) {
         return nullptr;
     }
     if constexpr (Mode == access_mode::Index) {
-        if (dict_owner_ != nullptr && dict_owner_->get() == hooks_.opaque_dict()) {
+        if (dict_owner_ != nullptr && dict_owner_->get() == hooks().opaque_dict()) {
             return *dict_owner_;
         }
     }
     // Copied in place from the table reference: control block and table share one
     // allocation, and no table_view is moved.
     return std::make_shared<const fixpp::dict::table_view>(
-        *static_cast<fixpp::dict::table_view const*>(hooks_.opaque_dict()));
+        *static_cast<fixpp::dict::table_view const*>(hooks().opaque_dict()));
 }
 
 namespace detail {
@@ -743,7 +772,7 @@ struct message_view_resolved_access {
                                                       std::uint16_t tag, dict_hooks const& hooks,
                                                       detail::generation_token gen) noexcept {
     using iter_t = MessageView<access_mode::Iter>::field_iterator;
-    for (iter_t it{span, 0, hooks}, end{span, span.size(), hooks}; !(it == end); ++it) {
+    for (iter_t it{span, 0, &hooks}, end{span, span.size(), &hooks}; !(it == end); ++it) {
         if ((*it).tag == tag) {
             auto const& f = *it;
             return field_view_access::make(f.value.data(), f.value.size(), gen);
@@ -776,27 +805,24 @@ inline dict_hooks dict_hooks::for_table_view(fixpp::dict::table_view const& dict
         // (data-model.md "GroupMembership", Option A). Fixes Defect A: a
         // reused NumInGroup tag (e.g. FIX44 295) now resolves to the members
         // it has in THIS message/parent-path, not whichever variant the
-        // loader saw first, PROVIDED the context (msg_type + full
-        // parent-no_tag path) is supplied — which it always is on this call
-        // site (ctx comes from the stored OffsetTable context, seeded at
-        // MessageView::group<>() / build_nested_subview(), parser.hpp /
-        // offset_table.cpp). `table_view`'s context accessor falls back to
-        // the legacy bare-`no_tag` store on a MISS (table_view.hpp doc,
-        // amended hardening invariant) — unreachable HERE because this call
-        // site's ctx always matches the exact registration key.
+        // loader saw first. 100 (research D2 "Lookup order"): the members come
+        // from `wire_group_member_tags`, which answers a `group_ctx_` miss from the
+        // occurrence's own record before the bare store.
         [](void const* d, group_context const& ctx, std::uint16_t no_tag,
            std::uint16_t tag) noexcept -> bool {
-            auto const members = static_cast<fixpp::dict::table_view const*>(d)->group_member_tags(
-                ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth},
-                no_tag);
+            auto const members =
+                static_cast<fixpp::dict::table_view const*>(d)->wire_group_member_tags(
+                    ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth},
+                    no_tag);
             return std::ranges::any_of(
                 members, [tag](std::uint16_t const member_tag) { return member_tag == tag; });
         },
         // 083 T057 (C-8.1): the delimiter sibling of the membership lambda,
-        // resolving through the SAME opaque_dict and the SAME context key.
+        // resolving through the SAME opaque_dict and the SAME context key, by the
+        // same lookup order (100).
         [](void const* d, group_context const& ctx,
            std::uint16_t no_tag) noexcept -> std::uint16_t {
-            return static_cast<fixpp::dict::table_view const*>(d)->group_first_field(
+            return static_cast<fixpp::dict::table_view const*>(d)->wire_group_first_field(
                 ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth},
                 no_tag);
         },
@@ -812,7 +838,21 @@ inline dict_hooks dict_hooks::for_table_view(fixpp::dict::table_view const& dict
                   return from == dict_hooks::pair_side::length ? tv->length_pair_data_tag(tag)
                                                                : tv->data_pair_length_tag(tag);
               }
-            : static_cast<dict_hooks::length_pair_fn_t>(nullptr)};
+            : static_cast<dict_hooks::length_pair_fn_t>(nullptr),
+        // 100 (research D2): the registration resolver, always installed, through the
+        // SAME opaque_dict and the SAME context key. It names the definition, so a read
+        // makes one lookup (T071 fix): the delimiter and members it returns are the
+        // answers of the two lambdas above at the same key (`wire_group_resolve`).
+        [](void const* d, group_context const& ctx,
+           std::uint16_t no_tag) noexcept -> dict_hooks::group_resolution {
+            auto const r = static_cast<fixpp::dict::table_view const*>(d)->wire_group_resolve(
+                ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth},
+                no_tag);
+            return dict_hooks::group_resolution{.registered = r.registered,
+                                                .definition_known = true,
+                                                .delimiter = r.delimiter,
+                                                .members = r.members};
+        }};
 }
 
 template <access_mode Mode = access_mode::Index>
@@ -939,7 +979,7 @@ public:
         // Gate B r8 P-1: thread THIS parser's bundle. Returning `{frame}` here dropped
         // the dictionary this parser was constructed with, silently.
         // fixpp#495: an Iter view records no owner (MessageView's `dict_owner_`).
-        return MessageView<access_mode::Iter>{frame, hooks_};
+        return MessageView<access_mode::Iter>{frame, &hooks_};
     }
 
 private : dict_hooks hooks_ {};  // fixpp#426: replaces the separate opaque_dict_/

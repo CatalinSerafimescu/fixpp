@@ -98,6 +98,8 @@ add_executable(capi_pure_tests
   abi_symbol_golden_test.cpp
   dict_overlay_capi_test.cpp          # 098 W-9: the pure rows
   capi_099_msg_version_test.cpp       # 099 T085: W-10's clone cells
+  test_100_group_getters.cpp          # 100 T010/T012: the C group getters' table
+  test_100_section_divergent.cpp      # 100 T011: section arm, divergent definitions
 )
 target_link_libraries(capi_pure_tests PRIVATE
   fixpp_capi
@@ -142,6 +144,9 @@ set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 098)
 # 099-fixt-appl-version-validation: label 099 (tasks.md T003). APPEND, after the last LABELS
 # setter for this entry, so the existing labels survive.
 set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 099)
+# 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 100)
 
 # T004 (US1, SC-004) — 051 error-block foundational oracle (translate re-point +
 # strerror + per-code-minor downgrade).  T022 (US5) appends live end-to-end arms
@@ -266,6 +271,9 @@ target_link_libraries(capi_message_read_test PRIVATE
 target_include_directories(capi_message_read_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
 add_test(NAME capi_message_read COMMAND capi_message_read_test)
 set_tests_properties(capi_message_read PROPERTIES LABELS "capi;051")
+# 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST capi_message_read APPEND PROPERTY LABELS 100)
 
 # fixpp#428 / #426 (design .specify/426-428-length-data-pairs.md §5, §6): the C-ABI
 # Length+Data setters and commit-time pair rule, and a two-engine loopback whose
@@ -294,6 +302,9 @@ target_link_libraries(capi_message_read_failloud_test PRIVATE
 target_include_directories(capi_message_read_failloud_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
 add_test(NAME capi_message_read_failloud COMMAND capi_message_read_failloud_test)
 set_tests_properties(capi_message_read_failloud PROPERTIES LABELS "capi;073")
+# 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST capi_message_read_failloud APPEND PROPERTY LABELS 100)
 
 # message_write_test — CA-009/CA-010-write: outbound construct/populate/commit + group builder
 add_executable(capi_message_write_test message_write_test.cpp)
@@ -660,6 +671,35 @@ add_test(NAME capi_inbound_frame_dispositions COMMAND capi_inbound_frame_disposi
 # lane /speckit-verify runs and on MSVC debug and msvc-asan (re-measure on msvc-asan,
 # under the same -j the lane uses), and size from the slowest.
 set_tests_properties(capi_inbound_frame_dispositions PROPERTIES LABELS "capi;093" TIMEOUT 1200)
+# 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST capi_inbound_frame_dispositions APPEND PROPERTY LABELS 100)
+
+# 100-wire-group-read-integrity (tasks T014; SC-002, US2.3, FR-006): fixpp#541's
+# reproduction, ported from branch b28-repro. fixpp_msg_get_group and
+# fixpp_group_get_nested_group report an exhausted parse arena as
+# FIXPP_ERR_WIRE_LIMIT_EXCEEDED, never by an exception leaving the getter. Standalone
+# ([const §VII.8]): every cell runs a live engine against a raw TCP peer. The src include
+# root is for session/parse_capacity.hpp, which sizes the loop cap from B(L). Re-derive
+# TIMEOUT by the rule capi_inbound_frame_dispositions' comment above gives
+# (time `ctest -R '^capi_group_cursor_shell_exhaustion$'` on every lane /speckit-verify runs
+# and on MSVC debug and msvc-asan, and size from the slowest).
+add_executable(capi_group_cursor_shell_exhaustion_test
+  group_cursor_shell_arena_exhaustion_capi_test.cpp)
+target_link_libraries(capi_group_cursor_shell_exhaustion_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_group_cursor_shell_exhaustion_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+  "${CMAKE_SOURCE_DIR}/src")
+target_compile_definitions(capi_group_cursor_shell_exhaustion_test PRIVATE
+  "FIXPP_DICT_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+add_test(NAME capi_group_cursor_shell_exhaustion
+  COMMAND capi_group_cursor_shell_exhaustion_test)
+set_tests_properties(capi_group_cursor_shell_exhaustion PROPERTIES
+  LABELS "capi;100" TIMEOUT 300)
 
 # 098-dialect-overlay W-9, the live arm: two C-ABI engines, each with its worker
 # thread, over loopback; standalone ([const §VII.8]). Each session's dictionary is

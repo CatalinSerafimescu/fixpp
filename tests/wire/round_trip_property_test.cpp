@@ -71,7 +71,9 @@ MessageView<access_mode::Iter> parse_iter(std::span<const std::byte> buf) {
         ADD_FAILURE() << "make_frame_view failed: " << static_cast<int>(fv.error());
         return MessageView<access_mode::Iter>{};
     }
-    Parser<access_mode::Iter> parser{};
+    // Static: the returned view points at its parser's dict_hooks (B-100-7), so the
+    // parser must outlive it.
+    static Parser<access_mode::Iter> parser{};
     auto mv = parser.parse_iter(*fv);
     if (!mv.has_value()) {
         ADD_FAILURE() << "parse_iter failed: " << static_cast<int>(mv.error());

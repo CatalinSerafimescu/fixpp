@@ -81,7 +81,8 @@ struct walk_result {
     std::uint16_t fault_length_tag = 0;
 };
 
-walk_result walk(std::span<std::byte const> buf, dict_hooks hooks) {
+// `hooks` may be null: the iterator then reads as `dict_hooks::none()` (B-100-7).
+walk_result walk_ptr(std::span<std::byte const> buf, dict_hooks const* hooks) {
     walk_result r;
     iter_t it{buf, 0, hooks};
     iter_t const end{buf, buf.size(), hooks};
@@ -98,6 +99,8 @@ walk_result walk(std::span<std::byte const> buf, dict_hooks hooks) {
     r.fault_length_tag = it.fault_length_tag();
     return r;
 }
+
+walk_result walk(std::span<std::byte const> buf, dict_hooks hooks) { return walk_ptr(buf, &hooks); }
 
 // The yielded sequence and the fault record are compared separately, so a
 // failure says which of the two moved.
@@ -252,6 +255,61 @@ TEST(FieldIteratorFault, T3_CustomPair) {
     expect_custom_pair(
         "35=A|5001=7|5002=ab|49=S", {{35, "A", kNone}, {5001, "7", kNone}, {5002, "ab|49=S", kLd}},
         kLd, 5001, {{35, "A", kNone}, {5001, "7", kNone}, {5002, "ab", kNone}, {49, "S", kNone}});
+}
+
+// ── A null bundle reads as `none()` (B-100-7) ───────────────────────────────
+//
+// 100-wire-group-read-integrity (T075): `field_iterator` and the Iter view take
+// `dict_hooks const*`, and a null pointer reads through no dictionary. The fixture
+// carries an SOH inside the custom pair's Data value, so a bundle that pairs 5001
+// with 5002 splits it differently from `none()`; each cell asserts that difference
+// first, so the null arm's comparison with `none()` can fail.
+
+namespace {
+constexpr std::string_view kNullHooksFixture = "35=A|5001=3|5002=a|c|49=S|";
+}  // namespace
+
+TEST(FieldIteratorFault, NullHooksIteratorReadsAsNone) {
+    hook_sets const hs;
+    auto const buf = bytes_of(kNullHooksFixture);
+    // The custom pair splits the counted value whole; `none()` splits at its SOH
+    // and stops at the non-digit tag `c`.
+    expect_walk(walk(buf, hs.custom()),
+                {{35, "A", kNone}, {5001, "3", kNone}, {5002, "a|c", kNone}, {49, "S", kNone}},
+                kNone, 0);
+    expect_walk(walk(buf, dict_hooks::none()),
+                {{35, "A", kNone}, {5001, "3", kNone}, {5002, "a", kNone}}, kTag, 0);
+    expect_walk(walk_ptr(buf, nullptr), {{35, "A", kNone}, {5001, "3", kNone}, {5002, "a", kNone}},
+                kTag, 0);
+}
+
+TEST(FieldIteratorFault, NullHooksIterViewReadsAsNone) {
+    hook_sets const hs;
+    auto const buf = bytes_of("8=FIX.4.4|9=26|35=A|5001=3|5002=a|c|49=S|10=000|");
+    auto const fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value()) << "setup: frame_view";
+    auto const fields = [](MessageView<access_mode::Iter> const& mv) {
+        std::vector<std::pair<std::uint16_t, std::string>> out;
+        for (auto it = mv.begin(); !(it == mv.end()); ++it) {
+            std::string v;
+            for (std::byte const b : (*it).value) {
+                auto const c = static_cast<char>(b);
+                v.push_back(c == '\x01' ? '|' : c);
+            }
+            out.emplace_back((*it).tag, std::move(v));
+        }
+        return out;
+    };
+    dict_hooks const custom = hs.custom();
+    dict_hooks const none = dict_hooks::none();
+    auto const paired = fields(MessageView<access_mode::Iter>{*fv, &custom});
+    auto const unpaired = fields(MessageView<access_mode::Iter>{*fv, &none});
+    auto const null_view = fields(MessageView<access_mode::Iter>{*fv, nullptr});
+    std::vector<std::pair<std::uint16_t, std::string>> const expected_unpaired = {
+        {8, "FIX.4.4"}, {9, "26"}, {35, "A"}, {5001, "3"}, {5002, "a"}};
+    EXPECT_EQ(unpaired, expected_unpaired) << "none(): split at the SOH, stopped at tag `c`";
+    EXPECT_NE(paired, unpaired) << "control: the custom pair must split this frame differently";
+    EXPECT_EQ(null_view, unpaired) << "a null bundle must read as none()";
 }
 
 // ── Sticky: the first fault wins over a later one of the other kind ─────────

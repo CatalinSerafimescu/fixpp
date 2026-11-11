@@ -70,6 +70,7 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/099-fixt-appl-version-validation-evidence.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/101-inbound-reject-fidelity-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/101-inbound-reject-fidelity-evidence.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/100-wire-group-read-integrity-gatea.md
 codegraph_entry: [Session, fsm_state, SeqnumManager, Engine, on_inbound_frame]
 constitution: ["§XI.4", "§XV.4"]
 ---
@@ -262,7 +263,7 @@ agent correctly treated this as a shortlist and re-derived, which is the intende
   - a true §4.5.2 failure detected by the Framer ended the session (`L-004-4`); since 093 (fixpp#514) it
     is disregarded and counted (`B-093-1`), and `L-004-4` is in the closed B&L file;
   - a late parse failure closed the session, and effects taken before the close stand; since 093
-    (fixpp#515) no admitted frame reaches it, and the close is a defence (`L-092-6`).
+    (fixpp#515) no admitted frame reaches it, and the close is a defence (`L-092-6`). ⚠️ **Superseded by 100 (`100-wire-group-read-integrity`) for a frame crafted against the index seed** (100 research D1): such a frame now fails its parse at the per-build probe budget and reaches the late-parse close, with no test seam (B&L `B-100-2`, and the 100 amendments of `B-093-6` and `L-092-6`).
 
   Read the code, not this bullet: `dispose_unparseable_` in `src/session/session.cpp`.
 

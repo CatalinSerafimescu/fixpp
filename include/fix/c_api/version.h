@@ -153,8 +153,9 @@
  *    - a frame over the inbound limit closes the session in every state, and
  *      one within it is admitted however the stream is split into reads (the
  *      five observers);
- *    - a frame the session admits always parses for dispatch (the five
- *      observers; the amended 1.10 parse-failure bullet);
+ *    - a frame the session admits always parses for dispatch (amended in C-ABI 1.15, 100: not
+ *      one crafted against the index seed, which fails the parse; the 1.15
+ *      entry) (the five observers; the amended 1.10 parse-failure bullet);
  *    - a connection not logged on by the establishment timeout is closed (the
  *      five observers);
  *    - every frame that passes the fault and third-field checks counts as
@@ -245,8 +246,29 @@
  *  fixpp_session_config_set_validate_inbound_messages (session.h),
  *  fixpp_engine_config_add_dictionary (engine.h), and the constants FIXPP_APPL_VER_*,
  *  FIXPP_SESSION_VER_* and FIXPP_MSG_KIND_* (dict.h). No error code is added. */
+/*  1.15 (BREAKING, [const §X.7]; 100-wire-group-read-integrity, fixpp#541, #644,
+ *  #645, #647): fixpp_msg_get_group and fixpp_group_get_nested_group answer from
+ *  one ordered table of endings (message.h, the CA-010 block, which carries the
+ *  changes from 1.14 and the migration). A registered group with zero instances
+ *  reads FIXPP_ERR_OK with count 0 on both getters, where the flat getter
+ *  answered FIXPP_ERR_TYPE_MISMATCH. A group read that could not complete (an
+ *  arena allocation, a group wire limit, the cursor shell) reads
+ *  FIXPP_ERR_WIRE_LIMIT_EXCEEDED on both, where the flat getter answered
+ *  FIXPP_ERR_TYPE_MISMATCH or let std::bad_alloc escape; no exception leaves
+ *  either getter. A tag present but not registered as a group in the read's
+ *  context reads FIXPP_ERR_TYPE_MISMATCH on both, where the flat getter could
+ *  return a cursor and the nested getter FIXPP_ERR_OK with count 0. The nested
+ *  getter writes NULL / 0 to both outputs for a NULL g.
+ *  The session observers, fixpp_session_is_established, fixpp_session_close,
+ *  fixpp_session_send, fixpp_session_register_callback and
+ *  fixpp_session_register_send_callback: a frame crafted against the index
+ *  seed, whose index build exceeds its probe budget, fails the parse and ends
+ *  the session with no Reject, no Logout and no callback, where it parsed with
+ *  a field missing from its index. Their 1.11 clauses in session.h, and the
+ *  1.11 entry above, are amended in place, marked 1.15.
+ *  No symbol, signature or error code is added. */
 #define FIXPP_C_ABI_VERSION_MAJOR 1
-#define FIXPP_C_ABI_VERSION_MINOR 14 /* 1.14: FIXT application version (099), BREAKING */
+#define FIXPP_C_ABI_VERSION_MINOR 15 /* 1.15: group read integrity (100), BREAKING */
 #define FIXPP_C_ABI_VERSION_PATCH 0
 
 /** Composite: (MAJOR<<16)|(MINOR<<8)|PATCH — single-integer compatibility check. */

@@ -23,6 +23,10 @@ refs:
   - specs/101-inbound-reject-fidelity/spec.md
   - specs/101-inbound-reject-fidelity/research.md
   - specs/101-inbound-reject-fidelity/data-model.md
+  - specs/100-wire-group-read-integrity/research.md
+  - specs/100-wire-group-read-integrity/contracts/capi-group-getters.md
+  - specs/004-wire-codec/contracts/group_view.hpp
+  - specs/073-nested-read-arena-failloud/contracts/nested_slices_result.md
   - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2b-wire.md
@@ -33,6 +37,8 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/101-inbound-reject-fidelity-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/101-inbound-reject-fidelity-evidence.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/100-wire-group-read-integrity-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/100-wire-group-read-integrity-evidence.md
 codegraph_entry: [Framer, garble_summary, OffsetTable, MessageView, dictionary_driven_validator, wire_error_to_session_reject_reason]
 constitution: ["§VIII.5"]
 ---
@@ -327,6 +333,9 @@ alone leaves `Dictionary::length_pair_data_tag(0)` and `field_ref` still reporti
 failure status, so `find()` reports that tag absent. 090 found it while making clone and reify
 refuse a failed re-parse (see [`dictionary.md`](./dictionary.md)). That refusal cannot see this case,
 because the build did not fail. Check the live B&L file before treating the row as open.
+⚠️ **Superseded by 100 (`100-wire-group-read-integrity`):** the per-insert cap is replaced by a
+per-build probe budget, and a build over it fails; L-458-1 is in the closed B&L file. See the 100
+section below.
 
 ## A field walk that meets a fault reports it; it does not just stop (092, fixpp#507)
 
@@ -415,6 +424,61 @@ The session now parses every inbound frame over its per-session buffer B(L) unde
   headroom large enough to make exhaustion impossible, which no number can be, since the C cursor
   shells allocate per call. The other lazy reads keep their reports (`L-093-5`), and the C cursor
   shells' missing catch is fixpp#541, outside 093 (`L-093-17`, OD-19).
+
+⚠️ **Superseded in part by 100 (`100-wire-group-read-integrity`):** "every admitted frame parses" no
+longer holds for a frame crafted against the index seed, which now fails its parse at the per-build
+probe budget and takes the late-parse close (B&L `B-100-2`, and the 100 amendments of `B-093-6`,
+`B-092-6`, `L-092-6`). The C cursor shells now catch their `bad_alloc` (L-093-17 retired), and the
+typed top-level read reports a failed read (`B-100-5`). The 093 reasoning above is kept as history.
+
+## Group reads answer by registration, and a failed read says so (100, fixpp#647, #644, #541, #645)
+
+The design record is `specs/100-wire-group-read-integrity/` (research D1 to D11; contract
+`contracts/capi-group-getters.md`). The registration predicate and its stores are on
+[`dictionary.md`](./dictionary.md); the getters' table on [`c-api.md`](./c-api.md). Wire-level
+decisions, each with what it rejected:
+- **D1, the probe bound is a per-build budget** (`kMaxBuildProbe` × occurrences, in
+  `OffsetTable::build`), and exceeding it fails the build with `wire_offset_table_full`, so a parse
+  never succeeds with a field missing from its index. Rejected: keeping the per-insert cap with the
+  new ending (it would close sessions on legitimate traffic); a new `wire_index_probe_cap` error (a
+  new slot and C-ABI mapping for an ending callers handle identically); a linear scan on a miss (the
+  quadratic cost the cap prevents) or re-seeding and rebuilding (unbounded retries against an
+  adaptive attacker).
+- **D5, a group read stopped by a wire limit is a failed read with its own status**: the result
+  structs carry `group_read_status status` (`ok`, `alloc_failed`, `limit_exceeded`) in place of
+  `bool alloc_failed`, and `group_view` gains `read_failed()` beside an unchanged `alloc_failed()`.
+  Rejected: widening `alloc_failed()`'s meaning (a public accessor would lie about hostile structural
+  input); two flags every reader must OR; replacing the constructors' `bool` parameter (breaks caller
+  source for no gain); leaving D5 out (a silent loss on lines this feature rewrites).
+- **D10, the group cache records only completed reads**: a flat row is pushed after the count pass
+  and popped if the slice allocation throws; a nested row is pushed before the build. Rejected:
+  caching the status and replaying it (one source of truth is the recompute); pushing after the
+  slices and serving uncached on a failed push (the repeat allocates again and can fail: one
+  condition, two endings); a pre-reserved row slot (more state for the same guarantee). Condition: a
+  repeat fails the same way on a monotonic arena; a resource that reuses freed memory can let it
+  complete.
+- **D11, on the nested path a failed read means a present, registered tag**: `resolve_nested_result`
+  asks registration, then presence (an allocation-free walk of the slice), at both exits. Rejected:
+  deciding presence in the C getter (fixes the C ABI only; the typed nested accessor would still
+  report a failure for an absent group). Condition: one (slice, bundle) is read under one `ctx`,
+  because the nested cache is keyed without `ctx` (fixpp#668).
+- Leads filed, not fixed: a nested sub-table is built with the default `Config` whatever the root's
+  caps (fixpp#667), and the validator's bare fallback (fixpp#666).
+
+### Superseded records, flagged in place
+
+- ⚠️ **Superseded by 100 (`100-wire-group-read-integrity`):**
+  `specs/004-wire-codec/contracts/group_view.hpp`, the shipped `group_view` shape, which has no
+  `read_failed()` and no status; frozen and not edited. `include/fixpp/wire/group_view.hpp` is
+  current.
+- ⚠️ **Superseded by 100 (`100-wire-group-read-integrity`):**
+  `specs/073-nested-read-arena-failloud/contracts/nested_slices_result.md`, whose
+  `nested_slices_result` carries `bool alloc_failed`, and whose C getter returns
+  `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` before its presence probe, and whose top-level reads stay silent
+  (L-073-1); frozen and not edited. `include/fixpp/wire/offset_table.hpp` and
+  100's research D5 and D11 are current.
+- `.specify/2b-wire.md` and 093's contract C-3 are amended in place for 100, so they are not flagged
+  here.
 
 ## An undefined MsgType and an undefined tag have their own results (101, fixpp#653, #655)
 

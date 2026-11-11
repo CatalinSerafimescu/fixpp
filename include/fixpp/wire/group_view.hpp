@@ -6,6 +6,9 @@
 // by 2c (e.g. NewOrderSingle::leg) and is constructible from a sub-frame
 // (byte span + generation token); the wire layer never decodes fields.
 // Authority: .specify/2b-wire.md v0.2; shape oracle contracts/group_view.hpp.
+// 100-wire-group-read-integrity: a view carries the read's `group_read_status`
+// and gains `read_failed()` (research D5, data-model `group_view<GroupT>`),
+// superseding 004's `contracts/group_view.hpp` shape of a bool-only view.
 
 #include <array>
 #include <cstddef>
@@ -126,16 +129,13 @@ public:
     // token on every minted entry (mr/opaque_dict/group_member_fn/
     // parent_cache_owner stay null — no production caller uses this path;
     // MessageView::group<>() uses the entry_context ctor below).
-    // 073 T009: trailing `alloc_failed` (defaulted false) — set from
-    // `nested_slices_result::alloc_failed` by the codegen-emitted nested
-    // accessor (data-model.md §"group_view<GroupT> status extension").
+    // 073 T009: trailing `alloc_failed` (defaulted false); `true` is
+    // `group_read_status::alloc_failed`. The codegen-emitted nested accessor
+    // passes the result's `status` to the status constructor below (100).
     group_view(std::span<slice const> instances, detail::generation_token gen,
                bool alloc_failed = false) noexcept
-        : View{instances.empty() ? nullptr : instances.front().data,
-               instances.empty() ? 0 : instances.front().len, gen},
-          instances_{instances},
-          base_ctx_{.span = {}, .gen = gen},
-          alloc_failed_{alloc_failed} {}
+        : group_view(instances, gen,
+                     alloc_failed ? group_read_status::alloc_failed : group_read_status::ok) {}
 
     // [2b §4.7] 062 T007: `base` carries everything a generated entry needs to
     // read its own fields/nested groups (mr, opaque_dict, group_member_fn,
@@ -145,11 +145,29 @@ public:
     // 073 T009: trailing `alloc_failed` (defaulted false), see above.
     group_view(std::span<slice const> instances, entry_context base,
                bool alloc_failed = false) noexcept
+        : group_view(instances, base,
+                     alloc_failed ? group_read_status::alloc_failed : group_read_status::ok) {}
+
+    // 100 (research D5): the status forms of the two constructors above. No
+    // default argument, so `group_view{inst, ctx}` still selects a `bool`
+    // constructor; a scoped enum converts neither to nor from `bool`, so
+    // `{inst, ctx, group_read_status::…}` selects one of these and an integer
+    // third argument selects a `bool` one.
+    group_view(std::span<slice const> instances, detail::generation_token gen,
+               group_read_status status) noexcept
+        : View{instances.empty() ? nullptr : instances.front().data,
+               instances.empty() ? 0 : instances.front().len, gen},
+          instances_{instances},
+          base_ctx_{.span = {}, .gen = gen},
+          status_{status} {}
+
+    group_view(std::span<slice const> instances, entry_context base,
+               group_read_status status) noexcept
         : View{instances.empty() ? nullptr : instances.front().data,
                instances.empty() ? 0 : instances.front().len, base.gen},
           instances_{instances},
           base_ctx_{base},
-          alloc_failed_{alloc_failed} {}
+          status_{status} {}
 
     [[nodiscard]] std::size_t size() const noexcept {
         check_alive();
@@ -160,7 +178,21 @@ public:
     // (present-but-truncated) — distinct from a legitimately empty group
     // (`size() == 0 && !alloc_failed()`). data-model.md §"Relationship to
     // size()".
-    [[nodiscard]] bool alloc_failed() const noexcept { return alloc_failed_; }
+    [[nodiscard]] bool alloc_failed() const noexcept {
+        return status_ == group_read_status::alloc_failed;
+    }
+
+    // 100 (research D5, D10): true iff the read did not complete, for an
+    // allocation failure or a group wire limit (`alloc_failed()` reports only the
+    // first). Typed readers check this one: a view with `size() == 0 &&
+    // !read_failed()` is a completed read of an absent tag, a tag that is not a
+    // group here, or a group with zero instances.
+    //
+    // Condition (FR-007): "a repeat read fails the same way" holds on a monotonic
+    // arena, one that returns nothing to its free space before it resets, as the
+    // session's parse arena is. A caller-supplied `memory_resource` that reuses
+    // freed memory can let a repeat read complete where the first read failed.
+    [[nodiscard]] bool read_failed() const noexcept { return status_ != group_read_status::ok; }
 
     // Both operator[](i) and iterator::operator*() (which delegates to this)
     // derive the per-entry entry_context from the SAME instance slice `i` —
@@ -205,7 +237,7 @@ public:
 private:
     std::span<slice const> instances_;
     entry_context base_ctx_{};
-    bool alloc_failed_ = false;
+    group_read_status status_ = group_read_status::ok;
 };
 
 }  // namespace fixpp::wire

@@ -395,7 +395,7 @@ namespace fixpp::v42::groups {  // shared repeating-group flyweights (AC-G5/AC-G
       auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 136, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(136);
-      return ::fixpp::wire::group_view<G_136>{r.slices, child_ctx, r.alloc_failed}; }
+      return ::fixpp::wire::group_view<G_136>{r.slices, child_ctx, r.status}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
     { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
@@ -692,14 +692,14 @@ namespace fixpp::v42::groups {  // shared repeating-group flyweights (AC-G5/AC-G
       auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 78, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(78);
-      return ::fixpp::wire::group_view<G_78>{r.slices, child_ctx, r.alloc_failed}; }
+      return ::fixpp::wire::group_view<G_78>{r.slices, child_ctx, r.status}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_386>
     trading_sessions() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
       auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 386, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(386);
-      return ::fixpp::wire::group_view<G_386>{r.slices, child_ctx, r.alloc_failed}; }
+      return ::fixpp::wire::group_view<G_386>{r.slices, child_ctx, r.status}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
     { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
@@ -1148,7 +1148,7 @@ namespace fixpp::v42::groups {  // shared repeating-group flyweights (AC-G5/AC-G
       auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 295, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(295);
-      return ::fixpp::wire::group_view<G_295>{r.slices, child_ctx, r.alloc_failed}; }
+      return ::fixpp::wire::group_view<G_295>{r.slices, child_ctx, r.status}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
     { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }

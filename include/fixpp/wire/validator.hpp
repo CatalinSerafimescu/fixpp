@@ -194,8 +194,8 @@ public:
         // validate falls through unchanged. A successful build costs only the
         // build_status() branch.
         if (!msg.offsets().build_status().has_value()) {
-            iter_t scan{msg.bytes(), 0, hooks};
-            iter_t const scan_end{msg.bytes(), msg.bytes().size(), hooks};
+            iter_t scan{msg.bytes(), 0, &hooks};
+            iter_t const scan_end{msg.bytes(), msg.bytes().size(), &hooks};
             while (!(scan == scan_end) && scan.fault() == field_fault::none) {
                 ++scan;
             }
@@ -241,8 +241,8 @@ public:
         // Hoist (perf): `field_valid_for(msg_type, tag)` would re-hash the
         // loop-invariant msg_type per field, so the walk below tests membership
         // in the view fetched above instead.
-        iter_t const begin{msg.bytes(), 0, hooks};
-        iter_t const end{msg.bytes(), msg.bytes().size(), hooks};
+        iter_t const begin{msg.bytes(), 0, &hooks};
+        iter_t const end{msg.bytes(), msg.bytes().size(), &hooks};
         auto const fields =
             envelope == nullptr
                 ? check_fields<false>(begin, end, valid_tags, scratch_mr, ref_tag_out, nullptr)

@@ -1298,10 +1298,12 @@ TEST(LoaderDisposition, BenignDuplicateCaptureIsKeptNotRejected) {
     fixpp::dict::detail::DelimCapture cap;
     // TWO captures, same context, same chain, same delimiter — the header/body
     // duplicate. Not a collision: nothing is being lost by keeping one.
-    cap.out.push_back(
-        {.rec = fixpp::dict::detail::make_group_ctx_delim(chain, 9000, 9001), .full_path = chain});
-    cap.out.push_back(
-        {.rec = fixpp::dict::detail::make_group_ctx_delim(chain, 9000, 9001), .full_path = chain});
+    cap.out.push_back({.rec = fixpp::dict::detail::make_group_ctx_delim(chain, 9000, 9001),
+                       .full_path = chain,
+                       .members = {}});
+    cap.out.push_back({.rec = fixpp::dict::detail::make_group_ctx_delim(chain, 9000, 9001),
+                       .full_path = chain,
+                       .members = {}});
 
     auto const clash = fixpp::dict::detail::flush_group_ctx_delims(h, cap);
     ASSERT_FALSE(clash.has_value())

@@ -13,16 +13,13 @@
 //    each, per the 062/063 scoping note — a multi-entry nested group is
 //    blocked by a separate defect and out of scope here).
 //  - BuildNestedSubviewAllocFailureDegradesToEmpty /
-//    CacheInsertAllocFailureServesWithoutCaching: the two defensive
-//    bad_alloc degrade paths (build_nested_subview's own catch, and
-//    nested_group_slices' cache-row push_back catch), driven via a call-counted
+//    CacheRowPushFailure_FailsTheReadOnBuild_ServesUncachedOnReuse: the two
+//    defensive bad_alloc degrade paths (build_nested_subview's own catch, and
+//    nested_group_slices' cache-row push_back catches), driven via a call-counted
 //    `failing_pmr_resource` (Nth-allocate-call injection) rather than a
 //    tight arena — nested_group_slices()'s `resource()` is fixed to the
 //    ROOT table's own arena, so a byte-budget arena cannot isolate a single
 //    allocation site without also perturbing the root table's own build.
-//    CacheInsertAllocFailureServesWithoutCaching is skipped on the MSVC debug
-//    STL (_ITERATOR_DEBUG_LEVEL != 0) — see the GTEST_SKIP rationale on that
-//    test: pmr-vector member-init proxy allocs escape the noexcept ctor there.
 //
 // Uses the same PUBLIC-API-only construction style as
 // group_slice_trailing_soh_test.cpp (T008), driving OffsetTable directly
@@ -44,6 +41,7 @@
 #include "support/failing_pmr_resource.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
+#include "support/wire_test_hooks.hpp"  // offset_table_test_access (100)
 
 namespace {
 
@@ -63,6 +61,13 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
 bool always_group_member(void const*, fixpp::wire::group_context const&, std::uint16_t,
                          std::uint16_t) noexcept {
     return true;
+}
+// 100: the registration stub that agrees with `always_group_member`.
+fixpp::wire::dict_hooks::group_resolution always_registered(void const*,
+                                                            fixpp::wire::group_context const&,
+                                                            std::uint16_t) noexcept {
+    // Names no definition: the walk asks the member stub.
+    return {.registered = true, .definition_known = false, .delimiter = 0, .members = {}};
 }
 
 // 063 T008: the new context arg — carried but unused in Phase 2.
@@ -85,13 +90,13 @@ TEST(NestedGroupSlicesCache, NullSliceDataReturnsEmptySpan) {
     OffsetTable root{*fv, &arena};  // dict-free ctor: the null guard never
                                     // reaches dict-aware code.
     int dict_token = 0;
-    auto slices =
-        root.nested_group_slices(nullptr, 0, /*nested_no_tag=*/802,
-                                 fixpp::wire::dict_hooks_test_access::make(
-                                     &dict_token, /*classify=*/nullptr, &always_group_member,
-                                     /*group_delim=*/nullptr, /*length_pair=*/nullptr),
-                                 fv->token(), kTestCtx)
-            .slices;
+    auto slices = root.nested_group_slices(
+                          nullptr, 0, /*nested_no_tag=*/802,
+                          fixpp::wire::dict_hooks_test_access::make(
+                              &dict_token, /*classify=*/nullptr, &always_group_member,
+                              /*group_delim=*/nullptr, /*length_pair=*/nullptr, &always_registered),
+                          fv->token(), kTestCtx)
+                      .slices;
     EXPECT_TRUE(slices.empty());
 }
 
@@ -259,14 +264,14 @@ TEST(NestedGroupSlicesCache, BuildNestedSubviewAllocFailureDegradesToEmpty) {
         ASSERT_GT(baseline_calls, 0U);
     }
 
-    // build_nested_subview's own top-level object allocation
-    // (`mr->allocate(sizeof(OffsetTable), ...)`) is
-    // deterministically the FIRST allocate() call inside the nested
-    // sequence (nested_group_slices() itself allocates nothing before
-    // calling it) — failing exactly there exercises build_nested_subview's catch and
-    // must degrade to an empty span, never crash/UB.
+    // 100 (research D10): a nested read that builds pushes its cache row first,
+    // so the row is the nested sequence's FIRST allocate() call (the row vector
+    // starts empty) and build_nested_subview's own top-level object allocation
+    // (`mr->allocate(sizeof(OffsetTable), ...)`) the SECOND — failing exactly there
+    // exercises build_nested_subview's catch and must degrade to an empty span,
+    // never crash/UB.
     std::pmr::monotonic_buffer_resource backing;  // bulk-frees (see baseline note above)
-    fixpp::test_support::failing_pmr_resource mr{&backing, baseline_calls + 1};
+    fixpp::test_support::failing_pmr_resource mr{&backing, baseline_calls + 2};
     OffsetTable root{*fv, &mr, fixpp::wire::dict_hooks::for_table_view(dict)};
     auto outer = root.group_slices(453);
     ASSERT_EQ(outer.size(), 1U);
@@ -274,105 +279,106 @@ TEST(NestedGroupSlicesCache, BuildNestedSubviewAllocFailureDegradesToEmpty) {
                                           fixpp::wire::dict_hooks::for_table_view(dict),
                                           fv->token(), kTestCtx)
                      .slices;
+    // The read makes exactly the row push and the refused shell request, so a refusal that
+    // lands on the row push (one request fewer) or inside the sub-build (more) fails here.
+    EXPECT_EQ(mr.allocate_calls(), baseline_calls + 2)
+        << "the nested read's requests: the cache row's push, then the refused sub-table shell";
     EXPECT_TRUE(inner.empty())
         << "build_nested_subview's object allocation failing must "
            "degrade to an empty span (build_nested_subview's bad_alloc catch)";
+    // The refused request is the shell: the pushed row then holds no sub-table. A refusal
+    // inside the sub-build would leave a built table whose own build failed in that row.
+    EXPECT_EQ(fixpp::wire::offset_table_test_access::resolve(
+                  root, outer[0].data, fixpp::wire::dict_hooks::for_table_view(dict), 802),
+              nullptr)
+        << "the injected failure did not hit build_nested_subview's shell allocation";
 }
 
-TEST(NestedGroupSlicesCache, CacheInsertAllocFailureServesWithoutCaching) {
-#if defined(_ITERATOR_DEBUG_LEVEL) && _ITERATOR_DEBUG_LEVEL != 0
-    // MSVC debug STL only (_ITERATOR_DEBUG_LEVEL != 0; Debug + asan-on-Debug
-    // lanes). Under iterator debugging every std::pmr::vector allocates a
-    // `_Container_proxy` through its resource AT CONSTRUCTION — i.e. in the
-    // sub-OffsetTable's member-init list, which runs BEFORE the ctor body and
-    // OUTSIDE build()'s internal bad_alloc try/catch. Because the OffsetTable
-    // ctors are noexcept (its ctor declarations, all `noexcept`), a failing_pmr_resource
-    // injection that lands on one of those proxy allocations escapes the
-    // noexcept boundary and std::terminates before build_nested_subview's
-    // catch can fire. This k-sweep inevitably hits such an index, so the test
-    // cannot reach its target (cache-row push_back) scenario here. libstdc++
-    // (macro undefined) and MSVC RELEASE (_ITERATOR_DEBUG_LEVEL == 0) allocate
-    // nothing in a vector ctor, so the site does not exist and this test runs
-    // there — the platform-independent push-back-catch contract stays covered.
-    // The escape is a debug-STL-only, genuine-OOM-only property universal to
-    // every pmr-holding noexcept type; the release path is unaffected.
-    GTEST_SKIP() << "noexcept-ctor member-init proxy allocation escapes under "
-                    "MSVC debug STL (_ITERATOR_DEBUG_LEVEL != 0); covered on "
-                    "libstdc++ and MSVC release";
-#else
+// 100 (FR-007, research D10): the nested cache row's push. Before 100 a failed
+// push after the build served the built table uncached, so the repeat rebuilt
+// over an arena the first build had consumed. Now a read that builds pushes its
+// row first: a failed push fails the read (802 is present in the instance and
+// registered) and builds nothing. A read that reuses an earlier row's sub-table
+// for the same slice and bundle still serves its answer uncached when its own row
+// does not fit, and the repeat finds the same earlier row and table.
+// The injection refuses one request and serves the next, which is not a
+// monotonic arena's exhaustion, so each repeat here completes (FR-007's
+// condition).
+TEST(NestedGroupSlicesCache, CacheRowPushFailure_FailsTheReadOnBuild_ServesUncachedOnReuse) {
     auto dict = make_oom_dict();
     auto buf = make_oom_frame();
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
+    auto const hooks = fixpp::wire::dict_hooks::for_table_view(dict);
 
+    // Baselines: the allocate() calls for the root table and its outer read, and
+    // those of a nested 802 read on top, with no injected failure.
     std::size_t baseline_calls = 0;
+    std::size_t after_802_calls = 0;
     {
         std::pmr::monotonic_buffer_resource backing;  // bulk-frees (see note above)
         fixpp::test_support::failing_pmr_resource mr{&backing, 0};
-        OffsetTable root{*fv, &mr, fixpp::wire::dict_hooks::for_table_view(dict)};
+        OffsetTable root{*fv, &mr, hooks};
         auto outer = root.group_slices(453);
         ASSERT_EQ(outer.size(), 1U);
         baseline_calls = mr.allocate_calls();
+        auto const r = root.nested_group_slices(outer[0].data, outer[0].len, 802, hooks,
+                                                fv->token(), kTestCtx);
+        ASSERT_EQ(r.slices.size(), 1U);
+        after_802_calls = mr.allocate_calls();
+        ASSERT_GT(after_802_calls, baseline_calls + 1U) << "setup: a row and a sub-table";
     }
 
-    // The exact allocate() index at which `nested_cache_.push_back(...)`
-    // itself runs is not analytically obvious
-    // (it depends on how many PMR allocations the sub-table's OWN internal
-    // build needs, which is an implementation detail this test must not
-    // assume). Sweep candidate failure points and behaviorally identify the
-    // boundary: the smallest offset at which the call still returns VALID,
-    // CORRECT nested-group content despite the injected failure is exactly
-    // the point where build_nested_subview has already fully succeeded and
-    // the very next allocation (the cache-row push_back) is the one that
-    // fails — any earlier offset lands inside build_nested_subview's own
-    // (self-degrading) work and yields empty/wrong content instead.
-    bool found = false;
-    for (std::size_t k = 1; k <= 64 && !found; ++k) {
-        std::pmr::monotonic_buffer_resource backing;  // bulk-frees (see note above)
-        fixpp::test_support::failing_pmr_resource mr{&backing, baseline_calls + k};
-        OffsetTable root{*fv, &mr, fixpp::wire::dict_hooks::for_table_view(dict)};
+    // Build path: the first nested allocation is the row; refusing it fails the
+    // read before any sub-table is requested.
+    {
+        std::pmr::monotonic_buffer_resource backing;
+        fixpp::test_support::failing_pmr_resource mr{&backing, baseline_calls + 1};
+        OffsetTable root{*fv, &mr, hooks};
         auto outer = root.group_slices(453);
         ASSERT_EQ(outer.size(), 1U);
-
-        auto inner1 = root.nested_group_slices(outer[0].data, outer[0].len,
-                                               /*nested_no_tag=*/802,
-                                               fixpp::wire::dict_hooks::for_table_view(dict),
-                                               fv->token(), kTestCtx)
-                          .slices;
-        if (inner1.size() != 1U) {
-            continue;  // failure landed inside build_nested_subview itself
-        }
-        auto delim1 = fixpp::wire::get({inner1[0].data, inner1[0].len}, /*tag=*/523, fv->token());
-        if (!delim1.has_value() || delim1->as_string() != "Q") {
-            continue;  // sub-table built but internally degraded/garbage
-        }
-
-        // Valid content on the FIRST call despite the injected failure. The
-        // resource's one-shot failure is now spent (every later call
-        // succeeds), so if the cache row failed to insert, a second
-        // same-key lookup MUST rebuild (strictly more allocate() calls)
-        // rather than being served for free from the cache.
-        auto const calls_after_first = mr.allocate_calls();
-        auto inner2 = root.nested_group_slices(outer[0].data, outer[0].len,
-                                               /*nested_no_tag=*/802,
-                                               fixpp::wire::dict_hooks::for_table_view(dict),
-                                               fv->token(), kTestCtx)
-                          .slices;
-        ASSERT_EQ(inner2.size(), 1U);
-        auto const calls_after_second = mr.allocate_calls();
-
-        if (calls_after_second > calls_after_first) {
-            found = true;
-            EXPECT_GT(calls_after_second, calls_after_first)
-                << "second same-key lookup rebuilt instead of being served from cache -- proves "
-                   "the cache-insert push_back failed and was caught (nested_group_slices' own "
-                   "catch)";
-        }
-        // Otherwise this k produced a fully successful call (push_back also
-        // succeeded, second call is a pure cache hit) — not the boundary;
-        // keep scanning.
+        auto const first = root.nested_group_slices(outer[0].data, outer[0].len, 802, hooks,
+                                                    fv->token(), kTestCtx);
+        EXPECT_EQ(first.status, fixpp::wire::group_read_status::alloc_failed)
+            << "FR-007: a nested read whose cache row does not fit fails";
+        EXPECT_TRUE(first.slices.empty());
+        EXPECT_FALSE(first.is_group);
+        EXPECT_EQ(mr.allocate_calls(), baseline_calls + 1U)
+            << "the failed read requested nothing after its row: no sub-table was built";
+        auto const repeat = root.nested_group_slices(outer[0].data, outer[0].len, 802, hooks,
+                                                     fv->token(), kTestCtx);
+        ASSERT_EQ(repeat.status, fixpp::wire::group_read_status::ok);
+        ASSERT_EQ(repeat.slices.size(), 1U);
+        auto delim =
+            fixpp::wire::get({repeat.slices[0].data, repeat.slices[0].len}, 523, fv->token());
+        ASSERT_TRUE(delim.has_value());
+        EXPECT_EQ(delim->as_string(), "Q");
     }
-    ASSERT_TRUE(found) << "no injected allocation offset within the search bound produced a "
-                          "serve-without-caching result (nested_group_slices' own catch unreached)";
-#endif
+
+    // Reuse path: a second no_tag over the same slice and bundle reuses the 802
+    // read's sub-table; its own row is the next allocation, and refusing it serves
+    // the answer uncached (448 is a member, not a group).
+    {
+        std::pmr::monotonic_buffer_resource backing;
+        fixpp::test_support::failing_pmr_resource mr{&backing, after_802_calls + 1};
+        OffsetTable root{*fv, &mr, hooks};
+        auto outer = root.group_slices(453);
+        ASSERT_EQ(outer.size(), 1U);
+        auto const r802 = root.nested_group_slices(outer[0].data, outer[0].len, 802, hooks,
+                                                   fv->token(), kTestCtx);
+        ASSERT_EQ(r802.slices.size(), 1U);
+        ASSERT_EQ(mr.allocate_calls(), after_802_calls);
+        auto const first = root.nested_group_slices(outer[0].data, outer[0].len, 448, hooks,
+                                                    fv->token(), kTestCtx);
+        EXPECT_EQ(first.status, fixpp::wire::group_read_status::ok)
+            << "a reused sub-table's answer is served when the call's own row does not fit";
+        EXPECT_FALSE(first.is_group);
+        auto const calls_after_first = mr.allocate_calls();
+        auto const repeat = root.nested_group_slices(outer[0].data, outer[0].len, 448, hooks,
+                                                     fv->token(), kTestCtx);
+        EXPECT_EQ(repeat.status, fixpp::wire::group_read_status::ok);
+        EXPECT_FALSE(repeat.is_group);
+        EXPECT_GT(mr.allocate_calls(), calls_after_first)
+            << "the repeat pushed the row the first read could not cache";
+    }
 }

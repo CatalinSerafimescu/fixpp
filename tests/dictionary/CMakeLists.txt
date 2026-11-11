@@ -53,9 +53,11 @@ add_executable(dictionary_pure_tests
   oom_injection_test.cpp          # local failing_pmr_resource seam — no global state
   dictionary_snapshot_test.cpp    # fixpp#215 item 1 (Option C): A1-A5 boundary pins + seam 4 alias identity
   test_101_tag_defined.cpp        # 101 T029: W101-15, table_view::tag_defined
+  test_100_registration_records.cpp  # 100 T028: registration stores, records, D2 sweep
 )
 target_link_libraries(dictionary_pure_tests PRIVATE
   fixpp_dictionary
+  fixpp_wire  # 100 T028 reads the stores through dict_hooks::for_table_view (parser.hpp)
   pugixml::pugixml
   GTest::gtest
   GTest::gtest_main
@@ -95,6 +97,9 @@ set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 098)
 # setter for this entry, so the existing labels survive. reused_tag_census_test.cpp and
 # xml_enum_codeset_test.cpp, which stay in this bucket, hold expected values 099 updated.
 set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 099)
+# 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 100)
 # 101-inbound-reject-fidelity: label 101 (tasks.md T019). APPEND, after the last LABELS setter
 # for this entry, so the existing labels survive. test_101_tag_defined.cpp joins this bucket.
 set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 101)
@@ -243,6 +248,17 @@ target_link_libraries(dictionary_table_view_pair_oom_test PRIVATE
 )
 add_test(NAME dictionary_table_view_pair_oom_test COMMAND dictionary_table_view_pair_oom_test)
 set_tests_properties(dictionary_table_view_pair_oom_test PROPERTIES LABELS "426;dictionary")
+
+# 100-wire-group-read-integrity (T067): the record stores' strong guarantee, one failed
+# allocation at a time, through the same TU-local global operator new seam.
+add_executable(dictionary_100_record_store_oom_test test_100_record_store_oom.cpp)
+target_link_libraries(dictionary_100_record_store_oom_test PRIVATE
+  fixpp_dictionary
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME dictionary_100_record_store_oom_test COMMAND dictionary_100_record_store_oom_test)
+set_tests_properties(dictionary_100_record_store_oom_test PROPERTIES LABELS "100;dictionary")
 
 # ── 098-dialect-overlay: the overlay splice under a failing pugixml allocator ──
 # Standalone, not in the pure bucket: it installs pugixml's process-global
