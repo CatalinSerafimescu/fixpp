@@ -214,7 +214,10 @@ public:
     std::atomic<std::uint64_t> fields_372{0};
 
     void expect_372(std::string_view msg_type) {
-        pattern_372_ = "\x01" "372=" + std::string(msg_type) + "\x01";
+        pattern_372_ =
+            "\x01"
+            "372=" +
+            std::string(msg_type) + "\x01";
         match_372_ = matcher{pattern_372_};
     }
 
@@ -275,8 +278,12 @@ private:
     asio::ip::tcp::socket* sock_;
     std::array<char, 4096> buf_{};
     std::size_t match_ = 0;  // run thread only
-    matcher match_reject_{"\x01" "35=3\x01"};
-    matcher match_bmr_{"\x01" "35=j\x01"};
+    matcher match_reject_{
+        "\x01"
+        "35=3\x01"};
+    matcher match_bmr_{
+        "\x01"
+        "35=j\x01"};
     std::string pattern_372_;
     matcher match_372_{};
 };

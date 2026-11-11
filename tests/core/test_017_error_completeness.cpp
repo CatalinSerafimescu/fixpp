@@ -84,8 +84,8 @@ TEST(Error017Completeness, ExactSetEquality) {
     // The cast names the slot one past the last enumerator on purpose: the
     // assertion is that the slot has no message.
     // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
-    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(
-                  static_cast<std::uint8_t>(error::wire_undefined_tag) + 1U)),
+    EXPECT_EQ(fixpp::core::error_message(
+                  static_cast<error>(static_cast<std::uint8_t>(error::wire_undefined_tag) + 1U)),
               std::string_view{"unknown error"})
         << "the slot after wire_undefined_tag carries a message — a "
            "message-bearing enumerator was added beyond the 101 block (see "

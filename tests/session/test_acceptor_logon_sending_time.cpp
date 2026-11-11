@@ -619,10 +619,22 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell8_LongCompId_RejectRebuiltInTheSlot_Sen
     ASSERT_EQ(captured_frames_.size(), 1U) << "Cell8: the Reject, rebuilt in the slot, is sent";
     const std::string rj(reinterpret_cast<const char*>(captured_frames_.front().data()),
                          captured_frames_.front().size());
-    EXPECT_NE(rj.find("\x01" "35=3\x01"), std::string::npos) << rj;
-    EXPECT_NE(rj.find("\x01" "373=10\x01"), std::string::npos) << rj;
-    EXPECT_NE(rj.find("\x01" "371=52\x01"), std::string::npos) << rj;
-    EXPECT_NE(rj.find("\x01" "49=" + long_sender + "\x01"), std::string::npos)
+    EXPECT_NE(rj.find("\x01"
+                      "35=3\x01"),
+              std::string::npos)
+        << rj;
+    EXPECT_NE(rj.find("\x01"
+                      "373=10\x01"),
+              std::string::npos)
+        << rj;
+    EXPECT_NE(rj.find("\x01"
+                      "371=52\x01"),
+              std::string::npos)
+        << rj;
+    EXPECT_NE(rj.find("\x01"
+                      "49=" +
+                      long_sender + "\x01"),
+              std::string::npos)
         << "the long CompID is carried whole";
 }
 

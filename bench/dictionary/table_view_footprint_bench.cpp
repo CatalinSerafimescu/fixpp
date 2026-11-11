@@ -263,7 +263,8 @@ BENCHMARK(BM_TableView_DefinedTags_FixtRouteFix50SP2)->Iterations(1);
 
 static void BM_TableView_DefinedTags_FixLatest(benchmark::State& state) {
     static std::pmr::unsynchronized_pool_resource mr;
-    auto const dictionary = fixpp::dict::load_any(dict_path("orchestra/OrchestraFIXLatest.xml"), &mr);
+    auto const dictionary =
+        fixpp::dict::load_any(dict_path("orchestra/OrchestraFIXLatest.xml"), &mr);
     report_defined_tags(state, dictionary.as_table_view());
 }
 BENCHMARK(BM_TableView_DefinedTags_FixLatest)->Iterations(1);

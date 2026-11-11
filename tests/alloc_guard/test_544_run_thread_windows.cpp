@@ -475,9 +475,8 @@ std::string reply_msg_type(rt::Rig const& rig, reply_kind kind, bool overflow) {
         std::string const mt(n == 0 ? 1 : n, 'U');
         std::span<std::byte> const out{buf.data(), buf.size()};
         return kind == reply_kind::bmr
-                   ? fixpp::session::build_business_message_reject(out, 99, "ISLD", "TW", 99, mt,
-                                                                   0, rig.begin_string,
-                                                                   rig.sending_time())
+                   ? fixpp::session::build_business_message_reject(
+                         out, 99, "ISLD", "TW", 99, mt, 0, rig.begin_string, rig.sending_time())
                          .has_value()
                    : fixpp::session::build_reject_with_text(out, 99, "ISLD", "TW", 99, 0, mt, 11,
                                                             rig.begin_string, rig.sending_time(),

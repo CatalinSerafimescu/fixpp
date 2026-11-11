@@ -221,8 +221,9 @@ std::string repeat_then(const std::string& tail) {
 
 TEST(RepeatWalkUnit101, W101_29c_InHeaderRepeat_ThenMalformedCount_ReportsNeither) {
     // RawDataLength(95) is a standard Length; its count runs past the frame.
-    const auto r = walk_on_fixt11(repeat_then("95=999\x01"
-                                              "96=x\x01"));
+    const auto r =
+        walk_on_fixt11(repeat_then("95=999\x01"
+                                   "96=x\x01"));
     EXPECT_FALSE(r.in_header) << "a faulting walk discards the 35s it saw";
     EXPECT_FALSE(r.past_header);
 }
@@ -248,7 +249,10 @@ TEST(RepeatWalkUnit101, W101_51_ConflictWithFaultingWalk_Answers14) {
         SCOPED_TRACE(kind_name(k));
         auto rig = started(spec(k), Arm::Active);
         ASSERT_TRUE(rig);
-        const std::string wire = rig->frame("D", 2, "95=999\x01" "96=x\x01", "35=0\x01");
+        const std::string wire = rig->frame("D", 2,
+                                            "95=999\x01"
+                                            "96=x\x01",
+                                            "35=0\x01");
         const auto bytes = std::as_bytes(std::span{wire.data(), wire.size()});
         detail::FrameHeader hdr{};
         hdr.msg_type = "D";

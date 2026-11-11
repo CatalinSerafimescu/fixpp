@@ -89,11 +89,10 @@ const KeyedRow kActiveOff[] = {
 // endings, which read the last 35): on a validation-off session after establishment a frame with
 // two MsgTypes ends as the same frame with every later 35 removed and re-framed, its stripped twin.
 const char* const kActiveOffRepeat[] = {
-    "rep35 D..0 past",         "rep35 D..3 past",         "rep35 D..4 past",
-    "rep35 D..A past",         "rep35 D..5 past",         "rep35 5..D past",
-    "rep35 0..D past",         "rep35 3..D past",         "rep35 4..D past",
-    "rep35 A..0 past",         "rep35 D..A logon-fields", "rep35 0..A logon-fields",
-    "rep35 0,D header",        "rep35 D,D header",
+    "rep35 D..0 past",  "rep35 D..3 past",  "rep35 D..4 past",         "rep35 D..A past",
+    "rep35 D..5 past",  "rep35 5..D past",  "rep35 0..D past",         "rep35 3..D past",
+    "rep35 4..D past",  "rep35 A..0 past",  "rep35 D..A logon-fields", "rep35 0..A logon-fields",
+    "rep35 0,D header", "rep35 D,D header",
 };
 
 // The frame with every 35 after the first removed, BodyLength and CheckSum recomputed. The
@@ -151,8 +150,11 @@ TEST_P(W6ActiveOffOracle, EndsAsTheStrippedTwin) {
     const std::string stripped = strip_later_35(frame);
     auto count_35 = [](const std::string& f) {
         std::size_t n = 0;
-        for (std::size_t p = f.find("\x01" "35="); p != std::string::npos;
-             p = f.find("\x01" "35=", p + 1)) {
+        for (std::size_t p = f.find("\x01"
+                                    "35=");
+             p != std::string::npos; p = f.find("\x01"
+                                                "35=",
+                                                p + 1)) {
             ++n;
         }
         return n;

@@ -152,8 +152,8 @@ TEST(AbiSymbolGolden, ErrorEnumUnchanged) {
     // The cast names the slot one past the last enumerator on purpose: the
     // assertion is that the slot has no message.
     // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
-    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(
-                  static_cast<std::uint8_t>(error::wire_undefined_tag) + 1U)),
+    EXPECT_EQ(fixpp::core::error_message(
+                  static_cast<error>(static_cast<std::uint8_t>(error::wire_undefined_tag) + 1U)),
               std::string_view{"unknown error"})
         << "the slot after wire_undefined_tag must remain unknown — 062 "
            "introduces no error enumerator (FR-007)";

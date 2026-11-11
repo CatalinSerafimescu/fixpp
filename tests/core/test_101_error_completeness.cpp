@@ -70,8 +70,7 @@ TEST(Error101Completeness, Messages) {
 TEST(Error101Completeness, TranslateTargets) {
     EXPECT_EQ(fixpp_capi::detail::translate(error::wire_invalid_msg_type),
               FIXPP_ERR_WIRE_CONFORMANCE);
-    EXPECT_EQ(fixpp_capi::detail::translate(error::wire_undefined_tag),
-              FIXPP_ERR_WIRE_CONFORMANCE);
+    EXPECT_EQ(fixpp_capi::detail::translate(error::wire_undefined_tag), FIXPP_ERR_WIRE_CONFORMANCE);
 }
 
 // ── SessionRejectReason(373) of every slot the validator returns ───────────────────────────

@@ -90,10 +90,10 @@ void expect_defined_set(const table_view& tv, const std::set<std::uint16_t>& exp
         }
         return s;
     };
-    EXPECT_TRUE(missing.empty()) << missing.size() << " declared tags not defined, first: "
-                                 << head(missing);
-    EXPECT_TRUE(extra.empty()) << extra.size() << " undeclared tags defined, first: "
-                               << head(extra);
+    EXPECT_TRUE(missing.empty()) << missing.size()
+                                 << " declared tags not defined, first: " << head(missing);
+    EXPECT_TRUE(extra.empty()) << extra.size()
+                               << " undeclared tags defined, first: " << head(extra);
 }
 
 const std::filesystem::path kDicts{FIXPP_DICT_DATA_DIR};
@@ -272,8 +272,8 @@ INSTANTIATE_TEST_SUITE_P(TagDefined101, TagDefined101Op, testing::ValuesIn(op_ca
 
 TEST(TagDefined101, EmptyTable_DefinesNothing) {
     const table_view tv = table_view_builder{}.build();
-    for (std::uint16_t t : {std::uint16_t{1}, std::uint16_t{55}, kTag,
-                            std::numeric_limits<std::uint16_t>::max()}) {
+    for (std::uint16_t t :
+         {std::uint16_t{1}, std::uint16_t{55}, kTag, std::numeric_limits<std::uint16_t>::max()}) {
         EXPECT_FALSE(tv.tag_defined(t)) << t;
     }
 }

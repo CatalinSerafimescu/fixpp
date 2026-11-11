@@ -74,11 +74,11 @@ TEST(Reject101Tag, W101_11_DefinedTagNotInMessage_Reason2) {
 TEST(Reject101Tag, W101_11_OverlayFieldInNoMessage_Reason2) {
     constexpr std::uint16_t kTag = 5101;
     ASSERT_EQ(outside_tag_reason("FIX44.xml", kTag), "0") << "the base must not define the tag";
-    static const DictPtr d = t99::overlay_on(
-        "FIX44.xml",
-        "<fix type='FIX' major='4' minor='4'><fields>"
-        "<field number='5101' name='Venue101FieldOnly' type='STRING' />"
-        "</fields></fix>");
+    static const DictPtr d =
+        t99::overlay_on("FIX44.xml",
+                        "<fix type='FIX' major='4' minor='4'><fields>"
+                        "<field number='5101' name='Venue101FieldOnly' type='STRING' />"
+                        "</fields></fix>");
     ASSERT_TRUE(defined(*d, kTag));
     t99::Fixture f;
     f.session_dict = d;

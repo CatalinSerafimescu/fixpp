@@ -315,8 +315,8 @@ const void* Session::callback_thread_tag_() noexcept {
 // slot only while the slot is free; on_inbound_frame calls that overlap on the same Session are
 // outside its contract. Evaluated by inbound_reply_slot_hold::take before it sets the flag.
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
-#define FIXPP_ASSERT_INBOUND_REPLY_SLOT_FREE()                               \
-    assert(!s_->inbound_reply_slot_held_ &&                                  \
+#define FIXPP_ASSERT_INBOUND_REPLY_SLOT_FREE()                              \
+    assert(!s_->inbound_reply_slot_held_ &&                                 \
            "inbound reply slot taken while another inbound reply holds it " \
            "(overlapping on_inbound_frame() calls on one Session?)")
 // The stack-arena overload of parse_and_dispatch_ evaluates this after its
@@ -2742,10 +2742,9 @@ fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_reject_(
     int ref_tag_id, std::string_view ref_msg_type, int reason, std::string_view sending_time,
     std::string_view text) noexcept {
     auto const build = [&](std::span<std::byte> out, std::string_view rmt) {
-        return fixpp::session::build_reject_with_text(out, seq, cfg_.sender_comp_id,
-                                                      cfg_.target_comp_id, ref_seq, ref_tag_id,
-                                                      rmt, reason, cfg_.begin_string,
-                                                      sending_time, text);
+        return fixpp::session::build_reject_with_text(
+            out, seq, cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq, ref_tag_id, rmt, reason,
+            cfg_.begin_string, sending_time, text);
     };
     auto r = build_in_site_then_slot(
         site, hold, [&](std::span<std::byte> out) { return build(out, ref_msg_type); });
@@ -3891,10 +3890,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
                 co_return co_await close_on_late_parse_failure_();
             }
             if (v.outcome == validate_outcome::reject) {
-                auto rj = co_await emit_session_reject_(
-                    parse_seqnum(hdr.msg_seq_num), hdr.msg_type, v.reject.reason,
-                    v.reject.ref_tag_id, session_reject_reason_text(v.reject.reason),
-                    fsm_state::NotConnected);
+                auto rj = co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
+                                                        v.reject.reason, v.reject.ref_tag_id,
+                                                        session_reject_reason_text(v.reject.reason),
+                                                        fsm_state::NotConnected);
                 // 099 (data-model E-7's S2, FR-010): any other Reject stays in the arm.
                 if (rj && logon_reject_disconnects_(hdr, v.reject.ref_tag_id)) {
                     disconnect_unless_superseded_(fsm_state::NotConnected);
@@ -5896,10 +5895,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
                 co_return co_await close_on_late_parse_failure_();
             }
             if (v.outcome == validate_outcome::reject) {
-                auto rj = co_await emit_session_reject_(
-                    parse_seqnum(hdr.msg_seq_num), hdr.msg_type, v.reject.reason,
-                    v.reject.ref_tag_id, session_reject_reason_text(v.reject.reason),
-                    fsm_state::LogonSent);
+                auto rj = co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
+                                                        v.reject.reason, v.reject.ref_tag_id,
+                                                        session_reject_reason_text(v.reject.reason),
+                                                        fsm_state::LogonSent);
                 // 099 (data-model E-7's S2, FR-010): any other Reject stays in the arm.
                 if (rj && logon_reject_disconnects_(hdr, v.reject.ref_tag_id)) {
                     disconnect_unless_superseded_(fsm_state::LogonSent);
