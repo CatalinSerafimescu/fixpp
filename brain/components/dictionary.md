@@ -482,4 +482,3 @@ shipped fixtures pass a null delimiter callback with a membership callback and w
 **Not fixed: custom dictionaries that define one count tag differently at one key** (`L-100-1`,
 fixpp#665; the validator's bare fallback is fixpp#666). The census scripts of research D2's recipe
 re-derive that shipped dictionaries reach none of them.
-
