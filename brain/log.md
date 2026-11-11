@@ -6,7 +6,7 @@ status: stable
 
 # Log
 
-- **2026-11-11 — 100-wire-group-read-integrity, `/speckit-verify` (Step 10b): decision links only.** `components/c-api.md`, `components/inbound-message-path.md` and `components/session.md` already name 100 in their bodies (each a "Superseded by 100" note); each gains its Gate A record in `refs_external`, as `brain_link_decisions.py --parent <parent root>` proposed. No page states the T071 signature changes (B-100-7, B-100-8): a grep of `brain/` for `dict_hooks` passed or held by value finds none, the same grep finding other "by value" lines.
+- **2026-11-11 — 100-wire-group-read-integrity, `/speckit-verify` (Step 10b): decision links only.** `components/c-api.md`, `components/inbound-message-path.md` and `components/session.md` already name 100 in their bodies (each a "Superseded by 100" note); each gains its Gate A record in `refs_external`, as `brain_link_decisions.py --parent <parent root>` proposed. No page states the T071 signature change (B-100-7): a grep of `brain/` for `dict_hooks` passed or held by value finds none, the same grep finding other "by value" lines.
 - **2026-11-05 — 099-fixt-appl-version-validation, `/speckit-verify` (Step 10b): a FIXT session reads each message with
   that message's dictionary.** `components/session.md` gains the section with what was decided (two dictionaries chosen
   per frame, one route per table, a shared `fixt_route_set` built in `Engine::start()`), what was rejected, and which
