@@ -461,7 +461,7 @@ TEST(GroupReadStatus100, T027_NullRegistrationCallback_DeclinesTheGroupRead) {
                   fixpp::wire::dict_hooks_test_access::make(
                       &tv, /*classify=*/nullptr, &fixpp_test_support::context_group_member_fn,
                       &fixpp_test_support::context_group_delim_fn, /*length_pair=*/nullptr,
-                      /*group_registered=*/nullptr)};
+                      /*group_resolve=*/nullptr)};
     ASSERT_TRUE(t.build_status().has_value()) << "setup: build";
     t.set_group_context(fixpp::wire::group_context{.msg_type = "D"});
     ASSERT_TRUE(t.find(453).has_value()) << "setup: the count tag is present";
@@ -690,7 +690,7 @@ TEST(GroupReadStatus100, T039_D11_NullRegistrationCallbackModeA_OkNotAGroup) {
     auto const no_registration = fixpp::wire::dict_hooks_test_access::make(
         &tv, /*classify=*/nullptr, &fixpp_test_support::context_group_member_fn,
         &fixpp_test_support::context_group_delim_fn, /*length_pair=*/nullptr,
-        /*group_registered=*/nullptr);
+        /*group_resolve=*/nullptr);
     auto const read = [&no_registration](view_t const& mv,
                                          std::optional<fixpp::wire::group_slice> const& outer) {
         auto const ctx = mv.offsets().group_context_for(453);
