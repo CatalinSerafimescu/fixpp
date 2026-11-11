@@ -908,9 +908,13 @@ private:
     // 101-inbound-reject-fidelity (research D1): records `tag` in the defined-tag store that
     // tag_defined() reads. Every population operation that names a tag calls this for each tag
     // it names, so a hand-built table defines every tag it was told anything about; an operation
-    // that only forwards to another (add_valid, add_required, set_type, set_group_first and its
-    // `_ctx` form) is covered by the one it calls. Re-derive the set of callers by listing the
-    // private mutators `table_view_builder` forwards to: a mutator added later calls it too.
+    // that only forwards to another (add_valid, add_required, set_type, set_group_first) is
+    // covered by the one it calls. Re-derive the set of callers by listing the private mutators
+    // `table_view_builder` forwards to: a mutator added later calls it too. The exception is 100's
+    // registration-only record stores (add_occurrence_group, add_section_group), which leave the
+    // validator's accessors unchanged (100 FR-009), tag_defined() among them; this rests on every
+    // tag they are given being a field the dictionary declares, which the field-list fill marks
+    // (TagDefined101's exact-set cells check it on each shipped dictionary).
     // It sets the tag's bit in `defined_bits_`, which `table_view_builder`'s constructor sized
     // before the first population operation, so it cannot throw; the store is written once,
     // from the bits, by `table_view_builder::build() &&`.
@@ -1072,6 +1076,7 @@ private:
     // behaviour, context-scoped.
     void set_group_first_ctx(std::string_view msg_type, std::span<std::uint16_t const> parent_path,
                              std::uint16_t no_tag, std::uint16_t first) {
+        mark_defined_ctx(parent_path, no_tag, first);
         auto& entry = ctx_entry(msg_type, parent_path, no_tag);
         entry.group_first = first;
         push_unique(entry.members, first);
