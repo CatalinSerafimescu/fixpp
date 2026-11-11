@@ -793,7 +793,7 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
             //     removal narrows the accidental spelling; the answer space
             //     still contains a value equivalent to absence.
             //   - bounded: this `delim` is membership-VALIDATED before use.
-            //     group() proceeds only after group_member_fn_ confirms the
+            //     group() proceeds only after confirming the
             //     wire's first tag after the count IS a member of this group
             //     in this context, so an arbitrary attacker-chosen tag can
             //     never become the delimiter — unlike #220's extent, which
@@ -806,17 +806,12 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
             //     exists to arbitrate.
             //
             // There is deliberately no "or the context did not resolve"
-            // branch: the splitter cannot observe that state, since
-            // `group_first_field` has already fallen through to the bare
-            // global before it sees a value and returns a plain scalar with
-            // no discriminator.
+            // branch: the splitter cannot observe that state.
             std::uint16_t delim = entries_[first].tag;
             if (hooks_.opaque_dict() != nullptr && hooks_.group_delim_fn() != nullptr) {
                 group_context const ctx = stored_group_context();
                 // 384 (C-8.4 row 2): a 0 answer means the store has no
-                // delimiter record for `(msg_type, parent_path, no_tag)` —
-                // `group_first_field` returns 0 both when `group_bit` is
-                // clear and when the record's `group_first` is itself 0. We
+                // delimiter record for `(msg_type, parent_path, no_tag)`. We
                 // are already past group()'s membership check, so the
                 // dictionary has asserted that this no_tag HAS members in
                 // this context; a missing delimiter record alongside a
