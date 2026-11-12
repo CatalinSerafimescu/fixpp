@@ -1504,8 +1504,7 @@ private:
 //
 // `build()` performs NO consistency validation (L-456-1): a builder can still
 // produce an internally inconsistent table (a group with members and no first
-// field — B-384-2). The seal governs reachability, not consistency: `build()`
-// is `return std::move(tv_);` and checks nothing.
+// field — B-384-2). The seal governs reachability, not consistency.
 class table_view_builder {
 public:
     // 101 (research D1, T067): sizes the view's defined-tag bits before any population
