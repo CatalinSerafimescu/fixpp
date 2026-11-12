@@ -177,10 +177,10 @@ TEST(TagDefined101, FixLatest_DefinesExactlyTheFieldDefinitions) {
 // in plain form; the 5.0 family (a QuickFIX XML file named `FIX50*`) also in route form. The
 // 5.0 family's set, in both forms, is the field definitions plus the FIXT framing tags: the
 // framing surface `Dictionary::build_table_view` adds for those versions marks its tags (its
-// `which_session_version()` switch). This is the check that a
-// registration-only record store (table_view.hpp's `add_occurrence_group`,
-// `add_section_group`, which do not mark) loses no tag on a shipped dictionary: the fill
-// marks every tag the source declares as a field, and nothing else.
+// `which_session_version()` switch). This is the check that a registration-only record store
+// (table_view.hpp's `add_occurrence_group`, `add_section_group`, which do not mark) loses no
+// tag on a shipped dictionary: each cell holds only when the defined set equals the source's
+// field definitions.
 
 struct ShippedCase {
     std::filesystem::path file;
