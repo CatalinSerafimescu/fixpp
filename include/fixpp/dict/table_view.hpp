@@ -931,8 +931,8 @@ private:
     // The seal (101 T067): writes the store from the bits, the defined tags in ascending order
     // at exact size (one allocation of the set bits' count), then releases the bits, so a built
     // view, and each copy of it, holds the sorted vector and no bit words. Load-time only, never
-    // on the inbound path. It allocates, and a failure propagates out of `build() &&` with the
-    // builder's view unchanged.
+    // on the inbound path. Its one allocation comes before it writes any member, so a failure of
+    // that allocation propagates out of `build() &&` with the builder's view unchanged.
     void seal_defined_tags() {
         std::size_t count = 0;
         for (auto const word : defined_bits_) {
@@ -1642,8 +1642,10 @@ public:
 
     // Consumes the builder. The move is a member-to-return move, so NRVO cannot
     // apply; C++17 guaranteed elision then makes the caller's own return free.
-    // 101 (research D1): seals the defined-tag store first; the seal allocates, so this can
-    // throw, and then the builder is unchanged.
+    // 101 (research D1): seals the defined-tag store first. A throw from the seal's allocation
+    // leaves the builder unchanged. The move after it can throw where
+    // `std::is_nothrow_move_constructible_v<table_view>` is false; a builder whose `build()`
+    // threw at that step is sealed, with its bits released, and is not to be reused.
     [[nodiscard]] table_view build() && {
         tv_.seal_defined_tags();
         return std::move(tv_);
