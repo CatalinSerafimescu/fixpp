@@ -39,6 +39,9 @@ character literals holding braces in their bodies.
   (n) Session::build_inbound_business_reject_ wrapping build_reject_with_text:
       refused the same way, the other direction.
   (o) a listed helper whose definition calls no raw builder: refused.
+  (p) a listed helper whose comment and string literal name the other
+      family's builder, around its own builder: passes, because the builders
+      a definition calls are read outside comments and literals.
 
 Line numbers in the expected messages are found in the fixture by a marker,
 and each flagged arm names how many sites the gate must report.
@@ -221,6 +224,19 @@ SRC_O = source(
     ],
     HELPER_DEFS[9:],
 )
+# (p): the other family's builder named only in a comment and in a string literal.
+SRC_P = source(
+    WIRED_CALLERS,
+    [
+        "fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_reject_(",
+        "    std::span<std::byte> site) noexcept {",
+        "    // not build_business_message_reject(site, seq): a Reject needs fire_to_admin_",
+        '    std::string_view const why = "build_business_message_reject(";',
+        "    return fixpp::session::build_reject_with_text(site, seq, why);",
+        "}",
+    ],
+    HELPER_DEFS[9:],
+)
 
 
 def comment_filler() -> list[str]:
@@ -392,6 +408,7 @@ ARMS = {
             "of the builder it wraps",
         ],
     ),
+    "p_other_family_named_only_in_a_comment_and_a_literal": (SRC_P, 0, [OK_TEXT]),
 }
 
 
