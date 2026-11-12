@@ -13,7 +13,9 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <fixpp/core/length_data_pairs.hpp>
@@ -25,6 +27,8 @@
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <map>
+#include <memory>
 #include <memory_resource>
 #include <ostream>
 #include <regex>
@@ -104,20 +108,20 @@ dd::Dictionary load(const std::filesystem::path& p) {
     return dd::load_any(p, &mr);
 }
 
-// Each shipped dictionary the cells read, and each view form they read from it, is loaded and
-// built once for the binary; every view is `as_table_view`'s result as returned.
-const dd::Dictionary& fix44() {
-    static const dd::Dictionary d = load(kDicts / "FIX44.xml");
-    return d;
+// Each shipped dictionary the cells read is loaded once for the binary, whichever cell reads it
+// first; each view form below is built once from it; every view is `as_table_view`'s result as
+// returned.
+const dd::Dictionary& shipped(const std::filesystem::path& p) {
+    static std::map<std::filesystem::path, std::unique_ptr<const dd::Dictionary>> cache;
+    auto& slot = cache[p];
+    if (!slot) {
+        slot = std::make_unique<const dd::Dictionary>(load(p));
+    }
+    return *slot;
 }
-const dd::Dictionary& fix50sp2() {
-    static const dd::Dictionary d = load(kDicts / "FIX50SP2.xml");
-    return d;
-}
-const dd::Dictionary& fix_latest() {
-    static const dd::Dictionary d = load(kOrch / "OrchestraFIXLatest.xml");
-    return d;
-}
+const dd::Dictionary& fix44() { return shipped(kDicts / "FIX44.xml"); }
+const dd::Dictionary& fix50sp2() { return shipped(kDicts / "FIX50SP2.xml"); }
+const dd::Dictionary& fix_latest() { return shipped(kOrch / "OrchestraFIXLatest.xml"); }
 const table_view& fix44_view() {
     static const table_view tv = fix44().as_table_view();
     return tv;
@@ -164,6 +168,86 @@ TEST(TagDefined101, FixLatest_DefinesExactlyTheFieldDefinitions) {
     ASSERT_TRUE(defs.contains(3115)) << "precondition: FIX Latest declares 3115";
     expect_defined_set(fix_latest_view(), defs);
 }
+
+// ── Every shipped dictionary, by a listing of the dictionary directories ────────────────
+//
+// The cells are the directories' listing, so a dictionary added to either directory is
+// checked without a new cell. Each `*.xml` of `FIXPP_DICT_DATA_DIR` (FIXT11 included: it
+// loads on its own, as a session-layer dictionary) and of `FIXPP_ORCHESTRA_DATA_DIR` is read
+// in plain form; the 5.0 family (a QuickFIX XML file named `FIX50*`) also in route form. The
+// 5.0 family's set, in both forms, is the field definitions plus the FIXT framing tags: the
+// framing surface `Dictionary::build_table_view` adds for those versions marks its tags (its
+// `which_session_version()` switch). This is the check that a
+// registration-only record store (table_view.hpp's `add_occurrence_group`,
+// `add_section_group`, which do not mark) loses no tag on a shipped dictionary: the fill
+// marks every tag the source declares as a field, and nothing else.
+
+struct ShippedCase {
+    std::filesystem::path file;
+    bool orchestra = false;
+    bool route = false;
+};
+
+void PrintTo(const ShippedCase& c, std::ostream* os) {
+    *os << c.file.filename().string() << (c.route ? " (route form)" : "");
+}
+
+std::vector<ShippedCase> shipped_cases() {
+    std::vector<ShippedCase> out;
+    for (auto const& [dir, orchestra] : {std::pair{kDicts, false}, std::pair{kOrch, true}}) {
+        std::vector<std::filesystem::path> files;
+        for (auto const& e : std::filesystem::directory_iterator{dir}) {
+            if (e.is_regular_file() && e.path().extension() == ".xml") {
+                files.push_back(e.path());
+            }
+        }
+        std::ranges::sort(files);
+        for (auto const& f : files) {
+            out.push_back({.file = f, .orchestra = orchestra});
+            if (!orchestra && f.filename().string().starts_with("FIX50")) {
+                out.push_back({.file = f, .orchestra = orchestra, .route = true});
+            }
+        }
+    }
+    return out;
+}
+
+// Known positive of the listing: it reaches the oldest and the newest QuickFIX dictionaries,
+// FIXT11 and the Orchestra file, and the route form of FIX50SP2.
+TEST(TagDefined101, ShippedListing_ReachesTheOldAndTheNewDictionaries) {
+    std::set<std::string> plain;
+    std::set<std::string> route;
+    for (auto const& c : shipped_cases()) {
+        (c.route ? route : plain).insert(c.file.filename().string());
+    }
+    for (const char* f : {"FIX40.xml", "FIX50SP2.xml", "FIXT11.xml", "OrchestraFIXLatest.xml"}) {
+        EXPECT_TRUE(plain.contains(f)) << f << " is not in the listing";
+    }
+    EXPECT_TRUE(route.contains("FIX50SP2.xml")) << "FIX50SP2's route form is not in the listing";
+    EXPECT_FALSE(route.contains("FIX44.xml")) << "only the 5.0 family is read in route form";
+}
+
+class TagDefined101Shipped : public testing::TestWithParam<ShippedCase> {};
+
+TEST_P(TagDefined101Shipped, DefinesExactlyTheFieldDefinitions) {
+    const ShippedCase& c = GetParam();
+    auto expected = field_definitions(slurp(c.file), c.orchestra);
+    if (!c.orchestra && c.file.filename().string().starts_with("FIX50")) {
+        const auto framing = framing_tags();
+        expected.insert(framing.begin(), framing.end());
+    }
+    const dd::Dictionary& d = shipped(c.file);
+    expect_defined_set(c.route ? d.as_table_view(dd::fixt_framing) : d.as_table_view(), expected);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    TagDefined101, TagDefined101Shipped, testing::ValuesIn(shipped_cases()),
+    [](const testing::TestParamInfo<ShippedCase>& info) {
+        std::string name = info.param.file.stem().string();
+        std::ranges::replace_if(
+            name, [](char ch) { return !std::isalnum(static_cast<unsigned char>(ch)); }, '_');
+        return name + (info.param.route ? "_Route" : "_Plain");
+    });
 
 // ── The seal writes the store at exact size ─────────────────────────────────────────────
 //

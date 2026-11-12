@@ -236,7 +236,7 @@ MVP: US1 and US2 at the end of Phase 4 (373=11 and 373=0 with QuickFIX's text). 
 | W101-12 | US2 sc3; FR-003 | `session_101_tests` :: `Reject101Tag` | RED | M101-17a to M101-17c |
 | W101-13 | US2 sc4; FR-002 | `session_101_tests` :: `Reject101Tag` | RED | M101-14 |
 | W101-14 | US2 sc5; FR-002 (D1 population) | `wire_dict_tests` :: `Validator101Reasons` | op cells GREEN; no-op tag RED | M101-9a to M101-9l, M101-46 |
-| W101-15 | FR-002 (D1 store) | `dictionary_pure_tests` :: `TagDefined101` | written at T029 | M101-9, M101-10, M101-12, M101-46 |
+| W101-15 | FR-002 (D1 store) | `dictionary_pure_tests` :: `TagDefined101` (and `TagDefined101Shipped`, one cell per shipped dictionary by directory listing, T064a) | written at T029 | M101-9, M101-10, M101-12, M101-46, M101-48 (M101-47 its confirming probe) |
 | W101-16 | SC-002 (both 14a undefined-tag steps, 14c) | `session_101_tests` :: `Reject101Tag` | RED | M101-14 |
 | W101-17 | FR-001, FR-002 (W-014) | `wire_pure_tests` :: conformance CSV | written at T033 | M101-11, M101-14 |
 | W101-20 | US3 sc1; FR-006 | `session_101_tests` :: `OneMsgType101` | RED | M101-43 (after D4 both the conflict term and `interpret_logon`'s first 35 refuse `D…A`, so no single-change row changes its ending) |
@@ -321,6 +321,8 @@ Origin **D9** = research D9 names it; **tasks** = added here, one per production
 | M101-44 | tasks (orchestrator ruling on the Phase 5-6 report) | the helper builds every reply in the slot (step 1 skipped) | W101-49 `EchoSiteBoundary101.*AtTheSiteBuffer_BuiltInPlace`: slot used |
 | M101-45 | tasks (orchestrator ruling on the T054 finding; re-targeted at T067: the seal no longer shrinks) | the seal reserves one more than the set bits' count | W101-52 `TagDefined101.SealReleasesExcessCapacity_*`: capacity ≠ size on each of the three |
 | M101-46 | tasks (orchestrator ruling on T067) | the seal skips every set bit at index 34 of its word (the bit `kTag` 6050 sits at) | W101-14 `Validator101OpClass.W101_14_DefinesItsTag_Reason2/*`: 0, not 2; W101-15 `TagDefined101Op.TheOperationDefinesItsTag/*` |
+| M101-47 | tasks (orchestrator ruling 1 on T064a; a confirming probe, not a kill) | `add_section_group` marks every tag it is given (`mark_defined_ctx(parent_path, no_tag, record.delimiter)` and each member), so 100's registration-only section store marks as the other population ops do | none: an expected survivor. W101-15's exact-set cells (`TagDefined101Shipped.*` over every shipped dictionary, and the named FIX44, FIX50SP2 and FIX Latest cells) stay GREEN, because every tag a section record names is a field the dictionary declares, which the field-list fill marks. A RED cell stops the batch: the registration-only condition at `mark_defined`'s comment would then be false. Its reach is proved separately: the edit runs on a dictionary-built view (T064a record) |
+| M101-48 | tasks (orchestrator ruling on T064a) | `Dictionary::build_table_view`'s field-list fill skips tag 1 when `which_session_version() == session_version::v40` (no tag is declared by FIX40 alone, so the edit is keyed by the dictionary) | W101-15 `TagDefined101Shipped.DefinesExactlyTheFieldDefinitions/FIX40_Plain`: tag 1 declared and not defined; no other listing instance RED |
 | M101-34a to M101-34e | tasks | one census site builds without the helper (each `emit_session_reject_` overload; `inbound_reject_leaf_`; `inbound_reject_best_effort_leaf_`; `inbound_business_reject_leaf_`) | that site's overflow cell in W101-40 or W101-41 (the best-effort leaf's unit cell, written at T047) |
 
 ## Census manifest
