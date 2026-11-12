@@ -14,7 +14,10 @@ A builder call inside the definition of a listed helper is not a site. A helper
 is listed because it only builds the frame and returns it: the emit, and so the
 hook, belong to the helper's caller, and the gate checks every caller instead.
 The exemption holds only while that is true, so the gate refuses a listed
-helper whose definition contains store_then_emit( or does not close. Only a
+helper whose definition contains store_then_emit( or does not close. The hook
+a helper is listed with is checked against its definition: the gate refuses a
+listed helper unless the raw builders its definition calls (outside comments
+and literals) all need the listed hook, and it calls at least one. Only a
 definition qualified exactly as Session::<name>( is a listed helper's; a raw
 builder call anywhere else, including in a helper not listed, stays a site.
 
@@ -111,7 +114,8 @@ APP_BUILDERS: dict[str, tuple[str, str]] = {
 }
 
 # Build helpers: a Session member that wraps a builder, builds the frame and
-# returns it without emitting. Each maps to the hook its builder requires.
+# returns it without emitting. Each maps to the hook its builder requires, the
+# declaration _helper_spans checks each definition's builders against.
 HELPERS: dict[str, tuple[str, str]] = {
     "build_inbound_reject_": ("fire_to_admin_(", "fire_to_admin_"),
     "build_inbound_business_reject_": ("->toApp(", "->toApp"),
@@ -149,6 +153,12 @@ def _helper_spans(
     character or `:`, whose next `{` comes before any `;`. Its span runs from
     `Session::` to the brace that closes that `{`, counted on comment-stripped
     lines with the inside of string and character literals blanked.
+
+    A definition is exempted only when the set of hooks its raw builders need
+    (ADMIN_BUILDERS and APP_BUILDERS keys found in the span, on the same
+    stripped and blanked text) is exactly the hook HELPERS lists for it. So a
+    definition calling no builder, builders of both families, or a builder of
+    the other family is refused, and its builders stay sites.
     """
     spans: list[tuple[Pos, Pos]] = []
     names: set[Pos] = set()
@@ -195,6 +205,22 @@ def _helper_spans(
                         f"{path}:{row + 1}: helper 'Session::{name}(' definition contains "
                         f"store_then_emit at :{emits[0][0] + 1} — a listed helper must "
                         f"return the frame without emitting"
+                    )
+                    continue
+                needs = {
+                    hook
+                    for key, (hook, _) in {**ADMIN_BUILDERS, **APP_BUILDERS}.items()
+                    for r in range(start[0], end[0] + 1)
+                    for c in re.finditer(re.escape(key), masked[r])
+                    if start <= (r, c.start()) <= end
+                }
+                listed = HELPERS[name][0]
+                if needs != {listed}:
+                    found = " and ".join(f"'{h}'" for h in sorted(needs)) or "no hook"
+                    refusals.append(
+                        f"{path}:{row + 1}: helper 'Session::{name}(' is listed with "
+                        f"'{listed}' but the builders its definition calls need {found} — "
+                        f"a listed helper's hook is the hook of the builder it wraps"
                     )
                     continue
                 spans.append((start, end))

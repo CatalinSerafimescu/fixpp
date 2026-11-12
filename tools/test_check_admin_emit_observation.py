@@ -33,6 +33,12 @@ character literals holding braces in their bodies.
       stays a site.
   (l) a listed helper whose definition does not close: refused, and the
       builder in it stays a site.
+  (m) Session::build_inbound_reject_ wrapping build_business_message_reject:
+      refused, because its builder needs ->toApp, not the listed
+      fire_to_admin_; the builder in it stays a site.
+  (n) Session::build_inbound_business_reject_ wrapping build_reject_with_text:
+      refused the same way, the other direction.
+  (o) a listed helper whose definition calls no raw builder: refused.
 
 Line numbers in the expected messages are found in the fixture by a marker,
 and each flagged arm names how many sites the gate must report.
@@ -183,6 +189,39 @@ SRC_L = source(
     ],
 )
 
+# (m) and (n): one helper's builder swapped for the other family's; (o): no builder.
+SRC_M = source(
+    WIRED_CALLERS,
+    [
+        "fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_reject_(  // DEF",
+        "    std::span<std::byte> site) noexcept {",
+        "    return fixpp::session::build_business_message_reject(site, seq);  // SWAPPED",
+        "}",
+    ],
+    HELPER_DEFS[9:],
+)
+SRC_N = source(
+    WIRED_CALLERS,
+    HELPER_DEFS[:9],
+    [
+        "fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_business_reject_("
+        "  // DEF",
+        "    std::span<std::byte> site) noexcept {",
+        "    return fixpp::session::build_reject_with_text(site, seq);  // SWAPPED",
+        "}",
+    ],
+)
+SRC_O = source(
+    WIRED_CALLERS,
+    [
+        "fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_reject_(  // DEF",
+        "    std::span<std::byte> site) noexcept {",
+        "    return build_something_else(site, seq);",
+        "}",
+    ],
+    HELPER_DEFS[9:],
+)
+
 
 def comment_filler() -> list[str]:
     half = FILLER // 2
@@ -314,6 +353,43 @@ ARMS = {
             f"l_listed_helper_that_does_not_close.cpp:{line_of(SRC_L, '// DEF')}: helper "
             "'Session::build_inbound_reject_(' definition does not close — check the site "
             "manually",
+        ],
+    ),
+    "m_reject_helper_wrapping_the_bmr_builder": (
+        SRC_M,
+        1,
+        [
+            unwired(2),
+            f"m_reject_helper_wrapping_the_bmr_builder.cpp:{line_of(SRC_M, '// DEF')}: helper "
+            "'Session::build_inbound_reject_(' is listed with 'fire_to_admin_(' but the "
+            "builders its definition calls need '->toApp(' — a listed helper's hook is the "
+            "hook of the builder it wraps",
+            f"m_reject_helper_wrapping_the_bmr_builder.cpp:{line_of(SRC_M, '// SWAPPED')}: "
+            "builder 'build_business_message_reject(' has no store_then_emit within",
+        ],
+    ),
+    "n_bmr_helper_wrapping_the_reject_builder": (
+        SRC_N,
+        1,
+        [
+            unwired(2),
+            f"n_bmr_helper_wrapping_the_reject_builder.cpp:{line_of(SRC_N, '// DEF')}: helper "
+            "'Session::build_inbound_business_reject_(' is listed with '->toApp(' but the "
+            "builders its definition calls need 'fire_to_admin_(' — a listed helper's hook is "
+            "the hook of the builder it wraps",
+            f"n_bmr_helper_wrapping_the_reject_builder.cpp:{line_of(SRC_N, '// SWAPPED')}: "
+            "builder 'build_reject_with_text(' has no store_then_emit within",
+        ],
+    ),
+    "o_listed_helper_without_a_builder": (
+        SRC_O,
+        1,
+        [
+            unwired(1),
+            f"o_listed_helper_without_a_builder.cpp:{line_of(SRC_O, '// DEF')}: helper "
+            "'Session::build_inbound_reject_(' is listed with 'fire_to_admin_(' but the "
+            "builders its definition calls need no hook — a listed helper's hook is the hook "
+            "of the builder it wraps",
         ],
     ),
 }
