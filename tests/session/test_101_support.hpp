@@ -458,9 +458,8 @@ public:
             sending_time_ = from->out.front().get(52);
             return;
         }
-        for (auto const& f : r->out) {
-            sending_time_ = decode(f).get(52);
-            return;
+        if (!r->out.empty()) {
+            sending_time_ = decode(r->out.front()).get(52);
         }
     }
 

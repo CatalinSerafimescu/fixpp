@@ -908,7 +908,7 @@ private:
     // only writer.
     struct log_rate_gate {
         bool logged = false;
-        fixpp::core::steady_time_point next{};
+        fixpp::core::steady_time_point next;
         std::uint64_t unlogged = 0;
     };
     // Admits a record now, returning the occurrences suppressed since the previous one (and

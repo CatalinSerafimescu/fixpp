@@ -21,6 +21,7 @@
 #include <fixpp/wire/reject_reason_map.hpp>
 #include <fixpp/wire/validator.hpp>
 #include <functional>
+#include <initializer_list>
 #include <memory_resource>
 #include <optional>
 #include <ostream>
@@ -85,7 +86,7 @@ Verdict judge(table_view tv, std::string_view fields) {
 // A table that defines MsgType "X" with the framing fields as its valid tags.
 table_view_builder x_table() {
     table_view_builder b;
-    for (std::uint16_t t : {8, 9, 10, 35}) {
+    for (std::uint16_t const t : std::initializer_list<std::uint16_t>{8, 9, 10, 35}) {
         b.add_valid("X", t);
     }
     return b;
@@ -126,7 +127,7 @@ TEST(Validator101Reasons, W101_6_UndefinedMsgTypeAndUndefinedTag_Reason11) {
 
 TEST(Validator101Reasons, W101_7_RequiredOnly_DefinesTheMsgType) {
     table_view_builder b;
-    for (std::uint16_t t : {8, 9, 10, 35, 6001}) {
+    for (std::uint16_t const t : std::initializer_list<std::uint16_t>{8, 9, 10, 35, 6001}) {
         b.add_required("X", t);
     }
     const Verdict v = judge(std::move(b).build(),

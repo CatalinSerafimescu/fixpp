@@ -87,8 +87,10 @@ template <bool kWholeFrame = false, class OnField>
         auto const wire_tag = static_cast<std::uint16_t>(tag);
         past_stop = past_stop || !(s_table.is_header_tag(wire_tag) ||
                                    fixpp::dict::is_fixt_standard_header_tag(wire_tag));
-        if (!kWholeFrame && past_stop && field_no > kMsgTypeField) {
-            return true;
+        if constexpr (!kWholeFrame) {
+            if (past_stop && field_no > kMsgTypeField) {
+                return true;
+            }
         }
         std::size_t const vstart = i;
         auto const value = carry.read_value(frame, vstart, wire_tag, hooks);
