@@ -285,24 +285,30 @@ TEST(Echo101, W101_41_Bmr_OverCeiling_NotSent_OneRecord_RateBounded) {
 // The acceptor sends nothing before the peer's Logon, so a gate Reject is the first frame its
 // CompIDs size. The peer's Logon omits SendingTime(52): the gate's required-field Reject.
 
-// The CompID length (both CompIDs equal) whose gate Reject, with 372 or without it, is the
-// longest that builds into the ceiling.
-std::optional<std::size_t> longest_compid(bool with_372) {
-    RejectInputs in;
+// The CompID length (both CompIDs equal) whose gate Reject, the session's first frame, built
+// from `in` with RefMsgType `ref_msg_type` (empty for none), is the longest that builds into the
+// ceiling.
+std::optional<std::size_t> longest_compid_for(RejectInputs in, std::string_view ref_msg_type) {
     in.begin = "FIX.4.4";
     in.sending_time = t99::kFresh;
     in.seq = 1;
     in.ref_seq = 1;
-    in.ref_tag = 52;
-    in.reason = 1;
-    in.text = std::string(kTextRequiredTagMissing);
     return longest_fitting(
         [&](std::size_t n) {
             in.sender = std::string(n == 0 ? 1 : n, 'S');
             in.target = std::string(n == 0 ? 1 : n, 'T');
-            return reject_fits(in, with_372 ? "A" : "", session_test_access::send_frame_bytes());
+            return reject_fits(in, ref_msg_type, session_test_access::send_frame_bytes());
         },
         session_test_access::send_frame_bytes());
+}
+
+// The same for the Logon-without-52 refusal, with 372 or without it.
+std::optional<std::size_t> longest_compid(bool with_372) {
+    RejectInputs in;
+    in.ref_tag = 52;
+    in.reason = 1;
+    in.text = std::string(kTextRequiredTagMissing);
+    return longest_compid_for(std::move(in), with_372 ? "A" : "");
 }
 
 Spec compid_spec(std::size_t n, const std::shared_ptr<fixpp::log::Logger>& logger) {
@@ -366,6 +372,61 @@ TEST(Echo101, W101_40iv_RejectOverCeilingWithout372_NotSent_OneRecord) {
     if (expected_records == 2) {
         EXPECT_EQ(recs[1].suppressed, 1U) << "the next record carries the count";
     }
+}
+
+// W101-40 (iv) for a frame whose MsgType(35) is empty: the gate's Reject (373=11) carries no 372
+// at any size, so above the ceiling it is the Reject that exceeds it even without 372, with the
+// same ending and the same record, naming a MsgType of length 0.
+std::string empty_msg_type_frame(const Rig101& rig) { return rig.frame("", 1); }
+
+TEST(Echo101, W101_40iv_EmptyMsgType_RejectOverCeiling_NotSent_OneRecord) {
+    const RejectSite g = gate_site();
+    RejectInputs in;
+    in.ref_tag = g.ref_tag;
+    in.reason = g.reason;
+    in.text = std::string(g.text);
+    const auto fit = longest_compid_for(in, "");
+    ASSERT_TRUE(fit);
+
+    // The control: short CompIDs, the arm's Reject sent, without 372.
+    const Ending101 sent = ending_of(spec(Kind::fix44), Arm::NotConnected, empty_msg_type_frame);
+    ASSERT_EQ(sent.of_type("3").size(), 1U) << describe(sent);
+    EXPECT_EQ(sent.of_type("3").front()->get(373), "11");
+    EXPECT_FALSE(sent.of_type("3").front()->has(372));
+    EXPECT_EQ(sent.after, fsm_state::NotConnected);
+
+    // At the fit, with these CompIDs: the frame reaches the arm and its Reject is sent.
+    {
+        auto rig = started(compid_spec(*fit, nullptr), Arm::NotConnected);
+        ASSERT_TRUE(rig);
+        const Ending101 at = rig->deliver(empty_msg_type_frame(*rig));
+        ASSERT_EQ(at.of_type("3").size(), 1U) << describe(at);
+        const Decoded& rj = *at.of_type("3").front();
+        EXPECT_EQ(rj.get(373), "11");
+        EXPECT_FALSE(rj.has(372));
+        EXPECT_EQ(rj.get(49), std::string(*fit, 'S'));
+    }
+
+    // One byte past the fit: nothing sent, no number, no toAdmin, the arm's own ending.
+    auto log = std::make_shared<LogCapture>();
+    auto rig = started(compid_spec(*fit + 1, log->logger), Arm::NotConnected);
+    ASSERT_TRUE(rig);
+    const Ending101 e = rig->deliver(empty_msg_type_frame(*rig));
+    EXPECT_TRUE(e.out.empty()) << describe(e);
+    EXPECT_EQ(e.next_out_after, e.next_out_before) << "no outbound number";
+    EXPECT_EQ(e.to_admin, 0) << "no toAdmin";
+    EXPECT_EQ(e.after, sent.after) << "the arm's own ending";
+    // A second inside the window writes no record; the next one carries the count.
+    (void)rig->deliver(empty_msg_type_frame(*rig));
+    ASSERT_TRUE(past_record_window(*rig)) << "the clock's move changed the session's state";
+    (void)rig->deliver(empty_msg_type_frame(*rig));
+    const auto recs = ceiling_records(*log, "3");
+    ASSERT_EQ(recs.size(), 2U) << "one record per window";
+    EXPECT_TRUE(recs[0].args_read) << "the record's arguments are the three the format names";
+    EXPECT_EQ(recs[0].ref_msg_type_len, 0U) << "the inbound MsgType's length";
+    EXPECT_EQ(recs[0].suppressed, 0U);
+    EXPECT_TRUE(recs[1].args_read);
+    EXPECT_EQ(recs[1].suppressed, 1U) << "the next record carries the count";
 }
 
 // ── W101-47: 092's disposer with a fitting 3-byte MsgType ───────────────────────────────

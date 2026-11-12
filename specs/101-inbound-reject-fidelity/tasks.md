@@ -252,7 +252,7 @@ MVP: US1 and US2 at the end of Phase 4 (373=11 and 373=0 with QuickFIX's text). 
 | W101-30 | FR-004 (`interpret_logon`) | `session_101_tests` :: `InterpretLogon101` | RED | M101-20 |
 | W101-31 | FR-004 (scan) | `session_pure_tests` :: `ScanFrameHeaderFault` | written at T036 | M101-1, M101-19 |
 | W101-32 | FR-005 check order on non-FIXT (spec Edge Cases) | `session_101_tests` :: `OneMsgType101` | RED (the repeat arm is FIXT-only today; `H0` endings recorded at T020) | M101-22, M101-38, M101-39 |
-| W101-40 | US4 sc1, sc2, sc7; FR-007 (a) | `session_101_tests` :: `Echo101` | overflow RED; (iv): record RED, no-send half GREEN | M101-8, M101-27, M101-29c, M101-34a to M101-34d |
+| W101-40 | US4 sc1, sc2, sc7; FR-007 (a) | `session_101_tests` :: `Echo101` | overflow RED; (iv): record RED, no-send half GREEN | M101-8, M101-27, M101-29c, M101-29d, M101-34a to M101-34d |
 | W101-41 | US4 sc3, sc4; FR-007 (b) | `session_101_tests` :: `Echo101` | overflow and record RED | M101-8, M101-28, M101-29a, M101-29b, M101-34e |
 | W101-42 | FR-007 callbacks at the ceiling | `session_101_tests` :: `Echo101` | RED | M101-8 |
 | W101-43 | FR-007 long CompIDs | `session_101_tests` :: `Echo101` | as recorded | M101-8 |
@@ -307,6 +307,7 @@ Origin **D9** = research D9 names it; **tasks** = added here, one per production
 | M101-29a | tasks | the record written on every occurrence | W101-41 second-record cell |
 | M101-29b | tasks | the record removed | W101-41 record cell |
 | M101-29c | tasks | the Reject not-sent ending writes no record | W101-40 (iv) |
+| M101-29d | tasks (Gate B round 1, R1-O1) | the empty-MsgType Reject not-sent ending writes no record (the helper returns before the record when the MsgType is empty) | W101-40 (iv) `Echo101.W101_40iv_EmptyMsgType_RejectOverCeiling_NotSent_OneRecord`: no record |
 | M101-30 | tasks | `dispose_unparseable_` keeps 092's bound | W101-47; the flipped `RefMsgTypeBound_*` cells |
 | M101-31 | tasks | `msg_type_conflict` set only when the last 35 differs | W101-50: a trap on T015's `D…A…D` seed |
 | M101-32 | tasks | the D5 walk stops at the header's stop | W101-26 `0,0(hdr)…D(past)`: 13 |

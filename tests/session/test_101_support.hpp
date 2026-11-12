@@ -643,6 +643,7 @@ inline constexpr char kCeilingRecord[] =
 struct CeilingRecord {
     std::uint64_t ref_msg_type_len = 0;
     std::uint64_t suppressed = 0;
+    bool args_read = false;  // the record holds exactly the three arguments, of their kinds
 };
 
 // The ceiling records the logger captured for the message type `msg_type` not sent ("3" or
@@ -663,6 +664,8 @@ inline std::vector<CeilingRecord> ceiling_records(fixpp::test_support::LogCaptur
         if (rec.arg_count >= 3 && rec.args[2].kind == fixpp::log::ArgValue::Kind::u64) {
             c.suppressed = rec.args[2].u64;
         }
+        c.args_read = rec.arg_count == 3 && rec.args[1].kind == fixpp::log::ArgValue::Kind::u64 &&
+                      rec.args[2].kind == fixpp::log::ArgValue::Kind::u64;
         out.push_back(c);
     }
     return out;

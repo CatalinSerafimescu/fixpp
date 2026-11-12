@@ -2748,11 +2748,14 @@ fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_reject_(
     };
     auto r = build_in_site_then_slot(
         site, hold, [&](std::span<std::byte> out) { return build(out, ref_msg_type); });
-    if (r || r.error() != fixpp::core::error::wire_field_value_truncated || ref_msg_type.empty()) {
+    if (r || r.error() != fixpp::core::error::wire_field_value_truncated) {
         return r;
     }
-    // 372 is optional in a Reject: above the ceiling it is sent without it; Text(58) stays.
-    r = build(hold.take(), std::string_view{});
+    if (!ref_msg_type.empty()) {
+        // 372 is optional in a Reject: above the ceiling it is sent without it; Text(58) stays.
+        r = build(hold.take(), std::string_view{});
+    }
+    // A Reject still over the ceiling, an empty MsgType's among them, is not sent: the record.
     if (!r && r.error() == fixpp::core::error::wire_field_value_truncated) {
         note_reply_over_ceiling_(/*business_reject=*/false, ref_msg_type.size());
     }
