@@ -15,6 +15,28 @@ input, and an arm that checked the exit code alone would pass on that.
   (d) as (c), with the hook only inside comments: flagged as unwired, because
       a hook token inside a comment is not a call.
 
+The listed build helpers (Session::build_inbound_reject_ and
+Session::build_inbound_business_reject_) wrap a builder and return the frame;
+the arms below define them in the shape session.cpp does, with string and
+character literals holding braces in their bodies.
+  (e) helper definitions whose bodies hold raw builders, with wired callers:
+      passes, because a builder inside a listed helper is not a site.
+  (f) a build_inbound_reject_ caller with no fire_to_admin_ before its emit:
+      flagged at the caller's line.
+  (g) as (f) for a build_inbound_business_reject_ caller with no ->toApp.
+  (h) a raw builder on the line after a helper's closing brace: flagged there.
+  (i) a raw builder inside Session::build_inbound_reject_v2_, a helper not
+      listed: flagged.
+  (j) a raw builder inside MockSession::build_inbound_reject_, not a Session
+      member: flagged, and its name is read as a helper call.
+  (k) a listed helper whose definition emits: refused, and the builder in it
+      stays a site.
+  (l) a listed helper whose definition does not close: refused, and the
+      builder in it stays a site.
+
+Line numbers in the expected messages are found in the fixture by a marker,
+and each flagged arm names how many sites the gate must report.
+
 The expected messages are spelled here, not read from the gate, so a change to
 the gate's wording turns these arms RED instead of following it.
 """
@@ -37,6 +59,129 @@ UNWIRED_TEXT = "'fire_to_admin_(' was NOT found before store_then_emit"
 
 def fixture(body: list[str]) -> str:
     return "\n".join(["void Session::f() {", *body, "}", ""])
+
+
+def unwired(n: int) -> str:
+    return f"[check_admin_emit_observation] FAIL — {n} unwired emit site(s)"
+
+
+def line_of(source: str, marker: str) -> int:
+    hits = [k for k, line in enumerate(source.split("\n"), 1) if marker in line]
+    assert len(hits) == 1, f"marker {marker!r} is on {len(hits)} fixture lines"
+    return hits[0]
+
+
+# The two listed helpers, in session.cpp's shape. The literals put braces where an
+# unmasked brace count would close helper 1 before its builder and leave helper 2
+# open to the end of the file.
+HELPER_DEFS = [
+    "fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_reject_(",
+    "    std::span<std::byte> site, int reason) noexcept {",
+    '    std::string_view const sep = "}";',
+    "    auto const build = [&](std::span<std::byte> out) {",
+    "        return fixpp::session::build_reject_with_text(out, seq, reason, sep);  // HELPER1",
+    "    };",
+    "    return build(site);",
+    "}",
+    "",
+    "fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_business_reject_(",
+    "    std::span<std::byte> site) noexcept {",
+    "    char const open = '{';",
+    "    auto const build = [&](std::span<std::byte> out) {",
+    "        return fixpp::session::build_business_message_reject(out, seq, open);",
+    "    };",
+    "    return build(site);",
+    "}  // END-HELPERS",
+]
+
+WIRED_CALLERS = [
+    "void Session::admin_site() {",
+    "    auto r = build_inbound_reject_(buf, 3);",
+    "    if (!fire_to_admin_(*r)) return;",
+    "    auto e = co_await store_then_emit(seq, *r);",
+    "}",
+    "void Session::app_site() {",
+    "    auto r = build_inbound_business_reject_(buf);",
+    "    if (!engine_.application->toApp(mv, sid)) return;",
+    "    auto e = co_await store_then_emit(seq, *r);",
+    "}",
+]
+
+
+def source(*blocks: list[str]) -> str:
+    return "\n".join(line for block in blocks for line in block) + "\n"
+
+
+SRC_E = source(WIRED_CALLERS, HELPER_DEFS)
+SRC_F = source(
+    [
+        "void Session::admin_site() {",
+        "    auto r = build_inbound_reject_(buf, 3);  // CALLER",
+        "    int x = 0;",
+        "    auto e = co_await store_then_emit(seq, *r);",
+        "}",
+    ],
+    HELPER_DEFS,
+)
+SRC_G = source(
+    [
+        "void Session::app_site() {",
+        "    auto r = build_inbound_business_reject_(buf);  // CALLER",
+        "    int x = 0;",
+        "    auto e = co_await store_then_emit(seq, *r);",
+        "}",
+    ],
+    HELPER_DEFS,
+)
+SRC_H = source(
+    WIRED_CALLERS,
+    HELPER_DEFS[:-1],
+    [
+        "}  void Session::g() { auto r = build_reject_with_text(buf);  // AFTER",
+        "    int x = 0;",
+        "    auto e = co_await store_then_emit(seq, *r);",
+        "}",
+    ],
+)
+SRC_I = source(
+    WIRED_CALLERS,
+    HELPER_DEFS,
+    [
+        "fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_reject_v2_(",
+        "    std::span<std::byte> site) noexcept {",
+        "    return fixpp::session::build_reject_with_text(site, seq);  // LOOKALIKE",
+        "}",
+    ],
+)
+SRC_J = source(
+    WIRED_CALLERS,
+    HELPER_DEFS,
+    [
+        "fixpp::core::expected_t<std::span<std::byte>> MockSession::build_inbound_reject_(  // DEF",
+        "    std::span<std::byte> site) noexcept {",
+        "    return fixpp::session::build_reject_with_text(site, seq);  // LOOKALIKE",
+        "}",
+    ],
+)
+SRC_K = source(
+    [
+        "fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_reject_(  // DEF",
+        "    std::span<std::byte> site) noexcept {",
+        "    auto r = fixpp::session::build_reject_with_text(site, seq);  // BUILD",
+        "    auto e = co_await store_then_emit(seq, *r);  // EMIT",
+        "    return r;",
+        "}",
+    ],
+    WIRED_CALLERS,
+)
+SRC_L = source(
+    WIRED_CALLERS,
+    [
+        "fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_reject_(  // DEF",
+        "    std::span<std::byte> site) noexcept {",
+        "    return fixpp::session::build_reject_with_text(site, seq);  // BUILD",
+    ],
+)
 
 
 def comment_filler() -> list[str]:
@@ -93,6 +238,83 @@ ARMS = {
         ),
         1,
         [FAIL_TEXT, UNWIRED_TEXT],
+    ),
+    "e_helper_bodies_are_not_sites": (SRC_E, 0, [OK_TEXT]),
+    "f_helper_caller_without_fire_to_admin": (
+        SRC_F,
+        1,
+        [
+            unwired(1),
+            f"f_helper_caller_without_fire_to_admin.cpp:{line_of(SRC_F, '// CALLER')}: "
+            "admin/app emit site uses 'build_inbound_reject_(' but 'fire_to_admin_(' was "
+            "NOT found before store_then_emit",
+        ],
+    ),
+    "g_helper_caller_without_toapp": (
+        SRC_G,
+        1,
+        [
+            unwired(1),
+            f"g_helper_caller_without_toapp.cpp:{line_of(SRC_G, '// CALLER')}: "
+            "admin/app emit site uses 'build_inbound_business_reject_(' but '->toApp(' was "
+            "NOT found before store_then_emit",
+        ],
+    ),
+    "h_raw_builder_after_the_helper": (
+        SRC_H,
+        1,
+        [
+            unwired(1),
+            f"h_raw_builder_after_the_helper.cpp:{line_of(SRC_H, '// AFTER')}: "
+            "admin/app emit site uses 'build_reject_with_text(' but 'fire_to_admin_(' was "
+            "NOT found before store_then_emit",
+        ],
+    ),
+    "i_unlisted_helper_name": (
+        SRC_I,
+        1,
+        [
+            unwired(1),
+            f"i_unlisted_helper_name.cpp:{line_of(SRC_I, '// LOOKALIKE')}: "
+            "builder 'build_reject_with_text(' has no store_then_emit within",
+        ],
+    ),
+    "j_helper_name_in_another_class": (
+        SRC_J,
+        1,
+        [
+            unwired(2),
+            f"j_helper_name_in_another_class.cpp:{line_of(SRC_J, '// DEF')}: "
+            "builder 'build_inbound_reject_(' has no store_then_emit within",
+            f"j_helper_name_in_another_class.cpp:{line_of(SRC_J, '// LOOKALIKE')}: "
+            "builder 'build_reject_with_text(' has no store_then_emit within",
+        ],
+    ),
+    "k_listed_helper_that_emits": (
+        SRC_K,
+        1,
+        [
+            unwired(2),
+            f"k_listed_helper_that_emits.cpp:{line_of(SRC_K, '// BUILD')}: "
+            "admin/app emit site uses 'build_reject_with_text(' but 'fire_to_admin_(' was "
+            "NOT found before store_then_emit",
+            f"k_listed_helper_that_emits.cpp:{line_of(SRC_K, '// DEF')}: helper "
+            "'Session::build_inbound_reject_(' definition contains store_then_emit at "
+            f":{line_of(SRC_K, '// EMIT')} — a listed helper must return the frame without "
+            "emitting",
+        ],
+    ),
+    "l_listed_helper_that_does_not_close": (
+        SRC_L,
+        1,
+        [
+            unwired(2),
+            f"l_listed_helper_that_does_not_close.cpp:{line_of(SRC_L, '// BUILD')}: "
+            "builder 'build_reject_with_text(' has no store_then_emit within",
+            f"l_listed_helper_that_does_not_close.cpp:{line_of(SRC_L, '// DEF')}: helper "
+            "'Session::build_inbound_reject_(' definition does not close — check the site "
+            "manually",
+        ],
     ),
 }
 

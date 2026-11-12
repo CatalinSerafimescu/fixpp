@@ -1121,6 +1121,9 @@ set_tests_properties(session_admin_emit_toadmin_coverage PROPERTIES
 # build_reject_with_text( / build_logout( site has fire_to_admin_( between the
 # builder and its store_then_emit(, and
 # every build_business_message_reject( site has ->toApp( in the same interval.
+# A call of a listed build helper is a site with its builder's hook; a builder
+# inside a listed helper's definition is not, and the gate refuses a listed
+# helper whose definition emits (the gate's header states the rule).
 # Exits 1 (prints offending line) if any admin emit site is unwired — catches a
 # FUTURE unwired site even when the dynamic scenario cells pass.
 # Anchors: spec.md SC-002/FR-001/FR-005; tasks.md T041; research.md Decision-1.
