@@ -174,6 +174,10 @@ TEST(Echo101, W101_40_NoApplication_OverCeiling_No372) {
 // posted, and returns whether the session is still in the state it was in.
 bool past_record_window(Rig101& rig) {
     const fsm_state before = rig.session().state();
+    // ESCALATION ROW, DISPOSITIONED: KIND A (time stamp). What the record cells read from this
+    // advance is `Session::admit_log_record_`'s `steady_now()`, taken synchronously when the next
+    // over-ceiling reply is built, on the caller's thread. The polls below only run what a
+    // liveness sleeper posted; no record cell's oracle depends on it.
     rig.r->clock->advance(std::chrono::seconds{2});
     for (int i = 0; i < 4; ++i) {
         rig.r->ioc.restart();
