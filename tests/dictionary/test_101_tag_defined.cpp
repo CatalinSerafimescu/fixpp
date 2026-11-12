@@ -103,19 +103,22 @@ void expect_defined_set(const table_view& tv, const std::set<std::uint16_t>& exp
 const std::filesystem::path kDicts{FIXPP_DICT_DATA_DIR};
 const std::filesystem::path kOrch{FIXPP_ORCHESTRA_DATA_DIR};
 
-dd::Dictionary load(const std::filesystem::path& p) {
+std::pmr::memory_resource* dictionary_resource() {
     static std::pmr::unsynchronized_pool_resource mr;
-    return dd::load_any(p, &mr);
+    return &mr;
 }
 
 // Each shipped dictionary the cells read is loaded once for the binary, whichever cell reads it
 // first; each view form below is built once from it; every view is `as_table_view`'s result as
-// returned.
+// returned. The resource the cached dictionaries allocate from is constructed before the cache,
+// so it is destroyed after it: function-local statics are destroyed in the reverse order of their
+// construction.
 const dd::Dictionary& shipped(const std::filesystem::path& p) {
+    static std::pmr::memory_resource* const mr = dictionary_resource();
     static std::map<std::filesystem::path, std::unique_ptr<const dd::Dictionary>> cache;
     auto& slot = cache[p];
     if (!slot) {
-        slot = std::make_unique<const dd::Dictionary>(load(p));
+        slot = std::make_unique<const dd::Dictionary>(dd::load_any(p, mr));
     }
     return *slot;
 }
