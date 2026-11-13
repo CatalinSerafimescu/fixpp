@@ -31,7 +31,8 @@ oracle, plus a name-offset oracle and generated large-dictionary identity cells;
 
 **Performance Goals**: `xml_loader_bench` within Article VIII §2's +5%, paired against the merge-base (D6).
 
-**Constraints**: C ABI and Python unchanged; every generated file without a MultiCharValue field byte-identical, except
+**Constraints**: C ABI and Python types and symbols unchanged; their results change as declared BREAKING (spec
+FR-007, contract §6); every generated file without a MultiCharValue field byte-identical, except
 the `FieldRef` row trailer in `Fields.hpp`. The generated text changes only by those hunks (SC-003): each `FieldRef`
 row loses one initializer and each MultiCharValue accessor, `Args` member and entry setter changes kind. No
 compile-time or object-size budget applies to the generated tiers, vlatest's included, and none is measured.
@@ -51,7 +52,7 @@ parser.
 | VII | RED first, mutation-proven | PASS planned (D4). |
 | VIII §2 | no regression | `xml_loader_bench` paired locally against the parent base at measurement time (`99e956a0`, 101's Gate B head that 102 is stacked on, until the post-squash rebase; the merge-base of the candidate and `origin/main` after it; the deciding run is the one after that rebase; D6, D9), +5% budget, independent approval above it (D6); the verify record names the base commit. |
 | IX | coverage, static | `/speckit-verify`; `tools/codegen/` is lint scope since #265. |
-| X | C ABI | C ABI unchanged: `fixpp_dict_t` opaque, `src/capi` reads `FieldRef::rule` and `type` (not widened), SWIG exposes none of the records. Article X does not govern the C++ break. |
+| X | C ABI | Declared BREAKING under §7 (owner ruling, 2026-11-13: "All BREAKING, bump (Recommended)"). Types and symbols are unchanged: `fixpp_dict_t` is opaque, `src/capi` reads `FieldRef::rule` and `type` (not widened), and SWIG exposes none of the records. Results change: `fixpp_dict_load_from_xml_with_overlay` and `fixpp_dict_load_from_xml` return `FIXPP_ERR_OK` for contract §6's input classes. The declaration: a `FIXPP_C_ABI_VERSION_MINOR` bump past `main`'s value after the post-squash rebase, BREAKING notes in `dict.h` and `version.h`, B-102-3, the PR description, and in-repository consumers updated (tasks T059a). Appendix A controls (§6): the owner's `/plan` sign-off is that ruling; one Codex Gate A review scoped to the C-ABI delta is **pending**; `/clarify` and `/analyze` are the pipeline's. Article X does not govern the C++ break. |
 | XV.1 | no per-message heap allocation on the hot path | unchanged. A MultiCharValue accessor and builder input take the String kind's existing paths (D3; spec FR-004, FR-005). FR-008's guard is arithmetic only: no allocation, no exception, `noexcept` kept. The surrogate-id parse is load-time only, a `std::from_chars` into an integer like the tag parse. Its enum type adds no storage, and the containers it keys already exist. |
 | XV.13 | hybrid codegen + runtime dictionary | unchanged. |
 | XVII.1 | Gate A on public API | Gate A required and assesses the C++ break: the corrected contract, B-102-1..3, the 2c §1, §4.1, §4.1.3 and §4.2 amendments (D8). Before the first public release this article's Gate A governs a public C++ break. The break is declared BREAKING in the B&L delta (B-102-1..3) and in the PR description, which tasks T069 drafts. |
@@ -98,6 +99,9 @@ tests/fuzz/                               # D2 duplicate seeds, harness comments
 tests/codegen/                            # census mapped_kind + Fields parser, validator_shape, read-tier pins,
                                           # decode cells, Orchestra IR id cell
 tests/session/                            # 077 round-trip assignments; builder round-trip cells
+include/fix/c_api/dict.h, version.h       # C-ABI BREAKING notes and MINOR bump (owner ruling 2026-11-13; T059a)
+tools/capi_freeze.sha256                  # the C-ABI byte-freeze manifest, re-recorded for those headers
+tests/capi/, bindings/python/tests/       # C-ABI and Python result cells; the version pins T059a updates
 ```
 
 Records and design documents (D8): `spec/behaviors-and-limitations.md` (+ closed file), `spec/feature-catalogue.md`,

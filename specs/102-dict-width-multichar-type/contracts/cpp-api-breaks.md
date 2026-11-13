@@ -1,16 +1,15 @@
-# Contract: C++ API changes in 102 (BREAKING, C++ only; C ABI and Python unchanged)
+# Contract: API changes in 102 (BREAKING: C++ types; C-ABI and Python results)
 
-Pre-release, declared under Article XVII §1 (Gate A on a public C++ surface). The C ABI is unchanged: `fixpp_dict_t`
-is opaque, `src/capi` reads `FieldRef::rule` and `type` (neither widened), and SWIG exposes none of these types
-(Article X: not engaged).
+Pre-release. The C++ break is declared under Article XVII §1 (Gate A on a public C++ surface). The C-ABI result change
+is declared BREAKING under `[const §X.7]` (owner ruling, 2026-11-13: "All BREAKING, bump (Recommended)"), with a
+`FIXPP_C_ABI_VERSION_MINOR` bump; §6 lists it. The C ABI's types and symbols are unchanged: `fixpp_dict_t` is opaque,
+`src/capi` reads `FieldRef::rule` and `type` (neither widened), and SWIG exposes none of these types.
 
-Re-derive the claim with one recipe over the C ABI, its implementation and the SWIG interface. It names the record
+Re-derive the type claim with one recipe over the C ABI, its implementation and the SWIG interface. It names the record
 types, their widened members and every `Dictionary` member that returns or spans a record:
 `command git grep -nE 'FieldRef|ComponentRef|GroupRef|field_ref\(|[.>]component\(|[.>]group\(|component_fields|group_fields|message_fields|first_field_index|component_index|component_id|name_offset|parent_component_id' -- src/capi bindings include/fix`.
 Its known positive on the parent base is `src/capi/message_write.cpp`'s `field_ref(` reads, each of which reads only
-`rule` or `type`. Every hit is classified as reading a member 102 does not widen, or a defect. Whether the C-ABI
-*results* that change with §2 and §3 are a breaking change under `[const §X.7]` awaits the owner
-(`checklists/api-abi.md` CHK001 to CHK003).
+`rule` or `type`. Every hit is classified as reading a member 102 does not widen, or a defect.
 
 B&L rows: B-102-1 (layouts), B-102-2 (MultiCharValue types), B-102-3 (loads that now succeed); B-098-1 amended.
 
@@ -135,3 +134,30 @@ read-side headers, `Fields.hpp` among them (`fixpp_typed_tier_expected_children`
 and, where the typed tier is installed (`FIXPP_INSTALL_TYPED_TIER`, #613), the builder libraries. So an installed
 consumer receives the regenerated row from the new package. A consumer that vendored a generated header regenerates
 it.
+
+## 6. C-ABI and Python results (BREAKING, `[const §X.7]`)
+
+Owner ruling, 2026-11-13: "All BREAKING, bump (Recommended)". No C-ABI type, symbol or error code changes; these calls
+return a result other than the one their pre-102 documentation gave.
+
+| Class | Call | Input | Before (`$P`) | After |
+|---|---|---|---|---|
+| (a) | `fixpp_dict_load_from_xml_with_overlay`, either format | an overlay whose only fault is that a component or group side table would stop fitting 16 bits | `FIXPP_ERR_DICT_LIMIT_EXCEEDED` | `FIXPP_ERR_OK` |
+| (b) | `fixpp_dict_load_from_xml_with_overlay` | an Orchestra base or overlay with a component, group, componentRef or groupRef id in 65536..2147483647 | `FIXPP_ERR_DICT_CONFIG` | `FIXPP_ERR_OK` |
+| (c) | `fixpp_dict_load_from_xml` | an Orchestra document with such an id | `FIXPP_ERR_CAPI_CONFIG_INVALID` | `FIXPP_ERR_OK` |
+| (d) | Python `fixpp.dict_load_from_xml` / `fixpp.dict_load_from_xml_with_overlay` | the inputs of (c) / of (a) and (b) | raised `CapiError` / `ValidatorError` (`.code` of (a) or (b)) | returns a dictionary |
+| (f) | either call | a base of more than 65,535 components | `FIXPP_ERR_OK`, identities past the wrap wrong | `FIXPP_ERR_OK`, identities correct; a session over such a base can see a different header tag set |
+
+- (a) was documented by cause: `dict.h`'s `FIXPP_ERR_DICT_LIMIT_EXCEEDED` line points at `xml_loader.hpp`'s cause
+  list, which named the side-table fit; B-098-1, B-098-6 and L-098-4 said the same. (b) and (c) were covered by the
+  calls' catch-all failure results.
+- (f) keeps its code and changes the dictionary the call yields. It is declared on the precedent of C-ABI 1.9 (091):
+  "The return code is the same, but the dictionary this call yields carries the pair".
+- Unchanged: an id above 2147483647, a negative or malformed id; every other input of either call.
+- TOML (`dictionary.path`, `dialect_overlay`) is outside the C ABI; it now loads these inputs, and B-102-3 records it.
+
+Declared by: a `FIXPP_C_ABI_VERSION_MINOR` bump to one past the value `main` holds after the post-squash rebase, with
+a `version.h` comment; a BREAKING note on both `dict.h` load declarations; B-102-3 marked BREAKING; the PR
+description; every in-repository consumer the version touches updated in the same PR (tasks T059a). Migration: a
+consumer that relied on these inputs being refused checks the dictionary's content itself; no code that handles the
+refusal needs to change, because the refusal no longer happens for these inputs.

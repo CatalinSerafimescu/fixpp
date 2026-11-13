@@ -539,8 +539,9 @@ reads through it.
     `FIXPP_ERR_OK` where an overlay's only fault was the side-table fit (was `FIXPP_ERR_DICT_LIMIT_EXCEEDED`) or a
     surrogate id past 65535 (was `FIXPP_ERR_DICT_CONFIG`). `fixpp_dict_load_from_xml` returns `FIXPP_ERR_OK` for an
     Orchestra document with such ids (was `FIXPP_ERR_CAPI_CONFIG_INVALID`). Python's two wrappers return where they
-    raised. It carries the BREAKING marker and the C-ABI version move if, and only if, the owner rules these a
-    breaking change under `[const §X.7]` (`checklists/api-abi.md` CHK001 to CHK003);
+    raised. **BREAKING** under `[const §X.7]` (owner ruling, 2026-11-13: "All BREAKING, bump (Recommended)"): the row
+    carries the BREAKING marker, names the new C-ABI MINOR (tasks T059a) and lists contract §6's classes, (f)
+    included;
   - new **L-102-1**: the 32-bit residual. (a) Until B86, an unbounded base expansion can wrap a 32-bit run end (the
     side tables, the per-message runs, and 100's delimiter and section member pools); on the overlay path an overlay
     adds at most `kExpansionBudget` beyond the base's own expansion (D2), so only a base's own expansion reaches it;
@@ -562,10 +563,9 @@ reads through it.
     `field_traits.hpp` listing comment (both name a MultiCharValue / MultiStringValue split; after D3 both kinds
     decode through `field_traits<std::string_view>`, which the note states as a condition, which kinds share a
     decoder, with no count of kinds);
-  - `include/fix/c_api/dict.h`: `fixpp_dict_load_from_xml_with_overlay`'s `FIXPP_ERR_DICT_LIMIT_EXCEEDED` line points
-    at `xml_loader.hpp`'s cause list. It needs no text of its own while that pointer resolves. If the owner rules the
-    C-ABI result changes breaking (`checklists/api-abi.md` CHK001 to CHK003), both `dict.h` load declarations gain a
-    BREAKING note under `[const §X.7]`;
+  - `include/fix/c_api/dict.h`: both load declarations gain a BREAKING note under `[const §X.7]` (owner ruling,
+    2026-11-13), naming the new C-ABI MINOR and the input classes of contract §6 that now return `FIXPP_ERR_OK`; and
+    `include/fix/c_api/version.h` gains that MINOR's comment (tasks T059a);
   - the installed `include/fixpp/dict/field_traits.hpp`: its comment on the remaining specialisations names "the
     MultiCharValue / MultiStringValue split", false after D3; amended, naming 102 D3;
   - the three installed record headers' banners and `_reserved` paragraphs;

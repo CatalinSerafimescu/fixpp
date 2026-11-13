@@ -220,11 +220,19 @@ accessor, or builds one through the typed builder.
 - **FR-006**: The generated text of every other field is unchanged, except that every generated `FieldRef` row drops
   its trailing `_reserved` initializer; every generated-file pin that moves is re-pinned with the reason, and the
   accessor census's value-type table maps MultiCharValue to the string kind.
-- **FR-007**: The C ABI and Python binding are unchanged (neither exposes these types). The C++ changes are declared as
-  breaking in the B&L (B-102-1: `FieldRef`, `ComponentRef`, `GroupRef` layouts; B-102-2: MultiCharValue accessor and
-  builder types; B-102-3: the loads that now succeed), with the migration in `contracts/cpp-api-breaks.md`, and in the
-  PR description (tasks T069). Whether the C-ABI results that change with B-102-3 and FR-003 are a breaking change
-  under `[const §X.7]` awaits the owner (`checklists/api-abi.md` CHK001 to CHK003).
+- **FR-007**: The C ABI's and the Python binding's types and symbols are unchanged (neither exposes these records),
+  but their results change. The C++ changes are declared as breaking in the B&L (B-102-1: `FieldRef`, `ComponentRef`,
+  `GroupRef` layouts; B-102-2: MultiCharValue accessor and builder types; B-102-3: the loads that now succeed), with
+  the migration in `contracts/cpp-api-breaks.md`, and in the PR description (tasks T069).
+  - **The C-ABI result change is BREAKING under `[const §X.7]`.** Owner ruling, 2026-11-13: "All BREAKING, bump
+    (Recommended)". `fixpp_dict_load_from_xml_with_overlay` and `fixpp_dict_load_from_xml` return `FIXPP_ERR_OK`
+    where they returned `FIXPP_ERR_DICT_LIMIT_EXCEEDED`, `FIXPP_ERR_DICT_CONFIG` or `FIXPP_ERR_CAPI_CONFIG_INVALID`,
+    and Python's two wrappers return where they raised. Contract §6 lists each input class.
+  - `FIXPP_C_ABI_VERSION_MINOR` moves to one past the value `main` holds after the post-squash rebase (tasks T055,
+    T059a). The BREAKING mark goes on both `dict.h` load declarations, in `version.h`'s version comment, on B-102-3
+    and in the PR description, and every in-repository consumer the version touches is updated in the same PR.
+  - Appendix A's controls for this ABI-affecting change: the owner's sign-off is the ruling above, and one Codex
+    Gate A review scoped to the C-ABI delta is pending (plan Constitution Check row X).
 - **FR-008** (#654): Every dictionary run reader does its bounds arithmetic so that it cannot wrap (`std::size_t`, or
   `start <= size && count <= size - start`); a record whose start and count would overrun its table returns an empty
   span.
