@@ -646,9 +646,14 @@ reads through it.
   - Known positive: over 102's own `src/dictionary` diff the recipe reports both `dict.h` loaders as root cause and
     at least the validator-backed session family (`fixpp_session_register_callback`). A run that reports only the
     loaders is blind downstream and stops.
-  - Comparator: the B set the recipe derives equals Appendix A's B rows, and each carrier Appendix A names is present
-    (contract §6, the `dict.h` notes, the family paragraphs, `version.h`). Its positive: a scratch copy of the
-    declared set with class (g) removed is reported as a mismatch.
+  - Comparator, two checks, each with its own positive:
+    - classes: the classes step 1 derives equal contract §6's list; positive: a scratch copy of §6 with class (g)
+      removed is reported as a mismatch;
+    - exports: the B exports steps 2 to 4 derive equal Appendix A's B rows, and each carrier those rows name is
+      present (the `dict.h` notes, the family paragraphs, `version.h`); positive: a scratch copy of Appendix A with
+      one B row deleted (`fixpp_session_register_callback`) is reported as a mismatch.
+    Removing a class is not an export-level positive: every export (g) reaches is also reached by (f), so the
+    export set would not move.
 - Catalogue / coverage index: the D-007, D-010, D-011 and W-009 rows (spec Normative References) gain 102's
   delivering cells in their witness column; none changes status. The coverage-index entries `[FIX50SP2 §3.3]` (the
   MultiCharValue decode and builder cells), `[FIX50SP2 §3.2]` (the component and group member cells) and
