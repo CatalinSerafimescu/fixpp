@@ -659,8 +659,8 @@ TEST(OrchestraFailClosed, LoadNonexistentPathThrows) {
     EXPECT_THROW((void)loader.load(bad, &mr), fixpp::dict::orchestra_parse_error);
 }
 
-// (t) A structural ref with a non-numeric id — parse_orchestra_id fail-closed
-// (distinct from the not-defined check: the id never parses to a uint16).
+// (t) A structural ref with a non-numeric id — the surrogate-id parse fails closed
+// (distinct from the not-defined check: the id never parses).
 TEST(OrchestraFailClosed, MalformedStructuralIdThrows) {
     constexpr std::string_view kXml = R"xml(
 <fixr:repository version="FIX.Latest_EP303">
@@ -1089,9 +1089,9 @@ TEST(OrchestraFailClosed, MalformedLengthIdThrows) {
 // ⚠️ The two cases below assert DIFFERENT mechanisms, and the difference follows
 // from where each value comes from. `data_tag` is a key of `fields_by_tag_`,
 // which `collect_fields` bars from being zero (fixpp#457); `length_tag` is a
-// `lengthId=` reference, parsed with the shared `parse_orchestra_id` — which
-// must keep admitting zero for the structural-id namespace — and resolved after
-// the declaration check. So one case still exercises the pair guard and the
+// `lengthId=` reference, parsed with `parse_orchestra_id`, the tag parse, which
+// admits zero (the zero rule is applied where each reference is resolved), and
+// resolved after the declaration check. So one case still exercises the pair guard and the
 // other exercises the declaration refusal that precedes it. Re-derive by
 // reading the two call sites, not by trusting this note.
 namespace {
@@ -1170,11 +1170,11 @@ TEST(OrchestraFailClosed, ZeroFieldIdThrows) {
 }
 
 // The false-positive arm. `<fixr:component id>` and `<fixr:group id>` are a
-// repository-LOCAL surrogate key — an XML document id, not a FIX tag — and they
-// share `parse_orchestra_id` with the field-tag sites. Zero is a legal value
-// there, so a rejection placed inside the shared parser (or inside
-// `try_parse_uint16`) would retroactively outlaw a valid Orchestra document.
-// This arm is what distinguishes the two namespaces.
+// repository-LOCAL surrogate key — an XML document id, not a FIX tag — read by
+// the surrogate-id parse (102 D1b), apart from the field-tag sites. The loader
+// admits zero there (the schema's `positiveInteger` excludes it; 102 adds no
+// refusal), so a zero rule placed in the surrogate parse would outlaw a document
+// that loads today. This arm is what distinguishes the two namespaces.
 TEST(OrchestraFailClosed, ZeroStructuralXmlIdsAreStillAccepted) {
     constexpr std::string_view kXml = R"xml(
 <fixr:repository version="FIX.Latest_EP303">

@@ -1466,15 +1466,24 @@ constexpr std::string_view kOrchContainers[] = {"fixr:codeSets", "fixr:fields", 
     return k == "fixr:fieldRef" || k == "fixr:componentRef" || k == "fixr:groupRef";
 }
 
+// 102-dict-width-multichar-type D1b: a `fixr:field` id is a FIX tag; a
+// `fixr:component` or `fixr:group` id is a surrogate id, read in its own domain.
 [[nodiscard]] std::optional<std::string> orch_id_key_of(pugi::xml_node c, std::string_view kind) {
     if (name_of(c) != kind) {
         return std::nullopt;
     }
-    std::uint16_t id = 0;
-    if (!try_parse_uint16(c.attribute("id").as_string(""), id)) {
+    if (kind == "fixr:field") {
+        std::uint16_t tag = 0;
+        if (!try_parse_uint16(c.attribute("id").as_string(""), tag)) {
+            return std::nullopt;
+        }
+        return std::to_string(tag);
+    }
+    orch_ref_id id{};
+    if (!try_parse_orch_ref_id(c.attribute("id").as_string(""), id)) {
         return std::nullopt;
     }
-    return std::to_string(id);
+    return std::to_string(std::to_underlying(id));
 }
 
 [[nodiscard]] std::optional<std::string> orch_attr_key_of(pugi::xml_node c, std::string_view kind,
@@ -1523,11 +1532,19 @@ constexpr std::string_view kOrchContainers[] = {"fixr:codeSets", "fixr:fields", 
     if (!is_orch_ref(name_of(c))) {
         return std::nullopt;
     }
-    std::uint16_t id = 0;
-    if (!try_parse_uint16(c.attribute("id").as_string(""), id)) {
+    // 102 D1b: a fieldRef's id is a tag; a componentRef's or groupRef's a surrogate id.
+    if (name_of(c) == "fixr:fieldRef") {
+        std::uint16_t tag = 0;
+        if (!try_parse_uint16(c.attribute("id").as_string(""), tag)) {
+            return std::nullopt;
+        }
+        return std::string{name_of(c)} + "|" + std::to_string(tag);
+    }
+    orch_ref_id id{};
+    if (!try_parse_orch_ref_id(c.attribute("id").as_string(""), id)) {
         return std::nullopt;
     }
-    return std::string{name_of(c)} + "|" + std::to_string(id);
+    return std::string{name_of(c)} + "|" + std::to_string(std::to_underlying(id));
 }
 
 [[nodiscard]] std::optional<std::string> orch_code_key(pugi::xml_node c) {
@@ -1953,11 +1970,11 @@ orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(b
         return out;
     };
 
-    // Declared field ids; component and group definitions by id, the first of an id
-    // winning (the loader refuses a repeated one).
+    // Declared field ids (tags); component and group definitions by surrogate id
+    // (102 D1b), the first of an id winning (the loader refuses a repeated one).
     std::unordered_set<std::uint16_t> declared;
-    std::unordered_map<std::uint16_t, vnode> component_by_id;
-    std::unordered_map<std::uint16_t, vnode> group_by_id;
+    std::unordered_map<orch_ref_id, vnode> component_by_id;
+    std::unordered_map<orch_ref_id, vnode> group_by_id;
     auto const each_def = [&](char const* cname, std::string_view kind, auto&& fn) {
         if (vnode const cont = container(cname)) {
             children_of(cont, [&](vnode d) {
@@ -1975,12 +1992,12 @@ orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(b
     });
     each_def("fixr:components", "fixr:component", [&](vnode d, pugi::xml_node n) {
         r.components.push_back(d);
-        if (std::uint16_t id = 0; try_parse_uint16(n.attribute("id").as_string(""), id)) {
+        if (orch_ref_id id{}; try_parse_orch_ref_id(n.attribute("id").as_string(""), id)) {
             component_by_id.emplace(id, d);
         }
     });
     each_def("fixr:groups", "fixr:group", [&](vnode d, pugi::xml_node n) {
-        if (std::uint16_t id = 0; try_parse_uint16(n.attribute("id").as_string(""), id)) {
+        if (orch_ref_id id{}; try_parse_orch_ref_id(n.attribute("id").as_string(""), id)) {
             group_by_id.emplace(id, d);
         }
     });
@@ -2013,11 +2030,15 @@ orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(b
             pugi::xml_node const n = c.node();
             child_rec rec;
             std::string_view const k = n.type() == pugi::node_element ? name_of(n) : "";
-            std::uint16_t id = 0;
-            bool const has_id = try_parse_uint16(n.attribute("id").as_string(""), id);
+            // 102 D1b: a fieldRef's id is a tag; a groupRef's or componentRef's a
+            // surrogate id.
+            std::uint16_t tag = 0;
+            bool const has_tag = try_parse_uint16(n.attribute("id").as_string(""), tag);
+            orch_ref_id id{};
+            bool const has_id = try_parse_orch_ref_id(n.attribute("id").as_string(""), id);
             if (k == "fixr:fieldRef") {
                 rec.k = child_rec::kind::field;
-                rec.tag = has_id && declared.contains(id) ? id : 0;
+                rec.tag = has_tag && declared.contains(tag) ? tag : 0;
             } else if (k == "fixr:groupRef") {
                 rec.k = child_rec::kind::group;
                 if (has_id) {

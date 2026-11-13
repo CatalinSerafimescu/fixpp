@@ -148,18 +148,33 @@ constexpr OrchestraTypeEntry kOrchestraTypeTable[] = {
 }
 
 // ----------------------------------------------------------------------------
-// The non-throwing uint16 id parse is `detail::try_parse_uint16`
-// (dictionary_internal.hpp), used by the tolerant id-attribute reads below.
-// Skip-on-malformed there is not a correctness path, unlike
-// fieldRef/componentRef/groupRef resolution below.
+// 102-dict-width-multichar-type D1b: an Orchestra `id` is read by its kind. A
+// FIX tag (a `fixr:field` id, and a `fixr:fieldRef`, `fixr:numInGroup` or
+// `lengthId` reference) takes the 16-bit tag parse; a surrogate key (a
+// `fixr:component` or `fixr:group` id, and a `fixr:componentRef` or
+// `fixr:groupRef` reference) takes `detail::orch_ref_id`, in the schema's
+// `fixr:id_t` domain. The non-throwing forms (`detail::try_parse_uint16`,
+// `detail::try_parse_orch_ref_id`, dictionary_internal.hpp) serve the tolerant
+// reads below, where skip-on-malformed is not a correctness path, unlike the
+// reference resolution below.
 // ----------------------------------------------------------------------------
 
-// Strict/throwing id parse for real reference resolution (T013/T014/T016
-// fail-closed contract: a malformed/missing `id=` on a structural element is
-// a malformed dictionary).
+// Strict/throwing tag-id parse for real reference resolution (T013/T014/T016
+// fail-closed contract: a malformed/missing `id=` is a malformed dictionary).
 [[nodiscard]] std::uint16_t parse_orchestra_id(pugi::xml_attribute const& attr, char const* what) {
     std::uint16_t out = 0;
     if (!attr || !detail::try_parse_uint16(std::string_view{attr.as_string("")}, out)) {
+        throw orchestra_parse_error(std::string{"dict::orchestra_parse_error: missing/invalid "} +
+                                    what + " id attribute");
+    }
+    return out;
+}
+
+// The same strict parse for a surrogate id, with the same message.
+[[nodiscard]] detail::orch_ref_id parse_orchestra_ref_id(pugi::xml_attribute const& attr,
+                                                         char const* what) {
+    detail::orch_ref_id out{};
+    if (!attr || !detail::try_parse_orch_ref_id(std::string_view{attr.as_string("")}, out)) {
         throw orchestra_parse_error(std::string{"dict::orchestra_parse_error: missing/invalid "} +
                                     what + " id attribute");
     }
@@ -171,11 +186,12 @@ constexpr OrchestraTypeEntry kOrchestraTypeTable[] = {
 // dict/table_view accessors, so a zero-numbered field reads as present or
 // absent depending on which direction is asked.
 //
-// Deliberately NOT folded into `parse_orchestra_id` or `try_parse_uint16`:
-// those are shared with `<fixr:component id>` / `<fixr:group id>` and their
-// refs, which are a repository-LOCAL surrogate key — an XML document id, not a
-// FIX tag — where zero is a legal value. Widening the rule to the shared parser
-// would refuse a valid Orchestra document.
+// Not folded into `parse_orchestra_id`: that parse also reads the `lengthId`,
+// `fixr:fieldRef` and `fixr:numInGroup` references, whose zero is refused where
+// each is resolved, with that site's own message (`resolve_length_pair_relation`
+// for a `lengthId`). The surrogate ids take `parse_orchestra_ref_id`, which
+// admits 0: the schema's `positiveInteger` excludes it, and 102 keeps admitting
+// it (no new refusal).
 [[nodiscard]] std::uint16_t parse_orchestra_field_tag(pugi::xml_attribute const& attr,
                                                       char const* what) {
     auto const tag = parse_orchestra_id(attr, what);
@@ -354,7 +370,7 @@ private:
     // Length tag -> Data tag, from each data field's `lengthId=` (fixpp#427).
     std::unordered_map<std::uint16_t, std::uint16_t> data_by_length_;
     std::vector<OrchestraComponentDef> components_;
-    std::unordered_map<std::uint16_t, std::uint32_t> component_index_by_xml_id_;
+    std::unordered_map<detail::orch_ref_id, std::uint32_t> component_index_by_xml_id_;
     // Reverse parent map: parent_of_[child component's vector index] = enclosing
     // component's 1-based id (component_index + 1). First-seen wins (mirrors
     // xml_loader.cpp's parent_of_ / [2c §4.2]).
@@ -364,7 +380,7 @@ private:
     // reused no_tag (e.g. NoLegs=555) has MULTIPLE distinct `<fixr:group>`
     // definitions, each with its own G, so this map is required to resolve
     // WHICH specific group definition a given `<groupRef id=G>` points to.
-    std::unordered_map<std::uint16_t, pugi::xml_node> group_by_xml_id_;
+    std::unordered_map<detail::orch_ref_id, pugi::xml_node> group_by_xml_id_;
     // Output-shape state (deduped by no_tag, first-seen wins during the
     // expand walk below) — mirrors xml_loader.cpp's groups_/group_index_by_no_tag_.
     std::vector<OrchestraGroupDef> groups_;
@@ -488,10 +504,10 @@ void OrchestraLoaderState::collect_fields(pugi::xml_node const& root) {
         // asymmetry follows from where each value comes from rather than from any
         // count: `data_tag` is a key of `fields_by_tag_`, which fixpp#457 bars
         // from being zero at declaration; `length_tag` is a `lengthId=` reference,
-        // parsed with the shared `parse_orchestra_id` (which must keep admitting
-        // zero for the structural-id namespace) and resolved here, so it can still
-        // arrive zero. Both are refused, because the condition — zero is the "no
-        // pair" answer — is a property of the accessors, not of today's callers.
+        // parsed with `parse_orchestra_id`, the tag parse, which admits zero (the
+        // zero rule is applied where each reference is resolved), and resolved
+        // here, so it can still arrive zero. Both are refused, because the condition — zero is the
+        // "no pair" answer — is a property of the accessors, not of today's callers.
         if (length_tag == 0 || data_tag == 0) {
             throw orchestra_parse_error("dict::orchestra_parse_error: " + where() +
                                         " names field number 0, which cannot be half of a "
@@ -553,11 +569,11 @@ void OrchestraLoaderState::collect_components(pugi::xml_node const& root) {
         return;
     }
     for (auto const& c : comps.children("fixr:component")) {
-        auto const xml_id = parse_orchestra_id(c.attribute("id"), "<fixr:component>");
+        auto const xml_id = parse_orchestra_ref_id(c.attribute("id"), "<fixr:component>");
         if (component_index_by_xml_id_.contains(xml_id)) {
             throw orchestra_parse_error(
                 "dict::orchestra_parse_error: duplicate <fixr:component id=\"" +
-                std::to_string(xml_id) + "\">");
+                std::to_string(std::to_underlying(xml_id)) + "\">");
         }
         std::string const name{c.attribute("name").as_string("")};
         auto const idx = static_cast<std::uint32_t>(components_.size());
@@ -572,9 +588,9 @@ void OrchestraLoaderState::collect_components(pugi::xml_node const& root) {
     for (std::size_t i = 0; i < components_.size(); ++i) {
         auto const parent_1based = static_cast<std::uint32_t>(i + 1);
         for (auto const& child : components_[i].node.children("fixr:componentRef")) {
-            std::uint16_t child_xml_id = 0;
-            if (!detail::try_parse_uint16(std::string_view{child.attribute("id").as_string("")},
-                                          child_xml_id)) {
+            detail::orch_ref_id child_xml_id{};
+            if (!detail::try_parse_orch_ref_id(
+                    std::string_view{child.attribute("id").as_string("")}, child_xml_id)) {
                 continue;  // resolved (or rejected) properly at expand-time below
             }
             auto const cit = component_index_by_xml_id_.find(child_xml_id);
@@ -592,10 +608,10 @@ void OrchestraLoaderState::collect_groups(pugi::xml_node const& root) {
         return;
     }
     for (auto const& g : groups_node.children("fixr:group")) {
-        auto const xml_id = parse_orchestra_id(g.attribute("id"), "<fixr:group>");
+        auto const xml_id = parse_orchestra_ref_id(g.attribute("id"), "<fixr:group>");
         if (group_by_xml_id_.contains(xml_id)) {
             throw orchestra_parse_error("dict::orchestra_parse_error: duplicate <fixr:group id=\"" +
-                                        std::to_string(xml_id) + "\">");
+                                        std::to_string(std::to_underlying(xml_id)) + "\">");
         }
         group_by_xml_id_.emplace(xml_id, g);
     }
@@ -683,12 +699,14 @@ void OrchestraLoaderState::expand_field_list(
                 group_required_pairs_out.emplace_back(enclosing_group_no_tag, tag);
             }
         } else if (tag_name == "fixr:componentRef") {
-            auto const xml_id = parse_orchestra_id(child.attribute("id"), "<fixr:componentRef>");
+            auto const xml_id =
+                parse_orchestra_ref_id(child.attribute("id"), "<fixr:componentRef>");
             auto const cit = component_index_by_xml_id_.find(xml_id);
             if (cit == component_index_by_xml_id_.end()) {
                 throw orchestra_parse_error(
                     "dict::orchestra_parse_error: <fixr:componentRef id=\"" +
-                    std::to_string(xml_id) + "\"> not defined in <fixr:components>");
+                    std::to_string(std::to_underlying(xml_id)) +
+                    "\"> not defined in <fixr:components>");
             }
             auto const& def = components_[cit->second];
             // 079 T020: Orchestra's default componentRef presence is OPTIONAL
@@ -703,18 +721,18 @@ void OrchestraLoaderState::expand_field_list(
                               component_required && comp_req,
                               group_scope_component_required && comp_req);
         } else if (tag_name == "fixr:groupRef") {
-            auto const xml_id = parse_orchestra_id(child.attribute("id"), "<fixr:groupRef>");
+            auto const xml_id = parse_orchestra_ref_id(child.attribute("id"), "<fixr:groupRef>");
             auto const git = group_by_xml_id_.find(xml_id);
             if (git == group_by_xml_id_.end()) {
                 throw orchestra_parse_error("dict::orchestra_parse_error: <fixr:groupRef id=\"" +
-                                            std::to_string(xml_id) +
+                                            std::to_string(std::to_underlying(xml_id)) +
                                             "\"> not defined in <fixr:groups>");
             }
             auto const group_node = git->second;
             auto const numing_node = group_node.child("fixr:numInGroup");
             if (!numing_node) {
                 throw orchestra_parse_error("dict::orchestra_parse_error: <fixr:group id=\"" +
-                                            std::to_string(xml_id) +
+                                            std::to_string(std::to_underlying(xml_id)) +
                                             "\"> missing <fixr:numInGroup>");
             }
             auto const no_tag =
@@ -874,16 +892,22 @@ std::uint32_t OrchestraLoaderState::intern_name_in_pool(detail::dict_metadata_ha
 // it reads resolves, and the skips keep the walk total. A child with no id (a
 // fixr:annotation, text) is skipped.
 void OrchestraLoaderState::collect_header_tags(detail::dict_metadata_handle& h) const {
-    auto const header = component_index_by_xml_id_.find(1024);
+    auto const header = component_index_by_xml_id_.find(detail::orch_ref_id{1024});
     if (header == component_index_by_xml_id_.end()) {
         return;
     }
-    auto const id_of = [](pugi::xml_node const& n, std::uint16_t& out) {
+    // 102 D1b: a fieldRef's and a numInGroup's id is a tag, a componentRef's and a
+    // groupRef's a surrogate id, each read by its own parse.
+    auto const tag_of = [](pugi::xml_node const& n, std::uint16_t& out) {
         return detail::try_parse_uint16(std::string_view{n.attribute("id").as_string("")}, out);
+    };
+    auto const ref_of = [](pugi::xml_node const& n, detail::orch_ref_id& out) {
+        return detail::try_parse_orch_ref_id(std::string_view{n.attribute("id").as_string("")},
+                                             out);
     };
     std::vector<std::uint16_t> tags;
     std::vector<bool> walked(components_.size(), false);
-    std::unordered_set<std::uint16_t> walked_groups;
+    std::unordered_set<detail::orch_ref_id> walked_groups;
     walked[header->second] = true;
     std::vector<pugi::xml_node> stack{components_[header->second].node};
     while (!stack.empty()) {
@@ -891,15 +915,16 @@ void OrchestraLoaderState::collect_header_tags(detail::dict_metadata_handle& h) 
         stack.pop_back();
         for (auto const& child : node.children()) {
             std::string_view const kind{child.name()};
-            std::uint16_t id = 0;
-            if (!id_of(child, id)) {
-                continue;
-            }
             if (kind == "fixr:fieldRef") {
-                if (fields_by_tag_.contains(id)) {
-                    tags.push_back(id);
+                std::uint16_t tag = 0;
+                if (tag_of(child, tag) && fields_by_tag_.contains(tag)) {
+                    tags.push_back(tag);
                 }
             } else if (kind == "fixr:componentRef") {
+                detail::orch_ref_id id{};
+                if (!ref_of(child, id)) {
+                    continue;
+                }
                 auto const it = component_index_by_xml_id_.find(id);
                 if (it == component_index_by_xml_id_.end() || walked[it->second]) {
                     continue;
@@ -907,12 +932,16 @@ void OrchestraLoaderState::collect_header_tags(detail::dict_metadata_handle& h) 
                 walked[it->second] = true;
                 stack.push_back(components_[it->second].node);
             } else if (kind == "fixr:groupRef") {
+                detail::orch_ref_id id{};
+                if (!ref_of(child, id)) {
+                    continue;
+                }
                 auto const it = group_by_xml_id_.find(id);
                 if (it == group_by_xml_id_.end() || !walked_groups.insert(id).second) {
                     continue;
                 }
                 std::uint16_t no_tag = 0;
-                if (id_of(it->second.child("fixr:numInGroup"), no_tag) &&
+                if (tag_of(it->second.child("fixr:numInGroup"), no_tag) &&
                     fields_by_tag_.contains(no_tag)) {
                     tags.push_back(no_tag);
                 }
@@ -939,23 +968,29 @@ void OrchestraLoaderState::collect_header_tags(detail::dict_metadata_handle& h) 
 // adds nothing. Header before trailer, declaration order; the sink keeps the first
 // record at a key.
 void OrchestraLoaderState::collect_section_groups(detail::dict_metadata_handle& h) const {
-    auto const id_of = [](pugi::xml_node const& n, std::uint16_t& out) {
+    // 102 D1b: split by kind, as in `collect_header_tags`.
+    auto const tag_of = [](pugi::xml_node const& n, std::uint16_t& out) {
         return detail::try_parse_uint16(std::string_view{n.attribute("id").as_string("")}, out);
+    };
+    auto const ref_of = [](pugi::xml_node const& n, detail::orch_ref_id& out) {
+        return detail::try_parse_orch_ref_id(std::string_view{n.attribute("id").as_string("")},
+                                             out);
     };
     detail::SectionWalk w;
     auto walk = [&](auto& self, pugi::xml_node const& node,
                     std::vector<std::uint16_t>* level) -> void {
         for (auto const& child : node.children()) {
             std::string_view const kind{child.name()};
-            std::uint16_t id = 0;
-            if (!id_of(child, id)) {
-                continue;
-            }
             if (kind == "fixr:fieldRef") {
-                if (fields_by_tag_.contains(id)) {
-                    detail::SectionWalk::add(level, id);
+                std::uint16_t tag = 0;
+                if (tag_of(child, tag) && fields_by_tag_.contains(tag)) {
+                    detail::SectionWalk::add(level, tag);
                 }
             } else if (kind == "fixr:componentRef") {
+                detail::orch_ref_id id{};
+                if (!ref_of(child, id)) {
+                    continue;
+                }
                 auto const it = component_index_by_xml_id_.find(id);
                 if (it == component_index_by_xml_id_.end()) {
                     continue;
@@ -966,12 +1001,16 @@ void OrchestraLoaderState::collect_section_groups(detail::dict_metadata_handle& 
                     w.leave();
                 }
             } else if (kind == "fixr:groupRef") {
+                detail::orch_ref_id id{};
+                if (!ref_of(child, id)) {
+                    continue;
+                }
                 auto const it = group_by_xml_id_.find(id);
                 if (it == group_by_xml_id_.end()) {
                     continue;
                 }
                 std::uint16_t no_tag = 0;
-                if (!id_of(it->second.child("fixr:numInGroup"), no_tag) ||
+                if (!tag_of(it->second.child("fixr:numInGroup"), no_tag) ||
                     !fields_by_tag_.contains(no_tag)) {
                     continue;
                 }
@@ -988,7 +1027,8 @@ void OrchestraLoaderState::collect_section_groups(detail::dict_metadata_handle& 
             }
         }
     };
-    for (std::uint16_t const section : {std::uint16_t{1024}, std::uint16_t{1025}}) {
+    for (detail::orch_ref_id const section :
+         {detail::orch_ref_id{1024}, detail::orch_ref_id{1025}}) {
         auto const it = component_index_by_xml_id_.find(section);
         if (it == component_index_by_xml_id_.end()) {
             continue;

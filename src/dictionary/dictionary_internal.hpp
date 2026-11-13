@@ -70,8 +70,10 @@ namespace fixpp::dict::detail {
     return r.ec == std::errc{} && r.ptr == s.data() + s.size() && out >= 0;
 }
 
-// An Orchestra `id`, 0..65535. Non-throwing, for the tolerant "skip on a miss"
-// reads; `out` is written only when this returns true.
+// An Orchestra id that is a FIX tag (a `fixr:field` id, and a `fixr:fieldRef`,
+// `fixr:numInGroup` or `lengthId` reference), 0..65535. Non-throwing, for the
+// tolerant "skip on a miss" reads; `out` is written only when this returns true.
+// A component or group id is a surrogate key and takes `try_parse_orch_ref_id`.
 [[nodiscard]] inline bool try_parse_uint16(std::string_view s, std::uint16_t& out) noexcept {
     int val = 0;
     auto const r = std::from_chars(s.data(), s.data() + s.size(), val);
@@ -79,6 +81,31 @@ namespace fixpp::dict::detail {
         return false;
     }
     out = static_cast<std::uint16_t>(val);
+    return true;
+}
+
+// 102-dict-width-multichar-type D1b: an Orchestra surrogate id, the document-local
+// key of a `fixr:component` or `fixr:group` and of a `fixr:componentRef` or
+// `fixr:groupRef` (not a FIX tag). A distinct type, so a surrogate key does not
+// convert to an integer implicitly: a container or holder of another width does
+// not accept it. It becomes text only through `std::to_underlying`.
+enum class orch_ref_id : std::uint32_t {};
+
+// The repository schema's `fixr:id_t` upper bound (`maxInclusive`).
+inline constexpr std::int64_t kOrchRefIdMax = 2147483647;
+
+// An Orchestra surrogate id, 0..kOrchRefIdMax: the lexical rule of
+// `try_parse_uint16` (the whole string read by `std::from_chars` as a signed
+// integer, the value non-negative) with the schema's upper bound. The schema's `positiveInteger`
+// excludes 0; 0 is admitted, as the 16-bit parse admitted it. Non-throwing; `out` is written only
+// when this returns true.
+[[nodiscard]] inline bool try_parse_orch_ref_id(std::string_view s, orch_ref_id& out) noexcept {
+    std::int64_t val = 0;
+    auto const r = std::from_chars(s.data(), s.data() + s.size(), val);
+    if (r.ec != std::errc{} || r.ptr != s.data() + s.size() || val < 0 || val > kOrchRefIdMax) {
+        return false;
+    }
+    out = orch_ref_id{static_cast<std::uint32_t>(val)};
     return true;
 }
 
