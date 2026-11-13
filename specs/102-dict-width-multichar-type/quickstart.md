@@ -1,7 +1,7 @@
 # Quickstart: validating 102
 
-Worktree `~/Work/Programming/fixpp-parallel`; its build tree goes on F: (`/mnt/wsl/fixppbuild`, the
-`build/linux-clang-*` symlinks onto `build/parallel-clang-*` there), never the root file system.
+Worktree `~/Work/Programming/fixpp-parallel`; its build tree goes on F: (`/mnt/wsl/fixppbuild`: `build/linux-clang-*` and
+`build/linux-gcc-release` are symlinks onto `build/parallel-clang-*` and `build/parallel-gcc-release` there; `ls -la build/`), never the root file system.
 
 ```sh
 cmake --build build/linux-clang-debug -j8   # or --target each entry `ctest -N -L 102` lists
