@@ -172,8 +172,13 @@ accessor, or builds one through the typed builder.
   - The code generator is a build tool run over the vendored dictionaries. For it, US1.5 requires that its walk
     resolve every reference as the loader does on the same document (tasks T016 runs it over a fixture); it does not
     make generating code from another Orchestra document a supported use.
-  - A component id and a group id are separate key spaces: a document may give a component and a group the same id,
-    and every container that holds both kinds keys them by (kind, id).
+  - A component id and a group id are separate key spaces: a document may give a component and a group the same id.
+    No container keys both kinds by id alone. In the loader, the overlay graph build and `ir.cpp`, each surrogate
+    container the D1b holder recipe reports holds one kind, and the overlay's child key carries the element name.
+    100's test oracle, which keyed both in one domain, is re-keyed by (kind, id) (tasks T015b, T034a). The
+    witness is tasks T012's shared-id control.
+  - Witnesses for the lexical rule are tasks T012's lexical controls: a leading zero loads; a leading `+` and
+    surrounding whitespace are refused.
   - FIX tag ids (`<fixr:field id>`, `fieldRef`, `lengthId`, `numInGroup`) stay 1..65535 and are refused as today,
     with the same exception and the same message per kind (research D4 (g)).
 - **FR-002** (#654): `Dictionary::component_fields` and `Dictionary::group_fields` MUST return each definition's own
@@ -202,12 +207,15 @@ accessor, or builds one through the typed builder.
     code set the field names. The generator's kind reads that loaded type.
   - "Any value" is whatever the String kind's decoder returns for a MultipleStringValue field. There is no check of
     the MultipleCharValue grammar: a token longer than one character and a doubled or trailing space are returned
-    verbatim, and an empty value ends as it does for a MultipleStringValue field.
+    verbatim (tasks T019's cells), and an empty value ends as it does for a MultipleStringValue field. That holds by
+    construction: the same kind emits the same accessor text over the same decoder, and tasks T022's census
+    witnesses the kind.
   - 102 changes neither the generated validators nor the runtime validator (neither reads the kind; research Survey
     "Codegen"), so a typed read and a validated read take the same value as the same string.
 - **FR-005** (#621): Every generated typed builder input for a MultiCharValue field MUST take that string type and
   write it verbatim, through the path a MultipleStringValue input takes. A value no FIX field may carry (an empty
-  value, an embedded SOH) ends exactly as it does for a MultipleStringValue input. 102 adds no allocation path of
+  value, an embedded SOH) ends exactly as it does for a MultipleStringValue input. That holds by construction: the
+  same member type selects the same builder call, and tasks T021's type check witnesses the type. 102 adds no allocation path of
   its own (`[const §XV.1]`; plan Constitution Check).
 - **FR-006**: The generated text of every other field is unchanged, except that every generated `FieldRef` row drops
   its trailing `_reserved` initializer; every generated-file pin that moves is re-pinned with the reason, and the
@@ -266,8 +274,8 @@ accessor, or builds one through the typed builder.
   time (`99e956a0` until the post-squash rebase, the merge-base of the candidate and `origin/main` after it; the
   deciding run is the one after that rebase), stays within +5% or carries the §2 approval; the table-view footprint of that base and of the head
   is recorded. The verify record names the base commit.
-  - The bench loads FIX42, FIX44 and FIX50SP2 (re-derive: its `BENCHMARK` registrations); FIX50SP2 is the vendored
-    QuickFIX XML base with the most components.
+  - The bench's dictionaries are its `BENCHMARK` registrations. They must include the vendored QuickFIX XML base with
+    the most components (re-derive: count each file's component definitions).
   - No paired bench exists for `OrchestraLoader::load` or the overlay merge (re-derive: the `bench/dictionary/` rows
     of `bench/ci-suite.txt`), and 102 adds none. Their per-element work changes as `XmlLoader::load`'s does, by record
     width only, which `xml_loader_bench` measures.

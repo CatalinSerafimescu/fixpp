@@ -103,7 +103,7 @@ The affected symbols are every accessor, `Args` member and group-entry setter ge
 FR-004's classification); SC-003's differential lists them. `fixpp::v42`, `fixpp::v44` and `fixpp::vt11` have no
 MultiCharValue field, so their typed API changes only through §5's row.
 
-What fails to compile (each checked by a scratch compile under GCC 13 and Clang 22, `-std=c++23`, with
+What fails to compile (re-check each with a scratch compile under GCC and Clang, `-std=c++23`, over
 `std::expected<std::string_view, E>` and `std::optional<std::string_view>`):
 
 - `char c = *acc;`, `switch (*acc)`, `*acc == '1'` and `acc == '1'`;
@@ -120,7 +120,7 @@ What compiles and changes silently:
   compiles, and now dangles. Migration: copy the value into a `std::string` (or a `char` where one character is
   meant) before the source goes away.
 - Lifetime, builder. `args.exec_inst = std::string{"1 2"};`, or any temporary `std::string`, compiles and leaves the
-  member dangling before the build call reads it. Neither compiler warns at `-Wall -Wextra`. The caller's obligation
+  member dangling before the build call reads it. No compiler diagnostic is relied on to catch it. The caller's obligation
   is the one every MultipleStringValue `Args` member already carries: the viewed characters outlive the build call.
 
 A consumer of a precompiled builder library rebuilds the library and its own code against the 102 headers; an
