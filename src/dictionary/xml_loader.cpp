@@ -335,7 +335,7 @@ private:
         pugi::xml_node const& parent, std::vector<FieldRef>& out,
         std::vector<std::uint16_t>& required_out,
         std::vector<std::pair<std::uint16_t, std::uint16_t>>& group_required_pairs_out,
-        std::uint16_t enclosing_group_no_tag, std::uint16_t enclosing_component_index,
+        std::uint16_t enclosing_group_no_tag, std::uint32_t enclosing_component_index,
         // 083 T026/T027: Entity-2 capture. NULL at the component-cache and
         // group-cache call sites, which are not message-scoped (C-1.1).
         detail::DelimCapture* delim_cap = nullptr, bool in_group = false,
@@ -357,7 +357,7 @@ private:
     std::unordered_map<std::string, GlobalFieldInfo> by_name_;
     std::unordered_map<std::uint16_t, std::string> by_tag_;
     std::vector<ComponentDef> components_;
-    std::unordered_map<std::string, std::uint16_t> component_index_by_name_;
+    std::unordered_map<std::string, std::uint32_t> component_index_by_name_;
     // Reverse parent map: parent_of_[child_name] = enclosing component's 1-based
     // id (component_index + 1). Populated during collect_components() by walking
     // each component's XML body for nested <component> references. Used in
@@ -366,7 +366,7 @@ private:
     // When a child component is referenced from multiple parents, the first
     // encountered in declaration order wins (FIX XML is typically acyclic and
     // single-parent; the tiebreak is documented here for clarity).
-    std::unordered_map<std::string, std::uint16_t> parent_of_;
+    std::unordered_map<std::string, std::uint32_t> parent_of_;
     std::vector<GroupDef> groups_;
     std::unordered_map<std::uint16_t, std::uint16_t> group_index_by_no_tag_;
     std::vector<MessageDef> messages_;
@@ -498,7 +498,7 @@ void LoaderState::collect_components(pugi::xml_node const& root) {
     if (!comps) {
         return;
     }
-    std::uint16_t next_id = 0;
+    std::uint32_t next_id = 0;
     for (auto const& c : comps.children("component")) {
         auto const name = std::string{c.attribute("name").as_string("")};
         if (name.empty()) {
@@ -525,7 +525,7 @@ void LoaderState::collect_components(pugi::xml_node const& root) {
         if (pit == component_index_by_name_.end()) {
             continue;
         }
-        auto const parent_1based = static_cast<std::uint16_t>(pit->second + 1);
+        std::uint32_t const parent_1based = pit->second + 1U;
         for (auto const& child : def.node.children()) {
             if (std::string_view{child.name()} == "component") {
                 auto const cname = std::string{child.attribute("name").as_string("")};
@@ -555,13 +555,13 @@ void LoaderState::collect_messages(pugi::xml_node const& root) {
 }
 
 // NOLINTBEGIN(misc-no-recursion,bugprone-easily-swappable-parameters) — recursive XML walk by
-// design (component refs expand inline); the two uint16_t params name different domains (group's
-// no_tag vs component index) and aren't interchangeable.
+// design (component refs expand inline); the group's no_tag and the component index params name
+// different domains and aren't interchangeable.
 void LoaderState::expand_field_list(
     pugi::xml_node const& parent, std::vector<FieldRef>& out,
     std::vector<std::uint16_t>& required_out,
     std::vector<std::pair<std::uint16_t, std::uint16_t>>& group_required_pairs_out,
-    std::uint16_t enclosing_group_no_tag, std::uint16_t enclosing_component_index,
+    std::uint16_t enclosing_group_no_tag, std::uint32_t enclosing_component_index,
     detail::DelimCapture* delim_cap, bool in_group, bool component_required,
     bool group_scope_component_required) {
     for (auto const& child : parent.children()) {
@@ -626,8 +626,8 @@ void LoaderState::expand_field_list(
             // that is what makes a component's first field eligible to be the
             // enclosing group's delimiter (FR-004) with no extra machinery.
             expand_field_list(def.node, out, required_out, group_required_pairs_out,
-                              enclosing_group_no_tag, static_cast<std::uint16_t>(cit->second + 1),
-                              delim_cap, in_group, component_required && comp_req,
+                              enclosing_group_no_tag, cit->second + 1U, delim_cap, in_group,
+                              component_required && comp_req,
                               group_scope_component_required && comp_req);
         } else if (tag_name == "group") {
             auto const gname = std::string{child.attribute("name").as_string("")};
@@ -1139,7 +1139,7 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
 
     struct PendingComponent {
         detail::NameSlice slice{};
-        std::uint16_t index{0};
+        std::uint32_t index{0};
     };
     std::vector<PendingComponent> pending_components;
     pending_components.reserve(components_.size());
@@ -1361,7 +1361,7 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         detail::NameSlice ns{};
         ns.offset = intern_name_in_pool(h, def.name);
         ns.length = static_cast<std::uint32_t>(def.name.size());
-        pending_components.push_back({.slice = ns, .index = static_cast<std::uint16_t>(i)});
+        pending_components.push_back({.slice = ns, .index = static_cast<std::uint32_t>(i)});
 
         // Expand the component's field list into a scratch vector, then
         // append to the flat component_fields_ table.
@@ -1372,16 +1372,15 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         // its own standalone GroupDef walk below.
         expand_field_list(def.node, comp_fields, comp_required, comp_group_required,
                           /*enclosing_group_no_tag=*/0,
-                          /*enclosing_component_index=*/static_cast<std::uint16_t>(i + 1),
+                          /*enclosing_component_index=*/static_cast<std::uint32_t>(i + 1),
                           // 083 C-1.1: NOT message-scoped — a record emitted
                           // here would carry no message type and corrupt the
                           // store. Explicit rather than defaulted, so the
                           // decision is visible at the call site.
                           /*delim_cap=*/nullptr);
 
-        auto const first_idx = static_cast<std::uint16_t>(h.component_fields_.size());
-        auto const cnt =
-            static_cast<std::uint16_t>(std::min<std::size_t>(comp_fields.size(), 65535U));
+        auto const first_idx = static_cast<std::uint32_t>(h.component_fields_.size());
+        auto const cnt = static_cast<std::uint32_t>(comp_fields.size());
         h.component_fields_.insert(h.component_fields_.end(), comp_fields.begin(),
                                    comp_fields.end());
 
@@ -1389,14 +1388,14 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         // collect_components(). 0 = top-level (no enclosing component); otherwise
         // the enclosing component's 1-based id per [2c §4.2] / data-model.md
         // Entity 2 / contracts/component_ref.hpp's `component_id` field.
-        std::uint16_t parent_comp_id = 0;
+        std::uint32_t parent_comp_id = 0;
         if (auto const pit = parent_of_.find(def.name); pit != parent_of_.end()) {
             parent_comp_id = pit->second;
         }
 
         ComponentRef cr{};
-        cr.component_id = static_cast<std::uint16_t>(i);
-        cr.name_offset = static_cast<std::uint16_t>(std::min<std::uint32_t>(ns.offset, 65535));
+        cr.component_id = static_cast<std::uint32_t>(i);
+        cr.name_offset = ns.offset;
         cr.first_field_index = first_idx;
         cr.field_count = cnt;
         cr.parent_component_id = parent_comp_id;
@@ -1436,8 +1435,8 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     h.groups_.reserve(groups_.size());
     h.group_required_offsets_.reserve(groups_.size());
     for (auto const& g : groups_) {
-        std::uint16_t first_idx = 0;
-        std::uint16_t cnt = 0;
+        std::uint32_t first_idx = 0;
+        std::uint32_t cnt = 0;
         // Gate B r1 F1 (fixpp#201): `grp_required` is the GROUP-RELATIVE direct
         // required-member set for THIS group — this standalone call starts
         // fresh at the group's own boundary, so `!in_group && component_
@@ -1470,8 +1469,8 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
                               /*delim_cap=*/nullptr,
                               /*in_group=*/false,
                               /*component_required=*/g_own_required);
-            first_idx = static_cast<std::uint16_t>(h.group_fields_.size());
-            cnt = static_cast<std::uint16_t>(std::min<std::size_t>(grp_fields.size(), 65535U));
+            first_idx = static_cast<std::uint32_t>(h.group_fields_.size());
+            cnt = static_cast<std::uint32_t>(grp_fields.size());
             h.group_fields_.insert(h.group_fields_.end(), grp_fields.begin(), grp_fields.end());
         }
 

@@ -574,7 +574,7 @@ public:
     // Returns the flat FieldRef run for a component (by component_id).
     // Returns empty span if component_id is out of range or field_count == 0.
     [[nodiscard]] std::span<FieldRef const> component_fields_impl(
-        std::uint16_t component_id) const noexcept;
+        std::uint32_t component_id) const noexcept;
 
     // Returns the flat FieldRef run for a group (by no_tag).
     // Returns empty span if the group has no fields recorded.

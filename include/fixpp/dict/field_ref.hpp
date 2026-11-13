@@ -14,8 +14,8 @@
 // 102-dict-width-multichar-type D1 supersedes the 16-bit `component_index`
 // and the `_reserved` tail of `[2c §4.1]` and of the 002 extract:
 // `component_index` is `std::uint32_t` in place (offset 8), so it holds the
-// component's index + 1 for any component below 2^32, and `_reserved` is
-// removed. The record stays 16 bytes, now at `alignof == 4`; a generated row
+// component's index + 1 while that value fits in `std::uint32_t`, and
+// `_reserved` is removed. The record stays 16 bytes, now at `alignof == 4`; a generated row
 // has one positional initializer per member.
 
 #pragma once

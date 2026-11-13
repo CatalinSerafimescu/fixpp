@@ -322,7 +322,7 @@ private:
         pugi::xml_node const& parent, std::vector<FieldRef>& out,
         std::vector<std::uint16_t>& required_out,
         std::vector<std::pair<std::uint16_t, std::uint16_t>>& group_required_pairs_out,
-        std::uint16_t enclosing_group_no_tag, std::uint16_t enclosing_component_index,
+        std::uint16_t enclosing_group_no_tag, std::uint32_t enclosing_component_index,
         // 083 T030: Entity-2 capture, symmetric with xml_loader.cpp. NULL at
         // the component-cache and group-cache call sites (C-1.1).
         detail::DelimCapture* delim_cap = nullptr, bool in_group = false,
@@ -354,11 +354,11 @@ private:
     // Length tag -> Data tag, from each data field's `lengthId=` (fixpp#427).
     std::unordered_map<std::uint16_t, std::uint16_t> data_by_length_;
     std::vector<OrchestraComponentDef> components_;
-    std::unordered_map<std::uint16_t, std::uint16_t> component_index_by_xml_id_;
+    std::unordered_map<std::uint16_t, std::uint32_t> component_index_by_xml_id_;
     // Reverse parent map: parent_of_[child component's vector index] = enclosing
     // component's 1-based id (component_index + 1). First-seen wins (mirrors
     // xml_loader.cpp's parent_of_ / [2c §4.2]).
-    std::unordered_map<std::uint16_t, std::uint16_t> parent_of_;
+    std::unordered_map<std::uint32_t, std::uint32_t> parent_of_;
     // Collect-phase map: <fixr:group id=G> -> the group's own XML node.
     // groupRef references G (the group element's id), NOT the no_tag — a
     // reused no_tag (e.g. NoLegs=555) has MULTIPLE distinct `<fixr:group>`
@@ -560,7 +560,7 @@ void OrchestraLoaderState::collect_components(pugi::xml_node const& root) {
                 std::to_string(xml_id) + "\">");
         }
         std::string const name{c.attribute("name").as_string("")};
-        auto const idx = static_cast<std::uint16_t>(components_.size());
+        auto const idx = static_cast<std::uint32_t>(components_.size());
         components_.push_back({.name = name, .node = c});
         component_index_by_xml_id_.emplace(xml_id, idx);
     }
@@ -570,7 +570,7 @@ void OrchestraLoaderState::collect_components(pugi::xml_node const& root) {
     // DIRECT componentRef children and record parent_of_[index_of(C)] =
     // index_of(P) + 1.
     for (std::size_t i = 0; i < components_.size(); ++i) {
-        auto const parent_1based = static_cast<std::uint16_t>(i + 1);
+        auto const parent_1based = static_cast<std::uint32_t>(i + 1);
         for (auto const& child : components_[i].node.children("fixr:componentRef")) {
             std::uint16_t child_xml_id = 0;
             if (!detail::try_parse_uint16(std::string_view{child.attribute("id").as_string("")},
@@ -633,7 +633,7 @@ void OrchestraLoaderState::expand_field_list(
     pugi::xml_node const& parent, std::vector<FieldRef>& out,
     std::vector<std::uint16_t>& required_out,
     std::vector<std::pair<std::uint16_t, std::uint16_t>>& group_required_pairs_out,
-    std::uint16_t enclosing_group_no_tag, std::uint16_t enclosing_component_index,
+    std::uint16_t enclosing_group_no_tag, std::uint32_t enclosing_component_index,
     detail::DelimCapture* delim_cap, bool in_group, bool component_required,
     bool group_scope_component_required) {
     for (auto const& child : parent.children()) {
@@ -699,8 +699,8 @@ void OrchestraLoaderState::expand_field_list(
             // 083 C-1.2: a componentRef expands INLINE at the enclosing level,
             // so the same capture frame carries through (FR-004).
             expand_field_list(def.node, out, required_out, group_required_pairs_out,
-                              enclosing_group_no_tag, static_cast<std::uint16_t>(cit->second + 1),
-                              delim_cap, in_group, component_required && comp_req,
+                              enclosing_group_no_tag, cit->second + 1U, delim_cap, in_group,
+                              component_required && comp_req,
                               group_scope_component_required && comp_req);
         } else if (tag_name == "fixr:groupRef") {
             auto const xml_id = parse_orchestra_id(child.attribute("id"), "<fixr:groupRef>");
@@ -1069,7 +1069,7 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
 
     struct PendingComponent {
         detail::NameSlice slice{};
-        std::uint16_t index{0};
+        std::uint32_t index{0};
     };
     std::vector<PendingComponent> pending_components;
     pending_components.reserve(components_.size());
@@ -1257,7 +1257,7 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
         detail::NameSlice ns{};
         ns.offset = intern_name_in_pool(h, def.name);
         ns.length = static_cast<std::uint32_t>(def.name.size());
-        pending_components.push_back({.slice = ns, .index = static_cast<std::uint16_t>(i)});
+        pending_components.push_back({.slice = ns, .index = static_cast<std::uint32_t>(i)});
 
         std::vector<FieldRef> comp_fields;
         std::vector<std::uint16_t> comp_required;  // discard — component required-sets unused
@@ -1266,25 +1266,24 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
         // its own standalone OrchestraGroupDef walk below.
         expand_field_list(def.node, comp_fields, comp_required, comp_group_required,
                           /*enclosing_group_no_tag=*/0,
-                          /*enclosing_component_index=*/static_cast<std::uint16_t>(i + 1),
+                          /*enclosing_component_index=*/static_cast<std::uint32_t>(i + 1),
                           // 083 C-1.1: not message-scoped — emits nothing.
                           /*delim_cap=*/nullptr);
 
-        auto const first_idx = static_cast<std::uint16_t>(h.component_fields_.size());
-        auto const cnt =
-            static_cast<std::uint16_t>(std::min<std::size_t>(comp_fields.size(), 65535U));
+        auto const first_idx = static_cast<std::uint32_t>(h.component_fields_.size());
+        auto const cnt = static_cast<std::uint32_t>(comp_fields.size());
         h.component_fields_.insert(h.component_fields_.end(), comp_fields.begin(),
                                    comp_fields.end());
 
-        std::uint16_t parent_comp_id = 0;
-        if (auto const pit = parent_of_.find(static_cast<std::uint16_t>(i));
+        std::uint32_t parent_comp_id = 0;
+        if (auto const pit = parent_of_.find(static_cast<std::uint32_t>(i));
             pit != parent_of_.end()) {
             parent_comp_id = pit->second;
         }
 
         ComponentRef cr{};
-        cr.component_id = static_cast<std::uint16_t>(i);
-        cr.name_offset = static_cast<std::uint16_t>(std::min<std::uint32_t>(ns.offset, 65535));
+        cr.component_id = static_cast<std::uint32_t>(i);
+        cr.name_offset = ns.offset;
         cr.first_field_index = first_idx;
         cr.field_count = cnt;
         cr.parent_component_id = parent_comp_id;
@@ -1317,8 +1316,8 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
     h.groups_.reserve(groups_.size());
     h.group_required_offsets_.reserve(groups_.size());
     for (auto const& g : groups_) {
-        std::uint16_t first_idx = 0;
-        std::uint16_t cnt = 0;
+        std::uint32_t first_idx = 0;
+        std::uint32_t cnt = 0;
         // Gate B r1 F1 (fixpp#201, mirrors xml_loader.cpp): `grp_required` is
         // the GROUP-RELATIVE direct required-member set for THIS group — this
         // standalone call starts fresh at the group's own boundary. 081-
@@ -1338,8 +1337,8 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
                               /*delim_cap=*/nullptr,
                               /*in_group=*/false,
                               /*component_required=*/g.first_seen_required);
-            first_idx = static_cast<std::uint16_t>(h.group_fields_.size());
-            cnt = static_cast<std::uint16_t>(std::min<std::size_t>(grp_fields.size(), 65535U));
+            first_idx = static_cast<std::uint32_t>(h.group_fields_.size());
+            cnt = static_cast<std::uint32_t>(grp_fields.size());
             h.group_fields_.insert(h.group_fields_.end(), grp_fields.begin(), grp_fields.end());
         }
 

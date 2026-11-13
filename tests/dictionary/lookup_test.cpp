@@ -301,7 +301,8 @@ TEST_P(DictionaryLookupFixture, ComponentParties) {
         // (component_id is 0-based; parent_component_id is 1-based).
         auto const sag = dict().component("SecAltIDGrp");
         ASSERT_TRUE(sag.has_value()) << "SecAltIDGrp must be declared in " << p.filename;
-        EXPECT_EQ(sag->parent_component_id, static_cast<std::uint16_t>(ins->component_id + 1U))
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the two ASSERT_TRUEs above check them
+        EXPECT_EQ(sag->parent_component_id, ins->component_id + 1U)
             << "SecAltIDGrp is nested inside Instrument; "
                "parent_component_id must equal Instrument's 1-based id in "
             << p.filename;

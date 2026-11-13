@@ -11,9 +11,9 @@
 // 102-dict-width-multichar-type D1 supersedes the 16-bit layout of `[2c §4.2]`
 // and of the 002 extract: every member is `std::uint32_t`, in the declared
 // order, so a component's id, name offset, side-table start, member count and
-// parent id are its own while each table stays below 2^32 entries. The
+// parent id are its own while each table's size fits in `std::uint32_t`. The
 // `_reserved` member, and with it the `FIXPP_DICT_COMPONENTREF_RESERVED_USED`
-// forward-compatibility slot of C-P3-1, is removed (no code read it).
+// forward-compatibility slot of C-P3-1, is removed.
 // `component_id` is the 0-based declaration index in both formats, not an
 // Orchestra document's `fixr:component id`.
 

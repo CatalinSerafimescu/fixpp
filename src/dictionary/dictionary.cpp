@@ -154,7 +154,7 @@ std::optional<GroupRef> dict_metadata_handle::group_impl(std::uint16_t no_tag) c
 }
 
 std::span<FieldRef const> dict_metadata_handle::component_fields_impl(
-    std::uint16_t component_id) const noexcept {
+    std::uint32_t component_id) const noexcept {
     if (component_id >= components_.size()) {
         return {};
     }
