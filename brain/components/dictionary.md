@@ -34,6 +34,8 @@ refs:
   - specs/101-inbound-reject-fidelity/data-model.md
   - specs/100-wire-group-read-integrity/research.md
   - specs/100-wire-group-read-integrity/plan.md
+  - specs/102-dict-width-multichar-type/research.md
+  - specs/102-dict-width-multichar-type/contracts/cpp-api-breaks.md
   - spec/behaviors-and-limitations.md
   - dictionaries/README.md
   - docs/src/dictionary/codegen.md
@@ -433,7 +435,8 @@ Records that describe the older design are flagged here and not rewritten. Each 
   B&L file.
 - **Open from 098:** L-098-3 (the base load paths have no caps and no cycle guard, fixpp#650) and
   L-098-4 (the `std::uint16_t` side-table index wraps; the vendored FIX50SP2 component table already does,
-  fixpp#654).
+  fixpp#654). ⚠️ **Closed by 102 (`102-dict-width-multichar-type`):** L-098-4; it sits in the closed B&L
+  file. L-098-3 stays open, and points at L-102-1 (a).
 
 ## Two dictionaries on a FIXT session (099) — what this family gained, and what was rejected
 
@@ -492,3 +495,61 @@ Design: `specs/101-inbound-reject-fidelity/research.md` D1; the validator that r
 **DECIDED — "defined" is the dictionary's field list, not message reach**, as QuickFIX's `checkValidTagNumber` reads `m_fields`. `Dictionary::build_table_view` fills the store from `dict_metadata_handle::field_by_name_` (every QuickFIX-XML `<field number=…>` under `<fields>`, or every Orchestra `<fixr:field id=…>`, after any 098 overlay merge), through `table_view_builder::add_defined_tag`, never from `fields_`, the per-message runs. So a field declared and reached by no message answers 373=2, not 373=0, and so does one an overlay adds; every `as_table_view` form comes through that one function. **DECIDED — every population operation that names a tag calls `mark_defined`**, so a hand-built table defines every tag it was told anything about; the rule is stated at `mark_defined` as a procedure (list the private mutators `table_view_builder` forwards to). **DECIDED — a sorted `std::vector<std::uint16_t>`, binary-searched, sealed (sorted and deduplicated) once by `build() &&`**: the lookup is cold, and the store is copied with every validator's table. ⚠️ *How the seal builds it is superseded by 101 T067 (`/simplify`):* `mark_defined` sets a bit in a build-time bitset that `table_view_builder` sizes to the store's tag type before the first population operation, and `build() &&` writes the set tags in ascending order at exact size, then releases the bitset; the stored form is unchanged. Verify in `include/fixpp/dict/table_view.hpp` (`seal_defined_tags`).
 
 **REJECTED — `field_type_of`** (it cannot tell an unknown tag from a String field). **REJECTED — asking the `Dictionary` at validate time** (the validator holds a `table_view`, not a `Dictionary`). **REJECTED — a fixed tag-space bitset as the stored form** (a build-time one, released by the seal, is what T067 uses): copied with every validator's table, it would cost every copy the whole tag space's words whatever the dictionary declares, the reason the per-tag stores' comment gives.
+
+## Record width and MultiCharValue (102) — what was decided, and what was rejected
+
+`102-dict-width-multichar-type` widens the dictionary records and reads Orchestra surrogate ids in their own domain
+(fixpp#654), and gives a MultiCharValue field the string kind (fixpp#621). Design: `specs/102-dict-width-multichar-type/`
+research D1, D1b, D2, D3 and D7; the C++ and C-ABI breaks: `contracts/cpp-api-breaks.md`; behaviour: B&L `B-102-1`,
+`B-102-2`, `B-102-3`, `L-102-1`. Verify against `include/fixpp/dict/field_ref.hpp`, `component_ref.hpp` and
+`group_ref.hpp`, `detail::orch_ref_id` and `detail::run_fits` in `src/dictionary/dictionary_internal.hpp`, and
+`kind_of` in `tools/codegen/fixpp-codegen/gen_util.hpp`.
+
+**DECIDED — widen the records to 32 bits, in place** (research D1): every `ComponentRef` member, `GroupRef`'s start and
+count, and `FieldRef::component_index`, with each loader's counters, maps and one-based casts that carry them; the
+`_reserved` members of `FieldRef` and `ComponentRef` go, so `FieldRef` stays 16 bytes. **DECIDED — a surrogate id is
+its own type** (research D1b): `detail::orch_ref_id`, an enum class over `std::uint32_t` read in `fixr:id_t`'s
+0..2147483647, so a container or holder of another width does not accept it; it becomes text only through
+`std::to_underlying`, and the FIX tag parse stays 16-bit. **DECIDED — no side-table fit check** (research D2): the
+starts and counts `finalize` writes are 32-bit, the overlay adds at most `kExpansionBudget` beyond the base's own
+expansion, and B86's budget bounds the base's (L-102-1 (a)). **DECIDED — every run reader tests
+`start <= size && count <= size - start`** (research D7, spec FR-008), so a 32-bit sum cannot wrap past the check.
+**DECIDED — MultiCharValue takes the string kind** (research D3), as MultipleStringValue does and as QuickFIX types it.
+
+**REJECTED** (each with its source):
+- a component cap of 65,535 that refuses (research D1 "Alternatives"; the Gate A ruling dropped it): the B86 owner
+  ruling admits no entry caps ("widen it, which is B84's job, not a cap");
+- a 20-byte `FieldRef` that keeps `_reserved` (research D1 "Alternatives"): every `FieldRef` table, constexpr and
+  runtime, grows by a quarter; the 16-byte layout is the one the orchestrator directed and B86's step-cost model
+  assumes;
+- a 24-byte `ComponentRef` that keeps `_reserved` as a `std::uint32_t` (research D1 "Alternatives"): it keeps an unused
+  slot (`FIXPP_DICT_COMPONENTREF_RESERVED_USED`, which no code reads) at 4 bytes per component;
+- refusing a side table past 65535 (research D1 "Alternatives"): it refuses the vendored FIX50SP2;
+- keeping the 16-bit surrogate parse as a "format rule" (research D1b "Alternatives"): the schema says otherwise, and
+  with the index widened it would be the one place a 65,537th Orchestra component is refused, the cap B86 rejected;
+- bare `std::uint32_t` surrogate ids (research D1b "Alternatives", round 2): a distinct type turns the container-width
+  class from a silent wrong answer, caught only by a fixture that declares an alias pair, into a compile error;
+- keeping a 32-bit side-table fit check (research D2, "it is not kept"): it could fire only on a base already within
+  `kExpansionBudget` of 2^32 entries, error handling for an input no host can load, with no witness short of a test
+  seam;
+- a dedicated multi-character view type (spec Clarifications, 2026-11-07): nothing in fixpp or QuickFIX needs one; an
+  application splits on spaces.
+
+**Records this supersedes, flagged here and not edited.**
+
+- ⚠️ **Superseded by 102 D2:** `specs/098-dialect-overlay/contracts/witnesses.md` (M-12's "the side-table fit stays"
+  and its side-table-origin RED, M-18, the N-3 side-table rows and the budget-before-fit order row),
+  `specs/098-dialect-overlay/tasks.md` (T019's side-table rows and order row, T037, T038's M-18) and
+  `specs/098-dialect-overlay/contracts/surface.md` (the `load_with_overlay` comment's side-table fit and cause).
+- ⚠️ **Superseded by 102 D3:** `specs/003-dictionary-codegen/data-model.md` Entity 11's shape, `spec.md`'s AC-FT1 and
+  `contracts/field_traits.hpp`, where each names the MultiCharValue / MultiStringValue split.
+- ⚠️ **Superseded by 102 D1:** `specs/002-dictionary-xml-loader/contracts/field_ref.hpp`, `component_ref.hpp`,
+  `group_ref.hpp` and `data-model.md` (the 16-bit layouts and `_reserved`).
+- `.specify/2c-codegen.md` carries in-place `Updated (102-dict-width-multichar-type)` notes at §1's "Field
+  representation types" bullet, §4.1, §4.1.3 and §4.2; the text before each note is history. Re-derive with
+  `grep -n 'Updated (102-dict-width-multichar-type)' .specify/2c-codegen.md`.
+- ⚠️ **Closed by 102:** L-098-4 and L-621-1, in the closed B&L file. B-098-1 carries a 102 amendment.
+
+**Open from 102:** L-102-1, the 32-bit residual: (a) with B86 (fixpp#650), (b) the name pool past 2^32 bytes
+(fixpp#676), (c) component identity at 2^32 components (fixpp#677). XML `GroupDef`'s unused 16-bit members:
+fixpp#678.

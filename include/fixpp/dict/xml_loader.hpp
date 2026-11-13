@@ -77,7 +77,8 @@ public:
     // Only the parse-status mapping is shared with the overlay parse. Parses `overlay` with
     // parse_default | parse_doctype, then runs research R-5's guards in order (shape caps, then one
     // iterative walk of the merged reference graph for cycles and the expansion budget, then the
-    // R-4 conflict checks), splices the overlay into the base document (R-3), checks
+    // R-4 conflict checks; 102-dict-width-multichar-type D2 removed the walk's 16-bit side-table
+    // check), splices the overlay into the base document (R-3), checks
     // the spliced document's Length+Data relation against the base's (R-5 step 8a) and builds the
     // Dictionary from the spliced document as `load` builds one from a file, with the expansion
     // step counter armed. Throws: xml_parse_error (base or overlay malformed, unknown reference,

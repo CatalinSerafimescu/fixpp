@@ -7,7 +7,8 @@
 // verbatim from the 002-shipped FieldRef the RC#5 accessors carried into the
 // IR (one XML truth — research D-1/D-24). Static storage, zero runtime alloc
 // (I-5). Deterministic LF-only output over the bytewise-sorted message list
-// (NFR-003-7).
+// (NFR-003-7). 102-dict-width-multichar-type D1 removed `FieldRef::_reserved`, so a
+// row carries no `_reserved` trailer (003 AC-V6 / I-7's `0`).
 #include <cstdint>
 #include <fixpp/dict/field_ref.hpp>
 #include <string>

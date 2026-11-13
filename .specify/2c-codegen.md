@@ -31,6 +31,7 @@ Updated (098-dialect-overlay): goals 1 and 4. There is no `DialectOverlay` type.
 
 - **Wire-format mechanics.** Parse / serialize / validate of bytes-on-the-wire is owned by **2b** (`Parser`, `Writer`, `Validator`, `Framer`). Typed messages reuse 2b's primitives: a `fixpp::v50sp2::NewOrderSingle` is constructed from a `wire::MessageView<wire::access_mode::Index>` (per `[2b §4.3]`); its accessors call `MessageView::get<Tag>()` under the hood.
 - **Field representation types.** Decimal is `fixpp::decimal_t` from **2a** (per `[2a §4.4]`'s `FIXPP_DECIMAL_T` alias rule — one symbol set per build); integer/string/timestamp/UTCTimestamp/boolean/MultiCharValue/MultiStringValue/etc. are concrete representations selected by `dict::field_traits<DataType>` specializations (§4.1.3). 2c selects which trait specialization to substitute at each accessor; it does not re-implement field decoding.
+  Updated (102-dict-width-multichar-type): every kind the code generator maps to the string kind (`kind_of` in `tools/codegen/fixpp-codegen/gen_util.hpp`, the kinds that return `TypeKind::String`) decodes through `field_traits<std::string_view>`, MultiCharValue and MultiStringValue among them, so there is no MultiCharValue / MultiStringValue split (102 research D3; B-102-2). A MultiCharValue accessor returns `expected_t<std::string_view>`. The text before this note is history.
 - **Session semantics.** Sequence numbers, gap fills, recovery, ResendRequest, the `ApplVerID(1128)` resolution algorithm at the *session-FSM* layer — owned by `session/` (Phase 4). 2c provides the typed-message *classes* the session FSM dispatches on, the `dict::reify` bridge it dispatches *through*, and the `version_profile` shape it consults; 2c does not interpret OrdStatus, ExecType, or any application semantics, and does not own the FSM state machine that walks header `ApplVerID` per `[FIXT §5.3]`.
 - **C ABI surface.** `fixpp_msg_t`, `fixpp_dict_t`, `fixpp_owning_msg_t`, the per-tag C-typed accessors (`fixpp_msg_field_int`, `fixpp_msg_field_decimal`, …), the runtime version tag's bit layout, and the opaque arena handle shape are owned by **2i**. 2c records the *contract* (§5) and the C++ surface 2i wraps; the C-typed shape itself is 2i's call.
 
@@ -274,6 +275,8 @@ Notes:
 
 Updated (098-dialect-overlay): the `FieldRef` listing's comments and the `condition_index` / `length_pair_data_tag` bullets. An overlay cannot declare a conditional rule: a QuickFIX-XML `required` attribute must be `Y`, `N` or absent (Orchestra `presence`: `required`, `optional` or absent), and any other value is refused with `dict::overlay_conflict_error`. An overlay can declare a Length+Data pair between fields it adds, and that pair reaches every parse that pairs through the session dictionary; a pair that touches a field number the base declares cannot be gained, lost or re-paired (`overlay_conflict_error`). Neither `dict_overlay_unsupported_rule` nor `dict_overlay_unsupported_length_pair` exists.
 
+Updated (102-dict-width-multichar-type): `FieldRef::component_index` is `std::uint32_t` and `FieldRef::_reserved` is gone; `sizeof(FieldRef)` stays 16 and `alignof(FieldRef)` is 4. The `_reserved` discipline above no longer applies to `FieldRef`, and the `FIXPP_DICT_FIELDREF_RESERVED_USED` slot it reserved is gone. Declared member order is unchanged (102 research D1; B-102-1; the installed `include/fixpp/dict/field_ref.hpp`). The listing and the `_reserved` bullet are history.
+
 #### 4.1.3 `dict::field_traits<T>` — typed decoding over `wire::field_view`
 
 The 2c-owned typed-decoding layer referenced from `[2b §1]` and `[2b W-009]`. `wire::MessageView<Index>` itself exposes only the two untyped accessors per `[2b §4.3]` (`template <std::uint16_t Tag> get() const noexcept -> expected_t<field_view>` and `get(std::uint16_t tag) const noexcept -> expected_t<field_view>`); the typed-by-`T` decoding is layered here, in `fixpp::dict`, plus — for the decimal case — the merged 2a parse entry point `decimal_t::parse(span, mr)` per `[2a §4.3]` (a thin shell over `decimal_traits<FIXPP_DECIMAL_T>::from_chars(span, mr)`, `[2a §4.2]`).
@@ -325,6 +328,8 @@ decode_field(expected_t<wire::field_view> fv) noexcept {
 
 }  // namespace fixpp::dict
 ```
+
+Updated (102-dict-width-multichar-type): the listing comment above names a MultiCharValue / MultiStringValue split. Since 102 research D3, every kind the code generator maps to the string kind (`kind_of` in `tools/codegen/fixpp-codegen/gen_util.hpp`, the kinds that return `TypeKind::String`) decodes through `field_traits<std::string_view>`, MultiCharValue and MultiStringValue among them, so there is no MultiCharValue / MultiStringValue split. The comment is history; the installed `field_traits.hpp` states the condition.
 
 `field_traits<T>::from_field_view` and `decode_field<T>` are `noexcept` and allocation-free; they sit on the typed-accessor hot path (§6.2 ≤ 20 ns ceiling for the string/int/char accessors). Both are referenced from §4.7 (typed-message accessor sketches) and §4.8 (`dict::reify` algorithm step 3); the formal home is here, in §4.1.3, so the references in those sections compile against a single declaration.
 
@@ -378,6 +383,8 @@ static_assert(std::is_trivially_copyable_v<GroupRef>);
 ```
 
 The `_reserved` `uint16_t` in each table mirrors the 2a discipline: zero on emit, ignore on read in v1.0; future minor version may use under the matching feature macro per C-P3-1. Applies uniformly to `FieldRef`, `ComponentRef`, `GroupRef`.
+
+Updated (102-dict-width-multichar-type): every `ComponentRef` member is `std::uint32_t` and `ComponentRef::_reserved` is gone (`sizeof` 20, `alignof` 4); `GroupRef::first_field_index` and `field_count` are `std::uint32_t` and `GroupRef::_reserved` stays as the explicit tail pad (`sizeof` 16, `alignof` 4). The `_reserved` discipline applies to `GroupRef` alone: it no longer applies to `FieldRef` or `ComponentRef`, and the `FIXPP_DICT_COMPONENTREF_RESERVED_USED` slot is gone. Declared member order is unchanged (102 research D1; B-102-1; the installed `component_ref.hpp` and `group_ref.hpp`). The listing and the paragraph above are history.
 
 ### 4.3 `fixpp::dict::Dictionary` — runtime owner + dialect-overlay binding
 
