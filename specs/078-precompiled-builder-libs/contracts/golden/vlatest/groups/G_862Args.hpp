@@ -12,7 +12,7 @@ namespace fixpp::vlatest::groups {
 
 struct G_862Args {
     ::std::optional<char> order_capacity{};
-    ::std::optional<char> order_restrictions{};
+    ::std::optional<::std::string_view> order_restrictions{};
     ::std::optional<::fixpp::decimal_t> order_capacity_qty{};
 };
 

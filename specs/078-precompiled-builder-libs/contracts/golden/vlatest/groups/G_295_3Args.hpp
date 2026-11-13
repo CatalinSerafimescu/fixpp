@@ -307,7 +307,7 @@ struct G_295_3Args {
     ::std::optional<::std::string_view> currency_code_source{};
     ::std::optional<::std::int64_t> booking_type{};
     ::std::optional<char> order_capacity{};
-    ::std::optional<char> order_restrictions{};
+    ::std::optional<::std::string_view> order_restrictions{};
 };
 
 }  // namespace fixpp::vlatest::groups

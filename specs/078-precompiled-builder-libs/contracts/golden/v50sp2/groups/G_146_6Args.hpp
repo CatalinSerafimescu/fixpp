@@ -39,7 +39,7 @@ namespace fixpp::v50sp2::groups {
 
 struct G_146_6Args {
     ::std::optional<char> list_update_action{};
-    ::std::optional<char> corporate_action{};
+    ::std::optional<::std::string_view> corporate_action{};
     ::std::optional<::std::string_view> symbol{};
     ::std::optional<::std::string_view> symbol_sfx{};
     ::std::optional<::std::string_view> security_id{};

@@ -6858,7 +6858,7 @@ namespace fixpp::vlatest {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item12.leg_exec_inst) {
-        auto r = eh12.set_char(1384, *item12.leg_exec_inst);
+        auto r = eh12.set_string(1384, *item12.leg_exec_inst);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item12.leg_last_qty) {

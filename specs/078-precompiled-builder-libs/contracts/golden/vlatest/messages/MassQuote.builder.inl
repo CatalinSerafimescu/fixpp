@@ -17625,7 +17625,7 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MassQuote(::std
         if (!r) return ::std::unexpected(r.error());
     }
     if (item108.order_restrictions) {
-        auto r = eh108.set_char(529, *item108.order_restrictions);
+        auto r = eh108.set_string(529, *item108.order_restrictions);
         if (!r) return ::std::unexpected(r.error());
     }
         }

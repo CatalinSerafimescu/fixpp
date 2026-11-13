@@ -18136,7 +18136,7 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_TradeMatchRepor
         if (!r) return ::std::unexpected(r.error());
     }
     if (item321.exec_inst) {
-        auto r = eh321.set_char(18, *item321.exec_inst);
+        auto r = eh321.set_string(18, *item321.exec_inst);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item321.ord_status) {
@@ -18267,7 +18267,7 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_TradeMatchRepor
         if (!r) return ::std::unexpected(r.error());
     }
     if (item321.order_restrictions) {
-        auto r = eh321.set_char(529, *item321.order_restrictions);
+        auto r = eh321.set_string(529, *item321.order_restrictions);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item321.booking_type) {

@@ -6190,7 +6190,7 @@ namespace fixpp::v50sp2 {
             if (!en119) return ::std::unexpected(en119.error());
             auto& eh119 = *en119;
     if (item119.exec_inst_value) {
-        auto r = eh119.set_char(1308, *item119.exec_inst_value);
+        auto r = eh119.set_string(1308, *item119.exec_inst_value);
         if (!r) return ::std::unexpected(r.error());
     }
         }

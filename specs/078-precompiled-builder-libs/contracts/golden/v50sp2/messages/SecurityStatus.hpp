@@ -74,8 +74,8 @@ struct SecurityStatusArgs {
     ::std::optional<::std::string_view> redemption_date{};
     ::std::optional<::std::string_view> credit_rating{};
     ::std::optional<::std::int64_t> market_depth{};
-    ::std::optional<char> financial_status{};
-    ::std::optional<char> corporate_action{};
+    ::std::optional<::std::string_view> financial_status{};
+    ::std::optional<::std::string_view> corporate_action{};
     ::std::optional<::std::string_view> security_status_req_id{};
     ::std::optional<bool> unsolicited_indicator{};
     ::std::optional<::std::int64_t> security_trading_status{};

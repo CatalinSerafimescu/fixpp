@@ -80,7 +80,7 @@ struct SecurityDefinitionArgs {
     ::std::optional<::std::string_view> repo_collateral_security_type{};
     ::std::optional<::std::string_view> redemption_date{};
     ::std::optional<::std::string_view> credit_rating{};
-    ::std::optional<char> corporate_action{};
+    ::std::optional<::std::string_view> corporate_action{};
     ::std::optional<::std::string_view> security_req_id{};
     ::std::optional<::std::string_view> security_response_id{};
     ::std::optional<::std::int64_t> security_response_type{};

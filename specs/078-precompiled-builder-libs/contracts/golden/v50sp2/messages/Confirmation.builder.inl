@@ -12638,7 +12638,7 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_Confirmation(::
         if (!r) return ::std::unexpected(r.error());
     }
     if (item232.order_restrictions) {
-        auto r = eh232.set_char(529, *item232.order_restrictions);
+        auto r = eh232.set_string(529, *item232.order_restrictions);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item232.order_capacity_qty) {

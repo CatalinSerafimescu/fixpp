@@ -99,7 +99,7 @@ struct CollateralReportArgs {
     ::std::optional<::std::string_view> repo_collateral_security_type{};
     ::std::optional<::std::string_view> redemption_date{};
     ::std::optional<::std::string_view> credit_rating{};
-    ::std::optional<char> financial_status{};
+    ::std::optional<::std::string_view> financial_status{};
     ::std::optional<::std::string_view> trading_session_id{};
     ::std::optional<::std::string_view> encoded_issuer{};
     ::std::optional<::std::string_view> encoded_security_desc{};

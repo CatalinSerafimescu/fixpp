@@ -134,7 +134,7 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_TradingSessionL
             if (!en3) return ::std::unexpected(en3.error());
             auto& eh3 = *en3;
     if (item3.exec_inst_value) {
-        auto r = eh3.set_char(1308, *item3.exec_inst_value);
+        auto r = eh3.set_string(1308, *item3.exec_inst_value);
         if (!r) return ::std::unexpected(r.error());
     }
         }

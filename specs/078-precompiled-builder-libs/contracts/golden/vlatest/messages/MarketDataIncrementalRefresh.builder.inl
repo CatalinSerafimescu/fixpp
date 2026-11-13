@@ -17826,11 +17826,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         if (!ge329) return ::std::unexpected(ge329.error());
     }
     if (item1.financial_status) {
-        auto r = eh1.set_char(291, *item1.financial_status);
+        auto r = eh1.set_string(291, *item1.financial_status);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.corporate_action) {
-        auto r = eh1.set_char(292, *item1.corporate_action);
+        auto r = eh1.set_string(292, *item1.corporate_action);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.md_entry_px) {
@@ -18223,7 +18223,7 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.open_close_settl_flag) {
-        auto r = eh1.set_char(286, *item1.open_close_settl_flag);
+        auto r = eh1.set_string(286, *item1.open_close_settl_flag);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.time_in_force) {
@@ -18251,7 +18251,7 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.exec_inst) {
-        auto r = eh1.set_char(18, *item1.exec_inst);
+        auto r = eh1.set_string(18, *item1.exec_inst);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.seller_days) {
@@ -18342,7 +18342,7 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.scope) {
-        auto r = eh1.set_char(546, *item1.scope);
+        auto r = eh1.set_string(546, *item1.scope);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.price_delta) {

@@ -77,12 +77,14 @@ struct field_traits<bool> {
         wire::field_view const& fv) noexcept;
 };
 
-// The remaining field-view-decodable types ([2c §4.1.3:269-271]) — the
-// timestamp / UTCTimestamp / date types and the MultiCharValue /
-// MultiStringValue split — follow the SAME single-static `from_field_view`
-// shape above; their specialisations are declared alongside their wire/codegen
-// value types when those land (the oracle elides them deliberately; the shape
-// is invariant). `decimal_t` is excluded by design (AC-FT2).
+// The remaining field-view-decodable types ([2c §4.1.3], its `field_traits.hpp`
+// listing) — the timestamp / UTCTimestamp / date types — follow the SAME
+// single-static `from_field_view` shape above; their specialisations are
+// declared alongside their wire/codegen value types when those land (the oracle
+// elides them deliberately; the shape is invariant). 102-dict-width-multichar-type
+// D3: a MultiCharValue field decodes through `field_traits<std::string_view>`, the
+// specialisation String and MultiStringValue fields use; `field_traits<char>`
+// decodes Char fields. `decimal_t` is excluded by design (AC-FT2).
 
 // get-then-check-then-decode helper every [2c §4.7] typed accessor and the
 // [2c §4.8] dict::reify algorithm inline. Defined for every T with a

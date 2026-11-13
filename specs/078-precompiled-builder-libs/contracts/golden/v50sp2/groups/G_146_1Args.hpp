@@ -284,7 +284,7 @@ struct G_146_1Args {
     ::std::optional<::fixpp::decimal_t> secondary_trading_reference_price{};
     ::std::optional<::std::string_view> currency{};
     ::std::optional<::std::string_view> currency_code_source{};
-    ::std::optional<char> corporate_action{};
+    ::std::optional<::std::string_view> corporate_action{};
     ::std::optional<::std::int64_t> delivery_form{};
     ::std::optional<::fixpp::decimal_t> pct_at_risk{};
     ::std::optional<::std::span<const G_870Args>> instr_attrib{};

@@ -25,10 +25,10 @@ struct MarketDataRequestArgs {
     ::std::optional<::std::int64_t> md_update_type{};
     ::std::optional<bool> aggregated_book{};
     ::std::optional<::std::span<const groups::G_267Args>> md_entry_types{};
-    ::std::optional<char> open_close_settl_flag{};
+    ::std::optional<::std::string_view> open_close_settl_flag{};
     ::std::optional<::std::span<const groups::G_386_1Args>> trading_sessions{};
     ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
-    ::std::optional<char> scope{};
+    ::std::optional<::std::string_view> scope{};
     ::std::optional<bool> md_implicit_delete{};
     ::std::optional<::std::int64_t> appl_queue_max{};
     ::std::optional<::std::int64_t> appl_queue_action{};

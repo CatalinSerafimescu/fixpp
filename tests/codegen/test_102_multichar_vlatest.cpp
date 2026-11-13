@@ -125,7 +125,8 @@ TEST(MultiChar102Vlatest, GroupEntryLegExecInstReadsVerbatim) {
     fixpp::vlatest::NewOrderMultileg const msg{view};
     auto const legs = msg.legs();
     ASSERT_EQ(legs.size(), 1U) << "the NoLegs(555) instance did not resolve";
-    auto const r = legs[0].leg_exec_inst();
+    auto const leg = legs[0];  // the accessor's view is bound to a named entry
+    auto const r = leg.leg_exec_inst();
     ASSERT_TRUE(r.has_value()) << "leg_exec_inst() refused the multi-valued 1384=1 2";
     EXPECT_EQ(as_text(*r), "1 2");
     EXPECT_TRUE((std::is_same_v<value_of<decltype(r)>, std::string_view>));

@@ -166,7 +166,7 @@ TEST_F(AllVersionsRoundtrip077V50SP2, ExecutionReport) {
     args.cl_ord_id = "ExecutionReport_cl_ord_id";
     args.commission = make_decimal("10.5", &arena);
     args.comm_type = '1';
-    args.exec_inst = '1';
+    args.exec_inst = "1";
     auto built = fixpp::v50sp2::build_ExecutionReport(out, args);
     ASSERT_TRUE(built.has_value()) << "build_ExecutionReport failed";
     std::string const body = bytes_to_string(*built);
@@ -237,7 +237,7 @@ TEST_F(AllVersionsRoundtrip077V50SP2, NewOrderMultileg) {
     args.cl_ord_id = "NewOrderMultileg_cl_ord_id";
     args.commission = make_decimal("10.5", &arena);
     args.comm_type = '1';
-    args.exec_inst = '1';
+    args.exec_inst = "1";
     args.order_qty = make_decimal("10.5", &arena);
     auto built = fixpp::v50sp2::build_NewOrderMultileg(out, args);
     ASSERT_TRUE(built.has_value()) << "build_NewOrderMultileg failed";
@@ -261,7 +261,7 @@ TEST_F(AllVersionsRoundtrip077V50SP2, MultilegOrderCancelReplace) {
     args.cl_ord_id = "MultilegOrderCancelReplace_cl_ord_id";
     args.commission = make_decimal("10.5", &arena);
     args.comm_type = '1';
-    args.exec_inst = '1';
+    args.exec_inst = "1";
     args.order_qty = make_decimal("10.5", &arena);
     auto built = fixpp::v50sp2::build_MultilegOrderCancelReplace(out, args);
     ASSERT_TRUE(built.has_value()) << "build_MultilegOrderCancelReplace failed";
@@ -1055,7 +1055,7 @@ TEST_F(AllVersionsRoundtrip077V50SP2, TradingSessionList) {
 TEST_F(AllVersionsRoundtrip077V50SP2, SecurityListUpdateReport) {
     fixpp::v50sp2::SecurityListUpdateReportArgs args{};
     args.transact_time = "SecurityListUpdateReport_transact_time";
-    args.corporate_action = '1';
+    args.corporate_action = "1";
     args.security_req_id = "SecurityListUpdateReport_security_req_id";
     args.tot_no_related_sym = 393;
     args.security_request_result = 560;
@@ -1964,7 +1964,7 @@ TEST_F(AllVersionsRoundtrip077V50SP2, NewOrderSingle) {
     args.cl_ord_id = "NewOrderSingle_cl_ord_id";
     args.commission = make_decimal("10.5", &arena);
     args.comm_type = '1';
-    args.exec_inst = '1';
+    args.exec_inst = "1";
     args.order_qty = make_decimal("10.5", &arena);
     auto built = fixpp::v50sp2::build_NewOrderSingle(out, args);
     ASSERT_TRUE(built.has_value()) << "build_NewOrderSingle failed";
@@ -2183,7 +2183,7 @@ TEST_F(AllVersionsRoundtrip077V50SP2, MassOrder) {
     args.account = "MassOrder_account";
     args.text = "MassOrder_text";
     args.order_capacity = '1';
-    args.order_restrictions = '1';
+    args.order_restrictions = "1";
     args.account_type = 581;
     args.cust_order_capacity = 582;
     auto built = fixpp::v50sp2::build_MassOrder(out, args);
@@ -2206,7 +2206,7 @@ TEST_F(AllVersionsRoundtrip077V50SP2, MassOrderAck) {
     args.account = "MassOrderAck_account";
     args.text = "MassOrderAck_text";
     args.order_capacity = '1';
-    args.order_restrictions = '1';
+    args.order_restrictions = "1";
     args.account_type = 581;
     args.cust_order_capacity = 582;
     auto built = fixpp::v50sp2::build_MassOrderAck(out, args);
@@ -2650,7 +2650,7 @@ TEST_F(AllVersionsRoundtrip077V50SP2, OrderCancelReplaceRequest) {
     args.cl_ord_id = "OrderCancelReplaceRequest_cl_ord_id";
     args.commission = make_decimal("10.5", &arena);
     args.comm_type = '1';
-    args.exec_inst = '1';
+    args.exec_inst = "1";
     args.order_qty = make_decimal("10.5", &arena);
     auto built = fixpp::v50sp2::build_OrderCancelReplaceRequest(out, args);
     ASSERT_TRUE(built.has_value()) << "build_OrderCancelReplaceRequest failed";
@@ -2836,7 +2836,7 @@ TEST_F(AllVersionsRoundtrip077V50SP2, QuoteRequest) {
     args.cl_ord_id = "QuoteRequest_cl_ord_id";
     args.text = "QuoteRequest_text";
     args.order_capacity = '1';
-    args.order_restrictions = '1';
+    args.order_restrictions = "1";
     args.booking_type = 775;
     args.pre_trade_anonymity = true;
     auto built = fixpp::v50sp2::build_QuoteRequest(out, args);
@@ -2904,7 +2904,7 @@ TEST_F(AllVersionsRoundtrip077V50SP2, MarketDataRequest) {
     args.market_depth = 264;
     args.md_update_type = 265;
     args.aggregated_book = true;
-    args.open_close_settl_flag = '1';
+    args.open_close_settl_flag = "1";
     auto built = fixpp::v50sp2::build_MarketDataRequest(out, args);
     ASSERT_TRUE(built.has_value()) << "build_MarketDataRequest failed";
     std::string const body = bytes_to_string(*built);
@@ -3387,7 +3387,7 @@ TEST_F(AllVersionsRoundtrip077V50SP2, NewOrderCross) {
     std::pmr::monotonic_buffer_resource arena{4096};
     fixpp::v50sp2::NewOrderCrossArgs args{};
     args.currency = "NewOrderCross_currency";
-    args.exec_inst = '1';
+    args.exec_inst = "1";
     args.handl_inst = '1';
     args.security_id_source = "NewOrderCross_security_id_source";
     args.price = make_decimal("10.5", &arena);
@@ -3411,7 +3411,7 @@ TEST_F(AllVersionsRoundtrip077V50SP2, CrossOrderCancelReplaceRequest) {
     std::pmr::monotonic_buffer_resource arena{4096};
     fixpp::v50sp2::CrossOrderCancelReplaceRequestArgs args{};
     args.currency = "CrossOrderCancelReplaceRequest_currency";
-    args.exec_inst = '1';
+    args.exec_inst = "1";
     args.handl_inst = '1';
     args.security_id_source = "CrossOrderCancelReplaceRequest_security_id_source";
     args.price = make_decimal("10.5", &arena);
@@ -3736,7 +3736,8 @@ TEST_F(AllVersionsRoundtrip077V50SP2, MultiChar102LegExecInstTwoValuesRoundTrips
     fixpp::v50sp2::NewOrderMultileg const read_msg{mv};
     auto const read_legs = read_msg.legs();
     ASSERT_EQ(read_legs.size(), 1U) << "the NoLegs(555) instance did not resolve";
-    auto const r = read_legs[0].leg_exec_inst();
+    auto const read_leg = read_legs[0];  // the accessor's view is bound to a named entry
+    auto const r = read_leg.leg_exec_inst();
     ASSERT_TRUE(r.has_value()) << "the typed reader refused 1384=1 2";
     EXPECT_EQ(as_text_102(*r), "1 2");
 }

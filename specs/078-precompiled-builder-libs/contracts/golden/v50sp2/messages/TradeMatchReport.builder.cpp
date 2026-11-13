@@ -18135,7 +18135,7 @@ namespace fixpp::v50sp2 {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item321.exec_inst) {
-        auto r = eh321.set_char(18, *item321.exec_inst);
+        auto r = eh321.set_string(18, *item321.exec_inst);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item321.ord_status) {
@@ -18266,7 +18266,7 @@ namespace fixpp::v50sp2 {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item321.order_restrictions) {
-        auto r = eh321.set_char(529, *item321.order_restrictions);
+        auto r = eh321.set_string(529, *item321.order_restrictions);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item321.booking_type) {

@@ -74,8 +74,8 @@ struct MarketDataSnapshotFullRefreshArgs {
     ::std::optional<::std::string_view> md_req_id{};
     ::std::optional<::std::int64_t> market_depth{};
     ::std::optional<::std::span<const groups::G_268_1Args>> md_entries{};
-    ::std::optional<char> financial_status{};
-    ::std::optional<char> corporate_action{};
+    ::std::optional<::std::string_view> financial_status{};
+    ::std::optional<::std::string_view> corporate_action{};
     ::std::optional<::std::string_view> encoded_issuer{};
     ::std::optional<::std::string_view> encoded_security_desc{};
     ::std::optional<::fixpp::decimal_t> net_chg_prev_day{};

@@ -121,7 +121,7 @@ struct G_552_2Args {
     ::std::optional<char> ord_type{};
     ::std::optional<::fixpp::decimal_t> price{};
     ::std::optional<::fixpp::decimal_t> stop_px{};
-    ::std::optional<char> exec_inst{};
+    ::std::optional<::std::string_view> exec_inst{};
     ::std::optional<char> ord_status{};
     ::std::optional<::fixpp::decimal_t> order_qty{};
     ::std::optional<::fixpp::decimal_t> cash_order_qty{};
@@ -148,7 +148,7 @@ struct G_552_2Args {
     ::std::optional<::fixpp::decimal_t> display_min_incr{};
     ::std::optional<::fixpp::decimal_t> refresh_qty{};
     ::std::optional<char> order_capacity{};
-    ::std::optional<char> order_restrictions{};
+    ::std::optional<::std::string_view> order_restrictions{};
     ::std::optional<::std::int64_t> booking_type{};
     ::std::optional<::std::int64_t> orig_cust_order_capacity{};
     ::std::optional<::std::int64_t> order_origination{};

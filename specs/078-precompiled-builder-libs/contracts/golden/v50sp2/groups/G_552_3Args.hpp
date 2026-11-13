@@ -50,7 +50,7 @@ struct G_552_3Args {
     ::std::optional<char> fund_renew_waiv{};
     ::std::optional<::std::span<const G_2639Args>> commissions{};
     ::std::optional<char> order_capacity{};
-    ::std::optional<char> order_restrictions{};
+    ::std::optional<::std::string_view> order_restrictions{};
     ::std::optional<::std::int64_t> order_origination{};
     ::std::optional<::std::string_view> originating_dept_id{};
     ::std::optional<::std::string_view> receiving_dept_id{};

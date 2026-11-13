@@ -85,6 +85,17 @@
 # banner's Fields.hpp recipe (091's v50sp2) onto a file regenerated after 102,
 # first restore each row's trailing `, 0` (rewrite ` },` back to `, 0 },`).
 #
+# 102-dict-width-multichar-type (research D3, D5) also rebaselines v50sp2/Messages.hpp
+# and v50sp2/Reify.hpp: a MultiCharValue field (the FIX50SP2 fields typed
+# MULTIPLECHARVALUE) takes the string kind, so its view and owning accessors return
+# `expected_t<::std::string_view>` and are `[[clang::lifetimebound]]`. Re-derive that this
+# is the only change: generate the read tier with the codegen of the commit before 102's
+# kind change and with this one, and diff the two files with `--unified=0`: every
+# changed line must be an accessor's return type, its name line gaining
+# `[[clang::lifetimebound]]`, or its `decode_field<char>` becoming
+# `decode_field<::std::string_view>` over one of those fields' tags. The Messages.hpp
+# value equals the sha256 of the regenerated 003 golden (the 100 banner's condition).
+#
 # Which baseline each artifact is gated against is named by the banners above
 # and the 082 banner below; see the 091 banner for the v50sp2 pins. A mismatch
 # on any artifact, against its own baseline, is a real read-tier regression
@@ -163,8 +174,8 @@ set(_expected_v44_Messages.hpp   f47f36cccb6232a1577547699de7052c3c1b3465be8ae5c
 set(_expected_v44_Reify.hpp      98eb06542f2dbfb8e424b502a6d077959a34f61e49be4b03f411e73e75825196)
 set(_expected_v44_Validator.hpp  ad49a4ec2d2441e6d15181b48fa42ab30d9a2226d41476bfdd9007f5d942e9c0)
 set(_expected_v50sp2_Fields.hpp    9a80508fdbdc422ee6c8d1dd4ef732c7f185608bc599f984909846b0ef254105)  # 102 (banner)
-set(_expected_v50sp2_Messages.hpp  954ae63e397745d5a58a537ef17485a6bc5317ff930c337ff3c0520f8646fe72)  # 100 (banner)
-set(_expected_v50sp2_Reify.hpp     c73e5253cfe5617565df979eeb71d8b5bd5e62a9b2e379b4f8a7f2a350f6cd36)
+set(_expected_v50sp2_Messages.hpp  267506023314b43359097a9c4e59f020533e6a8d001edfd06f259fffb68ea92c)  # 100 (banner); 102 (banner)
+set(_expected_v50sp2_Reify.hpp     da8b4145e13d4ed0c72d6f50b06789f0e75e7a891a6d17ae23d77d9b3e8379f5)  # 102 (banner)
 set(_expected_v50sp2_Validator.hpp c68b15b6c075c271144f7a5b725237bac211880e88a91575708eb99ae90c0c9f)  # 091 (banner)
 set(_expected_vt11_Fields.hpp    84ae8fb7ea37882d53440b33bae27a07479606094128fc6e391c16903dedc20b)  # 102 (banner)
 set(_expected_vt11_Messages.hpp  3b1845e06e62eedd6cb75b57c785ae6f7ac6851c4777206939b2f9430d87e2c3)  # 099 (banner)

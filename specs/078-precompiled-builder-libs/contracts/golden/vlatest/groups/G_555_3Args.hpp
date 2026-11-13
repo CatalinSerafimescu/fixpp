@@ -303,7 +303,7 @@ struct G_555_3Args {
     ::std::optional<::fixpp::decimal_t> leg_volatility{};
     ::std::optional<::fixpp::decimal_t> leg_dividend_yield{};
     ::std::optional<::fixpp::decimal_t> leg_currency_ratio{};
-    ::std::optional<char> leg_exec_inst{};
+    ::std::optional<::std::string_view> leg_exec_inst{};
     ::std::optional<::fixpp::decimal_t> leg_last_qty{};
     ::std::optional<::std::string_view> fill_ref_id{};
     ::std::optional<::std::span<const G_3116Args>> leg_rate_sources{};

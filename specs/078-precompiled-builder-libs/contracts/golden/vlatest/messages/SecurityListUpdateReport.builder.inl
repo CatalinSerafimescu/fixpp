@@ -6188,7 +6188,7 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityListUpd
             if (!en118) return ::std::unexpected(en118.error());
             auto& eh118 = *en118;
     if (item118.exec_inst_value) {
-        auto r = eh118.set_char(1308, *item118.exec_inst_value);
+        auto r = eh118.set_string(1308, *item118.exec_inst_value);
         if (!r) return ::std::unexpected(r.error());
     }
         }

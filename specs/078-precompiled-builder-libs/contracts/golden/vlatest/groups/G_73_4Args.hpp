@@ -63,7 +63,7 @@ struct G_73_4Args {
     ::std::optional<char> cash_margin{};
     ::std::optional<::std::string_view> clearing_fee_indicator{};
     ::std::optional<char> handl_inst{};
-    ::std::optional<char> exec_inst{};
+    ::std::optional<::std::string_view> exec_inst{};
     ::std::optional<::fixpp::decimal_t> min_qty{};
     ::std::optional<::fixpp::decimal_t> match_increment{};
     ::std::optional<::std::int64_t> max_price_levels{};
@@ -401,7 +401,7 @@ struct G_73_4Args {
     ::std::optional<char> fund_renew_waiv{};
     ::std::optional<::std::span<const G_2639Args>> commissions{};
     ::std::optional<char> order_capacity{};
-    ::std::optional<char> order_restrictions{};
+    ::std::optional<::std::string_view> order_restrictions{};
     ::std::optional<bool> pre_trade_anonymity{};
     ::std::optional<::std::int64_t> cust_order_capacity{};
     ::std::optional<::std::span<const G_2593Args>> order_attributes{};

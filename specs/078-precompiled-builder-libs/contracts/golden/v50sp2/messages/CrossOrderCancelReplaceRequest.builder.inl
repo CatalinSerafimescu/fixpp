@@ -683,7 +683,7 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_CrossOrderCance
         if (!r) return ::std::unexpected(r.error());
     }
     if (item6.leg_exec_inst) {
-        auto r = eh6.set_char(1384, *item6.leg_exec_inst);
+        auto r = eh6.set_string(1384, *item6.leg_exec_inst);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item6.leg_short_sale_exemption_reason) {
@@ -968,7 +968,7 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_CrossOrderCance
         if (!r) return ::std::unexpected(r.error());
     }
     if (item3.order_restrictions) {
-        auto r = eh3.set_char(529, *item3.order_restrictions);
+        auto r = eh3.set_string(529, *item3.order_restrictions);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item3.order_origination) {

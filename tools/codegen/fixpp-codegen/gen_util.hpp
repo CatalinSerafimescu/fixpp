@@ -152,7 +152,6 @@ inline TypeKind kind_of(fixpp::dict::field_data_type t) noexcept {
         case D::Float:
             return TypeKind::Decimal;
         case D::Char:
-        case D::MultiCharValue:
             return TypeKind::Char;
         case D::Boolean:
             return TypeKind::Bool;
@@ -163,6 +162,10 @@ inline TypeKind kind_of(fixpp::dict::field_data_type t) noexcept {
         case D::DayOfMonth:
             return TypeKind::Int32;
         case D::String:
+        // 102-dict-width-multichar-type D3: a MultiCharValue holds one or more
+        // space-separated characters, so it takes the string kind, as MultiStringValue
+        // does (QuickFIX types MultipleCharValue as a string).
+        case D::MultiCharValue:
         case D::MultiStringValue:
         case D::Currency:
         case D::Exchange:

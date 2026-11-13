@@ -6458,7 +6458,7 @@ namespace fixpp::v50sp2 {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item7.leg_exec_inst) {
-        auto r = eh7.set_char(1384, *item7.leg_exec_inst);
+        auto r = eh7.set_string(1384, *item7.leg_exec_inst);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item7.leg_short_sale_exemption_reason) {

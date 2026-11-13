@@ -69,10 +69,16 @@ namespace fs = std::filesystem;
 
 static constexpr const char* kBin = FIXPP_CODEGEN_BIN;
 static constexpr const char* kDictDir = FIXPP_DICT_DATA_DIR;
+// 102-dict-width-multichar-type (research D3, D5): v50sp2_Messages.golden.hpp is
+// regenerated because a MultiCharValue field takes the string kind; recipe: the
+// `GeneratedMatchesGolden` failure message's `fixpp-codegen … && cp` line.
 static constexpr const char* kGoldenDir = FIXPP_CODEGEN_GOLDEN_DIR;
 // 076-fix-latest-typed-codegen T017/T018: the vlatest golden lives in a
 // separate feature golden dir (specs/076-.../contracts/golden/), not
 // specs/003's — see cmake target_compile_definitions below.
+// 102-dict-width-multichar-type (research D3, D5): regenerated because a
+// MultiCharValue field takes the string kind; recipe: the
+// `VlatestGeneratedMatchesGolden` failure message's `fixpp-codegen … && cp` line.
 static constexpr const char* kVlatestGoldenDir = FIXPP_CODEGEN_076_GOLDEN_DIR;
 static constexpr const char* kVlatestGoldenFile = "vlatest_Messages.golden.hpp";
 // 078-precompiled-builder-libs T007/T008 (R6/FR-010): the per-version builder-
@@ -82,6 +88,11 @@ static constexpr const char* kVlatestGoldenFile = "vlatest_Messages.golden.hpp";
 // (Gate-A round-2 decision: the official 33 are a byte-identical subset of
 // the default-mode 83, already pinned here — `official` mode instead gets a
 // lighter STRUCTURAL witness, OfficialModeBuildersStructuralShape below).
+// 102-dict-width-multichar-type (research D3, D5): the v50sp2 and vlatest sets are
+// regenerated because a MultiCharValue field's `Args` member and group-entry setter
+// take the string kind; recipe: run `fixpp-codegen` as `run_codegen` (v50sp2) and
+// `run_codegen_vlatest_only` (vlatest) do, then replace `<ns>/` with the output's
+// `collect_builder_tier_set` files.
 static constexpr const char* kBuilderGoldenDir = FIXPP_CODEGEN_078_GOLDEN_DIR;
 
 // XMLs in the exact order the tool accepts them (matches Codegen.cmake)
