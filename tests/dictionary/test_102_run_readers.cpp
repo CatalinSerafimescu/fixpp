@@ -24,7 +24,8 @@
 // D7's two recipes and tasks `## Census manifest`'s D7 sum supplement over `src/dictionary`.
 // `for_each_group_ctx_record` has no cell of its own: it reads through
 // `msg_group_ctx_delim_run`, the guard `msg_group_ctx_delims_impl`'s cell witnesses, and under
-// a wrapped guard it would read past its pool. `run_at` already sums in `std::size_t`; its cell is a control.
+// a wrapped guard it would read past its pool. `run_at` already sums in `std::size_t`; its cell
+// is a control.
 
 #include <gtest/gtest.h>
 
@@ -159,7 +160,7 @@ TEST(RunReaders102, FieldRefOverrunIsTheNotFoundValue) {
             h.fields_.resize(kTableSize, FieldRef{});
             h.per_msg_field_offsets_.push_back(MsgFieldsRun{.start = kStart, .count = kCount});
             FieldRef const fr = h.field_ref_impl(kMsgType, 1);
-            std::exit(fr.tag == 0 && fr.group_no_tag == 0 && fr.component_index == 0 ? 0 : 1);
+            std::_Exit(fr.tag == 0 && fr.group_no_tag == 0 && fr.component_index == 0 ? 0 : 1);
         },
         ::testing::ExitedWithCode(0), "");
 }
@@ -178,7 +179,7 @@ TEST(RunReaders102, IncompleteGroupContextOverrunReadsTheRunAsEmpty) {
             std::uint16_t const groups[] = {100};
             auto const offender =
                 fixpp::dict::detail::find_incomplete_group_context(h, std::span{groups});
-            std::exit(offender.has_value() ? 1 : 0);
+            std::_Exit(offender.has_value() ? 1 : 0);
         },
         ::testing::ExitedWithCode(0), "");
 }

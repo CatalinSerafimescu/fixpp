@@ -147,6 +147,15 @@ void push_run(std::pmr::vector<MsgFieldsRun>& runs, std::pmr::vector<T>& pool, I
 // 100: the run at `index` of `runs`, read from `pool`; empty when `index` has no run or
 // the run reaches past the pool's end (the guard the per-message run readers in
 // dictionary.cpp apply).
+// 102-dict-width-multichar-type D7 (spec FR-008): a run of `count` entries from
+// `start` lies inside a table of `size` entries. The test subtracts instead of adding, so a start
+// and a count whose 32-bit sum wraps cannot pass it. Every run reader tests a record
+// with this (or sums in `std::size_t`, as `run_at` below) before it builds a range.
+[[nodiscard]] constexpr bool run_fits(std::uint32_t start, std::uint32_t count,
+                                      std::size_t size) noexcept {
+    return start <= size && count <= size - start;
+}
+
 template <class T>
 [[nodiscard]] std::span<T const> run_at(std::pmr::vector<MsgFieldsRun> const& runs,
                                         std::pmr::vector<T> const& pool,
@@ -988,10 +997,17 @@ private:
 find_incomplete_group_context(dict_metadata_handle const& h,
                               std::span<std::uint16_t const> structural_group_tags) {
     for (std::size_t i = 0; i < h.per_msg_field_offsets_.size(); ++i) {
-        auto const frun = h.per_msg_field_offsets_[i];
-        auto const drun = (i < h.per_msg_group_ctx_delim_offsets_.size())
-                              ? h.per_msg_group_ctx_delim_offsets_[i]
-                              : MsgFieldsRun{};
+        auto frun = h.per_msg_field_offsets_[i];
+        auto drun = (i < h.per_msg_group_ctx_delim_offsets_.size())
+                        ? h.per_msg_group_ctx_delim_offsets_[i]
+                        : MsgFieldsRun{};
+        // 102 D7 (FR-008): a run that overruns its table is read as empty.
+        if (!run_fits(frun.start, frun.count, h.fields_.size())) {
+            frun = MsgFieldsRun{};
+        }
+        if (!run_fits(drun.start, drun.count, h.group_ctx_delim_pool_.size())) {
+            drun = MsgFieldsRun{};
+        }
         auto const offender = find_context_without_delim_record(
             std::span<FieldRef const>{h.fields_.data() + frun.start, frun.count},
             std::span<GroupCtxDelim const>{h.group_ctx_delim_pool_.data() + drun.start, drun.count},
