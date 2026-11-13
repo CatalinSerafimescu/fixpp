@@ -26,8 +26,10 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/version_profile.hpp>
@@ -35,6 +37,7 @@
 #include <fstream>
 #include <ios>
 #include <memory_resource>
+#include <optional>
 #include <pugixml.hpp>
 #include <string>
 #include <string_view>
@@ -42,6 +45,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "../support/dict_width_fixtures_102.hpp"
 #include "emit.hpp"
 #include "ir.hpp"
 
@@ -800,4 +804,106 @@ TEST(VersionIr097, FixLatestHasOwnApplicationVersion) {
     EXPECT_EQ(ir.session, fixpp::dict::session_version::vlatest);
     EXPECT_EQ(ir.application, fixpp::dict::application_version::vlatest);
     EXPECT_EQ(ir.ns, "vlatest");
+}
+
+// 102-dict-width-multichar-type (tasks T016; research D1b, D4 row (c) and the IR row; spec US1.5,
+// FR-001b): `build_ir` over tests/support/dict_width_fixtures_102.hpp's Orchestra header
+// fixture (generator (c)), written to a file because `build_ir` reads a path. The code
+// generator's own Orchestra walkers (`build_orchestra_component_index`,
+// `build_orchestra_group_index`, `collect_orchestra_tags`, `collect_orchestra_group_tags`,
+// `walk_orchestra_level`) key component and group ids in `by_id` maps; the fixture declares,
+// for each map, an id past 65535 and its alias, with distinct members.
+namespace {
+
+struct ir_102 {
+    std::optional<VersionIR> ir;
+    std::string error;
+};
+
+ir_102 const& header_fixture_ir_102() {
+    static ir_102 const out = [] {
+        ir_102 r;
+        auto const path =
+            std::filesystem::temp_directory_path() /
+            ("fixpp_codegen_102_header_fixture_" +
+             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".xml");
+        {
+            std::ofstream file(path, std::ios::binary | std::ios::trunc);
+            file << fixpp::test102::width::orch_header_fixture_text().text;
+        }
+        try {
+            std::pmr::monotonic_buffer_resource arena;
+            r.ir.emplace(fixpp::codegen::build_ir(path, &arena));
+        } catch (std::exception const& e) {
+            r.error = e.what();
+        }
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+        return r;
+    }();
+    return out;
+}
+
+bool contains_102(std::vector<std::uint16_t> const& v, std::uint16_t t) {
+    return std::ranges::find(v, t) != v.end();
+}
+
+std::vector<std::uint16_t> member_tags_102(GroupOrderEntry const& e) {
+    std::vector<std::uint16_t> out;
+    for (auto const& m : e.members) {
+        out.push_back(m.tag);
+    }
+    return out;
+}
+
+}  // namespace
+
+// The IR row: message E reaches IrHigh (id past 65535) and IrAlias through componentRefs, and
+// each one's group (JgHigh, id past 65535, and JgAlias). The message gets each component's
+// members and each group's order.
+TEST(OrchestraIds102, IrMessageGetsTheHighIdComponentsMembersAndGroupsOrder) {
+    auto const& f = fixpp::test102::width::orch_header_fixture_text();
+    ASSERT_EQ(f.precondition_failure(), "");
+    auto const& r = header_fixture_ir_102();
+    ASSERT_TRUE(r.ir.has_value()) << "build_ir refused the fixture: " << r.error;
+    MessageIR const& e = find_message(*r.ir, f.ir_msg_type);
+    std::vector<std::uint16_t> top;
+    for (auto const& o : e.occurrences) {
+        if (o.group_path.empty()) {
+            top.push_back(o.tag);
+        }
+    }
+    for (std::uint16_t const t : {f.ir_t_high, f.ir_n_high, f.ir_t_alias, f.ir_n_alias}) {
+        EXPECT_TRUE(contains_102(top, t)) << "message E lacks top-level occurrence " << t;
+    }
+    GroupOrderEntry const* high = nullptr;
+    GroupOrderEntry const* alias = nullptr;
+    for (auto const& g : e.group_order) {
+        if (g.parent_path.empty() && g.no_tag == f.ir_n_high) {
+            high = &g;
+        }
+        if (g.parent_path.empty() && g.no_tag == f.ir_n_alias) {
+            alias = &g;
+        }
+    }
+    ASSERT_NE(high, nullptr) << "no group_order entry for the group past 65535";
+    ASSERT_NE(alias, nullptr) << "no group_order entry for its alias";
+    EXPECT_EQ(member_tags_102(*high), (std::vector<std::uint16_t>{f.ir_m_high, f.ir_m_high2}));
+    EXPECT_EQ(member_tags_102(*alias), (std::vector<std::uint16_t>{f.ir_m_alias}));
+}
+
+// Row (c): the header classification. The header component (id 1024, named StandardHeader) is
+// reached by no message structure, so its groups' NumInGroup tags reach `ir.group_tags` only
+// through `collect_orchestra_group_tags`.
+TEST(OrchestraIds102, RowCHeaderClassificationReachesBothMembersOfEachAliasPair) {
+    auto const& f = fixpp::test102::width::orch_header_fixture_text();
+    ASSERT_EQ(f.precondition_failure(), "");
+    auto const& r = header_fixture_ir_102();
+    ASSERT_TRUE(r.ir.has_value()) << "build_ir refused the fixture: " << r.error;
+    for (std::uint16_t const t : {f.t, f.n, f.m, f.t2, f.n2, f.m2}) {
+        EXPECT_TRUE(contains_102(r.ir->header_trailer_tags, t))
+            << "header_trailer_tags lacks " << t;
+    }
+    EXPECT_TRUE(contains_102(r.ir->group_tags, f.n)) << "group_tags lacks " << f.n;
+    EXPECT_TRUE(contains_102(r.ir->group_tags, f.n2)) << "group_tags lacks " << f.n2;
 }
