@@ -49,8 +49,7 @@
 //      - TYPE. A tag that heads a group in `Fields.hpp` has a group accessor;
 //        any other has the kind `mapped_kind` gives for its `Fields.hpp` data
 //        type. That table restates the codegen's DESIGN mapping, not each
-//        field's correct type: it carries the MultiCharValue -> char entry
-//        that fixpp#621 reports as wrong, so a wrong mapping passes here.
+//        field's correct type.
 //      The field names come from the dictionary loaders, which the codegen
 //      also uses, so a loader name defect common to both would pass here;
 //      DictionaryCensus.*AllMessagesAndFieldsLoaded in
@@ -239,8 +238,7 @@ constexpr std::string_view kMsgView =
 // The codegen's DESIGN mapping from a field's data type to the accessor
 // kind (gen_util.hpp's kind_of, [2c §4.7]), restated here rather than
 // included so an edit to kind_of is caught. It is the design, not each
-// field's correct type: MultiCharValue -> char is the entry fixpp#621
-// reports as wrong. A switch with no default, so a new data type fails the
+// field's correct type. A switch with no default, so a new data type fails the
 // build (-Wswitch) until it is classified here.
 vkind mapped_kind(std::uint32_t raw) {
     using D = fixpp::dict::field_data_type;
@@ -254,7 +252,6 @@ vkind mapped_kind(std::uint32_t raw) {
         case D::Float:
             return vkind::decimal;
         case D::Char:
-        case D::MultiCharValue:
             return vkind::char_;
         case D::Boolean:
             return vkind::bool_;
@@ -265,6 +262,7 @@ vkind mapped_kind(std::uint32_t raw) {
         case D::DayOfMonth:
             return vkind::int32;
         case D::String:
+        case D::MultiCharValue:
         case D::MultiStringValue:
         case D::Currency:
         case D::Exchange:
