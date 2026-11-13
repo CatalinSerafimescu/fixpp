@@ -39,9 +39,8 @@ character literals holding braces in their bodies.
   (n) Session::build_inbound_business_reject_ wrapping build_reject_with_text:
       refused the same way, the other direction.
   (o) a listed helper whose definition calls no raw builder: refused.
-  (p) a listed helper whose comment and string literal name the other
-      family's builder, around its own builder: passes, because the builders
-      a definition calls are read outside comments and literals.
+  (p) a listed helper whose comment and ordinary string literal name the
+      other family's builder, around its own builder: passes.
 
 Line numbers in the expected messages are found in the fixture by a marker,
 and each flagged arm names how many sites the gate must report.

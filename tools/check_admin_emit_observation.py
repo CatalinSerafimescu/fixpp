@@ -16,10 +16,10 @@ hook, belong to the helper's caller, and the gate checks every caller instead.
 The exemption holds only while that is true, so the gate refuses a listed
 helper whose definition contains store_then_emit( or does not close. The hook
 a helper is listed with is checked against its definition: the gate refuses a
-listed helper unless the raw builders its definition calls (outside comments
-and literals) all need the listed hook, and it calls at least one. Only a
-definition qualified exactly as Session::<name>( is a listed helper's; a raw
-builder call anywhere else, including in a helper not listed, stays a site.
+listed helper unless the raw builders its definition calls all need the listed
+hook, and it calls at least one. Only a definition qualified exactly as
+Session::<name>( is a listed helper's; a raw builder call anywhere else,
+including in a helper not listed, stays a site.
 
 Exits 0 if clean, 1 if any admin emit reaches store_then_emit without the
 required observation hook (fire_to_admin_ or ->toApp) appearing between the
@@ -77,10 +77,7 @@ def _strip_cpp_comments(lines: list[str]) -> list[str]:
                     i += 2
                     in_block = True
                 elif line[i] in ('"', "'"):
-                    # String/char literal: copy verbatim (we don't need to
-                    # parse it accurately; false-positives from strings are
-                    # acceptable since no hook token appears in a string literal
-                    # in session.cpp and we only care about NOT counting comments).
+                    # A comment opener inside a string literal is not handled; see fixpp#674.
                     out.append(line[i])
                     i += 1
                 else:
