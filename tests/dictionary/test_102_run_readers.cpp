@@ -14,8 +14,9 @@
 // size passes such a record; one that sums in `std::size_t`, or tests
 // `start <= size && count <= size - start`, does not.
 //
-// The readers covered here are those whose record already holds a 32-bit start (a
-// `MsgFieldsRun` or an `EnumRun`). Re-derive the set: research D7's two recipes and tasks
+// The readers covered here are those whose record holds a 32-bit start (a `MsgFieldsRun`, an
+// `EnumRun`, and, since 102's record layouts, a `ComponentRef` or a `GroupRef`; tasks T027).
+// Re-derive the set: research D7's two recipes and tasks
 // `## Census manifest`'s D7 sum supplement over `src/dictionary`. `for_each_group_ctx_record`
 // has no cell of its own: it reads through `msg_group_ctx_delim_run`, the guard
 // `msg_group_ctx_delims_impl`'s cell witnesses, and under a wrapped guard it would read past
@@ -33,6 +34,8 @@
 
 namespace {
 
+using fixpp::dict::ComponentRef;
+using fixpp::dict::FieldRef;
 using fixpp::dict::GroupRef;
 using fixpp::dict::MessageEntry;
 using fixpp::dict::detail::dict_metadata_handle;
@@ -109,4 +112,26 @@ TEST(RunReaders102, RunAtOverrunIsEmpty) {
     pool.resize(kTableSize);
     runs.push_back(MsgFieldsRun{.start = kStart, .count = kCount});
     EXPECT_TRUE(fixpp::dict::detail::run_at(runs, pool, 0).empty());
+}
+
+TEST(RunReaders102, ComponentFieldsOverrunIsEmpty) {
+    dict_metadata_handle h{mr()};
+    ComponentRef cr{};
+    cr.component_id = 0;
+    cr.first_field_index = kStart;
+    cr.field_count = kCount;
+    h.components_.push_back(cr);
+    h.component_fields_.resize(kTableSize, FieldRef{});
+    EXPECT_TRUE(h.component_fields_impl(0).empty());
+}
+
+TEST(RunReaders102, GroupFieldsOverrunIsEmpty) {
+    dict_metadata_handle h{mr()};
+    GroupRef g{};
+    g.no_tag = 100;
+    g.first_field_index = kStart;
+    g.field_count = kCount;
+    h.groups_.push_back(g);
+    h.group_fields_.resize(kTableSize, FieldRef{});
+    EXPECT_TRUE(h.group_fields_impl(100).empty());
 }
