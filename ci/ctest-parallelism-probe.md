@@ -113,7 +113,7 @@ condition assumed:
 #### RE-RECORD — fixpp#675 (2026-11-14): every pinned lane, from one push to `main`, plus this branch's two entries
 
 Every lane had rendered `DIAGNOSTIC ONLY` on `main`: the executed counts had moved past the pins as
-098, 099, 100 and 101 added ctest entries. This is also 101's T074 re-record (orchestrator ruling R4),
+ctest entries were added after the #561 re-record below. This is also 101's T074 re-record (orchestrator ruling R4),
 batched here.
 
 **Basis:** the three workflow runs of one `push` to `main` at `e3ae461f` (101's squash), all created
