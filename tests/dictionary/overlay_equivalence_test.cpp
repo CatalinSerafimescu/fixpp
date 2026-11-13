@@ -1207,8 +1207,7 @@ TEST_P(OverlayEquivalenceW2Empty, EmptyOverlayEqualsTheBase) {
     ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
     Dictionary const reference = XmlLoader{}.load(base_path, mr());
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
-    expect_equivalent(row, compare_against(*p.dictionary, reference, base_text),
-                      GetParam() == "FIXT11.xml");
+    expect_equivalent(row, compare_against(*p.dictionary, reference, base_text));
 }
 
 // Seeded mismatch: `load(base)` against a copy of the base without one enum value
