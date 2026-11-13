@@ -48,7 +48,6 @@ add_executable(dictionary_pure_tests
   required_scope_test.cpp          # fixpp#201: message-level required scope (group leak)
   defect_a_group_context_test.cpp
   reused_tag_census_test.cpp
-  collision_membership_guards_test.cpp
   test_072_delimiter_guard_test.cpp  # 072 US1: load-time nested==parent delimiter guard witness
   oom_injection_test.cpp          # local failing_pmr_resource seam — no global state
   dictionary_snapshot_test.cpp    # fixpp#215 item 1 (Option C): A1-A5 boundary pins + seam 4 alias identity
@@ -167,10 +166,10 @@ target_compile_definitions(dictionary_099_tests PRIVATE
 add_test(NAME dictionary_099_tests COMMAND dictionary_099_tests)
 set_tests_properties(dictionary_099_tests PROPERTIES LABELS "dictionary;099")
 
-# ── fixpp#675: 100's and 101's dictionary cells, each feature in an entry of its own ──────
+# ── fixpp#675: files split out of dictionary_pure_tests, each in an entry of its own ───────
 # Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); out of
 # dictionary_pure_tests only because that entry ran past CI's per-test timeout on the slowest
-# sanitizer lanes once these suites joined it. Compiled as they were inside
+# sanitizer lanes with them in it. Compiled as they were inside
 # dictionary_pure_tests: the same link libraries, include directories and definitions.
 # TIMEOUT: each entry's value is at least twice its slowest reading on CI's sanitizer lanes and
 # under CI's `--timeout` guard. Re-derive from a CI log:
@@ -200,6 +199,10 @@ endfunction()
 add_dictionary_feature_bucket(dictionary_100_tests 100 900 test_100_registration_records.cpp)
 # 101 T029: W101-15, table_view::tag_defined.
 add_dictionary_feature_bucket(dictionary_101_tests 101 900 test_101_tag_defined.cpp)
+# 063 T017: the per-collision membership guards. Labels: the ones dictionary_pure_tests carries,
+# so every label selection that reached these cells inside it still does.
+add_dictionary_feature_bucket(dictionary_collision_guards_tests "075;083;091;097;098;099;100" 1650
+  collision_membership_guards_test.cpp)
 
 # ── Standalone: isolation-sensitive dictionary tests (FR-002) ─────────────────
 # Each keeps its own executable + add_test(NAME <target>) so its name, labels,
