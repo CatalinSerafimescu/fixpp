@@ -2183,8 +2183,9 @@ TEST(FixtLogonEstablishment097, W7c0_Fixt11_Fix50sp2Registry_10_Rejected) {
 // accepts 1407 or 1156, and they would also pass if no validation ran under their session
 // dictionaries. These two show the validate gate rejecting under exactly those
 // dictionaries: (a0)'s Logon plus one field neither dictionary declares gets a session
-// Reject naming that tag, with 373 the unexpected-tag mapping. The tag is chosen
-// undeclared in both files; re-derive with
+// Reject naming that tag, with 373 the undefined-tag mapping (373=0: the session
+// dictionary does not define the tag; 101 FR-002 supersedes these cells' 373=2). The tag is
+// chosen undeclared in both files; re-derive with
 //   grep -c "number='9876'" dictionaries/FIXT11.xml
 //   grep -c 'id="9876"' dictionaries/orchestra/OrchestraFIXLatest.xml
 // (each must print 0; the same greps for 1407 print non-zero, the known positive).
@@ -2194,7 +2195,7 @@ void expect_undeclared_tag_reject(const Acceptor097& a) {
     const auto rj = find_msg_type(a.out, "3");
     ASSERT_LT(rj, a.out.size()) << "expected a session Reject (35=3); observed " << a.observed();
     EXPECT_EQ(extract_tag(a.out[rj], 371), "9876") << "observed " << a.observed();
-    EXPECT_EQ(extract_tag(a.out[rj], 373), "2") << "observed " << a.observed();
+    EXPECT_EQ(extract_tag(a.out[rj], 373), "0") << "observed " << a.observed();
     EXPECT_EQ(find_msg_type(a.out, "A"), a.out.size()) << "observed " << a.observed();
     EXPECT_NE(a.sess->state(), fsm_state::Active) << "observed " << a.observed();
 }

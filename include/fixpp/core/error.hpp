@@ -835,6 +835,21 @@ enum class error : std::uint8_t {
                                       //   Length tag.
                                       //   → SessionRejectReason 5;
                                       //   → C-ABI FIXPP_ERR_WIRE_INVALID_FRAME
+    // ── 101-inbound-reject-fidelity ───────────────────────────────────────
+    //    specs/101-inbound-reject-fidelity/data-model.md `core::error`. Appended
+    //    after the 092 block per [const §X.4]; the exact set of the block is
+    //    asserted by tests/core/test_101_error_completeness.cpp. Returned only by
+    //    dictionary_driven_validator::validate (research D2).
+    wire_invalid_msg_type = 134,  // FR-001 — the validating table does not define
+                                  //   the frame's MsgType (no `valid_` entry).
+                                  //   RefTagID is not reported.
+                                  //   → SessionRejectReason 11;
+                                  //   → C-ABI FIXPP_ERR_WIRE_CONFORMANCE
+    wire_undefined_tag = 135,     // FR-002 — a field's tag is outside the message
+                                  //   and the table does not define it
+                                  //   (table_view::tag_defined). RefTagID is the tag.
+                                  //   → SessionRejectReason 0;
+                                  //   → C-ABI FIXPP_ERR_WIRE_CONFORMANCE
 };
 
 // ── 035-filestore-io-offload: FR-021 store_* error-set freeze guard ──────────
@@ -1096,6 +1111,11 @@ using expected_t = std::expected<T, error>;
             return "wire: invalid tag number";
         case error::wire_length_data_mismatch:
             return "wire: Length/Data mismatch";
+        // ── 101-inbound-reject-fidelity ───────────────────────────────────
+        case error::wire_invalid_msg_type:
+            return "wire: invalid msg type";
+        case error::wire_undefined_tag:
+            return "wire: undefined tag";
     }
     return "unknown error";
 }

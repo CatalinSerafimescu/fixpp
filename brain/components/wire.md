@@ -20,6 +20,9 @@ refs:
   - specs/093-inbound-frame-dispositions/research.md
   - specs/093-inbound-frame-dispositions/plan.md
   - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
+  - specs/101-inbound-reject-fidelity/spec.md
+  - specs/101-inbound-reject-fidelity/research.md
+  - specs/101-inbound-reject-fidelity/data-model.md
   - specs/100-wire-group-read-integrity/research.md
   - specs/100-wire-group-read-integrity/contracts/capi-group-getters.md
   - specs/004-wire-codec/contracts/group_view.hpp
@@ -32,6 +35,8 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-evidence.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/101-inbound-reject-fidelity-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/101-inbound-reject-fidelity-evidence.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/100-wire-group-read-integrity-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/100-wire-group-read-integrity-evidence.md
 codegraph_entry: [Framer, garble_summary, OffsetTable, MessageView, dictionary_driven_validator, wire_error_to_session_reject_reason]
@@ -474,6 +479,16 @@ decisions, each with what it rejected:
   100's research D5 and D11 are current.
 - `.specify/2b-wire.md` and 093's contract C-3 are amended in place for 100, so they are not flagged
   here.
+
+## An undefined MsgType and an undefined tag have their own results (101, fixpp#653, #655)
+
+Design: `specs/101-inbound-reject-fidelity/research.md` D2 (with D1's store on [`dictionary.md`](./dictionary.md)); behaviour: B&L `B-101-1`, `B-101-6`. Read `dictionary_driven_validator::validate` in `include/fixpp/wire/validator.hpp` for the order.
+
+- **The MsgType check sits after Step 0 and before Step 1, on Step 1's own lookup.** `valid_tags_for(msg_type)` is taken once; `valid_tag_set_view::found()` says whether the table has the key, a miss is `wire_invalid_msg_type`, and Step 1 reuses the view, so the hot path keeps one `valid_.find` per message. A MsgType is defined exactly when some `add_valid(_tag)` or `add_required(_tag)` named it; re-derive the writers with `grep -n "valid_\[" include/fixpp/dict/table_view.hpp`.
+- **A tag outside the message's set is split by the dictionary.** `table_view::tag_defined()` answers whether the table's dictionary defines it: `wire_undefined_tag` when not, `wire_unexpected_tag` when it does. The lookup is cold, asked only after the set test failed.
+- **No group-specific code.** Step 1 walks the frame flat, against a set that includes group members, so an undefined tag in a group instance at any depth gets the same answer; QuickFIX C++'s layout-dependent answers are disclosed, not copied (`B-101-6`).
+- **Two new `core::error` slots, mapped to the existing C conformance code**, so the C code set does not move. Their 373 values are in the seam below, which does not reproduce them.
+- **Rejected:** reusing `wire_invalid_tag_number` for an undefined tag (owner ruling: it keeps its contract, a malformed tag with no 371); querying the `Dictionary` at validate time (the validator holds a `table_view`).
 
 ## The seam into the session layer
 

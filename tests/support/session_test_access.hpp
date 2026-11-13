@@ -47,6 +47,19 @@ struct session_test_access {
         return s.cfg_.validate_inbound_messages && s.session_route_.validator != nullptr;
     }
 
+    // 101-inbound-reject-fidelity W101-51: refuse_active_frame_ called directly with the route
+    // the Active arm would select for `frame` and a header the cell builds. The SessionRejectReason
+    // of its refusal, or -1 when it passes the frame. A template so this header needs no include
+    // of the internal FrameHeader.
+    template <class FrameHeaderT>
+    [[nodiscard]] static int refuse_active_frame_reason(Session const& s,
+                                                        std::span<const std::byte> frame,
+                                                        FrameHeaderT const& hdr) noexcept {
+        auto const route = s.select_route_(frame, /*establishment_arm=*/false);
+        auto const v = s.refuse_active_frame_(frame, hdr, route);
+        return v.outcome == Session::validate_outcome::reject ? v.reject.reason : -1;
+    }
+
     // Hands a route set to a session right after construction and before open(), as the role
     // loops do through session_engine_access (099, tasks.md T007, T039).
     static void adopt_routes(Session& s, std::shared_ptr<const detail::fixt_route_set> set) {
@@ -192,6 +205,36 @@ struct session_test_access {
     // strand. A flag the test sets stays set: Session::send's holder clears only a flag it
     // set itself, and the fallback leaf never writes it.
     [[nodiscard]] static bool& send_slot_in_use(Session& s) noexcept { return s.send_slot_in_use_; }
+
+    // The engine's outbound frame ceiling, Session::kSendFrameBytes, read by name so a cell
+    // sizes its inputs off it rather than off a typed number (101-inbound-reject-fidelity,
+    // tasks.md T005).
+    [[nodiscard]] static constexpr std::size_t send_frame_bytes() noexcept {
+        return Session::kSendFrameBytes;
+    }
+
+    // 101-inbound-reject-fidelity D7 (tasks.md T046): whether an inbound reply holds the inbound
+    // reply slot, and each inbound reply site's own buffer, read by name.
+    [[nodiscard]] static bool inbound_reply_slot_held(Session const& s) noexcept {
+        return s.inbound_reply_slot_held_;
+    }
+    // The slot's bytes: a cell clears them before a reply and reads afterwards whether the
+    // reply was rebuilt there.
+    [[nodiscard]] static std::span<std::byte> inbound_reply_slot(Session& s) noexcept {
+        return std::span<std::byte>{s.inbound_reply_slot_};
+    }
+    // The size of every inbound reply site's own buffer.
+    [[nodiscard]] static constexpr std::size_t reply_site_buffer_bytes() noexcept {
+        return Session::kInboundReplySiteBytes;
+    }
+    // The best-effort Reject leaf (answers a fromAdmin reject of SequenceReset or Logout), for
+    // its unit cell (tasks.md T047): the awaitable, which the cell spawns on the session's
+    // executor.
+    [[nodiscard]] static asio::awaitable<fixpp::core::expected_t<void>>
+    inbound_reject_best_effort_leaf(Session& s, seqnum_t ref_seq, std::string_view ref_msg_type,
+                                    std::string_view sending_time) {
+        return s.inbound_reject_best_effort_leaf_(false, ref_seq, ref_msg_type, sending_time);
+    }
 
     // Enters a callback_dispatch_scope on `s`, as a callback site of the session does,
     // without a callback running; the scope ends when the returned object is destroyed

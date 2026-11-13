@@ -699,11 +699,13 @@ StrictVerdict validate_fix44_nos(dd::table_view table) {
     return out;
 }
 
+// The cell needs 1128 undefined by FIX 4.4 (re-derive with the field-definition grep), so the
+// refusal is an undefined tag (101 FR-002 supersedes this cell's wire_unexpected_tag).
 TEST(W17Fix44, PlainTableStrictValidationRejects1128) {
     const StrictVerdict v = validate_fix44_nos(vendored("FIX44.xml").as_table_view());
     EXPECT_FALSE(v.ok);
     EXPECT_EQ(v.ref_tag, 1128);
-    EXPECT_EQ(v.err, fixpp::core::error::wire_unexpected_tag);
+    EXPECT_EQ(v.err, fixpp::core::error::wire_undefined_tag);
 }
 
 // The control: the frame is otherwise valid, so the refusal above is 1128's.

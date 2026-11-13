@@ -13,6 +13,7 @@
 #include <string>
 
 #include "test_099_fixt_support.hpp"
+#include "test_101_tag_class.hpp"
 
 namespace fixpp::session::test099 {
 namespace {
@@ -57,8 +58,11 @@ std::string frame_of(const Rig& r, const VersionField& f, const char* header_112
                     f.body + std::to_string(f.tag) + "=" + f.value + "\x01", header_1128);
 }
 
-std::string reject_on_field(const VersionField& f) {
-    return "R 2/" + std::to_string(f.tag) + " " + f.msg_type + " 45=2 | stays | c | app=0 adm=0";
+// 101 FR-002: 373 is 2 when the judging dictionary (its source file under FIXPP_DICT_DATA_DIR)
+// defines the tag, else 0 (test_101_tag_class.hpp).
+std::string reject_on_field(const VersionField& f, const char* judging_file) {
+    return "R " + test101::outside_tag_reason(judging_file, f.tag) + "/" + std::to_string(f.tag) +
+           " " + f.msg_type + " 45=2 | stays | c | app=0 adm=0";
 }
 
 Fixture all_versions(Shape s) { return own_fixture(s, {fixt11(), fix50sp2(), latest(), fix44()}); }
@@ -83,6 +87,7 @@ struct W2Cell {
     DictPtr (*other)() = nullptr;
     dd::application_version other_version;
     const char* other_wire{};
+    const char* other_file{};  // `other`'s source file, for reject_on_field
 };
 
 DictPtr fix44_ptr() { return fix44(); }
@@ -95,21 +100,24 @@ const W2Cell kCells[] = {
      .to_other = "1128=6\x01",
      .other = fix44_ptr,
      .other_version = dd::application_version::v44,
-     .other_wire = "6"},
+     .other_wire = "6",
+     .other_file = "FIX44.xml"},
     {.name = "Latest",
      .field = latest_only,
      .to_b = "1128=10\x01",
      .to_other = "",
      .other = fix50sp2_ptr,
      .other_version = dd::application_version::v50sp2,
-     .other_wire = "9"},
+     .other_wire = "9",
+     .other_file = "FIX50SP2.xml"},
     {.name = "FIX44",
      .field = fix44_only,
      .to_b = "1128=6\x01",
      .to_other = "",
      .other = fix50sp2_ptr,
      .other_version = dd::application_version::v50sp2,
-     .other_wire = "9"},
+     .other_wire = "9",
+     .other_file = "FIX50SP2.xml"},
 };
 
 struct W2Param {
@@ -136,12 +144,12 @@ TEST_P(W2VersionFields, ResolvedToOtherRejected_AsOnTheTwin) {
     const CellRun run = run_own_cell(std::string("W-2 ") + c.name + " to other " + shape_name(s),
                                      all_versions(s), /*validate=*/true, Arm::Active,
                                      [&](const Rig& r) { return frame_of(r, f, c.to_other); });
-    expect_ending(run, reject_on_field(f));
+    expect_ending(run, reject_on_field(f, c.other_file));
     const CellRun twin = run_own_cell(std::string("W-2 ") + c.name + " twin " + shape_name(s),
                                       twin_of(c.other(), c.other_version, c.other_wire),
                                       /*validate=*/true, Arm::Active,
                                       [&](const Rig& r) { return frame_of(r, f, ""); });
-    expect_ending(twin, reject_on_field(f));
+    expect_ending(twin, reject_on_field(f, c.other_file));
 }
 
 std::vector<W2Param> w2_params() {
@@ -178,7 +186,7 @@ TEST(W2SpuriousHit, A_FieldOnlyFix50sp2Has_RejectedOnTheFix44Route) {
     const CellRun run =
         run_own_cell("W-2 spurious A", all_versions(Shape::A), /*validate=*/true, Arm::Active,
                      [&](const Rig& r) { return frame_of(r, f, "1128=6\x01"); });
-    expect_ending(run, reject_on_field(f));
+    expect_ending(run, reject_on_field(f, "FIX44.xml"));
 }
 
 }  // namespace

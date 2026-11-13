@@ -314,6 +314,11 @@ foreach(_corpus_path IN LISTS _fixpp_fuzz_corpus_dirs)
                         "${_corpus_path}")
   math(EXPR _fixpp_fuzz_replays_registered "${_fixpp_fuzz_replays_registered} + 1")
 endforeach()
+# 101-inbound-reject-fidelity (tasks.md T015, T019): the seeds 101 adds replay here; label 101,
+# APPENDed after the registration so its labels survive.
+if(TEST fuzz_replay_session_recovery_admin_parse)
+  set_property(TEST fuzz_replay_session_recovery_admin_parse APPEND PROPERTY LABELS 101)
+endif()
 
 # ⚠️ AN EMPTY REGISTRATION IS AN INSTRUMENT FAILURE, NOT A CLEAN BUILD. If the
 # corpus root moves or the glob stops matching, zero replays register and the

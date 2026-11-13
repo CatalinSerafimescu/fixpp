@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <fixpp/session/admin_messages.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <memory>
@@ -451,6 +452,137 @@ TEST(B35RunThreadWindows, ArmS_RunOneForScope) {
         cell_spec{.opt = {.mode = rt::hook::signal_from_admin, .driven_by_test_thread = true}});
     expect_window_ran(r);
     check_tu_count(r.tu_count, tu_expect::print_only, "arm (s)");
+}
+
+// ── 101-inbound-reject-fidelity (tasks.md T014, W101-45): reply windows ──────
+//
+// Each window frame draws one reply, which the peer reader counts, and the window waits on
+// that count, so a reply's own chain runs inside the window. The overflow cells use a
+// MsgType whose reply overflows the reply site's own buffer and fits the engine's outbound
+// ceiling, Session::kSendFrameBytes: half of the longest MsgType whose reply builds into a
+// buffer of that size, derived here from the frame's own values. Their twins use a MsgType
+// of two bytes, which fits every buffer.
+//   BMR: validation off, fromApp rejects, so each frame draws a BusinessMessageReject.
+//   Reject: a validating session and an undefined MsgType, so each draws a gate Reject.
+
+enum class reply_kind : std::uint8_t { bmr, reject };
+
+std::string reply_msg_type(rt::Rig const& rig, reply_kind kind, bool overflow) {
+    if (!overflow) return "U1";
+    std::size_t const ceiling = fixpp::session::session_test_access::send_frame_bytes();
+    std::vector<std::byte> buf(ceiling);
+    auto fits = [&](std::size_t n) {
+        std::string const mt(n == 0 ? 1 : n, 'U');
+        std::span<std::byte> const out{buf.data(), buf.size()};
+        return kind == reply_kind::bmr
+                   ? fixpp::session::build_business_message_reject(
+                         out, 99, "ISLD", "TW", 99, mt, 0, rig.begin_string, rig.sending_time())
+                         .has_value()
+                   : fixpp::session::build_reject_with_text(out, 99, "ISLD", "TW", 99, 0, mt, 11,
+                                                            rig.begin_string, rig.sending_time(),
+                                                            "Invalid MsgType")
+                         .has_value();
+    };
+    std::size_t lo = 0;
+    std::size_t hi = ceiling + 1;
+    while (hi - lo > 1) {
+        std::size_t const mid = lo + (hi - lo) / 2;
+        (fits(mid) ? lo : hi) = mid;
+    }
+    std::string mt = "U";
+    while (mt.size() < lo / 2) mt += static_cast<char>('0' + (mt.size() % 10));
+    return mt;
+}
+
+struct reply_result {
+    window_result w;
+    std::uint64_t fields_372 = 0;
+    std::size_t msg_type_bytes = 0;
+};
+
+reply_result run_reply_window(reply_kind kind, bool overflow) {
+    reply_result out;
+    window_result& r = out.w;
+    r.warm = kWarmFrames;
+    r.measured = measured_frames();
+    rt::Rig rig{
+        rt::options{.mode = rt::hook::wake_from_app, .validating = kind == reply_kind::reject}};
+    rig.app->reject_from_app = kind == reply_kind::bmr;
+    std::string const mt = reply_msg_type(rig, kind, overflow);
+    out.msg_type_bytes = mt.size();
+    rig.reader.expect_372(mt);
+
+    int const total = r.warm + r.measured + 1;
+    std::vector<std::string> frames;
+    frames.reserve(static_cast<std::size_t>(total));
+    for (int i = 0; i < total; ++i) {
+        frames.push_back(rig.msg(mt, static_cast<std::uint32_t>(2 + i)));
+    }
+    auto& done = rig.reader.reply_frames;
+    r.up = rig.start_and_logon();
+    int next = 0;
+    if (r.up) {
+        r.warmed = true;
+        for (int i = 0; i < r.warm && r.warmed; ++i, ++next) {
+            r.warmed = rig.write_and_wait(frames[next], done, static_cast<std::uint64_t>(next + 1));
+        }
+    }
+    if (r.warmed) {
+        bool ok = true;
+        open_window();
+        for (int j = 0; j <= r.measured && ok; ++j, ++next) {
+            ok = rig.write_and_wait(frames[next], done, static_cast<std::uint64_t>(next + 1));
+        }
+        r.tu_count = close_window();
+        r.window_done = ok;
+    }
+    r.snap = rig.observe();
+    r.stopped = rig.stop();
+    r.completions = done.load();
+    out.fields_372 = rig.reader.fields_372.load();
+    return out;
+}
+
+// One reply per frame, each carrying 372 equal to the frame's MsgType, the session still
+// Active with every frame consumed.
+void expect_replies(reply_result const& rr) {
+    window_result const& r = rr.w;
+    ASSERT_TRUE(r.up) << "the session did not reach Active";
+    ASSERT_TRUE(r.warmed) << "a warm-up frame drew no reply";
+    EXPECT_TRUE(r.window_done) << "a frame written inside the window drew no reply";
+    EXPECT_TRUE(r.stopped) << "Engine::stop() did not complete";
+    auto const frames = static_cast<std::uint64_t>(r.warm + r.measured + 1);
+    EXPECT_EQ(r.completions, frames) << "replies";
+    EXPECT_EQ(rr.fields_372, frames) << "replies whose 372 equals the inbound MsgType";
+    ASSERT_TRUE(r.snap.read) << "the strand-side state read did not run";
+    EXPECT_EQ(r.snap.state, fsm_state::Active);
+    EXPECT_EQ(r.snap.next_inbound, static_cast<fixpp::session::seqnum_t>(2 + frames));
+}
+
+TEST(B35RunThreadWindows, W101_45_BmrOverflow) {
+    auto const rr = run_reply_window(reply_kind::bmr, /*overflow=*/true);
+    expect_replies(rr);
+    check_tu_count(rr.w.tu_count, tu_expect::zero, "W101-45 BMR overflow");
+}
+
+TEST(B35RunThreadWindows, W101_45_BmrFittingTwin) {
+    auto const rr = run_reply_window(reply_kind::bmr, /*overflow=*/false);
+    expect_replies(rr);
+    check_tu_count(rr.w.tu_count, tu_expect::zero, "W101-45 BMR twin");
+}
+
+TEST(B35RunThreadWindows, W101_45_RejectOverflow) {
+    auto const rr = run_reply_window(reply_kind::reject, /*overflow=*/true);
+    expect_replies(rr);
+    EXPECT_TRUE(rr.w.snap.has_validator) << "validation is off, so no gate Reject was drawn";
+    check_tu_count(rr.w.tu_count, tu_expect::zero, "W101-45 Reject overflow");
+}
+
+TEST(B35RunThreadWindows, W101_45_RejectFittingTwin) {
+    auto const rr = run_reply_window(reply_kind::reject, /*overflow=*/false);
+    expect_replies(rr);
+    EXPECT_TRUE(rr.w.snap.has_validator) << "validation is off, so no gate Reject was drawn";
+    check_tu_count(rr.w.tu_count, tu_expect::zero, "W101-45 Reject twin");
 }
 
 }  // namespace

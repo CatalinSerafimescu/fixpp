@@ -39,6 +39,7 @@
 #include "mock_reconnect_factory.hpp"
 #include "session/logon_msg_type_defaults.hpp"
 #include "test_099_fixt_support.hpp"
+#include "test_101_tag_class.hpp"
 
 namespace fixpp::session::test099 {
 namespace {
@@ -550,7 +551,9 @@ std::string nos_3115(const Rig& r, unsigned seq) {
 }
 
 constexpr const char* kDelivered = "- | stays | c | app=1 adm=0";
-constexpr const char* kRefused3115 = "R 2/3115 D 45=2 | stays | c | app=0 adm=0";
+// Every cell that expects this needs 3115 undefined by the route that refuses it (re-derive with
+// the field-definition grep): 373=0 (101 FR-002 supersedes 2).
+constexpr const char* kRefused3115 = "R 0/3115 D 45=2 | stays | c | app=0 adm=0";
 
 // D's entry among `kept`, or 1137's version, which every cell here negotiates.
 Version answering_version(const Kept& kept) {
@@ -734,7 +737,10 @@ TEST_P(W25AfterMtA, AnotherMsgType_FieldOnlyLatestDeclaresIsRefused) {
     Rig& r = *run_.rig;
     const std::string field = std::to_string(tag) + "=" + plain_value(*latest(), *f) + "\x01";
     run_.ending = r.deliver(frame_35("F", r.peer_ctx(2), kCancelBody() + field));
-    expect_ending(run_, "R 2/" + std::to_string(tag) + " F 45=2 | stays | c | app=0 adm=0");
+    // 101 FR-002: 373 is 2 when FIX50SP2, the route, defines the tag, else 0
+    // (test_101_tag_class.hpp).
+    expect_ending(run_, "R " + test101::outside_tag_reason("FIX50SP2.xml", tag) + "/" +
+                            std::to_string(tag) + " F 45=2 | stays | c | app=0 adm=0");
 }
 
 class W25Named : public testing::TestWithParam<ShapeRole> {};
@@ -1039,12 +1045,16 @@ const std::string& kEightByteEntry() {
     return value;
 }
 
-// The gate's answer: 373 and 371, state and consume. A Reject's 372 is not asserted (E-10).
-void expect_refused_on_35(const Ending& e) {
+// The gate's answer: 373, 371 and 58, state and consume. A Reject's 372 is not asserted (E-10).
+// 101 FR-001 and FR-003 supersede this cell's 099 ending (373=5 on 35, the route table's enum for
+// MsgType): the routed table does not define the MsgType, so the validator refuses it as an
+// invalid MsgType, 373=11 with no 371 and QuickFIX C++'s text.
+void expect_refused_as_invalid_msg_type(const Ending& e) {
     ASSERT_EQ(e.out.size(), 1U) << log_form(e);
     EXPECT_EQ(tag_value(e.out[0], 35), "3");
-    EXPECT_EQ(tag_value(e.out[0], 373), "5") << log_form(e);
-    EXPECT_EQ(tag_value(e.out[0], 371), "35") << log_form(e);
+    EXPECT_EQ(tag_value(e.out[0], 373), "11") << log_form(e);
+    EXPECT_EQ(tag_value(e.out[0], 371), "") << log_form(e);
+    EXPECT_EQ(tag_value(e.out[0], 58), "Invalid MsgType") << log_form(e);
     EXPECT_EQ(e.after, fsm_state::Active);
     EXPECT_EQ(e.next_in_after, e.next_in_before + 1) << log_form(e);
     EXPECT_EQ(e.from_app, 0);
@@ -1076,12 +1086,13 @@ TEST_P(W25EightBytesDeclared, NoApplVerId_DeliveredOnTheDefaultsSlot) {
 
 TEST_P(W25EightBytesDeclared, Explicit1128_9_Refused) {
     Rig& r = *run_.rig;
-    expect_refused_on_35(r.deliver(frame_35("ABCDEFGH", r.peer_ctx(2), "58=x\x01", "1128=9\x01")));
+    expect_refused_as_invalid_msg_type(
+        r.deliver(frame_35("ABCDEFGH", r.peer_ctx(2), "58=x\x01", "1128=9\x01")));
 }
 
 TEST_P(W25EightBytesDeclared, Sibling_1137Answers_Refused) {
     Rig& r = *run_.rig;
-    expect_refused_on_35(r.deliver(frame_35("ABCDEFGX", r.peer_ctx(2), "58=x\x01")));
+    expect_refused_as_invalid_msg_type(r.deliver(frame_35("ABCDEFGX", r.peer_ctx(2), "58=x\x01")));
 }
 
 // Not validating, a named boundary cell: T, A and L.

@@ -303,6 +303,12 @@ public:
     //   on_inbound_frame() — session-strand; engine's transport feeds it after
     //                        parse/frame-validate; inbound ordering: store(inbound)
     //                        completes BEFORE fromAdmin/fromApp is dispatched.
+    //                        A caller co_awaits each call to completion before it
+    //                        makes the next on the same Session; overlapping calls
+    //                        are outside this contract, and builds with assertions
+    //                        assert it where an inbound reply takes the session's
+    //                        inbound reply slot (101-inbound-reject-fidelity D7,
+    //                        FR-008).
     //   send()             — session-strand; durable-before-transmit (I-3):
     //                        store(seq, committed, outbound) BEFORE transport write.
     //                        Started inside toApp or toAdmin of this session it
@@ -896,15 +902,27 @@ private:
     // Session ever serves a second connection, this placement must be re-derived.
     std::atomic<std::uint64_t> garbled_frames_{0};
 
+    // The rate state of a session log record written at most once per max(HeartBtInt, 1 s) on
+    // effective_clock_: whether one has been written, the earliest time of the next, and the
+    // occurrences suppressed since the last. One instance per record; admit_log_record_ is its
+    // only writer.
+    struct log_rate_gate {
+        bool logged = false;
+        fixpp::core::steady_time_point next;
+        std::uint64_t unlogged = 0;
+    };
+    // Admits a record now, returning the occurrences suppressed since the previous one (and
+    // starting the next window), or counts `occurrences` as suppressed and returns nullopt.
+    [[nodiscard]] std::optional<std::uint64_t> admit_log_record_(
+        log_rate_gate& gate, std::uint64_t occurrences) noexcept;
+
     // 093 (data-model E-12): the logger, resolved once at open() from
     // cfg_.logger_override, else the engine's; null when neither is set. And the
-    // garble log's rate state: whether a garble record has been written, the earliest
-    // time of the next one on effective_clock_, and the regions of rate-suppressed
-    // summaries since the last record (plan OD-21).
+    // garble log's rate state (a log_rate_gate since 101): whether a garble record has been
+    // written, the earliest time of the next one on effective_clock_, and the regions of
+    // rate-suppressed summaries since the last record (plan OD-21).
     std::shared_ptr<fixpp::log::Logger> logger_;
-    bool garble_logged_ = false;
-    fixpp::core::steady_time_point garble_log_next_;
-    std::uint64_t garbles_unlogged_ = 0;
+    log_rate_gate garble_log_gate_;
 
     // note_garbles_ — 093 (data-model E-4, E-12): accounts one summary of disregarded
     // inbound bytes. Reached from the engine through session_engine_access (the read
@@ -913,6 +931,15 @@ private:
     // session_event_garbled_frame and writes a garble log record, at most one per
     // max(HeartBtInt, 1 s). Session strand only.
     void note_garbles_(fixpp::wire::garble_summary const& g) noexcept;
+
+    // 101-inbound-reject-fidelity D7 (FR-007), the outbound-ceiling record: a Reject that exceeds
+    // kSendFrameBytes even without 372, or a BusinessMessageReject that exceeds it with 372, is not
+    // sent, and writes one session log record per max(HeartBtInt, 1 s) on effective_clock_, as the
+    // garble record does. One rate state and one suppressed count serve both message types (one
+    // cause), never reset, so they carry across connections. The record names the type not sent,
+    // the inbound MsgType's length (never its bytes) and the count suppressed since the last one.
+    log_rate_gate reply_ceiling_log_gate_;
+    void note_reply_over_ceiling_(bool business_reject, std::size_t ref_msg_type_len) noexcept;
 
     // 093-inbound-frame-dispositions (FR-013, data-model E-12): a frame over L was
     // refused at framing once this Session exists. Writes one FIXPP_SLOG record with
@@ -1330,10 +1357,12 @@ private:
     struct RejectDecision {
         int reason = 0;
         int ref_tag_id = 0;
-        // 099-fixt-appl-version-validation (data-model E-7, research R-9): a FIXT refusal's
-        // RefMsgType, which also keys the consume, and RefSeqNum are the third field's value and
-        // the first 34: the Active arm reads hdr.fault_ref_msg_type and hdr.fault_ref_seq_num.
-        // False everywhere else, and the arm reads hdr.msg_type and hdr.msg_seq_num.
+        // 099-fixt-appl-version-validation (data-model E-7, research R-9): a refusal of
+        // refuse_active_frame_ names the third field's value as RefMsgType, which also keys the
+        // consume, and the first 34 as RefSeqNum: the Active arm reads hdr.fault_ref_msg_type and
+        // hdr.fault_ref_seq_num. Set on every session that refusal runs on (101 D5: non-FIXT
+        // too), since msg_seq_num is last-wins. False everywhere else, and the arm reads
+        // hdr.msg_type and hdr.msg_seq_num.
         bool names_third_field = false;
     };
     enum class validate_outcome : std::uint8_t { pass, reject, parse_failed };
@@ -1344,13 +1373,15 @@ private:
     [[nodiscard]] InboundValidation validate_inbound_(
         std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
         inbound_route const& route) const noexcept;
-    // 099-fixt-appl-version-validation (data-model E-7): A1 and A2, a validating FIXT session's
-    // Active refusals, ahead of the exemption of Reject and Logout.
+    // 099-fixt-appl-version-validation (data-model E-7): A1 and A2, the Active refusals, ahead of
+    // the exemption of Reject and Logout; 101 D5: the repeat refusal on every validating session,
+    // the 1128 refusal on a FIXT one.
     [[nodiscard]] InboundValidation refuse_active_frame_(
         std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
         inbound_route const& route) const noexcept;
     // 099-fixt-appl-version-validation (data-model E-7's S1, FR-029, FR-005): an establishment arm
-    // ends a validating FIXT session on an application frame, or a frame with two MsgTypes.
+    // ends a validating FIXT session on an application frame; 101 D6: and any session on a frame
+    // with two MsgTypes.
     [[nodiscard]] bool establishment_frame_refused_(
         inbound_route const& route, fixpp::session::detail::FrameHeader const& hdr) const noexcept;
     // 099-fixt-appl-version-validation (data-model E-7's S2, FR-010): a validating FIXT session
@@ -2022,6 +2053,53 @@ private:
     std::array<std::byte, kSendFrameBytes> send_body_scratch_{};
     std::array<std::byte, kSendFrameBytes> send_frame_slot_{};
     bool send_slot_in_use_ = false;
+
+    // 101-inbound-reject-fidelity D7 (FR-007, FR-008): the inbound reply slot. A session Reject
+    // or BusinessMessageReject answering an inbound frame is built in its site's own buffer
+    // (the sizes below); when that build runs out of room it is rebuilt here, up to the
+    // outbound ceiling kSendFrameBytes. Allocated with the Session, as send_frame_slot_ is.
+    // Only the inbound reply sites use it, and the holder (inbound_reply_slot_hold) keeps
+    // inbound_reply_slot_held_ set from the rebuild until the site's tail returns.
+    std::array<std::byte, kSendFrameBytes> inbound_reply_slot_{};
+    bool inbound_reply_slot_held_ = false;
+    // Each inbound reply site's own buffer, one size for every site: a frame that fits is built
+    // there, as before.
+    static constexpr std::size_t kInboundReplySiteBytes = 512;
+
+    // Sets inbound_reply_slot_held_ when a rebuild takes the slot, and clears it when the
+    // site's coroutine frame releases the holder: on every return, a throw, or the frame's
+    // destruction by a close.
+    class inbound_reply_slot_hold {
+    public:
+        explicit inbound_reply_slot_hold(Session& s) noexcept : s_(&s) {}
+        inbound_reply_slot_hold(const inbound_reply_slot_hold&) = delete;
+        inbound_reply_slot_hold& operator=(const inbound_reply_slot_hold&) = delete;
+        inbound_reply_slot_hold(inbound_reply_slot_hold&&) = delete;
+        inbound_reply_slot_hold& operator=(inbound_reply_slot_hold&&) = delete;
+        ~inbound_reply_slot_hold() {
+            if (taken_) {
+                s_->inbound_reply_slot_held_ = false;
+            }
+        }
+        // The slot, taken for this holder. Defined in session.cpp, where the assertion is.
+        [[nodiscard]] std::span<std::byte> take() noexcept;
+
+    private:
+        Session* s_;
+        bool taken_ = false;
+    };
+    // The echo policy (research D7 steps 1 to 4) for a session Reject and for a
+    // BusinessMessageReject: built in `site` with 372 = `ref_msg_type` verbatim; on
+    // wire_field_value_truncated, rebuilt with 372 in the slot `hold` takes; a Reject only,
+    // when that also runs out of room and the MsgType is not empty, rebuilt once more without
+    // 372. An error means nothing is sent. Non-coroutines: they neither suspend nor call back.
+    [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_inbound_reject_(
+        std::span<std::byte> site, inbound_reply_slot_hold& hold, seqnum_t seq, seqnum_t ref_seq,
+        int ref_tag_id, std::string_view ref_msg_type, int reason, std::string_view sending_time,
+        std::string_view text) noexcept;
+    [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_inbound_business_reject_(
+        std::span<std::byte> site, inbound_reply_slot_hold& hold, seqnum_t seq, seqnum_t ref_seq,
+        std::string_view ref_msg_type, std::string_view sending_time) noexcept;
 };
 
 }  // namespace fixpp::session

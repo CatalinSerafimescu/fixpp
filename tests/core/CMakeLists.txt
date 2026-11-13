@@ -166,6 +166,21 @@ add_test(NAME error_092_completeness COMMAND error_092_completeness)
 set_tests_properties(error_092_completeness PROPERTIES
   LABELS "092;foundational;error_slots")
 
+# ── 101-inbound-reject-fidelity T022 — error completeness gate ──────────────
+# The 101 block is exactly {wire_invalid_msg_type, wire_undefined_tag} after the
+# 092 block (data-model `core::error`), with their messages, their C-ABI targets
+# and the SessionRejectReason of every validator result. Links fixpp_capi for
+# the engine-internal translate(), as error_surface_test does.
+add_executable(error_101_completeness test_101_error_completeness.cpp)
+target_link_libraries(error_101_completeness PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME error_101_completeness COMMAND error_101_completeness)
+set_tests_properties(error_101_completeness PROPERTIES
+  LABELS "101;foundational;error_slots")
+
 # ── 060-int128-decimal-compare T003 — differential-oracle harness ──────────
 # Deterministic (seed=42) boundary-biased corpus asserting the production
 # decimal_traits<pod_decimal>::compare agrees with a FROZEN verbatim copy of

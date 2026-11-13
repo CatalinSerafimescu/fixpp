@@ -79,6 +79,10 @@ struct table_view_test_access {
     [[nodiscard]] static bit_store const& header_bits(table_view const& tv) noexcept {
         return tv.header_bits_;
     }
+    using defined_tags_store = decltype(table_view::defined_tags_);
+    [[nodiscard]] static defined_tags_store const& defined_tags(table_view const& tv) noexcept {
+        return tv.defined_tags_;
+    }
 
     // 100-wire-group-read-integrity (research D2): the registration stores.
     using record_store = decltype(table_view::occurrence_records_);

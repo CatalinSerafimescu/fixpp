@@ -482,6 +482,15 @@ table_view Dictionary::build_table_view(
     // mutable local.
     table_view_builder b;
 
+    // 101-inbound-reject-fidelity (research D1, FR-002): the defined-tag store, from the
+    // dictionary's field definitions (`field_by_name_`, every QuickFIX-XML `<field number=…>`
+    // under `<fields>` or every Orchestra `<fixr:field id=…>`, after any 098 overlay merge),
+    // never from the per-message runs, which say which message reaches a field. Every
+    // as_table_view form comes through here.
+    for (auto const& f : handle_->field_by_name_) {
+        b.add_defined_tag(f.tag);
+    }
+
     auto const msgs = messages();
 
     for (auto const& msg_entry : msgs) {

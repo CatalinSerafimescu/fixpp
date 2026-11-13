@@ -138,6 +138,7 @@ add_executable(wire_dict_tests
   dict_hooks_custom_pair_test.cpp                                     # fixpp#426 (D-2)
   field_iterator_fault_test.cpp                                       # 092 T055/T057 (FR-012)
   test_099_validator_envelope.cpp                                     # 099 T026 (W-3, unit half)
+  test_101_validator_reasons.cpp                                      # 101 T008 (W101-6, 7, 14)
   test_100_group_read_status.cpp                                      # 100 T015
   test_100_typed_reads.cpp)                                           # 100 T016/T017
 target_link_libraries(wire_dict_tests PRIVATE
@@ -179,6 +180,9 @@ set_property(TEST wire_dict_tests APPEND PROPERTY LABELS 099)
 # 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
 # setter for this entry, so the existing labels survive.
 set_property(TEST wire_dict_tests APPEND PROPERTY LABELS 100)
+# 101-inbound-reject-fidelity: label 101 (tasks.md T019). APPEND, after the last LABELS setter for
+# this entry, so the existing labels survive.
+set_property(TEST wire_dict_tests APPEND PROPERTY LABELS 101)
 # 083 T021 (W-10a leg 4, contracts/typed_read_splitter.md): a BACKSTOP, never
 # the discriminator. Leg 4's depth-capped chain fixture drives
 # consume_group_extent's outer loop with an attacker-shaped declared count; an

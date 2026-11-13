@@ -311,6 +311,14 @@ const void* Session::callback_thread_tag_() noexcept {
     assert(callback_depth_ == 0 &&                                      \
            "inbound parse begun inside a callback of the same session " \
            "(on_inbound_frame() called from an application callback?)")
+// 101-inbound-reject-fidelity D7 (FR-008): an inbound reply takes the session's inbound reply
+// slot only while the slot is free; on_inbound_frame calls that overlap on the same Session are
+// outside its contract. Evaluated by inbound_reply_slot_hold::take before it sets the flag.
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define FIXPP_ASSERT_INBOUND_REPLY_SLOT_FREE()                              \
+    assert(!s_->inbound_reply_slot_held_ &&                                 \
+           "inbound reply slot taken while another inbound reply holds it " \
+           "(overlapping on_inbound_frame() calls on one Session?)")
 // The stack-arena overload of parse_and_dispatch_ evaluates this after its
 // callback_dispatch_scope is constructed and before it raises the outbound depth.
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
@@ -445,24 +453,32 @@ void Session::note_garbles_(fixpp::wire::garble_summary const& g) noexcept {
     emit_event(session_event_garbled_frame{
         .first_kind = g.first_kind, .frames = g.regions, .discarded_bytes = bytes});
 
-    auto const now =
-        effective_clock_ ? effective_clock_->steady_now() : fixpp::core::steady_time_point{};
-    if (garble_logged_ && now < garble_log_next_) {
-        garbles_unlogged_ += g.regions;
+    auto const suppressed = admit_log_record_(garble_log_gate_, g.regions);
+    if (!suppressed) {
         return;
     }
-    auto const heartbt = cfg_.heartbeat_interval.value_or(kDefaultHeartBtInt);
-    // Saturates at steady_time_point::max() when not representable.
-    garble_log_next_ = detail::deadline_after(now, std::max(heartbt, std::chrono::seconds{1}));
-    garble_logged_ = true;
-    std::uint64_t const unnamed = garbles_unlogged_ + (g.regions - 1U);
+    std::uint64_t const unnamed = *suppressed + (g.regions - 1U);
     FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
                "inbound garbled frame disregarded: kind={} discarded_bytes={} "
                "suppressed_since_last={}",
                fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(g.first_kind)),
                fixpp::log::ArgValue::from_u64(g.discarded),
                fixpp::log::ArgValue::from_u64(unnamed));
-    garbles_unlogged_ = 0;
+}
+
+std::optional<std::uint64_t> Session::admit_log_record_(log_rate_gate& gate,
+                                                        std::uint64_t occurrences) noexcept {
+    auto const now =
+        effective_clock_ ? effective_clock_->steady_now() : fixpp::core::steady_time_point{};
+    if (gate.logged && now < gate.next) {
+        gate.unlogged += occurrences;
+        return std::nullopt;
+    }
+    auto const heartbt = cfg_.heartbeat_interval.value_or(kDefaultHeartBtInt);
+    // Saturates at steady_time_point::max() when not representable.
+    gate.next = detail::deadline_after(now, std::max(heartbt, std::chrono::seconds{1}));
+    gate.logged = true;
+    return std::exchange(gate.unlogged, 0);
 }
 
 // ── 093-inbound-frame-dispositions — the establishment timeout (contract C-4;
@@ -2689,6 +2705,95 @@ public:
 
 }  // namespace
 
+// 101-inbound-reject-fidelity D7 (FR-007, FR-008): the inbound reply slot and the echo policy of
+// the inbound-fed Reject and BusinessMessageReject sites. Every build here runs after the site's
+// peek_outbound() and SendingTime stamp, which it is passed, and before the site's first
+// callback and assign_outbound(), so no attempt re-numbers, re-stamps or calls back twice.
+namespace {
+
+// D7 steps 1 and 2, shared by both inbound reply builds: the reply built in its site's buffer;
+// when that build runs out of room (wire_field_value_truncated), rebuilt in the slot `hold`
+// takes. Any other result of the first build is returned as it is.
+template <class Hold, class Build>
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_in_site_then_slot(
+    std::span<std::byte> site, Hold& hold, Build const& build) noexcept {
+    auto r = build(site);
+    if (r || r.error() != fixpp::core::error::wire_field_value_truncated) {
+        return r;
+    }
+    return build(hold.take());
+}
+
+}  // namespace
+
+std::span<std::byte> Session::inbound_reply_slot_hold::take() noexcept {
+    // Every frame rebuilt in the slot is one the resend replay can capture.
+    static_assert(kSendFrameBytes <= CaptureVisitor::kCapBufSize);
+    if (!taken_) {
+        FIXPP_ASSERT_INBOUND_REPLY_SLOT_FREE();
+        s_->inbound_reply_slot_held_ = true;
+        taken_ = true;
+    }
+    return std::span<std::byte>{s_->inbound_reply_slot_};
+}
+
+fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_reject_(
+    std::span<std::byte> site, inbound_reply_slot_hold& hold, seqnum_t seq, seqnum_t ref_seq,
+    int ref_tag_id, std::string_view ref_msg_type, int reason, std::string_view sending_time,
+    std::string_view text) noexcept {
+    auto const build = [&](std::span<std::byte> out, std::string_view rmt) {
+        return fixpp::session::build_reject_with_text(
+            out, seq, cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq, ref_tag_id, rmt, reason,
+            cfg_.begin_string, sending_time, text);
+    };
+    auto r = build_in_site_then_slot(
+        site, hold, [&](std::span<std::byte> out) { return build(out, ref_msg_type); });
+    if (r || r.error() != fixpp::core::error::wire_field_value_truncated) {
+        return r;
+    }
+    if (!ref_msg_type.empty()) {
+        // 372 is optional in a Reject: above the ceiling it is sent without it; Text(58) stays.
+        r = build(hold.take(), std::string_view{});
+    }
+    // A Reject still over the ceiling, an empty MsgType's among them, is not sent: the record.
+    if (!r && r.error() == fixpp::core::error::wire_field_value_truncated) {
+        note_reply_over_ceiling_(/*business_reject=*/false, ref_msg_type.size());
+    }
+    return r;
+}
+
+fixpp::core::expected_t<std::span<std::byte>> Session::build_inbound_business_reject_(
+    std::span<std::byte> site, inbound_reply_slot_hold& hold, seqnum_t seq, seqnum_t ref_seq,
+    std::string_view ref_msg_type, std::string_view sending_time) noexcept {
+    auto const build = [&](std::span<std::byte> out) {
+        return fixpp::session::build_business_message_reject(
+            out, seq, cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
+            ref_msg_type,  // RefMsgType(372)
+            0,             // BusinessRejectReason(380) = Other
+            cfg_.begin_string, sending_time);
+    };
+    // 372 is required in a BusinessMessageReject: there is no step without it.
+    auto r = build_in_site_then_slot(site, hold, build);
+    if (!r && r.error() == fixpp::core::error::wire_field_value_truncated) {
+        note_reply_over_ceiling_(/*business_reject=*/true, ref_msg_type.size());
+    }
+    return r;
+}
+
+void Session::note_reply_over_ceiling_(bool business_reject,
+                                       std::size_t ref_msg_type_len) noexcept {
+    auto const unlogged = admit_log_record_(reply_ceiling_log_gate_, 1);
+    if (!unlogged) {
+        return;
+    }
+    auto const len = fixpp::log::ArgValue::from_u64(ref_msg_type_len);
+    auto const suppressed = fixpp::log::ArgValue::from_u64(*unlogged);
+    FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
+               "inbound reply over the outbound ceiling not sent: msg_type={} "
+               "ref_msg_type_len={} suppressed={}",
+               business_reject ? FIXPP_SLIT("j") : FIXPP_SLIT("3"), len, suppressed);
+}
+
 // 070-fix44-closeout S-029 — refuse an inbound Logon on a 464 posture mismatch (or
 // malformed 464): emit Logout(35=5) carrying reason_text, then Disconnected — the
 // session never reaches Active. Mirrors the Logon-time Logout+disconnect disposition
@@ -2740,23 +2845,24 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout
 // inline form — only the two sites with identical Disconnected-on-fail handling
 // are extracted here.
 //
-// Returns expected_t<void>{} on success or build-failure (not fatal if build fails).
+// Returns expected_t<void>{} on success, or when the Reject is not sent because it exceeds the
+// outbound ceiling even without 372 (101-inbound-reject-fidelity D7's outbound-ceiling ending; a
+// Reject that overflows only this site's buffer is rebuilt in the inbound reply slot and sent).
 // Returns unexpected(error) on assign_outbound / store_then_emit failure, after
 // recording Disconnected. Caller should propagate with co_return std::unexpected(…).
 // [019-app-callbacks T011/T016; FR-005; D4; INV-4]
 asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
     seqnum_t ref_seq, std::string_view ref_msg_type) noexcept {
-    std::array<std::byte, 512> rj_buf{};
+    std::array<std::byte, kInboundReplySiteBytes> rj_buf{};
+    inbound_reply_slot_hold hold{*this};
     const auto rj_st52 = effective_clock_
                              ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
                              : SendingTimeStamp{};
     const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
-    auto rj_r =
-        fixpp::session::build_reject(std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
-                                     cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq,
-                                     0,                // RefTagID: n/a for MsgType/veto rejection
-                                     ref_msg_type, 3,  // SessionRejectReason = 3
-                                     cfg_.begin_string, rj_st52.value);
+    auto rj_r = build_inbound_reject_(rj_buf, hold, rj_seq, ref_seq,
+                                      0,                // RefTagID: n/a for MsgType/veto rejection
+                                      ref_msg_type, 3,  // SessionRejectReason = 3
+                                      rj_st52.value, std::string_view{});
     if (rj_r) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
@@ -2800,15 +2906,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
     seqnum_t ref_seq, std::string_view ref_msg_type, int reason, int ref_tag_id,
     std::string_view text, std::optional<fsm_state> arm) noexcept {
-    std::array<std::byte, 512> rj_buf{};
+    std::array<std::byte, kInboundReplySiteBytes> rj_buf{};
+    inbound_reply_slot_hold hold{*this};
     const auto rj_st52 = effective_clock_
                              ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
                              : SendingTimeStamp{};
     const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
-    auto rj_r = fixpp::session::build_reject_with_text(
-        std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq, cfg_.sender_comp_id,
-        cfg_.target_comp_id, ref_seq, ref_tag_id, ref_msg_type, reason, cfg_.begin_string,
-        rj_st52.value, text);
+    auto rj_r = build_inbound_reject_(rj_buf, hold, rj_seq, ref_seq, ref_tag_id, ref_msg_type,
+                                      reason, rj_st52.value, text);
     if (rj_r) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
@@ -2830,6 +2935,37 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 }
 
 namespace {
+
+// 101-inbound-reject-fidelity (research D3, FR-003): Text(58) of a validation-gate Reject, a
+// function of its SessionRejectReason(373): QuickFIX C++'s SessionRejectReason_*_TEXT literal
+// (src/C++/Values.h at the commit the spec cites), empty for any other reason. The list is
+// derived, not kept: re-derive it from the reasons wire_error_to_session_reject_reason returns
+// from a named case, plus those refuse_active_frame_ and validate_inbound_'s 1128 arm set; a
+// reason found there that is missing here, other than the map's fail-closed default, is a defect.
+[[nodiscard]] std::string_view session_reject_reason_text(int reason) noexcept {
+    switch (reason) {
+        case 0:
+            return "Invalid tag number";
+        case 1:
+            return "Required tag missing";
+        case 2:
+            return "Tag not defined for this message type";
+        case 4:
+            return "Tag specified without a value";
+        case 5:
+            return "Value is incorrect (out of range) for this tag";
+        case 6:
+            return "Incorrect data format for value";
+        case 11:
+            return "Invalid MsgType";
+        case 13:
+            return "Tag appears more than once";
+        case 14:
+            return "Tag specified out of required order";
+        default:
+            return {};
+    }
+}
 
 // One parse of an ApplVerID value, for 1128, 1137 and 1130 (data-model E-7, E-10). A profile's
 // default answers only an empty value (resolve_application_version), and this one's is Unknown, so
@@ -2987,19 +3123,25 @@ Session::InboundValidation Session::validate_inbound_(
 }
 
 // 099-fixt-appl-version-validation (data-model E-7's A1, A2; FR-009, FR-025): their Reject names
-// the third field and the first 34, because hdr is last-wins on 35 and, on a frame whose route was
-// refused, was split by S's hooks. Which of 373=13 and 14 is read only on a mismatch.
+// the third field and the first 34 (`names_third_field`).
+//
+// 101-inbound-reject-fidelity D5 (FR-005) supersedes 099 FR-025's choice between 373=13 and 14 and
+// its FIXT-only gate: the repeat arm runs on every validating session, on `hdr.msg_type_conflict`
+// (101 D4). The walk reads every field with the route's hooks (the hooks `hdr`'s scan used; the
+// owner ruling research D5 records) and classifies by S's header union; the answer is 14 when a
+// later 35 lies past the header, else 13 when one lies in it, else 14. The 1128 arm stays
+// FIXT-only.
 Session::InboundValidation Session::refuse_active_frame_(
     std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
     inbound_route const& route) const noexcept {
     int reason = 0;
     int ref_tag = 0;
-    if (hdr.msg_type != hdr.fault_ref_msg_type) {
-        bool const in_header = fixpp::session::detail::fixt_header_repeats_msg_type(
-            frame, session_hooks(inbound_tv_), *inbound_tv_);
-        reason = in_header ? 13 : 14;
+    if (hdr.msg_type_conflict) {
+        auto const seen = fixpp::session::detail::fixt_header_repeats_msg_type(
+            frame, session_hooks(*route.entry.owner), *inbound_tv_);
+        reason = (seen.in_header && !seen.past_header) ? 13 : 14;
         ref_tag = 35;
-    } else if (route.refusal != route_refusal::none) {
+    } else if (fixt_routing_ && route.refusal != route_refusal::none) {
         reason = route.refusal == route_refusal::empty_value ? 4 : 5;
         ref_tag = 1128;
     } else {
@@ -3010,10 +3152,12 @@ Session::InboundValidation Session::refuse_active_frame_(
                 RejectDecision{.reason = reason, .ref_tag_id = ref_tag, .names_third_field = true}};
 }
 
+// 101-inbound-reject-fidelity D6 (FR-006): a frame with two MsgTypes is refused in establishment
+// on every session, validating or not; the application-frame clause stays 099's.
 bool Session::establishment_frame_refused_(
     inbound_route const& route, fixpp::session::detail::FrameHeader const& hdr) const noexcept {
-    return fixt_routing_ && cfg_.validate_inbound_messages &&
-           (route.application || hdr.msg_type != hdr.fault_ref_msg_type);
+    return hdr.msg_type_conflict ||
+           (fixt_routing_ && cfg_.validate_inbound_messages && route.application);
 }
 
 bool Session::logon_reject_disconnects_(fixpp::session::detail::FrameHeader const& hdr,
@@ -3209,8 +3353,9 @@ fixpp::wire::garble_summary header_out_of_order_garble(std::span<const std::byte
 //     and persists only at the expected number, and a failed persist returns before
 //     the Reject), then the Reject. No ResendRequest, no too-low Logout, and
 //     PossDupFlag(43) is not read.
-// The Reject: 45 = the first 34 read; 372 = field 3's value when it is no longer
-// than kMaxShippedMsgTypeLength, else omitted; 373 = 0 without 371 for a malformed
+// The Reject: 45 = the first 34 read; 372 = field 3's value, verbatim (101-inbound-reject-
+// fidelity D7, superseding 092 research R-5's bound: the echo rule of every inbound-fed
+// Reject, so above the outbound ceiling it is omitted); 373 = 0 without 371 for a malformed
 // tag, 373 = 5 with 371 = the Length tag for a Length/Data mismatch; 58 = the fixed
 // Text for the fault kind.
 // No row writes last_inbound_steady_: a faulty frame never refreshes inbound
@@ -3246,16 +3391,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::dispose_unparseable_(
     }
 
     // D-4, D-5, D-6: the Reject.
-    const std::string_view ref_msg_type =
-        hdr.fault_ref_msg_type.size() <= fixpp::session::detail::kMaxShippedMsgTypeLength
-            ? hdr.fault_ref_msg_type
-            : std::string_view{};
     if (hdr.fault == fixpp::wire::field_fault::length_data_mismatch) {
         co_return co_await emit_session_reject_(
-            ref_seq, ref_msg_type, /*reason=*/5, hdr.fault_length_tag,
+            ref_seq, hdr.fault_ref_msg_type, /*reason=*/5, hdr.fault_length_tag,
             fixpp::session::detail::kRejectTextLengthDataMismatch);
     }
-    co_return co_await emit_session_reject_(ref_seq, ref_msg_type, /*reason=*/0, /*ref_tag_id=*/0,
+    co_return co_await emit_session_reject_(ref_seq, hdr.fault_ref_msg_type, /*reason=*/0,
+                                            /*ref_tag_id=*/0,
                                             fixpp::session::detail::kRejectTextMalformedTag);
 }
 
@@ -3289,9 +3431,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::dispose_unparseable_(
 // NOLINTEND(cppcoreguidelines-macro-usage,bugprone-macro-parentheses)
 
 // fixpp#544 §2.2 class 2: reply leaves. Each owns the buffer its frame is built in, because
-// store_then_emit transmits the caller's span after the store suspends. A leaf is awaited
-// directly by its arm, so the views it takes (sending_time, ref_msg_type, test_req_id) point
-// into storage that outlives the await.
+// store_then_emit transmits the caller's span after the store suspends; a Reject or
+// BusinessMessageReject that overflows that buffer is rebuilt in the inbound reply slot, which
+// the leaf's holder keeps until its tail returns (101-inbound-reject-fidelity D7). A leaf is
+// awaited directly by its arm, so the views it takes (sending_time, ref_msg_type, test_req_id)
+// point into storage that outlives the await.
 
 // Reject(35=3); assign_outbound before toAdmin. A failed assign or a throwing toAdmin
 // disconnects and returns the error; the emit's returned error is discarded (store_then_emit's
@@ -3300,12 +3444,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_reject_leaf_(
     bool tic, seqnum_t ref_seq, int ref_tag_id, std::string_view ref_msg_type, int reason,
     std::string_view sending_time, std::optional<fsm_state> arm) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
-    std::array<std::byte, 512> rj_buf{};
+    std::array<std::byte, kInboundReplySiteBytes> rj_buf{};
+    inbound_reply_slot_hold hold{*this};
     const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
-    auto rj_r =
-        fixpp::session::build_reject(std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
-                                     cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq, ref_tag_id,
-                                     ref_msg_type, reason, cfg_.begin_string, sending_time);
+    auto rj_r = build_inbound_reject_(rj_buf, hold, rj_seq, ref_seq, ref_tag_id, ref_msg_type,
+                                      reason, sending_time, std::string_view{});
     if (rj_r) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
@@ -3331,10 +3474,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_reject_best_effo
     std::string_view sending_time) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
     const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
-    std::array<std::byte, 512> rj_buf{};
-    auto rj_r = fixpp::session::build_reject(
-        std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq, cfg_.sender_comp_id,
-        cfg_.target_comp_id, ref_seq, 0, ref_msg_type, 3, cfg_.begin_string, sending_time);
+    std::array<std::byte, kInboundReplySiteBytes> rj_buf{};
+    inbound_reply_slot_hold hold{*this};
+    auto rj_r = build_inbound_reject_(rj_buf, hold, rj_seq, ref_seq, 0, ref_msg_type, 3,
+                                      sending_time, std::string_view{});
     if (rj_r) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (assign_r) {
@@ -3492,13 +3635,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_business_reject_
     std::string_view sending_time) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
     const seqnum_t bmr_seq = seqnum_mgr_.peek_outbound();
-    std::array<std::byte, 512> bmr_buf{};
-    auto bmr_r = fixpp::session::build_business_message_reject(
-        std::span<std::byte>{bmr_buf.data(), bmr_buf.size()}, bmr_seq, cfg_.sender_comp_id,
-        cfg_.target_comp_id, ref_seq,
-        ref_msg_type,  // RefMsgType(372)
-        0,             // BusinessRejectReason(380) = Other
-        cfg_.begin_string, sending_time);
+    std::array<std::byte, kInboundReplySiteBytes> bmr_buf{};
+    inbound_reply_slot_hold hold{*this};
+    auto bmr_r =
+        build_inbound_business_reject_(bmr_buf, hold, bmr_seq, ref_seq, ref_msg_type, sending_time);
     if (bmr_r) {
         // 036 C2: route 35=j through toApp before assign_outbound.
         // toApp fires BEFORE seqnum assignment so a veto consumes
@@ -3725,8 +3865,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
     }
 
     // 099-fixt-appl-version-validation (data-model E-7's S1, FR-029, FR-005): on a validating FIXT
-    // session an application frame, or a frame with two MsgTypes, ends here with nothing sent. It
-    // reads the third field: interpret_logon reads the last 35, so it could not refuse `D…A`.
+    // session an application frame ends here with nothing sent; 101 D6 (FR-006): so does a frame
+    // with two MsgTypes, on every session.
     if (establishment_frame_refused_(route, hdr)) {
         record_state_transition_(fsm_state::Disconnected);
         co_return fixpp::core::expected_t<void>{};
@@ -3755,7 +3895,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
             if (v.outcome == validate_outcome::reject) {
                 auto rj = co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
                                                         v.reject.reason, v.reject.ref_tag_id,
-                                                        /*text=*/{}, fsm_state::NotConnected);
+                                                        session_reject_reason_text(v.reject.reason),
+                                                        fsm_state::NotConnected);
                 // 099 (data-model E-7's S2, FR-010): any other Reject stays in the arm.
                 if (rj && logon_reject_disconnects_(hdr, v.reject.ref_tag_id)) {
                     disconnect_unless_superseded_(fsm_state::NotConnected);
@@ -4431,12 +4572,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
             // only; a faulty Reject or Logout is Rejected under C-2. [041 T014; E-4]
             // Buffer: the session's parse buffer B(L), as dispatch (093).
             if (cfg_.validate_inbound_messages && session_route_.validator) {
-                // 099 (data-model E-7's A1, A2): ahead of the exemption of Reject and Logout, since
-                // a repeated MsgType is what can make hdr.msg_type read either.
-                InboundValidation v{};
-                if (fixt_routing_) {
-                    v = refuse_active_frame_(frame, hdr, route);
-                }
+                // 099 (data-model E-7's A1, A2), widened by 101 D5 to every validating session:
+                // ahead of the exemption of Reject and Logout and of the validator, so a frame with
+                // two MsgTypes is refused whichever its first 35 is.
+                InboundValidation v = refuse_active_frame_(frame, hdr, route);
                 if (v.outcome == validate_outcome::pass && hdr.msg_type != "3" &&
                     hdr.msg_type != "5") {
                     v = validate_inbound_(frame, hdr, route);
@@ -4943,7 +5082,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_valida
                 co_return *expired;
             }
         }
-        // 099 (data-model E-7): a FIXT refusal names the frame by its third field and first 34.
+        // 099 (data-model E-7): a refuse_active_frame_ refusal names the frame by its third field
+        // and first 34 (101 D5: on every validating session).
         bool const named = v.reject.names_third_field;
         const seqnum_t rej_seq = parse_seqnum(named ? hdr.fault_ref_seq_num : hdr.msg_seq_num);
         std::string_view const rej_type = named ? hdr.fault_ref_msg_type : hdr.msg_type;
@@ -4951,7 +5091,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_valida
             co_return c;
         }
         co_return co_await emit_session_reject_(rej_seq, rej_type, v.reject.reason,
-                                                v.reject.ref_tag_id);
+                                                v.reject.ref_tag_id,
+                                                session_reject_reason_text(v.reject.reason));
     }
     co_return fixpp::core::expected_t<void>{};
 }
@@ -5731,8 +5872,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
         co_return co_await dispose_unparseable_(hdr, fsm_state::LogonSent);
     }
 
-    // 099-fixt-appl-version-validation (data-model E-7's S1, FR-029, FR-005): the acceptor's arm
-    // has the reason this reads the third field.
+    // 099-fixt-appl-version-validation (data-model E-7's S1, FR-029, FR-005) and 101 D6: as in the
+    // acceptor's arm.
     if (establishment_frame_refused_(route, hdr)) {
         record_state_transition_(fsm_state::Disconnected);
         co_return fixpp::core::expected_t<void>{};
@@ -5759,7 +5900,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
             if (v.outcome == validate_outcome::reject) {
                 auto rj = co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
                                                         v.reject.reason, v.reject.ref_tag_id,
-                                                        /*text=*/{}, fsm_state::LogonSent);
+                                                        session_reject_reason_text(v.reject.reason),
+                                                        fsm_state::LogonSent);
                 // 099 (data-model E-7's S2, FR-010): any other Reject stays in the arm.
                 if (rj && logon_reject_disconnects_(hdr, v.reject.ref_tag_id)) {
                     disconnect_unless_superseded_(fsm_state::LogonSent);
@@ -7680,6 +7822,18 @@ asio::awaitable<fixpp::core::expected_t<Session::replay_outcome>> Session::repla
     // unbuildable (fixpp#424) runs into one GapFill; flush before each replay.
     static constexpr std::size_t kRpBufSize =
         CaptureVisitor::kCapBufSize + 256;  // capture + replay-tag overhead
+    // 101-inbound-reject-fidelity (research D7, "The capture invariant"): a captured frame, up to
+    // kCapBufSize, is rebuilt here by build_replay_frame, which adds PossDupFlag(43)=Y and
+    // OrigSendingTime(122) and restamps or inserts SendingTime(52). Each timestamp is at most the
+    // widest UTCTimestamp utc_time_to_fix_string writes, its nanos form in core/fix_time.hpp, so
+    // the growth is bounded by the two added fields plus a whole 52, and the headroom must hold
+    // it. A frame built at kSendFrameBytes therefore replays past that ceiling by at most this.
+    static constexpr std::size_t kMaxUtcTimestampChars = sizeof("YYYYMMDD-HH:MM:SS.sssssssss") - 1;
+    static constexpr std::size_t kReplayGrowthBytes =
+        (sizeof("43=Y\x01") - 1) + (sizeof("122=\x01") - 1) + kMaxUtcTimestampChars +
+        (sizeof("52=\x01") - 1) + kMaxUtcTimestampChars;
+    static_assert(kRpBufSize - CaptureVisitor::kCapBufSize >= kReplayGrowthBytes,
+                  "the replay buffer's headroom holds a replay's growth");
     bool gap_open = false;
     seqnum_t gap_start = 0;
     for (seqnum_t k = begin; k <= eff_end; ++k) {

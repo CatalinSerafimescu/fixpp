@@ -60,7 +60,7 @@ fixpp_error_t translate(error e) noexcept {
         case error::dict_reify_oom:
             return FIXPP_ERR_DICT_OOM;
 
-        // ── wire (slots 30-42, 132-133) — [2b §6.7]: framing→INVALID_FRAME,
+        // ── wire (slots 30-42, 132-135) — [2b §6.7]: framing→INVALID_FRAME,
         //    capacity→LIMIT_EXCEEDED, conformance→CONFORMANCE,
         //    truncation→DECIMAL_PRECISION_LOSS ─────────────────────────────────
         case error::wire_invalid_body_length:
@@ -81,6 +81,10 @@ fixpp_error_t translate(error e) noexcept {
         case error::wire_header_out_of_order:
         case error::wire_field_value_out_of_range:
         case error::wire_unexpected_tag:
+        // 101 (data-model `core::error`): dictionary conformance results, as
+        // wire_unexpected_tag is; no C code is added.
+        case error::wire_invalid_msg_type:
+        case error::wire_undefined_tag:
             return FIXPP_ERR_WIRE_CONFORMANCE;
         case error::wire_field_value_truncated:
             return FIXPP_ERR_DECIMAL_PRECISION_LOSS;

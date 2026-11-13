@@ -278,6 +278,54 @@ add_session_099_bucket(session_099_version_tests
   test_099_resolved_version.cpp                                         # 099 T019, T084 (W-10)
   test_099_outbound_1128.cpp                                            # 099 T088 (W-11)
 )
+# 101-inbound-reject-fidelity (tasks.md T019): the feature's Session cells in an entry of their own,
+# shaped as add_session_099_bucket. No TIMEOUT property, so CI's `--timeout` wedge guard governs it.
+function(add_session_101_bucket name)
+  add_executable(${name} ${ARGN} $<TARGET_OBJECTS:session_test_support>)
+  target_link_libraries(${name} PRIVATE
+    fixpp_session
+    fixpp_capi
+    fixpp_mock_clock
+    fixpp_transport
+    fixpp_tls
+    "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+    "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_TRANSPORT_ZLIB_LIB}"
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(${name} PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_SOURCE_DIR}/src"
+  )
+  target_compile_definitions(${name} PRIVATE
+    FIXPP_TEST_BINARY_DIR="${CMAKE_BINARY_DIR}"
+    FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+    "FIXPP_098_FIXTURE_DIR=\"${CMAKE_SOURCE_DIR}/tests/dictionary/fixtures/098\""
+  )
+  add_test(NAME ${name} COMMAND ${name})
+  set_tests_properties(${name} PROPERTIES
+    ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+    LABELS "session;101")
+endfunction()
+add_session_101_bucket(session_101_tests
+  test_101_msg_type.cpp                                                 # 101 T006 (W101-1..5)
+  test_101_tag_reasons.cpp                                              # 101 T007 (W101-10..16)
+  test_101_one_msg_type.cpp                                             # 101 T009 (W101-20..32)
+  test_101_validation_off_oracle.cpp                                    # 101 T010 (W101-24, 25)
+  test_101_repeat_walk.cpp                                              # 101 T011 (W101-29)
+  test_101_interpret_logon.cpp                                          # 101 T012 (W101-30)
+  test_101_echo.cpp                                                     # 101 T013 (W101-40..48)
+  test_101_reply_slot.cpp                                               # 101 T044 (W101-46b, 49)
+)
+# 101 T045 (W101-46a): an abort path, so its own executable ([const §VII.8]); its cell runs where
+# NDEBUG is not defined.
+add_session_101_bucket(session_101_reply_slot_death_test
+  test_101_reply_slot_death.cpp
+)
+
 # 099 W-5's, W-6's and W-25's reconnect cells drive drive_reconnect() through MockReconnectFactory,
 # in those TUs only.
 set_source_files_properties(
@@ -1073,6 +1121,10 @@ set_tests_properties(session_admin_emit_toadmin_coverage PROPERTIES
 # build_reject_with_text( / build_logout( site has fire_to_admin_( between the
 # builder and its store_then_emit(, and
 # every build_business_message_reject( site has ->toApp( in the same interval.
+# A call of a listed build helper is a site with its builder's hook; a builder
+# inside a listed helper's definition is not, and the gate refuses a listed
+# helper whose definition emits, or whose builders do not all need the hook it
+# is listed with (the gate's header states the rule).
 # Exits 1 (prints offending line) if any admin emit site is unwired — catches a
 # FUTURE unwired site even when the dynamic scenario cells pass.
 # Anchors: spec.md SC-002/FR-001/FR-005; tasks.md T041; research.md Decision-1.

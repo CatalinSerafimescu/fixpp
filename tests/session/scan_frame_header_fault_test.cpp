@@ -278,7 +278,7 @@ TEST(ScanFrameHeaderFault, MsgTypeIsThird_FalseWhenField3IsNot35) {
         EXPECT_EQ(h.fault, field_fault::none);
         EXPECT_FALSE(h.msg_type_is_third);
         EXPECT_TRUE(h.fault_ref_msg_type.empty()) << h.fault_ref_msg_type;
-        EXPECT_EQ(h.msg_type, "D") << "the last-wins msg_type is unchanged";
+        EXPECT_EQ(h.msg_type, "D") << "msg_type is the first 35 (101 D4)";
     });
 }
 
@@ -358,11 +358,11 @@ TEST(ScanFrameHeaderFault, FaultRefMsgType_IsField3NotALater35) {
         EXPECT_EQ(h.fault, field_fault::malformed_tag);
         EXPECT_TRUE(h.msg_type_is_third);
         EXPECT_EQ(h.fault_ref_msg_type, "D");
-        EXPECT_EQ(h.msg_type, "4");
+        EXPECT_EQ(h.msg_type, "D") << "101 D4 (FR-004): the first 35, not the later 4";
     });
 }
 
-// ── C-3 I-3: a fault-free frame keeps last-wins ──────────────────────────────
+// ── C-3 I-3: a fault-free frame keeps last-wins (msg_type: the first 35, 101 D4) ──
 
 TEST(ScanFrameHeaderFault, CleanFrame_Duplicate34_KeepsLastWins) {
     for_each_hooks([](dict_hooks const& hooks) {
@@ -379,7 +379,8 @@ TEST(ScanFrameHeaderFault, CleanFrame_Duplicate34_KeepsLastWins) {
     });
 }
 
-TEST(ScanFrameHeaderFault, CleanFrame_Duplicate35_KeepsLastWins) {
+// 101 D4 (FR-004) supersedes 092 data-model E-1 / C-3 I-3 for msg_type: the first 35.
+TEST(ScanFrameHeaderFault, CleanFrame_Duplicate35_KeepsFirst101) {
     for_each_hooks([](dict_hooks const& hooks) {
         auto const s = scan(framed("35=0\x01"
                                    "34=1\x01"
@@ -387,9 +388,90 @@ TEST(ScanFrameHeaderFault, CleanFrame_Duplicate35_KeepsLastWins) {
                             hooks);
         auto const& h = s.h;
         EXPECT_EQ(h.fault, field_fault::none);
-        EXPECT_EQ(h.msg_type, "D");
+        EXPECT_EQ(h.msg_type, "0");
+        EXPECT_TRUE(h.msg_type_conflict);
         EXPECT_TRUE(h.msg_type_is_third);
         EXPECT_EQ(h.fault_ref_msg_type, "0");
+    });
+}
+
+// ── 101-inbound-reject-fidelity W101-31 (research D4, FR-004): one MsgType per frame ──
+// `msg_type` is the first 35; `msg_type_conflict` says a later 35's value differs from it, and
+// stays set once set; `msg_seq_num` keeps last-wins.
+
+TEST(ScanFrameHeaderMsgType101, OneMsgType_NoConflict) {
+    for_each_hooks([](dict_hooks const& hooks) {
+        auto const s = scan(framed("35=D\x01"
+                                   "34=1\x01"
+                                   "49=SND\x01"),
+                            hooks);
+        EXPECT_EQ(s.h.fault, field_fault::none);
+        EXPECT_EQ(s.h.msg_type, "D");
+        EXPECT_FALSE(s.h.msg_type_conflict);
+    });
+}
+
+TEST(ScanFrameHeaderMsgType101, SameValueRepeat_NoConflict) {
+    for_each_hooks([](dict_hooks const& hooks) {
+        auto const s = scan(framed("35=D\x01"
+                                   "34=1\x01"
+                                   "35=D\x01"),
+                            hooks);
+        EXPECT_EQ(s.h.fault, field_fault::none);
+        EXPECT_EQ(s.h.msg_type, "D");
+        EXPECT_FALSE(s.h.msg_type_conflict);
+    });
+}
+
+TEST(ScanFrameHeaderMsgType101, DThenA_FirstWinsAndConflict) {
+    for_each_hooks([](dict_hooks const& hooks) {
+        auto const s = scan(framed("35=D\x01"
+                                   "34=1\x01"
+                                   "35=A\x01"),
+                            hooks);
+        EXPECT_EQ(s.h.fault, field_fault::none);
+        EXPECT_EQ(s.h.msg_type, "D") << "the first 35";
+        EXPECT_TRUE(s.h.msg_type_conflict);
+    });
+}
+
+// Sticky: the last 35 equals the first, and a middle one differs.
+TEST(ScanFrameHeaderMsgType101, DThenAThenD_ConflictIsSticky) {
+    for_each_hooks([](dict_hooks const& hooks) {
+        auto const s = scan(framed("35=D\x01"
+                                   "34=1\x01"
+                                   "35=A\x01"
+                                   "35=D\x01"),
+                            hooks);
+        EXPECT_EQ(s.h.fault, field_fault::none);
+        EXPECT_EQ(s.h.msg_type, "D");
+        EXPECT_TRUE(s.h.msg_type_conflict);
+    });
+}
+
+// An empty later value differs from a non-empty first one (research D4, "Differs").
+TEST(ScanFrameHeaderMsgType101, EmptyLaterValue_IsAConflict) {
+    for_each_hooks([](dict_hooks const& hooks) {
+        auto const s = scan(framed("35=D\x01"
+                                   "34=1\x01"
+                                   "35=\x01"),
+                            hooks);
+        EXPECT_EQ(s.h.fault, field_fault::none);
+        EXPECT_EQ(s.h.msg_type, "D");
+        EXPECT_TRUE(s.h.msg_type_conflict);
+    });
+}
+
+TEST(ScanFrameHeaderMsgType101, MsgSeqNum_StaysLastWins) {
+    for_each_hooks([](dict_hooks const& hooks) {
+        auto const s = scan(framed("35=D\x01"
+                                   "34=1\x01"
+                                   "35=A\x01"
+                                   "34=5\x01"),
+                            hooks);
+        EXPECT_EQ(s.h.msg_seq_num, "5");
+        EXPECT_EQ(s.h.fault_ref_seq_num, "1");
+        EXPECT_EQ(s.h.msg_type, "D");
     });
 }
 
@@ -563,8 +645,9 @@ void expect_clean_and_agree(std::string const& wire, dict_hooks const& hooks) {
     auto const entries = o.table.entries();
     std::string_view first_34;
     std::string_view last_34;
-    std::string_view last_35;
+    std::string_view first_35;
     bool seen_34 = false;
+    bool seen_35 = false;
     for (auto const& e : entries) {
         if (e.tag == 34) {
             if (!seen_34) {
@@ -573,8 +656,9 @@ void expect_clean_and_agree(std::string const& wire, dict_hooks const& hooks) {
             }
             last_34 = entry_value(s.bytes, e);
         }
-        if (e.tag == 35) {
-            last_35 = entry_value(s.bytes, e);
+        if (e.tag == 35 && !seen_35) {
+            first_35 = entry_value(s.bytes, e);
+            seen_35 = true;
         }
     }
     bool const third_is_35 = entries.size() > 2 && entries[2].tag == 35;
@@ -585,7 +669,8 @@ void expect_clean_and_agree(std::string const& wire, dict_hooks const& hooks) {
               third_is_35 ? entry_value(s.bytes, entries[2]) : std::string_view{})
         << "fault_ref_msg_type vs the third entries() element";
     EXPECT_EQ(s.h.msg_seq_num, last_34) << "C-3 I-3: msg_seq_num stays last-wins";
-    EXPECT_EQ(s.h.msg_type, last_35) << "C-3 I-3: msg_type stays last-wins";
+    // 101 D4 (FR-004) supersedes C-3 I-3 for msg_type: the first 35.
+    EXPECT_EQ(s.h.msg_type, first_35) << "101 D4: msg_type is the first 35";
 }
 
 // Before any mutation: the seed must be clean on both sides under these hooks.
@@ -622,10 +707,15 @@ void expect_planted_fault(Planted const& p, dict_hooks const& hooks) {
     EXPECT_EQ(status.error(), p.error);
 
     for (std::uint16_t const tag : kScannedTags) {
-        std::string_view expected;  // last-wins among the fields before the fault
+        // Last-wins among the fields before the fault; for 35 the first (101 D4, FR-004,
+        // superseding C-3 I-3 for msg_type).
+        std::string_view expected;
         for (std::size_t k = 0; k < p.index; ++k) {
             if (tag_of(p.fields[k]) == tag) {
                 expected = std::string_view{p.fields[k]}.substr(p.fields[k].find('=') + 1);
+                if (tag == 35) {
+                    break;
+                }
             }
         }
         EXPECT_EQ(member_for(s.h, tag).value_or("?"), expected) << "member for tag " << tag;

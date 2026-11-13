@@ -7,13 +7,18 @@
 // will. `scan_frame_header` cannot do this: its hooks come from that table, so what it splits
 // depends on the answer.
 //
-// One rule on every shape. The walk uses S's hooks through `length_data_carry::read_value`, the
-// primitive `scan_frame_header` uses, and reads a tag exactly as that scan does, so a frame this
-// cannot read is one the scan, on S's route, faults or garbles on in the same place. It stops at
-// the first tag that is neither a header tag of S nor a standard header tag.
+// One rule on every shape. peek_fixt_route's walk uses S's hooks through
+// `length_data_carry::read_value`, the primitive `scan_frame_header` uses, and reads a tag exactly
+// as that scan does, so a frame this cannot read is one the scan, on S's route, faults or garbles
+// on in the same place. It stops at the first tag that is neither a header tag of S nor a standard
+// header tag.
 //
 // MsgType is the third field's even when a tag ahead of it stopped the walk: `FrameHeader`'s
 // `fault_ref_msg_type` is the third field's value on any fault-free frame, and the two must agree.
+//
+// 101-inbound-reject-fidelity D5 (FR-005) supersedes 099 FR-025's choice between 373=13 and 14: the
+// repeat walk below (`fixt_header_repeats_msg_type`) reads the whole frame with the route's hooks
+// and reports where later 35s stand; refuse_active_frame_ answers from that report.
 //
 // Internal header: NOT under include/fixpp/. No heap on any path (NFR-002).
 #pragma once
@@ -49,10 +54,12 @@ inline constexpr std::uint32_t kMsgTypeField = 3;
 // Calls `on_field(field_no, tag, value, past_stop)` for each field read, in frame order. Returns
 // false when a field it had to read faults. A field ahead of the third is read whatever its tag,
 // with `past_stop` set once a tag has stopped the walk, because the third field must still be
-// found on the boundaries the scan uses. From the third field on, the walk ends at the stop.
-template <class OnField>
+// found on the boundaries the scan uses. From the third field on, the walk ends at the stop,
+// unless `kWholeFrame` (the repeat walk, 101 D5), which reads every field to the frame's end with
+// one carry. `hooks` are the hooks every field is read with; `s_table` classifies the stop.
+template <bool kWholeFrame = false, class OnField>
 [[nodiscard]] bool walk_fixt_header(std::span<const std::byte> frame,
-                                    fixpp::wire::dict_hooks const& s_hooks,
+                                    fixpp::wire::dict_hooks const& hooks,
                                     fixpp::dict::table_view const& s_table,
                                     OnField const& on_field) noexcept {
     const std::byte SOH{0x01};
@@ -62,7 +69,7 @@ template <class OnField>
     std::size_t i = 0;
     std::uint32_t field_no = 0;
     bool past_stop = false;
-    while (i < n && (!past_stop || field_no < kMsgTypeField)) {
+    while (i < n && (kWholeFrame || !past_stop || field_no < kMsgTypeField)) {
         const std::size_t field_start = i;
         ++field_no;
         std::uint32_t tag = 0;
@@ -80,11 +87,13 @@ template <class OnField>
         auto const wire_tag = static_cast<std::uint16_t>(tag);
         past_stop = past_stop || !(s_table.is_header_tag(wire_tag) ||
                                    fixpp::dict::is_fixt_standard_header_tag(wire_tag));
-        if (past_stop && field_no > kMsgTypeField) {
-            return true;
+        if constexpr (!kWholeFrame) {
+            if (past_stop && field_no > kMsgTypeField) {
+                return true;
+            }
         }
         std::size_t const vstart = i;
-        auto const value = carry.read_value(frame, vstart, wire_tag, s_hooks);
+        auto const value = carry.read_value(frame, vstart, wire_tag, hooks);
         if (!value) {
             return false;
         }
@@ -128,20 +137,35 @@ template <class OnField>
     return peek;
 }
 
-// The cold path of a repeated MsgType (FR-025): whether a second 35 stands in the header, by the
-// same walk and the same stop. Read only when the third field's value and the last 35 differ.
-[[nodiscard]] inline bool fixt_header_repeats_msg_type(
-    std::span<const std::byte> frame, fixpp::wire::dict_hooks const& s_hooks,
+// What the repeat walk saw: a 35 after the third field standing in the header, and one past it.
+// Both false when the walk faulted (the 35s it had seen are discarded) or saw no later 35.
+struct msg_type_repeat_report {
+    bool in_header = false;
+    bool past_header = false;
+};
+
+// The cold path of a repeated MsgType. 101-inbound-reject-fidelity D5 (FR-005) supersedes 099
+// FR-025's walk here: one walk over the whole frame, which does not end at the header's stop
+// (`walk_fixt_header`'s `kWholeFrame` form, so it reads a tag exactly as the peek does). Every
+// field is read with `route_hooks` (the hooks the arm's scan_frame_header call used; the owner
+// ruling research D5 records), through one `length_data_carry` never reset or replaced, so a Data
+// value counted by a header Length is read whole across the stop. Each tag is classified by S's
+// header union (`s_table`'s header tags plus the standard header tags); once a field is not a
+// header field, every later field is past the header. A 35 after the third field is in the header
+// when no field before it was past the header. peek_fixt_route's walk and its stop are unchanged.
+[[nodiscard]] inline msg_type_repeat_report fixt_header_repeats_msg_type(
+    std::span<const std::byte> frame, fixpp::wire::dict_hooks const& route_hooks,
     fixpp::dict::table_view const& s_table) noexcept {
-    bool repeated = false;
-    (void)peek_detail::walk_fixt_header(
-        frame, s_hooks, s_table,
-        [&repeated](std::uint32_t field_no, std::uint16_t tag, std::string_view,
-                    bool /*past_stop*/) noexcept {
-            repeated = repeated ||
-                       (field_no > peek_detail::kMsgTypeField && tag == peek_detail::kMsgTypeTag);
+    msg_type_repeat_report seen;
+    const bool read = peek_detail::walk_fixt_header</*kWholeFrame=*/true>(
+        frame, route_hooks, s_table,
+        [&seen](std::uint32_t field_no, std::uint16_t tag, std::string_view,
+                bool past_stop) noexcept {
+            if (field_no > peek_detail::kMsgTypeField && tag == peek_detail::kMsgTypeTag) {
+                (past_stop ? seen.past_header : seen.in_header) = true;
+            }
         });
-    return repeated;
+    return read ? seen : msg_type_repeat_report{};
 }
 
 }  // namespace fixpp::session::detail

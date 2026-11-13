@@ -34,11 +34,16 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/load_any.hpp>
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/xml_loader.hpp>
+#include <fstream>
+#include <iterator>
 #include <memory_resource>
+#include <string>
 #include <string_view>
 
 namespace {
@@ -197,5 +202,83 @@ static void BM_TableView_CopyFix44(benchmark::State& state) {
     }
 }
 BENCHMARK(BM_TableView_CopyFix44)->Unit(benchmark::kMicrosecond);
+
+// -----------------------------------------------------------------------
+// 101-inbound-reject-fidelity (research D8, "Footprint"): the defined-tag store's bytes,
+// report-only. Not timed (Iterations(1), as BM_TableView_Sizeof), and named outside the
+// BM_TableView_Build* / BM_TableView_Copy* rows, so the timed row set stays the base's.
+//
+// `defined_tags` counts the tags `tag_defined()` answers true for, over the whole uint16_t tag
+// space; `defined_tags_B` is that count times sizeof(std::uint16_t): the store's element bytes,
+// which is what a copy of the view allocates for it. Derived from the public accessor rather
+// than from the private member, so the figure is reproducible from the header alone. Re-derive:
+// run this binary with --benchmark_filter=DefinedTags.
+//
+// The high-tag overlay row adds one field at the top of the tag space to the FIX44 base and no
+// message: its count is the FIX44 row's plus one, and its bytes grow by one element, where a
+// tag-space bitset would grow to the top tag's word.
+// -----------------------------------------------------------------------
+namespace {
+
+std::size_t defined_tag_count(fixpp::dict::table_view const& tv) {
+    std::size_t n = 0;
+    for (std::uint32_t t = 1; t <= 0xFFFFU; ++t) {
+        if (tv.tag_defined(static_cast<std::uint16_t>(t))) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+void report_defined_tags(benchmark::State& state, fixpp::dict::table_view const& tv) {
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(tv.tag_defined(35));
+    }
+    auto const n = defined_tag_count(tv);
+    state.counters["defined_tags"] = static_cast<double>(n);
+    state.counters["defined_tags_B"] = static_cast<double>(n * sizeof(std::uint16_t));
+}
+
+std::string slurp(std::filesystem::path const& p) {
+    std::ifstream in{p, std::ios::binary};
+    return {std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
+}  // namespace
+
+static void BM_TableView_DefinedTags_Fix44(benchmark::State& state) {
+    static std::pmr::unsynchronized_pool_resource mr;
+    auto const dictionary = fixpp::dict::XmlLoader{}.load(dict_path("FIX44.xml"), &mr);
+    report_defined_tags(state, dictionary.as_table_view());
+}
+BENCHMARK(BM_TableView_DefinedTags_Fix44)->Iterations(1);
+
+// A FIXT session's route table for FIX 5.0 SP2 (the as_table_view(fixt_framing) form).
+static void BM_TableView_DefinedTags_FixtRouteFix50SP2(benchmark::State& state) {
+    static std::pmr::unsynchronized_pool_resource mr;
+    auto const dictionary = fixpp::dict::XmlLoader{}.load(dict_path("FIX50SP2.xml"), &mr);
+    report_defined_tags(state, dictionary.as_table_view(fixpp::dict::fixt_framing));
+}
+BENCHMARK(BM_TableView_DefinedTags_FixtRouteFix50SP2)->Iterations(1);
+
+static void BM_TableView_DefinedTags_FixLatest(benchmark::State& state) {
+    static std::pmr::unsynchronized_pool_resource mr;
+    auto const dictionary =
+        fixpp::dict::load_any(dict_path("orchestra/OrchestraFIXLatest.xml"), &mr);
+    report_defined_tags(state, dictionary.as_table_view());
+}
+BENCHMARK(BM_TableView_DefinedTags_FixLatest)->Iterations(1);
+
+static void BM_TableView_DefinedTags_Fix44HighTagOverlay(benchmark::State& state) {
+    static std::pmr::unsynchronized_pool_resource mr;
+    auto const dictionary = fixpp::dict::XmlLoader{}.load_with_overlay_from_string(
+        slurp(dict_path("FIX44.xml")),
+        "<fix type='FIX' major='4' minor='4'><fields>"
+        "<field number='65535' name='Footprint101High' type='STRING' />"
+        "</fields></fix>",
+        &mr);
+    report_defined_tags(state, dictionary.as_table_view());
+}
+BENCHMARK(BM_TableView_DefinedTags_Fix44HighTagOverlay)->Iterations(1);
 
 BENCHMARK_MAIN();

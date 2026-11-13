@@ -55,6 +55,11 @@ long g_alloc_count = 0;
 long g_fail_at = -1;  // -1 = never fail
 }  // namespace
 
+// GCC's -Wmismatched-new-delete pairs std::free with the STANDARD operator new; these replace it.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
+#endif
 void* operator new(std::size_t size) {
     if (++g_alloc_count == g_fail_at) {
         throw std::bad_alloc{};
@@ -79,6 +84,9 @@ void operator delete(void* p) noexcept { std::free(p); }
 void operator delete[](void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 namespace {
 
@@ -158,6 +166,47 @@ TEST(RecordStoreOom100, SectionRecordIsAllOrNothing) {
         "add_section_group",
         [&rec](table_view_builder& b) { b.add_section_group(kPath, kNo, rec); },
         &table_view_test_access::section_records);
+}
+
+// 101-inbound-reject-fidelity (research D1): `build() &&` seals the defined-tag store first, and
+// the seal's one allocation (its `reserve`) comes before it writes any member, so a failure there
+// leaves the builder unchanged and a retry builds the same census. The cell fails the first
+// allocation inside `build()`, then builds the same builder again. Mutation procedure: release
+// `defined_bits_` before the `reserve`, keeping the fill on a local copy of the bits, so a first
+// build still reads the census and only the retry reads none.
+TEST(SealOom101, FailedSealLeavesTheBuilderUnchanged) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP();
+    auto const populate = [](table_view_builder& b) {
+        b.add_valid_tag(kMsgType, 9000);
+        b.add_valid_tag(kMsgType, 55);
+        b.add_valid_tag(kMsgType, 6050);
+        b.add_valid_tag(kMsgType, 11);
+    };
+    std::vector<std::uint16_t> const want{11, 55, 6050, 9000};
+    {
+        table_view_builder b;
+        populate(b);
+        auto const tv = std::move(b).build();
+        ASSERT_EQ(table_view_test_access::defined_tags(tv), want)
+            << "positive control: the census of an unfailed build";
+    }
+    table_view_builder b;
+    populate(b);
+    g_fail_at = g_alloc_count + 1;
+    bool caught = false;
+    try {
+        (void)std::move(b).build();
+    } catch (std::bad_alloc const&) {
+        caught = true;
+    }
+    g_fail_at = -1;  // disarm BEFORE the retry and the assertions, which allocate
+    ASSERT_TRUE(caught) << "the first allocation inside build() was not made to fail (arming is "
+                           "broken)";
+    // build() && threw in the seal, before moving the view: b is the builder the retry is about.
+    // NOLINTNEXTLINE(bugprone-use-after-move,hicpp-invalid-access-moved)
+    auto const tv = std::move(b).build();
+    EXPECT_EQ(table_view_test_access::defined_tags(tv), want)
+        << "the retry after a failed seal reads the builder's census";
 }
 
 }  // namespace

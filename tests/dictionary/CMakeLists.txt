@@ -52,6 +52,7 @@ add_executable(dictionary_pure_tests
   test_072_delimiter_guard_test.cpp  # 072 US1: load-time nested==parent delimiter guard witness
   oom_injection_test.cpp          # local failing_pmr_resource seam — no global state
   dictionary_snapshot_test.cpp    # fixpp#215 item 1 (Option C): A1-A5 boundary pins + seam 4 alias identity
+  test_101_tag_defined.cpp        # 101 T029: W101-15, table_view::tag_defined
   test_100_registration_records.cpp  # 100 T028: registration stores, records, D2 sweep
 )
 target_link_libraries(dictionary_pure_tests PRIVATE
@@ -99,6 +100,9 @@ set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 099)
 # 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
 # setter for this entry, so the existing labels survive.
 set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 100)
+# 101-inbound-reject-fidelity: label 101 (tasks.md T019). APPEND, after the last LABELS setter
+# for this entry, so the existing labels survive. test_101_tag_defined.cpp joins this bucket.
+set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 101)
 
 # ── 098-dialect-overlay: the overlay witnesses W-0..W-4 and W-9's status-mapping rows ──
 # Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); a bucket of

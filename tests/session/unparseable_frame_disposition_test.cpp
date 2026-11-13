@@ -2176,10 +2176,11 @@ INSTANTIATE_TEST_SUITE_P(UnparseableFrameDisposition, RowByValidation,
 //     2 fills it, so the gap closes, and a Heartbeat at 5 then draws a fresh
 //     ResendRequest from 3 (none is sent while a gap is still open).
 //   RefMsgTypeBound_*: a faulty frame at N whose MsgType is far longer than any shipped
-//     MsgType draws a Reject without 372, and NextNumIn advances only together with that
-//     Reject. The length below is spelled out, not derived from the session's bound.
-//     To check it can fail, pass the unbounded 372 in dispose_unparseable_ in a scratch
-//     copy: the Reject no longer fits its buffer, and the cell must fail on the Reject.
+//     MsgType, overflowing the disposer's own buffer and fitting the outbound ceiling,
+//     draws a Reject whose 372 is that MsgType byte for byte, and NextNumIn advances only
+//     together with that Reject. 101-inbound-reject-fidelity D7 (FR-007) supersedes 092
+//     research R-5's bound, under which this Reject carried no 372 (the cells' former
+//     names ended `_RejectWithout372_*`).
 
 TEST(UnparseableFrameDisposition, App_AtN_MalformedTag) {
     run_expected_n_cell(At::active, "D", kOrderFields, kTagShape);
@@ -2336,17 +2337,18 @@ void run_ref_msg_type_bound_cell(Shape const& shape) {
     std::string const row = "RefMsgTypeBound (373=" + std::string{shape.reason} + ")";
     std::string const long_type(600, 'Z');
     feed_faulty(c, make_raw_frame(long_type, 2, kOrderFields + shape.garble),
-                want_reject("2", "", shape), row);
+                want_reject("2", long_type, shape), row);
     for (auto const& r : c.fix.sent_of_type("3")) {
-        EXPECT_FALSE(has_field(r, "372=")) << row << ": the Reject must carry no RefMsgType(372)";
+        EXPECT_TRUE(has_field(r, "372=" + long_type + "\x01"))
+            << row << ": 372 is the MsgType, verbatim";
     }
     expect_heartbeat_in_sequence(c.fix, *c.sess, *c.app, 3, row + " (NextNumIn advanced)");
 }
 
-TEST(UnparseableFrameDisposition, RefMsgTypeBound_LongMsgType_RejectWithout372_MalformedTag) {
+TEST(UnparseableFrameDisposition, RefMsgTypeBound_LongMsgType_RejectWith372_MalformedTag) {
     run_ref_msg_type_bound_cell(kTagShape);
 }
-TEST(UnparseableFrameDisposition, RefMsgTypeBound_LongMsgType_RejectWithout372_LengthDataMismatch) {
+TEST(UnparseableFrameDisposition, RefMsgTypeBound_LongMsgType_RejectWith372_LengthDataMismatch) {
     run_ref_msg_type_bound_cell(kCountShape);
 }
 
@@ -2673,7 +2675,7 @@ TEST(UnparseableFrameDisposition, LateSite_Active_NewOrderSingle_FromApp_Closes)
 // parse ceiling parses. At a dispatch site the message is delivered and consumed, and
 // the durable read reports the advance. At the Active validate gate the validator runs
 // over the parsed frame and rejects the first filler tag, which the dictionary does not
-// define for the message. So a LateSite_* frame differs from a parseable one only in
+// define. So a LateSite_* frame differs from a parseable one only in
 // its field count, and the durable read can report an advance.
 TEST(UnparseableFrameDisposition, LateSite_Control_BelowCeiling_FromApp_DeliveredAndConsumed) {
     LateCell c{{}};
@@ -2698,9 +2700,16 @@ TEST(UnparseableFrameDisposition, LateSite_Control_BelowCeiling_ValidateGate_Par
     }
     int const app_before = c.app->from_app;
     c.fix.feed(*c.sess, make_raw_frame("D", 2, kNewOrderFields + filler(kControlFillerFields)));
-    expect_only_reject(
-        c.fix, {.ref_seq = "2", .ref_msg_type = "D", .reason = "2", .ref_tag = "5000", .text = ""},
-        "control: the validator's Reject of the first filler tag");
+    // 101 FR-003: a validation-gate Reject carries QuickFIX C++'s text for its 373. 101 FR-002:
+    // the cell needs 5000 undefined by the session dictionary (re-derive with the field-definition
+    // grep), so the reason is 0.
+    expect_only_reject(c.fix,
+                       {.ref_seq = "2",
+                        .ref_msg_type = "D",
+                        .reason = "0",
+                        .ref_tag = "5000",
+                        .text = "Invalid tag number"},
+                       "control: the validator's Reject of the first filler tag");
     EXPECT_TRUE(c.sess->is_open()) << "control: the session stays open";
     EXPECT_EQ(c.sess->state(), fsm_state::Active) << "control: state after the frame";
     EXPECT_EQ(c.app->from_app, app_before) << "control: a rejected message is not delivered";

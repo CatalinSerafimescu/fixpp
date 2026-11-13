@@ -586,7 +586,7 @@ TEST(ValidateGateInbound, RejectNotConsumed_OutOfSequenceLogonSequenceReset) {
 //   8 KiB arena: 8192 − 6132 = 2060 bytes remaining; cap-512 needs 6144 → FAILS.
 //     parse() returns unexpected; validation silently skipped → bypass.
 //   16 KiB arena: 16384 − 6132 = 10252 bytes remaining; cap-512 needs 6144 → OK.
-//     parse succeeds; validate fires → Reject(373=2) ✓.
+//     parse succeeds; validate fires → Reject(373=0) ✓.
 //
 // Field count choice (N = 400 undefined tags):
 //   Total entries = 10 header/required + 400 undefined = 410 → cap-512 needed.
@@ -605,7 +605,7 @@ TEST(ValidateGateInbound, RejectNotConsumed_OutOfSequenceLogonSequenceReset) {
 //
 // RED on kAdminParseArena gate: arena exhausts at ~257 fields → parse() returns
 //   unexpected → validation SKIPPED → no Reject.
-// On the session's parse buffer: parse succeeds → validate fires → Reject(373=2)
+// On the session's parse buffer: parse succeeds → validate fires → Reject(373=0)
 //   for the first undefined tag; then conformant NOS at seq=2 dispatched, no Reject.
 //
 // RED-discrimination confirmation (required by brief):
@@ -618,7 +618,9 @@ TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
     Session sess{fix.engine, cfg};
     fix.open_to_active(sess);
 
-    // ── (a) Feed violation frame: 280 undefined tags → must produce Reject(373=2) ──
+    // ── (a) Feed violation frame: 280 undefined tags → must produce Reject(373=0) ──
+    // The cell needs the tags undefined by the session dictionary (101 FR-002 supersedes this
+    // cell's 373=2); re-derive with the field-definition grep over dictionaries/*.xml.
     //
     // Total entries: 7 header fields (8,9,35,49,56,34,52) + 3 required body fields
     // (11,54,60) + 280 undefined (9000-9279) = 290.  Needs cap-512 (next power of 2
@@ -641,9 +643,9 @@ TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
     // On kAdminParseArena gate: arena exhausts at ~257 fields → parse() returns
     //   unexpected → validation SKIPPED → no Reject  [RED].
     // On the session's parse buffer: parse succeeds → validate fires →
-    //   first undefined tag (9000) detected → Reject(373=2)  [GREEN].
-    EXPECT_TRUE(fix.has_reject_with_reason(2))
-        << "W8a: high-field-count frame with undefined tags must be Rejected (373=2), "
+    //   first undefined tag (9000) detected → Reject(373=0)  [GREEN].
+    EXPECT_TRUE(fix.has_reject_with_reason(0))
+        << "W8a: high-field-count frame with undefined tags must be Rejected (373=0), "
            "not silently bypassed due to parse-arena exhaustion in the validate gate";
 
     // ── (b) Threshold-independent discrimination: conformant Heartbeat at same seqnum ──

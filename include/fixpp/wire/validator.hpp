@@ -20,6 +20,9 @@
 // below and are instantiated wherever a complete table_view exists (now in
 // both production TUs via Dictionary::as_table_view() and test TUs).
 //
+// 101-inbound-reject-fidelity D2 supersedes the step order below Step 0: see validate()'s
+// algorithm list.
+//
 // 099-fixt-appl-version-validation (data-model E-4, FR-008): dictionary_driven_validator gains a
 // non-virtual validate() taking the session dictionary's table as an envelope, and table(). Neither
 // is on `Validator`, and the class's layout does not move.
@@ -140,8 +143,12 @@ public:
 
     // [2b §6.5] Unconditional validation over every field present in `msg`.
     // Algorithm (per spec):
+    //   0. Header order (the first field after 8 and 9 is 35), then the
+    //      MsgType: one the table does not define → wire_invalid_msg_type
+    //      (101 D2), no RefTagID.
     //   1. Iterate each field via begin/end; for each:
-    //      a. Unexpected tag  → wire_unexpected_tag (42)
+    //      a. Tag outside the message → wire_unexpected_tag (42) when the
+    //         table defines it, wire_undefined_tag when it does not (101 D2)
     //      b. Enum violation  → wire_field_value_out_of_range (40)
     //      c. Type structural → wire_field_value_out_of_range (40) /
     //                           wire_field_value_truncated (41) [Float path]
@@ -179,8 +186,8 @@ public:
         using iter_t = MessageView<access_mode::Index>::field_iterator;
 
         // 092 T062a (FR-012, owner ruling on a failed-build view): a failed
-        // build leaves msg_type() empty, so Step 1 would reject the first field
-        // as an unexpected tag before its walk met the fault. When the build
+        // build leaves msg_type() empty, so the MsgType check below would refuse
+        // the frame before a walk met the fault. When the build
         // failed, walk to the end or the first fault and report the fault the
         // same way E-5 does. A build that failed for another reason (out of
         // memory, the offset-table cap) leaves a walk with no fault, and then
@@ -222,13 +229,18 @@ public:
             }
         }
 
-        // ── Step 1: iterate every present field ──────────────────────────
-        // Hoist (perf): `field_valid_for(msg_type, tag)` re-hashes the
-        // loop-invariant msg_type on every field (valid_.find(msg_type)).
-        // Fetch the tag view once; an unknown msg_type yields a view whose
-        // `contains()` is false for every tag — identical to field_valid_for
-        // returning false for every tag.
+        // ── The MsgType check (101 D2: the algorithm list above) ─────────
+        // The view is fetched once and Step 1 reuses it, so a validated
+        // message pays one valid_.find(msg_type).
         auto const valid_tags = dict_.valid_tags_for(msg_type);
+        if (!valid_tags.found()) {
+            return core::expected_t<void>{std::unexpect, core::error::wire_invalid_msg_type};
+        }
+
+        // ── Step 1: iterate every present field ──────────────────────────
+        // Hoist (perf): `field_valid_for(msg_type, tag)` would re-hash the
+        // loop-invariant msg_type per field, so the walk below tests membership
+        // in the view fetched above instead.
         iter_t const begin{msg.bytes(), 0, &hooks};
         iter_t const end{msg.bytes(), msg.bytes().size(), &hooks};
         auto const fields =
@@ -587,10 +599,14 @@ private:
             // term only runs on an already-failing lookup, adding no cost to
             // the pre-081 accept path (T023 perf note). A FIXT framing tag
             // (populated by Dictionary::as_table_view()'s forms — dictionary.hpp)
-            // passes here instead of rejecting wire_unexpected_tag.
+            // passes here instead of being refused.
+            // 101 D2 (step 1a of the algorithm list): the walk is flat, so a tag inside a
+            // group instance is told apart here too, with no group-specific code.
             if (!valid_tags.contains(fld.tag) && !dict_.is_fixt_framing_tag(fld.tag)) {
                 set_ref_tag(ref_tag_out, fld.tag);
-                return core::expected_t<void>{std::unexpect, core::error::wire_unexpected_tag};
+                return core::expected_t<void>{std::unexpect, dict_.tag_defined(fld.tag)
+                                                                 ? core::error::wire_unexpected_tag
+                                                                 : core::error::wire_undefined_tag};
             }
 
             // (b) Enum validity check

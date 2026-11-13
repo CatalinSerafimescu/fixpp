@@ -197,10 +197,12 @@ constexpr std::array kEnumTable{
     EnumEntry{.name="app_payload_malformed",              .value=error::app_payload_malformed},
     EnumEntry{.name="wire_invalid_tag_number",            .value=error::wire_invalid_tag_number},
     EnumEntry{.name="wire_length_data_mismatch",          .value=error::wire_length_data_mismatch},
+    EnumEntry{.name="wire_invalid_msg_type",              .value=error::wire_invalid_msg_type},
+    EnumEntry{.name="wire_undefined_tag",                 .value=error::wire_undefined_tag},
 };
 // clang-format on
 
-static_assert(kEnumTable.size() == 118U, "E-3-test: enumerator table must have exactly 118 rows");
+static_assert(kEnumTable.size() == 120U, "E-3-test: enumerator table must have exactly 120 rows");
 
 // Build a name→code lookup from the CSV oracle.
 // Format: lines starting with '#' are comments; data lines are "name,FIXPP_ERR_SYMBOL".
@@ -292,7 +294,7 @@ fixpp_error_t symbol_to_code(const std::string& sym) {
 TEST(CapiError, CorrectnessOracle) {
     auto csv = load_csv();
     ASSERT_FALSE(csv.empty()) << "CSV not loaded from " FIXPP_CAPI_DATA_DIR;
-    ASSERT_EQ(csv.size(), 118U) << "CSV must have exactly 118 data rows";
+    ASSERT_EQ(csv.size(), 120U) << "CSV must have exactly 120 data rows";
 
     for (const auto& entry : kEnumTable) {
         auto it = csv.find(std::string(entry.name));

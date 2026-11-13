@@ -142,6 +142,9 @@ public:
     std::atomic<asio::steady_timer*> wake{nullptr};
     // Sends `toApp` vetoes from now on; written only through a post to the strand.
     int veto_remaining = 0;
+    // 101-inbound-reject-fidelity (tasks.md T014): fromApp rejects every message, so each
+    // draws a BusinessMessageReject. Set before start_and_logon(), read on the strand.
+    bool reject_from_app = false;
 
     void onLogon(fixpp::session::SessionId const& /*id*/) override {
         logons.fetch_add(1, std::memory_order_release);
@@ -170,6 +173,7 @@ public:
         } else if (mode_ == hook::wake_from_app) {
             wake_loop();
         }
+        if (reject_from_app) return std::unexpected(fixpp::core::error::app_do_not_send);
         return {};
     }
 
@@ -203,6 +207,19 @@ public:
     std::atomic<std::size_t> bytes{0};
     std::atomic<std::size_t> app_frames{0};
     std::atomic<bool> ended{false};
+    // 101-inbound-reject-fidelity (tasks.md T014): the Rejects (`<SOH>35=3<SOH>`) and
+    // BusinessMessageRejects (`<SOH>35=j<SOH>`) among the bytes, and the fields equal to the
+    // pattern expect_372() set, which runs before start().
+    std::atomic<std::uint64_t> reply_frames{0};
+    std::atomic<std::uint64_t> fields_372{0};
+
+    void expect_372(std::string_view msg_type) {
+        pattern_372_ =
+            "\x01"
+            "372=" +
+            std::string(msg_type) + "\x01";
+        match_372_ = matcher{pattern_372_};
+    }
 
     void start() {
         sock_->async_read_some(asio::buffer(buf_), [this](std::error_code const& ec,
@@ -221,6 +238,10 @@ private:
         std::size_t found = 0;
         for (std::size_t i = 0; i < n; ++i) {
             char const c = buf_[i];
+            if (match_reject_.feed(c) || match_bmr_.feed(c)) {
+                reply_frames.fetch_add(1, std::memory_order_release);
+            }
+            if (match_372_.feed(c)) fields_372.fetch_add(1, std::memory_order_release);
             if (c == kPattern[match_]) {
                 if (++match_ == kPattern.size()) {
                     ++found;
@@ -235,9 +256,36 @@ private:
         start();
     }
 
+    // A streaming match of a pattern whose only SOHs are its first and last byte: the
+    // closing SOH opens the next match, and a mismatch restarts at an SOH.
+    struct matcher {
+        std::string_view pat;
+        std::size_t m = 0;
+        bool feed(char c) noexcept {
+            if (pat.empty()) return false;
+            if (c == pat[m]) {
+                if (++m == pat.size()) {
+                    m = 1;
+                    return true;
+                }
+                return false;
+            }
+            m = c == pat[0] ? 1 : 0;
+            return false;
+        }
+    };
+
     asio::ip::tcp::socket* sock_;
     std::array<char, 4096> buf_{};
     std::size_t match_ = 0;  // run thread only
+    matcher match_reject_{
+        "\x01"
+        "35=3\x01"};
+    matcher match_bmr_{
+        "\x01"
+        "35=j\x01"};
+    std::string pattern_372_;
+    matcher match_372_{};
 };
 
 // A long-lived coroutine on the session strand, woken by `wake`'s cancel. Each wake runs

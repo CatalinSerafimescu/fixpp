@@ -63,12 +63,14 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/length_data_pairs.hpp>  // is_standard_pair_tag (the standard pairs)
 #include <fixpp/dict/field_type.hpp>         // field_type (7-value enum)
 #include <functional>
+#include <limits>
 #include <optional>  // group_first_field_exact (fixpp#215 item 2) — header-only, alloc-free
 #include <span>
 #include <string>
@@ -285,6 +287,12 @@ public:
         return set_ != nullptr && set_->contains(tag);
     }
 
+    // 101-inbound-reject-fidelity (research D2): true when the view refers to a `valid_` entry,
+    // i.e. the table defines the MsgType it was taken for (some add_valid(_tag) or
+    // add_required(_tag) named it; a group-context, per-tag, header or framing operation does
+    // not). The validator answers wire_invalid_msg_type on a view this is false for.
+    [[nodiscard]] bool found() const noexcept { return set_ != nullptr; }
+
 private:
     friend class table_view;
 
@@ -365,9 +373,9 @@ public:
     // Hot-path hoist (validator perf round): the per-msg_type valid-tag set,
     // fetched ONCE per message so validate()'s per-field loop pays a uint16
     // set-membership test instead of re-hashing the loop-invariant msg_type
-    // on every field. An unknown msg_type yields a view whose `contains()`
-    // returns false for every tag — the same behaviour as field_valid_for
-    // returning false for every tag on an unknown msg_type. The view aliases
+    // on every field. An unknown msg_type yields a view whose `found()` is
+    // false and whose `contains()` is false for every tag, as field_valid_for
+    // is (101 D2: the validator's algorithm list). The view aliases
     // storage owned by this table_view (stable for its lifetime; the map is
     // immutable after construction).
     [[nodiscard]] valid_tag_set_view valid_tags_for(std::string_view msg_type) const noexcept {
@@ -730,6 +738,16 @@ public:
     // no scanner pays a lookup per field.
     [[nodiscard]] bool has_nonstandard_pair() const noexcept { return has_nonstandard_pair_; }
 
+    // 101-inbound-reject-fidelity (research D1, FR-002): true when the table's dictionary
+    // defines `tag`. On a dictionary-built table that is a field the dictionary declares (its
+    // merged field store, after any overlay), whether or not a message reaches it; on a
+    // hand-built one, a tag some population operation named. A binary search over
+    // `defined_tags_`, which `table_view_builder::build() &&` writes in ascending order. Cold: the
+    // validator asks only after a tag failed the message's set. No allocation.
+    [[nodiscard]] bool tag_defined(std::uint16_t tag) const noexcept {
+        return std::ranges::binary_search(defined_tags_, tag);
+    }
+
     // 098-dialect-overlay (FR-022, data-model §A.3): true when the dictionary declares
     // `tag` in its header: the tags data-model §A.3's visited-set walk collects from
     // QuickFIX `<header>` or Orchestra component 1024 (fields, component members,
@@ -887,18 +905,70 @@ private:
     // the receiver's name. Chaining lives on `table_view_builder`, whose
     // forwarders return `table_view_builder&`; nothing chains on this band.
 
+    // 101-inbound-reject-fidelity (research D1): records `tag` in the defined-tag store that
+    // tag_defined() reads. Every population operation that names a tag calls this for each tag
+    // it names, so a hand-built table defines every tag it was told anything about; an operation
+    // that only forwards to another (add_valid, add_required, set_type, set_group_first) is
+    // covered by the one it calls. Re-derive the set of callers by listing the private mutators
+    // `table_view_builder` forwards to: a mutator added later calls it too. The exception is 100's
+    // registration-only record stores (add_occurrence_group, add_section_group), which leave the
+    // validator's accessors unchanged (100 FR-009), tag_defined() among them; this rests on every
+    // tag they are given being a field the dictionary declares, which the field-list fill marks
+    // (TagDefined101's exact-set cells check it on each shipped dictionary).
+    // It sets the tag's bit in `defined_bits_`, which `table_view_builder`'s constructor sized
+    // before the first population operation, so it cannot throw; the store is written once,
+    // from the bits, by `table_view_builder::build() &&`.
+    void mark_defined(std::uint16_t tag) noexcept {
+        defined_bits_[tag >> 6U] |= std::uint64_t{1} << (tag & 63U);
+    }
+
+    // One bit per value of the store's tag type.
+    [[nodiscard]] static constexpr std::size_t defined_bit_words() noexcept {
+        using tag_t = decltype(defined_tags_)::value_type;
+        return (std::size_t{std::numeric_limits<tag_t>::max()} + 1U) / 64U;
+    }
+
+    // The seal (101 T067): writes the store from the bits, the defined tags in ascending order
+    // at exact size (one allocation of the set bits' count), then releases the bits, so a built
+    // view, and each copy of it, holds the sorted vector and no bit words. Load-time only, never
+    // on the inbound path. Its one allocation comes before it writes any member, so a failure of
+    // that allocation propagates out of `build() &&` with the builder's view unchanged.
+    void seal_defined_tags() {
+        std::size_t count = 0;
+        for (auto const word : defined_bits_) {
+            count += static_cast<std::size_t>(std::popcount(word));
+        }
+        std::vector<std::uint16_t> tags;
+        tags.reserve(count);
+        for (std::size_t w = 0; w < defined_bits_.size(); ++w) {
+            for (auto bits = defined_bits_[w]; bits != 0; bits &= bits - 1U) {
+                tags.push_back(static_cast<std::uint16_t>(
+                    (w << 6U) | static_cast<std::size_t>(std::countr_zero(bits))));
+            }
+        }
+        defined_tags_ = std::move(tags);
+        defined_bits_ = std::vector<std::uint64_t>{};
+    }
+
     void add_valid_tag(std::string_view msg_type, std::uint16_t tag) {
+        mark_defined(tag);
         valid_[std::string{msg_type}].insert(tag);
     }
 
     void add_required_tag(std::string_view msg_type, std::uint16_t tag) {
+        mark_defined(tag);
         required_[std::string{msg_type}].push_back(tag);
         valid_[std::string{msg_type}].insert(tag);
     }
 
-    void set_field_type(std::uint16_t tag, field_type ft) { types_[tag] = ft; }
+    void set_field_type(std::uint16_t tag, field_type ft) {
+        mark_defined(tag);
+        types_[tag] = ft;
+    }
 
     void add_group_member(std::uint16_t no_tag, std::uint16_t member_tag) {
+        mark_defined(no_tag);
+        mark_defined(member_tag);
         set_group_bit(no_tag);
         auto& members = group_members_[no_tag];
         for (auto const t : members) {
@@ -911,6 +981,8 @@ private:
     // `no_tag` (bare store). Does NOT add it to the member set — callers pair
     // this with add_group_member/set_group_first as needed.
     void add_group_required_member(std::uint16_t no_tag, std::uint16_t member_tag) {
+        mark_defined(no_tag);
+        mark_defined(member_tag);
         set_group_bit(no_tag);
         auto& req = group_required_members_[no_tag];
         for (auto const t : req) {
@@ -939,6 +1011,7 @@ private:
     // `enum_domain` above for why the table owns them). Sorted-on-insert and
     // deduped, so enum_valid's binary search is valid regardless of call order.
     void add_enum(std::uint16_t tag, std::string_view value) {
+        mark_defined(tag);
         set_enum_bit(tag);
         auto& domain = enums_[tag];
         auto& codes = domain.codes;
@@ -965,17 +1038,29 @@ private:
     // carry — without this, FR-004's tokenizer (T018) has no unit-level
     // witness that does not require a full XML load.
     void set_multi_value(std::uint16_t tag, bool multi = true) {
+        mark_defined(tag);
         set_enum_bit(tag);
         enums_[tag].multi_value = multi;
     }
 
     // ── 063 Defect-A: context-scoped population surface ───────────────────
+    // The `_ctx` operations name the ancestors' count tags, the group's own and the member.
+    void mark_defined_ctx(std::span<std::uint16_t const> parent_path, std::uint16_t no_tag,
+                          std::uint16_t member_tag) {
+        for (auto const t : parent_path) {
+            mark_defined(t);
+        }
+        mark_defined(no_tag);
+        mark_defined(member_tag);
+    }
+
     // Used EXCLUSIVELY by Dictionary::as_table_view() (dictionary.cpp) — the
     // hardening invariant documented on the context-aware accessors above
     // depends on real dictionaries registering HERE and ONLY here (never via
     // add_group_member/set_group_first).
     void add_group_member_ctx(std::string_view msg_type, std::span<std::uint16_t const> parent_path,
                               std::uint16_t no_tag, std::uint16_t member_tag) {
+        mark_defined_ctx(parent_path, no_tag, member_tag);
         push_unique(ctx_entry(msg_type, parent_path, no_tag).members, member_tag);
     }
 
@@ -983,6 +1068,7 @@ private:
     void add_group_required_member_ctx(std::string_view msg_type,
                                        std::span<std::uint16_t const> parent_path,
                                        std::uint16_t no_tag, std::uint16_t member_tag) {
+        mark_defined_ctx(parent_path, no_tag, member_tag);
         push_unique(ctx_entry(msg_type, parent_path, no_tag).required_members, member_tag);
     }
 
@@ -990,6 +1076,7 @@ private:
     // behaviour, context-scoped.
     void set_group_first_ctx(std::string_view msg_type, std::span<std::uint16_t const> parent_path,
                              std::uint16_t no_tag, std::uint16_t first) {
+        mark_defined_ctx(parent_path, no_tag, first);
         auto& entry = ctx_entry(msg_type, parent_path, no_tag);
         entry.group_first = first;
         push_unique(entry.members, first);
@@ -1058,6 +1145,7 @@ private:
     // well, from the baked FIXT11.xml-census-pinned constant. Does NOT touch
     // valid_/required_/types_ (D-1 invariant).
     void add_fixt_framing_tag(std::uint16_t tag, field_type ft) {
+        mark_defined(tag);
         fixt_framing_tags_.insert(tag);
         fixt_framing_types_[tag] = ft;
     }
@@ -1067,6 +1155,7 @@ private:
     // metadata handle's declared header store. Grows `header_bits_` to the word
     // holding `tag`, at config time only.
     void add_header_tag(std::uint16_t tag) {
+        mark_defined(tag);
         std::size_t const w = static_cast<std::size_t>(tag) >> 6U;
         if (w >= header_bits_.size()) {
             header_bits_.resize(w + 1, 0);
@@ -1123,6 +1212,8 @@ private:
         if (displaced_length != 0 && displaced_length != length_tag) {
             length_pair_data_tag_.erase(displaced_length);
         }
+        mark_defined(length_tag);
+        mark_defined(data_tag);
         // Last, so the flag never describes a pair that did not land.
         if (!fixpp::core::detail::is_standard_pair_tag(length_tag) &&
             !fixpp::core::detail::is_standard_pair_tag(data_tag)) {
@@ -1351,6 +1442,15 @@ private:
     // highest set tag, so a FIX 5.0 QuickFIX-XML view (empty header) holds no words.
     // is_header_tag() is its only reader.
     std::vector<std::uint64_t> header_bits_;
+
+    // 101-inbound-reject-fidelity (research D1): the defined-tag store tag_defined() reads,
+    // written in ascending order by `table_view_builder::build() &&`. A vector of tags rather
+    // than a tag-space bitset: it is copied with every validator's table, and a bitset sized to
+    // the tag space would cost every copy that much whatever the dictionary declares.
+    std::vector<std::uint16_t> defined_tags_;
+    // The build-time bits mark_defined sets (101 T067): sized by `table_view_builder`'s
+    // constructor to defined_bit_words(), emptied by the seal, so a built view holds none.
+    std::vector<std::uint64_t> defined_bits_;
 };
 
 // Move CONSTRUCTION is the property that became load-bearing when fixpp#456 deleted
@@ -1404,10 +1504,13 @@ private:
 //
 // `build()` performs NO consistency validation (L-456-1): a builder can still
 // produce an internally inconsistent table (a group with members and no first
-// field — B-384-2). The seal governs reachability, not consistency: `build()`
-// is `return std::move(tv_);` and checks nothing.
+// field — B-384-2). The seal governs reachability, not consistency.
 class table_view_builder {
 public:
+    // 101 (research D1, T067): sizes the view's defined-tag bits before any population
+    // operation, so mark_defined cannot throw inside one.
+    table_view_builder() { tv_.defined_bits_.resize(table_view::defined_bit_words()); }
+
     // ── the forwarders, each returning *this for chaining ───────────────────
     table_view_builder& add_valid_tag(std::string_view msg_type, std::uint16_t tag) {
         tv_.add_valid_tag(msg_type, tag);
@@ -1515,6 +1618,14 @@ public:
         return *this;
     }
 
+    // 101-inbound-reject-fidelity (research D1): the dictionary-built fill's entry point.
+    // `Dictionary::build_table_view` names here every field its dictionary declares, so a
+    // declared field no message reaches is defined. Names no message, type or role.
+    table_view_builder& add_defined_tag(std::uint16_t tag) {
+        tv_.mark_defined(tag);
+        return *this;
+    }
+
     // ── scalar readbacks, for the witnesses that assert BETWEEN mutations ─────
     // Scalars by design: a reference-returning accessor would alias storage that
     // `build() &&` moves from. See the `peek()` refusal above.
@@ -1530,7 +1641,14 @@ public:
 
     // Consumes the builder. The move is a member-to-return move, so NRVO cannot
     // apply; C++17 guaranteed elision then makes the caller's own return free.
-    [[nodiscard]] table_view build() && { return std::move(tv_); }
+    // 101 (research D1): seals the defined-tag store first. A throw from the seal's allocation
+    // leaves the builder unchanged. The move after it can throw where
+    // `std::is_nothrow_move_constructible_v<table_view>` is false; a builder whose `build()`
+    // threw at that step is sealed, with its bits released, and is not to be reused.
+    [[nodiscard]] table_view build() && {
+        tv_.seal_defined_tags();
+        return std::move(tv_);
+    }
 
 private:
     table_view tv_;
