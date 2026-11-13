@@ -9,6 +9,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/dictionary.hpp>
@@ -18,16 +21,21 @@
 #include <fixpp/dict/version_registry.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fstream>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <memory_resource>
+#include <optional>
 #include <pugixml.hpp>
 #include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 #include <vector>
+
+#include "support/dict_width_fixtures_102.hpp"
 
 namespace {
 
@@ -1214,10 +1222,12 @@ TEST(OrchestraFailClosed, ZeroStructuralXmlIdsAreStillAccepted) {
     });
 }
 
-// The range guards of the shared id parse (`try_parse_uint16`): a negative id and an
-// id above 65535 on a structural definition are refused like a non-numeric one.
-TEST(OrchestraFailClosed, StructuralIdOutsideTheUint16RangeThrows) {
-    for (std::string_view const id : {"-1", "65536"}) {
+// The range of a structural definition's id, the schema's `fixr:id_t` with 0 admitted
+// (102 spec FR-001b): a negative id and an id above the schema's `maxInclusive` (2147483647)
+// are refused like a non-numeric one. An id past 65535 inside that range loads
+// (`IdDomain102.StructuralIdsInsideTheSchemaRangeLoad`).
+TEST(OrchestraFailClosed, StructuralIdOutsideTheIdTRangeThrows) {
+    for (std::string_view const id : {"-1", "2147483648"}) {
         std::string const xml =
             std::string{R"xml(<fixr:repository version="FIX.Latest_EP303"><fixr:fields>)xml"} +
             R"xml(<fixr:field id="1" name="Account" type="String"/></fixr:fields>)xml" +
@@ -1228,4 +1238,277 @@ TEST(OrchestraFailClosed, StructuralIdOutsideTheUint16RangeThrows) {
         EXPECT_NE(msg.find("missing/invalid <fixr:component> id attribute"), std::string::npos)
             << "id=" << id << ": refused for the wrong reason, or loaded. Message: " << msg;
     }
+}
+
+// ══ 102-dict-width-multichar-type (tasks T012) ═════════════════════════════════════════════════
+// Spec US1.4, US1.5, SC-005, FR-001a, FR-001b; research D1b, D4 ("component identity", "the
+// alias-pair rule", rows (a) and (g)).
+
+namespace {
+
+namespace w = fixpp::test102::width;
+
+struct loaded_orch {
+    std::pmr::monotonic_buffer_resource arena;
+    std::optional<fixpp::dict::Dictionary> dict;
+    std::string error;
+};
+
+// tests/support/dict_width_fixtures_102.hpp's generator (b), loaded once per binary.
+loaded_orch const& orch_identity() {
+    static loaded_orch l;
+    static bool const done = [] {
+        try {
+            l.dict.emplace(fixpp::dict::OrchestraLoader{}.load_from_string(
+                w::orch_identity_fixture_text().text, &l.arena));
+        } catch (std::exception const& e) {
+            l.error = e.what();
+        }
+        return true;
+    }();
+    (void)done;
+    return l;
+}
+
+std::vector<w::member> members_of_102(std::span<fixpp::dict::FieldRef const> run) {
+    std::vector<w::member> out;
+    for (auto const& fr : run) {
+        out.push_back({.tag = fr.tag, .component_index = fr.component_index});
+    }
+    return out;
+}
+
+std::string render_102(std::vector<w::member> const& v) {
+    std::string s;
+    for (auto const& m : v) {
+        s += " (" + std::to_string(m.tag) + ", " + std::to_string(m.component_index) + ")";
+    }
+    return s;
+}
+
+// The message's FieldRef for `tag`, or nullptr.
+fixpp::dict::FieldRef const* find_102(std::span<fixpp::dict::FieldRef const> run,
+                                      std::uint16_t tag) {
+    for (auto const& fr : run) {
+        if (fr.tag == tag) {
+            return &fr;
+        }
+    }
+    return nullptr;
+}
+
+// A document with one component and one group, each referenced from message 0: `comp_id` and
+// `group_id` are the definitions' id attributes as written, `comp_ref` and `group_ref` the
+// references'.
+std::string id_domain_doc(std::string_view comp_id, std::string_view comp_ref,
+                          std::string_view group_id, std::string_view group_ref) {
+    return std::string{R"xml(<fixr:repository version="FIX.Latest_EP303"><fixr:fields>)xml"} +
+           R"xml(<fixr:field id="1" name="Account" type="String"/>)xml" +
+           R"xml(<fixr:field id="100" name="NoLegs" type="NumInGroup"/>)xml" +
+           R"xml(<fixr:field id="200" name="LegSymbol" type="String"/></fixr:fields>)xml" +
+           R"xml(<fixr:components><fixr:component id=")xml" + std::string{comp_id} +
+           R"xml(" name="Comp"><fixr:fieldRef id="1"/></fixr:component></fixr:components>)xml" +
+           R"xml(<fixr:groups><fixr:group id=")xml" + std::string{group_id} +
+           R"xml(" name="Grp"><fixr:numInGroup id="100"/><fixr:fieldRef id="200"/>)xml" +
+           R"xml(</fixr:group></fixr:groups><fixr:messages>)xml" +
+           R"xml(<fixr:message id="1" name="Heartbeat" msgType="0"><fixr:structure>)xml" +
+           R"xml(<fixr:componentRef id=")xml" + std::string{comp_ref} + R"xml("/>)xml" +
+           R"xml(<fixr:groupRef id=")xml" + std::string{group_ref} + R"xml("/>)xml" +
+           R"xml(</fixr:structure></fixr:message></fixr:messages></fixr:repository>)xml";
+}
+
+// The document loads, and message 0 holds the component's field and the group's count and
+// member.
+void expect_expands(std::string const& xml, std::string const& row) {
+    std::pmr::monotonic_buffer_resource mr;
+    try {
+        auto const dict = fixpp::dict::OrchestraLoader{}.load_from_string(xml, &mr);
+        auto const run = dict.message_fields("0");
+        EXPECT_NE(find_102(run, 1), nullptr) << row << ": the component did not expand";
+        EXPECT_NE(find_102(run, 100), nullptr) << row << ": the group did not expand";
+        EXPECT_NE(find_102(run, 200), nullptr) << row << ": the group's member is missing";
+    } catch (std::exception const& e) {
+        ADD_FAILURE() << row << ": refused: " << e.what();
+    }
+}
+
+}  // namespace
+
+// (1) The Orchestra identity cell over generator (b), with the alias pairs of
+// `component_index_by_xml_id_` and `group_by_xml_id_` its layout declares.
+TEST(ComponentIdentity102Orch, EveryComponentHasItsOwnIdentityAndMembers) {
+    auto const& f = w::orch_identity_fixture_text();
+    ASSERT_EQ(f.precondition_failure(), "");
+    auto const& l = orch_identity();
+    ASSERT_TRUE(l.dict.has_value()) << "the base did not load: " << l.error;
+    std::size_t wrong = 0;
+    std::string first;
+    for (auto const& e : f.components) {
+        auto const cr = l.dict->component(e.name);
+        std::string why;
+        if (!cr) {
+            why = " not found";
+        } else {
+            std::uint64_t const id = cr->component_id;
+            std::uint64_t const parent = cr->parent_component_id;
+            auto const got = members_of_102(l.dict->component_fields(e.name));
+            if (id != e.id) {
+                why += " component_id " + std::to_string(id);
+            }
+            if (parent != e.parent) {
+                why += " parent_component_id " + std::to_string(parent);
+            }
+            if (got != e.members) {
+                why += " members" + render_102(got) + " (expected" + render_102(e.members) + ")";
+            }
+        }
+        if (!why.empty()) {
+            if (wrong == 0) {
+                first = "component \"" + e.name + "\" (expected id " + std::to_string(e.id) +
+                        ", parent " + std::to_string(e.parent) + "):" + why;
+            }
+            ++wrong;
+        }
+    }
+    EXPECT_EQ(wrong, 0U) << "components with a wrong identity or members; first: " << first;
+
+    auto const run = l.dict->message_fields(f.msg_type);
+    for (auto const& m : f.message_members) {
+        auto const* hit = find_102(run, m.tag);
+        if (hit == nullptr) {
+            ADD_FAILURE() << "message " << f.msg_type << " lacks tag " << m.tag;
+            continue;
+        }
+        std::uint64_t const got = hit->component_index;
+        EXPECT_EQ(got, m.component_index) << "message " << f.msg_type << " tag " << m.tag;
+    }
+}
+
+// Row (a): a nested child reached through a componentRef past 65535 (Kh, under Ph) and its
+// alias child under another parent (Ka, under Pa): each child's parent is its own parent.
+TEST(ComponentIdentity102Orch, RowAAliasChildrenHaveTheirOwnParents) {
+    auto const& f = w::orch_identity_fixture_text();
+    ASSERT_EQ(f.precondition_failure(), "");
+    auto const& l = orch_identity();
+    ASSERT_TRUE(l.dict.has_value()) << "the base did not load: " << l.error;
+    for (auto const& [child, parent] : {std::pair{"Kh", "Ph"}, std::pair{"Ka", "Pa"}}) {
+        auto const c = l.dict->component(child);
+        auto const p = l.dict->component(parent);
+        ASSERT_TRUE(c.has_value() && p.has_value()) << child << " / " << parent;
+        std::uint64_t const got = c->parent_component_id;
+        std::uint64_t const want = std::uint64_t{p->component_id} + 1U;
+        EXPECT_EQ(got, want) << child << "'s parent must be " << parent;
+    }
+}
+
+// The alias pair of `group_by_xml_id_`: Gx (id past 65535, counted by NX) and Gxa (its alias,
+// counted by NXa) each keep their own member, and X reaches Gx, not Gxa.
+TEST(ComponentIdentity102Orch, GroupAliasPairResolvesToItsOwnDefinitions) {
+    auto const& f = w::orch_identity_fixture_text();
+    ASSERT_EQ(f.precondition_failure(), "");
+    auto const& l = orch_identity();
+    ASSERT_TRUE(l.dict.has_value()) << "the base did not load: " << l.error;
+    auto const tags = [](std::span<fixpp::dict::FieldRef const> run) {
+        std::vector<std::uint16_t> out;
+        for (auto const& fr : run) {
+            out.push_back(fr.tag);
+        }
+        return out;
+    };
+    EXPECT_EQ(tags(l.dict->component_fields("X")),
+              (std::vector<std::uint16_t>{f.t_x, f.n_x, f.m_x}));
+    EXPECT_EQ(tags(l.dict->group_fields(f.n_x)), (std::vector<std::uint16_t>{f.m_x}));
+    auto const xa = tags(l.dict->component_fields("Xa"));
+    ASSERT_EQ(xa.size(), 3U);
+    EXPECT_EQ(tags(l.dict->group_fields(xa[1])), (std::vector<std::uint16_t>{xa[2]}));
+    EXPECT_NE(xa[1], f.n_x);
+}
+
+// (2) The id-domain pair (spec FR-001b, Edge Cases): an id past 65535 and the schema's
+// `maxInclusive` load, for a component and a group.
+TEST(IdDomain102, StructuralIdsInsideTheSchemaRangeLoad) {
+    for (std::string_view const id : {"65536", "2147483647"}) {
+        expect_expands(id_domain_doc(id, id, id, id), "id " + std::string{id});
+    }
+}
+
+// Control: one past the schema's `maxInclusive` is still refused, for each kind.
+TEST(IdDomain102, OnePastTheSchemaBoundIsAParseError) {
+    auto const comp = orchestra_load_error_message(
+        id_domain_doc("2147483648", "2147483648", "5", "5"));
+    std::cout << "[102 id domain] component id 2147483648: " << comp << '\n';
+    EXPECT_NE(comp.find("missing/invalid <fixr:component> id attribute"), std::string::npos)
+        << "component id 2147483648: " << comp;
+    auto const group = orchestra_load_error_message(
+        id_domain_doc("5", "5", "2147483648", "2147483648"));
+    std::cout << "[102 id domain] group id 2147483648: " << group << '\n';
+    EXPECT_NE(group.find("missing/invalid <fixr:group> id attribute"), std::string::npos)
+        << "group id 2147483648: " << group;
+}
+
+// Control: 0 stays admitted for both kinds (spec Edge Cases).
+TEST(IdDomain102, ZeroLoads) { expect_expands(id_domain_doc("0", "0", "0", "0"), "id 0"); }
+
+// Controls, the lexical rule of spec FR-001b: the whole attribute is read by `std::from_chars`
+// with nothing left over, so a leading zero loads, and a leading `+` or surrounding whitespace
+// is refused.
+TEST(IdDomain102, LeadingZeroLoadsAsItsValue) {
+    expect_expands(id_domain_doc("07", "7", "08", "8"), "ids 07 and 08");
+}
+
+TEST(IdDomain102, LeadingPlusAndSurroundingWhitespaceAreParseErrors) {
+    for (std::string_view const id : {"+7", " 7", "7 "}) {
+        auto const msg = orchestra_load_error_message(id_domain_doc(id, "7", "5", "5"));
+        EXPECT_NE(msg.find("missing/invalid <fixr:component> id attribute"), std::string::npos)
+            << "component id \"" << id << "\": " << msg;
+    }
+}
+
+// Control: a component id and a group id are separate key spaces; one id below 65536, given
+// to both, resolves each reference to its own definition.
+TEST(IdDomain102, ComponentAndGroupSharingAnIdResolveToTheirOwn) {
+    expect_expands(id_domain_doc("7", "7", "7", "7"), "component and group both id 7");
+}
+
+// (4) Row (g), a characterization pin: an id past 65535 at a FIX-tag site is refused by the tag
+// parse's range check, named by that check's own message for the kind. Each id truncates to 16
+// bits as a path that loads (65536 + a declared tag; 65536 + an undeclared tag for
+// `<fixr:field id>`), so only the range check can refuse it.
+TEST(TagKinds102, FieldIdPast65535IsRefusedByTheRangeCheck) {
+    auto const msg = orchestra_load_error_message(repository_with_fields(
+        R"xml(<fixr:field id="1" name="Account" type="String"/>
+              <fixr:field id="72537" name="Undeclared7001" type="String"/>)xml",
+        R"xml(<fixr:fieldRef id="1"/>)xml"));
+    EXPECT_NE(msg.find("missing/invalid <fixr:field> id attribute"), std::string::npos) << msg;
+}
+
+TEST(TagKinds102, FieldRefIdPast65535IsRefusedByTheRangeCheck) {
+    auto const msg = orchestra_load_error_message(repository_with_fields(
+        R"xml(<fixr:field id="1" name="Account" type="String"/>)xml",
+        R"xml(<fixr:fieldRef id="65537"/>)xml"));
+    EXPECT_NE(msg.find("missing/invalid <fixr:fieldRef> id attribute"), std::string::npos) << msg;
+}
+
+TEST(TagKinds102, NumInGroupIdPast65535IsRefusedByTheRangeCheck) {
+    std::string const xml =
+        std::string{R"xml(<fixr:repository version="FIX.Latest_EP303"><fixr:fields>)xml"} +
+        R"xml(<fixr:field id="100" name="NoLegs" type="NumInGroup"/>)xml" +
+        R"xml(<fixr:field id="200" name="LegSymbol" type="String"/></fixr:fields>)xml" +
+        R"xml(<fixr:groups><fixr:group id="1" name="Grp"><fixr:numInGroup id="65636"/>)xml" +
+        R"xml(<fixr:fieldRef id="200"/></fixr:group></fixr:groups><fixr:messages>)xml" +
+        R"xml(<fixr:message id="1" name="Heartbeat" msgType="0"><fixr:structure>)xml" +
+        R"xml(<fixr:groupRef id="1"/></fixr:structure></fixr:message></fixr:messages>)xml" +
+        R"xml(</fixr:repository>)xml";
+    auto const msg = orchestra_load_error_message(xml);
+    EXPECT_NE(msg.find("missing/invalid <fixr:numInGroup> id attribute"), std::string::npos)
+        << msg;
+}
+
+TEST(TagKinds102, LengthIdPast65535IsRefusedByTheRangeCheck) {
+    auto const msg = orchestra_load_error_message(repository_with_fields(
+        R"xml(<fixr:field id="95" name="RawDataLength" type="Length"/>
+              <fixr:field id="96" name="RawData" type="data" lengthId="65631"/>)xml",
+        R"xml(<fixr:fieldRef id="95"/><fixr:fieldRef id="96"/>)xml"));
+    EXPECT_NE(msg.find("missing/invalid <fixr:field lengthId> id attribute"), std::string::npos)
+        << msg;
 }
