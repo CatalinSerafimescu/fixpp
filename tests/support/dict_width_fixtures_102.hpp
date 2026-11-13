@@ -183,8 +183,12 @@ struct xml_identity_fixture {
     std::string msg_type = "D";
     std::vector<member> message_members;  // members of D that come from a component
     std::uint32_t x_index = 0;
-    std::uint16_t t_x = 0, n_x = 0, m_x = 0;
-    std::uint16_t t_alias = 0, n_alias = 0, m_alias = 0;
+    std::uint16_t t_x = 0;
+    std::uint16_t n_x = 0;
+    std::uint16_t m_x = 0;
+    std::uint16_t t_alias = 0;
+    std::uint16_t n_alias = 0;
+    std::uint16_t m_alias = 0;
 
     [[nodiscard]] std::string precondition_failure() const {
         // Definitions are the lines that start with `<component name=`; references are inline.
@@ -202,8 +206,17 @@ struct xml_identity_fixture {
 inline xml_identity_fixture make_xml_identity_fixture() {
     constexpr std::uint32_t W = kWrap;
     constexpr std::uint32_t N = W + 8;
-    constexpr std::uint16_t kFH = 9001, kTP1 = 9002, kTK1 = 9003, kTP2 = 9004, kTK2 = 9005,
-                            kTX = 9006, kNX = 9007, kMX = 9008, kTA = 9009, kNA = 9010, kMA = 9011;
+    constexpr std::uint16_t kFH = 9001;
+    constexpr std::uint16_t kTP1 = 9002;
+    constexpr std::uint16_t kTK1 = 9003;
+    constexpr std::uint16_t kTP2 = 9004;
+    constexpr std::uint16_t kTK2 = 9005;
+    constexpr std::uint16_t kTX = 9006;
+    constexpr std::uint16_t kNX = 9007;
+    constexpr std::uint16_t kMX = 9008;
+    constexpr std::uint16_t kTA = 9009;
+    constexpr std::uint16_t kNA = 9010;
+    constexpr std::uint16_t kMA = 9011;
     xml_identity_fixture f;
     f.x_index = W + 4;
     f.t_x = kTX;
@@ -306,7 +319,9 @@ struct orch_identity_fixture {
     std::vector<member> message_members;
     std::uint32_t header_index = 0;
     std::uint32_t x_index = 0;
-    std::uint16_t t_x = 0, n_x = 0, m_x = 0;
+    std::uint16_t t_x = 0;
+    std::uint16_t n_x = 0;
+    std::uint16_t m_x = 0;
     std::vector<alias_pair> pairs;
 
     [[nodiscard]] std::string precondition_failure() const {
@@ -325,9 +340,18 @@ inline orch_identity_fixture make_orch_identity_fixture() {
     constexpr std::uint32_t W = kWrap;
     constexpr std::uint32_t N = W + 8;
     constexpr std::uint32_t kIdBase = 2000;
-    constexpr std::uint16_t kTKa = 9101, kTPa = 9102, kFL = 9103, kTXa = 9104, kNXa = 9105,
-                            kMXa = 9106, kTKh = 9111, kTPh = 9112, kFH = 9113, kTX = 9114,
-                            kNX = 9115, kMX = 9116;
+    constexpr std::uint16_t kTKa = 9101;
+    constexpr std::uint16_t kTPa = 9102;
+    constexpr std::uint16_t kFL = 9103;
+    constexpr std::uint16_t kTXa = 9104;
+    constexpr std::uint16_t kNXa = 9105;
+    constexpr std::uint16_t kMXa = 9106;
+    constexpr std::uint16_t kTKh = 9111;
+    constexpr std::uint16_t kTPh = 9112;
+    constexpr std::uint16_t kFH = 9113;
+    constexpr std::uint16_t kTX = 9114;
+    constexpr std::uint16_t kNX = 9115;
+    constexpr std::uint16_t kMX = 9116;
     constexpr std::uint32_t kGx = 70000;
     constexpr std::uint32_t kGxa = kGx - W;
     orch_identity_fixture f;
@@ -446,14 +470,24 @@ inline orch_identity_fixture const& orch_identity_fixture_text() {
 
 struct orch_header_fixture {
     std::string text;
-    std::uint16_t t = 9201, n = 9202, m = 9203;
-    std::uint16_t t2 = 9204, n2 = 9205, m2 = 9206;
+    std::uint16_t t = 9201;
+    std::uint16_t n = 9202;
+    std::uint16_t m = 9203;
+    std::uint16_t t2 = 9204;
+    std::uint16_t n2 = 9205;
+    std::uint16_t m2 = 9206;
     std::uint16_t t_ord = 9207;
-    std::uint16_t n_t = 9208, m_t = 9209;
+    std::uint16_t n_t = 9208;
+    std::uint16_t m_t = 9209;
     // The IR row.
     std::string ir_msg_type = "E";
-    std::uint16_t ir_t_high = 9211, ir_n_high = 9212, ir_m_high = 9213, ir_m_high2 = 9217;
-    std::uint16_t ir_t_alias = 9214, ir_n_alias = 9215, ir_m_alias = 9216;
+    std::uint16_t ir_t_high = 9211;
+    std::uint16_t ir_n_high = 9212;
+    std::uint16_t ir_m_high = 9213;
+    std::uint16_t ir_m_high2 = 9217;
+    std::uint16_t ir_t_alias = 9214;
+    std::uint16_t ir_n_alias = 9215;
+    std::uint16_t ir_m_alias = 9216;
     std::vector<alias_pair> pairs;
 
     [[nodiscard]] std::string precondition_failure() const {
@@ -474,9 +508,15 @@ struct orch_header_fixture {
 
 inline orch_header_fixture make_orch_header_fixture() {
     orch_header_fixture f;
-    constexpr std::uint32_t kHc = 70001, kHg = 70002, kHca = kHc - kWrap, kHga = kHg - kWrap;
+    constexpr std::uint32_t kHc = 70001;
+    constexpr std::uint32_t kHg = 70002;
+    constexpr std::uint32_t kHca = kHc - kWrap;
+    constexpr std::uint32_t kHga = kHg - kWrap;
     constexpr std::uint32_t kGt = 70003;
-    constexpr std::uint32_t kIc = 70010, kJg = 70011, kIca = kIc - kWrap, kJga = kJg - kWrap;
+    constexpr std::uint32_t kIc = 70010;
+    constexpr std::uint32_t kJg = 70011;
+    constexpr std::uint32_t kIca = kIc - kWrap;
+    constexpr std::uint32_t kJga = kJg - kWrap;
     f.pairs = {{"fixr:component", "fixr:componentRef", kHc},
                {"fixr:group", "fixr:groupRef", kHg},
                {"fixr:component", "fixr:componentRef", kIc},
@@ -679,9 +719,12 @@ inline oracle_collision_fixture make_oracle_collision_fixture(bool colliding) {
 struct component_overlay_fixture {
     std::string base;
     std::string overlay;
-    std::string high_name = "OvHigh", alias_name = "OvAlias";
+    std::string high_name = "OvHigh";
+    std::string alias_name = "OvAlias";
     std::uint32_t high_id = 70020;
-    std::uint16_t high_member = 9701, alias_member = 9702, added = 9703;
+    std::uint16_t high_member = 9701;
+    std::uint16_t alias_member = 9702;
+    std::uint16_t added = 9703;
     std::vector<alias_pair> pairs;
 
     [[nodiscard]] std::string precondition_failure() const { return pairs_failure(base, pairs); }
