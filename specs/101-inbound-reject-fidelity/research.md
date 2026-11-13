@@ -612,18 +612,21 @@ The census is **derived by command at the head being accepted and re-derived aft
 row gives file::cell, today's ending, the new ending, the superseding FR (and the superseded clause, from the list
 below), and for a tag cell whether the tag is dictionary-defined or wholly undefined. The manifest lives in `tasks.md`.
 
-**Grep recipes** (each hit classified, not counted):
-- `git grep -ln wire_unexpected_tag -- tests` — an undefined tag moves to `wire_undefined_tag`; a defined tag not in the
+**Grep recipes** (each hit classified, not counted). The pathspec includes `bindings/python/tests`: the Python binding's
+tests pin Reject fields too, and no ctest entry runs them.
+- `git grep -ln wire_unexpected_tag -- tests bindings/python/tests` — an undefined tag moves to `wire_undefined_tag`; a defined tag not in the
   MsgType stays; a hand-built table follows D1's population rule.
-- `git grep -n "wire_length_data_mismatch) + 1\|static_cast<error>(134" -- tests` — the "last enumerator + 1 is unknown"
+- `git grep -n "wire_length_data_mismatch) + 1\|static_cast<error>(134" -- tests bindings/python/tests` — the "last enumerator + 1 is unknown"
   sentinels (re-spell the second pattern to whatever value is one past the last slot at implement time).
-- `git grep -ln rep35 -- tests` **and** `git grep -lE 'kNotConnectedOff|kLogonSentOff|kLogoutSent' -- tests` — the 099
+- `git grep -ln rep35 -- tests bindings/python/tests` **and** `git grep -lE 'kNotConnectedOff|kLogonSentOff|kLogoutSent' -- tests bindings/python/tests` — the 099
   tables (the first grep misses `tests/session/test_099_establishment.cpp`'s W5 tables, so it is not enough alone).
-- `git grep -n -i "last-wins\|LastWins" -- tests/session` — 092's scan pins.
+- `git grep -n -i "last-wins\|LastWins" -- tests/session bindings/python/tests` — 092's scan pins.
 - `is_valid_wire_error` in `tests/fuzz/fuzz_wire_validator.cpp` (it traps on any code outside its allowlist).
 - the `kMaxShippedMsgTypeLength` hits (D7).
-- `git grep -n fixt_header_repeats_msg_type -- tests` — the D5 walk's direct callers, whose report changes (D5); known
+- `git grep -n fixt_header_repeats_msg_type -- tests bindings/python/tests` — the D5 walk's direct callers, whose report changes (D5); known
   positive: `W21PeekColdPath` in tests/session/test_099_peek_fixt_route.cpp.
+- `git grep -l 3115 -- tests bindings/python/tests` — the 3115 candidates (3115 is defined only by FIX Latest); known
+  positive: bindings/python/tests/test_099_fixt_appl_version.py, the Python twin of 099's C-ABI W-12 live cell.
 
 **Mutate-and-run recipes** (grep is the wrong instrument where `58=` or a MsgType string matches nearly every Reject
 cell). The cells live in many binaries (`session_pure_tests`, `wire_dict_tests`, the per-feature
@@ -634,7 +637,9 @@ every test target (-k 0; rc ≠ 0 voids the recipe). The affected binaries are t
 must pass `strings … | command grep -c 101-MUT-<id>`, and a changed binary without the marker stops the recipe. Run
 each affected binary whole and unfiltered under the mutant protocol's timeout. Where the ctest entry wraps a binary
 (interop golden checks), run the entry's registered command from `ctest -N -V`. No ctest run here; the one full ctest
-is T075. The RED set is the union of [  FAILED  ] names and must contain the recipe's known positive (recipe 1: the
+is T075. The pytest suite is part of the run: in a `FIXPP_BUILD_PYTHON=ON` tree, build `fixpp_py` with the test
+targets and run tier1.yml's "Run Python tests" step, extracted from the workflow, with its `PYTHONPATH`; its `FAILED`
+names join the RED set. The RED set is the union of [  FAILED  ] names and must contain the recipe's known positive (recipe 1: the
 locally reachable HP-QFj-*-reject-invalid-admin golden checks), or the recipe is broken. Recipe 1's positive is also
 W101-12's cells, which the D3 change always turns RED (T024); when no golden check can run locally (a counterparty
 binary absent), W101-12 is the positive alone, the absence is recorded, and the goldens are diffed only at T052. The
@@ -643,7 +648,8 @@ RED set is the census for that change:
    `HP-QFj-*-reject-invalid-admin` goldens.
 2. D4 alone (first-wins scan + `interpret_logon` + LogoutSent) → the 092 and 099 cells pinning last-wins endings.
 3. D6 alone (conflict clause without the `validate` term) → the validation-off establishment cells.
-4. D2 alone → the validator and session cells pinning 373=2 for an undefined tag or an undefined MsgType.
+4. D2 alone → the validator and session cells pinning 373=2 for an undefined tag or an undefined MsgType, the Python
+   binding's included (`test_099_fixt_appl_version.py`'s 3115 Reject).
 5. Two placeholder enumerators appended to `core::error` → the RED set must contain the sentinel grep's hits (its
    known positive), as every other recipe's must contain its own; every other RED name (a completeness gate or size
    pin the placeholders' switch cases trip, such as `kEnumTable`, `expected_error_map.csv` or `error_surface_test`'s
