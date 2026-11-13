@@ -3998,8 +3998,7 @@ TEST_F(AllVersionsRoundtrip077Vlatest, MultiChar102ExecInstTwoValuesRoundTrips) 
 TEST_F(AllVersionsRoundtrip077Vlatest, MultiChar102LegExecInstTwoValuesRoundTrips) {
     fixpp::vlatest::NewOrderMultilegArgs args{};
     args.cl_ord_id = "NewOrderMultileg_cl_ord_id";
-    using leg_args =
-        std::remove_const_t<typename std::remove_cvref_t<decltype(*args.legs)>::element_type>;
+    using leg_args = std::remove_const_t<std::remove_cvref_t<decltype(*args.legs)>::element_type>;
     std::array<leg_args, 1> legs{};
     legs[0].leg_symbol = "SYM";
     std::string_view const value = "1 2";

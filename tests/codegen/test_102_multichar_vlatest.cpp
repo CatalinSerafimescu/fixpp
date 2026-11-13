@@ -54,7 +54,7 @@ std::string as_text(T const& v) {
 
 // The accessor's value type, from the expected the accessor returns.
 template <class Expected>
-using value_of = typename std::remove_cvref_t<Expected>::value_type;
+using value_of = std::remove_cvref_t<Expected>::value_type;
 
 struct VLatest {
     std::pmr::monotonic_buffer_resource arena{65536};
@@ -78,21 +78,21 @@ struct Parsed {
     std::optional<IndexView> view;
 };
 
-void parse_into(Parsed& p, std::string_view body) {
+IndexView const& parse_into(Parsed& p, std::string_view body) {
     p.frame = fixpp_test_support::make_frame("FIXT.1.1", body);
-    p.view.emplace(fixpp_test_support::parse_dict(p.frame, vlatest().tv, &p.arena));
+    return p.view.emplace(fixpp_test_support::parse_dict(p.frame, vlatest().tv, &p.arena));
 }
 
 }  // namespace
 
 TEST(MultiChar102Vlatest, ExecInstTwoValuesReadsVerbatim) {
     Parsed p;
-    parse_into(p,
-               "35=D\x01"
-               "11=CL1\x01"
-               "18=1 2\x01");
+    IndexView const& view = parse_into(p,
+                                       "35=D\x01"
+                                       "11=CL1\x01"
+                                       "18=1 2\x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
-    fixpp::vlatest::NewOrderSingle const msg{*p.view};
+    fixpp::vlatest::NewOrderSingle const msg{view};
     auto const r = msg.exec_inst();
     ASSERT_TRUE(r.has_value()) << "exec_inst() refused the multi-valued 18=1 2";
     EXPECT_EQ(as_text(*r), "1 2");
@@ -100,12 +100,12 @@ TEST(MultiChar102Vlatest, ExecInstTwoValuesReadsVerbatim) {
 
 TEST(MultiChar102Vlatest, ExecInstOneValueReadsAsAString) {
     Parsed p;
-    parse_into(p,
-               "35=D\x01"
-               "11=CL1\x01"
-               "18=1\x01");
+    IndexView const& view = parse_into(p,
+                                       "35=D\x01"
+                                       "11=CL1\x01"
+                                       "18=1\x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
-    fixpp::vlatest::NewOrderSingle const msg{*p.view};
+    fixpp::vlatest::NewOrderSingle const msg{view};
     auto const r = msg.exec_inst();
     ASSERT_TRUE(r.has_value());
     EXPECT_EQ(as_text(*r), "1");
@@ -115,14 +115,14 @@ TEST(MultiChar102Vlatest, ExecInstOneValueReadsAsAString) {
 
 TEST(MultiChar102Vlatest, GroupEntryLegExecInstReadsVerbatim) {
     Parsed p;
-    parse_into(p,
-               "35=AB\x01"
-               "11=CL1\x01"
-               "555=1\x01"
-               "600=SYM\x01"
-               "1384=1 2\x01");
+    IndexView const& view = parse_into(p,
+                                       "35=AB\x01"
+                                       "11=CL1\x01"
+                                       "555=1\x01"
+                                       "600=SYM\x01"
+                                       "1384=1 2\x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
-    fixpp::vlatest::NewOrderMultileg const msg{*p.view};
+    fixpp::vlatest::NewOrderMultileg const msg{view};
     auto const legs = msg.legs();
     ASSERT_EQ(legs.size(), 1U) << "the NoLegs(555) instance did not resolve";
     auto const r = legs[0].leg_exec_inst();
@@ -133,13 +133,13 @@ TEST(MultiChar102Vlatest, GroupEntryLegExecInstReadsVerbatim) {
 
 TEST(MultiChar102Vlatest, OwningExecInstReadsVerbatim) {
     Parsed p;
-    parse_into(p,
-               "35=D\x01"
-               "11=CL1\x01"
-               "18=1 2\x01");
+    IndexView const& view = parse_into(p,
+                                       "35=D\x01"
+                                       "11=CL1\x01"
+                                       "18=1 2\x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
     std::pmr::monotonic_buffer_resource own_arena{16384};
-    auto owned = fixpp::vlatest::owning_NewOrderSingle::from_view(*p.view, &own_arena);
+    auto owned = fixpp::vlatest::owning_NewOrderSingle::from_view(view, &own_arena);
     ASSERT_TRUE(owned.has_value()) << "from_view failed";
     auto const r = owned->exec_inst();
     ASSERT_TRUE(r.has_value()) << "owning exec_inst() refused the multi-valued 18=1 2";

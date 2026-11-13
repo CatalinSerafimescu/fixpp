@@ -1348,6 +1348,7 @@ std::vector<std::uint16_t> run_tags_102(std::span<fixpp::dict::FieldRef const> r
 // `count` consecutive tags from `first`.
 std::vector<std::uint16_t> numbered_tags_102(int first, int count) {
     std::vector<std::uint16_t> out;
+    out.reserve(static_cast<std::size_t>(std::max(count, 0)));
     for (int i = 0; i < count; ++i) {
         out.push_back(static_cast<std::uint16_t>(first + i));
     }

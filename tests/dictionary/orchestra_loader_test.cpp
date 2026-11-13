@@ -1341,17 +1341,19 @@ TEST(ComponentIdentity102Orch, EveryComponentHasItsOwnIdentityAndMembers) {
     ASSERT_EQ(f.precondition_failure(), "");
     auto const& l = orch_identity();
     ASSERT_TRUE(l.dict.has_value()) << "the base did not load: " << l.error;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& dict = *l.dict;
     std::size_t wrong = 0;
     std::string first;
     for (auto const& e : f.components) {
-        auto const cr = l.dict->component(e.name);
+        auto const cr = dict.component(e.name);
         std::string why;
         if (!cr) {
             why = " not found";
         } else {
             std::uint64_t const id = cr->component_id;
             std::uint64_t const parent = cr->parent_component_id;
-            auto const got = members_of_102(l.dict->component_fields(e.name));
+            auto const got = members_of_102(dict.component_fields(e.name));
             if (id != e.id) {
                 why += " component_id " + std::to_string(id);
             }
@@ -1372,7 +1374,7 @@ TEST(ComponentIdentity102Orch, EveryComponentHasItsOwnIdentityAndMembers) {
     }
     EXPECT_EQ(wrong, 0U) << "components with a wrong identity or members; first: " << first;
 
-    auto const run = l.dict->message_fields(f.msg_type);
+    auto const run = dict.message_fields(f.msg_type);
     for (auto const& m : f.message_members) {
         auto const* hit = find_102(run, m.tag);
         if (hit == nullptr) {
@@ -1391,12 +1393,16 @@ TEST(ComponentIdentity102Orch, RowAAliasChildrenHaveTheirOwnParents) {
     ASSERT_EQ(f.precondition_failure(), "");
     auto const& l = orch_identity();
     ASSERT_TRUE(l.dict.has_value()) << "the base did not load: " << l.error;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& dict = *l.dict;
     for (auto const& [child, parent] : {std::pair{"Kh", "Ph"}, std::pair{"Ka", "Pa"}}) {
-        auto const c = l.dict->component(child);
-        auto const p = l.dict->component(parent);
+        auto const c = dict.component(child);
+        auto const p = dict.component(parent);
         ASSERT_TRUE(c.has_value() && p.has_value()) << child << " / " << parent;
+        // NOLINTBEGIN(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks both
         std::uint64_t const got = c->parent_component_id;
         std::uint64_t const want = std::uint64_t{p->component_id} + 1U;
+        // NOLINTEND(bugprone-unchecked-optional-access)
         EXPECT_EQ(got, want) << child << "'s parent must be " << parent;
     }
 }
@@ -1408,6 +1414,8 @@ TEST(ComponentIdentity102Orch, GroupAliasPairResolvesToItsOwnDefinitions) {
     ASSERT_EQ(f.precondition_failure(), "");
     auto const& l = orch_identity();
     ASSERT_TRUE(l.dict.has_value()) << "the base did not load: " << l.error;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& dict = *l.dict;
     auto const tags = [](std::span<fixpp::dict::FieldRef const> run) {
         std::vector<std::uint16_t> out;
         for (auto const& fr : run) {
@@ -1415,12 +1423,11 @@ TEST(ComponentIdentity102Orch, GroupAliasPairResolvesToItsOwnDefinitions) {
         }
         return out;
     };
-    EXPECT_EQ(tags(l.dict->component_fields("X")),
-              (std::vector<std::uint16_t>{f.t_x, f.n_x, f.m_x}));
-    EXPECT_EQ(tags(l.dict->group_fields(f.n_x)), (std::vector<std::uint16_t>{f.m_x}));
-    auto const xa = tags(l.dict->component_fields("Xa"));
+    EXPECT_EQ(tags(dict.component_fields("X")), (std::vector<std::uint16_t>{f.t_x, f.n_x, f.m_x}));
+    EXPECT_EQ(tags(dict.group_fields(f.n_x)), (std::vector<std::uint16_t>{f.m_x}));
+    auto const xa = tags(dict.component_fields("Xa"));
     ASSERT_EQ(xa.size(), 3U);
-    EXPECT_EQ(tags(l.dict->group_fields(xa[1])), (std::vector<std::uint16_t>{xa[2]}));
+    EXPECT_EQ(tags(dict.group_fields(xa[1])), (std::vector<std::uint16_t>{xa[2]}));
     EXPECT_NE(xa[1], f.n_x);
 }
 

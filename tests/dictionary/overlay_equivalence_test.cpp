@@ -214,9 +214,10 @@ TEST(OverlayEquivalenceW1Orch, EveryAdditionKindEqualsTheEditedReference) {
     ot::expect_loaded_at_prediction(p, "W-1 orch");
     ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
     Dictionary const reference = load_orch_text(edited);
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    // NOLINTBEGIN(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     expect_equivalent("W-1 orch",
                       compare_against(*p.dictionary, reference, edited, fmt::orchestra));
+    // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 // Seeded mismatch: the reference without the code Z the overlay adds to the base

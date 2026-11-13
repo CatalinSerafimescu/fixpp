@@ -257,7 +257,7 @@ inline std::string g_refs(int first, int count) {
     return s;
 }
 
-inline constexpr int orch_g_entries(int n) { return 1 + (n * kOrchPerH); }
+constexpr int orch_g_entries(int n) { return 1 + (n * kOrchPerH); }
 
 inline std::string orch_grow_e0_e1() {
     return ocomp(1, "E0", oref("fieldRef", 8) + g_refs(0, 2)) +

@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/dict/dictionary.hpp>
@@ -33,7 +34,6 @@ namespace {
 namespace ot = overlay_test;
 namespace ov = fixpp::dict::detail::overlay;
 namespace w = fixpp::test102::width;
-using fixpp::dict::Dictionary;
 using fixpp::dict::FieldRef;
 
 std::pmr::memory_resource* mr() { return std::pmr::new_delete_resource(); }
@@ -51,21 +51,11 @@ std::vector<std::uint16_t> tags_of(std::span<FieldRef const> run) {
 }
 
 bool has_tag(std::span<FieldRef const> run, std::uint16_t tag) {
-    for (auto const& fr : run) {
-        if (fr.tag == tag) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(run, [tag](FieldRef const& fr) { return fr.tag == tag; });
 }
 
 bool has_tag(std::span<std::uint16_t const> run, std::uint16_t tag) {
-    for (auto const t : run) {
-        if (t == tag) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(run, [tag](std::uint16_t t) { return t == tag; });
 }
 
 // A small Orchestra base: the header (1024), then `components`, `groups`, `fields` and message

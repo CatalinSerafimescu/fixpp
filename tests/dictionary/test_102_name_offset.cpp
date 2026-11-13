@@ -37,11 +37,16 @@ struct base_file {
 };
 
 constexpr base_file kBases[] = {
-    {"FIX40.xml", false},    {"FIX41.xml", false},
-    {"FIX42.xml", false},    {"FIX43.xml", false},
-    {"FIX44.xml", false},    {"FIX50.xml", false},
-    {"FIX50SP1.xml", false}, {"FIX50SP2.xml", false},
-    {"FIXT11.xml", false},   {"OrchestraFIXLatest.xml", true},
+    {.name = "FIX40.xml", .orchestra = false},
+    {.name = "FIX41.xml", .orchestra = false},
+    {.name = "FIX42.xml", .orchestra = false},
+    {.name = "FIX43.xml", .orchestra = false},
+    {.name = "FIX44.xml", .orchestra = false},
+    {.name = "FIX50.xml", .orchestra = false},
+    {.name = "FIX50SP1.xml", .orchestra = false},
+    {.name = "FIX50SP2.xml", .orchestra = false},
+    {.name = "FIXT11.xml", .orchestra = false},
+    {.name = "OrchestraFIXLatest.xml", .orchestra = true},
 };
 
 std::filesystem::path path_of(base_file const& b) {

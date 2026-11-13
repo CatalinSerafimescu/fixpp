@@ -849,6 +849,7 @@ bool contains_102(std::vector<std::uint16_t> const& v, std::uint16_t t) {
 
 std::vector<std::uint16_t> member_tags_102(GroupOrderEntry const& e) {
     std::vector<std::uint16_t> out;
+    out.reserve(e.members.size());
     for (auto const& m : e.members) {
         out.push_back(m.tag);
     }
@@ -865,6 +866,7 @@ TEST(OrchestraIds102, IrMessageGetsTheHighIdComponentsMembersAndGroupsOrder) {
     ASSERT_EQ(f.precondition_failure(), "");
     auto const& r = header_fixture_ir_102();
     ASSERT_TRUE(r.ir.has_value()) << "build_ir refused the fixture: " << r.error;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     MessageIR const& e = find_message(*r.ir, f.ir_msg_type);
     std::vector<std::uint16_t> top;
     for (auto const& o : e.occurrences) {
@@ -899,10 +901,11 @@ TEST(OrchestraIds102, RowCHeaderClassificationReachesBothMembersOfEachAliasPair)
     ASSERT_EQ(f.precondition_failure(), "");
     auto const& r = header_fixture_ir_102();
     ASSERT_TRUE(r.ir.has_value()) << "build_ir refused the fixture: " << r.error;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& ir = *r.ir;
     for (std::uint16_t const t : {f.t, f.n, f.m, f.t2, f.n2, f.m2}) {
-        EXPECT_TRUE(contains_102(r.ir->header_trailer_tags, t))
-            << "header_trailer_tags lacks " << t;
+        EXPECT_TRUE(contains_102(ir.header_trailer_tags, t)) << "header_trailer_tags lacks " << t;
     }
-    EXPECT_TRUE(contains_102(r.ir->group_tags, f.n)) << "group_tags lacks " << f.n;
-    EXPECT_TRUE(contains_102(r.ir->group_tags, f.n2)) << "group_tags lacks " << f.n2;
+    EXPECT_TRUE(contains_102(ir.group_tags, f.n)) << "group_tags lacks " << f.n;
+    EXPECT_TRUE(contains_102(ir.group_tags, f.n2)) << "group_tags lacks " << f.n2;
 }

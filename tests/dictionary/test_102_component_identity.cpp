@@ -118,8 +118,10 @@ TEST(ComponentIdentity102Xml, EveryComponentHasItsOwnIdentityAndMembers) {
     ASSERT_EQ(f.precondition_failure(), "");
     auto const& l = xml_identity();
     ASSERT_TRUE(l.dict.has_value()) << "the base did not load: " << l.error;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& dict = *l.dict;
     std::string first;
-    std::size_t const wrong = compare_components(*l.dict, f.components, first);
+    std::size_t const wrong = compare_components(dict, f.components, first);
     EXPECT_EQ(wrong, 0U) << "components with a wrong identity or members; first: " << first;
 }
 
@@ -130,8 +132,10 @@ TEST(ComponentIdentity102Xml, ParentAtAndPastTheWrapPointIsTheParentsIdPlusOne) 
     ASSERT_EQ(f.precondition_failure(), "");
     auto const& l = xml_identity();
     ASSERT_TRUE(l.dict.has_value()) << "the base did not load: " << l.error;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& dict = *l.dict;
     for (char const* kid : {"Kid1", "Kid2"}) {
-        auto const cr = l.dict->component(kid);
+        auto const cr = dict.component(kid);
         ASSERT_TRUE(cr.has_value()) << kid;
         std::uint32_t expected = 0;
         for (auto const& e : f.components) {
@@ -140,6 +144,7 @@ TEST(ComponentIdentity102Xml, ParentAtAndPastTheWrapPointIsTheParentsIdPlusOne) 
             }
         }
         ASSERT_NE(expected, 0U) << kid << ": the fixture gives it a parent";
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE on cr checks it
         std::uint64_t const got = cr->parent_component_id;
         EXPECT_EQ(got, expected) << kid;
     }
@@ -150,7 +155,9 @@ TEST(ComponentIdentity102Xml, MessageMembersCarryTheirComponentIndex) {
     ASSERT_EQ(f.precondition_failure(), "");
     auto const& l = xml_identity();
     ASSERT_TRUE(l.dict.has_value()) << "the base did not load: " << l.error;
-    auto const run = l.dict->message_fields(f.msg_type);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& dict = *l.dict;
+    auto const run = dict.message_fields(f.msg_type);
     for (auto const& m : f.message_members) {
         FieldRef const* hit = nullptr;
         for (auto const& fr : run) {

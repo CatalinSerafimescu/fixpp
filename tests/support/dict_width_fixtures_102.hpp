@@ -249,21 +249,27 @@ inline xml_identity_fixture make_xml_identity_fixture() {
         f.components[i].id = i;
     }
     auto const own = [](std::uint32_t i) { return i + 1; };
-    f.components[W - 1].members = {{kTP1, own(W - 1)}, {kTK1, own(W)}};
-    f.components[W].members = {{kTK1, own(W)}};
+    f.components[W - 1].members = {{.tag = kTP1, .component_index = own(W - 1)},
+                                   {.tag = kTK1, .component_index = own(W)}};
+    f.components[W].members = {{.tag = kTK1, .component_index = own(W)}};
     f.components[W].parent = own(W - 1);
-    f.components[W + 1].members = {{kFH, own(W + 1)}};
-    f.components[W + 2].members = {{kTP2, own(W + 2)}, {kTK2, own(W + 3)}};
-    f.components[W + 3].members = {{kTK2, own(W + 3)}};
+    f.components[W + 1].members = {{.tag = kFH, .component_index = own(W + 1)}};
+    f.components[W + 2].members = {{.tag = kTP2, .component_index = own(W + 2)},
+                                   {.tag = kTK2, .component_index = own(W + 3)}};
+    f.components[W + 3].members = {{.tag = kTK2, .component_index = own(W + 3)}};
     f.components[W + 3].parent = own(W + 2);
-    f.components[W + 4].members = {{kTX, own(W + 4)}, {kNX, own(W + 4)}, {kMX, own(W + 4)}};
-    f.components[4].members = {{kTA, own(4)}, {kNA, own(4)}, {kMA, own(4)}};
+    f.components[W + 4].members = {{.tag = kTX, .component_index = own(W + 4)},
+                                   {.tag = kNX, .component_index = own(W + 4)},
+                                   {.tag = kMX, .component_index = own(W + 4)}};
+    f.components[4].members = {{.tag = kTA, .component_index = own(4)},
+                               {.tag = kNA, .component_index = own(4)},
+                               {.tag = kMA, .component_index = own(4)}};
 
-    f.message_members = {{kFH, own(W + 1)},
-                         {kTP2, own(W + 2)},
-                         {kTK2, own(W + 3)},
-                         {kTX, own(W + 4)},
-                         {kNX, own(W + 4)}};
+    f.message_members = {{.tag = kFH, .component_index = own(W + 1)},
+                         {.tag = kTP2, .component_index = own(W + 2)},
+                         {.tag = kTK2, .component_index = own(W + 3)},
+                         {.tag = kTX, .component_index = own(W + 4)},
+                         {.tag = kNX, .component_index = own(W + 4)}};
 
     std::string& x = f.text;
     x.reserve(std::size_t{N} * 32U);
@@ -395,28 +401,39 @@ inline orch_identity_fixture make_orch_identity_fixture() {
         f.components[i].id = i;
     }
     auto const own = [](std::uint32_t i) { return i + 1; };
-    f.components[0].members = {{kTKa, own(0)}};
+    f.components[0].members = {{.tag = kTKa, .component_index = own(0)}};
     f.components[0].parent = own(1);
-    f.components[1].members = {{kTPa, own(1)}, {kTKa, own(0)}};
-    f.components[2].members = {{kFL, own(2)}};
-    f.components[3].members = {{kTXa, own(3)}, {kNXa, own(3)}, {kMXa, own(3)}};
-    f.components[W].members = {{kTKh, own(W)}};
+    f.components[1].members = {{.tag = kTPa, .component_index = own(1)},
+                               {.tag = kTKa, .component_index = own(0)}};
+    f.components[2].members = {{.tag = kFL, .component_index = own(2)}};
+    f.components[3].members = {{.tag = kTXa, .component_index = own(3)},
+                               {.tag = kNXa, .component_index = own(3)},
+                               {.tag = kMXa, .component_index = own(3)}};
+    f.components[W].members = {{.tag = kTKh, .component_index = own(W)}};
     f.components[W].parent = own(W + 1);
-    f.components[W + 1].members = {{kTPh, own(W + 1)}, {kTKh, own(W)}};
-    f.components[W + 2].members = {{kFH, own(W + 2)}};
-    f.components[W + 3].members = {{kTX, own(W + 3)}, {kNX, own(W + 3)}, {kMX, own(W + 3)}};
+    f.components[W + 1].members = {{.tag = kTPh, .component_index = own(W + 1)},
+                                   {.tag = kTKh, .component_index = own(W)}};
+    f.components[W + 2].members = {{.tag = kFH, .component_index = own(W + 2)}};
+    f.components[W + 3].members = {{.tag = kTX, .component_index = own(W + 3)},
+                                   {.tag = kNX, .component_index = own(W + 3)},
+                                   {.tag = kMX, .component_index = own(W + 3)}};
     f.components[W + 3].parent = own(W + 4);
-    f.components[W + 4].members = {{8, own(W + 4)},   {9, own(W + 4)},   {35, own(W + 4)},
-                                   {kTX, own(W + 3)}, {kNX, own(W + 3)}, {kMX, own(W + 3)}};
+    f.components[W + 4].members = {
+        {.tag = 8, .component_index = own(W + 4)},   {.tag = 9, .component_index = own(W + 4)},
+        {.tag = 35, .component_index = own(W + 4)},  {.tag = kTX, .component_index = own(W + 3)},
+        {.tag = kNX, .component_index = own(W + 3)}, {.tag = kMX, .component_index = own(W + 3)}};
 
-    f.message_members = {{kTKa, own(0)},    {kTPa, own(1)},   {kFL, own(2)},      {kTXa, own(3)},
-                         {kNXa, own(3)},    {kTKh, own(W)},   {kTPh, own(W + 1)}, {kFH, own(W + 2)},
-                         {kTX, own(W + 3)}, {kNX, own(W + 3)}};
-    f.pairs = {{"fixr:component", "fixr:componentRef", ids[W]},
-               {"fixr:component", "fixr:componentRef", ids[W + 1]},
-               {"fixr:component", "fixr:componentRef", ids[W + 2]},
-               {"fixr:component", "fixr:componentRef", ids[W + 3]},
-               {"fixr:group", "fixr:groupRef", kGx}};
+    f.message_members = {
+        {.tag = kTKa, .component_index = own(0)},     {.tag = kTPa, .component_index = own(1)},
+        {.tag = kFL, .component_index = own(2)},      {.tag = kTXa, .component_index = own(3)},
+        {.tag = kNXa, .component_index = own(3)},     {.tag = kTKh, .component_index = own(W)},
+        {.tag = kTPh, .component_index = own(W + 1)}, {.tag = kFH, .component_index = own(W + 2)},
+        {.tag = kTX, .component_index = own(W + 3)},  {.tag = kNX, .component_index = own(W + 3)}};
+    f.pairs = {{.element = "fixr:component", .ref = "fixr:componentRef", .high = ids[W]},
+               {.element = "fixr:component", .ref = "fixr:componentRef", .high = ids[W + 1]},
+               {.element = "fixr:component", .ref = "fixr:componentRef", .high = ids[W + 2]},
+               {.element = "fixr:component", .ref = "fixr:componentRef", .high = ids[W + 3]},
+               {.element = "fixr:group", .ref = "fixr:groupRef", .high = kGx}};
 
     std::string& x = f.text;
     x.reserve(std::size_t{N} * 48U);
@@ -429,13 +446,18 @@ inline orch_identity_fixture make_orch_identity_fixture() {
         char const* name;
         char const* type;
     };
-    for (field_row const& r :
-         {field_row{kTKa, "TKa", "String"}, field_row{kTPa, "TPa", "String"},
-          field_row{kFL, "FL", "String"}, field_row{kTXa, "TXa", "String"},
-          field_row{kNXa, "NoXa", "NumInGroup"}, field_row{kMXa, "MXa", "String"},
-          field_row{kTKh, "TKh", "String"}, field_row{kTPh, "TPh", "String"},
-          field_row{kFH, "FH", "String"}, field_row{kTX, "TX", "String"},
-          field_row{kNX, "NoX", "NumInGroup"}, field_row{kMX, "MX", "String"}}) {
+    for (field_row const& r : {field_row{.tag = kTKa, .name = "TKa", .type = "String"},
+                               field_row{.tag = kTPa, .name = "TPa", .type = "String"},
+                               field_row{.tag = kFL, .name = "FL", .type = "String"},
+                               field_row{.tag = kTXa, .name = "TXa", .type = "String"},
+                               field_row{.tag = kNXa, .name = "NoXa", .type = "NumInGroup"},
+                               field_row{.tag = kMXa, .name = "MXa", .type = "String"},
+                               field_row{.tag = kTKh, .name = "TKh", .type = "String"},
+                               field_row{.tag = kTPh, .name = "TPh", .type = "String"},
+                               field_row{.tag = kFH, .name = "FH", .type = "String"},
+                               field_row{.tag = kTX, .name = "TX", .type = "String"},
+                               field_row{.tag = kNX, .name = "NoX", .type = "NumInGroup"},
+                               field_row{.tag = kMX, .name = "MX", .type = "String"}}) {
         x += o_field_def(r.tag, r.name, r.type);
     }
     x += "</fixr:fields>\n<fixr:components>\n";
@@ -517,10 +539,10 @@ inline orch_header_fixture make_orch_header_fixture() {
     constexpr std::uint32_t kJg = 70011;
     constexpr std::uint32_t kIca = kIc - kWrap;
     constexpr std::uint32_t kJga = kJg - kWrap;
-    f.pairs = {{"fixr:component", "fixr:componentRef", kHc},
-               {"fixr:group", "fixr:groupRef", kHg},
-               {"fixr:component", "fixr:componentRef", kIc},
-               {"fixr:group", "fixr:groupRef", kJg}};
+    f.pairs = {{.element = "fixr:component", .ref = "fixr:componentRef", .high = kHc},
+               {.element = "fixr:group", .ref = "fixr:groupRef", .high = kHg},
+               {.element = "fixr:component", .ref = "fixr:componentRef", .high = kIc},
+               {.element = "fixr:group", .ref = "fixr:groupRef", .high = kJg}};
     std::string& x = f.text;
     x += kOrchOpen;
     x += "<fixr:fields>\n";
@@ -596,7 +618,7 @@ inline std::vector<expected_component> crossing_added(std::uint32_t base_count,
         expected_component c;
         c.name = "New" + std::to_string(k);
         c.id = base_count + static_cast<std::uint32_t>(k);
-        c.members = {{static_cast<std::uint16_t>(9500U + k), c.id + 1}};
+        c.members = {{.tag = static_cast<std::uint16_t>(9500U + k), .component_index = c.id + 1}};
         out.push_back(std::move(c));
     }
     return out;
@@ -733,7 +755,7 @@ struct component_overlay_fixture {
 inline component_overlay_fixture make_component_overlay_fixture() {
     component_overlay_fixture f;
     std::uint32_t const alias = f.high_id - kWrap;
-    f.pairs = {{"fixr:component", "fixr:componentRef", f.high_id}};
+    f.pairs = {{.element = "fixr:component", .ref = "fixr:componentRef", .high = f.high_id}};
     f.base =
         std::string{kOrchOpen} + "<fixr:fields>\n" + o_field_def(8, "BeginString", "String") +
         o_field_def(9, "BodyLength", "Length") + o_field_def(10, "CheckSum", "String") +

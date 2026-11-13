@@ -495,15 +495,17 @@ TEST(HeaderTags102, OrchestraHeaderStoreKeepsEachMemberOfAnAliasPair) {
     ASSERT_EQ(f.precondition_failure(), "");
     auto const& l = header_fixture_102();
     ASSERT_TRUE(l.tv.has_value()) << "the fixture did not load: " << l.error;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& tv = *l.tv;
     for (std::uint16_t const t : {f.t, f.n, f.m, f.t2, f.n2, f.m2}) {
-        EXPECT_TRUE(l.tv->is_header_tag(t)) << "tag " << t;
+        EXPECT_TRUE(tv.is_header_tag(t)) << "tag " << t;
     }
     std::vector<std::string> unresolved;
     tag_set const walk = orchestra_header_walk(f.text, unresolved);
     EXPECT_TRUE(unresolved.empty()) << "the walk met ids it cannot resolve";
-    EXPECT_EQ(disagreements(*l.tv, walk), tag_set{}) << "walk " << render(walk);
+    EXPECT_EQ(disagreements(tv, walk), tag_set{}) << "walk " << render(walk);
     // Spec Edge Cases: component 1024 + 65536 is an ordinary definition, not the header.
-    EXPECT_FALSE(l.tv->is_header_tag(f.t_ord));
+    EXPECT_FALSE(tv.is_header_tag(f.t_ord));
 }
 
 // Row (b2): 100's section records, read directly.
@@ -512,10 +514,12 @@ TEST(HeaderTags102, OrchestraSectionRecordsKeepEachMemberOfAnAliasPair) {
     ASSERT_EQ(f.precondition_failure(), "");
     auto const& l = header_fixture_102();
     ASSERT_TRUE(l.tv.has_value()) << "the fixture did not load: " << l.error;
-    EXPECT_EQ(top_section_members_102(*l.tv, f.n), std::vector<std::uint16_t>{f.m});
-    EXPECT_EQ(top_section_members_102(*l.tv, f.n2), std::vector<std::uint16_t>{f.m2});
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& tv = *l.tv;
+    EXPECT_EQ(top_section_members_102(tv, f.n), std::vector<std::uint16_t>{f.m});
+    EXPECT_EQ(top_section_members_102(tv, f.n2), std::vector<std::uint16_t>{f.m2});
     // Spec Edge Cases: component 1025 + 65536 is an ordinary definition, not the trailer.
-    EXPECT_FALSE(top_section_members_102(*l.tv, f.n_t).has_value());
+    EXPECT_FALSE(top_section_members_102(tv, f.n_t).has_value());
 }
 
 // Row (b-x): the QuickFIX XML header reaches HeaderX, past the wrap.
@@ -524,13 +528,15 @@ TEST(HeaderTags102, QuickFixHeaderPastTheWrapHoldsItsOwnComponentsTags) {
     ASSERT_EQ(f.precondition_failure(), "");
     auto const& l = xml_identity_102();
     ASSERT_TRUE(l.tv.has_value()) << "the base did not load: " << l.error;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& tv = *l.tv;
     for (std::uint16_t const t : {f.t_x, f.n_x, f.m_x}) {
-        EXPECT_TRUE(l.tv->is_header_tag(t)) << "tag " << t;
+        EXPECT_TRUE(tv.is_header_tag(t)) << "tag " << t;
     }
     std::vector<std::string> unresolved;
     tag_set const walk = quickfix_header_walk(f.text, unresolved);
     EXPECT_TRUE(unresolved.empty()) << "the walk met names it cannot resolve";
-    EXPECT_EQ(disagreements(*l.tv, walk), tag_set{}) << "walk " << render(walk);
+    EXPECT_EQ(disagreements(tv, walk), tag_set{}) << "walk " << render(walk);
 }
 
 // Row (b2-x).
@@ -539,7 +545,9 @@ TEST(HeaderTags102, QuickFixSectionRecordPastTheWrapHoldsItsOwnMember) {
     ASSERT_EQ(f.precondition_failure(), "");
     auto const& l = xml_identity_102();
     ASSERT_TRUE(l.tv.has_value()) << "the base did not load: " << l.error;
-    EXPECT_EQ(top_section_members_102(*l.tv, f.n_x), std::vector<std::uint16_t>{f.m_x});
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& tv = *l.tv;
+    EXPECT_EQ(top_section_members_102(tv, f.n_x), std::vector<std::uint16_t>{f.m_x});
 }
 
 // Row (b-o): the Orchestra header (declared past the wrap) reaches X, past the wrap.
@@ -548,13 +556,15 @@ TEST(HeaderTags102, OrchestraHeaderPastTheWrapHoldsItsOwnComponentsTags) {
     ASSERT_EQ(f.precondition_failure(), "");
     auto const& l = orch_identity_102();
     ASSERT_TRUE(l.tv.has_value()) << "the base did not load: " << l.error;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& tv = *l.tv;
     for (std::uint16_t const t : {f.t_x, f.n_x, f.m_x}) {
-        EXPECT_TRUE(l.tv->is_header_tag(t)) << "tag " << t;
+        EXPECT_TRUE(tv.is_header_tag(t)) << "tag " << t;
     }
     std::vector<std::string> unresolved;
     tag_set const walk = orchestra_header_walk(f.text, unresolved);
     EXPECT_TRUE(unresolved.empty()) << "the walk met ids it cannot resolve";
-    EXPECT_EQ(disagreements(*l.tv, walk), tag_set{}) << "walk " << render(walk);
+    EXPECT_EQ(disagreements(tv, walk), tag_set{}) << "walk " << render(walk);
 }
 
 // Row (b2-o).
@@ -563,7 +573,9 @@ TEST(HeaderTags102, OrchestraSectionRecordPastTheWrapHoldsItsOwnMember) {
     ASSERT_EQ(f.precondition_failure(), "");
     auto const& l = orch_identity_102();
     ASSERT_TRUE(l.tv.has_value()) << "the base did not load: " << l.error;
-    EXPECT_EQ(top_section_members_102(*l.tv, f.n_x), std::vector<std::uint16_t>{f.m_x});
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& tv = *l.tv;
+    EXPECT_EQ(top_section_members_102(tv, f.n_x), std::vector<std::uint16_t>{f.m_x});
 }
 
 }  // namespace

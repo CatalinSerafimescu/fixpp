@@ -53,7 +53,7 @@ std::string as_text(T const& v) {
 
 // The accessor's value type, from the expected the accessor returns.
 template <class Expected>
-using value_of = typename std::remove_cvref_t<Expected>::value_type;
+using value_of = std::remove_cvref_t<Expected>::value_type;
 
 struct V50Sp2 {
     std::pmr::monotonic_buffer_resource arena{65536};
@@ -77,21 +77,21 @@ struct Parsed {
     std::optional<IndexView> view;
 };
 
-void parse_into(Parsed& p, std::string_view body) {
+IndexView const& parse_into(Parsed& p, std::string_view body) {
     p.frame = fixpp_test_support::make_frame("FIX.5.0SP2", body);
-    p.view.emplace(fixpp_test_support::parse_dict(p.frame, v50sp2().tv, &p.arena));
+    return p.view.emplace(fixpp_test_support::parse_dict(p.frame, v50sp2().tv, &p.arena));
 }
 
 }  // namespace
 
 TEST(MultiChar102V50sp2, ExecInstTwoValuesReadsVerbatim) {
     Parsed p;
-    parse_into(p,
-               "35=D\x01"
-               "11=CL1\x01"
-               "18=1 2\x01");
+    IndexView const& view = parse_into(p,
+                                       "35=D\x01"
+                                       "11=CL1\x01"
+                                       "18=1 2\x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
-    fixpp::v50sp2::NewOrderSingle const msg{*p.view};
+    fixpp::v50sp2::NewOrderSingle const msg{view};
     auto const r = msg.exec_inst();
     ASSERT_TRUE(r.has_value()) << "exec_inst() refused the multi-valued 18=1 2";
     EXPECT_EQ(as_text(*r), "1 2");
@@ -99,12 +99,12 @@ TEST(MultiChar102V50sp2, ExecInstTwoValuesReadsVerbatim) {
 
 TEST(MultiChar102V50sp2, ExecInstOneValueReadsAsAString) {
     Parsed p;
-    parse_into(p,
-               "35=D\x01"
-               "11=CL1\x01"
-               "18=1\x01");
+    IndexView const& view = parse_into(p,
+                                       "35=D\x01"
+                                       "11=CL1\x01"
+                                       "18=1\x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
-    fixpp::v50sp2::NewOrderSingle const msg{*p.view};
+    fixpp::v50sp2::NewOrderSingle const msg{view};
     auto const r = msg.exec_inst();
     ASSERT_TRUE(r.has_value());
     EXPECT_EQ(as_text(*r), "1");
@@ -115,12 +115,12 @@ TEST(MultiChar102V50sp2, ExecInstOneValueReadsAsAString) {
 // Spec FR-004: no MultipleCharValue grammar check; spacing is returned as it came.
 TEST(MultiChar102V50sp2, ExecInstIrregularSpacingReadsVerbatim) {
     Parsed p;
-    parse_into(p,
-               "35=D\x01"
-               "11=CL1\x01"
-               "18=1  2 \x01");
+    IndexView const& view = parse_into(p,
+                                       "35=D\x01"
+                                       "11=CL1\x01"
+                                       "18=1  2 \x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
-    fixpp::v50sp2::NewOrderSingle const msg{*p.view};
+    fixpp::v50sp2::NewOrderSingle const msg{view};
     auto const r = msg.exec_inst();
     ASSERT_TRUE(r.has_value()) << "exec_inst() refused 18=1  2 (doubled and trailing space)";
     EXPECT_EQ(as_text(*r), "1  2 ");
@@ -128,14 +128,14 @@ TEST(MultiChar102V50sp2, ExecInstIrregularSpacingReadsVerbatim) {
 
 TEST(MultiChar102V50sp2, GroupEntryLegExecInstReadsVerbatim) {
     Parsed p;
-    parse_into(p,
-               "35=AB\x01"
-               "11=CL1\x01"
-               "555=1\x01"
-               "600=SYM\x01"
-               "1384=1 2\x01");
+    IndexView const& view = parse_into(p,
+                                       "35=AB\x01"
+                                       "11=CL1\x01"
+                                       "555=1\x01"
+                                       "600=SYM\x01"
+                                       "1384=1 2\x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
-    fixpp::v50sp2::NewOrderMultileg const msg{*p.view};
+    fixpp::v50sp2::NewOrderMultileg const msg{view};
     auto const legs = msg.legs();
     ASSERT_EQ(legs.size(), 1U) << "the NoLegs(555) instance did not resolve";
     auto const r = legs[0].leg_exec_inst();
@@ -146,13 +146,13 @@ TEST(MultiChar102V50sp2, GroupEntryLegExecInstReadsVerbatim) {
 
 TEST(MultiChar102V50sp2, OwningExecInstReadsVerbatim) {
     Parsed p;
-    parse_into(p,
-               "35=D\x01"
-               "11=CL1\x01"
-               "18=1 2\x01");
+    IndexView const& view = parse_into(p,
+                                       "35=D\x01"
+                                       "11=CL1\x01"
+                                       "18=1 2\x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
     std::pmr::monotonic_buffer_resource own_arena{16384};
-    auto owned = fixpp::v50sp2::owning_NewOrderSingle::from_view(*p.view, &own_arena);
+    auto owned = fixpp::v50sp2::owning_NewOrderSingle::from_view(view, &own_arena);
     ASSERT_TRUE(owned.has_value()) << "from_view failed";
     auto const r = owned->exec_inst();
     ASSERT_TRUE(r.has_value()) << "owning exec_inst() refused the multi-valued 18=1 2";
