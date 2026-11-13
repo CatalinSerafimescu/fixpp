@@ -11,7 +11,8 @@ types, their widened members and every `Dictionary` member that returns or spans
 Its known positive on the parent base is `src/capi/message_write.cpp`'s `field_ref(` reads, each of which reads only
 `rule` or `type`. Every hit is classified as reading a member 102 does not widen, or a defect.
 
-B&L rows: B-102-1 (layouts), B-102-2 (MultiCharValue types), B-102-3 (loads that now succeed); B-098-1 amended.
+B&L rows: B-102-1 (layouts), B-102-2 (MultiCharValue types), B-102-3 (loads that now succeed, and the C-ABI and
+Python results of §6); B-098-1 amended. The C-ABI population §6 reaches is data-model.md Appendix A.
 
 Every C++ consumer of the `fixpp/dict` headers rebuilds against them. libfixpp's own C++ ABI changes wherever a
 member returns, spans or takes a record: `Dictionary::component`, `group`, `component_fields`, `group_fields`,
@@ -79,7 +80,8 @@ initializers.
   list says only "malformed".
 - On the vendored FIX50SP2, `Dictionary::component_fields("RgstDistInstGrp")`, and that of every component whose
   side-table start passed 65535, now returns the component's own members; before, it returned another definition's,
-  with no error (L-098-4, closed). B-102-3 records it.
+  with no error (L-098-4, closed). B-102-3 records it. This is a C++ change only: no C-ABI result observes it (§6
+  "Unchanged").
 
 ## 3. 098's side-table refusal is removed
 
@@ -138,26 +140,64 @@ it.
 ## 6. C-ABI and Python results (BREAKING, `[const §X.7]`)
 
 Owner ruling, 2026-11-13: "All BREAKING, bump (Recommended)". No C-ABI type, symbol or error code changes; these calls
-return a result other than the one their pre-102 documentation gave.
+return a result other than the one their pre-102 documentation gave, in three kinds:
+
+- a failure turned into a success: (a), (b), (c), (d);
+- the same code, and a different dictionary: (f), (g), with every downstream call data-model.md Appendix A marks;
+- a failure turned into a different failure (or into a success): (a′), (b′).
+
+The classes are derived outward from what 102 corrects, not from `dict.h`'s documented causes:
+
+| 102 corrects | C-ABI reach |
+|---|---|
+| the side-table refusal (retired) | (a), (a′) |
+| the surrogate-id parse | (b), (b′), (c) |
+| component identity (`expand_field_list`'s `components_[cit->second]` past the wrap) | (f) |
+| the group side table (`finalize`'s group start) | (g) |
+| the component side-table start (FIX50SP2's `RgstDistInstGrp`), the name offset, FR-008's guard, the MultiCharValue kind | none: "Unchanged" below |
+
+(e) is unused.
 
 | Class | Call | Input | Before (`$P`) | After |
 |---|---|---|---|---|
-| (a) | `fixpp_dict_load_from_xml_with_overlay`, either format | an overlay whose only fault is that a component or group side table would stop fitting 16 bits | `FIXPP_ERR_DICT_LIMIT_EXCEEDED` | `FIXPP_ERR_OK` |
-| (b) | `fixpp_dict_load_from_xml_with_overlay` | an Orchestra base or overlay with a component, group, componentRef or groupRef id in 65536..2147483647 | `FIXPP_ERR_DICT_CONFIG` | `FIXPP_ERR_OK` |
-| (c) | `fixpp_dict_load_from_xml` | an Orchestra document with such an id | `FIXPP_ERR_CAPI_CONFIG_INVALID` | `FIXPP_ERR_OK` |
-| (d) | Python `fixpp.dict_load_from_xml` / `fixpp.dict_load_from_xml_with_overlay` | the inputs of (c) / of (a) and (b) | raised `CapiError` / `ValidatorError` (`.code` of (a) or (b)) | returns a dictionary |
-| (f) | either call | a base of more than 65,535 components | `FIXPP_ERR_OK`, identities past the wrap wrong | `FIXPP_ERR_OK`, identities correct; a session over such a base can see a different header tag set |
+| (a) | `fixpp_dict_load_from_xml_with_overlay`, either format | an overlay whose side-table fault (a component or group side table that would stop fitting 16 bits) was the only refusal it reached | `FIXPP_ERR_DICT_LIMIT_EXCEEDED` | `FIXPP_ERR_OK` |
+| (a′) | `fixpp_dict_load_from_xml_with_overlay`, either format | an overlay with that side-table fault and a fault the guard detects after its side-table arms: a step-7 conflict (QuickFIX XML `required="X"`; Orchestra `presence="X"`), a loader or `finalize` failure after the splice, an allocation failure | `FIXPP_ERR_DICT_LIMIT_EXCEEDED` | that fault's code: `FIXPP_ERR_DICT_CONFIG` for a conflict or a loader failure, `FIXPP_ERR_DICT_OOM` for an allocation failure |
+| (b) | `fixpp_dict_load_from_xml_with_overlay` | an Orchestra base or overlay whose only refusal at `$P` was the loader's parse of a component, group, componentRef or groupRef id in 65536..2147483647 | `FIXPP_ERR_DICT_CONFIG`, every subtype: the guard's own Orchestra keys (`orch_id_key_of`, `orch_child_key`, the graph build's `component_by_id` and `group_by_id` fills, `records_of`'s `has_id`) skip such an id silently, so the load ends in the loader's strict `parse_orchestra_id` after the splice (`orchestra_parse_error`); recorded at `H0` by tasks T021a | `FIXPP_ERR_OK` |
+| (b′) | `fixpp_dict_load_from_xml_with_overlay` | an Orchestra input with such an id whose refusal at `$P` was a guard the skipped id moved: the expansion budget, which at `$P` did not count the skipped definitions; or a new-definition cap (`kMaxNewComponents`, `kMaxNewGroups`), which at `$P` counted an overlay's restatement of a base definition past 65535 as new, because its key did not parse | budget: `FIXPP_ERR_DICT_CONFIG` (the load reached the loader's parse); cap: `FIXPP_ERR_DICT_LIMIT_EXCEEDED` | budget: `FIXPP_ERR_DICT_LIMIT_EXCEEDED`; cap: the restatements match, so the load goes on to the later guards and the loader (`FIXPP_ERR_OK` when nothing else refuses) |
+| (c) | `fixpp_dict_load_from_xml` | an Orchestra document whose only refusal at `$P` was such an id | `FIXPP_ERR_CAPI_CONFIG_INVALID` | `FIXPP_ERR_OK` |
+| (d) | Python `fixpp.dict_load_from_xml` and `fixpp_oo.Dictionary.load_xml` / `fixpp.dict_load_from_xml_with_overlay` | the inputs of (c) / of (a), (b) and the cap half of (b′); of (a′) and the budget half of (b′) | raised `CapiError` / `ValidatorError` with the `.code` of the C call | returns a dictionary; for (a′) and the budget half of (b′), raises `ValidatorError` with the `.code` the C call now returns |
+| (f) | either call | a base, or a base with an overlay the 098 arm admits, of more than 65,535 components (an Orchestra base with more than 65,536 has an id past 65535, so at `$P` it is class (b) or (c)) | `FIXPP_ERR_OK`; component identities past the wrap wrong, and in a QuickFIX XML base a componentRef past the wrap expanded another component's node into the referencing message, group or component | `FIXPP_ERR_OK`; identities correct, and every expansion its own: `message_fields` changes, and with it every `table_view` store built from it (the valid-tag and required sets, the group contexts, the Length+Data pairs), the header store and the section records. The observers are data-model.md Appendix A's B rows |
+| (g) | either call | a base, or a base with an overlay the 098 arm admits, whose group side table passes 65,535 entries | `FIXPP_ERR_OK`; `group_fields` of a group whose start passed the wrap returned another group's members, and so did the bare member store built from it | `FIXPP_ERR_OK`, and its own members. Observers: a validating session's Step 3 on a context miss (the receive callback, or a Reject), the wire read on a miss in every record store `table_view::wire_group_resolve` probes first, and the other Appendix A B rows that read groups |
 
 - (a) was documented by cause: `dict.h`'s `FIXPP_ERR_DICT_LIMIT_EXCEEDED` line points at `xml_loader.hpp`'s cause
   list, which named the side-table fit; B-098-1, B-098-6 and L-098-4 said the same. (b) and (c) were covered by the
-  calls' catch-all failure results.
-- (f) keeps its code and changes the dictionary the call yields. It is declared on the precedent of C-ABI 1.9 (091):
-  "The return code is the same, but the dictionary this call yields carries the pair".
-- Unchanged: an id above 2147483647, a negative or malformed id; every other input of either call.
+  calls' catch-all failure results. (a′) and (b′) change a code `dict.h` documents by cause; 1.9 counted a failure
+  turned into a different failure as BREAKING (`specs/091-data-field-bytes/data-model.md` B-091-4).
+- (f) and (g) keep their code and change the dictionary the call yields, on the precedent of C-ABI 1.9 (091): "The
+  return code is the same, but the dictionary this call yields carries the pair". Their downstream effect is not one
+  clause: data-model.md Appendix A derives every export it reaches.
+- The population is derived, in 1.9's form: data-model.md Appendix A classifies every export of
+  `tests/abi/golden/fixpp_capi_symbols.txt` by one predicate, and research D8's C-ABI population recipe re-derives it
+  at the head (tasks T067).
+- Unchanged:
+  - an id above 2147483647, a negative or malformed id (still refused, with the same code);
+  - the component side-table start, so contract §2's third bullet (FIX50SP2's `RgstDistInstGrp`) is a C++ change
+    only: it is read only through `Dictionary::component_fields`, and nothing in `src/` calls it (re-derive:
+    `command git grep -n -E 'component_fields(_impl)?\(' -- src`; unchanged while it reports no caller besides the
+    definition and its `_impl`);
+  - the component name offset: nothing in `src/` reads `ComponentRef::name_offset` (re-derive:
+    `command git grep -n name_offset -- src`; unchanged while it reports the loaders' writes only);
+  - FR-008's run-reader guard: no loader writes an overrunning record below 2^32 entries;
+  - the MultiCharValue kind: no `src/capi` file includes a generated typed-tier header, and the runtime validator
+    does not read the kind (spec FR-004);
+  - every export data-model.md Appendix A classifies U.
 - TOML (`dictionary.path`, `dialect_overlay`) is outside the C ABI; it now loads these inputs, and B-102-3 records it.
 
 Declared by: a `FIXPP_C_ABI_VERSION_MINOR` bump to one past the value `main` holds after the post-squash rebase, with
-a `version.h` comment; a BREAKING note on both `dict.h` load declarations; B-102-3 marked BREAKING; the PR
-description; every in-repository consumer the version touches updated in the same PR (tasks T059a). Migration: a
-consumer that relied on these inputs being refused checks the dictionary's content itself; no code that handles the
-refusal needs to change, because the refusal no longer happens for these inputs.
+a `version.h` comment (which also carries the effects no declaration carries); a BREAKING note on both `dict.h` load
+declarations naming every class above, the same-code ones in 1.9's form; one BREAKING family paragraph in each header
+whose calls data-model.md Appendix A marks (`message.h`, `session.h`); B-102-3 marked BREAKING; the PR description;
+every in-repository consumer the version touches updated in the same PR (tasks T059a). Migration: a consumer that
+relied on these inputs being refused checks the dictionary's content itself; no code that handles the refusal needs to
+change, because the refusal no longer happens for these inputs. A consumer over a dictionary in region (f) or (g)
+sees each marked call answer from the corrected dictionary.

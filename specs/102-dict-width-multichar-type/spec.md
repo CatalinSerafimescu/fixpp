@@ -75,7 +75,12 @@ fields, or for a component's id and parent.
   members. Nothing in `src/` calls `component_fields`, so the read path is not reached through it.
 - The read path's context-free group store is filled from `group_fields`, and is reached only by a base whose group
   side table passes 65,535 entries; no vendored base does. After 100, the wire read reaches that store only on a miss
-  in every record store `table_view::wire_group_resolve` probes before it.
+  in every record store `table_view::wire_group_resolve` probes before it. The validator reaches it too, on a context
+  miss: Step 3's level walk (`validate_group_level`) and `consume_group` ask `table_view::group_first_field(msg_type, parent_path, no_tag)` and
+  `group_member_tags(msg_type, parent_path, no_tag)`, and each falls back to the bare store when `group_ctx_` has no
+  record for that context (for example a NumInGroup tag at top level that the message declares only at a nested
+  path). Those members decide each instance's extent, so a validating session's Reject or delivery can depend on
+  them (contract §6 class (g)).
 - A dictionary of more than 65,535 components gets wrong ids, parents and member `component_index` values.
 
 **Independent Test**: For every vendored dictionary, compare each component's and each group's members as returned by
@@ -176,7 +181,10 @@ accessor, or builds one through the typed builder.
     No container keys both kinds by id alone. In the loader, the overlay graph build and `ir.cpp`, each surrogate
     container the D1b holder recipe reports holds one kind, and the overlay's child key carries the element name.
     100's test oracle, which keyed both in one domain, is re-keyed by (kind, id) (tasks T015b, T034a). The
-    witness is tasks T012's shared-id control.
+    loader's witness is tasks T012's shared-id control. The overlay graph build's `component_by_id` and
+    `group_by_id`, and `ir.cpp`'s two `by_id` maps, hold one kind per container and the overlay's child key carries
+    the element name, by construction: the D1b holder recipe's classification shows it (tasks T025, T035), and no
+    cell of its own is written for them.
   - Witnesses for the lexical rule are tasks T012's lexical controls: a leading zero loads; a leading `+` and
     surrounding whitespace are refused.
   - FIX tag ids (`<fixr:field id>`, `fieldRef`, `lengthId`, `numInGroup`) stay 1..65535 and are refused as today,
@@ -225,14 +233,21 @@ accessor, or builds one through the typed builder.
   `GroupRef` layouts; B-102-2: MultiCharValue accessor and builder types; B-102-3: the loads that now succeed), with
   the migration in `contracts/cpp-api-breaks.md`, and in the PR description (tasks T069).
   - **The C-ABI result change is BREAKING under `[const §X.7]`.** Owner ruling, 2026-11-13: "All BREAKING, bump
-    (Recommended)". `fixpp_dict_load_from_xml_with_overlay` and `fixpp_dict_load_from_xml` return `FIXPP_ERR_OK`
-    where they returned `FIXPP_ERR_DICT_LIMIT_EXCEEDED`, `FIXPP_ERR_DICT_CONFIG` or `FIXPP_ERR_CAPI_CONFIG_INVALID`,
-    and Python's two wrappers return where they raised. Contract §6 lists each input class.
+    (Recommended)". It has three kinds, each class in contract §6:
+    - a failure turned into a success: (a), (b), (c), and Python's wrappers (d), which return where they raised;
+    - the same code, and a different dictionary: (f) and (g), whose effect reaches every downstream call
+      data-model.md Appendix A marks BREAKING;
+    - a failure turned into a different failure, or into a success: (a′) and (b′).
+  - The population is derived, not listed by example: data-model.md Appendix A classifies every export of
+    `tests/abi/golden/fixpp_capi_symbols.txt` by one predicate, and research D8's C-ABI population recipe re-derives
+    it at the head (tasks T067).
   - `FIXPP_C_ABI_VERSION_MINOR` moves to one past the value `main` holds after the post-squash rebase (tasks T055,
-    T059a). The BREAKING mark goes on both `dict.h` load declarations, in `version.h`'s version comment, on B-102-3
-    and in the PR description, and every in-repository consumer the version touches is updated in the same PR.
-  - Appendix A's controls for this ABI-affecting change: the owner's sign-off is the ruling above, and one Codex
-    Gate A review scoped to the C-ABI delta is pending (plan Constitution Check row X).
+    T059a). The BREAKING mark goes where C-ABI 1.9 put it: a root-cause note on both `dict.h` load declarations; one
+    family paragraph in each header whose calls Appendix A marks (`message.h`, `session.h`); `version.h`'s version
+    comment, for the effects no declaration carries; B-102-3; and the PR description (tasks T069). Every
+    in-repository consumer the version touches is updated in the same PR.
+  - Appendix A's controls for this ABI-affecting change: the owner's sign-off is the ruling above; the Codex Gate A
+    review scoped to the C-ABI delta is in progress, and its state is plan Constitution Check row X's.
 - **FR-008** (#654): Every dictionary run reader does its bounds arithmetic so that it cannot wrap (`std::size_t`, or
   `start <= size && count <= size - start`); a record whose start and count would overrun its table returns an empty
   span.
@@ -276,7 +291,8 @@ accessor, or builds one through the typed builder.
   recorded. The base is the parent base:
   `99e956a0` (101's Gate B head, which 102 is stacked on) until the post-squash rebase onto `origin/main`, and the
   merge-base of the candidate and `origin/main` after it (tasks.md Execution rules' **Base**); the deciding run is the
-  one after that rebase, or the run before it when the rebase's base delta is empty (tasks.md T055),
+  one after that rebase, or the run before it when the rebase's base delta touches none of the paths tasks T057
+  names (a golden, a pin, `tools/codegen`, `dictionaries`), the condition under which T058 is N/A,
   and the verify record names the base commit.
 - **SC-004**: `xml_loader_bench`, paired by Article VIII §2's local protocol against the parent base at measurement
   time (`99e956a0` until the post-squash rebase, the merge-base of the candidate and `origin/main` after it; the
@@ -353,8 +369,10 @@ accessor, or builds one through the typed builder.
   QuickFIX/J `bc7e8b23` and QuickFIX/Go `eff945dd` for the loader's expansion; QuickFIX/Go's MultipleCharValue mapping
   was not read for 102.
 - **Catalogue rows**: D-007 (the loaders), D-010 (components), D-011 (the Orchestra reader), W-009 (field data types).
-- **Constitution**: `[const §I]`; `[const §VI.5]`; `[const §VII]`; `[const §VIII.2]`; `[const §X.1]` (C ABI
-  unchanged); `[const §XV.13]`; `[const §XVII.1]`. The whole check is in `plan.md`.
+- **Constitution**: `[const §I]`; `[const §VI.5]`; `[const §VII]`; `[const §VIII.2]`; `[const §X.1]`,
+  `[const §X.6]` and `[const §X.7]` (the C-ABI result change declared BREAKING, owner ruling 2026-11-13: "All
+  BREAKING, bump (Recommended)"; types and symbols unchanged; FR-007, contract §6, data-model.md Appendix A);
+  `[const §XV.13]`; `[const §XVII.1]`. The whole check is in `plan.md`.
 - **Design documents**: `[2c §4.1]`, `[2c §4.2]` (the record layouts this feature amends), `[2c §1]` and
   `[2c §4.1.3]` (the field representation types and the `field_traits` listing, whose MultiCharValue / MultiStringValue
   split this feature removes); research D8.

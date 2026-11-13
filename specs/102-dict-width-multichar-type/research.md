@@ -427,7 +427,8 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
   - one reified (owning) decode of `18=1 2`;
   - a builder round-trip of `exec_inst = "1 2"` and of a group entry's `LegExecInst(1384)`;
   - a vlatest compile-shape assertion for one view, one group-entry and one owning MultiCharValue accessor (the
-    accessor census covers v42, v44, v50sp2 and vt11 against `mapped_kind`; vlatest is outside it);
+    accessor census covers vlatest too, under `FIXPP_D008_CENSUS_HAS_VLATEST`, which `FIXPP_CODEGEN_FIX_LATEST`
+    defines; the shape cells are kept beside it, tasks `## Bundle findings` 4);
   - no lifetime cells after a move or after source destruction: the emitted text is the String kind's, shared with
     every MultipleStringValue field, and its lifetime contract is not new to 102.
 - Mutation: each change reverted alone turns its own cell RED. The list is per independent helper, not per
@@ -462,6 +463,11 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
     into `std::uint16_t` → the row (g) pins of the kinds it serves RED (each such id truncates to a tag that loads, and
     the pin asserts the range message, row (g)). (Swapping in the surrogate parser instead would
     fail to compile against the tag holders, which proves nothing about row (g).)
+- Cells added by ruling or by the step 9 checklist audit, and by the scoped C-ABI Gate A, are stated in their tasks,
+  and this section points at them rather than restating them: T012's lexical and shared-id controls; T015a's row
+  (b2); T015b's oracle cell and T034a's re-key and sweep; T015c's rows (b-x), (b-o), (b2-x) and (b2-o); T021a's C-ABI
+  cells ((a), (a′), (b), (b′), (c) and the controls) and T021b's Python cells; T038's child-process cells; T013's
+  base-only twin of the low-tagged-group row.
 
 ### D5 — Republishing and the cross-revision differential (SC-003)
 
@@ -535,13 +541,20 @@ reads through it.
   - new **B-102-3**: an Orchestra document whose component or group ids pass 65535 now loads; a QuickFIX XML or
     Orchestra base of more than 65,535 components loads with correct identities (below 2^32 components, (c)); on the
     vendored FIX50SP2, `component_fields` of `RgstDistInstGrp` and of every later component returns its own members.
-    It names the C-ABI and Python results that change: `fixpp_dict_load_from_xml_with_overlay` returns
-    `FIXPP_ERR_OK` where an overlay's only fault was the side-table fit (was `FIXPP_ERR_DICT_LIMIT_EXCEEDED`) or a
-    surrogate id past 65535 (was `FIXPP_ERR_DICT_CONFIG`). `fixpp_dict_load_from_xml` returns `FIXPP_ERR_OK` for an
-    Orchestra document with such ids (was `FIXPP_ERR_CAPI_CONFIG_INVALID`). Python's two wrappers return where they
-    raised. **BREAKING** under `[const §X.7]` (owner ruling, 2026-11-13: "All BREAKING, bump (Recommended)"): the row
-    carries the BREAKING marker, names the new C-ABI MINOR (tasks T059a) and lists contract §6's classes, (f)
-    included;
+    It names the C-ABI and Python results that change, contract §6's classes in its three kinds: a failure turned
+    into a success ((a): an overlay whose only refusal was the side-table fit, was `FIXPP_ERR_DICT_LIMIT_EXCEEDED`;
+    (b): a surrogate id past 65535 on the overlay call, was `FIXPP_ERR_DICT_CONFIG`; (c): such an id on
+    `fixpp_dict_load_from_xml`, was `FIXPP_ERR_CAPI_CONFIG_INVALID`; (d): Python's wrappers, `fixpp_oo.Dictionary.load_xml`
+    included, return where they raised); the same code and a corrected dictionary ((f): a base of more than 65,535
+    components, whose message expansion through a componentRef past the wrap is now its own, and with it every
+    `table_view` store, the header store and the section records; (g): a group side table past 65,535 entries,
+    whose groups' members, and the bare member store, are now their own); and a failure turned into a different
+    failure ((a′): the side-table fault plus a fault detected after the guard's side-table arms, now that fault's
+    code; (b′): a high-id input whose refusal at the base was a guard the skipped id moved). The downstream calls
+    (f) and (g) reach are data-model.md Appendix A's B rows, derived by the recipe below. Contract §2's third bullet
+    (FIX50SP2's `RgstDistInstGrp`) has no C-ABI effect (contract §6 "Unchanged"). **BREAKING** under
+    `[const §X.7]` (owner ruling, 2026-11-13: "All BREAKING, bump (Recommended)"): the row carries the BREAKING
+    marker, names the new C-ABI MINOR (added by tasks T059a, after T048 writes the row) and points at Appendix A;
   - new **L-102-1**: the 32-bit residual. (a) Until B86, an unbounded base expansion can wrap a 32-bit run end (the
     side tables, the per-message runs, and 100's delimiter and section member pools); on the overlay path an overlay
     adds at most `kExpansionBudget` beyond the base's own expansion (D2), so only a base's own expansion reaches it;
@@ -564,8 +577,11 @@ reads through it.
     decode through `field_traits<std::string_view>`, which the note states as a condition, which kinds share a
     decoder, with no count of kinds);
   - `include/fix/c_api/dict.h`: both load declarations gain a BREAKING note under `[const §X.7]` (owner ruling,
-    2026-11-13), naming the new C-ABI MINOR and the input classes of contract §6 that now return `FIXPP_ERR_OK`; and
-    `include/fix/c_api/version.h` gains that MINOR's comment (tasks T059a);
+    2026-11-13), naming the new C-ABI MINOR and every class of contract §6 that reaches the call, the same-code ones
+    in 1.9's form ("The return code is the same, but the dictionary this call yields …"); `message.h` and
+    `session.h` each gain one BREAKING family paragraph over the rows data-model.md Appendix A marks for them; and
+    `include/fix/c_api/version.h` gains that MINOR's comment, which also carries the effects no declaration carries
+    (tasks T059a);
   - the installed `include/fixpp/dict/field_traits.hpp`: its comment on the remaining specialisations names "the
     MultiCharValue / MultiStringValue split", false after D3; amended, naming 102 D3;
   - the three installed record headers' banners and `_reserved` paragraphs;
@@ -608,6 +624,31 @@ reads through it.
   `side.?tables? *$` alternative is not in the round-2 judgement's recipe; it was added because the guard-order
   sentence in `xml_loader.hpp` breaks the line between "side-table" and "fit", which no single-line alternative of
   that recipe matches. The `field_traits.hpp` comment is caught by the "MultiStringValue split" alternative.
+- **C-ABI population recipe** (scoped C-ABI Gate A, round 1, R-1; data-model.md Appendix A is its record). It
+  derives the population from what 102 changes, looking from `src/dictionary` toward the exports, not from `dict.h`'s
+  documented causes. Run at the head (tasks T067), CodeGraph with `projectPath` `$T` where the tree is indexed, else
+  Read and Grep:
+  1. The corrected parts: read `git diff "$P"...HEAD -- src/dictionary` hunk by hunk to its enclosing function, and
+     map each to the part it corrects: component identity (`expand_field_list`'s component lookup, and so
+     `message_fields` and every store `Dictionary::build_table_view` builds from it, the header store and the section
+     records); the group side table (`group_fields` and the bare member store); the surrogate-id parse and the
+     side-table guard (the load's own result).
+  2. Reach: for each changed function, `codegraph_impact` (or `codegraph_callers`, transitively) up to the
+     `src/capi` thunks; every export reached is a candidate.
+  3. Observers: a call graph does not show a result observed through the session's state or a callback, so for
+     every export of `tests/abi/golden/fixpp_capi_symbols.txt` not reached in step 2, read its body for a read of the
+     session dictionary (`dict_`, `session_tv_`, `tv_`, a view parsed over the session table) and for an observer
+     path: delivery through `validate_inbound_`, the validate-first Logon gate, the send path's header placement and
+     Length+Data carry, and `Engine::register_session`'s FIXT check (1.9's R-11 step 6 read its handshake observers
+     the same way).
+  4. Classify each export by Appendix A's predicate: B with its path and carrier, or U with the predicate as the
+     reason. A row the recipe classifies differently from Appendix A stops.
+  - Known positive: over 102's own `src/dictionary` diff the recipe reports both `dict.h` loaders as root cause and
+    at least the validator-backed session family (`fixpp_session_register_callback`). A run that reports only the
+    loaders is blind downstream and stops.
+  - Comparator: the B set the recipe derives equals Appendix A's B rows, and each carrier Appendix A names is present
+    (contract §6, the `dict.h` notes, the family paragraphs, `version.h`). Its positive: a scratch copy of the
+    declared set with class (g) removed is reported as a mismatch.
 - Catalogue / coverage index: the D-007, D-010, D-011 and W-009 rows (spec Normative References) gain 102's
   delivering cells in their witness column; none changes status. The coverage-index entries `[FIX50SP2 §3.3]` (the
   MultiCharValue decode and builder cells), `[FIX50SP2 §3.2]` (the component and group member cells) and

@@ -29,10 +29,14 @@ oracle, plus a name-offset oracle and generated large-dictionary identity cells;
 
 **Project Type**: C++ library: dictionary loaders, code generator, generated typed tiers.
 
-**Performance Goals**: `xml_loader_bench` within Article VIII §2's +5%, paired against the merge-base (D6).
+**Performance Goals**: `xml_loader_bench` within Article VIII §2's +5%, paired against the parent base `$P` at
+measurement time (`99e956a0` until the post-squash rebase, the merge-base of the candidate and `origin/main` after it;
+D6, D9).
 
 **Constraints**: C ABI and Python types and symbols unchanged; their results change as declared BREAKING (spec
-FR-007, contract §6); every generated file without a MultiCharValue field byte-identical, except
+FR-007, contract §6), in three kinds: a failure turned into a success ((a) to (d)), the same code with a different
+dictionary ((f), (g)), and a failure turned into a different failure ((a′), (b′)); the affected exports are
+data-model.md Appendix A's derived population. Every generated file without a MultiCharValue field byte-identical, except
 the `FieldRef` row trailer in `Fields.hpp`. The generated text changes only by those hunks (SC-003): each `FieldRef`
 row loses one initializer and each MultiCharValue accessor, `Args` member and entry setter changes kind. No
 compile-time or object-size budget applies to the generated tiers, vlatest's included, and none is measured.
@@ -52,12 +56,12 @@ parser.
 | VII | RED first, mutation-proven | PASS planned (D4). |
 | VIII §2 | no regression | `xml_loader_bench` paired locally against the parent base at measurement time (`99e956a0`, 101's Gate B head that 102 is stacked on, until the post-squash rebase; the merge-base of the candidate and `origin/main` after it; the deciding run is the one after that rebase; D6, D9), +5% budget, independent approval above it (D6); the verify record names the base commit. |
 | IX | coverage, static | `/speckit-verify`; `tools/codegen/` is lint scope since #265. |
-| X | C ABI | Declared BREAKING under §7 (owner ruling, 2026-11-13: "All BREAKING, bump (Recommended)"). Types and symbols are unchanged: `fixpp_dict_t` is opaque, `src/capi` reads `FieldRef::rule` and `type` (not widened), and SWIG exposes none of the records. Results change: `fixpp_dict_load_from_xml_with_overlay` and `fixpp_dict_load_from_xml` return `FIXPP_ERR_OK` for contract §6's input classes. The declaration: a `FIXPP_C_ABI_VERSION_MINOR` bump past `main`'s value after the post-squash rebase, BREAKING notes in `dict.h` and `version.h`, B-102-3, the PR description, and in-repository consumers updated (tasks T059a). Appendix A controls (§6): the owner's `/plan` sign-off is that ruling; one Codex Gate A review scoped to the C-ABI delta is **pending**; `/clarify` and `/analyze` are the pipeline's. Article X does not govern the C++ break. |
+| X | C ABI | Declared BREAKING under §7 (owner ruling, 2026-11-13: "All BREAKING, bump (Recommended)"). Types and symbols are unchanged: `fixpp_dict_t` is opaque, `src/capi` reads `FieldRef::rule` and `type` (not widened), and SWIG exposes none of the records. Results change in three kinds (contract §6): a failure turned into a success ((a) to (d)), the same code with a different dictionary ((f), (g)), and a failure turned into a different failure ((a′), (b′)); the affected exports are data-model.md Appendix A's population, derived by one predicate over `tests/abi/golden/fixpp_capi_symbols.txt` and re-derived at the head (tasks T067). The declaration, in C-ABI 1.9's three tiers: a `FIXPP_C_ABI_VERSION_MINOR` bump past `main`'s value after the post-squash rebase; root-cause notes on both `dict.h` loaders; one family paragraph in each header Appendix A marks (`message.h`, `session.h`); `version.h`'s comment for the effects no declaration carries; B-102-3, the PR description, and in-repository consumers updated (tasks T059a). Appendix A controls (§6): the owner's `/plan` sign-off is that ruling; **scoped Codex Gate A in progress (rewrite 1 applied after round 1); closes at convergence, recorded in the Gate A record's supersession section**; `/clarify` and `/analyze` are the pipeline's. Article X does not govern the C++ break. |
 | XV.1 | no per-message heap allocation on the hot path | unchanged. A MultiCharValue accessor and builder input take the String kind's existing paths (D3; spec FR-004, FR-005). FR-008's guard is arithmetic only: no allocation, no exception, `noexcept` kept. The surrogate-id parse is load-time only, a `std::from_chars` into an integer like the tag parse. Its enum type adds no storage, and the containers it keys already exist. |
 | XV.13 | hybrid codegen + runtime dictionary | unchanged. |
 | XVII.1 | Gate A on public API | Gate A required and assesses the C++ break: the corrected contract, B-102-1..3, the 2c §1, §4.1, §4.1.3 and §4.2 amendments (D8). Before the first public release this article's Gate A governs a public C++ break. The break is declared BREAKING in the B&L delta (B-102-1..3) and in the PR description, which tasks T069 drafts. |
 
-**Initial gate: PASS. Post-design re-check: PASS.**
+**Initial gate: PASS. Post-design re-check: PASS, except row X, whose scoped Codex Gate A is in progress (row X).**
 
 ## Project Structure
 
@@ -72,7 +76,12 @@ specs/102-dict-width-multichar-type/
 ├── contracts/
 │   └── cpp-api-breaks.md
 ├── checklists/
-│   └── requirements.md
+│   ├── requirements.md
+│   ├── api-abi.md
+│   ├── dictionary.md
+│   ├── nfr.md
+│   ├── records.md
+│   └── test-integrity.md
 └── tasks.md            # /speckit-tasks
 ```
 
@@ -100,8 +109,10 @@ tests/codegen/                            # census mapped_kind + Fields parser, 
                                           # decode cells, Orchestra IR id cell
 tests/session/                            # 077 round-trip assignments; builder round-trip cells
 include/fix/c_api/dict.h, version.h       # C-ABI BREAKING notes and MINOR bump (owner ruling 2026-11-13; T059a)
+include/fix/c_api/message.h, session.h    # one BREAKING family paragraph each (data-model.md Appendix A; T059a)
 tools/capi_freeze.sha256                  # the C-ABI byte-freeze manifest, re-recorded for those headers
 tests/capi/, bindings/python/tests/       # C-ABI and Python result cells; the version pins T059a updates
+tests/support/                            # T008's generators, T013's lifted side-table documents, T018's seam
 ```
 
 Records and design documents (D8): `spec/behaviors-and-limitations.md` (+ closed file), `spec/feature-catalogue.md`,
@@ -259,4 +270,14 @@ Where the applied text departs from the judge's:
 - Plan phase 2 also states the oracle's concrete operand change, so the implementation item carries the judge's fix.
 - Open item 4 had no round-3 verdict in the ruling; Codex round 3 accepted it and the judge did not reopen it.
 
-**Gate A converged by owner ruling (2026-11-07). No open item remains.**
+**Gate A converged by owner ruling (2026-11-07). No open item remained then; the C-ABI result change reopened Gate A
+for its own scope on 2026-11-13 (below).**
+
+### Scoped C-ABI Gate A (2026-11-13)
+
+The owner's ruling of 2026-11-13 ("All BREAKING, bump (Recommended)") made 102 ABI-affecting, so `[const §X.1]` and
+Appendix A require a Codex Gate A on the C-ABI delta (contract §6, data-model.md Appendix A, spec FR-007, tasks T021a,
+T021b, T059a, T067). The orchestrator runs it as a pipeline step, not a task. Its state is Constitution Check row X's;
+at convergence it is recorded in the Gate A record's supersession section, and row X is updated then. Rewrite 1
+applied the round-1 judgement (`research/reviews/opus_102_gate_a_capi_scoped_triage.md`, items 1 to 10) with the
+post-audit `/speckit-analyze` remediation.
