@@ -197,6 +197,9 @@ endfunction()
 # 100 T028: the registration stores, records, D2 sweep. fixpp_wire: the cells read the stores
 # through dict_hooks::for_table_view (parser.hpp).
 add_dictionary_feature_bucket(dictionary_100_tests 100 900 test_100_registration_records.cpp)
+# 102-dict-width-multichar-type: label 102 (tasks.md T004; T015b and T034a edit
+# test_100_registration_records.cpp). APPEND, after the entry's LABELS setter.
+set_property(TEST dictionary_100_tests APPEND PROPERTY LABELS 102)
 # 101 T029: W101-15, table_view::tag_defined.
 add_dictionary_feature_bucket(dictionary_101_tests 101 900 test_101_tag_defined.cpp)
 # 063 T017: the per-collision membership guards. Labels: the ones dictionary_pure_tests carries,
