@@ -270,13 +270,16 @@ def test_shape_t_reaches_active_routes_rejects_and_reads_its_version():
         assert got.wait(timeout=STEP_TIMEOUT), "the frame did not reach the callback"
         assert versions[-1] == (KIND_APPLICATION, SESSION_VT11, APPL_V50SP2)
 
-        # A routed Reject: FIX50SP2 answers this frame and does not declare 3115.
+        # A routed Reject: FIX50SP2 answers this frame. The cell needs 3115 undefined by FIX50SP2
+        # (re-derive with the field-definition grep): an undefined tag, 373=0 (101 FR-002
+        # supersedes 2), with QuickFIX's text for that reason.
         got.clear()
         peer.write(_nos(4, body_tail=_fields((3115, "1.5"))))
         reject = peer.read_until(_msg_type_is(b"3"))
         assert reject is not None, "no Reject for 3115 on the negotiated version"
-        assert _tag(reject, 373) == b"2"
+        assert _tag(reject, 373) == b"0"
         assert _tag(reject, 371) == b"3115"
+        assert _tag(reject, 58) == b"Invalid tag number"
 
         # The validation setter is what a Reject for 1128=99 rests on.
         peer.write(_nos(5, (1128, "99")))
