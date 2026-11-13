@@ -35,6 +35,7 @@ add_executable(codegen_pure_tests
   group_entry_generation_trap_test.cpp   # EXPECT_DEATH only (gtest fork) — isolation-safe
   conformance/conformance_test.cpp        # T022 conformance — manifest-driven presence/shape
   accessor_resolution_census_test.cpp     # 094 FR-022c — D-008 compile-time accessor census
+  test_102_multichar_read.cpp             # 102 T019: MultiCharValue decode, v50sp2
 )
 add_dependencies(codegen_pure_tests fixpp_codegen_generate)
 target_link_libraries(codegen_pure_tests PRIVATE
@@ -162,6 +163,8 @@ add_executable(codegen_vlatest_tests
   # v44/v50sp2/vlatest positive control. Pure filesystem existence check --
   # same isolation-safety rationale as T013 above.
   test_077_builder_no_emit.cpp          # T018
+  # 102-dict-width-multichar-type T020: MultiCharValue decode and shape, vlatest.
+  test_102_multichar_vlatest.cpp
 )
 add_dependencies(codegen_vlatest_tests fixpp_codegen_generate)
 target_link_libraries(codegen_vlatest_tests PRIVATE

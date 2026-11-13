@@ -54,6 +54,9 @@ add_executable(dictionary_pure_tests
   dictionary_snapshot_test.cpp    # fixpp#215 item 1 (Option C): A1-A5 boundary pins + seam 4 alias identity
   test_101_tag_defined.cpp        # 101 T029: W101-15, table_view::tag_defined
   test_100_registration_records.cpp  # 100 T028: registration stores, records, D2 sweep
+  test_102_name_offset.cpp         # 102 T010: the name-offset oracle (name pool, src/dictionary)
+  test_102_component_identity.cpp  # 102 T011: XML component identity, overlay crossing
+  test_102_run_readers.cpp         # 102 T018: run readers, hand-built handle (src/dictionary)
 )
 target_link_libraries(dictionary_pure_tests PRIVATE
   fixpp_dictionary
@@ -117,6 +120,7 @@ add_executable(dictionary_overlay_tests
   dictionary_equivalence_test.cpp  # 098 W-0: the dictionary comparator's self-test
   overlay_equivalence_test.cpp     # 098 W-1/W-2/W-4: overlay vs the equivalent edited XML
   overlay_refusal_test.cpp         # 098 W-3: the overlay's refusals; W-9's status-mapping rows
+  test_102_overlay_ids.cpp         # 102 T014: Orchestra overlay ids past 65535 (read seam)
 )
 target_link_libraries(dictionary_overlay_tests PRIVATE
   fixpp_dictionary
