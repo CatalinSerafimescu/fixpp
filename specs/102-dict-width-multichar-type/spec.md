@@ -73,7 +73,8 @@ fields, or for a component's id and parent.
 - On a shipped dictionary (FIX50SP2), the public `component_fields("RgstDistInstGrp")` returns another definition's
   members. Nothing in `src/` calls `component_fields`, so the read path is not reached through it.
 - The read path's context-free group store is filled from `group_fields`, and is reached only by a base whose group
-  side table passes 65,535 entries; no vendored base does.
+  side table passes 65,535 entries; no vendored base does. After 100, the wire read reaches that store only on a miss
+  in every record store `table_view::wire_group_resolve` probes before it.
 - A dictionary of more than 65,535 components gets wrong ids, parents and member `component_index` values.
 
 **Independent Test**: For every vendored dictionary, compare each component's and each group's members as returned by
@@ -169,21 +170,23 @@ accessor, or builds one through the typed builder.
 
 ### Measurable Outcomes
 
-- **SC-001**: The member comparison of US1.2 is RED on `fa778a8e` for `RgstDistInstGrp` on FIX50SP2, and the
+- **SC-001**: The member comparison of US1.2 is RED on the parent base `99e956a0` for `RgstDistInstGrp` on FIX50SP2, and the
   name-offset comparison RED on FIX50SP1, FIX50SP2 and FIX Latest; both GREEN on the feature head for every component and
   group of every vendored base.
-- **SC-002**: `exec_inst()` on `18=1 2` is RED on `fa778a8e` and GREEN on the head, on v50sp2 and vlatest; the builder
+- **SC-002**: `exec_inst()` on `18=1 2` is RED on the parent base `99e956a0` and GREEN on the head, on v50sp2 and vlatest; the builder
   round-trip of US2.3 likewise.
 - **SC-003**: Generating every tier with the base and the head code generators and diffing the trees shows only
   MultiCharValue hunks for tags {18, 286, 291, 292, 529, 546, 1308, 1384} and the `FieldRef` row-trailer change; the
-  filter is shown able to report a stray hunk; each moved pin names this feature. The base is the merge-base of the
-  candidate and its target branch at measurement time (`fa778a8e` until the D9 rebase); the deciding run is the one at
-  the integrated head, and the verify record names the base commit.
-- **SC-004**: `xml_loader_bench`, paired by Article VIII §2's local protocol against the merge-base of the candidate
-  and its target branch at measurement time (`fa778a8e` until the D9 rebase; the deciding run is the one at the
-  integrated head), stays within +5% or carries the §2 approval; the table-view footprint of that base and of the head
+  filter is shown able to report a stray hunk; each moved pin names this feature. The base is the parent base:
+  `99e956a0` (101's Gate B head, which 102 is stacked on) until the post-squash rebase onto `origin/main`, and the
+  merge-base of the candidate and `origin/main` after it (tasks.md Execution rules' **Base**); the deciding run is the
+  one after that rebase, or the run before it when the rebase's base delta is empty (tasks.md T055),
+  and the verify record names the base commit.
+- **SC-004**: `xml_loader_bench`, paired by Article VIII §2's local protocol against the parent base at measurement
+  time (`99e956a0` until the post-squash rebase, the merge-base of the candidate and `origin/main` after it; the
+  deciding run is the one after that rebase), stays within +5% or carries the §2 approval; the table-view footprint of that base and of the head
   is recorded. The verify record names the base commit.
-- **SC-005**: The identity cells of US1.4 and US1.5 are RED on `fa778a8e` and GREEN on the head, for both formats.
+- **SC-005**: The identity cells of US1.4 and US1.5 are RED on the parent base `99e956a0` and GREEN on the head, for both formats.
 
 ## Assumptions
 

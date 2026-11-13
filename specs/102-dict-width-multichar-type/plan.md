@@ -47,7 +47,7 @@ parser.
 | I / VI | dictionaries and codegen fidelity | PASS: every vendored base's members, names and identities correct; no component count is refused (QuickFIX parity); identities exact below 2^32 components (L-102-1 (c)); FIX's MultipleCharValue representable. |
 | VI §5 | Normative References | PASS: spec §Normative References. |
 | VII | RED first, mutation-proven | PASS planned (D4). |
-| VIII §2 | no regression | `xml_loader_bench` paired locally against the merge-base of the candidate and its target branch at measurement time (`fa778a8e` until the D9 rebase; the deciding run is the one at the integrated head), +5% budget, independent approval above it (D6); the verify record names the base commit. |
+| VIII §2 | no regression | `xml_loader_bench` paired locally against the parent base at measurement time (`99e956a0`, 101's Gate B head that 102 is stacked on, until the post-squash rebase; the merge-base of the candidate and `origin/main` after it; the deciding run is the one after that rebase; D6, D9), +5% budget, independent approval above it (D6); the verify record names the base commit. |
 | IX | coverage, static | `/speckit-verify`; `tools/codegen/` is lint scope since #265. |
 | X | C ABI | C ABI unchanged: `fixpp_dict_t` opaque, `src/capi` reads `FieldRef::rule` and `type` (not widened), SWIG exposes none of the records. Article X does not govern the C++ break. |
 | XV.13 | hybrid codegen + runtime dictionary | unchanged. |
@@ -108,8 +108,8 @@ section flagging the superseded 098, 003 and 002 clauses; no merged bundle is ed
 1. **RED** — equivalence fixture repaired (32-bit `check` operands, Orchestra ids 32-bit) and with exclusions removed
    (RED at `RgstDistInstGrp`); name-offset oracle (RED on SP1/SP2/Latest); component-identity cells for both formats,
    the Orchestra id-domain pair, the overlay-crossing rows, the Orchestra overlay and IR id cells, rows (a)–(f), each
-   fixture under the alias-pair rule (RED on `fa778a8e`); row (g), a characterization pin (GREEN on `fa778a8e` and
-   the head, RED only under its mutant); the re-pointed side-table rows (D2; RED: refused); reader
+   fixture under the alias-pair rule, and row (b2) (RED on the parent base `99e956a0`); row (g), a characterization
+   pin (GREEN on `99e956a0` and the head, RED only under its mutant); the re-pointed side-table rows (D2; RED: refused); reader
    cell; MultiCharValue decode, group-entry, reified, builder and vlatest shape cells (RED: decode failure /
    compile-level shape check).
 2. **#654** — classify the hits of the D1, D1b (parse, holder and `to_underlying`), D2 and D7 recipes; repair the test
@@ -127,10 +127,13 @@ section flagging the superseded 098, 003 and 002 clauses; no merged bundle is ed
    the live-text amendments (2c §1, §4.1, §4.1.3, §4.2; the installed headers; `overlay_merge`'s comments and its
    superseding header comment; the parse comments); the brain section's flags; catalogue / coverage index. Every D8
    recipe hit classified. Hand the orchestrator D2's §B86 text.
-7. **Integrate** (D9) — after 100 and then 101 merge: rebase onto the integrated head; re-run the D1, D1b, D2, D7 and
-   D8 recipes; republish the goldens, 078 trees and read-tier hashes from the integrated tree; re-run D5's
-   differential with the integrated merge-base as its base; re-run the size pins, the accessor census and D6 against
-   the merge-base at measurement time; record which base each RED was shown on.
+7. **Post-squash rebase** (D9, superseded 2026-11-13 by the owner's ruling to stack 102 on 101's Gate B head
+   `99e956a0`) — when 101 squash-merges, the orchestrator runs `git rebase --onto origin/main 99e956a0` (101's final
+   head in place of `99e956a0` if 101 gained commits after it), then records the base delta (`git diff` of the old
+   upstream against `origin/main`) and checks that the rebase moved nothing else. An empty delta needs no re-run; a
+   non-empty one re-runs the recipes, the republish, the differential and the RED record over the delta only.
+   D6 runs against the merge-base at measurement time, after the rebase. 102 opens no PR and pushes no gate label
+   before this phase.
 8. **Verify** — targeted ctest, D6 paired run and footprint, MSVC build of the touched targets, `/speckit-verify`.
 
 ## Open for Gate A

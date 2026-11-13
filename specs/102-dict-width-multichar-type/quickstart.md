@@ -1,15 +1,16 @@
 # Quickstart: validating 102
 
-Worktree `~/Work/Programming/fixpp-third`; its build tree goes on F: (`/mnt/wsl/fixppbuild`), never the root file system.
+Worktree `~/Work/Programming/fixpp-parallel`; its build tree goes on F: (`/mnt/wsl/fixppbuild`, the
+`build/linux-clang-*` symlinks onto `build/parallel-clang-*` there), never the root file system.
 
 ```sh
-cmake --build build/linux-clang-debug -j8 --target dictionary_pure_tests dictionary_overlay_tests codegen_tests session_pure_tests
-ctest --test-dir build/linux-clang-debug -L dictionary --output-on-failure
-ctest --test-dir build/linux-clang-debug -L codegen --output-on-failure
+cmake --build build/linux-clang-debug -j8   # or --target each entry `ctest -N -L 102` lists
+ctest --test-dir build/linux-clang-debug -L 102 --no-tests=error --output-on-failure
 ```
 
-Target and label names are confirmed against the test `CMakeLists.txt` at tasks; a label matching nothing exits 0, so
-record each binary's executed-test count.
+Label `102` is appended to the entries tasks.md T004 lists (the 077 round-trips among them, standalone entries
+outside `-L dictionary` and `-L codegen`); compare the selection with `ctest -N -L 102`. A label
+matching nothing exits 0 without `--no-tests=error`, so record each binary's executed-test count.
 
 Expected:
 
@@ -24,6 +25,7 @@ Expected:
 - on the head, the D1, D1b (parse and holder), D2, D7 and D8 recipes show no unclassified hit, and no 16-bit
   component-identity or surrogate-id hit;
 - every D4 mutant applied alone turns its named row RED, and every container-width mutant fails to compile;
-- after the D9 rebase onto 100 and 101, all of the above again at the integrated head.
+- after the post-squash rebase onto `origin/main` (tasks.md T055), the above again over the base delta only, when that
+  delta is not empty.
 
 MSVC: build the touched targets in the sandbox (`.sandbox-lock` first) before the first labelled push.

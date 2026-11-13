@@ -3,6 +3,13 @@
 Code read at `fa778a8e`. Symbols, not lines. Every inventory below is stated with the recipe that re-derives it; the
 recipe, not a list or a count, is authoritative.
 
+**Base (owner ruling, 2026-11-13).** 102 is stacked on `99e956a0` (101's Gate B head, on `origin/main` `6714582d`,
+where 100 is merged), the parent base `$P` of tasks.md's Execution rules. Where this file names `fa778a8e` as a RED
+base or a recipe's known positive, read `$P`: the recipes were re-run at `$P` for the 2026-11-13 analysis, the classes
+of their hits there are in tasks.md `## Census at tasks time`, and T005 re-runs each on its known positive at `$P`
+(one that does not report there stops). The sites 100 added are named below where a decision reaches them (D1b, D4
+row (b2), D7, the §B86 text, L-102-1 (a)); D9 records the ruling. The Gate A text is otherwise unchanged.
+
 ## Survey
 
 ### Dictionary records (#654)
@@ -62,8 +69,9 @@ recipe, not a list or a count, is authoritative.
   loop reads `group_fields`. Every run reader checks `start + count > size()` in the operand type: today the 16-bit
   operands promote to `int`; after D1 they are unsigned 32-bit and can wrap (D7).
 - The name pool's offsets and lengths, and every `MsgFieldsRun` / `EnumRun`, are already `std::uint32_t`, narrowed from
-  `size_t` with `static_cast<std::uint32_t>` (D2). Re-derive:
-  `grep -n 'static_cast<std::uint32_t>' src/dictionary/{xml,orchestra}_loader.cpp`.
+  `size_t` with `static_cast<std::uint32_t>` (D2). So are 100's expansion-derived member pools (the delimiter and
+  section member pools and the capture's member pool, written through `push_run` and `close_member_level`). Re-derive:
+  `grep -n 'static_cast<std::uint32_t>' src/dictionary/{xml,orchestra}_loader.cpp src/dictionary/dictionary_internal.hpp`.
 - `emit_fields.cpp`'s `emit_field_ref` writes one positional initializer per `FieldRef` member and ends each row with a
   literal `, 0 },` for `_reserved`. `accessor_resolution_census_test.cpp`'s Fields parser requires nine numbers per
   row; `validator_shape_test.cpp` reads `_reserved` of a generated v44 row.
@@ -198,6 +206,12 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
     parent-map pass's tolerant read, the `component_index_by_xml_id_` and `group_by_xml_id_` keys, and
     `collect_header_tags`, whose `id_of` reads the fieldRef, componentRef and groupRef ids and each group's
     `numInGroup` id through one width, and whose `walked_groups` set holds group ids; both are split by kind;
+    `collect_section_groups` (added by 100), whose `id_of` and `id` local serve the fieldRef (a tag) and the
+    componentRef and groupRef (surrogates) through one 16-bit variable, whose `.find`s into
+    `component_index_by_xml_id_` and `group_by_xml_id_` and whose section ids 1024 and 1025 are surrogate keys, and
+    whose `no_tag` is a tag; its `id_of` is split by kind as `collect_header_tags`' is. A parse miss there is a silent
+    `continue`, and its output, the section-group records, is read by the wire path
+    (`table_view::wire_group_resolve`, `wire_group_member_tags`);
   - `overlay_merge.cpp`: `orch_id_key_of` (one helper for the field, component and group definition arms; the field
     arm stays tag-parsed), `orch_child_key` (fieldRef, componentRef and groupRef; the fieldRef arm stays tag-parsed),
     and the Orchestra graph build's `component_by_id`, `group_by_id` and `records_of`'s `has_id` (one read for all
@@ -294,7 +308,8 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
   >   counts, the component name offset and the whole component identity to 32 bits, and retires 098's side-table fit
   >   check. The ruling note's refusal order "cycle, budget, depth, side-table fit" therefore becomes **cycle, budget,
   >   depth**. B86 owns the 32-bit obligation in its place: its absolute expansion budget must imply that every
-  >   expansion-derived run end (each side table, and each per-message `MsgFieldsRun`) is at most `UINT32_MAX`. It does
+  >   expansion-derived run end (each side table, each per-message `MsgFieldsRun`, and 100's delimiter and section
+>   member pools) is at most `UINT32_MAX`. It does
   >   by construction (a walk step emits at most one entry, and the budget is far below 2^32); B86's shipped text states
   >   that derivation, and B86 amends L-102-1 (a) when it lands. The budget does not bound the component count (an
   >   empty definition costs no step); the component-identity boundary is L-102-1 (c), not B86's obligation. The
@@ -367,6 +382,11 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
     is a set, so a narrowed key skips the second group of the pair; each group must contribute its own tags. Assert
     `is_header_tag` of T, N, M, T', N' and M' on the table view, and set equality with `header_tags_test.cpp`'s
     `orchestra_header_walk` oracle, which keys by `unsigned`.
+  - **(b2) Loader, section records** (100's `collect_section_groups`). Over row (b)'s fixture, the section-group
+    records are asserted directly, through `table_view_test_access::section_records` and the lookup
+    `make_ctx_query({}, path, no_tag)`: N's record at path `{}` holds M, and N''s holds M'. Not through
+    `wire_group_member_tags` or `group_registered`: those fall back to the bare store or arm 3, so a skipped record
+    still reads as correct unless the section definition differs from the bare store.
   - **(c) Codegen, header classification.** `populate_orchestra_projection`, through `build_ir`, over row (b)'s
     fixture: `ir.header_trailer_tags` ⊇ {T, N, M, T', N', M'} and `ir.group_tags` ∋ N, N'. The fixture's header
     component carries both the id 1024 and the name `StandardHeader`: the loader finds the header by id and
@@ -425,6 +445,7 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
       the Orchestra identity cell (loud: `orchestra_parse_error`);
     - the parent-map pass's tolerant read → row (a);
     - `collect_header_tags`' `id_of`, component arm and group arm → row (b);
+    - `collect_section_groups`' `id_of`, component arm and group arm → row (b2);
     - `build_orchestra_component_index` and `build_orchestra_group_index` → the IR row and row (c);
     - `collect_orchestra_tags` → row (c)'s `header_trailer_tags` half; `collect_orchestra_group_tags` → row (c)'s
       `group_tags` half;
@@ -457,8 +478,8 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
   carries a 102 banner in `read_tier_byte_diff_test.cmake` stating the re-derivation below, in the 091/099 form.
 - **Differential, the SC-003 instrument.** Generate every tier (v42, v44, v50sp2, vt11, vlatest; read tier, builder tier
   and `_dispatch/`) with the base codegen and with the head codegen, and diff the trees recursively. The base is
-  `fa778a8e` while 102 sits on it, and the integrated merge-base once 102 is rebased after 100 and 101 (D9). The head is
-  accepted only if:
+  the parent base: `99e956a0` while 102 sits on it, and `git merge-base origin/main HEAD` after the post-squash rebase
+  (D9). The head is accepted only if:
   - every `Fields.hpp` equals the base's after the row-trailer transform (each row's `, 0 },` becomes ` },`), and
     nothing else changes in it;
   - every other hunk is an accessor, an `Args` member or an entry setter of a tag in
@@ -472,7 +493,7 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
 - The records grow (`ComponentRef` from 12 to 20 bytes, `GroupRef` from 12 to 16; `FieldRef` stays 16); loader work is
   unchanged.
 - Timing: `bench/dictionary/xml_loader_bench` (a `paired` row in `bench/ci-suite.txt`), run locally paired against the
-  merge-base at measurement time (`fa778a8e` until the D9 rebase) under Article VIII §2: release build of both trees, A-B-A-B, min-per-tree, the +5% budget; above
+  parent base at measurement time (`99e956a0` until the post-squash rebase, the merge-base after it; D9) under Article VIII §2: release build of both trees, A-B-A-B, min-per-tree, the +5% budget; above
   +5%, the measurement, a rationale and independent approval in the PR, per §2. A crashed or empty run is a failure.
   The bench's fixed `monotonic_buffer_resource` already falls back to its upstream on FIX50SP2 (the bench's own
   comment); larger records move more of the load onto that fallback, in both trees' terms, and the paired run measures
@@ -489,7 +510,11 @@ run reader tests `start <= size && count <= size - start` (or sums in `std::size
 `git grep -nE '(start|first_field_index) \+ [a-z_.>-]*count' -- src/dictionary` (empty on the head; `fa778a8e` is the
 known positive), and classify every span built from a 32-bit offset, found by `git grep -nE '\.data\(\) \+ ' --
 src/dictionary`, as guarded or bounded by a guarded reader. `name_at` is the name-pool reader; it is L-102-1 (b), not
-changed.
+changed. 100 moved the delimiter-run guard into `msg_group_ctx_delim_run`, which bounds both
+`msg_group_ctx_delims_impl` (a span) and `for_each_group_ctx_record`, which indexes the pool element by element in
+`std::size_t`, so a wrapped guard there is an out-of-bounds read, not a wrong span. 100's `run_at`
+(`dictionary_internal.hpp`) sums in `std::size_t` (guarded) and is the form to reuse; `for_each_section_group_record`
+reads through it.
 
 ### D8 — Records and amendments (FR-007)
 
@@ -500,8 +525,8 @@ changed.
   - new **B-102-2**: the MultiCharValue accessor and builder types;
   - new **B-102-3**: an Orchestra document whose component or group ids pass 65535 now loads; a QuickFIX XML or
     Orchestra base of more than 65,535 components loads with correct identities (below 2^32 components, (c));
-  - new **L-102-1**: the 32-bit residual. (a) Until B86, an unbounded base expansion can wrap a 32-bit run end; B86's
-    budget closes it. (b) A name pool past 2^32 bytes gives wrong names, in bounds; it outlives B86. (c) A QuickFIX XML
+  - new **L-102-1**: the 32-bit residual. (a) Until B86, an unbounded base expansion can wrap a 32-bit run end (the
+    side tables, the per-message runs, and 100's delimiter and section member pools); B86's budget closes it. (b) A name pool past 2^32 bytes gives wrong names, in bounds; it outlives B86. (c) A QuickFIX XML
     base of 2^32 or more components can give wrong component identities, in bounds, with no error: at exactly 2^32,
     the members and the children of the last component carry 0 for its one-based id (`component_index`,
     `parent_component_id`); above 2^32, zero-based `component_id`s wrap too. It needs 2^32 distinct
@@ -558,6 +583,16 @@ changed.
 - Catalogue / coverage index: the D-007 and D-010 rows gain 102.
 
 ### D9 — Integration after 100 and 101 (row 7's merge order)
+
+**Superseded 2026-11-13 (owner ruling: "start 102 now ... just branch from this latest commit").** 102 is stacked on
+101's Gate B head `99e956a0`, which already contains 100 (merged, `origin/main` `6714582d`) and 101. Every RED is
+shown at `99e956a0`, a base that holds 100's and 101's code paths, so a cell needs a second RED base only when the
+base delta of the post-squash rebase touches its code path. The merge or rebase below is replaced by one post-squash rebase, `git rebase --onto origin/main
+99e956a0` (101's final head in place of `99e956a0` if 101 gained commits after it), run by the orchestrator when 101
+squash-merges, followed by a delta check (tasks.md T055 to T059): an empty base delta needs no re-run; a non-empty one
+re-runs what follows over the delta only. 100's nested-accessor republish is already in the base (the `100 (banner)`
+pins in `read_tier_byte_diff_test.cmake`), so 102's republish (D5) is written against it. The text below is kept as
+the Gate A decision it was.
 
 Row 7 merges 100, then 101, then 102. 100 changes `table_view` (a section-group store and an arm-1 store), the
 loaders' member capture (`DelimCapture` in `dictionary_internal.hpp`) and adds section walks to both loaders, and
