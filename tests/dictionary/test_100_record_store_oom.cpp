@@ -194,6 +194,8 @@ TEST(SealOom101, FailedSealLeavesTheBuilderUnchanged) {
     g_fail_at = -1;  // disarm BEFORE the retry and the assertions, which allocate
     ASSERT_TRUE(caught) << "the first allocation inside build() was not made to fail (arming is "
                            "broken)";
+    // build() && threw in the seal, before moving the view: b is the builder the retry is about.
+    // NOLINTNEXTLINE(bugprone-use-after-move,hicpp-invalid-access-moved)
     auto const tv = std::move(b).build();
     EXPECT_EQ(table_view_test_access::defined_tags(tv), want)
         << "the retry after a failed seal reads the builder's census";
