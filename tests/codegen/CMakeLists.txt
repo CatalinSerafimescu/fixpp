@@ -61,6 +61,9 @@ set_tests_properties(codegen_pure_tests PROPERTIES LABELS codegen)
 # 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
 # setter for this entry, so the existing labels survive.
 set_property(TEST codegen_pure_tests APPEND PROPERTY LABELS 100)
+# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST codegen_pure_tests APPEND PROPERTY LABELS 102)
 
 # ── Standalone: isolation-sensitive codegen tests (FR-002) ───────────────────
 # codegen_group_entry_alloc_gate_test: in-TU global operator-new counter +
@@ -128,6 +131,9 @@ set_tests_properties(codegen_067_emit_builders_unit_test PROPERTIES LABELS "code
 # 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
 # LABELS setter for this entry, so the existing labels survive.
 set_property(TEST codegen_067_emit_builders_unit_test APPEND PROPERTY LABELS 097)
+# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST codegen_067_emit_builders_unit_test APPEND PROPERTY LABELS 102)
 
 # 076-fix-latest-typed-codegen T008/T011: vlatest compile-smoke + dispatch-exclusion
 # witnesses. T008 needs the vlatest {Fields,Messages,Validator,Reify}.hpp read-tier
@@ -188,6 +194,9 @@ set_tests_properties(codegen_vlatest_tests PROPERTIES
 # 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
 # LABELS setter for this entry, so the existing labels survive.
 set_property(TEST codegen_vlatest_tests APPEND PROPERTY LABELS 097)
+# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST codegen_vlatest_tests APPEND PROPERTY LABELS 102)
 
 # 076-fix-latest-typed-codegen T013 [US2]: V-1 completeness census —
 # independent raw-XML walker (pugixml, no ir.cpp/ir.hpp/emit_manifest.cpp
@@ -528,6 +537,9 @@ set_property(TEST codegen_determinism_test APPEND PROPERTY LABELS 097)
 # 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
 # setter for this entry, so the existing labels survive.
 set_property(TEST codegen_determinism_test APPEND PROPERTY LABELS 100)
+# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST codegen_determinism_test APPEND PROPERTY LABELS 102)
 
 # 077-builder-args-dedup T019 [US2]: only defined when THIS build was
 # configured with the tier ON -- MainTreeVlatestBuildersUnaffectedByOffPathWitness
@@ -607,6 +619,9 @@ set_tests_properties("fixpp::dict::read-tier-byte-diff" PROPERTIES
 # 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
 # setter for this entry, so the existing labels survive.
 set_property(TEST "fixpp::dict::read-tier-byte-diff" APPEND PROPERTY LABELS 100)
+# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST "fixpp::dict::read-tier-byte-diff" APPEND PROPERTY LABELS 102)
 
 # 078-precompiled-builder-libs T002 (research.md R2a — Phase-0 BLOCKING
 # prerequisite): hand-written ~30-line ODR / builder⟂validator (SC-003) probe.

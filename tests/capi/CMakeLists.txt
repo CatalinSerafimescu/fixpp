@@ -147,6 +147,9 @@ set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 099)
 # 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
 # setter for this entry, so the existing labels survive.
 set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 100)
+# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 102)
 
 # T004 (US1, SC-004) — 051 error-block foundational oracle (translate re-point +
 # strerror + per-code-minor downgrade).  T022 (US5) appends live end-to-end arms

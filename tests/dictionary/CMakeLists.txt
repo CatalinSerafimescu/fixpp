@@ -103,6 +103,9 @@ set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 100)
 # 101-inbound-reject-fidelity: label 101 (tasks.md T019). APPEND, after the last LABELS setter
 # for this entry, so the existing labels survive. test_101_tag_defined.cpp joins this bucket.
 set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 101)
+# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 102)
 
 # ── 098-dialect-overlay: the overlay witnesses W-0..W-4 and W-9's status-mapping rows ──
 # Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); a bucket of
@@ -133,6 +136,9 @@ target_compile_definitions(dictionary_overlay_tests PRIVATE
   FIXPP_TEST_HOOKS)
 add_test(NAME dictionary_overlay_tests COMMAND dictionary_overlay_tests)
 set_tests_properties(dictionary_overlay_tests PROPERTIES LABELS "dictionary;098")
+# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST dictionary_overlay_tests APPEND PROPERTY LABELS 102)
 
 # ── 099-fixt-appl-version-validation: W-17 and W-21's dictionary half ─────────
 # Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); a bucket of
@@ -259,6 +265,10 @@ target_link_libraries(dictionary_100_record_store_oom_test PRIVATE
 )
 add_test(NAME dictionary_100_record_store_oom_test COMMAND dictionary_100_record_store_oom_test)
 set_tests_properties(dictionary_100_record_store_oom_test PROPERTIES LABELS "100;dictionary")
+# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive. Its source is unchanged: it injects
+# allocation failure into the record stores whose writers 102 changes.
+set_property(TEST dictionary_100_record_store_oom_test APPEND PROPERTY LABELS 102)
 
 # ── 098-dialect-overlay: the overlay splice under a failing pugixml allocator ──
 # Standalone, not in the pure bucket: it installs pugixml's process-global
@@ -330,6 +340,9 @@ set_tests_properties(dictionary_orchestra_tests PROPERTIES LABELS "dictionary;or
 # 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
 # LABELS setter for this entry, so the existing labels survive.
 set_property(TEST dictionary_orchestra_tests APPEND PROPERTY LABELS 097)
+# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST dictionary_orchestra_tests APPEND PROPERTY LABELS 102)
 
 # ── 080-orchestra-runtime-load: dict::load_any shared dispatch helper ───────
 # Grouped whole-binary executable (const §VII.8), LABELS "dictionary;orchestra;080";
@@ -396,6 +409,9 @@ target_compile_definitions(dictionary_098_header_census_test PRIVATE
   "FIXPP_ORCHESTRA_DATA_DIR=\"${FIXPP_ORCHESTRA_DATA_DIR}\"")
 add_test(NAME dictionary_098_header_census_test COMMAND dictionary_098_header_census_test)
 set_tests_properties(dictionary_098_header_census_test PROPERTIES LABELS "dictionary;098;census")
+# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST dictionary_098_header_census_test APPEND PROPERTY LABELS 102)
 
 # ── 079-required-presence-scope T015-T017: required-set census (Contract 1 +
 # 1a) — STANDALONE (const §VII.8) exact-set completeness gate, selected via
