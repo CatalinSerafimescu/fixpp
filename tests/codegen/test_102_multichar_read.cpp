@@ -78,7 +78,7 @@ struct Parsed {
 };
 
 void parse_into(Parsed& p, std::string_view body) {
-    p.frame = fixpp_test_support::make_frame("FIXT.1.1", body);
+    p.frame = fixpp_test_support::make_frame("FIX.5.0SP2", body);
     p.view.emplace(fixpp_test_support::parse_dict(p.frame, v50sp2().tv, &p.arena));
 }
 
