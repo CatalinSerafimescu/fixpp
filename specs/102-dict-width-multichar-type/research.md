@@ -486,7 +486,9 @@ count wraps a 16-bit index, widen it; do not cap it. 102 adds no refusal.
     {18, 286, 291, 292, 529, 546, 1308, 1384};
   - every other file is byte-identical.
   The filter is shown able to report a stray hunk: a planted extra change in one non-MultiCharValue file is reported,
-  then removed. The verify record holds the commands, the hunk classification and the planted positive.
+  then removed; and a planted non-MultiCharValue hunk inside a file that carries MultiCharValue hunks (the
+  classifier's weak point) is reported, then removed. The verify record holds the commands, the hunk classification
+  and the planted positives.
 
 ### D6 — Performance (SC-004)
 
@@ -519,27 +521,51 @@ reads through it.
 ### D8 — Records and amendments (FR-007)
 
 - B&L:
-  - L-098-4 and L-621-1 closed (moved to the closed file);
-  - B-098-1 amended: the side-table fit refusal is gone, and its cause-list entry with it;
+  - L-098-4 and L-621-1 closed (moved to the closed file). Each names, by `Suite.Test`, the cells that close it and
+    the head on which they are GREEN, the head the verify record accepts. L-098-4: the FIX50SP2 rows of the repaired
+    equivalence fixture (US1.1) and the name-offset cell (US1.2). L-621-1: the `18=1 2` decode cells of US2.1 on
+    v50sp2 and vlatest, and the builder round-trip of US2.3;
+  - B-098-1 amended in place: the side-table fit refusal is gone, with its "(L-098-4)" pointer and its entry in the
+    `overlay_limit_error` cause list; the walk refuses a component cycle and an expansion over the budget only
+    (spec FR-003);
   - new **B-102-1**: the `ComponentRef`, `GroupRef` and `FieldRef` layouts, with the contract's migration;
-  - new **B-102-2**: the MultiCharValue accessor and builder types;
+  - new **B-102-2**: the MultiCharValue accessor and builder types, with contract §4's migration. That includes its
+    lifetime lines: the accessor now returns a view into the message buffer, not a `char` by value, and an `Args`
+    member views the caller's characters until the build call;
   - new **B-102-3**: an Orchestra document whose component or group ids pass 65535 now loads; a QuickFIX XML or
-    Orchestra base of more than 65,535 components loads with correct identities (below 2^32 components, (c));
+    Orchestra base of more than 65,535 components loads with correct identities (below 2^32 components, (c)); on the
+    vendored FIX50SP2, `component_fields` of `RgstDistInstGrp` and of every later component returns its own members.
+    It names the C-ABI and Python results that change: `fixpp_dict_load_from_xml_with_overlay` returns
+    `FIXPP_ERR_OK` where an overlay's only fault was the side-table fit (was `FIXPP_ERR_DICT_LIMIT_EXCEEDED`) or a
+    surrogate id past 65535 (was `FIXPP_ERR_DICT_CONFIG`). `fixpp_dict_load_from_xml` returns `FIXPP_ERR_OK` for an
+    Orchestra document with such ids (was `FIXPP_ERR_CAPI_CONFIG_INVALID`). Python's two wrappers return where they
+    raised. It carries the BREAKING marker and the C-ABI version move if, and only if, the owner rules these a
+    breaking change under `[const §X.7]` (`checklists/api-abi.md` CHK001 to CHK003);
   - new **L-102-1**: the 32-bit residual. (a) Until B86, an unbounded base expansion can wrap a 32-bit run end (the
-    side tables, the per-message runs, and 100's delimiter and section member pools); B86's budget closes it. (b) A name pool past 2^32 bytes gives wrong names, in bounds; it outlives B86. (c) A QuickFIX XML
+    side tables, the per-message runs, and 100's delimiter and section member pools); on the overlay path an overlay
+    adds at most `kExpansionBudget` beyond the base's own expansion (D2), so only a base's own expansion reaches it;
+    B86's budget closes it. (b) A name pool past 2^32 bytes gives wrong names, in bounds; it outlives B86. (c) A QuickFIX XML
     base of 2^32 or more components can give wrong component identities, in bounds, with no error: at exactly 2^32,
     the members and the children of the last component carry 0 for its one-based id (`component_index`,
     `parent_component_id`); above 2^32, zero-based `component_id`s wrap too. It needs 2^32 distinct
     names, so (b) is reached first; an Orchestra base cannot reach it (distinct ids, at most 2^31). B86's budget does
     not bound the component count (a component with no members costs no step), and B86 adds no entry cap, so (c)
-    outlives B86, as (b) does (D2);
-  - L-098-3 gains a pointer to L-102-1 (a).
+    outlives B86, as (b) does (D2). No call reports that a dictionary is in region (b) or (c). (b) and (c) each cite
+    a tracking issue (tasks T047);
+  - L-098-3 gains one sentence, pointing from it to L-102-1 (a): its unbounded base expansion can also wrap a 32-bit
+    run end, L-102-1 (a). The row is otherwise unchanged.
 - **Live texts, amended** (they describe current behaviour, so they are not history):
-  - `.specify/2c-codegen.md`, each with an `Updated (102-dict-width-multichar-type)` note: §4.1 and §4.2 (the
+  - `.specify/2c-codegen.md`, each with an `Updated (102-dict-width-multichar-type)` note that names what it
+    supersedes and leaves the text before it in place as history: §4.1 and §4.2 (the
     layouts, `alignof`, the `_reserved` discipline that no longer applies to `FieldRef` and `ComponentRef`, and the
     lost `FIXPP_DICT_COMPONENTREF_RESERVED_USED` slot); §1's "Field representation types" bullet and §4.1.3's
     `field_traits.hpp` listing comment (both name a MultiCharValue / MultiStringValue split; after D3 both kinds
-    decode through `field_traits<std::string_view>`);
+    decode through `field_traits<std::string_view>`, which the note states as a condition, which kinds share a
+    decoder, with no count of kinds);
+  - `include/fix/c_api/dict.h`: `fixpp_dict_load_from_xml_with_overlay`'s `FIXPP_ERR_DICT_LIMIT_EXCEEDED` line points
+    at `xml_loader.hpp`'s cause list. It needs no text of its own while that pointer resolves. If the owner rules the
+    C-ABI result changes breaking (`checklists/api-abi.md` CHK001 to CHK003), both `dict.h` load declarations gain a
+    BREAKING note under `[const §X.7]`;
   - the installed `include/fixpp/dict/field_traits.hpp`: its comment on the remaining specialisations names "the
     MultiCharValue / MultiStringValue split", false after D3; amended, naming 102 D3;
   - the three installed record headers' banners and `_reserved` paragraphs;
@@ -575,12 +601,17 @@ reads through it.
   `git grep -n -i -E 'side.?table (fit|refusal|check)|side.?tables? *$|stop fitting|kSideTableMax|side_table_fits|MultiStringValue split|MultiCharValue( ?[/-] ?|, )MultiStringValue' -- ':!specs/102-*'`
   is classified as **amended** (live text), **flagged** (a merged bundle, through the brain section), **kept** (still
   true: the `field_data_type` enum listings, `table_view`'s `multi_value` comment) or **history** (draft and history
-  files), at tasks and again after the last fix commit. `fa778a8e` is its known positive: it hits every clause
-  above, `error.hpp`, both `xml_loader.hpp` sentences and the `overlay_merge.hpp` comments. The
+  files), at tasks and again after the last fix commit. `fa778a8e` is its known positive: it hits the clauses
+  above, `error.hpp`, both `xml_loader.hpp` sentences and the `overlay_merge.hpp` comments, but not 002's
+  `group_ref.hpp` and `data-model.md` (flagged by D1 through T050) or the texts of tasks `## Census manifest`'s "D8
+  supplement"; that supplement is part of this recipe. The
   `side.?tables? *$` alternative is not in the round-2 judgement's recipe; it was added because the guard-order
   sentence in `xml_loader.hpp` breaks the line between "side-table" and "fit", which no single-line alternative of
   that recipe matches. The `field_traits.hpp` comment is caught by the "MultiStringValue split" alternative.
-- Catalogue / coverage index: the D-007 and D-010 rows gain 102.
+- Catalogue / coverage index: the D-007, D-010, D-011 and W-009 rows (spec Normative References) gain 102's
+  delivering cells in their witness column; none changes status. The coverage-index entries `[FIX50SP2 §3.3]` (the
+  MultiCharValue decode and builder cells), `[FIX50SP2 §3.2]` (the component and group member cells) and
+  `[FIX-Orchestra]` (the surrogate-id cells) gain a 102 evidence note, with no status change.
 
 ### D9 — Integration after 100 and 101 (row 7's merge order)
 

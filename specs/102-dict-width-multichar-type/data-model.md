@@ -18,7 +18,7 @@ Declared order unchanged; `component_index` widened in place; `_reserved` remove
 | 12 | `enum_table_index` | `std::uint16_t` | never written (0) |
 | 14 | `length_pair_data_tag` | `std::uint16_t` | FIX tag |
 
-`sizeof == 16` (unchanged), `alignof == 4` (was 2).
+`sizeof == 16` (unchanged), `alignof == 4` (was 2). Every generated constexpr `FieldRef` table therefore keeps its size.
 
 ## `ComponentRef` (after)
 
@@ -26,7 +26,7 @@ Declared order unchanged; every member `std::uint32_t`; `_reserved` removed.
 
 | Offset | Member | Type | Note |
 |---|---|---|---|
-| 0 | `component_id` | `std::uint32_t` | 0-based declaration index; was 16-bit and wrapped past 65,535 components |
+| 0 | `component_id` | `std::uint32_t` | 0-based declaration index in both formats (not an Orchestra document's `fixr:component id`); was 16-bit and wrapped past 65,535 components |
 | 4 | `name_offset` | `std::uint32_t` | was clamped at 65535 |
 | 8 | `first_field_index` | `std::uint32_t` | was wrapped modulo 65,536 |
 | 12 | `field_count` | `std::uint32_t` | was clamped at 65535 |
@@ -47,16 +47,18 @@ Declared order unchanged; the two side-table values widened.
 | 12 | `parent_group_no_tag` | `std::uint16_t` |
 | 14 | `_reserved` | `std::uint16_t` (0) |
 
-`sizeof == 16` (was 12), `alignof == 4`. The group index is not stored in a record; inside the loaders it stays 16-bit,
-bounded by the NumInGroup tag domain (research Survey).
+`sizeof == 16` (was 12), `alignof == 4`. `_reserved` stays as the explicit tail pad (the record is 16 bytes at
+`alignof == 4` either way), under 2c §4.2's discipline: zero on emit, ignored on read. The group index is not stored
+in a record; inside the loaders it stays 16-bit, bounded by the NumInGroup tag domain (research Survey).
 
 ## Loader behaviour
 
 - No refusal is added. A QuickFIX XML or Orchestra base of any number of components loads (no count is refused); each
   component's id, parent id, members and name are its own while every table stays below 2^32 entries (FR-001's
   condition: components, side-table entries, name-pool bytes; L-102-1 (a)–(c)).
-- Orchestra component and group ids (and their refs) are read in the schema's `id_t` domain, up to 2147483647; above it,
-  or malformed, `orchestra_parse_error` as today. Field ids, `lengthId` and `numInGroup` ids stay FIX tags, 1..65535.
+- Orchestra component and group ids (and their refs) are read in 0..2147483647 (the schema's `id_t` domain, with 0
+  admitted as today), by today's lexical rule with only its upper bound raised (spec FR-001b); above it, or
+  malformed, `orchestra_parse_error` as today. Field ids, `lengthId` and `numInGroup` ids stay FIX tags, 1..65535.
 - 098's side-table fit refusal is removed (research D2).
 
 ## Generated type of a MultiCharValue field

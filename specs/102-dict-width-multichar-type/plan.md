@@ -32,7 +32,9 @@ oracle, plus a name-offset oracle and generated large-dictionary identity cells;
 **Performance Goals**: `xml_loader_bench` within Article VIII §2's +5%, paired against the merge-base (D6).
 
 **Constraints**: C ABI and Python unchanged; every generated file without a MultiCharValue field byte-identical, except
-the `FieldRef` row trailer in `Fields.hpp`.
+the `FieldRef` row trailer in `Fields.hpp`. The generated text changes only by those hunks (SC-003): each `FieldRef`
+row loses one initializer and each MultiCharValue accessor, `Args` member and entry setter changes kind. No
+compile-time or object-size budget applies to the generated tiers, vlatest's included, and none is measured.
 
 **Scale/Scope**: the files below. Republished: 003 v50sp2 golden, 076 vlatest golden, 078 v50sp2 and vlatest trees,
 the read-tier hashes of every `Fields.hpp` and of v50sp2 `Messages.hpp` and `Reify.hpp`, the census table and Fields
@@ -50,8 +52,9 @@ parser.
 | VIII §2 | no regression | `xml_loader_bench` paired locally against the parent base at measurement time (`99e956a0`, 101's Gate B head that 102 is stacked on, until the post-squash rebase; the merge-base of the candidate and `origin/main` after it; the deciding run is the one after that rebase; D6, D9), +5% budget, independent approval above it (D6); the verify record names the base commit. |
 | IX | coverage, static | `/speckit-verify`; `tools/codegen/` is lint scope since #265. |
 | X | C ABI | C ABI unchanged: `fixpp_dict_t` opaque, `src/capi` reads `FieldRef::rule` and `type` (not widened), SWIG exposes none of the records. Article X does not govern the C++ break. |
+| XV.1 | no per-message heap allocation on the hot path | unchanged. A MultiCharValue accessor and builder input take the String kind's existing paths (D3; spec FR-004, FR-005). FR-008's guard is arithmetic only: no allocation, no exception, `noexcept` kept. The surrogate-id parse is load-time only, a `std::from_chars` into an integer like the tag parse. Its enum type adds no storage, and the containers it keys already exist. |
 | XV.13 | hybrid codegen + runtime dictionary | unchanged. |
-| XVII.1 | Gate A on public API | Gate A required and assesses the C++ break: the corrected contract, B-102-1..3, the 2c §1, §4.1, §4.1.3 and §4.2 amendments (D8). |
+| XVII.1 | Gate A on public API | Gate A required and assesses the C++ break: the corrected contract, B-102-1..3, the 2c §1, §4.1, §4.1.3 and §4.2 amendments (D8). Before the first public release this article's Gate A governs a public C++ break. The break is declared BREAKING in the B&L delta (B-102-1..3) and in the PR description, which tasks T069 drafts. |
 
 **Initial gate: PASS. Post-design re-check: PASS.**
 
