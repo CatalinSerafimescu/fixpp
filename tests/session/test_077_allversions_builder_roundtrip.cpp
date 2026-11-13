@@ -3706,7 +3706,8 @@ TEST_F(AllVersionsRoundtrip077V50SP2, MultiChar102ExecInstTwoValuesRoundTrips) {
     std::vector<std::byte> const frame = make_frame("FIX.5.0SP2", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure());
-    auto const r = fixpp::v50sp2::NewOrderSingle{mv}.exec_inst();
+    fixpp::v50sp2::NewOrderSingle const read_msg{mv};
+    auto const r = read_msg.exec_inst();
     ASSERT_TRUE(r.has_value()) << "the typed reader refused 18=1 2";
     EXPECT_EQ(as_text_102(*r), "1 2");
 }
@@ -3733,7 +3734,8 @@ TEST_F(AllVersionsRoundtrip077V50SP2, MultiChar102LegExecInstTwoValuesRoundTrips
     std::vector<std::byte> const frame = make_frame("FIX.5.0SP2", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure());
-    auto const read_legs = fixpp::v50sp2::NewOrderMultileg{mv}.legs();
+    fixpp::v50sp2::NewOrderMultileg const read_msg{mv};
+    auto const read_legs = read_msg.legs();
     ASSERT_EQ(read_legs.size(), 1U) << "the NoLegs(555) instance did not resolve";
     auto const r = read_legs[0].leg_exec_inst();
     ASSERT_TRUE(r.has_value()) << "the typed reader refused 1384=1 2";
