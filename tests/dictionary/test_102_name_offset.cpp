@@ -37,10 +37,11 @@ struct base_file {
 };
 
 constexpr base_file kBases[] = {
-    {"FIX40.xml", false},    {"FIX41.xml", false},    {"FIX42.xml", false},
-    {"FIX43.xml", false},    {"FIX44.xml", false},    {"FIX50.xml", false},
-    {"FIX50SP1.xml", false}, {"FIX50SP2.xml", false}, {"FIXT11.xml", false},
-    {"OrchestraFIXLatest.xml", true},
+    {"FIX40.xml", false},    {"FIX41.xml", false},
+    {"FIX42.xml", false},    {"FIX43.xml", false},
+    {"FIX44.xml", false},    {"FIX50.xml", false},
+    {"FIX50SP1.xml", false}, {"FIX50SP2.xml", false},
+    {"FIXT11.xml", false},   {"OrchestraFIXLatest.xml", true},
 };
 
 std::filesystem::path path_of(base_file const& b) {
@@ -73,9 +74,9 @@ class NameOffset102 : public ::testing::TestWithParam<base_file> {};
 TEST_P(NameOffset102, EveryComponentNameSitsAtItsOffset) {
     base_file const& b = GetParam();
     std::pmr::monotonic_buffer_resource arena;
-    fixpp::dict::Dictionary const d =
-        b.orchestra ? fixpp::dict::OrchestraLoader{}.load(path_of(b), &arena)
-                    : fixpp::dict::XmlLoader{}.load(path_of(b), &arena);
+    fixpp::dict::Dictionary const d = b.orchestra
+                                          ? fixpp::dict::OrchestraLoader{}.load(path_of(b), &arena)
+                                          : fixpp::dict::XmlLoader{}.load(path_of(b), &arena);
     auto const* h = fixpp::dict::dictionary_test_access::handle(d);
     ASSERT_NE(h, nullptr);
     std::vector<std::string> const names = raw_component_names(b);

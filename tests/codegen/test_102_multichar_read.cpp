@@ -86,7 +86,10 @@ void parse_into(Parsed& p, std::string_view body) {
 
 TEST(MultiChar102V50sp2, ExecInstTwoValuesReadsVerbatim) {
     Parsed p;
-    parse_into(p, "35=D\x01" "11=CL1\x01" "18=1 2\x01");
+    parse_into(p,
+               "35=D\x01"
+               "11=CL1\x01"
+               "18=1 2\x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
     fixpp::v50sp2::NewOrderSingle const msg{*p.view};
     auto const r = msg.exec_inst();
@@ -96,7 +99,10 @@ TEST(MultiChar102V50sp2, ExecInstTwoValuesReadsVerbatim) {
 
 TEST(MultiChar102V50sp2, ExecInstOneValueReadsAsAString) {
     Parsed p;
-    parse_into(p, "35=D\x01" "11=CL1\x01" "18=1\x01");
+    parse_into(p,
+               "35=D\x01"
+               "11=CL1\x01"
+               "18=1\x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
     fixpp::v50sp2::NewOrderSingle const msg{*p.view};
     auto const r = msg.exec_inst();
@@ -109,7 +115,10 @@ TEST(MultiChar102V50sp2, ExecInstOneValueReadsAsAString) {
 // Spec FR-004: no MultipleCharValue grammar check; spacing is returned as it came.
 TEST(MultiChar102V50sp2, ExecInstIrregularSpacingReadsVerbatim) {
     Parsed p;
-    parse_into(p, "35=D\x01" "11=CL1\x01" "18=1  2 \x01");
+    parse_into(p,
+               "35=D\x01"
+               "11=CL1\x01"
+               "18=1  2 \x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
     fixpp::v50sp2::NewOrderSingle const msg{*p.view};
     auto const r = msg.exec_inst();
@@ -119,7 +128,12 @@ TEST(MultiChar102V50sp2, ExecInstIrregularSpacingReadsVerbatim) {
 
 TEST(MultiChar102V50sp2, GroupEntryLegExecInstReadsVerbatim) {
     Parsed p;
-    parse_into(p, "35=AB\x01" "11=CL1\x01" "555=1\x01" "600=SYM\x01" "1384=1 2\x01");
+    parse_into(p,
+               "35=AB\x01"
+               "11=CL1\x01"
+               "555=1\x01"
+               "600=SYM\x01"
+               "1384=1 2\x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
     fixpp::v50sp2::NewOrderMultileg const msg{*p.view};
     auto const legs = msg.legs();
@@ -132,7 +146,10 @@ TEST(MultiChar102V50sp2, GroupEntryLegExecInstReadsVerbatim) {
 
 TEST(MultiChar102V50sp2, OwningExecInstReadsVerbatim) {
     Parsed p;
-    parse_into(p, "35=D\x01" "11=CL1\x01" "18=1 2\x01");
+    parse_into(p,
+               "35=D\x01"
+               "11=CL1\x01"
+               "18=1 2\x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
     std::pmr::monotonic_buffer_resource own_arena{16384};
     auto owned = fixpp::v50sp2::owning_NewOrderSingle::from_view(*p.view, &own_arena);
@@ -147,10 +164,10 @@ TEST(MultiChar102V50sp2, AccessorShapesAreStringViews) {
     using owning_t =
         decltype(std::declval<fixpp::v50sp2::owning_NewOrderSingle const&>().exec_inst());
     using entry_t = decltype(std::declval<fixpp::v50sp2::groups::G_555 const&>().leg_exec_inst());
-    EXPECT_TRUE((std::is_same_v<std::remove_cvref_t<view_t>,
-                                fixpp::core::expected_t<std::string_view>>));
-    EXPECT_TRUE((std::is_same_v<std::remove_cvref_t<owning_t>,
-                                fixpp::core::expected_t<std::string_view>>));
-    EXPECT_TRUE((std::is_same_v<std::remove_cvref_t<entry_t>,
-                                fixpp::core::expected_t<std::string_view>>));
+    EXPECT_TRUE(
+        (std::is_same_v<std::remove_cvref_t<view_t>, fixpp::core::expected_t<std::string_view>>));
+    EXPECT_TRUE(
+        (std::is_same_v<std::remove_cvref_t<owning_t>, fixpp::core::expected_t<std::string_view>>));
+    EXPECT_TRUE(
+        (std::is_same_v<std::remove_cvref_t<entry_t>, fixpp::core::expected_t<std::string_view>>));
 }

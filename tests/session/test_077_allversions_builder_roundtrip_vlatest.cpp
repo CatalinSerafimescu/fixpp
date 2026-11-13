@@ -3982,7 +3982,10 @@ TEST_F(AllVersionsRoundtrip077Vlatest, MultiChar102ExecInstTwoValuesRoundTrips) 
     auto built = fixpp::vlatest::build_NewOrderSingle(out, args);
     ASSERT_TRUE(built.has_value()) << "build_NewOrderSingle failed";
     std::string const body = bytes_to_string(*built);
-    EXPECT_NE(body.find("\x01" "18=1 2\x01"), std::string::npos) << "the wire lacks 18=1 2: " << body;
+    EXPECT_NE(body.find("\x01"
+                        "18=1 2\x01"),
+              std::string::npos)
+        << "the wire lacks 18=1 2: " << body;
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure());
@@ -4006,7 +4009,9 @@ TEST_F(AllVersionsRoundtrip077Vlatest, MultiChar102LegExecInstTwoValuesRoundTrip
     auto built = fixpp::vlatest::build_NewOrderMultileg(out, args);
     ASSERT_TRUE(built.has_value()) << "build_NewOrderMultileg failed";
     std::string const body = bytes_to_string(*built);
-    EXPECT_NE(body.find("\x01" "1384=1 2\x01"), std::string::npos)
+    EXPECT_NE(body.find("\x01"
+                        "1384=1 2\x01"),
+              std::string::npos)
         << "the wire lacks 1384=1 2: " << body;
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);

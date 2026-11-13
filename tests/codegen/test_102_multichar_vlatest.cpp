@@ -87,7 +87,10 @@ void parse_into(Parsed& p, std::string_view body) {
 
 TEST(MultiChar102Vlatest, ExecInstTwoValuesReadsVerbatim) {
     Parsed p;
-    parse_into(p, "35=D\x01" "11=CL1\x01" "18=1 2\x01");
+    parse_into(p,
+               "35=D\x01"
+               "11=CL1\x01"
+               "18=1 2\x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
     fixpp::vlatest::NewOrderSingle const msg{*p.view};
     auto const r = msg.exec_inst();
@@ -97,7 +100,10 @@ TEST(MultiChar102Vlatest, ExecInstTwoValuesReadsVerbatim) {
 
 TEST(MultiChar102Vlatest, ExecInstOneValueReadsAsAString) {
     Parsed p;
-    parse_into(p, "35=D\x01" "11=CL1\x01" "18=1\x01");
+    parse_into(p,
+               "35=D\x01"
+               "11=CL1\x01"
+               "18=1\x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
     fixpp::vlatest::NewOrderSingle const msg{*p.view};
     auto const r = msg.exec_inst();
@@ -109,7 +115,12 @@ TEST(MultiChar102Vlatest, ExecInstOneValueReadsAsAString) {
 
 TEST(MultiChar102Vlatest, GroupEntryLegExecInstReadsVerbatim) {
     Parsed p;
-    parse_into(p, "35=AB\x01" "11=CL1\x01" "555=1\x01" "600=SYM\x01" "1384=1 2\x01");
+    parse_into(p,
+               "35=AB\x01"
+               "11=CL1\x01"
+               "555=1\x01"
+               "600=SYM\x01"
+               "1384=1 2\x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
     fixpp::vlatest::NewOrderMultileg const msg{*p.view};
     auto const legs = msg.legs();
@@ -122,7 +133,10 @@ TEST(MultiChar102Vlatest, GroupEntryLegExecInstReadsVerbatim) {
 
 TEST(MultiChar102Vlatest, OwningExecInstReadsVerbatim) {
     Parsed p;
-    parse_into(p, "35=D\x01" "11=CL1\x01" "18=1 2\x01");
+    parse_into(p,
+               "35=D\x01"
+               "11=CL1\x01"
+               "18=1 2\x01");
     ASSERT_FALSE(::testing::Test::HasFailure());
     std::pmr::monotonic_buffer_resource own_arena{16384};
     auto owned = fixpp::vlatest::owning_NewOrderSingle::from_view(*p.view, &own_arena);
@@ -137,10 +151,10 @@ TEST(MultiChar102Vlatest, AccessorShapesAreStringViews) {
     using owning_t =
         decltype(std::declval<fixpp::vlatest::owning_NewOrderSingle const&>().exec_inst());
     using entry_t = decltype(std::declval<fixpp::vlatest::groups::G_555 const&>().leg_exec_inst());
-    EXPECT_TRUE((std::is_same_v<std::remove_cvref_t<view_t>,
-                                fixpp::core::expected_t<std::string_view>>));
-    EXPECT_TRUE((std::is_same_v<std::remove_cvref_t<owning_t>,
-                                fixpp::core::expected_t<std::string_view>>));
-    EXPECT_TRUE((std::is_same_v<std::remove_cvref_t<entry_t>,
-                                fixpp::core::expected_t<std::string_view>>));
+    EXPECT_TRUE(
+        (std::is_same_v<std::remove_cvref_t<view_t>, fixpp::core::expected_t<std::string_view>>));
+    EXPECT_TRUE(
+        (std::is_same_v<std::remove_cvref_t<owning_t>, fixpp::core::expected_t<std::string_view>>));
+    EXPECT_TRUE(
+        (std::is_same_v<std::remove_cvref_t<entry_t>, fixpp::core::expected_t<std::string_view>>));
 }

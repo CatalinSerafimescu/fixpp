@@ -1434,13 +1434,13 @@ TEST(IdDomain102, StructuralIdsInsideTheSchemaRangeLoad) {
 
 // Control: one past the schema's `maxInclusive` is still refused, for each kind.
 TEST(IdDomain102, OnePastTheSchemaBoundIsAParseError) {
-    auto const comp = orchestra_load_error_message(
-        id_domain_doc("2147483648", "2147483648", "5", "5"));
+    auto const comp =
+        orchestra_load_error_message(id_domain_doc("2147483648", "2147483648", "5", "5"));
     std::cout << "[102 id domain] component id 2147483648: " << comp << '\n';
     EXPECT_NE(comp.find("missing/invalid <fixr:component> id attribute"), std::string::npos)
         << "component id 2147483648: " << comp;
-    auto const group = orchestra_load_error_message(
-        id_domain_doc("5", "5", "2147483648", "2147483648"));
+    auto const group =
+        orchestra_load_error_message(id_domain_doc("5", "5", "2147483648", "2147483648"));
     std::cout << "[102 id domain] group id 2147483648: " << group << '\n';
     EXPECT_NE(group.find("missing/invalid <fixr:group> id attribute"), std::string::npos)
         << "group id 2147483648: " << group;
@@ -1483,9 +1483,9 @@ TEST(TagKinds102, FieldIdPast65535IsRefusedByTheRangeCheck) {
 }
 
 TEST(TagKinds102, FieldRefIdPast65535IsRefusedByTheRangeCheck) {
-    auto const msg = orchestra_load_error_message(repository_with_fields(
-        R"xml(<fixr:field id="1" name="Account" type="String"/>)xml",
-        R"xml(<fixr:fieldRef id="65537"/>)xml"));
+    auto const msg = orchestra_load_error_message(
+        repository_with_fields(R"xml(<fixr:field id="1" name="Account" type="String"/>)xml",
+                               R"xml(<fixr:fieldRef id="65537"/>)xml"));
     EXPECT_NE(msg.find("missing/invalid <fixr:fieldRef> id attribute"), std::string::npos) << msg;
 }
 
@@ -1500,8 +1500,7 @@ TEST(TagKinds102, NumInGroupIdPast65535IsRefusedByTheRangeCheck) {
         R"xml(<fixr:groupRef id="1"/></fixr:structure></fixr:message></fixr:messages>)xml" +
         R"xml(</fixr:repository>)xml";
     auto const msg = orchestra_load_error_message(xml);
-    EXPECT_NE(msg.find("missing/invalid <fixr:numInGroup> id attribute"), std::string::npos)
-        << msg;
+    EXPECT_NE(msg.find("missing/invalid <fixr:numInGroup> id attribute"), std::string::npos) << msg;
 }
 
 TEST(TagKinds102, LengthIdPast65535IsRefusedByTheRangeCheck) {

@@ -47,9 +47,8 @@ loaded const& xml_identity() {
     static loaded l;
     static bool const done = [] {
         try {
-            l.dict.emplace(
-                fixpp::dict::XmlLoader{}.load_from_string(w::xml_identity_fixture_text().text,
-                                                          &l.arena));
+            l.dict.emplace(fixpp::dict::XmlLoader{}.load_from_string(
+                w::xml_identity_fixture_text().text, &l.arena));
         } catch (std::exception const& e) {
             l.error = e.what();
         }
@@ -175,7 +174,8 @@ TEST(ComponentIdentity102Xml, OverlayCrossingTheWrapPointGivesNewComponentsTheir
     std::pmr::monotonic_buffer_resource arena;
     std::optional<Dictionary> d;
     try {
-        d.emplace(fixpp::dict::XmlLoader{}.load_with_overlay_from_string(f.base, f.overlay, &arena));
+        d.emplace(
+            fixpp::dict::XmlLoader{}.load_with_overlay_from_string(f.base, f.overlay, &arena));
     } catch (std::exception const& e) {
         FAIL() << "the merged dictionary did not load: " << typeid(e).name() << ": " << e.what();
     }

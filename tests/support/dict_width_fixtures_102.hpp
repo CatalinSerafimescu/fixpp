@@ -40,8 +40,7 @@ inline constexpr std::uint32_t kWrap = 65536;
 
 // ── Element builders (QuickFIX XML) ──────────────────────────────────────────────────────────
 
-inline std::string x_field_def(std::uint32_t number, std::string_view name,
-                               std::string_view type) {
+inline std::string x_field_def(std::uint32_t number, std::string_view name, std::string_view type) {
     return "<field number='" + std::to_string(number) + "' name='" + std::string{name} +
            "' type='" + std::string{type} + "'/>\n";
 }
@@ -52,8 +51,7 @@ inline std::string x_cref(std::string_view name) {
     return "<component name='" + std::string{name} + "' required='N'/>";
 }
 inline std::string x_group(std::string_view name, std::string_view body) {
-    return "<group name='" + std::string{name} + "' required='N'>" + std::string{body} +
-           "</group>";
+    return "<group name='" + std::string{name} + "' required='N'>" + std::string{body} + "</group>";
 }
 inline std::string x_comp(std::string_view name, std::string_view body) {
     if (body.empty()) {
@@ -61,7 +59,8 @@ inline std::string x_comp(std::string_view name, std::string_view body) {
     }
     return "<component name='" + std::string{name} + "'>" + std::string{body} + "</component>\n";
 }
-inline constexpr std::string_view kXmlOpen = "<fix type='FIX' major='4' minor='4' servicepack='0'>\n";
+inline constexpr std::string_view kXmlOpen =
+    "<fix type='FIX' major='4' minor='4' servicepack='0'>\n";
 
 // ── Element builders (Orchestra) ─────────────────────────────────────────────────────────────
 
@@ -71,8 +70,8 @@ inline constexpr std::string_view kOrchOpen =
 inline constexpr std::string_view kOrchClose = "</fixr:repository>\n";
 
 inline std::string o_field_def(std::uint32_t id, std::string_view name, std::string_view type) {
-    return "<fixr:field id='" + std::to_string(id) + "' name='" + std::string{name} +
-           "' type='" + std::string{type} + "'/>\n";
+    return "<fixr:field id='" + std::to_string(id) + "' name='" + std::string{name} + "' type='" +
+           std::string{type} + "'/>\n";
 }
 inline std::string o_fref(std::uint32_t id, std::string_view presence = {}) {
     return "<fixr:fieldRef id='" + std::to_string(id) + "'" +
@@ -204,8 +203,7 @@ inline xml_identity_fixture make_xml_identity_fixture() {
     constexpr std::uint32_t W = kWrap;
     constexpr std::uint32_t N = W + 8;
     constexpr std::uint16_t kFH = 9001, kTP1 = 9002, kTK1 = 9003, kTP2 = 9004, kTK2 = 9005,
-                            kTX = 9006, kNX = 9007, kMX = 9008, kTA = 9009, kNA = 9010,
-                            kMA = 9011;
+                            kTX = 9006, kNX = 9007, kMX = 9008, kTA = 9009, kNA = 9010, kMA = 9011;
     xml_identity_fixture f;
     f.x_index = W + 4;
     f.t_x = kTX;
@@ -248,8 +246,11 @@ inline xml_identity_fixture make_xml_identity_fixture() {
     f.components[W + 4].members = {{kTX, own(W + 4)}, {kNX, own(W + 4)}, {kMX, own(W + 4)}};
     f.components[4].members = {{kTA, own(4)}, {kNA, own(4)}, {kMA, own(4)}};
 
-    f.message_members = {{kFH, own(W + 1)}, {kTP2, own(W + 2)}, {kTK2, own(W + 3)},
-                         {kTX, own(W + 4)}, {kNX, own(W + 4)}};
+    f.message_members = {{kFH, own(W + 1)},
+                         {kTP2, own(W + 2)},
+                         {kTK2, own(W + 3)},
+                         {kTX, own(W + 4)},
+                         {kNX, own(W + 4)}};
 
     std::string& x = f.text;
     x.reserve(std::size_t{N} * 32U);
@@ -381,14 +382,12 @@ inline orch_identity_fixture make_orch_identity_fixture() {
     f.components[W + 2].members = {{kFH, own(W + 2)}};
     f.components[W + 3].members = {{kTX, own(W + 3)}, {kNX, own(W + 3)}, {kMX, own(W + 3)}};
     f.components[W + 3].parent = own(W + 4);
-    f.components[W + 4].members = {{8, own(W + 4)},       {9, own(W + 4)},
-                                   {35, own(W + 4)},      {kTX, own(W + 3)},
-                                   {kNX, own(W + 3)},     {kMX, own(W + 3)}};
+    f.components[W + 4].members = {{8, own(W + 4)},   {9, own(W + 4)},   {35, own(W + 4)},
+                                   {kTX, own(W + 3)}, {kNX, own(W + 3)}, {kMX, own(W + 3)}};
 
-    f.message_members = {{kTKa, own(0)},     {kTPa, own(1)},     {kFL, own(2)},
-                         {kTXa, own(3)},     {kNXa, own(3)},     {kTKh, own(W)},
-                         {kTPh, own(W + 1)}, {kFH, own(W + 2)},  {kTX, own(W + 3)},
-                         {kNX, own(W + 3)}};
+    f.message_members = {{kTKa, own(0)},    {kTPa, own(1)},   {kFL, own(2)},      {kTXa, own(3)},
+                         {kNXa, own(3)},    {kTKh, own(W)},   {kTPh, own(W + 1)}, {kFH, own(W + 2)},
+                         {kTX, own(W + 3)}, {kNX, own(W + 3)}};
     f.pairs = {{"fixr:component", "fixr:componentRef", ids[W]},
                {"fixr:component", "fixr:componentRef", ids[W + 1]},
                {"fixr:component", "fixr:componentRef", ids[W + 2]},
@@ -406,13 +405,13 @@ inline orch_identity_fixture make_orch_identity_fixture() {
         char const* name;
         char const* type;
     };
-    for (field_row const& r : {field_row{kTKa, "TKa", "String"}, field_row{kTPa, "TPa", "String"},
-                               field_row{kFL, "FL", "String"}, field_row{kTXa, "TXa", "String"},
-                               field_row{kNXa, "NoXa", "NumInGroup"},
-                               field_row{kMXa, "MXa", "String"}, field_row{kTKh, "TKh", "String"},
-                               field_row{kTPh, "TPh", "String"}, field_row{kFH, "FH", "String"},
-                               field_row{kTX, "TX", "String"}, field_row{kNX, "NoX", "NumInGroup"},
-                               field_row{kMX, "MX", "String"}}) {
+    for (field_row const& r :
+         {field_row{kTKa, "TKa", "String"}, field_row{kTPa, "TPa", "String"},
+          field_row{kFL, "FL", "String"}, field_row{kTXa, "TXa", "String"},
+          field_row{kNXa, "NoXa", "NumInGroup"}, field_row{kMXa, "MXa", "String"},
+          field_row{kTKh, "TKh", "String"}, field_row{kTPh, "TPh", "String"},
+          field_row{kFH, "FH", "String"}, field_row{kTX, "TX", "String"},
+          field_row{kNX, "NoX", "NumInGroup"}, field_row{kMX, "MX", "String"}}) {
         x += o_field_def(r.tag, r.name, r.type);
     }
     x += "</fixr:fields>\n<fixr:components>\n";
@@ -423,8 +422,8 @@ inline orch_identity_fixture make_orch_identity_fixture() {
     x += o_group(kGx, "Gx", kNX, o_fref(kMX)) + o_group(kGxa, "Gxa", kNXa, o_fref(kMXa));
     x += "</fixr:groups>\n<fixr:messages>\n";
     x += o_msg(1, "NewOrderSingle", "D",
-               o_cref(1024, "required") + o_cref(ids[W + 1]) + o_cref(ids[1]) +
-                   o_cref(ids[W + 2]) + o_cref(ids[2]) + o_cref(ids[3]));
+               o_cref(1024, "required") + o_cref(ids[W + 1]) + o_cref(ids[1]) + o_cref(ids[W + 2]) +
+                   o_cref(ids[2]) + o_cref(ids[3]));
     x += "</fixr:messages>\n";
     x += kOrchClose;
     return f;
@@ -583,7 +582,8 @@ inline crossing_fixture make_xml_crossing_fixture(std::size_t max_new) {
     std::string fields;
     for (auto const& c : f.added) {
         comps += x_comp(c.name, x_fref("NewF" + std::to_string(c.members[0].tag)));
-        fields += x_field_def(c.members[0].tag, "NewF" + std::to_string(c.members[0].tag), "STRING");
+        fields +=
+            x_field_def(c.members[0].tag, "NewF" + std::to_string(c.members[0].tag), "STRING");
     }
     f.overlay = std::string{kXmlOpen} + "<components>\n" + comps + "</components>\n<fields>\n" +
                 fields + "</fields>\n</fix>\n";
@@ -611,7 +611,8 @@ inline crossing_fixture make_orch_crossing_fixture(std::size_t max_new) {
     for (std::size_t k = 0; k < f.added.size(); ++k) {
         auto const& c = f.added[k];
         comps += o_comp(70000U + static_cast<std::uint32_t>(k), c.name, o_fref(c.members[0].tag));
-        fields += o_field_def(c.members[0].tag, "NewF" + std::to_string(c.members[0].tag), "String");
+        fields +=
+            o_field_def(c.members[0].tag, "NewF" + std::to_string(c.members[0].tag), "String");
     }
     f.overlay = std::string{kOrchOpen} + "<fixr:fields>\n" + fields +
                 "</fixr:fields>\n<fixr:components>\n" + comps + "</fixr:components>\n" +
@@ -659,8 +660,7 @@ inline oracle_collision_fixture make_oracle_collision_fixture(bool colliding) {
     f.component_id = 0x10000U + f.group_id + (colliding ? 0U : 1U);
     f.text = std::string{kOrchOpen} + "<fixr:fields>\n" + o_field_def(8, "BeginString", "String") +
              o_field_def(9, "BodyLength", "Length") + o_field_def(10, "CheckSum", "String") +
-             o_field_def(35, "MsgType", "String") +
-             o_field_def(f.no_tag, "NoG", "NumInGroup") +
+             o_field_def(35, "MsgType", "String") + o_field_def(f.no_tag, "NoG", "NumInGroup") +
              o_field_def(f.members[0], "GM", "String") + "</fixr:fields>\n<fixr:components>\n" +
              o_comp(f.component_id, "C", o_gref(f.group_id)) +
              "</fixr:components>\n<fixr:groups>\n" +
@@ -691,23 +691,21 @@ inline component_overlay_fixture make_component_overlay_fixture() {
     component_overlay_fixture f;
     std::uint32_t const alias = f.high_id - kWrap;
     f.pairs = {{"fixr:component", "fixr:componentRef", f.high_id}};
-    f.base = std::string{kOrchOpen} + "<fixr:fields>\n" + o_field_def(8, "BeginString", "String") +
-             o_field_def(9, "BodyLength", "Length") + o_field_def(10, "CheckSum", "String") +
-             o_field_def(35, "MsgType", "String") +
-             o_field_def(f.high_member, "OvHighF", "String") +
-             o_field_def(f.alias_member, "OvAliasF", "String") +
-             "</fixr:fields>\n<fixr:components>\n" +
-             o_comp(1024, "StandardHeader",
-                    o_fref(8, "required") + o_fref(9, "required") + o_fref(35, "required")) +
-             o_comp(f.high_id, f.high_name, o_fref(f.high_member)) +
-             o_comp(alias, f.alias_name, o_fref(f.alias_member)) +
-             "</fixr:components>\n<fixr:messages>\n" +
-             o_msg(1, "NewOrderSingle", "D",
-                   o_cref(1024, "required") + o_cref(f.high_id) + o_cref(alias)) +
-             "</fixr:messages>\n" + std::string{kOrchClose};
+    f.base =
+        std::string{kOrchOpen} + "<fixr:fields>\n" + o_field_def(8, "BeginString", "String") +
+        o_field_def(9, "BodyLength", "Length") + o_field_def(10, "CheckSum", "String") +
+        o_field_def(35, "MsgType", "String") + o_field_def(f.high_member, "OvHighF", "String") +
+        o_field_def(f.alias_member, "OvAliasF", "String") + "</fixr:fields>\n<fixr:components>\n" +
+        o_comp(1024, "StandardHeader",
+               o_fref(8, "required") + o_fref(9, "required") + o_fref(35, "required")) +
+        o_comp(f.high_id, f.high_name, o_fref(f.high_member)) +
+        o_comp(alias, f.alias_name, o_fref(f.alias_member)) +
+        "</fixr:components>\n<fixr:messages>\n" +
+        o_msg(1, "NewOrderSingle", "D",
+              o_cref(1024, "required") + o_cref(f.high_id) + o_cref(alias)) +
+        "</fixr:messages>\n" + std::string{kOrchClose};
     f.overlay = std::string{kOrchOpen} + "<fixr:fields>\n" +
-                o_field_def(f.added, "OvAdded", "String") +
-                "</fixr:fields>\n<fixr:components>\n" +
+                o_field_def(f.added, "OvAdded", "String") + "</fixr:fields>\n<fixr:components>\n" +
                 o_comp(f.high_id, f.high_name, o_fref(f.added)) + "</fixr:components>\n" +
                 std::string{kOrchClose};
     return f;
