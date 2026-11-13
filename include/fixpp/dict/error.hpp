@@ -113,9 +113,9 @@ class overlay_conflict_error : public xml_parse_error {
 
 // 098-dialect-overlay (research R-6). Thrown by the `load_with_overlay*` entry
 // points when the overlay hits a cap, carries a DOCTYPE, exceeds the expansion
-// budget, would make a side table stop fitting 16 bits, or trips the build's step
-// counter (research R-5): the message names what it hit, and for a numeric cap its
-// value. Same derivation rule as `overlay_conflict_error`.
+// budget, or trips the build's step counter (research R-5; 102-dict-width-
+// multichar-type D2 removed the side-table fit): the message names what it hit, and
+// for a numeric cap its value. Same derivation rule as `overlay_conflict_error`.
 class overlay_limit_error : public xml_parse_error {
     using xml_parse_error::xml_parse_error;
 };

@@ -1483,8 +1483,8 @@ TEST(OverlayWrapProbe, Fix50Sp2FirstComponentPastTheWrapPoint) {
         }
         start += members.size();
     }
-    std::cout << "[098 wrap probe] FIX50SP2: no component past the wrap point (the component "
-                 "side table fits)\n";
+    std::cout << "[098 wrap probe] FIX50SP2: no component past the wrap point (no component's "
+                 "start passes 65535)\n";
 }
 
 }  // namespace

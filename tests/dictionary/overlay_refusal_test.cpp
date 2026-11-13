@@ -1266,23 +1266,14 @@ std::string empty_chains_overlay() {
     return overlay_doc(comps + " </components>\n");
 }
 
-void expect_base_fits(ov::xml_overlay_probe const& p, std::string const& row) {
-    ASSERT_TRUE(p.guards.has_value()) << row << ": " << ot::describe(p);
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
-    EXPECT_TRUE(p.guards->base_components_fit && p.guards->base_groups_fit)
-        << row << ": the doubling rows need a base whose side tables fit";
-}
-
 TEST(OverlayRefusalW3XmlWalk, DoublingBombRefusedByTheBudget) {
     auto const p = probe(base_doc(), doubling_overlay());
-    expect_base_fits(p, "doubling");
     expect_refused<overlay_limit_error>(p, {"expansion budget"}, "doubling");
     expect_origin(p, ov::refusal_origin::budget, "doubling");
 }
 
 TEST(OverlayRefusalW3XmlWalk, TwoEmptyChainsRefusedByTheBudget) {
     auto const p = probe(base_doc(), empty_chains_overlay());
-    expect_base_fits(p, "empty chains");
     expect_refused<overlay_limit_error>(p, {"expansion budget"}, "empty chains");
     expect_origin(p, ov::refusal_origin::budget, "empty chains");
 }
@@ -1330,7 +1321,7 @@ TEST(OverlayRefusalW3XmlWalk, HeaderExpansionLoadsAtThePrediction) {
     EXPECT_EQ(got, expected) << "header expansion: the declared header store";
 }
 
-// ── side-table fit (N-3) ─────────────────────────────────────────────────────
+// ── side tables past the 16-bit width (098 N-3; its fit retired by 102 D2) ───
 
 // 102-dict-width-multichar-type (tasks T013): the rows whose start or count passes 65535 load,
 // and the definition past it returns its own members.
@@ -1387,13 +1378,6 @@ TEST(OverlayRefusalW3XmlSideTable, ALaterBaseStartPastTheWrapLoadsWithItsOwnMemb
     // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-TEST(OverlayRefusalW3XmlSideTable, EarlyComponentsJustInsideTheTableLoad) {
-    // Every start, VenueBig's after Late included, stays within 65535.
-    int const each = (65535 - 2 - kBigFields) / 2 / kPerGroup;
-    ot::expect_loaded_at_prediction(probe(side_table_base(), side_overlay(grow_e0_e1(each))),
-                                    "components start control");
-}
-
 TEST(OverlayRefusalW3XmlSideTable, ANewComponentWhoseCountPassesTheWrapLoadsWithItsOwnMembers) {
     int const n = xml_new_count_n();
     auto const p = probe(side_table_base(), side_overlay("  <component name='VenueHuge'>\n" +
@@ -1411,14 +1395,6 @@ TEST(OverlayRefusalW3XmlSideTable, ANewComponentWhoseCountPassesTheWrapLoadsWith
     auto const got = run_tags_102(p.dictionary->component_fields("VenueHuge"));
     EXPECT_EQ(got.size(), expected.size());
     EXPECT_TRUE(got == expected) << "VenueHuge's members are not its own";
-}
-
-TEST(OverlayRefusalW3XmlSideTable, ANewComponentJustInsideTheTableLoads) {
-    int const n = (65535 - 3 - kBigFields) / kPerGroup;
-    ot::expect_loaded_at_prediction(
-        probe(side_table_base(), side_overlay("  <component name='VenueHuge'>\n" +
-                                              big_groups(0, n) + "  </component>\n")),
-        "component count control");
 }
 
 TEST(OverlayRefusalW3XmlSideTable,
@@ -1459,12 +1435,6 @@ TEST(OverlayRefusalW3XmlSideTable, BaseGroupsPastTheWrapWithNoOverlayKeepTheirOw
     EXPECT_EQ(base_groups_wrong_102(d, first), 0U) << "first: " << first;
 }
 
-TEST(OverlayRefusalW3XmlSideTable, ALowTaggedGroupJustInsideTheTableLoads) {
-    int const n = (65535 - kGroups) / kPerGroup;
-    ot::expect_loaded_at_prediction(probe(side_table_base(), low_group_overlay(n)),
-                                    "groups start control");
-}
-
 // ── guard order (N-1) ────────────────────────────────────────────────────────
 
 TEST(OverlayRefusalW3XmlOrder, CycleIsReportedBeforeARedeclareConflict) {
@@ -1479,15 +1449,6 @@ TEST(OverlayRefusalW3XmlOrder, VersionMismatchIsReportedBeforeTheMessageCap) {
     overlay.replace(0, kOpen.size(), "<fix type='FIX' major='4' minor='2' servicepack='0'>\n");
     expect_refused<overlay_conflict_error>(probe(base_doc(), overlay), {"version mismatch"},
                                            "order: version");
-}
-
-TEST(OverlayRefusalW3XmlOrder, BudgetIsReportedBeforeTheSideTableFit) {
-    auto const p = probe(base_doc(), doubling_overlay());
-    ASSERT_TRUE(p.guards.has_value()) << ot::describe(p);
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
-    EXPECT_FALSE(p.guards->merged_components_fit) << "the row needs both checks to fail";
-    expect_refused<overlay_limit_error>(p, {"expansion budget"}, "order: budget");
-    expect_origin(p, ov::refusal_origin::budget, "order: budget");
 }
 
 // ── the budget recipe and the longest chain ──────────────────────────────────
@@ -2546,19 +2507,17 @@ std::string orch_empty_chains_overlay() {
 
 TEST(OverlayRefusalW3OrchWalk, DoublingBombRefusedByTheBudget) {
     auto const p = oprobe(orch_base_doc(), orch_doubling_overlay());
-    expect_base_fits(p, "Orchestra doubling");
     expect_refused<overlay_limit_error>(p, {"expansion budget"}, "Orchestra doubling");
     expect_origin(p, ov::refusal_origin::budget, "Orchestra doubling");
 }
 
 TEST(OverlayRefusalW3OrchWalk, TwoEmptyChainsRefusedByTheBudget) {
     auto const p = oprobe(orch_base_doc(), orch_empty_chains_overlay());
-    expect_base_fits(p, "Orchestra empty chains");
     expect_refused<overlay_limit_error>(p, {"expansion budget"}, "Orchestra empty chains");
     expect_origin(p, ov::refusal_origin::budget, "Orchestra empty chains");
 }
 
-// ── side-table fit (N-3), Orchestra ──────────────────────────────────────────
+// ── side tables past the 16-bit width (098 N-3; its fit retired by 102 D2), Orchestra ───
 TEST(OverlayRefusalW3OrchSideTable, ALaterBaseStartPastTheWrapLoadsWithItsOwnMembers) {
     // E0 and E1 each stay within a count of 65535; Late's start, and VenueBig's after it,
     // pass it.
@@ -2573,15 +2532,6 @@ TEST(OverlayRefusalW3OrchSideTable, ALaterBaseStartPastTheWrapLoadsWithItsOwnMem
     EXPECT_EQ(run_tags_102(p.dictionary->component_fields("VenueBig")),
               numbered_tags_102(40000, kOrchBigFields));
     // NOLINTEND(bugprone-unchecked-optional-access)
-}
-
-TEST(OverlayRefusalW3OrchSideTable, EarlyComponentsJustInsideTheTableLoad) {
-    // Every start, VenueBig's after Late included, stays within 65535.
-    constexpr int n = kOrchHGroups - 1;
-    static_assert(3 + (3 * orch_g_entries(n)) <= 65535);
-    ot::expect_loaded_at_prediction(
-        oprobe(orch_side_table_base(), orch_side_overlay(orch_grow_e0_e1(), {{n, n, n}})),
-        "components start control");
 }
 
 TEST(OverlayRefusalW3OrchSideTable, ANewComponentWhoseCountPassesTheWrapLoadsWithItsOwnMembers) {
@@ -2607,15 +2557,6 @@ TEST(OverlayRefusalW3OrchSideTable, ANewComponentWhoseCountPassesTheWrapLoadsWit
     auto const got = run_tags_102(p.dictionary->component_fields("VenueHuge"));
     EXPECT_EQ(got.size(), expected.size());
     EXPECT_TRUE(got == expected) << "VenueHuge's members are not its own";
-}
-
-TEST(OverlayRefusalW3OrchSideTable, ANewComponentJustInsideTheTableLoads) {
-    constexpr int n = kOrchHGroups - 1;
-    static_assert(3 + (3 * orch_g_entries(n)) <= 65535);
-    ot::expect_loaded_at_prediction(
-        oprobe(orch_side_table_base(),
-               orch_side_overlay(ocomp(3998, "VenueHuge", g_refs(0, 3)), {{n, n, n}})),
-        "component count control");
 }
 
 TEST(OverlayRefusalW3OrchSideTable,
@@ -2659,15 +2600,6 @@ TEST(OverlayRefusalW3OrchSideTable, BaseGroupsPastTheWrapWithNoOverlayKeepTheirO
     EXPECT_EQ(base_groups_wrong_102(d, first), 0U) << "first: " << first;
 }
 
-TEST(OverlayRefusalW3OrchSideTable, ALowTaggedGroupJustInsideTheTableLoads) {
-    constexpr int count = 3 * orch_g_entries(kOrchHGroups - 1);
-    static_assert(count + kGroups <= 65535);
-    ot::expect_loaded_at_prediction(
-        oprobe(orch_side_table_base(),
-               orch_low_group_overlay({kOrchHGroups - 1, kOrchHGroups - 1, kOrchHGroups - 1})),
-        "groups start control");
-}
-
 // ── guard order (N-1), Orchestra ─────────────────────────────────────────────
 
 TEST(OverlayRefusalW3OrchOrder, CycleIsReportedBeforeARedeclareConflict) {
@@ -2684,15 +2616,6 @@ TEST(OverlayRefusalW3OrchOrder, VersionMismatchIsReportedBeforeTheMessageCap) {
     overlay.replace(overlay.find(v), v.size(), "version='FIX.Latest_EP999'");
     expect_refused<overlay_conflict_error>(oprobe(orch_base_doc(), overlay), {"version mismatch"},
                                            "order: version");
-}
-
-TEST(OverlayRefusalW3OrchOrder, BudgetIsReportedBeforeTheSideTableFit) {
-    auto const p = oprobe(orch_base_doc(), orch_doubling_overlay());
-    ASSERT_TRUE(p.guards.has_value()) << ot::describe(p);
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
-    EXPECT_FALSE(p.guards->merged_components_fit) << "the row needs both checks to fail";
-    expect_refused<overlay_limit_error>(p, {"expansion budget"}, "order: budget");
-    expect_origin(p, ov::refusal_origin::budget, "order: budget");
 }
 
 // ── the longest chain (Orchestra) ────────────────────────────────────────────
@@ -3129,31 +3052,22 @@ constexpr kind kCells[] = {
      .orchestra = na("Orchestra's header is component 1024, charged standalone")},
     {.name = "side table past 65535 entries loads",
      .xml = row("OverlayRefusalW3XmlSideTable.ALaterBaseStartPastTheWrapLoadsWithItsOwnMembers "
-                "OverlayRefusalW3XmlSideTable.EarlyComponentsJustInsideTheTableLoad "
                 "OverlayRefusalW3XmlSideTable."
                 "ANewComponentWhoseCountPassesTheWrapLoadsWithItsOwnMembers "
-                "OverlayRefusalW3XmlSideTable.ANewComponentJustInsideTheTableLoads "
                 "OverlayRefusalW3XmlSideTable."
-                "ALowTaggedGroupPushingBaseGroupsPastTheWrapLoadsWithTheirOwnMembers "
-                "OverlayRefusalW3XmlSideTable.ALowTaggedGroupJustInsideTheTableLoads"),
+                "ALowTaggedGroupPushingBaseGroupsPastTheWrapLoadsWithTheirOwnMembers"),
      .orchestra =
          row("OverlayRefusalW3OrchSideTable.ALaterBaseStartPastTheWrapLoadsWithItsOwnMembers "
-             "OverlayRefusalW3OrchSideTable.EarlyComponentsJustInsideTheTableLoad "
              "OverlayRefusalW3OrchSideTable."
              "ANewComponentWhoseCountPassesTheWrapLoadsWithItsOwnMembers "
-             "OverlayRefusalW3OrchSideTable.ANewComponentJustInsideTheTableLoads "
              "OverlayRefusalW3OrchSideTable."
-             "ALowTaggedGroupPushingBaseGroupsPastTheWrapLoadsWithTheirOwnMembers "
-             "OverlayRefusalW3OrchSideTable.ALowTaggedGroupJustInsideTheTableLoads")},
+             "ALowTaggedGroupPushingBaseGroupsPastTheWrapLoadsWithTheirOwnMembers")},
     {.name = "guard order: cycle before redeclare",
      .xml = row("OverlayRefusalW3XmlOrder.CycleIsReportedBeforeARedeclareConflict"),
      .orchestra = row("OverlayRefusalW3OrchOrder.CycleIsReportedBeforeARedeclareConflict")},
     {.name = "guard order: version before the entry cap",
      .xml = row("OverlayRefusalW3XmlOrder.VersionMismatchIsReportedBeforeTheMessageCap"),
      .orchestra = row("OverlayRefusalW3OrchOrder.VersionMismatchIsReportedBeforeTheMessageCap")},
-    {.name = "guard order: budget before the side-table fit",
-     .xml = row("OverlayRefusalW3XmlOrder.BudgetIsReportedBeforeTheSideTableFit"),
-     .orchestra = row("OverlayRefusalW3OrchOrder.BudgetIsReportedBeforeTheSideTableFit")},
     {.name = "budget recipe",
      .xml = row("OverlayRefusalW3Budget.ConstantEqualsTheRecipeOverTheVendoredBases"),
      .orchestra = row("OverlayRefusalW3Budget.ConstantEqualsTheRecipeOverTheVendoredBases")},

@@ -790,7 +790,6 @@ struct child_rec {
 
 struct def_info {
     std::uint64_t steps = 0;
-    std::uint64_t entries = 0;
 };
 
 // The tags a definition emits at its own level, sorted by tag, each counted to at
@@ -887,18 +886,15 @@ def_info visit_definition(graph_walk& r, vnode root, RecordsOf const& records_of
             if (!stack.empty()) {
                 frame& p = stack.back();
                 p.acc.steps = sat_add(p.acc.steps, done.steps);
-                p.acc.entries = sat_add(p.acc.entries, done.entries);
             }
             continue;
         }
         child_rec const& c = kids[f.next++];
         f.acc.steps = sat_add(f.acc.steps, 1);
         if (c.k == child_rec::kind::field) {
-            f.acc.entries = sat_add(f.acc.entries, 1);
             continue;
         }
         if (c.k == child_rec::kind::group && c.tag != 0) {
-            f.acc.entries = sat_add(f.acc.entries, 1);
             r.first_seen_groups.emplace(c.tag, c.target);
         }
         if (!c.target) {
@@ -927,24 +923,17 @@ def_info visit_definition(graph_walk& r, vnode root, RecordsOf const& records_of
         }
         def_info const& m = r.memo.at(c.target.key());
         f.acc.steps = sat_add(f.acc.steps, m.steps);
-        f.acc.entries = sat_add(f.acc.entries, m.entries);
     }
     return r.memo.at(root.key());
 }
 
-// Side-table fit (research R-5 step 6): every start `finalize` passes to its
-// `std::uint16_t` cast, and every count it clamps, is at most 65535. `counts` are
-// the definitions' entry counts in the order `finalize` assigns their starts.
-[[nodiscard]] bool side_table_fits(std::vector<std::uint64_t> const& counts) noexcept {
-    std::uint64_t start = 0;
-    for (std::uint64_t const n : counts) {
-        if (start > kSideTableMax || n > kSideTableMax) {
-            return false;
-        }
-        start = sat_add(start, n);
-    }
-    return true;
-}
+// 102-dict-width-multichar-type D2 supersedes 098 R-5 step 6's side-table fit. The
+// side-table starts and counts `finalize` writes are `std::uint32_t` (102 D1), a walk
+// step emits at most one side-table entry, and the overlay path arms the build's step
+// counter at no more than the base's total plus `kExpansionBudget`. So an overlay
+// cannot push a start or a count past what `finalize` stores unless the base's own
+// expansion already nears that width, which B86's absolute budget is to bound
+// (L-102-1 (a)). No fit check replaces this one.
 
 // Step 7's level set of definition `root` in a walk's records, memoized per
 // definition; iterative over component edges, a back edge read as a leaf.
@@ -1045,8 +1034,6 @@ struct xml_overlay_merge::impl::walk_result : graph_walk {
     vnode trailer;
     std::vector<vnode> components;  // declaration order
     std::uint64_t total = 0;
-    bool components_fit = true;
-    bool groups_fit = true;
 };
 
 xml_overlay_merge::impl::walk_result xml_overlay_merge::impl::walk(bool merged) const {
@@ -1171,21 +1158,13 @@ xml_overlay_merge::impl::walk_result xml_overlay_merge::impl::walk(bool merged) 
             total = sat_add(total, visit(r.trailer).steps);
         }
     }
-    std::vector<std::uint64_t> comp_counts;
     for (vnode const c : r.components) {
-        def_info const d = visit(c);
-        total = sat_add(total, d.steps);
-        comp_counts.push_back(d.entries);
+        total = sat_add(total, visit(c).steps);
     }
-    std::vector<std::uint64_t> group_counts;
     for (auto const& [tag, g] : r.first_seen_groups) {
-        def_info const d = visit(g);
-        total = sat_add(total, d.steps);
-        group_counts.push_back(d.entries);
+        total = sat_add(total, visit(g).steps);
     }
     r.total = total;
-    r.components_fit = side_table_fits(comp_counts);
-    r.groups_fit = side_table_fits(group_counts);
     return r;
 }
 
@@ -1399,10 +1378,6 @@ std::uint64_t xml_overlay_merge::guard(overlay_trace& trace) {
     g.base_total = base.total;
     g.merged_total = merged.total;
     g.arm_limit = std::min(merged.total, sat_add(base.total, kExpansionBudget));
-    g.base_components_fit = base.components_fit;
-    g.base_groups_fit = base.groups_fit;
-    g.merged_components_fit = merged.components_fit;
-    g.merged_groups_fit = merged.groups_fit;
     trace.guards = g;
     if (merged.cycle) {
         throw xml_parse_error("dict::xml_parse_error: component reference cycle: " + *merged.cycle);
@@ -1411,18 +1386,6 @@ std::uint64_t xml_overlay_merge::guard(overlay_trace& trace) {
         trace.origin = refusal_origin::budget;
         limit("the overlay adds more expansion steps than the expansion budget of " +
               std::to_string(kExpansionBudget));
-    }
-    if (base.components_fit && !merged.components_fit) {
-        trace.origin = refusal_origin::side_table;
-        limit(
-            "the components side table would stop fitting 16 bits (a start or a count "
-            "above 65535)");
-    }
-    if (base.groups_fit && !merged.groups_fit) {
-        trace.origin = refusal_origin::side_table;
-        limit(
-            "the groups side table would stop fitting 16 bits (a start or a count above "
-            "65535)");
     }
 
     m.check_conflicts(merged, base);  // step 7
@@ -1918,8 +1881,6 @@ struct orchestra_overlay_merge::impl::walk_result : graph_walk {
     std::vector<std::pair<std::string, vnode>> messages;  // msgType, structure; sorted
     std::vector<vnode> components;                        // declaration order
     std::uint64_t total = 0;
-    bool components_fit = true;
-    bool groups_fit = true;
 };
 
 orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(bool merged) const {
@@ -2075,21 +2036,13 @@ orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(b
             total = sat_add(total, visit(s).steps);
         }
     }
-    std::vector<std::uint64_t> comp_counts;
     for (vnode const c : r.components) {
-        def_info const d = visit(c);
-        total = sat_add(total, d.steps);
-        comp_counts.push_back(d.entries);
+        total = sat_add(total, visit(c).steps);
     }
-    std::vector<std::uint64_t> group_counts;
     for (auto const& [tag, g] : r.first_seen_groups) {
-        def_info const d = visit(g);
-        total = sat_add(total, d.steps);
-        group_counts.push_back(d.entries);
+        total = sat_add(total, visit(g).steps);
     }
     r.total = total;
-    r.components_fit = side_table_fits(comp_counts);
-    r.groups_fit = side_table_fits(group_counts);
     return r;
 }
 
@@ -2317,10 +2270,6 @@ std::uint64_t orchestra_overlay_merge::guard(overlay_trace& trace) {
     g.base_total = base.total;
     g.merged_total = merged.total;
     g.arm_limit = std::min(merged.total, sat_add(base.total, kExpansionBudget));
-    g.base_components_fit = base.components_fit;
-    g.base_groups_fit = base.groups_fit;
-    g.merged_components_fit = merged.components_fit;
-    g.merged_groups_fit = merged.groups_fit;
     trace.guards = g;
     if (merged.cycle) {
         throw orchestra_parse_error("dict::orchestra_parse_error: component reference cycle: " +
@@ -2330,18 +2279,6 @@ std::uint64_t orchestra_overlay_merge::guard(overlay_trace& trace) {
         trace.origin = refusal_origin::budget;
         limit("the overlay adds more expansion steps than the expansion budget of " +
               std::to_string(kExpansionBudget));
-    }
-    if (base.components_fit && !merged.components_fit) {
-        trace.origin = refusal_origin::side_table;
-        limit(
-            "the components side table would stop fitting 16 bits (a start or a count "
-            "above 65535)");
-    }
-    if (base.groups_fit && !merged.groups_fit) {
-        trace.origin = refusal_origin::side_table;
-        limit(
-            "the groups side table would stop fitting 16 bits (a start or a count above "
-            "65535)");
     }
 
     m.check_conflicts(merged, base);  // step 7

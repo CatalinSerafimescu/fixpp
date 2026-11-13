@@ -76,8 +76,6 @@ private:
             return "none";
         case ov::refusal_origin::budget:
             return "pre-walk budget";
-        case ov::refusal_origin::side_table:
-            return "pre-walk side-table fit";
         case ov::refusal_origin::counter:
             return "build counter";
     }
