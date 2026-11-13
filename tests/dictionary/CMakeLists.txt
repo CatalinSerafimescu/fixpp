@@ -52,15 +52,12 @@ add_executable(dictionary_pure_tests
   test_072_delimiter_guard_test.cpp  # 072 US1: load-time nested==parent delimiter guard witness
   oom_injection_test.cpp          # local failing_pmr_resource seam — no global state
   dictionary_snapshot_test.cpp    # fixpp#215 item 1 (Option C): A1-A5 boundary pins + seam 4 alias identity
-  test_101_tag_defined.cpp        # 101 T029: W101-15, table_view::tag_defined
-  test_100_registration_records.cpp  # 100 T028: registration stores, records, D2 sweep
   test_102_name_offset.cpp         # 102 T010: the name-offset oracle (name pool, src/dictionary)
   test_102_component_identity.cpp  # 102 T011: XML component identity, overlay crossing
   test_102_run_readers.cpp         # 102 T018: run readers, hand-built handle (src/dictionary)
 )
 target_link_libraries(dictionary_pure_tests PRIVATE
   fixpp_dictionary
-  fixpp_wire  # 100 T028 reads the stores through dict_hooks::for_table_view (parser.hpp)
   pugixml::pugixml
   GTest::gtest
   GTest::gtest_main
@@ -101,11 +98,9 @@ set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 098)
 # xml_enum_codeset_test.cpp, which stay in this bucket, hold expected values 099 updated.
 set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 099)
 # 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
-# setter for this entry, so the existing labels survive.
+# setter for this entry, so the existing labels survive. loader_disposition_test.cpp, which
+# stays in this bucket, holds cells 100 updated.
 set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 100)
-# 101-inbound-reject-fidelity: label 101 (tasks.md T019). APPEND, after the last LABELS setter
-# for this entry, so the existing labels survive. test_101_tag_defined.cpp joins this bucket.
-set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 101)
 # 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
 # setter for this entry, so the existing labels survive.
 set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 102)
@@ -171,6 +166,40 @@ target_compile_definitions(dictionary_099_tests PRIVATE
   FIXPP_TEST_HOOKS)
 add_test(NAME dictionary_099_tests COMMAND dictionary_099_tests)
 set_tests_properties(dictionary_099_tests PROPERTIES LABELS "dictionary;099")
+
+# ── fixpp#675: 100's and 101's dictionary cells, each feature in an entry of its own ──────
+# Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); out of
+# dictionary_pure_tests only because that entry ran past CI's per-test timeout on the slowest
+# sanitizer lanes once these suites joined it. Compiled as they were inside
+# dictionary_pure_tests: the same link libraries, include directories and definitions.
+# TIMEOUT: each entry's value is at least twice its slowest reading on CI's sanitizer lanes and
+# under CI's `--timeout` guard. Re-derive from a CI log:
+# `grep -E 'Test +#[0-9]+: dictionary_10[01]_tests '`, and for a run that did not finish, the
+# sum of gtest's `[       OK ] <Suite>.<Cell> (N ms)` lines per suite.
+function(add_dictionary_feature_bucket target label timeout)
+  add_executable(${target} ${ARGN})
+  target_link_libraries(${target} PRIVATE
+    fixpp_dictionary
+    fixpp_wire
+    pugixml::pugixml
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(${target} PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_SOURCE_DIR}/src/dictionary")
+  target_compile_definitions(${target} PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+    "FIXPP_ORCHESTRA_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries/orchestra\""
+    FIXPP_TEST_HOOKS)
+  add_test(NAME ${target} COMMAND ${target})
+  set_tests_properties(${target} PROPERTIES LABELS "dictionary;${label}" TIMEOUT ${timeout})
+endfunction()
+# 100 T028: the registration stores, records, D2 sweep. fixpp_wire: the cells read the stores
+# through dict_hooks::for_table_view (parser.hpp).
+add_dictionary_feature_bucket(dictionary_100_tests 100 900 test_100_registration_records.cpp)
+# 101 T029: W101-15, table_view::tag_defined.
+add_dictionary_feature_bucket(dictionary_101_tests 101 900 test_101_tag_defined.cpp)
 
 # ── Standalone: isolation-sensitive dictionary tests (FR-002) ─────────────────
 # Each keeps its own executable + add_test(NAME <target>) so its name, labels,
