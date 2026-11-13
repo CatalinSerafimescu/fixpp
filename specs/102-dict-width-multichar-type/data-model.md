@@ -156,7 +156,7 @@ generated typed-tier header, and the runtime validator does not read the kind, s
 | `fixpp_group_get_field_string` | B | as `fixpp_group_get_field_decimal` | message.h paragraph |
 | `fixpp_group_get_nested_group` | B | as `fixpp_group_get_field_decimal`, through `nested_group_slices` | message.h paragraph |
 | `fixpp_library_version` | U | no dictionary read | none |
-| `fixpp_msg_clone` | B (view) | the return code is unchanged: it re-parses the source's bytes over the source's own table, which succeeded once; the clone's view is the reader rows' | message.h paragraph (view only) |
+| `fixpp_msg_clone` | U | the return code is unchanged: it re-parses the source's bytes over the source's own table under its caps, which succeeded once; an outbound source returns `FIXPP_ERR_INVALID_HANDLE` first; the clone's view is the reader rows' (091's row) | message.h paragraph (view only) |
 | `fixpp_msg_commit` | B | `validate_group_grammar` over `dict_` and `session_tv_` (group contexts and delimiters: (f), (g)) and `check_length_data(…, pair_hooks(…))`: `FIXPP_ERR_OK` and a group-grammar or pair refusal can trade places | message.h paragraph |
 | `fixpp_msg_create_outbound` | U | reads only `Dictionary::messages()`'s MsgType list, which no 102 correction changes | none |
 | `fixpp_msg_destroy` | U | no dictionary read | none |
@@ -203,5 +203,31 @@ generated typed-tier header, and the runtime validator does not read the kind, s
 | `fixpp_session_register_send_callback` | B | the toApp view is the reader rows' view; the send path's header placement and carry (`fixpp_session_send`); and the handshake observer | session.h paragraph |
 | `fixpp_session_send` | B | the send path places header fields by the session dictionary's header store (`table_view::is_header_tag`, `send_header_tags.hpp`) and carries Length+Data pairs over `session_hooks`, so the bytes sent, and `FIXPP_ERR_OK` against a payload refusal, can change; and the handshake observer | session.h paragraph |
 | `fixpp_strerror` | U | no error code is added | none |
-| `fixpp_version` | U (value bumps) | returns the new MINOR by design: the declaration mechanism, not a 102 effect | `version.h` |
+| `fixpp_version` | U | (value bumps) returns the new MINOR by design: the declaration mechanism, not a 102 effect | `version.h` |
 | `fixpp_version_string` | U | no dictionary read | none |
+
+The Class cell holds exactly `B` or `U`; qualifiers go in the Reason column.
+
+### Python
+
+The Python binding inherits its results from the C rows, by construction.
+
+- `fixpp.i`'s type-scoped `%typemap(out) fixpp_error_t` raises the exception class of the code's block, with
+  `.code`. Its argout typemaps convert the out-values. No binding code reads the dictionary.
+- So a flat wrapper's result changes exactly where its C row's does. `msg_get_string`'s UTF-8 decode can turn a
+  changed value into `FixppError`, and that is inside its row.
+- A `fixpp_oo` method calls flat wrappers behind liveness, reentrancy and pickle checks that make no C call. So its
+  result changes only where a row it composes is `B`.
+- Python's BREAKING set is therefore every flat wrapper whose C row is `B`, plus every `fixpp_oo` method that calls
+  one. Class (d) is the loaders' part of that set. Elsewhere, the result of each call is its C row's.
+- **Derive the flat surface from `fixpp.i`:**
+  - the declarations of the `%include`d `fix/c_api` headers, minus the `%ignore`s;
+  - plus the redeclared `msg_*` functions;
+  - plus the hand wrappers, each mapped to the export it calls: `session_register_callback` and
+    `_register_application_oo` map to `fixpp_session_register_callback`; `engine_create` maps to
+    `fixpp_engine_create`.
+- **Derive the OO methods** from `fixpp_oo.py`'s import list and the method bodies that call those imports.
+- **Positive:** the hand-written `session_register_callback` maps to `fixpp_session_register_callback`, which is
+  `B`. A derivation that drops it with its `%ignore`d raw declaration is blind and stops.
+- **No Python cell besides tasks T021b.** The binding is unchanged (T067's surface check), the existing pytest suite
+  witnesses the mapping, and the composed rows' witnesses are the requirement map's.

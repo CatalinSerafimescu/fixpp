@@ -235,6 +235,7 @@ accessor, or builds one through the typed builder.
   - **The C-ABI result change is BREAKING under `[const §X.7]`.** Owner ruling, 2026-11-13: "All BREAKING, bump
     (Recommended)". It has three kinds, each class in contract §6:
     - a failure turned into a success: (a), (b), (c), and Python's wrappers (d), which return where they raised;
+      every other Python call inherits its C row (data-model.md Appendix A `### Python`);
     - the same code, and a different dictionary: (f) and (g), whose effect reaches every downstream call
       data-model.md Appendix A marks BREAKING;
     - a failure turned into a different failure, or into a success: (a′) and (b′).

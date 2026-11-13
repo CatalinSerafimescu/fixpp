@@ -545,7 +545,7 @@ reads through it.
     into a success ((a): an overlay whose only refusal was the side-table fit, was `FIXPP_ERR_DICT_LIMIT_EXCEEDED`;
     (b): a surrogate id past 65535 on the overlay call, was `FIXPP_ERR_DICT_CONFIG`; (c): such an id on
     `fixpp_dict_load_from_xml`, was `FIXPP_ERR_CAPI_CONFIG_INVALID`; (d): Python's wrappers, `fixpp_oo.Dictionary.load_xml`
-    included, return where they raised); the same code and a corrected dictionary ((f): a base of more than 65,535
+    included, return where they raised; every other Python call inherits its C row, data-model.md Appendix A `### Python`); the same code and a corrected dictionary ((f): a base of more than 65,535
     components, whose message expansion through a componentRef past the wrap is now its own, and with it every
     `table_view` store, the header store and the section records; (g): a group side table past 65,535 entries,
     whose groups' members, and the bare member store, are now their own); and a failure turned into a different
@@ -633,27 +633,62 @@ reads through it.
      `message_fields` and every store `Dictionary::build_table_view` builds from it, the header store and the section
      records); the group side table (`group_fields` and the bare member store); the surrogate-id parse and the
      side-table guard (the load's own result).
-  2. Reach: for each changed function, `codegraph_impact` (or `codegraph_callers`, transitively) up to the
-     `src/capi` thunks; every export reached is a candidate.
-  3. Observers: a call graph does not show a result observed through the session's state or a callback, so for
-     every export of `tests/abi/golden/fixpp_capi_symbols.txt` not reached in step 2, read its body for a read of the
-     session dictionary (`dict_`, `session_tv_`, `tv_`, a view parsed over the session table) and for an observer
-     path: delivery through `validate_inbound_`, the validate-first Logon gate, the send path's header placement and
-     Length+Data carry, and `Engine::register_session`'s FIXT check (1.9's R-11 step 6 read its handshake observers
-     the same way).
-  4. Classify each export by Appendix A's predicate: B with its path and carrier, or U with the predicate as the
-     reason. A row the recipe classifies differently from Appendix A stops.
-  - Known positive: over 102's own `src/dictionary` diff the recipe reports both `dict.h` loaders as root cause and
-    at least the validator-backed session family (`fixpp_session_register_callback`). A run that reports only the
-    loaders is blind downstream and stops.
-  - Comparator, two checks, each with its own positive:
-    - classes: the classes step 1 derives equal contract §6's list; positive: a scratch copy of §6 with class (g)
-      removed is reported as a mismatch;
-    - exports: the B exports steps 2 to 4 derive equal Appendix A's B rows, and each carrier those rows name is
-      present (the `dict.h` notes, the family paragraphs, `version.h`); positive: a scratch copy of Appendix A with
-      one B row deleted (`fixpp_session_register_callback`) is reported as a mismatch.
-    Removing a class is not an export-level positive: every export (g) reaches is also reached by (f), so the
-    export set would not move.
+  2. Reach (root causes only): for each changed function, `codegraph impact <fn> -d 8` (`impact` takes no limit
+     flag), or `codegraph callers <fn> -l 500` transitively. For `callers`, a printed count equal to the limit stops
+     and re-runs with a larger one: the printed count is the truncated count. For `impact`, a reached chain as long
+     as `-d` re-runs it deeper. Known positive: both `dict.h` loaders. This step finds root causes only: the changed
+     functions write the dictionary, so no reader is their caller.
+  3. **Downstream, three arms, run per export of `tests/abi/golden/fixpp_capi_symbols.txt`.** Write the result as a
+     manifest in the evidence file, one line per export: symbol, the arm that hit (A, V, O, or none), the first
+     target reached with its path, and the class (`B` or `U`, with the reason for U when an arm hit). Write it
+     **before data-model.md Appendix A is opened**.
+     - **A, the call arm.**
+       - Walk the export's callees transitively, as a breadth-first walk with a visited set keyed by file and start
+         line: `codegraph callees <fn> -j -l 500`. A printed count equal to the limit stops and re-runs with a larger
+         one.
+       - A callee CodeGraph resolves into `tests/`, or into a module the caller does not include, is a resolution
+         artefact (resolution is by name). Read the call site and follow the real target.
+       - The target set is over-approximated: **every** member function of `fixpp::dict::Dictionary` and
+         `fixpp::dict::table_view`. Stop at the first one reached and record it with its path.
+       - Do not narrow this set by hand. A target that reads no part 102 corrects is ruled out at classification
+         (step 4), with its reason, not here.
+     - **V, the view arm** (1.9's reader-paragraph rule).
+       - The same walk, with the target set **every** member of `fixpp::wire::MessageView` and `fixpp::wire::Parser`
+         (`include/fixpp/wire/parser.hpp`), the parse that read the session table.
+       - A view parsed over a session table carries the group contexts, delimiters and pairs that table held when
+         the frame was parsed. So a read of it is a candidate even though no dictionary call is on its path.
+     - **O, the observer arm.** For each export, read whether its result is observed through session state or a
+       callback that the call graph does not connect:
+       - delivery through `validate_inbound_`;
+       - the validate-first Logon gate;
+       - the send path's header placement and Length+Data carry;
+       - `Engine::register_session`'s FIXT check.
+       - 1.9's R-11 step 6 read its handshake observers the same way.
+     - **Positives, one per arm.** A run that misses any of them stops:
+       - **A, through helpers.** `fixpp_entry_set_int` reaches `Dictionary::group_first_field` through
+         `entry_set_bytes_impl → is_group_collision`. A run that reads only the body misses it.
+       - **A, at depth.** `fixpp_session_open` reaches `Dictionary::field_valid_for` through
+         `register_session → fixt_session_config_valid → defines_fixt_admin`. A depth-2 walk misses it.
+       - **V.** `fixpp_group_get_field_int` reaches `Parser::hooks` and `MessageView` (through `hooks_for` and
+         `scan_slice_for_tag`) and no target of arm A. A run without arm V misses it.
+       - **O.** `fixpp_session_register_callback`.
+  4. **Classify each export by Appendix A's predicate, in the manifest.**
+     - An export that no arm hit is U.
+     - An export that an arm hit is B unless the manifest states why its result cannot move. Examples: the target
+       reads only the MsgType list (`Dictionary::messages()`); the call re-parses bytes that already parsed over the
+       same table (`fixpp_msg_clone`).
+     - **Comparator, run only after the manifest is recorded:**
+       - the manifest's `B` set equals the set of Appendix A rows whose Class cell is exactly `B`;
+       - every Appendix A U row that an arm hit carries the manifest's reason;
+       - each carrier the B rows name is present (the `dict.h` notes, the family paragraphs, `version.h`).
+     - Positive: a scratch copy of Appendix A with `fixpp_session_register_callback`'s row deleted is reported.
+     - A difference stops.
+  - Known positive of the whole recipe: over 102's own `src/dictionary` diff, step 2 reports both `dict.h` loaders
+    as root cause and step 3 at least the validator-backed session family (`fixpp_session_register_callback`). A run
+    that reports only the loaders is blind downstream and stops.
+  - Class comparator: the classes step 1 derives equal contract §6's list; positive: a scratch copy of §6 with class
+    (g) removed is reported as a mismatch. Removing a class is not an export-level positive: every export (g)
+    reaches is also reached by (f), so the export set would not move; the export comparator is step 4's.
 - Catalogue / coverage index: the D-007, D-010, D-011 and W-009 rows (spec Normative References) gain 102's
   delivering cells in their witness column; none changes status. The coverage-index entries `[FIX50SP2 §3.3]` (the
   MultiCharValue decode and builder cells), `[FIX50SP2 §3.2]` (the component and group member cells) and
