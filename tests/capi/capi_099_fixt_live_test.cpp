@@ -396,6 +396,8 @@ struct CallbackLog {
     std::atomic<int> calls{0};
     std::array<Bytes, 8> bytes{};
     std::atomic<fixpp_msg_t*> clone{nullptr};
+    // fixpp_msg_clone's return for the first message, so a refused clone has its own ending.
+    std::atomic<int> clone_rc{-1};
 };
 
 void on_message(const fixpp_msg_t* inbound, void* user) {
@@ -406,7 +408,9 @@ void on_message(const fixpp_msg_t* inbound, void* user) {
     }
     if (at == 0) {
         fixpp_msg_t* cloned = nullptr;
-        if (fixpp_msg_clone(inbound, &cloned) == FIXPP_ERR_OK) {
+        const fixpp_error_t rc = fixpp_msg_clone(inbound, &cloned);
+        log->clone_rc.store(static_cast<int>(rc), std::memory_order_relaxed);
+        if (rc == FIXPP_ERR_OK) {
             log->clone.store(cloned, std::memory_order_release);
         }
     }
@@ -485,9 +489,14 @@ TEST_P(W12Shape, ReachesActive_RoutesAccepts_RoutesRejects_ReadsItsVersion) {
         // An accept routed by 1128: only FIX Latest declares 3115.
         EXPECT_TRUE(peer.write(nos(2, "1128=10\x01", k3115())));
         EXPECT_TRUE(wait_calls(log, 1)) << "the routed frame did not reach the callback";
+        EXPECT_EQ(log.clone_rc.load(std::memory_order_relaxed), static_cast<int>(FIXPP_ERR_OK))
+            << "fixpp_msg_clone refused the routed frame";
+        EXPECT_NE(log.clone.load(std::memory_order_acquire), nullptr) << "there is no clone";
 
-        // A second thread reads the clone while the worker handles the frames below.
+        // A second thread reads the clone while the worker handles the frames below. The frames
+        // are sent only once it has read once, so the overlap is a precondition, not a schedule.
         std::atomic<bool> stop_reading{false};
+        std::atomic<bool> first_read{false};
         std::vector<Bytes> clone_reads;
         std::thread reader{[&] {
             fixpp_msg_t* const clone = log.clone.load(std::memory_order_acquire);
@@ -497,8 +506,16 @@ TEST_P(W12Shape, ReachesActive_RoutesAccepts_RoutesRejects_ReadsItsVersion) {
                 } else {
                     (void)read_version(clone);
                 }
+                first_read.store(true, std::memory_order_release);
             }
         }};
+        EXPECT_TRUE(fixpp::test_support::wait_until_observed(
+            [&] {
+                return first_read.load(std::memory_order_acquire) ||
+                       log.clone.load(std::memory_order_acquire) == nullptr;
+            },
+            kStep))
+            << "the reader thread did not start";
 
         // The negotiated version answers a frame with no 1128.
         EXPECT_TRUE(peer.write(nos(3, "", "")));
