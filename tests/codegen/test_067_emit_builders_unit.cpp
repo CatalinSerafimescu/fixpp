@@ -809,10 +809,9 @@ TEST(VersionIr097, FixLatestHasOwnApplicationVersion) {
 // 102-dict-width-multichar-type (tasks T016; research D1b, D4 row (c) and the IR row; spec US1.5,
 // FR-001b): `build_ir` over tests/support/dict_width_fixtures_102.hpp's Orchestra header
 // fixture (generator (c)), written to a file because `build_ir` reads a path. The code
-// generator's own Orchestra walkers (`build_orchestra_component_index`,
-// `build_orchestra_group_index`, `collect_orchestra_tags`, `collect_orchestra_group_tags`,
-// `walk_orchestra_level`) key component and group ids in `by_id` maps; the fixture declares,
-// for each map, an id past 65535 and its alias, with distinct members.
+// generator's own Orchestra walkers key component and group ids in `by_id` maps (re-derive the
+// walkers: research D1b's parse recipe over tools/codegen); the fixture declares, for each map,
+// an id past 65535 and its alias, with distinct members.
 namespace {
 
 struct ir_102 {
