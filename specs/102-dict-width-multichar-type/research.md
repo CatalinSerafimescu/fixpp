@@ -639,9 +639,9 @@ reads through it.
      as `-d` re-runs it deeper. Known positive: both `dict.h` loaders. This step finds root causes only: the changed
      functions write the dictionary, so no reader is their caller.
   3. **Downstream, three arms, run per export of `tests/abi/golden/fixpp_capi_symbols.txt`.** Write the result as a
-     manifest in the evidence file, one line per export: symbol, the arm that hit (A, V, O, or none), the first
-     target reached with its path, and the class (`B` or `U`, with the reason for U when an arm hit). Write it
-     **before data-model.md Appendix A is opened**.
+     manifest file, one line per export: symbol, the arms that hit (A, V, O, or none), **every** target reached,
+     each with a path to it, and the class step 4 assigns (`B` or `U`, with the reason for U when an arm hit). The
+     manifest is written, classified and frozen (step 5) **before data-model.md Appendix A is opened**.
      - **A, the call arm.**
        - Walk the export's callees transitively, as a breadth-first walk with a visited set keyed by file and start
          line: `codegraph callees <fn> -j -l 500`. A printed count equal to the limit stops and re-runs with a larger
@@ -649,12 +649,15 @@ reads through it.
        - A callee CodeGraph resolves into `tests/`, or into a module the caller does not include, is a resolution
          artefact (resolution is by name). Read the call site and follow the real target.
        - The target set is over-approximated: **every** member function of `fixpp::dict::Dictionary` and
-         `fixpp::dict::table_view`. Stop at the first one reached and record it with its path.
+         `fixpp::dict::table_view`. Do not stop at the first one reached: traverse every path to the end of the walk
+         and record every target reached, each with a path to it, so a harmless target found first cannot hide an
+         affected one.
        - Do not narrow this set by hand. A target that reads no part 102 corrects is ruled out at classification
          (step 4), with its reason, not here.
      - **V, the view arm** (1.9's reader-paragraph rule).
-       - The same walk, with the target set **every** member of `fixpp::wire::MessageView` and `fixpp::wire::Parser`
-         (`include/fixpp/wire/parser.hpp`), the parse that read the session table.
+       - The same exhaustive walk, recording every target reached, with the target set **every** member of
+         `fixpp::wire::MessageView` and `fixpp::wire::Parser` (`include/fixpp/wire/parser.hpp`), the parse that read
+         the session table.
        - A view parsed over a session table carries the group contexts, delimiters and pairs that table held when
          the frame was parsed. So a read of it is a candidate even though no dictionary call is on its path.
      - **O, the observer arm.** For each export, read whether its result is observed through session state or a
@@ -672,15 +675,38 @@ reads through it.
        - **V.** `fixpp_group_get_field_int` reaches `Parser::hooks` and `MessageView` (through `hooks_for` and
          `scan_slice_for_tag`) and no target of arm A. A run without arm V misses it.
        - **O.** `fixpp_session_register_callback`.
-  4. **Classify each export by Appendix A's predicate, in the manifest.**
+       - **Every target, not the first.** `fixpp_session_open` reaches, through `defines_fixt_admin`, both
+         `Dictionary::messages()` (harmless: the MsgType list, which no 102 correction changes) and
+         `Dictionary::field_valid_for` (affected: message expansion); `messages()` is the earlier call in that
+         function. Its manifest line must list both and classify it B. The positive is shown by also deriving the
+         line a first-target-only walk would write, stopping at `Dictionary::messages()`: that line lists one target
+         and classifies U under step 4's harmless-target rule, so it misses the affected target. A run whose line
+         for `fixpp_session_open` lacks `Dictionary::field_valid_for` stops.
+  4. **Classify each export in the manifest, by this predicate** (stated here, not read from data-model.md
+     Appendix A). An export is B when both hold:
+     - its result depends on a `Dictionary` or a `table_view` built from a `fixpp_dict_t`, read at call time (arm
+       A), through a view parsed over the session table (arm V), or through the session, validator or send path
+       that observes it (arm O);
+     - that read consumes a part step 1 maps as corrected: component identity, and so `message_fields` and every
+       store `Dictionary::build_table_view` builds from it (the valid-tag and required sets, the group contexts, the
+       Length+Data pairs), the header store and the section records; the group side table, and so `group_fields`
+       and the bare member store; or the load's own result (the surrogate-id parse, the retired side-table refusal),
+       for the two load calls only.
+     Applied per export:
      - An export that no arm hit is U.
-     - An export that an arm hit is B unless the manifest states why its result cannot move. Examples: the target
-       reads only the MsgType list (`Dictionary::messages()`); the call re-parses bytes that already parsed over the
-       same table (`fixpp_msg_clone`).
-     - **Comparator, run only after the manifest is recorded:**
-       - the manifest's `B` set equals the set of Appendix A rows whose Class cell is exactly `B`;
-       - every Appendix A U row that an arm hit carries the manifest's reason;
-       - each carrier the B rows name is present (the `dict.h` notes, the family paragraphs, `version.h`).
+     - An export that an arm hit is B if **any** recorded target, or the observed path, consumes a corrected part.
+       It is U only when the manifest states, for every recorded target and observed path, why it consumes none.
+       Examples: the target reads only the MsgType list (`Dictionary::messages()`); the call re-parses bytes that
+       already parsed over the same table (`fixpp_msg_clone`).
+  5. **Freeze.** When every export's line is written and classified, compute `sha256sum` of the manifest file and
+     record the file's path and its hash in the evidence file, **before data-model.md Appendix A is opened**. The
+     manifest is not edited after that; a correction is a new manifest, a new hash, and a new run of this step
+     before Appendix A is opened again.
+  6. **Comparator, over that hashed artifact only.** First recompute the manifest's `sha256sum` and check that it
+     equals the recorded hash; a mismatch stops. Then:
+     - the manifest's `B` set equals the set of Appendix A rows whose Class cell is exactly `B`;
+     - every Appendix A U row that an arm hit carries the manifest's reason;
+     - each carrier the B rows name is present (the `dict.h` notes, the family paragraphs, `version.h`).
      - Positive: a scratch copy of Appendix A with `fixpp_session_register_callback`'s row deleted is reported.
      - A difference stops.
   - Known positive of the whole recipe: over 102's own `src/dictionary` diff, step 2 reports both `dict.h` loaders
@@ -688,7 +714,7 @@ reads through it.
     that reports only the loaders is blind downstream and stops.
   - Class comparator: the classes step 1 derives equal contract §6's list; positive: a scratch copy of §6 with class
     (g) removed is reported as a mismatch. Removing a class is not an export-level positive: every export (g)
-    reaches is also reached by (f), so the export set would not move; the export comparator is step 4's.
+    reaches is also reached by (f), so the export set would not move; the export comparator is step 6's.
 - Catalogue / coverage index: the D-007, D-010, D-011 and W-009 rows (spec Normative References) gain 102's
   delivering cells in their witness column; none changes status. The coverage-index entries `[FIX50SP2 §3.3]` (the
   MultiCharValue decode and builder cells), `[FIX50SP2 §3.2]` (the component and group member cells) and
