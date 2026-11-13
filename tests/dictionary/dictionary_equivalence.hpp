@@ -40,12 +40,6 @@
 // the definition the first `fixr:groupRef` to its NumInGroup tag names on that walk,
 // and its `fixr:numInGroup` emits nothing.
 //
-// The side-table wrap condition (research R-10 §3): a component or group is
-// compared with its census expansion only when its start and its count, computed
-// from census sizes in `finalize`'s order (re-derive the order from the two
-// `finalize` loops that set `first_idx`), both fit in 16 bits. Any other is
-// listed as a wrap case in the report's notes and counted as excluded.
-//
 // The invariant checks (contracts W-0) are functions of store values, so a test
 // can feed each one values that break its invariant only. `compare()` runs each
 // on both sides' real stores.
@@ -484,8 +478,8 @@ namespace detail_census {
 
 struct orchestra_walker {
     std::set<std::uint16_t> fields;
-    std::unordered_map<std::uint16_t, pugi::xml_node> components;
-    std::unordered_map<std::uint16_t, pugi::xml_node> groups;
+    std::unordered_map<std::uint32_t, pugi::xml_node> components;
+    std::unordered_map<std::uint32_t, pugi::xml_node> groups;
     std::map<std::uint16_t, pugi::xml_node> group_nodes;
     std::vector<std::string>* notes = nullptr;
 
@@ -498,15 +492,18 @@ struct orchestra_walker {
         }
         for (auto const& child : parent.children()) {
             std::string_view const kind{child.name()};
-            auto const id = static_cast<std::uint16_t>(child.attribute("id").as_uint(0));
             if (kind == "fixr:fieldRef") {
-                if (!fields.contains(id)) {
-                    notes->push_back("census: <fixr:fieldRef id=\"" + std::to_string(id) +
+                // A fieldRef's id is a FIX tag; a componentRef's and a groupRef's are
+                // surrogate keys, read whole.
+                auto const tag = static_cast<std::uint16_t>(child.attribute("id").as_uint(0));
+                if (!fields.contains(tag)) {
+                    notes->push_back("census: <fixr:fieldRef id=\"" + std::to_string(tag) +
                                      "\"> is not declared");
                     continue;
                 }
-                out.push_back(id);
+                out.push_back(tag);
             } else if (kind == "fixr:componentRef") {
+                std::uint32_t const id = child.attribute("id").as_uint(0);
                 auto const it = components.find(id);
                 if (it == components.end()) {
                     notes->push_back("census: <fixr:componentRef id=\"" + std::to_string(id) +
@@ -515,6 +512,7 @@ struct orchestra_walker {
                 }
                 walk(it->second, out, register_groups, depth + 1);
             } else if (kind == "fixr:groupRef") {
+                std::uint32_t const id = child.attribute("id").as_uint(0);
                 auto const it = groups.find(id);
                 if (it == groups.end()) {
                     notes->push_back("census: <fixr:groupRef id=\"" + std::to_string(id) +
@@ -573,7 +571,7 @@ struct orchestra_walker {
     std::set<std::string> comp_names;
     for (auto const& comp : root.child("fixr:components").children("fixr:component")) {
         std::string const name{comp.attribute("name").as_string("")};
-        auto const id = static_cast<std::uint16_t>(comp.attribute("id").as_uint(0));
+        std::uint32_t const id = comp.attribute("id").as_uint(0);
         if (!w.components.emplace(id, comp).second) {
             c.notes.push_back("census: duplicate <fixr:component id=\"" + std::to_string(id) +
                               "\">; the first is kept");
@@ -585,7 +583,7 @@ struct orchestra_walker {
         comp_order.emplace_back(name, comp);
     }
     for (auto const& g : root.child("fixr:groups").children("fixr:group")) {
-        auto const id = static_cast<std::uint16_t>(g.attribute("id").as_uint(0));
+        std::uint32_t const id = g.attribute("id").as_uint(0);
         if (!w.groups.emplace(id, g).second) {
             c.notes.push_back("census: duplicate <fixr:group id=\"" + std::to_string(id) +
                               "\">; the first is kept");
@@ -641,7 +639,6 @@ struct comparison_report {
     std::vector<invariant_violation> invariant_violations;
     std::vector<std::string> notes;
     std::size_t census_compared = 0;
-    std::size_t census_excluded = 0;
 
     [[nodiscard]] std::set<std::string_view> reported_entries() const {
         std::set<std::string_view> out;
@@ -661,7 +658,7 @@ struct comparison_report {
         for (auto const& n : notes) {
             os << "  note: " << n << '\n';
         }
-        os << "  census: compared " << census_compared << ", excluded " << census_excluded << '\n';
+        os << "  census: compared " << census_compared << '\n';
         return os.str();
     }
 
@@ -992,12 +989,6 @@ inline void compare_with_census(comparison_report& r, char const* side_name, Dic
     std::size_t start = 0;
     for (auto const& [name, members] : c.components) {
         std::size_t const count = members.size();
-        if (start > 0xFFFFU || count > 0xFFFFU) {
-            r.notes.push_back(who + ": wrap case, component \"" + name + "\" not compared");
-            ++r.census_excluded;
-            start += count;
-            continue;
-        }
         ++r.census_compared;
         auto const cr = d.component(name);
         if (!cr) {
@@ -1020,13 +1011,6 @@ inline void compare_with_census(comparison_report& r, char const* side_name, Dic
     start = 0;
     for (auto const& [no_tag, members] : c.groups) {
         std::size_t const count = members.size();
-        if (start > 0xFFFFU || count > 0xFFFFU) {
-            r.notes.push_back(who + ": wrap case, group " + std::to_string(no_tag) +
-                              " not compared");
-            ++r.census_excluded;
-            start += count;
-            continue;
-        }
         ++r.census_compared;
         auto const gr = d.group(no_tag);
         if (!gr) {
@@ -1202,7 +1186,7 @@ inline void compare_with_census(comparison_report& r, char const* side_name, Dic
         if (ga.has_value() != gb.has_value()) {
             r.add(id::kGroup, at);
         } else if (ga) {
-            auto check = [&](std::string_view entry, std::uint16_t x, std::uint16_t y) {
+            auto check = [&](std::string_view entry, std::uint64_t x, std::uint64_t y) {
                 if (x != y) {
                     r.add(entry, at + ": " + std::to_string(x) + " vs " + std::to_string(y));
                 }
@@ -1236,7 +1220,7 @@ inline void compare_with_census(comparison_report& r, char const* side_name, Dic
         if (ca.has_value() != cb.has_value()) {
             r.add(id::kComponent, at);
         } else if (ca) {
-            auto check = [&](std::string_view entry, std::uint16_t x, std::uint16_t y) {
+            auto check = [&](std::string_view entry, std::uint64_t x, std::uint64_t y) {
                 if (x != y) {
                     r.add(entry, at + ": " + std::to_string(x) + " vs " + std::to_string(y));
                 }

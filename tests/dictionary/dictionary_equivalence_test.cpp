@@ -625,7 +625,6 @@ TEST_P(ComparatorSeed, ReportsExactlyItsExpectedSet) {
         << "expected " << render(s.expected) << "\nreported " << render(reported) << "\n"
         << r.describe();
     EXPECT_TRUE(r.invariant_violations.empty()) << r.describe();
-    EXPECT_EQ(r.census_excluded, 0U) << r.describe();
     EXPECT_GT(r.census_compared, 0U);
 }
 
@@ -646,7 +645,6 @@ TEST(ComparatorW0, IdenticalLoadsReportNothing) {
     EXPECT_TRUE(r.differences.empty()) << r.describe();
     EXPECT_TRUE(r.invariant_violations.empty()) << r.describe();
     EXPECT_TRUE(r.notes.empty()) << r.describe();
-    EXPECT_EQ(r.census_excluded, 0U);
     EXPECT_GT(r.census_compared, 0U);
 }
 

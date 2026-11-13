@@ -79,24 +79,13 @@ eq::comparison_report compare_against(Dictionary const& a, Dictionary const& b,
 }
 
 void report_counts(std::string const& row, eq::comparison_report const& r) {
-    std::cout << "[098 " << row << "] census compared " << r.census_compared << ", excluded "
-              << r.census_excluded << '\n';
-    auto const wraps = std::ranges::count_if(
-        r.notes, [](std::string const& n) { return n.contains("wrap case"); });
-    if (wraps != 0) {
-        std::cout << "[098 " << row << "] wrap-case notes " << wraps
-                  << " (definitions past the wrap point compared side against side only)\n";
-    }
+    std::cout << "[098 " << row << "] census compared " << r.census_compared << '\n';
 }
 
-void expect_equivalent(std::string const& row, eq::comparison_report const& r,
-                       bool assert_no_exclusions) {
+void expect_equivalent(std::string const& row, eq::comparison_report const& r) {
     report_counts(row, r);
     EXPECT_TRUE(r.differences.empty()) << row << ":\n" << r.describe();
     EXPECT_TRUE(r.invariant_violations.empty()) << row << ":\n" << r.describe();
-    if (assert_no_exclusions) {
-        EXPECT_EQ(r.census_excluded, 0U) << row << ":\n" << r.describe();
-    }
 }
 
 void expect_reports(std::string const& row, eq::comparison_report const& r,
@@ -152,8 +141,7 @@ TEST(OverlayEquivalenceW1Qf, EveryAdditionKindEqualsTheEditedReference) {
     ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
     Dictionary const reference = load_text(edited);
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
-    expect_equivalent("W-1 qf", compare_against(*p.dictionary, reference, edited),
-                      /*assert_no_exclusions=*/true);
+    expect_equivalent("W-1 qf", compare_against(*p.dictionary, reference, edited));
 }
 
 // Seeded mismatch: the reference without the enum value Z the overlay adds to
@@ -182,8 +170,7 @@ TEST(OverlayEquivalenceW1Qf, TolerantTripleEqualsItsReferenceUnderTolerant) {
     ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
     Dictionary const reference = load_text(edited, unresolved_group_policy::tolerant);
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
-    expect_equivalent("W-1 qf tolerant", compare_against(*p.dictionary, reference, edited),
-                      /*assert_no_exclusions=*/true);
+    expect_equivalent("W-1 qf tolerant", compare_against(*p.dictionary, reference, edited));
 }
 
 // Seeded mismatch: the reference without the field VenueTag the overlay appends to
@@ -228,8 +215,8 @@ TEST(OverlayEquivalenceW1Orch, EveryAdditionKindEqualsTheEditedReference) {
     ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
     Dictionary const reference = load_orch_text(edited);
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
-    expect_equivalent("W-1 orch", compare_against(*p.dictionary, reference, edited, fmt::orchestra),
-                      /*assert_no_exclusions=*/true);
+    expect_equivalent("W-1 orch",
+                      compare_against(*p.dictionary, reference, edited, fmt::orchestra));
 }
 
 // Seeded mismatch: the reference without the code Z the overlay adds to the base
@@ -259,8 +246,7 @@ TEST(OverlayEquivalenceW1Orch, TolerantTripleEqualsItsReferenceUnderTolerant) {
     Dictionary const reference = load_orch_text(edited, unresolved_group_policy::tolerant);
     // NOLINTBEGIN(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     expect_equivalent("W-1 orch tolerant",
-                      compare_against(*p.dictionary, reference, edited, fmt::orchestra),
-                      /*assert_no_exclusions=*/true);
+                      compare_against(*p.dictionary, reference, edited, fmt::orchestra));
     // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
@@ -318,8 +304,7 @@ void expect_overlay_row(fmt format, std::string_view base, std::string_view over
     std::string const without = without_line(edited, seeded_anchor);
     Dictionary const seeded_reference = load_text_as(format, without);
     // NOLINTBEGIN(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
-    expect_equivalent(row, compare_against(*p.dictionary, reference, edited, format),
-                      /*assert_no_exclusions=*/true);
+    expect_equivalent(row, compare_against(*p.dictionary, reference, edited, format));
     expect_reports(row, compare_against(*p.dictionary, seeded_reference, without, format), seeded);
     // NOLINTEND(bugprone-unchecked-optional-access)
 }
@@ -400,8 +385,7 @@ void expect_noise_ignored(fmt format, std::string_view noisy_edited, std::string
     Dictionary const with_noise = load_text_as(format, noisy_edited);
     Dictionary const without_noise = load_text_as(format, edited);
     expect_equivalent(row + " (the base loader over the noisy edited text)",
-                      compare_against(with_noise, without_noise, edited, format),
-                      /*assert_no_exclusions=*/true);
+                      compare_against(with_noise, without_noise, edited, format));
 }
 
 constexpr std::string_view kTextRun = "  venue text<![CDATA[venue cdata]]>";
@@ -1036,7 +1020,6 @@ struct vendored_row {
     char const* base = nullptr;         // under dictionaries/
     char const* overlay = nullptr;      // under fixtures/098/real/
     char const* patch = nullptr;        // under fixtures/098/real/
-    bool assert_no_exclusions = false;  // the small bases and FIXT11
     char const* seeded_hunk = nullptr;  // the hunk the seeded mismatch drops (its label)
     std::set<std::string_view> seeded_expect;
     fmt format = fmt::quickfix_xml;
@@ -1048,28 +1031,24 @@ std::vector<vendored_row> const& vendored_rows() {
          .base = "FIX44.xml",
          .overlay = "FIX44_overlay.xml",
          .patch = "FIX44.patch",
-         .assert_no_exclusions = true,
          .seeded_hunk = "field 40: value Z appended",
          .seeded_expect = {ids::kEnumValue, ids::kEnumCodes}},
         {.name = "FIX50SP2",
          .base = "FIX50SP2.xml",
          .overlay = "FIX50SP2_overlay.xml",
          .patch = "FIX50SP2.patch",
-         .assert_no_exclusions = false,
          .seeded_hunk = "field 40: value Z appended",
          .seeded_expect = {ids::kEnumValue, ids::kEnumCodes}},
         {.name = "FIXT11",
          .base = "FIXT11.xml",
          .overlay = "FIXT11_overlay.xml",
          .patch = "FIXT11.patch",
-         .assert_no_exclusions = true,
          .seeded_hunk = "header: Custom098HeaderTag (5020) appended to <header>",
          .seeded_expect = {ids::kMessageFields.tag, ids::kValid}},
         {.name = "Orchestra",
          .base = "orchestra/OrchestraFIXLatest.xml",
          .overlay = "Orchestra_overlay.xml",
          .patch = "Orchestra.patch",
-         .assert_no_exclusions = false,
          .seeded_hunk = "codeSet MsgTypeCodeSet (35): code U1 appended",
          .seeded_expect = {ids::kEnumValue, ids::kEnumCodes},
          .format = fmt::orchestra},
@@ -1111,8 +1090,7 @@ TEST_P(OverlayEquivalenceW2, OverlayEqualsThePatchedBase) {
     Dictionary const reference = load_text_as(row.format, patched);
     // NOLINTBEGIN(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     expect_equivalent(std::string{"W-2 "} + row.name,
-                      compare_against(*p.dictionary, reference, patched, row.format),
-                      row.assert_no_exclusions);
+                      compare_against(*p.dictionary, reference, patched, row.format));
     // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
@@ -1356,8 +1334,7 @@ TEST(OverlayEquivalenceW2EmptyOrchestra, EmptyOverlayEqualsTheBase) {
     Dictionary const reference = OrchestraLoader{}.load(orchestra_base(), mr());
     // NOLINTBEGIN(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     expect_equivalent("W-2 empty Orchestra",
-                      compare_against(*p.dictionary, reference, base_text, fmt::orchestra),
-                      /*assert_no_exclusions=*/false);
+                      compare_against(*p.dictionary, reference, base_text, fmt::orchestra));
     // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
@@ -1403,8 +1380,7 @@ void expect_dispatch_matches(triple_paths const& t, unresolved_group_policy poli
                              std::string const& row) {
     Dictionary const any = fixpp::dict::load_any_with_overlay(t.base, t.overlay, mr(), policy);
     Dictionary const direct = direct_load(t, policy);
-    expect_equivalent(row, compare_against(any, direct, ot::read_file(t.edited), t.format),
-                      /*assert_no_exclusions=*/true);
+    expect_equivalent(row, compare_against(any, direct, ot::read_file(t.edited), t.format));
 }
 
 TEST(OverlayLoadAnyW4, QuickFixXmlMatchesTheDirectLoader) {
