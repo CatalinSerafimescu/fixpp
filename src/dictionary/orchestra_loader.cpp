@@ -1288,7 +1288,6 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
         cr.first_field_index = first_idx;
         cr.field_count = cnt;
         cr.parent_component_id = parent_comp_id;
-        cr._reserved = 0;
         h.components_.push_back(cr);
     }
 

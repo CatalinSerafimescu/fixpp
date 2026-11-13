@@ -6,8 +6,8 @@
 // ::fixpp::dict::FieldRef <Msg>_fields[]` per emitted message, populated
 // verbatim from the 002-shipped FieldRef the RC#5 accessors carried into the
 // IR (one XML truth — research D-1/D-24). Static storage, zero runtime alloc
-// (I-5); `_reserved` emitted as 0 (AC-V6 / I-7). Deterministic LF-only output
-// over the bytewise-sorted message list (NFR-003-7).
+// (I-5). Deterministic LF-only output over the bytewise-sorted message list
+// (NFR-003-7).
 #include <cstdint>
 #include <fixpp/dict/field_ref.hpp>
 #include <string>
@@ -39,7 +39,7 @@ void emit_field_ref(TemplateWriter& w, fixpp::dict::FieldRef const& r) {
     w.num(r.enum_table_index);
     w.raw(", ");
     w.num(r.length_pair_data_tag);
-    w.raw(", 0 },");
+    w.raw(" },");
     w.line();
 }
 

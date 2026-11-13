@@ -19,17 +19,19 @@
 
 // AC-F1
 static_assert(sizeof(fixpp::dict::FieldRef) == 16);
-static_assert(alignof(fixpp::dict::FieldRef) == 2);
+static_assert(alignof(fixpp::dict::FieldRef) == 4);
 static_assert(std::is_standard_layout_v<fixpp::dict::FieldRef>);
 static_assert(std::is_trivially_copyable_v<fixpp::dict::FieldRef>);
 
 // AC-F2
-static_assert(sizeof(fixpp::dict::ComponentRef) == 12);
+static_assert(sizeof(fixpp::dict::ComponentRef) == 20);
+static_assert(alignof(fixpp::dict::ComponentRef) == 4);
 static_assert(std::is_standard_layout_v<fixpp::dict::ComponentRef>);
 static_assert(std::is_trivially_copyable_v<fixpp::dict::ComponentRef>);
 
 // AC-F3
-static_assert(sizeof(fixpp::dict::GroupRef) == 12);
+static_assert(sizeof(fixpp::dict::GroupRef) == 16);
+static_assert(alignof(fixpp::dict::GroupRef) == 4);
 static_assert(std::is_standard_layout_v<fixpp::dict::GroupRef>);
 static_assert(std::is_trivially_copyable_v<fixpp::dict::GroupRef>);
 
@@ -46,7 +48,7 @@ static_assert(
 
 TEST(RefShape, FieldRefSize) { EXPECT_EQ(sizeof(fixpp::dict::FieldRef), 16U); }
 
-TEST(RefShape, FieldRefAlignment) { EXPECT_EQ(alignof(fixpp::dict::FieldRef), 2U); }
+TEST(RefShape, FieldRefAlignment) { EXPECT_EQ(alignof(fixpp::dict::FieldRef), 4U); }
 
 TEST(RefShape, FieldRefIsStandardLayout) {
     EXPECT_TRUE(std::is_standard_layout_v<fixpp::dict::FieldRef>);
@@ -56,7 +58,7 @@ TEST(RefShape, FieldRefIsTriviallyCopyable) {
     EXPECT_TRUE(std::is_trivially_copyable_v<fixpp::dict::FieldRef>);
 }
 
-TEST(RefShape, ComponentRefSize) { EXPECT_EQ(sizeof(fixpp::dict::ComponentRef), 12U); }
+TEST(RefShape, ComponentRefSize) { EXPECT_EQ(sizeof(fixpp::dict::ComponentRef), 20U); }
 
 TEST(RefShape, ComponentRefIsStandardLayout) {
     EXPECT_TRUE(std::is_standard_layout_v<fixpp::dict::ComponentRef>);
@@ -66,7 +68,7 @@ TEST(RefShape, ComponentRefIsTriviallyCopyable) {
     EXPECT_TRUE(std::is_trivially_copyable_v<fixpp::dict::ComponentRef>);
 }
 
-TEST(RefShape, GroupRefSize) { EXPECT_EQ(sizeof(fixpp::dict::GroupRef), 12U); }
+TEST(RefShape, GroupRefSize) { EXPECT_EQ(sizeof(fixpp::dict::GroupRef), 16U); }
 
 TEST(RefShape, GroupRefIsStandardLayout) {
     EXPECT_TRUE(std::is_standard_layout_v<fixpp::dict::GroupRef>);
@@ -79,9 +81,8 @@ TEST(RefShape, GroupRefIsTriviallyCopyable) {
 // ---------------------------------------------------------------------------
 // RefShape102 — 102-dict-width-multichar-type (data-model.md, the three "after" tables):
 // `sizeof`, `alignof`, the offset and the width of every member, checked at run time so a
-// layout that differs is a failing assertion, not a compile error. The `static_assert`s and
-// `ReservedDiscipline` above keep the layout they were written for until the layout change
-// itself moves them. Re-derive the expected values from data-model.md's tables.
+// layout that differs is a failing assertion, not a compile error. Re-derive the expected
+// values from data-model.md's tables.
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -153,18 +154,9 @@ TEST(RefShape102, GroupRefLayout) {
 }
 
 // ---------------------------------------------------------------------------
-// ReservedDiscipline — AC-F4: _reserved must be zero after value-init
+// ReservedDiscipline — AC-F4: _reserved must be zero after value-init. Only `GroupRef` keeps
+// a `_reserved` member (102-dict-width-multichar-type D1).
 // ---------------------------------------------------------------------------
-
-TEST(ReservedDiscipline, FieldRefReservedIsZeroOnValueInit) {
-    fixpp::dict::FieldRef fr{};
-    EXPECT_EQ(fr._reserved, 0U);
-}
-
-TEST(ReservedDiscipline, ComponentRefReservedIsZeroOnValueInit) {
-    fixpp::dict::ComponentRef cr{};
-    EXPECT_EQ(cr._reserved, 0U);
-}
 
 TEST(ReservedDiscipline, GroupRefReservedIsZeroOnValueInit) {
     fixpp::dict::GroupRef gr{};

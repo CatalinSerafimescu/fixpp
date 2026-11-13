@@ -1025,7 +1025,7 @@ field_rows read_fields(std::vector<std::string> const& lines) {
         }
         // { tag, static_cast<...field_data_type>(t), static_cast<...field_presence>(r),
         //   condition_index, group_no_tag, component_index, enum_table_index,
-        //   length_pair_data_tag, _reserved },
+        //   length_pair_data_tag }, (one number per FieldRef member)
         std::vector<std::uint32_t> nums;
         std::uint64_t v = 0;
         bool in_num = false;
@@ -1039,7 +1039,7 @@ field_rows read_fields(std::vector<std::string> const& lines) {
                 in_num = false;
             }
         }
-        if (nums.size() != 9 || !s.starts_with("{ ") || !s.ends_with(" },") ||
+        if (nums.size() != 8 || !s.starts_with("{ ") || !s.ends_with(" },") ||
             !match("{ @N, static_cast<::fixpp::dict::field_data_type>(@S", s)) {
             out.malformed.push_back("line " + std::to_string(i + 1) + ": " + lines[i]);
             continue;
@@ -1279,16 +1279,16 @@ static_assert(sizeof(NewOrderSingle) == sizeof(::fixpp::wire::MessageView<::fixp
 constexpr std::string_view kSyntheticFields = R"(#pragma once
 namespace fixpp::vx::fields {
 inline constexpr ::fixpp::dict::FieldRef NewOrderSingle_fields[] = {  // MsgType D
-    { 1, static_cast<::fixpp::dict::field_data_type>(13), static_cast<::fixpp::dict::field_presence>(1), 0, 0, 0, 0, 0, 0 },
-    { 11, static_cast<::fixpp::dict::field_data_type>(13), static_cast<::fixpp::dict::field_presence>(2), 0, 0, 0, 0, 0, 0 },
-    { 44, static_cast<::fixpp::dict::field_data_type>(5), static_cast<::fixpp::dict::field_presence>(1), 0, 0, 0, 0, 0, 0 },
-    { 54, static_cast<::fixpp::dict::field_data_type>(11), static_cast<::fixpp::dict::field_presence>(2), 0, 0, 0, 0, 0, 0 },
-    { 78, static_cast<::fixpp::dict::field_data_type>(3), static_cast<::fixpp::dict::field_presence>(1), 0, 0, 0, 0, 0, 0 },
-    { 79, static_cast<::fixpp::dict::field_data_type>(13), static_cast<::fixpp::dict::field_presence>(1), 0, 78, 0, 0, 0, 0 },
-    { 80, static_cast<::fixpp::dict::field_data_type>(6), static_cast<::fixpp::dict::field_presence>(1), 0, 78, 0, 0, 0, 0 },
-    { 539, static_cast<::fixpp::dict::field_data_type>(3), static_cast<::fixpp::dict::field_presence>(1), 0, 78, 0, 0, 0, 0 },
-    { 524, static_cast<::fixpp::dict::field_data_type>(13), static_cast<::fixpp::dict::field_presence>(1), 0, 539, 0, 0, 0, 0 },
-    { 9001, static_cast<::fixpp::dict::field_data_type>(13), static_cast<::fixpp::dict::field_presence>(1), 0, 539, 0, 0, 0, 0 },
+    { 1, static_cast<::fixpp::dict::field_data_type>(13), static_cast<::fixpp::dict::field_presence>(1), 0, 0, 0, 0, 0 },
+    { 11, static_cast<::fixpp::dict::field_data_type>(13), static_cast<::fixpp::dict::field_presence>(2), 0, 0, 0, 0, 0 },
+    { 44, static_cast<::fixpp::dict::field_data_type>(5), static_cast<::fixpp::dict::field_presence>(1), 0, 0, 0, 0, 0 },
+    { 54, static_cast<::fixpp::dict::field_data_type>(11), static_cast<::fixpp::dict::field_presence>(2), 0, 0, 0, 0, 0 },
+    { 78, static_cast<::fixpp::dict::field_data_type>(3), static_cast<::fixpp::dict::field_presence>(1), 0, 0, 0, 0, 0 },
+    { 79, static_cast<::fixpp::dict::field_data_type>(13), static_cast<::fixpp::dict::field_presence>(1), 0, 78, 0, 0, 0 },
+    { 80, static_cast<::fixpp::dict::field_data_type>(6), static_cast<::fixpp::dict::field_presence>(1), 0, 78, 0, 0, 0 },
+    { 539, static_cast<::fixpp::dict::field_data_type>(3), static_cast<::fixpp::dict::field_presence>(1), 0, 78, 0, 0, 0 },
+    { 524, static_cast<::fixpp::dict::field_data_type>(13), static_cast<::fixpp::dict::field_presence>(1), 0, 539, 0, 0, 0 },
+    { 9001, static_cast<::fixpp::dict::field_data_type>(13), static_cast<::fixpp::dict::field_presence>(1), 0, 539, 0, 0, 0 },
 };
 }  // namespace fixpp::vx::fields
 )";
