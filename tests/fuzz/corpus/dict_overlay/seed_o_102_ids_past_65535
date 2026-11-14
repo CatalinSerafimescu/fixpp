@@ -1,0 +1,43 @@
+O<!--
+  102-dict-width-multichar-type (tasks T064): the overlay form of the Orchestra loader's
+  seed_102_ids_past_65535.xml over this harness's Orchestra base: new component and group ids past
+  65535, each beside its alias (the id minus 65536), referenced from message D.
+-->
+<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' version='FIX.Latest_EP303'>
+ <fixr:fields>
+  <fixr:field id='9001' name='HighMember' type='String' />
+  <fixr:field id='9002' name='AliasMember' type='String' />
+  <fixr:field id='9003' name='NoHigh' type='NumInGroup' />
+  <fixr:field id='9004' name='HighGroupMember' type='String' />
+  <fixr:field id='9005' name='NoAlias' type='NumInGroup' />
+  <fixr:field id='9006' name='AliasGroupMember' type='String' />
+ </fixr:fields>
+ <fixr:components>
+  <fixr:component id='70000' name='High'>
+    <fixr:fieldRef id='9001' />
+  </fixr:component>
+  <fixr:component id='4464' name='HighAlias'>
+    <fixr:fieldRef id='9002' />
+  </fixr:component>
+ </fixr:components>
+ <fixr:groups>
+  <fixr:group id='70001' name='HighGroup'>
+    <fixr:numInGroup id='9003' />
+    <fixr:fieldRef id='9004' />
+  </fixr:group>
+  <fixr:group id='4465' name='AliasGroup'>
+    <fixr:numInGroup id='9005' />
+    <fixr:fieldRef id='9006' />
+  </fixr:group>
+ </fixr:groups>
+ <fixr:messages>
+  <fixr:message id='14' name='NewOrderSingle' msgType='D'>
+   <fixr:structure>
+    <fixr:componentRef id='70000' />
+    <fixr:componentRef id='4464' />
+    <fixr:groupRef id='70001' />
+    <fixr:groupRef id='4465' />
+   </fixr:structure>
+  </fixr:message>
+ </fixr:messages>
+</fixr:repository>
