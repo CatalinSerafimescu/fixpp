@@ -27,8 +27,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/dict/field_ref.hpp>
 #include <initializer_list>
 #include <limits>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -132,6 +134,23 @@ struct member {
     std::uint32_t component_index = 0;
     friend bool operator==(member const&, member const&) = default;
 };
+
+// A run's members as (tag, component_index) pairs, and their rendering for a failure message.
+inline std::vector<member> members_of(std::span<fixpp::dict::FieldRef const> run) {
+    std::vector<member> out;
+    for (auto const& fr : run) {
+        out.push_back({.tag = fr.tag, .component_index = fr.component_index});
+    }
+    return out;
+}
+
+inline std::string render(std::vector<member> const& v) {
+    std::string s;
+    for (auto const& m : v) {
+        s += " (" + std::to_string(m.tag) + ", " + std::to_string(m.component_index) + ")";
+    }
+    return s;
+}
 
 // One expected component, in declaration order. `id` is the zero-based declaration index;
 // `parent` is 0 (top level) or the parent's id + 1.

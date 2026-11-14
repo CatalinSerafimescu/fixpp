@@ -1270,22 +1270,6 @@ loaded_orch const& orch_identity() {
     return l;
 }
 
-std::vector<w::member> members_of_102(std::span<fixpp::dict::FieldRef const> run) {
-    std::vector<w::member> out;
-    for (auto const& fr : run) {
-        out.push_back({.tag = fr.tag, .component_index = fr.component_index});
-    }
-    return out;
-}
-
-std::string render_102(std::vector<w::member> const& v) {
-    std::string s;
-    for (auto const& m : v) {
-        s += " (" + std::to_string(m.tag) + ", " + std::to_string(m.component_index) + ")";
-    }
-    return s;
-}
-
 // The message's FieldRef for `tag`, or nullptr.
 fixpp::dict::FieldRef const* find_102(std::span<fixpp::dict::FieldRef const> run,
                                       std::uint16_t tag) {
@@ -1353,7 +1337,7 @@ TEST(ComponentIdentity102Orch, EveryComponentHasItsOwnIdentityAndMembers) {
         } else {
             std::uint64_t const id = cr->component_id;
             std::uint64_t const parent = cr->parent_component_id;
-            auto const got = members_of_102(dict.component_fields(e.name));
+            auto const got = w::members_of(dict.component_fields(e.name));
             if (id != e.id) {
                 why += " component_id " + std::to_string(id);
             }
@@ -1361,7 +1345,7 @@ TEST(ComponentIdentity102Orch, EveryComponentHasItsOwnIdentityAndMembers) {
                 why += " parent_component_id " + std::to_string(parent);
             }
             if (got != e.members) {
-                why += " members" + render_102(got) + " (expected" + render_102(e.members) + ")";
+                why += " members" + w::render(got) + " (expected" + w::render(e.members) + ")";
             }
         }
         if (!why.empty()) {

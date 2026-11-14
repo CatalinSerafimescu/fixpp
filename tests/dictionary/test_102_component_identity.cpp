@@ -58,22 +58,6 @@ loaded const& xml_identity() {
     return l;
 }
 
-std::vector<w::member> members_of(std::span<FieldRef const> run) {
-    std::vector<w::member> out;
-    for (auto const& fr : run) {
-        out.push_back({.tag = fr.tag, .component_index = fr.component_index});
-    }
-    return out;
-}
-
-std::string render(std::vector<w::member> const& v) {
-    std::string s;
-    for (auto const& m : v) {
-        s += " (" + std::to_string(m.tag) + ", " + std::to_string(m.component_index) + ")";
-    }
-    return s;
-}
-
 // Compares each expected component with the dictionary; returns the number that differ and
 // describes the first.
 std::size_t compare_components(Dictionary const& d,
@@ -88,7 +72,7 @@ std::size_t compare_components(Dictionary const& d,
         } else {
             std::uint64_t const id = cr->component_id;
             std::uint64_t const parent = cr->parent_component_id;
-            auto const got = members_of(d.component_fields(e.name));
+            auto const got = w::members_of(d.component_fields(e.name));
             if (id != e.id) {
                 why += " component_id " + std::to_string(id) + " (expected " +
                        std::to_string(e.id) + ")";
@@ -98,7 +82,7 @@ std::size_t compare_components(Dictionary const& d,
                        std::to_string(e.parent) + ")";
             }
             if (got != e.members) {
-                why += " members" + render(got) + " (expected" + render(e.members) + ")";
+                why += " members" + w::render(got) + " (expected" + w::render(e.members) + ")";
             }
         }
         if (!why.empty()) {
