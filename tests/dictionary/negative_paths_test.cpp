@@ -510,22 +510,15 @@ TEST(NegativePaths, FieldNumberAboveTheTagRangeOrWithTrailingJunkThrows) {
 // different parser from the `<field number>` parse), and 1, the smallest valid
 // tag.
 //
-// ⚠️ NO COVERAGE CLAIM IS MADE FOR THIS CASE, because two were written here and
-// both were false. Measured: under either mutation it is meant to describe —
-// `parse_nonneg_int` requiring `out > 0`, or the tag bound written `<= 1` — this
-// TARGET aborts during static initialization (`--gtest_list_tests` exits 134),
-// because the target's `INSTANTIATE_TEST_SUITE_P` generator in
-// `collision_membership_guards_test.cpp` loads `kRuntimeDicts` at static init,
-// so any rule that refuses a value a vendored dictionary carries aborts before
-// `main`. No test body runs, so no assertion here can be the witness; the
-// witness is the abort, which is loud and self-describing but is not this case.
+// ⚠️ NO COVERAGE CLAIM IS MADE FOR THIS CASE. Before citing it, re-derive what
+// witnesses the boundary: apply either mutation it is meant to describe —
+// `parse_nonneg_int` requiring `out > 0`, or the tag bound written `<= 1` — and
+// look at the target's EXIT STATUS, not at the test list.
 //
 // It is kept because it STATES the boundary where a reader looks for it. The
-// arm that actually reports a wrongly-widened rule is the Orchestra one,
-// `OrchestraFailClosed.ZeroStructuralXmlIdsAreStillAccepted`, which fails
-// cleanly because the structural-id namespace it defends is not exercised by
-// any static-init fixture. Re-derive before citing either: apply the mutation
-// and look at the EXIT STATUS, not at the test list.
+// Orchestra twin of the boundary is
+// `OrchestraFailClosed.ZeroStructuralXmlIdsAreStillAccepted`; re-derive it the
+// same way before citing it.
 TEST(NegativePaths, ZeroVersionNumbersAndTagOneAreStillAccepted) {
     auto* mr = std::pmr::new_delete_resource();
     constexpr std::string_view kXml = R"(<fix type='FIX' major='5' minor='0' servicepack='0'>)"

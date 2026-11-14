@@ -270,7 +270,8 @@ page** — derive it, because the two halves differ and the difference follows f
 comes from: a `data_tag` is a key of the loader's own field store, which the declaration rule bars
 from zero; a `length_tag` comes from a `lengthId=` reference, parsed with the shared
 `parse_orchestra_id` (which must keep admitting zero for the structural-id namespace) and resolved
-*after* the declaration check. The recipe: read `parse_document` / `collect_fields` call order and
+*after* the declaration check. ⚠️ **Superseded by 102 D1b:** the structural ids take their own parse, so
+the parenthetical's reason is history; it is kept as the 457 decision's "why". The recipe: read `parse_document` / `collect_fields` call order and
 ask, for each argument, whether it originates in a declaration or in a reference. The guards are
 kept as boundary conditions — zero is the "no pair" answer of the accessors, which is a property of
 the accessors rather than of today's callers.
@@ -284,7 +285,8 @@ rule off the shared parser is the load-bearing one: `<fixr:component id>` / `<fi
 are a repository-local surrogate key where `id="0"` is legal, so the Orchestra rule lives in
 `parse_orchestra_field_tag` and the false-positive arm
 (`OrchestraFailClosed.ZeroStructuralXmlIdsAreStillAccepted`) is what holds the two namespaces
-apart. **`table_view`'s own mutator surface was the residue, and fixpp#456 MOVED it rather than
+apart. ⚠️ **Superseded by 102 D1b:** the component and group ids no longer share a parser with the field
+ids; they take their own parse. The decision above is kept as the 457 history. **`table_view`'s own mutator surface was the residue, and fixpp#456 MOVED it rather than
 closing it.** The population members are private now and reachable only through
 `table_view_builder` — `include/fixpp/dict/table_view.hpp`'s STORAGE banner states the mechanism,
 and is the one place that does. The *hazard* is unchanged: the builder accepts everything the view
