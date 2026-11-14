@@ -1,7 +1,7 @@
 # Implementation Plan: Resend and Logon-reset fidelity — QuickFIX's and FIX-SL's endings for sequence recovery
 
 **Branch**: `103-resend-logon-reset-fidelity` | **Date**: 2026-11-14 | **Spec**: [spec.md](spec.md)
-**Base**: `2c74af92` (feature 102's head); rebased `--onto origin/main 2c74af92` once PR #680 squash-merges.
+**Base**: `da129e17` (PR #680's squash of feature 102), rebased from `2c74af92` on 2026-11-14; the two trees are identical.
 **Input**: [spec.md](spec.md) with three Clarifications sessions; design decisions in [research.md](research.md)
 (D1–D9, RED cells, pins, B&L delta, constitution check, risks, and the normative "Pass-2 amendments").
 
@@ -54,7 +54,7 @@ check" as amended by "Pass-2 amendments". Summary:
 | XVI §3/§4 | `/clarify` done; `/analyze` mandatory |
 | XVII §1 | Gate A required (C ABI, concurrency, session FSM and recovery, wire) |
 
-**Owner `/plan` sign-off**: PENDING (Appendix A control 4).
+**Owner `/plan` sign-off**: GIVEN 2026-11-14 ("plan signed off"), on the bundle at `278495fb` (rebased onto `da129e17` as `d165880b`; the squash tree equals 102's head tree, so no anchor moved). Appendix A control 4 discharged.
 
 ## Project Structure
 
