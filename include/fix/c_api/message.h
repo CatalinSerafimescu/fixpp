@@ -136,7 +136,7 @@ typedef struct fixpp_resolved_msg_version {
  *
  * BREAKING (C-ABI 1.16, [const §X.7]; 102-dict-width-multichar-type, fixpp#654):
  * over a dictionary of more than 65,535 components, or one whose group side table
- * passes 65,535 entries (dict.h's C-ABI 1.16 notes), these calls answer from the
+ * passes UINT16_MAX entries (dict.h's C-ABI 1.16 notes), these calls answer from the
  * corrected dictionary. The readers this file's 1.9 paragraph lists, on the
  * inbound, clone and toApp views: the session table's group contexts, delimiters
  * and Length+Data pairs change, so a getter can trade FIXPP_ERR_OK and

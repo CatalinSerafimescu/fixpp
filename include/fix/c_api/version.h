@@ -282,7 +282,7 @@
  *    point are now their own, and with them every table a session builds from the
  *    dictionary (the valid-tag and required sets, the group contexts, the Length+Data
  *    pairs, the header store and the section records); a base whose group side table
- *    passes 65,535 entries, whose groups' members and bare member store are now their own;
+ *    passes UINT16_MAX entries, whose groups' members and bare member store are now their own;
  *  - a failure turned into a different failure: on the overlay call, that side-table fault
  *    together with a fault the guard detects after it now returns that fault's code; a
  *    high-id Orchestra input refused by a guard the id moved now returns the expansion

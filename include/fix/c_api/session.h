@@ -18,7 +18,7 @@
  *
  * BREAKING (C-ABI 1.16, [const §X.7]; 102-dict-width-multichar-type, fixpp#654):
  * over a dictionary of more than 65,535 components, or one whose group side table
- * passes 65,535 entries (dict.h's C-ABI 1.16 notes), the session answers from the
+ * passes UINT16_MAX entries (dict.h's C-ABI 1.16 notes), the session answers from the
  * corrected dictionary. fixpp_session_open: the FIXT check on a validating
  * FIXT.1.1 config reads whether the dictionary's Logon accepts 1137, so FIXPP_ERR_OK
  * and the config refusal can trade places. fixpp_session_register_callback: on a

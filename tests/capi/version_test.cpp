@@ -28,7 +28,7 @@ TEST(CapiVersion, CApiVersionMatchesPatchMacro) {
 // downgrade stays coherent: a reset would place the version below the
 // introducing_minor of already-published codes. Every later C-ABI change bumps
 // MINOR ([const §X.7]); what each minor changed is recorded in version.h.
-// 102-dict-width-multichar-type: C-ABI 1.16, BREAKING (contract §6, owner ruling 2026-11-13).
+// 102-dict-width-multichar-type: C-ABI 1.16, BREAKING (contract §6, owner ruling).
 TEST(CapiVersion, CApiVersionIsExactly_1_16_0) {
     fixpp_version_t v = fixpp_version();
     EXPECT_EQ(v.major, uint16_t{1});

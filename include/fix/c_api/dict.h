@@ -83,7 +83,7 @@ extern "C" {
  * code is the same, but the dictionary this call yields is corrected for a base of more
  * than 65,535 components, whose component identities and message expansions through a
  * componentRef past that point are now their own, and for a base whose group side table
- * passes 65,535 entries, whose groups' members are now their own. The calls that read
+ * passes UINT16_MAX entries, whose groups' members are now their own. The calls that read
  * such a dictionary carry C-ABI 1.16 paragraphs in message.h and session.h.
  *
  * THUNK: construction-time — catches all exceptions thrown by XmlLoader
@@ -130,7 +130,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_dict_load_from_xml(const char*     path,
  *  (FIXPP_ERR_DICT_LIMIT_EXCEEDED), the restatement now matches and the load goes on to the
  *  later guards. The return code is the same, but the dictionary this call yields is corrected
  *  as fixpp_dict_load_from_xml's C-ABI 1.16 note states, for a base past 65,535 components or
- *  a group side table past 65,535 entries.
+ *  a group side table past UINT16_MAX entries.
  *
  *  @return FIXPP_ERR_OK                   *out_dict owns a new handle (destroy with fixpp_dict_destroy)
  *  @return FIXPP_ERR_NULL_HANDLE          base_path, overlay_path or out_dict is NULL; *out_dict = NULL
