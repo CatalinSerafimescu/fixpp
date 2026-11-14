@@ -12,7 +12,7 @@
 // `[2c §4.2]` and of the 002 extract: `first_field_index` and `field_count` are
 // `std::uint32_t`, so a group's members are its own while the side table's
 // size fits in `std::uint32_t`. The tags stay 16-bit. `_reserved` stays as the explicit
-// tail pad of the 16-byte record: zero on emit, ignored on read.
+// tail pad: zero on emit, ignored on read.
 
 #pragma once
 

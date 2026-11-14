@@ -6,13 +6,10 @@
 // A MultiCharValue field (FIX's MultipleCharValue: space-separated single characters, for
 // example ExecInst(18)=1 2) reads through its generated typed accessor as the string type a
 // MultipleStringValue field reads as, verbatim, with no check of the MultipleCharValue
-// grammar (spec FR-004). Cells, all on `fixpp::vlatest` (built only under
-// `FIXPP_CODEGEN_FIX_LATEST`):
-//   - `NewOrderSingle::exec_inst()` on `18=1 2` and on `18=1`;
-//   - a group entry's `leg_exec_inst()` (LegExecInst(1384)) on `1384=1 2`, through
-//     `NewOrderMultileg::legs()`, the read class whose group entry carries `leg_exec_inst`;
-//   - the owning (reified) `owning_NewOrderSingle::exec_inst()` on `18=1 2`;
-//   - the shape of each accessor, `expected_t<std::string_view>`, checked at run time.
+// grammar (spec FR-004). The cells here, on `fixpp::vlatest` (built only under
+// `FIXPP_CODEGEN_FIX_LATEST`), each check that a MultiCharValue accessor (a message's, a group
+// entry's or an owning message's) reads the value verbatim and returns
+// `expected_t<std::string_view>`.
 //
 // Every cell compiles whatever the accessor's value type is: a value is compared through
 // `as_text`, which renders a `char` or a `std::string_view` as `std::string`, and a type is
