@@ -181,6 +181,17 @@ constexpr OrchestraTypeEntry kOrchestraTypeTable[] = {
     return out;
 }
 
+// 102 D1b: a child's `id` read by the parse of its kind, a FIX tag for a `fixr:fieldRef` or a
+// `fixr:numInGroup` and a surrogate id for a `fixr:componentRef` or a `fixr:groupRef`; false
+// where that parse refuses it. Unlike the two parses above, these do not throw.
+[[nodiscard]] bool tag_of(pugi::xml_node const& n, std::uint16_t& out) {
+    return detail::try_parse_uint16(std::string_view{n.attribute("id").as_string("")}, out);
+}
+
+[[nodiscard]] bool ref_of(pugi::xml_node const& n, detail::orch_ref_id& out) {
+    return detail::try_parse_orch_ref_id(std::string_view{n.attribute("id").as_string("")}, out);
+}
+
 // fixpp#457: the same strict parse, restricted to the ids that ARE FIX tags.
 // The valid tag range is 1..65535: zero is the "absent" answer of several
 // dict/table_view accessors, so a zero-numbered field reads as present or
@@ -589,8 +600,7 @@ void OrchestraLoaderState::collect_components(pugi::xml_node const& root) {
         auto const parent_1based = static_cast<std::uint32_t>(i + 1);
         for (auto const& child : components_[i].node.children("fixr:componentRef")) {
             detail::orch_ref_id child_xml_id{};
-            if (!detail::try_parse_orch_ref_id(
-                    std::string_view{child.attribute("id").as_string("")}, child_xml_id)) {
+            if (!ref_of(child, child_xml_id)) {
                 continue;  // resolved (or rejected) properly at expand-time below
             }
             auto const cit = component_index_by_xml_id_.find(child_xml_id);
@@ -896,15 +906,7 @@ void OrchestraLoaderState::collect_header_tags(detail::dict_metadata_handle& h) 
     if (header == component_index_by_xml_id_.end()) {
         return;
     }
-    // 102 D1b: a fieldRef's and a numInGroup's id is a tag, a componentRef's and a
-    // groupRef's a surrogate id, each read by its own parse.
-    auto const tag_of = [](pugi::xml_node const& n, std::uint16_t& out) {
-        return detail::try_parse_uint16(std::string_view{n.attribute("id").as_string("")}, out);
-    };
-    auto const ref_of = [](pugi::xml_node const& n, detail::orch_ref_id& out) {
-        return detail::try_parse_orch_ref_id(std::string_view{n.attribute("id").as_string("")},
-                                             out);
-    };
+    // 102 D1b: each child's id is read by the parse of its kind (`tag_of`, `ref_of`).
     std::vector<std::uint16_t> tags;
     std::vector<bool> walked(components_.size(), false);
     std::unordered_set<detail::orch_ref_id> walked_groups;
@@ -968,14 +970,7 @@ void OrchestraLoaderState::collect_header_tags(detail::dict_metadata_handle& h) 
 // adds nothing. Header before trailer, declaration order; the sink keeps the first
 // record at a key.
 void OrchestraLoaderState::collect_section_groups(detail::dict_metadata_handle& h) const {
-    // 102 D1b: split by kind, as in `collect_header_tags`.
-    auto const tag_of = [](pugi::xml_node const& n, std::uint16_t& out) {
-        return detail::try_parse_uint16(std::string_view{n.attribute("id").as_string("")}, out);
-    };
-    auto const ref_of = [](pugi::xml_node const& n, detail::orch_ref_id& out) {
-        return detail::try_parse_orch_ref_id(std::string_view{n.attribute("id").as_string("")},
-                                             out);
-    };
+    // 102 D1b: split by kind (`tag_of`, `ref_of`), as in `collect_header_tags`.
     detail::SectionWalk w;
     auto walk = [&](auto& self, pugi::xml_node const& node,
                     std::vector<std::uint16_t>* level) -> void {
