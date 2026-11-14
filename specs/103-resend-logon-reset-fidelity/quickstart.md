@@ -1,7 +1,8 @@
 # Quickstart: validating 103
 
 Run from the library root of the tree that holds the branch. One build or test process at a time (machine rule).
-Contracts: [session-wire-endings.md](contracts/session-wire-endings.md) (E1–E14), [c-abi-1.17.md](contracts/c-abi-1.17.md).
+Contracts: [session-wire-endings.md](contracts/session-wire-endings.md) (E1–E14), [c-abi-1.17.md](contracts/c-abi-1.17.md),
+[constitution-xi3-amendment.md](contracts/constitution-xi3-amendment.md) (applied first, plan phase 0).
 
 ## 1. RED on the base (before each fix)
 
@@ -22,31 +23,49 @@ Re-run the same filter after the fix (GREEN), then revert only the fix's decisiv
 
 ## 3. The FR-020 and Arm-B censuses (measured)
 
-In a scratch copy (never committed): Pass P (poison default) and Pass F (default flipped) per research D8, and the
-Arm-B Logout applied alone per D9; run the session, capi and config labels and the standalone interop labels:
+In a scratch copy (never committed), with the seeded sentinel `tests/session/test_103_census_sentinel.cpp` added:
+Pass P (poison default; non-fatal, one flushed `CENSUS-HIT` line on stdout per hit, the run continuing with the base
+value) and Pass F (default flipped) per research D8, and the Arm-B Logout applied alone per D9. Run the session,
+capi and config labels and the standalone interop labels with each binary's output captured, and attribute each
+`CENSUS-HIT` to the `[ RUN      ]` line before it (grouped binaries would hide every later cell if the poison
+aborted):
 
 ```bash
-ctest --preset linux-clang-debug -L session
-ctest --preset linux-clang-debug -L capi
-ctest --preset linux-clang-debug -L config
+ctest --preset linux-clang-debug -L session -V
+ctest --preset linux-clang-debug -L capi -V
+ctest --preset linux-clang-debug -L config -V
 ```
 
-Known positives: `VariantC_BilateralStrictDefault_RegressionGuardNotClean` (Pass P),
-`PossDupToleranceTest.ArmB_Regression_Pin_NoLogout` (Arm B). A census without its known positive is broken.
+Known positives: the sentinel (static matcher, Pass P and Pass F; its `CENSUS-HIT` must land under its own
+`[ RUN ]` line), `PossDupToleranceTest.ArmB_Regression_Pin_NoLogout` (Arm B). Negative control:
+`StoreFailReconcileTest.VariantC_BilateralStrictDefault_RegressionGuardNotClean` (it names the policy through
+`make_initiator_cfg`) must not appear in any of the three. A census without its known positive, or with its negative
+control, is broken.
 
 ## 4. Whole-feature checks
 
 - `pytest bindings/python/tests` (the binding's default-policy comment and cells).
-- The sanitizer repeat of R-588-a/b (SC-005) on `linux-clang-tsan` and `linux-clang-asan`.
+- SC-005: R-588-a/b once per sanitizer lane (the hold makes them deterministic) with their mutants; R-588-h on
+  `linux-clang-tsan` and `linux-clang-asan` repeated n times, n derived from its mutant's measured miss rate
+  (research R-588-h), recorded in the evidence file.
 - The paired send-path bench (SC-006) against the base, with the base worktree path padded to equal length.
-- The send-path allocation witness (`test_session_alloc_guard`) stays at zero.
+- The send-path allocation witness: the Release, Linux-only registrations
+  `alloc_guard_544_we_sends_interleaved_mallocnesia` and its MemoryStore twin
+  `alloc_guard_103_we_sends_memorystore_mallocnesia` read zero; in a scratch copy, an allocation planted in the
+  gate's shared fast path turns both RED (research D5′ "Allocation"). `test_session_alloc_guard` is not this
+  witness: it never runs `Session::send`.
 - MSVC: build the new test targets (`-k 0`) before the first labelled push.
 
-## 5. Live interop (SC-002)
+## 5. SC-002 (re-scoped by owner ruling, Gate A round 1)
 
-With the interop helpers no longer forcing a policy, run the restart-and-resume cells against QuickFIX C++ v1.16.0
-and QuickFIX/J 3.0.2 (counterparty image `sha256:5c9928840b6f…`, pinned). Expected: every cell passes with the
-default configuration; E1 and E3 visible in the transcripts.
+With the interop helpers no longer forcing a policy, run the live default-config Logon cells against QuickFIX C++
+v1.16.0 and QuickFIX/J 3.0.2 (counterparty image `sha256:5c9928840b6f…`, pinned): `Fix44/HappyLogonHbLogout`,
+`Fixt/HappyFixtLogonHbLogout`, `Fix44/ResetOnLogonInitiator`, `Fix44/ResetOnLogonAcceptor` and
+`Fix44/HappyDisconnectReconnectNoReset` (re-derive the live set: `tests/interop/expected-skips-without-counterparty.txt`
+minus `tests/interop/live-cells-excluded.txt`). Expected: every cell passes with the default configuration, and
+`HappyDisconnectReconnectNoReset` goes RED with the strict default restored (its reconnect logs on at a stored number
+above 1). Then the in-process FileStore restart-and-resume cell, both roles, against the peer fixture: GREEN with the
+default, RED with the strict default restored. The live restart-and-resume suites stay fixpp#503's.
 
 ## 6. Records
 

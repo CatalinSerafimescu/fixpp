@@ -1,6 +1,6 @@
 # Research: 103 resend and Logon-reset fidelity
 
-**Provenance.** Drafted by two read-only Opus design runs through `.claude/scripts/claude-triage.sh` (pass 1 $10.87: D1–D8; pass 2 $5.21: D5′ and D9, after the owner widened #588 and #581/FR-018 on 2026-11-14), spot-checked by the orchestrator against source (Arm B's silent ending; QuickFIX's too-low text at QFC `doTargetTooLow` and QFJ `Session.java`). **Where "Pass-2 amendments" (last section) contradicts an earlier section, the amendment governs**; Gate A reviews the whole.
+**Provenance.** Drafted by two read-only Opus design runs through `.claude/scripts/claude-triage.sh` (pass 1 $10.87: D1–D8; pass 2 $5.21: D5′ and D9, after the owner widened #588 and #581/FR-018 on 2026-11-14), spot-checked by the orchestrator against source (Arm B's silent ending; QuickFIX's too-low text at QFC `doTargetTooLow` and QFJ `Session.java`). **Where "Pass-2 amendments" (last section) contradicts an earlier section, the amendment governs**; Gate A reviews the whole. **Gate A round 1 (2026-11-14)** edited the sections in place (D1, D4.2, D4.4, D4.6, D5′, D6, D7, D8, D9, the RED cells, the B&L delta, the Risks) and folded into them the pass-2 items it touched; the plan's Constitution Check replaces this file's. Each round-1 change names its finding (Codex #n, N-n, RC-n).
 
 
 The code was read on branch `103-resend-logon-reset-fidelity`, based on `2c74af92`; its session code is identical to `0ae8e465`. Citations name symbols, not lines: re-locate each by name. Facts about QuickFIX C++ (QFC), QuickFIX/J (QFJ) and QuickFIX/Go (QFGo) come from the pre-spec research (`research/reviews/opus_103_preSpec_research_2026-11-14.md`) and were not re-read here. The owner's rulings are final. Where a ruling cannot be built as written, the Risks section says so.
@@ -13,33 +13,76 @@ Notation: **N** = NextNumIn. **S** = the MsgSeqNum of a too-high Logout. **T** =
 
 ### D1 — Resend state and the mark end with the connection (#578; FR-006, FR-007, FR-011's last sentence)
 
+*Amended at Gate A round 1 (RC1): the clear moves to the transport install, because the public
+`Session::drive_reconnect` can install a new transport from Active with no `Disconnected` edge.*
+
 **Decision:**
-- **One clearing site:** `Session::record_state_transition_`, on the edge into `Disconnected`. That edge is written by every ending: `close()`, every arm's fatal branch, the gap deadline, and the Logout routes. On that edge:
-  - `reconnect_fsm_.exit_awaiting_resend()` clears the awaiting flag. `ResendState::reset` clears the outstanding range, `started_at` and `inbound_filled_through`.
-  - The mark is cleared and the D4 bound's wait is woken.
-  - The test is one enum comparison per state transition, not per frame. Both calls are `noexcept` and allocate nothing. `ResendState::reset` empties `inbound_held`, which nothing ever writes.
-- **In-place reconnect.** In every in-repo caller, `Session::install_reconnected_transport` is reached only after `Disconnected`: `drive_reconnect()` from `run_connect_loop` runs once per Session, after `open()`, and the tests call it after a `Disconnected`. FR-006's "before the new Logon is sent" therefore holds through that edge.
-  - The plan verifies this with a caller census of `drive_reconnect`.
-  - If some caller can reach it from another state, add a clear there, with its own cell. A second clear that no cell can observe is not added, because its mutant would survive.
-- **Doc fix in `resend_state.hpp`.** Replace "reset on gap close (awaiting_resend=false) or session exit" with: reset by `ReconnectFsm::exit_awaiting_resend`, which is called when the gap closes and on the session's entry to `Disconnected` (`Session::record_state_transition_`). Name feature 103 in that comment, so it points at the decision that replaced the old wording.
-- **A side effect.** The defect in pre-spec (c)8 disappears: `close_filled_resend_gap_` refreshing `started_at` against an `outstanding_end` left from numbering before a reset. That stale end can no longer survive a reconnect.
+- **The connection generation.** A private `std::uint32_t conn_gen_` of `Session`, incremented in
+  `Session::install_reconnected_transport`, before its `record_state_transition_(LogonSent)`. Connection-scoped
+  recovery work captures it and acts only while it is current (D4.4).
+- **Clearing site for the resend state: `Session::install_reconnected_transport`.** There, before the `LogonSent`
+  transition and therefore before `drive_reconnect`'s `emit_initiator_logon_` sends the new Logon (FR-006's own
+  point):
+  - `reconnect_fsm_.exit_awaiting_resend()` clears the awaiting flag. `ResendState::reset` clears the outstanding
+    range, `started_at` and `inbound_filled_through`.
+  - The mark is cleared (`peer_logout_.phase = none`), `conn_gen_` moves, and the bound's wake and the replay
+    gate's `wake_all()` are invoked, so a bound of the old connection resumes, sees the new generation, and exits
+    with no effect (D4.4).
+  - Both calls are `noexcept` and allocate nothing, which `install_reconnected_transport`'s `noexcept` requires.
+    `ResendState::reset` empties `inbound_held`, which nothing ever writes.
+- **The `Disconnected` edge** (`Session::record_state_transition_`) keeps the two wakes (the bound's,
+  `replay_gate_.wake_all()`), and clears nothing. The edge is where `close()`, every arm's fatal branch, the gap
+  deadline and the Logout routes end the connection, and the bound and gate waiters must stop waiting there
+  (D4.4, D5′). One enum comparison per state transition, not per frame.
+- **Why the edge clears neither the resend state nor the mark.** Each clear needs a cell its mutant turns RED.
+  After a `Disconnected` with no reconnect, neither has a reader that acts: `resend_gap_deadline_`, the too-high
+  sub-arms and `close_filled_resend_gap_` run only in the Active arm, and every reader of the mark (`send_body_`'s
+  refusal, `close(graceful)`'s claim inside its Active/LogonReceived phase-1 block, the bound's "live" test) also
+  requires Active. A clear there would be an unkillable mutant. The plan's phase-1 census re-derives both reader
+  sets (codegraph callers of `ResendState`, `ReconnectFsm`'s resend accessors and `peer_logout_`); if any reader
+  runs outside Active, the edge clear is added with its own cell.
+- **The acceptor.** `Session::attach_accepted_transport` is called once per Session: the accept loop builds a fresh
+  `Session` for each accepted connection (`run_accept_loop`'s `local_session`), so no in-place re-attach exists.
+  The phase-1 census confirms it by reading; no clear is added there.
+- **Disclosed residual (the pre-existing in-place-swap class).** An emit already past its last generation re-test
+  when a direct caller installs a new transport (a `Session::send` mid-store today; after 103 also a claimed
+  acknowledgement in its store or write) writes its frame on the new transport, because `live_write_serialized_`
+  reads the live transport at call time. 103 bounds the bound's part of it: after its emit the bound re-tests the
+  generation before any state write or event (D4.4), so it never records `Disconnected` against the new
+  connection. The frame itself is the pre-existing class, disclosed with B-103-9.
+- **Doc fix in `resend_state.hpp`.** Replace "reset on gap close (awaiting_resend=false) or session exit" with:
+  reset by `ReconnectFsm::exit_awaiting_resend`, which is called when the gap closes and when a new transport is
+  installed (`Session::install_reconnected_transport`). Name feature 103 in that comment, so it points at the
+  decision that replaced the old wording.
+- **A side effect.** The defect in pre-spec (c)8 disappears: `close_filled_resend_gap_` refreshing `started_at`
+  against an `outstanding_end` left from numbering before a reset. That stale end can no longer survive a
+  reconnect.
 
 **Rationale:**
-- All three engines clear resend state when they disconnect: QFC's and QFJ's `disconnect()`, and QFGo's `latentState`.
+- All three engines clear resend state when they disconnect: QFC's and QFJ's `disconnect()`, and QFGo's
+  `latentState`. fixpp's equivalent of "the old connection is gone" for an in-place reconnect is the transport
+  install, which every reconnect passes through whatever state it starts from.
 - TC 1B(c) and TC 1S(a) expect a fresh ResendRequest on the new connection.
 - One clearing site covers the reset route (`reset_on_logon`, and D2's strict reset) and the 789 route alike.
 
 **Alternatives considered:**
-- Clear in `install_reconnected_transport` only. This misses state left behind when the session stops at `Disconnected`, and it is not where the engines clear.
+- Clear only on the `Disconnected` edge (pass 1). Misses the main real shape of #578: a direct caller that loses
+  the transport reaches `install_reconnected_transport` from Active, so the stale mark's bound passes its tests on
+  the new connection and acknowledges the old Logout there (Gate A round 1, Codex #7).
+- Make `Disconnected` an enforced precondition of `drive_reconnect`, returning an error otherwise. A new error
+  path on a public call (a BREAKING C++ change) for a state the clear makes harmless.
 - Clear in `emit_initiator_logon_`. This covers the initiator only, and it is the wrong layer for the mark.
 - Clear in `close()`. `close()` is terminal; the in-place route never calls it.
 
-**Reachability, disclosed with the B-row:** the Engine never reconnects a Session in place. `run_connect_loop` ends with `close(terminal)`, which is permanent, and there is one Session per entry per `Engine::start`. #578 is reachable only by a direct caller of the public `Session::drive_reconnect`.
+**Reachability, disclosed with the B-row:** the Engine never reconnects a Session in place. `run_connect_loop` ends
+with `close(terminal)`, which is permanent, and there is one Session per entry per `Engine::start`. #578 is
+reachable only by a direct caller of the public `Session::drive_reconnect`, from `Disconnected` or from Active.
 
 **Sites:**
-- `Session::record_state_transition_` (`src/session/session.cpp`).
+- `Session::install_reconnected_transport`, `Session::record_state_transition_` (`src/session/session.cpp`).
 - `ReconnectFsm::exit_awaiting_resend` (`src/session/reconnect_fsm.cpp`), unchanged.
 - The `ResendState` comment in `include/fixpp/session/resend_state.hpp`.
+- `include/fixpp/session/session.hpp`: `conn_gen_`.
 
 ---
 
@@ -92,7 +135,7 @@ Notation: **N** = NextNumIn. **S** = the MsgSeqNum of a too-high Logout. **T** =
   - Option (i): pre-scan 141 ahead of `check_inbound` in the LogonSent arm, and withhold or reset as the acceptor does.
   - Option (ii): an L-row plus a follow-up issue.
   - **Recommend (ii)** for 103. No ruling covers (i), and (i) changes the reset unit's targets.
-  - SC-002 meets this case only if a counterparty acceptor runs `ResetOnLogon=Y`. Check the interop matrix's configs before the live runs.
+  - SC-002's live Logon cells meet this case only if a counterparty acceptor runs `ResetOnLogon=Y`. Check the interop matrix's configs before the live runs.
 
 **D2.4 — The strict acceptor's refusal: move it, and send a Logout with Text.**
 - **Today** the refusal in `on_inbound_not_connected_` sits after `check_inbound`. Three problems follow:
@@ -191,7 +234,7 @@ In both routes:
   - In (a) for `"5"`, before fixpp's own ResendRequest.
   - In (b) for `"5"` when the phase is `none`. A second too-high Logout while the mark is set is ignored, as under B-537-1.
 - `logout_seen_ = true` is set at receipt, as `on_inbound_active_logout_` does first, so a configured `reset_on_logout` fires whichever ending follows.
-- **Active only.** A too-high Logout in LogonReceived keeps today's gap path; the plan confirms that LogonReceived can see one.
+- **Active only, and LogonReceived cannot see one (by reading; re-confirmed by the phase-1 census).** `on_inbound_not_connected_` records `LogonReceived` and, in the same inbound chain, either records `Active` after the reply Logon (and the 789 honour) or ends at `Disconnected` (a refusal, a failed reply, a supersession by `close()`); `run_read_pump` awaits `on_inbound_frame` once per frame, serially (B-101-10's precondition). So no frame other than the Logon itself is processed in LogonReceived, and FR-010, E9, FR-018, E14, D9 and B-9 are scoped to Active on this one result. The census re-derives it: every `record_state_transition_(fsm_state::LogonReceived)` site and every exit of the chain after it.
 - **T == 0, or no clock (`effective_clock_` null):** no mark. Acknowledge at once in the arm (D4.5): the QuickFIX ending, with no ResendRequest of fixpp's own (Risk R3).
 - **0 does reach the session.** The TOML mapper accepts any uint32, and `SessionConfig` has no validator. The header's "Must be > 0; validated at SessionConfig-build time" is stale; fix that comment.
 
@@ -214,23 +257,55 @@ In both routes:
   - `run_liveness_loop` returns at once when HB is 0, and FR-010 has no HB exemption.
   - It sleeps toward its own deadlines, up to HB, and has no per-session wake: a sweep of the clock was rejected (#536, D-536-1).
 - **Why not frame-driven, as #537 did for the gap deadline:** US3 AS4 needs the acknowledgement at expiry even if no frame arrives. #537's "a timer for the deadline" rejection was about the gap deadline, not this bound.
-- **`Session::run_peer_logout_bound_()`:**
-  - It is `co_spawn`ed when the mark is set, on `co_await asio::this_coro::executor` in the arm: the session strand, as the liveness loop is spawned.
-  - Its body races a frame-local `asio::steady_timer` at `time_point::max()` against `detail::await_deadline(*effective_clock_, at + T)`. This is `run_logout_phase1`'s pattern: the outcome is read from session state afterwards, never from which arm of the race won.
-  - After the race it exits without effect if:
-    - `state_` is `closing` or `closed_drained`;
-    - `engine_stop_requested_` is set;
-    - `fsm_state_ != Active`;
-    - or the phase is not `pending`.
-  - Otherwise it sets the phase to `acking`, synchronously and before its first suspension, then sends the acknowledgement (D4.5).
+- **`Session::run_peer_logout_bound_()`** (protocol amended at Gate A round 1, RC1; the pass-2 claim placement
+  stays):
+  - It is `co_spawn`ed when the mark is set, on `co_await asio::this_coro::executor` in the arm: the session
+    strand, as the liveness loop is spawned. It captures `gen = conn_gen_` (D1) at spawn.
+  - **Its exit test, "live"**: `conn_gen_ == gen`, the phase is `pending`, `fsm_state_ == Active`, `state_` is
+    neither `closing` nor `closed_drained`, and `engine_stop_requested_` is clear. Whether `co_spawn` runs the child
+    up to its first suspension or posts its start depends on the asio version; the protocol relies on neither.
+  - **Publish, then re-test.** It first publishes its wake (`peer_logout_wake_`), then tests "live"; if it fails, it
+    exits with no effect. An ending that ran before the child started (a `Disconnected` edge, an install) found no
+    wake to call, and this test is what sees it (Gate A round 1, Codex #3).
+  - **The T race.** It races a frame-local `asio::steady_timer` at `time_point::max()` against
+    `detail::await_deadline(*effective_clock_, at + T)`. This is `run_logout_phase1`'s pattern: the outcome is read
+    from session state afterwards, never from which arm of the race won. When the race ends, the wake is cleared
+    (set to null) **before** anything else, so no later `close()` or edge calls through a reference to the
+    frame-local timer once the race is over.
+  - **After the race:** re-test "live"; exit with no effect if it fails.
+  - **The gate wait (D5′):** the shared hold for the acknowledgement's emit. On the contended path, "live" is
+    re-tested after every wake of the gate wait, and it exits with no effect if it fails.
+  - **The claim:** with the hold taken and "live" true, it sets the phase to `acking` synchronously, before its
+    first suspension, then sends the acknowledgement (D4.5).
+  - **After the emit:** it re-tests `conn_gen_ == gen` after every suspension of the emit, and performs the
+    acknowledgement's state writes and event (D4.5's `emit_event`, `record_state_transition_(Disconnected)`) only
+    if the generation is unchanged. A direct caller's install during the emit therefore cannot end the new
+    connection; the frame already handed to the transport is D1's disclosed residual.
 - **Cancellation and lifetime:**
-  - It is **not** bound to `root_cancel_.slot()`. A `cancellation_signal`'s slot holds one handler; the liveness loop is bound there, and a second binding would displace it, so `close()`'s liveness join could wait out a whole HB.
-  - **The wake:** a member `std::function<void()> peer_logout_wake_`, set by the coroutine and cleared on every exit by a guard. This is the idiom of `logout_wait_wake_`, `reset_unit_wake_` and `close_grace_wake_`. The `std::function` holds one reference capture, so it does not allocate.
-  - **The join:** a `std::shared_ptr<std::atomic<int>>` counter, incremented before `co_spawn` and decremented by a frame-local guard that touches only the shared counter (`liveness_counter_`'s FQ-C pattern).
-  - `close()` wakes the coroutine (the `Disconnected` edge in D1 already does), then waits for the counter to reach 0 next to the liveness join, before the teardown reset and the drains.
-  - `Engine::stop()`'s step 1 sets `engine_stop_requested_`; the coroutine's post-wake test then exits, and stop's `close()` joins it.
-  - A reconnect follows a `Disconnected` edge, which has already cleared the mark and woken the coroutine (D1).
-  - **Precondition, stated in the plan:** `close()` runs before the Session is destroyed. The liveness loop already relies on this, because its sleep resumes into `this`.
+  - It is **not** bound to `root_cancel_.slot()`. A `cancellation_signal`'s slot holds one handler; the liveness
+    loop is bound there, and a second binding would displace it, so `close()`'s liveness join could wait out a
+    whole HB.
+  - **The wake:** a member `std::function<void()> peer_logout_wake_`, set by the coroutine and cleared when its race
+    ends and on every exit by a guard. This is the idiom of `logout_wait_wake_`, `reset_unit_wake_` and
+    `close_grace_wake_`. The `std::function` holds one reference capture, so it does not allocate.
+  - **Wake sources:** `note_inbound_advance_` (N passed S), every D4.6 claim of `pending → none`, the
+    `Disconnected` edge (D1), `install_reconnected_transport` (D1), `note_engine_stop_`, and `close()`, which calls
+    it **unconditionally** at entry, not only through the edge. An edge's wake would be lost if it landed on the timer
+    before the race's wait is initiated. In the vendored asio (1.38: `co_spawn_entry_point` begins with
+    `co_spawn_dispatch`, so a child spawned from the strand starts inline) the wait is pending before the bound
+    first suspends, so the window does not arise there; the protocol is written not to depend on that, and
+    `close()`'s later wake is the backstop for an asio whose start posts (cell F2, whose hook stands in for such a
+    start).
+  - **The join:** a `std::shared_ptr<std::atomic<int>>` counter, incremented before `co_spawn` and decremented by a
+    frame-local guard that touches only the shared counter (`liveness_counter_`'s FQ-C pattern). The guard also
+    cancels the frame-local `bound_done` timer that `close()` may be racing on (D4.6), so a join waiter is woken
+    when the bound exits.
+  - `close()` wakes the coroutine at entry, joins an `acking` bound inside its grace (D4.6), and waits for the
+    counter to reach 0 next to the liveness join, before the teardown reset and the drains.
+  - `Engine::stop()`'s step 1 sets `engine_stop_requested_` and calls `note_engine_stop_`, which wakes the bound;
+    its "live" test then fails, and stop's `close()` joins it.
+  - **Precondition, stated in the plan:** `close()` runs before the Session is destroyed. The liveness loop already
+    relies on this, because its sleep resumes into `this`.
 - **Allocation:** one coroutine frame per too-high Logout, on a cold path. [const §XV.1]'s hot path is untouched.
 
 **D4.5 — The acknowledgement.**
@@ -246,15 +321,20 @@ In both routes:
   - `run_read_pump` closes only on EOF, a read error, a frame too large, or a failed `on_inbound_frame`, so the session waits for the peer to disconnect, or for `close()` or `Engine::stop()`.
   - This is not `close(graceful)`'s timed wait (Risk R2).
 
-**D4.6 — Exactly one Logout: the claim protocol.** Everything runs on the strand, and every claim is made synchronously, before the claimer's first suspension.
+**D4.6 — At most one Logout, exactly one except FR-010's cases: the claim protocol.** Everything runs on the strand, and every claim is made synchronously, before the claimer's first suspension. (Amended at Gate A round 1, RC2; folds in pass 2's Arm B row and the claim after the gate wait.)
 
 | Ending | Claim | Then |
 |---|---|---|
-| The bound (expiry or wake) | `pending → acking` | sends the acknowledgement |
+| The bound (N passed S, or T expired) | `pending → acking`, after its gate wait (D4.4) | sends the acknowledgement |
 | `resend_gap_deadline_` expires | `pending → none` and wake; if the phase is `acking`, return handled with nothing | its own B-537-2 Logout |
 | `on_inbound_active_logout_` (the peer resends its Logout in sequence) | `pending → none` and wake | its own acknowledgement is the one Logout |
-| `close(graceful)`, at entry | `pending → none` and wake; if the phase is `acking`, skip phase 1's Logout and go to the terminal part | phase 1's Logout is the one Logout |
+| Arm B (too low, 43≠Y; D9) | `pending → none` and wake | its own Logout is the one Logout |
+| `close(graceful)`, at entry | `pending → none` and wake | phase 1's Logout is the one Logout |
+| `close(graceful)`, at entry, phase `acking` | — | phase 1 is replaced by a join of the bound inside the same grace race (below); no Logout of its own |
+| `close(terminal)`, the read pump's EOF close, `Engine::stop()` | `pending → none` and wake, or nothing if `acking` | no Logout of its own; a claimed acknowledgement may or may not reach the wire (FR-010 case 4) |
 | `on_inbound_active_` in Active while the phase is `acking` | — | the frame is drained, as the LogoutSent row drains (one flag read per frame) |
+
+**`close(graceful)` and a claimed acknowledgement (Gate A round 1, Codex #2).** `acking` means the acknowledgement is being emitted, not that it will reach the wire: `close()` records `Disconnected`, emits `root_cancel_` and closes the transport before its later joins. So when phase 1's block (Active or LogonReceived, not escalated) finds the phase `acking`, it races, in place of `run_logout_phase1()`, a frame-local `bound_done` timer at `time_point::max()` (cancelled by the bound's exit guard, D4.4) against the same `close_grace` timer. It reads the join counter first and skips the race if it is already 0; the `bound_done` wake is published before that read, with no suspension between them. With the vendored asio's inline start the race's waits are pending before `close()` suspends, so the bound's exit cannot fall between the read and the wait; under an asio whose start posts, a lost cancel costs a delay of `close()` up to the grace, never a lost Logout, because the acknowledgement has already completed when the guard runs. The bound's acknowledgement then completes, and records `Disconnected` itself, **before** `close()` records `Disconnected` and before it closes the transport. If the grace runs out first, the force-close path follows as for phase 1 (FR-010 case 5, L-103-6). Cell: US3 AS7 / R-588-e's second arm.
 
 **D4.7 — `Session::send` while the mark is set (FR-011).**
 - `send_body_`'s first test becomes `fsm_state_ != Active || peer_logout_.phase != none`, returning `session_invalid_state_for_send`. It is tested again after D5's wait.
@@ -296,11 +376,11 @@ The gate has no atomics. `Session::send`'s path is already strand-local: `send_s
 **D5′.2 The shared side: the fast path, then a contended wait.**
 1. **Fast path.** `if (!gate.exclusive) { ++shared; }`. The RAII holder's destructor runs `--shared; if (shared == 0 && exclusive) wake_all();`. No await, no allocation, no change to the cancellation filter.
 2. **Contended wait.** While the gate is exclusive, each iteration does the following:
-   1. Apply by hand the pre-check a co_await performs (`send_deferred_`'s OD-1 idiom): if `throw_if_cancelled()` is set and the coroutine is already cancelled, return without waiting.
+   1. Apply by hand the pre-check a co_await performs (`send_deferred_`'s OD-1 idiom): if `throw_if_cancelled()` is set and the coroutine is already cancelled, return without waiting. **Placement rule (Gate A round 1, Codex #1):** the pre-check sits in the same coroutine frame as the `co_await` it guards. Every emitter of a per-operation or root slot runs on the strand, and neither `co_await` of the pre-check suspends, so nothing runs between the pre-check and step 3's `await_transform`: there is no race in that form. If the wait is factored into a child awaitable (for example `gate.acquire_shared()`), a pre-check inside the child comes after the parent's `await_transform`, which throws first; `send_body_`'s wait sits outside its `try`, so that throw would leave a `noexcept` coroutine. A factored wait is therefore awaited through the split idiom (`FIXPP_INBOUND_SPLIT_AWAIT` / `FIXPP_INBOUND_SPLIT_ENTRY`), or the pre-check stays in the parent's frame before that `co_await`.
    2. Otherwise run `++waiters` under RAII, so a wait ended by `||` or by frame destruction cannot leak a count.
    3. `co_await wake->async_wait(asio::as_tuple(asio::use_awaitable))`.
    4. `--waiters`.
-   5. If `cancellation_state.cancelled() != none`, return.
+   5. If `cancellation_state.cancelled() != none`, return `dispatch_aborted`, leaving the caller's cancellation pending (no `reset_cancellation_state`; see "Cancellation").
    6. Re-test the emitter's own predicate (D5′.4).
    7. Loop.
 3. **Taking the hold.** The hold is taken with no suspension between the loop's last test and `++shared`.
@@ -331,7 +411,7 @@ The gate has no atomics. `Session::send`'s path is already strand-local: `send_s
 | `run_logout_phase1` (from `close(graceful)`) | `close` | **Shared.** It starts at the function's top, before the stamp and the peek. It is released when `store_then_emit` returns: before `logout_seen_`, `LogoutSent`, and the `logout_wait_wake_` race, which needs the peer's Logout from the inbound chain. |
 | `run_peer_logout_bound_`, D4's acknowledgement through `inbound_logout_leaf_` | detached (D4.4) | **Shared, around the acknowledgement's emit only.** It is taken after the T race. The D4.6 claim moves to after the gate wait (§4). |
 | `emit_session_reject_` (both overloads), `refuse_logon_with_logout_`, `inbound_reject_leaf_`, `inbound_reject_best_effort_leaf_`, `inbound_logout_leaf_` (inbound callers), `inbound_logon_sent_logout_leaf_`, `inbound_resend_request_leaf_`, `inbound_heartbeat_reply_leaf_`, `inbound_business_reject_leaf_`, `inbound_acceptor_reply_logon_leaf_`, `apply_inbound_sequence_reset`'s Reject, `honor_peer_next_expected_`'s two Logouts. New: D6's deadline Logout, Arm B's Logout, D4's T=0 acknowledgement. | `on_inbound_frame` | **None.** They run in the inbound chain, which is the walk's own chain and is serialised (B-101-10's precondition, asserted). They cannot overlap a walk. Each is awaited before the chain can start one. |
-| `emit_initiator_logon_` | `open()` / `drive_reconnect` | **None**, provided it runs before the connection's read pump delivers a frame. The plan verifies this with a caller census of both. If either can overlap a live inbound chain, it takes a shared hold; it is not a hot path. |
+| `emit_initiator_logon_` | `open()` / `drive_reconnect` | **None, by causality** (Gate A round 1, Codex #15; replaces pass 2's "provided that" and its caller census). A walk needs a ResendRequest processed in Active, or the Logon acknowledgement's 789. Both are the peer's answers to this Logon, which `store_then_emit` has numbered, stored and written before the peer can send them, so no walk can start between the Logon's numbering and its write. The only exception is a caller that feeds the old connection's frames during `drive_reconnect`, which breaks the serialised-inbound precondition (B-101-10). Fallback, if Gate A prefers construction to argument: take the shared hold; this path is cold. |
 | The walk's `emit_gapfill_async` and its replay `transmit_async` | inside the walk | **None.** They carry the replayed numbers and take no number. |
 
 *Verification that walks run only in the inbound chain.* The callers of `replay_outbound_range_` are `on_inbound_active_resend_request_` and `honor_peer_next_expected_`; after D4, also `answer_resend_request_`. All of them are reached only from `on_inbound_frame` (re-derive: codegraph callers of `replay_outbound_range_`). Because `on_inbound_frame` is serialised, walks never overlap, and an inbound-chain emitter never runs during one. That covers Arm B's Logout and D6's deadline Logout.
@@ -347,8 +427,9 @@ The gate has no atomics. `Session::send`'s path is already strand-local: `send_s
 **Wake sources.** `wake_all()` is called from:
 1. the exclusive guard's destructor;
 2. the last shared release while exclusive;
-3. the Disconnected edge in `record_state_transition_`, next to D1's clears;
-4. `note_engine_stop_`.
+3. the Disconnected edge in `record_state_transition_`, next to the bound's wake (D1);
+4. `note_engine_stop_`;
+5. `install_reconnected_transport`, next to D1's clears.
 
 Each is one compare when nobody waits.
 
@@ -375,20 +456,22 @@ Each is one compare when nobody waits.
   - `toApp` runs before `assign_outbound`, so nothing is numbered on that path.
 - **`close(graceful)`.**
   - Phase 1's wait is a branch of the `run_logout_phase1() || close_grace` race. The timer winning cancels it (per-operation slot), and the transport is force-closed.
-  - Disclosed: a walk longer than T uses up the grace, so no Logout is sent and the force close follows.
-  - `close()` writes Disconnected before its joins, so the bound's join (D4.4) and the liveness join never wait behind a walk.
+  - Disclosed: a walk longer than T uses up the grace, so no Logout is sent and the force close follows (FR-010 case 5, L-103-6).
+  - With the phase `acking`, the grace race joins the bound in place of phase 1 (D4.6). The bound is past its gate wait and holds a shared hold; it waits on no inbound processing, and a walk waits for it, not the reverse. The join is bounded by the grace.
+  - Otherwise `close()` writes Disconnected before its joins, so the bound's join (D4.4) and the liveness join never wait behind a walk.
 - **`Engine::stop()`.**
   - Step 1 calls `note_engine_stop_`, which wakes the gate. A waiting `Engine::send` then refuses, so step 3's `send_counter_` drain does not wait on the walk.
   - The walk is inside the role loop that step 3 joins. It ends at its next write, which fails after step 2 closed the transport, or when its store read completes. A wedged `FileStore` job (B-598-1) holds step 3 today as well.
 - **D4's bound.**
   - It takes a shared hold for the acknowledgement.
   - It claims `pending → acking` **after** the gate wait, synchronously and before its first suspension, which is `assign_outbound`. While it waits, every other ending can still claim `pending → none`.
-  - A claimed `acking` therefore always means the acknowledgement is being emitted, which D4.6's `close(graceful)` row requires.
+  - A claimed `acking` therefore means the acknowledgement is being emitted. That is not "will reach the wire", which is why `close(graceful)` joins an `acking` bound inside its grace before it records Disconnected (D4.6).
 - **D6's deadline Logout, Arm B's Logout, and D4's T=0 acknowledgement** are in the inbound chain, so they cannot run during a walk. No hold is needed.
 
 #### Cancellation (#583)
 
 - The gate never calls `reset_cancellation_state` and uses no `async_mutex`. A wait inherits its caller's filter and leaves it as it found it.
+- **The state after a cancelled wait (Gate A round 1, N5): the cancellation stays pending.** A wait ended by its caller's own cancellation returns `dispatch_aborted` with the session's state unchanged, no number consumed, and the caller's cancellation state still cancelled, so the caller's next pre-checked `co_await` throws. This is `send_deferred_`'s OD-1 return, the same "nothing consumed" ending. `send_body_`'s D-OUT-9 tail, which resets the state and records Disconnected, is a different condition: it runs only after an exception, when something may have been consumed. B-103-8 states the choice; R-588-f(3) asserts it.
 - What reaches a wait:
   - **The per-operation slot.** Phase 1's `||` sends a terminal cancellation. The liveness loop's sleep-time total reaches it, because the filter is reset to total before each sleep.
   - **The wake idiom.** The Disconnected edge and engine stop.
@@ -401,10 +484,12 @@ Each is one compare when nobody waits.
 #### Allocation (Article XV §1)
 
 - **Fast path:** a bool test, an increment, a decrement and a compare. No heap and no await. It meets the #544 zero-allocation send target and FR-015. The XV §1 hot path (parse → validate → dispatch, `MemoryStore`) is not touched.
-- **Contended path:** cold.
+- **Contended path:** cold, and outside XV §1's scope (the exclusive wait sits only at `replay_outbound_range_`'s entry, reached from a ResendRequest or a 789 walk, never per frame).
   - The `std::optional` timer is constructed in place, once per Session.
-  - Each `async_wait` operation goes through the awaitable's recycling handler allocator.
-  - The mallocnesia send-path witness (`test_session_alloc_guard`) must stay at zero; it is re-run.
+  - Each `async_wait` operation goes through the awaitable's recycling handler allocator. That is a claim, not a proof, and N concurrent waiters exceed the recycler's per-thread cache; the contended witness below measures it.
+- **The send-path witness (Gate A round 1, N2).** `tests/alloc_guard/test_session_alloc_guard.cpp` cannot be it: its two cells drive `SeqnumManager::assign_outbound` and the pure admin builders, never `send_body_`. The witness is the Release, Linux-only mallocnesia registration `alloc_guard_544_we_sends_interleaved_mallocnesia` (gtest case `B35RunThreadWindows.WE_InboundPairInterleavedWithSends`, whose expected entry is empty, so the case must read zero); its counter build is `print_only` and does not count as the witness. Its `rt::send_body` calls `Session::send` through the real Engine read pump. Its rig sets no `store_factory`, so it runs with no store; 103 adds a twin registration with `shape_session` setting a `MemoryStoreFactory` (`alloc_guard_103_we_sends_memorystore_mallocnesia`), measured on the base first. If the base twin is not zero, the witness is that twin's base-vs-head equality and the cause is reported, not hidden.
+  - **Proof it can fire:** in a scratch copy, plant one allocation in the gate's shared fast path (a `new` inside the RAII holder's constructor); both registrations must go RED with the interceptor's entry. Then remove the plant and require zero. Command and result in the evidence file.
+- **The contended-wait witness (Gate A round 1, Codex #9, evidence only).** In `replay_gate_test.cpp`, under the TU operator-new counter of `test_544_run_thread_windows.cpp`'s counter build: one warm-up contended exclusive wait and one contended shared wait on a strand, then N more of each, with the count recorded. A nonzero count is disclosed in the B&L row, not a gate failure, since the path is outside XV §1's scope. Proof it can fire: a planted `new` inside the wait loop reads at least N.
 
 #### The ordering guarantee
 
@@ -418,8 +503,7 @@ Each is one compare when nobody waits.
 3. **After the answer.** Every frame whose 34 is above the answer's range (above `eff_end`, or at or above the GapFill's NewSeqNo) is numbered after Z, so it is written after the answer's last frame.
 4. **During the answer.** No frame other than the answer's own is written in [A, Z].
 
-**Still uncovered: none** among fixpp's emitters, given the census recipe above. Two conditions:
-- **`emit_initiator_logon_`'s exclusion holds only if the plan's caller census confirms it.**
+**Still uncovered: none** among fixpp's emitters, given the census recipe above. One condition:
 - **Inbound-chain frames.** These can still interleave with a live send that is mid-store when no answer is running. No ruling orders those, and FR-014 does not cover them.
 
 #### Rationale
@@ -427,7 +511,7 @@ Each is one compare when nobody waits.
 - QFC holds `m_mutex` through `sendRaw` (persist and send) and across the whole resend. QFGo takes `resendMutex.RLock` in `send`/`queueForSend` through persist and enqueue, and `Lock` for the resend in `in_session.go`. D5′ is QFGo's shape, scoped to the walk.
 - Each of #544 R-10's objections to a send gate is answered:
   - **Sends queuing behind each other's store and write:** shared holds do not exclude each other.
-  - **A drain in `close()` and `Engine::stop()`:** none is needed. The gate holds no resource that has a destructor precondition, unlike `async_mutex`'s `not_locked`, and its waiters are woken by Disconnected and by stop.
+  - **A drain in `close()` and `Engine::stop()`:** none is needed. The gate has no unlock-before-destruction precondition (unlike `async_mutex`'s `not_locked`) and needs no `cancel_and_drain`; its waiters are woken by Disconnected, by stop and by an install. Its lazily built timer is an ordinary Session member, destroyed with the Session before the io_context, like the session's other timers.
   - **`close()` awaited inside `send_impl`:** analysed above; it joins nothing that waits on the gate.
   - **A pending cancellation throwing early, turning a veto into a disconnect:** the fast path has no await; the contended wait sits outside the `try` with the pre-check applied by hand and returns with no state change.
 
@@ -469,13 +553,13 @@ Each is one compare when nobody waits.
   - a Reset-mode SequenceReset that moved nothing, or that `fromAdmin` rejected;
   - every out-of-sequence frame: a too-low Heartbeat, a too-low PossDup frame, and a too-high frame while a resend is outstanding, including D4's.
   - A too-high frame with no resend outstanding returns at test 2.
-- **Deliberately not added:** `dispose_unparseable_`. Faulty frames do not refresh liveness (B-093-9), so a peer that sends only those ends at the TestRequest grace check, and the L-537-1 shape cannot arise. Garbled frames are disregarded. This is how 103 reads FR-017's "any MsgSeqNum" (Risk R12).
+- **Deliberately not added:** `dispose_unparseable_`. Faulty frames do not refresh liveness (B-093-9), so a peer that sends only those ends at the TestRequest grace check, and the L-537-1 shape cannot arise. Garbled frames are disregarded; FIX-SL §4.5.2 treats a garbled message as never received. Every well-formed frame that does not advance N does trigger the deadline, so the L-537-1 shape, a gap with no ending, cannot arise; only the *kind* of ending differs for a peer that sends nothing but faulty frames. FR-017 and E12 state the exclusion and its reason (Gate A round 1, Codex #6; Risk R12 closed).
 - **Restart:** unchanged. `mark_resend_progress` runs at each advance, through `note_inbound_advance_` → `close_filled_resend_gap_`.
 - **The too-low Heartbeat.** In `on_inbound_active_out_of_sequence_`'s Heartbeat arm, keep the early return only for:
   - a too-high Heartbeat (B-537-3's TestRequest rule, then the frame is ignored);
   - `validate_sequence_numbers` off (today's drop, which keeps `ValidationCompatToggles.Seq_KnobOff_TooLowHeartbeatStillDropped`).
   - A too-low Heartbeat **with** 43=Y then reaches the PossDup arm and is ignored as an admin PossDup.
-  - A too-low Heartbeat **without** 43=Y reaches Arm B. What Arm B then sends is Risk R1.
+  - A too-low Heartbeat **without** 43=Y reaches Arm B, which sends QuickFIX's too-low Logout (D9; R1 resolved).
 - **Interplay with D4:** D4.6's claim protocol settles it. The gap deadline acts before the Logout bound only when 2 × HB is less than T.
 - **HB ≤ 0 or no clock:** no gap deadline, as today. Disclosed.
 
@@ -500,22 +584,36 @@ Each is one compare when nobody waits.
       - an acceptor accepts a Logon without 141;
       - strict resets before every Logon;
       - a strict acceptor sends a Logout with Text.
-    - **The counterparty's side, reached through `fixpp_session_*`**, as 102 listed it for 1.16:
+    - **The observers, one line per change**, each naming the declarations of the session.h table below that carry it (1.12's model): the too-high Logout's mark and `fixpp_session_send`'s refusal; the too-low Heartbeat ending; the gap deadline at every non-advancing frame; a send that waits for a resend answer; `fixpp_session_close` and the mark.
+    - **The counterparty's side, with no carrying declaration:**
       - 7=0 is answered as 7=1, and an absent 7 draws a Reject;
       - a too-high ResendRequest is serviced, and a too-high Logout is acknowledged within the bound;
-      - a send waits for a resend answer;
-      - the deadline ending for an open gap, and the too-low Heartbeat ending.
+      - every frame below NextNumIn without 43=Y draws a Logout with Text;
+      - liveness, Logout and in-flight sends are ordered around a resend answer;
+      - resend state and the mark end with the connection (no reach through the C ABI: it has no `drive_reconnect`).
     - **Migration:** set `FIXPP_RESET_SEQNUM_BILATERAL_STRICT` to keep a reset on every Logon (now conforming).
     - No symbol, type or error code changes.
   - The introducing-minor table is unchanged, because no error code is added. Re-derive with `tools/abi_history/error_codes_v1.txt` and `tools/check_capi_occupancy.sh`.
-- **`include/fix/c_api/session.h`:**
-  - the `(default)` marker moves from STRICT to LENIENT;
+- **`include/fix/c_api/session.h` (amended at Gate A round 1, N3: Article X §7 asks for the mark "in the documentation of each affected declaration", and 1.12's model puts a per-call clause on every observer):**
+  - the `(default)` marker moves from STRICT to LENIENT; the enumerator descriptions are corrected to the policy table;
   - the setter's paragraph is rewritten;
-  - "BREAKING since 1.17" goes on `fixpp_reset_seqnum_policy` and on the setter;
-  - the enumerator descriptions are corrected to the policy table.
+  - each declaration below gets a "BREAKING (C-ABI 1.17; 103)" clause naming what changes **for that call**. The list is derived from the behaviour changes, one row per change; re-derive it the same way, not from this table.
+
+  | Behaviour change (decision) | What a C consumer sees | Declarations that carry it |
+  |---|---|---|
+  | Default policy lenient (D2.1) | a Logon without 141=Y is accepted where it was refused; an initiator's Logon no longer carries 141=Y (34=1 either way: a session opened through the C ABI runs on the in-memory store, so "no 141=Y at a stored number above 1" has no reach as shipped) | `fixpp_reset_seqnum_policy`, `fixpp_session_config_set_reset_seqnum_policy`, `fixpp_session_config_create` (the config it creates now carries lenient), and the five observers: `fixpp_session_is_established` (true where it stayed false), `fixpp_session_close` (returns `FIXPP_ERR_OK`, not `FIXPP_ERR_THREAD_SESSION_LIFECYCLE`, for a session that now establishes), `fixpp_session_send`, `fixpp_session_register_callback`, `fixpp_session_register_send_callback` |
+  | Strict resets before every Logon; strict acceptor's Logout with Text, before the sequence check (D2.2, D2.4) | a strict acceptor's refusal of a Logon without 141=Y carries a Logout with Text, and an out-of-sequence one is refused the same way. No reach as shipped for the reset itself: on the in-memory store the numbers are already 1, so "gives up persistent recovery" and "no store reset for a refused Logon" are not observable through the C ABI | `fixpp_reset_seqnum_policy` (the STRICT enumerator), the setter, `fixpp_session_config_set_reset_on_logon` |
+  | A too-high Logout pending (D4.2, D4.7) | `fixpp_session_send` returns the invalid-state code where it returned `FIXPP_ERR_OK`; the session ends at the acknowledgement | `fixpp_session_send`, `fixpp_session_is_established`, `fixpp_session_close`, `fixpp_session_register_callback`, `fixpp_session_register_send_callback` |
+  | A too-low Heartbeat without 43=Y ends the session (D6, D9) | `fixpp_session_is_established` turns false where it stayed true | the five observers |
+  | The gap deadline at every non-advancing frame (D6) | the session ends at a frame at or below N where it stayed established | the five observers |
+  | Replay serialisation (D5′) | `fixpp_session_send` may return later (after a resend answer), and a send waiting there returns the invalid-state code on close, stop or a pending mark, where it would have succeeded | `fixpp_session_send`, `fixpp_session_close` (its graceful Logout waits for a running answer; a walk longer than the logout timeout means no Logout, L-103-6) |
+  | `close(graceful)` and the mark (D4.6) | a close while a too-high Logout is pending sends the close's own Logout; one that finds the acknowledgement claimed waits for it inside the logout timeout | `fixpp_session_close` |
+
+  - **Sentences amended in place, marked 1.17.** 103 falsifies sentences of the 1.12 clause that each of the five observers repeats: "the next too-high frame that neither ends the session by another check nor advances the expected number draws a Logout" (now any frame that does not advance it, FR-017) and "a too-high frame that reaches the sequence check while a resend is outstanding is ignored" (not for a ResendRequest, which is serviced, or a Logout, which sets the mark; FR-008, FR-010). Per the 1.11/1.12 model, each such sentence is amended in place in every declaration that carries it, marked "(amended in C-ABI 1.17, 103: …)". Re-derive the sites: grep `session.h` for the 1.12 clause's sentences.
+  - **No carrying declaration (the counterparty's side), in `version.h`'s 1.17 paragraph only:** 7=0 answered as 7=1 and an absent 7 Rejected; a too-high ResendRequest serviced; every too-low frame without 43=Y draws a Logout with Text (a non-Heartbeat one already ended the session, so only the wire changes); outbound frames ordered around a resend answer; #578's clear (no reach: the C ABI has no `drive_reconnect`).
 - **Pinned literals:** `CapiVersion.CApiVersionIsExactly_1_16_0` (rename it to `_1_17_0`, value 17) and the literal in `CapiVersion.CompositeMacroValue` (`tests/capi/version_test.cpp`). Readers of the macro follow it without edits: `src/capi/version.cpp`, `tests/capi/capi_version_smoke.c`, `bindings/python/fixpp.i`, and the `fixpp_engine_create` callers. Recipe: grep `FIXPP_C_ABI_VERSION_MINOR` and `minor` literals under `tests/` and `bindings/`.
 - **In-repo consumers, updated in the same PR:**
-  - **Interop helpers that force lenient.** Remove the forcing so that SC-002 runs the default: `tests/interop/happy/hp_support.hpp`, `tests/interop/parity/parity_support.hpp`, `tests/interop/happy/hp_fix44_restart_resume_test.cpp`, `tests/interop/thorny/recovery/qfj-626-…_test.cpp`. A cell whose subject is the policy keeps naming it.
+  - **Interop helpers that force lenient.** Remove the forcing so that SC-002's live Logon cells run the default (the live set is re-derived from `tests/interop/expected-skips-without-counterparty.txt` minus `tests/interop/live-cells-excluded.txt`; the live suites that take their config from `hp_support.hpp`'s `make_session_config` are the ones SC-002 names, and `parity_support.hpp`'s users are standalone thorny and parity cells, none of which is in the live set). Of SC-002's cells only `Fix44/HappyDisconnectReconnectNoReset.ReconnectPreservesSequenceContinuity` (live as `QFcpp_init` and `QFj_init`) logs on again at a stored number above 1 (by its scenario; the plan confirms by reading the cell); the others log on fresh and pass under strict and lenient alike. So it is SC-002's discriminating cell: the plan shows it RED with the strict default restored on top of D2's strict reset (a reset-to-1 mutant), and the in-process FileStore cell (both roles, US1) carries the same mutant. Files: `tests/interop/happy/hp_support.hpp`, `tests/interop/parity/parity_support.hpp`, `tests/interop/happy/hp_fix44_restart_resume_test.cpp`, `tests/interop/thorny/recovery/qfj-626-…_test.cpp`. A cell whose subject is the policy keeps naming it.
   - **C ABI helpers:**
     - `tests/capi/capi_loopback_support.hpp`: its "the default is bilateral_strict" comment is now false.
     - `tests/capi/recovery_liveness_capi_support.hpp`, `tests/capi/inbound_frame_dispositions_capi_support.hpp`, `tests/capi/capi_099_route_set_oom_test.cpp`: re-read.
@@ -542,16 +640,19 @@ Each is one compare when nobody waits.
 | **C** | Asserts something the policy decides: tag 141, a Logon's 34, `session_seqnum_reset_mismatch`, `by_peer_request`, or the fate of a Logon without 141. |
 
 - The census is (A ∖ B) ∩ C, after resolving helpers: a helper that names the policy covers its users, and one that does not passes A on to them.
-- **Known positive:** `tests/session/test_store_fail_reconcile.cpp` (VariantC) must appear. A file seeded in a scratch copy must fire the matcher.
+- **Known positive (amended at Gate A round 1, Codex #11):** a scratch-only seeded sentinel, `tests/session/test_103_census_sentinel.cpp`, never committed: one gtest cell that builds a `SessionConfig` without naming the policy, opens an initiator over a store at {in=37, out=42} and asserts what the base default does there: its Logon carries 141=Y. It passes on the base. It is in A and C and not in B, so the static matcher must report it; it reaches a Session with an unnamed policy, so Pass P must list it; and its outcome depends on the default, so Pass F must fail it. If the static half also finds a genuinely unnamed-default cell in the tree, it is recorded as a second positive; the sentinel is required either way.
+- **Negative control:** `StoreFailReconcileTest.VariantC_BilateralStrictDefault_RegressionGuardNotClean` must **not** be reported. Its helper `make_initiator_cfg` assigns `cfg.reset_seqnum_policy_field = policy`, so it is in B. Its comment "bilateral_strict IS the production default" goes on the re-read list (it becomes false).
 - **Limits:** a lexical match cannot see a helper defined in another file, or a config built at run time. The measured half covers those.
 
 **The measured half.** Run in a scratch copy of the tree (Article XVI §6's mutation proofs), never committed.
 
-- **Pass P, the poison default.**
-  - The default becomes `static_cast<reset_seqnum_policy>(0xFF)`, and `Session`'s constructor aborts with a recognisable message when it sees that value.
-  - Every cell that reaches a Session with an unnamed policy dies. This is the superset.
-  - Known positive: `VariantC_BilateralStrictDefault_RegressionGuardNotClean` must be in it, or the instrument is broken.
-- **Pass F, the flip.** The base tree with only the default changed to lenient. The cells that fail are those whose outcome depends on the default.
+- **Pass P, the poison default (non-fatal; amended at Gate A round 1, N1).**
+  - The default becomes `static_cast<reset_seqnum_policy>(0xFF)`. When `Session`'s constructor sees that value it writes one line, `CENSUS-HIT`, to stdout and flushes it, then continues with the base value (`bilateral_strict`), so the rest of the run is the base tree's.
+  - It must not abort: Article VII §8 groups isolation-safe tests into whole-binary buckets (for example `session_pure_tests`, one `add_test`), so an abort would kill every later cell of the bucket and ctest would report one failure per binary.
+  - The library does not link gtest. Each hit is attributed to the gtest case whose `[ RUN      ]` line precedes it in the binary's own output (run each binary directly, or through `ctest -V`, with its stdout captured); a C test to its ctest entry; a pytest case through `pytest -s -v`. The sentinel proves the attribution: its `CENSUS-HIT` must land under its own `[ RUN ]` line.
+  - Every cell that reaches a Session with an unnamed policy is listed. This is the superset.
+  - Known positive: the sentinel must be in it; VariantC must not. Otherwise the instrument is broken.
+- **Pass F, the flip.** The base tree with only the default changed to lenient. The cells that fail are those whose outcome depends on the default. Known positive: the sentinel must fail here; VariantC must not fail for the flip (it names strict).
 - **Every Pass-P hit gets a row** in the census record, with one disposition:
   - **flipped:** also failed in F;
   - **insensitive:** in P but not in F, and re-read to confirm it asserts nothing the policy decides;
@@ -575,9 +676,7 @@ Each is one compare when nobody waits.
   - Only `chk_error == session_seqnum_too_low` sends the Logout.
   - Any other refusal that falls through stays a silent `Disconnected`: a drained seqnum lock while closing, where "too low" would be false.
   - Too-high frames return earlier: ignored under B-537-1, or answered by D4.
-- **Which states:** `on_inbound_active_` serves both `LogonReceived` and `Active`, so Arm B's Logout is sent in both, as QFC's `verify` does in any state. `onLogout` fires only on the edge out of Active.
-  - The plan confirms whether a non-faulty too-low frame can reach `LogonReceived` at all; the acceptor normally leaves it within the Logon's own chain.
-  - If it can, cell B-9. If not, say so by reading.
+- **Which states:** `on_inbound_active_` serves both `LogonReceived` and `Active`, but no frame other than the Logon itself is processed in LogonReceived (D4.2's reachability result), so Arm B's Logout is sent in Active. `onLogout` fires on the edge out of Active. B-9 is dropped as unreachable by reading; the phase-1 census that re-confirms D4.2 re-confirms it.
 - **Text:** `"MsgSeqNum too low, expecting " + N + " but received " + M`. This is QFC's `doTargetTooLow` and QFJ's `doTargetTooLow`, byte for byte; QFGo per the research.
   - **N:** `seqnum_mgr_.next_inbound_unsafe()` read in the arm. `check_inbound` refused the frame, so it is NextNumIn before the frame.
   - **M:** `parse_seqnum(hdr.msg_seq_num)`, written in decimal by `std::to_chars`. The peer's bytes are never echoed.
@@ -604,7 +703,7 @@ Each is one compare when nobody waits.
 - **Rows that are unchanged:**
   - **TestMessageIndicator:** the Logout carries no 464, and posture is not consulted. The 464 posture refusal is a Logon-arm rule.
   - **`validate_sequence_numbers` off:** the knob-off branch runs first, so the frame is delivered and no Logout is sent.
-  - **Validation on, a too-low frame that fails the dictionary:** Rejected at the validate gate before Guard (4), not consumed, and the session stays Active.
+  - **Validation on, a too-low frame that fails the dictionary:** Rejected at the validate gate before Guard (4), not consumed, and the session stays Active. This is QuickFIX C++'s order (`Session::next` validates before `verify`; a validation failure goes to `generateReject`, which advances only an in-sequence number), and the owner ruled it the FR-018 carve-out (Gate A round 1). Cell B-8.
   - **A too-low frame failing CompID or SendingTime:** the earlier guards' endings apply.
   - **A too-low frame with 43=Y:** the PossDup arm ignores it.
   - **A too-low Heartbeat:** after D6 it no longer returns early, so it reaches Arm B like any other frame.
@@ -653,10 +752,21 @@ Each cell must be RED on `2c74af92`, by reading. #577 and #578 are unconfirmed: 
   - A: reach Active; a frame at N+10 draws a 35=2; a too-low frame without 43=Y gives Arm B → `Disconnected`; `drive_reconnect()`; ack 141=Y at 34=1; a frame at 34=4 within 2 × HB.
   - B: as A, with the clock moved past 2 × HB during the downtime.
   - C: strict with no knob, after D2. It reaches the same state with no setting at all.
-  - D: the mark is cleared across the reconnect (after D4).
-- **Assertion:** `resend_outstanding()` is false after the reconnect's Active. Exactly one 35=2 with 7=2, and no 35=5.
+  - D: the mark is cleared across the reconnect (after D4), through `Disconnected` first.
+  - **E (Gate A round 1, RC1; no `Disconnected` edge):** reach Active; a frame at N+10 draws a 35=2; a too-high Logout sets the mark (T > 0, mock clock); the mock transport is dropped with no `Disconnected` recorded; `drive_reconnect()` installs a new transport; the new Logon's acknowledgement reaches Active; advance the clock past the old mark's `at + T`; `Session::send` an application message.
+  - **G (an install during a claimed acknowledgement):** the bound has claimed and its acknowledgement's `store(S)` is held (the 538 store wrapper); a direct `drive_reconnect` installs a new transport from Active; release the store. Assert: after the reconnect mark no `Disconnected` is recorded, no `sequence_numbers_reset` event is emitted, and the new connection's Logon exchange reaches Active. The acknowledgement's frame itself is D1's disclosed residual and is not asserted.
+  - **H (a new mark on the new connection):** a test hook holds the old bound before its pre-claim test; a direct `drive_reconnect` installs a new transport; the new Logon exchange reaches Active; a too-high Logout at t2 sets a new mark (phase `pending` again); release the old bound with the clock at the old `at + T`, earlier than `t2 + T`. Assert: no 35=5 is written until `t2 + T` (or until N passes the new S).
+  - **F1 (the bound's late start):** the mark is set and a test hook holds the child bound before its first run until `close(terminal)` has begun and is at its join; release; `close()` must complete within a bounded pump (no wait of T).
+  - **F2 (a wake lost before the race starts):** the hook holds the bound after its publish-and-re-test and before its race's wait is initiated; a wrong-CompID frame records `Disconnected` (the edge's wake lands on a timer with no wait pending); release; `close()` must complete within a bounded pump.
+- **Assertions:** `resend_outstanding()` is false after the reconnect's Active, and only 35=2 frames written after the reconnect mark count: exactly one with 7=2 (A, B), none from the old range. Arm E: no 35=5 written after the reconnect mark at or after `at + T`, the send returns success and its frame is written, and the bound's join counter is 0. Arms F1, F2: `close()` returns within the pump; the join counter is 0. Frames written before the reconnect mark (Arm A's Arm-B Logout, D9) are not scoped by these assertions.
 - **Control:** a fresh Session, steps 3 and 4 only, writes the same 35=2.
-- **Mutant:** delete the clear on the `Disconnected` edge → A is RED (nothing written) and B is RED (a 35=5 "ResendRequest unanswered").
+- **Mutants, one per site:**
+  - delete the resend-state clear in `install_reconnected_transport` → A RED (nothing written: the first too-high frame is "already requested"), B RED (a 35=5 "ResendRequest unanswered"), E RED;
+  - delete the mark clear at install, keep the generation → E RED (the send is refused);
+  - delete the bound's pre-claim generation test → H RED (a 35=5 at the old mark's `at + T` on the new connection). E does not kill it: the install's mark clear already fails the bound's `phase == pending` test;
+  - delete the bound's post-emit generation re-test → G RED (a `Disconnected` recorded against the new connection);
+  - delete the bound's wake on the `Disconnected` edge → (j) of the too-high Logout cells RED (the join counter stays 1 until T);
+  - delete the bound's publish-then-re-test → F1 RED; delete `close()`'s unconditional wake → F2 RED (each: the pump deadline expires, with no hang).
 
 **#682 — the default policy and strict's meaning**
 - **Files:** a new `tests/session/test_103_default_reset_policy.cpp`; `test_reset_seqnum_policy_matrix.cpp` (extend); a TOML cell; a C ABI cell. Fixture: `make_reconnect_initiator` with a persistent store at {in=37, out=42}, and a store wrapper that logs its calls.
@@ -720,7 +830,9 @@ Each cell must be RED on `2c74af92`, by reading. #577 and #578 are unconfirmed: 
   - (f) the bound against the deadline, with T > 2 × HB and with T < 2 × HB;
   - (g) `close(terminal)` and `close(graceful)` while pending;
   - (h) the Logout resent in sequence while pending;
-  - (i) no clock.
+  - (i) no clock;
+  - (j) the mark pending, then a frame that ends the session with no Logout and no `close()` (a wrong CompID), with the clock not moved;
+  - (k) the mark pending, then a TestRequest and an in-sequence ResendRequest (FR-011's "administrative traffic continues").
 - **Assertions:**
   - (a) one 35=5, written after the GapFill; then `Disconnected`, with the transport callback left open.
   - (b) no 35=5 at T−1ms; one at T.
@@ -728,8 +840,10 @@ Each cell must be RED on `2c74af92`, by reading. #577 and #578 are unconfirmed: 
   - (d) `session_invalid_state_for_send`, and nothing written.
   - (e) no second 35=2.
   - (f) exactly one 35=5 in each order.
-  - (g) no acknowledgement; `close()` returns; the join counter is 0; `drain()` finds no handler left.
+  - (g) `close(terminal)`: no 35=5 (FR-010 case 4); `close(graceful)`: exactly one 35=5, phase 1's; in both, `close()` returns, the join counter is 0, and `drain()` finds no handler left.
   - (h) one 35=5.
+  - (j) `Disconnected`; the join counter reaches 0 within a bounded pump.
+  - (k) a Heartbeat with the TestReqID, then the replay; the session stays Active with the mark pending.
 - **Control:** an in-sequence Logout is acknowledged at once.
 - **Mutants:**
   - delete `note_inbound_advance_`'s mark test → (a) RED. The clock is never moved, so the timer cannot be what wrote the acknowledgement: this is the forced spurious-hit arm.
@@ -783,10 +897,10 @@ Each cell must be RED on `2c74af92`, by reading. #577 and #578 are unconfirmed: 
 | R-588-b | Same; the wrapper also holds `store(S, outbound)` | `co_spawn(send)` takes S and suspends in its store; feed 7=1, 16=0; release the store. | The original frame S is written before the answer's first frame. The answer covers S: S is replayed with 43=Y, or gap-filled through S+1. No answer frame precedes S. | — | (1) Start the hold after `store_then_emit` → the answer's first frame precedes S. (2) Move the exclusive wait after the tail read → the answer stops at S−1. |
 | R-588-c | Same; mock clock; HB set | Hold `retrieve(3)`; advance HB so the loop wants a Heartbeat; separately, idle past HB so it wants a TestRequest; release. | No 35=0 or 35=1 inside the answer. Each one written afterwards carries the next 34. | Liveness frames with no answer, unchanged (`GapDeadlineProgress.*`). | Delete the liveness wait → a 35=0 or 35=1 lands between replays. |
 | R-588-d | Same | Hold `retrieve(3)`; `co_spawn(close(graceful))`; pump. | No 35=5 while held. After release, the 35=5 follows the answer and carries the next 34. A second arm uses a walk longer than T: no 35=5, and the transport is force-closed. | `close(graceful)` with no answer. | Delete phase 1's wait → the 35=5 lands inside the answer. |
-| R-588-e | `test_103_too_high_logout.cpp` (after D4) | The mark is set; a too-high ResendRequest starts a held walk; advance to T. | The acknowledgement follows the answer, exactly one 35=5. A `close(graceful)` while the bound waits on the gate gives one 35=5 (phase 1's). | Pass-1 (b). | Claim before the wait → `close` skips its Logout, the bound exits on Disconnected, and **zero** 35=5 are written. |
-| R-588-f | 538 fixture | A send contended behind a held walk, then: (1) `close(terminal)`; (2) `Engine::stop()`; (3) the send's own slot emits terminal. | (1) and (2): the send returns `session_invalid_state_for_send` within a bounded pump, and nothing is written. (3): `dispatch_aborted`, the state stays Active, `peek_outbound()` is unchanged, and the waiter count is back to 0. | — | (1)/(2) remove the Disconnected / stop wakes → the pump deadline expires (RED, with no hang). (3) put the wait inside the `try` → Disconnected. Drop the `closing` re-test → a cell with `close(graceful)` plus a contended send shows the application frame after the Logout. |
+| R-588-e | `test_103_too_high_logout.cpp` (after D4) | (1) The mark is set; a too-high ResendRequest starts a held walk; advance to T; release. (2) A `close(graceful)` while the bound waits on the gate. (3) The bound has claimed and its acknowledgement's `store(S)` is held; `co_spawn(close(graceful))`; release (US3 AS7). | (1) The acknowledgement follows the answer; exactly one 35=5. (2) One 35=5, phase 1's. (3) Exactly one 35=5, the acknowledgement, written before the transport closes; `close()` returns. | Pass-1 (b). | (1)/(2) claim before the wait → `close` skips its Logout, the bound exits on Disconnected, and **zero** 35=5 are written. (3) Remove `close()`'s join of an `acking` bound → zero 35=5 (the transport closes under the held store). |
+| R-588-f | 538 fixture | A send contended behind a held walk, then: (1) `close(terminal)`; (2) `Engine::stop()`; (3) the send's own slot emits terminal. | (1) and (2): the send returns `session_invalid_state_for_send` within a bounded pump, and nothing is written. (3): `dispatch_aborted`, the state stays Active, `peek_outbound()` is unchanged, the waiter count is back to 0, and the caller's cancellation state is still cancelled (N5). | — | (1)/(2) remove the Disconnected / stop wakes → the pump deadline expires (RED, with no hang). (3) put the wait inside the `try` → Disconnected; add a `reset_cancellation_state` after the cancelled wait → the cancellation-state assertion is RED. Drop the `closing` re-test → a cell with `close(graceful)` plus a contended send shows the application frame after the Logout. |
 | R-588-g | New `replay_gate_test.cpp` (the gate alone) | Shared/exclusive semantics; writer preference; the last release wakes exclusive; RAII on a cancelled wait; **the filter witness**: after a contended wait, a total emit on the caller's slot aborts the next timer wait. | All hold. | The uncontended path performs no `async_wait`, counted with a test hook on the gate. | Replace the wait with an `async_mutex` lock → the total emit is filtered (#583) and the cell is RED. |
-| R-588-h | Sanitizer lanes (TSan / ASan) | SC-005's repeat count on R-588-a/b. A multi-threaded `io_context` Engine with sends from several threads during a held walk. | 100 % ordered; no report. | — | — |
+| R-588-h | Sanitizer lanes (TSan / ASan) | A multi-threaded `io_context` Engine with sends from several threads during a held walk, repeated n times. | 100 % ordered; no report. | — | Delete `send_body_`'s wait → an application frame inside the answer in at least one run. **The repeat count n (Gate A round 1, N7):** R-588-a/b force the interleaving with a hold, so one run each plus their mutants suffices. R-588-h's interleaving is the scheduler's: run the mutant 200 times per lane and measure its miss rate p (runs in which the defect does not show); n is the least integer with p^n ≤ 0.01, so a live defect shows in at least one of n runs with 99 % probability. If the mutant shows in every run (p = 0), n = 1; if it never shows in the 200 runs, R-588-h is not a witness, SC-005 rests on R-588-a/b, and that is disclosed. The measured p, n and command go in the evidence file, not in code or a comment. |
 | B-1 | New `test_103_too_low_logout.cpp`, `ActiveSession`; N driven to 5 | An application frame at 34=2, no 43=Y. | One 35=5 with `58=MsgSeqNum too low, expecting 5 but received 2`; then Disconnected; N=5 and not persisted; `toAdmin` once, before `onLogout`; no `fromApp`. | — | Remove the Logout → none written. Swap N and M → the text is wrong. Pass N after an increment → the text is wrong. |
 | B-2 | Same | A Heartbeat at 34=1 without 43=Y, with no gap and with a gap before the deadline. | As B-1. | A Heartbeat with 43=Y is ignored; knob off → dropped (`Seq_KnobOff_TooLowHeartbeatStillDropped`). | Restore the Heartbeat's early return (D6) → Active. |
 | B-3 | Same | A gap open past 2×HB, then a too-low frame. | Exactly one 35=5, with the deadline's text. | — | Reorder Arm B ahead of the deadline → the wrong text. |
@@ -794,10 +908,39 @@ Each cell must be RED on `2c74af92`, by reading. #577 and #578 are unconfirmed: 
 | B-5 | Same | CompIDs long enough that the leaf's build fails (sized by computing the builder's overhead, not hard-coded). | No 35=5; Disconnected. | B-1. | — |
 | B-6 | Same, via `session_test_access::seqnum_mgr(sess).drain()` | A frame at 34=N with the seqnum lock drained. | No 35=5 (silent). | — | Drop the `chk_error == too_low` test → a 35=5 reading "expecting N but received N". |
 | B-7 | Same (after D4) | The mark is pending; a too-low frame whose Logout store call is held; advance to T; release. | Exactly one 35=5. | — | Drop Arm B's claim → two. |
-| B-8 | Same | Validation on, a dictionary-invalid too-low frame; and a too-low 43=Y application frame. | A Reject and Active; ignored and Active. | — | — |
-| B-9 | The `LogonReceived` fixture (if reachable) | A too-low frame. | One 35=5; Disconnected; no `onLogout`. | — | — |
+| B-8 | Same | Validation on, a dictionary-invalid too-low frame; and a too-low 43=Y application frame. | A Reject and Active, no 35=5; ignored and Active. | A dictionary-valid too-low frame draws B-1's Logout. | Route validate-gate failures of too-low frames into Arm B (a sequence check ahead of the gate's Reject) → a 35=5 and Disconnected. |
+| B-9 | — | Dropped: LogonReceived processes no frame but the Logon (D4.2). | — | — | — |
 
 The pass-1 #588 cell is replaced by R-588-a…h.
+
+### FR ↔ cell ↔ mutant (Gate A round 1, Codex #16)
+
+Every behavioural FR has a cell and a mutant that turns it RED for the FR's own reason. FR-007 and FR-019 are documentation and records: they are read at Gate B against the site they describe and need no behavioural mutant. Characterisation cells of unchanged behaviour carry a control instead.
+
+| FR | Cell(s) | Mutant → RED |
+|---|---|---|
+| FR-001 | #682 AS1, AS4; C ABI and TOML default cells | restore the strict default |
+| FR-002 | #682 AS5 | restore the old 141 predicate |
+| FR-003 | #682 AS2 | drop strict from `reset_before_logon` |
+| FR-004 | #682 AS3 | restore the silent refusal |
+| FR-005 | #682 AS1, AS4, AS5 | restore the strict default |
+| FR-006 | #578 A, B, E, G, H, F1, F2 | delete the install clear (A, B, E); delete the bound's post-emit generation re-test (G) or its pre-claim generation test (H); delete the publish-then-re-test (F1) or `close()`'s unconditional wake (F2) |
+| FR-007 | the `resend_state.hpp` comment, read against D1's site | none (documentation) |
+| FR-008 | #577 RR Arms 1, 2 | delete either too-high dispatch |
+| FR-009 | #577 RR Arm 2; Logout (e) | send a second ResendRequest from the out-of-sequence route |
+| FR-010 | Logout (a)–(j); R-588-e; B-7 | delete `note_inbound_advance_`'s mark test; delete the bound; delete a claim; remove `close()`'s `acking` join |
+| FR-011 | Logout (d), (k); #578 E | delete the send refusal; delete the install mark clear |
+| FR-012 | #580 7=0 arm; SC-003 assertion | delete the clamp |
+| FR-013 | #580 absent arms | delete the presence test |
+| FR-014 | R-588-a…e | delete each emitter's wait; start a hold after `store_then_emit`; move the exclusive wait after the tail read |
+| FR-015 | R-588-g; the send-path allocation witness; R-588-f(3) | `async_mutex` in place of the wait; a planted allocation in the fast path; a reset after a cancelled wait |
+| FR-016 | R-588-a's store-fault arm; R-588-f | delete the guard's release; delete the Disconnected / stop wakes |
+| FR-017 | #581 residual cells; B-3 | restore test 1 ("above N") |
+| FR-018 | B-1, B-2, B-6, B-8; #581 too-low Heartbeat | remove the Logout; restore the Heartbeat's early return; drop the `too_low` test; route validate-gate failures into Arm B |
+| FR-019 | the B&L delta rows, read against the live and closed B&L files | none (records) |
+| FR-020 | D8's census with its sentinel | remove the sentinel → the census's known-positive check fails |
+
+Characterisation cells, no behavioural mutant: B-4 (`toAdmin` throws; control B-1), B-5 (CompID overflow; control B-1). R-588-h's mutant is in its row.
 
 ---
 
@@ -866,7 +1009,7 @@ The pass-1 #588 cell is replaced by R-588-a…h.
 
 **Amended:**
 - `B-013-6`: lenient is the default; strict resets before every Logon; the strict acceptor sends a Logout with Text; the "QFJ-style" label is struck.
-- `B-013-1`: "too-LOW … still Logs out with `session_seqnum_too_low`" is false by source. Correct it per R1's outcome.
+- `B-013-1`: "too-LOW … still Logs out" becomes true (Logout with Text, B-103-10); "with `session_seqnum_too_low`" is false, because the arm returns success: strike it.
 - `B-016-1`: a too-high Logout draws a ResendRequest and a bounded acknowledgement (B-103-7). "recovering the gap before the Logout is dispatched" is struck: no frame is kept.
 - `B-537-1`: the exceptions for a too-high ResendRequest and Logout (B-103-6, B-103-7).
 - `B-537-2`: "the next frame above NextNumIn" becomes "the next frame that does not advance NextNumIn". The list of endings loses its `L-537-1` line.
@@ -881,36 +1024,23 @@ The pass-1 #588 cell is replaced by R-588-a…h.
 - `B-103-4`: BeginSeqNo(7)=0 is answered as 7=1.
 - `B-103-5`: an absent 7 draws Reject 373=1, 371=7 and is consumed in sequence. A present but non-numeric 7 is read as 0.
 - `B-103-6`: a too-high ResendRequest is serviced; at most one ResendRequest of fixpp's own; no `fromAdmin`. With `validate_sequence_numbers` off, unchanged.
-- `B-103-7`: the pending-Logout ending: the acknowledgement when N passes S or at T, or at once with T=0 or no clock; sends refused while the mark is set; no `fromAdmin`; the durable N stays at or below S on the timeout route.
-- `B-103-8`: a send started during a resend answer is written after the answer, and is numbered then.
-- `B-103-9`: resend state and the mark are cleared on `Disconnected`. Reachable in place only through a direct `Session::drive_reconnect`.
-- `B-103-10`: a too-low Heartbeat without 43=Y ends the session, with Arm B's ending.
-- `L-103-1`: a send that is mid-store when an answer starts, and liveness or Logout frames during an answer, are not serialised.
+- `B-103-7`: the pending-Logout ending (Active only): the acknowledgement when N passes S or at T, or at once with T=0 or no clock; sends refused while the mark is pending; TestRequests and ResendRequests answered meanwhile; no `fromAdmin`; the durable N stays at or below S on the timeout route; a `close(graceful)` that finds the acknowledgement claimed waits for it inside its grace. At most one Logout; none where the CompIDs overflow the Logout buffer, where `toAdmin` throws on it, where its assignment or store call fails, or where the transport ends first (the peer's EOF, `close(terminal)`, `Engine::stop()`) (FR-010 cases 1–4).
+- `B-103-8`: the four emitter kinds (`Session::send`, the liveness Heartbeat and TestRequest, `close()`'s Logout, the pending-Logout acknowledgement) wait for a running resend answer and are numbered after it; a frame numbered before an answer is written before it; a waiting send is refused (`session_invalid_state_for_send`) on close, stop, a non-Active state or the mark, or returns `dispatch_aborted` with no state change and its caller's cancellation still pending on its own cancellation.
+- `B-103-9`: resend state and the mark end with the connection: cleared when a new transport is installed, whether or not the session passed through `Disconnected`; the mark's bound acts only on its own connection. Reachable in place only through a direct `Session::drive_reconnect`. Disclosed: an emit already past its last check when a direct caller installs a new transport (a `Session::send` mid-store, or a claimed acknowledgement) writes its frame on the new transport, as before 103.
+- `B-103-10`: every frame below NextNumIn without 43=Y, the Heartbeat included, in Active with sequence validation on, that reaches the sequence check draws `Logout 58="MsgSeqNum too low, expecting N but received M"`, then `Disconnected`. N is not advanced. There is no `fromAdmin`/`fromApp` and no event. The gap deadline's Logout takes precedence. Not covered: a frame Rejected at the validate gate (it stays Active, as QuickFIX C++), a frame failing the CompID or SendingTime check, an unparseable or garbled frame. No Logout where the CompIDs overflow the Logout buffer or `toAdmin` throws.
 - `L-103-2`: a peer-spontaneous 141=Y acknowledgement at 34=1 with a hydrated N above 1 ends the session (D2.3).
 - `L-103-3`: HB ≤ 0: no gap deadline (restated).
 - `L-103-4`: a strict acceptor that receives a 141=Y Logon with 34 ≠ 1: unchanged (the spec's Edge Cases).
+- `L-103-5`: after a too-low Logout, as after B-537-2, the transport stays open until the peer disconnects, `close()` or `Engine::stop()`, and `reset_on_logout` does not fire.
+- `L-103-6`: a `close(graceful)` whose `logout_disconnect_timeout_ms` grace runs out before its Logout is written (a resend answer longer than the grace, or a claimed acknowledgement whose store and write outlast it) sends no Logout and force-closes (FR-010 case 5).
+- `L-103-7`: a too-low frame in the Logon arms (NotConnected, LogonSent) still ends silently. That is out of FR-018's Arm B; QuickFIX sends a Logout there.
+- (`L-103-1` of pass 1 is not added: pass 2 covers both of its cases.)
 
 ---
 
 ## Constitution check
 
-| Article | Verdict | Note |
-|---|---|---|
-| VI §5 | **Needs work** | `spec.md` has no Normative References section. Add the entries: FIX-SL §4.4.2, §4.4.3, §4.5.4, §4.8.1, §4.8.5, Table 3, §4.10; TC 1B, 1S, 14b, 20. Add catalogue and coverage-index rows before landing (§4). |
-| VII §3 | PASS | Test-first: the RED cells above, with a mutant for each fix. |
-| VII §5 / §6 | PASS (planned) | `TcSeqnumTest.Tc2c` re-pinned; the live QuickFIX restart-and-resume cell (SC-002) run with no helper forcing a policy. |
-| VIII §2 and §5 | Needs a measurement | Adds a flag read on the send path (D4.7, D5) and two on the inbound fast path (the `acking` drain; `note_inbound_advance_`). Measure with the paired bench (SC-006). No allocation is added between parse and `fromApp`. |
-| IX §1 | PASS (planned) | New branches each get a cell: the bound's exit tests, the close join, T=0, no clock, the cancelled wait, the store-fault release. |
-| IX §2 | PASS (planned) | TSan/ASan on the bound vs `close()` race and the held-retrieve cell (SC-005). |
-| X §1, §6, §7 | PASS (D7) | MINOR 17; BREAKING on the declarations, in the PR body and in the B&L; consumers updated. |
-| XI §2 | Needs justification | The bound's wait wakes by cancelling a timer (asio-native), not through a cancellation slot, because `root_cancel_`'s only slot belongs to the liveness loop. No `stop_token`. Alternative: an own `cancellation_signal`. |
-| XI §3 / XV §9 | PASS | No `std::mutex`, and no new `async_mutex` on the send path. |
-| XI §7 | PASS | Adds a new detached awaitable and a new wait; all four controls apply. |
-| XV §1 | PASS | The hot path is untouched. Cold paths only: the bound's frame, one per too-high Logout, and the contended wait's operation. |
-| XVI §3 / §4 | PASS / pending | Clarify is done; analyze is mandatory (wire, FSM, ABI, threading). |
-| XVII §1 | Gate A required | Triggers: the C ABI, concurrency, the session FSM and recovery, the wire. |
-| XVII §8 | Pending | `/speckit-verify` after implementation. |
-| Appendix A | All four controls apply | Triggers: an ABI surface change (the default's documented result); threading (the new awaitable and wait); error semantics (`session_invalid_state_for_send` under a new condition; `session_seqnum_reset_mismatch` now with a Logout); wire format (7=0, the Reject, the acknowledgement, the ResendRequest); session FSM (recovery semantics). |
+*Superseded at Gate A round 1 (RC5): the check is redone in plan.md "Constitution Check", with each article's text quoted. The pass-1 table and its pass-2 amendments are removed here so that they cannot be read as current.*
 
 ---
 
@@ -927,15 +1057,15 @@ The pass-1 #588 cell is replaced by R-588-a…h.
   - It is not `close(graceful)`'s timed wait. D4.5 uses the in-sequence ending.
   - Amend the wording to "as after an in-sequence peer Logout". No new wait.
 - **R3 — FR-010 with T = 0.** "Draw a ResendRequest per FR-009" conflicts with "acknowledges at once (the QuickFIX ending)", which sends no ResendRequest. Recommend: no ResendRequest at T = 0, or with no clock; amend FR-010's parenthesis.
-- **R4 — #578 in production.** The Engine never reconnects in place (`run_connect_loop`), so the defect is reachable only through a direct `Session::drive_reconnect`. Fix it anyway; the B-row states the reachability.
+- **R4 — #578 in production.** The Engine never reconnects in place (`run_connect_loop`), so the defect is reachable only through a direct `Session::drive_reconnect`, from `Disconnected` or from Active (D1). Fix it anyway; the B-row states the reachability.
 - **R5 — The bound needs a timer.** #537 rejected a timer for the gap deadline; D4's bound is a different requirement, with its own justification under XI §7. The hazard of the one-handler slot (D4.4) must be in the plan's threading section, with a cell showing that the liveness join completes while the bound's coroutine is alive.
-- **R6 — One Logout across five endings.** The endings are the bound, the gap deadline, the Logout resent in sequence, `close(graceful)`, and the `Disconnected` edge. D4.6's claim table is normative; Gate A should review it as a unit. Cell (f) covers both orders.
+- **R6 — At most one Logout across the competing endings** (exactly one except FR-010's enumerated cases). The endings are the bound, the gap deadline, the Logout resent in sequence, Arm B, `close(graceful)` (with its join of an `acking` bound), and the `Disconnected` edge. D4.6's claim table is normative; Gate A should review it as a unit. Cell (f) covers both orders; R-588-e(3) the `close()` join.
 - **R7 — D5's scope.** The two uncovered cases (D5 "Not covered") are disclosed, not fixed. Confirm with the owner that "scoped to the replay" excludes a send already mid-store, and the liveness loop's frames.
 - **R8 — No `fromAdmin`** for a too-high ResendRequest or Logout, where QFC calls it at receipt. Disclosed.
 - **R9 — `validate_sequence_numbers = false`.** A too-high ResendRequest or Logout is still only handed to `fromAdmin`: not answered, not acknowledged. That gap predates 103 and stays outside it.
-- **R10 — The peer-spontaneous 141=Y acknowledgement** (D2.3, L-103-2). It is in scope only if the owner reads FR-005 widely. Check the SC-002 counterparty configs for `ResetOnLogon=Y` acceptors before the live runs.
+- **R10 — The peer-spontaneous 141=Y acknowledgement** (D2.3, L-103-2). It is in scope only if the owner reads FR-005 widely. Check the counterparty configs of SC-002's live Logon cells for `ResetOnLogon=Y` acceptors before the live runs.
 - **R11 — On a validating session, a too-high frame that fails validation** (for example an absent 7) is Rejected at the gate and opens no gap, because the gate runs before Guard (4). A non-validating session sends the Reject and fixpp's own ResendRequest. A pre-existing asymmetry, disclosed.
-- **R12 — FR-017's "any MsgSeqNum".** D6 excludes faulty frames (`dispose_unparseable_`) and garbled frames, because they do not refresh liveness. Confirm this reading at analyze.
+- **R12 — FR-017's "any MsgSeqNum".** Closed at Gate A round 1: FR-017 and E12 now state the exclusion of faulty and garbled frames and its reason (D6).
 - **R13 — The re-aim of the 538 slot-zero cell** (the instrument note under #580's RED cell). Flipping only its last assertion would leave a cell that fails at its precondition.
 - **R14 — Moving the strict acceptor's refusal** (D2.4) changes two more cases: an out-of-sequence Logon without 141 now gets a Logout, and a strict acceptor with `reset_on_logon` does not reset its store for a refused Logon. Both go in B-103-3. Gate A should confirm the move.
 - **R15 — The stale header comment** on `logout_disconnect_timeout_ms` ("Must be > 0; validated"). Fix it in the same PR; FR-010's 0 clause depends on 0 being reachable, and it is.
@@ -961,13 +1091,13 @@ The pass-1 #588 cell is replaced by R-588-a…h.
 
 **Decisions**
 - **D5:** replaced by D5′ in full. Pass-1's "Not covered (i), (ii)" is deleted; both are now covered.
-- **D4.4 / D4.6:**
+- **D4.4 / D4.6** (folded into D4.4 and D4.6 at Gate A round 1):
   - The bound claims `pending → acking` **after** its gate wait, immediately before the acknowledgement's emit.
   - Add claim-table row: "Arm B (too low, 43≠Y) | `pending → none` and wake | its own Logout is the one Logout".
   - The bound is a shared-hold emitter (D5′.4).
 - **D4.7:** after a contended wake, `send_body_` re-tests the mark together with Active, `closing` and engine stop.
-- **D6:** "What Arm B then sends is Risk R1" becomes: Arm B sends QuickFIX's too-low Logout (§2).
-- **D1:** `record_state_transition_`'s Disconnected edge also calls `replay_gate_.wake_all()`.
+- **D6:** "What Arm B then sends is Risk R1" becomes: Arm B sends QuickFIX's too-low Logout (§2). (Folded into D6.)
+- **D1:** `record_state_transition_`'s Disconnected edge also calls `replay_gate_.wake_all()`. (Folded into D1 at round 1, which adds the same wake at `install_reconnected_transport`.)
 - **D7, the 1.17 paragraph:** add "every frame below NextNumIn without 43=Y now draws a Logout with Text" and "liveness, Logout and in-flight sends are ordered around a resend answer".
 
 **Spec amendments for clarify / analyze**
@@ -983,22 +1113,10 @@ The pass-1 #588 cell is replaced by R-588-a…h.
 - "#578 and #588: no existing pin" stays true for #588.
 
 **B&L delta**
-- **Delete `L-103-1`.** Both cases are covered.
-- **`B-103-8` rewritten:** the four emitter kinds wait for a running answer and are numbered after it; a frame numbered before an answer is written before it; a waiting send is refused on close, stop, a non-Active state or the mark (`session_invalid_state_for_send`), or returns `dispatch_aborted` with no state change on its own cancellation.
-- **`B-103-10` rewritten:** every frame below NextNumIn without 43=Y, the Heartbeat included, in LogonReceived or Active with sequence validation on, draws `Logout 58="MsgSeqNum too low, expecting N but received M"`, then `Disconnected`. N is not advanced. There is no `fromAdmin`/`fromApp` and no event. No Logout is sent where the CompIDs overflow the Logout buffer. The gap deadline's Logout takes precedence.
-- **`B-013-1` amended:** "Logs out with Text" becomes true. "with `session_seqnum_too_low`" is false, because the arm returns success; strike it.
-- **New `L-103-5`:** after a too-low Logout, as after B-537-2, the transport stays open until the peer disconnects, `close()` or `Engine::stop()`, and `reset_on_logout` does not fire.
-- **New `L-103-6`:** a `close(graceful)` that meets a resend answer longer than `logout_disconnect_timeout_ms` sends no Logout and force-closes.
-- **New `L-103-7`:** a too-low frame in the Logon arms (NotConnected, LogonSent) still ends silently. That is out of FR-018's Arm B; QuickFIX sends a Logout there.
+- Folded into "B&L delta" above at Gate A round 1 (L-103-1 not added; B-103-8 and B-103-10 rewritten; B-013-1 amended; L-103-5, L-103-6, L-103-7 added).
 
 **Constitution check**
-- **XI §3:** change to *Needs justification*. The gate is a new synchronisation shape. Argue that it is not a mutex in §3's sense (strand-local, no thread exclusion, no `std::mutex`), and have Gate A rule on it. The alternative is `async_mutex`, rejected under #583 and R-10.
-- **XI §2:** cancellation through the per-operation slot plus the wake idiom. Disclose that a caller carrying #583's terminal filter is woken only by Disconnected or stop.
-- **VIII §2 / §5:** add the gate's bool test on the send path and on the liveness emits. SC-006's paired bench and the mallocnesia send witness.
-- **IX §1:** add the contended-path branches (each re-test, the cancelled wait, the RAII count) and B-6's drained-lock branch.
-- **IX §2:** add R-588-h.
-- **XV §1:** PASS, with the contended path cold.
-- **Appendix A:** threading now also covers the gate; wire format covers Arm B's Logout.
+- Folded into plan.md "Constitution Check" at Gate A round 1.
 
 **Risks**
 - **R1:** resolved as option (b) by the owner on 2026-11-14.
@@ -1006,7 +1124,7 @@ The pass-1 #588 cell is replaced by R-588-a…h.
 - **New R18, writer preference:** back-to-back peer ResendRequests can hold off live sends. Each walk is driven by a peer frame, so this is bounded by the peer, and QFGo behaves the same. Disclose.
 - **New R19, inbound stall:** the inbound chain now also waits for in-flight holders' store calls before a walk. That costs at most one store operation per holder; a wedged `FileStore` job already stalls the walk today (B-598-1).
 - **New R20, liveness slip:** liveness emits slip by the length of a walk, and a TestRequest decided before a walk is re-evaluated after it. Usually it is dropped, because the ResendRequest refreshed inbound liveness.
-- **New R21:** `emit_initiator_logon_`'s exclusion depends on the plan's caller census of `open()` and `drive_reconnect`.
-- **New R22, layout:** `Session` grows by the gate (an optional timer and three scalars), before the first release.
-- **New R23:** the frozen `specs/013-session-reconnect-binding` FR-009 / T020-A (the too-low Heartbeat exemption) and B&L `B-013-1` are superseded. Flag both in `brain/components/session.md`. The #544 section's "a session send gate" rejection gains a note naming 103's scoped shared/exclusive gate as the decision that narrowed it.
+- **R21:** closed at Gate A round 1: `emit_initiator_logon_`'s exclusion rests on causality, not on a caller census (D5′.4's row).
+- **New R22, layout:** `Session` grows by the gate (an optional timer and three scalars) and, at round 1, by `conn_gen_`, before the first release.
+- **New R23:** the frozen `specs/013-session-reconnect-binding` FR-009 / T020-A (the too-low Heartbeat exemption) and B&L `B-013-1` are superseded. Flag both in `brain/components/session.md`. The #544 section's "a session send gate" rejection gains a note naming 103's scoped shared/exclusive gate, and the Article XI §3 amendment that permits it (contracts/constitution-xi3-amendment.md), as the decision that narrowed it.
 - **R17, the order of work:** D5′ goes before D4's Logout half (R-588-e needs D4). Arm B goes with D6.

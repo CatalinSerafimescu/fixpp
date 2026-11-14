@@ -30,31 +30,40 @@ pytest (`bindings/python/tests`), the parent interop matrix (live QuickFIX C++ v
 **Performance Goals**: no regression on the send path beyond the bench gate's tolerance (SC-006); the fast path of
 the replay gate is a flag test and a counter, no await, no allocation
 **Constraints**: Article XV §1 (no allocation on parse → validate → dispatch), #583 (no terminal cancellation filter
-left by the new gate), Article XI §3 (no coarse session mutex), one observable ending per condition
+left by the new gate), Article XI §3 as amended by this feature (contracts/constitution-xi3-amendment.md), one
+observable ending per condition
 **Scale/Scope**: ~15 session functions changed (research Sites lists), two new private helpers plus one coroutine
 (`note_inbound_advance_`, `answer_resend_request_`, `run_peer_logout_bound_`), one new internal primitive
-(`detail::replay_gate`), one internal header field (`FrameHeader::begin_seqno_present`), C-ABI MINOR 16 → 17
+(`detail::replay_gate`), one private counter (`conn_gen_`), one internal header field
+(`FrameHeader::begin_seqno_present`), C-ABI MINOR 16 → 17, constitution v4.3 → v4.4 (Article XI §3)
 
 ## Constitution Check
 
-*GATE: must pass before Phase 0 and be re-checked after Phase 1.* The full table is research.md "Constitution
-check" as amended by "Pass-2 amendments". Summary:
+*GATE: must pass before Phase 0 and be re-checked after Phase 1.* Redone at Gate A round 1 (RC5) with each clause
+quoted from `.specify/memory/constitution.md` (v4.3); it replaces research.md's table.
 
-| Article | Verdict |
+| Article (quoted) | Verdict |
 |---|---|
-| VI §5 normative references | PASS — spec "Normative References" added (FIX-SL §§, Table 3, §4.10; TC 1B, 1S, 2c, 14b, 20) |
-| VII §3 test-first | PASS — a RED cell and a mutant per fix (research RED cells) |
-| VIII §2/§5 performance | Measure — the gate's flag on send/liveness and two flag reads on the inbound path; SC-006 paired bench + the send-path allocation witness |
-| IX §1/§2 coverage, sanitizers | PASS (planned) — every new branch has a cell; R-588-h under TSan/ASan |
-| X §1/§6/§7 C ABI | PASS — MINOR 17, BREAKING marks on `fixpp_reset_seqnum_policy` and its setter, PR body, B&L; in-repo consumers updated (D7) |
-| XI §2 cancellation | Justified — waits are woken by timer cancel (the session's wake idiom), not a cancellation slot, because `root_cancel_`'s one slot belongs to the liveness loop (D4.4) |
-| XI §3 no session mutex | **Needs Gate A ruling** — the replay gate is strand-local (no thread exclusion, no `std::mutex`, no `async_mutex`); argued in D5′ |
-| XI §7, Appendix A | All four controls apply: `/clarify` (done), `/analyze`, Codex Gate A, the owner's `/plan` sign-off |
-| XV §1 allocation | PASS — hot path untouched; the bound's coroutine frame and contended waits are cold |
-| XVI §3/§4 | `/clarify` done; `/analyze` mandatory |
-| XVII §1 | Gate A required (C ABI, concurrency, session FSM and recovery, wire) |
+| VI §5: "Every `/specify` artifact must include a **Normative References** section listing the exact `[DocAbbrev §X.Y.Z] Title` entries from the coverage index that inform the spec." | **PASS (round 1)** — spec "Normative References" lists each FIX-SL and FIX-TC entry by its exact `spec/coverage-index.md` keys; Table 3 is cited under `[FIX-SL §4.8.8]` and precedence 14/15 under `[FIX-SL §4.10]`, with the detail in prose. Every needed key exists; no coverage-index row is added. |
+| VII §3: "**TDD is mandatory.** Every feature lands as red-green-refactor: failing test first, then implementation." | PASS (planned) — a RED cell before each fix; research "FR ↔ cell ↔ mutant" maps every behavioural FR to a cell and a mutant. |
+| VII §5: "`tests/conformance/` holds the official FIX session-layer test cases … Every PR must pass them in CI." | PASS (planned) — `TcSeqnumTest.Tc2c_MsgSeqNumTooLow` re-pinned to TC 2c's Logout (research Pins). |
+| VII §6: "v1.0 includes at least one interop test against an independent FIX implementation (QuickFIX) …" | PASS — unchanged; SC-002's live Logon cells run the default policy once the helpers stop forcing it (owner ruling 2; the live restart-and-resume run stays fixpp#503). |
+| VIII §2: "**Regression budget: a slowdown greater than +5%** against the **merge-base** … measured as a **paired base-vs-candidate run on one runner**" | Measure — the gate's flag test on the send and liveness paths, two flag reads on the inbound path (`acking`, `note_inbound_advance_`); SC-006's paired bench against the base, base worktree path padded to equal length. |
+| VIII §5: "zero `new`/`delete` between parse and `fromApp` callback." | PASS (planned) — nothing is added between parse and `fromApp`; the send-path fast path is witnessed by `alloc_guard_544_we_sends_interleaved_mallocnesia` and its MemoryStore twin, proven able to fire on a planted allocation (research D5′ "Allocation"). |
+| IX §1: "**Per-PR:** **≥95% line, ≥85% branch** on **touched modules** … **Binding rule — no silent uncovered error/edge path.**" | PASS (planned) — each new branch has a cell: the bound's "live" and generation re-tests (#578 E, F1, F2, G, H), the `close()` join (R-588-e(3)), T=0, no clock, the cancelled wait (R-588-f(3)), the store-fault release, B-6's drained lock. |
+| IX §2: "**Sanitizers — Tier 1 (every PR, Linux/Clang):** ASan, UBSan, TSan must all run and pass." | PASS (planned) — R-588-h on TSan and ASan with its derived repeat count (SC-005). |
+| X §1/§6: "Every change to it is reviewed against the contract; Codex Gate A is mandatory." / "ABI-affecting features trigger all four mandatory controls" | PASS — Gate A running; the four controls in the XI §7 row. |
+| X §7: a breaking change "is marked **BREAKING** in the documentation of each affected declaration (in the version comment of `version.h` where no declaration carries the change), in the PR description, and in the behaviors-and-limitations delta" and "updates every in-repository consumer … in the same PR" | **PASS (round 1, N3)** — MINOR 17; a 1.17 clause on every affected declaration, derived from the behaviour changes (research D7's table: the policy enum, its setter, `fixpp_session_config_create`, `fixpp_session_config_set_reset_on_logon`, and the five observers `fixpp_session_is_established`, `fixpp_session_close`, `fixpp_session_send`, `fixpp_session_register_callback`, `fixpp_session_register_send_callback`, with the 1.12 sentences 103 falsifies amended in place); the counterparty's side in `version.h`; PR body; B-103-1; consumers per D7. |
+| XI §2: "**Cancellation: ASIO native cancellation slots end-to-end.** No parallel `stop_token` abstraction." | PASS, justified — waits end by the per-operation slot or by the session's wake idiom (a timer cancel, asio-native); no `stop_token`. The bound is not bound to `root_cancel_` because its slot holds one handler, the liveness loop's (D4.4). |
+| XI §3: "`fixpp::sync::async_mutex` … is the only allowed mutex shape for coroutines." | **PASS once amended (owner ruling 1, Gate A round 1)** — `detail::replay_gate` is a coroutine shared/exclusive exclusion primitive, so it conflicts with §3 as written, and Article XX §1 requires "amending the article first". The amendment rides this PR (MINOR, v4.3 → v4.4): [contracts/constitution-xi3-amendment.md](contracts/constitution-xi3-amendment.md) holds the exact text and the Sync Impact Report entry, and phase 0 applies it before any D5′ code. |
+| XI §7: "Threading/concurrency-affecting features trigger all four mandatory controls (Appendix A)" | Applies — `/clarify` done; `/analyze` pending; Codex Gate A running; owner `/plan` sign-off: see below. |
+| XV §1: "The "hot path" of this ban is the latency-critical **in-memory** path — parse → validate → dispatch and `MemoryStore`, which MUST stay zero-allocation per message." | PASS — the per-frame additions are a byte compare and a flag read. The contended exclusive wait sits only at `replay_outbound_range_`'s entry (a ResendRequest or a 789 walk), off the per-frame path; it is measured as evidence (research D5′ "Allocation", Codex #9). The bound's coroutine frame is one per too-high Logout. |
+| XV §3: "**Coarse global session lock.**" / XV §9: "**`std::mutex` in coroutine context.**" | PASS — the gate is per session, scoped to one resend answer, and uses no `std::mutex`. |
+| XVI §3/§4: "`/clarify` is MANDATORY before `/plan` …" / "`/analyze` is MANDATORY for the same trigger set" | `/clarify` done; `/analyze` pending. |
+| XVII §1: Gate A triggers "Touches the public C++ API or C ABI", "concurrency / threading / cancellation / executor model", "the wire format", "the session FSM, recovery, or message store contract" | Gate A required and running (all four triggers). |
+| XX §1–§3: "Any conflict … must be resolved by amending the article first (with rationale committed in the same PR)"; "Codex Gate A review on every amendment. User signs off."; "every amendment is recorded in a Sync Impact Report" | Planned — the XI §3 amendment's text is reviewed at Gate A round 2 with this bundle, then a scoped Codex Gate A on the applied clause, Gate B, and owner sign-off; the PR is titled in Article XX §2 form (contract). |
 
-**Owner `/plan` sign-off**: GIVEN 2026-11-14 ("plan signed off"), on the bundle at `278495fb` (rebased onto `da129e17` as `d165880b`; the squash tree equals 102's head tree, so no anchor moved). Appendix A control 4 discharged.
+**Owner `/plan` sign-off**: GIVEN 2026-11-14 ("plan signed off"), on the bundle at `278495fb` (rebased onto `da129e17` as `d165880b`), with Article XI §3 then open. **Re-confirmation requested on the round-1 delta** (Opus round-1 recommendation): D1's clear site (the transport install, with the connection generation), D4's bound protocol and `close()`'s join of an `acking` bound, and the replay gate's constitutional status (the XI §3 amendment). Appendix A control 4 is discharged for the pre-round-1 bundle only until the owner re-confirms.
 
 ## Project Structure
 
@@ -69,7 +78,8 @@ specs/103-resend-logon-reset-fidelity/
 ├── quickstart.md    # validation scenarios and commands
 ├── contracts/
 │   ├── c-abi-1.17.md           # the default-policy change (BREAKING)
-│   └── session-wire-endings.md # one observable ending per condition, per item
+│   ├── session-wire-endings.md # one observable ending per condition, per item
+│   └── constitution-xi3-amendment.md # Article XI §3 text + Sync Impact Report (owner ruling 1)
 └── checklists/requirements.md
 ```
 
@@ -77,7 +87,8 @@ specs/103-resend-logon-reset-fidelity/
 
 ```text
 include/fixpp/session/session_config.hpp   # default policy; doc of reset_seqnum_policy, refresh_on_logon, logout_disconnect_timeout_ms
-include/fixpp/session/session.hpp          # private members: peer_logout_ mark, replay gate, bound join counter, wake
+include/fixpp/session/session.hpp          # private members: peer_logout_ mark, conn_gen_, replay gate, bound join counter, wake
+.specify/memory/constitution.md            # Article XI §3 amendment + Sync Impact Report (phase 0)
 include/fixpp/session/resend_state.hpp     # doc: when resend state is reset (names 103)
 include/fix/c_api/session.h, version.h     # (default) marker, BREAKING marks, MINOR 17 paragraph
 src/session/session.cpp                    # D1–D6, D9 sites (research Sites per decision)
@@ -90,38 +101,51 @@ tests/capi/version_test.cpp, tests/config/*, bindings/python/tests/*, tests/inte
 spec/behaviors-and-limitations*.md, spec/feature-catalogue.md, spec/coverage-index.md, brain/components/session.md
 ```
 
-**Structure Decision**: library-internal session changes plus documentation surfaces; no new public symbol, type or
-error code.
+**Structure Decision**: library-internal session changes plus documentation surfaces and one constitution
+amendment; no new public symbol, type or error code.
 
 ## Phases (for /speckit-tasks)
 
 Order by dependency (research R17 as amended):
 
-1. **Setup & census** — D8's FR-020 census (static half with its known positive; measured Pass P poison-default and
-   Pass F flip in a scratch copy) and D9's Arm-B census; caller censuses for `drive_reconnect` (D1) and for
-   `emit_initiator_logon_` vs a live inbound chain (D5′ R21). Results recorded in the evidence file, never in code
-   comments.
-2. **#578 (D1)** — RED reproduction first; if GREEN on the base, close as not-a-bug with evidence. Clear on the
+0. **Constitution amendment first (owner ruling 1; Article XX §1).** Apply
+   [contracts/constitution-xi3-amendment.md](contracts/constitution-xi3-amendment.md) to
+   `.specify/memory/constitution.md`: the Article XI §3 sentence and the PENDING Sync Impact Report entry. No D5′ code
+   (phase 6, and the bound's gate wait in phase 7) is written before this lands on the branch.
+1. **Setup & census** — D8's FR-020 census: the static half with the seeded sentinel as its known positive and
+   VariantC as its negative control; Pass P (non-fatal `CENSUS-HIT`, attributed to the enclosing `[ RUN ]` line)
+   and Pass F in a scratch copy, each proven non-zero on the sentinel. D9's Arm-B census. The reader censuses D1
+   needs (no reader of the resend state or the mark acts outside Active), D4.2's LogonReceived reachability, and
+   the acceptor's single `attach_accepted_transport` per Session. The send-path allocation witness's MemoryStore
+   twin measured on the base, and its planted-allocation proof. Results recorded in the evidence file, never in
+   code comments.
+2. **#578 (D1)** — RED reproduction first (arms A, B, E; F1, F2, G, H after phase 7); if GREEN on the base, close as
+   not-a-bug with evidence. The clear and `conn_gen_` at `install_reconnected_transport`; the wakes on the
    `Disconnected` edge; doc fix.
 3. **#682 (D2, D7)** — RED cells (default, strict reset, strict acceptor Logout, AS5 matrix, C ABI and TOML
    defaults); the default flip; strict reset via the `reset_on_logon` path; the acceptor refusal moved before the
-   sequence check; C-ABI 1.17; consumer updates; the census-found pins.
+   sequence check; C-ABI 1.17 with a clause on every declaration of D7's table; consumer updates; the census-found
+   pins.
 4. **#580 (D3)** — RED cells (7=0 byte-equal to 7=1; absent → Reject); presence flag; clamp in the walk; re-aim the
    538 slot-zero cell (R13).
 5. **#577 ResendRequest half (D4.1)** — RED reproduction; `answer_resend_request_` from both too-high routes.
-6. **#588 (D5′)** — the gate alone first (`replay_gate_test.cpp`, filter witness R-588-g); then the walk's exclusive
-   side and each emitter's shared side (R-588-a…f); sanitizer repeat (R-588-h); bench (SC-006).
-7. **#577 Logout half (D4.2–D4.7)** — the mark, `note_inbound_advance_`, `run_peer_logout_bound_` with its join and
-   wake, the claim table, the send refusal; cells (a)…(i) and R-588-e.
-8. **#581 (D6, D9)** — the deadline predicate; the Heartbeat's early return removed; Arm B's Logout; flipped pins
-   (research Pins and pass-2 list).
+6. **#588 (D5′)** — after phase 0. The gate alone first (`replay_gate_test.cpp`, filter witness R-588-g, the
+   contended-wait allocation evidence); then the walk's exclusive side and each emitter's shared side
+   (R-588-a…f), with the pre-check in the waiting frame or the split idiom (D5′.2); R-588-h's repeat count derived
+   from its mutant's measured miss rate; bench (SC-006).
+7. **#577 Logout half (D4.2–D4.7)** — the mark, `note_inbound_advance_`, `run_peer_logout_bound_` with its
+   generation, publish-then-re-test, join and wake sources, the claim table, `close()`'s join of an `acking`
+   bound, the send refusal; cells (a)…(k), R-588-e, #578 F1, F2, G, H.
+8. **#581 (D6, D9)** — the deadline predicate; the Heartbeat's early return removed; Arm B's Logout; B-8's
+   validate-gate carve-out; flipped pins (research Pins and pass-2 list).
 9. **Records** — B&L delta (retire L-029-3, L-537-1; amend B-013-1, B-013-6, B-016-1, B-537-1, B-537-2, B-538-2,
    L-028-3, L-092-1/-2, L-093-7; add B-103-1…10, L-103-2…7), catalogue and coverage-index rows, brain supersession
    flags (R16, R23), the stale `logout_disconnect_timeout_ms` comment (R15), the QFJ 3.0.1 → 3.0.2 library doc
    mentions (`tests/interop/KNOWN-LIMITATIONS.md`, `brain/components/quickfix-compat.md`), a follow-up issue for
    L-103-2 (peer-spontaneous 141=Y acknowledgement).
-10. **Polish** — `/simplify`, `/speckit-verify` (Tier-1 mirror incl. MSVC build of new targets, sanitizers, live
-    interop SC-002 with no helper forcing a policy), Gate B.
+10. **Polish** — `/simplify`, `/speckit-verify` (Tier-1 mirror incl. MSVC build of new targets, sanitizers, SC-002's
+    live Logon cells with no helper forcing a policy, and the in-process FileStore restart cell in both roles),
+    Gate B, the scoped Codex Gate A on the applied XI §3 clause, owner sign-off of the amendment.
 
 ## Complexity Tracking
 
@@ -129,10 +153,56 @@ Order by dependency (research R17 as amended):
 |---|---|---|
 | `detail::replay_gate` (shared/exclusive, strand-local) | FR-014 widened by the owner: in-flight sends and liveness/close frames must be ordered around an answer | a flag + send-only wait (pass-1 D5) misses both widened cases; `async_mutex` leaves #583's terminal filter and serialises sends against each other |
 | `run_peer_logout_bound_` detached coroutine | FR-010's bound must fire with no inbound frame | the liveness loop returns at HB 0 and has no per-session wake; a frame-driven check cannot fire without a frame |
-| claim table across five Logout endings | exactly one Logout (US3, FR-017/018) | per-site guards were the #554 per-site-patching failure class |
+| claim table across the competing Logout endings, with `close()`'s join of an `acking` bound | at most one Logout, exactly one except FR-010's enumerated cases (US3, FR-010, FR-017/018) | per-site guards were the #554 per-site-patching failure class; a claim alone cannot keep `close()` from closing the transport under a claimed acknowledgement |
+| `conn_gen_` and the bound's generation re-tests | FR-006: the old connection's mark and bound must not act on a transport a direct `drive_reconnect` installs from Active | an FSM-edge clear misses that route (Codex #7); an enforced `Disconnected` precondition is a new public error path |
+| Article XI §3 amendment | Article XX §1: the gate conflicts with §3 as written | `async_mutex`: exclusive only, #583's terminal filter, teardown drains |
 
 ## Gate A
 
-Not yet run. Points for the reviewers (research Risks): the claim table D4.6 as a unit (R6); D5′'s lock order and
-deadlock analysis; the XI §3 ruling on the gate; D2.4's move of the strict acceptor's refusal (R14); D6's reading of
-"any MsgSeqNum" excluding faulty and garbled frames (R12); writer preference (R18) and the inbound stall bound (R19).
+- Round 1 applied 2026-11-14: Codex P1=13 P2=4 P3=0; Opus post-judging P1=3 P2=8 P3=13; rewrite addresses RC1–RC5 and the three owner rulings. Reviews: research/reviews/codex_103-resend-logon-reset-fidelity_gate_a_review.md, research/reviews/opus_103-resend-logon-reset-fidelity_gate_a_adversarial_review.md.
+
+Points for round 2: the XI §3 amendment text (contract); D1's install-site clear and `conn_gen_`; D4.4's bound
+protocol and D4.6's claim table as a unit, with `close()`'s `acking` join; FR-010's enumerated zero-Logout cases
+against each Logout leaf's failure exits; D5′'s placement rule for the pre-check; the census sentinel and the
+send-path witness; D7's per-declaration BREAKING table.
+
+### Round 1 — disagreements
+
+The Opus review marks no finding "Disagree"; every Codex finding is confirmed, downgraded or clustered. Where Opus
+rejected Codex's proposed fix shape, the Codex shape is not applied:
+
+- **Codex #1 (cancellation race in the contended wait)** — no race exists: every emitter of a per-operation or
+  root slot runs on the strand, and neither `co_await` of the hand-applied pre-check suspends, so nothing runs
+  between it and the wait's `await_transform`. Codex's non-throwing primitive and its "cancel between pre-check and
+  initiation" seam are not built (the seam cannot be constructed). Applied instead: the placement rule (D5′.2).
+- **Codex #2 (zero Logouts from `close()`)** — the four-state owned Logout operation is not adopted; `close()`'s
+  join of an `acking` bound closes the avoidable case (D4.6). Codex's second trigger, a store failure after the
+  claim, is not a defect: every Logout leaf fails closed on a store fault; it is listed as FR-010 case 3.
+- **Codex #4 (builder overflow)** — prevalidating CompIDs or a guaranteed-capacity buffer is not adopted: ruling
+  R-12 on #537 already chose the no-Logout overflow ending for this leaf, and C-ABI 1.12 documents it. Applied: the
+  carve-out in FR-010, FR-017, FR-018, E9, E12, E14.
+- **Codex #5 (dictionary-invalid too-low frames)** — moving the too-low disposition ahead of dictionary validation
+  is not adopted (owner ruling 3: QuickFIX C++ validates first).
+- **Codex #6 (faulty/garbled frames and the deadline)** — a header-scan-level trigger is not adopted: faulty frames
+  do not refresh liveness, so the gap cannot stay open without end, and FIX-SL §4.5.2 treats a garbled message as
+  never received. Applied: the exclusion and its reason in FR-017 and E12.
+- **Codex #9 (Article XV §1)** — not a violation: §1's hot path is parse → validate → dispatch and `MemoryStore`,
+  and the exclusive wait is not on the per-frame path. A preallocated waiter representation is not required;
+  the contended-wait allocation witness is added as evidence.
+- **Codex #10 (stale Assumption)** — the Assumption is deleted; the optional clock-driven negative test is not
+  added, because the acknowledgement path arms no timer.
+- **Codex #12 (SC-002)** — absorbing fixpp#503 is not adopted (owner ruling 2).
+- **Codex #13 (Normative References)** — the over-reach is not applied: Article VI §5 asks only for coverage-index
+  entries, not constitution, B&L or design-note keys. Its citation of `checklists/requirements.md` does not match
+  that file's text.
+- **Codex #11 (census control)** — the substance is applied; the test Codex named does not exist (VariantC's real
+  name is `VariantC_BilateralStrictDefault_RegressionGuardNotClean`).
+- **Codex #15 (initiator Logon outside the gate)** — enforcing a lifecycle/read-pump happens-before in the API is
+  not adopted; the exclusion rests on causality (D5′.4's row), with the shared hold as the named fallback.
+- **Codex #16 (traceability)** — removed-text mutants for documentation FRs are not adopted: FR-007 and FR-019 are
+  documentation and records and need no behavioural mutant. The traceability table and the missing FR-011 cell
+  are added.
+- **Codex #17 (data model)** — a first-class owned state object is not adopted; the connection generation and the
+  publish-then-re-test rule carry the bound's safety (data-model.md).
+- **Codex #14 (`acking` drain vs FR-011)** — continuing to service administrative traffic until the
+  acknowledgement is durably committed is not adopted; FR-011 is narrowed to the pending phase.
