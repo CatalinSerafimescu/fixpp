@@ -3876,7 +3876,7 @@ Terms. **NextNumIn** is the session's next expected inbound MsgSeqNum(34). **HB*
 
 L-097-1 is in the closed file since 099.
 
-## fixpp#621 — a `MultiCharValue` field's typed accessor reads one character (2026-10-30)
+## fixpp#621 — MultiCharValue typed accessor (2026-10-30; closed by 102)
 
 ### Limitations
 
