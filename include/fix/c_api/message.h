@@ -134,6 +134,25 @@ typedef struct fixpp_resolved_msg_version {
  * validate_inbound_messages in src/capi, and read its default in
  * include/fixpp/session/session_config.hpp.
  *
+ * BREAKING (C-ABI 1.16, [const §X.7]; 102-dict-width-multichar-type, fixpp#654):
+ * over a dictionary of more than 65,535 components, or one whose group side table
+ * passes 65,535 entries (dict.h's C-ABI 1.16 notes), these calls answer from the
+ * corrected dictionary. The readers this file's 1.9 paragraph lists, on the
+ * inbound, clone and toApp views: the session table's group contexts, delimiters
+ * and Length+Data pairs change, so a getter can trade FIXPP_ERR_OK and
+ * FIXPP_ERR_TAG_NOT_FOUND, fixpp_msg_has_tag and fixpp_msg_field_count can change
+ * value, fixpp_msg_field_at can go out of range, and fixpp_msg_get_group,
+ * fixpp_group_get_field_{string,int,double,decimal} and
+ * fixpp_group_get_nested_group can report other instances or members.
+ * fixpp_msg_clone's return code is unchanged; its clone reads as these readers.
+ * The writers: fixpp_msg_set_{string,int,double,decimal} and fixpp_msg_set_data
+ * check the message's field rule, so FIXPP_ERR_OK, FIXPP_ERR_DICT_CONFIG and
+ * FIXPP_ERR_TYPE_MISMATCH can trade places; fixpp_msg_set_bytes,
+ * fixpp_msg_set_data, fixpp_msg_group_begin, fixpp_entry_group_begin and
+ * fixpp_entry_set_{string,int,double,decimal,data} check a group's first field and
+ * the Length+Data pairs; and fixpp_msg_commit's group-grammar and pair checks can
+ * trade FIXPP_ERR_OK with a refusal.
+ *
  * Returned-pointer lifetime is HANDLE-FLAVOUR dependent: for an inbound / toApp
  * handle the aliases are valid ONLY within the receive/send callback (dispatch)
  * window; for a detached fixpp_msg_clone they are valid until fixpp_msg_destroy
