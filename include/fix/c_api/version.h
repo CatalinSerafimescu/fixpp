@@ -289,8 +289,8 @@
  *    budget's FIXPP_ERR_DICT_LIMIT_EXCEEDED, or goes on to the later guards where an
  *    overlay's restatement of such a base definition was counted as new.
  *  The readers, builders and setters that read such a dictionary are marked in message.h
- *  (the C-ABI 1.16 paragraph beside the 1.9 reader paragraph) and the session calls in
- *  session.h (its C-ABI 1.16 paragraph). What no declaration carries, the counterparty's
+ *  (the C-ABI 1.16 paragraph beside the 1.9 reader paragraph), and the session calls and
+ *  fixpp_engine_start in session.h (its C-ABI 1.16 paragraph). What no declaration carries, the counterparty's
  *  side: a validating session over such a dictionary can send a Reject it did not send, or
  *  not send one it sent, and the header placement and the Length+Data carry of the frames
  *  a session sends follow the corrected header store and pairs.

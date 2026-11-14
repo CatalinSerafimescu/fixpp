@@ -667,13 +667,29 @@ reads through it.
        - the send path's header placement and Length+Data carry;
        - `Engine::register_session`'s FIXT check.
        - 1.9's R-11 step 6 read its handshake observers the same way.
+       - **Where arm O hits.** `[const §X.7]` judges a call's own result. Arm O hits an export whose own result
+         carries the corrected read: its return value, or what it delivers to the consumer (the callback it
+         registers is invoked, or not, with a frame the corrected stores decided; `fixpp_session_is_established`
+         answers from the corrected Logon gate). It also hits an export that performs the read in the work it
+         starts (the role loops `fixpp_engine_start` starts open each session over its table). It does not hit a
+         setter or carrier whose stored state another export reads later and whose own result carries no such
+         read (a config setter, `fixpp_engine_config_add_dictionary`, `fixpp_engine_create`'s registry): record
+         the later read on its line, and step 4 classifies it by its own result.
+     - **Instrument notes** (CodeGraph's index of the tree):
+       - A member call on a local object (`view.get(…)`) is stored in `unresolved_refs` with no edge. Resolve each
+         at its call site by the receiver's type, and add it as a hand row.
+       - The requires-clause members of `MessageView` and `Parser` are indexed under the name `access_mode::Index`.
+         Take those targets by the class's line range, not by name.
+       - Edges at confidence 0.65 and 0.7 are name matches. Read each call site; a wrong one is a DROP row.
      - **Positives, one per arm.** A run that misses any of them stops:
        - **A, through helpers.** `fixpp_entry_set_int` reaches `Dictionary::group_first_field` through
          `entry_set_bytes_impl → is_group_collision`. A run that reads only the body misses it.
        - **A, at depth.** `fixpp_session_open` reaches `Dictionary::field_valid_for` through
          `register_session → fixt_session_config_valid → defines_fixt_admin`. A depth-2 walk misses it.
-       - **V.** `fixpp_group_get_field_int` reaches `Parser::hooks` and `MessageView` (through `hooks_for` and
-         `scan_slice_for_tag`) and no target of arm A. A run without arm V misses it.
+       - **V.** `fixpp_group_get_field_int` reaches `MessageView::hooks` (`Parser` has only the member `hooks_`)
+         and `MessageView` (through `hooks_for` and `scan_slice_for_tag`). A run without arm V misses those
+         targets. Following the `dict_hooks` function pointers `dict_hooks::for_table_view` binds makes arm A hit
+         this export too, so a line for it with no arm A hit did not follow them.
        - **O.** `fixpp_session_register_callback`.
        - **Every target, not the first.** `fixpp_session_open` reaches, through `defines_fixt_admin`, both
          `Dictionary::messages()` (harmless: the MsgType list, which no 102 correction changes) and
@@ -693,6 +709,9 @@ reads through it.
        and the bare member store; or the load's own result (the surrogate-id parse, the retired side-table refusal),
        for the two load calls only.
      Applied per export:
+     - The read must reach the export's own result, or be performed in the work the call starts (step 3, "Where
+       arm O hits"). A setter or carrier whose stored state another export reads later, and whose own result
+       carries no such read, is U with that reason, even where its line records the later read.
      - An export that no arm hit is U.
      - An export that an arm hit is B if **any** recorded target, or the observed path, consumes a corrected part.
        It is U only when the manifest states, for every recorded target and observed path, why it consumes none.

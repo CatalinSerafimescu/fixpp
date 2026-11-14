@@ -106,7 +106,9 @@ Re-derive at the implementation head:
    - the group side table, and so `group_fields` and the bare member store `build_table_view` fills from it;
    - or the load's own result (the surrogate-id parse; the retired side-table refusal): the two load calls only.
 
-Every other row is UNCHANGED (**U**), with the predicate as its reason. A B row changes only over a dictionary in
+Every other row is UNCHANGED (**U**), with the predicate as its reason. Condition 1's read reaches the call's own result, or is performed in the work the call
+starts: a setter or carrier whose stored state another call reads later, and whose own result carries no such read,
+is U (research D8 step 3, "Where arm O hits"). A B row changes only over a dictionary in
 contract §6's regions: a load input of classes (a) to (c) and their twins, or a dictionary of class (f) or (g). No
 vendored base is in region (f) or (g) (research Survey; spec US1).
 
@@ -135,14 +137,14 @@ generated typed-tier header, and the runtime validator does not read the kind, s
 | `fixpp_dict_destroy` | U | releases the handle; reads no content | none |
 | `fixpp_dict_load_from_xml` | B | root cause: (c) a failure turned into a success; (f) and (g) the same code, and the dictionary the call yields is corrected | own note + `version.h` |
 | `fixpp_dict_load_from_xml_with_overlay` | B | root cause: (a) and (b) failures turned into a success; (a′) and (b′) failures turned into a different failure, or into a success; (f) and (g) as for `fixpp_dict_load_from_xml` | own note + `version.h` |
-| `fixpp_engine_config_add_dictionary` | U | stores the handle after `check_dict_handle`'s tag check; reads no content | none |
+| `fixpp_engine_config_add_dictionary` | U | stores the handle after `check_dict_handle`'s tag check; reads no content; arm O records the corrected read at the exports whose result carries it (the `fixpp_session_*` B rows) or whose started work performs it (`fixpp_engine_start`); this call's own result carries none, since its stored state is read later (`[const §X.7]` judges a call's own result) | none |
 | `fixpp_engine_config_create` | U | no dictionary read | none |
-| `fixpp_engine_config_destroy` | U | no dictionary read | none |
+| `fixpp_engine_config_destroy` | U | destroys; reads no dictionary content (an implicit destructor is not a read) | none |
 | `fixpp_engine_config_set_realtime_clock` | U | no dictionary read | none |
 | `fixpp_engine_config_set_worker_threads` | U | no dictionary read | none |
-| `fixpp_engine_create` | U | builds the version registry from the configured dictionaries (`build_version_registry`, which always holds a value); reads no corrected part | none |
-| `fixpp_engine_destroy` | U | no dictionary read | none |
-| `fixpp_engine_start` | U | starts the engine; the sessions it runs are classified in the `fixpp_session_*` rows | none |
+| `fixpp_engine_create` | U | builds the version registry from the configured dictionaries (`build_version_registry`, which always holds a value); its one dictionary read, `Dictionary::which_session_version`, reads no corrected part; arm O records the corrected read at the exports whose result carries it (the `fixpp_session_*` B rows) or whose started work performs it (`fixpp_engine_start`); this call's own result carries none, since its stored state is read later (`[const §X.7]` judges a call's own result) | none |
+| `fixpp_engine_destroy` | U | destroys; reads no dictionary content (an implicit destructor is not a read) | none |
+| `fixpp_engine_start` | B | with a FIXT session registered, `Engine::start` builds the route tables in the call (`fixt_route_set::build` → `Dictionary::as_table_view`, every store `build_table_view` builds from `message_fields`), and the role loops it starts run `Session::open` → `Dictionary::as_table_view` (the session table) and `bind_fixt_routes_`; the sessions it starts validate and parse over those stores. Its return code is unchanged: the route build still fails only on an allocation failure | session.h paragraph |
 | `fixpp_entry_group_begin` | B | `Dictionary::group_first_field(group_tag) == 0` refuses with `FIXPP_ERR_TYPE_MISMATCH`; `GroupRef::first_field_tag` is the first-seen delimiter of the group contexts the message expansions build, which (f) moves | message.h paragraph |
 | `fixpp_entry_set_data` | B | `pair_hooks` (the session table's Length+Data pairs, registered from every message's `message_fields`), `session_tv_->group_first_field_exact` and `is_group_collision` | message.h paragraph |
 | `fixpp_entry_set_decimal` | B | `entry_set_bytes_impl`'s `is_group_collision` (`Dictionary::group_first_field`), as `fixpp_entry_group_begin` | message.h paragraph |
@@ -159,7 +161,7 @@ generated typed-tier header, and the runtime validator does not read the kind, s
 | `fixpp_msg_clone` | U | the return code is unchanged: it re-parses the source's bytes over the source's own table under its caps, which succeeded once; an outbound source returns `FIXPP_ERR_INVALID_HANDLE` first; the clone's view is the reader rows' (091's row) | message.h paragraph (view only) |
 | `fixpp_msg_commit` | B | `validate_group_grammar` over `dict_` and `session_tv_` (group contexts and delimiters: (f), (g)) and `check_length_data(…, pair_hooks(…))`: `FIXPP_ERR_OK` and a group-grammar or pair refusal can trade places | message.h paragraph |
 | `fixpp_msg_create_outbound` | U | reads only `Dictionary::messages()`'s MsgType list, which no 102 correction changes | none |
-| `fixpp_msg_destroy` | U | no dictionary read | none |
+| `fixpp_msg_destroy` | U | destroys; reads no dictionary content (an implicit destructor is not a read) | none |
 | `fixpp_msg_field_at` | B | the view's `OffsetTable` entries, whose counted carry reads the session table's pairs | message.h paragraph |
 | `fixpp_msg_field_count` | B | as `fixpp_msg_field_at` | message.h paragraph |
 | `fixpp_msg_get_bytes` | B | `view->get(tag)` over that `OffsetTable`: `FIXPP_ERR_OK` and `FIXPP_ERR_TAG_NOT_FOUND` can trade places | message.h paragraph |
@@ -167,7 +169,7 @@ generated typed-tier header, and the runtime validator does not read the kind, s
 | `fixpp_msg_get_double` | B | as `fixpp_msg_get_bytes` | message.h paragraph |
 | `fixpp_msg_get_group` | B | `offsets().group_context_for` and the group slices of the parse over the session table | message.h paragraph |
 | `fixpp_msg_get_int` | B | as `fixpp_msg_get_bytes` | message.h paragraph |
-| `fixpp_msg_get_msg_type` | B | MsgType(35) through the same view, as in its 1.9 row: a pair before 35 is reachable while the session does not validate | message.h paragraph |
+| `fixpp_msg_get_msg_type` | U | `MessageView::msg_type` reads MsgType(35), the third field: since 093 every inbound state disregards as garbled a frame whose third field is not 35, before validation (`session.cpp`, `!hdr.msg_type_is_third` in each inbound arm), the toApp view reads a frame the session built with 35 third, and a clone re-parses a view's own bytes, so no pair precedes 35 | none |
 | `fixpp_msg_get_string` | B | as `fixpp_msg_get_bytes` | message.h paragraph |
 | `fixpp_msg_group_begin` | B | as `fixpp_entry_group_begin` | message.h paragraph |
 | `fixpp_msg_group_end` | U | no dictionary read | none |
@@ -179,15 +181,15 @@ generated typed-tier header, and the runtime validator does not read the kind, s
 | `fixpp_msg_set_double` | B | as `fixpp_msg_set_decimal` | message.h paragraph |
 | `fixpp_msg_set_int` | B | as `fixpp_msg_set_decimal` | message.h paragraph |
 | `fixpp_msg_set_string` | B | `check_dict` and `soh_outside_data(pair_hooks(…))` | message.h paragraph |
-| `fixpp_msg_version` | B | `view->get(1137)` over the same view | message.h paragraph |
+| `fixpp_msg_version` | B | `MessageView::resolved_application_version`, the version the session stamped from the frame's route (`Session::select_route_` → `peek_fixt_route`, which reads the header store, `table_view::is_header_tag`, and the pair store); `get(8)` and `msg_type()` read fixed header fields, so `kind` and `session` cannot move | message.h paragraph |
 | `fixpp_session_acceptor_bound_endpoint` | U | no dictionary read | none |
 | `fixpp_session_close` | B | handshake observer: a validating session runs the validator over the Logon before `interpret_logon` (the validate-first gate), over the corrected stores, so a Logon accepted before can be Rejected, or the reverse; its return then moves as its 1.9 clause states for a refused Logon | session.h paragraph |
 | `fixpp_session_config_create` | U | no dictionary read | none |
-| `fixpp_session_config_destroy` | U | no dictionary read | none |
-| `fixpp_session_config_set_begin_string` | U | stores a value | none |
+| `fixpp_session_config_destroy` | U | destroys; reads no dictionary content (an implicit destructor is not a read) | none |
+| `fixpp_session_config_set_begin_string` | U | stores a value; arm O records the corrected read at the exports whose result carries it (the `fixpp_session_*` B rows) or whose started work performs it (`fixpp_engine_start`); this call's own result carries none, since its stored state is read later (`[const §X.7]` judges a call's own result) | none |
 | `fixpp_session_config_set_comp_ids` | U | stores a value | none |
-| `fixpp_session_config_set_default_appl_ver_id` | U | `resolve_application_version` only; no dictionary read | none |
-| `fixpp_session_config_set_dictionary` | U | stores the handle; the effect is the load call's and the session rows' | none |
+| `fixpp_session_config_set_default_appl_ver_id` | U | `resolve_application_version` only; no dictionary read; arm O records the corrected read at the exports whose result carries it (the `fixpp_session_*` B rows) or whose started work performs it (`fixpp_engine_start`); this call's own result carries none, since its stored state is read later (`[const §X.7]` judges a call's own result) | none |
+| `fixpp_session_config_set_dictionary` | U | stores the handle; the effect is the load call's and the session rows'; arm O records the corrected read at the exports whose result carries it (the `fixpp_session_*` B rows) or whose started work performs it (`fixpp_engine_start`); this call's own result carries none, since its stored state is read later (`[const §X.7]` judges a call's own result) | none |
 | `fixpp_session_config_set_heartbeat_seconds` | U | stores a value | none |
 | `fixpp_session_config_set_logon_timeout_ms` | U | stores a value | none |
 | `fixpp_session_config_set_reset_on_logon` | U | stores a value | none |
@@ -195,8 +197,8 @@ generated typed-tier header, and the runtime validator does not read the kind, s
 | `fixpp_session_config_set_role` | U | stores a value | none |
 | `fixpp_session_config_set_security` | U | stores a value | none |
 | `fixpp_session_config_set_tcp_endpoint` | U | stores a value | none |
-| `fixpp_session_config_set_validate_inbound_messages` | U | stores the flag; its effect is the session rows' | none |
-| `fixpp_session_garbled_frame_count` | U | counts the Framer's garbles and the frames whose third field is not MsgType(35) (`header_out_of_order_garble`); neither reads the dictionary | none |
+| `fixpp_session_config_set_validate_inbound_messages` | U | stores the flag; its effect is the session rows'; arm O records the corrected read at the exports whose result carries it (the `fixpp_session_*` B rows) or whose started work performs it (`fixpp_engine_start`); this call's own result carries none, since its stored state is read later (`[const §X.7]` judges a call's own result) | none |
+| `fixpp_session_garbled_frame_count` | U | counts the Framer's garbles and the frames whose third field is not MsgType(35) (`header_out_of_order_garble`); `scan_frame_header` runs with the session hooks, but fields 1–3 (BeginString, BodyLength, MsgType) cannot move: no Length+Data pair, group context or header-store test reaches them | none |
 | `fixpp_session_is_established` | B | handshake observer, as `fixpp_session_close`: `true` and `false` can trade places | session.h paragraph |
 | `fixpp_session_open` | B | `Engine::register_session` runs the FIXT check on a validating FIXT.1.1 config: `fixt_session_config_valid` reads `defines_fixt_admin`, which asks `Dictionary::field_valid_for("A", 1137)` (message expansion), so `FIXPP_ERR_OK` and the config refusal can trade places; `Session::bind_fixt_routes_` chooses the transport route by the same predicate | session.h paragraph |
 | `fixpp_session_register_callback` | B | delivery: on a validating session `validate_inbound_` runs the validator over the corrected stores (Step 1's valid-tag set; Step 3's group walk, whose context miss falls back to the bare store, (g)), so a frame can go from delivered to Rejected or the reverse; on every dictionary-backed session the parse's pair carry moves; and the handshake observer of `fixpp_session_close` | session.h paragraph |

@@ -30,7 +30,12 @@
  * FIXPP_ERR_OK against a payload refusal, can change. fixpp_session_close and
  * fixpp_session_is_established: a validating session validates the Logon first, so a
  * Logon accepted before can be Rejected, or the reverse, and these calls then answer
- * as their 1.9 clauses state for a refused Logon.
+ * as their 1.9 clauses state for a refused Logon. fixpp_engine_start (engine.h): with
+ * a FIXT session registered it builds the route tables from the corrected dictionary
+ * in the call, and the role loops it starts open each session over a table built
+ * from it, so the route a frame takes and the stores its session validates and
+ * parses with are the corrected ones; its return code is unchanged (the route build
+ * still fails only on an allocation failure).
  */
 
 #ifndef FIXPP_C_API_SESSION_H
