@@ -4,7 +4,7 @@
 // 003-dictionary-codegen (RC#1) — out-of-line body of the 003-owned free
 // function dict::resolve_application_version declared in
 // include/fixpp/dict/version_profile.hpp. Profile-only [FIXT §5] priority
-// resolution ([2c §4.3:457-501]) so dict::reify (which holds no Dictionary)
+// resolution ([2c §4.3, its free function]) so dict::reify (which holds no Dictionary)
 // can run it. Pure; no wire dependency. AC-VP2/AC-VP3/AC-VP4; data-model
 // Entity 10 / I-13.
 #include <expected>
@@ -16,7 +16,7 @@ namespace fixpp::dict {
 
 core::expected_t<application_version> resolve_application_version(
     version_profile profile, std::string_view appl_ver_id_value) noexcept {
-    // Step 2 ([2c §4.3:470-474]): empty ApplVerID → profile default.
+    // Step 2 ([2c §4.3, the Algorithm's step 2]): empty ApplVerID → profile default.
     if (appl_ver_id_value.empty()) {
         if (profile.default_appl == application_version::Unknown) {
             // RC#1 / AC-D6: NOT a sentinel fall-through to
@@ -26,7 +26,7 @@ core::expected_t<application_version> resolve_application_version(
         return profile.default_appl;
     }
 
-    // Step 1 ([2c §4.3:486-501]): parse via the WIRE enum values, NOT the C++
+    // Step 1 ([2c §4.3, the wire 1128 table]): parse via the WIRE enum values, NOT the C++
     // application_version internal indices (AC-VP4 / I-13 — reusing the C++
     // index would mis-map FIX 5.0 and the SP variants). Single wire char.
     if (appl_ver_id_value.size() == 1) {

@@ -128,12 +128,12 @@ inline constexpr std::array<std::string_view, 7> kFixtAdminMsgTypes{"0", "1", "2
 // Appended below the unchanged 002 enums, non-renumbering. 002 deferred the
 // `version_profile` struct + `resolve_application_version` free function
 // (specs/002-dictionary-xml-loader/contracts/version_profile.hpp's deferred-struct note); 003
-// owns them. Shapes are verbatim [2c §4.3:408-481]; oracle:
+// owns them. Shapes are verbatim [2c §4.3, its version_profile.hpp block]; oracle:
 // specs/003-dictionary-codegen/contracts/version_profile.hpp; data-model
 // Entity 10; spec §4.8 AC-VP1..AC-VP6.
 
 // 4-byte profile carried by every Dictionary; the resolution input
-// `dict::reify` consumes (it holds no Dictionary). Verbatim [2c §4.3:408-422].
+// `dict::reify` consumes (it holds no Dictionary). Verbatim [2c §4.3, `version_profile`].
 struct version_profile {
     session_version session;           // 1 byte
     application_version default_appl;  // 1 byte
@@ -146,7 +146,7 @@ struct version_profile {
 static_assert(sizeof(version_profile) == 4);
 static_assert(std::is_trivially_copyable_v<version_profile>);
 
-// Resolved per-message version axis ([2c §4.3:440-455]). kind-first dispatch:
+// Resolved per-message version axis ([2c §4.3, resolved_message_version]). kind-first dispatch:
 // session_admin → vt11 (application == Unknown); application → resolved value.
 struct resolved_message_version {
     enum class kind : std::uint8_t { session_admin, application };
@@ -159,15 +159,15 @@ static_assert(sizeof(resolved_message_version) == 4);
 static_assert(alignof(resolved_message_version) == 1);
 static_assert(std::is_trivially_copyable_v<resolved_message_version>);
 
-// Free-function form of the [FIXT §5] priority resolution ([2c §4.3:457-481]).
+// Free-function form of the [FIXT §5] priority resolution ([2c §4.3, its free function]).
 // Profile-only (no Dictionary needed) so `dict::reify` — which receives only
 // MessageView + version_profile + mr — can run it. Dictionary's member
 // `resolve_application_version` is a thin wrapper:
 //   dict::resolve_application_version(this->which(), appl_ver_id_value).
 //
-// Algorithm ([2c §4.3:465-474]):
+// Algorithm ([2c §4.3, its "Algorithm"]):
 //   1. appl_ver_id_value non-empty → parse via the WIRE→C++ mapping table
-//      below ([2c §4.3:488-501]). On success → resolved application_version;
+//      below ([2c §4.3, the wire 1128 table]). On success → resolved application_version;
 //      on parse failure → core::error::dict_unknown_appl_ver_id.
 //   2. appl_ver_id_value empty → use profile.default_appl. If that is
 //      application_version::Unknown → core::error::
@@ -177,7 +177,7 @@ static_assert(std::is_trivially_copyable_v<resolved_message_version>);
 [[nodiscard]] core::expected_t<application_version> resolve_application_version(
     version_profile profile, std::string_view appl_ver_id_value) noexcept;
 
-// ─── Wire ApplVerID(1128) → C++ application_version mapping ([2c §4.3:486]) ──
+// ─── Wire ApplVerID(1128) → C++ application_version mapping ([2c §4.3, the 1128 table]) ──
 // [FIXT §5.1] (DefaultApplVerID 1137) / [FIXT §5.3] (per-message ApplVerID
 // 1128). The FIX-defined WIRE enum values do NOT coincide with this header's
 // C++ application_version internal indices. The parse MUST use the wire

@@ -39,7 +39,7 @@ namespace fixpp::dict {
 // Primary template; specialised below for the field-view-decodable types.
 //
 // `decimal_t` is DELIBERATELY NOT a field_traits specialisation
-// ([2c §4.1.3:269-277] / RC#2 / AC-FT2): decimal routes through the merged-2a
+// ([2c §4.1.3, its RC#2 amendment] / RC#2 / AC-FT2): decimal routes through the merged-2a
 // PMR-mandatory entry point decimal_t::parse(span, mr) ([2a §4.3]) directly at
 // the accessor call site, because from_field_view's mr-less signature cannot
 // carry the required memory_resource* through. See
