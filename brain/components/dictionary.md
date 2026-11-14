@@ -435,7 +435,7 @@ Records that describe the older design are flagged here and not rewritten. Each 
   B&L file.
 - **Open from 098:** L-098-3 (the base load paths have no caps and no cycle guard, fixpp#650) and
   L-098-4 (the `std::uint16_t` side-table index wraps; the vendored FIX50SP2 component table already does,
-  fixpp#654). ⚠️ **Closed by 102 (`102-dict-width-multichar-type`):** L-098-4; it sits in the closed B&L
+  fixpp#654). ⚠️ **Closed by 102 (`102-dict-width-multichar-type`, 2026-11-14):** 102 closes L-098-4; it sits in the closed B&L
   file. L-098-3 stays open, and points at L-102-1 (a).
 
 ## Two dictionaries on a FIXT session (099) — what this family gained, and what was rejected
@@ -548,7 +548,7 @@ expansion, and B86's budget bounds the base's (L-102-1 (a)). **DECIDED — every
 - `.specify/2c-codegen.md` carries in-place `Updated (102-dict-width-multichar-type)` notes at §1's "Field
   representation types" bullet, §4.1, §4.1.3 and §4.2; the text before each note is history. Re-derive with
   `grep -n 'Updated (102-dict-width-multichar-type)' .specify/2c-codegen.md`.
-- ⚠️ **Closed by 102:** L-098-4 and L-621-1, in the closed B&L file. B-098-1 carries a 102 amendment.
+- ⚠️ **Closed by 102 (2026-11-14):** 102 closes L-098-4 and L-621-1; both sit in the closed B&L file. B-098-1 carries a 102 amendment.
 
 **Open from 102:** L-102-1, the 32-bit residual: (a) with B86 (fixpp#650), (b) the name pool past 2^32 bytes
 (fixpp#676), (c) component identity at 2^32 components (fixpp#677). XML `GroupDef`'s unused 16-bit members:
