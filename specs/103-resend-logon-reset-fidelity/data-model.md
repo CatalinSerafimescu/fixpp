@@ -30,14 +30,20 @@ the bound asserts it. The acceptor needs none: `attach_accepted_transport` runs 
 
 ## Reconnect drain — `drive_reconnect` (changed) and `inbound_depth_` (new)
 
-- `inbound_depth_`: `std::uint32_t`, raised by an RAII holder at `on_inbound_frame`'s entry, lowered at its every
-  exit; reaching 0 calls `replay_gate_.wake_all()`.
+- `inbound_depth_`: `std::uint32_t`, raised by an RAII holder declared as `on_inbound_active_`'s first statement,
+  lowered at its every exit, an exception and frame destruction included (not in `on_inbound_frame`, a non-coroutine
+  forwarder); reaching 0 calls `replay_gate_.wake_all()`.
+- `reconnect_in_flight_`: `bool`, set at `drive_reconnect`'s entry, cleared by RAII; a second call returns
+  `session_already_open`.
 - Quiescent ⇔ `replay_gate_.shared == 0 && inbound_depth_ == 0` (no emitter outside the inbound chain between its
-  number peek and the return of its `store_then_emit`, and no inbound chain running).
+  number peek and the return of its `store_then_emit`, and no inbound chain running), then, after the drain's
+  `root_cancel_.emit(total)`, `bound_counter == 0 && liveness_counter_ == 0` (polled by post).
 - `drive_reconnect`: refuse if closing, closed or stopping (`session_already_closed`); from Active or LogonReceived
   record `Disconnected`; wait until quiescent on the gate's wake (bounded by `logout_disconnect_timeout_ms`, then the
   old transport is force-closed and the wait continues); re-test the refusal after every wake; then connect and
-  install. The install asserts quiescence. Caller cancellation → `dispatch_aborted`, nothing installed, state
+  install. The install is the commit point: with no suspension before it, it refuses on closing, closed or stop,
+  closes the new transport and installs nothing (`session_already_closed`). It asserts quiescence. From a
+  callback: one post first. Cancellation reaching backoff, connect or handshake: fixpp#585, unchanged. Caller cancellation → `dispatch_aborted`, nothing installed, state
   `Disconnected`, cancellation left pending.
 - Invariant: no frame numbered or claimed on one connection is written on a later one.
 
@@ -46,7 +52,15 @@ the bound asserts it. The acceptor needs none: `attach_accepted_transport` runs 
 Fields: `seq` (the too-high Logout's MsgSeqNum S), `at` (arrival time), `phase ∈ {none, pending, acking}`. The bound
 coroutine owns its captured `gen`; the session owns `peer_logout_wake_` (published by the bound, cleared when its T
 race ends and on every exit) and the join counter (a shared counter, incremented before `co_spawn`, decremented by
-the bound's exit guard, which also cancels any `bound_done` timer `close()` races on).
+the bound's exit guard, which touches only that counter; `close()` and the reconnect drain poll it by post).
+
+## Logout owner — `logout_in_flight_` (new, Gate A round 2)
+
+`bool`, set synchronously by each Logout emitter of an established session before its first suspension (the bound's
+acknowledgement, the in-sequence acknowledgement, the gap deadline's, Arm B's, the T = 0 acknowledgement,
+`run_logout_phase1`) and cleared when its leaf returns, on every path. Found set: `close(graceful)` poll-joins it
+inside its grace and sends none; an inbound emitter skips its Logout and keeps the rest of its ending; the bound sets
+the phase `none` and exits. Invariant: at most one Logout of an established session is in flight.
 
 | From | Event | To | Effect |
 |---|---|---|---|
@@ -54,7 +68,7 @@ the bound's exit guard, which also cancels any `bound_done` timer `close()` race
 | none | too-high Logout in Active, T = 0 or no clock | none | acknowledgement at once, no ResendRequest |
 | pending | NextNumIn > S (`note_inbound_advance_`) or T elapsed, and "live" still true after the gate wait | acking | bound sends the acknowledgement; then, if `conn_gen_ == gen`, the event and `Disconnected` |
 | pending | gap deadline, in-sequence Logout, `close(graceful)`, Arm B too-low, `close(terminal)`, stop | none | that ending's own Logout, if any, is the one Logout (claim table D4.6); bound woken |
-| acking | `close(graceful)` | acking | `close()` joins the bound inside its grace, before `Disconnected` and before closing the transport |
+| acking | `close(graceful)` | acking | `logout_in_flight_` is set: `close()` poll-joins it inside its grace, before `Disconnected` and before closing the transport |
 | any | new transport installed (always after the drain) | none | `conn_gen_` moves; a bound not yet resumed finds `none` and exits without effect |
 | any | edge into `Disconnected` | unchanged | bound and gate woken; the bound's "live" test fails (not Active), so it exits without effect |
 

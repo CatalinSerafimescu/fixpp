@@ -14,7 +14,7 @@ distinguish it: `async_mutex` is itself used strand-locally. `async_mutex` was r
 
 ## Proposed replacement text of Article XI §3
 
-The two existing sentences stay byte-identical; one sentence is inserted between them.
+Article XI §3 has three sentences after its heading (the `async_mutex` sentence, the bold `std::mutex` ban, and "Enforced by clang-tidy custom check or grep gate."). All three stay byte-identical; one sentence is inserted after the first.
 
 > 3. **Awaitable mutex required in coroutine context.** `fixpp::sync::async_mutex` (own implementation, BSL-1.0
 > algorithm attribution to avast/asio-mutex) is the only allowed mutex shape for coroutines. One exception is
@@ -42,11 +42,13 @@ Sync Impact Report — v4.3 → v4.4 (<date>) — PENDING
     Gate A review of the amended clause body as applied, THEN Gate B on 103's PR (Article XVII §2), THEN
     owner sign-off (Article XX §2), each recorded under Review and sign-off below. This header reads
     PENDING until all four have happened, then RATIFIED.
-  Bump: MINOR, per Article XX §4; no CHANGELOG.md entry. Does a PR mergeable under v4.3 fail under
+  Bump: MINOR. Article XX §4 makes only backwards-incompatible amendments (banned-pattern additions,
+    perf-budget tightening) v-major; a permissive exception is therefore MINOR by implication and by the
+    097 (v4.3) precedent. No CHANGELOG.md entry. Does a PR mergeable under v4.3 fail under
     v4.4? None does: the amendment permits one more shape and adds no banned pattern, budget or
     obligation.
     NOTE: the constitution's version is independent of the library's and of the C ABI's.
-  Modified: Article XI §3 — a sentence inserted between its two sentences: one exception to
+  Modified: Article XI §3 — a sentence inserted after its first sentence: one exception to
     "the only allowed mutex shape for coroutines", for the serialisation of outbound frames against a
     resend answer and the drain of in-flight outbound frames before an in-place reconnect only
     (feature 103): a strand-confined shared/exclusive gate, detail::replay_gate,
@@ -75,11 +77,19 @@ Sync Impact Report — v4.3 → v4.4 (<date>) — PENDING
 
 ## What Gate A round 2 checks on this text
 
-- The inserted sentence is the only change to §3, and the two existing sentences are byte-identical.
-- Each property in the sentence is one that D5′ states and a cell checks: confinement to the session's domain
-  (D5′.1; R-588-h under TSan), no atomic and no OS primitive (D5′.1), no change to the caller's cancellation
-  filter or state (D5′ "Cancellation"; R-588-g's filter witness and R-588-f(3)), no unlock before destruction and
-  no teardown drain (D5′ "Rationale": unlike `async_mutex`'s `not_locked` precondition and `cancel_and_drain`), not
-  a general send gate (FR-014's scope; spec Out of Scope).
+- The inserted sentence is the only change to §3, and its three existing sentences are byte-identical.
+- Each property in the sentence is one that D5′ states, checked as follows (Gate A round 2, Codex #7: a runtime cell
+  cannot establish a structural property, so the two kinds are separate):
+  - **Behavioural cells:** confinement to the session's domain (R-588-h under TSan: no report with sends from several
+    threads); no change to the caller's cancellation filter or state (R-588-g's filter witness, R-588-f(3)); a gate
+    built, held, released and destroyed with no waiter needs nothing at teardown (R-588-g's no-waiter
+    construct/destroy cell under ASan).
+  - **Structural checks:** no atomic and no OS synchronisation primitive in `detail::replay_gate` (a source check on
+    the gate's header and source: no `std::atomic`, `std::mutex`, `std::shared_mutex`, `std::condition_variable` or
+    `<atomic>` / `<mutex>` / `<shared_mutex>` / `<condition_variable>` include, run in `/speckit-verify`, proven to
+    fire on a seeded `std::atomic` in a scratch copy); no unlock-before-destruction precondition and no teardown
+    drain (a source/lifecycle proof in the verify record: the gate's destructor has no precondition, and neither
+    `close()` nor `Engine::stop()` calls any gate drain).
+  - **Scope:** not a general send gate (FR-014's scope; spec Out of Scope), a review property of the text.
 - The permission is scoped to the resend-answer serialisation and the reconnect drain (research D1, owner ruling
   2026-11-15), so it cannot be cited for another gate.

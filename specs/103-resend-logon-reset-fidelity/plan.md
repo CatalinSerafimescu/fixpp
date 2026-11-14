@@ -48,7 +48,7 @@ quoted from `.specify/memory/constitution.md` (v4.3); it replaces research.md's 
 | VII §3: "**TDD is mandatory.** Every feature lands as red-green-refactor: failing test first, then implementation." | PASS (planned) — a RED cell before each fix; research "FR ↔ cell ↔ mutant" maps every behavioural FR to a cell and a mutant. |
 | VII §5: "`tests/conformance/` holds the official FIX session-layer test cases … Every PR must pass them in CI." | PASS (planned) — `TcSeqnumTest.Tc2c_MsgSeqNumTooLow` re-pinned to TC 2c's Logout (research Pins). |
 | VII §6: "v1.0 includes at least one interop test against an independent FIX implementation (QuickFIX) …" | PASS — unchanged; SC-002's live Logon cells run the default policy once the helpers stop forcing it (owner ruling 2; the live restart-and-resume run stays fixpp#503). |
-| VIII §2: "**Regression budget: a slowdown greater than +5%** against the **merge-base** … measured as a **paired base-vs-candidate run on one runner**" | Measure — the gate's flag test on the send and liveness paths, two flag reads on the inbound path (`acking`, `note_inbound_advance_`); SC-006's paired bench against the base, base worktree path padded to equal length. |
+| VIII §2: "**Regression budget: a slowdown greater than +5%** against the **merge-base** … measured as a **paired base-vs-candidate run on one runner**" | Measure — on the send and liveness paths, the gate's flag test; on every inbound frame, `inbound_depth_`'s increment, decrement and compare (its holder is `on_inbound_active_`'s first statement, adding no coroutine frame) and two flag reads (`acking`, `note_inbound_advance_`), plus the `logout_in_flight_` test on the Logout paths only. SC-006's two paired rows: the send path, and the inbound-frame path (an Active Heartbeat and an Active application message), base worktree path padded to equal length. Article VIII §3 ("No perf change merged without a benchmark in the same PR") is met by those rows. |
 | VIII §5: "zero `new`/`delete` between parse and `fromApp` callback." | PASS (planned) — nothing is added between parse and `fromApp`; the send-path fast path is witnessed by `alloc_guard_544_we_sends_interleaved_mallocnesia` and its MemoryStore twin, proven able to fire on a planted allocation (research D5′ "Allocation"). |
 | IX §1: "**Per-PR:** **≥95% line, ≥85% branch** on **touched modules** … **Binding rule — no silent uncovered error/edge path.**" | PASS (planned) — each new branch has a cell: the bound's "live" re-tests (#578 E, F1, F2), the reconnect drain's branches (G1–G4), the `close()` join (R-588-e(3)), T=0, no clock, the cancelled wait (R-588-f(3)), the store-fault release, B-6's drained lock. |
 | IX §2: "**Sanitizers — Tier 1 (every PR, Linux/Clang):** ASan, UBSan, TSan must all run and pass." | PASS (planned) — R-588-h on TSan and ASan with its derived repeat count (SC-005). |
@@ -57,7 +57,7 @@ quoted from `.specify/memory/constitution.md` (v4.3); it replaces research.md's 
 | XI §2: "**Cancellation: ASIO native cancellation slots end-to-end.** No parallel `stop_token` abstraction." | PASS, justified — waits end by the per-operation slot or by the session's wake idiom (a timer cancel, asio-native); no `stop_token`. The bound is not bound to `root_cancel_` because its slot holds one handler, the liveness loop's (D4.4). |
 | XI §3: "`fixpp::sync::async_mutex` … is the only allowed mutex shape for coroutines." | **PASS once amended (owner ruling 1, Gate A round 1)** — `detail::replay_gate` is a coroutine shared/exclusive exclusion primitive, so it conflicts with §3 as written, and Article XX §1 requires "amending the article first". The amendment rides this PR (MINOR, v4.3 → v4.4): [contracts/constitution-xi3-amendment.md](contracts/constitution-xi3-amendment.md) holds the exact text and the Sync Impact Report entry, and phase 0 applies it before any D5′ code. |
 | XI §7: "Threading/concurrency-affecting features trigger all four mandatory controls (Appendix A)" | Applies — `/clarify` done; `/analyze` pending; Codex Gate A running; owner `/plan` sign-off: see below. |
-| XV §1: "The "hot path" of this ban is the latency-critical **in-memory** path — parse → validate → dispatch and `MemoryStore`, which MUST stay zero-allocation per message." | PASS — the per-frame additions are a byte compare and a flag read. The contended exclusive wait sits only at `replay_outbound_range_`'s entry (a ResendRequest or a 789 walk), off the per-frame path; it is measured as evidence (research D5′ "Allocation", Codex #9). The bound's coroutine frame is one per too-high Logout. |
+| XV §1: "The "hot path" of this ban is the latency-critical **in-memory** path — parse → validate → dispatch and `MemoryStore`, which MUST stay zero-allocation per message." | PASS — the per-frame additions are `inbound_depth_`'s holder (an increment, a decrement, a compare; no coroutine frame: it sits in `on_inbound_active_`, not in the non-coroutine `on_inbound_frame`, per #544's ruling a2), a byte compare and a flag read. The existing inbound windows `alloc_guard_544_wa_active_heartbeat_mallocnesia` and `alloc_guard_544_wb_active_app_message_mallocnesia` (cases that must read zero) witness it. The contended exclusive wait sits only at `replay_outbound_range_`'s entry (a ResendRequest or a 789 walk), off the per-frame path; it is measured as evidence (research D5′ "Allocation", Codex #9). The bound's coroutine frame is one per too-high Logout. |
 | XV §3: "**Coarse global session lock.**" / XV §9: "**`std::mutex` in coroutine context.**" | PASS — the gate is per session, scoped to one resend answer, and uses no `std::mutex`. |
 | XVI §3/§4: "`/clarify` is MANDATORY before `/plan` …" / "`/analyze` is MANDATORY for the same trigger set" | `/clarify` done; `/analyze` pending. |
 | XVII §1: Gate A triggers "Touches the public C++ API or C ABI", "concurrency / threading / cancellation / executor model", "the wire format", "the session FSM, recovery, or message store contract" | Gate A required and running (all four triggers). |
@@ -154,15 +154,22 @@ Order by dependency (research R17 as amended):
 |---|---|---|
 | `detail::replay_gate` (shared/exclusive, strand-local) | FR-014 widened by the owner: in-flight sends and liveness/close frames must be ordered around an answer | a flag + send-only wait (pass-1 D5) misses both widened cases; `async_mutex` leaves #583's terminal filter and serialises sends against each other |
 | `run_peer_logout_bound_` detached coroutine | FR-010's bound must fire with no inbound frame | the liveness loop returns at HB 0 and has no per-session wake; a frame-driven check cannot fire without a frame |
-| claim table across the competing Logout endings, with `close()`'s join of an `acking` bound | at most one Logout, exactly one except FR-010's enumerated cases (US3, FR-010, FR-017/018) | per-site guards were the #554 per-site-patching failure class; a claim alone cannot keep `close()` from closing the transport under a claimed acknowledgement |
-| `conn_gen_`, `inbound_depth_` and the reconnect drain | FR-006 and the owner's "drain, then reconnect": no frame of the old connection on the new one, whatever `drive_reconnect` starts from | an FSM-edge clear misses that route (Codex #7); a write fence leaves the install racing live emits; refusing from Active is a new public error path the owner did not choose |
+| one session-level Logout owner (`logout_in_flight_`) across the competing Logout endings, with `close()`'s poll-join | at most one Logout, exactly one except FR-010's enumerated cases (US3, FR-010, FR-017/018) | per-site guards were the #554 per-site-patching failure class; a claim alone cannot keep `close()` from closing the transport under a claimed acknowledgement |
+| `conn_gen_`, `inbound_depth_`, `reconnect_in_flight_` and the reconnect drain's operation contract | FR-006 and the owner's "drain, then reconnect": no frame of the old connection on the new one, whatever `drive_reconnect` starts from | an FSM-edge clear misses that route (Codex #7); a write fence leaves the install racing live emits; refusing from Active is a new public error path the owner did not choose |
 | Article XI §3 amendment | Article XX §1: the gate conflicts with §3 as written | `async_mutex`: exclusive only, #583's terminal filter, teardown drains |
 
 ## Gate A
 
 - Round 1 applied 2026-11-14: Codex P1=13 P2=4 P3=0; Opus post-judging P1=3 P2=8 P3=13; rewrite addresses RC1–RC5 and the three owner rulings. Reviews: research/reviews/codex_103-resend-logon-reset-fidelity_gate_a_review.md, research/reviews/opus_103-resend-logon-reset-fidelity_gate_a_adversarial_review.md.
 
-Points for round 2: the XI §3 amendment text (contract); D1's install-site clear and `conn_gen_`; D4.4's bound
+- Round 2 applied 2026-11-15: Codex P1=3 P2=3 P3=1; Opus post-judging P1=0 P2=8 P3=3; rewrite addresses root causes A–D. Reviews: research/reviews/codex_103-resend-logon-reset-fidelity_gate_a_2_review.md, research/reviews/opus_103-resend-logon-reset-fidelity_gate_a_2_adversarial_review.md.
+
+Points for a scoped round 3 (the Opus round-2 recommendation: D1 and D4.6 only): D1's operation contract
+(single flight and its error code, the R-4 post and the 563 §2.1a supersession, the detached-coroutine wait and its
+`root_cancel_` emit, the install's commit-point refusal, the #585 boundary, the latches); D4.6's `logout_in_flight_`
+owner, its emitter list and `run_logout_phase1`'s `Disconnected` early exit; cells G5–G9 and LO-1–LO-3.
+
+Points for round 2 (as recorded before round 2): the XI §3 amendment text (contract); D1's install-site clear and `conn_gen_`; D4.4's bound
 protocol and D4.6's claim table as a unit, with `close()`'s `acking` join; D1's reconnect drain (owner ruling
 2026-11-15) and Risk R24; FR-010's enumerated zero-Logout cases
 against each Logout leaf's failure exits; D5′'s placement rule for the pre-check; the census sentinel and the
@@ -208,3 +215,25 @@ rejected Codex's proposed fix shape, the Codex shape is not applied:
   publish-then-re-test rule carry the bound's safety (data-model.md).
 - **Codex #14 (`acking` drain vs FR-011)** — continuing to service administrative traffic until the
   acknowledgement is durably committed is not adopted; FR-011 is narrowed to the pending phase.
+
+### Round 2 — disagreements
+
+The Opus round-2 review marks no finding "Disagree" and downgrades Codex's three P1s to P2. Where it rejected
+Codex's fix shape, the Codex shape is not applied:
+
+- **Codex #2 (reconnect lifecycle)** — Codex's attempt token "rechecked after every suspension" carrying the
+  caller's cancellation identity through backoff, connect and handshake is not adopted: cancellation there is
+  fixpp#585's (B-538-5, brain R-22). Applied instead: the install as the atomic commit point for `close()` and stop,
+  with the refused transport closed, and the `dispatch_aborted` clause scoped to the drain's wait.
+- **Codex #3 (concurrent calls)** — "join the existing attempt" and a per-attempt generation checked at Logon
+  emission are not adopted: single flight with a documented existing error (`session_already_open`) covers the
+  whole operation, including the Logon.
+- **Codex #4 (`inbound_depth_`'s holder)** — a move-only depth token passed into each arm, and a per-return-family
+  table, are not adopted: the holder is `on_inbound_active_`'s first statement, which covers every return path, an
+  exception and frame destruction with one RAII object and no new frame. Cell G9 covers destruction.
+- **Codex #6 (`bound_done`)** — a modelled `bound_done_wake_` member with its own publish / re-test / clear protocol
+  is not adopted: Opus's fix shape (a) removes `bound_done`, and every waiter polls the shared counter by post.
+- **Codex #5 (inbound bench)** — "both callback and no-callback rows, MemoryStore where relevant" is narrowed to two
+  rows (an Active Heartbeat, which reaches no application callback, and an Active application message, which reaches
+  `fromApp`), the shapes the existing inbound allocation windows already drive.
+

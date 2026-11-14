@@ -48,7 +48,8 @@ control, is broken.
 - SC-005: R-588-a/b once per sanitizer lane (the hold makes them deterministic) with their mutants; R-588-h on
   `linux-clang-tsan` and `linux-clang-asan` repeated n times, n derived from its mutant's measured miss rate
   (research R-588-h), recorded in the evidence file.
-- The paired send-path bench (SC-006) against the base, with the base worktree path padded to equal length.
+- The paired benches (SC-006) against the base, with the base worktree path padded to equal length: the send path,
+  and the inbound-frame path (an Active Heartbeat, an Active application message).
 - The send-path allocation witness: the Release, Linux-only registrations
   `alloc_guard_544_we_sends_interleaved_mallocnesia` and its MemoryStore twin
   `alloc_guard_103_we_sends_memorystore_mallocnesia` read zero; in a scratch copy, an allocation planted in the

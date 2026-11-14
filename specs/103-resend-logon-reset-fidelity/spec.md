@@ -243,8 +243,10 @@ peer's request is never answered and its Logout never acknowledged.
    `session_invalid_state_for_send` and nothing is written.
 6. **Given** a too-high Logout pending, **When** the peer sends a TestRequest or an in-sequence ResendRequest,
    **Then** fixpp answers it (a Heartbeat; the replay) as it does with no mark.
-7. **Given** the mark's acknowledgement claimed and in its store call, **When** the application calls
-   `close(graceful)`, **Then** exactly one Logout (the acknowledgement) is written before the transport closes.
+7. **Given** the mark's acknowledgement claimed and in its store call (or any other Logout of the session in its
+   store call: an in-sequence acknowledgement, the deadline's, Arm B's), **When** the application calls
+   `close(graceful)`, **Then** exactly one Logout (the one in flight) is written before the transport closes; and,
+   the other way round, an inbound ending that meets `close(graceful)`'s Logout in flight sends none of its own.
 
 In every scenario fixpp sends at most one Logout for the condition, and exactly one except in the cases FR-010
 enumerates.
@@ -351,12 +353,16 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   transport is installed, whether or not the session passed through `Disconnected` before it. Recovery state of
   the old connection (the resend state, the pending-Logout mark and its bound) MUST NOT act on the new
   connection. A `drive_reconnect` called in Active or LogonReceived MUST first record `Disconnected` and wait until
-  no emit of the old connection is in flight (no frame numbered or claimed there is still being stored or written),
-  and only then install the new transport; no frame numbered or claimed on the old connection MAY be written on the
-  new one. The wait is bounded by `logout_disconnect_timeout_ms`, after which the old transport is force-closed so
-  a blocked write unwinds; a `close()` or `Engine::stop()` that starts meanwhile ends it with
-  `session_already_closed` and no install, and the caller's own cancellation with `dispatch_aborted` and no install
-  (research D1).
+  no emit of the old connection is in flight (no frame numbered or claimed there is still being stored or written)
+  and no detached coroutine of the old connection (its liveness loop, the mark's bound) is alive, and only then
+  install the new transport; no frame numbered or claimed on the old connection MAY be written on the new one. The
+  emit wait is bounded by `logout_disconnect_timeout_ms`, after which the old transport is force-closed so a blocked
+  write unwinds. The operation (research D1): one at a time (a second concurrent call returns
+  `session_already_open` and connects nothing); started from a callback, it runs after one post, as `close()` does;
+  a `close()` or `Engine::stop()` that starts during it, during the drain or during connect and handshake, ends it
+  with `session_already_closed`, no install, and the newly connected transport closed (the install is the commit
+  point); the caller's own cancellation of the drain's wait ends it with `dispatch_aborted` and no install, while
+  one that reaches the backoff, connect or handshake keeps today's result (fixpp#585).
 - **FR-007**: The header documentation of the resend state MUST state when it is reset, matching FR-006.
 
 **Too-high ResendRequest and Logout (#577)**
@@ -387,8 +393,10 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
      Logout's own `toAdmin`, whose Logout is stored and not transmitted (fixpp#590, rulings R-8 and R-9) (B-103-7);
   5. `close(graceful)` whose `logout_disconnect_timeout_ms` grace runs out before the Logout is written, because a
      resend answer or the claimed acknowledgement's own store and write outlast it (L-103-6).
-  `close(graceful)` that finds the acknowledgement claimed MUST wait for it, inside its grace, before it records
-  `Disconnected` and closes the transport (research D4.6).
+  One Logout is owned at a time, session-wide (research D4.6): `close(graceful)` that finds any Logout in flight
+  (the acknowledgement, an in-sequence acknowledgement, the deadline's, Arm B's) MUST wait for it, inside its
+  grace, before it records `Disconnected` and closes the transport, and send none of its own; an inbound ending that
+  finds one in flight (phase 1's included) MUST skip its own Logout and keep the rest of its ending.
 - **FR-011**: While the pending-Logout mark is pending (before its acknowledgement is claimed), `Session::send`
   MUST return `session_invalid_state_for_send` (the result after a peer's in-sequence Logout), and administrative
   traffic MUST continue: a TestRequest is answered and a ResendRequest is serviced. Once the acknowledgement is
@@ -484,7 +492,10 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
 - **SC-005**: A send started during a replay is written after the replay's last frame in 100 % of runs of the held-
   retrieve cells (deterministic: the hold forces the interleaving) and of the multi-threaded cell R-588-h under the
   sanitizer lanes, R-588-h's repeat count derived from its mutant's measured miss rate (research R-588-h).
-- **SC-006**: The normal-path send latency does not regress beyond the bench gate's tolerance.
+- **SC-006**: The normal-path send latency, and the normal inbound-frame path (an Active Heartbeat and an Active
+  application message through parse → validate → dispatch, `inbound_depth_`'s holder included), each in a paired
+  base-vs-candidate run on one runner against the merge-base with the base worktree path padded, do not regress
+  beyond the bench gate's tolerance.
 
 ## Assumptions
 
