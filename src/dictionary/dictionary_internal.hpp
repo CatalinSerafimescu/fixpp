@@ -144,9 +144,6 @@ void push_run(std::pmr::vector<MsgFieldsRun>& runs, std::pmr::vector<T>& pool, I
     pool.insert(pool.end(), items.begin(), items.end());
 }
 
-// 100: the run at `index` of `runs`, read from `pool`; empty when `index` has no run or
-// the run reaches past the pool's end (the guard the per-message run readers in
-// dictionary.cpp apply).
 // 102-dict-width-multichar-type D7 (spec FR-008): a run of `count` entries from
 // `start` lies inside a table of `size` entries. The test subtracts instead of adding, so a start
 // and a count whose 32-bit sum wraps cannot pass it. Every run reader tests a record
@@ -156,6 +153,9 @@ void push_run(std::pmr::vector<MsgFieldsRun>& runs, std::pmr::vector<T>& pool, I
     return start <= size && count <= size - start;
 }
 
+// 100: the run at `index` of `runs`, read from `pool`; empty when `index` has no run or
+// the run reaches past the pool's end (the guard the per-message run readers in
+// dictionary.cpp apply).
 template <class T>
 [[nodiscard]] std::span<T const> run_at(std::pmr::vector<MsgFieldsRun> const& runs,
                                         std::pmr::vector<T> const& pool,
