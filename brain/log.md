@@ -11,6 +11,7 @@ status: stable
   tier or caller count" (F1: a removal filed as "dead internal helper"; B-652-1). Class 1 gains "a round-trip that
   seeds every field of a category with the same value cannot see a swap within that category" (F2/F3: the v42 and
   077 builder round-trips). Owner-approved 2026-11-15 from the Gate B record's anti-pattern candidates.
+- **2026-11-14 — 102-dict-width-multichar-type close-out (PR #680), row 15: `failure-classes.md` class 14 gains a form, a stale-restatement sweep keyed on the new wording.** Owner-approved anti-pattern from 102's Gate B (rounds 1 and 2); the same rule is in the parent's `.claude/agents/phase-implementer.md`. Landed on 103's branch so Gate B reviews it.
 - **2026-11-11 — 100-wire-group-read-integrity, `/speckit-verify` (Step 10b): decision links only.** `components/c-api.md`, `components/inbound-message-path.md` and `components/session.md` already name 100 in their bodies (each a "Superseded by 100" note); each gains its Gate A record in `refs_external`, as `brain_link_decisions.py --parent <parent root>` proposed. No page states the T071 signature change (B-100-7): a grep of `brain/` for `dict_hooks` passed or held by value finds none, the same grep finding other "by value" lines.
 - **2026-11-05 — 099-fixt-appl-version-validation, `/speckit-verify` (Step 10b): a FIXT session reads each message with
   that message's dictionary.** `components/session.md` gains the section with what was decided (two dictionaries chosen

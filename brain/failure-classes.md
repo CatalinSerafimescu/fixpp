@@ -802,6 +802,14 @@ phrase no list contained, and every live predicate reports PASS.
   and mutation-test that half specifically.
 - **Relation to class 2:** class 2 says a corrected claim is still a claim. This is its enforcement
   twin — a check that enumerates wrong answers inherits the same treadmill as the claim it guards.
+- **Form: a stale-restatement sweep keyed on the NEW wording (102).** A sweep for records a change has
+  falsified is a search for content that should now be absent, so it inherits this class: keyed on the
+  change's own vocabulary, it can only find the sites that already agree. Key it on the OLD claim — its
+  wording, its rationale, its issue number, the prior function names — cover `spec/`, `docs/` and
+  `brain/`, and show it hits a known stale site before trusting a zero (class 1). 102's Gate B found the
+  same root cause on two axes in rounds 1 and 2 (MultiCharValue → `char` in the codegen docs page; the
+  shared id-parse rationale in comments). Owner-approved 2026-11-14; the implementer's anti-pattern
+  library carries the same rule.
 
 ### 15. A seam that outlives the window it observes leaks into whatever runs next
 
