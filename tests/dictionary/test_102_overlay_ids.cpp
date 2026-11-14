@@ -234,3 +234,54 @@ TEST(OverlayIds102, RowFCycleThroughAComponentRefPast65535IsThePreWalksRefusal) 
             << "the message must name '" << part << "': " << r.what;
     }
 }
+
+// Research D1b, spec FR-001b ("the loader's parse decides the ending"): the overlay merge reads a
+// field, fieldRef or numInGroup id as a FIX tag, in its own parses (`orch_id_key_of`,
+// `orch_child_key`, the graph build's declared-field set, `group_tag`, `records_of`). An id past
+// 65535 is no key the merge matches or counts, so each input below ends in the loader's own tag
+// refusal. A merge parse that truncated such an id would match it to the base's field 1 or
+// NumInGroup 100 instead: a conflict refusal, or a load (its mutant, tasks M-K-overlay).
+TEST(OverlayIds102, TagIdsPast65535EndInTheLoadersTagRefusal) {
+    std::string const base = small_base(w::o_field_def(1, "Account", "String") +
+                                            w::o_field_def(100, "NoX", "NumInGroup") +
+                                            w::o_field_def(200, "XM", "String"),
+                                        {}, w::o_group(5, "GX", 100, w::o_fref(200)),
+                                        w::o_fref(1) + w::o_gref(5));
+    struct input {
+        std::string_view name;
+        std::string overlay;
+        std::string_view refusal;
+    };
+    std::vector<input> const inputs = {
+        {.name = "a field definition with id 65537",
+         .overlay = overlay_of("<fixr:fields>\n" + w::o_field_def(65537, "Other", "String") +
+                               "</fixr:fields>\n"),
+         .refusal = "missing/invalid <fixr:field> id attribute"},
+        {.name = "a fieldRef 65537 restated in message D",
+         .overlay = overlay_of("<fixr:messages>\n" +
+                               w::o_msg(1, "NewOrderSingle", "D", w::o_fref(65537)) +
+                               "</fixr:messages>\n"),
+         .refusal = "missing/invalid <fixr:fieldRef> id attribute"},
+        {.name = "a new group whose numInGroup id is 65636",
+         .overlay = overlay_of("<fixr:groups>\n" + w::o_group(6, "GY", 65636, w::o_fref(200)) +
+                               "</fixr:groups>\n<fixr:messages>\n" +
+                               w::o_msg(1, "NewOrderSingle", "D", w::o_gref(6)) +
+                               "</fixr:messages>\n"),
+         .refusal = "missing/invalid <fixr:numInGroup> id attribute"},
+        {.name = "a new component holding a fieldRef 65537",
+         .overlay = overlay_of("<fixr:components>\n" + w::o_comp(7, "CZ", w::o_fref(65537)) +
+                               "</fixr:components>\n<fixr:messages>\n" +
+                               w::o_msg(1, "NewOrderSingle", "D", w::o_cref(7)) +
+                               "</fixr:messages>\n"),
+         .refusal = "missing/invalid <fixr:fieldRef> id attribute"},
+    };
+    for (auto const& in : inputs) {
+        auto const p = oprobe(base, in.overlay);
+        ot::refusal const r = ot::refusal_of(p);
+        EXPECT_TRUE(r.refused) << in.name << ": " << ot::describe(p);
+        EXPECT_EQ(r.type, typeid(fixpp::dict::orchestra_parse_error).name())
+            << in.name << ": " << ot::describe(p);
+        EXPECT_NE(r.what.find(in.refusal), std::string::npos)
+            << in.name << ": the message must name '" << in.refusal << "': " << r.what;
+    }
+}
