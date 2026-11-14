@@ -788,10 +788,6 @@ struct child_rec {
     vnode target;           // group: the group node; component: its definition, if resolved
 };
 
-struct def_info {
-    std::uint64_t steps = 0;
-};
-
 // The tags a definition emits at its own level, sorted by tag, each counted to at
 // most two.
 using level_set = std::vector<std::pair<std::uint16_t, std::uint8_t>>;
@@ -844,7 +840,7 @@ enum class colour : std::uint8_t { grey, black };
 // child records and post-order memo, the first-seen group of each NumInGroup tag,
 // and the first cycle met.
 struct graph_walk {
-    std::unordered_map<node_ptr, def_info> memo;
+    std::unordered_map<node_ptr, std::uint64_t> memo;  // each definition's walk steps
     child_map children;              // per definition visited
     std::vector<vnode> visit_order;  // definitions in the order the walk first met them
     std::map<std::uint16_t, vnode> first_seen_groups;
@@ -857,43 +853,40 @@ struct graph_walk {
 // `label(v)` names a definition in a cycle message. A definition already visited
 // is not walked again, which keeps the order of first encounters.
 template <class RecordsOf, class Label>
-def_info visit_definition(graph_walk& r, vnode root, RecordsOf const& records_of,
-                          Label const& label) {
+std::uint64_t visit_definition(graph_walk& r, vnode root, RecordsOf const& records_of,
+                               Label const& label) {
     if (auto const it = r.memo.find(root.key()); it != r.memo.end()) {
         return it->second;
     }
     struct frame {
         vnode v;
         std::size_t next = 0;
-        def_info acc;
+        std::uint64_t steps = 0;
     };
     std::vector<frame> stack;
     auto const open = [&](vnode v) {
         r.colours[v.key()] = colour::grey;
         r.children.emplace(v.key(), records_of(v));
         r.visit_order.push_back(v);
-        stack.push_back({.v = v, .next = 0, .acc = {}});
+        stack.push_back({.v = v, .next = 0, .steps = 0});
     };
     open(root);
     while (!stack.empty()) {
         frame& f = stack.back();
         auto const& kids = r.children.at(f.v.key());
         if (f.next == kids.size()) {
-            def_info const done = f.acc;
+            std::uint64_t const done = f.steps;
             r.memo[f.v.key()] = done;
             r.colours[f.v.key()] = colour::black;
             stack.pop_back();
             if (!stack.empty()) {
                 frame& p = stack.back();
-                p.acc.steps = sat_add(p.acc.steps, done.steps);
+                p.steps = sat_add(p.steps, done);
             }
             continue;
         }
         child_rec const& c = kids[f.next++];
-        f.acc.steps = sat_add(f.acc.steps, 1);
-        if (c.k == child_rec::kind::field) {
-            continue;
-        }
+        f.steps = sat_add(f.steps, 1);
         if (c.k == child_rec::kind::group && c.tag != 0) {
             r.first_seen_groups.emplace(c.tag, c.target);
         }
@@ -921,8 +914,7 @@ def_info visit_definition(graph_walk& r, vnode root, RecordsOf const& records_of
             }
             continue;
         }
-        def_info const& m = r.memo.at(c.target.key());
-        f.acc.steps = sat_add(f.acc.steps, m.steps);
+        f.steps = sat_add(f.steps, r.memo.at(c.target.key()));
     }
     return r.memo.at(root.key());
 }
@@ -1151,18 +1143,18 @@ xml_overlay_merge::impl::walk_result xml_overlay_merge::impl::walk(bool merged) 
     std::uint64_t total = 0;
     for (auto const& [mt, m] : r.messages) {
         if (r.header) {
-            total = sat_add(total, visit(r.header).steps);
+            total = sat_add(total, visit(r.header));
         }
-        total = sat_add(total, visit(m).steps);
+        total = sat_add(total, visit(m));
         if (r.trailer) {
-            total = sat_add(total, visit(r.trailer).steps);
+            total = sat_add(total, visit(r.trailer));
         }
     }
     for (vnode const c : r.components) {
-        total = sat_add(total, visit(c).steps);
+        total = sat_add(total, visit(c));
     }
     for (auto const& [tag, g] : r.first_seen_groups) {
-        total = sat_add(total, visit(g).steps);
+        total = sat_add(total, visit(g));
     }
     r.total = total;
     return r;
@@ -1492,22 +1484,23 @@ constexpr std::string_view kOrchContainers[] = {"fixr:codeSets", "fixr:fields", 
 }
 
 [[nodiscard]] std::optional<std::string> orch_child_key(pugi::xml_node c) {
-    if (!is_orch_ref(name_of(c))) {
+    std::string_view const k = name_of(c);
+    if (!is_orch_ref(k)) {
         return std::nullopt;
     }
     // 102 D1b: a fieldRef's id is a tag; a componentRef's or groupRef's a surrogate id.
-    if (name_of(c) == "fixr:fieldRef") {
+    if (k == "fixr:fieldRef") {
         std::uint16_t tag = 0;
         if (!try_parse_uint16(c.attribute("id").as_string(""), tag)) {
             return std::nullopt;
         }
-        return std::string{name_of(c)} + "|" + std::to_string(tag);
+        return std::string{k} + "|" + std::to_string(tag);
     }
     orch_ref_id id{};
     if (!try_parse_orch_ref_id(c.attribute("id").as_string(""), id)) {
         return std::nullopt;
     }
-    return std::string{name_of(c)} + "|" + std::to_string(std::to_underlying(id));
+    return std::string{k} + "|" + std::to_string(std::to_underlying(id));
 }
 
 [[nodiscard]] std::optional<std::string> orch_code_key(pugi::xml_node c) {
@@ -1993,16 +1986,14 @@ orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(b
             std::string_view const k = n.type() == pugi::node_element ? name_of(n) : "";
             // 102 D1b: a fieldRef's id is a tag; a groupRef's or componentRef's a
             // surrogate id.
-            std::uint16_t tag = 0;
-            bool const has_tag = try_parse_uint16(n.attribute("id").as_string(""), tag);
-            orch_ref_id id{};
-            bool const has_id = try_parse_orch_ref_id(n.attribute("id").as_string(""), id);
+            char const* const id_text = n.attribute("id").as_string("");
             if (k == "fixr:fieldRef") {
                 rec.k = child_rec::kind::field;
-                rec.tag = has_tag && declared.contains(tag) ? tag : 0;
+                std::uint16_t tag = 0;
+                rec.tag = try_parse_uint16(id_text, tag) && declared.contains(tag) ? tag : 0;
             } else if (k == "fixr:groupRef") {
                 rec.k = child_rec::kind::group;
-                if (has_id) {
+                if (orch_ref_id id{}; try_parse_orch_ref_id(id_text, id)) {
                     if (auto const it = group_by_id.find(id); it != group_by_id.end()) {
                         rec.tag = group_tag(it->second);
                         if (rec.tag != 0) {
@@ -2012,7 +2003,7 @@ orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(b
                 }
             } else if (k == "fixr:componentRef") {
                 rec.k = child_rec::kind::component;
-                if (has_id) {
+                if (orch_ref_id id{}; try_parse_orch_ref_id(id_text, id)) {
                     if (auto const it = component_by_id.find(id); it != component_by_id.end()) {
                         rec.target = it->second;
                     }
@@ -2033,14 +2024,14 @@ orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(b
     std::uint64_t total = 0;
     for (auto const& [mt, s] : r.messages) {
         if (s) {
-            total = sat_add(total, visit(s).steps);
+            total = sat_add(total, visit(s));
         }
     }
     for (vnode const c : r.components) {
-        total = sat_add(total, visit(c).steps);
+        total = sat_add(total, visit(c));
     }
     for (auto const& [tag, g] : r.first_seen_groups) {
-        total = sat_add(total, visit(g).steps);
+        total = sat_add(total, visit(g));
     }
     r.total = total;
     return r;
