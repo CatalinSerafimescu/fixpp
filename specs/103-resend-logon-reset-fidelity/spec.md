@@ -78,11 +78,33 @@ the FIX Session Layer's, or from both:
 - Q: #581 — an unfilled gap that nothing above NextNumIn trips? → A: while a resend is outstanding and NextNumIn has
   not advanced for 2 × HeartBtInt, the next inbound frame of **any** MsgSeqNum draws the B-537-2 Logout and
   `Disconnected` (supersedes ruling R-11). And a too-low Heartbeat without 43=Y draws a Logout and disconnect, like
-  every other too-low frame without 43=Y.
+  every other too-low frame without 43=Y. *(Narrowed by the `/speckit-clarify` session below: a frame that advances
+  NextNumIn is processed and restarts the deadline.)*
 - Q: #588 — a live send during a resend answer? → A: serialised, scoped to the replay: the live frame reaches the
   wire after the answer's last frame (QuickFIX C++ and Go). Not a general session send gate (#544 R-10 stands).
 - Q: #578 — resend state across an in-place reconnect? → A: no ruling needed (docs and all three engines agree): a
   reconnected session starts with no resend outstanding.
+
+### Session 2026-11-14 (`/speckit-clarify`; each answer is the stated recommendation, owner pre-approved: "go ahead with everything, plan is good")
+
+- Q: Is changing the C-ABI default reset policy (enum values unchanged) a breaking C-ABI change under Article X §7,
+  and what does it bump? → A: **BREAKING.** A consumer that never sets the policy sees a result other than the one
+  documented (strict), which §7 defines as breaking. It bumps `FIXPP_C_ABI_VERSION_MINOR` to the next value after
+  the base's (1.16 at `2c74af92` → 1.17), is marked BREAKING in `fixpp_reset_seqnum_policy`'s documentation, the PR
+  description and the B&L delta, updates every in-repository consumer in the same PR (Python binding, tests,
+  examples, interop harnesses), and takes all four Appendix A controls (clarify, analyze, Codex Gate A, the owner's
+  `/plan` sign-off).
+- Q: How long does fixpp wait for a gap before acknowledging a too-high Logout? → A: **`logout_disconnect_timeout_ms`**
+  (default 2000 ms), no new setting. It matches QuickFIX's LogoutTimeout default (2 s), which is how long a QuickFIX
+  peer that sent the Logout waits for the acknowledgement; a longer bound would see the peer disconnect first. A
+  value of 0 acknowledges at once (the QuickFIX ending).
+- Q: May the application send while a too-high peer Logout is pending? → A: **No.** `Session::send` returns
+  `session_invalid_state_for_send`, as it does after a peer's in-sequence Logout: the condition "the peer asked to
+  log out" has one ending for the application whatever the Logout's MsgSeqNum. Administrative traffic (resend
+  answers, Heartbeats, TestRequests) continues.
+- Q: Does #581's deadline end the session on a late frame that fills or advances the gap? → A: **No.** The deadline
+  acts only on a frame that does not advance NextNumIn. A frame that advances it (a replay, a GapFill) is processed
+  as today and restarts the deadline, so a late but real fill is never cut off.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -156,6 +178,8 @@ peer's request is never answered and its Logout never acknowledged.
    the peer to disconnect.
 4. **Given** the same, **When** the gap is not closed within `logout_disconnect_timeout_ms`, **Then** fixpp sends its
    Logout acknowledgement once at expiry, then waits for the peer to disconnect.
+5. **Given** a too-high Logout pending, **When** the application calls `Session::send`, **Then** it returns
+   `session_invalid_state_for_send` and nothing is written.
 
 ### User Story 4 — A ResendRequest from 0, or with no BeginSeqNo, gets a valid answer (Priority: P2)
 
@@ -197,12 +221,14 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
 
 **Acceptance Scenarios**:
 
-1. **Given** a resend outstanding and no advance of NextNumIn for 2 × HeartBtInt, **When** any inbound frame arrives
-   (at, below or above NextNumIn), **Then** fixpp sends the B-537-2 Logout ("ResendRequest unanswered, expecting
-   MsgSeqNum n") and records `Disconnected`.
-2. **Given** a resend outstanding, **When** frames keep advancing NextNumIn, **Then** the deadline restarts at each
+1. **Given** a resend outstanding and no advance of NextNumIn for 2 × HeartBtInt, **When** an inbound frame that
+   does not advance NextNumIn arrives (at, below or above NextNumIn), **Then** fixpp sends the B-537-2 Logout
+   ("ResendRequest unanswered, expecting MsgSeqNum n") and records `Disconnected`.
+2. **Given** the same, **When** the peer's GapFill or replay that advances NextNumIn arrives after 2 × HeartBtInt,
+   **Then** it is processed as today and the session stays up.
+3. **Given** a resend outstanding, **When** frames keep advancing NextNumIn, **Then** the deadline restarts at each
    advance, as today.
-3. **Given** Active, gap or not, **When** a Heartbeat below NextNumIn without 43=Y arrives, **Then** fixpp sends the
+4. **Given** Active, gap or not, **When** a Heartbeat below NextNumIn without 43=Y arrives, **Then** fixpp sends the
    same too-low Logout it sends for any other too-low frame without 43=Y and disconnects.
 
 ### Edge Cases
@@ -231,7 +257,10 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
 **Logon reset (#682)**
 
 - **FR-001**: The default `reset_seqnum_policy` MUST be `bilateral_lenient` on every configuration surface (C++
-  `SessionConfig`, the C ABI session config, TOML). The C ABI and TOML spellings of every policy are unchanged.
+  `SessionConfig`, the C ABI session config, TOML). The C ABI and TOML spellings of every policy are unchanged. The
+  change is BREAKING under Article X §7: `FIXPP_C_ABI_VERSION_MINOR` moves to the next value after the base's, the
+  BREAKING mark goes on `fixpp_reset_seqnum_policy`'s documentation, and every in-repository consumer is updated in
+  the same change.
 - **FR-002**: A Logon that fixpp sends with 141=Y MUST carry 34=1, under every policy and every reset setting, and
   both stored numbers MUST be 1 (durably) when it is built.
 - **FR-003**: Under `bilateral_strict`, an initiator MUST durably reset both numbers to 1 before building its Logon,
@@ -257,10 +286,12 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   one only if none is outstanding.
 - **FR-010**: A Logout whose 34 is above NextNumIn MUST set a pending-Logout mark (its 34 and the time it arrived)
   and draw a ResendRequest per FR-009. The session MUST send its Logout acknowledgement exactly once: when NextNumIn
-  passes the mark's 34, or when `logout_disconnect_timeout_ms` has elapsed since the mark, whichever comes first.
-  After the acknowledgement it MUST wait for the peer's disconnect as a graceful close does today.
-- **FR-011**: The pending-Logout mark MUST be cleared on disconnect and on an in-place reconnect (with FR-006's
-  resend state). Application sends while the mark is set are unchanged from today.
+  passes the mark's 34, or when `logout_disconnect_timeout_ms` has elapsed since the mark, whichever comes first (a
+  value of 0 acknowledges at once). After the acknowledgement it MUST wait for the peer's disconnect as a graceful
+  close does today.
+- **FR-011**: While the pending-Logout mark is set, `Session::send` MUST return `session_invalid_state_for_send`
+  (the result after a peer's in-sequence Logout), and administrative traffic MUST continue. The mark MUST be
+  cleared on disconnect and on an in-place reconnect (with FR-006's resend state).
 
 **BeginSeqNo (#580)**
 
@@ -280,8 +311,9 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
 **Gap endings (#581)**
 
 - **FR-017**: While a resend is outstanding and NextNumIn has not advanced for 2 × HeartBtInt, the next inbound frame
-  of any MsgSeqNum MUST draw the B-537-2 Logout ("ResendRequest unanswered, expecting MsgSeqNum " + NextNumIn) and
-  `Disconnected`. The deadline's start and restart rules are B-537-2's.
+  of any MsgSeqNum that does not advance NextNumIn MUST draw the B-537-2 Logout ("ResendRequest unanswered,
+  expecting MsgSeqNum " + NextNumIn) and `Disconnected`. A frame that advances NextNumIn is processed as today and
+  restarts the deadline. The deadline's start and restart rules are otherwise B-537-2's.
 - **FR-018**: A Heartbeat below NextNumIn without 43=Y MUST draw the same Logout and disconnect as any other frame
   below NextNumIn without 43=Y, gap or not.
 
@@ -322,14 +354,14 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
 
 ## Assumptions
 
-- The pending-Logout bound reuses `logout_disconnect_timeout_ms` (default 2000 ms) rather than a new setting.
 - After fixpp's Logout acknowledgement, the wait for the peer's disconnect is today's graceful-close wait.
-- The C ABI keeps its enum values; only the default and its documentation change. Whether this is BREAKING under
-  Article X §7 (a changed default on an unchanged signature) and the C-ABI MINOR bump are settled at plan / Gate A.
+- The C ABI keeps its enum values; only the default and its documentation change (BREAKING per the clarification).
 - The too-low Logout text for FR-018 is the one fixpp already sends for other too-low frames.
 - Gate A is required: the feature changes wire behaviour and a default configuration.
-- QuickFIX/J 3.0.2 and QuickFIX/Go v0.9.12 (being indexed in parallel) are checked for changes on these paths before
-  the plan is written.
+- QuickFIX/J 3.0.2 and QuickFIX/Go v0.9.12 were checked for changes on these paths (parent
+  `research/reviews/quickfix-engines-update-2026-11-14.md`): none changes a ruling; the research already read QFJ
+  and QFC at master. The interop pin moves to QuickFIX/J 3.0.2 separately (owner, 2026-11-14), so SC-002's live
+  runs use a peer with QFJ #902 fixed.
 
 ## Out of Scope
 

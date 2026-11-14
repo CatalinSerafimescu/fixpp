@@ -34,6 +34,7 @@
 
 ## Notes
 
-- `/speckit-clarify` is mandatory (session + wire + default-config change, constitution §XVI.3). Points to settle
-  there: Article X §7 classification of the changed C-ABI default; the pending-Logout bound reusing
-  `logout_disconnect_timeout_ms`; application sends while a Logout is pending (kept unchanged by FR-011).
+- `/speckit-clarify` ran 2026-11-14 (4 questions, recommendations owner-pre-approved): C-ABI default change is
+  BREAKING (MINOR bump, Appendix A); the pending-Logout bound is `logout_disconnect_timeout_ms`; sends while a peer
+  Logout is pending return `session_invalid_state_for_send`; #581's deadline never cuts off a frame that advances
+  NextNumIn. Re-validated: 16/16.
