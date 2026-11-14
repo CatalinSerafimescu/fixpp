@@ -50,7 +50,7 @@ quoted from `.specify/memory/constitution.md` (v4.3); it replaces research.md's 
 | VII §6: "v1.0 includes at least one interop test against an independent FIX implementation (QuickFIX) …" | PASS — unchanged; SC-002's live Logon cells run the default policy once the helpers stop forcing it (owner ruling 2; the live restart-and-resume run stays fixpp#503). |
 | VIII §2: "**Regression budget: a slowdown greater than +5%** against the **merge-base** … measured as a **paired base-vs-candidate run on one runner**" | Measure — the gate's flag test on the send and liveness paths, two flag reads on the inbound path (`acking`, `note_inbound_advance_`); SC-006's paired bench against the base, base worktree path padded to equal length. |
 | VIII §5: "zero `new`/`delete` between parse and `fromApp` callback." | PASS (planned) — nothing is added between parse and `fromApp`; the send-path fast path is witnessed by `alloc_guard_544_we_sends_interleaved_mallocnesia` and its MemoryStore twin, proven able to fire on a planted allocation (research D5′ "Allocation"). |
-| IX §1: "**Per-PR:** **≥95% line, ≥85% branch** on **touched modules** … **Binding rule — no silent uncovered error/edge path.**" | PASS (planned) — each new branch has a cell: the bound's "live" and generation re-tests (#578 E, F1, F2, G, H), the `close()` join (R-588-e(3)), T=0, no clock, the cancelled wait (R-588-f(3)), the store-fault release, B-6's drained lock. |
+| IX §1: "**Per-PR:** **≥95% line, ≥85% branch** on **touched modules** … **Binding rule — no silent uncovered error/edge path.**" | PASS (planned) — each new branch has a cell: the bound's "live" re-tests (#578 E, F1, F2), the reconnect drain's branches (G1–G4), the `close()` join (R-588-e(3)), T=0, no clock, the cancelled wait (R-588-f(3)), the store-fault release, B-6's drained lock. |
 | IX §2: "**Sanitizers — Tier 1 (every PR, Linux/Clang):** ASan, UBSan, TSan must all run and pass." | PASS (planned) — R-588-h on TSan and ASan with its derived repeat count (SC-005). |
 | X §1/§6: "Every change to it is reviewed against the contract; Codex Gate A is mandatory." / "ABI-affecting features trigger all four mandatory controls" | PASS — Gate A running; the four controls in the XI §7 row. |
 | X §7: a breaking change "is marked **BREAKING** in the documentation of each affected declaration (in the version comment of `version.h` where no declaration carries the change), in the PR description, and in the behaviors-and-limitations delta" and "updates every in-repository consumer … in the same PR" | **PASS (round 1, N3)** — MINOR 17; a 1.17 clause on every affected declaration, derived from the behaviour changes (research D7's table: the policy enum, its setter, `fixpp_session_config_create`, `fixpp_session_config_set_reset_on_logon`, and the five observers `fixpp_session_is_established`, `fixpp_session_close`, `fixpp_session_send`, `fixpp_session_register_callback`, `fixpp_session_register_send_callback`, with the 1.12 sentences 103 falsifies amended in place); the counterparty's side in `version.h`; PR body; B-103-1; consumers per D7. |
@@ -63,7 +63,7 @@ quoted from `.specify/memory/constitution.md` (v4.3); it replaces research.md's 
 | XVII §1: Gate A triggers "Touches the public C++ API or C ABI", "concurrency / threading / cancellation / executor model", "the wire format", "the session FSM, recovery, or message store contract" | Gate A required and running (all four triggers). |
 | XX §1–§3: "Any conflict … must be resolved by amending the article first (with rationale committed in the same PR)"; "Codex Gate A review on every amendment. User signs off."; "every amendment is recorded in a Sync Impact Report" | Planned — the XI §3 amendment's text is reviewed at Gate A round 2 with this bundle, then a scoped Codex Gate A on the applied clause, Gate B, and owner sign-off; the PR is titled in Article XX §2 form (contract). |
 
-**Owner `/plan` sign-off**: GIVEN 2026-11-14 ("plan signed off"), on the bundle at `278495fb` (rebased onto `da129e17` as `d165880b`), with Article XI §3 then open. **Re-confirmation requested on the round-1 delta** (Opus round-1 recommendation): D1's clear site (the transport install, with the connection generation), D4's bound protocol and `close()`'s join of an `acking` bound, and the replay gate's constitutional status (the XI §3 amendment). Appendix A control 4 is discharged for the pre-round-1 bundle only until the owner re-confirms.
+**Owner `/plan` sign-off**: GIVEN 2026-11-14 ("plan signed off"), on the bundle at `278495fb` (rebased onto `da129e17` as `d165880b`), with Article XI §3 then open; **RE-CONFIRMED 2026-11-15 on the round-1 delta** (D1's clear at `install_reconnected_transport` with the connection generation, D4's bound protocol and `close()` join, the XI §3 amendment riding 103; spec Clarifications, Gate A round 1). Appendix A control 4 is discharged for the round-1 bundle. The same day the owner ruled "drain, then reconnect" for a `drive_reconnect` from Active (research D1), which round 2 reviews.
 
 ## Project Structure
 
@@ -119,9 +119,10 @@ Order by dependency (research R17 as amended):
    the acceptor's single `attach_accepted_transport` per Session. The send-path allocation witness's MemoryStore
    twin measured on the base, and its planted-allocation proof. Results recorded in the evidence file, never in
    code comments.
-2. **#578 (D1)** — RED reproduction first (arms A, B, E; F1, F2, G, H after phase 7); if GREEN on the base, close as
-   not-a-bug with evidence. The clear and `conn_gen_` at `install_reconnected_transport`; the wakes on the
-   `Disconnected` edge; doc fix.
+2. **#578 (D1)** — RED reproduction first (arms A, B, E; G1–G4, F1, F2 after phases 6 and 7); if GREEN on the base,
+   close as not-a-bug with evidence. The clear and `conn_gen_` at `install_reconnected_transport`; the wakes on the
+   `Disconnected` edge; doc fix. The reconnect drain (`inbound_depth_`, the quiescence wait, its bound, its closing
+   and cancellation endings) lands after phase 6, because it waits on the gate's shared count.
 3. **#682 (D2, D7)** — RED cells (default, strict reset, strict acceptor Logout, AS5 matrix, C ABI and TOML
    defaults); the default flip; strict reset via the `reset_on_logon` path; the acceptor refusal moved before the
    sequence check; C-ABI 1.17 with a clause on every declaration of D7's table; consumer updates; the census-found
@@ -135,7 +136,7 @@ Order by dependency (research R17 as amended):
    from its mutant's measured miss rate; bench (SC-006).
 7. **#577 Logout half (D4.2–D4.7)** — the mark, `note_inbound_advance_`, `run_peer_logout_bound_` with its
    generation, publish-then-re-test, join and wake sources, the claim table, `close()`'s join of an `acking`
-   bound, the send refusal; cells (a)…(k), R-588-e, #578 F1, F2, G, H.
+   bound, the send refusal; cells (a)…(k), R-588-e, #578 F1, F2, G2.
 8. **#581 (D6, D9)** — the deadline predicate; the Heartbeat's early return removed; Arm B's Logout; B-8's
    validate-gate carve-out; flipped pins (research Pins and pass-2 list).
 9. **Records** — B&L delta (retire L-029-3, L-537-1; amend B-013-1, B-013-6, B-016-1, B-537-1, B-537-2, B-538-2,
@@ -154,7 +155,7 @@ Order by dependency (research R17 as amended):
 | `detail::replay_gate` (shared/exclusive, strand-local) | FR-014 widened by the owner: in-flight sends and liveness/close frames must be ordered around an answer | a flag + send-only wait (pass-1 D5) misses both widened cases; `async_mutex` leaves #583's terminal filter and serialises sends against each other |
 | `run_peer_logout_bound_` detached coroutine | FR-010's bound must fire with no inbound frame | the liveness loop returns at HB 0 and has no per-session wake; a frame-driven check cannot fire without a frame |
 | claim table across the competing Logout endings, with `close()`'s join of an `acking` bound | at most one Logout, exactly one except FR-010's enumerated cases (US3, FR-010, FR-017/018) | per-site guards were the #554 per-site-patching failure class; a claim alone cannot keep `close()` from closing the transport under a claimed acknowledgement |
-| `conn_gen_` and the bound's generation re-tests | FR-006: the old connection's mark and bound must not act on a transport a direct `drive_reconnect` installs from Active | an FSM-edge clear misses that route (Codex #7); an enforced `Disconnected` precondition is a new public error path |
+| `conn_gen_`, `inbound_depth_` and the reconnect drain | FR-006 and the owner's "drain, then reconnect": no frame of the old connection on the new one, whatever `drive_reconnect` starts from | an FSM-edge clear misses that route (Codex #7); a write fence leaves the install racing live emits; refusing from Active is a new public error path the owner did not choose |
 | Article XI §3 amendment | Article XX §1: the gate conflicts with §3 as written | `async_mutex`: exclusive only, #583's terminal filter, teardown drains |
 
 ## Gate A
@@ -162,7 +163,8 @@ Order by dependency (research R17 as amended):
 - Round 1 applied 2026-11-14: Codex P1=13 P2=4 P3=0; Opus post-judging P1=3 P2=8 P3=13; rewrite addresses RC1–RC5 and the three owner rulings. Reviews: research/reviews/codex_103-resend-logon-reset-fidelity_gate_a_review.md, research/reviews/opus_103-resend-logon-reset-fidelity_gate_a_adversarial_review.md.
 
 Points for round 2: the XI §3 amendment text (contract); D1's install-site clear and `conn_gen_`; D4.4's bound
-protocol and D4.6's claim table as a unit, with `close()`'s `acking` join; FR-010's enumerated zero-Logout cases
+protocol and D4.6's claim table as a unit, with `close()`'s `acking` join; D1's reconnect drain (owner ruling
+2026-11-15) and Risk R24; FR-010's enumerated zero-Logout cases
 against each Logout leaf's failure exits; D5′'s placement rule for the pre-check; the census sentinel and the
 send-path witness; D7's per-declaration BREAKING table.
 

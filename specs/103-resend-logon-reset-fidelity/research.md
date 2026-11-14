@@ -14,20 +14,67 @@ Notation: **N** = NextNumIn. **S** = the MsgSeqNum of a too-high Logout. **T** =
 ### D1 — Resend state and the mark end with the connection (#578; FR-006, FR-007, FR-011's last sentence)
 
 *Amended at Gate A round 1 (RC1): the clear moves to the transport install, because the public
-`Session::drive_reconnect` can install a new transport from Active with no `Disconnected` edge.*
+`Session::drive_reconnect` can install a new transport from Active with no `Disconnected` edge. Amended again by
+owner ruling 2026-11-15 ("drain, then reconnect"): a `drive_reconnect` from Active or LogonReceived first records
+`Disconnected` and waits for every in-flight emit, then installs.*
 
 **Decision:**
 - **The connection generation.** A private `std::uint32_t conn_gen_` of `Session`, incremented in
   `Session::install_reconnected_transport`, before its `record_state_transition_(LogonSent)`. Connection-scoped
-  recovery work captures it and acts only while it is current (D4.4).
+  recovery work captures it; the drain below makes "work of an older generation acts on a newer one" unreachable,
+  so the bound asserts it (D4.4) rather than branching on it.
+- **Drain, then reconnect (owner ruling 2026-11-15).** No frame numbered or claimed on the old connection may be
+  written on the new one. `Session::drive_reconnect` therefore begins, before `reconnect_fsm_.drive_reconnect_attempt()`:
+  1. **Refuse a closing session.** If `state_` is `closing` or `closed_drained`, or `engine_stop_requested_` is set,
+     return `session_already_closed` and install nothing.
+  2. **Leave the old connection.** If `fsm_state_` is Active or LogonReceived, `record_state_transition_(Disconnected)`.
+     The edge fires `onLogout` (from Active) and wakes the bound and the gate's waiters (D4.4, D5′), so a waiting
+     send re-tests Active and is refused, and the bound exits. From this point no emitter can start: `send_body_`,
+     the liveness loop's emits, `run_logout_phase1` and the bound all require Active (or LogonReceived), and the
+     Disconnected arm of `on_inbound_frame` emits nothing (the phase-1 census confirms it by reading).
+  3. **Wait for in-flight emits: the quiescence condition** is `replay_gate_.shared == 0 && inbound_depth_ == 0`.
+     - `replay_gate_.shared` counts every emitter outside the inbound chain from before its number peek to the
+       return of its `store_then_emit` (D5′.4): `Session::send` in its store call or write, the liveness Heartbeat and
+       TestRequest, `close()`'s phase-1 Logout, and a claimed (`acking`) acknowledgement, which holds a shared hold
+       for its emit.
+     - `inbound_depth_` is a new private counter, raised by an RAII holder at `on_inbound_frame`'s entry and lowered
+       at its every exit. It covers every inbound-chain emitter (replies, Rejects, fixpp's ResendRequest, a resend
+       answer's walk, the Logout leaves), which number and write inside the chain. Cost: an increment and a
+       decrement per frame, and one compare at the decrement (VIII §2 measurement, SC-006).
+     - A frame-local check first: if quiescent, no await (the usual case: a reconnect after `Disconnected`).
+     - Otherwise it waits on the gate's wake like any gate waiter (`++waiters` under RAII, `async_wait` on the lazy
+       timer, D5′.2's pre-check in the same frame). The gate's last shared release calls `wake_all()` whenever
+       `waiters != 0` (generalising D5′'s "last shared release while exclusive"), and `inbound_depth_` reaching 0
+       calls `replay_gate_.wake_all()` (one compare when nobody waits). The condition is re-tested after every wake.
+     - **Bound.** A frame-local `steady_timer` of `logout_disconnect_timeout_ms`, as `close_grace` is, raced against
+       the wait. At expiry the old transport is force-closed (`live->close()`, `close(graceful)`'s FQ-G path), so a
+       writer blocked in `async_write` unwinds with an error; the wait then continues with no deadline. The residual
+       unbounded case is a wedged store call (B-598-1), which already holds `close()` and `Engine::stop()` today;
+       disclosed with B-103-9. With T = 0 the force-close is immediate.
+     - **What the in-flight emits do.** They finish on the **old** transport, which is still installed: a frame in
+       its store call is stored and then written to the old transport, or its write fails (and its emitter's own
+       failure path finds `Disconnected` already recorded). Either way it is never written on the new transport; a
+       stored frame that was not written is served by the peer's ResendRequest on the new connection.
+     - **Cancellation.** The wait completes through `as_tuple`; a cancellation of the caller's own slot ends it.
+       `drive_reconnect` then returns `dispatch_aborted`, installs nothing, and leaves the session `Disconnected`
+       and the caller's cancellation pending (N5's rule). A later `drive_reconnect` runs the same drain, so an emit
+       still in flight then is still waited for.
+     - **`close()` / `Engine::stop()` racing it.** `close()` and `note_engine_stop_` call `replay_gate_.wake_all()`;
+       after every wake the drain re-tests step 1's condition and returns `session_already_closed` with nothing
+       installed. `close()` does not join `drive_reconnect`; the precondition that `close()` runs before the
+       Session is destroyed, and that a caller awaiting `drive_reconnect` keeps the Session alive, is the one every
+       Session awaitable already has.
+     - **Called from a callback.** A callback cannot `co_await`, so a `drive_reconnect` started from `fromApp` is
+       `co_spawn`ed; its drain suspends on `inbound_depth_ == 1` and resumes when the chain returns. No deadlock.
+  4. Then `drive_reconnect_attempt()` (connect, handshake) and `install_reconnected_transport`, which asserts the
+     quiescence condition (`FIXPP_ASSERT`) before it installs; nothing can break it in between, by step 2.
 - **Clearing site for the resend state: `Session::install_reconnected_transport`.** There, before the `LogonSent`
   transition and therefore before `drive_reconnect`'s `emit_initiator_logon_` sends the new Logon (FR-006's own
   point):
   - `reconnect_fsm_.exit_awaiting_resend()` clears the awaiting flag. `ResendState::reset` clears the outstanding
     range, `started_at` and `inbound_filled_through`.
-  - The mark is cleared (`peer_logout_.phase = none`), `conn_gen_` moves, and the bound's wake and the replay
-    gate's `wake_all()` are invoked, so a bound of the old connection resumes, sees the new generation, and exits
-    with no effect (D4.4).
+  - The mark is cleared (`peer_logout_.phase = none`) and `conn_gen_` moves. The drain's `Disconnected` edge has
+    already woken the old bound; one that has not yet resumed finds the phase `none` and exits with no effect (D4.4).
   - Both calls are `noexcept` and allocate nothing, which `install_reconnected_transport`'s `noexcept` requires.
     `ResendState::reset` empties `inbound_held`, which nothing ever writes.
 - **The `Disconnected` edge** (`Session::record_state_transition_`) keeps the two wakes (the bound's,
@@ -44,12 +91,10 @@ Notation: **N** = NextNumIn. **S** = the MsgSeqNum of a too-high Logout. **T** =
 - **The acceptor.** `Session::attach_accepted_transport` is called once per Session: the accept loop builds a fresh
   `Session` for each accepted connection (`run_accept_loop`'s `local_session`), so no in-place re-attach exists.
   The phase-1 census confirms it by reading; no clear is added there.
-- **Disclosed residual (the pre-existing in-place-swap class).** An emit already past its last generation re-test
-  when a direct caller installs a new transport (a `Session::send` mid-store today; after 103 also a claimed
-  acknowledgement in its store or write) writes its frame on the new transport, because `live_write_serialized_`
-  reads the live transport at call time. 103 bounds the bound's part of it: after its emit the bound re-tests the
-  generation before any state write or event (D4.4), so it never records `Disconnected` against the new
-  connection. The frame itself is the pre-existing class, disclosed with B-103-9.
+- **The in-place-swap class is closed, not disclosed (owner ruling 2026-11-15).** Before 103 a `Session::send`
+  mid-store when a direct caller installed a new transport wrote its frame on the new transport, because
+  `live_write_serialized_` reads the live transport at call time. The drain removes it for every emitter: no emit is
+  in flight when the install runs.
 - **Doc fix in `resend_state.hpp`.** Replace "reset on gap close (awaiting_resend=false) or session exit" with:
   reset by `ReconnectFsm::exit_awaiting_resend`, which is called when the gap closes and when a new transport is
   installed (`Session::install_reconnected_transport`). Name feature 103 in that comment, so it points at the
@@ -70,19 +115,28 @@ Notation: **N** = NextNumIn. **S** = the MsgSeqNum of a too-high Logout. **T** =
   the transport reaches `install_reconnected_transport` from Active, so the stale mark's bound passes its tests on
   the new connection and acknowledges the old Logout there (Gate A round 1, Codex #7).
 - Make `Disconnected` an enforced precondition of `drive_reconnect`, returning an error otherwise. A new error
-  path on a public call (a BREAKING C++ change) for a state the clear makes harmless.
+  path on a public call for a state the drain makes safe; the owner chose "drain, then reconnect" (2026-11-15).
+- A write fence (each emitter captures `conn_gen_` and `store_then_emit` stores without transmitting when it moved).
+  It keeps the old frame off the new transport but leaves the install racing live emitters; the ruling asks for the
+  emits to finish first.
 - Clear in `emit_initiator_logon_`. This covers the initiator only, and it is the wrong layer for the mark.
 - Clear in `close()`. `close()` is terminal; the in-place route never calls it.
 
 **Reachability, disclosed with the B-row:** the Engine never reconnects a Session in place. `run_connect_loop` ends
 with `close(terminal)`, which is permanent, and there is one Session per entry per `Engine::start`. #578 is
 reachable only by a direct caller of the public `Session::drive_reconnect`, from `Disconnected` or from Active.
+**Behaviour change for that caller (C++ API only; no C-ABI reach):** a `drive_reconnect` from Active now records
+`Disconnected` first, so `onLogout` fires and waiting sends are refused, and it may return later (after the drain)
+or return `session_already_closed` / `dispatch_aborted` without reconnecting. The header doc of `drive_reconnect`
+states it (`include/fixpp/session/session.hpp`).
 
 **Sites:**
 - `Session::install_reconnected_transport`, `Session::record_state_transition_` (`src/session/session.cpp`).
 - `ReconnectFsm::exit_awaiting_resend` (`src/session/reconnect_fsm.cpp`), unchanged.
 - The `ResendState` comment in `include/fixpp/session/resend_state.hpp`.
-- `include/fixpp/session/session.hpp`: `conn_gen_`.
+- `include/fixpp/session/session.hpp`: `conn_gen_`, `inbound_depth_`, and `drive_reconnect`'s doc.
+- `Session::drive_reconnect`, `Session::on_inbound_frame` (the depth holder), `detail::replay_gate` (wake on the last
+  shared release whenever a waiter exists).
 
 ---
 
@@ -261,8 +315,11 @@ In both routes:
   stays):
   - It is `co_spawn`ed when the mark is set, on `co_await asio::this_coro::executor` in the arm: the session
     strand, as the liveness loop is spawned. It captures `gen = conn_gen_` (D1) at spawn.
-  - **Its exit test, "live"**: `conn_gen_ == gen`, the phase is `pending`, `fsm_state_ == Active`, `state_` is
-    neither `closing` nor `closed_drained`, and `engine_stop_requested_` is clear. Whether `co_spawn` runs the child
+  - **Its exit test, "live"**: the phase is `pending`, `fsm_state_ == Active`, `state_` is neither `closing` nor
+    `closed_drained`, and `engine_stop_requested_` is clear. `conn_gen_ == gen` is asserted (`FIXPP_ASSERT`) at each
+    test, not branched on: D1's drain records `Disconnected` before any install and waits for a claimed
+    acknowledgement's shared hold, and the install clears the mark, so a bound of an older generation cannot reach
+    a test with "live" otherwise true. Whether `co_spawn` runs the child
     up to its first suspension or posts its start depends on the asio version; the protocol relies on neither.
   - **Publish, then re-test.** It first publishes its wake (`peer_logout_wake_`), then tests "live"; if it fails, it
     exits with no effect. An ending that ran before the child started (a `Disconnected` edge, an install) found no
@@ -277,10 +334,9 @@ In both routes:
     re-tested after every wake of the gate wait, and it exits with no effect if it fails.
   - **The claim:** with the hold taken and "live" true, it sets the phase to `acking` synchronously, before its
     first suspension, then sends the acknowledgement (D4.5).
-  - **After the emit:** it re-tests `conn_gen_ == gen` after every suspension of the emit, and performs the
-    acknowledgement's state writes and event (D4.5's `emit_event`, `record_state_transition_(Disconnected)`) only
-    if the generation is unchanged. A direct caller's install during the emit therefore cannot end the new
-    connection; the frame already handed to the transport is D1's disclosed residual.
+  - **After the emit:** the acknowledgement's state writes and event (D4.5's `emit_event`,
+    `record_state_transition_(Disconnected)`, guarded by `fsm_state_ != Disconnected`) follow. No install can run
+    during the emit: D1's drain waits for its shared hold. `conn_gen_ == gen` is asserted there too.
 - **Cancellation and lifetime:**
   - It is **not** bound to `root_cancel_.slot()`. A `cancellation_signal`'s slot holds one handler; the liveness
     loop is bound there, and a second binding would displace it, so `close()`'s liveness join could wait out a
@@ -289,7 +345,7 @@ In both routes:
     ends and on every exit by a guard. This is the idiom of `logout_wait_wake_`, `reset_unit_wake_` and
     `close_grace_wake_`. The `std::function` holds one reference capture, so it does not allocate.
   - **Wake sources:** `note_inbound_advance_` (N passed S), every D4.6 claim of `pending → none`, the
-    `Disconnected` edge (D1), `install_reconnected_transport` (D1), `note_engine_stop_`, and `close()`, which calls
+    `Disconnected` edge (D1; `drive_reconnect`'s drain writes one from Active), `note_engine_stop_`, and `close()`, which calls
     it **unconditionally** at entry, not only through the edge. An edge's wake would be lost if it landed on the timer
     before the race's wait is initiated. In the vendored asio (1.38: `co_spawn_entry_point` begins with
     `co_spawn_dispatch`, so a child spawned from the strand starts inline) the wait is pending before the bound
@@ -374,7 +430,7 @@ In both routes:
 The gate has no atomics. `Session::send`'s path is already strand-local: `send_slot_in_use_` and `outbound_callback_depth_` are plain members, and `Engine::send` hops onto the session strand. The gate is a class of its own so that a unit cell can test it without a Session.
 
 **D5′.2 The shared side: the fast path, then a contended wait.**
-1. **Fast path.** `if (!gate.exclusive) { ++shared; }`. The RAII holder's destructor runs `--shared; if (shared == 0 && exclusive) wake_all();`. No await, no allocation, no change to the cancellation filter.
+1. **Fast path.** `if (!gate.exclusive) { ++shared; }`. The RAII holder's destructor runs `--shared; if (shared == 0) wake_all();` (`wake_all` is a no-op unless `waiters != 0`; the waiter is the walk's exclusive wait or D1's reconnect drain). No await, no allocation, no change to the cancellation filter.
 2. **Contended wait.** While the gate is exclusive, each iteration does the following:
    1. Apply by hand the pre-check a co_await performs (`send_deferred_`'s OD-1 idiom): if `throw_if_cancelled()` is set and the coroutine is already cancelled, return without waiting. **Placement rule (Gate A round 1, Codex #1):** the pre-check sits in the same coroutine frame as the `co_await` it guards. Every emitter of a per-operation or root slot runs on the strand, and neither `co_await` of the pre-check suspends, so nothing runs between the pre-check and step 3's `await_transform`: there is no race in that form. If the wait is factored into a child awaitable (for example `gate.acquire_shared()`), a pre-check inside the child comes after the parent's `await_transform`, which throws first; `send_body_`'s wait sits outside its `try`, so that throw would leave a `noexcept` coroutine. A factored wait is therefore awaited through the split idiom (`FIXPP_INBOUND_SPLIT_AWAIT` / `FIXPP_INBOUND_SPLIT_ENTRY`), or the pre-check stays in the parent's frame before that `co_await`.
    2. Otherwise run `++waiters` under RAII, so a wait ended by `||` or by frame destruction cannot leak a count.
@@ -426,10 +482,10 @@ The gate has no atomics. `Session::send`'s path is already strand-local: `send_s
 
 **Wake sources.** `wake_all()` is called from:
 1. the exclusive guard's destructor;
-2. the last shared release while exclusive;
+2. the last shared release, whenever a waiter exists (the walk's exclusive wait, or D1's reconnect drain);
 3. the Disconnected edge in `record_state_transition_`, next to the bound's wake (D1);
 4. `note_engine_stop_`;
-5. `install_reconnected_transport`, next to D1's clears.
+5. `inbound_depth_` reaching 0, and the last shared release whenever `waiters != 0`, for D1's reconnect drain (which waits on the gate's wake as a waiter; it takes no hold).
 
 Each is one compare when nobody waits.
 
@@ -753,18 +809,20 @@ Each cell must be RED on `2c74af92`, by reading. #577 and #578 are unconfirmed: 
   - B: as A, with the clock moved past 2 × HB during the downtime.
   - C: strict with no knob, after D2. It reaches the same state with no setting at all.
   - D: the mark is cleared across the reconnect (after D4), through `Disconnected` first.
-  - **E (Gate A round 1, RC1; no `Disconnected` edge):** reach Active; a frame at N+10 draws a 35=2; a too-high Logout sets the mark (T > 0, mock clock); the mock transport is dropped with no `Disconnected` recorded; `drive_reconnect()` installs a new transport; the new Logon's acknowledgement reaches Active; advance the clock past the old mark's `at + T`; `Session::send` an application message.
-  - **G (an install during a claimed acknowledgement):** the bound has claimed and its acknowledgement's `store(S)` is held (the 538 store wrapper); a direct `drive_reconnect` installs a new transport from Active; release the store. Assert: after the reconnect mark no `Disconnected` is recorded, no `sequence_numbers_reset` event is emitted, and the new connection's Logon exchange reaches Active. The acknowledgement's frame itself is D1's disclosed residual and is not asserted.
-  - **H (a new mark on the new connection):** a test hook holds the old bound before its pre-claim test; a direct `drive_reconnect` installs a new transport; the new Logon exchange reaches Active; a too-high Logout at t2 sets a new mark (phase `pending` again); release the old bound with the clock at the old `at + T`, earlier than `t2 + T`. Assert: no 35=5 is written until `t2 + T` (or until N passes the new S).
+  - **E (Gate A round 1, RC1; `drive_reconnect` from Active):** reach Active; a frame at N+10 draws a 35=2; a too-high Logout sets the mark (T > 0, mock clock); the mock transport is dropped with no `Disconnected` recorded by the test; `drive_reconnect()` (whose drain records `Disconnected`, finds nothing in flight, and installs a new transport); the new Logon's acknowledgement reaches Active; advance the clock past the old mark's `at + T`; `Session::send` an application message.
+  - **G1 (drain: a send held in its store call; owner ruling 2026-11-15):** Active; `co_spawn(send)` takes S and the 538 store wrapper holds its `store(S)`; `co_spawn(drive_reconnect())`; pump. Assert while held: `Disconnected` recorded, no connect attempted (the mock factory saw no call), nothing written on any new transport. Release: the send's 34=S frame is written on the old transport (or its write fails there); after the install, no frame on the new transport carries 34=S, and the new Logon carries S+1.
+  - **G2 (drain: a claimed acknowledgement):** the mark is pending; a GapFill moves N past S; the bound claims and its acknowledgement's `store` is held; `co_spawn(drive_reconnect())`; release. Assert: the 35=5 is written on the old transport or not at all, never on the new one; the new connection reaches Active with no 35=5 written on it.
+  - **G3 (drain: an inbound-chain reply):** a TestRequest's Heartbeat reply is held in its `store`; `co_spawn(drive_reconnect())` from Active; release; the 35=0 is not written on the new transport.
+  - **G4 (drain against `close()` and cancellation):** with G1's hold, (1) `close(terminal)` while the drain waits → `drive_reconnect` returns `session_already_closed` within a bounded pump and installs nothing; (2) the caller's own slot emits terminal → `dispatch_aborted`, nothing installed, the state `Disconnected`, the cancellation still pending; a second `drive_reconnect` after the release reconnects; (3) T elapses with the write blocked → the old transport is force-closed and the drain completes.
   - **F1 (the bound's late start):** the mark is set and a test hook holds the child bound before its first run until `close(terminal)` has begun and is at its join; release; `close()` must complete within a bounded pump (no wait of T).
   - **F2 (a wake lost before the race starts):** the hook holds the bound after its publish-and-re-test and before its race's wait is initiated; a wrong-CompID frame records `Disconnected` (the edge's wake lands on a timer with no wait pending); release; `close()` must complete within a bounded pump.
-- **Assertions:** `resend_outstanding()` is false after the reconnect's Active, and only 35=2 frames written after the reconnect mark count: exactly one with 7=2 (A, B), none from the old range. Arm E: no 35=5 written after the reconnect mark at or after `at + T`, the send returns success and its frame is written, and the bound's join counter is 0. Arms F1, F2: `close()` returns within the pump; the join counter is 0. Frames written before the reconnect mark (Arm A's Arm-B Logout, D9) are not scoped by these assertions.
+- **Assertions:** `resend_outstanding()` is false after the reconnect's Active, and only 35=2 frames written after the reconnect mark count: exactly one with 7=2 (A, B), none from the old range. Arm E: `onLogout` fired once (the drain's edge), no 35=5 written after the reconnect mark at or after `at + T`, the send returns success and its frame is written, and the bound's join counter is 0. Arms F1, F2: `close()` returns within the pump; the join counter is 0. Frames written before the reconnect mark (Arm A's Arm-B Logout, D9) are not scoped by these assertions.
 - **Control:** a fresh Session, steps 3 and 4 only, writes the same 35=2.
 - **Mutants, one per site:**
   - delete the resend-state clear in `install_reconnected_transport` → A RED (nothing written: the first too-high frame is "already requested"), B RED (a 35=5 "ResendRequest unanswered"), E RED;
   - delete the mark clear at install, keep the generation → E RED (the send is refused);
-  - delete the bound's pre-claim generation test → H RED (a 35=5 at the old mark's `at + T` on the new connection). E does not kill it: the install's mark clear already fails the bound's `phase == pending` test;
-  - delete the bound's post-emit generation re-test → G RED (a `Disconnected` recorded against the new connection);
+  - delete the drain's wait (install at once) → G1 RED (34=S written on the new transport, after the new Logon) and G2 RED (a 35=5 on the new connection);
+  - drop `inbound_depth_` from the quiescence condition → G3 RED; drop the step-1 / after-wake closing re-test → G4(1) RED (an install after `close()`); add a `reset_cancellation_state` after the cancelled wait → G4(2) RED; delete the force-close at expiry → G4(3) RED (the pump deadline expires, no hang);
   - delete the bound's wake on the `Disconnected` edge → (j) of the too-high Logout cells RED (the join counter stays 1 until T);
   - delete the bound's publish-then-re-test → F1 RED; delete `close()`'s unconditional wake → F2 RED (each: the pump deadline expires, with no hang).
 
@@ -924,7 +982,7 @@ Every behavioural FR has a cell and a mutant that turns it RED for the FR's own 
 | FR-003 | #682 AS2 | drop strict from `reset_before_logon` |
 | FR-004 | #682 AS3 | restore the silent refusal |
 | FR-005 | #682 AS1, AS4, AS5 | restore the strict default |
-| FR-006 | #578 A, B, E, G, H, F1, F2 | delete the install clear (A, B, E); delete the bound's post-emit generation re-test (G) or its pre-claim generation test (H); delete the publish-then-re-test (F1) or `close()`'s unconditional wake (F2) |
+| FR-006 | #578 A, B, E, G1–G4, F1, F2 | delete the install clear (A, B, E); delete the drain's wait (G1, G2) or its `inbound_depth_` term (G3); its closing re-test, a cancellation reset or the force-close (G4); delete the publish-then-re-test (F1) or `close()`'s unconditional wake (F2) |
 | FR-007 | the `resend_state.hpp` comment, read against D1's site | none (documentation) |
 | FR-008 | #577 RR Arms 1, 2 | delete either too-high dispatch |
 | FR-009 | #577 RR Arm 2; Logout (e) | send a second ResendRequest from the out-of-sequence route |
@@ -1026,7 +1084,7 @@ Characterisation cells, no behavioural mutant: B-4 (`toAdmin` throws; control B-
 - `B-103-6`: a too-high ResendRequest is serviced; at most one ResendRequest of fixpp's own; no `fromAdmin`. With `validate_sequence_numbers` off, unchanged.
 - `B-103-7`: the pending-Logout ending (Active only): the acknowledgement when N passes S or at T, or at once with T=0 or no clock; sends refused while the mark is pending; TestRequests and ResendRequests answered meanwhile; no `fromAdmin`; the durable N stays at or below S on the timeout route; a `close(graceful)` that finds the acknowledgement claimed waits for it inside its grace. At most one Logout; none where the CompIDs overflow the Logout buffer, where `toAdmin` throws on it, where its assignment or store call fails, or where the transport ends first (the peer's EOF, `close(terminal)`, `Engine::stop()`) (FR-010 cases 1–4).
 - `B-103-8`: the four emitter kinds (`Session::send`, the liveness Heartbeat and TestRequest, `close()`'s Logout, the pending-Logout acknowledgement) wait for a running resend answer and are numbered after it; a frame numbered before an answer is written before it; a waiting send is refused (`session_invalid_state_for_send`) on close, stop, a non-Active state or the mark, or returns `dispatch_aborted` with no state change and its caller's cancellation still pending on its own cancellation.
-- `B-103-9`: resend state and the mark end with the connection: cleared when a new transport is installed, whether or not the session passed through `Disconnected`; the mark's bound acts only on its own connection. Reachable in place only through a direct `Session::drive_reconnect`. Disclosed: an emit already past its last check when a direct caller installs a new transport (a `Session::send` mid-store, or a claimed acknowledgement) writes its frame on the new transport, as before 103.
+- `B-103-9`: resend state and the mark end with the connection: cleared when a new transport is installed, whether or not the session passed through `Disconnected`; the mark's bound acts only on its own connection. Reachable in place only through a direct `Session::drive_reconnect`. A `drive_reconnect` from Active or LogonReceived records `Disconnected` first (so `onLogout` fires and waiting sends are refused) and waits until no emit of the old connection is in flight, so no frame numbered or claimed on the old connection is written on the new one (before 103 a send mid-store could be); the wait is bounded by `logout_disconnect_timeout_ms`, then the old transport is force-closed, except that a wedged store call holds it as it holds `close()` today (B-598-1); a `close()` or `Engine::stop()` meanwhile ends it with `session_already_closed`, the caller's cancellation with `dispatch_aborted`, neither installing.
 - `B-103-10`: every frame below NextNumIn without 43=Y, the Heartbeat included, in Active with sequence validation on, that reaches the sequence check draws `Logout 58="MsgSeqNum too low, expecting N but received M"`, then `Disconnected`. N is not advanced. There is no `fromAdmin`/`fromApp` and no event. The gap deadline's Logout takes precedence. Not covered: a frame Rejected at the validate gate (it stays Active, as QuickFIX C++), a frame failing the CompID or SendingTime check, an unparseable or garbled frame. No Logout where the CompIDs overflow the Logout buffer or `toAdmin` throws.
 - `L-103-2`: a peer-spontaneous 141=Y acknowledgement at 34=1 with a hydrated N above 1 ends the session (D2.3).
 - `L-103-3`: HB ≤ 0: no gap deadline (restated).
@@ -1126,5 +1184,6 @@ Characterisation cells, no behavioural mutant: B-4 (`toAdmin` throws; control B-
 - **New R20, liveness slip:** liveness emits slip by the length of a walk, and a TestRequest decided before a walk is re-evaluated after it. Usually it is dropped, because the ResendRequest refreshed inbound liveness.
 - **R21:** closed at Gate A round 1: `emit_initiator_logon_`'s exclusion rests on causality, not on a caller census (D5′.4's row).
 - **New R22, layout:** `Session` grows by the gate (an optional timer and three scalars) and, at round 1, by `conn_gen_`, before the first release.
+- **New R24 (owner ruling 2026-11-15, drain then reconnect) — for Gate A round 2:** (a) `inbound_depth_` adds an increment, a decrement and a compare per inbound frame (VIII §2, SC-006); (b) the drain is a second user of the replay gate's wake and shared count, which the XI §3 amendment text now names (contract); (c) a wedged store call holds the drain with no bound (B-598-1's class); (d) `drive_reconnect` from Active now fires `onLogout` and can return `session_already_closed` or `dispatch_aborted` without reconnecting, a public C++ behaviour change (no C-ABI reach) disclosed in B-103-9 and its header doc; (e) the claim that no emitter starts in `Disconnected` (the drain's step 2) rests on the phase-1 census of the Disconnected arm and the emitters' state tests; (f) the bound's generation tests became assertions, so their only witness is a debug build.
 - **New R23:** the frozen `specs/013-session-reconnect-binding` FR-009 / T020-A (the too-low Heartbeat exemption) and B&L `B-013-1` are superseded. Flag both in `brain/components/session.md`. The #544 section's "a session send gate" rejection gains a note naming 103's scoped shared/exclusive gate, and the Article XI §3 amendment that permits it (contracts/constitution-xi3-amendment.md), as the decision that narrowed it.
 - **R17, the order of work:** D5′ goes before D4's Logout half (R-588-e needs D4). Arm B goes with D6.

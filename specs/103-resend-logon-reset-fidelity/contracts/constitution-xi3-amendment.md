@@ -18,7 +18,8 @@ The two existing sentences stay byte-identical; one sentence is inserted between
 
 > 3. **Awaitable mutex required in coroutine context.** `fixpp::sync::async_mutex` (own implementation, BSL-1.0
 > algorithm attribution to avast/asio-mutex) is the only allowed mutex shape for coroutines. One exception is
-> permitted, for the serialisation of outbound frames against a resend answer only (feature 103): a
+> permitted, for the serialisation of outbound frames against a resend answer and the drain of in-flight outbound
+> frames before an in-place reconnect only (feature 103): a
 > **strand-confined shared/exclusive gate**, `detail::replay_gate`, whose every acquire, release and wake runs in
 > its session's serialised execution domain (the domain that already orders the session's plain-member state,
 > such as its send slot), which uses no OS synchronisation primitive and no atomic, never blocks a thread, never
@@ -47,7 +48,8 @@ Sync Impact Report — v4.3 → v4.4 (<date>) — PENDING
     NOTE: the constitution's version is independent of the library's and of the C ABI's.
   Modified: Article XI §3 — a sentence inserted between its two sentences: one exception to
     "the only allowed mutex shape for coroutines", for the serialisation of outbound frames against a
-    resend answer only (feature 103): a strand-confined shared/exclusive gate, detail::replay_gate,
+    resend answer and the drain of in-flight outbound frames before an in-place reconnect only
+    (feature 103): a strand-confined shared/exclusive gate, detail::replay_gate,
     confined to its session's serialised execution domain, with no OS primitive and no atomic, never
     blocking a thread, never changing its caller's cancellation filter or state, needing no unlock
     before destruction and no teardown drain, not a general session send gate; any other use needs
@@ -79,4 +81,5 @@ Sync Impact Report — v4.3 → v4.4 (<date>) — PENDING
   filter or state (D5′ "Cancellation"; R-588-g's filter witness and R-588-f(3)), no unlock before destruction and
   no teardown drain (D5′ "Rationale": unlike `async_mutex`'s `not_locked` precondition and `cancel_and_drain`), not
   a general send gate (FR-014's scope; spec Out of Scope).
-- The permission is scoped to the resend-answer serialisation, so it cannot be cited for another gate.
+- The permission is scoped to the resend-answer serialisation and the reconnect drain (research D1, owner ruling
+  2026-11-15), so it cannot be cited for another gate.

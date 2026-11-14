@@ -25,8 +25,21 @@ Fields: awaiting-resend flag, outstanding range [begin, end], `started_at` (dead
 ## Connection generation — `conn_gen_` (new)
 
 `std::uint32_t`, incremented in `install_reconnected_transport` before its `LogonSent` transition (D1).
-Connection-scoped work captures it and acts only while it is current. The acceptor needs none:
-`attach_accepted_transport` runs once per Session.
+Connection-scoped work captures it; the reconnect drain makes older-generation work unreachable after an install, so
+the bound asserts it. The acceptor needs none: `attach_accepted_transport` runs once per Session.
+
+## Reconnect drain — `drive_reconnect` (changed) and `inbound_depth_` (new)
+
+- `inbound_depth_`: `std::uint32_t`, raised by an RAII holder at `on_inbound_frame`'s entry, lowered at its every
+  exit; reaching 0 calls `replay_gate_.wake_all()`.
+- Quiescent ⇔ `replay_gate_.shared == 0 && inbound_depth_ == 0` (no emitter outside the inbound chain between its
+  number peek and the return of its `store_then_emit`, and no inbound chain running).
+- `drive_reconnect`: refuse if closing, closed or stopping (`session_already_closed`); from Active or LogonReceived
+  record `Disconnected`; wait until quiescent on the gate's wake (bounded by `logout_disconnect_timeout_ms`, then the
+  old transport is force-closed and the wait continues); re-test the refusal after every wake; then connect and
+  install. The install asserts quiescence. Caller cancellation → `dispatch_aborted`, nothing installed, state
+  `Disconnected`, cancellation left pending.
+- Invariant: no frame numbered or claimed on one connection is written on a later one.
 
 ## Pending-Logout mark — `peer_logout_` (new)
 
@@ -42,13 +55,13 @@ the bound's exit guard, which also cancels any `bound_done` timer `close()` race
 | pending | NextNumIn > S (`note_inbound_advance_`) or T elapsed, and "live" still true after the gate wait | acking | bound sends the acknowledgement; then, if `conn_gen_ == gen`, the event and `Disconnected` |
 | pending | gap deadline, in-sequence Logout, `close(graceful)`, Arm B too-low, `close(terminal)`, stop | none | that ending's own Logout, if any, is the one Logout (claim table D4.6); bound woken |
 | acking | `close(graceful)` | acking | `close()` joins the bound inside its grace, before `Disconnected` and before closing the transport |
-| any | new transport installed | none | `conn_gen_` moves; bound and gate woken; bound exits without effect |
+| any | new transport installed (always after the drain) | none | `conn_gen_` moves; a bound not yet resumed finds `none` and exits without effect |
 | any | edge into `Disconnected` | unchanged | bound and gate woken; the bound's "live" test fails (not Active), so it exits without effect |
 
-"Live" = `conn_gen_ == gen`, phase `pending`, `fsm_state_ == Active`, not `closing`/`closed_drained`, no engine stop.
-The bound tests it after publishing its wake, after its T race, after every gate wake, and before its claim; after
-the claim it re-tests only `conn_gen_ == gen`, after every suspension, before any state write or event (D4.4).
-Invariant: no bound acts on a connection other than the one its mark arrived on.
+"Live" = phase `pending`, `fsm_state_ == Active`, not `closing`/`closed_drained`, no engine stop.
+The bound tests it after publishing its wake, after its T race, after every gate wake, and before its claim, and
+asserts `conn_gen_ == gen` at each test and after its emit (D4.4). Invariant: no bound acts on a connection other
+than the one its mark arrived on (the drain guarantees it).
 
 While `phase != none`, `Session::send` returns `session_invalid_state_for_send`. While `phase == pending`,
 administrative traffic is answered; while `acking`, inbound frames are drained.
@@ -61,8 +74,8 @@ Fields: `shared` (open shared holds), `exclusive` (a walk is waiting or running)
   `store_then_emit` returns. Fast path: no await, no allocation.
 - Exclusive hold: `replay_outbound_range_` from entry (before the store tail read) to every ending (RAII); waits
   for `shared == 0` first.
-- Wake sources: exclusive release, last shared release while exclusive, the `Disconnected` edge, engine stop, a new
-  transport installed.
+- Wake sources: exclusive release, the last shared release whenever a waiter exists (the walk, or the reconnect
+  drain), `inbound_depth_` reaching 0, the `Disconnected` edge, engine stop, `close()`.
 - A contended wait: the pre-check sits in the waiting frame, or the wait is awaited through the split idiom (D5′.2).
   A wait its caller's cancellation ends returns `dispatch_aborted`, state unchanged, no number consumed, the
   caller's cancellation left pending.

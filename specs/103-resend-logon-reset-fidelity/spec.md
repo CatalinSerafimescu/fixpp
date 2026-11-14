@@ -145,6 +145,17 @@ the FIX Session Layer's, or from both:
   too-low frame without 43=Y that fails dictionary validation is Rejected at the validate gate and the session
   stays Active, as QuickFIX C++ does (its `Session::next` runs `DataDictionary::validate` before `verify`);
   unparseable and garbled frames keep their 093 dispositions. Owner ruling.
+- Q: Is the `/plan` sign-off still good after the round-1 delta (D1's clear at `install_reconnected_transport` with
+  the connection generation, D4's bound protocol and `close()` join, the XI §3 amendment riding 103)? → A:
+  **re-confirmed** (2026-11-15); Appendix A control 4 is discharged for the round-1 bundle. Owner ruling.
+- Q: A direct `Session::drive_reconnect()` from Active can install a new transport while an emit of the old
+  connection is in flight (a send in its store call, a claimed acknowledgement), and that frame is then written on
+  the new transport. Accept, refuse from Active, or drain? → A: **drain, then reconnect** (2026-11-15): from Active
+  or LogonReceived it first records `Disconnected` and waits for every in-flight emit to finish (the replay gate's
+  shared holders: sends in their store call, liveness frames, `close()`'s phase-1 Logout; a claimed acknowledgement;
+  any other emitter holding an outbound number), then installs the new transport (the connection generation moves,
+  the resend state and the mark are cleared). No frame numbered or claimed on the old connection may be written on
+  the new one. Owner ruling; research D1.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -199,9 +210,13 @@ a ResendRequest for the new gap is written. Control: a fresh Session given the s
 3. **Given** the same with the clock advanced past 2 × HeartBtInt during the downtime, **When** the first too-high
    frame arrives, **Then** it draws a ResendRequest, not the deadline Logout.
 4. **Given** Active with a resend outstanding and a too-high peer Logout pending, **When** the transport is dropped
-   and `drive_reconnect()` installs a new one with no `Disconnected` edge, **Then** after the new Logon exchange
-   reaches Active no resend is outstanding, no Logout of the old connection's mark is sent at T, and
+   and `drive_reconnect()` is called from Active, **Then** it records `Disconnected` first, and after the new Logon
+   exchange reaches Active no resend is outstanding, no Logout of the old connection's mark is sent at T, and
    `Session::send` is admitted.
+5. **Given** Active with a send held in its store call (or a claimed acknowledgement held in its store call),
+   **When** `drive_reconnect()` is called, **Then** it records `Disconnected`, waits until that frame's store and
+   write end on the old transport, and only then installs the new transport; the frame is never written on the new
+   transport.
 
 ### User Story 3 — A too-high ResendRequest is answered; a too-high Logout is acknowledged after recovery (Priority: P2)
 
@@ -335,7 +350,13 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   flag, the outstanding range and the gap deadline's start are cleared before the new Logon is sent, when the new
   transport is installed, whether or not the session passed through `Disconnected` before it. Recovery state of
   the old connection (the resend state, the pending-Logout mark and its bound) MUST NOT act on the new
-  connection.
+  connection. A `drive_reconnect` called in Active or LogonReceived MUST first record `Disconnected` and wait until
+  no emit of the old connection is in flight (no frame numbered or claimed there is still being stored or written),
+  and only then install the new transport; no frame numbered or claimed on the old connection MAY be written on the
+  new one. The wait is bounded by `logout_disconnect_timeout_ms`, after which the old transport is force-closed so
+  a blocked write unwinds; a `close()` or `Engine::stop()` that starts meanwhile ends it with
+  `session_already_closed` and no install, and the caller's own cancellation with `dispatch_aborted` and no install
+  (research D1).
 - **FR-007**: The header documentation of the resend state MUST state when it is reset, matching FR-006.
 
 **Too-high ResendRequest and Logout (#577)**
