@@ -1,6 +1,6 @@
 8004df93c6f4a8a0662a412d49dd071c6d7972566f3f779d6513a9f10d24f25c  include/fix/c_api.h
 54bfa71c915cc1d3eaba14726f10559eb2ea760ce16aa4ef0e668f380ba99cad  include/fix/c_api/decimal.h
-d60942b6d37ae36e63a2451bc22c3a614ae59286e0751258996fcce96c277ee9  include/fix/c_api/dict.h
+5c2b7c1053212c8bb33ee53f07ae24685af9ccf841b7a51296989f917146c15a  include/fix/c_api/dict.h
 c885f3bd0919e724a5a0abc90128668cf23f1a08d1f224dcebce2713b3f96905  include/fix/c_api/engine.h
 c4730d7d145954c3e10eb29db4fbd1a99ef3efc1a4a4c70e8bb6f0cfecc1fe0b  include/fix/c_api/error.h
 37ed8c570790368a88d57651f81e39bea1d0e79aa72710e7a809a2e2d4a5a1a7  include/fix/c_api/export.h
@@ -9,4 +9,4 @@ f8334ce2b1f6c822b8d1bd712fc9911a1a29fa8a4932ca63af2f3dffaa641dc2  include/fix/c_
 2cc9a1f4865866720e39eaa455ed3977b68ea92e9c1f8abddb4a3fd47c35dd70  include/fix/c_api/message.h
 ef626592b43572ce43e00fabb4b1757edd59fd190a615f0c575b6e2751017487  include/fix/c_api/otel.h
 d975fdf38e92e768bd47dd90b7efab0cf709f8274ce6c57bd03ae1c157ca8ca5  include/fix/c_api/session.h
-fd752dcdf1fdef677f4f650ab805a82f8c83ee023800dd2190bde9fb261a774b  include/fix/c_api/version.h
+48a14cf2273c1b1eece0a78fc769fb023a04e49e4ed8d7bd812cfb3f4fc929a1  include/fix/c_api/version.h

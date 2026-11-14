@@ -112,9 +112,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_dict_load_from_xml(const char*     path,
  *  THUNK: construction-time; never on a hot path.
  *  Reentrancy: single-thread.
  *
- *  Returns a code only: fixpp_strerror gives the code's fixed text. The conflicting element or the cap
- *  is named in the C++ exception, not here. Unlike fixpp_dict_load_from_xml, which maps every failure
- *  to FIXPP_ERR_CAPI_CONFIG_INVALID, this function returns the DICT codes below.
+ *  Returns a code only: fixpp_strerror gives the code's fixed text. The conflicting element or
+ *  the cap is named in the C++ exception, not here. Unlike fixpp_dict_load_from_xml, which maps
+ *  every failure to FIXPP_ERR_CAPI_CONFIG_INVALID, this function returns the DICT codes below.
  *
  *  BREAKING (C-ABI 1.16, [const §X.7]; 102-dict-width-multichar-type, fixpp#654): an overlay
  *  whose only refusal was a component or group side table that would stop fitting 16 bits now
@@ -132,11 +132,13 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_dict_load_from_xml(const char*     path,
  *  as fixpp_dict_load_from_xml's C-ABI 1.16 note states, for a base past 65,535 components or
  *  a group side table past UINT16_MAX entries.
  *
- *  @return FIXPP_ERR_OK                   *out_dict owns a new handle (destroy with fixpp_dict_destroy)
- *  @return FIXPP_ERR_NULL_HANDLE          base_path, overlay_path or out_dict is NULL; *out_dict = NULL
- *                                         when out_dict is not NULL
- *  @return FIXPP_ERR_DICT_LIMIT_EXCEEDED  the load threw fixpp::dict::overlay_limit_error (its causes
- *                                         are listed once, in xml_loader.hpp); *out_dict = NULL
+ *  @return FIXPP_ERR_OK                   *out_dict owns a new handle (destroy with
+ *                                         fixpp_dict_destroy)
+ *  @return FIXPP_ERR_NULL_HANDLE          base_path, overlay_path or out_dict is NULL;
+ *                                         *out_dict = NULL when out_dict is not NULL
+ *  @return FIXPP_ERR_DICT_LIMIT_EXCEEDED  the load threw fixpp::dict::overlay_limit_error (its
+ *                                         causes are listed once, in xml_loader.hpp);
+ *                                         *out_dict = NULL
  *  @return FIXPP_ERR_DICT_OOM             allocation failed anywhere in the call, including the
  *                                         handle's own allocation; *out_dict = NULL
  *  @return FIXPP_ERR_DICT_CONFIG          any other load or merge failure, an empty or unreadable
