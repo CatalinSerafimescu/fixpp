@@ -50,6 +50,7 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/098-dialect-overlay-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/099-fixt-appl-version-validation-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/100-wire-group-read-integrity-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/102-dict-width-multichar-type-gatea.md
 codegraph_entry: [Dictionary, xml_loader, orchestra_loader, field_traits, version_registry, table_view_builder]
 constitution: ["§I.1"]
 ---
