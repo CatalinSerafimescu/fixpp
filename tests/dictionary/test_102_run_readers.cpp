@@ -183,3 +183,30 @@ TEST(RunReaders102, IncompleteGroupContextOverrunReadsTheRunAsEmpty) {
         },
         ::testing::ExitedWithCode(0), "");
 }
+
+// The delimiter run alone overruns its pool; the field run is in bounds and holds a member of the
+// structural group 100's context at the root. The delimiter run reads as empty, so the context has
+// no delimiter record and the walk reports group 100 (its mutant, tasks M-11-incomplete_drun).
+TEST(RunReaders102, IncompleteGroupContextDelimOverrunReadsTheDelimRunAsEmpty) {
+    EXPECT_EXIT(
+        {
+            dict_metadata_handle h{mr()};
+            one_message(h);
+            FieldRef count_tag{};
+            count_tag.tag = 100;
+            FieldRef member{};
+            member.tag = 101;
+            member.group_no_tag = 100;
+            h.fields_.push_back(count_tag);
+            h.fields_.push_back(member);
+            h.per_msg_field_offsets_.push_back(MsgFieldsRun{.start = 0, .count = 2});
+            h.group_ctx_delim_pool_.resize(kTableSize);
+            h.per_msg_group_ctx_delim_offsets_.push_back(
+                MsgFieldsRun{.start = kStart, .count = kCount});
+            std::uint16_t const groups[] = {100};
+            auto const offender =
+                fixpp::dict::detail::find_incomplete_group_context(h, std::span{groups});
+            std::_Exit(offender.has_value() && offender->second == 100 ? 0 : 1);
+        },
+        ::testing::ExitedWithCode(0), "");
+}
