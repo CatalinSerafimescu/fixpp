@@ -1471,6 +1471,23 @@ TEST(IdDomain102, LeadingPlusAndSurroundingWhitespaceAreParseErrors) {
     }
 }
 
+// A componentRef inside a component definition whose id the strict parse refuses: the
+// parent pre-pass skips it (`collect_components`), and the expansion refuses the document
+// with the componentRef's own message.
+TEST(IdDomain102, ComponentRefPastTheSchemaBoundInsideAComponentIsAParseError) {
+    std::string const xml =
+        std::string{R"xml(<fixr:repository version="FIX.Latest_EP303"><fixr:fields>)xml"} +
+        R"xml(<fixr:field id="1" name="Account" type="String"/></fixr:fields>)xml" +
+        R"xml(<fixr:components><fixr:component id="5" name="Outer">)xml" +
+        R"xml(<fixr:fieldRef id="1"/><fixr:componentRef id="2147483648"/>)xml" +
+        R"xml(</fixr:component></fixr:components><fixr:messages>)xml" +
+        R"xml(<fixr:message id="1" name="Heartbeat" msgType="0"><fixr:structure>)xml" +
+        R"xml(<fixr:componentRef id="5"/></fixr:structure></fixr:message></fixr:messages>)xml" +
+        R"xml(</fixr:repository>)xml";
+    EXPECT_EQ(orchestra_load_error_message(xml),
+              "dict::orchestra_parse_error: missing/invalid <fixr:componentRef> id attribute");
+}
+
 // Control: a component id and a group id are separate key spaces; one id below 65536, given
 // to both, resolves each reference to its own definition.
 TEST(IdDomain102, ComponentAndGroupSharingAnIdResolveToTheirOwn) {
