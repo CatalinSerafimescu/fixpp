@@ -32,6 +32,7 @@
 #include <memory_resource>
 #include <pugixml.hpp>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -42,12 +43,15 @@
 #include "overlay_test_support.hpp"
 #include "reused_tag_census.hpp"
 #include "support/dictionary_test_access.hpp"
+#include "support/overlay_side_table_docs_102.hpp"
 #include "support/temp_dir.hpp"
 
 namespace {
 
 namespace ot = overlay_test;
 namespace ov = fixpp::dict::detail::overlay;
+// The document builders the side-table rows share with the C-ABI cells (102 tasks T013).
+using namespace fixpp::test102::side;  // NOLINT(google-build-using-namespace)
 using fixpp::dict::Dictionary;
 using fixpp::dict::group_delimiter_collision_error;
 using fixpp::dict::orchestra_parse_error;
@@ -58,17 +62,6 @@ using fixpp::dict::xml_parse_error;
 using fixpp::dict::XmlLoader;
 
 std::pmr::memory_resource* mr() { return std::pmr::new_delete_resource(); }
-
-constexpr std::string_view kOpen = "<fix type='FIX' major='4' minor='4' servicepack='0'>\n";
-
-std::string overlay_doc(std::string_view body) {
-    return std::string{kOpen} + std::string{body} + "</fix>\n";
-}
-
-std::string field_def(int number, std::string_view name, std::string_view type) {
-    return "  <field number='" + std::to_string(number) + "' name='" + std::string{name} +
-           "' type='" + std::string{type} + "' />\n";
-}
 
 // The general small base of the W-3 rows: NewOrderSingle reaches NoPartyIDs(453)
 // through component Parties, ExecutionReport through Outer → Parties (a two-level
@@ -542,10 +535,6 @@ std::string extend_d(std::string_view body, std::string_view more = {}) {
 std::string extend_c(std::string_view body, std::string_view more = {}) {
     return " <components>\n  <component name='C'>\n" + std::string{body} +
            "  </component>\n </components>\n" + std::string{more};
-}
-
-std::string fref(std::string_view name) {
-    return "   <field name='" + std::string{name} + "' required='N' />\n";
 }
 
 void expect_relation_unchanged(std::string const& base, ov::xml_overlay_probe const& p,
@@ -1277,23 +1266,14 @@ std::string empty_chains_overlay() {
     return overlay_doc(comps + " </components>\n");
 }
 
-void expect_base_fits(ov::xml_overlay_probe const& p, std::string const& row) {
-    ASSERT_TRUE(p.guards.has_value()) << row << ": " << ot::describe(p);
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
-    EXPECT_TRUE(p.guards->base_components_fit && p.guards->base_groups_fit)
-        << row << ": the doubling rows need a base whose side tables fit";
-}
-
 TEST(OverlayRefusalW3XmlWalk, DoublingBombRefusedByTheBudget) {
     auto const p = probe(base_doc(), doubling_overlay());
-    expect_base_fits(p, "doubling");
     expect_refused<overlay_limit_error>(p, {"expansion budget"}, "doubling");
     expect_origin(p, ov::refusal_origin::budget, "doubling");
 }
 
 TEST(OverlayRefusalW3XmlWalk, TwoEmptyChainsRefusedByTheBudget) {
     auto const p = probe(base_doc(), empty_chains_overlay());
-    expect_base_fits(p, "empty chains");
     expect_refused<overlay_limit_error>(p, {"expansion budget"}, "empty chains");
     expect_origin(p, ov::refusal_origin::budget, "empty chains");
 }
@@ -1341,141 +1321,118 @@ TEST(OverlayRefusalW3XmlWalk, HeaderExpansionLoadsAtThePrediction) {
     EXPECT_EQ(got, expected) << "header expansion: the declared header store";
 }
 
-// ── side-table fit (N-3) ─────────────────────────────────────────────────────
-// A generated base whose side tables fit: message A1 holds `kGroups` groups NoSG_i
-// of one member each (each the first-seen group of its tag), and three components
-// declared in the order E0, E1, Late. VenueBig is a new component of `kBigFields`
-// fields; a group NoSG_i { component VenueBig } adds 1 + kBigFields entries to its
-// parent level and leaves the groups table alone, since NoSG_i is first seen in A1.
+// ── side tables past the 16-bit width (098 N-3; its fit retired by 102 D2) ───
 
-constexpr int kGroups = 700;
-constexpr int kBigFields = 100;
+// 102-dict-width-multichar-type (tasks T013): the rows whose start or count passes 65535 load,
+// and the definition past it returns its own members.
 
-std::string side_table_base() {
-    std::string msg = "  <message name='SideTable' msgtype='A1' msgcat='app'>\n";
-    std::string fields;
+// The tags of a FieldRef run, in order.
+std::vector<std::uint16_t> run_tags_102(std::span<fixpp::dict::FieldRef const> run) {
+    std::vector<std::uint16_t> out;
+    out.reserve(run.size());
+    for (auto const& fr : run) {
+        out.push_back(fr.tag);
+    }
+    return out;
+}
+
+// `count` consecutive tags from `first`.
+std::vector<std::uint16_t> numbered_tags_102(int first, int count) {
+    std::vector<std::uint16_t> out;
+    out.reserve(static_cast<std::size_t>(std::max(count, 0)));
+    for (int i = 0; i < count; ++i) {
+        out.push_back(static_cast<std::uint16_t>(first + i));
+    }
+    return out;
+}
+
+// Every base group NoSG_i (NumInGroup tag 10000 + i) returns its own member SGF_i
+// (11000 + i); returns the number that do not and describes the first.
+std::size_t base_groups_wrong_102(Dictionary const& d, std::string& first) {
+    std::size_t wrong = 0;
     for (int i = 0; i < kGroups; ++i) {
-        msg += "   <group name='NoSG" + std::to_string(i) + "' required='N'>\n" +
-               fref("SGF" + std::to_string(i)) + "   </group>\n";
-        fields += field_def(10000 + i, "NoSG" + std::to_string(i), "NUMINGROUP") +
-                  field_def(11000 + i, "SGF" + std::to_string(i), "STRING");
+        auto const no_tag = static_cast<std::uint16_t>(10000 + i);
+        auto const got = run_tags_102(d.group_fields(no_tag));
+        if (got != std::vector<std::uint16_t>{static_cast<std::uint16_t>(11000 + i)}) {
+            if (wrong == 0) {
+                first = "group " + std::to_string(no_tag) + ": " + std::to_string(got.size()) +
+                        " members, the first " +
+                        (got.empty() ? std::string{"-"} : std::to_string(got.front()));
+            }
+            ++wrong;
+        }
     }
-    msg += "  </message>\n";
-    return std::string{kOpen} +
-           " <header>\n  <field name='BeginString' required='Y' />\n"
-           " </header>\n <messages>\n" +
-           msg +
-           " </messages>\n <components>\n"
-           "  <component name='E0'>\n" +
-           fref("BeginString") +
-           "  </component>\n"
-           "  <component name='E1'>\n" +
-           fref("BeginString") +
-           "  </component>\n"
-           "  <component name='Late'>\n" +
-           fref("BeginString") + "  </component>\n </components>\n <fields>\n" +
-           field_def(8, "BeginString", "STRING") + fields + " </fields>\n</fix>\n";
+    return wrong;
 }
 
-std::string big_component_and_fields(std::string_view extra_fields = {}) {
-    std::string big = "  <component name='VenueBig'>\n";
-    std::string fields = " <fields>\n";
-    for (int i = 0; i < kBigFields; ++i) {
-        big += fref("VenueBigF" + std::to_string(i));
-        fields += field_def(20000 + i, "VenueBigF" + std::to_string(i), "STRING");
-    }
-    return big + "  </component>\n" + "@@FIELDS@@" + fields + std::string{extra_fields} +
-           " </fields>\n";
+TEST(OverlayRefusalW3XmlSideTable, ALaterBaseStartPastTheWrapLoadsWithItsOwnMembers) {
+    // E0 and E1 each stay within a count of 65535; Late's start, and VenueBig's after it,
+    // pass it.
+    auto const p = probe(side_table_base(), side_overlay(grow_e0_e1(xml_start_push_each())));
+    ot::expect_loaded_at_prediction(p, "components start");
+    ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
+    // NOLINTBEGIN(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    EXPECT_EQ(run_tags_102(p.dictionary->component_fields("Late")), std::vector<std::uint16_t>{8});
+    EXPECT_EQ(run_tags_102(p.dictionary->component_fields("VenueBig")),
+              numbered_tags_102(20000, kBigFields));
+    // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-// `count` groups NoSG_i { component VenueBig } starting at `first`.
-std::string big_groups(int first, int count) {
-    std::string s;
-    for (int i = first; i < first + count; ++i) {
-        s += "   <group name='NoSG" + std::to_string(i) +
-             "' required='N'>\n"
-             "    <component name='VenueBig' required='N' />\n   </group>\n";
-    }
-    return s;
-}
-
-// components = the overlay's <components> body (VenueBig is added), messages = its
-// <messages> body, extra fields beyond VenueBig's.
-std::string side_overlay(std::string const& components, std::string const& messages = {},
-                         std::string const& extra_fields = {}) {
-    std::string const bc = big_component_and_fields(extra_fields);
-    std::size_t const cut = bc.find("@@FIELDS@@");
-    std::string body;
-    if (!messages.empty()) {
-        body += " <messages>\n" + messages + " </messages>\n";
-    }
-    body += " <components>\n" + components + bc.substr(0, cut) + " </components>\n" +
-            bc.substr(cut + std::string_view{"@@FIELDS@@"}.size());
-    return overlay_doc(body);
-}
-
-// The entries one NoSG_i { component VenueBig } adds.
-constexpr int kPerGroup = 1 + kBigFields;
-
-std::string grow_e0_e1(int each) {
-    return "  <component name='E0'>\n" + big_groups(0, each) +
-           "  </component>\n"
-           "  <component name='E1'>\n" +
-           big_groups(each, each) + "  </component>\n";
-}
-
-TEST(OverlayRefusalW3XmlSideTable, EarlyComponentsPushALaterBaseStartPastTheTable) {
-    // E0 and E1 each stay within a count of 65535; Late's start passes it.
-    int const each = ((65536 / 2) / kPerGroup) + 1;
-    auto const p = probe(side_table_base(), side_overlay(grow_e0_e1(each)));
-    expect_refused<overlay_limit_error>(p, {"components side table"}, "components start");
-    expect_origin(p, ov::refusal_origin::side_table, "components start");
-}
-
-TEST(OverlayRefusalW3XmlSideTable, EarlyComponentsJustInsideTheTableLoad) {
-    // Every start, VenueBig's after Late included, stays within 65535.
-    int const each = (65535 - 2 - kBigFields) / 2 / kPerGroup;
-    ot::expect_loaded_at_prediction(probe(side_table_base(), side_overlay(grow_e0_e1(each))),
-                                    "components start control");
-}
-
-TEST(OverlayRefusalW3XmlSideTable, ANewComponentWhoseCountPassesTheTable) {
-    int const n = (65536 / kPerGroup) + 1;
+TEST(OverlayRefusalW3XmlSideTable, ANewComponentWhoseCountPassesTheWrapLoadsWithItsOwnMembers) {
+    int const n = xml_new_count_n();
     auto const p = probe(side_table_base(), side_overlay("  <component name='VenueHuge'>\n" +
                                                          big_groups(0, n) + "  </component>\n"));
-    expect_refused<overlay_limit_error>(p, {"components side table"}, "component count");
-    expect_origin(p, ov::refusal_origin::side_table, "component count");
+    ot::expect_loaded_at_prediction(p, "component count");
+    ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
+    // VenueHuge expands each NoSG_i, its count tag then VenueBig's fields.
+    std::vector<std::uint16_t> expected;
+    for (int i = 0; i < n; ++i) {
+        expected.push_back(static_cast<std::uint16_t>(10000 + i));
+        auto const big = numbered_tags_102(20000, kBigFields);
+        expected.insert(expected.end(), big.begin(), big.end());
+    }
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const got = run_tags_102(p.dictionary->component_fields("VenueHuge"));
+    EXPECT_EQ(got.size(), expected.size());
+    EXPECT_TRUE(got == expected) << "VenueHuge's members are not its own";
 }
 
-TEST(OverlayRefusalW3XmlSideTable, ANewComponentJustInsideTheTableLoads) {
-    int const n = (65535 - 3 - kBigFields) / kPerGroup;
-    ot::expect_loaded_at_prediction(
-        probe(side_table_base(), side_overlay("  <component name='VenueHuge'>\n" +
-                                              big_groups(0, n) + "  </component>\n")),
-        "component count control");
+TEST(OverlayRefusalW3XmlSideTable,
+     ALowTaggedGroupPushingBaseGroupsPastTheWrapLoadsWithTheirOwnMembers) {
+    auto const p = probe(side_table_base(), low_group_overlay(xml_low_group_n()));
+    ot::expect_loaded_at_prediction(p, "groups start");
+    ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
+    std::string first;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    EXPECT_EQ(base_groups_wrong_102(*p.dictionary, first), 0U) << "first: " << first;
 }
 
-// A large group NoVenueLow(5), lower than every base NumInGroup tag, in a new
-// message that sorts after A1 (so every NoSG_i stays first seen in A1).
-std::string low_group_overlay(int n) {
-    return side_overlay({},
-                        "  <message name='VenueLowMsg' msgtype='Z9' msgcat='app'>\n"
-                        "   <group name='NoVenueLow' required='N'>\n" +
-                            big_groups(0, n) + "   </group>\n  </message>\n",
-                        field_def(5, "NoVenueLow", "NUMINGROUP"));
+// Contract §6 (g): the low-tagged-group row's definitions declared in the base itself, loaded
+// with no overlay. No overlay arm ever refused such a base.
+std::string xml_low_group_base_only(int n) {
+    std::string doc = side_table_base();
+    std::string const bc = big_component_and_fields(field_def(5, "NoVenueLow", "NUMINGROUP"));
+    std::size_t const cut = bc.find("@@FIELDS@@");
+    std::string const component = bc.substr(0, cut);
+    std::string fields = bc.substr(cut + std::string_view{"@@FIELDS@@"}.size());
+    std::string_view const open = " <fields>\n";
+    std::string_view const close = " </fields>\n";
+    fields = fields.substr(open.size(), fields.size() - open.size() - close.size());
+    std::string const message =
+        "  <message name='VenueLowMsg' msgtype='Z9' msgcat='app'>\n"
+        "   <group name='NoVenueLow' required='N'>\n" +
+        big_groups(0, n) + "   </group>\n  </message>\n";
+    doc.insert(doc.find(" </messages>\n"), message);
+    doc.insert(doc.find(" </components>\n"), component);
+    doc.insert(doc.find(" </fields>\n"), fields);
+    return doc;
 }
 
-TEST(OverlayRefusalW3XmlSideTable, ALowTaggedGroupPushesBaseGroupsPastTheTable) {
-    int const n = (65535 - (kGroups / 2)) / kPerGroup;  // its own count fits; later starts do not
-    auto const p = probe(side_table_base(), low_group_overlay(n));
-    expect_refused<overlay_limit_error>(p, {"groups side table"}, "groups start");
-    expect_origin(p, ov::refusal_origin::side_table, "groups start");
-}
-
-TEST(OverlayRefusalW3XmlSideTable, ALowTaggedGroupJustInsideTheTableLoads) {
-    int const n = (65535 - kGroups) / kPerGroup;
-    ot::expect_loaded_at_prediction(probe(side_table_base(), low_group_overlay(n)),
-                                    "groups start control");
+TEST(OverlayRefusalW3XmlSideTable, BaseGroupsPastTheWrapWithNoOverlayKeepTheirOwnMembers) {
+    Dictionary const d =
+        XmlLoader{}.load_from_string(xml_low_group_base_only(xml_low_group_n()), mr());
+    std::string first;
+    EXPECT_EQ(base_groups_wrong_102(d, first), 0U) << "first: " << first;
 }
 
 // ── guard order (N-1) ────────────────────────────────────────────────────────
@@ -1492,15 +1449,6 @@ TEST(OverlayRefusalW3XmlOrder, VersionMismatchIsReportedBeforeTheMessageCap) {
     overlay.replace(0, kOpen.size(), "<fix type='FIX' major='4' minor='2' servicepack='0'>\n");
     expect_refused<overlay_conflict_error>(probe(base_doc(), overlay), {"version mismatch"},
                                            "order: version");
-}
-
-TEST(OverlayRefusalW3XmlOrder, BudgetIsReportedBeforeTheSideTableFit) {
-    auto const p = probe(base_doc(), doubling_overlay());
-    ASSERT_TRUE(p.guards.has_value()) << ot::describe(p);
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
-    EXPECT_FALSE(p.guards->merged_components_fit) << "the row needs both checks to fail";
-    expect_refused<overlay_limit_error>(p, {"expansion budget"}, "order: budget");
-    expect_origin(p, ov::refusal_origin::budget, "order: budget");
 }
 
 // ── the budget recipe and the longest chain ──────────────────────────────────
@@ -1604,44 +1552,6 @@ TEST(OverlayRefusalW3XmlBudget, LongestChainLoadsAtThePrediction) {
 // schema error is asserted as `orchestra_parse_error` by `typeid` equality, so a
 // row expecting it fails on a plain `xml_parse_error` or an overlay error.
 
-constexpr std::string_view kOrchOpen =
-    "<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' "
-    "version='FIX.Latest_EP303'>\n";
-
-std::string orch_overlay(std::string_view body) {
-    return std::string{kOrchOpen} + std::string{body} + "</fixr:repository>\n";
-}
-
-std::string ofield(int id, std::string_view name, std::string_view type,
-                   std::string_view extra = {}) {
-    return "  <fixr:field id='" + std::to_string(id) + "' name='" + std::string{name} + "' type='" +
-           std::string{type} + "'" + std::string{extra} + " />\n";
-}
-
-// A reference element: kind is fieldRef, componentRef or groupRef.
-std::string oref(std::string_view kind, int id, std::string_view presence = {}) {
-    return "    <fixr:" + std::string{kind} + " id='" + std::to_string(id) + "'" +
-           (presence.empty() ? std::string{} : " presence='" + std::string{presence} + "'") +
-           " />\n";
-}
-
-std::string ocomp(int id, std::string_view name, std::string_view body) {
-    return "  <fixr:component id='" + std::to_string(id) + "' name='" + std::string{name} + "'>\n" +
-           std::string{body} + "  </fixr:component>\n";
-}
-
-std::string ogroup(int id, std::string_view name, int nig, std::string_view body) {
-    return "  <fixr:group id='" + std::to_string(id) + "' name='" + std::string{name} +
-           "'>\n    <fixr:numInGroup id='" + std::to_string(nig) + "' />\n" + std::string{body} +
-           "  </fixr:group>\n";
-}
-
-std::string omsg(int id, std::string_view name, std::string_view msg_type, std::string_view body) {
-    return "  <fixr:message id='" + std::to_string(id) + "' name='" + std::string{name} +
-           "' msgType='" + std::string{msg_type} + "'>\n   <fixr:structure>\n" + std::string{body} +
-           "   </fixr:structure>\n  </fixr:message>\n";
-}
-
 // The `{}` initializers let a designated initializer omit a member without
 // -Wmissing-designated-field-initializers, so they are not redundant here.
 // NOLINTBEGIN(readability-redundant-member-init)
@@ -1717,16 +1627,6 @@ ov::xml_overlay_probe oprobe(std::string_view base, std::string_view overlay) {
 std::string extend_od(std::string_view body, std::string_view more = {}) {
     return " <fixr:messages>\n" + omsg(14, "NewOrderSingle", "D", body) + " </fixr:messages>\n" +
            std::string{more};
-}
-
-std::string ofields(std::string_view body) {
-    return " <fixr:fields>\n" + std::string{body} + " </fixr:fields>\n";
-}
-std::string ocomps(std::string_view body) {
-    return " <fixr:components>\n" + std::string{body} + " </fixr:components>\n";
-}
-std::string ogroups(std::string_view body) {
-    return " <fixr:groups>\n" + std::string{body} + " </fixr:groups>\n";
 }
 
 // ── R-4 conflicts (Orchestra) ────────────────────────────────────────────────
@@ -2607,182 +2507,97 @@ std::string orch_empty_chains_overlay() {
 
 TEST(OverlayRefusalW3OrchWalk, DoublingBombRefusedByTheBudget) {
     auto const p = oprobe(orch_base_doc(), orch_doubling_overlay());
-    expect_base_fits(p, "Orchestra doubling");
     expect_refused<overlay_limit_error>(p, {"expansion budget"}, "Orchestra doubling");
     expect_origin(p, ov::refusal_origin::budget, "Orchestra doubling");
 }
 
 TEST(OverlayRefusalW3OrchWalk, TwoEmptyChainsRefusedByTheBudget) {
     auto const p = oprobe(orch_base_doc(), orch_empty_chains_overlay());
-    expect_base_fits(p, "Orchestra empty chains");
     expect_refused<overlay_limit_error>(p, {"expansion budget"}, "Orchestra empty chains");
     expect_origin(p, ov::refusal_origin::budget, "Orchestra empty chains");
 }
 
-// ── side-table fit (N-3), Orchestra ──────────────────────────────────────────
-// A generated base whose side tables fit: message A1 refers to `kGroups` groups
-// SG_i (NumInGroup tag 10000 + i) of one member each, each the first-seen group of
-// its tag, and three components declared in the order E0, E1, Late. VenueBig is a
-// new component of `kOrchBigFields` fields. A new group H_h has a base tag 10000 + h,
-// so it is never first seen (A1 registers that tag first) and leaves the groups
-// table alone; H_h = { componentRef VenueBig } adds 1 + kOrchBigFields entries to
-// its parent level. A new group G_k (base tag 10000 + 100 + k) refers to the first
-// `n` of the H groups and adds 1 + n × (1 + kOrchBigFields) entries.
-
-constexpr int kOrchBigFields = 960;
-constexpr int kOrchPerH = 1 + kOrchBigFields;
-constexpr int kOrchHGroups = 23;
-
-std::string orch_side_table_base() {
-    std::string msg;
-    std::string fields = ofield(8, "BeginString", "String");
-    std::string groups;
-    for (int i = 0; i < kGroups; ++i) {
-        msg += oref("groupRef", 10000 + i);
-        groups +=
-            ogroup(10000 + i, "SG" + std::to_string(i), 10000 + i, oref("fieldRef", 11000 + i));
-        fields += ofield(10000 + i, "NoSG" + std::to_string(i), "NumInGroup") +
-                  ofield(11000 + i, "SGF" + std::to_string(i), "String");
-    }
-    return std::string{kOrchOpen} + ofields(fields) +
-           ocomps(ocomp(1, "E0", oref("fieldRef", 8)) + ocomp(2, "E1", oref("fieldRef", 8)) +
-                  ocomp(3, "Late", oref("fieldRef", 8))) +
-           ogroups(groups) + " <fixr:messages>\n" + omsg(1, "SideTable", "A1", msg) +
-           " </fixr:messages>\n</fixr:repository>\n";
-}
-
-// G groups 30000 + k, each referring to the first `n_k` H groups (20000 + h).
-struct orch_side_parts {
-    std::vector<int> g_sizes;  // n_k of each G group
-};
-
-std::string orch_side_groups(orch_side_parts const& parts) {
-    std::string groups;
-    for (int h = 0; h < kOrchHGroups; ++h) {
-        groups +=
-            ogroup(20000 + h, "VenueH" + std::to_string(h), 10000 + h, oref("componentRef", 3999));
-    }
-    for (std::size_t k = 0; k < parts.g_sizes.size(); ++k) {
-        std::string body;
-        for (int h = 0; h < parts.g_sizes[k]; ++h) {
-            body += oref("groupRef", 20000 + h);
-        }
-        groups += ogroup(30000 + static_cast<int>(k), "VenueG" + std::to_string(k),
-                         10000 + 100 + static_cast<int>(k), body);
-    }
-    return ogroups(groups);
-}
-
-std::string orch_big_and_fields(std::string_view extra_fields = {}) {
-    std::string big;
-    std::string fields;
-    for (int i = 0; i < kOrchBigFields; ++i) {
-        big += oref("fieldRef", 40000 + i);
-        fields += ofield(40000 + i, "VenueBigF" + std::to_string(i), "String");
-    }
-    return ocomp(3999, "VenueBig", big) + "@@FIELDS@@" + fields + std::string{extra_fields};
-}
-
-// components = the overlay's fixr:components body (VenueBig is appended after it),
-// messages = its fixr:messages body, extra fields beyond VenueBig's.
-std::string orch_side_overlay(std::string const& components, orch_side_parts const& parts,
-                              std::string const& messages = {},
-                              std::string const& extra_fields = {}) {
-    std::string const bc = orch_big_and_fields(extra_fields);
-    std::size_t const cut = bc.find("@@FIELDS@@");
-    std::string body = ofields(bc.substr(cut + std::string_view{"@@FIELDS@@"}.size())) +
-                       ocomps(components + bc.substr(0, cut)) + orch_side_groups(parts);
-    if (!messages.empty()) {
-        body += " <fixr:messages>\n" + messages + " </fixr:messages>\n";
-    }
-    return orch_overlay(body);
-}
-
-// The refs to the G groups `first` .. `first + count - 1`.
-std::string g_refs(int first, int count) {
-    std::string s;
-    for (int k = first; k < first + count; ++k) {
-        s += oref("groupRef", 30000 + k);
-    }
-    return s;
-}
-
-constexpr int orch_g_entries(int n) { return 1 + (n * kOrchPerH); }
-
-std::string orch_grow_e0_e1() {
-    return ocomp(1, "E0", oref("fieldRef", 8) + g_refs(0, 2)) +
-           ocomp(2, "E1", oref("fieldRef", 8) + g_refs(2, 1));
-}
-
-TEST(OverlayRefusalW3OrchSideTable, EarlyComponentsPushALaterBaseStartPastTheTable) {
-    // E0 and E1 each stay within a count of 65535; Late's start passes it.
+// ── side tables past the 16-bit width (098 N-3; its fit retired by 102 D2), Orchestra ───
+TEST(OverlayRefusalW3OrchSideTable, ALaterBaseStartPastTheWrapLoadsWithItsOwnMembers) {
+    // E0 and E1 each stay within a count of 65535; Late's start, and VenueBig's after it,
+    // pass it.
     constexpr int n = kOrchHGroups;
     static_assert(1 + (2 * orch_g_entries(n)) <= 65535 && 2 + (3 * orch_g_entries(n)) > 65535);
-    auto const p =
-        oprobe(orch_side_table_base(), orch_side_overlay(orch_grow_e0_e1(), {{n, n, n}}));
-    expect_refused<overlay_limit_error>(p, {"components side table"}, "components start");
-    expect_origin(p, ov::refusal_origin::side_table, "components start");
+    auto const p = oprobe(orch_side_table_base(),
+                          orch_side_overlay(orch_grow_e0_e1(), orch_start_push_parts()));
+    ot::expect_loaded_at_prediction(p, "components start");
+    ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
+    // NOLINTBEGIN(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    EXPECT_EQ(run_tags_102(p.dictionary->component_fields("Late")), std::vector<std::uint16_t>{8});
+    EXPECT_EQ(run_tags_102(p.dictionary->component_fields("VenueBig")),
+              numbered_tags_102(40000, kOrchBigFields));
+    // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-TEST(OverlayRefusalW3OrchSideTable, EarlyComponentsJustInsideTheTableLoad) {
-    // Every start, VenueBig's after Late included, stays within 65535.
-    constexpr int n = kOrchHGroups - 1;
-    static_assert(3 + (3 * orch_g_entries(n)) <= 65535);
-    ot::expect_loaded_at_prediction(
-        oprobe(orch_side_table_base(), orch_side_overlay(orch_grow_e0_e1(), {{n, n, n}})),
-        "components start control");
-}
-
-TEST(OverlayRefusalW3OrchSideTable, ANewComponentWhoseCountPassesTheTable) {
+TEST(OverlayRefusalW3OrchSideTable, ANewComponentWhoseCountPassesTheWrapLoadsWithItsOwnMembers) {
     constexpr int n = kOrchHGroups;
     static_assert(3 * orch_g_entries(n) > 65535);
-    auto const p = oprobe(orch_side_table_base(),
-                          orch_side_overlay(ocomp(3998, "VenueHuge", g_refs(0, 3)), {{n, n, n}}));
-    expect_refused<overlay_limit_error>(p, {"components side table"}, "component count");
-    expect_origin(p, ov::refusal_origin::side_table, "component count");
-}
-
-TEST(OverlayRefusalW3OrchSideTable, ANewComponentJustInsideTheTableLoads) {
-    constexpr int n = kOrchHGroups - 1;
-    static_assert(3 + (3 * orch_g_entries(n)) <= 65535);
-    ot::expect_loaded_at_prediction(
+    auto const p =
         oprobe(orch_side_table_base(),
-               orch_side_overlay(ocomp(3998, "VenueHuge", g_refs(0, 3)), {{n, n, n}})),
-        "component count control");
+               orch_side_overlay(ocomp(3998, "VenueHuge", g_refs(0, 3)), orch_new_count_parts()));
+    ot::expect_loaded_at_prediction(p, "component count");
+    ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
+    // VenueHuge expands each G group (count tag 10100 + k), and in it each H group (count tag
+    // 10000 + h) with VenueBig's fields.
+    std::vector<std::uint16_t> expected;
+    auto const big = numbered_tags_102(40000, kOrchBigFields);
+    for (int k = 0; k < 3; ++k) {
+        expected.push_back(static_cast<std::uint16_t>(10100 + k));
+        for (int h = 0; h < n; ++h) {
+            expected.push_back(static_cast<std::uint16_t>(10000 + h));
+            expected.insert(expected.end(), big.begin(), big.end());
+        }
+    }
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const got = run_tags_102(p.dictionary->component_fields("VenueHuge"));
+    EXPECT_EQ(got.size(), expected.size());
+    EXPECT_TRUE(got == expected) << "VenueHuge's members are not its own";
 }
 
-// A large group NoVenueLow(5), lower than every base NumInGroup tag, in a new message
-// that sorts after A1 (so every SG_i and every reused tag stays first seen in A1).
-std::string orch_low_group_overlay(std::vector<int> const& g_sizes) {
-    std::string const low =
-        ogroup(4999, "VenueLow", 5, g_refs(0, static_cast<int>(g_sizes.size())));
-    std::string const overlay =
-        orch_side_overlay({}, {g_sizes}, omsg(9999, "VenueLowMsg", "Z9", oref("groupRef", 4999)),
-                          ofield(5, "NoVenueLow", "NumInGroup"));
-    // NoVenueLow joins the groups container the H and G groups are in.
-    std::string out = overlay;
-    std::string const anchor = " </fixr:groups>\n";
-    out.insert(out.find(anchor), low);
-    return out;
-}
-
-TEST(OverlayRefusalW3OrchSideTable, ALowTaggedGroupPushesBaseGroupsPastTheTable) {
+TEST(OverlayRefusalW3OrchSideTable,
+     ALowTaggedGroupPushingBaseGroupsPastTheWrapLoadsWithTheirOwnMembers) {
     // Its own count fits; a later base group's start does not.
     constexpr int count = (2 * orch_g_entries(kOrchHGroups)) + orch_g_entries(kOrchHGroups - 1);
     static_assert(count <= 65535 && count + kGroups > 65535);
-    auto const p = oprobe(orch_side_table_base(),
-                          orch_low_group_overlay({kOrchHGroups, kOrchHGroups, kOrchHGroups - 1}));
-    expect_refused<overlay_limit_error>(p, {"groups side table"}, "groups start");
-    expect_origin(p, ov::refusal_origin::side_table, "groups start");
+    auto const p = oprobe(orch_side_table_base(), orch_low_group_overlay(orch_low_group_sizes()));
+    ot::expect_loaded_at_prediction(p, "groups start");
+    ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
+    std::string first;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    EXPECT_EQ(base_groups_wrong_102(*p.dictionary, first), 0U) << "first: " << first;
 }
 
-TEST(OverlayRefusalW3OrchSideTable, ALowTaggedGroupJustInsideTheTableLoads) {
-    constexpr int count = 3 * orch_g_entries(kOrchHGroups - 1);
-    static_assert(count + kGroups <= 65535);
-    ot::expect_loaded_at_prediction(
-        oprobe(orch_side_table_base(),
-               orch_low_group_overlay({kOrchHGroups - 1, kOrchHGroups - 1, kOrchHGroups - 1})),
-        "groups start control");
+// Contract §6 (g): the low-tagged-group row's definitions declared in the base itself, loaded
+// with no overlay.
+std::string orch_low_group_base_only(std::vector<int> const& g_sizes) {
+    std::string doc = orch_side_table_base();
+    std::string const bc = orch_big_and_fields(ofield(5, "NoVenueLow", "NumInGroup"));
+    std::size_t const cut = bc.find("@@FIELDS@@");
+    std::string const component = bc.substr(0, cut);
+    std::string const fields = bc.substr(cut + std::string_view{"@@FIELDS@@"}.size());
+    std::string groups = orch_side_groups({g_sizes});
+    std::string_view const open = " <fixr:groups>\n";
+    std::string_view const close = " </fixr:groups>\n";
+    groups = groups.substr(open.size(), groups.size() - open.size() - close.size());
+    groups += ogroup(4999, "VenueLow", 5, g_refs(0, static_cast<int>(g_sizes.size())));
+    doc.insert(doc.find(" </fixr:messages>\n"),
+               omsg(9999, "VenueLowMsg", "Z9", oref("groupRef", 4999)));
+    doc.insert(doc.find(" </fixr:groups>\n"), groups);
+    doc.insert(doc.find(" </fixr:components>\n"), component);
+    doc.insert(doc.find(" </fixr:fields>\n"), fields);
+    return doc;
+}
+
+TEST(OverlayRefusalW3OrchSideTable, BaseGroupsPastTheWrapWithNoOverlayKeepTheirOwnMembers) {
+    Dictionary const d =
+        OrchestraLoader{}.load_from_string(orch_low_group_base_only(orch_low_group_sizes()), mr());
+    std::string first;
+    EXPECT_EQ(base_groups_wrong_102(d, first), 0U) << "first: " << first;
 }
 
 // ── guard order (N-1), Orchestra ─────────────────────────────────────────────
@@ -2801,15 +2616,6 @@ TEST(OverlayRefusalW3OrchOrder, VersionMismatchIsReportedBeforeTheMessageCap) {
     overlay.replace(overlay.find(v), v.size(), "version='FIX.Latest_EP999'");
     expect_refused<overlay_conflict_error>(oprobe(orch_base_doc(), overlay), {"version mismatch"},
                                            "order: version");
-}
-
-TEST(OverlayRefusalW3OrchOrder, BudgetIsReportedBeforeTheSideTableFit) {
-    auto const p = oprobe(orch_base_doc(), orch_doubling_overlay());
-    ASSERT_TRUE(p.guards.has_value()) << ot::describe(p);
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
-    EXPECT_FALSE(p.guards->merged_components_fit) << "the row needs both checks to fail";
-    expect_refused<overlay_limit_error>(p, {"expansion budget"}, "order: budget");
-    expect_origin(p, ov::refusal_origin::budget, "order: budget");
 }
 
 // ── the longest chain (Orchestra) ────────────────────────────────────────────
@@ -3244,29 +3050,24 @@ constexpr kind kCells[] = {
     {.name = "header expansion",
      .xml = row("OverlayRefusalW3XmlWalk.HeaderExpansionLoadsAtThePrediction"),
      .orchestra = na("Orchestra's header is component 1024, charged standalone")},
-    {.name = "side-table fit",
-     .xml = row("OverlayRefusalW3XmlSideTable.EarlyComponentsPushALaterBaseStartPastTheTable "
-                "OverlayRefusalW3XmlSideTable.EarlyComponentsJustInsideTheTableLoad "
-                "OverlayRefusalW3XmlSideTable.ANewComponentWhoseCountPassesTheTable "
-                "OverlayRefusalW3XmlSideTable.ANewComponentJustInsideTheTableLoads "
-                "OverlayRefusalW3XmlSideTable.ALowTaggedGroupPushesBaseGroupsPastTheTable "
-                "OverlayRefusalW3XmlSideTable.ALowTaggedGroupJustInsideTheTableLoads"),
+    {.name = "side table past 65535 entries loads",
+     .xml = row("OverlayRefusalW3XmlSideTable.ALaterBaseStartPastTheWrapLoadsWithItsOwnMembers "
+                "OverlayRefusalW3XmlSideTable."
+                "ANewComponentWhoseCountPassesTheWrapLoadsWithItsOwnMembers "
+                "OverlayRefusalW3XmlSideTable."
+                "ALowTaggedGroupPushingBaseGroupsPastTheWrapLoadsWithTheirOwnMembers"),
      .orchestra =
-         row("OverlayRefusalW3OrchSideTable.EarlyComponentsPushALaterBaseStartPastTheTable "
-             "OverlayRefusalW3OrchSideTable.EarlyComponentsJustInsideTheTableLoad "
-             "OverlayRefusalW3OrchSideTable.ANewComponentWhoseCountPassesTheTable "
-             "OverlayRefusalW3OrchSideTable.ANewComponentJustInsideTheTableLoads "
-             "OverlayRefusalW3OrchSideTable.ALowTaggedGroupPushesBaseGroupsPastTheTable "
-             "OverlayRefusalW3OrchSideTable.ALowTaggedGroupJustInsideTheTableLoads")},
+         row("OverlayRefusalW3OrchSideTable.ALaterBaseStartPastTheWrapLoadsWithItsOwnMembers "
+             "OverlayRefusalW3OrchSideTable."
+             "ANewComponentWhoseCountPassesTheWrapLoadsWithItsOwnMembers "
+             "OverlayRefusalW3OrchSideTable."
+             "ALowTaggedGroupPushingBaseGroupsPastTheWrapLoadsWithTheirOwnMembers")},
     {.name = "guard order: cycle before redeclare",
      .xml = row("OverlayRefusalW3XmlOrder.CycleIsReportedBeforeARedeclareConflict"),
      .orchestra = row("OverlayRefusalW3OrchOrder.CycleIsReportedBeforeARedeclareConflict")},
     {.name = "guard order: version before the entry cap",
      .xml = row("OverlayRefusalW3XmlOrder.VersionMismatchIsReportedBeforeTheMessageCap"),
      .orchestra = row("OverlayRefusalW3OrchOrder.VersionMismatchIsReportedBeforeTheMessageCap")},
-    {.name = "guard order: budget before the side-table fit",
-     .xml = row("OverlayRefusalW3XmlOrder.BudgetIsReportedBeforeTheSideTableFit"),
-     .orchestra = row("OverlayRefusalW3OrchOrder.BudgetIsReportedBeforeTheSideTableFit")},
     {.name = "budget recipe",
      .xml = row("OverlayRefusalW3Budget.ConstantEqualsTheRecipeOverTheVendoredBases"),
      .orchestra = row("OverlayRefusalW3Budget.ConstantEqualsTheRecipeOverTheVendoredBases")},

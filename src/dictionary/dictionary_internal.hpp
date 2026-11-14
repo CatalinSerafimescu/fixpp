@@ -70,8 +70,10 @@ namespace fixpp::dict::detail {
     return r.ec == std::errc{} && r.ptr == s.data() + s.size() && out >= 0;
 }
 
-// An Orchestra `id`, 0..65535. Non-throwing, for the tolerant "skip on a miss"
-// reads; `out` is written only when this returns true.
+// An Orchestra id that is a FIX tag (a `fixr:field` id, and a `fixr:fieldRef`,
+// `fixr:numInGroup` or `lengthId` reference), 0..65535. Non-throwing, for the
+// tolerant "skip on a miss" reads; `out` is written only when this returns true.
+// A component or group id is a surrogate key and takes `try_parse_orch_ref_id`.
 [[nodiscard]] inline bool try_parse_uint16(std::string_view s, std::uint16_t& out) noexcept {
     int val = 0;
     auto const r = std::from_chars(s.data(), s.data() + s.size(), val);
@@ -79,6 +81,31 @@ namespace fixpp::dict::detail {
         return false;
     }
     out = static_cast<std::uint16_t>(val);
+    return true;
+}
+
+// 102-dict-width-multichar-type D1b: an Orchestra surrogate id, the document-local
+// key of a `fixr:component` or `fixr:group` and of a `fixr:componentRef` or
+// `fixr:groupRef` (not a FIX tag). A distinct type, so a surrogate key does not
+// convert to an integer implicitly: a container or holder of another width does
+// not accept it. It becomes text only through `std::to_underlying`.
+enum class orch_ref_id : std::uint32_t {};
+
+// The repository schema's `fixr:id_t` upper bound (`maxInclusive`).
+inline constexpr std::int64_t kOrchRefIdMax = 2147483647;
+
+// An Orchestra surrogate id, 0..kOrchRefIdMax: the lexical rule of
+// `try_parse_uint16` (the whole string read by `std::from_chars` as a signed
+// integer, the value non-negative) with the schema's upper bound. The schema's `positiveInteger`
+// excludes 0; 0 is admitted, as the 16-bit parse admitted it. Non-throwing; `out` is written only
+// when this returns true.
+[[nodiscard]] inline bool try_parse_orch_ref_id(std::string_view s, orch_ref_id& out) noexcept {
+    std::int64_t val = 0;
+    auto const r = std::from_chars(s.data(), s.data() + s.size(), val);
+    if (r.ec != std::errc{} || r.ptr != s.data() + s.size() || val < 0 || val > kOrchRefIdMax) {
+        return false;
+    }
+    out = orch_ref_id{static_cast<std::uint32_t>(val)};
     return true;
 }
 
@@ -115,6 +142,15 @@ void push_run(std::pmr::vector<MsgFieldsRun>& runs, std::pmr::vector<T>& pool, I
     runs.push_back(MsgFieldsRun{.start = static_cast<std::uint32_t>(pool.size()),
                                 .count = static_cast<std::uint32_t>(items.size())});
     pool.insert(pool.end(), items.begin(), items.end());
+}
+
+// 102-dict-width-multichar-type D7 (spec FR-008): a run of `count` entries from
+// `start` lies inside a table of `size` entries. The test subtracts instead of adding, so a start
+// and a count whose 32-bit sum wraps cannot pass it. Every run reader tests a record
+// with this (or sums in `std::size_t`, as `run_at` below) before it builds a range.
+[[nodiscard]] constexpr bool run_fits(std::uint32_t start, std::uint32_t count,
+                                      std::size_t size) noexcept {
+    return start <= size && count <= size - start;
 }
 
 // 100: the run at `index` of `runs`, read from `pool`; empty when `index` has no run or
@@ -574,7 +610,7 @@ public:
     // Returns the flat FieldRef run for a component (by component_id).
     // Returns empty span if component_id is out of range or field_count == 0.
     [[nodiscard]] std::span<FieldRef const> component_fields_impl(
-        std::uint16_t component_id) const noexcept;
+        std::uint32_t component_id) const noexcept;
 
     // Returns the flat FieldRef run for a group (by no_tag).
     // Returns empty span if the group has no fields recorded.
@@ -961,10 +997,17 @@ private:
 find_incomplete_group_context(dict_metadata_handle const& h,
                               std::span<std::uint16_t const> structural_group_tags) {
     for (std::size_t i = 0; i < h.per_msg_field_offsets_.size(); ++i) {
-        auto const frun = h.per_msg_field_offsets_[i];
-        auto const drun = (i < h.per_msg_group_ctx_delim_offsets_.size())
-                              ? h.per_msg_group_ctx_delim_offsets_[i]
-                              : MsgFieldsRun{};
+        auto frun = h.per_msg_field_offsets_[i];
+        auto drun = (i < h.per_msg_group_ctx_delim_offsets_.size())
+                        ? h.per_msg_group_ctx_delim_offsets_[i]
+                        : MsgFieldsRun{};
+        // 102 D7 (FR-008): a run that overruns its table is read as empty.
+        if (!run_fits(frun.start, frun.count, h.fields_.size())) {
+            frun = MsgFieldsRun{};
+        }
+        if (!run_fits(drun.start, drun.count, h.group_ctx_delim_pool_.size())) {
+            drun = MsgFieldsRun{};
+        }
         auto const offender = find_context_without_delim_record(
             std::span<FieldRef const>{h.fields_.data() + frun.start, frun.count},
             std::span<GroupCtxDelim const>{h.group_ctx_delim_pool_.data() + drun.start, drun.count},

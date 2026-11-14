@@ -225,7 +225,7 @@ namespace fixpp::v50sp2 {
             if (!en4) return ::std::unexpected(en4.error());
             auto& eh4 = *en4;
     if (item4.exec_inst_value) {
-        auto r = eh4.set_char(1308, *item4.exec_inst_value);
+        auto r = eh4.set_string(1308, *item4.exec_inst_value);
         if (!r) return ::std::unexpected(r.error());
     }
         }

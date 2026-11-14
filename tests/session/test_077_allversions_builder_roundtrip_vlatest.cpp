@@ -40,6 +40,8 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <typeinfo>
 #include <vector>
 
 #include "support/app_message_read_scaffold.hpp"
@@ -163,7 +165,7 @@ TEST_F(AllVersionsRoundtrip077Vlatest, ExecutionReport) {
     args.cl_ord_id = "ExecutionReport_cl_ord_id";
     args.commission = make_decimal("10.5", &arena);
     args.comm_type = '1';
-    args.exec_inst = '1';
+    args.exec_inst = "1";
     auto built = fixpp::vlatest::build_ExecutionReport(out, args);
     ASSERT_TRUE(built.has_value()) << "build_ExecutionReport failed";
     std::string const body = bytes_to_string(*built);
@@ -234,7 +236,7 @@ TEST_F(AllVersionsRoundtrip077Vlatest, NewOrderMultileg) {
     args.cl_ord_id = "NewOrderMultileg_cl_ord_id";
     args.commission = make_decimal("10.5", &arena);
     args.comm_type = '1';
-    args.exec_inst = '1';
+    args.exec_inst = "1";
     args.order_qty = make_decimal("10.5", &arena);
     auto built = fixpp::vlatest::build_NewOrderMultileg(out, args);
     ASSERT_TRUE(built.has_value()) << "build_NewOrderMultileg failed";
@@ -258,7 +260,7 @@ TEST_F(AllVersionsRoundtrip077Vlatest, MultilegOrderCancelReplace) {
     args.cl_ord_id = "MultilegOrderCancelReplace_cl_ord_id";
     args.commission = make_decimal("10.5", &arena);
     args.comm_type = '1';
-    args.exec_inst = '1';
+    args.exec_inst = "1";
     args.order_qty = make_decimal("10.5", &arena);
     auto built = fixpp::vlatest::build_MultilegOrderCancelReplace(out, args);
     ASSERT_TRUE(built.has_value()) << "build_MultilegOrderCancelReplace failed";
@@ -1052,7 +1054,7 @@ TEST_F(AllVersionsRoundtrip077Vlatest, TradingSessionList) {
 TEST_F(AllVersionsRoundtrip077Vlatest, SecurityListUpdateReport) {
     fixpp::vlatest::SecurityListUpdateReportArgs args{};
     args.transact_time = "SecurityListUpdateReport_transact_time";
-    args.corporate_action = '1';
+    args.corporate_action = "1";
     args.security_req_id = "SecurityListUpdateReport_security_req_id";
     args.tot_no_related_sym = 393;
     args.security_request_result = 560;
@@ -1961,7 +1963,7 @@ TEST_F(AllVersionsRoundtrip077Vlatest, NewOrderSingle) {
     args.cl_ord_id = "NewOrderSingle_cl_ord_id";
     args.commission = make_decimal("10.5", &arena);
     args.comm_type = '1';
-    args.exec_inst = '1';
+    args.exec_inst = "1";
     args.order_qty = make_decimal("10.5", &arena);
     auto built = fixpp::vlatest::build_NewOrderSingle(out, args);
     ASSERT_TRUE(built.has_value()) << "build_NewOrderSingle failed";
@@ -2180,7 +2182,7 @@ TEST_F(AllVersionsRoundtrip077Vlatest, MassOrder) {
     args.account = "MassOrder_account";
     args.text = "MassOrder_text";
     args.order_capacity = '1';
-    args.order_restrictions = '1';
+    args.order_restrictions = "1";
     args.account_type = 581;
     args.cust_order_capacity = 582;
     auto built = fixpp::vlatest::build_MassOrder(out, args);
@@ -2203,7 +2205,7 @@ TEST_F(AllVersionsRoundtrip077Vlatest, MassOrderAck) {
     args.account = "MassOrderAck_account";
     args.text = "MassOrderAck_text";
     args.order_capacity = '1';
-    args.order_restrictions = '1';
+    args.order_restrictions = "1";
     args.account_type = 581;
     args.cust_order_capacity = 582;
     auto built = fixpp::vlatest::build_MassOrderAck(out, args);
@@ -2977,7 +2979,7 @@ TEST_F(AllVersionsRoundtrip077Vlatest, OrderCancelReplaceRequest) {
     args.cl_ord_id = "OrderCancelReplaceRequest_cl_ord_id";
     args.commission = make_decimal("10.5", &arena);
     args.comm_type = '1';
-    args.exec_inst = '1';
+    args.exec_inst = "1";
     args.order_qty = make_decimal("10.5", &arena);
     auto built = fixpp::vlatest::build_OrderCancelReplaceRequest(out, args);
     ASSERT_TRUE(built.has_value()) << "build_OrderCancelReplaceRequest failed";
@@ -3163,7 +3165,7 @@ TEST_F(AllVersionsRoundtrip077Vlatest, QuoteRequest) {
     args.cl_ord_id = "QuoteRequest_cl_ord_id";
     args.text = "QuoteRequest_text";
     args.order_capacity = '1';
-    args.order_restrictions = '1';
+    args.order_restrictions = "1";
     args.booking_type = 775;
     args.pre_trade_anonymity = true;
     auto built = fixpp::vlatest::build_QuoteRequest(out, args);
@@ -3231,7 +3233,7 @@ TEST_F(AllVersionsRoundtrip077Vlatest, MarketDataRequest) {
     args.market_depth = 264;
     args.md_update_type = 265;
     args.aggregated_book = true;
-    args.open_close_settl_flag = '1';
+    args.open_close_settl_flag = "1";
     auto built = fixpp::vlatest::build_MarketDataRequest(out, args);
     ASSERT_TRUE(built.has_value()) << "build_MarketDataRequest failed";
     std::string const body = bytes_to_string(*built);
@@ -3714,7 +3716,7 @@ TEST_F(AllVersionsRoundtrip077Vlatest, NewOrderCross) {
     std::pmr::monotonic_buffer_resource arena{4096};
     fixpp::vlatest::NewOrderCrossArgs args{};
     args.currency = "NewOrderCross_currency";
-    args.exec_inst = '1';
+    args.exec_inst = "1";
     args.handl_inst = '1';
     args.security_id_source = "NewOrderCross_security_id_source";
     args.price = make_decimal("10.5", &arena);
@@ -3738,7 +3740,7 @@ TEST_F(AllVersionsRoundtrip077Vlatest, CrossOrderCancelReplaceRequest) {
     std::pmr::monotonic_buffer_resource arena{4096};
     fixpp::vlatest::CrossOrderCancelReplaceRequestArgs args{};
     args.currency = "CrossOrderCancelReplaceRequest_currency";
-    args.exec_inst = '1';
+    args.exec_inst = "1";
     args.handl_inst = '1';
     args.security_id_source = "CrossOrderCancelReplaceRequest_security_id_source";
     args.price = make_decimal("10.5", &arena);
@@ -3934,4 +3936,91 @@ TEST_F(AllVersionsRoundtrip077Vlatest, NewOrderSingle_EncodedText_SohAnd0xFF_091
     auto data = mv.get(355);
     ASSERT_TRUE(data.has_value()) << "re-parse lost EncodedText(355)";
     EXPECT_EQ(data->as_string(), text) << "re-parse must recover the octets verbatim";
+}
+
+// ── 102-dict-width-multichar-type (fixpp#621; spec US2.3, FR-005; tasks T021) ──────────────
+// A typed builder input for a MultiCharValue field takes the string type its accessor returns
+// and writes it verbatim: `exec_inst` (ExecInst(18)) at top level and a group entry's
+// `leg_exec_inst` (LegExecInst(1384)), each set to the multi-valued "1 2", the wire then
+// carrying `18=1 2` / `1384=1 2`, read back through the typed reader. The assignment is made
+// only when the member's type admits a `std::string_view` (`assign_view_102`, a generic lambda,
+// so the branch that does not apply is never instantiated); otherwise the cell fails naming the
+// member's type, and stops.
+
+namespace {
+
+template <class T>
+std::string as_text_102(T const& v) {
+    if constexpr (std::is_same_v<T, char>) {
+        return std::string(1, v);
+    } else {
+        return std::string{v};
+    }
+}
+
+constexpr auto assign_view_102 = [](auto& member, std::string_view value) -> bool {
+    using M = std::remove_reference_t<decltype(member)>;
+    if constexpr (std::is_assignable_v<M&, std::string_view>) {
+        member = value;
+        return true;
+    } else {
+        ADD_FAILURE() << "the member's type, " << typeid(M).name()
+                      << ", does not admit a std::string_view";
+        return false;
+    }
+};
+
+}  // namespace
+
+TEST_F(AllVersionsRoundtrip077Vlatest, MultiChar102ExecInstTwoValuesRoundTrips) {
+    fixpp::vlatest::NewOrderSingleArgs args{};
+    args.cl_ord_id = "NewOrderSingle_cl_ord_id";
+    std::string_view const value = "1 2";
+    if (!assign_view_102(args.exec_inst, value)) {
+        return;
+    }
+    auto built = fixpp::vlatest::build_NewOrderSingle(out, args);
+    ASSERT_TRUE(built.has_value()) << "build_NewOrderSingle failed";
+    std::string const body = bytes_to_string(*built);
+    EXPECT_NE(body.find("\x01"
+                        "18=1 2\x01"),
+              std::string::npos)
+        << "the wire lacks 18=1 2: " << body;
+    std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
+    auto const mv = parse_dict(frame, *tv_, &read_arena);
+    ASSERT_FALSE(::testing::Test::HasFailure());
+    fixpp::vlatest::NewOrderSingle const read_msg{mv};
+    auto const r = read_msg.exec_inst();
+    ASSERT_TRUE(r.has_value()) << "the typed reader refused 18=1 2";
+    EXPECT_EQ(as_text_102(*r), "1 2");
+}
+
+TEST_F(AllVersionsRoundtrip077Vlatest, MultiChar102LegExecInstTwoValuesRoundTrips) {
+    fixpp::vlatest::NewOrderMultilegArgs args{};
+    args.cl_ord_id = "NewOrderMultileg_cl_ord_id";
+    using leg_args = std::remove_const_t<std::remove_cvref_t<decltype(*args.legs)>::element_type>;
+    std::array<leg_args, 1> legs{};
+    legs[0].leg_symbol = "SYM";
+    std::string_view const value = "1 2";
+    if (!assign_view_102(legs[0].leg_exec_inst, value)) {
+        return;
+    }
+    args.legs = std::span<leg_args const>{legs};
+    auto built = fixpp::vlatest::build_NewOrderMultileg(out, args);
+    ASSERT_TRUE(built.has_value()) << "build_NewOrderMultileg failed";
+    std::string const body = bytes_to_string(*built);
+    EXPECT_NE(body.find("\x01"
+                        "1384=1 2\x01"),
+              std::string::npos)
+        << "the wire lacks 1384=1 2: " << body;
+    std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
+    auto const mv = parse_dict(frame, *tv_, &read_arena);
+    ASSERT_FALSE(::testing::Test::HasFailure());
+    fixpp::vlatest::NewOrderMultileg const read_msg{mv};
+    auto const read_legs = read_msg.legs();
+    ASSERT_EQ(read_legs.size(), 1U) << "the NoLegs(555) instance did not resolve";
+    auto const read_leg = read_legs[0];  // the accessor's view is bound to a named entry
+    auto const r = read_leg.leg_exec_inst();
+    ASSERT_TRUE(r.has_value()) << "the typed reader refused 1384=1 2";
+    EXPECT_EQ(as_text_102(*r), "1 2");
 }

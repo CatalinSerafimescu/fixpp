@@ -11,7 +11,7 @@
 namespace fixpp::v50sp2::groups {
 
 struct G_1232Args {
-    ::std::optional<char> exec_inst_value{};
+    ::std::optional<::std::string_view> exec_inst_value{};
 };
 
 }  // namespace fixpp::v50sp2::groups

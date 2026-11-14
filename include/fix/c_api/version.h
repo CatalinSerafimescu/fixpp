@@ -267,8 +267,37 @@
  *  a field missing from its index. Their 1.11 clauses in session.h, and the
  *  1.11 entry above, are amended in place, marked 1.15.
  *  No symbol, signature or error code is added. */
+/*  1.16 (BREAKING, [const §X.7]; 102-dict-width-multichar-type, fixpp#654): the two
+ *  dictionary loads return another result for some inputs, and every call that reads a
+ *  dictionary in two regions answers from a corrected one. No symbol, signature, type or
+ *  error code changes. Three kinds (dict.h carries each load's own note):
+ *  - a failure turned into a success: fixpp_dict_load_from_xml_with_overlay, an overlay
+ *    whose only refusal was a component or group side table that would stop fitting 16
+ *    bits (was FIXPP_ERR_DICT_LIMIT_EXCEEDED), or an Orchestra input whose only refusal was
+ *    a component, group, componentRef or groupRef id in 65536..2147483647 (was
+ *    FIXPP_ERR_DICT_CONFIG); fixpp_dict_load_from_xml, such an id (was
+ *    FIXPP_ERR_CAPI_CONFIG_INVALID). An id above 2147483647 is still refused;
+ *  - the same code, and a different dictionary: a base of more than 65,535 components,
+ *    whose component identities and message expansions through a componentRef past that
+ *    point are now their own, and with them every table a session builds from the
+ *    dictionary (the valid-tag and required sets, the group contexts, the Length+Data
+ *    pairs, the header store and the section records); a base whose group side table
+ *    passes UINT16_MAX entries, whose groups' members and bare member store are now their own;
+ *  - a failure turned into a different failure: on the overlay call, that side-table fault
+ *    together with a fault the guard detects after it now returns that fault's code; a
+ *    high-id Orchestra input refused by a guard the id moved now returns the expansion
+ *    budget's FIXPP_ERR_DICT_LIMIT_EXCEEDED, or goes on to the later guards where an
+ *    overlay's restatement of such a base definition was counted as new.
+ *  The readers, builders and setters that read such a dictionary are marked in message.h
+ *  (the C-ABI 1.16 paragraph beside the 1.9 reader paragraph), and the session calls and
+ *  fixpp_engine_start in session.h (its C-ABI 1.16 paragraph). What no declaration carries,
+ *  the counterparty's side: a validating session over such a dictionary can send a Reject it
+ *  did not send, or not send one it sent, and the header placement and the Length+Data carry
+ *  of the frames a session sends follow the corrected header store and pairs.
+ *  Migration: a consumer that relied on these inputs being refused checks the dictionary's
+ *  content itself; no code that handles the refusal needs to change. */
 #define FIXPP_C_ABI_VERSION_MAJOR 1
-#define FIXPP_C_ABI_VERSION_MINOR 15 /* 1.15: group read integrity (100), BREAKING */
+#define FIXPP_C_ABI_VERSION_MINOR 16 /* 1.16: dictionary record width (102), BREAKING */
 #define FIXPP_C_ABI_VERSION_PATCH 0
 
 /** Composite: (MAJOR<<16)|(MINOR<<8)|PATCH — single-integer compatibility check. */

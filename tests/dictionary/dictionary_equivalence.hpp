@@ -40,12 +40,6 @@
 // the definition the first `fixr:groupRef` to its NumInGroup tag names on that walk,
 // and its `fixr:numInGroup` emits nothing.
 //
-// The side-table wrap condition (research R-10 §3): a component or group is
-// compared with its census expansion only when its start and its count, computed
-// from census sizes in `finalize`'s order (re-derive the order from the two
-// `finalize` loops that set `first_idx`), both fit in 16 bits. Any other is
-// listed as a wrap case in the report's notes and counted as excluded.
-//
 // The invariant checks (contracts W-0) are functions of store values, so a test
 // can feed each one values that break its invariant only. `compare()` runs each
 // on both sides' real stores.
@@ -111,7 +105,6 @@ inline constexpr std::string_view kCompNameOffset = "ComponentRef::name_offset";
 inline constexpr std::string_view kCompFirstFieldIndex = "ComponentRef::first_field_index";
 inline constexpr std::string_view kCompFieldCount = "ComponentRef::field_count";
 inline constexpr std::string_view kCompParent = "ComponentRef::parent_component_id";
-inline constexpr std::string_view kCompReserved = "ComponentRef::_reserved";
 inline constexpr std::string_view kGroup = "Dictionary::group";
 inline constexpr std::string_view kGroupNoTag = "GroupRef::no_tag";
 inline constexpr std::string_view kGroupFirstFieldTag = "GroupRef::first_field_tag";
@@ -130,7 +123,6 @@ struct fieldref_ids {
     std::string_view component_index;
     std::string_view enum_table_index;
     std::string_view length_pair_data_tag;
-    std::string_view reserved;
 };
 inline constexpr fieldref_ids kMessageFields{
     .tag = "Dictionary::message_fields: FieldRef::tag",
@@ -140,8 +132,7 @@ inline constexpr fieldref_ids kMessageFields{
     .group_no_tag = "Dictionary::message_fields: FieldRef::group_no_tag",
     .component_index = "Dictionary::message_fields: FieldRef::component_index",
     .enum_table_index = "Dictionary::message_fields: FieldRef::enum_table_index",
-    .length_pair_data_tag = "Dictionary::message_fields: FieldRef::length_pair_data_tag",
-    .reserved = "Dictionary::message_fields: FieldRef::_reserved"};
+    .length_pair_data_tag = "Dictionary::message_fields: FieldRef::length_pair_data_tag"};
 inline constexpr fieldref_ids kComponentFields{
     .tag = "Dictionary::component_fields: FieldRef::tag",
     .type = "Dictionary::component_fields: FieldRef::type",
@@ -150,8 +141,7 @@ inline constexpr fieldref_ids kComponentFields{
     .group_no_tag = "Dictionary::component_fields: FieldRef::group_no_tag",
     .component_index = "Dictionary::component_fields: FieldRef::component_index",
     .enum_table_index = "Dictionary::component_fields: FieldRef::enum_table_index",
-    .length_pair_data_tag = "Dictionary::component_fields: FieldRef::length_pair_data_tag",
-    .reserved = "Dictionary::component_fields: FieldRef::_reserved"};
+    .length_pair_data_tag = "Dictionary::component_fields: FieldRef::length_pair_data_tag"};
 inline constexpr fieldref_ids kGroupFields{
     .tag = "Dictionary::group_fields: FieldRef::tag",
     .type = "Dictionary::group_fields: FieldRef::type",
@@ -160,8 +150,7 @@ inline constexpr fieldref_ids kGroupFields{
     .group_no_tag = "Dictionary::group_fields: FieldRef::group_no_tag",
     .component_index = "Dictionary::group_fields: FieldRef::component_index",
     .enum_table_index = "Dictionary::group_fields: FieldRef::enum_table_index",
-    .length_pair_data_tag = "Dictionary::group_fields: FieldRef::length_pair_data_tag",
-    .reserved = "Dictionary::group_fields: FieldRef::_reserved"};
+    .length_pair_data_tag = "Dictionary::group_fields: FieldRef::length_pair_data_tag"};
 
 // table_view stores
 inline constexpr std::string_view kValid = "table_view::valid_";
@@ -246,7 +235,6 @@ inline constexpr std::array kStoreList{
     store_entry{id::kMessageFields.enum_table_index, entry_kind::compared_unseeded,
                 kNeverAssignedReason},
     store_entry{id::kMessageFields.length_pair_data_tag, entry_kind::seeded, ""},
-    store_entry{id::kMessageFields.reserved, entry_kind::compared_unseeded, kNeverAssignedReason},
     store_entry{id::kFieldRef, entry_kind::seeded, ""},
     store_entry{id::kField, entry_kind::seeded, ""},
     store_entry{id::kFieldValidFor, entry_kind::seeded, ""},
@@ -263,8 +251,6 @@ inline constexpr std::array kStoreList{
     store_entry{id::kCompFirstFieldIndex, entry_kind::seeded, ""},
     store_entry{id::kCompFieldCount, entry_kind::seeded, ""},
     store_entry{id::kCompParent, entry_kind::seeded, ""},
-    store_entry{id::kCompReserved, entry_kind::compared_unseeded,
-                "both loaders' `finalize` write `cr._reserved = 0`"},
     store_entry{id::kGroup, entry_kind::seeded, ""},
     store_entry{id::kGroupNoTag, entry_kind::compared_unseeded,
                 "`dict_metadata_handle::group_impl` returns only a GroupRef whose `no_tag` "
@@ -286,7 +272,6 @@ inline constexpr std::array kStoreList{
     store_entry{id::kComponentFields.enum_table_index, entry_kind::compared_unseeded,
                 kNeverAssignedReason},
     store_entry{id::kComponentFields.length_pair_data_tag, entry_kind::seeded, ""},
-    store_entry{id::kComponentFields.reserved, entry_kind::compared_unseeded, kNeverAssignedReason},
     store_entry{id::kGroupFields.tag, entry_kind::seeded, ""},
     store_entry{id::kGroupFields.type, entry_kind::seeded, ""},
     store_entry{id::kGroupFields.rule, entry_kind::seeded, ""},
@@ -297,7 +282,6 @@ inline constexpr std::array kStoreList{
     store_entry{id::kGroupFields.enum_table_index, entry_kind::compared_unseeded,
                 kNeverAssignedReason},
     store_entry{id::kGroupFields.length_pair_data_tag, entry_kind::seeded, ""},
-    store_entry{id::kGroupFields.reserved, entry_kind::compared_unseeded, kNeverAssignedReason},
     store_entry{id::kValid, entry_kind::seeded, ""},
     store_entry{id::kRequired, entry_kind::seeded, ""},
     store_entry{id::kGroupFirstBare, entry_kind::seeded, ""},
@@ -484,8 +468,8 @@ namespace detail_census {
 
 struct orchestra_walker {
     std::set<std::uint16_t> fields;
-    std::unordered_map<std::uint16_t, pugi::xml_node> components;
-    std::unordered_map<std::uint16_t, pugi::xml_node> groups;
+    std::unordered_map<std::uint32_t, pugi::xml_node> components;
+    std::unordered_map<std::uint32_t, pugi::xml_node> groups;
     std::map<std::uint16_t, pugi::xml_node> group_nodes;
     std::vector<std::string>* notes = nullptr;
 
@@ -498,15 +482,18 @@ struct orchestra_walker {
         }
         for (auto const& child : parent.children()) {
             std::string_view const kind{child.name()};
-            auto const id = static_cast<std::uint16_t>(child.attribute("id").as_uint(0));
             if (kind == "fixr:fieldRef") {
-                if (!fields.contains(id)) {
-                    notes->push_back("census: <fixr:fieldRef id=\"" + std::to_string(id) +
+                // A fieldRef's id is a FIX tag; a componentRef's and a groupRef's are
+                // surrogate keys, read whole.
+                auto const tag = static_cast<std::uint16_t>(child.attribute("id").as_uint(0));
+                if (!fields.contains(tag)) {
+                    notes->push_back("census: <fixr:fieldRef id=\"" + std::to_string(tag) +
                                      "\"> is not declared");
                     continue;
                 }
-                out.push_back(id);
+                out.push_back(tag);
             } else if (kind == "fixr:componentRef") {
+                std::uint32_t const id = child.attribute("id").as_uint(0);
                 auto const it = components.find(id);
                 if (it == components.end()) {
                     notes->push_back("census: <fixr:componentRef id=\"" + std::to_string(id) +
@@ -515,6 +502,7 @@ struct orchestra_walker {
                 }
                 walk(it->second, out, register_groups, depth + 1);
             } else if (kind == "fixr:groupRef") {
+                std::uint32_t const id = child.attribute("id").as_uint(0);
                 auto const it = groups.find(id);
                 if (it == groups.end()) {
                     notes->push_back("census: <fixr:groupRef id=\"" + std::to_string(id) +
@@ -573,7 +561,7 @@ struct orchestra_walker {
     std::set<std::string> comp_names;
     for (auto const& comp : root.child("fixr:components").children("fixr:component")) {
         std::string const name{comp.attribute("name").as_string("")};
-        auto const id = static_cast<std::uint16_t>(comp.attribute("id").as_uint(0));
+        std::uint32_t const id = comp.attribute("id").as_uint(0);
         if (!w.components.emplace(id, comp).second) {
             c.notes.push_back("census: duplicate <fixr:component id=\"" + std::to_string(id) +
                               "\">; the first is kept");
@@ -585,7 +573,7 @@ struct orchestra_walker {
         comp_order.emplace_back(name, comp);
     }
     for (auto const& g : root.child("fixr:groups").children("fixr:group")) {
-        auto const id = static_cast<std::uint16_t>(g.attribute("id").as_uint(0));
+        std::uint32_t const id = g.attribute("id").as_uint(0);
         if (!w.groups.emplace(id, g).second) {
             c.notes.push_back("census: duplicate <fixr:group id=\"" + std::to_string(id) +
                               "\">; the first is kept");
@@ -641,7 +629,6 @@ struct comparison_report {
     std::vector<invariant_violation> invariant_violations;
     std::vector<std::string> notes;
     std::size_t census_compared = 0;
-    std::size_t census_excluded = 0;
 
     [[nodiscard]] std::set<std::string_view> reported_entries() const {
         std::set<std::string_view> out;
@@ -661,7 +648,7 @@ struct comparison_report {
         for (auto const& n : notes) {
             os << "  note: " << n << '\n';
         }
-        os << "  census: compared " << census_compared << ", excluded " << census_excluded << '\n';
+        os << "  census: compared " << census_compared << '\n';
         return os.str();
     }
 
@@ -799,7 +786,7 @@ inline bool fieldref_equal(FieldRef const& a, FieldRef const& b) noexcept {
     return a.tag == b.tag && a.type == b.type && a.rule == b.rule &&
            a.condition_index == b.condition_index && a.group_no_tag == b.group_no_tag &&
            a.component_index == b.component_index && a.enum_table_index == b.enum_table_index &&
-           a.length_pair_data_tag == b.length_pair_data_tag && a._reserved == b._reserved;
+           a.length_pair_data_tag == b.length_pair_data_tag;
 }
 
 // A FieldRef run: the tag sequence first; each other field only where the tag
@@ -830,7 +817,6 @@ inline void compare_runs(comparison_report& r, id::fieldref_ids const& ids,
         check(ids.component_index, x.component_index, y.component_index);
         check(ids.enum_table_index, x.enum_table_index, y.enum_table_index);
         check(ids.length_pair_data_tag, x.length_pair_data_tag, y.length_pair_data_tag);
-        check(ids.reserved, x._reserved, y._reserved);
     }
 }
 
@@ -992,12 +978,6 @@ inline void compare_with_census(comparison_report& r, char const* side_name, Dic
     std::size_t start = 0;
     for (auto const& [name, members] : c.components) {
         std::size_t const count = members.size();
-        if (start > 0xFFFFU || count > 0xFFFFU) {
-            r.notes.push_back(who + ": wrap case, component \"" + name + "\" not compared");
-            ++r.census_excluded;
-            start += count;
-            continue;
-        }
         ++r.census_compared;
         auto const cr = d.component(name);
         if (!cr) {
@@ -1020,13 +1000,6 @@ inline void compare_with_census(comparison_report& r, char const* side_name, Dic
     start = 0;
     for (auto const& [no_tag, members] : c.groups) {
         std::size_t const count = members.size();
-        if (start > 0xFFFFU || count > 0xFFFFU) {
-            r.notes.push_back(who + ": wrap case, group " + std::to_string(no_tag) +
-                              " not compared");
-            ++r.census_excluded;
-            start += count;
-            continue;
-        }
         ++r.census_compared;
         auto const gr = d.group(no_tag);
         if (!gr) {
@@ -1202,7 +1175,7 @@ inline void compare_with_census(comparison_report& r, char const* side_name, Dic
         if (ga.has_value() != gb.has_value()) {
             r.add(id::kGroup, at);
         } else if (ga) {
-            auto check = [&](std::string_view entry, std::uint16_t x, std::uint16_t y) {
+            auto check = [&](std::string_view entry, std::uint64_t x, std::uint64_t y) {
                 if (x != y) {
                     r.add(entry, at + ": " + std::to_string(x) + " vs " + std::to_string(y));
                 }
@@ -1236,7 +1209,7 @@ inline void compare_with_census(comparison_report& r, char const* side_name, Dic
         if (ca.has_value() != cb.has_value()) {
             r.add(id::kComponent, at);
         } else if (ca) {
-            auto check = [&](std::string_view entry, std::uint16_t x, std::uint16_t y) {
+            auto check = [&](std::string_view entry, std::uint64_t x, std::uint64_t y) {
                 if (x != y) {
                     r.add(entry, at + ": " + std::to_string(x) + " vs " + std::to_string(y));
                 }
@@ -1246,7 +1219,6 @@ inline void compare_with_census(comparison_report& r, char const* side_name, Dic
             check(id::kCompFirstFieldIndex, ca->first_field_index, cb->first_field_index);
             check(id::kCompFieldCount, ca->field_count, cb->field_count);
             check(id::kCompParent, ca->parent_component_id, cb->parent_component_id);
-            check(id::kCompReserved, ca->_reserved, cb->_reserved);
         }
         compare_runs(r, id::kComponentFields, at, a.dict.component_fields(name),
                      b.dict.component_fields(name));

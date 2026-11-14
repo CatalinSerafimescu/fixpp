@@ -12635,7 +12635,7 @@ namespace fixpp::vlatest {
             if (!en231) return ::std::unexpected(en231.error());
             auto& eh231 = *en231;
     if (item231.exec_inst_value) {
-        auto r = eh231.set_char(1308, *item231.exec_inst_value);
+        auto r = eh231.set_string(1308, *item231.exec_inst_value);
         if (!r) return ::std::unexpected(r.error());
     }
         }

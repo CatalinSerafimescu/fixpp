@@ -25,6 +25,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/orchestra_loader.hpp>
@@ -33,8 +34,10 @@
 #include <fstream>
 #include <map>
 #include <memory_resource>
+#include <optional>
 #include <pugixml.hpp>
 #include <set>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -42,6 +45,8 @@
 
 #include "reused_tag_census.hpp"  // fixpp_test_support::kRuntimeDicts
 #include "send_header_tags.hpp"   // fixpp::session::detail::kSendHeaderTags
+#include "support/dict_width_fixtures_102.hpp"
+#include "support/table_view_test_access.hpp"
 
 namespace {
 
@@ -402,6 +407,175 @@ TEST(HeaderTagsW7Session, SeededFix44CopyMakesTheUnionDiffer) {
     tag_set const walk = quickfix_header_walk(xml, unresolved);
     EXPECT_TRUE(unresolved.empty());
     EXPECT_EQ(outside_fixed_set(walk), tag_set{kCustomTag}) << "walk " << render(walk);
+}
+
+// ── 102-dict-width-multichar-type (tasks T015, T015a, T015c) ─────────────────────
+// Rows (b) and (b2) over tests/support/dict_width_fixtures_102.hpp's Orchestra header fixture
+// (generator (c)): the header store and the section records keep each member of a
+// component and a group alias pair whose ids pass 65535 (research D4 (b), (b2); spec FR-001b).
+// Rows (b-x), (b2-x), (b-o) and (b2-o) over generators (a) and (b): the header of a base past
+// `kWrap` components reaches a component past the wrap, and the header store and the section
+// records hold that component's tags, not those of the component at its index - `kWrap` (the
+// D1 identity readers; spec FR-001a). Each base is loaded once per binary.
+
+namespace w = fixpp::test102::width;
+using fixpp::dict::table_view_test_access;
+
+struct loaded_102 {
+    std::pmr::monotonic_buffer_resource arena;
+    std::optional<Dictionary> dict;
+    std::optional<fixpp::dict::table_view> tv;
+    std::string error;
+};
+
+template <class Load>
+void load_once_102(loaded_102& l, Load const& load) {
+    try {
+        l.dict.emplace(load(&l.arena));
+        l.tv.emplace(l.dict->as_table_view());
+    } catch (std::exception const& e) {
+        l.error = e.what();
+    }
+}
+
+loaded_102 const& header_fixture_102() {
+    static loaded_102 l;
+    static bool const done = [] {
+        load_once_102(l, [](std::pmr::memory_resource* mr) {
+            return fixpp::dict::OrchestraLoader{}.load_from_string(
+                w::orch_header_fixture_text().text, mr);
+        });
+        return true;
+    }();
+    (void)done;
+    return l;
+}
+
+loaded_102 const& xml_identity_102() {
+    static loaded_102 l;
+    static bool const done = [] {
+        load_once_102(l, [](std::pmr::memory_resource* mr) {
+            return fixpp::dict::XmlLoader{}.load_from_string(w::xml_identity_fixture_text().text,
+                                                             mr);
+        });
+        return true;
+    }();
+    (void)done;
+    return l;
+}
+
+loaded_102 const& orch_identity_102() {
+    static loaded_102 l;
+    static bool const done = [] {
+        load_once_102(l, [](std::pmr::memory_resource* mr) {
+            return fixpp::dict::OrchestraLoader{}.load_from_string(
+                w::orch_identity_fixture_text().text, mr);
+        });
+        return true;
+    }();
+    (void)done;
+    return l;
+}
+
+// The members of the section record at path {} for `no_tag`, or nullopt.
+std::optional<std::vector<std::uint16_t>> top_section_members_102(fixpp::dict::table_view const& tv,
+                                                                  std::uint16_t no_tag) {
+    auto const& sec = table_view_test_access::section_records(tv);
+    auto const it =
+        sec.find(fixpp::dict::make_ctx_query({}, std::span<std::uint16_t const>{}, no_tag));
+    if (it == sec.end()) {
+        return std::nullopt;
+    }
+    return it->second.members;
+}
+
+// Row (b).
+TEST(HeaderTags102, OrchestraHeaderStoreKeepsEachMemberOfAnAliasPair) {
+    auto const& f = w::orch_header_fixture_text();
+    ASSERT_EQ(f.precondition_failure(), "");
+    auto const& l = header_fixture_102();
+    ASSERT_TRUE(l.tv.has_value()) << "the fixture did not load: " << l.error;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& tv = *l.tv;
+    for (std::uint16_t const t : {f.t, f.n, f.m, f.t2, f.n2, f.m2}) {
+        EXPECT_TRUE(tv.is_header_tag(t)) << "tag " << t;
+    }
+    std::vector<std::string> unresolved;
+    tag_set const walk = orchestra_header_walk(f.text, unresolved);
+    EXPECT_TRUE(unresolved.empty()) << "the walk met ids it cannot resolve";
+    EXPECT_EQ(disagreements(tv, walk), tag_set{}) << "walk " << render(walk);
+    // Spec Edge Cases: component 1024 + 65536 is an ordinary definition, not the header.
+    EXPECT_FALSE(tv.is_header_tag(f.t_ord));
+}
+
+// Row (b2): 100's section records, read directly.
+TEST(HeaderTags102, OrchestraSectionRecordsKeepEachMemberOfAnAliasPair) {
+    auto const& f = w::orch_header_fixture_text();
+    ASSERT_EQ(f.precondition_failure(), "");
+    auto const& l = header_fixture_102();
+    ASSERT_TRUE(l.tv.has_value()) << "the fixture did not load: " << l.error;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& tv = *l.tv;
+    EXPECT_EQ(top_section_members_102(tv, f.n), std::vector<std::uint16_t>{f.m});
+    EXPECT_EQ(top_section_members_102(tv, f.n2), std::vector<std::uint16_t>{f.m2});
+    // Spec Edge Cases: component 1025 + 65536 is an ordinary definition, not the trailer.
+    EXPECT_FALSE(top_section_members_102(tv, f.n_t).has_value());
+}
+
+// Row (b-x): the QuickFIX XML header reaches HeaderX, past the wrap.
+TEST(HeaderTags102, QuickFixHeaderPastTheWrapHoldsItsOwnComponentsTags) {
+    auto const& f = w::xml_identity_fixture_text();
+    ASSERT_EQ(f.precondition_failure(), "");
+    auto const& l = xml_identity_102();
+    ASSERT_TRUE(l.tv.has_value()) << "the base did not load: " << l.error;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& tv = *l.tv;
+    for (std::uint16_t const t : {f.t_x, f.n_x, f.m_x}) {
+        EXPECT_TRUE(tv.is_header_tag(t)) << "tag " << t;
+    }
+    std::vector<std::string> unresolved;
+    tag_set const walk = quickfix_header_walk(f.text, unresolved);
+    EXPECT_TRUE(unresolved.empty()) << "the walk met names it cannot resolve";
+    EXPECT_EQ(disagreements(tv, walk), tag_set{}) << "walk " << render(walk);
+}
+
+// Row (b2-x).
+TEST(HeaderTags102, QuickFixSectionRecordPastTheWrapHoldsItsOwnMember) {
+    auto const& f = w::xml_identity_fixture_text();
+    ASSERT_EQ(f.precondition_failure(), "");
+    auto const& l = xml_identity_102();
+    ASSERT_TRUE(l.tv.has_value()) << "the base did not load: " << l.error;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& tv = *l.tv;
+    EXPECT_EQ(top_section_members_102(tv, f.n_x), std::vector<std::uint16_t>{f.m_x});
+}
+
+// Row (b-o): the Orchestra header (declared past the wrap) reaches X, past the wrap.
+TEST(HeaderTags102, OrchestraHeaderPastTheWrapHoldsItsOwnComponentsTags) {
+    auto const& f = w::orch_identity_fixture_text();
+    ASSERT_EQ(f.precondition_failure(), "");
+    auto const& l = orch_identity_102();
+    ASSERT_TRUE(l.tv.has_value()) << "the base did not load: " << l.error;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& tv = *l.tv;
+    for (std::uint16_t const t : {f.t_x, f.n_x, f.m_x}) {
+        EXPECT_TRUE(tv.is_header_tag(t)) << "tag " << t;
+    }
+    std::vector<std::string> unresolved;
+    tag_set const walk = orchestra_header_walk(f.text, unresolved);
+    EXPECT_TRUE(unresolved.empty()) << "the walk met ids it cannot resolve";
+    EXPECT_EQ(disagreements(tv, walk), tag_set{}) << "walk " << render(walk);
+}
+
+// Row (b2-o).
+TEST(HeaderTags102, OrchestraSectionRecordPastTheWrapHoldsItsOwnMember) {
+    auto const& f = w::orch_identity_fixture_text();
+    ASSERT_EQ(f.precondition_failure(), "");
+    auto const& l = orch_identity_102();
+    ASSERT_TRUE(l.tv.has_value()) << "the base did not load: " << l.error;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    auto const& tv = *l.tv;
+    EXPECT_EQ(top_section_members_102(tv, f.n_x), std::vector<std::uint16_t>{f.m_x});
 }
 
 }  // namespace

@@ -334,7 +334,7 @@ struct G_555_5Args {
     ::std::optional<::fixpp::decimal_t> leg_volatility{};
     ::std::optional<::fixpp::decimal_t> leg_dividend_yield{};
     ::std::optional<::fixpp::decimal_t> leg_currency_ratio{};
-    ::std::optional<char> leg_exec_inst{};
+    ::std::optional<::std::string_view> leg_exec_inst{};
     ::std::optional<::fixpp::decimal_t> leg_last_qty{};
     ::std::optional<::std::int64_t> leg_qty_type{};
     ::std::optional<::fixpp::decimal_t> leg_last_multiplied_qty{};

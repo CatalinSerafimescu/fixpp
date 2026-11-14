@@ -16,7 +16,7 @@ namespace fixpp::v50sp2 {
 struct SecurityListUpdateReportArgs {
     ::std::optional<::std::string_view> transact_time{};
     ::std::optional<::std::span<const groups::G_146_5Args>> related_sym{};
-    ::std::optional<char> corporate_action{};
+    ::std::optional<::std::string_view> corporate_action{};
     ::std::optional<::std::string_view> security_req_id{};
     ::std::optional<::std::string_view> security_response_id{};
     ::std::optional<::std::int64_t> tot_no_related_sym{};

@@ -76,6 +76,16 @@ extern "C" {
  * about such a pair follow from it (FR-020 and FR-021 are separate causes). The
  * return code is the same, but the dictionary this call yields carries the pair.
  *
+ * BREAKING (C-ABI 1.16, [const §X.7]; 102-dict-width-multichar-type, fixpp#654): an
+ * Orchestra document whose component, group, componentRef or groupRef ids pass 65535,
+ * up to 2147483647, now returns FIXPP_ERR_OK where it returned
+ * FIXPP_ERR_CAPI_CONFIG_INVALID; an id above 2147483647 is still refused. The return
+ * code is the same, but the dictionary this call yields is corrected for a base of more
+ * than 65,535 components, whose component identities and message expansions through a
+ * componentRef past that point are now their own, and for a base whose group side table
+ * passes UINT16_MAX entries, whose groups' members are now their own. The calls that read
+ * such a dictionary carry C-ABI 1.16 paragraphs in message.h and session.h.
+ *
  * THUNK: construction-time — catches all exceptions thrown by XmlLoader
  * (xml_parse_error / unknown_version_error / xml_oom_error on bad or missing
  * input) and maps them to FIXPP_ERR_CAPI_CONFIG_INVALID; no exception escapes
@@ -102,15 +112,33 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_dict_load_from_xml(const char*     path,
  *  THUNK: construction-time; never on a hot path.
  *  Reentrancy: single-thread.
  *
- *  Returns a code only: fixpp_strerror gives the code's fixed text. The conflicting element or the cap
- *  is named in the C++ exception, not here. Unlike fixpp_dict_load_from_xml, which maps every failure
- *  to FIXPP_ERR_CAPI_CONFIG_INVALID, this function returns the DICT codes below.
+ *  Returns a code only: fixpp_strerror gives the code's fixed text. The conflicting element or
+ *  the cap is named in the C++ exception, not here. Unlike fixpp_dict_load_from_xml, which maps
+ *  every failure to FIXPP_ERR_CAPI_CONFIG_INVALID, this function returns the DICT codes below.
  *
- *  @return FIXPP_ERR_OK                   *out_dict owns a new handle (destroy with fixpp_dict_destroy)
- *  @return FIXPP_ERR_NULL_HANDLE          base_path, overlay_path or out_dict is NULL; *out_dict = NULL
- *                                         when out_dict is not NULL
- *  @return FIXPP_ERR_DICT_LIMIT_EXCEEDED  the load threw fixpp::dict::overlay_limit_error (its causes
- *                                         are listed once, in xml_loader.hpp); *out_dict = NULL
+ *  BREAKING (C-ABI 1.16, [const §X.7]; 102-dict-width-multichar-type, fixpp#654): an overlay
+ *  whose only refusal was a component or group side table that would stop fitting 16 bits now
+ *  returns FIXPP_ERR_OK where it returned FIXPP_ERR_DICT_LIMIT_EXCEEDED; with that fault and a
+ *  fault the guard detects after it (a conflict, a load or build failure after the splice, an
+ *  allocation failure) it returns that fault's code, FIXPP_ERR_DICT_CONFIG or
+ *  FIXPP_ERR_DICT_OOM, where it returned FIXPP_ERR_DICT_LIMIT_EXCEEDED. An Orchestra base or
+ *  overlay whose only refusal was a component, group, componentRef or groupRef id in
+ *  65536..2147483647 now returns FIXPP_ERR_OK where it returned FIXPP_ERR_DICT_CONFIG. Such an
+ *  input whose refusal was a guard the skipped id moved now returns the expansion budget's
+ *  FIXPP_ERR_DICT_LIMIT_EXCEEDED where it returned FIXPP_ERR_DICT_CONFIG; where the
+ *  new-definition cap counted an overlay's restatement of such a base definition as new
+ *  (FIXPP_ERR_DICT_LIMIT_EXCEEDED), the restatement now matches and the load goes on to the
+ *  later guards. The return code is the same, but the dictionary this call yields is corrected
+ *  as fixpp_dict_load_from_xml's C-ABI 1.16 note states, for a base past 65,535 components or
+ *  a group side table past UINT16_MAX entries.
+ *
+ *  @return FIXPP_ERR_OK                   *out_dict owns a new handle (destroy with
+ *                                         fixpp_dict_destroy)
+ *  @return FIXPP_ERR_NULL_HANDLE          base_path, overlay_path or out_dict is NULL;
+ *                                         *out_dict = NULL when out_dict is not NULL
+ *  @return FIXPP_ERR_DICT_LIMIT_EXCEEDED  the load threw fixpp::dict::overlay_limit_error (its
+ *                                         causes are listed once, in xml_loader.hpp);
+ *                                         *out_dict = NULL
  *  @return FIXPP_ERR_DICT_OOM             allocation failed anywhere in the call, including the
  *                                         handle's own allocation; *out_dict = NULL
  *  @return FIXPP_ERR_DICT_CONFIG          any other load or merge failure, an empty or unreadable

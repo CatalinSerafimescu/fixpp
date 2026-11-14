@@ -3466,6 +3466,9 @@ if(TARGET fixpp_codegen_generate)
   # 096-fix-latest-tail-evidence: label 096 (expected-ctest-096.txt), appended after the last
   # LABELS setter for this entry.
   set_property(TEST test_077_allversions_builder_roundtrip APPEND PROPERTY LABELS 096)
+  # 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+  # setter for this entry, so the existing labels survive.
+  set_property(TEST test_077_allversions_builder_roundtrip APPEND PROPERTY LABELS 102)
 
   # vlatest half of T016 -- kept in a SEPARATE TU/executable from the v50sp2
   # one above (not one combined "allversions" TU): compiling both the ~75MB
@@ -3516,6 +3519,9 @@ if(TARGET fixpp_codegen_generate)
     # 096-fix-latest-tail-evidence: label 096 (expected-ctest-096.txt), appended after the last
     # LABELS setter for this entry.
     set_property(TEST test_077_allversions_builder_roundtrip_vlatest APPEND PROPERTY LABELS 096)
+    # 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+    # setter for this entry, so the existing labels survive.
+    set_property(TEST test_077_allversions_builder_roundtrip_vlatest APPEND PROPERTY LABELS 102)
   endif()
 
   # ── 078-precompiled-builder-libs T021 [US1]: byte-identical wire round-trip

@@ -134,7 +134,7 @@ struct QuoteArgs {
     ::std::optional<::fixpp::decimal_t> order_percent{};
     ::std::optional<::std::int64_t> owner_type{};
     ::std::optional<char> order_capacity{};
-    ::std::optional<char> order_restrictions{};
+    ::std::optional<::std::string_view> order_restrictions{};
     ::std::optional<::std::int64_t> quote_type{};
     ::std::optional<::std::string_view> maturity_date{};
     ::std::optional<::std::string_view> instr_registry{};

@@ -788,11 +788,6 @@ struct child_rec {
     vnode target;           // group: the group node; component: its definition, if resolved
 };
 
-struct def_info {
-    std::uint64_t steps = 0;
-    std::uint64_t entries = 0;
-};
-
 // The tags a definition emits at its own level, sorted by tag, each counted to at
 // most two.
 using level_set = std::vector<std::pair<std::uint16_t, std::uint8_t>>;
@@ -845,7 +840,7 @@ enum class colour : std::uint8_t { grey, black };
 // child records and post-order memo, the first-seen group of each NumInGroup tag,
 // and the first cycle met.
 struct graph_walk {
-    std::unordered_map<node_ptr, def_info> memo;
+    std::unordered_map<node_ptr, std::uint64_t> memo;  // each definition's walk steps
     child_map children;              // per definition visited
     std::vector<vnode> visit_order;  // definitions in the order the walk first met them
     std::map<std::uint16_t, vnode> first_seen_groups;
@@ -858,47 +853,41 @@ struct graph_walk {
 // `label(v)` names a definition in a cycle message. A definition already visited
 // is not walked again, which keeps the order of first encounters.
 template <class RecordsOf, class Label>
-def_info visit_definition(graph_walk& r, vnode root, RecordsOf const& records_of,
-                          Label const& label) {
+std::uint64_t visit_definition(graph_walk& r, vnode root, RecordsOf const& records_of,
+                               Label const& label) {
     if (auto const it = r.memo.find(root.key()); it != r.memo.end()) {
         return it->second;
     }
     struct frame {
         vnode v;
         std::size_t next = 0;
-        def_info acc;
+        std::uint64_t steps = 0;
     };
     std::vector<frame> stack;
     auto const open = [&](vnode v) {
         r.colours[v.key()] = colour::grey;
         r.children.emplace(v.key(), records_of(v));
         r.visit_order.push_back(v);
-        stack.push_back({.v = v, .next = 0, .acc = {}});
+        stack.push_back({.v = v, .next = 0, .steps = 0});
     };
     open(root);
     while (!stack.empty()) {
         frame& f = stack.back();
         auto const& kids = r.children.at(f.v.key());
         if (f.next == kids.size()) {
-            def_info const done = f.acc;
+            std::uint64_t const done = f.steps;
             r.memo[f.v.key()] = done;
             r.colours[f.v.key()] = colour::black;
             stack.pop_back();
             if (!stack.empty()) {
                 frame& p = stack.back();
-                p.acc.steps = sat_add(p.acc.steps, done.steps);
-                p.acc.entries = sat_add(p.acc.entries, done.entries);
+                p.steps = sat_add(p.steps, done);
             }
             continue;
         }
         child_rec const& c = kids[f.next++];
-        f.acc.steps = sat_add(f.acc.steps, 1);
-        if (c.k == child_rec::kind::field) {
-            f.acc.entries = sat_add(f.acc.entries, 1);
-            continue;
-        }
+        f.steps = sat_add(f.steps, 1);
         if (c.k == child_rec::kind::group && c.tag != 0) {
-            f.acc.entries = sat_add(f.acc.entries, 1);
             r.first_seen_groups.emplace(c.tag, c.target);
         }
         if (!c.target) {
@@ -925,26 +914,18 @@ def_info visit_definition(graph_walk& r, vnode root, RecordsOf const& records_of
             }
             continue;
         }
-        def_info const& m = r.memo.at(c.target.key());
-        f.acc.steps = sat_add(f.acc.steps, m.steps);
-        f.acc.entries = sat_add(f.acc.entries, m.entries);
+        f.steps = sat_add(f.steps, r.memo.at(c.target.key()));
     }
     return r.memo.at(root.key());
 }
 
-// Side-table fit (research R-5 step 6): every start `finalize` passes to its
-// `std::uint16_t` cast, and every count it clamps, is at most 65535. `counts` are
-// the definitions' entry counts in the order `finalize` assigns their starts.
-[[nodiscard]] bool side_table_fits(std::vector<std::uint64_t> const& counts) noexcept {
-    std::uint64_t start = 0;
-    for (std::uint64_t const n : counts) {
-        if (start > kSideTableMax || n > kSideTableMax) {
-            return false;
-        }
-        start = sat_add(start, n);
-    }
-    return true;
-}
+// 102-dict-width-multichar-type D2 supersedes 098 R-5 step 6's side-table fit. The
+// side-table starts and counts `finalize` writes are `std::uint32_t` (102 D1), a walk
+// step emits at most one side-table entry, and the overlay path arms the build's step
+// counter at no more than the base's total plus `kExpansionBudget`. So an overlay
+// cannot push a start or a count past what `finalize` stores unless the base's own
+// expansion already nears that width, which B86's absolute budget is to bound
+// (L-102-1 (a)). No fit check replaces this one.
 
 // Step 7's level set of definition `root` in a walk's records, memoized per
 // definition; iterative over component edges, a back edge read as a leaf.
@@ -1045,8 +1026,6 @@ struct xml_overlay_merge::impl::walk_result : graph_walk {
     vnode trailer;
     std::vector<vnode> components;  // declaration order
     std::uint64_t total = 0;
-    bool components_fit = true;
-    bool groups_fit = true;
 };
 
 xml_overlay_merge::impl::walk_result xml_overlay_merge::impl::walk(bool merged) const {
@@ -1164,28 +1143,20 @@ xml_overlay_merge::impl::walk_result xml_overlay_merge::impl::walk(bool merged) 
     std::uint64_t total = 0;
     for (auto const& [mt, m] : r.messages) {
         if (r.header) {
-            total = sat_add(total, visit(r.header).steps);
+            total = sat_add(total, visit(r.header));
         }
-        total = sat_add(total, visit(m).steps);
+        total = sat_add(total, visit(m));
         if (r.trailer) {
-            total = sat_add(total, visit(r.trailer).steps);
+            total = sat_add(total, visit(r.trailer));
         }
     }
-    std::vector<std::uint64_t> comp_counts;
     for (vnode const c : r.components) {
-        def_info const d = visit(c);
-        total = sat_add(total, d.steps);
-        comp_counts.push_back(d.entries);
+        total = sat_add(total, visit(c));
     }
-    std::vector<std::uint64_t> group_counts;
     for (auto const& [tag, g] : r.first_seen_groups) {
-        def_info const d = visit(g);
-        total = sat_add(total, d.steps);
-        group_counts.push_back(d.entries);
+        total = sat_add(total, visit(g));
     }
     r.total = total;
-    r.components_fit = side_table_fits(comp_counts);
-    r.groups_fit = side_table_fits(group_counts);
     return r;
 }
 
@@ -1399,10 +1370,6 @@ std::uint64_t xml_overlay_merge::guard(overlay_trace& trace) {
     g.base_total = base.total;
     g.merged_total = merged.total;
     g.arm_limit = std::min(merged.total, sat_add(base.total, kExpansionBudget));
-    g.base_components_fit = base.components_fit;
-    g.base_groups_fit = base.groups_fit;
-    g.merged_components_fit = merged.components_fit;
-    g.merged_groups_fit = merged.groups_fit;
     trace.guards = g;
     if (merged.cycle) {
         throw xml_parse_error("dict::xml_parse_error: component reference cycle: " + *merged.cycle);
@@ -1411,18 +1378,6 @@ std::uint64_t xml_overlay_merge::guard(overlay_trace& trace) {
         trace.origin = refusal_origin::budget;
         limit("the overlay adds more expansion steps than the expansion budget of " +
               std::to_string(kExpansionBudget));
-    }
-    if (base.components_fit && !merged.components_fit) {
-        trace.origin = refusal_origin::side_table;
-        limit(
-            "the components side table would stop fitting 16 bits (a start or a count "
-            "above 65535)");
-    }
-    if (base.groups_fit && !merged.groups_fit) {
-        trace.origin = refusal_origin::side_table;
-        limit(
-            "the groups side table would stop fitting 16 bits (a start or a count above "
-            "65535)");
     }
 
     m.check_conflicts(merged, base);  // step 7
@@ -1466,15 +1421,24 @@ constexpr std::string_view kOrchContainers[] = {"fixr:codeSets", "fixr:fields", 
     return k == "fixr:fieldRef" || k == "fixr:componentRef" || k == "fixr:groupRef";
 }
 
+// 102-dict-width-multichar-type D1b: a `fixr:field` id is a FIX tag; a
+// `fixr:component` or `fixr:group` id is a surrogate id, read in its own domain.
 [[nodiscard]] std::optional<std::string> orch_id_key_of(pugi::xml_node c, std::string_view kind) {
     if (name_of(c) != kind) {
         return std::nullopt;
     }
-    std::uint16_t id = 0;
-    if (!try_parse_uint16(c.attribute("id").as_string(""), id)) {
+    if (kind == "fixr:field") {
+        std::uint16_t tag = 0;
+        if (!try_parse_uint16(c.attribute("id").as_string(""), tag)) {
+            return std::nullopt;
+        }
+        return std::to_string(tag);
+    }
+    orch_ref_id id{};
+    if (!try_parse_orch_ref_id(c.attribute("id").as_string(""), id)) {
         return std::nullopt;
     }
-    return std::to_string(id);
+    return std::to_string(std::to_underlying(id));
 }
 
 [[nodiscard]] std::optional<std::string> orch_attr_key_of(pugi::xml_node c, std::string_view kind,
@@ -1520,14 +1484,23 @@ constexpr std::string_view kOrchContainers[] = {"fixr:codeSets", "fixr:fields", 
 }
 
 [[nodiscard]] std::optional<std::string> orch_child_key(pugi::xml_node c) {
-    if (!is_orch_ref(name_of(c))) {
+    std::string_view const k = name_of(c);
+    if (!is_orch_ref(k)) {
         return std::nullopt;
     }
-    std::uint16_t id = 0;
-    if (!try_parse_uint16(c.attribute("id").as_string(""), id)) {
+    // 102 D1b: a fieldRef's id is a tag; a componentRef's or groupRef's a surrogate id.
+    if (k == "fixr:fieldRef") {
+        std::uint16_t tag = 0;
+        if (!try_parse_uint16(c.attribute("id").as_string(""), tag)) {
+            return std::nullopt;
+        }
+        return std::string{k} + "|" + std::to_string(tag);
+    }
+    orch_ref_id id{};
+    if (!try_parse_orch_ref_id(c.attribute("id").as_string(""), id)) {
         return std::nullopt;
     }
-    return std::string{name_of(c)} + "|" + std::to_string(id);
+    return std::string{k} + "|" + std::to_string(std::to_underlying(id));
 }
 
 [[nodiscard]] std::optional<std::string> orch_code_key(pugi::xml_node c) {
@@ -1901,8 +1874,6 @@ struct orchestra_overlay_merge::impl::walk_result : graph_walk {
     std::vector<std::pair<std::string, vnode>> messages;  // msgType, structure; sorted
     std::vector<vnode> components;                        // declaration order
     std::uint64_t total = 0;
-    bool components_fit = true;
-    bool groups_fit = true;
 };
 
 orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(bool merged) const {
@@ -1953,11 +1924,11 @@ orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(b
         return out;
     };
 
-    // Declared field ids; component and group definitions by id, the first of an id
-    // winning (the loader refuses a repeated one).
+    // Declared field ids (tags); component and group definitions by surrogate id
+    // (102 D1b), the first of an id winning (the loader refuses a repeated one).
     std::unordered_set<std::uint16_t> declared;
-    std::unordered_map<std::uint16_t, vnode> component_by_id;
-    std::unordered_map<std::uint16_t, vnode> group_by_id;
+    std::unordered_map<orch_ref_id, vnode> component_by_id;
+    std::unordered_map<orch_ref_id, vnode> group_by_id;
     auto const each_def = [&](char const* cname, std::string_view kind, auto&& fn) {
         if (vnode const cont = container(cname)) {
             children_of(cont, [&](vnode d) {
@@ -1975,12 +1946,12 @@ orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(b
     });
     each_def("fixr:components", "fixr:component", [&](vnode d, pugi::xml_node n) {
         r.components.push_back(d);
-        if (std::uint16_t id = 0; try_parse_uint16(n.attribute("id").as_string(""), id)) {
+        if (orch_ref_id id{}; try_parse_orch_ref_id(n.attribute("id").as_string(""), id)) {
             component_by_id.emplace(id, d);
         }
     });
     each_def("fixr:groups", "fixr:group", [&](vnode d, pugi::xml_node n) {
-        if (std::uint16_t id = 0; try_parse_uint16(n.attribute("id").as_string(""), id)) {
+        if (orch_ref_id id{}; try_parse_orch_ref_id(n.attribute("id").as_string(""), id)) {
             group_by_id.emplace(id, d);
         }
     });
@@ -2013,14 +1984,16 @@ orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(b
             pugi::xml_node const n = c.node();
             child_rec rec;
             std::string_view const k = n.type() == pugi::node_element ? name_of(n) : "";
-            std::uint16_t id = 0;
-            bool const has_id = try_parse_uint16(n.attribute("id").as_string(""), id);
+            // 102 D1b: a fieldRef's id is a tag; a groupRef's or componentRef's a
+            // surrogate id.
+            char const* const id_text = n.attribute("id").as_string("");
             if (k == "fixr:fieldRef") {
                 rec.k = child_rec::kind::field;
-                rec.tag = has_id && declared.contains(id) ? id : 0;
+                std::uint16_t tag = 0;
+                rec.tag = try_parse_uint16(id_text, tag) && declared.contains(tag) ? tag : 0;
             } else if (k == "fixr:groupRef") {
                 rec.k = child_rec::kind::group;
-                if (has_id) {
+                if (orch_ref_id id{}; try_parse_orch_ref_id(id_text, id)) {
                     if (auto const it = group_by_id.find(id); it != group_by_id.end()) {
                         rec.tag = group_tag(it->second);
                         if (rec.tag != 0) {
@@ -2030,7 +2003,7 @@ orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(b
                 }
             } else if (k == "fixr:componentRef") {
                 rec.k = child_rec::kind::component;
-                if (has_id) {
+                if (orch_ref_id id{}; try_parse_orch_ref_id(id_text, id)) {
                     if (auto const it = component_by_id.find(id); it != component_by_id.end()) {
                         rec.target = it->second;
                     }
@@ -2051,24 +2024,16 @@ orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(b
     std::uint64_t total = 0;
     for (auto const& [mt, s] : r.messages) {
         if (s) {
-            total = sat_add(total, visit(s).steps);
+            total = sat_add(total, visit(s));
         }
     }
-    std::vector<std::uint64_t> comp_counts;
     for (vnode const c : r.components) {
-        def_info const d = visit(c);
-        total = sat_add(total, d.steps);
-        comp_counts.push_back(d.entries);
+        total = sat_add(total, visit(c));
     }
-    std::vector<std::uint64_t> group_counts;
     for (auto const& [tag, g] : r.first_seen_groups) {
-        def_info const d = visit(g);
-        total = sat_add(total, d.steps);
-        group_counts.push_back(d.entries);
+        total = sat_add(total, visit(g));
     }
     r.total = total;
-    r.components_fit = side_table_fits(comp_counts);
-    r.groups_fit = side_table_fits(group_counts);
     return r;
 }
 
@@ -2296,10 +2261,6 @@ std::uint64_t orchestra_overlay_merge::guard(overlay_trace& trace) {
     g.base_total = base.total;
     g.merged_total = merged.total;
     g.arm_limit = std::min(merged.total, sat_add(base.total, kExpansionBudget));
-    g.base_components_fit = base.components_fit;
-    g.base_groups_fit = base.groups_fit;
-    g.merged_components_fit = merged.components_fit;
-    g.merged_groups_fit = merged.groups_fit;
     trace.guards = g;
     if (merged.cycle) {
         throw orchestra_parse_error("dict::orchestra_parse_error: component reference cycle: " +
@@ -2309,18 +2270,6 @@ std::uint64_t orchestra_overlay_merge::guard(overlay_trace& trace) {
         trace.origin = refusal_origin::budget;
         limit("the overlay adds more expansion steps than the expansion budget of " +
               std::to_string(kExpansionBudget));
-    }
-    if (base.components_fit && !merged.components_fit) {
-        trace.origin = refusal_origin::side_table;
-        limit(
-            "the components side table would stop fitting 16 bits (a start or a count "
-            "above 65535)");
-    }
-    if (base.groups_fit && !merged.groups_fit) {
-        trace.origin = refusal_origin::side_table;
-        limit(
-            "the groups side table would stop fitting 16 bits (a start or a count above "
-            "65535)");
     }
 
     m.check_conflicts(merged, base);  // step 7

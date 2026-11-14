@@ -43,6 +43,7 @@
 #include <vector>
 
 #include "dictionary_internal.hpp"  // detail::SectionWalk
+#include "support/dict_width_fixtures_102.hpp"
 #include "support/divergent_dicts_100.hpp"
 #include "support/table_view_test_access.hpp"
 
@@ -231,8 +232,12 @@ struct orch_source {
             }
         }
     }
+    // The cycle stack holds (kind, id), 'c' for a component and 'g' for a group: a
+    // component id and a group id are separate surrogate domains, each reaching the
+    // schema's `fixr:id_t` bound (102 D1b), so no offset keeps their keys apart.
+    using cycle_key = std::pair<char, unsigned>;
     void walk_occ(pugi::xml_node node, path_t& path, char section, std::vector<occurrence>& out,
-                  std::vector<unsigned>& stack) const {
+                  std::vector<cycle_key>& stack) const {
         for (auto const& ch : node.children()) {
             std::string_view const kind{ch.name()};
             if (kind == "fixr:groupRef") {
@@ -240,7 +245,7 @@ struct orch_source {
                 if (!t) {
                     continue;
                 }
-                unsigned const gid = 0x10000U + ch.attribute("id").as_uint();
+                cycle_key const gid{'g', ch.attribute("id").as_uint()};
                 if (std::ranges::find(stack, gid) != stack.end()) {
                     continue;
                 }
@@ -257,13 +262,14 @@ struct orch_source {
             } else if (kind == "fixr:componentRef") {
                 unsigned const id = ch.attribute("id").as_uint();
                 auto const it = components.find(id);
-                if (it == components.end() || std::ranges::find(stack, id) != stack.end()) {
+                if (it == components.end() ||
+                    std::ranges::find(stack, cycle_key{'c', id}) != stack.end()) {
                     continue;
                 }
                 // Inside a message's structure, the header and trailer components set the
                 // occurrence's section.
                 char const sec = id == 1024U ? 'H' : id == 1025U ? 'T' : section;
-                stack.push_back(id);
+                stack.emplace_back('c', id);
                 walk_occ(it->second, path, sec, out, stack);
                 stack.pop_back();
             }
@@ -289,7 +295,7 @@ oracle orch_oracle(std::string const& text) {
         std::string const mt = m.attribute("msgType").as_string("");
         o.msg_types.push_back(mt);
         path_t path;
-        std::vector<unsigned> stack;
+        std::vector<orch_source::cycle_key> stack;
         src.walk_occ(m.child("fixr:structure"), path, 'B', o.per_msg[mt], stack);
     }
     for (unsigned const id : {1024U, 1025U}) {
@@ -298,7 +304,7 @@ oracle orch_oracle(std::string const& text) {
             continue;
         }
         path_t path;
-        std::vector<unsigned> stack{id};
+        std::vector<orch_source::cycle_key> stack{{'c', id}};
         src.walk_occ(it->second, path, id == 1024U ? 'H' : 'T', o.sections, stack);
     }
     for (auto const& [mt, occs] : o.per_msg) {
@@ -996,6 +1002,50 @@ TEST(RegistrationRecords100, DelimCapture_MemberLevels_EachRunHoldsItsOwnLevel) 
     EXPECT_EQ(empty_outer.count, 0U);
     EXPECT_EQ(cap.member_pool.size(), want_inner.size() + want_outer.size() + want_reopened.size())
         << "a tag emitted with no level open is captured nowhere";
+}
+
+// ── 102-dict-width-multichar-type (tasks T015b; research D1b; spec FR-001b) ─────────────────
+// `orch_oracle`, with no loader, over tests/support/dict_width_fixtures_102.hpp's generator
+// (e): a group G referenced from a component whose id is 0x10000 + G's id, the component
+// referenced from message M. G's occurrence at path {} must hold G's NumInGroup tag and its
+// members: a cycle key that puts a component id and a group id in one domain (a group id offset
+// by 0x10000) mistakes G for the enclosing component. The control twin gives the component the
+// id 0x10000 + G's id + 1.
+
+void expect_top_occurrence_102(bool colliding) {
+    auto const f = fixpp::test102::width::make_oracle_collision_fixture(colliding);
+    ASSERT_EQ(f.precondition_failure(colliding), "");
+    oracle const o = orch_oracle(f.text);
+    auto const it = o.per_msg.find(f.msg_type);
+    ASSERT_NE(it, o.per_msg.end()) << "the oracle saw no message " << f.msg_type;
+    std::set<tag_t> const want(f.members.begin(), f.members.end());
+    bool found = false;
+    for (auto const& oc : it->second) {
+        if (oc.path.empty() && oc.no_tag == f.no_tag) {
+            found = true;
+            EXPECT_EQ(oc.def.member_set(), want);
+        }
+    }
+    EXPECT_TRUE(found) << "the oracle has no occurrence of NumInGroup " << f.no_tag
+                       << " at path {} (component id " << f.component_id << ", group id "
+                       << f.group_id << ")";
+}
+
+TEST(RegistrationRecords102, OrchOracleKeepsAGroupWhoseIdPlus0x10000IsAComponentsId) {
+    expect_top_occurrence_102(true);
+}
+
+TEST(RegistrationRecords102, OrchOracleControlTwinWithNoIdCollision) {
+    expect_top_occurrence_102(false);
+}
+
+// tasks T034a: the loader against the oracle over the same document, in the form of
+// `sweep_divergent_orch`. The document loads once surrogate ids are read in the schema's
+// domain (102 D1b).
+TEST(RegistrationRecords100, Sweep_IdCollision102_Orchestra) {
+    auto const f = fixpp::test102::width::make_oracle_collision_fixture(true);
+    ASSERT_EQ(f.precondition_failure(true), "");
+    sweep_divergent_orch("(102 component id 0x10000 + a group id)", f.text);
 }
 
 }  // namespace

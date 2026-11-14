@@ -125,14 +125,39 @@ typedef struct fixpp_resolved_msg_version {
  * a pair can absorb fields these readers used to return: a getter that returned
  * FIXPP_ERR_OK can now return FIXPP_ERR_TAG_NOT_FOUND, and fixpp_msg_get_group
  * can report a changed instance count; fixpp_msg_field_at can go out of range;
- * fixpp_msg_has_tag and fixpp_msg_field_count change value; fixpp_msg_version's
- * kind, read from 35, says application when 35 is absorbed (tag 8 is fixed first
- * by the Framer and cannot be); fixpp_msg_get_msg_type can return FIXPP_ERR_TAG_NOT_FOUND
- * when such a pair precedes 35, which is reachable while the session's
- * validate_inbound_messages is unset, since that header-order check is the only
- * rule placing 35 third. To re-derive whether a C-ABI session can set it, grep
- * validate_inbound_messages in src/capi, and read its default in
- * include/fixpp/session/session_config.hpp.
+ * fixpp_msg_has_tag and fixpp_msg_field_count change value. At 1.9 a pair that
+ * preceded 35 could also absorb it, moving fixpp_msg_version's kind and making
+ * fixpp_msg_get_msg_type return FIXPP_ERR_TAG_NOT_FOUND. Since C-ABI 1.11 (093) no
+ * pair can precede 35 on these views (corrected here by 102): every inbound state
+ * disregards as garbled a frame whose third field is not MsgType(35), before
+ * validation; the toApp view reads a frame the session built with 35 third; a clone
+ * re-parses a view's own bytes. So fixpp_msg_get_msg_type and fixpp_msg_version's
+ * kind read a field no pair can move. To re-derive, grep msg_type_is_third in
+ * src/session/session.cpp: each inbound arm tests it on the frame's header scan,
+ * before the frame is parsed for a view.
+ *
+ * BREAKING (C-ABI 1.16, [const §X.7]; 102-dict-width-multichar-type, fixpp#654):
+ * over a dictionary of more than 65,535 components, or one whose group side table
+ * passes UINT16_MAX entries (dict.h's C-ABI 1.16 notes), these calls answer from the
+ * corrected dictionary. The readers this file's 1.9 paragraph lists, except
+ * fixpp_msg_get_msg_type (35 is the third field, as that paragraph states), on the
+ * inbound, clone and toApp views: the session table's group contexts, delimiters
+ * and Length+Data pairs change, so a getter can trade FIXPP_ERR_OK and
+ * FIXPP_ERR_TAG_NOT_FOUND, fixpp_msg_has_tag and fixpp_msg_field_count can change
+ * value, fixpp_msg_field_at can go out of range, and fixpp_msg_get_group,
+ * fixpp_group_get_field_{string,int,double,decimal} and
+ * fixpp_group_get_nested_group can report other instances or members.
+ * fixpp_msg_version on a FIXT.1.1 message: its application is the version the
+ * session resolved from the frame's route, which a header walk over the corrected
+ * header store and pairs selects, so it can change; its kind and session cannot.
+ * fixpp_msg_clone's return code is unchanged; its clone reads as these readers.
+ * The writers: fixpp_msg_set_{string,int,double,decimal} and fixpp_msg_set_data
+ * check the message's field rule, so FIXPP_ERR_OK, FIXPP_ERR_DICT_CONFIG and
+ * FIXPP_ERR_TYPE_MISMATCH can trade places; fixpp_msg_set_bytes,
+ * fixpp_msg_set_data, fixpp_msg_group_begin, fixpp_entry_group_begin and
+ * fixpp_entry_set_{string,int,double,decimal,data} check a group's first field and
+ * the Length+Data pairs; and fixpp_msg_commit's group-grammar and pair checks can
+ * trade FIXPP_ERR_OK with a refusal.
  *
  * Returned-pointer lifetime is HANDLE-FLAVOUR dependent: for an inbound / toApp
  * handle the aliases are valid ONLY within the receive/send callback (dispatch)

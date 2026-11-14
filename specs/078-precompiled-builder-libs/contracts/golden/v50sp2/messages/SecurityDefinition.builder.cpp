@@ -12572,7 +12572,7 @@ namespace fixpp::v50sp2 {
             if (!en230) return ::std::unexpected(en230.error());
             auto& eh230 = *en230;
     if (item230.exec_inst_value) {
-        auto r = eh230.set_char(1308, *item230.exec_inst_value);
+        auto r = eh230.set_string(1308, *item230.exec_inst_value);
         if (!r) return ::std::unexpected(r.error());
     }
         }

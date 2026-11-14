@@ -110,6 +110,44 @@ condition assumed:
   cannot reset it. Sampling around `ctest` needs no such concession — but it also
   means the new figures are **not** comparable to a cgroup one, had any existed.
 
+#### RE-RECORD — fixpp#675 (2026-11-14): every pinned lane, from one push to `main`, plus this branch's three entries
+
+Every lane had rendered `DIAGNOSTIC ONLY` on `main`: the executed counts had moved past the pins as
+ctest entries were added after the #561 re-record below. This is also 101's T074 re-record (orchestrator ruling R4),
+batched here.
+
+**Basis:** the three workflow runs of one `push` to `main` at `e3ae461f` (101's squash), all created
+2026-11-13: Tier 1 run `43486627919` (success), Tier 3 libc++ run `43486626881` and Tier 2 Windows run
+`43486626839` (each failure only on `dictionary_pure_tests`' timeout, fixpp#675; ctest counts a test that
+timed out in its total, so the count is the registered workload). **Method:** as the #561 section below:
+on Linux the `ran:` value of the lane's `ci/peak-memory-report.sh` line, cross-checked against ctest's
+`… out of <N>` for the step it sampled; on Windows the `out of <N>` of the lane's suite step.
+
+**Plus this branch's registrations:** fixpp#675 adds three ctest entries, `dictionary_100_tests`,
+`dictionary_101_tests` and `dictionary_collision_guards_tests`, registered unconditionally in tests/dictionary/CMakeLists.txt beside
+`dictionary_pure_tests`, which every lane runs (re-check: grep each job log for
+`Test #…: dictionary_pure_tests`). So each pin is the CI reading plus 3. Re-check that the branch adds
+exactly those registrations and removes none:
+`git diff origin/main HEAD -- '*CMakeLists.txt' '*.cmake' | grep -E '^[+-].*(add_test|gtest_discover_tests|fixpp_add_[a-z_]*test|add_dictionary_feature_bucket)'`.
+Per this document's rule, confirm each lane on the first run after this lands, by reading its count.
+
+| lane | was | CI read at `e3ae461f` | now | log line |
+|---|---:|---:|---:|---|
+| `linux-clang-debug` | 486 | 508 | **511** | `[ran: 508/486]`; `100% tests passed, 0 tests failed out of 508` |
+| `linux-clang-release` | 519 | 549 | **552** | `[ran: 549/519]`; `100% tests passed, 0 tests failed out of 549` |
+| `linux-clang-asan` | 483 | 509 | **512** | `[ran: 509/483]`; `100% tests passed, 0 tests failed out of 509` |
+| `linux-clang-ubsan` | 455 | 477 | **480** | `[ran: 477/455]`; `100% tests passed, 0 tests failed out of 477` |
+| `linux-clang-tsan` | 455 | 477 | **480** | `[ran: 477/455]`; `100% tests passed, 0 tests failed out of 477` |
+| `linux-gcc-release` | 527 | 557 | **560** | `[ran: 557/527]`; `100% tests passed, 0 tests failed out of 557` |
+| `linux-clang-coverage` | 493 | 515 | **518** | `[ran: 515/493]`; `100% tests passed, 0 tests failed out of 515` |
+| `linux-clang-libc++` | 481 | 503 | **506** | `[ran: 503/481]`; `100% tests passed, 0 tests failed out of 503` |
+| `linux-clang-libc++-asan` | 450 | 472 | **475** | `[ran: 472/450]`; `100% tests passed, 0 tests failed out of 472` |
+| `linux-clang-libc++-ubsan` | 450 | 472 | **475** | `[ran: 472/450]`; `100% tests passed, 0 tests failed out of 472` |
+| `linux-clang-libc++-tsan` | 450 | 472 | **475** | `[ran: 472/450]`; `… 1 tests failed out of 472` (the `dictionary_pure_tests` timeout, fixpp#675) |
+| `windows-msvc-debug` | 411 | 433 | **436** | step `ctest --preset windows-msvc-debug --output-on-failure -LE packaging --timeout 1800`: `100% tests passed, 0 tests failed out of 433` |
+| `windows-msvc-release` | 419 | 441 | **444** | step `ctest --preset windows-msvc-release --output-on-failure --timeout 1800`: `100% tests passed, 0 tests failed out of 441` |
+| `windows-msvc-asan` | 410 | 432 | **435** | step `ctest --preset windows-msvc-asan --output-on-failure -LE packaging --timeout 1800`: `99% tests passed, 1 tests failed out of 432` (the `dictionary_pure_tests` timeout, fixpp#675) |
+
 #### RE-RECORD — #561 (2026-10-22): every pinned lane, from one push to `main`
 
 Every Tier 1 lane had rendered `DIAGNOSTIC ONLY` on `main` since at least run `37749128892`

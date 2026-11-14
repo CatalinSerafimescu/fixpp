@@ -44,7 +44,7 @@ namespace fixpp::v50sp2 {
 
 struct CrossOrderCancelReplaceRequestArgs {
     ::std::optional<::std::string_view> currency{};
-    ::std::optional<char> exec_inst{};
+    ::std::optional<::std::string_view> exec_inst{};
     ::std::optional<char> handl_inst{};
     ::std::optional<::std::string_view> security_id_source{};
     ::std::optional<::std::string_view> ioiid{};

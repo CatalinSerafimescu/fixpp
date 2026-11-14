@@ -74,6 +74,28 @@
 # must be that line with `r.alloc_failed}` replaced by `r.status}`. vt11 has no nested
 # group accessor, so its hash does not move.
 #
+# 102-dict-width-multichar-type (research D1, D5) intentionally rebaselines all FOUR
+# Fields.hpp hashes (v42/v44/v50sp2/vt11): `FieldRef::_reserved` is removed, so
+# `emit_field_ref` no longer writes the trailing `, 0` initializer of each row.
+# Re-derive that this is the only change: generate the read tier with the codegen
+# of the commit before 102's layout change and with this one; in the older
+# `Fields.hpp`, rewrite every `FieldRef` row's trailing `, 0 },` to ` },`; the
+# result must `cmp` equal to the newer file. Messages/Reify/Validator.hpp carry
+# no `FieldRef` row, so their hashes do not move with it. To chain an earlier
+# banner's Fields.hpp recipe (091's v50sp2) onto a file regenerated after 102,
+# first restore each row's trailing `, 0` (rewrite ` },` back to `, 0 },`).
+#
+# 102-dict-width-multichar-type (research D3, D5) also rebaselines v50sp2/Messages.hpp
+# and v50sp2/Reify.hpp: a MultiCharValue field (the FIX50SP2 fields typed
+# MULTIPLECHARVALUE) takes the string kind, so its view and owning accessors return
+# `expected_t<::std::string_view>` and are `[[clang::lifetimebound]]`. Re-derive that this
+# is the only change: generate the read tier with the codegen of the commit before 102's
+# kind change and with this one, and diff the two files with `--unified=0`: every
+# changed line must be an accessor's return type, its name line gaining
+# `[[clang::lifetimebound]]`, or its `decode_field<char>` becoming
+# `decode_field<::std::string_view>` over one of those fields' tags. The Messages.hpp
+# value equals the sha256 of the regenerated 003 golden (the 100 banner's condition).
+#
 # Which baseline each artifact is gated against is named by the banners above
 # and the 082 banner below; see the 091 banner for the v50sp2 pins. A mismatch
 # on any artifact, against its own baseline, is a real read-tier regression
@@ -119,7 +141,7 @@ endif()
 
 # ── Pre-077 baseline (T001, HEAD 455737c3) ─────────────────────────────────
 
-set(_expected_v42_Fields.hpp     c8bb64b1be70acdfae7e8efcfeba8c512b19910ed9987eb2a2d62257c48757e5)
+set(_expected_v42_Fields.hpp     4f886b9bf0b4691e9419d8536c1c5e80c0cd17224a77032e2e1af4d8c0f8b4ab)  # 102 (banner)
 # ── 082-structural-group-detection T026/T028: the two v42 READ-TIER artifacts
 # below are RE-BASELINED (2026-08-12). The T001 values were correct under 077's
 # premise, stated in the banner above, that "077 touches ONLY emit_builders.cpp".
@@ -147,15 +169,15 @@ set(_expected_v42_Fields.hpp     c8bb64b1be70acdfae7e8efcfeba8c512b19910ed9987eb
 set(_expected_v42_Messages.hpp   a7dffb7e39d8771d02a2dae4965062a1f90ba8d4903c48e74c253e7f3ff4703e)  # 100 (banner)
 set(_expected_v42_Reify.hpp      4c546c831bd0863a6a43dc0e8e958de72a280b033c918792d473a4c858082b1b)
 set(_expected_v42_Validator.hpp  b5d39106b4cc81eafd32ab65998d109b3bff1ae8198920634869f5765e88f096)
-set(_expected_v44_Fields.hpp     e39f240770bc4115c80fc425da35ebb20619502fe633bb3b62dcd44322be5fcb)
+set(_expected_v44_Fields.hpp     c1ad44a3beb70bace1575da0b2de9582ddf42902bc69f54c7322932f699bc265)  # 102 (banner)
 set(_expected_v44_Messages.hpp   f47f36cccb6232a1577547699de7052c3c1b3465be8ae5c1d9582c776febd9b0)  # 100 (banner)
 set(_expected_v44_Reify.hpp      98eb06542f2dbfb8e424b502a6d077959a34f61e49be4b03f411e73e75825196)
 set(_expected_v44_Validator.hpp  ad49a4ec2d2441e6d15181b48fa42ab30d9a2226d41476bfdd9007f5d942e9c0)
-set(_expected_v50sp2_Fields.hpp    c8b224285b5617b8a29ec8c79fa5478ee9de6e6910cae37dd2fa43a10e66bd9c)  # 091 (banner)
-set(_expected_v50sp2_Messages.hpp  954ae63e397745d5a58a537ef17485a6bc5317ff930c337ff3c0520f8646fe72)  # 100 (banner)
-set(_expected_v50sp2_Reify.hpp     c73e5253cfe5617565df979eeb71d8b5bd5e62a9b2e379b4f8a7f2a350f6cd36)
+set(_expected_v50sp2_Fields.hpp    9a80508fdbdc422ee6c8d1dd4ef732c7f185608bc599f984909846b0ef254105)  # 102 (banner)
+set(_expected_v50sp2_Messages.hpp  267506023314b43359097a9c4e59f020533e6a8d001edfd06f259fffb68ea92c)  # 100 (banner); 102 (banner)
+set(_expected_v50sp2_Reify.hpp     da8b4145e13d4ed0c72d6f50b06789f0e75e7a891a6d17ae23d77d9b3e8379f5)  # 102 (banner)
 set(_expected_v50sp2_Validator.hpp c68b15b6c075c271144f7a5b725237bac211880e88a91575708eb99ae90c0c9f)  # 091 (banner)
-set(_expected_vt11_Fields.hpp    bb3b72ac99d067fc560bea7edeccd286ce952b758fe5735e7f88c2c259384292)  # 099 (banner)
+set(_expected_vt11_Fields.hpp    84ae8fb7ea37882d53440b33bae27a07479606094128fc6e391c16903dedc20b)  # 102 (banner)
 set(_expected_vt11_Messages.hpp  3b1845e06e62eedd6cb75b57c785ae6f7ac6851c4777206939b2f9430d87e2c3)  # 099 (banner)
 set(_expected_vt11_Reify.hpp     4ba3573ad33faa5bbc93679c9642bf41ccb0ccf558d6e534502c90e5c692c13e)  # 099 (banner)
 set(_expected_vt11_Validator.hpp f15e54c71135ddb812422fdf98473a5c36873eef11c44b8333826f6f5e870730)  # 099 (banner)

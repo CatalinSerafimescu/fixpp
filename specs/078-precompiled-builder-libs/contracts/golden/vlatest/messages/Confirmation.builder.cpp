@@ -12700,7 +12700,7 @@ namespace fixpp::vlatest {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item233.order_restrictions) {
-        auto r = eh233.set_char(529, *item233.order_restrictions);
+        auto r = eh233.set_string(529, *item233.order_restrictions);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item233.order_capacity_qty) {

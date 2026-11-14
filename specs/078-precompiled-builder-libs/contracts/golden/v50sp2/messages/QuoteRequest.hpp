@@ -22,7 +22,7 @@ struct QuoteRequestArgs {
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> compliance_id{};
     ::std::optional<char> order_capacity{};
-    ::std::optional<char> order_restrictions{};
+    ::std::optional<::std::string_view> order_restrictions{};
     ::std::optional<::std::string_view> rfq_req_id{};
     ::std::optional<::std::int64_t> booking_type{};
     ::std::optional<bool> pre_trade_anonymity{};

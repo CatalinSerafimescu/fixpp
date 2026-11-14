@@ -73,7 +73,7 @@ MsgFieldsRun dict_metadata_handle::find_msg_required(std::string_view msg_type) 
 FieldRef dict_metadata_handle::field_ref_impl(std::string_view msg_type,
                                               std::uint16_t tag) const noexcept {
     auto const run = find_msg_fields(msg_type);
-    if (run.count == 0) {
+    if (run.count == 0 || !run_fits(run.start, run.count, fields_.size())) {
         return FieldRef{};
     }
     const auto* const begin = fields_.data() + run.start;
@@ -89,7 +89,7 @@ FieldRef dict_metadata_handle::field_ref_impl(std::string_view msg_type,
 std::span<std::uint16_t const> dict_metadata_handle::required_fields_impl(
     std::string_view msg_type) const noexcept {
     auto const run = find_msg_required(msg_type);
-    if (run.count == 0) {
+    if (run.count == 0 || !run_fits(run.start, run.count, required_fields_pool_.size())) {
         return {};
     }
     return std::span<std::uint16_t const>{required_fields_pool_.data() + run.start, run.count};
@@ -154,12 +154,13 @@ std::optional<GroupRef> dict_metadata_handle::group_impl(std::uint16_t no_tag) c
 }
 
 std::span<FieldRef const> dict_metadata_handle::component_fields_impl(
-    std::uint16_t component_id) const noexcept {
+    std::uint32_t component_id) const noexcept {
     if (component_id >= components_.size()) {
         return {};
     }
     auto const& cr = components_[component_id];
-    if (cr.field_count == 0 || cr.first_field_index + cr.field_count > component_fields_.size()) {
+    if (cr.field_count == 0 ||
+        !run_fits(cr.first_field_index, cr.field_count, component_fields_.size())) {
         return {};
     }
     return std::span<FieldRef const>{component_fields_.data() + cr.first_field_index,
@@ -174,7 +175,8 @@ std::span<FieldRef const> dict_metadata_handle::group_fields_impl(
         return {};
     }
     auto const& gr = *it;
-    if (gr.field_count == 0 || gr.first_field_index + gr.field_count > group_fields_.size()) {
+    if (gr.field_count == 0 ||
+        !run_fits(gr.first_field_index, gr.field_count, group_fields_.size())) {
         return {};
     }
     return std::span<FieldRef const>{group_fields_.data() + gr.first_field_index, gr.field_count};
@@ -196,7 +198,7 @@ std::span<std::uint16_t const> dict_metadata_handle::group_required_members_impl
         return {};
     }
     auto const run = group_required_offsets_[idx];
-    if (run.count == 0 || run.start + run.count > group_required_pool_.size()) {
+    if (run.count == 0 || !run_fits(run.start, run.count, group_required_pool_.size())) {
         return {};
     }
     return std::span<std::uint16_t const>{group_required_pool_.data() + run.start, run.count};
@@ -212,7 +214,7 @@ dict_metadata_handle::msg_group_required_pairs_impl(std::string_view msg_type) c
         return {};
     }
     auto const run = per_msg_group_required_offsets_[idx];
-    if (run.count == 0 || run.start + run.count > msg_group_required_pool_.size()) {
+    if (run.count == 0 || !run_fits(run.start, run.count, msg_group_required_pool_.size())) {
         return {};
     }
     return std::span<std::pair<std::uint16_t, std::uint16_t> const>{
@@ -228,7 +230,7 @@ MsgFieldsRun dict_metadata_handle::msg_group_ctx_delim_run(
         return {};
     }
     auto const run = per_msg_group_ctx_delim_offsets_[idx];
-    if (run.count == 0 || run.start + run.count > group_ctx_delim_pool_.size()) {
+    if (run.count == 0 || !run_fits(run.start, run.count, group_ctx_delim_pool_.size())) {
         return {};
     }
     return run;
@@ -275,7 +277,7 @@ std::span<EnumValueRef const> dict_metadata_handle::enum_values_impl(
         return {};
     }
     auto const& run = *it;
-    if (run.count == 0 || run.start + run.count > enum_values_.size()) {
+    if (run.count == 0 || !run_fits(run.start, run.count, enum_values_.size())) {
         return {};
     }
     return std::span<EnumValueRef const>{enum_values_.data() + run.start, run.count};
@@ -286,7 +288,7 @@ std::span<EnumValueRef const> dict_metadata_handle::enum_values_impl(
 std::span<FieldRef const> dict_metadata_handle::message_fields_impl(
     std::string_view msg_type) const noexcept {
     MsgFieldsRun const run = find_msg_fields(msg_type);
-    if (run.count == 0 || run.start + run.count > fields_.size()) {
+    if (run.count == 0 || !run_fits(run.start, run.count, fields_.size())) {
         return {};
     }
     return std::span<FieldRef const>{fields_.data() + run.start, run.count};

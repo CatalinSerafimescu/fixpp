@@ -53,7 +53,7 @@ struct MultilegOrderCancelReplaceArgs {
     ::std::optional<::fixpp::decimal_t> commission{};
     ::std::optional<char> comm_type{};
     ::std::optional<::std::string_view> currency{};
-    ::std::optional<char> exec_inst{};
+    ::std::optional<::std::string_view> exec_inst{};
     ::std::optional<char> handl_inst{};
     ::std::optional<::std::string_view> security_id_source{};
     ::std::optional<::std::string_view> ioiid{};
@@ -140,7 +140,7 @@ struct MultilegOrderCancelReplaceArgs {
     ::std::optional<::std::int64_t> owner_type{};
     ::std::optional<::std::string_view> secondary_cl_ord_id{};
     ::std::optional<char> order_capacity{};
-    ::std::optional<char> order_restrictions{};
+    ::std::optional<::std::string_view> order_restrictions{};
     ::std::optional<::std::string_view> maturity_date{};
     ::std::optional<::std::string_view> instr_registry{};
     ::std::optional<char> cash_margin{};

@@ -21,7 +21,7 @@ struct MassOrderArgs {
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
     ::std::optional<char> order_capacity{};
-    ::std::optional<char> order_restrictions{};
+    ::std::optional<::std::string_view> order_restrictions{};
     ::std::optional<::std::int64_t> account_type{};
     ::std::optional<::std::int64_t> cust_order_capacity{};
     ::std::optional<::std::int64_t> acct_id_source{};

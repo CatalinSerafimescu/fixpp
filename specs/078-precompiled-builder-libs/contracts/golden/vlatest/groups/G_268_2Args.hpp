@@ -69,14 +69,14 @@ struct G_268_2Args {
     ::std::optional<::std::string_view> md_entry_originator{};
     ::std::optional<::std::string_view> location_id{};
     ::std::optional<::std::string_view> desk_id{};
-    ::std::optional<char> open_close_settl_flag{};
+    ::std::optional<::std::string_view> open_close_settl_flag{};
     ::std::optional<char> time_in_force{};
     ::std::optional<::std::string_view> expire_date{};
     ::std::optional<::std::string_view> expire_time{};
     ::std::optional<::std::int64_t> exposure_duration{};
     ::std::optional<::std::int64_t> exposure_duration_unit{};
     ::std::optional<::fixpp::decimal_t> min_qty{};
-    ::std::optional<char> exec_inst{};
+    ::std::optional<::std::string_view> exec_inst{};
     ::std::optional<::std::int64_t> seller_days{};
     ::std::optional<::std::string_view> order_id{};
     ::std::optional<::std::string_view> secondary_order_id{};
@@ -91,7 +91,7 @@ struct G_268_2Args {
     ::std::optional<::std::int64_t> number_of_orders{};
     ::std::optional<::std::int64_t> number_of_trades{};
     ::std::optional<::std::int64_t> md_entry_position_no{};
-    ::std::optional<char> scope{};
+    ::std::optional<::std::string_view> scope{};
     ::std::optional<::fixpp::decimal_t> price_delta{};
     ::std::optional<::std::int64_t> trd_type{};
     ::std::optional<::std::int64_t> trd_sub_type{};

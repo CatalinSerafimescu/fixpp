@@ -48,16 +48,15 @@ add_executable(dictionary_pure_tests
   required_scope_test.cpp          # fixpp#201: message-level required scope (group leak)
   defect_a_group_context_test.cpp
   reused_tag_census_test.cpp
-  collision_membership_guards_test.cpp
   test_072_delimiter_guard_test.cpp  # 072 US1: load-time nested==parent delimiter guard witness
   oom_injection_test.cpp          # local failing_pmr_resource seam — no global state
   dictionary_snapshot_test.cpp    # fixpp#215 item 1 (Option C): A1-A5 boundary pins + seam 4 alias identity
-  test_101_tag_defined.cpp        # 101 T029: W101-15, table_view::tag_defined
-  test_100_registration_records.cpp  # 100 T028: registration stores, records, D2 sweep
+  test_102_name_offset.cpp         # 102 T010: the name-offset oracle (name pool, src/dictionary)
+  test_102_component_identity.cpp  # 102 T011: XML component identity, overlay crossing
+  test_102_run_readers.cpp         # 102 T018: run readers, hand-built handle (src/dictionary)
 )
 target_link_libraries(dictionary_pure_tests PRIVATE
   fixpp_dictionary
-  fixpp_wire  # 100 T028 reads the stores through dict_hooks::for_table_view (parser.hpp)
   pugixml::pugixml
   GTest::gtest
   GTest::gtest_main
@@ -98,11 +97,12 @@ set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 098)
 # xml_enum_codeset_test.cpp, which stay in this bucket, hold expected values 099 updated.
 set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 099)
 # 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
-# setter for this entry, so the existing labels survive.
+# setter for this entry, so the existing labels survive. loader_disposition_test.cpp, which
+# stays in this bucket, holds cells 100 updated.
 set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 100)
-# 101-inbound-reject-fidelity: label 101 (tasks.md T019). APPEND, after the last LABELS setter
-# for this entry, so the existing labels survive. test_101_tag_defined.cpp joins this bucket.
-set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 101)
+# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 102)
 
 # ── 098-dialect-overlay: the overlay witnesses W-0..W-4 and W-9's status-mapping rows ──
 # Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); a bucket of
@@ -114,6 +114,7 @@ add_executable(dictionary_overlay_tests
   dictionary_equivalence_test.cpp  # 098 W-0: the dictionary comparator's self-test
   overlay_equivalence_test.cpp     # 098 W-1/W-2/W-4: overlay vs the equivalent edited XML
   overlay_refusal_test.cpp         # 098 W-3: the overlay's refusals; W-9's status-mapping rows
+  test_102_overlay_ids.cpp         # 102 T014: Orchestra overlay ids past 65535 (read seam)
 )
 target_link_libraries(dictionary_overlay_tests PRIVATE
   fixpp_dictionary
@@ -133,6 +134,9 @@ target_compile_definitions(dictionary_overlay_tests PRIVATE
   FIXPP_TEST_HOOKS)
 add_test(NAME dictionary_overlay_tests COMMAND dictionary_overlay_tests)
 set_tests_properties(dictionary_overlay_tests PROPERTIES LABELS "dictionary;098")
+# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST dictionary_overlay_tests APPEND PROPERTY LABELS 102)
 
 # ── 099-fixt-appl-version-validation: W-17 and W-21's dictionary half ─────────
 # Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); a bucket of
@@ -161,6 +165,47 @@ target_compile_definitions(dictionary_099_tests PRIVATE
   FIXPP_TEST_HOOKS)
 add_test(NAME dictionary_099_tests COMMAND dictionary_099_tests)
 set_tests_properties(dictionary_099_tests PROPERTIES LABELS "dictionary;099")
+
+# ── fixpp#675: files split out of dictionary_pure_tests, each in an entry of its own ───────
+# Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); out of
+# dictionary_pure_tests only because that entry ran past CI's per-test timeout on the slowest
+# sanitizer lanes with them in it. Compiled as they were inside
+# dictionary_pure_tests: the same link libraries, include directories and definitions.
+# TIMEOUT: each entry's value is at least twice its slowest reading on CI's sanitizer lanes and
+# under CI's `--timeout` guard. Re-derive from a CI log:
+# `grep -E 'Test +#[0-9]+: dictionary_10[01]_tests '`, and for a run that did not finish, the
+# sum of gtest's `[       OK ] <Suite>.<Cell> (N ms)` lines per suite.
+function(add_dictionary_feature_bucket target label timeout)
+  add_executable(${target} ${ARGN})
+  target_link_libraries(${target} PRIVATE
+    fixpp_dictionary
+    fixpp_wire
+    pugixml::pugixml
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(${target} PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_SOURCE_DIR}/src/dictionary")
+  target_compile_definitions(${target} PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+    "FIXPP_ORCHESTRA_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries/orchestra\""
+    FIXPP_TEST_HOOKS)
+  add_test(NAME ${target} COMMAND ${target})
+  set_tests_properties(${target} PROPERTIES LABELS "dictionary;${label}" TIMEOUT ${timeout})
+endfunction()
+# 100 T028: the registration stores, records, D2 sweep. fixpp_wire: the cells read the stores
+# through dict_hooks::for_table_view (parser.hpp).
+add_dictionary_feature_bucket(dictionary_100_tests 100 900 test_100_registration_records.cpp)
+# 102-dict-width-multichar-type: label 102 (tasks.md T004; T015b and T034a edit
+# test_100_registration_records.cpp). APPEND, after the entry's LABELS setter.
+set_property(TEST dictionary_100_tests APPEND PROPERTY LABELS 102)
+# 101 T029: W101-15, table_view::tag_defined.
+add_dictionary_feature_bucket(dictionary_101_tests 101 900 test_101_tag_defined.cpp)
+# 063 T017: the per-collision membership guards. Labels: the ones dictionary_pure_tests carries,
+# so every label selection that reached these cells inside it still does.
+add_dictionary_feature_bucket(dictionary_collision_guards_tests "075;083;091;097;098;099;100" 1650
+  collision_membership_guards_test.cpp)
 
 # ── Standalone: isolation-sensitive dictionary tests (FR-002) ─────────────────
 # Each keeps its own executable + add_test(NAME <target>) so its name, labels,
@@ -259,6 +304,10 @@ target_link_libraries(dictionary_100_record_store_oom_test PRIVATE
 )
 add_test(NAME dictionary_100_record_store_oom_test COMMAND dictionary_100_record_store_oom_test)
 set_tests_properties(dictionary_100_record_store_oom_test PROPERTIES LABELS "100;dictionary")
+# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive. Its source is unchanged: it injects
+# allocation failure into the record stores whose writers 102 changes.
+set_property(TEST dictionary_100_record_store_oom_test APPEND PROPERTY LABELS 102)
 
 # ── 098-dialect-overlay: the overlay splice under a failing pugixml allocator ──
 # Standalone, not in the pure bucket: it installs pugixml's process-global
@@ -330,6 +379,9 @@ set_tests_properties(dictionary_orchestra_tests PROPERTIES LABELS "dictionary;or
 # 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
 # LABELS setter for this entry, so the existing labels survive.
 set_property(TEST dictionary_orchestra_tests APPEND PROPERTY LABELS 097)
+# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST dictionary_orchestra_tests APPEND PROPERTY LABELS 102)
 
 # ── 080-orchestra-runtime-load: dict::load_any shared dispatch helper ───────
 # Grouped whole-binary executable (const §VII.8), LABELS "dictionary;orchestra;080";
@@ -396,6 +448,9 @@ target_compile_definitions(dictionary_098_header_census_test PRIVATE
   "FIXPP_ORCHESTRA_DATA_DIR=\"${FIXPP_ORCHESTRA_DATA_DIR}\"")
 add_test(NAME dictionary_098_header_census_test COMMAND dictionary_098_header_census_test)
 set_tests_properties(dictionary_098_header_census_test PROPERTIES LABELS "dictionary;098;census")
+# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST dictionary_098_header_census_test APPEND PROPERTY LABELS 102)
 
 # ── 079-required-presence-scope T015-T017: required-set census (Contract 1 +
 # 1a) — STANDALONE (const §VII.8) exact-set completeness gate, selected via

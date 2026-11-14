@@ -100,6 +100,7 @@ add_executable(capi_pure_tests
   capi_099_msg_version_test.cpp       # 099 T085: W-10's clone cells
   test_100_group_getters.cpp          # 100 T010/T012: the C group getters' table
   test_100_section_divergent.cpp      # 100 T011: section arm, divergent definitions
+  test_102_dict_load_capi.cpp         # 102 T021a: the loads' C-ABI result classes
 )
 target_link_libraries(capi_pure_tests PRIVATE
   fixpp_capi
@@ -111,6 +112,13 @@ target_include_directories(capi_pure_tests PRIVATE
   ${FIXPP_CAPI_FEATURE_B_INCLUDES}
   "${CMAKE_SOURCE_DIR}/src"   # 099 W-10: session/fixt_route_set.hpp, through the session witnesses' rig
 )
+# 102-dict-width-multichar-type T021a: test_102_dict_load_capi.cpp reads the overlay caps and the
+# expansion budget from src/dictionary/overlay_merge.hpp (already on this entry's include path),
+# which includes pugixml.hpp. The cell uses only the header's constants, so pugixml's include
+# directories are added and nothing is linked.
+find_package(pugixml CONFIG REQUIRED)
+target_include_directories(capi_pure_tests PRIVATE
+  $<TARGET_PROPERTY:pugixml::pugixml,INTERFACE_INCLUDE_DIRECTORIES>)
 target_compile_definitions(capi_pure_tests PRIVATE
   FIXPP_DICT_DATA_DIR="${CMAKE_SOURCE_DIR}/dictionaries"
   FIXPP_ORCHESTRA_DATA_DIR="${CMAKE_SOURCE_DIR}/dictionaries/orchestra"
@@ -147,6 +155,9 @@ set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 099)
 # 100-wire-group-read-integrity: label 100 (tasks.md T003). APPEND, after the last LABELS
 # setter for this entry, so the existing labels survive.
 set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 100)
+# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 102)
 
 # T004 (US1, SC-004) — 051 error-block foundational oracle (translate re-point +
 # strerror + per-code-minor downgrade).  T022 (US5) appends live end-to-end arms

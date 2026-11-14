@@ -5728,7 +5728,7 @@ namespace fixpp::vlatest {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item0.corporate_action) {
-        auto r = eh0.set_char(292, *item0.corporate_action);
+        auto r = eh0.set_string(292, *item0.corporate_action);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item0.delivery_form) {
@@ -12602,7 +12602,7 @@ namespace fixpp::vlatest {
             if (!en233) return ::std::unexpected(en233.error());
             auto& eh233 = *en233;
     if (item233.exec_inst_value) {
-        auto r = eh233.set_char(1308, *item233.exec_inst_value);
+        auto r = eh233.set_string(1308, *item233.exec_inst_value);
         if (!r) return ::std::unexpected(r.error());
     }
         }

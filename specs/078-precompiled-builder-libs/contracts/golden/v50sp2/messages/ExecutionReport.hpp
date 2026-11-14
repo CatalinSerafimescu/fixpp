@@ -74,7 +74,7 @@ struct ExecutionReportArgs {
     ::std::optional<::fixpp::decimal_t> cum_qty{};
     ::std::optional<::std::string_view> currency{};
     ::std::optional<::std::string_view> exec_id{};
-    ::std::optional<char> exec_inst{};
+    ::std::optional<::std::string_view> exec_inst{};
     ::std::optional<::std::string_view> exec_ref_id{};
     ::std::optional<char> handl_inst{};
     ::std::optional<::std::string_view> security_id_source{};
@@ -207,7 +207,7 @@ struct ExecutionReportArgs {
     ::std::optional<::std::string_view> secondary_cl_ord_id{};
     ::std::optional<::std::string_view> secondary_exec_id{};
     ::std::optional<char> order_capacity{};
-    ::std::optional<char> order_restrictions{};
+    ::std::optional<::std::string_view> order_restrictions{};
     ::std::optional<::std::string_view> maturity_date{};
     ::std::optional<::std::string_view> instr_registry{};
     ::std::optional<char> cash_margin{};

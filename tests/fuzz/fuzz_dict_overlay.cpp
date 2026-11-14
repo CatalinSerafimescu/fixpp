@@ -20,8 +20,8 @@
 //     guard stage's model of `finalize` drifted from the build.
 //   - On every input that loads, the step counter must equal step 6's predicted
 //     total, or the harness aborts.
-//   - A refusal from the pre-walk budget or side-table fit is an accepted
-//     `overlay_limit_error`.
+//   - A refusal from the pre-walk budget is an accepted `overlay_limit_error`
+//     (102-dict-width-multichar-type D2 removed the side-table fit).
 //   - Only research R-11's exception set may escape the loader. QuickFIX XML:
 //     `overlay_limit_error`, `overlay_conflict_error`,
 //     `group_delimiter_collision_error`, `xml_parse_error`,
@@ -240,7 +240,7 @@ void accept_xml_refusal(std::exception_ptr const& e) {
     try {
         std::rethrow_exception(e);
     } catch (dict::overlay_limit_error const&) {
-        // A cap, DOCTYPE, the budget or a side table (the counter origin aborted above).
+        // A cap, DOCTYPE or the budget (the counter origin aborted above).
     } catch (dict::overlay_conflict_error const&) {
         // R-4's conflicts and root checks.
     } catch (dict::group_delimiter_collision_error const&) {
@@ -260,7 +260,7 @@ void accept_orchestra_refusal(std::exception_ptr const& e) {
     try {
         std::rethrow_exception(e);
     } catch (dict::overlay_limit_error const&) {
-        // A cap, DOCTYPE, the budget or a side table (the counter origin aborted above).
+        // A cap, DOCTYPE or the budget (the counter origin aborted above).
     } catch (dict::overlay_conflict_error const&) {
         // R-4's conflicts and root checks.
     } catch (dict::group_delimiter_collision_error const&) {

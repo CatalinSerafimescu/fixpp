@@ -329,8 +329,8 @@ struct G_146_9Args {
     ::std::optional<::std::int64_t> security_trading_status{};
     ::std::optional<::std::int64_t> security_trading_event{};
     ::std::optional<::std::int64_t> halt_reason{};
-    ::std::optional<char> financial_status{};
-    ::std::optional<char> corporate_action{};
+    ::std::optional<::std::string_view> financial_status{};
+    ::std::optional<::std::string_view> corporate_action{};
     ::std::optional<::std::string_view> text{};
     ::std::optional<::std::string_view> encoded_text{};
 };

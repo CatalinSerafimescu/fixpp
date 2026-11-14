@@ -10,6 +10,14 @@
 // (D-008, separate feature); PMR-allocated metadata-handle storage for
 // runtime-XML versions emitted by `XmlLoader` per
 // `specs/002-dictionary-xml-loader/data-model.md` Entity 1.
+//
+// 102-dict-width-multichar-type D1 supersedes the 16-bit `component_index`
+// and the `_reserved` tail of `[2c §4.1]` and of the 002 extract:
+// `component_index` is `std::uint32_t`, widened in place, so it holds the
+// component's index + 1 while that value fits in `std::uint32_t`, and
+// `_reserved` is removed (the layout is pinned by the `static_assert`s below and
+// tests/dictionary/ref_shape_test.cpp); a generated row has one positional initializer
+// per member.
 
 #pragma once
 
@@ -87,16 +95,15 @@ struct FieldRef {
     field_presence rule;
     std::uint16_t condition_index;
     std::uint16_t group_no_tag;
-    std::uint16_t component_index;
+    std::uint32_t component_index;  // 0 = not in a component, else the component's index + 1
     std::uint16_t enum_table_index;
     std::uint16_t length_pair_data_tag;
-    std::uint16_t _reserved;
 };
 
 // AC-F1..AC-F4 per spec.md §4.3 — re-asserted here and again in
 // tests/dictionary/ref_shape_test.cpp (seam #4) for ABI-drift detection.
 static_assert(sizeof(FieldRef) == 16);
-static_assert(alignof(FieldRef) == 2);
+static_assert(alignof(FieldRef) == 4);
 static_assert(std::is_standard_layout_v<FieldRef>);
 static_assert(std::is_trivially_copyable_v<FieldRef>);
 

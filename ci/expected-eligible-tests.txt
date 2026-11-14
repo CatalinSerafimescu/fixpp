@@ -107,15 +107,15 @@
 #   The lane's log carries `100% tests passed ... out of <N>` and the peak-memory
 #   annotation's `[ran: <N>/<pin>]`. If N != the pin, correct the line and record
 #   the run in ci/ctest-parallelism-probe.md; do not widen the check.
-linux-clang-debug     486
-linux-clang-release   519
+linux-clang-debug     511
+linux-clang-release   552
 # `linux-clang-asan` is the FUZZ lane (`FIXPP_BUILD_FUZZ=ON`,
 # ci/assert-ci-lane-policy.py), and tests/fuzz/CMakeLists.txt registers one
 # `fuzz_replay_<name>` ctest per corpus DIRECTORY. A LANE-LOCAL drift therefore
 # lands here and nowhere else; a change on every lane at once is not that.
-linux-clang-asan      483
-linux-clang-ubsan     455
-linux-clang-tsan      455
+linux-clang-asan      512
+linux-clang-ubsan     480
+linux-clang-tsan      480
 
 # `linux-gcc-release` runs a DIFFERENT workload, not no workload.  ⚠️ An earlier
 # revision of this file said it "SKIPS the minimal-tier Test step entirely, so
@@ -125,23 +125,23 @@ linux-clang-tsan      455
 # filter.  It is the only lane in the matrix that runs the packaging tier at all.
 # Its pin is read off its own log, never derived from `linux-clang-release` (a
 # `-LE packaging` count, a different quantity).
-linux-gcc-release     527
+linux-gcc-release     560
 
 # Tier 3 (`.github/workflows/tier3-libcxx.yml`). These lanes run the FULL suite
 # — their Test step carries no `-LE packaging` — and fewer tests are registered
 # under libc++, so their counts are not comparable to the Tier 1 lanes'. Their
 # `--parallel` widening is #267 phase 3's question.
-linux-clang-libc++        481
-linux-clang-libc++-asan   450
-linux-clang-libc++-ubsan  450
-linux-clang-libc++-tsan   450
+linux-clang-libc++        506
+linux-clang-libc++-asan   475
+linux-clang-libc++-ubsan  475
+linux-clang-libc++-tsan   475
 
 # The coverage lane runs the FULL suite (no `-LE packaging` filter), so its
 # count is not comparable to any lane above.  A lane whose basis nobody has read
 # off a CI log ships `-`, never a value guessed from a sibling lane: `-` can equal
 # no count, so the lane renders DIAGNOSTIC ONLY, which is the honest disposition
 # for an unmeasured basis.
-linux-clang-coverage  493
+linux-clang-coverage  518
 
 # ── Tier 2, MSVC (`.github/workflows/tier2.yml`) ─────────────────────────────
 #
@@ -154,6 +154,6 @@ linux-clang-coverage  493
 # rediscovers the missing basis. `windows-msvc-release` is the only MSVC lane that
 # runs the packaging tier, so its count is not comparable to the other two — the
 # same reason `linux-clang-coverage` is not comparable to the filtered lanes.
-windows-msvc-debug    411
-windows-msvc-release  419
-windows-msvc-asan     410
+windows-msvc-debug    436
+windows-msvc-release  444
+windows-msvc-asan     435

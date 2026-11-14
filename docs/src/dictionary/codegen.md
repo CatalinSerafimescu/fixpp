@@ -261,8 +261,9 @@ Each standard FIX message gets a lightweight flyweight class in namespace
   no ownership.
 - Provides **per-field `[[nodiscard]] inline noexcept`** accessors that return
   `core::expected_t<T>`:
-  - **String / date / timestamp fields** → `expected_t<std::string_view>`
-  - **Char / MultiCharValue fields** → `expected_t<char>`
+  - **String / date / timestamp / MultiCharValue fields** → `expected_t<std::string_view>`
+    (MultiCharValue since 102, B-102-2)
+  - **Char fields** → `expected_t<char>`
   - **Boolean fields** → `expected_t<bool>`
   - **Integer / length / sequence-number fields** → `expected_t<int32_t>`
   - **Price / Qty / Amt / Percentage / Float fields** → `expected_t<decimal_t>`

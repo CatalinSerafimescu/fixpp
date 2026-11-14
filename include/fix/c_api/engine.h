@@ -113,6 +113,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_engine_create(fixpp_engine_config_t* cfg,
  * second call after a success returns a domain error. A refused config is reported by
  * fixpp_session_open, not here. (099-fixt-appl-version-validation, C-ABI 1.14.)
  *
+ * BREAKING (C-ABI 1.16, [const §X.7]; 102-dict-width-multichar-type): the tables it
+ * builds and the sessions it starts read the corrected dictionary; session.h's C-ABI
+ * 1.16 paragraph states the effect.
+ *
  * Reentrancy: single-thread. THUNK: construction-time.
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_engine_start(fixpp_engine_t* engine);

@@ -297,7 +297,7 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDefinitio
             if (!en6) return ::std::unexpected(en6.error());
             auto& eh6 = *en6;
     if (item6.exec_inst_value) {
-        auto r = eh6.set_char(1308, *item6.exec_inst_value);
+        auto r = eh6.set_string(1308, *item6.exec_inst_value);
         if (!r) return ::std::unexpected(r.error());
     }
         }

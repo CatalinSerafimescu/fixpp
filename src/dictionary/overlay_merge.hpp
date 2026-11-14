@@ -10,10 +10,10 @@
 // owns R-5's read seam channel, declared at the end of this file.
 //
 // Order of the guard stage (research R-5): byte cap, parse, DOCTYPE, depth, root,
-// entry and reference caps, the merged-graph walk (cycles, expansion budget,
-// side-table fit), conflicts. Every step is iterative. No step before the walk
-// follows a reference, and the walk runs before the conflict checks, the splice
-// and the build (FR-010).
+// entry and reference caps, the merged-graph walk (cycles, expansion budget),
+// conflicts; 102-dict-width-multichar-type D2 removed the walk's side-table fit.
+// Every step is iterative. No step before the walk follows a reference, and the
+// walk runs before the conflict checks, the splice and the build (FR-010).
 
 #pragma once
 
@@ -56,10 +56,6 @@ inline constexpr std::size_t kMaxNewCodeSets = 256;
 // equals its result.
 inline constexpr std::uint64_t kExpansionBudget = std::uint64_t{1} << 20U;
 
-// The most a side-table start or count may be and still fit the `std::uint16_t`
-// that `finalize` stores it in (research R-5 step 6, side-table fit).
-inline constexpr std::uint64_t kSideTableMax = 65535;
-
 // Step 2: the overlay's parse flags. The base is parsed with `load`'s flags.
 inline constexpr unsigned kOverlayParseFlags = pugi::parse_default | pugi::parse_doctype;
 
@@ -85,19 +81,15 @@ void check_no_doctype(pugi::xml_document const& overlay);
 void check_depth(pugi::xml_document const& overlay);
 
 // Which of the guard stage's limit checks, or the build's counter, refused a load.
-enum class refusal_origin : std::uint8_t { none, budget, side_table, counter };
+enum class refusal_origin : std::uint8_t { none, budget, counter };
 
-// The guard stage's step totals and side-table fits. `arm_limit` is the value the
-// build's step counter is armed with: the smaller of the merged total and the base's total plus the
+// The guard stage's step totals. `arm_limit` is the value the build's step counter
+// is armed with: the smaller of the merged total and the base's total plus the
 // budget (research R-5, the step counter).
 struct guard_outcome {
     std::uint64_t base_total = 0;
     std::uint64_t merged_total = 0;
     std::uint64_t arm_limit = 0;
-    bool base_components_fit = true;
-    bool base_groups_fit = true;
-    bool merged_components_fit = true;
-    bool merged_groups_fit = true;
 };
 
 // Written by the overlay load as it goes, so the read seam can report where a
@@ -151,8 +143,8 @@ public:
 
     // The guard routine each overlay entry point calls before the splice: research
     // R-5's steps from the DOCTYPE check through the conflict checks, in R-5's order.
-    // Writes the step totals into `trace`, and the origin before a budget or
-    // side-table refusal. Returns the step counter's arm value.
+    // Writes the step totals into `trace`, and the origin before a budget refusal.
+    // Returns the step counter's arm value.
     [[nodiscard]] std::uint64_t guard(overlay_trace& trace);
 
     // Step 8 (research R-3). Call only after `guard` returned.

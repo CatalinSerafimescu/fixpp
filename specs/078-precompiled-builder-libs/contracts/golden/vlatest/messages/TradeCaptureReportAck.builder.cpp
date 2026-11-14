@@ -1309,7 +1309,7 @@ namespace fixpp::vlatest {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.exec_inst) {
-        auto r = eh1.set_char(18, *item1.exec_inst);
+        auto r = eh1.set_string(18, *item1.exec_inst);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.ord_status) {
@@ -1440,7 +1440,7 @@ namespace fixpp::vlatest {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.order_restrictions) {
-        auto r = eh1.set_char(529, *item1.order_restrictions);
+        auto r = eh1.set_string(529, *item1.order_restrictions);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.booking_type) {
@@ -7613,7 +7613,7 @@ namespace fixpp::vlatest {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item26.leg_exec_inst) {
-        auto r = eh26.set_char(1384, *item26.leg_exec_inst);
+        auto r = eh26.set_string(1384, *item26.leg_exec_inst);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item26.leg_last_qty) {

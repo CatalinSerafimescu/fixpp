@@ -259,7 +259,7 @@ namespace fixpp::v50sp2 {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item0.exec_inst) {
-        auto r = eh0.set_char(18, *item0.exec_inst);
+        auto r = eh0.set_string(18, *item0.exec_inst);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item0.min_qty) {
@@ -12302,7 +12302,7 @@ namespace fixpp::v50sp2 {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item0.order_restrictions) {
-        auto r = eh0.set_char(529, *item0.order_restrictions);
+        auto r = eh0.set_string(529, *item0.order_restrictions);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item0.pre_trade_anonymity) {

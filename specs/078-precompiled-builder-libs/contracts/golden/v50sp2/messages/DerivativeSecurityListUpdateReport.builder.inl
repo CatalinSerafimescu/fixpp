@@ -29,7 +29,7 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_DerivativeSecur
         if (!r) return ::std::unexpected(r.error());
     }
     if (item0.corporate_action) {
-        auto r = eh0.set_char(292, *item0.corporate_action);
+        auto r = eh0.set_string(292, *item0.corporate_action);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item0.symbol) {
@@ -12536,7 +12536,7 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_DerivativeSecur
             if (!en232) return ::std::unexpected(en232.error());
             auto& eh232 = *en232;
     if (item232.exec_inst_value) {
-        auto r = eh232.set_char(1308, *item232.exec_inst_value);
+        auto r = eh232.set_string(1308, *item232.exec_inst_value);
         if (!r) return ::std::unexpected(r.error());
     }
         }

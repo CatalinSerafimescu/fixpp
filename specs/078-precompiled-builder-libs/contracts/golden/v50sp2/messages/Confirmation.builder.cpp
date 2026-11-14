@@ -12637,7 +12637,7 @@ namespace fixpp::v50sp2 {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item232.order_restrictions) {
-        auto r = eh232.set_char(529, *item232.order_restrictions);
+        auto r = eh232.set_string(529, *item232.order_restrictions);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item232.order_capacity_qty) {

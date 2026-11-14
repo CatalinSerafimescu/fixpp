@@ -17787,11 +17787,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityMassSta
         if (!r) return ::std::unexpected(r.error());
     }
     if (item0.financial_status) {
-        auto r = eh0.set_char(291, *item0.financial_status);
+        auto r = eh0.set_string(291, *item0.financial_status);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item0.corporate_action) {
-        auto r = eh0.set_char(292, *item0.corporate_action);
+        auto r = eh0.set_string(292, *item0.corporate_action);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item0.text) {
