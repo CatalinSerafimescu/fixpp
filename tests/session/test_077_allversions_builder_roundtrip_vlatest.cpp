@@ -23,6 +23,10 @@
 // specs/077-builder-args-dedup/tasks.md T016 (SC-003: 100% of the vlatest
 // in-scope application set, zero skips -- set-equality, not per-field
 // exhaustiveness).
+//
+// The AdjustedPositionReport, ContraryIntentionReport and DerivativeSecurityListUpdateReport
+// cells are hand-edited after generation: they also assert MsgType(35), and seed their two
+// decimals as "<tag>.5" so that the two are distinct on the wire.
 
 #include <gtest/gtest.h>
 
@@ -1081,8 +1085,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, AdjustedPositionReport) {
     args.pos_maint_rpt_ref_id = "AdjustedPositionReport_pos_maint_rpt_ref_id";
     args.clearing_business_date = "AdjustedPositionReport_clearing_business_date";
     args.pos_req_type = 724;
-    args.settl_price = make_decimal("10.5", &arena);
-    args.prior_settl_price = make_decimal("10.5", &arena);
+    args.settl_price = make_decimal("730.5", &arena);
+    args.prior_settl_price = make_decimal("734.5", &arena);
     auto built = fixpp::vlatest::build_AdjustedPositionReport(out, args);
     ASSERT_TRUE(built.has_value()) << "build_AdjustedPositionReport failed";
     std::string const body = bytes_to_string(*built);
@@ -1090,11 +1094,12 @@ TEST_F(AllVersionsRoundtrip077Vlatest, AdjustedPositionReport) {
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
         << "dict-aware parse of built AdjustedPositionReport frame failed (see ADD_FAILURE above)";
+    expect_text(mv, 35, "BL", "msg_type");
     expect_text(mv, 714, "AdjustedPositionReport_pos_maint_rpt_ref_id", "pos_maint_rpt_ref_id");
     expect_text(mv, 715, "AdjustedPositionReport_clearing_business_date", "clearing_business_date");
     expect_text(mv, 724, "724", "pos_req_type");
-    expect_decimal(mv, 730, "10.5", &read_arena, "settl_price");
-    expect_decimal(mv, 734, "10.5", &read_arena, "prior_settl_price");
+    expect_decimal(mv, 730, "730.5", &read_arena, "settl_price");
+    expect_decimal(mv, 734, "734.5", &read_arena, "prior_settl_price");
 }
 
 TEST_F(AllVersionsRoundtrip077Vlatest, AllocationInstructionAlert) {
@@ -1152,9 +1157,9 @@ TEST_F(AllVersionsRoundtrip077Vlatest, ContraryIntentionReport) {
     args.security_id_source = "ContraryIntentionReport_security_id_source";
     args.security_id = "ContraryIntentionReport_security_id";
     args.put_or_call = 201;
-    args.strike_price = make_decimal("10.5", &arena);
+    args.strike_price = make_decimal("202.5", &arena);
     args.opt_attribute = '1';
-    args.coupon_rate = make_decimal("10.5", &arena);
+    args.coupon_rate = make_decimal("223.5", &arena);
     auto built = fixpp::vlatest::build_ContraryIntentionReport(out, args);
     ASSERT_TRUE(built.has_value()) << "build_ContraryIntentionReport failed";
     std::string const body = bytes_to_string(*built);
@@ -1162,12 +1167,13 @@ TEST_F(AllVersionsRoundtrip077Vlatest, ContraryIntentionReport) {
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
         << "dict-aware parse of built ContraryIntentionReport frame failed (see ADD_FAILURE above)";
+    expect_text(mv, 35, "BO", "msg_type");
     expect_text(mv, 22, "ContraryIntentionReport_security_id_source", "security_id_source");
     expect_text(mv, 48, "ContraryIntentionReport_security_id", "security_id");
     expect_text(mv, 201, "201", "put_or_call");
-    expect_decimal(mv, 202, "10.5", &read_arena, "strike_price");
+    expect_decimal(mv, 202, "202.5", &read_arena, "strike_price");
     expect_text(mv, 206, "1", "opt_attribute");
-    expect_decimal(mv, 223, "10.5", &read_arena, "coupon_rate");
+    expect_decimal(mv, 223, "223.5", &read_arena, "coupon_rate");
 }
 
 TEST_F(AllVersionsRoundtrip077Vlatest, SecurityDefinitionUpdateReport) {
@@ -1224,8 +1230,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, DerivativeSecurityListUpdateReport) {
     args.underlying_coupon_payment_date =
         "DerivativeSecurityListUpdateReport_underlying_coupon_payment_date";
     args.underlying_repurchase_term = 244;
-    args.underlying_repurchase_rate = make_decimal("10.5", &arena);
-    args.underlying_factor = make_decimal("10.5", &arena);
+    args.underlying_repurchase_rate = make_decimal("245.5", &arena);
+    args.underlying_factor = make_decimal("246.5", &arena);
     args.underlying_put_or_call = 315;
     auto built = fixpp::vlatest::build_DerivativeSecurityListUpdateReport(out, args);
     ASSERT_TRUE(built.has_value()) << "build_DerivativeSecurityListUpdateReport failed";
@@ -1235,12 +1241,13 @@ TEST_F(AllVersionsRoundtrip077Vlatest, DerivativeSecurityListUpdateReport) {
     ASSERT_FALSE(::testing::Test::HasFailure())
         << "dict-aware parse of built DerivativeSecurityListUpdateReport frame failed (see "
            "ADD_FAILURE above)";
+    expect_text(mv, 35, "BR", "msg_type");
     expect_text(mv, 60, "DerivativeSecurityListUpdateReport_transact_time", "transact_time");
     expect_text(mv, 241, "DerivativeSecurityListUpdateReport_underlying_coupon_payment_date",
                 "underlying_coupon_payment_date");
     expect_text(mv, 244, "244", "underlying_repurchase_term");
-    expect_decimal(mv, 245, "10.5", &read_arena, "underlying_repurchase_rate");
-    expect_decimal(mv, 246, "10.5", &read_arena, "underlying_factor");
+    expect_decimal(mv, 245, "245.5", &read_arena, "underlying_repurchase_rate");
+    expect_decimal(mv, 246, "246.5", &read_arena, "underlying_factor");
     expect_text(mv, 315, "315", "underlying_put_or_call");
 }
 
