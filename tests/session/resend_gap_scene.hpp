@@ -179,6 +179,9 @@ struct Options {
     // io_context always has a handler ready: such a cell feeds with feed_spawn() and pumps
     // with pump_until() or pump_for(), never with feed(), pass() or drain().
     bool recording_store = false;
+    // With recording_store: the store reports itself persistent, so the session persists
+    // each inbound advance (persist_inbound_advance_) and a cell can hold that store call.
+    bool recording_store_persistent = false;
 };
 
 // The peer is "TW" and the session "ISLD", FIX.4.2.
@@ -222,6 +225,7 @@ public:
                 std::make_shared<fixpp::session::MemoryStoreFactory>(
                     fixpp::session::MemoryStore::Config{
                         .policy = fixpp::session::capacity_policy::unbounded}));
+            if (o.recording_store_persistent) f->reports_persistent = true;
             log = f->log;
             cfg.store_factory = f;
         } else if (o.with_store) {

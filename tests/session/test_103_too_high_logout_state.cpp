@@ -22,10 +22,12 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <functional>
 #include <future>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "session/test_103_support.hpp"
@@ -434,6 +436,247 @@ TEST_P(TooHighLogoutState103, R588e3_AckStoreHeldThenCloseGraceful_ExactlyOneLog
 INSTANTIATE_TEST_SUITE_P(BothRoles, TooHighLogoutState103,
                          ::testing::Values(session_role::initiator, session_role::acceptor),
                          [](auto const& info) { return std::string{rg::role_name(info.param)}; });
+
+// LO-2 (tasks T083), the reverse of LO-1: close(graceful)'s phase-1 Logout is held in its
+// store; an inbound Logout emitter's frame is fed; the hold is released. Exactly one Logout,
+// phase 1's; the inbound ending's Disconnected recorded; phase 1 takes its early exit, so
+// close() returns with no wait for a confirming Logout (well inside the grace T).
+enum class Lo2Frame : std::uint8_t { in_sequence_logout, sending_time_fatal, arm_d, bound_zero };
+
+class Lo2 : public ::testing::TestWithParam<std::tuple<session_role, Lo2Frame>> {};
+
+TEST_P(Lo2, Phase1HeldThenAnInboundEnding_ExactlyOneLogoutPhase1s) {
+    auto const [role, f] = GetParam();
+    rg::Scene s{rg::Options{.role = role,
+                            .logout_timeout_ms = f == Lo2Frame::bound_zero ? 0 : kT,
+                            .recording_store = true}};
+    ASSERT_TRUE(active_recorded(s)) << "setup";
+    seqnum_t const n = s.next_in();
+    hold_store_of(s, next_out(s));
+    auto const mark = s.sent.size();
+    auto close_fut = spawn_close(s, close_mode::graceful);
+    ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); }))
+        << "setup: phase 1's Logout store was not held";
+    std::vector<std::byte> frame;
+    switch (f) {
+        case Lo2Frame::in_sequence_logout:
+            frame = s.logout(n);
+            break;
+        case Lo2Frame::sending_time_fatal:
+            frame = s.order_with_stale_sending_time(n);
+            break;
+        case Lo2Frame::arm_d:
+            frame = poss_dup_order_with_later_orig(s, n);
+            break;
+        case Lo2Frame::bound_zero:
+            frame = s.logout(n + 3);
+            break;
+    }
+    auto feed_fut = s.feed_spawn(frame);
+    s.pump_for(std::chrono::milliseconds{20});
+    s.log->release_hold();
+    // Phase 1's early exit: close() returns with no wait for a confirming Logout.
+    EXPECT_TRUE(s.pump_until([&] { return rg::Scene::ready(close_fut); },
+                             std::chrono::milliseconds{kT} / 4))
+        << "close() waited for a confirming Logout";
+    (void)s.pump_until([&] { return rg::Scene::ready(close_fut) && rg::Scene::ready(feed_fut); },
+                       kCloseBudget);
+    EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
+    EXPECT_EQ(s.state(), fsm_state::Disconnected);
+}
+
+std::string lo2_name(::testing::TestParamInfo<std::tuple<session_role, Lo2Frame>> const& info) {
+    std::string e;
+    switch (std::get<1>(info.param)) {
+        case Lo2Frame::in_sequence_logout:
+            e = "InSequenceLogout";
+            break;
+        case Lo2Frame::sending_time_fatal:
+            e = "SendingTimeFatal";
+            break;
+        case Lo2Frame::arm_d:
+            e = "ArmD";
+            break;
+        case Lo2Frame::bound_zero:
+            e = "TooHighLogoutBoundZero";
+            break;
+    }
+    return std::string{rg::role_name(std::get<0>(info.param))} + e;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    BothRolesEveryFrame, Lo2,
+    ::testing::Combine(::testing::Values(session_role::initiator, session_role::acceptor),
+                       ::testing::Values(Lo2Frame::in_sequence_logout, Lo2Frame::sending_time_fatal,
+                                         Lo2Frame::arm_d, Lo2Frame::bound_zero)),
+    lo2_name);
+
+// LO-2's other frames: the gap deadline past its bound, and a too-low frame (Arm B, tasks
+// T147), are written with their sites.
+TEST_P(TooHighLogoutState103, Lo2_TooLowFrame) {
+    GTEST_SKIP() << "Arm B's too-low Logout lands at tasks T147";
+}
+
+// LO-3 (tasks T084; characterisation of L-103-6): close(graceful) while a Logout is in
+// flight whose store outlasts the grace. No second Logout; the force-close at the grace.
+// Its control is LO-1's in-sequence arm, the same hold released inside the grace. T is
+// short here: the grace is a real-time timer of T.
+TEST_P(TooHighLogoutState103, Lo3_InFlightLogoutOutlastsTheGrace_NoSecondLogout) {
+    constexpr std::uint32_t kShortT = 200;
+    rg::Scene s{
+        rg::Options{.role = GetParam(), .logout_timeout_ms = kShortT, .recording_store = true}};
+    ASSERT_TRUE(active_recorded(s)) << "setup";
+    seqnum_t const n = s.next_in();
+    hold_store_of(s, next_out(s));
+    auto const mark = s.sent.size();
+    auto feed_fut = s.feed_spawn(s.logout(n));
+    ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); })) << "setup: the ack was not held";
+    auto close_fut = spawn_close(s, close_mode::graceful);
+    EXPECT_TRUE(s.pump_until([&] { return rg::Scene::ready(close_fut); },
+                             4 * std::chrono::milliseconds{kShortT}))
+        << "close() did not return at the grace";
+    s.log->release_hold();
+    (void)s.pump_until([&] { return rg::Scene::ready(feed_fut); });
+    EXPECT_LE(s.count("5", mark), 1U) << "a second Logout: " << s.written(mark);
+}
+
+// LO-4 (tasks T085): a pending mark; a SendingTime-fatal (twin: Arm D) frame's Logout held in
+// its store; T expires; the hold is released. Exactly one Logout, the held one; the bound
+// writes none.
+class Lo4 : public ::testing::TestWithParam<std::tuple<session_role, bool>> {};
+
+TEST_P(Lo4, MarkPendingFatalLogoutHeldTExpires_ExactlyOneLogout) {
+    auto const [role, arm_d] = GetParam();
+    rg::Scene s{rg::Options{.role = role, .logout_timeout_ms = kT, .recording_store = true}};
+    ASSERT_TRUE(active_recorded(s)) << "setup";
+    seqnum_t n = s.next_in();
+    (void)s.feed(s.logout(n + 3));
+    ASSERT_EQ(phase(s), kPending) << "setup: no pending mark";
+    (void)s.feed(s.gap_fill(n, n + 3));
+    n = s.next_in();
+    hold_store_of(s, next_out(s) + 1U);  // after the Reject
+    auto const mark = s.sent.size();
+    auto feed_fut = s.feed_spawn(arm_d ? poss_dup_order_with_later_orig(s, n)
+                                       : s.order_with_stale_sending_time(n));
+    ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); }))
+        << "setup: the fatal Logout was not held";
+    s.mock->advance(std::chrono::milliseconds{kT});
+    s.pump_for(std::chrono::milliseconds{20});
+    s.log->release_hold();
+    EXPECT_TRUE(s.pump_until([&] { return rg::Scene::ready(feed_fut); }));
+    s.pump_for(std::chrono::milliseconds{20});
+    EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
+}
+
+// LO-6 (tasks T087): a pending mark; a SendingTime-fatal (twin: Arm D) frame whose Reject's
+// store is held; T expires, so the bound acknowledges and records Disconnected; the hold is
+// released. Exactly one Logout, the bound's; Disconnected; the owner clear.
+class Lo6 : public ::testing::TestWithParam<std::tuple<session_role, bool>> {};
+
+TEST_P(Lo6, MarkPendingRejectHeldTExpires_ExactlyOneLogoutTheBounds) {
+    auto const [role, arm_d] = GetParam();
+    rg::Scene s{rg::Options{.role = role, .logout_timeout_ms = kT, .recording_store = true}};
+    ASSERT_TRUE(active_recorded(s)) << "setup";
+    seqnum_t n = s.next_in();
+    (void)s.feed(s.logout(n + 3));
+    ASSERT_EQ(phase(s), kPending) << "setup: no pending mark";
+    (void)s.feed(s.gap_fill(n, n + 3));
+    n = s.next_in();
+    hold_store_of(s, next_out(s));  // the Reject
+    auto const mark = s.sent.size();
+    auto feed_fut = s.feed_spawn(arm_d ? poss_dup_order_with_later_orig(s, n)
+                                       : s.order_with_stale_sending_time(n));
+    ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); })) << "setup: the Reject was not held";
+    s.mock->advance(std::chrono::milliseconds{kT});
+    s.pump_for(std::chrono::milliseconds{20});
+    s.log->release_hold();
+    EXPECT_TRUE(s.pump_until([&] { return rg::Scene::ready(feed_fut); }));
+    s.pump_for(std::chrono::milliseconds{20});
+    EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
+    EXPECT_EQ(s.state(), fsm_state::Disconnected);
+    EXPECT_FALSE(session_test_access::logout_in_flight(*s.session));
+}
+
+std::string role_twin_name(::testing::TestParamInfo<std::tuple<session_role, bool>> const& i) {
+    return std::string{rg::role_name(std::get<0>(i.param))} +
+           (std::get<1>(i.param) ? "ArmD" : "SendingTimeFatal");
+}
+INSTANTIATE_TEST_SUITE_P(BothRolesBothFrames, Lo4,
+                         ::testing::Combine(::testing::Values(session_role::initiator,
+                                                              session_role::acceptor),
+                                            ::testing::Bool()),
+                         role_twin_name);
+INSTANTIATE_TEST_SUITE_P(BothRolesBothFrames, Lo6,
+                         ::testing::Combine(::testing::Values(session_role::initiator,
+                                                              session_role::acceptor),
+                                            ::testing::Bool()),
+                         role_twin_name);
+
+// LO-5 (tasks T086): an in-sequence peer Logout; its confirming Logout succeeds; fromAdmin
+// spawns close(graceful); the inbound persist's store is held (twin: fromAdmin rejects the
+// Logout and the best-effort Reject's store is held); the hold is released. Exactly one
+// Logout; Disconnected; close() completes; the owner clear.
+class CloseInFromAdminApp final : public rg::GapApp {
+public:
+    std::function<void()> on_logout;
+    bool reject_logout = false;
+    fixpp::core::expected_t<void> fromAdmin(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
+        const fixpp::session::SessionId& /*id*/) override {
+        if (msg.msg_type() != "5") return {};
+        if (on_logout) on_logout();
+        if (reject_logout) return std::unexpected(fixpp::core::error::app_do_not_send);
+        return {};
+    }
+};
+
+class Lo5 : public ::testing::TestWithParam<std::tuple<session_role, bool>> {};
+
+TEST_P(Lo5, CloseFromFromAdminWhileTheEndingIsHeld_ExactlyOneLogout) {
+    auto const [role, reject] = GetParam();
+    auto const app = std::make_shared<CloseInFromAdminApp>();
+    rg::Scene s{rg::Options{.role = role,
+                            .app = app,
+                            .logout_timeout_ms = kT,
+                            .recording_store = true,
+                            .recording_store_persistent = true}};
+    ASSERT_TRUE(active_recorded(s)) << "setup";
+    seqnum_t const n = s.next_in();
+    app->reject_logout = reject;
+    std::future<fixpp::core::expected_t<void>> close_fut;
+    app->on_logout = [&] { close_fut = spawn_close(s, close_mode::graceful); };
+    if (reject) {
+        hold_store_of(s, next_out(s) + 1U);  // the Reject, after the confirming Logout
+    } else {
+        s.log->hold_in = [](StoreCall const& c) {
+            return c.op == store_op::next_seqnum && c.dir == fixpp::session::direction_t::inbound &&
+                   c.increment;
+        };
+    }
+    auto const mark = s.sent.size();
+    auto feed_fut = s.feed_spawn(s.logout(n));
+    ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); }))
+        << "setup: the ending's store call was not held: " << s.written(mark);
+    ASSERT_TRUE(close_fut.valid()) << "setup: fromAdmin did not spawn close()";
+    s.pump_for(std::chrono::milliseconds{20});
+    s.log->release_hold();
+    EXPECT_TRUE(s.pump_until(
+        [&] { return rg::Scene::ready(feed_fut) && rg::Scene::ready(close_fut); }, kCloseBudget))
+        << "close() did not complete";
+    EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
+    EXPECT_EQ(s.state(), fsm_state::Disconnected);
+    EXPECT_FALSE(session_test_access::logout_in_flight(*s.session));
+}
+
+std::string role_reject_name(::testing::TestParamInfo<std::tuple<session_role, bool>> const& i) {
+    return std::string{rg::role_name(std::get<0>(i.param))} +
+           (std::get<1>(i.param) ? "RejectHeld" : "PersistHeld");
+}
+INSTANTIATE_TEST_SUITE_P(BothRolesBothHolds, Lo5,
+                         ::testing::Combine(::testing::Values(session_role::initiator,
+                                                              session_role::acceptor),
+                                            ::testing::Bool()),
+                         role_reject_name);
 
 std::string lo1_name(::testing::TestParamInfo<std::tuple<session_role, Lo1Case>> const& info) {
     auto const& c = std::get<1>(info.param);

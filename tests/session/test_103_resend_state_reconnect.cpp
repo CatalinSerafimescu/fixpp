@@ -18,11 +18,16 @@
 // among them (the positive control that the reading reaches the new connection's sink).
 #include <gtest/gtest.h>
 
+#include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
+#include <asio/post.hpp>
+#include <asio/this_coro.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <future>
 #include <memory>
 #include <optional>
 #include <span>
@@ -32,6 +37,7 @@
 
 #include "session/test_103_support.hpp"
 #include "support/session_executor_of.hpp"
+#include "support/session_test_access.hpp"
 
 namespace {
 
@@ -363,6 +369,74 @@ TEST(ResendStateReconnect103,
         written = written || f.seq.has_value();
     }
     EXPECT_TRUE(written) << "the send's frame is not written: " << r.after_mark_text();
+}
+
+// ── F1 and F2 (tasks T088, T089): the bound's late start and a lost wake ─────────────
+
+// A test seam the bound awaits: it records that it ran, then yields until released.
+struct BoundHold {
+    bool entered = false;
+    bool released = false;
+    std::function<asio::awaitable<void>()> fn() {
+        return [this]() -> asio::awaitable<void> {
+            entered = true;
+            auto const ex = co_await asio::this_coro::executor;
+            while (!released) co_await asio::post(ex, asio::use_awaitable);
+        };
+    }
+};
+
+std::future<fixpp::core::expected_t<void>> spawn_terminal_close(rg::Scene& s) {
+    return asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                          s.session->close(fixpp::session::close_mode::terminal), asio::use_future);
+}
+
+// F1 (research D4.4, "Publish, then re-test"): the hook holds the bound before its first run
+// until close(terminal) has begun; released, the bound finds the session closing and exits.
+// close() completes within a bounded pump, and the join counter is 0. The mock clock is not
+// moved, so the bound's T cannot end any wait: the cell's forced spurious-hit arm.
+TEST(BoundProtocol103, F1_BoundStartsAfterCloseBegan_CloseCompletesCounterZero) {
+    rg::Scene s{rg::Options{.logout_timeout_ms = 2000}};
+    ASSERT_TRUE(s.open_to_active());
+    BoundHold hold;
+    fixpp::session::session_test_access::set_peer_logout_bound_hold_first_run(*s.session,
+                                                                              hold.fn());
+    seqnum_t const n = s.next_in();
+    auto feed_fut = s.feed_spawn(s.logout(n + 3));
+    ASSERT_TRUE(s.pump_until([&] { return hold.entered && rg::Scene::ready(feed_fut); }))
+        << "setup: the bound did not reach its first-run seam";
+    auto close_fut = spawn_terminal_close(s);
+    s.pump_for(std::chrono::milliseconds{20});
+    hold.released = true;
+    EXPECT_TRUE(s.pump_until([&] { return rg::Scene::ready(close_fut); }))
+        << "close() did not complete";
+    EXPECT_EQ(fixpp::session::session_test_access::peer_logout_bound_count(*s.session), 0);
+}
+
+// F2 (research D4.4, "Wake sources"): the hook holds the bound after its publish-and-re-test,
+// before its race's wait; a wrong-SenderCompID frame records Disconnected, whose wake lands
+// on a timer with no wait pending; released, the bound waits. close() completes within a
+// bounded pump through its unconditional wake, and the join counter is 0. The mock clock is
+// not moved.
+TEST(BoundProtocol103, F2_EdgeWakeLostBeforeTheRace_CloseCompletesCounterZero) {
+    rg::Scene s{rg::Options{.logout_timeout_ms = 2000}};
+    ASSERT_TRUE(s.open_to_active());
+    BoundHold hold;
+    fixpp::session::session_test_access::set_peer_logout_bound_hold_before_race(*s.session,
+                                                                                hold.fn());
+    seqnum_t const n = s.next_in();
+    auto feed_fut = s.feed_spawn(s.logout(n + 3));
+    ASSERT_TRUE(s.pump_until([&] { return hold.entered && rg::Scene::ready(feed_fut); }))
+        << "setup: the bound did not reach its before-race seam";
+    auto wrong = s.feed_spawn(s.order_from_other_comp_id(n));
+    ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(wrong); }));
+    ASSERT_EQ(s.state(), fsm_state::Disconnected) << "setup";
+    hold.released = true;
+    s.pump_for(std::chrono::milliseconds{20});
+    auto close_fut = spawn_terminal_close(s);
+    EXPECT_TRUE(s.pump_until([&] { return rg::Scene::ready(close_fut); }))
+        << "close() did not complete";
+    EXPECT_EQ(fixpp::session::session_test_access::peer_logout_bound_count(*s.session), 0);
 }
 
 }  // namespace
