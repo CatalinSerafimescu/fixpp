@@ -9,12 +9,13 @@
 
 Six session defects on the sequence-recovery and Logon-reset paths, each fixed to the owner's 2026-11-14 rulings:
 the default reset policy becomes `bilateral_lenient` and `bilateral_strict` resets before every Logon (#682,
-C-ABI 1.17 BREAKING); resend state ends with the connection (#578); BeginSeqNo 0 is answered from 1 and an absent
+C-ABI 1.17 BREAKING); resend state ends with the connection (#578), through a drain in `Session::drive_reconnect`
+that is a BREAKING public C++ change (C ABI unchanged; B-103-9, orchestrator ruling 2026-11-15); BeginSeqNo 0 is answered from 1 and an absent
 tag 7 is Rejected (#580); a too-high ResendRequest is serviced and a too-high Logout is acknowledged after a
 bounded recovery (#577); every outbound emitter outside the inbound chain is serialised against a resend answer by
 a strand-local shared/exclusive gate (#588); the gap deadline acts on every frame that does not advance
 NextNumIn, and every too-low frame without PossDupFlag draws QuickFIX's Logout (#581). Every item is RED-first;
-#577 and #578 begin with a reproduction.
+#577 and #578 begin with a reproduction. The msvc-asan CI-cache side quest rides the PR by owner ruling (phase 11).
 
 ## Technical Context
 
@@ -169,8 +170,8 @@ Order by dependency (research R17 as amended):
     acceptance is tasks T163's post-merge pair (a restore HIT of the new-format archive and the hit-rate comparison
     on asan and debug), traced in tasks' `## Requirement map` row "Phase 12". The job `timeout-minutes` change is a
     separate main commit, not 103's; 103 adds no pin that reads `timeout-minutes` (re-derive: `command grep -rn
-    timeout-minutes ci/*.py ci/*.sh`, each hit read), so it lands in either order. Tasks order it before the two
-    close-out tasks.
+    timeout-minutes ci/*.py ci/*.sh`, each hit read), so it lands in either order. Tasks order it (tasks Phase 12)
+    before Polish (phase 10, tasks Phase 13).
 
 ## Complexity Tracking
 

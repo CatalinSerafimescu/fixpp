@@ -178,6 +178,21 @@ the FIX Session Layer's, or from both:
   pre-loop-2 edit applies RC-α (above), RC-β (the Logout owner moves into `inbound_logout_leaf_`), RC-γ and the
   round-3 P3s, then a fresh Gate A loop runs. Owner ruling.
 
+### Session 2026-11-15 (step-9 checklist audit; orchestrator and owner rulings)
+
+- Q: Is the change to `Session::drive_reconnect` from Active (it now records `Disconnected`, fires `onLogout`, and
+  can return `session_already_closed`, `dispatch_aborted` or `session_already_open` without reconnecting) a
+  breaking change? → A: **BREAKING (public C++; C ABI unchanged)**, marked on B-103-9, in `drive_reconnect`'s header
+  doc and in the PR description. Orchestrator ruling 2026-11-15, following B-097-2 and B-098-4; the same ruling
+  confirms FR-001's reading that the C++ and TOML default flip is BREAKING, as B-103-1 says.
+- Q: Does the msvc-asan CI-cache work ride 103? → A: **yes**, as tasks Phase 12 (plan phase 11): a per-leg
+  `SCCACHE_CACHE_SIZE` (16G on asan and debug, 8G on release), a zstd archive with its ratio measured first, and a
+  per-test budget for `dictionary_overlay_tests` that splits the entry rather than set a value above CI's guard.
+  The job `timeout-minutes` change is a separate commit to main. Owner ruling 2026-11-15 (parent
+  `research/reviews/msvc-asan-timeout-investigation-2026-11-15.md` §7 is background, not a requirement). Its
+  post-merge acceptance threshold (each MSVC sanitizer/debug leg's `Cache hits` at least 90 % of the release leg's,
+  with a restore HIT on each) is an orchestrator ruling of the same day.
+
 ## User Scenarios & Testing *(mandatory)*
 
 Every item is test-first: a cell that is RED on the base `2c74af92` comes before its fix. #577 and #578 are
@@ -378,8 +393,9 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   "return a result other than the one documented"; on C++ `SessionConfig` and TOML as a pre-release breaking change
   to the public C++ API and its configuration, in the form of B-097-2 and B-098-4. `FIXPP_C_ABI_VERSION_MINOR` moves
   to the next value after the base's, where the base is the merge-base with `origin/main` when 103 merges: 17 while
-  `origin/main` stays at 16, and the next value after `origin/main`'s if another change takes 17 first (tasks T178's
-  integration re-runs T035 and T154 with it, and the contract, B-103-1 and the PR body follow). The BREAKING mark goes
+  `origin/main` stays at 16, and the next value after `origin/main`'s if another change takes 17 first (tasks T178
+  reads `origin/main`'s `FIXPP_C_ABI_VERSION_MINOR` and, if it is no longer 16, re-runs T035, T036 and T154 with the
+  next value and updates the contract, B-103-1 and the PR body, T181). The BREAKING mark goes
   on `fixpp_reset_seqnum_policy`'s documentation, and every in-repository consumer is updated in the same change.
 - **FR-002**: A Logon that fixpp sends with 141=Y MUST carry 34=1, under every policy and every reset setting, and
   both stored numbers MUST be 1 (durably) when it is built.
@@ -425,6 +441,8 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   still on the old `live_transport()` when the new transport is installed reads a destroyed transport, an aborted
   read on plain TCP and undefined behaviour on TLS, and nothing reads the new one; research D1 step 1a). The
   operation (research D1): one at a time (above); started from a callback, it runs after one post, as `close()` does;
+  (this is a BREAKING change to the public C++ `Session::drive_reconnect`, C ABI unchanged: B-103-9, Clarifications
+  2026-11-15);
   a `close()` or `Engine::stop()` that starts during it, during the drain or during connect and handshake, ends it
   with `session_already_closed`, no install, and the newly connected transport closed (the install is the commit
   point); the caller's own cancellation of the drain's wait ends it with `dispatch_aborted` and no install, while
@@ -564,6 +582,14 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   (Pass P); a Pass-P row that does not fail in Pass F is re-read and recorded "insensitive", which closes it for
   FR-020. The census is re-run at the head being accepted, and a changed test expectation that no census row or pin
   task names stops for a decision (tasks T166).
+
+**Additional scope (owner ruling 2026-11-15; CI only, no library behaviour)**
+
+- **Phase 12, the msvc-asan CI cache**: the tier-2 MSVC legs restore a cache that holds one full build plus one
+  commit's churn, in a compressed (and, past GHCR's per-layer limit, multi-layer) archive, and
+  `dictionary_overlay_tests` runs under a per-entry budget at or under CI's `--timeout` guard. Measured after the
+  merge by tasks T163's pair: a restore HIT of the new-format archive on the asan and debug legs, and their
+  `Cache hits` each at least 90 % of the release leg's on the acceptance commit (Clarifications 2026-11-15).
 
 ### Key Entities
 

@@ -6,8 +6,8 @@ an internal detail header with no public symbol, installed only because `Session
 include/fixpp/session/session.hpp (precedent: include/fixpp/session/detail/has_flush_for_session_close.hpp). "No public
 symbol" means what it means for that precedent: the header declares only names in a `detail` namespace, which the
 documentation does not describe and the supported API does not include; the install-surface and layering checks
-(`tools/check_layers.py`, the packaging consumer tests) must accept it as they accept the precedent, and tasks T061
-runs them. The gate's `asio::steady_timer` adds no include requirement for a consumer of the installed
+(`tools/check_layers.py`, the packaging consumer tests) must accept it as they accept the precedent: tasks T165 runs `tools/check_layers.py` and
+T177's full `ctest` runs the packaging consumer tests. The gate's `asio::steady_timer` adds no include requirement for a consumer of the installed
 session.hpp while session.hpp reaches `<asio/steady_timer.hpp>` through `fixpp/session/reconnect_fsm.hpp`, whose
 members are `std::optional<asio::steady_timer>` (re-derive: `command grep -n steady_timer
 include/fixpp/session/reconnect_fsm.hpp`; tasks T061 re-reads it); replay_gate.hpp includes it itself. Decisions are in [research.md](research.md).
