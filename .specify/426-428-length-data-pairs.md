@@ -119,6 +119,10 @@ detector.
 | 13 | `Session::send_impl` opaque-payload walk, including `has_boundary_token` (`session.cpp`) | **none** | C++ `Session::send` and `fixpp_session_send`: framing-tag refusal, duplicate-35 scan, per-field validation, header partition (`is_send_header_tag`), 43/122 excision | session hooks |
 | 14 | `fixpp_msg_clone`'s `mk_fv` (`src/capi/message_write.cpp`) | **none** | inbound message clone `frame_view` bounds | none needed (§4) |
 
+> **Erratum (fixpp#652):** row 10's `redact_tag554` had no production caller; its consumer column named
+> sites that did not exist. fixpp#652 removed the helper and its tests. The row is kept as the design
+> record of what this table described at the time.
+
 - **"Session hooks"** means `dict_hooks::for_table_view(*inbound_tv_)` when the session has a
   dictionary, else `none()` (standard table). The free functions gain a `dict_hooks` parameter
   defaulting to `none()`.
