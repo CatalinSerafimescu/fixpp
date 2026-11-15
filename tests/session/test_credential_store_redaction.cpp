@@ -268,6 +268,28 @@ TEST(Masker_SameLength_FieldAnchored_unit, H_MultipleGenuine554_AllMasked) {
     EXPECT_NE(s.find("58=mid"), std::string::npos) << "interleaved non-554 field must survive";
 }
 
+TEST(Masker_SameLength_FieldAnchored_unit, J_FrameEndOccurrenceNoTrailingSoh_Masked) {
+    // A 554 value that runs to the end of the buffer with no terminating SOH: the
+    // walk's step past the value must stop at the end, not one byte beyond it.
+    // fixpp#652 removed RedactTag554.Tag554AtFrameEnd_NoTrailingSOH, which was the only
+    // cell to reach that arm; this is its masker form.
+    auto buf = make_buf(
+        "49=S\x01"
+        "554=mysecret");
+    auto before = buf;
+
+    bool result = mask_tag554_same_length_inplace(std::span<std::byte>{buf});
+
+    EXPECT_TRUE(result) << "a 554 at the frame end must be found";
+    // Layout: 49=S(0..3) \x01(4) 554=(5..8) mysecret(9..16), size 17.
+    ASSERT_EQ(buf.size(), 17U);
+    EXPECT_TRUE(all_stars(buf.data() + 9, buf.data() + buf.size()))
+        << "the value up to the frame end must be all '*'";
+    for (std::size_t i = 0; i < 9; ++i) {
+        EXPECT_EQ(buf[i], before[i]) << "byte " << i << " before the value must be unchanged";
+    }
+}
+
 TEST(Masker_SameLength_FieldAnchored_unit, I_FrameHasGenuine554_Detector) {
     // Directly exercises frame_has_genuine_tag554 — the detection sibling that
     // store_then_emit's maskability gate calls before masking. Covers all three
