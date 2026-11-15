@@ -17,8 +17,9 @@
 // Nothing here waits in real time for a mock-clock effect. The mock clock's wake-ups are
 // posted handlers, the store (with Options::with_store; otherwise the session has none) is a
 // MemoryStore and the transport is a callback, so after a delivery or a clock move every
-// handler the session owes is ready, and drain() runs them all. A cell that closes gracefully, uses another store or runs an Engine does not have
-// that property and must not use pass().
+// handler the session owes is ready, and drain() runs them all. A cell that closes
+// gracefully, uses another store or runs an Engine does not have that property and must not
+// use pass().
 #pragma once
 
 #include <gtest/gtest.h>

@@ -605,6 +605,66 @@ TEST(ResendAnswerBeginSeqNo580, SevenZero_NoStore_OneGapFillFromOne) {
         << printable(a.written);
 }
 
+// 103 (fixpp#580; B-103-5): a ResendRequest whose BeginSeqNo(7) is present but empty, or
+// present but not a number. On a session that does not validate, each reads as 0 and is
+// answered as 7=1 is (contracts/session-wire-endings.md E5's comparison). On a session that
+// validates against the vendored FIX 4.4 dictionary the gate Rejects each before the arm
+// runs, with RefTagID(371)=7, and the session stays up.
+//
+// The validating arms pin a departure, not a conformance witness. The validator maps an
+// empty value and a value its type check refuses to SessionRejectReason(373)=5; the FIX
+// Session Layer Test Cases (June 2020), test 14, require 373=4 for a tag with no value
+// (sub-case 14d) and 373=6 for a value in the wrong data format (sub-case 14f), and QuickFIX
+// sends 4 or 6. That gap is B-075-4 and L-075-1; fixpp#694 tracks it. This cell makes no
+// claim on TC-010.
+TEST(ResendAnswerBeginSeqNo580,
+     SevenEmptyOrNonNumeric_ValidatingRejects_OtherwiseAnsweredAsSevenOne) {
+    auto const fix44 = [](bool const validate) {
+        return DirectAcceptor::Options{.tweak_cfg = [validate](fixpp::session::SessionConfig& cfg) {
+            cfg.begin_string = "FIX.4.4";
+            cfg.dictionary = fixpp::test_support::make_fix44_dictionary();
+            cfg.validate_inbound_messages = validate;
+        }};
+    };
+    struct Arm {
+        char const* name;
+        char const* begin_field;
+    };
+    for (Arm const arm : {Arm{"empty", "7=\x01"}, Arm{"non-numeric", "7=X\x01"}}) {
+        SCOPED_TRACE(arm.name);
+        ActiveSession gate{fix44(true)};
+        ASSERT_TRUE(gate.setup(kStoredFor580))
+            << "setup (validating): the session did not reach Active";
+        auto const ag =
+            gate.answer(std::string{arm.begin_field} + "16=0\x01", is_outbound_retrieve);
+        ASSERT_TRUE(ag.call.completed) << "on_inbound_frame did not complete";
+        EXPECT_EQ(ag.state_after_call, fsm_state::Active);
+        ASSERT_EQ(ag.written.size(), 1U) << printable(ag.written);
+        EXPECT_EQ(plain_rig::field_value(ag.written.front(), "35"), "3") << printable(ag.written);
+        EXPECT_EQ(plain_rig::field_value(ag.written.front(), "371"), "7") << printable(ag.written);
+        EXPECT_EQ(plain_rig::field_value(ag.written.front(), "373"), "5") << printable(ag.written);
+        EXPECT_TRUE(replayed_numbers(ag.written).empty()) << printable(ag.written);
+
+        ActiveSession lax{fix44(false)};
+        ASSERT_TRUE(lax.setup(kStoredFor580))
+            << "setup (not validating): the session did not reach Active";
+        auto const al = lax.answer(std::string{arm.begin_field} + "16=0\x01", is_outbound_retrieve);
+        ActiveSession one{fix44(false)};
+        ASSERT_TRUE(one.setup(kStoredFor580)) << "setup (7=1): the session did not reach Active";
+        auto const a1 = one.answer(
+            "7=1\x01"
+            "16=0\x01",
+            is_outbound_retrieve);
+        ASSERT_TRUE(al.call.completed) << "on_inbound_frame did not complete";
+        EXPECT_TRUE(al.call.returned_success()) << al.call.call_text();
+        EXPECT_EQ(al.state_after_call, fsm_state::Active);
+        ASSERT_EQ(a1.written.size(), 3U) << printable(a1.written);
+        EXPECT_TRUE(equal_as_e5(al.written, a1.written));
+        EXPECT_TRUE(fixpp::test_support::t103::no_frame_carries_34_zero(al.written))  // SC-003
+            << printable(al.written);
+    }
+}
+
 // ── fixpp#577 with #580: a ResendRequest above NextNumIn (route (a) and (b)) ───────────────
 
 // NextNumIn, the session's and its store's. The store's is read with a store call of its own.
@@ -618,8 +678,8 @@ InboundNumbers inbound_numbers(ActiveSession& s) {
         .store = std::nullopt};
     auto* const st = session_test_access::store(*s.f.session);
     if (st == nullptr) return out;
-    auto fut = asio::co_spawn(s.f.ioc, st->next_seqnum(direction_t::inbound, false),
-                              asio::use_future);
+    auto fut =
+        asio::co_spawn(s.f.ioc, st->next_seqnum(direction_t::inbound, false), asio::use_future);
     if (!s.f.run_until([&] { return DirectAcceptor::ready(fut); })) return out;
     if (auto const r = fut.get(); r) out.store = *r;
     return out;
@@ -675,8 +735,8 @@ TEST(ResendAnswerTooHigh577, SevenAbsent_TooHigh_NoResendOutstanding_RejectThenO
         << "fixpp's ResendRequest must follow the Reject:\n"
         << printable(a.written);
 
-    EXPECT_FALSE(a.aimed.has_value()) << "an inbound advance was persisted: "
-                                      << record_text(a.aimed);
+    EXPECT_FALSE(a.aimed.has_value())
+        << "an inbound advance was persisted: " << record_text(a.aimed);
     auto const after = inbound_numbers(s);
     EXPECT_EQ(after.session, n) << "NextNumIn moved";
     ASSERT_TRUE(after.store.has_value());
@@ -708,8 +768,8 @@ TEST(ResendAnswerTooHigh577, SevenAbsent_TooHigh_ResendOutstanding_RejectAndNoSe
     EXPECT_EQ(count_of_type(a.written, "2"), 0U) << printable(a.written);
     EXPECT_TRUE(session_test_access::resend_outstanding(*s.f.session));
 
-    EXPECT_FALSE(a.aimed.has_value()) << "an inbound advance was persisted: "
-                                      << record_text(a.aimed);
+    EXPECT_FALSE(a.aimed.has_value())
+        << "an inbound advance was persisted: " << record_text(a.aimed);
     auto const after = inbound_numbers(s);
     EXPECT_EQ(after.session, n) << "NextNumIn moved";
     ASSERT_TRUE(after.store.has_value());
@@ -741,8 +801,8 @@ TEST(ResendAnswerTooHigh577, SevenPresent_TooHigh_AnsweredAndNothingPersisted) {
               std::to_string(n))
         << printable(a.written);
 
-    EXPECT_FALSE(a.aimed.has_value()) << "an inbound advance was persisted: "
-                                      << record_text(a.aimed);
+    EXPECT_FALSE(a.aimed.has_value())
+        << "an inbound advance was persisted: " << record_text(a.aimed);
     auto const after = inbound_numbers(s);
     EXPECT_EQ(after.session, n) << "NextNumIn moved";
     ASSERT_TRUE(after.store.has_value());

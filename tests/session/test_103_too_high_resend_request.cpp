@@ -223,8 +223,8 @@ TEST_P(TooHighResendRequest103, Control_InSequence_SameAnswerNoResendRequest) {
 // nothing; no frame is written and NextNumIn does not move. The witness of route (b)'s
 // `cfg_.validate_sequence_numbers` term.
 TEST_P(TooHighResendRequest103, Control_KnobOff_TooHighResendRequestNotAnswered) {
-    rg::Scene s{rg::Options{
-        .role = GetParam(), .validate_sequence_numbers = false, .with_store = true}};
+    rg::Scene s{
+        rg::Options{.role = GetParam(), .validate_sequence_numbers = false, .with_store = true}};
     std::vector<std::string> payloads;
     ASSERT_TRUE(active_with_two_sends(s, payloads));
     seqnum_t const n = s.next_in();
