@@ -18,11 +18,13 @@ Article XI §3 has three sentences after its heading (the `async_mutex` sentence
 
 > 3. **Awaitable mutex required in coroutine context.** `fixpp::sync::async_mutex` (own implementation, BSL-1.0
 > algorithm attribution to avast/asio-mutex) is the only allowed mutex shape for coroutines. One exception is
-> permitted, for the serialisation of outbound frames against a resend answer and the drain of in-flight outbound
-> frames before an in-place reconnect only (feature 103): a
-> **strand-confined shared/exclusive gate**, `detail::replay_gate`, whose every acquire, release and wake runs in
-> its session's serialised execution domain (the domain that already orders the session's plain-member state,
-> such as its send slot), which uses no OS synchronisation primitive and no atomic, never blocks a thread, never
+> permitted, for the serialisation of outbound frames against a resend answer and the wait of an in-place reconnect
+> for the session's in-flight outbound frames and inbound chain, only (feature 103): a
+> **strand-confined shared/exclusive gate**, `detail::replay_gate`, whose every acquire, and every release and wake
+> made by a resumed coroutine, runs in its session's serialised execution domain (the domain that already orders
+> the session's plain-member state, such as its send slot); a release made by the destructor of a coroutine frame
+> destroyed without being resumed runs only while that domain's execution context is being destroyed, when no
+> handler of the domain runs or will run again; which uses no OS synchronisation primitive and no atomic, never blocks a thread, never
 > resets or otherwise changes its caller's cancellation filter or cancellation state, and needs no unlock before
 > its destruction and no drain at teardown; it is not a general session send gate, and any other use of such a gate requires its own
 > amendment. **Plain `std::mutex` is banned in any header that includes `asio::awaitable<...>`.** Enforced by
@@ -50,9 +52,11 @@ Sync Impact Report — v4.3 → v4.4 (<date>) — PENDING
     NOTE: the constitution's version is independent of the library's and of the C ABI's.
   Modified: Article XI §3 — a sentence inserted after its first sentence: one exception to
     "the only allowed mutex shape for coroutines", for the serialisation of outbound frames against a
-    resend answer and the drain of in-flight outbound frames before an in-place reconnect only
-    (feature 103): a strand-confined shared/exclusive gate, detail::replay_gate,
-    confined to its session's serialised execution domain, with no OS primitive and no atomic, never
+    resend answer and the wait of an in-place reconnect for the session's in-flight outbound frames and
+    inbound chain, only (feature 103): a strand-confined shared/exclusive gate, detail::replay_gate,
+    whose every acquire, and every release and wake made by a resumed coroutine, runs in its session's
+    serialised execution domain (a release by the destructor of a frame destroyed unresumed runs only
+    while that domain's execution context is destroyed, when no handler of it runs again), with no OS primitive and no atomic, never
     blocking a thread, never changing its caller's cancellation filter or state, needing no unlock
     before destruction and no teardown drain, not a general session send gate; any other use needs
     its own amendment.
@@ -84,16 +88,23 @@ Sync Impact Report — v4.3 → v4.4 (<date>) — PENDING
     built, held, released and destroyed with no waiter needs nothing at teardown (R-588-g's no-waiter
     construct/destroy cell under ASan).
   - **Structural checks:** confinement to the session's domain (Gate A round 3, Codex #3: a clean TSan run proves
-    only that no race occurred on the paths exercised): a call-site census of every gate acquire, release and
-    `wake_all` site and of every wake source (data-model.md's replay-gate list), each shown to run on the session
-    strand (`note_engine_stop_` included: it runs inside `Engine::stop()`'s `co_spawn` on the session strand), plus a
-    Debug `FIXPP_ASSERT(strand.running_in_this_thread())` at the gate's entry points where the executor is a strand;
-    R-588-h under TSan stays as race evidence only. No atomic and no OS synchronisation primitive in `detail::replay_gate` (a source check on
+    only that no race occurred on the paths exercised; reworded at loop 2 round 2, Codex P2-2): a call-site census
+    of every gate acquire, release and `wake_all` site and of every wake source (data-model.md's replay-gate list),
+    each classified as a coroutine-body site (shown to run on the session strand; `note_engine_stop_` included: it
+    runs inside `Engine::stop()`'s `co_spawn` on the session strand) or a destructor site (a shared holder, the
+    exclusive guard, the waiter count, the `inbound_depth_` holder), which runs on the strand on every resumed exit
+    and otherwise only under research D1's lifetime rule. A Debug `FIXPP_ASSERT(strand.running_in_this_thread())`,
+    where the executor is a strand, at every **acquire** (the shared fast path, the contended wait's `++waiters`,
+    the exclusive entry, the reconnect drain's wait) and inside `wake_all()`'s acting branch (`waiters != 0`), never
+    on a bare decrement in a destructor: a pending waiter means the timer exists, and a Session that owns the timer
+    is destroyed before its context, so no waiter is pending at a supported teardown. G9 (research) is the
+    teardown witness. R-588-h under TSan stays as race evidence only. No atomic and no OS synchronisation primitive in `detail::replay_gate` (a source check on
     the gate's header and source: no `std::atomic`, `std::mutex`, `std::shared_mutex`, `std::condition_variable` or
     `<atomic>` / `<mutex>` / `<shared_mutex>` / `<condition_variable>` include, run in `/speckit-verify`, proven to
     fire on a seeded `std::atomic` in a scratch copy); no unlock-before-destruction precondition and no teardown
     drain (a source/lifecycle proof in the verify record: the gate's destructor has no precondition, and neither
     `close()` nor `Engine::stop()` calls any gate drain).
   - **Scope:** not a general send gate (FR-014's scope; spec Out of Scope), a review property of the text.
-- The permission is scoped to the resend-answer serialisation and the reconnect drain (research D1, owner ruling
-  2026-11-15), so it cannot be cited for another gate.
+- The permission is scoped to the resend-answer serialisation and the reconnect's wait for in-flight outbound frames
+  and the inbound chain (research D1, owner ruling 2026-11-15), so it cannot be cited for another gate; a further
+  use of the gate needs its own amendment (Article XX §1).

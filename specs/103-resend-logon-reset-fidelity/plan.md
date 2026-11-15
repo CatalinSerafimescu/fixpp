@@ -170,6 +170,7 @@ Order by dependency (research R17 as amended):
 
 - Round 1 applied 2026-11-14: Codex P1=13 P2=4 P3=0; Opus post-judging P1=3 P2=8 P3=13; rewrite addresses RC1–RC5 and the three owner rulings. Reviews: research/reviews/codex_103-resend-logon-reset-fidelity_gate_a_review.md, research/reviews/opus_103-resend-logon-reset-fidelity_gate_a_adversarial_review.md.
 
+- Loop 2 round 2 applied 2026-11-15: Codex P1=0 P2=2 P3=1; Opus post-judging P1=0 P2=2 P3=4; rewrite adds the leaf's Active entry test, rewords the XI §3 confinement clause and moves the assertion, and applies the P3s. Reviews: research/reviews/codex_103-resend-logon-reset-fidelity_gate_a_5_review.md, research/reviews/opus_103-resend-logon-reset-fidelity_gate_a_5_adversarial_review.md.
 - Loop 2 round 1 applied 2026-11-15: Codex P1=0 P2=2 P3=1; Opus post-judging P1=0 P2=2 P3=6; rewrite addresses the fence predicate/order (acceptor erratum), the Logout-owner clear site, and the P3s. Reviews: research/reviews/codex_103-resend-logon-reset-fidelity_gate_a_4_review.md, research/reviews/opus_103-resend-logon-reset-fidelity_gate_a_4_adversarial_review.md.
 - Loop 1 exhausted at round 3 (2026-11-15): Codex P1=1 P2=1 P3=1; Opus post-judging P1=0 P2=2 P3=5; owner chose hand-edit + one targeted round and the Engine-managed fence; pre-loop-2 edit applies RC-α, RC-β, RC-γ and the P3s. Reviews: research/reviews/codex_103-resend-logon-reset-fidelity_gate_a_3_review.md, research/reviews/opus_103-resend-logon-reset-fidelity_gate_a_3_adversarial_review.md.
 - Round 2 applied 2026-11-15: Codex P1=3 P2=3 P3=1; Opus post-judging P1=0 P2=8 P3=3; rewrite addresses root causes A–D. Reviews: research/reviews/codex_103-resend-logon-reset-fidelity_gate_a_2_review.md, research/reviews/opus_103-resend-logon-reset-fidelity_gate_a_2_adversarial_review.md.
@@ -266,4 +267,22 @@ applied, as the judge rejected or did not prefer them:
   the two leaves and cleared only on the edge into `Disconnected` spans the whole ending; clearing phase 1's
   ownership early at an inbound ending's `Disconnected` loses nothing, because no Logout emitter can start after
   that edge (D4.6 "The clear").
+
+### Loop 2 round 2 — disagreements
+
+The Opus review downgrades Codex P2-1 to P3, confirms Codex P2-2 narrowed, and marks nothing "Disagree". Codex's
+two fix directions are not applied, because the trigger they defend against has no supported path (research D1's
+lifetime rule: a frame is destroyed mid-body only while its execution context is destroyed, after which no handler
+of the session runs):
+
+- **Codex P2-1: an abandonment-safe Logout owner** (an RAII guard that clears `logout_in_flight_` at frame
+  destruction) **and its LO-6 "destroy the frame and verify a terminal disposition"** — not adopted. In the leaf it
+  would clear at the leaf's return and reopen LO-5's window; at `on_inbound_active_` it never acts on a resumed path;
+  at teardown nothing reads the owner again, so it would be a clear with no killing cell. The cell would build the
+  unsupported continuation. Applied instead: the text no longer asserts the trigger (G9 rewritten as a teardown
+  witness, D4.6's "every resumed path"). The LO-6 in research is a different cell (RC-θ's Trace A).
+- **Codex P2-2: a destruction-safe gate** (making off-domain destructor releases race-free) — not adopted. No race is
+  reachable: at teardown no handler of the domain runs, and a Session that owns the gate's timer is destroyed before
+  its context. Applied instead: the XI §3 clause reworded to the true statement, the strand assertion moved to the
+  acquire sites and `wake_all`'s acting branch, and G9 as the teardown witness.
 

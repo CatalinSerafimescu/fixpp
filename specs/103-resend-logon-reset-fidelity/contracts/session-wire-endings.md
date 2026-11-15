@@ -30,7 +30,8 @@ Arm-D Logouts included. One session-level owner, `logout_in_flight_` (research D
 of an established session, `inbound_logout_leaf_` (every inbound-chain Logout and the bound's acknowledgement) and
 `run_logout_phase1`: each tests and sets it before its first suspension; it is cleared only on the edge into
 `Disconnected`, so it spans the whole ending.
-`inbound_logout_leaf_` that finds it set returns without a Logout and its caller keeps the rest of its ending;
+`inbound_logout_leaf_` that finds it set, or finds the session no longer Active (a chain that resumes after another
+ending's `Disconnected`), returns without a Logout and its caller keeps the rest of its ending;
 `close(graceful)` that finds it set poll-joins that Logout inside its grace and sends none of its own; the bound
 tests it at its claim, after its gate wait. The Logon arms' Logouts are outside this sentence (they run
 before Active).

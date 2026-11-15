@@ -426,7 +426,8 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   One Logout is owned at a time, session-wide (research D4.6): `close(graceful)` that finds any Logout in flight
   (the acknowledgement, an in-sequence acknowledgement, the deadline's, Arm B's) MUST wait for it, inside its
   grace, before it records `Disconnected` and closes the transport, and send none of its own; an inbound ending that
-  finds one in flight (phase 1's included) MUST skip its own Logout and keep the rest of its ending.
+  finds one in flight (phase 1's included), or finds the session no longer Active, MUST skip its own Logout and keep
+  the rest of its ending.
 - **FR-011**: While the pending-Logout mark is pending (before its acknowledgement is claimed), `Session::send`
   MUST return `session_invalid_state_for_send` (the result after a peer's in-sequence Logout), and administrative
   traffic MUST continue: a TestRequest is answered and a ResendRequest is serviced. Once the acknowledgement is

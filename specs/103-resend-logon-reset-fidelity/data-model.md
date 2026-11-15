@@ -32,7 +32,8 @@ the bound asserts it. The acceptor needs none: `attach_accepted_transport` runs 
 
 - `inbound_depth_`: `std::uint32_t`, raised by an RAII holder declared as `on_inbound_active_`'s first statement,
   lowered at its every exit, an exception and frame destruction included (not in `on_inbound_frame`, a non-coroutine
-  forwarder); reaching 0 calls `replay_gate_.wake_all()`. Precondition: the Session outlives the inbound frame (the
+  forwarder); reaching 0 calls `replay_gate_.wake_all()` (on a resumed exit; a frame destroyed unresumed falls under
+  research D1's lifetime rule, after which nothing runs). Precondition: the Session outlives the inbound frame (the
   holder's destructor touches `inbound_depth_` and the gate), as for the chain's existing lock guards.
 - Reader fence, tested after the closing/closed/stopped test (`session_already_closed`):
   `cfg_.role == session_role::acceptor || (cfg_.engine_managed && live_transport_shared_() != nullptr)` →
@@ -67,7 +68,8 @@ established session: `inbound_logout_leaf_` (every Active inbound-chain Logout a
 in-sequence acknowledgement, gap deadline, SendingTime-fatal, PossDup Arm D, Arm B, T = 0 acknowledgement, the
 bound) and `run_logout_phase1`; cleared only on the edge into `Disconnected` (`record_state_transition_`), so it spans
 the whole ending, the in-sequence acknowledgement's `fromAdmin`, best-effort Reject and inbound persist included;
-`install_reconnected_transport` asserts it clear. Found set: `inbound_logout_leaf_`
+`install_reconnected_transport` asserts it clear. `inbound_logout_leaf_` also skips when the session is no longer
+Active (tested at entry), so the owner is set only in Active. Found set (or not Active): `inbound_logout_leaf_`
 returns a "skipped" success and its caller keeps the rest of its ending; `close(graceful)` poll-joins it inside its
 grace and sends none; the bound tests it at its claim, sets the phase `none` and exits. LS-1 pins that no other
 Active Logout builder exists. Invariant: at most one Logout of an established session is in flight.
