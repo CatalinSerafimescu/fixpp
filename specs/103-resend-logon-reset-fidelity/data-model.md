@@ -32,7 +32,11 @@ the bound asserts it. The acceptor needs none: `attach_accepted_transport` runs 
 
 - `inbound_depth_`: `std::uint32_t`, raised by an RAII holder declared as `on_inbound_active_`'s first statement,
   lowered at its every exit, an exception and frame destruction included (not in `on_inbound_frame`, a non-coroutine
-  forwarder); reaching 0 calls `replay_gate_.wake_all()`.
+  forwarder); reaching 0 calls `replay_gate_.wake_all()`. Precondition: the Session outlives the inbound frame (the
+  holder's destructor touches `inbound_depth_` and the gate), as for the chain's existing lock guards.
+- Reader fence: `drive_reconnect` on an Engine-managed Session (`cfg_.engine_managed`) with an installed transport
+  returns `session_already_open` and changes nothing (the Engine's read pump owns that transport). Standalone
+  precondition: the caller's reader has left `live_transport()` before the call and starts on the new one after it.
 - `reconnect_in_flight_`: `bool`, set at `drive_reconnect`'s entry, cleared by RAII; a second call returns
   `session_already_open`.
 - Quiescent ⇔ `replay_gate_.shared == 0 && inbound_depth_ == 0` (no emitter outside the inbound chain between its
@@ -50,26 +54,29 @@ the bound asserts it. The acceptor needs none: `attach_accepted_transport` runs 
 ## Pending-Logout mark — `peer_logout_` (new)
 
 Fields: `seq` (the too-high Logout's MsgSeqNum S), `at` (arrival time), `phase ∈ {none, pending, acking}`. The bound
-coroutine owns its captured `gen`; the session owns `peer_logout_wake_` (published by the bound, cleared when its T
-race ends and on every exit) and the join counter (a shared counter, incremented before `co_spawn`, decremented by
+coroutine owns its captured `gen`; the session owns `peer_logout_wake_` (published by the bound, cleared in the
+bound's body when its T race ends; no exit guard clears it, D4.4) and the join counter (a shared counter, incremented before `co_spawn`, decremented by
 the bound's exit guard, which touches only that counter; `close()` and the reconnect drain poll it by post).
 
-## Logout owner — `logout_in_flight_` (new, Gate A round 2)
+## Logout owner — `logout_in_flight_` (new, Gate A round 2; held at the leaf before loop 2)
 
-`bool`, set synchronously by each Logout emitter of an established session before its first suspension (the bound's
-acknowledgement, the in-sequence acknowledgement, the gap deadline's, Arm B's, the T = 0 acknowledgement,
-`run_logout_phase1`) and cleared when its leaf returns, on every path. Found set: `close(graceful)` poll-joins it
-inside its grace and sends none; an inbound emitter skips its Logout and keeps the rest of its ending; the bound sets
-the phase `none` and exits. Invariant: at most one Logout of an established session is in flight.
+`bool`, tested and set synchronously, before any stamp, number peek or suspension, by the two Logout leaves of an
+established session: `inbound_logout_leaf_` (every Active inbound-chain Logout and the bound's acknowledgement:
+in-sequence acknowledgement, gap deadline, SendingTime-fatal, PossDup Arm D, Arm B, T = 0 acknowledgement, the
+bound) and `run_logout_phase1`; cleared when that leaf returns, on every path. Found set: `inbound_logout_leaf_`
+returns a "skipped" success and its caller keeps the rest of its ending; `close(graceful)` poll-joins it inside its
+grace and sends none; the bound tests it at its claim, sets the phase `none` and exits. LS-1 pins that no other
+Active Logout builder exists. Invariant: at most one Logout of an established session is in flight.
 
 | From | Event | To | Effect |
 |---|---|---|---|
 | none | too-high Logout in Active, T > 0 and a clock | pending | ResendRequest if none outstanding; bound spawned, captures `gen = conn_gen_`, publishes its wake, then re-tests "live" |
 | none | too-high Logout in Active, T = 0 or no clock | none | acknowledgement at once, no ResendRequest |
-| pending | NextNumIn > S (`note_inbound_advance_`) or T elapsed, and "live" still true after the gate wait | acking | bound sends the acknowledgement; then, if `conn_gen_ == gen`, the event and `Disconnected` |
+| pending | NextNumIn > S (`note_inbound_advance_`) or T elapsed, "live" still true after the gate wait, and `logout_in_flight_` clear | acking | bound sends the acknowledgement; then the event and `Disconnected` (guarded by `fsm_state_ != Disconnected`; `conn_gen_ == gen` asserted, D4.4) |
 | pending | gap deadline, in-sequence Logout, `close(graceful)`, Arm B too-low, `close(terminal)`, stop | none | that ending's own Logout, if any, is the one Logout (claim table D4.6); bound woken |
+| pending | SendingTime-fatal or PossDup Arm-D Logout (existing endings) | pending | the leaf owns their Logout; the bound exits at its owner test or at their `Disconnected` edge |
 | acking | `close(graceful)` | acking | `logout_in_flight_` is set: `close()` poll-joins it inside its grace, before `Disconnected` and before closing the transport |
-| any | new transport installed (always after the drain) | none | `conn_gen_` moves; a bound not yet resumed finds `none` and exits without effect |
+| any | new transport installed (always after the drain, which waited for the bound's counter to reach 0) | none | `conn_gen_` moves; no bound of the old connection exists (D1 step 3) |
 | any | edge into `Disconnected` | unchanged | bound and gate woken; the bound's "live" test fails (not Active), so it exits without effect |
 
 "Live" = phase `pending`, `fsm_state_ == Active`, not `closing`/`closed_drained`, no engine stop.

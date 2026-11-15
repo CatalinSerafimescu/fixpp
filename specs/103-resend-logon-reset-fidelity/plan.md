@@ -119,7 +119,8 @@ Order by dependency (research R17 as amended):
    the acceptor's single `attach_accepted_transport` per Session. The send-path allocation witness's MemoryStore
    twin measured on the base, and its planted-allocation proof. Results recorded in the evidence file, never in
    code comments.
-2. **#578 (D1)** — RED reproduction first (arms A, B, E; G1–G4, F1, F2 after phases 6 and 7); if GREEN on the base,
+2. **#578 (D1)** — RED reproduction first (arms A, B, E; G1–G10, F1, F2 and the RS-1 census after phases 6 and 7;
+   G10 is the Engine-managed reader fence, owner ruling 2026-11-15); if GREEN on the base,
    close as not-a-bug with evidence. The clear and `conn_gen_` at `install_reconnected_transport`; the wakes on the
    `Disconnected` edge; doc fix. The reconnect drain (`inbound_depth_`, the quiescence wait, its bound, its closing
    and cancellation endings) lands after phase 6, because it waits on the gate's shared count.
@@ -135,15 +136,20 @@ Order by dependency (research R17 as amended):
    (R-588-a…f), with the pre-check in the waiting frame or the split idiom (D5′.2); R-588-h's repeat count derived
    from its mutant's measured miss rate; bench (SC-006).
 7. **#577 Logout half (D4.2–D4.7)** — the mark, `note_inbound_advance_`, `run_peer_logout_bound_` with its
-   generation, publish-then-re-test, join and wake sources, the claim table, `close()`'s join of an `acking`
-   bound, the send refusal; cells (a)…(k), R-588-e, #578 F1, F2, G2.
+   generation, publish-then-re-test, join and wake sources, the claim table, the `logout_in_flight_` owner held in
+   `inbound_logout_leaf_` and `run_logout_phase1`, `close()`'s poll-join, the send refusal; cells (a)…(k), R-588-e,
+   LO-1–LO-4, the LS-1 census, #578 F1, F2, G2.
 8. **#581 (D6, D9)** — the deadline predicate; the Heartbeat's early return removed; Arm B's Logout; B-8's
    validate-gate carve-out; flipped pins (research Pins and pass-2 list).
 9. **Records** — B&L delta (retire L-029-3, L-537-1; amend B-013-1, B-013-6, B-016-1, B-537-1, B-537-2, B-538-2,
    L-028-3, L-092-1/-2, L-093-7; add B-103-1…10, L-103-2…7), catalogue and coverage-index rows, brain supersession
    flags (R16, R23), the stale `logout_disconnect_timeout_ms` comment (R15), the QFJ 3.0.1 → 3.0.2 library doc
    mentions (`tests/interop/KNOWN-LIMITATIONS.md`, `brain/components/quickfix-compat.md`), a follow-up issue for
-   L-103-2 (peer-spontaneous 141=Y acknowledgement).
+   L-103-2 (peer-spontaneous 141=Y acknowledgement). The `session.hpp` comment on `root_cancellation_slot()`,
+   which advertises the slot for transport I/O and the parser→fromApp chain, is corrected to the single-client
+   invariant and names 103 (research D1, P3-1). `drive_reconnect`'s header doc: the Engine-managed fence, the
+   standalone reader precondition, single flight, the 563 §2.1a supersession, the latches, and "not bound to
+   `root_cancellation_slot()`".
 10. **Polish** — `/simplify`, `/speckit-verify` (Tier-1 mirror incl. MSVC build of new targets, sanitizers, SC-002's
     live Logon cells with no helper forcing a policy, and the in-process FileStore restart cell in both roles),
     Gate B, the scoped Codex Gate A on the applied XI §3 clause, owner sign-off of the amendment.
@@ -154,7 +160,7 @@ Order by dependency (research R17 as amended):
 |---|---|---|
 | `detail::replay_gate` (shared/exclusive, strand-local) | FR-014 widened by the owner: in-flight sends and liveness/close frames must be ordered around an answer | a flag + send-only wait (pass-1 D5) misses both widened cases; `async_mutex` leaves #583's terminal filter and serialises sends against each other |
 | `run_peer_logout_bound_` detached coroutine | FR-010's bound must fire with no inbound frame | the liveness loop returns at HB 0 and has no per-session wake; a frame-driven check cannot fire without a frame |
-| one session-level Logout owner (`logout_in_flight_`) across the competing Logout endings, with `close()`'s poll-join | at most one Logout, exactly one except FR-010's enumerated cases (US3, FR-010, FR-017/018) | per-site guards were the #554 per-site-patching failure class; a claim alone cannot keep `close()` from closing the transport under a claimed acknowledgement |
+| one session-level Logout owner (`logout_in_flight_`), held at the two Active Logout leaves, with `close()`'s poll-join | at most one Logout, exactly one except FR-010's enumerated cases (US3, FR-010, FR-017/018) | per-site guards were the #554 per-site-patching failure class; a claim alone cannot keep `close()` from closing the transport under a claimed acknowledgement |
 | `conn_gen_`, `inbound_depth_`, `reconnect_in_flight_` and the reconnect drain's operation contract | FR-006 and the owner's "drain, then reconnect": no frame of the old connection on the new one, whatever `drive_reconnect` starts from | an FSM-edge clear misses that route (Codex #7); a write fence leaves the install racing live emits; refusing from Active is a new public error path the owner did not choose |
 | Article XI §3 amendment | Article XX §1: the gate conflicts with §3 as written | `async_mutex`: exclusive only, #583's terminal filter, teardown drains |
 
@@ -162,9 +168,14 @@ Order by dependency (research R17 as amended):
 
 - Round 1 applied 2026-11-14: Codex P1=13 P2=4 P3=0; Opus post-judging P1=3 P2=8 P3=13; rewrite addresses RC1–RC5 and the three owner rulings. Reviews: research/reviews/codex_103-resend-logon-reset-fidelity_gate_a_review.md, research/reviews/opus_103-resend-logon-reset-fidelity_gate_a_adversarial_review.md.
 
+- Loop 1 exhausted at round 3 (2026-11-15): Codex P1=1 P2=1 P3=1; Opus post-judging P1=0 P2=2 P3=5; owner chose hand-edit + one targeted round and the Engine-managed fence; pre-loop-2 edit applies RC-α, RC-β, RC-γ and the P3s. Reviews: research/reviews/codex_103-resend-logon-reset-fidelity_gate_a_3_review.md, research/reviews/opus_103-resend-logon-reset-fidelity_gate_a_3_adversarial_review.md.
 - Round 2 applied 2026-11-15: Codex P1=3 P2=3 P3=1; Opus post-judging P1=0 P2=8 P3=3; rewrite addresses root causes A–D. Reviews: research/reviews/codex_103-resend-logon-reset-fidelity_gate_a_2_review.md, research/reviews/opus_103-resend-logon-reset-fidelity_gate_a_2_adversarial_review.md.
 
-Points for a scoped round 3 (the Opus round-2 recommendation: D1 and D4.6 only): D1's operation contract
+Points for loop 2 (pre-loop-2 edit): D1's step 0a reader fence and the standalone precondition (G10), the root
+slot's single-client invariant (RS-1); D4.6's owner at the leaf, its derivation rule and LS-1, LO-1e/f, LO-2e/f/g,
+LO-4; the amendment contract's confinement as a structural check.
+
+Points for a scoped round 3 (as recorded before round 3; the Opus round-2 recommendation: D1 and D4.6 only): D1's operation contract
 (single flight and its error code, the R-4 post and the 563 §2.1a supersession, the detached-coroutine wait and its
 `root_cancel_` emit, the install's commit-point refusal, the #585 boundary, the latches); D4.6's `logout_in_flight_`
 owner, its emitter list and `run_logout_phase1`'s `Disconnected` early exit; cells G5–G9 and LO-1–LO-3.

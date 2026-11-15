@@ -28,7 +28,22 @@ commit point at the install, its cancellation boundary, and the latches it leave
   rather than branching on it.
 - **Drain, then reconnect (owner ruling 2026-11-15).** No frame numbered or claimed on the old connection may be
   written on the new one. `Session::drive_reconnect` therefore begins, before `reconnect_fsm_.drive_reconnect_attempt()`:
-  0. **Single flight, then callback entry (Gate A round 2).**
+  0a. **The reader fence (owner ruling 2026-11-15, Gate A loop 1 exhausted, RC-α).** The inbound reader of the
+     installed transport is not the Session's: on an Engine-managed Session the Engine's read pump holds
+     `live_transport()` by reference (`run_read_pump`'s `Transport&`), and an install's
+     `reconnected_transport_ = std::move(transport)` would destroy that transport under the pump's outstanding read
+     (plain TCP: the aborted read's `transport_read_cancelled` makes the pump `close(terminal)` the reconnected
+     session; TLS: a stream destroyed under a pending composed operation), and nothing would ever read the new
+     one. So, before anything else: **if `cfg_.engine_managed` and `live_transport_shared_() != nullptr`,
+     `drive_reconnect` returns `session_already_open`** with no drain, no transition and no connect. That is exactly
+     the case where the Engine's pump owns the installed transport; the Engine's own first call has no transport
+     installed and is unaffected. The fence applies from Active and from every later state that keeps the transport
+     open (a post-acknowledgement, deadline or Arm-B `Disconnected`, L-103-5). Why `session_already_open`: the same
+     reason as single flight below: a connection is already established and owned. Cell G10.
+     **Standalone Sessions keep the drain, with a documented precondition** (header doc): the caller's own reader
+     must have left `live_transport()` before the call, and the caller starts its reader on the new
+     `live_transport()` after the call returns. 103 does not detect a reader that breaks it.
+  0b. **Single flight, then callback entry (Gate A round 2).**
      - A strand-local `bool reconnect_in_flight_`, tested and set at entry and cleared by an RAII holder on every
        exit. A second call while one is in flight returns `session_already_open` at once, with no drain and no
        connect. Why that code: it is the session lifecycle's existing "this establishment is already under way"
@@ -71,6 +86,14 @@ commit point at the install, its cancellation boundary, and the latches it leave
        `bound_counter == 0 && liveness_counter_ == 0` by post, as `close()`'s liveness join does. No bound or
        liveness loop of the old connection survives the install, so the new connection's Active spawns the only
        loop and the old bound cannot meet a new mark.
+     - **The root slot's single-client invariant (Gate A round 3, P3-1), on which this emit rests.** In production
+       `root_cancel_.slot()` is bound at exactly two sites, the two `run_liveness_loop` spawns (the acceptor's
+       Logon→Active path and the initiator's LogonSent→Active path), and `Session::root_cancellation_slot()` has no
+       production caller. The Engine's read pump is cancelled through a different signal, the Engine's per-entry
+       `session_cancel`. So the emit retires exactly the old liveness loop. `drive_reconnect` itself must not be
+       bound to that slot (its own drain would cancel it), and the header doc says so. A source census (cell RS-1)
+       pins the invariant; the `session.hpp` comment on `root_cancellation_slot()`, which still advertises the slot
+       for transport I/O and the parser→fromApp chain, is corrected and names 103 (plan phase 9).
      - A frame-local check first: if quiescent, no await (the usual case: a reconnect after `Disconnected`).
      - Otherwise it waits on the gate's wake like any gate waiter (`++waiters` under RAII, `async_wait` on the lazy
        timer, D5′.2's pre-check in the same frame). The gate's last shared release calls `wake_all()` whenever
@@ -98,7 +121,7 @@ commit point at the install, its cancellation boundary, and the latches it leave
        Session is destroyed, and that a caller awaiting `drive_reconnect` keeps the Session alive, is the one every
        Session awaitable already has.
      - **Called from a callback.** A callback cannot `co_await`, so a `drive_reconnect` started from `fromApp` or
-       `toApp` is `co_spawn`ed; step 0's post takes it off the callback's stack, and its drain then waits on
+       `toApp` is `co_spawn`ed; step 0b's post takes it off the callback's stack, and its drain then waits on
        `inbound_depth_` (`fromApp`) or on the shared hold of the emit whose `toApp` started it. No deadlock.
   4. Then `drive_reconnect_attempt()` (connect, handshake) and `install_reconnected_transport`. **The install is the
      commit point (Gate A round 2, Codex #2).** Connect and handshake suspend, so a `close()` or `Engine::stop()` can
@@ -138,10 +161,13 @@ commit point at the install, its cancellation boundary, and the latches it leave
 - **The acceptor.** `Session::attach_accepted_transport` is called once per Session: the accept loop builds a fresh
   `Session` for each accepted connection (`run_accept_loop`'s `local_session`), so no in-place re-attach exists.
   The phase-1 census confirms it by reading; no clear is added there.
-- **The in-place-swap class is closed, not disclosed (owner ruling 2026-11-15).** Before 103 a `Session::send`
-  mid-store when a direct caller installed a new transport wrote its frame on the new transport, because
-  `live_write_serialized_` reads the live transport at call time. The drain removes it for every emitter: no emit is
-  in flight when the install runs.
+- **The in-place-swap class: the outbound half is closed; the inbound half is fenced or a precondition (corrected
+  at Gate A loop 1's exhaustion; round 2 over-claimed it closed).** Outbound: before 103 a `Session::send` mid-store
+  when a direct caller installed a new transport wrote its frame on the new transport, because
+  `live_write_serialized_` reads the live transport at call time; the drain removes that for every emitter. Inbound:
+  the drain cannot join a reader outside the Session. On an Engine-managed Session step 0a refuses; on a standalone
+  Session the caller's reader is the caller's (the precondition above). The Engine's multi-cycle respin stays
+  deferred (`engine.cpp`'s "DEFERRED per Clarifications 2026-05-31 / E-1a").
 - **Doc fix in `resend_state.hpp`.** Replace "reset on gap close (awaiting_resend=false) or session exit" with:
   reset by `ReconnectFsm::exit_awaiting_resend`, which is called when the gap closes and when a new transport is
   installed (`Session::install_reconnected_transport`). Name feature 103 in that comment, so it points at the
@@ -172,10 +198,13 @@ commit point at the install, its cancellation boundary, and the latches it leave
 **Reachability, disclosed with the B-row:** the Engine never reconnects a Session in place. `run_connect_loop` ends
 with `close(terminal)`, which is permanent, and there is one Session per entry per `Engine::start`. #578 is
 reachable only by a direct caller of the public `Session::drive_reconnect`, from `Disconnected` or from Active.
-**Behaviour change for that caller (C++ API only; no C-ABI reach):** a `drive_reconnect` from Active now records
-`Disconnected` first, so `onLogout` fires and waiting sends are refused, and it may return later (after the drain)
-or return `session_already_closed` / `dispatch_aborted` without reconnecting. The header doc of `drive_reconnect`
-states it (`include/fixpp/session/session.hpp`).
+**Behaviour change for that caller (C++ API only; no C-ABI reach):** on an Engine-managed Session with a transport
+installed, `drive_reconnect` is refused (`session_already_open`, step 0a). On a standalone Session, one from Active
+now records `Disconnected` first, so `onLogout` fires and waiting sends are refused, and it may return later (after
+the drain) or return `session_already_closed` / `dispatch_aborted` / `session_already_open` without reconnecting.
+The header doc of `drive_reconnect` states all of it: the fence, the standalone reader precondition, single flight,
+the 563 §2.1a supersession, the latches, and that it must not be bound to `root_cancellation_slot()`
+(`include/fixpp/session/session.hpp`).
 
 **Sites:**
 - `Session::install_reconnected_transport`, `Session::record_state_transition_` (`src/session/session.cpp`).
@@ -432,15 +461,17 @@ In both routes:
 
 **D4.6 — At most one Logout, exactly one except FR-010's cases: one session-level owner.** Everything runs on the strand, and every claim is made synchronously, before the claimer's first suspension. (Amended at Gate A round 1, RC2; rewritten at Gate A round 2, root cause B: round 1's claim covered only the bound's `acking` window, and every other Logout emitter dropped ownership at `pending → none` before its first suspension, so a `close(graceful)` arriving while that Logout was in its store call sent a second one.)
 
-**The owner: `logout_in_flight_`.** A private `bool` of `Session`. Every Logout emitter of an established session tests it and sets it synchronously, before its stamp, number peek or first suspension, and clears it when its leaf returns, on every path (success, a build overflow, a `toAdmin` throw, an assignment or store failure, a cut Logout). The emitters, each by its enclosing function (re-derive: D5′.4's census, restricted to `build_logout` callers on Active or LogonReceived paths):
-- the bound's acknowledgement (D4.4; it also sets the phase `acking`, which the send refusal and the inbound drain read);
-- `inbound_logout_leaf_`'s Active callers: the in-sequence peer Logout's acknowledgement (`on_inbound_active_logout_`), the gap deadline's Logout (`resend_gap_deadline_`), Arm B's too-low Logout (D9), and the T = 0 / no-clock acknowledgement (D4.2);
-- `run_logout_phase1` (`close(graceful)`'s phase 1).
+**The owner: `logout_in_flight_`, held at the leaf (rewritten before Gate A loop 2, RC-β).** A private `bool` of `Session`. Round 2 put the test and set at each caller, a hand-written per-site list that missed two current emitters (`on_inbound_active_sending_time_reject_`'s Logout and `on_inbound_active_poss_dup_`'s Arm-D Logout): the #554 per-site class this plan rejects. Ownership now sits at the two Logout leaves of an established session:
+- **`inbound_logout_leaf_`** tests and sets it at its entry, synchronously, before its stamp, number peek or first suspension, and clears it when it returns, on every path (success, a build overflow, a `toAdmin` throw, an assignment or store failure). If it is already set, the leaf returns a "skipped" success at once: no Logout. Every caller of the leaf is an `on_inbound_active_*` function or the bound, so every Active Logout of the inbound chain is owned by construction, a future caller included: today the in-sequence acknowledgement (`on_inbound_active_logout_`), the gap deadline (`resend_gap_deadline_`), the SendingTime-fatal Logout (`on_inbound_active_sending_time_reject_`), the PossDup Arm-D Logout (`on_inbound_active_poss_dup_`), and after 103 Arm B (D9), the T = 0 / no-clock acknowledgement (D4.2) and the bound's acknowledgement (D4.5).
+- **`run_logout_phase1`**, which builds its own Logout, tests and sets it before its stamp and peek and clears it on every exit.
+- **The bound** keeps its own test at its claim (set → the phase becomes `none` and the bound exits, D4.4); the set itself happens at the leaf's entry, with no suspension between the bound's test and the leaf's entry.
 
-Logouts of the Logon arms (`refuse_logon_with_logout_`, `inbound_logon_sent_logout_leaf_`) and `honor_peer_next_expected_`'s two Logouts run before Active in the Logon's own chain, where no other emitter can run, and do not take it.
+How the list is derived (re-derive it this way, never by hand): the `build_logout` call sites of `session.cpp` and their enclosing functions. Those outside Active (`refuse_logon_with_logout_`, `inbound_logon_sent_logout_leaf_`, the two Logouts of `honor_peer_next_expected_`) run in the Logon's own chain before Active, where no other emitter can run, and do not take the owner. Inside Active there are exactly two Logout builders, `inbound_logout_leaf_` and `run_logout_phase1`. A source census (cell LS-1) pins "`inbound_logout_leaf_` is the only `build_logout` leaf reachable from an `on_inbound_active_*` function", proven to fire on a seeded new caller of `build_logout` in an Active arm.
+
+Every caller of the leaf records `Disconnected` synchronously after the leaf returns, so clearing at the leaf's exit leaves no gap on the strand.
 
 **The rule.**
-- An inbound-chain emitter (in-sequence acknowledgement, deadline, Arm B, T = 0 acknowledgement) that finds it set skips its own Logout and keeps the rest of its ending (its `Disconnected`, its event, its return value). A pending mark is claimed `pending → none`, with the bound's wake, as before.
+- An inbound-chain emitter (any caller of `inbound_logout_leaf_`) whose leaf finds it set gets the leaf's "skipped" success and keeps the rest of its ending (its `Disconnected`, its event, its return value). A pending mark is claimed `pending → none`, with the bound's wake, as before.
 - The bound that finds it set at its claim sets the phase `none` and exits (D4.4).
 - `close(graceful)` that finds it set at its phase-1 block (Active or LogonReceived, not escalated) does not run `run_logout_phase1()`. It races, inside the same `close_grace`, a poll by post until `logout_in_flight_` is clear (`co_await asio::post` in a loop, as the liveness join polls) against `close_grace.async_wait(as_tuple)`. The Logout in flight completes, and its emitter records `Disconnected` itself, before `close()` records `Disconnected` and before it closes the transport. If the grace runs out first, the force-close path follows as for phase 1 (FR-010 case 5, L-103-6). No Session member is published for this and no exit guard touches the Session.
 - `close(terminal)`, the read pump's EOF close and `Engine::stop()` take no Logout of their own; a Logout in flight may or may not reach the wire (FR-010 case 4).
@@ -453,6 +484,7 @@ Logouts of the Logon arms (`refuse_logon_with_logout_`, `inbound_logon_sent_logo
 | `on_inbound_active_logout_` (in sequence) | set → skip | `pending → none` and wake | its own acknowledgement, unless skipped |
 | Arm B (too low, 43≠Y; D9) | set → skip | `pending → none` and wake | its own Logout, unless skipped |
 | T = 0 / no-clock acknowledgement (D4.2) | set → skip | — | its own acknowledgement, unless skipped |
+| SendingTime-fatal Logout, PossDup Arm-D Logout (existing) | set → skip (at the leaf) | — (no per-site claim: the leaf owns the Logout, and the bound exits at its owner test or at their `Disconnected` edge) | their Reject, then their Logout unless skipped; `Disconnected` either way |
 | `close(graceful)`, phase-1 block | set → poll-join inside its grace | `pending → none` and wake | phase 1's Logout if not set; none of its own if set |
 | `close(terminal)`, EOF close, `Engine::stop()` | — | `pending → none` and wake | none of its own (FR-010 case 4) |
 | `on_inbound_active_` in Active while the phase is `acking` | — | — | the frame is drained, as the LogoutSent row drains (one flag read per frame) |
@@ -477,7 +509,7 @@ This keeps every owner-approved zero case: no emitter takes over after another's
 - `Session::on_inbound_active_too_high_`, `Session::on_inbound_active_out_of_sequence_`, `Session::on_inbound_active_logout_`, `Session::on_inbound_active_`.
 - `Session::close_filled_resend_gap_`, `Session::consume_rejected_seqnum_`, `Session::apply_inbound_sequence_reset`, `Session::resend_gap_deadline_`, `Session::close`, `Session::send_body_`, `Session::record_state_transition_`.
 - New: `Session::note_inbound_advance_`, `Session::run_peer_logout_bound_`, `Session::answer_resend_request_`.
-- `logout_in_flight_` (round 2, D4.6) and its test/set/clear in `inbound_logout_leaf_`'s Active callers and in `Session::run_logout_phase1` (with its `Disconnected` early exit); the `~Session` assertion on the bound's counter.
+- `logout_in_flight_` (D4.6) and its test/set/clear in `Session::inbound_logout_leaf_` (with its "skipped" success) and in `Session::run_logout_phase1` (with its `Disconnected` early exit), and the bound's test at its claim; the `~Session` assertion on the bound's counter.
 - `include/fixpp/session/session.hpp`: new private members. This is a C++ layout change, made before the first release.
 
 ---
@@ -810,7 +842,7 @@ Each is one compare when nobody waits.
   - 52 comes from `effective_clock_ ? stamp_sending_time(...) : SendingTimeStamp{}`, `on_inbound_active_logout_`'s pattern, because a session may run without a clock.
   - **If it does not fit** (long CompIDs): the builder fails, the leaf sends nothing and returns success, and the arm still records `Disconnected`. This is the existing fail-closed behaviour of B-537-2 and of the SendingTime route. Disclosed.
 - **Order of effects:**
-  1. The `logout_in_flight_` test (set → no Logout of its own, the rest of the ending kept) and set, then any `peer_logout_` claim (D4.6).
+  1. Any `peer_logout_` claim; the `logout_in_flight_` test and set happen inside `inbound_logout_leaf_` (set already → the leaf's "skipped" success, the rest of the ending kept; D4.6).
   2. `toAdmin(Logout)`.
   3. The outbound store, then the write.
   4. `record_state_transition_(Disconnected)`, whose Active edge runs `onLogout`.
@@ -886,7 +918,9 @@ Each cell must be RED on `2c74af92`, by reading. #577 and #578 are unconfirmed: 
   - **G6 (commit point):** after a quiescent drain, the mock factory's connect is held; `close(terminal)`; release → `drive_reconnect` returns `session_already_closed`, `install_reconnected_transport` installed nothing and recorded no transition, the new mock transport is closed, and no Logon is emitted. A twin with `Engine::stop()`.
   - **G7 (callback entry):** `co_spawn(drive_reconnect())` from `fromApp`, and from `toApp`, on an Active session in a Debug build → `onLogout` runs with callback depth 1 (its own scope, not nested in the callback), no assertion fires, and the reconnect completes after the callback (and, for `toApp`, after its emit) returns.
   - **G8 (detached coroutines):** Active, HB set (a liveness loop running) and a pending mark (a bound alive); `drive_reconnect()` from Active in a Debug build → after the install `liveness_counter_` counts only the new connection's loop and the bound's counter is 0; no generation assertion fires. Twin: the new connection receives a too-high Logout at once after Active → its acknowledgement waits for the new mark's own N-passes-S or T, never the old one's.
-  - **G9 (the depth holder survives and unwinds):** a `co_spawn(on_inbound_frame(...))` held in a reply's store call is destroyed (its io_context stopped and its frame destroyed) → `inbound_depth_ == 0` and a drain waiting on it wakes.
+  - **G9 (the depth holder survives and unwinds):** a `co_spawn(on_inbound_frame(...))` held in a reply's store call is destroyed (its io_context stopped and its frame destroyed) **while the Session is alive** → `inbound_depth_ == 0` and a drain waiting on it wakes. Precondition (Gate A round 3, P3-4): the Session outlives the frame; the holder's destructor touches `inbound_depth_` and the gate, as the chain's lock guards already touch Session members at frame destruction. The holder stays a Session member, not a shared counter, because it needs the wake.
+  - **G10 (the reader fence; owner ruling 2026-11-15):** an Engine-managed initiator (`cfg_.engine_managed`) with its read pump parked in `async_read_some` on the installed transport; a direct `drive_reconnect()` (through `Engine::lookup`'s Session), once from Active and once from a post-acknowledgement `Disconnected` (transport still open) → `session_already_open`, no transition (Active stays Active), no connect attempted, the old transport intact (`live_transport()` is the same object), and the pump still reading: a frame fed after the refusal is processed. Control: the Engine's own first `drive_reconnect` (no transport installed) proceeds.
+  - **RS-1 (the root slot's single client; source census):** every `bind_cancellation_slot(root_cancel_.slot(), …)` site in `src/` and `include/` is one of the two `run_liveness_loop` spawns, and `root_cancellation_slot()` has no caller outside tests. Run in `/speckit-verify`; proven to fire on a seeded third binder in a scratch copy.
   - **F1 (the bound's late start):** the mark is set and a test hook holds the child bound before its first run until `close(terminal)` has begun and is at its join; release; `close()` must complete within a bounded pump (no wait of T).
   - **F2 (a wake lost before the race starts):** the hook holds the bound after its publish-and-re-test and before its race's wait is initiated; a wrong-CompID frame records `Disconnected` (the edge's wake lands on a timer with no wait pending); release; `close()` must complete within a bounded pump.
 - **Assertions:** `resend_outstanding()` is false after the reconnect's Active, and only 35=2 frames written after the reconnect mark count: exactly one with 7=2 (A, B), none from the old range. Arm E: `onLogout` fired once (the drain's edge), no 35=5 written after the reconnect mark at or after `at + T`, the send returns success and its frame is written, and the bound's join counter is 0. Arms F1, F2: `close()` returns within the pump; the join counter is 0. Frames written before the reconnect mark (Arm A's Arm-B Logout, D9) are not scoped by these assertions.
@@ -895,7 +929,7 @@ Each cell must be RED on `2c74af92`, by reading. #577 and #578 are unconfirmed: 
   - delete the resend-state clear in `install_reconnected_transport` → A RED (nothing written: the first too-high frame is "already requested"), B RED (a 35=5 "ResendRequest unanswered"), E RED;
   - delete the mark clear at install, keep the generation → E RED (the send is refused);
   - delete the drain's wait (install at once) → G1 RED (34=S written on the new transport, after the new Logon) and G2 RED (a 35=5 on the new connection);
-  - drop `inbound_depth_` from the quiescence condition → G3 RED; place its holder in `on_inbound_frame` → G3 RED (the count reads 0 while the reply is held); drop the single-flight flag → G5 RED (two connects, two installs); drop the commit-point test → G6 RED (an install on a closed Session); drop the R-4 post → G7 RED (the lifecycle-entry assertion fires); drop the detached-coroutine wait or the drain's `root_cancel_` emit → G8 RED (a generation assertion, or two liveness loops); drop the step-1 / after-wake closing re-test → G4(1) RED (an install after `close()`); add a `reset_cancellation_state` after the cancelled wait → G4(2) RED; delete the force-close at expiry → G4(3) RED (the pump deadline expires, no hang);
+  - drop `inbound_depth_` from the quiescence condition → G3 RED; place its holder in `on_inbound_frame` → G3 RED (the count reads 0 while the reply is held); drop the single-flight flag → G5 RED (two connects, two installs); drop the commit-point test → G6 RED (an install on a closed Session); drop the R-4 post → G7 RED (the lifecycle-entry assertion fires); drop the detached-coroutine wait → G8 RED (a generation assertion, or two liveness loops); drop the drain's `root_cancel_` emit → G8 RED by its bounded-pump deadline (on the mock clock the old loop never wakes, so the drain polls until the deadline; Gate A round 3, P3-3); drop the reader fence → G10 RED (the old transport destroyed under the parked read: the pump's `close(terminal)` on plain TCP, an ASan report on TLS); drop the step-1 / after-wake closing re-test → G4(1) RED (an install after `close()`); add a `reset_cancellation_state` after the cancelled wait → G4(2) RED; delete the force-close at expiry → G4(3) RED (the pump deadline expires, no hang);
   - delete the bound's wake on the `Disconnected` edge → (j) of the too-high Logout cells RED (the join counter stays 1 until T);
   - delete the bound's publish-then-re-test → F1 RED; delete `close()`'s unconditional wake → F2 RED (each: the pump deadline expires, with no hang).
 
@@ -1041,9 +1075,11 @@ Each cell must be RED on `2c74af92`, by reading. #577 and #578 are unconfirmed: 
 | B-7 | Same (after D4) | The mark is pending; a too-low frame whose Logout store call is held; advance to T; release. | Exactly one 35=5. | — | Drop Arm B's claim → two. |
 | B-8 | Same | Validation on, a dictionary-invalid too-low frame; and a too-low 43=Y application frame. | A Reject and Active, no 35=5; ignored and Active. | A dictionary-valid too-low frame draws B-1's Logout. | Route validate-gate failures of too-low frames into Arm B (a sequence check ahead of the gate's Reject) → a 35=5 and Disconnected. |
 | B-9 | — | Dropped: LogonReceived processes no frame but the Logon (D4.2). | — | — | — |
-| LO-1 | `test_103_too_high_logout.cpp` (Gate A round 2, root cause B) | Each inbound Logout emitter (in-sequence acknowledgement, gap deadline, Arm B, T = 0 acknowledgement), with and without a pending mark, held in its Logout's `store`; `co_spawn(close(graceful))`; release. | Exactly one 35=5 (the emitter's), written before the transport closes; `close()` returns; `logout_in_flight_` clear. | `close(graceful)` with no Logout in flight sends phase 1's. | Delete `close()`'s owner test → two 35=5. Delete the emitter's owner set → two 35=5. |
-| LO-2 | Same | The reverse: `close(graceful)`'s phase-1 Logout held in its `store`; then each inbound Logout emitter's frame (an in-sequence peer Logout, the deadline past its bound, a too-low frame) is fed; release. | Exactly one 35=5 (phase 1's); the inbound ending's `Disconnected` is recorded; `run_logout_phase1` takes its early exit (no `LogoutSent`). | — | Delete the inbound emitter's skip → two 35=5. Delete phase 1's `Disconnected` early exit → `LogoutSent` after `Disconnected` and a grace-long wait. |
+| LO-1 | `test_103_too_high_logout.cpp` (Gate A round 2, root cause B; extended before loop 2) | Each inbound Logout emitter (in-sequence acknowledgement, gap deadline, Arm B, T = 0 acknowledgement, and LO-1e the SendingTime-fatal Logout, LO-1f the PossDup Arm-D Logout), with and without a pending mark, held in its Logout's `store`; `co_spawn(close(graceful))`; release. | Exactly one 35=5 (the emitter's), written before the transport closes; `close()` returns; `logout_in_flight_` clear. | `close(graceful)` with no Logout in flight sends phase 1's. | Delete `close()`'s owner test → two 35=5. Delete the emitter's owner set → two 35=5. |
+| LO-2 | Same | The reverse: `close(graceful)`'s phase-1 Logout held in its `store`; then each inbound Logout emitter's frame (an in-sequence peer Logout, the deadline past its bound, a too-low frame; LO-2e a SendingTime-fatal frame, LO-2f a PossDup Arm-D frame, LO-2g a too-high Logout with T = 0 or no clock) is fed; release. | Exactly one 35=5 (phase 1's); the inbound ending's `Disconnected` is recorded; `run_logout_phase1` takes its early exit (no `LogoutSent`). | — | Delete the inbound emitter's skip → two 35=5. Delete phase 1's `Disconnected` early exit → `LogoutSent` after `Disconnected` and a grace-long wait. |
 | LO-3 | Same | `close(graceful)` while a Logout is in flight whose store outlasts the grace. | No second 35=5; force-close at the grace (FR-010 case 5). | — | — |
+| LO-4 | Same | A pending mark; a SendingTime-fatal (or Arm-D) frame's Logout held in its `store`; T expires; release. | Exactly one 35=5 (the held one); the bound exits with no Logout. | — | Move the owner back to the callers' list without these two → two 35=5. |
+| LS-1 | Source census (Gate A loop 2 pre-edit) | Every `build_logout` call site in `session.cpp` and its enclosing function; every function reachable from an `on_inbound_active_*` function that builds a Logout. | `inbound_logout_leaf_` and `run_logout_phase1` are the only Active Logout builders, and only `inbound_logout_leaf_` is reachable from an `on_inbound_active_*` function. Run in `/speckit-verify`. | — | A seeded new `build_logout` call in an Active arm in a scratch copy → the census fires. |
 
 The pass-1 #588 cell is replaced by R-588-a…h.
 
@@ -1058,11 +1094,11 @@ Every behavioural FR has a cell and a mutant that turns it RED for the FR's own 
 | FR-003 | #682 AS2 | drop strict from `reset_before_logon` |
 | FR-004 | #682 AS3 | restore the silent refusal |
 | FR-005 | #682 AS1, AS4, AS5 | restore the strict default |
-| FR-006 | #578 A, B, E, G1–G9, F1, F2 | delete the install clear (A, B, E); delete the drain's wait (G1, G2) or its `inbound_depth_` term (G3); its closing re-test, a cancellation reset or the force-close (G4); delete the publish-then-re-test (F1) or `close()`'s unconditional wake (F2) |
+| FR-006 | #578 A, B, E, G1–G10, F1, F2; RS-1 | delete the install clear (A, B, E); delete the drain's wait (G1, G2) or its `inbound_depth_` term (G3); its closing re-test, a cancellation reset or the force-close (G4); delete the publish-then-re-test (F1) or `close()`'s unconditional wake (F2) |
 | FR-007 | the `resend_state.hpp` comment, read against D1's site | none (documentation) |
 | FR-008 | #577 RR Arms 1, 2 | delete either too-high dispatch |
 | FR-009 | #577 RR Arm 2; Logout (e) | send a second ResendRequest from the out-of-sequence route |
-| FR-010 | Logout (a)–(j); R-588-e; B-7; LO-1, LO-2 | delete `note_inbound_advance_`'s mark test; delete the bound; delete a claim; delete an owner test or set; remove `close()`'s poll-join |
+| FR-010 | Logout (a)–(j); R-588-e; B-7; LO-1–LO-4; LS-1 | delete `note_inbound_advance_`'s mark test; delete the bound; delete a claim; delete an owner test or set; remove `close()`'s poll-join |
 | FR-011 | Logout (d), (k); #578 E | delete the send refusal; delete the install mark clear |
 | FR-012 | #580 7=0 arm; SC-003 assertion | delete the clamp |
 | FR-013 | #580 absent arms | delete the presence test |
@@ -1160,7 +1196,7 @@ Characterisation cells, no behavioural mutant: B-4 (`toAdmin` throws; control B-
 - `B-103-6`: a too-high ResendRequest is serviced; at most one ResendRequest of fixpp's own; no `fromAdmin`. With `validate_sequence_numbers` off, unchanged.
 - `B-103-7`: the pending-Logout ending (Active only): the acknowledgement when N passes S or at T, or at once with T=0 or no clock; sends refused while the mark is pending; TestRequests and ResendRequests answered meanwhile; no `fromAdmin`; the durable N stays at or below S on the timeout route; a `close(graceful)` that finds any Logout in flight (the acknowledgement, the in-sequence acknowledgement, the deadline's, Arm B's) waits for it inside its grace and sends none of its own, and an inbound Logout emitter that finds one in flight skips its own (D4.6). At most one Logout; none where the CompIDs overflow the Logout buffer, where `toAdmin` throws on it, where its assignment or store call fails, or where the transport ends first (the peer's EOF, `close(terminal)`, `Engine::stop()`) (FR-010 cases 1–4).
 - `B-103-8`: the four emitter kinds (`Session::send`, the liveness Heartbeat and TestRequest, `close()`'s Logout, the pending-Logout acknowledgement) wait for a running resend answer and are numbered after it; a frame numbered before an answer is written before it; a waiting send is refused (`session_invalid_state_for_send`) on close, stop, a non-Active state or the mark, or returns `dispatch_aborted` with no state change and its caller's cancellation still pending on its own cancellation.
-- `B-103-9`: resend state and the mark end with the connection: cleared when a new transport is installed, whether or not the session passed through `Disconnected`; the mark's bound acts only on its own connection. Reachable in place only through a direct `Session::drive_reconnect`. A `drive_reconnect` from Active or LogonReceived records `Disconnected` first (so `onLogout` fires and waiting sends are refused) and waits until no emit of the old connection is in flight, so no frame numbered or claimed on the old connection is written on the new one (before 103 a send mid-store could be); the wait is bounded by `logout_disconnect_timeout_ms`, then the old transport is force-closed, except that a wedged store call holds it as it holds `close()` today (B-598-1); a `close()` or `Engine::stop()` meanwhile, during the drain or during connect and handshake, ends it with `session_already_closed` and no install (the newly connected transport is closed); a caller cancellation of the drain's wait with `dispatch_aborted`, no install (one that reaches the backoff, connect or handshake is fixpp#585's, as today); a second concurrent call returns `session_already_open`; a call from a callback runs after one post. The old connection's liveness loop and bound exit before the install. Disclosed: the reconnect leaves `onLogon_fired_`, `onLogout_fired_`, `reached_active_` and `logout_seen_` set, so the new connection fires no `onLogon` and no `onLogout`, and a Logout seen on the old connection still triggers `reset_on_logout`'s teardown reset.
+- `B-103-9`: resend state and the mark end with the connection: cleared when a new transport is installed, whether or not the session passed through `Disconnected`; the mark's bound acts only on its own connection. Reachable in place only through a direct `Session::drive_reconnect`. On an Engine-managed Session with a transport installed, that call is refused with `session_already_open` (the Engine's read pump owns the installed transport; owner ruling 2026-11-15). On a standalone Session the caller's reader must have left `live_transport()` before the call and starts on the new one after it returns. A standalone `drive_reconnect` from Active or LogonReceived records `Disconnected` first (so `onLogout` fires and waiting sends are refused) and waits until no emit of the old connection is in flight, so no frame numbered or claimed on the old connection is written on the new one (before 103 a send mid-store could be); the wait is bounded by `logout_disconnect_timeout_ms`, then the old transport is force-closed, except that a wedged store call holds it as it holds `close()` today (B-598-1); a `close()` or `Engine::stop()` meanwhile, during the drain or during connect and handshake, ends it with `session_already_closed` and no install (the newly connected transport is closed); a caller cancellation of the drain's wait with `dispatch_aborted`, no install (one that reaches the backoff, connect or handshake is fixpp#585's, as today); a second concurrent call returns `session_already_open`; a call from a callback runs after one post. The old connection's liveness loop and bound exit before the install. Disclosed: the reconnect leaves `onLogon_fired_`, `onLogout_fired_`, `reached_active_` and `logout_seen_` set, so the new connection fires no `onLogon` and no `onLogout`, and a Logout seen on the old connection still triggers `reset_on_logout`'s teardown reset.
 - `B-103-10`: every frame below NextNumIn without 43=Y, the Heartbeat included, in Active with sequence validation on, that reaches the sequence check draws `Logout 58="MsgSeqNum too low, expecting N but received M"`, then `Disconnected`. N is not advanced. There is no `fromAdmin`/`fromApp` and no event. The gap deadline's Logout takes precedence. Not covered: a frame Rejected at the validate gate (it stays Active, as QuickFIX C++), a frame failing the CompID or SendingTime check, an unparseable or garbled frame. No Logout where the CompIDs overflow the Logout buffer or `toAdmin` throws.
 - `L-103-2`: a peer-spontaneous 141=Y acknowledgement at 34=1 with a hydrated N above 1 ends the session (D2.3).
 - `L-103-3`: HB ≤ 0: no gap deadline (restated).

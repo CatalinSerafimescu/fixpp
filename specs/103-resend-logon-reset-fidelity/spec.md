@@ -157,6 +157,20 @@ the FIX Session Layer's, or from both:
   the resend state and the mark are cleared). No frame numbered or claimed on the old connection may be written on
   the new one. Owner ruling; research D1.
 
+### Session 2026-11-15 (Gate A loop 1 exhausted; owner rulings)
+
+- Q: The Engine's read pump holds the installed transport by reference, so a direct `drive_reconnect` on an
+  Engine-managed Session destroys that transport under the pump's outstanding read, and nothing reads the new one
+  (Gate A round 3, RC-α). Fence it, or disclose only? → A: **fence Engine-managed:** `drive_reconnect` refuses with
+  `session_already_open` when the Session is Engine-managed (`cfg_.engine_managed`) and already has an installed
+  transport, the case where the Engine's read pump owns it; the Engine's own first call has no transport and is
+  unaffected. A standalone Session keeps the drain, with a documented precondition: the caller's reader must have
+  left `live_transport()` before the call and starts on the new `live_transport()` after it returns. Owner ruling;
+  research D1 step 0a.
+- Q: How does the bundle continue after loop 1's round-3 exhaustion? → A: **hand-edit plus one targeted round:** the
+  pre-loop-2 edit applies RC-α (above), RC-β (the Logout owner moves into `inbound_logout_leaf_`), RC-γ and the
+  round-3 P3s, then a fresh Gate A loop runs. Owner ruling.
+
 ## User Scenarios & Testing *(mandatory)*
 
 Every item is test-first: a cell that is RED on the base `2c74af92` comes before its fix. #577 and #578 are
@@ -216,7 +230,11 @@ a ResendRequest for the new gap is written. Control: a fresh Session given the s
 5. **Given** Active with a send held in its store call (or a claimed acknowledgement held in its store call),
    **When** `drive_reconnect()` is called, **Then** it records `Disconnected`, waits until that frame's store and
    write end on the old transport, and only then installs the new transport; the frame is never written on the new
-   transport.
+   transport (a standalone Session; its reader follows the precondition of FR-006).
+6. **Given** an Engine-managed initiator whose read pump is reading the installed transport, **When** the
+   application calls `drive_reconnect()` directly, from Active or from the `Disconnected` that follows a Logout
+   acknowledgement, **Then** it returns `session_already_open`, the session's state is unchanged, the installed
+   transport is untouched, and the pump keeps reading it.
 
 ### User Story 3 — A too-high ResendRequest is answered; a too-high Logout is acknowledged after recovery (Priority: P2)
 
@@ -357,7 +375,11 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   and no detached coroutine of the old connection (its liveness loop, the mark's bound) is alive, and only then
   install the new transport; no frame numbered or claimed on the old connection MAY be written on the new one. The
   emit wait is bounded by `logout_disconnect_timeout_ms`, after which the old transport is force-closed so a blocked
-  write unwinds. The operation (research D1): one at a time (a second concurrent call returns
+  write unwinds. On an Engine-managed Session that already has an installed transport, `drive_reconnect` MUST
+  refuse with `session_already_open` and change nothing (the Engine's read pump owns that transport; owner ruling
+  2026-11-15); on a standalone Session the caller's reader MUST have left `live_transport()` before the call and
+  starts on the new `live_transport()` after it returns (a documented precondition, not detected). The operation
+  (research D1): one at a time (a second concurrent call returns
   `session_already_open` and connects nothing); started from a callback, it runs after one post, as `close()` does;
   a `close()` or `Engine::stop()` that starts during it, during the drain or during connect and handshake, ends it
   with `session_already_closed`, no install, and the newly connected transport closed (the install is the commit

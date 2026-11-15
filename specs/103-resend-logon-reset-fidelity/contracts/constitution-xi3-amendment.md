@@ -80,11 +80,15 @@ Sync Impact Report — v4.3 → v4.4 (<date>) — PENDING
 - The inserted sentence is the only change to §3, and its three existing sentences are byte-identical.
 - Each property in the sentence is one that D5′ states, checked as follows (Gate A round 2, Codex #7: a runtime cell
   cannot establish a structural property, so the two kinds are separate):
-  - **Behavioural cells:** confinement to the session's domain (R-588-h under TSan: no report with sends from several
-    threads); no change to the caller's cancellation filter or state (R-588-g's filter witness, R-588-f(3)); a gate
+  - **Behavioural cells:** no change to the caller's cancellation filter or state (R-588-g's filter witness, R-588-f(3)); a gate
     built, held, released and destroyed with no waiter needs nothing at teardown (R-588-g's no-waiter
     construct/destroy cell under ASan).
-  - **Structural checks:** no atomic and no OS synchronisation primitive in `detail::replay_gate` (a source check on
+  - **Structural checks:** confinement to the session's domain (Gate A round 3, Codex #3: a clean TSan run proves
+    only that no race occurred on the paths exercised): a call-site census of every gate acquire, release and
+    `wake_all` site and of every wake source (data-model.md's replay-gate list), each shown to run on the session
+    strand (`note_engine_stop_` included: it runs inside `Engine::stop()`'s `co_spawn` on the session strand), plus a
+    Debug `FIXPP_ASSERT(strand.running_in_this_thread())` at the gate's entry points where the executor is a strand;
+    R-588-h under TSan stays as race evidence only. No atomic and no OS synchronisation primitive in `detail::replay_gate` (a source check on
     the gate's header and source: no `std::atomic`, `std::mutex`, `std::shared_mutex`, `std::condition_variable` or
     `<atomic>` / `<mutex>` / `<shared_mutex>` / `<condition_variable>` include, run in `/speckit-verify`, proven to
     fire on a seeded `std::atomic` in a scratch copy); no unlock-before-destruction precondition and no teardown
