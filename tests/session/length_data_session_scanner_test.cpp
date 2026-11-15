@@ -177,17 +177,6 @@ TEST(LengthDataSessionScanner, MaskTag554LeavesCountedValueBytesUnchanged) {
         << "the genuine Password must still be masked";
 }
 
-TEST(LengthDataSessionScanner, RedactTag554LeavesCountedValueUnchanged) {
-    std::string const counted_part = counted(95, 96,
-                                             "x\x01"
-                                             "554=secret");
-    std::string const frame =
-        "8=FIX.4.4\x01"
-        "35=A\x01" +
-        counted_part + "10=000\x01";
-    EXPECT_NE(redact_tag554(frame).find(counted_part), std::string::npos);
-}
-
 // A count that ends on a byte other than SOH is malformed too (design §4, rows 6-8):
 // the scanner stops, so the bytes after the counted value are never read as a field.
 TEST(LengthDataSessionScanner, ScanFrameHeaderStopsAtACountEndingOnANonSohByte) {
@@ -243,7 +232,6 @@ TEST(LengthDataSessionScanner, Tag554ScannersFallBackToEveryAnchoredPasswordOnAM
         "96=x\x01"
         "554=secret\x01");
     EXPECT_TRUE(frame_has_genuine_tag554(std::span<const std::byte>{only_after}));
-    EXPECT_EQ(redact_tag554(std::string{as_sv(only_after)}).find("secret"), std::string::npos);
 }
 
 TEST(LengthDataSessionScanner, MaskTag554SkipsAFieldWhoseTagIsNotDigits) {

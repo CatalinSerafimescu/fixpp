@@ -517,8 +517,9 @@ struct SessionConfig {
 
     // username / password: optional FIX Logon credentials emitted as
     //   Username(553) / Password(554) in the outbound Logon when set.
-    //   Parsed and surfaced inbound (E5 / FR-008a); Password is REDACTED in logs
-    //   (INV-FIXT-4 / FR-011). Validation of inbound credentials is deferred to a
+    //   Parsed and surfaced inbound (E5 / FR-008a). The Password of an outbound
+    //   Logon is masked in the message store (034), and `logon_credentials`'s
+    //   operator<< prints it as `***` (INV-FIXT-4 / FR-011). Validation of inbound credentials is deferred to a
     //   future config-gated feature (Clarify 2026-06-12 FR-008a); these fields
     //   cover the parse+surface slice only.
     //   [033 data-model.md E3; FR-008a; INV-FIXT-4]

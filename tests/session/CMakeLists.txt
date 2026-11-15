@@ -2644,9 +2644,10 @@ set_tests_properties(session_fixt_logon_establishment PROPERTIES
 set_property(TEST session_fixt_logon_establishment APPEND PROPERTY LABELS 097)
 
 # T002: credentials test target.
-# T009/T010: logon_credentials operator<< redaction + redact_tag554 utility.
-# T019/T020 (US2 W6/W7): credential emission, seam capture, redaction witnesses.
-# Requires fixpp_session + fixpp_mock_clock for W6/W7 (added at US2 phase).
+# T009/T010: logon_credentials operator<< redaction.
+# T019 (US2 W6): credential emission and seam capture. fixpp#652 removed the
+# redact_tag554 utility and its W7 cells.
+# Requires fixpp_session + fixpp_mock_clock for W6 (added at US2 phase).
 add_executable(session_fixt_credentials
   test_fixt_credentials.cpp
 )

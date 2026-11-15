@@ -9,7 +9,7 @@
 // Later phases (T005–T011) append cells to this file.
 //
 // TDD: Phase 2 cells are RED until T003 (masker impl) ships; the masker is in
-// include/fixpp/session/logon_credentials.hpp (sibling of redact_tag554).
+// include/fixpp/session/logon_credentials.hpp.
 //
 // FileStore-fixture headers (_fixtures_/store_temp_dir.hpp,
 // _fixtures_/test_double_fsm.hpp) are included for later phases (T005 US1
@@ -1113,6 +1113,132 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
                          asio::use_future)
         .get();
     pool.join();  // drain+join workers before executor-holding locals destruct (teardown-race fix)
+}
+
+// ── fixpp#652: credentials inside an application message are stored in cleartext ──
+//
+// The store mask runs only for MsgType(35)=A (store_then_emit's `msg_type == "A"`
+// gate), because an application frame is replayed verbatim from its stored bytes
+// and a mask there would reach the wire at resend. So an application-sent
+// UserRequest (35=BE) keeps Username(553), Password(554), NewPassword(925),
+// EncryptedPassword(1402) and EncryptedNewPassword(1404) in cleartext at rest.
+// This is the behaviour the B&L row for fixpp#652 records; QuickFIX's stores do the
+// same.
+//
+// Harness: T005's FileStore initiator (its own Logon carries a password) brought to
+// Active by T009's hand-crafted reply Logon, then one `send()` of a 35=BE.
+//
+// Each credential value is a distinct sentinel, so each clause is checked on its
+// own. Positive control: the initiator's Logon password, in the same store
+// directory, is masked. Without it, "cleartext on disk" could also mean that the
+// mask never runs at all.
+TEST(CredentialStoreRedaction, AppUserRequest_CredentialFieldsStoredInCleartext_LogonPasswordMasked) {
+    constexpr std::string_view kLogonPassword = "logon-pw-652-sentinel";
+    constexpr std::string_view kUsername = "user-652-sentinel";
+    constexpr std::string_view kPassword = "pw-652-sentinel";
+    constexpr std::string_view kNewPassword = "newpw-652-sentinel";
+    constexpr std::string_view kEncryptedPassword = "encpw-652-sentinel";
+    constexpr std::string_view kEncryptedNewPassword = "encnewpw-652-sentinel";
+
+    asio::thread_pool pool{2};
+    asio::any_io_executor sx = asio::make_strand(pool);
+    auto dir = unique_store_dir("b87_userrequest");
+
+    FileStore::Config fcfg;
+    fcfg.directory = dir;
+    fcfg.sender_comp_id = "INITR";
+    fcfg.target_comp_id = "ACCEPTR";
+    fcfg.max_frame_bytes = 4096;
+    fcfg.file_io_executor = sx;
+
+    fixpp::core::EngineConfig engine;
+    engine.executor = sx;
+    engine.clock = make_mock_clock(sx);
+    engine.max_store_memory_per_session = 1ULL << 30;
+
+    auto dict = make_fix50sp2_dict();
+    version_registry registry{{dict}};
+
+    std::vector<std::byte> wire_out;
+    auto init_cfg = make_fixt_initiator_cfg(sx);
+    init_cfg.password = std::string(kLogonPassword);
+    init_cfg.store_factory = std::make_unique<FileStoreFactory>(fcfg);
+    init_cfg.transport_send = [&](std::span<const std::byte> f) {
+        wire_out.assign(f.begin(), f.end());
+    };
+
+    bool sent = false;
+    {
+        Session initiator{engine, init_cfg, &registry};
+        auto open_r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
+        EXPECT_TRUE(open_r.has_value()) << "open() must succeed for a configured FIXT initiator";
+
+        auto peer_reply = make_fixt_logon("ACCEPTR", "INITR", 1, "9");
+        auto inb_r = asio::co_spawn(sx,
+                                    initiator.on_inbound_frame(std::span<const std::byte>{
+                                        peer_reply.data(), peer_reply.size()}),
+                                    asio::use_future)
+                         .get();
+        EXPECT_TRUE(inb_r.has_value()) << "on_inbound_frame must accept the reply Logon";
+        EXPECT_EQ(initiator.state(), fsm_state::Active) << "Initiator must reach Active";
+
+        std::string payload = "35=BE\x01";
+        payload += "923=REQ-652\x01";  // UserRequestID
+        payload += "924=1\x01";        // UserRequestType = LogOnUser
+        payload += "553=" + std::string(kUsername) + "\x01";
+        payload += "554=" + std::string(kPassword) + "\x01";
+        payload += "925=" + std::string(kNewPassword) + "\x01";
+        payload += "1401=" + std::to_string(kEncryptedPassword.size()) + "\x01";
+        payload += "1402=" + std::string(kEncryptedPassword) + "\x01";
+        payload += "1403=" + std::to_string(kEncryptedNewPassword.size()) + "\x01";
+        payload += "1404=" + std::string(kEncryptedNewPassword) + "\x01";
+        std::vector<std::byte> payload_bytes;
+        payload_bytes.reserve(payload.size());
+        for (char c : payload) payload_bytes.push_back(static_cast<std::byte>(c));
+
+        wire_out.clear();
+        auto send_r = asio::co_spawn(sx,
+                                     initiator.send(std::span<const std::byte>{
+                                         payload_bytes.data(), payload_bytes.size()}),
+                                     asio::use_future)
+                          .get();
+        EXPECT_TRUE(send_r.has_value()) << "send() of a 35=BE must succeed in Active";
+        sent = send_r.has_value();
+
+        (void)asio::co_spawn(sx, initiator.close(fixpp::session::close_mode::terminal),
+                             asio::use_future)
+            .get();
+    }
+    // Session destructs here: advisory lock released, FileStore flushed.
+
+    ASSERT_TRUE(sent) << "the 35=BE was not sent, so nothing below is about it";
+    std::string const wire_str = bytes_as_str(wire_out);
+    EXPECT_NE(wire_str.find("\x01" "35=BE\x01"), std::string::npos)
+        << "the last frame on the wire must be the UserRequest: " << wire_str;
+
+    // Positive control: the Logon's own Password is masked in the same store.
+    EXPECT_FALSE(disk_bytes_contain(dir, kLogonPassword))
+        << "the Logon password must not be at rest in cleartext (034 mask)";
+    std::string masked_logon_pw = "554=";
+    masked_logon_pw.append(kLogonPassword.size(), '*');
+    EXPECT_TRUE(disk_bytes_contain(dir, masked_logon_pw))
+        << "the Logon password's same-length mask must be on disk";
+
+    // The UserRequest's credential fields are at rest verbatim, each as its own field.
+    EXPECT_TRUE(disk_bytes_contain(dir, "\x01" "553=" + std::string(kUsername) + "\x01"))
+        << "Username(553) of an application UserRequest is stored in cleartext";
+    EXPECT_TRUE(disk_bytes_contain(dir, "\x01" "554=" + std::string(kPassword) + "\x01"))
+        << "Password(554) of an application UserRequest is stored in cleartext";
+    EXPECT_TRUE(disk_bytes_contain(dir, "\x01" "925=" + std::string(kNewPassword) + "\x01"))
+        << "NewPassword(925) of an application UserRequest is stored in cleartext";
+    EXPECT_TRUE(disk_bytes_contain(dir, "\x01" "1402=" + std::string(kEncryptedPassword) + "\x01"))
+        << "EncryptedPassword(1402) of an application UserRequest is stored in cleartext";
+    EXPECT_TRUE(
+        disk_bytes_contain(dir, "\x01" "1404=" + std::string(kEncryptedNewPassword) + "\x01"))
+        << "EncryptedNewPassword(1404) of an application UserRequest is stored in cleartext";
+
+    std::filesystem::remove_all(dir);
+    pool.join();
 }
 
 // ── T007 / open()-time credential-length guard (both roles) ──────────────────
