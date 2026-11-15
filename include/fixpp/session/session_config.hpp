@@ -331,6 +331,10 @@ struct SessionConfig {
     // timeout in milliseconds. Default 2000 ms (matches QuickFIX/J
     // SessionState.logoutTimeoutMs=2000L). Must be > 0; validated at
     // SessionConfig-build time per [arch §5.3] construction-time carve-out.
+    // On a FileStore session the timeout does not bound a graceful close while the
+    // Logout's write job is in the file executor: a cancellation does not take a job
+    // out of an executor, so the close completes only after the file executor has run
+    // that write (L-563-7; fixpp#598).
     std::uint32_t logout_disconnect_timeout_ms{2000};
 
     // 093-inbound-frame-dispositions (FR-006; contract C-4; data-model E-7): the
