@@ -46,6 +46,7 @@
 #include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -169,6 +170,9 @@ struct Options {
     // True: the session stores what it sends in an unbounded MemoryStore, so a ResendRequest
     // is answered by replays. False: no store, and the walk answers with one GapFill.
     bool with_store = false;
+    // When set, SessionConfig::logout_disconnect_timeout_ms (the too-high Logout's bound T,
+    // research D4.4); otherwise SessionConfig's default.
+    std::optional<std::uint32_t> logout_timeout_ms = std::nullopt;
 };
 
 // The peer is "TW" and the session "ISLD", FIX.4.2.
@@ -205,6 +209,7 @@ public:
         cfg.validate_sequence_numbers = o.validate_sequence_numbers;
         cfg.executor_override = ioc.get_executor();
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        if (o.logout_timeout_ms) cfg.logout_disconnect_timeout_ms = *o.logout_timeout_ms;
         if (o.with_store) {
             cfg.store_factory = std::make_shared<fixpp::session::MemoryStoreFactory>(
                 fixpp::session::MemoryStore::Config{

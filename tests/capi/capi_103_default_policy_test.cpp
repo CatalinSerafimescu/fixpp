@@ -17,6 +17,8 @@
 //   - an acceptor accepts a Logon without 141 (fixpp_session_is_established true), and
 //     fixpp_session_close on that session returns FIXPP_ERR_OK, where a session that never
 //     established returns FIXPP_ERR_THREAD_SESSION_LIFECYCLE.
+//
+// fixpp#577, tasks T077: fixpp_session_send while a too-high Logout is pending is refused.
 #include <gtest/gtest.h>
 
 #include <chrono>
@@ -166,6 +168,54 @@ TEST(CapiDefaultResetPolicy103, DefaultAcceptor_AcceptsALogonWithout141_CloseRet
     EXPECT_TRUE(established) << "the default acceptor did not accept a Logon without 141";
     peer.disconnect();
     EXPECT_EQ(a.drain_then_close(), FIXPP_ERR_OK);
+}
+
+// tasks T077 (contracts/c-abi-1.17.md, "Witnesses"; FR-011, research D4.7): fixpp_session_send
+// while a too-high Logout waits for its acknowledgement returns the invalid-state code. The
+// Logout is at 34=4 with NextNumIn 2; the engine's ResendRequest shows it was processed.
+// The session's bound T is SessionConfig's default (the C ABI sets none), on the real clock:
+// after T the session acknowledges and is Disconnected, where a send is refused for another
+// reason, so the send must be made before T has run from the Logout's write.
+// The peer's Logon carries ResetSeqNumFlag(141)=Y, which the base's strict default and
+// 103's lenient default both accept, so the cell runs the same path on both.
+constexpr std::chrono::milliseconds kDefaultLogoutBound{2000};
+
+TEST(CapiTooHighLogout103, SendWhileATooHighLogoutIsPending_RefusedWithTheInvalidStateCode) {
+    DefaultEngine a{FIXPP_ROLE_ACCEPTOR, 0};
+    ASSERT_TRUE(a.start()) << "setup";
+    std::uint16_t const port = a.bound_port();
+    ASSERT_NE(port, 0U) << "setup";
+    ifd::RawAcceptor peer;
+    ASSERT_TRUE(peer.connect(port)) << "setup";
+    ASSERT_TRUE(peer.write(ifd::frame44(
+        "35=A\x01" + ifd::peer_header(1) +
+        ifd::fix_fields({{98, "0"}, {108, std::to_string(kHeartBtIntSeconds)}, {141, "Y"}}))));
+    ASSERT_TRUE(a.wait_established()) << "setup";
+    ASSERT_TRUE(peer.read_logon()) << "setup: the engine wrote no Logon reply";
+
+    auto const logout_written = std::chrono::steady_clock::now();
+    ASSERT_TRUE(peer.write(ifd::frame44("35=5\x01" + ifd::peer_header(4))));
+    auto const rr =
+        peer.read_until([](std::string const& f) { return ifd::RawAcceptor::has_field(f, "35=2"); },
+                        kDefaultLogoutBound / 2);
+    ASSERT_TRUE(rr.has_value()) << "the engine wrote no ResendRequest after the too-high Logout";
+
+    std::string const payload =
+        "35=D\x01"
+        "11=ORD-577-C\x01"
+        "55=TESTSYM\x01"
+        "54=1\x01"
+        "38=100\x01"
+        "40=1\x01";
+    auto const rc = fixpp_session_send(
+        a.session, reinterpret_cast<std::uint8_t const*>(payload.data()), payload.size());
+    auto const elapsed = std::chrono::steady_clock::now() - logout_written;
+    ASSERT_LT(elapsed, kDefaultLogoutBound)
+        << "the path was not exercised: the send ran after the bound T";
+    EXPECT_EQ(rc, FIXPP_ERR_SESSION_INVALID_STATE)
+        << "fixpp_session_send returned " << static_cast<int>(rc);
+    peer.disconnect();
+    (void)a.drain_then_close();
 }
 
 }  // namespace

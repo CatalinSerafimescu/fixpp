@@ -366,6 +366,7 @@ add_session_103_bucket(session_103_tests
   test_103_resend_state_reconnect.cpp                                   # 103 T018
   test_103_default_reset_policy.cpp                                     # 103 T022
   test_103_too_high_resend_request.cpp                                  # 103 T047
+  test_103_too_high_logout.cpp                                          # 103 T076
 )
 # 103 T054: R-588-g, detail::replay_gate alone on a session strand; an entry of its own (it
 # replaces global operator new for its allocation evidence).
