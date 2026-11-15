@@ -35,11 +35,15 @@
 
 #include <algorithm>
 #include <asio/awaitable.hpp>
+#include <asio/bind_cancellation_slot.hpp>
 #include <asio/cancellation_signal.hpp>
+#include <asio/cancellation_type.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/use_future.hpp>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/seqnum.hpp>
@@ -47,6 +51,7 @@
 #include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <functional>
+#include <future>
 #include <initializer_list>
 #include <optional>
 #include <span>
@@ -875,6 +880,402 @@ TEST(ResendAnswerTooHigh577, SevenPresent_TooHigh_TailReadFails_EndsWithNoResend
         << "fixpp's ResendRequest was sent after a failed answer:\n"
         << printable(a.written);
     expect_nothing_written_and_ended(a, error::store_io_failure);
+}
+
+// ── fixpp#588: a live frame does not land inside a resend answer (R-588-a, b, d, f) ──────
+
+// Application messages the session sends before the request; stored at 2 to 4.
+constexpr unsigned kStoredFor588 = 3;
+
+// A frame of `frames` that the walk wrote: a replay (43=Y) or a GapFill (123=Y).
+bool is_answer_frame(std::string const& f) {
+    return plain_rig::field_value(f, "43") == "Y" || plain_rig::field_value(f, "123") == "Y";
+}
+// The index of the last answer frame in `frames`, or frames.size() when there is none.
+std::size_t last_answer_index(std::vector<std::string> const& frames) {
+    std::size_t at = frames.size();
+    for (std::size_t i = 0; i < frames.size(); ++i) {
+        if (is_answer_frame(frames[i])) at = i;
+    }
+    return at;
+}
+std::size_t first_answer_index(std::vector<std::string> const& frames) {
+    for (std::size_t i = 0; i < frames.size(); ++i) {
+        if (is_answer_frame(frames[i])) return i;
+    }
+    return frames.size();
+}
+// The highest MsgSeqNum(34) the answer covers: a replay's 34, or a GapFill's NewSeqNo(36) - 1.
+seqnum_t answer_end(std::vector<std::string> const& frames) {
+    seqnum_t end = 0;
+    for (auto const& f : frames) {
+        if (plain_rig::field_value(f, "43") == "Y" && plain_rig::field_value(f, "35") != "4") {
+            end = std::max(end, static_cast<seqnum_t>(std::stoul(plain_rig::field_value(f, "34"))));
+        } else if (plain_rig::field_value(f, "123") == "Y") {
+            end = std::max(end,
+                           static_cast<seqnum_t>(std::stoul(plain_rig::field_value(f, "36")) - 1U));
+        }
+    }
+    return end;
+}
+
+// An acceptor in Active that has sent kStoredFor588 application messages, then given a
+// ResendRequest from 1 through 0 whose walk the recording store holds at one chosen call.
+// What a coroutine of the fixture refers to is declared before `s`, so it outlives the drain
+// ~DirectAcceptor runs; the Session is destroyed before its io_context (`s.f.ioc` is
+// DirectAcceptor's first member).
+struct HeldWalk {
+    CallingThreadReadings rr_call;
+    asio::cancellation_signal rr_none;
+    std::future<void> rr_fut;
+    std::deque<std::vector<std::byte>> live_payloads;
+    std::deque<CallingThreadReadings> live_calls;
+    std::deque<asio::cancellation_signal> live_signals;
+    std::deque<std::future<void>> live_futs;
+    ActiveSession s;
+
+    HeldWalk() = default;
+    explicit HeldWalk(DirectAcceptor::Options o) : s{std::move(o)} {}
+
+    // Setup, then the request, held at the first call `hold` accepts; `held` is that call's
+    // result when the hold ends (none: forwarded). False when the walk did not reach the hold.
+    [[nodiscard]] bool start(std::function<bool(StoreCall const&)> hold,
+                             std::optional<error> held = std::nullopt, bool request = true) {
+        if (!s.setup(kStoredFor588)) return false;
+        s.f.log->hold_in = std::move(hold);
+        s.f.log->held_result = held;
+        if (!request) return true;
+        return feed_request();
+    }
+    [[nodiscard]] bool feed_request() {
+        s.request_frame = s.f.msg("2", 2,
+                                  "7=1\x01"
+                                  "16=0\x01");
+        rr_fut = s.f.feed(s.request_frame, rr_call, rr_none);
+        return s.f.run_until([&] { return s.f.log->holding(); });
+    }
+    // Starts Session::send of an application message from a coroutine of the cell's, bound to
+    // a signal of its own; returns its index.
+    std::size_t spawn_send(std::string const& clordid) {
+        live_payloads.push_back(
+            plain_rig::to_bytes("35=D\x01"
+                                "11=" +
+                                clordid +
+                                "\x01"
+                                "55=AAPL\x01"));
+        auto const& p = live_payloads.back();
+        live_calls.emplace_back();
+        live_signals.emplace_back();
+        auto& out = live_calls.back();
+        live_futs.push_back(asio::co_spawn(
+            s.f.ioc,
+            fixpp::test_support::await_and_read_thread(
+                [this, &p] { return s.f.session->send(std::span<const std::byte>{p}); }, out),
+            asio::bind_cancellation_slot(live_signals.back().slot(), asio::use_future)));
+        return live_futs.size() - 1;
+    }
+    [[nodiscard]] bool send_done(std::size_t i) const {
+        return DirectAcceptor::ready(live_futs[i]);
+    }
+    // A bounded window of pumping that no predicate ends: `d` of real time.
+    void pump_for(std::chrono::milliseconds d) {
+        (void)s.f.run_until([] { return false; }, d);
+    }
+    void release() {
+        s.f.log->release_hold();
+        (void)s.f.run_until([&] { return !rr_fut.valid() || DirectAcceptor::ready(rr_fut); });
+    }
+};
+
+// The frames written for the live message whose ClOrdID(11) is `clordid` (not a replay).
+std::vector<std::string> live_frames(std::vector<std::string> const& frames,
+                                     std::string const& clordid) {
+    std::vector<std::string> out;
+    for (auto const& f : frames) {
+        if (plain_rig::field_value(f, "11") == clordid && plain_rig::field_value(f, "43") != "Y")
+            out.push_back(f);
+    }
+    return out;
+}
+
+// A window long enough for a send that nothing holds to run to its end several times over,
+// and short against the hold's own bound (recording_store.hpp's kBodyHoldBound).
+constexpr std::chrono::milliseconds kHeldWindow{50};
+// R-588-c's HeartBtInt.
+constexpr std::chrono::seconds kHb588{30};
+
+// 103 tasks T055, R-588-a (FR-014, SC-005): a send started while the answer is held at
+// the read of slot 3 is not written while the hold lasts; once the answer ends, every frame
+// numbered above the answer's range follows its last frame, and the live message carries the
+// number after the answer's end.
+TEST(ReplayGate588, R588a_SendDuringTheAnswer_WrittenAfterIt) {
+    HeldWalk w;
+    ASSERT_TRUE(w.start(is_slot_read(3))) << "setup: the walk did not reach the held read";
+    auto const i = w.spawn_send("LIVE-A");
+    w.pump_for(kHeldWindow);
+    EXPECT_TRUE(live_frames(w.s.f.sent, "LIVE-A").empty())
+        << "the live frame was written while the answer is held:\n"
+        << printable(w.s.f.sent);
+    w.release();
+    ASSERT_TRUE(w.s.f.run_until([&] { return w.send_done(i); })) << "the send never ended";
+    EXPECT_TRUE(w.live_calls[i].returned_success()) << w.live_calls[i].call_text();
+    auto const& sent = w.s.f.sent;
+    auto const end = answer_end(sent);
+    ASSERT_GE(end, kFirstApp + kStoredFor588 - 1) << printable(sent);
+    auto const last = last_answer_index(sent);
+    for (std::size_t k = 0; k < sent.size(); ++k) {
+        auto const n = std::stoul(plain_rig::field_value(sent[k], "34"));
+        if (!is_answer_frame(sent[k]) && n > end) {
+            EXPECT_GT(k, last) << "frame " << k << " (34=" << n
+                               << ") above the answer's range precedes its last frame:\n"
+                               << printable(sent);
+        }
+    }
+    auto const live = live_frames(sent, "LIVE-A");
+    ASSERT_EQ(live.size(), 1U) << printable(sent);
+    EXPECT_EQ(plain_rig::field_value(live.front(), "34"), std::to_string(end + 1))
+        << printable(sent);
+    EXPECT_TRUE(fixpp::test_support::t103::no_frame_carries_34_zero(sent))  // SC-003
+        << printable(sent);
+}
+
+// R-588-a's store-fault arm: the held read fails; the answer ends the session, and the send
+// contended behind it ends with session_invalid_state_for_send, writing nothing.
+TEST(ReplayGate588, R588a_HeldReadFails_ContendedSendRefused) {
+    HeldWalk w;
+    ASSERT_TRUE(w.start(is_slot_read(3), error::store_io_failure))
+        << "setup: the walk did not reach the held read";
+    auto const i = w.spawn_send("LIVE-F");
+    w.pump_for(kHeldWindow);
+    w.release();
+    ASSERT_TRUE(w.s.f.run_until([&] { return w.send_done(i); })) << "the send never ended";
+    EXPECT_TRUE(w.live_calls[i].returned_error(error::session_invalid_state_for_send))
+        << w.live_calls[i].call_text();
+    EXPECT_TRUE(live_frames(w.s.f.sent, "LIVE-F").empty()) << printable(w.s.f.sent);
+    EXPECT_EQ(w.s.f.session->state(), fsm_state::Disconnected);
+}
+
+// R-588-a's control: with no ResendRequest the same send is written in the pump that starts
+// it.
+TEST(ReplayGate588, R588a_Control_NoAnswer_SendWrittenAtOnce) {
+    HeldWalk w;
+    ASSERT_TRUE(w.start(is_slot_read(3), std::nullopt, /*request=*/false));
+    auto const i = w.spawn_send("LIVE-C");
+    w.s.f.ioc.restart();
+    w.s.f.ioc.poll();
+    EXPECT_TRUE(w.send_done(i)) << "the send did not end in one poll";
+    EXPECT_EQ(live_frames(w.s.f.sent, "LIVE-C").size(), 1U) << printable(w.s.f.sent);
+}
+
+// 103 tasks T056, R-588-b (FR-014): a send numbered S that is still in its store call
+// when the ResendRequest arrives is written before the answer's first frame, and the
+// answer covers S.
+TEST(ReplayGate588, R588b_SendInItsStoreCall_WrittenBeforeTheAnswerWhichCoversIt) {
+    HeldWalk w;
+    constexpr seqnum_t s_num = kFirstApp + kStoredFor588;
+    ASSERT_TRUE(w.start(
+        [](StoreCall const& c) {
+            return c.op == store_op::store && c.dir == direction_t::outbound && c.first == s_num;
+        },
+        std::nullopt, /*request=*/false));
+    auto const i = w.spawn_send("LIVE-S");
+    ASSERT_TRUE(w.s.f.run_until([&] { return w.s.f.log->holding(); }))
+        << "setup: the send did not reach its store call";
+    w.s.request_frame = w.s.f.msg("2", 2,
+                                  "7=1\x01"
+                                  "16=0\x01");
+    w.rr_fut = w.s.f.feed(w.s.request_frame, w.rr_call, w.rr_none);
+    w.pump_for(kHeldWindow);
+    w.release();
+    ASSERT_TRUE(w.s.f.run_until([&] { return w.send_done(i) && DirectAcceptor::ready(w.rr_fut); }))
+        << "the send or the answer never ended";
+    auto const& sent = w.s.f.sent;
+    auto const live = live_frames(sent, "LIVE-S");
+    ASSERT_EQ(live.size(), 1U) << printable(sent);
+    EXPECT_EQ(plain_rig::field_value(live.front(), "34"), std::to_string(s_num)) << printable(sent);
+    std::size_t live_at = 0;
+    for (std::size_t k = 0; k < sent.size(); ++k) {
+        if (sent[k] == live.front()) live_at = k;
+    }
+    EXPECT_LT(live_at, first_answer_index(sent))
+        << "an answer frame precedes the original frame S:\n"
+        << printable(sent);
+    EXPECT_GE(answer_end(sent), s_num) << "the answer does not cover S:\n" << printable(sent);
+}
+
+// 103 tasks T057, R-588-c (FR-014): with a HeartBtInt, the liveness loop's Heartbeat and
+// TestRequest fall due while the answer is held (the clock moves past HeartBtInt twice, so
+// both the outbound and the inbound side are idle). Neither is written inside the answer;
+// each one written after it carries the next number.
+TEST(ReplayGate588, R588c_LivenessDuringTheAnswer_NothingInsideItNextNumbersAfter) {
+    HeldWalk w{DirectAcceptor::Options{
+        .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
+    ASSERT_TRUE(w.start(is_slot_read(3))) << "setup: the walk did not reach the held read";
+    w.s.f.clock->advance(kHb588 + std::chrono::seconds{1});
+    w.pump_for(kHeldWindow);
+    w.s.f.clock->advance(kHb588 + std::chrono::seconds{1});
+    w.pump_for(kHeldWindow);
+    EXPECT_EQ(w.s.f.sent_count("0") + w.s.f.sent_count("1"), 0U)
+        << "a liveness frame was written while the answer is held:\n"
+        << printable(w.s.f.sent);
+    w.release();
+    w.pump_for(kHeldWindow);
+    auto const& sent = w.s.f.sent;
+    ASSERT_GT(w.s.f.sent_count("0") + w.s.f.sent_count("1"), 0U)
+        << "setup: the liveness loop wrote nothing; the cell exercised no contention:\n"
+        << printable(sent);
+    auto const last = last_answer_index(sent);
+    auto next = answer_end(sent) + 1;
+    for (std::size_t k = 0; k < sent.size(); ++k) {
+        auto const t = plain_rig::field_value(sent[k], "35");
+        if (t != "0" && t != "1") continue;
+        EXPECT_GT(k, last) << "a 35=" << t << " lies inside the answer:\n" << printable(sent);
+        EXPECT_EQ(plain_rig::field_value(sent[k], "34"), std::to_string(next)) << printable(sent);
+        ++next;
+    }
+}
+
+// 103 tasks T058, R-588-d (FR-014): close(graceful) started while the answer is held writes
+// no Logout during it; once the answer ends the Logout follows it with the next number.
+TEST(ReplayGate588, R588d_GracefulCloseDuringTheAnswer_LogoutAfterIt) {
+    HeldWalk w{DirectAcceptor::Options{.logout_disconnect_timeout_ms = 2000}};
+    ASSERT_TRUE(w.start(is_slot_read(3))) << "setup: the walk did not reach the held read";
+    auto close_fut = w.s.f.spawn_close(close_mode::graceful);
+    w.pump_for(kHeldWindow);
+    EXPECT_EQ(w.s.f.sent_count("5"), 0U) << "a Logout was written while the answer is held:\n"
+                                         << printable(w.s.f.sent);
+    w.release();
+    (void)w.s.f.run_until([&] { return w.s.f.sent_count("5") > 0U; },
+                          std::chrono::milliseconds{w.s.f.cfg.logout_disconnect_timeout_ms} / 2);
+    auto const& sent = w.s.f.sent;
+    ASSERT_EQ(w.s.f.sent_count("5"), 1U) << printable(sent);
+    std::size_t lo = 0;
+    for (std::size_t k = 0; k < sent.size(); ++k) {
+        if (plain_rig::field_value(sent[k], "35") == "5") lo = k;
+    }
+    EXPECT_GT(lo, last_answer_index(sent)) << printable(sent);
+    EXPECT_EQ(plain_rig::field_value(sent[lo], "34"), std::to_string(answer_end(sent) + 1))
+        << printable(sent);
+    // The peer's Logout ends the graceful close.
+    w.s.request_frame = w.s.f.msg("5", 3);
+    CallingThreadReadings peer_logout;
+    ASSERT_TRUE(w.s.f.feed_plain(w.s.request_frame, peer_logout));
+    EXPECT_TRUE(w.s.f.run_until([&] { return DirectAcceptor::ready(close_fut); }));
+}
+
+// R-588-d's second arm: an answer held for longer than the close's grace. No Logout is
+// written, and the close ends the session when its grace runs out. The grace is real time,
+// so the window below is derived from it.
+TEST(ReplayGate588, R588d_AnswerLongerThanTheGrace_NoLogoutAndTheCloseEnds) {
+    HeldWalk w;  // logout_disconnect_timeout_ms: the fixture's 200
+    ASSERT_TRUE(w.start(is_slot_read(3))) << "setup: the walk did not reach the held read";
+    auto const grace = std::chrono::milliseconds{w.s.f.cfg.logout_disconnect_timeout_ms};
+    auto close_fut = w.s.f.spawn_close(close_mode::graceful);
+    EXPECT_TRUE(w.s.f.run_until([&] { return DirectAcceptor::ready(close_fut); }, grace * 4))
+        << "the close did not end within its grace";
+    EXPECT_EQ(w.s.f.sent_count("5"), 0U) << "a Logout was written during the answer:\n"
+                                         << printable(w.s.f.sent);
+    EXPECT_EQ(w.s.f.session->state(), fsm_state::Disconnected);
+    w.release();
+}
+
+// R-588-d's control: close(graceful) with no answer writes its Logout at once.
+TEST(ReplayGate588, R588d_Control_NoAnswer_LogoutAtOnce) {
+    HeldWalk w;
+    ASSERT_TRUE(w.start(is_slot_read(3), std::nullopt, /*request=*/false));
+    auto close_fut = w.s.f.spawn_close(close_mode::graceful);
+    w.pump_for(kHeldWindow);
+    EXPECT_EQ(w.s.f.sent_count("5"), 1U) << printable(w.s.f.sent);
+    w.s.request_frame = w.s.f.msg("5", 2);
+    CallingThreadReadings peer_logout;
+    ASSERT_TRUE(w.s.f.feed_plain(w.s.request_frame, peer_logout));
+    EXPECT_TRUE(w.s.f.run_until([&] { return DirectAcceptor::ready(close_fut); }));
+}
+
+// 103 tasks T059, R-588-f (FR-015): a send contended behind a held answer, ended by
+// close(terminal), by the Engine's stop, or by its own cancellation; and a send contended
+// behind an answer while close(graceful) runs.
+TEST(ReplayGate588, R588f1_ContendedSend_CloseTerminal_RefusedNothingWritten) {
+    HeldWalk w;
+    ASSERT_TRUE(w.start(is_slot_read(3))) << "setup: the walk did not reach the held read";
+    auto const i = w.spawn_send("LIVE-T");
+    w.pump_for(kHeldWindow);
+    auto close_fut = w.s.f.spawn_close(close_mode::terminal);
+    EXPECT_TRUE(w.s.f.run_until([&] { return w.send_done(i); }))
+        << "the contended send did not end after close(terminal)";
+    EXPECT_TRUE(w.live_calls[i].returned_error(error::session_invalid_state_for_send))
+        << w.live_calls[i].call_text();
+    EXPECT_TRUE(live_frames(w.s.f.sent, "LIVE-T").empty()) << printable(w.s.f.sent);
+    w.release();
+    (void)w.s.f.run_until([&] { return DirectAcceptor::ready(close_fut); });
+}
+
+TEST(ReplayGate588, R588f2_ContendedSend_EngineStop_RefusedNothingWritten) {
+    HeldWalk w;
+    ASSERT_TRUE(w.start(is_slot_read(3))) << "setup: the walk did not reach the held read";
+    auto const i = w.spawn_send("LIVE-E");
+    w.pump_for(kHeldWindow);
+    session_test_access::note_engine_stop(*w.s.f.session);
+    EXPECT_TRUE(w.s.f.run_until([&] { return w.send_done(i); }))
+        << "the contended send did not end after the Engine's stop";
+    EXPECT_TRUE(w.live_calls[i].returned_error(error::session_invalid_state_for_send))
+        << w.live_calls[i].call_text();
+    EXPECT_TRUE(live_frames(w.s.f.sent, "LIVE-E").empty()) << printable(w.s.f.sent);
+    w.release();
+}
+
+// (3): the send's own slot emits a terminal cancellation while it waits. It returns
+// dispatch_aborted; the session stays Active, no number is consumed, and the caller's
+// cancellation is still pending when the call returns.
+TEST(ReplayGate588, R588f3_ContendedSend_OwnCancellation_AbortedStateUnchanged) {
+    HeldWalk w;
+    ASSERT_TRUE(w.start(is_slot_read(3))) << "setup: the walk did not reach the held read";
+    auto const next_out = session_test_access::seqnum_mgr(*w.s.f.session).peek_outbound();
+    auto const i = w.spawn_send("LIVE-X");
+    w.pump_for(kHeldWindow);
+    w.live_signals[i].emit(asio::cancellation_type::terminal);
+    EXPECT_TRUE(w.s.f.run_until([&] { return w.send_done(i); }))
+        << "the contended send did not end after its own cancellation";
+    EXPECT_TRUE(w.live_calls[i].returned_error(error::dispatch_aborted))
+        << w.live_calls[i].call_text();
+    EXPECT_TRUE(w.live_calls[i].cancellation_recorded)
+        << "the caller's cancellation is not pending after the call";
+    EXPECT_EQ(w.s.f.session->state(), fsm_state::Active);
+    EXPECT_EQ(session_test_access::seqnum_mgr(*w.s.f.session).peek_outbound(), next_out)
+        << "a number was consumed";
+    EXPECT_TRUE(live_frames(w.s.f.sent, "LIVE-X").empty()) << printable(w.s.f.sent);
+    w.release();
+}
+
+// The close(graceful) arm: a send contended behind the answer while close(graceful) waits
+// to send its Logout; no application frame follows the Logout.
+TEST(ReplayGate588, R588f_GracefulClose_ContendedSend_NoApplicationFrameAfterTheLogout) {
+    HeldWalk w{DirectAcceptor::Options{.logout_disconnect_timeout_ms = 2000}};
+    ASSERT_TRUE(w.start(is_slot_read(3))) << "setup: the walk did not reach the held read";
+    auto close_fut = w.s.f.spawn_close(close_mode::graceful);
+    auto const i = w.spawn_send("LIVE-G");
+    w.pump_for(kHeldWindow);
+    w.release();
+    (void)w.s.f.run_until([&] { return w.send_done(i) && w.s.f.sent_count("5") > 0U; },
+                          std::chrono::milliseconds{w.s.f.cfg.logout_disconnect_timeout_ms} / 2);
+    auto const& sent = w.s.f.sent;
+    std::size_t lo = sent.size();
+    for (std::size_t k = 0; k < sent.size(); ++k) {
+        if (plain_rig::field_value(sent[k], "35") == "5") {
+            lo = k;
+            break;
+        }
+    }
+    ASSERT_LT(lo, sent.size()) << "no Logout was written:\n" << printable(sent);
+    for (std::size_t k = lo + 1; k < sent.size(); ++k) {
+        EXPECT_NE(plain_rig::field_value(sent[k], "35"), "D")
+            << "an application frame follows the Logout:\n"
+            << printable(sent);
+    }
+    w.s.request_frame = w.s.f.msg("5", 3);
+    CallingThreadReadings peer_logout;
+    (void)w.s.f.feed_plain(w.s.request_frame, peer_logout);
+    (void)w.s.f.run_until([&] { return DirectAcceptor::ready(close_fut); });
 }
 
 // ── The 789 path superseded (R-13) ───────────────────────────────────────────────────

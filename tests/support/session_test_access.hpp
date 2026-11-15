@@ -153,6 +153,9 @@ struct session_test_access {
 
     // Whether Engine::stop()'s step 1 has run on the session's strand (093, data-model
     // E-13).
+    // What Engine::stop() calls on each of its sessions first (103 tasks T059, R-588-f(2)),
+    // for a cell that drives a Session with no Engine.
+    static void note_engine_stop(Session& s) noexcept { s.note_engine_stop_(); }
     [[nodiscard]] static bool engine_stop_requested(Session const& s) noexcept {
         return s.engine_stop_requested_;
     }
