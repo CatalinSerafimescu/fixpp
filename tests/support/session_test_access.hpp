@@ -198,6 +198,12 @@ struct session_test_access {
     // competing store operation on it).
     [[nodiscard]] static MessageStore* store(Session& s) noexcept { return s.store_.get(); }
 
+    // The session's replay gate (103, research D5′): a cell reads whether a walk waits at
+    // it. Read it on the session's strand.
+    [[nodiscard]] static detail::replay_gate const& replay_gate(Session const& s) noexcept {
+        return s.replay_gate_;
+    }
+
     // The numeric value of the session's Session::lifecycle (see the enum in session.hpp
     // for the names). Read it on the session's strand.
     [[nodiscard]] static int lifecycle_value(Session const& s) noexcept {

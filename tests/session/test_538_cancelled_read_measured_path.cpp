@@ -339,6 +339,135 @@ TEST(CancelledReadMeasuredPath, Control_ReleaseBeforeStop_RangeReplayed) {
     EXPECT_TRUE(inbound_moved_by_recorded_advances_only(o));
 }
 
+// ── Engine::stop meets a walk waiting at the replay gate ─────────────────────────────
+//
+// 103 research D5′.3 and its erratum. One Engine::send is held inside its store(), so
+// its shared hold of the replay gate stays open, and the peer's ResendRequest starts a
+// walk that waits at the gate. Engine::stop's first step, in one handler on the
+// session's strand, notes the stop on the session, which wakes the gate's waiters,
+// and then emits a total cancellation on the read pump's slot. The walk must end with
+// store_cancelled at that wake, so the session records Disconnected, and calls
+// onLogout, before Engine::stop's close of the session begins. A walk that does not
+// record the total keeps waiting at the gate until the held send's shared hold ends,
+// which the cell lets happen only after its bounded wait for onLogout; Engine::stop
+// joins the held send before it closes the session.
+
+// Records, at the first onLogout, whether Engine::stop had noted the stop on the
+// session and the session's lifecycle (session.hpp's Session::lifecycle; open = 1).
+struct LogoutSampleApp final : fixpp::session::Application {
+    fixpp::session::Session* session = nullptr;  // set once the session is published
+    int logouts = 0;
+    bool stop_noted_at_first_logout = false;
+    int lifecycle_at_first_logout = -1;
+    void onLogon(const fixpp::session::SessionId& /*id*/) override {}
+    void onLogout(const fixpp::session::SessionId& /*id*/) override {
+        if (logouts++ == 0 && session != nullptr) {
+            stop_noted_at_first_logout =
+                fixpp::session::session_test_access::engine_stop_requested(*session);
+            lifecycle_at_first_logout =
+                fixpp::session::session_test_access::lifecycle_value(*session);
+        }
+    }
+};
+
+struct GateStopOutcome {
+    std::string setup_miss;
+    bool hold_entered = false;
+    // At the spawn of Engine::stop: the gate exclusive with the held send's shared hold
+    // open, a waiter suspended in it, and no tail read recorded.
+    bool walk_waited_at_the_gate = false;
+    bool logout_before_release = false;       // onLogout ran before the hold was released
+    bool tail_read_called = false;            // a tail read was recorded before the release
+    bool stop_noted_at_first_logout = false;  // copied from the app
+    int lifecycle_at_first_logout = -1;       // copied from the app
+    bool hold_timed_out = false;
+    bool stop_completed = false;
+    // What the peer read after its ResendRequest while the hold was in flight.
+    std::vector<std::string> after_rr;
+};
+
+GateStopOutcome run_gate_wait_stop() {
+    GateStopOutcome o;
+    auto const app = std::make_shared<LogoutSampleApp>();
+    HeldFileStoreScene scene{1, app};
+    auto& rig = scene.rig;
+    [&] {
+        if (!scene.setup(kAppMessages)) return;
+        auto session = rig.session();
+        if (!session) {
+            scene.setup_miss = "the session is not published";
+            return;
+        }
+        app->session = session.get();
+        auto const& gate = fixpp::session::session_test_access::replay_gate(*session);
+        store_hold::arm();
+        auto held_fut = scene.send_app();
+        if (!rig.run_until([] { return store_hold::holding(); })) {
+            scene.setup_miss = "the offload hook did not enter its hold";
+            return;
+        }
+        o.hold_entered = true;
+        auto const rr_mark = scene.log->mark();
+        auto const waits_before = gate.timer_waits;
+        auto const rx_mark = rig.peer.received.size();
+        auto tail_read = [&] {
+            return scene.log->first_after(rr_mark, [](StoreCall const& call) {
+                return call.op == store_op::next_seqnum && call.dir == direction_t::outbound &&
+                       !call.increment;
+            });
+        };
+        scene.peer_resend_request(2, scene.first, scene.last);
+        // Only the walk sets the gate exclusive, and with a shared hold open it is then
+        // suspended in the gate's wait; the handlers that are ready run first.
+        if (rig.run_until([&] { return gate.exclusive && gate.timer_waits > waits_before; })) {
+            rig.ioc.poll();
+            rig.ioc.restart();
+            o.walk_waited_at_the_gate = gate.exclusive && gate.shared == 1 && gate.waiters >= 1 &&
+                                        tail_read() == nullptr && store_hold::holding();
+        }
+        if (o.walk_waited_at_the_gate) {
+            scene.spawn_stop();
+            // The bound: the hold is released only below, and Engine::stop's close of
+            // the session waits for the held send.
+            o.logout_before_release = rig.run_until([&] { return app->logouts != 0; });
+            o.tail_read_called = tail_read() != nullptr;
+        }
+        rig.settle();
+        o.after_rr = scene.peer_frames_from(rx_mark);
+        store_hold::release();
+        (void)rig.run_until([&] { return HeldFileStoreScene::ready(held_fut); });
+        scene.finish();
+        app->session = nullptr;
+    }();
+    scene.finish();
+    o.stop_noted_at_first_logout = app->stop_noted_at_first_logout;
+    o.lifecycle_at_first_logout = app->lifecycle_at_first_logout;
+    o.setup_miss = scene.setup_miss;
+    o.hold_timed_out = store_hold::timed_out();
+    o.stop_completed = scene.stop_completed;
+    return o;
+}
+
+TEST(CancelledReadMeasuredPath, StopWhileTheWalkWaitsAtTheGate_TheSessionEndsAtTheStopsWake) {
+    auto const o = run_gate_wait_stop();
+    ASSERT_TRUE(o.setup_miss.empty()) << o.setup_miss;
+    ASSERT_TRUE(o.hold_entered && o.walk_waited_at_the_gate && !o.hold_timed_out)
+        << "the path was not exercised: hold_entered=" << o.hold_entered
+        << " walk_waited_at_the_gate=" << o.walk_waited_at_the_gate
+        << " hold_timed_out=" << o.hold_timed_out;
+    EXPECT_TRUE(o.stop_completed);
+
+    EXPECT_TRUE(o.logout_before_release) << "onLogout did not run before the hold was released";
+    EXPECT_TRUE(o.stop_noted_at_first_logout)
+        << "the session ended before Engine::stop noted the stop on it";
+    EXPECT_EQ(o.lifecycle_at_first_logout, 1)
+        << "the session's lifecycle at its first onLogout: 1 (open) when the walk ended at "
+           "the stop's wake, 2 (closing) when Engine::stop's close ended it";
+    EXPECT_FALSE(o.tail_read_called) << "the walk made its tail read after the stop";
+    EXPECT_TRUE(o.after_rr.empty()) << "the peer read a frame after its ResendRequest:\n"
+                                    << store_hold::printable(o.after_rr);
+}
+
 // ── The other timing ─────────────────────────────────────────────────────────────────
 
 // What one moment of the session reads.
