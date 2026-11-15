@@ -8,9 +8,9 @@ symbol" means what it means for that precedent: the header declares only names i
 documentation does not describe and the supported API does not include; the install-surface and layering checks
 (`tools/check_layers.py`, the packaging consumer tests) must accept it as they accept the precedent, and tasks T061
 runs them. The gate's `asio::steady_timer` adds no include requirement for a consumer of the installed
-session.hpp: session.hpp already reaches `<asio/steady_timer.hpp>` through `fixpp/session/reconnect_fsm.hpp`, whose
+session.hpp while session.hpp reaches `<asio/steady_timer.hpp>` through `fixpp/session/reconnect_fsm.hpp`, whose
 members are `std::optional<asio::steady_timer>` (re-derive: `command grep -n steady_timer
-include/fixpp/session/reconnect_fsm.hpp`); replay_gate.hpp includes it itself. Decisions are in [research.md](research.md).
+include/fixpp/session/reconnect_fsm.hpp`; tasks T061 re-reads it); replay_gate.hpp includes it itself. Decisions are in [research.md](research.md).
 
 ## Reset policy — `SessionConfig::reset_seqnum_policy_field` (changed default)
 

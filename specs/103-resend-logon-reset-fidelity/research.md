@@ -362,7 +362,7 @@ the 563 §2.1a supersession, the latches, and that it must not be bound to `root
 - **On a validating session,** the gate's Reject (373=1, 371=7, the same text after 101) comes before the arm, but only if the session dictionary marks BeginSeqNo required in ResendRequest.
   - The plan verifies the vendored FIX42/FIX44/FIX50SP2 dictionaries, the minimal test dictionary and the validation test dictionary.
   - Otherwise the arm is reached only on a non-validating session.
-  - The RED cell asserts that the two Rejects are byte-identical apart from 34 and 52.
+  - The RED cell asserts that the two Rejects are equal field for field apart from 34, 52 and CheckSum(10) (spec FR-013).
 - **`fromAdmin` order.** For an in-sequence frame the Active block calls `fromAdmin` before the sub-arm runs, so `fromAdmin` sees the frame before its Reject. That is QFC's order: `verify` → `fromCallback`, then the `getField` throw. Unchanged.
 
 **Rationale:** the rulings, TC 14b (the Reject and the N increment), and QFC/QFJ's observable answer to 7=0.
@@ -1008,10 +1008,10 @@ Each cell must be RED on `2c74af92`, by reading. #577 and #578 are unconfirmed: 
   - tag 7 absent, with validation on;
   - tag 7 absent and too high (after D4).
 - **Assertions:**
-  - The 7=0 answer equals the 7=1 answer apart from 52: a GapFill with 34=1 and 36=2, then replays of 2 and 3.
+  - The 7=0 answer equals the 7=1 answer as the endings contract's E5 defines the comparison (apart from 52, the GapFill's 122 and CheckSum(10)): a GapFill with 34=1 and 36=2, then replays of 2 and 3.
   - No frame in `a.written` carries 34=0 (SC-003).
   - Absent 7: Reject 373=1, 371=7, 58="Required tag missing"; no replay; N+1, persisted.
-  - With validation on: the same Reject frame.
+  - With validation on: the same Reject frame, field for field apart from 34, 52 and CheckSum(10).
   - Too high: Reject, N unchanged.
 - **Control:** the existing `Control_SlotNotRetained_*` cell, and the 7=1 arm.
 - **Mutants:** delete the clamp → the 7=0 arm is RED (34=0); delete the presence test → the absent arm is RED (a replay).

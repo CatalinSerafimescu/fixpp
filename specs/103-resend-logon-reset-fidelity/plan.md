@@ -168,7 +168,8 @@ Order by dependency (research R17 as amended):
     `research/reviews/msvc-asan-timeout-investigation-2026-11-15.md`, §7, background and not a requirement). Its
     acceptance is tasks T163's post-merge pair (a restore HIT of the new-format archive and the hit-rate comparison
     on asan and debug), traced in tasks' `## Requirement map` row "Phase 12". The job `timeout-minutes` change is a
-    separate main commit, not 103's, and no 103 pin reads `timeout-minutes`. Tasks order it before the two
+    separate main commit, not 103's; 103 adds no pin that reads `timeout-minutes` (re-derive: `command grep -rn
+    timeout-minutes ci/*.py ci/*.sh`, each hit read), so it lands in either order. Tasks order it before the two
     close-out tasks.
 
 ## Complexity Tracking

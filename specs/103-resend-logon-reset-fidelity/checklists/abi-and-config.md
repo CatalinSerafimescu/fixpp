@@ -62,7 +62,7 @@ Gate A converged and the owner signed off (2026-11-15). An item here asks whethe
 
 ## `sizeof(Session)` and the installed detail header
 
-- [x] CHK023 B-103-11 discloses that `sizeof(Session)` grows. Is it stated which consumers can observe that? A C++ consumer compiling against the installed header can; the C ABI's opaque handle cannot. Is it stated whether this is a C++ ABI break that needs the BREAKING mark under any article? [Clarity, Research "B&L delta" B-103-11, Tasks "Bundle findings" 3] — DD-DECIDED §analyze E2: the orchestrator's ruling at `/speckit-analyze` (2026-11-15) gives B-103-11 the shape of B-544-3 and B-101-14: a C++ layout change a consumer compiling against the installed header observes, none through the C ABI's opaque handle, and no BREAKING mark (B-544-3 carries none); research's B-103-11 now says so.
+- [x] CHK023 B-103-11 discloses that `sizeof(Session)` grows. Is it stated which consumers can observe that? A C++ consumer compiling against the installed header can; the C ABI's opaque handle cannot. Is it stated whether this is a C++ ABI break that needs the BREAKING mark under any article? [Clarity, Research "B&L delta" B-103-11, Tasks "Bundle findings" 3] — SPEC-FIXED: basis: the orchestrator's ruling at `/speckit-analyze` (2026-11-15) gives B-103-11 the shape of B-544-3 and B-101-14: a C++ layout change a consumer compiling against the installed header observes, none through the C ABI's opaque handle, and no BREAKING mark (B-544-3 carries none); research's B-103-11 is edited to state the observers and the absent mark.
 - [x] CHK024 B-103-11 and T173 list the members: the gate, the mark, the wake, the counter, the owner, `conn_gen_`, `inbound_depth_` and `reconnect_in_flight_`. Is the list derived by recipe from session.hpp's diff, so a member added later is not missed? [Measurability, Research "B&L delta" B-103-11, Tasks T173] — SPEC-FIXED: research's B-103-11, tasks T151 and T173 derive the member list from `git diff origin/main...HEAD -- include/fixpp/session/session.hpp`, not from the list.
 - [x] CHK025 `include/fixpp/session/detail/replay_gate.hpp` is installed but "has no public symbol". Is "no public symbol" defined (namespace `detail`, absent from the docs, outside the supported API)? Is it stated whether the install-surface and layering checks (`tools/check_layers.py`, the packaging consumer tests) must accept the new header? [Clarity, Data-model (introduction), Plan §Project Structure, Tasks T061] — SPEC-FIXED: data-model's introduction defines "no public symbol" (names in a `detail` namespace, undocumented, outside the supported API, as has_flush_for_session_close.hpp) and requires `tools/check_layers.py` and the packaging consumer tests to accept the header (tasks T061).
 - [x] CHK026 The gate is a member by value, so session.hpp's include graph gains the gate's `asio::steady_timer`. Is it stated whether that changes what consumers of the installed header must be able to include, or whether session.hpp already pulls in asio's timer? [Gap, Data-model (introduction), Research D5′.1] — SPEC-FIXED: data-model's introduction states that session.hpp already reaches `<asio/steady_timer.hpp>` through `fixpp/session/reconnect_fsm.hpp` (checked: its `std::optional<asio::steady_timer>` members), so a consumer gains no include requirement.
@@ -87,8 +87,8 @@ Gate A converged and the owner signed off (2026-11-15). An item here asks whethe
 | Disposition | Count |
 |---|---|
 | PASS | 6 |
-| SPEC-FIXED | 21 |
-| DD-DECIDED | 1 |
+| SPEC-FIXED | 22 |
+| DD-DECIDED | 0 |
 | WAIVED | 0 |
 | ESCALATE | 0 |
 | **Total** | 28 |
@@ -111,13 +111,14 @@ Gate A converged and the owner signed off (2026-11-15). An item here asks whethe
 - CHK017 — plan Constitution Check rows XI §7 and XVI §3/§4, and research D7 "Controls", record each control's discharge with its date (`/analyze` run 2026-11-15 and re-run after this audit), replacing "pending".
 - CHK019 — spec §FR-020 defines "relies" as Pass F's outcome dependence, Pass P as the superset, and an "insensitive" re-read row as closing the row for FR-020.
 - CHK022 — spec §FR-020 states the re-run at the head being accepted and its stop rule (tasks T166).
+- CHK023 — basis: the orchestrator's ruling at `/speckit-analyze` (2026-11-15) gives B-103-11 the shape of B-544-3 and B-101-14: a C++ layout change a consumer compiling against the installed header observes, none through the C ABI's opaque handle, and no BREAKING mark (B-544-3 carries none); research's B-103-11 is edited to state the observers and the absent mark.
 - CHK024 — research's B-103-11, tasks T151 and T173 derive the member list from `git diff origin/main...HEAD -- include/fixpp/session/session.hpp`, not from the list.
 - CHK025 — data-model's introduction defines "no public symbol" (names in a `detail` namespace, undocumented, outside the supported API, as has_flush_for_session_close.hpp) and requires `tools/check_layers.py` and the packaging consumer tests to accept the header (tasks T061).
 - CHK026 — data-model's introduction states that session.hpp already reaches `<asio/steady_timer.hpp>` through `fixpp/session/reconnect_fsm.hpp` (checked: its `std::optional<asio::steady_timer>` members), so a consumer gains no include requirement.
 - CHK028 — tasks T153's comment requirement states 0's meaning for each use (`close(graceful)`'s grace as today, the drain's immediate force-close, the immediate acknowledgement) and that the C ABI has no setter for the field (checked); spec §FR-006 states the drain's 0.
 
 ### DD-DECIDED items
-- CHK023 — DD-DECIDED §analyze E2: the orchestrator's ruling at `/speckit-analyze` (2026-11-15) gives B-103-11 the shape of B-544-3 and B-101-14: a C++ layout change a consumer compiling against the installed header observes, none through the C ABI's opaque handle, and no BREAKING mark (B-544-3 carries none); research's B-103-11 now says so.
+- none
 
 ### WAIVED items
 - none
@@ -125,4 +126,4 @@ Gate A converged and the owner signed off (2026-11-15). An item here asks whethe
 ### ESCALATE items (box left open; blocks the gate)
 - none
 
-Anchors spot-verified: every `[FIX-SL …]` and `[FIX-TC §4 scenario …]` key of spec §Normative References resolves to a row of spec/coverage-index.md (its FIX-SL and FIX-TC tables, section or scenario column plus title column); the live B&L rows the bundle cites and amends (L-537-1, L-563-2, B-598-1, B-544-3, B-101-14, B-538-2, B-013-1, L-092-1, L-092-2, L-093-7) were read in the live spec/behaviors-and-limitations.md. The authority for this feature is the converged Gate A bundle with the owner rulings of spec §Clarifications, plan `## Gate A` and the 2026-11-15 rulings; no separate design-doc revision anchors it. SPEC-FIXED edits are in commit `6b1e415b`.
+Anchors spot-verified: every `[FIX-SL …]` and `[FIX-TC §4 scenario …]` key of spec §Normative References resolves to a row of spec/coverage-index.md (its FIX-SL and FIX-TC tables, section or scenario column plus title column); the live B&L rows the bundle cites and amends (L-537-1, L-563-2, B-598-1, B-544-3, B-101-14, B-538-2, B-013-1, L-092-1, L-092-2, L-093-7) were read in the live spec/behaviors-and-limitations.md. The authority for this feature is the converged Gate A bundle with the owner rulings of spec §Clarifications, plan `## Gate A` and the 2026-11-15 rulings; no separate design-doc revision anchors it. SPEC-FIXED edits are in commit `6b1e415b` and the fix-up commit that follows `3f9a6de7`.

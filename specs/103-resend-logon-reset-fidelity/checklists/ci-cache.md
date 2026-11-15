@@ -60,7 +60,7 @@ Depth: a formal pipeline step 8 list, dispositioned at step 9 (`/speckit-checkli
 
 ## The post-merge acceptance (T163)
 
-- [x] CHK020 T163 reads the asan and debug legs' `Cache hits` as "about equal" to the release leg's, on the first `push:main` after the merge. Is "about equal" quantified? [Ambiguity, Tasks T163] — SPEC-FIXED: tasks T163 quantifies "about equal": asan's and debug's `Cache hits` each at least 90 % of the release leg's on the acceptance run's commit. The 90 % is a threshold chosen at this audit, flagged to the orchestrator.
+- [ ] CHK020 T163 reads the asan and debug legs' `Cache hits` as "about equal" to the release leg's, on the first `push:main` after the merge. Is "about equal" quantified? [Ambiguity, Tasks T163] — ESCALATE: quantifying "about equal" sets T163's pass/fail threshold, a new classification decision. Options: (a) asan's and debug's `Cache hits` each at least X % of the release leg's on the acceptance run's commit; (b) asan's and debug's misses each at most the release leg's misses plus a fixed slack of cacheable calls. Recommend (a) at 90 %: it reads straight off the three legs' `Cache hits` lines and fails a cap that still cascades. tasks T163 now carries 90 % as the proposed value, pending this ruling.
 - [x] CHK021 Is the acceptance stated as a PAIR: a `restore HIT`, meaning the new-format archive was pulled and extracted, and the hit-rate comparison? A cold restore with zero hits on every leg must not pass as "equal". [Gap, Tasks T163] — SPEC-FIXED: tasks T163 is read as a PAIR (a restore HIT of a new-format archive on asan and debug, AND the hit threshold); a run whose release leg has 0 hits is void and the next run is read, so "0 ≈ 0" cannot pass.
 - [x] CHK022 103 changes widely included headers, session.hpp among them, so its merge commit churns every leg, and an old-format archive may read as a logged miss. Is the acceptance run defined as the first `push:main` whose restore pulled an archive seeded under the new format and cap? That run may be the second after the merge, not the first. [Conflict, Tasks T163, T160] — SPEC-FIXED: tasks T163 defines the acceptance run as the first `push:main` run whose asan and debug restores HIT an archive the new seed step wrote, never the merge commit's own run (old format, and 103's own churn).
 - [x] CHK023 Is a no-churn control stated, such as a warm re-run of the same SHA on asan, as the report's §7 "Verify" list includes? It separates a cap that still cascades from legitimate churn. [Coverage, Tasks T163] — SPEC-FIXED: tasks T163 adds the no-churn control: a re-run of the acceptance run's SHA shows asan warm.
@@ -96,10 +96,10 @@ Depth: a formal pipeline step 8 list, dispositioned at step 9 (`/speckit-checkli
 | Disposition | Count |
 |---|---|
 | PASS | 2 |
-| SPEC-FIXED | 31 |
+| SPEC-FIXED | 30 |
 | DD-DECIDED | 0 |
 | WAIVED | 0 |
-| ESCALATE | 0 |
+| ESCALATE | 1 |
 | **Total** | 33 |
 
 ### SPEC-FIXED items
@@ -121,7 +121,6 @@ Depth: a formal pipeline step 8 list, dispositioned at step 9 (`/speckit-checkli
 - CHK017 — tasks T163 states restore and save times are recorded with the run ids, not judged (outside the acceptance: the cap was ruled with the report's transfer estimate in view).
 - CHK018 — tasks T163 records the first run's `Measure disk at job end (#613)` summary at the new cap and reports a reading that leaves less free than one archive.
 - CHK019 — tasks T160 fixes the size report's line shape (today's, with the compressed total of the parts) for T163 to read.
-- CHK020 — tasks T163 quantifies "about equal": asan's and debug's `Cache hits` each at least 90 % of the release leg's on the acceptance run's commit. The 90 % is a threshold chosen at this audit, flagged to the orchestrator.
 - CHK021 — tasks T163 is read as a PAIR (a restore HIT of a new-format archive on asan and debug, AND the hit threshold); a run whose release leg has 0 hits is void and the next run is read, so "0 ≈ 0" cannot pass.
 - CHK022 — tasks T163 defines the acceptance run as the first `push:main` run whose asan and debug restores HIT an archive the new seed step wrote, never the merge commit's own run (old format, and 103's own churn).
 - CHK023 — tasks T163 adds the no-churn control: a re-run of the acceptance run's SHA shows asan warm.
@@ -142,6 +141,6 @@ Depth: a formal pipeline step 8 list, dispositioned at step 9 (`/speckit-checkli
 - none
 
 ### ESCALATE items (box left open; blocks the gate)
-- none
+- CHK020 — quantifying "about equal" sets T163's pass/fail threshold, a new classification decision. Options: (a) asan's and debug's `Cache hits` each at least X % of the release leg's on the acceptance run's commit; (b) asan's and debug's misses each at most the release leg's misses plus a fixed slack of cacheable calls. Recommend (a) at 90 %: it reads straight off the three legs' `Cache hits` lines and fails a cap that still cascades. tasks T163 now carries 90 % as the proposed value, pending this ruling.
 
-Anchors spot-verified: every `[FIX-SL …]` and `[FIX-TC §4 scenario …]` key of spec §Normative References resolves to a row of spec/coverage-index.md (its FIX-SL and FIX-TC tables, section or scenario column plus title column); the live B&L rows the bundle cites and amends (L-537-1, L-563-2, B-598-1, B-544-3, B-101-14, B-538-2, B-013-1, L-092-1, L-092-2, L-093-7) were read in the live spec/behaviors-and-limitations.md. The authority for this feature is the converged Gate A bundle with the owner rulings of spec §Clarifications, plan `## Gate A` and the 2026-11-15 rulings; no separate design-doc revision anchors it. SPEC-FIXED edits are in commit `6b1e415b`.
+Anchors spot-verified: every `[FIX-SL …]` and `[FIX-TC §4 scenario …]` key of spec §Normative References resolves to a row of spec/coverage-index.md (its FIX-SL and FIX-TC tables, section or scenario column plus title column); the live B&L rows the bundle cites and amends (L-537-1, L-563-2, B-598-1, B-544-3, B-101-14, B-538-2, B-013-1, L-092-1, L-092-2, L-093-7) were read in the live spec/behaviors-and-limitations.md. The authority for this feature is the converged Gate A bundle with the owner rulings of spec §Clarifications, plan `## Gate A` and the 2026-11-15 rulings; no separate design-doc revision anchors it. SPEC-FIXED edits are in commit `6b1e415b` and the fix-up commit that follows `3f9a6de7`.

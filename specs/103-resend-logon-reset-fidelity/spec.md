@@ -286,7 +286,8 @@ frame written is a GapFill with 34=1 and 36=2, then 2 and 3 replayed; no frame a
 **Acceptance Scenarios**:
 
 1. **Given** a store holding frames from 1, **When** a ResendRequest with 7=0 arrives, **Then** the answer is
-   byte-for-byte the answer to 7=1 (modulo SendingTime).
+   the answer to 7=1, compared as the endings contract's E5 defines (field for field, apart from SendingTime(52),
+   the GapFill's OrigSendingTime(122) and CheckSum(10)).
 2. **Given** any store, **When** a ResendRequest without tag 7 arrives, **Then** fixpp sends Reject 373=1, 371=7,
    replays nothing, and consumes the frame's sequence number.
 
@@ -607,10 +608,11 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
 - **SC-006**: The normal-path send latency, and the normal inbound-frame path (an Active Heartbeat and an Active
   application message through parse → validate → dispatch, `inbound_depth_`'s holder included), each in a paired
   base-vs-candidate run on one runner against the merge-base with the base worktree path padded, do not regress
-  beyond the bench gate's tolerance, a slowdown greater than +5 % (`[const §VIII.2]`). The rows exist today: the
-  send path in `bench/session/session_send_bench.cpp` and `bench/session/engine_send_bench.cpp`, the inbound path
-  in `bench/session/on_inbound_frame_bench.cpp`'s `BM_Session_OnInboundFrame_InSequence` (its Heartbeat and
-  application-message arguments); tasks T170 adds a row only if a re-read finds one missing.
+  beyond the bench gate's tolerance, a slowdown greater than +5 % (`[const §VIII.2]`). The rows are existing
+  ones, re-read at tasks T170: the send path in `bench/session/session_send_bench.cpp` and
+  `bench/session/engine_send_bench.cpp`, the inbound path in `bench/session/on_inbound_frame_bench.cpp`'s
+  `BM_Session_OnInboundFrame_InSequence` (its Heartbeat and application-message arguments); T170 adds a row only if
+  that re-read finds one missing.
 
 ## Assumptions
 
