@@ -54,7 +54,8 @@ control, is broken.
 ## 4. Whole-feature checks
 
 - `pytest bindings/python/tests` (the binding's default-policy comment and cells).
-- SC-005: R-588-a/b once per sanitizer lane (the hold makes them deterministic) with their mutants; R-588-h on
+- SC-005: R-588-a/b once on each of `linux-clang-asan`, `linux-clang-ubsan` and `linux-clang-tsan` (the hold makes
+  them deterministic) with their mutants; R-588-h on
   `linux-clang-tsan` and `linux-clang-asan` repeated n times, n derived from its mutant's measured miss rate
   (research R-588-h), recorded in the evidence file.
 - The paired benches (SC-006) against the base, with the base worktree path padded to equal length: the send path,
@@ -69,7 +70,8 @@ control, is broken.
 ## 5. SC-002 (re-scoped by owner ruling, Gate A round 1)
 
 With the interop helpers no longer forcing a policy, run the live default-config Logon cells against QuickFIX C++
-v1.16.0 and QuickFIX/J 3.0.2 (counterparty image `sha256:5c9928840b6f…`, pinned): `Fix44/HappyLogonHbLogout`,
+v1.16.0 and QuickFIX/J 3.0.2 (the counterparty image re-derived from the harness at run time, its digest recorded
+in the evidence file, tasks T176; no digest is quoted here to copy): `Fix44/HappyLogonHbLogout`,
 `Fixt/HappyFixtLogonHbLogout`, `Fix44/ResetOnLogonInitiator`, `Fix44/ResetOnLogonAcceptor` and
 `Fix44/HappyDisconnectReconnectNoReset` (re-derive the live set: `tests/interop/expected-skips-without-counterparty.txt`
 minus `tests/interop/live-cells-excluded.txt`). Expected: every cell passes with the default configuration, and

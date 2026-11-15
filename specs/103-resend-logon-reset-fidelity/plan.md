@@ -56,11 +56,11 @@ quoted from `.specify/memory/constitution.md` (v4.3); it replaces research.md's 
 | X §7: a breaking change "is marked **BREAKING** in the documentation of each affected declaration (in the version comment of `version.h` where no declaration carries the change), in the PR description, and in the behaviors-and-limitations delta" and "updates every in-repository consumer … in the same PR" | **PASS (round 1, N3)** — MINOR 17; a 1.17 clause on every affected declaration, derived from the behaviour changes (research D7's table: the policy enum, its setter, `fixpp_session_config_create`, `fixpp_session_config_set_reset_on_logon`, and the five observers `fixpp_session_is_established`, `fixpp_session_close`, `fixpp_session_send`, `fixpp_session_register_callback`, `fixpp_session_register_send_callback`, with the 1.12 sentences 103 falsifies amended in place); the counterparty's side in `version.h`; PR body; B-103-1; consumers per D7. |
 | XI §2: "**Cancellation: ASIO native cancellation slots end-to-end.** No parallel `stop_token` abstraction." | PASS, justified — waits end by the per-operation slot or by the session's wake idiom (a timer cancel, asio-native); no `stop_token`. The bound is not bound to `root_cancel_` because its slot holds one handler, the liveness loop's (D4.4). |
 | XI §3: "`fixpp::sync::async_mutex` … is the only allowed mutex shape for coroutines." | **PASS once amended (owner ruling 1, Gate A round 1)** — `detail::replay_gate` is a coroutine shared/exclusive exclusion primitive, so it conflicts with §3 as written, and Article XX §1 requires "amending the article first". The amendment rides this PR (MINOR, v4.3 → v4.4): [contracts/constitution-xi3-amendment.md](contracts/constitution-xi3-amendment.md) holds the exact text and the Sync Impact Report entry, and phase 0 applies it before any D5′ code. Its text converged with this bundle at Gate A (2026-11-15); the scoped Codex re-read of the clause as applied, required by the contract's Sync Impact Report, follows phase 0. |
-| XI §7: "Threading/concurrency-affecting features trigger all four mandatory controls (Appendix A)" | Applies — `/clarify` done; `/analyze` pending; Codex Gate A **converged** 2026-11-15 (loop 2 round 3); owner `/plan` sign-off: see below. |
+| XI §7: "Threading/concurrency-affecting features trigger all four mandatory controls (Appendix A)" | Applies — the four controls, each discharged: `/clarify` 2026-11-14 (spec Clarifications); `/analyze` run 2026-11-15, its findings applied to tasks.md (each cited there by its ID) and re-run after the step-9 checklist audit's SPEC-FIXED edits; Codex Gate A **converged** 2026-11-15 (loop 2 round 3); owner `/plan` sign-off 2026-11-14, re-confirmed 2026-11-15 and given on the converged bundle 2026-11-15 (below). |
 | XII §5: "`Session` construction requires an explicit `SecurityProfile` choice — there is no implicit default." | **N/A** — its subject is `SecurityProfile` alone; the reset-policy default is not a security profile. `session_config.hpp`'s comments that cite it for the policy default drop the citation (tasks T027). |
 | XV §1: "The "hot path" of this ban is the latency-critical **in-memory** path — parse → validate → dispatch and `MemoryStore`, which MUST stay zero-allocation per message." | PASS — the per-frame additions are `inbound_depth_`'s holder (an increment, a decrement, a compare; no coroutine frame: it sits in `on_inbound_active_`, not in the non-coroutine `on_inbound_frame`, per #544's ruling a2), a byte compare and a flag read. The existing inbound windows `alloc_guard_544_wa_active_heartbeat_mallocnesia` and `alloc_guard_544_wb_active_app_message_mallocnesia` (cases that must read zero) witness it. The contended exclusive wait sits only at `replay_outbound_range_`'s entry (a ResendRequest or a 789 walk), off the per-frame path; it is measured as evidence (research D5′ "Allocation", Codex #9). The bound's coroutine frame is one per too-high Logout. |
 | XV §3: "**Coarse global session lock.**" / XV §9: "**`std::mutex` in coroutine context.**" | PASS — the gate is per session, scoped to one resend answer, and uses no `std::mutex`. |
-| XVI §3/§4: "`/clarify` is MANDATORY before `/plan` …" / "`/analyze` is MANDATORY for the same trigger set" | `/clarify` done; `/analyze` pending. |
+| XVI §3/§4: "`/clarify` is MANDATORY before `/plan` …" / "`/analyze` is MANDATORY for the same trigger set" | `/clarify` done 2026-11-14; `/analyze` run 2026-11-15, re-run after the step-9 checklist audit's SPEC-FIXED edits (the XI §7 row). |
 | XVII §1: Gate A triggers "Touches the public C++ API or C ABI", "concurrency / threading / cancellation / executor model", "the wire format", "the session FSM, recovery, or message store contract" | Gate A required (all four triggers) and **converged** 2026-11-15 (loop 2 round 3: P1=0 P2=0 P3=5; the P3s applied as a hand-edit). |
 | XX §1–§3: "Any conflict … must be resolved by amending the article first (with rationale committed in the same PR)"; "Codex Gate A review on every amendment. User signs off."; "every amendment is recorded in a Sync Impact Report" | Planned — the XI §3 amendment's text was reviewed with this bundle through Gate A (converged 2026-11-15); still to come, in the contract's order: phase 0 applies it, a scoped Codex Gate A re-reads the applied clause, then Gate B and the owner's sign-off of the amendment; the PR is titled in Article XX §2 form (contract). |
 
@@ -101,7 +101,9 @@ tests/session/test_538_*.cpp, test_537_gap_deadline.cpp, test_reset_seqnum_polic
 tests/capi/version_test.cpp, tests/config/*, bindings/python/tests/*, tests/interop/** # consumers (D7)
 spec/behaviors-and-limitations*.md, spec/feature-catalogue.md, spec/coverage-index.md, brain/components/session.md
 .github/workflows/tier2.yml, .github/workflows/parallelism-measure.yml, ci/seed-sccache.sh, ci/restore-sccache.sh,
-ci/assert-ci-lane-policy.py, ci/tier2-sccache-probe.md, tests/dictionary/CMakeLists.txt  # msvc-asan CI cache (owner ruling 2026-11-15; phase 11)
+ci/assert-ci-lane-policy.py, ci/test-ci-lane-policy.sh, ci/tier2-sccache-probe.md, tests/dictionary/CMakeLists.txt,
+ci/test-*.sh (the harness T160 extends, or adds and wires into .github/workflows/tier1.yml's ci-script-pins)  # msvc-asan CI cache (owner ruling 2026-11-15; phase 11)
+tools/capi_freeze.sha256                   # re-recorded for the edited C-ABI headers (T035)
 ```
 
 **Structure Decision**: library-internal session changes plus documentation surfaces and one constitution
@@ -145,7 +147,7 @@ Order by dependency (research R17 as amended):
 8. **#581 (D6, D9)** — the deadline predicate; the Heartbeat's early return removed; Arm B's Logout; B-8's
    validate-gate carve-out; flipped pins (research Pins and pass-2 list).
 9. **Records** — B&L delta (retire L-029-3, L-537-1; amend B-013-1, B-013-6, B-016-1, B-537-1, B-537-2, B-538-2,
-   L-028-3, L-092-1/-2, L-093-7; add B-103-1…10, L-103-2…7), catalogue and coverage-index rows, brain supersession
+   L-028-3, L-092-1/-2, L-093-7; add B-103-1…11, L-103-2…7), catalogue and coverage-index rows, brain supersession
    flags (R16, R23), the stale `logout_disconnect_timeout_ms` comment (R15), the QFJ 3.0.1 → 3.0.2 library doc
    mentions (`tests/interop/KNOWN-LIMITATIONS.md`, `brain/components/quickfix-compat.md`), a follow-up issue for
    L-103-2 (peer-spontaneous 141=Y acknowledgement). The three comments that advertise the root slot for
@@ -163,8 +165,11 @@ Order by dependency (research R17 as amended):
 11. **msvc-asan CI cache (owner ruling 2026-11-15)** — a per-leg `SCCACHE_CACHE_SIZE` on the tier-2 MSVC legs, a
     compressed (and, if needed, multi-layer) sccache archive under GHCR's per-layer limit, a per-test `TIMEOUT` for
     `dictionary_overlay_tests` derived from CI durations, and the pins that read them (parent
-    `research/reviews/msvc-asan-timeout-investigation-2026-11-15.md`). The job `timeout-minutes` change is a
-    separate main commit, not 103's. Tasks order it before the two close-out tasks.
+    `research/reviews/msvc-asan-timeout-investigation-2026-11-15.md`, §7, background and not a requirement). Its
+    acceptance is tasks T163's post-merge pair (a restore HIT of the new-format archive and the hit-rate comparison
+    on asan and debug), traced in tasks' `## Requirement map` row "Phase 12". The job `timeout-minutes` change is a
+    separate main commit, not 103's, and no 103 pin reads `timeout-minutes`. Tasks order it before the two
+    close-out tasks.
 
 ## Complexity Tracking
 

@@ -334,17 +334,28 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
 - A strict acceptor receives a 141=Y Logon whose 34 is not 1: unchanged by this feature (disclosed in the B&L delta).
 - A too-high Logout arrives while a resend is already outstanding: the pending-Logout mark is set and no second
   ResendRequest is sent; the acknowledgement follows User Story 3's rule.
-- A too-high Logout's bound and the gap deadline both apply: the first to expire acts; the pending-Logout bound
-  (`logout_disconnect_timeout_ms`) ends with the acknowledgement, the gap deadline with its Logout; at most one
-  Logout is sent (exactly one except FR-010's enumerated cases).
+- A too-high Logout's bound and the gap deadline both apply: the first to act ends the session; the pending-Logout
+  bound (`logout_disconnect_timeout_ms`) acts by its own timer at the mark's arrival + T and ends with the
+  acknowledgement; the gap deadline is frame-driven and acts only at the first frame that does not advance NextNumIn
+  at or after 2 × HeartBtInt without an advance (FR-017), so a deadline passed with no such frame has not acted; at
+  most one Logout is sent (exactly one except FR-010's enumerated cases). On one inbound frame the order is the
+  endings contract's "Precedence on one frame".
 - The peer disconnects before fixpp's acknowledgement: no acknowledgement is sent; `Disconnected` as today (one of
   FR-010's enumerated cases).
 - A too-high ResendRequest whose range reaches past what fixpp has sent: answered as an in-sequence request with the
   same range is answered today.
 - A ResendRequest with 7=0 on an empty store: unchanged (already clamped to 1).
+- A ResendRequest whose tag 7 is present but empty or non-numeric: read as 0 and answered as 7=1 (disclosed,
+  B-103-5); a validating session has already Rejected it at the validate gate (research D3).
+- A default (lenient) initiator with a hydrated NextNumIn above 1 whose acceptor answers with 141=Y at 34=1 that
+  fixpp did not ask for (a QuickFIX acceptor configured `ResetOnLogon=Y` does: research D2.3, Risk R10): the
+  acknowledgement is too low and the session ends silently (L-103-2, follow-up issue). SC-002 does not cover that
+  peer; tasks T003 records whether a live counterparty is configured so.
 - A live send during a replay whose answer fails mid-way (a store fault): the send is released when the answer ends,
   whatever its ending.
-- HeartBtInt ≤ 0: the gap deadline does not exist, as today; User Story 6 scenario 1 does not apply (disclosed).
+- HeartBtInt ≤ 0: the gap deadline does not exist, as today; User Story 6 scenario 1 does not apply (disclosed,
+  L-103-3). FR-018's too-low Logout and FR-010's bound do not depend on HeartBtInt and apply as written; the
+  disclosure covers FR-017 only.
 - Reconnect with no resend outstanding: unchanged.
 - An application or test that relied on `bilateral_strict` being the default without naming it: its behaviour changes
   (the BREAKING default).
@@ -356,20 +367,37 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
 **Logon reset (#682)**
 
 - **FR-001**: The default `reset_seqnum_policy` MUST be `bilateral_lenient` on every configuration surface (C++
-  `SessionConfig`, the C ABI session config, TOML). The C ABI and TOML spellings of every policy are unchanged. The
-  change is BREAKING under Article X §7: `FIXPP_C_ABI_VERSION_MINOR` moves to the next value after the base's, the
-  BREAKING mark goes on `fixpp_reset_seqnum_policy`'s documentation, and every in-repository consumer is updated in
-  the same change.
+  `SessionConfig`, the C ABI session config, TOML). The Python binding, the examples and the bench drivers set no
+  default of their own: they reach `SessionConfig` or `fixpp_session_config_create` (re-derive: `command grep -rn
+  reset_seqnum` over `bindings/python`, outside its tests, `examples` and `bench`; a bench driver that names the
+  policy keeps it). The C ABI and TOML spellings of every policy are unchanged: `FIXPP_RESET_SEQNUM_BILATERAL_STRICT`
+  = 0, `FIXPP_RESET_SEQNUM_BILATERAL_LENIENT` = 1, `FIXPP_RESET_SEQNUM_UNILATERAL` = 2, and TOML's
+  `reset_seqnum_policy = "bilateral_strict" | "bilateral_lenient" | "unilateral"`. The change is BREAKING on every
+  surface (B-103-1): on the C ABI under Article X §7, because a consumer that never sets the policy sees a call
+  "return a result other than the one documented"; on C++ `SessionConfig` and TOML as a pre-release breaking change
+  to the public C++ API and its configuration, in the form of B-097-2 and B-098-4. `FIXPP_C_ABI_VERSION_MINOR` moves
+  to the next value after the base's, where the base is the merge-base with `origin/main` when 103 merges: 17 while
+  `origin/main` stays at 16, and the next value after `origin/main`'s if another change takes 17 first (tasks T178's
+  integration re-runs T035 and T154 with it, and the contract, B-103-1 and the PR body follow). The BREAKING mark goes
+  on `fixpp_reset_seqnum_policy`'s documentation, and every in-repository consumer is updated in the same change.
 - **FR-002**: A Logon that fixpp sends with 141=Y MUST carry 34=1, under every policy and every reset setting, and
   both stored numbers MUST be 1 (durably) when it is built.
 - **FR-003**: Under `bilateral_strict`, an initiator MUST durably reset both numbers to 1 before building its Logon,
-  so FR-002 holds, and MUST accept the peer's acknowledgement carrying 141=Y at 34=1.
+  so FR-002 holds, and MUST accept the peer's acknowledgement carrying 141=Y at 34=1. If that durable reset fails,
+  the session records `Disconnected` and sends no Logon (the `fatal` reset disposition `reset_on_logon` already
+  uses; research D2.2).
 - **FR-004**: Under `bilateral_strict`, an acceptor that refuses a Logon without 141=Y MUST send a Logout whose
   Text(58) names the reason before disconnecting (FIX-SL §4.4.3), and MUST still return
-  `session_seqnum_reset_mismatch` from the arm.
+  `session_seqnum_reset_mismatch` from the arm, with two exceptions that keep the refusal helper's existing
+  endings (research D2.4): a failure of the Logout's own emit returns that failure's error, and an arm superseded by
+  `close()` returns success (D-CAN-5). A Logout that does not fit the helper's buffer is not sent, and the arm still
+  records `Disconnected` and returns the mismatch. The refusal runs before the sequence check (research D2.4, Risk
+  R14), so an out-of-sequence Logon without 141=Y draws the same Logout, NextNumIn is not advanced, and a strict
+  acceptor with `reset_on_logon` does not reset its store for a Logon it refuses (B-103-3).
 - **FR-005**: Under the new default, the initiator's and acceptor's 141 behaviour MUST equal QuickFIX's on each
-  observable in the research's policy table (141 sent only with a reset setting and both numbers at 1; a Logon
-  without 141 accepted; a 141=Y Logon mirrored).
+  observable of data-model.md's reset-policy table, its `bilateral_lenient` row: 141 sent only with a reset
+  setting on and both numbers at 1; an acknowledgement without 141 accepted; a Logon without 141 accepted; a 141=Y
+  Logon mirrored.
 
 **Resend state across reconnect (#578)**
 
@@ -381,15 +409,21 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   no emit of the old connection is in flight (no frame numbered or claimed there is still being stored or written)
   and no detached coroutine of the old connection (its liveness loop, the mark's bound) is alive, and only then
   install the new transport; no frame numbered or claimed on the old connection MAY be written on the new one. The
-  emit wait is bounded by `logout_disconnect_timeout_ms`, after which the old transport is force-closed so a blocked
-  write unwinds. After its closing/closed/stopped test (`session_already_closed`), `drive_reconnect` MUST refuse
+  emit wait is bounded by `logout_disconnect_timeout_ms` (0: an immediate force-close), after which the old
+  transport is force-closed so a blocked write unwinds and the wait continues with no deadline; "bounded" covers
+  every emit blocked in its write, not a store call that never returns (a wedged store call, B-598-1's class, holds
+  the drain as it holds `close()` and `Engine::stop()` today; disclosed in B-103-9). The tests run in research D1's
+  order: single flight first (a second call while one is in flight returns `session_already_open`, whatever the
+  state, and connects nothing), then, from a callback, one post, as `close()` does; then the closing/closed/stopped
+  test (`session_already_closed`); then the reader fence: `drive_reconnect` MUST refuse
   with `session_already_open` and change nothing on an acceptor, or on an `engine_managed` initiator that already
   has an installed transport (the Engine's read pump owns that transport; owner ruling 2026-11-15, the acceptor
   disjunct an erratum the owner confirmed 2026-11-15; a standalone initiator configured `engine_managed` is treated the
   same, disclosed); on a standalone initiator the caller's reader MUST have left `live_transport()` before the call
-  and starts on the new `live_transport()` after it returns (a documented precondition, not detected). The operation
-  (research D1): one at a time (a second concurrent call returns
-  `session_already_open` and connects nothing); started from a callback, it runs after one post, as `close()` does;
+  and starts on the new `live_transport()` after it returns (a documented precondition, not detected: a reader
+  still on the old `live_transport()` when the new transport is installed reads a destroyed transport, an aborted
+  read on plain TCP and undefined behaviour on TLS, and nothing reads the new one; research D1 step 1a). The
+  operation (research D1): one at a time (above); started from a callback, it runs after one post, as `close()` does;
   a `close()` or `Engine::stop()` that starts during it, during the drain or during connect and handshake, ends it
   with `session_already_closed`, no install, and the newly connected transport closed (the install is the commit
   point); the caller's own cancellation of the drain's wait ends it with `dispatch_aborted` and no install, while
@@ -399,17 +433,27 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
 **Too-high ResendRequest and Logout (#577)**
 
 - **FR-008**: A ResendRequest whose 34 is above NextNumIn MUST be answered as an in-sequence ResendRequest with the
-  same 7 and 16 is answered, whether or not a resend is outstanding. NextNumIn MUST NOT move for it.
+  same 7 and 16 is answered, whether or not a resend is outstanding and whether or not it carries PossDupFlag(43)=Y
+  (with a resend outstanding its dispatch comes before the PossDup arm, whose admin row would drop it; research
+  D4.1). NextNumIn MUST NOT move for it. The answer is written before fixpp's own ResendRequest, when one is sent
+  (FR-009; FIX-SL Table 3, Test Case 20; contract E7). With `validate_sequence_numbers` off, unchanged: the frame is
+  handed to `fromAdmin` only and not answered (Risk R9, B-103-6).
 - **FR-009**: At most one ResendRequest of fixpp's own MUST be outstanding; a too-high ResendRequest or Logout opens
   one only if none is outstanding.
 - **FR-010**: In Active, a Logout whose 34 is above NextNumIn MUST set a pending-Logout mark (its 34 and the time
   it arrived) and draw a ResendRequest per FR-009. (Active is the only state that can see one: LogonReceived is
   entered and left inside the Logon's own inbound chain, and inbound frames are serialised, so no other frame is
-  processed there; research D4.2.) The session MUST send its Logout acknowledgement when NextNumIn passes the
+  processed there; research D4.2.) fixpp's own ResendRequest is the one today's too-high path sends, BeginSeqNo(7) =
+  NextNumIn and EndSeqNo(16) = 0 (through current), so a conforming peer's answer covers S itself, with a GapFill
+  over its own Logout, and moves NextNumIn past S (User Story 3 scenario 3). The session MUST send its Logout
+  acknowledgement when NextNumIn passes the
   mark's 34, or when `logout_disconnect_timeout_ms` has elapsed since the mark, whichever comes first. With a value
   of 0, or on a session with no clock, it MUST acknowledge at once and send no ResendRequest of its own. After the
   acknowledgement the session ends as after an in-sequence peer Logout: `Disconnected`, the transport open until
-  the peer's EOF, `close()` or `Engine::stop()`. Across every ending that competes for the mark (the
+  the peer's EOF, `close()` or `Engine::stop()`. On the timeout route the Logout's own number is never consumed, so
+  NextNumIn and its durable copy stay at or below S and a reconnect asks for the gap again (research D4.5, B-103-7).
+  With `validate_sequence_numbers` off, unchanged: the Logout is handed to `fromAdmin` only, sets no mark and is not
+  acknowledged (Risk R9). Across every ending that competes for the mark (the
   acknowledgement, the gap deadline, the peer's in-sequence Logout, `close(graceful)`, a too-low frame's Logout)
   the session MUST send **at most one** Logout, and **exactly one** except in these cases, each disclosed in its
   B&L row (research "B&L delta"):
@@ -424,25 +468,40 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
      Logout's own `toAdmin`, whose Logout is stored and not transmitted (fixpp#590, rulings R-8 and R-9) (B-103-7);
   5. `close(graceful)` whose `logout_disconnect_timeout_ms` grace runs out before the Logout is written, because a
      resend answer or the claimed acknowledgement's own store and write outlast it (L-103-6).
-  One Logout is owned at a time, session-wide (research D4.6): `close(graceful)` that finds any Logout in flight
+  One Logout is owned at a time, session-wide (research D4.6; the endings contract's "At most one Logout" sentence,
+  which covers every Logout of an established session, Active or LogonReceived, and so also `close(graceful)` from
+  LogonReceived, which has no competitor there because no inbound frame but the Logon is processed in
+  LogonReceived): `close(graceful)` that finds any Logout in flight
   (the acknowledgement, an in-sequence acknowledgement, the deadline's, Arm B's) MUST wait for it, inside its
   grace, before it records `Disconnected` and closes the transport, and send none of its own; an inbound ending that
   finds one in flight (phase 1's included), or finds the session no longer Active, MUST skip its own Logout and keep
   the rest of its ending.
 - **FR-011**: While the pending-Logout mark is pending (before its acknowledgement is claimed), `Session::send`
   MUST return `session_invalid_state_for_send` (the result after a peer's in-sequence Logout), and administrative
-  traffic MUST continue: a TestRequest is answered and a ResendRequest is serviced. Once the acknowledgement is
+  traffic MUST continue: a TestRequest is answered and a ResendRequest is serviced. Every other inbound frame takes
+  the ending it takes with a resend outstanding and no mark (an in-sequence application frame is delivered to
+  `fromApp`; a SequenceReset, a Reject or a Heartbeat as today), and one that moves NextNumIn past S wakes the
+  bound (FR-010). The peer's Logout resent in sequence while the mark is pending takes the in-sequence route: it
+  claims the mark and is acknowledged once, with `fromAdmin` called once, for that frame (research D4.6's claim
+  table; the too-high Logout itself had none, Risk R8). Once the acknowledgement is
   claimed, inbound frames are drained until its `Disconnected`, as after an in-sequence Logout. The mark MUST end
   with its connection: it has no effect once the session leaves Active, and it is cleared when a new transport is
   installed (with FR-006's resend state).
 
 **BeginSeqNo (#580)**
 
-- **FR-012**: A ResendRequest with BeginSeqNo(7)=0 MUST be answered exactly as one with 7=1. No outbound frame MAY
-  carry 34=0.
+- **FR-012**: A ResendRequest with BeginSeqNo(7)=0 MUST be answered exactly as one with 7=1, "exactly" as the
+  endings contract's E5 defines the comparison (field for field, apart from SendingTime(52), the GapFill's
+  OrigSendingTime(122), which is stamped equal to its 52, and CheckSum(10), which covers them). No outbound frame
+  MAY carry 34=0.
 - **FR-013**: A ResendRequest without tag 7 MUST draw Reject 373=1 (Required tag missing) with RefTagID(371)=7 and
-  QuickFIX's Text(58) for that reason, MUST NOT be replayed, and MUST consume its sequence number like any Rejected
-  frame (FIX-SL §4.5.4).
+  QuickFIX C++'s Text(58) for that reason (the text 101's `session_reject_reason_text` table transcribes, B-101-13;
+  tasks T005 checks the two are the same string), and MUST NOT be replayed. In sequence it MUST consume its sequence
+  number like any Rejected frame (FIX-SL §4.5.4). Above NextNumIn, where the arm is reached, it consumes nothing:
+  NextNumIn does not move and nothing is persisted (FR-008), and fixpp's own ResendRequest follows the Reject per
+  FR-009 (research D3, D4.1). On a validating session whose dictionary marks BeginSeqNo required in ResendRequest
+  (tasks T004 records which do), the validate gate Rejects it before the arm, with the same Reject frame field for
+  field apart from 34, 52 and CheckSum(10) (research D3; a too-high one then opens no gap, Risk R11).
 
 **Replay serialisation (#588)**
 
@@ -450,33 +509,46 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   Heartbeat and TestRequest, `close()`'s Logout, the pending-Logout acknowledgement — MUST NOT be written inside a
   resend answer: one numbered after the answer started is numbered and written after the answer's last frame, and
   one numbered before it started (including a send suspended in its store write) is written before the answer's
-  first frame.
+  first frame. No hold of this serialisation MAY span a wait whose end depends on inbound processing (research
+  D5′.4's rule: such a span deadlocks the answer, which waits inside the inbound chain), for every emitter, a later
+  one included; and no path MAY acquire the gate while it holds the seqnum mutex or `write_gate_` (the lock order of
+  research D5′ "Deadlock analysis": the gate, then the seqnum mutex, then `write_gate_`).
 - **FR-015**: An emitter while no answer is in progress MUST NOT wait and MUST NOT allocate for this (no added
   latency on the normal path), and the serialisation MUST NOT leave a terminal cancellation filter on the caller.
   A wait that its caller's own cancellation ends returns `dispatch_aborted` with the session's state unchanged, no
   number consumed, and the caller's cancellation still pending (as `send_deferred_`'s hop returns it; research
-  D5′ "Cancellation").
+  D5′ "Cancellation"; its #583 limit, a consumer that already carries the terminal filter, is disclosed in
+  B-103-8).
 - **FR-016**: FR-014's ordering MUST hold whatever the answer's ending (complete, store fault, disconnect).
 
 **Gap endings (#581)**
 
 - **FR-017**: While a resend is outstanding and NextNumIn has not advanced for 2 × HeartBtInt, the next inbound frame
   of any MsgSeqNum that does not advance NextNumIn MUST draw the B-537-2 Logout ("ResendRequest unanswered,
-  expecting MsgSeqNum " + NextNumIn) and `Disconnected`. A frame that advances NextNumIn is processed as today and
-  restarts the deadline. The deadline's start and restart rules are otherwise B-537-2's. "Inbound frame" excludes
+  expecting MsgSeqNum " + NextNumIn) and `Disconnected`. A frame advances NextNumIn when the session will consume
+  its number (an in-sequence frame processed, or Rejected and consumed; a GapFill or a Reset that moves NextNumIn);
+  "does not advance" is not "34 ≠ NextNumIn": a frame at NextNumIn that is Rejected and not consumed, or a Reset
+  that moves nothing, does not advance it (research D6 "The predicate"). A frame that advances NextNumIn is processed
+  as today and restarts the deadline. The deadline's start and restart rules are otherwise B-537-2's. "Inbound frame" excludes
   a frame the session cannot read (a garbled frame the Framer disregards, B-093-1…B-093-3, and a faulty frame
   disposed of before any handler reads it, the 092 B-rows): FIX-SL §4.5.2 treats a garbled message as never received,
   and such frames do not refresh liveness (B-093-9), so a peer that sends only those ends at the TestRequest grace
-  check and the gap cannot stay open without end (research D6). No Logout is sent where the CompIDs overflow the
-  Logout buffer (B-537-2).
+  check (HeartBtInt > 0; at HeartBtInt ≤ 0 FR-017 does not apply, L-103-3) and the gap cannot stay open without end
+  (research D6). No Logout is sent where the CompIDs overflow the Logout buffer (B-537-2). This ends the session
+  where QuickFIX/J and QuickFIX/Go would also wait (the reading L-537-1 records), by the owner's ruling on #581
+  (2026-11-14, superseding ruling R-11; "Departures from QuickFIX" below).
 - **FR-018**: In Active (LogonReceived sees no frame but the Logon itself; FR-010), on a session with sequence
   validation on, gap or not, every frame below NextNumIn without 43=Y, the Heartbeat included, that reaches the
   sequence check MUST draw a Logout whose Text(58) is `MsgSeqNum too low, expecting <N> but received <M>`
-  (N = NextNumIn before the frame, M = its MsgSeqNum), then `Disconnected`, without advancing NextNumIn. Where the
+  (N = NextNumIn before the frame, M = its MsgSeqNum, each written by fixpp in decimal with no padding or sign; the
+  peer's bytes are never echoed; research D9 "Text"), then `Disconnected`, without advancing NextNumIn. Where the
   gap deadline (FR-017) has expired, its Logout is the one Logout. Not covered, each keeping its ending: a frame
   that fails dictionary validation is Rejected at the validate gate and the session stays Active, as QuickFIX C++
   does (`Session::next` runs `DataDictionary::validate` before `verify`; owner ruling, Gate A round 1); a frame
-  that fails the CompID or SendingTime check takes that check's ending; an unparseable or garbled frame keeps its
+  that fails the CompID check ends the session silently (`Disconnected`, no Logout), and one that fails the
+  SendingTime check draws its Reject and then the SendingTime-fatal Logout, as today (pinned by
+  `GapDeadlineGuards.G1_WrongCompIdAfterTheBound_EndsSilently` and
+  `GapDeadlineGuards.G1_SendingTimeOutsideTheThresholdAfterTheBound_RejectThenLogout`); an unparseable or garbled frame keeps its
   093 disposition. No Logout is sent where the CompIDs overflow the Logout buffer, or where `toAdmin` throws on it
   (FR-010's cases 1–3).
 
@@ -486,7 +558,11 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   lists the rows (retired, amended and added), together with every live row its recipe finds.
 - **FR-020**: Every test cell that pins today's behaviour of these paths MUST be flipped or re-read in the same
   change, and every test that relies on the default policy without naming it MUST be found by a census, not by
-  failures alone.
+  failures alone. A test relies on the default when its outcome depends on it: it fails with only the default
+  flipped (research D8, Pass F). The census's superset is every test that reaches a Session with an unnamed policy
+  (Pass P); a Pass-P row that does not fail in Pass F is re-read and recorded "insensitive", which closes it for
+  FR-020. The census is re-run at the head being accepted, and a changed test expectation that no census row or pin
+  task names stops for a decision (tasks T166).
 
 ### Key Entities
 
@@ -516,16 +592,25 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   `tests/interop/expected-skips-without-counterparty.txt` minus `tests/interop/live-cells-excluded.txt`). And an
   in-process FileStore restart-and-resume cell, in both roles, against the peer fixture (User Story 1's Independent
   Test and its acceptor twin) passes with the default configuration and fails with the strict default restored.
-- **SC-003**: No outbound frame in any test carries 34=0 (an assertion in the resend-answer cells).
-- **SC-004**: In every L-537-1 residual-pattern cell, the session ends within one frame after 2 × HeartBtInt without
-  an advance.
+- **SC-003**: No outbound frame of the resend-answer cells carries 34=0: `no_frame_carries_34_zero` holds in every
+  resend-answer cell of `tests/session/test_538_resend_answer_store_failure.cpp` and of 103's too-high ResendRequest
+  cells (tasks T041, T047). The claim reaches no further than those cells; FR-012's clamp sits in the walk, the one
+  place an answer is numbered, so no caller of the walk can write 34=0 (research D3).
+- **SC-004**: In every L-537-1 residual-pattern cell, the session ends at the first frame that does not advance
+  NextNumIn at or after 2 × HeartBtInt without an advance (FR-017; tasks T135 splits the residual loop at
+  E + `kGapBound`), and not before it.
 - **SC-005**: A send started during a replay is written after the replay's last frame in 100 % of runs of the held-
-  retrieve cells (deterministic: the hold forces the interleaving) and of the multi-threaded cell R-588-h under the
-  sanitizer lanes, R-588-h's repeat count derived from its mutant's measured miss rate (research R-588-h).
+  retrieve cells (deterministic: the hold forces the interleaving; R-588-a and R-588-b once on each of
+  `linux-clang-asan`, `linux-clang-ubsan` and `linux-clang-tsan`) and of the multi-threaded cell R-588-h on
+  `linux-clang-tsan` and `linux-clang-asan`, R-588-h's repeat count derived from its mutant's measured miss rate
+  (research R-588-h).
 - **SC-006**: The normal-path send latency, and the normal inbound-frame path (an Active Heartbeat and an Active
   application message through parse → validate → dispatch, `inbound_depth_`'s holder included), each in a paired
   base-vs-candidate run on one runner against the merge-base with the base worktree path padded, do not regress
-  beyond the bench gate's tolerance.
+  beyond the bench gate's tolerance, a slowdown greater than +5 % (`[const §VIII.2]`). The rows exist today: the
+  send path in `bench/session/session_send_bench.cpp` and `bench/session/engine_send_bench.cpp`, the inbound path
+  in `bench/session/on_inbound_frame_bench.cpp`'s `BM_Session_OnInboundFrame_InSequence` (its Heartbeat and
+  application-message arguments); tasks T170 adds a row only if a re-read finds one missing.
 
 ## Assumptions
 
@@ -538,11 +623,35 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   and QFC at master. The interop pin moves to QuickFIX/J 3.0.2 separately (owner, 2026-11-14), so SC-002's live
   Logon cells run against a peer with QFJ #902 fixed.
 
+### Departures from QuickFIX
+
+The one list of 103's observable departures from QuickFIX C++, QuickFIX/J or QuickFIX/Go, each with its authority.
+The PR description (tasks T181) and the B&L rows name them from here.
+
+| Departure | Engines it departs from | Authority |
+|---|---|---|
+| A too-high Logout is acknowledged after a bounded recovery, not at once (FR-010) | all three | owner ruling #577, 2026-11-14: the named exception (FIX-SL Table 3, §4.10 precedence 15) |
+| No `fromAdmin` for a too-high ResendRequest or Logout (FR-008, FR-010) | QuickFIX C++ (calls it at receipt) | disclosure: Risk R8, B-103-6, B-103-7 |
+| The gap deadline ends the session at any frame that does not advance NextNumIn (FR-017) | QuickFIX/J, QuickFIX/Go (would also wait, L-537-1) | owner ruling #581, 2026-11-14, superseding R-11 |
+| A live send is serialised against a resend answer (FR-014) | QuickFIX/J (does not serialise) | owner ruling #588, 2026-11-14 (QuickFIX C++ and Go serialise) |
+| After a too-low Logout the transport stays open until the peer's EOF, `close()` or `Engine::stop()` (FR-018) | QuickFIX C++, QuickFIX/J (close at once) | disclosure: L-103-5 (QuickFIX/Go waits in its logout state) |
+| A too-low frame in NotConnected or LogonSent still ends silently | all three (send a Logout) | disclosure: L-103-7, Out of Scope |
+| A send started in the too-high Logout acknowledgement's `toAdmin` is refused (research D4.7) | QuickFIX C++, QuickFIX/J (accept it, as L-563-2 records for the in-sequence route) | disclosure: B-103-7 |
+| A strict acceptor refuses a Logon without 141=Y with a Logout (FR-004; opt-in policy only) | all three (no engine refuses such a Logon) | owner ruling #682, 2026-11-14 (FIX-SL §4.4.3) |
+| A peer-spontaneous 141=Y acknowledgement at 34=1 with a hydrated NextNumIn above 1 ends the session | QuickFIX C++, QuickFIX/Go (accept it); QuickFIX/J (takes it as a reset) | disclosure: L-103-2, with a follow-up issue |
+
+Not a departure from QuickFIX C++: the validate-gate carve-out of FR-018 (its `Session::next` validates before
+`verify`; owner ruling, Gate A round 1).
+
 ## Normative References
 
 Entries are the exact `[DocAbbrev §X.Y.Z] Title` keys of `spec/coverage-index.md` (Article VI §5). Detail below a
 key (a table, a precedence row, a sub-case) is in the prose after it. Every point this spec cites has a key; no
-coverage-index row needs adding.
+coverage-index row needs adding. Matching recipe: a `[FIX-SL §X] Title` key is the row of the index's
+`## FIX Session Layer (FIX-SL)` table whose first column is `§X` and whose title column is `Title`; a
+`[FIX-TC §4 scenario N] Title` key is the row of its `## FIX Session Test Cases (FIX-TC)` table whose scenario
+column is `N` and whose title column is `Title` (the form prior specs use, for example 101's). A key with no such
+row, or whose title differs, is a dangling reference.
 
 - `[FIX-SL §4.1] Sequence numbers` — sequence numbers start at 1; no frame carries 34=0 (FR-012).
 - `[FIX-SL §4.4.2] Using ResetSeqNumFlag(141) for 24-hour connectivity` — 34=1 on a 141=Y Logon, after both numbers
@@ -569,7 +678,9 @@ coverage-index row needs adding.
   (FR-010).
 - `[FIX-TC §4 scenario 1B] Connect and Send Logon (Initiator)` — sub-case 1B(c): a too-high Logon on a new
   connection draws a ResendRequest (FR-006).
-- `[FIX-TC §4 scenario 1S] Receive Logon (Acceptor)` — sub-case 1S(a), the same on the acceptor (FR-006).
+- `[FIX-TC §4 scenario 1S] Receive Logon (Acceptor)` — sub-case 1S(a), the same on the acceptor (FR-006's
+  rationale). 103 claims no acceptor evidence for it: an acceptor is never reconnected in place (one Session per
+  accepted connection, and FR-006's fence refuses every acceptor), so 103 changes nothing it observes.
 - `[FIX-TC §4 scenario 2] Receive Message Standard Header` — sub-case 2c, MsgSeqNum too low (FR-018).
 - `[FIX-TC §4 scenario 8] Receive Resend Request message` — the answer to a ResendRequest (FR-008, FR-012).
 - `[FIX-TC §4 scenario 13] Receive Logout message` — the acknowledgement of the peer's Logout (FR-010).
@@ -586,5 +697,7 @@ QuickFIX/Go) at the SHAs in the pre-spec research's `_engine_shas.txt`, for obse
 - A general session send gate (#544 R-10) and ordered emission inside `Session` beyond the resend answer (the
   scoped gate of research D5′ is not one).
 - A 141=Y Logon received with 34 ≠ 1.
+- A too-low frame in the Logon arms (NotConnected, LogonSent): it still ends silently (L-103-7). FR-018's "every
+  frame below NextNumIn" is scoped to Active.
 - Holding application frames during gap recovery (L-013-2 stands).
 - #684 (L-509-1, PossDup with unparseable 52): batch B65.

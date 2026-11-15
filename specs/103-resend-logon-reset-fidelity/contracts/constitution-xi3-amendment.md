@@ -108,3 +108,26 @@ Sync Impact Report — v4.3 → v4.4 (<date>) — PENDING
 - The permission is scoped to the resend-answer serialisation and the reconnect's wait for in-flight outbound frames
   and the inbound chain (research D1, owner ruling 2026-11-15), so it cannot be cited for another gate; a further
   use of the gate needs its own amendment (Article XX §1).
+
+## How the clause's terms are read (checklist audit; not amendment text)
+
+The amended sentence above is unchanged; these readings are what the structural checks test it against.
+
+- **"Its session's serialised execution domain"** is the session's serialisation domain as session.hpp defines it
+  for `close()` and `send()`: the session strand under `threading_mode::per_session_strand` (the default), and the
+  attested already-serialised executor under `threading_mode::direct_executor`. The Debug strand assertion runs
+  only where the executor is a strand; under `direct_executor` the confinement rests on the caller's attestation,
+  as it does for every strand-confined member, and the call-site census (T075) is the check.
+- **"No OS synchronisation primitive and no atomic"** is about `detail::replay_gate`'s own code, which is what the
+  source check on its header reads. The `asio::steady_timer` service it waits on is asio's, as for every other
+  session timer, and is outside the clause.
+- **The clause governs `detail::replay_gate` only.** The bound's join counter (a `std::shared_ptr<std::atomic<int>>`,
+  research D4.4) is not part of the gate: it follows `liveness_counter_`'s FQ-C pattern, because its guard may run
+  at the destruction of a detached frame after the Session is gone, where a plain member could not be touched. The
+  no-atomic check is therefore not widened to session.hpp (tasks, "Bundle findings" 7).
+- **Lock order.** The gate is acquired before the seqnum mutex and before `write_gate_`, and no path acquires the
+  gate while it holds either `async_mutex` (research D5′ "Deadlock analysis"; spec FR-014). The call-site census
+  reads each acquire site against it.
+- **The two uses.** Every acquire site and every wake source of data-model.md's replay-gate list serves the
+  resend-answer serialisation, the reconnect's wait, or both; the census (T075) classifies each one so, and a site
+  that serves neither is "any other use", which needs its own amendment.

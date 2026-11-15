@@ -3,7 +3,14 @@
 Session state added or changed. All of it is private to `Session` (or internal under `src/session`) and lives on
 the session strand; no public type changes. One installed header is added, include/fixpp/session/detail/replay_gate.hpp:
 an internal detail header with no public symbol, installed only because `Session` holds the gate by value in
-include/fixpp/session/session.hpp (precedent: include/fixpp/session/detail/has_flush_for_session_close.hpp). Decisions are in [research.md](research.md).
+include/fixpp/session/session.hpp (precedent: include/fixpp/session/detail/has_flush_for_session_close.hpp). "No public
+symbol" means what it means for that precedent: the header declares only names in a `detail` namespace, which the
+documentation does not describe and the supported API does not include; the install-surface and layering checks
+(`tools/check_layers.py`, the packaging consumer tests) must accept it as they accept the precedent, and tasks T061
+runs them. The gate's `asio::steady_timer` adds no include requirement for a consumer of the installed
+session.hpp: session.hpp already reaches `<asio/steady_timer.hpp>` through `fixpp/session/reconnect_fsm.hpp`, whose
+members are `std::optional<asio::steady_timer>` (re-derive: `command grep -n steady_timer
+include/fixpp/session/reconnect_fsm.hpp`); replay_gate.hpp includes it itself. Decisions are in [research.md](research.md).
 
 ## Reset policy — `SessionConfig::reset_seqnum_policy_field` (changed default)
 
@@ -26,9 +33,16 @@ Fields: awaiting-resend flag, outstanding range [begin, end], `started_at` (dead
 
 ## Connection generation — `conn_gen_` (new)
 
-`std::uint32_t`, incremented in `install_reconnected_transport` before its `LogonSent` transition (D1).
+`std::uint32_t`, incremented in `install_reconnected_transport` before its `LogonSent` transition (D1), after the
+install's commit-point test: a refused install installs nothing, clears nothing and leaves `conn_gen_` unchanged. In
+the install the order is the commit-point test, then the clear (resend state, mark) and the increment, then the
+`LogonSent` transition, then `drive_reconnect`'s `emit_initiator_logon_`.
 Connection-scoped work captures it; the reconnect drain makes older-generation work unreachable after an install, so
-the bound asserts it. The acceptor needs none: `attach_accepted_transport` runs once per Session.
+the bound asserts it (`FIXPP_ASSERT`), never branches on it: only builds with `FIXPP_ASSERT` enabled witness the
+guarantee (the Debug cells G2 and G8), and a release build has no generation check, which the drain makes unnecessary
+(research Risk R24 (f)). Wrap-around at `UINT32_MAX` is harmless: the drain leaves no work of an older generation
+alive at any install, so the equality assertion never compares against a stale generation that the wrap could
+match. The acceptor needs none: `attach_accepted_transport` runs once per Session.
 
 ## Reconnect drain — `drive_reconnect` (changed) and `inbound_depth_` (new)
 
@@ -40,8 +54,11 @@ the bound asserts it. The acceptor needs none: `attach_accepted_transport` runs 
 - Reader fence, tested after the closing/closed/stopped test (`session_already_closed`):
   `cfg_.role == session_role::acceptor || (cfg_.engine_managed && live_transport_shared_() != nullptr)` →
   `session_already_open`, nothing changes (the Engine's read pump owns that transport; the acceptor disjunct is an
-  erratum the owner confirmed 2026-11-15). Standalone initiator precondition: the caller's reader has left
-  `live_transport()` before the call and starts on the new one after it.
+  erratum the owner confirmed 2026-11-15). Disclosed false positive (B-103-9): a standalone initiator that sets
+  `engine_managed` to defer its connect is treated as Engine-owned, so its second call with a transport installed is
+  refused. Standalone initiator precondition: the caller's reader has left `live_transport()` before the call and
+  starts on the new one after it (the same precondition keeps the old connection's frames from being fed during the
+  call, on which `emit_initiator_logon_`'s exclusion rests, research D5′.4).
 - `reconnect_in_flight_`: `bool`, set at `drive_reconnect`'s entry, cleared by RAII; a second call returns
   `session_already_open`.
 - Quiescent ⇔ `replay_gate_.shared == 0 && inbound_depth_ == 0` (no emitter outside the inbound chain between its
@@ -54,7 +71,23 @@ the bound asserts it. The acceptor needs none: `attach_accepted_transport` runs 
   closes the new transport and installs nothing (`session_already_closed`). It asserts quiescence. From a
   callback: one post first. Cancellation reaching backoff, connect or handshake: fixpp#585, unchanged. Caller cancellation → `dispatch_aborted`, nothing installed, state
   `Disconnected`, cancellation left pending.
-- Invariant: no frame numbered or claimed on one connection is written on a later one.
+- Endings, in the order the operation tests them (research D1):
+
+  | Ending | Result | State it leaves |
+  |---|---|---|
+  | a second call while one is in flight (single flight) | `session_already_open` | unchanged; nothing connected |
+  | closing, closed or stopping (step 1) | `session_already_closed` | unchanged; nothing installed |
+  | the reader fence (step 1a) | `session_already_open` | unchanged; the installed transport untouched |
+  | a `close()` or stop during the drain (re-test after a wake) | `session_already_closed` | `Disconnected` (if the drain started from Active or LogonReceived); nothing installed |
+  | the caller's own cancellation of the drain's wait | `dispatch_aborted` | `Disconnected`; nothing installed; the cancellation left pending |
+  | a cancellation reaching backoff, connect or handshake | fixpp#585's result, unchanged (`transport_connect_cancelled`) | as today |
+  | a refused install at the commit point | `session_already_closed` | `Disconnected`; the new transport closed; nothing installed, nothing cleared |
+  | installed | success | `LogonSent`, then the new connection's Logon exchange |
+
+- Invariant: no frame numbered or claimed on one connection is written on a later one. "Claimed" is the bound's
+  acknowledgement after its `pending → acking` claim; every other Logout that holds `logout_in_flight_` is numbered
+  inside a shared hold (`run_logout_phase1`) or inside the inbound chain (`inbound_depth_`), so the quiescence
+  condition waits for every holder.
 
 ## Pending-Logout mark — `peer_logout_` (new)
 
@@ -68,7 +101,9 @@ the bound's exit guard, which touches only that counter; `close()` and the recon
 `bool`, tested and set synchronously, before any stamp, number peek or suspension, by the two Logout leaves of an
 established session: `inbound_logout_leaf_` (every Active inbound-chain Logout and the bound's acknowledgement:
 in-sequence acknowledgement, gap deadline, SendingTime-fatal, PossDup Arm D, Arm B, T = 0 acknowledgement, the
-bound) and `run_logout_phase1`; cleared only on the edge into `Disconnected` (`record_state_transition_`), so it spans
+bound) and `run_logout_phase1`; cleared only on the edge into `Disconnected` (`record_state_transition_` when it records
+`Disconnected`: research D4.6 "The clear" shows the clear is sound whether that clears on a transition only or on
+every `Disconnected` record; the implementer picks one and tasks T100 records which), so it spans
 the whole ending, the in-sequence acknowledgement's `fromAdmin`, best-effort Reject and inbound persist included;
 `install_reconnected_transport` asserts it clear. `inbound_logout_leaf_` also skips when the session is no longer
 Active (tested at entry), so the leaf sets the owner only in Active (`run_logout_phase1` may also set it in
@@ -101,7 +136,14 @@ administrative traffic is answered; while `acking`, inbound frames are drained.
 Fields: `shared` (open shared holds), `exclusive` (a walk is waiting or running), `waiters`, lazy `wake` timer.
 - Shared hold: every emitter outside the inbound chain (`send_body_`/`send_impl`, liveness Heartbeat/TestRequest,
   `run_logout_phase1`, the bound's acknowledgement), from before its SendingTime stamp and number peek until its
-  `store_then_emit` returns. Fast path: no await, no allocation.
+  `store_then_emit` returns. Fast path: no await, no allocation. The set is the one research D5′.4's census recipe
+  derives (re-run at tasks T014 (c) and T166); where this list and the census differ, the census governs and the
+  difference stops for a decision.
+- Executor precondition: every acquirer's coroutine runs on the session's executor (`send()`'s documented
+  "session-strand" contract in session.hpp; the session's own coroutines are spawned there), so the lazy timer the
+  first waiter builds on `co_await this_coro::executor` binds to the session's executor, and each waiter resumes on
+  its own coroutine's executor. The Debug strand assertion at every acquire enforces it where the executor is a
+  strand; under `direct_executor` the attestation is the caller's, as for every strand-confined member.
 - Exclusive hold: `replay_outbound_range_` from entry (before the store tail read) to every ending (RAII); waits
   for `shared == 0` first.
 - Wake sources (the one normative list; research D5′ and the amendment's census point here): exclusive release,
