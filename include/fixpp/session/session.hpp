@@ -1473,6 +1473,11 @@ private:
         bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
     [[nodiscard]] inbound_result_t on_inbound_active_resend_request_(
         bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    // 103 (research D3): the answer to a ResendRequest. An absent BeginSeqNo(7) draws Reject
+    // 373=1, 371=7 and no walk; an in-sequence request's advance is persisted first. A
+    // request that is not in sequence (`in_sequence` false) persists nothing.
+    [[nodiscard]] inbound_result_t answer_resend_request_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr, bool in_sequence) noexcept;
     [[nodiscard]] inbound_result_t on_inbound_active_unsupported_(
         bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
     [[nodiscard]] inbound_result_t on_inbound_active_from_app_failed_(

@@ -5739,6 +5739,29 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_test_r
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_resend_request_(
     bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
+    // Guard (4)'s check_inbound has advanced NextNumIn: the request is in sequence.
+    FIXPP_INBOUND_SPLIT_AWAIT(r, tic, answer_resend_request_(tic, hdr, /*in_sequence=*/true));
+    co_return r;
+}
+
+// 103 (research D3; FR-012, FR-013): the answer to a ResendRequest, shared with D4's too-high
+// route. An absent BeginSeqNo(7) is refused with Reject 373=1 (Required tag missing), 371=7 and
+// QuickFIX C++'s text, and no walk; in sequence, Guard (4) has already consumed the number, so
+// the advance is persisted before the Reject (fixpp#423's order, as on_inbound_active_unsupported_
+// does). A present 7 that is empty or not a number parses to 0 and is answered as 7=1
+// (replay_outbound_range_ clamps it). fromAdmin's order is unchanged: on_inbound_active_ has
+// already dispatched it.
+asio::awaitable<fixpp::core::expected_t<void>> Session::answer_resend_request_(
+    bool tic, fixpp::session::detail::FrameHeader const& hdr, bool in_sequence) noexcept {
+    FIXPP_INBOUND_SPLIT_ENTRY(tic);
+    if (!hdr.begin_seqno_present) {
+        if (in_sequence) {
+            auto p_r = co_await persist_inbound_advance_();
+            if (!p_r) co_return std::unexpected(p_r.error());
+        }
+        co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num), "2", /*reason=*/1,
+                                                /*ref_tag_id=*/7, session_reject_reason_text(1));
+    }
     // 027 T006: delegate to replay_outbound_range_() — the
     // extracted walk helper (T005). Caller owns the FSM
     // Disconnected transition on any unexpected return.
@@ -5757,7 +5780,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_resend
     // fromAdmin dispatched by on_inbound_active_ before it selected this sub-arm. Persist after
     // handling.
     // [029 tasks T010; contracts C3.1; data-model §Persist matrix ResendRequest]
-    {
+    if (in_sequence) {
         auto p_r = co_await persist_inbound_advance_();
         if (!p_r) co_return std::unexpected(p_r.error());
     }
@@ -7825,6 +7848,12 @@ asio::awaitable<fixpp::core::expected_t<Session::replay_outcome>> Session::repla
         co_return replay_outcome::completed;
     };
 
+    // 103 (research D3; FR-012, SC-003): a request from 0 is answered as one from 1. The one
+    // clamp is here, where an answer is numbered, so no caller of the walk can write 34=0.
+    if (begin < seqnum_min) {
+        begin = seqnum_min;
+    }
+
     // Resolve the effective end: through-current or clamped to our last stored
     // sequence number. Mirrors the original rr_end resolution.
     seqnum_t our_last = 0;
@@ -7852,7 +7881,7 @@ asio::awaitable<fixpp::core::expected_t<Session::replay_outcome>> Session::repla
     if (!store_ || our_last == 0 || begin > eff_end) {
         const seqnum_t new_seq_no =
             end_is_through_current ? seqnum_mgr_.peek_outbound() : (requested_end + 1U);
-        co_return co_await emit_gapfill_async(begin > 0 ? begin : 1U, new_seq_no);
+        co_return co_await emit_gapfill_async(begin, new_seq_no);
     }
 
     // Per-slot store-walk over [begin, eff_end]. Accumulate absent, admin and

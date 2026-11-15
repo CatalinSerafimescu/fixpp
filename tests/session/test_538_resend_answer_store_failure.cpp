@@ -22,6 +22,11 @@
 // that captures every frame the session writes; and the session's event ring. The cells
 // an Engine's read pump drives are in test_538_resend_answer_store_failure_engine.cpp.
 //
+// Feature 103 (specs/103-resend-logon-reset-fidelity/, research D3; tasks T041, T042), fixpp#580:
+// a ResendRequest from BeginSeqNo(7)=0 is answered exactly as one from 7=1 (FR-012), an
+// absent 7 draws a Reject 373=1, 371=7 (FR-013), and no frame a resend-answer cell of this
+// file reads carries MsgSeqNum(34)=0 (SC-003, test_103_support.hpp's no_frame_carries_34_zero).
+//
 // The unbuildable-replay control of D-538-4's row "class 1 controls" is an existing
 // cell, ResendAnswerReplayTest.Replay_NoClockAndNoStoredSendingTime_SlotIsGapFilled
 // (test_resend_answer_field_order.cpp); it is not copied here.
@@ -42,16 +47,20 @@
 #include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <functional>
+#include <initializer_list>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
 #include "session/logon_arm_fixtures.hpp"
 #include "session/plain_engine_rig.hpp"
+#include "session/test_103_support.hpp"
 #include "support/calling_thread_readings.hpp"
+#include "support/fix44_dictionary.hpp"
 #include "support/recording_store.hpp"
 #include "support/seqnum_manager_test_access.hpp"
 #include "support/session_test_access.hpp"
@@ -139,6 +148,9 @@ struct ActiveSession {
     Answer pending;
     DirectAcceptor f{DirectAcceptor::Options{}};
 
+    ActiveSession() = default;
+    explicit ActiveSession(DirectAcceptor::Options o) : f{std::move(o)} {}
+
     [[nodiscard]] bool setup(unsigned const apps) {
         if (!f.open()) return false;
         CallingThreadReadings logon_call;
@@ -222,6 +234,8 @@ void expect_aborted_at_the_slot(Answer const& a, error const code) {
                                                  << printable(a.written);
     EXPECT_EQ(a.written.size(), 1U) << "a frame was written beyond the replay:\n"
                                     << printable(a.written);
+    EXPECT_TRUE(fixpp::test_support::t103::no_frame_carries_34_zero(a.written))  // SC-003
+        << printable(a.written);
 }
 
 // D-538-4, "a wrapper whose retrieve returns store_io_failure for one slot".
@@ -271,6 +285,8 @@ TEST(ResendAnswerStoreFailure,
         << printable(a.written);
     EXPECT_EQ(plain_rig::field_value(gap_fill, "36"), std::to_string(kFailedSlot + 1))
         << printable(a.written);
+    EXPECT_TRUE(fixpp::test_support::t103::no_frame_carries_34_zero(a.written))  // SC-003
+        << printable(a.written);
 }
 
 // ── The tail read fails ──────────────────────────────────────────────────────────────
@@ -293,6 +309,8 @@ void expect_nothing_written_and_ended(Answer const& a, error const code) {
     EXPECT_TRUE(a.call.returned_error(code)) << "on_inbound_frame " << a.call.call_text();
     EXPECT_EQ(a.state_after_call, fsm_state::Disconnected) << "the state after the call";
     EXPECT_TRUE(a.written.empty()) << "a frame was written:\n" << printable(a.written);
+    EXPECT_TRUE(fixpp::test_support::t103::no_frame_carries_34_zero(a.written))  // SC-003
+        << printable(a.written);
 }
 
 // D-538-4, "the tail read".
@@ -350,47 +368,240 @@ TEST(ResendAnswerStoreFailure, Control_SlotNotRetained_FoldsIntoAGapFillAndStays
     EXPECT_EQ(plain_rig::field_value(gap_fill, "36"), std::to_string(kHole + 1))
         << printable(a.written);
     EXPECT_FALSE(a.gap_filled_event) << "a plain gap must fold with no event";
+    EXPECT_TRUE(fixpp::test_support::t103::no_frame_carries_34_zero(a.written))  // SC-003
+        << printable(a.written);
 }
 
-// ── Class 2 (R-10): slot 0 ───────────────────────────────────────────────────────────
+// ── Class 2 (R-10): slot 0; BeginSeqNo(7) 0 and absent (fixpp#580) ────────────────────
 
-// D-538-4, "class 2 (R-10), slot 0". `request` asks from number 0, through the current
-// end, over a store that holds the reply Logon and two application messages. The
-// validate gate (SessionConfig::validate_inbound_messages) is off, its default.
-void run_slot_zero(std::string_view const request) {
-    constexpr unsigned kStored = 2;
+// The validate gate (SessionConfig::validate_inbound_messages) is off in every cell of this
+// section but the one that names it: its default.
+constexpr unsigned kStoredFor580 = 2;  // the reply Logon at 1, application messages at 2 and 3
+
+bool is_outbound_retrieve(StoreCall const& call) {
+    return call.op == store_op::retrieve && call.dir == direction_t::outbound;
+}
+bool is_inbound_persist(StoreCall const& call) {
+    return call.op == store_op::next_seqnum && call.dir == direction_t::inbound && call.increment;
+}
+
+// Slot 0 (D-538-4; feature 103 tasks T042; FR-012; research.md, "The re-aim of the 538
+// slot-zero cell"): a request from number 0 is clamped to 1 at the walk's entry, so the walk
+// never asks the store for slot 0. Its first slot read is 1, and the answer's first frame is
+// the GapFill over the reply Logon at 34=1.
+TEST(ResendAnswerStoreFailure, Guard_BeginSeqNoZero_ClampedToOne_SlotZeroNeverRead) {
     ActiveSession s;
-    ASSERT_TRUE(s.setup(kStored)) << "setup: the session did not reach Active and send";
+    ASSERT_TRUE(s.setup(kStoredFor580)) << "setup: the session did not reach Active and send";
     ASSERT_FALSE(s.f.cfg.validate_inbound_messages);
-    auto const a = s.answer(request, is_slot_read(0));
-    ASSERT_TRUE(a.call.completed && a.aimed.has_value() && a.aimed->returned() &&
-                a.aimed->error == error::store_seqnum_invalid)
-        << "the path was not exercised: the walk must ask the shipped store for number 0 and "
-           "be refused; that read: "
-        << record_text(a.aimed);
-
+    auto const a = s.answer(
+        "7=0\x01"
+        "16=0\x01",
+        is_outbound_retrieve);
+    ASSERT_TRUE(a.call.completed) << "on_inbound_frame did not complete";
     EXPECT_TRUE(a.call.returned_success()) << "on_inbound_frame " << a.call.call_text();
     EXPECT_EQ(a.state_after_call, fsm_state::Active);
-    EXPECT_EQ(replayed_numbers(a.written),
-              (std::vector<std::string>{std::to_string(kFirstApp), std::to_string(kFirstApp + 1)}))
-        << printable(a.written);
+    ASSERT_TRUE(a.aimed.has_value()) << "the walk read no slot";
+    EXPECT_EQ(a.aimed->first, seqnum_t{1}) << "the walk's first slot read";
+    EXPECT_FALSE(std::ranges::any_of(s.f.log->calls(), is_slot_read(0)))
+        << "the walk asked the store for slot 0";
     ASSERT_FALSE(a.written.empty());
-    // fixpp#580 flips this assertion: it clamps the per-slot walk's start to 1.
     EXPECT_TRUE(plain_rig::field_value(a.written.front(), "35") == "4" &&
                 plain_rig::field_value(a.written.front(), "123") == "Y" &&
-                plain_rig::field_value(a.written.front(), "34") == "0")
-        << "the answer's first frame must be a GapFill whose MsgSeqNum(34) is 0:\n"
+                plain_rig::field_value(a.written.front(), "34") == "1")
+        << "the answer's first frame must be a GapFill whose MsgSeqNum(34) is 1:\n"
+        << printable(a.written);
+    EXPECT_TRUE(fixpp::test_support::t103::no_frame_carries_34_zero(a.written))  // SC-003
         << printable(a.written);
 }
 
-TEST(ResendAnswerStoreFailure, Guard_BeginSeqNoZero_SlotZeroIsFoldedAndTheSessionStaysActive) {
-    run_slot_zero(
-        "7=0\x01"
-        "16=0\x01");
+// D-538-4's absent-7 slot-0 cell, now the absent-7 Reject (103 tasks T041, T042; FR-013): a
+// ResendRequest in sequence with no BeginSeqNo(7) draws Reject 373=1 (Required tag missing),
+// 371=7, Text(58) "Required tag missing" (QuickFIX C++'s text, evidence T005), and is not
+// answered by a walk. Guard (4) consumed its number: NextNumIn is 3 and the advance is
+// persisted before the Reject is stored (fixpp#423's order). The store reports itself
+// persistent, so the persist is a store call this cell can read.
+TEST(ResendAnswerStoreFailure,
+     Guard_BeginSeqNoAbsent_RejectRequiredTagMissing_ConsumedAndPersisted) {
+    ActiveSession s{DirectAcceptor::Options{.reports_persistent = true}};
+    ASSERT_TRUE(s.setup(kStoredFor580)) << "setup: the session did not reach Active and send";
+    ASSERT_FALSE(s.f.cfg.validate_inbound_messages);
+    auto const a = s.answer("16=0\x01", is_inbound_persist);
+    ASSERT_TRUE(a.call.completed) << "on_inbound_frame did not complete";
+    EXPECT_TRUE(a.call.returned_success()) << "on_inbound_frame " << a.call.call_text();
+    EXPECT_EQ(a.state_after_call, fsm_state::Active);
+
+    EXPECT_TRUE(replayed_numbers(a.written).empty()) << "a replay was written:\n"
+                                                     << printable(a.written);
+    EXPECT_EQ(count_of_type(a.written, "4"), 0U) << "a GapFill was written:\n"
+                                                 << printable(a.written);
+    ASSERT_EQ(a.written.size(), 1U) << printable(a.written);
+    auto const& rj = a.written.front();
+    EXPECT_EQ(plain_rig::field_value(rj, "35"), "3") << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(rj, "373"), "1") << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(rj, "371"), "7") << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(rj, "45"), "2") << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(rj, "58"), "Required tag missing") << printable(a.written);
+
+    EXPECT_EQ(session_test_access::seqnum_mgr(*s.f.session).next_inbound_unsafe(), seqnum_t{3})
+        << "the ResendRequest's number must be consumed";
+    ASSERT_TRUE(a.aimed.has_value() && a.aimed->returned() && !a.aimed->error.has_value())
+        << "the consumed number was not persisted: " << record_text(a.aimed);
+    auto const* const reject_store = s.f.log->first_after(0, [](StoreCall const& c) {
+        return c.op == store_op::store && c.dir == direction_t::outbound;
+    });
+    ASSERT_NE(reject_store, nullptr) << "the Reject was not stored";
+    EXPECT_LT(a.aimed->called_at, reject_store->called_at)
+        << "the advance must be persisted before the Reject is stored";
+    EXPECT_TRUE(fixpp::test_support::t103::no_frame_carries_34_zero(a.written))  // SC-003
+        << printable(a.written);
 }
 
-TEST(ResendAnswerStoreFailure, Guard_BeginSeqNoAbsent_SlotZeroIsFoldedAndTheSessionStaysActive) {
-    run_slot_zero("16=0\x01");
+// ── fixpp#580: 7=0 answered as 7=1; the gate's Reject; no store ────────────────────────
+
+// The (tag, value) fields of `frame`, in order, without the tags `skip` names.
+std::vector<std::pair<std::string, std::string>> fields_but(
+    std::string_view const frame, std::initializer_list<std::string_view> const skip) {
+    std::vector<std::pair<std::string, std::string>> out;
+    std::size_t at = 0;
+    while (at < frame.size()) {
+        auto const soh = frame.find('\x01', at);
+        auto const end = soh == std::string_view::npos ? frame.size() : soh;
+        auto const field = frame.substr(at, end - at);
+        auto const eq = field.find('=');
+        if (eq != std::string_view::npos) {
+            std::string tag{field.substr(0, eq)};
+            if (std::ranges::find(skip, std::string_view{tag}) == skip.end()) {
+                out.emplace_back(std::move(tag), std::string{field.substr(eq + 1)});
+            }
+        }
+        at = end + 1;
+    }
+    return out;
+}
+
+// contracts/session-wire-endings.md E5: equal field for field, apart from SendingTime(52), a
+// GapFill's OrigSendingTime(122) and CheckSum(10); MsgSeqNum(34) included.
+::testing::AssertionResult equal_as_e5(std::vector<std::string> const& got,
+                                       std::vector<std::string> const& want) {
+    if (got.size() != want.size()) {
+        return ::testing::AssertionFailure()
+               << got.size() << " frames, the 7=1 answer has " << want.size() << ":\n"
+               << printable(got) << "vs\n"
+               << printable(want);
+    }
+    for (std::size_t i = 0; i < got.size(); ++i) {
+        bool const gap_fill = plain_rig::field_value(want[i], "35") == "4";
+        auto const g =
+            gap_fill ? fields_but(got[i], {"52", "122", "10"}) : fields_but(got[i], {"52", "10"});
+        auto const w =
+            gap_fill ? fields_but(want[i], {"52", "122", "10"}) : fields_but(want[i], {"52", "10"});
+        if (g != w) {
+            return ::testing::AssertionFailure() << "frame " << i << " differs:\n"
+                                                 << printable({got[i]}) << "vs\n"
+                                                 << printable({want[i]});
+        }
+    }
+    return ::testing::AssertionSuccess();
+}
+
+// 103 tasks T041 (FR-012, SC-003; contracts/session-wire-endings.md E5): a ResendRequest from
+// BeginSeqNo(7)=0 through the current end gets exactly the answer of one from 7=1: a GapFill
+// over the reply Logon at 34=1 with NewSeqNo(36)=2, then the replays of 2 and 3. The 7=1 arm
+// is the control and the comparison's other half.
+TEST(ResendAnswerBeginSeqNo580, SevenZero_AnsweredExactlyAsSevenOne) {
+    ActiveSession zero;
+    ASSERT_TRUE(zero.setup(kStoredFor580)) << "setup (7=0): the session did not reach Active";
+    auto const a0 = zero.answer(
+        "7=0\x01"
+        "16=0\x01",
+        is_outbound_retrieve);
+    ActiveSession one;
+    ASSERT_TRUE(one.setup(kStoredFor580)) << "setup (7=1): the session did not reach Active";
+    auto const a1 = one.answer(
+        "7=1\x01"
+        "16=0\x01",
+        is_outbound_retrieve);
+
+    // The control: the 7=1 answer is the GapFill over the Logon, then the two replays.
+    ASSERT_TRUE(a1.call.completed && a1.call.returned_success()) << a1.call.call_text();
+    ASSERT_EQ(a1.written.size(), 3U) << printable(a1.written);
+    EXPECT_EQ(plain_rig::field_value(a1.written[0], "35"), "4") << printable(a1.written);
+    EXPECT_EQ(plain_rig::field_value(a1.written[0], "123"), "Y") << printable(a1.written);
+    EXPECT_EQ(plain_rig::field_value(a1.written[0], "34"), "1") << printable(a1.written);
+    EXPECT_EQ(plain_rig::field_value(a1.written[0], "36"), "2") << printable(a1.written);
+    EXPECT_EQ(replayed_numbers(a1.written), (std::vector<std::string>{"2", "3"}))
+        << printable(a1.written);
+
+    ASSERT_TRUE(a0.call.completed) << "on_inbound_frame (7=0) did not complete";
+    EXPECT_TRUE(a0.call.returned_success()) << "on_inbound_frame " << a0.call.call_text();
+    EXPECT_EQ(a0.state_after_call, fsm_state::Active);
+    EXPECT_TRUE(equal_as_e5(a0.written, a1.written));
+    EXPECT_TRUE(fixpp::test_support::t103::no_frame_carries_34_zero(a0.written))  // SC-003
+        << printable(a0.written);
+    EXPECT_TRUE(fixpp::test_support::t103::no_frame_carries_34_zero(a1.written))  // SC-003
+        << printable(a1.written);
+}
+
+// 103 tasks T041 (FR-013; evidence T004): on a session that validates against the vendored
+// FIX 4.4 dictionary, where BeginSeqNo is required in ResendRequest, the gate Rejects an
+// absent 7 before the arm runs. Its Reject equals the non-validating session's (the arm's)
+// field for field, apart from MsgSeqNum(34), SendingTime(52) and CheckSum(10). Both sessions
+// are FIX.4.4 over the same dictionary; only the validate gate differs.
+TEST(ResendAnswerBeginSeqNo580, SevenAbsent_ValidatingSession_GateRejectEqualsTheArmsReject) {
+    auto const fix44 = [](bool const validate) {
+        return DirectAcceptor::Options{.tweak_cfg = [validate](fixpp::session::SessionConfig& cfg) {
+            cfg.begin_string = "FIX.4.4";
+            cfg.dictionary = fixpp::test_support::make_fix44_dictionary();
+            cfg.validate_inbound_messages = validate;
+        }};
+    };
+    ActiveSession gate{fix44(true)};
+    ASSERT_TRUE(gate.setup(kStoredFor580))
+        << "setup (validating): the session did not reach Active";
+    auto const ag = gate.answer("16=0\x01", is_outbound_retrieve);
+    ActiveSession arm{fix44(false)};
+    ASSERT_TRUE(arm.setup(kStoredFor580))
+        << "setup (not validating): the session did not reach Active";
+    auto const aa = arm.answer("16=0\x01", is_outbound_retrieve);
+
+    ASSERT_EQ(ag.written.size(), 1U) << printable(ag.written);
+    EXPECT_EQ(plain_rig::field_value(ag.written.front(), "35"), "3") << printable(ag.written);
+    EXPECT_EQ(plain_rig::field_value(ag.written.front(), "373"), "1") << printable(ag.written);
+    EXPECT_EQ(plain_rig::field_value(ag.written.front(), "371"), "7") << printable(ag.written);
+    ASSERT_EQ(aa.written.size(), 1U) << printable(aa.written);
+    EXPECT_EQ(fields_but(aa.written.front(), {"34", "52", "10"}),
+              fields_but(ag.written.front(), {"34", "52", "10"}))
+        << "the arm's Reject:\n"
+        << printable(aa.written) << "the gate's Reject:\n"
+        << printable(ag.written);
+    EXPECT_TRUE(fixpp::test_support::t103::no_frame_carries_34_zero(aa.written))  // SC-003
+        << printable(aa.written);
+}
+
+// 103 tasks T041, the storeless arm (`/speckit-analyze` C4; FR-012, SC-003): 7=0 on a
+// session with no store takes the walk's empty-store branch, one GapFill over the whole
+// range, which starts at 34=1 and never at 0. Its RED source is T046's mutant: once the walk's
+// entry clamps, that branch's own clamp is removed.
+TEST(ResendAnswerBeginSeqNo580, SevenZero_NoStore_OneGapFillFromOne) {
+    ActiveSession s{DirectAcceptor::Options{
+        .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.store_factory = nullptr; }}};
+    ASSERT_TRUE(s.setup(kStoredFor580)) << "setup: the session did not reach Active and send";
+    ASSERT_EQ(session_test_access::store(*s.f.session), nullptr) << "setup: a store was made";
+    auto const a = s.answer(
+        "7=0\x01"
+        "16=0\x01",
+        is_outbound_retrieve);
+    ASSERT_TRUE(a.call.completed) << "on_inbound_frame did not complete";
+    EXPECT_TRUE(a.call.returned_success()) << "on_inbound_frame " << a.call.call_text();
+    ASSERT_EQ(a.written.size(), 1U) << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(a.written.front(), "35"), "4") << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(a.written.front(), "123"), "Y") << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(a.written.front(), "34"), "1") << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(a.written.front(), "36"),
+              std::to_string(kFirstApp + kStoredFor580))
+        << printable(a.written);
+    EXPECT_TRUE(fixpp::test_support::t103::no_frame_carries_34_zero(a.written))  // SC-003
+        << printable(a.written);
 }
 
 // ── The 789 path superseded (R-13) ───────────────────────────────────────────────────
@@ -463,6 +674,8 @@ TEST(ResendAnswerStoreFailure, Control_Superseded789Arm_TailReadCancelled_Record
     EXPECT_EQ(ring_after_call, ring_before_release)
         << "ring when the call returned: " << ring_text(ring_after_call)
         << "; ring before the read was released: " << ring_text(ring_before_release);
+    EXPECT_TRUE(fixpp::test_support::t103::no_frame_carries_34_zero(f.sent))  // SC-003
+        << printable(f.sent);
 }
 
 // D-CAN-5's returned timing when the arm is not superseded (D-CAN-4): the peer's Logon asks
@@ -513,6 +726,8 @@ TEST(ResendAnswerStoreFailure, NotSuperseded789Arm_TailReadCancelled_ReturnsStor
     ASSERT_EQ(f.sent.size(), 1U) << "a frame was written after the reply Logon:\n"
                                  << printable(f.sent);
     EXPECT_EQ(plain_rig::field_value(f.sent.front(), "35"), "A") << printable(f.sent);
+    EXPECT_TRUE(fixpp::test_support::t103::no_frame_carries_34_zero(f.sent))  // SC-003
+        << printable(f.sent);
 }
 
 }  // namespace

@@ -948,6 +948,12 @@ foreach(held_store_test
     LABELS "session;538"
     TIMEOUT 300)
 endforeach()
+# 103 T041 (fixpp#580): SC-003 is read through test_103_support.hpp, whose mock transport
+# header needs FIXPP_ALLOW_MOCK_TRANSPORT, and the validating arm loads the vendored
+# FIX 4.4 dictionary (tests/support/fix44_dictionary.hpp reads FIXPP_DICT_DATA_DIR).
+target_compile_definitions(session_538_resend_answer_store_failure PRIVATE
+  FIXPP_ALLOW_MOCK_TRANSPORT
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 
 # Rulings R-15 to R-23 (`.specify/536-537-538-recovery-liveness.md` §10): a cancelled outbound
 # store, and the graceful Logout that was not sent. Standalone ([const §VII.8]):
