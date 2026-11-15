@@ -1238,6 +1238,39 @@ TEST(ReplayGate588, R588f2_ContendedSend_EngineStop_RefusedNothingWritten) {
     w.release();
 }
 
+// 103 tasks T072 (1)'s witness: a send contended behind a held answer while the session goes
+// Disconnected with no close() and no end of the walk, at the liveness loop's TestRequest
+// grace expiry. Only the Disconnected edge's wake can end the send's wait before the release:
+// close()'s first-commit wake and the guard's release, which also wake it, are absent, so
+// the two edges do not cover each other here. The TestRequest is written before the request,
+// so the loop sleeps in its grace window, outside any hold, while the answer is held. The
+// bound is derived from the hold's own real-time bound, the other thing that can end the
+// walk and so wake the send.
+TEST(ReplayGate588, R588f4_ContendedSend_LivenessDisconnects_RefusedNothingWritten) {
+    HeldWalk w{DirectAcceptor::Options{
+        .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
+    ASSERT_TRUE(w.start(is_slot_read(3), std::nullopt, /*request=*/false)) << "setup";
+    w.s.f.clock->advance(kHb588 + std::chrono::seconds{1});
+    ASSERT_TRUE(w.s.f.run_until([&] { return w.s.f.sent_count("1") != 0; }))
+        << "setup: no TestRequest was written:\n"
+        << printable(w.s.f.sent);
+    ASSERT_TRUE(w.feed_request()) << "setup: the walk did not reach the held read";
+    auto const i = w.spawn_send("LIVE-L");
+    w.pump_for(kHeldWindow);
+    ASSERT_FALSE(w.send_done(i)) << "setup: the send did not wait behind the held answer";
+    w.s.f.clock->advance(kHb588 + std::chrono::seconds{1});
+    EXPECT_TRUE(
+        w.s.f.run_until([&] { return w.send_done(i); }, fixpp::test_support::kBodyHoldBound / 2))
+        << "the contended send did not end after the liveness loop's Disconnected";
+    EXPECT_EQ(w.s.f.session->state(), fsm_state::Disconnected);
+    EXPECT_EQ(session_test_access::lifecycle_value(*w.s.f.session), 1)
+        << "the session's lifecycle: 1 (open), no close() ran";
+    EXPECT_TRUE(w.live_calls[i].returned_error(error::session_invalid_state_for_send))
+        << w.live_calls[i].call_text();
+    EXPECT_TRUE(live_frames(w.s.f.sent, "LIVE-L").empty()) << printable(w.s.f.sent);
+    w.release();
+}
+
 // (3): the send's own slot emits a terminal cancellation while it waits. It returns
 // dispatch_aborted; the session stays Active, no number is consumed, and the caller's
 // cancellation is still pending when the call returns.
