@@ -68,6 +68,7 @@
 #include "support/fix44_dictionary.hpp"
 #include "support/recording_store.hpp"
 #include "support/seqnum_manager_test_access.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 namespace {
@@ -170,9 +171,9 @@ struct ActiveSession {
                                     std::to_string(i) +
                                     "\x01"
                                     "55=AAPL\x01"));
-            auto fut =
-                asio::co_spawn(f.ioc, f.session->send(std::span<const std::byte>{payloads.back()}),
-                               asio::use_future);
+            auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*f.session, f.ioc),
+                                      f.session->send(std::span<const std::byte>{payloads.back()}),
+                                      asio::use_future);
             if (!f.run_until([&] { return DirectAcceptor::ready(fut); }) ||
                 !fut.get().has_value()) {
                 return false;
@@ -935,6 +936,16 @@ struct HeldWalk {
     ActiveSession s;
 
     HeldWalk() = default;
+    HeldWalk(HeldWalk const&) = delete;
+    HeldWalk& operator=(HeldWalk const&) = delete;
+    // spawn_send binds a co_spawn to a signal of this fixture's, and a co_spawn leaves its
+    // cancellation handler, which holds the session's strand, in that signal; no copy of a
+    // strand may outlive the io_context. So the drain runs here, while every member is alive,
+    // and those handlers are destroyed before `s`'s io_context.
+    ~HeldWalk() {
+        fixpp::test_support::cancel_and_drain_or_report(s.f.ioc, *s.f.clock, "538::HeldWalk");
+        for (auto& sig : live_signals) sig.slot().clear();
+    }
     explicit HeldWalk(DirectAcceptor::Options o) : s{std::move(o)} {}
 
     // Setup, then the request, held at the first call `hold` accepts; `held` is that call's
@@ -968,7 +979,7 @@ struct HeldWalk {
         live_signals.emplace_back();
         auto& out = live_calls.back();
         live_futs.push_back(asio::co_spawn(
-            s.f.ioc,
+            fixpp::test_support::session_executor_of(*s.f.session, s.f.ioc),
             fixpp::test_support::await_and_read_thread(
                 [this, &p] { return s.f.session->send(std::span<const std::byte>{p}); }, out),
             asio::bind_cancellation_slot(live_signals.back().slot(), asio::use_future)));

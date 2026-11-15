@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "session/test_103_support.hpp"
+#include "support/session_executor_of.hpp"
 
 namespace {
 
@@ -120,7 +121,8 @@ public:
 
     // open(), then the peer's 141=Y acknowledgement at 34=1: Active, NextNumIn 2.
     [[nodiscard]] bool open_to_active() {
-        auto fut = asio::co_spawn(s.ioc, s.session->open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                                  s.session->open(), asio::use_future);
         if (!t103::pump_or_fail(
                 s.ioc, [&] { return rg::Scene::ready(fut); }, fixpp::test_support::kPumpBudget,
                 "t103_578/open") ||
@@ -153,7 +155,8 @@ public:
     // on it. Takes the reconnect mark first.
     [[nodiscard]] fixpp::core::expected_t<void> reconnect() {
         reconnect_mark = s.sent.size();
-        auto fut = asio::co_spawn(s.ioc, s.session->drive_reconnect(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                                  s.session->drive_reconnect(), asio::use_future);
         if (!t103::pump_or_fail(
                 s.ioc, [&] { return rg::Scene::ready(fut); }, fixpp::test_support::kPumpBudget,
                 "t103_578/drive_reconnect")) {
@@ -346,7 +349,7 @@ TEST(ResendStateReconnect103,
         "11=ORD-E\x01" +
         std::string{rg::kSideAndTime};
     auto fut =
-        asio::co_spawn(r.s.ioc,
+        asio::co_spawn(fixpp::test_support::session_executor_of(*r.s.session, r.s.ioc),
                        r.s.session->send(std::span<const std::byte>{
                            reinterpret_cast<std::byte const*>(payload.data()), payload.size()}),
                        asio::use_future);

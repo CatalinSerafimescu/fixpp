@@ -15,8 +15,8 @@
 // released by a handler posted onto the session's own executor, so the hold's state is touched
 // only there.
 //
-// One run is one sample. The repeat count that makes the cell a witness is measured from its
-// mutant (tasks T074); run it with --gtest_repeat=<n>.
+// One run is one sample. The repeat count that makes the cell a witness comes from its
+// mutant's miss rate (tasks T074); run it with --gtest_repeat=<n>.
 #include <gtest/gtest.h>
 
 #include <array>

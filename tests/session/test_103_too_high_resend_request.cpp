@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "session/test_103_support.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 namespace {
@@ -62,7 +63,7 @@ class TooHighResendRequest103 : public ::testing::TestWithParam<session_role> {}
             "11=ORD-577-" +
             std::to_string(i) + "\x01" + std::string{rg::kSideAndTime});
         auto const& p = payloads.back();
-        auto fut = asio::co_spawn(s.ioc,
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
                                   s.session->send(std::span<const std::byte>{
                                       reinterpret_cast<std::byte const*>(p.data()), p.size()}),
                                   asio::use_future);

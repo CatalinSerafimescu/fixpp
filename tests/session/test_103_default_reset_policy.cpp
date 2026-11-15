@@ -42,6 +42,7 @@
 
 #include "session/test_103_support.hpp"
 #include "support/recording_store.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 #include "support/temp_dir.hpp"
 
@@ -134,7 +135,8 @@ std::vector<t103::frame_fields> of_type(std::vector<std::string> const& frames,
 // Hands one frame to on_inbound_frame and returns its result. The frame is the caller's and
 // outlives the pump.
 fixpp::core::expected_t<void> feed(rr::Fixture& f, std::vector<std::byte> const& frame) {
-    auto fut = asio::co_spawn(f.ioc, f.session->on_inbound_frame(frame), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*f.session, f.ioc),
+                              f.session->on_inbound_frame(frame), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, std::chrono::milliseconds{500},
                                                     "t103_682/feed")) {
         fixpp::test_support::drain_or_report(f.ioc, "t103_682/feed");
@@ -147,7 +149,7 @@ fixpp::core::expected_t<void> feed(rr::Fixture& f, std::vector<std::byte> const&
 // Session::send of one NewOrderSingle body; returns its result.
 fixpp::core::expected_t<void> send_order(rr::Fixture& f, std::string const& payload) {
     auto fut =
-        asio::co_spawn(f.ioc,
+        asio::co_spawn(fixpp::test_support::session_executor_of(*f.session, f.ioc),
                        f.session->send(std::span<const std::byte>{
                            reinterpret_cast<std::byte const*>(payload.data()), payload.size()}),
                        asio::use_future);
@@ -354,7 +356,8 @@ public:
         auto* raw = f.get();
         f->cfg.transport_send = [raw](std::span<const std::byte> d) { raw->capture(d); };
         f->session = std::make_unique<fixpp::session::Session>(f->eng, f->cfg);
-        auto fut = asio::co_spawn(f->ioc, f->session->open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*f->session, f->ioc),
+                                  f->session->open(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(f->ioc, fut, std::chrono::seconds{2},
                                                         "t103_682/restart/open")) {
             fixpp::test_support::drain_or_report(f->ioc, "t103_682/restart/open");
@@ -368,7 +371,8 @@ public:
 
     // Closes the session terminally and drains, then destroys it (releasing the store).
     static void close(std::unique_ptr<rr::Fixture>& f) {
-        auto fut = asio::co_spawn(f->ioc, f->session->close(fixpp::session::close_mode::terminal),
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*f->session, f->ioc),
+                                  f->session->close(fixpp::session::close_mode::terminal),
                                   asio::use_future);
         if (fixpp::test_support::run_window_then_ready(f->ioc, fut, std::chrono::seconds{2},
                                                        "t103_682/restart/close")) {
