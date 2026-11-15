@@ -451,7 +451,8 @@ ReconnectFsm::run_inbound_liveness_watch() noexcept {
 // ── exit_awaiting_resend ──────────────────────────────────────────────────────
 //
 // Clear the AwaitingResend transient flag and reset resend_state_. Called by
-// session.cpp when the gap closes. [data-model §E-1]
+// session.cpp when the gap closes and, since 103 (research D1), when a new transport
+// is installed (Session::install_reconnected_transport). [data-model §E-1]
 void ReconnectFsm::exit_awaiting_resend() noexcept {
     awaiting_resend_ = false;
     resend_state_.reset();

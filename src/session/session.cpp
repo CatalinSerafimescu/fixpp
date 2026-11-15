@@ -776,6 +776,16 @@ void Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Tr
     //     the pre-live/config-time test path (cfg_.transport_send set at open()).
     //     [data-model §E-1a; T016(c); FR-003; FQ-A gate-b/r2]
 
+    // 2b. 103 (research D1, "Clearing site"; FR-006): the new connection starts with no
+    //     resend outstanding. exit_awaiting_resend clears the awaiting flag and resets the
+    //     resend state (the outstanding range, started_at, inbound_filled_through), before
+    //     the LogonSent transition and so before drive_reconnect's emit_initiator_logon_
+    //     sends the new Logon. Then the connection generation moves. Both are noexcept and
+    //     allocate nothing. The Disconnected edge clears neither (research D1, "Why the edge
+    //     clears neither the resend state nor the mark").
+    reconnect_fsm_.exit_awaiting_resend();
+    ++conn_gen_;
+
     // 3. Re-enter LogonSent so on_inbound_frame drives back to Active.
     //    The session's next peer Logon-ack will be processed by the LogonSent
     //    row of the FSM matrix, transitioning back to Active.

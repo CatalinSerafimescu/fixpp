@@ -1612,6 +1612,11 @@ private:
     // Engine::stop()'s registry clear (the writes are not in the join counter).
     std::shared_ptr<fixpp::transport::Transport> reconnected_transport_;
 
+    // 103 (specs/103-resend-logon-reset-fidelity/ data-model, research D1): the connection
+    // generation. Incremented in install_reconnected_transport before its LogonSent
+    // transition; connection-scoped recovery work captures it.
+    std::uint32_t conn_gen_ = 0;
+
     // 015 T011 — live accepted transport (owned by Session after a successful
     // attach_accepted_transport call). Null until the engine's accept loop
     // attaches a peer. shared_ptr per 015 /simplify Q-1 (see reconnected_transport_).

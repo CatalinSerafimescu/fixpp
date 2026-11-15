@@ -362,6 +362,9 @@ function(add_session_103_bucket name)
     ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
     LABELS "session;103")
 endfunction()
+add_session_103_bucket(session_103_tests
+  test_103_resend_state_reconnect.cpp                                   # 103 T018
+)
 
 # 099 W-5's, W-6's and W-25's reconnect cells drive drive_reconnect() through MockReconnectFactory,
 # in those TUs only.
