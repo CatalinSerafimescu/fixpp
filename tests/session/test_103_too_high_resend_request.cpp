@@ -218,6 +218,25 @@ TEST_P(TooHighResendRequest103, Control_InSequence_SameAnswerNoResendRequest) {
     EXPECT_FALSE(s.resend_outstanding());
 }
 
+// Control, the knob off (research D4.1, "with validate_sequence_numbers off, nothing
+// changes"): a ResendRequest above NextNumIn is delivered by the knob-off arm and answered by
+// nothing; no frame is written and NextNumIn does not move. The witness of route (b)'s
+// `cfg_.validate_sequence_numbers` term.
+TEST_P(TooHighResendRequest103, Control_KnobOff_TooHighResendRequestNotAnswered) {
+    rg::Scene s{rg::Options{
+        .role = GetParam(), .validate_sequence_numbers = false, .with_store = true}};
+    std::vector<std::string> payloads;
+    ASSERT_TRUE(active_with_two_sends(s, payloads));
+    seqnum_t const n = s.next_in();
+
+    auto const mark = s.sent.size();
+    auto const r = s.feed(s.resend_request(n + 3));
+    EXPECT_TRUE(r.has_value()) << "on_inbound_frame returned error " << static_cast<int>(r.error());
+    EXPECT_EQ(s.state(), fsm_state::Active) << s.written(mark);
+    EXPECT_EQ(s.sent.size(), mark) << "the knob-off session answered: " << s.written(mark);
+    EXPECT_EQ(s.next_in(), n) << "NextNumIn moved";
+}
+
 INSTANTIATE_TEST_SUITE_P(BothRoles, TooHighResendRequest103,
                          ::testing::Values(session_role::initiator, session_role::acceptor),
                          [](auto const& info) { return std::string{rg::role_name(info.param)}; });
