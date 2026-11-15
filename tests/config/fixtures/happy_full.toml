@@ -75,7 +75,7 @@ validate_sequence_numbers    = false  # default true  (inverted)
 validate_inbound_messages    = false  # default false (same — dictionary != nullptr enables it)
 
 # Enum knobs — non-default values
-reset_seqnum_policy   = "bilateral_lenient"    # the default since feature 103
+reset_seqnum_policy   = "bilateral_strict"     # default bilateral_lenient (feature 103)
 sending_time_precision = "micros"              # default millis
 app_backpressure       = "disconnect_and_recover"  # default block
 

@@ -136,10 +136,9 @@ std::string dump_diags(const fixpp::config::LoadResult& result) {
 //                              which is a session-level seam outside config scope
 //   locks=mutex              — default; spin is an opt-in performance knob
 //   begin_string="FIX.4.4"  — non-FIXT so default_appl_ver_id stays nullopt
-//   refresh_on_logon=false   — must be false under bilateral_strict; fixture uses
-//                              bilateral_lenient which permits true, but we leave
-//                              it false to keep the matrix simpler (tested in
-//                              negative cells later)
+//   refresh_on_logon=false   — the fixture sets bilateral_strict (the non-default
+//                              since feature 103), under which a refresh is
+//                              suppressed (INV-RoL-3); it stays false
 //   validate_inbound_messages=false — stays false; enabling it requires
 //                              dictionary != nullptr which the loader populates
 //                              only in Phase 3c (selector resolver); no conflict.
@@ -223,7 +222,7 @@ TEST(LoadHappyPath, T011_FieldForFieldEquivalence) {
 
     // ── Enum knobs (non-default values) ──────────────────────────────────────
     EXPECT_EQ(cfg.reset_seqnum_policy_field,
-              fixpp::session::reset_seqnum_policy::bilateral_lenient);  // the default since 103
+              fixpp::session::reset_seqnum_policy::bilateral_strict);  // default lenient (103)
 
     EXPECT_EQ(cfg.sending_time_precision,
               fixpp::core::fix_time_precision::micros);  // default millis
