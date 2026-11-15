@@ -587,14 +587,14 @@ The gate has no atomics. `Session::send`'s path is already strand-local: `send_s
    2. Otherwise run `++waiters` under RAII, so a wait ended by `||` or by frame destruction cannot leak a count.
    3. `co_await wake->async_wait(asio::as_tuple(asio::use_awaitable))`.
    4. `--waiters`.
-   5. If `cancellation_state.cancelled() != none`, return `dispatch_aborted`, leaving the caller's cancellation pending (no `reset_cancellation_state`; see "Cancellation").
+   5. If `cancellation_state.cancelled() != none`, return `dispatch_aborted`, leaving the caller's cancellation pending (no `reset_cancellation_state`; see "Cancellation"). [Erratum 2026-11-15: this step is the shared wait's; the walk's exclusive wait ends otherwise, see "Cancellation (#583)", the walk's exclusive wait.]
    6. Re-test the emitter's own predicate (D5′.4).
    7. Loop.
 3. **Taking the hold.** The hold is taken with no suspension between the loop's last test and `++shared`.
 
 **D5′.3 The exclusive side, in `Session::replay_outbound_range_`.**
 1. **Entry, before the first suspension:** assert `!exclusive` (walks never overlap; see D5′.6), set `exclusive = true`, and build an RAII guard. The guard's destructor clears `exclusive` and calls `wake_all()`. It runs on every ending: completed, superseded, every error `co_return`, an exception, and destruction of the frame.
-2. **Wait for open holds:** `while (shared != 0)`, the same pre-check, wait and RAII count as D5′.2. After each wake, if `fsm_state_ == Disconnected`, or the walk's arm was superseded, return `dispatch_aborted`. Callers keep their existing failure handling; any `record_state_transition_(Disconnected)` they make is guarded by `fsm_state_ != Disconnected`.
+2. **Wait for open holds:** `while (shared != 0)`, the same pre-check, wait and RAII count as D5′.2. After each wake, if `fsm_state_ == Disconnected`, or the walk's arm was superseded, return `dispatch_aborted`. [Erratum: the pre-check and the cancelled wait end with `store_cancelled` and the lock sequence's cancellation parts, see "Cancellation (#583)", the erratum.] Callers keep their existing failure handling; any `record_state_transition_(Disconnected)` they make is guarded by `fsm_state_ != Disconnected`.
 3. **Where the wait sits:** before the store tail read (`store_->next_seqnum`), not just before the first frame. The tail read sets `our_last` and `eff_end`. A send that took S before A and is still in its store call must be stored before that read, or the answer stops at S−1 while S is written ahead of it. Cell R-588-b.
 4. **Coverage:** one site covers every caller: the in-sequence ResendRequest sub-arm, D4's two too-high routes through `answer_resend_request_`, and `honor_peer_next_expected_`'s 789 walk.
 
@@ -682,6 +682,11 @@ Each is one compare when nobody waits.
   - `logout_wait_wake_`, `reset_unit_wake_` and `close_grace_wake_` serve one waiter each, through a frame-local timer and a `std::function`.
   - The gate has N waiters, so it keeps one lazily created member timer whose `cancel()` wakes all of them.
 - **The witness is a unit cell on the gate alone** (R-588-g). On the send path, the `async_lock` that follows the wait would mask the result.
+- **The walk's exclusive wait** *(Erratum 2026-11-15, 103 Phase 7, orchestrator ruling; owner to confirm with XI §3 at Gate B)*. The bullets above hold for an emitter's SHARED wait (D5′.2) and for the gate itself. They do not hold for the inbound chain's EXCLUSIVE wait, D5′.3's wait in the walk:
+  - **The condition they missed.** Engine::stop's first step emits a total cancellation on the read pump's slot, in the strand handler that first notes the stop on the session (which wakes the gate's waiters). A walk runs in that read pump, and its thread carries #583's terminal filter once a lock of the inbound chain has run. A gate wait that inherits that filter does not record the stop's total, while the same walk waiting at the store's lock does, because the lock sequence sets the filter to total for its wait. One condition, the engine stopping during an answer, then had two endings: `store_cancelled` at the stop's wake (the walk at the lock), or a later wake and `dispatch_aborted` (the walk at the gate). The evidence file's "Phase 7: the pins' re-aim, the gate-wait timing, and the walk's cancellation erratum" has the probe and its reading.
+  - **The rule for the walk.** Each pass of the walk's wait runs, in the walk's own frame, the cancellation parts 1 to 4 of the lock sequence (`FIXPP_DETAIL_CO_AWAIT_LOCK`, async_mutex.hpp): the pre-check; the filter set to total for the wait; the wait; `cancelled()` read, then the state reset to terminal. A pass that its caller's cancellation ends returns `store_cancelled`, the ending of a cancelled store read of the walk (R-13, R-14, D-CAN-4), and leaves the calling thread as a cancelled lock wait leaves it: no cancellation recorded, the terminal filter (D-CAN-3). A wake by the `Disconnected` edge or a superseded arm still returns `dispatch_aborted` (D5′.3 step 2).
+  - **What stays.** The gate itself never calls `reset_cancellation_state`. The amended Article XI §3 sentence (constitution.md, contracts/constitution-xi3-amendment.md) speaks of the gate and stays true as written; the amendment's Rationale clause on the caller's filter is scoped by the same erratum. The shared waits keep "the cancellation stays pending" and `dispatch_aborted`; the evidence file's class table ("gate wait sites × production emits") reads, per site, which production emits reach it and how its wait ends at the gate and at the store lock. The "Disclosed" bullet above concerns those shared waits only.
+  - **Witnesses.** `InboundCancellation.WalkCancelledAtTheReplayGate_EndsTheSessionAndReturnsStoreCancelled`, `InboundCancellation.WalkReadCancelled_EveryTimingLeavesTheSameReadings` (the thrown, returned and gate-wait timings, each with a total emit), and `CancelledReadMeasuredPath.StopWhileTheWalkWaitsAtTheGate_TheSessionEndsAtTheStopsWake` (under an Engine); their mutants are in the evidence file.
 
 #### Allocation (Article XV §1)
 
@@ -1217,6 +1222,9 @@ Characterisation cells, no behavioural mutant: B-4 (`toAdmin` throws; control B-
   - `Qfj750_LogoutTooLowSeqnumStillDisconnects` asserts only the state; it holds.
 
 **#578 and #588:** no existing pin. `FrameSentDuringTheReplay.IsIgnoredAndASecondResendRequestFetchesIt` holds.
+
+**#588 — flip (found at implementation, Phase 7; orchestrator ruling)**
+- `CancelledReadMeasuredPath.StopDuringAnswer_PeerReadsNothingMore` and `CancelledReadMeasuredPath.Control_ReleaseBeforeStop_RangeReplayed` (test_538_cancelled_read_measured_path.cpp), and `InboundCancellation.WalkReadCancelledAtTheStoresLock_EndsTheSessionAndReturnsStoreCancelled` with its pair (test_inbound_cancellation.cpp). Each held one Engine::send inside its store() so that the walk's tail read would queue at the FileStore's lock. D5′.3's exclusive wait comes before the tail read, and the held send holds the gate shared, so the walk waits at the gate instead and the tail read is never called. Re-aimed: the lock is held by a store call of the cell's own, which takes no gate hold; the subject, a store_cancelled returned by the lock, is unchanged. R588b_SendInItsStoreCall_WrittenBeforeTheAnswerWhichCoversIt witnesses the ordering that moved them. The pair became `WalkReadCancelled_EveryTimingLeavesTheSameReadings`, with the gate-wait timing as its third arm. Before/after readings in the evidence file.
 
 ---
 

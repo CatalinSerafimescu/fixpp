@@ -154,6 +154,11 @@ Fields: `shared` (open shared holds), `exclusive` (a walk is waiting or running)
 - A contended wait: the pre-check sits in the waiting frame, or the wait is awaited through the split idiom (D5′.2).
   A wait its caller's cancellation ends returns `dispatch_aborted`, state unchanged, no number consumed, the
   caller's cancellation left pending.
+  *(Erratum 2026-11-15, 103 Phase 7, orchestrator ruling; owner to confirm with XI §3 at Gate B)* That ending is
+  an emitter's shared wait's. The walk's exclusive wait runs the lock sequence's cancellation parts in its own
+  frame: its caller's cancellation ends it with `store_cancelled`, the thread left with no cancellation recorded
+  and the terminal filter (research D5′ "Cancellation (#583)", the walk's exclusive wait). The gate itself resets
+  nothing.
 - Guarantee: no outbound number is assigned during an answer; frames numbered before it are written before its
   first frame.
 

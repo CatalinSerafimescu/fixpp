@@ -537,7 +537,12 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   A wait that its caller's own cancellation ends returns `dispatch_aborted` with the session's state unchanged, no
   number consumed, and the caller's cancellation still pending (as `send_deferred_`'s hop returns it; research
   D5′ "Cancellation"; its #583 limit, a consumer that already carries the terminal filter, is disclosed in
-  B-103-8).
+  B-103-8). *(Erratum 2026-11-15, 103 Phase 7, orchestrator ruling; owner to confirm with XI §3 at Gate B)*: "no terminal cancellation filter left on the caller" and the `dispatch_aborted`
+  ending with the caller's cancellation still pending apply to an emitter's SHARED wait (research D5′.2). The
+  inbound chain's EXCLUSIVE wait, the resend walk's, follows the lock sequence: its caller's cancellation ends it
+  with `store_cancelled` and leaves the thread as a cancelled lock wait does, with no cancellation recorded and the
+  terminal filter (research D5′ "Cancellation (#583)", the walk's exclusive wait). The amended Article XI §3
+  sentence speaks of the gate and stays as written.
 - **FR-016**: FR-014's ordering MUST hold whatever the answer's ending (complete, store fault, disconnect).
 
 **Gap endings (#581)**
