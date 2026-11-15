@@ -3924,6 +3924,12 @@ if(TARGET fixpp_codegen_generate AND TARGET fixpp_builders_v42)
   add_executable(test_082_v42_nested_exemplar_roundtrip
     test_082_v42_nested_exemplar_roundtrip.cpp
     "${CMAKE_SOURCE_DIR}/tests/interop/support/golden_diff.cpp"
+    # Records pass (REMAINING-WORK row 8): the per-message v42 builder round-trip and its
+    # census join this executable, which already links the v42 builder libs and loads
+    # FIX42.xml (no new ctest entry, [const §VII.8]); the census reads the registered
+    # cells of this binary, as the tail-row censuses joined to
+    # test_077_allversions_builder_roundtrip do.
+    test_v42_builder_roundtrip.cpp
   )
   add_dependencies(test_082_v42_nested_exemplar_roundtrip fixpp_codegen_generate)
   target_link_libraries(test_082_v42_nested_exemplar_roundtrip PRIVATE
@@ -3931,6 +3937,7 @@ if(TARGET fixpp_codegen_generate AND TARGET fixpp_builders_v42)
     fixpp_dictionary
     fixpp::builders::v42
     fixpp::validators::v42
+    pugixml::pugixml
     GTest::gtest
     GTest::gtest_main
   )
@@ -3948,4 +3955,8 @@ if(TARGET fixpp_codegen_generate AND TARGET fixpp_builders_v42)
     COMMAND test_082_v42_nested_exemplar_roundtrip)
   set_tests_properties(test_082_v42_nested_exemplar_roundtrip PROPERTIES
     LABELS "082;us4;roundtrip;golden;dict;i")
+  # Records pass: the v42 per-message round-trip's labels. APPEND, after the last LABELS
+  # setter for this entry, so the existing labels survive.
+  set_property(TEST test_082_v42_nested_exemplar_roundtrip APPEND PROPERTY LABELS
+    "builder-roundtrip;v42")
 endif()

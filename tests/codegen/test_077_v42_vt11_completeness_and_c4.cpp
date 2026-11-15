@@ -14,14 +14,15 @@
 //   - vt11 is genuinely admin-only: the raw-XML walk over FIXT11.xml itself
 //     returns an EMPTY application-message set (8/8 messages are
 //     msgcat="admin") -- expected(vt11)=∅ is DERIVED, not asserted by fiat.
-//   - v42 is NOT admin-only: the raw-XML walk over FIX42.xml returns 39
-//     application messages (msgcat="app"). expected(v42)=∅ for THIS
-//     census is a POLICY exclusion (issue #196 / L-063-1: FIX 4.2 types
-//     NumInGroup as legacy INT, so emit_builders would materialize zero
-//     typed groups for it and silently omit required='Y' groups -- see
-//     tools/codegen/fixpp-codegen/main.cpp's since-removed driver-level `if (ir.ns != "v42")`
-//     skip). This test asserts BOTH numbers (39 real app messages, 0 builder-completeness
-//     expectation) so the distinction is pinned, not conflated.
+//   - v42 is NOT admin-only: the raw-XML walk over FIX42.xml returns its
+//     application messages (msgcat="app"), and since 082 (issue #196) the
+//     emitted v42 builder_registry must equal that set exactly -- see
+//     V42RegistryExactSetEqualsRawXmlWalk below. (Before 082, expected(v42)
+//     was empty by policy: FIX 4.2 types NumInGroup as legacy INT, and the
+//     since-removed driver skip `if (ir.ns != "v42")` in
+//     tools/codegen/fixpp-codegen/main.cpp kept v42 builder-less.) The
+//     per-message round-trip of every v42 builder is
+//     tests/session/test_v42_builder_roundtrip.cpp.
 //
 // C4 (structural-key safety pin): a future dictionary bump that introduces
 // a new structural variant of an existing shared `no_tag` group is absorbed
