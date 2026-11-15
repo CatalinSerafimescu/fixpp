@@ -1,7 +1,9 @@
 # Data Model: 103 resend and Logon-reset fidelity
 
 Session state added or changed. All of it is private to `Session` (or internal under `src/session`) and lives on
-the session strand; no public type changes. Decisions are in [research.md](research.md).
+the session strand; no public type changes. One installed header is added, include/fixpp/session/detail/replay_gate.hpp:
+an internal detail header with no public symbol, installed only because `Session` holds the gate by value in
+include/fixpp/session/session.hpp (precedent: include/fixpp/session/detail/has_flush_for_session_close.hpp). Decisions are in [research.md](research.md).
 
 ## Reset policy — `SessionConfig::reset_seqnum_policy_field` (changed default)
 

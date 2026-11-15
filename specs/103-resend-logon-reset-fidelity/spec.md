@@ -6,9 +6,10 @@
 
 **Status**: Draft
 
-**Base**: `2c74af92` (feature 102's head, PR #680, owner rule 2026-11-14: new work branches from the open PR's tip).
-Rebased `--onto origin/main 2c74af92` once PR #680 squash-merges. Feature 102 changes no file under `src/session`,
-`include/fixpp/session` or the session C ABI.
+**Base**: `da129e17` (PR #680's squash of feature 102). The branch was cut from `2c74af92` (feature 102's head,
+owner rule 2026-11-14: new work branches from the open PR's tip) and rebased onto `da129e17` on 2026-11-14; the two
+trees are identical. Feature 102 changes no file under `src/session`, `include/fixpp/session` or the session C ABI.
+"RED on `2c74af92`" below reads the same on `da129e17`.
 
 **Input**: batch B43 (fixpp#580, #577, #581, #578, #588) plus fixpp#682 (B&L L-029-3), the owner's v1.0 goal 1
 ("no known bugs"). Pre-spec research, which reads every point below against the FIX Session Layer (Nov 2020), the
@@ -481,10 +482,8 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
 
 **Records**
 
-- **FR-019**: The B&L file MUST be amended for every behaviour above: L-029-3 retired; L-537-1 retired; B-013-6,
-  B-016-1, B-537-1, B-537-2 and L-028-3 amended where they state today's behaviour; new B-rows for the default
-  change (marked BREAKING), the strict acceptor's Logout, the 7=0/absent-7 answers, the pending-Logout ending, and
-  the replay serialisation.
+- **FR-019**: The B&L file MUST be amended for every behaviour above, exactly as research.md's "B&L delta"
+  lists the rows (retired, amended and added), together with every live row its recipe finds.
 - **FR-020**: Every test cell that pins today's behaviour of these paths MUST be flipped or re-read in the same
   change, and every test that relies on the default policy without naming it MUST be found by a census, not by
   failures alone.

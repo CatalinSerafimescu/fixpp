@@ -2,7 +2,7 @@
 
 **Branch**: `103-resend-logon-reset-fidelity` | **Date**: 2026-11-14 | **Spec**: [spec.md](spec.md)
 **Base**: `da129e17` (PR #680's squash of feature 102), rebased from `2c74af92` on 2026-11-14; the two trees are identical.
-**Input**: [spec.md](spec.md) with three Clarifications sessions; design decisions in [research.md](research.md)
+**Input**: [spec.md](spec.md) with its Clarifications sessions; design decisions in [research.md](research.md)
 (D1–D9, RED cells, pins, B&L delta, constitution check, risks, and the normative "Pass-2 amendments").
 
 ## Summary
@@ -57,6 +57,7 @@ quoted from `.specify/memory/constitution.md` (v4.3); it replaces research.md's 
 | XI §2: "**Cancellation: ASIO native cancellation slots end-to-end.** No parallel `stop_token` abstraction." | PASS, justified — waits end by the per-operation slot or by the session's wake idiom (a timer cancel, asio-native); no `stop_token`. The bound is not bound to `root_cancel_` because its slot holds one handler, the liveness loop's (D4.4). |
 | XI §3: "`fixpp::sync::async_mutex` … is the only allowed mutex shape for coroutines." | **PASS once amended (owner ruling 1, Gate A round 1)** — `detail::replay_gate` is a coroutine shared/exclusive exclusion primitive, so it conflicts with §3 as written, and Article XX §1 requires "amending the article first". The amendment rides this PR (MINOR, v4.3 → v4.4): [contracts/constitution-xi3-amendment.md](contracts/constitution-xi3-amendment.md) holds the exact text and the Sync Impact Report entry, and phase 0 applies it before any D5′ code. Its text converged with this bundle at Gate A (2026-11-15); the scoped Codex re-read of the clause as applied, required by the contract's Sync Impact Report, follows phase 0. |
 | XI §7: "Threading/concurrency-affecting features trigger all four mandatory controls (Appendix A)" | Applies — `/clarify` done; `/analyze` pending; Codex Gate A **converged** 2026-11-15 (loop 2 round 3); owner `/plan` sign-off: see below. |
+| XII §5: "`Session` construction requires an explicit `SecurityProfile` choice — there is no implicit default." | **N/A** — its subject is `SecurityProfile` alone; the reset-policy default is not a security profile. `session_config.hpp`'s comments that cite it for the policy default drop the citation (tasks T027). |
 | XV §1: "The "hot path" of this ban is the latency-critical **in-memory** path — parse → validate → dispatch and `MemoryStore`, which MUST stay zero-allocation per message." | PASS — the per-frame additions are `inbound_depth_`'s holder (an increment, a decrement, a compare; no coroutine frame: it sits in `on_inbound_active_`, not in the non-coroutine `on_inbound_frame`, per #544's ruling a2), a byte compare and a flag read. The existing inbound windows `alloc_guard_544_wa_active_heartbeat_mallocnesia` and `alloc_guard_544_wb_active_app_message_mallocnesia` (cases that must read zero) witness it. The contended exclusive wait sits only at `replay_outbound_range_`'s entry (a ResendRequest or a 789 walk), off the per-frame path; it is measured as evidence (research D5′ "Allocation", Codex #9). The bound's coroutine frame is one per too-high Logout. |
 | XV §3: "**Coarse global session lock.**" / XV §9: "**`std::mutex` in coroutine context.**" | PASS — the gate is per session, scoped to one resend answer, and uses no `std::mutex`. |
 | XVI §3/§4: "`/clarify` is MANDATORY before `/plan` …" / "`/analyze` is MANDATORY for the same trigger set" | `/clarify` done; `/analyze` pending. |
@@ -71,7 +72,7 @@ quoted from `.specify/memory/constitution.md` (v4.3); it replaces research.md's 
 
 ```text
 specs/103-resend-logon-reset-fidelity/
-├── spec.md          # rulings in three Clarifications sessions
+├── spec.md          # rulings in its Clarifications sessions
 ├── plan.md          # this file
 ├── research.md      # D1–D9, RED cells, pins, B&L delta, constitution check, risks, pass-2 amendments
 ├── data-model.md    # session state added or changed
@@ -93,12 +94,14 @@ include/fixpp/session/resend_state.hpp     # doc: when resend state is reset (na
 include/fix/c_api/session.h, version.h     # (default) marker, BREAKING marks, MINOR 17 paragraph
 src/session/session.cpp                    # D1–D6, D9 sites (research Sites per decision)
 src/session/scan_frame_header.hpp          # FrameHeader::begin_seqno_present
-src/session/<replay_gate>.hpp              # detail::replay_gate (location decided at tasks)
+include/fixpp/session/detail/replay_gate.hpp # detail::replay_gate: an installed internal detail header with no public symbol, because Session holds the gate by value in session.hpp (precedent: include/fixpp/session/detail/has_flush_for_session_close.hpp)
 tests/session/test_103_*.cpp               # new RED cells (reconnect, default policy, too-high RR, too-high Logout, too-low Logout)
 tests/session/replay_gate_test.cpp         # the gate alone (filter witness)
 tests/session/test_538_*.cpp, test_537_gap_deadline.cpp, test_reset_seqnum_policy_matrix.cpp, …  # extended / flipped pins
 tests/capi/version_test.cpp, tests/config/*, bindings/python/tests/*, tests/interop/** # consumers (D7)
 spec/behaviors-and-limitations*.md, spec/feature-catalogue.md, spec/coverage-index.md, brain/components/session.md
+.github/workflows/tier2.yml, .github/workflows/parallelism-measure.yml, ci/seed-sccache.sh, ci/restore-sccache.sh,
+ci/assert-ci-lane-policy.py, ci/tier2-sccache-probe.md, tests/dictionary/CMakeLists.txt  # msvc-asan CI cache (owner ruling 2026-11-15; phase 11)
 ```
 
 **Structure Decision**: library-internal session changes plus documentation surfaces and one constitution
@@ -154,7 +157,14 @@ Order by dependency (research R17 as amended):
    `root_cancellation_slot()`".
 10. **Polish** — `/simplify`, `/speckit-verify` (Tier-1 mirror incl. MSVC build of new targets, sanitizers, SC-002's
     live Logon cells with no helper forcing a policy, and the in-process FileStore restart cell in both roles),
-    Gate B, the scoped Codex Gate A on the applied XI §3 clause, owner sign-off of the amendment.
+    Gate B, then the owner's sign-off of the amendment (its RATIFIED flip). The scoped Codex Gate A on the applied
+    XI §3 clause is not a polish step: it runs right after phase 0 applies the clause (tasks T007), and it holds
+    phase 6 back only if it returns a P1 or a P2.
+11. **msvc-asan CI cache (owner ruling 2026-11-15)** — a per-leg `SCCACHE_CACHE_SIZE` on the tier-2 MSVC legs, a
+    compressed (and, if needed, multi-layer) sccache archive under GHCR's per-layer limit, a per-test `TIMEOUT` for
+    `dictionary_overlay_tests` derived from CI durations, and the pins that read them (parent
+    `research/reviews/msvc-asan-timeout-investigation-2026-11-15.md`). The job `timeout-minutes` change is a
+    separate main commit, not 103's. Tasks order it before the two close-out tasks.
 
 ## Complexity Tracking
 

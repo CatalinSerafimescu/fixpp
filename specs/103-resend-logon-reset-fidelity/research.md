@@ -1245,6 +1245,8 @@ Characterisation cells, no behavioural mutant: B-4 (`toAdmin` throws; control B-
 - `L-103-5`: after a too-low Logout, as after B-537-2, the transport stays open until the peer disconnects, `close()` or `Engine::stop()`, and `reset_on_logout` does not fire.
 - `L-103-6`: a `close(graceful)` whose `logout_disconnect_timeout_ms` grace runs out before its Logout is written (a resend answer longer than the grace, or a claimed acknowledgement whose store and write outlast it) sends no Logout and force-closes (FR-010 case 5).
 - `L-103-7`: a too-low frame in the Logon arms (NotConnected, LogonSent) still ends silently. That is out of FR-018's Arm B; QuickFIX sends a Logout there.
+- `B-103-11` (orchestrator ruling at `/speckit-analyze`, 2026-11-15; the shape of B-544-3, B-099-18 and B-101-14): `sizeof(Session)` grows, a C++ layout change in an installed header (the replay gate, the pending-Logout mark and its wake, the bound's join counter, the Logout owner, `conn_gen_`, `inbound_depth_`, `reconnect_in_flight_`), before the first release; no C-ABI change, since the C ABI exposes `Session` only through an opaque handle. The new installed header include/fixpp/session/detail/replay_gate.hpp is an internal detail header with no public symbol.
+- Also every live row the recipe finds: each row of the live spec/behaviors-and-limitations.md that names L-029-3 or L-537-1, or states the strict default, is amended or retired with them (tasks T148).
 - (`L-103-1` of pass 1 is not added: pass 2 covers both of its cases.)
 
 ---
