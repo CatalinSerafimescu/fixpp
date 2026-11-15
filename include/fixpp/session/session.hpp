@@ -1733,6 +1733,33 @@ private:
         replay_gate_.wake_all();
     }
 
+    // ── 103 (fixpp#577, research D4.2 to D4.6) — a too-high Logout ─────────────
+    // The pending-Logout mark: the too-high Logout's MsgSeqNum S, its arrival time, and
+    // the phase (data-model "Pending-Logout mark"). Session strand only.
+    struct peer_logout_mark {
+        enum class phase_t : std::uint8_t { none, pending, acking };
+        seqnum_t seq = 0;
+        fixpp::core::steady_time_point at{};
+        phase_t phase = phase_t::none;
+    };
+    peer_logout_mark peer_logout_;
+    // The bound's wake (research D4.4): published by the bound and cleared in its body
+    // when its race ends. Session strand only.
+    std::function<void()> peer_logout_wake_;
+    // The bound's join counter (research D4.4): incremented before the bound is spawned,
+    // decremented by a frame-local guard that touches only this counter
+    // (liveness_counter_'s pattern).
+    std::shared_ptr<std::atomic<int>> peer_logout_bound_counter_{
+        std::make_shared<std::atomic<int>>(0)};
+    // The Logout owner (research D4.6): at most one Logout of an established session is
+    // in flight. Session strand only.
+    bool logout_in_flight_ = false;
+    // Test seams of the bound (cells F1 and F2): when set, the bound awaits the first
+    // before its first test, and the second between its publish-and-re-test and its
+    // race's wait. Set only through session_test_access.
+    std::function<asio::awaitable<void>()> peer_logout_bound_hold_first_run_;
+    std::function<asio::awaitable<void>()> peer_logout_bound_hold_before_race_;
+
     // ── 013 Phase 3 T023/T026 — ReconnectFsm driver ─────────────────────────
     // 043 T012 (D-4/E-6) — Session-owned resolved transport factory.
     // Populated ONCE at open() to the effective factory:

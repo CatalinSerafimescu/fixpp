@@ -12,9 +12,12 @@
 // `Session`. Never installed; production targets must not include this
 // header. Needs no test macro.
 
+#include <asio/awaitable.hpp>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/session/session.hpp>
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -197,6 +200,29 @@ struct session_test_access {
     // The session's store, or null before open() (093 plan OD-25: a cell issues a
     // competing store operation on it).
     [[nodiscard]] static MessageStore* store(Session& s) noexcept { return s.store_.get(); }
+
+    // 103 (fixpp#577, research D4.2 to D4.6): the pending-Logout mark's phase (0 none,
+    // 1 pending, 2 acking), the Logout owner, and the bound's join counter. Read on the
+    // session's strand.
+    [[nodiscard]] static int peer_logout_phase(Session const& s) noexcept {
+        return static_cast<int>(s.peer_logout_.phase);
+    }
+    [[nodiscard]] static bool logout_in_flight(Session const& s) noexcept {
+        return s.logout_in_flight_;
+    }
+    [[nodiscard]] static int peer_logout_bound_count(Session const& s) noexcept {
+        return s.peer_logout_bound_counter_->load(std::memory_order_acquire);
+    }
+    // The bound's two test seams (cells F1, F2): the bound awaits the first before its
+    // first test, and the second between its publish-and-re-test and its race's wait.
+    static void set_peer_logout_bound_hold_first_run(Session& s,
+                                                     std::function<asio::awaitable<void>()> hold) {
+        s.peer_logout_bound_hold_first_run_ = std::move(hold);
+    }
+    static void set_peer_logout_bound_hold_before_race(
+        Session& s, std::function<asio::awaitable<void>()> hold) {
+        s.peer_logout_bound_hold_before_race_ = std::move(hold);
+    }
 
     // The session's replay gate (103, research D5′): a cell reads whether a walk waits at
     // it. Read it on the session's strand.
