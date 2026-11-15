@@ -365,6 +365,7 @@ endfunction()
 add_session_103_bucket(session_103_tests
   test_103_resend_state_reconnect.cpp                                   # 103 T018
   test_103_default_reset_policy.cpp                                     # 103 T022
+  test_103_too_high_resend_request.cpp                                  # 103 T047
 )
 
 # 103 T023: test_reset_seqnum_policy_matrix.cpp's AS5 cells use mock_reconnect_factory.hpp's

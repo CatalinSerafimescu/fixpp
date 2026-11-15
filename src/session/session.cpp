@@ -5264,6 +5264,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_too_hi
         !answer_pending_test_request_(hdr.test_req_id)) {
         co_return fixpp::core::expected_t<void>{};
     }
+    // 103 (research D4.1 route (a); FR-008, fixpp#577): a too-high ResendRequest is answered
+    // as an in-sequence one is, consuming and persisting nothing, and the retransmission goes
+    // before fixpp's own ResendRequest below (FIX-SL Table 3, TC 20). A failed answer has
+    // recorded Disconnected inside the helper. No fromAdmin: no out-of-sequence frame reaches
+    // it.
+    if (hdr.msg_type == "2") {
+        FIXPP_INBOUND_SPLIT_AWAIT(ans, tic,
+                                  answer_resend_request_(tic, hdr, /*in_sequence=*/false));
+        if (!ans) {
+            co_return ans;
+        }
+    }
     // Too-high: enter AwaitingResend and emit ResendRequest(2).
     // reconnect_fsm_.enter_awaiting_resend() owns state; we emit
     // ResendRequest inline (requires seqnum_mgr_ + store_then_emit).
@@ -5458,6 +5470,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
         }
         // Any out-of-sequence Heartbeat: no advance, no persist, no fromAdmin, no echo.
         co_return fixpp::core::expected_t<void>{};
+    }
+    // 103 (research D4.1 route (b); FR-008, FR-009, fixpp#577): a ResendRequest above
+    // NextNumIn while a resend is outstanding is answered, and no second ResendRequest goes
+    // out. Ahead of the PossDup arm, whose admin row would drop one carrying 43=Y. With the
+    // knob off the frame keeps the knob-off arm's delivery below.
+    if (cfg_.validate_sequence_numbers &&
+        chk_error == fixpp::core::error::session_seqnum_too_high && hdr.msg_type == "2") {
+        FIXPP_INBOUND_SPLIT_AWAIT(ans, tic,
+                                  answer_resend_request_(tic, hdr, /*in_sequence=*/false));
+        co_return ans;
     }
     // 021 T005 Stage-2 — Arm A: too-low possible-duplicate tolerance.
     // data-model.md §1 Stage 2 rows 6/7/8; contracts/session-possdup.md C1.

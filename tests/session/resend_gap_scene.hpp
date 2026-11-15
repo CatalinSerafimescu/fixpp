@@ -15,9 +15,9 @@
 // subject does.
 //
 // Nothing here waits in real time for a mock-clock effect. The mock clock's wake-ups are
-// posted handlers, the store is a MemoryStore and the transport is a callback, so after a
-// delivery or a clock move every handler the session owes is ready, and drain() runs them
-// all. A cell that closes gracefully, uses another store or runs an Engine does not have
+// posted handlers, the store (with Options::with_store; otherwise the session has none) is a
+// MemoryStore and the transport is a callback, so after a delivery or a clock move every
+// handler the session owes is ready, and drain() runs them all. A cell that closes gracefully, uses another store or runs an Engine does not have
 // that property and must not use pass().
 #pragma once
 
@@ -38,6 +38,7 @@
 #include <fixpp/core/fix_time.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/application.hpp>
+#include <fixpp/session/memory_store_factory.hpp>
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
@@ -163,6 +164,9 @@ struct Options {
     bool validate_sequence_numbers = true;
     // Null: a GapApp.
     std::shared_ptr<GapApp> app = nullptr;
+    // True: the session stores what it sends in an unbounded MemoryStore, so a ResendRequest
+    // is answered by replays. False: no store, and the walk answers with one GapFill.
+    bool with_store = false;
 };
 
 // The peer is "TW" and the session "ISLD", FIX.4.2.
@@ -199,6 +203,11 @@ public:
         cfg.validate_sequence_numbers = o.validate_sequence_numbers;
         cfg.executor_override = ioc.get_executor();
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        if (o.with_store) {
+            cfg.store_factory = std::make_shared<fixpp::session::MemoryStoreFactory>(
+                fixpp::session::MemoryStore::Config{
+                    .policy = fixpp::session::capacity_policy::unbounded});
+        }
         cfg.transport_send = [this](std::span<const std::byte> f) {
             sent.emplace_back(reinterpret_cast<const char*>(f.data()), f.size());
         };

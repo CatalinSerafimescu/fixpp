@@ -178,14 +178,15 @@ struct ActiveSession {
         return true;
     }
 
-    // Hands the peer's ResendRequest (its number 2) with the fields `request` to
-    // on_inbound_frame and reads the outcome. `aimed_at` selects the store call the cell
-    // reports on.
+    // Hands the peer's ResendRequest (its number `seq`, 2 by default) with the fields
+    // `request` to on_inbound_frame and reads the outcome. `aimed_at` selects the store call
+    // the cell reports on.
     [[nodiscard]] Answer answer(std::string_view const request,
-                                std::function<bool(StoreCall const&)> const& aimed_at) {
+                                std::function<bool(StoreCall const&)> const& aimed_at,
+                                std::uint32_t const seq = 2) {
         Answer& a = pending;
         auto const mark = f.log->mark();
-        request_frame = f.msg("2", 2, request);
+        request_frame = f.msg("2", seq, request);
         auto fut = f.feed(request_frame, a.call, none,
                           [this] { pending.state_after_call = f.session->state(); });
         (void)f.run_until([&] { return DirectAcceptor::ready(fut); });
@@ -600,6 +601,153 @@ TEST(ResendAnswerBeginSeqNo580, SevenZero_NoStore_OneGapFillFromOne) {
     EXPECT_EQ(plain_rig::field_value(a.written.front(), "36"),
               std::to_string(kFirstApp + kStoredFor580))
         << printable(a.written);
+    EXPECT_TRUE(fixpp::test_support::t103::no_frame_carries_34_zero(a.written))  // SC-003
+        << printable(a.written);
+}
+
+// ── fixpp#577 with #580: a ResendRequest above NextNumIn (route (a) and (b)) ───────────────
+
+// NextNumIn, the session's and its store's. The store's is read with a store call of its own.
+struct InboundNumbers {
+    seqnum_t session = 0;
+    std::optional<seqnum_t> store;
+};
+InboundNumbers inbound_numbers(ActiveSession& s) {
+    InboundNumbers out{
+        .session = session_test_access::seqnum_mgr(*s.f.session).next_inbound_unsafe(),
+        .store = std::nullopt};
+    auto* const st = session_test_access::store(*s.f.session);
+    if (st == nullptr) return out;
+    auto fut = asio::co_spawn(s.f.ioc, st->next_seqnum(direction_t::inbound, false),
+                              asio::use_future);
+    if (!s.f.run_until([&] { return DirectAcceptor::ready(fut); })) return out;
+    if (auto const r = fut.get(); r) out.store = *r;
+    return out;
+}
+
+// The index in `frames` of the first frame of MsgType `type`, or frames.size().
+std::size_t first_of_type(std::vector<std::string> const& frames, std::string_view const type) {
+    auto const it = std::ranges::find_if(
+        frames, [type](auto const& f) { return plain_rig::field_value(f, "35") == type; });
+    return static_cast<std::size_t>(it - frames.begin());
+}
+
+// Opens a gap: a Heartbeat above NextNumIn, which draws fixpp's own ResendRequest and leaves
+// a resend outstanding. The frames it wrote are cleared, so the cell reads only its answer.
+[[nodiscard]] bool open_gap(ActiveSession& s, std::uint32_t const seq) {
+    s.request_frame = s.f.msg("0", seq);
+    CallingThreadReadings call;
+    if (!s.f.feed_plain(s.request_frame, call) || s.f.sent_count("2") != 1U ||
+        !session_test_access::resend_outstanding(*s.f.session)) {
+        return false;
+    }
+    s.f.sent.clear();
+    return true;
+}
+
+// 103 tasks T048, route (a) (FR-013 through research D4.1's route; B-103-5): a ResendRequest
+// with no BeginSeqNo(7), above NextNumIn, with no resend outstanding, draws the Reject 373=1,
+// 371=7, consumes nothing and persists nothing; then fixpp's own ResendRequest from N,
+// written after the Reject. The store reports itself persistent, so a persist is a store call.
+TEST(ResendAnswerTooHigh577, SevenAbsent_TooHigh_NoResendOutstanding_RejectThenOneResendRequest) {
+    ActiveSession s{DirectAcceptor::Options{.reports_persistent = true}};
+    ASSERT_TRUE(s.setup(kStoredFor580)) << "setup: the session did not reach Active and send";
+    auto const before = inbound_numbers(s);
+    ASSERT_TRUE(before.store.has_value()) << "setup: the store's NextNumIn was not read";
+    seqnum_t const n = before.session;
+    auto const a = s.answer("16=0\x01", is_inbound_persist, n + 3);
+    ASSERT_TRUE(a.call.completed) << "on_inbound_frame did not complete";
+    EXPECT_TRUE(a.call.returned_success()) << "on_inbound_frame " << a.call.call_text();
+    EXPECT_EQ(a.state_after_call, fsm_state::Active);
+
+    ASSERT_EQ(count_of_type(a.written, "3"), 1U) << printable(a.written);
+    auto const& rj = a.written[first_of_type(a.written, "3")];
+    EXPECT_EQ(plain_rig::field_value(rj, "373"), "1") << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(rj, "371"), "7") << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(rj, "45"), std::to_string(n + 3)) << printable(a.written);
+    EXPECT_TRUE(replayed_numbers(a.written).empty()) << printable(a.written);
+    EXPECT_EQ(count_of_type(a.written, "4"), 0U) << printable(a.written);
+    ASSERT_EQ(count_of_type(a.written, "2"), 1U) << printable(a.written);
+    auto const& rr = a.written[first_of_type(a.written, "2")];
+    EXPECT_EQ(plain_rig::field_value(rr, "7"), std::to_string(n)) << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(rr, "16"), "0") << printable(a.written);
+    EXPECT_GT(first_of_type(a.written, "2"), first_of_type(a.written, "3"))
+        << "fixpp's ResendRequest must follow the Reject:\n"
+        << printable(a.written);
+
+    EXPECT_FALSE(a.aimed.has_value()) << "an inbound advance was persisted: "
+                                      << record_text(a.aimed);
+    auto const after = inbound_numbers(s);
+    EXPECT_EQ(after.session, n) << "NextNumIn moved";
+    ASSERT_TRUE(after.store.has_value());
+    EXPECT_LE(*after.store, after.session) << "the store's NextNumIn is ahead of the session's";
+    EXPECT_EQ(*after.store, *before.store) << "the store's NextNumIn moved";
+    EXPECT_TRUE(fixpp::test_support::t103::no_frame_carries_34_zero(a.written))  // SC-003
+        << printable(a.written);
+}
+
+// 103 tasks T048, route (b) (FR-009, FR-013; B-103-5): the same frame while a resend is
+// outstanding draws the Reject, consumes and persists nothing, and no second ResendRequest.
+TEST(ResendAnswerTooHigh577, SevenAbsent_TooHigh_ResendOutstanding_RejectAndNoSecondResendRequest) {
+    ActiveSession s{DirectAcceptor::Options{.reports_persistent = true}};
+    ASSERT_TRUE(s.setup(kStoredFor580)) << "setup: the session did not reach Active and send";
+    seqnum_t const n = session_test_access::seqnum_mgr(*s.f.session).next_inbound_unsafe();
+    ASSERT_TRUE(open_gap(s, n + 5)) << "setup: no gap was opened:\n" << printable(s.f.sent);
+    auto const before = inbound_numbers(s);
+    ASSERT_TRUE(before.store.has_value()) << "setup: the store's NextNumIn was not read";
+    auto const a = s.answer("16=0\x01", is_inbound_persist, n + 7);
+    ASSERT_TRUE(a.call.completed) << "on_inbound_frame did not complete";
+    EXPECT_TRUE(a.call.returned_success()) << "on_inbound_frame " << a.call.call_text();
+    EXPECT_EQ(a.state_after_call, fsm_state::Active);
+
+    ASSERT_EQ(a.written.size(), 1U) << printable(a.written);
+    auto const& rj = a.written.front();
+    EXPECT_EQ(plain_rig::field_value(rj, "35"), "3") << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(rj, "373"), "1") << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(rj, "371"), "7") << printable(a.written);
+    EXPECT_EQ(count_of_type(a.written, "2"), 0U) << printable(a.written);
+    EXPECT_TRUE(session_test_access::resend_outstanding(*s.f.session));
+
+    EXPECT_FALSE(a.aimed.has_value()) << "an inbound advance was persisted: "
+                                      << record_text(a.aimed);
+    auto const after = inbound_numbers(s);
+    EXPECT_EQ(after.session, n) << "NextNumIn moved";
+    ASSERT_TRUE(after.store.has_value());
+    EXPECT_LE(*after.store, after.session) << "the store's NextNumIn is ahead of the session's";
+    EXPECT_EQ(*after.store, *before.store) << "the store's NextNumIn moved";
+}
+
+// 103 tasks T048's guard note (research D4.1; the walk's final persist): a ResendRequest that
+// carries 7, above NextNumIn, is answered by the walk out of sequence, and the walk persists
+// nothing. Route (a): the answer, then fixpp's own ResendRequest from N.
+TEST(ResendAnswerTooHigh577, SevenPresent_TooHigh_AnsweredAndNothingPersisted) {
+    ActiveSession s{DirectAcceptor::Options{.reports_persistent = true}};
+    ASSERT_TRUE(s.setup(kStoredFor580)) << "setup: the session did not reach Active and send";
+    auto const before = inbound_numbers(s);
+    ASSERT_TRUE(before.store.has_value()) << "setup: the store's NextNumIn was not read";
+    seqnum_t const n = before.session;
+    auto const a = s.answer(
+        "7=1\x01"
+        "16=0\x01",
+        is_inbound_persist, n + 3);
+    ASSERT_TRUE(a.call.completed) << "on_inbound_frame did not complete";
+    EXPECT_TRUE(a.call.returned_success()) << "on_inbound_frame " << a.call.call_text();
+    EXPECT_EQ(a.state_after_call, fsm_state::Active);
+
+    EXPECT_EQ(replayed_numbers(a.written), (std::vector<std::string>{"2", "3"}))
+        << printable(a.written);
+    ASSERT_EQ(count_of_type(a.written, "2"), 1U) << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(a.written[first_of_type(a.written, "2")], "7"),
+              std::to_string(n))
+        << printable(a.written);
+
+    EXPECT_FALSE(a.aimed.has_value()) << "an inbound advance was persisted: "
+                                      << record_text(a.aimed);
+    auto const after = inbound_numbers(s);
+    EXPECT_EQ(after.session, n) << "NextNumIn moved";
+    ASSERT_TRUE(after.store.has_value());
+    EXPECT_LE(*after.store, after.session) << "the store's NextNumIn is ahead of the session's";
+    EXPECT_EQ(*after.store, *before.store) << "the store's NextNumIn moved";
     EXPECT_TRUE(fixpp::test_support::t103::no_frame_carries_34_zero(a.written))  // SC-003
         << printable(a.written);
 }
