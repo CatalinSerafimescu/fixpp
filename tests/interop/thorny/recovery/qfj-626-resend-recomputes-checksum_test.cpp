@@ -251,7 +251,7 @@ protected:
         cfg.executor_override = ioc.get_executor();
         cfg.transport_send = [this](std::span<const std::byte> d) { capture(d); };
         cfg.role = fixpp::session::session_role::acceptor;
-        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        // The reset policy is the default (bilateral_lenient since feature 103, FR-001).
         cfg.store_factory =
             std::make_shared<PoisonedChecksumStoreFactory>(std::move(poisoned), kStoredSeq);
         return cfg;

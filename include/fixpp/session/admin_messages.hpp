@@ -64,7 +64,9 @@ struct logon_advertise_options {
 // sending_time: pre-formatted UTCTimestamp string from effective_clock.now()
 //               (e.g. "20240101-00:00:00.000") for tag 52.
 // reset_seqnum: when true, emits ResetSeqNumFlag(141)=Y.
-//   bilateral_strict mode sets this to request mutual seqnum reset [FR-017].
+//   The initiator sets it under bilateral_strict, and under any policy when a reset
+//   setting is on and both numbers are 1; either way the Logon carries 34=1 (feature
+//   103, FR-002) [FR-017].
 // default_appl_ver_id: when set (FIXT sessions only), emits DefaultApplVerID(1137)
 //   after 108, before 141 (data-model E4 / FR-002). Rendered via
 //   render_appl_ver_id(); an Unknown value is propagated as an error (no garbage

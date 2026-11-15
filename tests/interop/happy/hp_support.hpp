@@ -190,7 +190,8 @@ inline fixpp::session::SessionConfig make_session_config(
     c.security_profile =
         fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::one_way_ca};
     c.dictionary = fixpp::test_support::make_minimal_dictionary();
-    c.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    // The reset policy is left at its default (bilateral_lenient since feature 103, FR-001):
+    // SC-002's live Logon cells run the default configuration.
     c.transport_factory_override = std::move(factory);
     c.heartbeat_interval = std::chrono::seconds{30};
     c.logout_disconnect_timeout_ms = 2000;

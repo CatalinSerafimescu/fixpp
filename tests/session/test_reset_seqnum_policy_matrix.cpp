@@ -33,6 +33,7 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/file_store.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_event.hpp>
@@ -45,11 +46,14 @@
 #include <variant>
 #include <vector>
 
+#include "session/mock_reconnect_factory.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/recording_store.hpp"
 #include "support/seqnum_manager_test_access.hpp"
 #include "support/session_test_access.hpp"
+#include "support/temp_dir.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -637,8 +641,18 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_CountersResetToOne
         fixpp::session::session_test_access::seqnum_mgr(sess), 1, 10);
 
     ASSERT_TRUE(run_open(sess).has_value());
-    // open() consumed seq=10 → next_outbound_=11.
+    // 103 FR-003 (research D2.2): strict resets both numbers durably to 1 before the
+    // Logon, so the pre-seeded outbound 10 is not used: the Logon is seq=1 with 141=Y.
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
+    ASSERT_FALSE(capture.frames.empty());
+    {
+        std::string const logon(reinterpret_cast<char const*>(capture.frames.back().data()),
+                                capture.frames.back().size());
+        EXPECT_TRUE(
+            logon.contains("\x01"
+                           "34=1\x01"))
+            << "bilateral_strict resets before the Logon (103 FR-003): " << logon;
+    }
 
     // Peer (acceptor) acks with Logon seq=1 + 141=Y (mutual reset confirm).
     auto logon_ack_with_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/true);
@@ -646,28 +660,27 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_CountersResetToOne
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
-    // FR-017:150 + 030 FR-009: after mutual reset:
+    // FR-017:150 + 030 FR-009, with 103 D2.3: after mutual reset:
     //   next_inbound_ = 2 (the peer's seq-1 reset-ack Logon was consumed in-sequence;
     //     030 restores the advance on the initiator peer_ack_sent_reset_flag arm — the
     //     identical clobber to the acceptor arm; QuickFIX reset-then-increment parity)
-    //   next_outbound_ = 1 (reset; initiator's next send is seq=1)
-    // (Initiator's Logon was seq=10, pre-reset. After reset outbound restarts at 1;
-    //  inbound nets 2 because the consumed reset-ack Logon survives the reset.)
+    //   next_outbound_ = 2 (the initiator's own Logon is numbered 1 after the reset, so the
+    //     reset unit keeps it consumed: unit_out = 2; research D2.3)
     EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
               fixpp::session::seqnum_t{2})
         << "bilateral_strict initiator: next_inbound_ must be 2 after 141=Y mutual reset "
         << "(consumed seq-1 reset-ack Logon; 030 FR-009).";
     EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_outbound_unsafe(),
-              fixpp::session::seqnum_t{1})
-        << "bilateral_strict initiator: next_outbound_ must be 1 after 141=Y mutual reset "
-        << "(Logon was pre-reset; post-reset next outbound is seq=1).";
+              fixpp::session::seqnum_t{2})
+        << "bilateral_strict initiator: next_outbound_ must be 2 after 141=Y mutual reset "
+        << "(103 D2.3: the Logon was seq=1, after strict's reset).";
 
-    // T013 W4b — label-side of the C4/C1 divergence [032 contract C4, FR-006, SC-006]:
-    // This is the UNIQUE row where latch=true AND reset_before_send=false.
-    // C4 keys on the latch ALONE: by_peer_request=false (fixpp sent 141=Y) even though
-    // the restore gate (C1) did NOT fire (reset_before_send false → outbound stays 1).
-    // Without this assertion, an implementer collapsing C4 into C1 would pass W4 but
-    // would emit by_peer_request=true on this row — undetected. [032 T010(d)]
+    // T013 W4b — the label of the reset [032 contract C4, FR-006, SC-006]: C4 keys on the
+    // latch ALONE, so by_peer_request=false (fixpp sent 141=Y). Before 103 this was the row
+    // where latch=true AND reset_before_send=false (a strict Logon at seq=10). Since 103 a
+    // Logon with 141=Y carries 34=1 (FR-002), so the latch implies reset_before_send and no
+    // row separates C4 from C1 any more; the assertion keeps the label pinned.
+    // [032 T010(d)]
     {
         auto events = sess.recent_events();
         bool found = false;
@@ -940,4 +953,233 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
         << "T012 W7 counter assertion: fresh no-knob peer-spontaneous-at-seq-1 "
            "(latch=false) — outbound MUST stay 1 after the reset; restore_before_send "
            "alone would wrongly set it to 2. [032 contract C1, FR-005, W7]";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 103-resend-logon-reset-fidelity (tasks T023; FR-002, FR-005; research D2.2), AS5:
+// policy × the four knobs (reset_on_logon, reset_on_logout, reset_on_disconnect,
+// refresh_on_logon) × a persistent store at {1,1} or {37,42}. data-model, verbatim:
+// "Invariant (FR-002): any Logon fixpp sends with 141=Y carries 34=1 and both stored
+// numbers are 1 when it is built."
+//
+// "When it is built" is read at the Logon's own store() call, through the recording
+// wrapper: the stored inbound number (the FaultStore's) and the outbound number the Logon
+// takes (its store() call's sequence number) are both 1 there. The cell also asserts the
+// policy table's "Initiator sends 141=Y when" column, so the invariant cannot pass on a
+// matrix that sends no 141=Y at all: strict always; lenient and unilateral when a reset
+// setting is on and both numbers are 1 (after reset_on_logon's or strict's reset).
+// ─────────────────────────────────────────────────────────────────────────────
+
+struct LogonInvariantCombo {
+    fixpp::session::reset_seqnum_policy policy;
+    unsigned knobs;  // bit 0 reset_on_logon, 1 reset_on_logout, 2 reset_on_disconnect, 3 refresh
+    bool fresh;      // store at {1,1}; otherwise {37,42}
+};
+
+class ResetPolicyLogonInvariant103 : public ResetSeqnumPolicyMatrixTest,
+                                     public ::testing::WithParamInterface<LogonInvariantCombo> {};
+
+TEST_P(ResetPolicyLogonInvariant103, AS5_Any141YLogonCarries34Eq1AndStoredOnes) {
+    using fixpp::session::reset_seqnum_policy;
+    auto const p = GetParam();
+    bool const rol = (p.knobs & 1U) != 0;
+    bool const rlo = (p.knobs & 2U) != 0;
+    bool const rdi = (p.knobs & 4U) != 0;
+    bool const refresh = (p.knobs & 8U) != 0;
+    bool const strict = p.policy == reset_seqnum_policy::bilateral_strict;
+
+    auto fault = std::make_shared<fixpp::test_support::reconnect_rig::FaultStoreFactory>(
+        p.fresh ? 1U : 37U, p.fresh ? 1U : 42U, /*persistent=*/true);
+    auto rec = std::make_shared<fixpp::test_support::RecordingStoreFactory>(fault);
+    rec->log->arm();
+    bool sampled = false;
+    fixpp::session::seqnum_t stored_in_at_logon = 0;
+    fixpp::session::seqnum_t logon_store_seq = 0;
+    rec->log->on_call = [&](fixpp::test_support::StoreCall const& c) {
+        if (sampled || c.op != fixpp::test_support::store_op::store ||
+            c.dir != fixpp::session::direction_t::outbound || fault->last_store == nullptr) {
+            return;
+        }
+        sampled = true;
+        stored_in_at_logon = fault->last_store->current_inbound();
+        logon_store_seq = c.first;
+    };
+
+    auto cfg = make_cfg(fixpp::session::session_role::initiator, p.policy);
+    cfg.store_factory = rec;
+    cfg.reset_on_logon = rol;
+    cfg.reset_on_logout = rlo;
+    cfg.reset_on_disconnect = rdi;
+    cfg.refresh_on_logon = refresh;
+    fixpp::session::Session sess{engine, cfg};
+    ASSERT_TRUE(run_open(sess).has_value());
+
+    std::vector<std::vector<std::byte>> logons;
+    for (auto const& f : capture.frames) {
+        if (frame_msg_type_is(f, "A")) logons.push_back(f);
+    }
+    ASSERT_EQ(logons.size(), 1U);
+    bool const sent_141 = frame_has_141Y(logons.front());
+    std::string const logon_text(reinterpret_cast<char const*>(logons.front().data()),
+                                 logons.front().size());
+
+    // The policy table's column (data-model "Initiator sends 141=Y when").
+    bool const reset_before_logon = rol || strict;
+    bool const at_one = reset_before_logon || p.fresh;
+    bool const any_reset_setting = rol || rlo || rdi;
+    bool const expect_141 = strict || (any_reset_setting && at_one);
+    EXPECT_EQ(sent_141, expect_141) << logon_text;
+
+    if (sent_141) {
+        EXPECT_TRUE(
+            logon_text.contains("\x01"
+                                "34=1\x01"))
+            << logon_text;
+        ASSERT_TRUE(sampled) << "the Logon's store() call was not recorded";
+        EXPECT_EQ(logon_store_seq, fixpp::session::seqnum_t{1}) << logon_text;
+        EXPECT_EQ(stored_in_at_logon, fixpp::session::seqnum_t{1}) << logon_text;
+    }
+}
+
+std::vector<LogonInvariantCombo> logon_invariant_combos() {
+    std::vector<LogonInvariantCombo> out;
+    for (auto const pol : {fixpp::session::reset_seqnum_policy::bilateral_strict,
+                           fixpp::session::reset_seqnum_policy::bilateral_lenient,
+                           fixpp::session::reset_seqnum_policy::unilateral}) {
+        for (unsigned k = 0; k < 16U; ++k) {
+            for (bool const fresh : {true, false}) out.push_back({pol, k, fresh});
+        }
+    }
+    return out;
+}
+
+std::string logon_invariant_name(::testing::TestParamInfo<LogonInvariantCombo> const& i) {
+    using fixpp::session::reset_seqnum_policy;
+    std::string const pol = i.param.policy == reset_seqnum_policy::bilateral_strict ? "Strict"
+                            : i.param.policy == reset_seqnum_policy::bilateral_lenient
+                                ? "Lenient"
+                                : "Unilateral";
+    return pol + "_Knobs" + std::to_string(i.param.knobs) +
+           (i.param.fresh ? "_Store1_1" : "_Store37_42");
+}
+
+INSTANTIATE_TEST_SUITE_P(Matrix, ResetPolicyLogonInvariant103,
+                         ::testing::ValuesIn(logon_invariant_combos()), logon_invariant_name);
+
+// D2.2's case, "reasoned, not run" in research, as a cell: a teardown reset whose store
+// call failed (logged-then-proceed, I-07) leaves the store unchanged, and the next Session
+// sends no 141. Two lifetimes over one FileStore directory, lenient with
+// reset_on_disconnect. The control twin lets the teardown reset succeed: the next Session
+// then logs on at 34=1 with 141=Y, so the failed arm's "no 141" is the failure's doing.
+namespace {
+
+struct TeardownResetOutcome {
+    bool setup_ok = false;
+    std::string second_logon;
+};
+
+TeardownResetOutcome run_teardown_reset_lifetimes(bool const fail_teardown_reset) {
+    TeardownResetOutcome out;
+    auto const dir = fixpp::test_support::unique_temp_dir("t103_teardown_reset");
+    auto lifetime = [&](bool const first) -> std::string {
+        asio::io_context ioc;
+        fixpp::core::EngineConfig eng;
+        eng.executor = ioc.get_executor();
+        std::vector<std::string> sent;
+        fixpp::session::SessionConfig cfg;
+        cfg.sender_comp_id = "TW";
+        cfg.target_comp_id = "ISLD";
+        cfg.begin_string = "FIX.4.2";
+        cfg.heartbeat_interval = std::chrono::seconds{0};
+        cfg.role = fixpp::session::session_role::initiator;
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        cfg.reset_on_disconnect = true;
+        cfg.transport_send = [&sent](std::span<const std::byte> d) {
+            sent.emplace_back(reinterpret_cast<char const*>(d.data()), d.size());
+        };
+        fixpp::session::FileStore::Config fc;
+        fc.directory = dir;
+        fc.sender_comp_id = cfg.sender_comp_id;
+        fc.target_comp_id = cfg.target_comp_id;
+        fc.file_io_executor = ioc.get_executor();
+        auto rec = std::make_shared<fixpp::test_support::RecordingStoreFactory>(fc);
+        rec->log->arm();
+        cfg.store_factory = rec;
+        auto sess = std::make_unique<fixpp::session::Session>(eng, cfg);
+        auto run = [&](auto&& aw, char const* site) {
+            auto fut = asio::co_spawn(ioc, std::forward<decltype(aw)>(aw), asio::use_future);
+            if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms, site)) {
+                fixpp::test_support::drain_or_report(ioc, site);
+                ADD_FAILURE() << fixpp::test_support::kWindowMiss << site;
+                return false;
+            }
+            return fut.get().has_value();
+        };
+        if (!run(sess->open(), "t103_teardown/open")) return {};
+        std::string logon;
+        for (auto const& f : sent) {
+            if (f.contains("\x01"
+                           "35=A\x01"))
+                logon = f;
+        }
+        if (first) {
+            // The first Logon is 141=Y at 34=1 over the fresh store; the peer mirrors it.
+            auto const ack = make_logon("FIX.4.2", 1, "ISLD", "TW", 0, true);
+            (void)run(sess->on_inbound_frame(ack), "t103_teardown/ack");
+            std::string const order =
+                "35=D\x01"
+                "11=ORD-T\x01";
+            for (int i = 0; i < 2; ++i) {
+                (void)run(sess->send(std::span<const std::byte>{
+                              reinterpret_cast<std::byte const*>(order.data()), order.size()}),
+                          "t103_teardown/send");
+            }
+            if (sess->state() != fixpp::session::fsm_state::Active) return {};
+            out.setup_ok = true;
+        }
+        if (first && fail_teardown_reset) {
+            // Armed only now: the acknowledgement's own 141=Y reset unit above must succeed.
+            rec->log->fail_in = [](fixpp::test_support::StoreCall const& c) {
+                return c.op == fixpp::test_support::store_op::reset ||
+                       c.op == fixpp::test_support::store_op::reset_to;
+            };
+        }
+        (void)run(sess->close(fixpp::session::close_mode::terminal), "t103_teardown/close");
+        sess.reset();
+        return logon;
+    };
+    (void)lifetime(true);
+    if (out.setup_ok) out.second_logon = lifetime(false);
+    (void)fixpp::test_support::try_remove_temp_dir(dir);
+    return out;
+}
+
+}  // namespace
+
+TEST(ResetPolicyTeardownReset103, AS5_FailedTeardownResetLeavesTheStore_NextLogonNo141) {
+    auto const failed = run_teardown_reset_lifetimes(/*fail_teardown_reset=*/true);
+    ASSERT_TRUE(failed.setup_ok) << "setup: the first lifetime did not reach Active";
+    ASSERT_FALSE(failed.second_logon.empty()) << "the second lifetime wrote no Logon";
+    EXPECT_FALSE(
+        failed.second_logon.contains("\x01"
+                                     "141=Y\x01"))
+        << failed.second_logon;
+    EXPECT_FALSE(
+        failed.second_logon.contains("\x01"
+                                     "34=1\x01"))
+        << failed.second_logon;
+
+    auto const control = run_teardown_reset_lifetimes(/*fail_teardown_reset=*/false);
+    ASSERT_TRUE(control.setup_ok) << "setup (control): the first lifetime did not reach Active";
+    EXPECT_TRUE(
+        control.second_logon.contains("\x01"
+                                      "141=Y\x01"))
+        << control.second_logon;
+    EXPECT_TRUE(
+        control.second_logon.contains("\x01"
+                                      "34=1\x01"))
+        << control.second_logon;
 }

@@ -20,13 +20,11 @@
 // Variant B — reset_on_logon=true: the durable reset (reset_seqnums_to_one_durable)
 //   overrides BOTH counters to {1,1} before the reconnect Logon; the
 //   reconcile is neutral.
-// Variant C — bilateral_strict (the DEFAULT policy, no reset knob): NO
-//   durable reset exists on this path; the reconnect Logon carries 34=k
-//   (k>1) WITH 141=Y — the pre-existing, DEFERRED L-029-3 malformed-Logon
-//   limitation (behaviors-and-limitations.md's L-029-3). This variant is a
-//   REGRESSION GUARD ONLY: it asserts 059 does not worsen L-029-3 (the
-//   reconciled k is non-1, same as an un-reconciled k+1 would be) — it does
-//   NOT assert clean recovery.
+// Variant C — bilateral_strict (no reset knob; no longer the default since
+//   feature 103, FR-001): since 103 (FR-003, research D2.2) strict resets both
+//   numbers durably before every Logon, so the reconnect Logon carries 34=1
+//   with 141=Y and NextNumIn is 1 (L-029-3's malformed Logon, 34=k with 141=Y,
+//   is gone). The reconcile before the reconnect is asserted as before.
 //
 // Harness: asio::thread_pool{2} + a single per-session strand (mirrors
 // test_store_fail_closed_persistent.cpp) — the store path is strand-confined
@@ -434,8 +432,8 @@ TEST_F(StoreFailReconcileTest, VariantB_ResetOnLogon_ReconnectLogonAtOneWellForm
 TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNotClean) {
     std::vector<std::vector<std::byte>> wire;
     auto transport_fac = std::make_shared<MockReconnectFactory>();
-    // bilateral_strict IS the production default (SessionConfig::reset_seqnum_policy_field's
-    // default) — pass it explicitly here for test clarity, no reset knob.
+    // bilateral_strict, named explicitly, no reset knob. The cell's name predates feature
+    // 103, which made bilateral_lenient the default (FR-001).
     auto cfg = make_initiator_cfg(reset_seqnum_policy::bilateral_strict,
                                   /*reset_on_logon=*/false, transport_fac);
     cfg.transport_send = [&](std::span<const std::byte> f) {
@@ -505,31 +503,21 @@ TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNo
     auto recon_bytes = transport_fac->last_transport->outbound_bytes_seen();
     ASSERT_FALSE(recon_bytes.empty()) << "reconnect must re-emit an initiator Logon";
 
-    // REGRESSION GUARD ONLY (per quickstart.md W3 / research.md D4): under
-    // bilateral_strict there is no durable reset, so the reconnect Logon
-    // carries 34=k (k>1) WITH 141=Y — this IS the pre-existing, DEFERRED
-    // L-029-3 malformed-Logon limitation (behaviors-and-limitations.md:
-    // 1252-1265), not a 059 regression. 059's reconcile is neutral vs
-    // no-reconcile here: both the reconciled k and an un-reconciled k+1 are
-    // non-1, so the malformed-Logon shape is unchanged by 059. We do NOT
-    // assert clean recovery in this variant
-    // ([[feedback_coverage_push_enshrines_bugs]] — asserting a "clean"
-    // recovery here would enshrine the wrong behaviour as a passing test).
-    EXPECT_EQ(extract_tag(recon_bytes, 34), std::to_string(k))
-        << "059 does not worsen L-029-3: the reconnect Logon carries the "
-           "RECONCILED (non-1) seq k="
-        << k
-        << ", matching the pre-existing "
-           "malformed-Logon shape (an un-reconciled k+1 would also be non-1)";
+    // 103 FR-003 (research D2.2): bilateral_strict resets both numbers durably before
+    // the reconnect Logon, which therefore carries 34=1 with 141=Y (FR-002), whatever the
+    // reconcile left the outbound counter at (k > 1, asserted above).
+    EXPECT_EQ(extract_tag(recon_bytes, 34), "1")
+        << "bilateral_strict resets before every Logon (FR-003): the reconnect Logon "
+           "carries 34=1, not the reconciled k="
+        << k;
     EXPECT_EQ(extract_tag(recon_bytes, 141), "Y")
-        << "bilateral_strict unconditionally emits 141=Y on reconnect; combined with "
-           "34=k (k>1) this IS the pre-existing L-029-3 malformed Logon, not a 059 "
-           "regression";
+        << "bilateral_strict's reconnect Logon carries 141=Y at 34=1 (FR-002)";
 
     EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*sess).next_inbound_unsafe(),
-              inbound_before)
-        << "post-reconnect inbound sequencing must remain unaffected (no reset "
-           "runs under bilateral_strict without a reset knob)";
+              fixpp::session::seqnum_t{1})
+        << "bilateral_strict's reset before the reconnect Logon puts NextNumIn at 1 "
+           "(FR-003), so the inbound number before the failure ("
+        << inbound_before << ") does not survive";
 
     // Teardown; call alone (not its result) drains the detached liveness loop.
     (void)asio::co_spawn(sx_, sess->close(fixpp::session::close_mode::terminal), asio::use_future)

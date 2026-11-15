@@ -297,7 +297,7 @@
  *  Migration: a consumer that relied on these inputs being refused checks the dictionary's
  *  content itself; no code that handles the refusal needs to change. */
 #define FIXPP_C_ABI_VERSION_MAJOR 1
-#define FIXPP_C_ABI_VERSION_MINOR 16 /* 1.16: dictionary record width (102), BREAKING */
+#define FIXPP_C_ABI_VERSION_MINOR 17 /* 1.17: reset policy default, endings (103), BREAKING */
 #define FIXPP_C_ABI_VERSION_PATCH 0
 
 /** Composite: (MAJOR<<16)|(MINOR<<8)|PATCH — single-integer compatibility check. */

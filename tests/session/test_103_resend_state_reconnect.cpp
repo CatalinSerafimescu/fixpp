@@ -8,7 +8,7 @@
 //
 // The vehicle is resend_gap_scene.hpp's Scene (a directly driven initiator on a mock clock,
 // with a liveness loop) given a MockReconnectFactory, so `Session::drive_reconnect()` connects
-// and logs on again with no socket: the make_reconnect_initiator shape on a clocked session.
+// and logs on again with no socket: the make_reconnect_initiator shape, on a mock clock.
 //
 // Where the frames are. Before the reconnect the session writes through its transport
 // callback (`Scene::sent`); after `install_reconnected_transport` its live writes go to the
@@ -260,6 +260,14 @@ TEST(ResendStateReconnect103, ArmB_ClockPastTheBoundDuringDowntime_NoStaleDeadli
     run_arm_a_or_b(r, rg::kGapBound + std::chrono::seconds{1});
 }
 
+// ── Arm C: strict with no reset setting reaches Arm A's state (tasks T039) ──────────────────
+// bilateral_strict resets before every Logon (103 D2.2), so the reconnect's Logon is a reset
+// with no reset_on_logon set at all; Arm A's assertions and downtime.
+TEST(ResendStateReconnect103, ArmC_StrictNoKnob_ReconnectResets_TooHighFrameDrawsAResendRequest) {
+    Rig r{fixpp::session::reset_seqnum_policy::bilateral_strict, /*reset_on_logon=*/false};
+    run_arm_a_or_b(r, rg::kHeartBtInt + std::chrono::seconds{1});
+}
+
 // ── Control: a fresh Session given steps 3 and 4 only writes the same ResendRequest ─────────
 TEST(ResendStateReconnect103, Control_FreshSession_TooHighFrameDrawsTheSameResendRequest) {
     Rig r;
@@ -302,7 +310,7 @@ TEST(ResendStateReconnect103, DISABLED_ArmL_AcknowledgementAboveN_ResendRequestF
 }
 
 // ── Arm E: drive_reconnect from Active with a too-high Logout received ──────────────────────
-// research D1 (Gate A round 1, RC1): GREEN only once the drain and the commit point land
+// research D1, the drain: GREEN only once the drain and the commit point land
 // (tasks T129, T131); the mark's half needs D4.
 // Disabled until then (tasks T131 drops the prefix); its RED is read with
 // --gtest_also_run_disabled_tests.

@@ -1242,12 +1242,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
         // inbound seed when reset_on_logon is set — the reset block below owns next_inbound
         // post-state on that path (INV-H5). [029 tasks T007/T011 call-site 1; contracts C2.4/C2.5;
         // data-model INV-H3/H5; research D-6]
+        // 103 (research D2.2; FR-003): bilateral_strict resets durably before every Logon,
+        // on reset_on_logon's path: the inbound seed is withheld and the fatal reset below
+        // runs for either.
+        const bool reset_before_logon =
+            cfg_.reset_on_logon ||
+            cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict;
         {
-            const bool withhold_inbound = cfg_.reset_on_logon;
+            const bool withhold_inbound = reset_before_logon;
             // 025 T006 — refresh_on_logon: re-read store on each logon (store-wins, up or down).
-            // Suppressed under bilateral_strict (unconditional 141=Y + non-1 seed → malformed
-            // Logon; INV-RoL-3 / FR-008 / D-RoL-3). Default false → zero delta (byte-identical
-            // pre-025).
+            // Suppressed under bilateral_strict (INV-RoL-3 / FR-008 / D-RoL-3): under strict
+            // the Logon always resets, so a refresh has nothing to set (103 D2.2). Default
+            // false → zero delta (byte-identical pre-025).
             const bool refresh_active =
                 cfg_.refresh_on_logon && cfg_.reset_seqnum_policy_field !=
                                              fixpp::session::reset_seqnum_policy::bilateral_strict;
@@ -1262,11 +1268,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
         // 024 T007: reset_on_logon — durable reset here (the shared emission point)
         // so BOTH open() (per-session-direct, engine_managed=false) AND drive_reconnect()
         // (engine lazy-connect and reconnect) reset symmetrically before building the Logon.
+        // 103 D2.2: bilateral_strict takes the same reset (reset_before_logon above).
         // fatal disposition: a store failure propagates → record Disconnected + return error.
         // peek_outbound() below samples the post-reset seqnum=1 (analyze B1).
         // [[feedback_half_restructure_symmetric_api]]: fix at the shared point, not two copies.
         // [024 data-model initiator row; C2.1; C2.6; plan.md Complexity Tracking row 1]
-        if (cfg_.reset_on_logon) {
+        if (reset_before_logon) {
             auto rst_r = co_await reset_seqnums_to_one_durable(reset_disposition::fatal);
             if (!rst_r) {
                 record_state_transition_(fsm_state::Disconnected);
@@ -1306,9 +1313,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
         // suspension between) — reuse it rather than re-querying the manager.
         const bool seqnums_at_one =
             (logon_seq == seqnum_min && seqnum_mgr_.next_inbound_unsafe() == seqnum_min);
+        // 103 (research D2.2; FR-002): (strict || any reset knob) && both numbers at 1, so a
+        // Logon with 141=Y carries 34=1 under every policy by construction; under strict
+        // the reset above has just put both numbers at 1. unilateral keeps lenient's
+        // predicate (D2.5).
         const bool initr_reset_seqnum =
-            (cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) ||
-            (any_reset_knob && seqnums_at_one);
+            ((cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) ||
+             any_reset_knob) &&
+            seqnums_at_one;
         // 032 T007: unconditionally latch the emit-time 141=Y fact. Overwrites to false
         // when fixpp does NOT emit 141=Y — ensures a stale latch cannot survive across
         // reconnects (this is the shared open()/drive_reconnect() emit point).
@@ -4005,7 +4017,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         {
             const bool withhold_inbound = peer_sent_reset || cfg_.reset_on_logon;
             // 025 T006 — refresh_on_logon: re-read store on each logon (store-wins).
-            // Same suppression gate as call-site 1: bilateral_strict → force=false.
+            // Same suppression gate as call-site 1: bilateral_strict → force=false; under
+            // strict the Logon always resets, so a refresh has nothing to set (103 D2.2).
             // [025 contracts C3.1–C3.3; FR-002/008/009]
             const bool refresh_active =
                 cfg_.refresh_on_logon && cfg_.reset_seqnum_policy_field !=
@@ -4098,6 +4111,31 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
             }
         }
 
+        // 103 (research D2.4; FR-004): bilateral_strict refuses a Logon without 141=Y with
+        // a Logout carrying kStrictResetText, at the posture guard's position: after
+        // ensure_hydrated_ (the Logout's 34 is the durable next outbound number) and the
+        // SendingTime guard, before the reset_on_logon block and check_inbound, so an
+        // out-of-sequence Logon is refused the same way, NextNumIn does not move, and a
+        // strict acceptor with reset_on_logon does not reset its store for a Logon it
+        // refuses. refuse_logon_with_logout_ records Disconnected unless the arm was
+        // superseded meanwhile, and does not send a Logout that does not fit its buffer.
+        // Its error is returned; a superseded arm returns success (D-CAN-5); otherwise
+        // the mismatch. logon_arm_superseded_ is asked about Disconnected because the
+        // helper has just recorded it: true only for a close(), a stop or another state.
+        if (!peer_sent_reset &&
+            cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) {
+            static constexpr std::string_view kStrictResetText = "ResetSeqNumFlag(141)=Y required";
+            auto refused =
+                co_await refuse_logon_with_logout_(kStrictResetText, fsm_state::NotConnected);
+            if (!refused) {
+                co_return refused;
+            }
+            if (logon_arm_superseded_(fsm_state::Disconnected)) {
+                co_return fixpp::core::expected_t<void>{};
+            }
+            co_return std::unexpected(fixpp::core::error::session_seqnum_reset_mismatch);
+        }
+
         if (cfg_.reset_on_logon) {
             // Knob-driven → fatal: a store failure blocks Active (C2.6).
             auto rst_r = co_await reset_seqnums_to_one_durable(reset_disposition::fatal);
@@ -4142,23 +4180,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         }
 
         // T027 FR-017 — ResetSeqNumFlag(141) policy (Clarifications Q1=A).
-        // bilateral_strict: REQUIRES mutual agreement on 141=Y. If peer does
-        //   NOT send 141=Y when our policy is bilateral_strict, disconnect with
-        //   session_seqnum_reset_mismatch(116). [spec.md FR-017; T017 Cell 2]
+        // bilateral_strict's refusal of a Logon without 141=Y runs before the
+        // reset_on_logon block and check_inbound (103 D2.4, above).
         // bilateral_lenient: if peer sends 141=Y → honour; if not → accept.
         // unilateral: always honour any peer 141=Y.
         // All modes: if peer sends 141=Y → emit session_event_sequence_numbers_reset.
         // [spec.md FR-017; data-model.md §E-4; Clarifications Q1=A]
-
-        if (!peer_sent_reset &&
-            cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) {
-            // bilateral_strict requires peer to also send 141=Y.
-            // Peer omitted 141=Y → session_seqnum_reset_mismatch(116) + Disconnected.
-            // RC#C (gate-b/r1): surface the typed error code instead of bare
-            // Disconnected, per triage RC#C(b) + spec.md FR-017 / US1 AC7.
-            record_state_transition_(fsm_state::Disconnected);
-            co_return std::unexpected(fixpp::core::error::session_seqnum_reset_mismatch);
-        }
 
         // peer_sent_reset: event emission deferred to after the reply-Logon block
         // so the event fires with consistent post-reset counters (FR-018) and the

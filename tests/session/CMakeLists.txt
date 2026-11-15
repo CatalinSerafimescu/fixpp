@@ -364,8 +364,13 @@ function(add_session_103_bucket name)
 endfunction()
 add_session_103_bucket(session_103_tests
   test_103_resend_state_reconnect.cpp                                   # 103 T018
+  test_103_default_reset_policy.cpp                                     # 103 T022
 )
 
+# 103 T023: test_reset_seqnum_policy_matrix.cpp's AS5 cells use mock_reconnect_factory.hpp's
+# FaultStoreFactory, whose header includes the mock transport.
+set_source_files_properties(test_reset_seqnum_policy_matrix.cpp PROPERTIES
+  COMPILE_DEFINITIONS FIXPP_ALLOW_MOCK_TRANSPORT)
 # 099 W-5's, W-6's and W-25's reconnect cells drive drive_reconnect() through MockReconnectFactory,
 # in those TUs only.
 set_source_files_properties(

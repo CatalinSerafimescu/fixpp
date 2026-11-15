@@ -474,7 +474,7 @@ TEST_P(W12Shape, ReachesActive_RoutesAccepts_RoutesRejects_ReadsItsVersion) {
         const auto logon = peer.read_msg_type("A", kStep);
         EXPECT_TRUE(logon.has_value()) << "no Logon from the initiator";
         EXPECT_EQ(frame_field(logon.value_or(""), 1137), "9");
-        // Answers 141 as the session's Logon asked, since the default policy wants both to say it.
+        // Answers 141 as the session's Logon asked (a mirroring peer), whatever the policy.
         const std::string reset = frame_field(logon.value_or(""), 141) == "Y" ? "141=Y\x01" : "";
         EXPECT_TRUE(peer.write(
             fixt_frame("35=A\x01" + header(1) + "98=0\x01" + "108=30\x01" + "1137=9\x01" + reset)));
