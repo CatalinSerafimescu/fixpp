@@ -56,6 +56,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 #include "support/validation_test_dictionary.hpp"
 
@@ -224,8 +225,8 @@ public:
     // here, over live storage. cancel_and_drain_or_report carries its own catch.
     ~Scene() {
         try {
-            asio::co_spawn(ioc, session->close(fixpp::session::close_mode::terminal),
-                           asio::detached);
+            asio::co_spawn(fixpp::test_support::session_executor_of(*session, ioc),
+                           session->close(fixpp::session::close_mode::terminal), asio::detached);
         } catch (...) {  // NOLINT(bugprone-empty-catch) — the drain below still runs.
         }
         fixpp::test_support::cancel_and_drain_or_report(ioc, *mock, "resend_gap::Scene");
@@ -394,7 +395,8 @@ public:
     // delivery that a pump missed is still resumed over live storage by the destructor.
     fixpp::core::expected_t<void> feed(std::vector<std::byte> f) {
         fed_.push_back(std::move(f));
-        auto fut = asio::co_spawn(ioc, session->on_inbound_frame(fed_.back()), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*session, ioc),
+                                  session->on_inbound_frame(fed_.back()), asio::use_future);
         if (!fixpp::test_support::pump_until(
                 ioc, [&] { return ready(fut); }, fixpp::test_support::kPumpBudget,
                 fixpp::test_support::kPumpSlice, nullptr)) {
@@ -408,7 +410,8 @@ public:
     // open(), then the peer's Logon at 1: the session is Active, NextNumIn is 2, and its
     // liveness loop, when it has one, is parked in its first sleep.
     [[nodiscard]] bool open_to_active() {
-        auto fut = asio::co_spawn(ioc, session->open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*session, ioc),
+                                  session->open(), asio::use_future);
         if (!fixpp::test_support::pump_until(
                 ioc, [&] { return ready(fut); }, fixpp::test_support::kPumpBudget,
                 fixpp::test_support::kPumpSlice, nullptr) ||

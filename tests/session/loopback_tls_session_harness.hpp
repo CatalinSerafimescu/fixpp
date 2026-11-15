@@ -69,6 +69,7 @@
 
 // Shared test support headers (minimal dictionary + security profile).
 #include "support/minimal_dictionary.hpp"
+#include "support/session_executor_of.hpp"
 
 using namespace std::chrono_literals;
 
@@ -188,13 +189,15 @@ public:
     // Convenience: open the Session (drives the initiator to LogonSent).
     // Returns the expected_t from open(); caller drives io_context.
     std::future<fixpp::core::expected_t<void>> spawn_open(asio::io_context& ioc) {
-        return asio::co_spawn(ioc, session_->open(), asio::use_future);
+        return asio::co_spawn(fixpp::test_support::session_executor_of(*session_, ioc),
+                              session_->open(), asio::use_future);
     }
 
     // Convenience: feed inbound bytes through on_inbound_frame.
     std::future<fixpp::core::expected_t<void>> spawn_feed(asio::io_context& ioc,
                                                           std::span<const std::byte> frame) {
-        return asio::co_spawn(ioc, session_->on_inbound_frame(frame), asio::use_future);
+        return asio::co_spawn(fixpp::test_support::session_executor_of(*session_, ioc),
+                              session_->on_inbound_frame(frame), asio::use_future);
     }
 
 private:

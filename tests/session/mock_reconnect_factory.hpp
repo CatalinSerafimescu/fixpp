@@ -51,6 +51,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 namespace fixpp::test_support {
 
@@ -226,7 +227,8 @@ struct Fixture {
     std::unique_ptr<fixpp::session::Session> session;
 
     void feed(const std::vector<std::byte>& frame) {
-        auto fut = asio::co_spawn(ioc, session->on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*session, ioc),
+                                  session->on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{500},
                                                         "RefreshOnLogon::Fixture::feed")) {
             fixpp::test_support::drain_or_report(ioc, "RefreshOnLogon::Fixture::feed");

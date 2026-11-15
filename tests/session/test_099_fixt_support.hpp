@@ -66,6 +66,7 @@
 
 #include "session/fixt_route_set.hpp"
 #include "support/fixt_raw_peer.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 namespace fixpp::session::test099 {
@@ -969,7 +970,8 @@ public:
         if (!options.private_build) {
             adopt_fixture_routes(*sess, fixture);
         }
-        auto fut = asio::co_spawn(ioc, sess->open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, ioc),
+                                  sess->open(), asio::use_future);
         if (!pump_ready(ioc, fut, std::chrono::seconds{120})) {
             return std::string("OPEN-PUMP-MISS");
         }
@@ -989,7 +991,8 @@ public:
     // Feeds a frame and pumps what it posted. A pump miss is reported in err.
     void feed(const std::string& frame, std::string* err) {
         auto bytes = std::as_bytes(std::span{frame.data(), frame.size()});
-        auto fut = asio::co_spawn(ioc, sess->on_inbound_frame(bytes), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, ioc),
+                                  sess->on_inbound_frame(bytes), asio::use_future);
         if (!pump_ready(ioc, fut, std::chrono::seconds{60})) {
             if (err != nullptr) {
                 *err = "PUMP-MISS";
@@ -1011,7 +1014,8 @@ public:
     [[nodiscard]] std::string send(const std::string& payload) {
         out.clear();
         auto bytes = std::as_bytes(std::span{payload.data(), payload.size()});
-        auto fut = asio::co_spawn(ioc, sess->send(bytes), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, ioc),
+                                  sess->send(bytes), asio::use_future);
         if (!pump_ready(ioc, fut, std::chrono::seconds{60})) {
             return "PUMP-MISS";
         }
@@ -1066,7 +1070,8 @@ public:
     // From Active, a graceful close to LogoutSent.
     [[nodiscard]] std::optional<std::string> enter_logout_sent() {
         close_fut = std::make_shared<std::future<expected_t<void>>>(
-            asio::co_spawn(ioc, sess->close(close_mode::graceful), asio::use_future));
+            asio::co_spawn(fixpp::test_support::session_executor_of(*sess, ioc),
+                           sess->close(close_mode::graceful), asio::use_future));
         const auto end = std::chrono::steady_clock::now() + std::chrono::seconds{10};
         while (sess->state() != fsm_state::LogoutSent && std::chrono::steady_clock::now() < end) {
             ioc.restart();
