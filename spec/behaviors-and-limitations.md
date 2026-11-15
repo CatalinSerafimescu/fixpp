@@ -1181,13 +1181,12 @@ row; see `feature-catalogue.md`.)*
   persistent store's `store()` call RETURNS no longer proceeds: the frame is not transmitted, the
   session's next outbound number is reconciled from the store, and the error is returned to the
   caller (`Session::store_then_emit` in `src/session/session.cpp`; its header comment lists every
-  ending). What still proceeds past a failed write on a persistent store is (a) an exception thrown
-  out of the store's body that is not a cancellation, which `store_then_emit` absorbs before it
-  transmits, and (b) a failed `flush_for_session_close` under `close(graceful)`, which close logs
-  and proceeds past. Either can leave the persisted outbound counter behind the last frame sent,
-  and the restart hydrate below reads that value. A volatile store still proceeds on a returned
-  error, but persists nothing a restart reads. The 029-era text below describes the pre-059 policy;
-  read its "logged-then-proceed" as cases (a) and (b).] The existing outbound store write (added in 008/024) is I-07
+  ending). What still proceeds past a failed write on a persistent store is an exception thrown out
+  of the store's body that is not a cancellation: `store_then_emit` absorbs it and transmits the
+  frame, so the persisted outbound counter can be behind the last frame sent, and the restart
+  hydrate below reads that value. A volatile store still proceeds on a returned error, but persists
+  nothing a restart reads. The 029-era text below describes the pre-059 policy; read its
+  "logged-then-proceed" as that one case.] The existing outbound store write (added in 008/024) is I-07
   logged-then-proceed — an outbound `next_seqnum(outbound,true)` failure is logged but does NOT
   disconnect the session (asymmetric with the inbound path where failure is fatal, per research
   D-3). If this outbound write silently fails mid-session, the FileStore's persisted outbound
@@ -1432,15 +1431,18 @@ authentication. App (non-admin) frames ARE replayed verbatim, which is precisely
 gated to `MsgType=A` only. *(034 R4/R7 / INV-034-3/5.)*
 
 **L-652-1 — Credentials inside an application message are stored in cleartext by every store backend and
-replayed verbatim on resend.** The store mask runs only for `35=A` (B-034-1), because an application frame
+go back on the wire, as stored, on a resend.** The store mask runs only for `35=A` (B-034-1), because an application frame
 is replayed from its stored bytes and a mask there would reach the wire at resend (L-034-1). The mask is
 applied once, in `Session::store_then_emit`, before any store backend's `store()` call, so no backend
 masks anything else. An application-sent UserRequest (35=BE) therefore keeps Username(553), Password(554),
-NewPassword(925), EncryptedPassword(1402) and EncryptedNewPassword(1404) in cleartext at rest. QuickFIX's
+NewPassword(925), EncryptedPassword(1402) and EncryptedNewPassword(1404) in cleartext at rest, and a
+resend of it sends those fields again: the replay (`build_replay_frame` in `session.cpp`) adds PossDupFlag(43)
+and OrigSendingTime(122), restamps SendingTime(52) and re-frames, and copies the body as stored. QuickFIX's
 stores keep the same bytes (B-034-1). Protect the store path with filesystem permissions. **Status: by
 design** (QuickFIX parity). *(fixpp#652; `session.cpp` `store_then_emit`'s `msg_type == "A"` gate;
 witnesses `CredentialStoreRedaction.AppUserRequest_CredentialFieldsStoredInCleartext_LogonPasswordMasked`
-(FileStore disk bytes, with the Logon's masked Password as the positive control) and
+(FileStore disk bytes, with the Logon's masked Password as the positive control, and the resend answer to
+a ResendRequest for the UserRequest, carrying 43=Y and the stored 554 and 925) and
 `CredentialStoreRedaction.T009_NonLogon_WithGenuine554_StoredUnchanged` (MemoryStore: the stored frame is
 byte-identical to the wire frame).)*
 
@@ -1602,7 +1604,7 @@ L-041-1 is closed (retired by 075-live-wire-enum-validation); its text is in `be
 
 ### Limitations
 
-**L-044-1 — `reject_policy` is file-recognized but not file-selectable (step-1 capability limit).** `SessionConfig::reject_policy` is a recognized field in the loader's scalar mapper, but the underlying `RejectPolicy` enum (owned by feature 005) is **forward-declared only with no enumerators defined in this checkout** — no canonical token can be mapped from a string. A TOML file containing a `reject_policy` key resolves to `recognized_not_yet_supported_step2` (not `unknown_key`) so that the diagnostic is informative rather than misleading. The programmatic path to `reject_policy` is unaffected (host-built `SessionConfig` sets it directly). **Status: step-1 capability limit — resolved when feature 005 lands the `RejectPolicy` enum enumerators.** **[PREMISE CORRECTED: 005 shipped without them, and no later feature has defined them.** `RejectPolicy` is still only forward-declared, `enum class RejectPolicy : std::uint8_t;` in `include/fixpp/session/session_config.hpp`, and no session code reads `SessionConfig::reject_policy` (re-derive: `git grep -n reject_policy -- src include`). So the field has no effect from either path: a host-built `SessionConfig` can store a value in it, and nothing acts on it. The row stays open until a feature defines the enumerators and a reader; none is scheduled.] *(044 data-model E-6; `src/config/scalar_mappers.cpp`; `neg_multi.toml` negative battery fixture.)*
+**L-044-1 — `reject_policy` is file-recognized but not file-selectable (step-1 capability limit).** `SessionConfig::reject_policy` is a recognized field in the loader's scalar mapper, but the underlying `RejectPolicy` enum (owned by feature 005) is **forward-declared only with no enumerators defined in this checkout** — no canonical token can be mapped from a string. A TOML file containing a `reject_policy` key resolves to `recognized_not_yet_supported_step2` (not `unknown_key`) so that the diagnostic is informative rather than misleading. The programmatic path to `reject_policy` is unaffected (host-built `SessionConfig` sets it directly). **Status: step-1 capability limit — resolved when feature 005 lands the `RejectPolicy` enum enumerators.** **[PREMISE CORRECTED: 005 shipped without them, and no later feature has defined them.** `RejectPolicy` is still only forward-declared, `enum class RejectPolicy : std::uint8_t;` in `include/fixpp/session/session_config.hpp`, and no session code reads `SessionConfig::reject_policy` (re-derive: `git grep -n reject_policy -- src include`). So the field has no effect from either path: a host-built `SessionConfig` can store a value in it, and nothing acts on it. The row stays open until a feature defines the enumerators and a reader.] *(044 data-model E-6; `src/config/scalar_mappers.cpp`; `neg_multi.toml` negative battery fixture.)*
 
 **L-044-2 — A missing `security_profile.kind` produces both a primary `missing_required` diagnostic AND a redundant resolver-layer `invalid_or_contradictory_selector` diagnostic.** The loader runs validation (which emits `missing_required` at `session[0].security_profile.kind`) and selector resolution (which also attempts to build the transport selector and emits `invalid_or_contradictory_selector` at `…transport` because no security-profile kind was provided) as independent passes in collect-ALL mode. Both diagnostics describe the same root cause; the second is redundant but not incorrect. An optional cleanup — suppressing the resolver arm when `security_profile.kind` is absent — would yield a single-diagnostic result for this input. **Status: known / low-priority — redundant but not contradictory; optional cleanup tracked in tasks.md T033 notes.** *(044 data-model E-3; `src/config/selector_resolver.cpp`; witnessed in the US2 negative battery.)*
 
@@ -1845,7 +1847,7 @@ L-073-1 is in the closed file since 100 (`B-100-1`, `B-100-5`).
 ### Limitations
 
 - L-061-1 is closed (resolved by 082-structural-group-detection); its text is in `behaviors-and-limitations-closed.md`.
-- **L-061-2 — the 5 exemplar builders are REPRESENTATIVE shape-oracles, not full-field: each sets all message-level required fields + the identifying first field of each required component + enough optionals to exercise every field TYPE and the full group/nesting SHAPE, NOT every optional field.** Full-field coverage, the remaining ~28 OFFICIAL A/M/P builders, and all-version coverage are the follow-on FR-015a / FR-015b features; the 5 catalogue rows (A-001/A-002/A-006/A-007/P-003) therefore carry 061 evidence but remain `backlog` for full coverage until FR-015a closes them. **[AMENDED: the five rows are `done`** — 067-codegen-writer-emitter delivered the generated v44 builders for them (each row's Feature column reads "061 (v44 shape-oracle) + 067-codegen-writer-emitter"), and 069/077 widened the builder tier to every in-scope v44, v50sp2 and FIX Latest message. What this row still records is the depth of the five 061 exemplars themselves: they are representative shape oracles, not full-field.] *(FR-002/FR-010; data-model §2 "Representative shape-oracle rule"; the 020 "minimal fields" precedent.)*
+- **L-061-2 — the 5 exemplar builders are REPRESENTATIVE shape-oracles, not full-field: each sets all message-level required fields + the identifying first field of each required component + enough optionals to exercise every field TYPE and the full group/nesting SHAPE, NOT every optional field.** Full-field coverage, the remaining ~28 OFFICIAL A/M/P builders, and all-version coverage are the follow-on FR-015a / FR-015b features; the 5 catalogue rows (A-001/A-002/A-006/A-007/P-003) therefore carry 061 evidence but remain `backlog` for full coverage until FR-015a closes them. **[AMENDED: the five rows are `done`** — 067-codegen-writer-emitter delivered the generated v44 builders for them (each row's Feature column reads "061 (v44 shape-oracle) + 067-codegen-writer-emitter"), and 069/077/082 widened the builder tier to every in-scope v44, v50sp2, FIX Latest and FIX 4.2 message. What this row still records is the depth of the five 061 exemplars themselves: they are representative shape oracles, not full-field.] *(FR-002/FR-010; data-model §2 "Representative shape-oracle rule"; the 020 "minimal fields" precedent.)*
 
 ## 066-dict-backed-inbound-parse (dictionary-backed inbound receive parse, 2026-07-09)
 
