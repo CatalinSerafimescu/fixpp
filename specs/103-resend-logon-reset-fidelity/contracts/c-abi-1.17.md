@@ -78,8 +78,12 @@ in or out of sequence, where 1.16 disconnected silently.
 ## Witnesses
 
 `CapiVersion.CApiVersionIsExactly_1_17_0` (renamed from `_1_16_0`), `CapiVersion.CompositeMacroValue`, a C-ABI cell
-asserting the default pair's Logon (no 141, 34 = stored), a C-ABI cell for `fixpp_session_send`'s refusal while a
+asserting the default pair's Logon (no 141; 34=1 as its stated precondition, a fresh in-memory store), a C-ABI cell for `fixpp_session_send`'s refusal while a
 too-high Logout is pending, and the existing strict-naming cells in `tests/capi/public_roundtrip_test.cpp`.
+"34 = stored > 1" is unreachable through the C ABI while it has no store setter and the Engine sends one Logon per
+Session (re-check: `command grep -n store_factory src/capi` finds only `MemoryStoreFactory`, `session.h` declares no
+store setter, and `run_connect_loop` calls `drive_reconnect` once); the FileStore restart-and-resume cell in both
+roles (tasks T022) carries that claim in C++.
 
 Per mark: `fixpp_reset_seqnum_policy`, `fixpp_session_config_set_reset_seqnum_policy` and
 `fixpp_session_config_create`, the default pair (tasks T024); `fixpp_session_is_established` true for a Logon

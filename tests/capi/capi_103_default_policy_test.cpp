@@ -3,14 +3,17 @@
 // tests/capi/capi_103_default_policy_test.cpp — test-only.
 //
 // Feature 103 (specs/103-resend-logon-reset-fidelity/), fixpp#682, tasks T024: the C ABI's
-// default reset policy (contracts/c-abi-1.17.md, "Witnesses": "a C-ABI cell asserting the
-// default pair's Logon (no 141, 34 = stored)"). A session config made by
+// default reset policy (contracts/c-abi-1.17.md, "Witnesses"). A session config made by
 // fixpp_session_config_create on which fixpp_session_config_set_reset_seqnum_policy is never
 // called, and no reset setting is turned on, faces a raw TCP peer
 // (inbound_frame_dispositions_capi_support.hpp's RawAcceptor), which reads the engine's Logon
 // bytes or sends its own Logon:
-//   - an initiator's Logon carries no ResetSeqNumFlag(141) and 34=1 (the C ABI's store is
-//     the in-memory one, so the stored number is 1);
+//   - an initiator's Logon carries no ResetSeqNumFlag(141): the discriminator, since a strict
+//     default over the fresh store's {1,1} would send 141=Y. 34=1 is asserted as the stated
+//     precondition (a fresh in-memory store), not as a witness that a stored number is kept:
+//     that is unreachable through the C ABI while it has no store setter and the Engine sends
+//     one Logon per Session, and test_103_default_reset_policy.cpp's FileStore restart cell
+//     carries it in C++;
 //   - an acceptor accepts a Logon without 141 (fixpp_session_is_established true), and
 //     fixpp_session_close on that session returns FIXPP_ERR_OK, where a session that never
 //     established returns FIXPP_ERR_THREAD_SESSION_LIFECYCLE.
@@ -141,8 +144,10 @@ TEST(CapiDefaultResetPolicy103, DefaultInitiator_LogonCarriesNo141And34Eq1) {
     auto const logon = peer.read_until(
         [](std::string const& f) { return ifd::RawAcceptor::has_field(f, "35=A"); });
     ASSERT_TRUE(logon.has_value()) << "the engine wrote no Logon";
-    EXPECT_FALSE(field(*logon, "141").has_value()) << *logon;
+    // The precondition: a fresh in-memory store numbers the Logon 1.
     EXPECT_EQ(field(*logon, "34"), std::optional<std::string>{"1"}) << *logon;
+    // The discriminator: no ResetSeqNumFlag(141) under the default.
+    EXPECT_FALSE(field(*logon, "141").has_value()) << *logon;
     peer.disconnect();
     (void)c.drain_then_close();
 }
