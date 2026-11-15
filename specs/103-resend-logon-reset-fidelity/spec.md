@@ -167,7 +167,7 @@ the FIX Session Layer's, or from both:
   unaffected. A standalone Session keeps the drain, with a documented precondition: the caller's reader must have
   left `live_transport()` before the call and starts on the new `live_transport()` after it returns. Owner ruling;
   research D1 step 1a.
-  - **Erratum (Gate A loop 2 round 1), pending owner confirmation at Gate A sign-off.** The ruling's condition is
+  - **Erratum (Gate A loop 2 round 1), confirmed by the owner 2026-11-15 at Gate A sign-off.** The ruling's condition is
     "where the Engine's read pump owns the installed transport"; its parenthetical named only `cfg_.engine_managed`,
     which the Engine sets for initiators alone. The Engine's acceptor loop also runs a read pump on its Session's
     transport, so the fence is `cfg_.role == session_role::acceptor || (cfg_.engine_managed &&` a transport
@@ -384,7 +384,7 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   write unwinds. After its closing/closed/stopped test (`session_already_closed`), `drive_reconnect` MUST refuse
   with `session_already_open` and change nothing on an acceptor, or on an `engine_managed` initiator that already
   has an installed transport (the Engine's read pump owns that transport; owner ruling 2026-11-15, the acceptor
-  disjunct an erratum pending owner confirmation; a standalone initiator configured `engine_managed` is treated the
+  disjunct an erratum the owner confirmed 2026-11-15; a standalone initiator configured `engine_managed` is treated the
   same, disclosed); on a standalone initiator the caller's reader MUST have left `live_transport()` before the call
   and starts on the new `live_transport()` after it returns (a documented precondition, not detected). The operation
   (research D1): one at a time (a second concurrent call returns

@@ -38,7 +38,7 @@ the bound asserts it. The acceptor needs none: `attach_accepted_transport` runs 
 - Reader fence, tested after the closing/closed/stopped test (`session_already_closed`):
   `cfg_.role == session_role::acceptor || (cfg_.engine_managed && live_transport_shared_() != nullptr)` →
   `session_already_open`, nothing changes (the Engine's read pump owns that transport; the acceptor disjunct is an
-  erratum pending owner confirmation). Standalone initiator precondition: the caller's reader has left
+  erratum the owner confirmed 2026-11-15). Standalone initiator precondition: the caller's reader has left
   `live_transport()` before the call and starts on the new one after it.
 - `reconnect_in_flight_`: `bool`, set at `drive_reconnect`'s entry, cleared by RAII; a second call returns
   `session_already_open`.
@@ -69,7 +69,8 @@ in-sequence acknowledgement, gap deadline, SendingTime-fatal, PossDup Arm D, Arm
 bound) and `run_logout_phase1`; cleared only on the edge into `Disconnected` (`record_state_transition_`), so it spans
 the whole ending, the in-sequence acknowledgement's `fromAdmin`, best-effort Reject and inbound persist included;
 `install_reconnected_transport` asserts it clear. `inbound_logout_leaf_` also skips when the session is no longer
-Active (tested at entry), so the owner is set only in Active. Found set (or not Active): `inbound_logout_leaf_`
+Active (tested at entry), so the leaf sets the owner only in Active (`run_logout_phase1` may also set it in
+LogonReceived). Found set (or not Active): `inbound_logout_leaf_`
 returns a "skipped" success and its caller keeps the rest of its ending; `close(graceful)` poll-joins it inside its
 grace and sends none; the bound tests it at its claim, sets the phase `none` and exits. LS-1 pins that no other
 Active Logout builder exists. Invariant: at most one Logout of an established session is in flight.
@@ -101,8 +102,11 @@ Fields: `shared` (open shared holds), `exclusive` (a walk is waiting or running)
   `store_then_emit` returns. Fast path: no await, no allocation.
 - Exclusive hold: `replay_outbound_range_` from entry (before the store tail read) to every ending (RAII); waits
   for `shared == 0` first.
-- Wake sources: exclusive release, the last shared release whenever a waiter exists (the walk, or the reconnect
-  drain), `inbound_depth_` reaching 0, the `Disconnected` edge, engine stop, `close()`.
+- Wake sources (the one normative list; research D5′ and the amendment's census point here): exclusive release,
+  the last shared release whenever a waiter exists (the walk, or the reconnect drain), `inbound_depth_` reaching 0,
+  the `Disconnected` edge, engine stop (`note_engine_stop_`), and `close()`, immediately after its first commit of
+  `state_ = lifecycle::closing` (after the R-4 post when taken; no suspension between), not again when joining.
+  There is no install wake.
 - A contended wait: the pre-check sits in the waiting frame, or the wait is awaited through the split idiom (D5′.2).
   A wait its caller's cancellation ends returns `dispatch_aborted`, state unchanged, no number consumed, the
   caller's cancellation left pending.
