@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/dictionary/lookup_test.cpp
 //
-// AC-D1..D8 parameterized over the seven currently-loadable v1.0 FIX versions:
-// the four codegen-target dictionaries (FIX42, FIX44, FIX50SP2, FIXT11) plus
-// the three runtime-XML-only versions vendored for D-005/006 (FIX43, FIX50,
-// FIX50SP1 — spec 002 §10 F1). FIX 4.0/4.1 (D-004) are excluded pending loader
-// legacy-type support (see the INSTANTIATE note). GoogleTest TEST_P fixture;
-// each version is loaded fresh per test via a 4 MiB monotonic_buffer_resource.
+// AC-D1..D8 parameterized over every vendored QuickFIX-XML v1.0 dictionary
+// listed in the AllRuntimeVersions instantiation below: the codegen-target
+// dictionaries (FIX42, FIX44, FIX50SP2, FIXT11) and the runtime-XML-only ones
+// (FIX 4.0/4.1 for D-004, loaded through 064's legacy-type aliases; FIX43,
+// FIX50, FIX50SP1 for D-005/006 — spec 002 §10 F1). Re-derive the set from the
+// instantiation, or `ls dictionaries/*.xml`. GoogleTest TEST_P fixture; each
+// version is loaded fresh per test via a 4 MiB monotonic_buffer_resource.
 
 #include <gtest/gtest.h>
 
