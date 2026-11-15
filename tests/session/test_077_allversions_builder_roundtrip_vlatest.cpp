@@ -25,8 +25,8 @@
 // exhaustiveness).
 //
 // The AdjustedPositionReport, ContraryIntentionReport and DerivativeSecurityListUpdateReport
-// cells are hand-edited after generation: they also assert MsgType(35), and seed their two
-// decimals as "<tag>.5" so that the two are distinct on the wire.
+// cells differ from the generated form: they also assert MsgType(35), and seed their two
+// decimals as "<tag>.5" so that the two are distinct on the wire. A regeneration must keep both.
 
 #include <gtest/gtest.h>
 
