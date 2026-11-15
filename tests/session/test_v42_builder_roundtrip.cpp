@@ -22,10 +22,10 @@
 //     decimal_t), as test_077_allversions_builder_roundtrip.cpp chooses them;
 //   - values are chosen before any build: string "<Msg>_<member>", int64 = the field's own
 //     tag, decimal "<tag>.5", bool true (wire "Y"), char = the first value of the field's
-//     FIX42.xml enum list that no other seeded field of the cell carries (where none is left,
-//     the first such digit or letter). The script stops unless every seeded value of a cell
-//     is distinct on the wire, so a builder that writes one seeded member under another
-//     seeded member's tag fails a value assertion.
+//     FIX42.xml enum list that differs from every value already seeded in the cell (where
+//     none does, the first such digit or letter). The script stops unless every seeded value
+//     of a cell is distinct on the wire, so a builder that writes one seeded member under
+//     another seeded member's tag fails a value assertion.
 // validate_<Msg> is not called: required groups are left empty, which it refuses by design
 // (tests/codegen/test_082_v42_required_group_omission_test.cpp witnesses that refusal).
 //
