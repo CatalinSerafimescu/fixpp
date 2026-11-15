@@ -282,6 +282,35 @@ TEST(ResendStateReconnect103, Control_FreshSession_TooHighFrameDrawsTheSameResen
     EXPECT_EQ(r.s.count("5", before), 0U) << r.s.written(before);
 }
 
+// ── G8 (zero downtime): the old connection's liveness loop does not outlive the install ─────
+// research D1 step 3 and cell G8 (tasks T118). As Arm A with no clock motion during the
+// downtime, so the old connection's run_liveness_loop is still parked in its mock-clock sleep
+// when drive_reconnect installs the new transport, and the new Active spawns a loop of its
+// own. Only one loop may be bound to the session's root cancellation slot (D1, "The root
+// slot's single-client invariant"); the drain retires the old one first (tasks T129, T131).
+// After the new Active the clock moves one HeartBtInt: one liveness loop writes one
+// Heartbeat. Disabled until the drain lands (T131 drops the prefix); read with
+// --gtest_also_run_disabled_tests and this cell's exact name.
+TEST(ResendStateReconnect103,
+     DISABLED_G8_ZeroDowntimeReconnect_OldLivenessLoopRetiredBeforeTheInstall) {
+    Rig r;
+    ASSERT_TRUE(r.open_to_active()) << "setup: the session did not reach Active";
+    ASSERT_TRUE(r.open_gap()) << "setup: no gap opened; the session wrote " << r.s.written();
+    r.too_low_order();
+    ASSERT_EQ(r.s.state(), fsm_state::Disconnected) << rg::state_name(r.s.state());
+
+    auto const rc = r.reconnect();
+    ASSERT_TRUE(rc.has_value()) << "drive_reconnect returned " << static_cast<int>(rc.error());
+    expect_one_reset_logon_after_mark(r);
+    (void)r.s.feed(r.ack(1, true));
+    ASSERT_EQ(r.s.state(), fsm_state::Active) << "after the mark: " << r.after_mark_text();
+
+    r.s.pass(rg::kHeartBtInt + std::chrono::seconds{1});
+    EXPECT_EQ(r.after_mark_of("0").size(), 1U)
+        << "one liveness loop writes one Heartbeat per HeartBtInt; after the mark: "
+        << r.after_mark_text();
+}
+
 // ── Arm E: drive_reconnect from Active with a too-high Logout received ──────────────────────
 // research D1, the drain: GREEN only once the drain and the commit point land
 // (tasks T129, T131); the mark's half needs D4.
