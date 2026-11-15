@@ -546,6 +546,8 @@ This keeps every owner-approved zero case: no emitter takes over after another's
 
 **Rationale:** the rulings, FIX-SL Table 3 and §4.10 precedence 15 (bounded), and TC 20. Only a mark is kept, not the frame (L-013-2 stands). The named exception's premise, that a QuickFIX peer keeps servicing a ResendRequest while it waits for its Logout's acknowledgement, read in PARENT `reference-engines/` at checklist audit (QuickFIX/Go at the pre-spec research's `_engine_shas.txt` commit; QuickFIX C++ at its checkout's head, a descendant of that file's commit, so re-read it at that commit before relying on it): QuickFIX/Go's `logoutState.FixMsgIn` hands every inbound message to `inSession.FixMsgIn`, and QuickFIX C++'s `Session::validLogonState` treats a message other than a Logout as valid after `sentLogout`, so it is processed. QuickFIX/J was not re-read for it here.
 
+**Correction (implementation, T005; orchestrator ruling 2026-11-15):** the PARENT `reference-engines/` checkouts, re-cloned and updated on 2026-11-14, are not descendants of `_engine_shas.txt`'s commits (`git merge-base --is-ancestor <recorded> HEAD` is false for QuickFIX C++ and QuickFIX/J), so "a descendant of that file's commit" above does not hold; the transcription strings 103 uses were read at the recorded SHAs (`git show <sha>:<path>`), and they are the same at both checkout heads.
+
 **Alternatives considered:**
 - Dispatch ahead of Guard (4). Every frame would pay for it, and it would mix with the PossDup Stage-1 ordering.
 - Bind the bound's coroutine to `root_cancel_`. Rejected: the slot holds one handler (D4.4).
