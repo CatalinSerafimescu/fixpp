@@ -367,6 +367,10 @@ add_session_103_bucket(session_103_tests
   test_103_default_reset_policy.cpp                                     # 103 T022
   test_103_too_high_resend_request.cpp                                  # 103 T047
 )
+# 103 T060: R-588-h, an Engine on an io_context run by several threads; an entry of its own.
+add_session_103_bucket(session_103_replay_mt_engine
+  test_103_replay_mt_engine.cpp                                         # 103 T060
+)
 
 # 103 T023: test_reset_seqnum_policy_matrix.cpp's AS5 cells use mock_reconnect_factory.hpp's
 # FaultStoreFactory, whose header includes the mock transport.
