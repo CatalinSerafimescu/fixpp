@@ -117,7 +117,7 @@ Order by dependency (research R17 as amended):
    and Pass F in a scratch copy, each proven non-zero on the sentinel. D9's Arm-B census. The reader censuses D1
    needs (no reader of the resend state or the mark acts outside Active), D4.2's LogonReceived reachability, and
    the acceptor's single `attach_accepted_transport` per Session. The send-path allocation witness's MemoryStore
-   twin measured on the base, and its planted-allocation proof. Results recorded in the evidence file, never in
+   twin measured on the base, and its planted-allocation proof. Label 103 added to every test registration 103 touches, so `ctest -L 103 --no-tests=error` selects them (quickstart §1). Results recorded in the evidence file, never in
    code comments.
 2. **#578 (D1)** — RED reproduction first (arms A, B, E; G1–G10, F1, F2 and the RS-1 census after phases 6 and 7;
    G10 is the Engine-managed reader fence, owner ruling 2026-11-15); if GREEN on the base,
@@ -145,9 +145,11 @@ Order by dependency (research R17 as amended):
    L-028-3, L-092-1/-2, L-093-7; add B-103-1…10, L-103-2…7), catalogue and coverage-index rows, brain supersession
    flags (R16, R23), the stale `logout_disconnect_timeout_ms` comment (R15), the QFJ 3.0.1 → 3.0.2 library doc
    mentions (`tests/interop/KNOWN-LIMITATIONS.md`, `brain/components/quickfix-compat.md`), a follow-up issue for
-   L-103-2 (peer-spontaneous 141=Y acknowledgement). The `session.hpp` comment on `root_cancellation_slot()`,
-   which advertises the slot for transport I/O and the parser→fromApp chain, is corrected to the single-client
-   invariant and names 103 (research D1, P3-1). `drive_reconnect`'s header doc: the Engine-managed fence, the
+   L-103-2 (peer-spontaneous 141=Y acknowledgement). The three comments that advertise the root slot for
+   transport I/O, mutex acquire and the parser→fromApp chain are corrected to the condition (the slot has a single
+   client kind, the liveness loop) and the recipe (cell RS-1), with no count, naming 103: `session.hpp`'s comment on
+   `root_cancellation_slot()`, `session.hpp`'s comment saying in-flight work bound to that slot unwinds, and
+   `close()`'s comment at its `root_cancel_.emit` (research D1, P3-1; loop 2 round 1, P3-4). `drive_reconnect`'s header doc: the reader fence (acceptors, and `engine_managed` initiators with a transport, a standalone `engine_managed` initiator included), the
    standalone reader precondition, single flight, the 563 §2.1a supersession, the latches, and "not bound to
    `root_cancellation_slot()`".
 10. **Polish** — `/simplify`, `/speckit-verify` (Tier-1 mirror incl. MSVC build of new targets, sanitizers, SC-002's
@@ -168,10 +170,11 @@ Order by dependency (research R17 as amended):
 
 - Round 1 applied 2026-11-14: Codex P1=13 P2=4 P3=0; Opus post-judging P1=3 P2=8 P3=13; rewrite addresses RC1–RC5 and the three owner rulings. Reviews: research/reviews/codex_103-resend-logon-reset-fidelity_gate_a_review.md, research/reviews/opus_103-resend-logon-reset-fidelity_gate_a_adversarial_review.md.
 
+- Loop 2 round 1 applied 2026-11-15: Codex P1=0 P2=2 P3=1; Opus post-judging P1=0 P2=2 P3=6; rewrite addresses the fence predicate/order (acceptor erratum), the Logout-owner clear site, and the P3s. Reviews: research/reviews/codex_103-resend-logon-reset-fidelity_gate_a_4_review.md, research/reviews/opus_103-resend-logon-reset-fidelity_gate_a_4_adversarial_review.md.
 - Loop 1 exhausted at round 3 (2026-11-15): Codex P1=1 P2=1 P3=1; Opus post-judging P1=0 P2=2 P3=5; owner chose hand-edit + one targeted round and the Engine-managed fence; pre-loop-2 edit applies RC-α, RC-β, RC-γ and the P3s. Reviews: research/reviews/codex_103-resend-logon-reset-fidelity_gate_a_3_review.md, research/reviews/opus_103-resend-logon-reset-fidelity_gate_a_3_adversarial_review.md.
 - Round 2 applied 2026-11-15: Codex P1=3 P2=3 P3=1; Opus post-judging P1=0 P2=8 P3=3; rewrite addresses root causes A–D. Reviews: research/reviews/codex_103-resend-logon-reset-fidelity_gate_a_2_review.md, research/reviews/opus_103-resend-logon-reset-fidelity_gate_a_2_adversarial_review.md.
 
-Points for loop 2 (pre-loop-2 edit): D1's step 0a reader fence and the standalone precondition (G10), the root
+Points for loop 2 (pre-loop-2 edit): D1's reader fence (step 1a since loop 2 round 1) and the standalone precondition (G10), the root
 slot's single-client invariant (RS-1); D4.6's owner at the leaf, its derivation rule and LS-1, LO-1e/f, LO-2e/f/g,
 LO-4; the amendment contract's confinement as a structural check.
 
@@ -247,4 +250,20 @@ Codex's fix shape, the Codex shape is not applied:
 - **Codex #5 (inbound bench)** — "both callback and no-callback rows, MemoryStore where relevant" is narrowed to two
   rows (an Active Heartbeat, which reaches no application callback, and an Active application message, which reaches
   `fromApp`), the shapes the existing inbound allocation windows already drive.
+
+### Loop 2 round 1 — disagreements
+
+The Opus review confirms both Codex P2s and the P3 and marks nothing "Disagree". Two Codex fix shapes are not
+applied, as the judge rejected or did not prefer them:
+
+- **Codex P2-1 (a dedicated Engine-owned / reader-owned property, or setting `engine_managed` for acceptors too)**
+  — not adopted. The judge's main fix is the role disjunct `cfg_.role == acceptor` before `engine_managed &&` a
+  transport installed: it implements the owner's stated condition with no new mechanism and no change to
+  `engine_managed`'s initiator-only contract. Its one false positive, a standalone initiator that sets
+  `engine_managed` to defer its connect, is disclosed (B-103-9, header doc). The Engine-only marker
+  (`session_engine_access::mark_pump_owned`) stays the named alternative if the owner prefers it at sign-off.
+- **Codex P2-2 (a three-state owner, `none | inbound_ending | graceful_phase1`)** — not adopted. A boolean set at
+  the two leaves and cleared only on the edge into `Disconnected` spans the whole ending; clearing phase 1's
+  ownership early at an inbound ending's `Disconnected` loses nothing, because no Logout emitter can start after
+  that edge (D4.6 "The clear").
 

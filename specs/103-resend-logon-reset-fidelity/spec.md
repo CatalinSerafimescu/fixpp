@@ -166,7 +166,13 @@ the FIX Session Layer's, or from both:
   transport, the case where the Engine's read pump owns it; the Engine's own first call has no transport and is
   unaffected. A standalone Session keeps the drain, with a documented precondition: the caller's reader must have
   left `live_transport()` before the call and starts on the new `live_transport()` after it returns. Owner ruling;
-  research D1 step 0a.
+  research D1 step 1a.
+  - **Erratum (Gate A loop 2 round 1), pending owner confirmation at Gate A sign-off.** The ruling's condition is
+    "where the Engine's read pump owns the installed transport"; its parenthetical named only `cfg_.engine_managed`,
+    which the Engine sets for initiators alone. The Engine's acceptor loop also runs a read pump on its Session's
+    transport, so the fence is `cfg_.role == session_role::acceptor || (cfg_.engine_managed &&` a transport
+    installed`)`, tested after the closing/closed/stopped test (which returns `session_already_closed`). An acceptor
+    is never reconnected in place, so refusing every acceptor removes nothing supported.
 - Q: How does the bundle continue after loop 1's round-3 exhaustion? → A: **hand-edit plus one targeted round:** the
   pre-loop-2 edit applies RC-α (above), RC-β (the Logout owner moves into `inbound_logout_leaf_`), RC-γ and the
   round-3 P3s, then a fresh Gate A loop runs. Owner ruling.
@@ -231,7 +237,7 @@ a ResendRequest for the new gap is written. Control: a fresh Session given the s
    **When** `drive_reconnect()` is called, **Then** it records `Disconnected`, waits until that frame's store and
    write end on the old transport, and only then installs the new transport; the frame is never written on the new
    transport (a standalone Session; its reader follows the precondition of FR-006).
-6. **Given** an Engine-managed initiator whose read pump is reading the installed transport, **When** the
+6. **Given** an Engine initiator or acceptor whose read pump is reading the installed transport, **When** the
    application calls `drive_reconnect()` directly, from Active or from the `Disconnected` that follows a Logout
    acknowledgement, **Then** it returns `session_already_open`, the session's state is unchanged, the installed
    transport is untouched, and the pump keeps reading it.
@@ -375,10 +381,12 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   and no detached coroutine of the old connection (its liveness loop, the mark's bound) is alive, and only then
   install the new transport; no frame numbered or claimed on the old connection MAY be written on the new one. The
   emit wait is bounded by `logout_disconnect_timeout_ms`, after which the old transport is force-closed so a blocked
-  write unwinds. On an Engine-managed Session that already has an installed transport, `drive_reconnect` MUST
-  refuse with `session_already_open` and change nothing (the Engine's read pump owns that transport; owner ruling
-  2026-11-15); on a standalone Session the caller's reader MUST have left `live_transport()` before the call and
-  starts on the new `live_transport()` after it returns (a documented precondition, not detected). The operation
+  write unwinds. After its closing/closed/stopped test (`session_already_closed`), `drive_reconnect` MUST refuse
+  with `session_already_open` and change nothing on an acceptor, or on an `engine_managed` initiator that already
+  has an installed transport (the Engine's read pump owns that transport; owner ruling 2026-11-15, the acceptor
+  disjunct an erratum pending owner confirmation; a standalone initiator configured `engine_managed` is treated the
+  same, disclosed); on a standalone initiator the caller's reader MUST have left `live_transport()` before the call
+  and starts on the new `live_transport()` after it returns (a documented precondition, not detected). The operation
   (research D1): one at a time (a second concurrent call returns
   `session_already_open` and connects nothing); started from a callback, it runs after one post, as `close()` does;
   a `close()` or `Engine::stop()` that starts during it, during the drain or during connect and handshake, ends it

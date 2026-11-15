@@ -8,7 +8,7 @@ Decisions: research D1–D9.
 | E1 | Default policy, initiator, stored next-out N_out > 1, no reset setting | Logon 34=N_out, no 141; an in-sequence ack → Active | #682 FR-001, FR-005 |
 | E2 | `bilateral_strict` initiator, any stored numbers | durable reset to {1,1}; Logon 141=Y, 34=1; ack 141=Y, 34=1 → Active; next message 34=2 | #682 FR-002, FR-003 |
 | E3 | `bilateral_strict` acceptor, Logon without 141=Y (in or out of sequence) | Logout 58=`ResetSeqNumFlag(141)=Y required` (none if the CompIDs overflow the buffer); Disconnected; N not advanced; arm returns `session_seqnum_reset_mismatch` | #682 FR-004 |
-| E4 | Any reconnect in place (a new transport installed, from `Disconnected` or from Active) | Engine-managed with a transport installed: refused (`session_already_open`), nothing changes; otherwise (standalone; the caller's reader has left the old transport): one at a time; from Active or LogonReceived: `Disconnected` first, then a wait until no emit of the old connection is in flight (bounded by T, then the old transport force-closed) and its liveness loop and bound have exited; a `close()`/stop meanwhile ends it with no install; no frame numbered or claimed on the old connection is written on the new one; the new connection starts with no resend outstanding and no pending-Logout mark; first too-high frame → ResendRequest from N | #578 FR-006, FR-011 |
+| E4 | Any reconnect in place (a new transport installed, from `Disconnected` or from Active) | closing/closed/stopped: `session_already_closed`; then an acceptor, or an `engine_managed` initiator with a transport installed: refused (`session_already_open`), nothing changes; otherwise (a standalone initiator whose reader has left the old transport): one at a time; from Active or LogonReceived: `Disconnected` first, then a wait until no emit of the old connection is in flight (bounded by T, then the old transport force-closed) and its liveness loop and bound have exited; a `close()`/stop meanwhile ends it with no install; no frame numbered or claimed on the old connection is written on the new one; the new connection starts with no resend outstanding and no pending-Logout mark; first too-high frame → ResendRequest from N | #578 FR-006, FR-011 |
 | E5 | ResendRequest with 7=0 | answer byte-identical to 7=1's (modulo 52); no frame with 34=0 | #580 FR-012 |
 | E6 | ResendRequest without tag 7, in sequence | Reject 373=1, 371=7, 58=`Required tag missing`; no replay; N+1 persisted | #580 FR-013 |
 | E7 | ResendRequest with 34 > N, no resend outstanding | the requested range is answered; then one ResendRequest from N; N unchanged | #577 FR-008, FR-009 |
@@ -28,7 +28,8 @@ peer's EOF, `close(terminal)`, `Engine::stop()`; a `close(graceful)` grace that 
 its B&L row. The sentence covers every Logout of an established session, the existing SendingTime-fatal and PossDup
 Arm-D Logouts included. One session-level owner, `logout_in_flight_` (research D4.6), held at the two Logout leaves
 of an established session, `inbound_logout_leaf_` (every inbound-chain Logout and the bound's acknowledgement) and
-`run_logout_phase1`: each tests and sets it before its first suspension and clears it when it returns.
+`run_logout_phase1`: each tests and sets it before its first suspension; it is cleared only on the edge into
+`Disconnected`, so it spans the whole ending.
 `inbound_logout_leaf_` that finds it set returns without a Logout and its caller keeps the rest of its ending;
 `close(graceful)` that finds it set poll-joins that Logout inside its grace and sends none of its own; the bound
 tests it at its claim, after its gate wait. The Logon arms' Logouts are outside this sentence (they run

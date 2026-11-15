@@ -34,15 +34,17 @@ the bound asserts it. The acceptor needs none: `attach_accepted_transport` runs 
   lowered at its every exit, an exception and frame destruction included (not in `on_inbound_frame`, a non-coroutine
   forwarder); reaching 0 calls `replay_gate_.wake_all()`. Precondition: the Session outlives the inbound frame (the
   holder's destructor touches `inbound_depth_` and the gate), as for the chain's existing lock guards.
-- Reader fence: `drive_reconnect` on an Engine-managed Session (`cfg_.engine_managed`) with an installed transport
-  returns `session_already_open` and changes nothing (the Engine's read pump owns that transport). Standalone
-  precondition: the caller's reader has left `live_transport()` before the call and starts on the new one after it.
+- Reader fence, tested after the closing/closed/stopped test (`session_already_closed`):
+  `cfg_.role == session_role::acceptor || (cfg_.engine_managed && live_transport_shared_() != nullptr)` →
+  `session_already_open`, nothing changes (the Engine's read pump owns that transport; the acceptor disjunct is an
+  erratum pending owner confirmation). Standalone initiator precondition: the caller's reader has left
+  `live_transport()` before the call and starts on the new one after it.
 - `reconnect_in_flight_`: `bool`, set at `drive_reconnect`'s entry, cleared by RAII; a second call returns
   `session_already_open`.
 - Quiescent ⇔ `replay_gate_.shared == 0 && inbound_depth_ == 0` (no emitter outside the inbound chain between its
   number peek and the return of its `store_then_emit`, and no inbound chain running), then, after the drain's
   `root_cancel_.emit(total)`, `bound_counter == 0 && liveness_counter_ == 0` (polled by post).
-- `drive_reconnect`: refuse if closing, closed or stopping (`session_already_closed`); from Active or LogonReceived
+- `drive_reconnect`: single flight and the callback post; refuse if closing, closed or stopping (`session_already_closed`); then the reader fence above (`session_already_open`); from Active or LogonReceived
   record `Disconnected`; wait until quiescent on the gate's wake (bounded by `logout_disconnect_timeout_ms`, then the
   old transport is force-closed and the wait continues); re-test the refusal after every wake; then connect and
   install. The install is the commit point: with no suspension before it, it refuses on closing, closed or stop,
@@ -63,7 +65,9 @@ the bound's exit guard, which touches only that counter; `close()` and the recon
 `bool`, tested and set synchronously, before any stamp, number peek or suspension, by the two Logout leaves of an
 established session: `inbound_logout_leaf_` (every Active inbound-chain Logout and the bound's acknowledgement:
 in-sequence acknowledgement, gap deadline, SendingTime-fatal, PossDup Arm D, Arm B, T = 0 acknowledgement, the
-bound) and `run_logout_phase1`; cleared when that leaf returns, on every path. Found set: `inbound_logout_leaf_`
+bound) and `run_logout_phase1`; cleared only on the edge into `Disconnected` (`record_state_transition_`), so it spans
+the whole ending, the in-sequence acknowledgement's `fromAdmin`, best-effort Reject and inbound persist included;
+`install_reconnected_transport` asserts it clear. Found set: `inbound_logout_leaf_`
 returns a "skipped" success and its caller keeps the rest of its ending; `close(graceful)` poll-joins it inside its
 grace and sends none; the bound tests it at its claim, sets the phase `none` and exits. LS-1 pins that no other
 Active Logout builder exists. Invariant: at most one Logout of an established session is in flight.

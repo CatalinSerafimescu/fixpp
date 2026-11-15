@@ -9,16 +9,25 @@ Contracts: [session-wire-endings.md](contracts/session-wire-endings.md) (E1–E1
 For each new cell in research "RED cells", build the feature's test target at the commit that adds the cell and
 before the fix, and record the failing assertion in the evidence file:
 
+Article VII §8 groups isolation-safe tests into whole-binary buckets (one CTest registration each, for example
+`session_pure_tests`), so a GTest cell name passed to `ctest -R` matches nothing and ctest exits 0 with "No tests
+were found": an instrument that can only report clean. Select instead (loop 2 round 1, Codex P3-1):
+
 ```bash
-cmake --build --preset linux-clang-debug --target <the cell's test target>   # e.g. session_pure_tests; new files may add their own target
-ctest --preset linux-clang-debug -R '<cell filter>' --output-on-failure
+cmake --build --preset linux-clang-debug --target <the cell's test target>   # e.g. session_pure_tests
+# one cell inside a bucket: run the binary directly, and record the reported test count (0 fails the step)
+<build>/tests/session/session_pure_tests --gtest_filter='Suite.Cell'
+# constitutional runs: by label, refusing an empty selection (label 103 is added to every bucket 103 touches)
+ctest --preset linux-clang-debug -L 103 --no-tests=error --output-on-failure
 ```
+
+`ctest -R <target>` is used only for §8's standalone "live `-R <target>` selection" exception.
 
 #577 and #578: if the reproduction is GREEN on the base, stop for that issue and record not-a-bug with the evidence.
 
 ## 2. GREEN after each fix, and the mutant
 
-Re-run the same filter after the fix (GREEN), then revert only the fix's decisive line in a scratch copy and re-run
+Re-run the same selection after the fix (GREEN, with the same non-zero test count), then revert only the fix's decisive line in a scratch copy and re-run
 (RED again). Each mutant is named in research "RED cells".
 
 ## 3. The FR-020 and Arm-B censuses (measured)
