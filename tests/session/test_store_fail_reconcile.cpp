@@ -472,8 +472,8 @@ TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNo
     ASSERT_TRUE(pre_r.has_value()) << "the baseline (pre-failure) send must succeed";
 
     const std::uint32_t k = fixpp::session::session_test_access::seqnum_mgr(*sess).peek_outbound();
-    ASSERT_GT(k, 1U) << "the failing message k must be non-1 for this variant to exercise "
-                        "the L-029-3 cold-open shape";
+    ASSERT_GT(k, 1U) << "the failing message k must be non-1, so that the reconnect Logon's 34=1 "
+                        "below is strict's reset (103 FR-003) and not the reconciled k";
 
     fixpp::session::arm_force_store_pwrite_fail_once();
     auto payload_k = make_app_payload("ORD-K");

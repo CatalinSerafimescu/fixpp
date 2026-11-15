@@ -7,7 +7,8 @@
 //   × 2 roles (initiator / acceptor)
 //
 // For bilateral_strict: peer Logon without 141=Y when we sent 141=Y →
-//   session_seqnum_reset_mismatch(116) + Disconnected.
+//   session_seqnum_reset_mismatch(116) + Disconnected. An acceptor's refusal of a Logon
+//   without 141=Y also sends a Logout with Text, before the sequence check (103 FR-004).
 // For successful reset (any mode, valid exchange): emits
 //   session_event_sequence_numbers_reset{by_peer_request} via recent_events().
 //

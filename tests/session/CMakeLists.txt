@@ -666,7 +666,7 @@ fixpp_add_store_test(store_fail_open_volatile SOURCES
 )
 
 # T011: W3 reconcile-from-durable witness (US3 / FR-007 / SC-004) — three
-# HONEST policy variants (plain / reset_on_logon / bilateral_strict default)
+# HONEST policy variants (plain / reset_on_logon / bilateral_strict)
 # driven via an in-process Session::drive_reconnect() over a mock_transport
 # (the reconcile only mutates the in-memory counter; a fresh-Session restart
 # would bypass it). FIXPP_TEST_HOOKS declares the namespace-scope T003/T004

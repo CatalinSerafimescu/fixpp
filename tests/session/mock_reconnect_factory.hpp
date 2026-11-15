@@ -312,19 +312,17 @@ inline ReconnectInitiatorFixture make_reconnect_initiator(
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_reconnect_initiator/open";
         // Return the fixture VALID, not null. The condition, which is what matters and
         // does not rot: every caller dereferences `result.fix` WITHOUT checking it, so
-        // nulling would trade a hang for a null dereference. Verified for both this
-        // helper's callers and `make_acceptor_notconnected`'s -- re-derive rather than
-        // trusting this line, the callers are the thing that moves:
+        // nulling would trade a hang for a null dereference. Re-derive the callers of this
+        // helper and of `make_acceptor_notconnected`, which are the thing that moves:
         // clang-format off
         //   git grep -n -A2 'make_reconnect_initiator(\|make_acceptor_notconnected(' -- tests/session
         // clang-format on
         // ⚠️ WHAT STOPS A QUIET PASS IS THE `ADD_FAILURE` ABOVE, AND ONLY THAT. An
         // earlier draft of this line added "the state EXPECT below fails too" -- false,
         // and falsifiable by reading three lines further: this `return` leaves the
-        // function, so that EXPECT never runs. Every caller does re-assert
-        // `ASSERT_NE(result.store, nullptr)` on its next line, and `store` IS left null
-        // here, so a caller does get a second chance to fail -- but that is the caller's
-        // assertion, not one "below".
+        // function, so that EXPECT never runs. `store` IS left null here, so a caller that
+        // re-asserts `ASSERT_NE(result.store, nullptr)` on its next line gets a second
+        // chance to fail -- but that is the caller's assertion, not one "below".
         return result;
     }
     (void)open_fut.get();
