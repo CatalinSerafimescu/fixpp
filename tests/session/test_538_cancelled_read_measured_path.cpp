@@ -11,16 +11,26 @@
 //
 // Shape, both cells:
 //   1. Application messages go out through Engine::send, and the peer reads them.
-//   2. One more Engine::send is held inside its store(), so the store's lock stays taken.
+//   2. A store call of the cell's own (HeldFileStoreScene::spawn_own_inbound_advance)
+//      is held inside its offload, so the store's lock stays taken. It holds no shared
+//      hold of the session's replay gate, so the walk passes the gate (103 research
+//      D5′.3). It advances the store's inbound number one past what the session
+//      persisted, which the walk does not read, persist_inbound_advance_ does not
+//      compare and nothing here reads except the check that only the recorded advances
+//      moved it; nothing here reopens the store.
 //   3. The peer sends a ResendRequest over the stored application messages.
 //   4. The gate, with no sleep: the wrapper records that next_seqnum(outbound, false)
 //      was entered after the ResendRequest; the test then runs the handlers that are
 //      ready until none is, which takes the call past FileStore::next_seqnum's leading
-//      post to the store's lock, where it queues behind the held store().
+//      post to the store's lock, where it queues behind the held call.
+//
+// An Engine::send held inside its store() cannot be the holder: it holds the replay
+// gate shared, so the walk waits at the gate and never reaches the store's lock.
+// R588b_SendInItsStoreCall_WrittenBeforeTheAnswerWhichCoversIt
+// (test_538_resend_answer_store_failure.cpp) witnesses that ordering.
 //
 // StopDuringAnswer_PeerReadsNothingMore then spawns Engine::stop itself, pumps to the
-// peer's end-of-stream, and only then releases the hold: step 3 of Engine::stop waits
-// for the held send, so Rig::stop() cannot be used there. The peer must read no frame
+// peer's end-of-stream, and only then releases the hold. The peer must read no frame
 // after its ResendRequest.
 //
 // Control_ReleaseBeforeStop_RangeReplayed is the same up to the queued tail read. It
@@ -151,7 +161,28 @@ struct Outcome {
     bool stop_completed = false;
     bool answered = false;              // control arm: the peer read an answer
     std::vector<std::string> after_rr;  // every frame the peer read after its ResendRequest
+    // The store's inbound number before the cell's own call and at the end of the arm,
+    // and the inbound advances recorded in between.
+    std::optional<fixpp::session::seqnum_t> inbound_before;
+    std::optional<fixpp::session::seqnum_t> inbound_after;
+    std::size_t inbound_advances = 0;
 };
+
+// The store's inbound number moved by the recorded advances alone, the cell's own
+// among them.
+::testing::AssertionResult inbound_moved_by_recorded_advances_only(Outcome const& o) {
+    if (o.inbound_before && o.inbound_after && o.inbound_advances >= 1 &&
+        *o.inbound_after == *o.inbound_before + o.inbound_advances) {
+        return ::testing::AssertionSuccess();
+    }
+    auto text = [](std::optional<fixpp::session::seqnum_t> v) {
+        return v ? std::to_string(*v) : std::string{"unread"};
+    };
+    return ::testing::AssertionFailure()
+           << "the store's inbound number moved by more than the recorded advances: before="
+           << text(o.inbound_before) << " after=" << text(o.inbound_after)
+           << " advances=" << o.inbound_advances;
+}
 
 Outcome run_arm(Arm const arm) {
     Outcome o;
@@ -162,9 +193,16 @@ Outcome run_arm(Arm const arm) {
         o.first = scene.first;
         o.last = scene.last;
 
-        // 2. The hold: one more Engine::send, caught inside its store()'s offload.
+        auto session = rig.session();
+        if (!session) {
+            scene.setup_miss = "the session is not published";
+            return;
+        }
+        // 2. The hold: the cell's own store call, caught inside its offload.
+        o.inbound_before = scene.store_next(*session, direction_t::inbound);
+        auto const holder_mark = scene.log->mark();
         store_hold::arm();
-        auto held_fut = scene.send_app();
+        auto held_fut = scene.spawn_own_inbound_advance(*session);
         if (!rig.run_until([] { return store_hold::holding(); })) {
             scene.setup_miss = "the offload hook did not enter its hold";
             return;
@@ -195,6 +233,8 @@ Outcome run_arm(Arm const arm) {
             scene.spawn_stop();
             o.peer_read_ended_before_release = rig.run_until([&] { return rig.peer.read_ended; });
             o.release_mark = scene.log->mark();
+            store_hold::release();
+            (void)rig.run_until([&] { return HeldFileStoreScene::ready(held_fut); });
             scene.finish();
         } else {
             o.release_mark = scene.log->mark();
@@ -206,6 +246,8 @@ Outcome run_arm(Arm const arm) {
             scene.finish();
             (void)rig.run_until([&] { return rig.peer.read_ended; });
         }
+        o.inbound_after = scene.store_next(*session, direction_t::inbound);
+        o.inbound_advances = scene.inbound_advances_after(holder_mark);
         if (auto const* t = tail_read(); t != nullptr) o.tail_read = *t;
         o.after_rr = scene.peer_frames_from(rx_mark);
     }();
@@ -217,7 +259,7 @@ Outcome run_arm(Arm const arm) {
 }
 
 // Both cells: the tail read's body was entered after the ResendRequest and stood queued
-// at the store's lock, behind the held store(), when the cell acted.
+// at the store's lock, behind the held call, when the cell acted.
 ::testing::AssertionResult tail_read_was_queued(Outcome const& o) {
     if (!o.setup_miss.empty()) {
         return ::testing::AssertionFailure() << "setup did not complete: " << o.setup_miss;
@@ -274,6 +316,7 @@ TEST(CancelledReadMeasuredPath, StopDuringAnswer_PeerReadsNothingMore) {
         << store_hold::printable(o.after_rr);
     EXPECT_TRUE(o.peer_read_ended_before_release)
         << "the peer's read had not ended when the hold was released";
+    EXPECT_TRUE(inbound_moved_by_recorded_advances_only(o));
 }
 
 TEST(CancelledReadMeasuredPath, Control_ReleaseBeforeStop_RangeReplayed) {
@@ -293,6 +336,7 @@ TEST(CancelledReadMeasuredPath, Control_ReleaseBeforeStop_RangeReplayed) {
         << store_hold::printable(o.after_rr);
     EXPECT_EQ(a.gap_fills, 0U) << "a GapFill was written over stored messages:\n"
                                << store_hold::printable(o.after_rr);
+    EXPECT_TRUE(inbound_moved_by_recorded_advances_only(o));
 }
 
 // ── The other timing ─────────────────────────────────────────────────────────────────

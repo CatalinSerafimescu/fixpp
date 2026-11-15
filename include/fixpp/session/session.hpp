@@ -35,6 +35,7 @@
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/core/session_local.hpp>
 #include <fixpp/core/trace_context.hpp>
+#include <fixpp/session/detail/replay_gate.hpp>  // 103 (research D5′): replay_gate_
 // 066-dict-backed-inbound-parse T002: inbound_tv_ is a
 // std::optional<table_view> Session MEMBER (not a unique_ptr to an
 // incomplete type like validator_), so table_view must be complete here.
@@ -1725,7 +1726,12 @@ private:
     // Placement condition: as garbled_frames_; a Session reused for a second connection
     // would need it reset when the transport is installed.
     bool engine_stop_requested_ = false;
-    void note_engine_stop_() noexcept { engine_stop_requested_ = true; }
+    // 103 (research D5′; data-model "Replay gate", wake sources): engine stop wakes the
+    // replay gate's waiters, so a send waiting behind a resend answer refuses.
+    void note_engine_stop_() noexcept {
+        engine_stop_requested_ = true;
+        replay_gate_.wake_all();
+    }
 
     // ── 013 Phase 3 T023/T026 — ReconnectFsm driver ─────────────────────────
     // 043 T012 (D-4/E-6) — Session-owned resolved transport factory.
@@ -2063,6 +2069,10 @@ private:
     std::array<std::byte, kSendFrameBytes> send_body_scratch_{};
     std::array<std::byte, kSendFrameBytes> send_frame_slot_{};
     bool send_slot_in_use_ = false;
+    // 103 (research D5′, fixpp#588; data-model "Replay gate"): a resend answer holds it
+    // exclusive, every emitter outside the inbound chain shared. Strand-confined. Bound to
+    // exec_ at open().
+    detail::replay_gate replay_gate_;
 
     // 101-inbound-reject-fidelity D7 (FR-007, FR-008): the inbound reply slot. A session Reject
     // or BusinessMessageReject answering an inbound frame is built in its site's own buffer

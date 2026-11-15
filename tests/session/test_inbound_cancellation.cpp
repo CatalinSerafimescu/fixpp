@@ -255,6 +255,18 @@ struct LockedWalkOutcome {
     // The arm went on to its inbound persist after the walk: a store call it makes only
     // when the walk returned no error.
     bool inbound_persist_called = false;
+    // The store's inbound number before the cell's own call and once every call has
+    // returned, and the inbound advances recorded in between.
+    std::optional<fixpp::session::seqnum_t> inbound_before;
+    std::optional<fixpp::session::seqnum_t> inbound_after;
+    std::size_t inbound_advances = 0;
+
+    // The store's inbound number moved by the recorded advances alone, the cell's own
+    // among them.
+    [[nodiscard]] bool inbound_moved_by_recorded_advances_only() const {
+        return inbound_before && inbound_after && inbound_advances >= 1 &&
+               *inbound_after == *inbound_before + inbound_advances;
+    }
 
     // The window: the read returned store_cancelled between the emit and the release.
     // Nothing but the cell's cancellation can end a wait at the lock in that interval.
@@ -275,10 +287,16 @@ struct LockedWalkOutcome {
     }
 };
 
-// The returned timing: the same ResendRequest as run_walk's, handed over while one
-// Engine::send is held inside its store(), so the walk's first store read queues at the
-// FileStore's lock. The cell's cancellation is emitted while it waits there; the store
-// returns store_cancelled from its lock.
+// The returned timing: the same ResendRequest as run_walk's, handed over while a store
+// call of the cell's own, HeldFileStoreScene::spawn_own_inbound_advance, is held inside
+// its offload, so the walk's tail read queues at the FileStore's lock. The holder holds no
+// shared hold of the session's replay gate, so the walk passes the gate; an Engine::send
+// held inside its store() would keep the walk at the gate instead. The holder advances
+// the store's inbound number one past what the session persisted, which the walk does
+// not read, persist_inbound_advance_ does not compare and no cell here reads except the
+// check that only the recorded advances moved it; nothing here reopens the store. The
+// cell's cancellation is emitted while the read waits at the lock; the store returns
+// store_cancelled from its lock.
 LockedWalkOutcome run_walk_read_cancelled_at_the_lock() {
     LockedWalkOutcome w;
     auto& o = w.o;
@@ -294,9 +312,11 @@ LockedWalkOutcome run_walk_read_cancelled_at_the_lock() {
             scene.setup_miss = "the session is not published";
             return;
         }
-        // The hold: one Engine::send, caught inside its store()'s offload.
+        // The hold: the cell's own store call, caught inside its offload.
+        w.inbound_before = scene.store_next(*session, direction_t::inbound);
+        auto const holder_mark = scene.log->mark();
         store_hold::arm();
-        auto held_fut = scene.send_app();
+        auto held_fut = scene.spawn_own_inbound_advance(*session);
         if (!rig.run_until([] { return store_hold::holding(); })) {
             scene.setup_miss = "the offload hook did not enter its hold";
             return;
@@ -312,7 +332,7 @@ LockedWalkOutcome run_walk_read_cancelled_at_the_lock() {
         auto fut = hand_over(*session, bytes, *app, cancel, o);
         // The gate, with no sleep: the read's body has started; the handlers that are
         // ready then run until none is, which takes the call to the store's lock, where
-        // it queues behind the held store().
+        // it queues behind the held call.
         if (rig.run_until([&] { return read() != nullptr && read()->entered(); })) {
             rig.ioc.poll();
             rig.ioc.restart();
@@ -327,7 +347,7 @@ LockedWalkOutcome run_walk_read_cancelled_at_the_lock() {
             o.store_call = *read();
         }
         // What the session wrote for the request reaches the peer while the hold is
-        // still in flight, so the held message is not among it.
+        // still in flight.
         rig.settle();
         o.peer_frames = scene.peer_frames_from(rx_mark);
         w.release_mark = scene.log->mark();
@@ -338,6 +358,8 @@ LockedWalkOutcome run_walk_read_cancelled_at_the_lock() {
             return call.op == store_op::next_seqnum && call.dir == direction_t::inbound &&
                    call.increment;
         }) != nullptr;
+        w.inbound_after = scene.store_next(*session, direction_t::inbound);
+        w.inbound_advances = scene.inbound_advances_after(holder_mark);
         session.reset();
     }();
     scene.finish();
@@ -366,6 +388,11 @@ TEST(InboundCancellation, WalkReadCancelledAtTheStoresLock_EndsTheSessionAndRetu
         << store_hold::printable(o.peer_frames);
     EXPECT_FALSE(w.inbound_persist_called)
         << "the arm went on to its inbound persist after the walk's read was cancelled";
+    EXPECT_TRUE(w.inbound_moved_by_recorded_advances_only())
+        << "the store's inbound number moved by more than the recorded advances: before="
+        << (w.inbound_before ? std::to_string(*w.inbound_before) : "unread")
+        << " after=" << (w.inbound_after ? std::to_string(*w.inbound_after) : "unread")
+        << " advances=" << w.inbound_advances;
 }
 
 // The pair: one cancellation of a read of the walk, on its two timings. The readings a

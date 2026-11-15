@@ -367,6 +367,11 @@ add_session_103_bucket(session_103_tests
   test_103_default_reset_policy.cpp                                     # 103 T022
   test_103_too_high_resend_request.cpp                                  # 103 T047
 )
+# 103 T054: R-588-g, detail::replay_gate alone on a session strand; an entry of its own (it
+# replaces global operator new for its allocation evidence).
+add_session_103_bucket(session_103_replay_gate
+  replay_gate_test.cpp                                                  # 103 T054
+)
 # 103 T060: R-588-h, an Engine on an io_context run by several threads; an entry of its own.
 add_session_103_bucket(session_103_replay_mt_engine
   test_103_replay_mt_engine.cpp                                         # 103 T060

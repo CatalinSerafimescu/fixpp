@@ -218,4 +218,9 @@ using session_inner_executor_t =
 // otherwise a strand over `exec` itself.
 [[nodiscard]] asio::any_io_executor make_session_strand(asio::any_io_executor const& exec);
 
+// Feature 103 (research D5′; replay_gate.hpp's bind()): whether the calling thread runs `ex`'s
+// serialisation — 1 when `ex` is a strand make_session_strand builds and it does, 0 when it is
+// one and it does not, -1 when `ex` is neither strand type (nothing to check).
+[[nodiscard]] int session_strand_check(asio::any_io_executor const& ex) noexcept;
+
 }  // namespace fixpp::session::detail

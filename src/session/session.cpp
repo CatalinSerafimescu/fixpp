@@ -83,6 +83,7 @@
 #include "read_first_frame_bounded.hpp"  // 093 C-6: await_deadline for close()'s wait
 #include "scan_frame_header.hpp"  // 040 US1: FrameHeader + scan_frame_header (moved from anon ns)
 #include "send_header_tags.hpp"   // 098: kSendHeaderTags + is_send_header_tag (moved from here)
+#include "session_strand.hpp"     // 103: detail::session_strand_check
 // 019 T011: Application callback dispatch (inbound). Include here (session.cpp
 // only) to avoid pulling wire/parser.hpp into the awaitable-corpus headers.
 // session → wire is ALLOWED per [arch §5.3] / check_layers.py.
@@ -363,6 +364,11 @@ void Session::record_state_transition_(fsm_state new_state) noexcept {
         ++fsm_visit_count_;
     }
     fsm_state_ = new_state;
+    // 103 (research D5′; data-model "Replay gate", wake sources): the Disconnected edge wakes
+    // the replay gate's waiters, which then refuse or abort.
+    if (new_state == fsm_state::Disconnected) {
+        replay_gate_.wake_all();
+    }
 
     // 093 (data-model E-6): the establishment deadline's disarm. Set here, before the
     // no-application return below, so a session with no application attached stops
@@ -1760,6 +1766,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         }
         exec_ = std::move(*bound);
     }
+    // 103 (research D5′): the replay gate's strand check runs against this executor.
+    replay_gate_.bind(exec_.underlying(), &detail::session_strand_check);
     // INV-3 (E-3/023): when the engine adopts a strand, the session's inner
     // executor IS that strand. Debug-assert verifies identity (catches D1 double-
     // wrap if the engine accidentally re-wraps before calling open()).
@@ -2107,6 +2115,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
 
     // ── First close() on an OPEN session: run the two-phase body once ──────
     state_ = lifecycle::closing;
+    // 103 (research D5′; data-model "Replay gate", wake sources): immediately after the first
+    // commit of closing, with no suspension between; a joining close() does not wake again.
+    replay_gate_.wake_all();
     close_result_ = std::make_shared<std::optional<fixpp::core::expected_t<void>>>();
 
     // T037 phase 1 — graceful ONLY (terminal skips phase 1 entirely; the
@@ -5794,7 +5805,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::answer_resend_request_(
     auto replay_r =
         co_await replay_outbound_range_(rr_begin, rr_end, /*end_is_through_current=*/(rr_end == 0));
     if (!replay_r) {
-        record_state_transition_(fsm_state::Disconnected);
+        if (fsm_state_ != fsm_state::Disconnected) {
+            record_state_transition_(fsm_state::Disconnected);
+        }
         co_return std::unexpected(replay_r.error());
     }
     // 029 T010 — PERSIST: inbound ResendRequest (35=2).
@@ -6482,6 +6495,29 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_body_(
         co_return co_await send_deferred_(app_payload);
     }
 
+    // 103 (research D5′.2, D5′.4; FR-014, FR-015): while a resend answer holds the replay gate,
+    // wait for its end, outside the try below. The pre-check is a co_await's, applied by hand in
+    // this frame, so a cancelled caller returns before the wait and nothing is consumed. After a
+    // wake the send is refused unless it could still be sent (the re-tests run only here, on the
+    // contended path). A wait its caller's cancellation ends returns dispatch_aborted, the state
+    // unchanged, the cancellation left pending.
+    while (replay_gate_.exclusive) {
+        if ((co_await asio::this_coro::throw_if_cancelled()) &&
+            (co_await asio::this_coro::cancellation_state).cancelled() !=
+                asio::cancellation_type::none) {
+            co_return std::unexpected(error::dispatch_aborted);
+        }
+        co_await replay_gate_.wait_for_wake();
+        if ((co_await asio::this_coro::cancellation_state).cancelled() !=
+            asio::cancellation_type::none) {
+            co_return std::unexpected(error::dispatch_aborted);
+        }
+        if (fsm_state_ != fsm_state::Active || state_ == lifecycle::closing ||
+            engine_stop_requested_) {
+            co_return std::unexpected(error::session_invalid_state_for_send);
+        }
+    }
+
     // F5 (Round-A drift): wrap the entire send body in try/catch to absorb
     // asio::system_error{operation_aborted} thrown when the async_mutex awaitable
     // is cancelled (e.g. Session::close() fires root_cancel_ while a send is in flight).
@@ -6492,6 +6528,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_body_(
     // [F5 drift fix;
     // [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]
     try {
+        // 103 (research D5′.4): the shared hold, the try's first statement, ahead of the slot
+        // holder; it spans the frame's stamp and peek, toApp, the number and store_then_emit.
+        const detail::replay_gate::shared_hold gate_hold{replay_gate_};
         // gate-b/r2 FQ-1: disconnect_required carries PROVENANCE out of send_impl —
         // set true ONLY at the two commit-region producer sites (assign_outbound
         // overflow, store_then_emit fatal). Transition on origin, not on the
@@ -7144,6 +7183,13 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
             // If no outbound for heartbt_int, emit Heartbeat(0) to tell peer we're alive.
             // This updates last_outbound_steady_ via store_then_emit.
             if (last_outbound_steady_ + heartbt_int <= now) {
+                // 103 (research D5′.4): a shared hold per emit; behind a resend answer the loop
+                // waits for its end and goes back to its top, which recomputes both deadlines.
+                if (replay_gate_.exclusive) {
+                    co_await replay_gate_.wait_for_wake();
+                    continue;
+                }
+                const detail::replay_gate::shared_hold hb_hold{replay_gate_};
                 std::array<std::byte, 256> hb_buf{};
                 const auto st52_hb =
                     stamp_sending_time(*effective_clock_, cfg_.sending_time_precision);
@@ -7182,6 +7228,15 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                 continue;
             }
 
+            // 103 (research D5′.4): as the Heartbeat's; the hold covers the TestReqID's
+            // assignment and the emit, and ends before the grace sleep, whose end depends on an
+            // inbound Heartbeat.
+            if (replay_gate_.exclusive) {
+                co_await replay_gate_.wait_for_wake();
+                continue;
+            }
+            std::optional<detail::replay_gate::shared_hold> tr_hold;
+            tr_hold.emplace(replay_gate_);
             // No inbound data for heartbt_int: emit TestRequest.
             // Generate a unique TestReqID using the per-session counter
             // (FR-010 / RC#6): ++next_test_request_id_ replaces the prior
@@ -7228,6 +7283,7 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                     }
                 }
             }
+            tr_hold.reset();
 
             // Grace window: sleep until inbound_deadline + heartbt_int + 1ns.
             // T018 Cell C fix: grace_deadline = inbound_deadline + heartbt_int
@@ -7601,6 +7657,36 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     using namespace std::chrono_literals;
     using std::chrono::seconds;
 
+    // 103 (research D5′.4; FR-014): behind a resend answer the Logout waits for its end, before
+    // its stamp and its peek. After a wake, a state that is no longer Active or LogonReceived, or
+    // the caller's own cancellation (the grace timer winning the race), takes D-OUT-6's "not
+    // sent" exit below.
+    bool gate_refused = false;
+    while (replay_gate_.exclusive) {
+        if ((co_await asio::this_coro::throw_if_cancelled()) &&
+            (co_await asio::this_coro::cancellation_state).cancelled() !=
+                asio::cancellation_type::none) {
+            gate_refused = true;
+            break;
+        }
+        co_await replay_gate_.wait_for_wake();
+        if ((co_await asio::this_coro::cancellation_state).cancelled() !=
+                asio::cancellation_type::none ||
+            (fsm_state_ != fsm_state::Active && fsm_state_ != fsm_state::LogonReceived)) {
+            gate_refused = true;
+            break;
+        }
+    }
+    if (gate_refused) {
+        if (fsm_state_ != fsm_state::Disconnected) {
+            record_state_transition_(fsm_state::Disconnected);
+        }
+        co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+    }
+    // The shared hold: from here, before the stamp and the peek, until store_then_emit returns.
+    std::optional<detail::replay_gate::shared_hold> gate_hold;
+    gate_hold.emplace(replay_gate_);
+
     // Build the Logout frame into a stack buffer.
     std::array<std::byte, 256> buf{};
     const auto st52 = effective_clock_
@@ -7677,6 +7763,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         } catch (...) {  // NOLINT(bugprone-empty-catch): the outcome is in `sent`
         }
     }
+    gate_hold.reset();
 
     // D-OUT-6: the Logout was not sent, so no reply to it can come. The phase leaves at
     // once and arms no wait; close() goes on to its terminal part. logout_seen_ is not
@@ -7874,6 +7961,46 @@ asio::awaitable<fixpp::core::expected_t<Session::replay_outcome>> Session::repla
     // clamp is here, where an answer is numbered, so no caller of the walk can write 34=0.
     if (begin < seqnum_min) {
         begin = seqnum_min;
+    }
+
+    // 103 (research D5′.3; FR-014): the walk holds the replay gate exclusive from here, before
+    // its first suspension, to every ending, and waits for the open shared holds before the
+    // store tail read, so a frame numbered before the answer is stored and written before the
+    // tail read sets the answer's end. The guard's release wakes the waiting emitters.
+    //   The caller's own cancellation, before or during the wait, ends the walk as a cancelled
+    //   store read does (research D5′.3 and its erratum; `.specify/536-537-538-recovery-
+    //   liveness.md` §9, D-CAN-3, D-CAN-4): store_cancelled, which the caller turns into the
+    //   same ending, so the timing of one cancellation is not observable. Each pass of the wait
+    //   therefore runs, in this frame, the cancellation parts 1 to 4 of the lock sequence a
+    //   store's lock wait runs (FIXPP_DETAIL_CO_AWAIT_LOCK, async_mutex.hpp): the pre-check, the
+    //   filter set to total for the wait, the wait, and the state reset to terminal, read
+    //   first. A pass's exit is then the one a cancelled lock wait leaves: no cancellation
+    //   recorded, the terminal filter. The gate itself resets nothing. A wake by the
+    //   Disconnected edge, or a superseded arm, is not a cancellation: dispatch_aborted.
+    //   Part 1 has no reachable hit while the walk is entered only through a plain co_await,
+    //   whose await_transform makes the same test first, with no await before this loop, and
+    //   part 4 resets with no suspension before the next pass's part 1. It stays so that part 2
+    //   cannot erase a cancellation that a later await before the loop would record.
+    const detail::replay_gate::exclusive_guard gate_exclusive{replay_gate_};
+    while (replay_gate_.shared != 0) {
+        if ((co_await asio::this_coro::throw_if_cancelled()) &&
+            (co_await asio::this_coro::cancellation_state).cancelled() !=
+                asio::cancellation_type::none) {
+            co_await asio::this_coro::reset_cancellation_state(
+                asio::enable_terminal_cancellation{});
+            co_return std::unexpected(fixpp::core::error::store_cancelled);
+        }
+        co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
+        co_await replay_gate_.wait_for_wake();
+        const bool wait_cancelled = (co_await asio::this_coro::cancellation_state).cancelled() !=
+                                    asio::cancellation_type::none;
+        co_await asio::this_coro::reset_cancellation_state(asio::enable_terminal_cancellation{});
+        if (wait_cancelled) {
+            co_return std::unexpected(fixpp::core::error::store_cancelled);
+        }
+        if (fsm_state_ == fsm_state::Disconnected || superseded()) {
+            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+        }
     }
 
     // Resolve the effective end: through-current or clamped to our last stored
@@ -8139,7 +8266,9 @@ Session::honor_peer_next_expected_(std::string_view raw_789, bool /*present_789*
             if (logon_arm_superseded_(arm)) {
                 co_return logon_789_outcome::superseded;
             }
-            record_state_transition_(fsm_state::Disconnected);
+            if (fsm_state_ != fsm_state::Disconnected) {
+                record_state_transition_(fsm_state::Disconnected);
+            }
             co_return std::unexpected(rr789.error());
         }
         if (*rr789 == replay_outcome::superseded) {
