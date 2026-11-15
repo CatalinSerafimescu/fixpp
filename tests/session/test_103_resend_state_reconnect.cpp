@@ -4,7 +4,8 @@
 //
 // Feature 103 (specs/103-resend-logon-reset-fidelity/), fixpp#578: the resend state ends with
 // the connection. research.md "RED cells", "#578 — resend state across an in-place
-// reconnect"; tasks T018 (arms A, B, L, E and the fresh-Session control) and T039 (arm C).
+// reconnect"; tasks T018 (arms A, B, E and the fresh-Session control), T039 (arm C) and T118
+// (G8's zero-downtime cell).
 //
 // The vehicle is resend_gap_scene.hpp's Scene (a directly driven initiator on a mock clock,
 // with a liveness loop) given a MockReconnectFactory, so `Session::drive_reconnect()` connects
@@ -279,34 +280,6 @@ TEST(ResendStateReconnect103, Control_FreshSession_TooHighFrameDrawsTheSameResen
     ASSERT_EQ(rr.size(), 1U) << r.s.written(before);
     EXPECT_EQ(rg::field(rr.front(), 7), "2");
     EXPECT_EQ(r.s.count("5", before), 0U) << r.s.written(before);
-}
-
-// ── Arm L: the reconnect's acknowledgement carries a number above N ─────────────────────────
-// TC 1B(c): fixpp sends a ResendRequest from N on the new connection and reaches Active.
-// Disabled: a too-high acknowledgement ends a LogonSent session (on_inbound_logon_sent_'s
-// sequence guard) unless enable_next_expected_msg_seq_num is on, which sends no ResendRequest
-// at the Logon either; no 103 task changes that arm. Its disposition is the orchestrator's.
-// Run it with --gtest_also_run_disabled_tests.
-TEST(ResendStateReconnect103, DISABLED_ArmL_AcknowledgementAboveN_ResendRequestFromN) {
-    Rig r;
-    ASSERT_TRUE(r.open_to_active()) << "setup: the session did not reach Active";
-    ASSERT_TRUE(r.open_gap()) << "setup: no gap opened; the session wrote " << r.s.written();
-    r.too_low_order();
-    ASSERT_EQ(r.s.state(), fsm_state::Disconnected) << rg::state_name(r.s.state());
-
-    auto const rc = r.reconnect();
-    ASSERT_TRUE(rc.has_value()) << "drive_reconnect returned " << static_cast<int>(rc.error());
-    expect_one_reset_logon_after_mark(r);
-
-    seqnum_t const n = r.s.next_in();
-    (void)r.s.feed(r.ack(n + 3, false));
-    auto const rr = r.after_mark_of("2");
-    EXPECT_EQ(rr.size(), 1U) << "after the mark: " << r.after_mark_text();
-    if (rr.size() == 1U) {
-        EXPECT_EQ(rr.front().begin_seq_no, std::optional<std::string>{std::to_string(n)})
-            << "after the mark: " << r.after_mark_text();
-    }
-    EXPECT_EQ(r.s.state(), fsm_state::Active) << rg::state_name(r.s.state());
 }
 
 // ── Arm E: drive_reconnect from Active with a too-high Logout received ──────────────────────

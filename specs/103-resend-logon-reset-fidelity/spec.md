@@ -705,7 +705,8 @@ row, or whose title differs, is a dangling reference.
 - `[FIX-SL §4.10] FIX session state matrix` — precedence rows 14 and 15, the too-high Logout's bounded recovery
   (FR-010).
 - `[FIX-TC §4 scenario 1B] Connect and Send Logon (Initiator)` — sub-case 1B(c): a too-high Logon on a new
-  connection draws a ResendRequest (FR-006).
+  connection draws a ResendRequest. Not claimed by 103 (the base disconnects on a too-high Logon ack; see
+  evidence T018).
 - `[FIX-TC §4 scenario 1S] Receive Logon (Acceptor)` — sub-case 1S(a), the same on the acceptor (FR-006's
   rationale). 103 claims no acceptor evidence for it: an acceptor is never reconnected in place (one Session per
   accepted connection, and FR-006's fence refuses every acceptor), so 103 changes nothing it observes.
