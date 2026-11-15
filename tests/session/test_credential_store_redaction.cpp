@@ -271,8 +271,7 @@ TEST(Masker_SameLength_FieldAnchored_unit, H_MultipleGenuine554_AllMasked) {
 TEST(Masker_SameLength_FieldAnchored_unit, J_FrameEndOccurrenceNoTrailingSoh_Masked) {
     // A 554 value that runs to the end of the buffer with no terminating SOH: the
     // walk's step past the value must stop at the end, not one byte beyond it.
-    // fixpp#652 removed RedactTag554.Tag554AtFrameEnd_NoTrailingSOH, which was the only
-    // cell to reach that arm; this is its masker form.
+    // fixpp#652 removed RedactTag554.Tag554AtFrameEnd_NoTrailingSOH; this is its masker form.
     auto buf = make_buf(
         "49=S\x01"
         "554=mysecret");
@@ -1145,8 +1144,7 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
 // and a mask there would reach the wire at resend. So an application-sent
 // UserRequest (35=BE) keeps Username(553), Password(554), NewPassword(925),
 // EncryptedPassword(1402) and EncryptedNewPassword(1404) in cleartext at rest.
-// This is the behaviour the B&L row for fixpp#652 records; QuickFIX's stores do the
-// same.
+// This is the behaviour the B&L row for fixpp#652 records.
 //
 // Harness: T005's FileStore initiator (its own Logon carries a password) brought to
 // Active by T009's hand-crafted reply Logon, then one `send()` of a 35=BE, then a
