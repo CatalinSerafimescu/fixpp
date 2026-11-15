@@ -159,16 +159,16 @@ jobs:
     permissions:
       contents: read
       packages: write  # save the rebuilt Conan cache + the sccache cache to GHCR
-    # Hung-job backstop. MEASURED (#231, run 30880318695, all three legs green):
-    # job totals are 104 / 104 / 171 min for debug / release / asan — so the asan
-    # leg finishes 9 minutes inside this backstop, not "well above" it.
+    # Hung-job backstop, shared by all three legs; windows-msvc-asan is the leg
+    # to size it against. The owner set this value as permanent, so a cache fix
+    # is not a reason to lower it again.
     #
-    # The "~45 min cold; 90 sits well above that" note this replaces (2026-07-09)
-    # was stale by 2-4x and read as headroom that does not exist. Left at 180
-    # deliberately: raising it would hide the proximity that #229 has to fix, and
-    # a compiler cache cannot buy it back — 85 of the asan leg's 171 min is
-    # Build, the other 81 is ctest, which sccache does not touch.
-    timeout-minutes: 180
+    # It must cover a COLD Build: when the sccache cache has been evicted at its
+    # size cap, the asan leg recompiles every TU and then runs its full ctest.
+    # The cache cap is tracked in feature 103. To re-derive, read the asan leg's
+    # Build and Test step durations from a Tier 2 run whose `sccache statistics`
+    # step shows a cold cache, and keep their sum below this value.
+    timeout-minutes: 210
     needs: filter
     if: needs.filter.outputs.should_run == 'true'
 
