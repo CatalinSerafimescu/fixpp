@@ -158,6 +158,21 @@ prints `0` for a whole syntax.
   on a per-advance wake. **The argument was sound; the measurement killed it.** So the trigger is not
   "does this check look right" but *"show me the mutation that makes it RED"* — and if there is no
   such mutation in the tree, the check is an assertion that cannot fail and does not ship.
+- ⚠️ **A ROUND-TRIP THAT SEEDS EVERY FIELD OF A CATEGORY WITH THE SAME VALUE CANNOT SEE A SWAP WITHIN
+  THAT CATEGORY.** A builder that writes member A under member B's tag, and B under A's, puts the same
+  bytes at both tags, so both value assertions pass. The suite still catches swaps across categories
+  and between strings seeded by name, so its recorded mutants go RED and the blind half never shows.
+  - **Trigger:** a cell sets two or more fields to one literal (`'1'`, `"10.5"`, `true`), and its
+    record claims the suite detects a swapped tag.
+  - **Procedure:** seed every field of a cell with a value distinct on the wire, across categories
+    (a decimal derived from its own tag, a char from the field's enum domain not yet used in the
+    cell). Make the generator refuse a cell with a duplicate, and prove the refusal fires by forcing
+    the old scheme. Then prove the claim with a same-category swap mutant: RED against the new cells,
+    GREEN against the old ones.
+  - **Instance (PR #690, Gate B round 1, F2 and F3).** The v42 builder round-trip seeded every char
+    `'1'` and every decimal `"10.5"`, and its recorded swap mutant used two strings. A 44↔53 swap in
+    the compiled `Advertisement` builder and a 13↔21 swap in `NewOrderSingle` went RED only after the
+    reseeding. The 077 BL/BO/BR cells had the decimal half; the rest of the 077 suites is fixpp#692.
 - ⚠️ **AN INSTRUMENT WHOSE RESIDUAL RISES WHEN YOU FIX A SITE IS MISCOUNTING, AND THE DIRECTION IS THE
   TELL.** `ci/pump-get-sweep.sh` matched `using R = decltype(fut.get());` as a `.get()` call — an
   UNEVALUATED operand — and that idiom is part of the settled value-helper recipe, so every migrated
@@ -614,6 +629,27 @@ whether the C path delivers it.
 - **Not class 12.** Class 12's label is true at every site and only too coarse. Here the audit's
   verdict was false for the C-ABI clause, so the cure is to ask the question per clause (this class),
   not to split a label.
+
+⚠️ **A SYMBOL IN AN INSTALLED, NON-`detail` HEADER IS PUBLIC C++ API, WHATEVER ITS CONTRACT TIER OR
+CALLER COUNT.** The same class, at a removal. The removal is assessed against its runtime effects: no
+caller in `src/`, no C-ABI symbol, no binding, nothing released. Each comes back clean, and the verdict
+is filed as "no public API change", which is a claim about a different effect: the header is installed,
+so a consumer's call stops compiling. "Dead internal helper" is not a classification.
+`.specify/architecture.md` §9.1 makes every header under `include/fixpp/` public unless it lives under
+`<module>/detail/`, and `.specify/api-contract.md` defines Internal as `detail` only, so a symbol in no
+tier is public and uncontracted, not internal.
+
+- **Trigger:** a change removes or changes a symbol in an installed header, and the record calls the
+  symbol internal, dead or unused.
+- **Procedure:** classify by where the symbol lives (installed? under `detail`?), not by its tier or
+  its callers. Removing or changing such a symbol is an Article XVII §1 trigger. Disclose it in a
+  BREAKING (public C++) B&L row that states what a consumer sees, the replacement, and the C-ABI and
+  version effect, as B-098-4 and B-652-1 do. A Gate A waiver then rests on its own ground, such as an
+  owner ruling made with the exposure in front of it, never on "no trigger".
+- **Instance (PR #690, fixpp#652, Gate B round 1, F1).** `fixpp::session::redact_tag554`, an inline
+  function in `include/fixpp/session/logon_credentials.hpp` with no caller, was removed and recorded as
+  "a dead internal helper" touching no Article XVII §1 trigger. The owner ruling it implemented had
+  named the installed-header exposure. Fixed in the records and by B-652-1.
 
 **Sibling.** Where class 9 is a justification that lost its SUBJECT, this is a justification that
 kept its subject and lost its SCOPE. Both are recorded on the same site pair (`#384`, `#389`) because
