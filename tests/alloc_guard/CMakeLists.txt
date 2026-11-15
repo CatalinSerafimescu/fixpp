@@ -492,8 +492,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     "alloc_guard_101_bmr_overflow_mallocnesia|W101_45_BmrOverflow|"
     "alloc_guard_101_bmr_twin_mallocnesia|W101_45_BmrFittingTwin|"
     "alloc_guard_101_reject_overflow_mallocnesia|W101_45_RejectOverflow|"
-    "alloc_guard_101_reject_twin_mallocnesia|W101_45_RejectFittingTwin|")
+    "alloc_guard_101_reject_twin_mallocnesia|W101_45_RejectFittingTwin|"
+    # 103-resend-logon-reset-fidelity (tasks.md T015): W-E's MemoryStore twin.
+    "alloc_guard_103_we_sends_memorystore_mallocnesia|WE103_MemoryStoreTwin_InboundPairInterleavedWithSends|")
   _fixpp_b35_register_cells(test_544_run_thread_windows B35RunThreadWindows ${_b35_rig_cells})
+  # 103 (tasks.md T015): the twin exists only where the Release interceptor registers it.
+  if(TEST alloc_guard_103_we_sends_memorystore_mallocnesia)
+    set_property(TEST alloc_guard_103_we_sends_memorystore_mallocnesia APPEND PROPERTY LABELS 103)
+  endif()
   # 101 (tasks.md T019): the W101-45 registrations exist only where the Release interceptor
   # registers them.
   foreach(_t101 alloc_guard_101_bmr_overflow_mallocnesia alloc_guard_101_bmr_twin_mallocnesia
@@ -542,3 +548,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set_target_properties(test_544_tls_diagnostic PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 endif()
+
+# 103-resend-logon-reset-fidelity (tasks.md T017): label 103 on each entry of this file whose
+# sources a 103 task edits (re-derive from tasks.md's paths; tasks.md T167 re-derives the set).
+# APPEND, at the end of the file, so it follows every LABELS setter for these entries.
+set_property(TEST alloc_guard_544_run_thread APPEND PROPERTY LABELS 103)

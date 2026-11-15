@@ -801,3 +801,11 @@ target_compile_definitions(capi_099_fixt_live_test PRIVATE
 add_test(NAME capi_099_fixt_live_test COMMAND capi_099_fixt_live_test)
 set_tests_properties(capi_099_fixt_live_test PROPERTIES
   LABELS "capi;099" TIMEOUT 300)
+
+# 103-resend-logon-reset-fidelity (tasks.md T017): label 103 on each entry of this file whose
+# sources a 103 task edits (re-derive from tasks.md's paths; tasks.md T167 re-derives the set).
+# APPEND, at the end of the file, so it follows every LABELS setter for these entries.
+set_property(TEST capi_version_smoke_c APPEND PROPERTY LABELS 103)
+set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 103)
+set_property(TEST capi_public_roundtrip APPEND PROPERTY LABELS 103)
+set_property(TEST capi_099_route_set_oom_test APPEND PROPERTY LABELS 103)

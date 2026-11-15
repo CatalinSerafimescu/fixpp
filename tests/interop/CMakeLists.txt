@@ -574,3 +574,10 @@ add_test(
 set_tests_properties(interop_cell_results_schema_check PROPERTIES
     LABELS "interop;016;interop-thorny;us4;schema-check"
 )
+
+# 103-resend-logon-reset-fidelity (tasks.md T017): label 103 on each entry of this file whose
+# sources a 103 task edits (re-derive from tasks.md's paths; tasks.md T167 re-derives the set).
+# APPEND, at the end of the file, so it follows every LABELS setter for these entries.
+set_property(TEST interop_thorny_recovery_us2_tests APPEND PROPERTY LABELS 103)
+set_property(TEST interop_028_validation_compat_test APPEND PROPERTY LABELS 103)
+set_property(TEST interop_029_restart_resume_test APPEND PROPERTY LABELS 103)

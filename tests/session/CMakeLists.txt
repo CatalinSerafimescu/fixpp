@@ -325,6 +325,43 @@ add_session_101_bucket(session_101_tests
 add_session_101_bucket(session_101_reply_slot_death_test
   test_101_reply_slot_death.cpp
 )
+# 103-resend-logon-reset-fidelity (tasks.md T017): the feature's Session cells in an entry of their
+# own, shaped as add_session_101_bucket with label 103. No TIMEOUT property, so CI's `--timeout`
+# wedge guard governs it. `session_103_tests` is registered when its first file lands; each later
+# cell task appends its file with a `# 103 T0nn` comment.
+function(add_session_103_bucket name)
+  add_executable(${name} ${ARGN} $<TARGET_OBJECTS:session_test_support>)
+  target_link_libraries(${name} PRIVATE
+    fixpp_session
+    fixpp_capi
+    fixpp_mock_clock
+    fixpp_transport
+    fixpp_tls
+    "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+    "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_TRANSPORT_ZLIB_LIB}"
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(${name} PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_SOURCE_DIR}/src"
+  )
+  target_compile_definitions(${name} PRIVATE
+    FIXPP_TEST_BINARY_DIR="${CMAKE_BINARY_DIR}"
+    FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+    "FIXPP_098_FIXTURE_DIR=\"${CMAKE_SOURCE_DIR}/tests/dictionary/fixtures/098\""
+    # test_103_support.hpp includes mock_reconnect_factory.hpp, whose mock transport header
+    # refuses a target without this definition.
+    FIXPP_ALLOW_MOCK_TRANSPORT
+  )
+  add_test(NAME ${name} COMMAND ${name})
+  set_tests_properties(${name} PROPERTIES
+    ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+    LABELS "session;103")
+endfunction()
 
 # 099 W-5's, W-6's and W-25's reconnect cells drive drive_reconnect() through MockReconnectFactory,
 # in those TUs only.
@@ -3960,3 +3997,15 @@ if(TARGET fixpp_codegen_generate AND TARGET fixpp_builders_v42)
   set_property(TEST test_082_v42_nested_exemplar_roundtrip APPEND PROPERTY LABELS
     "builder-roundtrip;v42")
 endif()
+
+# 103-resend-logon-reset-fidelity (tasks.md T017): label 103 on each entry of this file whose
+# sources a 103 task edits (re-derive from tasks.md's paths; tasks.md T167 re-derives the set).
+# APPEND, at the end of the file, so it follows every LABELS setter for these entries.
+set_property(TEST session_pure_tests APPEND PROPERTY LABELS 103)
+set_property(TEST store_fail_reconcile APPEND PROPERTY LABELS 103)
+set_property(TEST session_537_gap_deadline APPEND PROPERTY LABELS 103)
+set_property(TEST session_538_resend_answer_store_failure APPEND PROPERTY LABELS 103)
+set_property(TEST engine_reset_unit_stop APPEND PROPERTY LABELS 103)
+set_property(TEST session_inbound_poss_dup_tolerance APPEND PROPERTY LABELS 103)
+set_property(TEST session_reset_on_lifecycle APPEND PROPERTY LABELS 103)
+set_property(TEST session_refresh_on_logon APPEND PROPERTY LABELS 103)

@@ -39,6 +39,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fixpp/session/admin_messages.hpp>
+#include <fixpp/session/memory_store_factory.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <memory>
@@ -368,6 +369,28 @@ TEST(B35RunThreadWindows, WE_InboundPairInterleavedWithSends) {
     EXPECT_EQ(r.loop_ok, r.completions) << "a send in the window did not succeed";
     EXPECT_GE(r.peer_app_frames, r.loop_ok) << "a successful send did not reach the peer";
     check_tu_count(r.tu_count, tu_expect::print_only, "W-E");
+}
+
+// Feature 103 (tasks T015, research D5′ "Allocation"): W-E's twin with a MemoryStore, so each
+// send in the window also runs the outbound store call. The interceptor registration for it
+// expects zero, as W-E's does. The store is bounded, so its slab is allocated once, at open,
+// before the window; its capacity must hold every frame the cell stores, and the default
+// capacity's slab exceeds the engine's store-memory guard, which fails the open.
+TEST(B35RunThreadWindows, WE103_MemoryStoreTwin_InboundPairInterleavedWithSends) {
+    cell_spec spec = sender_spec(false);
+    spec.opt.shape_session = [](fixpp::session::SessionConfig& c) {
+        fixpp::session::MemoryStore::Config sc;
+        sc.inbound_capacity = 256;
+        sc.outbound_capacity = 256;
+        sc.max_frame_bytes = 4096;
+        c.store_factory = std::make_shared<fixpp::session::MemoryStoreFactory>(sc);
+    };
+    auto const r = run_window(spec, make_sender);
+    expect_window_ran(r);
+    EXPECT_EQ(r.app_messages, r.completions);
+    EXPECT_EQ(r.loop_ok, r.completions) << "a send in the window did not succeed";
+    EXPECT_GE(r.peer_app_frames, r.loop_ok) << "a successful send did not reach the peer";
+    check_tu_count(r.tu_count, tu_expect::print_only, "W-E MemoryStore twin");
 }
 
 TEST(B35RunThreadWindows, VetoThenZero_SendsAfterAVetoedSend) {
