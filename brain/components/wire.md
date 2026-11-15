@@ -220,6 +220,8 @@ counted-field RULE. It does not merge the scanners.
 What was rejected:
 - **Pairs from the dictionary only.** Pre-session routing and log redaction have no dictionary,
   so the standard table has to stand alone (L-426-1).
+  *(Note, fixpp#652: the "log redaction" half named the `redact_tag554` helper, which had no
+  production caller and was removed. Pre-session routing is the remaining dictionary-less site.)*
 - **A dictionary overriding a standard pair** (design §3, r3 R3-1). Two dictionaries would then
   split the same standard frame differently (L-426-2).
 - **Separate pair-callback parameters.** The pair lookup travels in `wire::dict_hooks` with the

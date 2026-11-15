@@ -11,10 +11,10 @@
 // INV-FIXT-4). Both fields are owning strings so the value outlives the
 // inbound wire frame.
 //
-// redact_tag554: shared tag-554 field redactor (C8). Takes a FIX frame as a
-// string (SOH-delimited), replaces the *value* of any 554=<value> occurrence
-// with "***", and returns the result. Applied at every persistence site (session
-// logger/tap, transport transcript, golden writer) — not ad-hoc per site.
+// frame_has_genuine_tag554 / mask_tag554_same_length_inplace: the Password(554)
+// detector and same-length masker (034). Session::store_then_emit applies them,
+// with the session's dict_hooks, to a Logon before it is stored. fixpp#652
+// removed the allocating, dictionary-free `redact_tag554` that used to sit here.
 
 #pragma once
 
@@ -27,7 +27,6 @@
 #include <ostream>
 #include <span>
 #include <string>
-#include <string_view>
 
 namespace fixpp::session {
 
@@ -142,33 +141,6 @@ void for_each_tag554_value(std::span<const std::byte> frame, fixpp::wire::dict_h
 }
 
 }  // namespace detail
-
-// ── redact_tag554 ─────────────────────────────────────────────────────────────
-//
-// Shared tag-554 field redactor (C8 / FR-011). Returns a copy of `frame` with the
-// value of every genuine Password(554) field replaced by "***". A genuine field is
-// one detail::for_each_tag554_value reports: a `554=` inside another field's
-// value (tag 58 free text, or a counted Data value — fixpp#426) is not redacted.
-//
-// This is the single canonical redaction site; T024 (US2) wires it into
-// logger/transcript sites and T026 (US3) wires it into the golden writer. Those
-// sites have no dictionary, so the pairs are the standard table alone.
-[[nodiscard]] inline std::string redact_tag554(std::string const& frame) {
-    constexpr std::string_view kMask = "***";
-
-    std::string result;
-    result.reserve(frame.size());
-    std::size_t pos = 0;
-    detail::for_each_tag554_value(
-        std::span<const std::byte>{reinterpret_cast<const std::byte*>(frame.data()), frame.size()},
-        fixpp::wire::dict_hooks::none(), [&](std::size_t vstart, std::size_t vend) {
-            result.append(frame, pos, vstart - pos);
-            result.append(kMask);
-            pos = vend;  // the terminating SOH is not the value; keep it
-        });
-    result.append(frame, pos, std::string::npos);
-    return result;
-}
 
 // ── frame_has_genuine_tag554 ─────────────────────────────────────────────────
 //

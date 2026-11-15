@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/dictionary/lookup_test.cpp
 //
-// AC-D1..D8 parameterized over the seven currently-loadable v1.0 FIX versions:
-// the four codegen-target dictionaries (FIX42, FIX44, FIX50SP2, FIXT11) plus
-// the three runtime-XML-only versions vendored for D-005/006 (FIX43, FIX50,
-// FIX50SP1 — spec 002 §10 F1). FIX 4.0/4.1 (D-004) are excluded pending loader
-// legacy-type support (see the INSTANTIATE note). GoogleTest TEST_P fixture;
-// each version is loaded fresh per test via a 4 MiB monotonic_buffer_resource.
+// AC-D1..D8 parameterized over every vendored QuickFIX-XML v1.0 dictionary
+// listed in the AllRuntimeVersions instantiation below: the codegen-target
+// dictionaries (FIX42, FIX44, FIX50SP2, FIXT11) and the runtime-XML-only ones
+// (FIX 4.0/4.1 for D-004, loaded through 064's legacy-type aliases; FIX43,
+// FIX50, FIX50SP1 for D-005/006 — spec 002 §10 F1). Re-derive the set from the
+// instantiation, or `ls dictionaries/*.xml`. GoogleTest TEST_P fixture; each
+// version is loaded fresh per test via a 4 MiB monotonic_buffer_resource.
 
 #include <gtest/gtest.h>
 
@@ -775,17 +776,20 @@ INSTANTIATE_TEST_SUITE_P(
         // this dictionary, so they are asserted PRESENT — the inverse of the FIX
         // 5.0/5.0SP1 app-only shape below (session moved to FIXT.1.1). Loadable
         // now that the loader accepts their legacy `TIME`/`DATE` field types
-        // (064). FIX 4.0/4.1 predate <component>s and NUMINGROUP-typed group
-        // counters (their NoXxx fields are type='INT'), so has_instrument and
-        // parties_expected are false and there are no registered NoXxx delimiter
-        // groups. Every field below verified against the vendored files.
+        // (064). FIX 4.0/4.1 predate <component>s, so has_instrument and
+        // parties_expected are false. Their NoXxx count fields are type='INT', but
+        // since 082 a <group> registers structurally whatever its count field's
+        // type, so these dictionaries DO have registered groups; these cells just
+        // name none in required_group_no_tags. Group registration for them is
+        // witnessed by tests/dictionary/delimiter_census_test.cpp. Every field
+        // below verified against the vendored files.
         VersionParam{
             .filename = "FIX40.xml",
             .expected_version = fixpp::dict::session_version::v40,
             .required_msg_types = {"D", "8", "A", "0",
                                    "3"},   // app D/8 + PRESENT pre-FIXT session A/0
             .forbidden_msg_types = {},     // session lives in-dict (pre-FIXT)
-            .required_group_no_tags = {},  // NoXxx are type='INT', not NUMINGROUP
+            .required_group_no_tags = {},  // none named here; see the note above
             .has_clordid = true,
             .parties_expected = std::optional<bool>{false},  // Parties added in 4.3
             .has_instrument = false,                         // no <component> declarations

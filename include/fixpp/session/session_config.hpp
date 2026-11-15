@@ -331,6 +331,10 @@ struct SessionConfig {
     // timeout in milliseconds. Default 2000 ms (matches QuickFIX/J
     // SessionState.logoutTimeoutMs=2000L). Must be > 0; validated at
     // SessionConfig-build time per [arch §5.3] construction-time carve-out.
+    // On a FileStore session the timeout does not bound a graceful close while the
+    // Logout's write job is in the file executor: a cancellation does not take a job
+    // out of an executor, so the close completes only after the file executor has run
+    // that write (L-563-7; fixpp#598).
     std::uint32_t logout_disconnect_timeout_ms{2000};
 
     // 093-inbound-frame-dispositions (FR-006; contract C-4; data-model E-7): the
@@ -517,8 +521,9 @@ struct SessionConfig {
 
     // username / password: optional FIX Logon credentials emitted as
     //   Username(553) / Password(554) in the outbound Logon when set.
-    //   Parsed and surfaced inbound (E5 / FR-008a); Password is REDACTED in logs
-    //   (INV-FIXT-4 / FR-011). Validation of inbound credentials is deferred to a
+    //   Parsed and surfaced inbound (E5 / FR-008a). The Password of an outbound
+    //   Logon is masked in the message store (034), and `logon_credentials`'s
+    //   operator<< prints it as `***` (INV-FIXT-4 / FR-011). Validation of inbound credentials is deferred to a
     //   future config-gated feature (Clarify 2026-06-12 FR-008a); these fields
     //   cover the parse+surface slice only.
     //   [033 data-model.md E3; FR-008a; INV-FIXT-4]

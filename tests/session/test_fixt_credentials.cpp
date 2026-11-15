@@ -3,7 +3,7 @@
 // tests/session/test_fixt_credentials.cpp
 //
 // 033-fixt-fix50sp2-session — T002 (target creation) / T009 (RED) / T010
-// (impl: logon_credentials + tag-554 redactor).
+// (impl: logon_credentials).
 //
 // Phase 2 (Foundational) witnesses:
 //
@@ -12,10 +12,9 @@
 //     the username IS visible; the mask token ("***") appears instead.
 //     Uses a DISTINCT sentinel password so the test cannot pass vacuously.
 //
-//   Redactor_ElidesTag554Value (T009/T010):
-//     redact_tag554() masks the 554 field value. The decoy "554=" inside a
-//     free-text value (tag 58) must NOT be redacted — only the real 554 field
-//     is affected. Neighbours (553=, 10=) survive unmodified.
+// fixpp#652 removed the `redact_tag554` helper and its tests. The Password(554)
+// mask at the message store is witnessed in test_credential_store_redaction.cpp
+// and length_data_session_scanner_test.cpp.
 //
 // Anchors: data-model.md E5, research R6, contracts/fixt-logon-establishment.md
 // C8, FR-011, INV-FIXT-4.
@@ -29,7 +28,6 @@
 namespace {
 
 using fixpp::session::logon_credentials;
-using fixpp::session::redact_tag554;
 
 // ── T009/T010: logon_credentials operator<< redaction ────────────────────────
 
@@ -80,99 +78,9 @@ TEST(LogonCredentials, OperatorStream_BothAbsent) {
     EXPECT_EQ(oss.str().find("***"), std::string::npos);
 }
 
-// ── T009/T010: redact_tag554 ─────────────────────────────────────────────────
-
-TEST(RedactTag554, ElidesTag554Value_MidFrame) {
-    // Typical mid-frame 554 field in a SOH-delimited FIX frame.
-    // Frame: 8=FIXT.1.1<SOH>553=alice<SOH>554=xyzzy-s3cr3t<SOH>10=123<SOH>
-    std::string frame =
-        "8=FIXT.1.1\x01"
-        "553=alice\x01"
-        "554=xyzzy-s3cr3t\x01"
-        "10=123\x01";
-
-    std::string redacted = redact_tag554(frame);
-
-    // The clear password value MUST be absent.
-    EXPECT_EQ(redacted.find("xyzzy-s3cr3t"), std::string::npos)
-        << "redact_tag554 did not elide the 554 value: " << redacted;
-
-    // The tag key and mask MUST be present.
-    EXPECT_NE(redacted.find("554=***"), std::string::npos)
-        << "redact_tag554 did not insert mask: " << redacted;
-
-    // Neighbours must survive unmodified.
-    EXPECT_NE(redacted.find("553=alice"), std::string::npos)
-        << "redact_tag554 corrupted 553 field: " << redacted;
-    EXPECT_NE(redacted.find("10=123"), std::string::npos)
-        << "redact_tag554 corrupted 10 field: " << redacted;
-}
-
-TEST(RedactTag554, DoesNotRedactDecoy554InFreeText) {
-    // A free-text field (tag 58) whose value contains the substring "554="
-    // must NOT be redacted — only a SOH-anchored real 554 tag is a match.
-    // Decoy: 58=note_554=fake<SOH>  (no SOH before "554=", so not a real field)
-    std::string frame =
-        "8=FIXT.1.1\x01"
-        "553=carol\x01"
-        "58=note_554=fake\x01"
-        "554=real-secret\x01"
-        "10=099\x01";
-
-    std::string redacted = redact_tag554(frame);
-
-    // The real 554 value MUST be masked.
-    EXPECT_EQ(redacted.find("real-secret"), std::string::npos)
-        << "real 554 value not redacted: " << redacted;
-
-    // The decoy inside tag 58 MUST survive.
-    EXPECT_NE(redacted.find("58=note_554=fake"), std::string::npos)
-        << "redactor incorrectly touched the decoy inside tag 58: " << redacted;
-
-    // 553 must survive.
-    EXPECT_NE(redacted.find("553=carol"), std::string::npos)
-        << "redactor corrupted 553: " << redacted;
-}
-
-TEST(RedactTag554, NoTag554_FrameUnchanged) {
-    // A frame without a 554 field passes through byte-identical.
-    std::string frame =
-        "8=FIX.4.4\x01"
-        "553=dave\x01"
-        "10=042\x01";
-
-    std::string redacted = redact_tag554(frame);
-    EXPECT_EQ(redacted, frame);
-}
-
-TEST(RedactTag554, EmptyFrame) { EXPECT_EQ(redact_tag554(""), ""); }
-
-TEST(RedactTag554, Tag554AtFrameStart) {
-    // Edge case: 554 is the very first field (no preceding SOH).
-    std::string frame =
-        "554=top-secret\x01"
-        "10=007\x01";
-
-    std::string redacted = redact_tag554(frame);
-    EXPECT_EQ(redacted.find("top-secret"), std::string::npos);
-    EXPECT_NE(redacted.find("554=***"), std::string::npos);
-    EXPECT_NE(redacted.find("10=007"), std::string::npos);
-}
-
-TEST(RedactTag554, Tag554AtFrameEnd_NoTrailingSOH) {
-    // 554 value reaches end-of-string without a trailing SOH.
-    std::string frame =
-        "8=FIXT.1.1\x01"
-        "554=mysecret";
-
-    std::string redacted = redact_tag554(frame);
-    EXPECT_EQ(redacted.find("mysecret"), std::string::npos);
-    EXPECT_NE(redacted.find("554=***"), std::string::npos);
-}
-
 }  // namespace
 
-// ── US2 Phase 4 witnesses: W6 (T019) and W7 (T020) ──────────────────────────
+// ── US2 Phase 4 witnesses: W6 (T019) ──────────────────────────
 //
 // These tests require Session + build_logon + CompIdAuthorizationPolicy.
 // They are RED until T021–T024 are implemented.
@@ -201,7 +109,6 @@ TEST(RedactTag554, Tag554AtFrameEnd_NoTrailingSOH) {
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/version_registry.hpp>
 #include <fixpp/dict/xml_loader.hpp>
-#include <fixpp/session/admin_messages.hpp>
 #include <fixpp/session/application.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/session/security_profile.hpp>
@@ -225,7 +132,6 @@ using fixpp::dict::application_version;
 using fixpp::dict::version_registry;
 using fixpp::session::fsm_state;
 using fixpp::session::logon_credentials;
-using fixpp::session::redact_tag554;
 
 // ── Minimal FIX 5.0 SP2 XML dict (same as in establishment test) ─────────────
 
@@ -643,120 +549,6 @@ TEST(FixtCredentials, W6d_CredentialFreeLogon_ReachesActive) {
         << "authorize_logon must receive empty creds for credential-free Logon";
     EXPECT_EQ(acceptor.state(), fsm_state::Active)
         << "Acceptor must reach Active for credential-free Logon (d)";
-}
-
-// ── T020 / W7 ─────────────────────────────────────────────────────────────────
-//
-// A Logon carrying a populated 554, when written to each persistence class,
-// shows the value REDACTED. Assert per-class:
-// (1) redact_tag554 applied to session logger/tap output (simulated by applying
-//     the redactor to the captured frame bytes before any archival)
-// (2) transport transcript capture: frame captured via transport_send_ lambda,
-//     then redact_tag554 applied (the session logger redaction path)
-// (3) unit golden fixture: known input → expected output comparison.
-//
-// NOTE: T024 wires the shared redact_tag554 at the production persistence sites;
-// W7 proves the redaction function works correctly at each artifact class.
-// Specifically: the production code uses cfg_.transport_send capturing (test);
-// production session logger/tap hooks are deferred to the 2l tap feature;
-// the binary file_store is not affected (binary format, not human-readable text).
-//
-// [FR-011/C8/INV-FIXT-4; data-model INV-FIXT-4]
-
-// (1)+(2) Session/transport transcript capture: outbound Logon with 554,
-// captured via transport_send_, then redact_tag554 applied.
-// The sentinel password "SENTINEL-W7-xyzzy" must not appear in the redacted output;
-// "554=***" must appear instead.
-TEST(FixtCredentials, W7_OutboundLogonWith554_RedactedBeforeCapture) {
-    // Build a raw outbound Logon frame via build_logon with 553+554.
-    // Uses the build_logon API directly (T022 extension).
-    std::array<std::byte, 512> buf{};
-    auto r = fixpp::session::build_logon(std::span<std::byte>(buf),
-                                         /*seq=*/1,
-                                         /*sender_comp_id=*/"SENDER",
-                                         /*target_comp_id=*/"TARGET",
-                                         /*begin_string=*/"FIXT.1.1",
-                                         /*heartbt_int=*/30,
-                                         /*sending_time=*/"20240101-00:00:00.000",
-                                         /*reset_seqnum=*/false,
-                                         /*next_expected_seq=*/std::nullopt,
-                                         /*default_appl_ver_id=*/application_version::v50sp2,
-                                         /*username=*/"user1",
-                                         /*password=*/"SENTINEL-W7-xyzzy");
-    ASSERT_TRUE(r.has_value()) << "build_logon with creds must succeed";
-
-    const std::string raw = span_to_str(*r);
-
-    // The raw frame carries the sentinel password (it must be on the wire for auth).
-    ASSERT_NE(raw.find("SENTINEL-W7-xyzzy"), std::string::npos)
-        << "build_logon must emit the password clear on the wire (for peer auth); got: " << raw;
-
-    // Site (1)+(2): apply redact_tag554 as a persistence/logging interceptor.
-    const std::string redacted = redact_tag554(raw);
-
-    // The clear password must be ABSENT after redaction.
-    EXPECT_EQ(redacted.find("SENTINEL-W7-xyzzy"), std::string::npos)
-        << "redact_tag554 must elide the clear password value (INV-FIXT-4); redacted: " << redacted;
-
-    // The redaction marker must be PRESENT.
-    EXPECT_NE(redacted.find("554=***"), std::string::npos)
-        << "redact_tag554 must emit 554=*** in place of the password; redacted: " << redacted;
-
-    // The username (553) must survive unmodified.
-    EXPECT_NE(redacted.find("553=user1"), std::string::npos)
-        << "redact_tag554 must not touch 553; redacted: " << redacted;
-
-    // The 1137 field must survive unmodified.
-    EXPECT_NE(redacted.find("1137=9"), std::string::npos)
-        << "redact_tag554 must not touch 1137; redacted: " << redacted;
-}
-
-// (3) Unit golden fixture: redact_tag554 on a known FIXT Logon frame with 554
-// produces a known expected redacted string.
-// This is the "golden" comparison — distinct from the function-unit tests in
-// T009/T010 (which test the redactor in isolation without FIXT context).
-TEST(FixtCredentials, W7_GoldenFixture_RedactedLogon) {
-    // Input: a typical FIXT Logon with 553+554 sandwiched between 1137 and 141.
-    // (Ordering as per data-model E4: 1137 after 108, 553+554 after 1137, before 141.)
-    const std::string input =
-        "8=FIXT.1.1\x01"
-        "9=82\x01"
-        "35=A\x01"
-        "34=1\x01"
-        "49=TW\x01"
-        "52=20240101-00:00:00.000\x01"
-        "56=ISLD\x01"
-        "98=0\x01"
-        "108=30\x01"
-        "1137=9\x01"
-        "553=user1\x01"
-        "554=SENTINEL-W7-golden\x01"
-        "10=042\x01";
-
-    const std::string expected =
-        "8=FIXT.1.1\x01"
-        "9=82\x01"
-        "35=A\x01"
-        "34=1\x01"
-        "49=TW\x01"
-        "52=20240101-00:00:00.000\x01"
-        "56=ISLD\x01"
-        "98=0\x01"
-        "108=30\x01"
-        "1137=9\x01"
-        "553=user1\x01"
-        "554=***\x01"
-        "10=042\x01";
-
-    const std::string got = redact_tag554(input);
-
-    EXPECT_EQ(got, expected)
-        << "Golden fixture: redact_tag554 on a FIXT Logon with 554 must produce the "
-        << "expected redacted frame exactly. Sentinel 'SENTINEL-W7-golden' must be absent.";
-
-    // Extra assertion: clear sentinel absent.
-    EXPECT_EQ(got.find("SENTINEL-W7-golden"), std::string::npos)
-        << "Clear password sentinel must be absent in golden output";
 }
 
 // ── FQ-2 Gate B r1 — authorize_logon throw-safety ────────────────────────────

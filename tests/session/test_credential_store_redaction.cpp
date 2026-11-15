@@ -9,7 +9,7 @@
 // Later phases (T005–T011) append cells to this file.
 //
 // TDD: Phase 2 cells are RED until T003 (masker impl) ships; the masker is in
-// include/fixpp/session/logon_credentials.hpp (sibling of redact_tag554).
+// include/fixpp/session/logon_credentials.hpp.
 //
 // FileStore-fixture headers (_fixtures_/store_temp_dir.hpp,
 // _fixtures_/test_double_fsm.hpp) are included for later phases (T005 US1
@@ -268,6 +268,53 @@ TEST(Masker_SameLength_FieldAnchored_unit, H_MultipleGenuine554_AllMasked) {
     EXPECT_NE(s.find("58=mid"), std::string::npos) << "interleaved non-554 field must survive";
 }
 
+TEST(Masker_SameLength_FieldAnchored_unit, J_FrameEndOccurrenceNoTrailingSoh_Masked) {
+    // A 554 value that runs to the end of the buffer with no terminating SOH: the
+    // walk's step past the value must stop at the end, not one byte beyond it.
+    // fixpp#652 removed RedactTag554.Tag554AtFrameEnd_NoTrailingSOH; this is its masker form.
+    auto buf = make_buf(
+        "49=S\x01"
+        "554=mysecret");
+    auto before = buf;
+
+    bool result = mask_tag554_same_length_inplace(std::span<std::byte>{buf});
+
+    EXPECT_TRUE(result) << "a 554 at the frame end must be found";
+    // Layout: 49=S(0..3) \x01(4) 554=(5..8) mysecret(9..16), size 17.
+    ASSERT_EQ(buf.size(), 17U);
+    EXPECT_TRUE(all_stars(buf.data() + 9, buf.data() + buf.size()))
+        << "the value up to the frame end must be all '*'";
+    for (std::size_t i = 0; i < 9; ++i) {
+        EXPECT_EQ(buf[i], before[i]) << "byte " << i << " before the value must be unchanged";
+    }
+}
+
+TEST(Masker_SameLength_FieldAnchored_unit, K_MalformedCountFallback_FrameEndNoTrailingSoh_Masked) {
+    // RawDataLength(95)/RawData(96) is a standard pair, so `dict_hooks::none()` arms it.
+    // Its count runs past the buffer, so the walk takes the malformed-count fallback from
+    // the 96 field on, and the fallback finds a 554 whose value runs to the end of the
+    // buffer with no terminating SOH: the fallback's value end must be the buffer end.
+    auto buf = make_buf(
+        "35=A\x01"
+        "95=999\x01"
+        "96=x\x01"
+        "554=secret");
+    auto before = buf;
+
+    bool result = mask_tag554_same_length_inplace(std::span<std::byte>{buf});
+
+    EXPECT_TRUE(result) << "a 554 found by the malformed-count fallback must be reported";
+    // Layout: 35=A(0..3) \x01(4) 95=999(5..10) \x01(11) 96=x(12..15) \x01(16)
+    //         554=(17..20) secret(21..26), size 27.
+    ASSERT_EQ(buf.size(), 27U);
+    for (std::size_t i = 21; i < 27; ++i) {
+        EXPECT_EQ(buf[i], std::byte{0x2A}) << "value byte " << i << " must be '*'";
+    }
+    for (std::size_t i = 0; i < 21; ++i) {
+        EXPECT_EQ(buf[i], before[i]) << "byte " << i << " before the value must be unchanged";
+    }
+}
+
 TEST(Masker_SameLength_FieldAnchored_unit, I_FrameHasGenuine554_Detector) {
     // Directly exercises frame_has_genuine_tag554 — the detection sibling that
     // store_then_emit's maskability gate calls before masking. Covers all three
@@ -315,6 +362,7 @@ TEST(Masker_SameLength_FieldAnchored_unit, I_FrameHasGenuine554_Detector) {
 #include <asio/strand.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fixpp/core/engine_config.hpp>
@@ -1113,6 +1161,169 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
                          asio::use_future)
         .get();
     pool.join();  // drain+join workers before executor-holding locals destruct (teardown-race fix)
+}
+
+// ── fixpp#652: credentials inside an application message are stored in cleartext ──
+//
+// The store mask runs only for MsgType(35)=A (store_then_emit's `msg_type == "A"`
+// gate), because an application frame is replayed verbatim from its stored bytes
+// and a mask there would reach the wire at resend. So an application-sent
+// UserRequest (35=BE) keeps Username(553), Password(554), NewPassword(925),
+// EncryptedPassword(1402) and EncryptedNewPassword(1404) in cleartext at rest.
+// This is the behaviour the B&L row for fixpp#652 records.
+//
+// Harness: T005's FileStore initiator (its own Logon carries a password) brought to
+// Active by T009's hand-crafted reply Logon, then one `send()` of a 35=BE, then a
+// peer ResendRequest for that message, whose answer replays the stored bytes.
+//
+// Each credential value is a distinct sentinel, so each clause is checked on its
+// own. Positive control: the initiator's Logon password, in the same store
+// directory, is masked. Without it, "cleartext on disk" could also mean that the
+// mask never runs at all.
+TEST(CredentialStoreRedaction, AppUserRequest_CredentialFieldsStoredInCleartext_LogonPasswordMasked) {
+    constexpr std::string_view kLogonPassword = "logon-pw-652-sentinel";
+    constexpr std::string_view kUsername = "user-652-sentinel";
+    constexpr std::string_view kPassword = "pw-652-sentinel";
+    constexpr std::string_view kNewPassword = "newpw-652-sentinel";
+    constexpr std::string_view kEncryptedPassword = "encpw-652-sentinel";
+    constexpr std::string_view kEncryptedNewPassword = "encnewpw-652-sentinel";
+
+    asio::thread_pool pool{2};
+    asio::any_io_executor sx = asio::make_strand(pool);
+    auto dir = unique_store_dir("b87_userrequest");
+
+    FileStore::Config fcfg;
+    fcfg.directory = dir;
+    fcfg.sender_comp_id = "INITR";
+    fcfg.target_comp_id = "ACCEPTR";
+    fcfg.max_frame_bytes = 4096;
+    fcfg.file_io_executor = sx;
+
+    fixpp::core::EngineConfig engine;
+    engine.executor = sx;
+    engine.clock = make_mock_clock(sx);
+    engine.max_store_memory_per_session = 1ULL << 30;
+
+    auto dict = make_fix50sp2_dict();
+    version_registry registry{{dict}};
+
+    std::vector<std::byte> wire_out;
+    auto init_cfg = make_fixt_initiator_cfg(sx);
+    init_cfg.password = std::string(kLogonPassword);
+    init_cfg.store_factory = std::make_unique<FileStoreFactory>(fcfg);
+    init_cfg.transport_send = [&](std::span<const std::byte> f) {
+        wire_out.assign(f.begin(), f.end());
+    };
+
+    bool sent = false;
+    std::vector<std::byte> wire_after_send;
+    std::vector<std::byte> wire_after_resend;
+    {
+        Session initiator{engine, init_cfg, &registry};
+        auto open_r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
+        EXPECT_TRUE(open_r.has_value()) << "open() must succeed for a configured FIXT initiator";
+
+        auto peer_reply = make_fixt_logon("ACCEPTR", "INITR", 1, "9");
+        auto inb_r = asio::co_spawn(sx,
+                                    initiator.on_inbound_frame(std::span<const std::byte>{
+                                        peer_reply.data(), peer_reply.size()}),
+                                    asio::use_future)
+                         .get();
+        EXPECT_TRUE(inb_r.has_value()) << "on_inbound_frame must accept the reply Logon";
+        EXPECT_EQ(initiator.state(), fsm_state::Active) << "Initiator must reach Active";
+
+        std::string payload = "35=BE\x01";
+        payload += "923=REQ-652\x01";  // UserRequestID
+        payload += "924=1\x01";        // UserRequestType = LogOnUser
+        payload += "553=" + std::string(kUsername) + "\x01";
+        payload += "554=" + std::string(kPassword) + "\x01";
+        payload += "925=" + std::string(kNewPassword) + "\x01";
+        payload += "1401=" + std::to_string(kEncryptedPassword.size()) + "\x01";
+        payload += "1402=" + std::string(kEncryptedPassword) + "\x01";
+        payload += "1403=" + std::to_string(kEncryptedNewPassword.size()) + "\x01";
+        payload += "1404=" + std::string(kEncryptedNewPassword) + "\x01";
+        std::vector<std::byte> payload_bytes;
+        payload_bytes.reserve(payload.size());
+        for (char c : payload) payload_bytes.push_back(static_cast<std::byte>(c));
+
+        wire_out.clear();
+        auto send_r = asio::co_spawn(sx,
+                                     initiator.send(std::span<const std::byte>{
+                                         payload_bytes.data(), payload_bytes.size()}),
+                                     asio::use_future)
+                          .get();
+        EXPECT_TRUE(send_r.has_value()) << "send() of a 35=BE must succeed in Active";
+        sent = send_r.has_value();
+        wire_after_send = wire_out;
+
+        // The peer asks for the UserRequest again (its MsgSeqNum is 2: the Logon was 1).
+        std::string rr_body = "35=2\x01" "34=2\x01" "49=ACCEPTR\x01"
+                              "52=19700101-00:00:00.000\x01" "56=INITR\x01" "7=2\x01" "16=2\x01";
+        std::string rr = "8=FIXT.1.1\x01" "9=" + std::to_string(rr_body.size()) + "\x01" + rr_body;
+        unsigned int cs = 0;
+        for (unsigned char c : rr) cs += c;
+        char csbuf[8];
+        std::snprintf(csbuf, sizeof(csbuf), "%03u", cs & 0xFFU);
+        rr += "10=" + std::string(csbuf) + "\x01";
+        std::vector<std::byte> rr_bytes;
+        rr_bytes.reserve(rr.size());
+        for (char c : rr) rr_bytes.push_back(static_cast<std::byte>(c));
+        wire_out.clear();
+        auto rr_r = asio::co_spawn(sx,
+                                   initiator.on_inbound_frame(std::span<const std::byte>{
+                                       rr_bytes.data(), rr_bytes.size()}),
+                                   asio::use_future)
+                        .get();
+        EXPECT_TRUE(rr_r.has_value()) << "on_inbound_frame must accept the ResendRequest";
+        wire_after_resend = wire_out;
+
+        (void)asio::co_spawn(sx, initiator.close(fixpp::session::close_mode::terminal),
+                             asio::use_future)
+            .get();
+    }
+    // Session destructs here: advisory lock released, FileStore flushed.
+
+    ASSERT_TRUE(sent) << "the 35=BE was not sent, so nothing below is about it";
+    std::string const wire_str = bytes_as_str(wire_after_send);
+    EXPECT_NE(wire_str.find("\x01" "35=BE\x01"), std::string::npos)
+        << "the last frame on the wire must be the UserRequest: " << wire_str;
+
+    // The resend answer replays the stored UserRequest: its credential fields go back on the
+    // wire as stored, under the replay's PossDupFlag(43)=Y.
+    std::string const replay_str = bytes_as_str(wire_after_resend);
+    EXPECT_NE(replay_str.find("\x01" "35=BE\x01"), std::string::npos)
+        << "the resend answer must be the UserRequest, not a gap-fill: " << replay_str;
+    EXPECT_NE(replay_str.find("\x01" "43=Y\x01"), std::string::npos)
+        << "the replayed UserRequest must carry PossDupFlag(43)=Y: " << replay_str;
+    EXPECT_NE(replay_str.find("\x01" "554=" + std::string(kPassword) + "\x01"), std::string::npos)
+        << "the replayed UserRequest carries the stored Password(554): " << replay_str;
+    EXPECT_NE(replay_str.find("\x01" "925=" + std::string(kNewPassword) + "\x01"),
+              std::string::npos)
+        << "the replayed UserRequest carries the stored NewPassword(925): " << replay_str;
+
+    // Positive control: the Logon's own Password is masked in the same store.
+    EXPECT_FALSE(disk_bytes_contain(dir, kLogonPassword))
+        << "the Logon password must not be at rest in cleartext (034 mask)";
+    std::string masked_logon_pw = "554=";
+    masked_logon_pw.append(kLogonPassword.size(), '*');
+    EXPECT_TRUE(disk_bytes_contain(dir, masked_logon_pw))
+        << "the Logon password's same-length mask must be on disk";
+
+    // The UserRequest's credential fields are at rest verbatim, each as its own field.
+    EXPECT_TRUE(disk_bytes_contain(dir, "\x01" "553=" + std::string(kUsername) + "\x01"))
+        << "Username(553) of an application UserRequest is stored in cleartext";
+    EXPECT_TRUE(disk_bytes_contain(dir, "\x01" "554=" + std::string(kPassword) + "\x01"))
+        << "Password(554) of an application UserRequest is stored in cleartext";
+    EXPECT_TRUE(disk_bytes_contain(dir, "\x01" "925=" + std::string(kNewPassword) + "\x01"))
+        << "NewPassword(925) of an application UserRequest is stored in cleartext";
+    EXPECT_TRUE(disk_bytes_contain(dir, "\x01" "1402=" + std::string(kEncryptedPassword) + "\x01"))
+        << "EncryptedPassword(1402) of an application UserRequest is stored in cleartext";
+    EXPECT_TRUE(
+        disk_bytes_contain(dir, "\x01" "1404=" + std::string(kEncryptedNewPassword) + "\x01"))
+        << "EncryptedNewPassword(1404) of an application UserRequest is stored in cleartext";
+
+    std::filesystem::remove_all(dir);
+    pool.join();
 }
 
 // ── T007 / open()-time credential-length guard (both roles) ──────────────────
