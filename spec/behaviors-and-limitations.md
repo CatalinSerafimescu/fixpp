@@ -1348,7 +1348,24 @@ is accepted normally — credentials are optional per FIX-SL §4.3. Before an ou
 message store, its `Password(554)` value is masked at the store boundary (B-034-1). No production logger,
 tap or transcript writes Logon bytes (L-033-4). *(FR-006, FR-007, FR-008;
 `tests/session/test_fixt_credentials.cpp` W6; the store mask: `tests/session/test_credential_store_redaction.cpp`.
-fixpp#652 removed the unwired `redact_tag554` helper and its W7 cells.)*
+fixpp#652 removed the unwired `redact_tag554` helper and its W7 cells, a breaking change to the public
+C++ API: B-652-1.)*
+
+**B-652-1 — `fixpp::session::redact_tag554` is removed (pre-release breaking change to the public C++ API;
+C ABI unchanged).** The inline function was declared outside any `detail` namespace in the installed header
+`include/fixpp/session/logon_credentials.hpp`, so it was public C++ API (architecture §9.1), though in no
+api-contract tier, and nothing in `src/` called it. What a consumer sees: a call to
+`fixpp::session::redact_tag554` stops compiling. The header no longer includes `<string_view>` itself, so code
+that relied on it for `std::string_view` includes `<string_view>` directly. The replacement shape:
+copy the frame's bytes, then call `mask_tag554_same_length_inplace(copy, fixpp::wire::dict_hooks::none())`
+on the copy. `dict_hooks::none()` is the standard Length/Data pairs alone, which is what the removed function
+used, and the masker finds the same Password(554) fields by the same walk (`detail::for_each_tag554_value`).
+The output is not the same bytes: the masker turns each value into a `'*'` run of the value's own length,
+where `redact_tag554` wrote `***`, so the result keeps the input's length; and it returns whether a field
+was found, not a new string. No C ABI, binding or version effect: neither the C ABI nor the SWIG/Python
+binding exposed the function (`git grep -n redact_tag554 -- include/fix bindings src` prints nothing), and
+before the first public release a C++ break moves no version (api-contract §4). *(fixpp#652; owner ruling of
+2026-11-02 on fixpp#652.)*
 
 ### Limitations
 
