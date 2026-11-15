@@ -746,6 +746,48 @@ TEST(ResendAnswerTooHigh577, SevenAbsent_TooHigh_NoResendOutstanding_RejectThenO
         << printable(a.written);
 }
 
+// 103 tasks T048, route (a) on a validating session (B-103-5; the orchestrator's ruling): the
+// validate gate runs before the sequence check, so the frame draws only the gate's Reject
+// 373=1, 371=7; NextNumIn does not move and no ResendRequest of fixpp's own is sent. The gap
+// is not lost: the next frame above NextNumIn opens it with fixpp's ResendRequest from N.
+// QuickFIX C++ does the same: Session::next() validates before its MsgType dispatch, and
+// generateReject increments only at the expected number.
+TEST(ResendAnswerTooHigh577, SevenAbsent_TooHigh_ValidatingSession_RejectOnlyThenGapAtNextFrame) {
+    ActiveSession s{DirectAcceptor::Options{.tweak_cfg = [](fixpp::session::SessionConfig& cfg) {
+        cfg.begin_string = "FIX.4.4";
+        cfg.dictionary = fixpp::test_support::make_fix44_dictionary();
+        cfg.validate_inbound_messages = true;
+    }}};
+    ASSERT_TRUE(s.setup(kStoredFor580)) << "setup: the session did not reach Active and send";
+    seqnum_t const n = session_test_access::seqnum_mgr(*s.f.session).next_inbound_unsafe();
+    auto const a = s.answer("16=0\x01", is_outbound_retrieve, n + 3);
+    ASSERT_TRUE(a.call.completed) << "on_inbound_frame did not complete";
+    EXPECT_EQ(a.state_after_call, fsm_state::Active);
+    ASSERT_EQ(a.written.size(), 1U) << printable(a.written);
+    auto const& rj = a.written.front();
+    EXPECT_EQ(plain_rig::field_value(rj, "35"), "3") << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(rj, "373"), "1") << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(rj, "371"), "7") << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(rj, "45"), std::to_string(n + 3)) << printable(a.written);
+    EXPECT_EQ(session_test_access::seqnum_mgr(*s.f.session).next_inbound_unsafe(), n)
+        << "NextNumIn moved";
+    EXPECT_FALSE(session_test_access::resend_outstanding(*s.f.session))
+        << "a resend is outstanding after the gate's Reject";
+
+    s.f.sent.clear();
+    s.request_frame = s.f.msg("0", n + 4);
+    CallingThreadReadings next;
+    ASSERT_TRUE(s.f.feed_plain(s.request_frame, next)) << "the next frame did not complete";
+    ASSERT_EQ(s.f.sent_count("2"), 1U)
+        << "the next frame above NextNumIn did not request the gap:\n"
+        << printable(s.f.sent);
+    auto const& rr = s.f.sent[first_of_type(s.f.sent, "2")];
+    EXPECT_EQ(plain_rig::field_value(rr, "7"), std::to_string(n)) << printable(s.f.sent);
+    EXPECT_EQ(plain_rig::field_value(rr, "16"), "0") << printable(s.f.sent);
+    EXPECT_TRUE(session_test_access::resend_outstanding(*s.f.session));
+    EXPECT_EQ(s.f.session->state(), fsm_state::Active);
+}
+
 // 103 tasks T048, route (b) (FR-009, FR-013; B-103-5): the same frame while a resend is
 // outstanding draws the Reject, consumes and persists nothing, and no second ResendRequest.
 TEST(ResendAnswerTooHigh577, SevenAbsent_TooHigh_ResendOutstanding_RejectAndNoSecondResendRequest) {
