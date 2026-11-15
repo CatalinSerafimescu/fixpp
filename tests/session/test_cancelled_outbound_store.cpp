@@ -267,18 +267,20 @@ DirectSendOutcome run_direct_send(Timing const timing) {
     if (timing == Timing::thrown) {
         // Posted from the call expression of store(): the post is queued ahead of the
         // one FileStore::store makes when its body starts, so the emit runs while the
-        // store call stands at its leading post.
+        // store call stands at its leading post. It is posted on the session's strand: a
+        // cancellation emitted from outside the strand is delivered through the coroutine's
+        // executor, so it would be queued behind the store's leading post.
         f.log->on_call = [&, posted = false](StoreCall const& call) mutable {
             if (posted || !is_outbound_store(call) || call.first != o.seq) return;
             posted = true;
-            asio::post(f.ioc, [&] {
+            asio::post(f.session->executor().underlying(), [&] {
                 o.cancel_mark = f.log->mark();
                 cancel.emit(asio::cancellation_type::terminal);
             });
         };
     }
     auto fut =
-        asio::co_spawn(f.ioc,
+        asio::co_spawn(fixpp::test_support::session_executor_of(*f.session, f.ioc),
                        await_and_read_thread(
                            [&] { return f.session->send(std::span<const std::byte>{h.payload}); },
                            o.call, [&] { o.state_after_call = f.session->state(); }),
@@ -620,7 +622,8 @@ public:
         CallingThreadReadings& out, asio::cancellation_signal& cancel,
         std::function<void()> after_call = {}) {
         return asio::co_spawn(
-            ioc, await_and_read_thread(std::move(make_call), out, std::move(after_call)),
+            fixpp::test_support::session_executor_of(*session, ioc),
+            await_and_read_thread(std::move(make_call), out, std::move(after_call)),
             asio::bind_cancellation_slot(cancel.slot(), asio::use_future));
     }
 
@@ -1152,7 +1155,7 @@ TEST(TeardownReset, SendInItsStoreCallAcrossTheReset_IsNotHandedToTheSink) {
     CallingThreadReadings send_call;
     asio::cancellation_signal none;
     auto send_fut = asio::co_spawn(
-        f.ioc,
+        fixpp::test_support::session_executor_of(*f.session, f.ioc),
         await_and_read_thread([&] { return f.session->send(std::span<const std::byte>{payload}); },
                               send_call),
         asio::bind_cancellation_slot(none.slot(), asio::use_future));

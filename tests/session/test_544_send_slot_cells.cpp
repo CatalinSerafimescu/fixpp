@@ -251,8 +251,13 @@ struct SlotFixture {
     }
 
     template <class Awaitable>
-    expected_t<void> run(Awaitable a, char const* what) {
-        auto fut = asio::co_spawn(ioc, std::move(a), asio::use_future);
+    // `on`, when given: the Session whose coroutine `a` is; it then runs on that session's
+    // executor once open() has bound it (support/session_executor_of.hpp).
+    expected_t<void> run(Awaitable a, char const* what,
+                         fixpp::session::Session const* on = nullptr) {
+        auto fut = asio::co_spawn(on != nullptr ? fixpp::test_support::session_executor_of(*on, ioc)
+                                                : asio::any_io_executor{ioc.get_executor()},
+                                  std::move(a), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, what);
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << what;
@@ -263,9 +268,9 @@ struct SlotFixture {
 
     // Acceptor: open(), then the peer's Logon; the reply Logon is outbound seq 1.
     bool open_to_active(Session& s) {
-        if (!run(s.open(), "SlotFixture::open")) return false;
+        if (!run(s.open(), "SlotFixture::open", &s)) return false;
         const auto logon = peer_logon();
-        if (!run(s.on_inbound_frame(logon), "SlotFixture::logon")) return false;
+        if (!run(s.on_inbound_frame(logon), "SlotFixture::logon", &s)) return false;
         return s.state() == fsm_state::Active;
     }
 
@@ -490,7 +495,7 @@ TEST(B35SendSlot, VetoedSend_ReleasesTheSlot) {
         held_in_to_app = session_test_access::send_slot_in_use(sess);
     };
     const auto one = bytes_of(kPayloadOne);
-    auto r = f.run(sess.send(one), "VetoedSend_ReleasesTheSlot");
+    auto r = f.run(sess.send(one), "VetoedSend_ReleasesTheSlot", &sess);
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::app_do_not_send);
     EXPECT_TRUE(held_in_to_app) << "the send did not hold the slot while toApp ran";
@@ -508,7 +513,7 @@ TEST(B35SendSlot, ThrowingToApp_ReleasesTheSlot) {
         held_in_to_app = session_test_access::send_slot_in_use(sess);
     };
     const auto one = bytes_of(kPayloadOne);
-    auto r = f.run(sess.send(one), "ThrowingToApp_ReleasesTheSlot");
+    auto r = f.run(sess.send(one), "ThrowingToApp_ReleasesTheSlot", &sess);
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::app_callback_threw);
     EXPECT_TRUE(held_in_to_app) << "the send did not hold the slot while toApp ran";
@@ -524,7 +529,7 @@ TEST(B35SendSlot, SlotHeld_SendTakesTheLeafWithTheSameBytes) {
     const std::size_t wire_before = f.wire.size();
     session_test_access::send_slot_in_use(sess) = true;
     const auto one = bytes_of(kPayloadOne);
-    auto r = f.run(sess.send(one), "SlotHeld_SendTakesTheLeafWithTheSameBytes");
+    auto r = f.run(sess.send(one), "SlotHeld_SendTakesTheLeafWithTheSameBytes", &sess);
     ASSERT_TRUE(r.has_value()) << "the leaf send failed: " << static_cast<int>(r.error());
     // The leaf never writes the flag, so the one the test set is still set.
     EXPECT_TRUE(session_test_access::send_slot_in_use(sess));

@@ -1160,6 +1160,12 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
     std::deque<std::vector<std::byte>> frames;
     asio::cancellation_signal sig;
     asio::io_context ioc;
+    // 103: the co_spawn bound to `sig` runs on the session's strand and leaves a copy of it in
+    // `sig`; no copy of a strand may outlive `ioc`, so the handler is destroyed before it.
+    struct clear_on_exit {
+        asio::cancellation_signal& s;
+        ~clear_on_exit() { s.slot().clear(); }
+    } const sig_clear{sig};
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
 
@@ -1198,7 +1204,7 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
 
     // first close (graceful) from a CANCELLABLE caller — enters phase-1 and suspends.
     auto close1 = asio::co_spawn(
-        ioc,
+        fixpp::test_support::session_executor_of(sess, ioc),
         [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
             co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
             co_return co_await sess.close(fixpp::session::close_mode::graceful);

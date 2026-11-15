@@ -39,6 +39,7 @@
 #include <asio/cancellation_signal.hpp>
 #include <asio/cancellation_type.hpp>
 #include <asio/co_spawn.hpp>
+#include <asio/post.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
@@ -1226,7 +1227,9 @@ TEST(ReplayGate588, R588f2_ContendedSend_EngineStop_RefusedNothingWritten) {
     ASSERT_TRUE(w.start(is_slot_read(3))) << "setup: the walk did not reach the held read";
     auto const i = w.spawn_send("LIVE-E");
     w.pump_for(kHeldWindow);
-    session_test_access::note_engine_stop(*w.s.f.session);
+    // Engine::stop() calls it on the session's strand.
+    asio::post(w.s.f.session->executor().underlying(),
+               [&w] { session_test_access::note_engine_stop(*w.s.f.session); });
     EXPECT_TRUE(w.s.f.run_until([&] { return w.send_done(i); }))
         << "the contended send did not end after the Engine's stop";
     EXPECT_TRUE(w.live_calls[i].returned_error(error::session_invalid_state_for_send))

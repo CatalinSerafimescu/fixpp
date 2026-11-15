@@ -1114,7 +1114,8 @@ TeardownResetOutcome run_teardown_reset_lifetimes(bool const fail_teardown_reset
         cfg.store_factory = rec;
         auto sess = std::make_unique<fixpp::session::Session>(eng, cfg);
         auto run = [&](auto&& aw, char const* site) {
-            auto fut = asio::co_spawn(ioc, std::forward<decltype(aw)>(aw), asio::use_future);
+            auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, ioc),
+                                      std::forward<decltype(aw)>(aw), asio::use_future);
             if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms, site)) {
                 fixpp::test_support::drain_or_report(ioc, site);
                 ADD_FAILURE() << fixpp::test_support::kWindowMiss << site;
