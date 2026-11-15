@@ -35,8 +35,12 @@ Sync Impact Report — v4.3 → v4.4 (2026-11-15) — PENDING
   Rides: feature 103; its PR is titled in Article XX §2 form
     (`Constitution: amend §XI.3 — strand-confined replay gate for resend-answer serialisation`, as a
     prefix or the title, as 097 did).
-  Review and sign-off: filled in this order before the RATIFIED flip. Gate A: <103's Gate A result>.
-    Scoped amendment round: <rounds and tallies>. Gate B: <PR, rounds>. Owner sign-off: <date>.
+  Review and sign-off: filled in this order before the RATIFIED flip. Gate A: feature 103
+    converged at loop 2 round 3 (post-judging P1=0 P2=0 P3=5; all five P3s applied; no gate-level
+    waiver), owner-signed-off 2026-11-15 at bundle commit e0325d05.
+    Scoped amendment round: one Codex round on the applied clause (c0107e44): P1=0 P2=1 P3=0;
+    the P2 was this placeholder, filled in the commit "103 P0: Sync Impact Report — record
+    Gate A and the scoped round". Gate B: <PR, rounds>. Owner sign-off: <date>.
 -->
 <!--
 Sync Impact Report — v4.2 → v4.3 (2026-10-29) — RATIFIED
