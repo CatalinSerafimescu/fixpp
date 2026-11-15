@@ -315,6 +315,7 @@ TEST(Masker_SameLength_FieldAnchored_unit, I_FrameHasGenuine554_Detector) {
 #include <asio/strand.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fixpp/core/engine_config.hpp>
@@ -1126,7 +1127,8 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
 // same.
 //
 // Harness: T005's FileStore initiator (its own Logon carries a password) brought to
-// Active by T009's hand-crafted reply Logon, then one `send()` of a 35=BE.
+// Active by T009's hand-crafted reply Logon, then one `send()` of a 35=BE, then a
+// peer ResendRequest for that message, whose answer replays the stored bytes.
 //
 // Each credential value is a distinct sentinel, so each clause is checked on its
 // own. Positive control: the initiator's Logon password, in the same store
@@ -1168,6 +1170,8 @@ TEST(CredentialStoreRedaction, AppUserRequest_CredentialFieldsStoredInCleartext_
     };
 
     bool sent = false;
+    std::vector<std::byte> wire_after_send;
+    std::vector<std::byte> wire_after_resend;
     {
         Session initiator{engine, init_cfg, &registry};
         auto open_r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
@@ -1204,6 +1208,28 @@ TEST(CredentialStoreRedaction, AppUserRequest_CredentialFieldsStoredInCleartext_
                           .get();
         EXPECT_TRUE(send_r.has_value()) << "send() of a 35=BE must succeed in Active";
         sent = send_r.has_value();
+        wire_after_send = wire_out;
+
+        // The peer asks for the UserRequest again (its MsgSeqNum is 2: the Logon was 1).
+        std::string rr_body = "35=2\x01" "34=2\x01" "49=ACCEPTR\x01"
+                              "52=19700101-00:00:00.000\x01" "56=INITR\x01" "7=2\x01" "16=2\x01";
+        std::string rr = "8=FIXT.1.1\x01" "9=" + std::to_string(rr_body.size()) + "\x01" + rr_body;
+        unsigned int cs = 0;
+        for (unsigned char c : rr) cs += c;
+        char csbuf[8];
+        std::snprintf(csbuf, sizeof(csbuf), "%03u", cs & 0xFFU);
+        rr += "10=" + std::string(csbuf) + "\x01";
+        std::vector<std::byte> rr_bytes;
+        rr_bytes.reserve(rr.size());
+        for (char c : rr) rr_bytes.push_back(static_cast<std::byte>(c));
+        wire_out.clear();
+        auto rr_r = asio::co_spawn(sx,
+                                   initiator.on_inbound_frame(std::span<const std::byte>{
+                                       rr_bytes.data(), rr_bytes.size()}),
+                                   asio::use_future)
+                        .get();
+        EXPECT_TRUE(rr_r.has_value()) << "on_inbound_frame must accept the ResendRequest";
+        wire_after_resend = wire_out;
 
         (void)asio::co_spawn(sx, initiator.close(fixpp::session::close_mode::terminal),
                              asio::use_future)
@@ -1212,9 +1238,22 @@ TEST(CredentialStoreRedaction, AppUserRequest_CredentialFieldsStoredInCleartext_
     // Session destructs here: advisory lock released, FileStore flushed.
 
     ASSERT_TRUE(sent) << "the 35=BE was not sent, so nothing below is about it";
-    std::string const wire_str = bytes_as_str(wire_out);
+    std::string const wire_str = bytes_as_str(wire_after_send);
     EXPECT_NE(wire_str.find("\x01" "35=BE\x01"), std::string::npos)
         << "the last frame on the wire must be the UserRequest: " << wire_str;
+
+    // The resend answer replays the stored UserRequest: its credential fields go back on the
+    // wire as stored, under the replay's PossDupFlag(43)=Y.
+    std::string const replay_str = bytes_as_str(wire_after_resend);
+    EXPECT_NE(replay_str.find("\x01" "35=BE\x01"), std::string::npos)
+        << "the resend answer must be the UserRequest, not a gap-fill: " << replay_str;
+    EXPECT_NE(replay_str.find("\x01" "43=Y\x01"), std::string::npos)
+        << "the replayed UserRequest must carry PossDupFlag(43)=Y: " << replay_str;
+    EXPECT_NE(replay_str.find("\x01" "554=" + std::string(kPassword) + "\x01"), std::string::npos)
+        << "the replayed UserRequest carries the stored Password(554): " << replay_str;
+    EXPECT_NE(replay_str.find("\x01" "925=" + std::string(kNewPassword) + "\x01"),
+              std::string::npos)
+        << "the replayed UserRequest carries the stored NewPassword(925): " << replay_str;
 
     // Positive control: the Logon's own Password is masked in the same store.
     EXPECT_FALSE(disk_bytes_contain(dir, kLogonPassword))

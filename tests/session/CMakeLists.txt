@@ -3926,9 +3926,9 @@ if(TARGET fixpp_codegen_generate AND TARGET fixpp_builders_v42)
     "${CMAKE_SOURCE_DIR}/tests/interop/support/golden_diff.cpp"
     # Records pass (REMAINING-WORK row 8): the per-message v42 builder round-trip and its
     # census join this executable, which already links the v42 builder libs and loads
-    # FIX42.xml (no new ctest entry, [const §VII.8]); the census reads the registered
-    # cells of this binary, as the tail-row censuses joined to
-    # test_077_allversions_builder_roundtrip do.
+    # FIX42.xml, so no new ctest entry is added. Precedent: the tail-row censuses joined
+    # to test_077_allversions_builder_roundtrip, which read the registered cells of their
+    # binary the same way; this binary is a standalone executable, not a grouped bucket.
     test_v42_builder_roundtrip.cpp
   )
   add_dependencies(test_082_v42_nested_exemplar_roundtrip fixpp_codegen_generate)
