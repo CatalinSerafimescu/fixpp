@@ -39,7 +39,7 @@ Depth: a formal pipeline step 8 list, dispositioned at step 9 (`/speckit-checkli
 
 ## The zstd archive, with its ratio measured first
 
-- [ ] CHK008 T158 measures the zstd ratio before the format is chosen. Is it stated that sccache's entries may already be compressed (the report says CI's entries are zstd-compressed), so a ratio near 1 is a likely outcome? Is it stated what is decided then: compress anyway, or skip compression? [Assumption, Tasks T158, T160]
+- [ ] CHK008 T158 measures the zstd ratio before the format is chosen. Is it stated that sccache's entries may already be compressed (the report says CI's entries are zstd-compressed), so a ratio near 1 is a likely outcome? Is it stated that the archive is compressed whatever the ratio, and that the measured ratio decides only whether the archive is split into layers? [Assumption, Tasks T158, T160]
 - [ ] CHK009 Is the compression level the seed step will use stated before T158 measures at it? Must the measurement use a real archive from the asan leg, the largest one, rather than a smaller leg's? [Clarity, Tasks T158]
 - [ ] CHK010 T158 pulls a cache archive, which is untrusted data, into a new empty scratch directory on the build vhdx. Is it stated that nothing in the archive is executed, and that the directory is deleted after the measurement? [Completeness, Tasks T158]
 
