@@ -289,6 +289,32 @@ TEST(Masker_SameLength_FieldAnchored_unit, J_FrameEndOccurrenceNoTrailingSoh_Mas
     }
 }
 
+TEST(Masker_SameLength_FieldAnchored_unit, K_MalformedCountFallback_FrameEndNoTrailingSoh_Masked) {
+    // RawDataLength(95)/RawData(96) is a standard pair, so `dict_hooks::none()` arms it.
+    // Its count runs past the buffer, so the walk takes the malformed-count fallback from
+    // the 96 field on, and the fallback finds a 554 whose value runs to the end of the
+    // buffer with no terminating SOH: the fallback's value end must be the buffer end.
+    auto buf = make_buf(
+        "35=A\x01"
+        "95=999\x01"
+        "96=x\x01"
+        "554=secret");
+    auto before = buf;
+
+    bool result = mask_tag554_same_length_inplace(std::span<std::byte>{buf});
+
+    EXPECT_TRUE(result) << "a 554 found by the malformed-count fallback must be reported";
+    // Layout: 35=A(0..3) \x01(4) 95=999(5..10) \x01(11) 96=x(12..15) \x01(16)
+    //         554=(17..20) secret(21..26), size 27.
+    ASSERT_EQ(buf.size(), 27U);
+    for (std::size_t i = 21; i < 27; ++i) {
+        EXPECT_EQ(buf[i], std::byte{0x2A}) << "value byte " << i << " must be '*'";
+    }
+    for (std::size_t i = 0; i < 21; ++i) {
+        EXPECT_EQ(buf[i], before[i]) << "byte " << i << " before the value must be unchanged";
+    }
+}
+
 TEST(Masker_SameLength_FieldAnchored_unit, I_FrameHasGenuine554_Detector) {
     // Directly exercises frame_has_genuine_tag554 — the detection sibling that
     // store_then_emit's maskability gate calls before masking. Covers all three
