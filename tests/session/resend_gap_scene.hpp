@@ -57,6 +57,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/recording_store.hpp"
 #include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 #include "support/validation_test_dictionary.hpp"
@@ -173,6 +174,11 @@ struct Options {
     // When set, SessionConfig::logout_disconnect_timeout_ms (the too-high Logout's bound T,
     // research D4.4); otherwise SessionConfig's default.
     std::optional<std::uint32_t> logout_timeout_ms = std::nullopt;
+    // True (with_store ignored): the unbounded MemoryStore behind a RecordingStore, whose log
+    // is Scene::log, so a cell can hold one store call. While a hold is in flight the
+    // io_context always has a handler ready: such a cell feeds with feed_spawn() and pumps
+    // with pump_until() or pump_for(), never with feed(), pass() or drain().
+    bool recording_store = false;
 };
 
 // The peer is "TW" and the session "ISLD", FIX.4.2.
@@ -186,6 +192,7 @@ public:
     fixpp::session::SessionConfig cfg;
     std::vector<std::string> sent;  // each frame the session gave its transport callback
     std::unique_ptr<fixpp::session::Session> session;
+    std::shared_ptr<fixpp::test_support::StoreCallLog> log;  // Options::recording_store only
 
     explicit Scene(Options const& o = {}) : app{o.app ? o.app : std::make_shared<GapApp>()} {
         using namespace std::chrono;
@@ -210,7 +217,14 @@ public:
         cfg.executor_override = ioc.get_executor();
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         if (o.logout_timeout_ms) cfg.logout_disconnect_timeout_ms = *o.logout_timeout_ms;
-        if (o.with_store) {
+        if (o.recording_store) {
+            auto const f = std::make_shared<fixpp::test_support::RecordingStoreFactory>(
+                std::make_shared<fixpp::session::MemoryStoreFactory>(
+                    fixpp::session::MemoryStore::Config{
+                        .policy = fixpp::session::capacity_policy::unbounded}));
+            log = f->log;
+            cfg.store_factory = f;
+        } else if (o.with_store) {
             cfg.store_factory = std::make_shared<fixpp::session::MemoryStoreFactory>(
                 fixpp::session::MemoryStore::Config{
                     .policy = fixpp::session::capacity_policy::unbounded});
@@ -410,6 +424,24 @@ public:
         }
         drain();
         return fut.get();
+    }
+
+    // Starts the delivery of one frame and returns its future without running anything.
+    [[nodiscard]] std::future<fixpp::core::expected_t<void>> feed_spawn(std::vector<std::byte> f) {
+        fed_.push_back(std::move(f));
+        return asio::co_spawn(fixpp::test_support::session_executor_of(*session, ioc),
+                              session->on_inbound_frame(fed_.back()), asio::use_future);
+    }
+    // Runs handlers until `pred` holds or `budget` has passed; true if it held.
+    template <class Pred>
+    [[nodiscard]] bool pump_until(
+        Pred pred, std::chrono::steady_clock::duration budget = fixpp::test_support::kPumpBudget) {
+        return fixpp::test_support::pump_until(ioc, std::move(pred), budget,
+                                               fixpp::test_support::kPumpSlice, nullptr);
+    }
+    // Runs handlers for `d` of real time.
+    void pump_for(std::chrono::steady_clock::duration d) {
+        (void)pump_until([] { return false; }, d);
     }
 
     // open(), then the peer's Logon at 1: the session is Active, NextNumIn is 2, and its

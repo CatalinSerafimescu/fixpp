@@ -1,0 +1,473 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// tests/session/test_103_too_high_logout_state.cpp — test-only.
+//
+// Feature 103 (specs/103-resend-logon-reset-fidelity/), fixpp#577, the Logout half: TU2, the
+// cells that read 103 state (the pending-Logout mark's phase, the Logout owner, the bound's
+// join counter; research D4.2 to D4.7, "#577 — a too-high Logout"; tasks T080 onward). The
+// arms that read none are test_103_too_high_logout.cpp's.
+//
+// Every cell runs on both roles, on resend_gap_scene.hpp's Scene. The mock clock moves only
+// where a cell calls pass(); a cell that holds a store call uses Options::recording_store and
+// pumps with the Scene's bounded pumps instead.
+#include <gtest/gtest.h>
+
+#include <asio/co_spawn.hpp>
+#include <asio/use_future.hpp>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <fixpp/core/error.hpp>
+#include <fixpp/session/seqnum.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_fsm.hpp>
+#include <future>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "session/test_103_support.hpp"
+#include "support/session_executor_of.hpp"
+#include "support/session_test_access.hpp"
+
+namespace {
+
+namespace rg = fixpp::test_support::resend_gap;
+using fixpp::session::close_mode;
+using fixpp::session::fsm_state;
+using fixpp::session::seqnum_t;
+using fixpp::session::session_role;
+using fixpp::session::session_test_access;
+
+constexpr std::uint32_t kT = 2000;  // the bound T, in milliseconds
+constexpr int kPending = 1;         // session_test_access::peer_logout_phase's `pending`
+
+// Counts fromAdmin calls by MsgType.
+class AdminCountingApp final : public rg::GapApp {
+public:
+    std::vector<std::string> from_admin_types;
+    fixpp::core::expected_t<void> fromAdmin(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
+        const fixpp::session::SessionId& /*id*/) override {
+        from_admin_types.emplace_back(msg.msg_type());
+        return {};
+    }
+    [[nodiscard]] int from_admin_count(std::string_view msg_type) const {
+        int n = 0;
+        for (auto const& t : from_admin_types) n += static_cast<int>(t == msg_type);
+        return n;
+    }
+};
+
+class TooHighLogoutState103 : public ::testing::TestWithParam<session_role> {};
+
+std::future<fixpp::core::expected_t<void>> spawn_close(rg::Scene& s, close_mode const mode) {
+    return asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                          s.session->close(mode), asio::use_future);
+}
+
+int phase(rg::Scene const& s) { return session_test_access::peer_logout_phase(*s.session); }
+int bound_count(rg::Scene const& s) {
+    return session_test_access::peer_logout_bound_count(*s.session);
+}
+
+// close(graceful)'s phase-1 grace is a real-time timer of T, so a close that waits for it
+// completes within T; the budget is derived from it.
+constexpr auto kCloseBudget = 2 * std::chrono::milliseconds{kT};
+
+}  // namespace
+
+// (e) The Logout while a resend is outstanding: no second ResendRequest, and the
+// acknowledgement at T.
+TEST_P(TooHighLogoutState103, E_LogoutWhileAResendIsOutstanding_NoSecondResendRequestAckAtT) {
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT}};
+    ASSERT_TRUE(s.open_to_active());
+    seqnum_t const n = s.next_in();
+    auto const gap_mark = s.sent.size();
+    (void)s.feed(s.order(n + rg::kGapWidth));
+    ASSERT_EQ(s.count("2", gap_mark), 1U) << "setup: no gap was opened: " << s.written(gap_mark);
+    auto const mark = s.sent.size();
+    (void)s.feed(s.logout(n + rg::kGapWidth + 1));
+    EXPECT_EQ(s.count("2", mark), 0U) << "a second ResendRequest: " << s.written(mark);
+    s.pass(std::chrono::milliseconds{kT});
+    EXPECT_EQ(s.count("5", mark), 1U) << "no acknowledgement at T: " << s.written(mark);
+    EXPECT_EQ(s.state(), fsm_state::Disconnected) << s.written(mark);
+}
+
+// (f), T > 2 × HB: the gap deadline comes first and writes its Logout; the bound writes none
+// after it. The peer answers each TestRequest so the liveness loop does not end the session.
+TEST_P(TooHighLogoutState103, F1_DeadlineBeforeTheBound_ExactlyOneLogout) {
+    constexpr std::uint32_t kLongT = 3 * 30'000;  // above 2 × kHeartBtInt
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kLongT}};
+    ASSERT_TRUE(s.open_to_active());
+    seqnum_t const n = s.next_in();
+    auto const mark = s.sent.size();
+    (void)s.feed(s.logout(n + 3));
+    std::uint32_t seq = n + 3;
+    std::size_t answered = 0;
+    constexpr auto kTick = rg::kHeartBtInt / 2;
+    for (int i = 0; i < 6 && s.state() == fsm_state::Active; ++i) {
+        s.pass(kTick);
+        if (s.count("1") > answered) {
+            (void)s.feed(s.heartbeat(++seq, s.last_test_req_id()));
+            ++answered;
+        }
+    }
+    // Past 2 × HB: a frame above NextNumIn draws the deadline's Logout, if it has not.
+    if (s.state() == fsm_state::Active) (void)s.feed(s.heartbeat(++seq));
+    ASSERT_EQ(s.count("5", mark), 1U) << "the deadline wrote no Logout: " << s.written(mark);
+    s.pass(std::chrono::milliseconds{kLongT});
+    EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
+    EXPECT_EQ(s.state(), fsm_state::Disconnected);
+}
+
+// (f), T < 2 × HB: the bound acknowledges at T; a frame past 2 × HB draws no second Logout.
+TEST_P(TooHighLogoutState103, F2_BoundBeforeTheDeadline_ExactlyOneLogout) {
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT}};
+    ASSERT_TRUE(s.open_to_active());
+    seqnum_t const n = s.next_in();
+    auto const mark = s.sent.size();
+    (void)s.feed(s.logout(n + 3));
+    s.pass(std::chrono::milliseconds{kT});
+    EXPECT_EQ(s.count("5", mark), 1U) << "no acknowledgement at T: " << s.written(mark);
+    s.pass(2 * rg::kHeartBtInt);
+    (void)s.feed(s.heartbeat(n + 4));
+    EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
+}
+
+// (g) close(terminal) while pending: no Logout; the join counter 0 when close() returns.
+TEST_P(TooHighLogoutState103, G_CloseTerminalWhilePending_NoLogout) {
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT}};
+    ASSERT_TRUE(s.open_to_active());
+    seqnum_t const n = s.next_in();
+    (void)s.feed(s.logout(n + 3));
+    ASSERT_EQ(phase(s), kPending) << "setup: no pending mark";
+    auto const mark = s.sent.size();
+    auto close_fut = spawn_close(s, close_mode::terminal);
+    ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(close_fut); }, kCloseBudget));
+    EXPECT_EQ(s.count("5", mark), 0U) << s.written(mark);
+    EXPECT_EQ(bound_count(s), 0);
+}
+
+// (g) close(graceful) while pending: exactly one Logout, phase 1's; the counter 0.
+TEST_P(TooHighLogoutState103, G_CloseGracefulWhilePending_ExactlyOneLogoutPhase1s) {
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT}};
+    ASSERT_TRUE(s.open_to_active());
+    seqnum_t const n = s.next_in();
+    (void)s.feed(s.logout(n + 3));
+    ASSERT_EQ(phase(s), kPending) << "setup: no pending mark";
+    auto const mark = s.sent.size();
+    auto close_fut = spawn_close(s, close_mode::graceful);
+    ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(close_fut); }, kCloseBudget));
+    EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
+    EXPECT_EQ(bound_count(s), 0);
+}
+
+// (h) The Logout resent in sequence while pending: one Logout, the in-sequence
+// acknowledgement; fromAdmin once, for the resent frame.
+TEST_P(TooHighLogoutState103, H_LogoutResentInSequence_OneAckFromAdminOnce) {
+    auto const app = std::make_shared<AdminCountingApp>();
+    rg::Scene s{rg::Options{.role = GetParam(), .app = app, .logout_timeout_ms = kT}};
+    ASSERT_TRUE(s.open_to_active());
+    seqnum_t const n = s.next_in();
+    auto const mark = s.sent.size();
+    (void)s.feed(s.logout(n + 3));
+    ASSERT_EQ(phase(s), kPending) << "setup: no pending mark";
+    (void)s.feed(s.gap_fill(n, n + 3));
+    (void)s.feed(s.logout(n + 3));
+    EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
+    EXPECT_EQ(app->from_admin_count("5"), 1);
+    s.pass(std::chrono::milliseconds{kT});
+    EXPECT_EQ(s.count("5", mark), 1U) << "a second Logout at T: " << s.written(mark);
+}
+
+// (j) A frame that ends the session with no Logout and no close() (a wrong SenderCompID)
+// while pending, the clock not moved: Disconnected, and the join counter 0 within a bounded
+// pump.
+TEST_P(TooHighLogoutState103, J_WrongCompIdWhilePending_CounterZeroWithNoClockMove) {
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT}};
+    ASSERT_TRUE(s.open_to_active());
+    seqnum_t const n = s.next_in();
+    (void)s.feed(s.logout(n + 3));
+    ASSERT_EQ(phase(s), kPending) << "setup: no pending mark";
+    (void)s.feed(s.order_from_other_comp_id(n));
+    EXPECT_EQ(s.state(), fsm_state::Disconnected);
+    EXPECT_TRUE(s.pump_until([&] { return bound_count(s) == 0; }))
+        << "the bound did not exit with the clock not moved";
+}
+
+// (k) A TestRequest and an in-sequence ResendRequest while pending: a Heartbeat with the
+// TestReqID, then the replay; Active with the mark pending.
+TEST_P(TooHighLogoutState103, K_AdminTrafficWhilePending_AnsweredStillPending) {
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT}};
+    ASSERT_TRUE(s.open_to_active());
+    seqnum_t const n = s.next_in();
+    (void)s.feed(s.logout(n + 3));
+    auto const mark = s.sent.size();
+    (void)s.feed(s.test_request(n));
+    auto const hb = s.of_type("0", mark);
+    ASSERT_EQ(hb.size(), 1U) << s.written(mark);
+    EXPECT_EQ(rg::field(hb.front(), 112), "PEER-TR") << s.written(mark);
+    auto const rr_mark = s.sent.size();
+    (void)s.feed(s.resend_request(n + 1));
+    EXPECT_GE(s.count("4", rr_mark), 1U) << "no replay: " << s.written(rr_mark);
+    EXPECT_EQ(s.state(), fsm_state::Active);
+    EXPECT_EQ(phase(s), kPending);
+}
+
+// ── Held store calls: R-588-e and LO-1 ───────────────────────────────────────────────
+
+namespace {
+
+using fixpp::test_support::store_op;
+using fixpp::test_support::StoreCall;
+
+// The next outbound number: the one the session's next frame takes.
+seqnum_t next_out(rg::Scene const& s) {
+    return session_test_access::seqnum_mgr(*s.session).peek_outbound();
+}
+// Holds the store() of outbound number `seq`.
+void hold_store_of(rg::Scene& s, seqnum_t const seq) {
+    s.log->hold_in = [seq](StoreCall const& c) {
+        return c.op == store_op::store && c.dir == fixpp::session::direction_t::outbound &&
+               c.first == seq;
+    };
+}
+// A PossDup NewOrderSingle whose OrigSendingTime(122) is a minute after its SendingTime(52):
+// on_inbound_active_poss_dup_'s Arm D, a Reject and then a Logout.
+std::vector<std::byte> poss_dup_order_with_later_orig(rg::Scene const& s, std::uint32_t seq) {
+    return rg::Scene::raw("D", seq, "TW", s.sending_time(),
+                          "43=Y\x01"
+                          "122=" +
+                              s.sending_time(std::chrono::seconds{60}) + "\x01" +
+                              rg::Scene::order_fields(seq));
+}
+
+// Brings a recording-store Scene to Active with the log armed.
+[[nodiscard]] bool active_recorded(rg::Scene& s) {
+    if (!s.open_to_active()) return false;
+    s.log->arm();
+    return true;
+}
+
+}  // namespace
+
+// LO-1 (research D4.6; tasks T082): an inbound Logout emitter's Logout is held in its store;
+// close(graceful) is spawned; the hold is released. Exactly one Logout, the emitter's, and
+// close() returns with the owner clear. Control: close(graceful) with no Logout in flight
+// sends phase 1's.
+enum class Emitter : std::uint8_t {
+    in_sequence_ack,
+    bound_zero_ack,
+    sending_time_fatal,
+    arm_d,
+    gap_deadline
+};
+struct Lo1Case {
+    Emitter emitter;
+    bool with_mark;
+};
+
+class Lo1 : public ::testing::TestWithParam<std::tuple<session_role, Lo1Case>> {};
+
+TEST_P(Lo1, InboundLogoutHeldThenCloseGraceful_ExactlyOneLogout) {
+    auto const [role, c] = GetParam();
+    rg::Scene s{rg::Options{.role = role,
+                            .logout_timeout_ms = c.emitter == Emitter::bound_zero_ack ? 0 : kT,
+                            .recording_store = true}};
+    ASSERT_TRUE(active_recorded(s)) << "setup";
+    seqnum_t n = s.next_in();
+    if (c.with_mark) {
+        (void)s.feed(s.logout(n + 3));
+        ASSERT_EQ(phase(s), kPending) << "setup: no pending mark";
+        (void)s.feed(s.gap_fill(n, n + 3));  // N to S, which does not pass it
+        n = s.next_in();
+    }
+    std::uint32_t deadline_seq = 0;
+    if (c.emitter == Emitter::gap_deadline) {
+        (void)s.feed(s.order(n + rg::kGapWidth));
+        deadline_seq = n + rg::kGapWidth;
+        std::size_t answered = 0;
+        for (int i = 0; i < 4 && s.state() == fsm_state::Active; ++i) {
+            s.pass(rg::kHeartBtInt / 2);
+            if (s.count("1") > answered) {
+                (void)s.feed(s.heartbeat(++deadline_seq, s.last_test_req_id()));
+                ++answered;
+            }
+        }
+        ASSERT_EQ(s.state(), fsm_state::Active) << "setup: " << s.written();
+        s.pass(std::chrono::seconds{1});
+    }
+    // The emitter's Logout is the session's frame after any Reject.
+    seqnum_t const logout_seq =
+        next_out(s) +
+        ((c.emitter == Emitter::sending_time_fatal || c.emitter == Emitter::arm_d) ? 1U : 0U);
+    hold_store_of(s, logout_seq);
+    auto const mark = s.sent.size();
+    std::vector<std::byte> frame;
+    switch (c.emitter) {
+        case Emitter::in_sequence_ack:
+            frame = s.logout(n);
+            break;
+        case Emitter::bound_zero_ack:
+            frame = s.logout(n + 3);
+            break;
+        case Emitter::sending_time_fatal:
+            frame = s.order_with_stale_sending_time(n);
+            break;
+        case Emitter::arm_d:
+            frame = poss_dup_order_with_later_orig(s, n);
+            break;
+        case Emitter::gap_deadline:
+            frame = s.heartbeat(++deadline_seq);
+            break;
+    }
+    auto feed_fut = s.feed_spawn(frame);
+    ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); }))
+        << "setup: the emitter's Logout store was not held: " << s.written(mark);
+    auto close_fut = spawn_close(s, close_mode::graceful);
+    s.pump_for(std::chrono::milliseconds{20});
+    s.log->release_hold();
+    EXPECT_TRUE(s.pump_until(
+        [&] { return rg::Scene::ready(close_fut) && rg::Scene::ready(feed_fut); }, kCloseBudget))
+        << "close() or the delivery did not return";
+    EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
+    EXPECT_FALSE(session_test_access::logout_in_flight(*s.session));
+    if (c.emitter == Emitter::bound_zero_ack) {
+        EXPECT_EQ(s.count("2", mark), 0U)
+            << "the T = 0 Logout drew a ResendRequest: " << s.written(mark);
+    }
+}
+
+TEST_P(TooHighLogoutState103, Lo1Control_CloseGracefulWithNoLogoutInFlight_SendsPhase1s) {
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT}};
+    ASSERT_TRUE(s.open_to_active());
+    auto const mark = s.sent.size();
+    auto close_fut = spawn_close(s, close_mode::graceful);
+    ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(close_fut); }, kCloseBudget));
+    EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
+}
+
+// LO-1's Arm B emitter: its too-low Logout lands at tasks T147.
+TEST_P(TooHighLogoutState103, Lo1_ArmBEmitter) {
+    GTEST_SKIP() << "Arm B's too-low Logout lands at tasks T147";
+}
+
+// R-588-e (1) (US3 AS7; tasks T081): with the mark set, a too-high ResendRequest starts a
+// walk held at its read; the clock moves to T, so the bound waits at the replay gate; the
+// hold is released. The acknowledgement follows the answer, exactly one Logout.
+TEST_P(TooHighLogoutState103, R588e1_BoundAtTheGateBehindAHeldWalk_AckAfterTheAnswer) {
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT, .recording_store = true}};
+    ASSERT_TRUE(active_recorded(s)) << "setup";
+    seqnum_t const n = s.next_in();
+    (void)s.feed(s.logout(n + 3));
+    ASSERT_EQ(phase(s), kPending) << "setup: no pending mark";
+    s.log->hold_in = [](StoreCall const& c) { return c.op == store_op::retrieve; };
+    auto const mark = s.sent.size();
+    auto rr_fut = s.feed_spawn(s.resend_request(n + 5));
+    ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); })) << "setup: the walk was not held";
+    auto const& gate = session_test_access::replay_gate(*s.session);
+    auto const waits = gate.timer_waits;
+    s.mock->advance(std::chrono::milliseconds{kT});
+    ASSERT_TRUE(s.pump_until([&] { return gate.timer_waits > waits; }))
+        << "setup: the bound did not wait at the gate";
+    s.log->release_hold();
+    ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(rr_fut) && s.count("5", mark) != 0; }));
+    s.pump_for(std::chrono::milliseconds{20});
+    EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
+    std::size_t last_answer = 0;
+    std::size_t ack = 0;
+    for (std::size_t i = mark; i < s.sent.size(); ++i) {
+        if (rg::field(s.sent[i], 43) == "Y" || rg::field(s.sent[i], 123) == "Y") last_answer = i;
+        if (rg::field(s.sent[i], 35) == "5") ack = i;
+    }
+    EXPECT_GT(ack, last_answer) << "the acknowledgement precedes the answer: " << s.written(mark);
+}
+
+// R-588-e (2): close(graceful) while the bound waits at the gate: one Logout, phase 1's.
+TEST_P(TooHighLogoutState103, R588e2_CloseGracefulWhileTheBoundWaitsAtTheGate_OneLogout) {
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT, .recording_store = true}};
+    ASSERT_TRUE(active_recorded(s)) << "setup";
+    seqnum_t const n = s.next_in();
+    (void)s.feed(s.logout(n + 3));
+    ASSERT_EQ(phase(s), kPending) << "setup: no pending mark";
+    s.log->hold_in = [](StoreCall const& c) { return c.op == store_op::retrieve; };
+    auto const mark = s.sent.size();
+    auto rr_fut = s.feed_spawn(s.resend_request(n + 5));
+    ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); })) << "setup: the walk was not held";
+    auto const& gate = session_test_access::replay_gate(*s.session);
+    auto const waits = gate.timer_waits;
+    s.mock->advance(std::chrono::milliseconds{kT});
+    ASSERT_TRUE(s.pump_until([&] { return gate.timer_waits > waits; }))
+        << "setup: the bound did not wait at the gate";
+    auto close_fut = spawn_close(s, close_mode::graceful);
+    s.pump_for(std::chrono::milliseconds{20});
+    s.log->release_hold();
+    EXPECT_TRUE(s.pump_until(
+        [&] { return rg::Scene::ready(close_fut) && rg::Scene::ready(rr_fut); }, kCloseBudget));
+    EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
+}
+
+// R-588-e (3): the bound has claimed and its acknowledgement's store is held;
+// close(graceful) is spawned; the hold is released. Exactly one Logout, the
+// acknowledgement, and close() returns.
+TEST_P(TooHighLogoutState103, R588e3_AckStoreHeldThenCloseGraceful_ExactlyOneLogout) {
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT, .recording_store = true}};
+    ASSERT_TRUE(active_recorded(s)) << "setup";
+    seqnum_t const n = s.next_in();
+    (void)s.feed(s.logout(n + 3));
+    ASSERT_EQ(phase(s), kPending) << "setup: no pending mark";
+    hold_store_of(s, next_out(s));
+    auto const mark = s.sent.size();
+    s.mock->advance(std::chrono::milliseconds{kT});
+    ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); }))
+        << "setup: the acknowledgement's store was not held";
+    auto close_fut = spawn_close(s, close_mode::graceful);
+    s.pump_for(std::chrono::milliseconds{20});
+    s.log->release_hold();
+    EXPECT_TRUE(s.pump_until([&] { return rg::Scene::ready(close_fut); }, kCloseBudget));
+    EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
+}
+
+INSTANTIATE_TEST_SUITE_P(BothRoles, TooHighLogoutState103,
+                         ::testing::Values(session_role::initiator, session_role::acceptor),
+                         [](auto const& info) { return std::string{rg::role_name(info.param)}; });
+
+std::string lo1_name(::testing::TestParamInfo<std::tuple<session_role, Lo1Case>> const& info) {
+    auto const& c = std::get<1>(info.param);
+    std::string e;
+    switch (c.emitter) {
+        case Emitter::in_sequence_ack:
+            e = "InSequenceAck";
+            break;
+        case Emitter::bound_zero_ack:
+            e = "BoundZeroAck";
+            break;
+        case Emitter::sending_time_fatal:
+            e = "SendingTimeFatal";
+            break;
+        case Emitter::arm_d:
+            e = "ArmD";
+            break;
+        case Emitter::gap_deadline:
+            e = "GapDeadline";
+            break;
+    }
+    return std::string{rg::role_name(std::get<0>(info.param))} + e +
+           (c.with_mark ? "WithMark" : "NoMark");
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    BothRolesEveryEmitter, Lo1,
+    ::testing::Combine(::testing::Values(session_role::initiator, session_role::acceptor),
+                       ::testing::Values(Lo1Case{Emitter::in_sequence_ack, false},
+                                         Lo1Case{Emitter::in_sequence_ack, true},
+                                         Lo1Case{Emitter::bound_zero_ack, false},
+                                         Lo1Case{Emitter::sending_time_fatal, false},
+                                         Lo1Case{Emitter::sending_time_fatal, true},
+                                         Lo1Case{Emitter::arm_d, false},
+                                         Lo1Case{Emitter::arm_d, true},
+                                         Lo1Case{Emitter::gap_deadline, false})),
+    lo1_name);
