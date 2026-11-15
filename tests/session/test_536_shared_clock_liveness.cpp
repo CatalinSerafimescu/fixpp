@@ -71,6 +71,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 using namespace std::chrono_literals;
 
@@ -226,7 +227,8 @@ protected:
                                "SharedClockLiveness::close_a_T");
                 break;
             case Trigger::graceful_confirmed: {
-                auto fut = asio::co_spawn(ioc, a.close(close_mode::graceful), asio::use_future);
+                auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(a, ioc),
+                                          a.close(close_mode::graceful), asio::use_future);
                 // Wait for A to send its Logout, then confirm it as the peer.
                 if (!fixpp::test_support::pump_until(
                         ioc, [&] { return a.state() == fsm_state::LogoutSent; },

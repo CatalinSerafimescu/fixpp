@@ -53,6 +53,7 @@
 #include "support/pump_until_ready.hpp"
 #include "support/recording_store.hpp"
 #include "support/seqnum_manager_test_access.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 #include "support/temp_dir.hpp"
 
@@ -188,7 +189,8 @@ protected:
     }
 
     fixpp::core::expected_t<void> run_open(fixpp::session::Session& s) {
-        auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc), s.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 100ms,
                                                         "ResetSeqnumPolicyMatrixTest::run_open")) {
             fixpp::test_support::cancel_and_drain_or_report(
@@ -202,7 +204,8 @@ protected:
 
     fixpp::core::expected_t<void> feed(fixpp::session::Session& s,
                                        std::span<const std::byte> frame) {
-        auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc),
+                                  s.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 100ms,
                                                         "ResetSeqnumPolicyMatrixTest::feed")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,

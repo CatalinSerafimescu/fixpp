@@ -55,6 +55,7 @@
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/seqnum_manager_test_access.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
@@ -283,7 +284,8 @@ protected:
     // consume the result with a fatal `ASSERT_TRUE(...has_value())`, so a miss cannot
     // be mistaken for a successful open.
     fixpp::core::expected_t<void> open_sync(Session& s) {
-        auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc), s.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "SendPathTest::open_sync");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "SendPathTest::open_sync";
@@ -322,7 +324,8 @@ protected:
     // over -- this fixture HAS a clock, and the later resumer here is the test body's
     // next pump, not a fixture destructor.
     void feed(Session& s, const std::vector<std::byte>& frame) {
-        auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc),
+                                  s.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "SendPathTest::feed");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "SendPathTest::feed";
@@ -372,8 +375,8 @@ TEST_F(SendPathTest, Fix44_Active_Send_IncrementsSeqnum_And_StampsFields) {
 
     // Call Session::send with a dummy application payload.
     auto payload = make_min_app_payload();
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
             ioc, *clock, "Fix44_Active_Send_IncrementsSeqnum_And_StampsFields/send");
@@ -443,8 +446,8 @@ TEST_F(SendPathTest, Fix42_Active_Send_CarriesNegotiatedBeginString) {
     drive_to_active(sess, "FIX.4.2");
 
     auto payload = make_min_app_payload();
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
             ioc, *clock, "Fix42_Active_Send_CarriesNegotiatedBeginString/send");
@@ -504,8 +507,8 @@ TEST_F(SendPathTest, CancelledTransport_ReturnsDefinedError_StoreAlreadyCommitte
         static_cast<std::size_t>(std::count(call_log.begin(), call_log.end(), "store_out"));
 
     auto payload = make_min_app_payload();
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
             ioc, *clock, "CancelledTransport_ReturnsDefinedError_StoreAlreadyCommitted/send");
@@ -632,8 +635,8 @@ TEST_F(SendPathTest, Send_NotInActive_ReturnsError_NoFrameEmitted_NoSeqnumConsum
 
     // Call send() while in LogonSent (not Active).
     auto payload = make_min_app_payload();
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
             ioc, *clock, "Send_NotInActive_ReturnsError_NoFrameEmitted_NoSeqnumConsumed/send");
@@ -746,8 +749,8 @@ TEST_F(SendPathTest, Send_StoreThrowsOperationAborted_ReturnsDefinedError_NoTerm
     *throw_flag = true;
 
     auto payload = make_min_app_payload();
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
             ioc, *clock, "Send_StoreThrowsOperationAborted_ReturnsDefinedError_NoTerminate/send");
@@ -785,8 +788,8 @@ TEST_F(SendPathTest, Send_ThrowFromStore_SessionReachesDisconnected) {
     *throw_flag = true;
 
     auto payload = make_min_app_payload();
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
             ioc, *clock, "Send_ThrowFromStore_SessionReachesDisconnected/send");
@@ -835,8 +838,8 @@ TEST_F(SendPathTest, Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums) {
     // First send.
     auto payload = make_min_app_payload();
     {
-        auto fut =
-            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.send(std::span<const std::byte>(payload)), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
             fixpp::test_support::cancel_and_drain_or_report(
                 ioc, *clock, "Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums/send1");
@@ -848,8 +851,8 @@ TEST_F(SendPathTest, Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums) {
     }
     // Second send.
     {
-        auto fut =
-            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.send(std::span<const std::byte>(payload)), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
             fixpp::test_support::cancel_and_drain_or_report(
                 ioc, *clock, "Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums/send2");
@@ -928,8 +931,8 @@ TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_AfterLogon_FirstSend_IsTwo) {
     // Call Session::send once.
     auto payload = make_min_app_payload();
     {
-        auto fut =
-            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.send(std::span<const std::byte>(payload)), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
             fixpp::test_support::cancel_and_drain_or_report(
                 ioc, *clock, "AbsoluteSeqnumIntegrity_AfterLogon_FirstSend_IsTwo/send");
@@ -971,8 +974,8 @@ TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_OpenSendSend_OnWireIsOneTwoThree) {
     auto payload = make_min_app_payload();
     // First send.
     {
-        auto fut =
-            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.send(std::span<const std::byte>(payload)), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
             fixpp::test_support::cancel_and_drain_or_report(
                 ioc, *clock, "AbsoluteSeqnumIntegrity_OpenSendSend_OnWireIsOneTwoThree/send1");
@@ -984,8 +987,8 @@ TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_OpenSendSend_OnWireIsOneTwoThree) {
     }
     // Second send.
     {
-        auto fut =
-            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.send(std::span<const std::byte>(payload)), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
             fixpp::test_support::cancel_and_drain_or_report(
                 ioc, *clock, "AbsoluteSeqnumIntegrity_OpenSendSend_OnWireIsOneTwoThree/send2");
@@ -1049,8 +1052,8 @@ TEST_F(SendPathTest, Send_TransportThrowsAfterStore_ReturnsDefinedError_StateDis
     *transport_throw = true;
 
     auto payload = make_min_app_payload();
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
                                                         "Send_TransportThrowsAfterStore/send");
@@ -1147,7 +1150,8 @@ TEST_F(SendPathTest, AdminEmit_HeartbeatReply_SeqnumOverflow_DoesNotEmit_Reaches
         }
     }
 
-    auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{tr_frame}),
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.on_inbound_frame(std::span<const std::byte>{tr_frame}),
                               asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
@@ -1211,8 +1215,8 @@ TEST_F(SendPathTest, Send_SeqnumOverflow_ReturnsError_ReachesDisconnected_NoTran
                                                              seqnum_max);
 
     auto payload = make_min_app_payload();
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
             ioc, *clock, "Send_SeqnumOverflow_ReturnsError_ReachesDisconnected_NoTransmit/send");

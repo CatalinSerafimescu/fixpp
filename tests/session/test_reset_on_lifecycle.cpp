@@ -62,6 +62,7 @@
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/seqnum_manager_test_access.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 #include "support/store_double.hpp"
 
@@ -250,7 +251,8 @@ protected:
     // Open (initiator: sends Logon; acceptor: waits for inbound Logon).
     // Returns the open() result.
     fixpp::core::expected_t<void> open_sync(Session& sess) {
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
                                                         "ResetOnLifecycleTest::open_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -263,7 +265,8 @@ protected:
 
     // Feed an inbound frame synchronously.
     fixpp::core::expected_t<void> feed_sync(Session& sess, const std::vector<std::byte>& frame) {
-        auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
                                                         "ResetOnLifecycleTest::feed_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -277,7 +280,8 @@ protected:
     // Drive a graceful close to completion: advance the clock past the 2 s
     // graceful-close (Logout) timeout so teardown completes.
     void graceful_close_sync(Session& sess) {
-        auto fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.close(close_mode::graceful), asio::use_future);
         // ⚠️ A STAGING WINDOW, AND A BLIND ONE IS NOT SAFE JUST BECAUSE NO `get()`
         // FOLLOWS IT. Its job is to get `close(graceful)` to its MOCK-CLOCK sleep
         // before the advance below fires that sleep. If the coroutine has not parked
@@ -325,7 +329,8 @@ protected:
     // Drive a terminal close to completion: abnormal drop / post-Logout teardown
     // (no graceful Logout exchange, so no clock advance needed).
     void terminal_close_sync(Session& sess) {
-        auto fut = asio::co_spawn(ioc, sess.close(close_mode::terminal), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.close(close_mode::terminal), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(
                 ioc, fut, 200ms, "ResetOnLifecycleTest::terminal_close_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(

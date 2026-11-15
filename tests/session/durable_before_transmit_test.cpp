@@ -49,6 +49,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -86,7 +87,8 @@ protected:
     }
 
     fixpp::core::expected_t<void> open_sync(Session& s) {
-        auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc), s.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
                                                         "DurableBeforeTransmitTest::open_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -159,7 +161,8 @@ TEST_F(DurableBeforeTransmitTest, InboundStoreBeforeFromAdminDispatch) {
     }
 
     // Feed the inbound Logon.
-    auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(logon_frame), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.on_inbound_frame(logon_frame), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
                                                     "InboundStoreBeforeFromAdminDispatch")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -318,7 +321,8 @@ TEST_F(DurableBeforeTransmitTest, OutboundStoreBeforeTransportSend) {
             logon_ack.push_back(static_cast<std::byte>(c));
         }
 
-        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
+        auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                   sess.on_inbound_frame(logon_ack), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(
                 ioc, fut2, 200ms, "OutboundStoreBeforeTransportSend/logon-ack")) {
             fixpp::test_support::cancel_and_drain_or_report(
@@ -334,7 +338,8 @@ TEST_F(DurableBeforeTransmitTest, OutboundStoreBeforeTransportSend) {
     // Trigger an outbound: close(graceful) builds + emits a Logout via
     // store_then_emit() (the I-3 outbound-half code path), then advance the mock clock
     // past the 2 s timeout so phase-1 returns and close() completes.
-    auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                    sess.close(close_mode::graceful), asio::use_future);
     // #289 STAGING BARRIER. "Drive ioc briefly so close() registers its 2s sleep" was
     // the old comment and it named the requirement exactly -- a fixed `run_for(100ms)`
     // just did not MEET it. If the coroutine has not parked when a wall-clock window

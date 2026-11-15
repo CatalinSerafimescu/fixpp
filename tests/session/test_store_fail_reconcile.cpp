@@ -71,6 +71,7 @@
 #include "support/extract_tag.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
@@ -266,15 +267,17 @@ TEST_F(StoreFailReconcileTest, VariantA_PlainPersistent_CleanResumeAtK) {
 
     auto sess = std::make_unique<Session>(engine_, cfg);
 
-    auto open_r = asio::co_spawn(sx_, sess->open(), asio::use_future).get();
+    auto open_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_), sess->open(),
+                                 asio::use_future)
+                      .get();
     ASSERT_TRUE(open_r.has_value()) << "open() must succeed";
     ASSERT_EQ(sess->state(), fsm_state::LogonSent);
 
     auto peer_logon = make_logon("FIX.4.2", 1, "ACCEPTR", "INITR");
-    auto logon_r =
-        asio::co_spawn(sx_, sess->on_inbound_frame(std::span<const std::byte>(peer_logon)),
-                       asio::use_future)
-            .get();
+    auto logon_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                                  sess->on_inbound_frame(std::span<const std::byte>(peer_logon)),
+                                  asio::use_future)
+                       .get();
     ASSERT_TRUE(logon_r.has_value()) << "peer Logon-ack must be accepted";
     ASSERT_EQ(sess->state(), fsm_state::Active);
 
@@ -283,7 +286,8 @@ TEST_F(StoreFailReconcileTest, VariantA_PlainPersistent_CleanResumeAtK) {
 
     auto payload_pre = make_app_payload("ORD-PRE");
     auto pre_r =
-        asio::co_spawn(sx_, sess->send(std::span<const std::byte>(payload_pre)), asio::use_future)
+        asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                       sess->send(std::span<const std::byte>(payload_pre)), asio::use_future)
             .get();
     ASSERT_TRUE(pre_r.has_value()) << "the baseline (pre-failure) send must succeed";
 
@@ -291,9 +295,9 @@ TEST_F(StoreFailReconcileTest, VariantA_PlainPersistent_CleanResumeAtK) {
 
     fixpp::session::arm_force_store_pwrite_fail_once();
     auto payload_k = make_app_payload("ORD-K");
-    auto k_r =
-        asio::co_spawn(sx_, sess->send(std::span<const std::byte>(payload_k)), asio::use_future)
-            .get();
+    auto k_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                              sess->send(std::span<const std::byte>(payload_k)), asio::use_future)
+                   .get();
 
     ASSERT_GE(fixpp::session::read_and_reset_store_pwrite_fail_count(), 1)
         << "the FileStore pwrite fault-injection seam must have fired for message k=" << k;
@@ -317,7 +321,9 @@ TEST_F(StoreFailReconcileTest, VariantA_PlainPersistent_CleanResumeAtK) {
     // ONLY vehicle that can witness the reconcile (a fresh-Session restart
     // would re-hydrate next_outbound from the unchanged durable file,
     // bypassing the in-memory reconcile entirely).
-    auto reconnect_r = asio::co_spawn(sx_, sess->drive_reconnect(), asio::use_future).get();
+    auto reconnect_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                                      sess->drive_reconnect(), asio::use_future)
+                           .get();
     ASSERT_TRUE(reconnect_r.has_value())
         << "drive_reconnect() must succeed (mock transport connect+handshake); "
            "no repeating disconnect";
@@ -339,7 +345,8 @@ TEST_F(StoreFailReconcileTest, VariantA_PlainPersistent_CleanResumeAtK) {
            "outbound-only; no reset ran on this variant)";
 
     // Teardown; call alone (not its result) drains the detached liveness loop.
-    (void)asio::co_spawn(sx_, sess->close(fixpp::session::close_mode::terminal), asio::use_future)
+    (void)asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                         sess->close(fixpp::session::close_mode::terminal), asio::use_future)
         .get();
 }
 
@@ -354,15 +361,17 @@ TEST_F(StoreFailReconcileTest, VariantB_ResetOnLogon_ReconnectLogonAtOneWellForm
 
     auto sess = std::make_unique<Session>(engine_, cfg);
 
-    auto open_r = asio::co_spawn(sx_, sess->open(), asio::use_future).get();
+    auto open_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_), sess->open(),
+                                 asio::use_future)
+                      .get();
     ASSERT_TRUE(open_r.has_value()) << "open() must succeed";
     ASSERT_EQ(sess->state(), fsm_state::LogonSent);
 
     auto peer_logon = make_logon("FIX.4.2", 1, "ACCEPTR", "INITR");
-    auto logon_r =
-        asio::co_spawn(sx_, sess->on_inbound_frame(std::span<const std::byte>(peer_logon)),
-                       asio::use_future)
-            .get();
+    auto logon_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                                  sess->on_inbound_frame(std::span<const std::byte>(peer_logon)),
+                                  asio::use_future)
+                       .get();
     ASSERT_TRUE(logon_r.has_value()) << "peer Logon-ack must be accepted";
     ASSERT_EQ(sess->state(), fsm_state::Active);
 
@@ -371,7 +380,8 @@ TEST_F(StoreFailReconcileTest, VariantB_ResetOnLogon_ReconnectLogonAtOneWellForm
 
     auto payload_pre = make_app_payload("ORD-PRE");
     auto pre_r =
-        asio::co_spawn(sx_, sess->send(std::span<const std::byte>(payload_pre)), asio::use_future)
+        asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                       sess->send(std::span<const std::byte>(payload_pre)), asio::use_future)
             .get();
     ASSERT_TRUE(pre_r.has_value()) << "the baseline (pre-failure) send must succeed";
 
@@ -379,9 +389,9 @@ TEST_F(StoreFailReconcileTest, VariantB_ResetOnLogon_ReconnectLogonAtOneWellForm
 
     fixpp::session::arm_force_store_pwrite_fail_once();
     auto payload_k = make_app_payload("ORD-K");
-    auto k_r =
-        asio::co_spawn(sx_, sess->send(std::span<const std::byte>(payload_k)), asio::use_future)
-            .get();
+    auto k_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                              sess->send(std::span<const std::byte>(payload_k)), asio::use_future)
+                   .get();
 
     ASSERT_GE(fixpp::session::read_and_reset_store_pwrite_fail_count(), 1)
         << "the FileStore pwrite fault-injection seam must have fired for message k=" << k;
@@ -398,7 +408,9 @@ TEST_F(StoreFailReconcileTest, VariantB_ResetOnLogon_ReconnectLogonAtOneWellForm
         << "the reconcile is outbound-only; inbound sequencing must be unaffected at "
            "disconnect time (the durable reset has not run yet)";
 
-    auto reconnect_r = asio::co_spawn(sx_, sess->drive_reconnect(), asio::use_future).get();
+    auto reconnect_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                                      sess->drive_reconnect(), asio::use_future)
+                           .get();
     ASSERT_TRUE(reconnect_r.has_value())
         << "drive_reconnect() must succeed (mock transport connect+handshake); "
            "no repeating disconnect";
@@ -425,7 +437,8 @@ TEST_F(StoreFailReconcileTest, VariantB_ResetOnLogon_ReconnectLogonAtOneWellForm
            "inbound sequencing after reconnect must be 1, not the pre-reset value";
 
     // Teardown; call alone (not its result) drains the detached liveness loop.
-    (void)asio::co_spawn(sx_, sess->close(fixpp::session::close_mode::terminal), asio::use_future)
+    (void)asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                         sess->close(fixpp::session::close_mode::terminal), asio::use_future)
         .get();
 }
 
@@ -442,7 +455,9 @@ TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNo
 
     auto sess = std::make_unique<Session>(engine_, cfg);
 
-    auto open_r = asio::co_spawn(sx_, sess->open(), asio::use_future).get();
+    auto open_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_), sess->open(),
+                                 asio::use_future)
+                      .get();
     ASSERT_TRUE(open_r.has_value()) << "open() must succeed";
     ASSERT_EQ(sess->state(), fsm_state::LogonSent);
     // bilateral_strict unconditionally emits 141=Y in our own Logon; confirm
@@ -455,10 +470,10 @@ TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNo
     // initiator disconnects with session_seqnum_reset_mismatch (the RC#C bilateral_strict
     // initiator-path guard).
     auto peer_logon = make_logon_reset("FIX.4.2", 1, "ACCEPTR", "INITR");
-    auto logon_r =
-        asio::co_spawn(sx_, sess->on_inbound_frame(std::span<const std::byte>(peer_logon)),
-                       asio::use_future)
-            .get();
+    auto logon_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                                  sess->on_inbound_frame(std::span<const std::byte>(peer_logon)),
+                                  asio::use_future)
+                       .get();
     ASSERT_TRUE(logon_r.has_value()) << "peer Logon-ack (with 141=Y) must be accepted";
     ASSERT_EQ(sess->state(), fsm_state::Active);
 
@@ -467,7 +482,8 @@ TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNo
 
     auto payload_pre = make_app_payload("ORD-PRE");
     auto pre_r =
-        asio::co_spawn(sx_, sess->send(std::span<const std::byte>(payload_pre)), asio::use_future)
+        asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                       sess->send(std::span<const std::byte>(payload_pre)), asio::use_future)
             .get();
     ASSERT_TRUE(pre_r.has_value()) << "the baseline (pre-failure) send must succeed";
 
@@ -477,9 +493,9 @@ TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNo
 
     fixpp::session::arm_force_store_pwrite_fail_once();
     auto payload_k = make_app_payload("ORD-K");
-    auto k_r =
-        asio::co_spawn(sx_, sess->send(std::span<const std::byte>(payload_k)), asio::use_future)
-            .get();
+    auto k_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                              sess->send(std::span<const std::byte>(payload_k)), asio::use_future)
+                   .get();
 
     ASSERT_GE(fixpp::session::read_and_reset_store_pwrite_fail_count(), 1)
         << "the FileStore pwrite fault-injection seam must have fired for message k=" << k;
@@ -494,7 +510,9 @@ TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNo
               inbound_before)
         << "the reconcile is outbound-only; inbound sequencing must be unaffected";
 
-    auto reconnect_r = asio::co_spawn(sx_, sess->drive_reconnect(), asio::use_future).get();
+    auto reconnect_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                                      sess->drive_reconnect(), asio::use_future)
+                           .get();
     ASSERT_TRUE(reconnect_r.has_value())
         << "drive_reconnect() must succeed (mock transport connect+handshake); "
            "no repeating disconnect";
@@ -520,7 +538,8 @@ TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNo
         << inbound_before << ") does not survive";
 
     // Teardown; call alone (not its result) drains the detached liveness loop.
-    (void)asio::co_spawn(sx_, sess->close(fixpp::session::close_mode::terminal), asio::use_future)
+    (void)asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                         sess->close(fixpp::session::close_mode::terminal), asio::use_future)
         .get();
 }
 
@@ -578,11 +597,14 @@ protected:
         };
 
         auto sess = std::make_unique<Session>(engine_, cfg);
-        auto open_r = asio::co_spawn(sx_, sess->open(), asio::use_future).get();
+        auto open_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                                     sess->open(), asio::use_future)
+                          .get();
         ASSERT_TRUE(open_r.has_value()) << what << ": open() must succeed";
 
         auto feed = [&](const std::vector<std::byte>& f) {
-            return asio::co_spawn(sx_, sess->on_inbound_frame(std::span<const std::byte>(f)),
+            return asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                                  sess->on_inbound_frame(std::span<const std::byte>(f)),
                                   asio::use_future)
                 .get();
         };
@@ -611,8 +633,8 @@ protected:
         EXPECT_EQ(app->from_app_count, from_app_before) << what << ": no fromApp";
         EXPECT_EQ(app->from_admin_count, from_admin_before) << what << ": no fromAdmin";
 
-        (void)asio::co_spawn(sx_, sess->close(fixpp::session::close_mode::terminal),
-                             asio::use_future)
+        (void)asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                             sess->close(fixpp::session::close_mode::terminal), asio::use_future)
             .get();
         sess.reset();
 

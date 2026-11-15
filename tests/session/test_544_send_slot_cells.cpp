@@ -77,6 +77,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
@@ -304,10 +305,12 @@ TEST(B35SendSlot, Interleaved_EachSendStoresAndTransmitsItsOwnFrame) {
     const auto ex = sess.executor().underlying();
     // A spawn from the session strand runs the send inline until its first suspension.
     auto driver = [&]() -> asio::awaitable<void> {
-        asio::co_spawn(ex, sess.send(one), record_into(r1));
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ex), sess.send(one),
+                       record_into(r1));
         to_app_after_first = f.app->to_app_calls;
         first_pending_when_second_started = !r1.done;
-        asio::co_spawn(ex, sess.send(two), record_into(r2));
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ex), sess.send(two),
+                       record_into(r2));
         to_app_after_second = f.app->to_app_calls;
         co_return;
     };
@@ -374,7 +377,8 @@ TEST(B35SendSlot, Nested_ASendInsideToAppLeavesTheOuterFrameIntact) {
             outer_to_app_live = true;
             snapshot = text_of(mv.bytes());
             outer_data = mv.bytes().data();
-            asio::co_spawn(ex, sess.send(two), record_into(inner));
+            asio::co_spawn(fixpp::test_support::session_executor_of(sess, ex), sess.send(two),
+                           record_into(inner));
             outer_to_app_live = false;
         } else if (f.app->to_app_calls == 2) {
             inner_ran_inside_outer = outer_to_app_live;
@@ -383,7 +387,8 @@ TEST(B35SendSlot, Nested_ASendInsideToAppLeavesTheOuterFrameIntact) {
             inner_data = mv.bytes().data();
         }
     };
-    asio::co_spawn(ex, sess.send(one), record_into(outer));
+    asio::co_spawn(fixpp::test_support::session_executor_of(sess, ex), sess.send(one),
+                   record_into(outer));
     // On a miss, drain while `sess` and the captures are alive (see the Interleaved cell).
     const bool done = f.pump_until([&] { return outer.done && inner.done; });
     if (!done) {
@@ -436,7 +441,7 @@ CancelOutcome send_cancelled_in_to_app(SlotFixture& f, Session& sess,
     };
     if (before_send) before_send();
     const auto ex = sess.executor().underlying();
-    asio::co_spawn(ex, sess.send(one),
+    asio::co_spawn(fixpp::test_support::session_executor_of(sess, ex), sess.send(one),
                    asio::bind_cancellation_slot(sig.slot(), record_into(o.send)));
     // On a miss, drain here: the frame spans `one` and its completion is bound to `sig`'s slot,
     // and both die when this helper returns, so no guard in a caller can protect them.

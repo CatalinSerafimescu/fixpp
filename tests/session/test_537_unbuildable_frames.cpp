@@ -59,6 +59,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
@@ -182,7 +183,7 @@ protected:
                 cap->frames.emplace_back(reinterpret_cast<const char*>(f.data()), f.size());
             };
             session = std::make_unique<Session>(fx.engine, cfg);
-            opened = fx.run(session->open(), "UnbuildableFrames::open").has_value();
+            opened = fx.run(session->open(), "UnbuildableFrames::open", *session).has_value();
             const std::string logon_body =
                 "98=0\x01"
                 "108=" +
@@ -194,7 +195,7 @@ protected:
             // cancel_and_drain_or_report carries its own catch; the outer one covers the
             // pump and a report that throws under --gtest_throw_on_failure.
             try {
-                if (opened && !fx_.run_quiet(session->close(close_mode::terminal))) {
+                if (opened && !fx_.run_quiet(session->close(close_mode::terminal), *session)) {
                     fixpp::test_support::cancel_and_drain_or_report(fx_.ioc, *fx_.clock,
                                                                     "UnbuildableFrames::~Driven");
                 }
@@ -211,7 +212,7 @@ protected:
                                                           std::string_view extra = {}) {
             auto const f = make_frame(comp_id, msg_type, seq, extra);
             return fx_.run(session->on_inbound_frame(std::span<const std::byte>{f}),
-                           "UnbuildableFrames::feed");
+                           "UnbuildableFrames::feed", *session);
         }
 
         // The session wrote its own Logon and reached Active.
@@ -231,9 +232,13 @@ protected:
 
     // The coroutine's result, or nullopt with one reported failure when it did not
     // complete within the pump's budget.
+    // `on`: the Session whose coroutine `coro` is; it runs on that session's executor once
+    // open() has bound it (support/session_executor_of.hpp).
     template <class Coro>
-    std::optional<fixpp::core::expected_t<void>> run(Coro coro, const char* site) {
-        auto fut = asio::co_spawn(ioc, std::move(coro), asio::use_future);
+    std::optional<fixpp::core::expected_t<void>> run(Coro coro, const char* site,
+                                                     Session const& on) {
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(on, ioc),
+                                  std::move(coro), asio::use_future);
         if (!fixpp::test_support::pump_until_ready(ioc, fut, site)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, site);
             ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << site;
@@ -243,8 +248,9 @@ protected:
     }
     // As run(), without the report: for a destructor.
     template <class Coro>
-    bool run_quiet(Coro coro) {
-        auto fut = asio::co_spawn(ioc, std::move(coro), asio::use_future);
+    bool run_quiet(Coro coro, Session const& on) {
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(on, ioc),
+                                  std::move(coro), asio::use_future);
         if (!fixpp::test_support::pump_until_ready(ioc, fut)) return false;
         (void)fut.get();
         return true;

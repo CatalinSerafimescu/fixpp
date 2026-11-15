@@ -92,6 +92,7 @@
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/recording_store.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 #include "support/temp_dir.hpp"
 
@@ -187,7 +188,8 @@ struct HeldDirectSession {
     }
 
     [[nodiscard]] std::future<fixpp::core::expected_t<void>> spawn_send() {
-        return asio::co_spawn(f.ioc, f.session->send(std::span<const std::byte>{payload}),
+        return asio::co_spawn(fixpp::test_support::session_executor_of(*f.session, f.ioc),
+                              f.session->send(std::span<const std::byte>{payload}),
                               asio::use_future);
     }
 
@@ -594,7 +596,8 @@ public:
         keep_.reset();
         try {
             log->on_call = nullptr;
-            asio::co_spawn(ioc, session->close(close_mode::terminal), asio::detached);
+            asio::co_spawn(fixpp::test_support::session_executor_of(*session, ioc),
+                           session->close(close_mode::terminal), asio::detached);
         } catch (...) {  // NOLINT(bugprone-empty-catch) — the drain below still runs.
         }
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "DirectInitiator");
@@ -686,7 +689,8 @@ LogonRootOutcome run_logon_root(LogonRootInput const input) {
     const bool through_reconnect = input == logon_store_cancelled_through_drive_reconnect;
     if (through_reconnect) {
         // The first Logon, through open(), with nothing injected.
-        auto opened = asio::co_spawn(f.ioc, f.session->open(), asio::use_future);
+        auto opened = asio::co_spawn(fixpp::test_support::session_executor_of(*f.session, f.ioc),
+                                     f.session->open(), asio::use_future);
         if (!f.run_until([&] { return DirectInitiator::ready(opened); })) return o;
         if (!opened.get().has_value() || f.session->state() != fsm_state::LogonSent) return o;
     }

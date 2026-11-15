@@ -49,6 +49,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -168,7 +169,8 @@ protected:
     }
 
     fixpp::core::expected_t<void> open_sync(Session& s) {
-        auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc), s.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{200},
                                                         "FsmTransitionMatrixTest::open_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -181,7 +183,8 @@ protected:
     }
 
     fixpp::core::expected_t<void> feed_sync(Session& s, std::span<const std::byte> frame) {
-        auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc),
+                                  s.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{200},
                                                         "FsmTransitionMatrixTest::feed_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -194,7 +197,8 @@ protected:
     }
 
     fixpp::core::expected_t<void> close_sync(Session& s, close_mode mode) {
-        auto fut = asio::co_spawn(ioc, s.close(mode), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc), s.close(mode),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{500},
                                                         "FsmTransitionMatrixTest::close_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -329,7 +333,8 @@ TEST_F(FsmTransitionMatrixTest, LogoutSent_InboundNonLogoutEventsAreDrainedCellR
     // Initiate Logout → LogoutSent (we don't ioc.run() to completion of the
     // phase-1 graceful flow; close() posts the Logout emit + phase-1 timer
     // wait, and the FSM is in LogoutSent during phase 1).
-    asio::co_spawn(ioc, sess.close(close_mode::graceful),
+    asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                   sess.close(close_mode::graceful),
                    [](std::exception_ptr, fixpp::core::expected_t<void>) {});
     ioc.run_for(std::chrono::milliseconds{20});  // let phase-1 emit fire
 

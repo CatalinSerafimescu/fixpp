@@ -72,6 +72,7 @@
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/scripted_clock.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 namespace fixpp::session::test {
@@ -107,7 +108,8 @@ protected:
     }
 
     fixpp::core::expected_t<void> open_sync(Session& s) {
-        auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc), s.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{200},
                                                         "InboundFrameDispositions::open_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -239,7 +241,8 @@ TEST_F(InboundFrameDispositions, Q13_LogonTimeoutZeroIsRefusedByOpenAndOneIsAcce
     ASSERT_FALSE(r.has_value()) << "open() accepted logon_timeout_ms == 0";
     EXPECT_EQ(r.error(), fixpp::core::error::invalid_session_config);
     EXPECT_FALSE(refused.is_open()) << "a refused open() left the session open";
-    auto close_fut = asio::co_spawn(ioc, refused.close(close_mode::terminal), asio::use_future);
+    auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(refused, ioc),
+                                    refused.close(close_mode::terminal), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(
             ioc, close_fut, std::chrono::milliseconds{200},
             "InboundFrameDispositions::Q13_LogonTimeoutZero close")) {
@@ -1118,7 +1121,8 @@ TEST(InboundFrameDispositionsQ8, LogoutSent_MsgTypeNotThird_CountedAndNotTakenAs
     ASSERT_TRUE(f.feed(s, direct_msg("A", 1, kLogonFields)));
     ASSERT_EQ(s.state(), fsm_state::Active);
 
-    auto close_fut = asio::co_spawn(f.ioc, s.close(close_mode::graceful), asio::use_future);
+    auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, f.ioc),
+                                    s.close(close_mode::graceful), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until(
         f.ioc, [&s] { return s.state() == fsm_state::LogoutSent; }, timeout / 2))
         << "the graceful close must reach LogoutSent";
@@ -1179,7 +1183,8 @@ void run_q9(session_role role, fsm_state expected, std::string_view row) {
     ASSERT_TRUE(f.open(s));
     ASSERT_EQ(s.state(), expected) << row;
 
-    auto close_fut = asio::co_spawn(f.ioc, s.close(close_mode::graceful), asio::use_future);
+    auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, f.ioc),
+                                    s.close(close_mode::graceful), asio::use_future);
     bool const flushing = fixpp::test_support::pump_until(
         f.ioc, [&] { return log->flushes_begun == 1; },
         std::chrono::milliseconds{fixpp::test_support::kHoldBound} / 2,
@@ -1763,7 +1768,8 @@ void run_short_arena(Arena which, std::uint32_t limit, std::optional<std::uint32
         (which == Arena::carry ? cfg.framer_carry_arena : cfg.session_arena) = &arena;
         Session s{f.engine, cfg};
         arena.budget = arena.served + budget;  // what construction drew stays drawn
-        auto fut = asio::co_spawn(f.ioc, s.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, f.ioc), s.open(),
+                                  asio::use_future);
         ASSERT_TRUE(fixpp::test_support::pump_until_ready(f.ioc, fut, "Q14::open"));
         auto const r = fut.get();
         if (budget < need) {
@@ -2937,7 +2943,8 @@ TEST(InboundFrameDispositionsQ33, UnknownFieldsAtHeadroomExhaustion) {
     if (!f.open(s) || !f.feed(s, direct_msg("A", 1, kLogonFields))) std::exit(2);
     auto const nested = plain_rig::to_bytes(direct_msg("D", 3));
     app->on_app = [&](auto const& /*mv*/) {
-        asio::co_spawn(f.ioc, s.on_inbound_frame(nested), asio::detached);
+        asio::co_spawn(fixpp::test_support::session_executor_of(s, f.ioc),
+                       s.on_inbound_frame(nested), asio::detached);
     };
     (void)f.feed(s, direct_msg("D", 2));
     std::exit(0);
