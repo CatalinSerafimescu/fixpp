@@ -752,6 +752,29 @@ TEST(ResendAnswerTooHigh577, SevenPresent_TooHigh_AnsweredAndNothingPersisted) {
         << printable(a.written);
 }
 
+// 103 tasks T049 (research D4.1 route (a): "a failed answer records Disconnected, as for an
+// in-sequence request"): a too-high ResendRequest whose walk fails at the tail read ends the
+// session with the store's code, and fixpp's own ResendRequest is not sent after it.
+TEST(ResendAnswerTooHigh577, SevenPresent_TooHigh_TailReadFails_EndsWithNoResendRequest) {
+    ActiveSession s;
+    ASSERT_TRUE(s.setup(kStoredFor580)) << "setup: the session did not reach Active and send";
+    seqnum_t const n = session_test_access::seqnum_mgr(*s.f.session).next_inbound_unsafe();
+    s.f.log->fail_in = is_tail_read;
+    s.f.log->fail_code = error::store_io_failure;
+    auto const a = s.answer(
+        "7=1\x01"
+        "16=0\x01",
+        is_tail_read, n + 3);
+    ASSERT_TRUE(a.call.completed && a.aimed.has_value() && a.aimed->returned() &&
+                a.aimed->error == error::store_io_failure)
+        << "the path was not exercised: call_completed=" << a.call.completed
+        << " the tail read: " << record_text(a.aimed);
+    EXPECT_EQ(count_of_type(a.written, "2"), 0U)
+        << "fixpp's ResendRequest was sent after a failed answer:\n"
+        << printable(a.written);
+    expect_nothing_written_and_ended(a, error::store_io_failure);
+}
+
 // ── The 789 path superseded (R-13) ───────────────────────────────────────────────────
 
 // D-538-4, "the 789 path superseded": the `closing` leg of logon_arm_superseded_. The
