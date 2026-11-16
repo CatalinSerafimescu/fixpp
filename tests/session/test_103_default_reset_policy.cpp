@@ -223,7 +223,9 @@ TEST(DefaultResetPolicy103, AS2_StrictInitiator_ResetsBeforeTheLogon_141At1_Next
     }
     EXPECT_TRUE(reset_at.has_value()) << "no store reset was recorded before the Logon";
     EXPECT_TRUE(logon_store_at.has_value()) << "no store(1, outbound) was recorded";
-    if (reset_at && logon_store_at) EXPECT_LT(*reset_at, *logon_store_at);
+    if (reset_at && logon_store_at) {
+        EXPECT_LT(*reset_at, *logon_store_at);
+    }
 
     auto const logons = of_type(written(f), "A");
     ASSERT_EQ(logons.size(), 1U) << describe(written(f));
