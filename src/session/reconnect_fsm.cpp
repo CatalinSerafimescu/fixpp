@@ -94,7 +94,8 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
 //
 // Cancellation: co_await asio::this_coro::reset_cancellation_state(
 //   asio::enable_total_cancellation()) at the top of the coroutine so that
-//   cancellation_type::total (from root_cancel_ at Session::close) propagates
+//   cancellation_type::total from the caller's slot propagates (Session::
+//   drive_reconnect is not bound to the Session's root slot: 103, cell RS-1)
 //   through the nested awaits and releases the partially-built transport via
 //   RAII (SC-004). [[feedback_asio_cospawn_total_cancellation_default]].
 //
