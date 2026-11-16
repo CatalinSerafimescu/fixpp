@@ -505,6 +505,31 @@ TEST_P(TooHighLogoutState103, BoundLive_TooHighLogoutDuringAGracefulClose_TheBou
     EXPECT_EQ(bound_count(s), 0);
 }
 
+// The same term's Engine::stop() leg: Engine::stop()'s first step has run (its note, which
+// claims a mark it finds), the session still Active; a too-high Logout then sets a mark that
+// note never saw. The bound exits at its first "live" test, with the clock not moved.
+TEST_P(TooHighLogoutState103, BoundLive_TooHighLogoutAfterTheEngineStopNote_TheBoundExitsAtOnce) {
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT}};
+    ASSERT_TRUE(s.open_to_active());
+    seqnum_t const n = s.next_in();
+    session_test_access::note_engine_stop(*s.session);
+    ASSERT_EQ(s.state(), fsm_state::Active) << "setup: the stop's note left Active";
+    constexpr auto kWindow = std::chrono::milliseconds{kT} / 8;
+    auto feed_fut = s.feed_spawn(s.logout(n + 3));
+    EXPECT_TRUE(
+        s.pump_until([&] { return rg::Scene::ready(feed_fut) && phase(s) == kPending; }, kWindow))
+        << "the too-high Logout set no mark after the stop's note";
+    EXPECT_TRUE(s.pump_until([&] { return bound_count(s) == 0; }, kWindow))
+        << "the bound did not exit at once after Engine::stop()'s note";
+    EXPECT_EQ(s.state(), fsm_state::Active) << "the window closed before the bound's test";
+    if (bound_count(s) != 0) {
+        // A bound still running is ended at its own deadline, so the Session is not destroyed
+        // with it and the cell ends as a test failure, not an abort.
+        s.pass(std::chrono::milliseconds{kT});
+    }
+    EXPECT_EQ(bound_count(s), 0);
+}
+
 // Route (b) at once (research D4.1, D4.5; FR-010): with T = 0, a too-high Logout while a
 // resend is outstanding is acknowledged at once. The acknowledgement cannot take a number here
 // (the next outbound number is at its maximum), so the frame returns that error, no Logout is
