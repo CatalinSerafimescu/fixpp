@@ -284,13 +284,15 @@ public:
     }
 
     // ENGINE-INTERNAL (fixpp::session/ + seam tests). The ROOT cancellation
-    // slot (T039 / I-07): in-flight session work (transport read/write,
-    // heartbeat sleep, awaitable-mutex acquire, app-callback dispatch via
-    // cancellable_dispatch, the parser→fromApp chain — all 005-owned in the
-    // real engine) binds to this slot so phase-2's cancellation_type::total
-    // tears every strand of in-flight work down. 007 exposes the slot and
-    // fires phase-2 total; the scripted double binds a sleep/dispatch to it
-    // and asserts the propagation property only.
+    // slot (T039 / I-07). close()'s phase 2, and drive_reconnect's drain, fire
+    // cancellation_type::total on it. 103 (research D1) supersedes the list of
+    // in-flight work this comment named (transport read/write, awaitable-mutex
+    // acquire, cancellable_dispatch, the parser→fromApp chain): the slot's only
+    // binders are the liveness loop's spawns, and this accessor has no production
+    // caller (103, cell RS-1). Re-derive:
+    // `command grep -n 'root_cancel_.slot()\|root_cancellation_slot()' src include`.
+    // The scripted double binds a sleep/dispatch to it and asserts the propagation
+    // property only.
     [[nodiscard]] asio::cancellation_slot root_cancellation_slot() noexcept {
         return root_cancel_.slot();
     }
@@ -301,6 +303,9 @@ public:
     // Bodies land per user story (Phase 3–6); Phase 2 ships declarations only.
     //
     // Reentrancy contract (documented per entry point, [const §X.5] / FR-016):
+    //   "session-strand" below means executor(): a coroutine running on it, its
+    //   underlying() once open() has bound it. 103 (B-103-12): a build with assertions
+    //   checks it at every replay-gate acquire where that executor is a strand.
     //   on_inbound_frame() — session-strand; engine's transport feeds it after
     //                        parse/frame-validate; inbound ordering: store(inbound)
     //                        completes BEFORE fromAdmin/fromApp is dispatched.
@@ -700,10 +705,31 @@ public:
     //     dispatch_aborted with nothing installed and the cancellation left pending.
     //   - A close() or Engine::stop() that runs during the connect is caught at the
     //     install, which installs nothing and returns session_already_closed.
+    // The tests run in the order above; data-model.md "Reconnect drain" has the endings
+    // table. BREAKING (public C++; C ABI unchanged; 103, B-103-9): from Active a direct
+    // caller now sees onLogout fire, and the call can return session_already_closed,
+    // dispatch_aborted or session_already_open without reconnecting.
+    // Why the post from a callback: the closing test reads the state the call resumes
+    // into, and onLogout, fired where Disconnected is recorded, does not run nested in the
+    // callback.
+    // The latches onLogon_fired_, onLogout_fired_, reached_active_ and logout_seen_ stay
+    // set across the reconnect: the new connection fires no onLogon and no onLogout, its
+    // establishment deadline stays disarmed, and a Logout seen on the old connection still
+    // triggers reset_on_logout's teardown reset.
     // Standalone initiator precondition: the caller's own reader has left
     // live_transport() before the call, and starts on the new live_transport() after it
-    // returns. drive_reconnect must not be bound to root_cancellation_slot(): its drain
-    // emits that signal.
+    // returns. A reader still on the old live_transport() reads a destroyed transport, and
+    // nothing reads the new one (FR-006).
+    // drive_reconnect must not be bound to root_cancellation_slot(): its own drain emits
+    // that signal, which would cancel it, and the slot's single client kind is the
+    // liveness loop.
+    // Two caller preconditions every Session awaitable has, named here because the bound
+    // and the gate make them checkable or load-bearing: close() runs before the Session is
+    // destroyed (~Session asserts the too-high Logout bound's counter is 0 in builds with
+    // assertions; a release build does not check, and a bound still alive then resumes
+    // into a destroyed Session, as the liveness loop already would); and research D1's
+    // lifetime rule: a Session whose replay-gate timer exists, like one with a transport,
+    // is destroyed before its execution context (B-103-13).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> drive_reconnect() noexcept;
 
     // 015 T016(b) — live-transport accessor for the read-pump (SC-010 delta (8)).
@@ -853,8 +879,9 @@ private:
     // Dispatched at close(graceful) by T032; close(terminal) skips entirely.
     MessageStore::flush_hook_fn close_flush_hook_a1_ = nullptr;
 
-    // Root cancellation signal (T039). Phase 2 fires cancellation_type::total
-    // on this; in-flight work bound to root_cancellation_slot() unwinds.
+    // Root cancellation signal (T039). close()'s phase 2 and drive_reconnect's drain
+    // fire cancellation_type::total on this. It reaches only what is bound to
+    // root_cancellation_slot(): the liveness loop's spawns (103, cell RS-1).
     asio::cancellation_signal root_cancel_;
 
     // Idempotent THREE-STATE close (I-10): the FIRST close() runs the body

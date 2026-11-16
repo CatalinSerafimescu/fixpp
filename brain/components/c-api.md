@@ -273,7 +273,8 @@ outstanding, ended the session silently. Since 1.12 that message is ignored, and
 a gap the peer does not fill ends: with a Logout at the deadline for a peer that keeps sending and
 answers TestRequests, silently at the grace check for one that answers nothing, and not at all with
 HeartBtInt ≤ 0 or for a peer that sends only frames that move nothing (`L-092-1`, `B-537-2`,
-`L-537-1`). The 1.10 bullets that ended "the session ends at the peer's next new message that is not
+`L-537-1`). ⚠️ **Since 1.17 (103) that last case ends too:** every frame that does not advance
+NextNumIn is checked against the deadline (`B-537-2`, amended), and `L-537-1` is closed. The 1.10 bullets that ended "the session ends at the peer's next new message that is not
 a Heartbeat" are amended at their sites in `session.h`, marked 1.12.
 
 ## C-ABI 1.11: how the session frames inbound bytes (093, fixpp#514, #515, #516)

@@ -857,7 +857,7 @@ set_tests_properties(session_536_shared_clock_liveness PROPERTIES LABELS "sessio
 add_threading_test(session_536_close_and_logout_wait test_536_close_and_logout_wait.cpp)
 set_tests_properties(session_536_close_and_logout_wait PROPERTIES LABELS "session;536")
 # fixpp#537 (B28), D-537-1 and D-537-2 — a frame above NextNumIn while a resend is outstanding
-# is ignored. Standalone, not a grouped bucket ([const §VII.8]): not the class the clause
+# is ignored (a ResendRequest and a Logout excepted since 103, D4.1). Standalone, not a grouped bucket ([const §VII.8]): not the class the clause
 # groups. Its cells open Sessions and drive their coroutines and timers on an io_context with
 # a mock clock.
 add_threading_test(session_537_second_too_high test_537_second_too_high.cpp)

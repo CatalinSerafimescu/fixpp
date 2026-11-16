@@ -894,8 +894,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::drain_for_reconnect_() n
             co_return std::unexpected(error::session_already_closed);
         }
         // The old connection's detached coroutines: the liveness loop ends at the total
-        // cancellation close() uses (the root slot's binders are its two spawns), and the
-        // bound was woken by step 2's edge.
+        // cancellation close() uses (the root slot's binders are the liveness loop's
+        // spawns, cell RS-1), and the bound was woken by step 2's edge.
         root_cancel_.emit(asio::cancellation_type::total);
         auto const bc = peer_logout_bound_counter_;
         auto const lc = liveness_counter_;
@@ -2207,8 +2207,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // Engine::stop() post-join drain re-enters, takes the `closing` branch below, and
     // awaits a result nobody will ever set → hang. Disable cancellation on this
     // coroutine for the whole of close() so it is immune to the caller's signal. This
-    // shields close()'s OWN co_awaits only; the session work it tears down is still
-    // cancelled via root_cancel_.emit(total), fired in phase 2.
+    // shields close()'s OWN co_awaits only; the liveness loop it tears down is still
+    // cancelled via root_cancel_.emit(total), fired in phase 2 (the root slot's binders
+    // are the liveness loop's spawns: 103, cell RS-1).
     // (Engine::stop() also drives a fresh close() for sessions whose role-loop close()
     // was cancelled BEFORE entry — the two fixes are complementary.) [Codex P1]
     co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
@@ -2320,9 +2321,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
         // from the phase-2 root total signal: phase-2 fires root_cancel_.emit()
         // AFTER this block resolves (peer ACK | timeout | cancellation).
         //
-        // [feedback_asio_cospawn_total_cancellation_default]: we use the root
-        // slot for the child; run_logout_phase1 makes no reset_cancellation_state
-        // call.
+        // [feedback_asio_cospawn_total_cancellation_default]: run_logout_phase1 makes
+        // no reset_cancellation_state call; it runs under close()'s cancellation
+        // state, which the root slot does not reach (103, cell RS-1).
         // OD-29: a terminal close that arrived during the flush hooks above has set
         // close_escalated_, and phase 1 does not start.
         if (!close_escalated_ &&
@@ -2405,11 +2406,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
 
     // T037/T039 phase 2 — fire root cancellation_type::total ONLY after
     // phase 1 has resolved (peer ACK | child timeout | child cancelled —
-    // collapsed to "phase 1 done" in the scripted scope). This is the single
-    // propagation point: every strand of in-flight session work bound to
-    // root_cancellation_slot() (transport r/w, heartbeat sleep, mutex
-    // acquire, cancellable_dispatch, parser→fromApp — all 005-owned) unwinds
-    // here. terminal reaches phase 2 immediately (phase 1 skipped).
+    // collapsed to "phase 1 done" in the scripted scope). It reaches what is
+    // bound to root_cancellation_slot(): the liveness loop's spawns. Transport
+    // I/O, mutex acquires, cancellable_dispatch and the parser→fromApp chain are
+    // not bound to it (103, cell RS-1). Re-derive:
+    // `command grep -n 'root_cancel_.slot()' src include`.
+    // terminal reaches phase 2 immediately (phase 1 skipped).
     //
     // fixpp#536 (.specify/536-537-538-recovery-liveness.md, D-536-1 and D-536-2),
     // superseding US4 (T047)'s Clock::cancel_sleeps() call here. close() does not
@@ -4941,7 +4943,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
                 // on_inbound_active_out_of_sequence_, which has the dispositions:
                 // too low without PossDup is session-fatal (not recoverable per I-4),
                 // and a frame above NextNumIn while a resend is outstanding does not
-                // advance and is ignored (fixpp#537, D-537-1 and D-537-2).
+                // advance and is ignored (fixpp#537, D-537-1 and D-537-2), a
+                // ResendRequest and a Logout excepted (103, D4.1).
                 auto chk = co_await seqnum_mgr_.check_inbound(seq);
                 if (!chk) {
                     slow.k = inbound_slow_t::kind::out_of_sequence;
@@ -5474,6 +5477,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_sequen
 }
 
 // Too-high MsgSeqNum: AwaitingResend and a ResendRequest(2); the session stays in its arm.
+// 103 (research D4.1 route (a)): a too-high ResendRequest is answered first, and a
+// too-high Logout sets the pending-Logout mark.
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_too_high_(
     bool tic, fixpp::session::detail::FrameHeader const& hdr, seqnum_t next_expected,
     seqnum_t seq) noexcept {
@@ -5784,6 +5789,10 @@ asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::on_inboun
 // fixpp#537 (`.specify/536-537-538-recovery-liveness.md` §4.3, D-537-1 and D-537-2)
 // supersedes the route that ended the session, in "Arm B" below, at a second frame above
 // NextNumIn: that frame is ignored, and an unfilled gap ends by its deadline (D-537-5).
+// 103 (research D4.1, fixpp#577) excepts a ResendRequest and a Logout, with sequence
+// validation on: a too-high ResendRequest is answered, consuming and persisting nothing,
+// and a too-high Logout sets the pending-Logout mark; neither sends a second
+// ResendRequest.
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of_sequence_(
     bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
     fixpp::core::error chk_error, inbound_route const& route) noexcept {
@@ -5912,8 +5921,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
         co_return fixpp::core::expected_t<void>{};
     }
     // fixpp#537 (D-537-1, D-537-2): a frame above NextNumIn while a resend is outstanding
-    // is ignored. The outstanding request runs to 0, so it covers the frame. Every other
-    // refusal stays fatal below.
+    // is ignored, a ResendRequest and a Logout excepted above (103, D4.1). The outstanding
+    // request runs to 0, so it covers the frame. Every other refusal stays fatal below.
     if (chk_error == fixpp::core::error::session_seqnum_too_high) {
         co_return fixpp::core::expected_t<void>{};
     }
@@ -6909,7 +6918,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_body_(
 
     // F5 (Round-A drift): wrap the entire send body in try/catch to absorb
     // asio::system_error{operation_aborted} thrown when the async_mutex awaitable
-    // is cancelled (e.g. Session::close() fires root_cancel_ while a send is in flight).
+    // is cancelled (the send's own cancellation slot; the Session's root slot does not
+    // reach a send: 103, cell RS-1).
     // The try is for the ending: any exception of the send body, store_then_emit's
     // operation_aborted for a cancelled store call among them, ends the send with
     // dispatch_aborted and the session Disconnected, and leaves the caller's thread as
@@ -8040,10 +8050,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_r
 // phase-2 total AFTER this coroutine returns (either path).
 //
 // [feedback_asio_cospawn_total_cancellation_default]: this coroutine is called
-// via co_await from close(); the current coroutine's cancellation state is
-// already bound to the root slot. We do NOT reset here — the caller (close)
-// controls the root slot. The wait for the confirmation is step 3's race
-// (D-536-3).
+// via co_await from close(), which disabled cancellation on its coroutine first;
+// the root slot does not reach it (its binders are the liveness loop's spawns:
+// 103, cell RS-1). We do NOT reset here — the caller (close) owns the
+// cancellation state. The wait for the confirmation is step 3's race (D-536-3).
 asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noexcept {
     using namespace std::chrono_literals;
     using std::chrono::seconds;

@@ -105,11 +105,34 @@ typedef fixpp_toapp_verdict (*fixpp_send_cb)(const fixpp_msg_t* outbound, void* 
 
 /** Sequence-number reset policy (FR-005b / E-4). Values mirror the C++ enum class
  *  reset_seqnum_policy : uint8_t in session_config.hpp (same integer ordinals).
- *  ABI-stable: new values are additive; out-of-range values → CAPI_CONFIG_INVALID. */
+ *  ABI-stable: new values are additive; out-of-range values → CAPI_CONFIG_INVALID.
+ *
+ *  BREAKING (C-ABI 1.17, [const §X.7]; 103): the default is
+ *  FIXPP_RESET_SEQNUM_BILATERAL_LENIENT, where it was STRICT. A default initiator's
+ *  Logon no longer carries 141=Y (it goes at 34=1 either way on the in-memory store a
+ *  C-ABI session runs on), and a default acceptor accepts a Logon without 141=Y. A
+ *  STRICT acceptor refuses a Logon without 141=Y with a Logout carrying Text(58)
+ *  "ResetSeqNumFlag(141)=Y required", in or out of sequence, where it disconnected
+ *  silently. STRICT's durable reset of both numbers to 1 before every Logon has no
+ *  reach as shipped: the in-memory store's numbers are already 1. That holds while
+ *  `grep -n store_factory src/capi` finds only MemoryStoreFactory and this header
+ *  declares no store setter; a store setter invalidates this clause and every other
+ *  "no reach as shipped" below. */
 typedef enum fixpp_reset_seqnum_policy {
-    FIXPP_RESET_SEQNUM_BILATERAL_STRICT  = 0,  /**< Both peers must present 141=Y (default). */
-    FIXPP_RESET_SEQNUM_BILATERAL_LENIENT = 1,  /**< Either peer presenting 141=Y is sufficient. */
-    FIXPP_RESET_SEQNUM_UNILATERAL        = 2   /**< Always reset regardless of peer 141=Y. */
+    FIXPP_RESET_SEQNUM_BILATERAL_STRICT  = 0,  /**< Initiator: sends 141=Y always, after a
+                                                    durable reset of both numbers to 1
+                                                    (34=1); refuses an acknowledgement
+                                                    without 141=Y. Acceptor: refuses a Logon
+                                                    without 141=Y with a Logout and Text,
+                                                    before the sequence check; mirrors a
+                                                    141=Y Logon. */
+    FIXPP_RESET_SEQNUM_BILATERAL_LENIENT = 1,  /**< (default) Initiator: sends 141=Y when a
+                                                    reset setting is on and both numbers are
+                                                    1; accepts an acknowledgement without
+                                                    141=Y. Acceptor: accepts a Logon without
+                                                    141=Y; mirrors a 141=Y Logon. */
+    FIXPP_RESET_SEQNUM_UNILATERAL        = 2   /**< As BILATERAL_LENIENT, except that an
+                                                    acceptor does not mirror a 141=Y Logon. */
 } fixpp_reset_seqnum_policy;
 
 /* ── Session-config builder (opaque; FR-014) ───────────────────────────────
@@ -118,7 +141,11 @@ typedef enum fixpp_reset_seqnum_policy {
  * fixpp_session_open on success (moved into the registry, invalidated; do NOT
  * destroy afterwards); on failure untouched (caller still owns it). */
 
-/** Create a session-config builder. Reentrancy: single-thread. */
+/** Create a session-config builder. Reentrancy: single-thread.
+ *
+ *  BREAKING (C-ABI 1.17; 103): the config it creates carries
+ *  FIXPP_RESET_SEQNUM_BILATERAL_LENIENT, where it carried STRICT
+ *  (fixpp_reset_seqnum_policy's 1.17 clause). */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_create(fixpp_session_config_t** out_cfg);
 
 /** SenderCompID / TargetCompID (both required; empty → config error).
@@ -204,7 +231,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_default_appl_ver_id(
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_validate_inbound_messages(
     fixpp_session_config_t* cfg, bool validate);
 
-/** Reset sequence numbers on logon. Reentrancy: single-thread. */
+/** Reset sequence numbers on logon. Reentrancy: single-thread.
+ *
+ *  BREAKING (C-ABI 1.17; 103): a STRICT acceptor with this knob set no longer resets
+ *  its store for a Logon it refuses (one without 141=Y). No reach as shipped: the
+ *  in-memory store's numbers are already 1 (fixpp_reset_seqnum_policy's 1.17 clause). */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_reset_on_logon(
     fixpp_session_config_t* cfg, bool reset_on_logon);
 
@@ -213,9 +244,14 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_reset_on_logon(
  *
  * Writes SessionConfig::reset_seqnum_policy_field.  The enumerator values mirror
  * the C++ enum class reset_seqnum_policy : uint8_t (same integer ordinals; 0=strict,
- * 1=lenient, 2=unilateral).  The default (bilateral_strict) requires BOTH peers to
- * send ResetSeqNumFlag(141)=Y for a reset to be accepted.  Use bilateral_lenient when
- * only one side sends 141=Y (e.g. initiator reset_on_logon=true, acceptor=false).
+ * 1=lenient, 2=unilateral).  The default is bilateral_lenient; each enumerator's
+ * description above gives what that value does on each role.
+ *
+ * BREAKING (C-ABI 1.17; 103): the default this call overrides is
+ * FIXPP_RESET_SEQNUM_BILATERAL_LENIENT, where it was STRICT. Migration: a consumer that
+ * wants a reset on every Logon (now at 34=1) calls this with
+ * FIXPP_RESET_SEQNUM_BILATERAL_STRICT; a consumer that already sets STRICT gets its
+ * 1.17 meaning (fixpp_reset_seqnum_policy's 1.17 clause).
  *
  * Reentrancy: single-thread.
  * @return FIXPP_ERR_OK; FIXPP_ERR_NULL_HANDLE (NULL cfg); FIXPP_ERR_CAPI_CONFIG_INVALID
@@ -381,12 +417,17 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  *     outstanding is ignored: no second ResendRequest is sent, the expected
  *     number does not advance and the session stays established, where such
  *     a frame, unless it was a Heartbeat or carried PossDupFlag(43)=Y, ended
- *     the session;
+ *     the session (amended in C-ABI 1.17, 103: except a ResendRequest, which
+ *     is answered, and a Logout, which is acknowledged after a bounded
+ *     recovery);
  *   - with a heartbeat interval set, a gap the peer does not fill ends with
  *     a Logout: once the expected number has not advanced for two heartbeat
  *     intervals while a resend is outstanding, the next too-high frame that
  *     neither ends the session by another check nor advances the expected
- *     number draws a Logout carrying Text(58), and the session ends there.
+ *     number draws a Logout carrying Text(58), and the session ends there
+ *     (amended in C-ABI 1.17, 103: any frame that neither ends the session by
+ *     another check nor advances the expected number, at, below or above it,
+ *     draws that Logout).
  *     The deadline is tested only when such a frame arrives. A heartbeat
  *     interval of 0 turns it off; a session whose interval was never set
  *     (no call of fixpp_session_config_set_heartbeat_seconds) runs at the
@@ -429,6 +470,15 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  * FIXPP_ERR_OK as before. What changes is when a close that waits for the
  * peer's answer to its Logout returns: another session's close no longer
  * cuts that wait short.
+ *
+ * BREAKING (C-ABI 1.17, [const §X.7]; 103): close returns FIXPP_ERR_OK, where it
+ * returned FIXPP_ERR_THREAD_SESSION_LIFECYCLE, translated for the consumer's ABI minor
+ * (fixpp_engine_create), for a default-config acceptor's session whose Logon without
+ * 141=Y the STRICT default refused: that session now establishes. A close while a
+ * too-high Logout is pending sends the close's own Logout. A graceful close waits for
+ * a running resend answer, and for a Logout already in flight (a claimed
+ * acknowledgement among them), inside the logout timeout, and sends no Logout when
+ * that timeout runs out first.
  *
  * Reentrancy: single-thread — non-callback / non-session-strand caller only; no
  * concurrent close on the same handle (the thunk posts onto the session domain
@@ -548,12 +598,17 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *     outstanding is ignored: no second ResendRequest is sent, the expected
  *     number does not advance and the session stays established, where such
  *     a frame, unless it was a Heartbeat or carried PossDupFlag(43)=Y, ended
- *     the session;
+ *     the session (amended in C-ABI 1.17, 103: except a ResendRequest, which
+ *     is answered, and a Logout, which is acknowledged after a bounded
+ *     recovery);
  *   - with a heartbeat interval set, a gap the peer does not fill ends with
  *     a Logout: once the expected number has not advanced for two heartbeat
  *     intervals while a resend is outstanding, the next too-high frame that
  *     neither ends the session by another check nor advances the expected
- *     number draws a Logout carrying Text(58), and the session ends there.
+ *     number draws a Logout carrying Text(58), and the session ends there
+ *     (amended in C-ABI 1.17, 103: any frame that neither ends the session by
+ *     another check nor advances the expected number, at, below or above it,
+ *     draws that Logout).
  *     The deadline is tested only when such a frame arrives. A heartbeat
  *     interval of 0 turns it off; a session whose interval was never set
  *     (no call of fixpp_session_config_set_heartbeat_seconds) runs at the
@@ -595,6 +650,14 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *     the Heartbeats and TestRequests the other sessions send;
  *   - another session's close no longer ends this session's wait for the
  *     peer's answer to its own Logout early.
+ *
+ * BREAKING (C-ABI 1.17, [const §X.7]; 103): *out_established becomes true where the
+ * STRICT default refused the session: a default acceptor accepts a Logon without
+ * 141=Y, and a default initiator accepts an acknowledgement without 141=Y. It turns
+ * false where the session stayed established: at a too-low Heartbeat without
+ * PossDupFlag(43)=Y (after a Logout carrying Text(58)), at the gap deadline on any
+ * frame that does not advance the expected number, and at a too-high Logout's
+ * acknowledgement.
  *
  * Reentrancy: thread-safe. O(1) lock-free (atomic reader snapshot).
  */
@@ -780,12 +843,17 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  *     outstanding is ignored: no second ResendRequest is sent, the expected
  *     number does not advance and the session stays established, where such
  *     a frame, unless it was a Heartbeat or carried PossDupFlag(43)=Y, ended
- *     the session;
+ *     the session (amended in C-ABI 1.17, 103: except a ResendRequest, which
+ *     is answered, and a Logout, which is acknowledged after a bounded
+ *     recovery);
  *   - with a heartbeat interval set, a gap the peer does not fill ends with
  *     a Logout: once the expected number has not advanced for two heartbeat
  *     intervals while a resend is outstanding, the next too-high frame that
  *     neither ends the session by another check nor advances the expected
- *     number draws a Logout carrying Text(58), and the session ends there.
+ *     number draws a Logout carrying Text(58), and the session ends there
+ *     (amended in C-ABI 1.17, 103: any frame that neither ends the session by
+ *     another check nor advances the expected number, at, below or above it,
+ *     draws that Logout).
  *     The deadline is tested only when such a frame arrives. A heartbeat
  *     interval of 0 turns it off; a session whose interval was never set
  *     (no call of fixpp_session_config_set_heartbeat_seconds) runs at the
@@ -826,6 +894,15 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  * ResendRequest, where a GapFill was sent in its place. A resend is not
  * surfaced to the send callback (L-019-4), so the effect is on the wire
  * only.
+ *
+ * BREAKING (C-ABI 1.17, [const §X.7]; 103): send returns
+ * FIXPP_ERR_SESSION_INVALID_STATE, translated for the consumer's ABI minor
+ * (fixpp_engine_create), where it returned FIXPP_ERR_OK: while a too-high Logout is
+ * pending, and during a Logout ending of the session, from the moment a Logout's owner
+ * is set until the session ends, where the frame was numbered after that Logout. A
+ * send issued while a resend answer runs returns after the answer, numbered after it,
+ * and returns FIXPP_ERR_SESSION_INVALID_STATE if the session closes, stops, ends or
+ * receives such a Logout meanwhile.
  *
  * Reentrancy: thread-safe — callable from any consumer thread (the any-thread
  * Engine::send contract) EXCEPT from inside the receive callback, where the
@@ -963,12 +1040,17 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  *     outstanding is ignored: no second ResendRequest is sent, the expected
  *     number does not advance and the session stays established, where such
  *     a frame, unless it was a Heartbeat or carried PossDupFlag(43)=Y, ended
- *     the session;
+ *     the session (amended in C-ABI 1.17, 103: except a ResendRequest, which
+ *     is answered, and a Logout, which is acknowledged after a bounded
+ *     recovery);
  *   - with a heartbeat interval set, a gap the peer does not fill ends with
  *     a Logout: once the expected number has not advanced for two heartbeat
  *     intervals while a resend is outstanding, the next too-high frame that
  *     neither ends the session by another check nor advances the expected
- *     number draws a Logout carrying Text(58), and the session ends there.
+ *     number draws a Logout carrying Text(58), and the session ends there
+ *     (amended in C-ABI 1.17, 103: any frame that neither ends the session by
+ *     another check nor advances the expected number, at, below or above it,
+ *     draws that Logout).
  *     The deadline is tested only when such a frame arrives. A heartbeat
  *     interval of 0 turns it off; a session whose interval was never set
  *     (no call of fixpp_session_config_set_heartbeat_seconds) runs at the
@@ -1000,6 +1082,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  * one it ends, the reverse. `cb` is not invoked for an application message
  * ignored that way; it is invoked for it when the peer's answer to the
  * ResendRequest brings it in sequence.
+ *
+ * BREAKING (C-ABI 1.17, [const §X.7]; 103): `cb` is invoked for the inbound
+ * application messages of a default session the STRICT default refused (see
+ * fixpp_session_is_established's 1.17 clause), and is no longer invoked after the
+ * endings that clause names.
  *
  * Reentrancy: single-thread. THUNK: construction-time.
  */
@@ -1130,12 +1217,17 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  *     outstanding is ignored: no second ResendRequest is sent, the expected
  *     number does not advance and the session stays established, where such
  *     a frame, unless it was a Heartbeat or carried PossDupFlag(43)=Y, ended
- *     the session;
+ *     the session (amended in C-ABI 1.17, 103: except a ResendRequest, which
+ *     is answered, and a Logout, which is acknowledged after a bounded
+ *     recovery);
  *   - with a heartbeat interval set, a gap the peer does not fill ends with
  *     a Logout: once the expected number has not advanced for two heartbeat
  *     intervals while a resend is outstanding, the next too-high frame that
  *     neither ends the session by another check nor advances the expected
- *     number draws a Logout carrying Text(58), and the session ends there.
+ *     number draws a Logout carrying Text(58), and the session ends there
+ *     (amended in C-ABI 1.17, 103: any frame that neither ends the session by
+ *     another check nor advances the expected number, at, below or above it,
+ *     draws that Logout).
  *     The deadline is tested only when such a frame arrives. A heartbeat
  *     interval of 0 turns it off; a session whose interval was never set
  *     (no call of fixpp_session_config_set_heartbeat_seconds) runs at the
@@ -1165,6 +1257,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  * On a session one of these effects keeps established, `cb` is invoked for
  * a send issued after the effect, where fixpp_session_send refused that send
  * at the engine's Active check; on one it ends, the reverse.
+ *
+ * BREAKING (C-ABI 1.17, [const §X.7]; 103): the same as
+ * fixpp_session_register_callback's 1.17 clause, for a send: `cb` is invoked for a
+ * send on a default session the STRICT default refused, and not for one that
+ * fixpp_session_send's 1.17 clause refuses.
  *
  * Reentrancy: single-thread. THUNK: construction-time. The installed callback
  * runs on the session strand (see fixpp_send_cb typedef; [contracts/toapp-callback.md]).

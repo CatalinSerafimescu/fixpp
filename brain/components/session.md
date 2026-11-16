@@ -617,7 +617,9 @@ taken. Each item names the note's section that has the whole list.
   terminal filter, so a loop that had sent a frame no longer accepted `close`'s total cancellation;
   whether the lock should restore its caller's filter is fixpp#583.
 - **A second too-high frame and an unfilled gap (#537, §4.4, rulings R-2, R-6, R-9, R-11, R-12).** The
-  frame is ignored and the gap has a deadline (`B-537-1`, `B-537-2`). Not taken: holding the frame,
+  frame is ignored and the gap has a deadline (`B-537-1`, `B-537-2`); since 103 a too-high
+  ResendRequest is answered and a too-high Logout opens a bounded recovery (`B-103-6`, `B-103-7`,
+  research D4.1, fixpp#577). Not taken: holding the frame,
   as 013 FR-009 and the three QuickFIX engines do (it needs a capacity policy, an order for held
   administrative frames and a delivery path, and gains nothing on the wire while the request runs to
   0); a second ResendRequest per extra frame; no longer refreshing liveness on a too-high frame (it

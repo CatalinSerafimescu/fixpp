@@ -333,8 +333,13 @@ struct SessionConfig {
 
     // FR-008 / Clarifications Q5=A — initiator-graceful Logout disconnect
     // timeout in milliseconds. Default 2000 ms (matches QuickFIX/J
-    // SessionState.logoutTimeoutMs=2000L). Must be > 0; validated at
-    // SessionConfig-build time per [arch §5.3] construction-time carve-out.
+    // SessionState.logoutTimeoutMs=2000L). 0 reaches the session: TOML's mapper
+    // accepts any uint32, and the C ABI has no setter for this field (re-derive:
+    // `command grep -rn logout_disconnect include/fix/c_api`). What 0 means at each
+    // use (103; FR-006, FR-010): close(graceful)'s grace is 0, as
+    // before 103; drive_reconnect's drain, when it has to wait, force-closes the old
+    // transport at once; a too-high Logout is acknowledged at once, with no
+    // ResendRequest.
     // On a FileStore session the timeout does not bound a graceful close while the
     // Logout's write job is in the file executor: a cancellation does not take a job
     // out of an executor, so the close completes only after the file executor has run
