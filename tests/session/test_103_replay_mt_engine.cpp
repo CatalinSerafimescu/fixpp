@@ -214,11 +214,16 @@ TEST(ReplayMtEngine588, R588h_SendsFromSeveralThreadsDuringAHeldAnswer_AllAfterI
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
 #endif
     cfg.security_profile =
         fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::insecure_plain_tcp};
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif
     cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
     cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;

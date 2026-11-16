@@ -331,16 +331,16 @@ TEST(TooLowLogoutLongCompIds103, B5_LogoutDoesNotFit_NoLogoutDisconnected_NearMi
     EXPECT_EQ(over.s.count("5", mark), 0U) << "the session wrote " << over.s.written(mark);
     EXPECT_EQ(over.s.state(), fsm_state::Disconnected) << rg::state_name(over.s.state());
 
-    LongIds near{length - 1};
-    ASSERT_TRUE(near.to_n()) << "setup: the near-miss session is "
-                             << rg::state_name(near.s.state());
-    mark = near.s.sent.size();
-    r = near.s.feed(near.from_peer("D", 2, rg::Scene::order_fields(2)));
+    LongIds near_miss{length - 1};
+    ASSERT_TRUE(near_miss.to_n()) << "setup: the near-miss session is "
+                                  << rg::state_name(near_miss.s.state());
+    mark = near_miss.s.sent.size();
+    r = near_miss.s.feed(near_miss.from_peer("D", 2, rg::Scene::order_fields(2)));
     EXPECT_TRUE(r.has_value());
-    auto const logouts = near.s.of_type("5", mark);
-    ASSERT_EQ(logouts.size(), 1U) << "the near miss wrote " << near.s.written(mark);
+    auto const logouts = near_miss.s.of_type("5", mark);
+    ASSERT_EQ(logouts.size(), 1U) << "the near miss wrote " << near_miss.s.written(mark);
     EXPECT_EQ(rg::field(logouts.front(), 58), too_low_text(kN, 2));
-    EXPECT_EQ(near.s.state(), fsm_state::Disconnected);
+    EXPECT_EQ(near_miss.s.state(), fsm_state::Disconnected);
 }
 
 // ── B-6 (T141): a frame at 34=N with the seqnum lock drained ────────────────────────────
