@@ -210,6 +210,15 @@ struct session_test_access {
     [[nodiscard]] static bool logout_in_flight(Session const& s) noexcept {
         return s.logout_in_flight_;
     }
+    // 103 Phase 9: the liveness loops' join counter, the callback depth, the connection
+    // generation. Read on the session's strand.
+    [[nodiscard]] static int liveness_count(Session const& s) noexcept {
+        return s.liveness_counter_->load(std::memory_order_acquire);
+    }
+    [[nodiscard]] static std::uint32_t callback_depth(Session const& s) noexcept {
+        return s.callback_depth_;
+    }
+    [[nodiscard]] static std::uint32_t conn_gen(Session const& s) noexcept { return s.conn_gen_; }
     [[nodiscard]] static int peer_logout_bound_count(Session const& s) noexcept {
         return s.peer_logout_bound_counter_->load(std::memory_order_acquire);
     }

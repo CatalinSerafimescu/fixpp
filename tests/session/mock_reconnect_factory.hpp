@@ -71,6 +71,9 @@ public:
     std::atomic<int> make_call_count{0};
     // Raw pointer to the last transport created. Owned by the session.
     fixpp::transport::test::mock_transport* last_transport{nullptr};
+    // Applied to each new transport's Script before it is built (feature 103: the connect
+    // and write holds).
+    std::function<void(fixpp::transport::test::Script&)> tweak_script;
 
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>> make(
         asio::any_io_executor exec, fixpp::tls::SslCtxConfig /*ssl_cfg*/,
@@ -78,6 +81,7 @@ public:
         ++make_call_count;
         fixpp::transport::test::Script script;
         script.handshake_succeeds = true;
+        if (tweak_script) tweak_script(script);
         // Empty inbound → immediate EOF after connect+handshake.
         auto t = std::make_unique<fixpp::transport::test::mock_transport>(std::move(exec),
                                                                           std::move(script));

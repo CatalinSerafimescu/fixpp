@@ -53,6 +53,7 @@ Define FIXPP_ALLOW_MOCK_TRANSPORT in the consuming test target."
 #include <fixpp/transport/endpoint.hpp>       // Endpoint
 #include <fixpp/transport/tls_transport.hpp>  // TlsTransport + handshake_result
 #include <fixpp/transport/transport.hpp>      // Transport + ConnectInfo
+#include <functional>
 #include <memory>
 #include <memory_resource>
 #include <span>
@@ -116,6 +117,17 @@ struct Script {
     // asio_tls_transport surfaces.
     std::size_t partial_write_bytes{0};
 
+    // Holds (feature 103, tasks T114 to T116). When set, async_connect awaits
+    // connect_hold before its checkpoint, and refuses with transport_already_closed if the
+    // transport was closed meanwhile. While *write_hold is true and the transport is open,
+    // async_write waits, one post at a time; a close() during that wait ends it with
+    // transport_write_cancelled and nothing written.
+    std::function<asio::awaitable<void>()> connect_hold;
+    std::shared_ptr<std::atomic<bool>> write_hold;
+    // When set, close() also sets it, so a cell can read the close after the transport
+    // itself is gone.
+    std::shared_ptr<std::atomic<bool>> closed_flag;
+
     // ConnectInfo returned by async_connect. Default = loopback IPv4.
     ConnectInfo connect_info{
         .remote = Endpoint{"127.0.0.1", 0},
@@ -161,6 +173,12 @@ public:
 
         if (closed_) {
             co_return std::unexpected{E::transport_already_closed};
+        }
+        if (script_.connect_hold) {
+            co_await script_.connect_hold();
+            if (closed_) {
+                co_return std::unexpected{E::transport_already_closed};
+            }
         }
 
         // #341: no pre-op cancellation reap here (see the CANCELLATION TIMING
@@ -276,6 +294,12 @@ public:
         if (closed_) {
             co_return std::unexpected{E::transport_already_closed};
         }
+        while (script_.write_hold && script_.write_hold->load() && !closed_) {
+            co_await asio::post(exec_, asio::use_awaitable);
+        }
+        if (closed_) {
+            co_return std::unexpected{E::transport_write_cancelled};
+        }
         // Latency injection.
         if (script_.write_latency > std::chrono::milliseconds{0}) {
             asio::steady_timer timer{exec_};
@@ -320,6 +344,7 @@ public:
 
     [[nodiscard]] core::expected_t<void> close() noexcept override {
         closed_ = true;
+        if (script_.closed_flag) script_.closed_flag->store(true);
         return {};
     }
 
