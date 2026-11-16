@@ -1167,6 +1167,7 @@ TEST(Drain103CommitPointPlain, G6_CloseDuringTheConnect_AlreadyClosedTransportCl
     ASSERT_TRUE(r.open_to_active()) << "setup";
     r.too_low_order();
     ASSERT_EQ(r.s.state(), fsm_state::Disconnected) << "setup";
+    auto const out_before = next_out(r);
     auto rc_fut = r.spawn_reconnect();
     ASSERT_TRUE(r.s.pump_until([&] { return hold.entered; })) << "setup: the connect was not held";
     auto close_fut = spawn_terminal_close(r.s);
@@ -1182,6 +1183,9 @@ TEST(Drain103CommitPointPlain, G6_CloseDuringTheConnect_AlreadyClosedTransportCl
     EXPECT_EQ(plain->make_call_count.load(), 1) << "transports made";
     EXPECT_TRUE(closed->load()) << "the new transport was not closed";
     EXPECT_NE(r.s.state(), fsm_state::LogonSent);
+    EXPECT_TRUE(r.after_mark_of("A").empty())
+        << "a Logon was written after the refused install: " << r.after_mark_text();
+    EXPECT_EQ(next_out(r), out_before) << "a number was taken after the refused install";
 }
 
 }  // namespace
