@@ -5535,7 +5535,13 @@ Session::on_inbound_active_too_high_logout_(bool tic, seqnum_t seq) noexcept {
     // As on_inbound_active_logout_ does first, so a configured reset_on_logout fires whichever
     // ending follows.
     logout_seen_ = true;
-    if (cfg_.logout_disconnect_timeout_ms == 0 || !effective_clock_) {
+    // 103 (spec FR-021's crossing clause; FIX-SL §4.6, §4.10.2): while the session is itself
+    // ending, the bound could not acknowledge: its claim refuses while a Logout of the session
+    // is in flight (the owner, research D4.6), and its "live" test while a close has begun or
+    // Engine::stop() has noted the stop. So that Logout is answered at once, as the in-sequence
+    // one is, with no mark, no bound and no ResendRequest; NextNumIn is not moved.
+    if (cfg_.logout_disconnect_timeout_ms == 0 || !effective_clock_ || logout_in_flight_ ||
+        closing_or_stopped_()) {
         FIXPP_INBOUND_SPLIT_AWAIT(ack, tic, acknowledge_peer_logout_(tic));
         co_return ack;
     }

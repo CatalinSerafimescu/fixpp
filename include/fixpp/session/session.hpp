@@ -1837,8 +1837,10 @@ private:
     // The Logout owner (research D4.6): at most one Logout of an established session is
     // in flight. Session strand only.
     bool logout_in_flight_ = false;
-    // A too-high Logout in Active (research D4.2): with T = 0 or no clock, the acknowledgement
-    // at once (D4.5), returned as the frame's result; otherwise the mark and its bound when
+    // A too-high Logout in Active (research D4.2): with T = 0 or no clock, or while the session
+    // is itself ending (a Logout of its own in flight, a close begun or the stop noted; spec
+    // FR-021's crossing clause), the acknowledgement at once (D4.5), returned as the frame's
+    // result; otherwise the mark and its bound when
     // the phase is `none`, and nullopt, so the caller goes on (route (a) to fixpp's own
     // ResendRequest, route (b) to the frame's end).
     [[nodiscard]] asio::awaitable<std::optional<fixpp::core::expected_t<void>>>

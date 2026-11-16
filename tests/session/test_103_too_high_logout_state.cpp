@@ -476,61 +476,6 @@ TEST_P(TooHighLogoutState103, R588e3_AckStoreHeldThenCloseGraceful_ExactlyOneLog
     EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
 }
 
-// The bound's "live" test, its close term (research D4.4): close(graceful) has begun, its
-// phase-1 Logout is held in its store, so the session is still Active; a too-high Logout
-// arrives in that window and sets a mark close() never claimed. The bound exits at its first
-// "live" test, with the clock not moved. The window is below the real-time grace T, which
-// would otherwise end the close and wake the bound by its Disconnected edge.
-TEST_P(TooHighLogoutState103, BoundLive_TooHighLogoutDuringAGracefulClose_TheBoundExitsAtOnce) {
-    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT, .recording_store = true}};
-    ASSERT_TRUE(active_recorded(s)) << "setup";
-    seqnum_t const n = s.next_in();
-    hold_store_of(s, next_out(s));
-    auto const mark = s.sent.size();
-    auto close_fut = spawn_close(s, close_mode::graceful);
-    ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); }))
-        << "setup: phase 1's Logout store was not held";
-    ASSERT_EQ(phase(s), kNone) << "setup: a mark before the too-high Logout";
-    auto feed_fut = s.feed_spawn(s.logout(n + 3));
-    constexpr auto kWindow = std::chrono::milliseconds{kT} / 8;
-    // The mark is set and the bound spawned in one synchronous step.
-    EXPECT_TRUE(s.pump_until([&] { return phase(s) == kPending; }, kWindow))
-        << "the too-high Logout set no mark during the close";
-    EXPECT_TRUE(s.pump_until([&] { return bound_count(s) == 0; }, kWindow))
-        << "the bound did not exit at once while a close is in flight";
-    EXPECT_EQ(s.state(), fsm_state::Active) << "the window closed before the bound's test";
-    s.log->release_hold();
-    EXPECT_TRUE(s.pump_until(
-        [&] { return rg::Scene::ready(close_fut) && rg::Scene::ready(feed_fut); }, kCloseBudget));
-    EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
-    EXPECT_EQ(bound_count(s), 0);
-}
-
-// The same term's Engine::stop() leg: Engine::stop()'s first step has run (its note, which
-// claims a mark it finds), the session still Active; a too-high Logout then sets a mark that
-// note never saw. The bound exits at its first "live" test, with the clock not moved.
-TEST_P(TooHighLogoutState103, BoundLive_TooHighLogoutAfterTheEngineStopNote_TheBoundExitsAtOnce) {
-    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT}};
-    ASSERT_TRUE(s.open_to_active());
-    seqnum_t const n = s.next_in();
-    session_test_access::note_engine_stop(*s.session);
-    ASSERT_EQ(s.state(), fsm_state::Active) << "setup: the stop's note left Active";
-    constexpr auto kWindow = std::chrono::milliseconds{kT} / 8;
-    auto feed_fut = s.feed_spawn(s.logout(n + 3));
-    EXPECT_TRUE(
-        s.pump_until([&] { return rg::Scene::ready(feed_fut) && phase(s) == kPending; }, kWindow))
-        << "the too-high Logout set no mark after the stop's note";
-    EXPECT_TRUE(s.pump_until([&] { return bound_count(s) == 0; }, kWindow))
-        << "the bound did not exit at once after Engine::stop()'s note";
-    EXPECT_EQ(s.state(), fsm_state::Active) << "the window closed before the bound's test";
-    if (bound_count(s) != 0) {
-        // A bound still running is ended at its own deadline, so the Session is not destroyed
-        // with it and the cell ends as a test failure, not an abort.
-        s.pass(std::chrono::milliseconds{kT});
-    }
-    EXPECT_EQ(bound_count(s), 0);
-}
-
 // Route (b) at once (research D4.1, D4.5; FR-010): with T = 0, a too-high Logout while a
 // resend is outstanding is acknowledged at once. The acknowledgement cannot take a number here
 // (the next outbound number is at its maximum), so the frame returns that error, no Logout is
