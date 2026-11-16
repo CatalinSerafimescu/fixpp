@@ -287,12 +287,9 @@ public:
     // slot (T039 / I-07). close()'s phase 2, and drive_reconnect's drain, fire
     // cancellation_type::total on it. 103 (research D1) supersedes the list of
     // in-flight work this comment named (transport read/write, awaitable-mutex
-    // acquire, cancellable_dispatch, the parser→fromApp chain): the slot's only
-    // binders are the liveness loop's spawns, and this accessor has no production
-    // caller (103, cell RS-1). Re-derive:
-    // `command grep -n 'root_cancel_.slot()\|root_cancellation_slot()' src include`.
-    // The scripted double binds a sleep/dispatch to it and asserts the propagation
-    // property only.
+    // acquire, cancellable_dispatch, the parser→fromApp chain): what the slot reaches
+    // is stated at `root_cancel_` below, with its recipe (cell RS-1). The scripted double binds a
+    // sleep/dispatch to it and asserts the propagation property only.
     [[nodiscard]] asio::cancellation_slot root_cancellation_slot() noexcept {
         return root_cancel_.slot();
     }
@@ -721,8 +718,7 @@ public:
     // returns. A reader still on the old live_transport() reads a destroyed transport, and
     // nothing reads the new one (FR-006).
     // drive_reconnect must not be bound to root_cancellation_slot(): its own drain emits
-    // that signal, which would cancel it, and the slot's single client kind is the
-    // liveness loop.
+    // that signal, which would cancel it (see `root_cancel_`; cell RS-1).
     // Two caller preconditions every Session awaitable has, named here because the bound
     // and the gate make them checkable or load-bearing: close() runs before the Session is
     // destroyed (~Session asserts the too-high Logout bound's counter is 0 in builds with
@@ -880,8 +876,14 @@ private:
     MessageStore::flush_hook_fn close_flush_hook_a1_ = nullptr;
 
     // Root cancellation signal (T039). close()'s phase 2 and drive_reconnect's drain
-    // fire cancellation_type::total on this. It reaches only what is bound to
-    // root_cancellation_slot(): the liveness loop's spawns (103, cell RS-1).
+    // fire cancellation_type::total on this, and it reaches only what is bound to
+    // root_cancellation_slot(). 103 (research D1) requires every binder of that slot to
+    // be a spawn of the liveness loop; transport I/O, mutex acquires, sends, the reconnect,
+    // the Logout phase and callback chains must not bind it. The comments that rely on
+    // this point here. Re-derive the binders with
+    // `command grep -n 'root_cancel_.slot()\|root_cancellation_slot()' src include`;
+    // cell RS-1 (tasks T014 (a), T134) checks the set, with a seeded binder as its
+    // known positive.
     asio::cancellation_signal root_cancel_;
 
     // Idempotent THREE-STATE close (I-10): the FIRST close() runs the body
@@ -1985,6 +1987,14 @@ private:
     // its phase 1 writes. The FSM term covers `closed_drained` too: close() writes
     // Disconnected before it gets there. `never_opened` is not a close.
     [[nodiscard]] bool logon_arm_superseded_(fsm_state expected) const noexcept;
+
+    // 103 (research D1, D4.4): a close() has begun or completed, or Engine::stop() has
+    // noted the stop. The test the reconnect's commit point, its drain, its step 1 and the
+    // too-high Logout's bound share.
+    [[nodiscard]] bool closing_or_stopped_() const noexcept {
+        return state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
+               engine_stop_requested_;
+    }
 
     // 093 plan OD-26: the Disconnected write that follows a store suspension on a Logon
     // arm (an error path, or a refusal's fail-closed write). With `arm` set and

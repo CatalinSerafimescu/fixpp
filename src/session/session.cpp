@@ -772,8 +772,7 @@ bool Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Tr
     // 103 (research D1 step 4): the commit point. A close() or Engine::stop() that ran during
     // the connect or the handshake is caught here, with no suspension between this test and
     // the install: the new transport is closed and nothing is installed or recorded.
-    if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
-        engine_stop_requested_) {
+    if (closing_or_stopped_()) {
         if (transport) {
             (void)transport->close();
         }
@@ -844,10 +843,7 @@ Session::inbound_depth_holder::~inbound_depth_holder() {
 // 103 (research D1 steps 2 and 3; data-model "Quiescent"): see session.hpp.
 asio::awaitable<fixpp::core::expected_t<void>> Session::drain_for_reconnect_() noexcept {
     using fixpp::core::error;
-    auto const refused = [this]() noexcept {
-        return state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
-               engine_stop_requested_;
-    };
+    auto const refused = [this]() noexcept { return closing_or_stopped_(); };
     auto const cancelled = [](asio::cancellation_state const cs) noexcept {
         return cs.cancelled() != asio::cancellation_type::none;
     };
@@ -894,8 +890,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::drain_for_reconnect_() n
             co_return std::unexpected(error::session_already_closed);
         }
         // The old connection's detached coroutines: the liveness loop ends at the total
-        // cancellation close() uses (the root slot's binders are the liveness loop's
-        // spawns, cell RS-1), and the bound was woken by step 2's edge.
+        // cancellation close() uses (see `root_cancel_`; cell RS-1), and the bound was woken by
+        // step 2's edge.
         root_cancel_.emit(asio::cancellation_type::total);
         auto const bc = peer_logout_bound_counter_;
         auto const lc = liveness_counter_;
@@ -939,8 +935,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::drive_reconnect() noexce
         FIXPP_ASSERT_NO_CALLBACK_AT_WAITED_RECONNECT();
     }
     // Step 1: a closing, closed or stopped Session.
-    if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
-        engine_stop_requested_) {
+    if (closing_or_stopped_()) {
         co_return std::unexpected(error::session_already_closed);
     }
     // Step 1a, the reader fence: the Engine's read pump owns the installed transport.
@@ -2208,8 +2203,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // awaits a result nobody will ever set → hang. Disable cancellation on this
     // coroutine for the whole of close() so it is immune to the caller's signal. This
     // shields close()'s OWN co_awaits only; the liveness loop it tears down is still
-    // cancelled via root_cancel_.emit(total), fired in phase 2 (the root slot's binders
-    // are the liveness loop's spawns: 103, cell RS-1).
+    // cancelled via root_cancel_.emit(total), fired in phase 2 (see `root_cancel_`; cell RS-1).
     // (Engine::stop() also drives a fresh close() for sessions whose role-loop close()
     // was cancelled BEFORE entry — the two fixes are complementary.) [Codex P1]
     co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
@@ -2323,7 +2317,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
         //
         // [feedback_asio_cospawn_total_cancellation_default]: run_logout_phase1 makes
         // no reset_cancellation_state call; it runs under close()'s cancellation
-        // state, which the root slot does not reach (103, cell RS-1).
+        // state, which the root slot does not reach (see `root_cancel_`; cell RS-1).
         // OD-29: a terminal close that arrived during the flush hooks above has set
         // close_escalated_, and phase 1 does not start.
         if (!close_escalated_ &&
@@ -2407,10 +2401,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // T037/T039 phase 2 — fire root cancellation_type::total ONLY after
     // phase 1 has resolved (peer ACK | child timeout | child cancelled —
     // collapsed to "phase 1 done" in the scripted scope). It reaches what is
-    // bound to root_cancellation_slot(): the liveness loop's spawns. Transport
-    // I/O, mutex acquires, cancellable_dispatch and the parser→fromApp chain are
-    // not bound to it (103, cell RS-1). Re-derive:
-    // `command grep -n 'root_cancel_.slot()' src include`.
+    // bound to root_cancellation_slot() (see `root_cancel_`; cell RS-1); transport I/O, mutex
+    // acquires, cancellable_dispatch and the parser→fromApp chain are not.
     // terminal reaches phase 2 immediately (phase 1 skipped).
     //
     // fixpp#536 (.specify/536-537-538-recovery-liveness.md, D-536-1 and D-536-2),
@@ -2426,7 +2418,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     if (auto live = live_transport_shared_()) {
         // #348 — close_async(), not close(). The Engine's read pump can still
         // have a read in flight at this instant: the emit above does not reach it
-        // (the root slot's binders are the liveness loop's spawns; 103, cell RS-1).
+        // (see `root_cancel_`; cell RS-1).
         // With a read in flight the synchronous close() takes its suspended-op
         // path and skips the close-notify, so the peer of a cleanly closing fixpp
         // session reads an OS-level error. close_async cancels and JOINS the
@@ -5592,7 +5584,6 @@ asio::awaitable<void> Session::run_peer_logout_bound_(std::shared_ptr<std::atomi
         std::shared_ptr<std::atomic<int>> c;
         ~counter_release() { c->fetch_sub(1, std::memory_order_release); }
     } const release{std::move(counter)};
-    (void)gen;
     try {
         if (peer_logout_bound_hold_first_run_) {
             co_await peer_logout_bound_hold_first_run_();
@@ -5601,8 +5592,7 @@ asio::awaitable<void> Session::run_peer_logout_bound_(std::shared_ptr<std::atomi
             assert(conn_gen_ == gen && "the too-high Logout's bound outlived its connection");
             (void)gen;
             return peer_logout_.phase == peer_logout_mark::phase_t::pending &&
-                   fsm_state_ == fsm_state::Active && state_ != lifecycle::closing &&
-                   state_ != lifecycle::closed_drained && !engine_stop_requested_;
+                   fsm_state_ == fsm_state::Active && !closing_or_stopped_();
         };
         asio::steady_timer woken{co_await asio::this_coro::executor,
                                  asio::steady_timer::time_point::max()};
@@ -6917,7 +6907,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_body_(
     // F5 (Round-A drift): wrap the entire send body in try/catch to absorb
     // asio::system_error{operation_aborted} thrown when the async_mutex awaitable
     // is cancelled (the send's own cancellation slot; the Session's root slot does not
-    // reach a send: 103, cell RS-1).
+    // reach a send; see `root_cancel_`, cell RS-1).
     // The try is for the ending: any exception of the send body, store_then_emit's
     // operation_aborted for a cancelled store call among them, ends the send with
     // dispatch_aborted and the session Disconnected, and leaves the caller's thread as
@@ -8049,9 +8039,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_r
 //
 // [feedback_asio_cospawn_total_cancellation_default]: this coroutine is called
 // via co_await from close(), which disabled cancellation on its coroutine first;
-// the root slot does not reach it (its binders are the liveness loop's spawns:
-// 103, cell RS-1). We do NOT reset here — the caller (close) owns the
-// cancellation state. The wait for the confirmation is step 3's race (D-536-3).
+// the root slot does not reach it (see `root_cancel_`; cell RS-1). We do NOT reset here — the
+// caller (close) owns the cancellation state. The wait for the confirmation is step 3's race
+// (D-536-3).
 asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noexcept {
     using namespace std::chrono_literals;
     using std::chrono::seconds;
