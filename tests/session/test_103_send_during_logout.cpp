@@ -19,7 +19,9 @@
 //   too_high_no_clock   a too-high Logout on a session with no clock, acknowledged at once;
 //   too_high_bound      a too-high Logout acknowledged by its bound at T;
 //   close_phase1        close(graceful)'s phase-1 Logout, the other leaf (R588f_GracefulClose
-//                       covers a send contended at the replay gate during that close).
+//                       covers a send contended at the replay gate during that close);
+//   too_low             a frame below NextNumIn without PossDupFlag(43): Arm B's Logout
+//                       (research D9, FR-018).
 #include <gtest/gtest.h>
 
 #include <asio/co_spawn.hpp>
@@ -64,7 +66,8 @@ enum class Emitter : std::uint8_t {
     arm_d,
     too_high_no_clock,
     too_high_bound,
-    close_phase1
+    close_phase1,
+    too_low
 };
 
 seqnum_t next_out(rg::Scene const& s) {
@@ -158,6 +161,9 @@ TEST_P(SendDuringLogout103, SendWhileTheEmittersLogoutIsStored_RefusedNoAppFrame
                                        s.session->close(fixpp::session::close_mode::graceful),
                                        asio::use_future);
             break;
+        case Emitter::too_low:
+            feed_fut = s.feed_spawn(s.order(n - 1));
+            break;
     }
     ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); }))
         << "setup: the emitter's Logout store was not held: " << s.written(mark);
@@ -219,6 +225,9 @@ std::string emitter_name(::testing::TestParamInfo<std::tuple<session_role, Emitt
         case Emitter::close_phase1:
             e = "ClosePhase1";
             break;
+        case Emitter::too_low:
+            e = "TooLow";
+            break;
     }
     return std::string{rg::role_name(std::get<0>(info.param))} + e;
 }
@@ -229,5 +238,5 @@ INSTANTIATE_TEST_SUITE_P(
                        ::testing::Values(Emitter::in_sequence_logout, Emitter::gap_deadline,
                                          Emitter::sending_time_fatal, Emitter::arm_d,
                                          Emitter::too_high_no_clock, Emitter::too_high_bound,
-                                         Emitter::close_phase1)),
+                                         Emitter::close_phase1, Emitter::too_low)),
     emitter_name);
