@@ -220,8 +220,8 @@ set_property(TEST session_pure_tests APPEND PROPERTY LABELS 098)
 # they were inside it: the same link libraries, include directories, definitions and environment.
 # Buckets of their own only because their cells are slow under the sanitizer lanes and one ctest
 # entry must stay inside CI's per-test timeout; grouped by source file, never by cell.
-# No TIMEOUT property, so CI's `--timeout 1800` wedge guard governs each entry, as for
-# dictionary_overlay_tests in tests/dictionary/CMakeLists.txt. The condition: each entry's run on
+# No TIMEOUT property, so CI's `--timeout 1800` wedge guard governs each entry, as it does
+# for dictionary_099_tests in tests/dictionary/CMakeLists.txt. The condition: each entry's run on
 # the slowest of CI's linux-clang-tsan and windows-msvc-asan lanes stays at or under half of that
 # guard; an entry past it moves a file to another bucket here, and an entry of one file past it
 # stops for a decision, since cells are never split across entries. Re-derive from a CI log of each

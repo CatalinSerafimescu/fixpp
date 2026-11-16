@@ -105,38 +105,56 @@ set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 100)
 set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 102)
 
 # ── 098-dialect-overlay: the overlay witnesses W-0..W-4 and W-9's status-mapping rows ──
-# Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); a bucket of
+# Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); buckets of
 # their own only because their cells are slow under msvc-asan, and one ctest entry must stay
 # under CI's per-test timeout. Compiled as they were inside dictionary_pure_tests: the same
 # link libraries, include directories and definitions. FIXPP_ORCHESTRA_DATA_DIR is spelled
 # out for the reason given in the bucket above.
-add_executable(dictionary_overlay_tests
+# 103 (tasks T161): W-2's vendored-bases suite and its empty-overlay suite moved, as whole
+# source files, to entries of their own, split by whole TEST/TEST_P suite, never by instance
+# or filter. TIMEOUT: each entry's value is at least twice its PROJECTED reading on CI's
+# slowest sanitizer lane, and under CI's `--timeout` guard. The projection: the entry's share
+# of the Debug run's per-suite durations (gtest's `[       OK ] <Suite>.<Cell> (N ms)` lines,
+# summed per suite and per file) applied to the slowest CI reading of the single entry the
+# three were, since a passing entry's CI log carries no per-cell lines. Re-check from a CI
+# log of each sanitizer lane: `grep -E 'Test +#[0-9]+: dictionary_overlay(_w2|_w2_empty)?_tests '`;
+# twice each reading must stay under the guard.
+function(add_dictionary_overlay_bucket target timeout)
+  add_executable(${target} ${ARGN})
+  target_link_libraries(${target} PRIVATE
+    fixpp_dictionary
+    pugixml::pugixml
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(${target} PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+    # tests/support/dictionary_test_access.hpp includes the private dictionary_internal.hpp.
+    "${CMAKE_SOURCE_DIR}/src/dictionary")
+  target_compile_definitions(${target} PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+    # The hand-written overlay fixtures and references.
+    "FIXPP_098_FIXTURE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures/098\""
+    "FIXPP_ORCHESTRA_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries/orchestra\""
+    FIXPP_TEST_HOOKS)
+  add_test(NAME ${target} COMMAND ${target})
+  set_tests_properties(${target} PROPERTIES LABELS "dictionary;098" TIMEOUT ${timeout})
+  # 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
+  # setter for this entry, so the existing labels survive.
+  set_property(TEST ${target} APPEND PROPERTY LABELS 102)
+endfunction()
+add_dictionary_overlay_bucket(dictionary_overlay_tests 1000
   dictionary_equivalence_test.cpp  # 098 W-0: the dictionary comparator's self-test
-  overlay_equivalence_test.cpp     # 098 W-1/W-2/W-4: overlay vs the equivalent edited XML
+  overlay_equivalence_test.cpp     # 098 W-1/W-4, W-2's at-cap and Orchestra rows
   overlay_refusal_test.cpp         # 098 W-3: the overlay's refusals; W-9's status-mapping rows
   test_102_overlay_ids.cpp         # 102 T014: Orchestra overlay ids past 65535 (read seam)
 )
-target_link_libraries(dictionary_overlay_tests PRIVATE
-  fixpp_dictionary
-  pugixml::pugixml
-  GTest::gtest
-  GTest::gtest_main
+add_dictionary_overlay_bucket(dictionary_overlay_w2_tests 1500
+  overlay_equivalence_w2_test.cpp        # 098 W-2: the vendored bases (103 T161)
 )
-target_include_directories(dictionary_overlay_tests PRIVATE
-  "${CMAKE_SOURCE_DIR}/tests"
-  # tests/support/dictionary_test_access.hpp includes the private dictionary_internal.hpp.
-  "${CMAKE_SOURCE_DIR}/src/dictionary")
-target_compile_definitions(dictionary_overlay_tests PRIVATE
-  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
-  # The hand-written overlay fixtures and references.
-  "FIXPP_098_FIXTURE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures/098\""
-  "FIXPP_ORCHESTRA_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries/orchestra\""
-  FIXPP_TEST_HOOKS)
-add_test(NAME dictionary_overlay_tests COMMAND dictionary_overlay_tests)
-set_tests_properties(dictionary_overlay_tests PROPERTIES LABELS "dictionary;098")
-# 102-dict-width-multichar-type: label 102 (tasks.md T004). APPEND, after the last LABELS
-# setter for this entry, so the existing labels survive.
-set_property(TEST dictionary_overlay_tests APPEND PROPERTY LABELS 102)
+add_dictionary_overlay_bucket(dictionary_overlay_w2_empty_tests 900
+  overlay_equivalence_w2_empty_test.cpp  # 098 W-2: the empty overlay on every runtime base
+)
 
 # ── 099-fixt-appl-version-validation: W-17 and W-21's dictionary half ─────────
 # Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); a bucket of
