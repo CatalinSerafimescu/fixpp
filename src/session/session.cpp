@@ -4317,8 +4317,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         // refuses. refuse_logon_with_logout_ records Disconnected unless the arm was
         // superseded meanwhile, and does not send a Logout that does not fit its buffer.
         // Its error is returned; a superseded arm returns success (D-CAN-5); otherwise
-        // the mismatch. logon_arm_superseded_ is asked about Disconnected because the
-        // helper has just recorded it: true only for a close(), a stop or another state.
+        // the mismatch. The helper has just recorded Disconnected, and a completed close()
+        // also leaves Disconnected, so the FSM alone cannot tell them apart: the arm is
+        // superseded when a close() has begun or completed, Engine::stop() has noted the
+        // stop, or the FSM holds a state other than Disconnected.
         if (!peer_sent_reset &&
             cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) {
             static constexpr std::string_view kStrictResetText = "ResetSeqNumFlag(141)=Y required";
@@ -4327,7 +4329,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
             if (!refused) {
                 co_return refused;
             }
-            if (logon_arm_superseded_(fsm_state::Disconnected)) {
+            if (closing_or_stopped_() || fsm_state_ != fsm_state::Disconnected) {
                 co_return fixpp::core::expected_t<void>{};
             }
             co_return std::unexpected(fixpp::core::error::session_seqnum_reset_mismatch);

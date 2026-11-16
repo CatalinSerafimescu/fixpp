@@ -1986,8 +1986,10 @@ private:
     // owns the teardown once it begins. The arm then returns success, as in the
     // Disconnected row. `closing` is the signal because close() sets it before it can
     // yield the strand, while a graceful close() leaves the FSM in the arm's state until
-    // its phase 1 writes. The FSM term covers `closed_drained` too: close() writes
-    // Disconnected before it gets there. `never_opened` is not a close.
+    // its phase 1 writes. For an arm expecting a state other than Disconnected, the FSM
+    // term covers `closed_drained` too: close() writes Disconnected before it gets there.
+    // An arm expecting Disconnected cannot tell a completed close() from its own record
+    // this way, so it asks closing_or_stopped_() instead. `never_opened` is not a close.
     [[nodiscard]] bool logon_arm_superseded_(fsm_state expected) const noexcept;
 
     // 103 (research D1, D4.4): a close() has begun or completed, or Engine::stop() has
