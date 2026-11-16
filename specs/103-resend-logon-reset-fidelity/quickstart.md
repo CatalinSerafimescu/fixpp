@@ -75,8 +75,9 @@ in the evidence file, tasks T176; no digest is quoted here to copy): `Fix44/Happ
 `Fixt/HappyFixtLogonHbLogout`, `Fix44/ResetOnLogonInitiator`, `Fix44/ResetOnLogonAcceptor` and
 `Fix44/HappyDisconnectReconnectNoReset` (re-derive the live set: `tests/interop/expected-skips-without-counterparty.txt`
 minus `tests/interop/live-cells-excluded.txt`). Expected: every cell passes with the default configuration, and
-`HappyDisconnectReconnectNoReset` goes RED with the strict default restored (its reconnect logs on at a stored number
-above 1). Then the in-process FileStore restart-and-resume cell, both roles, against the peer fixture: GREEN with the
+`HappyDisconnectReconnectNoReset` goes RED with the strict default restored: its first Logon gains 141=Y and the parent
+harness's golden check fails (at this harness the cell makes one Logon exchange at 34=1 and no reconnect; evidence
+T176; continuity across an in-place reconnect is witnessed by `tests/session/test_103_resend_state_reconnect.cpp`). Then the in-process FileStore restart-and-resume cell, both roles, against the peer fixture: GREEN with the
 default, RED with the strict default restored. The live restart-and-resume suites stay fixpp#503's.
 
 ## 6. Records

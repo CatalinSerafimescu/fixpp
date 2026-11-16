@@ -641,8 +641,11 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   interop helper forcing a policy, the live default-config Logon cells pass against each QuickFIX counterparty
   they run against: `Fix44/HappyLogonHbLogout.LogonHeartbeatLogout`, `Fixt/HappyFixtLogonHbLogout.LogonHeartbeatLogout`,
   `Fix44/ResetOnLogonInitiator.LogonAcceptedAndResyncs`, `Fix44/ResetOnLogonAcceptor.AdmitsFresh34eq1AndResyncsFrom1`
-  and `Fix44/HappyDisconnectReconnectNoReset.ReconnectPreservesSequenceContinuity` (the one that logs on at a
-  stored number above 1, so the one that fails if the default resets; re-derive the live set from
+  and `Fix44/HappyDisconnectReconnectNoReset.ReconnectPreservesSequenceContinuity` (the one that fails if the
+  default resets: at this harness it makes one Logon exchange at 34=1 and no reconnect, it checks that fixpp's first
+  Logon carries no 141=Y under the default, and the parent harness's golden check catches the 141=Y a strict default
+  adds; evidence T176. Sequence continuity across an in-place reconnect is witnessed in-repo by
+  `tests/session/test_103_resend_state_reconnect.cpp`. Re-derive the live set from
   `tests/interop/expected-skips-without-counterparty.txt` minus `tests/interop/live-cells-excluded.txt`). And an
   in-process FileStore restart-and-resume cell, in both roles, against the peer fixture (User Story 1's Independent
   Test and its acceptor twin) passes with the default configuration and fails with the strict default restored.
