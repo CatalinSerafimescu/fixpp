@@ -350,10 +350,8 @@ TEST(ResendStateReconnect103, Control_FreshSession_TooHighFrameDrawsTheSameResen
 // own. Only one loop may be bound to the session's root cancellation slot (D1, "The root
 // slot's single-client invariant"); the drain retires the old one first (tasks T129, T131).
 // After the new Active the clock moves one HeartBtInt: one liveness loop writes one
-// Heartbeat. Disabled until the drain lands (T131 drops the prefix); read with
-// --gtest_also_run_disabled_tests and this cell's exact name.
-TEST(ResendStateReconnect103,
-     DISABLED_G8_ZeroDowntimeReconnect_OldLivenessLoopRetiredBeforeTheInstall) {
+// Heartbeat.
+TEST(ResendStateReconnect103, G8_ZeroDowntimeReconnect_OldLivenessLoopRetiredBeforeTheInstall) {
     Rig r;
     ASSERT_TRUE(r.open_to_active()) << "setup: the session did not reach Active";
     ASSERT_TRUE(r.open_gap()) << "setup: no gap opened; the session wrote " << r.s.written();
@@ -373,12 +371,8 @@ TEST(ResendStateReconnect103,
 }
 
 // ── Arm E: drive_reconnect from Active with a too-high Logout received ──────────────────────
-// research D1, the drain: GREEN only once the drain and the commit point land
-// (tasks T129, T131); the mark's half needs D4.
-// Disabled until then (tasks T131 drops the prefix); its RED is read with
-// --gtest_also_run_disabled_tests.
-TEST(ResendStateReconnect103,
-     DISABLED_ArmE_ReconnectFromActive_OldLogoutNeverAcknowledgedOnTheNewOne) {
+// research D1, the drain and the commit point (tasks T129, T131), and D4's mark.
+TEST(ResendStateReconnect103, ArmE_ReconnectFromActive_OldLogoutNeverAcknowledgedOnTheNewOne) {
     Rig r;
     ASSERT_TRUE(r.open_to_active()) << "setup: the session did not reach Active";
     ASSERT_TRUE(r.open_gap()) << "setup: no gap opened; the session wrote " << r.s.written();

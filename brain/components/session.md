@@ -404,6 +404,11 @@ it through an `Application` callback is the callback the stretch itself calls.
   reset and before its three-state test. The owner fixed its reading after Gate A round 1: the rule is
   "after the callback returns", not "after the operation that called the callback has finished", and
   `L-563-1` is what that costs.
+  ⚠️ **The note's §2.1a row for `Session::open` / `Session::drive_reconnect` ("engine-driven; not an
+  application entry point from a callback") is SUPERSEDED for `drive_reconnect` by feature 103**
+  (`specs/103-resend-logon-reset-fidelity/research.md` D1 step 0b): `drive_reconnect` is an
+  application entry point, and from a callback it takes R-4's post before its first state test.
+  `Session::drive_reconnect`'s header comment states the contract.
 - **R-5.** `Engine::stop()` started from a callback is out of this decision; `L-563-4`, follow-up
   fixpp#579.
 - **R-6.** "Calls to `store()` complete in the order they were made" is a requirement of

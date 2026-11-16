@@ -314,9 +314,10 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
         // profiles — the fail-closed null-cast path (non-TLS transport on a TLS
         // profile is still a bug) is provably unchanged. [data-model §E-5; D-7]
         if (is_plaintext_) {
-            if (session_ != nullptr) {
-                session_->install_reconnected_transport(std::move(t),
-                                                        fixpp::transport::handshake_result{});
+            // 103 (research D1 step 4): the install is the commit point.
+            if (session_ != nullptr && !session_->install_reconnected_transport(
+                                           std::move(t), fixpp::transport::handshake_result{})) {
+                co_return std::unexpected{error::session_already_closed};
             }
             co_return expected_t<void>{};
         }
@@ -390,8 +391,10 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
         }
 
         // ── Step 8: Success handoff → Session::install_reconnected_transport ──
-        if (session_ != nullptr) {
-            session_->install_reconnected_transport(std::move(t), std::move(hr));
+        // 103 (research D1 step 4): the install is the commit point.
+        if (session_ != nullptr &&
+            !session_->install_reconnected_transport(std::move(t), std::move(hr))) {
+            co_return std::unexpected{error::session_already_closed};
         }
         // (If session_ is null the transport is simply dropped — test-only path
         // where ReconnectFsm is tested standalone without a Session owner.)

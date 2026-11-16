@@ -678,6 +678,32 @@ public:
     // emit is folded in here (NOT a third public method) to hold the SC-010
     // surface at exactly the two documented additions.
     // [data-model §E-1a; T016(b); FR-003/FR-004; SC-010 (7)]
+    //
+    // 103 (research D1 steps 0b to 4, "drain, then reconnect"; FR-006) supersedes the
+    // "only the engine's connect loop" convention: drive_reconnect is an application entry
+    // point (it supersedes .specify/563-564-callback-send.md §2.1a's drive_reconnect row,
+    // "engine-driven; not an application entry point from a callback"). Its contract:
+    //   - Single flight: a second call while one is in flight returns
+    //     session_already_open, with no drain and no connect.
+    //   - From a callback it first posts onto the session's executor, as close() does.
+    //   - A closing, closed or stopped Session returns session_already_closed.
+    //   - The reader fence: an acceptor, or an initiator whose Engine read pump owns the
+    //     installed transport (cfg_.engine_managed with a transport installed), returns
+    //     session_already_open, nothing changed. SessionConfig::engine_managed is public:
+    //     a standalone initiator that sets it is treated as Engine-owned.
+    //   - From Active or LogonReceived it records Disconnected (onLogout fires from
+    //     Active), then waits until no emit is in flight and no inbound frame is being
+    //     processed, bounded by logout_disconnect_timeout_ms (at the bound the old
+    //     transport is force-closed and the wait goes on), then retires the old
+    //     connection's liveness loop and too-high Logout bound, then connects.
+    //   - A cancellation of the caller's own slot during that wait returns
+    //     dispatch_aborted with nothing installed and the cancellation left pending.
+    //   - A close() or Engine::stop() that runs during the connect is caught at the
+    //     install, which installs nothing and returns session_already_closed.
+    // Standalone initiator precondition: the caller's own reader has left
+    // live_transport() before the call, and starts on the new live_transport() after it
+    // returns. drive_reconnect must not be bound to root_cancellation_slot(): its drain
+    // emits that signal.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> drive_reconnect() noexcept;
 
     // 015 T016(b) — live-transport accessor for the read-pump (SC-010 delta (8)).
@@ -1542,8 +1568,13 @@ private:
     // "fixpp/transport/tls_transport.hpp". [const §XV.9; 8e2d362 guard]
     //
     // [data-model §E-1 step 8; E-2; contracts C1; C2; FR-001; FR-006]
-    void install_reconnected_transport(std::unique_ptr<fixpp::transport::Transport> transport,
-                                       fixpp::transport::handshake_result hr) noexcept;
+    //
+    // 103 (research D1 step 4): the install is the reconnect's commit point. On a closing,
+    // closed or stopped Session it closes `transport`, installs nothing, records no
+    // transition and returns false; ReconnectFsm then returns session_already_closed.
+    [[nodiscard]] bool install_reconnected_transport(
+        std::unique_ptr<fixpp::transport::Transport> transport,
+        fixpp::transport::handshake_result hr) noexcept;
 
     // ReconnectFsm is a value member of Session and needs access to the
     // private install_reconnected_transport() method. The friend declaration
@@ -1622,6 +1653,27 @@ private:
     // generation. Incremented in install_reconnected_transport before its LogonSent
     // transition; connection-scoped recovery work captures it.
     std::uint32_t conn_gen_ = 0;
+
+    // 103 (research D1 step 0b): drive_reconnect's single-flight flag, set at its entry and
+    // cleared by an RAII holder on every exit. Session strand only.
+    bool reconnect_in_flight_ = false;
+    // 103 (research D1 step 3; data-model "inbound_depth_"): the inbound frames being
+    // processed, raised by an RAII holder that is on_inbound_active_'s first statement and
+    // lowered at its every exit; reaching 0 wakes the replay gate's waiters (the drain).
+    // Precondition: the Session outlives the inbound frame.
+    std::uint32_t inbound_depth_ = 0;
+    struct inbound_depth_holder {
+        explicit inbound_depth_holder(Session& s) noexcept : s_{s} { ++s_.inbound_depth_; }
+        ~inbound_depth_holder();
+        inbound_depth_holder(inbound_depth_holder const&) = delete;
+        inbound_depth_holder& operator=(inbound_depth_holder const&) = delete;
+
+    private:
+        Session& s_;
+    };
+    // The drain of research D1 steps 2 and 3. Returns an error when drive_reconnect must
+    // return it: session_already_closed, or dispatch_aborted on the caller's cancellation.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> drain_for_reconnect_() noexcept;
 
     // 015 T011 — live accepted transport (owned by Session after a successful
     // attach_accepted_transport call). Null until the engine's accept loop

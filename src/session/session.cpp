@@ -354,6 +354,12 @@ const void* Session::callback_thread_tag_() noexcept {
     assert(callback_depth_ == 0 &&                                \
            "close resumed inside a callback of the same session " \
            "(a callback ran the session's executor?)")
+// 103 (research D1 step 0b): drive_reconnect evaluates this after the same wait.
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define FIXPP_ASSERT_NO_CALLBACK_AT_WAITED_RECONNECT()                      \
+    assert(callback_depth_ == 0 &&                                          \
+           "drive_reconnect resumed inside a callback of the same session " \
+           "(a callback ran the session's executor?)")
 
 // ── FR-004 / D-2 — FSM transition ring-buffer helpers ────────────────────
 // record_state_transition_: write new_state into the 16-slot ring and advance
@@ -761,11 +767,25 @@ fixpp::core::expected_t<void> Session::reload_credentials(
 //
 // noexcept: move + optional-assign + record_state_transition_ are all
 // non-throwing. [data-model §E-1 step 8; E-2; contracts C1; C2; FR-001; FR-006]
-void Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Transport> transport,
+bool Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Transport> transport,
                                             fixpp::transport::handshake_result hr) noexcept {
-    // 103 (research D4.6, data-model "Logout owner"): the owner is cleared on the edge into
-    // Disconnected, which precedes every install.
+    // 103 (research D1 step 4): the commit point. A close() or Engine::stop() that ran during
+    // the connect or the handshake is caught here, with no suspension between this test and
+    // the install: the new transport is closed and nothing is installed or recorded.
+    if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
+        engine_stop_requested_) {
+        if (transport) {
+            (void)transport->close();
+        }
+        return false;
+    }
+    // 103 (research D1 step 3, D4.6): the drain left the old connection quiescent, with no
+    // Logout in flight and none of its detached coroutines running.
     assert(!logout_in_flight_ && "a Logout is in flight across a reconnect install");
+    assert(replay_gate_.shared == 0 && inbound_depth_ == 0 &&
+           peer_logout_bound_counter_->load(std::memory_order_acquire) == 0 &&
+           liveness_counter_->load(std::memory_order_acquire) == 0 &&
+           "the reconnect installs over a connection that is not quiescent");
     // 1. Store live peer identity for arm (1-live) in the Logon-ack guard.
     //    The peer_id is moved out of hr (hr.peer_id is owning-by-value per
     //    handshake_result::peer_id is owning-by-value). [data-model §E-2; contracts C2; FR-006]
@@ -800,6 +820,9 @@ void Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Tr
     //     allocate nothing. The Disconnected edge clears neither (research D1, "Why the edge
     //     clears neither the resend state nor the mark").
     reconnect_fsm_.exit_awaiting_resend();
+    // 103 (data-model, the mark's "new transport installed" row): no bound of the old
+    // connection exists (the drain waited for its counter), so the mark is cleared here.
+    peer_logout_.phase = peer_logout_mark::phase_t::none;
     ++conn_gen_;
 
     // 3. Re-enter LogonSent so on_inbound_frame drives back to Active.
@@ -807,6 +830,85 @@ void Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Tr
     //    row of the FSM matrix, transitioning back to Active.
     //    [data-model §E-1 step 8; FR-001; US1 AC1]
     record_state_transition_(fsm_state::LogonSent);
+    return true;
+}
+
+// 103 (research D1 step 3): see session.hpp.
+Session::inbound_depth_holder::~inbound_depth_holder() {
+    --s_.inbound_depth_;
+    if (s_.inbound_depth_ == 0) {
+        s_.replay_gate_.wake_all();
+    }
+}
+
+// 103 (research D1 steps 2 and 3; data-model "Quiescent"): see session.hpp.
+asio::awaitable<fixpp::core::expected_t<void>> Session::drain_for_reconnect_() noexcept {
+    using fixpp::core::error;
+    auto const refused = [this]() noexcept {
+        return state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
+               engine_stop_requested_;
+    };
+    auto const cancelled = [](asio::cancellation_state const cs) noexcept {
+        return cs.cancelled() != asio::cancellation_type::none;
+    };
+    try {
+        // Step 2: leave the old connection. The edge fires onLogout from Active and wakes
+        // the bound and the gate's waiters; from here no emitter can start.
+        if (fsm_state_ == fsm_state::Active || fsm_state_ == fsm_state::LogonReceived) {
+            record_state_transition_(fsm_state::Disconnected);
+        }
+        // Step 3: no emitter between its number peek and the return of its store_then_emit
+        // (the gate's shared count), and no inbound frame being processed. The condition
+        // and step 1's refusal are tested again after every wake.
+        if (replay_gate_.shared != 0 || inbound_depth_ != 0) {
+            using namespace asio::experimental::awaitable_operators;
+            auto const ex = co_await asio::this_coro::executor;
+            asio::steady_timer bound{ex};
+            bound.expires_after(std::chrono::milliseconds{cfg_.logout_disconnect_timeout_ms});
+            bool bound_reached = false;
+            while (replay_gate_.shared != 0 || inbound_depth_ != 0) {
+                if (refused()) {
+                    co_return std::unexpected(error::session_already_closed);
+                }
+                replay_gate_.assert_on_strand();
+                if (!bound_reached) {
+                    auto const r = co_await (replay_gate_.wait_for_wake() ||
+                                             bound.async_wait(asio::as_tuple(asio::use_awaitable)));
+                    if (r.index() == 1) {
+                        // At the bound the old transport is force-closed, so a writer
+                        // blocked in async_write unwinds; the wait goes on with no deadline.
+                        bound_reached = true;
+                        if (auto live = live_transport_shared_()) {
+                            (void)live->close();
+                        }
+                    }
+                } else {
+                    co_await replay_gate_.wait_for_wake();
+                }
+                if (cancelled(co_await asio::this_coro::cancellation_state)) {
+                    co_return std::unexpected(error::dispatch_aborted);
+                }
+            }
+        }
+        if (refused()) {
+            co_return std::unexpected(error::session_already_closed);
+        }
+        // The old connection's detached coroutines: the liveness loop ends at the total
+        // cancellation close() uses (the root slot's binders are its two spawns), and the
+        // bound was woken by step 2's edge.
+        root_cancel_.emit(asio::cancellation_type::total);
+        auto const bc = peer_logout_bound_counter_;
+        auto const lc = liveness_counter_;
+        while (bc->load(std::memory_order_acquire) > 0 || lc->load(std::memory_order_acquire) > 0) {
+            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+        }
+        if (refused()) {
+            co_return std::unexpected(error::session_already_closed);
+        }
+    } catch (...) {  // the caller's cancellation, at a suspension of this drain
+        co_return std::unexpected(error::dispatch_aborted);
+    }
+    co_return fixpp::core::expected_t<void>{};
 }
 
 // 015 T016(b) — public engine connect-loop driver (SC-010 (7)).
@@ -818,6 +920,38 @@ void Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Tr
 // Logon, FR-003 / E-1a). emit_initiator_logon_ handles its own Disconnected-on-
 // failure disposition. [data-model §E-1a; T016(b); FR-003/FR-004]
 asio::awaitable<fixpp::core::expected_t<void>> Session::drive_reconnect() noexcept {
+    using fixpp::core::error;
+    // 103 (research D1 step 0b): single flight, for the whole operation.
+    if (reconnect_in_flight_) {
+        co_return std::unexpected(error::session_already_open);
+    }
+    struct in_flight_holder {
+        bool& f;
+        explicit in_flight_holder(bool& flag) noexcept : f{flag} { f = true; }
+        ~in_flight_holder() { f = false; }
+        in_flight_holder(in_flight_holder const&) = delete;
+        in_flight_holder& operator=(in_flight_holder const&) = delete;
+    } const in_flight{reconnect_in_flight_};
+    // From a callback: a post first, as close()'s R-4 wait, so the closing test below reads
+    // the state the call resumes into and onLogout does not run nested in the callback.
+    if (callback_depth_ != 0) {
+        co_await asio::post(exec_.underlying(), asio::deferred);
+        FIXPP_ASSERT_NO_CALLBACK_AT_WAITED_RECONNECT();
+    }
+    // Step 1: a closing, closed or stopped Session.
+    if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
+        engine_stop_requested_) {
+        co_return std::unexpected(error::session_already_closed);
+    }
+    // Step 1a, the reader fence: the Engine's read pump owns the installed transport.
+    if (cfg_.role == session_role::acceptor ||
+        (cfg_.engine_managed && live_transport_shared_() != nullptr)) {
+        co_return std::unexpected(error::session_already_open);
+    }
+    // Steps 2 and 3, the drain.
+    if (auto drained = co_await drain_for_reconnect_(); !drained) {
+        co_return drained;
+    }
     auto drive_r = co_await reconnect_fsm_.drive_reconnect_attempt();
     if (!drive_r.has_value()) {
         co_return std::unexpected(drive_r.error());
@@ -4589,6 +4723,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
 // NOLINTNEXTLINE(readability-function-size,hicpp-function-size)
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
     std::span<const std::byte> frame) noexcept {
+    // 103 (research D1 step 3): the inbound frame is counted for its whole processing, an
+    // exception and the frame's destruction included; it is this coroutine's first
+    // statement, ahead of the try.
+    inbound_depth_holder const inbound_depth{*this};
     // D-CAN-5: the state the frame entered in. The last awaits of a Logon arm run with the
     // session already Active, so "a Logon arm" is told from this value.
     const fsm_state entry_state = fsm_state_;
