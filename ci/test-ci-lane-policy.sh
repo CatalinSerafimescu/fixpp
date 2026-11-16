@@ -721,6 +721,31 @@ MUT
   expect "$label" 1 "INTEROP GATE STEP TESTBRIDGE NOT UNSET: tier2.yml"
 done
 
+# ── T40-T41: 103 (tasks T162) — SCCACHE_CACHE_SIZE per MSVC leg ──────────────
+#
+# T40 reverts tier2.yml to one job-wide 8G: every leg gets the same cap, which
+# is what the per-leg rule exists to forbid. T41 gives the campaign's MSVC job a
+# literal that differs from tier2's value for the release leg.
+fresh
+python3 - "$WORK/t/.github/workflows/tier2.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = "      SCCACHE_CACHE_SIZE: ${{ matrix.preset == 'windows-msvc-release' && '8G' || '16G' }}\n"
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, "      SCCACHE_CACHE_SIZE: 8G\n", 1), encoding="utf-8")
+MUT
+expect "T40 tier2 reverted to one job-wide SCCACHE_CACHE_SIZE is caught" 1 "SCCACHE_CACHE_SIZE IS NOT SET PER LEG in tier2.yml:windows"
+
+fresh
+python3 - "$WORK/t/.github/workflows/parallelism-measure.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = "      SCCACHE_CACHE_SIZE: ${{ matrix.preset == 'windows-msvc-release' && '8G' || '16G' }}\n"
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, "      SCCACHE_CACHE_SIZE: 16G\n", 1), encoding="utf-8")
+MUT
+expect "T41 a campaign MSVC leg whose cap differs from tier2's is caught" 1 "SCCACHE_CACHE_SIZE DIFFERS between parallelism-measure.yml:windows"
+
 # ── The harness's own execution count ────────────────────────────────────────
 #
 # ⚠️ ADDED WITH THE FOUR NEW CELLS, and the omission is the point: a `cell`
@@ -735,8 +760,8 @@ done
 # T26 (#465 Gate B r1 F1) added the roster-floor cell — a roster member whose
 # guard is respelled away from the idiom must still be caught. T27 (#465 Gate
 # B r1 F2) added the list-form `on:` cell the per-line assessment had claimed
-# without a driving test.
-CELLS_DECLARED=42
+# without a driving test. T40-T41 (103) added the per-leg SCCACHE_CACHE_SIZE cells.
+CELLS_DECLARED=44
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then

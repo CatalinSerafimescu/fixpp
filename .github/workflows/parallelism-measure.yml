@@ -660,7 +660,9 @@ jobs:
       # boolean False — diverging from the lane while the check only PRINTS the
       # difference rather than failing it.
       SCCACHE_IDLE_TIMEOUT: "0"
-      SCCACHE_CACHE_SIZE: 8G
+      # tier2.yml's per-leg value, the same expression: the campaign measures the
+      # shipping lane's conditions (ci/assert-ci-lane-policy.py compares them).
+      SCCACHE_CACHE_SIZE: ${{ matrix.preset == 'windows-msvc-release' && '8G' || '16G' }}
     strategy:
       fail-fast: false
       matrix:

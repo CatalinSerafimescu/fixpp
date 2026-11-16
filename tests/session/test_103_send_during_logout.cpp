@@ -154,6 +154,8 @@ TEST_P(SendDuringLogout103, SendWhileTheEmittersLogoutIsStored_RefusedNoAppFrame
             feed_fut = s.feed_spawn(s.logout(n + 3));
             break;
         case Emitter::too_high_bound:
+            // KIND F: the bound's acknowledgement is what the next pump waits for; a lost
+            // advance fails that ASSERT_TRUE(pump_until(... holding ...)) by its budget.
             s.mock->advance(std::chrono::milliseconds{kT});
             break;
         case Emitter::close_phase1:
@@ -179,12 +181,12 @@ TEST_P(SendDuringLogout103, SendWhileTheEmittersLogoutIsStored_RefusedNoAppFrame
                        asio::use_future);
     s.pump_for(std::chrono::milliseconds{20});
     s.log->release_hold();
-    ASSERT_TRUE(s.pump_until(
-        [&] {
-            return rg::Scene::ready(send_fut) && (!feed_fut || rg::Scene::ready(*feed_fut)) &&
-                   s.count("5", mark) != 0;
-        },
-        kAfterReleaseBudget))
+    // Named, so the pump call carries no string literal for the site-label census to read.
+    auto const all_done = [&] {
+        return rg::Scene::ready(send_fut) && (!feed_fut || rg::Scene::ready(*feed_fut)) &&
+               s.count("5", mark) != 0;
+    };
+    ASSERT_TRUE(s.pump_until(all_done, kAfterReleaseBudget))
         << "the send, the delivery or the Logout did not complete: " << s.written(mark);
 
     auto const logouts = seqs_of(s, "5", mark);

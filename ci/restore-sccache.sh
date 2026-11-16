@@ -53,21 +53,71 @@ case "$DIR_TRIMMED" in
   *..*) echo "::error::SCCACHE_DIR=${SCCACHE_DIR} contains '..'; refusing to use an unnormalised path as a removable directory."; exit 1 ;;
 esac
 
+sccache_archive_names "$PRESET"
+
 # STAGE sits beside SCCACHE_DIR, not under $WORK, so the swap-in below is a
-# rename on the same volume rather than a 1 GB copy across one.
+# rename on the same volume rather than a multi-GB copy across one. $WORK, which
+# holds the pulled parts, is on the workspace drive (sccache_archive_workdir).
 STAGE="${DIR_POSIX%/}.restore.$$"
-WORK="$(mktemp -d)"; trap 'rm -rf "$WORK" "$STAGE"' EXIT
+WORK="$(sccache_archive_workdir)" || WORK=""
+trap 'rm -rf "$WORK" "$STAGE"' EXIT
 rm -rf "$STAGE"
 
+# extract_parts — the 103 format (tasks T160): the manifest's parts, checked
+# against it, decompressed and extracted into STAGE. Prints a MISS reason and
+# returns 1 on any failure; STAGE is then discarded by the caller.
+extract_parts() {
+  local m="$WORK/$SCCACHE_ARCHIVE_MANIFEST" line idx name digest want n=0
+  local pat="${SCCACHE_ARCHIVE_PART_PREFIX//./\\.}"
+  local -a parts=()
+  for tool in zstd sha256sum; do
+    command -v "$tool" >/dev/null 2>&1 || { echo "\`$tool\` is not on PATH"; return 1; }
+  done
+  # The manifest comes from the registry: every name must be the fixed pattern at
+  # its own index, in order from 000, which also rules out any path in it.
+  while IFS= read -r line || [ -n "$line" ]; do
+    if ! printf '%s\n' "$line" | grep -Eq "^[0-9]{3} ${pat}[0-9]{3} [0-9a-f]{64}\$"; then
+      echo "the manifest is malformed at line $((n + 1))"; return 1
+    fi
+    idx="${line%% *}"; name="${line#* }"; digest="${name#* }"; name="${name%% *}"
+    want="$(printf '%03d' "$n")"
+    if [ "$idx" != "$want" ] || [ "$name" != "${SCCACHE_ARCHIVE_PART_PREFIX}${want}" ]; then
+      echo "the manifest lists $name at index $idx where part $want belongs"; return 1
+    fi
+    if [ ! -f "$WORK/$name" ]; then
+      echo "part $name, listed in the manifest, was not pulled"; return 1
+    fi
+    if [ "$(sha256sum < "$WORK/$name" | cut -d' ' -f1)" != "$digest" ]; then
+      echo "part $name does not match the manifest"; return 1
+    fi
+    parts+=("$WORK/$name"); n=$((n + 1))
+  done < "$m"
+  [ "$n" -gt 0 ] || { echo "the manifest lists no part"; return 1; }
+  cat "${parts[@]}" | zstd -q -t
+  local -a pipe=("${PIPESTATUS[@]}")
+  [ "${pipe[*]}" = "0 0" ] || { echo "the parts did not decompress cleanly (cat | zstd -t exited ${pipe[*]})"; return 1; }
+  mkdir -p "$STAGE" || { echo "could not create the staging directory"; return 1; }
+  cat "${parts[@]}" | zstd -q -dc | tar -xf - -C "$STAGE"
+  pipe=("${PIPESTATUS[@]}")
+  [ "${pipe[*]}" = "0 0 0" ] || { echo "the archive did not extract cleanly (cat | zstd -d | tar -x exited ${pipe[*]})"; return 1; }
+  # The parts are no longer needed; free their space before the swap.
+  rm -f "${parts[@]}"
+  return 0
+}
+
 # Extract into STAGE and swap in only on success — never straight into the live
-# directory. Without `set -e` an unchecked `tar -xf` failure was invisible: a
+# directory. Without `set -e` an unchecked extraction failure was invisible: a
 # truncated archive (whose OCI digest is perfectly valid for its truncated
 # bytes) extracts a prefix, returns non-zero, and the old code went on to emit
 # `HIT` and `hit=true` over a partial cache. That is worse than a MISS in both
 # directions — the summary records a restore that did not happen, and sccache
 # serves from a directory nobody verified. Every leg of the condition is
 # checked: the pull, the archive's presence, and the extraction itself.
-if ! oras pull "$IMAGE:$TAG" -o "$WORK" >/dev/null 2>&1; then
+miss_reason=""
+if [ -z "$WORK" ]; then
+  note "sccache-cache MISS \`$TAG\` — no work directory for the pull; compiling with an empty cache"
+  emit false
+elif ! oras pull "$IMAGE:$TAG" -o "$WORK" >/dev/null 2>&1; then
   # MISS: no cache published for this preset+toolset yet, the package is not
   # readable from this context, or GHCR is unreachable. All three are the same
   # disposition — compile from scratch.
@@ -80,32 +130,36 @@ if ! oras pull "$IMAGE:$TAG" -o "$WORK" >/dev/null 2>&1; then
   # so nothing is hidden by staying quiet.
   note "sccache-cache MISS \`$TAG\` → compiling with an empty cache"
   emit false
-
-# Uncompressed tar on purpose: sccache already stores every entry
-# zstd-compressed, so gzipping the archive spends minutes of CPU to save almost
-# nothing — on an 80-minute build step that is a real trade, not a
-# micro-optimisation. Must match seed-sccache.sh.
-elif ! { [ -f "$WORK/sccache-$PRESET.tar" ] \
-         && mkdir -p "$STAGE" \
-         && tar -xf "$WORK/sccache-$PRESET.tar" -C "$STAGE"; }; then
-  # Pulled, but the payload is not usable. Same disposition as a plain miss: a
-  # cache we could not verify is a cache we do not have. The partial tree is
-  # discarded rather than swapped in.
-  rm -rf "$STAGE"
-  note "sccache-cache MISS \`$TAG\` — pulled, but the archive was missing or did not extract cleanly. Treated as no cache; compiling from scratch."
-  emit false
-
 else
-  rm -rf "$DIR_POSIX"
-  if mv "$STAGE" "$DIR_POSIX"; then
-    note "sccache-cache HIT  \`$TAG\`  ($(du -sh "$DIR_POSIX" | cut -f1) restored)"
-    emit true
+  # Format detection: a manifest is the 103 format; else the legacy single-layer
+  # uncompressed tar a pre-103 seed wrote, read as before; else nothing usable.
+  if [ -f "$WORK/$SCCACHE_ARCHIVE_MANIFEST" ]; then
+    miss_reason="$(extract_parts)" || true
+    [ -z "$miss_reason" ] || miss_reason="pulled, but $miss_reason"
+  elif [ -f "$WORK/$SCCACHE_ARCHIVE_LEGACY" ]; then
+    { mkdir -p "$STAGE" && tar -xf "$WORK/$SCCACHE_ARCHIVE_LEGACY" -C "$STAGE"; } \
+      || miss_reason="pulled, but the legacy archive did not extract cleanly"
   else
-    # DIR_POSIX has already been removed, so recreate it empty rather than let
-    # the server below start against a directory that may not exist.
-    mkdir -p "$DIR_POSIX"
-    note "sccache-cache MISS \`$TAG\` — restored tree could not be moved into ${SCCACHE_DIR}; compiling with an empty cache"
+    miss_reason="pulled, but the archive was missing"
+  fi
+  if [ -n "$miss_reason" ]; then
+    # Same disposition as a plain miss: a cache we could not verify is a cache we
+    # do not have. The partial tree is discarded rather than swapped in.
+    rm -rf "$STAGE"
+    note "sccache-cache MISS \`$TAG\` — ${miss_reason}. Treated as no cache; compiling from scratch."
     emit false
+  else
+    rm -rf "$DIR_POSIX"
+    if mv "$STAGE" "$DIR_POSIX"; then
+      note "sccache-cache HIT  \`$TAG\`  ($(du -sh "$DIR_POSIX" | cut -f1) restored)"
+      emit true
+    else
+      # DIR_POSIX has already been removed, so recreate it empty rather than let
+      # the server below start against a directory that may not exist.
+      mkdir -p "$DIR_POSIX"
+      note "sccache-cache MISS \`$TAG\` — restored tree could not be moved into ${SCCACHE_DIR}; compiling with an empty cache"
+      emit false
+    fi
   fi
 fi
 

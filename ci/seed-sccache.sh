@@ -115,43 +115,95 @@ fi
 
 [ -d "$DIR_POSIX" ] || { echo "seed: $DIR_POSIX does not exist — nothing to publish."; exit 0; }
 
-WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
+sccache_archive_names "$PRESET"
 
-# Uncompressed — see restore-sccache.sh. Must match the extract side.
-#
-# tar's status is CHECKED, and the result re-read with `tar -tf` before it is
-# allowed anywhere near GHCR. This script runs without `set -e` (most failures
-# here are deliberately non-fatal), which made an unchecked `tar -cf` the one
-# path that could publish a TRUNCATED archive and still print the `SEEDED`
+# 103 (tasks T160): the archive is compressed at this level, one named constant
+# (the restore decompresses whatever level the seed used).
+SCCACHE_ARCHIVE_ZSTD_LEVEL=3
+# Each part is one OCI layer. GHCR documents a per-layer limit of 10 GB
+# (docs.github.com, "Working with the Container registry"), read here as
+# 10,000,000,000 bytes; a part is that limit less a 500,000,000-byte margin.
+# SCCACHE_ARCHIVE_PART_BYTES is a test seam (ci/test-sccache-archive.sh sets a
+# small value to get several parts); no workflow sets it.
+PART_BYTES="${SCCACHE_ARCHIVE_PART_BYTES:-9500000000}"
+case "$PART_BYTES" in
+  ''|*[!0-9]*|0) note "::error::sccache-cache SEED FAILED for \`$TAG\` — SCCACHE_ARCHIVE_PART_BYTES='$PART_BYTES' is not a positive byte count. Nothing was published."; exit 1 ;;
+esac
+
+for tool in zstd split sha256sum; do
+  command -v "$tool" >/dev/null 2>&1 || {
+    note "::error::sccache-cache SEED FAILED for \`$TAG\` — \`$tool\` is not on PATH. Nothing was published."
+    exit 1
+  }
+done
+
+WORK="$(sccache_archive_workdir)" || { note "::error::sccache-cache SEED FAILED for \`$TAG\` — no work directory. Nothing was published."; exit 1; }
+trap 'rm -rf "$WORK"' EXIT
+
+# One pipeline, so a whole tar or a whole .zst never sits on disk beside the parts.
+# Every stage's status is CHECKED. This script runs without `set -e` (most
+# failures here are deliberately non-fatal), which made an unchecked `tar -cf` the
+# one path that could publish a TRUNCATED archive and still print the `SEEDED`
 # marker the operator gates the warm run on. On Windows a single locked or
-# vanished cache entry — antivirus, or the daemon's own churn — is enough:
-# tar skips it, exits non-zero, and leaves a perfectly pushable tar behind.
-# The listing pass is not redundant with the exit status: it is what catches a
-# tar that was truncated after the fact.
-if ! tar -cf "$WORK/sccache-$PRESET.tar" -C "$DIR_POSIX" . ; then
-  note "::error::sccache-cache SEED FAILED for \`$TAG\` — could not archive $DIR_POSIX. Nothing was published; a following 'warm' run would measure another cold build."
-  exit 1
-fi
-if ! tar -tf "$WORK/sccache-$PRESET.tar" >/dev/null 2>&1; then
-  note "::error::sccache-cache SEED FAILED for \`$TAG\` — the archive did not read back cleanly. Nothing was published."
+# vanished cache entry — antivirus, or the daemon's own churn — is enough: tar
+# skips it, exits non-zero, and leaves a perfectly pushable archive behind.
+tar -cf - -C "$DIR_POSIX" . \
+  | zstd -q -"$SCCACHE_ARCHIVE_ZSTD_LEVEL" -T0 -c \
+  | ( cd "$WORK" && split -b "$PART_BYTES" -d -a 3 - "$SCCACHE_ARCHIVE_PART_PREFIX" )
+pipe=("${PIPESTATUS[@]}")
+if [ "${pipe[*]}" != "0 0 0" ]; then
+  note "::error::sccache-cache SEED FAILED for \`$TAG\` — could not archive $DIR_POSIX (tar | zstd | split exited ${pipe[*]}). Nothing was published; a following 'warm' run would measure another cold build."
   exit 1
 fi
 
-# Report the SIZES BEFORE attempting the push, not after. SCCACHE_CACHE_SIZE was
-# set from an estimate and is meant to be tuned from these two numbers — and the
-# run most likely to fail its push (the first one, before the GHCR package
-# exists) is exactly the run whose sizing datum would otherwise be lost.
-note "sccache-cache archive \`$TAG\` — $(du -h "$WORK/sccache-$PRESET.tar" | cut -f1) archive, $(du -sh "$DIR_POSIX" | cut -f1) on disk (cap \`${SCCACHE_CACHE_SIZE:-default}\`)"
+parts=()
+while IFS= read -r f; do parts+=("$f"); done < <(cd "$WORK" && ls -1 | grep -E "^${SCCACHE_ARCHIVE_PART_PREFIX//./\\.}[0-9]{3}\$" | sort)
+if [ "${#parts[@]}" -eq 0 ]; then
+  note "::error::sccache-cache SEED FAILED for \`$TAG\` — the archive produced no part. Nothing was published."
+  exit 1
+fi
 
-# Push from inside $WORK with a RELATIVE filename so oras' absolute-path guard
-# passes and the artifact title is the clean basename (same reason as
-# seed-conan-cache.sh).
+# The listing pass is not redundant with the statuses above: it reads back the
+# parts in order, through the same decompression the restore uses, and is what
+# catches an archive that was truncated after the fact.
+( cd "$WORK" && cat "${parts[@]}" ) | zstd -q -dc | tar -tf - >/dev/null 2>&1
+pipe=("${PIPESTATUS[@]}")
+if [ "${pipe[*]}" != "0 0 0" ]; then
+  note "::error::sccache-cache SEED FAILED for \`$TAG\` — the archive did not read back cleanly (cat | zstd -d | tar -t exited ${pipe[*]}). Nothing was published."
+  exit 1
+fi
+
+# The manifest: index, name and sha256 of each part, in order. The digest is read
+# from stdin so no file-name column (which can carry a mode marker) is parsed.
+idx=0
+: > "$WORK/$SCCACHE_ARCHIVE_MANIFEST"
+for f in "${parts[@]}"; do
+  digest="$(sha256sum < "$WORK/$f" | cut -d' ' -f1)"
+  case "$digest" in
+    *[!0-9a-f]*|'') note "::error::sccache-cache SEED FAILED for \`$TAG\` — could not hash $f. Nothing was published."; exit 1 ;;
+  esac
+  printf '%03d %s %s\n' "$idx" "$f" "$digest" >> "$WORK/$SCCACHE_ARCHIVE_MANIFEST"
+  idx=$((idx + 1))
+done
+
+# Report the SIZES BEFORE attempting the push, not after. SCCACHE_CACHE_SIZE is
+# set per leg in tier2.yml from the condition its comment states, and is checked
+# against these two numbers — and the run most likely to fail its push (the first
+# one, before the GHCR package exists) is exactly the run whose sizing datum would
+# otherwise be lost. The archive figure is the total of the parts.
+note "sccache-cache archive \`$TAG\` — $( (cd "$WORK" && du -ch "${parts[@]}") | tail -1 | cut -f1) archive, $(du -sh "$DIR_POSIX" | cut -f1) on disk (cap \`${SCCACHE_CACHE_SIZE:-default}\`)"
+
+# Push from inside $WORK with RELATIVE filenames so oras' absolute-path guard
+# passes and each layer's title is the clean basename (same reason as
+# seed-conan-cache.sh). One layer per part, plus the manifest.
+push_files=("$SCCACHE_ARCHIVE_MANIFEST:text/plain")
+for f in "${parts[@]}"; do push_files+=("$f:application/zstd"); done
 ( cd "$WORK" && oras push "$IMAGE:$TAG" \
     --artifact-type application/vnd.fixpp.sccache.v1 \
     --annotation "org.opencontainers.image.source=https://github.com/CatalinSerafimescu/fixpp" \
     --annotation "fixpp.preset=$PRESET" \
     --annotation "fixpp.msvc.toolset=$SCCACHE_CACHE_TOOLSET" \
-    "sccache-$PRESET.tar:application/x-tar" ) || {
+    "${push_files[@]}" ) || {
   # The caller sets continue-on-error, so this exit is INVISIBLE in the step's
   # status. Shout into the summary instead — a silently unseeded cache makes the
   # next run a second COLD build that reads as a warm one, which would corrupt

@@ -201,9 +201,16 @@ jobs:
       # acceptance criterion here IS the stats, so a truncated counter would not
       # be a cosmetic loss — it would fabricate the measurement.
       SCCACHE_IDLE_TIMEOUT: "0"
-      # Bounds what the seed step has to upload. First estimate, to be tuned
-      # from the size the seed step prints into the job summary.
-      SCCACHE_CACHE_SIZE: 8G
+      # Bounds what the seed step has to upload, per leg (103, the owner's
+      # ruling on the msvc-asan cache). Evaluated per matrix leg here, so it is set before the sccache
+      # server starts in Build; no later step sets it again. The condition each
+      # value rests on: on asan and debug the cap holds one full build plus one
+      # commit's churn; on release the leg's full build stays under its cap.
+      # Re-derive from the legs' sccache statistics (`Cache size`, `Cache misses`,
+      # and the seed step's archive line) on recent push:main runs.
+      # parallelism-measure.yml's MSVC job carries the same expression
+      # (ci/assert-ci-lane-policy.py checks it).
+      SCCACHE_CACHE_SIZE: ${{ matrix.preset == 'windows-msvc-release' && '8G' || '16G' }}
 
     strategy:
       fail-fast: false

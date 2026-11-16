@@ -1123,8 +1123,11 @@ TEST(ReplayGate588, R588c_LivenessDuringTheAnswer_NothingInsideItNextNumbersAfte
     HeldWalk w{DirectAcceptor::Options{
         .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
     ASSERT_TRUE(w.start(is_slot_read(3))) << "setup: the walk did not reach the held read";
+    // KIND F: a lost advance writes no liveness frame at all, which the ASSERT_GT after the
+    // release reports by name ("the liveness loop wrote nothing").
     w.s.f.clock->advance(kHb588 + std::chrono::seconds{1});
     w.pump_for(kHeldWindow);
+    // KIND F: as the advance above.
     w.s.f.clock->advance(kHb588 + std::chrono::seconds{1});
     w.pump_for(kHeldWindow);
     EXPECT_EQ(w.s.f.sent_count("0") + w.s.f.sent_count("1"), 0U)
@@ -1250,6 +1253,8 @@ TEST(ReplayGate588, R588f4_ContendedSend_LivenessDisconnects_RefusedNothingWritt
     HeldWalk w{DirectAcceptor::Options{
         .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
     ASSERT_TRUE(w.start(is_slot_read(3), std::nullopt, /*request=*/false)) << "setup";
+    // KIND F: a lost advance writes no TestRequest, which the bounded run_until below
+    // reports by name ("no TestRequest was written").
     w.s.f.clock->advance(kHb588 + std::chrono::seconds{1});
     ASSERT_TRUE(w.s.f.run_until([&] { return w.s.f.sent_count("1") != 0; }))
         << "setup: no TestRequest was written:\n"

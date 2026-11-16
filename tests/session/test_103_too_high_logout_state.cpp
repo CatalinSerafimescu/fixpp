@@ -399,7 +399,11 @@ TEST_P(TooHighLogoutState103, R588e1_BoundAtTheGateBehindAHeldWalk_AckAfterTheAn
     ASSERT_TRUE(s.pump_until([&] { return gate.timer_waits > waits; }))
         << "setup: the bound did not wait at the gate";
     s.log->release_hold();
-    ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(rr_fut) && s.count("5", mark) != 0; }));
+    // Named, so the pump call carries no string literal for the site-label census to read.
+    auto const answered_and_acknowledged = [&] {
+        return rg::Scene::ready(rr_fut) && s.count("5", mark) != 0;
+    };
+    ASSERT_TRUE(s.pump_until(answered_and_acknowledged));
     s.pump_for(std::chrono::milliseconds{20});
     EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
     std::size_t last_answer = 0;
@@ -449,6 +453,8 @@ TEST_P(TooHighLogoutState103, R588e3_AckStoreHeldThenCloseGraceful_ExactlyOneLog
     ASSERT_EQ(phase(s), kPending) << "setup: no pending mark";
     hold_store_of(s, next_out(s));
     auto const mark = s.sent.size();
+    // KIND F: the advance reaches the bound; a lost one fails the next ASSERT_TRUE, whose
+    // pump is bounded, with "the acknowledgement's store was not held".
     s.mock->advance(std::chrono::milliseconds{kT});
     ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); }))
         << "setup: the acknowledgement's store was not held";

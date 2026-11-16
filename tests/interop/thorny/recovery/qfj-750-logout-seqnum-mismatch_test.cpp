@@ -57,6 +57,8 @@ TEST_F(ThornyRecoveryFixture, Qfj750_LogoutTooHighSeqnum_RecoversTheGapThenAckno
         << "next-expected-inbound must NOT advance past the gap until it is filled";
 
     // The bound: logout_disconnect_timeout_ms from the Logout's arrival.
+    // KIND F: a lost advance leaves the session Active, and the bounded pump_until below
+    // fails its EXPECT_TRUE by name.
     clock->advance(std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms});
     EXPECT_TRUE(fixpp::test_support::pump_until(
         ioc,
