@@ -13,12 +13,12 @@
 //
 //   * too-LOW MsgSeqNum  → Disconnected (session-fatal; matches both the spec's
 //     lower-than-expected rule and QFJ-750).
-//   * too-HIGH MsgSeqNum → the FIX-SL §4.5.3 sequence-gap rule takes precedence:
-//     fixpp issues a ResendRequest and stays Active (AwaitingResend transient,
-//     013 FR-009), recovering the gap BEFORE the Logout message-type is
-//     dispatched. fixpp applies its general too-high policy uniformly rather than
-//     QFJ-750's Logout special-case-to-disconnect. The Logout is not lost — it is
-//     re-processed after the gap is filled.
+//   * too-HIGH MsgSeqNum → feature 103 (FR-010, fixpp#577; research D4.2 to D4.5): fixpp
+//     keeps a pending-Logout mark (the Logout's 34 and arrival time, not the frame), sends
+//     its ResendRequest and stays Active, then acknowledges the Logout and records
+//     Disconnected once NextNumIn passes the Logout's 34 or when
+//     logout_disconnect_timeout_ms runs out, whichever is first; with that timeout 0 or no
+//     clock, at once with no ResendRequest. QFJ-750 disconnects at once.
 //
 // This is a documented divergence dispositioned `pass` (fixpp's behavior is
 // spec-conformant), NOT a known-limitation. See thorny/CORPUS-INDEX.md C-004.
@@ -36,28 +36,38 @@ namespace {
 
 using ThornyRecoveryFixture = fixpp::interop::parity::ParityAcceptorFixture;
 
-// Arm: inbound Logout with a too-HIGH MsgSeqNum → gap-recovery precedence.
-// fixpp emits a ResendRequest and stays Active (it does NOT take QFJ-750's
-// disconnect-on-Logout-gap special-case path).
-TEST_F(ThornyRecoveryFixture, Qfj750_LogoutTooHighSeqnumRecoversGapNotDisconnect) {
-    fixpp::session::Session s{engine, make_acceptor_cfg()};
+// Arm: inbound Logout with a too-HIGH MsgSeqNum (FR-010). The fixture's mock clock gives
+// the session a clock, so the Logout is pending: a ResendRequest, Active, and the
+// acknowledgement only when the clock reaches the bound, with no gap fill.
+TEST_F(ThornyRecoveryFixture, Qfj750_LogoutTooHighSeqnum_RecoversTheGapThenAcknowledgesAtTheBound) {
+    auto const cfg = make_acceptor_cfg();
+    fixpp::session::Session s{engine, cfg};
     ASSERT_TRUE(drive_to_active(s)) << "precondition: session must reach Active";
     ASSERT_EQ(next_inbound(s), 2U);
 
     // Peer Logout(35=5) at seq=999 — far above the expected next-inbound of 2.
-    // The FIX-SL §4.5.3 sequence-gap rule takes precedence over the logout: fixpp
-    // recovers the gap (ResendRequest) rather than special-casing the Logout to
-    // disconnect (the QFJ-750 divergence).
     (void)feed(s,
                fixpp::interop::parity::make_fix_frame("FIX.4.2", "5", /*seq=*/999, "TW", "ISLD"));
 
     EXPECT_EQ(s.state(), fixpp::session::fsm_state::Active)
-        << "too-high Logout must trigger gap recovery (AwaitingResend on Active), "
-           "not QFJ-750's disconnect-on-gap special-case";
-    EXPECT_GE(capture.count_msg_type("2"), 1U)
-        << "the sequence gap must drive a ResendRequest(35=2) before the Logout is dispatched";
+        << "a too-high Logout is pending until the gap passes it or the bound";
+    EXPECT_EQ(capture.count_msg_type("2"), 1U) << "the sequence gap must draw one ResendRequest";
+    EXPECT_EQ(capture.count_msg_type("5"), 0U) << "acknowledged before the bound";
     EXPECT_EQ(next_inbound(s), 2U)
         << "next-expected-inbound must NOT advance past the gap until it is filled";
+
+    // The bound: logout_disconnect_timeout_ms from the Logout's arrival.
+    clock->advance(std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms});
+    EXPECT_TRUE(fixpp::test_support::pump_until(
+        ioc,
+        [&] {
+            return s.state() == fixpp::session::fsm_state::Disconnected &&
+                   fixpp::session::session_test_access::peer_logout_bound_count(s) == 0;
+        },
+        "Qfj750_LogoutTooHighSeqnum/bound"))
+        << "no acknowledgement at the bound";
+    EXPECT_EQ(capture.count_msg_type("5"), 1U) << "the acknowledgement was not written once";
+    EXPECT_EQ(s.state(), fixpp::session::fsm_state::Disconnected);
 }
 
 // Arm: inbound Logout with a too-LOW MsgSeqNum still disconnects.

@@ -27,12 +27,14 @@
 //   LogoutWaitWake              D-536-3: the peer's Logout ends the logout wait through a
 //                               wake of the session's own.
 //   LogoutWaitLifetime          D-536-3, what the wake leaves behind when the wait ends
-//                               another way, and two controls on traces D-536-3 keeps.
+//                               another way, and controls on traces D-536-3 keeps (the
+//                               held-emit control's trace is 103 D4.6's).
 //   ExplicitSweep               D-536-4: a caller's own cancel_sleeps() still ends a
 //                               liveness loop.
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
@@ -741,12 +743,13 @@ TEST(LogoutWaitLifetime, TerminalCloseEscalatesDuringTheWait_BothClosesComplete)
 }
 
 // Control. The peer's Logout arrives while the session's own Logout emit is still held
-// in the store. It meets the Active arm, which answers it and records Disconnected.
-// Phase 1 then resumes, records LogoutSent over that, and waits for its deadline: no
-// confirmation is recorded on this trace. D-536-3 leaves the trace as it is. The cell
-// advances the mock clock to the deadline and reads real time, so that the deadline and
-// not close's real grace timer is what ended the wait.
-TEST(LogoutWaitLifetime, Control_PeersLogoutWhileTheLogoutEmitIsHeld_WaitRunsToItsDeadline) {
+// in the store. Feature 103 (research D4.6, the Logout owner; FR-010) supersedes this
+// trace as D-536-3 left it: phase 1 holds the owner, so the Active arm writes no Logout of
+// its own and records Disconnected; phase 1 then writes its Logout and, finding the
+// session Disconnected, takes its early exit, with no LogoutSent and no logout wait. The
+// mock clock is never advanced, and the cell reads real time, so neither the deadline nor
+// close's real grace timer is what let close return.
+TEST(LogoutWaitLifetime, Control_PeersLogoutWhileTheLogoutEmitIsHeld_OneLogoutAndNoWait) {
     Scene s{Options{.holding_store = true}};
     ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
     s.sent.clear();
@@ -755,51 +758,34 @@ TEST(LogoutWaitLifetime, Control_PeersLogoutWhileTheLogoutEmitIsHeld_WaitRunsToI
     s.hold->msg_type = "5";
     const auto began = std::chrono::steady_clock::now();
     auto closed = s.spawn_close(close_mode::graceful);
+    // The path: the session's Logout emit is held when the peer's Logout arrives.
     ASSERT_TRUE(s.pump([&] { return s.hold->holding; }))
         << "setup: the store() of the session's Logout was not held";
     ASSERT_EQ(s.count("5"), 0) << "setup: the Logout was transmitted before its store()";
-    // The wait has not begun, so the peer's Logout finds no wake to call.
     ASSERT_FALSE(wake_is_set(*s.session))
         << "setup: the logout wait's wake is set while the Logout emit is still held";
 
     (void)s.feed(s.peer_frame("5", 2));
-    ASSERT_EQ(s.session->state(), fsm_state::Disconnected)
-        << "setup: the Active arm did not record Disconnected for the peer's Logout";
-    ASSERT_EQ(s.count("5"), 1) << "setup: the Active arm did not answer the peer's Logout";
+    EXPECT_EQ(s.session->state(), fsm_state::Disconnected)
+        << "the Active arm did not record Disconnected for the peer's Logout";
+    EXPECT_EQ(s.count("5"), 0) << "the Active arm wrote a Logout while phase 1's was in flight";
     ASSERT_TRUE(s.hold->holding) << "setup: the hold ended before it was released";
-    ASSERT_FALSE(Scene::ready(closed)) << "close completed before the store was released";
+    EXPECT_FALSE(Scene::ready(closed)) << "close completed before the store was released";
 
     s.hold->released = true;
-    ASSERT_TRUE(s.pump([&] { return s.session->state() == fsm_state::LogoutSent; }))
-        << "phase 1 did not record LogoutSent after the store was released";
-    EXPECT_EQ(s.count("5"), 2) << "the two Logouts were not both written";
-    EXPECT_FALSE(s.hold->timed_out) << "the hold reached its bound";
-    const auto wake_calls = std::make_shared<int>(0);
-    ASSERT_TRUE(count_wake_calls(*s.session, wake_calls))
-        << "setup: the logout wait's wake is not set, so the wait is not in flight";
-
-    // No confirmation was recorded, so the wait stands until its deadline.
-    s.settle(timeout / 8);
-    ASSERT_FALSE(Scene::ready(closed))
-        << "close completed before the logout deadline, with the mock clock not advanced";
-
-    // Staging (ci/mock-clock-staging-sweep.sh): KIND E. The deadline this advance must
-    // reach is armed relative to the instant phase 1 began its wait, so it must be
-    // armed before the clock moves. The wake was read as set above, and phase 1 arms
-    // the deadline in the same run that sets it. KIND F as well: a lost advance leaves
-    // close to its real grace timer, which the assertion on real time below reports.
-    s.mock->advance(timeout);
     ASSERT_TRUE(s.pump([&] { return Scene::ready(closed); }))
-        << "close did not complete at the logout deadline";
+        << "close did not complete after the store was released";
     const auto took = std::chrono::steady_clock::now() - began;
-    ASSERT_LT(took, timeout) << "inconclusive: " << millis(took)
-                             << " ms of real time passed, so close's real grace timer ("
-                             << timeout.count() << " ms) may have ended the wait";
+    EXPECT_LT(took, timeout) << "close returned " << millis(took)
+                             << " ms after it began; its real grace timer is " << timeout.count()
+                             << " ms, so the grace may have ended it";
+    EXPECT_EQ(s.count("5"), 1) << "the session's Logout was not written exactly once";
+    EXPECT_FALSE(s.hold->timed_out) << "the hold reached its bound";
     EXPECT_EQ(s.session->state(), fsm_state::Disconnected);
-    EXPECT_FALSE(wake_is_set(*s.session))
-        << "the logout wait's wake is still set after the wait ended: a Logout that "
-           "arrived now would call into a wait that has ended";
-    EXPECT_EQ(*wake_calls, 0) << "the wake was called on a trace that records no confirmation";
+    auto const history = s.session->fsm_visit_history();
+    EXPECT_EQ(std::find(history.begin(), history.end(), fsm_state::LogoutSent), history.end())
+        << "phase 1 recorded LogoutSent after the session was Disconnected";
+    EXPECT_FALSE(wake_is_set(*s.session)) << "the logout wait's wake is set: a wait began";
 }
 
 // Controls for the `try` around the wait. Phase 1 is cancelled while its Logout emit is

@@ -1731,6 +1731,8 @@ private:
     void note_engine_stop_() noexcept {
         engine_stop_requested_ = true;
         replay_gate_.wake_all();
+        // 103 (research D4.4, D4.6): engine stop claims a pending mark and wakes the bound.
+        claim_peer_logout_none_();
     }
 
     // ── 103 (fixpp#577, research D4.2 to D4.6) — a too-high Logout ─────────────
@@ -1754,6 +1756,34 @@ private:
     // The Logout owner (research D4.6): at most one Logout of an established session is
     // in flight. Session strand only.
     bool logout_in_flight_ = false;
+    // A too-high Logout in Active (research D4.2): with T = 0 or no clock, the acknowledgement
+    // at once (D4.5), returned as the frame's result; otherwise the mark and its bound when
+    // the phase is `none`, and nullopt, so the caller goes on (route (a) to fixpp's own
+    // ResendRequest, route (b) to the frame's end).
+    [[nodiscard]] asio::awaitable<std::optional<fixpp::core::expected_t<void>>>
+    on_inbound_active_too_high_logout_(bool tic, seqnum_t seq) noexcept;
+    // The acknowledgement (research D4.5): the in-sequence route's Logout, its event and its
+    // Disconnected.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> acknowledge_peer_logout_(
+        bool tic) noexcept;
+    // Research D4.3: close_filled_resend_gap_(), then the bound's wake when N passes S.
+    void note_inbound_advance_() noexcept;
+    // Research D4.6's `pending → none` claim, with the bound's wake.
+    void claim_peer_logout_none_() noexcept {
+        if (peer_logout_.phase == peer_logout_mark::phase_t::pending) {
+            peer_logout_.phase = peer_logout_mark::phase_t::none;
+        }
+        wake_peer_logout_bound_();
+    }
+    void wake_peer_logout_bound_() noexcept {
+        if (peer_logout_wake_) {
+            peer_logout_wake_();
+        }
+    }
+    // Research D4.4: the bound, a detached coroutine on the session strand.
+    asio::awaitable<void> run_peer_logout_bound_(std::shared_ptr<std::atomic<int>> counter,
+                                                 std::uint32_t gen) noexcept;
+
     // Test seams of the bound (cells F1 and F2): when set, the bound awaits the first
     // before its first test, and the second between its publish-and-re-test and its
     // race's wait. Set only through session_test_access.

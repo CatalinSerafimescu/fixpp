@@ -373,6 +373,9 @@ TEST(ResendStateReconnect103,
 
 // ── F1 and F2 (tasks T088, T089): the bound's late start and a lost wake ─────────────
 
+// The bound T of F1 and F2, in milliseconds.
+constexpr std::uint32_t kBoundT = 2000;
+
 // A test seam the bound awaits: it records that it ran, then yields until released.
 struct BoundHold {
     bool entered = false;
@@ -386,6 +389,19 @@ struct BoundHold {
     }
 };
 
+// Teardown on a failure path: a bound still running is ended at its own deadline, so the
+// Session is not destroyed with it (~Session asserts its join counter is 0) and the cell
+// ends as a test failure, not an abort.
+void end_a_bound_still_running(rg::Scene& s, std::chrono::milliseconds bound_t,
+                               std::future<fixpp::core::expected_t<void>>& close_fut) {
+    if (fixpp::session::session_test_access::peer_logout_bound_count(*s.session) == 0) return;
+    s.mock->advance(bound_t);
+    (void)s.pump_until([&] {
+        return rg::Scene::ready(close_fut) &&
+               fixpp::session::session_test_access::peer_logout_bound_count(*s.session) == 0;
+    });
+}
+
 std::future<fixpp::core::expected_t<void>> spawn_terminal_close(rg::Scene& s) {
     return asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
                           s.session->close(fixpp::session::close_mode::terminal), asio::use_future);
@@ -396,7 +412,7 @@ std::future<fixpp::core::expected_t<void>> spawn_terminal_close(rg::Scene& s) {
 // close() completes within a bounded pump, and the join counter is 0. The mock clock is not
 // moved, so the bound's T cannot end any wait: the cell's forced spurious-hit arm.
 TEST(BoundProtocol103, F1_BoundStartsAfterCloseBegan_CloseCompletesCounterZero) {
-    rg::Scene s{rg::Options{.logout_timeout_ms = 2000}};
+    rg::Scene s{rg::Options{.logout_timeout_ms = kBoundT}};
     ASSERT_TRUE(s.open_to_active());
     BoundHold hold;
     fixpp::session::session_test_access::set_peer_logout_bound_hold_first_run(*s.session,
@@ -411,6 +427,7 @@ TEST(BoundProtocol103, F1_BoundStartsAfterCloseBegan_CloseCompletesCounterZero) 
     EXPECT_TRUE(s.pump_until([&] { return rg::Scene::ready(close_fut); }))
         << "close() did not complete";
     EXPECT_EQ(fixpp::session::session_test_access::peer_logout_bound_count(*s.session), 0);
+    end_a_bound_still_running(s, std::chrono::milliseconds{kBoundT}, close_fut);
 }
 
 // F2 (research D4.4, "Wake sources"): the hook holds the bound after its publish-and-re-test,
@@ -419,7 +436,7 @@ TEST(BoundProtocol103, F1_BoundStartsAfterCloseBegan_CloseCompletesCounterZero) 
 // bounded pump through its unconditional wake, and the join counter is 0. The mock clock is
 // not moved.
 TEST(BoundProtocol103, F2_EdgeWakeLostBeforeTheRace_CloseCompletesCounterZero) {
-    rg::Scene s{rg::Options{.logout_timeout_ms = 2000}};
+    rg::Scene s{rg::Options{.logout_timeout_ms = kBoundT}};
     ASSERT_TRUE(s.open_to_active());
     BoundHold hold;
     fixpp::session::session_test_access::set_peer_logout_bound_hold_before_race(*s.session,
@@ -437,6 +454,7 @@ TEST(BoundProtocol103, F2_EdgeWakeLostBeforeTheRace_CloseCompletesCounterZero) {
     EXPECT_TRUE(s.pump_until([&] { return rg::Scene::ready(close_fut); }))
         << "close() did not complete";
     EXPECT_EQ(fixpp::session::session_test_access::peer_logout_bound_count(*s.session), 0);
+    end_a_bound_still_running(s, std::chrono::milliseconds{kBoundT}, close_fut);
 }
 
 }  // namespace

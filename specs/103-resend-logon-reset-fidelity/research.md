@@ -1197,6 +1197,10 @@ Characterisation cells, no behavioural mutant: B-4 (`toAdmin` throws; control B-
 - `FixTcCoverageGaps.SimultaneousResendRequest_ServicesPeerWhileAwaitingOwn`: a control; it holds.
 - `FixTcCoverageGaps.TooHighInboundSeqnum_EmitsResendRequest_StaysActive`: re-read which MsgType it feeds.
 - `SecondTooHighPerType.*`: they hold.
+- **Found at implementation (Phase 8; orchestrator rulings):**
+  - `LogoutWaitLifetime.Control_PeersLogoutWhileTheLogoutEmitIsHeld_WaitRunsToItsDeadline` (test_536_close_and_logout_wait.cpp, D-536-3's lifetime control): flip. It pinned two Logouts and a wait to the deadline; under D4.6's owner the Active arm writes none while phase 1's Logout is in flight, and phase 1 takes its Disconnected early exit. Rewritten as `…_OneLogoutAndNoWait`, its "the emit is held when the peer's Logout arrives" precondition kept; `.specify/536-537-538-recovery-liveness.md` carries the pointer.
+  - `SecondFrameInFlight.MemoryStore_InboundArm_…`, `SecondFrameInFlight.FileStore_InboundArm_…`, `ReconcileAfterTheTakeBack.SecondSendAheadOfThePersist_…` and `ReconcileAfterTheTakeBack.PersistAheadOfTheSecondSend_…` (test_cancelled_outbound_store_engine.cpp, fixpp#534's boundary): flip the Logout clauses only. An arm still running after the cancelled frame recorded Disconnected sends no Logout, because the leaf skips once the session is no longer Active (D4.6); its Reject clauses hold, and `TheTwoLockOrdersDifferInWhatThePeerReads` holds.
+  - `Qfj750_LogoutTooHighSeqnumRecoversGapNotDisconnect`: ParityAcceptorFixture has a mock clock, so the mark is set, and the cell destroyed the Session with the bound running (`~Session`'s Debug assert). Rewritten as `Qfj750_LogoutTooHighSeqnum_RecoversTheGapThenAcknowledgesAtTheBound` (T108).
 
 **#581 (FR-017)**
 - `GapDeadlineResidualPattern.Pin_*`, all four: flip.

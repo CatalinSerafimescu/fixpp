@@ -44,6 +44,7 @@ using fixpp::session::session_role;
 using fixpp::session::session_test_access;
 
 constexpr std::uint32_t kT = 2000;  // the bound T, in milliseconds
+constexpr int kNone = 0;            // session_test_access::peer_logout_phase's `none`
 constexpr int kPending = 1;         // session_test_access::peer_logout_phase's `pending`
 
 // Counts fromAdmin calls by MsgType.
@@ -78,6 +79,9 @@ int bound_count(rg::Scene const& s) {
 // close(graceful)'s phase-1 grace is a real-time timer of T, so a close that waits for it
 // completes within T; the budget is derived from it.
 constexpr auto kCloseBudget = 2 * std::chrono::milliseconds{kT};
+// A close() whose wait ends with the Logout in flight, after that Logout's hold is released:
+// below the grace T, so a wait that only the grace ends cannot meet it.
+constexpr auto kAfterReleaseBudget = std::chrono::milliseconds{kT} / 4;
 
 }  // namespace
 
@@ -120,6 +124,9 @@ TEST_P(TooHighLogoutState103, F1_DeadlineBeforeTheBound_ExactlyOneLogout) {
     // Past 2 × HB: a frame above NextNumIn draws the deadline's Logout, if it has not.
     if (s.state() == fsm_state::Active) (void)s.feed(s.heartbeat(++seq));
     ASSERT_EQ(s.count("5", mark), 1U) << "the deadline wrote no Logout: " << s.written(mark);
+    // The deadline's claim (research D4.6): the mark is `none` once its ending ran, before
+    // any close().
+    EXPECT_EQ(phase(s), kNone) << "the deadline did not claim the mark";
     s.pass(std::chrono::milliseconds{kLongT});
     EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
     EXPECT_EQ(s.state(), fsm_state::Disconnected);
@@ -180,6 +187,8 @@ TEST_P(TooHighLogoutState103, H_LogoutResentInSequence_OneAckFromAdminOnce) {
     (void)s.feed(s.gap_fill(n, n + 3));
     (void)s.feed(s.logout(n + 3));
     EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
+    // The in-sequence Logout's claim (research D4.6): `none`, before any close().
+    EXPECT_EQ(phase(s), kNone) << "the in-sequence Logout did not claim the mark";
     EXPECT_EQ(app->from_admin_count("5"), 1);
     s.pass(std::chrono::milliseconds{kT});
     EXPECT_EQ(s.count("5", mark), 1U) << "a second Logout at T: " << s.written(mark);
@@ -330,10 +339,25 @@ TEST_P(Lo1, InboundLogoutHeldThenCloseGraceful_ExactlyOneLogout) {
     ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); }))
         << "setup: the emitter's Logout store was not held: " << s.written(mark);
     auto close_fut = spawn_close(s, close_mode::graceful);
-    s.pump_for(std::chrono::milliseconds{20});
+    if (c.emitter == Emitter::bound_zero_ack) {
+        // With T = 0, close()'s grace is 0, so it does not wait.
+        // FR-010 case 5.  claim-ok: a spec case, not a tally
+        s.pump_for(std::chrono::milliseconds{20});
+    } else {
+        // close(graceful) waits inside its grace T for the Logout in flight (research D4.6,
+        // the poll-join): while that Logout's store call is held it has neither returned nor
+        // recorded Disconnected. The window is below the grace, so the grace cannot end the
+        // wait inside it.
+        EXPECT_FALSE(s.pump_until([&] { return rg::Scene::ready(close_fut); },
+                                  std::chrono::milliseconds{kT} / 8))
+            << "close() returned under the Logout in flight: " << s.written(mark);
+        EXPECT_EQ(s.state(), fsm_state::Active)
+            << "close() recorded Disconnected under the Logout in flight";
+    }
     s.log->release_hold();
-    EXPECT_TRUE(s.pump_until(
-        [&] { return rg::Scene::ready(close_fut) && rg::Scene::ready(feed_fut); }, kCloseBudget))
+    EXPECT_TRUE(
+        s.pump_until([&] { return rg::Scene::ready(close_fut) && rg::Scene::ready(feed_fut); },
+                     kAfterReleaseBudget))
         << "close() or the delivery did not return";
     EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
     EXPECT_FALSE(session_test_access::logout_in_flight(*s.session));
@@ -410,6 +434,9 @@ TEST_P(TooHighLogoutState103, R588e2_CloseGracefulWhileTheBoundWaitsAtTheGate_On
     EXPECT_TRUE(s.pump_until(
         [&] { return rg::Scene::ready(close_fut) && rg::Scene::ready(rr_fut); }, kCloseBudget));
     EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
+    // close()'s claim of the pending mark (research D4.6): the bound, which had not claimed
+    // before its gate wait, left it `none`.
+    EXPECT_EQ(phase(s), kNone) << "the mark was left set";
 }
 
 // R-588-e (3): the bound has claimed and its acknowledgement's store is held;
@@ -427,9 +454,16 @@ TEST_P(TooHighLogoutState103, R588e3_AckStoreHeldThenCloseGraceful_ExactlyOneLog
     ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); }))
         << "setup: the acknowledgement's store was not held";
     auto close_fut = spawn_close(s, close_mode::graceful);
-    s.pump_for(std::chrono::milliseconds{20});
+    // close(graceful) waits inside its grace T for the acknowledgement in flight (research
+    // D4.6, the poll-join): it has neither returned nor recorded Disconnected; the window is
+    // below the grace.
+    EXPECT_FALSE(s.pump_until([&] { return rg::Scene::ready(close_fut); },
+                              std::chrono::milliseconds{kT} / 8))
+        << "close() returned under the acknowledgement in flight: " << s.written(mark);
+    EXPECT_EQ(s.state(), fsm_state::Active)
+        << "close() recorded Disconnected under the acknowledgement in flight";
     s.log->release_hold();
-    EXPECT_TRUE(s.pump_until([&] { return rg::Scene::ready(close_fut); }, kCloseBudget));
+    EXPECT_TRUE(s.pump_until([&] { return rg::Scene::ready(close_fut); }, kAfterReleaseBudget));
     EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
 }
 
@@ -440,18 +474,43 @@ INSTANTIATE_TEST_SUITE_P(BothRoles, TooHighLogoutState103,
 // LO-2 (tasks T083), the reverse of LO-1: close(graceful)'s phase-1 Logout is held in its
 // store; an inbound Logout emitter's frame is fed; the hold is released. Exactly one Logout,
 // phase 1's; the inbound ending's Disconnected recorded; phase 1 takes its early exit, so
-// close() returns with no wait for a confirming Logout (well inside the grace T).
-enum class Lo2Frame : std::uint8_t { in_sequence_logout, sending_time_fatal, arm_d, bound_zero };
+// close() returns with no wait for a confirming Logout (well inside the grace T). The
+// at-once acknowledgement's frame runs with no clock, not with T = 0: phase 1's grace is T,
+// and at T = 0 it ends phase 1 before its store call can be held.
+enum class Lo2Frame : std::uint8_t {
+    in_sequence_logout,
+    sending_time_fatal,
+    arm_d,
+    no_clock,
+    gap_deadline
+};
 
 class Lo2 : public ::testing::TestWithParam<std::tuple<session_role, Lo2Frame>> {};
 
 TEST_P(Lo2, Phase1HeldThenAnInboundEnding_ExactlyOneLogoutPhase1s) {
     auto const [role, f] = GetParam();
     rg::Scene s{rg::Options{.role = role,
-                            .logout_timeout_ms = f == Lo2Frame::bound_zero ? 0 : kT,
+                            .with_clock = f != Lo2Frame::no_clock,
+                            .logout_timeout_ms = kT,
                             .recording_store = true}};
     ASSERT_TRUE(active_recorded(s)) << "setup";
     seqnum_t const n = s.next_in();
+    // The gap deadline's frame: a gap opened and kept open past its deadline, as LO-1's.
+    std::uint32_t deadline_seq = 0;
+    if (f == Lo2Frame::gap_deadline) {
+        (void)s.feed(s.order(n + rg::kGapWidth));
+        deadline_seq = n + rg::kGapWidth;
+        std::size_t answered = 0;
+        for (int i = 0; i < 4 && s.state() == fsm_state::Active; ++i) {
+            s.pass(rg::kHeartBtInt / 2);
+            if (s.count("1") > answered) {
+                (void)s.feed(s.heartbeat(++deadline_seq, s.last_test_req_id()));
+                ++answered;
+            }
+        }
+        ASSERT_EQ(s.state(), fsm_state::Active) << "setup: " << s.written();
+        s.pass(std::chrono::seconds{1});
+    }
     hold_store_of(s, next_out(s));
     auto const mark = s.sent.size();
     auto close_fut = spawn_close(s, close_mode::graceful);
@@ -468,8 +527,11 @@ TEST_P(Lo2, Phase1HeldThenAnInboundEnding_ExactlyOneLogoutPhase1s) {
         case Lo2Frame::arm_d:
             frame = poss_dup_order_with_later_orig(s, n);
             break;
-        case Lo2Frame::bound_zero:
+        case Lo2Frame::no_clock:
             frame = s.logout(n + 3);
+            break;
+        case Lo2Frame::gap_deadline:
+            frame = s.heartbeat(++deadline_seq);
             break;
     }
     auto feed_fut = s.feed_spawn(frame);
@@ -482,6 +544,10 @@ TEST_P(Lo2, Phase1HeldThenAnInboundEnding_ExactlyOneLogoutPhase1s) {
     (void)s.pump_until([&] { return rg::Scene::ready(close_fut) && rg::Scene::ready(feed_fut); },
                        kCloseBudget);
     EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
+    if (f == Lo2Frame::no_clock) {
+        // The inbound ending ran: the at-once acknowledgement, with no ResendRequest.
+        EXPECT_EQ(s.count("2", mark), 0U) << s.written(mark);
+    }
     EXPECT_EQ(s.state(), fsm_state::Disconnected);
 }
 
@@ -497,8 +563,11 @@ std::string lo2_name(::testing::TestParamInfo<std::tuple<session_role, Lo2Frame>
         case Lo2Frame::arm_d:
             e = "ArmD";
             break;
-        case Lo2Frame::bound_zero:
-            e = "TooHighLogoutBoundZero";
+        case Lo2Frame::no_clock:
+            e = "TooHighLogoutNoClock";
+            break;
+        case Lo2Frame::gap_deadline:
+            e = "GapDeadline";
             break;
     }
     return std::string{rg::role_name(std::get<0>(info.param))} + e;
@@ -508,11 +577,11 @@ INSTANTIATE_TEST_SUITE_P(
     BothRolesEveryFrame, Lo2,
     ::testing::Combine(::testing::Values(session_role::initiator, session_role::acceptor),
                        ::testing::Values(Lo2Frame::in_sequence_logout, Lo2Frame::sending_time_fatal,
-                                         Lo2Frame::arm_d, Lo2Frame::bound_zero)),
+                                         Lo2Frame::arm_d, Lo2Frame::no_clock,
+                                         Lo2Frame::gap_deadline)),
     lo2_name);
 
-// LO-2's other frames: the gap deadline past its bound, and a too-low frame (Arm B, tasks
-// T147), are written with their sites.
+// LO-2's too-low frame (Arm B, tasks T147) is written with its site.
 TEST_P(TooHighLogoutState103, Lo2_TooLowFrame) {
     GTEST_SKIP() << "Arm B's too-low Logout lands at tasks T147";
 }
@@ -660,10 +729,15 @@ TEST_P(Lo5, CloseFromFromAdminWhileTheEndingIsHeld_ExactlyOneLogout) {
     ASSERT_TRUE(close_fut.valid()) << "setup: fromAdmin did not spawn close()";
     s.pump_for(std::chrono::milliseconds{20});
     s.log->release_hold();
-    EXPECT_TRUE(s.pump_until(
-        [&] { return rg::Scene::ready(feed_fut) && rg::Scene::ready(close_fut); }, kCloseBudget))
+    EXPECT_TRUE(
+        s.pump_until([&] { return rg::Scene::ready(feed_fut) && rg::Scene::ready(close_fut); },
+                     kAfterReleaseBudget))
         << "close() did not complete";
     EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
+    if (reject) {
+        // The twin's ending: the confirming Logout, then the best-effort Reject.
+        EXPECT_EQ(s.count("3", mark), 1U) << s.written(mark);
+    }
     EXPECT_EQ(s.state(), fsm_state::Disconnected);
     EXPECT_FALSE(session_test_access::logout_in_flight(*s.session));
 }

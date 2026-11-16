@@ -396,19 +396,19 @@ TEST(SecondFrameInFlight, MemoryStore_SecondSend_NeitherFrameIsTransmittedAndThe
     EXPECT_EQ(o.logouts, 1) << "onLogout calls";
 }
 
-TEST(SecondFrameInFlight,
-     MemoryStore_InboundArm_PeerReadsTheLogoutAtTheCancelledNumberAndNoReject) {
+TEST(SecondFrameInFlight, MemoryStore_InboundArm_PeerReadsNoReply) {
     auto const o = run_two_frames(Store::memory, Second::inbound_arm);
     ASSERT_TRUE(two_frame_gate(o, Second::inbound_arm));
 
     EXPECT_EQ(frames_of(o.wire, "3"), 0U) << "the peer read a Reject: " << wire_text(o.wire);
     // fixpp#534 owns this boundary: what an inbound arm that is already running sends
-    // after the session has ended. A change of it flips this assertion.
-    EXPECT_EQ(o.wire, (std::vector<WireFrame>{{"5", o.k}}))
-        << "the peer must read one frame, the Logout, numbered k=" << o.k
-        << "; it read: " << wire_text(o.wire);
-    EXPECT_EQ(o.next_outbound, static_cast<long long>(o.k) + 1)
-        << "the next outbound number in memory is not the one after the Logout's";
+    // after the session has ended.
+    // 103 (research D4.6): the Logout leaf skips once the session is no longer Active,
+    // so the arm's Logout is not among the replies it still sends after the cancelled
+    // frame recorded Disconnected; fixpp#534's boundary is narrowed to the Reject.
+    EXPECT_TRUE(o.wire.empty()) << "the peer must read no frame; it read: " << wire_text(o.wire);
+    EXPECT_EQ(o.next_outbound, static_cast<long long>(o.k))
+        << "the next outbound number in memory is not the cancelled frame's own";
     EXPECT_TRUE(o.inbound.returned_success()) << "on_inbound_frame " << o.inbound.text();
     EXPECT_TRUE(o.peer_read_ended) << "the peer's read did not end";
     EXPECT_EQ(o.state, fsm_state::Disconnected);
@@ -452,17 +452,19 @@ TEST(SecondFrameInFlight, Control_FileStore_InboundArm_WireStartsAtTheCancelledN
 
 // The one reading of that scene the take-back changes: the Reject takes the cancelled
 // frame's number, so the store accepts it.
-TEST(SecondFrameInFlight,
-     FileStore_InboundArm_PeerReadsTheRejectAtTheCancelledNumberThenTheLogout) {
+TEST(SecondFrameInFlight, FileStore_InboundArm_PeerReadsTheRejectAtTheCancelledNumber) {
     auto const o = run_two_frames(Store::file, Second::inbound_arm);
     ASSERT_TRUE(two_frame_gate(o, Second::inbound_arm));
     ASSERT_TRUE(o.store.read) << "the store was not read";
 
-    EXPECT_EQ(o.wire, (std::vector<WireFrame>{{"3", o.k}, {"5", o.k + 1}}))
-        << "the peer must read the Reject, numbered k=" << o.k
-        << ", and then the Logout; it read: " << wire_text(o.wire);
-    EXPECT_TRUE(o.store.type_at(o.k) == "3" && o.store.type_at(o.k + 1) == "5")
-        << "the store does not hold both replies: " << o.store.text();
+    // 103 (research D4.6): the Logout leaf skips once the session is no longer Active,
+    // so the arm's Logout is not among the replies it still sends after the cancelled
+    // frame recorded Disconnected; fixpp#534's boundary is narrowed to the Reject.
+    EXPECT_EQ(o.wire, (std::vector<WireFrame>{{"3", o.k}}))
+        << "the peer must read the Reject alone, numbered k=" << o.k
+        << "; it read: " << wire_text(o.wire);
+    EXPECT_TRUE(o.store.type_at(o.k) == "3" && o.store.type_at(o.k + 1).empty())
+        << "the store does not hold the Reject alone: " << o.store.text();
 }
 
 // ── D-OUT-10: 059's reconcile over a number assigned after the take-back (R-23) ──────
@@ -503,7 +505,8 @@ struct ReconcileOutcome {
     std::optional<fixpp::core::expected_t<void>> held;    // frame h's sender
     std::optional<fixpp::core::expected_t<void>> first;   // frame k's
     std::optional<fixpp::core::expected_t<void>> second;  // frame k + 1's
-    // The arm's own outbound store calls, in call order: the Reject's, then the Logout's.
+    // The arm's own outbound store calls, in call order: the Reject's, then the Logout's
+    // while the session is still Active (103 D4.6: the leaf skips otherwise).
     std::vector<StoreCall> arm_stores;
     bool reconcile_read_made = false;  // a next_seqnum(outbound, false) after the queueing
     fsm_state state = fsm_state::NotConnected;
@@ -746,7 +749,7 @@ void expect_cancelled_frame_ending(ReconcileOutcome const& o) {
 
 // Order 1, frame k + 1 ahead of the persist.
 TEST(ReconcileAfterTheTakeBack,
-     SecondSendAheadOfThePersist_PeerReadsNeitherReplyAndStoreHoldsTheReject) {
+     SecondSendAheadOfThePersist_PeerReadsNoReplyAndStoreHoldsTheReject) {
     auto const o = run_lock_order(Order::send_then_persist, /*cancel_k=*/true);
     ASSERT_TRUE(lock_order_gate(o, Order::send_then_persist, true));
     ASSERT_TRUE(o.store.read) << "the store was not read";
@@ -755,27 +758,34 @@ TEST(ReconcileAfterTheTakeBack,
     EXPECT_TRUE(o.replies().empty() && o.store.type_at(o.k) == "3")
         << "the peer must read neither reply, and the store must hold the Reject at k=" << o.k
         << "; the peer read: " << wire_text(o.wire) << "; the store: " << o.store.text();
-    ASSERT_GE(o.arm_stores.size(), 2U) << "the arm made fewer than two outbound store calls";
-    EXPECT_TRUE(o.arm_stores[1].returned() && o.arm_stores[1].error.has_value())
-        << "the Logout's store call was not refused: " << call_text(o.arm_stores[1]);
-    EXPECT_EQ(o.next_outbound, static_cast<long long>(o.k) + 1)
-        << "the next outbound number in memory is not the one after k";
+    // 103 (research D4.6): the Logout leaf skips once the session is no longer Active,
+    // so the arm's Logout is not among the replies it still sends after the cancelled
+    // frame recorded Disconnected; fixpp#534's boundary is narrowed to the Reject.
+    EXPECT_EQ(o.arm_stores.size(), 1U)
+        << "the arm made an outbound store call other than its Reject's";
+    // With no Logout numbered after the Reject, the number in memory stays where the
+    // reconcile's read left it, under the Reject (B-059-1, D-OUT-10).
+    EXPECT_EQ(o.next_outbound, static_cast<long long>(o.k))
+        << "the next outbound number in memory is not k";
 }
 
 // Order 2, the persist ahead of frame k + 1.
 TEST(ReconcileAfterTheTakeBack,
-     PersistAheadOfTheSecondSend_PeerReadsBothRepliesFromTheCancelledNumber) {
+     PersistAheadOfTheSecondSend_PeerReadsTheRejectAtTheCancelledNumber) {
     auto const o = run_lock_order(Order::persist_then_send, /*cancel_k=*/true);
     ASSERT_TRUE(lock_order_gate(o, Order::persist_then_send, true));
     ASSERT_TRUE(o.store.read) << "the store was not read";
     expect_cancelled_frame_ending(o);
 
     // fixpp#534: this reading of the peer is the one that issue's batch flips.
-    EXPECT_EQ(o.replies(), (std::vector<WireFrame>{{"3", o.k}, {"5", o.k + 1}}))
-        << "the peer must read the Reject at k=" << o.k
-        << " and the Logout at k + 1; it read: " << wire_text(o.wire);
-    EXPECT_TRUE(o.store.type_at(o.k) == "3" && o.store.type_at(o.k + 1) == "5")
-        << "the store does not hold both replies: " << o.store.text();
+    // 103 (research D4.6): the Logout leaf skips once the session is no longer Active,
+    // so the arm's Logout is not among the replies it still sends after the cancelled
+    // frame recorded Disconnected; fixpp#534's boundary is narrowed to the Reject.
+    EXPECT_EQ(o.replies(), (std::vector<WireFrame>{{"3", o.k}}))
+        << "the peer must read the Reject alone, at k=" << o.k
+        << "; it read: " << wire_text(o.wire);
+    EXPECT_TRUE(o.store.type_at(o.k) == "3" && o.store.type_at(o.k + 1).empty())
+        << "the store does not hold the Reject alone: " << o.store.text();
 }
 
 // The two orders differ on the wire. fixpp#534: once a Disconnected session stops
