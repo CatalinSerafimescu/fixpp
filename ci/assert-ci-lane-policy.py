@@ -956,14 +956,15 @@ def main():
         return 2
     # A check that could not run must not be reported as one that passed.
     if not campaign_judged:
-        # ⚠️ Names the FLAG, not one of its inputs. Three checks feed
-        # `campaign_judged` (trigger, job-env, ccache-restore-wiring); this said
-        # "the campaign-trigger invariant", so a PyYAML-absent run — where it is
-        # a DIFFERENT check that stands down — pointed the operator at a check
-        # that had run fine.
+        # ⚠️ Names the FLAG, not one of its inputs. Every check assigned into
+        # `campaign_judged` in main() above feeds it (re-derive: grep that name
+        # here), and the message lists them; this said "the campaign-trigger
+        # invariant", so a PyYAML-absent run — where it is a DIFFERENT check that
+        # stands down — pointed the operator at a check that had run fine.
         print("::error::a campaign invariant could not be evaluated (see the warning above): "
-              "the trigger check, the job-env check, the ccache-restore-wiring check, or some "
-              "combination. Refusing to report `all invariants hold` over a check that did not run.")
+              "the trigger check, the job-env check, the ccache-restore-wiring check, the "
+              "SCCACHE_CACHE_SIZE check, or some combination. Refusing to report `all "
+              "invariants hold` over a check that did not run.")
         return 2
 
     # ⚠️ AN EMPTY SCAN IS AN INSTRUMENT FAILURE, NOT A PASS. If the workflows move

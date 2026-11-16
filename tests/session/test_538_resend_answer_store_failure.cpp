@@ -1116,18 +1116,17 @@ TEST(ReplayGate588, R588b_SendInItsStoreCall_WrittenBeforeTheAnswerWhichCoversIt
 }
 
 // 103 tasks T057, R-588-c (FR-014): with a HeartBtInt, the liveness loop's Heartbeat and
-// TestRequest fall due while the answer is held (the clock moves past HeartBtInt twice, so
-// both the outbound and the inbound side are idle). Neither is written inside the answer;
-// each one written after it carries the next number.
+// TestRequest fall due while the answer is held (the clock moves past HeartBtInt, so both
+// the outbound and the inbound side are idle). Neither is written inside the answer; each
+// one written after it carries the next number. The loop waits at the gate from its
+// Heartbeat arm, and after the release writes the Heartbeat and then the TestRequest,
+// because both deadlines have passed.
 TEST(ReplayGate588, R588c_LivenessDuringTheAnswer_NothingInsideItNextNumbersAfter) {
     HeldWalk w{DirectAcceptor::Options{
         .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
     ASSERT_TRUE(w.start(is_slot_read(3))) << "setup: the walk did not reach the held read";
-    // KIND F: a lost advance writes no liveness frame at all, which the ASSERT_GT after the
-    // release reports by name ("the liveness loop wrote nothing").
-    w.s.f.clock->advance(kHb588 + std::chrono::seconds{1});
-    w.pump_for(kHeldWindow);
-    // KIND F: as the advance above.
+    // KIND F: a lost advance writes neither liveness frame, which the ASSERT_GTs after the
+    // release report by name.
     w.s.f.clock->advance(kHb588 + std::chrono::seconds{1});
     w.pump_for(kHeldWindow);
     EXPECT_EQ(w.s.f.sent_count("0") + w.s.f.sent_count("1"), 0U)
@@ -1136,8 +1135,11 @@ TEST(ReplayGate588, R588c_LivenessDuringTheAnswer_NothingInsideItNextNumbersAfte
     w.release();
     w.pump_for(kHeldWindow);
     auto const& sent = w.s.f.sent;
-    ASSERT_GT(w.s.f.sent_count("0") + w.s.f.sent_count("1"), 0U)
-        << "setup: the liveness loop wrote nothing; the cell exercised no contention:\n"
+    ASSERT_GT(w.s.f.sent_count("0"), 0U)
+        << "setup: the liveness loop wrote no Heartbeat; the cell exercised no contention:\n"
+        << printable(sent);
+    ASSERT_GT(w.s.f.sent_count("1"), 0U)
+        << "setup: the liveness loop wrote no TestRequest; the cell exercised no contention:\n"
         << printable(sent);
     auto const last = last_answer_index(sent);
     auto next = answer_end(sent) + 1;
