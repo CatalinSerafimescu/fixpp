@@ -12,6 +12,7 @@
 // pumps with the Scene's bounded pumps instead.
 #include <gtest/gtest.h>
 
+#include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
@@ -940,3 +941,107 @@ INSTANTIATE_TEST_SUITE_P(
             Lo1Case{Emitter::arm_d, true}, Lo1Case{Emitter::gap_deadline, false},
             Lo1Case{Emitter::arm_b, false}, Lo1Case{Emitter::arm_b, true})),
     lo1_name);
+
+// ── The crossing (spec FR-021's crossing clause; FIX-SL §4.6, §4.10.2) ──────────────────────────
+// A peer Logout arrives while the session is itself ending: (owner) close(graceful)'s phase-1
+// Logout is in its store call; (flush) close(graceful) has begun and waits in its store flush,
+// before phase 1 takes the Logout owner; (stop) Engine::stop()'s note has run. The in-sequence
+// Logout is the companion arm. Each ends Disconnected inside a quarter of the real-time grace T:
+// no ResendRequest after the mark, no mark left set, no bound started, one Logout of ours; a
+// too-high Logout leaves NextNumIn where it was, an in-sequence one moves it by one.
+enum class CrossState : std::uint8_t { owner, flush, stop };
+
+class Crossing103
+    : public ::testing::TestWithParam<std::tuple<session_role, CrossState, bool /*too_high*/>> {};
+
+TEST_P(Crossing103, PeerLogoutWhileTheSessionEnds_DisconnectedAtOnceNoResendRequest) {
+    auto const [role, st, too_high] = GetParam();
+    rg::Scene s{rg::Options{.role = role, .logout_timeout_ms = kT, .recording_store = true}};
+    ASSERT_TRUE(active_recorded(s)) << "setup";
+    bool bound_ran = false;
+    session_test_access::set_peer_logout_bound_hold_first_run(
+        *s.session, [&bound_ran]() -> asio::awaitable<void> {
+            bound_ran = true;
+            co_return;
+        });
+    seqnum_t const n = s.next_in();
+    auto const mark = s.sent.size();
+    std::future<fixpp::core::expected_t<void>> close_fut;
+    switch (st) {
+        case CrossState::owner:
+            hold_store_of(s, next_out(s));
+            close_fut = spawn_close(s, close_mode::graceful);
+            ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); }))
+                << "setup: phase 1's Logout store was not held";
+            ASSERT_TRUE(session_test_access::logout_in_flight(*s.session)) << "setup: no owner";
+            break;
+        case CrossState::flush:
+            s.log->hold_flush = true;
+            close_fut = spawn_close(s, close_mode::graceful);
+            ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); }))
+                << "setup: close()'s flush was not held";
+            ASSERT_FALSE(session_test_access::logout_in_flight(*s.session))
+                << "setup: phase 1 took the owner";
+            break;
+        case CrossState::stop:
+            session_test_access::note_engine_stop(*s.session);
+            break;
+    }
+    ASSERT_EQ(s.state(), fsm_state::Active) << "setup";
+    auto feed_fut = s.feed_spawn(s.logout(too_high ? n + 3 : n));
+    // Derived from the competing real-time grace T, which also ends a close.
+    constexpr auto kBudget = std::chrono::milliseconds{kT} / 4;
+    bool const disconnected =
+        s.pump_until([&] { return s.state() == fsm_state::Disconnected; }, kBudget);
+    int const phase_then = phase(s);
+    seqnum_t const next_in_then = s.next_in();
+    if (st != CrossState::stop) s.log->release_hold();
+    bool const ended = s.pump_until(
+        [&] {
+            return rg::Scene::ready(feed_fut) &&
+                   (!close_fut.valid() || rg::Scene::ready(close_fut));
+        },
+        kBudget);
+    EXPECT_TRUE(disconnected) << "not Disconnected within T/4: " << s.written(mark);
+    EXPECT_TRUE(ended) << "the frame or the close did not end within T/4 of the release";
+    EXPECT_EQ(phase_then, kNone) << "a mark was left set";
+    EXPECT_FALSE(bound_ran) << "a bound was started";
+    EXPECT_EQ(next_in_then, too_high ? n : n + 1) << "NextNumIn";
+    EXPECT_EQ(s.count("2", mark), 0U) << "a ResendRequest during the ending: " << s.written(mark);
+    EXPECT_EQ(s.count("5", mark), 1U) << "our Logouts: " << s.written(mark);
+    // Teardown on a failure path: a close still waiting is ended by its grace, and a bound still
+    // running at its own deadline, so the cell ends as a test failure, not an abort.
+    if (close_fut.valid()) {
+        (void)s.pump_until([&] { return rg::Scene::ready(close_fut); },
+                           2 * std::chrono::milliseconds{kT});
+    }
+    if (bound_count(s) != 0) {
+        s.mock->advance(std::chrono::milliseconds{kT});
+        (void)s.pump_until([&] { return bound_count(s) == 0; });
+    }
+}
+
+std::string crossing_name(
+    ::testing::TestParamInfo<std::tuple<session_role, CrossState, bool>> const& info) {
+    auto const [role, st, too_high] = info.param;
+    std::string state;
+    switch (st) {
+        case CrossState::owner:
+            state = "PhaseOneLogoutInItsStore";
+            break;
+        case CrossState::flush:
+            state = "CloseInItsFlush";
+            break;
+        case CrossState::stop:
+            state = "EngineStopNoted";
+            break;
+    }
+    return std::string{rg::role_name(role)} + state + (too_high ? "TooHigh" : "InSequence");
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    BothRolesEveryState, Crossing103,
+    ::testing::Combine(::testing::Values(session_role::initiator, session_role::acceptor),
+                       ::testing::Values(CrossState::owner, CrossState::flush, CrossState::stop),
+                       ::testing::Bool()),
+    crossing_name);

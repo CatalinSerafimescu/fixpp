@@ -158,6 +158,10 @@ public:
     // it to exhaustion (io_context::poll()) then.
     std::function<bool(StoreCall const&)> hold_in;
     std::optional<fixpp::core::error> held_result;
+    // hold_flush: close(graceful)'s flush waits until release_hold(), as a hold_in body
+    // does, and then forwards. Taken once; it shares hold_in's release and bound, so a cell
+    // sets one of the two.
+    bool hold_flush = false;
 
     [[nodiscard]] bool holding() const noexcept { return holding_; }
     [[nodiscard]] bool hold_timed_out() const noexcept { return hold_timed_out_; }
@@ -337,6 +341,10 @@ public:
 
     // close(graceful)'s flush: the inner store's own, when it has one. Not recorded.
     asio::awaitable<fixpp::core::expected_t<void>> flush_for_session_close() {
+        if (log_->hold_flush) {
+            log_->hold_flush = false;
+            co_await log_->wait_released();
+        }
         if (auto const hook = inner_->flush_hook(); hook != nullptr) {
             co_return co_await hook(*inner_);
         }
