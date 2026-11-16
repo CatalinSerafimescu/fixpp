@@ -1822,7 +1822,7 @@ private:
     struct peer_logout_mark {
         enum class phase_t : std::uint8_t { none, pending, acking };
         seqnum_t seq = 0;
-        fixpp::core::steady_time_point at{};
+        fixpp::core::steady_time_point at;
         phase_t phase = phase_t::none;
     };
     peer_logout_mark peer_logout_;

@@ -5927,7 +5927,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
         static constexpr std::string_view kPhrase2 = " but received ";
         std::array<char, 96> text_buf{};
         static_assert(kPhrase1.size() + kPhrase2.size() +
-                          2 * (std::numeric_limits<seqnum_t>::digits10 + 1) <=
+                          (2 * (std::numeric_limits<seqnum_t>::digits10 + 1)) <=
                       text_buf.size());
         char* const end = text_buf.data() + text_buf.size();
         char* out = std::ranges::copy(kPhrase1, text_buf.data()).out;
@@ -8360,9 +8360,7 @@ asio::awaitable<fixpp::core::expected_t<Session::replay_outcome>> Session::repla
 
     // 103 (research D3; FR-012, SC-003): a request from 0 is answered as one from 1. The one
     // clamp is here, where an answer is numbered, so no caller of the walk can write 34=0.
-    if (begin < seqnum_min) {
-        begin = seqnum_min;
-    }
+    begin = std::max(begin, seqnum_min);
 
     // 103 (research D5′.3; FR-014): the walk holds the replay gate exclusive from here, before
     // its first suspension, to every ending, and waits for the open shared holds before the
