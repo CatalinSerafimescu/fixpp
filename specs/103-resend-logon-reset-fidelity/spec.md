@@ -610,6 +610,20 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   `SendDuringLogoutEngine103.*` (an Engine on a FileStore); tasks T187, T188. The C ABI is not witnessed for
   this ending: no C-ABI cell can hold a Logout's store call, and the code's mapping to
   `FIXPP_ERR_SESSION_INVALID_STATE` is `CapiTooHighLogout103`'s subject.
+- **FR-021a** *(Addendum 2026-11-16, orchestrator ruling; the crossing)*: A Logout from the peer whose MsgSeqNum(34)
+  is above NextNumIn, received in Active while the session is itself ending (a Logout of the session's own in flight,
+  the Logout owner of research D4.6; a close() begun; or Engine::stop()'s note run), MUST be answered at once, as an
+  in-sequence Logout is in the same state: the session's confirming Logout when no Logout of its own is in flight
+  (none otherwise), then `Disconnected`, with no pending-Logout mark, no bound, no ResendRequest, and NextNumIn not
+  moved. `[FIX-SL §4.6] FIX connection termination`: the Logout initiator waits for the peer's Logout
+  acknowledgement, the gap fill being the peer's chance; `[FIX-SL §4.10.2] FIX logout process state transition
+  diagram`: "Receive Logout(35=5) Response → Disconnect", and only the logout acceptor may send a ResendRequest.
+  QuickFIX C++ (`Session::nextLogout`, `verify(logout, false, false)`, then `disconnect()`), QuickFIX/J
+  (`Session.nextLogout`, the same) and QuickFIX/Go (`inSession.handleLogout`, `verifySelect(msg, false, false,
+  true)`, then `checkTargetTooHigh` to `latentState`) disconnect at once and send no ResendRequest. QuickFIX C++
+  moves its target number by one there; QuickFIX/J and QuickFIX/Go do not, and fixpp does not (the gap is recovered
+  at the next Logon). Witness: `Crossing103.*` (both roles; a Logout of ours in its store call, a close in its
+  store flush, the stop noted; each with the in-sequence companion arm).
 
 **Additional scope (owner ruling 2026-11-15; CI only, no library behaviour)**
 
@@ -697,6 +711,7 @@ The PR description (tasks T181) and the B&L rows name them from here.
 | A too-low frame in NotConnected or LogonSent still ends silently | all three (send a Logout) | disclosure: L-103-7, Out of Scope |
 | A send started in the too-high Logout acknowledgement's `toAdmin` is refused (research D4.7) | QuickFIX C++, QuickFIX/J (accept it, as on the in-sequence route: the FR-021 row below) | disclosure: B-103-7 |
 | A send is refused from the moment a Logout emitter takes the Logout owner until `Disconnected`, every emitter included, the in-sequence confirming Logout among them (FR-021) | all three (logged off they accept a send, number it and store it for a resend; QuickFIX C++ and QuickFIX/J also transmit after a Logout of their own, until the reply or the timeout) | owner ruling 2026-11-16 (refuse; B-010-2 kept), and owner ruling 2026-10-12 (`.specify/563-564-callback-send.md` §7); B-103-14 |
+| A too-high Logout that crosses the session's own ending leaves NextNumIn where it was (FR-021a) | QuickFIX C++ (moves its target number by one) | orchestrator ruling 2026-11-16 (QuickFIX/J and QuickFIX/Go do not move it); B-103-15 |
 | A strict acceptor refuses a Logon without 141=Y with a Logout (FR-004; opt-in policy only) | all three (no engine refuses such a Logon) | owner ruling #682, 2026-11-14 (FIX-SL §4.4.3) |
 | A peer-spontaneous 141=Y acknowledgement at 34=1 with a hydrated NextNumIn above 1 ends the session | QuickFIX C++, QuickFIX/Go (accept it); QuickFIX/J (takes it as a reset) | disclosure: L-103-2, with a follow-up issue |
 
@@ -753,6 +768,10 @@ differs, is a dangling reference.
   (FR-008).
 - `[FIX44-V2 Administrative Messages] Logout` — after sending the Logout, the logout initiator sends no message
   unless the logout acceptor requests one by a ResendRequest (FR-021).
+- `[FIX-SL §4.6] FIX connection termination` — the Logout initiator waits for the peer's Logout acknowledgement;
+  the gap fill is the peer's (FR-021a).
+- `[FIX-SL §4.10.2] FIX logout process state transition diagram` — "Receive Logout(35=5) Response → Disconnect";
+  only the logout acceptor may send a ResendRequest (FR-021a).
 
 Informative, not coverage-index entries: the reference engines' session source (QuickFIX C++, QuickFIX/J,
 QuickFIX/Go) at the SHAs in the pre-spec research's `_engine_shas.txt`, for observable behaviour.

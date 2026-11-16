@@ -401,6 +401,7 @@ and its invariant: "Invariant (FR-002): any Logon fixpp sends with 141=Y carries
 | D7 *(C-ABI 1.17: every too-low frame without 43=Y draws a Logout with Text)* | `CapiC7Witness.Row6_TooLowHeartbeatWithoutPossDup_*` (T150), `CapiC7Witness.TooLowOrderWithoutPossDup_*` (Phase 10, added) | T147 | T148, T149 (1) |
 | FR-019 | B&L delta (T151) | T151 | none (records) |
 | FR-021 *(addendum, Phase 8)* | `SendDuringLogout103.*`, `SendDuringLogoutEngine103.*` (T187); `SendDuringLogout103 …/{Initiator,Acceptor}TooLow`, Arm B's row (Phase 10, added) | T188 | T188 (the refusal removed) |
+| FR-021a *(addendum, the crossing; orchestrator ruling 2026-11-16)* | `Crossing103.*` (both roles; owner, flush and stop states; the in-sequence companion arms) | the crossing branch at `Session::on_inbound_active_too_high_logout_`'s entry | the branch deleted → every too-high arm RED |
 | FR-020 | D8 census with its sentinel (T009–T011); Arm-B census (T012); T166 | T040, T150 | sentinel removed → the known-positive check fails (T009) |
 | SC-001 | every RED reading above, on `B0` (Execution rules) | — | every mutant task |
 | SC-002 | live cells (T176); restart cell (T022) | T027, T037 | T038, T176 |
