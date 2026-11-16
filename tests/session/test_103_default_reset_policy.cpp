@@ -377,6 +377,11 @@ void run_as3_close_during_the_refusals_store(bool const completed) {
     log->release_hold();
     EXPECT_TRUE(fixpp::test_support::pump_until(f.ioc, [&] { return ready(feed_fut); }))
         << "the Logon did not complete";
+    if (!completed) {
+        // The refusal resumed while the close was still in its flush: `closing`, not completed.
+        EXPECT_TRUE(log->flush_holding()) << "setup: close(graceful)'s flush hold had ended";
+        EXPECT_FALSE(ready(close_fut)) << "setup: close(graceful) completed before the release";
+    }
     log->release_flush();
     (void)fixpp::test_support::pump_until(f.ioc, [&] { return ready(close_fut); });
     ASSERT_TRUE(ready(feed_fut));
