@@ -1184,6 +1184,10 @@ Characterisation cells, no behavioural mutant: B-4 (`toAdmin` throws; control B-
 - **Re-run:** `test_reset_on_lifecycle.cpp`, `engine_reset_unit_stop_test.cpp`, and `tests/capi/public_roundtrip_test.cpp` (re-read its comments).
 - **Comments only:** the lenient-forcing helpers listed under D7.
 - **The rest:** whatever D8's census finds.
+- **Found before Phase 5 (orchestrator ruling):** `LoadHappyPath.T011_FieldForFieldEquivalence` (`tests/config/test_load_happy_path.cpp`): flip. It pins the value `happy_full.toml` names for `reset_seqnum_policy`, and the fixture's premise is a non-default value. With the default now `bilateral_lenient` (FR-001), the fixture names `bilateral_strict` and the cell expects it, where it expected `bilateral_lenient`.
+
+**FR-021 — flip (found at verification, Phase 13 T168; orchestrator ruling)**
+- `CallbackSend.LogoutToAdminStartsSend_PeerLogout` and `CallbackSend.LogoutToAdminStartsSend_PeerLogout_FileStore` (`tests/session/test_563_564_callback_send.cpp`, NC-5 (f)): flip. They expected a send started in the confirming Logout's `toAdmin` to be deferred, admitted and written after the Logout (the disclosed `L-563-2`). Under FR-021 the confirming Logout holds the Logout owner, so the send returns `session_invalid_state_for_send`, reaches no `toApp`, and no frame follows the Logout. The no-store arm already had that ending. `.specify/563-564-callback-send.md` §7's bullet carries an erratum.
 
 **#580**
 - `ResendAnswerStoreFailure.Guard_BeginSeqNoZero_SlotZeroIsFoldedAndTheSessionStaysActive`: flip, re-aim and rename.

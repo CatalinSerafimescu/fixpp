@@ -5751,30 +5751,20 @@ void run_close_and_send_in_one_callback(OneCallbackStarts shape, StoreKind store
             break;
         }
         case OneCallbackStarts::send_in_the_confirming_logouts_to_admin: {
-            if (!has_store) {
-                // With no store the confirming Logout's emit does not suspend, so
-                // the session has left Active before the send resumes.
-                EXPECT_EQ(cell.started.err,
-                          std::optional<error>{error::session_invalid_state_for_send})
-                    << "with no store the send resumes on a session that left Active and is "
-                       "refused. "
-                    << reading;
-                EXPECT_EQ(send_to_app, "never ran") << reading;
-                EXPECT_FALSE(inner_on_the_wire)
-                    << "nothing of the refused send is transmitted. " << reading;
-                break;
-            }
-            EXPECT_EQ(send_to_app, "deferred") << reading;
-            ASSERT_EQ(wire_full.size(), 2U)
-                << "the confirming Logout and then the send's frame must be transmitted. "
-                << reading;
-            EXPECT_EQ(field(wire_full[0], 35), "5")
-                << "the confirming Logout is transmitted first. " << reading;
-            EXPECT_EQ(field(wire_full[1], 11), "B41-INNER")
-                << "the send's frame is transmitted after the confirming Logout. " << reading;
-            EXPECT_EQ(seq_of(wire_full[1]), seq_of(wire_full[0]) + 1)
-                << "the send's frame carries the MsgSeqNum after the confirming Logout's. "
-                << reading;
+            // 103 (FR-021, research D4.6): from the confirming Logout's toAdmin on, a Logout
+            // of the session is in flight, so the send is refused whether or not the
+            // Logout's emit suspends; with no store the session has also left Active.
+            EXPECT_EQ(cell.started.err, std::optional<error>{error::session_invalid_state_for_send})
+                << "the send returns session_invalid_state_for_send. " << reading;
+            EXPECT_FALSE(cell.started.threw) << reading;
+            EXPECT_EQ(send_to_app, "never ran")
+                << "a send that is refused does not reach its toApp. " << reading;
+            EXPECT_FALSE(inner_on_the_wire)
+                << "nothing of the refused send is transmitted. " << reading;
+            EXPECT_FALSE(inner_retained) << "nothing of the refused send is stored. " << reading;
+            ASSERT_FALSE(wire_full.empty()) << "the confirming Logout is transmitted. " << reading;
+            EXPECT_TRUE(logout_is_last)
+                << "no frame is transmitted after the confirming Logout. " << reading;
             break;
         }
     }
@@ -6660,34 +6650,32 @@ TEST(CallbackSend, FromAppStartsCloseThenSend_Graceful_NoStore_LiveWrite) {
             .writes_refused = 0});
 }
 
-// The peer starts the logout; the toAdmin of the Logout that confirms it starts a send. No
-// close() has begun, so nothing refuses the send, and its frame is numbered and transmitted
-// after our Logout. The arms on a store pin a disclosed limitation
-// (`.specify/563-564-callback-send.md` §7, the bullet on a logout the peer began), not a
-// wanted behaviour. The arm with no store pins where that limitation stops: the Logout's
-// emit does not suspend there, the session has left Active when the send resumes, and the
-// send is refused. On the synchronous sink only: the row of this shape names it.
+// The peer starts the logout; the toAdmin of the Logout that confirms it starts a send. 103
+// (FR-021, research D4.6) refuses a send while a Logout of the session is in flight, so the
+// send is refused on every arm and no frame follows the confirming Logout. That supersedes
+// the limitation these arms pinned (`.specify/563-564-callback-send.md` §7, the bullet on a
+// logout the peer began, annotated there). The arm with no store reaches the same ending
+// with the session already out of Active. On the synchronous sink only: the row of this
+// shape names it.
 TEST(CallbackSend, LogoutToAdminStartsSend_PeerLogout) {
     run_close_and_send_in_one_callback(
         OneCallbackStarts::send_in_the_confirming_logouts_to_admin, StoreKind::memory,
         TransportKind::sync_capture,
         CloseAndSendExpect{
             .inside = "Active open",
-            .send_to_app = "deferred",
-            .order = {"toAdmin(35=5) returns [Active open]", "transmit 35=5 34=2 [Active open]",
-                      "onLogout [Disconnected open]",
-                      "on_inbound_frame completes [Disconnected open]",
-                      "transmit 35=D 34=3 11=B41-INNER [Disconnected open]",
-                      "send(INNER) completes [Disconnected open]"},
-            .callbacks = {"toApp [Active open]"},
+            .send_to_app = "never ran",
+            .order = {"toAdmin(35=5) returns [Active open]", "send(INNER) completes [Active open]",
+                      "transmit 35=5 34=2 [Active open]", "onLogout [Disconnected open]",
+                      "on_inbound_frame completes [Disconnected open]"},
+            .callbacks = {},
             .outer = "ok",
             .close = "not started",
-            .send = "ok",
-            .wire = {"35=5 34=2", "35=D 34=3 11=B41-INNER"},
-            .retained = {"35=A 34=1", "35=5 34=2", "35=D 34=3 11=B41-INNER", "none"},
-            .next_out = 4,
+            .send = "session_invalid_state_for_send",
+            .wire = {"35=5 34=2"},
+            .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+            .next_out = 3,
             .next_in = 3,
-            .store_next_out = 4,
+            .store_next_out = 3,
             .store_next_in = {},
             .at_the_end = "Disconnected open",
             .writes_after_close = 0,
@@ -6700,20 +6688,19 @@ TEST(CallbackSend, LogoutToAdminStartsSend_PeerLogout_FileStore) {
         TransportKind::sync_capture,
         CloseAndSendExpect{
             .inside = "Active open",
-            .send_to_app = "deferred",
-            .order = {"toAdmin(35=5) returns [Active open]", "transmit 35=5 34=2 [Active open]",
-                      "transmit 35=D 34=3 11=B41-INNER [Active open]",
-                      "send(INNER) completes [Active open]", "onLogout [Disconnected open]",
+            .send_to_app = "never ran",
+            .order = {"toAdmin(35=5) returns [Active open]", "send(INNER) completes [Active open]",
+                      "transmit 35=5 34=2 [Active open]", "onLogout [Disconnected open]",
                       "on_inbound_frame completes [Disconnected open]"},
-            .callbacks = {"toApp [Active open]"},
+            .callbacks = {},
             .outer = "ok",
             .close = "not started",
-            .send = "ok",
-            .wire = {"35=5 34=2", "35=D 34=3 11=B41-INNER"},
-            .retained = {"35=A 34=1", "35=5 34=2", "35=D 34=3 11=B41-INNER", "none"},
-            .next_out = 4,
+            .send = "session_invalid_state_for_send",
+            .wire = {"35=5 34=2"},
+            .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+            .next_out = 3,
             .next_in = 3,
-            .store_next_out = 4,
+            .store_next_out = 3,
             .store_next_in = 3,
             .at_the_end = "Disconnected open",
             .writes_after_close = 0,
