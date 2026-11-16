@@ -41,6 +41,7 @@
 #include <asio/use_awaitable.hpp>
 #include <cassert>
 #include <cstdint>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <optional>
 #include <utility>
 
