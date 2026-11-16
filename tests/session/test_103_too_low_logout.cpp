@@ -13,6 +13,7 @@
 // state; B-7 reads the too-high Logout's mark and is last in the file.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/use_future.hpp>
@@ -343,9 +344,12 @@ TEST(TooLowLogoutLongCompIds103, B5_LogoutDoesNotFit_NoLogoutDisconnected_NearMi
 }
 
 // ── B-6 (T141): a frame at 34=N with the seqnum lock drained ────────────────────────────
-// The sequence check refuses it for a reason other than "too low": no Logout.
+// The sequence check refuses it for a reason other than "too low": no Logout is built. The
+// drained lock also refuses a Logout's number, so "none written" alone cannot show it was
+// not built; the cell reads toAdmin, which the leaf calls before it numbers the Logout.
 TEST_P(TooLowLogout103, B6_FrameAtNextNumInWithTheSeqnumLockDrained_NoLogout) {
-    rg::Scene s{rg::Options{.role = GetParam()}};
+    auto app = std::make_shared<TooLowApp>();
+    rg::Scene s{rg::Options{.role = GetParam(), .app = app}};
     ASSERT_TRUE(s.open_to_active()) << "setup";
     ASSERT_TRUE(drive_to_n(s)) << "setup";
     auto drained =
@@ -353,8 +357,13 @@ TEST_P(TooLowLogout103, B6_FrameAtNextNumInWithTheSeqnumLockDrained_NoLogout) {
                        session_test_access::seqnum_mgr(*s.session).drain(), asio::use_future);
     ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(drained); })) << "setup: drain";
     auto const mark = s.sent.size();
+    auto const events_before = app->events.size();
     (void)s.feed(s.order(kN));
     EXPECT_EQ(s.count("5", mark), 0U) << "the session wrote " << s.written(mark);
+    std::vector<std::string> const after(
+        app->events.begin() + static_cast<std::ptrdiff_t>(events_before), app->events.end());
+    EXPECT_EQ(std::ranges::count(after, std::string{"toAdmin:5"}), 0)
+        << "a Logout was built and handed to toAdmin";
     EXPECT_EQ(s.state(), fsm_state::Disconnected) << rg::state_name(s.state());
 }
 
@@ -429,6 +438,12 @@ TEST_P(TooLowLogoutMark103, B7_MarkPendingTooLowLogoutHeldPastT_ExactlyOneLogout
     auto fut = s.feed_spawn(s.order(2));
     ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); }))
         << "setup: the too-low frame's Logout store was not held: " << s.written(mark);
+    // The data-model row is pending → none at Arm B's claim, before its Logout. Read here,
+    // before T: at T the bound, finding the Logout owner set, also leaves the phase none, and
+    // the owner alone keeps it from a second Logout, so the count below does not show the
+    // claim.
+    EXPECT_EQ(session_test_access::peer_logout_phase(*s.session), 0)
+        << "Arm B did not claim the pending mark";
     s.mock->advance(std::chrono::milliseconds{kT} + 1s);
     s.pump_for(std::chrono::milliseconds{kT} / 8);
     s.log->release_hold();
