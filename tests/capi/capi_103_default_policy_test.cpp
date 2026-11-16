@@ -175,9 +175,14 @@ TEST(CapiDefaultResetPolicy103, DefaultAcceptor_AcceptsALogonWithout141_CloseRet
 // Logout is at 34=4 with NextNumIn 2; the engine's ResendRequest shows it was processed.
 // The session's bound T is SessionConfig's default (the C ABI sets none), on the real clock:
 // after T the session acknowledges and is Disconnected, where a send is refused for another
-// reason, so the send must be made before T has run from the Logout's write.
+// reason, so the send must be made before T has run from the Logout's write. The margin is
+// a condition, not a figure: the send is issued right after the ResendRequest is read,
+// and T is the shipped default. A send that ran at or past T fails the cell, with the
+// elapsed time; the cell never skips.
 // The peer's Logon carries ResetSeqNumFlag(141)=Y, which the base's strict default and
 // 103's lenient default both accept, so the cell runs the same path on both.
+// SessionConfig::logout_disconnect_timeout_ms's shipped default; a change of that default
+// changes this.
 constexpr std::chrono::milliseconds kDefaultLogoutBound{2000};
 
 TEST(CapiTooHighLogout103, SendWhileATooHighLogoutIsPending_RefusedWithTheInvalidStateCode) {
@@ -209,11 +214,17 @@ TEST(CapiTooHighLogout103, SendWhileATooHighLogoutIsPending_RefusedWithTheInvali
         "40=1\x01";
     auto const rc = fixpp_session_send(
         a.session, reinterpret_cast<std::uint8_t const*>(payload.data()), payload.size());
-    auto const elapsed = std::chrono::steady_clock::now() - logout_written;
-    ASSERT_LT(elapsed, kDefaultLogoutBound)
-        << "the path was not exercised: the send ran after the bound T";
-    EXPECT_EQ(rc, FIXPP_ERR_SESSION_INVALID_STATE)
-        << "fixpp_session_send returned " << static_cast<int>(rc);
+    auto const elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - logout_written);
+    if (elapsed >= kDefaultLogoutBound) {
+        ADD_FAILURE() << "the path was not exercised: the send ran " << elapsed.count()
+                      << " ms after the Logout's write, at or past the bound T ("
+                      << kDefaultLogoutBound.count() << " ms)";
+    } else {
+        EXPECT_EQ(rc, FIXPP_ERR_SESSION_INVALID_STATE)
+            << "fixpp_session_send returned " << static_cast<int>(rc) << ", " << elapsed.count()
+            << " ms after the Logout's write";
+    }
     peer.disconnect();
     (void)a.drain_then_close();
 }

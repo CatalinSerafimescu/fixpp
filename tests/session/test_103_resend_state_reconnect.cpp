@@ -378,6 +378,11 @@ constexpr std::uint32_t kBoundT = 2000;
 
 // A test seam the bound awaits: it records that it ran, then yields until released.
 struct BoundHold {
+    // Releases the hold when the cell's scope ends, whatever path ended it.
+    struct release_on_exit {
+        BoundHold& h;
+        ~release_on_exit() { h.released = true; }
+    };
     bool entered = false;
     bool released = false;
     std::function<asio::awaitable<void>()> fn() {
@@ -412,9 +417,12 @@ std::future<fixpp::core::expected_t<void>> spawn_terminal_close(rg::Scene& s) {
 // close() completes within a bounded pump, and the join counter is 0. The mock clock is not
 // moved, so the bound's T cannot end any wait: the cell's forced spurious-hit arm.
 TEST(BoundProtocol103, F1_BoundStartsAfterCloseBegan_CloseCompletesCounterZero) {
-    rg::Scene s{rg::Options{.logout_timeout_ms = kBoundT}};
-    ASSERT_TRUE(s.open_to_active());
+    // Declared before the Scene and released by `release` after it, so a failure path's
+    // teardown resumes the held bound over a live BoundHold.
     BoundHold hold;
+    rg::Scene s{rg::Options{.logout_timeout_ms = kBoundT}};
+    BoundHold::release_on_exit const release{hold};
+    ASSERT_TRUE(s.open_to_active());
     fixpp::session::session_test_access::set_peer_logout_bound_hold_first_run(*s.session,
                                                                               hold.fn());
     seqnum_t const n = s.next_in();
@@ -436,9 +444,12 @@ TEST(BoundProtocol103, F1_BoundStartsAfterCloseBegan_CloseCompletesCounterZero) 
 // bounded pump through its unconditional wake, and the join counter is 0. The mock clock is
 // not moved.
 TEST(BoundProtocol103, F2_EdgeWakeLostBeforeTheRace_CloseCompletesCounterZero) {
-    rg::Scene s{rg::Options{.logout_timeout_ms = kBoundT}};
-    ASSERT_TRUE(s.open_to_active());
+    // Declared before the Scene and released by `release` after it, so a failure path's
+    // teardown resumes the held bound over a live BoundHold.
     BoundHold hold;
+    rg::Scene s{rg::Options{.logout_timeout_ms = kBoundT}};
+    BoundHold::release_on_exit const release{hold};
+    ASSERT_TRUE(s.open_to_active());
     fixpp::session::session_test_access::set_peer_logout_bound_hold_before_race(*s.session,
                                                                                 hold.fn());
     seqnum_t const n = s.next_in();
