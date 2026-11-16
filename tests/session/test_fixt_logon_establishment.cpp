@@ -85,6 +85,7 @@
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/reify_test_frame.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/store_double.hpp"
 #include "support/transport_double.hpp"
 #include "support/validation_test_dictionary.hpp"
@@ -702,9 +703,10 @@ struct FixtSetup {
 // Moving the helper below the struct costs nothing (its first caller is far below both)
 // and lets the signature state the constraint instead of a comment.
 template <typename Fn>
-auto run_sync(FixtSetup& s, Fn&& fn)
+auto run_sync(FixtSetup& s, fixpp::session::Session const& on, Fn&& fn)
     -> decltype(asio::co_spawn(s.ioc, fn(), asio::use_future).get()) {
-    auto fut = asio::co_spawn(s.ioc, fn(), asio::use_future);
+    auto fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(on, s.ioc), fn(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(s.ioc, fut, 200ms, "run_sync")) {
         fixpp::test_support::cancel_and_drain_or_report(s.ioc, *s.clock, "run_sync");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "run_sync";
@@ -745,9 +747,9 @@ TEST(FixtLogonEstablishment, W1_FullRoundTrip_BothActive_NegotiatedV50sp2) {
     fixpp::session::Session initiator(s.engine, init_cfg, reg);
 
     // Open acceptor (enters NotConnected waiting state)
-    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
+    ASSERT_TRUE(run_sync(s, acceptor, [&] { return acceptor.open(); }).has_value());
     // Open initiator (emits own Logon → LogonSent)
-    ASSERT_TRUE(run_sync(s, [&] { return initiator.open(); }).has_value());
+    ASSERT_TRUE(run_sync(s, initiator, [&] { return initiator.open(); }).has_value());
 
     ASSERT_FALSE(init_frame_out.empty()) << "Initiator should have emitted a Logon";
 
@@ -757,7 +759,7 @@ TEST(FixtLogonEstablishment, W1_FullRoundTrip_BothActive_NegotiatedV50sp2) {
 
     // Feed initiator's Logon to acceptor.
     // The acceptor sees the peer (TW→ISLD) Logon with 1137=9 (v50sp2).
-    auto acpt_r = run_sync(s, [&] {
+    auto acpt_r = run_sync(s, acceptor, [&] {
         return acceptor.on_inbound_frame(
             std::span<const std::byte>{init_frame_out.data(), init_frame_out.size()});
     });
@@ -781,7 +783,7 @@ TEST(FixtLogonEstablishment, W1_FullRoundTrip_BothActive_NegotiatedV50sp2) {
         << "(pre-T018: returns Unknown — this distinguishes T018 behavior)";
 
     // Feed acceptor's reply Logon to initiator.
-    auto init_r = run_sync(s, [&] {
+    auto init_r = run_sync(s, initiator, [&] {
         return initiator.on_inbound_frame(
             std::span<const std::byte>{acpt_frame_out.data(), acpt_frame_out.size()});
     });
@@ -824,12 +826,12 @@ TEST(FixtLogonEstablishment, InitiatorAbsent1137Ack_ReachesActive_NegotiatedUnkn
     };
     fixpp::session::Session initiator(s.engine, init_cfg, reg);
 
-    ASSERT_TRUE(run_sync(s, [&] { return initiator.open(); }).has_value());
+    ASSERT_TRUE(run_sync(s, initiator, [&] { return initiator.open(); }).has_value());
     ASSERT_FALSE(init_frame_out.empty()) << "Initiator should have emitted a Logon";
 
     // Synthetic acceptor Logon-ack (ISLD→TW) WITHOUT 1137 (empty default_appl_ver_id).
     auto ack_no_1137 = make_fixt_logon_frame("FIXT.1.1", 1, "ISLD", "TW", 30, "");
-    auto init_r = run_sync(s, [&] {
+    auto init_r = run_sync(s, initiator, [&] {
         return initiator.on_inbound_frame(
             std::span<const std::byte>{ack_no_1137.data(), ack_no_1137.size()});
     });
@@ -870,13 +872,13 @@ TEST(FixtLogonEstablishment, W2_Missing1137_AcceptorRejectsWithRTM_NotActive) {
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
+    ASSERT_TRUE(run_sync(s, acceptor, [&] { return acceptor.open(); }).has_value());
 
     // Build FIXT Logon WITHOUT 1137 (empty default_appl_ver_id).
     // Peer: TW sends to ISLD.
     auto logon_no_1137 = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "");
 
-    auto r = run_sync(s, [&] {
+    auto r = run_sync(s, acceptor, [&] {
         return acceptor.on_inbound_frame(
             std::span<const std::byte>{logon_no_1137.data(), logon_no_1137.size()});
     });
@@ -943,13 +945,13 @@ TEST(FixtLogonEstablishment, W3_Unserviceable1137_AcceptorRejectsWithVII_NotActi
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
+    ASSERT_TRUE(run_sync(s, acceptor, [&] { return acceptor.open(); }).has_value());
 
     // Peer (TW) sends FIXT Logon with 1137=8 (v50sp1) — present but absent
     // from registry {v44, v50sp2} → unserviceable → 373=5 path fires.
     auto logon_unserviceable = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "8");
 
-    auto r = run_sync(s, [&] {
+    auto r = run_sync(s, acceptor, [&] {
         return acceptor.on_inbound_frame(
             std::span<const std::byte>{logon_unserviceable.data(), logon_unserviceable.size()});
     });
@@ -1015,11 +1017,11 @@ TEST(FixtLogonEstablishment, W5_VersionGeneral_V44_NegotiatesCorrectly) {
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
+    ASSERT_TRUE(run_sync(s, acceptor, [&] { return acceptor.open(); }).has_value());
 
     // Peer (TW) sends FIXT Logon with 1137=6 (v44 wire value).
     auto logon_v44 = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "6");
-    auto r = run_sync(s, [&] {
+    auto r = run_sync(s, acceptor, [&] {
         return acceptor.on_inbound_frame(
             std::span<const std::byte>{logon_v44.data(), logon_v44.size()});
     });
@@ -1044,11 +1046,11 @@ TEST(FixtLogonEstablishment, W5_VersionGeneral_V50sp2_NegotiatesCorrectly) {
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
+    ASSERT_TRUE(run_sync(s, acceptor, [&] { return acceptor.open(); }).has_value());
 
     // Peer (TW) sends FIXT Logon with 1137=9 (v50sp2 wire value).
     auto logon_v50sp2 = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "9");
-    auto r = run_sync(s, [&] {
+    auto r = run_sync(s, acceptor, [&] {
         return acceptor.on_inbound_frame(
             std::span<const std::byte>{logon_v50sp2.data(), logon_v50sp2.size()});
     });
@@ -1104,12 +1106,12 @@ TEST(FixtLogonEstablishment, W8_1128Tolerance_DeliveredDictFree_StaysActive) {
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
+    ASSERT_TRUE(run_sync(s, acceptor, [&] { return acceptor.open(); }).has_value());
 
     // Step 1: Complete FIXT handshake to reach Active.
     // Feed a valid FIXT Logon with 1137=9 (v50sp2).
     auto logon = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "9");
-    auto handshake_r = run_sync(s, [&] {
+    auto handshake_r = run_sync(s, acceptor, [&] {
         return acceptor.on_inbound_frame(std::span<const std::byte>{logon.data(), logon.size()});
     });
     ASSERT_TRUE(handshake_r.has_value()) << "Handshake must succeed";
@@ -1147,7 +1149,7 @@ TEST(FixtLogonEstablishment, W8_1128Tolerance_DeliveredDictFree_StaysActive) {
         app_frame.reserve(full.size());
         for (char c : full) app_frame.push_back(static_cast<std::byte>(c));
 
-        auto app_r = run_sync(s, [&] {
+        auto app_r = run_sync(s, acceptor, [&] {
             return acceptor.on_inbound_frame(
                 std::span<const std::byte>{app_frame.data(), app_frame.size()});
         });
@@ -1194,7 +1196,7 @@ TEST(FixtOpenValidation, FQ1a_MissingDefaultApplVerId_ReturnsInvalidConfig_NoLog
 
     // Pass non-null registry so the registry arm does NOT fire.
     fixpp::session::Session sess(s.engine, cfg, &s.registry);
-    auto result = run_sync(s, [&] { return sess.open(); });
+    auto result = run_sync(s, sess, [&] { return sess.open(); });
 
     // Must return an error (invalid_session_config).
     ASSERT_FALSE(result.has_value())
@@ -1222,7 +1224,7 @@ TEST(FixtOpenValidation, FQ1b_NullRegistry_ReturnsInvalidConfig) {
 
     // Omit 3rd argument → app_version_registry_ == nullptr (test-ctor path).
     fixpp::session::Session sess(s.engine, cfg /*, no registry */);
-    auto result = run_sync(s, [&] { return sess.open(); });
+    auto result = run_sync(s, sess, [&] { return sess.open(); });
 
     // Must return an error.
     ASSERT_FALSE(result.has_value())
@@ -1294,11 +1296,11 @@ TEST(FixtLogonEstablishment, W_Missing1137_ToAdminObserved_RequiredTagMissing_Di
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
+    ASSERT_TRUE(run_sync(s, acceptor, [&] { return acceptor.open(); }).has_value());
 
     // Feed a FIXT Logon WITHOUT 1137 (empty default_appl_ver_id).
     auto logon_no_1137 = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "");
-    auto r = run_sync(s, [&] {
+    auto r = run_sync(s, acceptor, [&] {
         return acceptor.on_inbound_frame(
             std::span<const std::byte>{logon_no_1137.data(), logon_no_1137.size()});
     });
@@ -1364,12 +1366,12 @@ TEST(FixtLogonEstablishment, W_Unserviceable1137_ToAdminObserved_ValueIsIncorrec
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
+    ASSERT_TRUE(run_sync(s, acceptor, [&] { return acceptor.open(); }).has_value());
 
     // Peer sends FIXT Logon with 1137=8 (v50sp1) — present but absent from
     // registry {v44, v50sp2} → unserviceable → 373=5 path + toAdmin fires.
     auto logon_unserviceable = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "8");
-    auto r = run_sync(s, [&] {
+    auto r = run_sync(s, acceptor, [&] {
         return acceptor.on_inbound_frame(
             std::span<const std::byte>{logon_unserviceable.data(), logon_unserviceable.size()});
     });
@@ -1444,7 +1446,7 @@ TEST(FixtLogonEstablishment, W_StaleSendingTime_Beats1137Gate_Reject52_No1137) {
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
+    ASSERT_TRUE(run_sync(s, acceptor, [&] { return acceptor.open(); }).has_value());
 
     // Build a FIXT Logon with:
     //   - stale 52 (2020-01-01, 4 years before the clock's UTC) → 52 guard fires
@@ -1457,7 +1459,7 @@ TEST(FixtLogonEstablishment, W_StaleSendingTime_Beats1137Gate_Reject52_No1137) {
                               "20200101-00:00:00.000"               // stale 52 (2020 vs clock 2024)
         );
 
-    auto r = run_sync(s, [&] {
+    auto r = run_sync(s, acceptor, [&] {
         return acceptor.on_inbound_frame(
             std::span<const std::byte>{logon_stale52_no_1137.data(), logon_stale52_no_1137.size()});
     });
@@ -1532,7 +1534,7 @@ TEST(FixtLogonEstablishment, W1_042_AcceptorOpenFail_UnserviceableDefault) {
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    auto result = run_sync(s, [&] { return acceptor.open(); });
+    auto result = run_sync(s, acceptor, [&] { return acceptor.open(); });
 
     // Must fail closed with the configuration error — NOT succeed.
     ASSERT_FALSE(result.has_value())
@@ -1566,7 +1568,7 @@ TEST(FixtLogonEstablishment, W2_042_InitiatorOpenFail_UnserviceableDefault) {
     };
     fixpp::session::Session initiator(s.engine, init_cfg, &s.registry);
 
-    auto result = run_sync(s, [&] { return initiator.open(); });
+    auto result = run_sync(s, initiator, [&] { return initiator.open(); });
 
     ASSERT_FALSE(result.has_value())
         << "open() must fail when the registry cannot serve the configured "
@@ -1593,7 +1595,7 @@ TEST(FixtLogonEstablishment, W3_042_Serviceable_BothRolesOpenSucceed) {
     // Acceptor.
     auto acpt_cfg = s.make_acceptor_cfg(application_version::v50sp2);
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
-    auto acpt_result = run_sync(s, [&] { return acceptor.open(); });
+    auto acpt_result = run_sync(s, acceptor, [&] { return acceptor.open(); });
     EXPECT_TRUE(acpt_result.has_value())
         << "open() must succeed when registry serves the configured default (acceptor). "
         << "[W3/FR-003/NG-1]";
@@ -1602,7 +1604,7 @@ TEST(FixtLogonEstablishment, W3_042_Serviceable_BothRolesOpenSucceed) {
     FixtSetup s2{{make_dict(kMinimalFix50sp2Xml)}};
     auto init_cfg = s2.make_initiator_cfg(application_version::v50sp2);
     fixpp::session::Session initiator(s2.engine, init_cfg, &s2.registry);
-    auto init_result = run_sync(s2, [&] { return initiator.open(); });
+    auto init_result = run_sync(s2, initiator, [&] { return initiator.open(); });
     EXPECT_TRUE(init_result.has_value())
         << "open() must succeed when registry serves the configured default (initiator). "
         << "[W3/FR-003/NG-1/FR-008]";
@@ -1629,7 +1631,7 @@ TEST(FixtLogonEstablishment, W4_042_InboundNonDeadness_PeerUnserviceableSurvives
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
     // open() must succeed (serviceable own default).
-    auto open_result = run_sync(s, [&] { return acceptor.open(); });
+    auto open_result = run_sync(s, acceptor, [&] { return acceptor.open(); });
     ASSERT_TRUE(open_result.has_value())
         << "open() must succeed: own default v44 IS in registry {v44, v50sp2}. "
         << "If this fails, the new guard over-rejects — [W4/SC-003/NG-1]";
@@ -1638,7 +1640,7 @@ TEST(FixtLogonEstablishment, W4_042_InboundNonDeadness_PeerUnserviceableSurvives
     // This must trigger the 033 FR-004a runtime Reject(373=5).
     auto logon_v50sp1 = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "8");
 
-    auto inbound_result = run_sync(s, [&] {
+    auto inbound_result = run_sync(s, acceptor, [&] {
         return acceptor.on_inbound_frame(
             std::span<const std::byte>{logon_v50sp1.data(), logon_v50sp1.size()});
     });
@@ -1870,12 +1872,12 @@ struct Acceptor097 {
     ~Acceptor097() = default;
 
     [[nodiscard]] fixpp::core::expected_t<void> open() {
-        return run_sync(s, [&] { return sess->open(); });
+        return run_sync(s, *sess, [&] { return sess->open(); });
     }
     // The outcome is read from state and frames, not from this result: a refused Logon
     // may return either way (the pre-097 W2/W3 cells discard it too).
     void feed(const std::vector<std::byte>& frame) {
-        (void)run_sync(s, [&] {
+        (void)run_sync(s, *sess, [&] {
             return sess->on_inbound_frame(std::span<const std::byte>{frame.data(), frame.size()});
         });
     }
@@ -2028,7 +2030,7 @@ TEST(FixtLogonEstablishment097, W6d_BothRegistry_OneSessionPerPeer_EachNegotiate
 
     std::vector<bool> opened;
     for (auto& p : peers) {
-        auto r = run_sync(s, [&] { return p->sess->open(); });
+        auto r = run_sync(s, *p->sess, [&] { return p->sess->open(); });
         EXPECT_TRUE(r.has_value()) << "open() failed; " << p->observed();
         opened.push_back(r.has_value());
     }
@@ -2038,7 +2040,7 @@ TEST(FixtLogonEstablishment097, W6d_BothRegistry_OneSessionPerPeer_EachNegotiate
         }
         auto& p = *peers[i];
         auto logon = make_fixt_logon_frame("FIXT.1.1", 1, p.comp_id, "ISLD", 30, p.appl_ver_id);
-        (void)run_sync(s, [&] {
+        (void)run_sync(s, *p.sess, [&] {
             return p.sess->on_inbound_frame(std::span<const std::byte>{logon.data(), logon.size()});
         });
     }
@@ -2069,13 +2071,13 @@ TEST(FixtLogonEstablishment097, W6e_Initiator_Ack10_NegotiatedVlatest_NoRegistry
         out.emplace_back(f.begin(), f.end());
     };
     fixpp::session::Session sess(s.engine, cfg, &s.registry);
-    ASSERT_TRUE(run_sync(s, [&] { return sess.open(); }).has_value());
+    ASSERT_TRUE(run_sync(s, sess, [&] { return sess.open(); }).has_value());
     ASSERT_LT(find_msg_type(out, "A"), out.size()) << "the initiator sent no Logon";
     ASSERT_FALSE(s.registry.get(application_version::vlatest).has_value())
         << "precondition: the registry must not serve vlatest";
 
     auto ack = make_fixt_logon_frame("FIXT.1.1", 1, "ISLD", "TW", 30, "10");
-    (void)run_sync(s, [&] {
+    (void)run_sync(s, sess, [&] {
         return sess.on_inbound_frame(std::span<const std::byte>{ack.data(), ack.size()});
     });
     EXPECT_EQ(sess.state(), fsm_state::Active) << "frames: " << describe_frames(out);
@@ -2393,12 +2395,12 @@ TEST(FixtLogonEstablishment097, W8_CounterSeededPositives) {
     };
     fixpp::session::Session sess(s.engine, cfg, &s.registry);
     auto feed = [&](const std::vector<std::byte>& frame) {
-        (void)run_sync(s, [&] {
+        (void)run_sync(s, sess, [&] {
             return sess.on_inbound_frame(std::span<const std::byte>{frame.data(), frame.size()});
         });
     };
 
-    if (!run_sync(s, [&] { return sess.open(); }).has_value()) {
+    if (!run_sync(s, sess, [&] { return sess.open(); }).has_value()) {
         ADD_FAILURE() << "source " << source << ": open() failed";
         return out;
     }
@@ -2438,7 +2440,8 @@ TEST(FixtLogonEstablishment097, W8_CounterSeededPositives) {
     // close(graceful) sends the Logout and then waits for the peer's. The Logout frame is
     // the observation; the pump waits for that frame, not for close() to return.
     auto close_fut =
-        asio::co_spawn(s.ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, s.ioc),
+                       sess.close(fixpp::session::close_mode::graceful), asio::use_future);
     if (!fixpp::test_support::pump_until(s.ioc, has_type("5"), 1s, fixpp::test_support::kPumpSlice,
                                          "W8/initiator-source/close-logout")) {
         ADD_FAILURE() << "source " << source

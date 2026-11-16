@@ -102,6 +102,7 @@
 #include <fixpp/session/security_profile.hpp>
 
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
@@ -266,7 +267,8 @@ TEST(PlaintextAuthzTest, AuthorizeNotCalledOnPlaintext) {
                                  fixpp::session::SecurityProfile::kind::insecure_plain_tcp, authz);
 
     fixpp::session::Session sess{eng, cfg};
-    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                   asio::use_future);
     if (!fixpp::test_support::run_to_exhaustion_or_report(
             ioc, open_fut, "PlaintextAuthzTest::AuthorizeNotCalledOnPlaintext/open_fut")) {
         return;
@@ -281,8 +283,9 @@ TEST(PlaintextAuthzTest, AuthorizeNotCalledOnPlaintext) {
     // Feed a valid Logon — sender=INITIATOR, target=ACCEPTOR.
     auto logon = make_logon_bytes("FIX.4.2", "INITIATOR", "ACCEPTOR");
     {
-        auto feed_fut = asio::co_spawn(
-            ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
+        auto feed_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                       sess.on_inbound_frame(std::span<const std::byte>{logon}),
+                                       asio::use_future);
         ioc.restart();
         // on_inbound_frame + liveness loop (exits immediately for heartbt=0) complete
         if (!fixpp::test_support::run_to_exhaustion_or_report(
@@ -307,7 +310,8 @@ TEST(PlaintextAuthzTest, AuthorizeNotCalledOnPlaintext) {
 
     // Clean up (graceful close; runs Logout grace period of logout_disconnect_timeout_ms=500ms).
     {
-        auto close_fut = asio::co_spawn(ioc, sess.close(), asio::use_future);
+        auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                        sess.close(), asio::use_future);
         ioc.restart();
         if (!fixpp::test_support::run_to_exhaustion_or_report(
                 ioc, close_fut, "PlaintextAuthzTest::AuthorizeNotCalledOnPlaintext/close_fut")) {
@@ -339,7 +343,8 @@ TEST(PlaintextAuthzTest, AuthorizeCalledOnMtlsPositiveControl) {
                                  authz);
 
     fixpp::session::Session sess{eng, cfg};
-    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                   asio::use_future);
     if (!fixpp::test_support::run_to_exhaustion_or_report(
             ioc, open_fut, "PlaintextAuthzTest::AuthorizeCalledOnMtlsPositiveControl/open_fut")) {
         return;
@@ -354,8 +359,9 @@ TEST(PlaintextAuthzTest, AuthorizeCalledOnMtlsPositiveControl) {
     // Feed a valid Logon — triggers the is_mtls path → authorize() called.
     auto logon = make_logon_bytes("FIX.4.2", "INITIATOR", "ACCEPTOR");
     {
-        auto feed_fut = asio::co_spawn(
-            ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
+        auto feed_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                       sess.on_inbound_frame(std::span<const std::byte>{logon}),
+                                       asio::use_future);
         ioc.restart();
         if (!fixpp::test_support::run_to_exhaustion_or_report(
                 ioc, feed_fut,
@@ -372,7 +378,8 @@ TEST(PlaintextAuthzTest, AuthorizeCalledOnMtlsPositiveControl) {
            "This validates that the event-based observable used in Cell 1 is meaningful.";
 
     {
-        auto close_fut = asio::co_spawn(ioc, sess.close(), asio::use_future);
+        auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                        sess.close(), asio::use_future);
         ioc.restart();
         if (!fixpp::test_support::run_to_exhaustion_or_report(
                 ioc, close_fut,
@@ -402,7 +409,8 @@ TEST(PlaintextAuthzTest, LivePeerIdNulloptOnAcceptedHandoff) {
                                  fixpp::session::SecurityProfile::kind::insecure_plain_tcp);
 
     fixpp::session::Session sess{eng, cfg};
-    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                   asio::use_future);
     if (!fixpp::test_support::run_to_exhaustion_or_report(
             ioc, open_fut, "PlaintextAuthzTest::LivePeerIdNulloptOnAcceptedHandoff/open_fut")) {
         return;
@@ -427,7 +435,8 @@ TEST(PlaintextAuthzTest, LivePeerIdNulloptOnAcceptedHandoff) {
            "Mutation: drop the guard → sentinel sticks → has_value()==true → RED.";
 
     {
-        auto close_fut = asio::co_spawn(ioc, sess.close(), asio::use_future);
+        auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                        sess.close(), asio::use_future);
         ioc.restart();
         if (!fixpp::test_support::run_to_exhaustion_or_report(
                 ioc, close_fut,
@@ -454,7 +463,8 @@ TEST(PlaintextAuthzTest, LivePeerIdSetOnTlsPositiveControl) {
         make_acceptor_cfg(ioc.get_executor(), fixpp::session::SecurityProfile::kind::one_way_ca);
 
     fixpp::session::Session sess{eng, cfg};
-    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                   asio::use_future);
     if (!fixpp::test_support::run_to_exhaustion_or_report(
             ioc, open_fut, "PlaintextAuthzTest::LivePeerIdSetOnTlsPositiveControl/open_fut")) {
         return;
@@ -474,7 +484,8 @@ TEST(PlaintextAuthzTest, LivePeerIdSetOnTlsPositiveControl) {
            "in Cell 2a is what suppresses it.";
 
     {
-        auto close_fut = asio::co_spawn(ioc, sess.close(), asio::use_future);
+        auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                        sess.close(), asio::use_future);
         ioc.restart();
         if (!fixpp::test_support::run_to_exhaustion_or_report(
                 ioc, close_fut,
@@ -501,7 +512,8 @@ TEST(PlaintextAuthzTest, CheckCompIdRejectsMismatchOnPlaintext) {
                                  fixpp::session::SecurityProfile::kind::insecure_plain_tcp);
 
     fixpp::session::Session sess{eng, cfg};
-    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                   asio::use_future);
     if (!fixpp::test_support::run_to_exhaustion_or_report(
             ioc, open_fut, "PlaintextAuthzTest::CheckCompIdRejectsMismatchOnPlaintext/open_fut")) {
         return;
@@ -515,8 +527,9 @@ TEST(PlaintextAuthzTest, CheckCompIdRejectsMismatchOnPlaintext) {
     // Feed a Logon with WRONG SenderCompID(49)="WRONG-SENDER" (not "INITIATOR").
     auto bad_logon = make_logon_bytes("FIX.4.2", "WRONG-SENDER", "ACCEPTOR");
     {
-        auto feed_fut = asio::co_spawn(
-            ioc, sess.on_inbound_frame(std::span<const std::byte>{bad_logon}), asio::use_future);
+        auto feed_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                       sess.on_inbound_frame(std::span<const std::byte>{bad_logon}),
+                                       asio::use_future);
         ioc.restart();
         if (!fixpp::test_support::run_to_exhaustion_or_report(
                 ioc, feed_fut,
@@ -534,7 +547,8 @@ TEST(PlaintextAuthzTest, CheckCompIdRejectsMismatchOnPlaintext) {
         << static_cast<int>(sess.state());
     // Session is Disconnected — close() returns session_already_closed (fast path).
     {
-        auto close_fut = asio::co_spawn(ioc, sess.close(), asio::use_future);
+        auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                        sess.close(), asio::use_future);
         ioc.restart();
         if (!fixpp::test_support::run_to_exhaustion_or_report(
                 ioc, close_fut,

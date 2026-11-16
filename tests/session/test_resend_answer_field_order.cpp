@@ -90,6 +90,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::session::test_support::extract_field;
@@ -443,7 +444,8 @@ protected:
     }
 
     void drive_to_active(Session& sess) {
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(
                 ioc, fut, kWindow, "ResendAnswerReplayTest::drive_to_active/open")) {
             fixpp::test_support::cancel_and_drain_or_report(
@@ -455,7 +457,8 @@ protected:
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         auto logon = make_peer_logon_44(1, "TW", "ISLD");
-        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                   sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(
                 ioc, fut2, kWindow, "ResendAnswerReplayTest::drive_to_active/logon")) {
             fixpp::test_support::cancel_and_drain_or_report(
@@ -471,7 +474,8 @@ protected:
 
     // Returns on_inbound_frame's result, for the tests that assert it.
     fixpp::core::expected_t<void> feed_result(Session& sess, const std::vector<std::byte>& frame) {
-        auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                         "ResendAnswerReplayTest::feed/frame")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -492,8 +496,8 @@ protected:
     fixpp::core::expected_t<void> send_payload(Session& sess, std::string_view payload_str,
                                                const char* label) {
         auto payload = to_payload(payload_str);
-        auto fut =
-            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.send(std::span<const std::byte>(payload)), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, label)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, label);
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << label;
@@ -558,7 +562,8 @@ TEST_F(ResendAnswerReplayTest, Replay_NoHeaderTagAfterBody_WithNestedRepeatingGr
     auto payload = to_payload(kPayloadStr);
 
     auto fut_send =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                       sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut_send, kWindow,
                                                     "Replay_NoHeaderTagAfterBody/send")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -647,7 +652,8 @@ TEST_F(ResendAnswerReplayTest, GapFillOnly_IsNotMistakenForTheAppReplay) {
         "54=1\x01";
     auto payload = to_payload(kPayloadStr);
     auto fut_send =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                       sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(
             ioc, fut_send, kWindow, "GapFillOnly_IsNotMistakenForTheAppReplay/send")) {
         fixpp::test_support::cancel_and_drain_or_report(
@@ -704,7 +710,8 @@ TEST_F(ResendAnswerReplayTest, Replay_NoBodyFallback_StillCarries43And122) {
     const char kPayloadStr[] = "35=D\x01";
     auto payload = to_payload(kPayloadStr);
     auto fut_send =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                       sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut_send, kWindow,
                                                     "Replay_NoBodyFallback/send")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Replay_NoBodyFallback/send");

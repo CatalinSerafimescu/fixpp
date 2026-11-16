@@ -81,6 +81,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 // (#303) The teardown guard below deliberately LEAKS the SessionFixtures on the
 // residual path (see `quiesce_or_release_on_exit`). Tell LeakSanitizer, or the
@@ -1303,11 +1304,13 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     quiesce_or_release_on_exit quiesce{.ioc = ioc_owner, .clock = *clock, .fixtures = {&sA, &sB}};
 
     // Open both sessions (initiator path: each emits a Logon immediately).
-    auto fut_open_a = asio::co_spawn(ioc, sA->session->open(), asio::use_future);
+    auto fut_open_a = asio::co_spawn(fixpp::test_support::session_executor_of(*sA->session, ioc),
+                                     sA->session->open(), asio::use_future);
     ASSERT_TRUE(pump_until_ready(ioc, fut_open_a)) << kPumpBudgetMiss << "opening session A";
     ASSERT_TRUE(fut_open_a.get().has_value()) << "Session A failed to open";
 
-    auto fut_open_b = asio::co_spawn(ioc, sB->session->open(), asio::use_future);
+    auto fut_open_b = asio::co_spawn(fixpp::test_support::session_executor_of(*sB->session, ioc),
+                                     sB->session->open(), asio::use_future);
     ASSERT_TRUE(pump_until_ready(ioc, fut_open_b)) << kPumpBudgetMiss << "opening session B";
     ASSERT_TRUE(fut_open_b.get().has_value()) << "Session B failed to open";
 
@@ -1315,7 +1318,7 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     {
         auto& logon_a =
             frames.emplace_back(make_logon_frame("FIX.4.2", 1, "TARGET_A", "SENDER_A", 1));
-        auto fut_a = asio::co_spawn(ioc,
+        auto fut_a = asio::co_spawn(fixpp::test_support::session_executor_of(*sA->session, ioc),
                                     sA->session->on_inbound_frame(
                                         std::span<const std::byte>{logon_a.data(), logon_a.size()}),
                                     asio::use_future);
@@ -1326,7 +1329,7 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     {
         auto& logon_b =
             frames.emplace_back(make_logon_frame("FIX.4.2", 1, "TARGET_B", "SENDER_B", 1));
-        auto fut_b = asio::co_spawn(ioc,
+        auto fut_b = asio::co_spawn(fixpp::test_support::session_executor_of(*sB->session, ioc),
                                     sB->session->on_inbound_frame(
                                         std::span<const std::byte>{logon_b.data(), logon_b.size()}),
                                     asio::use_future);
@@ -1383,7 +1386,7 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
             frames.emplace_back(make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A",
                                                latest_a, fix_sending_time(clock->now())));
         auto fut_a = asio::co_spawn(
-            ioc,
+            fixpp::test_support::session_executor_of(*sA->session, ioc),
             sA->session->on_inbound_frame(std::span<const std::byte>{hb_a.data(), hb_a.size()}),
             asio::use_future);
         ASSERT_TRUE(pump_until_ready(ioc, fut_a))
@@ -1395,7 +1398,7 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
             frames.emplace_back(make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B",
                                                latest_b, fix_sending_time(clock->now())));
         auto fut_b = asio::co_spawn(
-            ioc,
+            fixpp::test_support::session_executor_of(*sB->session, ioc),
             sB->session->on_inbound_frame(std::span<const std::byte>{hb_b.data(), hb_b.size()}),
             asio::use_future);
         ASSERT_TRUE(pump_until_ready(ioc, fut_b))
@@ -1405,13 +1408,15 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 
     // Close both sessions before analysis.
     {
-        auto fut_a = asio::co_spawn(ioc, sA->session->close(fixpp::session::close_mode::terminal),
+        auto fut_a = asio::co_spawn(fixpp::test_support::session_executor_of(*sA->session, ioc),
+                                    sA->session->close(fixpp::session::close_mode::terminal),
                                     asio::use_future);
         ASSERT_TRUE(pump_until_ready(ioc, fut_a)) << kPumpBudgetMiss << "closing session A";
         (void)fut_a.get();
     }
     {
-        auto fut_b = asio::co_spawn(ioc, sB->session->close(fixpp::session::close_mode::terminal),
+        auto fut_b = asio::co_spawn(fixpp::test_support::session_executor_of(*sB->session, ioc),
+                                    sB->session->close(fixpp::session::close_mode::terminal),
                                     asio::use_future);
         ASSERT_TRUE(pump_until_ready(ioc, fut_b)) << kPumpBudgetMiss << "closing session B";
         (void)fut_b.get();
@@ -2005,14 +2010,16 @@ TEST(CrossSessionTeardown, ResidualPathReleasesTheFixtures) {
 
             // Real outstanding work: open the session (so its liveness loop is live
             // and re-arms), then spawn an inbound frame that is never pumped.
-            auto fut_open = asio::co_spawn(ioc, sA->session->open(), asio::use_future);
+            auto fut_open =
+                asio::co_spawn(fixpp::test_support::session_executor_of(*sA->session, ioc),
+                               sA->session->open(), asio::use_future);
             ASSERT_TRUE(pump_until_ready(ioc, fut_open))
                 << kPumpBudgetMiss << "opening the witness session";
             ASSERT_TRUE(fut_open.get().has_value());
 
             auto& logon =
                 frames.emplace_back(make_logon_frame("FIX.4.2", 1, "TARGET_A", "SENDER_A", 1));
-            auto fut = asio::co_spawn(ioc,
+            auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*sA->session, ioc),
                                       sA->session->on_inbound_frame(
                                           std::span<const std::byte>{logon.data(), logon.size()}),
                                       asio::use_future);
@@ -2192,7 +2199,9 @@ TEST(CrossSessionTeardown, OuterCatchSwallowsAThrowingAddFailure) {
                 std::make_unique<SessionFixture>(ioc.get_executor(), clock, "SENDER_B", "TARGET_B");
             sB->destructions = &destructions_b;
 
-            auto fut_open = asio::co_spawn(ioc, sA->session->open(), asio::use_future);
+            auto fut_open =
+                asio::co_spawn(fixpp::test_support::session_executor_of(*sA->session, ioc),
+                               sA->session->open(), asio::use_future);
             ASSERT_TRUE(pump_until_ready(ioc, fut_open))
                 << kPumpBudgetMiss << "opening the witness session";
             ASSERT_TRUE(fut_open.get().has_value());
@@ -2207,7 +2216,7 @@ TEST(CrossSessionTeardown, OuterCatchSwallowsAThrowingAddFailure) {
 
             auto& logon =
                 frames.emplace_back(make_logon_frame("FIX.4.2", 1, "TARGET_A", "SENDER_A", 1));
-            auto fut = asio::co_spawn(ioc,
+            auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*sA->session, ioc),
                                       sA->session->on_inbound_frame(
                                           std::span<const std::byte>{logon.data(), logon.size()}),
                                       asio::use_future);

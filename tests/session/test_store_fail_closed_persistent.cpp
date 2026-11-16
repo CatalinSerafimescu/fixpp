@@ -54,6 +54,7 @@
 #include "support/extract_tag.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
@@ -232,23 +233,26 @@ TEST_F(StoreFailClosedPersistentTest,
     auto sess = std::make_unique<Session>(engine_, cfg);
 
     // open() emits the initiator Logon (seq=1) and transitions to LogonSent.
-    auto open_r = asio::co_spawn(sx_, sess->open(), asio::use_future).get();
+    auto open_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_), sess->open(),
+                                 asio::use_future)
+                      .get();
     ASSERT_TRUE(open_r.has_value()) << "open() must succeed";
     ASSERT_EQ(sess->state(), fsm_state::LogonSent);
 
     // Feed the peer's Logon-ack (seq=1) — reaches Active.
     auto peer_logon = make_logon("FIX.4.2", 1, "ACCEPTR", "INITR");
-    auto logon_r =
-        asio::co_spawn(sx_, sess->on_inbound_frame(std::span<const std::byte>(peer_logon)),
-                       asio::use_future)
-            .get();
+    auto logon_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                                  sess->on_inbound_frame(std::span<const std::byte>(peer_logon)),
+                                  asio::use_future)
+                       .get();
     ASSERT_TRUE(logon_r.has_value()) << "peer Logon-ack must be accepted";
     ASSERT_EQ(sess->state(), fsm_state::Active);
 
     // Step 1: send one baseline app message (seq k-1) — retained normally.
     auto payload_pre = make_app_payload("ORD-PRE");
     auto pre_r =
-        asio::co_spawn(sx_, sess->send(std::span<const std::byte>(payload_pre)), asio::use_future)
+        asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                       sess->send(std::span<const std::byte>(payload_pre)), asio::use_future)
             .get();
     ASSERT_TRUE(pre_r.has_value()) << "the baseline (pre-failure) send must succeed";
 
@@ -259,9 +263,9 @@ TEST_F(StoreFailClosedPersistentTest,
     // forced to fail once.
     fixpp::session::arm_force_store_pwrite_fail_once();
     auto payload_k = make_app_payload("ORD-K");
-    auto k_r =
-        asio::co_spawn(sx_, sess->send(std::span<const std::byte>(payload_k)), asio::use_future)
-            .get();
+    auto k_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                              sess->send(std::span<const std::byte>(payload_k)), asio::use_future)
+                   .get();
 
     // Step 0 (V5 — RED-for-the-right-reason): the seam must have actually
     // fired for message k, otherwise everything below proves nothing
@@ -283,7 +287,8 @@ TEST_F(StoreFailClosedPersistentTest,
     // removes, so it cannot co-exist GREEN with the post-conditions below.)
     auto payload_after = make_app_payload("ORD-AFTER");
     auto after_r =
-        asio::co_spawn(sx_, sess->send(std::span<const std::byte>(payload_after)), asio::use_future)
+        asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                       sess->send(std::span<const std::byte>(payload_after)), asio::use_future)
             .get();
     EXPECT_FALSE(after_r.has_value())
         << "after a fail-closed retain failure the session is Disconnected; a further "
@@ -308,7 +313,8 @@ TEST_F(StoreFailClosedPersistentTest,
 
     // Release the FileStore's advisory lock before "restarting".
     auto close_r =
-        asio::co_spawn(sx_, sess->close(fixpp::session::close_mode::terminal), asio::use_future)
+        asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                       sess->close(fixpp::session::close_mode::terminal), asio::use_future)
             .get();
     ASSERT_TRUE(close_r.has_value()) << "close() must succeed to release the advisory lock "
                                         "before the simulated restart";
@@ -323,7 +329,9 @@ TEST_F(StoreFailClosedPersistentTest,
         wire2.emplace_back(f.begin(), f.end());
     };
     Session sess2(engine_, cfg2);
-    auto open2_r = asio::co_spawn(sx_, sess2.open(), asio::use_future).get();
+    auto open2_r = asio::co_spawn(fixpp::test_support::session_executor_of(sess2, sx_),
+                                  sess2.open(), asio::use_future)
+                       .get();
     ASSERT_TRUE(open2_r.has_value())
         << "restart open() must succeed; error="
         << (open2_r.has_value() ? 0 : static_cast<int>(open2_r.error()));
@@ -344,7 +352,8 @@ TEST_F(StoreFailClosedPersistentTest,
                               << " (the failed store never advanced it); got " << restart_seq;
 
     // Teardown; call alone (not its result) drains the detached liveness loop.
-    (void)asio::co_spawn(sx_, sess2.close(fixpp::session::close_mode::terminal), asio::use_future)
+    (void)asio::co_spawn(fixpp::test_support::session_executor_of(sess2, sx_),
+                         sess2.close(fixpp::session::close_mode::terminal), asio::use_future)
         .get();
 }
 

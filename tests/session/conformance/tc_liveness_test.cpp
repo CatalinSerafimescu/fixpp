@@ -63,6 +63,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/transport_double.hpp"
 
 using namespace std::chrono_literals;
@@ -188,7 +189,8 @@ protected:
 
     // Drive session to Active state (open + peer Logon-ack).
     void drive_to_active(Session& sess, TransportDouble& td) {
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
                                                             "TC004Liveness::drive_to_active/open");
@@ -203,7 +205,8 @@ protected:
         auto logon = make_raw_frame("FIX.4.2", "A", 1, "TW", "ISLD",
                                     "98=0\001"
                                     "108=30\001");
-        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                   sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
             fixpp::test_support::cancel_and_drain_or_report(
                 ioc, *clock, "TC004Liveness::drive_to_active/logon-ack");
@@ -239,7 +242,8 @@ protected:
     // was reproduced. Same shape, same cause and same fix as
     // `tc_logout_test.cpp`'s `GracefulLogoutTimeout/phase1` (#337).
     void do_close(Session& sess, const SessionConfig& cfg) {
-        auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+        auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                        sess.close(close_mode::graceful), asio::use_future);
 
         if (!fixpp::test_support::pump_until(
                 ioc, [&sess] { return sess.state() == fsm_state::LogoutSent; },
@@ -297,7 +301,8 @@ TEST_F(TC004Liveness, Fix42_4b_ReceivedTestRequest) {
 
     // Oracle step: send inbound TestRequest(35=1, 34=2, 112=HELLO).
     auto tr_frame = make_raw_frame("FIX.4.2", "1", 2, "TW", "ISLD", "112=HELLO\x01");
-    auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(tr_frame), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.on_inbound_frame(tr_frame), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
             ioc, *clock, "Fix42_4b_ReceivedTestRequest/test-request");
@@ -352,7 +357,8 @@ TEST_F(TC004Liveness, Fix42_4b_ReceivedTestRequest_EchoIsExact) {
 
     // Send TestRequest with a non-trivial TestReqID.
     auto tr_frame = make_raw_frame("FIX.4.2", "1", 2, "TW", "ISLD", "112=LIVENESS_PROBE_42\x01");
-    auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(tr_frame), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.on_inbound_frame(tr_frame), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
             ioc, *clock, "Fix42_4b_ReceivedTestRequest_EchoIsExact/test-request");

@@ -72,6 +72,7 @@
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/seqnum_manager_test_access.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 #include "support/transport_double.hpp"
 
@@ -570,7 +571,8 @@ protected:
     // nullopt means the pump budget was missed — the coroutine is still
     // suspended and the caller must not continue as though open() ran.
     std::optional<fixpp::core::expected_t<void>> open_session(Session& sess) {
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!pump_until_ready(ioc, fut)) {
             return std::nullopt;
         }
@@ -587,7 +589,8 @@ protected:
         Session& sess, std::span<const std::byte> frame) {
         inbound_frames.emplace_back(frame.begin(), frame.end());
         std::span<const std::byte> stable(inbound_frames.back());
-        return asio::co_spawn(ioc, sess.on_inbound_frame(stable), asio::use_future);
+        return asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.on_inbound_frame(stable), asio::use_future);
     }
 
     // Feed an inbound frame and wait for the FSM dispatch. `frame` is copied
@@ -731,7 +734,8 @@ TEST_F(LogoutExchangeTest, GracefulBothDirections) {
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Trigger graceful close in background.
-    auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                    sess.close(close_mode::graceful), asio::use_future);
 
     // Run briefly — should emit Logout and move to LogoutSent.
     ioc.run_for(100ms);
@@ -779,7 +783,8 @@ TEST_F(LogoutExchangeTest, NeverConfirmedForceDisconnect) {
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Trigger graceful close.
-    auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                    sess.close(close_mode::graceful), asio::use_future);
 
     // #289 STAGING BARRIER: phase 1 must be PARKED on its mock-clock sleep before the
     // advance below, or that advance lands on a timer that is not yet armed and is
@@ -838,7 +843,8 @@ TEST_F(LogoutExchangeTest, ConfigurableTimeoutHonored) {
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Trigger graceful close.
-    auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                    sess.close(close_mode::graceful), asio::use_future);
 
     // #289 STAGING BARRIER, REPLACING a post-hoc assertion rather than adding to one.
     // The `EXPECT_EQ(state, LogoutSent)` that used to follow a blind `run_for(100ms)`
@@ -970,7 +976,8 @@ TEST_F(LogoutExchangeTest, LogoutSentInboundLogoutDisconnects) {
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Initiate graceful close → LogoutSent.
-    auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                    sess.close(close_mode::graceful), asio::use_future);
     ioc.run_for(100ms);
     ioc.restart();
 
@@ -1065,7 +1072,8 @@ TEST_F(LogoutExchangeTest, DisconnectedInboundLogoutIgnored) {
     ASSERT_TRUE(drive_to_active_initiator(sess));
 
     // Force disconnect via terminal close.
-    auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::terminal), asio::use_future);
+    auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                    sess.close(close_mode::terminal), asio::use_future);
     ASSERT_TRUE(pump_until_ready(ioc, close_fut))
         << kPumpBudgetMiss << "DisconnectedInboundLogoutIgnored: terminal close()";
     (void)close_fut.get();
@@ -1096,7 +1104,8 @@ TEST_F(LogoutExchangeTest, InitiateLogoutFromActive) {
     ASSERT_TRUE(drive_to_active_initiator(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
-    auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                    sess.close(close_mode::graceful), asio::use_future);
 
     // #289 STAGING BARRIER: phase 1 must be PARKED on its mock-clock sleep before the
     // advance below, or that advance lands on a timer that is not yet armed and is
@@ -1262,7 +1271,8 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
 
         {
             const auto before = read_offload_counts();
-            auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+            auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                      sess.open(), asio::use_future);
             ASSERT_TRUE(pump_until_ready(ioc, fut, kSiteOpen))
                 << describe_pump_miss(kSiteOpen, kWhatOpen, before, file_pool,
                                       kPoolProbeBudget);
@@ -1272,7 +1282,8 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
 
         {
             const auto before = read_offload_counts();
-            auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
+            auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                      sess.on_inbound_frame(logon_ack), asio::use_future);
             // The per-site clause is a STATEMENT of what did not finish, and
             // nothing more. It has been walked back twice for saying more than
             // that -- first "the probe below is what tells the candidate causes
@@ -1297,7 +1308,8 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         // The A1 flush hook fires on close(graceful): flush_for_session_close() is
         // co_awaited and must complete before close() returns. [C5b / spec.md SC-007b]
         auto close_fut =
-            asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
+            asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                           sess.close(fixpp::session::close_mode::graceful), asio::use_future);
 
         // close(graceful) first offloads its flush_for_session_close() fdatasync (and
         // the Logout-frame store) to the real file_pool, resuming back on ioc, and
@@ -1509,7 +1521,8 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ForcedSpuriousHit_Report
         } release_guard;
 
         const auto before = read_offload_counts();
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
 
         // The pin below needs open() to have REACHED the blocked offload before
         // the snapshot is taken. A fixed-length pump only assumed that, and a

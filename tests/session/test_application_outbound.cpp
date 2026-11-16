@@ -52,6 +52,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -225,7 +226,8 @@ struct OutboundFixture {
     // Open session, feed peer Logon, advance to Active.
     // Acceptor role: session waits for peer Logon (peer = "TW" → us = "ISLD").
     void open_to_active(Session& sess) {
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
                                                             "OutboundFixture::open_to_active/open");
@@ -237,7 +239,8 @@ struct OutboundFixture {
 
         // Acceptor receives Logon from TW (sender=TW, target=ISLD).
         auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD");
-        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                   sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
             fixpp::test_support::cancel_and_drain_or_report(
                 ioc, *clock, "OutboundFixture::open_to_active/logon");
@@ -274,8 +277,8 @@ TEST(ApplicationOutbound, SendCrossesWireAfterToApp) {
     // NOTE: Engine::send is tested in Test7 via a standalone session.
     // This test verifies the underlying Session::send path includes toApp.
     auto payload = make_app_payload();
-    auto fut =
-        asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "SendCrossesWireAfterToApp/send");
@@ -311,8 +314,8 @@ TEST(ApplicationOutbound, ToAppVetoBlocksTransmit) {
     const std::size_t frames_before = f.captured_frames.size();
 
     auto payload = make_app_payload();
-    auto fut =
-        asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "ToAppVetoBlocksTransmit/send");
@@ -353,8 +356,8 @@ TEST(ApplicationOutbound, ToAppOtherErrorAbortsWithThatError) {
     const std::size_t frames_before = f.captured_frames.size();
 
     auto payload = make_app_payload();
-    auto fut =
-        asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "ToAppOtherErrorAbortsWithThatError/send");
@@ -425,7 +428,8 @@ TEST(ApplicationOutbound, SendOnNotEstablishedReturnsStateError) {
     Session sess(f.engine_cfg, cfg);
 
     // Open but do NOT feed peer Logon → stays in NotConnected/LogonSent.
-    auto fut_open = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
+    auto fut_open = asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                                   sess.open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut_open, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
             f.ioc, *f.clock, "SendOnNotEstablishedReturnsStateError/open");
@@ -439,8 +443,8 @@ TEST(ApplicationOutbound, SendOnNotEstablishedReturnsStateError) {
     ASSERT_NE(sess.state(), fixpp::session::fsm_state::Active);
 
     auto payload = make_app_payload();
-    auto fut =
-        asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
             f.ioc, *f.clock, "SendOnNotEstablishedReturnsStateError/send");
@@ -641,8 +645,8 @@ TEST(ApplicationOutbound, ReentrantSendFromCallbackDoesNotDeadlock) {
 
     // Send a payload — toApp fires, which enqueues the posted work item.
     auto payload = make_app_payload();
-    auto fut =
-        asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
             f.ioc, *f.clock, "ReentrantSendFromCallbackDoesNotDeadlock/send");

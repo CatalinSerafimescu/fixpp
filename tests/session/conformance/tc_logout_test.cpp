@@ -55,6 +55,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/store_double.hpp"
 #include "support/transport_double.hpp"
 
@@ -224,7 +225,8 @@ struct SessionFixture {
     // Open session and drive to Active (initiator path: LogonSent → Active).
     void open_and_drive_to_active(fixpp::session::Session& sess,
                                   std::string_view begin_string = "FIX.4.2") {
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
             fixpp::test_support::cancel_and_drain_or_report(
                 ioc, *clock, "SessionFixture::open_and_drive_to_active/open");
@@ -235,7 +237,8 @@ struct SessionFixture {
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         auto logon = make_logon_frame(begin_string, 1, "TW", "ISLD", 30);
-        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                   sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
             fixpp::test_support::cancel_and_drain_or_report(
                 ioc, *clock, "SessionFixture::open_and_drive_to_active/logon-ack");
@@ -248,7 +251,8 @@ struct SessionFixture {
     }
 
     void feed(fixpp::session::Session& sess, std::span<const std::byte> frame) {
-        auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "SessionFixture::feed");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "SessionFixture::feed";
@@ -352,7 +356,8 @@ TEST(TC009Logout, GracefulLogoutTimeout) {
 
     // Server initiates Logout (close graceful).
     auto close_fut =
-        asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                       sess.close(fixpp::session::close_mode::graceful), asio::use_future);
 
     // Phase 1 must reach LogoutSent BEFORE the `advance()` below, and a fixed
     // window cannot promise that. The dependency is not merely "the assertions
@@ -418,7 +423,8 @@ TEST(TC009Logout, GracefulLogoutBothDirections) {
     f.open_and_drive_to_active(sess, "FIX.4.2");
 
     auto close_fut =
-        asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                       sess.close(fixpp::session::close_mode::graceful), asio::use_future);
 
     // Same arming dependency as GracefulLogoutTimeout above, minus the clock
     // advance: the assertions below read the phase-1 emission, so wait for

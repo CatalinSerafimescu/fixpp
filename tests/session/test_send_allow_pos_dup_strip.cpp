@@ -57,6 +57,7 @@
 #include "support/minimal_security_profile.hpp"
 #include "support/possdup_test_support.hpp"  // extract_field
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
@@ -228,7 +229,8 @@ protected:
 
     // Open acceptor session + feed Logon(seq=1, TW→ISLD) → Active.
     void drive_to_active(Session& sess) {
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(
                 ioc, fut, kWindow, "AllowPosDupStripTest::drive_to_active/open")) {
             fixpp::test_support::cancel_and_drain_or_report(
@@ -240,7 +242,8 @@ protected:
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         auto logon = make_peer_logon_44(1, "TW", "ISLD");
-        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                   sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(
                 ioc, fut2, kWindow, "AllowPosDupStripTest::drive_to_active/logon")) {
             fixpp::test_support::cancel_and_drain_or_report(
@@ -256,7 +259,8 @@ protected:
 
     // Feed inbound frame; ignore the result (used for ResendRequest drive).
     void feed(Session& sess, const std::vector<std::byte>& frame) {
-        auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                         "AllowPosDupStripTest::feed/frame")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -334,8 +338,8 @@ TEST_F(AllowPosDupStripTest, W1_StripDefault_43And122AbsentInOutbound) {
         "55=AAPL\x01";
     auto payload = to_payload(kPayloadStr);
 
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, "W1_StripDefault/send")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "W1_StripDefault/send");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W1_StripDefault/send";
@@ -377,8 +381,8 @@ TEST_F(AllowPosDupStripTest, W2_Retain_43And122PresentInOutbound) {
         "55=AAPL\x01";
     auto payload = to_payload(kPayloadStr);
 
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, "W2_Retain/send")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "W2_Retain/send");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W2_Retain/send";
@@ -426,8 +430,8 @@ TEST_F(AllowPosDupStripTest, W3_EmbeddedText43_HostileWitness_ValueIntactBoundar
         "54=1\x01";
     auto payload = to_payload(kPayloadStr);
 
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                     "W3_EmbeddedText43_HostileWitness/send")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -489,8 +493,8 @@ TEST_F(AllowPosDupStripTest, W4_SohBoundary_DefaultStrip_BothRemoved) {
         "54=1\x01";
     auto payload = to_payload(kPayloadStr);
 
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                     "W4_SohBoundary_DefaultStrip/send")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -526,8 +530,8 @@ TEST_F(AllowPosDupStripTest, W4_SohBoundary_Retain_BothPresent) {
         "54=1\x01";
     auto payload = to_payload(kPayloadStr);
 
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                     "W4_SohBoundary_Retain/send")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "W4_SohBoundary_Retain/send");
@@ -572,8 +576,8 @@ TEST_F(AllowPosDupStripTest, W5_NoOp_WhenAbsent_ByteIdenticalOutput) {
         drive_to_active(sess);
 
         auto payload = to_payload(kPayloadStr);
-        auto fut =
-            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.send(std::span<const std::byte>(payload)), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                         "W5_NoOp_WhenAbsent/send-default")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -598,8 +602,8 @@ TEST_F(AllowPosDupStripTest, W5_NoOp_WhenAbsent_ByteIdenticalOutput) {
         drive_to_active(sess);
 
         auto payload = to_payload(kPayloadStr);
-        auto fut =
-            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.send(std::span<const std::byte>(payload)), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                         "W5_NoOp_WhenAbsent/send-retain")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -777,8 +781,8 @@ TEST_P(MalformedField131Test, W6_MalformedField_Returns131_NoSeqnum_NoTransmit_N
         payload[i] = static_cast<std::byte>(tc.payload[i]);
     }
 
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, "W6_MalformedField/send")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "W6_MalformedField/send");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W6_MalformedField/send";
@@ -839,8 +843,8 @@ TEST_F(AllowPosDupStripTest, W6b_OversizedStrippedPayload_ReturnsWireFrameTooLar
     std::vector<std::byte> payload(big.size());
     for (std::size_t i = 0; i < big.size(); ++i) payload[i] = static_cast<std::byte>(big[i]);
 
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                     "W6b_OversizedStrippedPayload/send")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -892,8 +896,8 @@ TEST_F(AllowPosDupStripTest, W7_ResendIndependence_ReplayAlwaysAdds43And122) {
         "54=1\x01";
     auto payload = to_payload(kPayloadStr);
 
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                     "W7_ResendIndependence/send")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "W7_ResendIndependence/send");
@@ -986,8 +990,8 @@ TEST_F(AllowPosDupStripTest, W8_NoHeap_Scaffold_SendSucceeds_NoPmrAllocDuringSen
 
     const std::size_t frames_before = captured_frames.size();
 
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, "W8_NoHeap_Scaffold/send")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "W8_NoHeap_Scaffold/send");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W8_NoHeap_Scaffold/send";
@@ -1035,8 +1039,8 @@ TEST_F(AllowPosDupStripTest, Cell2_RetainCase_ReplayDedups43And122) {
         "54=1\x01";
     auto payload = to_payload(kPayloadStr);
 
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                     "Cell2_RetainCase_ReplayDedups/send")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -1124,8 +1128,8 @@ TEST_F(AllowPosDupStripTest, Cell3_DefaultPath_ReplayByteIdentical) {
         "54=1\x01";
     auto payload = to_payload(kPayloadStr);
 
-    auto fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                     "Cell3_DefaultPath_ReplayByteIdentical/send")) {
         fixpp::test_support::cancel_and_drain_or_report(

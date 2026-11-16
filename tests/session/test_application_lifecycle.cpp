@@ -53,6 +53,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -226,7 +227,8 @@ struct LifecycleFixture {
 
     // Open session to Active state (acceptor path: NotConnected → Active via Logon).
     void open_to_active(Session& sess) {
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 300ms, "open_to_active/open")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "open_to_active/open");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "open_to_active/open";
@@ -236,7 +238,8 @@ struct LifecycleFixture {
 
         // Feed peer Logon to advance to Active.
         auto logon = make_logon_frame();
-        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                   sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 300ms, "open_to_active/logon")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "open_to_active/logon");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "open_to_active/logon";
@@ -247,7 +250,8 @@ struct LifecycleFixture {
     }
 
     void feed(Session& s, const std::vector<std::byte>& frame) {
-        auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc),
+                                  s.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 300ms, "feed/frame")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "feed/frame");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "feed/frame";
@@ -271,7 +275,8 @@ TEST(ApplicationLifecycle, OnCreateFiresOnceBeforeLogon) {
     EXPECT_TRUE(app->lifecycle_calls.empty()) << "no calls before open()";
 
     // open() initializes exec_ — onCreate must fire.
-    auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc), sess.open(),
+                              asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms,
                                                     "OnCreateFiresOnceBeforeLogon/open")) {
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
@@ -350,7 +355,8 @@ TEST(ApplicationLifecycle, OnLogoutFiresOnce_GracefulClose) {
 
     // Start graceful close in the background.
     auto close_fut =
-        asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                       sess.close(fixpp::session::close_mode::graceful), asio::use_future);
     // #289 STAGING BARRIER: wait until Logout is emitted and close() is PARKED on its
     // mock-clock sleep. A fixed `run_for(100ms)` here was a wall-clock hope; if the
     // coroutine has not parked when it expires, the advance below lands on a timer
@@ -401,7 +407,8 @@ TEST(ApplicationLifecycle, OnLogoutFiresOnce_TerminalClose) {
 
     // Terminal close.
     auto close_fut =
-        asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::terminal), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                       sess.close(fixpp::session::close_mode::terminal), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, close_fut, 300ms,
                                                     "OnLogoutFiresOnce_TerminalClose/close")) {
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
@@ -439,7 +446,8 @@ TEST(ApplicationLifecycle, OnLogoutFiresOnce_CallbackThrew) {
     // path re-enters close(terminal) — but the fire-once guard ensures onLogout
     // does NOT fire a second time.
     auto close_fut =
-        asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::terminal), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                       sess.close(fixpp::session::close_mode::terminal), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, close_fut, 300ms,
                                                     "OnLogoutFiresOnce_CallbackThrew/close")) {
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
