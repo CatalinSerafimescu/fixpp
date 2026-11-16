@@ -581,3 +581,4 @@ set_tests_properties(interop_cell_results_schema_check PROPERTIES
 set_property(TEST interop_thorny_recovery_us2_tests APPEND PROPERTY LABELS 103)
 set_property(TEST interop_028_validation_compat_test APPEND PROPERTY LABELS 103)
 set_property(TEST interop_029_restart_resume_test APPEND PROPERTY LABELS 103)
+set_property(TEST interop_parity_us3_tests APPEND PROPERTY LABELS 103)

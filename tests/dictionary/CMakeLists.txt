@@ -645,3 +645,11 @@ else()
   message(STATUS
     "tests/dictionary: fixpp_codegen_generate not available; skipping US2 reify tests")
 endif()
+
+# 103-resend-logon-reset-fidelity (tasks.md T167): label 103 on each entry of this file whose
+# sources a 103 task edits (re-derive: `git diff --name-only origin/main..HEAD -- tests`, mapped
+# through compile_commands.json to targets and `ctest --show-only=json-v1` to entries).
+# APPEND, at the end of the file, so it follows every LABELS setter for these entries.
+set_property(TEST dictionary_overlay_tests APPEND PROPERTY LABELS 103)
+set_property(TEST dictionary_overlay_w2_tests APPEND PROPERTY LABELS 103)
+set_property(TEST dictionary_overlay_w2_empty_tests APPEND PROPERTY LABELS 103)
