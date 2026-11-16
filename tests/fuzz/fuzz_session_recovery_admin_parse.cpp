@@ -91,6 +91,7 @@
 #include "session/logon_msg_type_defaults.hpp"
 #include "session/peek_fixt_route.hpp"
 #include "session/scan_frame_header.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
@@ -425,7 +426,8 @@ void check_peek_against_scan(std::span<const std::byte> buf,
 // `fuzz_admin_parse/open`'s.
 [[nodiscard]] bool feed_fixt(asio::io_context& ioc, fixpp::session::Session& sess,
                              std::span<const std::byte> buf) {
-    auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(buf), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.on_inbound_frame(buf), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "fuzz_admin_parse/fixt")) {
         ++g_fixt_missed;
         return false;
@@ -479,7 +481,8 @@ void run_fixt_arm(std::uint8_t preamble, std::span<const std::byte> payload) {
     fixpp::session::Session sess(engine, cfg, fixture.registry.get());
     fixpp::session::session_test_access::adopt_routes(sess, fixture.routes);
     {
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms,
                                                         "fuzz_admin_parse/fixt_open")) {
             ++g_fixt_missed;
@@ -597,7 +600,8 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
 
     // Open the session.
     {
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "fuzz_admin_parse/open")) {
             // ⚠️ NO `ADD_FAILURE` AND NO `drain_or_report` HERE, DELIBERATELY -- both
             // report through gtest, and in a libFuzzer TU that is a FALSE GREEN.
@@ -684,7 +688,8 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         const std::size_t total = body_end + static_cast<std::size_t>(trailer_len);
 
         auto buf = std::span<const std::byte>(reinterpret_cast<const std::byte*>(full), total);
-        auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(buf), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.on_inbound_frame(buf), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "fuzz_admin_parse/logon")) {
             // Same disposition as the two other sites; the rationale -- including why
             // `abort()` was rejected -- is stated once at `fuzz_admin_parse/open`.
@@ -705,7 +710,8 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     auto feed_span = [&](const std::uint8_t* p, std::size_t len) {
         if (len == 0) return;
         auto buf = std::span<const std::byte>(reinterpret_cast<const std::byte*>(p), len);
-        auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(buf), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.on_inbound_frame(buf), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "fuzz_admin_parse/feed")) {
             // Same disposition as the two sites above; the rationale is stated once
             // at `fuzz_admin_parse/open`. This one is inside a void lambda.
