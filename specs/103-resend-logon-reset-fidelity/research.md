@@ -914,7 +914,7 @@ Each is one compare when nobody waits.
   - **A too-low frame failing CompID or SendingTime:** the earlier guards' endings apply.
   - **A too-low frame with 43=Y:** the PossDup arm ignores it.
   - **A too-low Heartbeat:** after D6 it no longer returns early, so it reaches Arm B like any other frame.
-- **Disclosed, not new:** while the Logout is in its store call the state is still Active, so a live send can land after the Logout. B-537-2 and the SendingTime route have the same window.
+- **While the Logout is in its store call** the state is still Active. A send made then is refused, as during every Logout ending of an established session (FR-021, the Phase 8 addendum; amended at Phase 10, the cell `SendDuringLogout103 …/TooLow`). The earlier "a live send can land after the Logout" no longer holds.
 
 **Sites:** `Session::on_inbound_active_out_of_sequence_`; `Session::inbound_logout_leaf_` (gains the owner test and set, D4.6).
 

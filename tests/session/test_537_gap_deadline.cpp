@@ -3,11 +3,12 @@
 // tests/session/test_537_gap_deadline.cpp
 //
 // fixpp#537, D-537-5 and D-537-9 (.specify/536-537-538-recovery-liveness.md §4.3, §4.6,
-// §4.7 and the #537 table of §5): an unfilled gap has a deadline. When a frame above
-// NextNumIn arrives while a resend is outstanding, and NextNumIn has not advanced for
-// twice HeartBtInt, the session sends a Logout whose Text(58) names the unanswered resend
-// and records Disconnected. The check runs where such a frame leaves the inbound arm
-// without ending the session, and nowhere else: no timer is added.
+// §4.7 and the #537 table of §5): an unfilled gap has a deadline. When a frame that does
+// not advance NextNumIn arrives while a resend is outstanding, and NextNumIn has not
+// advanced for twice HeartBtInt, the session sends a Logout whose Text(58) names the
+// unanswered resend and records Disconnected (103 research D6 widened "above NextNumIn" to
+// every frame that does not advance it). The check runs where such a frame leaves the
+// inbound arm without ending the session, and nowhere else: no timer is added.
 //
 // E is the instant a cell's gap opened. The bound is E + kGapBound unless NextNumIn
 // advanced since.
@@ -136,7 +137,8 @@ template <class Make>
     const auto e = s.mock->steady_now();
     s.pass(kHeartBtInt);
     if (s.count("1", g.mark) != 1U || !s.test_request_pending()) {
-        ADD_FAILURE() << "setup: after one quiet HeartBtInt the session wrote " << s.written(g.mark);
+        ADD_FAILURE() << "setup: after one quiet HeartBtInt the session wrote "
+                      << s.written(g.mark);
         return 0;
     }
     const auto r = s.feed(s.heartbeat(g.n + kGapWidth + 1, s.last_test_req_id()));
@@ -978,7 +980,8 @@ void run_residual_pattern(Member member, std::size_t rejects_each) {
     const auto r = s.feed(member(s, g));
     ASSERT_TRUE(deadline_logout_written(s, mark, r));
     EXPECT_EQ(field(s.of_type("5", mark).front(), 58), deadline_text(g.n));
-    EXPECT_EQ(s.count("3", mark), 0U) << "the frame at the bound drew a Reject: " << s.written(mark);
+    EXPECT_EQ(s.count("3", mark), 0U)
+        << "the frame at the bound drew a Reject: " << s.written(mark);
     EXPECT_EQ(s.count("1", g.mark), 0U)
         << "a TestRequest was written, so the liveness loop could have ended the session: "
         << s.written(g.mark);
@@ -1030,8 +1033,8 @@ TEST(GapDeadlineResidualPattern, AS2_GapFillThatAdvancesAfterTheBound_ProcessedN
     ASSERT_NE(g.n, 0U);
     const auto e = s.mock->steady_now();
     const auto make = [&](std::size_t) { return s.poss_dup_order(1, orig::valid); };
-    ASSERT_TRUE(stream_before_the_bound(
-        s, g, make, [&](std::size_t, std::size_t, std::string const& at) {
+    ASSERT_TRUE(
+        stream_before_the_bound(s, g, make, [&](std::size_t, std::size_t, std::string const& at) {
             ASSERT_EQ(s.next_in(), g.n) << at << " moved NextNumIn";
         }));
 

@@ -4006,8 +4006,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_acceptor_reply_l
 //       session stays Active (no loop for Reject/Logout).
 //
 // Seqnum check (T031/T032/T035):
-//   Too-low  → session_seqnum_too_low (69)              → fatal: Disconnected
-//              Exception: Heartbeat(0) too-low silently ignored per T020-A.
+//   Too-low  → session_seqnum_too_low (69)              → fatal: Disconnected, after
+//              QuickFIX's too-low Logout unless 43=Y (103, research D9; a too-low
+//              Heartbeat included, which supersedes T020-A's silent drop)
 //   Too-high → 013 FR-009: AwaitingResend + ResendRequest(2) via reconnect_fsm_
 //              (slot 70 session_seqnum_gap_unrecoverable deleted per 013 T006a;
 //               state owned by ReconnectFsm per data-model §E-1 / Fix1 T023)
@@ -5250,7 +5251,9 @@ bool Session::inbound_sending_time_ok_(
 // fixpp#537 (`.specify/536-537-538-recovery-liveness.md` §4.3, D-537-5; §4.7): the deadline
 // of an unfilled resend gap. Called where a frame can leave the Active arm without ending
 // the session; the three tests are here and not at the call sites, so that a call site
-// cannot fire on a frame that is not above NextNumIn. Returns nullopt when the deadline
+// cannot fire on a frame that advances NextNumIn. 103 (research D6, fixpp#581) supersedes
+// ruling R-11's "above NextNumIn": the deadline acts on every frame that does not advance
+// NextNumIn. Returns nullopt when the deadline
 // has not expired, and the caller goes on. On expiry it sends a Logout whose Text(58)
 // names the unanswered resend and the expected MsgSeqNum, records Disconnected whether or
 // not that Logout could be built (ruling R-12), and returns the result its caller returns
@@ -5260,9 +5263,12 @@ bool Session::inbound_sending_time_ok_(
 asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::resend_gap_deadline_(
     bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
-    // 1: the frame is above NextNumIn. A MsgSeqNum(34) that does not parse reads as 0.
+    // 1: the frame will not advance NextNumIn. Every call site runs before the frame's
+    // consume, so "advances" is consume_rejected_seqnum_'s rule: at NextNumIn, and not a
+    // Logon or a SequenceReset. A MsgSeqNum(34) that does not parse reads as 0.
     const seqnum_t next_expected = seqnum_mgr_.next_inbound_unsafe();
-    if (parse_seqnum(hdr.msg_seq_num) <= next_expected) {
+    if (parse_seqnum(hdr.msg_seq_num) == next_expected && hdr.msg_type != "A" &&
+        hdr.msg_type != "4") {
         co_return std::nullopt;
     }
     // 2: a resend is outstanding.
@@ -5791,8 +5797,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
         record_state_transition_(fsm_state::Disconnected);
         co_return std::unexpected(chk_error);
     }
-    // fixpp#537 (D-537-5): the gap's deadline, for any frame above NextNumIn that reaches
-    // this function. It does not read chk_error (§4.7), and it runs ahead of the Heartbeat
+    // fixpp#537 (D-537-5): the gap's deadline, for any frame that reaches this function (none
+    // advances NextNumIn; 103 research D6). It does not read chk_error (§4.7), and it runs
+    // ahead of Arm B and of the Heartbeat
     // and PossDup arms, so ahead of the PossDup redelivery's fromApp.
     {
         FIXPP_INBOUND_SPLIT_AWAIT(expired, tic, resend_gap_deadline_(tic, hdr));
@@ -5800,7 +5807,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
             co_return *expired;
         }
     }
-    if (hdr.msg_type == "0") {
+    // 103 (research D6, fixpp#581): only a Heartbeat above NextNumIn, and any out-of-sequence
+    // Heartbeat with the knob off, return here. A Heartbeat below NextNumIn goes on: with 43=Y
+    // the PossDup arm ignores it, without it Arm B sends the too-low Logout.
+    if (hdr.msg_type == "0" && (chk_error == fixpp::core::error::session_seqnum_too_high ||
+                                !cfg_.validate_sequence_numbers)) {
         // fixpp#537 (D-537-6, ruling R-6): while a resend is outstanding, a Heartbeat above
         // NextNumIn answers a pending TestRequest by the in-sequence TestReqID rule. A
         // mismatch has ended the session inside the routine.
@@ -5808,7 +5819,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
             reconnect_fsm_.is_awaiting_resend() && !pending_test_req_id_.empty()) {
             (void)answer_pending_test_request_(hdr.test_req_id);
         }
-        // Any out-of-sequence Heartbeat: no advance, no persist, no fromAdmin, no echo.
+        // No advance, no persist, no fromAdmin, no echo.
         co_return fixpp::core::expected_t<void>{};
     }
     // 103 (research D4.1 route (b); FR-008, FR-009, fixpp#577): a ResendRequest above
@@ -5906,8 +5917,36 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
     if (chk_error == fixpp::core::error::session_seqnum_too_high) {
         co_return fixpp::core::expected_t<void>{};
     }
-    // Arm B: too-low non-Heartbeat without 43=Y — fatal (row 5).
-    // Default-true guard above: byte-identical to pre-feature (INV-2).
+    // Arm B: a frame below NextNumIn without 43=Y ends the session (row 5). 103 (research
+    // D9; FR-018, fixpp#581): with QuickFIX's too-low Logout first, for a too-low refusal
+    // only; any other refusal that reaches here (a drained sequence-number mutex) stays a
+    // silent Disconnected. The text names N, read here before any advance, and M as parsed;
+    // the peer's bytes are not echoed. A Logout that does not fit the leaf's buffer is not
+    // sent, and the session still ends.
+    if (chk_error == fixpp::core::error::session_seqnum_too_low) {
+        // 103 (research D4.6): Arm B claims a pending mark; its own Logout is the one.
+        claim_peer_logout_none_();
+        static constexpr std::string_view kPhrase1 = "MsgSeqNum too low, expecting ";
+        static constexpr std::string_view kPhrase2 = " but received ";
+        std::array<char, 96> text_buf{};
+        static_assert(kPhrase1.size() + kPhrase2.size() +
+                          2 * (std::numeric_limits<seqnum_t>::digits10 + 1) <=
+                      text_buf.size());
+        char* const end = text_buf.data() + text_buf.size();
+        char* out = std::ranges::copy(kPhrase1, text_buf.data()).out;
+        out = std::to_chars(out, end, seqnum_mgr_.next_inbound_unsafe()).ptr;
+        out = std::ranges::copy(kPhrase2, out).out;
+        out = std::to_chars(out, end, parse_seqnum(hdr.msg_seq_num)).ptr;
+        const std::string_view text{text_buf.data(),
+                                    static_cast<std::size_t>(out - text_buf.data())};
+        const auto st52 = effective_clock_
+                              ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                              : SendingTimeStamp{};
+        FIXPP_INBOUND_SPLIT_AWAIT(r, tic, inbound_logout_leaf_(tic, st52.value, text));
+        if (!r) {
+            co_return r;
+        }
+    }
     record_state_transition_(fsm_state::Disconnected);
     co_return fixpp::core::expected_t<void>{};
 }

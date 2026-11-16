@@ -12,7 +12,8 @@
 //   2. ArmA_App_Dropped           — too-low 43=Y app frame, redeliver=false → no fromApp
 //   3. ArmA_App_Redelivered       — too-low 43=Y app frame, redeliver=true → exactly 1 fromApp
 //   4. ArmA_Admin_Idempotent      — replayed possdup admin → no second side-effect
-//   5. ArmB_Regression_Pin        — too-low no-43Y → Disconnected, NO Logout wire frame
+//   5. ArmB_TooLow_LogoutWithText — too-low no-43Y → the too-low Logout, then Disconnected
+//                                   (103, FR-018; it was a pin of no Logout)
 //   6. ArmA_Admin_NoSideEffects   — renamed from ArmA_NoHeap_Witness (gate-b/r1 RC#2):
 //                                   bogus counting_resource assertion removed; real seqnum
 //                                   no-advance assertion retained. Binding no-heap gate is
@@ -167,12 +168,13 @@ TEST_F(PossDupToleranceTest, ArmA_Admin_Idempotent) {
         << "Idempotent replay must emit zero wire frames";
 }
 
-// ── Test 5: Arm B regression pin (INV-2) ──────────────────────────────────────
+// ── Test 5: Arm B, the too-low Logout ──────────────────────────────────────────
 //
-// Too-low frame WITHOUT 43=Y → Disconnected AND assert NO Logout wire frame
-// emitted. This is the byte-identical pre-feature behavior. (C1 row 4; C3; D3; INV-2)
+// Too-low frame WITHOUT 43=Y → one Logout with QuickFIX's too-low text, then
+// Disconnected. 103 (research D9; FR-018, fixpp#581) supersedes INV-2's "no Logout"
+// (C1 row 4; C3; D3).
 
-TEST_F(PossDupToleranceTest, ArmB_Regression_Pin_NoLogout) {
+TEST_F(PossDupToleranceTest, ArmB_TooLow_LogoutWithTextThenDisconnected) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
     drive_to_active(sess);
@@ -187,9 +189,16 @@ TEST_F(PossDupToleranceTest, ArmB_Regression_Pin_NoLogout) {
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
         << "Arm B: too-low non-possdup frame must transition to Disconnected";
 
-    // INV-2: NO Logout wire frame must be emitted.
-    EXPECT_FALSE(any_logout())
-        << "INV-2: Arm B must NOT emit a Logout wire frame (record_state_transition_ only)";
+    // FR-018: one Logout, with the text.
+    std::vector<std::string> logout_texts;
+    for (const auto& f : captured_frames) {
+        if (test_support::extract_field(f, 35) == "5") {
+            const auto text = test_support::extract_field(f, 58);
+            logout_texts.emplace_back(text ? std::string{*text} : std::string{"<no 58>"});
+        }
+    }
+    EXPECT_EQ(logout_texts,
+              (std::vector<std::string>{"MsgSeqNum too low, expecting 2 but received 1"}));
 }
 
 // ── Test 6: Arm A admin-ignore — no side effects (gate-b/r1 RC#2 rename) ────

@@ -954,23 +954,38 @@ TEST_F(FsmMatrixWitness, Active_SeqnumInSeq_AdvancesCounter_StaysActive) {
     EXPECT_EQ(sess.state(), fsm_state::Active);
 }
 
-// S3×E10: seqnum too-low Heartbeat → silently ignored, stay Active.
+// S3×E10: seqnum too-low Heartbeat → the too-low Logout, then Disconnected.
 TEST_F(FsmMatrixWitness, Active_SeqnumTooLow_FatalTransitionsToDisconnected) {
-    // T006a catch-site migration: 013 FR-006 / T020-A — too-low seqnum on
-    // Heartbeat(35=0) is silently ignored in Active (stays Active, no fatal).
-    // This preserves warmup compatibility: a peer may send a final warmup
-    // Heartbeat with an already-consumed seqnum during Active state.
-    // Pre-013 behavior was fatal Logout+Disconnected; 013 changes this.
+    // 103 (research D6 and D9; FR-018, fixpp#581) supersedes 013 T020-A's silent drop of
+    // a too-low Heartbeat: without PossDupFlag(43) it draws QuickFIX's too-low Logout and
+    // the session ends, as the cell's name says.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
+    const auto mark = captured_frames.size();
 
     // seq=1 again → too-low (next-expected-inbound=2 after the Logon was accepted).
-    // With 013, too-low Heartbeat is silently ignored — session stays Active.
     auto hb_low = build_frame("0", 1, kTarget, kSender, kBeginStr);
     (void)feed_sync(sess, hb_low);
 
-    EXPECT_EQ(sess.state(), fsm_state::Active);
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+    std::vector<std::string> logout_texts;
+    for (std::size_t i = mark; i < captured_frames.size(); ++i) {
+        const std::string wire(reinterpret_cast<const char*>(captured_frames[i].data()),
+                               captured_frames[i].size());
+        if (wire.find("\x01"
+                      "35=5\x01") == std::string::npos)
+            continue;
+        const auto at = wire.find(
+            "\x01"
+            "58=");
+        const auto from = at == std::string::npos ? at : at + 4;
+        logout_texts.push_back(at == std::string::npos
+                                   ? std::string{"<no 58>"}
+                                   : wire.substr(from, wire.find('\x01', from) - from));
+    }
+    EXPECT_EQ(logout_texts,
+              (std::vector<std::string>{"MsgSeqNum too low, expecting 2 but received 1"}));
 }
 
 // S3×E11: seqnum too-high → AwaitingResend + ResendRequest emitted, stay Active.

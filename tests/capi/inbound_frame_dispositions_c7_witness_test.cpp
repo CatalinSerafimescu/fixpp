@@ -325,11 +325,57 @@ void row6_cell(std::function<std::string(std::uint32_t)> const& traffic, bool ad
     expect_kept_up(observe(c, peer, row_id));
 }
 
-// Heartbeats below the expected MsgSeqNum (too low, tolerated for a Heartbeat).
-std::string too_low_heartbeat(std::uint32_t /*seq*/) { return heartbeat(1); }
+// Heartbeats below the expected MsgSeqNum carrying PossDupFlag(43)=Y (too low, ignored).
+// Without 43=Y a too-low Heartbeat ends the session (103, FR-018): the cells after this one.
+std::string too_low_heartbeat(std::uint32_t /*seq*/) {
+    std::string const ts = utc_now_sending_time();
+    return frame44(
+        "35=0\x01" +
+        fix_fields(
+            {{34, "1"}, {43, "Y"}, {49, kPeerCompId}, {52, ts}, {56, kEngineCompId}, {122, ts}}));
+}
 
 TEST(CapiC7Witness, Row6_LivenessOnlyTrafficKeepsTheSessionUp) {
     row6_cell(too_low_heartbeat, false, "ROW6");
+}
+
+// 103 (research D6 and D9; FR-018, fixpp#581): a Heartbeat below the expected MsgSeqNum
+// without PossDupFlag(43) is not liveness-only traffic. It draws QuickFIX's too-low Logout,
+// and fixpp_session_is_established turns false.
+void too_low_heartbeat_ends_cell(fixpp_session_role role) {
+    constexpr std::uint32_t kShortHeartBtInt = 1;
+    bool const acceptor = role == FIXPP_ROLE_ACCEPTOR;
+    RawAcceptor peer;
+    CInitiator c{acceptor ? std::uint16_t{0} : peer.port(),
+                 kShortHeartBtInt,
+                 {},
+                 record_receive,
+                 nullptr,
+                 role};
+    ASSERT_TRUE(acceptor ? establish_acceptor(c, peer, kShortHeartBtInt)
+                         : establish(c, peer, kShortHeartBtInt))
+        << "setup";
+    ASSERT_TRUE(peer.write(heartbeat(1))) << "setup: the peer's write";
+    auto const logout =
+        peer.read_until([](std::string const& f) { return RawAcceptor::has_field(f, "35=5"); });
+    ASSERT_TRUE(logout.has_value()) << "the engine wrote no Logout";
+    EXPECT_TRUE(RawAcceptor::has_field(*logout, "58=MsgSeqNum too low, expecting 2 but received 1"))
+        << "the Logout's Text(58): " << *logout;
+    auto const until = std::chrono::steady_clock::now() + kStepBudget;
+    while (c.established() && std::chrono::steady_clock::now() < until) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    }
+    EXPECT_FALSE(c.established()) << "fixpp_session_is_established";
+    peer.disconnect();
+    (void)c.drain_then_close();
+}
+
+TEST(CapiC7Witness, Row6_TooLowHeartbeatWithoutPossDup_EndsTheSessionWithTheTooLowLogout) {
+    too_low_heartbeat_ends_cell(FIXPP_ROLE_INITIATOR);
+}
+
+TEST(CapiC7Witness, Row6_TooLowHeartbeatWithoutPossDup_EndsAnAcceptorWithTheTooLowLogout) {
+    too_low_heartbeat_ends_cell(FIXPP_ROLE_ACCEPTOR);
 }
 
 // Orders below the expected MsgSeqNum carrying PossDupFlag(43)=Y (too low, ignored).

@@ -1724,8 +1724,33 @@ TEST(UnparseableFrameDisposition, Refresh_PossDupRejectBad122_NoTestRequestAtLog
                      "PossDup Reject (122 unparseable)");
 }
 
-TEST(UnparseableFrameDisposition, Refresh_TooLowHeartbeat_NoTestRequestAtLogonInterval) {
-    run_refresh_cell({.frame = make_raw_frame("0", 1), .next_in_after = 2}, "too-low Heartbeat");
+// A too-low Heartbeat without PossDupFlag(43) no longer leaves the session up: 103 (research
+// D6 and D9; FR-018, fixpp#581) sends the too-low Logout and the session ends, so it is not a
+// refresh class. With 43=Y it is ignored and refreshes liveness, the row after this one.
+TEST(UnparseableFrameDisposition, TooLowHeartbeat_TooLowLogoutThenDisconnected) {
+    DispositionFixture fix;
+    auto cfg = fix.make_cfg(false);
+    Session sess{fix.engine, cfg};
+    fix.open_to_active(sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    drain_ready(fix.ioc);
+    fix.feed(sess, make_raw_frame("0", 1));
+    std::vector<std::string> drawn;
+    std::vector<std::string> texts;
+    for (auto const& f : fix.transport.sent_frames()) {
+        drawn.push_back(extract_tag(f, 35));
+        texts.push_back(extract_tag(f, 58));
+    }
+    EXPECT_EQ(drawn, (std::vector<std::string>{"5"})) << "MsgType of each frame drawn";
+    EXPECT_EQ(texts, (std::vector<std::string>{"MsgSeqNum too low, expecting 2 but received 1"}));
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+}
+
+TEST(UnparseableFrameDisposition, Refresh_TooLowPossDupHeartbeat_NoTestRequestAtLogonInterval) {
+    run_refresh_cell({.frame = make_raw_frame("0", 1, kPossDupFields), .next_in_after = 2},
+                     "too-low PossDup Heartbeat");
 }
 
 TEST(UnparseableFrameDisposition, Refresh_TooLowPossDup_NoTestRequestAtLogonInterval) {

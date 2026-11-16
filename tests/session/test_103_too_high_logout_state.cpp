@@ -274,7 +274,8 @@ enum class Emitter : std::uint8_t {
     bound_zero_ack,
     sending_time_fatal,
     arm_d,
-    gap_deadline
+    gap_deadline,
+    arm_b  // a frame below NextNumIn without 43=Y (research D9)
 };
 struct Lo1Case {
     Emitter emitter;
@@ -334,6 +335,9 @@ TEST_P(Lo1, InboundLogoutHeldThenCloseGraceful_ExactlyOneLogout) {
         case Emitter::gap_deadline:
             frame = s.heartbeat(++deadline_seq);
             break;
+        case Emitter::arm_b:
+            frame = s.order(n - 1);
+            break;
     }
     auto feed_fut = s.feed_spawn(frame);
     ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); }))
@@ -374,11 +378,6 @@ TEST_P(TooHighLogoutState103, Lo1Control_CloseGracefulWithNoLogoutInFlight_Sends
     auto close_fut = spawn_close(s, close_mode::graceful);
     ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(close_fut); }, kCloseBudget));
     EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
-}
-
-// LO-1's Arm B emitter: its too-low Logout lands at tasks T147.
-TEST_P(TooHighLogoutState103, Lo1_ArmBEmitter) {
-    GTEST_SKIP() << "Arm B's too-low Logout lands at tasks T147";
 }
 
 // R-588-e (1) (US3 AS7; tasks T081): with the mark set, a too-high ResendRequest starts a
@@ -482,7 +481,8 @@ enum class Lo2Frame : std::uint8_t {
     sending_time_fatal,
     arm_d,
     no_clock,
-    gap_deadline
+    gap_deadline,
+    too_low  // a frame below NextNumIn without 43=Y: Arm B (research D9)
 };
 
 class Lo2 : public ::testing::TestWithParam<std::tuple<session_role, Lo2Frame>> {};
@@ -533,6 +533,9 @@ TEST_P(Lo2, Phase1HeldThenAnInboundEnding_ExactlyOneLogoutPhase1s) {
         case Lo2Frame::gap_deadline:
             frame = s.heartbeat(++deadline_seq);
             break;
+        case Lo2Frame::too_low:
+            frame = s.order(n - 1);
+            break;
     }
     auto feed_fut = s.feed_spawn(frame);
     s.pump_for(std::chrono::milliseconds{20});
@@ -569,6 +572,9 @@ std::string lo2_name(::testing::TestParamInfo<std::tuple<session_role, Lo2Frame>
         case Lo2Frame::gap_deadline:
             e = "GapDeadline";
             break;
+        case Lo2Frame::too_low:
+            e = "TooLowFrame";
+            break;
     }
     return std::string{rg::role_name(std::get<0>(info.param))} + e;
 }
@@ -578,13 +584,8 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Combine(::testing::Values(session_role::initiator, session_role::acceptor),
                        ::testing::Values(Lo2Frame::in_sequence_logout, Lo2Frame::sending_time_fatal,
                                          Lo2Frame::arm_d, Lo2Frame::no_clock,
-                                         Lo2Frame::gap_deadline)),
+                                         Lo2Frame::gap_deadline, Lo2Frame::too_low)),
     lo2_name);
-
-// LO-2's too-low frame (Arm B, tasks T147) is written with its site.
-TEST_P(TooHighLogoutState103, Lo2_TooLowFrame) {
-    GTEST_SKIP() << "Arm B's too-low Logout lands at tasks T147";
-}
 
 // LO-3 (tasks T084; characterisation of L-103-6): close(graceful) while a Logout is in
 // flight whose store outlasts the grace. No second Logout; the force-close at the grace.
@@ -771,6 +772,9 @@ std::string lo1_name(::testing::TestParamInfo<std::tuple<session_role, Lo1Case>>
         case Emitter::gap_deadline:
             e = "GapDeadline";
             break;
+        case Emitter::arm_b:
+            e = "ArmB";
+            break;
     }
     return std::string{rg::role_name(std::get<0>(info.param))} + e +
            (c.with_mark ? "WithMark" : "NoMark");
@@ -778,13 +782,12 @@ std::string lo1_name(::testing::TestParamInfo<std::tuple<session_role, Lo1Case>>
 
 INSTANTIATE_TEST_SUITE_P(
     BothRolesEveryEmitter, Lo1,
-    ::testing::Combine(::testing::Values(session_role::initiator, session_role::acceptor),
-                       ::testing::Values(Lo1Case{Emitter::in_sequence_ack, false},
-                                         Lo1Case{Emitter::in_sequence_ack, true},
-                                         Lo1Case{Emitter::bound_zero_ack, false},
-                                         Lo1Case{Emitter::sending_time_fatal, false},
-                                         Lo1Case{Emitter::sending_time_fatal, true},
-                                         Lo1Case{Emitter::arm_d, false},
-                                         Lo1Case{Emitter::arm_d, true},
-                                         Lo1Case{Emitter::gap_deadline, false})),
+    ::testing::Combine(
+        ::testing::Values(session_role::initiator, session_role::acceptor),
+        ::testing::Values(
+            Lo1Case{Emitter::in_sequence_ack, false}, Lo1Case{Emitter::in_sequence_ack, true},
+            Lo1Case{Emitter::bound_zero_ack, false}, Lo1Case{Emitter::sending_time_fatal, false},
+            Lo1Case{Emitter::sending_time_fatal, true}, Lo1Case{Emitter::arm_d, false},
+            Lo1Case{Emitter::arm_d, true}, Lo1Case{Emitter::gap_deadline, false},
+            Lo1Case{Emitter::arm_b, false}, Lo1Case{Emitter::arm_b, true})),
     lo1_name);

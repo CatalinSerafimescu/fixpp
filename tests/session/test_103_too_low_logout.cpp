@@ -117,9 +117,8 @@ void expect_too_low_logout(rg::Scene const& s, TooLowApp const& app, std::size_t
         EXPECT_EQ(s.log->first_after(log_mark, is_inbound_persist), nullptr)
             << "an inbound number was persisted for the too-low frame";
     }
-    std::vector<std::string> const after(app.events.begin() +
-                                             static_cast<std::ptrdiff_t>(events_before),
-                                         app.events.end());
+    std::vector<std::string> const after(
+        app.events.begin() + static_cast<std::ptrdiff_t>(events_before), app.events.end());
     EXPECT_EQ(after, (std::vector<std::string>{"toAdmin:5", "onLogout"}))
         << "toAdmin once, on the Logout, then onLogout";
     EXPECT_EQ(app.delivered.size(), delivered_before) << "fromApp ran for the too-low frame";
@@ -248,7 +247,7 @@ TEST_P(TooLowLogout103, B4_ToAdminThrowsOnTheLogout_AppCallbackThrewDisconnected
 
 // ── B-5 (T140): CompIDs long enough that the leaf's Logout does not fit ─────────────────
 // An initiator whose TargetCompID is `length` characters, which the peer's frames carry as
-// their SenderCompID(49). The length is measured with the builders over a large buffer:
+// their SenderCompID(49). The length is computed with the builders over a large buffer:
 // the least one at which the too-low Logout no longer fits the leaf's buffer, while the
 // Logon does. The arm one shorter is the near miss: the Logout fits and is written.
 namespace {
@@ -258,8 +257,8 @@ constexpr std::size_t kLeafBuffer = 256;  // inbound_logout_leaf_'s buffer and t
 [[nodiscard]] std::size_t logout_size(std::string const& target, seqnum_t seq,
                                       std::string const& st) {
     std::array<std::byte, 4096> big{};
-    auto const r = fixpp::session::build_logout(big, seq, "ISLD", target, too_low_text(kN, 2),
-                                                "FIX.4.2", st);
+    auto const r =
+        fixpp::session::build_logout(big, seq, "ISLD", target, too_low_text(kN, 2), "FIX.4.2", st);
     return r ? r->size() : 0U;
 }
 [[nodiscard]] std::size_t logon_size(std::string const& target, std::string const& st) {
@@ -433,7 +432,8 @@ TEST_P(TooLowLogoutMark103, B7_MarkPendingTooLowLogoutHeldPastT_ExactlyOneLogout
     s.mock->advance(std::chrono::milliseconds{kT} + 1s);
     s.pump_for(std::chrono::milliseconds{kT} / 8);
     s.log->release_hold();
-    EXPECT_TRUE(s.pump_until([&] { return rg::Scene::ready(fut); }, std::chrono::milliseconds{kT} / 4))
+    EXPECT_TRUE(
+        s.pump_until([&] { return rg::Scene::ready(fut); }, std::chrono::milliseconds{kT} / 4))
         << "the delivery did not complete";
     s.pump_for(std::chrono::milliseconds{kT} / 8);
     auto const logouts = s.of_type("5", mark);

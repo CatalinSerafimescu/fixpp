@@ -505,7 +505,8 @@ TEST(ValidateGateInbound, ConformantMessage_NoReject) {
 // high and draw a ResendRequest(35=2), the stall #423 measured live.
 //
 // ⚠️ The follow-up frame must be at seq=3, not seq=2: once seq=2 is consumed a
-// Heartbeat at seq=2 is too low and silently dropped, which also emits no Reject.
+// Heartbeat at seq=2 is too low and draws the too-low Logout (103, FR-018), which emits no
+// Reject either.
 TEST(ValidateGateInbound, InSequenceReject_ConsumesSeqnum) {
     ValidateGateFixture fix;
     auto cfg = fix.make_cfg_with_validation();
@@ -664,7 +665,8 @@ TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
     auto conformant_frame = make_heartbeat_frame(3);  // seq=3, admin message, no Application needed
     fix.feed(sess, conformant_frame);
 
-    // A too-low seq is dropped without a Reject, so first pin that seq=3 was in sequence.
+    // A frame out of sequence draws no Reject either (one too high a ResendRequest, one too
+    // low the too-low Logout), so first pin that seq=3 was in sequence.
     EXPECT_FALSE(fix.has_msg_type("2")) << "W8b: seq=3 must be in sequence (no ResendRequest)";
 
     EXPECT_FALSE(fix.has_any_reject())
