@@ -21,6 +21,7 @@
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <functional>
 #include <future>
@@ -28,9 +29,11 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <variant>
 #include <vector>
 
 #include "session/test_103_support.hpp"
+#include "support/seqnum_manager_test_access.hpp"
 #include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
@@ -500,6 +503,67 @@ TEST_P(TooHighLogoutState103, BoundLive_TooHighLogoutDuringAGracefulClose_TheBou
         [&] { return rg::Scene::ready(close_fut) && rg::Scene::ready(feed_fut); }, kCloseBudget));
     EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
     EXPECT_EQ(bound_count(s), 0);
+}
+
+// Route (b) at once (research D4.1, D4.5; FR-010): with T = 0, a too-high Logout while a
+// resend is outstanding is acknowledged at once. The acknowledgement cannot take a number here
+// (the next outbound number is at its maximum), so the frame returns that error, no Logout is
+// written, and the acknowledgement's sequence_numbers_reset event is not emitted.
+TEST_P(TooHighLogoutState103, RouteB_AtOnce_AcknowledgementCannotBeNumbered_ReturnsItsError) {
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = 0}};
+    ASSERT_TRUE(s.open_to_active());
+    seqnum_t const n = s.next_in();
+    auto const gap_mark = s.sent.size();
+    (void)s.feed(s.order(n + rg::kGapWidth));
+    ASSERT_EQ(s.count("2", gap_mark), 1U) << "setup: no gap was opened: " << s.written(gap_mark);
+    auto& mgr = session_test_access::seqnum_mgr(*s.session);
+    fixpp::session::seqnum_manager_test_access::set_counters(mgr, mgr.next_inbound_unsafe(),
+                                                             fixpp::session::seqnum_max);
+    auto const resets = [&s] {
+        int k = 0;
+        for (auto const& ev : s.session->recent_events()) {
+            auto const* e = std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev);
+            k += static_cast<int>(e != nullptr && !e->by_peer_request);
+        }
+        return k;
+    };
+    int const resets_before = resets();
+    auto const mark = s.sent.size();
+    auto const res = s.feed(s.logout(n + rg::kGapWidth + 1));
+    ASSERT_FALSE(res.has_value()) << "the frame returned success";
+    EXPECT_EQ(res.error(), fixpp::core::error::store_seqnum_overflow)
+        << static_cast<int>(res.error());
+    EXPECT_EQ(s.count("5", mark), 0U) << s.written(mark);
+    EXPECT_EQ(s.count("2", mark), 0U) << "a second ResendRequest: " << s.written(mark);
+    EXPECT_EQ(resets(), resets_before) << "the failed acknowledgement emitted its reset event";
+    EXPECT_EQ(s.state(), fsm_state::Disconnected);
+}
+
+// The acknowledgement in flight (research D4.6's last row): while the bound acknowledges, its
+// Logout held in its store, an in-sequence frame is drained, as the LogoutSent row drains:
+// it returns at once and NextNumIn does not move.
+TEST_P(TooHighLogoutState103, Acking_InSequenceFrameDrained_NextNumInUnchanged) {
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT, .recording_store = true}};
+    ASSERT_TRUE(active_recorded(s)) << "setup";
+    seqnum_t const n = s.next_in();
+    (void)s.feed(s.logout(n + 3));
+    ASSERT_EQ(phase(s), kPending) << "setup: no pending mark";
+    hold_store_of(s, next_out(s));
+    auto const mark = s.sent.size();
+    // KIND F: the advance reaches the bound; a lost one fails the next ASSERT_TRUE, whose
+    // pump is bounded, with "the acknowledgement's store was not held".
+    s.mock->advance(std::chrono::milliseconds{kT});
+    ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); }))
+        << "setup: the acknowledgement's store was not held";
+    ASSERT_EQ(phase(s), 2) << "setup: the bound did not claim the mark";
+    auto frame_fut = s.feed_spawn(s.heartbeat(n));
+    EXPECT_TRUE(s.pump_until([&] { return rg::Scene::ready(frame_fut); },
+                             std::chrono::milliseconds{kT} / 8))
+        << "the frame was not drained while the bound acknowledges";
+    EXPECT_EQ(s.next_in(), n) << "the frame advanced NextNumIn while the bound acknowledges";
+    s.log->release_hold();
+    EXPECT_TRUE(s.pump_until([&] { return bound_count(s) == 0; }, kAfterReleaseBudget));
+    EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
 }
 
 INSTANTIATE_TEST_SUITE_P(BothRoles, TooHighLogoutState103,

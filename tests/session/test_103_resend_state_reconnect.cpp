@@ -1034,4 +1034,154 @@ TEST(BoundProtocol103, F2_EdgeWakeLostBeforeTheRace_CloseCompletesCounterZero) {
     end_a_bound_still_running(s, std::chrono::milliseconds{kBoundT}, close_fut);
 }
 
+// The drain's wait for the old connection's detached coroutines (research D1 step 3): the
+// bound is held at its first-run seam, so the drain polls for its join counter. During that
+// poll a close(terminal) runs (G4_5) or the caller's own slot emits (G4_6). Released, the
+// drain returns session_already_closed (G4_5) or dispatch_aborted (G4_6), and no transport is
+// made. The mock clock is not moved, so the bound's T ends no wait.
+void start_drain_behind_a_held_bound(Rig& r, BoundHold& hold) {
+    ASSERT_TRUE(r.open_to_active()) << "setup";
+    fixpp::session::session_test_access::set_peer_logout_bound_hold_first_run(*r.s.session,
+                                                                              hold.fn());
+    seqnum_t const n = r.s.next_in();
+    auto feed_fut = r.s.feed_spawn(r.s.logout(n + 3));
+    ASSERT_TRUE(r.s.pump_until([&] { return hold.entered && rg::Scene::ready(feed_fut); }))
+        << "setup: the bound did not reach its first-run seam";
+}
+
+TEST(Drain103, G4_5_CloseWhileTheDrainWaitsForTheBound_AlreadyClosedNoTransport) {
+    BoundHold hold;
+    Rig r{fixpp::session::reset_seqnum_policy::bilateral_lenient, false, false};
+    BoundHold::release_on_exit const release{hold};
+    ASSERT_NO_FATAL_FAILURE(start_drain_behind_a_held_bound(r, hold));
+    auto rc_fut = r.spawn_reconnect();
+    r.s.pump_for(std::chrono::milliseconds{20});
+    ASSERT_FALSE(rg::Scene::ready(rc_fut)) << "setup: the drain did not wait for the bound";
+    auto close_fut = spawn_terminal_close(r.s);
+    r.s.pump_for(std::chrono::milliseconds{20});
+    hold.released = true;
+    EXPECT_TRUE(r.s.pump_until(
+        [&] { return rg::Scene::ready(rc_fut) && rg::Scene::ready(close_fut); }, kHeldWindow))
+        << "the reconnect or the close did not complete";
+    ASSERT_TRUE(rg::Scene::ready(rc_fut));
+    auto const rc = rc_fut.get();
+    ASSERT_FALSE(rc.has_value()) << "the reconnect succeeded after close()";
+    EXPECT_EQ(rc.error(), fixpp::core::error::session_already_closed)
+        << static_cast<int>(rc.error());
+    EXPECT_EQ(r.factory->make_call_count.load(), 0) << "a transport was made";
+    end_a_bound_still_running(r.s, std::chrono::milliseconds{kLogoutTimeoutMs}, close_fut);
+}
+
+TEST(Drain103, G4_6_CallersCancellationWhileTheDrainWaitsForTheBound_DispatchAborted) {
+    BoundHold hold;
+    Rig r{fixpp::session::reset_seqnum_policy::bilateral_lenient, false, false};
+    BoundHold::release_on_exit const release{hold};
+    ASSERT_NO_FATAL_FAILURE(start_drain_behind_a_held_bound(r, hold));
+    auto const out = std::make_shared<std::optional<fixpp::core::expected_t<void>>>();
+    asio::cancellation_signal sig;
+    auto* session = r.s.session.get();
+    r.reconnect_mark = r.s.sent.size();
+    asio::co_spawn(
+        fixpp::test_support::session_executor_of(*session, r.s.ioc),
+        [session, out]() -> asio::awaitable<void> { *out = co_await session->drive_reconnect(); },
+        asio::bind_cancellation_slot(sig.slot(), asio::detached));
+    r.s.pump_for(std::chrono::milliseconds{20});
+    ASSERT_FALSE(out->has_value()) << "setup: the drain did not wait for the bound";
+    sig.emit(asio::cancellation_type::terminal);
+    EXPECT_TRUE(r.s.pump_until([&] { return out->has_value(); }, kHeldWindow))
+        << "drive_reconnect did not return on the caller's cancellation";
+    hold.released = true;
+    (void)r.s.pump_until([&] {
+        return fixpp::session::session_test_access::peer_logout_bound_count(*r.s.session) == 0;
+    });
+    ASSERT_TRUE(out->has_value());
+    ASSERT_FALSE((*out)->has_value()) << "the reconnect succeeded";
+    EXPECT_EQ((*out)->error(), fixpp::core::error::dispatch_aborted)
+        << static_cast<int>((*out)->error());
+    EXPECT_EQ(r.factory->make_call_count.load(), 0) << "a transport was made";
+    sig.slot().clear();
+}
+
+// A plaintext twin of MockReconnectFactory: its kind() is plaintext, so a session on the
+// insecure_plain_tcp profile opens with it and the reconnect takes the plaintext branch.
+class PlainMockReconnectFactory final : public fixpp::transport::TransportFactory {
+public:
+    std::atomic<int> make_call_count{0};
+    std::function<void(fixpp::transport::test::Script&)> tweak_script;
+
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>> make(
+        asio::any_io_executor exec, fixpp::tls::SslCtxConfig /*ssl_cfg*/,
+        std::pmr::memory_resource* /*mr*/) noexcept override {
+        ++make_call_count;
+        fixpp::transport::test::Script script;
+        if (tweak_script) tweak_script(script);
+        return std::make_unique<fixpp::transport::test::mock_transport>(std::move(exec),
+                                                                        std::move(script));
+    }
+    [[nodiscard]] fixpp::core::expected_t<void> reload_credentials(
+        std::shared_ptr<fixpp::tls::cert_source> /*new_source*/) noexcept override {
+        return {};
+    }
+    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
+        const noexcept override {
+        return nullptr;
+    }
+    [[nodiscard]] fixpp::transport::transport_security_kind kind() const noexcept override {
+        return fixpp::transport::transport_security_kind::plaintext;
+    }
+};
+
+// G6 on the plaintext branch (research D1 step 4; reconnect_fsm.cpp's plaintext fast path):
+// close(terminal) during the held connect; released, the install refuses at the commit point,
+// the new transport is closed, and drive_reconnect returns session_already_closed.
+TEST(Drain103CommitPointPlain, G6_CloseDuringTheConnect_AlreadyClosedTransportClosed) {
+    ConnectHold hold;
+    Rig r{fixpp::session::reset_seqnum_policy::bilateral_lenient, true, false};
+    struct release_on_exit {
+        ConnectHold& h;
+        ~release_on_exit() { h.released = true; }
+    } const release{hold};
+    auto const plain = std::make_shared<PlainMockReconnectFactory>();
+    auto const closed = std::make_shared<std::atomic<bool>>(false);
+    plain->tweak_script = [&hold, closed](fixpp::transport::test::Script& sc) {
+        sc.connect_hold = hold.fn();
+        sc.closed_flag = closed;
+    };
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+    r.s.cfg.security_profile =
+        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::insecure_plain_tcp};
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    r.s.cfg.transport_factory_override = plain;
+    r.s.session = std::make_unique<fixpp::session::Session>(r.s.engine, r.s.cfg);
+    r.app->session = r.s.session.get();
+    ASSERT_TRUE(r.open_to_active()) << "setup";
+    r.too_low_order();
+    ASSERT_EQ(r.s.state(), fsm_state::Disconnected) << "setup";
+    auto rc_fut = r.spawn_reconnect();
+    ASSERT_TRUE(r.s.pump_until([&] { return hold.entered; })) << "setup: the connect was not held";
+    auto close_fut = spawn_terminal_close(r.s);
+    (void)r.s.pump_until([&] { return rg::Scene::ready(close_fut); }, kHeldWindow);
+    hold.released = true;
+    EXPECT_TRUE(r.s.pump_until([&] { return rg::Scene::ready(rc_fut); }))
+        << "drive_reconnect did not return";
+    ASSERT_TRUE(rg::Scene::ready(rc_fut));
+    auto const rc = rc_fut.get();
+    ASSERT_FALSE(rc.has_value()) << "the reconnect succeeded on a closed session";
+    EXPECT_EQ(rc.error(), fixpp::core::error::session_already_closed)
+        << static_cast<int>(rc.error());
+    EXPECT_EQ(plain->make_call_count.load(), 1) << "transports made";
+    EXPECT_TRUE(closed->load()) << "the new transport was not closed";
+    EXPECT_NE(r.s.state(), fsm_state::LogonSent);
+}
+
 }  // namespace

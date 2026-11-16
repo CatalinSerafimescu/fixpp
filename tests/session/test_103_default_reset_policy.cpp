@@ -33,6 +33,7 @@
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <functional>
+#include <future>
 #include <memory>
 #include <optional>
 #include <span>
@@ -277,6 +278,62 @@ TEST(DefaultResetPolicy103, AS3_StrictAcceptor_InSequenceLogonWithout141_LogoutW
 
 TEST(DefaultResetPolicy103, AS3_StrictAcceptor_OutOfSequenceLogonWithout141_LogoutWithText) {
     run_as3(40);
+}
+
+// AS3's error ending (research D2.4; FR-004): the refusal Logout cannot take a number, the
+// store's next outbound number being at its maximum. The arm returns that error, not the
+// mismatch; no Logout is written and the session is Disconnected.
+TEST(DefaultResetPolicy103, AS3_StrictAcceptor_RefusalLogoutCannotBeNumbered_ReturnsItsError) {
+    auto r = rr::make_acceptor_notconnected(
+        std::make_shared<rr::FaultStoreFactory>(37, fixpp::session::seqnum_max),
+        /*refresh_on_logon=*/false, reset_seqnum_policy::bilateral_strict);
+    ASSERT_NE(r.store, nullptr);
+    auto& f = *r.fix;
+    auto const logon = to_acceptor_logon(37, false);
+    auto const res = feed(f, logon);
+    ASSERT_FALSE(res.has_value()) << "the refusal returned success";
+    EXPECT_EQ(res.error(), fixpp::core::error::store_seqnum_overflow)
+        << static_cast<int>(res.error());
+    EXPECT_TRUE(of_type(written(f), "5").empty()) << describe(written(f));
+    EXPECT_EQ(f.session->state(), fsm_state::Disconnected);
+}
+
+// AS3 superseded (research D2.4; D-CAN-5): Engine::stop()'s first step runs on the session's
+// strand while the refusal Logout is in its store call. The arm returns success, as a
+// superseded Logon arm does, not the mismatch.
+TEST(DefaultResetPolicy103, AS3_StrictAcceptor_EngineStopDuringTheRefusalsStore_ReturnsSuccess) {
+    auto const rec =
+        std::make_shared<RecordingStoreFactory>(std::make_shared<rr::FaultStoreFactory>(37, 42));
+    auto const log = rec->log;
+    auto r = rr::make_acceptor_notconnected(rec, /*refresh_on_logon=*/false,
+                                            reset_seqnum_policy::bilateral_strict);
+    ASSERT_NE(r.fix, nullptr);
+    auto& f = *r.fix;
+    log->arm();
+    log->hold_in = [](fixpp::test_support::StoreCall const& c) {
+        return c.op == fixpp::test_support::store_op::store &&
+               c.dir == fixpp::session::direction_t::outbound && c.first == 42U;
+    };
+    auto const logon = to_acceptor_logon(37, false);
+    auto feed_fut = asio::co_spawn(fixpp::test_support::session_executor_of(*f.session, f.ioc),
+                                   f.session->on_inbound_frame(logon), asio::use_future);
+    ASSERT_TRUE(fixpp::test_support::pump_until(f.ioc, [&] { return log->holding(); }))
+        << "setup: the refusal Logout's store was not held";
+    // Engine::stop() calls it on the session's strand.
+    asio::post(f.session->executor().underlying(),
+               [&f] { fixpp::session::session_test_access::note_engine_stop(*f.session); });
+    bool stop_noted = false;
+    asio::post(f.session->executor().underlying(), [&stop_noted] { stop_noted = true; });
+    ASSERT_TRUE(fixpp::test_support::pump_until(f.ioc, [&] { return stop_noted; }))
+        << "setup: the stop's step did not run";
+    ASSERT_TRUE(log->holding()) << "setup: the hold ended before the stop's step";
+    log->release_hold();
+    ASSERT_TRUE(fixpp::test_support::pump_until(f.ioc, [&] {
+        return feed_fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready;
+    })) << "the Logon did not complete";
+    auto const res = feed_fut.get();
+    EXPECT_TRUE(res.has_value()) << "the superseded refusal returned "
+                                 << static_cast<int>(res.error());
 }
 
 // ── AS4: default acceptor, a Logon without 141 ──────────────────────────────────────────────

@@ -1115,6 +1115,42 @@ TEST(ReplayGate588, R588b_SendInItsStoreCall_WrittenBeforeTheAnswerWhichCoversIt
     EXPECT_GE(answer_end(sent), s_num) << "the answer does not cover S:\n" << printable(sent);
 }
 
+// R-588-b's Disconnected arm (research D5′.4): the ResendRequest arrives while a send numbered S
+// is in its store call, so the walk waits for the send's shared hold. close(terminal) records
+// Disconnected before the send returns, and its wake ends the walk there: the walk writes
+// nothing, and it ends before the send's store call is released.
+TEST(ReplayGate588, R588b_WalkWaitingForASend_CloseTerminal_EndsBeforeTheSendNothingAnswered) {
+    HeldWalk w;
+    constexpr seqnum_t s_num = kFirstApp + kStoredFor588;
+    ASSERT_TRUE(w.start(
+        [](StoreCall const& c) {
+            return c.op == store_op::store && c.dir == direction_t::outbound && c.first == s_num;
+        },
+        std::nullopt, /*request=*/false));
+    auto const i = w.spawn_send("LIVE-W");
+    ASSERT_TRUE(w.s.f.run_until([&] { return w.s.f.log->holding(); }))
+        << "setup: the send did not reach its store call";
+    auto const before = w.s.f.sent.size();
+    w.s.request_frame = w.s.f.msg("2", 2,
+                                  "7=1\x01"
+                                  "16=0\x01");
+    w.rr_fut = w.s.f.feed(w.s.request_frame, w.rr_call, w.rr_none);
+    w.pump_for(kHeldWindow);
+    ASSERT_FALSE(DirectAcceptor::ready(w.rr_fut)) << "setup: the walk did not wait for the send";
+    auto close_fut = w.s.f.spawn_close(close_mode::terminal);
+    EXPECT_TRUE(w.s.f.run_until([&] { return DirectAcceptor::ready(w.rr_fut); }, kHeldWindow))
+        << "the walk did not end at the Disconnected wake";
+    EXPECT_TRUE(w.s.f.log->holding()) << "setup: the send's store call was released";
+    std::vector<std::string> const after(w.s.f.sent.begin() + static_cast<std::ptrdiff_t>(before),
+                                         w.s.f.sent.end());
+    for (auto const& f : after) {
+        EXPECT_FALSE(is_answer_frame(f)) << "the walk answered after the wake:\n"
+                                         << printable(w.s.f.sent);
+    }
+    w.release();
+    (void)w.s.f.run_until([&] { return w.send_done(i) && DirectAcceptor::ready(close_fut); });
+}
+
 // 103 tasks T057, R-588-c (FR-014): with a HeartBtInt, the liveness loop's Heartbeat and
 // TestRequest fall due while the answer is held (the clock moves past HeartBtInt, so both
 // the outbound and the inbound side are idle). Neither is written inside the answer; each
