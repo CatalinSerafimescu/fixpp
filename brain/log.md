@@ -6,6 +6,12 @@ status: stable
 
 # Log
 
+- **2026-11-16 — 103-resend-logon-reset-fidelity, `/speckit-verify` (Step 10b): the crossing and the strict
+  refusal's superseded ending.** `components/session.md`'s 103 section gains two decisions made after its
+  last edit: a too-high Logout while the session is itself ending is acknowledged at once, with no bound
+  (FR-021a, `B-103-15`); and a strict refusal superseded by a completed `close()` returns success, by a
+  site-local predicate rather than the shared `logon_arm_superseded_` (`B-103-3`). Each names what was not
+  taken.
 - **2026-11-15 — PR #690 (records pass row 8 + fixpp#652), Gate B close-out: `failure-classes.md` gains two
   forms.** Class 10 gains "a symbol in an installed, non-`detail` header is public C++ API, whatever its contract
   tier or caller count" (F1: a removal filed as "dead internal helper"; B-652-1). Class 1 gains "a round-trip that

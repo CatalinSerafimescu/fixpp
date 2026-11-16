@@ -745,12 +745,25 @@ taken.
   `drive_reconnect` is not bound to `root_cancellation_slot()`, whose single client is the liveness
   loop: the drain's own `root_cancel_.emit(total)` would cancel it.
 - **The default reset policy is lenient; strict resets before every Logon; the strict acceptor
-  refuses with a Logout** (D2, #682). Strict's 141=Y at a stored number above 1 was `L-029-3`.
+  refuses with a Logout** (D2, #682). Strict's 141=Y at a stored number above 1 was `L-029-3`. A
+  refusal that a `close()` or `Engine::stop()` supersedes returns success whatever the close's timing
+  (D-CAN-5, `B-103-3`). The refusal site asks `closing_or_stopped_()` or a state other than
+  `Disconnected`, not `logon_arm_superseded_(Disconnected)`: the helper has just recorded
+  `Disconnected` itself, and a completed close leaves the same FSM, so the shared predicate returned
+  the mismatch after a completed close. Not taken: changing the shared predicate, whose other callers
+  each expect a state other than `Disconnected`.
 - **BeginSeqNo(7) = 0 is answered as 7 = 1, and an absent 7 is Rejected** (D3, #580).
 - **A too-high ResendRequest is answered; a too-high Logout is acknowledged after a bounded
   recovery** (D4, #577). The bound is its own coroutine, woken through a wake like the session's other
   in-session waits; at most one Logout across the competing endings, by one Logout owner
-  (`logout_in_flight_`) that `close(graceful)` and every inbound Logout emitter consult.
+  (`logout_in_flight_`) that `close(graceful)` and every inbound Logout emitter consult. While the
+  session is itself ending (its own Logout in flight, a close begun, or the stop noted), a too-high
+  Logout is acknowledged at once, as the in-sequence one is, with no bound and no ResendRequest
+  (spec FR-021a, `B-103-15`): the bound could not act then, because its claim refuses while the
+  owner is set and its `live` test while the session is closing or stopped. QuickFIX C++, QuickFIX/J
+  and QuickFIX/Go each disconnect at once there, with no ResendRequest. Not taken: leaving the
+  crossing to the bound (close() then waited out its whole grace, and the session drew a
+  ResendRequest during its own Logout ending).
 - **Sends, the liveness frames and the close's Logout wait for a running resend answer** (D5′, #588
   widened by the owner): a shared/exclusive `detail::replay_gate` on the session strand, with no
   atomic and no OS primitive, and a timer made only on a contended wait.
