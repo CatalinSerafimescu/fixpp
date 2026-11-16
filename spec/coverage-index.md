@@ -16,6 +16,7 @@
 | `FIXS` | FIXS RC1 — FIX over TLS (online ed., v1.1 RC1) | fixtrading.org/standards/fixs-online/ |
 | `FIX40`…`FIX50SP2` | FIX application spec per version (classic tag=value) | fixtrading.org/standards/ |
 | `FIX-TC` | FIX Session Layer Test Cases (online ed.) | fixtrading.org/standards/fix-session-testcases-online/ |
+| `FIX44-V2` | FIX 4.4 with Errata 20030618, Volume 2 — FIX Session Protocol (classic; sections by their headings) | fixtrading.org/standards/fix-4-4/ |
 | `FIX-Latest` | FIX Latest (living online standard) | fixtrading.org/standards/fix-latest-online/ |
 | `FIX-Orchestra` | FIX Orchestra machine-readable standard — `fixr:repository` schema (datatypes, codesets, fields, components, groups, messages) | fixtrading.org/standards/fix-orchestra-online/ |
 
@@ -390,6 +391,14 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 Both A-018 and A-024 in the catalogue reference MsgType BN (ExecutionAcknowledgement). A-024 is a duplicate entry from a later pass. A-018 is the canonical row; A-024 is a dropped duplicate. See Gap Summary.
 
 ---
+
+## FIX 4.4 Volume 2 — FIX Session Protocol (FIX44-V2)
+
+Cited points only. A key is `[FIX44-V2 <Section>] <Title>`: the volume's section heading and the entry under it.
+
+| Section | Title | Normative? | Catalogue IDs | Gap note |
+|---|---|---|---|---|
+| Administrative Messages | Logout | Y | S-002 | **103 (FR-021):** "After sending the Logout message, the logout initiator should not send any messages unless requested to do so by the logout acceptor via a ResendRequest" (PDF p.25). Kept by FR-021: a send is refused with `session_invalid_state_for_send` from the moment a Logout emitter takes the Logout owner until `Disconnected` (`B-103-14`). Witnesses: `SendDuringLogout103.*` in ctest `session_103_tests`, `SendDuringLogoutEngine103.*` in ctest `session_103_send_during_logout_engine`, `CallbackSend.LogoutToAdminStartsSend_PeerLogout*` in ctest `session_563_564_callback_send`. |
 
 ## FIX Session Test Cases (FIX-TC)
 

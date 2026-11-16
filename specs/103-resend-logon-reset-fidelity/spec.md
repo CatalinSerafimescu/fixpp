@@ -595,7 +595,8 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   Arm-D Logouts, the too-high Logout's acknowledgement at once or by its bound), so no application frame is numbered
   after the Logout or follows it on the wire. Before this, such a send was admitted and its frame was numbered
   after the Logout, and on a persistent store it was transmitted after it. What this keeps: no application frame
-  follows the session's Logout on that connection, as the FIX 4.4 specification (Volume 2, p.25) asks of the logout
+  follows the session's Logout on that connection, as the FIX 4.4 specification (`[FIX44-V2 Administrative Messages]
+  Logout`, PDF p.25) asks of the logout
   initiator ("After sending the Logout message, the logout initiator should not send any messages unless requested
   to do so by the logout acceptor via a ResendRequest"), and the logout window is answered as fixpp's
   `Disconnected` already answers a send (B-010-2, FR-005). Where it departs from QuickFIX: (1) logged off, all
@@ -705,12 +706,14 @@ Not a departure from QuickFIX C++: the validate-gate carve-out of FR-018 (its `S
 ## Normative References
 
 Entries are the exact `[DocAbbrev §X.Y.Z] Title` keys of `spec/coverage-index.md` (Article VI §5). Detail below a
-key (a table, a precedence row, a sub-case) is in the prose after it. Every point this spec cites has a key; no
-coverage-index row needs adding. Matching recipe: a `[FIX-SL §X] Title` key is the row of the index's
+key (a table, a precedence row, a sub-case) is in the prose after it. Every point this spec cites has a key; one
+coverage-index row was added, `[FIX44-V2 Administrative Messages] Logout`, for FR-021. Matching recipe: a `[FIX-SL §X] Title` key is the row of the index's
 `## FIX Session Layer (FIX-SL)` table whose first column is `§X` and whose title column is `Title`; a
 `[FIX-TC §4 scenario N] Title` key is the row of its `## FIX Session Test Cases (FIX-TC)` table whose scenario
-column is `N` and whose title column is `Title` (the form prior specs use, for example 101's). A key with no such
-row, or whose title differs, is a dangling reference.
+column is `N` and whose title column is `Title` (the form prior specs use, for example 101's); a
+`[FIX44-V2 <Section>] <Title>` key is the row of its `## FIX 4.4 Volume 2 — FIX Session Protocol (FIX44-V2)` table
+whose first column is `<Section>` and whose title column is `<Title>`. A key with no such row, or whose title
+differs, is a dangling reference.
 
 - `[FIX-SL §4.1] Sequence numbers` — sequence numbers start at 1; no frame carries 34=0 (FR-012).
 - `[FIX-SL §4.4.2] Using ResetSeqNumFlag(141) for 24-hour connectivity` — 34=1 on a 141=Y Logon, after both numbers
@@ -748,6 +751,8 @@ row, or whose title differs, is a dangling reference.
   draws Reject 373=1 (FR-013).
 - `[FIX-TC §4 scenario 20] Simultaneous Resend request` — a ResendRequest is serviced whatever its MsgSeqNum
   (FR-008).
+- `[FIX44-V2 Administrative Messages] Logout` — after sending the Logout, the logout initiator sends no message
+  unless the logout acceptor requests one by a ResendRequest (FR-021).
 
 Informative, not coverage-index entries: the reference engines' session source (QuickFIX C++, QuickFIX/J,
 QuickFIX/Go) at the SHAs in the pre-spec research's `_engine_shas.txt`, for observable behaviour.
