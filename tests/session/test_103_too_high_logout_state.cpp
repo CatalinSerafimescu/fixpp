@@ -566,6 +566,30 @@ TEST_P(TooHighLogoutState103, Acking_InSequenceFrameDrained_NextNumInUnchanged) 
     EXPECT_EQ(s.count("5", mark), 1U) << s.written(mark);
 }
 
+// A second too-high Logout while the mark is pending is ignored (research D4.2, as under
+// B-537-1): the mark keeps the first Logout's number S, no second bound starts, and filling the
+// gap past S, though not past the second Logout's number, draws the one acknowledgement.
+TEST_P(TooHighLogoutState103, SecondTooHighLogoutWhilePending_IgnoredOneBoundAckPastTheFirstS) {
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT}};
+    ASSERT_TRUE(s.open_to_active());
+    seqnum_t const n = s.next_in();
+    auto const mark = s.sent.size();
+    (void)s.feed(s.logout(n + 3));
+    ASSERT_EQ(phase(s), kPending) << "setup: no pending mark";
+    ASSERT_EQ(bound_count(s), 1) << "setup: no bound";
+    (void)s.feed(s.logout(n + 5));
+    EXPECT_EQ(bound_count(s), 1) << "a second bound started";
+    (void)s.feed(s.gap_fill(n, n + 4));
+    EXPECT_EQ(s.count("5", mark), 1U)
+        << "no acknowledgement once N passed the first S: " << s.written(mark);
+    if (bound_count(s) != 0) {
+        // A bound still running is ended at its own deadline, so the Session is not destroyed
+        // with it and the cell ends as a test failure, not an abort.
+        s.pass(std::chrono::milliseconds{kT});
+    }
+    EXPECT_EQ(bound_count(s), 0);
+}
+
 INSTANTIATE_TEST_SUITE_P(BothRoles, TooHighLogoutState103,
                          ::testing::Values(session_role::initiator, session_role::acceptor),
                          [](auto const& info) { return std::string{rg::role_name(info.param)}; });

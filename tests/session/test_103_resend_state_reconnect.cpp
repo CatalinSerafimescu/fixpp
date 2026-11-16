@@ -1034,6 +1034,64 @@ TEST(BoundProtocol103, F2_EdgeWakeLostBeforeTheRace_CloseCompletesCounterZero) {
     end_a_bound_still_running(s, std::chrono::milliseconds{kBoundT}, close_fut);
 }
 
+// F3 (research D4.3, D4.4): N passes S while the bound is held at its first-run seam, so the
+// frame path's wake lands before the bound has published its own. Released, the bound reads N
+// past S at its first test and acknowledges with no race, the mock clock not moved.
+TEST(BoundProtocol103, F3_NPassedSBeforeTheFirstTest_AckWithNoClockMove) {
+    BoundHold hold;
+    rg::Scene s{rg::Options{.logout_timeout_ms = kBoundT}};
+    BoundHold::release_on_exit const release{hold};
+    ASSERT_TRUE(s.open_to_active());
+    fixpp::session::session_test_access::set_peer_logout_bound_hold_first_run(*s.session,
+                                                                              hold.fn());
+    seqnum_t const n = s.next_in();
+    auto const mark = s.sent.size();
+    auto feed_fut = s.feed_spawn(s.logout(n + 3));
+    ASSERT_TRUE(s.pump_until([&] { return hold.entered && rg::Scene::ready(feed_fut); }))
+        << "setup: the bound did not reach its first-run seam";
+    auto gf = s.feed_spawn(s.gap_fill(n, n + 4));
+    ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(gf); })) << "setup: the GapFill";
+    ASSERT_EQ(s.count("5", mark), 0U) << "setup: acknowledged before the bound ran";
+    hold.released = true;
+    EXPECT_TRUE(s.pump_until([&] { return s.count("5", mark) == 1U; },
+                             std::chrono::milliseconds{kBoundT} / 4))
+        << "no acknowledgement with N past S at the bound's first test: " << s.written(mark);
+    if (fixpp::session::session_test_access::peer_logout_bound_count(*s.session) != 0) {
+        // A bound still running is ended at its own deadline (see end_a_bound_still_running).
+        s.mock->advance(std::chrono::milliseconds{kBoundT});
+        (void)s.pump_until([&] {
+            return fixpp::session::session_test_access::peer_logout_bound_count(*s.session) == 0;
+        });
+    }
+    EXPECT_EQ(fixpp::session::session_test_access::peer_logout_bound_count(*s.session), 0);
+}
+
+// The drain's bound reached on a session with no live transport (research D1 step 3): a send's
+// store call is held past T on a session whose sink is the config-time one, so at T there is
+// no old transport to force-close; the drain goes on waiting, and once the hold is released
+// the reconnect completes.
+TEST(Drain103, G4_7_BoundReachedWithNoLiveTransport_DrainCompletesAfterTheRelease) {
+    Rig r{fixpp::session::reset_seqnum_policy::bilateral_lenient, false, true};
+    ASSERT_TRUE(r.open_to_active()) << "setup";
+    r.s.log->arm();
+    hold_store_of(r, next_out(r));
+    auto send_fut = spawn_send(r, order_payload("ORD-G4-7"));
+    ASSERT_TRUE(r.s.pump_until([&] { return r.s.log->holding(); })) << "setup";
+    auto rc_fut = r.spawn_reconnect();
+    auto const t = std::chrono::milliseconds{kLogoutTimeoutMs};
+    EXPECT_FALSE(r.s.pump_until([&] { return rg::Scene::ready(rc_fut); }, t + t / 4))
+        << "the drain ended while the send's store was held";
+    r.s.log->release_hold();
+    EXPECT_TRUE(
+        r.s.pump_until([&] { return rg::Scene::ready(rc_fut) && rg::Scene::ready(send_fut); },
+                       kAfterReleaseBudget))
+        << "the reconnect or the send did not complete";
+    ASSERT_TRUE(rg::Scene::ready(rc_fut));
+    auto const rc = rc_fut.get();
+    EXPECT_TRUE(rc.has_value()) << static_cast<int>(rc.error());
+    EXPECT_EQ(r.factory->make_call_count.load(), 1) << "transports made";
+}
+
 // The drain's wait for the old connection's detached coroutines (research D1 step 3): the
 // bound is held at its first-run seam, so the drain polls for its join counter. During that
 // poll a close(terminal) runs (G4_5) or the caller's own slot emits (G4_6). Released, the

@@ -1232,6 +1232,43 @@ TEST(ReplayGate588, R588d_AnswerLongerThanTheGrace_NoLogoutAndTheCloseEnds) {
     w.release();
 }
 
+// R-588-d's Disconnected arm (research D5′.4; FR-014): close(graceful) waits at the gate behind
+// a held answer whose held read then fails, so the answer ends the session. The wake finds
+// phase 1 out of Active: no Logout is written, and the close ends at the wake, not at its
+// real-time grace, which the window below is derived from.
+TEST(ReplayGate588, R588d_GracefulCloseBehindAFailingAnswer_NoLogoutTheCloseEndsAtTheWake) {
+    HeldWalk w{DirectAcceptor::Options{.logout_disconnect_timeout_ms = 2000}};
+    ASSERT_TRUE(w.start(is_slot_read(3), error::store_io_failure))
+        << "setup: the walk did not reach the held read";
+    auto const grace = std::chrono::milliseconds{w.s.f.cfg.logout_disconnect_timeout_ms};
+    auto close_fut = w.s.f.spawn_close(close_mode::graceful);
+    w.pump_for(kHeldWindow);
+    ASSERT_FALSE(DirectAcceptor::ready(close_fut)) << "setup: the close did not wait";
+    w.release();
+    EXPECT_TRUE(w.s.f.run_until([&] { return DirectAcceptor::ready(close_fut); }, grace / 2))
+        << "the close did not end at the wake";
+    EXPECT_EQ(w.s.f.sent_count("5"), 0U) << "a Logout was written after the failed answer:\n"
+                                         << printable(w.s.f.sent);
+    EXPECT_EQ(w.s.f.session->state(), fsm_state::Disconnected);
+    (void)w.s.f.run_until([&] { return DirectAcceptor::ready(close_fut); }, grace * 2);
+}
+
+// FR-013's in-sequence absent-7 arm on a persistent store whose inbound persist fails: the
+// arm returns that error and sends no Reject, and the session is Disconnected.
+TEST(ResendAnswerBeginSeqNo580, SevenAbsent_InSequence_PersistFails_NoRejectDisconnected) {
+    ActiveSession a{DirectAcceptor::Options{.reports_persistent = true}};
+    ASSERT_TRUE(a.setup(kStoredFor580)) << "setup: the session did not reach Active";
+    a.f.log->fail_in = [](StoreCall const& c) {
+        return c.op == store_op::next_seqnum && c.dir == direction_t::inbound && c.increment;
+    };
+    auto const before = a.f.sent.size();
+    auto const ans = a.answer("16=0\x01", is_outbound_retrieve);
+    ASSERT_TRUE(ans.call.completed) << "on_inbound_frame did not complete";
+    EXPECT_TRUE(ans.call.returned_error(error::store_io_failure)) << ans.call.call_text();
+    EXPECT_EQ(ans.written.size(), before) << "a frame was written:\n" << printable(ans.written);
+    EXPECT_EQ(ans.state_after_call, fsm_state::Disconnected);
+}
+
 // R-588-d's control: close(graceful) with no answer writes its Logout at once.
 TEST(ReplayGate588, R588d_Control_NoAnswer_LogoutAtOnce) {
     HeldWalk w;
