@@ -587,16 +587,25 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   (Pass P); a Pass-P row that does not fail in Pass F is re-read and recorded "insensitive", which closes it for
   FR-020. The census is re-run at the head being accepted, and a changed test expectation that no census row or pin
   task names stops for a decision (tasks T166).
-- **FR-021** *(Addendum 2026-11-16, 103 Phase 8, orchestrator ruling; owner to confirm at Gate B)*: While the session
+- **FR-021** *(Addendum 2026-11-16, 103 Phase 8, orchestrator ruling; owner-confirmed 2026-11-16 (refuse; B-010-2 kept))*: While the session
   is ending by a Logout of its own, from the moment a Logout emitter of the established session takes the Logout
   owner (research D4.6) until the session is Disconnected, `Session::send` (and so `Engine::send`) MUST be
   refused with `session_invalid_state_for_send`, whichever emitter owns the Logout
   (close(graceful)'s phase 1, the in-sequence acknowledgement, the gap deadline, the SendingTime-fatal and PossDup
   Arm-D Logouts, the too-high Logout's acknowledgement at once or by its bound), so no application frame is numbered
   after the Logout or follows it on the wire. Before this, such a send was admitted and its frame was numbered
-  after the Logout, and on a persistent store it was transmitted after it. QuickFIX's `nextLogout` generates the
-  Logout and disconnects under the session lock, so no application frame can follow it there; this is the
-  observable behaviour kept. Witnesses: `SendDuringLogout103.*` (every emitter, both roles) and
+  after the Logout, and on a persistent store it was transmitted after it. What this keeps: no application frame
+  follows the session's Logout on that connection, as the FIX 4.4 specification (Volume 2, p.25) asks of the logout
+  initiator ("After sending the Logout message, the logout initiator should not send any messages unless requested
+  to do so by the logout acceptor via a ResendRequest"), and the logout window is answered as fixpp's
+  `Disconnected` already answers a send (B-010-2, FR-005). Where it departs from QuickFIX: (1) logged off, all
+  three engines accept a send, number it, store it and transmit nothing, so a later ResendRequest can replay it
+  (QuickFIX C++ `Session::sendRaw` and QuickFIX/J `Session.sendRaw` persist before their `isLoggedOn()` test;
+  QuickFIX/Go `queueForSend` persists and queues, and `dropQueued` clears only the send queue); here the send is
+  refused, and nothing is numbered or stored; (2) after a Logout of their own, QuickFIX C++ and QuickFIX/J keep
+  transmitting until the reply or the timeout, and QuickFIX/Go does not; (3) on the confirming route, the frame
+  QuickFIX C++ and QuickFIX/J transmit after the Logout exists only inside the unsynchronised gap between
+  `generateLogout` and `disconnect` in their `nextLogout`, a race, not a design. Witnesses: `SendDuringLogout103.*` (every emitter, both roles) and
   `SendDuringLogoutEngine103.*` (an Engine on a FileStore); tasks T187, T188. The C ABI is not witnessed for
   this ending: no C-ABI cell can hold a Logout's store call, and the code's mapping to
   `FIXPP_ERR_SESSION_INVALID_STATE` is `CapiTooHighLogout103`'s subject.
@@ -682,7 +691,8 @@ The PR description (tasks T181) and the B&L rows name them from here.
 | A live send is serialised against a resend answer (FR-014) | QuickFIX/J (does not serialise) | owner ruling #588, 2026-11-14 (QuickFIX C++ and Go serialise) |
 | After a too-low Logout the transport stays open until the peer's EOF, `close()` or `Engine::stop()` (FR-018) | QuickFIX C++, QuickFIX/J (close at once) | disclosure: L-103-5 (QuickFIX/Go waits in its logout state) |
 | A too-low frame in NotConnected or LogonSent still ends silently | all three (send a Logout) | disclosure: L-103-7, Out of Scope |
-| A send started in the too-high Logout acknowledgement's `toAdmin` is refused (research D4.7) | QuickFIX C++, QuickFIX/J (accept it, as L-563-2 records for the in-sequence route) | disclosure: B-103-7 |
+| A send started in the too-high Logout acknowledgement's `toAdmin` is refused (research D4.7) | QuickFIX C++, QuickFIX/J (accept it, as on the in-sequence route: the FR-021 row below) | disclosure: B-103-7 |
+| A send is refused from the moment a Logout emitter takes the Logout owner until `Disconnected`, every emitter included, the in-sequence confirming Logout among them (FR-021) | all three (logged off they accept a send, number it and store it for a resend; QuickFIX C++ and QuickFIX/J also transmit after a Logout of their own, until the reply or the timeout) | owner ruling 2026-11-16 (refuse; B-010-2 kept), and owner ruling 2026-10-12 (`.specify/563-564-callback-send.md` §7); B-103-14 |
 | A strict acceptor refuses a Logon without 141=Y with a Logout (FR-004; opt-in policy only) | all three (no engine refuses such a Logon) | owner ruling #682, 2026-11-14 (FIX-SL §4.4.3) |
 | A peer-spontaneous 141=Y acknowledgement at 34=1 with a hydrated NextNumIn above 1 ends the session | QuickFIX C++, QuickFIX/Go (accept it); QuickFIX/J (takes it as a reset) | disclosure: L-103-2, with a follow-up issue |
 

@@ -500,6 +500,8 @@ likely to propose again).
   in `fromApp` and undefined in `toApp`.
 - **Refuse a send started in the confirming Logout's `toAdmin`** of a logout the peer started. Ruled,
   then not implemented: the source reading showed that no QuickFIX engine refuses it (`L-563-2`).
+  *Implemented by 103 FR-021 (owner ruling 2026-10-12; the owner confirmed it on 2026-11-16: refuse,
+  `B-010-2` kept). `L-563-2` is closed; the row is `B-103-14`.*
 
 For R-8 and R-9 (note §5, its last block, which names the prototype of each):
 

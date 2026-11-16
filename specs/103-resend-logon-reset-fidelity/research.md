@@ -542,7 +542,7 @@ This keeps every owner-approved zero case: no emitter takes over after another's
 
 **D4.7 — `Session::send` while the mark is set (FR-011).**
 - `send_body_`'s first test becomes `fsm_state_ != Active || peer_logout_.phase != none`, returning `session_invalid_state_for_send`. It is tested again after D5's wait.
-- `send_deferred_` ends in `send_body_`, so a send started in the acknowledgement's `toAdmin` is deferred and then refused. That differs from L-563-2's in-sequence route on a `MemoryStore` or `FileStore`, where such a send is admitted. Disclosed.
+- `send_deferred_` ends in `send_body_`, so a send started in the acknowledgement's `toAdmin` is deferred and then refused. That differs from L-563-2's in-sequence route on a `MemoryStore` or `FileStore`, where such a send is admitted. Disclosed. [superseded — see spec FR-021: the in-sequence route refuses such a send as well; `L-563-2` is closed, `B-103-14`]
 
 **Rationale:** the rulings, FIX-SL Table 3 and §4.10 precedence 15 (bounded), and TC 20. Only a mark is kept, not the frame (L-013-2 stands). The named exception's premise, that a QuickFIX peer keeps servicing a ResendRequest while it waits for its Logout's acknowledgement, read in PARENT `reference-engines/` at checklist audit (QuickFIX/Go at the pre-spec research's `_engine_shas.txt` commit; QuickFIX C++ at its checkout's head, a descendant of that file's commit, so re-read it at that commit before relying on it): QuickFIX/Go's `logoutState.FixMsgIn` hands every inbound message to `inSession.FixMsgIn`, and QuickFIX C++'s `Session::validLogonState` treats a message other than a Logout as valid after `sentLogout`, so it is processed. QuickFIX/J was not re-read for it here.
 
