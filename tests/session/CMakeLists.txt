@@ -369,6 +369,7 @@ add_session_103_bucket(session_103_tests
   test_103_too_high_logout.cpp                                          # 103 T076
   test_103_too_high_logout_state.cpp                                    # 103 T080
   test_103_too_high_logout_engine.cpp                                   # 103 T080
+  test_103_send_during_logout.cpp                                       # 103 T187
 )
 # 103 T054: R-588-g, detail::replay_gate alone on a session strand; an entry of its own (it
 # replaces global operator new for its allocation evidence).
@@ -932,13 +933,19 @@ add_executable(session_538_resend_answer_store_failure
 add_executable(session_538_resend_answer_store_failure_engine
   test_538_resend_answer_store_failure_engine.cpp
 )
+# 103 T187 (FR-021): a send during a Logout ending, on the same fixture
+# (held_file_store_scene.hpp, which needs FIXPP_TEST_HOOKS).
+add_executable(session_103_send_during_logout_engine
+  test_103_send_during_logout_engine.cpp                                # 103 T187
+)
 foreach(held_store_test
     session_538_cancelled_read_measured_path
     session_cancelled_outbound_store_measurement
     session_inbound_cancellation
     session_inbound_cancellation_engine
     session_538_resend_answer_store_failure
-    session_538_resend_answer_store_failure_engine)
+    session_538_resend_answer_store_failure_engine
+    session_103_send_during_logout_engine)
   target_link_libraries(${held_store_test} PRIVATE
     fixpp_session
     fixpp_transport
@@ -964,6 +971,7 @@ endforeach()
 # 103 T041 (fixpp#580): SC-003 is read through test_103_support.hpp, whose mock transport
 # header needs FIXPP_ALLOW_MOCK_TRANSPORT, and the validating arm loads the vendored
 # FIX 4.4 dictionary (tests/support/fix44_dictionary.hpp reads FIXPP_DICT_DATA_DIR).
+set_tests_properties(session_103_send_during_logout_engine PROPERTIES LABELS "session;103")
 target_compile_definitions(session_538_resend_answer_store_failure PRIVATE
   FIXPP_ALLOW_MOCK_TRANSPORT
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")

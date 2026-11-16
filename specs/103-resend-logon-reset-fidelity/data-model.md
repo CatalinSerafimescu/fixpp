@@ -128,7 +128,13 @@ The bound tests it after publishing its wake, after its T race, after every gate
 asserts `conn_gen_ == gen` at each test and after its emit (D4.4). Invariant: no bound acts on a connection other
 than the one its mark arrived on (the drain guarantees it).
 
-While `phase != none`, `Session::send` returns `session_invalid_state_for_send`. While `phase == pending`,
+While `phase != none`, `Session::send` returns `session_invalid_state_for_send`. *(Addendum 2026-11-16, 103 Phase 8, orchestrator ruling; FR-021:)* so it does while `logout_in_flight_` is set, from the owner's set to the edge into `Disconnected`, whichever emitter holds it:
+
+| Owner | Event | Effect |
+|---|---|---|
+| `logout_in_flight_` set (any Logout emitter of the established session) | `Session::send`, at its first test or at its contended re-test after a gate wake | refused, `session_invalid_state_for_send`; nothing numbered, nothing written |
+
+ While `phase == pending`,
 administrative traffic is answered; while `acking`, inbound frames are drained.
 
 ## Replay gate — `detail::replay_gate` (new)

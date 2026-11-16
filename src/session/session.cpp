@@ -6690,7 +6690,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_body_(
     // Returns session_invalid_state_for_send (=77) — not session_invalid_logon —
     // to give the caller a semantically distinct diagnosis. [FR-005 / D-3]
     // 103 (research D4.7; FR-011): while a too-high Logout's mark is set, a send is refused.
-    if (fsm_state_ != fsm_state::Active || peer_logout_.phase != peer_logout_mark::phase_t::none) {
+    // 103 (FR-021, Phase 8 addendum): so is a send while a Logout of the session is in
+    // flight (the owner, research D4.6), for the whole ending until Disconnected, whichever
+    // emitter owns it, so no application frame is numbered after the Logout.
+    if (fsm_state_ != fsm_state::Active || peer_logout_.phase != peer_logout_mark::phase_t::none ||
+        logout_in_flight_) {
         co_return std::unexpected(error::session_invalid_state_for_send);
     }
 
@@ -6720,7 +6724,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_body_(
             co_return std::unexpected(error::dispatch_aborted);
         }
         if (fsm_state_ != fsm_state::Active || state_ == lifecycle::closing ||
-            engine_stop_requested_ || peer_logout_.phase != peer_logout_mark::phase_t::none) {
+            engine_stop_requested_ || peer_logout_.phase != peer_logout_mark::phase_t::none ||
+            logout_in_flight_) {
             co_return std::unexpected(error::session_invalid_state_for_send);
         }
     }

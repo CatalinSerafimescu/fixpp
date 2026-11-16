@@ -587,6 +587,19 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   (Pass P); a Pass-P row that does not fail in Pass F is re-read and recorded "insensitive", which closes it for
   FR-020. The census is re-run at the head being accepted, and a changed test expectation that no census row or pin
   task names stops for a decision (tasks T166).
+- **FR-021** *(Addendum 2026-11-16, 103 Phase 8, orchestrator ruling; owner to confirm at Gate B)*: While the session
+  is ending by a Logout of its own, from the moment a Logout emitter of the established session takes the Logout
+  owner (research D4.6) until the session is Disconnected, `Session::send` (and so `Engine::send`) MUST be
+  refused with `session_invalid_state_for_send`, whichever emitter owns the Logout
+  (close(graceful)'s phase 1, the in-sequence acknowledgement, the gap deadline, the SendingTime-fatal and PossDup
+  Arm-D Logouts, the too-high Logout's acknowledgement at once or by its bound), so no application frame is numbered
+  after the Logout or follows it on the wire. Before this, such a send was admitted and its frame was numbered
+  after the Logout, and on a persistent store it was transmitted after it. QuickFIX's `nextLogout` generates the
+  Logout and disconnects under the session lock, so no application frame can follow it there; this is the
+  observable behaviour kept. Witnesses: `SendDuringLogout103.*` (every emitter, both roles) and
+  `SendDuringLogoutEngine103.*` (an Engine on a FileStore); tasks T187, T188. The C ABI is not witnessed for
+  this ending: no C-ABI cell can hold a Logout's store call, and the code's mapping to
+  `FIXPP_ERR_SESSION_INVALID_STATE` is `CapiTooHighLogout103`'s subject.
 
 **Additional scope (owner ruling 2026-11-15; CI only, no library behaviour)**
 
