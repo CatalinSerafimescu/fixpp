@@ -158,14 +158,17 @@ public:
     // it to exhaustion (io_context::poll()) then.
     std::function<bool(StoreCall const&)> hold_in;
     std::optional<fixpp::core::error> held_result;
-    // hold_flush: close(graceful)'s flush waits until release_hold(), as a hold_in body
-    // does, and then forwards. Taken once; it shares hold_in's release and bound, so a cell
-    // sets one of the two.
+    // hold_flush: close(graceful)'s flush waits until release_flush(), yielding the session's
+    // executor, and then forwards. Taken once. Its release is its own, so a cell can hold a
+    // store call (hold_in) and the flush at once and release them in either order; the bound
+    // is hold_in's.
     bool hold_flush = false;
 
     [[nodiscard]] bool holding() const noexcept { return holding_; }
     [[nodiscard]] bool hold_timed_out() const noexcept { return hold_timed_out_; }
     void release_hold() noexcept { hold_released_ = true; }
+    [[nodiscard]] bool flush_holding() const noexcept { return flush_holding_; }
+    void release_flush() noexcept { flush_released_ = true; }
 
     // ── A store() call that returns to its caller late ───────────────────────────────
     //
@@ -232,6 +235,19 @@ private:
     bool holding_ = false;
     bool hold_released_ = false;
     bool hold_timed_out_ = false;
+
+    // The flush's hold: yields until the cell releases it or kBodyHoldBound has passed.
+    asio::awaitable<void> wait_flush_released() {
+        auto const ex = co_await asio::this_coro::executor;
+        auto const deadline = std::chrono::steady_clock::now() + kBodyHoldBound;
+        flush_holding_ = true;
+        while (!flush_released_ && std::chrono::steady_clock::now() < deadline) {
+            co_await asio::post(ex, asio::use_awaitable);
+        }
+        flush_holding_ = false;
+    }
+    bool flush_holding_ = false;
+    bool flush_released_ = false;
 
     // Whether the call `id`, whose inner call has returned, is the one late_return_in
     // chooses. Taken once.
@@ -343,7 +359,7 @@ public:
     asio::awaitable<fixpp::core::expected_t<void>> flush_for_session_close() {
         if (log_->hold_flush) {
             log_->hold_flush = false;
-            co_await log_->wait_released();
+            co_await log_->wait_flush_released();
         }
         if (auto const hook = inner_->flush_hook(); hook != nullptr) {
             co_return co_await hook(*inner_);

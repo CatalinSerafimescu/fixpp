@@ -336,6 +336,64 @@ TEST(DefaultResetPolicy103, AS3_StrictAcceptor_EngineStopDuringTheRefusalsStore_
                                  << static_cast<int>(res.error());
 }
 
+// AS3 superseded by a close (research D2.4; D-CAN-5): the refusal Logout is in its store call
+// when a close() runs; the arm returns success, as it does under Engine::stop(), whatever the
+// close's timing. (completed) close(terminal) has run to its end; (closing) close(graceful) is
+// held in its store flush, so `closing` holds when the refusal resumes.
+void run_as3_close_during_the_refusals_store(bool const completed) {
+    auto const rec =
+        std::make_shared<RecordingStoreFactory>(std::make_shared<rr::FaultStoreFactory>(37, 42));
+    auto const log = rec->log;
+    auto r = rr::make_acceptor_notconnected(rec, /*refresh_on_logon=*/false,
+                                            reset_seqnum_policy::bilateral_strict);
+    ASSERT_NE(r.fix, nullptr);
+    auto& f = *r.fix;
+    log->arm();
+    log->hold_in = [](fixpp::test_support::StoreCall const& c) {
+        return c.op == fixpp::test_support::store_op::store &&
+               c.dir == fixpp::session::direction_t::outbound && c.first == 42U;
+    };
+    auto const ready = [](auto const& fut) {
+        return fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready;
+    };
+    auto const logon = to_acceptor_logon(37, false);
+    auto feed_fut = asio::co_spawn(fixpp::test_support::session_executor_of(*f.session, f.ioc),
+                                   f.session->on_inbound_frame(logon), asio::use_future);
+    ASSERT_TRUE(fixpp::test_support::pump_until(f.ioc, [&] { return log->holding(); }))
+        << "setup: the refusal Logout's store was not held";
+    if (!completed) log->hold_flush = true;
+    auto close_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(*f.session, f.ioc),
+                       f.session->close(completed ? fixpp::session::close_mode::terminal
+                                                  : fixpp::session::close_mode::graceful),
+                       asio::use_future);
+    if (completed) {
+        ASSERT_TRUE(fixpp::test_support::pump_until(f.ioc, [&] { return ready(close_fut); }))
+            << "setup: close(terminal) did not complete while the refusal's store was held";
+    } else {
+        ASSERT_TRUE(fixpp::test_support::pump_until(f.ioc, [&] { return log->flush_holding(); }))
+            << "setup: close(graceful)'s flush was not held";
+    }
+    log->release_hold();
+    EXPECT_TRUE(fixpp::test_support::pump_until(f.ioc, [&] { return ready(feed_fut); }))
+        << "the Logon did not complete";
+    log->release_flush();
+    (void)fixpp::test_support::pump_until(f.ioc, [&] { return ready(close_fut); });
+    ASSERT_TRUE(ready(feed_fut));
+    auto const res = feed_fut.get();
+    EXPECT_TRUE(res.has_value()) << "the superseded refusal returned "
+                                 << static_cast<int>(res.error());
+}
+
+TEST(DefaultResetPolicy103,
+     AS3_StrictAcceptor_CloseCompletedDuringTheRefusalsStore_ReturnsSuccess) {
+    run_as3_close_during_the_refusals_store(/*completed=*/true);
+}
+
+TEST(DefaultResetPolicy103, AS3_StrictAcceptor_CloseClosingDuringTheRefusalsStore_ReturnsSuccess) {
+    run_as3_close_during_the_refusals_store(/*completed=*/false);
+}
+
 // ── AS4: default acceptor, a Logon without 141 ──────────────────────────────────────────────
 TEST(DefaultResetPolicy103, AS4_DefaultAcceptor_LogonWithout141_Active) {
     auto r = rr::make_acceptor_notconnected(std::make_shared<rr::FaultStoreFactory>(37, 42),

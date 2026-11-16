@@ -923,7 +923,7 @@ TEST_P(Crossing103, PeerLogoutWhileTheSessionEnds_DisconnectedAtOnceNoResendRequ
         case CrossState::flush:
             s.log->hold_flush = true;
             close_fut = spawn_close(s, close_mode::graceful);
-            ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); }))
+            ASSERT_TRUE(s.pump_until([&] { return s.log->flush_holding(); }))
                 << "setup: close()'s flush was not held";
             ASSERT_FALSE(session_test_access::logout_in_flight(*s.session))
                 << "setup: phase 1 took the owner";
@@ -940,7 +940,8 @@ TEST_P(Crossing103, PeerLogoutWhileTheSessionEnds_DisconnectedAtOnceNoResendRequ
         s.pump_until([&] { return s.state() == fsm_state::Disconnected; }, kBudget);
     int const phase_then = phase(s);
     seqnum_t const next_in_then = s.next_in();
-    if (st != CrossState::stop) s.log->release_hold();
+    if (st == CrossState::owner) s.log->release_hold();
+    if (st == CrossState::flush) s.log->release_flush();
     bool const ended = s.pump_until(
         [&] {
             return rg::Scene::ready(feed_fut) &&
