@@ -573,6 +573,27 @@ TEST(GapDeadlinePossDupStage1, P2_UnparseableOrigSendingTimeAtTheBound_LogoutAnd
     run_poss_dup_stage1_site(orig::unparseable);
 }
 
+// P3 (103 research D6): a PossDup Logon at NextNumIn with no OrigSendingTime(122), past the
+// bound. Stage 1 would Reject it and, a Logon being excluded from the consume, not advance
+// NextNumIn, so it does not advance it: the deadline fires, and no Reject goes out. The
+// carry past the bound is answered_test_request_past_the_bound's.
+TEST(GapDeadlinePossDupStage1, P3_PossDupLogonAtNextNumInNoOrigSendingTimeAtTheBound_Logout) {
+    Scene s;
+    const Gap g = open_gap(s);
+    ASSERT_NE(g.n, 0U);
+    ASSERT_NE(answered_test_request_past_the_bound(s, g), 0U);
+    const auto mark = s.sent.size();
+    const auto r = s.feed(s.frame("A", g.n,
+                                  "43=Y\x01"
+                                  "98=0\x01"
+                                  "108=" +
+                                      std::to_string(kHeartBtInt.count()) + "\x01"));
+    ASSERT_TRUE(deadline_logout_written(s, mark, r));
+    EXPECT_EQ(field(s.of_type("5", mark).front(), 58),
+              "ResendRequest unanswered, expecting MsgSeqNum " + std::to_string(g.n));
+    EXPECT_EQ(s.count("3", mark), 0U) << "the session wrote " << s.written(mark);
+}
+
 // ── D-537-5, S1, S2 and S3: the Reset-mode arm ──────────────────────────────────────
 
 // S1: the application's fromAdmin rejects every SequenceReset. Each Reset-mode

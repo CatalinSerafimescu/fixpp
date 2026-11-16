@@ -339,10 +339,11 @@ TEST(CapiC7Witness, Row6_LivenessOnlyTrafficKeepsTheSessionUp) {
     row6_cell(too_low_heartbeat, false, "ROW6");
 }
 
-// 103 (research D6 and D9; FR-018, fixpp#581): a Heartbeat below the expected MsgSeqNum
-// without PossDupFlag(43) is not liveness-only traffic. It draws QuickFIX's too-low Logout,
-// and fixpp_session_is_established turns false.
-void too_low_heartbeat_ends_cell(fixpp_session_role role) {
+// 103 (research D6 and D9; FR-018, fixpp#581): a frame below the expected MsgSeqNum without
+// PossDupFlag(43), a Heartbeat as much as an order, draws QuickFIX's too-low Logout, and
+// fixpp_session_is_established turns false. For the Heartbeat it is not liveness-only
+// traffic.
+void too_low_frame_ends_cell(std::string const& too_low, fixpp_session_role role) {
     constexpr std::uint32_t kShortHeartBtInt = 1;
     bool const acceptor = role == FIXPP_ROLE_ACCEPTOR;
     RawAcceptor peer;
@@ -355,7 +356,7 @@ void too_low_heartbeat_ends_cell(fixpp_session_role role) {
     ASSERT_TRUE(acceptor ? establish_acceptor(c, peer, kShortHeartBtInt)
                          : establish(c, peer, kShortHeartBtInt))
         << "setup";
-    ASSERT_TRUE(peer.write(heartbeat(1))) << "setup: the peer's write";
+    ASSERT_TRUE(peer.write(too_low)) << "setup: the peer's write";
     auto const logout =
         peer.read_until([](std::string const& f) { return RawAcceptor::has_field(f, "35=5"); });
     ASSERT_TRUE(logout.has_value()) << "the engine wrote no Logout";
@@ -371,11 +372,19 @@ void too_low_heartbeat_ends_cell(fixpp_session_role role) {
 }
 
 TEST(CapiC7Witness, Row6_TooLowHeartbeatWithoutPossDup_EndsTheSessionWithTheTooLowLogout) {
-    too_low_heartbeat_ends_cell(FIXPP_ROLE_INITIATOR);
+    too_low_frame_ends_cell(heartbeat(1), FIXPP_ROLE_INITIATOR);
 }
 
 TEST(CapiC7Witness, Row6_TooLowHeartbeatWithoutPossDup_EndsAnAcceptorWithTheTooLowLogout) {
-    too_low_heartbeat_ends_cell(FIXPP_ROLE_ACCEPTOR);
+    too_low_frame_ends_cell(heartbeat(1), FIXPP_ROLE_ACCEPTOR);
+}
+
+TEST(CapiC7Witness, TooLowOrderWithoutPossDup_EndsTheSessionWithTheTooLowLogout) {
+    too_low_frame_ends_cell(order(1, "LOW"), FIXPP_ROLE_INITIATOR);
+}
+
+TEST(CapiC7Witness, TooLowOrderWithoutPossDup_EndsAnAcceptorWithTheTooLowLogout) {
+    too_low_frame_ends_cell(order(1, "LOW"), FIXPP_ROLE_ACCEPTOR);
 }
 
 // Orders below the expected MsgSeqNum carrying PossDupFlag(43)=Y (too low, ignored).
