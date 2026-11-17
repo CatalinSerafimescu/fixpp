@@ -315,6 +315,9 @@ the 563 §2.1a supersession, the latches, and that it must not be bound to `root
 - **Body:**
   1. If `!peer_sent_reset && strict`, call `co_await refuse_logon_with_logout_(kStrictResetText, fsm_state::NotConnected)`.
   2. If the helper fails, return its error.
+     *(Note, Gate B round 1 ruling of 2026-11-17, for owner confirmation at Gate B: "fails" means the helper's
+     `toAdmin` and number-assignment routes. The helper discards its Logout's store or transmit failure, so that
+     failure reaches step 4 and returns the mismatch; spec FR-004 and contract E3 are amended to say so.)*
   3. If the arm was superseded (`logon_arm_superseded_`), return success (the D-CAN-5 convention).
   4. Otherwise return `std::unexpected(session_seqnum_reset_mismatch)`. The helper itself returns success, so the arm must return the mismatch explicitly.
 - **Text.** QuickFIX has no text for this, because no engine refuses such a Logon; FIX-SL §4.4.3 asks for a Logout with Text. Proposed constant: `kStrictResetText = "ResetSeqNumFlag(141)=Y required"`. It is ASCII, carries no peer bytes, and its length is fixed.
