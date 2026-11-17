@@ -232,6 +232,20 @@ struct session_test_access {
         Session& s, std::function<asio::awaitable<void>()> hold) {
         s.peer_logout_bound_hold_before_race_ = std::move(hold);
     }
+    // Whether the bound's wake is published (research D4.4). Read on the session's strand.
+    [[nodiscard]] static bool peer_logout_wake_published(Session const& s) noexcept {
+        return static_cast<bool>(s.peer_logout_wake_);
+    }
+    // Drops a published wake without calling it. A cell calls it only once it has failed on
+    // finding a wake published where none may be, so that its teardown does not call through
+    // a wake whose timer is gone and the cell ends as a test failure, not an abort.
+    static void drop_peer_logout_wake(Session& s) noexcept { s.peer_logout_wake_ = nullptr; }
+    // Replaces the config-time transport callback open() installed (a direct-Session cell's
+    // sink), so a cell can make the transport fail after the session is open.
+    static void set_transport_send(Session& s,
+                                   std::function<void(std::span<const std::byte>)> send) {
+        s.transport_send_ = std::move(send);
+    }
 
     // The session's replay gate (103, research D5′): a cell reads whether a walk waits at
     // it. Read it on the session's strand.

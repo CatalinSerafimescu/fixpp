@@ -27,6 +27,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -558,6 +559,118 @@ TEST_P(TooHighLogoutState103, SecondTooHighLogoutWhilePending_IgnoredOneBoundAck
         // with it and the cell ends as a test failure, not an abort.
         s.pass(std::chrono::milliseconds{kT});
     }
+    EXPECT_EQ(bound_count(s), 0);
+}
+
+// ── The bound's exception exit (the evidence record's "Gate B r1: the bound's exception
+// exit") ───────────────────────────────────────────────────────────────────────────────
+//
+// An exception that reaches the bound's handler ends it closed: no wake published, the mark
+// `none`, the session Disconnected, no Logout, and the join counter 0. The wake is read
+// directly, not through a sanitizer, which an allocator's recycling of the freed frame can
+// keep silent.
+
+namespace {
+
+// After a cell's readings: a frame past S, Engine::stop()'s step and a close(terminal) run,
+// and still no Logout is written.
+void the_ending_runs_on(rg::Scene& s, seqnum_t const n, std::size_t const mark) {
+    (void)s.feed(s.gap_fill(n, n + 4));
+    session_test_access::note_engine_stop(*s.session);
+    auto close_fut = spawn_close(s, close_mode::terminal);
+    EXPECT_TRUE(s.pump_until([&] { return rg::Scene::ready(close_fut); }, kCloseBudget))
+        << "close(terminal) did not complete";
+    EXPECT_EQ(s.count("5", mark), 0U) << s.written(mark);
+    EXPECT_EQ(bound_count(s), 0);
+}
+
+}  // namespace
+
+// The exception between the wake's publish and the race: the before-race seam throws.
+TEST_P(TooHighLogoutState103, BoundThrowsAfterItsPublish_NoWakeMarkNoneDisconnected) {
+    bool throw_in_seam = true;
+    bool seam_ran = false;
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT}};
+    ASSERT_TRUE(s.open_to_active());
+    session_test_access::set_peer_logout_bound_hold_before_race(
+        *s.session, [&throw_in_seam, &seam_ran]() -> asio::awaitable<void> {
+            seam_ran = true;
+            if (throw_in_seam) throw std::runtime_error{"103 cell: the before-race seam throws"};
+            co_return;
+        });
+    seqnum_t const n = s.next_in();
+    auto const mark = s.sent.size();
+    (void)s.feed(s.logout(n + 3));
+    EXPECT_TRUE(s.pump_until([&] { return bound_count(s) == 0; })) << "the bound did not exit";
+    EXPECT_TRUE(seam_ran) << "setup: the bound did not reach its before-race seam";
+    bool const wake_left = session_test_access::peer_logout_wake_published(*s.session);
+    EXPECT_FALSE(wake_left) << "the bound's exception exit left its wake published";
+    if (wake_left) session_test_access::drop_peer_logout_wake(*s.session);
+    EXPECT_EQ(phase(s), kNone) << "the bound's exception exit left the mark set";
+    EXPECT_EQ(s.state(), fsm_state::Disconnected);
+    EXPECT_EQ(s.count("5", mark), 0U) << s.written(mark);
+    EXPECT_EQ(bound_count(s), 0);
+    throw_in_seam = false;
+    the_ending_runs_on(s, n, mark);
+}
+
+// The exception before the wake's publish: the first-run seam throws.
+TEST_P(TooHighLogoutState103, BoundThrowsBeforeItsPublish_MarkNoneDisconnected) {
+    bool throw_in_seam = true;
+    bool seam_ran = false;
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT}};
+    ASSERT_TRUE(s.open_to_active());
+    session_test_access::set_peer_logout_bound_hold_first_run(
+        *s.session, [&throw_in_seam, &seam_ran]() -> asio::awaitable<void> {
+            seam_ran = true;
+            if (throw_in_seam) throw std::runtime_error{"103 cell: the first-run seam throws"};
+            co_return;
+        });
+    seqnum_t const n = s.next_in();
+    auto const mark = s.sent.size();
+    (void)s.feed(s.logout(n + 3));
+    EXPECT_TRUE(s.pump_until([&] { return bound_count(s) == 0; })) << "the bound did not exit";
+    EXPECT_TRUE(seam_ran) << "setup: the bound did not reach its first-run seam";
+    bool const wake_left = session_test_access::peer_logout_wake_published(*s.session);
+    EXPECT_FALSE(wake_left) << "a wake is published with no bound running";
+    if (wake_left) session_test_access::drop_peer_logout_wake(*s.session);
+    EXPECT_EQ(phase(s), kNone) << "the bound's exception exit left the mark set";
+    EXPECT_EQ(s.state(), fsm_state::Disconnected);
+    EXPECT_EQ(s.count("5", mark), 0U) << s.written(mark);
+    EXPECT_EQ(bound_count(s), 0);
+    throw_in_seam = false;
+    the_ending_runs_on(s, n, mark);
+}
+
+// The exception after the claim: the acknowledgement's store call returns store_cancelled,
+// so store_then_emit leaves by operation_aborted (its declaration in session.hpp), which
+// reaches the bound's handler with the mark `acking`.
+TEST_P(TooHighLogoutState103, AckStoreCancelled_MarkNoneDisconnectedNoLogout) {
+    rg::Scene s{rg::Options{.role = GetParam(), .logout_timeout_ms = kT, .recording_store = true}};
+    ASSERT_TRUE(active_recorded(s)) << "setup";
+    seqnum_t const n = s.next_in();
+    (void)s.feed(s.logout(n + 3));
+    ASSERT_EQ(phase(s), kPending) << "setup: no pending mark";
+    seqnum_t const ack_seq = next_out(s);
+    auto const is_ack_store = [ack_seq](StoreCall const& c) {
+        return c.op == store_op::store && c.dir == fixpp::session::direction_t::outbound &&
+               c.first == ack_seq;
+    };
+    s.log->fail_code = fixpp::core::error::store_cancelled;
+    s.log->fail_in = is_ack_store;
+    auto const mark = s.sent.size();
+    auto const log_mark = s.log->mark();
+    s.pass(std::chrono::milliseconds{kT});
+    EXPECT_TRUE(s.pump_until([&] { return bound_count(s) == 0; })) << "the bound did not exit";
+    auto const* call = s.log->first_after(log_mark, is_ack_store);
+    ASSERT_NE(call, nullptr) << "setup: the acknowledgement's store was not called";
+    ASSERT_TRUE(call->error.has_value()) << "setup: the acknowledgement's store did not fail";
+    EXPECT_EQ(*call->error, fixpp::core::error::store_cancelled) << "setup";
+    EXPECT_EQ(phase(s), kNone) << "the bound's exception exit left the mark `acking`";
+    EXPECT_EQ(s.state(), fsm_state::Disconnected);
+    EXPECT_FALSE(session_test_access::logout_in_flight(*s.session)) << "the Logout owner is set";
+    EXPECT_FALSE(session_test_access::peer_logout_wake_published(*s.session));
+    EXPECT_EQ(s.count("5", mark), 0U) << s.written(mark);
     EXPECT_EQ(bound_count(s), 0);
 }
 
