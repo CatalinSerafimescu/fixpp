@@ -588,8 +588,7 @@ TEST(ResendAnswerBeginSeqNo580, SevenAbsent_ValidatingSession_GateRejectEqualsTh
 
 // 103 tasks T041, the storeless arm (`/speckit-analyze` C4; FR-012, SC-003): 7=0 on a
 // session with no store takes the walk's empty-store branch, one GapFill over the whole
-// range, which starts at 34=1 and never at 0. Its RED source is T046's mutant: once the walk's
-// entry clamps, that branch's own clamp is removed.
+// range, which starts at 34=1 and never at 0.
 TEST(ResendAnswerBeginSeqNo580, SevenZero_NoStore_OneGapFillFromOne) {
     ActiveSession s{DirectAcceptor::Options{
         .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.store_factory = nullptr; }}};
