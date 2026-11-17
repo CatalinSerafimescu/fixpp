@@ -20,11 +20,11 @@
 //                       first offloaded write after the frame that trips it.
 //
 // Before the arm, the cell drains the store: a store call of its own on the session's
-// executor, run to its end. Every store call the session made before it has then ended, so
-// the hold is on the first offloaded write after the peer's frame. Without it the hold can
-// catch a write the session made earlier, such as the Logon's inbound advance, which the
-// session makes after its Logon reply and so after setup(0) can return. The mechanism is in
-// test_598_store_offload_engine.cpp, the paragraph "Before the arm".
+// executor, run to its end, so the hold is on the first offloaded write after the peer's
+// frame. Without it the hold can catch a write the session made earlier, such as the Logon's
+// inbound advance, which the session makes after its Logon reply and so after setup(0) can
+// return. The mechanism is in test_598_store_offload_engine.cpp, the paragraph "Before the
+// arm".
 //
 // The instance InSequenceLogout_LogonWriteQueuedAtTheArm keeps that write from beginning
 // until the io_context runs again after the arm site: its Application's onLogon takes the
