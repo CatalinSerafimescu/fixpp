@@ -176,7 +176,8 @@ TEST(Drain103Teardown, G9_ContextDestroyedWithFramesSuspended_NoReportNoAssertio
 // published is still published (research D4.4's reason for no exit guard: a frame destroyed so may
 // outlive its Session). The frame's join hold is destroyed with it, so the counter is 0. The cell
 // drops the wake without calling it before it destroys the Session.
-TEST(Drain103Teardown, G9_ContextDestroyedWithTheBoundInItsRace_ClearerTouchesNoSessionState) {
+TEST(Drain103Teardown,
+     G9_ContextDestroyedWithTheBoundAtItsBeforeRaceSeam_ClearerTouchesNoSessionState) {
     std::unique_ptr<fixpp::session::Session> session;
     auto ioc = std::make_unique<asio::io_context>();
     std::vector<std::string> sent;
