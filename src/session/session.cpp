@@ -34,6 +34,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>  // 034: std::memcpy for the masked-frame coroutine-frame copy
+#include <exception>  // 103: std::uncaught_exceptions, the bound's wake clearer
 #include <expected>
 #include <fixpp/core/clock.hpp>  // Clock::steady_now / sleep_until
 #include <fixpp/core/engine_config.hpp>
@@ -5552,11 +5553,16 @@ Session::on_inbound_active_too_high_logout_(bool tic, seqnum_t seq) noexcept {
         peer_logout_ = peer_logout_mark{.seq = seq,
                                         .at = effective_clock_->steady_now(),
                                         .phase = peer_logout_mark::phase_t::pending};
-        // The join counter is incremented before the spawn (liveness_counter_'s FQ-C).
-        auto counter = peer_logout_bound_counter_;
-        counter->fetch_add(1, std::memory_order_relaxed);
-        asio::co_spawn(co_await asio::this_coro::executor,
-                       run_peer_logout_bound_(std::move(counter), conn_gen_), asio::detached);
+        // The join counter is incremented before the spawn (liveness_counter_'s FQ-C), by
+        // the hold the bound's frame then owns. A spawn that throws leaves no mark set.
+        peer_logout_bound_join join{peer_logout_bound_counter_};
+        try {
+            asio::co_spawn(co_await asio::this_coro::executor,
+                           run_peer_logout_bound_(std::move(join), conn_gen_), asio::detached);
+        } catch (...) {
+            peer_logout_.phase = peer_logout_mark::phase_t::none;
+            throw;
+        }
     }
     co_return std::nullopt;
 }
@@ -5582,16 +5588,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::acknowledge_peer_logout_
     co_return fixpp::core::expected_t<void>{};
 }
 
-// 103 (research D4.4): the bound. Its join counter is decremented by a frame-local guard that
-// touches only the counter, so the frame may outlive the Session (FQ-C). The wake is
+// 103 (research D4.4): the bound. Its join counter is decremented by its `join` parameter,
+// which touches only the counter, so the frame may outlive the Session (FQ-C). The wake is
 // published, then "live" tested; the race's outcome is read from session state afterwards;
 // the wake is cleared, in the body, before anything else once the race is over.
-asio::awaitable<void> Session::run_peer_logout_bound_(std::shared_ptr<std::atomic<int>> counter,
-                                                      std::uint32_t gen) noexcept {
-    struct counter_release {
-        std::shared_ptr<std::atomic<int>> c;
-        ~counter_release() { c->fetch_sub(1, std::memory_order_release); }
-    } const release{std::move(counter)};
+// Superseded in part by the evidence record's "Gate B r1: the bound's exception exit": the
+// counter is held by a parameter rather than a body-local guard, a wake clearer is the
+// exception path's backstop for the body's clears, and the handler ends the bound closed.
+asio::awaitable<void> Session::run_peer_logout_bound_(
+    [[maybe_unused]] peer_logout_bound_join join, std::uint32_t gen) noexcept {
     try {
         if (peer_logout_bound_hold_first_run_) {
             co_await peer_logout_bound_hold_first_run_();
@@ -5604,9 +5609,26 @@ asio::awaitable<void> Session::run_peer_logout_bound_(std::shared_ptr<std::atomi
         };
         asio::steady_timer woken{co_await asio::this_coro::executor,
                                  asio::steady_timer::time_point::max()};
+        // The exception path's backstop. Declared after `woken`, so an exception's unwinding
+        // clears the wake before the timer it calls is destroyed and before the handler's
+        // Disconnected edge calls the wake. It acts only while an exception unwinds the
+        // frame: a suspended frame destroyed unresumed touches no Session state here, since
+        // its Session may be gone (research D4.4's reason, Gate A round 2, for no exit guard).
+        // The body's two clears disarm it.
+        struct wake_clearer {
+            Session* s;
+            int const unwinding_at = std::uncaught_exceptions();
+            bool armed = true;
+            ~wake_clearer() {
+                if (armed && std::uncaught_exceptions() > unwinding_at) {
+                    s->peer_logout_wake_ = nullptr;
+                }
+            }
+        } wake_clear{this};
         peer_logout_wake_ = [&woken] { woken.cancel(); };
         if (!live()) {
             peer_logout_wake_ = nullptr;
+            wake_clear.armed = false;
             co_return;
         }
         const bool passed = seqnum_mgr_.next_inbound_unsafe() > peer_logout_.seq;
@@ -5621,6 +5643,7 @@ asio::awaitable<void> Session::run_peer_logout_bound_(std::shared_ptr<std::atomi
                             detail::await_deadline(*effective_clock_, deadline));
         }
         peer_logout_wake_ = nullptr;
+        wake_clear.armed = false;
         if (!live()) {
             co_return;
         }
@@ -5646,7 +5669,17 @@ asio::awaitable<void> Session::run_peer_logout_bound_(std::shared_ptr<std::atomi
         }
         assert(conn_gen_ == gen && "the too-high Logout's bound outlived its connection");
         peer_logout_.phase = peer_logout_mark::phase_t::none;
-    } catch (...) {  // NOLINT(bugprone-empty-catch) — a detached frame's noexcept window
+    } catch (...) {
+        // An exception from any await of the body, store_then_emit's operation_aborted for
+        // a cancelled store call among them, ends the bound closed, as send_body_'s handler
+        // ends a send: no mark is left `pending` or `acking`, and the session is
+        // Disconnected (that edge also clears the Logout owner and wakes the replay gate).
+        // The wake is already clear: wake_clear's destructor ran during the unwinding.
+        assert(conn_gen_ == gen && "the too-high Logout's bound outlived its connection");
+        peer_logout_.phase = peer_logout_mark::phase_t::none;
+        if (fsm_state_ != fsm_state::Disconnected) {
+            record_state_transition_(fsm_state::Disconnected);
+        }
     }
 }
 

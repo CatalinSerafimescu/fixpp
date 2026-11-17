@@ -1827,13 +1827,38 @@ private:
     };
     peer_logout_mark peer_logout_;
     // The bound's wake (research D4.4): published by the bound and cleared in its body
-    // when its race ends. Session strand only.
+    // when its race ends; on an exception exit before that clear, a frame-local clearer
+    // clears it while the exception unwinds the frame (the evidence record's "Gate B r1: the
+    // bound's exception exit"). Session strand only.
     std::function<void()> peer_logout_wake_;
     // The bound's join counter (research D4.4): incremented before the bound is spawned,
-    // decremented by a frame-local guard that touches only this counter
-    // (liveness_counter_'s pattern).
+    // decremented by the bound's peer_logout_bound_join parameter, which touches only this
+    // counter (liveness_counter_'s pattern).
     std::shared_ptr<std::atomic<int>> peer_logout_bound_counter_{
         std::make_shared<std::atomic<int>>(0)};
+    // One hold on the bound's join counter: its constructor increments the counter and its
+    // destructor decrements it. It is the bound's parameter, so the frame owns it from its
+    // creation and releases the counter whether or not the body ran, an unstarted frame that
+    // a throwing co_spawn destroys included. A moved-from hold releases nothing.
+    class peer_logout_bound_join {
+    public:
+        explicit peer_logout_bound_join(std::shared_ptr<std::atomic<int>> counter) noexcept
+            : counter_{std::move(counter)} {
+            counter_->fetch_add(1, std::memory_order_relaxed);
+        }
+        peer_logout_bound_join(peer_logout_bound_join&&) noexcept = default;
+        peer_logout_bound_join(peer_logout_bound_join const&) = delete;
+        peer_logout_bound_join& operator=(peer_logout_bound_join const&) = delete;
+        peer_logout_bound_join& operator=(peer_logout_bound_join&&) = delete;
+        ~peer_logout_bound_join() {
+            if (counter_) {
+                counter_->fetch_sub(1, std::memory_order_release);
+            }
+        }
+
+    private:
+        std::shared_ptr<std::atomic<int>> counter_;
+    };
     // The Logout owner (research D4.6): at most one Logout of an established session is
     // in flight. Session strand only.
     bool logout_in_flight_ = false;
@@ -1863,8 +1888,10 @@ private:
             peer_logout_wake_();
         }
     }
-    // Research D4.4: the bound, a detached coroutine on the session strand.
-    asio::awaitable<void> run_peer_logout_bound_(std::shared_ptr<std::atomic<int>> counter,
+    // Research D4.4: the bound, a detached coroutine on the session strand. An exception
+    // that reaches its handler ends it closed: the mark `none` and the session Disconnected
+    // (the evidence record's "Gate B r1: the bound's exception exit").
+    asio::awaitable<void> run_peer_logout_bound_(peer_logout_bound_join join,
                                                  std::uint32_t gen) noexcept;
 
     // Test seams of the bound (cells F1 and F2): when set, the bound awaits the first

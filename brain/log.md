@@ -6,6 +6,10 @@ status: stable
 
 # Log
 
+- **2026-11-17 — 103-resend-logon-reset-fidelity, Gate B round 1: the too-high Logout bound's exception
+  exit.** `components/session.md`'s 103 section gains the decision that an exception reaching the bound's
+  handler ends it closed (no mark left, `Disconnected`), with a frame-local wake clearer and a
+  parameter-owned join hold, and names what was not taken.
 - **2026-11-16 — 103-resend-logon-reset-fidelity, `/speckit-verify` (Step 10b): the crossing and the strict
   refusal's superseded ending.** `components/session.md`'s 103 section gains two decisions made after its
   last edit: a too-high Logout while the session is itself ending is acknowledged at once, with no bound

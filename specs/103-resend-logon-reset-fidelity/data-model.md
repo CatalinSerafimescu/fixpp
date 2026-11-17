@@ -93,8 +93,14 @@ match. The acceptor needs none: `attach_accepted_transport` runs once per Sessio
 
 Fields: `seq` (the too-high Logout's MsgSeqNum S), `at` (arrival time), `phase ∈ {none, pending, acking}`. The bound
 coroutine owns its captured `gen`; the session owns `peer_logout_wake_` (published by the bound, cleared in the
-bound's body when its T race ends; no exit guard clears it, D4.4) and the join counter (a shared counter, incremented before `co_spawn`, decremented by
-the bound's exit guard, which touches only that counter; `close()` and the reconnect drain poll it by post).
+bound's body when its T race ends, D4.4; on an exception exit before that clear, a frame-local clearer that the body's
+clears disarm clears it while the exception unwinds the frame, before the frame's timer is destroyed; a frame destroyed
+unresumed is not unwinding an exception, so the clearer then touches no Session state, D4.4's reason for no exit
+guard) and the join counter (a shared counter, incremented
+before `co_spawn` by a hold that the bound's frame owns as its parameter, and decremented when that frame is destroyed,
+whether or not its body ran; the hold touches only that counter; `close()` and the reconnect drain poll it by post).
+*(Amended by the Gate B round 1 ruling of 2026-11-17, which supersedes "no exit guard clears it" for an exception's
+unwinding only, and the body-local exit guard; the exception rows below are the same ruling's.)*
 
 ## Logout owner — `logout_in_flight_` (new, Gate A round 2; held at the leaf before loop 2)
 
@@ -122,6 +128,8 @@ Active Logout builder exists. Invariant: at most one Logout of an established se
 | acking | `close(graceful)` | acking | `logout_in_flight_` is set: `close()` poll-joins it inside its grace, before `Disconnected` and before closing the transport |
 | any | new transport installed (always after the drain, which waited for the bound's counter to reach 0) | none | `conn_gen_` moves; no bound of the old connection exists (D1 step 3) |
 | any | edge into `Disconnected` | unchanged | bound and gate woken; the bound's "live" test fails (not Active), so it exits without effect |
+| none | the bound's spawn throws | none | the mark is cleared before the exception goes on; the hold, destroyed with the unstarted frame, releases the join counter |
+| pending, acking | an exception reaches the bound's handler (a throw at any await of its body, `store_then_emit`'s `operation_aborted` for a cancelled store call of the acknowledgement among them) | none | no Logout from the bound; the wake is already clear; `Disconnected` is recorded unless already recorded (that edge clears `logout_in_flight_` and wakes the gate) |
 
 "Live" = phase `pending`, `fsm_state_ == Active`, not `closing`/`closed_drained`, no engine stop.
 The bound tests it after publishing its wake, after its T race, after every gate wake, and before its claim, and

@@ -764,6 +764,16 @@ taken.
   and QuickFIX/Go each disconnect at once there, with no ResendRequest. Not taken: leaving the
   crossing to the bound (close() then waited out its whole grace, and the session drew a
   ResendRequest during its own Logout ending).
+  An exception that reaches the bound's handler ends the bound closed: no mark is left `pending` or
+  `acking` and the session records `Disconnected`, as a send's handler ends a send. A frame-local
+  clearer clears the wake before the bound's timer is destroyed, and acts only while an exception
+  unwinds the frame, so a frame destroyed unresumed still touches no Session state (D4.4's Gate A
+  reason for no exit guard). The join counter is held by the bound's parameter, so an unstarted frame
+  that a throwing `co_spawn` destroys still releases it (the Gate B round 1 ruling of 2026-11-17).
+  Not taken: a heap-owned timer (an allocation and shared ownership the clearer does not need); a
+  clearer that acts at every frame destruction (it writes into a Session that a frame destroyed
+  unresumed may outlive); an empty handler (it left the wake calling a destroyed timer, and the mark
+  set with the session Active).
 - **Sends, the liveness frames and the close's Logout wait for a running resend answer** (D5′, #588
   widened by the owner): a shared/exclusive `detail::replay_gate` on the session strand, with no
   atomic and no OS primitive, and a timer made only on a contended wait.

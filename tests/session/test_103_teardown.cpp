@@ -24,8 +24,13 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <asio/as_tuple.hpp>
+#include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
+#include <asio/steady_timer.hpp>
+#include <asio/this_coro.hpp>
+#include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
@@ -162,4 +167,99 @@ TEST(Drain103Teardown, G9_ContextDestroyedWithFramesSuspended_NoReportNoAssertio
     session.reset();
     EXPECT_THROW((void)tr_fut.get(), std::future_error) << "the inbound chain completed";
     EXPECT_THROW((void)send_fut.get(), std::future_error) << "the send completed";
+}
+
+// The bound's wake clearer (the evidence record's "Gate B r1: the bound's exception exit")
+// acts only while an exception unwinds the bound's frame. Here the io_context is destroyed
+// with the bound suspended between its publish and its race, in its before-race seam's wait on
+// a timer of that context, the Session alive: the frame is destroyed unresumed,
+// and the clearer writes no Session state, so the wake the bound published is still published
+// (research D4.4's reason for no exit guard: a frame destroyed so may outlive its Session).
+// The frame's join hold is destroyed with it, so the counter is 0. The cell drops the wake
+// without calling it before it destroys the Session.
+TEST(Drain103Teardown, G9_ContextDestroyedWithTheBoundInItsRace_ClearerTouchesNoSessionState) {
+    std::unique_ptr<fixpp::session::Session> session;
+    auto ioc = std::make_unique<asio::io_context>();
+    std::vector<std::string> sent;
+    std::vector<std::vector<std::byte>> fed;
+
+    using namespace std::chrono;
+    auto mock = std::make_shared<fixpp::core::mock_clock>(
+        system_clock::time_point{} + seconds{1704067200}, fixpp::core::steady_time_point{},
+        ioc->get_executor());
+    fixpp::core::EngineConfig engine;
+    engine.clock = mock;
+    engine.executor = ioc->get_executor();
+    fixpp::session::SessionConfig cfg;
+    cfg.sender_comp_id = "ISLD";
+    cfg.target_comp_id = "TW";
+    cfg.begin_string = "FIX.4.2";
+    cfg.heartbeat_interval = seconds{0};  // no liveness loop
+    cfg.role = fixpp::session::session_role::initiator;
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    cfg.executor_override = ioc->get_executor();
+    cfg.mode = fixpp::session::threading_mode::direct_executor;
+    cfg.already_serialized_executor = true;
+    cfg.logout_disconnect_timeout_ms = 2000;
+    cfg.transport_send = [&sent](std::span<const std::byte> b) {
+        sent.emplace_back(reinterpret_cast<const char*>(b.data()), b.size());
+    };
+    session = std::make_unique<fixpp::session::Session>(engine, cfg);
+
+    auto pump = [&](auto pred) {
+        return fixpp::test_support::pump_until(*ioc, pred, fixpp::test_support::kPumpBudget,
+                                               fixpp::test_support::kPumpSlice, nullptr);
+    };
+    auto ready = [](auto const& fut) {
+        return fut.wait_for(seconds{0}) == std::future_status::ready;
+    };
+    auto frame = [&](char const* type, std::uint32_t seq, std::string const& extra) {
+        std::array<char, 32> buf{};
+        auto const st = fixpp::core::utc_time_to_fix_string(
+            mock->now(), fixpp::core::fix_time_precision::millis, std::span<char>{buf});
+        return rg::Scene::raw(type, seq, "TW", st ? std::string{st->data(), st->size()} : "",
+                              extra);
+    };
+    auto deliver = [&](std::vector<std::byte> bytes) {
+        fed.push_back(std::move(bytes));
+        return asio::co_spawn(fixpp::test_support::session_executor_of(*session, *ioc),
+                              session->on_inbound_frame(fed.back()), asio::use_future);
+    };
+
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(*session, *ioc),
+                                   session->open(), asio::use_future);
+    ASSERT_TRUE(pump([&] { return ready(open_fut); })) << "setup: open()";
+    auto logon_fut = deliver(frame("A", 1,
+                                   "98=0\x01"
+                                   "108=0\x01"));
+    ASSERT_TRUE(pump([&] { return ready(logon_fut); })) << "setup: the Logon";
+    ASSERT_EQ(session->state(), fsm_state::Active) << "setup";
+
+    // A too-high Logout: the mark is set and the bound parks in its before-race seam, on a
+    // timer of the io_context that never expires, so only that context holds the frame (a
+    // wait on the mock clock would be held by the clock, which the Session keeps alive).
+    bool seam_entered = false;
+    session_test_access::set_peer_logout_bound_hold_before_race(
+        *session, [&seam_entered]() -> asio::awaitable<void> {
+            seam_entered = true;
+            asio::steady_timer never{co_await asio::this_coro::executor,
+                                     asio::steady_timer::time_point::max()};
+            (void)co_await never.async_wait(asio::as_tuple(asio::use_awaitable));
+        });
+    auto lo_fut = deliver(frame("5", 4, ""));
+    ASSERT_TRUE(pump([&] { return ready(lo_fut) && seam_entered; }))
+        << "setup: the bound did not reach its before-race seam";
+    ASSERT_TRUE(session_test_access::peer_logout_wake_published(*session))
+        << "setup: the bound did not publish its wake";
+    ASSERT_EQ(session_test_access::peer_logout_phase(*session), 1) << "setup: no pending mark";
+    ASSERT_EQ(session_test_access::peer_logout_bound_count(*session), 1) << "setup: no bound";
+
+    ioc.reset();
+    EXPECT_TRUE(session_test_access::peer_logout_wake_published(*session))
+        << "the bound's frame, destroyed unresumed, cleared the Session's wake";
+    EXPECT_EQ(session_test_access::peer_logout_bound_count(*session), 0)
+        << "the destroyed frame did not release the join counter";
+    session_test_access::drop_peer_logout_wake(*session);
+    session.reset();
 }

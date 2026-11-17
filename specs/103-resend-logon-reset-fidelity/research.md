@@ -461,7 +461,11 @@ In both routes:
   - **The wake:** a member `std::function<void()> peer_logout_wake_`, set by the coroutine and cleared when its race
     ends, in the coroutine's body. It is not cleared by an exit guard (Gate A round 2, Codex #6): the race's own clear
     already covers every resumed exit, and a guard would do work only at frame destruction, where a Session
-    destroyed without `close()` (tests do it, `session.hpp`'s FQ-C note) may already be gone. It follows the two body-cleared wakes, `close_grace_wake_` and
+    destroyed without `close()` (tests do it, `session.hpp`'s FQ-C note) may already be gone. *[Superseded in part by
+    the Gate B round 1 ruling of 2026-11-17 (the evidence record's "Gate B r1: the bound's exception exit"): a
+    frame-local clearer clears the wake while an exception unwinds the frame, which the race's clear does not cover;
+    it does nothing at the destruction of a frame that is not unwinding an exception, so the hazard above does not
+    arise.]* It follows the two body-cleared wakes, `close_grace_wake_` and
     `reset_unit_wake_` (`logout_wait_wake_` is cleared by an exit guard in `run_logout_phase1`, an awaited frame,
     where a Session-touching destructor is accepted); the reason the bound differs is FQ-C's: it is a detached frame
     that may outlive the Session. The `std::function` holds one reference capture, which the three supported standard libraries store inline;
@@ -481,7 +485,10 @@ In both routes:
   - **The join (`bound_counter`):** a `std::shared_ptr<std::atomic<int>>` counter, incremented before `co_spawn` and
     decremented by a frame-local guard that touches **only** the shared counter (`liveness_counter_`'s FQ-C
     pattern). There is no `bound_done` timer and no Session pointer in the guard (Gate A round 2, Codex #6, fix
-    shape (a)): every waiter polls the counter by post, as `close()`'s liveness join does.
+    shape (a)): every waiter polls the counter by post, as `close()`'s liveness join does. *[Superseded in part by the
+    Gate B round 1 ruling of 2026-11-17: the decrement is the bound's parameter, a hold whose constructor increments
+    the counter and whose destructor decrements it, so an unstarted frame that a throwing `co_spawn` destroys still
+    releases it; it still touches only the counter.]*
   - `close()` wakes the coroutine right after its `closing` commit (D1), joins a Logout in flight inside its grace (D4.6), and polls the counter
     to 0 next to the liveness join, before the teardown reset and the drains. `~Session` asserts (`FIXPP_ASSERT`)
     that the counter is 0, which makes the "close() before destruction" precondition checkable.
