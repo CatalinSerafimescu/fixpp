@@ -292,6 +292,26 @@ TEST(ReplayMtEngine588, R588h_SendsFromSeveralThreadsDuringAHeldAnswer_AllAfterI
     });
     EXPECT_TRUE(ok) << "setup: no Logon reply";
 
+    // The acceptor emits its Logon reply in LogonReceived and records Active only after the
+    // emit has completed, so the peer can read the reply before the session is Active, and a
+    // send that reaches the session's strand first is refused. The setup sends wait for
+    // Active, read on the session's strand. The handler holds no lookup() handle (~Engine
+    // requires every one released); the Session outlives every handler, which runs before
+    // teardown joins the io threads.
+    if (ok) {
+        std::optional<bool> active;
+        while (!active.value_or(false) && std::chrono::steady_clock::now() < deadline) {
+            if (auto const s = engine->lookup(id)) {
+                active = on_strand(
+                    *s, [p = s.get()] { return p->state() == fixpp::session::fsm_state::Active; },
+                    deadline);
+            }
+            if (!active.value_or(false)) std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        }
+        ok = active.value_or(false);
+        EXPECT_TRUE(ok) << "setup: the session did not reach Active";
+    }
+
     // The messages the answer replays, stored at 2 to 4.
     std::vector<std::string> const setup_payloads{
         "35=D\x01"
