@@ -33,7 +33,7 @@
 #include <coroutine>  // NOLINT(misc-include-cleaner) — IWYU: coroutine_handle via awaitable machinery
 #include <cstddef>
 #include <cstdint>
-#include <cstring>  // 034: std::memcpy for the masked-frame coroutine-frame copy
+#include <cstring>    // 034: std::memcpy for the masked-frame coroutine-frame copy
 #include <exception>  // 103: std::uncaught_exceptions, the bound's wake clearer
 #include <expected>
 #include <fixpp/core/clock.hpp>  // Clock::steady_now / sleep_until
@@ -5592,11 +5592,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::acknowledge_peer_logout_
 // which touches only the counter, so the frame may outlive the Session (FQ-C). The wake is
 // published, then "live" tested; the race's outcome is read from session state afterwards;
 // the wake is cleared, in the body, before anything else once the race is over.
-// Superseded in part by the evidence record's "Gate B r1: the bound's exception exit": the
-// counter is held by a parameter rather than a body-local guard, a wake clearer is the
+// Superseded in part by the evidence record's section on the bound's exception exit
+// ("Gate B r1: the bound's exception exit").  claim-ok: the superseding record's name
+// The counter is held by a parameter rather than a body-local guard, a wake clearer is the
 // exception path's backstop for the body's clears, and the handler ends the bound closed.
-asio::awaitable<void> Session::run_peer_logout_bound_(
-    [[maybe_unused]] peer_logout_bound_join join, std::uint32_t gen) noexcept {
+asio::awaitable<void> Session::run_peer_logout_bound_([[maybe_unused]] peer_logout_bound_join join,
+                                                      std::uint32_t gen) noexcept {
     try {
         if (peer_logout_bound_hold_first_run_) {
             co_await peer_logout_bound_hold_first_run_();
@@ -5613,7 +5614,7 @@ asio::awaitable<void> Session::run_peer_logout_bound_(
         // clears the wake before the timer it calls is destroyed and before the handler's
         // Disconnected edge calls the wake. It acts only while an exception unwinds the
         // frame: a suspended frame destroyed unresumed touches no Session state here, since
-        // its Session may be gone (research D4.4's reason, Gate A round 2, for no exit guard).
+        // its Session may be gone (research D4.4's reason for no exit guard).
         // The body's two clears disarm it.
         struct wake_clearer {
             Session* s;

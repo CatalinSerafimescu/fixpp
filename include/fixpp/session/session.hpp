@@ -1828,8 +1828,8 @@ private:
     peer_logout_mark peer_logout_;
     // The bound's wake (research D4.4): published by the bound and cleared in its body
     // when its race ends; on an exception exit before that clear, a frame-local clearer
-    // clears it while the exception unwinds the frame (the evidence record's "Gate B r1: the
-    // bound's exception exit"). Session strand only.
+    // clears it while the exception unwinds the frame (data-model "Pending-Logout mark").
+    // Session strand only.
     std::function<void()> peer_logout_wake_;
     // The bound's join counter (research D4.4): incremented before the bound is spawned,
     // decremented by the bound's peer_logout_bound_join parameter, which touches only this
@@ -1890,7 +1890,7 @@ private:
     }
     // Research D4.4: the bound, a detached coroutine on the session strand. An exception
     // that reaches its handler ends it closed: the mark `none` and the session Disconnected
-    // (the evidence record's "Gate B r1: the bound's exception exit").
+    // (data-model "Pending-Logout mark", its exception rows).
     asio::awaitable<void> run_peer_logout_bound_(peer_logout_bound_join join,
                                                  std::uint32_t gen) noexcept;
 

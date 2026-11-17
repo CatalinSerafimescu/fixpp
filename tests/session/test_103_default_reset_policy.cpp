@@ -299,11 +299,12 @@ TEST(DefaultResetPolicy103, AS3_StrictAcceptor_RefusalLogoutCannotBeNumbered_Ret
     EXPECT_EQ(f.session->state(), fsm_state::Disconnected);
 }
 
-// AS3's emit-failure ending (FR-004 as amended by the Gate B round 1 ruling of 2026-11-17;
-// research D2.4's note): the refusal helper discards its Logout's emit error, so the arm still
+// AS3's emit-failure ending (FR-004, its store-or-transmit clause; research D2.4's note): the
+// refusal helper discards its Logout's emit error, so the arm still
 // returns the mismatch. Here the Logout's outbound store at 42 fails on a persistent store: no
 // Logout is written, NextNumIn does not move and the session is Disconnected.
-TEST(DefaultResetPolicy103, AS3_StrictAcceptor_RefusalLogoutStoreFails_MismatchDisconnectedNoLogout) {
+TEST(DefaultResetPolicy103,
+     AS3_StrictAcceptor_RefusalLogoutStoreFails_MismatchDisconnectedNoLogout) {
     auto const rec =
         std::make_shared<RecordingStoreFactory>(std::make_shared<rr::FaultStoreFactory>(37, 42));
     auto const log = rec->log;
@@ -336,7 +337,8 @@ TEST(DefaultResetPolicy103, AS3_StrictAcceptor_RefusalLogoutStoreFails_MismatchD
 // Its transport twin: the Logout is stored and its send throws, which store_then_emit returns
 // as dispatch_aborted. The sink counts the Logouts handed to it, so "none written" is read
 // against one that reached the transport.
-TEST(DefaultResetPolicy103, AS3_StrictAcceptor_RefusalLogoutSendThrows_MismatchDisconnectedNoLogout) {
+TEST(DefaultResetPolicy103,
+     AS3_StrictAcceptor_RefusalLogoutSendThrows_MismatchDisconnectedNoLogout) {
     std::vector<std::string> handed;  // declared before the fixture, whose session holds the sink
     auto r = rr::make_acceptor_notconnected(std::make_shared<rr::FaultStoreFactory>(37, 42),
                                             /*refresh_on_logon=*/false,

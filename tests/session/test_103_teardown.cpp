@@ -169,14 +169,13 @@ TEST(Drain103Teardown, G9_ContextDestroyedWithFramesSuspended_NoReportNoAssertio
     EXPECT_THROW((void)send_fut.get(), std::future_error) << "the send completed";
 }
 
-// The bound's wake clearer (the evidence record's "Gate B r1: the bound's exception exit")
-// acts only while an exception unwinds the bound's frame. Here the io_context is destroyed
-// with the bound suspended between its publish and its race, in its before-race seam's wait on
-// a timer of that context, the Session alive: the frame is destroyed unresumed,
-// and the clearer writes no Session state, so the wake the bound published is still published
-// (research D4.4's reason for no exit guard: a frame destroyed so may outlive its Session).
-// The frame's join hold is destroyed with it, so the counter is 0. The cell drops the wake
-// without calling it before it destroys the Session.
+// The bound's wake clearer (data-model "Pending-Logout mark") acts only while an exception unwinds
+// the bound's frame. Here the io_context is destroyed with the bound suspended between its publish
+// and its race, in its before-race seam's wait on a timer of that context, the Session alive: the
+// frame is destroyed unresumed, and the clearer writes no Session state, so the wake the bound
+// published is still published (research D4.4's reason for no exit guard: a frame destroyed so may
+// outlive its Session). The frame's join hold is destroyed with it, so the counter is 0. The cell
+// drops the wake without calling it before it destroys the Session.
 TEST(Drain103Teardown, G9_ContextDestroyedWithTheBoundInItsRace_ClearerTouchesNoSessionState) {
     std::unique_ptr<fixpp::session::Session> session;
     auto ioc = std::make_unique<asio::io_context>();

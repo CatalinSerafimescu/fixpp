@@ -562,8 +562,7 @@ TEST_P(TooHighLogoutState103, SecondTooHighLogoutWhilePending_IgnoredOneBoundAck
     EXPECT_EQ(bound_count(s), 0);
 }
 
-// ── The bound's exception exit (the evidence record's "Gate B r1: the bound's exception
-// exit") ───────────────────────────────────────────────────────────────────────────────
+// ── The bound's exception exit (data-model "Pending-Logout mark", its exception rows) ──
 //
 // An exception that reaches the bound's handler ends it closed: no wake published, the mark
 // `none`, the session Disconnected, no Logout, and the join counter 0. The wake is read
