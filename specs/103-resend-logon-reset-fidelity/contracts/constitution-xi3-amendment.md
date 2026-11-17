@@ -67,7 +67,7 @@ Sync Impact Report — v4.3 → v4.4 (<date>) — PENDING
     Heartbeat and TestRequest, close()'s Logout and the pending-Logout acknowledgement around a resend
     answer, with no wait and no allocation on the normal path and no terminal cancellation filter
     left on the caller (spec FR-014, FR-015).
-    [Erratum 2026-11-15, 103 Phase 7, orchestrator ruling; owner to confirm with XI §3 at Gate B:
+    [Erratum 2026-11-15, 103 Phase 7, orchestrator ruling; owner to confirm with XI §3 at Gate B; owner-confirmed 2026-11-17:
     "no terminal cancellation filter left on the caller" is said of an emitter's shared wait. The
     walk's exclusive wait runs the lock sequence's cancellation parts in its own frame and leaves
     its caller the terminal filter, as the store lock it meets next does (research D5′

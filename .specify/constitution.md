@@ -28,7 +28,11 @@ Sync Impact Report — v4.3 → v4.4 (2026-11-15) — RATIFIED
   Rationale: fixpp#588 as widened by the owner (2026-11-14) orders Session::send, the liveness loop's
     Heartbeat and TestRequest, close()'s Logout and the pending-Logout acknowledgement around a resend
     answer, with no wait and no allocation on the normal path and no terminal cancellation filter
-    left on the caller (spec FR-014, FR-015). async_mutex is exclusive only (sends would queue behind
+    left on the caller (spec FR-014, FR-015). [Erratum 2026-11-15, owner-confirmed 2026-11-17: "no
+    terminal cancellation filter left on the caller" is said of an emitter's shared wait. The resend
+    walk's exclusive wait runs the lock sequence's cancellation parts in its own frame and ends as a
+    cancelled store-lock wait does (spec FR-015's erratum; research D5′ "Cancellation (#583)"). The
+    amended Article XI §3 sentence speaks of the gate and stays as written.] async_mutex is exclusive only (sends would queue behind
     each other), its lock sequence leaves #583's terminal filter, and it needs a cancel_and_drain in
     both teardowns (#544 R-10); the gate has none of these (research D5′).
   Affected catalogue rows: none. Affected specs: specs/103-resend-logon-reset-fidelity/ (research D5′,
