@@ -178,6 +178,7 @@ wheelhouse/
 # `fixpp-codegen --families official`; not a source-of-truth artifact)
 specs/069-v44-all-families/baseline/
 
-# spec-kit CLI catalog cache (ephemeral, regenerated)
+# spec-kit CLI catalog cache + extension-update backups (ephemeral, regenerated)
 .specify/integrations/.cache/
 .specify/extensions/.cache/
+.specify/extensions/.backup/
