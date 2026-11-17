@@ -17,8 +17,9 @@
 //
 // The hold is released only once every sender thread has a send waiting at the replay gate,
 // read on the session's strand; a run in which they do not is a failure, not a sample. The
-// readings share one budget, kPumpBudget, which is half the hold's own bound
-// (kBodyHoldBound), so they end before the hold can end by time. How many repeats the race
+// readings share one budget, kPumpBudget, taken before the request that starts the hold and
+// half the hold's own bound (kBodyHoldBound), so they end before the hold can end by time.
+// How many repeats the race
 // evidence takes is tasks T074's procedure; run it with --gtest_repeat=<n>.
 #include <gtest/gtest.h>
 
@@ -321,6 +322,7 @@ TEST(ReplayMtEngine588, R588h_SendsFromSeveralThreadsDuringAHeldAnswer_AllAfterI
     });
 
     // The request; the answer reaches the hold at slot 3 once replay 2 is on the wire.
+    auto const until = std::chrono::steady_clock::now() + fixpp::test_support::kPumpBudget;
     ok = ok && peer.write(peer_msg("2", 2,
                                    "7=1\x01"
                                    "16=0\x01"));
@@ -337,9 +339,8 @@ TEST(ReplayMtEngine588, R588h_SendsFromSeveralThreadsDuringAHeldAnswer_AllAfterI
         teardown();
         return;
     }
-    // The readings' one budget, taken before the first of them; the hold began at the read of
-    // slot 3, after replay 2 was written.
-    auto const until = std::chrono::steady_clock::now() + fixpp::test_support::kPumpBudget;
+    // The readings' one budget, taken before the request: the hold cannot begin before the
+    // request is written.
     auto const release_and_teardown = [&] {
         asio::post(session->executor().underlying(), [log] { log->release_hold(); });
         session.reset();
