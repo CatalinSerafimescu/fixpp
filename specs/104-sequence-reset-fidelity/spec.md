@@ -161,10 +161,10 @@ the state, both numbers, the store, and the frames fixpp sends.
 
 ### User Story 3 — A too-low frame in a Logon arm draws QuickFIX's Logout (Priority: P2)
 
-A frame whose MsgSeqNum is below NextNumIn, without PossDupFlag(43)=Y and without 141=Y, arrives while the session is
+A frame whose MsgSeqNum is below NextNumIn, without 141=Y and whatever its PossDupFlag(43) (E-2), arrives while the session is
 establishing: the acknowledgement on an initiator, or the Logon on an acceptor. fixpp sends a Logout with Text
 "MsgSeqNum too low, expecting N but received M", then ends the session. That is what the FIX Session Layer asks for
-and what all three QuickFIX engines do.
+(§4.3.11) and what all three QuickFIX engines do without 43=Y.
 
 **Why this priority**: the session ends either way, but today a silent end leaves the peer's operator nothing to
 diagnose. The commonest reach is a reconnect against a `ResetOnLogon=Y` acceptor.
@@ -176,11 +176,11 @@ final state.
 **Acceptance Scenarios**:
 
 1. **Given** an initiator in LogonSent with NextNumIn = N, **When** the acknowledgement arrives at 34 = M < N without
-   43=Y or 141=Y, **Then** fixpp sends one Logout with Text exactly "MsgSeqNum too low, expecting N but received M".
+   141=Y, whatever its 43, **Then** fixpp sends one Logout with Text exactly "MsgSeqNum too low, expecting N but received M".
    That Logout is numbered with fixpp's next outbound number. NextNumIn is not advanced. Then the session records
    `Disconnected`.
-2. **Given** an acceptor in NotConnected with NextNumIn = N, **When** a Logon arrives at 34 = M < N without 43=Y or
-   141=Y, **Then** the same, from the acceptor.
+2. **Given** an acceptor in NotConnected with NextNumIn = N, **When** a Logon arrives at 34 = M < N without
+   141=Y, whatever its 43, **Then** the same, from the acceptor.
 3. **Given** either arm, **When** the Logout cannot be sent (its build does not fit, its store call or its transmit
    fails), **Then** the session still ends, with the ending fixpp's existing Logout helpers give that failure.
 
@@ -219,8 +219,9 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
   Only `reset_on_disconnect` resets (FR-002, FR-004).
 - **141=Y acknowledgement at 34 ≠ 1** on a lenient initiator: what QuickFIX does is read in research and adopted or
   disclosed.
-- **A too-low Logon acknowledgement with 43=Y**: QuickFIX routes it to its PossDup handling. The plan reads that path
-  in all three engines and states fixpp's behaviour.
+- **A too-low Logon or acknowledgement with 43=Y**: it draws the same Logout (E-2, research D6). This follows
+  FIX-SL §4.3.11 and QuickFIX/Go. QuickFIX C++ and QuickFIX/J run their PossDup handling and then wait for their logon
+  timeout, which is a departure recorded in the plan.
 - **The acceptor twin of User Story 2** (a Logon with 141=Y at 34=1 on an acceptor whose NextNumIn is above 1): the
   inbound seed is withheld for a 141=Y Logon when hydration runs. An acceptor Session serves one accepted connection,
   so hydration runs at its first Logon. The plan confirms whether any route leaves NextNumIn above 1 at that point. If
@@ -239,13 +240,16 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
   receives a Logout from the peer: a request, or a response to its own Logout. The reset MUST happen at the receipt,
   after the reply Logout if one is owed and before the disconnect, as in QuickFIX C++, QuickFIX/J and QuickFIX/Go
   (clarification 2026-11-17). Sending a Logout MUST NOT by itself cause the reset. The reset MUST be durable on a
-  persistent store, and `close()` MUST wait for it as it waits for 103's reset unit.
+  persistent store, and `close()` MUST wait for it as it waits for 093's 141=Y reset unit (`run_reset_unit_`, 093
+  contract C-6, unchanged by 103) (erratum E-1). For a too-high Logout (B-103-7), "at the receipt" means at its
+  acknowledgement, where fixpp processes it (erratum E-3).
 - **FR-002**: A graceful close whose Logout was sent and not answered MUST NOT reset under `reset_on_logout`,
   whether its wait ended by `logout_disconnect_timeout_ms` or by a dropped connection.
 - **FR-003**: The peer's Logout response received in LogoutSent MUST be a reset trigger under `reset_on_logout`.
 - **FR-004**: `reset_on_disconnect` MUST be unchanged: it resets at teardown on every route it resets on today. A
-  session with both knobs set MUST end its teardown with both numbers at 1. 024's C5.1 (a single store reset) is kept
-  or superseded by name in the plan, now that the receipt reset comes first.
+  session with both knobs set MUST end its teardown with both numbers at 1. 024's C5.1 is read as "at most one store reset
+  per teardown" (erratum E-4): with both knobs set, a received Logout makes one reset at receipt and one at teardown,
+  as QuickFIX C++ and QuickFIX/J do (research D2).
 - **FR-005**: 024's contract clause C3.1, and B-538-7's "answered or not", MUST be superseded by name. Every witness
   that pins a reset after an unanswered local Logout MUST be re-pinned to the new rule or retired with a note. At the
   base these are `ResetOnLifecycleTest.ResetOnLogout_LocalInitiated_Resets`, the initiator arm of
@@ -265,15 +269,16 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
   outbound restarts at 1. fixpp MUST NOT send a further Logon. This follows QuickFIX/J and QuickFIX/Go (clarification
   2026-11-17). The plan derives, from the three engines, how fixpp answers a peer's ResendRequest that follows the
   reset.
-- **FR-009**: The reset MUST be durable on a persistent store, with the guarantees 103's reset unit gives today:
+- **FR-009**: The reset MUST be durable on a persistent store, with the guarantees 093's reset unit gives today (E-1):
   ordering against `close()` and failure handling.
 - **FR-010**: A strict initiator's handling of its own acknowledgement MUST be unchanged.
 - **FR-011**: L-103-2 MUST be retired, and its B&L row moved to the closed file with 104's resolution.
 
 **Too-low frame in the Logon arms (#701)**
 
-- **FR-012**: In LogonSent and in NotConnected, a frame whose MsgSeqNum is below NextNumIn, with no PossDupFlag(43)=Y
-  and not exempted by FR-007, MUST draw a Logout whose Text(58) is exactly "MsgSeqNum too low, expecting N but
+- **FR-012**: In LogonSent and in NotConnected, a frame whose MsgSeqNum is below NextNumIn, whatever its
+  PossDupFlag(43) (erratum E-2: FIX-SL §4.3.11 has no PossDup exception for the Logon; QuickFIX/Go), and not exempted
+  by FR-007, MUST draw a Logout whose Text(58) is exactly "MsgSeqNum too low, expecting N but
   received M" (N = NextNumIn, M = the frame's 34). The session then ends `Disconnected`.
 - **FR-013**: That Logout MUST be numbered with the session's next outbound number, and NextNumIn MUST NOT be
   advanced, as in B-103-10. It MUST carry Text(58) only, with no SessionStatus(1409) (clarification 2026-11-17).
