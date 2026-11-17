@@ -13,10 +13,13 @@
 // io_context of its own, on the test thread only, so its readings need no synchronisation.
 // The store's hold (tests/support/recording_store.hpp) is armed before the Engine starts and
 // released by a handler posted onto the session's own executor, so the hold's state is touched
-// only there.
+// only there; every reading of the hold and of the replay gate is taken the same way.
 //
-// One run is one sample. The repeat count that makes the cell a witness comes from its
-// mutant's miss rate (tasks T074); run it with --gtest_repeat=<n>.
+// The hold is released only once every sender thread has a send waiting at the replay gate,
+// read on the session's strand; a run in which they do not is a failure, not a sample. The
+// readings share one budget, kPumpBudget, which is half the hold's own bound
+// (kBodyHoldBound), so they end before the hold can end by time. How many repeats the race
+// evidence takes is tasks T074's procedure; run it with --gtest_repeat=<n>.
 #include <gtest/gtest.h>
 
 #include <array>
@@ -52,7 +55,9 @@
 
 #include "session/plain_engine_rig.hpp"
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
 #include "support/recording_store.hpp"
+#include "support/session_test_access.hpp"
 
 namespace {
 
@@ -174,6 +179,21 @@ bool has_replay(std::vector<std::string> const& frames, std::string const& seq) 
         }
     }
     return false;
+}
+
+// `read()`, run on the session's strand and waited for until `until`; nullopt when the strand
+// has not run it by then. The handler captures what it reads by value, since a reading that
+// misses may run after the caller has moved on.
+template <class Read>
+auto on_strand(fixpp::session::Session& s, Read read,
+               std::chrono::steady_clock::time_point const until)
+    -> std::optional<decltype(read())> {
+    using T = decltype(read());
+    auto p = std::make_shared<std::promise<T>>();
+    auto fut = p->get_future();
+    asio::post(s.executor().underlying(), [p, read] { p->set_value(read()); });
+    if (fut.wait_until(until) != std::future_status::ready) return std::nullopt;
+    return fut.get();
 }
 
 std::string printable(std::vector<std::string> const& frames) {
@@ -311,6 +331,32 @@ TEST(ReplayMtEngine588, R588h_SendsFromSeveralThreadsDuringAHeldAnswer_AllAfterI
         return;
     }
 
+    auto session = engine->lookup(id);
+    if (session == nullptr) {
+        ADD_FAILURE() << "Engine::lookup found no session";
+        teardown();
+        return;
+    }
+    // The readings' one budget, taken before the first of them; the hold began at the read of
+    // slot 3, after replay 2 was written.
+    auto const until = std::chrono::steady_clock::now() + fixpp::test_support::kPumpBudget;
+    auto const release_and_teardown = [&] {
+        asio::post(session->executor().underlying(), [log] { log->release_hold(); });
+        session.reset();
+        teardown();
+    };
+    std::optional<bool> held;
+    while (!held.value_or(false) && std::chrono::steady_clock::now() < until) {
+        held = on_strand(*session, [log] { return log->holding(); }, until);
+        if (!held.value_or(false)) std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    if (!held.value_or(false)) {
+        ADD_FAILURE() << "setup: the hold is not engaged (reading "
+                      << (held ? (*held ? "true" : "false") : "none") << ")";
+        release_and_teardown();
+        return;
+    }
+
     std::vector<std::vector<std::string>> payloads(kSenderThreads);
     std::vector<int> failed(kSenderThreads, 0);
     for (int t = 0; t < kSenderThreads; ++t) {
@@ -338,18 +384,36 @@ TEST(ReplayMtEngine588, R588h_SendsFromSeveralThreadsDuringAHeldAnswer_AllAfterI
             }
         });
     }
-    // Let the senders run against the held answer, reading what reaches the peer meanwhile.
-    (void)peer.read_until([](auto const&) { return false; }, std::chrono::milliseconds{100});
-
-    auto session = engine->lookup(id);
-    if (session == nullptr) {
-        ADD_FAILURE() << "Engine::lookup found no session";
-        teardown();
+    // The contention witness: every sender thread has a send waiting at the replay gate. The
+    // reading holds no lookup() handle (~Engine requires every one released); the Session
+    // outlives every handler, which runs before teardown joins the io threads.
+    auto const gate_waiters = [s = session.get()] {
+        return fixpp::session::session_test_access::replay_gate(*s).waiters;
+    };
+    std::optional<std::uint32_t> waiting;
+    while (waiting.value_or(0) != static_cast<std::uint32_t>(kSenderThreads) &&
+           std::chrono::steady_clock::now() < until) {
+        waiting = on_strand(*session, gate_waiters, until);
+        if (waiting.value_or(0) != static_cast<std::uint32_t>(kSenderThreads)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        }
+    }
+    if (waiting.value_or(0) != static_cast<std::uint32_t>(kSenderThreads)) {
+        ADD_FAILURE() << "not every sender reached the replay gate while the answer was held: "
+                      << "waiters " << (waiting ? std::to_string(*waiting) : std::string{"none"})
+                      << " of " << kSenderThreads;
+        release_and_teardown();
         return;
     }
+
     asio::post(session->executor().underlying(), [log] { log->release_hold(); });
     for (auto& s : senders) s.join();
     senders.clear();
+    auto const timed_out = on_strand(
+        *session, [log] { return log->hold_timed_out(); },
+        std::chrono::steady_clock::now() + fixpp::test_support::kPumpBudget);
+    EXPECT_EQ(timed_out, std::optional<bool>{false})
+        << "the hold ended by its time bound, not by the release";
     std::size_t const want_live = static_cast<std::size_t>(kSenderThreads * kSendsPerThread);
     bool const all = peer.read_until([&](auto const& fs) {
         return has_replay(fs, "3") && has_replay(fs, "4") && count_live(fs) >= want_live;
