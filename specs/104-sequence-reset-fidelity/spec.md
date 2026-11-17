@@ -101,6 +101,82 @@ Also in this feature, by owner instruction of 2026-11-17: re-record the #266 pea
   - FIX 4.4 Vol 2's and FIX-SL §4.4.2's reset procedure (the receiver of a reset Logon answers with 141=Y at 34=1)
     describes a reset request, not an acknowledgement. §4.4.3 makes the reset at Logon the initiator's option.
 
+### Session 2026-11-17 (Gate A round 1; orchestrator rulings under the owner's autonomy grant)
+
+The owner's grant of 2026-11-17 ("run autonomously through all steps … Stop if you hit a blocker"). Each ruling is
+listed again in the PR body for the owner's review at Gate B sign-off. The mechanism is the contract's Part 1
+(RT-1, RR-1 to RR-4, and its Outcomes table).
+
+- Q (RU-1; Codex #1, Opus N-3): a received Logout whose processing fails before its reset (a `fromAdmin` throw, a
+  late parse failure, a failed persist, a refused reply), or that races `close()` or `Engine::stop()`: reset
+  anyway, or not? → A: **QuickFIX's rule.** Under `reset_on_logout` a received Logout resets if and only if its
+  processing reaches its reset point: after the reply Logout has been attempted, if one is owed, or after a
+  response has been accepted. Processing that ends before it does not reset. The teardown backstop under
+  `reset_on_logout` is deleted; `reset_on_disconnect` stays at teardown. By construction, a reset point once
+  reached is completed and has one owner: `close()` and `Engine::stop()` wait for the receipt (rule RR-2); a
+  receipt they could not wait for (no clock, or the wait expired) has not reached its reset point and is not reset
+  (refined by the design rulings below).
+  Evidence: QuickFIX C++ resets only inside `nextLogout`, after `verify()`, which runs `fromCallback` →
+  `fromAdmin` (`quickfix-cpp@v1.16.0:src/C++/Session.cpp` `nextLogout`, `verify`, `fromCallback`); QuickFIX/J the
+  same (`quickfixj@QFJ_RELEASE_3_0_2:quickfixj-core/src/main/java/quickfix/Session.java` `nextLogout` → `verify` →
+  `fromCallback`, then `resetState()` under `resetOnLogout`); QuickFIX/Go `in_session.go` `handleLogout`:
+  `verifySelect(msg, false, false, true)` (whose `verifyMsgAgainstAppImpl` calls `FromAdmin`) returns into
+  `processReject` before `dropAndReset`. Read with it: QuickFIX/J's `sendRaw` catches a `Throwable` from
+  `toAdmin`, so a reply whose `toAdmin` throws still resets there (contract Outcomes O6, a listed departure), and
+  QuickFIX C++ and QuickFIX/J catch the store's `IOException` in `sendRaw`, so a reply whose store write fails
+  still resets (O8, which fixpp matches).
+- Q (RU-2; Opus N-1): a Logout received in LogonSent (the peer refusing fixpp's Logon), and one received in
+  NotConnected? → A: **QuickFIX C++ and QuickFIX/J.** In LogonSent it resets under `reset_on_logout`. fixpp still
+  sends no reply Logout there and still ends `Disconnected`; QuickFIX replies, a listed departure that FIX-TC 1B(e)
+  allows ("(Optional) Send Logout"). In NotConnected (acceptor, before any Logon) it does not reset. Evidence: QFC
+  `validLogonState` admits a Logout when `m_state.sentLogon()`, and false before any Logon was sent or received;
+  `nextLogout` then resets under `m_resetOnLogout`. QFJ `validLogonState`:
+  `MsgType.LOGOUT.equals(msgType) && state.isLogonSent()`; `nextLogout` resets under `resetOnLogout`. QFGo's
+  `logonState.FixMsgIn` sends a non-Logon to `latentState` with no reset (the third engine, not followed).
+- Q (RU-3; Opus N-2): the numbers are (1, 1) during the unit's store suspension while the session is still Active
+  — gate the emitters, or reorder? → A: **construction, not a gate.** In every receipt arm: the reply Logout, if
+  owed; record `Disconnected` (which stops the liveness loop from numbering, refuses sends and drains further
+  inbound frames); then the durable reset unit, which `close()` waits for; then the transport closes as today.
+  This does not widen 103's FR-021. Nothing on the wire differs from QuickFIX, which resets and then disconnects
+  synchronously. Listed departure: `onLogout` fires before the reset, where QFC's `disconnect()` fires it after
+  `m_state.reset`. Read from source (contract RR-4): the liveness loop, `Session::send` and the resend answer stop
+  on `Disconnected`; an Active-arm frame already in flight when the detached too-high bound records `Disconnected`
+  does not, and is stopped by construction at `store_then_emit` and `persist_inbound_advance_`. Research R1's false
+  premise ("the liveness loop's emits wait at the gate") is removed.
+- Q (N-8, decided from the text): must the too-low Logout, and the initiator's unasked reset, come after the mTLS
+  CompID-authorisation gate? → A: **Yes for every outbound answer; yes for the reset by the same principle.**
+  FIX-TC 1S(c): a Logon "received with unauthenticated/non-configured identity … Disconnect without sending a
+  message (Note: sending a Reject or Logout(35=5) would consume a MsgSeqNum(34))"
+  (`fixdocs/tc.txt`, §4.4.1). So on the acceptor the too-low Logout comes after the mTLS CompID-authorisation gate
+  and after `authorize_logon`, which judge the identity; on the initiator after its mTLS gate. A reset sends
+  nothing, so 1S(c) does not bind it by its text, and FIX-TC 1B (the initiator) has no identity sub-case. But a
+  durable reset made at an unauthenticated peer's word changes the session's state more than one consumed number
+  does, so the unasked unit also runs after the initiator's mTLS gate, and the LogonSent Logout's reset needs the
+  same authorisation (RR-1's row S). The asked (strict or knob) path keeps today's order, unit before the gate
+  (FR-010).
+- Q (design ruling 1): the receipt marker? → A: **Accepted:** `logout_seen_` becomes a three-valued marker,
+  `none` / `pending` / `reached` (data-model).
+- Q (design ruling 2): may `close()` wait while a receipt is `pending`, not only while its unit is in flight? →
+  A: **Accepted** (contract RR-2 item 4).
+- Q (design ruling 3): may the teardown take over a `pending` receipt that `close()` could not wait for? → A:
+  **Rejected:** that is the reset-without-processing RU-1 rules out. A receipt still `pending` when `close()`
+  cannot wait (no clock, or the wait expired) never reached its reset point, so it is not reset under
+  `reset_on_logout`; the teardown closes it out to `reached`, so the arm, resuming, runs no unit and RR-4 refuses
+  its writes. The teardown resets only a receipt that is `reached` with its unit not started, once; the
+  reset point being one strand turn (RR-2 item 3) leaves that case with no input. Round 1's DQ-17 and L-104-8 are
+  deleted; the no-reset case is disclosed in B-104-1 and B-104-2, with no new departure. Cells: R-1l ("`close()`
+  without a clock while `pending` → no reset") and R-1u ("`reached`, unit not started, teardown → one reset",
+  driven through its mutant).
+- Q (design ruling 4): the write refusal once the marker is `reached` (RR-4)? → A: **Accepted** as a
+  by-construction guard; its cell (R-1r) carries a real mutant.
+- Q (design ruling 5): arm S's reset requiring mTLS authorisation, and the unasked unit after the initiator's mTLS
+  gate? → A: **Both accepted.** Both follow FIX-TC 1S(c)'s principle, that nothing is acted on for an
+  unauthenticated identity, rather than its text, which speaks of sending a message.
+- Q (records): the L-104-3 follow-up? → A: plan phase 9 files a labelled issue (bug, follow-up) for the refusals
+  that still answer before the identity gates.
+- Q (R1): the store-order check? → A: it stays a phase-0 check. If it fails, implementation stops and the
+  decision returns to the orchestrator.
+
 ## User Scenarios & Testing *(mandatory)*
 
 The users are the operators and integrators of a fixpp session that talks to a QuickFIX-family counterparty.
@@ -129,7 +205,13 @@ timeout and once by a dropped connection. Read both numbers and the store afterw
 4. **Given** `reset_on_logout` set, **When** the peer sends a Logout request and fixpp answers it, **Then** the
    numbers are reset to 1 (unchanged).
 5. **Given** `reset_on_disconnect` set, with or without `reset_on_logout`, **When** any of the above happens,
-   **Then** the numbers are reset to 1, exactly once (unchanged).
+   **Then** the numbers end at 1, and the teardown makes at most one store reset (024 C5.1; with both knobs and a
+   received Logout, one more at receipt, D2).
+6. **Given** `reset_on_logout` set on an initiator in LogonSent, **When** the peer answers its Logon with a Logout,
+   **Then** the numbers are reset to 1, no Logout is sent, and the session ends `Disconnected` (RU-2).
+7. **Given** `reset_on_logout` set, **When** the processing of a received Logout ends before its reset point (a
+   `fromAdmin` throw or reject, a late parse failure, a failed persist, a refused reply, a too-high Logout left
+   unacknowledged), **Then** no reset is made under `reset_on_logout` (RU-1).
 
 ---
 
@@ -207,14 +289,22 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
   reset under `reset_on_logout`, as today. QuickFIX resets only on receipt.
 - **The peer's Logout response received in LogoutSent**: it must now be a reset trigger. Today only `logout_seen_`'s
   earlier set at emit makes it reset, because the LogoutSent arm sets only `logout_confirmed_`.
-- **A too-high Logout** (103's bounded recovery, `on_inbound_active_too_high_logout_`): it already sets the flag on
-  receipt, and that is unchanged.
-- **A Logout received in NotConnected or LogonSent**: it fails `interpret_logon` and ends the session. It sets no
-  flag, and that is unchanged.
-- **An in-place reconnect** (a direct `Session::drive_reconnect`; the Engine does not reconnect in place): because
-  the reset happens at receipt (FR-001), a peer Logout on the old connection has already reset the numbers before
-  the reconnect. The next Logon is at 1, as in QuickFIX. 103's disclosure that `logout_seen_` stays latched across
-  the reconnect no longer carries a reset consequence. The plan states what remains of it.
+- **A too-high Logout** (103's bounded recovery, `on_inbound_active_too_high_logout_`): it resets at its
+  acknowledgement (erratum E-3). One that ends unacknowledged (claimed by `close()`, a stop, another ending, a
+  reconnect drain) makes no reset under `reset_on_logout` (RU-1). QuickFIX C++ and QuickFIX/J would have reset at
+  receipt, since they process a too-high Logout at once; that follows from 103's bound and is a listed departure.
+- **A received Logout whose processing ends before its reset point** (a `fromAdmin` throw or reject, a late parse
+  failure, a failed inbound persist, a reply whose `toAdmin` throws or whose number cannot be assigned, or a
+  receipt `close()` could not wait for because there was no clock or the wait expired): no reset under
+  `reset_on_logout`, as in QuickFIX (RU-1). There is no teardown backstop or take-over.
+- **A Logout received in LogonSent** (the peer refuses fixpp's Logon): it resets under `reset_on_logout`, sends no
+  Logout and ends `Disconnected` (RU-2). **A Logout received in NotConnected** fails `interpret_logon`, ends the
+  session and does not reset, as today.
+- **An in-place reconnect** (a direct `Session::drive_reconnect`; the Engine does not reconnect in place): a peer
+  Logout on the old connection reset the numbers at its reset point, before the reconnect, and the next Logon goes
+  at 1, as in QuickFIX. Nothing received on the old connection resets the new one: the reconnect's
+  `install_reconnected_transport` clears the receipt marker. 103's disclosure that `logout_seen_` stays latched
+  across the reconnect is retired (B-103-9 amended).
 - **The peer's Logout never arrives** (timeout, or a dropped connection): there is no reset under `reset_on_logout`.
   Only `reset_on_disconnect` resets (FR-002, FR-004).
 - **141=Y acknowledgement at 34 ≠ 1** on a lenient initiator: what QuickFIX does is read in research and adopted or
@@ -236,13 +326,19 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
 
 **Reset on Logout (B53, #595)**
 
-- **FR-001**: With `reset_on_logout` set, the sequence numbers MUST be reset to 1 when, and only when, the session
-  receives a Logout from the peer: a request, or a response to its own Logout. The reset MUST happen at the receipt,
-  after the reply Logout if one is owed and before the disconnect, as in QuickFIX C++, QuickFIX/J and QuickFIX/Go
-  (clarification 2026-11-17). Sending a Logout MUST NOT by itself cause the reset. The reset MUST be durable on a
-  persistent store, and `close()` MUST wait for it as it waits for 093's 141=Y reset unit (`run_reset_unit_`, 093
-  contract C-6, unchanged by 103) (erratum E-1). For a too-high Logout (B-103-7), "at the receipt" means at its
-  acknowledgement, where fixpp processes it (erratum E-3).
+- **FR-001**: With `reset_on_logout` set, the sequence numbers MUST be reset to 1 when, and only when, a Logout
+  received from the peer is processed as far as its reset point (RU-1): a request in Active or LogonReceived, a
+  response to its own Logout in LogoutSent, a too-high Logout at its acknowledgement (erratum E-3), or a Logout in
+  LogonSent (RU-2). A Logout received in NotConnected MUST NOT reset. The reset point follows the reply Logout's
+  attempt, if one is owed, or the acceptance of a response, as in QuickFIX C++, QuickFIX/J and QuickFIX/Go
+  (clarification 2026-11-17). Processing that ends before it MUST NOT reset under `reset_on_logout`. At the reset
+  point the arm records `Disconnected`, then runs 093's 141=Y reset unit (`run_reset_unit_`, 093 contract C-6,
+  unchanged by 103) (erratum E-1; RU-3). Sending a Logout MUST NOT by itself cause the reset. The reset MUST be
+  durable on a persistent store. `close()` and `Engine::stop()` MUST wait for a receipt that is between its receipt
+  and its reset point, and for its unit, with the bound and the clock condition of 093's wait (B-104-2). A receipt
+  still before its reset point when they cannot wait (no clock, or the wait expired) MUST NOT be reset under
+  `reset_on_logout`, and the arm, resuming, MUST run no unit and write nothing. The reset point's marker transition
+  and the unit's start MUST be one strand turn, so no reset point once passed can be lost (contract RR-2).
 - **FR-002**: A graceful close whose Logout was sent and not answered MUST NOT reset under `reset_on_logout`,
   whether its wait ended by `logout_disconnect_timeout_ms` or by a dropped connection.
 - **FR-003**: The peer's Logout response received in LogoutSent MUST be a reset trigger under `reset_on_logout`.
@@ -250,11 +346,12 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
   session with both knobs set MUST end its teardown with both numbers at 1. 024's C5.1 is read as "at most one store reset
   per teardown" (erratum E-4): with both knobs set, a received Logout makes one reset at receipt and one at teardown,
   as QuickFIX C++ and QuickFIX/J do (research D2).
-- **FR-005**: 024's contract clause C3.1, and B-538-7's "answered or not", MUST be superseded by name. Every witness
-  that pins a reset after an unanswered local Logout MUST be re-pinned to the new rule or retired with a note. At the
-  base these are `ResetOnLifecycleTest.ResetOnLogout_LocalInitiated_Resets`, the initiator arm of
-  `ResetOnLogout_BothRoles_Resets`, and `ResetOnLogoutAndDisconnect_DoubleTrigger_OneStoreReset` insofar as it
-  depends on the local trigger; the list is re-derived in the plan.
+- **FR-005**: 024's contract clause C3.1, and B-538-7's "answered or not", MUST be superseded by name, and so MUST
+  every other surface that restates a rule 104 changes: 027 C3's explicit-end case (D3.3a), 093 C-6's `close()`
+  bullet, the live B&L rows, the brain pages and the test comments. Every witness that pins a reset after an
+  unanswered local Logout MUST be re-pinned to the new rule or retired with a note. The surfaces are found by the
+  supersession census (research D8), which finds surfaces that stay GREEN as well as cells that fail; its known
+  positives include `ResetOnLifecycleTest.ResetOnLogout_LocalInitiated_Resets` and B-024-1.
 - **FR-006**: The code comments that state the old rule (for example the "EXACTLY two … sites" comment on
   `logout_seen_` in `session.hpp`) MUST be corrected or removed with the change. Each one MUST name 104's rule where
   it supersedes 024's (header-comment rule, issue #310).
@@ -270,7 +367,8 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
   2026-11-17). The plan derives, from the three engines, how fixpp answers a peer's ResendRequest that follows the
   reset.
 - **FR-009**: The reset MUST be durable on a persistent store, with the guarantees 093's reset unit gives today (E-1):
-  ordering against `close()` and failure handling.
+  ordering against `close()` and failure handling. On a direct mTLS initiator the unasked unit MUST run only after
+  the live identity is authorised for the CompID (clarification N-8).
 - **FR-010**: A strict initiator's handling of its own acknowledgement MUST be unchanged.
 - **FR-011**: L-103-2 MUST be retired, and its B&L row moved to the closed file with 104's resolution.
 
@@ -279,7 +377,9 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
 - **FR-012**: In LogonSent and in NotConnected, a frame whose MsgSeqNum is below NextNumIn, whatever its
   PossDupFlag(43) (erratum E-2: FIX-SL §4.3.11 has no PossDup exception for the Logon; QuickFIX/Go), and not exempted
   by FR-007, MUST draw a Logout whose Text(58) is exactly "MsgSeqNum too low, expecting N but
-  received M" (N = NextNumIn, M = the frame's 34). The session then ends `Disconnected`.
+  received M" (N = NextNumIn, M = the frame's 34). The session then ends `Disconnected`. The Logout MUST NOT be
+  sent before the arm's identity gates pass: the mTLS CompID-authorisation gate in both arms, and `authorize_logon`
+  on the acceptor. A frame they refuse takes the gate's own silent ending (FIX-TC 1S(c); clarification N-8).
 - **FR-013**: That Logout MUST be numbered with the session's next outbound number, and NextNumIn MUST NOT be
   advanced, as in B-103-10. It MUST carry Text(58) only, with no SessionStatus(1409) (clarification 2026-11-17).
 - **FR-014**: A Logout that cannot be sent (build, store or transmit failure) MUST NOT stop the session from ending.
@@ -301,8 +401,8 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
 
 ### Key Entities
 
-- **Reset trigger under `reset_on_logout`**: the receipt of a Logout from the peer during the session's life. It
-  replaces "a Logout in either direction".
+- **Reset trigger under `reset_on_logout`**: a Logout received from the peer and processed as far as its reset
+  point (contract RR-1). It replaces "a Logout in either direction".
 - **Logon acknowledgement**: the peer's Logon received in LogonSent. Its 141 and 34 decide whether it resets, is in
   sequence, is too high, or is too low.
 - **Too-low Logout**: a Logout whose Text is "MsgSeqNum too low, expecting N but received M". After 104 every arm
@@ -330,20 +430,36 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
 - Gate A is required: the feature changes session wire behaviour and a reset contract.
 - There is no C-ABI change. The configuration keys and their defaults are unchanged; only `reset_on_logout`'s trigger
   changes.
-- The FIX docs and the three engines agree on every point this spec fixes, except FR-008's follow-up after the reset.
-  There QuickFIX C++ differs from the other two, and the clarification follows QuickFIX/J and QuickFIX/Go.
+- Where the three engines differ from each other, the choice and its authority are a row of "Departures from
+  QuickFIX" below (FR-008's follow-up, D4's M > 1, RU-2's LogonSent Logout, a reply whose `toAdmin` throws).
 - The text "MsgSeqNum too low, expecting N but received M" is QuickFIX's and Test Case 2c's, as 103 adopted for Active.
 - The Engine does not reconnect a session in place. Each connection of an engine-managed initiator ends in a terminal
   close (`run_connect_loop`), so the teardown reset runs per connection on the Engine route.
 
 ### Departures from QuickFIX
 
-The one list of 104's observable departures from QuickFIX C++, QuickFIX/J or QuickFIX/Go, each with its authority.
-The plan completes it. The rows at spec time:
+The one list (FR-018) of 104's observable departures from QuickFIX C++ (QFC), QuickFIX/J (QFJ) or QuickFIX/Go
+(QFGo), each with its authority. research.md, data-model.md and the contract refer to these rows and do not keep
+their own list. A row marked *pre-existing* is a departure 104 touches the surface of but does not create.
 
-| Departure | Engines it departs from | Authority |
-|---|---|---|
-| No second Logon after an unasked 141=Y acknowledgement (FR-008) | QuickFIX C++ (replies with Logon 141=Y at 34=1) | owner clarification 2026-11-17; QuickFIX C++'s reply is an untested side effect of `f26ca5fc`, reported as quickfix/quickfix#417; QuickFIX/J removed it in QFJ-380 |
+| # | Departure | Engines it departs from | Authority |
+|---|---|---|---|
+| DQ-1 | No second Logon after an unasked 141=Y acknowledgement (FR-008) | QFC (replies with Logon 141=Y at 34=1) | owner clarification 2026-11-17; QFC's reply is an untested side effect of `f26ca5fc`, reported as quickfix/quickfix#417; QFJ removed it in QFJ-380 |
+| DQ-2 | An unasked 141=Y acknowledgement at 34 = M > 1 continues at inbound 1, and the ResendRequest from 1 waits for the peer's next frame (D4, L-104-5) | QFC (continues at 2); QFJ and QFGo (request at Logon) | orchestrator ruling O-2 (QFJ and QFGo's outcome, one frame later) |
+| DQ-3 | A ResendRequest answered with nothing sent at or above its BeginSeqNo writes GapFill(34=B, 36=next), (1, 1) included (L-104-1) | QFC and QFJ at next outbound 1; QFGo always | research D3.3 (benign; QFC and QFJ send the same shape at begin = next > 1) |
+| DQ-4 | 789 evaluated after an unasked reset (D3.2, L-104-6) | QFGo (skips 789 when 141 is present) | QFC, QFJ |
+| DQ-5 | A too-low Logon or acknowledgement with 43=Y draws the Logout (E-2, D6, L-104-4) | QFC, QFJ (PossDup handling, then their logon timeout) | FIX-SL §4.3.11; QFGo |
+| DQ-6 | The posture, strict and SendingTime refusals and the 1137 Reject answer before the identity gates (L-104-3) | none (no engine binds certificates to CompIDs); FIX-TC 1S(c) | *pre-existing*; 104's too-low Logout and unasked reset come after the gates (clarification N-8) |
+| DQ-7 | The Logon arms' sequence check is made with `validate_sequence_numbers` off (B-104-6) | QFJ (skips it at Logon) | *pre-existing*, unchanged |
+| DQ-8 | The too-low Logout leaves the transport open until EOF, `close()` or stop (as B-103-10, L-103-5) | QFC, QFJ (close at once) | 103 precedent |
+| DQ-9 | No reply Logout to a Logout received in LogonSent; the reset is made (RU-2) | QFC, QFJ (reply with a Logout, then reset) | orchestrator ruling RU-2; FIX-TC 1B(e) makes that Logout optional |
+| DQ-10 | `onLogout` fires before the receipt reset, on the edge into Disconnected (RU-3) | QFC, QFJ (`disconnect()` fires it after `m_state.reset` / `resetState()`) | orchestrator ruling RU-3; nothing on the wire differs |
+| DQ-11 | A reply Logout whose `toAdmin` throws makes no reset (contract O6) | QFJ (`sendRaw` catches the `Throwable`, sends, resets) | QFC (the throw leaves `nextLogout`); RU-1 |
+| DQ-12 | A too-high Logout whose bound ends unacknowledged makes no reset under `reset_on_logout` (contract O18) | QFC, QFJ (process a too-high Logout at receipt, `verify(logout, false, false)`) | RU-1 on 103's bound (B-103-7) |
+| DQ-13 | The Logout reply is sent before `fromAdmin` runs, so a `fromAdmin` throw or reject follows a reply already on the wire (contract O2, O3) | QFC, QFJ, QFGo (`fromAdmin` runs inside `verify`, before the reply) | *pre-existing* (019 T016); 104 adds only "no reset" |
+| DQ-14 | A Logout received in LogoutSent or LogonSent resets with no CompID, SendingTime or `fromAdmin` check of that Logout | QFC, QFJ (`verify` checks CompID and SendingTime and runs `fromAdmin` first) | *pre-existing* acceptance of that Logout (the LogoutSent arm's "confirm" row); 104 adds the reset |
+| DQ-15 | An explicit EndSeqNo at or above the next outbound number is read as through-current (D3.3a, B-104-5). With BeginSeqNo B above the next outbound number the answer is GapFill(34=B, 36=N_out), NewSeqNo below MsgSeqNum | QFGo (sends nothing: its walk's `seqNum != nextSeqNum` is false) | QFC (`nextResendRequest`'s clamp, then `generateRetransmits`' `generateSequenceReset(B, next)`) and QFJ (`generateSequenceResetIfNeeded`), identical frames; it restores QFC's and QFJ's answer where fixpp wrote `EndSeqNo + 1` |
+| DQ-16 | Against a counterparty acceptor whose `toAdmin` injects 141=Y, the session ends when fixpp's outbound number reaches the number of its own Logon (L-104-7) | none: every QuickFIX initiator meets the same ending, and QFC's second Logon does not avoid it (orchestrator ruling O-1, by source) | listed because it is the consequence of DQ-1 an operator meets; not traced on a live peer |
 
 ## Normative References
 
@@ -363,7 +479,10 @@ Entries are the exact keys of `spec/coverage-index.md` (Article VI §5), with th
   Logout (FR-012).
 - `[FIX-SL §4.10.2] FIX logout process state transition diagram`: "Receive Logout Response → Disconnect" (FR-003).
 - `[FIX-TC §4 scenario 1B] Connect and Send Logon (Initiator)`: sub-case 1B(d), an invalid Logon acknowledgement
-  draws a Logout with Text, then a disconnect (FR-012).
+  draws a Logout with Text, then a disconnect (FR-012); sub-case 1B(e), a non-Logon in reply, makes the Logout
+  optional (RU-2, DQ-9).
+- `[FIX-TC §4 scenario 1S] Receive Logon (Acceptor)`: sub-case 1S(c), an unauthenticated or non-configured
+  identity is disconnected without a message (FR-012's identity gates, clarification N-8).
 - `[FIX-TC §4 scenario 2] Receive Message Standard Header`: sub-case 2c, MsgSeqNum too low (FR-012).
 - `[FIX-TC §4 scenario 13] Receive Logout message`: the acknowledgement of a Logout (FR-001, FR-003).
 
