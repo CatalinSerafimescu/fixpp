@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cstddef>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -30,6 +31,27 @@
 #include "support/pump_until_ready.hpp"
 
 namespace fixpp::test_support::t103 {
+
+// Records, in order, each toAdmin ("toAdmin:<35>") and each onLogout. With
+// `throw_on_logout`, toAdmin throws on a Logout(35=5). Written for the too-low cells
+// (test_103_too_low_logout.cpp); the strict refusal's toAdmin cell reuses it.
+class TooLowApp final : public resend_gap::GapApp {
+public:
+    std::vector<std::string> events;
+    bool throw_on_logout = false;
+
+    void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
+                 const fixpp::session::SessionId& id) override {
+        resend_gap::GapApp::toAdmin(msg, id);
+        events.push_back("toAdmin:" + std::string{msg.msg_type()});
+        if (throw_on_logout && msg.msg_type() == "5") {
+            throw std::runtime_error("TooLowApp: toAdmin");
+        }
+    }
+    void onLogout(const fixpp::session::SessionId& /*id*/) override {
+        events.emplace_back("onLogout");
+    }
+};
 
 // The value of the first `<SOH>tag=` field of one frame, or nullopt when the frame carries no
 // such field. An empty value is returned as an empty string, so "absent" and "present but

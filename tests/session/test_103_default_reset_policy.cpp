@@ -18,6 +18,7 @@
 // decides it.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/use_future.hpp>
@@ -299,6 +300,31 @@ TEST(DefaultResetPolicy103, AS3_StrictAcceptor_RefusalLogoutCannotBeNumbered_Ret
     EXPECT_EQ(f.session->state(), fsm_state::Disconnected);
 }
 
+// AS3's toAdmin ending (FR-004; research D2.4's note): the application's toAdmin throws on the
+// refusal Logout. The arm returns app_callback_threw, not the mismatch; no Logout is written,
+// NextNumIn does not move and the session is Disconnected. The Session holds the fixture's
+// EngineConfig by reference and reads its application at each callback, so the application is
+// attached after open().
+TEST(DefaultResetPolicy103, AS3_StrictAcceptor_RefusalLogoutToAdminThrows_ReturnsItsError) {
+    auto r = rr::make_acceptor_notconnected(std::make_shared<rr::FaultStoreFactory>(37, 42),
+                                            /*refresh_on_logon=*/false,
+                                            reset_seqnum_policy::bilateral_strict);
+    ASSERT_NE(r.fix, nullptr);
+    auto& f = *r.fix;
+    auto const app = std::make_shared<t103::TooLowApp>();
+    app->throw_on_logout = true;
+    f.eng.application = app;
+    auto const logon = to_acceptor_logon(37, false);
+    auto const res = feed(f, logon);
+    EXPECT_EQ(std::count(app->events.begin(), app->events.end(), "toAdmin:5"), 1)
+        << "setup: toAdmin was not called once for the refusal Logout";
+    ASSERT_FALSE(res.has_value()) << "the refusal returned success";
+    EXPECT_EQ(res.error(), fixpp::core::error::app_callback_threw) << static_cast<int>(res.error());
+    EXPECT_TRUE(of_type(written(f), "5").empty()) << describe(written(f));
+    EXPECT_EQ(next_in(f), seqnum_t{37}) << "NextNumIn moved on a refused Logon";
+    EXPECT_EQ(f.session->state(), fsm_state::Disconnected);
+}
+
 // AS3's emit-failure ending (FR-004, its store-or-transmit clause; research D2.4's note): the
 // refusal helper discards its Logout's emit error, so the arm still
 // returns the mismatch. Here the Logout's outbound store at 42 fails on a persistent store: no
@@ -334,31 +360,70 @@ TEST(DefaultResetPolicy103,
     EXPECT_EQ(f.session->state(), fsm_state::Disconnected);
 }
 
+// Its cancelled twin (B-103-3; on_inbound_frame's contract, ruling R-14; B-538-5): the
+// Logout's outbound store at 42 returns store_cancelled. A cancelled store call is not a
+// failed one: the inbound call returns store_cancelled, no Logout is written, NextNumIn does
+// not move and the session is Disconnected.
+TEST(DefaultResetPolicy103,
+     AS3_StrictAcceptor_RefusalLogoutStoreCancelled_StoreCancelledDisconnectedNoLogout) {
+    auto const rec =
+        std::make_shared<RecordingStoreFactory>(std::make_shared<rr::FaultStoreFactory>(37, 42));
+    auto const log = rec->log;
+    auto r = rr::make_acceptor_notconnected(rec, /*refresh_on_logon=*/false,
+                                            reset_seqnum_policy::bilateral_strict);
+    ASSERT_NE(r.fix, nullptr);
+    auto& f = *r.fix;
+    log->arm();
+    auto const is_logout_store = [](fixpp::test_support::StoreCall const& c) {
+        return c.op == fixpp::test_support::store_op::store &&
+               c.dir == fixpp::session::direction_t::outbound && c.first == 42U;
+    };
+    log->fail_code = fixpp::core::error::store_cancelled;
+    log->fail_in = is_logout_store;
+    auto const logon = to_acceptor_logon(37, false);
+    auto const res = feed(f, logon);
+    auto const* call = log->first_after(0, is_logout_store);
+    ASSERT_NE(call, nullptr) << "setup: the refusal Logout's store was not called";
+    ASSERT_TRUE(call->error.has_value()) << "setup: the refusal Logout's store did not fail";
+    EXPECT_EQ(*call->error, fixpp::core::error::store_cancelled) << "setup";
+    ASSERT_FALSE(res.has_value()) << "the cancelled refusal returned success";
+    EXPECT_EQ(res.error(), fixpp::core::error::store_cancelled) << static_cast<int>(res.error());
+    EXPECT_TRUE(of_type(written(f), "5").empty()) << describe(written(f));
+    EXPECT_EQ(next_in(f), seqnum_t{37}) << "NextNumIn moved on a refused Logon";
+    EXPECT_EQ(f.session->state(), fsm_state::Disconnected);
+}
+
 // Its transport twin: the Logout is stored and its send throws, which store_then_emit returns
-// as dispatch_aborted. The sink counts the Logouts handed to it, so "none written" is read
-// against one that reached the transport.
+// as dispatch_aborted. The sink throws on the first Logout handed to it and accepts every later
+// frame, so "none written" reads the frames it accepted, against a Logout that reached it.
 TEST(DefaultResetPolicy103,
      AS3_StrictAcceptor_RefusalLogoutSendThrows_MismatchDisconnectedNoLogout) {
-    std::vector<std::string> handed;  // declared before the fixture, whose session holds the sink
+    // Declared before the fixture, whose session holds the sink.
+    std::vector<std::string> handed;    // every frame handed to the sink
+    std::vector<std::string> accepted;  // the frames it did not throw on
+    bool threw = false;
     auto r = rr::make_acceptor_notconnected(std::make_shared<rr::FaultStoreFactory>(37, 42),
                                             /*refresh_on_logon=*/false,
                                             reset_seqnum_policy::bilateral_strict);
     ASSERT_NE(r.fix, nullptr);
     auto& f = *r.fix;
     fixpp::session::session_test_access::set_transport_send(
-        *f.session, [&handed](std::span<const std::byte> const data) {
+        *f.session, [&handed, &accepted, &threw](std::span<const std::byte> const data) {
             handed.emplace_back(reinterpret_cast<char const*>(data.data()), data.size());
-            throw std::runtime_error{"103 cell: the transport send throws"};
+            if (!threw && t103::decode(handed.back()).msg_type == "5") {
+                threw = true;
+                throw std::runtime_error{"103 cell: the transport send throws"};
+            }
+            accepted.push_back(handed.back());
         });
     auto const logon = to_acceptor_logon(37, false);
     auto const res = feed(f, logon);
-    ASSERT_EQ(of_type(handed, "5").size(), 1U) << "setup: the refusal Logout did not reach the "
-                                                  "transport: "
-                                               << describe(handed);
+    ASSERT_TRUE(threw) << "setup: the refusal Logout did not reach the transport: "
+                       << describe(handed);
     ASSERT_FALSE(res.has_value()) << "the refusal returned success";
     EXPECT_EQ(res.error(), fixpp::core::error::session_seqnum_reset_mismatch)
         << static_cast<int>(res.error());
-    EXPECT_TRUE(of_type(written(f), "5").empty()) << describe(written(f));
+    EXPECT_TRUE(of_type(accepted, "5").empty()) << describe(handed);
     EXPECT_EQ(next_in(f), seqnum_t{37}) << "NextNumIn moved on a refused Logon";
     EXPECT_EQ(f.session->state(), fsm_state::Disconnected);
 }

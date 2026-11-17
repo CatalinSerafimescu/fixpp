@@ -28,7 +28,6 @@
 #include <fixpp/session/session_fsm.hpp>
 #include <memory>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -51,25 +50,8 @@ using fixpp::test_support::StoreCall;
 // NextNumIn once a cell has driven it.
 constexpr seqnum_t kN = 5;
 
-// Records, in order, each toAdmin ("toAdmin:<35>") and each onLogout. With
-// `throw_on_logout`, toAdmin throws on a Logout(35=5).
-class TooLowApp final : public rg::GapApp {
-public:
-    std::vector<std::string> events;
-    bool throw_on_logout = false;
-
-    void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
-                 const fixpp::session::SessionId& id) override {
-        rg::GapApp::toAdmin(msg, id);
-        events.push_back("toAdmin:" + std::string{msg.msg_type()});
-        if (throw_on_logout && msg.msg_type() == "5") {
-            throw std::runtime_error("TooLowApp: toAdmin");
-        }
-    }
-    void onLogout(const fixpp::session::SessionId& /*id*/) override {
-        events.emplace_back("onLogout");
-    }
-};
+// The application of these cells is test_103_support.hpp's.
+using fixpp::test_support::t103::TooLowApp;
 
 [[nodiscard]] std::string too_low_text(seqnum_t n, seqnum_t m) {
     return "MsgSeqNum too low, expecting " + std::to_string(n) + " but received " +
