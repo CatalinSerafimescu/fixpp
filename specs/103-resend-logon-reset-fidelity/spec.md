@@ -411,8 +411,8 @@ nothing; before 2 × HeartBtInt the session waits; the first frame at or after i
   is not sent, and the arm still records `Disconnected` and returns the mismatch. A failure of the Logout's own
   store or transmit is discarded by the helper, as by the helper's other callers and by QuickFIX C++, QuickFIX/J and
   QuickFIX/Go, which report the refusal whatever their Logout's send does: no Logout is sent, and the arm records
-  `Disconnected` and returns the mismatch. *(Amended by the Gate B round 1 ruling of 2026-11-17, for owner
-  confirmation at Gate B: the spec follows the code. The clause it replaces, "a failure of the Logout's own emit
+  `Disconnected` and returns the mismatch. *(Amended by the Gate B round 1 ruling of 2026-11-17,
+  owner-confirmed 2026-11-17 (Gate B round 1): the spec follows the code. The clause it replaces, "a failure of the Logout's own emit
   returns that failure's error", assumed a helper result that the helper does not return.)* The refusal runs before the sequence check (research D2.4, Risk
   R14), so an out-of-sequence Logon without 141=Y draws the same Logout, NextNumIn is not advanced, and a strict
   acceptor with `reset_on_logon` does not reset its store for a Logon it refuses (B-103-3).
