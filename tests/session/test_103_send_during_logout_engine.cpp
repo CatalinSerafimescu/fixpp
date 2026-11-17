@@ -18,28 +18,67 @@
 //   gap_deadline        a gap kept open past its deadline (2 × HeartBtInt with NextNumIn
 //                       not advancing); the hold is on the deadline's Logout's store, the
 //                       first offloaded write after the frame that trips it.
+//
+// Before the arm, the cell drains the store: a store call of its own on the session's
+// executor, run to its end. Every store call the session made before it has then ended, so
+// the hold is on the first offloaded write after the peer's frame. Without it the hold can
+// catch a write the session made earlier, such as the Logon's inbound advance, which the
+// session makes after its Logon reply and so after setup(0) can return. The mechanism is in
+// test_598_store_offload_engine.cpp, the paragraph "Before the arm".
+//
+// The instance InSequenceLogout_LogonWriteQueuedAtTheArm keeps that write from beginning
+// until the io_context runs again after the arm site: its Application's onLogon takes the
+// FileStore's one file I/O thread, so the Logon's inbound advance, which the session makes
+// after onLogon, queues behind it, and the cell lets the thread go from a handler it posts
+// to the io_context just before the drain. It is the drain's known positive: delete the
+// drain and re-run this binary unfiltered; this instance must fail on "the send was
+// admitted".
 #include <gtest/gtest.h>
 
+#include <asio/any_io_executor.hpp>
+#include <asio/co_spawn.hpp>
+#include <asio/post.hpp>
+#include <asio/thread_pool.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/error.hpp>
+#include <fixpp/session/application.hpp>
+#include <fixpp/session/direction.hpp>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "session/held_file_store_scene.hpp"
+#include "support/recording_file_executor.hpp"
 
 namespace {
 
+namespace fe = fixpp::test_support::file_executor;
 namespace plain_rig = fixpp::test_support::plain_rig;
 namespace store_hold = fixpp::test_support::store_hold;
 using fixpp::test_support::HeldFileStoreScene;
 
 enum class Ending : std::uint8_t { in_sequence_logout, gap_deadline };
 
+struct Case {
+    Ending ending;
+    bool logon_write_late = false;  // the Logon's inbound advance queued at the arm site
+};
+
+struct OnLogonApp final : fixpp::session::Application {
+    std::function<void()> on_logon;
+    void onLogon(const fixpp::session::SessionId& /*id*/) override {
+        if (on_logon) on_logon();
+    }
+};
+
 struct Outcome {
     std::string setup_miss;
+    bool logon_write_queued = false;  // the file I/O thread was held at the arm site
     bool hold_entered = false;
     std::optional<fixpp::core::expected_t<void>> send;  // the Engine::send made during the hold
     std::vector<std::string> frames;  // every frame the peer read from the ending's frame on
@@ -50,9 +89,21 @@ struct Outcome {
 // The HeartBtInt of plain_engine_rig.hpp's session configuration.
 constexpr auto kHeartBtInt = std::chrono::seconds{30};
 
-Outcome run(Ending const ending) {
+Outcome run(Case const c) {
     Outcome o;
-    HeldFileStoreScene scene;
+    auto const ending = c.ending;
+    // Declared before the Scene: the pool job that holds the file I/O thread refers to it.
+    auto const pool_hold = std::make_shared<fe::JobLog>();
+    auto const app = std::make_shared<OnLogonApp>();
+    HeldFileStoreScene scene{1U, c.logon_write_late ? app : nullptr};
+    // After the Scene: the held thread is let go before the Scene joins its pool.
+    fe::let_go_on_exit const let_go{pool_hold};
+    if (c.logon_write_late) {
+        scene.wrap_file_executor = [&app, pool_hold](asio::thread_pool::executor_type ex) {
+            app->on_logon = [pool_hold, ex] { pool_hold->hold_a_thread(ex); };
+            return asio::any_io_executor{ex};
+        };
+    }
     auto& rig = scene.rig;
     [&] {
         if (!scene.setup(0)) return;
@@ -92,6 +143,25 @@ Outcome run(Ending const ending) {
             trip = rig.msg("5", seq);
         }
         auto const rx = rig.peer.received.size();
+        if (c.logon_write_late) {
+            o.logon_write_queued = pool_hold->wait_holders(1);
+            asio::post(rig.ioc, [pool_hold] { pool_hold->let_go(); });
+        }
+        // The drain, test_598_store_offload_engine.cpp's shape.
+        auto const session = rig.session();
+        auto* const store = scene.log ? scene.log->store : nullptr;
+        if (!session || store == nullptr) {
+            o.setup_miss = "the session or its store is not published";
+            return;
+        }
+        auto drain_fut = asio::co_spawn(
+            session->executor().underlying(),
+            store->next_seqnum(fixpp::session::direction_t::outbound, false), asio::use_future);
+        if (!rig.run_until([&] { return HeldFileStoreScene::ready(drain_fut); }) ||
+            !drain_fut.get().has_value()) {
+            o.setup_miss = "the drain before the arm did not complete";
+            return;
+        }
         store_hold::arm();
         rig.peer.send(trip);
         if (!rig.run_until([] { return store_hold::holding(); })) {
@@ -136,7 +206,7 @@ WireReading read_wire(std::vector<std::string> const& frames) {
     return w;
 }
 
-class SendDuringLogoutEngine103 : public ::testing::TestWithParam<Ending> {};
+class SendDuringLogoutEngine103 : public ::testing::TestWithParam<Case> {};
 
 }  // namespace
 
@@ -146,6 +216,10 @@ TEST_P(SendDuringLogoutEngine103, SendDuringTheEndingsLogoutStore_RefusedNoAppFr
     auto const o = run(GetParam());
     ASSERT_TRUE(o.setup_miss.empty()) << o.setup_miss;
     ASSERT_TRUE(o.stop_completed) << "Engine::stop did not complete";
+    if (GetParam().logon_write_late) {
+        ASSERT_TRUE(o.logon_write_queued)
+            << "the path was not exercised: the file I/O thread was not held at the arm site";
+    }
     ASSERT_TRUE(o.hold_entered) << "the path was not exercised: no hold";
     EXPECT_FALSE(o.hold_timed_out) << "the hold reached its bound";
     auto const w = read_wire(o.frames);
@@ -162,9 +236,14 @@ TEST_P(SendDuringLogoutEngine103, SendDuringTheEndingsLogoutStore_RefusedNoAppFr
 }
 
 INSTANTIATE_TEST_SUITE_P(BothEndings, SendDuringLogoutEngine103,
-                         ::testing::Values(Ending::in_sequence_logout, Ending::gap_deadline),
+                         ::testing::Values(Case{Ending::in_sequence_logout, false},
+                                           Case{Ending::gap_deadline, false},
+                                           Case{Ending::in_sequence_logout, true}),
                          [](auto const& info) {
-                             return std::string{info.param == Ending::gap_deadline
+                             if (info.param.logon_write_late) {
+                                 return std::string{"InSequenceLogout_LogonWriteQueuedAtTheArm"};
+                             }
+                             return std::string{info.param.ending == Ending::gap_deadline
                                                     ? "GapDeadline"
                                                     : "InSequenceLogout"};
                          });
