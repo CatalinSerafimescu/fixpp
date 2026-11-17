@@ -6,6 +6,12 @@ status: stable
 
 # Log
 
+- **2026-11-17 — 103-resend-logon-reset-fidelity close-out (PR #698), row 15: `failure-classes.md` gains class 23, a
+  reference published for a window must be withdrawn on every exit, unwinding included.** The too-high Logout bound
+  published a wake capturing a frame local; its exception exit left it dangling, and an unconditional clearer would
+  have written into a destroyed Session. The fix is an unwinding-only clearer declared after the referent, with a
+  fail-closed handler and throw-inside-the-window cells. Owner-approved 2026-11-17 from the Gate B record's
+  anti-pattern candidate, as a new class.
 - **2026-11-17 — 103-resend-logon-reset-fidelity, Gate B round 1: the too-high Logout bound's exception
   exit.** `components/session.md`'s 103 section gains the decision that an exception reaching the bound's
   handler ends it closed (no mark left, `Disconnected`), with a frame-local wake clearer and a

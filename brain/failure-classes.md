@@ -1111,6 +1111,50 @@ fails an allocation read clean.
   observable placed at a step other than the one whose outcome it names, so a failed operation
   looks complete. Here the convenience overload is that misplacement, built into the dependency.
 
+### 23. A reference published for a window must be withdrawn on every exit of the window, unwinding included
+
+A coroutine publishes a callback or pointer into longer-lived state (a member of the object that
+owns it) so that other paths can reach it while it waits, and that callback captures one of the
+coroutine's frame locals by reference (`[&local]`). The normal exits clear it explicitly. An
+exception exit (a store's `operation_aborted`, a test seam, an allocation failure) skips the clear,
+and the owner is left holding a reference into a destroyed frame; the next path that calls it uses
+freed memory. The obvious repair, an RAII clearer that runs on every exit, is wrong in its own way
+when the frame can outlive its owner: on a late normal exit the clearer writes into a destroyed
+object.
+
+- **Trigger:** you write or review a coroutine, above all a detached one, that stores a lambda,
+  pointer or handle capturing its own locals into a member that outlives a suspension; or a frame
+  whose lifetime is not bounded by the object it publishes into.
+- **Procedure:**
+  - List every exit of the publish window: each `co_return`, each early exit, and each await that
+    can throw. An exception exit counts as an exit.
+  - Withdraw the reference on each normal exit explicitly, and add a frame-local backstop for the
+    unwinding exits. If the frame may outlive the owner, the backstop acts only while unwinding: it
+    records `std::uncaught_exceptions()` at construction and clears only when the count has risen,
+    and the explicit clears disarm it.
+  - Declare the backstop after the local the reference points at, so reverse destruction withdraws
+    the reference before the referent is destroyed.
+  - End the exception path fail-closed in its handler: the state the window guarded goes to its
+    terminal value, never left as if the window were still open.
+  - Witness it with a cell that throws inside the publish window, after the publish, and asserts the
+    reference is withdrawn and the closed ending; add the twin that throws before the publish. A
+    mutant that deletes the backstop must turn the first cell RED.
+- **Scanning heuristic:** grep for a member assigned a lambda with a by-reference capture inside an
+  `asio::awaitable` function, and check each exit of that function for the matching reset.
+- **Instance (103-resend-logon-reset-fidelity, PR #698, Gate B round 1).** The too-high Logout bound,
+  `Session::run_peer_logout_bound_` in `src/session/session.cpp`, publishes `peer_logout_wake_ =
+  [&woken] { woken.cancel(); }`. Its exception path left the wake pointing at a destroyed timer, and
+  its frame can outlive the Session because the bound holds only a join counter. The fix is the
+  frame-local `wake_clearer`, gated on `std::uncaught_exceptions()` and declared after `woken`, with
+  a handler that ends the session closed. The witnesses are
+  `TooHighLogoutState103.BoundThrowsAfterItsPublish_NoWakeMarkNoneDisconnected` and
+  `BoundThrowsBeforeItsPublish_MarkNoneDisconnected` in `tests/session/test_103_too_high_logout_state.cpp`.
+  The bound's decisions are in the 103 section of [components/session](./components/session.md).
+- **Sibling.** Class 15 (a seam that outlives the window it observes): the same window-bracketing
+  rule for process-global instrumentation, closed by structure rather than by timing. Class 19 (a
+  commit marker published after the next fallible step): a publication whose placement relative to
+  a fallible step decides what a failure looks like.
+
 ## How to query the instances
 
 The corpus is private and machine-local. From the parent repo:
