@@ -33,8 +33,7 @@
 namespace fixpp::test_support::t103 {
 
 // Records, in order, each toAdmin ("toAdmin:<35>") and each onLogout. With
-// `throw_on_logout`, toAdmin throws on a Logout(35=5). Written for the too-low cells
-// (test_103_too_low_logout.cpp); the strict refusal's toAdmin cell reuses it.
+// `throw_on_logout`, toAdmin throws on a Logout(35=5).
 class TooLowApp final : public resend_gap::GapApp {
 public:
     std::vector<std::string> events;
