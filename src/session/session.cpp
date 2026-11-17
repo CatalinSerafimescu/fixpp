@@ -5588,14 +5588,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::acknowledge_peer_logout_
     co_return fixpp::core::expected_t<void>{};
 }
 
-// 103 (research D4.4): the bound. Its join counter is decremented by its `join` parameter,
-// which touches only the counter, so the frame may outlive the Session (FQ-C). The wake is
-// published, then "live" tested; the race's outcome is read from session state afterwards;
-// the wake is cleared, in the body, before anything else once the race is over.
-// Superseded in part by the evidence record's section on the bound's exception exit
-// ("Gate B r1: the bound's exception exit").  claim-ok: the superseding record's name
-// The counter is held by a parameter rather than a body-local guard, a wake clearer is the
-// exception path's backstop for the body's clears, and the handler ends the bound closed.
+// 103 (research D4.4, amended by data-model "Pending-Logout mark", its fields paragraph and
+// exception rows): the bound. Its join counter is held by its `join` parameter, which touches
+// only the counter, so the frame may outlive the Session (FQ-C). The wake is published, then
+// "live" tested; the race's outcome is read from session state afterwards; the body clears the
+// wake once the race is over, and a frame-local clearer clears it while an exception unwinds
+// the frame. An exception that reaches the handler ends the bound closed.
 asio::awaitable<void> Session::run_peer_logout_bound_([[maybe_unused]] peer_logout_bound_join join,
                                                       std::uint32_t gen) noexcept {
     try {
