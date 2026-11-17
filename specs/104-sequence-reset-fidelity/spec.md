@@ -60,8 +60,9 @@ differ from the FIX Session Layer.
    - 103's B-103-10 already sends this Logout in Active. 103 left the Logon arms out of scope.
 
 Also in this feature, by owner instruction of 2026-11-17: re-record the #266 peak-memory test-count basis.
-- The libc++ lanes now execute more tests than the recorded basis (482 against 475 on the merge run of `b3df5d45`;
-  the count is re-derived at 104's head).
+- The libc++ lanes now execute more tests than the recorded basis. This is a dated observation of one named run,
+  the merge run of `b3df5d45`, read from each lane's `ran:` value in its `ci/peak-memory-report.sh` line. Its numbers
+  are not copied here; FR-017 re-derives the counts at 104's head.
 - Because the counts differ, `ci/peak-memory-report.sh` marks every lane's figure DIAGNOSTIC ONLY, so the memory
   criterion is not discharged.
 
@@ -335,10 +336,12 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
   point the arm records `Disconnected`, then runs 093's 141=Y reset unit (`run_reset_unit_`, 093 contract C-6,
   unchanged by 103) (erratum E-1; RU-3). Sending a Logout MUST NOT by itself cause the reset. The reset MUST be
   durable on a persistent store. `close()` and `Engine::stop()` MUST wait for a receipt that is between its receipt
-  and its reset point, and for its unit, with the bound and the clock condition of 093's wait (B-104-2). A receipt
-  still before its reset point when they cannot wait (no clock, or the wait expired) MUST NOT be reset under
-  `reset_on_logout`, and the arm, resuming, MUST run no unit and write nothing. The reset point's marker transition
-  and the unit's start MUST be one strand turn, so no reset point once passed can be lost (contract RR-2).
+  and its reset point, and for its unit, with the bound and the clock condition of 093's wait (B-104-2). They MUST
+  stop waiting as soon as the receipt leaves that interval, by whatever exit. A receipt still before its reset point
+  when they cannot wait (no clock, or the wait expired) MUST NOT be reset under `reset_on_logout`. The arm, resuming,
+  MUST run no unit and MUST issue no store call after the close-out. A store call it had already issued runs to its
+  end (contract O13-r, O13-p). The reset point's marker transition and the unit's start MUST be one strand turn, with
+  no throw point, so no reset point once passed can be lost (contract RR-2).
 - **FR-002**: A graceful close whose Logout was sent and not answered MUST NOT reset under `reset_on_logout`,
   whether its wait ended by `logout_disconnect_timeout_ms` or by a dropped connection.
 - **FR-003**: The peer's Logout response received in LogoutSent MUST be a reset trigger under `reset_on_logout`.
@@ -456,6 +459,7 @@ their own list. A row marked *pre-existing* is a departure 104 touches the surfa
 | DQ-10 | `onLogout` fires before the receipt reset, on the edge into Disconnected (RU-3) | QFC, QFJ (`disconnect()` fires it after `m_state.reset` / `resetState()`) | orchestrator ruling RU-3; nothing on the wire differs |
 | DQ-11 | A reply Logout whose `toAdmin` throws makes no reset (contract O6) | QFJ (`sendRaw` catches the `Throwable`, sends, resets) | QFC (the throw leaves `nextLogout`); RU-1 |
 | DQ-12 | A too-high Logout whose bound ends unacknowledged makes no reset under `reset_on_logout` (contract O18) | QFC, QFJ (process a too-high Logout at receipt, `verify(logout, false, false)`) | RU-1 on 103's bound (B-103-7) |
+| DQ-12a | A too-high Logout gets no `fromAdmin`, at its receipt or at its acknowledgement, so at B's reset point no `fromAdmin` throw or reject can prevent the reset, as one does on arm A (contract O2, O3) | QFC (calls `fromAdmin` at receipt, inside `verify`) | *pre-existing* (103 Risk R8, 103 spec's departure "No `fromAdmin` for a too-high ResendRequest or Logout"); 104 adds only the reset at the acknowledgement |
 | DQ-13 | The Logout reply is sent before `fromAdmin` runs, so a `fromAdmin` throw or reject follows a reply already on the wire (contract O2, O3) | QFC, QFJ, QFGo (`fromAdmin` runs inside `verify`, before the reply) | *pre-existing* (019 T016); 104 adds only "no reset" |
 | DQ-14 | A Logout received in LogoutSent or LogonSent resets with no CompID, SendingTime or `fromAdmin` check of that Logout | QFC, QFJ (`verify` checks CompID and SendingTime and runs `fromAdmin` first) | *pre-existing* acceptance of that Logout (the LogoutSent arm's "confirm" row); 104 adds the reset |
 | DQ-15 | An explicit EndSeqNo at or above the next outbound number is read as through-current (D3.3a, B-104-5). With BeginSeqNo B above the next outbound number the answer is GapFill(34=B, 36=N_out), NewSeqNo below MsgSeqNum | QFGo (sends nothing: its walk's `seqNum != nextSeqNum` is false) | QFC (`nextResendRequest`'s clamp, then `generateRetransmits`' `generateSequenceReset(B, next)`) and QFJ (`generateSequenceResetIfNeeded`), identical frames; it restores QFC's and QFJ's answer where fixpp wrote `EndSeqNo + 1` |

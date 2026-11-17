@@ -2,8 +2,10 @@
 
 All the state below is private to `Session` and lives on the session strand. No public type, configuration key or
 default changes. No member is added or renamed. One member keeps its name and changes its type and contract
-(`logout_seen_`, `bool` → a one-byte enum), so `sizeof(Session)` is expected not to change; there is no pin on it
-to move (re-derive: `git grep -n "sizeof(Session)\|sizeof(fixpp::session::Session)" tests include src`).
+(`logout_seen_`, `bool` → a one-byte enum). One member is deleted: `reset_unit_wake_`, the waker of 093's
+event-driven wait, which `close()`'s poll replaces (contract RR-2 item 4; re-derive its users with
+`git grep -n reset_unit_wake_ -- src include tests`). So `sizeof(Session)` is expected to shrink. There is no pin on
+it to move (re-derive: `git grep -n "sizeof(Session)\|sizeof(fixpp::session::Session)" tests include src`).
 Decisions are in [research.md](research.md); the observable contract is in
 [contracts/session-wire-endings-104.md](contracts/session-wire-endings-104.md) (Part 1: RT-1, RR-1 to RR-4).
 
@@ -15,7 +17,7 @@ A one-byte enum with three values. It replaces the `bool` whose contract was "a 
 |---|---|
 | `none` | no received Logout on this connection is between its receipt and its reset point, and none reached it |
 | `pending` | a receipt arm (A, L, B or S, contract RT-1) is between its receipt and its reset point |
-| `reached` | this connection's received Logout reached its reset point (its unit started in the same strand turn), or `close()` closed out a receipt that was still `pending` when it could not wait; either way no further unit runs and RR-4 refuses writes |
+| `reached` | this connection's received Logout reached its reset point (its unit started in the same strand turn), or `close()` closed out a receipt that was still `pending` when it could not wait; either way no further unit runs, and RR-4 refuses every store call issued from then on (contract RR-2 item 5) |
 
 | Event | Effect |
 |---|---|
@@ -23,13 +25,13 @@ A one-byte enum with three values. It replaces the `bool` whose contract was "a 
 | A Logout received in NotConnected | no effect |
 | fixpp's own Logout emitted (`run_logout_phase1`) | **no effect** (the base's set is deleted) |
 | Any other Logout fixpp sends (error paths, the too-low Logout) | no effect |
-| The arm reaches its reset point | `pending` → `reached` and the unit's start, in one strand turn (contract RR-2 item 3); already `reached` (`close()` closed it out) → no unit (RR-2 item 5) |
-| The arm ends before its reset point, by return or by exception (a frame-local owner that clears only `pending`); and before any `close()` the arm calls itself | `pending` → `none` |
-| Arm B's bound ends unacknowledged (claimed, stopped, superseded, drained) | `pending` → `none` (the bound's frame owns the marker from its spawn) |
-| `Session::close`: the wait before the predicate | read: wait while `pending` or `reset_unit_in_flight_` |
+| The arm reaches its reset point | the thread's cancellation state reset, then `pending` → `reached` and the unit's start, in one strand turn (contract RR-2 item 3); already `reached` (`close()` closed it out) → no unit (RR-2 item 5) |
+| The arm ends before its reset point, by return or by exception; and before any `close()` the arm calls itself | `pending` → `none`, by the frame's owner (contract RR-2 item 2) |
+| Arm B's bound ends unacknowledged (claimed, stopped, superseded, drained) | `pending` → `none`, by the bound's body; by its unwinding-only owner on an exception (RR-2 item 2) |
+| `Session::close`: the wait before the predicate | read: a poll by post while `pending` or `reset_unit_in_flight_` (RR-2 item 4) |
 | `Session::close`: after the wait, before the predicate | a `pending` marker (no clock, or the wait expired) is set to `reached` with **no reset** under rol: the receipt did not reach its reset point (contract RR-2 item 4) |
 | `Session::close`: the teardown predicate | `!teardown_reset_done_ && rod`; the rol term for "`reached`, unit not started" has no input by RR-2 item 3 and is not coded |
-| `store_then_emit` (before its store call), `persist_inbound_advance_` (before its store call) | read: refuse while `reached` (contract RR-4); `store_then_emit` takes its number back |
+| `store_then_emit` (before its store call), `persist_inbound_advance_` (before its store call) | read: refuse a call issued while `reached` (contract RR-4); `store_then_emit` takes its number back. A call issued earlier runs to its end (RR-2 item 5) |
 | `install_reconnected_transport` | `none` |
 
 - **Invariant RO-1.** With rol set, the marker is `pending` exactly while one receipt arm is between its receipt
@@ -41,7 +43,7 @@ A one-byte enum with three values. It replaces the `bool` whose contract was "a 
 - **Invariant RO-3.** A receipt reset under rol has one owner, the arm's unit, which `close()` waits for. The
   teardown never resets a `pending` receipt (RU-1). The one case it would own, `reached` with the unit not started,
   has no input because the reset point is one strand turn. An arm that finds the marker `reached` at its reset
-  point runs no unit, and from `reached` on its writes are refused (contract RR-4).
+  point runs no unit, and issues no store call from `reached` on (contract RR-2 item 5).
 - The header comment states RO-1 to RO-3, names 104 and the 024 T013 / C3.1 clause it supersedes, and gives the
   recipe `git grep -n logout_seen_ -- src include`. It contains no count of sites (FR-006).
 - **Readers of the member outside `session.cpp`** (re-derive: `git grep -n logout_seen -- include src tests bindings
@@ -55,24 +57,24 @@ A one-byte enum with three values. It replaces the `bool` whose contract was "a 
 
 ## The reset unit: new callers
 
-`run_reset_unit_(next_in, next_out)` (093 data-model E-10, contract C-6) is unchanged. It gains callers:
+`run_reset_unit_(next_in, next_out)` (093 data-model E-10, contract C-6) is unchanged but for one deletion, its
+call of `reset_unit_wake_` (below). It gains callers:
 
 | Caller | Targets | Before the call | After the call |
 |---|---|---|---|
-| arms A, L, B, S at their reset point (rol set) | `(1, 1)` | `Disconnected` recorded (RR-3); the marker `pending` → `reached`; no unit if it was already `reached` | `reset_cancellation_state(enable_total_cancellation{})`; a manager or store error is logged; the arm continues as it does today (L: `logout_confirmed_` and phase 1's wake) |
+| arms A, L, B, S at their reset point (rol set) | `(1, 1)` | `Disconnected` recorded (RR-3); the thread's cancellation state reset; the marker `pending` → `reached`; no unit if it was already `reached` | `reset_cancellation_state(enable_total_cancellation{})`; a manager or store error is logged; the arm continues as it does today (L: `logout_confirmed_` and phase 1's wake) |
 | `on_inbound_logon_sent_`, the unasked branch (D3.1) | `(2, 1)` when the acknowledgement's 34 is 1; `(1, 1)` otherwise | the mTLS CompID-authorisation gate passed (clarification N-8) | today's step 5 to step 7 (030's persistent-fatal disposition) |
 
-`reset_unit_in_flight_` and `reset_unit_wake_` are unchanged. `close()` reads them earlier (below).
+`reset_unit_in_flight_` is unchanged, and `close()` reads it earlier (below). `reset_unit_wake_` and its call in
+`run_reset_unit_` are deleted (contract RR-2 item 4).
 
 ## `Session::close`'s teardown: order changed
 
 | Step | Base | 104 |
 |---|---|---|
-| a | `if (!teardown_reset_done_ && ((logout_seen_ && rol) \|\| rod))` | **wait while the marker is `pending` or `reset_unit_in_flight_`** (needs `effective_clock_`, bounded by `logon_timeout_ms`, `session_event_close_reset_wait_expired` on expiry) |
-| b | inside: set `teardown_reset_done_`, wait for an in-flight unit, `reset_seqnums_to_one_durable(logged)` | a `pending` marker → `reached`, with no reset; then `if (!teardown_reset_done_ && rod)`: set `teardown_reset_done_`, then `reset_seqnums_to_one_durable(logged)` |
+| a | `if (!teardown_reset_done_ && ((logout_seen_ && rol) \|\| rod))` | **poll by post while the marker is `pending` or `reset_unit_in_flight_`** (contract RR-2 item 4: needs `effective_clock_`, bounded by `logon_timeout_ms`, `session_event_close_reset_wait_expired` on expiry) |
+| b | inside: set `teardown_reset_done_`, wait for an in-flight unit (event-driven, woken by `reset_unit_wake_`), `reset_seqnums_to_one_durable(logged)` | a `pending` marker → `reached`, with no reset; then `if (!teardown_reset_done_ && rod)`: set `teardown_reset_done_`, then `reset_seqnums_to_one_durable(logged)` |
 
-A `pending` marker at step b means the wait expired or there was no clock; that receipt did not reach its reset
-point and is not reset under rol.
 024 C5.1 (at most one reset per teardown) is unchanged.
 
 ## LogonSent acknowledgement: the 141 branch
@@ -133,10 +135,14 @@ New rows:
 - **B-104-2** — `close()` and the close `Engine::stop()` drives wait, before the teardown reset decision, for a
   received Logout that is between its receipt and its reset point, and for any 141=Y reset unit in flight (a
   receipt reset or a Logon's), whatever the knobs. The wait is bounded by `logon_timeout_ms` and needs a clock.
-  Where it cannot wait (no clock, or the bound expired), a received Logout still short of its reset point is not
-  reset under `reset_on_logout`, and nothing its processing writes afterwards moves a number. A received Logout
-  past its reset point is never lost: its reset started in the same step. Supersedes 093 C-6's "`close()` waits
-  only when it is about to issue its teardown reset".
+  The wait ends as soon as that Logout leaves the interval, whatever ended it, with no expiry event. Where it
+  cannot wait (no clock, or the bound expired), a received Logout still short of its reset point is not reset
+  under `reset_on_logout`, and its processing issues no store call afterwards. A store call it had already issued
+  completes after `close()` returned: a held reply is stored, and is transmitted only on a config-time
+  `transport_send` sink (as B-563-5); a held inbound persist lands (B-598-1). Its other processing then runs after
+  `close()` returned, inside fixpp#597, which 104 neither widens nor closes. A received Logout past its reset point
+  is never lost: its reset started in the same step. Supersedes 093 C-6's "`close()` waits only when it is about to
+  issue its teardown reset".
 - **B-104-3** — with `reset_on_logout` and `reset_on_disconnect` both set, a received peer Logout makes two store
   resets, at its reset point and at teardown. C5.1 still allows one per teardown. The numbers end at 1. As
   QuickFIX C++ and QuickFIX/J.
@@ -155,6 +161,11 @@ New rows:
   message, as FIX-TC 1S(c) requires. Then Disconnected, with NextNumIn not advanced and no 1409. The endings when
   the Logout cannot be sent are those of research D5's table. It is not a `reset_on_logout` trigger. It is sent
   with `validate_sequence_numbers` off too. Retires L-103-7. Amends B-103-10's "In Active".
+- **B-104-7** — `sizeof(Session)` shrinks, a C++ layout change in an installed header, in the shape of B-544-3 and
+  B-103-11. `reset_unit_wake_`, the waker of 093's event-driven `close()` wait, is deleted; `logout_seen_` changes
+  from `bool` to a one-byte enum. A C++ consumer that compiles against the installed header observes it and must be
+  rebuilt; as B-544-3, the row carries no BREAKING mark. No C-ABI change: the C ABI exposes `Session` only through
+  an opaque handle.
 
 New limitations:
 - **L-104-1** — a ResendRequest answered when fixpp has sent nothing at or above BeginSeqNo writes a GapFill whose

@@ -45,42 +45,77 @@ under rol.
 completed, and nothing that races it can lose it or run it twice. A receipt that has not reached its reset point
 is never reset under rol, by anyone.
 1. With rol set, the marker is set to `pending` at the receipt (A, L and S at the arm's entry; B at
-   `on_inbound_active_too_high_logout_`, held by the bound's frame until its reset point or its exit). With rol
-   off it stays `none`: nothing is reset, waited for or refused.
-2. It leaves `pending` exactly once: to `reached` at the reset point, or by the teardown (item 4); or to `none` at
-   any exit before the reset point. The clear on exit is made by a frame-local owner that clears only a `pending`
-   marker, so an exception that unwinds the arm clears it too. An arm clears it before any `close()` it calls
-   itself (`close_on_late_parse_failure_`; the throw paths), so `close()` never waits for its own caller.
-3. **The reset point is one strand turn.** The arm's `pending` → `reached` and the start of its unit are made with
-   no suspension between them: the transition is written immediately before `run_reset_unit_`, whose manager calls
-   grant inline (093 C-6 step 3; research R1) and which sets `reset_unit_in_flight_` before its first suspension
-   (with no store the unit has no suspension at all). So no other coroutine on the strand observes a `reached`
-   receipt whose unit has not started.
-4. `close()` (any mode, and the close `Engine::stop()` drives) waits, after its joins and before its teardown
-   predicate, while the marker is `pending` or `reset_unit_in_flight_` is set. The wait is 093's: bounded by
-   `logon_timeout_ms`, it needs a clock, and on expiry it emits `session_event_close_reset_wait_expired`.
+   `on_inbound_active_too_high_logout_`). With rol off it stays `none`: nothing is reset, waited for or refused.
+2. It leaves `pending` exactly once: to `reached` at the reset point, or by `close()`'s close-out (item 4); or to
+   `none` at any exit before the reset point. An arm clears it before any `close()` it calls itself
+   (`close_on_late_parse_failure_`; the throw paths), so `close()` never waits for its own caller. The clear on any
+   other exit has one owner per frame:
+   - **A, L, S, and B's pump arm** (`on_inbound_active_too_high_logout_`) are awaited frames. A frame-local owner
+     clears a `pending` marker on every exit, return or exception. 103 accepts a Session-touching destructor in an
+     awaited frame.
+   - **B's bound** (`run_peer_logout_bound_`) is a detached frame that may outlive the `Session` (103 research
+     D4.4, the FQ-C pattern). The pump arm's owner holds the marker until the bound's `co_spawn` returns, and is
+     then disarmed. On the immediate acknowledgement no bound is spawned, and the pump arm's owner holds the marker
+     to the reset point. So a `co_spawn` that throws does not leave a `pending` marker without an owner.
+   - Once the bound holds the marker, its body clears it explicitly at each exit before its reset point. Its
+     frame-local owner has `wake_clearer`'s shape: it acts only while an exception unwinds the frame
+     (`std::uncaught_exceptions()` rose), never when a frame is destroyed unresumed. 103 rejected a clearer that
+     acts at every frame destruction, because "it writes into a Session that a frame destroyed unresumed may
+     outlive" (`brain/components/session.md`, the bound's "Not taken" list; 103's Gate B round 1 ruling of
+     2026-11-17).
+3. **The reset point is one strand turn, and nothing in it throws.**
+   - Immediately before the turn, the arm resets its thread's cancellation state (`reset_cancellation_state`,
+     which completes inline and does not suspend). This drops a `terminal` or `all` emission already recorded in
+     the arm's thread, for example one from inside the `onLogout` that RR-3 step 2 fires. Without the reset, that
+     emission makes `FIXPP_DETAIL_CO_AWAIT_LOCK`'s first part throw in `run_reset_unit_`'s first manager call.
+   - The arm's `pending` → `reached` and the start of its unit follow with no suspension and no callback between
+     them. The transition is written immediately before `run_reset_unit_`. Its manager calls grant inline (093 C-6
+     step 3; research R1), and it sets `reset_unit_in_flight_` before its first suspension. With no store, the unit
+     has no suspension at all.
+   - Within the turn nothing can record a cancellation. So no other coroutine on the strand observes a `reached`
+     receipt whose unit has not started (suspension), and no exception leaves the marker `reached` with no reset
+     (throws).
+4. `close()` (any mode, and the close `Engine::stop()` drives) waits after its joins and before its teardown
+   predicate, while the marker is `pending` or `reset_unit_in_flight_` is set. It needs a clock (as 093's wait
+   does) and is bounded by `logon_timeout_ms`. On expiry it emits `session_event_close_reset_wait_expired`.
+   - **The wait is a poll by post**, like the liveness and bound joins just above it. Each posted turn re-reads
+     both terms and compares `effective_clock_->steady_now()` with the bound.
+   - The poll needs no waker, so it cannot miss an exit from the condition: `pending` → `none` at an exit before
+     the reset point, `run_reset_unit_`'s early returns (no store, a manager failure), and the unit's completion.
+     So `close()` returns as soon as the condition is false, and never emits the expiry event for a receipt that
+     ended. 093's event wait, whose one waker was the unit's completion, is replaced, and `reset_unit_wake_` is
+     deleted (data-model; why: research D1 item 4).
+   - Cost: one posted turn per pass while a receipt or unit is outstanding, in `close()` only, bounded by
+     `logon_timeout_ms`.
    - **A receipt still `pending` after the wait** (it expired, or there was no clock to wait with) never reached
      its reset point. It is processing that ended before the reset point (RR-1): **no reset under rol**. The
-     teardown sets the marker to `reached`, so that when the arm resumes it runs no unit (item 5) and RR-4's
-     boundaries refuse its writes. Under rod the teardown resets as it always does.
+     close-out sets the marker to `reached`, so that when the arm resumes it runs no unit and issues no further
+     store call (item 5). Under rod the teardown resets as it always does.
    - **A receipt that is `reached` but whose unit has not started** is the one case the teardown would reset
-     itself, once. By item 3 the teardown never meets it: the case has no input by construction. Cell R-1u's
-     mutant opens that window (a suspension between `reached` and the unit) and goes RED, which is the evidence
-     that item 3 is load-bearing.
-   - The teardown predicate reads `!teardown_reset_done_ && (rod || (rol && <reached, unit not started>))`. Its
-     second term is unsatisfiable by item 3, so no code tests it: item 3 is its implementation, and a change that
-     splits that turn must add the term (and a way to observe "unit not started"; the three-valued marker has none)
-     before R-1u can go GREEN again.
-5. At its reset point an arm finds the marker `pending`, sets it to `reached` and runs the unit (item 3); or finds
-   it `reached`, because the teardown closed the receipt out (item 4), and runs no unit. From the moment the marker
-   is `reached`, RR-4's boundaries refuse the arm's later writes, so nothing it does after `close()` moves a number.
+     itself, once. By item 3 it has no input. So the teardown predicate,
+     `!teardown_reset_done_ && (rod || (rol && <reached, unit not started>))`, is coded as its first term only:
+     item 3 implements the second. A change that splits the turn must add that term, and a way to observe "unit not
+     started", which the three-valued marker does not have. Cell R-1u's mutant opens the window (a suspension
+     between `reached` and the unit) and goes RED, which is the evidence that item 3 is load-bearing.
+5. At its reset point an arm finds the marker `pending`, sets it to `reached` and runs the unit (item 3). Or it
+   finds it `reached`, because `close()` closed the receipt out (item 4), and runs no unit.
+   - **No store call is issued after the close-out.** RR-4's boundaries refuse each store call issued while the
+     marker is `reached`.
+   - **A store call already issued runs to its end.** `close()` cancels nothing on the arm's path (`root_cancel_`
+     reaches only what is bound to it), and a `FileStore` call that holds its lock runs its write to its end
+     whatever arrives (`B-598-1`). So what that call writes lands after `close()` returned, with its own ending:
+     Outcomes O13-r and O13-p.
+   - The arm's other work also runs after `close()` returned: the event, `fromAdmin`, and the attempt at a Reject
+     that RR-4 then refuses. That is fixpp#597 ("close() publishes closed_drained while a
+     store call of another coroutine of the session is in flight", open). 104 neither widens nor closes it.
 6. `install_reconnected_transport` sets `none`. A received Logout never resets a later connection.
 
 **RR-3 (order at the reset point; RU-3).** In every receipt arm:
 1. the reply Logout, if one is owed (A in Active, B);
 2. record `Disconnected` (where the arm has not), which stops every emitter from numbering in the reset space
    (RR-4) and drains further inbound frames;
-3. the reset point, in one strand turn (RR-2 item 3): the marker `pending` → `reached` and the unit; then
+3. the reset point, in one strand turn (RR-2 item 3): the cancellation state reset, the marker `pending` →
+   `reached` and the unit; then
    `reset_cancellation_state(enable_total_cancellation{})` as `on_inbound_logon_sent_` does after its unit; a
    manager or store error is RT-4's;
 4. L only: `logout_confirmed_` and phase 1's wake;
@@ -89,7 +124,7 @@ is never reset under rol, by anyone.
 A `close()` started inside the `onLogout` that step 2 fires finds the marker `pending`. It waits one post first
 (B-563-2), so the arm reaches step 3 before it, and the wait then covers the unit. Where that post does not move
 the close off the callback's stack (B-563-2's R-7 setup), the close's own wait still covers the receipt, and with
-no clock the receipt is not reset (item 4's first case).
+no clock the receipt is not reset (item 4, a receipt still `pending`).
 
 `onLogout` fires on the edge into Disconnected at step 2, so it observes the pre-reset numbers (A, B; L's
 `onLogout` fired earlier, on phase 1's Active → LogoutSent edge). This is a listed departure (spec "Departures
@@ -112,18 +147,21 @@ widen 103's FR-021.
     store-order condition that makes this hold, and its phase-0 check);
   - on route B, a pump-delivered Active-arm frame whose processing was already in flight when the detached bound
     recorded `Disconnected`, and whose later leaves or inbound persist are issued after the unit; and on any
-    route, the receipt arm's own later writes after `close()` closed the receipt out (RR-2 item 4).
+    route, the store calls the receipt arm issues after `close()` closed the receipt out (RR-2 item 4).
     **By construction:** `store_then_emit` (before its store call) and `persist_inbound_advance_` (before its
     store call) refuse while the marker is `reached`. `store_then_emit` takes the number back, as D-OUT-1 does
     for a cancelled store call, and returns `dispatch_aborted`; `persist_inbound_advance_` returns success with no
-    write. Each boundary is one byte test. The end state equals QuickFIX's, whose reset after the Logout discards
-    every earlier increment. The receipt unit and the teardown's reset do not pass through either boundary.
+    write. Each boundary is one byte test, run on every outbound frame that has a store call and on every inbound
+    persist (its cost: plan "Performance Goals"). A test made before the call cannot govern a call already issued
+    when the marker became `reached`; that call runs to its end (RR-2 item 5). The end state equals QuickFIX's,
+    whose reset after the Logout discards every earlier increment. The receipt unit and the teardown's reset do not
+    pass through either boundary.
 
 **RT-4 (store failure at the reset).** A manager or store failure of the receipt unit is logged. The arm's ending
 is unchanged (Disconnected, and the return value it has without the failure). There is no retry under rol; under
 rod the teardown reset still runs. On a refusing persistent store the stored numbers stay pre-reset (L-104-2).
 
-**RT-5 (`close()`).** RR-2 item 3's wait replaces the wait inside the predicate block, whatever the knobs, so a
+**RT-5 (`close()`).** RR-2 item 4's wait replaces the wait inside the predicate block, whatever the knobs, so a
 `close()` that finds a Logon-arm 141=Y unit in flight now waits for it even with no knob set (B-104-2). 024 C5.1
 is kept as written: at most one store reset per teardown (`teardown_reset_done_`). With rol and rod both set, a
 received Logout makes two resets, one at the reset point and one at teardown; both numbers end at 1 (D2).
@@ -145,14 +183,15 @@ A cell id is given where the row can be driven; its mutant is in research D10.
 | O6 | reply `toAdmin` throws | leaf records Disconnected, `app_callback_threw`; no reset | n/a | as A | n/a | QFC: no reset (propagates out of `sendRaw`); QFJ: resets (`sendRaw` catches `Throwable` from `toAdmin`, then sends); QFGo: no throw path | R-1n |
 | O7 | reply `assign_outbound` fails | leaf records Disconnected, the error; no reset | n/a | as A | n/a | n/a | R-1n |
 | O8 | reply store fails (persistent) | not transmitted; reset point reached; reset | n/a | as A | n/a | reset (QFC, QFJ catch the store's `IOException` in `sendRaw` and continue) | R-1n |
-| O9 | reply store call cancelled | `operation_aborted` unwinds the arm; marker cleared; no reset | n/a | as A | n/a | n/a | — (unreachable after the first lock, research R1; the owner covers it) |
+| O9 | reply store call cancelled: `store_cancelled` returned, or `operation_aborted` thrown (D-OUT-2 gives both timings the one block after the `try`) | the number taken back (D-OUT-1); Disconnected; no frame; `operation_aborted` unwinds the arm and its owner clears the marker (RR-2 item 2); no reset; `close()` is not held | n/a | as A | n/a | n/a | R-1v (the returned timing, which reaches the shared block) |
 | O10 | reply write fails | stored, not on the wire; reset | n/a | as A | n/a | reset (QFC `send` returns false; `nextLogout` continues) | R-1n |
 | O11 | inbound persist fails | Disconnected, the error; no reset | n/a | n/a | n/a | no reset (QFC, QFJ: `incrNextTargetMsgSeqNum` throws `IOException`) | R-1n |
-| O12 | `close()` during, before the reset point, with a clock | `close()` waits; the arm reaches its reset point and resets once, or exits and does not; `close()` returns after | as A | the bound is claimed: no reset (RR-1) unless already `acking`, then as A | `logon_arm_superseded_`: the arm acts on nothing; no reset | n/a (QuickFIX serialises receipt and disconnect) | R-1k, R-1f |
-| O13 | `close()` during, before the reset point, wait expired or no clock | no reset under rol (the receipt did not reach its reset point); the marker is closed out to `reached`; the arm, resuming, runs no unit and writes nothing | as A | as A | as O12 | n/a | R-1l |
+| O12 | `close()` during, before the reset point, with a clock | `close()` waits; the arm reaches its reset point and resets once, or exits and does not (with no store, the unit sets no in-flight flag); `close()` returns as soon as the marker has left `pending` with no unit in flight, not at `logon_timeout_ms`, and emits no `close_reset_wait_expired` | no input: L does not suspend before its reset point (research R1) | the bound is claimed: no reset (RR-1) unless already `acking`, then as A | no input: S does not suspend before its reset point; a frame that arrives after `close()` began meets `logon_arm_superseded_` and acts on nothing, no reset | n/a (QuickFIX serialises receipt and disconnect) | R-1k, R-1f, R-1w |
+| O13-r | `close()` during, before the reset point, wait expired or no clock, the arm held in its reply's store call | no reset under rol (the receipt did not reach its reset point); the marker is closed out to `reached`. The held call completes after `close()` returned (RR-2 item 5): the reply is stored. On a live transport it is not transmitted, because `close()` has run `close_async()` and `write_gate_.cancel_and_drain()`, so the write fails with `dispatch_aborted`; a config-time `transport_send` sink transmits it (as `B-563-5`). The persist is refused (RR-4), so the store's inbound stays N while the manager's is N+1 (`check_inbound`, before the arm). No unit. The event and `fromAdmin` run after `close()` returned (fixpp#597) | no input (as O12) | as A, when the bound is `acking` | no input (as O12) | n/a | R-1l (`HeldInReplyStore`) |
+| O13-p | as O13-r, the arm held in its inbound persist | no reset under rol; the marker is closed out to `reached`; the held persist completes after `close()` returned and lands (store inbound N+1); no unit (fixpp#597, as O13-r) | no input (as O12) | n/a (B has no persist) | no input (as O12) | n/a | R-1l (`HeldInPersist`) |
 | O13a | `reached`, unit not started, at the teardown | the teardown resets once; no input by construction (RR-2 item 3) | as A | as A | as A | n/a | R-1u (its mutant opens the window) |
-| O14 | `close()` during the unit | `close()` waits for the unit (clock); without a clock it returns while the unit's store operation completes on the strand (093's no-clock case) | as A | as A | as A | n/a | R-1j |
-| O15 | `Engine::stop()` during | as O12–O14 through the close it drives; its total emission can cancel only a store call before the arm's first lock (O9) | as A | as A | as O12 | n/a | R-1k (stop variant) |
+| O14 | `close()` during the unit | `close()` waits for the unit (clock); without a clock it returns while the unit's store operation completes on the strand (093's no-clock case, inside fixpp#597) | as A | as A | as A | n/a | R-1j |
+| O15 | `Engine::stop()` during | as O12–O14 through the close it drives. Its emission is total, which the arm's filter refuses after its first lock, and no Engine caller emits `terminal` or `all` on the arm's slot. A direct caller's `terminal` emission takes O9 at a store call and RR-2 item 3 at the reset point | as A | as A | as O12 | n/a | R-1k (stop variant), R-1x |
 | O16 | store reset fails | logged; Disconnected; no retry (RT-4) | as A | as A | as A | QFGo: logged, then `latentState` | R-1i |
 | O17 | grace timer of `close(graceful)` expires during L's unit | n/a | phase 1 returns `session_logout_timeout`; the timer branch also force-closes the transport (`live->close()`) before phase 2; the wire is the same (nothing more is sent); `close()` waits for the unit | n/a | n/a | n/a | R-1j |
 | O18 | bound ends unacknowledged (claim by `close()`, stop, another ending's Disconnected, reconnect drain, a Logout in flight) | n/a | n/a | marker cleared; no reset | n/a | QFC, QFJ: reset (they process a too-high Logout at receipt, `verify(logout, false, false)`) | R-1f |
@@ -215,4 +254,5 @@ guards (1137, strict mismatch, the unit, 789) are not reached by a too-low frame
   (`WalkExtraction.TwoValueEnd_ExplicitEndBeyondStore`) is re-pinned to `NewSeqNo=6`, QuickFIX C++'s identical
   GapFill(34=10, 36=6).
 - 093 `contracts/inbound-frame-dispositions.md` **C-6**'s `close()` bullet ("`close()` waits only when it is about
-  to issue its teardown reset"): by RR-2 item 3 and RT-5 (B-104-2). B-093-11 gains the same pointer.
+  to issue its teardown reset"), and the event-driven shape of that wait, whose one waker was the unit's
+  completion: by RR-2 item 4 and RT-5 (B-104-2). B-093-11 gains the same pointer.

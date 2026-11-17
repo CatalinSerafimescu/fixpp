@@ -29,9 +29,9 @@ RU-2 and RU-3 (spec Clarifications, Gate A round 1). This section records why, a
    - `run_logout_phase1`'s set after its emit (sc ~8236) is **deleted**. With it goes the "site (a)" half of the
      member's comment (FR-006).
    - It leaves `pending` once: to `reached` at the reset point, or when `close()` closes out a receipt it could not
-     wait for (no reset); to `none` at any exit before the reset point, through a frame-local owner, and before any
-     `close()` the arm calls itself.
-     `install_reconnected_transport` sets `none`.
+     wait for (no reset); to `none` at any exit before the reset point. Who clears it, per frame, is contract RR-2
+     item 2: an owner in each awaited arm, and in B's detached bound an owner of 103's `wake_clearer` shape that
+     acts only while an exception unwinds. `install_reconnected_transport` sets `none`.
    - The new header comment names 104 and the 024 T013 / C3.1 clause it supersedes. It states the condition and the
      re-derivation recipe (`git grep -n logout_seen_ -- src include`), and no count of sites.
 2. **The reset point (RU-1).** Each receipt arm has one (contract RR-1's table). The reset is made if and only if
@@ -60,15 +60,16 @@ RU-2 and RU-3 (spec Clarifications, Gate A round 1). This section records why, a
      Logon path makes (clarification N-8): an unauthorised one ends as today, with no reset. Then `Disconnected`,
      the marker and the unit. No reply Logout is sent (DQ-9; FIX-TC 1B(e) makes it optional), and no `fromAdmin`
      runs for it, as today (DQ-14).
-4. **`close()` and `Engine::stop()` (RR-2).** `close()` waits, after its joins and before its teardown predicate,
-   while the marker is `pending` or `reset_unit_in_flight_` is set. It is 093's bounded wait, moved out of the
-   predicate block and widened to the marker; it needs `effective_clock_` (B-104-2). A marker still `pending` after
-   the wait (it expired, or there was no clock) belongs to a receipt that did not reach its reset point: no reset
-   under rol (design ruling 3, rejecting round 1's teardown take-over). `close()` sets it to `reached`, so the arm,
-   resuming, runs no unit and RR-4's boundaries refuse its writes. The reset point itself is one strand turn
-   (`pending` → `reached` and the unit's start), so a reset point once passed is never lost and the teardown has
-   nothing to take over (contract RR-2 items 3–4). The wait cannot be on the caller's own arm, because an arm
-   clears its marker before any `close()` it calls.
+4. **`close()` and `Engine::stop()` (contract RR-2 items 3–5).** `close()` waits, after its joins and before its
+   teardown predicate, while the marker is `pending` or `reset_unit_in_flight_` is set. The wait is moved out of
+   the predicate block and widened to the marker, and it needs `effective_clock_` (B-104-2).
+   - It is a poll by post, not 093's event wait. 093's wait had one waker, the unit's completion, and widening it
+     to `pending` added exits that call no waker (Opus round 2, N-1).
+   - A marker still `pending` after the wait belongs to a receipt that did not reach its reset point: no reset
+     under rol (design ruling 3). `close()` closes it out to `reached`. From then on the arm issues no store call;
+     one it had already issued runs to its end (O13-r, O13-p).
+   - The reset point is one strand turn with no throw point. So a reset point once passed is never lost.
+   - The wait cannot be on the caller's own arm, because an arm clears its marker before any `close()` it calls.
 5. **Store failure at the reset: logged, then proceed.** This is 024 I-07's disposition for the teardown reset it
    replaces. A manager or store error from the unit is logged; the arm's ending is the one it has without the
    failure (QFGo `in_session.go` `handleLogout`: `dropAndReset` error → `logError`, then `latentState`). On a
@@ -153,8 +154,8 @@ RU-2 and RU-3 (spec Clarifications, Gate A round 1). This section records why, a
 **Sites:** `Session::on_inbound_active_logout_`, `Session::on_inbound_active_too_high_logout_`,
 `Session::on_inbound_logout_sent_`, `Session::on_inbound_logon_sent_` (arm S), `Session::acknowledge_peer_logout_`,
 `Session::run_peer_logout_bound_` (the marker's owner), `Session::run_logout_phase1` (the deleted set),
-`Session::close` (the wait's position and predicate, the close-out of a `pending` marker, the comment on the
-predicate),
+`Session::close` (the wait's position, its poll and predicate, the close-out of a `pending` marker, the comment on
+the predicate), `Session::run_reset_unit_` (its `reset_unit_wake_` call deleted, with the member),
 `Session::store_then_emit` and `Session::persist_inbound_advance_` (RR-4's boundaries),
 `Session::install_reconnected_transport` (the clear), and `sh` (the member, its type and comment, plus
 `drive_reconnect`'s latch paragraph: "a Logout seen on the old connection still triggers reset_on_logout's
@@ -461,9 +462,9 @@ evidence file, never into this bundle or a code comment.
 
 | Rule 104 changes | Keys (fixed strings, case as given) |
 |---|---|
-| 024 C3.1, "a Logout in either direction" resets (D1) | `C3.1`, `EITHER direction`, `either direction` (read each hit: the phrase is common), `sent OR received`, `answered or not`, `was sent still resets`, `Logout that was sent`, `brings no reset`, `reset_on_logout`, `logout_seen_`, `logout_seen`, `LocalInitiated`, `T013`, `site (a)`, `fixpp#595` |
+| 024 C3.1, "a Logout in either direction" resets (D1) | `C3.1`, `EITHER direction`, `either direction` (read each hit: the phrase is common), `sent OR received`, `sent **or** received` (Markdown bold defeats the previous key), `answered or not`, `was sent still resets`, `Logout that was sent`, `brings no reset`, `reset_on_logout`, `logout_seen_`, `logout_seen`, `LocalInitiated`, `T013`, `site (a)`, `fixpp#595` |
 | The receipt resets at teardown, and a latched flag resets the next connection (D1) | `teardown reset`, `still triggers`, `latched`, `drive_reconnect` (read each hit) |
-| 093 C-6: `close()` waits only before its own teardown reset (D1 item 4) | `waits only when it is about to issue`, `reset_unit_in_flight_`, `B-093-11` |
+| 093 C-6: `close()` waits only before its own teardown reset, woken by the unit alone (D1 item 4) | `waits only when it is about to issue`, `reset_unit_in_flight_`, `reset_unit_wake_`, `B-093-11`, `event-driven` and `completion signal` (read each hit: prose that describes the wait without naming the member) |
 | 027 C3, an explicit end beyond the store answers `requested_end + 1` (D3.3a) | `NewSeqNo=21`, `rr_end+1`, `rr_end + 1`, `requested_end + 1`, `TwoValueEnd`, `ExplicitEndBeyondStore`, `two-value end`, `I-NEX-3` |
 | A too-low frame in a Logon arm ends silently; an unasked 141=Y at 34=1 is too low (D3, D5) | `L-103-2`, `L-103-7`, `too-low → fatal`, `would be`, `in-sequence`, `ends silently`, `B-103-10` |
 
@@ -471,20 +472,23 @@ evidence file, never into this bundle or a code comment.
 
 1. For each key, over the tree at the branch head:
    ```bash
-   git grep -n -F -e '<key>' -- spec brain 'specs/*/contracts/*' 'specs/*/spec.md' .specify/*.md \
+   git grep -n -F -e '<key>' -- spec brain specs .specify/*.md \
      include src tests bindings tools ':!specs/104-sequence-reset-fidelity'
    ```
+   `specs` reaches every file of every other bundle: its spec, contracts, data model, research, plan, tasks,
+   quickstart and checklists. Round 1's pathspec named only `'specs/*/contracts/*'` and `'specs/*/spec.md'`, and
+   missed the superseded rule wherever a bundle restated it outside those two (Codex round 2, #5).
    Live B&L only: read `spec/behaviors-and-limitations.md`, not the `-closed` file (a resolved row there is not a
    surface to amend).
-   The pathspec `'specs/*/contracts/*'` matters: `'specs/*/contracts'` matches no file, and the 024 and 093
-   contract positives below then read as misses (found by running the recipe against them).
 2. Keep every hit that states the old rule as current behaviour: a test comment, a code comment, a live B&L row,
    a brain page's current-behaviour row, or another feature's contract clause. A brain page's rejected-alternative
    bullet is the historical half and is not rewritten; it gets a one-line pointer to 104.
 3. Give each kept hit one disposition in the evidence file: **re-pin** (a cell whose assertion changes), **reword**
    (a comment or row that becomes procedure or names 104), **supersede by name** (a merged feature's contract or
    bundle, which is not edited; the pointer goes on its component page and in the header comment of the code that
-   implements the new rule), or **unaffected**, with the reason.
+   implements the new rule), or **unaffected**, with the reason. A hit in a merged bundle outside its contract (its
+   data model, research, plan, tasks, quickstart or a checklist) is superseded by name too: its component page flags
+   that document, not only the contract clause (project rule, issue #334).
 4. **The measured half**, kept as a second instrument: in a scratch tree apply D1 alone, then D3 + D3.3a, then D5,
    and run `ctest -L session`, `-L capi`, `-L config`, the standalone interop labels and
    `tests/session/conformance` (quickstart §1). Every failing cell must already be a kept hit of step 2; one that
@@ -497,10 +501,17 @@ evidence file, never into this bundle or a code comment.
    - `brain/components/graceful-logout.md`: the invariant row "`logout_seen_` is written only at Logout-specific
      sites", and the R-24 bullet "Logout that was sent and never answered still resets: that case is fixpp#595";
    - `brain/components/session.md`: the bullet "(a graceful phase 1 sets `logout_seen_`)" (a rejected
-     alternative: pointer only);
+     alternative: pointer only), and the bullet "`close()`'s wait is bounded by `logon_timeout_ms`, event-driven"
+     (093 OD-1; its shape is superseded by RR-2 item 4's poll);
    - `specs/024-reset-refresh-on-logon/contracts/reset-knobs.md` C3.1 and C5.1;
    - `specs/027-next-expected-msgseqnum/contracts/next-expected-msgseqnum.md` C3's required test ("request
      `[10,20]`, store through 5");
+   - the non-contract restatements in merged bundles: 027's `data-model.md`, `research.md`, `plan.md` and
+     `tasks.md` (`NewSeqNo=21`, `TwoValueEnd`, `two-value end`); 024's `research.md` and `tasks.md` (`EITHER
+     direction`), its `data-model.md` row "Logout sent **or** received" (`sent **or** received`), and its
+     `quickstart.md` and `tasks.md` (`LocalInitiated`, `C3.1`); 013's `quickstart.md` (`NewSeqNo=21`). The recipe
+     with step 1's pathspec was run at `489affaf` on 2026-11-18 and reported each of these; round 1's pathspec
+     reported none of them;
    - `specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md` C-6's `close()` bullet;
    - `tests/session/test_persistent_seqnum_hydrate.cpp`, W8's comments ("in-sequence" against manager=37, and "seq=1
      would be / too-low → fatal → wrong path"; both line-wrapped, so the keys are one line's text);
@@ -549,7 +560,7 @@ The text of every new and amended row is data-model.md "B&L delta". In summary:
 - **024 C3.1** ("EITHER direction"), superseded by 104's contract RT-1 / RR-1 and B-104-1. 024 C5.1 is kept (read
   per teardown, E-4). 024's bundle is a merged, point-in-time record and is not edited.
 - **027 C3**'s explicit-end case, superseded by B-104-5 and contract row U6.
-- **093 C-6**'s `close()` bullet, superseded by B-104-2 and contract RR-2 item 3.
+- **093 C-6**'s `close()` bullet, superseded by B-104-2 and contract RR-2 item 4.
 - **Live B&L rows amended in place:** B-024-1, B-538-7, B-563-5, B-093-11, B-103-9's disclosure, B-103-10.
 - **Retired:** L-103-2 and L-103-7, each moved to `spec/behaviors-and-limitations-closed.md` with 104's
   resolution (FR-011, FR-016). 103's spec row "A too-low frame in NotConnected or LogonSent still ends silently"
@@ -564,7 +575,7 @@ The text of every new and amended row is data-model.md "B&L delta". In summary:
   the teardown block's predicate paragraph, `run_logout_phase1`'s "site (a)" comment, the receipt arms' "024 T013"
   comments, `drive_reconnect`'s latch paragraph, `session_config.hpp`'s two knobs, the end-model comment in
   `replay_outbound_range_`.
-- **New rows:** B-104-1 … B-104-6 and L-104-1 … L-104-7.
+- **New rows:** B-104-1 … B-104-7 and L-104-1 … L-104-7.
 
 ### D9 — FR-017: the #266 basis, re-recorded last
 
@@ -573,6 +584,8 @@ The text of every new and amended row is data-model.md "B&L delta". In summary:
   basis runs, method, the per-lane table). They go in one commit.
 - **When:** after the last commit that adds or removes a ctest registration. The re-record commit itself must add
   none.
+  - Before it: `bash ci/test-parallelism-verdict.sh`, the harness the basis file's header requires after any edit.
+    Its disposition outside Gate B's reviewed range is plan phase 11's.
   - Check: `git diff <re-record>^ <re-record> -- '*CMakeLists.txt' '*.cmake'` is empty.
   - Check: `git diff origin/main <head> -- '*CMakeLists.txt' '*.cmake' | grep -E '^[+-].*(add_test|gtest_discover_tests|fixpp_add_[a-z_]*test|add_session_10[34]_bucket|add_dictionary_feature_bucket)'`,
     with each hit read, so the registrations 104 adds are the ones expected.
@@ -619,7 +632,7 @@ The text of every new and amended row is data-model.md "B&L delta". In summary:
 - **One test-support addition, in phase 1, before any cell that needs it.** HookedStore's `on_reset` fires for
   both `reset()` and `reset_to` under `reset_to_mode::forward`, so a hook cannot tell the unit from the teardown.
   HookedStore gains a per-call record: which call fired (`reset` or `reset_to`, with `reset_to`'s targets) and a
-  count of each. R-1c to R-1f, R-1k, R-1l, R-1o, R-1u and R-2 assert on it; without it R-1l's first mutant and
+  count of each. R-1c to R-1f, R-1k, R-1l, R-1o, R-1u, R-1w, R-1x, R-2 and T-5 assert on it; without it R-1l's first mutant and
   the arm-versus-teardown readings of R-1k and R-1u could not go RED. Its own known positive: a cell that calls each of the two directly and reads two distinct records.
 - Re-pinned cells stay in their files (D8).
 
@@ -627,8 +640,8 @@ The text of every new and amended row is data-model.md "B&L delta". In summary:
 - No C-ABI change. `reset_on_logout` has no C-ABI setter: re-derive with
   `git grep -n reset_on_logout -- include/fix src/capi bindings`, which has no hit at the base. The TOML key and
   default are unchanged.
-- No member is added or renamed. `logout_seen_` changes from `bool` to a one-byte enum (data-model). No test pins
-  `sizeof(Session)`: `git grep -n "sizeof(Session)\|sizeof(fixpp::session::Session)" tests include src` has no
+- No member is added or renamed. `logout_seen_` changes from `bool` to a one-byte enum, and `reset_unit_wake_` is
+  deleted (data-model). No test pins `sizeof(Session)`: `git grep -n "sizeof(Session)\|sizeof(fixpp::session::Session)" tests include src` has no
   hit at the base; the full `-k 0` build (phase 7, phase 8) is the check that nothing else depends on it.
 - The public C++ header `session_config.hpp`'s comment on `reset_on_logout` changes. That is documentation, not
   API.
@@ -645,20 +658,23 @@ store call it saw (`reset_to` is the unit; `reset` is the teardown).
 | R-1c | `…Answered_ResetAtReceipt` (HookedStore, `reset_to_mode::forward`) | the peer's Logout fed in `LogoutSent`; the hook sees `reset_to`, state `Disconnected`, the transport **open**, phase 1 not yet woken; after `close()`: `(1, 1)`, one reset in total | base: the hook sees `reset` in `close()`'s teardown, transport closed | delete L's reset point (no teardown backstop now, so the final state is wrong too; the hook reading keeps the cell honest if a backstop is ever reintroduced) |
 | R-1d | `…PeerRequest_ResetAtReceipt` (both roles) | reply 35=5 numbered with the pre-reset next outbound; inside `onLogout` the numbers are the **pre-reset** ones (DQ-10); the hook sees `reset_to`, state `Disconnected`, transport open; one reset | as R-1c | delete A's reset point; second mutant: move the Disconnected write after the unit → `onLogout` sees `(1, 1)` and the hook sees Active |
 | R-1e | `…TooHighLogout_ResetAtAcknowledgement` | too-high Logout, gap filled, bound acknowledges; the hook as R-1d; pre-reset numbers inside `onLogout` | as R-1c | delete B's reset point |
-| R-1f | `…TooHighLogout_ClaimedByClose_NoReset` (rol only), and `…_AckingWhenClosed_ResetOnce` | (1) `close()` while the mark is pending: no `reset_to`, no `reset`; numbers as before; (2) `close()` while the bound is `acking` (its reply held in HookedStore): one `reset_to`, before `close()` returns | (1) base resets at teardown (flag set at receipt); (2) base resets at teardown, `reset` not `reset_to` | (1) leave the marker `pending` when the bound exits → the teardown takes it over → RED; (2) drop the `reset_unit_in_flight_` term of `close()`'s wait → `close()` returns while the unit's store call is held → RED (the bound's counter join, not the `pending` term, covers the `acking` phase) |
+| R-1f | `…TooHighLogout_ClaimedByClose_NoReset` (rol only, a mock clock), and `…_AckingWhenClosed_ResetOnce` | (1) `close()` while the mark is pending: no `reset_to`, no `reset`; numbers as before; `close()` returns with the mock clock below `logon_timeout_ms` and no `close_reset_wait_expired`; (2) `close()` while the bound is `acking` (its reply held in HookedStore): one `reset_to`, before `close()` returns. (2) is (1)'s forced-hit arm on the same store double | (1) base resets at teardown (flag set at receipt); (2) base resets at teardown, `reset` not `reset_to` | (1) leave the marker `pending` when the bound exits → `close()` polls to `logon_timeout_ms` and emits `close_reset_wait_expired` → RED; (2) drop the `reset_unit_in_flight_` term of `close()`'s wait → `close()` returns while the unit's store call is held → RED (the bound's counter join, not the `pending` term, covers the `acking` phase) |
 | R-1g | `…ReceiptEndsBeforeResetPoint_NoReset_*` (rol only; A in Active): `FromAdminThrow`, `FromAdminReject`, `LateParseFailure` | no `reset_to` and no `reset` after the arm and after `close()`; the arm's existing ending (reply on the wire for throw and reject; Reject for reject) | base resets at teardown (flag set) | per parameter: clear the marker only at the reset point, not on exit → the later `close()` waits for a receipt that will never arrive, to `logon_timeout_ms` (the cell asserts `close()` returns well inside that bound) → RED; for `LateParseFailure`, clear it after the arm's `close()` instead of before → `close()` waits for its own caller, the same assertion → RED |
 | R-1h | `…PeerLogoutThenReconnect_NoResetOnNewConnection` (standalone initiator) | peer Logout reset at its reset point; `drive_reconnect`; the reconnect Logon is written (RR-4 does not refuse it: `install_reconnected_transport` runs before `emit_initiator_logon_`); numbers advance; `close(terminal)`: no reset | base's latched flag resets at the new connection's teardown | do not set `none` at `install_reconnected_transport` → RR-4 refuses the reconnect Logon → RED |
 | R-1i | `…ReceiptResetStoreFailure_LoggedThenDisconnected` (persistent StoreDouble, `fail_next_reset`) | Disconnected; arm's return as without the failure; manager `(1, 1)`; no teardown retry (rol only) | the base has no receipt reset | make the failure fatal (return the error) |
-| R-1j | `…CloseWaitsForReceiptUnit` (HookedStore holds `reset_to`) | the hold is reached in L's arm (state Disconnected, transport open, phase 1 not woken); `close()` does not return during the hold; returns ok after release; `(1, 1)`; with `logout_disconnect_timeout_ms` below the hold, the timer arm wins and the transport is force-closed while `close()` still waits (O17) | base's hold is at teardown, after phase 2 began | move the wait back inside the predicate block |
+| R-1j | `…CloseWaitsForReceiptUnit` (HookedStore holds `reset_to`; a mock clock for the session) | the hold is reached in L's arm (state Disconnected, transport open, phase 1 not woken); `close()` does not return during the hold; returns ok after release; `(1, 1)`. O17: `close_grace` is a real `asio::steady_timer`, so the budget is a small real-time `logout_disconnect_timeout_ms` that expires during the hold, and the mock clock, on which the unit wait runs, is never advanced to `logon_timeout_ms` while the hold lasts. The cell asserts the transport closed (the timer arm won) while the `close()` future is still pending | base's hold is at teardown, after phase 2 began | move the wait back inside the predicate block |
 | R-1k | `…CloseDuringReplyStore_OneResetByTheArm` (A in Active, HookedStore holds the reply's `store`); variant `…_EngineStop` (`Engine::stop()` instead of `close(terminal)`) | `close()` started during the hold does not return before release; after: exactly one `reset_to`, no `reset`, finished before `close()` returns | base: the teardown's `reset`, no `reset_to` | drop the `pending` term of `close()`'s wait → `close()` closes the receipt out with no reset → zero resets → RED |
-| R-1l | `…CloseWhilePending_NoClock_NoReset` (no clock, rol only; HookedStore holds the reply's `store`) — ruled case "`close()` without a clock while `pending` → no reset" | `close()` returns during the hold; no `reset` and no `reset_to` at any point; after release the arm runs no unit and its persist writes nothing (RR-4): store and manager numbers are those before the receipt's persist | base: the teardown's `reset` (flag set at receipt) | (1) reset a `pending` receipt at the teardown (round 1's rejected take-over) → `reset` seen → RED; (2) drop the arm's "already `reached` → no unit" test → `reset_to` seen → RED; (3) drop RR-4's `persist_inbound_advance_` test → the store's inbound number moves → RED |
+| R-1l | `…CloseWhilePending_NoClock_NoReset_{HeldInReplyStore,HeldInPersist}` (no clock, rol only, A in Active; HookedStore holds, after completing it, the reply's `store` or the inbound persist) — ruled case "`close()` without a clock while `pending` → no reset" (O13-r, O13-p) | `close()` returns during the hold; no `reset` and no `reset_to` at any point; after release the arm runs no unit. Each number is named on its own. `HeldInReplyStore`: the store holds the reply 35=5 at N_out; no frame on the cell's live transport after `close()` returned, and on its `transport_send` twin the reply is transmitted (B-563-5); store inbound N (the persist refused, RR-4); manager inbound N+1 (`check_inbound`, before the arm). `HeldInPersist`: store inbound N+1 (the persist landed); manager inbound N+1 | base: the teardown's `reset` (flag set at receipt) | (1) reset a `pending` receipt at the teardown (round 1's rejected take-over) → `reset` seen → RED; (2) drop the arm's "already `reached` → no unit" test → `reset_to` seen → RED; (3) drop RR-4's `persist_inbound_advance_` test → `HeldInReplyStore`'s store inbound becomes N+1 → RED |
 | R-1n | `…ReplyEndings_*` (A in Active, rol only): `Overflow` (CompIDs for which the reply does not fit, paired with the longest that fit), `ToAdminThrow`, `AssignFailure` (outbound at `seqnum_max` through the test seam), `StoreFailure` (persistent StoreDouble refuses the reply's store), `WriteFailure` (sink throws), `PersistFailure` | per contract O5–O11: reset for `Overflow`, `StoreFailure`, `WriteFailure`; no reset for `ToAdminThrow`, `AssignFailure`, `PersistFailure` | base: every one resets at teardown, or (`PersistFailure`) per the base's flag | per parameter: for a reset row, treat the leaf's discarded result as an exit → no reset → RED; for a no-reset row, run the reset before the reply's `toAdmin` / before the persist → reset → RED |
-| R-1o | `…LogonSentLogout_Resets` (initiator, rol), plus `…_MtlsUnauthorised_NoReset` and `NotConnectedLogout_NoReset` (acceptor) | LogonSent: no 35=5 written by fixpp; `reset_to(1, 1)`; Disconnected. mTLS unauthorised: no reset, Disconnected, the authorisation-failed event. NotConnected: no reset | LogonSent: base makes no reset; the other two GREEN on base (pins) | delete S's reset → RED; skip S's authorisation test → the mTLS arm resets → RED; set the marker in NotConnected → RED |
+| R-1o | `…LogonSentLogout_Resets` (initiator, rol), plus `…_MtlsUnauthorised_NoReset` and `NotConnectedLogout_NoReset` (acceptor), on one store double | LogonSent: no 35=5 written by fixpp; `reset_to(1, 1)`; Disconnected (the forced-hit arm of the other two). mTLS unauthorised: no reset, Disconnected, the authorisation-failed event. NotConnected: no reset | LogonSent: base makes no reset; the other two GREEN on base (pins) | delete S's reset → RED; skip S's authorisation test → the mTLS arm resets → RED; invoke a reset point (the marker `reached` and the unit) from the NotConnected arm → `reset_to` seen → RED |
 | R-1p | `…LivenessDuringReceiptUnit_NumbersNothing` (A in Active, HookedStore holds `reset_to`, small HeartBtInt) | the mock clock advanced past one, then two HeartBtInt during the hold: no frame written after the reply; manager `(1, 1)` after release | the base has no receipt unit (its reset is after the loop is joined) | move the Disconnected write after the unit → the loop's Heartbeat or TestRequest is numbered 1 → RED |
 | R-1q | `…BoundRouteFrameDuringUnit_Drained` (B, HookedStore holds `reset_to`) | a frame at 34 > 1 fed during the hold: no ResendRequest, no inbound advance, no `fromApp` | as R-1p | as R-1p |
 | R-1r | `…BoundRouteInFlightPumpArm_RefusedAtTheBoundary` (B; a pump arm with a write after the bound's wake, held in HookedStore across the bound's unit) | after release: nothing the in-flight arm writes reaches the wire or the store's numbers; store and manager `(1, 1)` | as R-1p | delete RR-4's boundary test in `store_then_emit` (one arm) and in `persist_inbound_advance_` (a second arm) → the in-flight write lands → RED. The mutant is the same on either route: if phase 0 finds no Active sub-arm that writes after a suspension following `check_inbound`, the cell drives the boundary through the test seam `session_test_access::store_then_emit` after a receipt reset, and records the reading |
 | R-1s | `…CloseWaitsForLogonArmUnit_NoKnob` (no knob, initiator 141=Y acknowledgement, HookedStore holds `reset_to`) | `close()` during the hold does not return before release (B-104-2's other half) | base's wait is inside the predicate block, which no knob opens | move the wait back inside the predicate block |
 | R-1u | `…CloseInsideOnLogout_ResetOnceByTheArm` (A in Active, a clock; `close(terminal)` started inside the `onLogout` the arm's Disconnected write fires) — ruled case "`reached`, unit not started, teardown → one reset" | exactly one `reset_to`, no `reset`, finished before `close()` returns; the hook sees state Disconnected | base: the teardown's `reset`, no `reset_to` | split RR-2 item 3's turn (a post between the marker's `reached` and `run_reset_unit_`) → `close()`'s posted body runs in that window, finds `reached` and no unit in flight, passes its wait and drains the manager; the unit's manager calls then fail → zero resets → RED. This is the input the teardown's "`reached`, unit not started" term would need; item 3 leaves it none |
+| R-1v | `…ReplyStoreCancelled_NoReset` (A in Active, rol only, a mock clock; a cell-local store double whose outbound `store()` returns `store_cancelled` for the reply) — O9 | the number is taken back (manager next outbound N_out again); Disconnected; no frame; no `reset_to`, no `reset`; the owner cleared the marker while `operation_aborted` unwound the arm: a later `close()` returns with the mock clock below `logon_timeout_ms` and no `close_reset_wait_expired`. Forced-hit arm: R-1n's `StoreFailure` input on the same double resets. The thrown timing reaches the same block after the `try` (D-OUT-2), so this one cell witnesses both | base: the teardown's `reset` (flag set at receipt) | clear the marker on return only, not during unwinding → the marker stays `pending` → `close()` polls to `logon_timeout_ms` and emits the event → RED |
+| R-1w | `…CloseNotHeldWhenReceiptEndsWithoutUnit_{FromAdminThrow,Storeless,StuckPending}` (A in Active, rol, a mock clock) | `FromAdminThrow`: `close()` started during a held reply `store`; the hold released; `fromAdmin` throws; with the mock clock advanced to just below `logon_timeout_ms`, `close()` has returned, no `close_reset_wait_expired`, no reset. `Storeless`: no store (`store_factory` null), the reply's transport write held (the `arm_block()` / `release()` pattern of `ControlledWriteTransport`, `test_live_outbound_serialized.cpp`); `close()` started during the hold; released: the arm reaches its reset point, `run_reset_unit_` returns before setting `reset_unit_in_flight_`, manager `(1, 1)`; `close()` returned as above. Phase 1 reads whether the held write outlasts `close()`'s `close_async()`, which cancels and joins an in-flight operation. If it does not, the storeless exit has no input while `close()` waits, like the manager failure, and the poll covers it by construction: the arm is dropped and that reading is recorded. `StuckPending`, the instrument's forced hit: the hold never released and the mock clock advanced to the bound → one `close_reset_wait_expired`. The manager-failure exit has no input while `close()` waits: the manager refuses only after `close()`'s `seqnum_mgr_.drain()`, which follows the wait | base: `FromAdminThrow` resets at teardown; `Storeless` has no receipt unit | restore 093's event wait (`unit_done.async_wait \|\| await_deadline`, woken only at the unit's completion) widened to `pending` → `close()` runs to the bound and emits `close_reset_wait_expired` in `FromAdminThrow` and `Storeless` → RED |
+| R-1x | `…TerminalEmissionAtResetPoint_ResetOnce` (a direct `Session`, A in Active, rol, a clock; the cell `co_spawn`s `on_inbound_frame` bound to its own cancellation slot and emits `cancellation_type::terminal` on it from inside the `onLogout` that RR-3 step 2 fires) | exactly one `reset_to(1, 1)`; the marker `reached`; numbers `(1, 1)`; no `reset` | base: the teardown's `reset`, no `reset_to` | delete the cancellation-state reset before the turn → `reset_to_one`'s lock throws `operation_aborted` after the marker is `reached` → zero resets → RED |
 | R-2 | `…BothKnobs_PeerAnswers_TwoResets_EndsOneOne` (HookedStore) | two resets: the hook first sees `reset_to` in L's arm with the transport open, then `reset` in the teardown; `(1, 1)` (D2) | base: one reset | skip the teardown reset when the receipt reset ran → one reset → RED |
 | U-1 | `UnaskedResetAck104.Lenient_HydratedN_ResetsAndActive` (persistent store hydrated at in, out > 1) | Active (not merely "no second Logon"); inbound next 2, outbound next 1 in manager and store; `reset_to(2, 1)`; event `by_peer_request = true`; no 35=A written after fixpp's first; the next `send` is 34=1 | base ends Disconnected, too low | restore `check_inbound` before the 141 read |
 | U-2 | `…Unilateral_…` | as U-1 | as U-1 | as U-1 |
@@ -668,7 +684,7 @@ store call it saw (`reset_to` is the unit; `reset` is the teardown).
 | U-6 | `…FollowUpResendRequest_GapFillOneOne` | after U-1, RR(34=2, 7=1, 16=0) → exactly one frame, GapFill 34=1, 43=Y, 123=Y, 36=1; inbound next 3; the next `send` is 34=1 | unreachable on base (the session ended) | D3.3's rejected alternative, "answer an empty range with nothing" → no frame → RED |
 | U-7 | `…FollowUpResendRequest_ExplicitEnd_Clamped` (FIX.4.1 999999 and FIX.4.4 explicit end) | NewSeqNo = 1, not end + 1 | unreachable on base by this route; RED on base by U-8's route | drop the D3.3a clamp |
 | U-8 | `ResendAnswer104.ExplicitEndAboveNextOut_NoOvershoot` (Active, no reset, next out 5): RR(7=5, 16=10), and RR(7=10, 16=20) | GapFill 34=5, 36=5; and GapFill 34=10, 36=5 (NewSeqNo below MsgSeqNum, QFC's frame, N-6) | base writes 36=11 and 36=21 | drop the clamp |
-| U-9 | `UnaskedResetAck104.Mtls_Unauthorised_NoReset` (direct mTLS initiator, identity not authorised, ack 141=Y at 34=1) | no `reset_to`; hydrated numbers unchanged; Disconnected; the authorisation-failed event | GREEN on base (base: too low → Disconnected); the pin is that 104 keeps it | run the unasked unit before the gate → `reset_to(2, 1)` seen → RED |
+| U-9 | `UnaskedResetAck104.Mtls_Unauthorised_NoReset` (direct mTLS initiator, identity not authorised, ack 141=Y at 34=1) | no `reset_to`; hydrated numbers unchanged; Disconnected; the authorisation-failed event. Forced-hit arm: the same initiator with an authorised identity records `reset_to(2, 1)` | GREEN on base (base: too low → Disconnected); the pin is that 104 keeps it | run the unasked unit before the gate → `reset_to(2, 1)` seen → RED |
 | T-1 | `LogonTooLow104.Initiator_LogoutWithText` (NextNumIn 5, ack 34=3) | exactly one 35=5; 58 byte-equal to the text; no 1409, no 789; 34 = fixpp's next outbound; NextNumIn 5 in manager and store; `toAdmin(Logout)` once; Disconnected | base writes no 35=5 | remove the helper call |
 | T-2 | `…Acceptor_LogoutWithText` (hydrated NextNumIn 5, Logon 34=3) | as T-1, from the acceptor | as T-1 | as T-1 |
 | T-3 | `…PossDup_LogoutWithText` (both arms, 43=Y) | as T-1 (D6) | as T-1 | add a 43=Y exemption |
@@ -677,11 +693,26 @@ store call it saw (`reset_to` is the unit; `reset` is the teardown).
 | T-4c | `…AssignFailure` (each arm; outbound at `seqnum_max` through the test seam) | no frame; Disconnected; the assign error returned | base returns success | discard the assign error in the helper → success → RED |
 | T-4d | `…PersistentStoreFailure` (each arm; StoreDouble refuses the Logout's store) | `toAdmin` called with the text; no frame; Disconnected; success | base: no `toAdmin` call | transmit despite the store failure → RED |
 | T-4e | `…WriteFailure` (each arm; sink throws) | the Logout is stored (store holds a 35=5 at N_out); no frame on the wire; Disconnected; success | base stores nothing | propagate the write failure as the arm's return → RED |
-| T-5 | `…ResetOnLogout_NoResetForTooLowLogout` | `reset_on_logout` set; after the too-low Logout and `close(terminal)`: no reset | GREEN on base (vacuous there: no Logout); its role is the FR-015 pin once T-1 is GREEN | set the marker in `refuse_logon_with_logout_` |
+| T-5 | `…ResetOnLogout_NoResetForTooLowLogout` (initiator, `reset_on_logout` set) | first its own Logout: one 35=5 with T-1's text and one `toAdmin(Logout)`; then, after `close(terminal)`: no `reset_to`, no `reset`. Forced-hit arm on the same store double and fixture: a Logout received in LogonSent (arm S) records one `reset_to` | RED on base: base writes no 35=5 | invoke a reset point (the marker `reached` and the unit) from `refuse_logon_with_logout_` after its emit → `reset_to` seen → RED |
 | T-6 | `…Precedence_*`: too low and a bad SendingTime; too low on a strict acceptor without 141; too low on an mTLS acceptor with an off-list identity; too low on the acceptor with refused credentials (`authorize_logon`); too low on a direct mTLS initiator with an unauthorised identity | SendingTime's ending; the strict text; **no frame** and the gate's own ending for each identity arm (FIX-TC 1S(c), clarification N-8) | base: per-guard endings, the last silent (the identity arms are GREEN on base, as pins) | move the too-low branch ahead of the SendingTime guard → the SendingTime arm RED; send the too-low Logout before the identity gates → each identity arm RED |
 
 **Rules carried into the cells.**
 - A "no reset" cell runs with `reset_on_disconnect` off.
+- **No cell proves "no reset" with a forced miss alone.** Each carries, on the same store double and record, a
+  forced-hit arm whose input reaches a reset point and whose record shows one `reset_to`. The arm ships in the cell;
+  a mutant is a different thing and runs in a scratch copy.
+  - R-1a, R-1b: the answered twin (R-1c's input).
+  - R-1f(1): R-1f(2).
+  - R-1g: the same fixture with `fromAdmin` returning (R-1d's input).
+  - R-1h: its own first half, the old connection's reset.
+  - R-1l: R-1k's input, the same hold with a clock.
+  - R-1n's no-reset rows: its reset rows.
+  - R-1o's mTLS and NotConnected arms: its LogonSent arm.
+  - R-1v: R-1n's `StoreFailure` input.
+  - R-1w `FromAdminThrow`: R-1k's input. Its "no `close_reset_wait_expired`" assertion has `StuckPending` as its
+    forced hit, and so do R-1f(1)'s and R-1v's.
+  - T-5: arm S on the same fixture.
+  - U-9: its authorised twin, `reset_to(2, 1)`.
 - A "no second Logon" cell asserts Active and a next frame numbered 1.
 - A cell that reads "at the reset point" reads at the hook (state, transport, which store call), never only after
   `close()`. A final-state assertion cannot tell the arm's reset from a teardown reset (R-1k, R-1l, R-1u).
@@ -707,7 +738,7 @@ No erratum E-5: ruling O-3 chose D9's sequence (a), which meets FR-017 as writte
 
 ## Departures from QuickFIX
 
-The one list is spec.md "Departures from QuickFIX" (FR-018), rows DQ-1 to DQ-16. This file does not keep a copy;
+The one list is spec.md "Departures from QuickFIX" (FR-018), rows DQ-1 to DQ-16 and DQ-12a. This file does not keep a copy;
 each decision above names the row it produces.
 
 ## OPEN
@@ -736,9 +767,13 @@ Phase-0 checks whose outcome can return a question to the orchestrator:
     `already_serialized_executor` under `direct_executor` (`session_config.hpp` `threading_mode`). So a waiter
     exists only after `seqnum_mgr_.drain()`, which is `close()`'s last step, after the teardown predicate. 093 C-6
     step 3, B-093-11 and `brain/components/session.md` state the same condition.
-  - **Cancellation cannot fail the manager set.** After the arm's first lock, `FIXPP_DETAIL_CO_AWAIT_LOCK` part 4
-    leaves the thread's filter terminal-only, and `Engine::stop()` emits only total. Route L takes no suspension
-    before its unit.
+  - **Cancellation cannot fail the manager set.** This rests on contract RR-2 item 3's reset of the thread's
+    cancellation state immediately before the reset point, not on the Engine alone. After the arm's first lock,
+    `FIXPP_DETAIL_CO_AWAIT_LOCK` part 4 leaves the filter terminal-only, so a direct caller's `terminal` or `all`
+    emission passes it. `Engine::stop()` emits only `total`, and the Engine calls `on_inbound_frame` from the pump
+    with no `||` around it. The reset drops whatever was recorded before the turn, and nothing inside the turn can
+    record one (cell R-1x). Route L takes no suspension before its unit (read). Route S takes none by its design:
+    its guards are synchronous, and `compid_authorization_policy.authorize` returns a value.
   - **The store-order condition.** RR-4's first case needs every store call issued before the unit's `reset_to` to
     be applied before it. Phase 0 reads it for `MemoryStore` (a post, then its FIFO `async_mutex`), `FileStore`
     (its offloaded jobs) and HookedStore, with
@@ -750,6 +785,16 @@ Phase-0 checks whose outcome can return a question to the orchestrator:
 - **R2 — `close()` now waits for a Logon-arm unit with no knob set, and for a `pending` receipt** (D1 item 4). It
   is bounded by `logon_timeout_ms`. The 093 cells around `close()` and the unit (`InboundFrameDispositionsOd29.*`,
   `engine_reset_unit_stop_test.cpp`) are in the measured census.
+  - **The poll changes how a test may pump `close()`.** While it polls, `close()` keeps a handler ready on the
+    io_context. So an existing cell that holds a store call or a unit while `close()` runs, and pumps with an
+    unbounded `ioc.poll()`, `ioc.run()` or a `run_one()` loop with no bound, now hangs where it used to settle.
+    The measured census would see that only as a ctest timeout.
+  - Recipe, in phase 0's census: in every test file that holds a store call or `reset_to` while `close()` runs
+    (`git grep -l -e HookedStore -e hold_until_close_reset -e reset_to_mode -- tests`), list the pumps with
+    `git grep -n -e '\.poll()' -e '\.run()' -e 'run_one()' -- <those files>`, and read the helpers those files
+    pump through (a rig or settle helper), since the pump may live there. The grep reports hits elsewhere in
+    `tests/`, so a miss in those files is a reading, not a broken instrument. Give each pump a disposition in the
+    evidence file: bounded already, or re-pinned to a bounded pump (`run_for`, `pump_until_ready`).
 - **R3 — D3.3a changes 103's and 027's resend-answer arithmetic** for an explicit end at or above next outbound.
   The supersession census (D8) finds the cells and texts pinning `requested_end + 1`. The two-value end model's
   comment in `replay_outbound_range_` is amended to name 104.
@@ -792,5 +837,6 @@ blocker". Each is listed again in the PR body for the owner's review at Gate B s
   `endSeqNo >= getExpectedSenderNum()` → `endSeqNo = getExpectedSenderNum() - 1`). fixpp's `requested_end + 1` is a
   departure from it today, so the clamp restores QuickFIX's behaviour. It supersedes 027 C3's explicit-end case by
   name (D3.3a; contract "Superseded by name").
-- **The moved `close()` wait: accepted** (round 0's D1 item 6, now D1 item 4 and contract RR-2 item 3; B-104-2),
-  widened in round 1 to a `pending` receipt (RU-1). It is bounded by `logon_timeout_ms`.
+- **The moved `close()` wait: accepted** (round 0's D1 item 6, now D1 item 4 and contract RR-2 item 4; B-104-2),
+  widened in round 1 to a `pending` receipt (RU-1). It is bounded by `logon_timeout_ms`. Its shape became a poll
+  by post in Gate A round 2 (N-1); that is a construction under design ruling 2, not a new ruling.

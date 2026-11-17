@@ -10,13 +10,9 @@ Run each census in a scratch copy, never committed. Record the results in the ev
 comments.
 
 **Supersession census (research D8).** It finds surfaces that stay GREEN as well as cells that fail.
-- Static half, for each key of D8's key table (fixed strings), over every surface:
-  ```bash
-  git grep -n -F -e '<key>' -- spec brain 'specs/*/contracts/*' 'specs/*/spec.md' .specify/*.md \
-    include src tests bindings tools ':!specs/104-sequence-reset-fidelity'
-  ```
-  Read the live B&L file only, never `-closed`. Give each kept hit a disposition (re-pin, reword, supersede by
-  name, unaffected) in the evidence file.
+- Static half: research D8 steps 1 to 3, with its pathspec and key table, are the recipe; this file does not keep a
+  copy of the command. Give each kept hit a disposition (re-pin, reword, supersede by name, unaffected) in the
+  evidence file.
 - Measured half: apply D1 alone, then D3 + D3.3a, then D5, each in its own scratch copy, and run:
   ```bash
   ctest --preset linux-clang-debug -L session -V
@@ -84,7 +80,15 @@ Cells with a forced-hit or a competing-timer element:
 - **R-1b.** The drop's close must complete before `logout_disconnect_timeout_ms`. Assert the completion instant
   against the grace deadline, so the timer cannot be what ended the wait.
 - **R-1j.** Assert that the store hold is reached in the LogoutSent arm (state `Disconnected`, transport open,
-  phase 1 not woken). A hold reached in the teardown would also block `close()`.
+  phase 1 not woken). A hold reached in the teardown would also block `close()`. The grace timer is a real
+  `asio::steady_timer`: a small real-time `logout_disconnect_timeout_ms` expires during the hold, while the mock
+  clock is never advanced to `logon_timeout_ms`. Assert the transport closed while the `close()` future is pending.
+- **R-1l.** Name each number on its own: the manager's inbound moved at `check_inbound`, before the arm; the store's
+  inbound moves only if the persist lands (`HeldInPersist`).
+- **R-1w, R-1f(1), R-1v.** `close()`'s wait is a poll by post, so a cell pumps it with a bounded run (`run_for`, a
+  slice loop), never an unbounded `poll()`. "Not held" is read with the mock clock below `logon_timeout_ms`;
+  `StuckPending` is the forced hit of the expiry event.
+- **Every "no reset" cell** carries its forced-hit arm (research D10, "Rules carried into the cells").
 - **R-1p.** The mock clock passes one and then two HeartBtInt during the hold, so the loop's Heartbeat and
   TestRequest deadlines both fall inside it.
 - **T-4a.** The overflow cell is a pair: the longest CompIDs that still emit the Logout (the forced hit), and one
@@ -101,7 +105,7 @@ Cells with a forced-hit or a competing-timer element:
 | US1 AS5 | `rod`, with and without `rol`: one reset per teardown, `(1, 1)` | existing `ResetOnDisconnect_*`, R-2 |
 | US1 AS6 | Logout in LogonSent resets; in NotConnected does not | R-1o |
 | US1 AS7 | processing ends before the reset point: no reset | R-1f, R-1g, R-1n |
-| US1 edges | too-high Logout; races with `close()` and `Engine::stop()`; store failure; reconnect; emitters at the unit | R-1e, R-1h to R-1l, R-1p to R-1s, R-1u |
+| US1 edges | too-high Logout; races with `close()` and `Engine::stop()`; a cancelled reply store; store failure; reconnect; emitters at the unit; a direct caller's cancellation at the reset point | R-1e, R-1h to R-1l, R-1p to R-1s, R-1u to R-1x |
 | US2 AS1/AS2 | unasked 141=Y at 34=1, lenient and unilateral | U-1, U-2 |
 | US2 AS3 | strict unchanged | U-3, existing `Initiator_Received141Ack_*` |
 | US2 AS4 | 141=Y at M > 1 | U-4, W8 re-pin |
@@ -120,22 +124,28 @@ Cells with a forced-hit or a competing-timer element:
 - `.claude/scripts/check-comment-claims.py --root <tree> --base origin/main` over the new and changed comments.
   The `logout_seen_` comment and the end-model comment must state a condition and a recipe, not a
   count.
-- No bench is needed: 104 adds no per-frame work. The Logout arms gain one flag test and the unit on a Logout
-  that ends the session. The LogonSent arm loses a `check_inbound` on the unasked branch only.
+- The paired `session_send_bench` run, base against candidate on one machine (plan "Performance Goals", Article
+  VIII §3): RR-4 adds a byte test to every outbound frame's store path and every inbound persist. Results go to the
+  evidence file.
 
-## 5. Records, then FR-017 last
+## 5. Records, verification, then FR-017 last
 
-1. Records: the B&L delta (data-model.md), L-104-7 and the amendments to B-024-1, B-563-5 and B-093-11
+The order is plan phases 9 to 11.
+
+1. Records (phase 9): the B&L delta (data-model.md), L-104-7 and the amendments to B-024-1, B-563-5 and B-093-11
    included; `spec/feature-catalogue.md` rows, with 104's witnesses added to the rows whose Spec ref is a key in
    the spec's Normative References (re-derive with `grep -n -F '§4.3.11' spec/coverage-index.md` and the like);
    the `spec/coverage-index.md` notes column for those keys; the supersession flags on
    `brain/components/session.md` and `brain/components/graceful-logout.md` (024 C3.1, 027 C3, 093 C-6's
-   `close()` bullet, B-538-7's clause, 103's latch disclosure); the L-104-3 follow-up issue, labelled.
-2. FR-017 (research D9), after the last commit that changes a ctest registration:
-   - by sequence (a) (research D9, ruling O-3): dispatch the tiers on the branch at that head, before labelling;
+   `close()` bullet, B-538-7's clause, 103's latch disclosure, and each merged-bundle document the census flags);
+   the L-104-3 follow-up issue, labelled.
+2. `/speckit-verify`, then Gate B (phase 10).
+3. FR-017 (phase 11; research D9, ruling O-3), after Gate B's last fix:
+   - dispatch the tiers on the branch at that head, before labelling;
    - read each lane's count off that run (`ran:` on Linux, `out of <N>` on Windows);
    - confirm the same run printed the DIAGNOSTIC ONLY warning, the known positive;
-   - write `ci/expected-eligible-tests.txt` and a "RE-RECORD — 104" section of `ci/ctest-parallelism-probe.md`
-     in one commit that changes no CMake file;
+   - write `ci/expected-eligible-tests.txt` and a "RE-RECORD — 104" section of `ci/ctest-parallelism-probe.md`,
+     run `bash ci/test-parallelism-verdict.sh`, and commit both files in one commit that changes no CMake file;
+   - record the commit's disposition in the Gate B and verify records (plan phase 11);
+   - BODY → LABELS → wait ~2 min → PUSH LAST;
    - accept on the labelled run that includes it: no DIAGNOSTIC ONLY for a count mismatch.
-3. `/speckit-verify`, then Gate B.
