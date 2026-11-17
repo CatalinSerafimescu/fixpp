@@ -89,6 +89,17 @@ Also in this feature, by owner instruction of 2026-11-17: re-record the #266 pea
   "MsgSeqNum too low, expecting N but received M". This matches QuickFIX C++, QuickFIX/J and QuickFIX/Go, and 103's
   Active arm (B-103-10). FIX-SL allows 1409 on Logout only "by counterparty agreement" (§4.3, EP56), and §4.7.1 says
   "may". The FIX 4.4 Vol 2 Logout has only 58/354/355, and 1409 is not in the FIX 4.4 dictionary.
+- Q: After accepting an unasked 141=Y acknowledgement and resetting, does fixpp send its own Logon with 141=Y at
+  34=1 (QuickFIX C++) or nothing further (QuickFIX/J, QuickFIX/Go)? → A: Nothing further. Both numbers are reset:
+  inbound continues at 2 after the acknowledgement's 34=1, and outbound restarts at 1. Then the session goes Active.
+  - History (parent `research/probes/b107_695_104/q1_quickfix_history.md`): QuickFIX C++'s reply to an unasked
+    141=Y is a side effect of `f26ca5fc` (2010), which swapped the operands of the 2005 condition `05d4d39c`. That
+    reply was never tested or discussed, and quickfix/quickfix#417 (2023, open) reports it as a bug.
+  - QuickFIX/J ported the 2005 condition and removed it deliberately in 2008 (QFJ-380, after a forum thread: "There
+    is no reason A should send a second Logon").
+  - QuickFIX/Go never had an initiator reply.
+  - FIX 4.4 Vol 2's and FIX-SL §4.4.2's reset procedure (the receiver of a reset Logon answers with 141=Y at 34=1)
+    describes a reset request, not an acknowledgement. §4.4.3 makes the reset at Logon the initiator's option.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -137,8 +148,9 @@ the state, both numbers, the store, and the frames fixpp sends.
 **Acceptance Scenarios**:
 
 1. **Given** a lenient initiator with NextNumIn = N > 1 that sent its Logon without 141, **When** the
-   acknowledgement carries 141=Y at 34=1, **Then** the session does not end on it. Both numbers are reset as
-   QuickFIX resets them. The session reaches Active. The next frames fixpp sends are numbered from the reset.
+   acknowledgement carries 141=Y at 34=1, **Then** the session does not end on it. Both numbers are reset
+   (inbound next 2, outbound next 1). The session reaches Active without sending a second Logon, and the next frame
+   fixpp sends is numbered 1.
 2. **Given** the same with `unilateral`, **Then** the same.
 3. **Given** a `bilateral_strict` initiator (which sent 141=Y and reset before its Logon), **When** its
    acknowledgement carries 141=Y at 34=1, **Then** behaviour is unchanged (in sequence, reset as today).
@@ -249,10 +261,10 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
   compared with NextNumIn. An acknowledgement with 141=Y at 34=1 MUST NOT end the session as too low, whatever
   NextNumIn was.
 - **FR-008**: On such an acknowledgement that fixpp did not ask for (lenient or unilateral policy, no 141=Y on fixpp's
-  own Logon), both sequence numbers MUST be reset so that inbound continues after the acknowledgement's 34=1. The
-  outbound numbering after the reset, and whether fixpp sends anything further at the Logon (QuickFIX C++ sends its
-  own Logon with 141=Y at 34=1; QuickFIX/J and QuickFIX/Go do not), MUST be chosen by the plan from the three
-  engines' observable behaviour. The choice MUST be recorded as a departure from any engine it differs from.
+  own Logon), both sequence numbers MUST be reset: inbound continues at 2 after the acknowledgement's 34=1, and
+  outbound restarts at 1. fixpp MUST NOT send a further Logon. This follows QuickFIX/J and QuickFIX/Go (clarification
+  2026-11-17). The plan derives, from the three engines, how fixpp answers a peer's ResendRequest that follows the
+  reset.
 - **FR-009**: The reset MUST be durable on a persistent store, with the guarantees 103's reset unit gives today:
   ordering against `close()` and failure handling.
 - **FR-010**: A strict initiator's handling of its own acknowledgement MUST be unchanged.
@@ -299,7 +311,7 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
   unchanged, whether it ends by the timeout or by a drop. Each case has a cell that is RED on the base and GREEN on
   104.
 - **SC-002**: A lenient or unilateral initiator at NextNumIn > 1 reaches Active on an acknowledgement with 141=Y at
-  34=1, with the numbers FR-008 chooses. The cell is RED on the base.
+  34=1, with inbound next 2 and outbound next 1, and sends no second Logon (FR-008). The cell is RED on the base.
 - **SC-003**: A too-low acknowledgement (initiator) and a too-low Logon (acceptor) each produce exactly one Logout
   with the FR-012 text on the wire, then `Disconnected`. Each cell is RED on the base, which sends no Logout.
 - **SC-004**: Every existing `reset_on_disconnect`, peer-initiated `reset_on_logout` and not-sent-Logout witness stays
@@ -313,8 +325,8 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
 - Gate A is required: the feature changes session wire behaviour and a reset contract.
 - There is no C-ABI change. The configuration keys and their defaults are unchanged; only `reset_on_logout`'s trigger
   changes.
-- The FIX docs and the three engines agree on every point this spec fixes, except FR-008's follow-up after the reset
-  (QuickFIX C++ differs from the other two), which the plan decides.
+- The FIX docs and the three engines agree on every point this spec fixes, except FR-008's follow-up after the reset.
+  There QuickFIX C++ differs from the other two, and the clarification follows QuickFIX/J and QuickFIX/Go.
 - The text "MsgSeqNum too low, expecting N but received M" is QuickFIX's and Test Case 2c's, as 103 adopted for Active.
 - The Engine does not reconnect a session in place. Each connection of an engine-managed initiator ends in a terminal
   close (`run_connect_loop`), so the teardown reset runs per connection on the Engine route.
@@ -326,7 +338,7 @@ The plan completes it. The rows at spec time:
 
 | Departure | Engines it departs from | Authority |
 |---|---|---|
-| The follow-up after an unasked 141=Y acknowledgement (FR-008) | QuickFIX C++, or QuickFIX/J and QuickFIX/Go, whichever the plan does not follow | to be decided in the plan |
+| No second Logon after an unasked 141=Y acknowledgement (FR-008) | QuickFIX C++ (replies with Logon 141=Y at 34=1) | owner clarification 2026-11-17; QuickFIX C++'s reply is an untested side effect of `f26ca5fc`, reported as quickfix/quickfix#417; QuickFIX/J removed it in QFJ-380 |
 
 ## Normative References
 
