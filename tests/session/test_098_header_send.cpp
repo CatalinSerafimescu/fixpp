@@ -70,6 +70,7 @@
 #include "support/extract_tag.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 using namespace std::chrono_literals;
 
@@ -257,7 +258,8 @@ protected:
     }
 
     void drive_to_active(Session& sess) {
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!pump(fut, "HeaderSend098::open")) {
             return;
         }
@@ -270,7 +272,8 @@ protected:
                                                           "56=ISLD\x01"
                                                           "98=0\x01"
                                                           "108=30\x01");
-        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                   sess.on_inbound_frame(logon), asio::use_future);
         if (!pump(fut2, "HeaderSend098::logon")) {
             return;
         }
@@ -282,8 +285,8 @@ protected:
     // Sends `payload` and returns the one transmitted frame.
     std::vector<std::byte> send_one(Session& sess, std::string_view payload, char const* site) {
         auto const bytes = to_bytes(payload);
-        auto fut =
-            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(bytes)), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.send(std::span<const std::byte>(bytes)), asio::use_future);
         if (!pump(fut, site)) {
             return {};
         }
@@ -366,7 +369,8 @@ TEST_F(HeaderSend098, EditedDictionary_ReplayOfTheScalarMessage_Keeps5020And43An
     rr += "7=" + seq + "\x01";
     rr += "16=" + seq + "\x01";
     auto const rr_frame = fixpp_test_support::make_frame("FIX.4.4", rr);
-    auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(rr_frame), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.on_inbound_frame(rr_frame), asio::use_future);
     if (!pump(fut, "HeaderSend098/replay-resend")) {
         return;
     }

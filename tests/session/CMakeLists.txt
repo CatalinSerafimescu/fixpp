@@ -220,8 +220,8 @@ set_property(TEST session_pure_tests APPEND PROPERTY LABELS 098)
 # they were inside it: the same link libraries, include directories, definitions and environment.
 # Buckets of their own only because their cells are slow under the sanitizer lanes and one ctest
 # entry must stay inside CI's per-test timeout; grouped by source file, never by cell.
-# No TIMEOUT property, so CI's `--timeout 1800` wedge guard governs each entry, as for
-# dictionary_overlay_tests in tests/dictionary/CMakeLists.txt. The condition: each entry's run on
+# No TIMEOUT property, so CI's `--timeout 1800` wedge guard governs each entry, as it does
+# for dictionary_099_tests in tests/dictionary/CMakeLists.txt. The condition: each entry's run on
 # the slowest of CI's linux-clang-tsan and windows-msvc-asan lanes stays at or under half of that
 # guard; an entry past it moves a file to another bucket here, and an entry of one file past it
 # stops for a decision, since cells are never split across entries. Re-derive from a CI log of each
@@ -325,7 +325,69 @@ add_session_101_bucket(session_101_tests
 add_session_101_bucket(session_101_reply_slot_death_test
   test_101_reply_slot_death.cpp
 )
+# 103-resend-logon-reset-fidelity (tasks.md T017): the feature's Session cells in an entry of their
+# own, shaped as add_session_101_bucket with label 103. No TIMEOUT property, so CI's `--timeout`
+# wedge guard governs it. `session_103_tests` is registered when its first file lands; each later
+# cell task appends its file with a `# 103 T0nn` comment.
+function(add_session_103_bucket name)
+  add_executable(${name} ${ARGN} $<TARGET_OBJECTS:session_test_support>)
+  target_link_libraries(${name} PRIVATE
+    fixpp_session
+    fixpp_capi
+    fixpp_mock_clock
+    fixpp_transport
+    fixpp_tls
+    "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+    "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_TRANSPORT_ZLIB_LIB}"
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(${name} PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_SOURCE_DIR}/src"
+  )
+  target_compile_definitions(${name} PRIVATE
+    FIXPP_TEST_BINARY_DIR="${CMAKE_BINARY_DIR}"
+    FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+    "FIXPP_098_FIXTURE_DIR=\"${CMAKE_SOURCE_DIR}/tests/dictionary/fixtures/098\""
+    # test_103_support.hpp includes mock_reconnect_factory.hpp, whose mock transport header
+    # refuses a target without this definition.
+    FIXPP_ALLOW_MOCK_TRANSPORT
+  )
+  add_test(NAME ${name} COMMAND ${name})
+  set_tests_properties(${name} PROPERTIES
+    ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+    LABELS "session;103")
+endfunction()
+add_session_103_bucket(session_103_tests
+  test_103_resend_state_reconnect.cpp                                   # 103 T018
+  test_103_default_reset_policy.cpp                                     # 103 T022
+  test_103_too_high_resend_request.cpp                                  # 103 T047
+  test_103_too_high_logout.cpp                                          # 103 T076
+  test_103_too_high_logout_state.cpp                                    # 103 T080
+  test_103_too_high_logout_engine.cpp                                   # 103 T080
+  test_103_send_during_logout.cpp                                       # 103 T187
+  test_103_reconnect_fence_engine.cpp                                   # 103 T121
+  test_103_teardown.cpp                                                 # 103 T119
+  test_103_too_low_logout.cpp                                           # 103 T136
+)
+# 103 T054: R-588-g, detail::replay_gate alone on a session strand; an entry of its own (it
+# replaces global operator new for its allocation evidence).
+add_session_103_bucket(session_103_replay_gate
+  replay_gate_test.cpp                                                  # 103 T054
+)
+# 103 T060: R-588-h, an Engine on an io_context run by several threads; an entry of its own.
+add_session_103_bucket(session_103_replay_mt_engine
+  test_103_replay_mt_engine.cpp                                         # 103 T060
+)
 
+# 103 T023: test_reset_seqnum_policy_matrix.cpp's AS5 cells use mock_reconnect_factory.hpp's
+# FaultStoreFactory, whose header includes the mock transport.
+set_source_files_properties(test_reset_seqnum_policy_matrix.cpp PROPERTIES
+  COMPILE_DEFINITIONS FIXPP_ALLOW_MOCK_TRANSPORT)
 # 099 W-5's, W-6's and W-25's reconnect cells drive drive_reconnect() through MockReconnectFactory,
 # in those TUs only.
 set_source_files_properties(
@@ -621,7 +683,7 @@ fixpp_add_store_test(store_fail_open_volatile SOURCES
 )
 
 # T011: W3 reconcile-from-durable witness (US3 / FR-007 / SC-004) — three
-# HONEST policy variants (plain / reset_on_logon / bilateral_strict default)
+# HONEST policy variants (plain / reset_on_logon / bilateral_strict)
 # driven via an in-process Session::drive_reconnect() over a mock_transport
 # (the reconcile only mutates the in-memory counter; a fresh-Session restart
 # would bypass it). FIXPP_TEST_HOOKS declares the namespace-scope T003/T004
@@ -795,7 +857,7 @@ set_tests_properties(session_536_shared_clock_liveness PROPERTIES LABELS "sessio
 add_threading_test(session_536_close_and_logout_wait test_536_close_and_logout_wait.cpp)
 set_tests_properties(session_536_close_and_logout_wait PROPERTIES LABELS "session;536")
 # fixpp#537 (B28), D-537-1 and D-537-2 — a frame above NextNumIn while a resend is outstanding
-# is ignored. Standalone, not a grouped bucket ([const §VII.8]): not the class the clause
+# is ignored (a ResendRequest and a Logout excepted since 103, D4.1). Standalone, not a grouped bucket ([const §VII.8]): not the class the clause
 # groups. Its cells open Sessions and drive their coroutines and timers on an io_context with
 # a mock clock.
 add_threading_test(session_537_second_too_high test_537_second_too_high.cpp)
@@ -874,13 +936,19 @@ add_executable(session_538_resend_answer_store_failure
 add_executable(session_538_resend_answer_store_failure_engine
   test_538_resend_answer_store_failure_engine.cpp
 )
+# 103 T187 (FR-021): a send during a Logout ending, on the same fixture
+# (held_file_store_scene.hpp, which needs FIXPP_TEST_HOOKS).
+add_executable(session_103_send_during_logout_engine
+  test_103_send_during_logout_engine.cpp                                # 103 T187
+)
 foreach(held_store_test
     session_538_cancelled_read_measured_path
     session_cancelled_outbound_store_measurement
     session_inbound_cancellation
     session_inbound_cancellation_engine
     session_538_resend_answer_store_failure
-    session_538_resend_answer_store_failure_engine)
+    session_538_resend_answer_store_failure_engine
+    session_103_send_during_logout_engine)
   target_link_libraries(${held_store_test} PRIVATE
     fixpp_session
     fixpp_transport
@@ -903,6 +971,13 @@ foreach(held_store_test
     LABELS "session;538"
     TIMEOUT 300)
 endforeach()
+# 103 T041 (fixpp#580): SC-003 is read through test_103_support.hpp, whose mock transport
+# header needs FIXPP_ALLOW_MOCK_TRANSPORT, and the validating arm loads the vendored
+# FIX 4.4 dictionary (tests/support/fix44_dictionary.hpp reads FIXPP_DICT_DATA_DIR).
+set_tests_properties(session_103_send_during_logout_engine PROPERTIES LABELS "session;103")
+target_compile_definitions(session_538_resend_answer_store_failure PRIVATE
+  FIXPP_ALLOW_MOCK_TRANSPORT
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 
 # Rulings R-15 to R-23 (`.specify/536-537-538-recovery-liveness.md` §10): a cancelled outbound
 # store, and the graceful Logout that was not sent. Standalone ([const §VII.8]):
@@ -3960,3 +4035,30 @@ if(TARGET fixpp_codegen_generate AND TARGET fixpp_builders_v42)
   set_property(TEST test_082_v42_nested_exemplar_roundtrip APPEND PROPERTY LABELS
     "builder-roundtrip;v42")
 endif()
+
+# 103-resend-logon-reset-fidelity (tasks.md T017): label 103 on each entry of this file whose
+# sources a 103 task edits (re-derive from tasks.md's paths; tasks.md T167 re-derives the set).
+# APPEND, at the end of the file, so it follows every LABELS setter for these entries.
+set_property(TEST session_pure_tests APPEND PROPERTY LABELS 103)
+set_property(TEST store_fail_reconcile APPEND PROPERTY LABELS 103)
+set_property(TEST session_537_gap_deadline APPEND PROPERTY LABELS 103)
+set_property(TEST session_538_resend_answer_store_failure APPEND PROPERTY LABELS 103)
+set_property(TEST engine_reset_unit_stop APPEND PROPERTY LABELS 103)
+set_property(TEST session_inbound_poss_dup_tolerance APPEND PROPERTY LABELS 103)
+set_property(TEST session_reset_on_lifecycle APPEND PROPERTY LABELS 103)
+set_property(TEST session_refresh_on_logon APPEND PROPERTY LABELS 103)
+set_property(TEST session_536_close_and_logout_wait APPEND PROPERTY LABELS 103)
+set_property(TEST session_536_shared_clock_liveness APPEND PROPERTY LABELS 103)
+set_property(TEST session_537_second_too_high APPEND PROPERTY LABELS 103)
+set_property(TEST session_537_too_high_heartbeat APPEND PROPERTY LABELS 103)
+set_property(TEST session_537_unbuildable_frames APPEND PROPERTY LABELS 103)
+set_property(TEST session_538_cancelled_read_measured_path APPEND PROPERTY LABELS 103)
+set_property(TEST session_538_volatile_store_after_reset_logon APPEND PROPERTY LABELS 103)
+set_property(TEST session_544_send_slot APPEND PROPERTY LABELS 103)
+set_property(TEST session_598_store_offload APPEND PROPERTY LABELS 103)
+set_property(TEST session_cancelled_outbound_store APPEND PROPERTY LABELS 103)
+set_property(TEST session_cancelled_outbound_store_engine APPEND PROPERTY LABELS 103)
+set_property(TEST session_inbound_cancellation APPEND PROPERTY LABELS 103)
+set_property(TEST session_inbound_frame_dispositions APPEND PROPERTY LABELS 103)
+set_property(TEST session_unparseable_frame_disposition APPEND PROPERTY LABELS 103)
+set_property(TEST session_validate_gate_inbound APPEND PROPERTY LABELS 103)

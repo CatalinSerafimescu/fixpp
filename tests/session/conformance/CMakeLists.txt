@@ -124,3 +124,8 @@ target_include_directories(tc_liveness_test PRIVATE
 add_test(NAME session_tc_liveness COMMAND tc_liveness_test)
 set_tests_properties(session_tc_liveness PROPERTIES ENVIRONMENT
   "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+
+# 103-resend-logon-reset-fidelity (tasks.md T017): label 103 on each entry of this file whose
+# sources a 103 task edits (re-derive from tasks.md's paths; tasks.md T167 re-derives the set).
+# APPEND, at the end of the file, so it follows every LABELS setter for these entries.
+set_property(TEST session_tc_seqnum APPEND PROPERTY LABELS 103)

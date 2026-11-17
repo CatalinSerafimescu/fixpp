@@ -37,6 +37,7 @@
 #include <fixpp/transport/reconnect_policy.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <random>
@@ -135,10 +136,9 @@ std::string dump_diags(const fixpp::config::LoadResult& result) {
 //                              which is a session-level seam outside config scope
 //   locks=mutex              — default; spin is an opt-in performance knob
 //   begin_string="FIX.4.4"  — non-FIXT so default_appl_ver_id stays nullopt
-//   refresh_on_logon=false   — must be false under bilateral_strict; fixture uses
-//                              bilateral_lenient which permits true, but we leave
-//                              it false to keep the matrix simpler (tested in
-//                              negative cells later)
+//   refresh_on_logon=false   — the fixture sets bilateral_strict (the non-default
+//                              since feature 103), under which a refresh is
+//                              suppressed (INV-RoL-3); it stays false
 //   validate_inbound_messages=false — stays false; enabling it requires
 //                              dictionary != nullptr which the loader populates
 //                              only in Phase 3c (selector resolver); no conflict.
@@ -222,7 +222,7 @@ TEST(LoadHappyPath, T011_FieldForFieldEquivalence) {
 
     // ── Enum knobs (non-default values) ──────────────────────────────────────
     EXPECT_EQ(cfg.reset_seqnum_policy_field,
-              fixpp::session::reset_seqnum_policy::bilateral_lenient);  // default bilateral_strict
+              fixpp::session::reset_seqnum_policy::bilateral_strict);  // default lenient (103)
 
     EXPECT_EQ(cfg.sending_time_precision,
               fixpp::core::fix_time_precision::micros);  // default millis
@@ -785,4 +785,24 @@ TEST(LoadHappyPath, LogonTimeoutAcceptsBothEndsOfItsRange) {
     ASSERT_EQ(result->sessions.size(), 2U);
     EXPECT_EQ(result->sessions[0].config.logon_timeout_ms, std::uint32_t{1});
     EXPECT_EQ(result->sessions[1].config.logon_timeout_ms, std::uint32_t{4294967295U});
+}
+
+// 103-resend-logon-reset-fidelity (tasks T025; FR-001): a session whose table and [default]
+// leave `reset_seqnum_policy` out loads with the new default, bilateral_lenient. The fixture
+// is logon_timeout_bounds.toml; the cell first checks that its text names no such key, so a
+// fixture edit that adds one turns this cell red rather than letting it pass on the key.
+TEST(LoadHappyPath, ResetSeqnumPolicyAbsent_LoadsAsBilateralLenient) {
+    std::ifstream in{std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} /
+                     "logon_timeout_bounds.toml"};
+    ASSERT_TRUE(in.good());
+    std::string const text{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    ASSERT_EQ(text.find("reset_seqnum_policy"), std::string::npos);
+
+    auto result = load_fixture("logon_timeout_bounds.toml");
+    ASSERT_TRUE(result.has_value()) << "logon_timeout_bounds.toml failed to load";
+    ASSERT_FALSE(result->sessions.empty());
+    for (auto const& s : result->sessions) {
+        EXPECT_EQ(s.config.reset_seqnum_policy_field,
+                  fixpp::session::reset_seqnum_policy::bilateral_lenient);
+    }
 }

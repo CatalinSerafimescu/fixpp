@@ -49,6 +49,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::session::test_support::extract_field;
@@ -254,7 +255,8 @@ protected:
     // Open acceptor session + feed peer Logon → Active.
     // Clears captured_frames after reaching Active.
     void drive_to_active(Session& sess) {
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(
                 ioc, fut, kWindow, "SendingTimePrecisionTest::drive_to_active/open")) {
             fixpp::test_support::cancel_and_drain_or_report(
@@ -266,7 +268,8 @@ protected:
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         auto logon = make_peer_logon(1);
-        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                   sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(
                 ioc, fut2, kWindow, "SendingTimePrecisionTest::drive_to_active/logon")) {
             fixpp::test_support::cancel_and_drain_or_report(
@@ -313,7 +316,8 @@ TEST_F(SendingTimePrecisionTest, SendingTimePrecision_Nanos_Emits27Char52) {
     Session sess(engine, cfg);
 
     // Capture the Logon reply — it is the first emitted frame for an acceptor.
-    auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                              asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                     "Nanos_Emits27Char52/open")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Nanos_Emits27Char52/open");
@@ -323,7 +327,8 @@ TEST_F(SendingTimePrecisionTest, SendingTimePrecision_Nanos_Emits27Char52) {
     ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
     auto logon = make_peer_logon(1);
-    auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+    auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                               sess.on_inbound_frame(logon), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut2, kWindow,
                                                     "Nanos_Emits27Char52/logon")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Nanos_Emits27Char52/logon");
@@ -362,7 +367,8 @@ TEST_F(SendingTimePrecisionTest, SendingTimePrecision_Micros_Emits24Char52) {
     auto cfg = make_cfg(fixpp::core::fix_time_precision::micros);
     Session sess(engine, cfg);
 
-    auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                              asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                     "Micros_Emits24Char52/open")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Micros_Emits24Char52/open");
@@ -372,7 +378,8 @@ TEST_F(SendingTimePrecisionTest, SendingTimePrecision_Micros_Emits24Char52) {
     ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
     auto logon = make_peer_logon(1);
-    auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+    auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                               sess.on_inbound_frame(logon), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut2, kWindow,
                                                     "Micros_Emits24Char52/logon")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Micros_Emits24Char52/logon");
@@ -410,7 +417,8 @@ TEST_F(SendingTimePrecisionTest, SendingTimePrecision_DefaultMillis_ByteIdentica
     auto cfg = make_cfg();  // no override → millis
     Session sess(engine, cfg);
 
-    auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                              asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                     "DefaultMillis_ByteIdentical/open")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -421,7 +429,8 @@ TEST_F(SendingTimePrecisionTest, SendingTimePrecision_DefaultMillis_ByteIdentica
     ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
     auto logon = make_peer_logon(1);
-    auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+    auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                               sess.on_inbound_frame(logon), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut2, kWindow,
                                                     "DefaultMillis_ByteIdentical/logon")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -488,7 +497,8 @@ TEST_F(SendingTimePrecisionTest, InboundNanos52_ParsedNotRejected) {
     ASSERT_EQ(nanos_ts.size(), 27U) << "sanity: nanos_ts must be 27 chars";
 
     auto hb_frame = make_fix44_frame_with_time("0", 2, "TW", "ISLD", nanos_ts);
-    auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(hb_frame), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.on_inbound_frame(hb_frame), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                     "InboundNanos52_ParsedNotRejected/frame")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -543,7 +553,8 @@ TEST_F(SendingTimePrecisionTest, MaxLatency_OnNanosInbound_BoundaryCorrect) {
         // 52= at the mock clock time (divergence ≈ 0 ns < 120 s limit).
         const std::string_view ts_within = "20240101-00:00:00.123456789";
         auto hb = make_fix44_frame_with_time("0", 2, "TW", "ISLD", ts_within);
-        auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(hb), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.on_inbound_frame(hb), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                         "MaxLatency_OnNanosInbound/within")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -572,7 +583,8 @@ TEST_F(SendingTimePrecisionTest, MaxLatency_OnNanosInbound_BoundaryCorrect) {
         // 52= 121 s before the mock clock time → exceeds 120 s limit.
         const std::string_view ts_stale = "20231231-23:57:59.123456789";
         auto hb = make_fix44_frame_with_time("0", 2, "TW", "ISLD", ts_stale);
-        auto fut = asio::co_spawn(ioc, sess2.on_inbound_frame(hb), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess2, ioc),
+                                  sess2.on_inbound_frame(hb), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                         "MaxLatency_OnNanosInbound/beyond")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -639,7 +651,8 @@ TEST_F(SendingTimePrecisionTest, OrigSendingTime122_PreservedVerbatim_OnResend) 
         payload.push_back(static_cast<std::byte>(c));
 
     auto fut_send =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                       sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut_send, kWindow,
                                                     "OrigSendingTime122_PreservedVerbatim/send")) {
         fixpp::test_support::cancel_and_drain_or_report(
@@ -689,7 +702,8 @@ TEST_F(SendingTimePrecisionTest, OrigSendingTime122_PreservedVerbatim_OnResend) 
     // ── Step 5: feed ResendRequest for the app message ───────────────────────
     // Peer inbound seqnum is 2 (Logon was seq=1; ResendRequest is next).
     auto rr = make_resend_request_44(2, "TW", "ISLD", app_seq, app_seq);
-    auto fut_rr = asio::co_spawn(ioc, sess.on_inbound_frame(rr), asio::use_future);
+    auto fut_rr = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                 sess.on_inbound_frame(rr), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(
             ioc, fut_rr, kWindow, "OrigSendingTime122_PreservedVerbatim/resend-request")) {
         fixpp::test_support::cancel_and_drain_or_report(

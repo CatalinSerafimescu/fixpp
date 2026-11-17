@@ -88,6 +88,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -255,7 +256,8 @@ protected:
     }
 
     fixpp::core::expected_t<void> open_sync(Session& s) {
-        auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc), s.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
                                                         "FsmMatrixWitness::open_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -267,7 +269,8 @@ protected:
     }
 
     fixpp::core::expected_t<void> feed_sync(Session& s, std::span<const std::byte> frame) {
-        auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc),
+                                  s.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
                                                         "FsmMatrixWitness::feed_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -279,7 +282,8 @@ protected:
     }
 
     fixpp::core::expected_t<void> close_sync(Session& s, close_mode mode) {
-        auto fut = asio::co_spawn(ioc, s.close(mode), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc), s.close(mode),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms,
                                                         "FsmMatrixWitness::close_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -316,7 +320,8 @@ protected:
 
     bool drive_to_logout_sent(Session& sess) {
         if (!drive_to_active(sess)) return false;
-        close_fut_ = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+        close_fut_ = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                    sess.close(close_mode::graceful), asio::use_future);
         // #289 STAGING BARRIER, and this is the CROSS-FUNCTION shape: the window lives
         // here while the `clock->advance()` it stages for lives in
         // `finish_graceful_close()` below, so no same-function analysis can see the
@@ -949,23 +954,38 @@ TEST_F(FsmMatrixWitness, Active_SeqnumInSeq_AdvancesCounter_StaysActive) {
     EXPECT_EQ(sess.state(), fsm_state::Active);
 }
 
-// S3×E10: seqnum too-low Heartbeat → silently ignored, stay Active.
+// S3×E10: seqnum too-low Heartbeat → the too-low Logout, then Disconnected.
 TEST_F(FsmMatrixWitness, Active_SeqnumTooLow_FatalTransitionsToDisconnected) {
-    // T006a catch-site migration: 013 FR-006 / T020-A — too-low seqnum on
-    // Heartbeat(35=0) is silently ignored in Active (stays Active, no fatal).
-    // This preserves warmup compatibility: a peer may send a final warmup
-    // Heartbeat with an already-consumed seqnum during Active state.
-    // Pre-013 behavior was fatal Logout+Disconnected; 013 changes this.
+    // 103 (research D6 and D9; FR-018, fixpp#581) supersedes 013 T020-A's silent drop of
+    // a too-low Heartbeat: without PossDupFlag(43) it draws QuickFIX's too-low Logout and
+    // the session ends, as the cell's name says.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
+    const auto mark = captured_frames.size();
 
     // seq=1 again → too-low (next-expected-inbound=2 after the Logon was accepted).
-    // With 013, too-low Heartbeat is silently ignored — session stays Active.
     auto hb_low = build_frame("0", 1, kTarget, kSender, kBeginStr);
     (void)feed_sync(sess, hb_low);
 
-    EXPECT_EQ(sess.state(), fsm_state::Active);
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+    std::vector<std::string> logout_texts;
+    for (std::size_t i = mark; i < captured_frames.size(); ++i) {
+        const std::string wire(reinterpret_cast<const char*>(captured_frames[i].data()),
+                               captured_frames[i].size());
+        if (wire.find("\x01"
+                      "35=5\x01") == std::string::npos)
+            continue;
+        const auto at = wire.find(
+            "\x01"
+            "58=");
+        const auto from = at == std::string::npos ? at : at + 4;
+        logout_texts.push_back(at == std::string::npos
+                                   ? std::string{"<no 58>"}
+                                   : wire.substr(from, wire.find('\x01', from) - from));
+    }
+    EXPECT_EQ(logout_texts,
+              (std::vector<std::string>{"MsgSeqNum too low, expecting 2 but received 1"}));
 }
 
 // S3×E11: seqnum too-high → AwaitingResend + ResendRequest emitted, stay Active.
@@ -1028,7 +1048,8 @@ TEST_F(FsmMatrixWitness, Active_InitiateLogout_TransitionsToLogoutSentThenDiscon
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Spawn close(graceful) without blocking.
-    auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                    sess.close(close_mode::graceful), asio::use_future);
 
     // #289 STAGING BARRIER: phase-1 must have emitted Logout and PARKED on its
     // mock-clock sleep before the advance, or that advance lands on a timer that is

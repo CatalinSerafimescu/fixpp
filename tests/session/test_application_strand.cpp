@@ -61,6 +61,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -220,7 +221,8 @@ struct StrandFixture {
 
     // Open session to Active via acceptor path.
     void open_to_active(Session& sess) {
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 300ms)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
                                                             "StrandFixture::open_to_active/open");
@@ -231,7 +233,8 @@ struct StrandFixture {
         ASSERT_TRUE(fut.get().has_value());
 
         auto logon = make_logon_frame();
-        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                   sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 300ms)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
                                                             "StrandFixture::open_to_active/logon");
@@ -267,7 +270,8 @@ TEST(ApplicationStrand, NoConcurrentCallbacksForOneSession) {
     // and run serially.
     for (std::uint32_t seq = 2; seq <= 5; ++seq) {
         auto frame = make_app_frame(seq);
-        auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                                  sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 100ms)) {
             fixpp::test_support::cancel_and_drain_or_report(
                 f.ioc, *f.clock, "NoConcurrentCallbacksForOneSession/inbound");
@@ -306,7 +310,8 @@ TEST(ApplicationStrand, DrainBeforeDestroy) {
 
     // Open to Active.
     {
-        auto fut = asio::co_spawn(f.ioc, sess->open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, f.ioc),
+                                  sess->open(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "DrainBeforeDestroy/open");
@@ -317,7 +322,8 @@ TEST(ApplicationStrand, DrainBeforeDestroy) {
     }
     {
         auto logon = make_logon_frame();
-        auto fut = asio::co_spawn(f.ioc, sess->on_inbound_frame(logon), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, f.ioc),
+                                  sess->on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "DrainBeforeDestroy/logon");
@@ -331,7 +337,8 @@ TEST(ApplicationStrand, DrainBeforeDestroy) {
     // Feed an app frame — callback should be invoked.
     {
         auto frame = make_app_frame(2);
-        auto fut = asio::co_spawn(f.ioc, sess->on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, f.ioc),
+                                  sess->on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "DrainBeforeDestroy/frame");
@@ -344,7 +351,8 @@ TEST(ApplicationStrand, DrainBeforeDestroy) {
 
     // Terminal-close the session. This drains the session strand before returning.
     {
-        auto fut = asio::co_spawn(f.ioc, sess->close(close_mode::terminal), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, f.ioc),
+                                  sess->close(close_mode::terminal), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "DrainBeforeDestroy/close");
@@ -410,7 +418,8 @@ TEST(ApplicationStrand, EngineSendKeepAliveNoUAF) {
 
     // Open to Active.
     {
-        auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                                  sess.open(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "EngineSendKeepAliveNoUAF/open");
@@ -421,7 +430,8 @@ TEST(ApplicationStrand, EngineSendKeepAliveNoUAF) {
     }
     {
         auto logon = make_logon_frame();
-        auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                                  sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "EngineSendKeepAliveNoUAF/inbound");
@@ -502,7 +512,8 @@ TEST(ApplicationStrand, ReentrantSendNoDeadlock) {
 
     // Feed an app frame — fromApp fires and sets from_app_fired.
     auto frame = make_app_frame(2);
-    auto inbound_fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(frame), asio::use_future);
+    auto inbound_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                                      sess.on_inbound_frame(frame), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, inbound_fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "ReentrantSendNoDeadlock/inbound");
@@ -517,9 +528,9 @@ TEST(ApplicationStrand, ReentrantSendNoDeadlock) {
     // (from_app_fired is set), so no callback of the session is on the stack,
     // and the send must complete without deadlock.
     auto payload = make_app_payload();
-    auto send_fut =
-        asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload.data(), payload.size())),
-                       asio::use_future);
+    auto send_fut = asio::co_spawn(
+        fixpp::test_support::session_executor_of(sess, f.ioc),
+        sess.send(std::span<const std::byte>(payload.data(), payload.size())), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, send_fut, 300ms)) {
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "ReentrantSendNoDeadlock/send");
@@ -553,7 +564,8 @@ TEST(ApplicationStrand, NullApplicationZeroDelta) {
 
     // open() must succeed and no onCreate fires (no application).
     {
-        auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                                  sess.open(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "NullApplicationZeroDelta/open");
@@ -566,7 +578,8 @@ TEST(ApplicationStrand, NullApplicationZeroDelta) {
     // Feed peer Logon → session reaches Active (no onLogon fires).
     {
         auto logon = make_logon_frame();
-        auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                                  sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "NullApplicationZeroDelta/logon");
@@ -581,7 +594,8 @@ TEST(ApplicationStrand, NullApplicationZeroDelta) {
     // Feed an app frame → seqnum advances, session stays Active (no fromApp).
     {
         auto frame = make_app_frame(2);
-        auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                                  sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "NullApplicationZeroDelta/frame");
@@ -596,9 +610,10 @@ TEST(ApplicationStrand, NullApplicationZeroDelta) {
     // Session::send → toApp not registered → send proceeds normally.
     {
         auto payload = make_app_payload();
-        auto fut = asio::co_spawn(
-            f.ioc, sess.send(std::span<const std::byte>(payload.data(), payload.size())),
-            asio::use_future);
+        auto fut =
+            asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                           sess.send(std::span<const std::byte>(payload.data(), payload.size())),
+                           asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "NullApplicationZeroDelta/send");
@@ -613,7 +628,8 @@ TEST(ApplicationStrand, NullApplicationZeroDelta) {
 
     // close(terminal) → session tears down cleanly.
     {
-        auto fut = asio::co_spawn(f.ioc, sess.close(close_mode::terminal), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, f.ioc),
+                                  sess.close(close_mode::terminal), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "NullApplicationZeroDelta/close");

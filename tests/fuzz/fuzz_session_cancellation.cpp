@@ -31,6 +31,8 @@
 #include <memory_resource>
 #include <optional>
 
+#include "support/session_executor_of.hpp"
+
 namespace {
 
 using fixpp::core::cancellable_dispatch;
@@ -68,7 +70,8 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     auto se = *make_session_executor(ctx.get_executor(), threading_mode::per_session_strand,
                                      /*attested=*/false, &sess);
 
-    asio::co_spawn(ctx, sess.open(), asio::detached);
+    asio::co_spawn(fixpp::test_support::session_executor_of(sess, ctx), sess.open(),
+                   asio::detached);
     ctx.run();
     ctx.restart();
 
@@ -94,7 +97,8 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
             },
             asio::detached);
         if (static_cast<std::size_t>(i) == checkpoint) {
-            asio::co_spawn(ctx, sess.close(terminal ? close_mode::terminal : close_mode::graceful),
+            asio::co_spawn(fixpp::test_support::session_executor_of(sess, ctx),
+                           sess.close(terminal ? close_mode::terminal : close_mode::graceful),
                            asio::detached);
         }
     }

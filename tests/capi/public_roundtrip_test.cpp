@@ -11,9 +11,10 @@
 //   - fixpp_session_config_set_reset_seqnum_policy (T013) — seqnum-reset policy
 //   - E1 witness: dict handle destroyed BEFORE session open; session establishes
 //     via the config's independently-held shared_ptr copy.
-//   - D-4 empirical finding (2026-06-26): the production-default BILATERAL_STRICT
-//     establishes a fresh two-engine pair (both reset_on_logon=true) through the
-//     public C-ABI; verified 20/20 over loopback. BILATERAL_LENIENT is NOT required.
+//   - D-4 empirical finding: BILATERAL_STRICT, named explicitly (the
+//     production default until C-ABI 1.17, feature 103), establishes a fresh two-engine
+//     pair (both reset_on_logon=true) through the public C-ABI. BILATERAL_LENIENT is NOT
+//     required.
 //   - Error-path assertions for every new function (NULL / out-of-range).
 //     ⚠️ The set_reset_seqnum_policy OUT-OF-RANGE case is no longer here: it moved
 //     to tests/capi/reset_seqnum_policy_range_test.c (#268), because it cannot be
@@ -179,13 +180,12 @@ TEST(PublicRoundtrip, AcceptorBoundEndpointNullPortOut) {
 // ── Live two-engine loopback round-trip ───────────────────────────────────────
 
 TEST(PublicRoundtrip, TwoEngineLoopbackExchangesAppMessage) {
-    // D-4 empirical determination (2026-06-26): the production-default
-    // bilateral_strict policy establishes a fresh two-engine pair through the
-    // public C-ABI — verified 20/20 over loopback with BOTH sides reset_on_logon=true
-    // (the clean fresh-pair case, T011). The reset_seqnum_policy setter is exercised
-    // explicitly (set to STRICT, == the config-builder default) so the witness is
-    // self-documenting; LENIENT (the E-4 contingency) is NOT required. An earlier
-    // seam comment speculated strict would time out; direct evidence refutes that.
+    // D-4 empirical determination: the bilateral_strict policy
+    // establishes a fresh two-engine pair through the public C-ABI with BOTH sides
+    // reset_on_logon=true (the clean fresh-pair case, T011). The reset_seqnum_policy
+    // setter is exercised explicitly (set to STRICT; the config-builder default is
+    // BILATERAL_LENIENT since C-ABI 1.17, feature 103) so the witness names its
+    // policy; LENIENT (the E-4 contingency) is NOT required.
 
     // E1 witness: load the dictionary via the public loader (US1), pass it to
     // fixpp_session_config_set_dictionary (which takes a shared_ptr copy), then
@@ -219,8 +219,8 @@ TEST(PublicRoundtrip, TwoEngineLoopbackExchangesAppMessage) {
     ASSERT_EQ(fixpp_session_config_set_dictionary(acc_sc, acc_dict), FIXPP_ERR_OK);
     fixpp_dict_destroy(acc_dict);  // config's shared_ptr copy now the sole owner
     acc_dict = nullptr;
-    // D-4: pin the production-default BILATERAL_STRICT explicitly (self-documenting
-    // witness; == the config-builder default). Establishes 20/20 for the fresh pair.
+    // D-4: pin BILATERAL_STRICT explicitly (the config-builder default is
+    // BILATERAL_LENIENT since C-ABI 1.17, feature 103). Establishes the fresh pair.
     ASSERT_EQ(
         fixpp_session_config_set_reset_seqnum_policy(acc_sc, FIXPP_RESET_SEQNUM_BILATERAL_STRICT),
         FIXPP_ERR_OK);
@@ -304,7 +304,7 @@ TEST(PublicRoundtrip, TwoEngineLoopbackExchangesAppMessage) {
     ASSERT_EQ(fixpp_session_config_set_dictionary(ini_sc, ini_dict), FIXPP_ERR_OK);
     fixpp_dict_destroy(ini_dict);
     ini_dict = nullptr;
-    // D-4: BILATERAL_STRICT (production default) — see acceptor comment above.
+    // D-4: BILATERAL_STRICT, named explicitly — see acceptor comment above.
     ASSERT_EQ(
         fixpp_session_config_set_reset_seqnum_policy(ini_sc, FIXPP_RESET_SEQNUM_BILATERAL_STRICT),
         FIXPP_ERR_OK);

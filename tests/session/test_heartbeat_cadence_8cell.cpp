@@ -46,6 +46,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -166,7 +167,8 @@ struct HeartbeatCadenceFixture {
     }
 
     bool drive_to_active(fixpp::session::Session& s) {
-        auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc), s.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "drive_to_active/open")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "drive_to_active/open");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "drive_to_active/open";
@@ -174,7 +176,8 @@ struct HeartbeatCadenceFixture {
         }
         if (!fut.get().has_value()) return false;
         auto logon = make_logon("FIX.4.2", 1, "TW", "ISLD", 5);
-        auto f2 = asio::co_spawn(ioc, s.on_inbound_frame(logon), asio::use_future);
+        auto f2 = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc),
+                                 s.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, f2, 50ms, "drive_to_active/logon")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "drive_to_active/logon");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "drive_to_active/logon";
@@ -305,7 +308,8 @@ TEST(HeartbeatCadence8Cell, CellD_Strand_TestReqIdMismatchDetected) {
 
     // Now send a Heartbeat with a WRONG TestReqID.
     auto bad_hb = make_heartbeat("FIX.4.2", 2, "TW", "ISLD", "WRONG-ID-XYZ");
-    auto fut = asio::co_spawn(fix.ioc, sess.on_inbound_frame(bad_hb), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, fix.ioc),
+                              sess.on_inbound_frame(bad_hb), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut, 50ms,
                                                     "CellD_Strand_TestReqIdMismatchDetected")) {
         fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
@@ -332,7 +336,8 @@ TEST(HeartbeatCadence8Cell, CellD_Direct_TestReqIdMismatchDetected) {
     fix.advance_time(7000ms);
 
     auto bad_hb = make_heartbeat("FIX.4.2", 2, "TW", "ISLD", "WRONG-ID-XYZ");
-    auto fut = asio::co_spawn(fix.ioc, sess.on_inbound_frame(bad_hb), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, fix.ioc),
+                              sess.on_inbound_frame(bad_hb), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut, 50ms,
                                                     "CellD_Direct_TestReqIdMismatchDetected")) {
         fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,

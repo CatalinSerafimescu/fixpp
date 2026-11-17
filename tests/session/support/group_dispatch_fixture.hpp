@@ -50,6 +50,7 @@
 #include "support/fix44_group_frame_bodies.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 namespace fixpp::session::test066 {
 
@@ -125,7 +126,8 @@ struct GroupDispatchFixture {
     // Open the session and complete the handshake: our Logon goes out via
     // open(), then we feed the peer's Logon reply to reach Active.
     void open_to_active(Session& sess) {
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{200})) {
             fixpp::test_support::cancel_and_drain_or_report(
                 ioc, *clock, "GroupDispatchFixture::open_to_active/open");
@@ -136,7 +138,8 @@ struct GroupDispatchFixture {
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         auto logon = make_peer_logon_frame();
-        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                   sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut2,
                                                         std::chrono::milliseconds{200})) {
             fixpp::test_support::cancel_and_drain_or_report(
@@ -152,7 +155,8 @@ struct GroupDispatchFixture {
     // Feed an inbound frame through the SHIPPED dispatch path
     // (Session::on_inbound_frame -> parse_and_dispatch_).
     void feed(Session& sess, std::span<const std::byte> frame, int ms = 200) {
-        auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{ms})) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
                                                             "GroupDispatchFixture::feed");

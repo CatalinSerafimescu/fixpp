@@ -20,4 +20,14 @@ asio::any_io_executor make_session_strand(asio::any_io_executor const& exec) {
     return asio::any_io_executor{asio::make_strand(exec)};
 }
 
+int session_strand_check(asio::any_io_executor const& ex) noexcept {
+    if (auto const* const s = ex.target<asio::strand<session_inner_executor_t>>()) {
+        return s->running_in_this_thread() ? 1 : 0;
+    }
+    if (auto const* const s = ex.target<asio::strand<asio::any_io_executor>>()) {
+        return s->running_in_this_thread() ? 1 : 0;
+    }
+    return -1;
+}
+
 }  // namespace fixpp::session::detail

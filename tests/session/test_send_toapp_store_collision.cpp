@@ -61,6 +61,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
@@ -271,7 +272,8 @@ TEST_F(SendToAppStoreCollisionTest,
 
     Session sess(engine, cfg);
 
-    auto open_r = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto open_r = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                 asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, open_r, 200ms,
                                                     "ToAppStoreBlockValuedError/open")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -283,8 +285,9 @@ TEST_F(SendToAppStoreCollisionTest,
     ASSERT_EQ(sess.state(), fsm_state::LogonSent);
 
     auto peer_logon = make_logon("FIX.4.2", 1, "ACCEPTR", "INITR");
-    auto logon_r = asio::co_spawn(
-        ioc, sess.on_inbound_frame(std::span<const std::byte>(peer_logon)), asio::use_future);
+    auto logon_r = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.on_inbound_frame(std::span<const std::byte>(peer_logon)),
+                                  asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, logon_r, 200ms,
                                                     "ToAppStoreBlockValuedError/logon-ack")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -301,7 +304,8 @@ TEST_F(SendToAppStoreCollisionTest,
 
     auto payload = make_app_payload("ORD1");
     auto send_fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                       sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, send_fut, 200ms,
                                                     "ToAppStoreBlockValuedError")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "ToAppStoreBlockValuedError");

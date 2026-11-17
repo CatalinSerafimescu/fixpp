@@ -29,6 +29,7 @@
 
 #include "parity_support.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -264,7 +265,8 @@ TEST_F(FixTcCoverageGaps, InboundLogonWhileLogoutSent_Drained_StaysLogoutSent) {
     // WE initiate graceful logout → emits Logout, transitions to LogoutSent, then
     // parks awaiting the peer's Logout confirmation (2 s clock-bound timeout).
     auto close_fut =
-        asio::co_spawn(ioc, s.close(fixpp::session::close_mode::graceful), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc),
+                       s.close(fixpp::session::close_mode::graceful), asio::use_future);
     ioc.run_for(100ms);
     ASSERT_EQ(s.state(), fixpp::session::fsm_state::LogoutSent)
         << "precondition: graceful close emits Logout and enters LogoutSent";
@@ -275,7 +277,8 @@ TEST_F(FixTcCoverageGaps, InboundLogonWhileLogoutSent_Drained_StaysLogoutSent) {
     // run_for (the caller owns the buffer across the await, as the read-pump does).
     {
         auto logon = make_logon("FIX.4.2", inbound_before, "TW", "ISLD");
-        auto fut = asio::co_spawn(ioc, s.on_inbound_frame(logon), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc),
+                                  s.on_inbound_frame(logon), asio::use_future);
         // ⚠️ The substituted primitive RESTARTS after its window; the bare `run_for`
         // this replaced did not. Whether that is inert is a question about what runs
         // AFTER this window -- probe `ioc.stopped()` around it, do not trust a

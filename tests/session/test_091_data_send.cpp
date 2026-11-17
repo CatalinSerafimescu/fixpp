@@ -68,6 +68,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
@@ -227,7 +228,8 @@ protected:
     }
 
     void drive_to_active(Session& sess) {
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                         "DataSend091::drive_to_active/open")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -239,7 +241,8 @@ protected:
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         auto const logon = make_peer_logon_44();
-        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                   sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut2, kWindow,
                                                         "DataSend091::drive_to_active/logon")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -255,7 +258,8 @@ protected:
 
     fixpp::core::expected_t<void> send_payload(Session& sess, std::span<const std::byte> payload,
                                                char const* label) {
-        auto fut = asio::co_spawn(ioc, sess.send(payload), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.send(payload), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, label)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, label);
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << label;

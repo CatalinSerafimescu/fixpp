@@ -77,6 +77,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
@@ -250,8 +251,13 @@ struct SlotFixture {
     }
 
     template <class Awaitable>
-    expected_t<void> run(Awaitable a, char const* what) {
-        auto fut = asio::co_spawn(ioc, std::move(a), asio::use_future);
+    // `on`, when given: the Session whose coroutine `a` is; it then runs on that session's
+    // executor once open() has bound it (support/session_executor_of.hpp).
+    expected_t<void> run(Awaitable a, char const* what,
+                         fixpp::session::Session const* on = nullptr) {
+        auto fut = asio::co_spawn(on != nullptr ? fixpp::test_support::session_executor_of(*on, ioc)
+                                                : asio::any_io_executor{ioc.get_executor()},
+                                  std::move(a), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, what);
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << what;
@@ -262,9 +268,9 @@ struct SlotFixture {
 
     // Acceptor: open(), then the peer's Logon; the reply Logon is outbound seq 1.
     bool open_to_active(Session& s) {
-        if (!run(s.open(), "SlotFixture::open")) return false;
+        if (!run(s.open(), "SlotFixture::open", &s)) return false;
         const auto logon = peer_logon();
-        if (!run(s.on_inbound_frame(logon), "SlotFixture::logon")) return false;
+        if (!run(s.on_inbound_frame(logon), "SlotFixture::logon", &s)) return false;
         return s.state() == fsm_state::Active;
     }
 
@@ -304,10 +310,12 @@ TEST(B35SendSlot, Interleaved_EachSendStoresAndTransmitsItsOwnFrame) {
     const auto ex = sess.executor().underlying();
     // A spawn from the session strand runs the send inline until its first suspension.
     auto driver = [&]() -> asio::awaitable<void> {
-        asio::co_spawn(ex, sess.send(one), record_into(r1));
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ex), sess.send(one),
+                       record_into(r1));
         to_app_after_first = f.app->to_app_calls;
         first_pending_when_second_started = !r1.done;
-        asio::co_spawn(ex, sess.send(two), record_into(r2));
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ex), sess.send(two),
+                       record_into(r2));
         to_app_after_second = f.app->to_app_calls;
         co_return;
     };
@@ -374,7 +382,8 @@ TEST(B35SendSlot, Nested_ASendInsideToAppLeavesTheOuterFrameIntact) {
             outer_to_app_live = true;
             snapshot = text_of(mv.bytes());
             outer_data = mv.bytes().data();
-            asio::co_spawn(ex, sess.send(two), record_into(inner));
+            asio::co_spawn(fixpp::test_support::session_executor_of(sess, ex), sess.send(two),
+                           record_into(inner));
             outer_to_app_live = false;
         } else if (f.app->to_app_calls == 2) {
             inner_ran_inside_outer = outer_to_app_live;
@@ -383,7 +392,8 @@ TEST(B35SendSlot, Nested_ASendInsideToAppLeavesTheOuterFrameIntact) {
             inner_data = mv.bytes().data();
         }
     };
-    asio::co_spawn(ex, sess.send(one), record_into(outer));
+    asio::co_spawn(fixpp::test_support::session_executor_of(sess, ex), sess.send(one),
+                   record_into(outer));
     // On a miss, drain while `sess` and the captures are alive (see the Interleaved cell).
     const bool done = f.pump_until([&] { return outer.done && inner.done; });
     if (!done) {
@@ -436,7 +446,7 @@ CancelOutcome send_cancelled_in_to_app(SlotFixture& f, Session& sess,
     };
     if (before_send) before_send();
     const auto ex = sess.executor().underlying();
-    asio::co_spawn(ex, sess.send(one),
+    asio::co_spawn(fixpp::test_support::session_executor_of(sess, ex), sess.send(one),
                    asio::bind_cancellation_slot(sig.slot(), record_into(o.send)));
     // On a miss, drain here: the frame spans `one` and its completion is bound to `sig`'s slot,
     // and both die when this helper returns, so no guard in a caller can protect them.
@@ -485,7 +495,7 @@ TEST(B35SendSlot, VetoedSend_ReleasesTheSlot) {
         held_in_to_app = session_test_access::send_slot_in_use(sess);
     };
     const auto one = bytes_of(kPayloadOne);
-    auto r = f.run(sess.send(one), "VetoedSend_ReleasesTheSlot");
+    auto r = f.run(sess.send(one), "VetoedSend_ReleasesTheSlot", &sess);
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::app_do_not_send);
     EXPECT_TRUE(held_in_to_app) << "the send did not hold the slot while toApp ran";
@@ -503,7 +513,7 @@ TEST(B35SendSlot, ThrowingToApp_ReleasesTheSlot) {
         held_in_to_app = session_test_access::send_slot_in_use(sess);
     };
     const auto one = bytes_of(kPayloadOne);
-    auto r = f.run(sess.send(one), "ThrowingToApp_ReleasesTheSlot");
+    auto r = f.run(sess.send(one), "ThrowingToApp_ReleasesTheSlot", &sess);
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::app_callback_threw);
     EXPECT_TRUE(held_in_to_app) << "the send did not hold the slot while toApp ran";
@@ -519,7 +529,7 @@ TEST(B35SendSlot, SlotHeld_SendTakesTheLeafWithTheSameBytes) {
     const std::size_t wire_before = f.wire.size();
     session_test_access::send_slot_in_use(sess) = true;
     const auto one = bytes_of(kPayloadOne);
-    auto r = f.run(sess.send(one), "SlotHeld_SendTakesTheLeafWithTheSameBytes");
+    auto r = f.run(sess.send(one), "SlotHeld_SendTakesTheLeafWithTheSameBytes", &sess);
     ASSERT_TRUE(r.has_value()) << "the leaf send failed: " << static_cast<int>(r.error());
     // The leaf never writes the flag, so the one the test set is still set.
     EXPECT_TRUE(session_test_access::send_slot_in_use(sess));

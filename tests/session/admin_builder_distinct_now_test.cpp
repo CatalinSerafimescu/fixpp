@@ -61,6 +61,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -189,7 +190,8 @@ protected:
     }
 
     fixpp::core::expected_t<void> open_sync(Session& s) {
-        auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc), s.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
                                                         "AdminDistinctNowTest::open_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -201,7 +203,8 @@ protected:
     }
 
     fixpp::core::expected_t<void> feed_sync(Session& s, std::span<const std::byte> frame) {
-        auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc),
+                                  s.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
                                                         "AdminDistinctNowTest::feed_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -213,7 +216,8 @@ protected:
     }
 
     fixpp::core::expected_t<void> close_sync(Session& s, close_mode mode) {
-        auto fut = asio::co_spawn(ioc, s.close(mode), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc), s.close(mode),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms,
                                                         "AdminDistinctNowTest::close_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,

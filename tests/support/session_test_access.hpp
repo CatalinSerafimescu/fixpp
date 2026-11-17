@@ -12,9 +12,12 @@
 // `Session`. Never installed; production targets must not include this
 // header. Needs no test macro.
 
+#include <asio/awaitable.hpp>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/session/session.hpp>
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -153,6 +156,9 @@ struct session_test_access {
 
     // Whether Engine::stop()'s step 1 has run on the session's strand (093, data-model
     // E-13).
+    // What Engine::stop() calls on each of its sessions first (103 tasks T059, R-588-f(2)),
+    // for a cell that drives a Session with no Engine.
+    static void note_engine_stop(Session& s) noexcept { s.note_engine_stop_(); }
     [[nodiscard]] static bool engine_stop_requested(Session const& s) noexcept {
         return s.engine_stop_requested_;
     }
@@ -194,6 +200,58 @@ struct session_test_access {
     // The session's store, or null before open() (093 plan OD-25: a cell issues a
     // competing store operation on it).
     [[nodiscard]] static MessageStore* store(Session& s) noexcept { return s.store_.get(); }
+
+    // 103 (fixpp#577, research D4.2 to D4.6): the pending-Logout mark's phase (0 none,
+    // 1 pending, 2 acking), the Logout owner, and the bound's join counter. Read on the
+    // session's strand.
+    [[nodiscard]] static int peer_logout_phase(Session const& s) noexcept {
+        return static_cast<int>(s.peer_logout_.phase);
+    }
+    [[nodiscard]] static bool logout_in_flight(Session const& s) noexcept {
+        return s.logout_in_flight_;
+    }
+    // 103 Phase 9: the liveness loops' join counter, the callback depth, the connection
+    // generation. Read on the session's strand.
+    [[nodiscard]] static int liveness_count(Session const& s) noexcept {
+        return s.liveness_counter_->load(std::memory_order_acquire);
+    }
+    [[nodiscard]] static std::uint32_t callback_depth(Session const& s) noexcept {
+        return s.callback_depth_;
+    }
+    [[nodiscard]] static std::uint32_t conn_gen(Session const& s) noexcept { return s.conn_gen_; }
+    [[nodiscard]] static int peer_logout_bound_count(Session const& s) noexcept {
+        return s.peer_logout_bound_counter_->load(std::memory_order_acquire);
+    }
+    // The bound's two test seams (cells F1, F2): the bound awaits the first before its
+    // first test, and the second between its publish-and-re-test and its race's wait.
+    static void set_peer_logout_bound_hold_first_run(Session& s,
+                                                     std::function<asio::awaitable<void>()> hold) {
+        s.peer_logout_bound_hold_first_run_ = std::move(hold);
+    }
+    static void set_peer_logout_bound_hold_before_race(
+        Session& s, std::function<asio::awaitable<void>()> hold) {
+        s.peer_logout_bound_hold_before_race_ = std::move(hold);
+    }
+    // Whether the bound's wake is published (research D4.4). Read on the session's strand.
+    [[nodiscard]] static bool peer_logout_wake_published(Session const& s) noexcept {
+        return static_cast<bool>(s.peer_logout_wake_);
+    }
+    // Drops a published wake without calling it. A cell calls it only once it has failed on
+    // finding a wake published where none may be, so that its teardown does not call through
+    // a wake whose timer is gone and the cell ends as a test failure, not an abort.
+    static void drop_peer_logout_wake(Session& s) noexcept { s.peer_logout_wake_ = nullptr; }
+    // Replaces the config-time transport callback open() installed (a direct-Session cell's
+    // sink), so a cell can make the transport fail after the session is open.
+    static void set_transport_send(Session& s,
+                                   std::function<void(std::span<const std::byte>)> send) {
+        s.transport_send_ = std::move(send);
+    }
+
+    // The session's replay gate (103, research D5′): a cell reads whether a walk waits at
+    // it. Read it on the session's strand.
+    [[nodiscard]] static detail::replay_gate const& replay_gate(Session const& s) noexcept {
+        return s.replay_gate_;
+    }
 
     // The numeric value of the session's Session::lifecycle (see the enum in session.hpp
     // for the names). Read it on the session's strand.

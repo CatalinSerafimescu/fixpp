@@ -39,6 +39,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
@@ -69,6 +70,7 @@
 #include "support/pump_until_ready.hpp"
 #include "support/recording_store.hpp"
 #include "support/seqnum_manager_test_access.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 #include "support/temp_dir.hpp"
 
@@ -99,6 +101,9 @@ public:
     asio::io_context ioc;
 
 private:
+    // feed()'s own signals: declared second, so destroyed after every other member and
+    // before `ioc`.
+    std::deque<asio::cancellation_signal> feed_signals_;
     // With a FileStore: keeps `ioc` from stopping between two pumps when an offload's work
     // is released on the pool thread (tests/support/keep_running.hpp). Released first in the
     // destructor, before the drain, which waits for the io_context to stop.
@@ -195,7 +200,8 @@ public:
 
     // open(): an acceptor is NotConnected afterwards.
     [[nodiscard]] bool open() {
-        auto fut = asio::co_spawn(ioc, session->open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*session, ioc),
+                                  session->open(), asio::use_future);
         if (!run_until([&] { return ready(fut); })) return false;
         return fut.get().has_value();
     }
@@ -252,15 +258,22 @@ public:
 
     // Hands `frame` to on_inbound_frame from a coroutine of the cell's, bound to
     // `cancel`. `frame` and `out` must outlive the returned future's readiness.
+    //
+    // The coroutine runs on the session's executor, a strand; a co_spawn leaves its
+    // cancellation handler, which holds a copy of that executor, in the slot it is bound to,
+    // and no copy of a strand may outlive the io_context. So the coroutine is bound to a
+    // signal of this fixture's, destroyed before `ioc`, and `cancel` forwards to it.
     [[nodiscard]] std::future<void> feed(std::span<const std::byte> frame,
                                          CallingThreadReadings& out,
                                          asio::cancellation_signal& cancel,
                                          std::function<void()> after_call = {}) {
+        auto& own = feed_signals_.emplace_back();
+        cancel.slot().assign([&own](asio::cancellation_type const t) { own.emit(t); });
         return asio::co_spawn(
-            ioc,
+            fixpp::test_support::session_executor_of(*session, ioc),
             await_and_read_thread([this, frame] { return session->on_inbound_frame(frame); }, out,
                                   std::move(after_call)),
-            asio::bind_cancellation_slot(cancel.slot(), asio::use_future));
+            asio::bind_cancellation_slot(own.slot(), asio::use_future));
     }
     // The same, with no cancellation of the cell's, run until the call has completed.
     [[nodiscard]] bool feed_plain(std::span<const std::byte> frame, CallingThreadReadings& out) {
@@ -273,7 +286,8 @@ public:
     // thread from inside a handler, it runs to its first suspension before this returns.
     [[nodiscard]] std::future<fixpp::core::expected_t<void>> spawn_close(
         fixpp::session::close_mode mode) {
-        return asio::co_spawn(ioc, session->close(mode), asio::use_future);
+        return asio::co_spawn(fixpp::test_support::session_executor_of(*session, ioc),
+                              session->close(mode), asio::use_future);
     }
 
     [[nodiscard]] std::vector<fixpp::session::fsm_state> ring() const {

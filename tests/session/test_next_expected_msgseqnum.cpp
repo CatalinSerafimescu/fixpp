@@ -65,6 +65,7 @@ using namespace std::chrono_literals;
 #include "support/alloc_guard_markers.hpp"
 #include "support/extract_tag.hpp"
 #include "support/seqnum_manager_test_access.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 namespace {
@@ -375,7 +376,8 @@ struct Fixture {
     // at the bottom of this file, pins that it is live, not decorative.)
     void feed(const std::vector<std::byte>& frame, std::chrono::steady_clock::duration window = 5s,
               std::chrono::steady_clock::duration grace = fixpp::test_support::kPumpSlice) {
-        auto fut = asio::co_spawn(ioc, session->on_inbound_frame(std::span<const std::byte>(frame)),
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*session, ioc),
+                                  session->on_inbound_frame(std::span<const std::byte>(frame)),
                                   asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, window, grace)) {
             // Drain HERE, not in ~Fixture. `frame` is a CALLER'S TEMPORARY at most
@@ -413,7 +415,9 @@ std::unique_ptr<Fixture> make_acceptor(std::shared_ptr<MessageStoreFactory> stor
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     // open() — sets NotConnected for acceptor.
-    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    auto open_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                       fix->session->open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s)) {
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_acceptor";
         // Return the fixture, NOT nullptr. Callers do not null-check (6 of the 7
@@ -462,7 +466,9 @@ std::unique_ptr<Fixture> make_initiator(std::shared_ptr<MessageStoreFactory> sto
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     // open() emits the initiator Logon and transitions to LogonSent.
-    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    auto open_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                       fix->session->open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s)) {
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_initiator";
         // Return the fixture, NOT nullptr — same reasoning as make_acceptor above.
@@ -697,7 +703,9 @@ TEST(Honor, Acceptor_XltN_ResendsExactRange_AfterReply_NoResendRequest) {
     fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
-    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    auto open_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                       fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
         << fixpp::test_support::kWindowMiss
         << "Honor.Acceptor_XltN_ResendsExactRange_AfterReply_NoResendRequest";
@@ -771,7 +779,9 @@ TEST(Honor, Initiator_XltN_ResendsExactRange_NoResendRequest) {
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     // open() emits the initiator Logon at seq=1 and transitions to LogonSent.
-    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    auto open_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                       fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s))
         << fixpp::test_support::kWindowMiss
         << "Honor.Initiator_XltN_ResendsExactRange_NoResendRequest";
@@ -842,7 +852,9 @@ TEST(Honor, XeqN_NoResend) {
             fix2.capture(data);
         };
         fix2->session = std::make_unique<fixpp::session::Session>(fix2->eng, fix2->cfg);
-        auto open_fut2 = asio::co_spawn(fix2->ioc, fix2->session->open(), asio::use_future);
+        auto open_fut2 =
+            asio::co_spawn(fixpp::test_support::session_executor_of(*fix2->session, fix2->ioc),
+                           fix2->session->open(), asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix2->ioc, open_fut2, 2s))
             << fixpp::test_support::kWindowMiss << "Honor.XeqN_NoResend";
         (void)open_fut2.get();
@@ -896,7 +908,9 @@ TEST(Honor, Acceptor_XeqNpre_NoResend_Establishes) {
     fix->cfg.enable_next_expected_msg_seq_num = true;
     fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    auto open_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                       fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
         << fixpp::test_support::kWindowMiss << "Honor.Acceptor_XeqNpre_NoResend_Establishes";
     (void)open_fut.get();
@@ -956,7 +970,9 @@ TEST(Honor, Acceptor_XeqNprePlus1_TooHigh_Logout) {
     fix->cfg.enable_next_expected_msg_seq_num = true;
     fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    auto open_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                       fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
         << fixpp::test_support::kWindowMiss << "Honor.Acceptor_XeqNprePlus1_TooHigh_Logout";
     (void)open_fut.get();
@@ -1007,7 +1023,9 @@ TEST(WalkExtraction, TwoValueEnd_ExplicitEndBeyondStore_789Caller) {
     fix->cfg.enable_next_expected_msg_seq_num = true;
     fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    auto open_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                       fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
         << fixpp::test_support::kWindowMiss
         << "WalkExtraction.TwoValueEnd_ExplicitEndBeyondStore_789Caller";
@@ -1059,7 +1077,9 @@ TEST(WalkExtraction, TwoValueEnd_EndSeqNo0_EmptyStore_789Caller) {
     fix->cfg.enable_next_expected_msg_seq_num = true;
     fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    auto open_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                       fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
         << fixpp::test_support::kWindowMiss
         << "WalkExtraction.TwoValueEnd_EndSeqNo0_EmptyStore_789Caller";
@@ -1118,7 +1138,9 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Acceptor) {
     fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
-    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    auto open_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                       fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
         << fixpp::test_support::kWindowMiss
         << "BehindSide.KnobOn_AdmitsPeerResend_NoFatalDisconnect_Acceptor";
@@ -1196,7 +1218,9 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Initiator) {
     fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
-    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    auto open_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                       fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s))
         << fixpp::test_support::kWindowMiss
         << "BehindSide.KnobOn_AdmitsPeerResend_NoFatalDisconnect_Initiator";
@@ -1272,7 +1296,9 @@ TEST(BehindSide, Bidirectional_BothGaps_RecoverNoDoubleRecovery) {
     fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
-    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    auto open_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                       fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
         << fixpp::test_support::kWindowMiss
         << "BehindSide.Bidirectional_BothGaps_RecoverNoDoubleRecovery";
@@ -1358,7 +1384,9 @@ TEST(BehindSide, LostResend_SelfHealsViaActiveArm) {
     fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
-    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    auto open_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                       fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
         << fixpp::test_support::kWindowMiss << "BehindSide.LostResend_SelfHealsViaActiveArm";
     (void)open_fut.get();
@@ -1424,7 +1452,9 @@ TEST(Suppression, KnobOn_NoAtLogonResendRequest_KnobOff_FatalOnTooHigh) {
             fix.capture(data);
         };
         fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        auto open_fut =
+            asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                           fix->session->open(), asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
             << fixpp::test_support::kWindowMiss
             << "Suppression.KnobOn_NoAtLogonResendRequest_KnobOff_FatalOnTooHigh";
@@ -1467,7 +1497,9 @@ TEST(Suppression, KnobOn_NoAtLogonResendRequest_KnobOff_FatalOnTooHigh) {
             fix2.capture(data);
         };
         fix2->session = std::make_unique<fixpp::session::Session>(fix2->eng, fix2->cfg);
-        auto open_fut2 = asio::co_spawn(fix2->ioc, fix2->session->open(), asio::use_future);
+        auto open_fut2 =
+            asio::co_spawn(fixpp::test_support::session_executor_of(*fix2->session, fix2->ioc),
+                           fix2->session->open(), asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix2->ioc, open_fut2, 1s))
             << fixpp::test_support::kWindowMiss
             << "Suppression.KnobOn_NoAtLogonResendRequest_KnobOff_FatalOnTooHigh";
@@ -1513,7 +1545,9 @@ TEST(Reset, InitiatorResetLogon_Advertises1) {
         /*next_outbound=*/4);
 
     // open() emits the initiator Logon (with reset_on_logon: reset fires BEFORE build).
-    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    auto open_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                       fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s))
         << fixpp::test_support::kWindowMiss << "Reset.InitiatorResetLogon_Advertises1";
     (void)open_fut.get();
@@ -1557,7 +1591,9 @@ TEST(Reset, AcceptorReplyResetOnLogon_Advertises2) {
     fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
-    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    auto open_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                       fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
         << fixpp::test_support::kWindowMiss << "Reset.AcceptorReplyResetOnLogon_Advertises2";
     (void)open_fut.get();
@@ -1605,7 +1641,9 @@ TEST(Reset, AcceptorReplyReceived141_Advertises2) {
     fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
-    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    auto open_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                       fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
         << fixpp::test_support::kWindowMiss << "Reset.AcceptorReplyReceived141_Advertises2";
     (void)open_fut.get();
@@ -1759,7 +1797,9 @@ TEST(DefaultOff, ByteIdenticalLogon_InboundIgnored) {
         };
         fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
-        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        auto open_fut =
+            asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                           fix->session->open(), asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
             << fixpp::test_support::kWindowMiss << "DefaultOff.ByteIdenticalLogon_InboundIgnored";
         (void)open_fut.get();
@@ -1844,7 +1884,9 @@ TEST(Honor, XgtN_LogoutTextThenDisconnect) {
             fix.capture(data);
         };
         fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        auto open_fut =
+            asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                           fix->session->open(), asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
             << fixpp::test_support::kWindowMiss << "Honor.XgtN_LogoutTextThenDisconnect";
         (void)open_fut.get();
@@ -1901,7 +1943,9 @@ TEST(Honor, XgtN_LogoutTextThenDisconnect) {
             fix.capture(data);
         };
         fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        auto open_fut =
+            asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                           fix->session->open(), asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s))
             << fixpp::test_support::kWindowMiss << "Honor.XgtN_LogoutTextThenDisconnect";
         (void)open_fut.get();
@@ -1981,7 +2025,9 @@ TEST(Honor, Invalid789_LogoutThenDisconnect) {
                 fix.capture(data);
             };
             fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-            auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+            auto open_fut =
+                asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                               fix->session->open(), asio::use_future);
             ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
                 << fixpp::test_support::kWindowMiss << "Honor.Invalid789_LogoutThenDisconnect";
             (void)open_fut.get();
@@ -2039,7 +2085,9 @@ TEST(Honor, Invalid789_LogoutThenDisconnect) {
                 fix.capture(data);
             };
             fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-            auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+            auto open_fut =
+                asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                               fix->session->open(), asio::use_future);
             ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s))
                 << fixpp::test_support::kWindowMiss << "Honor.Invalid789_LogoutThenDisconnect";
             (void)open_fut.get();
@@ -2127,7 +2175,9 @@ TEST(Honor, Integrity_FiresToAdmin_XgtN) {
             fix.capture(data);
         };
         fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        auto open_fut =
+            asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                           fix->session->open(), asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
             << fixpp::test_support::kWindowMiss << "Honor.Integrity_FiresToAdmin_XgtN";
         (void)open_fut.get();
@@ -2167,7 +2217,9 @@ TEST(Honor, Integrity_FiresToAdmin_XgtN) {
             fix.capture(data);
         };
         fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        auto open_fut =
+            asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                           fix->session->open(), asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s))
             << fixpp::test_support::kWindowMiss << "Honor.Integrity_FiresToAdmin_XgtN";
         (void)open_fut.get();
@@ -2211,7 +2263,9 @@ TEST(Honor, Integrity_FiresToAdmin_Invalid789) {
             fix.capture(data);
         };
         fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        auto open_fut =
+            asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                           fix->session->open(), asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
             << fixpp::test_support::kWindowMiss << "Honor.Integrity_FiresToAdmin_Invalid789";
         (void)open_fut.get();
@@ -2248,7 +2302,9 @@ TEST(Honor, Integrity_FiresToAdmin_Invalid789) {
             fix.capture(data);
         };
         fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        auto open_fut =
+            asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                           fix->session->open(), asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s))
             << fixpp::test_support::kWindowMiss << "Honor.Integrity_FiresToAdmin_Invalid789";
         (void)open_fut.get();
@@ -2299,7 +2355,9 @@ TEST(Honor, Integrity_ToAdminThrow_SurfacesAppCallbackThrew) {
             fix.capture(data);
         };
         fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        auto open_fut =
+            asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                           fix->session->open(), asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
             << fixpp::test_support::kWindowMiss
             << "Honor.Integrity_ToAdminThrow_SurfacesAppCallbackThrew";
@@ -2309,9 +2367,10 @@ TEST(Honor, Integrity_ToAdminThrow_SurfacesAppCallbackThrew) {
         fixpp::session::seqnum_manager_test_access::set_counters(
             fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 4);
 
-        auto fut = asio::co_spawn(
-            fix->ioc, fix->session->on_inbound_frame(std::span<const std::byte>(logon_frame)),
-            asio::use_future);
+        auto fut =
+            asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                           fix->session->on_inbound_frame(std::span<const std::byte>(logon_frame)),
+                           asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, fut, 5s))
             << fixpp::test_support::kWindowMiss << "Integrity_ToAdminThrow/acceptor";
         auto result = fut.get();
@@ -2352,7 +2411,9 @@ TEST(Honor, Integrity_ToAdminThrow_SurfacesAppCallbackThrew) {
             fix.capture(data);
         };
         fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-        auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+        auto open_fut =
+            asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                           fix->session->open(), asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s))
             << fixpp::test_support::kWindowMiss
             << "Honor.Integrity_ToAdminThrow_SurfacesAppCallbackThrew";
@@ -2364,9 +2425,10 @@ TEST(Honor, Integrity_ToAdminThrow_SurfacesAppCallbackThrew) {
             fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 3);
         fix->clear_capture();
 
-        auto fut = asio::co_spawn(
-            fix->ioc, fix->session->on_inbound_frame(std::span<const std::byte>(logon_frame)),
-            asio::use_future);
+        auto fut =
+            asio::co_spawn(fixpp::test_support::session_executor_of(*fix->session, fix->ioc),
+                           fix->session->on_inbound_frame(std::span<const std::byte>(logon_frame)),
+                           asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, fut, 5s))
             << fixpp::test_support::kWindowMiss << "Integrity_ToAdminThrow/initiator";
         auto result = fut.get();

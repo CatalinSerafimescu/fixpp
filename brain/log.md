@@ -6,11 +6,22 @@ status: stable
 
 # Log
 
+- **2026-11-17 — 103-resend-logon-reset-fidelity, Gate B round 1: the too-high Logout bound's exception
+  exit.** `components/session.md`'s 103 section gains the decision that an exception reaching the bound's
+  handler ends it closed (no mark left, `Disconnected`), with a frame-local wake clearer and a
+  parameter-owned join hold, and names what was not taken.
+- **2026-11-16 — 103-resend-logon-reset-fidelity, `/speckit-verify` (Step 10b): the crossing and the strict
+  refusal's superseded ending.** `components/session.md`'s 103 section gains two decisions made after its
+  last edit: a too-high Logout while the session is itself ending is acknowledged at once, with no bound
+  (FR-021a, `B-103-15`); and a strict refusal superseded by a completed `close()` returns success, by a
+  site-local predicate rather than the shared `logon_arm_superseded_` (`B-103-3`). Each names what was not
+  taken.
 - **2026-11-15 — PR #690 (records pass row 8 + fixpp#652), Gate B close-out: `failure-classes.md` gains two
   forms.** Class 10 gains "a symbol in an installed, non-`detail` header is public C++ API, whatever its contract
   tier or caller count" (F1: a removal filed as "dead internal helper"; B-652-1). Class 1 gains "a round-trip that
   seeds every field of a category with the same value cannot see a swap within that category" (F2/F3: the v42 and
   077 builder round-trips). Owner-approved 2026-11-15 from the Gate B record's anti-pattern candidates.
+- **2026-11-14 — 102-dict-width-multichar-type close-out (PR #680), row 15: `failure-classes.md` class 14 gains a form, a stale-restatement sweep keyed on the new wording.** Owner-approved anti-pattern from 102's Gate B (rounds 1 and 2); the same rule is in the parent's `.claude/agents/phase-implementer.md`. Landed on 103's branch so Gate B reviews it.
 - **2026-11-11 — 100-wire-group-read-integrity, `/speckit-verify` (Step 10b): decision links only.** `components/c-api.md`, `components/inbound-message-path.md` and `components/session.md` already name 100 in their bodies (each a "Superseded by 100" note); each gains its Gate A record in `refs_external`, as `brain_link_decisions.py --parent <parent root>` proposed. No page states the T071 signature change (B-100-7): a grep of `brain/` for `dict_hooks` passed or held by value finds none, the same grep finding other "by value" lines.
 - **2026-11-05 — 099-fixt-appl-version-validation, `/speckit-verify` (Step 10b): a FIXT session reads each message with
   that message's dictionary.** `components/session.md` gains the section with what was decided (two dictionaries chosen

@@ -14,10 +14,10 @@ The badge names exact `{name, version, commit}` (FR-024). In-repo we pin the
 (the commit is a runtime property of the counterparty binary the parent builds):
 
 - **QuickFIX-cpp v1.16.0** (live counterparty, both roles)
-- **QuickFIX-J 3.0.1** (live counterparty, both roles)
+- **QuickFIX-J 3.0.2** (live counterparty, both roles)
 - **Fix8 1.4.3** — corpus-only at v1.0 (FR-009), not a live-paired counterparty.
 
-Badge text shape: `Interop verified against QuickFIX-cpp v1.16.0 / QuickFIX-J 3.0.1`
+Badge text shape: `Interop verified against QuickFIX-cpp v1.16.0 / QuickFIX-J 3.0.2`
 (+ archived-transcript link + this limitations list).
 
 ## Badge scope — what is asserted (018 G1, SC-006)

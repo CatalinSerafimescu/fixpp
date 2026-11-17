@@ -137,6 +137,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 #include "support/temp_dir.hpp"
 
@@ -346,9 +347,14 @@ protected:
         return sc;
     }
 
+    // `on`, when given: the Session whose coroutine `coro` is; it then runs on that session's
+    // executor once open() has bound it (support/session_executor_of.hpp).
     template <class T>
-    expected_t<T> run_sync(asio::awaitable<expected_t<T>> coro, const char* site) {
-        auto fut = asio::co_spawn(ioc, std::move(coro), asio::use_future);
+    expected_t<T> run_sync(asio::awaitable<expected_t<T>> coro, const char* site,
+                           fixpp::session::Session const* on = nullptr) {
+        auto fut = asio::co_spawn(on != nullptr ? fixpp::test_support::session_executor_of(*on, ioc)
+                                                : asio::any_io_executor{ioc.get_executor()},
+                                  std::move(coro), asio::use_future);
         const bool ready = fixpp::test_support::run_window_or_wait_until_ready(
                                ioc, fut, kWindow, fixpp::test_support::kPumpBudget, site)
                                .ready;
@@ -440,13 +446,14 @@ protected:
     }
 
     expected_t<void> feed(Session& s, const std::vector<std::byte>& f) {
-        return run_sync(s.on_inbound_frame(std::span<const std::byte>{f}), "VolatileStore::feed");
+        return run_sync(s.on_inbound_frame(std::span<const std::byte>{f}), "VolatileStore::feed",
+                        &s);
     }
 
     // Step 1. Every ASSERT here and in establish_and_send_two is a setup
     // precondition: a failure means the cell did not drive the shape, not a verdict.
     void establish(Session& s, Capture& cap, const LogonShape& shape) {
-        ASSERT_TRUE(run_sync(s.open(), "VolatileStore::open").has_value()) << "setup: open()";
+        ASSERT_TRUE(run_sync(s.open(), "VolatileStore::open", &s).has_value()) << "setup: open()";
         (void)feed(s, make_frame("A", 1,
                                  shape.peer_logon_has_141 ? "98=0\x01"
                                                             "108=30\x01"
@@ -479,8 +486,10 @@ protected:
         auto& mgr = session_test_access::seqnum_mgr(s);
         const auto a = bytes_of(kPayloadA);
         const auto b = bytes_of(kPayloadB);
-        ASSERT_TRUE(run_sync(s.send(a), "VolatileStore::send_a").has_value()) << "setup: send A";
-        ASSERT_TRUE(run_sync(s.send(b), "VolatileStore::send_b").has_value()) << "setup: send B";
+        ASSERT_TRUE(run_sync(s.send(a), "VolatileStore::send_a", &s).has_value())
+            << "setup: send A";
+        ASSERT_TRUE(run_sync(s.send(b), "VolatileStore::send_b", &s).has_value())
+            << "setup: send B";
         ASSERT_EQ(cap.frames.size(), 2U)
             << "setup: two frames transmitted: " << describe(cap.frames);
         sent_a = cap.frames[0];

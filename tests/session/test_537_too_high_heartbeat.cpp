@@ -169,7 +169,9 @@ TEST(TooHighHeartbeatDuringTheGap, OtherTestReqId_EndsTheSessionAtThatFrame) {
 }
 
 // Bounds of the rule, first: a Heartbeat below NextNumIn does not clear a pending
-// TestRequest, even with its TestReqID. The session ends at the grace check.
+// TestRequest, even with its TestReqID. The session ends at the grace check. The Heartbeat
+// carries PossDupFlag(43)=Y, so the PossDup arm ignores it: without 43=Y it draws the
+// too-low Logout (103, FR-018), which is not this control's subject.
 TEST(TooHighHeartbeatDuringTheGap, Control_HeartbeatBelowNextNumIn_LeavesTheTestRequestPending) {
     Scene s;
     const Gap g = open_gap(s);
@@ -178,7 +180,10 @@ TEST(TooHighHeartbeatDuringTheGap, Control_HeartbeatBelowNextNumIn_LeavesTheTest
     const std::string id = test_request_after_one_quiet_interval(s);
     ASSERT_FALSE(id.empty());
 
-    (void)s.feed(s.heartbeat(1, id));
+    (void)s.feed(s.frame("0", 1,
+                         "43=Y\x01"
+                         "122=" +
+                             s.sending_time() + "\x01" + "112=" + id + "\x01"));
     EXPECT_TRUE(s.test_request_pending()) << "a Heartbeat below NextNumIn cleared the TestRequest";
     EXPECT_EQ(s.state(), fsm_state::Active);
 

@@ -166,6 +166,7 @@
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/reify_test_frame.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 #include "support/temp_dir.hpp"
 #include "support/transport_double.hpp"
@@ -254,7 +255,8 @@ struct DispositionFixture {
     // open() alone: an initiator is then in LogonSent, an acceptor in NotConnected.
     void open_only(Session& sess) {
         transport.reset();
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::pump_until_ready(ioc, fut, "DispositionFixture::open_only")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
                                                             "DispositionFixture::open_only");
@@ -267,7 +269,8 @@ struct DispositionFixture {
     // Initiator path: open() sends a Logon; the peer's Logon reply makes it Active.
     void open_to_active(Session& sess) {
         transport.reset();
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::pump_until_ready(ioc, fut,
                                                    "DispositionFixture::open_to_active/open")) {
             fixpp::test_support::cancel_and_drain_or_report(
@@ -282,7 +285,8 @@ struct DispositionFixture {
                                     "98=0\x01"
                                     "108=30\x01");
         transport.reset();
-        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                   sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::pump_until_ready(ioc, fut2,
                                                    "DispositionFixture::open_to_active/logon")) {
             fixpp::test_support::cancel_and_drain_or_report(
@@ -298,7 +302,8 @@ struct DispositionFixture {
     // Feeds one frame; transport.sent_frames() then holds only what it drew.
     void feed(Session& sess, std::span<const std::byte> frame) {
         transport.reset();
-        auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::pump_until_ready(ioc, fut, "DispositionFixture::feed")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
                                                             "DispositionFixture::feed");
@@ -582,7 +587,8 @@ void anchor_d9(bool validate) {
         return;
     }
 
-    auto close_fut = asio::co_spawn(fix.ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, fix.ioc),
+                                    sess.close(close_mode::graceful), asio::use_future);
     if (!fixpp::test_support::pump_until(
             fix.ioc, [&sess] { return sess.state() == fsm_state::LogoutSent; }, timeout / 2)) {
         fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock, "Anchor_D9/stage");
@@ -1073,7 +1079,8 @@ struct StateCell {
         }
         ASSERT_NE(factory->last_store, nullptr);
         factory->last_store->park_outbound(1);
-        logon = asio::co_spawn(fix.ioc, sess->on_inbound_frame(logon_frame), asio::use_future);
+        logon = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, fix.ioc),
+                               sess->on_inbound_frame(logon_frame), asio::use_future);
         ASSERT_TRUE(fixpp::test_support::pump_until(fix.ioc, [this] {
             return factory->last_store->parked();
         })) << "StateCell: the acceptor's Logon reply never reached the store";
@@ -1717,8 +1724,33 @@ TEST(UnparseableFrameDisposition, Refresh_PossDupRejectBad122_NoTestRequestAtLog
                      "PossDup Reject (122 unparseable)");
 }
 
-TEST(UnparseableFrameDisposition, Refresh_TooLowHeartbeat_NoTestRequestAtLogonInterval) {
-    run_refresh_cell({.frame = make_raw_frame("0", 1), .next_in_after = 2}, "too-low Heartbeat");
+// A too-low Heartbeat without PossDupFlag(43) no longer leaves the session up: 103 (research
+// D6 and D9; FR-018, fixpp#581) sends the too-low Logout and the session ends, so it is not a
+// refresh class. With 43=Y it is ignored and refreshes liveness, the row after this one.
+TEST(UnparseableFrameDisposition, TooLowHeartbeat_TooLowLogoutThenDisconnected) {
+    DispositionFixture fix;
+    auto cfg = fix.make_cfg(false);
+    Session sess{fix.engine, cfg};
+    fix.open_to_active(sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    drain_ready(fix.ioc);
+    fix.feed(sess, make_raw_frame("0", 1));
+    std::vector<std::string> drawn;
+    std::vector<std::string> texts;
+    for (auto const& f : fix.transport.sent_frames()) {
+        drawn.push_back(extract_tag(f, 35));
+        texts.push_back(extract_tag(f, 58));
+    }
+    EXPECT_EQ(drawn, (std::vector<std::string>{"5"})) << "MsgType of each frame drawn";
+    EXPECT_EQ(texts, (std::vector<std::string>{"MsgSeqNum too low, expecting 2 but received 1"}));
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+}
+
+TEST(UnparseableFrameDisposition, Refresh_TooLowPossDupHeartbeat_NoTestRequestAtLogonInterval) {
+    run_refresh_cell({.frame = make_raw_frame("0", 1, kPossDupFields), .next_in_after = 2},
+                     "too-low PossDup Heartbeat");
 }
 
 TEST(UnparseableFrameDisposition, Refresh_TooLowPossDup_NoTestRequestAtLogonInterval) {
@@ -1874,7 +1906,8 @@ struct ProfileCell {
 
     void feed(std::span<const std::byte> bytes) {
         fix.transport.reset();
-        auto fut = asio::co_spawn(fix.ioc, sess->on_inbound_frame(bytes), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, fix.ioc),
+                                  sess->on_inbound_frame(bytes), asio::use_future);
         if (!fixpp::test_support::pump_until_ready(fix.ioc, fut, "ProfileCell::feed")) {
             fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
                                                             "ProfileCell::feed");
@@ -1887,7 +1920,8 @@ struct ProfileCell {
 
     // open() alone: an acceptor is then in NotConnected, an initiator in LogonSent.
     void open_only() {
-        auto fut = asio::co_spawn(fix.ioc, sess->open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, fix.ioc),
+                                  sess->open(), asio::use_future);
         if (!fixpp::test_support::pump_until_ready(fix.ioc, fut, "ProfileCell::open")) {
             fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
                                                             "ProfileCell::open");
@@ -2462,7 +2496,8 @@ struct LateCell {
             return;
         }
         if (sess->is_open()) {
-            auto fut = asio::co_spawn(fix.ioc, sess->close(close_mode::terminal), asio::use_future);
+            auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, fix.ioc),
+                                      sess->close(close_mode::terminal), asio::use_future);
             if (!fixpp::test_support::pump_until_ready(fix.ioc, fut, "LateCell::release")) {
                 fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
                                                                 "LateCell::release");
@@ -3323,7 +3358,8 @@ void run_d9_cell(std::vector<std::byte> const& faulty, std::string_view row) {
         return;
     }
 
-    auto close_fut = asio::co_spawn(fix.ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, fix.ioc),
+                                    sess.close(close_mode::graceful), asio::use_future);
     if (!fixpp::test_support::pump_until(
             fix.ioc, [&sess] { return sess.state() == fsm_state::LogoutSent; }, timeout / 2)) {
         fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock, "D9/stage");

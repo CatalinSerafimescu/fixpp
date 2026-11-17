@@ -35,6 +35,7 @@
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/core/session_local.hpp>
 #include <fixpp/core/trace_context.hpp>
+#include <fixpp/session/detail/replay_gate.hpp>  // 103 (research D5′): replay_gate_
 // 066-dict-backed-inbound-parse T002: inbound_tv_ is a
 // std::optional<table_view> Session MEMBER (not a unique_ptr to an
 // incomplete type like validator_), so table_view must be complete here.
@@ -283,13 +284,12 @@ public:
     }
 
     // ENGINE-INTERNAL (fixpp::session/ + seam tests). The ROOT cancellation
-    // slot (T039 / I-07): in-flight session work (transport read/write,
-    // heartbeat sleep, awaitable-mutex acquire, app-callback dispatch via
-    // cancellable_dispatch, the parser→fromApp chain — all 005-owned in the
-    // real engine) binds to this slot so phase-2's cancellation_type::total
-    // tears every strand of in-flight work down. 007 exposes the slot and
-    // fires phase-2 total; the scripted double binds a sleep/dispatch to it
-    // and asserts the propagation property only.
+    // slot (T039 / I-07). close()'s phase 2, and drive_reconnect's drain, fire
+    // cancellation_type::total on it. 103 (research D1) supersedes the list of
+    // in-flight work this comment named (transport read/write, awaitable-mutex
+    // acquire, cancellable_dispatch, the parser→fromApp chain): what the slot reaches
+    // is stated at `root_cancel_` below, with its recipe (cell RS-1). The scripted double binds a
+    // sleep/dispatch to it and asserts the propagation property only.
     [[nodiscard]] asio::cancellation_slot root_cancellation_slot() noexcept {
         return root_cancel_.slot();
     }
@@ -300,6 +300,9 @@ public:
     // Bodies land per user story (Phase 3–6); Phase 2 ships declarations only.
     //
     // Reentrancy contract (documented per entry point, [const §X.5] / FR-016):
+    //   "session-strand" below means executor(): a coroutine running on it, its
+    //   underlying() once open() has bound it. 103 (B-103-12): a build with assertions
+    //   checks it at every replay-gate acquire where that executor is a strand.
     //   on_inbound_frame() — session-strand; engine's transport feeds it after
     //                        parse/frame-validate; inbound ordering: store(inbound)
     //                        completes BEFORE fromAdmin/fromApp is dispatched.
@@ -677,6 +680,52 @@ public:
     // emit is folded in here (NOT a third public method) to hold the SC-010
     // surface at exactly the two documented additions.
     // [data-model §E-1a; T016(b); FR-003/FR-004; SC-010 (7)]
+    //
+    // 103 (research D1 steps 0b to 4, "drain, then reconnect"; FR-006) supersedes the
+    // "only the engine's connect loop" convention: drive_reconnect is an application entry
+    // point (it supersedes .specify/563-564-callback-send.md §2.1a's drive_reconnect row,
+    // "engine-driven; not an application entry point from a callback"). Its contract:
+    //   - Single flight: a second call while one is in flight returns
+    //     session_already_open, with no drain and no connect.
+    //   - From a callback it first posts onto the session's executor, as close() does.
+    //   - A closing, closed or stopped Session returns session_already_closed.
+    //   - The reader fence: an acceptor, or an initiator whose Engine read pump owns the
+    //     installed transport (cfg_.engine_managed with a transport installed), returns
+    //     session_already_open, nothing changed. SessionConfig::engine_managed is public:
+    //     a standalone initiator that sets it is treated as Engine-owned.
+    //   - From Active or LogonReceived it records Disconnected (onLogout fires from
+    //     Active), then waits until no emit is in flight and no inbound frame is being
+    //     processed, bounded by logout_disconnect_timeout_ms (at the bound the old
+    //     transport is force-closed and the wait goes on), then retires the old
+    //     connection's liveness loop and too-high Logout bound, then connects.
+    //   - A cancellation of the caller's own slot during that wait returns
+    //     dispatch_aborted with nothing installed and the cancellation left pending.
+    //   - A close() or Engine::stop() that runs during the connect is caught at the
+    //     install, which installs nothing and returns session_already_closed.
+    // The tests run in the order above; data-model.md "Reconnect drain" has the endings
+    // table. BREAKING (public C++; C ABI unchanged; 103, B-103-9): from Active a direct
+    // caller now sees onLogout fire, and the call can return session_already_closed,
+    // dispatch_aborted or session_already_open without reconnecting.
+    // Why the post from a callback: the closing test reads the state the call resumes
+    // into, and onLogout, fired where Disconnected is recorded, does not run nested in the
+    // callback.
+    // The latches onLogon_fired_, onLogout_fired_, reached_active_ and logout_seen_ stay
+    // set across the reconnect: the new connection fires no onLogon and no onLogout, its
+    // establishment deadline stays disarmed, and a Logout seen on the old connection still
+    // triggers reset_on_logout's teardown reset.
+    // Standalone initiator precondition: the caller's own reader has left
+    // live_transport() before the call, and starts on the new live_transport() after it
+    // returns. A reader still on the old live_transport() reads a destroyed transport, and
+    // nothing reads the new one (FR-006).
+    // drive_reconnect must not be bound to root_cancellation_slot(): its own drain emits
+    // that signal, which would cancel it (see `root_cancel_`; cell RS-1).
+    // Two caller preconditions every Session awaitable has, named here because the bound
+    // and the gate make them checkable or load-bearing: close() runs before the Session is
+    // destroyed (~Session asserts the too-high Logout bound's counter is 0 in builds with
+    // assertions; a release build does not check, and a bound still alive then resumes
+    // into a destroyed Session, as the liveness loop already would); and research D1's
+    // lifetime rule: a Session whose replay-gate timer exists, like one with a transport,
+    // is destroyed before its execution context (B-103-13).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> drive_reconnect() noexcept;
 
     // 015 T016(b) — live-transport accessor for the read-pump (SC-010 delta (8)).
@@ -826,8 +875,15 @@ private:
     // Dispatched at close(graceful) by T032; close(terminal) skips entirely.
     MessageStore::flush_hook_fn close_flush_hook_a1_ = nullptr;
 
-    // Root cancellation signal (T039). Phase 2 fires cancellation_type::total
-    // on this; in-flight work bound to root_cancellation_slot() unwinds.
+    // Root cancellation signal (T039). close()'s phase 2 and drive_reconnect's drain
+    // fire cancellation_type::total on this, and it reaches only what is bound to
+    // root_cancellation_slot(). 103 (research D1) requires every binder of that slot to
+    // be a spawn of the liveness loop; transport I/O, mutex acquires, sends, the reconnect,
+    // the Logout phase and callback chains must not bind it. The comments that rely on
+    // this point here. Re-derive the binders with
+    // `command grep -n 'root_cancel_.slot()\|root_cancellation_slot()' src include`;
+    // cell RS-1 (tasks T014 (a), T134) checks the set, with a seeded binder as its
+    // known positive.
     asio::cancellation_signal root_cancel_;
 
     // Idempotent THREE-STATE close (I-10): the FIRST close() runs the body
@@ -1473,6 +1529,11 @@ private:
         bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
     [[nodiscard]] inbound_result_t on_inbound_active_resend_request_(
         bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    // 103 (research D3): the answer to a ResendRequest. An absent BeginSeqNo(7) draws Reject
+    // 373=1, 371=7 and no walk; an in-sequence request's advance is persisted first. A
+    // request that is not in sequence (`in_sequence` false) persists nothing.
+    [[nodiscard]] inbound_result_t answer_resend_request_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr, bool in_sequence) noexcept;
     [[nodiscard]] inbound_result_t on_inbound_active_unsupported_(
         bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
     [[nodiscard]] inbound_result_t on_inbound_active_from_app_failed_(
@@ -1536,8 +1597,13 @@ private:
     // "fixpp/transport/tls_transport.hpp". [const §XV.9; 8e2d362 guard]
     //
     // [data-model §E-1 step 8; E-2; contracts C1; C2; FR-001; FR-006]
-    void install_reconnected_transport(std::unique_ptr<fixpp::transport::Transport> transport,
-                                       fixpp::transport::handshake_result hr) noexcept;
+    //
+    // 103 (research D1 step 4): the install is the reconnect's commit point. On a closing,
+    // closed or stopped Session it closes `transport`, installs nothing, records no
+    // transition and returns false; ReconnectFsm then returns session_already_closed.
+    [[nodiscard]] bool install_reconnected_transport(
+        std::unique_ptr<fixpp::transport::Transport> transport,
+        fixpp::transport::handshake_result hr) noexcept;
 
     // ReconnectFsm is a value member of Session and needs access to the
     // private install_reconnected_transport() method. The friend declaration
@@ -1611,6 +1677,32 @@ private:
     // captures a keepalive copy so an in-flight write outlives a Session freed by
     // Engine::stop()'s registry clear (the writes are not in the join counter).
     std::shared_ptr<fixpp::transport::Transport> reconnected_transport_;
+
+    // 103 (specs/103-resend-logon-reset-fidelity/ data-model, research D1): the connection
+    // generation. Incremented in install_reconnected_transport before its LogonSent
+    // transition; connection-scoped recovery work captures it.
+    std::uint32_t conn_gen_ = 0;
+
+    // 103 (research D1 step 0b): drive_reconnect's single-flight flag, set at its entry and
+    // cleared by an RAII holder on every exit. Session strand only.
+    bool reconnect_in_flight_ = false;
+    // 103 (research D1 step 3; data-model "inbound_depth_"): the inbound frames being
+    // processed, raised by an RAII holder that is on_inbound_active_'s first statement and
+    // lowered at its every exit; reaching 0 wakes the replay gate's waiters (the drain).
+    // Precondition: the Session outlives the inbound frame.
+    std::uint32_t inbound_depth_ = 0;
+    struct inbound_depth_holder {
+        explicit inbound_depth_holder(Session& s) noexcept : s_{s} { ++s_.inbound_depth_; }
+        ~inbound_depth_holder();
+        inbound_depth_holder(inbound_depth_holder const&) = delete;
+        inbound_depth_holder& operator=(inbound_depth_holder const&) = delete;
+
+    private:
+        Session& s_;
+    };
+    // The drain of research D1 steps 2 and 3. Returns an error when drive_reconnect must
+    // return it: session_already_closed, or dispatch_aborted on the caller's cancellation.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> drain_for_reconnect_() noexcept;
 
     // 015 T011 — live accepted transport (owned by Session after a successful
     // attach_accepted_transport call). Null until the engine's accept loop
@@ -1715,7 +1807,98 @@ private:
     // Placement condition: as garbled_frames_; a Session reused for a second connection
     // would need it reset when the transport is installed.
     bool engine_stop_requested_ = false;
-    void note_engine_stop_() noexcept { engine_stop_requested_ = true; }
+    // 103 (research D5′; data-model "Replay gate", wake sources): engine stop wakes the
+    // replay gate's waiters, so a send waiting behind a resend answer refuses.
+    void note_engine_stop_() noexcept {
+        engine_stop_requested_ = true;
+        replay_gate_.wake_all();
+        // 103 (research D4.4, D4.6): engine stop claims a pending mark and wakes the bound.
+        claim_peer_logout_none_();
+    }
+
+    // ── 103 (fixpp#577, research D4.2 to D4.6) — a too-high Logout ─────────────
+    // The pending-Logout mark: the too-high Logout's MsgSeqNum S, its arrival time, and
+    // the phase (data-model "Pending-Logout mark"). Session strand only.
+    struct peer_logout_mark {
+        enum class phase_t : std::uint8_t { none, pending, acking };
+        seqnum_t seq = 0;
+        fixpp::core::steady_time_point at;
+        phase_t phase = phase_t::none;
+    };
+    peer_logout_mark peer_logout_;
+    // The bound's wake (research D4.4): published by the bound and cleared in its body
+    // when its race ends; on an exception exit before that clear, a frame-local clearer
+    // clears it while the exception unwinds the frame (data-model "Pending-Logout mark").
+    // Session strand only.
+    std::function<void()> peer_logout_wake_;
+    // The bound's join counter (research D4.4): incremented before the bound is spawned,
+    // decremented by the bound's peer_logout_bound_join parameter, which touches only this
+    // counter (liveness_counter_'s pattern).
+    std::shared_ptr<std::atomic<int>> peer_logout_bound_counter_{
+        std::make_shared<std::atomic<int>>(0)};
+    // One hold on the bound's join counter: its constructor increments the counter and its
+    // destructor decrements it. It is the bound's parameter, so the frame owns it from its
+    // creation and releases the counter whether or not the body ran, an unstarted frame that
+    // a throwing co_spawn destroys included. A moved-from hold releases nothing.
+    class peer_logout_bound_join {
+    public:
+        explicit peer_logout_bound_join(std::shared_ptr<std::atomic<int>> counter) noexcept
+            : counter_{std::move(counter)} {
+            counter_->fetch_add(1, std::memory_order_relaxed);
+        }
+        peer_logout_bound_join(peer_logout_bound_join&&) noexcept = default;
+        peer_logout_bound_join(peer_logout_bound_join const&) = delete;
+        peer_logout_bound_join& operator=(peer_logout_bound_join const&) = delete;
+        peer_logout_bound_join& operator=(peer_logout_bound_join&&) = delete;
+        ~peer_logout_bound_join() {
+            if (counter_) {
+                counter_->fetch_sub(1, std::memory_order_release);
+            }
+        }
+
+    private:
+        std::shared_ptr<std::atomic<int>> counter_;
+    };
+    // The Logout owner (research D4.6): at most one Logout of an established session is
+    // in flight. Session strand only.
+    bool logout_in_flight_ = false;
+    // A too-high Logout in Active (research D4.2): with T = 0 or no clock, or while the session
+    // is itself ending (a Logout of its own in flight, a close begun or the stop noted; spec
+    // FR-021's crossing clause), the acknowledgement at once (D4.5), returned as the frame's
+    // result; otherwise the mark and its bound when
+    // the phase is `none`, and nullopt, so the caller goes on (route (a) to fixpp's own
+    // ResendRequest, route (b) to the frame's end).
+    [[nodiscard]] asio::awaitable<std::optional<fixpp::core::expected_t<void>>>
+    on_inbound_active_too_high_logout_(bool tic, seqnum_t seq) noexcept;
+    // The acknowledgement (research D4.5): the in-sequence route's Logout, its event and its
+    // Disconnected.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> acknowledge_peer_logout_(
+        bool tic) noexcept;
+    // Research D4.3: close_filled_resend_gap_(), then the bound's wake when N passes S.
+    void note_inbound_advance_() noexcept;
+    // Research D4.6's `pending → none` claim, with the bound's wake.
+    void claim_peer_logout_none_() noexcept {
+        if (peer_logout_.phase == peer_logout_mark::phase_t::pending) {
+            peer_logout_.phase = peer_logout_mark::phase_t::none;
+        }
+        wake_peer_logout_bound_();
+    }
+    void wake_peer_logout_bound_() noexcept {
+        if (peer_logout_wake_) {
+            peer_logout_wake_();
+        }
+    }
+    // Research D4.4: the bound, a detached coroutine on the session strand. An exception
+    // that reaches its handler ends it closed: the mark `none` and the session Disconnected
+    // (data-model "Pending-Logout mark", its exception rows).
+    asio::awaitable<void> run_peer_logout_bound_(peer_logout_bound_join join,
+                                                 std::uint32_t gen) noexcept;
+
+    // Test seams of the bound (cells F1 and F2): when set, the bound awaits the first
+    // before its first test, and the second between its publish-and-re-test and its
+    // race's wait. Set only through session_test_access.
+    std::function<asio::awaitable<void>()> peer_logout_bound_hold_first_run_;
+    std::function<asio::awaitable<void>()> peer_logout_bound_hold_before_race_;
 
     // ── 013 Phase 3 T023/T026 — ReconnectFsm driver ─────────────────────────
     // 043 T012 (D-4/E-6) — Session-owned resolved transport factory.
@@ -1830,9 +2013,19 @@ private:
     // owns the teardown once it begins. The arm then returns success, as in the
     // Disconnected row. `closing` is the signal because close() sets it before it can
     // yield the strand, while a graceful close() leaves the FSM in the arm's state until
-    // its phase 1 writes. The FSM term covers `closed_drained` too: close() writes
-    // Disconnected before it gets there. `never_opened` is not a close.
+    // its phase 1 writes. For an arm expecting a state other than Disconnected, the FSM
+    // term covers `closed_drained` too: close() writes Disconnected before it gets there.
+    // An arm expecting Disconnected cannot tell a completed close() from its own record
+    // this way, so it asks closing_or_stopped_() instead. `never_opened` is not a close.
     [[nodiscard]] bool logon_arm_superseded_(fsm_state expected) const noexcept;
+
+    // 103 (research D1, D4.4): a close() has begun or completed, or Engine::stop() has
+    // noted the stop. The test the reconnect's commit point, its drain, its step 1 and the
+    // too-high Logout's bound share.
+    [[nodiscard]] bool closing_or_stopped_() const noexcept {
+        return state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
+               engine_stop_requested_;
+    }
 
     // 093 plan OD-26: the Disconnected write that follows a store suspension on a Logon
     // arm (an error path, or a refusal's fail-closed write). With `arm` set and
@@ -2053,6 +2246,10 @@ private:
     std::array<std::byte, kSendFrameBytes> send_body_scratch_{};
     std::array<std::byte, kSendFrameBytes> send_frame_slot_{};
     bool send_slot_in_use_ = false;
+    // 103 (research D5′, fixpp#588; data-model "Replay gate"): a resend answer holds it
+    // exclusive, every emitter outside the inbound chain shared. Strand-confined. Bound to
+    // exec_ at open().
+    detail::replay_gate replay_gate_;
 
     // 101-inbound-reject-fidelity D7 (FR-007, FR-008): the inbound reply slot. A session Reject
     // or BusinessMessageReject answering an inbound frame is built in its site's own buffer

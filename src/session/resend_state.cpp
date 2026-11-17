@@ -13,9 +13,10 @@
 
 namespace fixpp::session {
 
-// reset: clear all fields back to default-constructed state on gap close.
+// reset: clear all fields back to default-constructed state (ReconnectFsm::
+// exit_awaiting_resend: on gap close, and since 103 on a transport install).
 // Clears inbound_held (returns PMR storage to the arena per its policy).
-// Called when awaiting_resend_ transitions from true → false.
+// Called from ReconnectFsm::exit_awaiting_resend.
 void ResendState::reset() noexcept {
     outstanding_begin = 0;
     outstanding_end = 0;

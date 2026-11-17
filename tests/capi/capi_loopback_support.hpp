@@ -66,9 +66,10 @@ inline void set_loopback_endpoint(fixpp_session_config_t* cfg, const char* host,
     // bilateral_lenient is the proven fresh-pair establishment policy used by
     // every two-engine session test (logon_handshake / logon_received_observability
     // / test_engine_session_strand). The C-ABI config builder exposes no reset-policy
-    // setter (none is in [2i]); the default is bilateral_strict, which is not the
-    // shape those round-trip witnesses establish under. Set it via the same
-    // test-only cast bridge as the endpoint (L-050-5) — NOT a new C-ABI setter.
+    // setter (none is in [2i]). Since C-ABI 1.17 (feature 103) the default is
+    // bilateral_lenient too; the explicit assignment keeps these witnesses off the
+    // default. Set it via the same test-only cast bridge as the endpoint (L-050-5) —
+    // NOT a new C-ABI setter.
     internal->cfg.reset_seqnum_policy_field =
         fixpp::session::reset_seqnum_policy::bilateral_lenient;
 }

@@ -92,6 +92,7 @@
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/recording_store.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 #include "support/temp_dir.hpp"
 
@@ -187,7 +188,8 @@ struct HeldDirectSession {
     }
 
     [[nodiscard]] std::future<fixpp::core::expected_t<void>> spawn_send() {
-        return asio::co_spawn(f.ioc, f.session->send(std::span<const std::byte>{payload}),
+        return asio::co_spawn(fixpp::test_support::session_executor_of(*f.session, f.ioc),
+                              f.session->send(std::span<const std::byte>{payload}),
                               asio::use_future);
     }
 
@@ -265,18 +267,20 @@ DirectSendOutcome run_direct_send(Timing const timing) {
     if (timing == Timing::thrown) {
         // Posted from the call expression of store(): the post is queued ahead of the
         // one FileStore::store makes when its body starts, so the emit runs while the
-        // store call stands at its leading post.
+        // store call stands at its leading post. It is posted on the session's strand: a
+        // cancellation emitted from outside the strand is delivered through the coroutine's
+        // executor, so it would be queued behind the store's leading post.
         f.log->on_call = [&, posted = false](StoreCall const& call) mutable {
             if (posted || !is_outbound_store(call) || call.first != o.seq) return;
             posted = true;
-            asio::post(f.ioc, [&] {
+            asio::post(f.session->executor().underlying(), [&] {
                 o.cancel_mark = f.log->mark();
                 cancel.emit(asio::cancellation_type::terminal);
             });
         };
     }
     auto fut =
-        asio::co_spawn(f.ioc,
+        asio::co_spawn(fixpp::test_support::session_executor_of(*f.session, f.ioc),
                        await_and_read_thread(
                            [&] { return f.session->send(std::span<const std::byte>{h.payload}); },
                            o.call, [&] { o.state_after_call = f.session->state(); }),
@@ -594,7 +598,8 @@ public:
         keep_.reset();
         try {
             log->on_call = nullptr;
-            asio::co_spawn(ioc, session->close(close_mode::terminal), asio::detached);
+            asio::co_spawn(fixpp::test_support::session_executor_of(*session, ioc),
+                           session->close(close_mode::terminal), asio::detached);
         } catch (...) {  // NOLINT(bugprone-empty-catch) — the drain below still runs.
         }
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "DirectInitiator");
@@ -617,7 +622,8 @@ public:
         CallingThreadReadings& out, asio::cancellation_signal& cancel,
         std::function<void()> after_call = {}) {
         return asio::co_spawn(
-            ioc, await_and_read_thread(std::move(make_call), out, std::move(after_call)),
+            fixpp::test_support::session_executor_of(*session, ioc),
+            await_and_read_thread(std::move(make_call), out, std::move(after_call)),
             asio::bind_cancellation_slot(cancel.slot(), asio::use_future));
     }
 
@@ -686,7 +692,8 @@ LogonRootOutcome run_logon_root(LogonRootInput const input) {
     const bool through_reconnect = input == logon_store_cancelled_through_drive_reconnect;
     if (through_reconnect) {
         // The first Logon, through open(), with nothing injected.
-        auto opened = asio::co_spawn(f.ioc, f.session->open(), asio::use_future);
+        auto opened = asio::co_spawn(fixpp::test_support::session_executor_of(*f.session, f.ioc),
+                                     f.session->open(), asio::use_future);
         if (!f.run_until([&] { return DirectInitiator::ready(opened); })) return o;
         if (!opened.get().has_value() || f.session->state() != fsm_state::LogonSent) return o;
     }
@@ -1148,7 +1155,7 @@ TEST(TeardownReset, SendInItsStoreCallAcrossTheReset_IsNotHandedToTheSink) {
     CallingThreadReadings send_call;
     asio::cancellation_signal none;
     auto send_fut = asio::co_spawn(
-        f.ioc,
+        fixpp::test_support::session_executor_of(*f.session, f.ioc),
         await_and_read_thread([&] { return f.session->send(std::span<const std::byte>{payload}); },
                               send_call),
         asio::bind_cancellation_slot(none.slot(), asio::use_future));

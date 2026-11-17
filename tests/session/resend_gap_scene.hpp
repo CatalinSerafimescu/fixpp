@@ -15,10 +15,11 @@
 // subject does.
 //
 // Nothing here waits in real time for a mock-clock effect. The mock clock's wake-ups are
-// posted handlers, the store is a MemoryStore and the transport is a callback, so after a
-// delivery or a clock move every handler the session owes is ready, and drain() runs them
-// all. A cell that closes gracefully, uses another store or runs an Engine does not have
-// that property and must not use pass().
+// posted handlers, the store (with Options::with_store; otherwise the session has none) is a
+// MemoryStore and the transport is a callback, so after a delivery or a clock move every
+// handler the session owes is ready, and drain() runs them all. A cell that closes
+// gracefully, uses another store or runs an Engine does not have that property and must not
+// use pass().
 #pragma once
 
 #include <gtest/gtest.h>
@@ -38,12 +39,14 @@
 #include <fixpp/core/fix_time.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/application.hpp>
+#include <fixpp/session/memory_store_factory.hpp>
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -54,6 +57,8 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/recording_store.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 #include "support/validation_test_dictionary.hpp"
 
@@ -163,6 +168,20 @@ struct Options {
     bool validate_sequence_numbers = true;
     // Null: a GapApp.
     std::shared_ptr<GapApp> app = nullptr;
+    // True: the session stores what it sends in an unbounded MemoryStore, so a ResendRequest
+    // is answered by replays. False: no store, and the walk answers with one GapFill.
+    bool with_store = false;
+    // When set, SessionConfig::logout_disconnect_timeout_ms (the too-high Logout's bound T,
+    // research D4.4); otherwise SessionConfig's default.
+    std::optional<std::uint32_t> logout_timeout_ms = std::nullopt;
+    // True (with_store ignored): the unbounded MemoryStore behind a RecordingStore, whose log
+    // is Scene::log, so a cell can hold one store call. While a hold is in flight the
+    // io_context always has a handler ready: such a cell feeds with feed_spawn() and pumps
+    // with pump_until() or pump_for(), never with feed(), pass() or drain().
+    bool recording_store = false;
+    // With recording_store: the store reports itself persistent, so the session persists
+    // each inbound advance (persist_inbound_advance_) and a cell can hold that store call.
+    bool recording_store_persistent = false;
 };
 
 // The peer is "TW" and the session "ISLD", FIX.4.2.
@@ -176,6 +195,7 @@ public:
     fixpp::session::SessionConfig cfg;
     std::vector<std::string> sent;  // each frame the session gave its transport callback
     std::unique_ptr<fixpp::session::Session> session;
+    std::shared_ptr<fixpp::test_support::StoreCallLog> log;  // Options::recording_store only
 
     explicit Scene(Options const& o = {}) : app{o.app ? o.app : std::make_shared<GapApp>()} {
         using namespace std::chrono;
@@ -199,6 +219,20 @@ public:
         cfg.validate_sequence_numbers = o.validate_sequence_numbers;
         cfg.executor_override = ioc.get_executor();
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        if (o.logout_timeout_ms) cfg.logout_disconnect_timeout_ms = *o.logout_timeout_ms;
+        if (o.recording_store) {
+            auto const f = std::make_shared<fixpp::test_support::RecordingStoreFactory>(
+                std::make_shared<fixpp::session::MemoryStoreFactory>(
+                    fixpp::session::MemoryStore::Config{
+                        .policy = fixpp::session::capacity_policy::unbounded}));
+            if (o.recording_store_persistent) f->reports_persistent = true;
+            log = f->log;
+            cfg.store_factory = f;
+        } else if (o.with_store) {
+            cfg.store_factory = std::make_shared<fixpp::session::MemoryStoreFactory>(
+                fixpp::session::MemoryStore::Config{
+                    .policy = fixpp::session::capacity_policy::unbounded});
+        }
         cfg.transport_send = [this](std::span<const std::byte> f) {
             sent.emplace_back(reinterpret_cast<const char*>(f.data()), f.size());
         };
@@ -214,8 +248,8 @@ public:
     // here, over live storage. cancel_and_drain_or_report carries its own catch.
     ~Scene() {
         try {
-            asio::co_spawn(ioc, session->close(fixpp::session::close_mode::terminal),
-                           asio::detached);
+            asio::co_spawn(fixpp::test_support::session_executor_of(*session, ioc),
+                           session->close(fixpp::session::close_mode::terminal), asio::detached);
         } catch (...) {  // NOLINT(bugprone-empty-catch) — the drain below still runs.
         }
         fixpp::test_support::cancel_and_drain_or_report(ioc, *mock, "resend_gap::Scene");
@@ -384,7 +418,8 @@ public:
     // delivery that a pump missed is still resumed over live storage by the destructor.
     fixpp::core::expected_t<void> feed(std::vector<std::byte> f) {
         fed_.push_back(std::move(f));
-        auto fut = asio::co_spawn(ioc, session->on_inbound_frame(fed_.back()), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*session, ioc),
+                                  session->on_inbound_frame(fed_.back()), asio::use_future);
         if (!fixpp::test_support::pump_until(
                 ioc, [&] { return ready(fut); }, fixpp::test_support::kPumpBudget,
                 fixpp::test_support::kPumpSlice, nullptr)) {
@@ -395,10 +430,29 @@ public:
         return fut.get();
     }
 
+    // Starts the delivery of one frame and returns its future without running anything.
+    [[nodiscard]] std::future<fixpp::core::expected_t<void>> feed_spawn(std::vector<std::byte> f) {
+        fed_.push_back(std::move(f));
+        return asio::co_spawn(fixpp::test_support::session_executor_of(*session, ioc),
+                              session->on_inbound_frame(fed_.back()), asio::use_future);
+    }
+    // Runs handlers until `pred` holds or `budget` has passed; true if it held.
+    template <class Pred>
+    [[nodiscard]] bool pump_until(
+        Pred pred, std::chrono::steady_clock::duration budget = fixpp::test_support::kPumpBudget) {
+        return fixpp::test_support::pump_until(ioc, std::move(pred), budget,
+                                               fixpp::test_support::kPumpSlice, nullptr);
+    }
+    // Runs handlers for `d` of real time.
+    void pump_for(std::chrono::steady_clock::duration d) {
+        (void)pump_until([] { return false; }, d);
+    }
+
     // open(), then the peer's Logon at 1: the session is Active, NextNumIn is 2, and its
     // liveness loop, when it has one, is parked in its first sleep.
     [[nodiscard]] bool open_to_active() {
-        auto fut = asio::co_spawn(ioc, session->open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*session, ioc),
+                                  session->open(), asio::use_future);
         if (!fixpp::test_support::pump_until(
                 ioc, [&] { return ready(fut); }, fixpp::test_support::kPumpBudget,
                 fixpp::test_support::kPumpSlice, nullptr) ||

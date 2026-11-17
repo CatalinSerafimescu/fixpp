@@ -390,7 +390,7 @@ set_tests_properties(capi_toapp_alloc_guard PROPERTIES LABELS "capi;051;alloc_gu
 
 # T011 (052 US2 / SC-001) — two-engine TCP loopback round-trip, pure public C-ABI headers.
 # Witnesses: set_tcp_endpoint, acceptor_bound_endpoint, set_reset_seqnum_policy,
-# E1 dict-handle-destroy-before-open, D-4 bilateral_strict (production default) establishment.
+# E1 dict-handle-destroy-before-open, D-4 bilateral_strict (named explicitly) establishment.
 # No capi_loopback_support.hpp / capi_internal.hpp seam.
 add_executable(capi_public_roundtrip_test public_roundtrip_test.cpp)
 target_link_libraries(capi_public_roundtrip_test PRIVATE
@@ -686,6 +686,22 @@ set_tests_properties(capi_inbound_frame_dispositions PROPERTIES LABELS "capi;093
 # setter for this entry, so the existing labels survive.
 set_property(TEST capi_inbound_frame_dispositions APPEND PROPERTY LABELS 100)
 
+# 103-resend-logon-reset-fidelity (tasks T024; contracts/c-abi-1.17.md "Witnesses"): the default
+# pair's Logon through the C ABI, against a raw TCP peer (RawAcceptor, from the support header
+# above). Standalone ([const §VII.8]): every cell runs a live engine with its worker thread.
+# No TIMEOUT property, so CI's `--timeout` wedge guard governs it, as session_103_tests.
+add_executable(capi_103_default_policy_test capi_103_default_policy_test.cpp)
+target_link_libraries(capi_103_default_policy_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_103_default_policy_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+target_compile_definitions(capi_103_default_policy_test PRIVATE
+  "FIXPP_DICT_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+add_test(NAME capi_103_default_policy COMMAND capi_103_default_policy_test)
+set_tests_properties(capi_103_default_policy PROPERTIES LABELS "capi;103")
+
 # 100-wire-group-read-integrity (tasks T014; SC-002, US2.3, FR-006): fixpp#541's
 # reproduction, ported from branch b28-repro. fixpp_msg_get_group and
 # fixpp_group_get_nested_group report an exhausted parse arena as
@@ -801,3 +817,13 @@ target_compile_definitions(capi_099_fixt_live_test PRIVATE
 add_test(NAME capi_099_fixt_live_test COMMAND capi_099_fixt_live_test)
 set_tests_properties(capi_099_fixt_live_test PROPERTIES
   LABELS "capi;099" TIMEOUT 300)
+
+# 103-resend-logon-reset-fidelity (tasks.md T017): label 103 on each entry of this file whose
+# sources a 103 task edits (re-derive from tasks.md's paths; tasks.md T167 re-derives the set).
+# APPEND, at the end of the file, so it follows every LABELS setter for these entries.
+set_property(TEST capi_version_smoke_c APPEND PROPERTY LABELS 103)
+set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 103)
+set_property(TEST capi_public_roundtrip APPEND PROPERTY LABELS 103)
+set_property(TEST capi_099_route_set_oom_test APPEND PROPERTY LABELS 103)
+set_property(TEST capi_099_fixt_live_test APPEND PROPERTY LABELS 103)
+set_property(TEST capi_inbound_frame_dispositions APPEND PROPERTY LABELS 103)

@@ -3468,6 +3468,13 @@ the amendment is open.
   transmit it after the Logout, QuickFIX/Go stores it and drops it unsent, and none refuses (read, not
   run: `research/G19-fix-fpml-iso20022/research/probes/b41_563_564/ph5_quickfix_send_during_peer_logout.md` in the parent repo, first section). It stays a disclosed limitation: B&L `L-563-2`. NC-5 (f) pins the
   first as measured, per store kind.
+  **Erratum (feature 103, FR-021; superseded in place, the text above kept as written).** 103 refuses
+  a send with `session_invalid_state_for_send` from the moment a Logout emitter of the established
+  session takes the Logout owner until `Disconnected`, the confirming Logout of a logout the peer
+  began among them (`specs/103-resend-logon-reset-fidelity/spec.md` FR-021, research D4.6). A send
+  started in the confirming Logout's `toAdmin` is therefore refused on every store kind, and no frame
+  follows that Logout; NC-5 (f)'s arms (`CallbackSend.LogoutToAdminStartsSend_PeerLogout*`) now pin
+  that ending. FR-021 is an orchestrator ruling the owner confirms at 103's Gate B.
 - What a TLS transport does with a write that begins while its `close_async` is suspended. Not decided by
   reading. Under R-4 that order is the regular one for a terminal close started in `toApp` on a TLS
   session; the cells run over plain transports. By reading, `ApplicationEngineSend.SendDrainRaceNoUAF`

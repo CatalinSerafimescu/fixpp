@@ -240,6 +240,95 @@ def check_sccache_pins(root, violations):
     return len(pins)
 
 
+# 103 (tasks T159, T162): SCCACHE_CACHE_SIZE is set per MSVC leg in tier2.yml's job-level
+# env, and the campaign's MSVC job carries tier2's value for each preset both run.
+SCCACHE_CAP_KEY = "SCCACHE_CACHE_SIZE"
+SCCACHE_CAP_RELEASE = "windows-msvc-release"
+SCCACHE_CAP_TERNARY = re.compile(
+    r"^\$\{\{\s*matrix\.preset\s*==\s*'(?P<preset>[^']+)'\s*&&\s*'(?P<then>[^']+)'"
+    r"\s*\|\|\s*'(?P<else>[^']+)'\s*\}\}$")
+
+
+def sccache_cap_per_preset(value, presets):
+    """{preset: cap} for a job-level SCCACHE_CACHE_SIZE value, or None if not evaluable.
+
+    Two shapes are read: a literal (every leg gets it) and the one-test ternary
+    `${{ matrix.preset == '<p>' && '<a>' || '<b>' }}`. Anything else is refused, so a
+    respelled expression is a violation rather than a guess.
+    """
+    text = str(value).strip()
+    if "${{" not in text:
+        return {p: text for p in presets}
+    m = SCCACHE_CAP_TERNARY.match(text)
+    if not m:
+        return None
+    return {p: (m["then"] if p == m["preset"] else m["else"]) for p in presets}
+
+
+def check_sccache_cache_size(root, violations):
+    """tier2's MSVC legs set SCCACHE_CACHE_SIZE per leg; the campaign carries each leg's value.
+
+    Per leg means the release leg's cap differs from the asan and debug legs'. The value
+    is read from the job-level env and evaluated for each preset of tier2's matrix; no
+    step of that job may set the key again, since the server reads it when it starts.
+    Returns True when a verdict was reached, False when it could not be.
+    """
+    wf = root / ".github" / "workflows"
+    try:
+        import yaml
+    except ImportError:
+        print("::warning::PyYAML unavailable — the SCCACHE_CACHE_SIZE check did NOT run.")
+        return False
+    src_file, src_job = CAMPAIGN_JOB_SOURCES["windows"]
+    try:
+        tier2 = yaml.safe_load((wf / src_file).read_text(encoding="utf-8"))["jobs"][src_job]
+        presets = list(tier2["strategy"]["matrix"]["preset"])
+        value = (tier2.get("env") or {})[SCCACHE_CAP_KEY]
+    except (OSError, yaml.YAMLError, KeyError, TypeError) as exc:
+        violations.append(f"SCCACHE_CACHE_SIZE UNCHECKABLE in {src_file}:{src_job} ({exc!r}).")
+        return True
+    caps = sccache_cap_per_preset(value, presets)
+    if caps is None:
+        violations.append(
+            f"SCCACHE_CACHE_SIZE UNEVALUABLE in {src_file}:{src_job}: {value!r} is neither a "
+            f"literal nor the one-test matrix.preset ternary.")
+        return True
+    others = [p for p in presets if p != SCCACHE_CAP_RELEASE]
+    if (SCCACHE_CAP_RELEASE not in caps or not others
+            or any(caps[p] == caps[SCCACHE_CAP_RELEASE] for p in others)):
+        violations.append(
+            f"SCCACHE_CACHE_SIZE IS NOT SET PER LEG in {src_file}:{src_job}: {caps}. The release "
+            f"leg's cap must differ from the asan and debug legs' (tier2.yml's comment states "
+            f"each value's condition).")
+    for step in tier2.get("steps") or []:
+        if (SCCACHE_CAP_KEY in (step.get("env") or {})
+                or SCCACHE_CAP_KEY + "=" in str(step.get("run", ""))):
+            violations.append(
+                f"SCCACHE_CACHE_SIZE SET AGAIN by the step {step.get('name')!r} of "
+                f"{src_file}:{src_job}; the job-level per-leg value must be the only one.")
+    campaign = wf / CAMPAIGN_WORKFLOW
+    if not campaign.is_file():
+        print(f"  sccache cap: {CAMPAIGN_WORKFLOW} is not present — campaign half stood down.")
+        return True
+    try:
+        mine = yaml.safe_load(campaign.read_text(encoding="utf-8"))["jobs"]["windows"]
+        cvalue = (mine.get("env") or {})[SCCACHE_CAP_KEY]
+    except (OSError, yaml.YAMLError, KeyError, TypeError) as exc:
+        violations.append(
+            f"SCCACHE_CACHE_SIZE UNCHECKABLE in {CAMPAIGN_WORKFLOW}:windows ({exc!r}).")
+        return True
+    ccaps = sccache_cap_per_preset(cvalue, presets)
+    if ccaps != caps:
+        violations.append(
+            f"SCCACHE_CACHE_SIZE DIFFERS between {CAMPAIGN_WORKFLOW}:windows "
+            f"({ccaps if ccaps is not None else repr(cvalue)}) and {src_file}:{src_job} "
+            f"({caps}) for a preset both run. The campaign measures the shipping lane's "
+            f"conditions.")
+    else:
+        print(f"  sccache cap: per leg {caps}, carried by {CAMPAIGN_WORKFLOW}:windows")
+    return True
+
+
 def check_campaign_job_env(root, violations):
     """Each campaign job must carry at least its source tier job's job-level env.
 
@@ -855,6 +944,7 @@ def main():
     campaign_judged = check_campaign_job_env(root, violations) and campaign_judged
     campaign_judged = check_ccache_restore_wiring(root, violations) and campaign_judged
     check_sccache_pins(root, violations)
+    campaign_judged = check_sccache_cache_size(root, violations) and campaign_judged
     push_trusting = check_push_trusting_triggers(root, violations)
     interop_judged = check_interop_gate_step(root, violations)
     if apt_seen is None or fuzz_seen is None:
@@ -866,14 +956,15 @@ def main():
         return 2
     # A check that could not run must not be reported as one that passed.
     if not campaign_judged:
-        # ⚠️ Names the FLAG, not one of its inputs. Three checks feed
-        # `campaign_judged` (trigger, job-env, ccache-restore-wiring); this said
-        # "the campaign-trigger invariant", so a PyYAML-absent run — where it is
-        # a DIFFERENT check that stands down — pointed the operator at a check
-        # that had run fine.
+        # ⚠️ Names the FLAG, not one of its inputs. Every check assigned into
+        # `campaign_judged` in main() above feeds it (re-derive: grep that name
+        # here), and the message lists them; this said "the campaign-trigger
+        # invariant", so a PyYAML-absent run — where it is a DIFFERENT check that
+        # stands down — pointed the operator at a check that had run fine.
         print("::error::a campaign invariant could not be evaluated (see the warning above): "
-              "the trigger check, the job-env check, the ccache-restore-wiring check, or some "
-              "combination. Refusing to report `all invariants hold` over a check that did not run.")
+              "the trigger check, the job-env check, the ccache-restore-wiring check, the "
+              "SCCACHE_CACHE_SIZE check, or some combination. Refusing to report `all "
+              "invariants hold` over a check that did not run.")
         return 2
 
     # ⚠️ AN EMPTY SCAN IS AN INSTRUMENT FAILURE, NOT A PASS. If the workflows move

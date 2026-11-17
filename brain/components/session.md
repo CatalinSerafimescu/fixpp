@@ -18,10 +18,12 @@ refs:
   - src/session/peek_fixt_route.hpp
   - src/session/fixt_session_check.hpp
   - src/session/logon_msg_type_defaults.hpp
+  - include/fixpp/session/detail/replay_gate.hpp
   - .specify/447-458-452-capi-refusals.md
   - .specify/544-hot-path-zero-alloc.md
   - .specify/536-537-538-recovery-liveness.md
   - .specify/563-564-callback-send.md
+  - .specify/memory/constitution.md
   - specs/059-outbound-store-fail-closed/research.md
   - specs/059-outbound-store-fail-closed/contracts/store-then-emit-disposition.md
   - specs/005-session-establishment-fsm/spec.md
@@ -38,6 +40,13 @@ refs:
   - specs/101-inbound-reject-fidelity/research.md
   - specs/101-inbound-reject-fidelity/data-model.md
   - specs/101-inbound-reject-fidelity/contracts/reject-frames.md
+  - specs/103-resend-logon-reset-fidelity/spec.md
+  - specs/103-resend-logon-reset-fidelity/plan.md
+  - specs/103-resend-logon-reset-fidelity/research.md
+  - specs/103-resend-logon-reset-fidelity/data-model.md
+  - specs/103-resend-logon-reset-fidelity/contracts/c-abi-1.17.md
+  - specs/103-resend-logon-reset-fidelity/contracts/session-wire-endings.md
+  - specs/103-resend-logon-reset-fidelity/contracts/constitution-xi3-amendment.md
   - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2d-threading.md
@@ -71,6 +80,8 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/101-inbound-reject-fidelity-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/101-inbound-reject-fidelity-evidence.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/100-wire-group-read-integrity-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/103-resend-logon-reset-fidelity-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/103-resend-logon-reset-fidelity-evidence.md
 codegraph_entry: [Session, fsm_state, SeqnumManager, Engine, on_inbound_frame]
 constitution: ["§XI.4", "§XV.4"]
 ---
@@ -121,12 +132,13 @@ The authority is therefore split three ways, and knowing the split is most of th
 | Sequence numbers, persistence, hydration | `SeqnumManager`; `specs/029-persistent-seqnum-hydrate/` ⚠️ **029 `tasks.md` T014 (`[X]`, "Live restart-resume interop cell … both roles") is FALSE as a result claim: `hp_fix44_restart_resume_test.cpp` does not run live.** Flagged here and not edited (frozen `specs/` are not rewritten): no harness cell selects the interop suite named in this row — its ids are in the `unregistered-tracked` group of `tests/interop/live-cells-excluded.txt`, and fixpp#503 owns making it live. Re-derive the bundles' live-cell claims with `git grep -n -i -E -e 'live [a-z -]*cell' -e 'bidirectional-gap cell' -- specs/025-refresh-on-logon specs/027-next-expected-msgseqnum specs/029-persistent-seqnum-hydrate`; prospective `plan.md` / `spec.md` lines are design intent, not result claims. |
 | PossDup / OrigSendingTime / PossResend | `specs/021-…`, `specs/022-…`. ⚠️ **021 FR-004's at-expected "MUST NOT advance … matches QuickFIX" is SUPERSEDED by fixpp#423** (B-423-1); see the rejected alternative below. |
 | Resend answers (replay + GapFill) — how `build_replay_frame` / `build_sequence_reset_gapfill` build the wire frame | `specs/013-session-reconnect-binding/spec.md` FR-010; `specs/037-resend-reply-possdup-tags/` (43/122 emission). ⚠️ **037's `spec.md` Assumptions section, `research.md` D-3, `plan.md`, `data-model.md`, `contracts/resend-reply-wire.md`, and `checklists/wire-conformance.md` CHK010 all describe placing `43`/`122` AFTER the body as "order-safe" / "field order is unconstrained for interop" — FALSE, superseded by fixpp#419: a strict peer (QuickFIX-J `UseDataDictionary=Y`) rejects it (373=14). The bundle is a point-in-time record, left as-is; do not trust its field-order claims. See `spec/behaviors-and-limitations.md` `## fixpp#419` for current behaviour.** ⚠️ **037 FR-006 / SC-003 ("replayed application frames MUST be byte-identical to prior behavior") are also SUPERSEDED, by fixpp#420: a replay restamps `SendingTime(52)`. 013 FR-010's "byte-for-byte" clause governs `122` only and still holds.** See `## fixpp#420 / fixpp#424` in the same file. |
-| Reset & refresh on Logon | `specs/024-reset-refresh-on-logon/`, `specs/025-refresh-on-logon/` ⚠️ **025 `tasks.md` T041 (`[X]`, "the live standby-re-hydrate interop cell … capture the golden") and T002's "standby-re-hydrate live cell" are FALSE as result claims: the `StandbyRehydrate_Initiator` suite does not run live.** Flagged here and not edited (frozen `specs/` are not rewritten): no harness cell selects the interop suite named in this row — its ids are in the `unregistered-tracked` group of `tests/interop/live-cells-excluded.txt`, and fixpp#503 owns making it live. Re-derive the bundles' live-cell claims with `git grep -n -i -E -e 'live [a-z -]*cell' -e 'bidirectional-gap cell' -- specs/025-refresh-on-logon specs/027-next-expected-msgseqnum specs/029-persistent-seqnum-hydrate`; prospective `plan.md` / `spec.md` lines are design intent, not result claims. |
+| Reset & refresh on Logon | `specs/024-reset-refresh-on-logon/`, `specs/025-refresh-on-logon/` ⚠️ **025 `tasks.md` T041 (`[X]`, "the live standby-re-hydrate interop cell … capture the golden") and T002's "standby-re-hydrate live cell" are FALSE as result claims: the `StandbyRehydrate_Initiator` suite does not run live.** Flagged here and not edited (frozen `specs/` are not rewritten): no harness cell selects the interop suite named in this row — its ids are in the `unregistered-tracked` group of `tests/interop/live-cells-excluded.txt`, and fixpp#503 owns making it live. Re-derive the bundles' live-cell claims with `git grep -n -i -E -e 'live [a-z -]*cell' -e 'bidirectional-gap cell' -- specs/025-refresh-on-logon specs/027-next-expected-msgseqnum specs/029-persistent-seqnum-hydrate`; prospective `plan.md` / `spec.md` lines are design intent, not result claims. ⚠️ **The frozen `specs/013-session-reconnect-binding/spec.md` FR-017 and its acceptance scenario 7, which make `bilateral_strict` the default, are superseded by 103** (`B-103-1`, research D2.1): the default is `bilateral_lenient`, and a strict initiator resets before every Logon (`B-103-2`). The "QFJ-style" label on the strict policy (`session_config.hpp` before 103, `B-013-6`'s "QFJ strict") is false by QuickFIX/J's source (`isResetNeeded`). 013 is frozen and not edited. |
 | NextExpectedMsgSeqNum | `specs/027-next-expected-msgseqnum/` ⚠️ **027 `tasks.md` T022's "+ a bidirectional-gap cell" and its `## Notes` line "T022 the live cell" are FALSE as result claims for the bidirectional suite: `NextExpectedBidirectional` does not run live. T022's "recover an at-logon gap with zero `ResendRequest`" and contract C10's "recover an at-logon gap … all missed messages delivered in order" are ALSO false as result claims for the initiator and acceptor NE cells: those cells run live but seed no gap (parent `run_interop_cell.py` NE block, "no resend"), so they witness only 789 negotiation and in-sync honour, and fixpp#503 owns the gap cells.** Flagged here and not edited (frozen `specs/` are not rewritten): no harness cell selects the interop suite named in this row — its ids are in the `unregistered-tracked` group of `tests/interop/live-cells-excluded.txt`, and fixpp#503 owns making it live. Re-derive the bundles' live-cell claims with `git grep -n -i -E -e 'live [a-z -]*cell' -e 'bidirectional-gap cell' -e 'recover an at-logon gap' -- specs/025-refresh-on-logon specs/027-next-expected-msgseqnum specs/029-persistent-seqnum-hydrate`; prospective `plan.md` / `spec.md` lines are design intent, not result claims. |
 | FIXT / FIX50SP2, version serviceability | `specs/033-fixt-fix50sp2-session/`, `specs/042-fixt-version-serviceability-guard/`. ⚠️ 033's "1128 tolerated, not routed" and 042's "config-load" are narrowed by 099: [below](#a-fixt-session-reads-each-message-with-that-messages-dictionary-099) |
 | Which dictionary answers a FIXT session's inbound frame, what each state does with it | `Session::select_route_`, `Session::bind_fixt_routes_` and `specs/099-fixt-appl-version-validation/data-model.md` E-6, E-7, E-10; the live B&L file's section `## 099`; why and what was rejected: [below](#a-fixt-session-reads-each-message-with-that-messages-dictionary-099) |
 | A second `close()` while one is in flight | `Session::close` and its comment in `session.hpp`; `specs/093-inbound-frame-dispositions/plan.md` OD-29. ⚠️ **`.specify/2d-threading.md` §4.7's and §6.5's "Idempotency" bullets and §4.7's code-block comment ("functionally a no-op for the second caller", "without side effects", "returns immediately with no error") are SUPERSEDED for terminal-on-graceful by 093 plan OD-29**: a terminal close that arrives while a graceful one is in flight escalates it, ending its grace wait or keeping its Logout exchange from starting. Each carries a dated erratum in place. ⚠️ **OD-29 is itself narrowed by fixpp#590** (`.specify/563-564-callback-send.md` §2.6, rulings R-8 and R-9; B&L `B-563-5`): a terminal close started inside the `toAdmin` of the graceful close's Logout cuts that Logout and joins without ending the grace wait. `.specify/2d-threading.md` has a document-level amendment for it at its end, and the frozen 093 bundle is flagged in the section on fixpp#563 below. The code-block comment's "returns immediately" did not hold before 093 either: the join awaits the in-flight close. Graceful-on-graceful still joins with no side effect. |
-| Recovery and liveness: a frame above the expected number while a resend is outstanding, the deadline of an unfilled gap, a too-high Heartbeat and a pending TestRequest, a resend answer whose store read fails, `retrieve` after a reset, one session's close and the other sessions' liveness | `.specify/536-537-538-recovery-liveness.md` §2 to §4 (fixpp#536, #537, #538; issue mode, no `specs/` bundle); the live B&L file's section `## fixpp#536 / #537 / #538 / #598`; why and what was rejected: [below](#recovery-liveness-and-a-cancellation-inside-the-session-fixpp536--537--538--598). ⚠️ **013's `spec.md` FR-009, a queue of inbound frames above the expected number during recovery, was never built and is now rejected** (the note's §4.4): a frame above NextNumIn while a resend is outstanding is ignored, and the peer's replay carries it (`B-537-1`). `ResendState::inbound_held` has no writer, and `L-013-2`, which said frames are held there, is corrected. 013 is frozen and not edited. |
+| Recovery and liveness: a frame above the expected number while a resend is outstanding, the deadline of an unfilled gap, a too-high Heartbeat and a pending TestRequest, a resend answer whose store read fails, `retrieve` after a reset, one session's close and the other sessions' liveness | `.specify/536-537-538-recovery-liveness.md` §2 to §4 (fixpp#536, #537, #538; issue mode, no `specs/` bundle); the live B&L file's section `## fixpp#536 / #537 / #538 / #598`; why and what was rejected: [below](#recovery-liveness-and-a-cancellation-inside-the-session-fixpp536--537--538--598). ⚠️ **013's `spec.md` FR-009, a queue of inbound frames above the expected number during recovery, was never built and is now rejected** (the note's §4.4): a frame above NextNumIn while a resend is outstanding is ignored, and the peer's replay carries it (`B-537-1`). `ResendState::inbound_held` has no writer, and `L-013-2`, which said frames are held there, is corrected. 013 is frozen and not edited. ⚠️ **`B-537-1`'s "ignored" has exceptions since 103**: a too-high ResendRequest is answered (`B-103-6`) and a too-high Logout opens a bounded recovery (`B-103-7`). **`B-537-2`'s trigger is any frame that does not advance NextNumIn since 103**, so `L-537-1` is closed (owner ruling on fixpp#581, superseding R-11). |
+| Resend, Logon and reset fidelity: the default reset policy, the strict initiator's reset and the strict acceptor's refusal, BeginSeqNo(7) = 0 or absent, a too-high ResendRequest or Logout, a send or the liveness loop against a running resend answer, resend state across an in-place reconnect, the too-low Logout | `specs/103-resend-logon-reset-fidelity/` (spec.md, research.md D1 to D9, data-model.md, contracts/); the live B&L file's section `## 103`; why and what was rejected: [below](#resend-logon-and-reset-fidelity-103) |
 | A cancellation met inside the session: while an inbound frame is processed, at an outbound store call, at the graceful close's Logout, inside a `FileStore` call's offload | the note's §9, §10 and §11 (rulings R-14 to R-17, R-24 to R-27); B&L `B-538-4` to `B-538-7`, `B-598-1`, `B-598-2`, `L-598-1`; [below](#recovery-liveness-and-a-cancellation-inside-the-session-fixpp536--537--538--598) |
 | The outbound store-then-transmit step (`store_then_emit`): what a store call that did not store the frame ends as | `Session::store_then_emit` and its header comment; `specs/059-outbound-store-fail-closed/` for a failed write on a persistent store (B&L `B-059-1`); the note's §10 for a cancelled store call (`B-538-5`). ⚠️ **059's disposition of a cancelled store call is SUPERSEDED by the note's §10 (rulings R-15, R-16)**: on both timings and on any store the frame is not transmitted, its number is taken back, and `store_then_emit` records `Disconnected` and leaves by `operation_aborted`, which `Session::send` turns into `dispatch_aborted`. Superseded, the returned timing (059's D7, "absorb → proceed", "shutdown-only"): `research.md`'s grounded fact "`store_cancelled` is shutdown-only", its D7, and D3 for this route; `contracts/store-then-emit-disposition.md` items 2 and 3 ("except `store_cancelled`") and its error-channel row for a cancelled or drained mutex; `data-model.md`'s disposition table, the row for `store_cancelled`; `plan.md`'s summary, step 1; `tasks.md` T006 (1) and T013 (a); `checklists/disposition.md` CHK002 and CHK012; `quickstart.md` ("only reachable on shutdown drain"). Superseded as mechanism, the thrown timing (059 kept the old catch, which returned `dispatch_aborted` from `store_then_emit` with no state change of its own): `research.md`'s grounded fact on the thrown `operation_aborted` and its D5; the contract's item 5; `data-model.md`'s disposition row for a thrown `operation_aborted` and its invariant INV-059-5 ("no new `Disconnected`/`hydrated_` side effects"); `plan.md`'s "existing `operation_aborted` cancellation handling … preserved verbatim"; the end of `tasks.md` T006. The caller of `Session::send` still gets `dispatch_aborted`. **Not superseded:** `spec.md`'s edge case "Cancellation is not a store failure" and FR-005, which say a cancelled send already disconnects; that now holds on both timings. The bundle is frozen and not edited. |
 | Runtime flows | the flow pages below — no design doc carries them |
@@ -354,6 +366,12 @@ since fixpp#563 and fixpp#564 (the next section). Re-derive the shape from sourc
     `close()`'s and `Engine::stop`'s drain, the `app_callback_threw` path awaits `close()` inside
     `send_impl`, and a pending cancellation would throw earlier than today, turning a validation error
     or a `toApp` veto into a disconnect;
+    ⚠️ **Narrowed by 103** (`specs/103-resend-logon-reset-fidelity/research.md` D5′, owner ruling on
+    fixpp#588): a scoped shared/exclusive gate, `detail::replay_gate`, now orders sends, the liveness
+    frames and the close's Logout against a running resend answer only; sends still do not queue
+    behind each other. The amended `[const §XI.3]` permits it
+    (`specs/103-resend-logon-reset-fidelity/contracts/constitution-xi3-amendment.md`). The rejection
+    above still holds for a gate that serialises sends against each other;
   - **`write_gate_` taken early**: `async_mutex` records no owner, so `store_then_emit` locking it again
     would wait on itself;
   - **a per-send leaf that owns the buffer**: that is the over-limit frame itself;
@@ -404,6 +422,11 @@ it through an `Application` callback is the callback the stretch itself calls.
   reset and before its three-state test. The owner fixed its reading after Gate A round 1: the rule is
   "after the callback returns", not "after the operation that called the callback has finished", and
   `L-563-1` is what that costs.
+  ⚠️ **The note's §2.1a row for `Session::open` / `Session::drive_reconnect` ("engine-driven; not an
+  application entry point from a callback") is SUPERSEDED for `drive_reconnect` by feature 103**
+  (`specs/103-resend-logon-reset-fidelity/research.md` D1 step 0b): `drive_reconnect` is an
+  application entry point, and from a callback it takes R-4's post before its first state test.
+  `Session::drive_reconnect`'s header comment states the contract.
 - **R-5.** `Engine::stop()` started from a callback is out of this decision; `L-563-4`, follow-up
   fixpp#579.
 - **R-6.** "Calls to `store()` complete in the order they were made" is a requirement of
@@ -477,6 +500,8 @@ likely to propose again).
   in `fromApp` and undefined in `toApp`.
 - **Refuse a send started in the confirming Logout's `toAdmin`** of a logout the peer started. Ruled,
   then not implemented: the source reading showed that no QuickFIX engine refuses it (`L-563-2`).
+  *Implemented by 103 FR-021 (owner ruling 2026-10-12; the owner confirmed it on 2026-11-16: refuse,
+  `B-010-2` kept). `L-563-2` is closed; the row is `B-103-14`.*
 
 For R-8 and R-9 (note §5, its last block, which names the prototype of each):
 
@@ -582,6 +607,8 @@ taken. Each item names the note's section that has the whole list.
   on a persistent store; aborting on slot 0 (no frame can exist there, and any peer could end a
   session with one frame); keeping the GapFill for a cancelled read (measured: the peer read a GapFill
   over stored messages); clamping the walk's start to 1 (a wire change no issue asked for; fixpp#580).
+  ⚠️ **The clamp's decline is superseded by 103** (research D3, fixpp#580): BeginSeqNo(7) = 0 is
+  answered as 7 = 1 and the walk starts at slot 1 (`B-103-4`); an absent 7 is Rejected (`B-103-5`).
 - **One session's close and the others' liveness (#536, §3.3).** No session sweeps the clock
   (`B-536-1`). Not taken: `close` emitting terminal or `all` (it would also cancel a liveness emit in
   flight); every sleeper re-arming on a sweep that is not its own (the issue's second option: it would
@@ -592,7 +619,9 @@ taken. Each item names the note's section that has the whole list.
   terminal filter, so a loop that had sent a frame no longer accepted `close`'s total cancellation;
   whether the lock should restore its caller's filter is fixpp#583.
 - **A second too-high frame and an unfilled gap (#537, §4.4, rulings R-2, R-6, R-9, R-11, R-12).** The
-  frame is ignored and the gap has a deadline (`B-537-1`, `B-537-2`). Not taken: holding the frame,
+  frame is ignored and the gap has a deadline (`B-537-1`, `B-537-2`); since 103 a too-high
+  ResendRequest is answered and a too-high Logout opens a bounded recovery (`B-103-6`, `B-103-7`,
+  research D4.1, fixpp#577). Not taken: holding the frame,
   as 013 FR-009 and the three QuickFIX engines do (it needs a capacity policy, an order for held
   administrative frames and a delivery path, and gains nothing on the wire while the request runs to
   0); a second ResendRequest per extra frame; no longer refreshing liveness on a too-high frame (it
@@ -601,6 +630,9 @@ taken. Each item names the note's section that has the whole list.
   surface); a Logout on the dead-peer ending; the check ahead of the BeginString, CompID and
   SendingTime guards; the check without its own too-high test (it would end a healthy slow replay); the
   check on every frame that does not advance (it would close `L-537-1`'s pattern; not chosen, R-11);
+  ⚠️ **R-11 is superseded by 103** (research D6; the owner's ruling on fixpp#581, 2026-11-14): the
+  deadline now acts on every frame that does not advance NextNumIn (`B-537-2`, amended), and
+  `L-537-1` is closed;
   a Logout with no text where the text does not fit (one more branch; kept by R-12).
 - **A cancellation met while an inbound frame is processed (§9.4, ruling R-14).** One catch at the
   one coroutine every frame enters (`B-538-4`). Not taken: making `on_inbound_frame` a coroutine with
@@ -694,6 +726,98 @@ The design is `specs/101-inbound-reject-fidelity/`: research D4 to D7 decide the
 - **Not superseded:** 099's two-occurrence FIXT endings in LogonReceived and Active, its validating FIXT establishment disconnect, and every 1128 refusal.
 
 **Left open by 101.** Echoing 372 beyond the outbound ceiling, up to the inbound limit (fixpp#669, for the owner); a CompID length bound at `open()`, and `apply_inbound_sequence_reset`'s literal-372 Reject dropped unlogged when long CompIDs overflow its buffer (fixpp#670).
+
+## Resend, Logon and reset fidelity (103)
+
+The design is `specs/103-resend-logon-reset-fidelity/` (spec.md, plan.md, research.md D1 to D9,
+data-model.md, contracts/c-abi-1.17.md, contracts/session-wire-endings.md,
+contracts/constitution-xi3-amendment.md) and the amended Article XI §3 of
+`.specify/memory/constitution.md`. Batch B43 (fixpp#580, #577, #581, #578, #588) with fixpp#682. What
+the code does is in the live B&L file's section `## 103`; this section keeps why, and what was not
+taken.
+
+**What was decided.**
+
+- **Resend state and the pending too-high Logout end with their connection** (D1, #578): cleared when
+  a new transport is installed, whether or not the session passed through `Disconnected`. A direct
+  `drive_reconnect` from Active drains the old connection first (the owner chose "drain, then
+  reconnect", 2026-11-15), so no frame numbered on the old connection is written on the new one.
+  `drive_reconnect` is not bound to `root_cancellation_slot()`, whose single client is the liveness
+  loop: the drain's own `root_cancel_.emit(total)` would cancel it.
+- **The default reset policy is lenient; strict resets before every Logon; the strict acceptor
+  refuses with a Logout** (D2, #682). Strict's 141=Y at a stored number above 1 was `L-029-3`. A
+  refusal that a `close()` or `Engine::stop()` supersedes returns success whatever the close's timing
+  (D-CAN-5, `B-103-3`). The refusal site asks `closing_or_stopped_()` or a state other than
+  `Disconnected`, not `logon_arm_superseded_(Disconnected)`: the helper has just recorded
+  `Disconnected` itself, and a completed close leaves the same FSM, so the shared predicate returned
+  the mismatch after a completed close. Not taken: changing the shared predicate, whose other callers
+  each expect a state other than `Disconnected`.
+- **BeginSeqNo(7) = 0 is answered as 7 = 1, and an absent 7 is Rejected** (D3, #580).
+- **A too-high ResendRequest is answered; a too-high Logout is acknowledged after a bounded
+  recovery** (D4, #577). The bound is its own coroutine, woken through a wake like the session's other
+  in-session waits; at most one Logout across the competing endings, by one Logout owner
+  (`logout_in_flight_`) that `close(graceful)` and every inbound Logout emitter consult. While the
+  session is itself ending (its own Logout in flight, a close begun, or the stop noted), a too-high
+  Logout is acknowledged at once, as the in-sequence one is, with no bound and no ResendRequest
+  (spec FR-021a, `B-103-15`): the bound could not act then, because its claim refuses while the
+  owner is set and its `live` test while the session is closing or stopped. QuickFIX C++, QuickFIX/J
+  and QuickFIX/Go each disconnect at once there, with no ResendRequest. Not taken: leaving the
+  crossing to the bound (close() then waited out its whole grace, and the session drew a
+  ResendRequest during its own Logout ending).
+  An exception that reaches the bound's handler ends the bound closed: no mark is left `pending` or
+  `acking` and the session records `Disconnected`, as a send's handler ends a send. A frame-local
+  clearer clears the wake before the bound's timer is destroyed, and acts only while an exception
+  unwinds the frame, so a frame destroyed unresumed still touches no Session state (D4.4's Gate A
+  reason for no exit guard). The join counter is held by the bound's parameter, so an unstarted frame
+  that a throwing `co_spawn` destroys still releases it (the Gate B round 1 ruling of 2026-11-17).
+  Not taken: a heap-owned timer (an allocation and shared ownership the clearer does not need); a
+  clearer that acts at every frame destruction (it writes into a Session that a frame destroyed
+  unresumed may outlive); an empty handler (it left the wake calling a destroyed timer, and the mark
+  set with the session Active).
+- **Sends, the liveness frames and the close's Logout wait for a running resend answer** (D5′, #588
+  widened by the owner): a shared/exclusive `detail::replay_gate` on the session strand, with no
+  atomic and no OS primitive, and a timer made only on a contended wait.
+- **The gap deadline acts on every frame that does not advance NextNumIn, and a too-low frame
+  without 43=Y draws a Logout with Text** (D6, D9, #581 and the owner's widening of FR-018).
+
+**What was rejected, and why.**
+
+- **D1:** clearing only on the `Disconnected` edge (a direct caller reaches the install from Active, so
+  the stale mark's bound would acknowledge the old Logout on the new connection); `Disconnected` as an
+  enforced precondition of `drive_reconnect` (a new error path for a state the drain makes safe); a
+  write fence on `conn_gen_` alone (it keeps old frames off the new transport but leaves the install
+  racing live emitters); clearing in `emit_initiator_logon_` (initiator only, the wrong layer for the
+  mark); clearing in `close()` (terminal; the in-place route never calls it).
+- **D4:** dispatching ahead of Guard (4) (every frame would pay); binding the bound's coroutine to
+  `root_cancel_` (the slot holds one handler); an own `cancellation_signal` per coroutine (viable;
+  the wake idiom kept for consistency with the existing waits); the liveness loop as the bound (HB = 0,
+  and no wake); writing `Disconnected` before the acknowledgement (`onLogout` would run before the
+  acknowledgement's `toAdmin`, the reverse of the in-sequence order); acknowledging inline in the
+  frame path (two claim sites, and an await on the fast path).
+- **D5′:** pass 1's flag with a wait in `send_body_` only (misses the liveness frames and the close's
+  Logout); `async_mutex` as the gate (exclusive only, its lock sequence leaves a terminal filter,
+  fixpp#583, and it needs a drain in both teardowns); two `async_mutex`es emulating read/write (the
+  same costs and a lock-order hazard); QuickFIX C++'s single session mutex (a coarse session lock,
+  `[const §XV.3]`); a shared hold taken inside `store_then_emit` (too late: the number is assigned
+  first); the exclusive hold taken after the walk's tail read (it loses a frame in flight); queueing
+  sends or ordered emission (rejected by fixpp#563/#564's note, §5). Frame-local timers in an
+  intrusive waiter list stayed the fallback.
+
+**Records this supersedes, flagged here and not edited** (frozen `specs/` are not rewritten).
+
+- ⚠️ **Superseded by 103:** the too-low Heartbeat's silent-ignore exemption, under
+  `specs/013-session-reconnect-binding` FR-009, which the code's comments label "T020-A": a too-low
+  Heartbeat without 43=Y now draws the too-low Logout (`B-103-10`, research D6). Re-derive the
+  comments that still carry the label: `command grep -rn T020-A src tests`.
+- ⚠️ **Superseded by 103:** B&L `B-013-1`'s "with `session_seqnum_too_low`" (the arm returns success,
+  and before 103 it sent no Logout); the row is amended in place.
+- ⚠️ **Superseded by 103:** `specs/013-session-reconnect-binding` FR-017's strict default and the
+  "QFJ-style" label (the routing row above).
+- ⚠️ **Superseded by 103:** `.specify/563-564-callback-send.md` §2.1a's `drive_reconnect` row (the
+  flag under R-4 above).
+- ⚠️ **Superseded by 103:** the #538 bullet's declined clamp and the #537 bullet's R-11 (flagged in
+  place above), and fixpp#544's rejection of a session send gate, narrowed to a gate that
+  serialises sends against each other (flagged in place above).
 
 ## Runtime flows
 

@@ -13,6 +13,14 @@
 > the end. Its warm number is the only measurement still outstanding, and it arrives free on the
 > first `push:main` after merge.
 
+> **Amended 2026-11-16 (103, tasks T159 and T160).** The cap is set per leg in `tier2.yml`
+> (16G on `windows-msvc-asan` and `windows-msvc-debug`, 8G on `windows-msvc-release`; the
+> workflow comment states each value's condition). The archive is a zstd-compressed tar split
+> into parts, one OCI layer each, with a manifest of their digests (`ci/seed-sccache.sh`,
+> `ci/restore-sccache.sh`, pinned by `ci/test-sccache-archive.sh`); the restore still reads a
+> tag holding the old single uncompressed tar. The sections below describe the archive and the
+> cap as they were when measured.
+
 ## MEASURED — warm run, 2026-08-07 ([31121588649])
 
 | leg | restore | `Build` cold → warm | observed ratio *(not controlled)* | requests | hits | non-cacheable | failures | seed |
@@ -103,7 +111,8 @@ Other cold-run facts worth keeping:
   baseline — i.e. the launcher itself costs nothing measurable.
 - **Publishing is cheap.** 1.1 GB archive, `oras push` 16:24:11 → 16:24:28 = **17 s**. The
   upload-cost worry does not survive contact with the measurement. `SCCACHE_CACHE_SIZE=8G` is
-  comfortable against a measured 1.1 G and needs no tuning yet.
+  comfortable against a measured 1.1 G and needs no tuning yet. *(Superseded by 103: the cap
+  is per leg; see the amendment at the top.)*
 - **The package was created by CI**, with `GITHUB_TOKEN` and no bootstrap — and came out
   `visibility: public`, `repository: CatalinSerafimescu/fixpp`, matching the other three packages.
   Both of this file's earlier worries on that point (that the first push might be refused, and that

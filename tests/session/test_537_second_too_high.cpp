@@ -6,6 +6,9 @@
 // #537 table of §5): a frame above NextNumIn that arrives while a resend is outstanding
 // is ignored. The session stays in its state, sends nothing and does not advance; the
 // outstanding ResendRequest runs to 0, so the peer's replay covers the frame.
+// 103 (research D4.1, fixpp#577) excepts a ResendRequest and a Logout: a too-high
+// ResendRequest is answered and a too-high Logout sets the pending-Logout mark
+// (tests/session/test_103_too_high_resend_request.cpp, test_103_too_high_logout*.cpp).
 //
 // FIX Session Layer (Nov 2020 errata), §4.8.2: "the application could ignore messages 3
 // through 5 and generate a resend request for messages 2 through 5, or, preferably 2
@@ -163,9 +166,10 @@ TEST_P(SecondTooHighPerType, Logon) {
 
 // ── A second too-high ResendRequest, and a second too-high Logout ───────────────────
 //
-// What fixpp should send for either is fixpp#577's question, which is not decided here.
-// The two assertions below hold under either answer to it: the frame does not advance
-// NextNumIn, and the session does not end without a Logout of its own.
+// What fixpp sends for either is decided by 103 (research D4.1, fixpp#577) and witnessed
+// in the cells this file's header names. The assertions below hold under that
+// answer: the frame does not advance NextNumIn, and the session does not end without a
+// Logout of its own.
 
 namespace {
 

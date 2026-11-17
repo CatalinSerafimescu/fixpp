@@ -39,6 +39,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 namespace fixpp::interop::parity {
@@ -171,12 +172,13 @@ protected:
         cfg.executor_override = ioc.get_executor();
         cfg.transport_send = [this](std::span<const std::byte> d) { capture(d); };
         cfg.role = fixpp::session::session_role::acceptor;
-        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        // The reset policy is the default (bilateral_lenient since feature 103, FR-001).
         return cfg;
     }
 
     fixpp::core::expected_t<void> run_open(fixpp::session::Session& s) {
-        auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc), s.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 100ms)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
                                                             "ParityAcceptorFixture::run_open");
@@ -188,7 +190,8 @@ protected:
 
     fixpp::core::expected_t<void> feed(fixpp::session::Session& s,
                                        std::span<const std::byte> frame) {
-        auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc),
+                                  s.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 100ms)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
                                                             "ParityAcceptorFixture::feed");

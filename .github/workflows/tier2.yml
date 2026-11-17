@@ -201,9 +201,16 @@ jobs:
       # acceptance criterion here IS the stats, so a truncated counter would not
       # be a cosmetic loss — it would fabricate the measurement.
       SCCACHE_IDLE_TIMEOUT: "0"
-      # Bounds what the seed step has to upload. First estimate, to be tuned
-      # from the size the seed step prints into the job summary.
-      SCCACHE_CACHE_SIZE: 8G
+      # Bounds what the seed step has to upload, per leg (103, the owner's
+      # ruling on the msvc-asan cache). Evaluated per matrix leg here, so it is set before the sccache
+      # server starts in Build; no later step sets it again. The condition each
+      # value rests on: on asan and debug the cap holds one full build plus one
+      # commit's churn; on release the leg's full build stays under its cap.
+      # Re-derive from the legs' sccache statistics (`Cache size`, `Cache misses`,
+      # and the seed step's archive line) on recent push:main runs.
+      # parallelism-measure.yml's MSVC job carries the same expression
+      # (ci/assert-ci-lane-policy.py checks it).
+      SCCACHE_CACHE_SIZE: ${{ matrix.preset == 'windows-msvc-release' && '8G' || '16G' }}
 
     strategy:
       fail-fast: false
@@ -949,6 +956,10 @@ jobs:
             exit 0
           fi
           df -h "$GITHUB_WORKSPACE" > /tmp/disk.txt || { echo "::error::df failed — instrument unavailable."; exit 1; }
+          # 103 (tasks T160): the drive that holds SCCACHE_DIR and the restore's
+          # staging directory, beside the workspace drive. Diagnostic only: it prints
+          # and never fails the step, so a missing SCCACHE_DIR or df error is a line.
+          { df -h "$(cygpath -u "${SCCACHE_DIR:-C:\\}")" 2>&1 || echo "df on SCCACHE_DIR's drive failed (diagnostic only)"; } >> /tmp/disk.txt
           du -sh "build/$P" >> /tmp/disk.txt || { echo "::error::du on build/$P failed — instrument unavailable."; exit 1; }
           for d in "build/$P"/_packaging_tests/* "build/$P/_packages" "build/$P/_consumer_witness/stage"; do
             if [ -e "$d" ]; then

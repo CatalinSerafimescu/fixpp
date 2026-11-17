@@ -71,6 +71,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 using namespace std::chrono_literals;
 
@@ -177,8 +178,12 @@ protected:
     // `clock` is the clock of the session the coroutine belongs to, so a miss
     // drain releases the sleeps that frame can actually be parked on.
     template <class Coro>
-    fixpp::core::expected_t<void> run_sync(Coro coro, fixpp::core::Clock& clock, const char* site) {
-        auto fut = asio::co_spawn(ioc, std::move(coro), asio::use_future);
+    // `on`: the Session whose coroutine `coro` is; it runs on that session's executor once
+    // open() has bound it (support/session_executor_of.hpp).
+    fixpp::core::expected_t<void> run_sync(Coro coro, fixpp::core::Clock& clock, const char* site,
+                                           fixpp::session::Session const& on) {
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(on, ioc),
+                                  std::move(coro), asio::use_future);
         if (!fixpp::test_support::pump_until_ready(ioc, fut, site)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, clock, site);
             ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << site;
@@ -190,13 +195,13 @@ protected:
     // Initiator open → LogonSent → peer Logon(35=A) → Active.
     bool drive_to_active(Session& s, std::string_view us, std::string_view peer,
                          fixpp::core::Clock& clock) {
-        if (!run_sync(s.open(), clock, "SharedClockLiveness::open")) return false;
+        if (!run_sync(s.open(), clock, "SharedClockLiveness::open", s)) return false;
         const std::string extra =
             "98=0\x01"
             "108=" +
             std::to_string(kHeartBtInt.count()) + "\x01";
         auto logon = make_frame("A", 1, peer, us, sending_time_now(clock), extra);
-        (void)run_sync(s.on_inbound_frame(logon), clock, "SharedClockLiveness::logon");
+        (void)run_sync(s.on_inbound_frame(logon), clock, "SharedClockLiveness::logon", s);
         return s.state() == fsm_state::Active;
     }
 
@@ -223,10 +228,11 @@ protected:
                 break;
             case Trigger::terminal_close:
                 (void)run_sync(a.close(close_mode::terminal), a_clock,
-                               "SharedClockLiveness::close_a_T");
+                               "SharedClockLiveness::close_a_T", a);
                 break;
             case Trigger::graceful_confirmed: {
-                auto fut = asio::co_spawn(ioc, a.close(close_mode::graceful), asio::use_future);
+                auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(a, ioc),
+                                          a.close(close_mode::graceful), asio::use_future);
                 // Wait for A to send its Logout, then confirm it as the peer.
                 if (!fixpp::test_support::pump_until(
                         ioc, [&] { return a.state() == fsm_state::LogoutSent; },
@@ -235,7 +241,7 @@ protected:
                 }
                 auto confirm = make_frame("5", 2, "A_PEER", "A_US", sending_time_now(a_clock));
                 (void)run_sync(a.on_inbound_frame(confirm), a_clock,
-                               "SharedClockLiveness::confirm_a");
+                               "SharedClockLiveness::confirm_a", a);
                 if (!fixpp::test_support::pump_until_ready(ioc, fut,
                                                            "SharedClockLiveness::close_a_G")) {
                     // The close frame is still suspended on `a`, which dies before `ioc`.
@@ -262,10 +268,10 @@ protected:
         // Teardown: close whatever is still open so no liveness frame outlives its Session.
         if (trigger == Trigger::none) {
             (void)run_sync(a.close(close_mode::terminal), a_clock,
-                           "SharedClockLiveness::teardown_a");
+                           "SharedClockLiveness::teardown_a", a);
         }
         (void)run_sync(b.close(close_mode::terminal), *shared_clock,
-                       "SharedClockLiveness::teardown_b");
+                       "SharedClockLiveness::teardown_b", b);
         return out;
     }
 };
@@ -348,8 +354,8 @@ TEST_F(SharedClockLiveness, Pin_ExplicitSweep_SharedClock_BothStayActiveAndSendN
     }
 
     // Teardown: close both so no liveness frame outlives its Session.
-    (void)run_sync(a.close(close_mode::terminal), *shared_clock, "SharedClockLiveness::pin_a");
-    (void)run_sync(b.close(close_mode::terminal), *shared_clock, "SharedClockLiveness::pin_b");
+    (void)run_sync(a.close(close_mode::terminal), *shared_clock, "SharedClockLiveness::pin_a", a);
+    (void)run_sync(b.close(close_mode::terminal), *shared_clock, "SharedClockLiveness::pin_b", b);
 }
 
 }  // namespace fixpp::session::test

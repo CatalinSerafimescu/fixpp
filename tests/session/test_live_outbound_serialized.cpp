@@ -72,6 +72,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -438,7 +439,8 @@ TEST(LiveOutboundSerializedTest, WriteErrorPropagatesAsFsmDisconnected) {
     auto cfg = make_acceptor_cfg(ioc.get_executor());
 
     fixpp::session::Session sess{eng, cfg};
-    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                   asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, open_fut, 100ms,
                                                     "WriteErrorPropagatesAsFsmDisconnected/open")) {
         fixpp::test_support::drain_or_report(ioc, "WriteErrorPropagatesAsFsmDisconnected/open");
@@ -456,8 +458,9 @@ TEST(LiveOutboundSerializedTest, WriteErrorPropagatesAsFsmDisconnected) {
 
     // Feed a peer Logon — triggers reply-Logon emit → first async_write fails.
     auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
-    auto inbound_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
-                                      asio::use_future);
+    auto inbound_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                       sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
 
     ioc.run_for(2s);
     ioc.restart();
@@ -496,7 +499,8 @@ TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
     // make_acceptor_cfg); this one exists solely for the guard.
     auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
     fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *teardown_clock};
-    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                   asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
@@ -507,8 +511,9 @@ TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
     auto& logon = frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
-    auto logon_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
-                                    asio::use_future);
+    auto logon_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                       sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, logon_fut, 2s))
         << "peer Logon timed out";
     ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
@@ -516,7 +521,8 @@ TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
 
     auto& test_req =
         frames.emplace_back(make_peer_test_request("FIX.4.4", 2, "INITIATOR", "ACCEPTOR", "TR1"));
-    auto hb_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{test_req}),
+    auto hb_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                 sess.on_inbound_frame(std::span<const std::byte>{test_req}),
                                  asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, hb_fut, 2s))
         << "TestRequest handling timed out";
@@ -557,7 +563,8 @@ TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmittedGenuineSecondEmit) 
     auto cfg = make_acceptor_cfg(ioc.get_executor());
 
     fixpp::session::Session sess{eng, cfg};
-    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                   asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(
             ioc, open_fut, 100ms, "ConcurrentWritesNotSubmittedGenuineSecondEmit/open")) {
         fixpp::test_support::drain_or_report(ioc,
@@ -578,7 +585,8 @@ TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmittedGenuineSecondEmit) 
 
     // Feed peer Logon → reply-Logon write #1 (unblocked, completes immediately).
     auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
-    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::detached);
+    asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                   sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::detached);
     ioc.run_for(100ms);  // let reply-Logon complete → session Active
     ioc.restart();
 
@@ -592,7 +600,8 @@ TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmittedGenuineSecondEmit) 
 
     // Feed a peer TestRequest → triggers outbound Heartbeat reply → write N+1 BLOCKS.
     auto hb1 = make_peer_test_request("FIX.4.4", 2, "INITIATOR", "ACCEPTOR", "TR1");
-    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{hb1}), asio::detached);
+    asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                   sess.on_inbound_frame(std::span<const std::byte>{hb1}), asio::detached);
 
     // Run a few steps to get write N+1 in-flight but blocked.
     ioc.run_for(50ms);
@@ -601,7 +610,8 @@ TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmittedGenuineSecondEmit) 
     // Now feed a second TestRequest → triggers another Heartbeat reply → write N+2.
     // This write must NOT enter async_write while N+1 is still in-flight.
     auto hb2 = make_peer_test_request("FIX.4.4", 3, "INITIATOR", "ACCEPTOR", "TR2");
-    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{hb2}), asio::detached);
+    asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                   sess.on_inbound_frame(std::span<const std::byte>{hb2}), asio::detached);
 
     // Run to ensure the second Heartbeat handler reaches its write_gate_ acquire.
     ioc.run_for(50ms);
@@ -670,7 +680,8 @@ TEST(LiveOutboundSerializedTest, ReplayTransmitErrorForcesDisconnect) {
     };
 
     fixpp::session::Session sess{eng, cfg};
-    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                   asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, open_fut, 100ms,
                                                     "ReplayTransmitErrorForcesDisconnect/open")) {
         fixpp::test_support::drain_or_report(ioc, "ReplayTransmitErrorForcesDisconnect/open");
@@ -682,7 +693,8 @@ TEST(LiveOutboundSerializedTest, ReplayTransmitErrorForcesDisconnect) {
 
     // Drive session to Active via peer Logon (using sync transport_send_ path).
     auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
-    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::detached);
+    asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                   sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::detached);
     ioc.run_for(100ms);
     ioc.restart();
 
@@ -715,8 +727,8 @@ TEST(LiveOutboundSerializedTest, ReplayTransmitErrorForcesDisconnect) {
         for (std::size_t i = 0; i < msg.size(); ++i)
             rr_bytes[i] = static_cast<std::byte>(static_cast<unsigned char>(msg[i]));
 
-        asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{rr_bytes}),
-                       asio::detached);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                       sess.on_inbound_frame(std::span<const std::byte>{rr_bytes}), asio::detached);
 
         // rr_bytes MUST outlive run_for(): on_inbound_frame() takes a non-owning
         // span and the detached coroutine reads it when the executor resumes it
@@ -751,7 +763,8 @@ TEST(LiveOutboundSerializedTest, LivenessHeartbeatWriteErrorStopsLoop) {
     // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it), reusing
     // this test's real clock so its liveness-loop sleep is also cancelled.
     fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *clock};
-    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                   asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
@@ -762,8 +775,9 @@ TEST(LiveOutboundSerializedTest, LivenessHeartbeatWriteErrorStopsLoop) {
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
     auto& logon = frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
-    auto logon_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
-                                    asio::use_future);
+    auto logon_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                       sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, logon_fut, 2s))
         << "peer Logon timed out";
     ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
@@ -803,7 +817,8 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
     // clock is otherwise needed by this test; this one exists for the guard.
     auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
     fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *teardown_clock};
-    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                   asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
@@ -814,8 +829,9 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
     auto& logon = frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
-    auto logon_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
-                                    asio::use_future);
+    auto logon_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                       sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, logon_fut, 2s))
         << "peer Logon timed out";
     ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
@@ -825,12 +841,14 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
 
     auto& payload = frames.emplace_back(make_min_app_payload());
     auto send_fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>{payload}), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                       sess.send(std::span<const std::byte>{payload}), asio::use_future);
     ioc.run_for(50ms);
     ioc.restart();
 
     auto close_fut =
-        asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::terminal), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                       sess.close(fixpp::session::close_mode::terminal), asio::use_future);
     ioc.run_for(500ms);
     ioc.restart();
 
@@ -886,7 +904,8 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
     // clock is otherwise needed by this test; this one exists for the guard.
     auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
     fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *teardown_clock};
-    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                   asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
@@ -897,8 +916,9 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
     auto& logon = frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
-    auto logon_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
-                                    asio::use_future);
+    auto logon_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                       sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, logon_fut, 2s))
         << "peer Logon timed out";
     ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
@@ -908,12 +928,14 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
 
     auto& payload = frames.emplace_back(make_min_app_payload());
     auto send_fut =
-        asio::co_spawn(ioc, sess.send(std::span<const std::byte>{payload}), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                       sess.send(std::span<const std::byte>{payload}), asio::use_future);
     ioc.run_for(50ms);
     ioc.restart();
 
     auto close_fut =
-        asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                       sess.close(fixpp::session::close_mode::graceful), asio::use_future);
     ioc.run_for(500ms);
     ioc.restart();
 
@@ -989,7 +1011,8 @@ TEST(LiveOutboundSerializedTest, CloseBeforeLivenessStartsDoesNotLeaveQueuedUaf)
     // runs. No transport is tracked here — the ControlledWriteTransport below
     // is never armed/blocked in this test, so it isn't a hang source.
     fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *clock};
-    auto open_fut = asio::co_spawn(ioc, sess->open(), asio::use_future);
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, ioc),
+                                   sess->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
@@ -1052,7 +1075,8 @@ TEST(LiveOutboundSerializedTest, StopDuringLivenessWriteNoCrash) {
     cfg.heartbeat_interval = std::chrono::seconds{1};
 
     fixpp::session::Session sess{eng, cfg};
-    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                   asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, open_fut, 100ms,
                                                     "StopDuringLivenessWriteNoCrash/open")) {
         fixpp::test_support::drain_or_report(ioc, "StopDuringLivenessWriteNoCrash/open");
@@ -1071,7 +1095,8 @@ TEST(LiveOutboundSerializedTest, StopDuringLivenessWriteNoCrash) {
     // Drive session to Active — reply-Logon write completes immediately,
     // liveness loop is spawned and starts sleeping.
     auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
-    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::detached);
+    asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                   sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::detached);
     ioc.run_for(100ms);
     ioc.restart();
 
@@ -1090,7 +1115,8 @@ TEST(LiveOutboundSerializedTest, StopDuringLivenessWriteNoCrash) {
     (void)raw_ptr->close();
 
     auto close_fut =
-        asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::terminal), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                       sess.close(fixpp::session::close_mode::terminal), asio::use_future);
 
     // Bounded: close() must complete within 5s.
     // root_cancel_.emit(total) should cancel the liveness sleep
@@ -1134,6 +1160,12 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
     std::deque<std::vector<std::byte>> frames;
     asio::cancellation_signal sig;
     asio::io_context ioc;
+    // 103: the co_spawn bound to `sig` runs on the session's strand and leaves a copy of it in
+    // `sig`; no copy of a strand may outlive `ioc`, so the handler is destroyed before it.
+    struct clear_on_exit {
+        asio::cancellation_signal& s;
+        ~clear_on_exit() { s.slot().clear(); }
+    } const sig_clear{sig};
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
 
@@ -1145,7 +1177,8 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
     // clock is otherwise needed by this test; this one exists for the guard.
     auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
     fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *teardown_clock};
-    auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                   asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
@@ -1156,7 +1189,8 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
     auto& logon = frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
-    asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::detached);
+    asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                   sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::detached);
     ioc.run_for(100ms);
     ioc.restart();
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
@@ -1170,7 +1204,7 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
 
     // first close (graceful) from a CANCELLABLE caller — enters phase-1 and suspends.
     auto close1 = asio::co_spawn(
-        ioc,
+        fixpp::test_support::session_executor_of(sess, ioc),
         [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
             co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
             co_return co_await sess.close(fixpp::session::close_mode::graceful);
@@ -1182,7 +1216,8 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
 
     // second close (terminal, un-cancelled) — the Engine::stop() post-join drain analogue.
     auto close2 =
-        asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::terminal), asio::use_future);
+        asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                       sess.close(fixpp::session::close_mode::terminal), asio::use_future);
 
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, close1, 3s)) << "first close timed out";
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, close2, 3s)) << "second close timed out";
@@ -1230,7 +1265,8 @@ TEST(LiveOutboundSerializedTest, BudgetMissQuiescesBeforeSessionTeardown) {
                 std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
             fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
 
-            auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+            auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                           sess.open(), asio::use_future);
             ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
                 << "open() timed out";
             ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
@@ -1244,7 +1280,8 @@ TEST(LiveOutboundSerializedTest, BudgetMissQuiescesBeforeSessionTeardown) {
             auto& logon =
                 frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
             auto logon_fut = asio::co_spawn(
-                ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
+                fixpp::test_support::session_executor_of(sess, ioc),
+                sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
             ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, logon_fut, 2s))
                 << "peer Logon timed out";
             ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
@@ -1255,8 +1292,9 @@ TEST(LiveOutboundSerializedTest, BudgetMissQuiescesBeforeSessionTeardown) {
             // fires — not just theoretically racing it.
             raw_ptr->arm_block();
             auto& payload = frames.emplace_back(make_min_app_payload());
-            auto send_fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>{payload}),
-                                           asio::use_future);
+            auto send_fut =
+                asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                               sess.send(std::span<const std::byte>{payload}), asio::use_future);
 
             // 1ms budget against a 30s-blocked write: guaranteed miss.
             ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, send_fut, 1ms))

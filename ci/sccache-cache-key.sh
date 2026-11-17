@@ -74,3 +74,38 @@ sccache_cache_key() {
   # windows-msvc-asan-14.44.35207` says what it is without a lookup table.
   SCCACHE_CACHE_TAG="sccache-${preset}-${SCCACHE_CACHE_TOOLSET}"
 }
+
+# sccache_archive_names <preset>
+#
+# Sets: SCCACHE_ARCHIVE_PART_PREFIX, SCCACHE_ARCHIVE_MANIFEST, SCCACHE_ARCHIVE_LEGACY.
+#
+# 103 (tasks T160) — the archive is zstd-compressed and split into parts, one OCI
+# layer each, so that no layer passes GHCR's per-layer limit. The names live here
+# because the seed and the restore must agree on them, for the same reason the tag
+# does. The parts are `<prefix>000`, `<prefix>001`, …, in order; the manifest lists
+# each part's index, name and sha256, one per line, in that order.
+#
+# The new names differ from the legacy single-layer name `sccache-<preset>.tar`, so
+# a restore script from before 103 that pulls a new archive finds no file of the
+# name it reads and takes its "archive was missing" MISS. The restore still reads
+# a legacy archive by that name (format detection), so a tag a pre-103 seed wrote
+# stays a HIT until the first new seed replaces it.
+sccache_archive_names() {
+  local preset="$1"
+  SCCACHE_ARCHIVE_PART_PREFIX="sccache-${preset}.tar.zst.part-"
+  SCCACHE_ARCHIVE_MANIFEST="sccache-${preset}.tar.zst.manifest"
+  SCCACHE_ARCHIVE_LEGACY="sccache-${preset}.tar"
+}
+
+# sccache_archive_workdir
+#
+# Prints a new empty directory for the archive's parts. Under RUNNER_TEMP when the
+# runner sets it (the workspace drive on the Windows runner, not the system drive
+# that holds SCCACHE_DIR), else under the default temporary directory.
+sccache_archive_workdir() {
+  if [ -n "${RUNNER_TEMP:-}" ]; then
+    mktemp -d "$(posixpath "$RUNNER_TEMP")/sccache-archive.XXXXXX"
+  else
+    mktemp -d
+  fi
+}

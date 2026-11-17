@@ -271,35 +271,49 @@ TEST_F(TcSeqnumTest, Tc2a_MsgSeqNumCorrect) {
 
 // ── 2c_MsgSeqNumTooLow ────────────────────────────────────────────────────────
 //
-// Oracle: a message with MsgSeqNum < next-expected and no PossDupFlag=Y →
-// session-fatal ([FIX-SL §4.1]) for non-Heartbeat messages.
+// Oracle (FIX Test Case 2c): a message with MsgSeqNum below the next expected and no
+// PossDupFlag=Y → a Logout whose Text(58) is "MsgSeqNum too low, expecting <N> but
+// received <M>", then disconnect ([FIX-SL §4.1]). This cell is TC 2c's anchor. 103
+// (research D6 and D9; FR-018, fixpp#581) supersedes 013 T020-A's silent drop of a
+// too-low Heartbeat, so the scenario's Heartbeat draws the Logout like any other frame.
 //
-// T006a catch-site migration (013): Heartbeat(35=0) with too-low seqnum is
-// silently ignored in Active state per 013 T020-A warmup compatibility.
-// The general [FIX-SL §4.1] fatal rule applies to all other MsgTypes.
-//
-// 2c scenario: after reaching Active (next expected=2), send a Heartbeat with
-// seq=1. With 013, too-low Heartbeat is silently ignored → session stays Active.
+// 2c scenario: after reaching Active (next expected=2), send a Heartbeat with seq=1.
 
 TEST_F(TcSeqnumTest, Tc2c_MsgSeqNumTooLow) {
     auto cfg = make_acceptor_cfg();
+    std::vector<std::string> sent;
+    cfg.transport_send = [&sent](std::span<const std::byte> b) {
+        sent.emplace_back(reinterpret_cast<const char*>(b.data()), b.size());
+    };
     fixpp::session::Session sess(engine, cfg);
 
     // Drive to Active: Logon consumed seq=1; next expected = 2.
     ASSERT_TRUE(drive_to_active(sess)) << "2c: Failed to drive to Active";
+    const auto mark = sent.size();
 
     // Send a Heartbeat with seq=1 (too low; no PossDupFlag).
-    // 013 FR-009 / T020-A: too-low Heartbeat is silently ignored → stays Active.
     auto hb = make_heartbeat_frame("FIX.4.2", 1, "TW", "ISLD");
-    (void)feed_sync(sess, hb);  // outcome checked below via state, not the return value
+    (void)feed_sync(sess, hb);  // outcome checked below via the frames and the state
 
-    // With 013, too-low Heartbeat → Active (not fatal).
-    // The general [FIX-SL §4.1] fatal rule still applies to non-Heartbeat
-    // messages; those paths are verified in fsm_matrix_witness_test.cpp.
+    std::vector<std::string> logout_texts;
+    for (std::size_t i = mark; i < sent.size(); ++i) {
+        if (sent[i].find("\x01"
+                         "35=5\x01") == std::string::npos)
+            continue;
+        const auto at = sent[i].find(
+            "\x01"
+            "58=");
+        const auto from = at == std::string::npos ? at : at + 4;
+        logout_texts.push_back(at == std::string::npos
+                                   ? std::string{"<no 58>"}
+                                   : sent[i].substr(from, sent[i].find('\x01', from) - from));
+    }
+    EXPECT_EQ(logout_texts,
+              (std::vector<std::string>{"MsgSeqNum too low, expecting 2 but received 1"}))
+        << "2c: one Logout with the too-low text";
     const auto st = sess.state();
-    EXPECT_EQ(st, fixpp::session::fsm_state::Active)
-        << "2c: Too-low Heartbeat must be silently ignored (Active) per 013 T020-A; "
-        << "got state=" << static_cast<int>(st);
+    EXPECT_EQ(st, fixpp::session::fsm_state::Disconnected)
+        << "2c: the session ends after the Logout; got state=" << static_cast<int>(st);
 }
 
 // ── 2q_MsgTypeNotValid ────────────────────────────────────────────────────────

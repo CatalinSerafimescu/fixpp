@@ -281,27 +281,45 @@ TEST_F(SeqnumGapFatalTest, NoResendRequestEmittedOnTooHighGap) {
         << "Got state=" << static_cast<int>(st);
 }
 
-// ── Test 3: Too-low Heartbeat(35=0) in Active → silently ignored (stays Active)
+// ── Test 3: Too-low Heartbeat(35=0) in Active → the too-low Logout, then Disconnected
 //
-// 013 T020-A / T026: too-low Heartbeat(0) is silently dropped (no disconnect)
-// so that liveness-warmup passes (which re-send the same seq) don't disrupt
-// an otherwise healthy session. Non-Heartbeat too-low messages remain fatal.
-// [spec.md FR-009 warmup behaviour; T020-A dual-gate; T006a catch-site migration]
+// 103 (research D6 and D9; FR-018, fixpp#581) supersedes 013 T020-A's silent drop of a
+// too-low Heartbeat: without PossDupFlag(43) it draws QuickFIX's too-low Logout, as any
+// other too-low frame does, and the session ends.
 
 TEST_F(SeqnumGapFatalTest, ActiveTooLowBecomesSessionFatal) {
     auto cfg = make_cfg();
+    std::vector<std::string> sent;
+    cfg.transport_send = [&sent](std::span<const std::byte> b) {
+        sent.emplace_back(reinterpret_cast<const char*>(b.data()), b.size());
+    };
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess));
+    const auto mark = sent.size();
 
     // In Active: next expected = 2. Send Heartbeat at seq=1 (too low).
-    // 013: too-low Heartbeat is silently ignored; session stays Active.
     auto hb = make_heartbeat_frame("FIX.4.2", 1, "TW", "ISLD");
-    (void)feed_sync(sess, hb);  // outcome checked below via state, not the return value
+    (void)feed_sync(sess, hb);  // outcome checked below via state and the written frames
 
     const auto st = sess.state();
-    EXPECT_EQ(st, fsm_state::Active)
-        << "013: too-low Heartbeat(0) silently ignored; session stays Active. "
+    EXPECT_EQ(st, fsm_state::Disconnected)
+        << "FR-018: a too-low Heartbeat without 43=Y ends the session. "
         << "Got state=" << static_cast<int>(st);
+    std::vector<std::string> logout_texts;
+    for (std::size_t i = mark; i < sent.size(); ++i) {
+        if (sent[i].find("\x01"
+                         "35=5\x01") == std::string::npos)
+            continue;
+        const auto at = sent[i].find(
+            "\x01"
+            "58=");
+        const auto from = at == std::string::npos ? at : at + 4;
+        logout_texts.push_back(at == std::string::npos
+                                   ? std::string{"<no 58>"}
+                                   : sent[i].substr(from, sent[i].find('\x01', from) - from));
+    }
+    EXPECT_EQ(logout_texts,
+              (std::vector<std::string>{"MsgSeqNum too low, expecting 2 but received 1"}));
 }
 
 // ── Test 4: LogonSent + unexpected inbound → Disconnected (matrix-strict) ────

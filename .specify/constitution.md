@@ -1,4 +1,48 @@
 <!--
+Sync Impact Report — v4.3 → v4.4 (2026-11-15) — PENDING
+  Pending. Article XX §2 sequence, in this order: Codex Gate A on feature 103 (which reviews this text in
+    specs/103-resend-logon-reset-fidelity/contracts/constitution-xi3-amendment.md), THEN a scoped Codex
+    Gate A review of the amended clause body as applied, THEN Gate B on 103's PR (Article XVII §2), THEN
+    owner sign-off (Article XX §2), each recorded under Review and sign-off below. This header reads
+    PENDING until all four have happened, then RATIFIED.
+  Bump: MINOR. Article XX §4 makes only backwards-incompatible amendments (banned-pattern additions,
+    perf-budget tightening) v-major; a permissive exception is therefore MINOR by implication and by the
+    097 (v4.3) precedent. No CHANGELOG.md entry. Does a PR mergeable under v4.3 fail under
+    v4.4? None does: the amendment permits one more shape and adds no banned pattern, budget or
+    obligation.
+    NOTE: the constitution's version is independent of the library's and of the C ABI's.
+  Modified: Article XI §3 — a sentence inserted after its first sentence: one exception to
+    "the only allowed mutex shape for coroutines", for the serialisation of outbound frames against a
+    resend answer and the wait of an in-place reconnect for the session's in-flight outbound frames and
+    inbound chain, only (feature 103): a strand-confined shared/exclusive gate, detail::replay_gate,
+    whose every acquire, and every release and wake made by a resumed coroutine, runs in its session's
+    serialised execution domain (a release by the destructor of a frame destroyed unresumed runs only
+    while that domain's execution context is destroyed, when no handler of it runs again), with no OS primitive and no atomic, never
+    blocking a thread, never changing its caller's cancellation filter or state, needing no unlock
+    before destruction and no teardown drain, not a general session send gate; any other use needs
+    its own amendment.
+  Modified at the RATIFIED flip: the `> **Status:**` blockquote (v4.4 first, v4.3 moved to "Prior").
+  Unchanged: Article XV §9 (bans std::mutex; its pointer to §3 follows the amended clause) and
+    Article XV §3.
+  Rationale: fixpp#588 as widened by the owner (2026-11-14) orders Session::send, the liveness loop's
+    Heartbeat and TestRequest, close()'s Logout and the pending-Logout acknowledgement around a resend
+    answer, with no wait and no allocation on the normal path and no terminal cancellation filter
+    left on the caller (spec FR-014, FR-015). async_mutex is exclusive only (sends would queue behind
+    each other), its lock sequence leaves #583's terminal filter, and it needs a cancel_and_drain in
+    both teardowns (#544 R-10); the gate has none of these (research D5′).
+  Affected catalogue rows: none. Affected specs: specs/103-resend-logon-reset-fidelity/ (research D5′,
+    plan Constitution Check). Brain: brain/components/session.md's #544 note on "a session send gate".
+  Rides: feature 103; its PR is titled in Article XX §2 form
+    (`Constitution: amend §XI.3 — strand-confined replay gate for resend-answer serialisation`, as a
+    prefix or the title, as 097 did).
+  Review and sign-off: filled in this order before the RATIFIED flip. Gate A: feature 103
+    converged at loop 2 round 3 (post-judging P1=0 P2=0 P3=5; all five P3s applied; no gate-level
+    waiver), owner-signed-off 2026-11-15 at bundle commit e0325d05.
+    Scoped amendment round: one Codex round on the applied clause (c0107e44): P1=0 P2=1 P3=0;
+    the P2 was this placeholder, filled in the commit "103 P0: Sync Impact Report — record
+    Gate A and the scoped round". Gate B: <PR, rounds>. Owner sign-off: <date>.
+-->
+<!--
 Sync Impact Report — v4.2 → v4.3 (2026-10-29) — RATIFIED
   Ratified. Article XX §2 sequence observed in order: Codex Gate A on feature 097, THEN a scoped Codex
     Gate A review of the amended clause bodies (tasks T003a; the Article XX §2 Codex Gate A review of
@@ -795,7 +839,7 @@ Sync Impact Report — v0.6 → v0.7 (2026-07-14) — RATIFIED
 
 1. **C++20/23 coroutines (`asio::awaitable<T>`) are the session/transport composition primitive.** Logon flow, recv, gap-fill, TLS handshake — all coroutines.
 2. **Cancellation: ASIO native cancellation slots end-to-end.** No parallel `stop_token` abstraction. `fixpp_session_close()` from the C ABI signals the cancellation slot.
-3. **Awaitable mutex required in coroutine context.** `fixpp::sync::async_mutex` (own implementation, BSL-1.0 algorithm attribution to avast/asio-mutex) is the only allowed mutex shape for coroutines. **Plain `std::mutex` is banned in any header that includes `asio::awaitable<...>`.** Enforced by clang-tidy custom check or grep gate.
+3. **Awaitable mutex required in coroutine context.** `fixpp::sync::async_mutex` (own implementation, BSL-1.0 algorithm attribution to avast/asio-mutex) is the only allowed mutex shape for coroutines. One exception is permitted, for the serialisation of outbound frames against a resend answer and the wait of an in-place reconnect for the session's in-flight outbound frames and inbound chain, only (feature 103): a **strand-confined shared/exclusive gate**, `detail::replay_gate`, whose every acquire, and every release and wake made by a resumed coroutine, runs in its session's serialised execution domain (the domain that already orders the session's plain-member state, such as its send slot); a release made by the destructor of a coroutine frame destroyed without being resumed runs only while that domain's execution context is being destroyed, when no handler of the domain runs or will run again; which uses no OS synchronisation primitive and no atomic, never blocks a thread, never resets or otherwise changes its caller's cancellation filter or cancellation state, and needs no unlock before its destruction and no drain at teardown; it is not a general session send gate, and any other use of such a gate requires its own amendment. **Plain `std::mutex` is banned in any header that includes `asio::awaitable<...>`.** Enforced by clang-tidy custom check or grep gate.
 4. **Application threading default: per-session strand.** Users who say nothing get callbacks serialised per session, never on the I/O thread. Custom executors are opt-in (per SYNTHESIS §3.2 Q6c).
 5. **Hot-path lock policy: per-session policy with hard-coded callsite caps.** Default = mutex. Spin opt-in via session config. Store-write path always uses mutex regardless of policy (SYNTHESIS §3.2 Q8).
 6. **Coroutine frame allocation: HALO-first.** PMR fallback per-awaiter where HALO doesn't fire. No global compiler-version pin (Article II §4). *(Limit — see §XV.1 scope: a cross-executor offload completion frame falls back to neither HALO nor PMR; §XV.1 permits a single bounded O(1) such frame per durable-I/O op on the §XV.4 FileStore offload path.)*

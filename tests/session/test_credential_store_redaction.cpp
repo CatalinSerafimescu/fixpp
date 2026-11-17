@@ -396,6 +396,7 @@ TEST(Masker_SameLength_FieldAnchored_unit, I_FrameHasGenuine554_Detector) {
 // Must be at file scope for the LD_PRELOAD override to bind. (T011 alloc gate;
 // mirrors the NoHeap pattern in test_next_expected_msgseqnum.cpp.)
 #include "support/alloc_guard_markers.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 namespace fixpp_redaction_session {
@@ -674,7 +675,9 @@ TEST(CredentialStoreRedaction, T005_Persisted_LogonPassword_AbsentFromStoreFile_
 
     {
         Session initiator{engine, init_cfg, &registry};
-        auto r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
+        auto r = asio::co_spawn(fixpp::test_support::session_executor_of(initiator, sx),
+                                initiator.open(), asio::use_future)
+                     .get();
         ASSERT_TRUE(r.has_value()) << "open() must succeed for a configured FIXT initiator";
     }
     // Session destructs here — advisory lock released, FileStore flushed.
@@ -756,12 +759,14 @@ TEST(CredentialStoreRedaction, T005_Acceptor_ReplyLogon_PasswordMaskedInStore) {
 
     {
         Session acceptor{engine, acpt_cfg, &registry};
-        auto open_r = asio::co_spawn(sx, acceptor.open(), asio::use_future).get();
+        auto open_r = asio::co_spawn(fixpp::test_support::session_executor_of(acceptor, sx),
+                                     acceptor.open(), asio::use_future)
+                          .get();
         ASSERT_TRUE(open_r.has_value()) << "Acceptor open() must succeed";
 
         // Feed a valid inbound FIXT Logon from the peer (INITR → ACCEPTR).
         auto peer_logon = make_fixt_logon("INITR", "ACCEPTR", 1, "9");
-        auto inb_r = asio::co_spawn(sx,
+        auto inb_r = asio::co_spawn(fixpp::test_support::session_executor_of(acceptor, sx),
                                     acceptor.on_inbound_frame(std::span<const std::byte>{
                                         peer_logon.data(), peer_logon.size()}),
                                     asio::use_future)
@@ -774,8 +779,8 @@ TEST(CredentialStoreRedaction, T005_Acceptor_ReplyLogon_PasswordMaskedInStore) {
         // stack session — UAF visible under ASan.
         // [feedback_executor_compat_dispatch_guard_outlives_stack_session]
         // Teardown; call alone (not its result) drains the detached liveness loop.
-        (void)asio::co_spawn(sx, acceptor.close(fixpp::session::close_mode::terminal),
-                             asio::use_future)
+        (void)asio::co_spawn(fixpp::test_support::session_executor_of(acceptor, sx),
+                             acceptor.close(fixpp::session::close_mode::terminal), asio::use_future)
             .get();
     }
     // Session destructs — FileStore flushed, liveness loop drained.
@@ -848,7 +853,9 @@ TEST(CredentialStoreRedaction, T005_InMemoryStore_CredentialedLogon_AlsoMasked) 
     };
 
     Session initiator{engine, init_cfg, &registry};
-    auto r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
+    auto r = asio::co_spawn(fixpp::test_support::session_executor_of(initiator, sx),
+                            initiator.open(), asio::use_future)
+                 .get();
     ASSERT_TRUE(r.has_value()) << "open() must succeed";
 
     // Pre-check: wire carries cleartext.
@@ -929,7 +936,9 @@ TEST(CredentialStoreRedaction, T008_Wire_LogonPassword_UnmaskedOnTransmit) {
     };
 
     Session initiator{engine, init_cfg, &registry};
-    auto r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
+    auto r = asio::co_spawn(fixpp::test_support::session_executor_of(initiator, sx),
+                            initiator.open(), asio::use_future)
+                 .get();
     ASSERT_TRUE(r.has_value()) << "open() must succeed for a FIXT initiator with password";
 
     ASSERT_FALSE(wire_out.empty()) << "Initiator must emit a Logon at open()";
@@ -994,7 +1003,9 @@ TEST(CredentialStoreRedaction, T009_CredentialFreeLogon_StoredByteIdenticalToWir
     };
 
     Session initiator{engine, init_cfg, &registry};
-    auto r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
+    auto r = asio::co_spawn(fixpp::test_support::session_executor_of(initiator, sx),
+                            initiator.open(), asio::use_future)
+                 .get();
     ASSERT_TRUE(r.has_value()) << "open() must succeed for a credential-free FIXT initiator";
 
     ASSERT_FALSE(wire_out.empty()) << "Initiator must emit a Logon at open()";
@@ -1078,7 +1089,9 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
     Session initiator{engine, init_cfg, &registry};
 
     // Step 1: open initiator (emits Logon, stays LogonSent).
-    auto init_open_r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
+    auto init_open_r = asio::co_spawn(fixpp::test_support::session_executor_of(initiator, sx),
+                                      initiator.open(), asio::use_future)
+                           .get();
     ASSERT_TRUE(init_open_r.has_value()) << "Initiator open() must succeed";
     ASSERT_FALSE(init_wire_out.empty()) << "Initiator must emit a Logon";
 
@@ -1086,7 +1099,7 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
     // Sender and target are from the acceptor's perspective: 49=ACCEPTR, 56=INITR.
     auto peer_reply = make_fixt_logon("ACCEPTR", "INITR", 1, "9");
 
-    auto inb_r = asio::co_spawn(sx,
+    auto inb_r = asio::co_spawn(fixpp::test_support::session_executor_of(initiator, sx),
                                 initiator.on_inbound_frame(std::span<const std::byte>{
                                     peer_reply.data(), peer_reply.size()}),
                                 asio::use_future)
@@ -1111,7 +1124,7 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
 
     auto send_r =
         asio::co_spawn(
-            sx,
+            fixpp::test_support::session_executor_of(initiator, sx),
             initiator.send(std::span<const std::byte>{payload_bytes.data(), payload_bytes.size()}),
             asio::use_future)
             .get();
@@ -1157,8 +1170,8 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
     // session — UAF visible under ASan.
     // [feedback_executor_compat_dispatch_guard_outlives_stack_session]
     // Teardown; call alone (not its result) drains the detached liveness loop.
-    (void)asio::co_spawn(sx, initiator.close(fixpp::session::close_mode::terminal),
-                         asio::use_future)
+    (void)asio::co_spawn(fixpp::test_support::session_executor_of(initiator, sx),
+                         initiator.close(fixpp::session::close_mode::terminal), asio::use_future)
         .get();
     pool.join();  // drain+join workers before executor-holding locals destruct (teardown-race fix)
 }
@@ -1220,11 +1233,13 @@ TEST(CredentialStoreRedaction, AppUserRequest_CredentialFieldsStoredInCleartext_
     std::vector<std::byte> wire_after_resend;
     {
         Session initiator{engine, init_cfg, &registry};
-        auto open_r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
+        auto open_r = asio::co_spawn(fixpp::test_support::session_executor_of(initiator, sx),
+                                     initiator.open(), asio::use_future)
+                          .get();
         EXPECT_TRUE(open_r.has_value()) << "open() must succeed for a configured FIXT initiator";
 
         auto peer_reply = make_fixt_logon("ACCEPTR", "INITR", 1, "9");
-        auto inb_r = asio::co_spawn(sx,
+        auto inb_r = asio::co_spawn(fixpp::test_support::session_executor_of(initiator, sx),
                                     initiator.on_inbound_frame(std::span<const std::byte>{
                                         peer_reply.data(), peer_reply.size()}),
                                     asio::use_future)
@@ -1247,7 +1262,7 @@ TEST(CredentialStoreRedaction, AppUserRequest_CredentialFieldsStoredInCleartext_
         for (char c : payload) payload_bytes.push_back(static_cast<std::byte>(c));
 
         wire_out.clear();
-        auto send_r = asio::co_spawn(sx,
+        auto send_r = asio::co_spawn(fixpp::test_support::session_executor_of(initiator, sx),
                                      initiator.send(std::span<const std::byte>{
                                          payload_bytes.data(), payload_bytes.size()}),
                                      asio::use_future)
@@ -1269,7 +1284,7 @@ TEST(CredentialStoreRedaction, AppUserRequest_CredentialFieldsStoredInCleartext_
         rr_bytes.reserve(rr.size());
         for (char c : rr) rr_bytes.push_back(static_cast<std::byte>(c));
         wire_out.clear();
-        auto rr_r = asio::co_spawn(sx,
+        auto rr_r = asio::co_spawn(fixpp::test_support::session_executor_of(initiator, sx),
                                    initiator.on_inbound_frame(std::span<const std::byte>{
                                        rr_bytes.data(), rr_bytes.size()}),
                                    asio::use_future)
@@ -1277,7 +1292,8 @@ TEST(CredentialStoreRedaction, AppUserRequest_CredentialFieldsStoredInCleartext_
         EXPECT_TRUE(rr_r.has_value()) << "on_inbound_frame must accept the ResendRequest";
         wire_after_resend = wire_out;
 
-        (void)asio::co_spawn(sx, initiator.close(fixpp::session::close_mode::terminal),
+        (void)asio::co_spawn(fixpp::test_support::session_executor_of(initiator, sx),
+                             initiator.close(fixpp::session::close_mode::terminal),
                              asio::use_future)
             .get();
     }
@@ -1361,7 +1377,9 @@ TEST(CredentialStoreRedaction, T007_OversizedCredential_OpenRejects_Initiator) {
     cfg.transport_send = [&](std::span<const std::byte> f) { wire_out.assign(f.begin(), f.end()); };
 
     Session initiator{engine, cfg, &registry};
-    auto r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
+    auto r = asio::co_spawn(fixpp::test_support::session_executor_of(initiator, sx),
+                            initiator.open(), asio::use_future)
+                 .get();
 
     ASSERT_FALSE(r.has_value()) << "open() must reject an oversized credential (T007)";
     EXPECT_EQ(r.error(), fixpp::core::error::invalid_session_config)
@@ -1390,7 +1408,9 @@ TEST(CredentialStoreRedaction, T007_OversizedCredential_OpenRejects_Acceptor) {
     cfg.password = std::string(300, 'x');  // > kMaxMaskableLogonBytes, FQ-3-clean
 
     Session acceptor{engine, cfg, &registry};
-    auto r = asio::co_spawn(sx, acceptor.open(), asio::use_future).get();
+    auto r = asio::co_spawn(fixpp::test_support::session_executor_of(acceptor, sx), acceptor.open(),
+                            asio::use_future)
+                 .get();
 
     ASSERT_FALSE(r.has_value())
         << "acceptor open() must reject an oversized credential (T007/FR-004)";
@@ -1460,7 +1480,9 @@ TEST(CredentialStoreRedaction, T010_OverBound_SmallBoundSeam_SkipStoreButTransmi
     };
 
     Session initiator{engine, init_cfg, &registry};
-    auto open_r = asio::co_spawn(sx, initiator.open(), asio::use_future).get();
+    auto open_r = asio::co_spawn(fixpp::test_support::session_executor_of(initiator, sx),
+                                 initiator.open(), asio::use_future)
+                      .get();
     ASSERT_TRUE(open_r.has_value()) << "open() must succeed";
     ASSERT_NE(factory_raw->last_store, nullptr);
     MemoryStore* store = factory_raw->last_store;

@@ -2400,6 +2400,14 @@ jobs:
       - name: Regression pin — ccache GHCR script dispositions (#240)
         run: bash ci/test-ccache-scripts.sh
 
+      # 103 (tasks T160): the sccache archive is zstd-compressed and split into
+      # parts with a manifest. The harness round-trips one part and several, reads
+      # a legacy archive, shows a pre-103 restore MISSing on a new one and the
+      # manifest refusing a truncated or reordered part, then requires each of its
+      # mutants RED. bash, coreutils, tar, zstd and python3; no network, no build.
+      - name: Regression pin — sccache archive format (103)
+        run: bash ci/test-sccache-archive.sh
+
       # The ctest cells in bindings/python/CMakeLists.txt only ever exercise the
       # layout the local tree produces; they cannot show which BROKEN layouts the
       # witness would certify. Gate B round 2 measured three it did, and this

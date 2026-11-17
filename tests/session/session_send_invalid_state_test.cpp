@@ -44,6 +44,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -133,7 +134,8 @@ protected:
 
     // Open and run, returning the result.
     fixpp::core::expected_t<void> open_sync(fixpp::session::Session& s) {
-        auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc), s.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
                                                         "SendInvalidStateTest::open_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -147,7 +149,8 @@ protected:
     // Feed an inbound frame.
     fixpp::core::expected_t<void> feed_sync(fixpp::session::Session& s,
                                             std::span<const std::byte> frame) {
-        auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc),
+                                  s.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
                                                         "SendInvalidStateTest::feed_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -161,8 +164,8 @@ protected:
     // Call send() with a dummy payload, return the result.
     fixpp::core::expected_t<void> send_sync(fixpp::session::Session& s) {
         std::array<std::byte, 4> payload{};
-        auto fut =
-            asio::co_spawn(ioc, s.send(std::span<const std::byte>(payload)), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(s, ioc),
+                                  s.send(std::span<const std::byte>(payload)), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
                                                         "SendInvalidStateTest::send_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -240,7 +243,8 @@ TEST_F(SendInvalidStateTest, SendInDisconnected_ReturnsInvalidStateForSend) {
 
     // close(terminal) → Disconnected.
     {
-        auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::terminal), asio::use_future);
+        auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                        sess.close(close_mode::terminal), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(
                 ioc, close_fut, 200ms, "SendInDisconnected_ReturnsInvalidStateForSend")) {
             fixpp::test_support::cancel_and_drain_or_report(

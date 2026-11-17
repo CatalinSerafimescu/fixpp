@@ -350,9 +350,9 @@ TEST_P(StandbyRehydrate_Initiator, RehydratesOnReconnect) {
                                        fx.ioc().get_executor(), *endpoint);
 
     // Knob: refresh_on_logon=true (the 025 knob under test).
-    // bilateral_lenient required: bilateral_strict suppresses re-hydrate (INV-RoL-3).
+    // The default policy (bilateral_lenient since feature 103) keeps the re-hydrate;
+    // bilateral_strict would suppress it (INV-RoL-3).
     cfg.refresh_on_logon = true;
-    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     // enable_next_expected_msg_seq_num=true so the 789 behind-side tolerance covers
     // any peer-ahead inbound seqnum after the primary run (SC-004 / W5 / L-029-1).
     cfg.enable_next_expected_msg_seq_num = true;

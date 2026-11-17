@@ -23,6 +23,7 @@
 #pragma once
 
 #include <asio/any_io_executor.hpp>
+#include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
@@ -34,7 +35,9 @@
 #include <filesystem>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/application.hpp>
+#include <fixpp/session/direction.hpp>
 #include <fixpp/session/file_store.hpp>
+#include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <functional>
 #include <future>
@@ -323,6 +326,48 @@ public:
     // Every frame the peer has read from byte `from` of its input on.
     [[nodiscard]] std::vector<std::string> peer_frames_from(std::size_t from) const {
         return store_hold::split_frames(std::string_view{rig.peer.received}.substr(from));
+    }
+
+    // A store call of the cell's own for store_hold to catch: next_seqnum(inbound, true)
+    // through the session's store, spawned on the session's executor; it takes no hold
+    // of the session's own. store_hold catches only a call that offloads while
+    // FileStore's lock is taken: re-derive which do from the g_store_offload_probe loads
+    // in src/session/file_store.cpp. The call advances the store's inbound number by one
+    // past what the session persisted.
+    [[nodiscard]] std::future<void> spawn_own_inbound_advance(fixpp::session::Session& s) {
+        auto* const store = log->store;
+        return asio::co_spawn(
+            s.executor().underlying(),
+            [store]() -> asio::awaitable<void> {
+                (void)co_await store->next_seqnum(fixpp::session::direction_t::inbound, true);
+            },
+            asio::use_future);
+    }
+
+    // The store's next number for `dir`, read through the session's store on the
+    // session's executor; nullopt when the read did not complete or failed.
+    [[nodiscard]] std::optional<fixpp::session::seqnum_t> store_next(
+        fixpp::session::Session& s, fixpp::session::direction_t dir) {
+        auto* const store = log->store;
+        if (store == nullptr) return std::nullopt;
+        auto fut = asio::co_spawn(s.executor().underlying(), store->next_seqnum(dir, false),
+                                  asio::use_future);
+        if (!rig.run_until([&] { return ready(fut); })) return std::nullopt;
+        auto const r = fut.get();
+        if (!r) return std::nullopt;
+        return *r;
+    }
+
+    // The inbound advances (next_seqnum(inbound, true)) recorded after `mark` that
+    // returned a value.
+    [[nodiscard]] std::size_t inbound_advances_after(std::size_t mark) const {
+        std::size_t n = 0;
+        for (auto const& c : log->calls()) {
+            n += static_cast<std::size_t>(c.called_at > mark && c.op == store_op::next_seqnum &&
+                                          c.dir == fixpp::session::direction_t::inbound &&
+                                          c.increment && c.returned() && !c.error);
+        }
+        return n;
     }
 
 private:

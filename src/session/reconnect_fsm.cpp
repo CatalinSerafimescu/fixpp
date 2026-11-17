@@ -94,9 +94,10 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
 //
 // Cancellation: co_await asio::this_coro::reset_cancellation_state(
 //   asio::enable_total_cancellation()) at the top of the coroutine so that
-//   cancellation_type::total (from root_cancel_ at Session::close) propagates
-//   through the nested awaits and releases the partially-built transport via
-//   RAII (SC-004). [[feedback_asio_cospawn_total_cancellation_default]].
+//   cancellation_type::total from the caller's slot propagates (Session::
+//   drive_reconnect is not bound to the Session's root slot; see Session::
+//   root_cancel_, cell RS-1) through the nested awaits and releases the partially-built transport
+//   via RAII (SC-004). [[feedback_asio_cospawn_total_cancellation_default]].
 //
 // factory_ null guard: if no factory is configured the coroutine co_returns
 // an error immediately (non-retried; test fixtures may construct a ReconnectFsm
@@ -314,9 +315,10 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
         // profiles — the fail-closed null-cast path (non-TLS transport on a TLS
         // profile is still a bug) is provably unchanged. [data-model §E-5; D-7]
         if (is_plaintext_) {
-            if (session_ != nullptr) {
-                session_->install_reconnected_transport(std::move(t),
-                                                        fixpp::transport::handshake_result{});
+            // 103 (research D1 step 4): the install is the commit point.
+            if (session_ != nullptr && !session_->install_reconnected_transport(
+                                           std::move(t), fixpp::transport::handshake_result{})) {
+                co_return std::unexpected{error::session_already_closed};
             }
             co_return expected_t<void>{};
         }
@@ -390,8 +392,10 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
         }
 
         // ── Step 8: Success handoff → Session::install_reconnected_transport ──
-        if (session_ != nullptr) {
-            session_->install_reconnected_transport(std::move(t), std::move(hr));
+        // 103 (research D1 step 4): the install is the commit point.
+        if (session_ != nullptr &&
+            !session_->install_reconnected_transport(std::move(t), std::move(hr))) {
+            co_return std::unexpected{error::session_already_closed};
         }
         // (If session_ is null the transport is simply dropped — test-only path
         // where ReconnectFsm is tested standalone without a Session owner.)
@@ -451,7 +455,8 @@ ReconnectFsm::run_inbound_liveness_watch() noexcept {
 // ── exit_awaiting_resend ──────────────────────────────────────────────────────
 //
 // Clear the AwaitingResend transient flag and reset resend_state_. Called by
-// session.cpp when the gap closes. [data-model §E-1]
+// session.cpp when the gap closes and, since 103 (research D1), when a new transport
+// is installed (Session::install_reconnected_transport). [data-model §E-1]
 void ReconnectFsm::exit_awaiting_resend() noexcept {
     awaiting_resend_ = false;
     resend_state_.reset();

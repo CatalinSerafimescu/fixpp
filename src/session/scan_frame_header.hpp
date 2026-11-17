@@ -68,6 +68,9 @@ struct FrameHeader {
         next_expected_msg_seq_num;  // tag 789 value (may be empty if field present-but-empty) — 027
     bool next_expected_present =
         false;  // tag 789 was present in frame (even if value is empty) — 027
+    // 103 (research D3; FR-013): set when tag 7 is present; distinguishes an absent BeginSeqNo
+    // (Reject 373=1, 371=7) from 7=0 (answered as 7=1).
+    bool begin_seqno_present = false;
 
     // 092 E-1: the first-fault record and the positional header identification.
     // The members above, but `msg_type`, keep last-wins among the fields read before
@@ -172,7 +175,8 @@ inline constexpr std::string_view kRejectTextLengthDataMismatch =
         switch (tag) {
             case 7:
                 h.begin_seqno = val;
-                break;  // T026 ResendRequest
+                h.begin_seqno_present = true;  // 103 D3
+                break;                         // T026 ResendRequest
             case 8:
                 h.begin_string = val;
                 break;

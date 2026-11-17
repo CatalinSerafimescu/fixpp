@@ -54,6 +54,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/transport_double.hpp"
 
 using namespace std::chrono_literals;
@@ -179,7 +180,8 @@ protected:
     }
 
     void drive_to_active(Session& sess) {
-        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
+                                  asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
             fixpp::test_support::cancel_and_drain_or_report(
                 ioc, *clock, "CancellationTwoPhaseTest::drive_to_active/open");
@@ -191,7 +193,8 @@ protected:
         ASSERT_EQ(sess.state(), fsm_state::LogonSent);
 
         auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
-        auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
+        auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                   sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
             fixpp::test_support::cancel_and_drain_or_report(
                 ioc, *clock, "CancellationTwoPhaseTest::drive_to_active/logon");
@@ -220,7 +223,8 @@ TEST_F(CancellationTwoPhaseTest, CloseTerminalSkipsPhase1) {
     // Record sent count before terminal close.
     const std::size_t sent_before = td.sent_count();
 
-    auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::terminal), asio::use_future);
+    auto close_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                    sess.close(close_mode::terminal), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
                                                         "CloseTerminalSkipsPhase1/close");
@@ -254,7 +258,8 @@ TEST_F(CancellationTwoPhaseTest, CloseIdempotent) {
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // First close: starts the graceful-close sequence.
-    auto fut1 = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto fut1 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                               sess.close(close_mode::graceful), asio::use_future);
 
     // #289 STAGING BARRIER. Phase 1 must be PARKED on its mock-clock sleep before the
     // advance below, or that advance lands on a timer that is not yet armed and is
@@ -271,7 +276,8 @@ TEST_F(CancellationTwoPhaseTest, CloseIdempotent) {
     }
 
     // Second close during phase 1 (idempotent — should attach to the in-flight result).
-    auto fut2 = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                               sess.close(close_mode::graceful), asio::use_future);
 
     // Advance clock past timeout to complete.
     clock->advance(std::chrono::seconds{3});
@@ -338,7 +344,8 @@ TEST_F(CancellationTwoPhaseTest, ChildCancellationStateIsolatesLogout) {
 
     // Start graceful close. Run briefly to let phase-1 start (Logout emitted,
     // state → LogoutSent) and the sleep_until registered in mock_clock.
-    auto fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                              sess.close(close_mode::graceful), asio::use_future);
 
     // #289 STAGING BARRIER, and it REPLACES a post-hoc assertion rather than adding
     // to one. The `EXPECT_EQ(state, LogoutSent)` that used to sit here after a blind
@@ -402,7 +409,8 @@ TEST_F(CancellationTwoPhaseTest, GracefulCloseFromAlreadyClosed) {
     // THEN advance past the 2s timeout. The advance MUST come AFTER the
     // sleep_until is registered (same pattern as NeverConfirmedForceDisconnect
     // in logout_exchange_test.cpp: run_for(100ms) → advance → run_for again).
-    auto fut1 = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto fut1 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                               sess.close(close_mode::graceful), asio::use_future);
     // ⚠️ AN EARLIER REVISION LEFT THIS WINDOW BLIND ON A CORRECT PREMISE AND A WRONG
     // CONCLUSION, and the comment is replaced rather than annotated. The premise: `fut1`
     // is NOT expected to be ready here, so `run_window_then_ready` would report a miss
@@ -433,7 +441,8 @@ TEST_F(CancellationTwoPhaseTest, GracefulCloseFromAlreadyClosed) {
     (void)fut1.get();
 
     // Second close on already-closed session.
-    auto fut2 = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+    auto fut2 = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                               sess.close(close_mode::graceful), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
             ioc, *clock, "GracefulCloseFromAlreadyClosed/second-close");

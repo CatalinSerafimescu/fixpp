@@ -133,7 +133,7 @@ grep -n static_assert tests/session/test_quickfix_compat_path_b_guard.cpp
 
 # The second rejection — read the accessor bodies themselves; do not reason about them.
 # (reference-engines/ is a vendored, GITIGNORED clone of the pinned upstream releases:
-#  QuickFIX-cpp v1.16.0 and QuickFIX-J 3.0.1. Paths, never line numbers.)
+#  QuickFIX-cpp v1.16.0 and QuickFIX-J 3.0.2. Paths, never line numbers.)
 grep -n 'get(FIELD &field)' reference-engines/quickfix-cpp/include/quickfix/FieldMap.h
 grep -n -A3 'get(quickfix.field.Symbol' \
   reference-engines/quickfixj/**/generated-sources/quickfix/fix44/NewOrderSingle.java

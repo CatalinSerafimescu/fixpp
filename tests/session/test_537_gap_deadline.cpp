@@ -3,11 +3,12 @@
 // tests/session/test_537_gap_deadline.cpp
 //
 // fixpp#537, D-537-5 and D-537-9 (.specify/536-537-538-recovery-liveness.md §4.3, §4.6,
-// §4.7 and the #537 table of §5): an unfilled gap has a deadline. When a frame above
-// NextNumIn arrives while a resend is outstanding, and NextNumIn has not advanced for
-// twice HeartBtInt, the session sends a Logout whose Text(58) names the unanswered resend
-// and records Disconnected. The check runs where such a frame leaves the inbound arm
-// without ending the session, and nowhere else: no timer is added.
+// §4.7 and the #537 table of §5): an unfilled gap has a deadline. When a frame that does
+// not advance NextNumIn arrives while a resend is outstanding, and NextNumIn has not
+// advanced for twice HeartBtInt, the session sends a Logout whose Text(58) names the
+// unanswered resend and records Disconnected (103 research D6 widened "above NextNumIn" to
+// every frame that does not advance it). The check runs where such a frame leaves the
+// inbound arm without ending the session, and nowhere else: no timer is added.
 //
 // E is the instant a cell's gap opened. The bound is E + kGapBound unless NextNumIn
 // advanced since.
@@ -124,26 +125,38 @@ template <class Make>
     return stream_before_the_bound(s, g, make, [](std::size_t, std::size_t, std::string const&) {});
 }
 
-// Carries the session past the bound with no frame above NextNumIn: a Heartbeat below
-// NextNumIn at each kStep from E, the last at E + kGapBound + kStep. One of them is at
-// E + kGapBound itself. After each, the session is still waiting.
-[[nodiscard]] ::testing::AssertionResult too_low_heartbeats_past_the_bound(Scene& s, Gap const& g) {
-    const int steps = static_cast<int>(kGapBound / kStep) + 1;
-    for (int i = 1; i <= steps; ++i) {
-        s.pass(kStep);
-        const auto r = s.feed(s.heartbeat(1));
-        const std::string at = "the Heartbeat below NextNumIn at E + " + seconds_text(i * kStep);
-        if (!r) {
-            return ::testing::AssertionFailure()
-                   << at << ": on_inbound_frame returned error " << static_cast<int>(r.error());
-        }
-        if (auto waiting = still_waiting(s, g, at); !waiting) return waiting;
+// Carries the session past the bound with no frame the deadline acts on. After one quiet
+// HeartBtInt the loop writes a TestRequest; the peer answers it, before the bound, with a
+// Heartbeat above NextNumIn, which clears it (B-537-3); then the clock moves one HeartBtInt
+// and a second, to just past E + kGapBound, where the loop writes its second TestRequest,
+// whose grace ends near E + 3 HB. Precondition: the gap opened at the clock's instant on
+// entry. Returns the size of `sent` after the carry, or 0 after a failed gate. The carry
+// writes TestRequests, so a cell that reads `still_waiting` afterwards counts from the
+// returned size.
+[[nodiscard]] std::size_t answered_test_request_past_the_bound(Scene& s, Gap const& g) {
+    const auto e = s.mock->steady_now();
+    s.pass(kHeartBtInt);
+    if (s.count("1", g.mark) != 1U || !s.test_request_pending()) {
+        ADD_FAILURE() << "setup: after one quiet HeartBtInt the session wrote "
+                      << s.written(g.mark);
+        return 0;
     }
-    if (!s.resend_outstanding() || s.next_in() != g.n) {
-        return ::testing::AssertionFailure()
-               << "past the bound the resend is no longer outstanding, or NextNumIn moved";
+    const auto r = s.feed(s.heartbeat(g.n + kGapWidth + 1, s.last_test_req_id()));
+    if (!r || s.state() != fsm_state::Active || s.test_request_pending()) {
+        ADD_FAILURE() << "setup: the Heartbeat above NextNumIn did not answer the TestRequest; "
+                      << "the session is " << state_name(s.state()) << " and wrote "
+                      << s.written(g.mark);
+        return 0;
     }
-    return ::testing::AssertionSuccess();
+    s.pass(kHeartBtInt + 1s);
+    if (s.mock->steady_now() - e < kGapBound || s.state() != fsm_state::Active ||
+        s.count("5", g.mark) != 0U || !s.resend_outstanding() || s.next_in() != g.n) {
+        ADD_FAILURE() << "setup: past the bound the session is " << state_name(s.state())
+                      << ", the resend outstanding is " << s.resend_outstanding()
+                      << ", NextNumIn is " << s.next_in() << "; it wrote " << s.written(g.mark);
+        return 0;
+    }
+    return s.sent.size();
 }
 
 // ── On an Engine: the cells that assert the open transport ───────────────────────────
@@ -481,16 +494,16 @@ TEST(GapDeadlineValidateGateSite, V2_InvalidFrameFromAnotherCompIdDrawsTheLogout
 
 // ── D-537-5, G1: the guards keep their dispositions ─────────────────────────────────
 //
-// Guard. The traffic that carries the session past the bound is a Heartbeat below
-// NextNumIn inside every HeartBtInt: it keeps liveness and is not above NextNumIn. A
-// frame above NextNumIn cannot be that traffic, because the first one at or after the
-// bound draws the deadline's Logout before the frame under test arrives.
+// Guard. The traffic that carries the session past the bound is
+// answered_test_request_past_the_bound's: a frame the deadline acts on cannot be that
+// traffic, because the first one at or after the bound draws the deadline's Logout before
+// the frame under test arrives.
 
 TEST(GapDeadlineGuards, G1_WrongCompIdAfterTheBound_EndsSilently) {
     Scene s{Options{.validate = true}};
     const Gap g = open_gap(s);
     ASSERT_NE(g.n, 0U);
-    ASSERT_TRUE(too_low_heartbeats_past_the_bound(s, g));
+    ASSERT_NE(answered_test_request_past_the_bound(s, g), 0U);
 
     const auto mark = s.sent.size();
     const auto r = s.feed(s.order_from_other_comp_id(g.n + kGapWidth + 1));
@@ -504,7 +517,7 @@ TEST(GapDeadlineGuards, G1_SendingTimeOutsideTheThresholdAfterTheBound_RejectThe
     Scene s{Options{.validate = true}};
     const Gap g = open_gap(s);
     ASSERT_NE(g.n, 0U);
-    ASSERT_TRUE(too_low_heartbeats_past_the_bound(s, g));
+    ASSERT_NE(answered_test_request_past_the_bound(s, g), 0U);
 
     const auto mark = s.sent.size();
     const auto r = s.feed(s.order_with_stale_sending_time(g.n + kGapWidth + 1));
@@ -558,6 +571,27 @@ TEST(GapDeadlinePossDupStage1, P1_NoOrigSendingTimeAtTheBound_LogoutAndNoReject)
 
 TEST(GapDeadlinePossDupStage1, P2_UnparseableOrigSendingTimeAtTheBound_LogoutAndNoReject) {
     run_poss_dup_stage1_site(orig::unparseable);
+}
+
+// P3 (103 research D6): a PossDup Logon at NextNumIn with no OrigSendingTime(122), past the
+// bound. Stage 1 would Reject it and, a Logon being excluded from the consume, not advance
+// NextNumIn, so it does not advance it: the deadline fires, and no Reject goes out. The
+// carry past the bound is answered_test_request_past_the_bound's.
+TEST(GapDeadlinePossDupStage1, P3_PossDupLogonAtNextNumInNoOrigSendingTimeAtTheBound_Logout) {
+    Scene s;
+    const Gap g = open_gap(s);
+    ASSERT_NE(g.n, 0U);
+    ASSERT_NE(answered_test_request_past_the_bound(s, g), 0U);
+    const auto mark = s.sent.size();
+    const auto r = s.feed(s.frame("A", g.n,
+                                  "43=Y\x01"
+                                  "98=0\x01"
+                                  "108=" +
+                                      std::to_string(kHeartBtInt.count()) + "\x01"));
+    ASSERT_TRUE(deadline_logout_written(s, mark, r));
+    EXPECT_EQ(field(s.of_type("5", mark).front(), 58),
+              "ResendRequest unanswered, expecting MsgSeqNum " + std::to_string(g.n));
+    EXPECT_EQ(s.count("3", mark), 0U) << "the session wrote " << s.written(mark);
 }
 
 // ── D-537-5, S1, S2 and S3: the Reset-mode arm ──────────────────────────────────────
@@ -650,7 +684,7 @@ TEST(GapDeadlineResetMode, S3_ResetThatAdvancesAfterTheBound_EndsTheResendAndNoL
     Scene s;
     const Gap g = open_gap(s);
     ASSERT_NE(g.n, 0U);
-    ASSERT_TRUE(too_low_heartbeats_past_the_bound(s, g));
+    ASSERT_NE(answered_test_request_past_the_bound(s, g), 0U);
 
     const auto mark = s.sent.size();
     const auto r = s.feed(s.sequence_reset(g.n + 30, g.n + 10));
@@ -661,12 +695,12 @@ TEST(GapDeadlineResetMode, S3_ResetThatAdvancesAfterTheBound_EndsTheResendAndNoL
     EXPECT_EQ(s.count("5", mark), 0U) << "the session wrote " << s.written(mark);
 }
 
-// ── D-537-5, the helper's too-high test ─────────────────────────────────────────────
+// ── D-537-5, an advance at a Reject arm ─────────────────────────────────────────────
 //
-// A frame that is not above NextNumIn never draws the Logout. Past the bound, with
-// Heartbeats below NextNumIn as the only traffic, an in-sequence frame arrives that a
-// Reject arm consumes. It advances NextNumIn, so a frame above NextNumIn straight after
-// it is ignored: the bound counts from that advance.
+// Past the bound, after answered_test_request_past_the_bound's traffic, an in-sequence
+// frame arrives that a Reject arm consumes. It advances NextNumIn, so it does not draw the
+// Logout, and a frame above NextNumIn straight after it is ignored: the bound counts from
+// that advance.
 //
 // Precondition: the gap is kGapWidth wide, so the consumed frame does not reach the
 // recorded end and the resend is still outstanding at the frame that follows.
@@ -679,7 +713,10 @@ void run_helpers_too_high_test(consumed_at where) {
     Scene s{Options{.validate = where == consumed_at::validate_gate}};
     const Gap g = open_gap(s);
     ASSERT_NE(g.n, 0U);
-    ASSERT_TRUE(too_low_heartbeats_past_the_bound(s, g));
+    // still_waiting counts from the end of the carry, which itself wrote TestRequests.
+    const auto carried = answered_test_request_past_the_bound(s, g);
+    ASSERT_NE(carried, 0U);
+    const Gap after{.n = g.n, .mark = carried};
 
     auto mark = s.sent.size();
     (void)s.feed(where == consumed_at::validate_gate ? s.invalid_order(g.n)
@@ -687,12 +724,12 @@ void run_helpers_too_high_test(consumed_at where) {
     ASSERT_EQ(s.count("3", mark), 1U)
         << "the in-sequence frame was not Rejected; the session wrote " << s.written(mark);
     ASSERT_EQ(s.next_in(), g.n + 1) << "the Rejected in-sequence frame was not consumed";
-    ASSERT_TRUE(still_waiting(s, g, "the in-sequence frame a Reject arm consumed"));
+    ASSERT_TRUE(still_waiting(s, after, "the in-sequence frame a Reject arm consumed"));
     ASSERT_TRUE(s.resend_outstanding()) << "precondition: the resend is still outstanding";
 
     mark = s.sent.size();
     (void)s.feed(s.order(g.n + kGapWidth + 1));
-    ASSERT_TRUE(still_waiting(s, g, "the frame above NextNumIn straight after the advance"));
+    ASSERT_TRUE(still_waiting(s, after, "the frame above NextNumIn straight after the advance"));
     EXPECT_EQ(s.sent.size(), mark) << "the session wrote for it: " << s.written(mark);
 }
 
@@ -928,66 +965,134 @@ TEST(GapDeadlineShortGapFill, NewResendRequestAndADeadlineThatStartsAgain) {
     EXPECT_TRUE(deadline_logout_written(s, mark, r));
 }
 
-// ── D-537-9, the residual pattern ───────────────────────────────────────────────────
+// ── #581 (103, FR-017 and FR-018): the residual pattern ends ────────────────────────
 //
-// Pin of a disclosed limitation (ruling R-11). The peer never fills the gap and, inside
-// every HeartBtInt, sends only a frame that is not above NextNumIn and moves nothing.
-// Each such frame refreshes liveness, so no TestRequest is sent, and none is above
-// NextNumIn, so the deadline is not checked. redeliver_poss_dup is off.
+// The peer never fills the gap and, inside every HeartBtInt, sends only a frame that does
+// not advance NextNumIn. Each such frame refreshes liveness, so no TestRequest is sent, and
+// each is a frame at which the deadline is checked (103 research D6, which supersedes ruling
+// R-11 and retires L-537-1). redeliver_poss_dup is off.
 
 namespace {
 
-// How long the pattern runs: three times the bound, in kStep frames.
-constexpr int kPatternFrames = static_cast<int>(3 * kGapBound / kStep);
+// The text of the deadline's Logout for a gap that opened at NextNumIn `n`.
+[[nodiscard]] std::string deadline_text(seqnum_t n) {
+    return "ResendRequest unanswered, expecting MsgSeqNum " + std::to_string(n);
+}
 
-// `member(s)` builds one frame of the pattern; each draws `rejects_each` Rejects.
+// `member(s, g)` builds one frame of the pattern; each before the bound draws
+// `rejects_each` Rejects and moves nothing. The first at the bound draws the deadline's
+// Logout, with its text, and no Reject; no TestRequest was written since the gap opened.
 template <class Member>
 void run_residual_pattern(Member member, std::size_t rejects_each) {
     Scene s;
     const Gap g = open_gap(s);
     ASSERT_NE(g.n, 0U);
     ASSERT_GT(g.n, 1U) << "the cell needs a MsgSeqNum below NextNumIn";
+    const auto make = [&](std::size_t) { return member(s, g); };
+    ASSERT_TRUE(stream_before_the_bound(
+        s, g, make, [&](std::size_t, std::size_t mark, std::string const& at) {
+            ASSERT_EQ(s.count("3", mark), rejects_each) << at << " drew " << s.written(mark);
+            ASSERT_EQ(s.next_in(), g.n) << at << " moved NextNumIn";
+            ASSERT_TRUE(s.resend_outstanding()) << at << " ended the outstanding resend";
+        }));
 
-    // fixpp#581 gives this pattern an ending, and flips the assertions of this loop.
-    for (int i = 1; i <= kPatternFrames; ++i) {
-        s.pass(kStep);
-        const auto mark = s.sent.size();
-        (void)s.feed(member(s, g));
-        const std::string at = "pattern frame " + std::to_string(i);
-        ASSERT_TRUE(still_waiting(s, g, at));
-        ASSERT_EQ(s.count("3", mark), rejects_each) << at << " drew " << s.written(mark);
-        ASSERT_EQ(s.next_in(), g.n) << at << " moved NextNumIn";
-        ASSERT_TRUE(s.resend_outstanding()) << at << " ended the outstanding resend";
-    }
-
-    // A frame above NextNumIn then draws the deadline's Logout.
+    s.pass(1ms);
     const auto mark = s.sent.size();
-    const auto r = s.feed(s.heartbeat(g.n + kGapWidth + 1));
-    EXPECT_TRUE(deadline_logout_written(s, mark, r));
+    const auto r = s.feed(member(s, g));
+    ASSERT_TRUE(deadline_logout_written(s, mark, r));
+    EXPECT_EQ(field(s.of_type("5", mark).front(), 58), deadline_text(g.n));
+    EXPECT_EQ(s.count("3", mark), 0U)
+        << "the frame at the bound drew a Reject: " << s.written(mark);
+    EXPECT_EQ(s.count("1", g.mark), 0U)
+        << "a TestRequest was written, so the liveness loop could have ended the session: "
+        << s.written(g.mark);
 }
 
 }  // namespace
 
-TEST(GapDeadlineResidualPattern, Pin_HeartbeatsBelowNextNumIn_NoEndingUntilAFrameAbove) {
-    run_residual_pattern([](Scene const& s, Gap const&) { return s.heartbeat(1); }, 0);
-}
-
-TEST(GapDeadlineResidualPattern, Pin_PossDupFramesBelowNextNumIn_NoEndingUntilAFrameAbove) {
+TEST(GapDeadlineResidualPattern, PossDupFramesBelowNextNumIn_DeadlineLogoutAtTheBound) {
     run_residual_pattern(
         [](Scene const& s, Gap const&) { return s.poss_dup_order(1, orig::valid); }, 0);
 }
 
 // A Reset-mode SequenceReset at NextNumIn with no NewSeqNo(36).
-TEST(GapDeadlineResidualPattern, Pin_ResetsAtNextNumInThatMoveNothing_NoEndingUntilAFrameAbove) {
+TEST(GapDeadlineResidualPattern, ResetsAtNextNumInThatMoveNothing_DeadlineLogoutAtTheBound) {
     run_residual_pattern([](Scene const& s, Gap const& g) { return s.sequence_reset(g.n, 0); }, 0);
 }
 
-// A PossDup application message below NextNumIn with no OrigSendingTime(122): Stage 1
-// Rejects it and does not consume it.
+// A PossDup application message below NextNumIn with no OrigSendingTime(122): before the
+// bound Stage 1 Rejects it and does not consume it; at the bound the Logout goes out alone.
 TEST(GapDeadlineResidualPattern,
-     Pin_PossDupFramesBelowNextNumInWithNoOrigSendingTime_RejectedAndNoEnding) {
+     PossDupFramesBelowNextNumInWithNoOrigSendingTime_RejectedThenDeadlineLogoutAtTheBound) {
     run_residual_pattern(
         [](Scene const& s, Gap const&) { return s.poss_dup_order(1, orig::absent); }, 1);
+}
+
+// A Heartbeat below NextNumIn without PossDupFlag(43) is a too-low frame (FR-018): the first
+// one ends the session with Arm B's Logout, before the bound.
+TEST(GapDeadlineResidualPattern, HeartbeatsBelowNextNumIn_TooLowLogoutAtTheFirst) {
+    Scene s;
+    const Gap g = open_gap(s);
+    ASSERT_NE(g.n, 0U);
+    ASSERT_GT(g.n, 1U) << "the cell needs a MsgSeqNum below NextNumIn";
+    s.pass(kStep);
+    const auto mark = s.sent.size();
+    const auto r = s.feed(s.heartbeat(1));
+    EXPECT_TRUE(r.has_value()) << "on_inbound_frame returned an error";
+    EXPECT_EQ(s.state(), fsm_state::Disconnected) << state_name(s.state());
+    const auto logouts = s.of_type("5", mark);
+    ASSERT_EQ(logouts.size(), 1U) << "the session wrote " << s.written(mark);
+    EXPECT_EQ(field(logouts.front(), 58),
+              "MsgSeqNum too low, expecting " + std::to_string(g.n) + " but received 1");
+}
+
+// AS2: before the bound only frames that move nothing; after it, the peer's GapFill at
+// NextNumIn, which advances it. It is processed and the session stays up.
+TEST(GapDeadlineResidualPattern, AS2_GapFillThatAdvancesAfterTheBound_ProcessedNoLogout) {
+    Scene s;
+    const Gap g = open_gap(s);
+    ASSERT_NE(g.n, 0U);
+    const auto e = s.mock->steady_now();
+    const auto make = [&](std::size_t) { return s.poss_dup_order(1, orig::valid); };
+    ASSERT_TRUE(
+        stream_before_the_bound(s, g, make, [&](std::size_t, std::size_t, std::string const& at) {
+            ASSERT_EQ(s.next_in(), g.n) << at << " moved NextNumIn";
+        }));
+
+    s.pass(1s);
+    ASSERT_GE(s.mock->steady_now() - e, kGapBound) << "precondition: the GapFill is past the bound";
+    const auto mark = s.sent.size();
+    const auto r = s.feed(s.gap_fill(g.n, g.n + kGapWidth));
+    EXPECT_TRUE(r.has_value()) << "on_inbound_frame returned an error";
+    EXPECT_EQ(s.next_in(), g.n + kGapWidth) << "the GapFill did not advance NextNumIn";
+    EXPECT_EQ(s.state(), fsm_state::Active) << state_name(s.state());
+    EXPECT_EQ(s.count("5", mark), 0U) << "the session wrote " << s.written(mark);
+}
+
+// AS3: frames that keep advancing NextNumIn, each followed by a frame that moves nothing.
+// The run is longer than the bound, and some of the frames that move nothing arrive more
+// than kGapBound after E but less than kGapBound after the last advance, so the deadline,
+// checked there, counts from that advance.
+TEST(GapDeadlineResidualPattern, AS3_FramesThatKeepAdvancing_NoLogout) {
+    Scene s;
+    const Gap g = open_gap(s, kReplayed);
+    ASSERT_NE(g.n, 0U);
+    const auto e = s.mock->steady_now();
+    bool checked_past_e_bound = false;
+    for (std::uint32_t k = 0; k + 1 < kReplayed; ++k) {
+        s.pass(kReplayStep);
+        const std::string at = "replay step " + std::to_string(k);
+        (void)s.feed(s.poss_dup_order(g.n + k, orig::valid));
+        ASSERT_EQ(s.next_in(), g.n + k + 1) << at << ": the replayed frame did not advance";
+        ASSERT_TRUE(s.resend_outstanding()) << at << ": the resend ended before the last frame";
+        s.pass(kStep);
+        (void)s.feed(s.poss_dup_order(1, orig::valid));
+        ASSERT_TRUE(still_waiting(s, g, at + ", the frame below NextNumIn"));
+        if (s.mock->steady_now() - e >= kGapBound) checked_past_e_bound = true;
+    }
+    EXPECT_TRUE(checked_past_e_bound)
+        << "precondition: no frame that moves nothing arrived past E + kGapBound";
+    EXPECT_EQ(s.count("5", g.mark), 0U) << "a Logout was written: " << s.written(g.mark);
 }
 
 }  // namespace fixpp::session::test

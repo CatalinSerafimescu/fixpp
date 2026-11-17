@@ -119,6 +119,7 @@
 #include "support/keep_running.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/recording_file_executor.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 #include "support/temp_dir.hpp"
 
@@ -1694,7 +1695,7 @@ SessionOutcome run_direct_session(SessionInput in, FileExec kind, char const* ce
             if (!log->wait_holders(1)) return o;
         }
         asio::co_spawn(
-            f.ioc,
+            fixpp::test_support::session_executor_of(*f.session, f.ioc),
             await_and_read<void>(
                 [&f, &payload] { return f.session->send(std::span<const std::byte>{payload}); },
                 send),

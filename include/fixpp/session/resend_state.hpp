@@ -37,7 +37,10 @@ struct held_inbound_msg {
 };
 
 // ResendState — populated on FR-009 entry (Active → awaiting_resend=true);
-// reset on gap close (awaiting_resend=false) or session exit. Value-typed;
+// reset by ReconnectFsm::exit_awaiting_resend, which is called when the gap closes
+// and when a new transport is installed (Session::install_reconnected_transport).
+// Feature 103 (specs/103-resend-logon-reset-fidelity/, research D1, FR-006/FR-007)
+// replaced the earlier "reset on gap close or session exit" wording. Value-typed;
 // embedded in ReconnectFsm. Default-construction is alloc-free (empty vector);
 // `inbound_held` has no writer (see the member's comment).
 // Validation per data-model.md §E-2:
@@ -73,7 +76,7 @@ struct ResendState {
     // changes this installed header's layout.
     std::pmr::vector<held_inbound_msg> inbound_held;
 
-    // Reset to default-constructed shape on gap close. Clears inbound_held
+    // Reset to default-constructed shape (see the struct comment for when). Clears inbound_held
     // (returning storage to the PMR arena per its policy). noexcept.
     void reset() noexcept;
 

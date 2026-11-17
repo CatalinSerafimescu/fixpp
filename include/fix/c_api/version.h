@@ -296,8 +296,40 @@
  *  of the frames a session sends follow the corrected header store and pairs.
  *  Migration: a consumer that relied on these inputs being refused checks the dictionary's
  *  content itself; no code that handles the refusal needs to change. */
+/*  1.17 (BREAKING, [const §X.7]; 103-resend-logon-reset-fidelity): the default reset
+ *  policy, and how a session ends a recovery. No symbol, signature, type or error code
+ *  changes. A consumer that never calls fixpp_session_config_set_reset_seqnum_policy now
+ *  runs FIXPP_RESET_SEQNUM_BILATERAL_LENIENT, where it ran STRICT: its initiator's Logon
+ *  carries no 141=Y unless a reset setting is on and both numbers are 1, and its
+ *  acceptor accepts a Logon without 141=Y. The observers, one line per change, each
+ *  carried by the session.h declarations named (each has a C-ABI 1.17 clause):
+ *  - the default: fixpp_reset_seqnum_policy, fixpp_session_config_create,
+ *    fixpp_session_config_set_reset_seqnum_policy;
+ *  - a STRICT acceptor refuses a Logon without 141=Y with a Logout carrying Text, and
+ *    with reset_on_logon does not reset for it: fixpp_reset_seqnum_policy,
+ *    fixpp_session_config_set_reset_on_logon;
+ *  - a default session establishes where STRICT refused it: fixpp_session_is_established,
+ *    fixpp_session_close, fixpp_session_register_callback,
+ *    fixpp_session_register_send_callback;
+ *  - a too-high Logout is acknowledged after a bounded recovery, and a send is refused
+ *    while it is pending and during any Logout ending: fixpp_session_is_established,
+ *    fixpp_session_close, fixpp_session_send, and the two register calls;
+ *  - the gap deadline acts on every frame that does not advance the expected number, and
+ *    a too-low Heartbeat without PossDupFlag(43)=Y ends the session with a Logout:
+ *    fixpp_session_is_established and the two register calls;
+ *  - sends and a graceful close's Logout wait for a running resend answer:
+ *    fixpp_session_send, fixpp_session_close.
+ *  The 1.12 sentences these change are amended in place in each observer, marked "amended
+ *  in C-ABI 1.17, 103". What no declaration carries, the counterparty's side: a
+ *  ResendRequest with BeginSeqNo(7) = 0 is answered as one with 7 = 1, and one without
+ *  tag 7 is Rejected; a too-high ResendRequest is answered; every too-low frame without
+ *  43=Y draws a Logout with Text; liveness, Logout and in-flight sends are ordered around
+ *  a resend answer; resend state clears with its connection (no reach: the C ABI has no
+ *  reconnect call). Migration: a consumer that wants the former default calls
+ *  fixpp_session_config_set_reset_seqnum_policy with FIXPP_RESET_SEQNUM_BILATERAL_STRICT,
+ *  whose 1.17 meaning fixpp_reset_seqnum_policy's clause states. */
 #define FIXPP_C_ABI_VERSION_MAJOR 1
-#define FIXPP_C_ABI_VERSION_MINOR 16 /* 1.16: dictionary record width (102), BREAKING */
+#define FIXPP_C_ABI_VERSION_MINOR 17 /* 1.17: reset policy default, endings (103), BREAKING */
 #define FIXPP_C_ABI_VERSION_PATCH 0
 
 /** Composite: (MAJOR<<16)|(MINOR<<8)|PATCH — single-integer compatibility check. */

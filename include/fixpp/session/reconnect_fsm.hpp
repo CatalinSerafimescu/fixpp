@@ -259,7 +259,9 @@ public:
 
     // Exit AwaitingResend: clear the transient flag and reset resend_state_.
     // Called by Session when the gap closes (seqnum_mgr_.next_inbound_unsafe()
-    // advances past resend_state_.outstanding_end). [data-model §E-1]
+    // advances past resend_state_.outstanding_end) and, since 103 (research D1), when
+    // a new transport is installed (Session::install_reconnected_transport).
+    // [data-model §E-1]
     void exit_awaiting_resend() noexcept;
 
     // fixpp#537 (`.specify/536-537-538-recovery-liveness.md` §4.3, D-537-5): write

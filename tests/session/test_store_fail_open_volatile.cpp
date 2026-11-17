@@ -44,6 +44,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/session_executor_of.hpp"
 
 using namespace std::chrono_literals;
 
@@ -185,16 +186,18 @@ TEST_F(StoreFailOpenVolatileTest, VolatileCapacityExhaustion_DoesNotDisconnect_T
     auto sess = std::make_unique<Session>(engine_, cfg);
 
     // open() emits the initiator Logon (outbound seq 1, stored — 1/2 capacity).
-    auto open_r = asio::co_spawn(sx_, sess->open(), asio::use_future).get();
+    auto open_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_), sess->open(),
+                                 asio::use_future)
+                      .get();
     ASSERT_TRUE(open_r.has_value()) << "open() must succeed";
     ASSERT_EQ(sess->state(), fsm_state::LogonSent);
 
     // Feed the peer's Logon-ack (inbound seq 1) — reaches Active.
     auto peer_logon = make_logon("FIX.4.2", 1, "ACCEPTR", "INITR");
-    auto logon_r =
-        asio::co_spawn(sx_, sess->on_inbound_frame(std::span<const std::byte>(peer_logon)),
-                       asio::use_future)
-            .get();
+    auto logon_r = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                                  sess->on_inbound_frame(std::span<const std::byte>(peer_logon)),
+                                  asio::use_future)
+                       .get();
     ASSERT_TRUE(logon_r.has_value()) << "peer Logon-ack must be accepted";
     ASSERT_EQ(sess->state(), fsm_state::Active);
 
@@ -202,7 +205,8 @@ TEST_F(StoreFailOpenVolatileTest, VolatileCapacityExhaustion_DoesNotDisconnect_T
     // outbound store is now exactly full).
     auto payload_pre = make_app_payload("ORD-PRE");
     auto pre_r =
-        asio::co_spawn(sx_, sess->send(std::span<const std::byte>(payload_pre)), asio::use_future)
+        asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                       sess->send(std::span<const std::byte>(payload_pre)), asio::use_future)
             .get();
     ASSERT_TRUE(pre_r.has_value()) << "the baseline send must succeed";
     ASSERT_EQ(sess->state(), fsm_state::Active);
@@ -215,7 +219,8 @@ TEST_F(StoreFailOpenVolatileTest, VolatileCapacityExhaustion_DoesNotDisconnect_T
     // proven in test_store_fail_closed_persistent.cpp).
     auto payload_over = make_app_payload("ORD-OVER");
     auto over_r =
-        asio::co_spawn(sx_, sess->send(std::span<const std::byte>(payload_over)), asio::use_future)
+        asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                       sess->send(std::span<const std::byte>(payload_over)), asio::use_future)
             .get();
 
     EXPECT_TRUE(over_r.has_value())
@@ -229,7 +234,8 @@ TEST_F(StoreFailOpenVolatileTest, VolatileCapacityExhaustion_DoesNotDisconnect_T
            "(logged-then-proceed, byte-identical to main)";
 
     // Teardown; call alone (not its result) drains the detached liveness loop.
-    (void)asio::co_spawn(sx_, sess->close(fixpp::session::close_mode::terminal), asio::use_future)
+    (void)asio::co_spawn(fixpp::test_support::session_executor_of(*sess, sx_),
+                         sess->close(fixpp::session::close_mode::terminal), asio::use_future)
         .get();
 }
 

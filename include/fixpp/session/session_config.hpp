@@ -84,15 +84,21 @@ namespace fixpp::session {
 enum class RejectPolicy : std::uint8_t;  // owned by 005; declared for the field
 
 // FR-017 / D-6 / Clarifications Q1=A — per-session ResetSeqNumFlag(141)=Y
-// policy. Default = bilateral_strict per [const §XII.5] no-implicit-default +
-// 2-of-3 industry convergence (QFC + QFJ favour bilateral; Fix8 unilateral is
-// the outlier). Three modes:
-//   - bilateral_strict  — refuse Logon if peer's response lacks 141=Y (when we
-//                         sent 141=Y); QFJ-style.
-//   - bilateral_lenient — auto-mirror 141=Y in our response Logon when peer
-//                         sends 141=Y; QFC-style.
-//   - unilateral        — honour any received 141=Y regardless of our outbound
-//                         flag; Fix8-style.
+// policy. Default = bilateral_lenient (feature 103, specs/103-resend-logon-reset-fidelity/
+// data-model "Reset policy"; FR-001), the policy table:
+//   - bilateral_lenient (default) — the initiator sends 141=Y when a reset setting is on
+//                         and both numbers are 1; it accepts an acknowledgement without
+//                         141=Y; an acceptor accepts a Logon without 141=Y and mirrors a
+//                         141=Y Logon.
+//   - bilateral_strict  — the initiator always sends 141=Y, after a durable reset of both
+//                         numbers to 1 (34=1); an acknowledgement without 141=Y is refused
+//                         (session_seqnum_reset_mismatch); an acceptor refuses a Logon
+//                         without 141=Y with a Logout and Text, before the sequence check,
+//                         and mirrors a 141=Y Logon.
+//   - unilateral        — the initiator as lenient; an acceptor accepts a Logon without
+//                         141=Y and does not mirror a 141=Y Logon.
+// Under every policy a Logon fixpp sends with 141=Y carries 34=1 and both stored numbers
+// are 1 when it is built (FR-002).
 // Per-session granularity (not engine-wide) so multi-tenant acceptors can pair
 // counterparties running different engines. [data-model §E-4]
 enum class reset_seqnum_policy : std::uint8_t {
@@ -267,16 +273,14 @@ struct SessionConfig {
     // ── 013-session-reconnect-binding extensions (4 new fields) [data-model §E-4] ──
 
     // FR-017 / Clarifications Q1=A — per-session ResetSeqNumFlag policy.
-    // Default bilateral_strict per spec FR-017 + [const §XII.5] no-implicit-default.
-    // bilateral_strict: we send 141=Y in our outbound Logon AND require the peer
-    //   to also send 141=Y; a peer Logon without 141=Y disconnects with
-    //   session_seqnum_reset_mismatch(116). [FIX-SL §4.1.1: mutual seqnum reset]
-    // bilateral_lenient: honour peer 141=Y if received; accept without refusing.
-    // unilateral: honour any peer 141=Y regardless of our own flag (Fix8-style).
-    // RC#C (gate-b/r1): restored from bilateral_lenient → bilateral_strict per FR-017.
-    // Pre-013 tests updated to send 141=Y in their test Logon frames to comply.
-    // [FR-017; Clarifications Q1=A; triage RC#C(a)]
-    reset_seqnum_policy reset_seqnum_policy_field{reset_seqnum_policy::bilateral_strict};
+    // Default bilateral_lenient (feature 103, FR-001; the policy table is at the enum
+    // above). bilateral_lenient: a restarted initiator logs on at its stored numbers with
+    // no 141=Y unless a reset setting is on and both numbers are 1; it accepts an
+    // acknowledgement without 141=Y. bilateral_strict: every Logon resets both numbers
+    // durably to 1 and carries 141=Y; a peer Logon or acknowledgement without 141=Y is
+    // refused with session_seqnum_reset_mismatch(116). unilateral: as lenient, and an
+    // acceptor does not mirror 141=Y. [FIX-SL §4.1.1; 103 data-model "Reset policy"]
+    reset_seqnum_policy reset_seqnum_policy_field{reset_seqnum_policy::bilateral_lenient};
 
     // ── 024-reset-refresh-on-logon (S-017) — lifecycle reset knobs ──────────
     //
@@ -305,8 +309,8 @@ struct SessionConfig {
     //   (store-wins, up or down).  Primary use: standby session that inherits a
     //   primary's store and must adopt the primary's counters on every reconnect.
     //   Default false (no-op; byte-identical to 029 one-shot behaviour).
-    //   Suppressed under bilateral_strict (the unconditional 141=Y in strict mode
-    //   combined with a non-1 store-read would emit a malformed Logon; C3.3).
+    //   Suppressed under bilateral_strict (C3.3): under strict the Logon always resets,
+    //   so a refresh has nothing to set (feature 103, research D2.2).
     //   No-op when the store is non-persistent (INV-RoL-2 / FR-005).
     // [025 data-model C1/C2/C3/C4; contracts/refresh-knob.md C1]
     bool refresh_on_logon = false;
@@ -329,8 +333,13 @@ struct SessionConfig {
 
     // FR-008 / Clarifications Q5=A — initiator-graceful Logout disconnect
     // timeout in milliseconds. Default 2000 ms (matches QuickFIX/J
-    // SessionState.logoutTimeoutMs=2000L). Must be > 0; validated at
-    // SessionConfig-build time per [arch §5.3] construction-time carve-out.
+    // SessionState.logoutTimeoutMs=2000L). 0 reaches the session: TOML's mapper
+    // accepts any uint32, and the C ABI has no setter for this field (re-derive:
+    // `command grep -rn logout_disconnect include/fix/c_api`). What 0 means at each
+    // use (103; FR-006, FR-010): close(graceful)'s grace is 0, as
+    // before 103; drive_reconnect's drain, when it has to wait, force-closes the old
+    // transport at once; a too-high Logout is acknowledged at once, with no
+    // ResendRequest.
     // On a FileStore session the timeout does not bound a graceful close while the
     // Logout's write job is in the file executor: a cancellation does not take a job
     // out of an executor, so the close completes only after the file executor has run
