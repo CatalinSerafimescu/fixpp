@@ -5618,14 +5618,14 @@ asio::awaitable<void> Session::run_peer_logout_bound_([[maybe_unused]] peer_logo
         // The body's two clears disarm it.
         struct wake_clearer {
             Session* s;
-            int const unwinding_at = std::uncaught_exceptions();
+            int unwinding_at = std::uncaught_exceptions();
             bool armed = true;
             ~wake_clearer() {
                 if (armed && std::uncaught_exceptions() > unwinding_at) {
                     s->peer_logout_wake_ = nullptr;
                 }
             }
-        } wake_clear{this};
+        } wake_clear{.s = this};
         peer_logout_wake_ = [&woken] { woken.cancel(); };
         if (!live()) {
             peer_logout_wake_ = nullptr;
