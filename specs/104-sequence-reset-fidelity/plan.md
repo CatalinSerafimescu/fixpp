@@ -386,6 +386,7 @@ result and every RED/GREEN/mutant record, never code comments.
 - Loop 2 round 1 applied 2026-11-18: Codex P1=1 P2=0 P3=0; Opus post-judging P1=0 P2=1 P3=3; rewrite addresses N-1 (P2), N-2, N-3, Codex #1 (downgraded P3). Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_4_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_4_adversarial_review.md.
 - Loop 2 round 2 applied 2026-11-18: Codex P1=1 P2=0 P3=0; Opus post-judging P1=0 P2=2 P3=0; rewrite corrects the Engine::stop() rows (role-loop join, L-563-4, L-093-12) and adds the stop cell. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_5_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_5_adversarial_review.md.
 - Loop 2 round 3 (loop 2 exhausted) 2026-11-18: Codex P1=0 P2=1 P3=0; Opus post-judging P1=0 P2=1 P3=0 (R-1t can stay GREEN under its reorder mutant). Owner chose: apply the judge's three verbatim edits, then a fresh narrow confirmation loop. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_6_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_6_adversarial_review.md.
+- Loop 3 round 1 (narrow confirmation) 2026-11-18: Codex P1=0 P2=0 P3=0; Opus post-judging P1=0 P2=0 P3=2 (New-1 pump budgets vs kHoldBound, New-2 wording), both applied. **Gate A CONVERGED.** Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_7_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_7_adversarial_review.md.
 
 ### Round 1 — disagreements
 

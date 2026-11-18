@@ -111,7 +111,11 @@ Cells with a forced-hit or a competing-timer element:
   run on a condition (`run_for`, a slice loop), never an unbounded `poll()` or `run()`. Release the hold and pump
   stop to completion on every exit path. Its mutant moves step 4's `close()` loop above the mark, ahead of step 3's
   join, and must go RED at the order assertion, as an assertion failure, not an abort; deleting the join is not the
-  mutant (INV-6).
+  mutant (INV-6). Every pump inside the hold window, from the start of stop to the release (the order pump, the settle
+  window after the advance, and the pump that must not observe stop's completion), has a budget derived from
+  HookedStore's `kHoldBound`, so that their sum stays below it. After the release, assert that the hold was ended by
+  the cell's release and not by its bound (`StoreLog::hold_timed_out` false), as `engine_reset_unit_stop_test.cpp`
+  does.
 - **R-1b.** The drop's close must complete before `logout_disconnect_timeout_ms`. Assert the completion instant
   against the grace deadline, so the timer cannot be what ended the wait.
 - **R-1j.** Assert that the store hold is reached in the LogoutSent arm (state `Disconnected`, transport open,
