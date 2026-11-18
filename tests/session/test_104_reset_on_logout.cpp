@@ -63,6 +63,7 @@
 #include <variant>
 #include <vector>
 
+#include "session/mock_reconnect_factory.hpp"
 #include "session/plain_engine_rig.hpp"
 #include "session/resend_gap_scene.hpp"
 #include "support/blocking_write_transport.hpp"
@@ -543,6 +544,9 @@ struct Opts104 {
     std::uint32_t logout_timeout_ms = kBoundT;
     bool with_clock = true;
     bool fail_held = false;  // HookedStore's fail_held: a held operation returns store_io_failure
+    // When set, the session's TransportFactory (SessionConfig::transport_factory_override), so a
+    // standalone initiator can drive_reconnect().
+    std::shared_ptr<fixpp::transport::TransportFactory> transport_factory = nullptr;
 };
 
 // A Scene whose session has reset_on_logout and a HookedStore. Every member a store hook, a
@@ -603,6 +607,10 @@ public:
         s.cfg.reset_on_disconnect = o.reset_on_disconnect;
         if (o.store == store_kind::hooked) s.cfg.store_factory = factory;
         if (o.store == store_kind::store_double) s.cfg.store_factory = double_factory;
+        if (o.transport_factory) {
+            s.cfg.transport_factory_override = o.transport_factory;
+            s.cfg.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 19099};
+        }
         if (o.store == store_kind::refusing) {
             s.cfg.store_factory =
                 std::make_shared<RefusingStoreFactory104>(factory, &ctl.refuse_next_store);
@@ -1639,5 +1647,83 @@ TEST(ResetOnLogout104, ReplyStoreCancelled_NoReset) {
             SCOPED_TRACE("forced hit: the reply's store refused (StoreFailure)");
             reply_ending(role, reply_end::store_failure);
         }
+    }
+}
+
+// ── T029: R-1h and R-1i ──────────────────────────────────────────────────────────────────
+
+namespace {
+
+std::size_t count_frames(std::vector<std::byte> const& bytes, std::string_view msg_type) {
+    std::string const wire(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    std::string const needle =
+        "\x01"
+        "35=" +
+        std::string{msg_type} + "\x01";
+    std::size_t n = 0;
+    for (auto pos = wire.find(needle); pos != std::string::npos; pos = wire.find(needle, pos + 1)) {
+        ++n;
+    }
+    return n;
+}
+
+}  // namespace
+
+// R-1h: a standalone initiator resets at the peer Logout's reset point; drive_reconnect() then
+// installs the factory's transport and writes the reconnect Logon (RR-4 does not refuse it),
+// the numbers advance, and close(terminal) on the new connection makes no reset. The first
+// half is the cell's forced hit.
+TEST(ResetOnLogout104, PeerLogoutThenReconnect_NoResetOnNewConnection) {
+    auto const tf = std::make_shared<fixpp::test_support::MockReconnectFactory>();
+    Rol104 r{Opts104{.role = session_role::initiator, .transport_factory = tf}};
+    auto& s = r.s;
+    ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+    (void)s.feed(s.logout(s.next_in()));
+    ASSERT_EQ(s.state(), fsm_state::Disconnected) << "setup: A did not end the connection";
+    // The reset at the reset point, before any close.
+    expect_one_reset_to_one_one_disconnected(r);
+    auto const out_before = r.manager_numbers().out;
+
+    auto rc_fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                                 s.session->drive_reconnect(), asio::use_future);
+    ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(rc_fut); }))
+        << "drive_reconnect() did not return";
+    auto const rc = rc_fut.get();
+    EXPECT_TRUE(rc.has_value()) << "drive_reconnect() failed: "
+                                << (rc ? 0 : static_cast<int>(rc.error()));
+    ASSERT_NE(tf->last_transport, nullptr) << "no transport was installed";
+    EXPECT_EQ(count_frames(tf->last_transport->outbound_bytes_seen(), "A"), 1U)
+        << "the reconnect Logon was not written on the new transport";
+    EXPECT_EQ(r.manager_numbers().out, out_before + 1) << "the reconnect Logon's number";
+    auto const calls_before_close = r.log().calls.size();
+
+    r.spawn_close(close_mode::terminal);
+    EXPECT_TRUE(r.close_returned_within(kReleaseBudget)) << "close() did not return";
+    EXPECT_EQ(r.log().calls.size(), calls_before_close)
+        << "a reset call at the new connection's close: reset() " << r.log().reset_calls
+        << ", reset_to " << r.log().reset_to_calls;
+}
+
+// R-1i: the receipt reset's store call fails (a persistent StoreDouble's next reset() fails):
+// logged, the arm returns as it would without the failure, Disconnected, the manager at (1, 1),
+// and the teardown does not retry it.
+TEST(ResetOnLogout104, ReceiptResetStoreFailure_LoggedThenDisconnected) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        Rol104 r{Opts104{.role = role, .store = store_kind::store_double}};
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        r.double_factory->store->fail_next_reset();
+        auto const res = s.feed(s.logout(s.next_in()));
+        EXPECT_TRUE(res.has_value()) << "the arm's return changed with the store's failure";
+        EXPECT_EQ(s.state(), fsm_state::Disconnected);
+        EXPECT_EQ(r.manager_numbers(), (Rol104::Numbers{.in = 1, .out = 1}))
+            << "the manager at the arm's end";
+        EXPECT_EQ(r.double_factory->store->reset_call_count(), 1U)
+            << "the receipt reset's store call";
+        r.spawn_close(close_mode::terminal);
+        EXPECT_TRUE(r.close_returned_within(kReleaseBudget)) << "close() did not return";
+        EXPECT_EQ(r.double_factory->store->reset_call_count(), 1U)
+            << "the teardown retried the reset";
     }
 }
