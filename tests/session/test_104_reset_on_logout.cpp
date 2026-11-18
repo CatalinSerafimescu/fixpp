@@ -1090,8 +1090,8 @@ private:
     fixpp::session::SessionConfig cfg_;
 };
 
-// The one reset of a receipt: a reset_to(1, 1) seen with the session Disconnected and its
-// transport open, and no other reset call.
+// The reset of a receipt: the record holds a single call, a reset_to(1, 1) seen with the
+// session Disconnected and its transport open.
 void expect_receipt_reset(StoreLog const& log) {
     ASSERT_EQ(log.calls.size(), 1U)
         << "reset calls: reset() " << log.reset_calls << ", reset_to " << log.reset_to_calls;
