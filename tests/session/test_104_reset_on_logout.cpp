@@ -1026,11 +1026,12 @@ public:
     }
 
     [[nodiscard]] bool start_to_active() {
-        if (!rig.start(cfg_)) return false;
+        // The Engine makes the Session at its connection, so it is looked up once Active.
+        if (!rig.start(cfg_) || !rig.to_active()) return false;
         sess = rig.session();
         if (!sess) return false;
         app->session = sess.get();
-        return rig.to_active();
+        return true;
     }
     [[nodiscard]] StoreLog& log() const { return *factory->log; }
     [[nodiscard]] Rol104::Numbers manager_numbers() const {
@@ -1118,7 +1119,7 @@ TEST(ResetOnLogout104, Answered_ResetAtReceipt) {
     std::optional<int> woken_at_reset;
     Live104 l{session_role::acceptor};
     ASSERT_TRUE(l.start_to_active()) << "setup: the session did not reach Active";
-    l.factory->log->call_snapshot = [&l, inner = l.factory->log->call_snapshot, &woken,
+    l.factory->log->call_snapshot = [inner = l.factory->log->call_snapshot, &woken,
                                      &woken_at_reset] {
         if (!woken_at_reset) woken_at_reset = woken;
         return inner();
