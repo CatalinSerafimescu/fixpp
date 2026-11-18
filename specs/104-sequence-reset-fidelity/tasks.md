@@ -132,7 +132,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
     - the gate loop's `gate_refused` exit;
     - that nothing suspends from `logout_in_flight_ = true` to `assign_outbound`;
     - the inline start of `operator||`'s branch: `co_spawn_dispatch` at the pinned asio.
-  - **The conditional writes.** For each `assign_outbound` failure branch, and for the writes its frame makes on its way to the pump, record each `Disconnected` write that T050 makes conditional (RR-5 item 6).
+  - **The conditional writes.** For each `assign_outbound` failure branch, and `apply_inbound_sequence_reset`'s `set_next_inbound` failure branch, and for the writes its frame makes on its way to the pump, record each `Disconnected` write that T050 makes conditional (RR-5 item 6).
   - **State-history readers.** Read `git grep -n -e fsm_visit_history -e fsm_visit_count -- tests`, and record each assertion a conditional write could change. Each one found is a census kept hit, re-pinned at T050.
 - [ ] T014 **(orchestrator)** STOP gate for RR-5's readings. Implementation stops, and the reading goes to the orchestrator, if T013 found any of these:
   - a counter write outside the seven bodies;
@@ -349,12 +349,12 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - **Existing users.** Run the entries of `git grep -l SeqnumManager -- tests`, by the Execution rules' selection form. They stay GREEN: nothing sets the flag outside 104's sites.
 - [ ] T050 [US1] The freeze's sites, in `src/session/session.cpp` (contract RR-5 items 1, 4 and 6).
   - **`run_reset_unit_`.**
-    - A Debug assert at its entry: the manager is not frozen.
+    - Two Debug asserts that the manager is not frozen: at its entry, and after its manager set, immediately before the freeze (the post-set assert).
     - The freeze, when the marker is `reached`: after its manager set, whatever that set returned, and before `reset_unit_in_flight_` and its store call, or before its return when there is no store.
   - **`close()`'s close-out.** Freeze, with the marker's `reached`.
   - **`install_reconnected_transport`.** Thaw, with the marker's `none`, before `LogonSent`.
   - **A Debug assert after each site:** the manager is frozen if and only if the marker is `reached`.
-  - **The conditional `Disconnected` writes** that T013 recorded (RR-5 item 6). Each takes the B41 rule's state test, and its comment names RR-5 item 6 and D-OUT-2 and states the condition.
+  - **The conditional `Disconnected` writes** that T013 recorded (RR-5 item 6), `apply_inbound_sequence_reset`'s `set_next_inbound` failure branch included (reached after `close()`'s `seqnum_mgr_.drain()`). Each takes the B41 rule's state test, and its comment names RR-5 item 6 and D-OUT-2 and states the condition.
   - **Re-pins.** Re-pin each state-history assertion that T013 recorded. Run its entry by the Execution rules' selection form.
 - [ ] T051 [US1] The remaining comments that state the old rule (FR-006, research D8 "Code comments"). Each names 104 and states a condition and a recipe:
   - `drive_reconnect`'s latch paragraph in `include/fixpp/session/session.hpp` (the latches stay set across a reconnect: `logout_seen_` no longer does);
@@ -399,12 +399,12 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - delete the freeze test in `set_next_inbound`: R-5a, both arms, and R-5d;
   - delete it in `set_next_outbound`: R-5b and R-5d;
   - delete it in `assign_outbound`: R-5c and R-5d;
-  - delete it in `check_inbound`, in `hydrate` and in `take_back_outbound`, each a row of its own: R-5d. No session input reaches these while frozen (contract RR-5 item 5); record that;
+  - delete it in `check_inbound`, in `hydrate` and in `take_back_outbound`, each a row of its own: R-5d. No session input reaches `check_inbound` or `take_back_outbound` while frozen (contract RR-5 item 5); record that;
   - add a freeze test to `reset_to_one`: R-5d, and R-2, whose teardown `reset` is absent;
   - drop the close-out's freeze: R-5e;
   - drop the thaw at `install_reconnected_transport`: R-1h. The reconnect Logon's number is refused, so the numbers do not advance;
   - restore the unconditional `Disconnected` write in the `assign_outbound` failure branch of the `emit_session_reject_` overload that `dispose_unparseable_` reaches (the one taking a reason, a RefTagID and a text): R-5c's one-entry assertion;
-  - arm the freeze before `run_reset_unit_`'s manager set: `run_reset_unit_`'s entry assert, read by its own message in the Debug build only. In an asserts-off build the receipt unit's targets equal `reset_to_one`'s, so no assertion can see the reorder (research D11, "Not relied on").
+  - arm the freeze anywhere ahead of the post-set assert (at `run_reset_unit_`'s entry, or between two of its manager calls): the post-set assert, read by its own message in the Debug build only, in the unfiltered run of a binary holding a cell whose arm reaches a receipt unit (R-2 or R-1x). In an asserts-off build the receipt unit's targets equal `reset_to_one`'s, so the reorder is an equivalent mutant there. Record that, and claim no assertion for it (research D11, "Not relied on").
 - [ ] T062 [US1] Mutant for T035 and R-1t (protocol). Move step 4's `close(terminal)` loop in `Engine::stop()` to between step 2's close join and the step-3 mark, ahead of step 3's join. R-1t must go RED at its order assertion, as an assertion failure and not an abort. Deleting the join is not this mutant (INV-6).
 
 **Checkpoint**: US1 GREEN; every US1 mutant RED; the MVP validation point.

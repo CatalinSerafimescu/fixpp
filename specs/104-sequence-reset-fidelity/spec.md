@@ -426,9 +426,10 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
   receipt out, a writer other than a reset writer MUST NOT change either sequence number in the session's manager
   until the connection ends, whatever it had begun before that point and wherever it was suspended (contract RR-5). The
   reset writers are the receipt unit's manager steps and the teardown's reset under `reset_on_disconnect`. A
-  refused write MUST leave both numbers unchanged. The writer MUST then emit nothing for a refused number, MUST
-  call no `toAdmin` for it, and MUST add no second `Disconnected` entry to the state history. With
-  `reset_on_logout` off nothing is frozen.
+  refused write MUST leave both numbers unchanged. The writer MUST then emit nothing for a refused number and MUST
+  call no `toAdmin` for it, and its handling of the refused return MUST add no second `Disconnected` entry to the
+  state history. A write the writer makes for a store error it met before the refusal (`store_then_emit`'s failure
+  after a refused reconcile) keeps its existing handling. With `reset_on_logout` off nothing is frozen.
 
 **Unasked 141=Y acknowledgement (B107, #695)**
 

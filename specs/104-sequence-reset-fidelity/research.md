@@ -827,7 +827,7 @@ store call it saw (`reset_to` is the unit; `reset` is the teardown).
 | R-5a | `…InFlightGapFillAcrossBoundUnit_ManagerStaysAtOne_{OneDelivery,Deadline}` (B; rol only, a mock clock, HookedStore holding the GapFill's inbound persist through `Hooks::on_inbound_persist_call`) — O21, path (a) of D11 | `OneDelivery`: one cell-local coroutine awaits `on_inbound_frame` for two frames back to back, as R-1z's `OneDelivery` does: frame k fills the gap past S and wakes the bound; frame k+1 is an in-sequence GapFill whose NewSeqNo X is above its own 34 + 1, and its persist is held while the bound's posted turn claims, records `Disconnected` and runs the unit. `Deadline`: one GapFill that fills only part of the gap, its persist held, and the mock clock advanced past `logout_disconnect_timeout_ms`, so the bound acknowledges at its deadline during the hold. Both arms, after the release: manager NextNumIn 1 and next outbound 1; store `(1, 1)`; exactly one `reset_to(1, 1)`, the hook seeing `Disconnected`; the GapFill frame's `on_inbound_frame` result is success; exactly one `Disconnected` entry in `fsm_visit_history()`. Forced-hit arm: the `OneDelivery` input with rol off, where no reset point is reached and the GapFill's `set_next_inbound` lands (manager NextNumIn X), which shows the reading can see a value other than 1. Pumps budgeted from `kHoldBound`, ratio stated | base: no receipt reset under rol (it resets at teardown), so the manager is at X and the store is not `(1, 1)` before `close()`. The RED is D1's absence; the freeze's own evidence is the mutant. The rol-off forced-hit arm is GREEN on the base, a pin: with no receipt reset nothing is refused, there or at the head | delete the freeze test in `set_next_inbound` → manager NextNumIn X → RED |
 | R-5b | `…SendReconcileAcrossReceiptUnit_ManagerOutboundStaysAtOne` (A in Active; rol only; a cell-local persistent store double, its factory's `yields_persistent_store()` true) — O21, path (b) | the double refuses the application frame's outbound `store()` (a persistent-store failure) and holds the reconcile's `next_seqnum(outbound, false)` until the cell releases it, then returns the store's pre-reset next outbound number; its reply `store()` and `reset_to` succeed. While the read is held, a peer Logout at N reaches arm A's reset point (reply, `Disconnected`, unit). After the release: manager next outbound 1 and NextNumIn 1; store `(1, 1)`; `send` returned the store's error and its frame is not on the wire; the double records the reconcile read's completion after its `reset_to` (the order without which the cell is vacuous); exactly one `reset_to`. Forced-hit arm: the same input with rol off, where the reconcile's `set_next_outbound` lands (manager next outbound equals the read value) | base: no receipt reset under rol, so the manager holds the read value and the store is not `(1, 1)` before `close()`. The rol-off forced-hit arm is GREEN on the base, a pin, as R-5a's | delete the freeze test in `set_next_outbound` → manager next outbound is the read value → RED |
 | R-5c | `…InFlightRejectAcrossBoundUnit_RefusedBeforeToAdmin` (B; rol only, a mock clock, HookedStore holding the frame's inbound persist through `Hooks::on_inbound_persist_call`; the application's `toAdmin` throws on a 35=3) — O21, path (c), the consult's claim 3 | an unparseable in-sequence frame at S, which draws a Reject through `dispose_unparseable_` → `consume_rejected_seqnum_`: its `check_inbound` advances past S and wakes the bound, and its persist is held while the bound's posted turn runs the unit. After the release: manager next outbound 1; store next outbound 1 and `(1, 1)`; zero `toAdmin` calls for a 35=3; no Reject in the store or on the wire; exactly one `reset_to(1, 1)`; exactly one `Disconnected` entry in `fsm_visit_history()`. Forced-hit arm: the same input with rol off, where `toAdmin` is called once for the Reject (and throws), which shows the `toAdmin` predicate can report a call | base: no receipt reset under rol, so the manager's outbound is pre-reset, and `toAdmin` is called for the Reject. The rol-off forced-hit arm is GREEN on the base, a pin, as R-5a's | delete the freeze test in `assign_outbound` → `toAdmin` called and throws, manager next outbound 2 → RED. Second mutant: restore the unconditional `Disconnected` write in the `assign_outbound` failure branch of the `emit_session_reject_` overload that `dispose_unparseable_` reaches (the one taking a reason, a RefTagID and a text) → two `Disconnected` entries → RED |
-| R-5d | `SeqnumManagerFreeze104.NonResetMutatorsRefusedWhileFrozen` (a `SeqnumManager` alone on an io_context; counters set through `seqnum_manager_test_access::set_counters`, the flag set and read through `seqnum_manager_test_access`) — RR-5 items 3 to 5 | frozen: `check_inbound`, `assign_outbound` and `hydrate` return `session_already_closed`; `set_next_inbound` and `set_next_outbound` return success; `take_back_outbound` returns; after each, both counters are unchanged. `reset_to_one` returns success and both counters are 1. Thawed (the forced-hit arm): every mutator writes again, each counter read. A Debug arm: `run_reset_unit_`'s entry assert is read by its own message under its mutant | none on base: the freeze does not exist (a compile failure is not RED evidence; Execution rules). Written with the mechanism (T049); its RED source is its mutants | one per refused mutator, delete its freeze test → that mutator's assertion RED; add a freeze test to `reset_to_one` → its assertion RED (and R-2's teardown `reset` absent). `check_inbound`, `hydrate` and `take_back_outbound` have no session input while frozen (contract RR-5 item 5), so R-5d is their only witness. Debug: arm the freeze before the unit's manager set → the entry assert fires |
+| R-5d | `SeqnumManagerFreeze104.NonResetMutatorsRefusedWhileFrozen` (a `SeqnumManager` alone on an io_context; counters set through `seqnum_manager_test_access::set_counters`, the flag set and read through `seqnum_manager_test_access`) — RR-5 items 3 to 5 | frozen: `check_inbound`, `assign_outbound` and `hydrate` return `session_already_closed`; `set_next_inbound` and `set_next_outbound` return success; `take_back_outbound` returns; after each, both counters are unchanged. `reset_to_one` returns success and both counters are 1. Thawed (the forced-hit arm): every mutator writes again, each counter read | none on base: the freeze does not exist (a compile failure is not RED evidence; Execution rules). Written with the mechanism (T049); its RED source is its mutants | one per refused mutator, delete its freeze test → that mutator's assertion RED; add a freeze test to `reset_to_one` → its assertion RED (and R-2's teardown `reset` absent). `check_inbound` and `take_back_outbound` have no session input while frozen, and `hydrate` only a direct caller's overlap with `open()`'s emit (contract RR-5 item 5), so R-5d is their only witness |
 | R-5e | `…CloseOutThenFromAdminReject_RejectRefusedBeforeToAdmin` (A in Active; rol and rod, no clock; HookedStore holds, after completing it, the reply's `store` with `hold_until_close_reset`, so the arm resumes once the teardown's `reset` is issued and before `close()` drains the manager; `fromAdmin` rejects the Logout) — RR-2 item 5 as amended, O13-r, sub-ruling 1 | `close(terminal)` closes the receipt out to `reached` (no clock, so no wait), then issues the teardown's `reset` (rod; `reset_to_one` is a reset writer, accepted while frozen); the hold returns; the arm resumes, `fromAdmin` rejects, and the Reject is refused at `assign_outbound`: zero `toAdmin` calls for a 35=3; no Reject in the store or on the wire; exactly one `Disconnected` entry; no `reset_to`; one `reset`; both numbers 1 after `close()`. Forced-hit arm: the same fixture with no `close()`, the hold released by `Hooks::release_when`: the arm's Reject calls `toAdmin` once (O3) | base: no close-out; the teardown's `reset` releases the hold, and the arm's Reject takes a number from the undrained manager and calls `toAdmin`. The no-`close()` forced-hit arm is GREEN on the base, a pin: no close-out, so nothing is frozen | drop the close-out's freeze → `toAdmin` called for the Reject → RED. The window is between the close-out and `close()`'s `seqnum_mgr_.drain()`, which refuses every mutator once it has run; a cell whose arm resumes only after the drain cannot tell the two apart, which is why the hold is released by the teardown's `reset` |
 | U-1 | `UnaskedResetAck104.Lenient_HydratedN_ResetsAndActive` (persistent store hydrated at in, out > 1) | Active (not merely "no second Logon"); inbound next 2, outbound next 1 in manager and store; `reset_to(2, 1)`; event `by_peer_request = true`; no 35=A written after fixpp's first; the next `send` is 34=1 | base ends Disconnected, too low | restore `check_inbound` before the 141 read |
 | U-2 | `…Unilateral_…` | as U-1 | as U-1 | as U-1 |
@@ -1043,14 +1043,18 @@ writers are fixpp's own concurrent emitters, which QuickFIX's synchronous send p
     which RR-2 item 3 already rests on.
   - The teardown's reset uses `reset_to_one`, which has no freeze test and no caller but the two reset writers
     (recipe in RR-5 item 4). `reset_seqnums_to_one_durable`'s other callers, the `reset_on_logon` resets on the
-    Logon paths, never run on a frozen manager (INV-F).
+    Logon paths, never run on a frozen manager: the acceptor's arm by INV-F and INV-P, and `emit_initiator_logon_`
+    because its only suspension before the reset is `ensure_hydrated_`'s store reads, after which `hydrate` refuses
+    on a frozen manager and the emit returns (contract RR-5 item 4).
   - `Session` sets and clears the flag through a passkey that only it can construct.
-  - Two Debug asserts guard the order: the manager is not frozen at `run_reset_unit_`'s entry, and the manager is
-    frozen if and only if the marker is `reached` after each of the three sites.
+  - Three Debug asserts guard the order: the manager is not frozen at `run_reset_unit_`'s entry, nor after its
+    manager set immediately before its freeze; and the manager is frozen if and only if the marker is `reached`
+    after each of the three sites.
 - **Not relied on: a value coincidence.** The receipt unit's targets are `(1, 1)`, and `reset_to_one` already sets
   `(1, 1)`. A refused `set_next_*` inside the unit would therefore leave the same numbers, which a reorder mutant
-  could not show. The design does not rest on this: the unit's setters run before the freeze, and the entry assert
-  catches a reorder (D10, R-5d's Debug arm).
+  could not show. The design does not rest on this: the unit's setters run before the freeze, and the post-set assert
+  catches a reorder in a Debug build (T061). In an asserts-off build the reorder is an equivalent mutant: no
+  assertion can see it, and none is claimed.
 - **Rejected alternatives:**
   - A reset-scoped token passed to the unit's setters, as a second overload per setter or a keyed setter replacing
     the unit's three calls. It is larger, and it changes 093's unit body (093 contract C-6 step 3).
@@ -1058,7 +1062,7 @@ writers are fixpp's own concurrent emitters, which QuickFIX's synchronous send p
     `Session` the counters too, so INV-Z would rest on reading `session.cpp`. The passkey limits `Session` to
     freezing and thawing.
   - Freezing on the session state rather than the marker: (Y)'s defect above.
-- **`hydrate` while frozen: unreachable.**
+- **`hydrate` while frozen: reachable only by a direct caller's overlap with `open()`'s emit (above).**
   - `ensure_hydrated_`'s callers are `emit_initiator_logon_` and `on_inbound_not_connected_`: re-derive with
     `git grep -n 'ensure_hydrated_(' -- src`.
   - `emit_initiator_logon_` runs at `open()`, where the marker is `none`, and from `drive_reconnect`. There it runs
@@ -1067,7 +1071,11 @@ writers are fixpp's own concurrent emitters, which QuickFIX's synchronous send p
     reconnect.
   - `on_inbound_not_connected_` is the acceptor's NotConnected arm, which a session in `Disconnected` never enters
     (INV-F).
-  - So `hydrate`'s freeze test has no session input. Its witness is the manager-level cell R-5d.
+  - The overlap: a direct initiator's `open()` emit, when a concurrent `on_inbound_frame` reaches arm S during
+    `ensure_hydrated_`'s store reads. `hydrate` is then refused, `disconnect_unless_superseded_` writes no second
+    `Disconnected` entry, and `open()` returns the error (contract RR-5 item 5). It is benign.
+  - So, other than that overlap, `hydrate`'s freeze test has no session input. Its witness is the manager-level
+    cell R-5d.
 
 #### The refused returns (sub-ruling 2), read in source
 
@@ -1078,7 +1086,8 @@ says that is the state whenever the manager is frozen.
 
 - **`check_inbound`.** In `consume_rejected_seqnum_`, any result other than `store_seqnum_overflow` falls to
   `co_return fixpp::core::expected_t<void>{};` (not consumed). So `session_already_closed`, the drained mutex's code,
-  costs nothing there. Its other callers run it in their frame's entry turn.
+  costs nothing there. Its other callers run it in their frame's entry turn (`on_inbound_active_`) or in a
+  Logon arm, which is the one pump frame (INV-P) with no bound before Active.
 - **`assign_outbound`.**
   - Success is not available: a number returned is a number stamped, passed to `toAdmin` and stored.
   - So the refusal is `session_already_closed`. Most failure branches are `record_state_transition_(fsm_state::
@@ -1091,8 +1100,10 @@ says that is the state whenever the manager is frozen.
   - `send_impl`'s `disconnect_required = is_persistent_retain_fatal(assign_r.error());` is not reached while frozen
     (INV-F: `Session::send` refuses first).
 - **`set_next_inbound`.** `apply_inbound_sequence_reset`'s failure branch is `if (!sr) {
-  record_state_transition_(fsm_state::Disconnected); co_return std::unexpected(sr.error()); }`. An error would add a
-  second entry and end the frame. A success with no write lets the function continue to its awaiting-resend exit
+  record_state_transition_(fsm_state::Disconnected); co_return std::unexpected(sr.error()); }`. On the base that
+  write is unconditional, so an error return would add a second entry and end the frame; that is why the refusal is
+  success with no write. After 104, T050 makes that write conditional (RR-5 item 6, N-2), so the branch's
+  post-drain path (`close()`'s `seqnum_mgr_.drain()`) adds no entry. A success with no write lets the function continue to its awaiting-resend exit
   and `note_inbound_advance_` (neither a counter write) and return success. That is the consult's sub-choice 2,
   taken.
 - **`set_next_outbound`.**
@@ -1105,7 +1116,8 @@ says that is the state whenever the manager is frozen.
   - after a close-out, no frame reaches `store_then_emit`'s take-back with a number assigned in an earlier turn.
   T013 reads that per emitter: `assign_outbound`, `fire_to_admin_` and `store_then_emit`'s boundary with no
   suspension between them.
-- **`hydrate`.** It is unreachable, as read above. Were it reached, `ensure_hydrated_`'s failure write is
+- **`hydrate`.** It is reachable only by a direct caller's overlap with `open()`'s emit, as read above. There,
+  `ensure_hydrated_`'s failure write is
   `disconnect_unless_superseded_(arm)`, which is already conditional.
 - **The frame's error, on the pump.** `run_read_pump` delivers with `auto deliver_r = co_await
   session.on_inbound_frame(frame.bytes());`, and on a failure runs `co_await stop_pump(); co_return;`. The session

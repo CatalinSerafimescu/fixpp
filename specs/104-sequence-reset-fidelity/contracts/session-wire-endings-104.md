@@ -347,9 +347,11 @@ accepts only the reset writers. RR-1 to RR-4, RU-1, RU-3 and construction A are 
    the marker is `none`: `open()` runs once per `Session` (`if (state_ != lifecycle::never_opened)` returns
    `session_already_open`), and `install_reconnected_transport` refuses once `close()` or stop has begun
    (`closing_or_stopped_()`). Re-derive the exits with `git grep -n -E
-   'record_state_transition_\(fsm_state::(NotConnected|LogonSent|LogonReceived|Active)\)' -- src/session/session.cpp`
-   and read each hit. A frame delivered while `Disconnected` takes the Disconnected row, which drains it.
-   `Session::send` refuses on `fsm_state_ != Active` at its entry and after every replay-gate wait. The liveness
+   'record_state_transition_\(fsm_state::(NotConnected|LogonSent|LogonReceived|Active|LogoutSent)\)' --
+   src/session/session.cpp` and read each hit. The `LogoutSent` write in `run_logout_phase1` is preceded by its
+   "already Disconnected → no LogoutSent" test; read that it still is. A frame delivered while `Disconnected` takes the
+   Disconnected row, which drains it. `Session::send` refuses on `fsm_state_ != Active` at its entry and after
+   every replay-gate wait. The liveness
    loop tests the state after each sleep and wake. So the only writers that can meet a frozen manager are those
    already in flight when it froze (research D11, "The writers").
 3. **INV-Z (the choke point).** Every write of the two counters is inside a `SeqnumManager` mutator body.
@@ -357,8 +359,10 @@ accepts only the reset writers. RR-1 to RR-4, RU-1, RU-3 and construction A are 
      `set_next_inbound` and `set_next_outbound`.
    - The seventh, `take_back_outbound`, is defined inline in the installed header
      `include/fixpp/session/seqnum_manager.hpp`. The ruling's "all seven in `seqnum_manager.cpp`" holds for six.
-   - Re-derive: `git grep -n -E '\bnext_(in|out)bound_\b *(=[^=]|\+\+|--)|(\+\+|--)next_(in|out)bound_\b' --
-     src/session include/fixpp/session ':!include/fixpp/session/memory_store.hpp'`. Every hit is inside one of the
+   - Re-derive: `git grep -n -E '\bnext_(in|out)bound_\b *([-+*/%&|^]|<<|>>)?=[^=]|(\+\+|--) *next_(in|out)bound_\b|\bnext_(in|out)bound_\b *(\+\+|--)|&next_(in|out)bound_\b|exchange\(next_(in|out)bound_' --
+     src/session include/fixpp/session ':!include/fixpp/session/memory_store.hpp'`. Its known positive: the input
+     `next_inbound_ += 1;`, `std::exchange(next_outbound_, 3);`, `next_inbound_ = 2;` and `if (next_inbound_ == 2)`,
+     one line each, gives 3 hits (the `+=`, `exchange` and `=` lines; `==` excluded). Every hit is inside one of the
      seven bodies, or is a comment or the two member initialisers. `MemoryStore`'s own counters share the names and
      are excluded; the test-only `seqnum_manager_test_access::set_counters` is under `tests/`.
 
@@ -375,14 +379,19 @@ accepts only the reset writers. RR-1 to RR-4, RU-1, RU-3 and construction A are 
      - The manager calls grant inline (research R1; T008's record). So the marker's move, the manager set and the
        freeze are one strand turn, and no other coroutine runs between them (RR-2 item 3).
      - A Logon arm's 141=Y unit runs with the marker not `reached`, and arms nothing.
-     - A Debug assert at `run_reset_unit_`'s entry checks that the manager is not frozen. A unit never runs on a
-       frozen manager: a pump frame that finds `reached` runs none (RR-2 item 5), and the bound finds `none`.
+     - Two Debug asserts in `run_reset_unit_` check that the manager is not frozen: one at its entry, and one after
+       its manager set, immediately before its freeze (the post-set assert). The entry assert pins that a unit never
+       runs on a frozen manager: a pump frame that finds `reached` runs none (RR-2 item 5), and the bound finds
+       `none`. The post-set assert pins the order, so a freeze moved ahead of any of the three manager calls fires
+       it. With receipt targets of `(1, 1)` no other assertion can see that reorder (research D11, "Not relied on").
    - **The teardown's reset.** `reset_seqnums_to_one_durable` calls `reset_to_one`, which carries no freeze test.
      Its callers are exactly the two reset writers: re-derive with `git grep -n 'reset_to_one(' -- src include` and
      read each hit. A caller that is not a reset writer is a change to RR-5. `reset_seqnums_to_one_durable` has
      other callers too, the Logon paths' `reset_on_logon` resets in `emit_initiator_logon_` and
-     `on_inbound_not_connected_` (re-derive with `git grep -n 'reset_seqnums_to_one_durable(' -- src`). INV-F keeps
-     both off a frozen manager. So under rod the teardown resets after a receipt as it does today (W7, R-2).
+     `on_inbound_not_connected_` (re-derive with `git grep -n 'reset_seqnums_to_one_durable(' -- src`). Neither meets
+     a frozen manager: the acceptor's arm by INV-F and INV-P, and `emit_initiator_logon_` because its only
+     suspension before the reset is `ensure_hydrated_`'s store reads, after which `hydrate` refuses on a frozen
+     manager and the emit returns. So under rod the teardown resets after a receipt as it does today (W7, R-2).
    - **The interface.** `SeqnumManager` gains one private flag, and two members that set and clear it, `freeze` and
      `thaw`. Each takes a passkey, `SeqnumManager::freeze_key`, which only `Session` can construct (its constructor
      is private, with `Session` its friend). No other caller can freeze or thaw a manager, and no other public name
@@ -394,12 +403,12 @@ accepts only the reset writers. RR-1 to RR-4, RU-1, RU-3 and construction A are 
 
    | Mutator | Refused return | Callers that can meet a frozen manager, and what each then does |
    |---|---|---|
-   | `check_inbound(seq)` | `unexpected(session_already_closed)`, the code its drained-mutex path already returns | `consume_rejected_seqnum_`, on a route-B frame in flight: a result other than `store_seqnum_overflow` is "not consumed", so it returns success with no `note_inbound_advance_` and no persist. Its caller goes on to its Reject, which `assign_outbound` refuses (next row). The other callers (`on_inbound_active_`, `on_inbound_not_connected_`, `on_inbound_logon_sent_`) call it in their frame's entry turn, so none meets a frozen manager (INV-F) |
+   | `check_inbound(seq)` | `unexpected(session_already_closed)`, the code its drained-mutex path already returns | `consume_rejected_seqnum_`, on a route-B frame in flight: a result other than `store_seqnum_overflow` is "not consumed", so it returns success with no `note_inbound_advance_` and no persist. Its caller goes on to its Reject, which `assign_outbound` refuses (next row). The other callers (`on_inbound_active_`, `on_inbound_not_connected_`, `on_inbound_logon_sent_`) call it in their frame's entry turn (`on_inbound_active_`) or in a Logon arm, which is the one pump frame (INV-P) with no bound before Active, so none meets a frozen manager (INV-F) |
    | `assign_outbound()` | `unexpected(session_already_closed)` | Every caller's failure branch. No frame is built into the store or onto the wire. Where `assign_outbound` precedes `fire_to_admin_` (the Rejects of both `emit_session_reject_` overloads, `inbound_reject_leaf_` and `apply_inbound_sequence_reset`), no `toAdmin` runs. `inbound_reject_best_effort_leaf_` skips and returns success. Every other caller records `Disconnected`, only when the state is not that already (item 6), and returns the error, which ends the frame (the pump's `stop_pump` on a frame's error). The emitters whose callback (`fire_to_admin_`, or `toApp` for the BusinessMessageReject and `Session::send`) precedes `assign_outbound` do not meet a frozen manager (item 6) |
    | `take_back_outbound(k)` | no-op | `store_then_emit`'s cancelled-call block (D-OUT-1) and RR-4's refusal: the number is not given back. No input gives this an observable effect (item 7) |
-   | `hydrate(in, out)` | `unexpected(session_already_closed)` | None. `ensure_hydrated_` runs in `emit_initiator_logon_` (at `open()`, marker `none`; on a reconnect, after `install_reconnected_transport`'s thaw, its `force` refresh included) and in the acceptor's NotConnected arm, which a frozen session never reaches (INV-F). Were it reached, `ensure_hydrated_`'s failure write is `disconnect_unless_superseded_`, which writes no second `Disconnected` entry, and the error is returned |
+   | `hydrate(in, out)` | `unexpected(session_already_closed)` | A direct initiator's `open()` emit, when a concurrent `on_inbound_frame` reaches arm S during `ensure_hydrated_`'s store reads: `disconnect_unless_superseded_` writes no second `Disconnected` entry, and `open()` returns the error. Otherwise none: `ensure_hydrated_` runs in `emit_initiator_logon_` (at `open()`, marker `none`; on a reconnect, after `install_reconnected_transport`'s thaw, its `force` refresh included) and in the acceptor's NotConnected arm, which a frozen session never reaches (INV-F). Were it reached, `ensure_hydrated_`'s failure write is `disconnect_unless_superseded_`, which writes no second `Disconnected` entry, and the error is returned |
    | `reset_to_one()` | never refused: a reset writer's mutator (item 4) | the two reset writers |
-   | `set_next_inbound(n)` | success, with no write | `apply_inbound_sequence_reset`, on a route-B GapFill or Reset-mode SequenceReset in flight. It continues as after a write: its awaiting-resend exit and `note_inbound_advance_`, neither a counter write. It returns success, and its failure branch, which records `Disconnected` unconditionally, is not reached. Nothing is emitted. The unit's own call precedes the freeze (item 4) |
+   | `set_next_inbound(n)` | success, with no write | `apply_inbound_sequence_reset`, on a route-B GapFill or Reset-mode SequenceReset in flight. It continues as after a write: its awaiting-resend exit and `note_inbound_advance_`, neither a counter write. It returns success, and its failure branch is not reached. On the base that branch's `Disconnected` write is unconditional, so an error return would add a second entry; that is why the refusal is success with no write. After 104, T050 makes that write conditional (item 6, N-2), so the branch's post-drain path adds no entry. Nothing is emitted. The unit's own call precedes the freeze (item 4) |
    | `set_next_outbound(n)` | success, with no write | `store_then_emit`'s reconcile after a persistent-store failure, which discards the result (`(void)co_await`). `store_then_emit` returns its captured store error as today, and the frame is not transmitted (fail closed). The manager keeps the number it had. The unit's own call precedes the freeze |
 
 6. **What a refused call's caller observes (sub-ruling 2's rule).** The caller emits nothing for a refused number,
@@ -431,8 +440,14 @@ accepts only the reset writers. RR-1 to RR-4, RU-1, RU-3 and construction A are 
        merge of B41).
      - It covers each `assign_outbound` call's failure branch (the recipe above, each failure branch read), and the
        writes the frame makes on its way out to the pump.
-     - `set_next_*` refuse with success, so `apply_inbound_sequence_reset`'s unconditional write is not reached.
+     - `set_next_*` refuse with success while frozen, so the freeze does not reach `apply_inbound_sequence_reset`'s
+       failure write. After `close()`'s `seqnum_mgr_.drain()` the drained mutex returns `session_already_closed`
+       before the freeze test, so that write is reached; it is made only when the state is not `Disconnected`
+       already, by the same rule.
      - Cells R-5a and R-5c assert exactly one `Disconnected` entry in `Session::fsm_visit_history()`.
+     - Not covered: a caller's write for `store_then_emit`'s store error after a refused reconcile
+       (`Session::send`'s `disconnect_required` write, `run_liveness_loop`'s emit-failure writes). The store error,
+       not the refusal, causes that write, and the base makes it too (B-104-8).
 7. **Unchanged.**
    - RR-4's two boundaries are unchanged.
    - While frozen, `store_then_emit`'s take-back of a refused or cancelled call is itself refused. That has no

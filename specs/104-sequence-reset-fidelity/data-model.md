@@ -86,8 +86,9 @@ call of `reset_unit_wake_` (below). It gains callers:
 
 `run_reset_unit_` also arms the manager freeze (contract RR-5 item 4): when the marker is `reached`, after its
 manager set, whatever that set returned, and before `reset_unit_in_flight_` and its store call (or its return, with
-no store). A Logon arm's unit runs with the marker not `reached` and arms nothing. A Debug assert at its entry
-checks that the manager is not frozen.
+no store). A Logon arm's unit runs with the marker not `reached` and arms nothing. Two Debug asserts check that
+the manager is not frozen: one at its entry, and one after its manager set, immediately before the freeze (contract
+RR-5 item 4).
 
 ## `SeqnumManager`: the freeze (contract RR-5; research D11)
 
@@ -280,8 +281,11 @@ New rows:
   - a failed send keeps the store's error and is not transmitted.
   The numbers stay at 1 after a receipt reset, and at their values after a close-out. The teardown's reset under
   `reset_on_disconnect` still runs. The session's state history (`Session::fsm_visit_history()`) records one
-  `Disconnected` for such an ending, and for any ending where a message cannot take a number while the session is
-  already Disconnected, for example after `close()` has drained the manager (104 contract RR-5 item 6). With `reset_on_logout` off nothing is refused. On a too-high Logout's route the
+  `Disconnected` for an ending whose number or NewSeqNo is refused, and for any ending where a message cannot take
+  a number while the session is already Disconnected, for example after `close()` has drained the manager (104
+  contract RR-5 item 6). A send, liveness frame or reply whose own store call failed keeps its handling of that
+  store error. When the session is already Disconnected, that handling can add a second `Disconnected` entry, as
+  before 104. With `reset_on_logout` off nothing is refused. On a too-high Logout's route the
   frame in progress is one that 103's bound let in after the Logout, which QuickFIX never processes; so nothing of
   it is sent, as in QuickFIX (104 research D11). FR-019, contract RR-5.
 

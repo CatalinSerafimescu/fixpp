@@ -421,6 +421,7 @@ result and every RED/GREEN/mutant record, never code comments.
 - Loop 3 round 1 (narrow confirmation) 2026-11-18: Codex P1=0 P2=0 P3=0; Opus post-judging P1=0 P2=0 P3=2 (New-1 pump budgets vs kHoldBound, New-2 wording), both applied. **Gate A CONVERGED.** Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_7_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_7_adversarial_review.md.
 - /speckit-analyze 2026-11-18: 26 findings (1 escalated, 3 HIGH); all applied. F1 corrects three base readings in research D10 in place (RED on base: the base ends before the identity gate); no design change, so no Gate A round (orchestrator ruling). D1 ruled HIGH (the owner's standing grant discharges §XVII.7's approval; T001 records it). B3: gate-b-done, per 103's T163 precedent.
 - Implementation STOP at T011, 2026-11-18: in-flight manager writers after the reset point. Fable consult 104-post-reset-inflight-manager-writers (probable). Owner ruled construction (Z), manager freeze; orchestrator sub-rulings: freeze on any reached marker, refused return per mutator, reset-writer mechanism. Narrow Gate A loop 4 follows.
+- Loop 4 round 1 applied 2026-11-18: Codex P1=0 P2=1 P3=0; Opus post-judging P1=0 P2=2 P3=5; rewrite adds the post-set Debug assert (C-1) and narrows FR-019/B-104-8 (N-1); P3s applied. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_8_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_8_adversarial_review.md.
 
 ### Round 1 — disagreements
 
@@ -524,3 +525,16 @@ result and every RED/GREEN/mutant record, never code comments.
   not a substitute: under the reorder mutant `close()` would wait out the hold and reset once, so it would stay
   GREEN against the mutant listed for it, which is New-1's defect again. (Superseded in part by loop 2 round 3: the
   decisive check is now the step-3 mark's order assertion; the clock advance stays as the bound's contrast.)
+
+### Loop 4 round 1 — disagreements
+
+- **Codex P2's second option (confirmed P2, judged).** Not taken: a test seam that runs `run_reset_unit_` with
+  targets other than `(1, 1)` and the marker `reached`, so that a freeze armed ahead of the unit's setters would
+  show as a refused `set_next_inbound` or `set_next_outbound`. Rejected for the judge's two reasons:
+  - the seam is outside the Execution rules' set of seams ("A seam outside that set goes to the orchestrator");
+  - it exercises an input that production never produces: every receipt unit's targets are `(1, 1)` (data-model
+    "The reset unit: new callers").
+
+  Codex's first option was taken instead: the post-set Debug assert in `run_reset_unit_` (contract RR-5 item 4;
+  T050), read by its own message in the Debug build under T061's reorder mutant. In an asserts-off build the
+  reorder is an equivalent mutant, recorded as such and claimed by no assertion (research D11, "Not relied on").

@@ -51,14 +51,14 @@ comments.
 - The manager freeze's readings (contract RR-5, research D11):
   ```bash
   # INV-Z: every counter write is inside a SeqnumManager mutator body
-  git grep -n -E '\bnext_(in|out)bound_\b *(=[^=]|\+\+|--)|(\+\+|--)next_(in|out)bound_\b' -- \
+  git grep -n -E '\bnext_(in|out)bound_\b *([-+*/%&|^]|<<|>>)?=[^=]|(\+\+|--) *next_(in|out)bound_\b|\bnext_(in|out)bound_\b *(\+\+|--)|&next_(in|out)bound_\b|exchange\(next_(in|out)bound_' -- \
     src/session include/fixpp/session ':!include/fixpp/session/memory_store.hpp'
   # the mutator callers, each read with its enclosing function and its failure branch
   git grep -n -E 'seqnum_mgr_\.(check_inbound|assign_outbound|take_back_outbound|hydrate|reset_to_one|set_next_inbound|set_next_outbound)\(' -- src include
   # reset_to_one's callers: the two reset writers only
   git grep -n 'reset_to_one(' -- src include
   # INV-F: the exits from Disconnected
-  git grep -n -E 'record_state_transition_\(fsm_state::(NotConnected|LogonSent|LogonReceived|Active)\)' -- src/session/session.cpp
+  git grep -n -E 'record_state_transition_\(fsm_state::(NotConnected|LogonSent|LogonReceived|Active|LogoutSent)\)' -- src/session/session.cpp
   # hydrate's callers
   git grep -n 'ensure_hydrated_(' -- src
   # the state-history readers a conditional Disconnected write could change
