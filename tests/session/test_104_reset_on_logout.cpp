@@ -41,6 +41,9 @@
 #include <deque>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/direction.hpp>
+#include <fixpp/session/message_store.hpp>
+#include <fixpp/session/message_store_factory.hpp>
+#include <fixpp/session/retrieve_visitor.hpp>
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
@@ -48,18 +51,22 @@
 #include <fixpp/session/session_fsm.hpp>
 #include <functional>
 #include <memory>
+#include <memory_resource>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <variant>
 #include <vector>
 
+#include "session/plain_engine_rig.hpp"
 #include "session/resend_gap_scene.hpp"
 #include "support/blocking_write_transport.hpp"
 #include "support/hooked_store.hpp"
 #include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
+#include "support/store_double.hpp"
 
 namespace {
 
@@ -364,21 +371,103 @@ constexpr std::uint32_t kBoundT = 2000;  // the too-high Logout's bound T, ms, o
 constexpr int kNone = 0;                 // session_test_access::peer_logout_phase's `none`
 constexpr int kPending = 1;              // session_test_access::peer_logout_phase's `pending`
 
-// Counts fromAdmin calls by MsgType, as 103's TooHighLogoutState103 cells do.
+// Counts fromAdmin calls by MsgType, as 103's TooHighLogoutState103 cells do. A cell can make
+// fromAdmin throw on or reject a Logout(35=5), make toAdmin throw on one, and read the
+// manager's numbers inside onLogout.
 class AdminCountingApp104 final : public rg::GapApp {
 public:
+    enum class on_logout_from_admin : std::uint8_t { accept, throw_, reject };
+    on_logout_from_admin logout_from_admin = on_logout_from_admin::accept;
+    bool throw_on_logout_to_admin = false;
+    fixpp::session::Session const* session = nullptr;  // read inside onLogout when set
+
     std::vector<std::string> from_admin_types;
+    struct Numbers {
+        seqnum_t next_in = 0;
+        seqnum_t next_out = 0;
+    };
+    std::vector<Numbers> on_logout_numbers;  // one entry per onLogout call
+
     fixpp::core::expected_t<void> fromAdmin(
         const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
         const fixpp::session::SessionId& /*id*/) override {
         from_admin_types.emplace_back(msg.msg_type());
+        if (msg.msg_type() == "5") {
+            if (logout_from_admin == on_logout_from_admin::throw_) {
+                throw std::runtime_error("AdminCountingApp104: fromAdmin");
+            }
+            if (logout_from_admin == on_logout_from_admin::reject) {
+                return std::unexpected(fixpp::core::error::app_do_not_send);
+            }
+        }
         return {};
+    }
+    void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
+                 const fixpp::session::SessionId& id) override {
+        GapApp::toAdmin(msg, id);
+        if (throw_on_logout_to_admin && msg.msg_type() == "5") {
+            throw std::runtime_error("AdminCountingApp104: toAdmin");
+        }
+    }
+    void onLogout(const fixpp::session::SessionId& /*id*/) override {
+        if (session == nullptr) return;
+        auto& m = session_test_access::seqnum_mgr(const_cast<fixpp::session::Session&>(*session));
+        on_logout_numbers.push_back(
+            {.next_in = m.next_inbound_unsafe(), .next_out = m.next_outbound_unsafe()});
     }
     [[nodiscard]] int from_admin_count(std::string_view msg_type) const {
         int n = 0;
         for (auto const& t : from_admin_types) n += static_cast<int>(t == msg_type);
         return n;
     }
+};
+
+// A MessageStore that forwards to a shared StoreDouble, so a cell keeps the double after the
+// session is gone. It reports itself persistent, as StoreDouble's factories do by default.
+class SharedStoreDouble104 final : public fixpp::session::MessageStore {
+public:
+    explicit SharedStoreDouble104(std::shared_ptr<fixpp::session::test::StoreDouble> d) noexcept
+        : fixpp::session::MessageStore(flush_thunk_for<SharedStoreDouble104>()), d_{std::move(d)} {}
+    asio::awaitable<fixpp::core::expected_t<void>> store(seqnum_t seq,
+                                                         std::span<const std::byte> frame,
+                                                         direction_t dir) noexcept override {
+        return d_->store(seq, frame, dir);
+    }
+    asio::awaitable<fixpp::core::expected_t<void>> retrieve(
+        seqnum_t begin, seqnum_t end, direction_t dir,
+        fixpp::session::retrieve_visitor& visitor) noexcept override {
+        return d_->retrieve(begin, end, dir, visitor);
+    }
+    asio::awaitable<fixpp::core::expected_t<seqnum_t>> next_seqnum(
+        direction_t dir, bool increment) noexcept override {
+        return d_->next_seqnum(dir, increment);
+    }
+    asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override { return d_->reset(); }
+
+private:
+    std::shared_ptr<fixpp::session::test::StoreDouble> d_;
+};
+class StoreDoubleFactory104 final : public fixpp::session::MessageStoreFactory {
+public:
+    std::shared_ptr<fixpp::session::test::StoreDouble> store =
+        std::make_shared<fixpp::session::test::StoreDouble>();
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::session::MessageStore>> make(
+        std::string_view, std::string_view, std::pmr::memory_resource*, std::size_t,
+        asio::any_io_executor) noexcept override {
+        return std::make_unique<SharedStoreDouble104>(store);
+    }
+};
+
+enum class store_kind : std::uint8_t { hooked, memory, store_double };
+
+// What a Rol104 builds; the defaults are R-1y's and R-1z's.
+struct Opts104 {
+    session_role role = session_role::initiator;
+    bool reset_on_logout = true;
+    bool reset_on_disconnect = false;
+    store_kind store = store_kind::hooked;
+    std::uint32_t logout_timeout_ms = kBoundT;
+    bool with_clock = true;
 };
 
 // A Scene whose session has reset_on_logout and a HookedStore. Every member a store hook, a
@@ -406,11 +495,18 @@ public:
     Delivery delivery;
     std::deque<std::vector<std::byte>> frames;  // a cell-local delivery's bytes
     std::shared_ptr<HookedStoreFactory> factory = std::make_shared<HookedStoreFactory>();
+    std::shared_ptr<StoreDoubleFactory104> double_factory =
+        std::make_shared<StoreDoubleFactory104>();
     std::shared_ptr<AdminCountingApp104> app = std::make_shared<AdminCountingApp104>();
     rg::Scene s;
 
-    explicit Rol104(session_role const role)
-        : s{rg::Options{.role = role, .app = app, .logout_timeout_ms = kBoundT}} {
+    explicit Rol104(session_role const role) : Rol104(Opts104{.role = role}) {}
+    explicit Rol104(Opts104 const& o)
+        : s{rg::Options{.role = o.role,
+                        .with_clock = o.with_clock,
+                        .app = app,
+                        .with_store = o.store == store_kind::memory,
+                        .logout_timeout_ms = o.logout_timeout_ms}} {
         factory->hooks.on_outbound_store = [c = &ctl] {
             if (!c->hold_next_store) return false;
             c->hold_next_store = false;
@@ -419,15 +515,54 @@ public:
         factory->hooks.release_when = [c = &ctl] { return c->released; };
         // These cells read the state at a reset call; the transport reading is not read.
         factory->log->call_snapshot = [this] { return CallReading{.state = s.session->state()}; };
-        s.cfg.reset_on_logout = true;
-        s.cfg.store_factory = factory;
+        s.cfg.reset_on_logout = o.reset_on_logout;
+        s.cfg.reset_on_disconnect = o.reset_on_disconnect;
+        if (o.store == store_kind::hooked) s.cfg.store_factory = factory;
+        if (o.store == store_kind::store_double) s.cfg.store_factory = double_factory;
         s.session = std::make_unique<fixpp::session::Session>(s.engine, s.cfg);
+        app->session = s.session.get();
     }
     Rol104(Rol104 const&) = delete;
     Rol104& operator=(Rol104 const&) = delete;
     ~Rol104() { ctl.released = true; }
 
     [[nodiscard]] StoreLog& log() const { return *factory->log; }
+
+    struct Numbers {
+        seqnum_t in = 0;
+        seqnum_t out = 0;
+        bool operator==(Numbers const&) const = default;
+    };
+    [[nodiscard]] Numbers manager_numbers() const {
+        auto& m = session_test_access::seqnum_mgr(*s.session);
+        return {.in = m.next_inbound_unsafe(), .out = m.next_outbound_unsafe()};
+    }
+    // The store's next inbound and outbound numbers: a StoreDouble's directly, a MemoryStore's
+    // (the HookedStore's inner one, or the session's own) through next_seqnum(dir, false),
+    // pumped. Empty when a read fails or does not return.
+    [[nodiscard]] std::optional<Numbers> store_numbers(store_kind const k) {
+        if (k == store_kind::store_double) {
+            return Numbers{.in = double_factory->store->current_next_inbound(),
+                           .out = double_factory->store->current_next_outbound()};
+        }
+        fixpp::session::MessageStore* st = k == store_kind::hooked
+                                               ? factory->log->inner.get()
+                                               : session_test_access::store(*s.session);
+        if (st == nullptr) return std::nullopt;
+        auto const read = std::make_shared<std::optional<Numbers>>();
+        auto const done = std::make_shared<bool>(false);
+        asio::co_spawn(
+            s.ioc,
+            [st, read, done]() -> asio::awaitable<void> {
+                auto in = co_await st->next_seqnum(direction_t::inbound, false);
+                auto out = co_await st->next_seqnum(direction_t::outbound, false);
+                if (in && out) *read = Numbers{.in = *in, .out = *out};
+                *done = true;
+            },
+            asio::detached);
+        if (!s.pump_until([&] { return *done; }, kReleaseBudget)) return std::nullopt;
+        return *read;
+    }
     [[nodiscard]] int phase() const { return session_test_access::peer_logout_phase(*s.session); }
     [[nodiscard]] int bound_count() const {
         return session_test_access::peer_logout_bound_count(*s.session);
@@ -652,4 +787,186 @@ TEST(ResetOnLogout104, ClaimsAPendingBound_OneResetByTheArm_CloseDuringReplyStor
 
 TEST(ResetOnLogout104, ClaimsAPendingBound_OneResetByTheArm_OneDelivery) {
     for (auto const role : kRoles) claims_pending_one_delivery(role);
+}
+
+// ── T024: R-1a and R-1b, an unanswered Logout under reset_on_logout ──────────────────────
+
+namespace {
+
+using Numbers104 = Rol104::Numbers;
+
+// close(graceful)'s phase 1 waits for the peer's Logout on close_grace, a real-time timer of
+// logout_disconnect_timeout_ms. R-1a's waits are ratios of it: a quarter for the Logout's emit,
+// four times it for close() to return past the grace.
+constexpr std::uint32_t kGraceMs = 400;
+
+std::string_view store_name(store_kind const k) {
+    switch (k) {
+        case store_kind::hooked:
+            return "HookedStore";
+        case store_kind::memory:
+            return "MemoryStore";
+        case store_kind::store_double:
+            return "StoreDouble";
+    }
+    return "?";
+}
+
+// R-1a, one role and store. `answered` is the forced-hit arm (R-1c's input): the peer answers
+// the Logout in LogoutSent, and the numbers end at (1, 1), which shows the cell's reading can
+// see a reset. The unanswered arm's numbers after the emit are past 1 on both sides (the
+// session has sent its Logon and its Logout and received the peer's Logon), so "equal to the
+// numbers after the emit" cannot hold by a reset.
+void unanswered_timeout(session_role const role, store_kind const store, bool const answered) {
+    SCOPED_TRACE(std::string{rg::role_name(role)} + "/" + std::string{store_name(store)} +
+                 (answered ? "/answered" : "/unanswered"));
+    Rol104 r{Opts104{.role = role, .store = store, .logout_timeout_ms = kGraceMs}};
+    auto& s = r.s;
+    ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+    auto const mark = s.sent.size();
+    r.spawn_close(close_mode::graceful);
+    bool const emitted =
+        s.pump_until([&] { return s.state() == fsm_state::LogoutSent && s.count("5", mark) == 1U; },
+                     std::chrono::milliseconds{kGraceMs} / 4);
+    // Before the timeout: the Logout was sent, so "no reset" cannot come from a not-sent route.
+    ASSERT_TRUE(emitted) << "setup: no 35=5 captured in LogoutSent; the session wrote "
+                         << s.written(mark) << " and is " << rg::state_name(s.state());
+    Numbers104 const mgr_after_emit = r.manager_numbers();
+    auto const store_after_emit = r.store_numbers(store);
+    ASSERT_TRUE(store_after_emit.has_value()) << "setup: the store's numbers were not read";
+    if (answered) (void)s.feed(s.logout(mgr_after_emit.in));
+
+    EXPECT_TRUE(r.close_returned_within(4 * std::chrono::milliseconds{kGraceMs}))
+        << "close() did not return";
+    Numbers104 const mgr_end = r.manager_numbers();
+    auto const store_end = r.store_numbers(store);
+    ASSERT_TRUE(store_end.has_value()) << "the store's numbers were not read after close()";
+    if (answered) {
+        EXPECT_EQ(mgr_end, (Numbers104{.in = 1, .out = 1})) << "the answered twin's manager";
+        EXPECT_EQ(*store_end, (Numbers104{.in = 1, .out = 1})) << "the answered twin's store";
+        return;
+    }
+    EXPECT_EQ(mgr_end, mgr_after_emit)
+        << "manager numbers after close(): " << mgr_end.in << "/" << mgr_end.out
+        << ", after the Logout's emit: " << mgr_after_emit.in << "/" << mgr_after_emit.out;
+    EXPECT_EQ(*store_end, *store_after_emit)
+        << "store numbers after close(): " << store_end->in << "/" << store_end->out
+        << ", after the Logout's emit: " << store_after_emit->in << "/" << store_after_emit->out;
+    if (store == store_kind::store_double) {
+        EXPECT_EQ(r.double_factory->store->reset_call_count(), 0U)
+            << "a reset() or reset_to call reached the StoreDouble";
+    }
+}
+
+namespace plain_rig = fixpp::test_support::plain_rig;
+
+// R-1b's grace: close_grace, real time. The cell's wait for the drop's close is a quarter of
+// it, so a close that the grace ends cannot meet the wait.
+constexpr std::uint32_t kDropGraceMs = 4000;
+
+// R-1b on an engine-managed initiator: close(graceful) sends the Logout, the peer drops the
+// connection in LogoutSent (or, in the forced-hit arm, answers it), and close() returns.
+void unanswered_transport_drop(bool const answered) {
+    SCOPED_TRACE(answered ? "answered" : "dropped");
+    auto const app = std::make_shared<plain_rig::CountingApp>();
+    auto const factory = std::make_shared<HookedStoreFactory>();
+    plain_rig::Rig rig{app};
+    auto c = rig.cfg(session_role::initiator);
+    c.reset_on_logout = true;
+    c.store_factory = factory;
+    c.logout_disconnect_timeout_ms = kDropGraceMs;
+    ASSERT_TRUE(rig.start(c)) << "setup: the engine did not start";
+    ASSERT_TRUE(rig.to_active()) << "setup: the session did not reach Active";
+    auto const sess = rig.session();
+    ASSERT_NE(sess, nullptr);
+
+    struct CloseRun {
+        bool done = false;
+        std::chrono::steady_clock::time_point at{};
+    };
+    auto const run = std::make_shared<CloseRun>();
+    auto const started = std::chrono::steady_clock::now();
+    asio::any_io_executor const ex = sess->executor().underlying();
+    asio::co_spawn(
+        ex,
+        [sess, run]() -> asio::awaitable<void> {
+            (void)co_await sess->close(close_mode::graceful);
+            run->at = std::chrono::steady_clock::now();
+            run->done = true;
+        },
+        asio::detached);
+    bool const emitted = rig.run_until(
+        [&] {
+            return rig.state() == fsm_state::LogoutSent &&
+                   plain_rig::frames_of_type(rig.peer.received, "5").size() == 1U;
+        },
+        std::chrono::milliseconds{kDropGraceMs} / 4);
+    ASSERT_TRUE(emitted) << "setup: no 35=5 reached the peer in LogoutSent";
+
+    auto read_store = [&]() -> std::optional<Numbers104> {
+        auto const st = factory->log->inner;
+        auto const out = std::make_shared<std::optional<Numbers104>>();
+        auto const done = std::make_shared<bool>(false);
+        asio::co_spawn(
+            rig.ioc,
+            [st, out, done]() -> asio::awaitable<void> {
+                auto in = co_await st->next_seqnum(direction_t::inbound, false);
+                auto o = co_await st->next_seqnum(direction_t::outbound, false);
+                if (in && o) *out = Numbers104{.in = *in, .out = *o};
+                *done = true;
+            },
+            asio::detached);
+        if (!rig.run_until([&] { return *done; }, kReleaseBudget)) return std::nullopt;
+        return *out;
+    };
+    auto mgr = [&] {
+        auto& m = session_test_access::seqnum_mgr(*sess);
+        return Numbers104{.in = m.next_inbound_unsafe(), .out = m.next_outbound_unsafe()};
+    };
+    Numbers104 const mgr_after_emit = mgr();
+    auto const store_after_emit = read_store();
+    ASSERT_TRUE(store_after_emit.has_value()) << "setup: the store's numbers were not read";
+
+    if (answered) {
+        rig.peer.send(rig.msg("5", mgr_after_emit.in));
+    } else {
+        rig.peer.close();
+    }
+    bool const closed =
+        rig.run_until([&] { return run->done; }, std::chrono::milliseconds{kDropGraceMs} / 4);
+    EXPECT_TRUE(closed) << "close() did not return within a quarter of the grace";
+    EXPECT_LT(run->at - started, std::chrono::milliseconds{kDropGraceMs})
+        << "close() returned at the grace deadline: the timer, not the drop, ended it";
+    Numbers104 const mgr_end = mgr();
+    auto const store_end = read_store();
+    ASSERT_TRUE(store_end.has_value()) << "the store's numbers were not read after close()";
+    if (answered) {
+        EXPECT_EQ(mgr_end, (Numbers104{.in = 1, .out = 1})) << "the answered twin's manager";
+        EXPECT_EQ(*store_end, (Numbers104{.in = 1, .out = 1})) << "the answered twin's store";
+    } else {
+        EXPECT_EQ(mgr_end, mgr_after_emit)
+            << "manager numbers after close(): " << mgr_end.in << "/" << mgr_end.out;
+        EXPECT_EQ(*store_end, *store_after_emit)
+            << "store numbers after close(): " << store_end->in << "/" << store_end->out;
+        EXPECT_TRUE(factory->log->calls.empty())
+            << "a reset() or reset_to call: reset() " << factory->log->reset_calls << ", reset_to "
+            << factory->log->reset_to_calls;
+    }
+    rig.stop();
+}
+
+}  // namespace
+
+TEST(ResetOnLogout104, Unanswered_Timeout_NoReset) {
+    for (auto const role : kRoles) {
+        for (auto const store : {store_kind::memory, store_kind::store_double}) {
+            unanswered_timeout(role, store, /*answered=*/false);
+            unanswered_timeout(role, store, /*answered=*/true);
+        }
+    }
+}
+
+TEST(ResetOnLogout104, Unanswered_TransportDrop_NoReset) {
+    unanswered_transport_drop(/*answered=*/false);
+    unanswered_transport_drop(/*answered=*/true);
 }
