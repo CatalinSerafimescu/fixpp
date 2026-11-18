@@ -448,6 +448,7 @@ result and every RED/GREEN/mutant record, never code comments.
     - `blocking_write_state::starts` in T015, with its known positive, and the C2 pins restated on the start count with the rol-off rise (Codex 2b).
     - R-5j reads `state()` inside `onCreate` (N-1).
     - Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_13_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_13_adversarial_review.md.
+  - Loop 5 converged at the confirmation round (codex/opus `_14`), P3 applied. Opus post-judging P1=0 P2=0 P3=1. The P3: the R-5f, R-5g `GateWait` and R-5h `GateWait` start-count pins name their two read sites, the frame's `release_when` call and `Hooks::on_reset` at the unit's `reset_to`, and require the readings to be equal. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_14_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_14_adversarial_review.md.
 
 ### Round 1 — disagreements
 
