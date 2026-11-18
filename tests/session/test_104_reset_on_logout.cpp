@@ -2019,3 +2019,81 @@ TEST(ResetOnLogout104, TerminalEmissionAtResetPoint_ResetOnce) {
         EXPECT_EQ(r.reset_tos().size(), 1U) << "reset_to calls after close()";
     }
 }
+
+// ── T032: R-1w, close() is not held when a receipt ends without a unit ───────────────────
+//
+// The Storeless arm is dropped: a write held in BlockingWriteTransport does not outlast
+// close()'s close_async() (tasks.md T032's recorded reading).
+
+namespace {
+
+int close_reset_wait_expired_count(rg::Scene const& s) {
+    int n = 0;
+    for (auto const& ev : s.session->recent_events()) {
+        n += static_cast<int>(
+            std::holds_alternative<fixpp::session::session_event_close_reset_wait_expired>(ev));
+    }
+    return n;
+}
+
+}  // namespace
+
+// R-1w FromAdminThrow: close(terminal) is started during A's held reply store; the hold is
+// released and fromAdmin throws. With the mock clock moved to 99/100 of logon_timeout_ms,
+// close() has returned, with no close_reset_wait_expired and no reset.
+TEST(ResetOnLogout104, CloseNotHeldWhenReceiptEndsWithoutUnit_FromAdminThrow) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        Rol104 r{role};
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        r.app->logout_from_admin = App104::on_logout_from_admin::throw_;
+        r.ctl.hold_next_store = true;
+        auto frame_fut = s.feed_spawn(s.logout(s.next_in()));
+        bool const held = s.pump_until([&] { return !r.log().store_events.empty(); }, kHoldWindow);
+        r.spawn_close(close_mode::terminal);
+        (void)s.pump_until([&] { return r.close_run.done; }, kHoldWindow);
+        r.ctl.released = true;
+        (void)s.pump_until([&] { return rg::Scene::ready(frame_fut); }, kReleaseBudget);
+        s.mock->advance(std::chrono::milliseconds{s.cfg.logon_timeout_ms} * 99 / 100);
+        bool const returned = s.pump_until([&] { return r.close_run.done; }, kReleaseBudget);
+        EXPECT_TRUE(returned) << "close() had not returned below logon_timeout_ms";
+        if (!returned) (void)r.close_returned_within(kReleaseBudget);
+
+        ASSERT_TRUE(held) << "setup: the reply's store was not held";
+        EXPECT_EQ(r.app->from_admin_count("5"), 1) << "setup: fromAdmin did not run on the Logout";
+        EXPECT_EQ(close_reset_wait_expired_count(s), 0) << "close_reset_wait_expired was emitted";
+        EXPECT_TRUE(r.log().calls.empty()) << "a reset call: reset() " << r.log().reset_calls
+                                           << ", reset_to " << r.log().reset_to_calls;
+    }
+}
+
+// R-1w StuckPending, the forced hit of the expiry event: A's reply store is held and never
+// released while close(terminal) waits; the mock clock moved past logon_timeout_ms ends the
+// wait with one close_reset_wait_expired. The cell's pumps stay inside kHoldBound, so the hold
+// is still in place when the clock moves.
+TEST(ResetOnLogout104, CloseNotHeldWhenReceiptEndsWithoutUnit_StuckPending) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        Rol104 r{role};
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        r.ctl.hold_next_store = true;
+        auto frame_fut = s.feed_spawn(s.logout(s.next_in()));
+        bool const held = s.pump_until([&] { return !r.log().store_events.empty(); }, kHoldWindow);
+        r.spawn_close(close_mode::terminal);
+        (void)s.pump_until([&] { return r.close_run.done; }, kHoldWindow / 2);
+        s.mock->advance(std::chrono::milliseconds{s.cfg.logon_timeout_ms} +
+                        std::chrono::milliseconds{1});
+        bool const returned = s.pump_until([&] { return r.close_run.done; }, kHoldWindow);
+        bool const hold_in_place = !r.log().hold_timed_out;
+        r.ctl.released = true;
+        (void)s.pump_until([&] { return rg::Scene::ready(frame_fut); }, kReleaseBudget);
+        if (!returned) (void)r.close_returned_within(kReleaseBudget);
+
+        ASSERT_TRUE(held) << "setup: the reply's store was not held";
+        EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the clock moved";
+        EXPECT_TRUE(returned) << "close() did not return past logon_timeout_ms";
+        EXPECT_EQ(close_reset_wait_expired_count(s), 1) << "close_reset_wait_expired events";
+    }
+}
