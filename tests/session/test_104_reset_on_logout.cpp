@@ -3955,3 +3955,104 @@ TEST(ResetOnLogout104, LivenessHeartbeatAcrossBoundUnit_OneEnding_StoreHeld_RolO
         liveness_heartbeat_across_unit(role, liveness_arm::store_held, false);
     }
 }
+
+// ── T049: R-5d, the manager freeze on a SeqnumManager alone (contract RR-5 items 3 to 5) ──
+//
+// Frozen: check_inbound, assign_outbound and hydrate return session_already_closed;
+// set_next_inbound and set_next_outbound return success; take_back_outbound returns; after
+// each, both counters keep their seeded values, which differ from every value a write would
+// leave. reset_to_one returns success and both counters are 1. Thawed (the forced-hit arm):
+// every mutator writes again.
+
+namespace {
+
+struct Freeze104 {
+    asio::io_context ioc;
+    fixpp::session::SeqnumManager m;
+
+    template <class Awaitable>
+    auto run(Awaitable aw) {
+        auto fut = asio::co_spawn(ioc, std::move(aw), asio::use_future);
+        ioc.restart();
+        ioc.run();
+        return fut.get();
+    }
+    [[nodiscard]] std::pair<seqnum_t, seqnum_t> counters() const {
+        return {m.next_inbound_unsafe(), m.next_outbound_unsafe()};
+    }
+    ~Freeze104() { (void)run(m.drain()); }
+    Freeze104() = default;
+    Freeze104(Freeze104 const&) = delete;
+    Freeze104& operator=(Freeze104 const&) = delete;
+};
+
+constexpr seqnum_t kFreezeIn = 7;
+constexpr seqnum_t kFreezeOut = 9;
+
+}  // namespace
+
+TEST(SeqnumManagerFreeze104, NonResetMutatorsRefusedWhileFrozen) {
+    using acc = fixpp::session::seqnum_manager_test_access;
+    using fixpp::core::error;
+    std::pair<seqnum_t, seqnum_t> const seeded{kFreezeIn, kFreezeOut};
+    {
+        SCOPED_TRACE("frozen");
+        Freeze104 f;
+        acc::set_counters(f.m, kFreezeIn, kFreezeOut);
+        acc::set_frozen(f.m, true);
+
+        auto const ci = f.run(f.m.check_inbound(kFreezeIn));
+        ASSERT_FALSE(ci.has_value()) << "check_inbound wrote while frozen";
+        EXPECT_EQ(ci.error(), error::session_already_closed) << "check_inbound's refusal";
+        EXPECT_EQ(f.counters(), seeded) << "after check_inbound";
+
+        auto const ao = f.run(f.m.assign_outbound());
+        ASSERT_FALSE(ao.has_value()) << "assign_outbound assigned while frozen";
+        EXPECT_EQ(ao.error(), error::session_already_closed) << "assign_outbound's refusal";
+        EXPECT_EQ(f.counters(), seeded) << "after assign_outbound";
+
+        auto const hy = f.run(f.m.hydrate(3, 4));
+        ASSERT_FALSE(hy.has_value()) << "hydrate wrote while frozen";
+        EXPECT_EQ(hy.error(), error::session_already_closed) << "hydrate's refusal";
+        EXPECT_EQ(f.counters(), seeded) << "after hydrate";
+
+        EXPECT_TRUE(f.run(f.m.set_next_inbound(20)).has_value()) << "set_next_inbound's return";
+        EXPECT_EQ(f.counters(), seeded) << "after set_next_inbound";
+
+        EXPECT_TRUE(f.run(f.m.set_next_outbound(21)).has_value()) << "set_next_outbound's return";
+        EXPECT_EQ(f.counters(), seeded) << "after set_next_outbound";
+
+        f.m.take_back_outbound(2);
+        EXPECT_EQ(f.counters(), seeded) << "after take_back_outbound";
+
+        EXPECT_TRUE(f.run(f.m.reset_to_one()).has_value()) << "reset_to_one's return";
+        EXPECT_EQ(f.counters(), (std::pair<seqnum_t, seqnum_t>{1, 1})) << "after reset_to_one";
+    }
+    {
+        SCOPED_TRACE("thawed");
+        Freeze104 f;
+        acc::set_counters(f.m, kFreezeIn, kFreezeOut);
+        acc::set_frozen(f.m, false);
+
+        EXPECT_TRUE(f.run(f.m.check_inbound(kFreezeIn)).has_value()) << "check_inbound";
+        EXPECT_EQ(f.counters(), (std::pair<seqnum_t, seqnum_t>{kFreezeIn + 1, kFreezeOut}));
+
+        auto const ao = f.run(f.m.assign_outbound());
+        ASSERT_TRUE(ao.has_value()) << "assign_outbound";
+        EXPECT_EQ(*ao, kFreezeOut);
+        EXPECT_EQ(f.counters(), (std::pair<seqnum_t, seqnum_t>{kFreezeIn + 1, kFreezeOut + 1}));
+
+        EXPECT_TRUE(f.run(f.m.hydrate(3, 4)).has_value()) << "hydrate";
+        EXPECT_EQ(f.counters(), (std::pair<seqnum_t, seqnum_t>{3, 4}));
+
+        EXPECT_TRUE(f.run(f.m.set_next_inbound(20)).has_value()) << "set_next_inbound";
+        EXPECT_TRUE(f.run(f.m.set_next_outbound(21)).has_value()) << "set_next_outbound";
+        EXPECT_EQ(f.counters(), (std::pair<seqnum_t, seqnum_t>{20, 21}));
+
+        f.m.take_back_outbound(5);
+        EXPECT_EQ(f.counters(), (std::pair<seqnum_t, seqnum_t>{20, 5})) << "take_back_outbound";
+
+        EXPECT_TRUE(f.run(f.m.reset_to_one()).has_value()) << "reset_to_one";
+        EXPECT_EQ(f.counters(), (std::pair<seqnum_t, seqnum_t>{1, 1}));
+    }
+}

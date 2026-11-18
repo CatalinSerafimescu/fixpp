@@ -74,6 +74,10 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::check_inbound(seqn
     }
     // lk holds the scoped_lock; mutex is held until lk goes out of scope.
     auto lk = std::move(*lk_result);
+    // 104 (contract RR-5 item 5): refused while frozen, before any counter read.
+    if (frozen_) {
+        co_return std::unexpected(error::session_already_closed);
+    }
 
     if (seq < next_inbound_) {
         // Too-low: classified here, counter NOT advanced. Whether it is fatal is
@@ -124,6 +128,10 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> SeqnumManager::assign_outboun
         co_return std::unexpected(error::session_already_closed);
     }
     auto lk = std::move(*lk_result);
+    // 104 (contract RR-5 item 5): refused while frozen, before any counter read.
+    if (frozen_) {
+        co_return std::unexpected(error::session_already_closed);
+    }
 
     // Overflow check: at seqnum_max the next value would need to be
     // seqnum_max+1 which overflows. Detect at seqnum_max itself.
@@ -151,6 +159,10 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::hydrate(
         co_return std::unexpected(fixpp::core::error::session_already_closed);
     }
     auto lk = std::move(*lk_result);
+    // 104 (contract RR-5 item 5): refused while frozen, before any counter write.
+    if (frozen_) {
+        co_return std::unexpected(fixpp::core::error::session_already_closed);
+    }
 
     next_inbound_ = next_inbound;
     next_outbound_ = next_outbound;
@@ -188,6 +200,10 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::set_next_inbound(
         co_return std::unexpected(fixpp::core::error::session_already_closed);
     }
     auto lk = std::move(*lk_result);
+    // 104 (contract RR-5 item 5): success with no write while frozen.
+    if (frozen_) {
+        co_return fixpp::core::expected_t<void>{};
+    }
 
     next_inbound_ = n;
     co_return fixpp::core::expected_t<void>{};
@@ -206,6 +222,10 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::set_next_outbound(
         co_return std::unexpected(fixpp::core::error::session_already_closed);
     }
     auto lk = std::move(*lk_result);
+    // 104 (contract RR-5 item 5): success with no write while frozen.
+    if (frozen_) {
+        co_return fixpp::core::expected_t<void>{};
+    }
 
     next_outbound_ = n;
     co_return fixpp::core::expected_t<void>{};

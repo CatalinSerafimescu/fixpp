@@ -60,8 +60,39 @@ namespace fixpp::session {
 // its destructor's terminate-precondition is not triggered. The Session
 // manages the lifetime; the SeqnumManager object has no independent lifecycle.
 
+class Session;
+
 class SeqnumManager {
 public:
+    // ── 104-sequence-reset-fidelity: the freeze (contract RR-5, construction (Z)) ──
+    //
+    // While frozen, the manager accepts only the reset writers: check_inbound,
+    // assign_outbound and hydrate return session_already_closed after the lock grant and
+    // before any counter read or write; set_next_inbound and set_next_outbound return
+    // success with no write; take_back_outbound is a no-op. reset_to_one carries no freeze
+    // test. Session freezes the manager exactly while its receipt marker is `reached`, so a
+    // writer already in flight at a received Logout's reset point cannot change either
+    // number after it. The freeze holds by construction only while every write of the two
+    // counters is inside a mutator body (INV-Z); re-derive with
+    // `git grep -n -E '\bnext_(in|out)bound_\b *([-+*/%&|^]|<<|>>)?=[^=]|(\+\+|--)
+    // *next_(in|out)bound_\b|\bnext_(in|out)bound_\b
+    // *(\+\+|--)|&next_(in|out)bound_\b|exchange\(next_(in|out)bound_' -- src/session
+    // include/fixpp/session ':!include/fixpp/session/memory_store.hpp'` and read each hit (contract
+    // RR-5 item 3 gives the recipe's known positive). The callers of reset_to_one must be the two
+    // reset writers: `git grep -n 'reset_to_one(' -- src include`, each hit read.
+    //
+    // freeze_key is a passkey: its constructor is private and Session is its friend, so the
+    // three members below are callable where a key can be made, in Session. frozen() serves
+    // Session's Debug asserts, and no production branch tests it (a branch on it would be a
+    // refusal per call site, contract RR-5 item 4).
+    class freeze_key {
+        friend class Session;
+        freeze_key() noexcept = default;
+    };
+    void freeze(freeze_key /*key*/) noexcept { frozen_ = true; }
+    void thaw(freeze_key /*key*/) noexcept { frozen_ = false; }
+    [[nodiscard]] bool frozen(freeze_key /*key*/) const noexcept { return frozen_; }
+
     // Construct with initial counters at seqnum_min (1).
     SeqnumManager() noexcept = default;
 
@@ -112,7 +143,11 @@ public:
     //   Not a coroutine, and it takes no lock: ONLY safe to call on the session strand,
     //   under the condition peek_outbound() states.
     //   [.specify/536-537-538-recovery-liveness.md §10, D-OUT-3; ruling R-19]
+    //   104 (contract RR-5 item 5): a no-op while frozen.
     void take_back_outbound(seqnum_t k) noexcept {
+        if (frozen_) {
+            return;
+        }
         if (next_outbound_ > k) {
             next_outbound_ = k;
         }
@@ -180,6 +215,7 @@ private:
     seqnum_t next_inbound_ = seqnum_min;   // next expected inbound (starts at 1)
     seqnum_t next_outbound_ = seqnum_min;  // next outbound to assign (starts at 1)
     fixpp::sync::async_mutex mutex_;       // serialises counter reads/writes (D-7)
+    bool frozen_ = false;                  // 104: the freeze (contract RR-5)
 };
 
 }  // namespace fixpp::session
