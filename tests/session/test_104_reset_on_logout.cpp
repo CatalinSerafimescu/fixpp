@@ -2258,6 +2258,7 @@ TEST(ResetOnLogout104, LivenessDuringReceiptUnit_NumbersNothing) {
         s.pump_for(kHoldWindow / 2);
         s.mock->advance(kSmallHeartBtInt);
         s.pump_for(kHoldWindow / 2);
+        auto const frames_in_hold = s.sent.size() - after_reply;
         std::string const written_in_hold = s.written(after_reply);
         bool const hold_in_place = !r.log().hold_timed_out;
         r.ctl.released = true;
@@ -2268,7 +2269,7 @@ TEST(ResetOnLogout104, LivenessDuringReceiptUnit_NumbersNothing) {
         EXPECT_EQ(s.count("5", mark), 1U) << "setup: A's reply: " << s.written(mark);
         EXPECT_TRUE(held) << "no reset_to was held at the receipt; reset calls: reset() "
                           << r.log().reset_calls << ", reset_to " << r.log().reset_to_calls;
-        EXPECT_TRUE(written_in_hold.empty())
+        EXPECT_EQ(frames_in_hold, 0U)
             << "frames written after A's reply during the hold: " << written_in_hold;
         EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the release";
         EXPECT_TRUE(frame_returned) << "the Logout's frame did not return";
