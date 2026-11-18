@@ -503,7 +503,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 - [X] T058 [US1] Done: evidence file, "Session of 2026-11-18, twentieth run", its T058 section. Mutants for T045 (protocol): R-1a and R-1b, by one mutant that restores `run_logout_phase1`'s set AND the teardown's reset_on_logout term it fed at the base (orchestrator ruling (d) on the T057 STOP). The answered twin stays GREEN. The set alone is an equivalent mutant: since T047 nothing reads it (the teardown predicate is `!teardown_reset_done_ && reset_on_disconnect`, and a reset point that finds `reached` runs no unit); record that, and claim no assertion for it.
 - [X] T059 [US1] Done: evidence file, "Session of 2026-11-18, twentieth run", its T059 section. Mutants for T047 (protocol): R-1j; R-1s; R-1k; R-1l(1); R-1w, the `FromAdminThrow` and `Storeless` arms, with `StuckPending` GREEN; R-1f(2b); R-2.
 - [X] T060 [US1] Done: evidence file, "Session of 2026-11-18, twentieth run", its T060 section. Mutants for T048 (protocol): R-1r, both boundaries, read by its seam arms (`…_SeamStoreThenEmit` for the `store_then_emit` test, `…_SeamPersist` for the `persist_inbound_advance_` test); R-1l(3); R-1h.
-- [ ] T061 [US1] Mutants for T049 and T050 (protocol). Each is RED by its named assertion, with its forced-hit arm GREEN:
+- [X] T061 [US1] Done: evidence file, "Session of 2026-11-18, twentieth run", its T061 section; "twenty-first run", (b); and "twenty-second run", its R-5k section. Mutants for T049 and T050 (protocol). Each is RED by its named assertion, with its forced-hit arm GREEN:
   - delete the freeze test in `set_next_inbound`: R-5a, both arms, and R-5d;
   - delete it in `set_next_outbound`: R-5b and R-5d;
   - delete it in `assign_outbound`: R-5c and R-5d;
