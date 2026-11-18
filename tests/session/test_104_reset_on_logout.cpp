@@ -51,6 +51,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -363,6 +364,23 @@ constexpr std::uint32_t kBoundT = 2000;  // the too-high Logout's bound T, ms, o
 constexpr int kNone = 0;                 // session_test_access::peer_logout_phase's `none`
 constexpr int kPending = 1;              // session_test_access::peer_logout_phase's `pending`
 
+// Counts fromAdmin calls by MsgType, as 103's TooHighLogoutState103 cells do.
+class AdminCountingApp104 final : public rg::GapApp {
+public:
+    std::vector<std::string> from_admin_types;
+    fixpp::core::expected_t<void> fromAdmin(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
+        const fixpp::session::SessionId& /*id*/) override {
+        from_admin_types.emplace_back(msg.msg_type());
+        return {};
+    }
+    [[nodiscard]] int from_admin_count(std::string_view msg_type) const {
+        int n = 0;
+        for (auto const& t : from_admin_types) n += static_cast<int>(t == msg_type);
+        return n;
+    }
+};
+
 // A Scene whose session has reset_on_logout and a HookedStore. Every member a store hook, a
 // spawned close or a cell-local delivery touches is declared before the Scene, so it outlives
 // whatever the Scene's teardown resumes; the destructor's body releases a hold first.
@@ -388,10 +406,11 @@ public:
     Delivery delivery;
     std::deque<std::vector<std::byte>> frames;  // a cell-local delivery's bytes
     std::shared_ptr<HookedStoreFactory> factory = std::make_shared<HookedStoreFactory>();
+    std::shared_ptr<AdminCountingApp104> app = std::make_shared<AdminCountingApp104>();
     rg::Scene s;
 
     explicit Rol104(session_role const role)
-        : s{rg::Options{.role = role, .logout_timeout_ms = kBoundT}} {
+        : s{rg::Options{.role = role, .app = app, .logout_timeout_ms = kBoundT}} {
         factory->hooks.on_outbound_store = [c = &ctl] {
             if (!c->hold_next_store) return false;
             c->hold_next_store = false;
@@ -567,9 +586,10 @@ void claims_pending_close_during_reply_store(session_role const role) {
     EXPECT_TRUE(finished_before_return) << "the reset_to had not finished when close() returned";
     EXPECT_EQ(r.log().reset_calls, 0) << "a reset() call";
     EXPECT_FALSE(r.close_reset_wait_expired()) << "close_reset_wait_expired was emitted";
+    // Whether A's reply is written under the in-flight close(terminal) is not pinned here; when
+    // one is written, the held store was its store.
     auto const logouts = s.of_type("5", mark);
-    ASSERT_EQ(logouts.size(), 1U) << "acknowledgement Logouts: " << s.written(mark);
-    if (!r.log().store_events.empty()) {
+    if (!logouts.empty() && !r.log().store_events.empty()) {
         EXPECT_EQ(rg::field(logouts.front(), 34), std::to_string(r.log().store_events.front().seq))
             << "the held store was not the Logout's";
     }
@@ -602,6 +622,9 @@ void claims_pending_one_delivery(session_role const role) {
     EXPECT_EQ(r.phase(), kNone) << "the in-sequence Logout did not claim the mark";
     EXPECT_TRUE(bound_ended) << "the bound did not end";
     EXPECT_EQ(s.count("5", mark), 1U) << "acknowledgement Logouts: " << s.written(mark);
+    // Reach by the arm: only the in-sequence Logout's arm hands the frame to fromAdmin; a frame
+    // drained at the drain test never reaches it.
+    EXPECT_EQ(r.app->from_admin_count("5"), 1) << "the in-sequence Logout's fromAdmin calls";
     expect_one_reset_to_one_one_disconnected(r);
 
     r.spawn_close(close_mode::terminal);

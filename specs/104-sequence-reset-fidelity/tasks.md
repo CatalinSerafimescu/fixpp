@@ -179,14 +179,18 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 
 **Independent test**: the settling selection's asserts stay silent, their known positive fires, and each D10 cell is RED on the base by assertion (or GREEN as D10 states, with its reason).
 
-- [ ] T018 [US1] Debug asserts for INV-T in `src/session/session.cpp`: `assert(peer_logout_.phase != peer_logout_mark::phase_t::acking)` at the entry of `on_inbound_active_logout_` and at the entry of `on_inbound_active_too_high_logout_`. Use the plain `assert` form `session.cpp` already uses, with no test-hook macro. Each assert's comment names INV-T and contract RR-2 and records no result. The asserts compile at the base and change no Release behaviour.
-- [ ] T019 [US1] R-1y in `tests/session/test_104_reset_on_logout.cpp`: `ResetOnLogout104.DuplicateTooHighLogoutWhilePending_OneResetByTheBound_{RouteA,RouteB}`, per research D10's row.
+- [X] T018 [US1] Debug asserts for INV-T in `src/session/session.cpp`: `assert(peer_logout_.phase != peer_logout_mark::phase_t::acking)` at the entry of `on_inbound_active_logout_` and at the entry of `on_inbound_active_too_high_logout_`. Use the plain `assert` form `session.cpp` already uses, with no test-hook macro. Each assert's comment names INV-T and contract RR-2 and records no result. The asserts compile at the base and change no Release behaviour. Done: evidence file, "Session of 2026-11-18, fourth run", its "T018 — INV-T Debug asserts" section.
+- [X] T019 [US1] R-1y in `tests/session/test_104_reset_on_logout.cpp`: `ResetOnLogout104.DuplicateTooHighLogoutWhilePending_OneResetByTheBound_{RouteA,RouteB}`, per research D10's row.
   - Setup: rol only, a mock clock, HookedStore. `RouteB` is the input of 103's `SecondTooHighLogoutWhilePending_*`; `RouteA` is the input of `H_LogoutResentInSequence_*`, with the resent Logout above N.
   - Assert exactly one acknowledgement Logout and exactly one `reset_to(1, 1)`, at the hook with state `Disconnected`; after `close()`, no `reset`. "Exactly one" is its own forced hit, since zero and two both fail.
-- [ ] T020 [US1] R-1z in `tests/session/test_104_reset_on_logout.cpp`: `ResetOnLogout104.ClaimsAPendingBound_OneResetByTheArm_{CloseDuringReplyStore,OneDelivery}`, per research D10's row.
+  - Done: evidence file, "Session of 2026-11-18, fourth run", its "T019, T020 — R-1y and R-1z" section.
+- [X] T020 [US1] R-1z in `tests/session/test_104_reset_on_logout.cpp`: `ResetOnLogout104.ClaimsAPendingBound_OneResetByTheArm_{CloseDuringReplyStore,OneDelivery}`, per research D10's row.
   - `OneDelivery` feeds a GapFill past S and the in-sequence Logout at the new N in one delivery. They come from a cell-local coroutine that awaits `on_inbound_frame` for both frames back to back, as `run_read_pump` does. `Scene::feed` is not used, because it pumps between frames.
   - Assert: `close()` does not return before the release; exactly one `reset_to(1, 1)`, by A, with the hook seeing `Disconnected`; no `reset`; no `close_reset_wait_expired`.
-- [ ] T021 [US1] The settling run (plan phase 1), in `$T`'s Debug build with asserts on. Run both selections together:
+  - `CloseDuringReplyStore` does not pin whether A's reply is written under the in-flight `close(terminal)`: it asserts no 35=5 count, and checks that the held store was the Logout's only when a 35=5 was written (orchestrator ruling at T023).
+  - `OneDelivery` pins its reach by arm A with `fromAdmin` called once for the 35=5, read by an admin-counting application as 103's `H_LogoutResentInSequence_*` does (orchestrator ruling at T023); its forced-hit mutant, which drains the Logout frame, is a T056 row.
+  - Done: evidence file, "Session of 2026-11-18, fourth run", its "T019, T020 — R-1y and R-1z" section.
+- [X] T021 [US1] The settling run (plan phase 1), in `$T`'s Debug build with asserts on. Run both selections together:
   - `session_103_tests --gtest_filter='*TooHighLogoutState103.*'`. First check with `--gtest_list_tests` under the same filter that it includes `SecondTooHighLogoutWhilePending_*` and `H_LogoutResentInSequence_*`.
   - `session_104_tests --gtest_filter='*ResetOnLogout104.DuplicateTooHighLogoutWhilePending_*:*ResetOnLogout104.ClaimsAPendingBound_*'`. `OneDelivery` must be in the list.
 
@@ -196,13 +200,15 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - (c) no Debug assert fires.
 
   An assert abort in any test is (c) failing, and goes to T023. An expected RED in (b) is not a STOP.
-- [ ] T022 [US1] The entry assert's known positive, in `$M` only (plan phase 1; quickstart §2):
+  Done: evidence file, "Session of 2026-11-18, fourth run", its "T021 — the settling run" section.
+- [X] T022 [US1] The entry assert's known positive, in `$M` only (plan phase 1; quickstart §2):
   - **The edit.** Insert a capped loop between `on_inbound_active_`'s `acking` drain test and its sub-arm dispatch: `for (int i = 0; i < K && peer_logout_.phase == peer_logout_mark::phase_t::pending; ++i) co_await asio::post(…)`. The loop also records the pass at which the mark left `pending`, and the phase it read at exit.
   - **K.** K is eight times the minimum posted-turn count of the bound's wake path, as plan phase 1 derives it. Re-derive that count by its three greps (`operator||` in `<asio>/experimental/awaitable_operators.hpp`, `co_spawn_entry_point` in `<asio>/impl/co_spawn.hpp`, and `^void complete` in `src/core/test/mock_clock.cpp`) at the pinned asio, and record the derivation and K in the evidence file.
   - **The observable.** R-1z's `OneDelivery` arm aborts on the entry assert's message.
   - **The known positive itself fails** if the cap is hit with the mark still `pending`, or if the loop exits with a phase other than `acking`. For the second case the remedy is in the scratch run only: hold the bound's reply `store` in HookedStore so that the bound stays `acking`, then re-run.
   - Record the exit pass and phase. If the arm does not abort, the selection cannot report a failure of INV-T, and the experiment is not accepted.
-- [ ] T023 [US1] **(orchestrator)** STOP gate for the settling experiment. If any assert fired in T021, or T022's known positive did not fire (or failed its cap or exit-phase rule), implementation stops. The cell, the assert and the stack go to the owner. Otherwise record what a green `OneDelivery` run proves and what it does not (plan phase 1): a one-turn suspension stays covered by the source reading of INV-T only.
+  - Done: evidence file, "Session of 2026-11-18, fourth run", its "T022 — the entry assert's known positive" section.
+- [X] T023 [US1] **(orchestrator)** STOP gate for the settling experiment. Done: evidence file, "T023 — orchestrator STOP gate for the settling experiment: PASS (2026-11-18)". If any assert fired in T021, or T022's known positive did not fire (or failed its cap or exit-phase rule), implementation stops. The cell, the assert and the stack go to the owner. Otherwise record what a green `OneDelivery` run proves and what it does not (plan phase 1): a one-turn suspension stays covered by the source reading of INV-T only.
 - [ ] T024 [US1] R-1a and R-1b in `tests/session/test_104_reset_on_logout.cpp` (SC-001; contract W1, W2).
   - `ResetOnLogout104.Unanswered_Timeout_NoReset` runs in both roles, with MemoryStore and a persistent StoreDouble. Before the clock advance, assert that a 35=5 was captured and `LogoutSent` reached.
   - `…Unanswered_TransportDrop_NoReset` runs as an engine-managed initiator on `fixpp::test_support::plain_rig` (`tests/session/plain_engine_rig.hpp`). `logout_disconnect_timeout_ms` is set above the cell's bounded wait for the drop's close, by a ratio stated in the cell. Assert that `close()` completed before the grace deadline. The grace timer is a real `asio::steady_timer` (`close_grace`, plan `## Gate A` round 2), so the cell reads the completion instant and the deadline both on `std::chrono::steady_clock`, never on the rig's mock clock.
@@ -475,6 +481,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - R-1f(1);
   - R-1y;
   - R-1z, read in Debug and asserts-off;
+  - R-1z `OneDelivery`'s forced hit: drain the in-sequence Logout frame at the drain test, read by its `fromAdmin("5") == 1` reach pin (orchestrator ruling at T023);
   - R-1x's marker mutant, read by "the marker `reached`", with R-1x's reset-count assertions GREEN.
 - [ ] T057 [US1] Mutants for T042 (protocol): R-1c; R-1d, both; R-1e; R-1f(2a); R-1o, one per arm; R-1p; R-1q; R-1u; R-1x(1), read by "exactly one `reset_to`"; R-3, by R-1d's first mutant, when T011 recorded R-3 drivable; R-1i; R-1n, one per parameter; R-1l(2).
 - [ ] T058 [US1] Mutants for T045 (protocol): R-1a and R-1b. The answered twin stays GREEN.
