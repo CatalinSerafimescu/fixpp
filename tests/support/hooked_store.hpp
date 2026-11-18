@@ -9,7 +9,7 @@
 // a second executable can hold a store operation the same way.
 //
 // 104-sequence-reset-fidelity (tasks.md T015; research D10, its test-support additions) adds
-// four readings a cell can take without a production seam:
+// these readings, which a cell takes without a production seam:
 //   - StoreLog::calls, an issue-time record of every reset() and reset_to call, taken at the
 //     call's entry before any hook, hold or forward, in every reset_to_mode, with the
 //     readings of StoreLog::call_snapshot, so a cell can tell the reset unit from the
@@ -21,7 +21,6 @@
 //     read from the stamps;
 //   - blocking_write_state::starts (tests/support/blocking_write_transport.hpp), the write
 //     count taken before the park.
-// StoreLog::writes, the existing hooks, the holds and kHoldBound are unchanged.
 #pragma once
 
 #include <asio/co_spawn.hpp>
