@@ -5535,6 +5535,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_too_hi
 asio::awaitable<std::optional<fixpp::core::expected_t<void>>>
 Session::on_inbound_active_too_high_logout_(bool tic, seqnum_t seq) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
+    // 104 (contract RR-2, INV-T): a 35=5 frame reaches this arm in the strand turn of
+    // on_inbound_active_'s acking drain test, so the too-high Logout's bound is not acking here.
+    assert(peer_logout_.phase != peer_logout_mark::phase_t::acking);
     // As on_inbound_active_logout_ does first, so a configured reset_on_logout fires whichever
     // ending follows.
     logout_seen_ = true;
@@ -6045,6 +6048,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
     bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
     inbound_route const& route) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
+    // 104 (contract RR-2, INV-T): a 35=5 frame reaches this arm in the strand turn of
+    // on_inbound_active_'s acking drain test, so the too-high Logout's bound is not acking here.
+    assert(peer_logout_.phase != peer_logout_mark::phase_t::acking);
     // 024 T013 (site b): mark that a peer Logout was received.
     // Set before any FSM action so close() can detect logout_seen_ even
     // if later teardown arrives via terminal close after this transition.
