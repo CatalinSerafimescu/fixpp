@@ -41,8 +41,8 @@ re-record.
    ruling O-3).
 
 No C ABI, configuration-key or public-type change. `logout_seen_` changes from `bool` to a one-byte enum, and
-`reset_unit_wake_` is deleted (contract RR-2 item 4), so `sizeof(Session)` is expected to shrink; nothing pins it
-(research D10). `Engine` gains one private member, R-1t's step-3 mark, so `sizeof(Engine)` changes, a layout
+`reset_unit_wake_` is deleted (contract RR-2 item 4), so `sizeof(Session)` is expected to shrink (an expectation: tasks.md T086 reads it once, base against head); nothing
+pins it (research D10). `Engine` gains one private member, R-1t's step-3 mark, so `sizeof(Engine)` changes, a layout
 change in the installed `engine.hpp` with no C-ABI change; nothing pins it either (B-104-7).
 
 ## Technical Context
@@ -130,11 +130,11 @@ accounted for on its own:
 | Article (quoted) | Verdict |
 |---|---|
 | VI §5: "Every `/specify` artifact must include a **Normative References** section listing the exact `[DocAbbrev §X.Y.Z] Title` entries from the coverage index that inform the spec." | **PASS.** The spec lists FIX-SL §4.3.11, §4.4.2, §4.4.3, §4.6, §4.7.1, §4.8.1, §4.10.2 and FIX-TC 1B, 1S, 2, 13, each a row of `spec/coverage-index.md` (re-derive: `grep -n -F '<§ or scenario>' spec/coverage-index.md`). No key is added. Phase 9 adds 104's witnesses to the notes column of the keys it witnesses. |
-| VII §3: "**TDD is mandatory.** Every feature lands as red-green-refactor: failing test first, then implementation." | **PASS (planned).** Each behaviour has a cell that is RED on the base, by reading, before its fix, and a mutant (research D10). Phases 2, 4 and 6 open with their cells. |
+| VII §3: "**TDD is mandatory.** Every feature lands as red-green-refactor: failing test first, then implementation." | **PASS (planned).** Each behaviour has a cell that is RED on the base, by reading, before its fix, and a mutant (research D10). Phases 1, 3 and 5 are the RED-cell phases, each before its story's change. |
 | VII §4: "**No code without a test.**" | **PASS (planned).** D3.3a's clamp, the text builder's new callers, the moved and widened `close()` wait and its poll, the close-out of a `pending` receipt with no reset, the reset point as one strand turn and its cancellation-state reset, the marker's owners (construction A: pump frames only, the bound's one write), RR-4's boundaries, arm S and the moved identity gates each have a cell (U-7/U-8, T-1/T-2, R-1j/R-1k/R-1s/R-1w, R-1l/R-1u, R-1x, R-1v/R-1f/R-1y/R-1z, R-1r, R-1o, T-6/U-9). |
 | VII §5: "`tests/conformance/` holds the official FIX session-layer test cases … Every PR must pass them in CI." | **PASS.** `TcSeqnumTest.Tc2c_MsgSeqNumTooLow` (Active) is unchanged. T-1/T-2 are TC 2c's and 1B(d)'s Logon-arm instances. |
 | VII §8: "Author isolation-safe tests grouped; select by ctest label, not executable name" | **PASS (planned).** One bucket, `session_104_tests`, with label `104`. Selection is `-L 104 --no-tests=error` (quickstart §2). |
-| IX §1: "**Per-PR:** **≥95% line, ≥85% branch** on **touched modules** … **Binding rule — no silent uncovered error/edge path.**" | **PASS (planned).** Each new branch has a cell, and each contract ending has one: each receipt arm's reset point (R-1c, R-1d, R-1e, R-1o), each ending before it (R-1f, R-1g, R-1n), the races with `close()` and `Engine::stop()` (R-1j, R-1k, R-1l, R-1t, R-1u, R-1w, R-1x, R-1z), a duplicate too-high Logout (R-1y), the reply's cancelled store call (R-1v), the store failure (R-1i), the emitters at the unit (R-1p, R-1q, R-1r), the unasked branch (U-1, U-4, U-9), the clamp (U-7, U-8), and each too-low Logout ending, one cell per ending per arm with its mutant (T-4a to T-4e, T-6). `/speckit-verify` assesses anything left uncovered. |
+| IX §1: "**Per-PR:** **≥95% line, ≥85% branch** on **touched modules** … **Binding rule — no silent uncovered error/edge path.**" | **PASS (planned).** Each new branch has a cell, and each contract ending has one: each receipt arm's reset point (R-1c, R-1d, R-1e, R-1o), each ending before it (R-1f, R-1g, R-1n), the races with `close()` and `Engine::stop()` (R-1j, R-1k, R-1l, R-1t, R-1u, R-1w, R-1x, R-1z), a duplicate too-high Logout (R-1y), the reply's cancelled store call (R-1v), the store failure (R-1i), the emitters at the unit (R-1p, R-1q, R-1r), the unasked branch (U-1, U-4, U-9, U-10), the clamp (U-7, U-8), and each too-low Logout ending, one cell per ending per arm with its mutant (T-4a to T-4f, T-6). `/speckit-verify` assesses anything left uncovered. |
 | VIII §3: "**No perf change merged without a benchmark in the same PR.**" | **PASS (planned).** Per mechanism ("Performance Goals"): `store_then_emit`'s byte test is the per-frame change, and `session_send_bench` runs paired base-vs-candidate in phase 7. `persist_inbound_advance_`'s byte test sits behind `store_is_persistent_`, so it is off the in-memory path and has no bench. `close()`'s poll is not a perf change (Performance Goals), and runs in `close()` only. Its worst case is up to `logon_timeout_ms` of posted turns while a store call is held, disclosed in B-104-2. Research D1 item 4 answers 093 OD-1's reason for rejecting a poll ("spins the strand for the whole bound"). `engine_send_bench`, the only `paired` CI row on a send route (`bench/ci-suite.txt`), refuses its malformed payload before a number is read and never reaches `store_then_emit`, and `session_send_bench` is not in `bench/ci-suite.txt`: RR-4's byte test is measured only by the plan's manual paired `session_send_bench` run (§2's method; §2 itself says automated coverage is partial). |
 | IX §2: "**Sanitizers — Tier 1 (every PR, Linux/Clang):** ASan, UBSan, TSan must all run and pass." | **PASS (planned).** `session_104_tests` and the re-pinned targets run under each (quickstart §4). |
 | X §1 / §6: "Every change to it is reviewed against the contract; Codex Gate A is mandatory." / "ABI-affecting features trigger all four mandatory controls" | **N/A.** No C-ABI change: `reset_on_logout` has no C-ABI setter (`git grep -n reset_on_logout include/fix`), and no signature, code or default moves. The behaviour change reaches C-ABI users through the session, as B-104-* rows. |
@@ -145,7 +145,7 @@ accounted for on its own:
 | XV §1: "The "hot path" of this ban is the latency-critical **in-memory** path — parse → validate → dispatch and `MemoryStore`, which MUST stay zero-allocation per message." | **PASS.** Per frame: one flag test in the LogonSent arm, and RR-4's byte test in `store_then_emit` and `persist_inbound_advance_`; none allocates. The unit's frame is allocated once per session-ending Logout, which is not per message. `close()`'s poll is not on the per-message path. The text is built in a fixed stack array. |
 | XVI §3 / §4: "`/clarify` is MANDATORY before `/plan` …" / "`/analyze` is MANDATORY for the same trigger set" | `/clarify` is done. `/analyze` is scheduled after `/speckit-tasks`. |
 | XVII §1: Gate A triggers "Touches concurrency / threading / cancellation / executor model", "Touches the session FSM, recovery, or message store contract" | **Gate A required** (spec Assumptions). |
-| XVII §7: "Before opening any PR, the contributor MUST run a local … build + ctest cycle on at least the `linux-clang-debug` preset" | Planned (phase 10). Builds are run one at a time, with the owner's approval (§7 resource gate). |
+| XVII §7: "Before opening any PR, the contributor MUST run a local … build + ctest cycle on at least the `linux-clang-debug` preset" | Planned (phase 7). §7's resource gate is discharged by the owner's standing grant of 2026-11-17 ("run autonomously through all steps … Stop if you hit a blocker"), recorded at tasks.md T001. Builds still run one at a time under `flock /tmp/fixpp-build.lock`, new trees go on `/mnt/wsl/fixppbuild`, and a build stops on any WSL memory pressure. |
 | XVII §8: "`/speckit-verify` … required after every `/speckit-implement`." | Planned (phase 10), before any gate label. |
 
 **Owner `/plan` sign-off**: delegated. The owner's instruction of 2026-11-17 was "run autonomously through all
@@ -184,9 +184,9 @@ include/fixpp/session/session_config.hpp   # reset_on_logout / reset_on_disconne
 include/fixpp/session/engine.hpp           # R-1t's step-3 mark: a private test seam beside test_hook_post_send_drain_
 src/session/engine.cpp                     # Engine::stop() awaits that seam, when set, between step 2's close join and step 3's join
 tests/support/engine_test_access.hpp       # its setter
-tests/session/test_104_reset_on_logout.cpp       # R-1a … R-1z, R-2
-tests/session/test_104_unasked_reset_ack.cpp     # U-1 … U-9
-tests/session/test_104_logon_too_low.cpp         # T-1 … T-6 (T-4a … T-4e)
+tests/session/test_104_reset_on_logout.cpp       # R-1a … R-1z, R-2, R-3 (conditional, research D10)
+tests/session/test_104_unasked_reset_ack.cpp     # U-1 … U-10
+tests/session/test_104_logon_too_low.cpp         # T-1 … T-6 (T-4a … T-4f)
 tests/session/CMakeLists.txt               # add_session_104_bucket(session_104_tests …), label 104
 tests/session/test_reset_on_lifecycle.cpp  # FR-005 re-pins (research D8)
 tests/session/inbound_frame_dispositions_test.cpp  # Od29 cell re-aimed to reset_on_disconnect
@@ -280,7 +280,7 @@ result and every RED/GREEN/mutant record, never code comments.
      reset-point assert. The observable: R-1y's bound trips the assert.
    - **If any assert fires, at either point, implementation STOPS** and the decision goes back to the owner, with
      the cell, the assert and the stack.
-   - Then the rest of the US1 RED cells (research D10 R-1a … R-1x, R-2), in `test_104_reset_on_logout.cpp`.
+   - Then the rest of the US1 RED cells (research D10 R-1a … R-1x, R-2, and R-3 when phase 0 reads its input drivable), in `test_104_reset_on_logout.cpp`.
      Confirm each, R-1y and R-1z included, is RED on the base (an assertion failure, not an abort), or GREEN where
      D10 says so, with its reason.
 2. **US1 change (D1, D2; contract Part 1).**
@@ -314,7 +314,7 @@ result and every RED/GREEN/mutant record, never code comments.
      `DoubleTrigger_OneStoreReset`, `PeerInitiated_Resets` and `test_logout_not_sent.cpp`; the Od29 cell re-aimed
      to `reset_on_disconnect`.
    - GREEN, then each mutant RED.
-3. **US2 RED cells** (U-1 … U-9), in `test_104_unasked_reset_ack.cpp`.
+3. **US2 RED cells** (U-1 … U-10), in `test_104_unasked_reset_ack.cpp`.
 4. **US2 change (D3, D4, D3.3a).**
    - The LogonSent 141 read moved, the unasked branch, and its unit after the mTLS gate (clarification N-8).
    - D4 as ruled (O-2): an unasked acknowledgement at M > 1 is not consumed.
@@ -322,7 +322,7 @@ result and every RED/GREEN/mutant record, never code comments.
    - The census's kept hits for D3 and D3.3a: W8's inbound-next assertion and comments; the 027 C3 cell
      (`WalkExtraction.TwoValueEnd_ExplicitEndBeyondStore`) re-pinned to `NewSeqNo=6`, with its file header's
      statement of 21 rewritten as the rule. GREEN, then the mutants.
-5. **US3 RED cells** (T-1 … T-6, T-4a … T-4e), in `test_104_logon_too_low.cpp`.
+5. **US3 RED cells** (T-1 … T-6, T-4a … T-4f), in `test_104_logon_too_low.cpp`.
 6. **US3 change (D5, D6).**
    - The file-local text builder; Arm B switched to it, byte-identical, with `TooLowLogout103.*` as the pin.
    - Both Logon arms' too-low branches: the identity gates first (the mTLS CompID-authorisation gate; on the
@@ -335,8 +335,8 @@ result and every RED/GREEN/mutant record, never code comments.
    `.sandbox-lock`, before the first labelled push.
 9. **Records.**
    - The B&L delta (data-model.md "B&L delta"): B-104-1 … B-104-7 and L-104-1 … L-104-7 added (L-104-7 is ruling
-     O-1's row, marked source-derived and not live-traced); B-024-1, B-538-7, B-563-5, B-093-11, B-103-9's
-     disclosure and B-103-10 amended in place; L-103-2 and L-103-7 moved to the closed file with 104's resolution.
+     O-1's row, marked source-derived and not live-traced); B-024-1, B-538-7, B-563-5, B-093-11, L-093-12,
+     B-103-9's disclosure and B-103-10 amended in place; L-103-2 and L-103-7 moved to the closed file with 104's resolution.
    - `spec/feature-catalogue.md` (a 104 row, and 104's witnesses on the rows of the Normative References' keys).
    - The `spec/coverage-index.md` notes.
    - `brain/components/session.md` and `brain/components/graceful-logout.md`: flag 024 C3.1, 027 C3, 093 C-6's
@@ -387,6 +387,7 @@ result and every RED/GREEN/mutant record, never code comments.
 - Loop 2 round 2 applied 2026-11-18: Codex P1=1 P2=0 P3=0; Opus post-judging P1=0 P2=2 P3=0; rewrite corrects the Engine::stop() rows (role-loop join, L-563-4, L-093-12) and adds the stop cell. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_5_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_5_adversarial_review.md.
 - Loop 2 round 3 (loop 2 exhausted) 2026-11-18: Codex P1=0 P2=1 P3=0; Opus post-judging P1=0 P2=1 P3=0 (R-1t can stay GREEN under its reorder mutant). Owner chose: apply the judge's three verbatim edits, then a fresh narrow confirmation loop. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_6_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_6_adversarial_review.md.
 - Loop 3 round 1 (narrow confirmation) 2026-11-18: Codex P1=0 P2=0 P3=0; Opus post-judging P1=0 P2=0 P3=2 (New-1 pump budgets vs kHoldBound, New-2 wording), both applied. **Gate A CONVERGED.** Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_7_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_7_adversarial_review.md.
+- /speckit-analyze 2026-11-18: 26 findings (1 escalated, 3 HIGH); all applied. F1 corrects three base readings in research D10 in place (RED on base: the base ends before the identity gate); no design change, so no Gate A round (orchestrator ruling). D1 ruled HIGH (the owner's standing grant discharges §XVII.7's approval; T001 records it). B3: gate-b-done, per 103's T163 precedent.
 
 ### Round 1 — disagreements
 

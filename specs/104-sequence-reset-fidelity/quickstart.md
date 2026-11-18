@@ -15,10 +15,10 @@ comments.
   evidence file.
 - Measured half: apply D1 alone, then D3 + D3.3a, then D5, each in its own scratch copy, and run:
   ```bash
-  ctest --preset linux-clang-debug -L session -V
-  ctest --preset linux-clang-debug -L capi -V
-  ctest --preset linux-clang-debug -L config -V
-  ctest --preset linux-clang-debug -R '^session_tc_' -V   # tests/session/conformance's standalone registrations
+  ctest --preset linux-clang-debug -L session --no-tests=error -V
+  ctest --preset linux-clang-debug -L capi --no-tests=error -V
+  ctest --preset linux-clang-debug -L config --no-tests=error -V
+  ctest --preset linux-clang-debug -R '^session_tc_' --no-tests=error -V   # tests/session/conformance's standalone registrations
   ```
   Also run the standalone interop labels. Every failing cell must already be a kept hit of the static half;
   one that is not means a key is missing.
@@ -90,7 +90,7 @@ For each cell in research D10:
 3. In a scratch copy, apply the cell's mutant. `strings`-check that the binary is fresh, re-run, and record RED.
 
 The re-pinned cells (D8) are run in their own registrations, `session_reset_on_lifecycle` and
-`session_inbound_frame_dispositions` (standalone, so `ctest -R '^<name>$'` selects them), before and after.
+`session_inbound_frame_dispositions` (standalone, so `ctest -R '^<name>$' --no-tests=error` selects them; record the test count, and 0 fails the step), before and after.
 
 Cells with a forced-hit or a competing-timer element:
 - **R-1c / R-1d / R-1e / R-1o.** Each reads at the store's `on_reset` hook: the store call it saw (`reset_to`,
@@ -151,7 +151,7 @@ Cells with a forced-hit or a competing-timer element:
 | US2 follow-up | 789 after the reset; RR(1..0); explicit EndSeqNo | U-5 to U-8 |
 | US2 mTLS | the unasked unit after the gate | U-9 |
 | US3 AS1/AS2 | too-low acknowledgement and too-low Logon draw the Logout | T-1, T-2, T-3 |
-| US3 AS3 | the Logout cannot be sent: one cell per ending per arm | T-4a to T-4e |
+| US3 AS3 | the Logout cannot be sent: one cell per ending per arm | T-4a to T-4f |
 | FR-015 | the too-low Logout does not reset | T-5 |
 | Precedence | SendingTime, strict, the identity gates (FIX-TC 1S(c)) | T-6 |
 

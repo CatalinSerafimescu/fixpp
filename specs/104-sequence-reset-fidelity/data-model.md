@@ -4,7 +4,7 @@ All the state below is private to `Session` and lives on the session strand. No 
 default changes. No `Session` member is added or renamed (the one `Engine` member is B-104-7). One member keeps
 its name and changes its type and contract (`logout_seen_`, `bool` → a one-byte enum). One member is deleted: `reset_unit_wake_`, the waker of 093's
 event-driven wait, which `close()`'s poll replaces (contract RR-2 item 4; re-derive its users with
-`git grep -n reset_unit_wake_ -- src include tests`). So `sizeof(Session)` is expected to shrink. There is no pin on
+`git grep -n reset_unit_wake_ -- src include tests`). So `sizeof(Session)` is expected to shrink, an expectation that phase 7's one-off size reading settles. There is no pin on
 it to move (re-derive: `git grep -n "sizeof(Session)\|sizeof(fixpp::session::Session)" tests include src`).
 Decisions are in [research.md](research.md); the observable contract is in
 [contracts/session-wire-endings-104.md](contracts/session-wire-endings-104.md) (Part 1: RT-1, RR-1 to RR-4).
@@ -176,7 +176,8 @@ New rows:
   message, as FIX-TC 1S(c) requires. Then Disconnected, with NextNumIn not advanced and no 1409. The endings when
   the Logout cannot be sent are those of research D5's table. It is not a `reset_on_logout` trigger. It is sent
   with `validate_sequence_numbers` off too. Retires L-103-7. Amends B-103-10's "In Active".
-- **B-104-7** — `sizeof(Session)` shrinks and `sizeof(Engine)` changes, C++ layout changes in installed headers,
+- **B-104-7** — `sizeof(Session)` changes (its direction is written from phase 7's one-off size reading, base
+  against head, never from this text) and `sizeof(Engine)` changes, C++ layout changes in installed headers,
   in the shape of B-544-3 and B-103-11. `reset_unit_wake_`, the waker of 093's event-driven `close()` wait, is deleted; `logout_seen_` changes
   from `bool` to a one-byte enum. A C++ consumer that compiles against the installed header observes it and must be
   rebuilt; as B-544-3, the row carries no BREAKING mark. No C-ABI change: the C ABI exposes `Session` only through

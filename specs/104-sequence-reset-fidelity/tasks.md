@@ -12,11 +12,11 @@ description: "Task list for 104-sequence-reset-fidelity"
 
 ## Format: `[ID] [P?] [Story] Description`
 
-`[P]`: a different file from every other open task of its phase, and no dependency on an incomplete task. `[US1]` to `[US4]`: spec.md's user stories, on story-phase tasks only. Paths are relative to the library root unless marked PARENT (`/home/catalin/Work/Programming/Antreprenoriat/`). A task marked **(orchestrator)** is run or requested by the orchestrator; every other task is the implementer's (`[const §XVI.6]`: the orchestrator writes no library code by any tool).
+`[P]`: a different file from every other open task of its phase, and no dependency on an incomplete task. Sections of the one evidence file are exempt: tasks that only append their own section of `.specify/decisions/104-sequence-reset-fidelity-evidence.md` may still be `[P]`. `[US1]` to `[US4]`: spec.md's user stories, on story-phase tasks only. Paths are relative to the library root unless marked PARENT (`/home/catalin/Work/Programming/Antreprenoriat/`). A task marked **(orchestrator)** is run or requested by the orchestrator; every other task is the implementer's (`[const §XVI.6]`: the orchestrator writes no library code by any tool).
 
 ## Execution rules (apply to every task)
 
-- **Trees.** `$T` is the main checkout `PARENT/research/G19-fix-fpml-iso20022/library`, branch `104-sequence-reset-fidelity`, the PR's tree. `$M` is `/mnt/wsl/fixppbuild/fixpp-104-mutants`, detached. It is the only place a mutant, a census scratch edit, a scratch draft of a mechanism or a known-positive edit is applied. `$B` is `/mnt/wsl/fixppbuild/fixpp-104-base-<pad>`, detached at `git merge-base HEAD origin/main`, computed when the bench runs. `<pad>` is a run of `x` chosen so that `${#B}` equals the build path length of `$T` (a base path of a different length shifts code layout). `fixpp-parallel` and the MSVC sandbox are never used as `$M` or `$B`.
+- **Trees.** `$T` is the main checkout `PARENT/research/G19-fix-fpml-iso20022/library`, branch `104-sequence-reset-fidelity`, the PR's tree. `$M` is `/mnt/wsl/fixppbuild/fixpp-104-mutants`, detached. It is the only place a mutant, a census scratch edit, a scratch draft of a mechanism or a known-positive edit is applied. `$B` is `/mnt/wsl/fixppbuild/fixpp-104-base-<pad>`, detached at `git merge-base HEAD origin/main`, computed when the bench runs. `<pad>` is a run of `x` chosen so that `${#B}` equals `${#T}` (a base path of a different length shifts code layout). The preset's `binaryDir` is `${sourceDir}/build/${presetName}`, so the build paths CMake records (`$B/build/linux-clang-release` against `$T/build/linux-clang-release`) are then equal in length too. The pad is derived when the bench runs; no length is written here. `fixpp-parallel` and the MSVC sandbox are never used as `$M` or `$B`.
 - **Git.** Never `git checkout` or `git switch` in any tree, and never `git stash` (it is shared by every worktree). New commits only, never `--amend`.
   - **Commit points.** The implementer commits in `$T`, and checks `git rev-parse --abbrev-ref HEAD` before each batch. Cells are committed before their RED-reading task (T036, T062, T076). Each mechanism is committed before its mutant task, so `H` is always a commit. Every `$M` edit starts from a named commit, T020's and T040's known positives included. `$M` moves with `git -C "$M" reset --hard <H>` and reverts with `git -C "$M" restore . && git -C "$M" clean -fd`. A later `origin/main` is integrated by a merge commit.
 - **Builds.** One build or ctest process at a time on this machine. Every build and ctest runs under `flock /tmp/fixpp-build.lock`. A long one is detached (`setsid nohup flock /tmp/fixpp-build.lock <cmd> > <log> 2>&1; touch <marker>.done`), with one background waiter on the marker, never a foreground poll and never `pgrep -f`.
@@ -25,15 +25,19 @@ description: "Task list for 104-sequence-reset-fidelity"
   - Never run a Windows build and a Linux build at once.
 - **The sandbox lock.** Run `cat /mnt/c/temp/fixpp/.sandbox-lock` before any full or unfiltered `ctest`, before each measured census and before any MSVC run. A full `ctest` compiles packaging consumer projects, so it counts as a build during a peer's MSVC window. A lock held by someone else means ask the owner.
 - **Base and RED.** `B0` is `bf294f00` (plan.md "Base"; `.specify/feature.json` `pinned_at`).
-  - A RED cell is read RED in `$T` at its story's entry head, before its mechanism lands. At that head, `git diff --stat bf294f00 HEAD -- src include` lists only inert scaffolding: T016's Debug asserts and T033's step-3 mark. Re-check this at each reading, and record the list.
+  - A RED cell is read RED in `$T` at its story's entry head, before its mechanism lands. Re-check the diff at each reading, and record its file list.
+    - **T036 (US1):** `git diff --stat bf294f00 HEAD -- src include` lists only inert scaffolding: T016's Debug asserts and T033's step-3 mark.
+    - **T062 (US2) and T076 (US3):** the earlier stories' mechanisms are in that diff by then. The rule is that `git diff bf294f00 HEAD -- src include` contains no line of the story's own mechanism (US2: T063 and T064; US3: T077 and T078), read hunk by hunk against those tasks.
   - RED means an assertion failure, or a named Debug-assert message where the task names one. An abort, a crash or a setup failure is not RED.
   - **A compile failure is not RED evidence.** An assertion that reads a symbol 104 adds is added in the task that adds the symbol. One example is the marker accessor of T037. The cell's base RED then comes from its other assertions, and its named mutant is the RED source for that assertion.
   - A cell that research D10 marks GREEN on the base is a pin: it is read GREEN, and the task gives the reason.
+  - A cell that research D10 marks unreachable on the base fails there at its setup. That failure is recorded with its cause and is not RED evidence; the cell's RED source is its named mutant.
 - **Selection** (`[const §VII.8]`, quickstart §2).
   - One cell inside a bucket: run the binary directly with `--gtest_filter`. Use a leading `*`, because a `TEST_P` suite is instantiated under a prefix. Record the reported test count; 0 fails the step.
   - Constitutional runs: `ctest --preset linux-clang-debug -L 104 --no-tests=error --output-on-failure`.
   - Never `ctest -R <cell>`: it matches nothing inside a bucket and exits 0.
-  - Standalone registrations that cells are re-pinned in are selected with `ctest -R '^<entry>$'`.
+  - Standalone registrations that cells are re-pinned in are selected with `ctest --preset linux-clang-debug -R '^<entry>$' --no-tests=error --output-on-failure`.
+  - **Every `ctest` selection, by `-R` or `-L`, carries `--no-tests=error`, and its reported test count is recorded; 0 fails the step**, as for a gtest filter. A task below that says "run its entry" or "run those entries" means this form.
 - **Mutant protocol.** For each mutant row, at `H`, the commit holding the mechanism:
   - check that `git -C "$M" rev-parse HEAD` equals `H` and that `git -C "$M" status --porcelain` is empty;
   - apply only the named edit, plus `[[gnu::used]] static const char k104_mut[] = "104-MUT-<task id>-<row>";` in the edited translation unit;
@@ -75,6 +79,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - `readlink -f .specify/decisions` resolves under PARENT `research/G19-fix-fpml-iso20022/decisions/speckit/`.
   - `codegraph status --json` reports `projectPath` = `$T` and a non-zero `fileCount`. If `rev-parse HEAD` moved since the last sync, run `codegraph sync`.
   - The pipeline steps that block implementation are recorded: `/speckit-analyze`, `/speckit-checklist` and `/speckit-checklist-audit` (`.specify/pipeline.md` steps 6, 7 and 9).
+  - The build-approval basis is recorded: §XVII.7 resource gate discharged by the owner's standing grant of 2026-11-17 ("run autonomously through all steps … Stop if you hit a blocker"). Builds still run one at a time under `flock /tmp/fixpp-build.lock`, new trees on `/mnt/wsl/fixppbuild`, and stop on any WSL memory pressure.
 - [ ] T002 Create `$M` with `git -C "$T" worktree add --detach /mnt/wsl/fixppbuild/fixpp-104-mutants HEAD`. Configure its `build/linux-clang-debug` tree, and check that the preset leaves `NDEBUG` undefined, since the settling experiment needs asserts on. Configure `build/linux-clang-release` in `$M` too, for the asserts-off readings. Both trees go on `/mnt/wsl/fixppbuild`. `$B` is created at T087, not now.
 - [ ] T003 Create `.specify/decisions/104-sequence-reset-fidelity-evidence.md` with a header recording `B0`, the three trees, and the section order: censuses, settling experiment, RED readings, GREEN readings, mutants, verification, FR-017.
 
@@ -93,7 +98,10 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - Each story phase's re-pin list is the set of kept hits for its rule row of the key table.
 - [ ] T005 [P] D8 step 6, the census leads. Settle each and record its disposition:
   - `tests/session/test_recovery_admin_span_gapfill.cpp`: its RR(2,12) and RR(2,5) against its store tail, and its header's `NewSeqNo=21`;
-  - the builders called with variables;
+  - the builders called with variables: the GapFill and SequenceReset builders and matchers whose NewSeqNo is a parameter, so a literal key cannot see the value a call passes. They are the production `build_sequence_reset_gapfill` (`include/fixpp/session/admin_messages.hpp`) and the test-local `make_sequence_reset`, `make_seq_reset_frame`, `make_sequence_reset_frame`, `make_seq_reset_gapfill`, `make_seq_reset_reset`, `build_sequence_reset` and `is_sequence_reset_gapfill`.
+    - Re-derive the names first: `git grep -hoE '(build|make|is)_[a-z_]*seq(uence)?_reset[a-z_]*\(' -- src include tests | sort -u`.
+    - Then list the calls with `git grep -nE -A3 '\b(<the names, joined by |>)\(' -- src tests`, and read each call's NewSeqNo argument, which often sits on a continuation line. Keep each call whose argument is not a literal and that sets or checks a GapFill's end.
+    - **Known positive:** the `build_sequence_reset_gapfill(` call in `replay_outbound_range_` (`src/session/session.cpp`), whose NewSeqNo is a variable, must be in the reading;
   - `tests/interop/parity/parity_support.hpp` and `tests/interop/conversation/conversation_script.yaml`;
   - the no-store comparator path in `test_538_volatile_store_after_reset_logon.cpp`.
 - [ ] T006 [P] D7 acceptor-twin reachability (quickstart §1, "Acceptor twin"): run the three `git grep` lines and read each hit. Record whether any hit is a production path that leaves NextNumIn above 1 at an acceptor's first Logon.
@@ -102,18 +110,20 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 - [ ] T009 Research R1, the store-order condition (contract RR-4's first case): run `git grep -n "async_lock\|asio::post\|offload" -- include/fixpp/session/*store*.hpp src/session/*store*.cpp`. Read `MemoryStore` (a post, then its FIFO `async_mutex`), `FileStore` (its offloaded jobs) and `tests/support/hooked_store.hpp`, and record whether any of them can apply a later `reset_to` before an earlier `store`.
 - [ ] T010 **(orchestrator)** STOP gate for R1 (orchestrator ruling of 2026-11-17). If T009 found a store that can reorder, implementation stops and the decision goes back to the orchestrator. R1's fallback ("the unit waits for the session's in-flight outbound store calls before its `reset_to`") is a proposal, not a plan. Otherwise record the pass.
 - [ ] T011 [P] R-1r's route (contract RR-4, quickstart §1 "The emitters at the reset point"). Read `run_liveness_loop`, `Session::send_body_`, `replay_outbound_range_` and the `inbound_*_leaf_` family. Record the first Active sub-arm that writes (a leaf or `persist_inbound_advance_`) after a suspension that follows its `check_inbound`. If there is none, record that R-1r drives the boundary through `session_test_access::store_then_emit` after a receipt reset. Also record every emitter's state test before its `assign_outbound`.
+  - **Arm A in LogonReceived** (research D1, "Read from source: a too-high Logout in LogonReceived", its last bullet). Record, as a disposition, that the row has input only while a close or a stop is in flight. Then read whether research D10's R-3 input is drivable with `close()` in flight (D10, "R-3's condition"): `close()` joins no inbound frame, so the cell must hold `close(graceful)` itself, through HookedStore's `Hooks::flush_until`, after its commit of `closing` and before it records Disconnected, with the acceptor's Logon arm already at its superseded exit in LogonReceived. Record "drivable", and R-3 is written at T025, or "no input while `close()` can be observed in flight", and R-3 is dropped. Also record what A writes on the wire in LogonReceived (`inbound_logout_leaf_` replies in Active only).
 - [ ] T012 [P] Research R2, the census of existing `close()` pumps. It runs before the poll lands (T044).
   - Find the files with `git grep -l -e HookedStore -e hold_until_close_reset -e reset_to_mode -- tests`, then list their pumps with `git grep -n -e '\.poll()' -e '\.run()' -e 'run_one()' -- <those files>`. Read the rig and settle helpers those files pump through, since the pump may live there.
   - A miss in those files is a reading, not a broken instrument: the same grep reports hits elsewhere in `tests/`, which is its known positive.
   - Disposition each pump as "bounded already" or "re-pin to a bounded pump" (`run_for`, `pump_until_ready`). T043 applies the re-pins.
 - [ ] T013 HookedStore's per-call record in `tests/support/hooked_store.hpp` (research D10, "One test-support addition"). Today `on_reset` fires for both `reset()` and `reset_to` under `reset_to_mode::forward`, so a hook cannot tell the unit from the teardown.
-  - Add to the store's log, per call, which call fired (`reset` or `reset_to`, with `reset_to`'s targets), and a count of each.
+  - Add an issue-time, per-call record beside `StoreLog::writes` (research D10, "One test-support addition", its delta). `StoreLog::writes` is a completion log with no session state. The new record is appended at each `reset` or `reset_to` call's entry, before any hook, hold or forward, in every `reset_to_mode`. Each entry carries which call fired, `reset_to`'s targets, and the state and transport-open readings from a snapshot callable the cell sets (the shape of `StoreLog::close_began`). A count of each kind goes with it.
+  - A cell reads the new record for a reading at the call or a count by kind, and `StoreLog::writes` for an order against `close()` or stop and for the final counters. R-2 needs two readings at the call, so it reads two entries of the new record: `on_reset` is one-shot.
   - The existing `on_reset`, hold and `kHoldBound` behaviour is unchanged.
   - The header comment names 104 and states the purpose. It states no count.
 - [ ] T014 Register `session_104_tests` with its first file. Create `tests/session/test_104_reset_on_logout.cpp`, holding one cell, `HookedStoreRecord104.ResetAndResetToRecordedApart`, which is T013's known positive. It calls `reset()` and `reset_to` directly and reads two distinct records with their counts.
   - Add `add_session_104_bucket`, a twin of `add_session_103_bucket` with `LABELS "session;104"` and no `TIMEOUT` property, to `tests/session/CMakeLists.txt`. Register `add_session_104_bucket(session_104_tests test_104_reset_on_logout.cpp)` with it. No empty bucket is registered.
   - Build, and run the cell with a non-zero test count. Mutant: in `$M`, the record files `reset_to` as `reset` → the cell is RED.
-- [ ] T015 Existing users of HookedStore are unchanged. Map `git grep -l HookedStore -- tests` to its ctest entries, then build and run those entries in `$T`'s debug tree. All are GREEN. Record.
+- [ ] T015 Existing users of HookedStore are unchanged. Map `git grep -l HookedStore -- tests` to its ctest entries, then build and run those entries in `$T`'s debug tree, by the Execution rules' selection form. All are GREEN. Record.
 
 **Checkpoint**: T007 and T010 have cleared; every census has its known positive and its rows; `git diff --stat bf294f00 HEAD -- src include` is empty.
 
@@ -163,6 +173,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - `…ReceiptEndsBeforeResetPoint_NoReset_{FromAdminThrow,FromAdminReject,LateParseFailure}` asserts the arm's existing ending, then no reset after the arm or after `close()`. `close()` must return well inside `logon_timeout_ms`, a ratio stated in the cell. The forced hit is the same fixture with `fromAdmin` returning (R-1d's input).
   - `…ReplyEndings_{Overflow,ToAdminThrow,AssignFailure,StoreFailure,WriteFailure,PersistFailure}` resets for `Overflow`, `StoreFailure` and `WriteFailure`, and does not reset for the other three.
   - `Overflow` is a pair: CompIDs for which the reply does not fit, and the longest that still fit. `AssignFailure` sets outbound to `seqnum_max` through the test seam. The no-reset rows' forced hits are the reset rows.
+  - R-3, `…LogonReceivedLogoutWhileClosing_ResetOnceByTheArm`, only when T011 recorded its input drivable (research D10's row and "R-3's condition"): a direct acceptor with rol, its Logon arm at its superseded exit in LogonReceived, `close(graceful)` held in its flush, then an in-sequence peer Logout. Assert at the hook `reset_to(1, 1)` with state `Disconnected`, exactly one `reset_to`, no `reset`, `close()` returning only after the arm's unit, and the wire T011 read. When T011 recorded no input, the arm is not written, and T036 cites T011.
 - [ ] T026 [US1] The `store_cancelled` store double and R-1v, in `tests/session/test_104_reset_on_logout.cpp` (contract O9).
   - The double is cell-local. Its outbound `store()` returns `fixpp::core::error::store_cancelled` for the reply, and the same double can instead refuse the reply's store, which is R-1n's `StoreFailure` input.
   - `…ReplyStoreCancelled_NoReset`, rol only with a mock clock, asserts: the number taken back (next outbound is N_out again); `Disconnected`; no frame; no `reset_to` and no `reset`; a later `close()` returns with the mock clock below `logon_timeout_ms` and no `close_reset_wait_expired`.
@@ -172,17 +183,17 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - `…ReceiptResetStoreFailure_LoggedThenDisconnected` uses a persistent StoreDouble with `fail_next_reset`. It asserts `Disconnected`, the arm's return as without the failure, manager `(1, 1)`, and no teardown retry.
 - [ ] T028 [US1] R-1j, R-1k and R-1s in `tests/session/test_104_reset_on_logout.cpp` (contract O12, O14, O17).
   - `…CloseWaitsForReceiptUnit`: HookedStore holds `reset_to`, and the session runs on a mock clock. Assert that the hold is reached in L's arm (`Disconnected`, transport open, phase 1 not woken). `close_grace` is a real `asio::steady_timer`, so a small real-time `logout_disconnect_timeout_ms` expires during the hold, while the mock clock is never advanced to `logon_timeout_ms`. Assert that the transport closed while the `close()` future is pending, and `(1, 1)` after the release.
-  - `…CloseDuringReplyStore_OneResetByTheArm` asserts exactly one `reset_to` and no `reset`, finished before `close()` returns.
+  - `…CloseDuringReplyStore_OneResetByTheArm` runs with A in Active and HookedStore holding the reply's `store`, and `close()` is started during the hold. It asserts that `close()` does not return before the release, then exactly one `reset_to` and no `reset`, finished before `close()` returns.
   - `…CloseWaitsForLogonArmUnit_NoKnob` sets no knob and feeds the initiator a 141=Y acknowledgement while `reset_to` is held. `close()` does not return before the release.
 - [ ] T029 [US1] R-1l, R-1u and R-1x in `tests/session/test_104_reset_on_logout.cpp` (contract O13-r, O13-p, O13a, O15).
   - `…CloseWhilePending_NoClock_NoReset_{HeldInReplyStore,HeldInPersist}` names each number on its own: store inbound, manager inbound and the reply at N_out. It has a `transport_send` twin, where the reply is transmitted (B-563-5). The forced hit is R-1k's input, the same hold with a clock.
   - `…CloseInsideOnLogout_ResetOnceByTheArm` asserts one `reset_to` and no `reset` before `close()` returns, with the hook seeing `Disconnected`.
-  - `…TerminalEmissionAtResetPoint_ResetOnce` uses a direct `Session`. The cell `co_spawn`s `on_inbound_frame` on its own cancellation slot and emits `terminal` from inside the `onLogout` that RR-3 step 2 fires. It asserts one `reset_to(1, 1)`, numbers `(1, 1)` and no `reset`. Its "marker `reached`" assertion is added at T037, with the accessor.
+  - `…TerminalEmissionAtResetPoint_ResetOnce` uses a direct `Session`. The cell `co_spawn`s `on_inbound_frame` on its own cancellation slot and emits `terminal` from inside the `onLogout` that RR-3 step 2 fires. It asserts one `reset_to(1, 1)`, numbers `(1, 1)` and no `reset`. Its "marker `reached`" assertion is added at T037, with the accessor; its base RED comes from its reset-count assertions.
 - [ ] T030 [US1] R-1w in `tests/session/test_104_reset_on_logout.cpp`: `…CloseNotHeldWhenReceiptEndsWithoutUnit_{FromAdminThrow,Storeless,StuckPending}`. `Storeless` holds the reply's transport write in the `arm_block()` / `release()` pattern of `ControlledWriteTransport` (`tests/session/test_live_outbound_serialized.cpp`). `StuckPending` is the forced hit of the expiry event: the hold is never released and the clock is advanced to the bound, giving one `close_reset_wait_expired`. It is also the forced hit of R-1f(1)'s, R-1v's and R-1t's "no `close_reset_wait_expired`" assertions.
   - **The `Storeless` reading (a recorded decision).** Read whether the held write outlasts `close()`'s `close_async()`. If it does not, the storeless exit has no input while `close()` waits. The arm is then dropped, and the reading is recorded in the evidence file.
 - [ ] T031 [US1] R-1o in `tests/session/test_104_reset_on_logout.cpp` (contract W10, W11, O19, O20). The three arms share one store double:
   - `…LogonSentLogout_Resets`, as an initiator with rol: no 35=5 written by fixpp, `reset_to(1, 1)`, `Disconnected`. It is the forced hit of the other two.
-  - `…_MtlsUnauthorised_NoReset`: no reset, `Disconnected`, and the authorisation-failed event. It is GREEN on the base, as a pin.
+  - `…_MtlsUnauthorised_NoReset`, as a direct mTLS initiator: no reset, `Disconnected`, and the authorisation-failed event. It is RED on the base by that event assertion: the base refuses a 35=5 in LogonSent at `interpret_logon`, before the identity gate. The assertion also witnesses the N-8 order (the gate before arm S's reset).
   - `NotConnectedLogout_NoReset`, as an acceptor: no reset. It is GREEN on the base, as a pin.
 - [ ] T032 [US1] R-1p, R-1q and R-1r in `tests/session/test_104_reset_on_logout.cpp` (contract RR-4).
   - `…LivenessDuringReceiptUnit_NumbersNothing` uses a small HeartBtInt, and moves the mock clock past one HeartBtInt and then two during the hold.
@@ -204,7 +215,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   **Budgets.** Every pump from the start of stop to the release (the order pump, the settle window and the pump that must not see stop complete) has a budget derived from HookedStore's `kHoldBound`, so that their sum stays below it; the cell states the ratio. After the release, assert that `StoreLog::hold_timed_out` is false. On every exit path the cell releases the hold, pumps stop to completion, and drops its session handle before the Rig is destroyed.
 - [ ] T035 [US1] R-2 in `tests/session/test_104_reset_on_logout.cpp`: `…BothKnobs_PeerAnswers_TwoResets_EndsOneOne` (D2, contract W7). HookedStore sees `reset_to` in L's arm with the transport open, then `reset` in the teardown; the numbers are `(1, 1)`.
 - [ ] T036 [US1] RED reading of every US1 cell (T017, T018, T022 to T032, T034, T035), per the Execution rules' "Base and RED", at `$T`'s head before T037.
-  - Record each cell's test count and its failing assertion. Each is RED by assertion, not abort, except R-1o's mTLS and NotConnected arms and T014's cell, which are GREEN with their reasons.
+  - Record each cell's test count and its failing assertion. Each is RED by assertion, not abort, except R-1o's NotConnected arm and T014's cell, which are GREEN with their reasons. R-1o's mTLS arm is RED by its authorisation-failed event assertion (research D10). R-3 is read when T011 recorded it drivable; otherwise the record cites T011.
   - `git diff --stat bf294f00 HEAD -- src include` lists only T016's and T033's files.
   - Re-run T019's selection once more: no assert fires.
 
@@ -222,14 +233,15 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - `logout_seen_` keeps its name and becomes a one-byte enum with the values `none`, `pending` and `reached`.
   - Its header comment states RO-1 to RO-3 and names 104, superseding 024 T013 / C3.1 by name. It gives the recipe `git grep -n logout_seen_ -- src include` and no count of sites.
   - Re-read every hit of `git grep -n logout_seen -- tests src include bindings tools`. At the base, the hits outside `session.cpp` are comments, and each is a T004 kept hit.
-  - Add a static read accessor for the marker to `tests/support/session_test_access.hpp` (brain "Test access to private `Session` state": a static function on the existing struct, with no change to the class's access). Add R-1x's "marker `reached`" assertion in T029's cell; its RED source is T052's R-1x mutant.
+  - **The interim tree, until T038, T042 and T044.** T037 changes the type only, and each base use is mapped so that the tree keeps the base's behaviour. Every `logout_seen_ = true` write (the entries of `on_inbound_active_logout_` and `on_inbound_active_too_high_logout_`, and `run_logout_phase1` after its emit) writes `reached`. The teardown predicate reads `logout_seen_ != none` where it read the `bool`. Re-derive the uses with `git grep -n -e 'logout_seen_ = ' -e 'logout_seen_ &&' -- src`. T038 replaces the two arm writes, T042 deletes phase 1's, and T044 rewrites the predicate. Record the mapping in the evidence file, since T040 reads this tree.
+  - Add a static read accessor for the marker to `tests/support/session_test_access.hpp` (brain "Test access to private `Session` state": a static function on the existing struct, with no change to the class's access). Add R-1x's "marker `reached`" assertion in T029's cell. Its RED source is T051's R-1x mutant (the frame-local owner clears unconditionally on exit). T052's R-1x mutant is read by "exactly one `reset_to`", since it leaves the marker `reached`.
 - [ ] T038 [US1] The pump frames' ownership of the marker, in `src/session/session.cpp` (contract RR-2 items 1 and 2):
   - With rol set, the marker becomes `pending` at receipt in four places only: arm A's entry (`on_inbound_active_logout_`); arm L's 35=5 test after its garble and fault guards (`on_inbound_logout_sent_`); arm S's 35=5 branch ahead of `interpret_logon` (`on_inbound_logon_sent_`); and B's immediate-acknowledgement branch of `on_inbound_active_too_high_logout_`.
   - B's spawn and ignored branches write nothing to the marker.
   - A frame-local owner sets `none` on every exit, by return or exception, if the marker is still `pending`, and never undoes a close-out's `reached`.
   - The frame clears the marker before any `close()` it calls itself (`close_on_late_parse_failure_`, the throw paths).
   - With rol off, the marker stays `none`.
-  - Mutants, run at T051: R-1g's two (clear only at the reset point; `LateParseFailure` clearing after the arm's `close()`), R-1v's (clear on return only, not while unwinding), R-1f(1)'s (B's spawn branch sets `pending`), R-1y's (round 3's hand-off, applied together) and R-1z's (the bound writes `none` at its claimed `!live()` exit).
+  - Mutants, run at T051: R-1g's two (clear only at the reset point; `LateParseFailure` clearing after the arm's `close()`), R-1v's (clear on return only, not while unwinding), R-1f(1)'s (B's spawn branch sets `pending`), R-1y's (round 3's hand-off, applied together), R-1z's (the bound writes `none` at its claimed `!live()` exit) and R-1x's marker mutant (the frame-local owner clears unconditionally on exit, not only from `pending`).
 - [ ] T039 [US1] The reset points, in `src/session/session.cpp` (contract RR-1, RR-2 items 3 and 5, RR-3; data-model "The reset unit: new callers").
   - **Order.** In each of A, L, B and S: the reply, if one is owed; then record `Disconnected`; then the thread's cancellation state is reset (`reset_cancellation_state`). Then, with no suspension and no callback between, the marker moves to `reached` and `run_reset_unit_(1, 1)` starts. Then `reset_cancellation_state(enable_total_cancellation{})` runs; a manager or store error is logged (RT-4). For L only, `logout_confirmed_` and phase 1's wake follow.
   - **Arm S** resets only once an mTLS session's live identity is authorised for the CompID. It sends no Logout.
@@ -242,12 +254,12 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
     - R-1f(2a): the bound's reset point moves the marker only from `pending`.
     - R-1o's three: delete S's reset; skip S's authorisation test; invoke a reset point from the NotConnected arm.
     - R-1u: split the turn with a post between `reached` and `run_reset_unit_`.
-    - R-1x: delete the cancellation-state reset.
+    - R-1x(1): delete the cancellation-state reset, read by "exactly one `reset_to`".
     - R-1i: make the unit's failure fatal.
     - R-1n's per-parameter mutants.
     - R-1l(2): drop the arm's "already `reached` → no unit" test.
 - [ ] T040 [US1] The marker assert's run and its known positive (plan phase 1, last bullets; quickstart §2):
-  - Re-run T019's two selections in the Debug build, with each count non-zero. Readings: no Debug assert fires, at entry or at a reset point. Record which of R-1y and R-1z are still RED by assertion, since they depend on T044.
+  - Re-run T019's two selections in the Debug build, with each count non-zero. Readings: no Debug assert fires, at entry or at a reset point. Record which of R-1y and R-1z are still RED by assertion, since they depend on T044: at this head phase 1 still writes `reached` and the teardown predicate still reads `!= none` (T037's interim mapping), so a cell that asserts no teardown `reset` after `close()` stays RED until T044.
   - The known positive, in `$M` only: in the bound, set the marker to `pending` immediately before its reset-point assert. R-1y's bound must trip that assert, by its own message. If it does not, the selection cannot report a violation, and the run is not accepted.
 - [ ] T041 [US1] **(orchestrator)** STOP gate for the marker assert. If any assert fired in T040, or its known positive did not fire, implementation stops, and the cell, the assert and the stack go to the owner.
 - [ ] T042 [US1] Delete the emit-time trigger in `run_logout_phase1` (`src/session/session.cpp`), and reword its "site (a)" comment to name 104 (FR-002, RO-2). Mutant, run at T053: restore the set (R-1a, R-1b).
@@ -276,22 +288,22 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - every other T004 kept hit of the first three key rows in `src/` and `include/`.
 
   Run `check-comment-claims.py` on the batch.
-- [ ] T047 [US1] D8's measured half for D1 (research D8 step 4). In `$M` at `B0`, apply D1 alone as a diff, not as cherry-picked commits: `git diff bf294f00 <the commit after T046> -- src include`, applied to `B0`. That is D1 plus the inert asserts and seam; it includes T037's enum, and it does not conflict with T016. Under the sandbox lock, run quickstart §1's `ctest --preset linux-clang-debug` lines for `-L session`, `-L capi`, `-L config` and `-R '^session_tc_'`, plus the standalone interop labels. Each failing cell must already be a T004 kept hit. `ResetOnLifecycleTest.ResetOnLogout_LocalInitiated_Resets` must fail: it is the known positive. A failing cell that is not a kept hit means a key is missing, and the key is added to T004 before the census is accepted.
+- [ ] T047 [US1] D8's measured half for D1 (research D8 step 4). In `$M` at `B0`, apply D1 alone as a diff, not as cherry-picked commits: `git diff bf294f00 <the commit after T046> -- src include`, applied to `B0`. That is D1 plus the inert asserts and seam; it includes T037's enum, and it does not conflict with T016. Under the sandbox lock, run quickstart §1's `ctest --preset linux-clang-debug` lines for `-L session`, `-L capi`, `-L config` and `-R '^session_tc_'`, each with `--no-tests=error` added and its test count recorded (0 fails the step), plus the interop entries. Every `fixpp_add_interop_test` registration carries the label `interop` (its `LABEL` list, applied as `IT_LABEL` in `tests/interop/CMakeLists.txt`): list them with `ctest --preset linux-clang-debug -N -L interop`, a non-zero count, and run `-L interop --no-tests=error`. An entry that needs an external peer and is skipped is recorded as skipped. Each failing cell must already be a T004 kept hit. `ResetOnLifecycleTest.ResetOnLogout_LocalInitiated_Resets` must fail: it is the known positive. A failing cell that is not a kept hit means a key is missing, and the key is added to T004 before the census is accepted.
 - [ ] T048 [US1] Re-pins in `tests/session/test_reset_on_lifecycle.cpp` (research D8, "Base reading of the cells"):
   - `ResetOnLogout_LocalInitiated_Resets` is renamed for the answered close. It feeds a peer Logout in LogoutSent and asserts the reset at the reset point. Its unanswered half moves to R-1a.
   - `ResetOnLogout_BothRoles_Resets`' initiator arm gets the same change.
   - The comments of `ResetOnLogoutAndDisconnect_DoubleTrigger_OneStoreReset` ("which sets logout_seen_=true") and `ResetOnLogout_PeerInitiated_Resets` (the teardown) are reworded. Their assertions are unchanged.
 
-  Run `ctest -R '^session_reset_on_lifecycle$'`, GREEN. Record.
+  Run `ctest --preset linux-clang-debug -R '^session_reset_on_lifecycle$' --no-tests=error`, GREEN with a non-zero count. Record.
 - [ ] T049 [US1] The other D1 kept hits.
   - Re-aim `InboundFrameDispositionsOd29.ATerminalCloseAfterPhase1ResolvedJoinsWithNoEarlyCut` in `tests/session/inbound_frame_dispositions_test.cpp` to `reset_on_disconnect`.
   - Reword the comment above `GracefulLogoutStoreCancelled.ByTheGraceTimer_ResetOnLogout_NoResetForALogoutThatWasNotSent` in `tests/session/test_logout_not_sent.cpp` to "a local graceful close resets only when the peer's Logout is received (104, B-104-1)", with the renamed cell's name.
   - Handle `CallbackSend.ToAdminOfGracefulCloseStartsClose_Terminal_ResetOnLogout*`'s comments as T004 dispositioned them.
   - Handle every other D1 kept hit of T004 and T047.
 
-  Run each entry by `-R '^<entry>$'`. Record.
+  Run each entry by `-R '^<entry>$' --no-tests=error`, each count non-zero. Record.
 - [ ] T050 [US1] US1 GREEN.
-  - Every Phase 3 cell, with the same non-zero count as at T036; `ctest -L 104 --no-tests=error`; and T048's and T049's entries, by `-R '^<entry>$'`.
+  - Every Phase 3 cell, with the same non-zero count as at T036; `ctest -L 104 --no-tests=error`; and T048's and T049's entries, by `-R '^<entry>$' --no-tests=error`.
   - The SC-004 witnesses, unedited: `ResetOnLifecycleTest.ResetOnLogout_Off_Preserves`, `…_NextInitiatorLogon_Emits141` and `ResetOnDisconnect_*`; `ResetPolicyLogonInvariant103.*`; `Od26.CloseDrainingTheSeqnumMutexBeforeTheHydrateWritesNoState`; `GracefulLogoutStoreCancelled.*`.
   - T019's selection once more, with asserts silent.
 
@@ -302,8 +314,9 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - R-1v;
   - R-1f(1);
   - R-1y;
-  - R-1z, read in Debug and asserts-off.
-- [ ] T052 [US1] Mutants for T039 (protocol): R-1c; R-1d, both; R-1e; R-1f(2a); R-1o, all three; R-1p; R-1q; R-1u; R-1x, by the T037 assertion; R-1i; R-1n, one per parameter; R-1l(2).
+  - R-1z, read in Debug and asserts-off;
+  - R-1x's marker mutant, read by "the marker `reached`", with R-1x's reset-count assertions GREEN.
+- [ ] T052 [US1] Mutants for T039 (protocol): R-1c; R-1d, both; R-1e; R-1f(2a); R-1o, all three; R-1p; R-1q; R-1u; R-1x(1), read by "exactly one `reset_to`"; R-3, by R-1d's first mutant, when T011 recorded R-3 drivable; R-1i; R-1n, one per parameter; R-1l(2).
 - [ ] T053 [US1] Mutants for T042 (protocol): R-1a and R-1b. The answered twin stays GREEN.
 - [ ] T054 [US1] Mutants for T044 (protocol): R-1j; R-1s; R-1k; R-1l(1); R-1w, the `FromAdminThrow` and `Storeless` arms, with `StuckPending` GREEN; R-1f(2b); R-2.
 - [ ] T055 [US1] Mutants for T045 (protocol): R-1r, both boundaries; R-1l(3); R-1h.
@@ -315,9 +328,9 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 
 ## Phase 5: User Story 2, RED cells — an unasked 141=Y acknowledgement (Priority: P1) (plan phase 3)
 
-**Goal**: U-1 to U-9 written and read on the base.
+**Goal**: U-1 to U-10 written and read on the base.
 
-**Independent test**: U-1, U-2, U-4, U-5, U-6 and U-8 RED on the base; U-3 and U-9 GREEN (pins); U-7 RED by U-8's route.
+**Independent test**: U-1, U-2, U-4, U-5, U-8, U-9 (both arms) and U-10 RED on the base by assertion; U-3 GREEN (FR-010's pin); U-6 and U-7 unreachable on the base (a setup failure there, not RED evidence), their RED source their T071 mutant, with U-8 the clamp's base RED.
 
 - [ ] T057 [US2] Create `tests/session/test_104_unasked_reset_ack.cpp`, and add it to `add_session_104_bucket(session_104_tests …)` in `tests/session/CMakeLists.txt`.
   - U-1, `UnaskedResetAck104.Lenient_HydratedN_ResetsAndActive`, uses a persistent store hydrated at in and out above 1 (contract U1). It asserts: Active; inbound next 2 and outbound next 1 in manager and store; `reset_to(2, 1)`; the event `by_peer_request = true`; no 35=A after fixpp's first; the next `send` is 34=1.
@@ -326,15 +339,16 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - U-3, `…Strict_OwnReset_Unchanged`, has two arms: an acknowledgement with 141=Y at 34=1, and one at 34 = M > 1. It is GREEN on the base, as FR-010's pin.
   - U-4, `…AtMAbove1_NotConsumed_ResendOnNextFrame`, uses N = 7 and M = 5 (contract U2). It asserts Active, inbound 1 and outbound 1, and that the peer's 34 = 6 Heartbeat draws ResendRequest 7=1, 16=0.
 - [ ] T059 [US2] U-5 and U-6 in `tests/session/test_104_unasked_reset_ack.cpp` (contract U3, U5).
-  - U-5, `…With789_TooHighAfterReset_Logout`, asserts "NextExpectedMsgSeqNum too high, expecting 1 but received X", then `Disconnected`.
-  - U-6, `…FollowUpResendRequest_GapFillOneOne`, runs after U-1's input. It feeds RR(34=2, 7=1, 16=0) and asserts exactly one GapFill (34=1, 43=Y, 123=Y, 36=1), then inbound next 3, then a next `send` at 34=1.
+  - U-5, `…With789_TooHighAfterReset_Logout`, sets `enable_next_expected_msg_seq_num`, and its acknowledgement carries 789 = X > 1 (contract U3). It asserts "NextExpectedMsgSeqNum too high, expecting 1 but received X", then `Disconnected`.
+  - U-6, `…FollowUpResendRequest_GapFillOneOne`, runs after U-1's input. It feeds RR(34=2, 7=1, 16=0) and asserts exactly one GapFill (34=1, 43=Y, 122 equal to its own 52, 123=Y, 36=1; contract U5), then inbound next 3, then a next `send` at 34=1. It is unreachable on the base (U-1's input ends Disconnected there); its RED source is its T071 mutant.
 - [ ] T060 [US2] U-7 and U-8 in `tests/session/test_104_unasked_reset_ack.cpp` (D3.3a, contract U6).
-  - U-7, `…FollowUpResendRequest_ExplicitEnd_Clamped`, has two arms: FIX.4.1's 999999 and a FIX.4.4 explicit end. It asserts NewSeqNo = 1.
+  - U-7, `…FollowUpResendRequest_ExplicitEnd_Clamped`, has two arms: FIX.4.1's 999999 and a FIX.4.4 explicit end. It asserts NewSeqNo = 1. It is unreachable on the base by this route, as U-6; its RED source is its T071 mutant, and U-8 is the clamp's base RED.
   - U-8, `ResendAnswer104.ExplicitEndAboveNextOut_NoOvershoot`, runs in Active with no reset and next outbound 5. RR(7=5, 16=10) must give GapFill 34=5, 36=5; RR(7=10, 16=20) must give GapFill 34=10, 36=5.
-- [ ] T061 [US2] U-9, `UnaskedResetAck104.Mtls_Unauthorised_NoReset`, in `tests/session/test_104_unasked_reset_ack.cpp` (contract U4m; clarification N-8). It uses a direct mTLS initiator with an unauthorised identity, and an acknowledgement with 141=Y at 34=1. It asserts: no `reset_to`; the hydrated numbers unchanged; `Disconnected`; the authorisation-failed event.
-  - Its forced-hit arm is the authorised twin, which records `reset_to(2, 1)`.
-  - The cell is GREEN on the base, as a pin.
-- [ ] T062 [US2] RED reading of T057 to T061 (Execution rules "Base and RED"). Record each count and each failing assertion, and the reason U-3 and U-9 are GREEN.
+- [ ] T061 [US2] U-9 and U-10 in `tests/session/test_104_unasked_reset_ack.cpp` (contract U4m, U7; clarification N-8).
+  - U-9, `UnaskedResetAck104.Mtls_Unauthorised_NoReset`, uses a direct mTLS initiator with an unauthorised identity, and an acknowledgement with 141=Y at 34=1. It asserts: no `reset_to`; the hydrated numbers unchanged; `Disconnected`; the authorisation-failed event. Its forced-hit arm is the authorised twin, which records `reset_to(2, 1)`.
+  - U-9 is RED on the base, both arms: the base's Guard (4) `check_inbound` ends the acknowledgement as too low before the mTLS gate, so there is no authorisation-failed event and no `reset_to(2, 1)`. The event assertion also witnesses the N-8 order (the gate before the unasked unit).
+  - U-10, `UnaskedResetAck104.PersistentStoreRefusesReset_Fatal`, per research D10's row: a lenient initiator on a persistent StoreDouble hydrated above 1, `fail_next_reset()` set, and an acknowledgement with 141=Y at 34=1. It asserts 030's persistent-fatal ending: one reset call on the store (`reset_call_count`), the store's error returned by the arm, `Disconnected` and never Active, no frame after fixpp's Logon, and the store's numbers at their hydrated values. Its forced-hit arm is the same double without the failure, which goes Active. It is RED on the base, where the store sees no reset call.
+- [ ] T062 [US2] RED reading of T057 to T061 (Execution rules "Base and RED"). Record each count and each failing assertion. The exceptions, arm by arm: U-3's two arms are GREEN (FR-010's pin); U-6 and U-7 fail at their setup on the base, which is recorded with its cause and is not RED evidence (their RED source is their T071 mutant, and U-8 is the clamp's base RED). Every other cell and arm, U-9's two and U-10's included, is RED by assertion. The diff rule is T062's (Execution rules "Base and RED").
 
 **Checkpoint**: US2's cells are RED or recorded pins.
 
@@ -344,7 +358,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 
 **Goal**: in LogonSent, an unasked 141=Y acknowledgement is a reset before the sequence check. At 34=1 the session continues at (2, 1); at 34 = M > 1 it is not consumed (O-2). The unit runs after the mTLS gate. A ResendRequest's EndSeqNo at or above the next outbound number is read as through-current.
 
-**Independent test**: U-1 to U-9 GREEN; W8 and the 027 walk cell re-pinned GREEN; the mutants of T070 and T071 RED.
+**Independent test**: U-1 to U-10 GREEN; W8 and the 027 walk cell re-pinned GREEN; the mutants of T070 and T071 RED.
 
 - [ ] T063 [US2] The 141 branch in `on_inbound_logon_sent_` (`src/session/session.cpp`; data-model "LogonSent acknowledgement: the 141 branch").
   - `peer_ack_sent_reset_flag` is read before Guard (4). `own_logon_sent_reset_flag_` is read there and stays one-shot cleared where it is today.
@@ -358,6 +372,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
     - U-4: set "consumed" for any M.
     - U-5: skip `honor_peer_next_expected_` on the unasked branch.
     - U-9: run the unit before the gate.
+    - U-10: on the unasked branch, log a persistent store's refusal and continue (024 I-07's volatile disposition).
 - [ ] T064 [US2] D3.3a's end model in `replay_outbound_range_` (`src/session/session.cpp`; data-model "`replay_outbound_range_`: the end model").
   - Inside the walk, after the gate's shared-hold wait and the store tail read, `end_is_through_current` becomes `end_is_through_current || requested_end >= next`. `next` is the tail read's next outbound number, or `peek_outbound()` when there is no store.
   - The callers are unchanged.
@@ -366,11 +381,11 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 - [ ] T065 [US2] D8's measured half for D3 + D3.3a. In `$M` at `B0`, apply T063 and T064's `src`/`include` diff with `git apply -3`. D3's edits to `on_inbound_logon_sent_` sit on code that D1 restructured (arm S), so resolve any conflict in the scratch copy, keeping only D3's and D3.3a's lines, and record each resolution in the evidence file. Then run T047's command set under the sandbox lock.
   - The known positives must fail: `WalkExtraction.TwoValueEnd_ExplicitEndBeyondStore`, and a scratch cell sending RR(7=5, 16=10) at next outbound 5.
   - Each failing cell must be a T004 or T005 kept hit, or a key is added.
-- [ ] T066 [US2] Re-pin W8 in `tests/session/test_persistent_seqnum_hydrate.cpp`: `PersistentSeqnumHydrate.W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous141Y` gains an inbound-next-1 assertion (U-4's rule). Its comments ("in-sequence", "seq=1 would be / too-low → fatal") are rewritten to state the rule, that an unasked 141=Y acknowledgement is compared with 1, not the old outcome. Run its entry by `-R '^<entry>$'`. Record.
-- [ ] T067 [US2] Re-pin 027 C3's cell in `tests/session/test_next_expected_msgseqnum.cpp`. `WalkExtraction.TwoValueEnd_ExplicitEndBeyondStore` moves from `NewSeqNo=21` to `NewSeqNo=6`, with QuickFIX C++'s GapFill(34=10, 36=6) as the rationale and 027 C3 superseded by name. The file header's statement of 21 is rewritten as the rule. `…_789Caller` stays unaffected; confirm that from T004. Record.
-- [ ] T068 [US2] The other D3 and D3.3a kept hits of T004, T005 and T065, including `tests/session/test_recovery_admin_span_gapfill.cpp` as T005 dispositioned it. Each is re-pinned or reworded, and its entry is run. Record.
-- [ ] T069 [US2] US2 GREEN: U-1 to U-9 with their T062 counts; `ctest -L 104 --no-tests=error`; T066 to T068's entries; the existing `Initiator_Received141Ack_*` cells (US2 AS3); `ResetSeqnumPolicyMatrixTest.PeerSpontaneous_Initiator_NonReset_Logon_AtNGt1_OutboundUnchanged`. Run `codegraph sync`. Record.
-- [ ] T070 [US2] Mutants for T063 (protocol): U-1, U-2, U-3, U-4, U-5, and U-9 with its authorised twin GREEN.
+- [ ] T066 [US2] Re-pin W8 in `tests/session/test_persistent_seqnum_hydrate.cpp`: `PersistentSeqnumHydrate.W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous141Y` gains an inbound-next-1 assertion (U-4's rule). Its comments ("in-sequence", "seq=1 would be / too-low → fatal") are rewritten to state the rule, that an unasked 141=Y acknowledgement is compared with 1, not the old outcome. Run its entry by `-R '^<entry>$' --no-tests=error`. Record.
+- [ ] T067 [US2] Re-pin 027 C3's cell in `tests/session/test_next_expected_msgseqnum.cpp`. `WalkExtraction.TwoValueEnd_ExplicitEndBeyondStore` moves from `NewSeqNo=21` to `NewSeqNo=6`, with QuickFIX C++'s GapFill(34=10, 36=6) as the rationale and 027 C3 superseded by name. The file header's statement of 21 is rewritten as the rule. `…_789Caller` stays unaffected; confirm that from T004. Run its entry by `-R '^<entry>$' --no-tests=error`. Record.
+- [ ] T068 [US2] The other D3 and D3.3a kept hits of T004, T005 and T065, including `tests/session/test_recovery_admin_span_gapfill.cpp` as T005 dispositioned it. Each is re-pinned or reworded, and its entry is run by the Execution rules' selection form. Record.
+- [ ] T069 [US2] US2 GREEN: U-1 to U-10 with their T062 counts; `ctest -L 104 --no-tests=error`; T066 to T068's entries; the existing `Initiator_Received141Ack_*` cells (US2 AS3); `ResetSeqnumPolicyMatrixTest.PeerSpontaneous_Initiator_NonReset_Logon_AtNGt1_OutboundUnchanged`. Run `codegraph sync`. Record.
+- [ ] T070 [US2] Mutants for T063 (protocol): U-1, U-2, U-3, U-4, U-5, U-9 with its authorised twin GREEN, and U-10 with its forced-hit arm GREEN.
 - [ ] T071 [US2] Mutants for T064 (protocol): U-6, U-7, U-8.
 
 **Checkpoint**: US2 GREEN; every US2 mutant RED.
@@ -381,19 +396,20 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 
 **Goal**: T-1 to T-6 written and read on the base.
 
-**Independent test**: T-1 to T-5 RED on the base, since the base writes no 35=5; T-6's identity arms GREEN, as pins.
+**Independent test**: T-1 to T-5 RED on the base, since the base writes no 35=5, except T-4a's L + 1 arm (a pin); T-6's identity arms RED on the base, since the base ends a too-low frame before the identity gates; T-6's SendingTime and strict arms GREEN, as pins.
 
 - [ ] T072 [US3] Create `tests/session/test_104_logon_too_low.cpp`, and add it to `session_104_tests` in `tests/session/CMakeLists.txt` (contract T1, T2).
   - T-1, `LogonTooLow104.Initiator_LogoutWithText`, uses NextNumIn 5 and an acknowledgement at 34=3.
   - T-2, `…Acceptor_LogoutWithText`, uses a hydrated NextNumIn of 5 and a Logon at 34=3.
   - T-3, `…PossDup_LogoutWithText`, runs both arms with 43=Y (D6).
   - Each asserts: exactly one 35=5; 58 byte-equal to the text; no 1409 and no 789; 34 = fixpp's next outbound; NextNumIn 5 in manager and store; `toAdmin(Logout)` called once; `Disconnected`.
-- [ ] T073 [US3] T-4a to T-4e in `tests/session/test_104_logon_too_low.cpp`, each arm (contract T3 to T6; research D5's table).
+- [ ] T073 [US3] T-4a to T-4f in `tests/session/test_104_logon_too_low.cpp`, each arm (contract T3 to T6; research D5's table).
   - `…Overflow_PairedWithNearBound` uses CompIDs of length L, the longest for which the Logout still fits, and L + 1. L is the forced hit.
   - `…ToAdminThrow`.
   - `…AssignFailure`, with outbound at `seqnum_max` through the test seam.
   - `…PersistentStoreFailure`.
   - `…WriteFailure`.
+  - `…VolatileStoreFailure` (T-4f): a store double whose factory's `yields_persistent_store()` is false refuses the Logout's store. One 35=5 with the text is on the wire (024 I-07), then `Disconnected`, success.
 - [ ] T074 [US3] T-5, `…ResetOnLogout_NoResetForTooLowLogout`, in `tests/session/test_104_logon_too_low.cpp` (FR-015, contract T7). It is an initiator with rol. It asserts one 35=5 with T-1's text and one `toAdmin(Logout)`; then, after `close(terminal)`, no `reset_to` and no `reset`, on T013's record.
   - The forced-hit arm uses the same store double and fixture. A Logout received in LogonSent (arm S) records one `reset_to`.
 - [ ] T075 [US3] T-6, `…Precedence_*`, in `tests/session/test_104_logon_too_low.cpp` (contract T8, "Precedence on one Logon frame"; FIX-TC 1S(c)). Its arms, each with a too-low frame:
@@ -403,8 +419,10 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - on an acceptor whose credentials `authorize_logon` refuses;
   - on a direct mTLS initiator with an unauthorised identity.
 
-  Each identity arm asserts no frame and the gate's own ending. The identity arms are GREEN on the base, as pins.
-- [ ] T076 [US3] RED reading of T072 to T075 (Execution rules "Base and RED"). Record each count and each failing assertion, and the reason the identity arms are GREEN.
+  Each identity arm asserts no frame and the gate's own ending: the authorisation-failed event on the two mTLS arms, and on the credentials arm, which emits no event, a counting refusing callable installed with `compid_authorization_policy::set_logon_validator`, called once.
+  - The identity arms are RED on the base: the base's `check_inbound` ends a too-low frame silently before the gates (`authorize` follows it in both Logon arms, and `authorize_logon` on the acceptor), so no event is emitted and the validator is never called. Each also witnesses the N-8 order (the gates before the too-low Logout).
+  - The SendingTime and strict arms are GREEN on the base, as pins: both guards run before `check_inbound`.
+- [ ] T076 [US3] RED reading of T072 to T075 (Execution rules "Base and RED"). Record each count and each failing assertion. The exceptions, arm by arm, are GREEN on the base as pins, each with its reason and its RED source: T-4a's L + 1 arm (the base writes no frame either; T082's larger-buffer mutant), T-6's SendingTime arm (its guard runs before `check_inbound`; T083's SendingTime-reorder mutant) and T-6's strict arm (likewise; T083's strict-reorder mutant). Every other cell and arm, T-6's identity arms included, is RED by assertion. The diff rule is T076's (Execution rules "Base and RED").
 
 **Checkpoint**: US3's cells are RED or recorded pins.
 
@@ -433,15 +451,16 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
     - T-4c: discard the assign error.
     - T-4d: transmit despite the store failure.
     - T-4e: propagate the write failure as the arm's return.
+    - T-4f: remove the helper call.
     - T-5: invoke a reset point from `refuse_logon_with_logout_` after its emit.
-    - T-6: move the too-low branch ahead of the SendingTime guard; or send the Logout before the identity gates.
+    - T-6: move the too-low branch ahead of the SendingTime guard; or ahead of the strict refusal; or send the Logout before the identity gates.
 - [ ] T079 [US3] D8's measured half for D5. In `$M` at `B0`, apply T077 and T078's `src`/`include` diff with `git apply -3`. D5's edits sit on Logon-arm code that D1 and D3 restructured, so resolve any conflict in the scratch copy, keeping only D5's lines, and record each resolution in the evidence file. Then run T047's command set under the sandbox lock.
   - The known positive must flip: a scratch cell feeding a too-low acknowledgement.
   - Each failing cell must be a T004 kept hit of the last key row.
   - Read the base-reading leads: `UnparseableFrameDisposition.D6Edge_*`, `DISABLED_TransportInteropConformance.TC009_LogonSeqNumTooLow` and `TcSeqnumTest.Tc2c_MsgSeqNumTooLow`, which is unchanged.
-- [ ] T080 [US3] The D5 kept hits of T004 and T079. Each is re-pinned or reworded, and its entry is run. Record.
-- [ ] T081 [US3] US3 GREEN: T-1 to T-6 with their T076 counts; `ctest -L 104 --no-tests=error`; `*TooLowLogout103.*`; the conformance entries (`-R '^session_tc_'`); T080's entries. Run `codegraph sync`. Record.
-- [ ] T082 [US3] Mutants for T078's T-1 to T-4e rows (protocol). Each overflow, throw and assign row is RED by its named assertion, with its forced hit GREEN.
+- [ ] T080 [US3] The D5 kept hits of T004 and T079. Each is re-pinned or reworded, and its entry is run by the Execution rules' selection form. Record.
+- [ ] T081 [US3] US3 GREEN: T-1 to T-6 with their T076 counts; `ctest -L 104 --no-tests=error`; `*TooLowLogout103.*`; the conformance entries (`-R '^session_tc_' --no-tests=error`); T080's entries. Run `codegraph sync`. Record.
+- [ ] T082 [US3] Mutants for T078's T-1 to T-4f rows (protocol). Each overflow, throw and assign row is RED by its named assertion, with its forced hit GREEN.
 - [ ] T083 [US3] Mutants for T078's T-5 and T-6 rows (protocol), with T-5's arm-S forced hit GREEN.
 
 **Checkpoint**: all three behavioural stories GREEN; every behavioural FR has its cell and its mutant recorded.
@@ -452,21 +471,23 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 
 **Purpose**: the local runs Article XVII §7, Article IX §1 and §2, and Article VIII §3 require, one at a time, before the first labelled push.
 
-- [ ] T084 linux-clang-debug build in `$T`, incremental, under the flock, followed by the targeted ctest. The entries are: `-L 104 --no-tests=error`; `session_103_tests`; `session_reset_on_lifecycle`; `session_inbound_frame_dispositions`; the entries of `test_logout_not_sent.cpp`, `test_next_expected_msgseqnum.cpp`, `test_persistent_seqnum_hydrate.cpp` and `engine_reset_unit_stop_test.cpp`; the entries T043, T068 and T080 touched; `-R '^session_tc_'`; `-L capi`; `-L config`. Re-derive the entry list from `git diff --name-only origin/main..HEAD -- tests`, mapped to the CMakeLists. Record.
-- [ ] T085 Sanitizers (`[const §IX.2]`): ASan, UBSan and TSan builds on `/mnt/wsl/fixppbuild` of `session_104_tests`, `session_103_tests` and the re-pinned targets of T084, each run through `ctest` by entry, one lane at a time. A finding is a defect until disproven (project rule). Record.
+- [ ] T084 linux-clang-debug build in `$T`, incremental, under the flock, followed by the targeted ctest. The entries are: `-L 104 --no-tests=error`; `session_103_tests`; `session_reset_on_lifecycle`; `session_inbound_frame_dispositions`; the entries of `test_logout_not_sent.cpp`, `test_next_expected_msgseqnum.cpp`, `test_persistent_seqnum_hydrate.cpp` and `engine_reset_unit_stop_test.cpp`; the entries T043, T068 and T080 touched; `-R '^session_tc_'`; `-L capi`; `-L config`. Each selection carries `--no-tests=error`, and each count is recorded and non-zero. Re-derive the entry list from `git diff --name-only origin/main..HEAD -- tests`, mapped to the CMakeLists. Record.
+- [ ] T085 Sanitizers (`[const §IX.2]`): ASan, UBSan and TSan builds on `/mnt/wsl/fixppbuild` of `session_104_tests`, `session_103_tests` and the re-pinned targets of T084, each run through `ctest --preset <lane> -R '^<entry>$' --no-tests=error` (the Execution rules' selection form, with the lane's preset), one lane at a time. A finding is a defect until disproven (project rule). Record.
 - [ ] T086 Size, layout and C-ABI checks (research D10 "C ABI and size"; B-104-7):
   - `git grep -nE 'sizeof ?\([^)]*\b(Engine|Session)\b' -- tests include src` has no hit. Its known positive is the same pattern with `FieldRef`, which must hit.
   - `git grep -n reset_on_logout -- include/fix src/capi bindings` has no hit.
   - Re-derive each non-static data member that `git diff origin/main...HEAD -- include/fixpp/session/engine.hpp include/fixpp/session/session.hpp` adds or removes, for B-104-7's text.
+  - A one-off size reading for B-104-7: `print sizeof(fixpp::session::Session)` and `print sizeof(fixpp::session::Engine)` in gdb, on one debug test binary built at `B0` in `$M` and on the same binary at the head. The values go to the evidence file only; T091 writes B-104-7's direction for `Session` from them.
   - Record.
 - [ ] T087 The paired `session_send_bench` run (plan "Performance Goals", the Article VIII §3 row).
   - Create `$B` at `git merge-base HEAD origin/main`, computed now, with its path padded.
-  - Release builds of `bench/session/session_send_bench.cpp` in `$B` and in a release tree of the candidate, both on F:, built one at a time.
+  - Release builds of `bench/session/session_send_bench.cpp`, one at a time. The candidate builds in `$T`'s `build/linux-clang-release`, a symlink into `/mnt/wsl/fixppbuild/build/` (`readlink -f` it first); the base builds in `$B/build/linux-clang-release`, a real directory on F:. Both are configured with `-DFIXPP_BUILD_BENCH=ON` (the option is in `cmake/ProjectOptions.cmake`; read `FIXPP_BUILD_BENCH` in each `CMakeCache.txt`).
+  - Check that the source and build paths the two caches record (`CMAKE_HOME_DIRECTORY`, `CMAKE_CACHEFILE_DIR`) are equal in length, per the Execution rules' pad rule. A mismatch re-pads `$B` before any run.
   - Run them base against candidate on one machine, alternating (Article VIII §2's method). The results go to the evidence file and nowhere else.
   - Record that `engine_send_bench` never reaches `store_then_emit`, and that `persist_inbound_advance_`'s test is not benched.
-- [ ] T088 Every Tier-1 source-audit job locally, the list derived from `.github/workflows/tier1.yml` at this head. That means every `ci-script-pins` step and `ci/test-parallelism-verdict.sh`, plus clang-format, clang-tidy and cppcheck on the changed files (never on `specs/` or `include/fix/c_api/*.h`), and `tools/check_layers.py`. Also run the owner's standing pre-push items: a `linux-gcc-release` build of the touched targets, and the whole `pytest bindings/python/tests` suite. Record.
+- [ ] T088 Every Tier-1 source-audit job locally, the list derived from `.github/workflows/tier1.yml` at this head. That means every `ci-script-pins` step and `ci/test-parallelism-verdict.sh`, plus clang-format, clang-tidy and cppcheck on the changed files (never on `specs/` or `include/fix/c_api/*.h`), and `tools/check_layers.py`. Also run the owner's standing pre-push items: a `linux-gcc-release` build of the touched targets, and the whole `pytest bindings/python/tests` suite. include-what-you-use is not repeated here: T102's `/speckit-verify` runs it on every touched file that has a compile command. Record.
 - [ ] T089 The one full `ctest` (`[const §XVII.7]`), at the code head. First `cat /mnt/c/temp/fixpp/.sandbox-lock`, outside any peer's MSVC window, and `df -h /mnt/e`. Then build all targets incrementally in `$T`'s existing tree (never emptied), and run **one** full `ctest --test-dir build/linux-clang-debug`, detached under the flock with one marker waiter. Record the sha for the PR body's `local build: green on linux-clang-debug @ <sha>` line.
-- [ ] T090 MSVC, before the first labelled push (`[const §IX.3]`; plan phase 8). Take `.sandbox-lock` per Step 0 of PARENT `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md`; a lock held by someone else means ask the owner. Never run this alongside a Linux build.
+- [ ] T090 MSVC, before the first labelled push (the owner's pre-push MSVC rule: even under a targeted verify, the feature's own targets are built on MSVC with `-k 0` before the first labelled push; plan phase 8). `[const §IX.3]` is not cited, since no msvc-asan run is planned; it applies only if one is added. Take `.sandbox-lock` per Step 0 of PARENT `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md`; a lock held by someone else means ask the owner. Never run this alongside a Linux build.
   - rsync, then build with `-k 0` `session_104_tests`, `session_103_tests` and every target T084 lists. Every target that includes `engine.hpp` or `session.hpp`'s changed members is covered by those targets' closure.
   - Run `session_104_tests`. Record. Release the lock at close-out.
 
@@ -536,13 +557,13 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 - [ ] T106 [P] **Catalogue close-out** (mandatory, `[const §XVII.8]`). spec.md and plan.md name no catalogue row that 104 owns, so the rows are derived by recipe, never from a frozen list.
   - **Find the rows.** Search `spec/feature-catalogue.md` and read each hit. The OFFICIAL rows to update are those whose Spec ref is one of spec.md's Normative References keys (re-derive with `command grep -n -F '<§ or scenario>' spec/coverage-index.md` for each of FIX-SL §4.3.11, §4.4.2, §4.4.3, §4.6, §4.7.1, §4.8.1 and §4.10.2, and FIX-TC 1B, 1S, 2 and 13), plus those whose note names #595, #695, #701, B53, B107, `reset_on_logout`, L-103-2 or L-103-7.
   - **Update them.** Add 104's witnesses (cell names) and the PR reference to each row found. Flip a feature-owned row from `in-progress`/`backlog` to `done`. Add 104's row. Add the matching `spec/coverage-index.md` notes for those keys.
-  - **If no row is feature-owned,** record "no feature-owned OFFICIAL row: the recipe above, run at `<sha>`, found only shared rows, each annotated" under `## Completeness` in `.specify/decisions/104-sequence-reset-fidelity-verify.md`, with the hits listed there.
+  - **If no row is feature-owned,** record "no feature-owned OFFICIAL row: the recipe above, run at `<sha>`, found only shared rows, each annotated" under `## Completeness` in `.specify/decisions/104-sequence-reset-fidelity-verify.md`, with the hits listed there. That section is the one `/gate-b` pre-flight 4d reads, with T107's verdict.
 - [ ] T107 **Feature-completeness audit (MUST be the FINAL task of this phase and the last before Gate B)**. At the head being accepted, assert that:
   - (i) every row of this file is `[X]` or carries an explicit waiver rationale;
   - (ii) every FR-001 to FR-018 and SC-001 to SC-006 maps, through the Requirement map below, to a landed test and a landed implementation;
   - (iii) every feature-owned OFFICIAL catalogue row is `done` with a matching `coverage-index.md` entry (T106).
 
-  Record the verdict, 100 % or fully waived, under `## Completeness` in `.specify/decisions/104-sequence-reset-fidelity-verify.md`. **Waived-pending:** T108 to T113 (US4, FR-017, SC-005) run after Gate B by design (plan phase 11; research D9; ruling O-3). Their waiver names T113 as its closing task, and the orchestrator closes it there. This is the hard `/gate-b` precondition (Article XVII §8, pre-flight 4d).
+  Record the verdict, "100 %, with every waiver listed" (103's precedent, its T184 with T163 waived-pending), under `## Completeness` in `.specify/decisions/104-sequence-reset-fidelity-verify.md`, the section `/gate-b` pre-flight 4d reads. **Waived-pending:** T108 to T113 (US4, FR-017, SC-005) run after Gate B by design (plan phase 11; research D9; ruling O-3). Their waiver names T113 as its closing task, and the orchestrator closes it there. This is the hard `/gate-b` precondition (Article XVII §8, pre-flight 4d).
 
 ---
 
@@ -566,7 +587,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 - [ ] T111 [US4] **(orchestrator)** The commit's disposition (`.specify/close-out.md` §1, "One line to settle in the Gate B record"). The Gate B record `.specify/decisions/104-sequence-reset-fidelity-gateb.md` and the verify record each get one sentence that names the basis commit. It says the commit is CI data only, deliberately outside the range Gate B reviewed and `/speckit-verify` recorded, and that neither is re-run for it, because it changes no code, test or registration (T110's checks and the verdict harness).
 - [ ] T112 [US4] **(orchestrator)** The final sign-off order: **BODY → LABELS → wait ~2 min → PUSH LAST**.
   - Update the PR body, including the closing set and the `local build` line.
-  - Apply the gate labels in one call, per `[const §XVII.8]`'s label evidence rule.
+  - Apply `gate-a-done` and `gate-b-done` in one call, per `[const §XVII.8]`'s label evidence rule. T108 to T113 being waived-pending under `## Completeness` does not hold `gate-b-done` back: 103's precedent (T163 waived-pending there, verdict "100 %, with every waiver listed").
   - Wait about 2 min, then push the basis commit as the last push.
   - Never cancel a gate-label wave that looks like a duplicate.
 - [ ] T113 [US4] **(orchestrator)** SC-005's acceptance on the labelled `pull_request` run that includes the basis commit: no `DIAGNOSTIC ONLY` for a count mismatch on any lane whose Test step succeeded. Record it in the verify record, and close T107's waiver under `## Completeness`, which brings the audit to 100 %.
@@ -577,24 +598,24 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 
 | Requirement | Cells (task) | Implementation (task) | Mutants (task) |
 |---|---|---|---|
-| FR-001 (receipt rule, reset points, `close()` and stop waits, one strand turn) | R-1c–R-1g, R-1i–R-1l, R-1n, R-1o, R-1t–R-1z (T017, T018, T023–T031, T034) | T038, T039, T044, T045, T033 | T051, T052, T054, T055, T056 |
+| FR-001 (receipt rule, reset points, `close()` and stop waits, one strand turn) | R-1c–R-1l, R-1n–R-1z, and R-3 when T011 reads it drivable (T017, T018, T023–T032, T034) | T038, T039, T044, T045, T033 | T051, T052, T054, T055, T056 |
 | FR-002 (unanswered close keeps numbers) | R-1a, R-1b (T022) | T042 | T053 |
 | FR-003 (LogoutSent response resets) | R-1c, R-1j (T023, T028) | T039 | T052 (R-1c) |
 | FR-004 (rod unchanged; two resets with both knobs) | R-2 (T035); existing `ResetOnDisconnect_*` (T050) | T044 | T054 (R-2) |
 | FR-005 (supersession by name; witnesses re-pinned) | census T004, T005, T047, T065, T079, T095; re-pins T048, T049, T066, T067, T068, T080 | T092, T093, T094, T096 | census known positives (T004, T047, T065, T079) |
 | FR-006 (comments naming 104) | `check-comment-claims` (T046, T099, T103) | T037, T039, T042, T044, T046, T064, T078, T096 | none (documentation) |
 | FR-007 (141=Y recognised before the comparison) | U-1, U-2 (T057) | T063 | T070 |
-| FR-008 (unasked reset, no second Logon, follow-up answer) | U-1, U-2, U-4, U-6, U-7, U-8 (T057–T060) | T063, T064 | T070, T071 |
-| FR-009 (durable; unit after the mTLS gate) | U-1 persistent store, U-9 (T057, T061) | T063 | T070 (U-9) |
+| FR-008 (unasked reset, no second Logon, follow-up answer) | U-1, U-2, U-4, U-5, U-6, U-7, U-8 (T057–T060) | T063, T064 | T070, T071 |
+| FR-009 (durable, its order against `close()` and its failure handling; unit after the mTLS gate) | U-1 persistent store, U-9, U-10 (T057, T061); R-1s, `close()` waiting for a Logon arm's unit (T028) | T063, T044 | T070 (U-9, U-10), T054 (R-1s) |
 | FR-010 (strict unchanged) | U-3 (T058); `Initiator_Received141Ack_*` (T069) | T063 (unchanged rows) | T070 (U-3) |
 | FR-011 (L-103-2 retired) | — | T093 | none (records) |
 | FR-012 (too-low Logout after identity gates, any 43) | T-1, T-2, T-3, T-6 (T072, T075) | T077, T078 | T082, T083 |
 | FR-013 (numbering, no 1409) | T-1, T-2 (T072) | T078 | T082 |
-| FR-014 (Logout that cannot be sent) | T-4a–T-4e (T073) | T078 | T082 |
+| FR-014 (Logout that cannot be sent) | T-4a–T-4f (T073) | T078 | T082 |
 | FR-015 (too-low Logout not a rol trigger) | T-5 (T074) | T078 | T083 |
 | FR-016 (L-103-7 retired) | — | T093 | none (records) |
 | FR-017 (#266 basis) | dispatch run T108, T109 | T110 | known positive: DIAGNOSTIC ONLY on the dispatch run (T109) |
-| FR-018 (B&L rows; one departures list) | — | T091, T092, T093 | none (records) |
+| FR-018 (B&L rows; one departures list) | U-5 (T059), DQ-4's departure (789 evaluated after an unasked reset, L-104-6) | T091, T092, T093 | T070 (U-5); otherwise none (records) |
 | SC-001 | R-1a, R-1b (T022) | T042 | T053 |
 | SC-002 | U-1, U-2 (T057) | T063 | T070 |
 | SC-003 | T-1, T-2 (T072) | T078 | T082 |
@@ -608,7 +629,8 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 - **Pipeline ahead of Phase 1**: `/speckit-analyze`, `/speckit-checklist` and `/speckit-checklist-audit` (`.specify/pipeline.md` steps 6, 7 and 9). The audit blocks implementation.
 - **Phase order**: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11 → Gate B → 12. Every production task edits `src/session/session.cpp` or `include/fixpp/session/session.hpp`, so the stories run in this order, never in parallel.
 - **STOP gates**: T007 (D7), T010 (R1 store order), T021 (the settling experiment) and T041 (the marker assert). Each one that fires halts every later task until the owner rules.
-- **Within US1**: T013 and T014 come before any cell that reads the record. T016 comes before T019, then T019 → T020 → T021, then the remaining cells. T033 comes before T034. T036 comes before T037. T039 → T040 → T041. T043 comes before T044. T047 comes before T048 and T049. The mechanisms land before T050, and the mutants T051 to T056 follow T050.
+- **Within US1**: T013 and T014 come before any cell that reads the record. T016 comes before T019, then T019 → T020 → T021, then the remaining cells. T033 comes before T034. T011 comes before T025, which writes R-3 only on T011's "drivable" reading. T036 comes before T037. T039 → T040 → T041. T043 comes before T044. T047 comes before T048 and T049. The mechanisms land before T050, and the mutants T051 to T056 follow T050.
+- **Records**: T097 → T091, because L-104-3 cites the issue T097 files.
 - **Cross-story**: US3's T074 uses T013's record and US1's arm S (T039). US2's U-6 to U-8 need only T064. T063's `false` row is completed by US3's T078.
 - **FR-017 vs the final audit**: `/gate-b` hard-blocks without T107's record, and FR-017 runs only after Gate B (ruling O-3). So T107 is the last task before Gate B, with T108 to T113 waived-pending. T113 closes that waiver after the labelled acceptance run, and T112's push is the last push.
 

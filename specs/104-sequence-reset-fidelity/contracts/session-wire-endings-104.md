@@ -319,12 +319,13 @@ A cell id is given where the row can be driven; its mutant is in research D10.
 | U4m | U1 or U2 on a direct mTLS initiator whose live identity is not authorised for the CompID | — | nothing | unchanged (no unit) | no `reset_to` | Disconnected |
 | U5 | after U1 (outbound next 1, nothing sent) | ResendRequest at 34=2, 7=1, 16=0 | one GapFill 34=1, 43=Y, 122=52, 123=Y, 36=1 | inbound next 3 | inbound persist | Active |
 | U6 | Active, any history | ResendRequest whose EndSeqNo ≥ N_out (999999 on FIX.4.0/4.1 included) | as 16=0: the walk to N_out − 1, and an empty-range GapFill's 36 = N_out (never EndSeqNo + 1). With BeginSeqNo B > N_out the GapFill is (34=B, 36=N_out), its NewSeqNo below its MsgSeqNum, QFC's identical frame (`nextResendRequest`'s clamp, then `generateRetransmits`' tail `generateSequenceReset(B, next)`) | unchanged | as today | Active |
+| U7 | U1 or U2 on a persistent store that refuses the unit's `reset_to` | — | nothing after fixpp's Logon | the manager at the unit's targets (`run_reset_unit_` sets it before its store call) | pre-reset (the store refused) | Disconnected; the arm returns the store's error (030's persistent-fatal disposition, unchanged) |
 | T1 | LogonSent, ack without 141=Y, M < N (43 any) | — | one Logout, 58 = "MsgSeqNum too low, expecting N but received M", 34 = N_out, no 1409, no 789; `toAdmin` called once before its number is taken; on an mTLS session only after the identity is authorised (T8) | N unchanged | the Logout stored as outbound; nothing inbound persisted | Disconnected |
 | T2 | NotConnected (acceptor), Logon without 141=Y, M < N, not strict, `reset_on_logon` off (43 any) | — | as T1, 34 = the hydrated next outbound; only after both identity gates pass (T8) | as T1 | as T1 | Disconnected |
 | T3 | T1/T2, Logout over 256 bytes (long CompIDs) | — | none (the near-bound CompIDs still emit T1's Logout) | as T1 | nothing | Disconnected; success |
 | T4 | T1/T2, `toAdmin` throws | — | none | as T1 | nothing | Disconnected; `app_callback_threw` |
 | T5 | T1/T2, `assign_outbound` fails | — | none | as T1 | nothing | Disconnected; that error |
-| T6 | T1/T2, the Logout's store or write fails | — | store failure: none; write failure: none on the wire, the Logout stored | as T1 | as the store left it | Disconnected; success |
+| T6 | T1/T2, the Logout's store or write fails | — | persistent store failure: none; volatile store failure (024 I-07, logged then sent): T1's Logout; write failure: none on the wire, the Logout stored | as T1 | as the store left it | Disconnected; success |
 | T7 | T1/T2 with rol set | — | as T1 | not reset by this Logout | no reset | Disconnected |
 | T8 | T1/T2 on an mTLS session whose live identity is not authorised for the CompID; on the acceptor also a Logon whose credentials `authorize_logon` refuses | — | nothing (FIX-TC 1S(c): "Disconnect without sending a message") | as T1 | nothing | Disconnected, with the gate's own event |
 
