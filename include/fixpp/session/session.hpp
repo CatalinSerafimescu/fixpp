@@ -1815,11 +1815,9 @@ private:
     // it succeeded. The arm proceeds either way.
     void note_receipt_reset_failed_(reset_unit_result const& unit) noexcept;
     // Set across the unit's reset_to await and cleared after it, error paths included.
-    // Session strand only, as teardown_reset_done_.
+    // close() polls it (104, contract RR-2 item 4). Session strand only, as
+    // teardown_reset_done_.
     bool reset_unit_in_flight_ = false;
-    // The unit's completion signal: set by close() while it waits for an in-flight
-    // unit, called by the unit when it clears reset_unit_in_flight_. Session strand only.
-    std::function<void()> reset_unit_wake_;
 
     // OD-29 (093 — terminal close escalates a graceful one). A close(terminal) made
     // while a close(graceful) is in flight sets the latch, which close(graceful) reads

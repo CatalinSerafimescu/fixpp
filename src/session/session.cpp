@@ -1353,7 +1353,7 @@ void Session::disconnect_unless_superseded_(std::optional<fsm_state> arm) noexce
 // inline on its uncontended fast path (L-518-1's condition), so nothing here suspends
 // before the store's reset_to. The first manager error stops the set and is returned;
 // the store is then not touched. Otherwise the store's one reset_to runs with
-// reset_unit_in_flight_ set, and the unit signals close() when it clears it.
+// reset_unit_in_flight_ set, which close() polls (104 deletes the unit's completion signal).
 // Plan OD-25 (supersedes OD-14's in-place shield, which an async_mutex grant replaces):
 // only the reset_to is co_spawned, on this strand, completing through a token bound to
 // an empty cancellation slot. Plan OD-26 names the two parts: running reset_to on its
@@ -1376,9 +1376,6 @@ asio::awaitable<Session::reset_unit_result> Session::run_reset_unit_(seqnum_t ne
         co_await asio::this_coro::executor, store_->reset_to(next_in, next_out),
         asio::bind_cancellation_slot(asio::cancellation_slot{}, asio::use_awaitable));
     reset_unit_in_flight_ = false;
-    if (reset_unit_wake_) {
-        reset_unit_wake_();
-    }
     co_return r;
 }
 
@@ -2504,7 +2501,40 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
         }
     }
 
-    // 024 T014 — teardown reset (reset_on_logout / reset_on_disconnect).
+    // 104-sequence-reset-fidelity (contract RR-2 item 4, RT-5; data-model "`Session::close`'s
+    // teardown"), superseding 093's event-driven wait (contract C-6 "close()"; plan OD-1),
+    // which sat inside the predicate block below and had one waker, the unit's completion:
+    // close() waits, after the joins above and before the teardown predicate, whatever the
+    // knobs, while a received Logout is `pending` short of its reset point or a reset unit's
+    // store operation is in flight (a receipt arm's or a Logon arm's). The too-high Logout's
+    // bound was joined above, so its receipt and unit are done by now. The wait is a poll by
+    // post, as the joins above are: each pass re-reads both terms and compares
+    // effective_clock_'s steady time with the bound, logon_timeout_ms from the wait's start
+    // (saturating), and the condition is tested before the first post, so a close() with
+    // nothing outstanding makes no pass. It needs no waker, so no exit from the condition can
+    // be missed. On expiry it records session_event_close_reset_wait_expired and proceeds.
+    // With no clock there is no wait.
+    if (effective_clock_) {
+        // Saturates at steady_time_point::max() when not representable.
+        auto const bound = detail::deadline_after(effective_clock_->steady_now(),
+                                                  std::chrono::milliseconds{cfg_.logon_timeout_ms});
+        while (logout_seen_ == receipt_marker::pending || reset_unit_in_flight_) {
+            if (effective_clock_->steady_now() >= bound) {
+                emit_event(session_event_close_reset_wait_expired{});
+                break;
+            }
+            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+        }
+    }
+    // 104 (contract RR-2 item 4): the close-out. A receipt still `pending` here (the wait
+    // expired, or there was no clock to wait with) never reached its reset point, so it is
+    // not reset under reset_on_logout (RR-1). It is set to `reached`, so that the arm, when it
+    // resumes, runs no unit and issues no further store call (RR-2 item 5).
+    if (logout_seen_ == receipt_marker::pending) {
+        logout_seen_ = receipt_marker::reached;
+    }
+
+    // 024 T014 — teardown reset (reset_on_disconnect).
     // Placement: BEFORE write_gate_.cancel_and_drain() (the first drain).
     // Binding constraint (analyze F1): reset_seqnums_to_one_durable() acquires the
     // seqnum async-mutex via reset_to_one(). If seqnum_mgr_.drain() has already run,
@@ -2512,50 +2542,28 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // silently no-oping without resetting counters. Must therefore run before BOTH
     // drains (write_gate_.cancel_and_drain() and seqnum_mgr_.drain()).
     //
-    // Single-fire guard (C5.1): teardown_reset_done_ prevents a logout+disconnect
-    // double-trigger (e.g. graceful Logout → timeout → terminal close via close()
-    // re-entry) from calling store_->reset() twice. FileStore::reset() is
+    // Single-fire guard (C5.1): teardown_reset_done_ prevents a double trigger (a
+    // re-entered close()) from calling store_->reset() twice. FileStore::reset() is
     // non-idempotent I/O (full atomic-rename + fdatasync + dir-fsync per call).
     //
-    // Predicate: (logout_seen_ && cfg_.reset_on_logout) || cfg_.reset_on_disconnect.
-    //   - reset_on_logout: fires when a Logout occurred in either direction
-    //     (local sent → run_logout_phase1 set logout_seen_; peer received →
-    //      on_inbound_frame 35=5 handler set logout_seen_). [C3.1]
-    //     A Logout that was cut is stored and not transmitted, and
-    //     run_logout_phase1 does not set logout_seen_ for it (fixpp#590;
-    //     `.specify/563-564-callback-send.md` §2.6, ruling R-8).
+    // Predicate: !teardown_reset_done_ && cfg_.reset_on_disconnect. 104-sequence-reset-fidelity
+    // (contract RR-2 item 4, RT-1) supersedes 024 C3.1's reset_on_logout term by name: a
+    // received Logout resets at its arm's reset point, and the teardown never resets a
+    // `pending` receipt (it was closed out above, with no reset). The one case the teardown
+    // would own under reset_on_logout, a receipt `reached` whose unit has not started, has no
+    // input, because the reset point is one strand turn (contract RR-2 item 3), so no term
+    // is coded for it. A change that splits that turn must add the term, and a way to observe
+    // "unit not started", which the three-valued marker does not have (contract RR-2 item 4;
+    // cell R-1u).
     //   - reset_on_disconnect: fires on ANY close() — graceful, terminal, or
     //     abnormal read-pump EOF → close(terminal). [C4.1, C4.2]
     //
     // Disposition: logged-then-proceed (I-07) — teardown store failure is not fatal;
-    // the session should still complete close() normally. [contracts C3.1, C4.1]
+    // the session should still complete close() normally. [contracts C4.1]
     //
-    // [contracts/reset-knobs.md C3.1, C4.1, C4.2, C5.1; plan.md Complexity row 3]
-    if (!teardown_reset_done_ && ((logout_seen_ != receipt_marker::none && cfg_.reset_on_logout) ||
-                                  cfg_.reset_on_disconnect)) {
+    // [contracts/reset-knobs.md C4.1, C4.2, C5.1; plan.md Complexity row 3]
+    if (!teardown_reset_done_ && cfg_.reset_on_disconnect) {
         teardown_reset_done_ = true;
-        // 093 (contract C-6 "close()"; data-model E-10; plan OD-1): a 141=Y reset unit's
-        // store operation is in flight, so wait for it, or this reset could land before
-        // the unit's and be overwritten. Event-driven: the unit's completion signal
-        // raced against await_deadline on effective_clock_, which re-arms on a
-        // clock-wide cancel_sleeps() sweep, bounded by logon_timeout_ms. On expiry,
-        // record it and proceed.
-        if (reset_unit_in_flight_ && effective_clock_) {
-            using namespace asio::experimental::awaitable_operators;
-            asio::steady_timer unit_done{co_await asio::this_coro::executor,
-                                         asio::steady_timer::time_point::max()};
-            reset_unit_wake_ = [&unit_done] { unit_done.cancel(); };
-            // Saturates at steady_time_point::max() when not representable.
-            auto const bound = detail::deadline_after(
-                effective_clock_->steady_now(), std::chrono::milliseconds{cfg_.logon_timeout_ms});
-            auto const which =
-                co_await (unit_done.async_wait(asio::as_tuple(asio::use_awaitable)) ||
-                          detail::await_deadline(*effective_clock_, bound));
-            reset_unit_wake_ = nullptr;
-            if (which.index() == 1) {
-                emit_event(session_event_close_reset_wait_expired{});
-            }
-        }
         auto rst_r = co_await reset_seqnums_to_one_durable(reset_disposition::logged);
         (void)rst_r;  // I-07 logged-then-proceed: store failure does not abort close.
     }
@@ -8398,7 +8406,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     // SessionState.logoutTimeoutMs). Wired from SessionConfig per FR-008 / RC#D.
     //
     // fixpp#536 (D-536-3): the wait is a race between a wake of this session's own and
-    // the deadline, the pattern close() uses for the reset unit (reset_unit_wake_).
+    // the deadline.
     //   - `confirmed` never expires by itself. The LogoutSent arm cancels it through
     //     logout_wait_wake_, and as_tuple turns that cancel into the arm's completion.
     //   - The deadline arm is await_deadline, so a Clock::cancel_sleeps() by anyone
