@@ -5618,9 +5618,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::acknowledge_peer_logout_
     if (fsm_state_ != fsm_state::Disconnected) {
         record_state_transition_(fsm_state::Disconnected);
     }
-    // 104 (contract RR-1, RR-3 steps 2 and 3): arm B's reset point, after its reply and event
-    // and its Disconnected. Shared by the immediate acknowledgement (a pump frame, which set
-    // the marker `pending`) and the bound (the 103 mark `acking`; the marker `none`).
+    // 104 (contract RR-1; RR-3, its Disconnected and reset-point steps): arm B's reset point,
+    // after its reply, its event and its Disconnected. Shared by the immediate acknowledgement
+    // (a pump frame, which set the marker `pending`) and the bound (the 103 mark `acking`; the
+    // marker `none`).
     if (cfg_.reset_on_logout) {
         co_await asio::this_coro::reset_cancellation_state();
         if (enter_receipt_reset_point_()) {
@@ -6187,10 +6188,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
     // Both Active and LogonReceived → Disconnected.
     // onLogout fires inside record_state_transition_ (INV-7 guard).
     record_state_transition_(fsm_state::Disconnected);
-    // 104 (contract RR-1, RR-3 steps 2 and 3), superseding 024 C3.1's teardown reset for a
-    // received Logout: arm A's reset point, reached once the reply was attempted, the event
-    // emitted, fromAdmin returned with no throw, reject or late parse failure, and the persist
-    // succeeded. Disconnected is recorded first, so onLogout sees the pre-reset numbers.
+    // 104 (contract RR-1; RR-3, its Disconnected and reset-point steps), superseding 024 C3.1's
+    // teardown reset for a received Logout: arm A's reset point, reached once the reply was
+    // attempted, the event emitted, fromAdmin returned with no throw, reject or late parse
+    // failure, and the persist succeeded. Disconnected is recorded first, so onLogout sees the
+    // pre-reset numbers.
     if (!from_admin_rejected) {
         if (cfg_.reset_on_logout) {
             co_await asio::this_coro::reset_cancellation_state();
@@ -6399,9 +6401,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logout_sent_(
             logout_seen_ = receipt_marker::pending;
         }
         record_state_transition_(fsm_state::Disconnected);
-        // 104 (contract RR-1, RR-3 steps 2 to 4), superseding 024 C3.1's teardown reset for
-        // an answered Logout: arm L's reset point, after Disconnected and before phase 1 is
-        // told. The frame's MsgSeqNum is not read and NextNumIn is not advanced.
+        // 104 (contract RR-1; RR-3, its Disconnected, reset-point and phase-1 wake steps),
+        // superseding 024 C3.1's teardown reset for an answered Logout: arm L's reset point,
+        // after Disconnected and before phase 1 is told. The frame's MsgSeqNum is not read and
+        // NextNumIn is not advanced.
         if (cfg_.reset_on_logout) {
             co_await asio::this_coro::reset_cancellation_state();
             if (enter_receipt_reset_point_()) {
@@ -6492,7 +6495,7 @@ bool Session::logon_sent_identity_admitted_() noexcept {
         // cn EMPTY: live_peer_id_.reset() below frees the backing store;
         // owned-cn deferred — see verify doc. sha256_fingerprint (owned
         // std::array) and bound_compid (config-stable) are safe. Matches
-        // the failure-arm precedent (gate-b/r2 FQ-2).
+        // the failure-arm precedent (gate-b/r2 FQ-2). claim-ok: moved unchanged, names a ruling
         emit_event(fixpp::session::session_event_peer_identity_bound{
             .cn = {},
             .sans = {},
@@ -6621,7 +6624,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
             co_return fixpp::core::expected_t<void>{};
         }
         record_state_transition_(fsm_state::Disconnected);
-        // Arm S's reset point (contract RR-3 steps 2 and 3); the branch runs only with the knob.
+        // Arm S's reset point (contract RR-3); the branch runs only with the knob.
         co_await asio::this_coro::reset_cancellation_state();
         if (enter_receipt_reset_point_()) {
             // RT-4: a manager or store failure of the unit is logged then proceeds, as 024
