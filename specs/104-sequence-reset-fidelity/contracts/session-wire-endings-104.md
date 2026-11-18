@@ -873,8 +873,9 @@ Logout.
   "single store reset" reads per teardown (erratum E-4).
 - 027 `contracts/next-expected-msgseqnum.md` **C3**, the two-value end model's explicit-end case, and its required
   test "request `[10,20]`, store through 5": by U6 (B-104-5). The cell that pins `NewSeqNo=21`
-  (`WalkExtraction.TwoValueEnd_ExplicitEndBeyondStore`) is re-pinned to `NewSeqNo=6`, QuickFIX C++'s identical
-  GapFill(34=10, 36=6).
+  (`WalkExtraction.TwoValueEnd_ExplicitEndBeyondStore`) is re-pinned to `NewSeqNo=6`, its fixture's manager seeded to
+  the store's next outbound number: NewSeqNo is the session's next outbound number (`peek_outbound()`), QuickFIX
+  C++'s value whenever store and manager agree (orchestrator ruling on the T073 STOP).
 - 099's ending for a Logon acknowledgement its validating-initiator test (data-model E-7's S3) refuses, NextNumIn
   consumed (pinned "c" by `W5PerShape.Initiator141YWith1137_4_NoReset`, `W5LogonSent.Ending`'s
   `LS_e_*_Logon_141_Y_1137_4` rows and `W25Initiator.Reply141YWithBad1130_NoReset`), for an unasked 141=Y
