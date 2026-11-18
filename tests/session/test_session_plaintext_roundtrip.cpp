@@ -1839,8 +1839,8 @@ TEST(HookedStoreResetTo, ForwardModeForwardsToTheInnerStoreAndFiresItsHook) {
 //     and close() is still waiting, until the clock reaches the bound.
 // Time moves only by the cell's advance; drain_ready runs what an advance made ready.
 //
-// The pumps are bounded by real time (104-sequence-reset-fidelity, research R2's census;
-// tasks.md T046). Once close() waits for a receipt or a reset unit by a poll by post
+// The pumps are bounded by real time (104-sequence-reset-fidelity, its research's census of
+// close() pumps). Once close() waits for a receipt or a reset unit by a poll by post
 // (contract RR-2 item 4), its pass keeps ioc's queue non-empty, so a poll() loop does not
 // return while that wait is outstanding, and an iteration cap around a poll() bounds
 // nothing. No real-time timer competes with these bounds: the cells' one timeout,
