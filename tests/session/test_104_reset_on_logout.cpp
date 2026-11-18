@@ -3145,6 +3145,7 @@ void in_flight_sending_time_reject(session_role const role, reject_arm const arm
                      kReachBudget);
     s.mock->advance(std::chrono::milliseconds{kBoundT} + std::chrono::milliseconds{1});
     bool const bound_ended = s.pump_until([&] { return r.bound_count() == 0; }, kInHoldBudget);
+    auto const acks_in_hold = s.count("5", mark);
     auto const state_in_hold = s.state();
     auto const events_in_hold = r.log().store_events.size();
     bool const hold_in_place = !r.log().hold_timed_out;
@@ -3162,6 +3163,7 @@ void in_flight_sending_time_reject(session_role const role, reject_arm const arm
     EXPECT_EQ(r.app->to_admin_count("3"), 1) << "toAdmin calls for a 35=3";
     EXPECT_TRUE(held) << "setup: the selected store call was not reached";
     EXPECT_TRUE(bound_ended) << "setup: the bound did not end during the hold";
+    EXPECT_EQ(acks_in_hold, 1U) << "setup: the bound's acknowledgement: " << s.written(mark);
     EXPECT_EQ(state_in_hold, fsm_state::Disconnected)
         << "setup: the state during the hold: " << rg::state_name(state_in_hold);
     EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the release";
