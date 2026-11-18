@@ -397,7 +397,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
     - R-1w: restore 093's event wait, widened to `pending`.
     - R-1f(2b): move 103's bound join to immediately after `seqnum_mgr_.drain()`, before `close_result_` is set.
     - R-2: skip the teardown reset when the receipt reset ran.
-- [ ] T048 [US1] RR-4's boundaries and the reconnect clear, in `src/session/session.cpp` (contract RR-4, RR-2 item 6).
+- [X] T048 [US1] RR-4's boundaries and the reconnect clear, in `src/session/session.cpp` (contract RR-4, RR-2 item 6). Done: evidence file, "Session of 2026-11-18, sixteenth run", its "T048" section.
   - `store_then_emit`, before its store call: refuse while the marker is `reached`, take the number back as D-OUT-1 does, and return `dispatch_aborted`.
   - `persist_inbound_advance_`, after its `store_is_persistent_` return and before its store call: return success with no write.
   - `install_reconnected_transport` sets the marker to `none`.
@@ -426,7 +426,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
       No count.
     - **The exemption's reading** (record it in the evidence file). Run the recipe and classify each hit by RR-6 item 4's categories. A second origin is a STOP finding. Its known positive: the recipe finds `run_logout_phase1`'s call. Re-run RR-6 item 4's lowering-writers recipe and read each hit against "phase 1 has numbered its Logout". Only arm A's crossing unit sets the member among them. A new lowering writer that can meet phase 1's Logout goes to the orchestrator.
     - Cells R-5f, R-5g, R-5h, R-5j (T038) and R-1l's sink twin (T031). Mutants in T061.
-- [ ] T049 [US1] The manager freeze, in `include/fixpp/session/seqnum_manager.hpp` and `src/session/seqnum_manager.cpp` (contract RR-5 items 3 to 5; data-model "`SeqnumManager`: the freeze"; research D11).
+- [X] T049 [US1] The manager freeze, in `include/fixpp/session/seqnum_manager.hpp` and `src/session/seqnum_manager.cpp` (contract RR-5 items 3 to 5; data-model "`SeqnumManager`: the freeze"; research D11). Done: evidence file, "Session of 2026-11-18, sixteenth run", its "T049" section.
   - **The interface.** The private flag. `SeqnumManager::freeze_key`, whose constructor is private, with `Session` its friend. `freeze(freeze_key)` and `thaw(freeze_key)`, and the query `[[nodiscard]] bool frozen(freeze_key) const noexcept`, which `Session`'s Debug asserts call (T050) and no production branch tests. `frozen` is inline and `noexcept`, and takes no lock.
   - **The freeze test**, in each refused mutator:
     - `check_inbound`, `assign_outbound` and `hydrate`: after the lock grant and before any counter read or write, return `session_already_closed`;
@@ -438,7 +438,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - **Test access.** Add a static function to `tests/support/seqnum_manager_test_access.hpp` that sets and reads the flag.
   - **R-5d.** Write `SeqnumManagerFreeze104.NonResetMutatorsRefusedWhileFrozen` in `tests/session/test_104_reset_on_logout.cpp`, per research D10's row. Build it, and run it GREEN with a non-zero count. Its RED source is T061's mutants.
   - **Existing users.** Run the entries of `git grep -l SeqnumManager -- tests`, by the Execution rules' selection form. They stay GREEN: nothing sets the flag outside 104's sites.
-- [ ] T050 [US1] The freeze's sites, in `src/session/session.cpp` (contract RR-5 items 1, 4 and 6).
+- [X] T050 [US1] The freeze's sites, in `src/session/session.cpp` (contract RR-5 items 1, 4 and 6). Done: evidence file, "Session of 2026-11-18, sixteenth run", its "T050" section.
   - **`run_reset_unit_`.**
     - Debug asserts that the manager is not frozen, each read through `frozen(freeze_key)` (T049): at its entry, and after its manager set, immediately before the freeze (the post-set assert). Each assert's message names it, as `run_reset_unit_`'s entry assert or its post-set assert, so that T061's row can read the post-set assert by its own message.
     - The freeze, when the marker is `reached`: after its manager set, whatever that set returned, and before `reset_unit_in_flight_` and its store call, or before its return when there is no store.
