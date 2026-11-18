@@ -1199,3 +1199,69 @@ TEST(ResetOnLogout104, TooHighLogout_ResetAtAcknowledgement) {
     EXPECT_TRUE(l.close_returned_within(kReleaseBudget)) << "close() did not return";
     expect_receipt_reset(l.log());
 }
+
+// ── T026: R-1f, a too-high Logout's bound when close() runs ─────────────────────────────
+
+// R-1f(1): close() while the 103 mark is pending claims the bound: no reset_to and no reset,
+// the numbers as before, and close() returns with the mock clock unmoved (so below
+// logon_timeout_ms) and no close_reset_wait_expired.
+TEST(ResetOnLogout104, TooHighLogout_ClaimedByClose_NoReset) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        Rol104 r{role};
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        seqnum_t const n = s.next_in();
+        (void)s.feed(s.logout(n + 3));
+        ASSERT_EQ(r.phase(), kPending) << "setup: no pending mark";
+        auto const mgr_before = r.manager_numbers();
+        auto const store_before = r.store_numbers(store_kind::hooked);
+        ASSERT_TRUE(store_before.has_value()) << "setup: the store's numbers were not read";
+
+        r.spawn_close(close_mode::terminal);
+        EXPECT_TRUE(r.close_returned_within(kReleaseBudget))
+            << "close() did not return with the mock clock unmoved";
+        EXPECT_TRUE(r.log().calls.empty()) << "a reset call: reset() " << r.log().reset_calls
+                                           << ", reset_to " << r.log().reset_to_calls;
+        EXPECT_EQ(r.manager_numbers(), mgr_before) << "the manager's numbers moved";
+        auto const store_after = r.store_numbers(store_kind::hooked);
+        ASSERT_TRUE(store_after.has_value()) << "the store's numbers were not read";
+        EXPECT_EQ(*store_after, *store_before) << "the store's numbers moved";
+        EXPECT_FALSE(r.close_reset_wait_expired()) << "close_reset_wait_expired was emitted";
+    }
+}
+
+// R-1f(2), (1)'s forced-hit arm: close() while the bound is acking, its reply's store held:
+// one reset_to, seen with the session Disconnected, finished before close() returns.
+TEST(ResetOnLogout104, TooHighLogout_AckingWhenClosed_ResetOnce) {
+    constexpr int kAcking = 2;  // session_test_access::peer_logout_phase's `acking`
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        Rol104 r{role};
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        seqnum_t const n = s.next_in();
+        (void)s.feed(s.logout(n + 3));
+        ASSERT_EQ(r.phase(), kPending) << "setup: no pending mark";
+        r.ctl.hold_next_store = true;
+        auto frame_fut = s.feed_spawn(s.gap_fill(n, n + 4));
+        bool const held = s.pump_until(
+            [&] { return !r.log().store_events.empty() && r.phase() == kAcking; }, kHoldWindow);
+        r.spawn_close(close_mode::terminal);
+        (void)s.pump_until([&] { return r.close_run.done; }, kHoldWindow);
+        r.ctl.released = true;
+        bool const close_returned = r.close_returned_within(kReleaseBudget);
+        (void)s.pump_until([&] { return rg::Scene::ready(frame_fut); }, kReleaseBudget);
+
+        ASSERT_TRUE(held) << "setup: the bound's reply store was not held in acking";
+        EXPECT_TRUE(close_returned) << "close() did not return after the release";
+        EXPECT_FALSE(r.log().hold_timed_out) << "the hold ended by its bound, not its release";
+        expect_one_reset_to_one_one_disconnected(r);
+        bool finished_before_return = false;
+        for (auto const& w : r.close_run.writes_at_return) {
+            finished_before_return = finished_before_return || w.op == "reset_to 1 1";
+        }
+        EXPECT_TRUE(finished_before_return)
+            << "the reset_to had not finished when close() returned";
+    }
+}
