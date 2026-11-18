@@ -168,8 +168,8 @@ RU-2 and RU-3 (spec Clarifications, Gate A round 1). This section records why, a
   test, 103's acking drain and `inbound_resend_request_leaf_`'s entry test. With the write moved after the unit
   and the freeze's two tests, the drain test and the leaf entry test removed, the cell that fed a frame during the
   unit (R-1q) could not go RED, and it was retired (D10's R-1q row). So this protection is defence only
-  and claimed by no cell. It is a candidate for T107's `/simplify` to question, and it is not removed now. The
-  order itself is still observed: the bound-route cells' reading of the state at the held `reset_to`, and
+  and claimed by no cell. The order itself is observed, so it is not a `/simplify` candidate (orchestrator ruling 3
+  on the T071 STOP): the bound-route cells' reading of the state at the held `reset_to`, and
   `TooHighLogout_ResetAtAcknowledgement`'s numbers inside `onLogout`, change when the write moves after the unit
   (the evidence file's T057 table, row T057-1q). Moving it therefore changes what `onLogout` observes.
 

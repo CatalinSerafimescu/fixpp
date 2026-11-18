@@ -875,6 +875,12 @@ Logout.
   test "request `[10,20]`, store through 5": by U6 (B-104-5). The cell that pins `NewSeqNo=21`
   (`WalkExtraction.TwoValueEnd_ExplicitEndBeyondStore`) is re-pinned to `NewSeqNo=6`, QuickFIX C++'s identical
   GapFill(34=10, 36=6).
+- 099's ending for a Logon acknowledgement its validating-initiator test (data-model E-7's S3) refuses, NextNumIn
+  consumed (pinned "c" by `W5PerShape.Initiator141YWith1137_4_NoReset`, `W5LogonSent.Ending`'s
+  `LS_e_*_Logon_141_Y_1137_4` rows and `W25Initiator.Reply141YWithBad1130_NoReset`), for an unasked 141=Y
+  acknowledgement only: by U1 and U2's "no sequence check" (T069). Such an acknowledgement is refused with NextNumIn
+  unchanged ("k"), as QuickFIX's `generateReject` leaves it for a Logon; no reset, and the Reject's outbound number,
+  are unchanged. The ordinary acknowledgement keeps "c" (L-104-8).
 - 093 `contracts/inbound-frame-dispositions.md` **C-6**'s `close()` bullet ("`close()` waits only when it is about
   to issue its teardown reset"), and the event-driven shape of that wait, whose one waker was the unit's
   completion: by RR-2 item 4 and RT-5 (B-104-2). B-093-11 gains the same pointer.

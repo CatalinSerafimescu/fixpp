@@ -379,6 +379,11 @@ New limitations:
   QuickFIX initiator meets the same ending, and QuickFIX C++'s second Logon does not clear the queue, which only
   `disconnect()` clears. Derived from QuickFIX C++ v1.16.0's source (`nextLogon`, `doTargetTooHigh` →
   `m_state.queue`, `nextQueued`, `disconnect()`), not traced on a live peer. 104 spec DQ-16.
+- **L-104-8** — a Logon acknowledgement refused at 099's S3 test (a validating initiator's DefaultApplVerID or
+  ApplVerID check) consumes its MsgSeqNum; QuickFIX's Reject path exempts a Logon (`generateReject`). This is the
+  ordinary acknowledgement without 141=Y, which Guard (4)'s `check_inbound` still consumes before the S3 test. An
+  unasked 141=Y acknowledgement takes no sequence check, so it is refused there with NextNumIn unchanged, as
+  QuickFIX does. Not fixed in 104; T103 files the issue (orchestrator ruling 1 on the T071 STOP).
 
 Amended in place:
 - **B-024-1**: its "a Logout teardown (sent OR received)" points to B-104-1 (the trigger is a received Logout at
