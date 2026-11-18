@@ -648,11 +648,11 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 
 **Independent test**: T-1 to T-6 GREEN; `*TooLowLogout103.*` byte-identical; the mutants of T088 and T089 RED.
 
-- [ ] T083 [US3] The shared text builder in `src/session/session.cpp` (data-model "The too-low Logout text").
+- [X] T083 [US3] Done: evidence file, "Session of 2026-11-19, twenty-fourth run (phase-implementer; US3)", its T083 section. The shared text builder in `src/session/session.cpp` (data-model "The too-low Logout text").
   - It is one file-local builder writing into a fixed `std::array<char, K>`, with the numbers written by `std::to_chars`. K is fixed by Arm B's existing `static_assert`.
   - 103's Arm B is switched to it, byte-identical.
   - The pin: `session_103_tests --gtest_filter='*TooLowLogout103.*'` is GREEN before and after the switch, with the same non-zero count. Record.
-- [ ] T084 [US3] The too-low branches of both Logon arms, in `src/session/session.cpp`: `on_inbound_logon_sent_` (the `false` row of T069's table) and `on_inbound_not_connected_` (contract T1, T2, T8; FR-012 to FR-014).
+- [X] T084 [US3] Done: evidence file, "Session of 2026-11-19, twenty-fourth run (phase-implementer; US3)", its T084 section. The too-low branches of both Logon arms, in `src/session/session.cpp`: `on_inbound_logon_sent_` (the `false` row of T069's table) and `on_inbound_not_connected_` (contract T1, T2, T8; FR-012 to FR-014).
   - **Order.** For a too-low frame the arm first runs the identity gates, through the helpers that make today's checks: the mTLS CompID-authorisation gate in both arms, and `authorize_logon` on the acceptor. The event, the one-shot `live_peer_id_` consumption and the silent `Disconnected` stay identical. Only then does it call `refuse_logon_with_logout_` with the builder's text, whatever the frame's 43, with no 1409 and no 789, and with NextNumIn not advanced.
   - **Unchanged.** The earlier guards keep their endings: the validate gate, `interpret_logon`, posture, SendingTime, `seq == 0`, and in NotConnected the strict refusal and the `reset_on_logon` reset.
   - Neither arm's too-low branch sets the receipt marker.
