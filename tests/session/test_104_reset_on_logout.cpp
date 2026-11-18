@@ -16,6 +16,12 @@
 //     and an unheld store records neither;
 //   - blocking_write_state::starts counts a parked write that has not completed.
 //
+// The cells R-1y and R-1z (tasks.md T019, T020; research D10's rows) run on
+// resend_gap_scene.hpp's Scene with reset_on_logout set, a HookedStore and the Scene's mock
+// clock, each on both roles. The Scene's first session is replaced before it opens, so the
+// cell's session is built from the edited config. They read the reset calls on HookedStore's
+// per-call record (StoreLog::calls), whose snapshot reads the session's state at each call.
+//
 // Pumps. A held store operation yields the strand by posts until it is released, or until
 // kHoldBound passes, when the log's hold_timed_out is set and the operation returns. So each
 // arm observes a hold over a window of a quarter of kHoldBound, and pumps for at most half of
@@ -31,18 +37,28 @@
 #include <asio/io_context.hpp>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <deque>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/seqnum.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
+#include <variant>
+#include <vector>
 
+#include "session/resend_gap_scene.hpp"
 #include "support/blocking_write_transport.hpp"
 #include "support/hooked_store.hpp"
+#include "support/session_executor_of.hpp"
+#include "support/session_test_access.hpp"
 
 namespace {
 
@@ -332,3 +348,285 @@ TEST(HookedStoreRecord104, ResetAndResetToRecordedApart) {
 }
 
 }  // namespace
+
+// ── R-1y and R-1z: a too-high Logout's bound under reset_on_logout ──────────────────────
+
+namespace {
+
+namespace rg = fixpp::test_support::resend_gap;
+using fixpp::session::close_mode;
+using fixpp::session::session_role;
+using fixpp::session::session_test_access;
+using fixpp::test_support::HookedStoreFactory;
+
+constexpr std::uint32_t kBoundT = 2000;  // the too-high Logout's bound T, ms, on the mock clock
+constexpr int kNone = 0;                 // session_test_access::peer_logout_phase's `none`
+constexpr int kPending = 1;              // session_test_access::peer_logout_phase's `pending`
+
+// A Scene whose session has reset_on_logout and a HookedStore. Every member a store hook, a
+// spawned close or a cell-local delivery touches is declared before the Scene, so it outlives
+// whatever the Scene's teardown resumes; the destructor's body releases a hold first.
+class Rol104 {
+public:
+    struct Control {
+        bool hold_next_store = false;  // the next outbound store() holds until `released`
+        bool released = false;
+    };
+    struct CloseRun {
+        bool done = false;
+        std::optional<fixpp::core::expected_t<void>> result;
+        std::vector<StoreLog::Write> writes_at_return;  // StoreLog::writes as close() returned
+    };
+    struct Delivery {
+        bool done = false;
+        std::optional<fixpp::core::expected_t<void>> first;
+        std::optional<fixpp::core::expected_t<void>> second;
+    };
+
+    Control ctl;
+    CloseRun close_run;
+    Delivery delivery;
+    std::deque<std::vector<std::byte>> frames;  // a cell-local delivery's bytes
+    std::shared_ptr<HookedStoreFactory> factory = std::make_shared<HookedStoreFactory>();
+    rg::Scene s;
+
+    explicit Rol104(session_role const role)
+        : s{rg::Options{.role = role, .logout_timeout_ms = kBoundT}} {
+        factory->hooks.on_outbound_store = [c = &ctl] {
+            if (!c->hold_next_store) return false;
+            c->hold_next_store = false;
+            return true;
+        };
+        factory->hooks.release_when = [c = &ctl] { return c->released; };
+        // These cells read the state at a reset call; the transport reading is not read.
+        factory->log->call_snapshot = [this] { return CallReading{.state = s.session->state()}; };
+        s.cfg.reset_on_logout = true;
+        s.cfg.store_factory = factory;
+        s.session = std::make_unique<fixpp::session::Session>(s.engine, s.cfg);
+    }
+    Rol104(Rol104 const&) = delete;
+    Rol104& operator=(Rol104 const&) = delete;
+    ~Rol104() { ctl.released = true; }
+
+    [[nodiscard]] StoreLog& log() const { return *factory->log; }
+    [[nodiscard]] int phase() const { return session_test_access::peer_logout_phase(*s.session); }
+    [[nodiscard]] int bound_count() const {
+        return session_test_access::peer_logout_bound_count(*s.session);
+    }
+
+    // Starts close(mode); close_run records its result and StoreLog::writes in the handler
+    // in which close() returns.
+    void spawn_close(close_mode const mode) {
+        asio::co_spawn(
+            fixpp::test_support::session_executor_of(*s.session, s.ioc),
+            [this, mode]() -> asio::awaitable<void> {
+                close_run.result = co_await s.session->close(mode);
+                close_run.writes_at_return = factory->log->writes;
+                close_run.done = true;
+            },
+            asio::detached);
+    }
+    // Pumps the close for `budget`; true if it returned. When it has not, the mock clock is
+    // moved past logon_timeout_ms (the bound of close()'s wait) and the close is pumped to
+    // its end, so the cell ends on its assertion and not on a hang.
+    [[nodiscard]] bool close_returned_within(std::chrono::milliseconds const budget) {
+        if (s.pump_until([this] { return close_run.done; }, budget)) return true;
+        s.mock->advance(std::chrono::milliseconds{s.cfg.logon_timeout_ms} +
+                        std::chrono::milliseconds{1});
+        (void)s.pump_until([this] { return close_run.done; });
+        return false;
+    }
+
+    // Delivers two frames back to back from one coroutine, as the read pump does: nothing
+    // runs on the context between the first frame's return and the second's start.
+    void spawn_one_delivery(std::vector<std::byte> first, std::vector<std::byte> second) {
+        frames.push_back(std::move(first));
+        frames.push_back(std::move(second));
+        auto const a = std::span<const std::byte>{frames[frames.size() - 2]};
+        auto const b = std::span<const std::byte>{frames.back()};
+        asio::co_spawn(
+            fixpp::test_support::session_executor_of(*s.session, s.ioc),
+            [this, a, b]() -> asio::awaitable<void> {
+                delivery.first = co_await s.session->on_inbound_frame(a);
+                delivery.second = co_await s.session->on_inbound_frame(b);
+                delivery.done = true;
+            },
+            asio::detached);
+    }
+
+    // The reset_to calls on the record.
+    [[nodiscard]] std::vector<StoreLog::Call> reset_tos() const {
+        std::vector<StoreLog::Call> out;
+        for (auto const& c : log().calls) {
+            if (c.kind == StoreLog::call_kind::reset_to) out.push_back(c);
+        }
+        return out;
+    }
+    [[nodiscard]] bool close_reset_wait_expired() const {
+        for (auto const& ev : s.session->recent_events()) {
+            if (std::holds_alternative<fixpp::session::session_event_close_reset_wait_expired>(
+                    ev)) {
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
+// Exactly one reset_to(1, 1), and at it the session was Disconnected.
+void expect_one_reset_to_one_one_disconnected(Rol104 const& r) {
+    auto const calls = r.reset_tos();
+    ASSERT_EQ(calls.size(), 1U) << "reset_to calls; reset() calls: " << r.log().reset_calls;
+    EXPECT_EQ(calls.front().next_in, seqnum_t{1}) << "the reset_to's inbound target";
+    EXPECT_EQ(calls.front().next_out, seqnum_t{1}) << "the reset_to's outbound target";
+    ASSERT_TRUE(calls.front().reading.has_value()) << "the reset_to's reading";
+    EXPECT_EQ(calls.front().reading->state, fsm_state::Disconnected)
+        << "the state at the reset_to: " << rg::state_name(calls.front().reading->state);
+}
+
+// R-1y: a second too-high Logout while the mark is pending is ignored, the gap is filled
+// past the first S, and the bound acknowledges once and resets once.
+void duplicate_too_high_logout(session_role const role, bool const route_a) {
+    SCOPED_TRACE(rg::role_name(role));
+    Rol104 r{role};
+    auto& s = r.s;
+    ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+    seqnum_t const n = s.next_in();
+    auto const mark = s.sent.size();
+    (void)s.feed(s.logout(n + 3));
+    ASSERT_EQ(r.phase(), kPending) << "setup: no pending mark";
+    ASSERT_EQ(r.bound_count(), 1) << "setup: no bound";
+    if (route_a) {
+        // The gap is filled to S: the resend closes and the mark stays pending.
+        (void)s.feed(s.gap_fill(n, n + 3));
+        ASSERT_EQ(s.next_in(), n + 3) << "setup: the gap was not filled to S";
+        ASSERT_FALSE(s.resend_outstanding()) << "setup: the resend is still outstanding";
+        ASSERT_EQ(r.phase(), kPending) << "setup: the mark left pending at S";
+        (void)s.feed(s.logout(n + 5));  // the duplicate, above N
+        EXPECT_EQ(r.bound_count(), 1) << "a second bound started";
+        (void)s.feed(s.gap_fill(n + 3, n + 6));
+    } else {
+        ASSERT_TRUE(s.resend_outstanding()) << "setup: no resend outstanding";
+        (void)s.feed(s.logout(n + 5));  // the duplicate, with the resend outstanding
+        EXPECT_EQ(r.bound_count(), 1) << "a second bound started";
+        (void)s.feed(s.gap_fill(n, n + 4));
+    }
+    EXPECT_EQ(s.count("5", mark), 1U) << "acknowledgement Logouts: " << s.written(mark);
+    if (r.bound_count() != 0) {
+        // A bound still running is ended at its own deadline, so the cell ends on its
+        // assertions and not with the bound alive.
+        s.pass(std::chrono::milliseconds{kBoundT});
+    }
+    EXPECT_EQ(r.bound_count(), 0) << "the bound did not end";
+    expect_one_reset_to_one_one_disconnected(r);
+
+    r.spawn_close(close_mode::terminal);
+    EXPECT_TRUE(r.close_returned_within(kReleaseBudget)) << "close() did not return";
+    EXPECT_EQ(r.log().reset_calls, 0)
+        << "a reset() call; reset_to calls: " << r.log().reset_to_calls;
+    EXPECT_EQ(r.reset_tos().size(), 1U) << "reset_to calls after close()";
+}
+
+// R-1z, CloseDuringReplyStore: the in-sequence Logout at S claims the pending mark; its reply's
+// store is held; close(terminal) starts during the hold and returns only after the release,
+// with the one reset_to finished by then.
+void claims_pending_close_during_reply_store(session_role const role) {
+    SCOPED_TRACE(rg::role_name(role));
+    Rol104 r{role};
+    auto& s = r.s;
+    ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+    seqnum_t const n = s.next_in();
+    auto const mark = s.sent.size();
+    (void)s.feed(s.logout(n + 3));
+    ASSERT_EQ(r.phase(), kPending) << "setup: no pending mark";
+    (void)s.feed(s.gap_fill(n, n + 3));
+    ASSERT_EQ(s.next_in(), n + 3) << "setup: the gap was not filled to S";
+    ASSERT_EQ(r.phase(), kPending) << "setup: the mark left pending at S";
+
+    r.ctl.hold_next_store = true;
+    auto frame_fut = s.feed_spawn(s.logout(n + 3));
+    bool const held = s.pump_until([&] { return !r.log().store_events.empty(); }, kHoldWindow);
+    r.spawn_close(close_mode::terminal);
+    bool const close_before_release = s.pump_until([&] { return r.close_run.done; }, kHoldWindow);
+    r.ctl.released = true;
+    bool const close_returned = r.close_returned_within(kReleaseBudget);
+    bool const frame_returned =
+        s.pump_until([&] { return rg::Scene::ready(frame_fut); }, kReleaseBudget);
+
+    EXPECT_TRUE(held) << "the reply's store was not held";
+    EXPECT_EQ(r.phase(), kNone) << "the in-sequence Logout did not claim the mark";
+    EXPECT_FALSE(close_before_release) << "close() returned during the reply's held store";
+    EXPECT_TRUE(close_returned) << "close() did not return after the release";
+    EXPECT_TRUE(frame_returned) << "the Logout's frame did not return";
+    EXPECT_FALSE(r.log().hold_timed_out) << "the hold ended by its bound, not its release";
+    expect_one_reset_to_one_one_disconnected(r);
+    bool finished_before_return = false;
+    for (auto const& w : r.close_run.writes_at_return) {
+        finished_before_return = finished_before_return || w.op == "reset_to 1 1";
+    }
+    EXPECT_TRUE(finished_before_return) << "the reset_to had not finished when close() returned";
+    EXPECT_EQ(r.log().reset_calls, 0) << "a reset() call";
+    EXPECT_FALSE(r.close_reset_wait_expired()) << "close_reset_wait_expired was emitted";
+    auto const logouts = s.of_type("5", mark);
+    ASSERT_EQ(logouts.size(), 1U) << "acknowledgement Logouts: " << s.written(mark);
+    if (!r.log().store_events.empty()) {
+        EXPECT_EQ(rg::field(logouts.front(), 34), std::to_string(r.log().store_events.front().seq))
+            << "the held store was not the Logout's";
+    }
+}
+
+// R-1z, OneDelivery: a GapFill past S and the in-sequence Logout at the new N in one delivery.
+// The GapFill's advance posts the bound's wake, which has not run when the Logout passes the
+// drain test; the Logout's arm claims the mark, the bound exits unacknowledged, and the arm's
+// reply is the one acknowledgement and its reset_to the one reset.
+void claims_pending_one_delivery(session_role const role) {
+    SCOPED_TRACE(rg::role_name(role));
+    Rol104 r{role};
+    auto& s = r.s;
+    ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+    seqnum_t const n = s.next_in();
+    auto const mark = s.sent.size();
+    (void)s.feed(s.logout(n + 3));
+    ASSERT_EQ(r.phase(), kPending) << "setup: no pending mark";
+    ASSERT_EQ(r.bound_count(), 1) << "setup: no bound";
+
+    r.spawn_one_delivery(s.gap_fill(n, n + 5), s.logout(n + 5));
+    bool const delivered = s.pump_until([&] { return r.delivery.done; }, kReleaseBudget);
+    bool const bound_ended = s.pump_until([&] { return r.bound_count() == 0; }, kReleaseBudget);
+
+    EXPECT_TRUE(delivered) << "the delivery did not return";
+    EXPECT_TRUE(r.delivery.first.has_value() && r.delivery.first->has_value())
+        << "the GapFill's on_inbound_frame";
+    EXPECT_TRUE(r.delivery.second.has_value() && r.delivery.second->has_value())
+        << "the Logout's on_inbound_frame";
+    EXPECT_EQ(r.phase(), kNone) << "the in-sequence Logout did not claim the mark";
+    EXPECT_TRUE(bound_ended) << "the bound did not end";
+    EXPECT_EQ(s.count("5", mark), 1U) << "acknowledgement Logouts: " << s.written(mark);
+    expect_one_reset_to_one_one_disconnected(r);
+
+    r.spawn_close(close_mode::terminal);
+    EXPECT_TRUE(r.close_returned_within(kReleaseBudget)) << "close() did not return";
+    EXPECT_EQ(r.log().reset_calls, 0) << "a reset() call";
+    EXPECT_EQ(r.reset_tos().size(), 1U) << "reset_to calls after close()";
+    EXPECT_FALSE(r.close_reset_wait_expired()) << "close_reset_wait_expired was emitted";
+}
+
+constexpr session_role kRoles[] = {session_role::initiator, session_role::acceptor};
+
+}  // namespace
+
+TEST(ResetOnLogout104, DuplicateTooHighLogoutWhilePending_OneResetByTheBound_RouteA) {
+    for (auto const role : kRoles) duplicate_too_high_logout(role, /*route_a=*/true);
+}
+
+TEST(ResetOnLogout104, DuplicateTooHighLogoutWhilePending_OneResetByTheBound_RouteB) {
+    for (auto const role : kRoles) duplicate_too_high_logout(role, /*route_a=*/false);
+}
+
+TEST(ResetOnLogout104, ClaimsAPendingBound_OneResetByTheArm_CloseDuringReplyStore) {
+    for (auto const role : kRoles) claims_pending_close_during_reply_store(role);
+}
+
+TEST(ResetOnLogout104, ClaimsAPendingBound_OneResetByTheArm_OneDelivery) {
+    for (auto const role : kRoles) claims_pending_one_delivery(role);
+}
