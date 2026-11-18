@@ -4286,13 +4286,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         co_return fixpp::core::expected_t<void>{};
     }
 
-    // 033 T023 (US2): surface 553/554 as logon_credentials to authorize_logon. Fired on the
-    // acceptor inbound-Logon path INDEPENDENTLY of mTLS (the mTLS-gated
-    // compid_authorization_policy.authorize() is unrelated). Default implementation: accept.
-    // asserted_compid = peer SenderCompID(49) = cfg_.target_comp_id. `result` is valid here.
-    // [033 contracts C7; research R6; data-model E5; FR-008/FR-008a]
-    // 104 (contract T8; clarification N-8): one callable, so a too-low Logon runs the same
-    // check before its Logout as an in-sequence one runs before LogonReceived.
+    // 104 (contract T8; clarification N-8): the credentials gate of 033 T023 (its comment is at
+    // the in-sequence call below) as one callable, so a too-low Logon runs the same check before
+    // its Logout as an in-sequence one runs before LogonReceived.
     auto const logon_credentials_admitted = [this, &result]() {
         fixpp::session::logon_credentials creds;
         if (result->username.has_value()) {
@@ -4301,6 +4297,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         if (result->password.has_value()) {
             creds.password = std::string{*result->password};
         }
+        // asserted_compid = peer SenderCompID(49) = cfg_.target_comp_id.
         return cfg_.compid_authorization_policy.authorize_logon(cfg_.target_comp_id, creds);
     };
 
@@ -4649,8 +4646,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         }
     }
 
-    // 033 T023 (US2): the credentials gate (logon_credentials_admitted, above). A future FR-008a
-    // validator may reject here.
+    // 033 T023 (US2): surface 553/554 as logon_credentials to authorize_logon.
+    // Fired on the acceptor inbound-Logon path INDEPENDENTLY of mTLS
+    // (the mTLS-gated compid_authorization_policy.authorize() is unrelated).
+    // Default implementation: accept. A future FR-008a validator may reject here.
+    // `result` is always valid here -- the earlier `if (!result)` returned.
+    // [033 contracts C7; research R6; data-model E5; FR-008/FR-008a]
     if (!logon_credentials_admitted()) {
         // Future: emit an authorization-failed event. For 033 (default-accept
         // validator), this path is unreachable unless a custom validator rejects.
