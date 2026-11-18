@@ -3710,7 +3710,7 @@ void crossing_logout(session_role const role, crossing_arm const arm, bool const
     if (too_high) {
         EXPECT_EQ(phase_at_frame, kNone)
             << "the too-high Logout set the 103 mark: the immediate acknowledgement did not run";
-        EXPECT_EQ(bounds_at_frame, 0) << "the too-high Logout spawned the bound";
+        EXPECT_EQ(bounds_at_frame, 0) << "the bound's join counter is not 0 after the frame";
     }
     EXPECT_EQ(logouts_before_release, 0U) << "a 35=5 written before the release";
     EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the release";
