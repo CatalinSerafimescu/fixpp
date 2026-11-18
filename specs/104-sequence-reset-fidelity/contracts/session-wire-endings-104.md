@@ -288,10 +288,22 @@ until step 3, and `close()`'s bound join covers the receipt and its unit (RR-2 i
 from QuickFIX"): QuickFIX C++ and QuickFIX/J fire `onLogout` in `disconnect()`, after `m_state.reset`. Nothing on
 the wire differs. QuickFIX replies, resets and disconnects in one call (QFC and QFJ `nextLogout`, QFGo
 `handleLogout`), and fixpp transmits nothing after its reset point, which follows the reply (RR-6, ruling W), apart
-from its own crossing Logout (RR-6 item 4), which QuickFIX has already written. Arm A suspends in step 1 after its
-reply (`fromAdmin` and the persist). A concurrent emitter's write granted in that window precedes the reset point
-and goes out. QuickFIX C++ and QuickFIX/J leave the same window to user-thread sends, between their reply and
-`disconnect()` (research D11, "Frames in flight across `reached`"). This closes the window in which the numbers were (1, 1) while the session was still Active; it does not
+from its own crossing Logout (RR-6 item 4), which QuickFIX has already written.
+- **One window remains.** After its reply, arm A suspends in step 1: in its `persist_inbound_advance_`, or in its
+  best-effort Reject's store call when `fromAdmin` rejects. `fromAdmin` itself is synchronous (`parse_and_dispatch_`).
+  A concurrent emitter's write granted in that window precedes the reset point and goes out.
+  - The persist suspends only on a persistent store: `persist_inbound_advance_` returns at
+    `if (!store_is_persistent_)` before any store call.
+  - So, with a persistent store, a liveness frame queued behind the reply is written during the persist whenever it
+    is queued there (the gate's grant is posted). That is not a race.
+  - With a volatile store and no best-effort Reject, arm A does not suspend after its reply, and the frame is held
+    back.
+- **The window is within QuickFIX/J's envelope, per frame kind** (research D11, "Frames in flight across
+  `reached`"):
+  - application sends: QuickFIX C++ and QuickFIX/J user-thread sends can race between the reply and `disconnect()`;
+    QuickFIX/Go never sends one there;
+  - liveness frames: QuickFIX/J's `SessionTimerTask` can race there; QuickFIX C++ and QuickFIX/Go run the timer on
+    the frame thread and never send one there. This closes the window in which the numbers were (1, 1) while the session was still Active; it does not
 widen 103's FR-021.
 
 **RR-4 (what stops at step 2, read from source).**
@@ -514,7 +526,7 @@ accepts only the reset writers. RR-1 to RR-4, RU-1, RU-3 and construction A are 
          item's scope.
 
        Recipe: for each `inbound_logout_leaf_(` caller, read the write that follows its success return, and
-       whether its frame can suspend before the leaf.
+       whether its frame can suspend before the leaf. Cell R-5i covers the two writes above (research D10).
      - Cells R-5a, R-5c and R-5f assert exactly one `Disconnected` entry in `Session::fsm_visit_history()`.
      - Not covered: a caller's write for `store_then_emit`'s store error after a refused reconcile
        (`Session::send`'s `disconnect_required` write, `run_liveness_loop`'s emit-failure writes). The store error,
@@ -538,94 +550,163 @@ accepts only the reset writers. RR-1 to RR-4, RU-1, RU-3 and construction A are 
 **RR-6 (ruling W: nothing is transmitted after a reset point; orchestrator ruling 2026-11-18, the T014 STOP;
 research D11, "Frames in flight across `reached`").** This is the third STOP of one class, **work in flight across
 the write of `reached`**. T011 found the manager writers, T014 the callback-first leaf, and this one the wire
-writes. RR-4 and D-OUT-10 keep a frame still inside its store call off the wire (column C1 of research D11's
-table). A frame whose store call had returned before the reset point was still written after it, after the reply.
-QuickFIX never sends such a frame: it handles a received Logout in one call, and a frame after a too-high Logout is
-never processed.
+writes.
+- Before W, D-OUT-10 kept a frame still inside its store call off the wire (column C1 of research D11's table), but
+  a frame whose store call had returned before the reset point was still written after it, after the reply.
+- QuickFIX never sends such a frame: it handles a received Logout in one call, and a frame after a too-high Logout
+  is never processed.
+- Gate A loop 5 (round 1, N-1) added that every frame the rule holds back has **one ending**, whichever state it was
+  in (item 3).
+
 1. **The rule.** Once a reset point has run, fixpp transmits nothing more on that connection. A reset point is a
    writer that runs the receipt unit: arm A, L or S at its reset point, or the bound at its reset point.
 2. **The discriminator, `wire_closed_by_reset_`.**
-   - A new private `bool` member of `Session`.
-   - It is set in the reset point's own strand turn, with the marker's `reached` (RR-2 item 3): the pump frame's
-     `pending` → `reached`, and the bound's `none` → `reached`. Arm A sets it in a crossing too (item 4).
+   - A new private member of `Session`, declared `bool wire_closed_by_reset_ = false;` in the members' existing
+     style. A `Session` is constructed with it clear.
+   - It is set in the reset point's own strand turn, in the same statement block as the marker's `reached` (RR-2
+     item 3), through one helper that both writes are made in: the pump frame's `pending` → `reached` and the
+     bound's `none` → `reached`. Arm A sets it in a crossing too (item 4).
    - `install_reconnected_transport` clears it, in the block that sets the marker to `none` and thaws the manager
      (RR-2 item 6, RR-5 item 1).
    - `close()`'s close-out never writes it (item 5). That is why it is not the marker: the close-out also writes
      `reached`.
    - It is not `frozen(freeze_key)`, which no production branch tests (RR-5 item 4).
    - It is a layout change (B-104-7).
-3. **The test, and its sites.** One test of the member, at each place a frame is handed to the transport:
-   - in `live_write_serialized_`, after the `write_gate_` grant (`guard = std::move(*lock_r);`) and before
-     `live->async_write(frame)`. This covers every frame granted the gate after the reset point, including one
-     that waited on it (column C2). A write already submitted to the transport before the reset point (column C3)
-     was handed over before it, and completes;
-   - in `store_then_emit`, immediately before the config-time sink's `transport_send_(frame)` (column C4);
-   - in `replay_outbound_range_`'s `transmit_async`, before its `transport_send_(f)`; its live branch is covered by
-     `live_write_serialized_`.
+3. **The test, its sites, and the one ending.**
+   - **The test reads the member at each place a frame is handed to the transport.**
+     - In `live_write_serialized_`, after the `write_gate_` grant (`guard = std::move(*lock_r);`) and before
+       `live->async_write(frame)`. This covers every frame granted the gate after the reset point, including one
+       that waited on it (column C2). A write already submitted to the transport before the reset point (column C3)
+       was handed over before it, and completes.
+     - In `store_then_emit`, immediately before the config-time sink's `transport_send_(frame)` (column C4).
+     - In `replay_outbound_range_`'s `transmit_async`, before its `transport_send_(f)`. Its live branch is covered
+       by `live_write_serialized_`.
 
-   The two sink sites have no input today. On the sink nothing suspends from the store's return to the send; a frame
-   still in its store call is refused by D-OUT-10; and the only frame past D-OUT-10 after the member is set is the
-   exempt Logout. They make "nothing more" hold by construction, and no cell claims them.
+     The two sink sites have no input today. On the sink nothing suspends from the store's return to the send, and
+     a frame still in its store call ends at D-OUT-10 (below). They make "nothing more" hold by construction, and
+     no cell claims them.
+   - **D-OUT-10 while the member is set.** A frame whose store call returns after the unit's manager set meets
+     D-OUT-10 (`if (stamped_seq >= seqnum_mgr_.peek_outbound())`).
+     - While `wire_closed_by_reset_` is set and the call carries no exemption, D-OUT-10 returns the same ending as
+       the test (orchestrator ruling on loop 5's N-1).
+     - While the member is clear, D-OUT-10 keeps its `dispatch_aborted` ending. That covers the two lowerings that
+       need no reset point (item 4), ruling R-19 unchanged.
+     - The member is set only after a unit has lowered the manager, and the manager is frozen from then on, so no
+       later lowering can be taken for it.
+   - **The one ending (C1, C2 and C4 alike).** Success with no transmit, the shape of the `transmit=false` exit:
+     - `store_then_emit` returns success before it updates `last_outbound_steady_`. `live_write_serialized_` has a
+       distinct return for a hit, so `store_then_emit` can tell a held-back write from a written one and skip that
+       update. `transmit_async` treats a hit as success.
+     - The number stays consumed. The frame's store write precedes the unit's `reset_to`, which clears it (research
+       R1's store order).
+     - No caller sees an error, so none writes a `Disconnected`.
+     - QuickFIX C++ gives a message persisted and not sent the same shape. In `Session::sendRaw`'s application
+       branch, `persist(message, messageString)` is followed by `if (isLoggedOn()) { send(messageString); }`, and
+       the function then returns `true`. QuickFIX/Go's `queueForSend` persists and queues the message and returns
+       `nil`. QuickFIX/J's `sendRaw` returns its `result`, which stays `false` when `isLoggedOn()` is false: the J
+       engine reports it as not sent.
+   - **The callers' endings, for a frame held back by the rule** (re-derive: every `store_then_emit` caller, each
+     read for the write on its non-success return):
 
-   **On a hit:** success with no transmit, the shape of the `transmit=false` exit. `store_then_emit` returns success
-   before it updates `last_outbound_steady_`. `live_write_serialized_` has a distinct return for a hit, so that
-   `store_then_emit` can tell a suppressed write from a written one and skip that update. `transmit_async` treats
-   a hit as success. The number stays consumed. The frame's store call returned before the reset point, so its
-   store write precedes the unit's `reset_to`, which clears it (research R1's store order). No caller sees an error,
-   so none writes a second `Disconnected`.
+     | Caller | Ending under the rule | Before the N-1 ruling, for a C1 frame |
+     |---|---|---|
+     | `send_body_` (`Session::send`) | `send` returns success; nothing transmitted; no `Disconnected` write | `send_body_`'s `disconnect_required \|\| … dispatch_aborted` write (a second entry), and `send` returned `dispatch_aborted` |
+     | `run_liveness_loop`, Heartbeat | the loop goes on; its next test of `fsm_state_ != Active` returns | `if (!emit_r) { record_state_transition_(fsm_state::Disconnected); co_return; }` (a second entry) |
+     | `run_liveness_loop`, TestRequest | the TestRequest is not written; the test before the grace sleep (`if (fsm_state_ != fsm_state::Active) { co_return; }`) returns, so no unanswered-TestRequest write | the same unconditional write |
+     | `inbound_heartbeat_reply_leaf_`, `inbound_business_reject_leaf_` | the leaf returns success; the caller's persist is refused by RR-4 (success); the frame returns success | unconditional write on `!emit_r`, and the error |
+     | `emit_session_reject_`, two-argument overload | returns success to `on_inbound_active_from_admin_failed_` / `on_inbound_active_unsupported_` | unconditional write on `!emit_r`, and the error |
+     | `emit_session_reject_`, six-argument overload | returns success; its `disconnect_unless_superseded_(arm)` is not reached | `disconnect_unless_superseded_` (already conditional), and the error |
+     | `inbound_resend_request_leaf_` | returns success | unconditional write on `!emit_r`, and the error |
+     | `inbound_reject_leaf_`, `inbound_reject_best_effort_leaf_`, `inbound_logout_leaf_`, `apply_inbound_sequence_reset`'s Reject | unchanged: each discards the emit result (`(void)emit_r;` or `(void)co_await`) | the same |
+     | `run_logout_phase1` | carries the exemption: transmitted (item 4) | — |
+     | `emit_initiator_logon_`, arm S against a direct caller's `open()` overlap (item 6) | returns success, so `open()` returns success with the state `Disconnected` (arm S recorded it) and nothing transmitted | the unconditional write in `if (!emit_r)` (a second entry), and `open()` returned `dispatch_aborted` |
+     | the Logon arms' emitters (`refuse_logon_with_logout_`, `inbound_logon_sent_logout_leaf_`, `inbound_acceptor_reply_logon_leaf_`, `honor_peer_next_expected_`) | no input: a Logon arm is the one pump frame (INV-P), and no bound exists before Active | — |
 
-   **The receipt's own reply is complete before the member is written.**
-   - Route A: `on_inbound_active_logout_` awaits `inbound_logout_leaf_`, and with it the whole `store_then_emit`,
-     transmit included, before its `Disconnected` write (RR-3 step 1 before step 2).
-   - Route B: `acknowledge_peer_logout_` awaits the same leaf before `record_state_transition_(fsm_state::
-     Disconnected)`.
-   - Arms L and S owe no reply (RR-3 step 1).
+   - **Owner-visible (Gate B sign-off).** Two public returns change in the window from a frame's store call to a
+     reset point:
+     - `Session::send` returns success for a send that is not transmitted, where the design before the ruling
+       returned `dispatch_aborted` and the base transmitted it;
+     - a direct initiator's `open()` in the arm S overlap returns success with the session `Disconnected`.
+
+     B-104-8 states both.
+   - **The receipt's own reply is complete before the member is written.**
+     - Route A: `on_inbound_active_logout_` awaits `inbound_logout_leaf_`, and with it the whole `store_then_emit`,
+       transmit included, before its `Disconnected` write (RR-3 step 1 before step 2).
+     - Route B: `acknowledge_peer_logout_` awaits the same leaf before `record_state_transition_(fsm_state::
+       Disconnected)`.
+     - Arms L and S owe no reply (RR-3 step 1).
 4. **The one exemption: fixpp's own Logout in a crossing (sub-ruling of W).**
    - **The crossing.** Phase 1 of `close(graceful)` has numbered our Logout and holds `logout_in_flight_`. A peer
-     Logout then reaches arm A in Active, whose reply leaf sends nothing (`if (logout_in_flight_ || fsm_state_ !=
-     fsm_state::Active)`), and arm A reaches its reset point.
-   - Without the exemption, our Logout is refused: by D-OUT-10 when it is still in its store call (the unit
-     lowered the next outbound number to 1), and by item 3 otherwise. No Logout would reach the wire. QuickFIX
-     writes ours before it handles the peer's (QFC and QFGo generate it on the session's own processing thread),
-     so QuickFIX's ending is exactly one Logout, ours.
-   - **The carrier.** One explicit parameter of `store_then_emit`, the exemption, which defaults to off.
-     - `run_logout_phase1` is its only caller that passes it.
-     - `store_then_emit` passes it on to `live_write_serialized_`.
-     - Re-derive with `git grep -n '<the exemption enumerator>' -- src include`: the hits are `run_logout_phase1`'s
-       call and the tests inside `store_then_emit` and `live_write_serialized_`. Any other hit is a change to this
-       item.
-     - A typed enumerator rather than a `bool`, so that every passing site names it. Known positive: the recipe
-       finds `run_logout_phase1`'s call.
+     Logout then reaches arm A, and arm A reaches its reset point without a reply. Two states:
+     - in Active, its reply leaf sends nothing (`if (logout_in_flight_ || fsm_state_ != fsm_state::Active)`);
+     - in LogonReceived, the arm sends no reply in any case.
+   - **Without the exemption**, our Logout is held back by D-OUT-10 or by item 3, and no Logout reaches the wire.
+     QuickFIX writes ours before it handles the peer's: QFC and QFGo generate it on the session's own processing
+     thread. So QuickFIX's ending is exactly one Logout, ours.
+   - **LogonReceived, classified from source.**
+     - `run_logout_phase1` runs when `close()`'s test `!close_escalated_ && (fsm_state_ == fsm_state::Active ||
+       fsm_state_ == fsm_state::LogonReceived)` holds.
+     - Arm A meets LogonReceived only after the acceptor's Logon arm has left with the state still LogonReceived:
+       its exit superseded by a `close()` (`logon_arm_superseded_(fsm_state::LogonReceived)`). While the arm runs it
+       is the one pump frame (INV-P). That `close()` can be a `close(graceful)` whose phase 1 then numbers its
+       Logout. An in-sequence peer Logout delivered while that Logout is in its store call reaches arm A in
+       LogonReceived: on_inbound_active_'s entry admits LogonReceived, and nothing there refuses on `closing`.
+     - So the crossing has an input in LogonReceived.
+     - The exemption gives it the base's ending: the base runs no unit at the receipt, so our Logout is transmitted.
+       Here it is transmitted at its pre-reset number. The superseded arm's reply Logon was stored and not
+       transmitted, as on the base.
+     - QuickFIX has no counterpart: it writes its Logon reply inside `nextLogon`, so it has no LogonReceived window.
+     - The exemption handles this route as it handles Active.
+   - **The carrier.** A private scoped enumeration, `wire_reset_exemption` with values `none` and
+     `crossing_logout`, as one explicit parameter of `store_then_emit` and of `live_write_serialized_`, defaulted to
+     `none`.
+     - **The census, by category** (re-derive with `git grep -n 'crossing_logout' -- src include`):
+       - the declaration;
+       - **one origin**, `run_logout_phase1`'s call;
+       - the pass-through from `store_then_emit` to `live_write_serialized_`;
+       - the comparisons: in `store_then_emit`, D-OUT-10's lift and the sink-site test; in `live_write_serialized_`,
+         the test after the grant.
+     - A second origin is a STOP finding. `transmit_async` takes no exemption, and phase 1's Logout never passes
+       through it.
+     - Known positive: the recipe finds `run_logout_phase1`'s call.
    - **What it exempts.**
-     - Item 3's test, at all three sites.
-     - D-OUT-10's transmit refusal, but only while `wire_closed_by_reset_` is set: only then was the lowering a
-       reset point's unit. Without the member, D-OUT-10 refuses as before.
+     - Item 3's test, at the two sites the carrier reaches: `live_write_serialized_` and `store_then_emit`'s sink.
+       `transmit_async` carries none.
+     - D-OUT-10's ending, but only while `wire_closed_by_reset_` is set. The reason is not that a set member proves
+       the lowering came from the unit: a take-back before the unit is overwritten by it. The reason:
+       - once the member is set, the manager is frozen and item 3 holds back every other frame, so no frame of the
+         old numbering can follow ours;
+       - a frame that took our number before the unit (by a take-back) has left the next outbound number above ours.
+         D-OUT-10 would then not have refused ours either.
+     - Without the member, D-OUT-10 refuses ours as before (`dispatch_aborted`).
      - Nothing else: not RR-4's store-call boundary, which the Logout passed before `reached`, and not RR-5.
-   - **What else can lower the outbound manager while phase 1's Logout is in its store call** (read from source;
-     re-derive with `git grep -n -E 'seqnum_mgr_\.(take_back_outbound|hydrate|reset_to_one|set_next_outbound)\(|reset_seqnums_to_one_durable\(|run_reset_unit_\(' -- src/session/session.cpp`
-     and read each hit against "phase 1 has numbered its Logout, and the state is Active or LogonReceived"):
-     - another frame's persistent-store reconcile (`(void)co_await seqnum_mgr_.set_next_outbound(*dk)` in
-       `store_then_emit`), on any concurrent emitter;
-     - another frame's cancelled store call (`seqnum_mgr_.take_back_outbound(stamped_seq)`), which lowers to that
-       frame's number when ours is above it.
+   - **What else can lower the outbound manager while phase 1's Logout is in its store call.** Re-derive with
+     `git grep -n -E 'seqnum_mgr_\.(take_back_outbound|hydrate|reset_to_one|set_next_outbound)\(|reset_seqnums_to_one_durable\(|run_reset_unit_\(' -- src/session/session.cpp`,
+     and read each hit against "phase 1 has numbered its Logout, and the state is Active or LogonReceived".
+     - Two can:
+       - another frame's persistent-store reconcile (`(void)co_await seqnum_mgr_.set_next_outbound(*dk)` in
+         `store_then_emit`), on any concurrent emitter;
+       - another frame's cancelled store call (`seqnum_mgr_.take_back_outbound(stamped_seq)`), which lowers to that
+         frame's number when ours is above it.
 
-     Neither sets `wire_closed_by_reset_`, so D-OUT-10 refuses our Logout there as before. The others cannot meet
-     it:
-     - the reset-before-Logon in `emit_initiator_logon_`, and the 141=Y unit in `on_inbound_logon_sent_`, run in
-       LogonSent, where phase 1 does not run;
-     - `on_inbound_not_connected_`'s `reset_on_logon` reset and its `ensure_hydrated_` run before its
-       `record_state_transition_(fsm_state::LogonReceived)`;
-     - its 141=Y unit follows that write with no suspension between, and the unit's manager set is inline (research
-       R1), so the lowering precedes any phase-1 number;
-     - `close()`'s teardown reset runs after `run_logout_phase1() || …` has completed: at the pinned asio,
-       `operator||` awaits `make_parallel_group(…)`, whose completion carries "all operations' completion handler
-       arguments";
-     - the bound cannot acknowledge once `close()` has claimed it at its first commit, which precedes phase 1 (O22);
-     - arm L follows phase 1's `LogoutSent`, which is written after its emit returns;
-     - arm S runs in LogonSent;
-     - the close-out runs no unit.
-
-     So arm A's crossing unit is the only reset point that can meet our Logout.
+       When no crossing unit follows, neither sets `wire_closed_by_reset_`, so D-OUT-10 refuses our Logout as
+       before.
+     - The others cannot meet it:
+       - the reset-before-Logon in `emit_initiator_logon_`, and the 141=Y unit in `on_inbound_logon_sent_`, run in
+         LogonSent, where phase 1 does not run;
+       - `on_inbound_not_connected_`'s `reset_on_logon` reset and its `ensure_hydrated_` run before its
+         `record_state_transition_(fsm_state::LogonReceived)`;
+       - its 141=Y unit follows that write with no suspension between, and the unit's manager set is inline
+         (research R1), so the lowering precedes any phase-1 number;
+       - `close()`'s teardown reset runs after `run_logout_phase1() || …` has completed. At the pinned asio,
+         `operator||` awaits `make_parallel_group(…)`, whose completion carries "all operations' completion handler
+         arguments";
+       - the bound cannot acknowledge once `close()` has claimed it at its first commit, which precedes phase 1
+         (O22);
+       - arm L follows phase 1's `LogoutSent`, which is written after its emit returns;
+       - arm S runs in LogonSent;
+       - the close-out runs no unit.
+     - So arm A's crossing unit, in Active or LogonReceived, is the only reset point that can meet our Logout.
    - **The store side is unchanged.**
      - Our Logout's number is assigned in phase 1's turn and kept. Its store call was issued before `reached`, and
        it runs to its end (RR-2 item 5).
@@ -633,25 +714,38 @@ never processed.
        before the later `reset_to` (research R1's store-order condition, T009). The unit therefore clears it, and
        the store ends `(1, 1)`.
      - Only the transmit changes: our Logout goes out at its pre-reset number.
-   - **Phase 1 afterwards.** `store_then_emit` returns success. Phase 1's existing test ("an inbound ending recorded
-     Disconnected while this Logout was in its store call, so it was that ending's reply: no LogoutSent and no wait
-     for one") returns. The state history keeps one `Disconnected` entry, arm A's.
+   - **Phase 1 afterwards.** `store_then_emit` returns success, and phase 1's existing test returns ("an inbound
+     ending recorded Disconnected while this Logout was in its store call, so it was that ending's reply: no
+     LogoutSent and no wait for one"). The state history keeps one `Disconnected` entry, arm A's.
    - **Wire ending.** Exactly one 35=5, ours, then nothing more on that connection. Any other frame in flight (a
      Heartbeat, an application send) is held back by item 3, because arm A set the member.
-5. **The close-out is exempt (W-2).** It runs no unit and does not write the member. O13-r's endings, the sink's
-   transmit included (B-563-5), are unchanged. On a live transport, `close()`'s own `close_async()` and
-   `write_gate_.cancel_and_drain()` still decide.
-6. **Classified from source.**
-   - Arm S against a direct caller's overlap with `open()`'s Logon suppresses nothing owed:
-     - if the peer's Logout arrives during `ensure_hydrated_`'s reads, `hydrate` is refused and no Logon is built;
-     - a Logon still in its store call is refused by D-OUT-10;
-     - no second writer holds the gate before Active, so there is no C2;
-     - a Logon whose write is already submitted is past item 3's test and completes.
-   - The peer's Logout before our Logon is on the wire is an order QuickFIX cannot produce: it writes its Logon
-     before it reads.
-7. **Cost.** One byte test per write, at the transmit. The exemption is a parameter compare on the same path.
-8. **Cells.** R-5f (a pump frame's Reject queued behind the bound's reply), R-5g (the crossing), R-5h (a liveness
-   Heartbeat queued behind the bound's reply), and R-5e's close-out sink assertion (research D10).
+5. **The close-out is exempt (W-2).** It runs no unit and does not write the member, so O13-r's endings are
+   unchanged.
+   - The sink's transmit (B-563-5) holds without `reset_on_disconnect`, that is, when no teardown reset has lowered
+     the manager before the held call returns. Under rod, the teardown's `reset_to_one` precedes its `store_->reset()`,
+     so D-OUT-10 refuses the reply with the member clear (`dispatch_aborted`).
+   - On a live transport, `close()`'s own `close_async()` and `write_gate_.cancel_and_drain()` still decide.
+6. **Classified from source.** Arm S against a direct caller's overlap with `open()`'s Logon suppresses nothing that
+   is owed:
+   - if the peer's Logout arrives during `ensure_hydrated_`'s reads, `hydrate` is refused and no Logon is built;
+   - a Logon still in its store call ends at D-OUT-10 with the member set: item 3's ending, so `open()` returns
+     success with the session `Disconnected` (item 3's table; owner-visible);
+   - no second writer holds the gate before Active, so there is no C2;
+   - a Logon whose write is already submitted is past item 3's test and completes.
+
+   The peer's Logout arriving before our Logon is on the wire is an order QuickFIX cannot produce: it writes its
+   Logon before it reads.
+7. **Cost.** One byte test per write, at the transmit, and one at D-OUT-10's refusal branch. The exemption is a
+   parameter compare on the same path.
+8. **Cells.**
+   - R-5f: a pump frame's Reject queued behind the bound's reply.
+   - R-5g: the crossing.
+   - R-5h: a liveness Heartbeat, in C2 and C1, and C1 at arm L, with one ending.
+   - R-5j: arm S against a direct caller's `open()` overlap, and `open()`'s ending.
+   - R-1l `HeldInReplyStore`'s sink twin: the close-out exemption.
+   - R-5i: the two conditional step-3 writes (RR-5 item 6).
+
+   All are in research D10.
 
 **RT-4 (store failure at the reset).** A manager or store failure of the receipt unit is logged. The arm's ending
 is unchanged (Disconnected, and the return value it has without the failure). There is no retry under rol; under
@@ -685,7 +779,7 @@ A cell id is given where the row can be driven; its mutant is in research D10.
 | O10 | reply write fails | stored, not on the wire; reset | n/a | as A | n/a | reset (QFC `send` returns false; `nextLogout` continues) | R-1n |
 | O11 | inbound persist fails | Disconnected, the error; no reset | n/a | n/a | n/a | no reset (QFC, QFJ: `incrNextTargetMsgSeqNum` throws `IOException`) | R-1n |
 | O12 | `close()` during, before the reset point, with a clock | `close()` waits; the arm reaches its reset point and resets once, or exits and does not (with no store, the unit sets no in-flight flag); `close()` returns as soon as the marker has left `pending` with no unit in flight, not at `logon_timeout_ms`, and emits no `close_reset_wait_expired` | no input: L does not suspend before its reset point (research R1) | immediate acknowledgement: as A. The bound, not yet `acking`: claimed at `close()`'s first commit, no reset (O18). Already `acking`: `close()`'s bound join waits for it, so it reaches its reset point and its unit ends before the wait begins (RR-2 item 4), one reset | no input: S does not suspend before its reset point; a frame that arrives after `close()` began meets `logon_arm_superseded_` and acts on nothing, no reset | n/a (QuickFIX serialises receipt and disconnect) | R-1k, R-1z (A beside a claimed bound), R-1f, R-1w |
-| O13-r | `close()` during, before the reset point, wait expired or no clock, the arm held in its reply's store call | no reset under rol (the receipt did not reach its reset point); the marker is closed out to `reached`. The held call completes after `close()` returned (RR-2 item 5): the reply is stored. On a live transport it is not transmitted, because `close()` has run `close_async()` and `write_gate_.cancel_and_drain()`, so the write fails with `dispatch_aborted`; a config-time `transport_send` sink transmits it (as `B-563-5`). The persist is refused (RR-4), so the store's inbound stays N while the manager's is N+1 (`check_inbound`, before the arm). No unit. The event and `fromAdmin` run after `close()` returned (fixpp#597); a Reject `fromAdmin` draws is refused at `assign_outbound`, before its `toAdmin` (RR-5; the close-out froze the manager) | no input (as O12) | the bound: no input, because `close()`'s bound join precedes the wait, so it never closes out a bound's receipt (RR-2 item 4). Immediate acknowledgement (no clock is one of its conditions): as A, without the persist and `fromAdmin` (B has neither) | no input (as O12) | n/a | R-1l (`HeldInReplyStore`), R-5e |
+| O13-r | `close()` during, before the reset point, wait expired or no clock, the arm held in its reply's store call | no reset under rol (the receipt did not reach its reset point); the marker is closed out to `reached`. The held call completes after `close()` returned (RR-2 item 5): the reply is stored. On a live transport it is not transmitted, because `close()` has run `close_async()` and `write_gate_.cancel_and_drain()`, so the write fails with `dispatch_aborted`; without `reset_on_disconnect` a config-time `transport_send` sink transmits it (as `B-563-5`): no teardown reset has lowered the manager before the held call returns, and the close-out does not set `wire_closed_by_reset_` (RR-6 item 5). Under rod the teardown's `reset_to_one` precedes its `store_->reset()`, so D-OUT-10 refuses it. The persist is refused (RR-4), so the store's inbound stays N while the manager's is N+1 (`check_inbound`, before the arm). No unit. The event and `fromAdmin` run after `close()` returned (fixpp#597); a Reject `fromAdmin` draws is refused at `assign_outbound`, before its `toAdmin` (RR-5; the close-out froze the manager) | no input (as O12) | the bound: no input, because `close()`'s bound join precedes the wait, so it never closes out a bound's receipt (RR-2 item 4). Immediate acknowledgement (no clock is one of its conditions): as A, without the persist and `fromAdmin` (B has neither) | no input (as O12) | n/a | R-1l (`HeldInReplyStore`), R-5e |
 | O13-p | as O13-r, the arm held in its inbound persist | no reset under rol; the marker is closed out to `reached`; the held persist completes after `close()` returned and lands (store inbound N+1); no unit (fixpp#597, as O13-r) | no input (as O12) | n/a (B has no persist) | no input (as O12) | n/a | R-1l (`HeldInPersist`) |
 | O13a | `reached`, unit not started, at the teardown | the teardown resets once; no input by construction (RR-2 item 3) | as A | as A | as A | n/a | R-1u (its mutant opens the window) |
 | O14 | `close()` during the unit | `close()` waits for the unit (clock); without a clock it returns while the unit's store operation completes on the strand (093's no-clock case, inside fixpp#597) | as A | immediate acknowledgement: as A. The bound: `close()`'s bound join waits for it, so for its unit, with or without a clock | as A | n/a | R-1j |
@@ -698,7 +792,7 @@ A cell id is given where the row can be driven; its mutant is in research D10.
 | O20 | Logout in NotConnected | — | — | — | — | no reset (QFC `validLogonState` false) | R-1o |
 | O21 | a writer in flight at the reset point writes the manager after it (RR-5): a route-B pump frame suspended in a store call, or `Session::send`, the liveness loop or phase 1 suspended in `store_then_emit`'s failure reconcile, on any route | an application send or liveness frame in flight: its reconcile's `set_next_outbound` refused; the send returns the store's error, nothing transmitted; manager `(1, 1)` | as A, phase 1's own reconcile included | the pump frame in flight: its GapFill's `set_next_inbound` refused (the frame returns success, nothing emitted); its Reject's `assign_outbound` refused before `toAdmin` (nothing numbered, stored or sent); its reconcile refused; a too-high ResendRequest's own ResendRequest refused at `inbound_resend_request_leaf_`'s entry test, before its `toAdmin` and number (RR-5 item 6). Manager and store `(1, 1)`; one `Disconnected` entry | no pump writer: S is the only pump frame and no bound exists before Active. A direct caller's `open()` Logon still in its store call: its reconcile refused | n/a: QuickFIX handles each frame to its end, a too-high Logout included at its receipt (DQ-12; QFC and QFJ `nextLogout` `verify(logout, false, false)`, QFGo `handleLogout` `verifySelect(msg, false, false, true)`), and its reset discards every earlier increment. On its processing thread no writer of its own is in flight at the reset. QFC and QFJ user-thread sends, and QFJ's timer thread, are not serialised with `nextLogout` and can land between the reply and `disconnect()`. fixpp's suppression (RR-6) therefore falls within QuickFIX's envelope. No departure: a frame that 103's bound lets in after a too-high Logout is never processed by QuickFIX, and under RR-6 nothing of it reaches fixpp's wire after the reset point (research D11) | R-5a, R-5b, R-5c, R-5d, R-5f, R-5h |
 | O22 | `close(graceful)` started after the reset point (sub-ruling 4) | phase 1 does not run: `close()`'s phase-1 test needs Active or LogonReceived, and the state is `Disconnected` from RR-3 step 2. No Logout, no `toAdmin`, no `assign_outbound`. A `close(graceful)` that passed that test before the receipt: phase 1 waiting at the replay gate is woken by the Disconnected edge and takes its "not sent" exit before its stamp, its `toAdmin` and its number; otherwise phase 1 runs from the test to its `assign_outbound` in one strand turn, before the receipt (research D11, "Phase 1"). Either way it never meets a frozen manager | phase 1 already sent its Logout (that is what LogoutSent means) | as A (`close()` claims the bound at its first commit, before phase 1) | as A (phase 1 needs Active or LogonReceived) | n/a | read from source, no cell. R-3, when T011 reads it drivable, runs this input: `close(graceful)` held in its flush while arm A in LogonReceived reaches its reset point |
-| O23 | crossing: phase 1 of `close(graceful)` has numbered its Logout and holds `logout_in_flight_` when a peer Logout reaches arm A in Active, rol set (RR-6 item 4) | A's reply leaf sends nothing; A records `Disconnected` and resets at its reset point, which also sets `wire_closed_by_reset_`. Our Logout, exempt from D-OUT-10 and from RR-6's test, is transmitted at its pre-reset number. Wire: exactly one 35=5, ours, and nothing else after the reset point. Store `(1, 1)`; one `reset_to(1, 1)`; one `Disconnected` entry; phase 1 returns by its "no LogoutSent" test. Rol off: our Logout as on the base | no input (phase 1 writes LogoutSent after its emit) | no input (`close()` claims the bound before phase 1) | no input (phase 1 needs Active or LogonReceived) | one Logout, ours: QFC and QFGo generate it on the session's own processing thread, before the peer's is handled, which `nextLogout` then takes as "Received logout response" | R-5g |
+| O23 | crossing: phase 1 of `close(graceful)` has numbered its Logout and holds `logout_in_flight_` when a peer Logout reaches arm A, in Active or in LogonReceived (after a Logon arm superseded by that `close()`), rol set (RR-6 item 4) | A sends no reply (in Active its reply leaf refuses on `logout_in_flight_`; in LogonReceived no reply is owed); A records `Disconnected` and resets at its reset point, which also sets `wire_closed_by_reset_`. Our Logout, exempt from D-OUT-10 and from RR-6's test, is transmitted at its pre-reset number. Wire: exactly one 35=5, ours, and nothing else after the reset point. Store `(1, 1)`; one `reset_to(1, 1)`; one `Disconnected` entry; phase 1 returns by its "no LogoutSent" test. Rol off: our Logout as on the base | no input (phase 1 writes LogoutSent after its emit) | no input (`close()` claims the bound before phase 1) | no input (phase 1 needs Active or LogonReceived) | one Logout, ours: QFC and QFGo generate it on the session's own processing thread, before the peer's is handled, which `nextLogout` then takes as "Received logout response" | R-5g |
 
 ## Part 2 — endings per arm and input
 

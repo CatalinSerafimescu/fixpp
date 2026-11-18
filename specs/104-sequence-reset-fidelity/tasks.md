@@ -222,7 +222,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - `…CloseDuringReplyStore_OneResetByTheArm` runs with A in Active and HookedStore holding the reply's `store`, and `close()` is started during the hold. It asserts that `close()` does not return before the release, then exactly one `reset_to` and no `reset`, finished before `close()` returns.
   - `…CloseWaitsForLogonArmUnit_NoKnob` sets no knob and feeds the initiator a 141=Y acknowledgement while `reset_to` is held. `close()` does not return before the release.
 - [ ] T031 [US1] R-1l, R-1u and R-1x in `tests/session/test_104_reset_on_logout.cpp` (contract O13-r, O13-p, O13a, O15).
-  - `…CloseWhilePending_NoClock_NoReset_{HeldInReplyStore,HeldInPersist}` names each number on its own: store inbound, manager inbound and the reply at N_out. It has a `transport_send` twin, where the reply is transmitted (B-563-5). The forced hit is R-1k's input, the same hold with a clock.
+  - `…CloseWhilePending_NoClock_NoReset_{HeldInReplyStore,HeldInPersist}` names each number on its own: store inbound, manager inbound and the reply at N_out. It has a `transport_send` twin, where the reply is transmitted (B-563-5). That twin is also the witness of the close-out's exemption from ruling W (contract RR-6 item 5; mutant in T061): rol only, no rod, so no teardown reset lowers the manager before the held call returns. The forced hit is R-1k's input, the same hold with a clock.
   - `…CloseInsideOnLogout_ResetOnceByTheArm` asserts one `reset_to` and no `reset` before `close()` returns, with the hook seeing `Disconnected`.
   - `…TerminalEmissionAtResetPoint_ResetOnce` uses a direct `Session`. The cell `co_spawn`s `on_inbound_frame` on its own cancellation slot and emits `terminal` from inside the `onLogout` that RR-3 step 2 fires. It asserts one `reset_to(1, 1)`, numbers `(1, 1)` and no `reset`. Its "marker `reached`" assertion is added at T040, with the accessor; its base RED comes from its reset-count assertions.
 - [ ] T032 [US1] R-1w in `tests/session/test_104_reset_on_logout.cpp`: `…CloseNotHeldWhenReceiptEndsWithoutUnit_{FromAdminThrow,Storeless,StuckPending}`. `Storeless` holds the reply's transport write with `BlockingWriteTransport` (`tests/support/blocking_write_transport.hpp`), through its `blocking_write_state`'s `arm_block()` / `release()`. `StuckPending` is the forced hit of the expiry event: the hold is never released and the clock is advanced to the bound, giving one `close_reset_wait_expired`. It is also the forced hit of R-1f(1)'s, R-1v's and R-1t's "no `close_reset_wait_expired`" assertions.
@@ -253,7 +253,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 
   **Budgets.** Every pump from the start of stop to the release (the order pump, the settle window and the pump that must not see stop complete) has a budget derived from HookedStore's `kHoldBound` (`tests/support/hooked_store.hpp`, cited by symbol), so that their sum stays below it; the cell states the ratio. `kHoldBound` is real time (`std::chrono::steady_clock`), so each budget is a real-time bound (`run_for`, a slice loop); the one mock-clock advance past `logon_timeout_ms` takes no real time and is not part of the sum. After the release, assert that `StoreLog::hold_timed_out` is false. On every exit path the cell releases the hold, pumps stop to completion, and drops its session handle before the Rig is destroyed.
 - [ ] T037 [US1] R-2 in `tests/session/test_104_reset_on_logout.cpp`: `…BothKnobs_PeerAnswers_TwoResets_EndsOneOne` (D2, contract W7). HookedStore sees `reset_to` in L's arm with the transport open, then `reset` in the teardown; the numbers are `(1, 1)`.
-- [ ] T038 [US1] R-5a, R-5b, R-5c, R-5e, R-5f, R-5g and R-5h in `tests/session/test_104_reset_on_logout.cpp` (contract RR-5, RR-6, O21, O23, O13-r; research D10's rows).
+- [ ] T038 [US1] R-5a, R-5b, R-5c, R-5e, R-5f, R-5g, R-5h, R-5i and R-5j in `tests/session/test_104_reset_on_logout.cpp` (contract RR-5, RR-6, O21, O23, O13-r; research D10's rows).
   - **R-5a**, `…InFlightGapFillAcrossBoundUnit_ManagerStaysAtOne_{OneDelivery,Deadline}`.
     - Route B, rol only, a mock clock. HookedStore holds the GapFill's inbound persist through `Hooks::on_inbound_persist_call` (T015).
     - `OneDelivery` uses R-1z's cell-local coroutine, two frames back to back.
@@ -287,16 +287,29 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
     - Asserts: exactly one 35=5 on the wire, ours, at its pre-reset MsgSeqNum; no other frame whose write began after the reset point; one `reset_to(1, 1)` with `Disconnected`; store `(1, 1)`; one `Disconnected` entry; `close()` returns.
     - Reach pins: no 35=5 before the release; the Logout's store completion before `reset_to`. A pin that fails at the head means the input is re-derived.
     - Forced-hit arm: rol off, with our Logout sent as on the base.
-  - **R-5h**, `…LivenessHeartbeatQueuedBehindBoundReply_NotWritten` (contract RR-6 item 1).
-    - Route B as R-5f's setup. The bound's reply write is held. The mock clock passes HeartBtInt, so the liveness loop's Heartbeat is stored and waits on `write_gate_`. Then the reply's write is released.
-    - Asserts: no 35=0 written after the reply; the Heartbeat's store completed before `reset_to`; manager and store `(1, 1)`; one `Disconnected` entry.
-    - Reach pin: the Heartbeat's store completion falls between the reply's and the unit's `reset_to`. A pin that fails at the head means the input is re-derived.
+  - **R-5h**, `…LivenessHeartbeatAcrossBoundUnit_OneEnding_{GateWait,StoreHeld}` (contract RR-6 items 1 and 3).
+    - `GateWait` (C2): route B as R-5f's setup. The bound's reply write is held. The mock clock passes HeartBtInt, so the liveness loop's Heartbeat is stored and waits on `write_gate_`. Then the reply's write is released.
+    - `StoreHeld` (C1): HookedStore holds the Heartbeat's `store` across the bound's deadline acknowledgement and unit, then releases it. It works on the config-time sink.
+    - Asserts, both arms (one ending): no 35=0 written after the reply; the Heartbeat's store completed before `reset_to`; manager and store `(1, 1)`; exactly one `Disconnected` entry; the liveness loop has returned with no further write.
+    - Reach pins: `GateWait`: the Heartbeat's store completion falls between the reply's and the unit's `reset_to`. `StoreHeld`: it falls after the unit's manager set. A pin that fails at the head means the input is re-derived.
+    - `StoreHeldAtArmL` (C1 at arm L): A in Active, rol only. The liveness loop's Heartbeat has its `store` held. `close(graceful)`'s phase 1 sends its Logout, records `LogoutSent`, and the peer's Logout reaches arm L's reset point. Then the Heartbeat's `store` is released. Same asserts, with the one `Disconnected` entry being arm L's.
     - Forced-hit arm: rol off, with the Heartbeat written after the reply.
-  - **R-5e** also asserts that its config-time sink transmits the reply Logout after the release (O13-r; the close-out is exempt from RR-6).
+  - **R-5j**, `…DirectOpenLogonAcrossLogonSentReset_OpenReturnsSuccess` (contract RR-6 items 3 and 6; the owner-visible `open()` ending).
+    - A direct initiator, rol only. HookedStore holds `open()`'s Logon `store`. A concurrent `on_inbound_frame` delivers a peer Logout to the LogonSent arm, which reaches arm S's reset point. Then the hold is released.
+    - Asserts: `open()` returns success; the state is `Disconnected` with one `Disconnected` entry; no 35=A on the wire; one `reset_to(1, 1)`.
+    - Reach pin: the Logon's store completion precedes the unit's `reset_to`. A pin that fails at the head means the input is re-derived.
+    - Forced-hit arm: rol off, with the Logon transmitted and `open()` returning success, as on the base.
+  - **R-5i**, `…InFlightSendingTimeRejectAcrossBound_OneDisconnected_{SendingTime,ArmD}` × {`RolOn`, `RolOff`} (contract RR-5 item 6; T050's two step-3 writes).
+    - Route B with a mock clock, and a persistent store fixture.
+    - `RolOn`: hold the Reject's outbound `store` until the bound has recorded `Disconnected`. Do not hold the persist: across a reset point the Reject's `assign_outbound` would meet a frozen manager, and step 3 would not be reached.
+    - `RolOff`: hold the consume persist across the bound's deadline acknowledgement.
+    - Asserts, each arm: exactly one `Disconnected` entry, and the frame's result is success.
+    - Reach pin: the Reject's `toAdmin` ran once. A pin that fails at the head means the input is re-derived.
+    - RED on the base by assertion (two entries) in every arm.
   - **Pump budgets.** Every pump is budgeted from `kHoldBound`, with the ratio stated. Each cell releases its hold and drains on every exit path.
   - **RED.** Each cell's base RED is D1's absence (the base resets only at teardown, and `close()` neither waits nor closes out), not the freeze. Each is read at T039. The freeze's RED source is T061's mutants. No assertion here reads a symbol 104 adds: R-5d, which does, is T049's.
 - [ ] T039 [US1] RED reading of every US1 cell (T019, T020, T024 to T034, T036, T037, T038), per the Execution rules' "Base and RED", at `$T`'s head before T040.
-  - Record each cell's test count and its failing assertion. Each is RED by assertion, not abort, except R-1o's rol-off and NotConnected arms, T016's cell, and the forced-hit arms of T038's cells (R-5a's, R-5b's, R-5c's, R-5f's, R-5g's and R-5h's rol-off arms, and R-5e's no-`close()` arm), which are GREEN with their reasons. Each forced-hit arm is a pin: with no receipt reset, or no close-out, nothing is frozen, on the base or at the head (research D10's rows). R-1o's mTLS arm is RED by its authorisation-failed event assertion (research D10). R-3 is read when T011 recorded it drivable; otherwise the record cites T011.
+  - Record each cell's test count and its failing assertion. Each is RED by assertion, not abort, except R-1o's rol-off and NotConnected arms, T016's cell, and the forced-hit arms of T038's cells (R-5a's, R-5b's, R-5c's, R-5f's, R-5g's, R-5h's and R-5j's rol-off arms, and R-5e's no-`close()` arm). R-5i has no forced-hit arm: every arm is RED on the base by assertion, which are GREEN with their reasons. Each forced-hit arm is a pin: with no receipt reset, or no close-out, nothing is frozen, on the base or at the head (research D10's rows). R-1o's mTLS arm is RED by its authorisation-failed event assertion (research D10). R-3 is read when T011 recorded it drivable; otherwise the record cites T011.
   - `git diff --stat bf294f00 HEAD -- src include` lists only T018's and T035's files.
   - Re-run T021's selection once more: no assert fires.
 
@@ -364,20 +377,28 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - Each boundary is one byte test.
   - Mutants, run at T060: R-1r's two (delete the test in `store_then_emit`; delete it in `persist_inbound_advance_`), R-1l(3) (drop the `persist_inbound_advance_` test) and R-1h (no `none` at `install_reconnected_transport`).
   - **Ruling W, nothing transmitted after a reset point** (contract RR-6; data-model "`wire_closed_by_reset_`"; the T014 STOP). This needs T042's reset-point sites.
-    - The private `bool` `wire_closed_by_reset_`. Set it in each reset point's turn with `reached` (the pump frame's `pending` → `reached`, crossing included; the bound's `none` → `reached`). Clear it in `install_reconnected_transport`'s block that sets `none`. `close()`'s close-out does not write it.
+    - The private member, declared `bool wire_closed_by_reset_ = false;`.
+      - Set it in each reset point's turn, in the same statement block as the marker's `reached`, through one helper that makes both writes (the pump frame's `pending` → `reached`, crossing included; the bound's `none` → `reached`).
+      - Clear it in `install_reconnected_transport`'s block that sets `none`.
+      - `close()`'s close-out does not write it.
     - The test: in `live_write_serialized_`, after `guard = std::move(*lock_r);` and before `live->async_write(frame)`; in `store_then_emit`, before `transport_send_(frame)`; in `replay_outbound_range_`'s `transmit_async`, before `transport_send_(f)` (its live branch is covered by `live_write_serialized_`).
     - On a hit, success with no transmit. `live_write_serialized_` gets a distinct return for a hit, so that `store_then_emit` returns before `last_outbound_steady_`, as its `transmit=false` exit does. `transmit_async` treats a hit as success.
-    - The exemption (RR-6 item 4): one typed enumerator parameter on `store_then_emit` and `live_write_serialized_`, defaulted to none, passed only by `run_logout_phase1`.
-      - It lifts the test.
+    - **D-OUT-10, one ending** (RR-6 item 3; loop 5's N-1 ruling).
+      - When its test fires while `wire_closed_by_reset_` is set and the call carries no exemption, it returns success with no transmit, before `last_outbound_steady_`, as a hit does.
+      - While the member is clear it keeps `dispatch_aborted`.
+      - Read each `store_then_emit` caller against RR-6 item 3's table, and record any difference.
+    - The exemption (RR-6 item 4): the private scoped enumeration `wire_reset_exemption` (`none`, `crossing_logout`), one parameter on `store_then_emit` and `live_write_serialized_`, defaulted to `none`.
+      - `run_logout_phase1` is its one origin.
+      - It lifts the test at the two sites the carrier reaches. `transmit_async` takes none.
       - It lifts D-OUT-10's refusal only while `wire_closed_by_reset_` is set.
       - Every other call site is unchanged.
     - Comments name 104, RR-6 and the class, state the condition, and give the recipes:
-      - the exemption's (`git grep -n '<the enumerator>' -- src include`: `run_logout_phase1`'s call plus the two tests);
+      - the exemption's, `git grep -n 'crossing_logout' -- src include`, read by category: the declaration; the one origin; the pass-through; the comparisons (D-OUT-10's lift and the sink test in `store_then_emit`, the grant test in `live_write_serialized_`);
       - the lowering writers' (RR-6 item 4).
 
       No count.
-    - **The exemption's reading** (record it in the evidence file). Run the recipe and read each hit. Its known positive: the recipe finds `run_logout_phase1`'s call. Re-run RR-6 item 4's lowering-writers recipe and read each hit against "phase 1 has numbered its Logout". Only arm A's crossing unit sets the member among them. A new lowering writer that can meet phase 1's Logout goes to the orchestrator.
-    - Cells R-5f, R-5g, R-5h and R-5e's sink assertion (T038). Mutants in T061.
+    - **The exemption's reading** (record it in the evidence file). Run the recipe and classify each hit by RR-6 item 4's categories. A second origin is a STOP finding. Its known positive: the recipe finds `run_logout_phase1`'s call. Re-run RR-6 item 4's lowering-writers recipe and read each hit against "phase 1 has numbered its Logout". Only arm A's crossing unit sets the member among them. A new lowering writer that can meet phase 1's Logout goes to the orchestrator.
+    - Cells R-5f, R-5g, R-5h, R-5j (T038) and R-1l's sink twin (T031). Mutants in T061.
 - [ ] T049 [US1] The manager freeze, in `include/fixpp/session/seqnum_manager.hpp` and `src/session/seqnum_manager.cpp` (contract RR-5 items 3 to 5; data-model "`SeqnumManager`: the freeze"; research D11).
   - **The interface.** The private flag. `SeqnumManager::freeze_key`, whose constructor is private, with `Session` its friend. `freeze(freeze_key)` and `thaw(freeze_key)`, and the query `[[nodiscard]] bool frozen(freeze_key) const noexcept`, which `Session`'s Debug asserts call (T050) and no production branch tests. `frozen` is inline and `noexcept`, and takes no lock.
   - **The freeze test**, in each refused mutator:
@@ -400,7 +421,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - **`inbound_resend_request_leaf_`'s entry test** (contract RR-5 item 6, "The leaf entry test"; orchestrator ruling 2026-11-18, the T014 STOP). Its first statement after `FIXPP_INBOUND_SPLIT_ENTRY`, before the number peek and the build: when the receipt marker is `reached`, return success with no write. It reads the marker, not `frozen(freeze_key)` and not the state. Its comment names 104, RR-5 item 6 and `inbound_logout_leaf_`'s pattern (B41, D-OUT-2), and states the condition ("nothing suspends from this test to `assign_outbound`"), with no count. Any other leaf that the enumeration lists gets the same test. Cell R-5f (T038); mutants in T061.
     - **The leaf entry test's reading** (replaces T013's for this site). Once the test has landed, read in source that it is the leaf's first statement after its split entry, before its peek and build; that it reads the marker for `reached` (not `frozen`, not the state); and that nothing suspends from it to `assign_outbound`. Re-run RR-5 item 6's enumeration recipe and record its result: the leaves found, each one's test, and that `inbound_heartbeat_reply_leaf_` and `inbound_business_reject_leaf_` still have no suspension from their frame's start to their number. A leaf found reachable after a suspension with no test of its own goes to the orchestrator.
   - **The conditional `Disconnected` writes** that T013 recorded (RR-5 item 6), `apply_inbound_sequence_reset`'s `set_next_inbound` failure branch included (reached after `close()`'s `seqnum_mgr_.drain()`). Each takes the B41 rule's state test, and its comment names RR-5 item 6 and D-OUT-2 and states the condition. Also on the list (orchestrator ruling 2026-11-18, the T014 STOP):
-    - `on_inbound_active_sending_time_reject_`'s step 3. A frame in flight across a route-B reset point reaches it with no refused call: its `inbound_logout_leaf_` returns success on `Disconnected`. The enumeration of that shape found `on_inbound_active_poss_dup_`'s Arm D step 3 as well (RR-5 item 6, "A frame in flight across a route-B reset point"). It takes the same test. No cell drives either one, as for the other conditional writes except the one T061 names. The state-history reading (T013) found no assertion that relies on a duplicate entry.
+    - `on_inbound_active_sending_time_reject_`'s step 3. A frame in flight across a route-B reset point reaches it with no refused call: its `inbound_logout_leaf_` returns success on `Disconnected`. The enumeration of that shape found `on_inbound_active_poss_dup_`'s Arm D step 3 as well (RR-5 item 6, "A frame in flight across a route-B reset point"). It takes the same test. Both are reachable on the base, rol on or off, with no refused call. So each has a cell, R-5i (T038), RED on the base, and its own mutant in T061. The state-history reading (T013) found no existing assertion that relies on a duplicate entry.
     - `inbound_resend_request_leaf_`'s own `assign_outbound` failure write. T011's table did not mark it "→ T050", but it is in item 6's scope: with the entry test the freeze cannot reach it, while a manager drained by `close()` still can.
   - **Re-pins.** Re-pin each state-history assertion that T013 recorded. Run its entry by the Execution rules' selection form.
 - [ ] T051 [US1] The remaining comments that state the old rule (FR-006, research D8 "Code comments"). Each names 104 and states a condition and a recipe:
@@ -455,7 +476,17 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
     - delete the test in `live_write_serialized_`: R-5f (a 35=3 written after the reply) and R-5h (a 35=0 after the reply);
     - drop the exemption from `run_logout_phase1`'s call: R-5g, both arms (zero 35=5);
     - pass the exemption from `run_liveness_loop`'s Heartbeat call as well: R-5h (a 35=0 after the reply), which pins one carrier;
-    - set `wire_closed_by_reset_` at `close()`'s close-out: R-5e's sink assertion (no reply transmitted);
+    - set `wire_closed_by_reset_` at `close()`'s close-out: R-1l `HeldInReplyStore`'s `transport_send` twin (no reply transmitted);
+    - restore `dispatch_aborted` at D-OUT-10 while the member is set: R-5h `StoreHeld` (a second `Disconnected` entry, the loop's `if (!emit_r)` write);
+    - the member's writes, each with its witness:
+      - drop the clear in `install_reconnected_transport`: R-1h (the reconnect Logon meets the test on the new connection and is not written);
+      - initialise the member to `true`: every direct-`Session` cell that writes before a reset point, R-1h's first Logon among them (read the first failing assertion);
+      - drop the set at arm A's reset point: R-5g `StoreHeld` (D-OUT-10 refuses our Logout with the member clear: zero 35=5). `GateWait` stays GREEN under it;
+      - drop the set at the bound's reset point: R-5f's third mutant's assertion and R-5h `GateWait` (a frame written after the reply);
+      - drop the set at arm L: R-5h `StoreHeldAtArmL`. With the member clear, D-OUT-10 ends the held Heartbeat `dispatch_aborted`, and the loop writes a second `Disconnected`. Under in-order stores L meets no frame past D-OUT-10, but a frame still in its store call (C1) is observable through D-OUT-10's member-dependent ending. So the mutant is not equivalent;
+      - drop the set at arm S: R-5j (`open()` returns `dispatch_aborted`, with a second `Disconnected` entry). The same reason applies: the Logon still in its store call is C1;
+      - drop the conjunct "only while the member is set" from D-OUT-10's lift: record whether a take-back or a reconcile can lower the manager below our Logout's number while it is in its store call with no reset point. Consider MemoryStore with a caller-cancelled frame, and FileStore, where either lowering fails our Logout's own store (`store_seqnum_out_of_order`) first. Claim no cell if it is unreachable;
+    - restore the unconditional `Disconnected` write at `on_inbound_active_sending_time_reject_`'s step 3: R-5i's `SendingTime` arms; restore it at Arm D's step 3: R-5i's `ArmD` arms. Each mutant is RED in its own arms only;
     - delete the test before the sink's `transport_send_`, in `store_then_emit` and in `transmit_async`: an equivalent mutant, as read in source. On the sink nothing suspends between the store's return and the send. A frame still in its store call at the unit is refused by D-OUT-10, and the only frame past D-OUT-10 after the member is set is the exempt Logout. A frame with no store call starts only while Active, and no emitter starts after the reset point. Record that reading, and claim no assertion for either sink site, as for the post-set assert in an asserts-off build;
   - drop the thaw at `install_reconnected_transport`: R-1h. The reconnect Logon's number is refused, so the numbers do not advance;
   - restore the unconditional `Disconnected` write in the `assign_outbound` failure branch of the `emit_session_reject_` overload that `dispose_unparseable_` reaches (the one taking a reason, a RefTagID and a text): R-5c's one-entry assertion;
@@ -770,7 +801,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 | FR-016 (L-103-7 retired) | — | T099 | none (records) |
 | FR-017 (#266 basis) | dispatch run T114, T115 | T116 | known positive: DIAGNOSTIC ONLY on the dispatch run (T115) |
 | FR-018 (B&L rows; one departures list) | — (records; each B&L row's own witness is its FR's cell, and DQ-4's behaviour is FR-008's U-5) | T097, T098, T099, T104 (the departures copied from the spec's table) | none (records) |
-| FR-019 (the manager freeze: no writer but a reset writer changes a number after the reset point) | R-5a, R-5b, R-5c, R-5e, R-5f, R-5g, R-5h (T038); R-5d (T049) | T048 (ruling W), T049, T050 | T061 |
+| FR-019 (the manager freeze: no writer but a reset writer changes a number after the reset point) | R-5a, R-5b, R-5c, R-5e, R-5f, R-5g, R-5h, R-5i, R-5j (T038); R-5d (T049); R-1l's sink twin (T031) | T048 (ruling W), T049, T050 | T061 |
 | SC-001 | R-1a, R-1b (T024) | T045 | T058 |
 | SC-002 | U-1, U-2 (T063) | T069 | T076 |
 | SC-003 | T-1, T-2 (T078) | T084 | T088 |

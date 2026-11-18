@@ -75,21 +75,26 @@ direction".
 
 ## `wire_closed_by_reset_` (new): nothing transmitted after a reset point (contract RR-6, ruling W)
 
-A private `bool` of `Session`, beside the receipt marker.
+A private `bool` of `Session`, beside the receipt marker, declared `bool wire_closed_by_reset_ = false;` as the
+other `bool` members are.
 
 | Event | Effect |
 |---|---|
-| A reset point (arm A, L or S: the frame's `pending` → `reached`; the bound: `none` → `reached`), in the same strand turn, crossing included | set |
+| `Session` construction | clear (the default member initializer) |
+| A reset point (arm A, L or S: the frame's `pending` → `reached`; the bound: `none` → `reached`), in the same statement block, through one helper, crossing included | set |
 | `close()`'s close-out of a `pending` marker | **not** written (RR-6 item 5) |
 | `install_reconnected_transport`, in the block that sets the marker to `none` and thaws the manager | cleared |
 | `live_write_serialized_` after the `write_gate_` grant; before `transport_send_` in `store_then_emit` and in `replay_outbound_range_`'s `transmit_async` | read: when set, no transmit, a success (a distinct return from `live_write_serialized_`, so `store_then_emit` skips `last_outbound_steady_` as its `transmit=false` exit does) |
-| D-OUT-10 in `store_then_emit` | read, only for a call carrying RR-6 item 4's exemption: when set, the lowered manager does not refuse the transmit |
+| D-OUT-10 in `store_then_emit` | read when the test fires. Set, with no exemption: success with no transmit, the test's ending (contract RR-6 item 3). Set, with the exemption: transmitted (RR-6 item 4). Clear: `dispatch_aborted`, as before |
 
-- **The exemption parameter.** `store_then_emit` and `live_write_serialized_` gain one parameter, a typed enumerator
-  that defaults to "none". `run_logout_phase1` is its only caller that passes the exemption, for our own Logout in a
-  crossing (RR-6 item 4). Recipe: `git grep -n '<the enumerator>' -- src include`.
-- **Invariant RO-5.** The member is set exactly when a reset point has run on this connection, and never by a
-  close-out. While it is set, no frame is handed to the transport except the frame carrying the exemption.
+- **The exemption parameter.** `store_then_emit` and `live_write_serialized_` gain one parameter of the private
+  scoped enumeration `wire_reset_exemption` (`none`, `crossing_logout`), defaulted to `none`. `run_logout_phase1`
+  is its one origin, for our own Logout in a crossing (RR-6 item 4). `transmit_async` takes none. The census is by
+  category: re-derive with `git grep -n 'crossing_logout' -- src include`.
+- **Invariant RO-5.** The member is clear at construction and at each new connection. It is set exactly when a reset
+  point has run on this connection, and never by a close-out. While it is set:
+  - no frame is handed to the transport except the frame carrying the exemption;
+  - every frame held back, whether it met D-OUT-10, the gate or the sink, ends with success and no transmit.
 - It is not the marker, because the close-out also writes `reached`. It is not `frozen(freeze_key)`, which no
   production branch tests (RR-5 item 4).
 
@@ -314,6 +319,12 @@ New rows:
     it. The one exception: when the peer's Logout
     crossed fixpp's own graceful-close Logout, which was already numbered, that Logout is sent. The wire then
     carries exactly one Logout, fixpp's own (104 contract RR-6).
+  - a frame held back this way ends as a success that was not transmitted, wherever it was held.
+    - `Session::send` for a send in flight at that point returns success, and its message is not sent. Before 104 it
+      was transmitted at its pre-reset number.
+    - A direct initiator's `open()`, when the peer's Logout reached the LogonSent arm while `open()`'s Logon was in
+      its store call, returns success with the session already Disconnected and its Logon not sent.
+    - No `Disconnected` entry is added for such a frame (104 contract RR-6 item 3).
   The numbers stay at 1 after a receipt reset, and at their values after a close-out. The teardown's reset under
   `reset_on_disconnect` still runs. The session's state history (`Session::fsm_visit_history()`) records one
   `Disconnected` for an ending whose number or NewSeqNo is refused, and for any ending where a message cannot take

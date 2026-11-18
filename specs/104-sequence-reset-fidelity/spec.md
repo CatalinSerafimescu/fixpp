@@ -257,8 +257,8 @@ listed again in the PR body for the owner's review at Gate B sign-off. The mecha
      by the orchestrator).
   3. The class is enumerated by a recipe (contract RR-5 item 6), not by a count. Only
      `inbound_resend_request_leaf_` needs the test; `inbound_logout_leaf_` already has one. Cell R-5f, with a
-     rol-off forced-hit arm. No further Gate A round: the change applies the converged RR-5 pattern, and it is
-     visible to the owner at Gate B.
+     rol-off forced-hit arm. It is reviewed by Gate A loop 5 (narrow), together with ruling W, and it is visible to
+     the owner at Gate B.
 - Q: The same reading found a third case of one class, **work in flight across the write of `reached`** (after
   T011's manager writers and T014's leaf). A frame that its store call had returned before the reset point was still
   written after it, after the reply (research D11, "Frames in flight across `reached`"). QuickFIX never sends any
@@ -273,8 +273,9 @@ listed again in the PR body for the owner's review at Gate B sign-off. The mecha
      - D-OUT-10 already covers a frame still in its store call. The test does not branch on `frozen`.
   2. `close()`'s close-out is exempt. It runs no unit and does not write the member, so O13-r's endings and
      B-563-5's are unchanged.
-  3. **Sub-ruling, the crossing.** Our own phase-1 Logout, already numbered when a peer Logout reaches arm A in
-     Active, is exempt from D-OUT-10 and from the test.
+  3. **Sub-ruling, the crossing.** Our own phase-1 Logout, already numbered when a peer Logout reaches arm A (in
+     Active, or in LogonReceived after a Logon arm superseded by that `close()`; loop 5's N-4), is exempt from
+     D-OUT-10 and from the test.
      - The exemption is carried by one defaulted parameter of `store_then_emit` that only `run_logout_phase1`
        passes. It lifts D-OUT-10 only while the member is set, so a reconcile's or a take-back's lowering still
        refuses.
@@ -283,7 +284,16 @@ listed again in the PR body for the owner's review at Gate B sign-off. The mecha
      - Arm A still runs its unit and still sets the member, so every other in-flight frame is held back.
   4. Research D11's "No new departure" holds under W. The suppression falls within QuickFIX's envelope: QuickFIX
      C++ and QuickFIX/J user-thread sends, and QuickFIX/J's timer thread, can themselves race past the reply.
-     Cells R-5f, R-5g and R-5h, and R-5e's close-out sink assertion.
+     Cells R-5f, R-5g and R-5h, and R-1l's close-out sink twin.
+  5. **Sub-ruling, one ending (Gate A loop 5, N-1).** While the member is set and the call carries no exemption,
+     D-OUT-10 returns the test's ending: success with no transmit, no `Disconnected` write, the number consumed. A
+     frame held back in its store call (C1) and one held back at the gate (C2) then end alike.
+     - Reason: QuickFIX C++'s `Session::sendRaw` returns `true` for a message it persisted and did not send
+       (`if (isLoggedOn()) { send(messageString); }`, then `return true;`).
+     - D-OUT-10 keeps `dispatch_aborted` while the member is clear.
+     - Owner-visible at Gate B: `Session::send` returns success for a send in flight at a reset point that is not
+       transmitted, and a direct initiator's `open()` in the LogonSent overlap returns success with the session
+       Disconnected (B-104-8). Cells: R-5h's C1 arms and R-5j.
 
 ## User Scenarios & Testing *(mandatory)*
 
