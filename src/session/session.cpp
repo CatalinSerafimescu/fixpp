@@ -514,6 +514,24 @@ void Session::note_establishment_timeout_() noexcept {
                fixpp::log::ArgValue::from_u64(cfg_.logon_timeout_ms));
 }
 
+// ── 104-sequence-reset-fidelity — a failed receipt reset (contract RT-4, O16) ──
+// At a received Logout's reset point, when the receipt reset unit returned an error: one
+// FIXPP_SLOG record carrying the part that failed (the manager set, or the store's reset_to)
+// and its error, through the logger open() resolved and with the session's trace_context; its
+// format string is registered in src/log/format_registry.cpp. No rate bound: a connection has
+// one receipt reset point. On a refusing persistent store the stored numbers keep their
+// pre-reset values (L-104-2).
+void Session::note_receipt_reset_failed_(reset_unit_result const& unit) noexcept {
+    if (unit.manager && unit.store) {
+        return;
+    }
+    auto const failure = !unit.manager ? unit.manager.error() : unit.store.error();
+    FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
+               "received Logout's sequence reset failed, not retried: part={} error={}",
+               !unit.manager ? FIXPP_SLIT("manager") : FIXPP_SLIT("store"),
+               fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(failure)));
+}
+
 // ── 093-inbound-frame-dispositions — a frame over L (FR-013; data-model E-12) ──
 // One FIXPP_SLOG record carrying the failure kind and L, through the logger open()
 // resolved and with the session's trace_context; its format string is registered in
@@ -5625,9 +5643,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::acknowledge_peer_logout_
     if (cfg_.reset_on_logout) {
         co_await asio::this_coro::reset_cancellation_state();
         if (enter_receipt_reset_point_()) {
-            // RT-4: a manager or store failure of the unit is logged then proceeds, as 024 I-07's
-            // teardown reset; the arm's ending is the one it has without the failure.
-            (void)co_await run_reset_unit_(seqnum_min, seqnum_min);
+            // RT-4: a manager or store failure of the unit is logged, then the arm proceeds
+            // with the ending it has without the failure; there is no retry.
+            note_receipt_reset_failed_(co_await run_reset_unit_(seqnum_min, seqnum_min));
         }
         co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
     }
@@ -6197,9 +6215,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
         if (cfg_.reset_on_logout) {
             co_await asio::this_coro::reset_cancellation_state();
             if (enter_receipt_reset_point_()) {
-                // RT-4: a manager or store failure of the unit is logged then proceeds, as 024
-                // I-07's teardown reset; the arm's ending is the one it has without the failure.
-                (void)co_await run_reset_unit_(seqnum_min, seqnum_min);
+                // RT-4: a manager or store failure of the unit is logged, then the arm proceeds
+                // with the ending it has without the failure; there is no retry.
+                note_receipt_reset_failed_(co_await run_reset_unit_(seqnum_min, seqnum_min));
             }
             co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
         }
@@ -6408,9 +6426,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logout_sent_(
         if (cfg_.reset_on_logout) {
             co_await asio::this_coro::reset_cancellation_state();
             if (enter_receipt_reset_point_()) {
-                // RT-4: a manager or store failure of the unit is logged then proceeds, as 024
-                // I-07's teardown reset; the arm's ending is the one it has without the failure.
-                (void)co_await run_reset_unit_(seqnum_min, seqnum_min);
+                // RT-4: a manager or store failure of the unit is logged, then the arm proceeds
+                // with the ending it has without the failure; there is no retry.
+                note_receipt_reset_failed_(co_await run_reset_unit_(seqnum_min, seqnum_min));
             }
             co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
         }
@@ -6627,9 +6645,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
         // Arm S's reset point (contract RR-3); the branch runs only with the knob.
         co_await asio::this_coro::reset_cancellation_state();
         if (enter_receipt_reset_point_()) {
-            // RT-4: a manager or store failure of the unit is logged then proceeds, as 024
-            // I-07's teardown reset; the arm's ending is the one it has without the failure.
-            (void)co_await run_reset_unit_(seqnum_min, seqnum_min);
+            // RT-4: a manager or store failure of the unit is logged, then the arm proceeds
+            // with the ending it has without the failure; there is no retry.
+            note_receipt_reset_failed_(co_await run_reset_unit_(seqnum_min, seqnum_min));
         }
         co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
         co_return fixpp::core::expected_t<void>{};

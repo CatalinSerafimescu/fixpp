@@ -45,6 +45,8 @@
 #include <cstdint>
 #include <deque>
 #include <fixpp/core/error.hpp>
+#include <fixpp/log/logger.hpp>
+#include <fixpp/log/record.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/message_store.hpp>
 #include <fixpp/session/message_store_factory.hpp>
@@ -75,6 +77,7 @@
 #include "support/blocking_write_transport.hpp"
 #include "support/engine_test_access.hpp"
 #include "support/hooked_store.hpp"
+#include "support/log_capture.hpp"
 #include "support/seqnum_manager_test_access.hpp"
 #include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
@@ -688,6 +691,8 @@ struct Opts104 {
     std::shared_ptr<fixpp::transport::TransportFactory> transport_factory = nullptr;
     // The session's HeartBtInt and the HeartBtInt(108) of the peer's Logon.
     std::chrono::seconds heartbeat = rg::kHeartBtInt;
+    // When set, the session's SessionConfig::logger_override.
+    std::shared_ptr<fixpp::log::Logger> logger = nullptr;
 };
 
 // A Scene whose session has reset_on_logout and a HookedStore. Every member a store hook, a
@@ -760,6 +765,7 @@ public:
             s.cfg.transport_factory_override = o.transport_factory;
             s.cfg.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 19099};
         }
+        if (o.logger) s.cfg.logger_override = o.logger;
         if (o.store == store_kind::refusing) {
             s.cfg.store_factory = std::make_shared<RefusingStoreFactory104>(
                 factory, &ctl.refuse_next_store, &ctl.side);
@@ -1858,13 +1864,19 @@ TEST(ResetOnLogout104, PeerLogoutThenReconnect_NoResetOnNewConnection) {
         << ", reset_to " << r.log().reset_to_calls;
 }
 
+// The failed receipt reset's record (contract RT-4), spelled out here rather than taken from the
+// session, so a change to the record fails R-1i.
+constexpr char kReceiptResetFailedFormat[] =
+    "received Logout's sequence reset failed, not retried: part={} error={}";
+
 // R-1i: the receipt reset's store call fails (a persistent StoreDouble's next reset() fails):
-// logged, the arm returns as it would without the failure, Disconnected, the manager at (1, 1),
-// and the teardown does not retry it.
+// one log record carrying the failed part and its error, the arm returns as it would without
+// the failure, Disconnected, the manager at (1, 1), and the teardown does not retry it.
 TEST(ResetOnLogout104, ReceiptResetStoreFailure_LoggedThenDisconnected) {
     for (auto const role : kRoles) {
         SCOPED_TRACE(rg::role_name(role));
-        Rol104 r{Opts104{.role = role, .store = store_kind::store_double}};
+        fixpp::test_support::LogCapture log;  // declared before the session it serves
+        Rol104 r{Opts104{.role = role, .store = store_kind::store_double, .logger = log.logger}};
         auto& s = r.s;
         ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
         r.double_factory->store->fail_next_reset();
@@ -1879,6 +1891,16 @@ TEST(ResetOnLogout104, ReceiptResetStoreFailure_LoggedThenDisconnected) {
         EXPECT_TRUE(r.close_returned_within(kReleaseBudget)) << "close() did not return";
         EXPECT_EQ(r.double_factory->store->reset_call_count(), 1U)
             << "the teardown retried the reset";
+        auto const records = log.records_of(FIXPP_FORMAT_ID(kReceiptResetFailedFormat));
+        ASSERT_EQ(records.size(), 1U) << "receipt reset failure records";
+        auto const& rec = records[0];
+        EXPECT_EQ(rec.level, fixpp::log::Level::warn);
+        EXPECT_EQ(rec.category, fixpp::log::cat::session);
+        ASSERT_EQ(rec.arg_count, 2U);
+        ASSERT_EQ(rec.args[0].kind, fixpp::log::ArgValue::Kind::static_str);
+        EXPECT_EQ(std::string_view{rec.args[0].static_ptr}, "store") << "the record's part";
+        EXPECT_EQ(rec.args[1].u64, static_cast<std::uint64_t>(fixpp::core::error::store_io_failure))
+            << "the record's error";
     }
 }
 

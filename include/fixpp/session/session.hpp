@@ -1810,6 +1810,10 @@ private:
     };
     [[nodiscard]] asio::awaitable<reset_unit_result> run_reset_unit_(seqnum_t next_in,
                                                                      seqnum_t next_out) noexcept;
+    // 104 (contract RT-4): at a received Logout's reset point, one log record when the receipt
+    // reset unit returned an error, carrying the part that failed and its error; nothing when
+    // it succeeded. The arm proceeds either way.
+    void note_receipt_reset_failed_(reset_unit_result const& unit) noexcept;
     // Set across the unit's reset_to await and cleared after it, error paths included.
     // Session strand only, as teardown_reset_done_.
     bool reset_unit_in_flight_ = false;

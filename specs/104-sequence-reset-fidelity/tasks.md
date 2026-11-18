@@ -368,6 +368,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - **The bound's one write.** In `acknowledge_peer_logout_` with the 103 mark `acking`, the bound moves the marker `none` → `reached`. `run_peer_logout_bound_` writes no marker before its reset point.
   - **Debug assert** at each reset point, for the values RR-2 item 5 allows: a pump frame finds `pending` (it runs the unit) or `reached` (it runs no unit); the bound finds `none`.
   - Update the "024 T013" comments in `on_inbound_active_logout_` and `on_inbound_active_too_high_logout_` to name 104.
+  - **The failure record (RT-4, O16; orchestrator ruling 1 on the fourteenth run).** When the receipt unit returns an error, the reset point writes one `FIXPP_SLOG` record carrying the part that failed (the manager set or the store's `reset_to`) and its error, through the session's logger and trace context, with its format string registered in `src/log/format_registry.cpp` beside its siblings; then the arm proceeds, with no retry. R-1i asserts one such record carrying the error. Done: evidence file, "Session of 2026-11-18, fifteenth run", its "T042 follow-up" section.
   - Mutants, run at T057:
     - R-1c, R-1d and R-1e: delete L's, A's and B's reset point in turn.
     - R-1d's second, and R-1p's and R-1q's: move the `Disconnected` write after the unit.
@@ -375,7 +376,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
     - R-1o's, one per arm: delete S's reset; skip S's authorisation test; run S's branch whatever the knob (read by the rol-off arm's event assertion); invoke a reset point from the NotConnected arm.
     - R-1u: split the turn with a post between `reached` and `run_reset_unit_`.
     - R-1x(1): delete the cancellation-state reset, read by "exactly one `reset_to`".
-    - R-1i: make the unit's failure fatal.
+    - R-1i: make the unit's failure fatal; drop the record.
     - R-1n's per-parameter mutants.
     - R-1l(2): drop the arm's "already `reached` → no unit" test.
 - [X] T043 [US1] The marker assert's run and its known positive (plan phase 1, last bullets; quickstart §2). Done: evidence file, "Session of 2026-11-18, fourteenth run", its "T043" section:
@@ -486,7 +487,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - R-1z, read in Debug and asserts-off;
   - R-1z `OneDelivery`'s forced hit: drain the in-sequence Logout frame at the drain test, read by its `fromAdmin("5") == 1` reach pin (orchestrator ruling at T023);
   - R-1x's marker mutant, read by "the marker `reached`", with R-1x's reset-count assertions GREEN.
-- [ ] T057 [US1] Mutants for T042 (protocol): R-1c; R-1d, both; R-1e; R-1f(2a); R-1o, one per arm; R-1p; R-1q; R-1u; R-1x(1), read by "exactly one `reset_to`"; R-3, by R-1d's first mutant, when T011 recorded R-3 drivable; R-1i; R-1n, one per parameter; R-1l(2).
+- [ ] T057 [US1] Mutants for T042 (protocol): R-1c; R-1d, both; R-1e; R-1f(2a); R-1o, one per arm; R-1p; R-1q; R-1u; R-1x(1), read by "exactly one `reset_to`"; R-3, by R-1d's first mutant, when T011 recorded R-3 drivable; R-1i, both (the failure fatal; the record dropped); R-1n, one per parameter; R-1l(2).
 - [ ] T058 [US1] Mutants for T045 (protocol): R-1a and R-1b. The answered twin stays GREEN.
 - [ ] T059 [US1] Mutants for T047 (protocol): R-1j; R-1s; R-1k; R-1l(1); R-1w, the `FromAdminThrow` and `Storeless` arms, with `StuckPending` GREEN; R-1f(2b); R-2.
 - [ ] T060 [US1] Mutants for T048 (protocol): R-1r, both boundaries, read by its seam arms (`…_SeamStoreThenEmit` for the `store_then_emit` test, `…_SeamPersist` for the `persist_inbound_advance_` test); R-1l(3); R-1h.
