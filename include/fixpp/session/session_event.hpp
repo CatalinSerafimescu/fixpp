@@ -148,8 +148,12 @@ struct session_event_garbled_frame {
 struct session_event_establishment_timeout {};
 
 // 093-inbound-frame-dispositions (data-model E-5, E-10; contract C-6) — emitted when
-// Session::close(), about to issue its teardown reset while a 141=Y reset unit's store
-// operation is in flight, gave up waiting for it at logon_timeout_ms and proceeded.
+// Session::close() gave up its wait at logon_timeout_ms and proceeded. 104-sequence-reset-fidelity
+// (contract RR-2 item 4, RT-5) supersedes "about to issue its teardown reset while a 141=Y
+// reset unit's store operation is in flight" by name: close() waits whatever the knobs, after
+// its joins and before its teardown predicate, while a received Logout is `pending` short of
+// its reset point or a reset unit's store operation (a receipt arm's or a Logon arm's) is in
+// flight.
 struct session_event_close_reset_wait_expired {};
 
 // SessionEvent — NEW 013-introduced public variant union. 5 initial

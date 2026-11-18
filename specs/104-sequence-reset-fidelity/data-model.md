@@ -140,8 +140,8 @@ RR-5 item 4).
   `Disconnected` already: each `assign_outbound` call's failure branch, and the writes its frame makes on the way
   out to the pump. Re-derive: `git grep -n 'seqnum_mgr_.assign_outbound()' -- src/session/session.cpp`, and read
   each failure branch.
-- **Test access:** `tests/support/seqnum_manager_test_access.hpp` gains a static function that sets and reads the
-  flag (brain "Test access to private `Session` state": a function on the existing friend, with no change to the
+- **Test access:** `tests/support/seqnum_manager_test_access.hpp` gains two static functions, `set_frozen` (sets
+  the flag) and `frozen` (reads it) (orchestrator ruling 3 on the sixteenth run; brain "Test access to private `Session` state": a function on the existing friend, with no change to the
   class's access), for cell R-5d.
 
 - **Invariant RO-4 (the freeze).** The manager is frozen exactly while the marker is `reached`, and only while

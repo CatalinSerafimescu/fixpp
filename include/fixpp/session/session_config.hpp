@@ -316,18 +316,26 @@ struct SessionConfig {
     bool refresh_on_logon = false;
 
     // reset_on_logout  (QuickFIX: ResetOnLogout)
-    //   Reset seqnums to {1,1} at Logout teardown in EITHER direction:
-    //   Logout sent (locally-initiated, close(graceful)) OR Logout received
-    //   (peer-initiated, keyed on a dedicated logout_seen_ flag).  Does NOT
-    //   fire on an abnormal disconnect with no Logout (that is reset_on_disconnect).
+    //   Reset seqnums to {1,1} when a Logout RECEIVED from the peer reaches its
+    //   arm's reset point: after the reply when one is owed and after
+    //   Disconnected is recorded, before the transport closes (contract RR-3).
+    //   A Logout fixpp sends, answered or not, makes no reset of its own: a
+    //   graceful close resets only when the peer's Logout is received.  Does
+    //   NOT fire on an abnormal disconnect with no Logout (that is
+    //   reset_on_disconnect).
+    //   104-sequence-reset-fidelity (FR-001, FR-002; contract RR-1, RR-2;
+    //   B-104-1) supersedes 024 C3.1's "in either direction" by name.
     // [data-model §"Additive config fields"; C1.1; C3.1; research D5]
     bool reset_on_logout = false;
 
     // reset_on_disconnect  (QuickFIX: ResetOnDisconnect)
     //   Reset seqnums to {1,1} on ANY transport disconnect/teardown, including
-    //   an abnormal connection drop (no Logout exchanged).  Superset of
-    //   reset_on_logout: fires on graceful Logout, peer-initiated Logout, AND
-    //   any raw read-pump EOF or transport error.
+    //   an abnormal connection drop (no Logout exchanged): close()'s teardown
+    //   reset, on a graceful close, a terminal one, or a raw read-pump EOF or
+    //   transport error.  It is close()'s only teardown-reset term:
+    //   104-sequence-reset-fidelity (contract RR-2 item 4) removes
+    //   reset_on_logout's term, so with both knobs set a received Logout resets
+    //   at its reset point and the teardown resets again (contract RT-5).
     // [data-model §"Additive config fields"; C1.1; C4.1; research D5]
     bool reset_on_disconnect = false;
 

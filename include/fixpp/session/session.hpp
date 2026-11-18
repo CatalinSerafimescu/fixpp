@@ -709,10 +709,14 @@ public:
     // Why the post from a callback: the closing test reads the state the call resumes
     // into, and onLogout, fired where Disconnected is recorded, does not run nested in the
     // callback.
-    // The latches onLogon_fired_, onLogout_fired_, reached_active_ and logout_seen_ stay
-    // set across the reconnect: the new connection fires no onLogon and no onLogout, its
-    // establishment deadline stays disarmed, and a Logout seen on the old connection still
-    // triggers reset_on_logout's teardown reset.
+    // The latches onLogon_fired_, onLogout_fired_ and reached_active_ stay set across the
+    // reconnect: the new connection fires no onLogon and no onLogout, and its establishment
+    // deadline stays disarmed. logout_seen_ is not a latch: 104-sequence-reset-fidelity
+    // (contract RR-2 items 1 and 6; data-model "`logout_seen_`") supersedes B-103-9's
+    // "a Logout seen on the old connection still triggers reset_on_logout's teardown reset"
+    // by name. A received Logout resets at its arm's reset point on the connection that
+    // received it, the teardown resets only under reset_on_disconnect, and
+    // install_reconnected_transport returns the marker to `none`.
     // Standalone initiator precondition: the caller's own reader has left
     // live_transport() before the call, and starts on the new live_transport() after it
     // returns. A reader still on the old live_transport() reads a destroyed transport, and
@@ -1814,8 +1818,9 @@ private:
     };
 
     // 024 T014 — teardown_reset_done_: single-fire guard for the teardown reset in
-    // close(). Prevents a logout+disconnect double-trigger (graceful Logout → timeout
-    // → terminal close path) from calling store_->reset() twice. FileStore::reset() is
+    // close(). Prevents a double trigger (graceful Logout → timeout → terminal close
+    // path) from calling store_->reset() twice; the teardown's only term is
+    // reset_on_disconnect (104, contract RR-2 item 4). FileStore::reset() is
     // non-idempotent I/O (full atomic-rename + fdatasync + dir-fsync per call).
     // [contracts/reset-knobs.md C5.1; plan.md Gate A note (e)]
     // Additive POD; no new include [const §XV.9].
