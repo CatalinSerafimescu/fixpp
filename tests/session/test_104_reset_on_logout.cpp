@@ -3333,3 +3333,590 @@ TEST(ResetOnLogout104, DirectOpenLogonAcrossLogonSentReset_OpenReturnsSuccess) {
 TEST(ResetOnLogout104, DirectOpenLogonAcrossLogonSentReset_OpenReturnsSuccess_RolOff) {
     direct_open_logon_across_logon_sent_reset(false);
 }
+
+// ── T038 part B: R-5f, R-5g and R-5h, frames in flight across a reset point (contract RR-6) ──
+//
+// The live-transport arms (R-5f, R-5g GateWait, R-5h GateWait) run a direct acceptor with a
+// BlockingWriteTransport attached through attach_accepted_transport (the acceptor's own seam,
+// as R-1l attaches a ScriptedReadTransport), so they run on the acceptor only. Their wire is the
+// transport's byte record: a frame is written when its entry is completed, and "after" a frame
+// means a start index above that frame's. The config-time sink arms read the Scene's `sent`, on
+// both roles. The two-site readings of the write-start count are taken by the store's
+// release_when, at its first call that returns true, and by its on_reset, at the first reset
+// call; on_reset routes that call through the hold path, so ctl.released is already true when a
+// cell's unit runs.
+
+namespace {
+
+namespace bwt = fixpp::session::test;
+
+// A recorded live write: its start index, MsgType and MsgSeqNum.
+struct LiveFrame104 {
+    std::size_t start = 0;
+    std::string type;
+    std::string seq;
+};
+
+// The completed writes of the byte record whose start index is above `after`, in start order.
+std::vector<LiveFrame104> written_after(bwt::blocking_write_state const& st, std::size_t after) {
+    std::vector<LiveFrame104> out;
+    for (auto const& w : st.recorded) {
+        if (!w.completed || w.start <= after) continue;
+        out.push_back({.start = w.start,
+                       .type = recorded_field(w.bytes, "35"),
+                       .seq = recorded_field(w.bytes, "34")});
+    }
+    return out;
+}
+std::size_t count_type(std::vector<LiveFrame104> const& frames, std::string_view type) {
+    std::size_t n = 0;
+    for (auto const& f : frames) n += static_cast<std::size_t>(f.type == type);
+    return n;
+}
+std::string describe(std::vector<LiveFrame104> const& frames) {
+    std::string out;
+    for (auto const& f : frames) {
+        out += (out.empty() ? "" : " ") + std::string{"35="} + f.type + "/34=" + f.seq + "@" +
+               std::to_string(f.start);
+    }
+    return out.empty() ? std::string{"nothing"} : out;
+}
+
+// Opens a direct acceptor with the byte record on, attaches the held-write transport, and feeds
+// the peer's Logon; true when the session is Active.
+bool open_live_acceptor(Rol104& r, std::shared_ptr<bwt::blocking_write_state> const& st) {
+    auto& s = r.s;
+    st->record_bytes = true;
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                                   s.session->open(), asio::use_future);
+    if (!s.pump_until([&] { return rg::Scene::ready(open_fut); })) return false;
+    if (!open_fut.get().has_value()) return false;
+    s.session->attach_accepted_transport(
+        std::make_unique<bwt::BlockingWriteTransport>(s.ioc.get_executor(),
+                                                      std::make_shared<bwt::ScriptedStream>(), st),
+        fixpp::transport::handshake_result{});
+    (void)s.feed(s.logon(1));
+    return s.state() == fsm_state::Active;
+}
+
+// The two readings of the write-start count, and what on_reset reads beside it.
+struct GateReadings104 {
+    std::optional<std::size_t> starts_at_release;  // the first release_when call returning true
+    bool parked_at_release = false;
+    std::optional<std::size_t> starts_at_reset;  // on_reset, at the first reset call
+    bool awaiting_resend_at_reset = false;
+};
+void install_gate_readings(Rol104& r, GateReadings104& g,
+                           std::shared_ptr<bwt::blocking_write_state> const& st) {
+    r.factory->hooks.release_when = [c = &r.ctl, gr = &g, st] {
+        if (c->released && !gr->starts_at_release) {
+            gr->starts_at_release = st->starts;
+            gr->parked_at_release = st->parked;
+        }
+        return c->released;
+    };
+    r.factory->hooks.on_reset = [gr = &g, st, sess = r.s.session.get()] {
+        gr->starts_at_reset = st->starts;
+        gr->awaiting_resend_at_reset = session_test_access::resend_outstanding(*sess);
+    };
+}
+
+// C2 on the one selected outbound store: both its events are stamped before the unit's
+// "reset_to 1 1" completed, and the write-start count read at its release equals the count read
+// at the unit's reset call.
+void expect_store_returned_before_the_reset_to(StoreLog const& log, GateReadings104 const& g) {
+    auto const at = reset_to_one_one_at(log);
+    ASSERT_EQ(log.store_events.size(), 2U) << "the selected store's two events";
+    EXPECT_TRUE(at.has_value()) << "C2: no reset_to(1, 1) on the record; reset calls: reset() "
+                                << log.reset_calls << ", reset_to " << log.reset_to_calls;
+    EXPECT_TRUE(g.starts_at_reset.has_value()) << "C2: on_reset did not run";
+    if (at) {
+        EXPECT_LE(log.store_events[0].writes_at, *at)
+            << "C2: store_applied is not before the unit's reset_to";
+        EXPECT_LE(log.store_events[1].writes_at, *at)
+            << "C2: store_returned is not before the unit's reset_to";
+    }
+    if (g.starts_at_release && g.starts_at_reset) {
+        EXPECT_EQ(*g.starts_at_release, *g.starts_at_reset)
+            << "C2: a write started between store_returned and the unit's reset call";
+    }
+}
+
+// A one-shot toAdmin selector: at the first toAdmin of `type`, the next outbound store() is
+// selected (nothing suspends from that toAdmin to its store call).
+struct StoreSelector104 {
+    bool selected = false;
+};
+void select_store_at_to_admin(Rol104& r, StoreSelector104& sel, std::string const type) {
+    r.app->to_admin_hook = [c = &r.ctl, sl = &sel, type](std::string_view const t) {
+        if (t != type || sl->selected) return;
+        sl->selected = true;
+        c->hold_next_store = true;
+    };
+}
+
+// ── R-5f ──────────────────────────────────────────────────────────────────────────────
+
+// R-5f: route B on the live transport and the refusing double (for its store-call record).
+// S = N + 3, the gap filled to S by one GapFill, so AwaitingResend is off and the bound is not
+// woken. A ResendRequest at S + 1 with no BeginSeqNo(7) draws a Reject, whose store is
+// selected at its toAdmin and held. The mock clock passes logout_disconnect_timeout_ms; the
+// bound's reply is stored and its write parks. The Reject's store is released, passes D-OUT-10
+// and waits at the write gate; then the reply's write is released.
+void too_high_resend_request_across_bound_unit(bool const rol) {
+    SCOPED_TRACE(rol ? "rol" : "rol off");
+    GateReadings104 g;  // declared before the session: its hooks write them
+    StoreSelector104 sel;
+    auto const st = std::make_shared<bwt::blocking_write_state>();
+    Rol104 r{Opts104{
+        .role = session_role::acceptor, .reset_on_logout = rol, .store = store_kind::refusing}};
+    install_gate_readings(r, g, st);
+    select_store_at_to_admin(r, sel, "3");
+    auto& s = r.s;
+    ASSERT_TRUE(open_live_acceptor(r, st)) << "setup: the session did not reach Active";
+    seqnum_t const n = s.next_in();
+    seqnum_t const big_s = n + 3;
+    (void)s.feed(s.logout(big_s));
+    ASSERT_EQ(r.phase(), kPending) << "setup: no pending mark";
+    (void)s.feed(s.gap_fill(n, big_s));
+    ASSERT_EQ(s.next_in(), big_s) << "setup: the gap was not filled to S";
+    ASSERT_EQ(r.phase(), kPending) << "setup: the mark left pending at S";
+    ASSERT_EQ(r.bound_count(), 1) << "setup: no bound";
+    ASSERT_FALSE(s.resend_outstanding()) << "setup: AwaitingResend is still on";
+    int const baseline = r.app->to_admin_count("2");
+    auto const stores_mark = r.ctl.side.outbound_store_types.size();
+
+    auto fut = s.feed_spawn(s.frame("2", big_s + 1, "16=0\x01"));
+    bool const held = s.pump_until([&] { return !r.log().store_events.empty(); }, kReachBudget);
+    st->arm_block();
+    s.mock->advance(std::chrono::milliseconds{kBoundT} + std::chrono::milliseconds{1});
+    bool const reply_parked = s.pump_until([&] { return st->parked; }, kInHoldBudget);
+    bool const parked_is_reply = !st->recorded.empty() &&
+                                 recorded_field(st->recorded.back().bytes, "35") == "5" &&
+                                 !st->recorded.back().completed;
+    std::size_t const reply_start = st->recorded.empty() ? 0 : st->recorded.back().start;
+    r.ctl.released = true;
+    bool const at_gate = s.pump_until(
+        [&] { return g.starts_at_release.has_value() && r.log().store_events.size() == 2; },
+        kHoldWindow);
+    std::size_t const starts_before_reply_release = st->starts;
+    bool const hold_in_place = !r.log().hold_timed_out;
+    st->release();
+    bool const returned = s.pump_until([&] { return rg::Scene::ready(fut); }, kReleaseBudget);
+    bool const bound_ended = s.pump_until([&] { return r.bound_count() == 0; }, kReleaseBudget);
+    std::optional<fixpp::core::expected_t<void>> result;
+    if (returned) result = fut.get();
+    auto const after_reply = written_after(*st, reply_start);
+    Numbers104 const mgr = r.manager_numbers();
+
+    if (rol) {
+        EXPECT_EQ(r.app->to_admin_count("2"), baseline) << "toAdmin calls for a 35=2";
+    }
+    // Reach, readable on the base: the Reject's store was held while the reply's write parked,
+    // and after its release no write started until the reply's write was released.
+    EXPECT_TRUE(held) << "setup: the Reject's store was not held";
+    EXPECT_EQ(r.app->to_admin_count("3"), 1) << "toAdmin calls for a 35=3";
+    EXPECT_TRUE(reply_parked && parked_is_reply) << "setup: the bound's reply did not park";
+    EXPECT_TRUE(at_gate) << "setup: the Reject's store did not return after its release";
+    EXPECT_TRUE(g.parked_at_release) << "setup: no write was parked at the Reject's release";
+    if (g.starts_at_release) {
+        EXPECT_EQ(starts_before_reply_release, *g.starts_at_release)
+            << "a write started while the Reject waited behind the parked reply";
+    }
+    EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the release";
+    EXPECT_TRUE(returned) << "the ResendRequest's on_inbound_frame did not return";
+    EXPECT_TRUE(bound_ended) << "the bound did not end";
+
+    if (!rol) {
+        // The forced hit: nothing is frozen, so the leaf calls toAdmin once more, and the first
+        // write started after the reply is the Reject.
+        EXPECT_EQ(r.app->to_admin_count("2"), baseline + 1) << "toAdmin calls for a 35=2";
+        EXPECT_TRUE(!after_reply.empty() && after_reply.front().type == "3" &&
+                    after_reply.front().start == reply_start + 1)
+            << "written after the reply: " << describe(after_reply);
+        return;
+    }
+    EXPECT_EQ(stored_of_type(r.ctl.side, "2", stores_mark), 0U)
+        << "a ResendRequest's store call after the input";
+    EXPECT_EQ(count_type(after_reply, "2"), 0U)
+        << "a ResendRequest written after the reply: " << describe(after_reply);
+    EXPECT_EQ(count_type(after_reply, "3"), 0U)
+        << "a Reject written after the reply: " << describe(after_reply);
+    EXPECT_EQ(mgr, (Numbers104{.in = 1, .out = 1}))
+        << "the manager after the release: " << mgr.in << "/" << mgr.out;
+    auto const store = r.store_numbers(store_kind::refusing);
+    ASSERT_TRUE(store.has_value()) << "the store's numbers were not read";
+    EXPECT_EQ(*store, (Numbers104{.in = 1, .out = 1}))
+        << "the store after the release: " << store->in << "/" << store->out;
+    expect_one_reset_to_one_one_disconnected(r);
+    EXPECT_TRUE(result.has_value() && result->has_value())
+        << "the ResendRequest's on_inbound_frame did not return success";
+    EXPECT_EQ(disconnected_entries(*s.session), 1) << "Disconnected entries in the history";
+    // Reach at the head: the arm reached the leaf after the reset point.
+    EXPECT_TRUE(g.starts_at_reset.has_value()) << "on_reset did not run";
+    EXPECT_FALSE(g.awaiting_resend_at_reset) << "AwaitingResend was on at the unit's reset call";
+    EXPECT_TRUE(s.resend_outstanding()) << "AwaitingResend is off after the release";
+    expect_store_returned_before_the_reset_to(r.log(), g);
+}
+
+}  // namespace
+
+TEST(ResetOnLogout104, TooHighResendRequestAcrossBoundUnit_NoToAdminForRefusedNumber) {
+    too_high_resend_request_across_bound_unit(true);
+}
+
+// R-5f's forced hit: the same input with reset_on_logout off.
+TEST(ResetOnLogout104, TooHighResendRequestAcrossBoundUnit_NoToAdminForRefusedNumber_RolOff) {
+    too_high_resend_request_across_bound_unit(false);
+}
+
+// ── R-5g ──────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+enum class crossing_arm : std::uint8_t { store_held, gate_wait };
+
+// R-5g: A in Active, close(graceful) with a clock. Phase 1's Logout store is selected at its
+// toAdmin. StoreHeld (C1, on the config-time sink): the store is held while an in-sequence
+// peer Logout reaches arm A, then released. GateWait (C2, on the live transport): an
+// application send's write is parked first, so phase 1's Logout, recorded with no hold, waits at
+// the write gate while the peer Logout reaches arm A; then the parked write is released.
+void crossing_logout(session_role const role, crossing_arm const arm, bool const rol) {
+    SCOPED_TRACE(std::string{rg::role_name(role)} +
+                 (arm == crossing_arm::store_held ? "/StoreHeld" : "/GateWait") +
+                 (rol ? "" : "/rol off"));
+    bool const live = arm == crossing_arm::gate_wait;
+    GateReadings104 g;  // declared before the session: its hooks write them
+    StoreSelector104 sel;
+    auto const st = std::make_shared<bwt::blocking_write_state>();
+    Rol104 r{Opts104{.role = role, .reset_on_logout = rol}};
+    if (live) {
+        install_gate_readings(r, g, st);
+        r.ctl.released = true;  // the selected store records both events with no hold
+    }
+    select_store_at_to_admin(r, sel, "5");
+    auto& s = r.s;
+    if (live) {
+        ASSERT_TRUE(open_live_acceptor(r, st)) << "setup: the session did not reach Active";
+    } else {
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+    }
+    seqnum_t const n = s.next_in();
+    auto const sent_mark = s.sent.size();
+    std::size_t const wire_mark = st->starts;
+
+    std::future<fixpp::core::expected_t<void>> send_fut;
+    bool app_parked = true;
+    std::size_t app_start = 0;
+    if (live) {
+        std::string const payload =
+            "35=D\x01"
+            "11=ORD-104-R5G\x01" +
+            std::string{rg::kSideAndTime};
+        r.frames.emplace_back(reinterpret_cast<std::byte const*>(payload.data()),
+                              reinterpret_cast<std::byte const*>(payload.data()) + payload.size());
+        st->arm_block();
+        send_fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                                  s.session->send(std::span<const std::byte>{r.frames.back()}),
+                                  asio::use_future);
+        app_parked = s.pump_until([&] { return st->parked; }, kReachBudget);
+        app_start = st->starts;
+    }
+    r.spawn_close(close_mode::graceful);
+    bool const selected =
+        s.pump_until([&] { return r.log().store_events.size() == (live ? 2U : 1U); }, kReachBudget);
+    auto lo_fut = s.feed_spawn(s.logout(n));
+    bool const frame_returned =
+        s.pump_until([&] { return rg::Scene::ready(lo_fut); }, kInHoldBudget);
+    auto const sent_at_frame = s.sent.size();
+    std::size_t const starts_at_frame = st->starts;
+    std::size_t const logouts_before_release =
+        live ? count_type(written_after(*st, wire_mark), "5") : s.count("5", sent_mark);
+    bool const hold_in_place = !r.log().hold_timed_out;
+    if (live) {
+        st->release();
+    } else {
+        r.ctl.released = true;
+    }
+    bool const close_returned = r.close_returned_within(kReleaseBudget);
+    r.ctl.released = true;
+    if (live) st->release();
+
+    std::string const held_seq =
+        r.log().store_events.empty() ? std::string{} : std::to_string(r.log().store_events[0].seq);
+    std::vector<std::string> logouts;  // the 34 of each 35=5 written by fixpp from the mark
+    if (live) {
+        for (auto const& f : written_after(*st, wire_mark)) {
+            if (f.type == "5") logouts.push_back(f.seq);
+        }
+    } else {
+        for (auto const& f : s.of_type("5", sent_mark)) logouts.push_back(rg::field(f, 34));
+    }
+
+    EXPECT_EQ(logouts.size(), 1U) << "35=5 frames written by fixpp: " << logouts.size();
+    if (logouts.size() == 1U) {
+        EXPECT_EQ(logouts.front(), held_seq) << "the 35=5 written is not phase 1's Logout";
+    }
+    // Reach, readable on the base.
+    EXPECT_TRUE(app_parked) << "setup: the application frame's write did not park";
+    EXPECT_TRUE(selected) << "setup: phase 1's Logout store was not reached";
+    EXPECT_TRUE(frame_returned) << "setup: the peer Logout's frame did not return";
+    EXPECT_EQ(logouts_before_release, 0U) << "a 35=5 written before the release";
+    EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the release";
+    EXPECT_TRUE(close_returned) << "close() did not return";
+    if (live) {
+        EXPECT_TRUE(g.parked_at_release) << "setup: no write was parked at the Logout's store";
+        if (g.starts_at_release) {
+            EXPECT_EQ(starts_at_frame, *g.starts_at_release)
+                << "a write started while phase 1's Logout waited behind the parked frame";
+        }
+        auto const after_frame = written_after(*st, starts_at_frame);
+        EXPECT_TRUE(after_frame.size() == 1U && after_frame.front().type == "5")
+            << "written after the peer Logout's frame returned: " << describe(after_frame);
+        if (send_fut.valid()) {
+            EXPECT_TRUE(s.pump_until([&] { return rg::Scene::ready(send_fut); }, kReleaseBudget))
+                << "send() did not return";
+        }
+    } else {
+        EXPECT_EQ(s.sent.size() - sent_at_frame, 1U)
+            << "written after the peer Logout's frame returned: " << s.written(sent_at_frame);
+    }
+
+    if (!rol) {
+        if (live) {
+            // The forced hit: the first write started after the parked frame is our Logout.
+            auto const after_app = written_after(*st, app_start);
+            EXPECT_TRUE(!after_app.empty() && after_app.front().type == "5" &&
+                        after_app.front().start == app_start + 1)
+                << "written after the application frame: " << describe(after_app);
+        }
+        return;
+    }
+    expect_one_reset_to_one_one_disconnected(r);
+    auto const store = r.store_numbers(store_kind::hooked);
+    ASSERT_TRUE(store.has_value()) << "the store's numbers were not read";
+    EXPECT_EQ(*store, (Numbers104{.in = 1, .out = 1}))
+        << "the store after close(): " << store->in << "/" << store->out;
+    EXPECT_EQ(disconnected_entries(*s.session), 1) << "Disconnected entries in the history";
+    if (live) {
+        if (g.starts_at_reset) {
+            auto const after_reset = written_after(*st, *g.starts_at_reset);
+            EXPECT_TRUE(after_reset.size() == 1U && after_reset.front().type == "5")
+                << "written after the reset point: " << describe(after_reset);
+        }
+        expect_store_returned_before_the_reset_to(r.log(), g);
+    } else {
+        expect_held_store_spans_the_reset_to(r.log());
+    }
+}
+
+}  // namespace
+
+TEST(ResetOnLogout104, CrossingLogout_OneLogoutOurs_StoreHeld) {
+    for (auto const role : kRoles) crossing_logout(role, crossing_arm::store_held, true);
+}
+
+TEST(ResetOnLogout104, CrossingLogout_OneLogoutOurs_GateWait) {
+    crossing_logout(session_role::acceptor, crossing_arm::gate_wait, true);
+}
+
+// R-5g's forced hits, one per observation path: reset_on_logout off.
+TEST(ResetOnLogout104, CrossingLogout_OneLogoutOurs_StoreHeld_RolOff) {
+    for (auto const role : kRoles) crossing_logout(role, crossing_arm::store_held, false);
+}
+
+TEST(ResetOnLogout104, CrossingLogout_OneLogoutOurs_GateWait_RolOff) {
+    crossing_logout(session_role::acceptor, crossing_arm::gate_wait, false);
+}
+
+// ── R-5h ──────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+enum class liveness_arm : std::uint8_t { gate_wait, store_held, store_held_at_arm_l };
+
+// StoreHeldAtArmL's pumps inside the Heartbeat's hold: until the hold, until LogoutSent, until
+// the peer Logout's frame returns. Each is a quarter of kHoldBound.
+static_assert(kReachBudget + kInHoldBudget + kInHoldBudget < kHoldBound);
+
+// R-5h. The Heartbeat's store is selected at its toAdmin. GateWait (C2, live transport,
+// HeartBtInt above logout_disconnect_timeout_ms): route B as R-5f's setup; the mock clock passes
+// logout_disconnect_timeout_ms with the next write armed to park, so the bound's reply parks;
+// then it passes HeartBtInt, and the Heartbeat, recorded with no hold, waits at the write gate;
+// then the reply's write is released. StoreHeld (C1, sink, HeartBtInt half of
+// logout_disconnect_timeout_ms): route B; the clock passes HeartBtInt, the Heartbeat's store is
+// held, then the clock passes logout_disconnect_timeout_ms (the loop is suspended in that
+// store), the bound acknowledges and runs its unit, and the store is released.
+// StoreHeldAtArmL (C1, sink): A in Active; the Heartbeat's store is held while close(graceful)'s
+// phase 1 sends its Logout and the peer's Logout reaches arm L; then it is released.
+void liveness_heartbeat_across_unit(session_role const role, liveness_arm const arm,
+                                    bool const rol) {
+    SCOPED_TRACE(std::string{rg::role_name(role)} +
+                 (arm == liveness_arm::gate_wait
+                      ? "/GateWait"
+                      : (arm == liveness_arm::store_held ? "/StoreHeld" : "/StoreHeldAtArmL")) +
+                 (rol ? "" : "/rol off"));
+    bool const live = arm == liveness_arm::gate_wait;
+    GateReadings104 g;  // declared before the session: its hooks write them
+    StoreSelector104 sel;
+    auto const st = std::make_shared<bwt::blocking_write_state>();
+    Rol104 r{Opts104{.role = role,
+                     .reset_on_logout = rol,
+                     .heartbeat = live ? rg::kHeartBtInt : kSmallHeartBtInt}};
+    if (live) {
+        install_gate_readings(r, g, st);
+        r.ctl.released = true;  // the selected store records both events with no hold
+    }
+    select_store_at_to_admin(r, sel, "0");
+    auto& s = r.s;
+    if (live) {
+        ASSERT_TRUE(open_live_acceptor(r, st)) << "setup: the session did not reach Active";
+    } else {
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+    }
+    seqnum_t const n = s.next_in();
+    if (arm != liveness_arm::store_held_at_arm_l) {
+        (void)s.feed(s.logout(n + 3));
+        ASSERT_EQ(r.phase(), kPending) << "setup: no pending mark";
+        (void)s.feed(s.gap_fill(n, n + 3));
+        ASSERT_EQ(s.next_in(), n + 3) << "setup: the gap was not filled to S";
+        ASSERT_EQ(r.phase(), kPending) << "setup: the mark left pending at S";
+        ASSERT_FALSE(s.resend_outstanding()) << "setup: AwaitingResend is still on";
+    }
+    auto const sent_mark = s.sent.size();
+    std::size_t reply_start = 0;  // live: the reply's start index
+    bool reached = false;         // the selected store was reached (and, live, the reply parked)
+    bool during = false;          // the work run during the hold or the gate wait completed
+    std::size_t starts_before_release = 0;
+    std::future<fixpp::core::expected_t<void>> lo_fut;
+    if (live) {
+        st->arm_block();
+        s.mock->advance(std::chrono::milliseconds{kBoundT} + std::chrono::milliseconds{1});
+        bool const parked = s.pump_until([&] { return st->parked; }, kReachBudget);
+        bool const is_reply = !st->recorded.empty() &&
+                              recorded_field(st->recorded.back().bytes, "35") == "5" &&
+                              !st->recorded.back().completed;
+        reply_start = st->recorded.empty() ? 0 : st->recorded.back().start;
+        s.mock->advance(rg::kHeartBtInt);
+        reached = parked && is_reply &&
+                  s.pump_until([&] { return r.log().store_events.size() == 2; }, kInHoldBudget);
+        during = s.state() == fsm_state::Active;  // the reply is still in its write
+        starts_before_release = st->starts;
+        st->release();
+    } else {
+        s.mock->advance(kSmallHeartBtInt + std::chrono::milliseconds{1});
+        reached = s.pump_until([&] { return !r.log().store_events.empty(); }, kReachBudget);
+        if (arm == liveness_arm::store_held) {
+            s.mock->advance(std::chrono::milliseconds{kBoundT} - kSmallHeartBtInt);
+            during = s.pump_until([&] { return r.bound_count() == 0; }, kInHoldBudget) &&
+                     s.count("5", sent_mark) == 1U && s.state() == fsm_state::Disconnected;
+        } else {
+            r.spawn_close(close_mode::graceful);
+            bool const logout_sent = s.pump_until(
+                [&] { return s.state() == fsm_state::LogoutSent && s.count("5", sent_mark) == 1U; },
+                kInHoldBudget);
+            lo_fut = s.feed_spawn(s.logout(n));
+            during = logout_sent &&
+                     s.pump_until([&] { return rg::Scene::ready(lo_fut); }, kInHoldBudget) &&
+                     s.state() == fsm_state::Disconnected;
+        }
+        r.ctl.released = true;
+    }
+    bool const hold_in_place = !r.log().hold_timed_out;
+    bool const loop_ended = s.pump_until(
+        [&] { return session_test_access::liveness_count(*s.session) == 0; }, kReleaseBudget);
+    bool close_returned = true;
+    if (arm == liveness_arm::store_held_at_arm_l) {
+        close_returned = r.close_returned_within(kReleaseBudget);
+    }
+    r.ctl.released = true;
+    if (live) (void)s.pump_until([&] { return r.bound_count() == 0; }, kReleaseBudget);
+
+    // The frames written after the reply (route B: the bound's 35=5; arm L: phase 1's 35=5).
+    std::vector<std::string> after;  // MsgTypes
+    if (live) {
+        for (auto const& f : written_after(*st, reply_start)) after.push_back(f.type);
+    } else {
+        std::size_t i = sent_mark;
+        while (i < s.sent.size() && rg::field(s.sent[i], 35) != "5") ++i;
+        for (std::size_t j = i + 1; j < s.sent.size(); ++j)
+            after.push_back(rg::field(s.sent[j], 35));
+    }
+    std::string after_text;
+    for (auto const& t : after) after_text += "35=" + t + " ";
+    std::size_t heartbeats_after = 0;
+    for (auto const& t : after) heartbeats_after += static_cast<std::size_t>(t == "0");
+
+    if (rol) {
+        EXPECT_EQ(heartbeats_after, 0U) << "a 35=0 written after the reply: " << after_text;
+    }
+    // Reach, readable on the base.
+    EXPECT_TRUE(reached) << "setup: the Heartbeat's store was not reached";
+    EXPECT_TRUE(during) << "setup: the work during the hold did not complete";
+    EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the release";
+    EXPECT_TRUE(loop_ended) << "the liveness loop did not return";
+    EXPECT_TRUE(close_returned) << "close() did not return";
+    if (live) {
+        EXPECT_TRUE(g.parked_at_release)
+            << "setup: the reply was not parked at the Heartbeat's store";
+        if (g.starts_at_release) {
+            EXPECT_EQ(starts_before_release, *g.starts_at_release)
+                << "a write started while the Heartbeat waited behind the parked reply";
+        }
+    }
+
+    if (!rol) {
+        // The forced hit: nothing is frozen, so the Heartbeat is written after the reply; on the
+        // live transport it is the first write started after it.
+        EXPECT_GE(heartbeats_after, 1U) << "written after the reply: " << after_text;
+        if (live) {
+            auto const w = written_after(*st, reply_start);
+            EXPECT_TRUE(!w.empty() && w.front().type == "0" && w.front().start == reply_start + 1)
+                << "written after the reply: " << describe(w);
+        }
+        return;
+    }
+    EXPECT_TRUE(after.empty()) << "written after the reply: " << after_text;
+    Numbers104 const mgr = r.manager_numbers();
+    EXPECT_EQ(mgr, (Numbers104{.in = 1, .out = 1}))
+        << "the manager after the release: " << mgr.in << "/" << mgr.out;
+    auto const store = r.store_numbers(store_kind::hooked);
+    ASSERT_TRUE(store.has_value()) << "the store's numbers were not read";
+    EXPECT_EQ(*store, (Numbers104{.in = 1, .out = 1}))
+        << "the store after the release: " << store->in << "/" << store->out;
+    EXPECT_EQ(disconnected_entries(*s.session), 1) << "Disconnected entries in the history";
+    if (live) {
+        expect_store_returned_before_the_reset_to(r.log(), g);
+    } else {
+        expect_held_store_spans_the_reset_to(r.log());
+    }
+}
+
+}  // namespace
+
+TEST(ResetOnLogout104, LivenessHeartbeatAcrossBoundUnit_OneEnding_GateWait) {
+    liveness_heartbeat_across_unit(session_role::acceptor, liveness_arm::gate_wait, true);
+}
+
+TEST(ResetOnLogout104, LivenessHeartbeatAcrossBoundUnit_OneEnding_StoreHeld) {
+    for (auto const role : kRoles) {
+        liveness_heartbeat_across_unit(role, liveness_arm::store_held, true);
+    }
+}
+
+TEST(ResetOnLogout104, LivenessHeartbeatAcrossBoundUnit_OneEnding_StoreHeldAtArmL) {
+    for (auto const role : kRoles) {
+        liveness_heartbeat_across_unit(role, liveness_arm::store_held_at_arm_l, true);
+    }
+}
+
+// R-5h's forced hits, one per observation path: reset_on_logout off.
+TEST(ResetOnLogout104, LivenessHeartbeatAcrossBoundUnit_OneEnding_GateWait_RolOff) {
+    liveness_heartbeat_across_unit(session_role::acceptor, liveness_arm::gate_wait, false);
+}
+
+TEST(ResetOnLogout104, LivenessHeartbeatAcrossBoundUnit_OneEnding_StoreHeld_RolOff) {
+    for (auto const role : kRoles) {
+        liveness_heartbeat_across_unit(role, liveness_arm::store_held, false);
+    }
+}
