@@ -800,7 +800,12 @@ or the disposition, not by editing the view alone. In summary:
     completed where it counts `writes`. A cell reads each frame's 35 and 34 in write-start order, and "written
     after the reply" as a completed entry whose start index is above the reply's.
   - With it off the write path does not allocate, so the header's no-allocation condition holds for every
-    existing user; the 544 entries are re-run after it lands. It lands with its first consumer (T038).
+    existing user. It lands with its first consumer (T038).
+  - The guard of that condition is the Release interceptor registrations
+    `alloc_guard_544_wdw_real_chain_{twin,arm}_mallocnesia`, whose measured window brackets the parked write;
+    the Debug functional registrations run no interceptor and do not guard it. Its known positive is the
+    `104-MUT-T038-BYTES` mutant (the record forced on in `run_wdw_real_chain`), under which the twin's
+    registration must go RED by its allocation assertion.
   - Known positive (T016's cell): two recorded writes read back in order with their MsgTypes, and a write with
     the record off records nothing.
 - Re-pinned cells stay in their files (D8).
