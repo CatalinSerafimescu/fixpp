@@ -223,7 +223,8 @@ protected:
     //   role: initiator (default) or acceptor
     //   reset_on_logon: knob under test
     //   policy: reset_seqnum_policy_field override
-    //   reset_on_logout: US2 teardown knob (C3.1/C3.2)
+    //   reset_on_logout: the received-Logout knob; 104 (contract RR-1) supersedes 024
+    //     C3.1's teardown reset by name: it resets at the receipt's reset point (C3.2)
     //   reset_on_disconnect: US2 teardown knob (C4.1/C4.2/C4.3)
     SessionConfig make_cfg(session_role role = session_role::initiator, bool reset_on_logon = false,
                            reset_seqnum_policy policy = reset_seqnum_policy::bilateral_lenient,
@@ -321,6 +322,38 @@ protected:
                 ioc, *clock, "ResetOnLifecycleTest::graceful_close_sync");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "ResetOnLifecycleTest::graceful_close_sync";
+            return;
+        }
+        (void)fut.get();
+    }
+
+    // 104-sequence-reset-fidelity (FR-001, FR-002; contract RR-1, arm L): a graceful close
+    // the peer ANSWERS. close(graceful) is staged to LogoutSent as graceful_close_sync
+    // stages it, then the peer's Logout at `peer_seq` is fed, and close() is awaited with
+    // the mock clock unmoved, so only the peer's Logout can end phase 1's wait. The
+    // condition on the two windows is graceful_close_sync's: together they stay strictly
+    // under `logout_disconnect_timeout_ms` as make_cfg() leaves it, or the REAL close_grace
+    // timer could complete `fut` with no answer. Re-derive: `command grep -n
+    // logout_disconnect_timeout_ms include/fixpp/session/session_config.hpp` and make_cfg.
+    void answered_graceful_close_sync(Session& sess, std::uint32_t peer_seq) {
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
+                                  sess.close(close_mode::graceful), asio::use_future);
+        if (!fixpp::test_support::pump_until(
+                ioc, [&sess] { return sess.state() == fsm_state::LogoutSent; },
+                "ResetOnLifecycleTest::answered_graceful_close_sync/stage")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "ResetOnLifecycleTest::answered_graceful_close_sync/stage");
+            ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
+                          << "ResetOnLifecycleTest::answered_graceful_close_sync/stage";
+            return;
+        }
+        (void)feed_sync(sess, make_peer_logout(peer_seq));
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut, 200ms, "ResetOnLifecycleTest::answered_graceful_close_sync")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "ResetOnLifecycleTest::answered_graceful_close_sync");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "ResetOnLifecycleTest::answered_graceful_close_sync";
             return;
         }
         (void)fut.get();
@@ -913,15 +946,17 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_DurableStoreFailure_BlocksActive) {
 // Mirrors logout_exchange_test.cpp (GracefulBothDirections / DisconnectedInboundLogout)
 // and cancellation_two_phase_test.cpp (CloseTerminalSkipsPhase1).
 
-// ── Witness (1): ResetOnLogout_LocalInitiated_Resets ─────────────────────────
+// ── Witness (1): ResetOnLogout_LocalInitiatedAnswered_Resets ─────────────────
 //
-// reset_on_logout=true, drive initiator to Active with seeded non-1 seqnums,
-// close(graceful) → reset fired: reset_call_count()==1 AND live counters→1.
-//
-// [C3.1]
-//
-// RED: no teardown reset wired → count==0 and seeded counters unchanged.
-TEST_F(ResetOnLifecycleTest, ResetOnLogout_LocalInitiated_Resets) {
+// 104-sequence-reset-fidelity (FR-001, FR-002; contract RR-1; research D8, "Base reading
+// of the cells") supersedes 024 C3.1's sent direction by name: a graceful close resets
+// under reset_on_logout only when the peer's Logout is received. reset_on_logout=true,
+// drive initiator to Active with seeded non-1 seqnums, close(graceful), and the peer
+// answers in LogoutSent → arm L's reset point resets: reset_call_count()==1, the receipt
+// marker `reached`, live counters→1. reset_on_disconnect is off, so no teardown reset can
+// move the count. The unanswered close makes no reset: R-1a
+// (`ResetOnLogout104.Unanswered_*` in test_104_reset_on_logout.cpp).
+TEST_F(ResetOnLifecycleTest, ResetOnLogout_LocalInitiatedAnswered_Resets) {
     auto cfg = make_cfg(session_role::initiator,
                         /*reset_on_logon=*/false, reset_seqnum_policy::bilateral_lenient,
                         /*reset_on_logout=*/true,
@@ -941,47 +976,46 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_LocalInitiated_Resets) {
 
     const std::size_t calls_before = factory->store->reset_call_count();
 
-    // Initiate graceful close.
-    graceful_close_sync(sess);
+    // Graceful close, answered by the peer's Logout at the seeded next inbound.
+    answered_graceful_close_sync(sess, 7);
 
     ASSERT_EQ(sess.state(), fsm_state::Disconnected);
+    EXPECT_TRUE(any_msg_type("5")) << "ResetOnLogout_LocalInitiatedAnswered_Resets: "
+                                      "our graceful-close Logout was not sent";
 
-    // C3.1: teardown reset must have fired exactly once.
-    // RED: reset_call_count() stays at calls_before (teardown not wired).
     EXPECT_EQ(factory->store->reset_call_count(), calls_before + 1U)
-        << "ResetOnLogout_LocalInitiated_Resets RED (C3.1): "
-           "exactly one store_.reset() must fire on graceful Logout teardown "
-           "when reset_on_logout=true; got count=="
-        << factory->store->reset_call_count() << " (teardown trigger not yet wired — T014 pending)";
+        << "ResetOnLogout_LocalInitiatedAnswered_Resets: exactly one store reset must "
+           "fire at the received Logout's reset point when reset_on_logout=true; got count=="
+        << factory->store->reset_call_count();
+    EXPECT_TRUE(fixpp::session::session_test_access::logout_seen(sess) ==
+                fixpp::session::session_test_access::receipt_marker::reached)
+        << "ResetOnLogout_LocalInitiatedAnswered_Resets: the receipt marker is not reached";
 
-    // C3.1: live manager counters must be reset to 1.
-    // After reset, peek_outbound()==1 (not yet used), next_inbound()==1.
     const seqnum_t out_after =
         fixpp::session::session_test_access::seqnum_mgr(sess).peek_outbound();
     const seqnum_t in_after =
         fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(out_after, static_cast<seqnum_t>(1))
-        << "ResetOnLogout_LocalInitiated_Resets RED (C3.1): "
-           "peek_outbound must be 1 after teardown reset; got "
+        << "ResetOnLogout_LocalInitiatedAnswered_Resets: "
+           "peek_outbound must be 1 after the reset; got "
         << out_after;
-    EXPECT_EQ(in_after, static_cast<seqnum_t>(1))
-        << "ResetOnLogout_LocalInitiated_Resets RED (C3.1): "
-           "next_inbound must be 1 after teardown reset; got "
-        << in_after;
+    EXPECT_EQ(in_after, static_cast<seqnum_t>(1)) << "ResetOnLogout_LocalInitiatedAnswered_Resets: "
+                                                     "next_inbound must be 1 after the reset; got "
+                                                  << in_after;
 }
 
 // ── Witness (2): ResetOnLogout_PeerInitiated_Resets ──────────────────────────
 //
 // reset_on_logout=true, drive initiator to Active, feed inbound peer Logout (35=5)
-// → session transitions to Disconnected inline (Active + inbound Logout → emit
-//   confirming Logout → Disconnected) → reset must fire.
+// → arm A: emit confirming Logout → Disconnected → its reset point resets.
 //
-// This is the half a close(graceful)-only key would MISS (peer drives Logout,
-// our session receives it and immediately disconnects without a close() call).
+// 104-sequence-reset-fidelity (contract RR-1, RR-3; research D8, "Base reading of the
+// cells") supersedes 024 C3.1's teardown reset for a received Logout by name: the reset
+// is made at arm A's reset point, inside the frame's processing, not by close()'s
+// teardown. The store double does not override reset_to, so the unit's default body
+// calls its reset() and reset_call_count moves by one.
 //
 // [C3.1]
-//
-// RED: no teardown reset wired → count==0 and seeded counters unchanged.
 TEST_F(ResetOnLifecycleTest, ResetOnLogout_PeerInitiated_Resets) {
     auto cfg = make_cfg(session_role::initiator,
                         /*reset_on_logon=*/false, reset_seqnum_policy::bilateral_lenient,
@@ -1002,11 +1036,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_PeerInitiated_Resets) {
     const std::size_t calls_before = factory->store->reset_call_count();
 
     // Feed peer Logout at seq=8 (matching next_inbound we just seeded to 8).
-    // Active + inbound 35=5: sets logout_seen_=true, emits confirming Logout,
-    // transitions fsm_state → Disconnected (but lifecycle state_ stays open).
-    // The teardown reset is in close() only — mirrors the production path where
-    // the read-pump hits EOF after the peer Logout and calls close(terminal).
-    // [contracts/reset-knobs.md C3.1; plan.md teardown design]
+    // Active + inbound 35=5: emits confirming Logout, transitions fsm_state →
+    // Disconnected (lifecycle state_ stays open), and resets at arm A's reset point.
     auto peer_logout = make_peer_logout(8);
     (void)feed_sync(sess, peer_logout);
 
@@ -1014,16 +1045,11 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_PeerInitiated_Resets) {
     // state_ is still open — close() has NOT been called yet.
     ASSERT_EQ(sess.state(), fsm_state::Disconnected);
 
-    // Mirror the production read-pump EOF path: call close(terminal) now.
-    // In production the engine's read-pump exits after the inline Disconnected
-    // transition and calls close(terminal) to run the two-phase teardown.
-    // close() does NOT early-return on fsm_state::Disconnected — it checks the
-    // lifecycle state_ (still open), enters the two-phase body, and reaches the
-    // teardown-reset block where (logout_seen_=true && reset_on_logout=true) fires.
+    // Mirror the production read-pump EOF path: call close(terminal) now. With
+    // reset_on_disconnect off, close()'s teardown makes no reset (104, contract RR-2
+    // item 4), so the count below is the reset point's.
     terminal_close_sync(sess);
 
-    // C3.1: teardown reset must have fired (via close(terminal) reaching the
-    // teardown-reset block with logout_seen_=true and reset_on_logout=true).
     EXPECT_EQ(factory->store->reset_call_count(), calls_before + 1U)
         << "ResetOnLogout_PeerInitiated_Resets (C3.1): "
            "store_.reset() must fire on peer-initiated Logout teardown "
@@ -1207,16 +1233,17 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_Off_Preserves) {
 
 // ── Witness (5): ResetOnLogoutAndDisconnect_DoubleTrigger_OneStoreReset ───────
 //
-// Both reset_on_logout=true AND reset_on_disconnect=true; graceful Logout (which
-// sets logout_seen_=true) followed by the session reaching Disconnected → the
-// single-fire guard collapses both triggers to exactly ONE observable store reset.
+// Both reset_on_logout=true AND reset_on_disconnect=true; an unanswered graceful
+// close that times out → Disconnected → exactly ONE observable store reset.
+// 104-sequence-reset-fidelity (FR-002; contract RR-2 item 4; research D8, "Base reading
+// of the cells") supersedes "graceful Logout (which sets logout_seen_=true)" by name: the
+// Logout fixpp sends makes no reset of its own, so the one reset is the teardown's, under
+// reset_on_disconnect. C5.1's two-trigger case, a received Logout with both knobs set, is
+// research D10's R-2.
 //
 // C5.1: FileStore::reset() is non-idempotent I/O; a double-fire corrupts state.
 //
 // [C5.1]
-//
-// RED: no teardown reset wired → reset_call_count()==0 (not 1). After T014 wires
-//      it, the guard must prevent a count of 2.
 TEST_F(ResetOnLifecycleTest, ResetOnLogoutAndDisconnect_DoubleTrigger_OneStoreReset) {
     auto cfg = make_cfg(session_role::initiator,
                         /*reset_on_logon=*/false, reset_seqnum_policy::bilateral_lenient,
@@ -1234,8 +1261,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogoutAndDisconnect_DoubleTrigger_OneStoreRe
         /*next_inbound=*/static_cast<seqnum_t>(4),
         /*next_outbound=*/static_cast<seqnum_t>(2));
 
-    // Graceful close: emits Logout (logout_seen_=true), times out → Disconnected.
-    // Both knobs fire conceptually; the single-fire guard must reduce to 1 reset.
+    // Graceful close: emits Logout, times out → Disconnected; the teardown resets once.
     graceful_close_sync(sess);
 
     ASSERT_EQ(sess.state(), fsm_state::Disconnected);
@@ -1255,12 +1281,13 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogoutAndDisconnect_DoubleTrigger_OneStoreRe
 //
 // reset_on_logout=true fires for BOTH initiator AND acceptor roles.
 //
-// Initiator arm: graceful close → reset fired.
-// Acceptor arm : peer-initiated Logout (feed 35=5 from peer) → reset fired.
+// Initiator arm: graceful close the peer answers → reset at arm L's reset point.
+// Acceptor arm : peer-initiated Logout (feed 35=5 from peer) → reset at arm A's.
+// 104-sequence-reset-fidelity (FR-001, FR-002; research D8, "Base reading of the cells")
+// supersedes the initiator arm's unanswered close by name: an unanswered close makes no
+// reset (R-1a).
 //
 // [C5.2]
-//
-// RED: no teardown reset wired → count==0 for both arms.
 TEST_F(ResetOnLifecycleTest, ResetOnLogout_BothRoles_Resets) {
     // ── Initiator arm ──
     {
@@ -1283,15 +1310,17 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_BothRoles_Resets) {
             fixpp::session::session_test_access::seqnum_mgr(sess), static_cast<seqnum_t>(6),
             static_cast<seqnum_t>(3));
 
-        graceful_close_sync(sess);
+        answered_graceful_close_sync(sess, 6);
 
         ASSERT_EQ(sess.state(), fsm_state::Disconnected);
 
         EXPECT_EQ(factory->store->reset_call_count(), 1U)
-            << "ResetOnLogout_BothRoles_Resets initiator arm RED (C5.2): "
-               "store_.reset() must fire on initiator graceful Logout "
-               "when reset_on_logout=true; got count=="
-            << factory->store->reset_call_count() << " (teardown not wired — T014 pending)";
+            << "ResetOnLogout_BothRoles_Resets initiator arm (C5.2): one store reset must "
+               "fire at the answered close's reset point when reset_on_logout=true; got count=="
+            << factory->store->reset_call_count();
+        EXPECT_TRUE(fixpp::session::session_test_access::logout_seen(sess) ==
+                    fixpp::session::session_test_access::receipt_marker::reached)
+            << "ResetOnLogout_BothRoles_Resets initiator arm: the receipt marker is not reached";
     }
 
     // ── Acceptor arm ──
@@ -1315,18 +1344,16 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_BothRoles_Resets) {
             fixpp::session::session_test_access::seqnum_mgr(sess), static_cast<seqnum_t>(7),
             static_cast<seqnum_t>(2));
 
-        // Feed peer Logout at seq=7 (matching seeded next_inbound).
-        // Sets logout_seen_=true, emits confirming Logout, fsm_state→Disconnected.
-        // lifecycle state_ stays open — close() has NOT run yet.
+        // Feed peer Logout at seq=7 (matching seeded next_inbound): emits confirming
+        // Logout, fsm_state→Disconnected, and resets at arm A's reset point. lifecycle
+        // state_ stays open — close() has NOT run yet.
         auto peer_logout = make_peer_logout(7);
         (void)feed_sync(sess, peer_logout);
 
         ASSERT_EQ(sess.state(), fsm_state::Disconnected);
 
-        // Mirror production read-pump EOF: call close(terminal) to complete teardown.
-        // close() checks lifecycle state_ (still open), enters the two-phase body,
-        // and fires the teardown reset via (logout_seen_=true && reset_on_logout=true).
-        // [contracts/reset-knobs.md C3.1; plan.md teardown design]
+        // Mirror production read-pump EOF: call close(terminal) to complete teardown,
+        // which makes no reset with reset_on_disconnect off (104, contract RR-2 item 4).
         terminal_close_sync(sess);
 
         EXPECT_EQ(factory->store->reset_call_count(), 1U)
