@@ -406,8 +406,9 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
   This follows QuickFIX/J and QuickFIX/Go (clarification 2026-11-17). The plan derives, from the three engines, how
   fixpp answers a peer's ResendRequest that follows the reset.
 - **FR-009**: The reset MUST be durable on a persistent store, with the guarantees 093's reset unit gives today (E-1):
-  ordering against `close()` and failure handling. On a direct mTLS initiator the unasked unit MUST run only after
-  the live identity is authorised for the CompID (clarification N-8).
+  ordering against `close()` and failure handling. On an mTLS initiator the unasked unit MUST run only after the
+  Logon path's mTLS gate passes: a live identity authorised for the CompID, or, on an initiator started by `open()`
+  with no live identity, never (the gate fails closed; contract RR-1 row S) (clarification N-8).
 - **FR-010**: A strict initiator's handling of its own acknowledgement MUST be unchanged, and so MUST that of any
   initiator whose own Logon carried 141=Y (a lenient one whose reset knob put it at (1, 1) before its Logon): both
   are the asked case (research D3.1).
@@ -515,6 +516,7 @@ L-104-3; DQ-7, B-104-6; DQ-12a, DQ-13 and DQ-14, B-104-1's departure clause.
 | DQ-14 | A Logout received in LogoutSent or LogonSent resets with no CompID, SendingTime or `fromAdmin` check of that Logout | QFC, QFJ (`verify` checks CompID and SendingTime and runs `fromAdmin` first) | *pre-existing* acceptance of that Logout (the LogoutSent arm's "confirm" row); 104 adds the reset |
 | DQ-15 | An explicit EndSeqNo at or above the next outbound number is read as through-current (D3.3a, B-104-5). With BeginSeqNo B above the next outbound number the answer is GapFill(34=B, 36=N_out), NewSeqNo below MsgSeqNum | QFGo (sends nothing: its walk's `seqNum != nextSeqNum` is false) | QFC (`nextResendRequest`'s clamp, then `generateRetransmits`' `generateSequenceReset(B, next)`) and QFJ (`generateSequenceResetIfNeeded`), identical frames; it restores QFC's and QFJ's answer where fixpp wrote `EndSeqNo + 1` |
 | DQ-16 | Against a counterparty acceptor whose `toAdmin` injects 141=Y, the session ends when fixpp's outbound number reaches the number of its own Logon (L-104-7) | none: every QuickFIX initiator meets the same ending, and QFC's second Logon does not avoid it (orchestrator ruling O-1, by source) | listed because it is the consequence of DQ-1 an operator meets; not traced on a live peer |
+| DQ-16a | When the receipt reset's store operation fails, fixpp logs it and still ends `Disconnected` (RU-1, L-104-2) | QFJ (`SessionState.reset` throws `RuntimeError`, so `nextLogout` skips its `disconnect`; the error is logged by the event-handling strategy) | analyze-2 B1 reading (QFJ_RELEASE_3_0_2); one condition, one observable ending |
 
 ## Normative References
 

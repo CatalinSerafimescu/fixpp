@@ -41,17 +41,24 @@ under rol.
 | A | the reply Logout has been attempted (Active only: `inbound_logout_leaf_` returned success, which includes a Logout that did not fit, whose store call failed, or whose write failed), the `sequence_numbers_reset` event, `fromAdmin` returned without a throw, a reject or a late parse failure, and `persist_inbound_advance_` succeeded |
 | L | the 35=5 frame passed the arm's garble and fault guards. Its MsgSeqNum is not read, as in the base's LogoutSent "confirm" row: any 34 resets, and NextNumIn is neither advanced nor persisted before the unit (W3) |
 | B | its reply has been attempted (as A's reply) and the event emitted |
-| S | with rol set only: the 35=5 frame passed the arm's guards ahead of `interpret_logon` (garble, `logon_arm_superseded_`, fault, 099's establishment refusal; the validate gate exempts 35=5), and on an mTLS session the live identity is authorised for the CompID (research D1.2). With rol off the branch does not run (W11) |
+| S | with rol set only: the 35=5 frame passed the arm's guards ahead of `interpret_logon` (garble, `logon_arm_superseded_`, fault, 099's establishment refusal; the validate gate exempts 35=5), and on an mTLS session the Logon path's mTLS gate passes (research D1 item 3): with `live_peer_id_` set it calls `authorize`, and with mTLS and no live identity it fails closed. With rol off the branch does not run (W11) |
 
 **Arm S's branch and the knob (orchestrator ruling 2026-11-18, spec Clarifications "Session 2026-11-18 (checklist
 audit; orchestrator ruling)").** The 35=5 branch in `on_inbound_logon_sent_` ahead of `interpret_logon`, and its mTLS
-`authorize` call, run only when `reset_on_logout` is set.
+gate, run only when `reset_on_logout` is set.
 - With rol off nothing changes from the base: `interpret_logon` refuses the frame as a non-Logon, the arm records
-  `Disconnected` and returns success, no `authorize` call is made and no `session_event_compid_authorization_failed`
-  is emitted, whatever the identity (W11).
-- With rol set the branch runs, the mTLS gate first (design ruling 5, FIX-TC 1S(c)). An authorised identity reaches
-  the reset point and resets once (RU-2, W10); an unauthorised one draws the gate's
-  `session_event_compid_authorization_failed` and no reset (O19). Either way the arm ends `Disconnected`, returns
+  `Disconnected` and returns success, the mTLS gate does not run (no `authorize` call is made) and no
+  `session_event_compid_authorization_failed` is emitted, whatever the identity (W11).
+- With rol set the branch runs, the mTLS gate first (design ruling 5, FIX-TC 1S(c)). The gate is the Logon path's,
+  with both its arms:
+  1. with `live_peer_id_` set, it calls `authorize`. On an initiator that identity is set only by
+     `install_reconnected_transport`, after `reconnect_fsm.cpp`'s step 7 authorised it;
+  2. with mTLS and no live identity, it fails closed with the same event and no `authorize` call. A direct
+     initiator that reaches LogonSent through `open()` has no live identity and takes this arm; the
+     direct-initiator cells drive it.
+
+  An authorised identity reaches the reset point and resets once (RU-2, W10); an unauthorised one, or none,
+  draws the gate's `session_event_compid_authorization_failed` and no reset (O19). Either way the arm ends `Disconnected`, returns
   success as the base's ending does, and sends no reply Logout (RU-2, DQ-9).
 
 **RR-2 (one owner; RU-1's construction, as ruled 2026-11-17; ownership by construction A, owner 2026-11-18).**
@@ -80,7 +87,9 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
   - Re-derive the claim sites with `git grep -n -e claim_peer_logout_none_ -e note_engine_stop_ -e
     'peer_logout_.phase = ' -- src/session/session.cpp include/fixpp/session/session.hpp`, and read each hit
     (`note_engine_stop_` is defined in the header); a site not in the list above is a
-    change to INV-M.
+    change to INV-M. At the base the recipe also returns `peer_logout_.phase = none` at
+    `install_reconnected_transport` (a new connection) and at the spawn branch's rollback when `co_spawn` throws
+    (the OOM class); neither is a claim.
   - The leaf sets `logout_in_flight_`, and the only place that clears it is `record_state_transition_`'s
     Disconnected edge. After that edge no frame reaches the Active arm.
   - The spawn branch is reached only when the immediate-acknowledgement test of
@@ -124,7 +133,7 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
    - A at its entry (`on_inbound_active_logout_`);
    - L and S at their 35=5 branch, after the garble guard (`on_inbound_logout_sent_`'s 35=5 test, which also
      follows the fault guard; `on_inbound_logon_sent_`'s 35=5 branch ahead of `interpret_logon`). Neither arm
-     suspends between that branch and its reset point (the guards and S's `authorize` call are synchronous), so
+     suspends between that branch and its reset point (the guards and S's mTLS gate, either arm, are synchronous), so
      the marker reaches the reset point in the same strand turn. Any other frame in L or S, the Logon
      acknowledgement included, leaves the marker untouched;
    - B's immediate-acknowledgement branch of `on_inbound_active_too_high_logout_`.
@@ -264,11 +273,8 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
 
 A `close()` started inside the `onLogout` that step 2 fires finds a pump frame's marker `pending`. It waits one
 post first (B-563-2), so the arm reaches step 3 before it, and the wait then covers the unit. Where that post does not move
-the close off the callback's stack (B-563-2's R-7 setup), the close's own wait still covers the receipt, and with
-no clock the receipt is not reset (item 4, a receipt still `pending`). With a clock the arm cannot resume beneath
-the callback while the close polls, so the wait runs to its bound: `session_event_close_reset_wait_expired`, then
-the close-out with no reset (item 4; inferred, not run, and outside `B-563-2`'s rule, which holds only where the
-callback does not run the session's own executor, `L-007-2`). No cell drives that setup. On the bound's route the marker is `none`
+the close off the callback's stack (B-563-2's R-7 setup, where the callback runs the session's own executor),
+104 specifies no ending for L-007-2's setup (undefined in release); no cell. On the bound's route the marker is `none`
 until step 3, and `close()`'s bound join covers the receipt and its unit (RR-2 item 4).
 
 `onLogout` fires on the edge into Disconnected at step 2, so it observes the pre-reset numbers (A, B; L's
@@ -349,7 +355,7 @@ A cell id is given where the row can be driven; its mutant is in research D10.
 | O17 | grace timer of `close(graceful)` expires during L's unit | n/a | phase 1 returns `session_logout_timeout`; the timer branch also force-closes the transport (`live->close()`) before phase 2; the wire is the same (nothing more is sent); `close()` waits for the unit | n/a | n/a | n/a | R-1j |
 | O18 | bound ends unacknowledged (claim by `close()`, stop, another ending's Disconnected, reconnect drain, a Logout in flight) | n/a | n/a | the marker untouched (`none`): the bound wrote nothing, and 103 clears or claims its mark; no reset | n/a | QFC, QFJ: reset (they process a too-high Logout at receipt, `verify(logout, false, false)`) | R-1f |
 | O18a | a second too-high Logout while the bound is `pending` (the ignored branch, either route) | n/a | n/a | the frame is ignored and writes nothing to the marker. The first bound's acknowledgement resets once (O1) | n/a | n/a (QuickFIX processed the first at receipt) | R-1y |
-| O19 | mTLS identity not authorised | n/a | n/a | n/a | rol set: the gate's `session_event_compid_authorization_failed`; no reset; Disconnected; the arm returns success. With rol off the branch does not run (W11): no event | n/a | R-1o |
+| O19 | mTLS identity not authorised, or none (the gate's arm (2), the case of a direct initiator started by `open()`) | n/a | n/a | n/a | rol set: the gate's `session_event_compid_authorization_failed`; no reset; Disconnected; the arm returns success. With rol off the branch does not run (W11): no event | n/a | R-1o |
 | O20 | Logout in NotConnected | — | — | — | — | no reset (QFC `validLogonState` false) | R-1o |
 
 ## Part 2 — endings per arm and input
@@ -362,17 +368,17 @@ A cell id is given where the row can be driven; its mutant is in research D10.
 | W4 | Active, rol set | peer Logout request, M = N | Logout reply at 34 = N_out | pre-reset at `onLogout`; `(1, 1)` after the arm | inbound persist, then `reset_to(1, 1)` with the state Disconnected and the transport open | Disconnected |
 | W5 | Active, rol set, T > 0, a clock | peer Logout with M > N | ResendRequest (as B-103-7); when N passes M or at T, the acknowledgement Logout | as W4, after the acknowledgement | `reset_to(1, 1)` after the acknowledgement, state Disconnected | Disconnected |
 | W6 | W5 pending, then `close()`, stop, the peer's EOF or a reconnect drain | — | as B-103-7 for that route | not reset by rol (O18); rod resets at teardown | no `reset_to` | as that route |
-| W6a | W5 with the bound already `acking`, then `close()`, stop, the peer's EOF or a reconnect drain | — | the acknowledgement Logout | `(1, 1)` | one `reset_to(1, 1)`: the bound runs to its end, because each route joins it (`close()`'s bound join, which the pump's close after the EOF and stop's step 4 reach; `drain_for_reconnect_`'s poll of the bound's counter, before `install_reconnected_transport`) | Disconnected |
+| W6a | W5 with the bound already `acking`, then `close()`, stop, the peer's EOF or a reconnect drain | — | the acknowledgement Logout attempted; on the wire only if its write completes before the transport closes (as O10, O13-r, O15): `Session::close` runs `close_async()` before 103's bound join, `Engine::stop()` closes the transport at its step 2, and on the EOF the peer has gone | `(1, 1)` | one `reset_to(1, 1)`: the bound runs to its end, because each route joins it (`close()`'s bound join, which the pump's close after the EOF and stop's step 4 reach; `drain_for_reconnect_`'s poll of the bound's counter, before `install_reconnected_transport`) | Disconnected |
 | W7 | W3 or W4 with rol **and** rod | — | as W3 / W4 | `(1, 1)` | two resets: the arm's `reset_to`, then the teardown's `reset` | Disconnected |
 | W8 | W3 or W4, receipt reset fails | — | as W3 / W4 | manager `(1, 1)`; store pre-reset when the store refused | logged | Disconnected; arm's return unchanged |
 | W9 | standalone initiator: W3/W4 reset at receipt, then `drive_reconnect`, numbers advance, then `close()` with rol only | — | the new Logon at the numbers as they stand | not reset by the new connection's teardown | no further reset | closed |
 | W10 | LogonSent, rol set; on an mTLS session the identity is authorised (an unauthorised one: O19) | peer Logout | nothing (QuickFIX replies with a Logout) | `(1, 1)` | `reset_to(1, 1)` | Disconnected; the arm returns success |
-| W11 | LogonSent, rol off, whatever the identity (arm S's branch and its `authorize` call do not run: `interpret_logon` refuses the frame as a non-Logon, as the base; no `session_event_compid_authorization_failed`); or NotConnected with any knob | peer Logout | nothing | unchanged | no reset | Disconnected; in LogonSent the arm returns success, as the base |
+| W11 | LogonSent, rol off, whatever the identity (arm S's branch and its mTLS gate do not run: `interpret_logon` refuses the frame as a non-Logon, as the base; no `session_event_compid_authorization_failed`); or NotConnected with any knob | peer Logout | nothing | unchanged | no reset | Disconnected; in LogonSent the arm returns success, as the base |
 | U1 | LogonSent, lenient or unilateral, fixpp's Logon without 141=Y, N ≥ 1 | ack 141=Y, M = 1 | no second Logon; the next frame fixpp sends is 34=1 | inbound next 2, outbound next 1 | `reset_to(2, 1)`; event `by_peer_request = true` | Active |
 | U2 | same | ack 141=Y, M > 1 | no second Logon; on the peer's next frame (34 > 1), ResendRequest 7=1, 16=0 | inbound next 1, outbound next 1 | `reset_to(1, 1)` | Active |
 | U3 | U1 or U2 with 789 enabled and present, 789 = X | X > 1 | Logout "NextExpectedMsgSeqNum too high, expecting 1 but received X" | as after the reset, plus the Logout | reset, then the Logout stored | Disconnected |
 | U4 | `bilateral_strict` or a knob-asked reset (fixpp's Logon carried 141=Y) | any ack | unchanged (today's `check_inbound` against N = 1) | unchanged | unchanged | unchanged |
-| U4m | U1 or U2 on a direct mTLS initiator whose live identity is not authorised for the CompID | — | nothing | unchanged (no unit) | no `reset_to` | Disconnected |
+| U4m | U1 or U2 on a direct mTLS initiator started by `open()`, which fails the Logon path's mTLS gate: it has no live identity, so the gate fails closed in its arm (2), with no `authorize` call (an initiator whose live identity is not authorised fails it in arm (1)) | — | nothing | unchanged (no unit) | no `reset_to` | Disconnected |
 | U5 | after U1 (outbound next 1, nothing sent) | ResendRequest at 34=2, 7=1, 16=0 | one GapFill 34=1, 43=Y, 122=52, 123=Y, 36=1 | inbound next 3 | inbound persist | Active |
 | U6 | Active, any history | ResendRequest whose EndSeqNo ≥ N_out (999999 on FIX.4.0/4.1 included) | as 16=0: the walk to N_out − 1, and an empty-range GapFill's 36 = N_out (never EndSeqNo + 1). With BeginSeqNo B > N_out the GapFill is (34=B, 36=N_out), its NewSeqNo below its MsgSeqNum, QFC's identical frame (`nextResendRequest`'s clamp, then `generateRetransmits`' tail `generateSequenceReset(B, next)`) | unchanged | as today | Active |
 | U7 | U1 or U2 on a persistent store that refuses the unit's `reset_to` | — | nothing after fixpp's Logon | the manager at the unit's targets (`run_reset_unit_` sets it before its store call) | pre-reset (the store refused) | Disconnected; the arm returns the store's error (030's persistent-fatal disposition, unchanged) |
@@ -383,7 +389,7 @@ A cell id is given where the row can be driven; its mutant is in research D10.
 | T5 | T1/T2, `assign_outbound` fails | — | none | as T1 | nothing | Disconnected; that error |
 | T6 | T1/T2, the Logout's store or write fails | — | persistent store failure: none; volatile store failure (024 I-07, logged then sent): T1's Logout; write failure: none on the wire, the Logout stored | as T1 | as the store left it | Disconnected; success |
 | T7 | T1/T2 with rol set | — | as T1 | not reset by this Logout | no reset | Disconnected |
-| T8 | T1/T2 on an mTLS session whose live identity is not authorised for the CompID; on the acceptor also a Logon whose credentials `authorize_logon` refuses | — | nothing (FIX-TC 1S(c): "Disconnect without sending a message") | as T1 | nothing | Disconnected, with the gate's own event |
+| T8 | T1/T2 on an mTLS session whose live identity is not authorised for the CompID, or that has none (the case of a direct initiator started by `open()`: the gate's arm (2), with no `authorize` call); on the acceptor also a Logon whose credentials `authorize_logon` refuses | — | nothing (FIX-TC 1S(c): "Disconnect without sending a message") | as T1 | nothing | Disconnected, with the gate's own event |
 
 **Precedence on one Logon frame** is each arm's code order (research D5), with one change (N-8): a too-low frame
 runs the identity gates before its Logout. An earlier guard (validate gate, `interpret_logon`, posture,
@@ -407,7 +413,7 @@ Logout.
 - The acceptor twin of U1 is unreachable (research D7).
 - The posture, strict and SendingTime refusals and the 1137 Reject still answer before the identity gates on an
   mTLS acceptor, and the posture and SendingTime Logouts before the gate on a direct mTLS initiator
-  (`on_inbound_logon_sent_` runs both ahead of its `authorize` call): a pre-existing departure from FIX-TC 1S(c)'s
+  (`on_inbound_logon_sent_` runs both ahead of its mTLS gate): a pre-existing departure from FIX-TC 1S(c)'s
   principle that 104 does not widen (L-104-3).
 
 ## Superseded by name (header-comment rule, issue #310)

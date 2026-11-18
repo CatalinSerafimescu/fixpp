@@ -103,11 +103,14 @@ Inputs, all on the strand:
 | true | false (**unasked**) | **none** | `seq == 1` | in: 2 if consumed, else 1; out: 1; the unit runs after the mTLS gate |
 
 With rol set, a Logout (35=5) in LogonSent is handled ahead of `interpret_logon` (arm S): marker `pending`; on an
-mTLS session the live identity's authorisation, where an unauthorised one draws the gate's
-`session_event_compid_authorization_failed` and no reset (contract O19); otherwise `Disconnected`, marker
+mTLS session the Logon path's mTLS gate, both arms: with `live_peer_id_` set it calls `authorize` (on an initiator
+that identity is set only by `install_reconnected_transport`, after `reconnect_fsm.cpp`'s step 7 authorised it), and
+with mTLS and no live identity, the case of a direct initiator started by `open()`, it fails closed with the same event and no `authorize`
+call. An unauthorised identity, or none, draws the gate's `session_event_compid_authorization_failed` and no reset
+(contract O19); otherwise `Disconnected`, marker
 `reached`, and the unit (contract RR-1). Either way the arm records `Disconnected`, returns success and sends no
 Logout. With rol off the branch does not run: `interpret_logon` refuses the frame as a non-Logon, the arm records
-`Disconnected` and returns success, with no `authorize` call and no event, as the base (contract RR-1 "Arm S's
+`Disconnected` and returns success, with no mTLS gate (no `authorize` call) and no event, as the base (contract RR-1 "Arm S's
 branch and the knob", W11).
 
 ## The too-low Logout text
@@ -143,7 +146,8 @@ New rows:
   LogoutSent; a too-high Logout, at its acknowledgement; a Logout refusing fixpp's Logon, in LogonSent (no Logout
   is sent there). A received Logout whose processing ends before that point (a `fromAdmin` throw or reject, a late
   parse failure, a failed inbound persist, a reply whose `toAdmin` throws or whose number cannot be assigned, a
-  too-high Logout left unacknowledged, a receipt still short of that point when `close()` could not wait for it,
+  too-high Logout left unacknowledged, a Logout in LogonSent on an mTLS session whose identity is not authorised
+  (no reset; the gate's event), a receipt still short of that point when `close()` could not wait for it,
   B-104-2 stating when) does not reset; only
   `reset_on_disconnect` then resets, at teardown. The
   session records Disconnected first and then resets, so `onLogout` sees the numbers from before the reset. A
@@ -195,7 +199,7 @@ New rows:
   BeginSeqNo above the next outbound number that GapFill is (34 = BeginSeqNo, 36 = next outbound), its NewSeqNo
   below its own MsgSeqNum: the frame QuickFIX C++ and QuickFIX/J send; QuickFIX/Go sends none (104 spec DQ-15).
   Supersedes 027 C3's explicit-end case.
-- **B-104-6** — a frame below NextNumIn in NotConnected or LogonSent draws a Logout with Text "MsgSeqNum too low,
+- **B-104-6** — a Logon (35=A) below NextNumIn in NotConnected or LogonSent draws a Logout with Text "MsgSeqNum too low,
   expecting N but received M", whatever its PossDupFlag, once the identity gates have passed (the mTLS
   CompID-authorisation gate, and on the acceptor `authorize_logon`). A frame they refuse is disconnected with no
   message, as FIX-TC 1S(c) requires. Then Disconnected, with NextNumIn not advanced and no 1409. When the Logout
@@ -228,10 +232,16 @@ New limitations:
   their pre-reset values until the next reset (as the teardown reset, I-07; as QuickFIX/Go). Not a departure
   against QuickFIX C++ either: its `next` catches the store's `IOException` from `nextLogout`'s `m_state.reset`,
   logs it and disconnects (read at v1.16.0). QuickFIX/J's `SessionState.reset` rethrows the store's `IOException`
-  as a `RuntimeError` out of `nextLogout`; where that is caught was not read.
+  as a `RuntimeError` out of `nextLogout` (`throw new RuntimeError(e);`), before `nextLogout`'s
+  `disconnect(msg, false)`. `Session.next(Message, boolean)`'s `catch (Throwable t) { // QFJ-572` rethrows it with
+  `rejectMessageOnUnhandledException` at its default, false (`throw new RuntimeError(t);`), and the event-handling
+  strategy's `catch (Throwable e)` around `quickfixSession.next(message)` logs it with `LogUtil.logThrowable`
+  (`SingleThreadedEventHandlingStrategy.SessionMessageEvent.processMessage`, and
+  `ThreadPerSessionEventHandlingStrategy.MessageDispatchingThread.doRun`, "Error during message processing"):
+  logged, with that Logout's `disconnect` not reached (read at `QFJ_RELEASE_3_0_2`).
 - **L-104-3** — on an mTLS acceptor, the posture, strict and SendingTime refusals and the 1137 Reject are still
   sent before the CompID-authorisation gate, and on a direct mTLS initiator the posture and SendingTime Logouts
-  are still sent before its gate (`on_inbound_logon_sent_` runs both ahead of its `authorize` call), so a
+  are still sent before its gate (`on_inbound_logon_sent_` runs both ahead of its mTLS gate), so a
   TLS-validated peer that is not authorised for the CompID can receive them, and each consumes an outbound number.
   FIX-TC 1S(c) asks for a disconnect with no message there; FIX-TC 1B has no identity sub-case, so on the initiator
   this is a departure from 1S(c)'s principle (clarification N-8, design ruling 5), not from a test case's text.
@@ -253,8 +263,10 @@ New limitations:
 Amended in place:
 - **B-024-1**: its "a Logout teardown (sent OR received)" points to B-104-1 (the trigger is a received Logout at
   its reset point).
-- **B-538-7**: "answered or not" struck in the title, pointing to B-104-1. Each other sentence that states the
-  superseded rule is quoted and replaced in the amendment, as 103 did for B-538-2:
+- **B-538-7**: the title's clause "a Logout that was sent still resets, answered or not" is replaced whole with
+  "since 104 a Logout that was sent never resets; a received one resets at its reset point (B-104-1)". The check
+  is T095's re-run of D8's census, whose key `was sent still resets` must no longer hit the row. Each other sentence
+  that states the superseded rule is quoted and replaced in the amendment, as 103 did for B-538-2:
   - "`run_logout_phase1` sets `logout_seen_` only after its Logout's emit returned success, and the teardown reset
     in `Session::close` runs when that flag and `reset_on_logout` are both set; the other place that sets the flag,
     the receipt of the peer's Logout, is unchanged" becomes "since 104, `run_logout_phase1` does not set
