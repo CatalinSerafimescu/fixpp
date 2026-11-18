@@ -515,6 +515,13 @@ private:
     // must not assign it.
     std::function<asio::awaitable<void>()> test_hook_post_send_drain_;
 
+    // 104-sequence-reset-fidelity (cell R-1t; B-104-7): the step-3 mark. An awaitable hook
+    // stop() awaits on the control strand after step 2's close join and immediately before
+    // step 3's role-loop join. Inert when unset: stop() then only tests it for null. Null
+    // unless a test installs one through engine_test_access (tests/support/, never
+    // installed); production code must not assign it.
+    std::function<asio::awaitable<void>()> test_hook_before_role_loop_join_;
+
 #ifndef NDEBUG
     // T025 (INV-9a / FR-014 / R7): debug-only outstanding-lease counter.
     //

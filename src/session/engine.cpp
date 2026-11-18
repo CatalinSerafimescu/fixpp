@@ -1616,6 +1616,15 @@ asio::awaitable<void> Engine::stop() {
                 }
             }
 
+            // 104 (cell R-1t's step-3 mark; a test seam, inert when unset). 104's stop
+            // ending (contract RR-2 item 4, "Under `Engine::stop()`") rests on step 3's
+            // role-loop join preceding step 4's close(): a receipt arm still in flight in a
+            // role loop finishes its reset unit before step 4 enters close(). A reorder of
+            // steps 3 and 4 must re-read that contract item; cell R-1t pins the order.
+            if (test_hook_before_role_loop_join_) {
+                co_await test_hook_before_role_loop_join_();
+            }
+
             // ── Step 3: JOIN + send-drain ─────────────────────────────────────────
             // JOIN: yield until all loops have co_return'd.
             // The steady_timer uses this_coro::executor = control_strand_, which is
