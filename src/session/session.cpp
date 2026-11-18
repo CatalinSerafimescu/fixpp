@@ -8601,6 +8601,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
 //   empty/short-store GapFill NewSeqNo =
 //               end_is_through_current ? peek_outbound() : (requested_end + 1)
 //
+// 104 (research D3.3a; contract U6; data-model "`replay_outbound_range_`: the end model")
+// supersedes 027 contracts/next-expected-msgseqnum.md C3's explicit-end case by name: after
+// the gate's wait and the store tail read,
+//   end_is_through_current = end_is_through_current || requested_end >= next
+// where `next` is the tail read's next outbound number, or peek_outbound() with no store. A
+// request whose end reaches the next outbound number is answered as one through the current
+// number, as QuickFIX C++ clamps EndSeqNo, so a GapFill's NewSeqNo never passes that number.
+//
 // The helper NEVER calls record_state_transition_ — the CALLER owns all FSM
 // Disconnected transitions. Returns std::unexpected on all failure paths so
 // the caller can detect and handle them.
@@ -8736,6 +8744,9 @@ asio::awaitable<fixpp::core::expected_t<Session::replay_outcome>> Session::repla
     // Resolve the effective end: through-current or clamped to our last stored
     // sequence number. Mirrors the original rr_end resolution.
     seqnum_t our_last = 0;
+    // 104 (research D3.3a): the next outbound number the end model's clamp reads, the tail
+    // read's when there is a store, else the manager's.
+    seqnum_t next_outbound = seqnum_mgr_.peek_outbound();
     if (store_) {
         auto ns = co_await store_->next_seqnum(direction_t::outbound, false);
         // fixpp#538 (.specify/536-537-538-recovery-liveness.md, D-538-4, "The tail
@@ -8747,7 +8758,10 @@ asio::awaitable<fixpp::core::expected_t<Session::replay_outcome>> Session::repla
             co_return std::unexpected(ns.error());
         }
         our_last = (*ns > 0) ? (*ns - 1U) : 0;
+        next_outbound = *ns;
     }
+    // 104 (research D3.3a): the end model's clamp (the function header's formula).
+    end_is_through_current = end_is_through_current || requested_end >= next_outbound;
     const seqnum_t eff_end = (end_is_through_current || (our_last > 0 && requested_end > our_last))
                                  ? our_last
                                  : requested_end;
