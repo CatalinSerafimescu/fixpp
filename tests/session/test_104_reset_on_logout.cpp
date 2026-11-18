@@ -70,6 +70,7 @@
 #include "session/plain_engine_rig.hpp"
 #include "session/resend_gap_scene.hpp"
 #include "support/blocking_write_transport.hpp"
+#include "support/engine_test_access.hpp"
 #include "support/hooked_store.hpp"
 #include "support/seqnum_manager_test_access.hpp"
 #include "support/session_executor_of.hpp"
@@ -1147,6 +1148,8 @@ public:
         app->session = sess.get();
         return true;
     }
+    // The session's config, edited before start_to_active().
+    [[nodiscard]] fixpp::session::SessionConfig& config() { return cfg_; }
     [[nodiscard]] StoreLog& log() const { return *factory->log; }
     [[nodiscard]] Rol104::Numbers manager_numbers() const {
         auto& m = session_test_access::seqnum_mgr(*sess);
@@ -2030,9 +2033,9 @@ TEST(ResetOnLogout104, TerminalEmissionAtResetPoint_ResetOnce) {
 
 namespace {
 
-int close_reset_wait_expired_count(rg::Scene const& s) {
+int close_reset_wait_expired_count(fixpp::session::Session const& sess) {
     int n = 0;
-    for (auto const& ev : s.session->recent_events()) {
+    for (auto const& ev : sess.recent_events()) {
         n += static_cast<int>(
             std::holds_alternative<fixpp::session::session_event_close_reset_wait_expired>(ev));
     }
@@ -2066,7 +2069,7 @@ TEST(ResetOnLogout104, CloseNotHeldWhenReceiptEndsWithoutUnit_FromAdminThrow) {
 
         ASSERT_TRUE(held) << "setup: the reply's store was not held";
         EXPECT_EQ(r.app->from_admin_count("5"), 1) << "setup: fromAdmin did not run on the Logout";
-        EXPECT_EQ(close_reset_wait_expired_count(s), 0) << "close_reset_wait_expired was emitted";
+        EXPECT_EQ(close_reset_wait_expired_count(*s.session), 0) << "close_reset_wait_expired was emitted";
         EXPECT_TRUE(r.log().calls.empty()) << "a reset call: reset() " << r.log().reset_calls
                                            << ", reset_to " << r.log().reset_to_calls;
     }
@@ -2098,7 +2101,7 @@ TEST(ResetOnLogout104, CloseNotHeldWhenReceiptEndsWithoutUnit_StuckPending) {
         ASSERT_TRUE(held) << "setup: the reply's store was not held";
         EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the clock moved";
         EXPECT_TRUE(returned) << "close() did not return past logon_timeout_ms";
-        EXPECT_EQ(close_reset_wait_expired_count(s), 1) << "close_reset_wait_expired events";
+        EXPECT_EQ(close_reset_wait_expired_count(*s.session), 1) << "close_reset_wait_expired events";
     }
 }
 
@@ -2374,4 +2377,154 @@ TEST(ResetOnLogout104, BoundRouteInFlightPumpArm_RefusedAtTheBoundary) {
         EXPECT_EQ(*st, (Numbers104{.in = 1, .out = 1}))
             << "the store after the release: " << st->in << "/" << st->out;
     }
+}
+
+// ── T036: R-1t, Engine::stop() while A's reply store is held ──────────────────────────
+//
+// An Engine session on plain_rig (Live104), rol only, A in Active, A's reply store held in
+// HookedStore. The step-3 mark (engine_test_access::set_before_role_loop_join_hook) runs on
+// stop()'s control strand after step 2's close join and immediately before step 3's role-loop
+// join. stop() must join the role loop, which is held inside A's arm, before step 4 enters
+// close(): so the mark runs with the session not closing, close() is not entered while the
+// hold lasts however far the mock clock moves, and the one reset is A's reset_to, finished
+// before stop() returns.
+
+namespace {
+
+// Every real-time pump from the hold's start to its release is a fraction of kHoldBound, and
+// their sum stays below it (the static_assert), so the hold is ended by the cell's release.
+// The mock clock's advance takes no real time and is not part of the sum.
+constexpr auto kStopOrderBudget = kHoldWindow;      // until the mark ran or close() began
+constexpr auto kStopSettle = kHoldWindow / 2;       // after the clock's advance
+constexpr auto kStopNotDoneBudget = kHoldWindow / 2;  // the pump that must not see stop return
+static_assert(kHoldWindow + kStopOrderBudget + kStopSettle + kStopNotDoneBudget < kHoldBound);
+
+}  // namespace
+
+TEST(ResetOnLogout104, EngineStopDuringReplyStore_JoinWaitsPastTheBound_OneResetByTheArm) {
+    bool mark_ran = false;  // declared before the session: the Engine's hook writes it
+    struct StopRun {
+        bool done = false;
+        std::vector<StoreLog::Call> calls_at_return;   // StoreLog::calls as stop() returned
+        std::vector<StoreLog::Write> writes_at_return;  // StoreLog::writes as stop() returned
+    };
+    auto const stop_run = std::make_shared<StopRun>();
+    Live104 l{session_role::acceptor};
+    auto& c = l.config();
+    ASSERT_TRUE(c.heartbeat_interval.has_value()) << "setup: the rig sets HeartBtInt";
+    // HeartBtInt is four times logon_timeout_ms, so the one advance past logon_timeout_ms
+    // crosses no Heartbeat, TestRequest or liveness-disconnect deadline.
+    c.logon_timeout_ms = static_cast<std::uint32_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(*c.heartbeat_interval).count() / 4);
+    ASSERT_TRUE(l.start_to_active()) << "setup: the session did not reach Active";
+    l.ctl.hold_next_store = true;
+    l.rig.peer.send(l.rig.msg("5", l.manager_numbers().in));
+    ASSERT_TRUE(l.rig.run_until([&] { return !l.log().store_events.empty(); }, kHoldWindow))
+        << "setup: A's reply store was not held";
+
+    // From here every check is non-fatal until stop() has returned.
+    fixpp::session::engine_test_access::set_before_role_loop_join_hook(
+        *l.rig.engine, [&mark_ran]() -> asio::awaitable<void> {
+            mark_ran = true;
+            co_return;
+        });
+    {
+        auto* const eng = l.rig.engine.get();
+        auto const lg = l.factory->log;
+        asio::co_spawn(
+            l.rig.ioc,
+            [eng, lg, stop_run]() -> asio::awaitable<void> {
+                co_await eng->stop();
+                stop_run->calls_at_return = lg->calls;
+                stop_run->writes_at_return = lg->writes;
+                stop_run->done = true;
+            },
+            asio::detached);
+    }
+    auto& sess = *l.sess;
+    (void)l.rig.run_until([&] { return mark_ran || session_test_access::is_closing(sess); },
+                          kStopOrderBudget);
+    bool const mark_ran_first = mark_ran;
+    bool const closing_at_mark = session_test_access::is_closing(sess);
+    l.rig.clock->advance(std::chrono::milliseconds{c.logon_timeout_ms} +
+                         std::chrono::milliseconds{1});
+    l.rig.settle(kStopSettle);
+    bool const closing_after_advance = session_test_access::is_closing(sess);
+    int const expired_in_hold = close_reset_wait_expired_count(sess);
+    bool const stop_returned_in_hold =
+        l.rig.run_until([&] { return stop_run->done; }, kStopNotDoneBudget);
+    bool const hold_in_place = !l.log().hold_timed_out;
+
+    l.ctl.released = true;
+    bool const stop_returned = l.rig.run_until([&] { return stop_run->done; });
+    if (!stop_returned) {
+        // close()'s wait, if it was entered, ends past logon_timeout_ms; then stop() is drained.
+        l.rig.clock->advance(std::chrono::milliseconds{c.logon_timeout_ms} +
+                             std::chrono::milliseconds{1});
+        if (!l.rig.run_until([&] { return stop_run->done; })) {
+            fixpp::test_support::cancel_and_drain_or_report(l.rig.ioc, *l.rig.clock,
+                                                            "ResetOnLogout104 R-1t stop");
+        }
+    }
+
+    EXPECT_TRUE(mark_ran_first) << "the step-3 mark did not run";
+    EXPECT_FALSE(closing_at_mark) << "close() had begun when the step-3 mark ran";
+    EXPECT_FALSE(closing_after_advance) << "close() began during the hold";
+    EXPECT_EQ(expired_in_hold, 0) << "close_reset_wait_expired during the hold";
+    EXPECT_FALSE(stop_returned_in_hold) << "stop() returned during the hold";
+    EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the release";
+    EXPECT_TRUE(stop_returned) << "stop() did not return after the release";
+    EXPECT_FALSE(l.log().hold_timed_out) << "the hold ended by its bound, not its release";
+    int reset_tos = 0;
+    int resets = 0;
+    for (auto const& call : stop_run->calls_at_return) {
+        reset_tos += static_cast<int>(call.kind == StoreLog::call_kind::reset_to);
+        resets += static_cast<int>(call.kind == StoreLog::call_kind::reset);
+    }
+    EXPECT_EQ(reset_tos, 1) << "reset_to calls before stop() returned; reset() calls: " << resets;
+    EXPECT_EQ(resets, 0) << "a reset() call before stop() returned";
+    bool finished_before_return = false;
+    for (auto const& w : stop_run->writes_at_return) {
+        finished_before_return = finished_before_return || w.op == "reset_to 1 1";
+    }
+    EXPECT_TRUE(finished_before_return) << "the reset_to had not finished when stop() returned";
+}
+
+// ── T037: R-2, both knobs, the peer answers ──────────────────────────────────────────
+
+// R-2 (D2): rol and rod; close(graceful) sends the Logout and the peer answers in LogoutSent.
+// Two resets: L's arm's reset_to, seen with the session Disconnected and the transport open,
+// then the teardown's reset(); the numbers end at (1, 1).
+TEST(ResetOnLogout104, BothKnobs_PeerAnswers_TwoResets_EndsOneOne) {
+    Live104 l{session_role::acceptor};
+    l.config().reset_on_disconnect = true;
+    ASSERT_TRUE(l.start_to_active()) << "setup: the session did not reach Active";
+    l.spawn_close(close_mode::graceful);
+    ASSERT_TRUE(l.rig.run_until([&] {
+        return l.rig.state() == fsm_state::LogoutSent && l.peer_frames("5").size() == 1U &&
+               static_cast<bool>(session_test_access::logout_wait_wake(*l.sess));
+    })) << "setup: phase 1's Logout was not sent";
+    l.rig.peer.send(l.rig.msg("5", l.manager_numbers().in));
+    EXPECT_TRUE(l.close_returned_within(4 * std::chrono::milliseconds{kBoundT}))
+        << "close() did not return";
+
+    auto const& calls = l.log().calls;
+    ASSERT_EQ(calls.size(), 2U) << "reset calls: reset() " << l.log().reset_calls << ", reset_to "
+                                << l.log().reset_to_calls;
+    EXPECT_EQ(calls[0].kind, StoreLog::call_kind::reset_to) << "the first call was a reset()";
+    EXPECT_EQ(calls[0].next_in, seqnum_t{1});
+    EXPECT_EQ(calls[0].next_out, seqnum_t{1});
+    ASSERT_TRUE(calls[0].reading.has_value());
+    EXPECT_EQ(calls[0].reading->state, fsm_state::Disconnected)
+        << "the state at the reset_to: " << rg::state_name(calls[0].reading->state);
+#if defined(FIXPP_TEST_PEER_HANG_UP_READING)
+    EXPECT_TRUE(calls[0].reading->transport_open) << "the transport was closed at the reset_to";
+#else
+    std::cout << "[ READING  ] the transport reading is not made on this platform\n";
+#endif
+    EXPECT_EQ(calls[1].kind, StoreLog::call_kind::reset) << "the second call was not the teardown's";
+    EXPECT_EQ(l.manager_numbers(), (Rol104::Numbers{.in = 1, .out = 1}));
+    auto const st = l.store_numbers();
+    ASSERT_TRUE(st.has_value()) << "the store's numbers were not read";
+    EXPECT_EQ(*st, (Rol104::Numbers{.in = 1, .out = 1}));
 }
