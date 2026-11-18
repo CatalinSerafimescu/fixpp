@@ -1495,7 +1495,9 @@ void reply_ending(session_role const role, reply_end const end) {
     }
     auto const res = s.feed(s.logout(n));
     EXPECT_EQ(s.state(), fsm_state::Disconnected) << "the arm's ending";
-    EXPECT_EQ(s.count("5", mark), 0U) << "a reply on the wire: " << s.written(mark);
+    // The reply is sent before the persist, so only PersistFailure's reply reaches the wire.
+    EXPECT_EQ(s.count("5", mark), end == reply_end::persist_failure ? 1U : 0U)
+        << "replies on the wire: " << s.written(mark);
     if (end == reply_end::to_admin_throw && !res) {
         EXPECT_EQ(res.error(), fixpp::core::error::app_callback_threw);
     }
