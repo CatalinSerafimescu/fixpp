@@ -6,8 +6,10 @@
 //
 // Phase 2 (Foundational) witnesses — T004:
 //   WalkExtraction_TwoValueEnd_ExplicitEndBeyondStore (ResendRequest-caller half):
-//     request [10,20], store through 5 => GapFill NewSeqNo=21, NOT 6.
-//     Guards the shipped 013 ResendRequest path regression (I-NEX-3).
+//     an explicit EndSeqNo at or above the next outbound number is answered as a request
+//     through the current number: the GapFill's NewSeqNo is the next outbound number.
+//     104 (research D3.3a, contract U6) supersedes 027 contracts/next-expected-msgseqnum.md
+//     C3's explicit-end case, NewSeqNo = EndSeqNo + 1, by name.
 //   WalkExtraction_TwoValueEnd_EndSeqNo0_EmptyStore (ResendRequest-caller half):
 //     EndSeqNo=0 / through-current, empty store => GapFill NewSeqNo=peek_outbound().
 //   WalkExtraction_SingleImplementation:
@@ -490,10 +492,14 @@ std::unique_ptr<Fixture> make_initiator(std::shared_ptr<MessageStoreFactory> sto
 // after extraction, because the loop moves 1:1 — but the second grep for
 // the function name is RED before extraction).
 
-// T004 witness 1 (ResendRequest-caller half, research D-5, I-NEX-3):
-// Peer sends ResendRequest([10,20]) when our store only has [1..5].
-// Response MUST be SequenceReset-GapFill with NewSeqNo=21 (rr_end+1), NOT 6
-// (eff_end+1). This guards the two-value end model in the existing inline walk.
+// T004 witness 1 (ResendRequest-caller half, research D-5, I-NEX-3), re-pinned by 104
+// (research D3.3a, contract U6), which supersedes 027 C3's explicit-end case by name:
+// Peer sends ResendRequest([10,20]) when our store only has [1..5]. EndSeqNo is above the
+// next outbound number, so the request is answered as one through the current number, and
+// the GapFill's NewSeqNo is the next outbound number, not EndSeqNo + 1. QuickFIX C++ answers
+// the same request with the same GapFill: it clamps EndSeqNo to the next outbound number
+// (`nextResendRequest`), then `generateRetransmits` ends on `generateSequenceReset(begin,
+// next)`.
 TEST(WalkExtraction, TwoValueEnd_ExplicitEndBeyondStore) {
     // Store has seqnums [1..5]; next outbound = 6.
     auto fix = make_acceptor(std::make_shared<ShortStoreFactory>(5));
@@ -507,10 +513,10 @@ TEST(WalkExtraction, TwoValueEnd_ExplicitEndBeyondStore) {
     auto gf_it = std::ranges::find_if(frames, frame_is_gapfill);
     ASSERT_NE(gf_it, frames.end()) << "Expected a SequenceReset-GapFill response";
 
-    // NewSeqNo(36) MUST be rr_end+1 = 21, NOT eff_end+1 = 6.
+    // NewSeqNo(36) is the next outbound number, not rr_end + 1.
     const std::string new_seqno = extract_tag(*gf_it, 36);
-    EXPECT_EQ(new_seqno, "21")
-        << "Two-value-end regression: GapFill NewSeqNo must be 21 (rr_end+1), not 6 (eff_end+1)";
+    EXPECT_EQ(new_seqno, "6")
+        << "104 end model: GapFill NewSeqNo must be the next outbound number, not rr_end + 1";
 
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
 }

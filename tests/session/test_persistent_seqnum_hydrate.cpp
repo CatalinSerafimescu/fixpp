@@ -2667,9 +2667,11 @@ TEST(PersistentSeqnumHydrate, INV_H1_Initiator_789BehindSide_NoOverPersist) {
 // emit time, seqnums_at_one=false → initr_reset_seqnum=false → latch=false.
 // Fixpp emits its Logon WITHOUT 141=Y.
 //
-// The peer then spontaneously sends a Logon with 141=Y at seq=37 (in-sequence
-// against manager=37). bilateral_lenient accepts this without requiring we sent
-// 141=Y first.
+// The peer then spontaneously sends a Logon with 141=Y at seq=37. bilateral_lenient
+// accepts this without requiring we sent 141=Y first. Since 104 (research D4, ruling O-2)
+// an acknowledgement with 141=Y that fixpp's Logon did not ask for is compared with 1, not
+// with NextNumIn: at a MsgSeqNum above 1 it resets the numbers and is not consumed, so
+// NextNumIn is 1 afterwards.
 //
 // Expected post-conditions:
 //   - outbound STAYS at post-reset baseline (NOT restored to 2): latch=false →
@@ -2686,8 +2688,8 @@ TEST(PersistentSeqnumHydrate, INV_H1_Initiator_789BehindSide_NoOverPersist) {
 // at emit → seqnums_at_one=false) is the ONLY gate that correctly rejects the
 // reconstruction. [032 contract C4, FR-005/FR-006, research R3, W8]
 //
-// NOTE: feed at seq=37 (in-seq for the hydrated manager=37). seq=1 would be
-// too-low → fatal → wrong path.
+// NOTE: the feed's MsgSeqNum is the hydrated NextNumIn, so the frame would pass a
+// sequence check against NextNumIn; the unasked rule above compares it with 1 instead.
 // [[feedback_witness_asserts_named_postcondition_not_proxy]] (distinct seed from asserted)
 TEST(PersistentSeqnumHydrate, W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous141Y) {
     // Store seeded {in=37, out=1}: manager hydrates to next_inbound=37 after open().
@@ -2737,7 +2739,7 @@ TEST(PersistentSeqnumHydrate, W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous
                "(seqnums_at_one=false → initr_reset_seqnum=false → latch=false)";
     }
 
-    // Feed peer spontaneous Logon with 141=Y at seq=37 (in-sequence).
+    // Feed peer spontaneous Logon with 141=Y at seq=37, the hydrated NextNumIn.
     // bilateral_lenient: peer-spontaneous 141=Y is accepted without requiring fixpp to have
     // sent it first.
     manual_fix->feed(make_logon_reset("FIX.4.4", 37, "SRV", "CLI"));
@@ -2774,6 +2776,13 @@ TEST(PersistentSeqnumHydrate, W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous
         << "T004 W8: hydrated {37,1} initiator — latch=false → outbound MUST stay 1 "
            "after peer-spontaneous 141=Y (no restore). RC1 reconstruction would "
            "restore to 2. [032 contract C1, FR-005, W8]";
+
+    // 104 (research D4, ruling O-2; contract U2): an unasked 141=Y acknowledgement above 1
+    // is not consumed, so NextNumIn is 1 after its reset.
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*manual_fix->session)
+                  .next_inbound_unsafe(),
+              fixpp::session::seqnum_t{1})
+        << "W8: an unasked 141=Y acknowledgement above 1 is not consumed (104, U2)";
 }
 
 // ── T014 W5/W6: persistent store interaction on the outbound restore arm ──────
