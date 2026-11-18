@@ -1470,10 +1470,10 @@ private:
         bool tic, std::span<const std::byte> frame) noexcept;
     [[nodiscard]] inbound_result_t on_inbound_logon_sent_(
         bool tic, std::span<const std::byte> frame) noexcept;
-    // The LogonSent arm's mTLS CompID-authorisation gate, both its arms: false when it
+    // The Logon path's mTLS CompID-authorisation gate, both its arms: false when it
     // refuses the identity (its event emitted, a live identity consumed; the caller records
-    // Disconnected), true when it admits it or the session is not mTLS. Its callers are the
-    // Logon-ack path and, 104, arm S's Logout branch.
+    // Disconnected), true when it admits it or the session is not mTLS. Its callers, both Logon
+    // arms (104): `git grep -n 'logon_sent_identity_admitted_()' -- src`.
     [[nodiscard]] bool logon_sent_identity_admitted_() noexcept;
     // The Active arm's synchronous SendingTime(52) MaxLatency check.
     [[nodiscard]] bool inbound_sending_time_ok_(
