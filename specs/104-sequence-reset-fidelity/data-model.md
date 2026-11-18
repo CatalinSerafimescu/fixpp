@@ -1,8 +1,8 @@
 # Data Model: 104 sequence-reset fidelity
 
 All the state below is private to `Session` and lives on the session strand. No public type, configuration key or
-default changes. No member is added or renamed. One member keeps its name and changes its type and contract
-(`logout_seen_`, `bool` → a one-byte enum). One member is deleted: `reset_unit_wake_`, the waker of 093's
+default changes. No `Session` member is added or renamed (the one `Engine` member is B-104-7). One member keeps
+its name and changes its type and contract (`logout_seen_`, `bool` → a one-byte enum). One member is deleted: `reset_unit_wake_`, the waker of 093's
 event-driven wait, which `close()`'s poll replaces (contract RR-2 item 4; re-derive its users with
 `git grep -n reset_unit_wake_ -- src include tests`). So `sizeof(Session)` is expected to shrink. There is no pin on
 it to move (re-derive: `git grep -n "sizeof(Session)\|sizeof(fixpp::session::Session)" tests include src`).
@@ -176,11 +176,19 @@ New rows:
   message, as FIX-TC 1S(c) requires. Then Disconnected, with NextNumIn not advanced and no 1409. The endings when
   the Logout cannot be sent are those of research D5's table. It is not a `reset_on_logout` trigger. It is sent
   with `validate_sequence_numbers` off too. Retires L-103-7. Amends B-103-10's "In Active".
-- **B-104-7** — `sizeof(Session)` shrinks, a C++ layout change in an installed header, in the shape of B-544-3 and
-  B-103-11. `reset_unit_wake_`, the waker of 093's event-driven `close()` wait, is deleted; `logout_seen_` changes
+- **B-104-7** — `sizeof(Session)` shrinks and `sizeof(Engine)` changes, C++ layout changes in installed headers,
+  in the shape of B-544-3 and B-103-11. `reset_unit_wake_`, the waker of 093's event-driven `close()` wait, is deleted; `logout_seen_` changes
   from `bool` to a one-byte enum. A C++ consumer that compiles against the installed header observes it and must be
   rebuilt; as B-544-3, the row carries no BREAKING mark. No C-ABI change: the C ABI exposes `Session` only through
-  an opaque handle.
+  an opaque handle. `sizeof(Engine)` changes too, a C++ layout change in the installed header
+  `include/fixpp/session/engine.hpp`, before the first release: `Engine` gains R-1t's step-3 mark, a private test
+  seam beside `test_hook_post_send_drain_`, set only through `engine_test_access`. A C++ consumer that compiles
+  against the installed header observes it and must be rebuilt; the row carries no BREAKING mark for it either. No
+  C-ABI change: the C ABI exposes `Engine` only through the opaque `fixpp_engine_t`. Re-derive the members: every
+  added non-static data member in `git diff origin/main...HEAD -- include/fixpp/session/engine.hpp`. No test or
+  source pins either size: `git grep -nE 'sizeof ?\([^)]*\b(Engine|Session)\b' -- tests include src` has no hit at
+  the base, and the same pattern with `FieldRef` in place of the two names hits (its known positive); the full
+  `-k 0` build is the check that nothing else depends on it.
 
 New limitations:
 - **L-104-1** — a ResendRequest answered when fixpp has sent nothing at or above BeginSeqNo writes a GapFill whose

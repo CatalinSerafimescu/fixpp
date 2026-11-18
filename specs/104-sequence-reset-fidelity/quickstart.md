@@ -100,14 +100,18 @@ Cells with a forced-hit or a competing-timer element:
   cell asserts which store call ran (R-1l: none). R-1k and R-1u assert that the reset finished before `close()`
   returned, and R-1t before `Engine::stop()` returned. R-1u's mutant splits the reset point's strand turn and must
   go RED.
-- **R-1t.** While the reply's `store` is held: start stop, pump until the raw peer sees step 2's EOF, pump once
-  more, then advance the mock clock past `logon_timeout_ms` twice, pumping between (the order is in research D10,
-  with the HeartBtInt ratio that keeps liveness deadlines out of the advances). Assert no
-  `close_reset_wait_expired` and that stop has not completed; release, and assert stop completes (the known
-  positive) and one `reset_to`. Stop's step 3 join is a yield loop on a zero-delay timer, so the io_context never
-  idles while it waits: pump with a bounded run on a condition (`run_for`, a slice loop), never an unbounded
-  `poll()` or `run()`. Its mutant moves step 4's `close()` ahead of step 3's join and must go RED as an assertion
-  failure, not an abort; deleting the join is not the mutant (INV-6).
+- **R-1t.** While the reply's `store` is held: install the step-3 mark (a private `Engine` test seam, set through
+  `engine_test_access`, that `Engine::stop()` awaits after step 2's close join and immediately before step 3's
+  role-loop join), start stop, and pump, bounded on a condition, until the mark has run or
+  `session_test_access::is_closing` holds. Assert that the mark ran and the session is not closing. Then advance
+  the mock clock once past `logon_timeout_ms` and pump (research D10 has the HeartBtInt ratio that keeps liveness
+  deadlines out of the advance). Assert that the session is still not closing, no `close_reset_wait_expired`, and
+  stop has not completed; release, and assert stop completes (the known positive) and one `reset_to`. Stop's step 3
+  join is a yield loop on a zero-delay timer, so the io_context never idles while it waits: pump with a bounded
+  run on a condition (`run_for`, a slice loop), never an unbounded `poll()` or `run()`. Release the hold and pump
+  stop to completion on every exit path. Its mutant moves step 4's `close()` loop above the mark, ahead of step 3's
+  join, and must go RED at the order assertion, as an assertion failure, not an abort; deleting the join is not the
+  mutant (INV-6).
 - **R-1b.** The drop's close must complete before `logout_disconnect_timeout_ms`. Assert the completion instant
   against the grace deadline, so the timer cannot be what ended the wait.
 - **R-1j.** Assert that the store hold is reached in the LogoutSent arm (state `Disconnected`, transport open,

@@ -42,7 +42,8 @@ re-record.
 
 No C ABI, configuration-key or public-type change. `logout_seen_` changes from `bool` to a one-byte enum, and
 `reset_unit_wake_` is deleted (contract RR-2 item 4), so `sizeof(Session)` is expected to shrink; nothing pins it
-(research D10).
+(research D10). `Engine` gains one private member, R-1t's step-3 mark, so `sizeof(Engine)` changes, a layout
+change in the installed `engine.hpp` with no C-ABI change; nothing pins it either (B-104-7).
 
 ## Technical Context
 
@@ -113,7 +114,10 @@ accounted for on its own:
 - `replay_outbound_range_`'s end model.
 - One member's type and contract changed (`logout_seen_`, `bool` → a one-byte enum). One member deleted
   (`reset_unit_wake_`), with `run_logout_phase1`'s comment that names it as "the pattern close() uses" reworded. No
-  member added or renamed.
+  `Session` member added or renamed.
+- One private `Engine` member added: R-1t's step-3 mark, a test seam beside `test_hook_post_send_drain_`, set through
+  `engine_test_access` and awaited by `Engine::stop()` between step 2's close join and step 3's join. So
+  `sizeof(Engine)` changes: a layout change in an installed header, disclosed in B-104-7, with no C-ABI change.
 - Doc comments in `session.hpp` (the member, `drive_reconnect`'s latch paragraph) and `session_config.hpp`
   (`reset_on_logout`, `reset_on_disconnect`).
 - Two CI basis files.
@@ -177,6 +181,9 @@ src/session/session.cpp                    # D1 (the receipt arms A/L/B/S and th
                                            # text builder, Arm B's caller)
 include/fixpp/session/session.hpp          # logout_seen_'s type and contract comment (FR-006); drive_reconnect's latch paragraph
 include/fixpp/session/session_config.hpp   # reset_on_logout / reset_on_disconnect doc comments (receipt rule, names 104)
+include/fixpp/session/engine.hpp           # R-1t's step-3 mark: a private test seam beside test_hook_post_send_drain_
+src/session/engine.cpp                     # Engine::stop() awaits that seam, when set, between step 2's close join and step 3's join
+tests/support/engine_test_access.hpp       # its setter
 tests/session/test_104_reset_on_logout.cpp       # R-1a … R-1z, R-2
 tests/session/test_104_unasked_reset_ack.cpp     # U-1 … U-9
 tests/session/test_104_logon_too_low.cpp         # T-1 … T-6 (T-4a … T-4e)
@@ -192,7 +199,8 @@ ci/expected-eligible-tests.txt, ci/ctest-parallelism-probe.md   # FR-017 (phase 
 ```
 
 **Structure Decision**: library-internal session changes, test buckets and records. No new public symbol, type,
-error code or configuration key.
+error code or configuration key; R-1t's step-3 mark is a private `Engine` member, reached only through the existing
+`engine_test_access` friend.
 
 ## Phases (for /speckit-tasks)
 
@@ -377,6 +385,7 @@ result and every RED/GREEN/mutant record, never code comments.
 - Round 3 (loop 1 exhausted) 2026-11-18: Codex P1=2 P2=0 P3=0; Opus post-judging P1=2 P2=0 P3=1 (RC-1: one marker, several owners on route B). Fable consult 104-receipt-reset-marker-ownership: probable. Owner chose a targeted amendment with construction A; loop 2 follows. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_3_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_3_adversarial_review.md.
 - Loop 2 round 1 applied 2026-11-18: Codex P1=1 P2=0 P3=0; Opus post-judging P1=0 P2=1 P3=3; rewrite addresses N-1 (P2), N-2, N-3, Codex #1 (downgraded P3). Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_4_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_4_adversarial_review.md.
 - Loop 2 round 2 applied 2026-11-18: Codex P1=1 P2=0 P3=0; Opus post-judging P1=0 P2=2 P3=0; rewrite corrects the Engine::stop() rows (role-loop join, L-563-4, L-093-12) and adds the stop cell. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_5_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_5_adversarial_review.md.
+- Loop 2 round 3 (loop 2 exhausted) 2026-11-18: Codex P1=0 P2=1 P3=0; Opus post-judging P1=0 P2=1 P3=0 (R-1t can stay GREEN under its reorder mutant). Owner chose: apply the judge's three verbatim edits, then a fresh narrow confirmation loop. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_6_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_6_adversarial_review.md.
 
 ### Round 1 — disagreements
 
@@ -478,4 +487,5 @@ result and every RED/GREEN/mutant record, never code comments.
   `Session::open` falls back from a null `clock_override` to that clock, so an Engine session always has one.
   R-1t's clock arm, advanced past `logon_timeout_ms`, is the discriminating cell. A "clock never advanced" twin is
   not a substitute: under the reorder mutant `close()` would wait out the hold and reset once, so it would stay
-  GREEN against the mutant listed for it, which is New-1's defect again.
+  GREEN against the mutant listed for it, which is New-1's defect again. (Superseded in part by loop 2 round 3: the
+  decisive check is now the step-3 mark's order assertion; the clock advance stays as the bound's contrast.)

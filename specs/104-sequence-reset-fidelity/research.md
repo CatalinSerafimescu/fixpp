@@ -236,7 +236,7 @@ teardown reset" is deleted, with nothing received resetting the new connection).
   - Every observable is equal under the alternatives: the wire, the final numbers and the store state. Only the
     count of store I/O differs, and it is not on the wire.
   - QFC and QFJ also reset twice on this path: `nextLogout`'s reset, then `disconnect()`'s `ResetOnDisconnect`
-    (QFC `:325-327`, `:638-640`; QFJ `:1484-1485`, `:2169`).
+    (QFC `if (m_resetOnLogout)`, `if (m_resetOnDisconnect)`; QFJ `if (resetOnLogout ||`, `if (resetOnDisconnect ||`).
   - Keeping C5.1 literal needs no new member, so there is no `sizeof(Session)` change and no new
     connection-scoped latch to clear at reconnect.
 - **Alternatives.** *Collapse the pair with a connection-scoped "receipt reset done" latch, cleared at
@@ -283,8 +283,10 @@ teardown reset" is deleted, with nothing received resetting the new connection).
   injected 141=Y and also sends 789 sends the 789 its own pre-reset state computed: X = N_out + 1 in QR Part C's
   QFC trace, where `generateLogon` sets 789 before `toAdmin`. So X > 1, and fixpp sends Logout "NextExpectedMsgSeqNum too high,
   expecting 1 but received X" and records Disconnected.
-- QFC (`:228-236`, after its reset at `:206`) and QFJ (`:2263`, after `resetState` at `:2222-2224`) do the same.
-  QFGo skips 789 when 141 is present (`session.go:571`).
+- QFC `nextLogon` (`nextExpectedMsgSeqNum.getValue() > getExpectedSenderNum()`, after its reset under
+  `if (!m_state.sentReset())`) and QFJ `nextLogon` (`targetWantsNextSeqNumToBe > actualNextNum`, after `resetState`
+  under `if (!state.isResetSent())`) do the same. QFGo skips 789 when 141 is present (`session.go` `handleLogon`,
+  `!msg.Body.Has(tagResetSeqNumFlag)`).
 - **Decision: unchanged**, with the QFGo departure listed. It needs `enable_next_expected_msg_seq_num` and a 789
   on the acknowledgement.
 
@@ -293,20 +295,24 @@ teardown reset" is deleted, with nothing received resetting the new connection).
 - **The peer.** By QR Part C, a QFC or QFGo acceptor that injected 141=Y through `toAdmin` reset its own store
   in `sendRaw`/`prepMessageForSend`. It then finds fixpp's Logon at 34 = N_out too high and sends
   ResendRequest(34=2, 7=1, 16=0). QFJ with `LogonTag=141=Y` instead disconnects itself after the acknowledgement
-  (QFJ `:2290-2292`).
+  (QFJ `nextLogon`, `if (state.isResetSent() && !state.isResetReceived())`).
 - **fixpp's numbers.** After D3.1, NextNumIn is 2, so the ResendRequest is in sequence, and next outbound is 1.
 - **The engines' answer to RR(7=1, 16=0) at next outbound 1, persistent store:** nothing is sent.
-  - QFC clamps EndSeqNo to `getExpectedSenderNum() - 1 = 0` (`:378-382`). `generateRetransmits(1, 0)` retrieves
-    nothing, and its tail `if (endSeqNo > msgSeqNum)` (`:495`) is `0 > 0`.
-  - QFJ clamps the same way (`manageGapFill`, `:1360-1370`). In `resendMessages(1, 0)`,
-    `generateSequenceResetIfNeeded`'s `endSeqNo > msgSeqNum` (`:2458`) is false.
-  - QFGo clamps the same way (`in_session.go:204-208`). `IterateMessages(1, 0)` yields nothing, and
-    `seqNum != nextSeqNum` (`:279`) is false.
+  - QFC clamps EndSeqNo to 0 (`nextResendRequest`, `endSeqNo = getExpectedSenderNum() - 1;`).
+    `generateRetransmits(1, 0)` retrieves nothing, and QFC `generateRetransmits`'s tail `if (endSeqNo > msgSeqNum)`
+    is `0 > 0`.
+  - QFJ clamps the same way (`manageGapFill`, `endSeqNo = expectedSenderNum - 1;`). In `resendMessages(1, 0)`,
+    QFJ `generateSequenceResetIfNeeded`'s `if (endSeqNo > msgSeqNum)` is false.
+  - QFGo clamps the same way (`in_session.go` `handleResendRequest`, `endSeqNo = expectedSeqNum - 1`).
+    `IterateMessages(1, 0)` yields nothing, and QFGo `resendMessages`'s `if seqNum != nextSeqNum {` is false.
 - **fixpp's answer today.** `replay_outbound_range_` takes its `!store_ || our_last == 0 || begin > eff_end`
   branch and writes one GapFill at `begin`.
   - With 16=0 it is GapFill(34=1, 43=Y, 123=Y, 36 = `peek_outbound()` = 1). NewSeqNo equals the receiver's
-    expected number, which all three treat as a no-op: QFC `nextSequenceReset` `:356-360`, QFJ `:1556-1579`, QFGo
-    `handleSequenceReset` `:166-176`. Neither branch fires, and no Reject is sent.
+    expected number, which all three treat as a no-op: QFC `nextSequenceReset` (`newSeqNo > getExpectedTargetNum()`,
+    `newSeqNo < getExpectedTargetNum()`), QFJ `nextSequenceReset` (`newSequence > getExpectedTargetNum()`,
+    `newSequence < getExpectedTargetNum()`), QFGo `in_session.go` `handleSequenceReset`
+    (`case newSeqNo > expectedSeqNum:`, `case newSeqNo < expectedSeqNum:`). Neither branch fires, and no Reject is
+    sent.
   - **Decision: kept**, disclosed as L-104-1. It is benign, and fixpp sends the same GapFill(N, N) shape that QFC
     and QFJ send when begin = next > 1.
   - **With an explicit EndSeqNo** (16 = 999999 on FIX.4.0/4.1, which all three engines send for those versions,
@@ -362,13 +368,16 @@ field definition and §4.4.2 treat 141=Y as a reset of both sides (FD). The aske
 ### D4 — A 141=Y acknowledgement at 34 = M ≠ 1 on a lenient or unilateral initiator (US2 AS4)
 
 **The engines, read:**
-- **QFC** accepts and resets. `isTargetTooHigh(M) && !resetSeqNumFlag` is false (`:254`), so it increments its
-  target to 2 and sends no ResendRequest (it also replies with its own Logon).
-- **QFJ** accepts and resets (`verify` skips the sequence checks when a reset was received, `:1831`). Then
-  `isLogonInNormalSequence` is false (`:2250`), and `doTargetTooHigh(logon)` (`:2308`) queues the Logon and sends
-  ResendRequest from 1.
-- **QFGo** accepts and resets (`session.go:530-544`). Then `checkTargetTooHigh` (`:587`) returns `targetTooHigh`,
-  and `doTargetTooHigh` sends ResendRequest(1, 0) and enters `resendState` (`logon_state.go:47-53`).
+- **QFC** accepts and resets. At 34 = M, `nextLogon`'s `isTargetTooHigh(msgSeqNum) && !resetSeqNumFlag` is false,
+  so it increments its target to 2 and sends no ResendRequest (it also replies with its own Logon).
+- **QFJ** accepts and resets (`verify` skips the sequence checks when a reset was received,
+  `if(!state.isResetReceived()){`). Then `nextLogon`'s `isLogonInNormalSequence` is false
+  (`!(isTargetTooHigh(sequence) && !resetOnLogon)`), and QFJ `nextLogon`'s `doTargetTooHigh(logon);` queues the
+  Logon and sends ResendRequest from 1.
+- **QFGo** accepts and resets (`session.go` `handleLogon`, `resetStore = true`, then
+  `if err := s.store.Reset(); err != nil {`). Then QFGo `handleLogon`'s `s.checkTargetTooHigh(msg)` returns
+  `targetTooHigh`, and `doTargetTooHigh` sends ResendRequest(1, 0) and enters `resendState` (`logon_state.go`
+  `(s logonState) FixMsgIn`, `case targetTooHigh:`).
 - None ends the session. No QuickFIX engine produces this acknowledgement: each one's injection path resets in
   `sendRaw` and stamps 34=1 (QR Part C).
 
@@ -413,7 +422,8 @@ field definition and §4.4.2 treat 141=Y as a reset of both sides (FD). The aske
   - `inbound_logout_leaf_` returns early unless `fsm_state_ == Active`. `inbound_logon_sent_logout_leaf_` assigns
     before `toAdmin` and does not disconnect.
 - **The text.** It is "MsgSeqNum too low, expecting N but received M": byte for byte QFC `doTargetTooLow`
-  (`:1105-1118`), QFJ `:1878-1885` and QFGo `targetTooLow.Error()` (`session_rejects.go:45-46`).
+  (`"MsgSeqNum too low, expecting "`), QFJ `doTargetTooLow` (`"MsgSeqNum too low, expecting "`) and QFGo
+  `targetTooLow.Error()` (`session_rejects.go`, `"MsgSeqNum too low, expecting %d but received %d"`).
   - N is `seqnum_mgr_.next_inbound_unsafe()`: refused, so not advanced.
   - M is `parse_seqnum(hdr.msg_seq_num)`, written with `std::to_chars`. The peer's bytes are not echoed.
   - The builder is one file-local function, shared with 103's Arm B (`on_inbound_active_out_of_sequence_`), so
@@ -455,10 +465,11 @@ field definition and §4.4.2 treat 141=Y as a reset of both sides (FD). The aske
     is not reached.
   - The gates run through the helpers that make today's checks, so the event, the one-shot `live_peer_id_`
     consumption and the silent Disconnected are identical to the in-sequence path's.
-  - The order agrees with QFC `verify` (`:976-1018`: logon state, SendingTime, CompID, then too-high or too-low)
+  - The order agrees with QFC `verify` (`validLogonState`, `isGoodTime`, `isCorrectCompID`, then `isTargetTooHigh`
+    or `isTargetTooLow`: logon state, SendingTime, CompID, then too-high or too-low)
     and QFGo `verifySelect` (BeginString, CompID, SendingTime, too-low).
-  - QFJ refuses a bad DefaultApplVerID before `verify` (`:2188-2199`), which fixpp checks after the sequence
-    check. That is pre-existing, outside 104, and not changed.
+  - QFJ refuses a bad DefaultApplVerID before `verify` (`nextLogon`, `"Invalid DefaultApplVerID="`), which fixpp
+    checks after the sequence check. That is pre-existing, outside 104, and not changed.
 - **The identity gates (clarification N-8, reversing round 0's disclosure).** FIX-TC 1S(c) (`fixdocs/tc.txt`,
   §4.4.1): a Logon "received with unauthenticated/non-configured identity (e.g. invalid SenderCompID(49), invalid
   TargetCompID(56), invalid source IP address, etc. vs. system configuration)" is answered by "Disconnect without
@@ -469,7 +480,8 @@ field definition and §4.4.2 treat 141=Y as a reset of both sides (FD). The aske
   SendingTime refusals and the 1137 Reject still answer before the gates; that is pre-existing, 104 does not
   widen it, and L-104-3 now discloses it (DQ-6). Proposed follow-up: an issue for it, filed and labelled in phase 9.
 - **`validate_sequence_numbers` off.** The Logon arms' `check_inbound` ignores the knob (pre-existing), so the
-  Logout is sent with the knob off too. QFJ skips its too-low check at Logon when the knob is off (`:2216`).
+  Logout is sent with the knob off too. QFJ skips its too-low check at Logon when the knob is off (`nextLogon`,
+  `if (!verify(logon, false, validateSequenceNumbers))`).
   Disclosed in B-104-6.
 
 #### Rationale
@@ -480,12 +492,14 @@ sends it in Active.
 ### D6 — A too-low Logon or acknowledgement with PossDupFlag(43)=Y
 
 - **Read.**
-  - QFC `doTargetTooLow` routes 43=Y to `doPossDup` (`:1083-1103`): no 122 → Reject 373=1 371=122; 122 > 52 →
-    Reject and Logout. `verify` then returns false and `nextLogon` returns with the Logon unprocessed, so the
-    session waits for its logon timeout.
-  - QFJ: `validatePossDup` in `doTargetTooLow` (`:1878-1885`), with the same shape.
-  - QFGo's `checkTargetTooLow` (`session.go:679-690`) ignores 43, so the arm sends "MsgSeqNum too low …" via
-    `shutdownWithReason` (`logon_state.go:44-46`, `:75-90`).
+  - QFC `doTargetTooLow` routes 43=Y to `doPossDup` (`return doPossDup(msg);`): no 122 → Reject 373=1 371=122
+    (`doPossDup`'s `SessionRejectReason_REQUIRED_TAG_MISSING`); 122 > 52 → Reject and Logout
+    (`origSendingTime > sendingTime`). `verify` then returns false and `nextLogon` returns with the Logon
+    unprocessed, so the session waits for its logon timeout.
+  - QFJ: `validatePossDup` in `doTargetTooLow` (`validatePossDup(msg);`), with the same shape.
+  - QFGo's `checkTargetTooLow` (`session.go`, `seqNum < s.store.NextTargetMsgSeqNum()`) ignores 43, so the arm
+    sends "MsgSeqNum too low …" via `shutdownWithReason` (`logon_state.go` `(s logonState) FixMsgIn`'s
+    `case targetTooLow:`, then `shutdownWithReason`'s `logout := session.buildLogout(reason)`).
   - FIX-SL §4.3.11 has no PossDup exception for the Logon (FD). Only §4.8.1, the general rule, has one.
   - fixpp at the base: a silent Disconnected, which matches none of them.
 - **Decision.** The Logon arms send D5's Logout for every too-low frame, whatever its 43. That is QFGo and
@@ -703,8 +717,8 @@ The text of every new and amended row is data-model.md "B&L delta". In summary:
 - No C-ABI change. `reset_on_logout` has no C-ABI setter: re-derive with
   `git grep -n reset_on_logout -- include/fix src/capi bindings`, which has no hit at the base. The TOML key and
   default are unchanged.
-- No member is added or renamed. `logout_seen_` changes from `bool` to a one-byte enum, and `reset_unit_wake_` is
-  deleted (data-model). No test pins `sizeof(Session)`: `git grep -n "sizeof(Session)\|sizeof(fixpp::session::Session)" tests include src` has no
+- No `Session` member is added or renamed; one private `Engine` member is added, R-1t's step-3 mark (B-104-7).
+  `logout_seen_` changes from `bool` to a one-byte enum, and `reset_unit_wake_` is deleted (data-model). No test pins `sizeof(Session)`: `git grep -n "sizeof(Session)\|sizeof(fixpp::session::Session)" tests include src` has no
   hit at the base; the full `-k 0` build (phase 7, phase 8) is the check that nothing else depends on it.
 - The public C++ header `session_config.hpp`'s comment on `reset_on_logout` changes. That is documentation, not
   API.
@@ -734,7 +748,7 @@ store call it saw (`reset_to` is the unit; `reset` is the teardown).
 | R-1q | `…BoundRouteFrameDuringUnit_Drained` (B, HookedStore holds `reset_to`) | a frame at 34 > 1 fed during the hold: no ResendRequest, no inbound advance, no `fromApp` | as R-1p | as R-1p |
 | R-1r | `…BoundRouteInFlightPumpArm_RefusedAtTheBoundary` (B; a pump arm with a write after the bound's wake, held in HookedStore across the bound's unit) | after release: nothing the in-flight arm writes reaches the wire or the store's numbers; store and manager `(1, 1)` | as R-1p | delete RR-4's boundary test in `store_then_emit` (one arm) and in `persist_inbound_advance_` (a second arm) → the in-flight write lands → RED. The mutant is the same on either route: if phase 0 finds no Active sub-arm that writes after a suspension following `check_inbound`, the cell drives the boundary through the test seam `session_test_access::store_then_emit` after a receipt reset, and records the reading |
 | R-1s | `…CloseWaitsForLogonArmUnit_NoKnob` (no knob, initiator 141=Y acknowledgement, HookedStore holds `reset_to`) | `close()` during the hold does not return before release (B-104-2's other half) | base's wait is inside the predicate block, which no knob opens | move the wait back inside the predicate block |
-| R-1t | `…EngineStopDuringReplyStore_JoinWaitsPastTheBound_OneResetByTheArm` (O15; rol only, A in Active, on `plain_engine_rig.hpp`'s mock-clock Engine with a HookedStore, as `engine_reset_unit_stop_test.cpp` does; HookedStore holds the reply's `store`) | during the hold, in this order: start `Engine::stop()`; pump, bounded on a condition, until the raw peer sees step 2's EOF; one more bounded pump; advance the mock clock past `logon_timeout_ms`, pump, and advance it past `logon_timeout_ms` again (so the ending does not depend on when a mutated `close()` took its deadline). HeartBtInt is set so that no Heartbeat, TestRequest or liveness-disconnect deadline falls inside the two advances, a ratio stated in the cell, so no liveness-driven `close()` competes for the same hold. Then, with the hold still in place: no `session_event_close_reset_wait_expired`, and stop's completion is not observed after a pump bounded on a condition. Known positive: the same harness observes stop's completion once the hold is released. After the release: exactly one `reset_to`, no `reset`, recorded before stop returns. **No no-clock twin**: an Engine session always has a clock (`validate_engine_config` at `Engine::start` refuses a null `EngineConfig::clock`, and `Session::open` falls back from a null `clock_override` to it), so the input has no form under stop. The contrast with R-1l is past the bound instead: there `close()` closes the receipt out, here stop waits | base: the teardown's `reset`, no `reset_to` | dispatch step 4's `close(terminal)` before step 3's role-loop join (Codex's rejected reorder, plan.md `## Gate A`) → `close()` sees `pending`, polls past the bound and closes it out → zero `reset_to` and one `close_reset_wait_expired` → RED, as an assertion failure, not an abort. Not "delete the join": that is the registry use-after-free step 3 prevents (INV-6), a crash rather than a discriminating RED |
+| R-1t | `…EngineStopDuringReplyStore_JoinWaitsPastTheBound_OneResetByTheArm` (O15; rol only, A in Active, on `plain_engine_rig.hpp`'s mock-clock Engine with a HookedStore, as `engine_reset_unit_stop_test.cpp` does; HookedStore holds the reply's `store`; plus the step-3 mark: a private `Engine` test seam set through `engine_test_access`, awaited by `Engine::stop()` on the control strand after step 2's close join and immediately before step 3's role-loop join) | during the hold, in this order: install the step-3 mark (the cell's hook sets a flag and returns); start `Engine::stop()`; pump, bounded on a condition, until the mark has run or `session_test_access::is_closing` holds for the session. Each arm reaches exactly one of the two with no clock advance: the candidate reaches the mark with the session not closing; a `close()` dispatched before step 3's join sets `closing` at entry and then waits, so the mark does not run. Assert that the mark ran and the session is not closing: the order, read directly. Then advance the mock clock once past `logon_timeout_ms` and pump, bounded by a settle window. HeartBtInt is set so that no Heartbeat, TestRequest or liveness-disconnect deadline falls inside the advance, a ratio stated in the cell, so no liveness-driven `close()` competes for the same hold. Then, with the hold still in place: the session is still not closing, no `session_event_close_reset_wait_expired`, and stop's completion is not observed after a pump bounded on a condition. Known positive: the same harness observes stop's completion once the hold is released. After the release: exactly one `reset_to`, no `reset`, recorded before stop returns. On every exit path the cell releases the hold, pumps stop to completion and drops its session handle before the Rig is destroyed, so a failed assertion stays an assertion failure. **No no-clock twin**: an Engine session always has a clock (`validate_engine_config` at `Engine::start` refuses a null `EngineConfig::clock`, and `Session::open` falls back from a null `clock_override` to it), so the input has no form under stop. The contrast with R-1l is past the bound instead: there `close()` closes the receipt out, here stop waits | base: the teardown's `reset`, no `reset_to` | move step 4's `close(terminal)` loop to between step 2's close join and the step-3 mark, ahead of step 3's role-loop join (Codex's rejected reorder, plan.md `## Gate A`) → `close()` is entered during the hold and sets `closing`, then waits in RR-2 item 4's poll, which cannot expire before the cell's advance, so the mark does not run → the order assertion fails → RED, as an assertion failure, not an abort, whatever instant the poll took its bound. Not "delete the join": that is the registry use-after-free step 3 prevents (INV-6), a crash rather than a discriminating RED |
 | R-1u | `…CloseInsideOnLogout_ResetOnceByTheArm` (A in Active, a clock; `close(terminal)` started inside the `onLogout` the arm's Disconnected write fires) — ruled case "`reached`, unit not started, teardown → one reset" | exactly one `reset_to`, no `reset`, finished before `close()` returns; the hook sees state Disconnected | base: the teardown's `reset`, no `reset_to` | split RR-2 item 3's turn (a post between the marker's `reached` and `run_reset_unit_`) → `close()`'s posted body runs in that window, finds `reached` and no unit in flight, passes its wait and drains the manager; the unit's manager calls then fail → zero resets → RED. This is the input the teardown's "`reached`, unit not started" term would need; item 3 leaves it none |
 | R-1v | `…ReplyStoreCancelled_NoReset` (A in Active, rol only, a mock clock; a cell-local store double whose outbound `store()` returns `store_cancelled` for the reply) — O9 | the number is taken back (manager next outbound N_out again); Disconnected; no frame; no `reset_to`, no `reset`; the owner cleared the marker while `operation_aborted` unwound the arm: a later `close()` returns with the mock clock below `logon_timeout_ms` and no `close_reset_wait_expired`. Forced-hit arm: R-1n's `StoreFailure` input on the same double resets. The thrown timing reaches the same block after the `try` (D-OUT-2), so this one cell witnesses both | base: the teardown's `reset` (flag set at receipt) | clear the marker on return only, not during unwinding → the marker stays `pending` → `close()` polls to `logon_timeout_ms` and emits the event → RED |
 | R-1w | `…CloseNotHeldWhenReceiptEndsWithoutUnit_{FromAdminThrow,Storeless,StuckPending}` (A in Active, rol, a mock clock) | `FromAdminThrow`: `close()` started during a held reply `store`; the hold released; `fromAdmin` throws; with the mock clock advanced to just below `logon_timeout_ms`, `close()` has returned, no `close_reset_wait_expired`, no reset. `Storeless`: no store (`store_factory` null), the reply's transport write held (the `arm_block()` / `release()` pattern of `ControlledWriteTransport`, `test_live_outbound_serialized.cpp`); `close()` started during the hold; released: the arm reaches its reset point, `run_reset_unit_` returns before setting `reset_unit_in_flight_`, manager `(1, 1)`; `close()` returned as above. Phase 1 reads whether the held write outlasts `close()`'s `close_async()`, which cancels and joins an in-flight operation. If it does not, the storeless exit has no input while `close()` waits, like the manager failure, and the poll covers it by construction: the arm is dropped and that reading is recorded. `StuckPending`, the instrument's forced hit: the hold never released and the mock clock advanced to the bound → one `close_reset_wait_expired`. The manager-failure exit has no input while `close()` waits: the manager refuses only after `close()`'s `seqnum_mgr_.drain()`, which follows the wait | base: `FromAdminThrow` resets at teardown; `Storeless` has no receipt unit | restore 093's event wait (`unit_done.async_wait \|\| await_deadline`, woken only at the unit's completion) widened to `pending` → `close()` runs to the bound and emits `close_reset_wait_expired` in `FromAdminThrow` and `Storeless` → RED |
