@@ -2129,7 +2129,7 @@ TEST(ResetOnLogout104, CloseInsideOnLogout_ResetOnceByTheArm) {
 // R-1x: a direct Session, A in Active, rol, a clock. The cell spawns the Logout's
 // on_inbound_frame bound to its own cancellation slot and emits a terminal cancellation on it
 // from inside the onLogout that the reset point fires. Exactly one reset_to(1, 1), the numbers
-// (1, 1), no reset. (Its "marker `reached`" assertion lands with the marker's accessor, T040.)
+// (1, 1), no reset, and the receipt marker `reached` once the frame has completed.
 TEST(ResetOnLogout104, TerminalEmissionAtResetPoint_ResetOnce) {
     for (auto const role : kRoles) {
         SCOPED_TRACE(rg::role_name(role));
@@ -2159,6 +2159,11 @@ TEST(ResetOnLogout104, TerminalEmissionAtResetPoint_ResetOnce) {
         EXPECT_TRUE(frame_done) << "the frame did not complete";
         expect_one_reset_to_one_one_disconnected(r);
         EXPECT_EQ(r.manager_numbers(), (Rol104::Numbers{.in = 1, .out = 1}));
+        EXPECT_TRUE(session_test_access::logout_seen(*s.session) ==
+                    session_test_access::receipt_marker::reached)
+            << "the marker after the frame: "
+            << static_cast<int>(session_test_access::logout_seen(*s.session))
+            << " (none 0, pending 1, reached 2)";
         r.spawn_close(close_mode::terminal);
         EXPECT_TRUE(r.close_returned_within(kReleaseBudget)) << "close() did not return";
         EXPECT_EQ(r.log().reset_calls, 0) << "a reset() call";

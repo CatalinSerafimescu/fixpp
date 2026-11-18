@@ -320,6 +320,14 @@ struct session_test_access {
         return s.waited_terminal_closes_;
     }
     [[nodiscard]] static bool logout_cut(Session const& s) noexcept { return s.logout_cut_; }
+
+    // 104 (data-model "`logout_seen_`"): the receipt marker, read by value, and its type
+    // under a name a cell can spell (the type is private to Session). Read it on the
+    // session's serialisation domain.
+    using receipt_marker = Session::receipt_marker;
+    [[nodiscard]] static receipt_marker logout_seen(Session const& s) noexcept {
+        return s.logout_seen_;
+    }
 };
 
 }  // namespace fixpp::session

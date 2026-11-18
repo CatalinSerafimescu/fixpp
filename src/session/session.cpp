@@ -2489,7 +2489,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     //
     // [contracts/reset-knobs.md C3.1, C4.1, C4.2, C5.1; plan.md Complexity row 3]
     if (!teardown_reset_done_ &&
-        ((logout_seen_ && cfg_.reset_on_logout) || cfg_.reset_on_disconnect)) {
+        ((logout_seen_ != receipt_marker::none && cfg_.reset_on_logout) ||
+         cfg_.reset_on_disconnect)) {
         teardown_reset_done_ = true;
         // 093 (contract C-6 "close()"; data-model E-10; plan OD-1): a 141=Y reset unit's
         // store operation is in flight, so wait for it, or this reset could land before
@@ -5540,7 +5541,7 @@ Session::on_inbound_active_too_high_logout_(bool tic, seqnum_t seq) noexcept {
     assert(peer_logout_.phase != peer_logout_mark::phase_t::acking);
     // As on_inbound_active_logout_ does first, so a configured reset_on_logout fires whichever
     // ending follows.
-    logout_seen_ = true;
+    logout_seen_ = receipt_marker::reached;
     // 103 (spec FR-021's crossing clause; FIX-SL §4.6, §4.10.2): while the session is itself
     // ending, the bound could not acknowledge: its claim refuses while a Logout of the session
     // is in flight (the owner, research D4.6), and its "live" test while a close has begun or
@@ -6057,7 +6058,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
     // Both Active (emit-confirming-Logout → Disconnected) and LogonReceived
     // (Disconnected directly per [FIX-SL §4.6]) paths are covered.
     // [contracts/reset-knobs.md C3.1; plan.md Gate A convergence note (b)]
-    logout_seen_ = true;
+    logout_seen_ = receipt_marker::reached;
 
     if (fsm_state_ == fsm_state::Active) {
         // 103 (research D4.6): the in-sequence Logout claims a pending mark; its own
@@ -8239,7 +8240,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     // A Logout that was cut is not placed on the wire and left by the exit above, so
     // the set is skipped for it (fixpp#590; `.specify/563-564-callback-send.md` §2.6,
     // ruling R-8).
-    logout_seen_ = true;
+    logout_seen_ = receipt_marker::reached;
 
     // 103 (research D4.6): an inbound ending recorded Disconnected while this Logout was in
     // its store call, so it was that ending's reply: no LogoutSent and no wait for one.

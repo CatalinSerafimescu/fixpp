@@ -1731,22 +1731,29 @@ private:
     // graceful-close completes normally or times out. Single-writer on strand.
     bool logout_confirmed_ = false;
 
-    // 024 T013 — logout_seen_: set to true at EXACTLY two Logout-specific sites:
-    //   (a) run_logout_phase1(): local graceful-Logout-sent path
-    //       (session.cpp, before record_state_transition_(LogoutSent)).
-    //   (b) on_inbound_frame() Active branch: inbound peer-Logout 35=5 receipt.
-    // Used by the teardown reset predicate in close() (T014).
-    // Site (a) is skipped for a Logout that was cut (fixpp#590;
-    // `.specify/563-564-callback-send.md` §2.6, ruling R-8): that Logout is
-    // stored and not transmitted, so it is not a Logout that was sent.
-    //
-    // NOT derived from onLogout_fired_ — that flag fires on ANY Active→!Active
-    // transition (including abnormal terminal close with no Logout), so it is a
-    // "left-Active" predicate, not a "logout-seen" predicate. Keying the teardown
-    // reset on onLogout_fired_ would collapse reset_on_logout into reset_on_disconnect,
-    // contradicting C4.2. [contracts/reset-knobs.md C3.1; plan.md Gate A note (b)]
-    // Additive POD; no new include → no std::mutex in the awaitable closure [const §XV.9].
-    bool logout_seen_ = false;
+    // logout_seen_, the receipt marker. 104-sequence-reset-fidelity (data-model
+    // "`logout_seen_`"; contract RR-2) supersedes 024 T013 and 024
+    // contracts/reset-knobs.md C3.1's "a Logout in either direction" by name: with
+    // reset_on_logout set, the reset is made when a Logout RECEIVED from the peer
+    // reaches its arm's reset point, and never for a Logout fixpp sends.
+    //   RO-1: with reset_on_logout set, the marker is `pending` exactly while one awaited
+    //         read-pump frame of a receipt arm (contract RT-1, "a peer Logout received by
+    //         an awaited read-pump frame") is between its receipt and its reset point or
+    //         exit; that frame is its one owner. It leaves `pending` once: to `reached` (the
+    //         frame at its reset point, or close() closing out a receipt it could not wait
+    //         for, with no reset) or to `none` (the frame's owner). A too-high Logout's
+    //         detached bound never makes it `pending` (its owed receipt is the 103 mark,
+    //         peer_logout_.phase); the bound writes it once, `none` to `reached`, at its
+    //         reset point. With reset_on_logout off the marker stays `none`.
+    //   RO-2: no Logout that fixpp sends changes the marker.
+    //   RO-3: a receipt reset has one owner, the arm's reset unit, which close() waits for;
+    //         the teardown never resets a `pending` receipt, and an arm that finds `reached`
+    //         at its reset point runs no unit.
+    // The writers and readers: `git grep -n logout_seen_ -- src include`.
+    // One byte by its underlying type; no new include, so no std::mutex in the awaitable
+    // closure [const §XV.9].
+    enum class receipt_marker : std::uint8_t { none, pending, reached };
+    receipt_marker logout_seen_ = receipt_marker::none;
 
     // 024 T014 — teardown_reset_done_: single-fire guard for the teardown reset in
     // close(). Prevents a logout+disconnect double-trigger (graceful Logout → timeout
