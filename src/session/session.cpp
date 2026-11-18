@@ -842,6 +842,10 @@ bool Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Tr
     // connection exists (the drain waited for its counter), so the mark is cleared here.
     peer_logout_.phase = peer_logout_mark::phase_t::none;
     ++conn_gen_;
+    // 104 (contract RR-2 item 6, RR-6 item 2): a received Logout never resets a later
+    // connection, and ruling W's hold ends with the connection it was set on.
+    logout_seen_ = receipt_marker::none;
+    wire_closed_by_reset_ = false;
 
     // 3. Re-enter LogonSent so on_inbound_frame drives back to Active.
     //    The session's next peer Logon-ack will be processed by the LogonSent
@@ -1006,12 +1010,13 @@ std::shared_ptr<fixpp::transport::Transport> Session::live_transport_shared_() c
 // If no live transport is present, returns ok (no-op; pre-live path).
 // NEVER holds the gate across any read (write-submit→complete window only).
 // [transport.hpp's [2h §4.1] RC#3 in-flight contract; FQ-A D-6; gate-b/r2]
-asio::awaitable<fixpp::core::expected_t<void>> Session::live_write_serialized_(
-    std::span<const std::byte> frame) noexcept {
+asio::awaitable<fixpp::core::expected_t<Session::live_write_outcome>>
+Session::live_write_serialized_(std::span<const std::byte> frame,
+                                wire_reset_exemption exemption) noexcept {
     auto live = live_transport_shared_();
     if (!live) {
         // No live transport — pre-live path, no-op.
-        co_return fixpp::core::expected_t<void>{};
+        co_return live_write_outcome::written;
     }
 
     // Acquire the write gate across the completion (not just up to suspension).
@@ -1034,6 +1039,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::live_write_serialized_(
         co_return std::unexpected(fixpp::core::error::dispatch_aborted);
     }
 
+    // 104 (contract RR-6 item 3, ruling W): after the grant and before the write, so every
+    // frame granted the gate once a reset point has run, one that waited on it included, is
+    // held back; a write already handed to the transport before the reset point completes.
+    // The exemption is fixpp's own Logout in a crossing (RR-6 item 4).
+    if (wire_closed_by_reset_ && exemption != wire_reset_exemption::crossing_logout) {
+        co_return live_write_outcome::held_back;
+    }
+
     // Gate held — at most one async_write in-flight. `live` shared_ptr is the
     // keepalive so the transport cannot be freed while we are suspended here.
     fixpp::core::expected_t<std::size_t> write_r;
@@ -1049,7 +1062,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::live_write_serialized_(
     if (!write_r.has_value()) {
         co_return std::unexpected(fixpp::core::error::dispatch_aborted);
     }
-    co_return fixpp::core::expected_t<void>{};
+    co_return live_write_outcome::written;
 }
 
 // 015 T011 — Acceptor attach primitive.
@@ -1259,6 +1272,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::persist_inbound_advance_
     if (!store_is_persistent_) {
         co_return fixpp::core::expected_t<void>{};
     }
+    // 104 (contract RR-4, "By construction"): once the receipt marker is `reached`, no new
+    // inbound persist is issued; the caller continues as after a write. A persist issued
+    // earlier runs to its end (RR-2 item 5).
+    if (logout_seen_ == receipt_marker::reached) {
+        co_return fixpp::core::expected_t<void>{};
+    }
     auto r = co_await store_->next_seqnum(direction_t::inbound, /*increment=*/true);
     if (!r) {
         disconnect_unless_superseded_(arm);
@@ -1391,7 +1410,7 @@ bool Session::enter_receipt_reset_point_() noexcept {
         assert(logout_seen_ == receipt_marker::none &&
                "104 RR-2 item 5: the too-high Logout's bound found the receipt marker not none at "
                "its reset point");
-        logout_seen_ = receipt_marker::reached;
+        mark_reset_point_reached_();
         return true;
     }
     assert(logout_seen_ != receipt_marker::none &&
@@ -1400,7 +1419,7 @@ bool Session::enter_receipt_reset_point_() noexcept {
     if (logout_seen_ == receipt_marker::reached) {
         return false;
     }
-    logout_seen_ = receipt_marker::reached;
+    mark_reset_point_reached_();
     return true;
 }
 
@@ -7944,7 +7963,7 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
 //  gate-b/r1-green: RC#B surfaces transport throws as dispatch_aborted]
 asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
     seqnum_t stamped_seq, std::span<const std::byte> frame, std::optional<fsm_state> arm,
-    bool transmit) {
+    bool transmit, wire_reset_exemption exemption) {
     // 034 T006 (C2 / R4): credential redaction at the single store boundary.
     // Mask the Password(554) value in a PRIVATE copy before it is persisted; the
     // wire path (Step 2) transmits the caller's ORIGINAL unmasked `frame`.
@@ -7993,6 +8012,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
 
     // Step 1: store (durable-before-transmit).
     if (store_ && !skip_store) {
+        // 104 (contract RR-4, "By construction"): once the receipt marker is `reached` (a
+        // reset point has run, or close() closed a receipt out), no new store call is issued:
+        // the number is taken back, as D-OUT-1 does for a cancelled call, and the call ends
+        // as one does, dispatch_aborted with no frame. A call issued before the marker became
+        // `reached` was not tested here and runs to its end (RR-2 item 5).
+        if (logout_seen_ == receipt_marker::reached) {
+            seqnum_mgr_.take_back_outbound(stamped_seq);
+            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+        }
         // The try takes what the store awaitable lets out: operation_aborted, when a
         // cancellation is met before the store's lock, and any exception of a store's
         // body.
@@ -8070,8 +8098,23 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
         // frame the store refused keeps 059's code; it is inside this branch, so that a
         // frame sent with no store call is not tested; and it is ahead of the superseded
         // test below. It returns a value: this frame's own store call was not cancelled.
+        // 104 (contract RR-6 item 3, loop 5's N-1 ruling): while a reset point has run on this
+        // connection, a frame refused here ends as one held back at the transmit does, with
+        // success and nothing transmitted, before the time of the last outbound frame;
+        // fixpp's own Logout in a crossing carries the exemption and is transmitted (RR-6
+        // item 4). While wire_closed_by_reset_ is clear, the refusal keeps dispatch_aborted:
+        // the lowerings that need no reset point (a reconcile, a take-back) are R-19's.
+        // The other lowering writers, read against "phase 1 has numbered its Logout":
+        // `git grep -n -E
+        // 'seqnum_mgr_\.(take_back_outbound|hydrate|reset_to_one|set_next_outbound)\(|reset_seqnums_to_one_durable\(|run_reset_unit_\('
+        // -- src/session/session.cpp`.
         if (stamped_seq >= seqnum_mgr_.peek_outbound()) {
-            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+            if (!wire_closed_by_reset_) {
+                co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+            }
+            if (exemption != wire_reset_exemption::crossing_logout) {
+                co_return fixpp::core::expected_t<void>{};
+            }
         }
     }
 
@@ -8107,11 +8150,20 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
     {
         if (live_transport_shared_()) {
             // Live path: serialized write through write_gate_.
-            auto write_r = co_await live_write_serialized_(frame);
+            auto write_r = co_await live_write_serialized_(frame, exemption);
             if (!write_r.has_value()) {
                 co_return std::unexpected(fixpp::core::error::dispatch_aborted);
             }
+            // 104 (contract RR-6 item 3): held back after a reset point; success with no
+            // transmit, as the transmit=false exit returns.
+            if (*write_r == live_write_outcome::held_back) {
+                co_return fixpp::core::expected_t<void>{};
+            }
         } else if (transport_send_) {
+            // 104 (contract RR-6 item 3): the config-time sink's site of ruling W's test.
+            if (wire_closed_by_reset_ && exemption != wire_reset_exemption::crossing_logout) {
+                co_return fixpp::core::expected_t<void>{};
+            }
             // Config-time sync sink (pre-live / test path).
             try {
                 transport_send_(frame);
@@ -8348,8 +8400,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         // cancelled store call, among them. `sent` then keeps dispatch_aborted. Nothing
         // is awaited in the handler, nor after it on the path that leaves early.
         try {
-            sent = co_await store_then_emit(logout_seq, *logout_result, std::nullopt,
-                                            /*transmit=*/!cut);
+            // 104 (contract RR-6 item 4): the exemption's one origin, fixpp's own Logout in
+            // a crossing. Census by category: `git grep -n 'crossing_logout' -- src include`
+            // (the declaration; this origin; the pass-through to live_write_serialized_; the
+            // comparisons, D-OUT-10's lift and the sink test in store_then_emit, the grant
+            // test in live_write_serialized_).
+            sent =
+                co_await store_then_emit(logout_seq, *logout_result, std::nullopt,
+                                         /*transmit=*/!cut, wire_reset_exemption::crossing_logout);
         } catch (...) {  // NOLINT(bugprone-empty-catch): the outcome is in `sent`
         }
     }
@@ -8500,10 +8558,15 @@ asio::awaitable<fixpp::core::expected_t<Session::replay_outcome>> Session::repla
     // for pre-live/test paths.
     const auto transmit_async = [&](std::span<const std::byte> f) -> asio::awaitable<bool> {
         if (live_transport_shared_()) {
+            // A frame held back by ruling W is a success (104, contract RR-6 item 3).
             auto wr = co_await live_write_serialized_(f);
             co_return wr.has_value();
         }
         if (!transport_send_) {
+            co_return true;
+        }
+        // 104 (contract RR-6 item 3): ruling W's test at the sink; it takes no exemption.
+        if (wire_closed_by_reset_) {
             co_return true;
         }
         try {

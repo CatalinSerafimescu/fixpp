@@ -1769,6 +1769,20 @@ private:
             logout_seen_ = receipt_marker::none;
         }
     }
+    // 104-sequence-reset-fidelity (contract RR-6, ruling W; data-model "`wire_closed_by_reset_`"):
+    // set when a reset point has run on this connection, so nothing more is transmitted on it
+    // (the class: work in flight across the write of `reached`). Set only with the marker's
+    // `reached` at a reset point, by mark_reset_point_reached_(); never by close()'s
+    // close-out, which is why it is not the marker; cleared by install_reconnected_transport.
+    // The places a frame is handed to the transport read it: `git grep -n
+    // wire_closed_by_reset_ -- src include`. Session strand only.
+    bool wire_closed_by_reset_ = false;
+    // The reset point's two writes, in one statement block (contract RR-6 item 2): the
+    // marker's `reached` and wire_closed_by_reset_.
+    void mark_reset_point_reached_() noexcept {
+        logout_seen_ = receipt_marker::reached;
+        wire_closed_by_reset_ = true;
+    }
     // 104 (contract RR-2 items 2, 3 and 5): the marker's move at a receipt arm's reset point,
     // called with reset_on_logout set, after the arm has reset its thread's cancellation state
     // and immediately before the unit it starts. True when the caller runs the reset unit.
@@ -2041,9 +2055,17 @@ private:
     //   write nor the synchronous sink runs, and the time of the last outbound frame
     //   is not updated. Only run_logout_phase1 passes it; every other caller takes
     //   the default.
+    // exemption: 104 (contract RR-6 item 4) lifts ruling W for fixpp's own Logout in a
+    //   crossing: while wire_closed_by_reset_ is set, a call carrying crossing_logout is
+    //   transmitted where every other frame is held back, and D-OUT-10 does not refuse it.
+    //   Only run_logout_phase1 passes it. While wire_closed_by_reset_ is set, a frame held back
+    //   at D-OUT-10 or at the transmit (no exemption) returns success with nothing
+    //   transmitted, before the time of the last outbound frame is updated.
+    enum class wire_reset_exemption : std::uint8_t { none, crossing_logout };
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store_then_emit(
         seqnum_t stamped_seq, std::span<const std::byte> frame,
-        std::optional<fsm_state> arm = std::nullopt, bool transmit = true);
+        std::optional<fsm_state> arm = std::nullopt, bool transmit = true,
+        wire_reset_exemption exemption = wire_reset_exemption::none);
 
     // fixpp#518, 093 (data-model E-13; contract C-6): true when a Logon arm must stop
     // after a resume, because the session left the state the arm expects while the arm
@@ -2177,8 +2199,13 @@ private:
     // NEVER holds the gate across any read — guards write-submit→complete only.
     // [transport.hpp In-flight exclusivity; FQ-A D-6;
     // feedback_async_mutex_us3_asio_cancel_and_subagent_seams]
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> live_write_serialized_(
-        std::span<const std::byte> frame) noexcept;
+    // 104 (contract RR-6 item 3): `held_back` when, after the gate's grant, a reset point has
+    // run on this connection and the call carries no exemption: nothing is handed to the
+    // transport, and the caller treats it as success with no transmit.
+    enum class live_write_outcome : std::uint8_t { written, held_back };
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<live_write_outcome>>
+    live_write_serialized_(std::span<const std::byte> frame,
+                           wire_reset_exemption exemption = wire_reset_exemption::none) noexcept;
 
     // run_logout_phase1: emit Logout frame, then wait for peer Logout-confirm
     // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a
