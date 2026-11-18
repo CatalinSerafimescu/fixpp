@@ -2039,8 +2039,9 @@ int close_reset_wait_expired_count(rg::Scene const& s) {
 }  // namespace
 
 // R-1w FromAdminThrow: close(terminal) is started during A's held reply store; the hold is
-// released and fromAdmin throws. With the mock clock moved to 99/100 of logon_timeout_ms,
-// close() has returned, with no close_reset_wait_expired and no reset.
+// released and fromAdmin throws. With the mock clock moved to just below logon_timeout_ms
+// (the advance below states the ratio), close() has returned, with no
+// close_reset_wait_expired and no reset.
 TEST(ResetOnLogout104, CloseNotHeldWhenReceiptEndsWithoutUnit_FromAdminThrow) {
     for (auto const role : kRoles) {
         SCOPED_TRACE(rg::role_name(role));
