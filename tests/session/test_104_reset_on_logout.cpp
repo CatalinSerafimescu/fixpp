@@ -1727,3 +1727,123 @@ TEST(ResetOnLogout104, ReceiptResetStoreFailure_LoggedThenDisconnected) {
             << "the teardown retried the reset";
     }
 }
+
+// ── T030: R-1j, R-1k and R-1s, close() waits for a unit ──────────────────────────────────
+
+// R-1j: L's arm's reset_to is held. The hold is reached in L's arm (Disconnected, the
+// transport open, phase 1 not woken); close_grace, a real-time timer of
+// logout_disconnect_timeout_ms (an eighth of kHoldBound here), expires during the hold and
+// closes the transport while close() is still pending on the unit; the mock clock is never
+// moved. After the release, close() returns and the numbers are (1, 1).
+TEST(ResetOnLogout104, CloseWaitsForReceiptUnit) {
+    constexpr auto kGrace = std::chrono::duration_cast<std::chrono::milliseconds>(kHoldBound) / 8;
+    int woken = 0;  // declared before the session: the wrapped wake writes it
+    std::optional<int> woken_at_reset;
+    Live104 l{session_role::acceptor, static_cast<std::uint32_t>(kGrace.count())};
+    l.factory->hooks.on_reset = [&] { woken_at_reset = woken; };
+    ASSERT_TRUE(l.start_to_active()) << "setup: the session did not reach Active";
+    l.spawn_close(close_mode::graceful);
+    ASSERT_TRUE(l.rig.run_until([&] {
+        return l.rig.state() == fsm_state::LogoutSent && l.peer_frames("5").size() == 1U &&
+               static_cast<bool>(session_test_access::logout_wait_wake(*l.sess));
+    })) << "setup: phase 1's Logout was not sent";
+    auto& wake = session_test_access::logout_wait_wake(*l.sess);
+    wake = [orig = wake, &woken] {
+        ++woken;
+        orig();
+    };
+    l.rig.peer.send(l.rig.msg("5", l.manager_numbers().in));
+    bool const held = l.rig.run_until([&] { return woken_at_reset.has_value(); }, kHoldWindow);
+    bool const transport_closed =
+        l.rig.run_until([&] { return l.rig.peer.read_ended; }, kReleaseBudget);
+    bool const close_pending = !l.close_run->done;
+    l.ctl.released = true;
+    bool const close_returned = l.close_returned_within(kReleaseBudget);
+
+    ASSERT_TRUE(held) << "setup: no reset call was held";
+    ASSERT_FALSE(l.log().calls.empty());
+    auto const& c = l.log().calls.front();
+    EXPECT_EQ(c.kind, StoreLog::call_kind::reset_to) << "the held call was a reset()";
+    ASSERT_TRUE(c.reading.has_value());
+    EXPECT_EQ(c.reading->state, fsm_state::Disconnected) << rg::state_name(c.reading->state);
+#if defined(FIXPP_TEST_PEER_HANG_UP_READING)
+    EXPECT_TRUE(c.reading->transport_open) << "the transport was closed at the held call";
+#else
+    std::cout << "[ READING  ] the transport reading is not made on this platform\n";
+#endif
+    EXPECT_EQ(*woken_at_reset, 0) << "phase 1 had been woken at the held call";
+    EXPECT_TRUE(transport_closed) << "close_grace did not close the transport during the hold";
+    EXPECT_TRUE(close_pending) << "close() returned during the hold";
+    EXPECT_TRUE(close_returned) << "close() did not return after the release";
+    EXPECT_FALSE(l.log().hold_timed_out) << "the hold ended by its bound, not its release";
+    EXPECT_EQ(l.manager_numbers(), (Rol104::Numbers{.in = 1, .out = 1}));
+    auto const st = l.store_numbers();
+    ASSERT_TRUE(st.has_value()) << "the store's numbers were not read";
+    EXPECT_EQ(*st, (Rol104::Numbers{.in = 1, .out = 1}));
+}
+
+// R-1k: A in Active, its reply's store held; close(terminal) started during the hold does not
+// return before the release; then exactly one reset_to(1, 1), no reset, finished before
+// close() returns.
+TEST(ResetOnLogout104, CloseDuringReplyStore_OneResetByTheArm) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        Rol104 r{role};
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        r.ctl.hold_next_store = true;
+        auto frame_fut = s.feed_spawn(s.logout(s.next_in()));
+        bool const held = s.pump_until([&] { return !r.log().store_events.empty(); }, kHoldWindow);
+        r.spawn_close(close_mode::terminal);
+        bool const close_before_release =
+            s.pump_until([&] { return r.close_run.done; }, kHoldWindow);
+        r.ctl.released = true;
+        bool const close_returned = r.close_returned_within(kReleaseBudget);
+        (void)s.pump_until([&] { return rg::Scene::ready(frame_fut); }, kReleaseBudget);
+
+        ASSERT_TRUE(held) << "setup: the reply's store was not held";
+        EXPECT_FALSE(close_before_release) << "close() returned during the reply's held store";
+        EXPECT_TRUE(close_returned) << "close() did not return after the release";
+        EXPECT_FALSE(r.log().hold_timed_out) << "the hold ended by its bound, not its release";
+        expect_one_reset_to_one_one_disconnected(r);
+        bool finished_before_return = false;
+        for (auto const& w : r.close_run.writes_at_return) {
+            finished_before_return = finished_before_return || w.op == "reset_to 1 1";
+        }
+        EXPECT_TRUE(finished_before_return)
+            << "the reset_to had not finished when close() returned";
+        EXPECT_EQ(r.log().reset_calls, 0) << "a reset() call";
+    }
+}
+
+// R-1s: no reset knob; the initiator's Logon arm runs its 141=Y reset unit, whose reset_to is
+// held; close(terminal) started during the hold does not return before the release.
+TEST(ResetOnLogout104, CloseWaitsForLogonArmUnit_NoKnob) {
+    Rol104 r{Opts104{.role = session_role::initiator, .reset_on_logout = false}};
+    r.factory->hooks.on_reset = [] {};  // holds the first reset call, with release_when
+    auto& s = r.s;
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                                   s.session->open(), asio::use_future);
+    ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(open_fut); }))
+        << "setup: open() did not return";
+    ASSERT_TRUE(open_fut.get().has_value()) << "setup: open() failed";
+    auto ack_fut = s.feed_spawn(s.frame("A", 1,
+                                        "98=0\x01"
+                                        "108=" +
+                                            std::to_string(rg::kHeartBtInt.count()) +
+                                            "\x01"
+                                            "141=Y\x01"));
+    bool const held = s.pump_until([&] { return !r.log().calls.empty(); }, kHoldWindow);
+    r.spawn_close(close_mode::terminal);
+    bool const close_before_release = s.pump_until([&] { return r.close_run.done; }, kHoldWindow);
+    r.ctl.released = true;
+    bool const close_returned = r.close_returned_within(kReleaseBudget);
+    (void)s.pump_until([&] { return rg::Scene::ready(ack_fut); }, kReleaseBudget);
+
+    ASSERT_TRUE(held) << "setup: the Logon arm's reset call was not issued";
+    EXPECT_EQ(r.log().calls.front().kind, StoreLog::call_kind::reset_to)
+        << "setup: the held call is not the Logon arm's unit";
+    EXPECT_FALSE(close_before_release) << "close() returned during the held reset_to";
+    EXPECT_TRUE(close_returned) << "close() did not return after the release";
+    EXPECT_FALSE(r.log().hold_timed_out) << "the hold ended by its bound, not its release";
+}
