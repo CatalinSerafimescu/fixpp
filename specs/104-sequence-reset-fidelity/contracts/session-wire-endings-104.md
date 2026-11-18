@@ -619,15 +619,15 @@ writes.
      | `inbound_resend_request_leaf_` | returns success | unconditional write on `!emit_r`, and the error |
      | `inbound_reject_leaf_`, `inbound_reject_best_effort_leaf_`, `inbound_logout_leaf_`, `apply_inbound_sequence_reset`'s Reject | unchanged: each discards the emit result (`(void)emit_r;` or `(void)co_await`) | the same |
      | `run_logout_phase1` | carries the exemption: transmitted (item 4) | — |
-     | `emit_initiator_logon_`, arm S against a direct caller's overlap with its emit (item 6). Its callers are `open()` and `drive_reconnect()` (`co_return co_await emit_initiator_logon_();`) | returns success, with the state `Disconnected` (arm S recorded it) and nothing transmitted. `open()` then goes on as after any successful Logon emit: it seeds `last_inbound_steady_` and `last_outbound_steady_`, and fires `onCreate` once, after the `Disconnected` entry. A throwing `onCreate` gets `close(terminal)` and `app_callback_threw`. No `onLogout` fires, because the state was never Active. `drive_reconnect()` returns success. Under the Engine neither has an input: an engine-managed initiator defers its Logon, and the read pump starts only after `drive_reconnect` returns. A direct, non-engine-managed initiator meets it for both | the unconditional write in `if (!emit_r)` (a second entry), and `open()` or `drive_reconnect()` returned `dispatch_aborted`; `onCreate` did not fire |
+     | `emit_initiator_logon_`, arm S against a direct caller's overlap with its emit (item 6). Its callers are `open()` and `drive_reconnect()` (`co_return co_await emit_initiator_logon_();`) | `open()`: returns success, with the state `Disconnected` (arm S recorded it) and nothing transmitted. `open()` then goes on as after any successful Logon emit: it seeds `last_inbound_steady_` and `last_outbound_steady_`, and fires `onCreate` once, with the state already `Disconnected`. A throwing `onCreate` gets `close(terminal)` and `app_callback_threw`. No `onLogout` fires, because the state was never Active. A direct, non-engine-managed initiator meets this through `open()`; under the Engine there is no input, because an engine-managed initiator defers its Logon. `drive_reconnect()`: no conforming input. Its standalone-initiator precondition (`session.hpp`, `drive_reconnect`'s doc comment: "the caller's own reader has left live_transport() before the call, and starts on the new live_transport() after it returns") and, under the Engine, the pump starting after the return deliver no frame to arm S during its emit (research D11, `hydrate`; T013) | `open()`: the unconditional write in `if (!emit_r)` (a second entry), and `open()` returned `dispatch_aborted`; `onCreate` did not fire |
      | the Logon arms' emitters (`refuse_logon_with_logout_`, `inbound_logon_sent_logout_leaf_`, `inbound_acceptor_reply_logon_leaf_`, `honor_peer_next_expected_`) | no input: a Logon arm is the one pump frame (INV-P), and no bound exists before Active | — |
 
    - **Owner-visible (Gate B sign-off).** Two public returns change in the window from a frame's store call to a
      reset point:
      - `Session::send` returns success for a send that is not transmitted, where the design before the ruling
        returned `dispatch_aborted` and the base transmitted it;
-     - a direct initiator's `open()` or `drive_reconnect()`, in the arm S overlap, returns success with the session
-       `Disconnected`, and `open()` fires `onCreate` once on that path.
+     - a direct initiator's `open()`, in the arm S overlap, returns success with the session `Disconnected`, and
+       fires `onCreate` once on that path.
 
      B-104-8 states both. The `send` result departs from QuickFIX/J (spec DQ-18). `open()`'s needs no row: QuickFIX
      cannot produce the overlap (item 6).
@@ -730,9 +730,9 @@ writes.
 6. **Classified from source.** Arm S against a direct caller's overlap with `open()`'s Logon suppresses nothing that
    is owed:
    - if the peer's Logout arrives during `ensure_hydrated_`'s reads, `hydrate` is refused and no Logon is built;
-   - a Logon still in its store call ends at D-OUT-10 with the member set: item 3's ending, so `open()` or
-     `drive_reconnect()` returns success with the session `Disconnected`, and `open()` fires `onCreate` (item 3's
-     table; owner-visible);
+   - a Logon still in its store call ends at D-OUT-10 with the member set: item 3's ending, so `open()` returns
+     success with the session `Disconnected` and fires `onCreate` (item 3's table; owner-visible). `drive_reconnect()`
+     has no conforming input here (item 3's table);
    - no second writer holds the gate before Active, so there is no C2;
    - a Logon whose write is already submitted is past item 3's test and completes.
 

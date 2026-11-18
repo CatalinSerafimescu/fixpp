@@ -324,9 +324,9 @@ New rows:
       was transmitted at its pre-reset number.
     - `Session::send` returning success there departs from QuickFIX/J, whose `send` returns `false` for a message
       persisted and not sent (spec DQ-18). QuickFIX C++ and QuickFIX/Go return success.
-    - A direct initiator's `open()` or `drive_reconnect()` returns success with the session already Disconnected
+    - A direct initiator's `open()` returns success with the session already Disconnected
       and its Logon not sent. This happens when the peer's Logout reached the LogonSent arm while that Logon was in
-      its store call. On that path `open()` fires `onCreate` once, after the session is Disconnected, and fires no
+      its store call. On that path `open()` fires `onCreate` once, with the session already Disconnected, and fires no
       `onLogout`.
     - No `Disconnected` entry is added for such a frame (104 contract RR-6 item 3).
   The numbers stay at 1 after a receipt reset, and at their values after a close-out. The teardown's reset under

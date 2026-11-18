@@ -296,7 +296,7 @@ listed again in the PR body for the owner's review at Gate B sign-off. The mecha
        (DQ-18).
      - D-OUT-10 keeps `dispatch_aborted` while the member is clear.
      - Owner-visible at Gate B: `Session::send` returns success for a send in flight at a reset point that is not
-       transmitted. A direct initiator's `open()`, or `drive_reconnect()`, in the LogonSent overlap returns success
+       transmitted. A direct initiator's `open()`, in the LogonSent overlap, returns success
        with the session Disconnected. `open()` then fires `onCreate` once (B-104-8). Cells: R-5h's C1 arms and R-5j.
 
 ## User Scenarios & Testing *(mandatory)*
