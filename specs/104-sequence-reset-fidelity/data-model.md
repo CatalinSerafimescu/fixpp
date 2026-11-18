@@ -322,8 +322,12 @@ New rows:
   - a frame held back this way ends as a success that was not transmitted, wherever it was held.
     - `Session::send` for a send in flight at that point returns success, and its message is not sent. Before 104 it
       was transmitted at its pre-reset number.
-    - A direct initiator's `open()`, when the peer's Logout reached the LogonSent arm while `open()`'s Logon was in
-      its store call, returns success with the session already Disconnected and its Logon not sent.
+    - `Session::send` returning success there departs from QuickFIX/J, whose `send` returns `false` for a message
+      persisted and not sent (spec DQ-18). QuickFIX C++ and QuickFIX/Go return success.
+    - A direct initiator's `open()` or `drive_reconnect()` returns success with the session already Disconnected
+      and its Logon not sent. This happens when the peer's Logout reached the LogonSent arm while that Logon was in
+      its store call. On that path `open()` fires `onCreate` once, after the session is Disconnected, and fires no
+      `onLogout`.
     - No `Disconnected` entry is added for such a frame (104 contract RR-6 item 3).
   The numbers stay at 1 after a receipt reset, and at their values after a close-out. The teardown's reset under
   `reset_on_disconnect` still runs. The session's state history (`Session::fsm_visit_history()`) records one
@@ -335,7 +339,7 @@ New rows:
   store error. When the session is already Disconnected, that handling can add a second `Disconnected` entry, as
   before 104. With `reset_on_logout` off nothing is refused. On a too-high Logout's route the
   frame in progress is one that 103's bound let in after the Logout, which QuickFIX never processes. Nothing of it
-  is sent after the reset point (contract RR-6), as in QuickFIX. QuickFIX's own user-thread sends (C++, J) and
+  is sent after the reset point (contract RR-6), as in QuickFIX, on the wire. The `send` result is DQ-18. QuickFIX's own user-thread sends (C++, J) and
   QuickFIX/J's timer thread can still race past its reply, so this suppression falls within QuickFIX's behaviour
   (104 research D11). FR-019, contract RR-5, RR-6.
 

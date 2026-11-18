@@ -282,18 +282,22 @@ listed again in the PR body for the owner's review at Gate B sign-off. The mecha
      - Reason: QuickFIX has already written our Logout before it processes the peer's, so its ending is exactly one
        Logout, ours. Without the exemption 104 would put none on the wire.
      - Arm A still runs its unit and still sets the member, so every other in-flight frame is held back.
-  4. Research D11's "No new departure" holds under W. The suppression falls within QuickFIX's envelope: QuickFIX
-     C++ and QuickFIX/J user-thread sends, and QuickFIX/J's timer thread, can themselves race past the reply.
+  4. Under W, research D11's "No new departure" holds on the wire. There is one departure in the `send` result,
+     QuickFIX/J's (DQ-18, item 5). The suppression falls within QuickFIX's envelope: QuickFIX C++ and QuickFIX/J
+     user-thread sends, and QuickFIX/J's timer thread, can themselves race past the reply.
      Cells R-5f, R-5g and R-5h, and R-1l's close-out sink twin.
   5. **Sub-ruling, one ending (Gate A loop 5, N-1).** While the member is set and the call carries no exemption,
      D-OUT-10 returns the test's ending: success with no transmit, no `Disconnected` write, the number consumed. A
      frame held back in its store call (C1) and one held back at the gate (C2) then end alike.
      - Reason: QuickFIX C++'s `Session::sendRaw` returns `true` for a message it persisted and did not send
-       (`if (isLoggedOn()) { send(messageString); }`, then `return true;`).
+       (`if (isLoggedOn()) { send(messageString); }`, then `return true;`). QuickFIX/Go's `queueForSend` returns `nil`.
+     - QuickFIX/J's `Session.sendRaw` returns `false` there (`boolean result = false;`, assigned only inside
+       `if (isLoggedOn())`). The success shape follows QuickFIX C++ and QuickFIX/Go, and departs from QuickFIX/J
+       (DQ-18).
      - D-OUT-10 keeps `dispatch_aborted` while the member is clear.
      - Owner-visible at Gate B: `Session::send` returns success for a send in flight at a reset point that is not
-       transmitted, and a direct initiator's `open()` in the LogonSent overlap returns success with the session
-       Disconnected (B-104-8). Cells: R-5h's C1 arms and R-5j.
+       transmitted. A direct initiator's `open()`, or `drive_reconnect()`, in the LogonSent overlap returns success
+       with the session Disconnected. `open()` then fires `onCreate` once (B-104-8). Cells: R-5h's C1 arms and R-5j.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -490,7 +494,9 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
   after a refused reconcile) keeps its existing handling. With `reset_on_logout` off nothing is frozen. After a
   received Logout's reset point, fixpp MUST transmit nothing more on that connection, except its own
   graceful-close Logout when the peer's Logout crossed it. In that case the wire MUST carry exactly one Logout,
-  fixpp's own (Clarifications 2026-11-18, ruling W; contract RR-6).
+  fixpp's own (Clarifications 2026-11-18, ruling W; contract RR-6). A frame held back by that rule, whether in its
+  store call, at the write gate or at the sink, MUST end as a success with nothing transmitted, and MUST add no
+  `Disconnected` entry (contract RR-6 item 3; DQ-18).
 
 **Unasked 141=Y acknowledgement (B107, #695)**
 
@@ -615,6 +621,7 @@ L-104-3; DQ-7, B-104-6; DQ-12a, DQ-13 and DQ-14, B-104-1's departure clause.
 | DQ-14 | A Logout received in LogoutSent or LogonSent resets with no CompID, SendingTime or `fromAdmin` check of that Logout | QFC, QFJ (`verify` checks CompID and SendingTime and runs `fromAdmin` first) | *pre-existing* acceptance of that Logout (the LogoutSent arm's "confirm" row); 104 adds the reset |
 | DQ-15 | An explicit EndSeqNo at or above the next outbound number is read as through-current (D3.3a, B-104-5). With BeginSeqNo B above the next outbound number the answer is GapFill(34=B, 36=N_out), NewSeqNo below MsgSeqNum | QFGo (sends nothing: its walk's `seqNum != nextSeqNum` is false) | QFC (`nextResendRequest`'s clamp, then `generateRetransmits`' `generateSequenceReset(B, next)`) and QFJ (`generateSequenceResetIfNeeded`), identical frames; it restores QFC's and QFJ's answer where fixpp wrote `EndSeqNo + 1` |
 | DQ-16 | Against a counterparty acceptor whose `toAdmin` injects 141=Y, the session ends when fixpp's outbound number reaches the number of its own Logon (L-104-7) | none: every QuickFIX initiator meets the same ending, and QFC's second Logon does not avoid it (orchestrator ruling O-1, by source) | listed because it is the consequence of DQ-1 an operator meets; not traced on a live peer |
+| DQ-18 | A `Session::send` in flight when a received Logout's reset point runs, which is stored and not transmitted, returns success (contract RR-6 item 3; B-104-8). | QFJ (`Session.sendRaw` starts `boolean result = false;` and assigns it only inside `if (isLoggedOn())`, so `Session.send` returns `false` for a message persisted and not sent) | ruling W's one-ending sub-ruling (Gate A loop 5, N-1); QFC `Session::sendRaw` (`if (isLoggedOn()) { send(messageString); }`, then `return true;`); QFGo `queueForSend` (persists, queues, returns `nil`) |
 | DQ-16a | When the receipt reset's store operation fails, fixpp logs it and still ends `Disconnected` (RU-1, L-104-2) | QFJ (`SessionState.reset` throws `RuntimeError`, so `nextLogout` skips its `disconnect`; the error is logged by the event-handling strategy) | analyze-2 B1 reading (QFJ_RELEASE_3_0_2); one condition, one observable ending |
 
 ## Normative References

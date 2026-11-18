@@ -154,11 +154,17 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - A cell reads the new record for a reading at the call or a count by kind, and `StoreLog::writes` for an order against `close()` or stop and for the final counters. R-2 needs two readings at the call, so it reads two entries of the new record: `on_reset` is one-shot.
   - **RR-5's per-call persist hold (research D10, "A second test-support addition").** Add `Hooks::on_inbound_persist_call`, a `std::function<bool()>` called on every `next_seqnum(inbound, true)`. When one call returns true, that operation completes and then holds, as `on_outbound_read` and `on_outbound_store` do. R-5a and R-5c hold a later persist with it. Its known positive is in T016's cell: a second inbound persist held while the first is not.
   - **R-5f's held write (conditional).** R-5f needs a live transport whose next write can be held, on the fixture its cell uses (research D10's R-5f row). `BlockingWriteTransport` (`tests/support/blocking_write_transport.hpp`) sits behind a `TransportFactory` for the Engine pump. `ControlledWriteTransport` is local to `tests/session/test_live_outbound_serialized.cpp`. If R-5f runs on a direct Session and neither fits, move or adapt one here, with a known positive in T016's cell (a held write that completes only on release). Record which double R-5f uses.
+  - **The held outbound store's two events (research D10, "A third test-support addition"; loop 5 round 2, Codex 2).** `StoreLog::writes` records only counter writes (its `Write::op` is "reset", "in+1", "out+1" or "reset_to <in> <out>"), and an outbound `store()` records nothing. So:
+    - add `StoreLog::store_events`, appended by `held_store` only: `store_applied <seq>` right after `inner_->store` returns, and `store_returned <seq>` right before `held_store` returns;
+    - stamp each event with `StoreLog::writes.size()` at its append, so its order against a `reset_to` in `writes` is read from that stamp;
+    - leave `StoreLog::writes` unchanged, so its existing readers are unaffected (T017).
+
+    A C1 pin then reads `store_applied` < the unit's `reset_to` < `store_returned`. D-OUT-10 follows `store_returned` in `store_then_emit` with no suspension, by construction. Its known positive is in T016's cell.
   - The existing `on_reset`, hold and `kHoldBound` behaviour is unchanged.
   - The header comment names 104 and states the purpose. It states no count.
-- [ ] T016 Register `session_104_tests` with its first file. Create `tests/session/test_104_reset_on_logout.cpp`, holding one cell, `HookedStoreRecord104.ResetAndResetToRecordedApart`, which is T015's known positive. It calls `reset()` and `reset_to` directly and reads two distinct records with their counts. A second arm makes two `next_seqnum(inbound, true)` calls with `on_inbound_persist_call` selecting the second: only the second holds.
+- [ ] T016 Register `session_104_tests` with its first file. Create `tests/session/test_104_reset_on_logout.cpp`, holding one cell, `HookedStoreRecord104.ResetAndResetToRecordedApart`, which is T015's known positive. It calls `reset()` and `reset_to` directly and reads two distinct records with their counts. A second arm makes two `next_seqnum(inbound, true)` calls with `on_inbound_persist_call` selecting the second: only the second holds. A third arm holds one outbound `store` with `on_outbound_store` and issues a `reset_to` during the hold. It reads `store_applied` stamped before the `reset_to`'s entry in `writes`, and `store_returned` stamped after it; an unheld `store` records neither event.
   - Add `add_session_104_bucket`, a twin of `add_session_103_bucket` with `LABELS "session;104"` and no `TIMEOUT` property, to `tests/session/CMakeLists.txt`. Register `add_session_104_bucket(session_104_tests test_104_reset_on_logout.cpp)` with it. No empty bucket is registered.
-  - Build, and run the cell with a non-zero test count. Mutant: in `$M`, the record files `reset_to` as `reset` → the cell is RED.
+  - Build, and run the cell with a non-zero test count. Mutants: in `$M`, the record files `reset_to` as `reset` → the cell is RED; `held_store` records `store_applied` after its hold → the third arm is RED.
 - [ ] T017 Existing users of HookedStore are unchanged. Map `git grep -l HookedStore -- tests` to its ctest entries, then build and run those entries in `$T`'s debug tree, by the Execution rules' selection form. All are GREEN. Record.
 
 **Checkpoint**: T007, T010 and T014 have cleared; every census has its known positive and its rows; `git diff --stat bf294f00 HEAD -- src include` is empty.
@@ -277,7 +283,8 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
     - Route B, rol only, a mock clock. A too-high Logout at S sets the mark and sends fixpp's own ResendRequest (the 35=2 `toAdmin` baseline). In-sequence frames then fill the gap to NextNumIn S exactly, so AwaitingResend is off and the bound is not woken.
     - Input: a ResendRequest above S with no BeginSeqNo(7). HookedStore holds its Reject's outbound `store` (`Hooks::on_outbound_store`, selected by ordinal). The mock clock passes `logout_disconnect_timeout_ms`. The bound's reply write is held in a live transport whose write can be held (research D10's row names the doubles; a config-time `transport_send` sink cannot drive it). `release_when` returns the Reject's `store` while that write is held, and then the cell releases the write.
     - Asserts: `toAdmin` calls for a 35=2 stay at the baseline; no ResendRequest stored or written after the unit; manager and store `(1, 1)`; one `reset_to(1, 1)` at the hook with `Disconnected`; the frame's `on_inbound_frame` result success; one `Disconnected` entry in `fsm_visit_history()`.
-    - The wire (RR-6): no 35=3 written after the bound's reply. The Reject's store completed at its number (`StoreLog::writes`, before `reset_to`).
+    - The wire (RR-6): no 35=3 written after the bound's reply.
+    - Order pins (C2, T015's events): the Reject's `store_applied` and `store_returned` both precede the unit's `reset_to`. A blocked grant is observed: after `store_returned`, while the reply's write is held, the transport's write count is unchanged.
     - Reach pins: AwaitingResend off at the unit's `on_reset` hook and on after the release; one `toAdmin` for the 35=3. Without them a missed order (the Reject refused by D-OUT-10, so the leaf is never called) reads GREEN under the mutant.
     - Forced-hit arm: rol off, with baseline + 1 `toAdmin` calls for a 35=2 and the Reject written after the reply, as on the base.
   - **R-5g**, `…CrossingLogout_OneLogoutOurs_{StoreHeld,GateWait}` (contract RR-6 item 4, O23).
@@ -285,31 +292,39 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
     - `StoreHeld`: HookedStore holds phase 1's Logout `store`. An in-sequence peer Logout reaches arm A's reset point during the hold, and `release_when` returns the `store` after the unit's `reset_to`. Works on the config-time sink.
     - `GateWait`: a live transport with a held write (T015's conditional) holds `write_gate_` with an earlier frame while phase 1's Logout waits on it. The peer's Logout reaches A's reset point, then the held write is released.
     - Asserts: exactly one 35=5 on the wire, ours, at its pre-reset MsgSeqNum; no other frame whose write began after the reset point; one `reset_to(1, 1)` with `Disconnected`; store `(1, 1)`; one `Disconnected` entry; `close()` returns.
-    - Reach pins: no 35=5 before the release; the Logout's store completion before `reset_to`. A pin that fails at the head means the input is re-derived.
+    - Reach pins: no 35=5 before the release.
+      - `StoreHeld` (C1): `store_applied` < the unit's `reset_to` < `store_returned`.
+      - `GateWait` (C2): `store_returned` < the unit's `reset_to`, and a blocked grant observed (the write count unchanged while the earlier write is held).
+
+      A pin that fails at the head means the input is re-derived.
     - Forced-hit arm: rol off, with our Logout sent as on the base.
   - **R-5h**, `…LivenessHeartbeatAcrossBoundUnit_OneEnding_{GateWait,StoreHeld}` (contract RR-6 items 1 and 3).
     - `GateWait` (C2): route B as R-5f's setup. The bound's reply write is held. The mock clock passes HeartBtInt, so the liveness loop's Heartbeat is stored and waits on `write_gate_`. Then the reply's write is released.
     - `StoreHeld` (C1): HookedStore holds the Heartbeat's `store` across the bound's deadline acknowledgement and unit, then releases it. It works on the config-time sink.
-    - Asserts, both arms (one ending): no 35=0 written after the reply; the Heartbeat's store completed before `reset_to`; manager and store `(1, 1)`; exactly one `Disconnected` entry; the liveness loop has returned with no further write.
-    - Reach pins: `GateWait`: the Heartbeat's store completion falls between the reply's and the unit's `reset_to`. `StoreHeld`: it falls after the unit's manager set. A pin that fails at the head means the input is re-derived.
+    - Asserts, every arm (one ending): no 35=0 written after the reply; manager and store `(1, 1)`; exactly one `Disconnected` entry; the liveness loop has returned with no further write.
+    - Reach pins (T015's events), on the Heartbeat's held `store` or, in `GateWait`, its `store` selected for recording:
+      - `GateWait` (C2): `store_returned` < the unit's `reset_to`, and a blocked grant observed (the write count unchanged while the reply's write is held);
+      - `StoreHeld` and `StoreHeldAtArmL` (C1): `store_applied` < the unit's `reset_to` < `store_returned`.
+
+      A pin that fails at the head means the input is re-derived.
     - `StoreHeldAtArmL` (C1 at arm L): A in Active, rol only. The liveness loop's Heartbeat has its `store` held. `close(graceful)`'s phase 1 sends its Logout, records `LogoutSent`, and the peer's Logout reaches arm L's reset point. Then the Heartbeat's `store` is released. Same asserts, with the one `Disconnected` entry being arm L's.
     - Forced-hit arm: rol off, with the Heartbeat written after the reply.
   - **R-5j**, `…DirectOpenLogonAcrossLogonSentReset_OpenReturnsSuccess` (contract RR-6 items 3 and 6; the owner-visible `open()` ending).
     - A direct initiator, rol only. HookedStore holds `open()`'s Logon `store`. A concurrent `on_inbound_frame` delivers a peer Logout to the LogonSent arm, which reaches arm S's reset point. Then the hold is released.
-    - Asserts: `open()` returns success; the state is `Disconnected` with one `Disconnected` entry; no 35=A on the wire; one `reset_to(1, 1)`.
-    - Reach pin: the Logon's store completion precedes the unit's `reset_to`. A pin that fails at the head means the input is re-derived.
+    - The cell has an application. Asserts: `open()` returns success; the state is `Disconnected` with one `Disconnected` entry; no 35=A on the wire; one `reset_to(1, 1)`; `onCreate` fired once, after the `Disconnected` entry; no `onLogout` (the state was never Active).
+    - Reach pin (C1, T015's events): `store_applied` < the unit's `reset_to` < `store_returned`. A pin that fails at the head means the input is re-derived.
     - Forced-hit arm: rol off, with the Logon transmitted and `open()` returning success, as on the base.
   - **R-5i**, `…InFlightSendingTimeRejectAcrossBound_OneDisconnected_{SendingTime,ArmD}` × {`RolOn`, `RolOff`} (contract RR-5 item 6; T050's two step-3 writes).
     - Route B with a mock clock, and a persistent store fixture.
     - `RolOn`: hold the Reject's outbound `store` until the bound has recorded `Disconnected`. Do not hold the persist: across a reset point the Reject's `assign_outbound` would meet a frozen manager, and step 3 would not be reached.
     - `RolOff`: hold the consume persist across the bound's deadline acknowledgement.
     - Asserts, each arm: exactly one `Disconnected` entry, and the frame's result is success.
-    - Reach pin: the Reject's `toAdmin` ran once. A pin that fails at the head means the input is re-derived.
+    - Reach pins: the Reject's `toAdmin` ran once. In `RolOn` (C1), the Reject's `store_applied` < the bound's unit's `reset_to` < its `store_returned`. A pin that fails at the head means the input is re-derived.
     - RED on the base by assertion (two entries) in every arm.
   - **Pump budgets.** Every pump is budgeted from `kHoldBound`, with the ratio stated. Each cell releases its hold and drains on every exit path.
   - **RED.** Each cell's base RED is D1's absence (the base resets only at teardown, and `close()` neither waits nor closes out), not the freeze. Each is read at T039. The freeze's RED source is T061's mutants. No assertion here reads a symbol 104 adds: R-5d, which does, is T049's.
 - [ ] T039 [US1] RED reading of every US1 cell (T019, T020, T024 to T034, T036, T037, T038), per the Execution rules' "Base and RED", at `$T`'s head before T040.
-  - Record each cell's test count and its failing assertion. Each is RED by assertion, not abort, except R-1o's rol-off and NotConnected arms, T016's cell, and the forced-hit arms of T038's cells (R-5a's, R-5b's, R-5c's, R-5f's, R-5g's, R-5h's and R-5j's rol-off arms, and R-5e's no-`close()` arm). R-5i has no forced-hit arm: every arm is RED on the base by assertion, which are GREEN with their reasons. Each forced-hit arm is a pin: with no receipt reset, or no close-out, nothing is frozen, on the base or at the head (research D10's rows). R-1o's mTLS arm is RED by its authorisation-failed event assertion (research D10). R-3 is read when T011 recorded it drivable; otherwise the record cites T011.
+  - Record each cell's test count and its failing assertion. Each is RED by assertion, not abort, except R-1o's rol-off and NotConnected arms, T016's cell, and the forced-hit arms of T038's cells (R-5a's, R-5b's, R-5c's, R-5f's, R-5g's, R-5h's and R-5j's rol-off arms, and R-5e's no-`close()` arm), which are GREEN with their reasons. R-5i has no forced-hit arm: every one of its arms is RED on the base by assertion. Each forced-hit arm is a pin: with no receipt reset, or no close-out, nothing is frozen, on the base or at the head (research D10's rows). R-1o's mTLS arm is RED by its authorisation-failed event assertion (research D10). R-3 is read when T011 recorded it drivable; otherwise the record cites T011.
   - `git diff --stat bf294f00 HEAD -- src include` lists only T018's and T035's files.
   - Re-run T021's selection once more: no assert fires.
 

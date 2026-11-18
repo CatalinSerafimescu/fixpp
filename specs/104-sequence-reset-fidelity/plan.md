@@ -436,7 +436,12 @@ result and every RED/GREEN/mutant record, never code comments.
     - Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_11_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_11_adversarial_review.md.
   - **Owner-visible items for Gate B sign-off (ruling W's one ending):**
     - `Session::send` returns success, with nothing transmitted, for a send in flight when a received Logout's reset point runs. Before the ruling the design returned `dispatch_aborted`; the base transmitted the send.
-    - A direct initiator's `open()` returns success with the session Disconnected, and its Logon not sent, when the peer's Logout reached the LogonSent arm while that Logon was in its store call (B-104-8; contract RR-6 items 3 and 6).
+    - A direct initiator's `open()` or `drive_reconnect()` returns success with the session Disconnected, and its Logon not sent, when the peer's Logout reached the LogonSent arm while that Logon was in its store call. On that path `open()` fires `onCreate` once, after the `Disconnected` entry (B-104-8; contract RR-6 items 3 and 6; cell R-5j).
+    - The `send` result departs from QuickFIX/J (spec DQ-18).
+  - Loop 5 round 2 applied 2026-11-18 (rewrite 2 of 2). Codex P1=1 P2=1 P3=0; Opus post-judging P1=0 P2=2 P3=4.
+    - The rewrite adds DQ-18 and qualifies "No new departure" to the wire (Codex 1), and adds HookedStore's `store_applied` / `store_returned` events with every order pin restated on them (Codex 2).
+    - It names `drive_reconnect()` (N-1), pins `onCreate` on `open()`'s new path (N-2), adds the one-ending sentence to FR-019 (N-3), and repairs T039 (N-4).
+    - Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_12_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_12_adversarial_review.md.
 
 ### Round 1 — disagreements
 
