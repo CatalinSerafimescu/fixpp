@@ -386,6 +386,10 @@ New limitations:
   QuickFIX does. Not fixed in 104; T103 files the issue (orchestrator ruling 1 on the T071 STOP).
 
 Amended in place:
+- **B-099-2**: its "Consume limit" sentence ("A gate Reject keeps NextNumIn and the block consumes it") gains "except
+  an initiator's unasked 141=Y acknowledgement, which takes no sequence check since 104 and is kept by the block as by
+  the gate (the 104 contract's "Superseded by name"; QuickFIX's `generateReject` exempts a Logon); the ordinary
+  acknowledgement still consumes (L-104-8)". Found by T071's measured half, a census miss (T074).
 - **B-024-1**: its "a Logout teardown (sent OR received)" points to B-104-1 (the trigger is a received Logout at
   its reset point).
 - **B-538-7**: the title's clause "a Logout that was sent still resets, answered or not" is replaced whole with
