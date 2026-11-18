@@ -10,7 +10,8 @@
 // HookedStore and a BlockingWriteTransport directly, with no Session, one arm per addition:
 //   - the per-call record tells a reset() from a reset_to, with reset_to's targets and the
 //     snapshot's readings taken at the call's entry, before the on_reset hook;
-//   - Hooks::on_inbound_persist_call holds the inbound persist it selects and no other;
+//   - Hooks::on_inbound_persist_call holds the inbound persist it selects, and a persist it
+//     does not select returns unheld;
 //   - a reset_to issued during a held outbound store falls between that store's two events,
 //     and an unheld store records neither;
 //   - blocking_write_state::starts counts a parked write that has not completed.
