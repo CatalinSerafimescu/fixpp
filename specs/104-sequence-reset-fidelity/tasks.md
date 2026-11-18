@@ -612,21 +612,21 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 
 **Independent test**: T-1 to T-5 RED on the base, since the base writes no 35=5, except T-4a's L + 1 arm (a pin); T-6's identity arms RED on the base, since the base ends a too-low frame before the identity gates; T-6's SendingTime and strict arms GREEN, as pins.
 
-- [ ] T078 [US3] Create `tests/session/test_104_logon_too_low.cpp`, and add it to `session_104_tests` in `tests/session/CMakeLists.txt` (contract T1, T2).
+- [X] T078 [US3] Done: evidence file, "Session of 2026-11-19, twenty-fourth run (phase-implementer; US3)", its T078 to T081 section. Create `tests/session/test_104_logon_too_low.cpp`, and add it to `session_104_tests` in `tests/session/CMakeLists.txt` (contract T1, T2).
   - T-1, `LogonTooLow104.Initiator_LogoutWithText`, uses NextNumIn 5 and an acknowledgement at 34=3.
   - T-2, `…Acceptor_LogoutWithText`, uses a hydrated NextNumIn of 5 and a Logon at 34=3.
   - T-3, `…PossDup_LogoutWithText`, runs both arms with 43=Y (D6).
   - Each asserts: exactly one 35=5; 58 byte-equal to the text; no 1409 and no 789; 34 = fixpp's next outbound; NextNumIn 5 in manager and store; `toAdmin(Logout)` called once; `Disconnected`.
-- [ ] T079 [US3] T-4a to T-4f in `tests/session/test_104_logon_too_low.cpp`, each arm (contract T3 to T6; research D5's table).
+- [X] T079 [US3] Done: evidence file, "Session of 2026-11-19, twenty-fourth run (phase-implementer; US3)", its T078 to T081 section. T-4a to T-4f in `tests/session/test_104_logon_too_low.cpp`, each arm (contract T3 to T6; research D5's table).
   - `…Overflow_PairedWithNearBound` uses CompIDs of length L, the longest for which the Logout still fits, and L + 1. L is the forced hit.
   - `…ToAdminThrow`.
   - `…AssignFailure`, with outbound at `seqnum_max` through the test seam.
   - `…PersistentStoreFailure`.
   - `…WriteFailure`.
   - `…VolatileStoreFailure` (T-4f): a store double whose factory's `yields_persistent_store()` is false refuses the Logout's store. One 35=5 with the text is on the wire (024 I-07), then `Disconnected`, success.
-- [ ] T080 [US3] T-5, `…ResetOnLogout_NoResetForTooLowLogout`, in `tests/session/test_104_logon_too_low.cpp` (FR-015, contract T7). It is an initiator with rol. It asserts one 35=5 with T-1's text and one `toAdmin(Logout)`; then, after `close(terminal)`, no `reset_to` and no `reset`, on T015's record.
+- [X] T080 [US3] Done: evidence file, "Session of 2026-11-19, twenty-fourth run (phase-implementer; US3)", its T078 to T081 section. T-5, `…ResetOnLogout_NoResetForTooLowLogout`, in `tests/session/test_104_logon_too_low.cpp` (FR-015, contract T7). It is an initiator with rol. It asserts one 35=5 with T-1's text and one `toAdmin(Logout)`; then, after `close(terminal)`, no `reset_to` and no `reset`, on T015's record.
   - The forced-hit arm uses the same store double and fixture. A Logout received in LogonSent (arm S) records one `reset_to`.
-- [ ] T081 [US3] T-6, `…Precedence_*`, in `tests/session/test_104_logon_too_low.cpp` (contract T8, "Precedence on one Logon frame"; FIX-TC 1S(c)). Its arms, each with a too-low frame:
+- [X] T081 [US3] Done: evidence file, "Session of 2026-11-19, twenty-fourth run (phase-implementer; US3)", its T078 to T081 section. T-6, `…Precedence_*`, in `tests/session/test_104_logon_too_low.cpp` (contract T8, "Precedence on one Logon frame"; FIX-TC 1S(c)). Its arms, each with a too-low frame:
   - with a bad SendingTime;
   - on a strict acceptor without 141;
   - on an mTLS acceptor with an off-list identity;
@@ -636,7 +636,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   Each identity arm asserts no frame and the gate's own ending: the authorisation-failed event on the two mTLS arms, and on the credentials arm, which emits no event, a counting refusing callable installed with `compid_authorization_policy::set_logon_validator`, called once.
   - The identity arms are RED on the base: the base's `check_inbound` ends a too-low frame silently before the gates (the mTLS gate follows it in both Logon arms, and `authorize_logon` on the acceptor), so no event is emitted and the validator is never called. Each also witnesses the N-8 order (the gates before the too-low Logout).
   - The SendingTime and strict arms are GREEN on the base, as pins: both guards run before `check_inbound`.
-- [ ] T082 [US3] RED reading of T078 to T081 (Execution rules "Base and RED"). Record each count and each failing assertion. The exceptions, arm by arm, are GREEN on the base as pins, each with its reason and its RED source: T-4a's L + 1 arm (the base writes no frame either; T088's larger-buffer mutant), T-6's SendingTime arm (its guard runs before `check_inbound`; T089's SendingTime-reorder mutant) and T-6's strict arm (likewise; T089's strict-reorder mutant). Every other cell and arm, T-6's identity arms included, is RED by assertion. The diff rule is T082's (Execution rules "Base and RED").
+- [X] T082 [US3] Done: evidence file, "Session of 2026-11-19, twenty-fourth run (phase-implementer; US3)", its T082 section. RED reading of T078 to T081 (Execution rules "Base and RED"). Record each count and each failing assertion. The exceptions, arm by arm, are GREEN on the base as pins, each with its reason and its RED source: T-4a's L + 1 arm (the base writes no frame either; T088's larger-buffer mutant), T-6's SendingTime arm (its guard runs before `check_inbound`; T089's SendingTime-reorder mutant) and T-6's strict arm (likewise; T089's strict-reorder mutant). Every other cell and arm, T-6's identity arms included, is RED by assertion. The diff rule is T082's (Execution rules "Base and RED").
 
 **Checkpoint**: US3's cells are RED or recorded pins.
 
