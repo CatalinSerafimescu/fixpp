@@ -16,6 +16,10 @@
 //     `use_awaitable` adapter where it suspends;
 //   - its write does not allocate: it records counts, never the bytes;
 //   - release() is called from the thread that runs the io_context.
+//
+// 104-sequence-reset-fidelity (tasks.md T015; research D10, the write-start count) adds
+// blocking_write_state::starts, counted as async_write's first statement, before the park
+// and before its closed test, so a cell can see a write that has started and not completed.
 #pragma once
 
 #include <asio/any_io_executor.hpp>
@@ -45,6 +49,7 @@ namespace fixpp::session::test {
 struct blocking_write_state {
     bool block_next = false;                  // the next write parks until release()
     bool parked = false;                      // a write is parked now
+    std::size_t starts = 0;                   // async_write calls begun (104)
     std::size_t writes = 0;                   // writes completed
     std::optional<asio::steady_timer> timer;  // the parked write's wait
 
@@ -75,6 +80,7 @@ public:
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_write(
         std::span<const std::byte> bytes) override {
+        ++state_->starts;
         if (closed_) co_return std::unexpected(fixpp::core::error::transport_already_closed);
         if (state_->block_next) {
             state_->parked = true;

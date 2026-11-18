@@ -383,6 +383,46 @@ add_session_103_bucket(session_103_replay_gate
 add_session_103_bucket(session_103_replay_mt_engine
   test_103_replay_mt_engine.cpp                                         # 103 T060
 )
+# 104-sequence-reset-fidelity (tasks.md T016): the feature's Session cells in an entry of their
+# own, shaped as add_session_103_bucket with label 104, so `ctest -L 104 --no-tests=error`
+# selects it. No TIMEOUT property, so CI's `--timeout` wedge guard governs it. Each cell task
+# appends its file with a `# 104 T0nn` comment.
+function(add_session_104_bucket name)
+  add_executable(${name} ${ARGN} $<TARGET_OBJECTS:session_test_support>)
+  target_link_libraries(${name} PRIVATE
+    fixpp_session
+    fixpp_capi
+    fixpp_mock_clock
+    fixpp_transport
+    fixpp_tls
+    "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+    "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_TRANSPORT_ZLIB_LIB}"
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(${name} PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_SOURCE_DIR}/src"
+  )
+  target_compile_definitions(${name} PRIVATE
+    FIXPP_TEST_BINARY_DIR="${CMAKE_BINARY_DIR}"
+    FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+    "FIXPP_098_FIXTURE_DIR=\"${CMAKE_SOURCE_DIR}/tests/dictionary/fixtures/098\""
+    # A cell file that includes the mock transport header (test_103_support.hpp does, through
+    # mock_reconnect_factory.hpp) needs this definition.
+    FIXPP_ALLOW_MOCK_TRANSPORT
+  )
+  add_test(NAME ${name} COMMAND ${name})
+  set_tests_properties(${name} PROPERTIES
+    ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+    LABELS "session;104")
+endfunction()
+add_session_104_bucket(session_104_tests
+  test_104_reset_on_logout.cpp                                          # 104 T016
+)
 
 # 103 T023: test_reset_seqnum_policy_matrix.cpp's AS5 cells use mock_reconnect_factory.hpp's
 # FaultStoreFactory, whose header includes the mock transport.
