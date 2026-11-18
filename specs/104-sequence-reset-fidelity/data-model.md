@@ -317,7 +317,8 @@ New rows:
   - nothing more is transmitted on that connection after a received Logout's reset point (not after a close-out).
     A frame already numbered and stored then is not sent; its store write came before the reset's, which clears
     it. The one exception: when the peer's Logout
-    crossed fixpp's own graceful-close Logout, which was already numbered, that Logout is sent. The wire then
+    crossed fixpp's own graceful-close Logout, which was already numbered, that Logout is sent, whether the peer's
+    Logout was in sequence or too high (104 contract RR-6 item 4). The wire then
     carries exactly one Logout, fixpp's own (104 contract RR-6).
   - a frame held back this way ends as a success that was not transmitted, wherever it was held.
     - `Session::send` for a send in flight at that point returns success, and its message is not sent. Before 104 it
