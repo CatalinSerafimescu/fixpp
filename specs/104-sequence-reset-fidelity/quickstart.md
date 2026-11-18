@@ -62,6 +62,14 @@ cmake --build --preset linux-clang-debug --target session_104_tests
 ctest --preset linux-clang-debug -L 104 --no-tests=error --output-on-failure
 ```
 
+The settling experiment (plan phase 1) runs before the other cells. Run it in a Debug build. 103's suite is a
+`TEST_P` instantiated as `BothRoles/…`, so its filter needs the leading `*`. Record each count, which must not be 0:
+
+```bash
+<build>/tests/session/session_103_tests --gtest_filter='*TooHighLogoutState103.*'
+<build>/tests/session/session_104_tests --gtest_filter='ResetOnLogout104.DuplicateTooHighLogoutWhilePending_*:ResetOnLogout104.ClaimsAPendingBound_*'
+```
+
 For each cell in research D10:
 1. Build at the commit that adds the cell, before its fix, and record the failing assertion.
 2. Build after the fix and record GREEN, with the same non-zero test count.
@@ -105,7 +113,7 @@ Cells with a forced-hit or a competing-timer element:
 | US1 AS5 | `rod`, with and without `rol`: one reset per teardown, `(1, 1)` | existing `ResetOnDisconnect_*`, R-2 |
 | US1 AS6 | Logout in LogonSent resets; in NotConnected does not | R-1o |
 | US1 AS7 | processing ends before the reset point: no reset | R-1f, R-1g, R-1n |
-| US1 edges | too-high Logout; races with `close()` and `Engine::stop()`; a cancelled reply store; store failure; reconnect; emitters at the unit; a direct caller's cancellation at the reset point | R-1e, R-1h to R-1l, R-1p to R-1s, R-1u to R-1x |
+| US1 edges | too-high Logout (a duplicate included); races with `close()` and `Engine::stop()` (A beside a claimed bound included); a cancelled reply store; store failure; reconnect; emitters at the unit; a direct caller's cancellation at the reset point | R-1e, R-1h to R-1l, R-1p to R-1s, R-1u to R-1z |
 | US2 AS1/AS2 | unasked 141=Y at 34=1, lenient and unilateral | U-1, U-2 |
 | US2 AS3 | strict unchanged | U-3, existing `Initiator_Received141Ack_*` |
 | US2 AS4 | 141=Y at M > 1 | U-4, W8 re-pin |
@@ -125,7 +133,8 @@ Cells with a forced-hit or a competing-timer element:
   The `logout_seen_` comment and the end-model comment must state a condition and a recipe, not a
   count.
 - The paired `session_send_bench` run, base against candidate on one machine (plan "Performance Goals", Article
-  VIII §3): RR-4 adds a byte test to every outbound frame's store path and every inbound persist. Results go to the
+  VIII §3): RR-4 adds a byte test to every outbound frame's store path. Its other test, in
+  `persist_inbound_advance_`, sits behind `store_is_persistent_` and is not benched. Results go to the
   evidence file.
 
 ## 5. Records, verification, then FR-017 last

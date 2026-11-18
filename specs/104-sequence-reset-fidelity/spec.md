@@ -178,6 +178,21 @@ listed again in the PR body for the owner's review at Gate B sign-off. The mecha
 - Q (R1): the store-order check? → A: it stays a phase-0 check. If it fails, implementation stops and the
   decision returns to the orchestrator.
 
+### Session 2026-11-18 (owner, after Gate A exhaustion)
+
+- Q: Gate A ended at round 3 with two P1s of one root cause. On route B one receipt marker had several owners: a
+  duplicate too-high Logout's frame cleared the bound's `pending`, and the bound's claimed exit cleared arm A's,
+  so `close()` stopped waiting for A. Rewrite the bundle, or amend it, and with which ownership construction? → A:
+  **A targeted amendment with construction A (Fable's three-state), followed by a fresh Gate A loop.**
+  - The marker keeps three values, and only awaited read-pump frames own `pending`.
+  - B's spawn and ignored branches write nothing. The bound's owed receipt is 103's `peer_logout_.phase`, and the
+    bound writes the marker once, `none` → `reached` at its reset point.
+  - `close()` needs nothing new for the bound.
+  - The construction rests on INV-P, INV-M, INV-T and INV-X (contract RR-2).
+  - **Settling experiment.** Plan phase 1 opens with Debug asserts of INV-T and INV-X, run with
+    `TooHighLogoutState103.*` and the two new cells, R-1y and R-1z. If an assert fires, implementation stops and
+    the decision returns to the owner.
+
 ## User Scenarios & Testing *(mandatory)*
 
 The users are the operators and integrators of a fixpp session that talks to a QuickFIX-family counterparty.
@@ -336,7 +351,8 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
   point the arm records `Disconnected`, then runs 093's 141=Y reset unit (`run_reset_unit_`, 093 contract C-6,
   unchanged by 103) (erratum E-1; RU-3). Sending a Logout MUST NOT by itself cause the reset. The reset MUST be
   durable on a persistent store. `close()` and `Engine::stop()` MUST wait for a receipt that is between its receipt
-  and its reset point, and for its unit, with the bound and the clock condition of 093's wait (B-104-2). They MUST
+  and its reset point, and for its unit, with the bound and the clock condition of 093's wait (B-104-2). A too-high
+  Logout whose acknowledgement is already under way is waited for by 103's join of its bound instead. They MUST
   stop waiting as soon as the receipt leaves that interval, by whatever exit. A receipt still before its reset point
   when they cannot wait (no clock, or the wait expired) MUST NOT be reset under `reset_on_logout`. The arm, resuming,
   MUST run no unit and MUST issue no store call after the close-out. A store call it had already issued runs to its

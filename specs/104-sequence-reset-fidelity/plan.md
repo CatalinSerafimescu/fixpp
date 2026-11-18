@@ -69,15 +69,23 @@ override it as one operation.
 
 **Project Type**: library (FIX engine).
 
-**Performance Goals**: one byte test per frame on two paths, and nothing else per frame.
-- RR-4 adds a byte test of the marker before the store call in `store_then_emit`, which runs on every outbound
-  frame that has a store call, every `Session::send` included. It adds one in `persist_inbound_advance_`, which
-  runs on every inbound persist.
+**Performance Goals**: one byte test per frame on two paths, and nothing else per frame. Each mechanism is
+accounted for on its own:
+- **`store_then_emit`'s byte test** (RR-4), before the store call. It runs on every outbound frame that has a
+  store call, every `Session::send` included. Article VIII §3 asks for a benchmark in the same PR, so phase 7 runs
+  the existing `bench/session/session_send_bench.cpp`, whose sends pass through `store_then_emit`. The run is
+  paired base-vs-candidate on one machine (Article VIII §2's method), and the results go in the evidence file.
+- **`persist_inbound_advance_`'s byte test** (RR-4). It sits after the function's `store_is_persistent_` return, so
+  it runs only on a persistent store's inbound persist and never on the in-memory inbound path (XV §1's hot path).
+  `session_send_bench` does not cover it, and no benchmark is added for it.
+- **`close()`'s poll** (contract RR-2 item 4). It runs in `close()` only, never per message, and it has the shape
+  of the post-polls `close()` already runs (103's poll-join, the liveness join, the bound join).
+  - Its worst case: one handler kept ready on the session's executor for up to `logon_timeout_ms`, while a receipt
+    is held in a store call.
+  - That is a cost to disclose (B-104-2), not a regression to bench. Its duration is the held call's, which a
+    benchmark would choose. Why it is accepted: research D1 item 4.
 - The LogonSent arm gains one flag test.
 - The rest runs only on a Logout that ends the session, on an establishment frame, or in `close()`.
-- Article VIII §3 asks for a benchmark in the same PR. Phase 7 runs the existing
-  `bench/session/session_send_bench.cpp`, whose sends pass through `store_then_emit`, paired base-vs-candidate on
-  one machine (Article VIII §2's method), with the results in the evidence file.
 
 **Constraints**:
 - Article XV §1: no allocation on parse → validate → dispatch. The unit's `co_spawn` frame is one per session
@@ -89,7 +97,8 @@ override it as one operation.
 **Scale/Scope**:
 - Session functions changed: `on_inbound_active_logout_`, `on_inbound_active_too_high_logout_`,
   `on_inbound_logout_sent_`, `on_inbound_logon_sent_` (arm S, the unasked branch, the too-low branch),
-  `acknowledge_peer_logout_`, `run_peer_logout_bound_` (the marker's owner), `run_logout_phase1`, `close` (the
+  `acknowledge_peer_logout_` (B's reset point), `run_peer_logout_bound_` (no marker write before its reset point;
+  the Debug assert there), `run_logout_phase1`, `close` (the
   poll), `run_reset_unit_` (its `reset_unit_wake_` call deleted), `store_then_emit` and `persist_inbound_advance_`
   (RR-4's boundaries), `install_reconnected_transport`.
 - The two Logon arms, `on_inbound_logon_sent_` and `on_inbound_not_connected_`, plus one file-local text builder
@@ -111,11 +120,11 @@ override it as one operation.
 |---|---|
 | VI §5: "Every `/specify` artifact must include a **Normative References** section listing the exact `[DocAbbrev §X.Y.Z] Title` entries from the coverage index that inform the spec." | **PASS.** The spec lists FIX-SL §4.3.11, §4.4.2, §4.4.3, §4.6, §4.7.1, §4.8.1, §4.10.2 and FIX-TC 1B, 1S, 2, 13, each a row of `spec/coverage-index.md` (re-derive: `grep -n -F '<§ or scenario>' spec/coverage-index.md`). No key is added. Phase 9 adds 104's witnesses to the notes column of the keys it witnesses. |
 | VII §3: "**TDD is mandatory.** Every feature lands as red-green-refactor: failing test first, then implementation." | **PASS (planned).** Each behaviour has a cell that is RED on the base, by reading, before its fix, and a mutant (research D10). Phases 2, 4 and 6 open with their cells. |
-| VII §4: "**No code without a test.**" | **PASS (planned).** D3.3a's clamp, the text builder's new callers, the moved and widened `close()` wait and its poll, the close-out of a `pending` receipt with no reset, the reset point as one strand turn and its cancellation-state reset, the marker's owners, RR-4's boundaries, arm S and the moved identity gates each have a cell (U-7/U-8, T-1/T-2, R-1j/R-1k/R-1s/R-1w, R-1l/R-1u, R-1x, R-1v/R-1f, R-1r, R-1o, T-6/U-9). |
+| VII §4: "**No code without a test.**" | **PASS (planned).** D3.3a's clamp, the text builder's new callers, the moved and widened `close()` wait and its poll, the close-out of a `pending` receipt with no reset, the reset point as one strand turn and its cancellation-state reset, the marker's owners (construction A: pump frames only, the bound's one write), RR-4's boundaries, arm S and the moved identity gates each have a cell (U-7/U-8, T-1/T-2, R-1j/R-1k/R-1s/R-1w, R-1l/R-1u, R-1x, R-1v/R-1f/R-1y/R-1z, R-1r, R-1o, T-6/U-9). |
 | VII §5: "`tests/conformance/` holds the official FIX session-layer test cases … Every PR must pass them in CI." | **PASS.** `TcSeqnumTest.Tc2c_MsgSeqNumTooLow` (Active) is unchanged. T-1/T-2 are TC 2c's and 1B(d)'s Logon-arm instances. |
 | VII §8: "Author isolation-safe tests grouped; select by ctest label, not executable name" | **PASS (planned).** One bucket, `session_104_tests`, with label `104`. Selection is `-L 104 --no-tests=error` (quickstart §2). |
-| IX §1: "**Per-PR:** **≥95% line, ≥85% branch** on **touched modules** … **Binding rule — no silent uncovered error/edge path.**" | **PASS (planned).** Each new branch has a cell, and each contract ending has one: each receipt arm's reset point (R-1c, R-1d, R-1e, R-1o), each ending before it (R-1f, R-1g, R-1n), the races with `close()` and `Engine::stop()` (R-1j, R-1k, R-1l, R-1u, R-1w, R-1x), the reply's cancelled store call (R-1v), the store failure (R-1i), the emitters at the unit (R-1p, R-1q, R-1r), the unasked branch (U-1, U-4, U-9), the clamp (U-7, U-8), and each too-low Logout ending, one cell per ending per arm with its mutant (T-4a to T-4e, T-6). `/speckit-verify` assesses anything left uncovered. |
-| VIII §3: "**No perf change merged without a benchmark in the same PR.**" | **PASS (planned).** RR-4's two byte tests are a per-frame change. `session_send_bench` runs paired base-vs-candidate in phase 7 ("Performance Goals"). |
+| IX §1: "**Per-PR:** **≥95% line, ≥85% branch** on **touched modules** … **Binding rule — no silent uncovered error/edge path.**" | **PASS (planned).** Each new branch has a cell, and each contract ending has one: each receipt arm's reset point (R-1c, R-1d, R-1e, R-1o), each ending before it (R-1f, R-1g, R-1n), the races with `close()` and `Engine::stop()` (R-1j, R-1k, R-1l, R-1u, R-1w, R-1x, R-1z), a duplicate too-high Logout (R-1y), the reply's cancelled store call (R-1v), the store failure (R-1i), the emitters at the unit (R-1p, R-1q, R-1r), the unasked branch (U-1, U-4, U-9), the clamp (U-7, U-8), and each too-low Logout ending, one cell per ending per arm with its mutant (T-4a to T-4e, T-6). `/speckit-verify` assesses anything left uncovered. |
+| VIII §3: "**No perf change merged without a benchmark in the same PR.**" | **PASS (planned).** Per mechanism ("Performance Goals"): `store_then_emit`'s byte test is the per-frame change, and `session_send_bench` runs paired base-vs-candidate in phase 7. `persist_inbound_advance_`'s byte test sits behind `store_is_persistent_`, so it is off the in-memory path and has no bench. `close()`'s poll runs in `close()` only. Its worst case is up to `logon_timeout_ms` of posted turns while a store call is held, disclosed in B-104-2. Research D1 item 4 answers 093 OD-1's reason for rejecting a poll ("spins the strand for the whole bound"). |
 | IX §2: "**Sanitizers — Tier 1 (every PR, Linux/Clang):** ASan, UBSan, TSan must all run and pass." | **PASS (planned).** `session_104_tests` and the re-pinned targets run under each (quickstart §4). |
 | X §1 / §6: "Every change to it is reviewed against the contract; Codex Gate A is mandatory." / "ABI-affecting features trigger all four mandatory controls" | **N/A.** No C-ABI change: `reset_on_logout` has no C-ABI setter (`git grep -n reset_on_logout include/fix`), and no signature, code or default moves. The behaviour change reaches C-ABI users through the session, as B-104-* rows. |
 | XI §2: "**Cancellation: ASIO native cancellation slots end-to-end.** No parallel `stop_token` abstraction." | **PASS.** The receipt reset reuses the unit's empty-slot `co_spawn` and the arm's restore. No new cancellation path. |
@@ -161,7 +170,7 @@ src/session/session.cpp                    # D1 (the receipt arms A/L/B/S and th
                                            # text builder, Arm B's caller)
 include/fixpp/session/session.hpp          # logout_seen_'s type and contract comment (FR-006); drive_reconnect's latch paragraph
 include/fixpp/session/session_config.hpp   # reset_on_logout / reset_on_disconnect doc comments (receipt rule, names 104)
-tests/session/test_104_reset_on_logout.cpp       # R-1a … R-1s, R-2
+tests/session/test_104_reset_on_logout.cpp       # R-1a … R-1z, R-2
 tests/session/test_104_unasked_reset_ack.cpp     # U-1 … U-9
 tests/session/test_104_logon_too_low.cpp         # T-1 … T-6 (T-4a … T-4e)
 tests/session/CMakeLists.txt               # add_session_104_bucket(session_104_tests …), label 104
@@ -193,23 +202,55 @@ result and every RED/GREEN/mutant record, never code comments.
      - the store-order condition and the manager's inline grant (research R1);
      - the Active sub-arms that write after a suspension following `check_inbound` (R-1r's route; contract RR-4).
    - Record the results. The phases below take the census's kept hits as their re-pin and reword list.
-1. **US1 RED cells** (research D10 R-1a … R-1s, R-2), in `test_104_reset_on_logout.cpp`, after HookedStore's
-   per-call record (D10's one test-support addition, with its own known positive). Confirm each is RED on the
-   base, or GREEN where D10 says so, with its reason.
+1. **The settling experiment comes first** (owner, 2026-11-18). Construction A rests on INV-T and INV-X (contract
+   RR-2), which are read from source and not yet run. If either fails, the construction is wrong, not its
+   implementation.
+   - Add the Debug asserts `peer_logout_.phase != acking` at the entry of `on_inbound_active_logout_` and of
+     `on_inbound_active_too_high_logout_`. They compile at the base.
+   - Write R-1y and R-1z first (research D10), after HookedStore's per-call record.
+   - In a Debug build, where asserts are on, run these together, by gtest filter in their binaries:
+     - `*TooHighLogoutState103.*` in `session_103_tests`. The suite is a `TEST_P` instantiated as
+       `BothRoles/…`, so a filter without the leading `*` selects nothing. That covers 103's
+       `SecondTooHighLogoutWhilePending_*` and `H_LogoutResentInSequence_*` cells.
+     - R-1y and R-1z, R-1z's `OneDelivery` arm included.
+
+     Record each test count, which must not be 0.
+   - **Only R-1z's `OneDelivery` arm reaches INV-T's window.** There the bound's wake has been posted and has not
+     run yet when a 35=5 frame passes the drain test. 103's cells and R-1z's `CloseDuringReplyStore` arm feed one frame per pump, so
+     the bound has run before the next frame. 103's `H_LogoutResentInSequence_*` also fills only to S, which leaves
+     the bound unwoken.
+   - Known positive, run in a scratch copy: insert a suspension (`co_await asio::post(...)`) between
+     `on_inbound_active_`'s drain test and its sub-arm dispatch. The `OneDelivery` arm must then abort on the entry
+     assert. If it does not, the selection cannot report a failure of INV-T, and the experiment is not accepted.
+   - The marker's assert (`none` at the bound's reset point, RR-2 item 5) needs the enum and B's reset point. It
+     lands with phase 2, which re-runs the same selection as soon as B's reset point exists. Only R-1y and R-1z set
+     `reset_on_logout`, so only they can trip it: with rol off the marker is always `none`. Its known positive, in
+     a scratch copy: B's ignored branch writes `pending`, and R-1y's bound then trips the assert.
+   - **If any assert fires, at either point, implementation STOPS** and the decision goes back to the owner, with
+     the cell, the assert and the stack.
+   - Then the rest of the US1 RED cells (research D10 R-1a … R-1x, R-2), in `test_104_reset_on_logout.cpp`.
+     Confirm each, R-1y and R-1z included, is RED on the base (an assertion failure, not an abort), or GREEN where
+     D10 says so, with its reason.
 2. **US1 change (D1, D2; contract Part 1).**
    - `logout_seen_`'s type (the three-valued marker) and its header comment with the condition and the recipe;
      every hit of `git grep -n logout_seen -- tests src include bindings tools` re-read (at the base the hits
      outside `session.cpp` are comments only, including `session.hpp`'s paragraph on the latches that stay set
      across a reconnect).
-   - The receipt arms A, L, B, S: the marker set at receipt, its owner per frame (contract RR-2 item 2: B's bound
-     takes 103's `wake_clearer` shape), the clear before an in-arm `close()`, and the reset point in RR-3's order
-     (reply, `Disconnected`, cancellation-state reset, marker `reached`, unit, restore).
+   - The receipt arms A, L, B, S, per contract RR-2 items 1, 2 and 5:
+     - the marker set at receipt by the pump frames only, with B's spawn and ignored branches writing nothing;
+     - each pump frame's owner, and its clear before an in-arm `close()`;
+     - the bound's one write at its reset point, in `acking`;
+     - the reset point in RR-3's order: reply, `Disconnected`, cancellation-state reset, marker `reached`, unit,
+       restore;
+     - the marker's Debug assert at each reset point (RR-2 item 5). As soon as B's reset point exists, re-run the
+       settling experiment's selection (phase 1). An assert that fires stops implementation there too.
    - The deletion in `run_logout_phase1`.
    - `close()`: the wait moved ahead of the predicate, widened to a `pending` marker, and made a poll by post
      (contract RR-2 item 4), with `reset_unit_wake_` deleted; a marker still `pending` after the wait closed out to
      `reached` with no reset (design ruling 3); the predicate's reset under rod only.
-   - The reset point as one strand turn: the cancellation-state reset, then `pending` → `reached` written
-     immediately before `run_reset_unit_`, with no suspension or callback between (contract RR-2 item 3).
+   - The reset point as one strand turn: the cancellation-state reset, then the marker's move to `reached` (from
+     the pump frame's `pending`, or from `none` in the bound; RR-2 item 5) written immediately before
+     `run_reset_unit_`, with no suspension or callback between (contract RR-2 item 3).
    - RR-4's boundaries in `store_then_emit` and `persist_inbound_advance_`; the clear at
      `install_reconnected_transport`.
    - The comments that state the old rule, each naming 104 (FR-006): the member, the teardown block's
@@ -289,6 +330,7 @@ result and every RED/GREEN/mutant record, never code comments.
 
 - Round 1 applied 2026-11-17: Codex P1=5 P2=2 P3=1; Opus post-judging P1=1 P2=7 P3=7; rewrite addresses root causes 1, 2, 3 (RU-1..RU-3). Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_adversarial_review.md.
 - Round 2 applied 2026-11-18: Codex P1=4 P2=3 P3=2; Opus post-judging P1=2 P2=8 P3=7; rewrite addresses Codex #1, N-1 (P1s) and every P2/P3. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_2_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_2_adversarial_review.md.
+- Round 3 (loop 1 exhausted) 2026-11-18: Codex P1=2 P2=0 P3=0; Opus post-judging P1=2 P2=0 P3=1 (RC-1: one marker, several owners on route B). Fable consult 104-receipt-reset-marker-ownership: probable. Owner chose a targeted amendment with construction A; loop 2 follows. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_3_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_3_adversarial_review.md.
 
 ### Round 1 — disagreements
 

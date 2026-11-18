@@ -15,32 +15,38 @@ A one-byte enum with three values. It replaces the `bool` whose contract was "a 
 
 | Value | Meaning |
 |---|---|
-| `none` | no received Logout on this connection is between its receipt and its reset point, and none reached it |
-| `pending` | a receipt arm (A, L, B or S, contract RT-1) is between its receipt and its reset point |
+| `none` | no awaited read-pump frame of a receipt arm is between its receipt and its reset point, and no receipt on this connection reached it. A too-high Logout's bound that is owed a receipt leaves it `none`: that state is the 103 mark (`peer_logout_.phase`), not this member |
+| `pending` | an awaited read-pump frame of a receipt arm (A, L, S, or B's immediate acknowledgement; contract RT-1) is between its receipt and its reset point. That frame is its one owner |
 | `reached` | this connection's received Logout reached its reset point (its unit started in the same strand turn), or `close()` closed out a receipt that was still `pending` when it could not wait; either way no further unit runs, and RR-4 refuses every store call issued from then on (contract RR-2 item 5) |
 
 | Event | Effect |
 |---|---|
-| A peer Logout received, with rol set: arm A's entry (`on_inbound_active_logout_`), arm L's 35=5 (`on_inbound_logout_sent_`), arm S's 35=5 (`on_inbound_logon_sent_`), arm B's receipt (`on_inbound_active_too_high_logout_`) | `pending` (with rol off: no effect) |
+| A peer Logout received by an awaited read-pump frame, with rol set: arm A's entry (`on_inbound_active_logout_`), arm L's 35=5 (`on_inbound_logout_sent_`), arm S's 35=5 (`on_inbound_logon_sent_`), arm B's immediate-acknowledgement branch (`on_inbound_active_too_high_logout_`) | `pending` (with rol off: no effect) |
+| `on_inbound_active_too_high_logout_`'s spawn branch (the bound is started) and its ignored branch (a second too-high Logout while the 103 mark is set) | **no effect** (contract RR-2 item 1) |
 | A Logout received in NotConnected | no effect |
 | fixpp's own Logout emitted (`run_logout_phase1`) | **no effect** (the base's set is deleted) |
 | Any other Logout fixpp sends (error paths, the too-low Logout) | no effect |
-| The arm reaches its reset point | the thread's cancellation state reset, then `pending` → `reached` and the unit's start, in one strand turn (contract RR-2 item 3); already `reached` (`close()` closed it out) → no unit (RR-2 item 5) |
-| The arm ends before its reset point, by return or by exception; and before any `close()` the arm calls itself | `pending` → `none`, by the frame's owner (contract RR-2 item 2) |
-| Arm B's bound ends unacknowledged (claimed, stopped, superseded, drained) | `pending` → `none`, by the bound's body; by its unwinding-only owner on an exception (RR-2 item 2) |
-| `Session::close`: the wait before the predicate | read: a poll by post while `pending` or `reset_unit_in_flight_` (RR-2 item 4) |
+| A pump frame reaches its reset point | the thread's cancellation state reset, then `pending` → `reached` and the unit's start, in one strand turn (contract RR-2 item 3); already `reached` (`close()` closed it out) → no unit (RR-2 item 5) |
+| Arm B's bound reaches its reset point (in `acknowledge_peer_logout_`, with the 103 mark `acking`) | the bound's one write: `none` → `reached` and the unit's start, in one strand turn, asserting `none` (contract RR-2 items 2, 3 and 5) |
+| A pump frame ends before its reset point, by return or by exception; and before any `close()` the arm calls itself | `pending` → `none`, by the frame's owner, only if still `pending` (contract RR-2 item 2) |
+| Arm B's bound ends unacknowledged (claimed, stopped, superseded, drained, its exception handler) | **no effect**: the bound's receipt owed is the 103 mark, which 103 clears or leaves to a claim (contract O18) |
+| `Session::close`: the wait before the predicate | read: a poll by post while `pending` or `reset_unit_in_flight_`, after 103's bound join, so it never sees a bound's receipt (RR-2 item 4) |
 | `Session::close`: after the wait, before the predicate | a `pending` marker (no clock, or the wait expired) is set to `reached` with **no reset** under rol: the receipt did not reach its reset point (contract RR-2 item 4) |
 | `Session::close`: the teardown predicate | `!teardown_reset_done_ && rod`; the rol term for "`reached`, unit not started" has no input by RR-2 item 3 and is not coded |
-| `store_then_emit` (before its store call), `persist_inbound_advance_` (before its store call) | read: refuse a call issued while `reached` (contract RR-4); `store_then_emit` takes its number back. A call issued earlier runs to its end (RR-2 item 5) |
+| `store_then_emit` (before its store call), `persist_inbound_advance_` (after its `store_is_persistent_` return, before its store call) | read: refuse a call issued while `reached` (contract RR-4); `store_then_emit` takes its number back. A call issued earlier runs to its end (RR-2 item 5) |
 | `install_reconnected_transport` | `none` |
 
-- **Invariant RO-1.** With rol set, the marker is `pending` exactly while one receipt arm is between its receipt
-  and its reset point or exit. It leaves `pending` once, to `reached` (the arm at its reset point, or `close()`
-  closing out a receipt it could not wait for, with no reset) or to `none`. With rol off it stays `none`, so 104
-  adds no wait, reset or refusal to such a session.
+- **Invariant RO-1.** With rol set, the marker is `pending` exactly while one awaited read-pump frame of a receipt
+  arm (A, L, S, or B's immediate acknowledgement) is between its receipt and its reset point or exit. That frame
+  is its one owner (contract INV-P). It leaves `pending` once, to `reached` (the frame at its reset point, or
+  `close()` closing out a receipt it could not wait for, with no reset) or to `none` (the frame's owner).
+  - A too-high Logout's detached bound never makes it `pending`: its owed receipt is the 103 mark.
+  - The bound writes the marker once, `none` → `reached` at its reset point (contract INV-M, INV-X).
+  - With rol off the marker stays `none`, so 104 adds no wait, reset or refusal to such a session.
 - **Invariant RO-2.** No Logout that fixpp sends changes the marker. FR-015 follows, and B-538-7's first half
   still holds.
-- **Invariant RO-3.** A receipt reset under rol has one owner, the arm's unit, which `close()` waits for. The
+- **Invariant RO-3.** A receipt reset under rol has one owner, the arm's unit, which `close()` waits for: by its
+  wait (contract RR-2 item 4), or for the bound's unit by 103's bound join, which precedes that wait. The
   teardown never resets a `pending` receipt (RU-1). The one case it would own, `reached` with the unit not started,
   has no input because the reset point is one strand turn. An arm that finds the marker `reached` at its reset
   point runs no unit, and issues no store call from `reached` on (contract RR-2 item 5).
@@ -62,7 +68,7 @@ call of `reset_unit_wake_` (below). It gains callers:
 
 | Caller | Targets | Before the call | After the call |
 |---|---|---|---|
-| arms A, L, B, S at their reset point (rol set) | `(1, 1)` | `Disconnected` recorded (RR-3); the thread's cancellation state reset; the marker `pending` → `reached`; no unit if it was already `reached` | `reset_cancellation_state(enable_total_cancellation{})`; a manager or store error is logged; the arm continues as it does today (L: `logout_confirmed_` and phase 1's wake) |
+| arms A, L, B, S at their reset point (rol set) | `(1, 1)` | `Disconnected` recorded (RR-3); the thread's cancellation state reset; the marker `pending` → `reached` (B's bound: `none` → `reached`); no unit if it was already `reached` (RR-2 item 5) | `reset_cancellation_state(enable_total_cancellation{})`; a manager or store error is logged; the arm continues as it does today (L: `logout_confirmed_` and phase 1's wake) |
 | `on_inbound_logon_sent_`, the unasked branch (D3.1) | `(2, 1)` when the acknowledgement's 34 is 1; `(1, 1)` otherwise | the mTLS CompID-authorisation gate passed (clarification N-8) | today's step 5 to step 7 (030's persistent-fatal disposition) |
 
 `reset_unit_in_flight_` is unchanged, and `close()` reads it earlier (below). `reset_unit_wake_` and its call in
@@ -134,8 +140,12 @@ New rows:
   to DQ-14 of 104's spec.
 - **B-104-2** — `close()` and the close `Engine::stop()` drives wait, before the teardown reset decision, for a
   received Logout that is between its receipt and its reset point, and for any 141=Y reset unit in flight (a
-  receipt reset or a Logon's), whatever the knobs. The wait is bounded by `logon_timeout_ms` and needs a clock.
-  The wait ends as soon as that Logout leaves the interval, whatever ended it, with no expiry event. Where it
+  receipt reset or a Logon's), whatever the knobs. The wait is bounded by `logon_timeout_ms` and needs a clock. A
+  too-high Logout whose acknowledgement is already under way is not in it: `close()` waits for that one, and for its
+  reset, by joining its bound, as before 104.
+  The wait ends as soon as that Logout leaves the interval, whatever ended it, with no expiry event. While it
+  waits, the session's executor runs one posted turn per pass, for up to `logon_timeout_ms` when a store call is
+  held. Where it
   cannot wait (no clock, or the bound expired), a received Logout still short of its reset point is not reset
   under `reset_on_logout`, and its processing issues no store call afterwards. A store call it had already issued
   completes after `close()` returned: a held reply is stored, and is transmitted only on a config-time

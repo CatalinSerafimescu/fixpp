@@ -24,14 +24,20 @@ RU-2 and RU-3 (spec Clarifications, Gate A round 1). This section records why, a
    `brain/`, and the smaller diff is the comment. Phases 2 and 9 re-read every hit of
    `git grep -n logout_seen -- tests src include bindings tools spec brain .specify` and correct the prose that
    states the old rule (the supersession census, D8).
-   - It becomes `pending`, with rol set, where a peer Logout is received and only there (contract RT-1's arms A,
-     L, B and S). The sets in L (FR-003) and S (RU-2) are **new**.
+   - With rol set it changes only where a peer Logout is received (contract RT-1's arms A, L, B and S). Which
+     frames set `pending` is the bullet after next. The sets in L (FR-003) and S (RU-2) are **new**.
    - `run_logout_phase1`'s set after its emit (sc ~8236) is **deleted**. With it goes the "site (a)" half of the
      member's comment (FR-006).
-   - It leaves `pending` once: to `reached` at the reset point, or when `close()` closes out a receipt it could not
-     wait for (no reset); to `none` at any exit before the reset point. Who clears it, per frame, is contract RR-2
-     item 2: an owner in each awaited arm, and in B's detached bound an owner of 103's `wake_clearer` shape that
-     acts only while an exception unwinds. `install_reconnected_transport` sets `none`.
+   - Only an awaited read-pump frame sets it `pending`: A, L and S at entry, and B's immediate acknowledgement.
+     That frame is its one owner (contract RR-2 items 1 and 2, construction A, owner 2026-11-18).
+     - It leaves `pending` once. It goes to `reached` at the reset point, or when `close()` closes out a receipt it
+       could not wait for (no reset). It goes to `none` at any exit before the reset point, by the frame's owner.
+     - B's spawn and ignored branches write nothing. A too-high Logout's detached bound keeps its owed receipt in
+       103's `peer_logout_.phase`, and it writes the marker once: `none` → `reached` at its reset point, in
+       `acking`.
+     - `install_reconnected_transport` sets `none`.
+     - The construction rests on four invariants read from source: INV-P, INV-M, INV-T and INV-X. They are stated
+       once, in the contract's RR-2.
    - The new header comment names 104 and the 024 T013 / C3.1 clause it supersedes. It states the condition and the
      re-derivation recipe (`git grep -n logout_seen_ -- src include`), and no count of sites.
 2. **The reset point (RU-1).** Each receipt arm has one (contract RR-1's table). The reset is made if and only if
@@ -51,7 +57,8 @@ RU-2 and RU-3 (spec Clarifications, Gate A round 1). This section records why, a
      still open, before `close()`'s phase 2, where the base made it in phase 2's teardown.
    - **B** (`acknowledge_peer_logout_`): after its leaf and event, its existing Disconnected write, then the unit.
      That one site covers the immediate acknowledgement (T = 0, no clock, a Logout in flight, closing or stopped)
-     and the bound's (`run_peer_logout_bound_`).
+     and the bound's (`run_peer_logout_bound_`). The 103 mark tells them apart there: it is `acking` only for the
+     bound (contract RR-2 item 5).
    - **S** (`on_inbound_logon_sent_`, RU-2): a 35=5 frame is handled ahead of `interpret_logon`, which refuses any
      non-Logon before its BeginString and CompID tests (`admin_messages.cpp`, `interpret_logon`: `msg_type_found
      != "A"` first). It passes the guards that run ahead of `interpret_logon` (garble, `logon_arm_superseded_`,
@@ -65,6 +72,19 @@ RU-2 and RU-3 (spec Clarifications, Gate A round 1). This section records why, a
    the predicate block and widened to the marker, and it needs `effective_clock_` (B-104-2).
    - It is a poll by post, not 093's event wait. 093's wait had one waker, the unit's completion, and widening it
      to `pending` added exits that call no waker (Opus round 2, N-1).
+   - **093 OD-1's reason for rejecting a poll is answered by name.** 093 recorded "a `co_await asio::post` poll
+     loop, which spins the strand for the whole bound" (`brain/components/session.md`, the 141=Y unit's `close()`
+     wait bullet).
+     - That cost is real here. A receipt held in a store call keeps one handler ready on the session's executor for
+       up to `logon_timeout_ms` (contract RR-2 item 4, its worst case; disclosed in B-104-2).
+     - It is accepted on three grounds:
+       - the cost is confined to `close()` and to the receipt's duration, never per message;
+       - the loop has the shape of the post-polls `close()` already runs (103's poll-join on
+         `logout_in_flight_`, the liveness join and the bound join);
+       - an event wait is correct only if every exit from `pending` calls its waker, and N-1 was a missed one.
+     - 093's event-driven shape is superseded (D8); 093's reason stands as a description of the cost.
+   - Route B needs nothing new. `close()` claims the 103 mark at its first commit, and its bound join precedes
+     this wait. So the wait sees only a pump frame's `pending`, or a unit in flight (contract RR-2 item 4).
    - A marker still `pending` after the wait belongs to a receipt that did not reach its reset point: no reset
      under rol (design ruling 3). `close()` closes it out to `reached`. From then on the arm issues no store call;
      one it had already issued runs to its end (O13-r, O13-p).
@@ -150,10 +170,48 @@ RU-2 and RU-3 (spec Clarifications, Gate A round 1). This section records why, a
   runs anyway.
 - *A separate "receipt in flight" member.* Rejected: the three-valued marker carries `pending` and `reached` in
   the byte the `bool` occupied, with no new clear site beyond `install_reconnected_transport`.
+- *Who owns a too-high Logout's receipt* (Gate A round 3, RC-1: one marker, several owners on route B). Round 3
+  had B's pump arm hand `pending` to the bound at `co_spawn`, with an unwinding-only owner in the bound. A
+  duplicate too-high Logout's frame then cleared the bound's `pending` (Codex #1). The bound's claimed exit cleared
+  an in-sequence Logout's `pending`, so `close()` stopped waiting for arm A (Opus N-1).
+  - **Chosen, construction A (owner, 2026-11-18):** keep three values, and let only awaited pump frames own
+    `pending`. The bound's owed receipt is 103's single-owner mark, and the bound writes the marker once, at its
+    reset point. No marker value then has two owners: INV-P serialises the pump frames, and INV-X keeps the bound's
+    reset point apart from them.
+  - *A fourth value, `pending_bound`, that a receipt arm's entry revokes* (Opus round 3). Not chosen: it keeps the
+    hand-over between the bound and a later receipt, which construction A removes, together with a value that
+    `close()`'s wait and close-out would have to treat as `pending`.
+  - *An owner epoch or token* (Codex round 3). Not taken: it adds a member, and data-model says none is added.
+
+#### Read from source: a too-high Logout in LogonReceived (Fable's unverified observation)
+
+The observation was that a too-high Logout in LogonReceived may reach the spawn branch. The bound would then exit
+on its "live" test without clearing the 103 mark, leaving `phase == pending`, which refuses every send. **Read at
+`3d04c544`: not reachable.** It is not recorded as OPEN.
+- The hazard exists as a shape. The bound's `!live()` exits write nothing to the 103 mark, so when "live" fails on
+  `fsm_state_ != Active` alone, the mark stays `pending`. That is harmless only because the spawn branch is
+  reachable in Active alone.
+- `record_state_transition_(fsm_state::LogonReceived)` has one writer, the acceptor Logon arm
+  (`on_inbound_not_connected_`). Re-derive it with
+  `git grep -n "record_state_transition_(fsm_state::LogonReceived)" -- src`.
+- That frame is awaited to its end before any other frame is delivered (INV-P). The acceptor's first frame is
+  delivered and awaited before `run_read_pump` starts.
+- Every exit from the arm after that write leaves one of three states:
+  - `Active`;
+  - `Disconnected`: `record_state_transition_`, `disconnect_unless_superseded_` when not superseded, and
+    `on_inbound_active_`'s catch, which records Disconnected unless superseded;
+  - superseded: `logon_arm_superseded_`, which is `state_ == lifecycle::closing || engine_stop_requested_ ||`
+    a state that is no longer LogonReceived. The two flags imply `closing_or_stopped_()`, and they are not reset
+    on that connection.
+- So a later frame meets LogonReceived only with `closing_or_stopped_()` true. That routes a too-high Logout to the
+  immediate-acknowledgement branch, never the spawn branch.
+- An observation for the owner, not an edit to RT-1. By the same reading, arm A's "Logout in LogonReceived" row
+  has input only while a close or a stop is in flight.
 
 **Sites:** `Session::on_inbound_active_logout_`, `Session::on_inbound_active_too_high_logout_`,
-`Session::on_inbound_logout_sent_`, `Session::on_inbound_logon_sent_` (arm S), `Session::acknowledge_peer_logout_`,
-`Session::run_peer_logout_bound_` (the marker's owner), `Session::run_logout_phase1` (the deleted set),
+`Session::on_inbound_logout_sent_`, `Session::on_inbound_logon_sent_` (arm S), `Session::acknowledge_peer_logout_`
+(B's reset point, shared by the immediate acknowledgement and the bound, told apart by the 103 mark),
+`Session::run_peer_logout_bound_` (no marker write; the Debug assert at its reset point), `Session::run_logout_phase1` (the deleted set),
 `Session::close` (the wait's position, its poll and predicate, the close-out of a `pending` marker, the comment on
 the predicate), `Session::run_reset_unit_` (its `reset_unit_wake_` call deleted, with the member),
 `Session::store_then_emit` and `Session::persist_inbound_advance_` (RR-4's boundaries),
@@ -632,7 +690,7 @@ The text of every new and amended row is data-model.md "B&L delta". In summary:
 - **One test-support addition, in phase 1, before any cell that needs it.** HookedStore's `on_reset` fires for
   both `reset()` and `reset_to` under `reset_to_mode::forward`, so a hook cannot tell the unit from the teardown.
   HookedStore gains a per-call record: which call fired (`reset` or `reset_to`, with `reset_to`'s targets) and a
-  count of each. R-1c to R-1f, R-1k, R-1l, R-1o, R-1u, R-1w, R-1x, R-2 and T-5 assert on it; without it R-1l's first mutant and
+  count of each. R-1c to R-1f, R-1k, R-1l, R-1o, R-1u, R-1w, R-1x, R-1y, R-1z, R-2 and T-5 assert on it; without it R-1l's first mutant and
   the arm-versus-teardown readings of R-1k and R-1u could not go RED. Its own known positive: a cell that calls each of the two directly and reads two distinct records.
 - Re-pinned cells stay in their files (D8).
 
@@ -658,7 +716,7 @@ store call it saw (`reset_to` is the unit; `reset` is the teardown).
 | R-1c | `…Answered_ResetAtReceipt` (HookedStore, `reset_to_mode::forward`) | the peer's Logout fed in `LogoutSent`; the hook sees `reset_to`, state `Disconnected`, the transport **open**, phase 1 not yet woken; after `close()`: `(1, 1)`, one reset in total | base: the hook sees `reset` in `close()`'s teardown, transport closed | delete L's reset point (no teardown backstop now, so the final state is wrong too; the hook reading keeps the cell honest if a backstop is ever reintroduced) |
 | R-1d | `…PeerRequest_ResetAtReceipt` (both roles) | reply 35=5 numbered with the pre-reset next outbound; inside `onLogout` the numbers are the **pre-reset** ones (DQ-10); the hook sees `reset_to`, state `Disconnected`, transport open; one reset | as R-1c | delete A's reset point; second mutant: move the Disconnected write after the unit → `onLogout` sees `(1, 1)` and the hook sees Active |
 | R-1e | `…TooHighLogout_ResetAtAcknowledgement` | too-high Logout, gap filled, bound acknowledges; the hook as R-1d; pre-reset numbers inside `onLogout` | as R-1c | delete B's reset point |
-| R-1f | `…TooHighLogout_ClaimedByClose_NoReset` (rol only, a mock clock), and `…_AckingWhenClosed_ResetOnce` | (1) `close()` while the mark is pending: no `reset_to`, no `reset`; numbers as before; `close()` returns with the mock clock below `logon_timeout_ms` and no `close_reset_wait_expired`; (2) `close()` while the bound is `acking` (its reply held in HookedStore): one `reset_to`, before `close()` returns. (2) is (1)'s forced-hit arm on the same store double | (1) base resets at teardown (flag set at receipt); (2) base resets at teardown, `reset` not `reset_to` | (1) leave the marker `pending` when the bound exits → `close()` polls to `logon_timeout_ms` and emits `close_reset_wait_expired` → RED; (2) drop the `reset_unit_in_flight_` term of `close()`'s wait → `close()` returns while the unit's store call is held → RED (the bound's counter join, not the `pending` term, covers the `acking` phase) |
+| R-1f | `…TooHighLogout_ClaimedByClose_NoReset` (rol only, a mock clock), and `…_AckingWhenClosed_ResetOnce` | (1) `close()` while the mark is pending: no `reset_to`, no `reset`; numbers as before; `close()` returns with the mock clock below `logon_timeout_ms` and no `close_reset_wait_expired`; (2) `close()` while the bound is `acking` (its reply held in HookedStore): one `reset_to`, before `close()` returns. (2) is (1)'s forced-hit arm on the same store double | (1) base resets at teardown (flag set at receipt); (2) base resets at teardown, `reset` not `reset_to` | (1) B's spawn branch sets the marker `pending` (round 3's hand-off, with no owner left to clear it once `close()` claims the bound) → `close()` polls to `logon_timeout_ms` and emits `close_reset_wait_expired` → RED; (2a) the bound's reset point moves the marker only from `pending` (round 3's rule) → it finds `none` and runs no unit → zero resets → RED; (2b) move 103's bound join after the 104 wait → `close()` passes the wait while the bound is held in its reply's store, and the bound's `reset_to` lands after `close()` returned → RED. 103's bound join, not the 104 wait, covers the `acking` phase and its unit (contract RR-2 item 4) |
 | R-1g | `…ReceiptEndsBeforeResetPoint_NoReset_*` (rol only; A in Active): `FromAdminThrow`, `FromAdminReject`, `LateParseFailure` | no `reset_to` and no `reset` after the arm and after `close()`; the arm's existing ending (reply on the wire for throw and reject; Reject for reject) | base resets at teardown (flag set) | per parameter: clear the marker only at the reset point, not on exit → the later `close()` waits for a receipt that will never arrive, to `logon_timeout_ms` (the cell asserts `close()` returns well inside that bound) → RED; for `LateParseFailure`, clear it after the arm's `close()` instead of before → `close()` waits for its own caller, the same assertion → RED |
 | R-1h | `…PeerLogoutThenReconnect_NoResetOnNewConnection` (standalone initiator) | peer Logout reset at its reset point; `drive_reconnect`; the reconnect Logon is written (RR-4 does not refuse it: `install_reconnected_transport` runs before `emit_initiator_logon_`); numbers advance; `close(terminal)`: no reset | base's latched flag resets at the new connection's teardown | do not set `none` at `install_reconnected_transport` → RR-4 refuses the reconnect Logon → RED |
 | R-1i | `…ReceiptResetStoreFailure_LoggedThenDisconnected` (persistent StoreDouble, `fail_next_reset`) | Disconnected; arm's return as without the failure; manager `(1, 1)`; no teardown retry (rol only) | the base has no receipt reset | make the failure fatal (return the error) |
@@ -675,6 +733,8 @@ store call it saw (`reset_to` is the unit; `reset` is the teardown).
 | R-1v | `…ReplyStoreCancelled_NoReset` (A in Active, rol only, a mock clock; a cell-local store double whose outbound `store()` returns `store_cancelled` for the reply) — O9 | the number is taken back (manager next outbound N_out again); Disconnected; no frame; no `reset_to`, no `reset`; the owner cleared the marker while `operation_aborted` unwound the arm: a later `close()` returns with the mock clock below `logon_timeout_ms` and no `close_reset_wait_expired`. Forced-hit arm: R-1n's `StoreFailure` input on the same double resets. The thrown timing reaches the same block after the `try` (D-OUT-2), so this one cell witnesses both | base: the teardown's `reset` (flag set at receipt) | clear the marker on return only, not during unwinding → the marker stays `pending` → `close()` polls to `logon_timeout_ms` and emits the event → RED |
 | R-1w | `…CloseNotHeldWhenReceiptEndsWithoutUnit_{FromAdminThrow,Storeless,StuckPending}` (A in Active, rol, a mock clock) | `FromAdminThrow`: `close()` started during a held reply `store`; the hold released; `fromAdmin` throws; with the mock clock advanced to just below `logon_timeout_ms`, `close()` has returned, no `close_reset_wait_expired`, no reset. `Storeless`: no store (`store_factory` null), the reply's transport write held (the `arm_block()` / `release()` pattern of `ControlledWriteTransport`, `test_live_outbound_serialized.cpp`); `close()` started during the hold; released: the arm reaches its reset point, `run_reset_unit_` returns before setting `reset_unit_in_flight_`, manager `(1, 1)`; `close()` returned as above. Phase 1 reads whether the held write outlasts `close()`'s `close_async()`, which cancels and joins an in-flight operation. If it does not, the storeless exit has no input while `close()` waits, like the manager failure, and the poll covers it by construction: the arm is dropped and that reading is recorded. `StuckPending`, the instrument's forced hit: the hold never released and the mock clock advanced to the bound → one `close_reset_wait_expired`. The manager-failure exit has no input while `close()` waits: the manager refuses only after `close()`'s `seqnum_mgr_.drain()`, which follows the wait | base: `FromAdminThrow` resets at teardown; `Storeless` has no receipt unit | restore 093's event wait (`unit_done.async_wait \|\| await_deadline`, woken only at the unit's completion) widened to `pending` → `close()` runs to the bound and emits `close_reset_wait_expired` in `FromAdminThrow` and `Storeless` → RED |
 | R-1x | `…TerminalEmissionAtResetPoint_ResetOnce` (a direct `Session`, A in Active, rol, a clock; the cell `co_spawn`s `on_inbound_frame` bound to its own cancellation slot and emits `cancellation_type::terminal` on it from inside the `onLogout` that RR-3 step 2 fires) | exactly one `reset_to(1, 1)`; the marker `reached`; numbers `(1, 1)`; no `reset` | base: the teardown's `reset`, no `reset_to` | delete the cancellation-state reset before the turn → `reset_to_one`'s lock throws `operation_aborted` after the marker is `reached` → zero resets → RED |
+| R-1y | `…DuplicateTooHighLogoutWhilePending_OneResetByTheBound_{RouteA,RouteB}` (rol only, a mock clock, HookedStore) — O18a, Codex round 3 #1 | a too-high Logout opens the bound; a second too-high Logout while the 103 mark is `pending` is ignored (no second bound); the gap is filled past the first S; the bound acknowledges: exactly one acknowledgement Logout and exactly one `reset_to(1, 1)`, at the hook with state `Disconnected`; after `close()`: no `reset`. `RouteB`: the duplicate arrives with the resend outstanding (103's `SecondTooHighLogoutWhilePending_*` input). `RouteA`: the gap is first filled to S, so the resend is closed while the mark stays `pending`, and the duplicate arrives above N (103's `H_LogoutResentInSequence_*` input with the resent Logout above N) | base: the teardown's `reset`, no `reset_to` | round 3's hand-off, applied together: B's spawn branch sets `pending`, the bound's reset point moves it only from `pending`, and the ignored branch's frame-local owner clears it on its return → the bound finds `none` → zero resets → RED. Under construction A the ignored branch's clear alone is a no-op, because the marker is already `none` there. So the mutant restores the hand-off it pins against. "Exactly one" is its own forced hit: zero and two both fail |
+| R-1z | `…ClaimsAPendingBound_OneResetByTheArm_{CloseDuringReplyStore,OneDelivery}` (R-1k on route B: rol only, a mock clock, HookedStore) — O12, Opus round 3 N-1 | a too-high Logout opens the bound; the gap is filled to S; the Logout resent in sequence at S reaches arm A, which claims the 103 mark; A's reply `store` is held; `close(terminal)` is started during the hold; the hold is released. `close()` does not return before the release; exactly one `reset_to(1, 1)`, by A (hook: state `Disconnected`), finished before `close()` returns; no `reset`; no `close_reset_wait_expired`. Arm `OneDelivery`, the input of INV-T's window (plan phase 1): a GapFill past S and the in-sequence Logout at the new N in **one delivery**, from a cell-local coroutine that awaits `on_inbound_frame` for both back to back, as `run_read_pump` does. `Scene::feed` pumps the context after each frame, so two feeds cannot open the window. The bound's wake is then posted and not yet run when the Logout passes the drain test. A claims the mark, the bound exits unacknowledged, and there is one acknowledgement Logout (A's reply) and exactly one `reset_to(1, 1)`, by A | base: the teardown's `reset`, no `reset_to` | the bound writes `none` to the marker at its claimed `!live()` exit (round 3's body clear, unconditional) → A's `pending` is lost, `close()` returns during the hold, and A's reset point finds `none` → RED (in Debug, RR-2 item 5's assert fires first) |
 | R-2 | `…BothKnobs_PeerAnswers_TwoResets_EndsOneOne` (HookedStore) | two resets: the hook first sees `reset_to` in L's arm with the transport open, then `reset` in the teardown; `(1, 1)` (D2) | base: one reset | skip the teardown reset when the receipt reset ran → one reset → RED |
 | U-1 | `UnaskedResetAck104.Lenient_HydratedN_ResetsAndActive` (persistent store hydrated at in, out > 1) | Active (not merely "no second Logon"); inbound next 2, outbound next 1 in manager and store; `reset_to(2, 1)`; event `by_peer_request = true`; no 35=A written after fixpp's first; the next `send` is 34=1 | base ends Disconnected, too low | restore `check_inbound` before the 141 read |
 | U-2 | `…Unilateral_…` | as U-1 | as U-1 | as U-1 |
