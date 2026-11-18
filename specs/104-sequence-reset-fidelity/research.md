@@ -791,6 +791,18 @@ or the disposition, not by editing the view alone. In summary:
     production seam.
   - Known positive (T016's cell): with `arm_block()`, one write reads `starts == 1, writes == 0` while parked, and
     `1, 1` after `release()`.
+- **A fifth test-support addition, the held write's byte record (orchestrator ruling on the third run's
+  escalations).**
+  - `BlockingWriteTransport` records counts, never bytes, and R-5f, R-5g `GateWait` and R-5h `GateWait` assert a
+    MsgType on the wire of a live transport whose write can be held.
+  - `blocking_write_state` gains an opt-in record, off by default: with `record_bytes` set, each `async_write`
+    appends a copy of its bytes with its start index (the `starts` value it counted), and marks the entry
+    completed where it counts `writes`. A cell reads each frame's 35 and 34 in write-start order, and "written
+    after the reply" as a completed entry whose start index is above the reply's.
+  - With it off the write path does not allocate, so the header's no-allocation condition holds for every
+    existing user; the 544 entries are re-run after it lands. It lands with its first consumer (T038).
+  - Known positive (T016's cell): two recorded writes read back in order with their MsgTypes, and a write with
+    the record off records nothing.
 - Re-pinned cells stay in their files (D8).
 
 **C ABI and size.**

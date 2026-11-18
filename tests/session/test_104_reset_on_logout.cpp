@@ -14,7 +14,9 @@
 //     does not select returns unheld;
 //   - a reset_to issued during a held outbound store falls between that store's two events,
 //     and an unheld store records neither;
-//   - blocking_write_state::starts counts a parked write that has not completed.
+//   - blocking_write_state::starts counts a parked write that has not completed;
+//   - blocking_write_state's opt-in byte record holds each write's bytes, in write-start
+//     order, only while record_bytes is set.
 //
 // The cells R-1y and R-1z (tasks.md T019, T020; research D10's rows) run on
 // resend_gap_scene.hpp's Scene with reset_on_logout set, a HookedStore and the Scene's mock
@@ -347,6 +349,69 @@ void arm_write_starts(asio::io_context& ioc) {
     ASSERT_TRUE(r.has_value() && r->has_value()) << "arm4: the write failed";
 }
 
+// The value of `tag` in a recorded write's bytes (its first occurrence after a SOH), or empty.
+std::string recorded_field(std::vector<std::byte> const& bytes, std::string_view tag) {
+    std::string const wire(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    std::string const needle = "\x01" + std::string{tag} + "=";
+    auto const at = wire.find(needle);
+    if (at == std::string::npos) return {};
+    auto const from = at + needle.size();
+    auto const end = wire.find('\x01', from);
+    return wire.substr(from, end == std::string::npos ? std::string::npos : end - from);
+}
+
+// Arm 5: the opt-in byte record (research D10, the fifth test-support addition). With
+// record_bytes set, two writes are recorded in write-start order, each with its MsgType, its
+// start index and its completion; with it clear, a write records nothing.
+void arm_byte_record(asio::io_context& ioc) {
+    auto stream = std::make_shared<fixpp::session::test::ScriptedStream>();
+    auto state = std::make_shared<fixpp::session::test::blocking_write_state>();
+    fixpp::session::test::BlockingWriteTransport transport{ioc.get_executor(), stream, state};
+    auto const as_bytes = [](std::string_view const t) {
+        std::vector<std::byte> out;
+        for (char const c : t) out.push_back(static_cast<std::byte>(c));
+        return out;
+    };
+    auto const first = as_bytes(
+        "8=FIX.4.2\x01"
+        "35=0\x01"
+        "34=7\x01");
+    auto const second = as_bytes(
+        "8=FIX.4.2\x01"
+        "35=3\x01"
+        "34=8\x01");
+    auto const third = as_bytes(
+        "8=FIX.4.2\x01"
+        "35=5\x01"
+        "34=9\x01");
+
+    bool done = false;
+    asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            state->record_bytes = true;
+            (void)co_await transport.async_write(std::span<const std::byte>{first});
+            (void)co_await transport.async_write(std::span<const std::byte>{second});
+            state->record_bytes = false;
+            (void)co_await transport.async_write(std::span<const std::byte>{third});
+            done = true;
+        },
+        asio::detached);
+    bool const finished = pump_until(ioc, [&] { return done; }, kReleaseBudget);
+
+    EXPECT_TRUE(finished) << "arm5: the writes did not complete";
+    EXPECT_EQ(state->starts, 3U) << "arm5: starts";
+    ASSERT_EQ(state->recorded.size(), 2U) << "arm5: the record holds the two recorded writes";
+    EXPECT_EQ(recorded_field(state->recorded[0].bytes, "35"), "0") << "arm5: the first's 35";
+    EXPECT_EQ(recorded_field(state->recorded[0].bytes, "34"), "7") << "arm5: the first's 34";
+    EXPECT_EQ(recorded_field(state->recorded[1].bytes, "35"), "3") << "arm5: the second's 35";
+    EXPECT_EQ(recorded_field(state->recorded[1].bytes, "34"), "8") << "arm5: the second's 34";
+    EXPECT_EQ(state->recorded[0].start, 1U) << "arm5: the first's start index";
+    EXPECT_EQ(state->recorded[1].start, 2U) << "arm5: the second's start index";
+    EXPECT_TRUE(state->recorded[0].completed) << "arm5: the first's completion";
+    EXPECT_TRUE(state->recorded[1].completed) << "arm5: the second's completion";
+}
+
 TEST(HookedStoreRecord104, ResetAndResetToRecordedApart) {
     {
         asio::io_context ioc;
@@ -363,6 +428,10 @@ TEST(HookedStoreRecord104, ResetAndResetToRecordedApart) {
     {
         asio::io_context ioc;
         arm_write_starts(ioc);
+    }
+    {
+        asio::io_context ioc;
+        arm_byte_record(ioc);
     }
 }
 
