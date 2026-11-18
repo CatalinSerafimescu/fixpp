@@ -76,12 +76,14 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
   - The `this_coro` cancellation awaits do not suspend either.
   - The `persist_inbound_advance_` awaits on the way sit on the Reject, Heartbeat and application paths, not on
     35=5.
-  - One step is read and not run: asio starts an awaited child coroutine inline. The Debug assert below checks the
-    whole invariant.
-- **INV-X (an `acking` bound excludes a pump receipt between its entry and its reset point).** The two never
+  - One step is read and not run: asio starts an awaited child coroutine inline. The Debug assert below detects a
+    suspension in the window only if it lasts long enough for the bound's wake to finish (at least two posted
+    turns; plan phase 1 derives the count). A shorter suspension leaves the 103 mark `pending` at the assert, so it
+    is covered by this reading only.
+- **INV-X (an `acking` bound excludes a pump receipt arm between its receipt and its reset point).** The two never
   overlap.
   - A pump 35=5 frame that meets an `acking` bound is drained before any arm (INV-T).
-  - A bound cannot enter `acking` while a pump receipt arm is between its entry and its reset point:
+  - A bound cannot enter `acking` while a pump receipt arm is between its receipt and its reset point:
     - A in Active claims the 103 mark at its entry and sets `logout_in_flight_` in the same turn (INV-M).
     - A in LogonReceived, L (LogoutSent) and S (LogonSent) run in no state from which the bound can claim. The bound's
       "live" test requires Active, and no bound is spawned before Active (research D1, "Read from source: a
@@ -94,7 +96,12 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
   - at a reset point, the value item 5 names (INV-X).
 
 1. With rol set, only an awaited read-pump frame sets the marker to `pending`, at its receipt:
-   - A, L and S at the arm's entry;
+   - A at its entry (`on_inbound_active_logout_`);
+   - L and S at their 35=5 branch, after the garble guard (`on_inbound_logout_sent_`'s 35=5 test, which also
+     follows the fault guard; `on_inbound_logon_sent_`'s 35=5 branch ahead of `interpret_logon`). Neither arm
+     suspends between that branch and its reset point (the guards and S's `authorize` call are synchronous), so
+     the marker reaches the reset point in the same strand turn. Any other frame in L or S, the Logon
+     acknowledgement included, leaves the marker untouched;
    - B's immediate-acknowledgement branch of `on_inbound_active_too_high_logout_`.
 
    B's spawn branch and its ignored branch ("a second too-high Logout while the mark is set") write nothing to the
@@ -136,7 +143,8 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
      begins, its unit included, because the bound awaits it. The wait therefore sees only a pump frame's `pending`, or
      a unit in flight: a pump arm's, or a Logon arm's. `close()` never closes out a bound's receipt.
    - **The wait is a poll by post**, like the liveness and bound joins just above it. Each posted turn re-reads
-     both terms and compares `effective_clock_->steady_now()` with the bound.
+     both terms and compares `effective_clock_->steady_now()` with the bound, and the condition is tested before the
+     first post, so a `close()` with nothing outstanding makes no pass.
    - The poll needs no waker, so it cannot miss an exit from the condition: `pending` → `none` at an exit before
      the reset point, `run_reset_unit_`'s early returns (no store, a manager failure), and the unit's completion.
      So `close()` returns as soon as the condition is false, and never emits the expiry event for a receipt that
@@ -144,8 +152,8 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
      deleted (data-model; why: research D1 item 4).
    - Cost: one posted turn per pass while a receipt or unit is outstanding, in `close()` only, bounded by
      `logon_timeout_ms`. The worst case is a receipt held in a store call, for example a `FileStore` write. The
-     poll then keeps one handler ready on the session's executor for up to `logon_timeout_ms`. Why that is accepted
-     where 093 rejected a poll: research D1 item 4.
+     poll then keeps one handler ready on the session's executor for up to `logon_timeout_ms`. Why 093's rejection
+     of a poll does not apply here: research D1 item 4.
    - **A receipt still `pending` after the wait** (it expired, or there was no clock to wait with) never reached
      its reset point. It is processing that ended before the reset point (RR-1): **no reset under rol**. The
      close-out sets the marker to `reached`, so that when the arm resumes it runs no unit and issues no further

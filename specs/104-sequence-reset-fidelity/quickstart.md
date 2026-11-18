@@ -70,6 +70,20 @@ The settling experiment (plan phase 1) runs before the other cells. Run it in a 
 <build>/tests/session/session_104_tests --gtest_filter='ResetOnLogout104.DuplicateTooHighLogoutWhilePending_*:ResetOnLogout104.ClaimsAPendingBound_*'
 ```
 
+Its known positives, each in a scratch copy with the binary `strings`-checked fresh (plan phases 1 and 2; research
+D10 R-1z, R-1y):
+- **The entry assert (phase 1).** Insert the capped post loop between `on_inbound_active_`'s drain test and its
+  sub-arm dispatch, running until the 103 mark leaves `pending`, with K as plan phase 1 derives it. R-1z's
+  `OneDelivery` arm must abort on the entry assert. If the cap is hit with the mark still `pending`, the known
+  positive itself fails, and so does a loop exit that reads a phase other than `acking` (hold the bound's reply
+  `store` in HookedStore for the scratch run). Record the pass at which the mark left `pending` in the evidence
+  file.
+- **The marker's assert (phase 2).** Set the marker to `pending` in the bound immediately before its reset-point
+  assert. R-1y's bound must trip the assert.
+
+A green `OneDelivery` run proves only that no suspension in INV-T's window outlasts the bound's wake. A one-turn
+suspension stays covered by the source reading (plan phase 1).
+
 For each cell in research D10:
 1. Build at the commit that adds the cell, before its fix, and record the failing assertion.
 2. Build after the fix and record GREEN, with the same non-zero test count.

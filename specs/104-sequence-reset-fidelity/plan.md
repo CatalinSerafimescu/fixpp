@@ -78,12 +78,19 @@ accounted for on its own:
 - **`persist_inbound_advance_`'s byte test** (RR-4). It sits after the function's `store_is_persistent_` return, so
   it runs only on a persistent store's inbound persist and never on the in-memory inbound path (XV §1's hot path).
   `session_send_bench` does not cover it, and no benchmark is added for it.
-- **`close()`'s poll** (contract RR-2 item 4). It runs in `close()` only, never per message, and it has the shape
-  of the post-polls `close()` already runs (103's poll-join, the liveness join, the bound join).
+- **`close()`'s poll** (contract RR-2 item 4). It runs in `close()` only, never per message.
   - Its worst case: one handler kept ready on the session's executor for up to `logon_timeout_ms`, while a receipt
     is held in a store call.
-  - That is a cost to disclose (B-104-2), not a regression to bench. Its duration is the held call's, which a
-    benchmark would choose. Why it is accepted: research D1 item 4.
+  - It is not a perf change under Article VIII: it changes none of the per-message quantities §1, §2, §4 and §5
+    govern, it tests its condition before its first post (so a `close()` with nothing outstanding makes no pass),
+    and it has the shape of the post-polls `close()` already runs: the joining close's result poll, 103's
+    poll-join, the liveness join and 103's bound join (the last has the same worst case, unbounded). Its executor
+    cost while a store call is held is a resource property, disclosed in B-104-2. Why 093's rejection of a poll
+    does not apply here: research D1 item 4.
+  - `engine_send_bench`, the only `paired` CI row on a send route (`bench/ci-suite.txt`), refuses its malformed
+    payload before a number is read, so it never reaches `store_then_emit`; `session_send_bench` is not in
+    `bench/ci-suite.txt`. RR-4's byte test is therefore measured only by the manual paired `session_send_bench`
+    run above.
 - The LogonSent arm gains one flag test.
 - The rest runs only on a Logout that ends the session, on an establishment frame, or in `close()`.
 
@@ -124,7 +131,7 @@ accounted for on its own:
 | VII §5: "`tests/conformance/` holds the official FIX session-layer test cases … Every PR must pass them in CI." | **PASS.** `TcSeqnumTest.Tc2c_MsgSeqNumTooLow` (Active) is unchanged. T-1/T-2 are TC 2c's and 1B(d)'s Logon-arm instances. |
 | VII §8: "Author isolation-safe tests grouped; select by ctest label, not executable name" | **PASS (planned).** One bucket, `session_104_tests`, with label `104`. Selection is `-L 104 --no-tests=error` (quickstart §2). |
 | IX §1: "**Per-PR:** **≥95% line, ≥85% branch** on **touched modules** … **Binding rule — no silent uncovered error/edge path.**" | **PASS (planned).** Each new branch has a cell, and each contract ending has one: each receipt arm's reset point (R-1c, R-1d, R-1e, R-1o), each ending before it (R-1f, R-1g, R-1n), the races with `close()` and `Engine::stop()` (R-1j, R-1k, R-1l, R-1u, R-1w, R-1x, R-1z), a duplicate too-high Logout (R-1y), the reply's cancelled store call (R-1v), the store failure (R-1i), the emitters at the unit (R-1p, R-1q, R-1r), the unasked branch (U-1, U-4, U-9), the clamp (U-7, U-8), and each too-low Logout ending, one cell per ending per arm with its mutant (T-4a to T-4e, T-6). `/speckit-verify` assesses anything left uncovered. |
-| VIII §3: "**No perf change merged without a benchmark in the same PR.**" | **PASS (planned).** Per mechanism ("Performance Goals"): `store_then_emit`'s byte test is the per-frame change, and `session_send_bench` runs paired base-vs-candidate in phase 7. `persist_inbound_advance_`'s byte test sits behind `store_is_persistent_`, so it is off the in-memory path and has no bench. `close()`'s poll runs in `close()` only. Its worst case is up to `logon_timeout_ms` of posted turns while a store call is held, disclosed in B-104-2. Research D1 item 4 answers 093 OD-1's reason for rejecting a poll ("spins the strand for the whole bound"). |
+| VIII §3: "**No perf change merged without a benchmark in the same PR.**" | **PASS (planned).** Per mechanism ("Performance Goals"): `store_then_emit`'s byte test is the per-frame change, and `session_send_bench` runs paired base-vs-candidate in phase 7. `persist_inbound_advance_`'s byte test sits behind `store_is_persistent_`, so it is off the in-memory path and has no bench. `close()`'s poll is not a perf change (Performance Goals), and runs in `close()` only. Its worst case is up to `logon_timeout_ms` of posted turns while a store call is held, disclosed in B-104-2. Research D1 item 4 answers 093 OD-1's reason for rejecting a poll ("spins the strand for the whole bound"). `engine_send_bench`, the only `paired` CI row on a send route (`bench/ci-suite.txt`), refuses its malformed payload before a number is read and never reaches `store_then_emit`, and `session_send_bench` is not in `bench/ci-suite.txt`: RR-4's byte test is measured only by the plan's manual paired `session_send_bench` run (§2's method; §2 itself says automated coverage is partial). |
 | IX §2: "**Sanitizers — Tier 1 (every PR, Linux/Clang):** ASan, UBSan, TSan must all run and pass." | **PASS (planned).** `session_104_tests` and the re-pinned targets run under each (quickstart §4). |
 | X §1 / §6: "Every change to it is reviewed against the contract; Codex Gate A is mandatory." / "ABI-affecting features trigger all four mandatory controls" | **N/A.** No C-ABI change: `reset_on_logout` has no C-ABI setter (`git grep -n reset_on_logout include/fix`), and no signature, code or default moves. The behaviour change reaches C-ABI users through the session, as B-104-* rows. |
 | XI §2: "**Cancellation: ASIO native cancellation slots end-to-end.** No parallel `stop_token` abstraction." | **PASS.** The receipt reset reuses the unit's empty-slot `co_spawn` and the arm's restore. No new cancellation path. |
@@ -215,17 +222,54 @@ result and every RED/GREEN/mutant record, never code comments.
      - R-1y and R-1z, R-1z's `OneDelivery` arm included.
 
      Record each test count, which must not be 0.
-   - **Only R-1z's `OneDelivery` arm reaches INV-T's window.** There the bound's wake has been posted and has not
-     run yet when a 35=5 frame passes the drain test. 103's cells and R-1z's `CloseDuringReplyStore` arm feed one frame per pump, so
-     the bound has run before the next frame. 103's `H_LogoutResentInSequence_*` also fills only to S, which leaves
-     the bound unwoken.
-   - Known positive, run in a scratch copy: insert a suspension (`co_await asio::post(...)`) between
-     `on_inbound_active_`'s drain test and its sub-arm dispatch. The `OneDelivery` arm must then abort on the entry
-     assert. If it does not, the selection cannot report a failure of INV-T, and the experiment is not accepted.
+   - **Only R-1z's `OneDelivery` arm is an input that reaches INV-T's window.** There the bound's wake has been
+     posted and has not run yet when a 35=5 frame passes the drain test. 103's cells and R-1z's
+     `CloseDuringReplyStore` arm feed one frame per pump, so the bound has run before the next frame. 103's
+     `H_LogoutResentInSequence_*` also fills only to S, which leaves the bound unwoken.
+   - **What a green `OneDelivery` run proves, and what it does not.** The bound needs at least two posted turns
+     after its wake before it can claim (the derivation is the next bullet). A green run therefore proves that no
+     suspension between the drain test and the entry assert lasts long enough for the bound to finish that race.
+     It does not run INV-T as a whole: a suspension of one turn leaves the 103 mark still `pending` at the entry
+     assert, so the assert stays silent, and that case is covered by the source reading of INV-T only.
+   - Known positive, run in a scratch copy. The event it must cause: the bound reaches `acking` while the Logout
+     frame is suspended between the drain test and the dispatch. The observable: the `OneDelivery` arm aborts on
+     the entry assert.
+     - The edit: between `on_inbound_active_`'s drain test and its sub-arm dispatch, insert a capped loop,
+       `for (int i = 0; i < K && peer_logout_.phase == peer_logout_mark::phase_t::pending; ++i) co_await
+       asio::post(…)`.
+     - K is derived from the bound's wake path, read at the pinned asio
+       (`grep -n "operator||" <asio>/experimental/awaitable_operators.hpp`; `grep -n "co_spawn_entry_point" -A 30
+       <asio>/impl/co_spawn.hpp`; `grep -n "^void complete" -A 6 src/core/test/mock_clock.cpp`):
+       1. `wake_peer_logout_bound_` calls `woken.cancel()`, which queues the aborted wait's handler (one posted
+          turn).
+       2. The bound waits in `woken.async_wait(…) || detail::await_deadline(…)`. `operator||` is a
+          `make_parallel_group(…).async_wait(wait_for_one_success(), …)`, which completes only when every operand
+          has completed. When the aborted wait runs, the group cancels the deadline operand.
+       3. `mock_clock`'s cancellation handler completes the parked `sleep_until` through `complete()`, which
+          calls `asio::post` (a second posted turn). Only then does `await_deadline` retire.
+       4. Each operand's completion is dispatched (`co_spawn_entry_point`), which adds a posted turn only while
+          the operand is still launching or on another executor. The group then completes, and the bound resumes
+          to `live()` and its claim.
+
+       So the race takes at least two posted turns, possibly more. K is eight times that minimum, 16. The loop
+       exits as soon as the mark leaves `pending`, so a generous K costs nothing.
+     - The known positive itself fails if the cap is hit with the mark still `pending`: the event did not happen,
+       and the instrument is not accepted. The pass at which the mark left `pending` is recorded in the evidence
+       file, not here.
+     - The loop also records the phase it reads at exit. The bound sets `acking` and then awaits its
+       acknowledgement (`run_peer_logout_bound_`), and sets `none` when that returns. So a value other than
+       `acking` (for example `none`, if the acknowledgement ran to its end without suspending) means the event was
+       not observable at the assert, and the known positive fails as it does at the cap. The remedy is in the
+       scratch run, not the design: hold the bound's reply `store` in HookedStore, so the bound stays `acking`
+       across the frame's next pass.
+     - If the arm does not abort, the selection cannot report a failure of INV-T, and the experiment is not
+       accepted.
    - The marker's assert (`none` at the bound's reset point, RR-2 item 5) needs the enum and B's reset point. It
      lands with phase 2, which re-runs the same selection as soon as B's reset point exists. Only R-1y and R-1z set
      `reset_on_logout`, so only they can trip it: with rol off the marker is always `none`. Its known positive, in
-     a scratch copy: B's ignored branch writes `pending`, and R-1y's bound then trips the assert.
+     a scratch copy, seeds the violation where the assert reads it. The event: the bound reaches its reset point
+     with the marker `pending`. The edit: set the marker to `pending` in the bound immediately before its
+     reset-point assert. The observable: R-1y's bound trips the assert.
    - **If any assert fires, at either point, implementation STOPS** and the decision goes back to the owner, with
      the cell, the assert and the stack.
    - Then the rest of the US1 RED cells (research D10 R-1a … R-1x, R-2), in `test_104_reset_on_logout.cpp`.
@@ -331,6 +375,7 @@ result and every RED/GREEN/mutant record, never code comments.
 - Round 1 applied 2026-11-17: Codex P1=5 P2=2 P3=1; Opus post-judging P1=1 P2=7 P3=7; rewrite addresses root causes 1, 2, 3 (RU-1..RU-3). Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_adversarial_review.md.
 - Round 2 applied 2026-11-18: Codex P1=4 P2=3 P3=2; Opus post-judging P1=2 P2=8 P3=7; rewrite addresses Codex #1, N-1 (P1s) and every P2/P3. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_2_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_2_adversarial_review.md.
 - Round 3 (loop 1 exhausted) 2026-11-18: Codex P1=2 P2=0 P3=0; Opus post-judging P1=2 P2=0 P3=1 (RC-1: one marker, several owners on route B). Fable consult 104-receipt-reset-marker-ownership: probable. Owner chose a targeted amendment with construction A; loop 2 follows. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_3_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_3_adversarial_review.md.
+- Loop 2 round 1 applied 2026-11-18: Codex P1=1 P2=0 P3=0; Opus post-judging P1=0 P2=1 P3=3; rewrite addresses N-1 (P2), N-2, N-3, Codex #1 (downgraded P3). Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_4_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_4_adversarial_review.md.
 
 ### Round 1 — disagreements
 
@@ -383,3 +428,24 @@ result and every RED/GREEN/mutant record, never code comments.
   is a binding ruling and is not edited. Read for O14, where the unit is already in flight, it means a receipt
   still `pending`. Contract RR-2 item 4 states that reading, in design ruling 3's own words.
 
+### Loop 2 round 1 — disagreements
+
+- **Codex #1 (P1 → P3, judged).** Codex read the Article VIII §3 row as exempting `close()`'s poll from the
+  benchmark requirement, and proposed a paired base-vs-candidate bench that holds a receipt pending during
+  `close()`. The counter-proposal is not taken, for the judge's reasons:
+  - §3 is met by its text: the PR carries a benchmark, and it measures the PR's only per-message change. No clause
+    of Article VIII asks for a benchmark per mechanism, and §2 says §3's benchmark need not pass.
+  - The poll is not a perf change in Article VIII's own terms. It moves none of §1, §2, §4 and §5's per-message
+    quantities or benched rows: it runs in `close()` only, after the joins, tests its condition before its first
+    post, and makes no pass in an ordinary `close()`.
+  - Precedent under the same, unamended text: `close()` already runs four post-polls with no benchmark (the
+    joining close's result poll, 103's poll-join, the liveness join and 103's bound join, the last unbounded with
+    the same worst case).
+  - No §2 reading is possible. The base's wait is event-driven, with zero posted turns, and the candidate's turn
+    count over a held receipt is set by the hold the bench itself chooses.
+  - The poll's shape is binding (round 2, "N-1's shape"), so no measurement could change a decision.
+
+  What remained was the wording: "a cost to disclose, not a regression to bench" read as an author-accepted
+  regression, which §2 forbids. "Performance Goals" and the VIII §3 row now classify the poll instead, contract RR-2
+  item 4 states the test-before-first-post rule, and the row records that RR-4's byte test is measured only by the
+  manual paired `session_send_bench` run. No benchmark is added.
