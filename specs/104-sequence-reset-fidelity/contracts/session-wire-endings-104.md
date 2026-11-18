@@ -774,7 +774,7 @@ A cell id is given where the row can be driven; its mutant is in research D10.
 | O2 | `fromAdmin` throws | reply already sent; Disconnected; no reset | n/a (no `fromAdmin`) | n/a | n/a | no reset (QFC, QFJ: `verify` → `fromCallback` throws before the reply) | R-1g |
 | O3 | `fromAdmin` rejects | reply, Reject, Disconnected; no reset | n/a | n/a | n/a | no reset (QFC, QFJ: the reject exception leaves `nextLogout`; QFGo: `processReject`) | R-1g |
 | O4 | late parse failure | marker cleared, then `close(terminal)`; no reset | n/a | n/a | n/a | no reset (not a processed Logout) | R-1g |
-| O5 | reply does not fit 256 bytes | no reply; reset point reached; reset | n/a | as A | n/a | n/a (no fixed buffer) | R-1n |
+| O5 | reply does not fit 256 bytes | no reply; reset point reached; reset | n/a | as A | n/a | n/a (no fixed buffer) | no conforming input in arm A's in-sequence reply (recipe in research D10's R-1n row); T-4a's Text-carrying Logout is the overflow witness for the Logon arms |
 | O6 | reply `toAdmin` throws | leaf records Disconnected, `app_callback_threw`; no reset | n/a | as A | n/a | QFC: no reset (propagates out of `sendRaw`); QFJ: resets (`sendRaw` catches `Throwable` from `toAdmin`, then sends); QFGo: no throw path | R-1n |
 | O7 | reply `assign_outbound` fails | leaf records Disconnected, the error; no reset | n/a | as A | n/a | n/a | R-1n |
 | O8 | reply store fails (persistent) | not transmitted; reset point reached; reset | n/a | as A | n/a | reset (QFC, QFJ catch the store's `IOException` in `sendRaw` and continue) | R-1n |
