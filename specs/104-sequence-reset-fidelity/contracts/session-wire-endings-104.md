@@ -134,9 +134,9 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
    - Within the turn nothing can record a cancellation. So no other coroutine on the strand observes a `reached`
      receipt whose unit has not started (suspension), and no exception leaves the marker `reached` with no reset
      (throws).
-4. `close()` (any mode, and the close `Engine::stop()` drives) waits after its joins and before its teardown
-   predicate, while the marker is `pending` or `reset_unit_in_flight_` is set. It needs a clock (as 093's wait
-   does) and is bounded by `logon_timeout_ms`. On expiry it emits `session_event_close_reset_wait_expired`.
+4. `close()` (any mode) waits after its joins and before its teardown predicate, while the marker is `pending` or
+   `reset_unit_in_flight_` is set. It needs a clock (as 093's wait does) and is bounded by `logon_timeout_ms`. On
+   expiry it emits `session_event_close_reset_wait_expired`.
    - **Route B needs nothing new here.** `close()` claims the 103 mark at its first commit
      (`claim_peer_logout_none_`). Its joins include 103's bound join, an unbounded poll on the bound's counter. So a
      bound that was not yet `acking` exits unacknowledged (O18), and an `acking` one runs to its end before the wait
@@ -164,6 +164,29 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
      item 3 implements the second. A change that splits the turn must add that term, and a way to observe "unit not
      started", which the three-valued marker does not have. Cell R-1u's mutant opens the window (a suspension
      between `reached` and the unit) and goes RED, which is the evidence that item 3 is load-bearing.
+   - **Under `Engine::stop()`, the wait is the role-loop join, not this poll.** Re-derive the order from
+     `Engine::stop`'s step comments in `src/session/engine.cpp`; the live row `L-563-4` states it ("`stop()`
+     reaches `Session::close` only after it has joined the role loops").
+     - Stop calls `close(terminal)` only at its step 4, after its step 3 join of the role loops
+       (`outstanding_counter_`). The role loops await the read pump inline, the pump awaits each frame to its end
+       (INV-P), and the frame awaits its unit. So step 3 waits for a pump frame's receipt arm. By step 4 no pump
+       frame's receipt is `pending` and no unit is in flight: this poll makes no pass under stop and never closes
+       a receipt out. The pump's own close after the arm, when its next read meets the transport stop's step 2
+       closed, runs after the frame too and sees the same state.
+     - Stop's `total` emission does not release a held arm: after `check_inbound`'s lock the arm's filter is
+       terminal-only (research R1), and a `FileStore` call that holds its lock runs its job to its end
+       (`B-598-1`).
+     - So the arm owns its ending under stop through the join: it reaches its reset point and resets once, or exits
+       before it and does not. There is no close-out and no `session_event_close_reset_wait_expired`.
+     - Stop's wait has no bound and no clock condition (an Engine session always has a clock:
+       `validate_engine_config` at `Engine::start`, and `Session::open`'s fallback from a null `clock_override`
+       to `EngineConfig::clock`). It ends when the held store call returns (`B-598-1`; `L-563-7` condition (2)).
+       A store call that never completes hangs `stop()`: `L-093-12`'s condition, now also met by a receipt's reply
+       store and inbound persist. 104 widens nothing here: on the base a pump frame held in any store call already
+       holds step 3.
+     - A bound is outside the join: it is spawned detached with no cancellation slot. A `pending` bound is claimed
+       by `note_engine_stop_` and exits unacknowledged (O18); an `acking` bound is joined by step 4's `close()`,
+       through 103's bound join.
 5. At its reset point an arm finds one of the values below. Any other value fails a Debug assert. It is not a
    third case.
    - **A pump frame**, which is A, L, S, or B's immediate acknowledgement:
@@ -266,7 +289,7 @@ A cell id is given where the row can be driven; its mutant is in research D10.
 | O13-p | as O13-r, the arm held in its inbound persist | no reset under rol; the marker is closed out to `reached`; the held persist completes after `close()` returned and lands (store inbound N+1); no unit (fixpp#597, as O13-r) | no input (as O12) | n/a (B has no persist) | no input (as O12) | n/a | R-1l (`HeldInPersist`) |
 | O13a | `reached`, unit not started, at the teardown | the teardown resets once; no input by construction (RR-2 item 3) | as A | as A | as A | n/a | R-1u (its mutant opens the window) |
 | O14 | `close()` during the unit | `close()` waits for the unit (clock); without a clock it returns while the unit's store operation completes on the strand (093's no-clock case, inside fixpp#597) | as A | immediate acknowledgement: as A. The bound: `close()`'s bound join waits for it, so for its unit, with or without a clock | as A | n/a | R-1j |
-| O15 | `Engine::stop()` during | as O12–O14 through the close it drives. Its emission is total, which the arm's filter refuses after its first lock, and no Engine caller emits `terminal` or `all` on the arm's slot. A direct caller's `terminal` emission takes O9 at a store call and RR-2 item 3 at the reset point | as A | as A | as O12 | n/a | R-1k (stop variant), R-1x |
+| O15 | `Engine::stop()` during | one reset or none, decided by the arm; no close-out. Stop's role-loop join (its step 3, before its step 4 `close()`; RR-2 item 4, `L-563-4`) waits for the arm, past `logon_timeout_ms` (the session always has a clock under the Engine). The arm reaches its reset point and resets once, or exits before it (O2–O11) and does not. A held reply is stored and not transmitted, because step 2 closed the transport (O10). A unit in flight is waited for (`L-093-12`). No `close_reset_wait_expired`. Stop returns after the arm (`L-093-12`, `L-563-4`). Its emission is total, which the arm's filter refuses after its first lock, and no Engine caller emits `terminal` or `all` on the arm's slot. A direct caller's `terminal` emission takes O9 at a store call and RR-2 item 3 at the reset point | L does not suspend before its reset point (research R1); its unit runs inside the pump frame, so the join waits for it (`L-093-12`): one reset | immediate acknowledgement: as A. The bound: as O12 and O18 through step 4's `close()` (a `pending` bound claimed by `note_engine_stop_`, no reset; an `acking` one joined, one reset) | a frame that arrives after stop's step 1 meets `logon_arm_superseded_` (the engine-stop flag) and acts on nothing, no reset; a unit already started runs inside the pump frame, and the join waits for it | n/a | R-1t, R-1x |
 | O16 | store reset fails | logged; Disconnected; no retry (RT-4) | as A | as A | as A | QFGo: logged, then `latentState` | R-1i |
 | O17 | grace timer of `close(graceful)` expires during L's unit | n/a | phase 1 returns `session_logout_timeout`; the timer branch also force-closes the transport (`live->close()`) before phase 2; the wire is the same (nothing more is sent); `close()` waits for the unit | n/a | n/a | n/a | R-1j |
 | O18 | bound ends unacknowledged (claim by `close()`, stop, another ending's Disconnected, reconnect drain, a Logout in flight) | n/a | n/a | the marker untouched (`none`): the bound wrote nothing, and 103 clears or claims its mark; no reset | n/a | QFC, QFJ: reset (they process a too-high Logout at receipt, `verify(logout, false, false)`) | R-1f |

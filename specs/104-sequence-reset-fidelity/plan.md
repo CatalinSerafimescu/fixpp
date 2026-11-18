@@ -21,8 +21,8 @@ re-record.
      reset (DQ-10).
    - The emit-time trigger in `run_logout_phase1` is deleted, so an unanswered close keeps its numbers.
    - `logout_seen_` keeps its name and becomes the receipt marker (`none` / `pending` / `reached`). `close()` and
-     `Engine::stop()` wait for a `pending` receipt and its unit. Where they cannot wait, `close()` closes the
-     receipt out to `reached` with no reset under `reset_on_logout`, and the arm, resuming, runs no unit: one owner
+     `Engine::stop()` wait for a `pending` receipt and its unit (stop through its role-loop join, with no bound:
+     contract RR-2 item 4). Where `close()` cannot wait, it closes the receipt out to `reached` with no reset under `reset_on_logout`, and the arm, resuming, runs no unit: one owner
      (contract RR-2). `store_then_emit` and `persist_inbound_advance_` refuse every store call issued once the
      marker is `reached` (RR-4).
    - 024 C5.1 is kept as written, per teardown (D2).
@@ -130,7 +130,7 @@ accounted for on its own:
 | VII §4: "**No code without a test.**" | **PASS (planned).** D3.3a's clamp, the text builder's new callers, the moved and widened `close()` wait and its poll, the close-out of a `pending` receipt with no reset, the reset point as one strand turn and its cancellation-state reset, the marker's owners (construction A: pump frames only, the bound's one write), RR-4's boundaries, arm S and the moved identity gates each have a cell (U-7/U-8, T-1/T-2, R-1j/R-1k/R-1s/R-1w, R-1l/R-1u, R-1x, R-1v/R-1f/R-1y/R-1z, R-1r, R-1o, T-6/U-9). |
 | VII §5: "`tests/conformance/` holds the official FIX session-layer test cases … Every PR must pass them in CI." | **PASS.** `TcSeqnumTest.Tc2c_MsgSeqNumTooLow` (Active) is unchanged. T-1/T-2 are TC 2c's and 1B(d)'s Logon-arm instances. |
 | VII §8: "Author isolation-safe tests grouped; select by ctest label, not executable name" | **PASS (planned).** One bucket, `session_104_tests`, with label `104`. Selection is `-L 104 --no-tests=error` (quickstart §2). |
-| IX §1: "**Per-PR:** **≥95% line, ≥85% branch** on **touched modules** … **Binding rule — no silent uncovered error/edge path.**" | **PASS (planned).** Each new branch has a cell, and each contract ending has one: each receipt arm's reset point (R-1c, R-1d, R-1e, R-1o), each ending before it (R-1f, R-1g, R-1n), the races with `close()` and `Engine::stop()` (R-1j, R-1k, R-1l, R-1u, R-1w, R-1x, R-1z), a duplicate too-high Logout (R-1y), the reply's cancelled store call (R-1v), the store failure (R-1i), the emitters at the unit (R-1p, R-1q, R-1r), the unasked branch (U-1, U-4, U-9), the clamp (U-7, U-8), and each too-low Logout ending, one cell per ending per arm with its mutant (T-4a to T-4e, T-6). `/speckit-verify` assesses anything left uncovered. |
+| IX §1: "**Per-PR:** **≥95% line, ≥85% branch** on **touched modules** … **Binding rule — no silent uncovered error/edge path.**" | **PASS (planned).** Each new branch has a cell, and each contract ending has one: each receipt arm's reset point (R-1c, R-1d, R-1e, R-1o), each ending before it (R-1f, R-1g, R-1n), the races with `close()` and `Engine::stop()` (R-1j, R-1k, R-1l, R-1t, R-1u, R-1w, R-1x, R-1z), a duplicate too-high Logout (R-1y), the reply's cancelled store call (R-1v), the store failure (R-1i), the emitters at the unit (R-1p, R-1q, R-1r), the unasked branch (U-1, U-4, U-9), the clamp (U-7, U-8), and each too-low Logout ending, one cell per ending per arm with its mutant (T-4a to T-4e, T-6). `/speckit-verify` assesses anything left uncovered. |
 | VIII §3: "**No perf change merged without a benchmark in the same PR.**" | **PASS (planned).** Per mechanism ("Performance Goals"): `store_then_emit`'s byte test is the per-frame change, and `session_send_bench` runs paired base-vs-candidate in phase 7. `persist_inbound_advance_`'s byte test sits behind `store_is_persistent_`, so it is off the in-memory path and has no bench. `close()`'s poll is not a perf change (Performance Goals), and runs in `close()` only. Its worst case is up to `logon_timeout_ms` of posted turns while a store call is held, disclosed in B-104-2. Research D1 item 4 answers 093 OD-1's reason for rejecting a poll ("spins the strand for the whole bound"). `engine_send_bench`, the only `paired` CI row on a send route (`bench/ci-suite.txt`), refuses its malformed payload before a number is read and never reaches `store_then_emit`, and `session_send_bench` is not in `bench/ci-suite.txt`: RR-4's byte test is measured only by the plan's manual paired `session_send_bench` run (§2's method; §2 itself says automated coverage is partial). |
 | IX §2: "**Sanitizers — Tier 1 (every PR, Linux/Clang):** ASan, UBSan, TSan must all run and pass." | **PASS (planned).** `session_104_tests` and the re-pinned targets run under each (quickstart §4). |
 | X §1 / §6: "Every change to it is reviewed against the contract; Codex Gate A is mandatory." / "ABI-affecting features trigger all four mandatory controls" | **N/A.** No C-ABI change: `reset_on_logout` has no C-ABI setter (`git grep -n reset_on_logout include/fix`), and no signature, code or default moves. The behaviour change reaches C-ABI users through the session, as B-104-* rows. |
@@ -376,6 +376,7 @@ result and every RED/GREEN/mutant record, never code comments.
 - Round 2 applied 2026-11-18: Codex P1=4 P2=3 P3=2; Opus post-judging P1=2 P2=8 P3=7; rewrite addresses Codex #1, N-1 (P1s) and every P2/P3. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_2_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_2_adversarial_review.md.
 - Round 3 (loop 1 exhausted) 2026-11-18: Codex P1=2 P2=0 P3=0; Opus post-judging P1=2 P2=0 P3=1 (RC-1: one marker, several owners on route B). Fable consult 104-receipt-reset-marker-ownership: probable. Owner chose a targeted amendment with construction A; loop 2 follows. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_3_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_3_adversarial_review.md.
 - Loop 2 round 1 applied 2026-11-18: Codex P1=1 P2=0 P3=0; Opus post-judging P1=0 P2=1 P3=3; rewrite addresses N-1 (P2), N-2, N-3, Codex #1 (downgraded P3). Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_4_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_4_adversarial_review.md.
+- Loop 2 round 2 applied 2026-11-18: Codex P1=1 P2=0 P3=0; Opus post-judging P1=0 P2=2 P3=0; rewrite corrects the Engine::stop() rows (role-loop join, L-563-4, L-093-12) and adds the stop cell. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_5_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_5_adversarial_review.md.
 
 ### Round 1 — disagreements
 
@@ -449,3 +450,32 @@ result and every RED/GREEN/mutant record, never code comments.
   regression, which §2 forbids. "Performance Goals" and the VIII §3 row now classify the poll instead, contract RR-2
   item 4 states the test-before-first-post rule, and the row records that RR-4's byte test is measured only by the
   manual paired `session_send_bench` run. No benchmark is added.
+
+### Loop 2 round 2 — disagreements
+
+- **Codex #1 (P1 → P2, judged).** Codex's facts stand: `Engine::stop()` calls `close(terminal)` only at its step 4,
+  after its step 3 role-loop join, and the pump awaits each frame (INV-P), so RR-2's bounded close-out never runs
+  under stop. The bundle's stop rows are corrected to that order (contract RR-2 item 4, "Under `Engine::stop()`";
+  O15; FR-001; B-104-2; research D1 item 4), citing `L-563-4` and `L-093-12`. Loop 2 round 1's owner table was
+  right about the owner (A) and wrong about the reason: A owns its ending under stop through the role-loop join,
+  not through RR-2's poll, and that table's "no clock: close-out" consequence does not apply to stop.
+  Codex's counter-proposal, starting the session close (or a close-out on the session strand) after the transport
+  closes and before the role-loop join, is not taken, for the judge's three reasons:
+  - **It does not bound stop.** The role-loop join stays, and it still waits for the held store call, so stop's
+    latency is unchanged. Stop is bounded only by the held store call, the class `L-093-12`, `L-563-7` (2) and
+    `B-598-1` already disclose; 104 widens nothing there.
+  - **It makes stop's ending depend on timing.** Its only effect is to change the ending: a hold longer than
+    `logon_timeout_ms` would end with no reset instead of one. Stop's one deterministic ending (a reset if and only
+    if the arm reaches its reset point, RU-1) would become a timing-dependent pair, which the "one condition, one
+    observable ending" rule forbids.
+  - **It reorders a load-bearing step 3 → 4.** INV-4b (step 4's `close()` drains the liveness loop after the role
+    loops have exited), INV-6 (before `registry_.clear()`), step 4's `operation_aborted` analysis, and `L-563-4`,
+    the shipped contract, all depend on that order.
+
+  Cell R-1t pins the order: its mutant is exactly this reorder, and it must go RED.
+- **New-1's no-clock twin (not added).** The judge asked for a no-clock twin of R-1t. Under the Engine it has no
+  input: `Engine::start` refuses a null `EngineConfig::clock` (`validate_engine_config`, `clock_not_set`), and
+  `Session::open` falls back from a null `clock_override` to that clock, so an Engine session always has one.
+  R-1t's clock arm, advanced past `logon_timeout_ms`, is the discriminating cell. A "clock never advanced" twin is
+  not a substitute: under the reorder mutant `close()` would wait out the hold and reset once, so it would stay
+  GREEN against the mutant listed for it, which is New-1's defect again.

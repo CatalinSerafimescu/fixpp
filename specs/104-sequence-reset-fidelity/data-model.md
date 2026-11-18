@@ -138,7 +138,7 @@ New rows:
   or a dropped connection, keeps the numbers. A Logout received in NotConnected does not reset. Supersedes 024
   C3.1 and B-538-7's "answered or not". As QuickFIX C++, QuickFIX/J and QuickFIX/Go, except the departures DQ-9
   to DQ-14 of 104's spec.
-- **B-104-2** — `close()` and the close `Engine::stop()` drives wait, before the teardown reset decision, for a
+- **B-104-2** — `close()` waits, before the teardown reset decision, for a
   received Logout that is between its receipt and its reset point, and for any 141=Y reset unit in flight (a
   receipt reset or a Logon's), whatever the knobs. The wait is bounded by `logon_timeout_ms` and needs a clock. A
   too-high Logout whose acknowledgement is already under way is not in it: `close()` waits for that one, and for its
@@ -151,7 +151,12 @@ New rows:
   completes after `close()` returned: a held reply is stored, and is transmitted only on a config-time
   `transport_send` sink (as B-563-5); a held inbound persist lands (B-598-1). Its other processing then runs after
   `close()` returned, inside fixpp#597, which 104 neither widens nor closes. A received Logout past its reset point
-  is never lost: its reset started in the same step. Supersedes 093 C-6's "`close()` waits only when it is about to
+  is never lost: its reset started in the same step. `Engine::stop()` waits for such a Logout, and for its reset,
+  before it closes the session: it joins the session's role loops first (`L-563-4`), and they await the Logout's
+  processing. That wait has no bound and does not depend on the clock. Under stop a received Logout is reset if and
+  only if its processing reaches its reset point, however long its store call is held, and it is never closed out;
+  a held reply is stored and not transmitted, because stop has already closed the transport. A store call that
+  never completes hangs `stop()` (`L-093-12`). Supersedes 093 C-6's "`close()` waits only when it is about to
   issue its teardown reset".
 - **B-104-3** — with `reset_on_logout` and `reset_on_disconnect` both set, a received peer Logout makes two store
   resets, at its reset point and at teardown. C5.1 still allows one per teardown. The numbers end at 1. As
@@ -210,6 +215,8 @@ Amended in place:
   `run_logout_phase1` before the Logout takes its number, so the session never enters LogoutSent and a peer Logout
   reaches the Disconnected row, which drains it (arm L is not reached).
 - **B-093-11**: points to B-104-2 for when `close()` waits.
+- **L-093-12**: a pointer to B-104-2. The store operations a held receipt makes `stop()` wait for are now also a
+  received Logout's reply store and its inbound persist, not only the reset unit's.
 - **B-103-9**'s disclosure: "and a Logout seen on the old connection still triggers `reset_on_logout`'s teardown
   reset" is replaced by "a peer Logout received on the old connection reset the numbers at its reset point, before
   the reconnect; nothing received there resets the new connection (B-104-1)".

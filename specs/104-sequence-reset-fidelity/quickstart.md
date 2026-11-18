@@ -96,9 +96,18 @@ Cells with a forced-hit or a competing-timer element:
 - **R-1c / R-1d / R-1e / R-1o.** Each reads at the store's `on_reset` hook: the store call it saw (`reset_to`,
   the unit, not `reset`, the teardown), the state (`Disconnected`, RU-3) and that the transport is still open.
   R-1d and R-1e also read the numbers inside `onLogout`, which must be the pre-reset ones (DQ-10).
-- **R-1k / R-1l / R-1u.** A final-state assertion cannot tell the arm's reset from a teardown reset; each cell
-  asserts which store call ran (R-1l: none). R-1k and R-1u assert that the reset finished before `close()`
-  returned. R-1u's mutant splits the reset point's strand turn and must go RED.
+- **R-1k / R-1l / R-1t / R-1u.** A final-state assertion cannot tell the arm's reset from a teardown reset; each
+  cell asserts which store call ran (R-1l: none). R-1k and R-1u assert that the reset finished before `close()`
+  returned, and R-1t before `Engine::stop()` returned. R-1u's mutant splits the reset point's strand turn and must
+  go RED.
+- **R-1t.** While the reply's `store` is held: start stop, pump until the raw peer sees step 2's EOF, pump once
+  more, then advance the mock clock past `logon_timeout_ms` twice, pumping between (the order is in research D10,
+  with the HeartBtInt ratio that keeps liveness deadlines out of the advances). Assert no
+  `close_reset_wait_expired` and that stop has not completed; release, and assert stop completes (the known
+  positive) and one `reset_to`. Stop's step 3 join is a yield loop on a zero-delay timer, so the io_context never
+  idles while it waits: pump with a bounded run on a condition (`run_for`, a slice loop), never an unbounded
+  `poll()` or `run()`. Its mutant moves step 4's `close()` ahead of step 3's join and must go RED as an assertion
+  failure, not an abort; deleting the join is not the mutant (INV-6).
 - **R-1b.** The drop's close must complete before `logout_disconnect_timeout_ms`. Assert the completion instant
   against the grace deadline, so the timer cannot be what ended the wait.
 - **R-1j.** Assert that the store hold is reached in the LogoutSent arm (state `Disconnected`, transport open,
@@ -127,7 +136,7 @@ Cells with a forced-hit or a competing-timer element:
 | US1 AS5 | `rod`, with and without `rol`: one reset per teardown, `(1, 1)` | existing `ResetOnDisconnect_*`, R-2 |
 | US1 AS6 | Logout in LogonSent resets; in NotConnected does not | R-1o |
 | US1 AS7 | processing ends before the reset point: no reset | R-1f, R-1g, R-1n |
-| US1 edges | too-high Logout (a duplicate included); races with `close()` and `Engine::stop()` (A beside a claimed bound included); a cancelled reply store; store failure; reconnect; emitters at the unit; a direct caller's cancellation at the reset point | R-1e, R-1h to R-1l, R-1p to R-1s, R-1u to R-1z |
+| US1 edges | too-high Logout (a duplicate included); races with `close()` and `Engine::stop()` (A beside a claimed bound included); a cancelled reply store; store failure; reconnect; emitters at the unit; a direct caller's cancellation at the reset point | R-1e, R-1h to R-1l, R-1p to R-1z |
 | US2 AS1/AS2 | unasked 141=Y at 34=1, lenient and unilateral | U-1, U-2 |
 | US2 AS3 | strict unchanged | U-3, existing `Initiator_Received141Ack_*` |
 | US2 AS4 | 141=Y at M > 1 | U-4, W8 re-pin |

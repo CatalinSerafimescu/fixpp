@@ -350,11 +350,13 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
   (clarification 2026-11-17). Processing that ends before it MUST NOT reset under `reset_on_logout`. At the reset
   point the arm records `Disconnected`, then runs 093's 141=Y reset unit (`run_reset_unit_`, 093 contract C-6,
   unchanged by 103) (erratum E-1; RU-3). Sending a Logout MUST NOT by itself cause the reset. The reset MUST be
-  durable on a persistent store. `close()` and `Engine::stop()` MUST wait for a receipt that is between its receipt
-  and its reset point, and for its unit, with the bound and the clock condition of 093's wait (B-104-2). A too-high
-  Logout whose acknowledgement is already under way is waited for by 103's join of its bound instead. They MUST
-  stop waiting as soon as the receipt leaves that interval, by whatever exit. A receipt still before its reset point
-  when they cannot wait (no clock, or the wait expired) MUST NOT be reset under `reset_on_logout`. The arm, resuming,
+  durable on a persistent store. `close()` MUST wait for a receipt that is between its receipt and its reset point,
+  and for its unit, with the bound and the clock condition of 093's wait (B-104-2). `Engine::stop()` MUST wait for
+  it, and for its unit, with no bound, by joining its role loops before it closes the session (`L-563-4`,
+  `L-093-12`); under stop a receipt is never closed out (contract RR-2 item 4, O15). A too-high Logout whose
+  acknowledgement is already under way is waited for by 103's join of its bound instead. `close()` MUST stop
+  waiting as soon as the receipt leaves that interval, by whatever exit. A receipt still before its reset point
+  when `close()` cannot wait (no clock, or the wait expired) MUST NOT be reset under `reset_on_logout`. The arm, resuming,
   MUST run no unit and MUST issue no store call after the close-out. A store call it had already issued runs to its
   end (contract O13-r, O13-p). The reset point's marker transition and the unit's start MUST be one strand turn, with
   no throw point, so no reset point once passed can be lost (contract RR-2).
