@@ -55,6 +55,7 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/wire/offset_table.hpp>
 #include <functional>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <memory_resource>
@@ -2328,11 +2329,12 @@ TEST(ResetOnLogout104, BoundRouteFrameDuringUnit_Drained) {
     }
 }
 
-// R-1r: route B, on the pump route research D10's R-1r row and T011's record name. The
-// Logout is too high by one; a GapFill fills to S; a TestRequest at S passes it, which wakes the
-// bound, and the TestRequest's Heartbeat store is held while the bound acknowledges and runs
-// its unit. After the release nothing that arm writes reaches the wire or the store's numbers,
-// and the store and the manager read (1, 1).
+// R-1r, the pump-route arm: route B, on the route T011's record names. The Logout is too high
+// by one; a GapFill fills to S; a TestRequest at S passes it, which wakes the bound, and the
+// TestRequest's Heartbeat store is held while the bound acknowledges and runs its unit. After
+// the release nothing that arm writes reaches the wire or the store's numbers, and the store
+// and the manager read (1, 1). It is a reach pin: no store call follows the unit on this
+// route, so the RR-4 boundaries are witnessed by the seam arms below (research D10's R-1r row).
 TEST(ResetOnLogout104, BoundRouteInFlightPumpArm_RefusedAtTheBoundary) {
     for (auto const role : kRoles) {
         SCOPED_TRACE(rg::role_name(role));
@@ -2378,6 +2380,105 @@ TEST(ResetOnLogout104, BoundRouteInFlightPumpArm_RefusedAtTheBoundary) {
         EXPECT_EQ(*st, (Numbers104{.in = 1, .out = 1}))
             << "the store after the release: " << st->in << "/" << st->out;
     }
+}
+
+// R-1r's seam arms. No pump arm issues a store call once the bound's reset point has run (the
+// recipe is in research D10's R-1r row), so each RR-4 boundary is driven directly. Route B is
+// brought through its reset point: a too-high Logout, a GapFill past S, the bound's
+// acknowledgement and its unit. Then one call is made through session_test_access, as an
+// emitter in flight across the unit would make it: store_then_emit with the number the bound's
+// acknowledgement carried, below the pre-reset next outbound, or the inbound persist. Each is
+// refused at its boundary: no store call, nothing on the wire, store and manager (1, 1).
+namespace {
+
+enum class seam_call : std::uint8_t { store_then_emit, persist };
+
+void bound_route_seam_call(session_role const role, seam_call const call) {
+    SCOPED_TRACE(std::string{rg::role_name(role)} +
+                 (call == seam_call::store_then_emit ? "/store_then_emit" : "/persist"));
+    int outbound_stores = 0;  // declared before the session: the store hooks write them
+    int inbound_persists = 0;
+    Rol104 r{role};
+    r.factory->hooks.on_outbound_store = [c = &outbound_stores] {
+        ++*c;
+        return false;
+    };
+    r.factory->hooks.on_inbound_persist_call = [c = &inbound_persists] {
+        ++*c;
+        return false;
+    };
+    auto& s = r.s;
+    ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+    seqnum_t const n = s.next_in();
+    (void)s.feed(s.logout(n + 3));
+    ASSERT_EQ(r.phase(), kPending) << "setup: no pending mark";
+    auto const ack_mark = s.sent.size();
+    (void)s.feed(s.gap_fill(n, n + 4));
+    ASSERT_TRUE(s.pump_until([&] { return r.bound_count() == 0; }, kReleaseBudget))
+        << "setup: the bound did not end";
+    auto const acks = s.of_type("5", ack_mark);
+    ASSERT_EQ(acks.size(), 1U) << "setup: the bound's acknowledgement: " << s.written(ack_mark);
+    auto const stamp = static_cast<seqnum_t>(std::stoul(rg::field(acks.front(), 34)));
+
+    int const stores_before = outbound_stores;
+    int const persists_before = inbound_persists;
+    auto const wire_mark = s.sent.size();
+    std::future<fixpp::core::expected_t<void>> fut;
+    if (call == seam_call::store_then_emit) {
+        r.frames.push_back(rg::Scene::raw("0", stamp, "ISLD", s.sending_time()));
+        fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                             session_test_access::store_then_emit(
+                                 *s.session, stamp, std::span<const std::byte>{r.frames.back()}),
+                             asio::use_future);
+    } else {
+        fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                             session_test_access::persist_inbound_advance(*s.session),
+                             asio::use_future);
+    }
+    bool const returned = s.pump_until([&] { return rg::Scene::ready(fut); }, kReleaseBudget);
+    std::optional<fixpp::core::expected_t<void>> result;
+    bool threw = false;
+    if (returned) {
+        try {
+            result = fut.get();
+        } catch (...) {
+            threw = true;
+        }
+    }
+
+    EXPECT_TRUE(returned) << "the seam call did not return";
+    EXPECT_FALSE(threw) << "the seam call threw";
+    if (result.has_value()) {
+        if (call == seam_call::store_then_emit) {
+            EXPECT_FALSE(result->has_value()) << "store_then_emit returned success";
+            if (!result->has_value()) {
+                EXPECT_EQ(result->error(), fixpp::core::error::dispatch_aborted)
+                    << "store_then_emit's refusal";
+            }
+        } else {
+            EXPECT_TRUE(result->has_value()) << "persist_inbound_advance_ returned an error";
+        }
+    }
+    EXPECT_EQ(outbound_stores, stores_before) << "an outbound store call reached the store";
+    EXPECT_EQ(inbound_persists, persists_before) << "an inbound persist reached the store";
+    EXPECT_EQ(s.sent.size(), wire_mark) << "written after the unit: " << s.written(wire_mark);
+    Numbers104 const mgr = r.manager_numbers();
+    EXPECT_EQ(mgr, (Numbers104{.in = 1, .out = 1}))
+        << "the manager after the seam call: " << mgr.in << "/" << mgr.out;
+    auto const st = r.store_numbers(store_kind::hooked);
+    ASSERT_TRUE(st.has_value()) << "the store's numbers were not read";
+    EXPECT_EQ(*st, (Numbers104{.in = 1, .out = 1}))
+        << "the store after the seam call: " << st->in << "/" << st->out;
+}
+
+}  // namespace
+
+TEST(ResetOnLogout104, BoundRouteInFlightPumpArm_RefusedAtTheBoundary_SeamStoreThenEmit) {
+    for (auto const role : kRoles) bound_route_seam_call(role, seam_call::store_then_emit);
+}
+
+TEST(ResetOnLogout104, BoundRouteInFlightPumpArm_RefusedAtTheBoundary_SeamPersist) {
+    for (auto const role : kRoles) bound_route_seam_call(role, seam_call::persist);
 }
 
 // ── T036: R-1t, Engine::stop() while A's reply store is held ──────────────────────────
