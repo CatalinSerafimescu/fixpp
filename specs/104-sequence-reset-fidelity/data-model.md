@@ -1,11 +1,14 @@
 # Data Model: 104 sequence-reset fidelity
 
-All the state below is private to `Session` and lives on the session strand. No public type, configuration key or
-default changes. No `Session` member is added or renamed (the one `Engine` member is B-104-7). One member keeps
+All the state below is private to `Session` or to its `SeqnumManager`, and lives on the session strand. No
+configuration key or default changes, and no public function's signature; one installed type gains members
+(`SeqnumManager`, below). No `Session` member is added or renamed (the one `Engine` member is B-104-7). One member keeps
 its name and changes its type and contract (`logout_seen_`, `bool` → a one-byte enum). One member is deleted: `reset_unit_wake_`, the waker of 093's
 event-driven wait, which `close()`'s poll replaces (contract RR-2 item 4; re-derive its users with
 `git grep -n reset_unit_wake_ -- src include tests`). So `sizeof(Session)` is expected to shrink, an expectation that phase 7's one-off size reading settles. There is no pin on
 it to move (re-derive: `git grep -n "sizeof(Session)\|sizeof(fixpp::session::Session)" tests include src`).
+One installed header outside `Session` changes: `SeqnumManager` (`include/fixpp/session/seqnum_manager.hpp`), which
+`Session` holds by value, gains the manager freeze ("`SeqnumManager`: the freeze" below; B-104-7).
 Decisions are in [research.md](research.md); the observable contract is in
 [contracts/session-wire-endings-104.md](contracts/session-wire-endings-104.md) (Part 1: RT-1, RR-1 to RR-4).
 
@@ -36,7 +39,8 @@ direction".
 | `Session::close`: after the wait, before the predicate | a `pending` marker (no clock, or the wait expired) is set to `reached` with **no reset** under rol: the receipt did not reach its reset point (contract RR-2 item 4) |
 | `Session::close`: the teardown predicate | `!teardown_reset_done_ && rod`; the rol term for "`reached`, unit not started" has no input by RR-2 item 3 and is not coded |
 | `store_then_emit` (before its store call), `persist_inbound_advance_` (after its `store_is_persistent_` return, before its store call) | read: refuse a call issued while `reached` (contract RR-4); `store_then_emit` takes its number back. A call issued earlier runs to its end (RR-2 item 5) |
-| `install_reconnected_transport` | `none` |
+| `install_reconnected_transport` | `none`, and the manager thawed in the same block (contract RR-5 item 1) |
+| Any write of `reached` (a reset point, `close()`'s close-out) | the manager frozen in the same strand turn: at a reset point by `run_reset_unit_`, after its manager set; at the close-out with the marker's write (contract RR-5) |
 
 - **Invariant RO-1.** With rol set, the marker is `pending` exactly while one awaited read-pump frame of a receipt
   arm (A, L, S, or B's immediate acknowledgement) is between its receipt and its reset point or exit. That frame
@@ -79,6 +83,42 @@ call of `reset_unit_wake_` (below). It gains callers:
 
 `reset_unit_in_flight_` is unchanged, and `close()` reads it earlier (below). `reset_unit_wake_` and its call in
 `run_reset_unit_` are deleted (contract RR-2 item 4).
+
+`run_reset_unit_` also arms the manager freeze (contract RR-5 item 4): when the marker is `reached`, after its
+manager set, whatever that set returned, and before `reset_unit_in_flight_` and its store call (or its return, with
+no store). A Logon arm's unit runs with the marker not `reached` and arms nothing. A Debug assert at its entry
+checks that the manager is not frozen.
+
+## `SeqnumManager`: the freeze (contract RR-5; research D11)
+
+| Member | Kind | Contract |
+|---|---|---|
+| the freeze flag (one private `bool`) | new, private | set while the session's receipt marker is `reached`; read by the six refused mutators only |
+| `SeqnumManager::freeze_key` | new, a passkey type | its constructor is private, with `Session` its friend, so no other caller can construct one |
+| `freeze(freeze_key)`, `thaw(freeze_key)` | new | set and clear the flag; no lock (strand-confined, as `take_back_outbound` and `peek_outbound` are) |
+| `check_inbound`, `assign_outbound`, `hydrate` | changed | while frozen: `unexpected(session_already_closed)`, counters unchanged; the test sits after the lock grant, before any read or write of a counter |
+| `set_next_inbound`, `set_next_outbound` | changed | while frozen: success, with no write |
+| `take_back_outbound` (inline, in the header) | changed | while frozen: a no-op |
+| `reset_to_one` | unchanged | never refused: a reset writer's mutator (its callers are the two reset writers) |
+
+`Session`'s sites:
+- **Freeze:** inside `run_reset_unit_` (above), and at `close()`'s close-out of a `pending` receipt, written with
+  the marker's `reached`.
+- **Thaw:** in `install_reconnected_transport`, with the marker's `none`.
+- **Debug assert:** after each site, the manager is frozen if and only if the marker is `reached`.
+- **Conditional `Disconnected` writes** (contract RR-5 item 6): every `record_state_transition_(fsm_state::
+  Disconnected)` on a path that a refused `assign_outbound` returns into is made only when the state is not
+  `Disconnected` already: each `assign_outbound` call's failure branch, and the writes its frame makes on the way
+  out to the pump. Re-derive: `git grep -n 'seqnum_mgr_.assign_outbound()' -- src/session/session.cpp`, and read
+  each failure branch.
+- **Test access:** `tests/support/seqnum_manager_test_access.hpp` gains a static function that sets and reads the
+  flag (brain "Test access to private `Session` state": a function on the existing friend, with no change to the
+  class's access), for cell R-5d.
+
+- **Invariant RO-4 (the freeze).** The manager is frozen exactly while the marker is `reached`, and only while
+  `Disconnected` (contract RR-5, INV-F). Every counter write is inside a mutator body, so the flag governs every
+  writer (INV-Z). The header comment on the flag names 104 and RR-5, states the condition and the recipes of
+  INV-Z and of `reset_to_one`'s callers, and contains no count of sites or callers.
 
 ## `Session::close`'s teardown: order changed
 
@@ -222,7 +262,28 @@ New rows:
   member in `git diff origin/main...HEAD -- include/fixpp/session/engine.hpp include/fixpp/session/session.hpp`. No test or
   source pins either size: `git grep -nE 'sizeof ?\([^)]*\b(Engine|Session)\b' -- tests include src` has no hit at
   the base, and the same pattern with `FieldRef` in place of the two names hits (its known positive); the full
-  `-k 0` build is the check that nothing else depends on it.
+  `-k 0` build is the check that nothing else depends on it. In `include/fixpp/session/seqnum_manager.hpp`
+  (since the T011 amendment, 104 contract RR-5), `SeqnumManager` gains a private freeze flag and the passkey-gated
+  `freeze` / `thaw` with their `freeze_key` type, and `take_back_outbound`'s inline body gains the flag's test. So
+  `sizeof(SeqnumManager)` may change, and `sizeof(Session)` with it, since `Session` holds the manager by value. The
+  direction of each is written from phase 7's size reading, never from this text. No public function's signature
+  changes, and `freeze` and `thaw` cannot be called outside `Session` (their key cannot be constructed there). No
+  test or source pins `sizeof(SeqnumManager)`: `git grep -nE 'sizeof ?\([^)]*SeqnumManager' -- tests include src`
+  has no hit at the base. The C ABI does not expose `SeqnumManager`.
+- **B-104-8** — with `reset_on_logout`, from a received Logout's reset point, or from `close()`'s close-out of a
+  received Logout it could not wait for, until the connection ends, nothing but a reset changes the session's
+  sequence numbers. A frame or a send that was already in progress at that point, and that later tries to number
+  a message, apply a GapFill or SequenceReset's NewSeqNo, or reconcile its outbound number after a store failure,
+  is refused. In particular:
+  - its late Reject or other reply is not numbered, stored or sent, and `toAdmin` is not called for it;
+  - a GapFill's NewSeqNo is not applied;
+  - a failed send keeps the store's error and is not transmitted.
+  The numbers stay at 1 after a receipt reset, and at their values after a close-out. The teardown's reset under
+  `reset_on_disconnect` still runs. The session's state history (`Session::fsm_visit_history()`) records one
+  `Disconnected` for such an ending, and for any ending where a message cannot take a number while the session is
+  already Disconnected, for example after `close()` has drained the manager (104 contract RR-5 item 6). With `reset_on_logout` off nothing is refused. On a too-high Logout's route the
+  frame in progress is one that 103's bound let in after the Logout, which QuickFIX never processes; so nothing of
+  it is sent, as in QuickFIX (104 research D11). FR-019, contract RR-5.
 
 New limitations:
 - **L-104-1** — a ResendRequest answered when fixpp has sent nothing at or above BeginSeqNo writes a GapFill whose
@@ -265,7 +326,7 @@ Amended in place:
   its reset point).
 - **B-538-7**: the title's clause "a Logout that was sent still resets, answered or not" is replaced whole with
   "since 104 a Logout that was sent never resets; a received one resets at its reset point (B-104-1)". The check
-  is T095's re-run of D8's census, whose key `was sent still resets` must no longer hit the row. Each other sentence
+  is T101's re-run of D8's census, whose key `was sent still resets` must no longer hit the row. Each other sentence
   that states the superseded rule is quoted and replaced in the amendment, as 103 did for B-538-2:
   - "`run_logout_phase1` sets `logout_seen_` only after its Logout's emit returned success, and the teardown reset
     in `Session::close` runs when that flag and `reset_on_logout` are both set; the other place that sets the flag,

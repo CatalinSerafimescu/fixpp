@@ -48,6 +48,26 @@ comments.
   `persist_inbound_advance_`) after a suspension that follows its `check_inbound`, and every emitter's state test
   before its `assign_outbound`. Read `run_liveness_loop`, `Session::send_body_`, `replay_outbound_range_` and the
   `inbound_*_leaf_` family. R-1r's route is the first such sub-arm found.
+- The manager freeze's readings (contract RR-5, research D11):
+  ```bash
+  # INV-Z: every counter write is inside a SeqnumManager mutator body
+  git grep -n -E '\bnext_(in|out)bound_\b *(=[^=]|\+\+|--)|(\+\+|--)next_(in|out)bound_\b' -- \
+    src/session include/fixpp/session ':!include/fixpp/session/memory_store.hpp'
+  # the mutator callers, each read with its enclosing function and its failure branch
+  git grep -n -E 'seqnum_mgr_\.(check_inbound|assign_outbound|take_back_outbound|hydrate|reset_to_one|set_next_inbound|set_next_outbound)\(' -- src include
+  # reset_to_one's callers: the two reset writers only
+  git grep -n 'reset_to_one(' -- src include
+  # INV-F: the exits from Disconnected
+  git grep -n -E 'record_state_transition_\(fsm_state::(NotConnected|LogonSent|LogonReceived|Active)\)' -- src/session/session.cpp
+  # hydrate's callers
+  git grep -n 'ensure_hydrated_(' -- src
+  # the state-history readers a conditional Disconnected write could change
+  git grep -n -e fsm_visit_history -e fsm_visit_count -- tests
+  ```
+  For each `assign_outbound` caller, read whether `fire_to_admin_` precedes it and, if so, that no suspension
+  falls between its last state test (or its frame's entry turn) and its number. Read phase 1 after a receipt
+  reset (contract O22), including the inline start of `operator||`'s branch at the pinned asio
+  (`grep -n co_spawn_dispatch <asio>/impl/co_spawn.hpp`). A reading that contradicts RR-5 stops implementation.
 
 ## 2. RED on the base, then GREEN, then the mutant
 
@@ -150,6 +170,7 @@ Cells with a forced-hit or a competing-timer element:
 | US1 AS6 | Logout in LogonSent resets; in NotConnected does not | R-1o |
 | US1 AS7 | processing ends before the reset point: no reset | R-1f, R-1g, R-1n |
 | US1 edges | too-high Logout (a duplicate included); races with `close()` and `Engine::stop()` (A beside a claimed bound included); a cancelled reply store; store failure; reconnect; emitters at the unit; a direct caller's cancellation at the reset point | R-1e, R-1h to R-1l, R-1p to R-1z |
+| US1, FR-019 | a writer in flight at the reset point (a route-B GapFill or Reject, a failed send's reconcile), and a Reject after `close()`'s close-out: refused by the manager freeze | R-5a, R-5b, R-5c, R-5e; the manager alone, R-5d |
 | US2 AS1/AS2 | unasked 141=Y at 34=1, lenient and unilateral | U-1, U-2 |
 | US2 AS3 | strict unchanged | U-3, existing `Initiator_Received141Ack_*` |
 | US2 AS4 | 141=Y at M > 1 | U-4, W8 re-pin |
@@ -170,8 +191,9 @@ Cells with a forced-hit or a competing-timer element:
   count.
 - The paired `session_send_bench` run, base against candidate on one machine (plan "Performance Goals", Article
   VIII §3): RR-4 adds a byte test to every outbound frame's store path. Its other test, in
-  `persist_inbound_advance_`, sits behind `store_is_persistent_` and is not benched. Results go to the
-  evidence file.
+  `persist_inbound_advance_`, sits behind `store_is_persistent_` and is not benched. RR-5 adds a byte test to
+  `check_inbound` and `assign_outbound`, so `seqnum_bench` and `on_inbound_frame_bench` run paired in the same
+  session. Results go to the evidence file.
 
 ## 5. Records, verification, then FR-017 last
 
@@ -183,7 +205,7 @@ The order is plan phases 9 to 11.
    the `spec/coverage-index.md` notes column for those keys; the supersession flags on
    `brain/components/session.md` and `brain/components/graceful-logout.md` (024 C3.1, 027 C3, 093 C-6's
    `close()` bullet, B-538-7's clause, 103's latch disclosure, and each merged-bundle document the census flags),
-   and on every other component page tasks T094's recipe finds (`message-store-quiescence.md` among them);
+   and on every other component page tasks T100's recipe finds (`message-store-quiescence.md` among them);
    the L-104-3 follow-up issue, labelled.
 2. `/speckit-verify`, then Gate B (phase 10).
 3. FR-017 (phase 11; research D9, ruling O-3), after Gate B's last fix:

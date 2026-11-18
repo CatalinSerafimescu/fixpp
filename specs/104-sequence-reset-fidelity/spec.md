@@ -207,6 +207,36 @@ listed again in the PR body for the owner's review at Gate B sign-off. The mecha
   which RU-2 already lists as a departure (DQ-9). Cell: R-1o's rol-off arm, RED by the mutant "the branch runs
   whatever the knob" (contract RR-1 "Arm S's branch and the knob", research D10).
 
+### Session 2026-11-18 (owner, implementation STOP at T011)
+
+- Q: Implementation stopped at T011 on a gap that 104 itself opens. A writer already in flight at the reset point
+  can write the sequence counters after the receipt unit ran, so the manager disagrees with the reset store. Three
+  paths were read (research D11): a route-B GapFill suspended in its inbound persist that then sets NextNumIn to
+  its NewSeqNo; `store_then_emit`'s reconcile after a persistent-store failure, which sets the outbound number from
+  a store read issued before the reset (`Session::send`, the liveness loop, phase 1, on any route); and a late
+  `assign_outbound` that nothing takes back when its `toAdmin` throws (an unparseable in-sequence frame's Reject on
+  route B). Should such a writer be waited for, or refused? The Fable consult
+  `104-post-reset-inflight-manager-writers` returned "probable" and recommended refusal. → A: **Refused:
+  construction (Z), the manager freeze.** `SeqnumManager` accepts only the reset writers while the session's
+  receipt marker is `reached`: from the reset-point turn until the marker returns to `none` at
+  `install_reconnected_transport` (contract RR-2 item 6). It is RR-4's own pattern, moved to the one choke point
+  where every counter write is made. It adds no wait. RU-1, RU-3, construction A and RR-4 are unchanged (contract
+  RR-5).
+  - **Orchestrator sub-rulings.**
+    1. Any `reached` marker freezes the manager, `close()`'s close-out included. RR-2 item 5's "attempt at a
+       Reject that RR-4 then refuses" becomes a refusal at `assign_outbound`, before `toAdmin`.
+    2. Each mutator's refused return is derived from its callers' handling, read in source, under one rule: the
+       caller emits nothing, calls no `toAdmin` for a refused number, and adds no second `Disconnected` entry to
+       the state history (contract RR-5 item 5's table). The last part needs caller-side edits: the `Disconnected`
+       writes after a failed `assign_outbound` become conditional, as B41's are (contract RR-5 item 6).
+    3. Only the reset writers write while frozen: `run_reset_unit_`'s manager steps and the teardown's
+       `reset_seqnums_to_one_durable`. The mechanism is the smallest one, and is kept out of the callable public
+       API (contract RR-5 item 4).
+    4. Whether a `close(graceful)` after a receipt reset can reach phase 1's `assign_outbound` is read and recorded:
+       read, not run, it cannot (contract O22; research D11, "Phase 1"). One step of the reading, the inline start of
+       `operator||`'s branch, is read at the pinned asio; T013 re-reads it, and T014 stops on a contrary reading.
+  - **Review.** A narrow Gate A loop (loop 4) reviews the amendment before implementation resumes at T011.
+
 ## User Scenarios & Testing *(mandatory)*
 
 The users are the operators and integrators of a fixpp session that talks to a QuickFIX-family counterparty.
@@ -392,6 +422,13 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
 - **FR-006**: The code comments that state the old rule (for example the "EXACTLY two … sites" comment on
   `logout_seen_` in `session.hpp`) MUST be corrected or removed with the change. Each one MUST name 104's rule where
   it supersedes 024's (header-comment rule, issue #310).
+- **FR-019** (added 2026-11-18, the T011 STOP): After a received Logout's reset point, and after `close()` closes a
+  receipt out, a writer other than a reset writer MUST NOT change either sequence number in the session's manager
+  until the connection ends, whatever it had begun before that point and wherever it was suspended (contract RR-5). The
+  reset writers are the receipt unit's manager steps and the teardown's reset under `reset_on_disconnect`. A
+  refused write MUST leave both numbers unchanged. The writer MUST then emit nothing for a refused number, MUST
+  call no `toAdmin` for it, and MUST add no second `Disconnected` entry to the state history. With
+  `reset_on_logout` off nothing is frozen.
 
 **Unasked 141=Y acknowledgement (B107, #695)**
 

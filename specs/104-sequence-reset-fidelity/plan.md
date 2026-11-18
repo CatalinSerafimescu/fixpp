@@ -41,7 +41,7 @@ re-record.
    ruling O-3).
 
 No C ABI, configuration-key or public-type change. `logout_seen_` changes from `bool` to a one-byte enum, and
-`reset_unit_wake_` is deleted (contract RR-2 item 4), so `sizeof(Session)` is expected to shrink (an expectation: tasks.md T086 reads it once, base against head); nothing
+`reset_unit_wake_` is deleted (contract RR-2 item 4), so `sizeof(Session)` is expected to shrink (an expectation: tasks.md T092 reads it once, base against head); nothing
 pins it (research D10). `Engine` gains one private member, R-1t's step-3 mark, so `sizeof(Engine)` changes, a layout
 change in the installed `engine.hpp` with no C-ABI change; nothing pins it either (B-104-7).
 
@@ -70,7 +70,8 @@ override it as one operation.
 
 **Project Type**: library (FIX engine).
 
-**Performance Goals**: one byte test per frame on two paths, and nothing else per frame. Each mechanism is
+**Performance Goals**: one byte test per frame on each of two paths for RR-4, one more on each path for RR-5, and
+nothing else per frame. Each mechanism is
 accounted for on its own:
 - **`store_then_emit`'s byte test** (RR-4), before the store call. It runs on every outbound frame that has a
   store call, every `Session::send` included. Article VIII §3 asks for a benchmark in the same PR, so phase 7 runs
@@ -79,6 +80,11 @@ accounted for on its own:
 - **`persist_inbound_advance_`'s byte test** (RR-4). It sits after the function's `store_is_persistent_` return, so
   it runs only on a persistent store's inbound persist and never on the in-memory inbound path (XV §1's hot path).
   `session_send_bench` does not cover it, and no benchmark is added for it.
+- **The manager freeze's byte test** (contract RR-5). It sits in each refused `SeqnumManager` mutator, before its
+  write, so it runs once per inbound frame (`check_inbound`) and once per outbound frame (`assign_outbound`), on the
+  in-memory hot path too. Phase 7 runs `bench/session/seqnum_bench.cpp` (`assign_outbound`, a `bench/ci-suite.txt`
+  row) and `bench/session/on_inbound_frame_bench.cpp` (`check_inbound` through `on_inbound_frame`) paired
+  base-vs-candidate, with `session_send_bench`, by the same method.
 - **`close()`'s poll** (contract RR-2 item 4). It runs in `close()` only, never per message.
   - Its worst case: one handler kept ready on the session's executor for up to `logon_timeout_ms`, while a receipt
     is held in a store call.
@@ -115,7 +121,10 @@ accounted for on its own:
   `acknowledge_peer_logout_` (B's reset point), `run_peer_logout_bound_` (no marker write before its reset point;
   the Debug assert there), `run_logout_phase1`, `close` (the
   poll), `run_reset_unit_` (its `reset_unit_wake_` call deleted), `store_then_emit` and `persist_inbound_advance_`
-  (RR-4's boundaries), `install_reconnected_transport`.
+  (RR-4's boundaries), `install_reconnected_transport` (the thaw), and the failure branches of the
+  `assign_outbound` callers (RR-5 item 6).
+- `SeqnumManager` (`include/fixpp/session/seqnum_manager.hpp`, `src/session/seqnum_manager.cpp`): the freeze
+  (contract RR-5; B-104-7).
 - The two Logon arms, `on_inbound_logon_sent_` and `on_inbound_not_connected_`, plus one file-local text builder
   shared with 103's Arm B.
 - `replay_outbound_range_`'s end model.
@@ -142,14 +151,14 @@ accounted for on its own:
 | VII §5: "`tests/conformance/` holds the official FIX session-layer test cases … Every PR must pass them in CI." | **PASS.** `TcSeqnumTest.Tc2c_MsgSeqNumTooLow` (Active) is unchanged. T-1/T-2 are TC 2c's and 1B(d)'s Logon-arm instances. |
 | VII §8: "Author isolation-safe tests grouped; select by ctest label, not executable name" | **PASS (planned).** One bucket, `session_104_tests`, with label `104`. Selection is `-L 104 --no-tests=error` (quickstart §2). |
 | IX §1: "**Per-PR:** **≥95% line, ≥85% branch** on **touched modules** … **Binding rule — no silent uncovered error/edge path.**" | **PASS (planned).** Each new branch has a cell, and each contract ending has one: each receipt arm's reset point (R-1c, R-1d, R-1e, R-1o), each ending before it (R-1f, R-1g, R-1n), the races with `close()` and `Engine::stop()` (R-1j, R-1k, R-1l, R-1t, R-1u, R-1w, R-1x, R-1z), a duplicate too-high Logout (R-1y), the reply's cancelled store call (R-1v), the store failure (R-1i), the emitters at the unit (R-1p, R-1q, R-1r), the unasked branch (U-1, U-4, U-9, U-10), the clamp (U-7, U-8), and each too-low Logout ending, one cell per ending per arm with its mutant (T-4a to T-4f, T-6). `/speckit-verify` assesses anything left uncovered. |
-| VIII §3: "**No perf change merged without a benchmark in the same PR.**" | **PASS (planned).** Per mechanism ("Performance Goals"): `store_then_emit`'s byte test is the per-frame change, and `session_send_bench` runs paired base-vs-candidate in phase 7. `persist_inbound_advance_`'s byte test sits behind `store_is_persistent_`, so it is off the in-memory path and has no bench. `close()`'s poll is not a perf change (Performance Goals), and runs in `close()` only. Its worst case is up to `logon_timeout_ms` of posted turns while a store call is held, disclosed in B-104-2. Research D1 item 4 answers 093 OD-1's reason for rejecting a poll ("spins the strand for the whole bound"). `engine_send_bench`, the only `paired` CI row on a send route (`bench/ci-suite.txt`), refuses its malformed payload before a number is read and never reaches `store_then_emit`, and `session_send_bench` is not in `bench/ci-suite.txt`: RR-4's byte test is measured only by the plan's manual paired `session_send_bench` run (§2's method; §2 itself says automated coverage is partial). |
+| VIII §3: "**No perf change merged without a benchmark in the same PR.**" | **PASS (planned).** Per mechanism ("Performance Goals"): `store_then_emit`'s byte test is the per-frame change, and `session_send_bench` runs paired base-vs-candidate in phase 7. RR-5's byte test in the manager's mutators is a per-frame change on both paths, measured by `seqnum_bench` and `on_inbound_frame_bench`, paired in the same run. `persist_inbound_advance_`'s byte test sits behind `store_is_persistent_`, so it is off the in-memory path and has no bench. `close()`'s poll is not a perf change (Performance Goals), and runs in `close()` only. Its worst case is up to `logon_timeout_ms` of posted turns while a store call is held, disclosed in B-104-2. Research D1 item 4 answers 093 OD-1's reason for rejecting a poll ("spins the strand for the whole bound"). `engine_send_bench`, the only `paired` CI row on a send route (`bench/ci-suite.txt`), refuses its malformed payload before a number is read and never reaches `store_then_emit`, and `session_send_bench` is not in `bench/ci-suite.txt`: RR-4's byte test is measured only by the plan's manual paired `session_send_bench` run (§2's method; §2 itself says automated coverage is partial). |
 | IX §2: "**Sanitizers — Tier 1 (every PR, Linux/Clang):** ASan, UBSan, TSan must all run and pass." | **PASS (planned).** `session_104_tests` and the re-pinned targets run under each (quickstart §4). |
 | X §1 / §6: "Every change to it is reviewed against the contract; Codex Gate A is mandatory." / "ABI-affecting features trigger all four mandatory controls" | **N/A.** No C-ABI change: `reset_on_logout` has no C-ABI setter (`git grep -n reset_on_logout include/fix`), and no signature, code or default moves. The behaviour change reaches C-ABI users through the session, as B-104-* rows. |
 | XI §2: "**Cancellation: ASIO native cancellation slots end-to-end.** No parallel `stop_token` abstraction." | **PASS.** The receipt reset reuses the unit's empty-slot `co_spawn` and the arm's restore. No new cancellation path. |
 | XI §3: "`fixpp::sync::async_mutex` … is the only allowed mutex shape for coroutines. One exception is permitted … `detail::replay_gate` …" | **PASS.** No new exclusion primitive. The unit's manager set takes the existing seqnum `async_mutex`, granted inline (risk R1). The receipt marker is a strand-confined byte, not a lock. |
 | XI §7: "Threading/concurrency-affecting features trigger all four mandatory controls (Appendix A)" | **Applies.** It moves `close()`'s wait and adds the unit's suspension to three inbound arms. Appendix A's "Session FSM: … recovery semantics" also applies. The controls: `/clarify` done 2026-11-17 (spec Clarifications); `/analyze` after `/speckit-tasks`; Codex Gate A on this bundle; owner `/plan` sign-off (delegated, below). |
 | XII §9: "Security-affecting features trigger all four mandatory controls (Appendix A)" | **Covered by XI §7's four controls.** 104 changes no TLS, cipher or cert-source code, but it changes two orderings against the mTLS CompID-authorisation gate, decided from FIX-TC 1S(c) (clarification N-8): the too-low Logout comes after the identity gates in both Logon arms (and after `authorize_logon` on the acceptor), and the initiator's unasked reset unit comes after its gate. Arm S's reset requires the same authorisation. What stays before the gates (posture, strict, SendingTime, 1137) is pre-existing and disclosed as L-104-3 (DQ-6). Cells: T-6's identity arms, U-9, R-1o. |
-| XV §1: "The "hot path" of this ban is the latency-critical **in-memory** path — parse → validate → dispatch and `MemoryStore`, which MUST stay zero-allocation per message." | **PASS, by reading.** Per frame: one flag test in the LogonSent arm, and RR-4's byte test in `store_then_emit` and `persist_inbound_advance_`; none allocates. The unit's frame is allocated once per session-ending Logout, which is not per message. `close()`'s poll is not on the per-message path. The text is built in a fixed stack array. The new allocation sites are listed under "Constraints". No allocation-counting cell is added: the existing `tests/alloc_guard/` entries, run under `tools/check_alloc.py`, are re-run at the head (T084), and whether any of them reaches `store_then_emit` or the LogonSent arm is read and recorded, so the record says which changed lines a measured witness covers and which rest on this reading. |
+| XV §1: "The "hot path" of this ban is the latency-critical **in-memory** path — parse → validate → dispatch and `MemoryStore`, which MUST stay zero-allocation per message." | **PASS, by reading.** Per frame: one flag test in the LogonSent arm, RR-4's byte test in `store_then_emit` and `persist_inbound_advance_`, and RR-5's in `check_inbound` and `assign_outbound`; none allocates. The unit's frame is allocated once per session-ending Logout, which is not per message. `close()`'s poll is not on the per-message path. The text is built in a fixed stack array. The new allocation sites are listed under "Constraints". No allocation-counting cell is added: the existing `tests/alloc_guard/` entries, run under `tools/check_alloc.py`, are re-run at the head (T090), and whether any of them reaches `store_then_emit` or the LogonSent arm is read and recorded, so the record says which changed lines a measured witness covers and which rest on this reading. |
 | XVI §3 / §4: "`/clarify` is MANDATORY before `/plan` …" / "`/analyze` is MANDATORY for the same trigger set" | `/clarify` is done. `/analyze` is scheduled after `/speckit-tasks`. |
 | XVII §1: Gate A triggers "Touches concurrency / threading / cancellation / executor model", "Touches the session FSM, recovery, or message store contract" | **Gate A required** (spec Assumptions). |
 | XVII §7: "Before opening any PR, the contributor MUST run a local … build + ctest cycle on at least the `linux-clang-debug` preset" | Planned (phase 7). §7's resource gate is discharged by the owner's standing grant of 2026-11-17 ("run autonomously through all steps … Stop if you hit a blocker"), recorded at tasks.md T001. Builds still run one at a time under `flock /tmp/fixpp-build.lock`, new trees go on `/mnt/wsl/fixppbuild`, and a build stops on any WSL memory pressure. |
@@ -222,7 +231,10 @@ result and every RED/GREEN/mutant record, never code comments.
        included), then its measured half, with its known positives (B-024-1 seeded) each a hit;
      - the acceptor-twin reachability greps (D7);
      - the store-order condition and the manager's inline grant (research R1);
-     - the Active sub-arms that write after a suspension following `check_inbound` (R-1r's route; contract RR-4).
+     - the Active sub-arms that write after a suspension following `check_inbound` (R-1r's route; contract RR-4);
+     - RR-5's readings (research D11): the mutator callers by recipe, each refused return's caller handling, the
+       emitters whose `toAdmin` precedes `assign_outbound`, `hydrate`'s reachability while frozen, and phase 1
+       after a receipt reset (contract O22). A reading that contradicts RR-5 stops implementation.
    - Record the results. The phases below take the census's kept hits as their re-pin and reword list.
 1. **The settling experiment comes first** (owner, 2026-11-18). Construction A rests on INV-T and INV-X (contract
    RR-2), which are read from source and not yet run. If either fails, the construction is wrong, not its
@@ -267,7 +279,7 @@ result and every RED/GREEN/mutant record, never code comments.
           to `live()` and its claim.
 
        So the race takes at least two posted turns, possibly more. K is eight times that minimum, derived at the
-       pinned asio and recorded with its derivation in the evidence file (T020), never here. The loop exits as
+       pinned asio and recorded with its derivation in the evidence file (T022), never here. The loop exits as
        soon as the mark leaves `pending`, so a generous K costs nothing.
      - The known positive itself fails if the cap is hit with the mark still `pending`: the event did not happen,
        and the instrument is not accepted. The pass at which the mark left `pending` is recorded in the evidence
@@ -279,7 +291,7 @@ result and every RED/GREEN/mutant record, never code comments.
        scratch run, not the design: hold the bound's reply `store` in HookedStore, so the bound stays `acking`
        across the frame's next pass.
      - If the arm does not abort, the selection cannot report a failure of INV-T, and the experiment is not
-       accepted: implementation STOPS, as it does for a fired assert (below; tasks T021, T041).
+       accepted: implementation STOPS, as it does for a fired assert (below; tasks T023, T044).
    - The marker's assert (`none` at the bound's reset point, RR-2 item 5) needs the enum and B's reset point. It
      lands with phase 2, which re-runs the same selection as soon as B's reset point exists. Only R-1y and R-1z set
      `reset_on_logout`, so only they can trip it: with rol off the marker is always `none`. Its known positive, in
@@ -313,6 +325,12 @@ result and every RED/GREEN/mutant record, never code comments.
      `run_reset_unit_`, with no suspension or callback between (contract RR-2 item 3).
    - RR-4's boundaries in `store_then_emit` and `persist_inbound_advance_`; the clear at
      `install_reconnected_transport`.
+   - RR-5's manager freeze (research D11): in `include/fixpp/session/seqnum_manager.hpp` and
+     `src/session/seqnum_manager.cpp`, the flag, the passkey-gated `freeze` / `thaw` and the test in the six refused
+     mutators; in `src/session/session.cpp`, the freeze in `run_reset_unit_` and at the close-out, the thaw at
+     `install_reconnected_transport`, the two Debug asserts, and the conditional `Disconnected` writes on the paths
+     a refused `assign_outbound` returns into (RR-5 item 6). Cells R-5a to R-5e, the first three and R-5e written RED
+     with the other US1 cells, and R-5d with the mechanism.
    - The comments that state the old rule, each naming 104 (FR-006): the member, the teardown block's
      "Predicate" paragraph, `run_logout_phase1`'s "site (a)" comment, `on_inbound_active_logout_`'s and
      `on_inbound_active_too_high_logout_`'s "024 T013" comments, `drive_reconnect`'s latch paragraph,
@@ -351,7 +369,7 @@ result and every RED/GREEN/mutant record, never code comments.
      `close()` bullet, B-538-7's clause and 103's latch disclosure as superseded, naming 104; reword
      graceful-logout.md's `logout_seen_` invariant row and its R-24 bullet; a pointer on session.md's
      rejected-alternative bullet (research D8).
-   - Every other component page the issue #334 recipe finds (tasks T094): a page whose `refs` list a document 104
+   - Every other component page the issue #334 recipe finds (tasks T100): a page whose `refs` list a document 104
      supersedes, or whose `codegraph_entry` names a function 104 changes ("Scale/Scope"), is read, and each
      statement of a superseded rule on it is flagged in place. Known positive:
      `brain/components/message-store-quiescence.md`, whose 141=Y unit section says `close()` waits "when it is
@@ -402,6 +420,7 @@ result and every RED/GREEN/mutant record, never code comments.
 - Loop 2 round 3 (loop 2 exhausted) 2026-11-18: Codex P1=0 P2=1 P3=0; Opus post-judging P1=0 P2=1 P3=0 (R-1t can stay GREEN under its reorder mutant). Owner chose: apply the judge's three verbatim edits, then a fresh narrow confirmation loop. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_6_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_6_adversarial_review.md.
 - Loop 3 round 1 (narrow confirmation) 2026-11-18: Codex P1=0 P2=0 P3=0; Opus post-judging P1=0 P2=0 P3=2 (New-1 pump budgets vs kHoldBound, New-2 wording), both applied. **Gate A CONVERGED.** Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_7_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_7_adversarial_review.md.
 - /speckit-analyze 2026-11-18: 26 findings (1 escalated, 3 HIGH); all applied. F1 corrects three base readings in research D10 in place (RED on base: the base ends before the identity gate); no design change, so no Gate A round (orchestrator ruling). D1 ruled HIGH (the owner's standing grant discharges §XVII.7's approval; T001 records it). B3: gate-b-done, per 103's T163 precedent.
+- Implementation STOP at T011, 2026-11-18: in-flight manager writers after the reset point. Fable consult 104-post-reset-inflight-manager-writers (probable). Owner ruled construction (Z), manager freeze; orchestrator sub-rulings: freeze on any reached marker, refused return per mutator, reset-writer mechanism. Narrow Gate A loop 4 follows.
 
 ### Round 1 — disagreements
 
