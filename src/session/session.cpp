@@ -846,6 +846,12 @@ bool Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Tr
     // connection, and ruling W's hold ends with the connection it was set on.
     logout_seen_ = receipt_marker::none;
     wire_closed_by_reset_ = false;
+    // 104 (contract RR-5 item 1): the thaw, with the marker's `none`, before LogonSent.
+    seqnum_mgr_.thaw(SeqnumManager::freeze_key{});
+    assert(seqnum_mgr_.frozen(SeqnumManager::freeze_key{}) ==
+               (logout_seen_ == receipt_marker::reached) &&
+           "104 RR-5 item 4: after install_reconnected_transport's thaw, frozen differs from the "
+           "marker reached");
 
     // 3. Re-enter LogonSent so on_inbound_frame drives back to Active.
     //    The session's next peer Logon-ack will be processed by the LogonSent
@@ -1384,9 +1390,26 @@ void Session::disconnect_unless_superseded_(std::optional<fsm_state> arm) noexce
 asio::awaitable<Session::reset_unit_result> Session::run_reset_unit_(seqnum_t next_in,
                                                                      seqnum_t next_out) noexcept {
     reset_unit_result r{};
+    assert(!seqnum_mgr_.frozen(SeqnumManager::freeze_key{}) &&
+           "104 RR-5 item 4: run_reset_unit_'s entry assert: the manager is frozen");
     r.manager = co_await seqnum_mgr_.reset_to_one();
     if (r.manager) r.manager = co_await seqnum_mgr_.set_next_inbound(next_in);
     if (r.manager) r.manager = co_await seqnum_mgr_.set_next_outbound(next_out);
+    assert(!seqnum_mgr_.frozen(SeqnumManager::freeze_key{}) &&
+           "104 RR-5 item 4: run_reset_unit_'s post-set assert: the manager is frozen");
+    // 104 (contract RR-5 items 1 and 4): a receipt's unit (the marker `reached`) freezes the
+    // manager after its manager set, whatever that set returned, and before its first
+    // suspension (reset_unit_in_flight_ and the store's reset_to) or its return with no store;
+    // the manager calls grant inline, so the marker's move, the set and the freeze are one
+    // strand turn. A Logon arm's 141=Y unit runs with the marker not `reached` and freezes
+    // nothing.
+    if (logout_seen_ == receipt_marker::reached) {
+        seqnum_mgr_.freeze(SeqnumManager::freeze_key{});
+    }
+    assert(seqnum_mgr_.frozen(SeqnumManager::freeze_key{}) ==
+               (logout_seen_ == receipt_marker::reached) &&
+           "104 RR-5 item 4: after run_reset_unit_'s freeze, frozen differs from the marker "
+           "reached");
     if (!r.manager || store_ == nullptr) {
         co_return r;
     }
@@ -1581,7 +1604,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
         if (!assign_r) {
             // Seqnum overflow — same disposition as build_logon failure above.
             // [W3.4 / /simplify B-8 fix]
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());  // overflow (I-8)
         }
         // 019 T014: toAdmin before transmitting the initiator Logon. [FR-008/010]
@@ -2551,7 +2574,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // resumes, runs no unit and issues no further store call (RR-2 item 5).
     if (logout_seen_ == receipt_marker::pending) {
         logout_seen_ = receipt_marker::reached;
+        // 104 (contract RR-5 item 1): the freeze, in the turn of the marker's `reached`.
+        seqnum_mgr_.freeze(SeqnumManager::freeze_key{});
     }
+    assert(seqnum_mgr_.frozen(SeqnumManager::freeze_key{}) ==
+               (logout_seen_ == receipt_marker::reached) &&
+           "104 RR-5 item 4: after close()'s close-out, frozen differs from the marker reached");
 
     // 024 T014 — teardown reset (reset_on_disconnect).
     // Placement: BEFORE write_gate_.cancel_and_drain() (the first drain).
@@ -3101,7 +3129,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout
         }
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
         auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm);
@@ -3147,7 +3175,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
     if (rj_r) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
         // 036 T015: ARM-1 — toAdmin observation before transmit (FR-001/FR-002).
@@ -3198,7 +3226,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
     if (rj_r) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
         // 036 T015: ARM-1 — toAdmin observation before transmit (FR-001/FR-002).
@@ -3733,7 +3761,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_reject_leaf_(
     if (rj_r) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
         // [[feedback_admin_emit_bypasses_fire_to_admin]]: toAdmin before transmit.
@@ -3805,7 +3833,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logout_leaf_(
         }
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
         auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
@@ -3828,7 +3856,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logon_sent_logou
     if (lo_result) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
         // 036 T023: ARM-1 — toAdmin observation before transmit (FR-001/FR-002).
@@ -3853,6 +3881,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logon_sent_logou
 asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_resend_request_leaf_(
     bool tic, seqnum_t begin_seqno, std::string_view sending_time) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
+    // 104 (contract RR-5 item 6, "The leaf entry test"; inbound_logout_leaf_'s pattern, B41
+    // D-OUT-2): this leaf calls toAdmin before its number, and its frame can reach it after a
+    // suspension in which a reset point ran. Once the receipt marker is `reached` it writes
+    // nothing: no toAdmin, no number, no store call, no state write. The condition: nothing
+    // suspends from this test to assign_outbound (the build and fire_to_admin_ are
+    // synchronous, the grant inline), so a leaf past it meets an unfrozen manager. It reads
+    // the marker, not the state and not the manager's flag.
+    if (logout_seen_ == receipt_marker::reached) {
+        co_return fixpp::core::expected_t<void>{};
+    }
     std::array<std::byte, 256> rr_buf{};
     const seqnum_t rr_seq = seqnum_mgr_.peek_outbound();
     auto rr_result = fixpp::session::build_resend_request(
@@ -3867,7 +3905,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_resend_request_l
         }
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
         } else {
             auto emit_r = co_await store_then_emit(rr_seq, *rr_result);
             if (!emit_r) {
@@ -3904,7 +3942,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_heartbeat_reply_
         if (!assign_r) {
             // Overflow or closed: session-fatal per 005 data-model.md's E3.
             // Do NOT emit with unassigned seq — skip and disconnect.
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
         auto emit_r = co_await store_then_emit(hb_seq, *hb_result);
@@ -3958,7 +3996,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_business_reject_
         if (!suppressed) {
             auto assign_r = co_await seqnum_mgr_.assign_outbound();
             if (!assign_r) {
-                record_state_transition_(fsm_state::Disconnected);
+                record_disconnected_unless_already_();
                 co_return std::unexpected(assign_r.error());
             }
             auto emit_r = co_await store_then_emit(bmr_seq, *bmr_r);
@@ -4026,7 +4064,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_acceptor_reply_l
     // Advance outbound counter through manager (RC#A: was ++next_outbound_seq_).
     auto assign_r = co_await seqnum_mgr_.assign_outbound();
     if (!assign_r) {
-        record_state_transition_(fsm_state::Disconnected);
+        record_disconnected_unless_already_();
         co_return std::unexpected(assign_r.error());
     }
     // 019 T014: toAdmin before transmitting the acceptor reply Logon. [FR-008/010]
@@ -5368,7 +5406,8 @@ asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::resend_ga
     if (!r) {
         co_return r;
     }
-    record_state_transition_(fsm_state::Disconnected);
+    // 104 (contract RR-5 item 6): the leaf returns success on Disconnected.
+    record_disconnected_unless_already_();
     co_return fixpp::core::expected_t<void>{};
 }
 
@@ -5453,8 +5492,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_sendin
             co_return r;
         }
     }
-    // Step 3: Disconnect.
-    record_state_transition_(fsm_state::Disconnected);
+    // Step 3: Disconnect. 104 (contract RR-5 item 6, "A frame in flight across a route-B
+    // reset point"): the leaf returns success on Disconnected.
+    record_disconnected_unless_already_();
     co_return fixpp::core::expected_t<void>{};
 }
 
@@ -5890,8 +5930,9 @@ asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::on_inboun
                     co_return r;
                 }
             }
-            // Step 3: Disconnect.
-            record_state_transition_(fsm_state::Disconnected);
+            // Step 3: Disconnect. 104 (contract RR-5 item 6, "A frame in flight across a
+            // route-B reset point"): the leaf returns success on Disconnected.
+            record_disconnected_unless_already_();
             co_return fixpp::core::expected_t<void>{};
         }
         // else: equal or 122 < 52 → validated, fall through.
@@ -6232,7 +6273,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
     }
     // Both Active and LogonReceived → Disconnected.
     // onLogout fires inside record_state_transition_ (INV-7 guard).
-    record_state_transition_(fsm_state::Disconnected);
+    // 104 (contract RR-5 item 6): the best-effort Reject may have skipped a refused number
+    // after a Disconnected edge, so the write is made only when the state is not that.
+    record_disconnected_unless_already_();
     // 104 (contract RR-1; RR-3, its Disconnected and reset-point steps), superseding 024 C3.1's
     // teardown reset for a received Logout: arm A's reset point, reached once the reply was
     // attempted, the event emitted, fromAdmin returned with no throw, reject or late parse
@@ -7808,7 +7851,7 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                     }
                     auto assign_r = co_await seqnum_mgr_.assign_outbound();
                     if (!assign_r) {
-                        record_state_transition_(fsm_state::Disconnected);
+                        record_disconnected_unless_already_();
                         co_return;
                     }
                     auto emit_r = co_await store_then_emit(hb_seq, *hb_result);
@@ -7875,7 +7918,7 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                         // Overflow or closed: session-fatal per 005 data-model.md §E3
                         // (Sequence-number state). Liveness loop is fire-and-forget (no expected_t
                         // return): log by transitioning to Disconnected and stopping the loop.
-                        record_state_transition_(fsm_state::Disconnected);
+                        record_disconnected_unless_already_();
                         co_return;
                     }
                     auto emit_r = co_await store_then_emit(tr_seq, *tr_result);
@@ -8204,7 +8247,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_r
         // (Reset). [QuickFIX setNextTargetMsgSeqNum]
         auto sr = co_await seqnum_mgr_.set_next_inbound(new_seqno);
         if (!sr) {
-            record_state_transition_(fsm_state::Disconnected);
+            // 104 (contract RR-5 item 6): reached after close()'s seqnum_mgr_.drain().
+            record_disconnected_unless_already_();
             co_return std::unexpected(sr.error());
         }
         // If this completes an outstanding resend span, leave recovery.
@@ -8235,7 +8279,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_r
         if (rj_result) {
             auto assign_r = co_await seqnum_mgr_.assign_outbound();
             if (!assign_r) {
-                record_state_transition_(fsm_state::Disconnected);
+                record_disconnected_unless_already_();
                 co_return std::unexpected(assign_r.error());
             }
             // 036 T012: ARM-1 — toAdmin observation before transmit (FR-001/FR-002).

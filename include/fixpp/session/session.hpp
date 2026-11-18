@@ -1777,6 +1777,18 @@ private:
     // The places a frame is handed to the transport read it: `git grep -n
     // wire_closed_by_reset_ -- src include`. Session strand only.
     bool wire_closed_by_reset_ = false;
+    // 104 (contract RR-5 item 6; the B41 rule, `.specify/536-537-538-recovery-liveness.md`
+    // D-OUT-2): Disconnected is recorded only when the state is not Disconnected already, on
+    // every path a refused or drained assign_outbound returns into and on a frame's way out
+    // after a reset point fell in its suspension, because record_state_transition_ appends to
+    // the state history on every call. Re-derive the paths: `git grep -n
+    // 'seqnum_mgr_.assign_outbound()' -- src/session/session.cpp`, each failure branch read, and
+    // each `inbound_logout_leaf_(` caller's write after its success return.
+    void record_disconnected_unless_already_() noexcept {
+        if (fsm_state_ != fsm_state::Disconnected) {
+            record_state_transition_(fsm_state::Disconnected);
+        }
+    }
     // The reset point's two writes, in one statement block (contract RR-6 item 2): the
     // marker's `reached` and wire_closed_by_reset_.
     void mark_reset_point_reached_() noexcept {
