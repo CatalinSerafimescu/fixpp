@@ -572,7 +572,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 
 **Independent test**: U-1 to U-10 GREEN; W8 and the 027 walk cell re-pinned GREEN; the mutants of T076 and T077 RED.
 
-- [ ] T069 [US2] The 141 branch in `on_inbound_logon_sent_` (`src/session/session.cpp`; data-model "LogonSent acknowledgement: the 141 branch").
+- [X] T069 [US2] Done: evidence file, "US2 — T063 to T068 (twenty-second run, continued)", its T069 and T070 section. The 141 branch in `on_inbound_logon_sent_` (`src/session/session.cpp`; data-model "LogonSent acknowledgement: the 141 branch").
   - `peer_ack_sent_reset_flag` is read before Guard (4). `own_logon_sent_reset_flag_` is read there and stays one-shot cleared where it is today.
   - **Unasked** (`true`/`false`): no `check_inbound`; `logon_inbound_advanced_init` = `seq == 1`; unit targets (2, 1) when the acknowledgement's 34 is 1, and (1, 1) otherwise, not consumed (D4, ruling O-2). The unit runs after the mTLS CompID-authorisation gate (N-8).
   - **789.** `honor_peer_next_expected_` is honoured after the reset (D3.2).
@@ -585,7 +585,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
     - U-5: skip `honor_peer_next_expected_` on the unasked branch.
     - U-9: run the unit before the gate.
     - U-10: on the unasked branch, log a persistent store's refusal and continue (024 I-07's volatile disposition).
-- [ ] T070 [US2] D3.3a's end model in `replay_outbound_range_` (`src/session/session.cpp`; data-model "`replay_outbound_range_`: the end model").
+- [X] T070 [US2] Done: evidence file, "US2 — T063 to T068 (twenty-second run, continued)", its T069 and T070 section. D3.3a's end model in `replay_outbound_range_` (`src/session/session.cpp`; data-model "`replay_outbound_range_`: the end model").
   - Inside the walk, after the gate's shared-hold wait and the store tail read, `end_is_through_current` becomes `end_is_through_current || requested_end >= next`. `next` is the tail read's next outbound number, or `peek_outbound()` when there is no store.
   - The callers are unchanged.
   - The end-model comment names 104 and supersedes 027 C3's explicit-end case by name. It keeps the formula and gives no example values.
