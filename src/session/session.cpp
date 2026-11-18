@@ -6791,6 +6791,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
         }
     }
 
+    // 104 (FR-009, FR-010; research D3 and D4, ruling O-2; data-model "LogonSent
+    // acknowledgement: the 141 branch"): the acknowledgement's 141=Y and fixpp's own latch
+    // are read before the sequence check. An acknowledgement with 141=Y that fixpp's Logon
+    // did not ask for (the latch clear) is a reset, compared with 1 and not with NextNumIn:
+    // it takes no check_inbound, it is consumed only at 34=1, and its unit runs after the
+    // mTLS gate below. An asked one, and one without 141=Y, take the sequence check as before.
+    // peer_ack_sent_reset_flag is at case scope for the persist guard below (029 INV-H1).
+    const bool peer_ack_sent_reset_flag = (hdr.reset_seqnum_flag == "Y");
+    const bool own_logon_sent_reset_flag = own_logon_sent_reset_flag_;
+    const bool unasked_reset_ack = peer_ack_sent_reset_flag && !own_logon_sent_reset_flag;
+
     // ── Guard (4): seqnum check (T035 LogonSent row) ─────────────────
     const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
     if (seq == 0) {
@@ -6799,13 +6810,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     }
 
     // 029 gate-b/r1: hoisted to LogonSent case scope so the persist guard
-    // below can read them. Symmetric carried-bool approach (same as acceptor).
+    // below can read it. Symmetric carried-bool approach (same as acceptor).
     // [029 INV-H1 fix; triage root-cause #1/#2; contracts C3.1]
     bool logon_inbound_advanced_init = false;
-    bool peer_ack_sent_reset_flag = false;
 
-    auto chk = co_await seqnum_mgr_.check_inbound(seq);
-    if (!chk) {
+    if (unasked_reset_ack) {
+        // 104: consumed only when the acknowledgement is at 34=1 (ruling O-2).
+        logon_inbound_advanced_init = seq == seqnum_min;
+    } else if (auto chk = co_await seqnum_mgr_.check_inbound(seq); !chk) {
         // 027 T016 — behind-side tolerance (formulation A, I-NEX-5/D-7):
         // When the knob is on AND the failure is too-high (NOT too-low),
         // do NOT take the fatal branch. Leave next_inbound_ at X. Emit no
@@ -6858,21 +6870,19 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     // We sent 141=Y in our outbound Logon (see open() above). If the peer's
     // Logon-ack omits 141=Y, reject with session_seqnum_reset_mismatch(116).
     // [spec.md FR-017; triage RC#C(b); [[feedback_half_restructure_symmetric_api]]]
-    // peer_ack_sent_reset_flag: hoisted to case scope for the persist guard.
-    // [029 gate-b/r1; INV-H1 fix; triage root-cause #1]
-    peer_ack_sent_reset_flag = (hdr.reset_seqnum_flag == "Y");
+    // peer_ack_sent_reset_flag is read above, before Guard (4) (104).
     {
         if (!peer_ack_sent_reset_flag &&
             cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) {
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(fixpp::core::error::session_seqnum_reset_mismatch);
         }
-        if (peer_ack_sent_reset_flag) {
-            // 032 T010(a): snapshot + one-shot clear the latch BEFORE the first
-            // co_await. All logic below uses the local (independent of
-            // reset/persist success — RC1 unconditional-assign invariant).
-            // [032 contract C4, data-model, RC1]
-            const bool own_logon_sent_reset_flag = own_logon_sent_reset_flag_;
+        // 104: the asked acknowledgement's unit, unchanged; the unasked one's follows the
+        // mTLS gate below.
+        if (peer_ack_sent_reset_flag && !unasked_reset_ack) {
+            // 032 T010(a): one-shot clear the latch, snapshotted above before Guard (4).
+            // All logic below uses the local (independent of reset/persist success — RC1
+            // unconditional-assign invariant). [032 contract C4, data-model, RC1]
             own_logon_sent_reset_flag_ = false;
             // 032 T010(b): capture pre-reset outbound BEFORE reset_seqnums_to_one_durable.
             // reset_before_send := (n_pre_outbound == seqnum_min+1) means fixpp's own
@@ -6934,6 +6944,30 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     if (!logon_sent_identity_admitted_()) {
         record_state_transition_(fsm_state::Disconnected);
         co_return fixpp::core::expected_t<void>{};
+    }
+
+    // 104 (clarification N-8; contract U1, U2, U4m, U7): the unasked acknowledgement's unit,
+    // after the mTLS gate, so a refused identity makes no reset. Its targets are next-in 2
+    // when the acknowledgement was consumed, else 1, and next-out 1: 032 C1's next-out 2 needs
+    // the latch, which is clear here. The dispositions and the superseded test
+    // are the asked unit's (093 contract C-6 steps 5 to 7); the 789 honour below compares the
+    // peer's 789 with the number after the reset (research D3.2).
+    if (unasked_reset_ack) {
+        const seqnum_t unit_in = logon_inbound_advanced_init ? seqnum_min + 1 : seqnum_min;
+        auto const unit = co_await run_reset_unit_(unit_in, seqnum_min);
+        co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
+        if (!unit.manager) {
+            disconnect_unless_superseded_(fsm_state::LogonSent);
+            co_return std::unexpected(unit.manager.error());
+        }
+        if (!unit.store && store_is_persistent_) {
+            disconnect_unless_superseded_(fsm_state::LogonSent);
+            co_return std::unexpected(unit.store.error());
+        }
+        if (logon_arm_superseded_(fsm_state::LogonSent)) {
+            co_return fixpp::core::expected_t<void>{};
+        }
+        emit_event(fixpp::session::session_event_sequence_numbers_reset{.by_peer_request = true});
     }
 
     // T-041 CLOSED (015 US4): the acceptor guard above now binds the live
