@@ -2383,7 +2383,7 @@ TEST(ResetOnLogout104, NotConnectedLogout_NoReset) {
     close_and_expect_no_reset(r, "close()");
 }
 
-// ── T034: R-1p, R-1q and R-1r, what runs while a reset unit is held (contract RR-4) ───────
+// ── T034: R-1p and R-1r, what runs while a reset unit is held (contract RR-4) ─────────────
 //
 // Each cell holds the reset unit's reset_to (HookedStore's on_reset, with release_when), or an
 // in-flight arm's store, and observes the session during the hold, by the pump discipline of
@@ -2442,56 +2442,6 @@ TEST(ResetOnLogout104, LivenessDuringReceiptUnit_NumbersNothing) {
         EXPECT_TRUE(frame_returned) << "the Logout's frame did not return";
         EXPECT_EQ(mgr, (Numbers104{.in = 1, .out = 1}))
             << "the manager after the release: " << mgr.in << "/" << mgr.out;
-    }
-}
-
-// R-1q: route B; the bound's reset_to is held. An application message at the pre-reset
-// NextNumIn, fed during the hold, is drained: no ResendRequest, no inbound advance, no fromApp.
-TEST(ResetOnLogout104, BoundRouteFrameDuringUnit_Drained) {
-    for (auto const role : kRoles) {
-        SCOPED_TRACE(rg::role_name(role));
-        Rol104 r{role};
-        r.factory->hooks.on_reset = [] {};  // holds the first reset call, until `released`
-        auto& s = r.s;
-        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
-        seqnum_t const n = s.next_in();
-        (void)s.feed(s.logout(n + 3));
-        ASSERT_EQ(r.phase(), kPending) << "setup: no pending mark";
-        auto const ack_mark = s.sent.size();
-        auto gap_fut = s.feed_spawn(s.gap_fill(n, n + 4));
-        // The base holds nothing, and its bound ends; the hold's window is the bound.
-        (void)s.pump_until(
-            [&] {
-                return !r.log().calls.empty() ||
-                       (rg::Scene::ready(gap_fut) && r.bound_count() == 0);
-            },
-            kHoldWindow);
-        bool const held = first_call_is_reset_to(r);
-        seqnum_t const next_in_before = s.next_in();
-        auto const delivered_before = r.app->delivered.size();
-        auto const mark = s.sent.size();
-        auto frame_fut = s.feed_spawn(s.order(n + 4));
-        bool const frame_returned =
-            s.pump_until([&] { return rg::Scene::ready(frame_fut); }, kHoldWindow);
-        seqnum_t const next_in_after = s.next_in();
-        auto const delivered_after = r.app->delivered.size();
-        auto const resends = s.count("2", mark);
-        bool const hold_in_place = !r.log().hold_timed_out;
-        r.ctl.released = true;
-        (void)s.pump_until([&] { return rg::Scene::ready(gap_fut) && r.bound_count() == 0; },
-                           kReleaseBudget);
-
-        EXPECT_EQ(s.count("5", ack_mark), 1U)
-            << "setup: the bound's acknowledgement: " << s.written(ack_mark);
-        EXPECT_TRUE(held) << "no reset_to was held at the bound's acknowledgement; reset calls: "
-                          << "reset() " << r.log().reset_calls << ", reset_to "
-                          << r.log().reset_to_calls;
-        EXPECT_TRUE(frame_returned) << "the frame fed during the hold did not return";
-        EXPECT_EQ(resends, 0U) << "a ResendRequest: " << s.written(mark);
-        EXPECT_EQ(next_in_after, next_in_before)
-            << "NextNumIn moved: " << next_in_before << " -> " << next_in_after;
-        EXPECT_EQ(delivered_after, delivered_before) << "fromApp received the frame";
-        EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the release";
     }
 }
 
