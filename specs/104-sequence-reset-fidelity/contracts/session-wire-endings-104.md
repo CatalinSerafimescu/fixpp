@@ -379,7 +379,7 @@ accepts only the reset writers. RR-1 to RR-4, RU-1, RU-3 and construction A are 
      - The manager calls grant inline (research R1; T008's record). So the marker's move, the manager set and the
        freeze are one strand turn, and no other coroutine runs between them (RR-2 item 3).
      - A Logon arm's 141=Y unit runs with the marker not `reached`, and arms nothing.
-     - Two Debug asserts in `run_reset_unit_` check that the manager is not frozen: one at its entry, and one after
+     - Debug asserts in `run_reset_unit_` check that the manager is not frozen: one at its entry, and one after
        its manager set, immediately before its freeze (the post-set assert). The entry assert pins that a unit never
        runs on a frozen manager: a pump frame that finds `reached` runs none (RR-2 item 5), and the bound finds
        `none`. The post-set assert pins the order, so a freeze moved ahead of any of the three manager calls fires
@@ -392,10 +392,14 @@ accepts only the reset writers. RR-1 to RR-4, RU-1, RU-3 and construction A are 
      a frozen manager: the acceptor's arm by INV-F and INV-P, and `emit_initiator_logon_` because its only
      suspension before the reset is `ensure_hydrated_`'s store reads, after which `hydrate` refuses on a frozen
      manager and the emit returns. So under rod the teardown resets after a receipt as it does today (W7, R-2).
-   - **The interface.** `SeqnumManager` gains one private flag, and two members that set and clear it, `freeze` and
-     `thaw`. Each takes a passkey, `SeqnumManager::freeze_key`, which only `Session` can construct (its constructor
-     is private, with `Session` its friend). No other caller can freeze or thaw a manager, and no other public name
-     is added. The six refused mutators read the flag; nothing else does. The layout change is B-104-7's.
+   - **The interface.** `SeqnumManager` gains one private flag; two members that set and clear it, `freeze` and
+     `thaw`; and one that reads it, `frozen`, for this item's Debug asserts. Each takes a passkey,
+     `SeqnumManager::freeze_key`, which only `Session` can construct (its constructor is private, with `Session` its
+     friend). No other caller can freeze, thaw or query a manager. The three are public names that a C++ consumer
+     cannot call, because it cannot construct the key. No other public name is added. The six refused mutators
+     read the flag to refuse. `frozen` reads it only for the Debug asserts, and no production branch tests it: a
+     branch on it would be a refusal per call site (research D11, (Y)). The layout change is B-104-7's. `frozen` is
+     an inline member function and adds no data member.
    - **Debug assert.** After each of the three sites in item 1, the manager is frozen if and only if the marker is
      `reached`.
 5. **The refused returns (sub-ruling 2).** A refused call changes neither counter. Each return was chosen from its

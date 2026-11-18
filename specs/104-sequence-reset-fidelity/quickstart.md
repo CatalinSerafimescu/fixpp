@@ -67,7 +67,10 @@ comments.
   For each `assign_outbound` caller, read whether `fire_to_admin_` precedes it and, if so, that no suspension
   falls between its last state test (or its frame's entry turn) and its number. Read phase 1 after a receipt
   reset (contract O22), including the inline start of `operator||`'s branch at the pinned asio
-  (`grep -n co_spawn_dispatch <asio>/impl/co_spawn.hpp`). A reading that contradicts RR-5 stops implementation.
+  (`grep -n co_spawn_dispatch <asio>/impl/co_spawn.hpp`). A reading that contradicts RR-5 or research D11 stops
+  implementation (T014). The direct-`open()` overlap of RR-5 item 5's `hydrate` row is accepted, not a stop: record
+  it as read, and stop only if its refused `hydrate` does not end through `disconnect_unless_superseded_` with
+  `open()` returning the error.
 
 ## 2. RED on the base, then GREEN, then the mutant
 

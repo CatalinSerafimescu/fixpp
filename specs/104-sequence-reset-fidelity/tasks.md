@@ -125,8 +125,11 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - **The refused returns.** Read each caller's handling against RR-5 item 5's table, and record any difference.
   - **No `toAdmin` for a refused number.** For each `assign_outbound` hit, record whether a `fire_to_admin_`, or a `toApp` dispatch (`inbound_business_reject_leaf_`, `send_impl`), precedes it in its function. For each that does, take the per-site reading in research D11 ("No `toAdmin` for a refused number"). Then read, per emitter, that its `assign_outbound`, its `fire_to_admin_` and `store_then_emit`'s boundary run with no suspension between them (the take-back reading in RR-5 item 7).
   - **INV-F.** Run the exits recipe and read each hit.
-  - **The allowed writers.** `reset_to_one`'s callers are exactly the two reset writers.
-  - **`hydrate`.** Read `ensure_hydrated_`'s callers, and `drive_reconnect`'s order (`install_reconnected_transport` before `emit_initiator_logon_`).
+  - **The allowed writers.** `reset_to_one`'s callers are exactly the two reset writers. For `reset_seqnums_to_one_durable`'s Logon callers, read RR-5 item 4's reason that neither meets a frozen manager: the acceptor's arm by INV-F and INV-P; and in `emit_initiator_logon_`, no suspension before that call's `reset_to_one` other than `ensure_hydrated_`'s store reads. Read the path from `open()`'s `LogonSent` write, and from `install_reconnected_transport` through `drive_reconnect_attempt`'s return, to the emit.
+  - **`hydrate`.** Read `ensure_hydrated_`'s callers.
+    - Read the one input on which `hydrate` meets a frozen manager (contract RR-5 item 5, its `hydrate` row): a direct initiator's `open()` emit whose `ensure_hydrated_` is suspended in a store read while a concurrent `on_inbound_frame` reaches arm S.
+    - Record that the refused `hydrate` goes to `disconnect_unless_superseded_` with `arm` empty, whose write is made only when the state is not `Disconnected` already, and that `open()` returns the error.
+    - Record why `drive_reconnect`'s emit has no such input. The thaw-before-emit order alone does not exclude a freeze during the emit's store reads. The reasons are `drive_reconnect`'s standalone-initiator precondition in `include/fixpp/session/session.hpp` (the caller's reader starts on the new `live_transport()` only after the call returns) and, under the Engine, the read pump starting after `drive_reconnect` returns.
   - **Phase 1 (contract O22).** Read:
     - `close()`'s phase-1 test;
     - the gate loop's `gate_refused` exit;
@@ -134,14 +137,16 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
     - the inline start of `operator||`'s branch: `co_spawn_dispatch` at the pinned asio.
   - **The conditional writes.** For each `assign_outbound` failure branch, and `apply_inbound_sequence_reset`'s `set_next_inbound` failure branch, and for the writes its frame makes on its way to the pump, record each `Disconnected` write that T050 makes conditional (RR-5 item 6).
   - **State-history readers.** Read `git grep -n -e fsm_visit_history -e fsm_visit_count -- tests`, and record each assertion a conditional write could change. Each one found is a census kept hit, re-pinned at T050.
-- [ ] T014 **(orchestrator)** STOP gate for RR-5's readings. Implementation stops, and the reading goes to the orchestrator, if T013 found any of these:
+- [ ] T014 **(orchestrator)** STOP gate for RR-5's readings. Implementation stops, and the reading goes to the orchestrator, if a T013 reading contradicts contract RR-5 or research D11. In particular, it stops if T013 found any of these:
   - a counter write outside the seven bodies;
+  - an exit from `Disconnected` other than `install_reconnected_transport` after its thaw and `open()`, or a `LogoutSent` write without its "already Disconnected" test (INV-F);
+  - a caller of `reset_to_one` other than the two reset writers, or a Logon caller of `reset_seqnums_to_one_durable` that can meet a frozen manager (RR-5 item 4; T013's "allowed writers");
   - a callback-first emitter (`toAdmin` or `toApp` before its number) reachable while frozen;
   - a caller whose handling does not meet RR-5 item 5's table;
-  - a reachable `hydrate`;
+  - a `hydrate` that meets a frozen manager on any input other than RR-5 item 5's direct-`open()` overlap; or that overlap's refused `hydrate` not ending through `disconnect_unless_superseded_`, with `open()` returning the error;
   - a turn between `close()`'s phase-1 test and phase 1's number.
 
-  Otherwise record the pass.
+  The direct-`open()` overlap itself is accepted by RR-5 item 5. It is not a STOP finding, and T013 records it as read. Otherwise record the pass.
 - [ ] T015 HookedStore's per-call record in `tests/support/hooked_store.hpp` (research D10, "One test-support addition"). Today `on_reset` fires for both `reset()` and `reset_to` under `reset_to_mode::forward`, so a hook cannot tell the unit from the teardown.
   - Add an issue-time, per-call record beside `StoreLog::writes` (research D10, "One test-support addition", its delta). `StoreLog::writes` is a completion log with no session state. The new record is appended at each `reset` or `reset_to` call's entry, before any hook, hold or forward, in every `reset_to_mode`. Each entry carries which call fired, `reset_to`'s targets, and the state and transport-open readings from a snapshot callable the cell sets (the shape of `StoreLog::close_began`). A count of each kind goes with it.
   - A cell reads the new record for a reading at the call or a count by kind, and `StoreLog::writes` for an order against `close()` or stop and for the final counters. R-2 needs two readings at the call, so it reads two entries of the new record: `on_reset` is one-shot.
@@ -336,7 +341,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - Each boundary is one byte test.
   - Mutants, run at T060: R-1r's two (delete the test in `store_then_emit`; delete it in `persist_inbound_advance_`), R-1l(3) (drop the `persist_inbound_advance_` test) and R-1h (no `none` at `install_reconnected_transport`).
 - [ ] T049 [US1] The manager freeze, in `include/fixpp/session/seqnum_manager.hpp` and `src/session/seqnum_manager.cpp` (contract RR-5 items 3 to 5; data-model "`SeqnumManager`: the freeze"; research D11).
-  - **The interface.** The private flag. `SeqnumManager::freeze_key`, whose constructor is private, with `Session` its friend. `freeze(freeze_key)` and `thaw(freeze_key)`.
+  - **The interface.** The private flag. `SeqnumManager::freeze_key`, whose constructor is private, with `Session` its friend. `freeze(freeze_key)` and `thaw(freeze_key)`, and the query `[[nodiscard]] bool frozen(freeze_key) const noexcept`, which `Session`'s Debug asserts call (T050) and no production branch tests. `frozen` is inline and `noexcept`, and takes no lock.
   - **The freeze test**, in each refused mutator:
     - `check_inbound`, `assign_outbound` and `hydrate`: after the lock grant and before any counter read or write, return `session_already_closed`;
     - `set_next_inbound` and `set_next_outbound`: return success with no write;
@@ -349,11 +354,11 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - **Existing users.** Run the entries of `git grep -l SeqnumManager -- tests`, by the Execution rules' selection form. They stay GREEN: nothing sets the flag outside 104's sites.
 - [ ] T050 [US1] The freeze's sites, in `src/session/session.cpp` (contract RR-5 items 1, 4 and 6).
   - **`run_reset_unit_`.**
-    - Two Debug asserts that the manager is not frozen: at its entry, and after its manager set, immediately before the freeze (the post-set assert).
+    - Debug asserts that the manager is not frozen, each read through `frozen(freeze_key)` (T049): at its entry, and after its manager set, immediately before the freeze (the post-set assert).
     - The freeze, when the marker is `reached`: after its manager set, whatever that set returned, and before `reset_unit_in_flight_` and its store call, or before its return when there is no store.
   - **`close()`'s close-out.** Freeze, with the marker's `reached`.
   - **`install_reconnected_transport`.** Thaw, with the marker's `none`, before `LogonSent`.
-  - **A Debug assert after each site:** the manager is frozen if and only if the marker is `reached`.
+  - **A Debug assert after each site**, read through `frozen(freeze_key)` (T049): the manager is frozen if and only if the marker is `reached`.
   - **The conditional `Disconnected` writes** that T013 recorded (RR-5 item 6), `apply_inbound_sequence_reset`'s `set_next_inbound` failure branch included (reached after `close()`'s `seqnum_mgr_.drain()`). Each takes the B41 rule's state test, and its comment names RR-5 item 6 and D-OUT-2 and states the condition.
   - **Re-pins.** Re-pin each state-history assertion that T013 recorded. Run its entry by the Execution rules' selection form.
 - [ ] T051 [US1] The remaining comments that state the old rule (FR-006, research D8 "Code comments"). Each names 104 and states a condition and a recipe:
@@ -404,7 +409,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - drop the close-out's freeze: R-5e;
   - drop the thaw at `install_reconnected_transport`: R-1h. The reconnect Logon's number is refused, so the numbers do not advance;
   - restore the unconditional `Disconnected` write in the `assign_outbound` failure branch of the `emit_session_reject_` overload that `dispose_unparseable_` reaches (the one taking a reason, a RefTagID and a text): R-5c's one-entry assertion;
-  - arm the freeze anywhere ahead of the post-set assert (at `run_reset_unit_`'s entry, or between two of its manager calls): the post-set assert, read by its own message in the Debug build only, in the unfiltered run of a binary holding a cell whose arm reaches a receipt unit (R-2 or R-1x). In an asserts-off build the receipt unit's targets equal `reset_to_one`'s, so the reorder is an equivalent mutant there. Record that, and claim no assertion for it (research D11, "Not relied on").
+  - arm the freeze anywhere ahead of the post-set assert (after the entry assert and before `reset_to_one`, or between two of its manager calls): the post-set assert, read by its own message in the Debug build only, in the unfiltered run of a binary holding a cell whose arm reaches a receipt unit (R-2 or R-1x). In an asserts-off build the receipt unit's targets equal `reset_to_one`'s, so the reorder is an equivalent mutant there. Record that, and claim no assertion for it (research D11, "Not relied on").
 - [ ] T062 [US1] Mutant for T035 and R-1t (protocol). Move step 4's `close(terminal)` loop in `Engine::stop()` to between step 2's close join and the step-3 mark, ahead of step 3's join. R-1t must go RED at its order assertion, as an assertion failure and not an abort. Deleting the join is not this mutant (INV-6).
 
 **Checkpoint**: US1 GREEN; every US1 mutant RED; the MVP validation point.

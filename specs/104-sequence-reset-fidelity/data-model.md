@@ -86,7 +86,7 @@ call of `reset_unit_wake_` (below). It gains callers:
 
 `run_reset_unit_` also arms the manager freeze (contract RR-5 item 4): when the marker is `reached`, after its
 manager set, whatever that set returned, and before `reset_unit_in_flight_` and its store call (or its return, with
-no store). A Logon arm's unit runs with the marker not `reached` and arms nothing. Two Debug asserts check that
+no store). A Logon arm's unit runs with the marker not `reached` and arms nothing. Debug asserts check that
 the manager is not frozen: one at its entry, and one after its manager set, immediately before the freeze (contract
 RR-5 item 4).
 
@@ -94,9 +94,10 @@ RR-5 item 4).
 
 | Member | Kind | Contract |
 |---|---|---|
-| the freeze flag (one private `bool`) | new, private | set while the session's receipt marker is `reached`; read by the six refused mutators only |
+| the freeze flag (one private `bool`) | new, private | set while the session's receipt marker is `reached`; read by the six refused mutators, and by `frozen(freeze_key)` for `Session`'s Debug asserts only |
 | `SeqnumManager::freeze_key` | new, a passkey type | its constructor is private, with `Session` its friend, so no other caller can construct one |
 | `freeze(freeze_key)`, `thaw(freeze_key)` | new | set and clear the flag; no lock (strand-confined, as `take_back_outbound` and `peek_outbound` are) |
+| `[[nodiscard]] bool frozen(freeze_key) const noexcept` | new | reads the flag; called only by `Session`'s Debug asserts (contract RR-5 item 4), never by a production branch; inline, no lock, no data member |
 | `check_inbound`, `assign_outbound`, `hydrate` | changed | while frozen: `unexpected(session_already_closed)`, counters unchanged; the test sits after the lock grant, before any read or write of a counter |
 | `set_next_inbound`, `set_next_outbound` | changed | while frozen: success, with no write |
 | `take_back_outbound` (inline, in the header) | changed | while frozen: a no-op |
@@ -264,11 +265,14 @@ New rows:
   source pins either size: `git grep -nE 'sizeof ?\([^)]*\b(Engine|Session)\b' -- tests include src` has no hit at
   the base, and the same pattern with `FieldRef` in place of the two names hits (its known positive); the full
   `-k 0` build is the check that nothing else depends on it. In `include/fixpp/session/seqnum_manager.hpp`
-  (since the T011 amendment, 104 contract RR-5), `SeqnumManager` gains a private freeze flag and the passkey-gated
-  `freeze` / `thaw` with their `freeze_key` type, and `take_back_outbound`'s inline body gains the flag's test. So
+  (since the T011 amendment, 104 contract RR-5), `SeqnumManager` gains a private freeze flag, the passkey-gated
+  `freeze` / `thaw` with their `freeze_key` type, and the passkey-gated query `frozen`, and `take_back_outbound`'s
+  inline body gains the flag's test. `frozen` is an inline member function and adds no data member, so only the
+  flag can move `sizeof(SeqnumManager)`. So
   `sizeof(SeqnumManager)` may change, and `sizeof(Session)` with it, since `Session` holds the manager by value. The
   direction of each is written from phase 7's size reading, never from this text. No public function's signature
-  changes, and `freeze` and `thaw` cannot be called outside `Session` (their key cannot be constructed there). No
+  changes, and `freeze`, `thaw` and `frozen` cannot be called outside `Session` (their key cannot be constructed
+  there). No
   test or source pins `sizeof(SeqnumManager)`: `git grep -nE 'sizeof ?\([^)]*SeqnumManager' -- tests include src`
   has no hit at the base. The C ABI does not expose `SeqnumManager`.
 - **B-104-8** — with `reset_on_logout`, from a received Logout's reset point, or from `close()`'s close-out of a

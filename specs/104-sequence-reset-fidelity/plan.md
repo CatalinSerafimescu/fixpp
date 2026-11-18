@@ -326,9 +326,9 @@ result and every RED/GREEN/mutant record, never code comments.
    - RR-4's boundaries in `store_then_emit` and `persist_inbound_advance_`; the clear at
      `install_reconnected_transport`.
    - RR-5's manager freeze (research D11): in `include/fixpp/session/seqnum_manager.hpp` and
-     `src/session/seqnum_manager.cpp`, the flag, the passkey-gated `freeze` / `thaw` and the test in the six refused
+     `src/session/seqnum_manager.cpp`, the flag, the passkey-gated `freeze` / `thaw` and query `frozen`, and the test in the six refused
      mutators; in `src/session/session.cpp`, the freeze in `run_reset_unit_` and at the close-out, the thaw at
-     `install_reconnected_transport`, the two Debug asserts, and the conditional `Disconnected` writes on the paths
+     `install_reconnected_transport`, T050's Debug asserts, and the conditional `Disconnected` writes on the paths
      a refused `assign_outbound` returns into (RR-5 item 6). Cells R-5a to R-5e, the first three and R-5e written RED
      with the other US1 cells, and R-5d with the mechanism.
    - The comments that state the old rule, each naming 104 (FR-006): the member, the teardown block's
@@ -422,6 +422,7 @@ result and every RED/GREEN/mutant record, never code comments.
 - /speckit-analyze 2026-11-18: 26 findings (1 escalated, 3 HIGH); all applied. F1 corrects three base readings in research D10 in place (RED on base: the base ends before the identity gate); no design change, so no Gate A round (orchestrator ruling). D1 ruled HIGH (the owner's standing grant discharges §XVII.7's approval; T001 records it). B3: gate-b-done, per 103's T163 precedent.
 - Implementation STOP at T011, 2026-11-18: in-flight manager writers after the reset point. Fable consult 104-post-reset-inflight-manager-writers (probable). Owner ruled construction (Z), manager freeze; orchestrator sub-rulings: freeze on any reached marker, refused return per mutator, reset-writer mechanism. Narrow Gate A loop 4 follows.
 - Loop 4 round 1 applied 2026-11-18: Codex P1=0 P2=1 P3=0; Opus post-judging P1=0 P2=2 P3=5; rewrite adds the post-set Debug assert (C-1) and narrows FR-019/B-104-8 (N-1); P3s applied. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_8_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_8_adversarial_review.md.
+- Loop 4 round 2 applied 2026-11-18: Codex P1=1 P2=1 P3=0; Opus post-judging P1=1 P2=2 P3=1; rewrite replaces T014 (C-1, N-1), adds the passkey-gated frozen(freeze_key) query (C-2), fixes T061's row (N-2). Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_9_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_9_adversarial_review.md.
 
 ### Round 1 — disagreements
 
@@ -538,3 +539,17 @@ result and every RED/GREEN/mutant record, never code comments.
   Codex's first option was taken instead: the post-set Debug assert in `run_reset_unit_` (contract RR-5 item 4;
   T050), read by its own message in the Debug build under T061's reorder mutant. In an asserts-off build the
   reorder is an equivalent mutant, recorded as such and claimed by no assertion (research D11, "Not relied on").
+
+### Loop 4 round 2 — disagreements
+
+- **C-2's alternatives (confirmed P2, judged).** `Session`'s Debug asserts need to read the manager's private flag.
+  The judge took a passkey-gated `[[nodiscard]] bool frozen(freeze_key) const noexcept`, inline, with no lock, that
+  no production branch tests (contract RR-5 item 4; T049). Three alternatives were rejected, for the judge's reasons:
+  - **A Debug-only accessor (`#ifndef NDEBUG`).** `seqnum_manager.hpp` is installed, and its fixpp#511 comment states
+    that a member gated behind a macro makes a TU's `SeqnumManager` a different class from the library's, an ODR
+    violation (ill-formed, no diagnostic required). A consumer may set `NDEBUG` differently from the library
+    (research D11).
+  - **`freeze` returning the previous state.** It cannot express the entry assert or the "iff" asserts, and under
+    T061's reorder mutant the check would move with the freeze, so the mutant would go undetected.
+  - **`friend class Session`.** Research D11's own rejected alternative: it gives `Session` the counters too, so
+    INV-Z would rest on reading `session.cpp`.

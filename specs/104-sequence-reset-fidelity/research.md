@@ -782,7 +782,8 @@ or the disposition, not by editing the view alone. In summary:
   setter, B-093-4). The TOML key and default are unchanged.
 - No `Session` member is added or renamed; one private `Engine` member is added, R-1t's step-3 mark (B-104-7).
   `SeqnumManager`, which `Session` holds by value (`seqnum_mgr_`), gains one private flag and the passkey-gated
-  `freeze` / `thaw` (contract RR-5 item 4), so `sizeof(SeqnumManager)` may grow, and with it `Session`. No test pins
+  `freeze` / `thaw` and query `frozen` (contract RR-5 item 4), so `sizeof(SeqnumManager)` may grow, and with it
+  `Session`. No test pins
   `sizeof(SeqnumManager)`: `git grep -nE 'sizeof ?\([^)]*SeqnumManager' -- tests include src` has no hit at the base
   (B-104-7; T092 reads the size).
   `logout_seen_` changes from `bool` to a one-byte enum, and `reset_unit_wake_` is deleted (data-model). No test pins `sizeof(Session)`: `git grep -n "sizeof(Session)\|sizeof(fixpp::session::Session)" tests include src` has no
@@ -1046,8 +1047,9 @@ writers are fixpp's own concurrent emitters, which QuickFIX's synchronous send p
     Logon paths, never run on a frozen manager: the acceptor's arm by INV-F and INV-P, and `emit_initiator_logon_`
     because its only suspension before the reset is `ensure_hydrated_`'s store reads, after which `hydrate` refuses
     on a frozen manager and the emit returns (contract RR-5 item 4).
-  - `Session` sets and clears the flag through a passkey that only it can construct.
-  - Three Debug asserts guard the order: the manager is not frozen at `run_reset_unit_`'s entry, nor after its
+  - `Session` sets and clears the flag, and reads it for its Debug asserts, through a passkey that only it can
+    construct.
+  - Debug asserts guard the order: the manager is not frozen at `run_reset_unit_`'s entry, nor after its
     manager set immediately before its freeze; and the manager is frozen if and only if the marker is `reached`
     after each of the three sites.
 - **Not relied on: a value coincidence.** The receipt unit's targets are `(1, 1)`, and `reset_to_one` already sets
@@ -1060,8 +1062,10 @@ writers are fixpp's own concurrent emitters, which QuickFIX's synchronous send p
     the unit's three calls. It is larger, and it changes 093's unit body (093 contract C-6 step 3).
   - `friend class Session`, with `Session` writing the flag directly. It is one line smaller, but it gives
     `Session` the counters too, so INV-Z would rest on reading `session.cpp`. The passkey limits `Session` to
-    freezing and thawing.
+    freezing, thawing and reading the flag.
   - Freezing on the session state rather than the marker: (Y)'s defect above.
+  - A Debug-only accessor (`#ifndef NDEBUG`): rejected. `seqnum_manager.hpp` is installed, and its fixpp#511
+    comment states that a macro-gated member makes the class differ between TUs, an ODR violation.
 - **`hydrate` while frozen: reachable only by a direct caller's overlap with `open()`'s emit (above).**
   - `ensure_hydrated_`'s callers are `emit_initiator_logon_` and `on_inbound_not_connected_`: re-derive with
     `git grep -n 'ensure_hydrated_(' -- src`.
