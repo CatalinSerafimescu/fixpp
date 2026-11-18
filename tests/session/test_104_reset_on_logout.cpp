@@ -35,6 +35,7 @@
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -49,6 +50,7 @@
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <fixpp/wire/offset_table.hpp>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -65,6 +67,7 @@
 #include "session/resend_gap_scene.hpp"
 #include "support/blocking_write_transport.hpp"
 #include "support/hooked_store.hpp"
+#include "support/seqnum_manager_test_access.hpp"
 #include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 #include "support/store_double.hpp"
@@ -459,7 +462,77 @@ public:
     }
 };
 
-enum class store_kind : std::uint8_t { hooked, memory, store_double };
+// tasks.md T028's store double: a HookedStore behind a store whose next armed outbound
+// store() is refused without reaching the HookedStore, with store_cancelled or with
+// store_io_failure. Every other call, the reset calls and the flush included, goes to the
+// HookedStore, so its per-call record and its log read as for a HookedStore.
+enum class refuse_mode : std::uint8_t { none, cancelled, io_failure };
+class RefusingStore104 final : public fixpp::session::MessageStore {
+public:
+    RefusingStore104(std::unique_ptr<HookedStore> inner, refuse_mode* next) noexcept
+        : fixpp::session::MessageStore(flush_thunk_for<RefusingStore104>()),
+          inner_{std::move(inner)},
+          next_{next} {}
+    asio::awaitable<fixpp::core::expected_t<void>> store(seqnum_t seq,
+                                                         std::span<const std::byte> frame,
+                                                         direction_t dir) noexcept override {
+        if (dir == direction_t::outbound && *next_ != refuse_mode::none) {
+            auto const m = *next_;
+            *next_ = refuse_mode::none;
+            return refused(m);
+        }
+        return inner_->store(seq, frame, dir);
+    }
+    asio::awaitable<fixpp::core::expected_t<void>> retrieve(
+        seqnum_t begin, seqnum_t end, direction_t dir,
+        fixpp::session::retrieve_visitor& visitor) noexcept override {
+        return inner_->retrieve(begin, end, dir, visitor);
+    }
+    asio::awaitable<fixpp::core::expected_t<seqnum_t>> next_seqnum(
+        direction_t dir, bool increment) noexcept override {
+        return inner_->next_seqnum(dir, increment);
+    }
+    asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
+        return inner_->reset();
+    }
+    asio::awaitable<fixpp::core::expected_t<void>> reset_to(seqnum_t next_in,
+                                                            seqnum_t next_out) noexcept override {
+        return inner_->reset_to(next_in, next_out);
+    }
+    asio::awaitable<fixpp::core::expected_t<void>> flush_for_session_close() {
+        return inner_->flush_for_session_close();
+    }
+
+private:
+    static asio::awaitable<fixpp::core::expected_t<void>> refused(refuse_mode const m) {
+        co_return std::unexpected(m == refuse_mode::cancelled
+                                      ? fixpp::core::error::store_cancelled
+                                      : fixpp::core::error::store_io_failure);
+    }
+    std::unique_ptr<HookedStore> inner_;
+    refuse_mode* next_;
+};
+class RefusingStoreFactory104 final : public fixpp::session::MessageStoreFactory {
+public:
+    RefusingStoreFactory104(std::shared_ptr<HookedStoreFactory> hooked, refuse_mode* next)
+        : hooked_{std::move(hooked)}, next_{next} {}
+    [[nodiscard]] bool yields_persistent_store() const noexcept override { return true; }
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::session::MessageStore>> make(
+        std::string_view, std::string_view, std::pmr::memory_resource*, std::size_t,
+        asio::any_io_executor) noexcept override {
+        ++hooked_->log->stores_made;
+        return std::make_unique<RefusingStore104>(
+            std::make_unique<HookedStore>(hooked_->outbound_next, std::move(hooked_->hooks),
+                                          hooked_->log, hooked_->mode),
+            next_);
+    }
+
+private:
+    std::shared_ptr<HookedStoreFactory> hooked_;
+    refuse_mode* next_;
+};
+
+enum class store_kind : std::uint8_t { hooked, memory, store_double, refusing };
 
 // What a Rol104 builds; the defaults are R-1y's and R-1z's.
 struct Opts104 {
@@ -469,6 +542,7 @@ struct Opts104 {
     store_kind store = store_kind::hooked;
     std::uint32_t logout_timeout_ms = kBoundT;
     bool with_clock = true;
+    bool fail_held = false;  // HookedStore's fail_held: a held operation returns store_io_failure
 };
 
 // A Scene whose session has reset_on_logout and a HookedStore. Every member a store hook, a
@@ -477,8 +551,11 @@ struct Opts104 {
 class Rol104 {
 public:
     struct Control {
-        bool hold_next_store = false;  // the next outbound store() holds until `released`
+        bool hold_next_store = false;    // the next outbound store() holds until `released`
+        bool hold_next_persist = false;  // the next inbound persist holds until `released`
         bool released = false;
+        bool throw_next_write = false;  // the config-time sink throws on its next write
+        refuse_mode refuse_next_store = refuse_mode::none;  // store_kind::refusing only
     };
     struct CloseRun {
         bool done = false;
@@ -514,12 +591,30 @@ public:
             return true;
         };
         factory->hooks.release_when = [c = &ctl] { return c->released; };
+        factory->hooks.on_inbound_persist_call = [c = &ctl] {
+            if (!c->hold_next_persist) return false;
+            c->hold_next_persist = false;
+            return true;
+        };
+        factory->hooks.fail_held = o.fail_held;
         // These cells read the state at a reset call; the transport reading is not read.
         factory->log->call_snapshot = [this] { return CallReading{.state = s.session->state()}; };
         s.cfg.reset_on_logout = o.reset_on_logout;
         s.cfg.reset_on_disconnect = o.reset_on_disconnect;
         if (o.store == store_kind::hooked) s.cfg.store_factory = factory;
         if (o.store == store_kind::store_double) s.cfg.store_factory = double_factory;
+        if (o.store == store_kind::refusing) {
+            s.cfg.store_factory =
+                std::make_shared<RefusingStoreFactory104>(factory, &ctl.refuse_next_store);
+        }
+        s.cfg.transport_send = [c = &ctl,
+                                sink = s.cfg.transport_send](std::span<const std::byte> f) {
+            if (c->throw_next_write) {
+                c->throw_next_write = false;
+                throw std::runtime_error("Rol104: the sink's write failed");
+            }
+            sink(f);
+        };
         s.session = std::make_unique<fixpp::session::Session>(s.engine, s.cfg);
         app->session = s.session.get();
     }
@@ -546,7 +641,7 @@ public:
             return Numbers{.in = double_factory->store->current_next_inbound(),
                            .out = double_factory->store->current_next_outbound()};
         }
-        fixpp::session::MessageStore* st = k == store_kind::hooked
+        fixpp::session::MessageStore* st = k == store_kind::hooked || k == store_kind::refusing
                                                ? factory->log->inner.get()
                                                : session_test_access::store(*s.session);
         if (st == nullptr) return std::nullopt;
@@ -809,6 +904,8 @@ std::string_view store_name(store_kind const k) {
             return "MemoryStore";
         case store_kind::store_double:
             return "StoreDouble";
+        case store_kind::refusing:
+            return "RefusingStore";
     }
     return "?";
 }
@@ -1264,4 +1361,246 @@ TEST(ResetOnLogout104, TooHighLogout_AckingWhenClosed_ResetOnce) {
         EXPECT_TRUE(finished_before_return)
             << "the reset_to had not finished when close() returned";
     }
+}
+
+// ── T027: R-1g, R-1n and R-3, receipts that end before or at the reset point ──────────────
+
+namespace {
+
+using App104 = AdminCountingApp104;
+
+// More fields than the session's lowered inbound entry cap, so the arm's late parse fails
+// (093's input: unparseable_frame_disposition_test.cpp's late-site cells).
+std::string late_parse_filler() {
+    std::string out;
+    for (std::size_t i = 0; i < fixpp::wire::default_max_offset_entries + 100; ++i) {
+        out += std::to_string(5000 + i) + "=v\x01";
+    }
+    return out;
+}
+
+// close(terminal), pumped with the mock clock unmoved: a close() that returns here returns at
+// no elapsed part of logon_timeout_ms, so "well inside" that bound.
+void close_and_expect_no_reset(Rol104& r, std::string_view const after) {
+    r.spawn_close(close_mode::terminal);
+    EXPECT_TRUE(r.close_returned_within(kReleaseBudget))
+        << "close() did not return with the mock clock unmoved";
+    EXPECT_TRUE(r.log().calls.empty())
+        << "a reset call after " << after << ": reset() " << r.log().reset_calls << ", reset_to "
+        << r.log().reset_to_calls;
+}
+
+enum class receipt_end : std::uint8_t { from_admin_throw, from_admin_reject, late_parse_failure };
+
+// R-1g, one parameter on one role, then the forced-hit arm (the same fixture with fromAdmin
+// returning, R-1d's input), which resets.
+void receipt_ends_before_reset_point(session_role const role, receipt_end const end) {
+    SCOPED_TRACE(rg::role_name(role));
+    {
+        Rol104 r{role};
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        seqnum_t const n = s.next_in();
+        auto const mark = s.sent.size();
+        std::vector<std::byte> lo;
+        if (end == receipt_end::from_admin_throw) {
+            r.app->logout_from_admin = App104::on_logout_from_admin::throw_;
+            lo = s.logout(n);
+        } else if (end == receipt_end::from_admin_reject) {
+            r.app->logout_from_admin = App104::on_logout_from_admin::reject;
+            lo = s.logout(n);
+        } else {
+            session_test_access::lower_inbound_entry_cap(*s.session,
+                                                         fixpp::wire::default_max_offset_entries);
+            lo = s.frame("5", n, late_parse_filler());
+        }
+        auto const res = s.feed(std::move(lo));
+        // The arm's existing ending.
+        EXPECT_EQ(s.count("5", mark), 1U) << "A's reply: " << s.written(mark);
+        if (end == receipt_end::from_admin_throw) {
+            EXPECT_FALSE(res.has_value()) << "the throw's error";
+            if (!res) EXPECT_EQ(res.error(), fixpp::core::error::app_callback_threw);
+            EXPECT_EQ(s.state(), fsm_state::Disconnected);
+        } else if (end == receipt_end::from_admin_reject) {
+            EXPECT_EQ(s.count("3", mark), 1U) << "the reject's Reject: " << s.written(mark);
+            EXPECT_EQ(s.state(), fsm_state::Disconnected);
+        } else {
+            EXPECT_EQ(s.count("3", mark), 0U) << "a late parse failure sends no Reject";
+            EXPECT_FALSE(s.session->is_open()) << "the late parse failure did not close";
+        }
+        EXPECT_TRUE(r.log().calls.empty())
+            << "a reset call after the arm: reset() " << r.log().reset_calls << ", reset_to "
+            << r.log().reset_to_calls;
+        close_and_expect_no_reset(r, "close()");
+    }
+    {
+        SCOPED_TRACE("forced hit: fromAdmin returns");
+        Rol104 r{role};
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        (void)s.feed(s.logout(s.next_in()));
+        r.spawn_close(close_mode::terminal);
+        EXPECT_TRUE(r.close_returned_within(kReleaseBudget)) << "close() did not return";
+        EXPECT_FALSE(r.log().calls.empty()) << "the forced hit made no reset call";
+    }
+}
+
+enum class reply_end : std::uint8_t {
+    to_admin_throw,
+    assign_failure,
+    store_failure,
+    write_failure,
+    persist_failure
+};
+
+// R-1n, one row on one role: reset for StoreFailure and WriteFailure (the leaf's discarded
+// result), no reset for ToAdminThrow, AssignFailure and PersistFailure.
+void reply_ending(session_role const role, reply_end const end) {
+    SCOPED_TRACE(rg::role_name(role));
+    bool const resets = end == reply_end::store_failure || end == reply_end::write_failure;
+    Rol104 r{Opts104{
+        .role = role,
+        .store = end == reply_end::store_failure ? store_kind::refusing : store_kind::hooked,
+        .fail_held = end == reply_end::persist_failure}};
+    auto& s = r.s;
+    ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+    seqnum_t const n = s.next_in();
+    auto const mark = s.sent.size();
+    switch (end) {
+        case reply_end::to_admin_throw:
+            r.app->throw_on_logout_to_admin = true;
+            break;
+        case reply_end::assign_failure:
+            fixpp::session::seqnum_manager_test_access::set_counters(
+                session_test_access::seqnum_mgr(*s.session), n, fixpp::session::seqnum_max);
+            break;
+        case reply_end::store_failure:
+            r.ctl.refuse_next_store = refuse_mode::io_failure;
+            break;
+        case reply_end::write_failure:
+            r.ctl.throw_next_write = true;
+            break;
+        case reply_end::persist_failure:
+            r.ctl.released = true;  // the selected persist completes, then fails at once
+            r.ctl.hold_next_persist = true;
+            break;
+    }
+    auto const res = s.feed(s.logout(n));
+    EXPECT_EQ(s.state(), fsm_state::Disconnected) << "the arm's ending";
+    EXPECT_EQ(s.count("5", mark), 0U) << "a reply on the wire: " << s.written(mark);
+    if (end == reply_end::to_admin_throw && !res) {
+        EXPECT_EQ(res.error(), fixpp::core::error::app_callback_threw);
+    }
+    if (end == reply_end::to_admin_throw || end == reply_end::assign_failure ||
+        end == reply_end::persist_failure) {
+        EXPECT_FALSE(res.has_value()) << "the arm returned success";
+    }
+    if (end == reply_end::store_failure) {
+        EXPECT_EQ(r.ctl.refuse_next_store, refuse_mode::none)
+            << "the reply's store was not refused";
+    }
+    if (end == reply_end::write_failure) {
+        EXPECT_FALSE(r.ctl.throw_next_write) << "the reply's write was not attempted";
+    }
+    if (end == reply_end::persist_failure) {
+        EXPECT_FALSE(r.ctl.hold_next_persist) << "the Logout's persist was not selected";
+    }
+    if (resets) {
+        // At the arm, before any close(): the reset point's unit.
+        expect_one_reset_to_one_one_disconnected(r);
+        r.spawn_close(close_mode::terminal);
+        EXPECT_TRUE(r.close_returned_within(kReleaseBudget)) << "close() did not return";
+        EXPECT_EQ(r.log().reset_calls, 0) << "a reset() call";
+        EXPECT_EQ(r.reset_tos().size(), 1U) << "reset_to calls after close()";
+    } else {
+        EXPECT_TRUE(r.log().calls.empty())
+            << "a reset call after the arm: reset() " << r.log().reset_calls << ", reset_to "
+            << r.log().reset_to_calls;
+        close_and_expect_no_reset(r, "close()");
+    }
+}
+
+}  // namespace
+
+TEST(ResetOnLogout104, ReceiptEndsBeforeResetPoint_NoReset_FromAdminThrow) {
+    for (auto const role : kRoles)
+        receipt_ends_before_reset_point(role, receipt_end::from_admin_throw);
+}
+TEST(ResetOnLogout104, ReceiptEndsBeforeResetPoint_NoReset_FromAdminReject) {
+    for (auto const role : kRoles) {
+        receipt_ends_before_reset_point(role, receipt_end::from_admin_reject);
+    }
+}
+TEST(ResetOnLogout104, ReceiptEndsBeforeResetPoint_NoReset_LateParseFailure) {
+    for (auto const role : kRoles) {
+        receipt_ends_before_reset_point(role, receipt_end::late_parse_failure);
+    }
+}
+TEST(ResetOnLogout104, ReplyEndings_ToAdminThrow) {
+    for (auto const role : kRoles) reply_ending(role, reply_end::to_admin_throw);
+}
+TEST(ResetOnLogout104, ReplyEndings_AssignFailure) {
+    for (auto const role : kRoles) reply_ending(role, reply_end::assign_failure);
+}
+TEST(ResetOnLogout104, ReplyEndings_StoreFailure) {
+    for (auto const role : kRoles) reply_ending(role, reply_end::store_failure);
+}
+TEST(ResetOnLogout104, ReplyEndings_WriteFailure) {
+    for (auto const role : kRoles) reply_ending(role, reply_end::write_failure);
+}
+TEST(ResetOnLogout104, ReplyEndings_PersistFailure) {
+    for (auto const role : kRoles) reply_ending(role, reply_end::persist_failure);
+}
+
+// R-3: the acceptor's Logon arm exits superseded with the state still LogonReceived (its reply
+// Logon's store held while close(graceful) commits `closing` and holds in its flush); an
+// in-sequence peer Logout then reaches arm A. A writes nothing in LogonReceived
+// (inbound_logout_leaf_ replies in Active only), resets at its reset point, and close()
+// returns only after that unit.
+TEST(ResetOnLogout104, LogonReceivedLogoutWhileClosing_ResetOnceByTheArm) {
+    bool flush_released = false;  // declared before the session: the flush hook reads it
+    Rol104 r{session_role::acceptor};
+    r.factory->hooks.flush_until = [&flush_released] { return flush_released; };
+    auto& s = r.s;
+    struct release_on_exit {
+        bool& f;
+        ~release_on_exit() { f = true; }
+    } const release_flush{flush_released};
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                                   s.session->open(), asio::use_future);
+    ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(open_fut); }))
+        << "setup: open() did not return";
+    ASSERT_TRUE(open_fut.get().has_value()) << "setup: open() failed";
+    r.ctl.hold_next_store = true;
+    auto logon_fut = s.feed_spawn(s.logon(1));
+    ASSERT_TRUE(s.pump_until([&] { return !r.log().store_events.empty(); }, kHoldWindow))
+        << "setup: the reply Logon's store was not held";
+    ASSERT_EQ(s.state(), fsm_state::LogonReceived) << "setup: not in LogonReceived";
+    r.spawn_close(close_mode::graceful);
+    ASSERT_TRUE(s.pump_until([&] { return r.log().flushes_begun == 1; }, kHoldWindow))
+        << "setup: close(graceful) did not reach its flush";
+    r.ctl.released = true;
+    ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(logon_fut); }, kHoldWindow))
+        << "setup: the Logon arm did not return";
+    ASSERT_EQ(s.state(), fsm_state::LogonReceived)
+        << "setup: the Logon arm's superseded exit left " << rg::state_name(s.state());
+    auto const mark = s.sent.size();
+    auto lo_fut = s.feed_spawn(s.logout(2));
+    bool const frame_returned = s.pump_until([&] { return rg::Scene::ready(lo_fut); }, kHoldWindow);
+    bool const close_before_flush = r.close_run.done;
+    flush_released = true;
+    bool const close_returned = r.close_returned_within(kReleaseBudget);
+
+    EXPECT_TRUE(frame_returned) << "the Logout's frame did not return";
+    EXPECT_FALSE(close_before_flush) << "close() returned while its flush was held";
+    EXPECT_TRUE(close_returned) << "close() did not return after the flush";
+    EXPECT_FALSE(r.log().flush_hold_timed_out) << "the flush ended by its bound";
+    EXPECT_EQ(s.count("5", mark), 0U) << "A wrote a Logout in LogonReceived: " << s.written(mark);
+    expect_one_reset_to_one_one_disconnected(r);
+    bool finished_before_return = false;
+    for (auto const& w : r.close_run.writes_at_return) {
+        finished_before_return = finished_before_return || w.op == "reset_to 1 1";
+    }
+    EXPECT_TRUE(finished_before_return) << "the reset_to had not finished when close() returned";
+    EXPECT_EQ(r.log().reset_calls, 0) << "a reset() call";
 }
