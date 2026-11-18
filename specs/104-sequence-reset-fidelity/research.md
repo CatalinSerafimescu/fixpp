@@ -70,7 +70,7 @@ RU-2 and RU-3 (spec Clarifications, Gate A round 1). This section records why, a
      calls `compid_authorization_policy.authorize`; on an initiator that identity is set only by
      `install_reconnected_transport`, after `reconnect_fsm.cpp`'s step 7 authorised it; (2) with mTLS and no live
      identity, it fails closed with the same event and no `authorize` call. A direct initiator that reaches
-     LogonSent through `open()` has no live identity, so its cells drive arm (2). An unauthorised identity, or none, takes the gate's own ending, its
+     LogonSent through `open()` has no live identity, so its cells drive arm (2). Because arm S runs the Logon path's own gate (`logon_sent_identity_admitted_`, shared with the Logon-ack path), it has that gate's side effects: an admitted live identity draws `session_event_peer_identity_bound` and is consumed (orchestrator ruling 2 on the fourteenth run). An unauthorised identity, or none, takes the gate's own ending, its
      `session_event_compid_authorization_failed`, `Disconnected` and success, with no reset (contract O19). An authorised
      identity, or a session without mTLS, then takes `Disconnected`, the marker and the unit. No reply Logout is sent (DQ-9; FIX-TC 1B(e) makes it optional), and no
      `fromAdmin` runs for it, as today (DQ-14); the arm returns success, as the base's ending does. With rol off
