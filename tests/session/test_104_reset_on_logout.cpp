@@ -3609,18 +3609,25 @@ TEST(ResetOnLogout104, TooHighResendRequestAcrossBoundUnit_NoToAdminForRefusedNu
 
 namespace {
 
-enum class crossing_arm : std::uint8_t { store_held, gate_wait };
+enum class crossing_arm : std::uint8_t { store_held, gate_wait, immediate_ack_store_held };
 
 // R-5g: A in Active, close(graceful) with a clock. Phase 1's Logout store is selected at its
 // toAdmin. StoreHeld (C1, on the config-time sink): the store is held while an in-sequence
 // peer Logout reaches arm A, then released. GateWait (C2, on the live transport): an
 // application send's write is parked first, so phase 1's Logout, recorded with no hold, waits at
 // the write gate while the peer Logout reaches arm A; then the parked write is released.
+// ImmediateAckStoreHeld (C1, contract RR-6 item 4's arm-B crossing): as StoreHeld, with a
+// too-high peer Logout, which takes arm B's immediate acknowledgement because a Logout is in
+// flight. With the scene's clock and nonzero logout_disconnect_timeout_ms, that Logout outside a
+// crossing would set the 103 mark and spawn the bound instead; the cell reads both.
 void crossing_logout(session_role const role, crossing_arm const arm, bool const rol) {
     SCOPED_TRACE(std::string{rg::role_name(role)} +
-                 (arm == crossing_arm::store_held ? "/StoreHeld" : "/GateWait") +
+                 (arm == crossing_arm::store_held  ? "/StoreHeld"
+                  : arm == crossing_arm::gate_wait ? "/GateWait"
+                                                   : "/ImmediateAckStoreHeld") +
                  (rol ? "" : "/rol off"));
     bool const live = arm == crossing_arm::gate_wait;
+    bool const too_high = arm == crossing_arm::immediate_ack_store_held;
     GateReadings104 g;  // declared before the session: its hooks write them
     StoreSelector104 sel;
     auto const st = std::make_shared<bwt::blocking_write_state>();
@@ -3660,9 +3667,12 @@ void crossing_logout(session_role const role, crossing_arm const arm, bool const
     r.spawn_close(close_mode::graceful);
     bool const selected =
         s.pump_until([&] { return r.log().store_events.size() == (live ? 2U : 1U); }, kReachBudget);
-    auto lo_fut = s.feed_spawn(s.logout(n));
+    bool const owner_held_at_feed = session_test_access::logout_in_flight(*s.session);
+    auto lo_fut = s.feed_spawn(s.logout(too_high ? n + 3 : n));
     bool const frame_returned =
         s.pump_until([&] { return rg::Scene::ready(lo_fut); }, kInHoldBudget);
+    int const phase_at_frame = session_test_access::peer_logout_phase(*s.session);
+    int const bounds_at_frame = session_test_access::peer_logout_bound_count(*s.session);
     auto const sent_at_frame = s.sent.size();
     std::size_t const starts_at_frame = st->starts;
     std::size_t const logouts_before_release =
@@ -3696,6 +3706,12 @@ void crossing_logout(session_role const role, crossing_arm const arm, bool const
     EXPECT_TRUE(app_parked) << "setup: the application frame's write did not park";
     EXPECT_TRUE(selected) << "setup: phase 1's Logout store was not reached";
     EXPECT_TRUE(frame_returned) << "setup: the peer Logout's frame did not return";
+    EXPECT_TRUE(owner_held_at_feed) << "setup: phase 1 did not hold the Logout owner at the feed";
+    if (too_high) {
+        EXPECT_EQ(phase_at_frame, kNone)
+            << "the too-high Logout set the 103 mark: the immediate acknowledgement did not run";
+        EXPECT_EQ(bounds_at_frame, 0) << "the too-high Logout spawned the bound";
+    }
     EXPECT_EQ(logouts_before_release, 0U) << "a 35=5 written before the release";
     EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the release";
     EXPECT_TRUE(close_returned) << "close() did not return";
@@ -3755,9 +3771,21 @@ TEST(ResetOnLogout104, CrossingLogout_OneLogoutOurs_GateWait) {
     crossing_logout(session_role::acceptor, crossing_arm::gate_wait, true);
 }
 
+TEST(ResetOnLogout104, CrossingLogout_OneLogoutOurs_ImmediateAckStoreHeld) {
+    for (auto const role : kRoles) {
+        crossing_logout(role, crossing_arm::immediate_ack_store_held, true);
+    }
+}
+
 // R-5g's forced hits, one per observation path: reset_on_logout off.
 TEST(ResetOnLogout104, CrossingLogout_OneLogoutOurs_StoreHeld_RolOff) {
     for (auto const role : kRoles) crossing_logout(role, crossing_arm::store_held, false);
+}
+
+TEST(ResetOnLogout104, CrossingLogout_OneLogoutOurs_ImmediateAckStoreHeld_RolOff) {
+    for (auto const role : kRoles) {
+        crossing_logout(role, crossing_arm::immediate_ack_store_held, false);
+    }
 }
 
 TEST(ResetOnLogout104, CrossingLogout_OneLogoutOurs_GateWait_RolOff) {
