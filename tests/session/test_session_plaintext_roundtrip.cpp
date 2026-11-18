@@ -1838,13 +1838,23 @@ TEST(HookedStoreResetTo, ForwardModeForwardsToTheInnerStoreAndFiresItsHook) {
 //     clock, so the sweep is another caller's) records no expiry,
 //     and close() is still waiting, until the clock reaches the bound.
 // Time moves only by the cell's advance; drain_ready runs what an advance made ready.
+//
+// The pumps are bounded by real time (104-sequence-reset-fidelity, research R2's census;
+// tasks.md T046). Once close() waits for a receipt or a reset unit by a poll by post
+// (contract RR-2 item 4), its pass keeps ioc's queue non-empty, so a poll() loop does not
+// return while that wait is outstanding, and an iteration cap around a poll() bounds
+// nothing. No real-time timer competes with these bounds: the cells' one timeout,
+// logon_timeout_ms (kQ27Bound), runs on the mock clock, which only a cell's advance moves.
+// So the drain window is stated as a ratio of kQ27Bound (a twentieth), and the loop's budget
+// is the shared kPumpBudget.
 namespace {
+
+constexpr std::uint32_t kQ27Bound = 1000;  // logon_timeout_ms
+constexpr auto kQ27DrainWindow = std::chrono::milliseconds{kQ27Bound} / 20;
 
 void drain_ready_q27(asio::io_context& ioc) {
     ioc.restart();
-    while (ioc.poll() > 0) {
-        ioc.restart();
-    }
+    (void)ioc.run_for(kQ27DrainWindow);
     ioc.restart();
 }
 
@@ -1853,8 +1863,6 @@ bool has_wait_expired_event(sess::Session const& s) {
         return std::holds_alternative<sess::session_event_close_reset_wait_expired>(ev);
     });
 }
-
-constexpr std::uint32_t kQ27Bound = 1000;  // logon_timeout_ms
 
 struct Q27Rig {
     asio::io_context ioc;
@@ -1918,14 +1926,17 @@ struct Q27Rig {
         return c;
     }
 
-    // Runs both io_contexts until `ready` holds or neither has work left.
+    // Runs both io_contexts until `ready` holds, neither has work left, or kPumpBudget of
+    // real time has passed: each turn polls the file-I/O executor, then runs ioc for one
+    // kPumpSlice.
     template <class Ready>
     bool run_both_until(Ready ready) {
-        for (int i = 0; i < 100000 && !ready(); ++i) {
+        auto const deadline = std::chrono::steady_clock::now() + fixpp::test_support::kPumpBudget;
+        while (!ready() && std::chrono::steady_clock::now() < deadline) {
             fio.restart();
             std::size_t const n = fio.poll();
             ioc.restart();
-            std::size_t const m = ioc.poll();
+            std::size_t const m = ioc.run_for(fixpp::test_support::kPumpSlice);
             if (n == 0 && m == 0 && !ready()) return false;
         }
         return ready();
