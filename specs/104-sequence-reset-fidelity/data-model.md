@@ -94,7 +94,7 @@ RR-5 item 4).
 
 | Member | Kind | Contract |
 |---|---|---|
-| the freeze flag (one private `bool`) | new, private | set while the session's receipt marker is `reached`; read by the six refused mutators, and by `frozen(freeze_key)` for `Session`'s Debug asserts only |
+| the freeze flag (one private `bool`) | new, private | set while the session's receipt marker is `reached`; read by the six refused mutators, by `frozen(freeze_key)` for `Session`'s Debug asserts, and, in tests only, by `seqnum_manager_test_access` (T049; R-5d); no production branch tests it |
 | `SeqnumManager::freeze_key` | new, a passkey type | its constructor is private, with `Session` its friend, so no other caller can construct one |
 | `freeze(freeze_key)`, `thaw(freeze_key)` | new | set and clear the flag; no lock (strand-confined, as `take_back_outbound` and `peek_outbound` are) |
 | `[[nodiscard]] bool frozen(freeze_key) const noexcept` | new | reads the flag; called only by `Session`'s Debug asserts (contract RR-5 item 4), never by a production branch; inline, no lock, no data member |

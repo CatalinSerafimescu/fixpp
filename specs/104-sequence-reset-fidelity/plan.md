@@ -423,6 +423,7 @@ result and every RED/GREEN/mutant record, never code comments.
 - Implementation STOP at T011, 2026-11-18: in-flight manager writers after the reset point. Fable consult 104-post-reset-inflight-manager-writers (probable). Owner ruled construction (Z), manager freeze; orchestrator sub-rulings: freeze on any reached marker, refused return per mutator, reset-writer mechanism. Narrow Gate A loop 4 follows.
 - Loop 4 round 1 applied 2026-11-18: Codex P1=0 P2=1 P3=0; Opus post-judging P1=0 P2=2 P3=5; rewrite adds the post-set Debug assert (C-1) and narrows FR-019/B-104-8 (N-1); P3s applied. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_8_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_8_adversarial_review.md.
 - Loop 4 round 2 applied 2026-11-18: Codex P1=1 P2=1 P3=0; Opus post-judging P1=1 P2=2 P3=1; rewrite replaces T014 (C-1, N-1), adds the passkey-gated frozen(freeze_key) query (C-2), fixes T061's row (N-2). Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_9_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_9_adversarial_review.md.
+- Loop 4 round 3 (narrow confirmation) 2026-11-18: Codex P1=0 P2=0 P3=1 (rejected by the judge); Opus post-judging P1=0 P2=0 P3=3 (N-1..N-3), applied with the optional D11 note. **Gate A loop 4 CONVERGED** (manager freeze, construction Z). Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_10_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_10_adversarial_review.md.
 
 ### Round 1 — disagreements
 

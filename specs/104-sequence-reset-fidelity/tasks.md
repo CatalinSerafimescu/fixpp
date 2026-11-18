@@ -354,7 +354,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - **Existing users.** Run the entries of `git grep -l SeqnumManager -- tests`, by the Execution rules' selection form. They stay GREEN: nothing sets the flag outside 104's sites.
 - [ ] T050 [US1] The freeze's sites, in `src/session/session.cpp` (contract RR-5 items 1, 4 and 6).
   - **`run_reset_unit_`.**
-    - Debug asserts that the manager is not frozen, each read through `frozen(freeze_key)` (T049): at its entry, and after its manager set, immediately before the freeze (the post-set assert).
+    - Debug asserts that the manager is not frozen, each read through `frozen(freeze_key)` (T049): at its entry, and after its manager set, immediately before the freeze (the post-set assert). Each assert's message names it, as `run_reset_unit_`'s entry assert or its post-set assert, so that T061's row can read the post-set assert by its own message.
     - The freeze, when the marker is `reached`: after its manager set, whatever that set returned, and before `reset_unit_in_flight_` and its store call, or before its return when there is no store.
   - **`close()`'s close-out.** Freeze, with the marker's `reached`.
   - **`install_reconnected_transport`.** Thaw, with the marker's `none`, before `LogonSent`.

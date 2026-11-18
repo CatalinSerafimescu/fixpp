@@ -1072,7 +1072,10 @@ writers are fixpp's own concurrent emitters, which QuickFIX's synchronous send p
   - `emit_initiator_logon_` runs at `open()`, where the marker is `none`, and from `drive_reconnect`. There it runs
     after `reconnect_fsm_.drive_reconnect_attempt()`, which calls `install_reconnected_transport`, which thaws the
     manager (data-model "Order against an in-place reconnect"). That includes 025's `force` refresh on each
-    reconnect.
+    reconnect. The thaw coming first does not by itself exclude a freeze during the emit's store reads. No frame of
+    the new connection is delivered during them: `drive_reconnect`'s standalone-initiator precondition
+    (`include/fixpp/session/session.hpp`: the caller's reader starts on the new `live_transport()` after the call
+    returns) and, under the Engine, `run_connect_loop` entering the read pump only after `drive_reconnect` returns.
   - `on_inbound_not_connected_` is the acceptor's NotConnected arm, which a session in `Disconnected` never enters
     (INV-F).
   - The overlap: a direct initiator's `open()` emit, when a concurrent `on_inbound_frame` reaches arm S during
