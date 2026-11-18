@@ -251,6 +251,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - `…LivenessDuringReceiptUnit_NumbersNothing` uses a small HeartBtInt, and moves the mock clock past one HeartBtInt and then two during the hold.
   - `…BoundRouteFrameDuringUnit_Drained` feeds a frame at 34 > 1 during the hold, and asserts no ResendRequest, no inbound advance and no `fromApp`.
   - `…BoundRouteInFlightPumpArm_RefusedAtTheBoundary` takes the route T011 recorded, a pump arm or the `session_test_access::store_then_emit` seam. It asserts that nothing the in-flight arm writes reaches the wire or the store's numbers, and store and manager `(1, 1)`.
+  - **No pump route reaches an RR-4 boundary at the head** (orchestrator ruling on the tenth run; the re-derivation recipe is in research D10's R-1r row): the pump routes are refused first by D-OUT-10 and by the RR-5 freeze, and the marker's `reached` and the unit's manager set are written in one strand turn. So the pump arm stays as a reach pin, and two seam arms witness the boundaries: `…_SeamStoreThenEmit` calls `session_test_access::store_then_emit`, and `…_SeamPersist` calls `session_test_access::persist_inbound_advance` (a forwarder in `tests/support/session_test_access.hpp`), each after route B's reset point. Each asserts the call is refused at its boundary: no store call, nothing on the wire, store and manager `(1, 1)`.
 - [ ] T035 [US1] R-1t's step-3 mark, a test seam in production code (plan "Scale/Scope"; B-104-7).
   - Add a private member to `Engine` in `include/fixpp/session/engine.hpp`, beside `test_hook_post_send_drain_`, with the same shape: unconditional and never gated on `FIXPP_TEST_HOOKS` (the ODR rule in `brain/components/session.md`, "Test access to private `Session` state").
   - Add its setter to `tests/support/engine_test_access.hpp`, mirroring the existing setter.
@@ -262,6 +263,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   1. Install the step-3 mark through `engine_test_access` (T035), then start `Engine::stop()`.
   2. Pump, bounded on a condition, until the mark has run or `session_test_access::is_closing` holds. Assert that the mark ran and the session is not closing.
   3. Advance the mock clock once past `logon_timeout_ms`, and pump for a settle window. HeartBtInt is set, by a ratio stated in the cell, so that no liveness deadline falls inside the advance.
+     - The ratio is stated on whichever knob the cell controls: R-1t sets `logon_timeout_ms` to a quarter of the rig's fixed HeartBtInt (orchestrator ruling on the tenth run).
   4. With the hold still in place, assert: not closing, no `close_reset_wait_expired`, and stop's completion not observed after a bounded pump.
   5. Release the hold. The known positive: the same harness observes stop's completion. Assert exactly one `reset_to` and no `reset`, recorded before stop returns.
 
@@ -398,7 +400,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - `persist_inbound_advance_`, after its `store_is_persistent_` return and before its store call: return success with no write.
   - `install_reconnected_transport` sets the marker to `none`.
   - Each boundary is one byte test.
-  - Mutants, run at T060: R-1r's two (delete the test in `store_then_emit`; delete it in `persist_inbound_advance_`), R-1l(3) (drop the `persist_inbound_advance_` test) and R-1h (no `none` at `install_reconnected_transport`).
+  - Mutants, run at T060: R-1r's two (delete the test in `store_then_emit`, read by `…_SeamStoreThenEmit`; delete it in `persist_inbound_advance_`, read by `…_SeamPersist`), R-1l(3) (drop the `persist_inbound_advance_` test) and R-1h (no `none` at `install_reconnected_transport`).
   - **Ruling W, nothing transmitted after a reset point** (contract RR-6; data-model "`wire_closed_by_reset_`"; the T014 STOP). This needs T042's reset-point sites.
     - The private member, declared `bool wire_closed_by_reset_ = false;`.
       - Set it in each reset point's turn, in the same statement block as the marker's `reached`, through one helper that makes both writes (the pump frame's `pending` → `reached`, crossing included; the bound's `none` → `reached`).
@@ -486,7 +488,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 - [ ] T057 [US1] Mutants for T042 (protocol): R-1c; R-1d, both; R-1e; R-1f(2a); R-1o, one per arm; R-1p; R-1q; R-1u; R-1x(1), read by "exactly one `reset_to`"; R-3, by R-1d's first mutant, when T011 recorded R-3 drivable; R-1i; R-1n, one per parameter; R-1l(2).
 - [ ] T058 [US1] Mutants for T045 (protocol): R-1a and R-1b. The answered twin stays GREEN.
 - [ ] T059 [US1] Mutants for T047 (protocol): R-1j; R-1s; R-1k; R-1l(1); R-1w, the `FromAdminThrow` and `Storeless` arms, with `StuckPending` GREEN; R-1f(2b); R-2.
-- [ ] T060 [US1] Mutants for T048 (protocol): R-1r, both boundaries; R-1l(3); R-1h.
+- [ ] T060 [US1] Mutants for T048 (protocol): R-1r, both boundaries, read by its seam arms (`…_SeamStoreThenEmit` for the `store_then_emit` test, `…_SeamPersist` for the `persist_inbound_advance_` test); R-1l(3); R-1h.
 - [ ] T061 [US1] Mutants for T049 and T050 (protocol). Each is RED by its named assertion, with its forced-hit arm GREEN:
   - delete the freeze test in `set_next_inbound`: R-5a, both arms, and R-5d;
   - delete it in `set_next_outbound`: R-5b and R-5d;
