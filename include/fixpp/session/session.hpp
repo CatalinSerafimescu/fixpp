@@ -1263,7 +1263,8 @@ private:
     //   unconditionally (store-wins, up or down — INV-RoL-4).  Default false preserves
     //   the pre-025 byte-identical cold-open behaviour.
     // persist_inbound_advance_(): site-keyed durable inbound +1, invoked after each
-    //   delivering callback at every check_inbound-success site (C3).
+    //   delivering callback at every check_inbound-success site (C3). 104 (contract RR-4):
+    //   once the receipt marker is `reached` it returns success with no store call.
     // 093 plan OD-26: `arm` is a Logon arm caller's expected state, for the Disconnected
     // write that follows a failed store operation (disconnect_unless_superseded_).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> ensure_hydrated_(
@@ -2047,6 +2048,10 @@ private:
     //   when a persistent store fails the call (059); dispatch_aborted when the transport
     //   write fails or throws, and when the frame's number is no longer below the
     //   session's next outbound number once its store call has returned (D-OUT-10).
+    //   104 (contract RR-4): dispatch_aborted, with the number taken back and no store call,
+    //   when the receipt marker is already `reached` before the store call. Success with
+    //   nothing transmitted when a reset point has run on the connection (ruling W, the
+    //   exemption below).
     // Throws asio::system_error{operation_aborted} when the store call was cancelled,
     //   whether the store returned store_cancelled or let operation_aborted out: the
     //   frame is not transmitted, its number is taken back, and Disconnected is recorded
