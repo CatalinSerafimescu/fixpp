@@ -599,8 +599,8 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - `RecoveryAdminSpanGapfillTest.AllAdminSpanCollapsesToSingleGapFill`, `FixTcCoverageGaps.ResendRequestEndSeqNoBeyondLastOutbound_GapFills_StaysActive` and `FixTcCoverageGaps.SimultaneousResendRequest_ServicesPeerWhileAwaitingOwn`. Each GapFill's NewSeqNo moves from EndSeqNo + 1 to the next outbound number, read from the cell's own store tail.
   - `FixTcCoverageGaps.BodyFieldsArbitraryOrder_Accepted`. Its ResendRequest gets an explicit EndSeqNo below the next outbound number, so that its GapFill's NewSeqNo still depends on tag 16 having been parsed.
 - [X] T075 [US2] Done: evidence file, the twenty-third run, its T075 section. US2 GREEN: U-1 to U-10 with their T068 counts; `ctest -L 104 --no-tests=error`; T072 to T074's entries; the existing `Initiator_Received141Ack_*` cells (US2 AS3); `ResetSeqnumPolicyMatrixTest.PeerSpontaneous_Initiator_NonReset_Logon_AtNGt1_OutboundUnchanged`. Run `codegraph sync`. Record.
-- [ ] T076 [US2] Mutants for T069 (protocol): U-1, U-2, U-3, U-4, U-5, U-9 with its authorised twin GREEN, and U-10 with its forced-hit arm GREEN.
-- [ ] T077 [US2] Mutants for T070 (protocol): U-6, U-7, U-8.
+- [X] T076 [US2] Done: evidence file, the twenty-third run, its T076 and T077 section. Mutants for T069 (protocol): U-1, U-2, U-3, U-4, U-5, U-9 with its authorised twin GREEN, and U-10 with its forced-hit arm GREEN.
+- [X] T077 [US2] Done: evidence file, the twenty-third run, its T076 and T077 section. Mutants for T070 (protocol): U-6, U-7, U-8.
 
 **Checkpoint**: US2 GREEN; every US2 mutant RED.
 
