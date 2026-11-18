@@ -32,6 +32,8 @@
 
 #include <array>
 #include <asio/awaitable.hpp>
+#include <asio/bind_cancellation_slot.hpp>
+#include <asio/cancellation_signal.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
@@ -50,6 +52,7 @@
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/wire/offset_table.hpp>
 #include <functional>
 #include <iostream>
@@ -72,6 +75,7 @@
 #include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 #include "support/store_double.hpp"
+#include "support/transport_double.hpp"
 
 namespace {
 
@@ -414,7 +418,9 @@ public:
             throw std::runtime_error("AdminCountingApp104: toAdmin");
         }
     }
+    std::function<void()> on_logout_hook;  // run inside each onLogout, after the reading
     void onLogout(const fixpp::session::SessionId& /*id*/) override {
+        if (on_logout_hook) on_logout_hook();
         if (session == nullptr) return;
         auto& m = session_test_access::seqnum_mgr(const_cast<fixpp::session::Session&>(*session));
         on_logout_numbers.push_back(
@@ -1848,4 +1854,168 @@ TEST(ResetOnLogout104, CloseWaitsForLogonArmUnit_NoKnob) {
     EXPECT_FALSE(close_before_release) << "close() returned during the held reset_to";
     EXPECT_TRUE(close_returned) << "close() did not return after the release";
     EXPECT_FALSE(r.log().hold_timed_out) << "the hold ended by its bound, not its release";
+}
+
+// ── T031: R-1l, R-1u and R-1x ────────────────────────────────────────────────────────────
+
+namespace {
+
+enum class held_call : std::uint8_t { reply_store, persist };
+
+// R-1l, one arm: no clock, rol only, A in Active; HookedStore holds the reply's store or the
+// Logout's inbound persist after completing it. close(terminal) returns during the hold; no
+// reset call is made at any point; after the release the arm runs no unit. `live` attaches a
+// ScriptedReadTransport to the acceptor (its own seam), so the session writes through a live
+// transport; otherwise the Scene's config-time sink is the session's transport (the
+// transport_send twin, B-563-5).
+void close_while_pending_no_clock(held_call const held, bool const live) {
+    SCOPED_TRACE(
+        std::string{held == held_call::reply_store ? "HeldInReplyStore" : "HeldInPersist"} +
+        (live ? "/live transport" : "/transport_send"));
+    Rol104 r{Opts104{.role = session_role::acceptor, .with_clock = false}};
+    auto& s = r.s;
+    auto const stream = std::make_shared<fixpp::session::test::ScriptedStream>();
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                                   s.session->open(), asio::use_future);
+    ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(open_fut); })) << "setup: open()";
+    ASSERT_TRUE(open_fut.get().has_value()) << "setup: open() failed";
+    if (live) {
+        s.session->attach_accepted_transport(
+            std::make_unique<fixpp::session::test::ScriptedReadTransport>(stream),
+            fixpp::transport::handshake_result{});
+    }
+    (void)s.feed(s.logon(1));
+    ASSERT_EQ(s.state(), fsm_state::Active) << "setup: the session did not reach Active";
+    seqnum_t const n = s.next_in();
+    seqnum_t const n_out = r.manager_numbers().out;
+    auto const sent_mark = s.sent.size();
+    auto const live_mark = stream->written.size();
+    if (held == held_call::reply_store) {
+        r.ctl.hold_next_store = true;
+    } else {
+        r.ctl.hold_next_persist = true;
+    }
+    auto frame_fut = s.feed_spawn(s.logout(n));
+    bool const reached = s.pump_until(
+        [&] {
+            return held == held_call::reply_store ? !r.log().store_events.empty()
+                                                  : !r.ctl.hold_next_persist;
+        },
+        kHoldWindow);
+    r.spawn_close(close_mode::terminal);
+    bool const close_during_hold = s.pump_until([&] { return r.close_run.done; }, kHoldWindow);
+    auto const live_at_close = stream->written.size();
+    bool const reset_before_release = !r.log().calls.empty();
+    r.ctl.released = true;
+    bool const frame_returned =
+        s.pump_until([&] { return rg::Scene::ready(frame_fut); }, kReleaseBudget);
+
+    ASSERT_TRUE(reached) << "setup: the held call was not reached";
+    EXPECT_TRUE(close_during_hold) << "close() did not return during the hold";
+    EXPECT_TRUE(frame_returned) << "the Logout's frame did not return";
+    EXPECT_FALSE(r.log().hold_timed_out) << "the hold ended by its bound, not its release";
+    EXPECT_FALSE(reset_before_release) << "a reset call before the release";
+    EXPECT_TRUE(r.log().calls.empty()) << "a reset call: reset() " << r.log().reset_calls
+                                       << ", reset_to " << r.log().reset_to_calls;
+    EXPECT_EQ(r.manager_numbers().in, n + 1) << "the manager's NextNumIn";
+    auto const st = r.store_numbers(store_kind::hooked);
+    ASSERT_TRUE(st.has_value()) << "the store's numbers were not read";
+    if (held == held_call::reply_store) {
+        ASSERT_FALSE(r.log().store_events.empty());
+        EXPECT_EQ(r.log().store_events.front().seq, n_out) << "the held store's number";
+        EXPECT_EQ(st->in, n) << "the store's NextNumIn: the persist after the hold was not refused";
+        if (live) {
+            EXPECT_EQ(stream->written.size(), live_at_close)
+                << "a frame on the live transport after close() returned";
+            (void)live_mark;
+        } else {
+            EXPECT_EQ(s.count("5", sent_mark), 1U)
+                << "the transport_send twin's reply: " << s.written(sent_mark);
+        }
+    } else {
+        EXPECT_EQ(st->in, n + 1) << "the store's NextNumIn: the held persist did not land";
+    }
+}
+
+}  // namespace
+
+TEST(ResetOnLogout104, CloseWhilePending_NoClock_NoReset_HeldInReplyStore) {
+    close_while_pending_no_clock(held_call::reply_store, /*live=*/true);
+    close_while_pending_no_clock(held_call::reply_store, /*live=*/false);
+}
+
+TEST(ResetOnLogout104, CloseWhilePending_NoClock_NoReset_HeldInPersist) {
+    close_while_pending_no_clock(held_call::persist, /*live=*/true);
+}
+
+// R-1u: A in Active with a clock; close(terminal) is started inside the onLogout that the
+// arm's Disconnected write fires. Exactly one reset_to, seen with the session Disconnected,
+// no reset, finished before close() returns.
+TEST(ResetOnLogout104, CloseInsideOnLogout_ResetOnceByTheArm) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        Rol104 r{role};
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        bool started = false;
+        r.app->on_logout_hook = [&r, &started] {
+            if (started) return;
+            started = true;
+            r.spawn_close(close_mode::terminal);
+        };
+        (void)s.feed(s.logout(s.next_in()));
+        bool const close_returned = r.close_returned_within(kReleaseBudget);
+        r.app->on_logout_hook = nullptr;
+
+        ASSERT_TRUE(started) << "setup: onLogout did not run";
+        EXPECT_TRUE(close_returned) << "close() did not return";
+        expect_one_reset_to_one_one_disconnected(r);
+        bool finished_before_return = false;
+        for (auto const& w : r.close_run.writes_at_return) {
+            finished_before_return = finished_before_return || w.op == "reset_to 1 1";
+        }
+        EXPECT_TRUE(finished_before_return)
+            << "the reset_to had not finished when close() returned";
+        EXPECT_EQ(r.log().reset_calls, 0) << "a reset() call";
+    }
+}
+
+// R-1x: a direct Session, A in Active, rol, a clock. The cell spawns the Logout's
+// on_inbound_frame bound to its own cancellation slot and emits a terminal cancellation on it
+// from inside the onLogout that the reset point fires. Exactly one reset_to(1, 1), the numbers
+// (1, 1), no reset. (Its "marker `reached`" assertion lands with the marker's accessor, T040.)
+TEST(ResetOnLogout104, TerminalEmissionAtResetPoint_ResetOnce) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        asio::cancellation_signal sig;  // declared before the session: the frame's slot is on it
+        bool done = false;
+        Rol104 r{role};
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        bool emitted = false;
+        r.app->on_logout_hook = [&sig, &emitted] {
+            if (emitted) return;
+            emitted = true;
+            sig.emit(asio::cancellation_type::terminal);
+        };
+        r.frames.push_back(s.logout(s.next_in()));
+        auto const bytes = std::span<const std::byte>{r.frames.back()};
+        asio::co_spawn(
+            fixpp::test_support::session_executor_of(*s.session, s.ioc),
+            s.session->on_inbound_frame(bytes),
+            asio::bind_cancellation_slot(
+                sig.slot(), [&done](std::exception_ptr const&,
+                                    fixpp::core::expected_t<void> const&) { done = true; }));
+        bool const frame_done = s.pump_until([&] { return done; }, kReleaseBudget);
+        r.app->on_logout_hook = nullptr;
+
+        ASSERT_TRUE(emitted) << "setup: onLogout did not run";
+        EXPECT_TRUE(frame_done) << "the frame did not complete";
+        expect_one_reset_to_one_one_disconnected(r);
+        EXPECT_EQ(r.manager_numbers(), (Rol104::Numbers{.in = 1, .out = 1}));
+        r.spawn_close(close_mode::terminal);
+        EXPECT_TRUE(r.close_returned_within(kReleaseBudget)) << "close() did not return";
+        EXPECT_EQ(r.log().reset_calls, 0) << "a reset() call";
+        EXPECT_EQ(r.reset_tos().size(), 1U) << "reset_to calls after close()";
+    }
 }
