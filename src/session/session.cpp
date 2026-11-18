@@ -3103,6 +3103,35 @@ void Session::note_reply_over_ceiling_(bool business_reject,
                business_reject ? FIXPP_SLIT("j") : FIXPP_SLIT("3"), len, suppressed);
 }
 
+// 104 (data-model "The too-low Logout text"; research D5 "The text"): QuickFIX's too-low Logout
+// text, "MsgSeqNum too low, expecting N but received M", written by one builder for 103's Arm B
+// (on_inbound_active_out_of_sequence_) and the Logon arms, so that they cannot diverge.
+// Every caller passes N as seqnum_mgr_.next_inbound_unsafe() and M as
+// parse_seqnum(hdr.msg_seq_num), both seqnum_t, so the static_assert below (two phrases and two
+// seqnum_t numbers at their widest) bounds every caller's text and no caller truncates. The
+// numbers are written by std::to_chars; the peer's bytes are not echoed.
+namespace {
+
+constexpr std::string_view kTooLowPhrase1 = "MsgSeqNum too low, expecting ";
+constexpr std::string_view kTooLowPhrase2 = " but received ";
+using too_low_text_buffer = std::array<char, 96>;
+static_assert(kTooLowPhrase1.size() + kTooLowPhrase2.size() +
+                  (2 * (std::numeric_limits<seqnum_t>::digits10 + 1)) <=
+              too_low_text_buffer{}.size());
+
+// Writes the text for NextNumIn `expected` and MsgSeqNum `received` into `buf`; returns its length.
+[[nodiscard]] std::size_t write_too_low_text(too_low_text_buffer& buf, seqnum_t expected,
+                                             seqnum_t received) noexcept {
+    char* const end = buf.data() + buf.size();
+    char* out = std::ranges::copy(kTooLowPhrase1, buf.data()).out;
+    out = std::to_chars(out, end, expected).ptr;
+    out = std::ranges::copy(kTooLowPhrase2, out).out;
+    out = std::to_chars(out, end, received).ptr;
+    return static_cast<std::size_t>(out - buf.data());
+}
+
+}  // namespace
+
 // 070-fix44-closeout S-029 — refuse an inbound Logon on a 464 posture mismatch (or
 // malformed 464): emit Logout(35=5) carrying reason_text, then Disconnected — the
 // session never reaches Active. Mirrors the Logon-time Logout+disconnect disposition
@@ -6095,19 +6124,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
     if (chk_error == fixpp::core::error::session_seqnum_too_low) {
         // 103 (research D4.6): Arm B claims a pending mark; its own Logout is the one.
         claim_peer_logout_none_();
-        static constexpr std::string_view kPhrase1 = "MsgSeqNum too low, expecting ";
-        static constexpr std::string_view kPhrase2 = " but received ";
-        std::array<char, 96> text_buf{};
-        static_assert(kPhrase1.size() + kPhrase2.size() +
-                          (2 * (std::numeric_limits<seqnum_t>::digits10 + 1)) <=
-                      text_buf.size());
-        char* const end = text_buf.data() + text_buf.size();
-        char* out = std::ranges::copy(kPhrase1, text_buf.data()).out;
-        out = std::to_chars(out, end, seqnum_mgr_.next_inbound_unsafe()).ptr;
-        out = std::ranges::copy(kPhrase2, out).out;
-        out = std::to_chars(out, end, parse_seqnum(hdr.msg_seq_num)).ptr;
+        // 104: the shared builder above refuse_logon_with_logout_.
+        too_low_text_buffer text_buf{};
         const std::string_view text{text_buf.data(),
-                                    static_cast<std::size_t>(out - text_buf.data())};
+                                    write_too_low_text(text_buf, seqnum_mgr_.next_inbound_unsafe(),
+                                                       parse_seqnum(hdr.msg_seq_num))};
         const auto st52 = effective_clock_
                               ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
                               : SendingTimeStamp{};
