@@ -9695,8 +9695,11 @@ TEST(CallbackSend,
         ArmSetup::behind_the_gate(FileGate::Mode::holds_the_pools_thread));
 }
 
-// §3, NC-23: NC-21's six arms with reset_on_logout set. A Logout that was cut is not a
-// Logout that was sent, so the teardown reset does not fire: the store still holds the
+// §3, NC-23: NC-21's six arms with reset_on_logout set. 104-sequence-reset-fidelity
+// (contract RR-1; B-104-1) supersedes "a Logout that was cut is not a Logout that was
+// sent, so the teardown reset does not fire" by name: reset_on_logout resets only when a
+// Logout received from the peer reaches its reset point, no peer Logout is received here,
+// and the Logout fixpp sends, cut or not, makes no reset. So the store still holds the
 // Logout, and the next outbound number is the Logout's plus one in the manager and in the
 // store.
 TEST(CallbackSend, ToAdminOfGracefulCloseStartsClose_Terminal_ResetOnLogout) {
@@ -10882,7 +10885,9 @@ const char* arrival_name(Arrival what) {
 // Logout's. The cell waits until the call is held, reads the session, starts the
 // arrival, lets the session's executor run a bounded number of handlers, reads again,
 // releases the hold and pumps to the end. The session was written Disconnected when the
-// cut was decided, so the arrival meets a session that is not Active.
+// cut was decided, so the arrival meets a session that is not Active. With
+// reset_on_logout set, a peer Logout arriving then meets Disconnected and reaches no
+// receipt arm, so no reset is made (104, contract RR-1, RT-1).
 void run_arrival_while_the_cut_logouts_store_call_is_held(StoreCallHold::By by, Arrival what,
                                                           bool reset_on_logout = false) {
     Fixture f{ExecKind::io_context,

@@ -2407,9 +2407,13 @@ TEST(InboundFrameDispositionsOd29, TheEscalatingTerminalCloseReturnsTheInFlightR
 
 // "A terminal close that arrives after phase 1 has resolved joins as before." The peer
 // answers the Logout, so phase 1 resolves; the graceful close then closes the transport
-// and issues its teardown reset (reset_on_logout), which a HookedStore holds. A
+// and issues its teardown reset (reset_on_disconnect), which a HookedStore holds. A
 // close(terminal) made during the hold does not return, nor does the graceful call,
-// until the reset is released; both then return ok.
+// until the reset is released; both then return ok. 104-sequence-reset-fidelity (contract
+// RR-1, RR-2 item 4; research D8, "Base reading of the cells") supersedes the cell's
+// reset_on_logout by name: under it the answered Logout resets at arm L's reset point,
+// before phase 1 resolves, and the teardown makes no reset, so the teardown reset this
+// cell holds is reset_on_disconnect's.
 TEST(InboundFrameDispositionsOd29, ATerminalCloseAfterPhase1ResolvedJoinsWithNoEarlyCut) {
     auto const factory = std::make_shared<fixpp::test_support::HookedStoreFactory>();
     auto const held = std::make_shared<bool>(false);
@@ -2420,7 +2424,7 @@ TEST(InboundFrameDispositionsOd29, ATerminalCloseAfterPhase1ResolvedJoinsWithNoE
     auto const hold_budget = std::chrono::milliseconds{fixpp::test_support::kHoldBound} / 4;
     Od29Cell c{[&](SessionConfig& cfg) {
         cfg.store_factory = factory;
-        cfg.reset_on_logout = true;
+        cfg.reset_on_disconnect = true;
     }};
     bool const answered = c.reached && c.rig.deliver(c.rig.msg("5", 2));
     bool const holding = answered && c.rig.run_until([&] { return *held; }, hold_budget);
