@@ -755,6 +755,8 @@ writes.
    - R-5g: the crossing.
    - R-5h: a liveness Heartbeat, in C2 and C1, and C1 at arm L, with one ending.
    - R-5j: arm S against a direct caller's `open()` overlap, and `open()`'s ending.
+   - R-5k: our Logout with the member clear, behind a lower frame whose store call was cancelled, on a volatile
+     store: D-OUT-10's `dispatch_aborted` ("What it exempts").
    - R-1l `HeldInReplyStore`'s sink twin: the close-out exemption.
    - R-5i: the two conditional step-3 writes (RR-5 item 6).
 

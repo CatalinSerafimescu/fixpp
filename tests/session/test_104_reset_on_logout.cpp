@@ -3311,6 +3311,155 @@ TEST(ResetOnLogout104, DirectOpenLogonAcrossLogonSentReset_OpenReturnsSuccess_Ro
     direct_open_logon_across_logon_sent_reset(false);
 }
 
+// ── R-5k ──────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+bool is_outbound_store_at(fixpp::test_support::StoreCall const& c, seqnum_t const seq) {
+    return c.op == fixpp::test_support::store_op::store && c.dir == direction_t::outbound &&
+           c.first == seq;
+}
+
+// R-5k: Active on the Scene's RecordingStore over an unbounded MemoryStore, a volatile store,
+// with reset_on_logout set and no peer Logout, so no reset point runs and
+// wire_closed_by_reset_ stays clear. An application frame F, a Session::send spawned on its
+// own cancellation slot, is numbered f and enters MemoryStore::store, where its leading post
+// yields; close(graceful)'s phase 1, spawned after it, numbers its Logout L at f + 1 and calls
+// its store. When `cancel` is set, F's slot is emitted on from inside L's store call
+// expression (StoreCallLog::on_call), so F meets the cancellation in its MemoryStore::store
+// before the lock, stores nothing, and store_then_emit takes f back (D-OUT-1). L's store then
+// fails the MemoryStore's order check, which on a volatile store is logged-then-proceed into
+// D-OUT-10, with L's number above the manager's next; the member is clear, so L ends
+// dispatch_aborted, untransmitted. The forced hit (`cancel` clear): F is stored, and L is
+// stored and transmitted at f + 1; the peer's Logout then ends the close.
+void cancelled_lower_send_before_logout_store(session_role const role, bool const cancel) {
+    SCOPED_TRACE(std::string{rg::role_name(role)} + (cancel ? "" : "/not cancelled"));
+    asio::cancellation_signal sig;  // declared before the scene: the send's slot is on it
+    bool send_done = false;
+    std::exception_ptr send_exception;
+    std::optional<fixpp::core::expected_t<void>> send_r;
+    bool close_done = false;
+    std::optional<seqnum_t> mgr_out_at_logout_return;
+    std::vector<std::byte> app_frame;
+    rg::Scene s{rg::Options{.role = role, .recording_store = true}};
+    s.cfg.reset_on_logout = true;
+    s.session = std::make_unique<fixpp::session::Session>(s.engine, s.cfg);
+    ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+    auto& mgr = session_test_access::seqnum_mgr(*s.session);
+    seqnum_t const f = mgr.next_outbound_unsafe();
+    auto const mark = s.sent.size();
+    std::string const payload =
+        "35=D\x01"
+        "11=ORD-104-R5K\x01" +
+        std::string{rg::kSideAndTime};
+    app_frame.assign(reinterpret_cast<std::byte const*>(payload.data()),
+                     reinterpret_cast<std::byte const*>(payload.data()) + payload.size());
+    s.log->arm();
+    s.log->on_call = [&sig, f, cancel](fixpp::test_support::StoreCall const& c) {
+        if (cancel && is_outbound_store_at(c, f + 1)) sig.emit(asio::cancellation_type::terminal);
+    };
+    s.log->on_return = [&mgr, &mgr_out_at_logout_return, f](
+                           fixpp::test_support::StoreCall const& c) {
+        if (is_outbound_store_at(c, f + 1)) mgr_out_at_logout_return = mgr.next_outbound_unsafe();
+    };
+    auto const ex = fixpp::test_support::session_executor_of(*s.session, s.ioc);
+    asio::co_spawn(
+        ex, s.session->send(std::span<const std::byte>{app_frame}),
+        asio::bind_cancellation_slot(
+            sig.slot(), [&](std::exception_ptr const& e, fixpp::core::expected_t<void> const& r) {
+                send_exception = e;
+                if (!e) send_r = r;
+                send_done = true;
+            }));
+    asio::co_spawn(
+        ex,
+        [&s, &close_done]() -> asio::awaitable<void> {
+            (void)co_await s.session->close(close_mode::graceful);
+            close_done = true;
+        },
+        asio::detached);
+    bool const logout_store_returned =
+        s.pump_until([&] { return send_done && mgr_out_at_logout_return.has_value(); },
+                     kReleaseBudget);
+    auto const logouts = s.of_type("5", mark);
+    if (!cancel && logouts.size() == 1U) {
+        auto lo_fut = s.feed_spawn(s.logout(s.next_in()));
+        (void)s.pump_until([&] { return rg::Scene::ready(lo_fut); }, kReleaseBudget);
+    }
+    bool const close_returned = s.pump_until([&] { return close_done; }, kReleaseBudget);
+
+    auto const& calls = s.log->calls();
+    auto const find_store = [&calls](seqnum_t const seq) {
+        fixpp::test_support::StoreCall const* found = nullptr;
+        int n = 0;
+        for (auto const& c : calls) {
+            if (is_outbound_store_at(c, seq)) {
+                found = &c;
+                ++n;
+            }
+        }
+        return n == 1 ? found : nullptr;
+    };
+    auto const* const f_store = find_store(f);
+    auto const* const l_store = find_store(f + 1);
+
+    ASSERT_TRUE(logout_store_returned) << "setup: the send and L's store call did not both end";
+    ASSERT_NE(f_store, nullptr) << "setup: not exactly one outbound store call at f = " << f;
+    ASSERT_NE(l_store, nullptr) << "setup: not exactly one outbound store call at f + 1";
+    EXPECT_TRUE(close_returned) << "close() did not return";
+    EXPECT_FALSE(send_exception) << "send() let an exception out";
+
+    if (!cancel) {
+        // The forced hit: F is stored, then L is stored and transmitted at its number.
+        EXPECT_TRUE(f_store->returned() && !f_store->error) << "F's store did not succeed";
+        EXPECT_TRUE(send_r.has_value() && send_r->has_value()) << "send() did not succeed";
+        EXPECT_TRUE(l_store->returned() && !l_store->error) << "L's store did not succeed";
+        ASSERT_EQ(logouts.size(), 1U) << "35=5 frames written: " << s.written(mark);
+        EXPECT_EQ(rg::field(logouts.front(), 34), std::to_string(f + 1))
+            << "the 35=5 written is not at L's number";
+        return;
+    }
+    // Reach: F met the cancellation inside MemoryStore::store, which threw before its lock,
+    // so the call was entered and never returned, and the send ended dispatch_aborted.
+    EXPECT_TRUE(f_store->entered() && !f_store->returned())
+        << "F's store call: entered " << f_store->entered() << ", returned "
+        << f_store->returned();
+    EXPECT_TRUE(send_r.has_value() && !send_r->has_value() &&
+                send_r->error() == fixpp::core::error::dispatch_aborted)
+        << "send() did not end dispatch_aborted";
+    // Reach: F's take-back preceded L's store's return, and L's store failed its order check.
+    EXPECT_EQ(mgr_out_at_logout_return, std::optional<seqnum_t>{f})
+        << "the manager's next outbound when L's store returned";
+    EXPECT_TRUE(l_store->returned() &&
+                l_store->error == fixpp::core::error::store_seqnum_out_of_order)
+        << "L's store call: returned " << l_store->returned() << ", error "
+        << (l_store->error ? static_cast<int>(*l_store->error) : -1);
+    // No reset point ran before L's store returned, so the member was clear at D-OUT-10.
+    for (auto const& c : calls) {
+        bool const reset_call = c.op == fixpp::test_support::store_op::reset ||
+                                c.op == fixpp::test_support::store_op::reset_to;
+        EXPECT_FALSE(reset_call && c.called_at < l_store->returned_at)
+            << "a reset call before L's store returned";
+    }
+    // D-OUT-10's ending with the member clear: dispatch_aborted, so phase 1 leaves by its
+    // not-sent exit, with no 35=5 and no LogoutSent.
+    EXPECT_TRUE(logouts.empty()) << "a 35=5 was written: " << s.written(mark);
+    bool logout_sent_visited = false;
+    for (auto const st : s.session->fsm_visit_history()) {
+        logout_sent_visited = logout_sent_visited || st == fsm_state::LogoutSent;
+    }
+    EXPECT_FALSE(logout_sent_visited) << "the session entered LogoutSent";
+    EXPECT_EQ(mgr.next_outbound_unsafe(), f) << "the manager's next outbound after close()";
+}
+
+}  // namespace
+
+TEST(ResetOnLogout104, CancelledLowerSendBeforeLogoutStore_NoLogoutTransmitted) {
+    for (bool const cancel : {true, false}) {
+        for (auto const role : kRoles) cancelled_lower_send_before_logout_store(role, cancel);
+    }
+}
+
 // ── T038 part B: R-5f, R-5g and R-5h, frames in flight across a reset point (contract RR-6) ──
 //
 // The live-transport arms (R-5f, R-5g GateWait, R-5h GateWait) run a direct acceptor with a
