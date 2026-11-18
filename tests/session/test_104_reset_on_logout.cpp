@@ -3405,6 +3405,10 @@ struct GateReadings104 {
     bool parked_at_release = false;
     std::optional<std::size_t> starts_at_reset;  // on_reset, at the first reset call
     bool awaiting_resend_at_reset = false;
+    // The first reset call's kind (HookedStore records a call before it fires on_reset): a
+    // reset_to is the unit's; a reset() is a teardown's, made where no unit ran.
+    std::optional<StoreLog::call_kind> reset_kind;
+    [[nodiscard]] bool at_unit() const { return reset_kind == StoreLog::call_kind::reset_to; }
 };
 void install_gate_readings(Rol104& r, GateReadings104& g,
                            std::shared_ptr<bwt::blocking_write_state> const& st) {
@@ -3415,7 +3419,8 @@ void install_gate_readings(Rol104& r, GateReadings104& g,
         }
         return c->released;
     };
-    r.factory->hooks.on_reset = [gr = &g, st, sess = r.s.session.get()] {
+    r.factory->hooks.on_reset = [gr = &g, st, sess = r.s.session.get(), lg = r.factory->log.get()] {
+        if (!lg->calls.empty()) gr->reset_kind = lg->calls.back().kind;
         gr->starts_at_reset = st->starts;
         gr->awaiting_resend_at_reset = session_test_access::resend_outstanding(*sess);
     };
@@ -3429,14 +3434,14 @@ void expect_store_returned_before_the_reset_to(StoreLog const& log, GateReadings
     ASSERT_EQ(log.store_events.size(), 2U) << "the selected store's two events";
     EXPECT_TRUE(at.has_value()) << "C2: no reset_to(1, 1) on the record; reset calls: reset() "
                                 << log.reset_calls << ", reset_to " << log.reset_to_calls;
-    EXPECT_TRUE(g.starts_at_reset.has_value()) << "C2: on_reset did not run";
+    EXPECT_TRUE(g.at_unit()) << "C2: the first reset call was not the unit's reset_to";
     if (at) {
         EXPECT_LE(log.store_events[0].writes_at, *at)
             << "C2: store_applied is not before the unit's reset_to";
         EXPECT_LE(log.store_events[1].writes_at, *at)
             << "C2: store_returned is not before the unit's reset_to";
     }
-    if (g.starts_at_release && g.starts_at_reset) {
+    if (g.starts_at_release && g.starts_at_reset && g.at_unit()) {
         EXPECT_EQ(*g.starts_at_release, *g.starts_at_reset)
             << "C2: a write started between store_returned and the unit's reset call";
     }
@@ -3553,8 +3558,11 @@ void too_high_resend_request_across_bound_unit(bool const rol) {
         << "the ResendRequest's on_inbound_frame did not return success";
     EXPECT_EQ(disconnected_entries(*s.session), 1) << "Disconnected entries in the history";
     // Reach at the head: the arm reached the leaf after the reset point.
-    EXPECT_TRUE(g.starts_at_reset.has_value()) << "on_reset did not run";
-    EXPECT_FALSE(g.awaiting_resend_at_reset) << "AwaitingResend was on at the unit's reset call";
+    EXPECT_TRUE(g.at_unit()) << "the first reset call was not the unit's reset_to";
+    if (g.at_unit()) {
+        EXPECT_FALSE(g.awaiting_resend_at_reset)
+            << "AwaitingResend was on at the unit's reset call";
+    }
     EXPECT_TRUE(s.resend_outstanding()) << "AwaitingResend is off after the release";
     expect_store_returned_before_the_reset_to(r.log(), g);
 }
@@ -3699,7 +3707,7 @@ void crossing_logout(session_role const role, crossing_arm const arm, bool const
         << "the store after close(): " << store->in << "/" << store->out;
     EXPECT_EQ(disconnected_entries(*s.session), 1) << "Disconnected entries in the history";
     if (live) {
-        if (g.starts_at_reset) {
+        if (g.starts_at_reset && g.at_unit()) {
             auto const after_reset = written_after(*st, *g.starts_at_reset);
             EXPECT_TRUE(after_reset.size() == 1U && after_reset.front().type == "5")
                 << "written after the reset point: " << describe(after_reset);
