@@ -248,7 +248,7 @@ TEST_F(FixTcCoverageGaps, BodyFieldsArbitraryOrder_Accepted) {
     EXPECT_EQ(capture.count_msg_type("3"), 0U)
         << "DIVERGENCE: no Reject for out-of-order body fields (QF emits 373=14)";
     // Prove BOTH reversed body fields were actually PARSED (not ignored): the
-    // resend range [1..2] was read from the reversed 16/7 and honored → a single
+    // resend range [1..2] was read from the reversed EndSeqNo and BeginSeqNo and honored → a single
     // GapFill whose gap starts at BeginSeqNo=1 (MsgSeqNum 34=1) and whose
     // NewSeqNo(36)=EndSeqNo+1=3, below the next outbound number. 36=3 pins EndSeqNo(16).
     ASSERT_EQ(capture.frames.size(), before + 1U) << "exactly one GapFill reply expected";

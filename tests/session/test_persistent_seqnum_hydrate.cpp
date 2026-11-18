@@ -2323,7 +2323,7 @@ TEST(PersistentSeqnumHydrate, NoHeap_HydrateAndPersistPaths) {
 // ResendOnNextFrame: inbound next 1 after the reset):
 //   manager.next_inbound == 1 and store.durable_inbound == 1 (equality, no over-persist).
 //
-// The 029/030 history below describes the asked-or-consumed case this cell pinned before 104.
+// The 029 and 030 history below describes the asked-or-consumed case this cell pinned before 104.
 //
 // 029 over-persist (the bug this witness was born to catch): reset set store=1, then an
 //   UNCONDITIONAL persist pushed store=2 while manager stayed at 1 — store(2) > manager(1),
