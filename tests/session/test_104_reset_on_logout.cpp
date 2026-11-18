@@ -2386,8 +2386,9 @@ TEST(ResetOnLogout104, BoundRouteInFlightPumpArm_RefusedAtTheBoundary) {
 // recipe is in research D10's R-1r row), so each RR-4 boundary is driven directly. Route B is
 // brought through its reset point: a too-high Logout, a GapFill past S, the bound's
 // acknowledgement and its unit. Then one call is made through session_test_access, as an
-// emitter in flight across the unit would make it: store_then_emit with the number the bound's
-// acknowledgement carried, below the pre-reset next outbound, or the inbound persist. Each is
+// emitter in flight across the unit would make it: store_then_emit with the outbound number
+// after the acknowledgement's (the one an emitter that assigned between the acknowledgement and
+// the unit holds; a store takes outbound numbers in order), or the inbound persist. Each is
 // refused at its boundary: no store call, nothing on the wire, store and manager (1, 1).
 namespace {
 
@@ -2418,7 +2419,7 @@ void bound_route_seam_call(session_role const role, seam_call const call) {
         << "setup: the bound did not end";
     auto const acks = s.of_type("5", ack_mark);
     ASSERT_EQ(acks.size(), 1U) << "setup: the bound's acknowledgement: " << s.written(ack_mark);
-    auto const stamp = static_cast<seqnum_t>(std::stoul(rg::field(acks.front(), 34)));
+    auto const stamp = static_cast<seqnum_t>(std::stoul(rg::field(acks.front(), 34)) + 1);
 
     int const stores_before = outbound_stores;
     int const persists_before = inbound_persists;
