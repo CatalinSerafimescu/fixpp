@@ -50,6 +50,7 @@
 #include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -969,4 +970,231 @@ TEST(ResetOnLogout104, Unanswered_Timeout_NoReset) {
 TEST(ResetOnLogout104, Unanswered_TransportDrop_NoReset) {
     unanswered_transport_drop(/*answered=*/false);
     unanswered_transport_drop(/*answered=*/true);
+}
+
+// ── T025: R-1c, R-1d and R-1e, the reset at receipt ──────────────────────────────────────
+//
+// These cells read whether the transport is open at a reset call, so they run an Engine
+// session on plain_rig, whose peer socket can see the session's end close
+// (plain_rig::peer_sees_hang_up). HookedStore's per-call record takes that reading and the
+// state at each reset() and reset_to call.
+
+namespace {
+
+// One engine-managed session on plain_rig with reset_on_logout, a HookedStore and an
+// admin-counting application. Members the hooks and spawned coroutines touch are declared
+// before the Rig.
+class Live104 {
+public:
+    struct CloseRun {
+        bool done = false;
+        std::vector<StoreLog::Write> writes_at_return;
+    };
+    Rol104::Control ctl;
+    std::shared_ptr<CloseRun> close_run = std::make_shared<CloseRun>();
+    std::shared_ptr<HookedStoreFactory> factory = std::make_shared<HookedStoreFactory>();
+    std::shared_ptr<AdminCountingApp104> app = std::make_shared<AdminCountingApp104>();
+    plain_rig::Rig rig{app};
+    std::shared_ptr<fixpp::session::Session> sess;
+
+    explicit Live104(session_role const role, std::uint32_t const logout_timeout_ms = kBoundT) {
+        factory->hooks.on_outbound_store = [c = &ctl] {
+            if (!c->hold_next_store) return false;
+            c->hold_next_store = false;
+            return true;
+        };
+        factory->hooks.release_when = [c = &ctl] { return c->released; };
+        factory->log->call_snapshot = [this] {
+#if defined(FIXPP_TEST_PEER_HANG_UP_READING)
+            bool const open = !plain_rig::peer_sees_hang_up(rig.peer);
+#else
+            bool const open = false;
+#endif
+            return CallReading{.state = sess ? sess->state() : fsm_state::NotConnected,
+                               .transport_open = open};
+        };
+        cfg_ = rig.cfg(role);
+        cfg_.reset_on_logout = true;
+        cfg_.store_factory = factory;
+        cfg_.logout_disconnect_timeout_ms = logout_timeout_ms;
+    }
+    Live104(Live104 const&) = delete;
+    Live104& operator=(Live104 const&) = delete;
+    ~Live104() {
+        ctl.released = true;
+        rig.stop();
+    }
+
+    [[nodiscard]] bool start_to_active() {
+        if (!rig.start(cfg_)) return false;
+        sess = rig.session();
+        if (!sess) return false;
+        app->session = sess.get();
+        return rig.to_active();
+    }
+    [[nodiscard]] StoreLog& log() const { return *factory->log; }
+    [[nodiscard]] Rol104::Numbers manager_numbers() const {
+        auto& m = session_test_access::seqnum_mgr(*sess);
+        return {.in = m.next_inbound_unsafe(), .out = m.next_outbound_unsafe()};
+    }
+    [[nodiscard]] std::optional<Rol104::Numbers> store_numbers() {
+        auto const st = factory->log->inner;
+        auto const out = std::make_shared<std::optional<Rol104::Numbers>>();
+        auto const done = std::make_shared<bool>(false);
+        asio::co_spawn(
+            rig.ioc,
+            [st, out, done]() -> asio::awaitable<void> {
+                auto in = co_await st->next_seqnum(direction_t::inbound, false);
+                auto o = co_await st->next_seqnum(direction_t::outbound, false);
+                if (in && o) *out = Rol104::Numbers{.in = *in, .out = *o};
+                *done = true;
+            },
+            asio::detached);
+        if (!rig.run_until([&] { return *done; }, kReleaseBudget)) return std::nullopt;
+        return *out;
+    }
+    [[nodiscard]] std::vector<std::string> peer_frames(std::string_view msg_type) const {
+        return plain_rig::frames_of_type(rig.peer.received, msg_type);
+    }
+    void spawn_close(close_mode const mode) {
+        asio::any_io_executor const ex = sess->executor().underlying();
+        auto const s = sess;
+        auto const run = close_run;
+        auto const lg = factory->log;
+        asio::co_spawn(
+            ex,
+            [s, run, lg, mode]() -> asio::awaitable<void> {
+                (void)co_await s->close(mode);
+                run->writes_at_return = lg->writes;
+                run->done = true;
+            },
+            asio::detached);
+    }
+    [[nodiscard]] bool close_returned_within(std::chrono::milliseconds const budget) {
+        if (rig.run_until([&] { return close_run->done; }, budget)) return true;
+        rig.clock->advance(std::chrono::milliseconds{cfg_.logon_timeout_ms} +
+                           std::chrono::milliseconds{1});
+        (void)rig.run_until([&] { return close_run->done; });
+        return false;
+    }
+    [[nodiscard]] std::string gap_fill(std::uint32_t begin, std::uint32_t new_seq_no) const {
+        return rig.msg("4", begin,
+                       "43=Y\x01"
+                       "122=" +
+                           rig.sending_time() + "\x01" + "123=Y\x01" +
+                           "36=" + std::to_string(new_seq_no) + "\x01");
+    }
+
+private:
+    fixpp::session::SessionConfig cfg_;
+};
+
+// The one reset of a receipt: a reset_to(1, 1) seen with the session Disconnected and its
+// transport open, and no other reset call.
+void expect_receipt_reset(StoreLog const& log) {
+    ASSERT_EQ(log.calls.size(), 1U)
+        << "reset calls: reset() " << log.reset_calls << ", reset_to " << log.reset_to_calls;
+    auto const& c = log.calls.front();
+    EXPECT_EQ(c.kind, StoreLog::call_kind::reset_to) << "the reset was a reset(), not the unit";
+    EXPECT_EQ(c.next_in, seqnum_t{1});
+    EXPECT_EQ(c.next_out, seqnum_t{1});
+    ASSERT_TRUE(c.reading.has_value());
+    EXPECT_EQ(c.reading->state, fsm_state::Disconnected)
+        << "the state at the reset: " << rg::state_name(c.reading->state);
+#if defined(FIXPP_TEST_PEER_HANG_UP_READING)
+    EXPECT_TRUE(c.reading->transport_open) << "the transport was closed at the reset";
+#else
+    std::cout << "[ READING  ] the transport reading is not made on this platform\n";
+#endif
+}
+
+}  // namespace
+
+// R-1c: close(graceful) sends the Logout, the peer answers in LogoutSent, and L's arm resets
+// at receipt: reset_to at the hook, Disconnected, the transport open, phase 1 not yet woken.
+TEST(ResetOnLogout104, Answered_ResetAtReceipt) {
+    // Declared before the session, so the hooks that read them outlive its teardown.
+    int woken = 0;
+    std::optional<int> woken_at_reset;
+    Live104 l{session_role::acceptor};
+    ASSERT_TRUE(l.start_to_active()) << "setup: the session did not reach Active";
+    l.factory->log->call_snapshot = [&l, inner = l.factory->log->call_snapshot, &woken,
+                                     &woken_at_reset] {
+        if (!woken_at_reset) woken_at_reset = woken;
+        return inner();
+    };
+    l.spawn_close(close_mode::graceful);
+    ASSERT_TRUE(l.rig.run_until([&] {
+        return l.rig.state() == fsm_state::LogoutSent && l.peer_frames("5").size() == 1U &&
+               static_cast<bool>(session_test_access::logout_wait_wake(*l.sess));
+    })) << "setup: phase 1's Logout was not sent";
+    auto& wake = session_test_access::logout_wait_wake(*l.sess);
+    wake = [orig = wake, &woken] {
+        ++woken;
+        orig();
+    };
+    l.rig.peer.send(l.rig.msg("5", l.manager_numbers().in));
+    EXPECT_TRUE(l.close_returned_within(4 * std::chrono::milliseconds{kBoundT}))
+        << "close() did not return";
+    expect_receipt_reset(l.log());
+    ASSERT_TRUE(woken_at_reset.has_value()) << "no reset call";
+    EXPECT_EQ(*woken_at_reset, 0) << "phase 1 had been woken at the reset";
+    EXPECT_EQ(l.manager_numbers(), (Rol104::Numbers{.in = 1, .out = 1}));
+    auto const st = l.store_numbers();
+    ASSERT_TRUE(st.has_value()) << "the store's numbers were not read";
+    EXPECT_EQ(*st, (Rol104::Numbers{.in = 1, .out = 1}));
+}
+
+// R-1d: the peer's in-sequence Logout in Active; A's reply carries the pre-reset next
+// outbound, onLogout sees the pre-reset numbers, and the reset is at receipt.
+TEST(ResetOnLogout104, PeerRequest_ResetAtReceipt) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        Live104 l{role};
+        ASSERT_TRUE(l.start_to_active()) << "setup: the session did not reach Active";
+        auto const before = l.manager_numbers();
+        auto const sent_before = l.peer_frames("5").size();
+        l.rig.peer.send(l.rig.msg("5", before.in));
+        ASSERT_TRUE(l.rig.run_until([&] {
+            return l.rig.state() == fsm_state::Disconnected &&
+                   l.peer_frames("5").size() == sent_before + 1;
+        })) << "setup: A's reply was not written";
+        auto const reply = l.peer_frames("5").back();
+        EXPECT_EQ(plain_rig::field_value(reply, "34"), std::to_string(before.out))
+            << "the reply's MsgSeqNum";
+        ASSERT_EQ(l.app->on_logout_numbers.size(), 1U) << "onLogout calls";
+        EXPECT_EQ(l.app->on_logout_numbers.front().next_in, before.in + 1)
+            << "NextNumIn inside onLogout";
+        EXPECT_EQ(l.app->on_logout_numbers.front().next_out, before.out + 1)
+            << "the next outbound number inside onLogout";
+        l.spawn_close(close_mode::terminal);
+        EXPECT_TRUE(l.close_returned_within(kReleaseBudget)) << "close() did not return";
+        expect_receipt_reset(l.log());
+    }
+}
+
+// R-1e: a too-high Logout, the gap filled past S, the bound's acknowledgement and its reset.
+TEST(ResetOnLogout104, TooHighLogout_ResetAtAcknowledgement) {
+    Live104 l{session_role::acceptor};
+    ASSERT_TRUE(l.start_to_active()) << "setup: the session did not reach Active";
+    auto const n = l.manager_numbers().in;
+    auto const sent_before = l.peer_frames("5").size();
+    l.rig.peer.send(l.rig.msg("5", n + 3));
+    ASSERT_TRUE(l.rig.run_until([&] {
+        return session_test_access::peer_logout_phase(*l.sess) == kPending;
+    })) << "setup: no pending mark";
+    l.rig.peer.send(l.gap_fill(n, n + 4));
+    ASSERT_TRUE(l.rig.run_until([&] {
+        return l.rig.state() == fsm_state::Disconnected &&
+               l.peer_frames("5").size() == sent_before + 1;
+    })) << "setup: the bound did not acknowledge";
+    auto const reply = l.peer_frames("5").back();
+    ASSERT_EQ(l.app->on_logout_numbers.size(), 1U) << "onLogout calls";
+    EXPECT_EQ(l.app->on_logout_numbers.front().next_in, n + 4) << "NextNumIn inside onLogout";
+    EXPECT_EQ(std::to_string(l.app->on_logout_numbers.front().next_out - 1),
+              plain_rig::field_value(reply, "34"))
+        << "the next outbound number inside onLogout";
+    l.spawn_close(close_mode::terminal);
+    EXPECT_TRUE(l.close_returned_within(kReleaseBudget)) << "close() did not return";
+    expect_receipt_reset(l.log());
 }
