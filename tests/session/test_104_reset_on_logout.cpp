@@ -2097,3 +2097,114 @@ TEST(ResetOnLogout104, CloseNotHeldWhenReceiptEndsWithoutUnit_StuckPending) {
         EXPECT_EQ(close_reset_wait_expired_count(s), 1) << "close_reset_wait_expired events";
     }
 }
+
+// ── T033: R-1o, a Logout in LogonSent or NotConnected ────────────────────────────────────
+//
+// The arms share one store double: a HookedStore whose MemoryStore is seeded to NextNumIn
+// kHydratedN, so the session hydrates above 1. The mTLS arms run a direct initiator started by
+// open() with an mtls_ca profile and a CompID binding (test_compid_binding_mtls_fail_closed.cpp's
+// Cell B): such an initiator has no live identity, so the Logon path's gate fails closed.
+
+namespace {
+
+constexpr seqnum_t kHydratedN = 5;
+
+std::shared_ptr<fixpp::session::MemoryStore> hydrated_store() {
+    auto st = std::make_shared<fixpp::session::MemoryStore>(
+        fixpp::session::MemoryStore::Config{.policy = fixpp::session::capacity_policy::unbounded});
+    asio::io_context seed;
+    asio::co_spawn(
+        seed,
+        [st]() -> asio::awaitable<void> {
+            for (seqnum_t i = 1; i < kHydratedN; ++i) {
+                (void)co_await st->next_seqnum(direction_t::inbound, true);
+            }
+        },
+        asio::detached);
+    seed.run();
+    return st;
+}
+
+bool compid_authorization_failed(rg::Scene const& s) {
+    for (auto const& ev : s.session->recent_events()) {
+        if (std::holds_alternative<fixpp::session::session_event_compid_authorization_failed>(ev)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+enum class logon_sent_arm : std::uint8_t { resets, mtls_unauthorised, rol_off_mtls };
+
+// One R-1o LogonSent arm: open() as an initiator hydrated at kHydratedN, then the peer's
+// Logout at 34 = 2, below NextNumIn.
+void logon_sent_logout(logon_sent_arm const arm) {
+    bool const rol = arm != logon_sent_arm::rol_off_mtls;
+    bool const mtls = arm != logon_sent_arm::resets;
+    Rol104 r{Opts104{.role = session_role::initiator, .reset_on_logout = rol}};
+    r.factory->log->inner = hydrated_store();
+    auto& s = r.s;
+    if (mtls) {
+        s.cfg.security_profile =
+            fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
+        s.cfg.compid_authorization_policy.add_binding("CN=TW-PROD-01,O=Peer,C=US", {"TW"});
+        s.session = std::make_unique<fixpp::session::Session>(s.engine, s.cfg);
+        r.app->session = s.session.get();
+    }
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                                   s.session->open(), asio::use_future);
+    ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(open_fut); })) << "setup: open()";
+    ASSERT_TRUE(open_fut.get().has_value()) << "setup: open() failed";
+    ASSERT_EQ(s.state(), fsm_state::LogonSent) << "setup: not in LogonSent";
+    ASSERT_EQ(s.next_in(), kHydratedN) << "setup: the session did not hydrate above 1";
+    auto const mark = s.sent.size();
+    auto const res = s.feed(s.logout(2));
+    EXPECT_EQ(s.state(), fsm_state::Disconnected);
+    if (arm == logon_sent_arm::resets) {
+        EXPECT_EQ(s.count("5", mark), 0U) << "a 35=5 written by fixpp: " << s.written(mark);
+        expect_one_reset_to_one_one_disconnected(r);
+        return;
+    }
+    EXPECT_TRUE(r.log().calls.empty()) << "a reset call: reset() " << r.log().reset_calls
+                                       << ", reset_to " << r.log().reset_to_calls;
+    if (arm == logon_sent_arm::mtls_unauthorised) {
+        EXPECT_TRUE(compid_authorization_failed(s)) << "no authorisation-failed event";
+    } else {
+        EXPECT_EQ(s.count("5", mark), 0U) << "a 35=5 written by fixpp: " << s.written(mark);
+        EXPECT_TRUE(res.has_value()) << "the arm did not return success";
+        EXPECT_FALSE(compid_authorization_failed(s)) << "an authorisation-failed event";
+    }
+}
+
+}  // namespace
+
+// R-1o Resets, the forced hit of the other three arms' "no reset".
+TEST(ResetOnLogout104, LogonSentLogout_Resets) { logon_sent_logout(logon_sent_arm::resets); }
+
+TEST(ResetOnLogout104, LogonSentLogout_MtlsUnauthorised_NoReset) {
+    logon_sent_logout(logon_sent_arm::mtls_unauthorised);
+}
+
+// The authorisation-failed event's absence reads the same event type by the same predicate as
+// the mTLS arm, whose event is its forced hit.
+TEST(ResetOnLogout104, LogonSentLogout_RolOff_MtlsUnauthorised_Unchanged) {
+    logon_sent_logout(logon_sent_arm::rol_off_mtls);
+}
+
+// R-1o NotConnected: an acceptor's first frame is a Logout; no reset call follows, after the
+// frame or after close().
+TEST(ResetOnLogout104, NotConnectedLogout_NoReset) {
+    Rol104 r{Opts104{.role = session_role::acceptor}};
+    r.factory->log->inner = hydrated_store();
+    auto& s = r.s;
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                                   s.session->open(), asio::use_future);
+    ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(open_fut); })) << "setup: open()";
+    ASSERT_TRUE(open_fut.get().has_value()) << "setup: open() failed";
+    ASSERT_EQ(s.state(), fsm_state::NotConnected) << "setup: not in NotConnected";
+    (void)s.feed(s.logout(2));
+    EXPECT_TRUE(r.log().calls.empty())
+        << "a reset call after the frame: reset() " << r.log().reset_calls << ", reset_to "
+        << r.log().reset_to_calls;
+    close_and_expect_no_reset(r, "close()");
+}
