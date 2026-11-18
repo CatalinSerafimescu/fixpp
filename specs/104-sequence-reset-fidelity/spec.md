@@ -193,6 +193,20 @@ listed again in the PR body for the owner's review at Gate B sign-off. The mecha
     `TooHighLogoutState103.*` and the two new cells, R-1y and R-1z. If an assert fires, implementation stops and
     the decision returns to the owner.
 
+### Session 2026-11-18 (checklist audit; orchestrator ruling)
+
+- Q (CHK006, CHK036): do arm S's 35=5 branch in `on_inbound_logon_sent_`, which sits ahead of `interpret_logon`, and
+  its mTLS `authorize` call run with `reset_on_logout` off? → A: **No: only when `reset_on_logout` is set.** With it
+  off nothing changes from the base: `interpret_logon` refuses the frame as a non-Logon, the session records
+  `Disconnected` and returns success, and no `session_event_compid_authorization_failed` is emitted, whatever the
+  identity (contract W11). With it set the branch runs, the mTLS gate first (design ruling 5, FIX-TC 1S(c)): an
+  authorised identity resets once (RU-2, W10), and an unauthorised one draws the gate's event with no reset (O19).
+  In both cases the arm ends `Disconnected` and returns success, exactly as the base's ending does, and sends no
+  reply Logout (RU-2, DQ-9). Reasons: it keeps W11, contract RR-2 item 1 and data-model invariant RO-1 (with rol off 104
+  adds nothing); it is the minimal change; and QuickFIX's observable difference with the knob off is the reply Logout,
+  which RU-2 already lists as a departure (DQ-9). Cell: R-1o's rol-off arm, RED by the mutant "the branch runs
+  whatever the knob" (contract RR-1 "Arm S's branch and the knob", research D10).
+
 ## User Scenarios & Testing *(mandatory)*
 
 The users are the operators and integrators of a fixpp session that talks to a QuickFIX-family counterparty.
@@ -252,8 +266,10 @@ the state, both numbers, the store, and the frames fixpp sends.
 2. **Given** the same with `unilateral`, **Then** the same.
 3. **Given** a `bilateral_strict` initiator (which sent 141=Y and reset before its Logon), **When** its
    acknowledgement carries 141=Y at 34=1, **Then** behaviour is unchanged (in sequence, reset as today).
-4. **Given** a lenient initiator, **When** the acknowledgement carries 141=Y at a 34 other than 1, **Then** the
-   behaviour is the one the plan derives from QuickFIX for that case, stated in the B&L row (see Edge Cases).
+4. **Given** a lenient initiator, **When** the acknowledgement carries 141=Y at a 34 = M > 1, **Then** the
+   acknowledgement is not consumed: both numbers are reset (inbound next 1, outbound next 1), the session reaches
+   Active without sending a second Logon, and the peer's next frame draws a ResendRequest from 1 (research D4,
+   ruling O-2; DQ-2; B-104-4, L-104-5).
 
 ---
 
@@ -323,8 +339,8 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
   across the reconnect is retired (B-103-9 amended).
 - **The peer's Logout never arrives** (timeout, or a dropped connection): there is no reset under `reset_on_logout`.
   Only `reset_on_disconnect` resets (FR-002, FR-004).
-- **141=Y acknowledgement at 34 ≠ 1** on a lenient initiator: what QuickFIX does is read in research and adopted or
-  disclosed.
+- **141=Y acknowledgement at 34 ≠ 1** on a lenient initiator: research D4 reads the three engines, and ruling O-2
+  adopts QuickFIX/J's and QuickFIX/Go's outcome (US2 AS4; DQ-2, L-104-5).
 - **A too-low Logon or acknowledgement with 43=Y**: it draws the same Logout (E-2, research D6). This follows
   FIX-SL §4.3.11 and QuickFIX/Go. QuickFIX C++ and QuickFIX/J run their PossDup handling and then wait for their logon
   timeout, which is a departure recorded in the plan.
@@ -381,28 +397,41 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
 
 - **FR-007**: In LogonSent, a Logon acknowledgement carrying 141=Y MUST be recognised as a reset before it is
   compared with NextNumIn. An acknowledgement with 141=Y at 34=1 MUST NOT end the session as too low, whatever
-  NextNumIn was.
+  NextNumIn was. On the asked path (fixpp's own Logon carried 141=Y) NextNumIn is already 1 when the
+  acknowledgement is compared, so that path keeps its `check_inbound` (FR-010; research D3.1).
 - **FR-008**: On such an acknowledgement that fixpp did not ask for (lenient or unilateral policy, no 141=Y on fixpp's
   own Logon), both sequence numbers MUST be reset: inbound continues at 2 after the acknowledgement's 34=1, and
-  outbound restarts at 1. fixpp MUST NOT send a further Logon. This follows QuickFIX/J and QuickFIX/Go (clarification
-  2026-11-17). The plan derives, from the three engines, how fixpp answers a peer's ResendRequest that follows the
-  reset.
+  outbound restarts at 1. At a 34 = M > 1 the acknowledgement is not consumed: inbound next 1, outbound next 1, and
+  the peer's next frame draws a ResendRequest from 1 (research D4, ruling O-2). fixpp MUST NOT send a further Logon.
+  This follows QuickFIX/J and QuickFIX/Go (clarification 2026-11-17). The plan derives, from the three engines, how
+  fixpp answers a peer's ResendRequest that follows the reset.
 - **FR-009**: The reset MUST be durable on a persistent store, with the guarantees 093's reset unit gives today (E-1):
   ordering against `close()` and failure handling. On a direct mTLS initiator the unasked unit MUST run only after
   the live identity is authorised for the CompID (clarification N-8).
-- **FR-010**: A strict initiator's handling of its own acknowledgement MUST be unchanged.
+- **FR-010**: A strict initiator's handling of its own acknowledgement MUST be unchanged, and so MUST that of any
+  initiator whose own Logon carried 141=Y (a lenient one whose reset knob put it at (1, 1) before its Logon): both
+  are the asked case (research D3.1).
 - **FR-011**: L-103-2 MUST be retired, and its B&L row moved to the closed file with 104's resolution.
 
 **Too-low frame in the Logon arms (#701)**
 
-- **FR-012**: In LogonSent and in NotConnected, a frame whose MsgSeqNum is below NextNumIn, whatever its
+- **FR-012**: In LogonSent and in NotConnected, a Logon (35=A) whose MsgSeqNum is below NextNumIn, whatever its
   PossDupFlag(43) (erratum E-2: FIX-SL §4.3.11 has no PossDup exception for the Logon; QuickFIX/Go), and not exempted
   by FR-007, MUST draw a Logout whose Text(58) is exactly "MsgSeqNum too low, expecting N but
-  received M" (N = NextNumIn, M = the frame's 34). The session then ends `Disconnected`. The Logout MUST NOT be
+  received M" (N = NextNumIn before the frame, M = the frame's 34 as parsed; both written in decimal by
+  `std::to_chars`, with no padding and no sign, and the peer's bytes never echoed; research D5 "The text"). The
+  session then ends `Disconnected`. Only a Logon reaches the sequence check in these arms: `interpret_logon` refuses
+  any other first frame before it, with its own ending, so a Logout (35=5) in LogonSent never reaches the sequence
+  check, whatever its 34: with `reset_on_logout` set arm S's branch ahead of `interpret_logon` takes it (contract
+  RR-1 row S, W10, O19), and with it off `interpret_logon`'s non-Logon refusal does (W11, clarification
+  2026-11-18), so it never draws the too-low Logout. The Logout MUST NOT be
   sent before the arm's identity gates pass: the mTLS CompID-authorisation gate in both arms, and `authorize_logon`
-  on the acceptor. A frame they refuse takes the gate's own silent ending (FIX-TC 1S(c); clarification N-8).
+  on the acceptor. A frame they refuse takes the gate's own silent ending (FIX-TC 1S(c); clarification N-8). On an
+  engine-managed initiator the peer's identity is authorised at connect, before its Logon is sent
+  (`reconnect_fsm.cpp`'s step 7), so the in-arm gate decides only for a direct mTLS session (research D3.1).
 - **FR-013**: That Logout MUST be numbered with the session's next outbound number, and NextNumIn MUST NOT be
-  advanced, as in B-103-10. It MUST carry Text(58) only, with no SessionStatus(1409) (clarification 2026-11-17).
+  advanced, as in B-103-10. It MUST carry Text(58) only, with no SessionStatus(1409) and no
+  NextExpectedMsgSeqNum(789) (clarification 2026-11-17; contract T1).
 - **FR-014**: A Logout that cannot be sent (build, store or transmit failure) MUST NOT stop the session from ending.
   The ending MUST be the one fixpp's existing Logon-arm Logout helpers give that failure, stated in the B&L row.
 - **FR-015**: The too-low Logout MUST NOT be a `reset_on_logout` trigger (FR-001).
@@ -462,6 +491,10 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
 The one list (FR-018) of 104's observable departures from QuickFIX C++ (QFC), QuickFIX/J (QFJ) or QuickFIX/Go
 (QFGo), each with its authority. research.md, data-model.md and the contract refer to these rows and do not keep
 their own list. A row marked *pre-existing* is a departure 104 touches the surface of but does not create.
+Engine behaviour restated elsewhere (the contract's Outcomes "QuickFIX" column, data-model's B-104-* and L-104-*
+rows) is subordinate to this table: on a difference this table wins, and a restatement that shows a departure not
+listed here is a defect of that restatement. The B&L row that carries each *pre-existing* row to operators: DQ-6,
+L-104-3; DQ-7, B-104-6; DQ-12a, DQ-13 and DQ-14, B-104-1's departure clause.
 
 | # | Departure | Engines it departs from | Authority |
 |---|---|---|---|
@@ -470,7 +503,7 @@ their own list. A row marked *pre-existing* is a departure 104 touches the surfa
 | DQ-3 | A ResendRequest answered with nothing sent at or above its BeginSeqNo writes GapFill(34=B, 36=next), (1, 1) included (L-104-1) | QFC and QFJ at next outbound 1; QFGo always | research D3.3 (benign; QFC and QFJ send the same shape at begin = next > 1) |
 | DQ-4 | 789 evaluated after an unasked reset (D3.2, L-104-6) | QFGo (skips 789 when 141 is present) | QFC, QFJ |
 | DQ-5 | A too-low Logon or acknowledgement with 43=Y draws the Logout (E-2, D6, L-104-4) | QFC, QFJ (PossDup handling, then their logon timeout) | FIX-SL §4.3.11; QFGo |
-| DQ-6 | The posture, strict and SendingTime refusals and the 1137 Reject answer before the identity gates (L-104-3) | none (no engine binds certificates to CompIDs); FIX-TC 1S(c) | *pre-existing*; 104's too-low Logout and unasked reset come after the gates (clarification N-8) |
+| DQ-6 | The posture, strict and SendingTime refusals and the 1137 Reject answer before the identity gates on an mTLS acceptor, and the posture and SendingTime Logouts before the gate on a direct mTLS initiator (L-104-3) | none (no engine binds certificates to CompIDs); FIX-TC 1S(c) | *pre-existing*; 104's too-low Logout and unasked reset come after the gates (clarification N-8) |
 | DQ-7 | The Logon arms' sequence check is made with `validate_sequence_numbers` off (B-104-6) | QFJ (skips it at Logon) | *pre-existing*, unchanged |
 | DQ-8 | The too-low Logout leaves the transport open until EOF, `close()` or stop (as B-103-10, L-103-5) | QFC, QFJ (close at once) | 103 precedent |
 | DQ-9 | No reply Logout to a Logout received in LogonSent; the reset is made (RU-2) | QFC, QFJ (reply with a Logout, then reset) | orchestrator ruling RU-2; FIX-TC 1B(e) makes that Logout optional |

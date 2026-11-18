@@ -56,8 +56,10 @@ GTest name given to `ctest -R` selects nothing and exits 0, so select like this:
 
 ```bash
 cmake --build --preset linux-clang-debug --target session_104_tests
-# one cell: run the binary; record the reported test count (0 fails the step)
-<build>/tests/session/session_104_tests --gtest_filter='ResetOnLogout104.Unanswered_Timeout_NoReset'
+# one cell: run the binary; record the reported test count (0 fails the step). The leading and trailing `*`
+# are required: a TEST_P suite is instantiated under a prefix and its names carry a parameter suffix
+# (tasks "Execution rules", Selection), and R-1a runs both roles.
+<build>/tests/session/session_104_tests --gtest_filter='*ResetOnLogout104.Unanswered_Timeout_NoReset*'
 # the constitutional run: by label, refusing an empty selection
 ctest --preset linux-clang-debug -L 104 --no-tests=error --output-on-failure
 ```
@@ -67,7 +69,7 @@ The settling experiment (plan phase 1) runs before the other cells. Run it in a 
 
 ```bash
 <build>/tests/session/session_103_tests --gtest_filter='*TooHighLogoutState103.*'
-<build>/tests/session/session_104_tests --gtest_filter='ResetOnLogout104.DuplicateTooHighLogoutWhilePending_*:ResetOnLogout104.ClaimsAPendingBound_*'
+<build>/tests/session/session_104_tests --gtest_filter='*ResetOnLogout104.DuplicateTooHighLogoutWhilePending_*:*ResetOnLogout104.ClaimsAPendingBound_*'
 ```
 
 Its known positives, each in a scratch copy with the binary `strings`-checked fresh (plan phases 1 and 2; research
@@ -86,7 +88,10 @@ suspension stays covered by the source reading (plan phase 1).
 
 For each cell in research D10:
 1. Build at the commit that adds the cell, before its fix, and record the failing assertion.
-2. Build after the fix and record GREEN, with the same non-zero test count.
+2. Build after the fix and record GREEN, with the same non-zero test count for the cell's own filter. A
+   binary-level or label-level count can change by design between the two readings (a later story's cells added to
+   the same binary; an arm dropped on a recorded reading, such as R-1w's `Storeless` or R-3); the record then names
+   each test added or dropped since the RED reading, and an unexplained difference fails the step.
 3. In a scratch copy, apply the cell's mutant. `strings`-check that the binary is fresh, re-run, and record RED.
 
 The re-pinned cells (D8) are run in their own registrations, `session_reset_on_lifecycle` and
@@ -177,7 +182,8 @@ The order is plan phases 9 to 11.
    the spec's Normative References (re-derive with `grep -n -F '§4.3.11' spec/coverage-index.md` and the like);
    the `spec/coverage-index.md` notes column for those keys; the supersession flags on
    `brain/components/session.md` and `brain/components/graceful-logout.md` (024 C3.1, 027 C3, 093 C-6's
-   `close()` bullet, B-538-7's clause, 103's latch disclosure, and each merged-bundle document the census flags);
+   `close()` bullet, B-538-7's clause, 103's latch disclosure, and each merged-bundle document the census flags),
+   and on every other component page tasks T094's recipe finds (`message-store-quiescence.md` among them);
    the L-104-3 follow-up issue, labelled.
 2. `/speckit-verify`, then Gate B (phase 10).
 3. FR-017 (phase 11; research D9, ruling O-3), after Gate B's last fix:

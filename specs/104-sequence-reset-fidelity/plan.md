@@ -93,11 +93,18 @@ accounted for on its own:
     `bench/ci-suite.txt`. RR-4's byte test is therefore measured only by the manual paired `session_send_bench`
     run above.
 - The LogonSent arm gains one flag test.
+- `Engine::stop()` gains R-1t's step-3 mark: one test of an unset member per stop, not per message, so not a perf
+  change under Article VIII, as the LogonSent flag test is not.
 - The rest runs only on a Logout that ends the session, on an establishment frame, or in `close()`.
 
 **Constraints**:
-- Article XV §1: no allocation on parse → validate → dispatch. The unit's `co_spawn` frame is one per session
-  ending.
+- Article XV §1: no allocation on parse → validate → dispatch. Each new allocation site and its condition, none
+  per message:
+  - the reset unit's frame and its `co_spawn` at a receipt's reset point: at most one per connection, at a Logout
+    that ends the session;
+  - the same at the unasked 141=Y branch of `on_inbound_logon_sent_`: at most one per establishment;
+  - each posted turn of `close()`'s poll: in `close()` only, while a receipt or unit is outstanding;
+  - the step-3 mark's awaited hook in `Engine::stop()`: only when a test has set it.
 - 093 contract C-6's unit guarantees.
 - One observable ending per condition.
 - Keep QuickFIX's observable behaviour.
@@ -142,7 +149,7 @@ accounted for on its own:
 | XI §3: "`fixpp::sync::async_mutex` … is the only allowed mutex shape for coroutines. One exception is permitted … `detail::replay_gate` …" | **PASS.** No new exclusion primitive. The unit's manager set takes the existing seqnum `async_mutex`, granted inline (risk R1). The receipt marker is a strand-confined byte, not a lock. |
 | XI §7: "Threading/concurrency-affecting features trigger all four mandatory controls (Appendix A)" | **Applies.** It moves `close()`'s wait and adds the unit's suspension to three inbound arms. Appendix A's "Session FSM: … recovery semantics" also applies. The controls: `/clarify` done 2026-11-17 (spec Clarifications); `/analyze` after `/speckit-tasks`; Codex Gate A on this bundle; owner `/plan` sign-off (delegated, below). |
 | XII §9: "Security-affecting features trigger all four mandatory controls (Appendix A)" | **Covered by XI §7's four controls.** 104 changes no TLS, cipher or cert-source code, but it changes two orderings against the mTLS CompID-authorisation gate, decided from FIX-TC 1S(c) (clarification N-8): the too-low Logout comes after the identity gates in both Logon arms (and after `authorize_logon` on the acceptor), and the initiator's unasked reset unit comes after its gate. Arm S's reset requires the same authorisation. What stays before the gates (posture, strict, SendingTime, 1137) is pre-existing and disclosed as L-104-3 (DQ-6). Cells: T-6's identity arms, U-9, R-1o. |
-| XV §1: "The "hot path" of this ban is the latency-critical **in-memory** path — parse → validate → dispatch and `MemoryStore`, which MUST stay zero-allocation per message." | **PASS.** Per frame: one flag test in the LogonSent arm, and RR-4's byte test in `store_then_emit` and `persist_inbound_advance_`; none allocates. The unit's frame is allocated once per session-ending Logout, which is not per message. `close()`'s poll is not on the per-message path. The text is built in a fixed stack array. |
+| XV §1: "The "hot path" of this ban is the latency-critical **in-memory** path — parse → validate → dispatch and `MemoryStore`, which MUST stay zero-allocation per message." | **PASS, by reading.** Per frame: one flag test in the LogonSent arm, and RR-4's byte test in `store_then_emit` and `persist_inbound_advance_`; none allocates. The unit's frame is allocated once per session-ending Logout, which is not per message. `close()`'s poll is not on the per-message path. The text is built in a fixed stack array. The new allocation sites are listed under "Constraints". No allocation-counting cell is added: the existing `tests/alloc_guard/` entries, run under `tools/check_alloc.py`, are re-run at the head (T084), and whether any of them reaches `store_then_emit` or the LogonSent arm is read and recorded, so the record says which changed lines a measured witness covers and which rest on this reading. |
 | XVI §3 / §4: "`/clarify` is MANDATORY before `/plan` …" / "`/analyze` is MANDATORY for the same trigger set" | `/clarify` is done. `/analyze` is scheduled after `/speckit-tasks`. |
 | XVII §1: Gate A triggers "Touches concurrency / threading / cancellation / executor model", "Touches the session FSM, recovery, or message store contract" | **Gate A required** (spec Assumptions). |
 | XVII §7: "Before opening any PR, the contributor MUST run a local … build + ctest cycle on at least the `linux-clang-debug` preset" | Planned (phase 7). §7's resource gate is discharged by the owner's standing grant of 2026-11-17 ("run autonomously through all steps … Stop if you hit a blocker"), recorded at tasks.md T001. Builds still run one at a time under `flock /tmp/fixpp-build.lock`, new trees go on `/mnt/wsl/fixppbuild`, and a build stops on any WSL memory pressure. |
@@ -259,8 +266,9 @@ result and every RED/GREEN/mutant record, never code comments.
           the operand is still launching or on another executor. The group then completes, and the bound resumes
           to `live()` and its claim.
 
-       So the race takes at least two posted turns, possibly more. K is eight times that minimum, 16. The loop
-       exits as soon as the mark leaves `pending`, so a generous K costs nothing.
+       So the race takes at least two posted turns, possibly more. K is eight times that minimum, derived at the
+       pinned asio and recorded with its derivation in the evidence file (T020), never here. The loop exits as
+       soon as the mark leaves `pending`, so a generous K costs nothing.
      - The known positive itself fails if the cap is hit with the mark still `pending`: the event did not happen,
        and the instrument is not accepted. The pass at which the mark left `pending` is recorded in the evidence
        file, not here.
@@ -271,7 +279,7 @@ result and every RED/GREEN/mutant record, never code comments.
        scratch run, not the design: hold the bound's reply `store` in HookedStore, so the bound stays `acking`
        across the frame's next pass.
      - If the arm does not abort, the selection cannot report a failure of INV-T, and the experiment is not
-       accepted.
+       accepted: implementation STOPS, as it does for a fired assert (below; tasks T021, T041).
    - The marker's assert (`none` at the bound's reset point, RR-2 item 5) needs the enum and B's reset point. It
      lands with phase 2, which re-runs the same selection as soon as B's reset point exists. Only R-1y and R-1z set
      `reset_on_logout`, so only they can trip it: with rol off the marker is always `none`. Its known positive, in
@@ -343,6 +351,11 @@ result and every RED/GREEN/mutant record, never code comments.
      `close()` bullet, B-538-7's clause and 103's latch disclosure as superseded, naming 104; reword
      graceful-logout.md's `logout_seen_` invariant row and its R-24 bullet; a pointer on session.md's
      rejected-alternative bullet (research D8).
+   - Every other component page the issue #334 recipe finds (tasks T094): a page whose `refs` list a document 104
+     supersedes, or whose `codegraph_entry` names a function 104 changes ("Scale/Scope"), is read, and each
+     statement of a superseded rule on it is flagged in place. Known positive:
+     `brain/components/message-store-quiescence.md`, whose 141=Y unit section says `close()` waits "when it is
+     about to issue its teardown reset and a unit is in flight" (093 C-6's bullet).
    - File a labelled issue (bug, follow-up) for the refusals that still answer before the identity gates (L-104-3,
      FIX-TC 1S(c)); take the label names from `gh label list`.
    - Close follow-ups fixpp#595, #695 and #701 through the PR body, with no closing keyword inside a negation.
@@ -353,7 +366,8 @@ result and every RED/GREEN/mutant record, never code comments.
     - After Gate B's last fix, which is the last commit that can change a ctest registration, push the branch and
       dispatch Tier 1, 2 and 3 (`workflow_dispatch`) at that head. First check from each workflow's `if:` that the
       peak-memory report step runs on a dispatch event.
-    - Read every lane's count off that run, and confirm its DIAGNOSTIC ONLY warning, the known positive.
+    - Read every lane's count off that run, and confirm its DIAGNOSTIC ONLY warning, the known positive (research
+      D9 defines its lane set).
     - Write `ci/expected-eligible-tests.txt` and the "RE-RECORD — 104" section. Before committing, run
       `bash ci/test-parallelism-verdict.sh`, as the basis file's header requires after any edit to it (not
       `ci/test-peak-rss.sh`, which the header names as the wrong harness). Record its result in the evidence file.

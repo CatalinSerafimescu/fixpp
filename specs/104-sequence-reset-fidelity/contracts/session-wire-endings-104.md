@@ -31,22 +31,36 @@ Decisions: [research.md](../research.md) D1–D7. Notation:
 **RR-1 (the reset point; RU-1).** Each receipt arm has one reset point. The reset is made if and only if the arm
 reaches it. Processing that ends before it does not reset under rol: a validation failure, a `fromAdmin` throw or
 reject, a late parse failure, a failed inbound persist, a refused reply (its `toAdmin` throw, its
-`assign_outbound` failure, a cancelled store call), a gate refusal, a too-high Logout's bound that ends
+`assign_outbound` failure, a cancelled store call), a gate refusal (arm S's mTLS CompID authorisation, O19; arms
+A, L and B pass no identity gate), a too-high Logout's bound that ends
 unacknowledged, or a receipt still short of its reset point when `close()` could not wait for it (RR-2 item 4). Only rod then resets, at teardown. There is no teardown backstop and no reconnect-Logon backstop
 under rol.
 
 | Arm | Reset point: reached when |
 |---|---|
 | A | the reply Logout has been attempted (Active only: `inbound_logout_leaf_` returned success, which includes a Logout that did not fit, whose store call failed, or whose write failed), the `sequence_numbers_reset` event, `fromAdmin` returned without a throw, a reject or a late parse failure, and `persist_inbound_advance_` succeeded |
-| L | the 35=5 frame passed the arm's garble and fault guards |
+| L | the 35=5 frame passed the arm's garble and fault guards. Its MsgSeqNum is not read, as in the base's LogoutSent "confirm" row: any 34 resets, and NextNumIn is neither advanced nor persisted before the unit (W3) |
 | B | its reply has been attempted (as A's reply) and the event emitted |
-| S | the 35=5 frame passed the arm's guards ahead of `interpret_logon` (garble, `logon_arm_superseded_`, fault, 099's establishment refusal; the validate gate exempts 35=5), and on an mTLS session the live identity is authorised for the CompID (research D1.2) |
+| S | with rol set only: the 35=5 frame passed the arm's guards ahead of `interpret_logon` (garble, `logon_arm_superseded_`, fault, 099's establishment refusal; the validate gate exempts 35=5), and on an mTLS session the live identity is authorised for the CompID (research D1.2). With rol off the branch does not run (W11) |
+
+**Arm S's branch and the knob (orchestrator ruling 2026-11-18, spec Clarifications "Session 2026-11-18 (checklist
+audit; orchestrator ruling)").** The 35=5 branch in `on_inbound_logon_sent_` ahead of `interpret_logon`, and its mTLS
+`authorize` call, run only when `reset_on_logout` is set.
+- With rol off nothing changes from the base: `interpret_logon` refuses the frame as a non-Logon, the arm records
+  `Disconnected` and returns success, no `authorize` call is made and no `session_event_compid_authorization_failed`
+  is emitted, whatever the identity (W11).
+- With rol set the branch runs, the mTLS gate first (design ruling 5, FIX-TC 1S(c)). An authorised identity reaches
+  the reset point and resets once (RU-2, W10); an unauthorised one draws the gate's
+  `session_event_compid_authorization_failed` and no reset (O19). Either way the arm ends `Disconnected`, returns
+  success as the base's ending does, and sends no reply Logout (RU-2, DQ-9).
 
 **RR-2 (one owner; RU-1's construction, as ruled 2026-11-17; ownership by construction A, owner 2026-11-18).**
 Once a reset point is reached the reset is completed, and nothing that races it can lose it or run it twice. A
 receipt that has not reached its reset point is never reset under rol, by anyone.
 
-*The invariants the construction rests on.* Each is read from source at `3d04c544`. Each is stated here once, and
+*The invariants the construction rests on.* Each is read from source at `3d04c544`, a bundle commit on this branch
+whose `src`, `include` and `tests` equal the base's (check: `git diff --stat bf294f00 3d04c544 -- src include tests`
+is empty; T001 checks the same for the head). Each is stated here once, and
 the other documents name it. INV-T and INV-X are also asserted in Debug builds. Plan phase 1 opens by running
 those asserts (the settling experiment), and phase 2 re-runs it once the marker's assert exists.
 - **INV-P (one awaited receipt frame at a time).** The read pump awaits each frame to its end before it delivers the
@@ -63,10 +77,19 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
     `on_inbound_active_out_of_sequence_`). It also leaves through the bound itself: its claim refusal (with
     `logout_in_flight_` set), its `acking` (which ends in Disconnected), or its exception handler (which records
     Disconnected).
+  - Re-derive the claim sites with `git grep -n -e claim_peer_logout_none_ -e note_engine_stop_ -e
+    'peer_logout_.phase = ' -- src/session/session.cpp include/fixpp/session/session.hpp`, and read each hit
+    (`note_engine_stop_` is defined in the header); a site not in the list above is a
+    change to INV-M.
   - The leaf sets `logout_in_flight_`, and the only place that clears it is `record_state_transition_`'s
     Disconnected edge. After that edge no frame reaches the Active arm.
-  - The spawn branch is guarded by `logout_in_flight_ || closing_or_stopped_()`.
-  - `install_reconnected_transport` asserts that the bound's counter is 0 before the new connection starts.
+  - The spawn branch is reached only when the immediate-acknowledgement test of
+    `on_inbound_active_too_high_logout_` is false. That test is INV-X's list (`logout_disconnect_timeout_ms == 0
+    || !effective_clock_ || logout_in_flight_ || closing_or_stopped_()`, one definition); INV-M rests on its last
+    two terms.
+  - `install_reconnected_transport` asserts, with a plain Debug `assert`, that the bound's counter is 0 before the
+    new connection starts. A Release build checks nothing there: what makes it hold is `drain_for_reconnect_`,
+    which polls the bound's counter to 0 before the install.
 - **INV-T (drain test to arm entry in one strand turn).** A 35=5 frame goes from `on_inbound_active_`'s `acking`
   drain test ("while the bound acknowledges a too-high Logout") to the entry of its receipt arm with no suspension.
   - The only awaits on those paths are `seqnum_mgr_.check_inbound`, whose mutex is granted inline on the strand
@@ -76,7 +99,9 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
   - The `this_coro` cancellation awaits do not suspend either.
   - The `persist_inbound_advance_` awaits on the way sit on the Reject, Heartbeat and application paths, not on
     35=5.
-  - One step is read and not run: asio starts an awaited child coroutine inline. The Debug assert below detects a
+  - One step is read and not run: asio starts an awaited child coroutine inline. It is read at the asio that
+    `conanfile.py` pins: `awaitable<T>::await_suspend` pushes the child's frame onto the running thread
+    (re-derive: `grep -n push_frame <asio>/awaitable.hpp <asio>/impl/awaitable.hpp`). The Debug assert below detects a
     suspension in the window only if it lasts long enough for the bound's wake to finish (at least two posted
     turns; plan phase 1 derives the count). A shorter suspension leaves the 103 mark `pending` at the assert, so it
     is covered by this reading only.
@@ -106,7 +131,9 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
 
    B's spawn branch and its ignored branch ("a second too-high Logout while the mark is set") write nothing to the
    marker. A detached bound's "receipt owed" state is the 103 mark (`pending` / `acking`), which 103 already owns
-   alone. With rol off the marker stays `none`: nothing is reset, waited for or refused.
+   alone. With rol off the marker stays `none`: no receipt is reset, waited for or refused on the marker's account.
+   That scope is the marker's only: `close()`'s wait for a Logon arm's 141=Y unit in flight (item 4, RT-5) and the
+   unasked reset (U1, U2) apply whatever the knobs.
 2. **One owner per value.** By INV-P, at most one pump frame holds `pending` at a time, and it is that frame's own.
    By INV-X no bound runs its reset point beside it.
    - **A pump frame's `pending`.** It leaves `pending` exactly once:
@@ -114,7 +141,9 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
      - or to `none` at any exit before the reset point.
 
      The frame clears it before any `close()` it calls itself (`close_on_late_parse_failure_`; the throw paths), so
-     `close()` never waits for its own caller. On every other exit, return or exception, a frame-local owner sets
+     `close()` never waits for its own caller. Re-derive the in-arm calls by reading the four receipt arms' bodies,
+     and the helpers they await, for the hits of `git grep -n -e 'close(' -e close_on_late_parse_failure_ --
+     src/session/session.cpp`; a call site not covered by the clear is a defect of this item. On every other exit, return or exception, a frame-local owner sets
      `none` if the marker is still `pending`. 103 accepts a Session-touching destructor in an awaited frame. A
      `close()` close-out to `reached` is never undone by that owner.
    - **The bound** (`run_peer_logout_bound_`) writes the marker exactly once: at its reset point, in `acking`, inside
@@ -123,8 +152,9 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
      the claimed, stopped, superseded and drained exits, its exception handler, and a frame destroyed unresumed.
      Its receipt owed is the 103 mark, which those exits already clear or leave to a claim (O18).
 3. **The reset point is one strand turn, and nothing in it throws.**
-   - Immediately before the turn, the arm resets its thread's cancellation state (`reset_cancellation_state`,
-     which completes inline and does not suspend). This drops a `terminal` or `all` emission already recorded in
+   - At the start of the turn, immediately before the marker's move, the arm resets its thread's cancellation state
+     (`reset_cancellation_state`, which completes inline and does not suspend), so no suspension or callback falls
+     between the reset and the marker's move (RR-3 step 3 lists it in the turn). This drops a `terminal` or `all` emission already recorded in
      the arm's thread, for example one from inside the `onLogout` that RR-3 step 2 fires. Without the reset, that
      emission makes `FIXPP_DETAIL_CO_AWAIT_LOCK`'s first part throw in `run_reset_unit_`'s first manager call.
    - The marker's move to `reached` (item 5) and the start of the unit follow with no suspension and no callback
@@ -134,9 +164,19 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
    - Within the turn nothing can record a cancellation. So no other coroutine on the strand observes a `reached`
      receipt whose unit has not started (suspension), and no exception leaves the marker `reached` with no reset
      (throws).
+   - "Nothing throws" excludes allocation failure, which is the existing OOM class and not a third ending. The
+     unit's frame is allocated by the call of `run_reset_unit_`, whose ramp is `noexcept`, so a `std::bad_alloc`
+     there terminates the process (`std::terminate`, as `L-048-1`'s sites do; read, not run) rather than leaving the
+     marker `reached` with no reset. An allocation inside the unit, after it has started, is 093 C-6's unit, unchanged by
+     104.
 4. `close()` (any mode) waits after its joins and before its teardown predicate, while the marker is `pending` or
-   `reset_unit_in_flight_` is set. It needs a clock (as 093's wait does) and is bounded by `logon_timeout_ms`. On
-   expiry it emits `session_event_close_reset_wait_expired`.
+   `reset_unit_in_flight_` is set. In `close(graceful)` that is in phase 2, after phase 1 has returned. It needs a
+   clock (as 093's wait does) and is bounded by `logon_timeout_ms`, measured from the wait's start on
+   `effective_clock_` (`detail::deadline_after`, saturating), as 093's wait was; reusing the establishment timeout
+   as this bound is 093's choice, kept. On expiry it emits `session_event_close_reset_wait_expired`.
+   - **A joining `close()` runs none of this.** A `close()` that finds one already in flight (093 OD-29's
+     escalation of a graceful close, `B-563-2`'s join, a repeated close) waits for that close's result by its
+     result poll and returns it. The close that owns the teardown runs this wait and its close-out, once.
    - **Route B needs nothing new here.** `close()` claims the 103 mark at its first commit
      (`claim_peer_logout_none_`). Its joins include 103's bound join, an unbounded poll on the bound's counter. So a
      bound that was not yet `acking` exits unacknowledged (O18), and an `acking` one runs to its end before the wait
@@ -152,8 +192,10 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
      deleted (data-model; why: research D1 item 4).
    - Cost: one posted turn per pass while a receipt or unit is outstanding, in `close()` only, bounded by
      `logon_timeout_ms`. The worst case is a receipt held in a store call, for example a `FileStore` write. The
-     poll then keeps one handler ready on the session's executor for up to `logon_timeout_ms`. Why 093's rejection
-     of a poll does not apply here: research D1 item 4.
+     poll then keeps one handler ready on the session's executor for up to `logon_timeout_ms`. Each pass is one
+     posted handler with no delay, so the handlers of other sessions on the same io_context threads run between
+     passes; what the poll takes from them is the thread time its passes use, a busy wait for the hold's duration
+     (read, not measured). Why 093's rejection of a poll does not apply here: research D1 item 4.
    - **A receipt still `pending` after the wait** (it expired, or there was no clock to wait with) never reached
      its reset point. It is processing that ended before the reset point (RR-1): **no reset under rol**. The
      close-out sets the marker to `reached`, so that when the arm resumes it runs no unit and issues no further
@@ -181,9 +223,10 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
      - Stop's wait has no bound and no clock condition (an Engine session always has a clock:
        `validate_engine_config` at `Engine::start`, and `Session::open`'s fallback from a null `clock_override`
        to `EngineConfig::clock`). It ends when the held store call returns (`B-598-1`; `L-563-7` condition (2)).
-       A store call that never completes hangs `stop()`: `L-093-12`'s condition, now also met by a receipt's reply
-       store and inbound persist. 104 widens nothing here: on the base a pump frame held in any store call already
-       holds step 3.
+       A store call that never completes hangs `stop()`: `L-093-12`'s condition, which names the reset unit's
+       store operation and whose amended text names a receipt's reply store and inbound persist too. 104 widens
+       nothing here: on the base a pump frame held in any store call already holds step 3; only the row's text
+       widens.
      - A bound is outside the join: it is spawned detached with no cancellation slot. A `pending` bound is claimed
        by `note_engine_stop_` and exits unacknowledged (O18); an `acking` bound is joined by step 4's `close()`,
        through 103's bound join.
@@ -207,7 +250,9 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
 6. `install_reconnected_transport` sets `none`. A received Logout never resets a later connection.
 
 **RR-3 (order at the reset point; RU-3).** In every receipt arm:
-1. the reply Logout, if one is owed (A in Active, B);
+1. the reply Logout, if one is owed (A in Active, B); for A, then the `sequence_numbers_reset` event, `fromAdmin`
+   and `persist_inbound_advance_`, in today's order, so `fromAdmin` returns before the `onLogout` that step 2
+   fires; for B, then its event;
 2. record `Disconnected` (where the arm has not), which stops every emitter from numbering in the reset space
    (RR-4) and drains further inbound frames;
 3. the reset point, in one strand turn (RR-2 item 3): the cancellation state reset, the marker to `reached` (RR-2
@@ -220,7 +265,10 @@ those asserts (the settling experiment), and phase 2 re-runs it once the marker'
 A `close()` started inside the `onLogout` that step 2 fires finds a pump frame's marker `pending`. It waits one
 post first (B-563-2), so the arm reaches step 3 before it, and the wait then covers the unit. Where that post does not move
 the close off the callback's stack (B-563-2's R-7 setup), the close's own wait still covers the receipt, and with
-no clock the receipt is not reset (item 4, a receipt still `pending`). On the bound's route the marker is `none`
+no clock the receipt is not reset (item 4, a receipt still `pending`). With a clock the arm cannot resume beneath
+the callback while the close polls, so the wait runs to its bound: `session_event_close_reset_wait_expired`, then
+the close-out with no reset (item 4; inferred, not run, and outside `B-563-2`'s rule, which holds only where the
+callback does not run the session's own executor, `L-007-2`). No cell drives that setup. On the bound's route the marker is `none`
 until step 3, and `close()`'s bound join covers the receipt and its unit (RR-2 item 4).
 
 `onLogout` fires on the edge into Disconnected at step 2, so it observes the pre-reset numbers (A, B; L's
@@ -252,8 +300,13 @@ widen 103's FR-021.
     outbound frame that has a store call, and on every inbound persist to a persistent store; the in-memory inbound
     path returns before the test (its cost: plan "Performance Goals"). A test made before the call cannot govern a call already issued
     when the marker became `reached`; that call runs to its end (RR-2 item 5). The end state equals QuickFIX's,
-    whose reset after the Logout discards every earlier increment. The receipt unit and the teardown's reset do not
-    pass through either boundary.
+    whose reset after the Logout discards every earlier increment. The receipt unit, the teardown's reset under
+    rod and `close(graceful)`'s store flush (`close_flush_hook_a1_`) do not pass through either boundary, so each
+    runs after `reached` as it does today; L's phase 1 wake makes no store call.
+  - **What a refused call's caller observes.** Each boundary returns a result its callers already handle: a
+    refused `store_then_emit` ends as a cancelled store call does (the number taken back, `dispatch_aborted`, no
+    frame; D-OUT-1, O9's ending), and a refused `persist_inbound_advance_` lets its caller continue as after a
+    write. The arm's return value is then the one its existing handling of that result gives.
 
 **RT-4 (store failure at the reset).** A manager or store failure of the receipt unit is logged. The arm's ending
 is unchanged (Disconnected, and the return value it has without the failure). There is no retry under rol; under
@@ -269,11 +322,13 @@ received Logout makes two resets, one at the reset point and one at teardown; bo
 ### Outcomes (RU-1): every receipt arm × every way its processing can end
 
 "no reset" means under rol alone; rod still resets at teardown. Engine columns are read from source (research D1).
+The "QuickFIX" column is that reading, subordinate to the spec's "Departures from QuickFIX" (FR-018), which wins on
+a difference; it is not a second list of departures.
 A cell id is given where the row can be driven; its mutant is in research D10.
 
 | # | Condition | A (Active / LogonReceived) | L (LogoutSent) | B (too-high ack) | S (LogonSent) | QuickFIX | Cell |
 |---|---|---|---|---|---|---|---|
-| O1 | normal | reply, persist, Disconnected, reset at the arm; wire: the reply only | Disconnected, reset at the arm, then phase 1 wakes; wire: nothing | reply, Disconnected, reset at the arm | Disconnected, reset at the arm; wire: nothing (QuickFIX replies) | reset at receipt, all three | R-1c, R-1d, R-1e, R-1o |
+| O1 | normal | reply, persist, Disconnected, reset at the arm; wire: the reply only | Disconnected, reset at the arm, then phase 1 wakes; wire: nothing | reply, Disconnected, reset at the arm | Disconnected, reset at the arm; the arm returns success; wire: nothing (QuickFIX replies) | reset at receipt, all three | R-1c, R-1d, R-1e, R-1o |
 | O2 | `fromAdmin` throws | reply already sent; Disconnected; no reset | n/a (no `fromAdmin`) | n/a | n/a | no reset (QFC, QFJ: `verify` → `fromCallback` throws before the reply) | R-1g |
 | O3 | `fromAdmin` rejects | reply, Reject, Disconnected; no reset | n/a | n/a | n/a | no reset (QFC, QFJ: the reject exception leaves `nextLogout`; QFGo: `processReject`) | R-1g |
 | O4 | late parse failure | marker cleared, then `close(terminal)`; no reset | n/a | n/a | n/a | no reset (not a processed Logout) | R-1g |
@@ -294,7 +349,7 @@ A cell id is given where the row can be driven; its mutant is in research D10.
 | O17 | grace timer of `close(graceful)` expires during L's unit | n/a | phase 1 returns `session_logout_timeout`; the timer branch also force-closes the transport (`live->close()`) before phase 2; the wire is the same (nothing more is sent); `close()` waits for the unit | n/a | n/a | n/a | R-1j |
 | O18 | bound ends unacknowledged (claim by `close()`, stop, another ending's Disconnected, reconnect drain, a Logout in flight) | n/a | n/a | the marker untouched (`none`): the bound wrote nothing, and 103 clears or claims its mark; no reset | n/a | QFC, QFJ: reset (they process a too-high Logout at receipt, `verify(logout, false, false)`) | R-1f |
 | O18a | a second too-high Logout while the bound is `pending` (the ignored branch, either route) | n/a | n/a | the frame is ignored and writes nothing to the marker. The first bound's acknowledgement resets once (O1) | n/a | n/a (QuickFIX processed the first at receipt) | R-1y |
-| O19 | mTLS identity not authorised | n/a | n/a | n/a | no reset; Disconnected | n/a | R-1o |
+| O19 | mTLS identity not authorised | n/a | n/a | n/a | rol set: the gate's `session_event_compid_authorization_failed`; no reset; Disconnected; the arm returns success. With rol off the branch does not run (W11): no event | n/a | R-1o |
 | O20 | Logout in NotConnected | — | — | — | — | no reset (QFC `validLogonState` false) | R-1o |
 
 ## Part 2 — endings per arm and input
@@ -307,11 +362,12 @@ A cell id is given where the row can be driven; its mutant is in research D10.
 | W4 | Active, rol set | peer Logout request, M = N | Logout reply at 34 = N_out | pre-reset at `onLogout`; `(1, 1)` after the arm | inbound persist, then `reset_to(1, 1)` with the state Disconnected and the transport open | Disconnected |
 | W5 | Active, rol set, T > 0, a clock | peer Logout with M > N | ResendRequest (as B-103-7); when N passes M or at T, the acknowledgement Logout | as W4, after the acknowledgement | `reset_to(1, 1)` after the acknowledgement, state Disconnected | Disconnected |
 | W6 | W5 pending, then `close()`, stop, the peer's EOF or a reconnect drain | — | as B-103-7 for that route | not reset by rol (O18); rod resets at teardown | no `reset_to` | as that route |
+| W6a | W5 with the bound already `acking`, then `close()`, stop, the peer's EOF or a reconnect drain | — | the acknowledgement Logout | `(1, 1)` | one `reset_to(1, 1)`: the bound runs to its end, because each route joins it (`close()`'s bound join, which the pump's close after the EOF and stop's step 4 reach; `drain_for_reconnect_`'s poll of the bound's counter, before `install_reconnected_transport`) | Disconnected |
 | W7 | W3 or W4 with rol **and** rod | — | as W3 / W4 | `(1, 1)` | two resets: the arm's `reset_to`, then the teardown's `reset` | Disconnected |
 | W8 | W3 or W4, receipt reset fails | — | as W3 / W4 | manager `(1, 1)`; store pre-reset when the store refused | logged | Disconnected; arm's return unchanged |
 | W9 | standalone initiator: W3/W4 reset at receipt, then `drive_reconnect`, numbers advance, then `close()` with rol only | — | the new Logon at the numbers as they stand | not reset by the new connection's teardown | no further reset | closed |
-| W10 | LogonSent, rol set | peer Logout | nothing (QuickFIX replies with a Logout) | `(1, 1)` | `reset_to(1, 1)` | Disconnected |
-| W11 | W10, rol off; or NotConnected with any knob | peer Logout | nothing | unchanged | no reset | Disconnected |
+| W10 | LogonSent, rol set; on an mTLS session the identity is authorised (an unauthorised one: O19) | peer Logout | nothing (QuickFIX replies with a Logout) | `(1, 1)` | `reset_to(1, 1)` | Disconnected; the arm returns success |
+| W11 | LogonSent, rol off, whatever the identity (arm S's branch and its `authorize` call do not run: `interpret_logon` refuses the frame as a non-Logon, as the base; no `session_event_compid_authorization_failed`); or NotConnected with any knob | peer Logout | nothing | unchanged | no reset | Disconnected; in LogonSent the arm returns success, as the base |
 | U1 | LogonSent, lenient or unilateral, fixpp's Logon without 141=Y, N ≥ 1 | ack 141=Y, M = 1 | no second Logon; the next frame fixpp sends is 34=1 | inbound next 2, outbound next 1 | `reset_to(2, 1)`; event `by_peer_request = true` | Active |
 | U2 | same | ack 141=Y, M > 1 | no second Logon; on the peer's next frame (34 > 1), ResendRequest 7=1, 16=0 | inbound next 1, outbound next 1 | `reset_to(1, 1)` | Active |
 | U3 | U1 or U2 with 789 enabled and present, 789 = X | X > 1 | Logout "NextExpectedMsgSeqNum too high, expecting 1 but received X" | as after the reset, plus the Logout | reset, then the Logout stored | Disconnected |
@@ -335,15 +391,24 @@ SendingTime, `seq == 0`, and in NotConnected the strict refusal and the `reset_o
 ending. For a too-low frame the arm then runs the mTLS CompID-authorisation gate (both arms) and, on the acceptor,
 `authorize_logon`, through the helpers that make today's checks, so the event, the one-shot `live_peer_id_`
 consumption and the silent Disconnected are identical. Only then does it send the too-low Logout. The later
-guards (1137, strict mismatch, the unit, 789) are not reached by a too-low frame.
+guards (1137, strict mismatch, the unit, 789) are not reached by a too-low frame. The frame is a Logon (35=A):
+`interpret_logon` refuses any other first frame before the sequence check. A Logout (35=5) in LogonSent never
+reaches the sequence check, whatever its 34: with rol set arm S's branch ahead of `interpret_logon` takes it (RR-1
+row S, W10, O19), and with rol off `interpret_logon`'s non-Logon refusal does (W11), so it never draws the too-low
+Logout.
 
 **Unchanged and disclosed:**
-- The too-low Logout leaves the transport open until EOF, `close()` or stop (B-103-10, L-103-5).
+- The too-low Logout leaves the transport open until EOF, `close()` or stop (B-103-10, L-103-5, whose text names
+  no arm). In a Logon arm an engine-managed session's establishment deadline (`logon_timeout_ms`, B-093-4) also
+  ends it, because the session never reached Active (`run_read_pump`'s `establishing` test in
+  `src/session/engine.cpp`); a direct session waits for EOF, `close()` or stop.
 - The Logon arms' sequence check ignores `validate_sequence_numbers`.
 - A strict acceptor's 141=Y Logon at 34 ≠ 1 (L-103-4).
 - The acceptor twin of U1 is unreachable (research D7).
-- The posture, strict and SendingTime refusals and the 1137 Reject still answer before the identity gates: a
-  pre-existing departure from FIX-TC 1S(c) that 104 does not widen (L-104-3).
+- The posture, strict and SendingTime refusals and the 1137 Reject still answer before the identity gates on an
+  mTLS acceptor, and the posture and SendingTime Logouts before the gate on a direct mTLS initiator
+  (`on_inbound_logon_sent_` runs both ahead of its `authorize` call): a pre-existing departure from FIX-TC 1S(c)'s
+  principle that 104 does not widen (L-104-3).
 
 ## Superseded by name (header-comment rule, issue #310)
 

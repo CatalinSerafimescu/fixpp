@@ -61,14 +61,18 @@ RU-2 and RU-3 (spec Clarifications, Gate A round 1). This section records why, a
      That one site covers the immediate acknowledgement (T = 0, no clock, a Logout in flight, closing or stopped)
      and the bound's (`run_peer_logout_bound_`). The 103 mark tells them apart there: it is `acking` only for the
      bound (contract RR-2 item 5).
-   - **S** (`on_inbound_logon_sent_`, RU-2): a 35=5 frame is handled ahead of `interpret_logon`, which refuses any
+   - **S** (`on_inbound_logon_sent_`, RU-2): with rol set only (orchestrator ruling 2026-11-18; contract RR-1
+     "Arm S's branch and the knob"), a 35=5 frame is handled ahead of `interpret_logon`, which refuses any
      non-Logon before its BeginString and CompID tests (`admin_messages.cpp`, `interpret_logon`: `msg_type_found
      != "A"` first). It passes the guards that run ahead of `interpret_logon` (garble, `logon_arm_superseded_`,
      fault, 099's `establishment_frame_refused_`; the validate gate exempts 35=5). On an mTLS session the live
      identity must be authorised for the CompID, by the same `compid_authorization_policy.authorize` call the
-     Logon path makes (clarification N-8): an unauthorised one ends as today, with no reset. Then `Disconnected`,
-     the marker and the unit. No reply Logout is sent (DQ-9; FIX-TC 1B(e) makes it optional), and no `fromAdmin`
-     runs for it, as today (DQ-14).
+     Logon path makes (clarification N-8): an unauthorised one takes the gate's own ending, its
+     `session_event_compid_authorization_failed`, `Disconnected` and success, with no reset (contract O19). An authorised
+     identity, or a session without mTLS, then takes `Disconnected`, the marker and the unit. No reply Logout is sent (DQ-9; FIX-TC 1B(e) makes it optional), and no
+     `fromAdmin` runs for it, as today (DQ-14); the arm returns success, as the base's ending does. With rol off
+     the branch does not run and the frame takes the base's ending: `interpret_logon`'s non-Logon refusal,
+     `Disconnected`, success, with no `authorize` call and no event (contract W11).
 4. **`close()` (contract RR-2 items 3–5).** `close()` waits, after its joins and before its
    teardown predicate, while the marker is `pending` or `reset_unit_in_flight_` is set. The wait is moved out of
    the predicate block and widened to the marker, and it needs `effective_clock_` (B-104-2).
@@ -522,7 +526,9 @@ acceptor's first Logon. Re-derive each step:
 - It is skipped only when `hydrated_ && !force`. Its callers are `git grep -n "ensure_hydrated_(" src`: the
   acceptor's is in `on_inbound_not_connected_`.
 - NotConnected is entered only at construction. `git grep -n "record_state_transition_(fsm_state::NotConnected"
-  src` has no hit, so the arm meets at most one Logon that reaches hydration. Every path after hydration records
+  src` has no hit, so the arm meets at most one Logon that reaches hydration. Its known positive, over the same
+  pathspec: `git grep -n "record_state_transition_(fsm_state::LogonReceived" src` hits (D1's one writer), so the
+  pattern can report a hit. Every path after hydration records
   Disconnected or leaves for LogonReceived. A validate-gate Reject that keeps the arm open runs before hydration.
 - The Engine builds one `Session` per accepted connection: `run_accept_loop` calls `std::make_shared<Session>`
   per registry match (`src/session/engine.cpp`), then `open()`, then `attach_accepted_transport`.
@@ -546,7 +552,7 @@ evidence file, never into this bundle or a code comment.
 |---|---|
 | 024 C3.1, "a Logout in either direction" resets (D1) | `C3.1`, `EITHER direction`, `either direction` (read each hit: the phrase is common), `sent OR received`, `sent **or** received` (Markdown bold defeats the previous key), `answered or not`, `was sent still resets`, `Logout that was sent`, `brings no reset`, `reset_on_logout`, `logout_seen_`, `logout_seen`, `LocalInitiated`, `T013`, `site (a)`, `fixpp#595` |
 | The receipt resets at teardown, and a latched flag resets the next connection (D1) | `teardown reset`, `still triggers`, `latched`, `drive_reconnect` (read each hit) |
-| 093 C-6: `close()` waits only before its own teardown reset, woken by the unit alone (D1 item 4) | `waits only when it is about to issue`, `reset_unit_in_flight_`, `reset_unit_wake_`, `B-093-11`, `event-driven` and `completion signal` (read each hit: prose that describes the wait without naming the member) |
+| 093 C-6: `close()` waits only before its own teardown reset, woken by the unit alone (D1 item 4) | `waits only when it is about to issue`, `about to issue its teardown reset`, `reset_unit_in_flight_`, `reset_unit_wake_`, `B-093-11`, `event-driven` and `completion signal` (read each hit: prose that describes the wait without naming the member) |
 | 027 C3, an explicit end beyond the store answers `requested_end + 1` (D3.3a) | `NewSeqNo=21`, `rr_end+1`, `rr_end + 1`, `requested_end + 1`, `TwoValueEnd`, `ExplicitEndBeyondStore`, `two-value end`, `I-NEX-3` |
 | A too-low frame in a Logon arm ends silently; an unasked 141=Y at 34=1 is too low (D3, D5) | `L-103-2`, `L-103-7`, `too-low → fatal`, `would be`, `in-sequence`, `ends silently`, `B-103-10` |
 
@@ -562,6 +568,10 @@ evidence file, never into this bundle or a code comment.
    missed the superseded rule wherever a bundle restated it outside those two (Codex round 2, #5).
    Live B&L only: read `spec/behaviors-and-limitations.md`, not the `-closed` file (a resolved row there is not a
    surface to amend).
+   The surfaces outside that pathspec are in scope too, read once by the same keys with
+   `command grep -rn -F -e '<key>' -- docs bench ci perf .github README.md CHANGELOG.md CONTRIBUTING.md`, each hit
+   dispositioned as in step 3. The C-ABI headers and their documentation are under `include` already. A key run
+   over `include` is the known positive that this second grep can report a hit.
 2. Keep every hit that states the old rule as current behaviour: a test comment, a code comment, a live B&L row,
    a brain page's current-behaviour row, or another feature's contract clause. A brain page's rejected-alternative
    bullet is the historical half and is not rewritten; it gets a one-line pointer to 104.
@@ -585,6 +595,8 @@ evidence file, never into this bundle or a code comment.
    - `brain/components/session.md`: the bullet "(a graceful phase 1 sets `logout_seen_`)" (a rejected
      alternative: pointer only), and the bullet "`close()`'s wait is bounded by `logon_timeout_ms`, event-driven"
      (093 OD-1; its shape is superseded by RR-2 item 4's poll);
+   - `brain/components/message-store-quiescence.md`: its 141=Y unit section's "`close()` also waits, when it is
+     about to issue its teardown reset and a unit is in flight" (093 C-6's bullet);
    - `specs/024-reset-refresh-on-logon/contracts/reset-knobs.md` C3.1 and C5.1;
    - `specs/027-next-expected-msgseqnum/contracts/next-expected-msgseqnum.md` C3's required test ("request
      `[10,20]`, store through 5");
@@ -638,7 +650,10 @@ are found by the same recipe (step 1's last key row) and step 4's run with D3 an
 
 #### B&L, brain and contract supersessions (by name)
 
-The text of every new and amended row is data-model.md "B&L delta". In summary:
+The text of every new and amended row is data-model.md "B&L delta". This summary, the contract's "Superseded by
+name", spec FR-005's list and tasks T094 are views of one list, the census's kept hits (T004, re-run at T095),
+which is authoritative: a surface on one view and missing from another is resolved in the census, by adding the key
+or the disposition, not by editing the view alone. In summary:
 - **024 C3.1** ("EITHER direction"), superseded by 104's contract RT-1 / RR-1 and B-104-1. 024 C5.1 is kept (read
   per teardown, E-4). 024's bundle is a merged, point-in-time record and is not edited.
 - **027 C3**'s explicit-end case, superseded by B-104-5 and contract row U6.
@@ -649,7 +664,8 @@ The text of every new and amended row is data-model.md "B&L delta". In summary:
   resolution (FR-011, FR-016). 103's spec row "A too-low frame in NotConnected or LogonSent still ends silently"
   is superseded by name in the closed row.
 - **L-103-5**: unchanged. `reset_on_logout` still does not fire after a too-low Logout.
-- **Brain:** `brain/components/session.md` and `brain/components/graceful-logout.md` each list 024 C3.1, 027 C3,
+- **Brain:** every component page the issue #334 recipe finds (tasks T094), `message-store-quiescence.md` among
+  them. `brain/components/session.md` and `brain/components/graceful-logout.md` each list 024 C3.1, 027 C3,
   093 C-6's bullet and 103's latch disclosure as superseded by 104, flagged in place (the project rule that a
   component page lists every document, wrong ones included). graceful-logout.md's invariant row on
   `logout_seen_` and its R-24 bullet's "still resets: that case is fixpp#595" are reworded to the receipt rule;
@@ -667,6 +683,13 @@ The text of every new and amended row is data-model.md "B&L delta". In summary:
   basis runs, method, the per-lane table). They go in one commit.
 - **When:** after the last commit that adds or removes a ctest registration. The re-record commit itself must add
   none.
+  - FR-017's "after 104's own tests land" and "after Gate B's last fix" name the same point: Gate B's last fix is
+    the last commit that can change a registration. A commit after the dispatch run that adds or removes a
+    registration (a late fix, an `origin/main` integration) voids that run, and phase 11 restarts from a new
+    dispatch at the new head.
+  - Before the dispatch, read in each tier workflow whether a `pull_request` run checks out the PR merge ref or the
+    head sha. If it checks out the merge ref and `origin/main` has gained registrations since the merge-base, the
+    dispatch counts cannot match the labelled run; that case is a STOP to the orchestrator (tasks T108).
   - Before it: `bash ci/test-parallelism-verdict.sh`, the harness the basis file's header requires after any edit.
     Its disposition outside Gate B's reviewed range is plan phase 11's.
   - Check: `git diff <re-record>^ <re-record> -- '*CMakeLists.txt' '*.cmake'` is empty.
@@ -691,9 +714,14 @@ The text of every new and amended row is data-model.md "B&L delta". In summary:
 - **Source** under (a): Linux, the `ran:` value of each lane's `ci/peak-memory-report.sh` line, cross-checked
   against ctest's `… out of <N>` for the step it sampled; Windows, the `out of <N>` of the suite step. Never a
   value from this bundle or the spec.
+  - Which lanes run `ci/peak-memory-report.sh` is read from the workflows at T108 (`git grep -n
+    peak-memory-report -- .github/workflows`). SC-005's "every lane" is the lanes the report runs on. A lane that
+    has a line in `ci/expected-eligible-tests.txt` and no report step (whether the Windows lanes do is read there) is
+    still re-recorded from its `out of <N>`, and the record says it has no EVIDENCE reading.
 - **Known positive:** the same run's report must print the `DIAGNOSTIC ONLY` warning (`peak-memory-report.sh`,
-  the `EXPECTED` branch near its end) for the lanes the spec names. That shows the comparison can report a
-  mismatch.
+  the `EXPECTED` branch near its end) on every lane whose dispatch count differs from the basis file's current
+  value, and on at least one lane. That shows the comparison can report a mismatch. A lane whose count happens to
+  equal the current basis prints no warning and is not a positive.
 - **Acceptance (SC-005):** the first run that includes the re-record prints no `DIAGNOSTIC ONLY` for a count
   mismatch on any lane whose Test step succeeded. Under (a) that is the labelled `pull_request` run.
   - The probe file's own rule, "Do NOT batch a re-record with a change that adds tests", is met by the commit
@@ -733,8 +761,9 @@ The text of every new and amended row is data-model.md "B&L delta". In summary:
 
 **C ABI and size.**
 - No C-ABI change. `reset_on_logout` has no C-ABI setter: re-derive with
-  `git grep -n reset_on_logout -- include/fix src/capi bindings`, which has no hit at the base. The TOML key and
-  default are unchanged.
+  `git grep -n reset_on_logout -- include/fix src/capi bindings`, which has no hit at the base. Its known positive,
+  over the same pathspec: `git grep -n logon_timeout -- include/fix src/capi bindings` hits (a knob with a C
+  setter, B-093-4). The TOML key and default are unchanged.
 - No `Session` member is added or renamed; one private `Engine` member is added, R-1t's step-3 mark (B-104-7).
   `logout_seen_` changes from `bool` to a one-byte enum, and `reset_unit_wake_` is deleted (data-model). No test pins `sizeof(Session)`: `git grep -n "sizeof(Session)\|sizeof(fixpp::session::Session)" tests include src` has no
   hit at the base; the full `-k 0` build (phase 7, phase 8) is the check that nothing else depends on it.
@@ -761,7 +790,7 @@ store call it saw (`reset_to` is the unit; `reset` is the teardown).
 | R-1k | `…CloseDuringReplyStore_OneResetByTheArm` (A in Active, HookedStore holds the reply's `store`) | `close()` started during the hold does not return before release; after: exactly one `reset_to`, no `reset`, finished before `close()` returns | base: the teardown's `reset`, no `reset_to` | drop the `pending` term of `close()`'s wait → `close()` closes the receipt out with no reset → zero resets → RED |
 | R-1l | `…CloseWhilePending_NoClock_NoReset_{HeldInReplyStore,HeldInPersist}` (no clock, rol only, A in Active; HookedStore holds, after completing it, the reply's `store` or the inbound persist) — ruled case "`close()` without a clock while `pending` → no reset" (O13-r, O13-p) | `close()` returns during the hold; no `reset` and no `reset_to` at any point; after release the arm runs no unit. Each number is named on its own. `HeldInReplyStore`: the store holds the reply 35=5 at N_out; no frame on the cell's live transport after `close()` returned, and on its `transport_send` twin the reply is transmitted (B-563-5); store inbound N (the persist refused, RR-4); manager inbound N+1 (`check_inbound`, before the arm). `HeldInPersist`: store inbound N+1 (the persist landed); manager inbound N+1 | base: the teardown's `reset` (flag set at receipt) | (1) reset a `pending` receipt at the teardown (round 1's rejected take-over) → `reset` seen → RED; (2) drop the arm's "already `reached` → no unit" test → `reset_to` seen → RED; (3) drop RR-4's `persist_inbound_advance_` test → `HeldInReplyStore`'s store inbound becomes N+1 → RED |
 | R-1n | `…ReplyEndings_*` (A in Active, rol only): `Overflow` (CompIDs for which the reply does not fit, paired with the longest that fit), `ToAdminThrow`, `AssignFailure` (outbound at `seqnum_max` through the test seam), `StoreFailure` (persistent StoreDouble refuses the reply's store), `WriteFailure` (sink throws), `PersistFailure` | per contract O5–O11: reset for `Overflow`, `StoreFailure`, `WriteFailure`; no reset for `ToAdminThrow`, `AssignFailure`, `PersistFailure` | base: every one resets at teardown, or (`PersistFailure`) per the base's flag | per parameter: for a reset row, treat the leaf's discarded result as an exit → no reset → RED; for a no-reset row, run the reset before the reply's `toAdmin` / before the persist → reset → RED |
-| R-1o | `…LogonSentLogout_Resets` (initiator, rol), plus `…_MtlsUnauthorised_NoReset` and `NotConnectedLogout_NoReset` (acceptor), on one store double | LogonSent: no 35=5 written by fixpp; `reset_to(1, 1)`; Disconnected (the forced-hit arm of the other two). mTLS unauthorised: no reset, Disconnected, the authorisation-failed event. NotConnected: no reset | LogonSent: base makes no reset. mTLS unauthorised: RED on base, because the base refuses a 35=5 in LogonSent at `interpret_logon` (a non-Logon), before the identity gate, so the authorisation-failed event is never emitted; that assertion also witnesses the N-8 order (the gate before arm S's reset). NotConnected: GREEN on base (pin) | delete S's reset → RED; skip S's authorisation test → the mTLS arm resets → RED; invoke a reset point (the marker `reached` and the unit) from the NotConnected arm → `reset_to` seen → RED |
+| R-1o | `…LogonSentLogout_Resets` (initiator, rol), plus `…_MtlsUnauthorised_NoReset`, `…LogonSentLogout_RolOff_MtlsUnauthorised_Unchanged` (direct mTLS initiator, rol off, an unauthorised identity) and `NotConnectedLogout_NoReset` (acceptor), on one store double | LogonSent: no 35=5 written by fixpp; `reset_to(1, 1)`; Disconnected (the forced-hit arm of the other three). mTLS unauthorised: no reset, Disconnected, the authorisation-failed event. Rol off (contract W11, the orchestrator ruling of 2026-11-18): no reset, Disconnected, the arm returns success, and **no** authorisation-failed event; that absence reads the same event type from `Session::recent_events()` by the same predicate as the mTLS arm, whose event is its forced hit. NotConnected: no reset | LogonSent: base makes no reset. mTLS unauthorised: RED on base, because the base refuses a 35=5 in LogonSent at `interpret_logon` (a non-Logon), before the identity gate, so the authorisation-failed event is never emitted; that assertion also witnesses the N-8 order (the gate before arm S's reset). Rol off: GREEN on base (pin; the base never reaches the gate for a 35=5). NotConnected: GREEN on base (pin) | delete S's reset → RED; skip S's authorisation test → the mTLS arm resets → RED; run arm S's branch whatever the knob → the rol-off arm sees the authorisation-failed event → RED; invoke a reset point (the marker `reached` and the unit) from the NotConnected arm → `reset_to` seen → RED |
 | R-1p | `…LivenessDuringReceiptUnit_NumbersNothing` (A in Active, HookedStore holds `reset_to`, small HeartBtInt) | the mock clock advanced past one, then two HeartBtInt during the hold: no frame written after the reply; manager `(1, 1)` after release | the base has no receipt unit (its reset is after the loop is joined) | move the Disconnected write after the unit → the loop's Heartbeat or TestRequest is numbered 1 → RED |
 | R-1q | `…BoundRouteFrameDuringUnit_Drained` (B, HookedStore holds `reset_to`) | a frame at 34 > 1 fed during the hold: no ResendRequest, no inbound advance, no `fromApp` | as R-1p | as R-1p |
 | R-1r | `…BoundRouteInFlightPumpArm_RefusedAtTheBoundary` (B; a pump arm with a write after the bound's wake, held in HookedStore across the bound's unit) | after release: nothing the in-flight arm writes reaches the wire or the store's numbers; store and manager `(1, 1)` | as R-1p | delete RR-4's boundary test in `store_then_emit` (one arm) and in `persist_inbound_advance_` (a second arm) → the in-flight write lands → RED. The mutant is the same on either route: if phase 0 finds no Active sub-arm that writes after a suspension following `check_inbound`, the cell drives the boundary through the test seam `session_test_access::store_then_emit` after a receipt reset, and records the reading |
@@ -817,10 +846,16 @@ is held. If it is, R-3 is written and read as the other cells are. If it is not,
   - R-1h: its own first half, the old connection's reset.
   - R-1l: R-1k's input, the same hold with a clock.
   - R-1n's no-reset rows: its reset rows.
-  - R-1o's mTLS and NotConnected arms: its LogonSent arm.
+  - R-1o's mTLS, rol-off and NotConnected arms: its LogonSent arm. The rol-off arm's "no authorisation-failed
+    event" also has the mTLS arm as its forced hit, on the same fixture and observation path.
   - R-1v: R-1n's `StoreFailure` input.
   - R-1w `FromAdminThrow`: R-1k's input. Its "no `close_reset_wait_expired`" assertion has `StuckPending` as its
-    forced hit, and so do R-1f(1)'s, R-1v's and R-1t's.
+    forced hit, and so do R-1f(1)'s, R-1v's and R-1t's. A forced hit in another cell stands for an assertion only
+    where both read the event through the same observation path: the same event type, read from the session's own
+    event ring (`Session::recent_events()`) by the same predicate, with no more events emitted after it than the
+    ring holds (`kSessionEventRingCapacity`). R-1t reads the Engine session's ring through its session handle by
+    `StuckPending`'s predicate, so `StuckPending`'s hit shows the path can report the event; the clock wiring
+    differs (the Engine's mock clock) and is not part of the observation.
   - R-1t's "stop has not returned": its own release arm, where the same harness observes stop's completion.
   - T-5: arm S on the same fixture.
   - U-9: its authorised twin, `reset_to(2, 1)`.
@@ -886,8 +921,15 @@ Phase-0 checks whose outcome can return a question to the orchestrator:
     record one (cell R-1x). Route L takes no suspension before its unit (read). Route S takes none by its design:
     its guards are synchronous, and `compid_authorization_policy.authorize` returns a value.
   - **The store-order condition.** RR-4's first case needs every store call issued before the unit's `reset_to` to
-    be applied before it. Phase 0 reads it for `MemoryStore` (a post, then its FIFO `async_mutex`), `FileStore`
-    (its offloaded jobs) and HookedStore, with
+    be applied before it. "Issued" is the order in which the session calls the store; "applied" is the order in
+    which the calls' effects land on the store's state, under its writer lock, whatever order their completions
+    reach the session in. A user-supplied `MessageStore` is inside the condition as far as the interface's own
+    requirements reach (`include/fixpp/session/message_store.hpp`: its methods take the per-instance FIFO
+    `async_mutex` on entry, I-01, and the ORDER requirement on `store()`); phase 0 reads the shipped stores and the
+    test double against them, and does not certify a user store. HookedStore's holds are consistent with it: a held operation completes its inner
+    call and then holds its return to the session ("The operation whose hook fires completes, then does not
+    return"), so a call R-1r or R-1l holds is applied in issue order. Phase 0 reads it for `MemoryStore` (a post,
+    then its FIFO `async_mutex`), `FileStore` (its offloaded jobs) and HookedStore, with
     `git grep -n "async_lock\|asio::post\|offload" -- include/fixpp/session/*store*.hpp src/session/*store*.cpp`.
     If a store can apply a later `reset_to` before an earlier `store`, implementation stops and the decision
     returns to the orchestrator (ruling of 2026-11-17). The proposal to put to it: the unit waits for the
