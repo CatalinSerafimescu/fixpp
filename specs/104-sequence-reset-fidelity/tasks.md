@@ -490,7 +490,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - T021's selection once more, with asserts silent.
 
   Run `codegraph sync`. Record.
-- [ ] T056 [US1] Mutants for T041 (protocol), each RED by its named assertion with its forced hit GREEN:
+- [X] T056 [US1] Done: evidence file, "Session of 2026-11-18, nineteenth run", its T056 section. Mutants for T041 (protocol), each RED by its named assertion with its forced hit GREEN:
   - R-1g, the clear only at the reset point;
   - R-1g, `LateParseFailure` clearing after `close()`;
   - R-1v;
@@ -500,9 +500,9 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - R-1z `OneDelivery`'s forced hit: drain the in-sequence Logout frame at the drain test, read by its `fromAdmin("5") == 1` reach pin (orchestrator ruling at T023);
   - R-1x's marker mutant, read by "the marker `reached`", with R-1x's reset-count assertions GREEN.
 - [ ] T057 [US1] Mutants for T042 (protocol): R-1c; R-1d, both; R-1e; R-1f(2a); R-1o, one per arm; R-1p; R-1q; R-1u; R-1x(1), read by "exactly one `reset_to`"; R-3, by R-1d's first mutant, when T011 recorded R-3 drivable; R-1i, both (the failure fatal; the record dropped); R-1n, one per parameter; R-1l(2); put reset_on_logout back into the teardown predicate and skip arm L's unit while keeping `mark_reset_point_reached_()`: R-1c RED by assertion, with `ResetOnLifecycleTest.ResetOnLogout_LocalInitiatedAnswered_Resets` and `ResetOnLogout_BothRoles_Resets` recorded GREEN under it, non-discriminating by design (orchestrator ruling 1 on the eighteenth run).
-- [ ] T058 [US1] Mutants for T045 (protocol): R-1a and R-1b, by one mutant that restores `run_logout_phase1`'s set AND the teardown's reset_on_logout term it fed at the base (orchestrator ruling (d) on the T057 STOP). The answered twin stays GREEN. The set alone is an equivalent mutant: since T047 nothing reads it (the teardown predicate is `!teardown_reset_done_ && reset_on_disconnect`, and a reset point that finds `reached` runs no unit); record that, and claim no assertion for it.
-- [ ] T059 [US1] Mutants for T047 (protocol): R-1j; R-1s; R-1k; R-1l(1); R-1w, the `FromAdminThrow` and `Storeless` arms, with `StuckPending` GREEN; R-1f(2b); R-2.
-- [ ] T060 [US1] Mutants for T048 (protocol): R-1r, both boundaries, read by its seam arms (`…_SeamStoreThenEmit` for the `store_then_emit` test, `…_SeamPersist` for the `persist_inbound_advance_` test); R-1l(3); R-1h.
+- [X] T058 [US1] Done: evidence file, "Session of 2026-11-18, twentieth run", its T058 section. Mutants for T045 (protocol): R-1a and R-1b, by one mutant that restores `run_logout_phase1`'s set AND the teardown's reset_on_logout term it fed at the base (orchestrator ruling (d) on the T057 STOP). The answered twin stays GREEN. The set alone is an equivalent mutant: since T047 nothing reads it (the teardown predicate is `!teardown_reset_done_ && reset_on_disconnect`, and a reset point that finds `reached` runs no unit); record that, and claim no assertion for it.
+- [X] T059 [US1] Done: evidence file, "Session of 2026-11-18, twentieth run", its T059 section. Mutants for T047 (protocol): R-1j; R-1s; R-1k; R-1l(1); R-1w, the `FromAdminThrow` and `Storeless` arms, with `StuckPending` GREEN; R-1f(2b); R-2.
+- [X] T060 [US1] Done: evidence file, "Session of 2026-11-18, twentieth run", its T060 section. Mutants for T048 (protocol): R-1r, both boundaries, read by its seam arms (`…_SeamStoreThenEmit` for the `store_then_emit` test, `…_SeamPersist` for the `persist_inbound_advance_` test); R-1l(3); R-1h.
 - [ ] T061 [US1] Mutants for T049 and T050 (protocol). Each is RED by its named assertion, with its forced-hit arm GREEN:
   - delete the freeze test in `set_next_inbound`: R-5a, both arms, and R-5d;
   - delete it in `set_next_outbound`: R-5b and R-5d;
@@ -532,7 +532,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - drop the thaw at `install_reconnected_transport`: R-1h. The reconnect Logon's number is refused, so the numbers do not advance;
   - restore the unconditional `Disconnected` write in the `assign_outbound` failure branch of the `emit_session_reject_` overload that `dispose_unparseable_` reaches (the one taking a reason, a RefTagID and a text): R-5c's one-entry assertion;
   - arm the freeze anywhere ahead of the post-set assert (after the entry assert and before `reset_to_one`, or between two of its manager calls): the post-set assert, read by its own message in the Debug build only, in the unfiltered run of a binary holding a cell whose arm reaches a receipt unit (R-2 or R-1x). In an asserts-off build the receipt unit's targets equal `reset_to_one`'s, so the reorder is an equivalent mutant there. Record that, and claim no assertion for it (research D11, "Not relied on").
-- [ ] T062 [US1] Mutant for T035 and R-1t (protocol). Move step 4's `close(terminal)` loop in `Engine::stop()` to between step 2's close join and the step-3 mark, ahead of step 3's join. R-1t must go RED at its order assertion, as an assertion failure and not an abort. Deleting the join is not this mutant (INV-6).
+- [X] T062 [US1] Done: evidence file, "Session of 2026-11-18, twentieth run", its T062 section. Mutant for T035 and R-1t (protocol). Move step 4's `close(terminal)` loop in `Engine::stop()` to between step 2's close join and the step-3 mark, ahead of step 3's join. R-1t must go RED at its order assertion, as an assertion failure and not an abort. Deleting the join is not this mutant (INV-6).
 
 **Checkpoint**: US1 GREEN; every US1 mutant RED; the MVP validation point.
 
