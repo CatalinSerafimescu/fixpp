@@ -1754,6 +1754,28 @@ private:
     // closure [const §XV.9].
     enum class receipt_marker : std::uint8_t { none, pending, reached };
     receipt_marker logout_seen_ = receipt_marker::none;
+    // 104 (contract RR-2 item 2): a pump frame's `pending` ends with that frame. The frame
+    // calls release_pending_receipt_() before any close() it calls itself, so close() never
+    // waits for its own caller, and declares a pending_receipt_owner, which calls it on every
+    // other exit, by return or by exception. Each acts only from `pending`: a `reached`
+    // marker is never undone. The too-high Logout's bound declares no owner.
+    void release_pending_receipt_() noexcept {
+        if (logout_seen_ == receipt_marker::pending) {
+            logout_seen_ = receipt_marker::none;
+        }
+    }
+    class pending_receipt_owner {
+    public:
+        explicit pending_receipt_owner(Session& s) noexcept : s_(&s) {}
+        pending_receipt_owner(pending_receipt_owner const&) = delete;
+        pending_receipt_owner& operator=(pending_receipt_owner const&) = delete;
+        pending_receipt_owner(pending_receipt_owner&&) = delete;
+        pending_receipt_owner& operator=(pending_receipt_owner&&) = delete;
+        ~pending_receipt_owner() { s_->release_pending_receipt_(); }
+
+    private:
+        Session* s_;
+    };
 
     // 024 T014 — teardown_reset_done_: single-fire guard for the teardown reset in
     // close(). Prevents a logout+disconnect double-trigger (graceful Logout → timeout

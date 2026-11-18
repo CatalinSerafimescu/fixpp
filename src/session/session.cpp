@@ -5539,9 +5539,6 @@ Session::on_inbound_active_too_high_logout_(bool tic, seqnum_t seq) noexcept {
     // 104 (contract RR-2, INV-T): a 35=5 frame reaches this arm in the strand turn of
     // on_inbound_active_'s acking drain test, so the too-high Logout's bound is not acking here.
     assert(peer_logout_.phase != peer_logout_mark::phase_t::acking);
-    // As on_inbound_active_logout_ does first, so a configured reset_on_logout fires whichever
-    // ending follows.
-    logout_seen_ = receipt_marker::reached;
     // 103 (spec FR-021's crossing clause; FIX-SL §4.6, §4.10.2): while the session is itself
     // ending, the bound could not acknowledge: its claim refuses while a Logout of the session
     // is in flight (the owner, research D4.6), and its "live" test while a close has begun or
@@ -5549,6 +5546,14 @@ Session::on_inbound_active_too_high_logout_(bool tic, seqnum_t seq) noexcept {
     // one is, with no mark, no bound and no ResendRequest; NextNumIn is not moved.
     if (cfg_.logout_disconnect_timeout_ms == 0 || !effective_clock_ || logout_in_flight_ ||
         closing_or_stopped_()) {
+        // 104 (contract RR-2 items 1 and 2): with reset_on_logout set, this immediate
+        // acknowledgement is a receipt, `pending` and owned by this frame until its reset point
+        // in acknowledge_peer_logout_ or its exit. The spawn and ignored branches below write
+        // nothing to the marker: the bound's owed receipt is the 103 mark.
+        pending_receipt_owner const receipt_owner{*this};
+        if (cfg_.reset_on_logout) {
+            logout_seen_ = receipt_marker::pending;
+        }
         FIXPP_INBOUND_SPLIT_AWAIT(ack, tic, acknowledge_peer_logout_(tic));
         co_return ack;
     }
@@ -6052,13 +6057,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
     // 104 (contract RR-2, INV-T): a 35=5 frame reaches this arm in the strand turn of
     // on_inbound_active_'s acking drain test, so the too-high Logout's bound is not acking here.
     assert(peer_logout_.phase != peer_logout_mark::phase_t::acking);
-    // 024 T013 (site b): mark that a peer Logout was received.
-    // Set before any FSM action so close() can detect logout_seen_ even
-    // if later teardown arrives via terminal close after this transition.
-    // Both Active (emit-confirming-Logout → Disconnected) and LogonReceived
-    // (Disconnected directly per [FIX-SL §4.6]) paths are covered.
-    // [contracts/reset-knobs.md C3.1; plan.md Gate A convergence note (b)]
-    logout_seen_ = receipt_marker::reached;
+    // 104 (contract RR-2 items 1 and 2), superseding 024 T013's site (b): with reset_on_logout
+    // set, the receipt is `pending` from this arm's entry, owned by this frame, until its reset
+    // point or its exit. In Active and LogonReceived alike.
+    pending_receipt_owner const receipt_owner{*this};
+    if (cfg_.reset_on_logout) {
+        logout_seen_ = receipt_marker::pending;
+    }
 
     if (fsm_state_ == fsm_state::Active) {
         // 103 (research D4.6): the in-sequence Logout claims a pending mark; its own
@@ -6096,6 +6101,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
             [&](auto& mv, auto& sid) { return engine_.application->fromAdmin(mv, sid); });
         // 092 contract C-6: a late parse failure closes the session.
         if (cb_r && *cb_r == dispatch_outcome::parse_failed) {
+            // 104 (contract RR-2 item 2): the receipt ends here, before the close() this frame
+            // calls, so that close() does not wait for its own caller.
+            release_pending_receipt_();
             co_return co_await close_on_late_parse_failure_();
         }
         if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
@@ -6329,6 +6337,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logout_sent_(
         co_return co_await dispose_unparseable_(hdr, fsm_state::LogoutSent);
     }
     if (hdr.msg_type == "5") {  // Logout(35=5) confirms our Logout
+        // 104 (contract RR-2 items 1 and 2): with reset_on_logout set, the confirming Logout is
+        // a receipt, `pending` and owned by this frame until its reset point or its exit. Any
+        // other frame here leaves the marker untouched.
+        pending_receipt_owner const receipt_owner{*this};
+        if (cfg_.reset_on_logout) {
+            logout_seen_ = receipt_marker::pending;
+        }
         record_state_transition_(fsm_state::Disconnected);
         logout_confirmed_ = true;  // signal run_logout_phase1 coroutine
         // fixpp#536 (.specify/536-537-538-recovery-liveness.md, D-536-3), superseding
@@ -6431,6 +6446,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
                 co_return rj;
             }
         }
+    }
+
+    // 104 arm S (contract RR-1 "Arm S's branch and the knob"; RR-2 items 1 and 2): with
+    // reset_on_logout set, a Logout received here, past the guards above, is a receipt,
+    // `pending` and owned by this frame until its reset point or its exit. With the knob off
+    // the branch does not run and interpret_logon refuses the frame as a non-Logon.
+    if (cfg_.reset_on_logout && hdr.msg_type == "5") {
+        pending_receipt_owner const receipt_owner{*this};
+        logout_seen_ = receipt_marker::pending;
     }
 
     auto result =
