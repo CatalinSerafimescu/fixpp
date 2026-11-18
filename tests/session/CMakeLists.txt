@@ -422,6 +422,7 @@ function(add_session_104_bucket name)
 endfunction()
 add_session_104_bucket(session_104_tests
   test_104_reset_on_logout.cpp                                          # 104 T016
+  test_104_unasked_reset_ack.cpp                                        # 104 T063
 )
 
 # 103 T023: test_reset_seqnum_policy_matrix.cpp's AS5 cells use mock_reconnect_factory.hpp's
