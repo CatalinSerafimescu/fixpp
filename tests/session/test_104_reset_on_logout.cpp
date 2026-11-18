@@ -553,6 +553,8 @@ struct Opts104 {
     // When set, the session's TransportFactory (SessionConfig::transport_factory_override), so a
     // standalone initiator can drive_reconnect().
     std::shared_ptr<fixpp::transport::TransportFactory> transport_factory = nullptr;
+    // The session's HeartBtInt and the HeartBtInt(108) of the peer's Logon.
+    std::chrono::seconds heartbeat = rg::kHeartBtInt;
 };
 
 // A Scene whose session has reset_on_logout and a HookedStore. Every member a store hook, a
@@ -591,6 +593,7 @@ public:
     explicit Rol104(session_role const role) : Rol104(Opts104{.role = role}) {}
     explicit Rol104(Opts104 const& o)
         : s{rg::Options{.role = o.role,
+                        .heartbeat = o.heartbeat,
                         .with_clock = o.with_clock,
                         .app = app,
                         .with_store = o.store == store_kind::memory,
@@ -2208,4 +2211,167 @@ TEST(ResetOnLogout104, NotConnectedLogout_NoReset) {
         << "a reset call after the frame: reset() " << r.log().reset_calls << ", reset_to "
         << r.log().reset_to_calls;
     close_and_expect_no_reset(r, "close()");
+}
+
+// ── T034: R-1p, R-1q and R-1r, what runs while a reset unit is held (contract RR-4) ───────
+//
+// Each cell holds the reset unit's reset_to (HookedStore's on_reset, with release_when), or an
+// in-flight arm's store, and observes the session during the hold, by the pump discipline of
+// this file's header. A hold that the base never reaches is read as the cell's own assertion,
+// not as a setup failure: the base runs no reset unit at receipt.
+
+namespace {
+
+// R-1p's HeartBtInt: small, so that the cell's two clock advances, each past one HeartBtInt,
+// cross the liveness loop's Heartbeat, TestRequest and liveness-disconnect deadlines.
+constexpr std::chrono::seconds kSmallHeartBtInt{1};
+
+// True when HookedStore's record holds a call and its first call is a reset_to.
+bool first_call_is_reset_to(Rol104 const& r) {
+    return !r.log().calls.empty() && r.log().calls.front().kind == StoreLog::call_kind::reset_to;
+}
+
+}  // namespace
+
+// R-1p: A in Active with a small HeartBtInt; the receipt unit's reset_to is held. During the
+// hold the mock clock moves past one HeartBtInt, then past two. No frame is written after A's
+// reply, and after the release the manager reads (1, 1).
+TEST(ResetOnLogout104, LivenessDuringReceiptUnit_NumbersNothing) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        Rol104 r{Opts104{.role = role, .heartbeat = kSmallHeartBtInt}};
+        r.factory->hooks.on_reset = [] {};  // holds the first reset call, until `released`
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        auto const mark = s.sent.size();
+        auto frame_fut = s.feed_spawn(s.logout(s.next_in()));
+        // The base holds nothing, and its frame returns; the hold's window is the bound.
+        (void)s.pump_until(
+            [&] { return !r.log().calls.empty() || rg::Scene::ready(frame_fut); }, kHoldWindow);
+        bool const held = first_call_is_reset_to(r);
+        auto const after_reply = s.sent.size();
+        // Two advances, each past one HeartBtInt, each followed by half a hold window.
+        s.mock->advance(kSmallHeartBtInt + std::chrono::milliseconds{1});
+        s.pump_for(kHoldWindow / 2);
+        s.mock->advance(kSmallHeartBtInt);
+        s.pump_for(kHoldWindow / 2);
+        std::string const written_in_hold = s.written(after_reply);
+        bool const hold_in_place = !r.log().hold_timed_out;
+        r.ctl.released = true;
+        bool const frame_returned =
+            s.pump_until([&] { return rg::Scene::ready(frame_fut); }, kReleaseBudget);
+        Numbers104 const mgr = r.manager_numbers();
+
+        EXPECT_EQ(s.count("5", mark), 1U) << "setup: A's reply: " << s.written(mark);
+        EXPECT_TRUE(held) << "no reset_to was held at the receipt; reset calls: reset() "
+                          << r.log().reset_calls << ", reset_to " << r.log().reset_to_calls;
+        EXPECT_TRUE(written_in_hold.empty())
+            << "frames written after A's reply during the hold: " << written_in_hold;
+        EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the release";
+        EXPECT_TRUE(frame_returned) << "the Logout's frame did not return";
+        EXPECT_EQ(mgr, (Numbers104{.in = 1, .out = 1}))
+            << "the manager after the release: " << mgr.in << "/" << mgr.out;
+    }
+}
+
+// R-1q: route B; the bound's reset_to is held. An application message at the pre-reset
+// NextNumIn, fed during the hold, is drained: no ResendRequest, no inbound advance, no fromApp.
+TEST(ResetOnLogout104, BoundRouteFrameDuringUnit_Drained) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        Rol104 r{role};
+        r.factory->hooks.on_reset = [] {};  // holds the first reset call, until `released`
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        seqnum_t const n = s.next_in();
+        (void)s.feed(s.logout(n + 3));
+        ASSERT_EQ(r.phase(), kPending) << "setup: no pending mark";
+        auto const ack_mark = s.sent.size();
+        auto gap_fut = s.feed_spawn(s.gap_fill(n, n + 4));
+        // The base holds nothing, and its bound ends; the hold's window is the bound.
+        (void)s.pump_until(
+            [&] {
+                return !r.log().calls.empty() ||
+                       (rg::Scene::ready(gap_fut) && r.bound_count() == 0);
+            },
+            kHoldWindow);
+        bool const held = first_call_is_reset_to(r);
+        seqnum_t const next_in_before = s.next_in();
+        auto const delivered_before = r.app->delivered.size();
+        auto const mark = s.sent.size();
+        auto frame_fut = s.feed_spawn(s.order(n + 4));
+        bool const frame_returned =
+            s.pump_until([&] { return rg::Scene::ready(frame_fut); }, kHoldWindow);
+        seqnum_t const next_in_after = s.next_in();
+        auto const delivered_after = r.app->delivered.size();
+        auto const resends = s.count("2", mark);
+        bool const hold_in_place = !r.log().hold_timed_out;
+        r.ctl.released = true;
+        (void)s.pump_until([&] { return rg::Scene::ready(gap_fut) && r.bound_count() == 0; },
+                           kReleaseBudget);
+
+        EXPECT_EQ(s.count("5", ack_mark), 1U)
+            << "setup: the bound's acknowledgement: " << s.written(ack_mark);
+        EXPECT_TRUE(held) << "no reset_to was held at the bound's acknowledgement; reset calls: "
+                          << "reset() " << r.log().reset_calls << ", reset_to "
+                          << r.log().reset_to_calls;
+        EXPECT_TRUE(frame_returned) << "the frame fed during the hold did not return";
+        EXPECT_EQ(resends, 0U) << "a ResendRequest: " << s.written(mark);
+        EXPECT_EQ(next_in_after, next_in_before)
+            << "NextNumIn moved: " << next_in_before << " -> " << next_in_after;
+        EXPECT_EQ(delivered_after, delivered_before) << "fromApp received the frame";
+        EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the release";
+    }
+}
+
+// R-1r: route B, on the pump route research D10's R-1r row and T011's record name. The
+// Logout is too high by one; a GapFill fills to S; a TestRequest at S passes it, which wakes the
+// bound, and the TestRequest's Heartbeat store is held while the bound acknowledges and runs
+// its unit. After the release nothing that arm writes reaches the wire or the store's numbers,
+// and the store and the manager read (1, 1).
+TEST(ResetOnLogout104, BoundRouteInFlightPumpArm_RefusedAtTheBoundary) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        Rol104 r{role};
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        seqnum_t const n = s.next_in();
+        (void)s.feed(s.logout(n + 1));
+        ASSERT_EQ(r.phase(), kPending) << "setup: no pending mark";
+        (void)s.feed(s.gap_fill(n, n + 1));
+        ASSERT_EQ(s.next_in(), n + 1) << "setup: the gap was not filled to S";
+        ASSERT_EQ(r.phase(), kPending) << "setup: the mark left pending at S";
+        auto const mark = s.sent.size();
+        r.ctl.hold_next_store = true;
+        auto frame_fut = s.feed_spawn(s.test_request(n + 1));
+        bool const held_while_bound_ended = s.pump_until(
+            [&] { return !r.log().store_events.empty() && r.bound_count() == 0; }, kHoldWindow);
+        bool const hold_in_place = !r.log().hold_timed_out;
+        r.ctl.released = true;
+        bool const frame_returned =
+            s.pump_until([&] { return rg::Scene::ready(frame_fut); }, kReleaseBudget);
+        Numbers104 const mgr = r.manager_numbers();
+        auto const st = r.store_numbers(store_kind::hooked);
+
+        EXPECT_TRUE(held_while_bound_ended)
+            << "setup: the Heartbeat's store was not held while the bound ended";
+        auto const logouts = s.of_type("5", mark);
+        EXPECT_EQ(logouts.size(), 1U) << "setup: the bound's acknowledgement: " << s.written(mark);
+        // The held store's number was assigned before the bound's reply's: it is the arm's.
+        if (!logouts.empty() && !r.log().store_events.empty()) {
+            EXPECT_EQ(rg::field(logouts.front(), 34),
+                      std::to_string(r.log().store_events.front().seq + 1))
+                << "the held store was not the in-flight arm's";
+        }
+        EXPECT_EQ(s.count("0", mark), 0U)
+            << "the in-flight arm's Heartbeat reached the wire: " << s.written(mark);
+        EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the release";
+        EXPECT_TRUE(frame_returned) << "the TestRequest's frame did not return";
+        expect_one_reset_to_one_one_disconnected(r);
+        EXPECT_EQ(mgr, (Numbers104{.in = 1, .out = 1}))
+            << "the manager after the release: " << mgr.in << "/" << mgr.out;
+        ASSERT_TRUE(st.has_value()) << "the store's numbers were not read";
+        EXPECT_EQ(*st, (Numbers104{.in = 1, .out = 1}))
+            << "the store after the release: " << st->in << "/" << st->out;
+    }
 }
