@@ -496,14 +496,21 @@ std::unique_ptr<Fixture> make_initiator(std::shared_ptr<MessageStoreFactory> sto
 // (research D3.3a, contract U6), which supersedes 027 C3's explicit-end case by name:
 // Peer sends ResendRequest([10,20]) when our store only has [1..5]. EndSeqNo is above the
 // next outbound number, so the request is answered as one through the current number, and
-// the GapFill's NewSeqNo is the next outbound number, not EndSeqNo + 1. QuickFIX C++ answers
-// the same request with the same GapFill: it clamps EndSeqNo to the next outbound number
+// the GapFill's NewSeqNo is the session's next outbound number (peek_outbound()), not
+// EndSeqNo + 1. That is QuickFIX C++'s value whenever store and manager agree, as the cell seeds
+// them: QuickFIX C++ clamps EndSeqNo to the next outbound number
 // (`nextResendRequest`), then `generateRetransmits` ends on `generateSequenceReset(begin,
 // next)`.
 TEST(WalkExtraction, TwoValueEnd_ExplicitEndBeyondStore) {
     // Store has seqnums [1..5]; next outbound = 6.
     auto fix = make_acceptor(std::make_shared<ShortStoreFactory>(5));
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+    // The manager's next outbound is seeded to ShortStore's next, so store and manager agree as
+    // in a live session (104, orchestrator ruling on the T073 STOP): the clamp reads the store
+    // tail and the GapFill carries peek_outbound(), and here both are the store's next.
+    auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix->session);
+    fixpp::session::seqnum_manager_test_access::set_counters(mgr, mgr.next_inbound_unsafe(), 6);
+    ASSERT_EQ(mgr.peek_outbound(), 6U) << "setup: the manager's next outbound";
     fix->clear_capture();
 
     // Peer sends ResendRequest(BeginSeqNo=10, EndSeqNo=20).
@@ -513,7 +520,7 @@ TEST(WalkExtraction, TwoValueEnd_ExplicitEndBeyondStore) {
     auto gf_it = std::ranges::find_if(frames, frame_is_gapfill);
     ASSERT_NE(gf_it, frames.end()) << "Expected a SequenceReset-GapFill response";
 
-    // NewSeqNo(36) is the next outbound number, not rr_end + 1.
+    // NewSeqNo(36) is the session's next outbound number (peek_outbound()), not rr_end + 1.
     const std::string new_seqno = extract_tag(*gf_it, 36);
     EXPECT_EQ(new_seqno, "6")
         << "104 end model: GapFill NewSeqNo must be the next outbound number, not rr_end + 1";
