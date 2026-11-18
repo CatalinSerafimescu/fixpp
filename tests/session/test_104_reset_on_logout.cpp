@@ -1604,3 +1604,40 @@ TEST(ResetOnLogout104, LogonReceivedLogoutWhileClosing_ResetOnceByTheArm) {
     EXPECT_TRUE(finished_before_return) << "the reset_to had not finished when close() returned";
     EXPECT_EQ(r.log().reset_calls, 0) << "a reset() call";
 }
+
+// ── T028: R-1v, the reply's store cancelled ──────────────────────────────────────────────
+
+// R-1v: the refusing double returns store_cancelled for A's reply. The number is taken back,
+// the session is Disconnected, no frame is written, no reset call is made, and a later close()
+// returns with the mock clock unmoved and no close_reset_wait_expired. The forced-hit arm is
+// R-1n's StoreFailure input on the same double, which resets at the arm.
+TEST(ResetOnLogout104, ReplyStoreCancelled_NoReset) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        {
+            Rol104 r{Opts104{.role = role, .store = store_kind::refusing}};
+            auto& s = r.s;
+            ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+            seqnum_t const n = s.next_in();
+            auto const out_before = r.manager_numbers().out;
+            auto const mark = s.sent.size();
+            r.ctl.refuse_next_store = refuse_mode::cancelled;
+            (void)s.feed(s.logout(n));
+            EXPECT_EQ(r.ctl.refuse_next_store, refuse_mode::none)
+                << "setup: the reply's store was not refused";
+            EXPECT_EQ(r.manager_numbers().out, out_before)
+                << "the reply's number was not taken back";
+            EXPECT_EQ(s.state(), fsm_state::Disconnected);
+            EXPECT_EQ(s.sent.size(), mark) << "a frame was written: " << s.written(mark);
+            EXPECT_TRUE(r.log().calls.empty())
+                << "a reset call after the arm: reset() " << r.log().reset_calls << ", reset_to "
+                << r.log().reset_to_calls;
+            close_and_expect_no_reset(r, "close()");
+            EXPECT_FALSE(r.close_reset_wait_expired()) << "close_reset_wait_expired was emitted";
+        }
+        {
+            SCOPED_TRACE("forced hit: the reply's store refused (StoreFailure)");
+            reply_ending(role, reply_end::store_failure);
+        }
+    }
+}
