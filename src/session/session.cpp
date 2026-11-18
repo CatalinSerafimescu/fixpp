@@ -8282,8 +8282,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
 
     // D-OUT-6: what became of the Logout. It holds a value only when store_then_emit
     // returned success for it, which on the cut route (below) it does with its transmit
-    // skipped. Both early exits below, this one's and the cut route's, come before the
-    // assignment of logout_seen_.
+    // skipped.
     fixpp::core::expected_t<void> sent = std::unexpected(fixpp::core::error::dispatch_aborted);
     // fixpp#590 (`.specify/563-564-callback-send.md` §2.6 "The mechanism", ruling R-8):
     // set below when a terminal close was started inside this Logout's toAdmin. The
@@ -8349,9 +8348,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     gate_hold.reset();
 
     // D-OUT-6: the Logout was not sent, so no reply to it can come. The phase leaves at
-    // once and arms no wait; close() goes on to its terminal part. logout_seen_ is not
-    // set on this path (ruling R-24): for reset_on_logout, a Logout that was not sent is
-    // not a Logout, and the teardown makes no reset for it.
+    // once and arms no wait; close() goes on to its terminal part. Ruling R-24's "a Logout
+    // that was not sent is not a Logout" for reset_on_logout is subsumed by 104: no Logout
+    // fixpp sends, sent or not, changes the receipt marker (data-model RO-2).
     if (!sent) {
         if (fsm_state_ != fsm_state::Disconnected) {
             record_state_transition_(fsm_state::Disconnected);
@@ -8362,10 +8361,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     // The cut route's exit (fixpp#590; `.specify/563-564-callback-send.md` §2.6 "The
     // mechanism", statement 4, "The exit"; ruling R-8). A Logout that was stored and not
     // transmitted is not a Logout that was sent, and no reply to it can come. So the
-    // step leaves at once: it does not set logout_seen_, does not record LogoutSent,
-    // arms no wait and posts nothing. The write of Disconnected is kept for a state
-    // that is not that already; on this route the decision point above made it.
-    // close() discards the value returned.
+    // step leaves at once: it does not record LogoutSent, arms no wait and posts nothing.
+    // The write of Disconnected is kept for a state that is not that already; on this
+    // route the decision point above made it. close() discards the value returned.
     if (cut) {
         if (fsm_state_ != fsm_state::Disconnected) {
             record_state_transition_(fsm_state::Disconnected);
@@ -8373,15 +8371,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         co_return std::unexpected(fixpp::core::error::dispatch_aborted);
     }
 
-    // 024 T013 (site a): mark that a Logout was sent on the local graceful path.
-    // Keyed here (after emit, before LogoutSent) so logout_seen_ is true whenever
-    // the Logout frame was actually placed on the wire. The teardown reset in close()
-    // reads this flag to distinguish a graceful-Logout teardown from an abnormal drop.
-    // [contracts/reset-knobs.md C3.1; plan.md Gate A convergence note (b)]
-    // A Logout that was cut is not placed on the wire and left by the exit above, so
-    // the set is skipped for it (fixpp#590; `.specify/563-564-callback-send.md` §2.6,
-    // ruling R-8).
-    logout_seen_ = receipt_marker::reached;
+    // 104-sequence-reset-fidelity (FR-002, data-model RO-2) supersedes 024 T013's site (a)
+    // and 024 contracts/reset-knobs.md C3.1's sent direction by name: the Logout this phase
+    // sends no longer marks logout_seen_, so a graceful close resets under reset_on_logout
+    // only when the peer's Logout reaches its reset point (arm L), and an unanswered one
+    // makes no reset.
 
     // 103 (research D4.6): an inbound ending recorded Disconnected while this Logout was in
     // its store call, so it was that ending's reply: no LogoutSent and no wait for one.
