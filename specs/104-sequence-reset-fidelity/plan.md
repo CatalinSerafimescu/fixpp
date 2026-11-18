@@ -41,7 +41,7 @@ re-record.
    ruling O-3).
 
 No C ABI, configuration-key or public-type change. `logout_seen_` changes from `bool` to a one-byte enum, and
-`reset_unit_wake_` is deleted (contract RR-2 item 4), so `sizeof(Session)` is expected to shrink (an expectation: tasks.md T092 reads it once, base against head); nothing
+`reset_unit_wake_` is deleted (contract RR-2 item 4), and the private `bool` `wire_closed_by_reset_` is added (contract RR-6, ruling W). Whether `sizeof(Session)` moves is read once, base against head, at tasks.md T092; nothing
 pins it (research D10). `Engine` gains one private member, R-1t's step-3 mark, so `sizeof(Engine)` changes, a layout
 change in the installed `engine.hpp` with no C-ABI change; nothing pins it either (B-104-7).
 
@@ -129,8 +129,9 @@ accounted for on its own:
   shared with 103's Arm B.
 - `replay_outbound_range_`'s end model.
 - One member's type and contract changed (`logout_seen_`, `bool` → a one-byte enum). One member deleted
-  (`reset_unit_wake_`), with `run_logout_phase1`'s comment that names it as "the pattern close() uses" reworded. No
-  `Session` member added or renamed.
+  (`reset_unit_wake_`), with `run_logout_phase1`'s comment that names it as "the pattern close() uses" reworded. One
+  private `Session` member added, `wire_closed_by_reset_`, and a defaulted exemption parameter on the private
+  `store_then_emit` and `live_write_serialized_` (contract RR-6, ruling W). No member renamed.
 - One private `Engine` member added: R-1t's step-3 mark, a test seam beside `test_hook_post_send_drain_`, set through
   `engine_test_access` and awaited by `Engine::stop()` between step 2's close join and step 3's join. So
   `sizeof(Engine)` changes: a layout change in an installed header, disclosed in B-104-7, with no C-ABI change.
@@ -329,8 +330,9 @@ result and every RED/GREEN/mutant record, never code comments.
      `src/session/seqnum_manager.cpp`, the flag, the passkey-gated `freeze` / `thaw` and query `frozen`, and the test in the six refused
      mutators; in `src/session/session.cpp`, the freeze in `run_reset_unit_` and at the close-out, the thaw at
      `install_reconnected_transport`, T050's Debug asserts, and the conditional `Disconnected` writes on the paths
-     a refused `assign_outbound` returns into (RR-5 item 6). Cells R-5a to R-5e, the first three and R-5e written RED
-     with the other US1 cells, and R-5d with the mechanism.
+     a refused `assign_outbound` returns into (RR-5 item 6), and `inbound_resend_request_leaf_`'s entry test (RR-5
+     item 6, the T014 STOP). Cells R-5a to R-5f, all but R-5d written RED with the other US1 cells, and R-5d with
+     the mechanism.
    - The comments that state the old rule, each naming 104 (FR-006): the member, the teardown block's
      "Predicate" paragraph, `run_logout_phase1`'s "site (a)" comment, `on_inbound_active_logout_`'s and
      `on_inbound_active_too_high_logout_`'s "024 T013" comments, `drive_reconnect`'s latch paragraph,
@@ -424,6 +426,8 @@ result and every RED/GREEN/mutant record, never code comments.
 - Loop 4 round 1 applied 2026-11-18: Codex P1=0 P2=1 P3=0; Opus post-judging P1=0 P2=2 P3=5; rewrite adds the post-set Debug assert (C-1) and narrows FR-019/B-104-8 (N-1); P3s applied. Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_8_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_8_adversarial_review.md.
 - Loop 4 round 2 applied 2026-11-18: Codex P1=1 P2=1 P3=0; Opus post-judging P1=1 P2=2 P3=1; rewrite replaces T014 (C-1, N-1), adds the passkey-gated frozen(freeze_key) query (C-2), fixes T061's row (N-2). Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_9_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_9_adversarial_review.md.
 - Loop 4 round 3 (narrow confirmation) 2026-11-18: Codex P1=0 P2=0 P3=1 (rejected by the judge); Opus post-judging P1=0 P2=0 P3=3 (N-1..N-3), applied with the optional D11 note. **Gate A loop 4 CONVERGED** (manager freeze, construction Z). Reviews: research/reviews/codex_104-sequence-reset-fidelity_gate_a_10_review.md, research/reviews/opus_104-sequence-reset-fidelity_gate_a_10_adversarial_review.md.
+- T014 STOP 2026-11-18: inbound_resend_request_leaf_ reachable after a suspension (missing-7 Reject). Orchestrator ruling: by-construction entry state test (B41 pattern) plus the sending-time conditional write; no ordering argument. No further Gate A round (applies the converged RR-5 pattern); owner-visible at Gate B.
+  - Ruling W, 2026-11-18. This is the third STOP of the class "work in flight across the write of `reached`", after the T011 manager writers and the T014 leaf. Once a reset point has run, nothing more is transmitted (contract RR-6). The test reads `wire_closed_by_reset_` after the `write_gate_` grant and before the sink. The close-out is exempt. Sub-ruling: our crossing phase-1 Logout is exempt from D-OUT-10 and from the test, by one parameter that only `run_logout_phase1` passes, because QuickFIX has already written our Logout before it processes the peer's. Cells R-5f, R-5g, R-5h and R-5e's sink assertion. A narrow Gate A loop 5 reviews the T014 delta (the leaf test, Arm D, W).
 
 ### Round 1 — disagreements
 

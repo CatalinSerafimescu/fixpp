@@ -2,10 +2,11 @@
 
 All the state below is private to `Session` or to its `SeqnumManager`, and lives on the session strand. No
 configuration key or default changes, and no public function's signature; one installed type gains members
-(`SeqnumManager`, below). No `Session` member is added or renamed (the one `Engine` member is B-104-7). One member keeps
+(`SeqnumManager`, below). One private `Session` member is added, `wire_closed_by_reset_` (below; contract RR-6),
+and no `Session` member is renamed (the one `Engine` member is B-104-7). One member keeps
 its name and changes its type and contract (`logout_seen_`, `bool` → a one-byte enum). One member is deleted: `reset_unit_wake_`, the waker of 093's
 event-driven wait, which `close()`'s poll replaces (contract RR-2 item 4; re-derive its users with
-`git grep -n reset_unit_wake_ -- src include tests`). So `sizeof(Session)` is expected to shrink, an expectation that phase 7's one-off size reading settles. There is no pin on
+`git grep -n reset_unit_wake_ -- src include tests`). So `sizeof(Session)` may move either way; phase 7's one-off size reading settles it. There is no pin on
 it to move (re-derive: `git grep -n "sizeof(Session)\|sizeof(fixpp::session::Session)" tests include src`).
 One installed header outside `Session` changes: `SeqnumManager` (`include/fixpp/session/seqnum_manager.hpp`), which
 `Session` holds by value, gains the manager freeze ("`SeqnumManager`: the freeze" below; B-104-7).
@@ -39,6 +40,7 @@ direction".
 | `Session::close`: after the wait, before the predicate | a `pending` marker (no clock, or the wait expired) is set to `reached` with **no reset** under rol: the receipt did not reach its reset point (contract RR-2 item 4) |
 | `Session::close`: the teardown predicate | `!teardown_reset_done_ && rod`; the rol term for "`reached`, unit not started" has no input by RR-2 item 3 and is not coded |
 | `store_then_emit` (before its store call), `persist_inbound_advance_` (after its `store_is_persistent_` return, before its store call) | read: refuse a call issued while `reached` (contract RR-4); `store_then_emit` takes its number back. A call issued earlier runs to its end (RR-2 item 5) |
+| `inbound_resend_request_leaf_`'s entry, before its number peek and build | read: when `reached`, return success with no write (no `toAdmin`, no number, no store call, no state write); `none` and `pending` pass (contract RR-5 item 6, "The leaf entry test") |
 | `install_reconnected_transport` | `none`, and the manager thawed in the same block (contract RR-5 item 1) |
 | Any write of `reached` (a reset point, `close()`'s close-out) | the manager frozen in the same strand turn: at a reset point by `run_reset_unit_`, after its manager set; at the close-out with the marker's write (contract RR-5) |
 
@@ -70,6 +72,26 @@ direction".
 - **Order against an in-place reconnect.** `drive_reconnect` drains, then `reconnect_fsm_.drive_reconnect_attempt()`
   runs `install_reconnected_transport` (which sets `none`), then `emit_initiator_logon_`. So the reconnect Logon's
   `store_then_emit` never meets a `reached` marker.
+
+## `wire_closed_by_reset_` (new): nothing transmitted after a reset point (contract RR-6, ruling W)
+
+A private `bool` of `Session`, beside the receipt marker.
+
+| Event | Effect |
+|---|---|
+| A reset point (arm A, L or S: the frame's `pending` → `reached`; the bound: `none` → `reached`), in the same strand turn, crossing included | set |
+| `close()`'s close-out of a `pending` marker | **not** written (RR-6 item 5) |
+| `install_reconnected_transport`, in the block that sets the marker to `none` and thaws the manager | cleared |
+| `live_write_serialized_` after the `write_gate_` grant; before `transport_send_` in `store_then_emit` and in `replay_outbound_range_`'s `transmit_async` | read: when set, no transmit, a success (a distinct return from `live_write_serialized_`, so `store_then_emit` skips `last_outbound_steady_` as its `transmit=false` exit does) |
+| D-OUT-10 in `store_then_emit` | read, only for a call carrying RR-6 item 4's exemption: when set, the lowered manager does not refuse the transmit |
+
+- **The exemption parameter.** `store_then_emit` and `live_write_serialized_` gain one parameter, a typed enumerator
+  that defaults to "none". `run_logout_phase1` is its only caller that passes the exemption, for our own Logout in a
+  crossing (RR-6 item 4). Recipe: `git grep -n '<the enumerator>' -- src include`.
+- **Invariant RO-5.** The member is set exactly when a reset point has run on this connection, and never by a
+  close-out. While it is set, no frame is handed to the transport except the frame carrying the exemption.
+- It is not the marker, because the close-out also writes `reached`. It is not `frozen(freeze_key)`, which no
+  production branch tests (RR-5 item 4).
 
 ## The reset unit: new callers
 
@@ -253,7 +275,9 @@ New rows:
   with `validate_sequence_numbers` off too. Retires L-103-7. Amends B-103-10's "In Active".
 - **B-104-7** — C++ layout changes in two installed headers, in the shape of B-544-3 and B-103-11, before the
   first release. In `include/fixpp/session/session.hpp`, `reset_unit_wake_`, the waker of 093's event-driven
-  `close()` wait, is deleted, and `logout_seen_` changes from `bool` to a one-byte enum; whether `sizeof(Session)`
+  `close()` wait, is deleted, `logout_seen_` changes from `bool` to a one-byte enum, and the private `bool`
+  `wire_closed_by_reset_` is added (contract RR-6). The private `store_then_emit` and `live_write_serialized_` gain a
+  defaulted exemption parameter; neither is callable outside `Session`. Whether `sizeof(Session)`
   moves, and which way, is written from phase 7's one-off size reading, base against head, never from this text,
   and the row says the size is unchanged if the reading shows no change (padding can absorb the deletion). In
   `include/fixpp/session/engine.hpp`, `Engine` gains R-1t's step-3 mark, a private test seam beside
@@ -280,18 +304,29 @@ New rows:
   sequence numbers. A frame or a send that was already in progress at that point, and that later tries to number
   a message, apply a GapFill or SequenceReset's NewSeqNo, or reconcile its outbound number after a store failure,
   is refused. In particular:
-  - its late Reject or other reply is not numbered, stored or sent, and `toAdmin` is not called for it;
+  - its late Reject or other reply is not numbered, stored or sent, and `toAdmin` is not called for it. The
+    ResendRequest such a frame would send for a too-high ResendRequest is not built, and its `toAdmin` is not
+    called (104 contract RR-5 item 6, "The leaf entry test");
   - a GapFill's NewSeqNo is not applied;
-  - a failed send keeps the store's error and is not transmitted.
+  - a failed send keeps the store's error and is not transmitted;
+  - nothing more is transmitted on that connection after a received Logout's reset point (not after a close-out).
+    A frame already numbered and stored then is not sent; its store write came before the reset's, which clears
+    it. The one exception: when the peer's Logout
+    crossed fixpp's own graceful-close Logout, which was already numbered, that Logout is sent. The wire then
+    carries exactly one Logout, fixpp's own (104 contract RR-6).
   The numbers stay at 1 after a receipt reset, and at their values after a close-out. The teardown's reset under
   `reset_on_disconnect` still runs. The session's state history (`Session::fsm_visit_history()`) records one
   `Disconnected` for an ending whose number or NewSeqNo is refused, and for any ending where a message cannot take
   a number while the session is already Disconnected, for example after `close()` has drained the manager (104
-  contract RR-5 item 6). A send, liveness frame or reply whose own store call failed keeps its handling of that
+  contract RR-5 item 6). It also records one when a frame still in progress as a too-high Logout's bound acknowledges
+  then ends the session itself (a SendingTime or OrigSendingTime Reject followed by its Logout), with or without
+  `reset_on_logout`. A send, liveness frame or reply whose own store call failed keeps its handling of that
   store error. When the session is already Disconnected, that handling can add a second `Disconnected` entry, as
   before 104. With `reset_on_logout` off nothing is refused. On a too-high Logout's route the
-  frame in progress is one that 103's bound let in after the Logout, which QuickFIX never processes; so nothing of
-  it is sent, as in QuickFIX (104 research D11). FR-019, contract RR-5.
+  frame in progress is one that 103's bound let in after the Logout, which QuickFIX never processes. Nothing of it
+  is sent after the reset point (contract RR-6), as in QuickFIX. QuickFIX's own user-thread sends (C++, J) and
+  QuickFIX/J's timer thread can still race past its reply, so this suppression falls within QuickFIX's behaviour
+  (104 research D11). FR-019, contract RR-5, RR-6.
 
 New limitations:
 - **L-104-1** — a ResendRequest answered when fixpp has sent nothing at or above BeginSeqNo writes a GapFill whose

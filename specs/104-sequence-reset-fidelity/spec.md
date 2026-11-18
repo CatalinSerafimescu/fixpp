@@ -237,6 +237,54 @@ listed again in the PR body for the owner's review at Gate B sign-off. The mecha
        `operator||`'s branch, is read at the pinned asio; T013 re-reads it, and T014 stops on a contrary reading.
   - **Review.** A narrow Gate A loop (loop 4) reviews the amendment before implementation resumes at T011.
 
+### Session 2026-11-18 (orchestrator, T014 STOP)
+
+- Q: T013 found that `inbound_resend_request_leaf_`, which calls `toAdmin` before it takes its number, is not
+  reached in its frame's entry turn. On a too-high ResendRequest with BeginSeqNo(7) missing,
+  `on_inbound_active_too_high_` first answers it, and the answer's Reject suspends in its store call and write. A
+  route-B reset point can fall there, and the leaf then calls `toAdmin` for a number the freeze refuses. RR-5 item
+  6 and research D11 gave an entry-turn reason, and the real reason rested on a store return order that no clause
+  stated. Amend the reasoning, or close the site by construction? → A: **By construction, with no ordering
+  argument.**
+  1. The leaf gets an entry test in `inbound_logout_leaf_`'s pattern (B41, D-OUT-2). Before its peek and build,
+     it returns success and writes nothing when the receipt marker is `reached`. The marker is the narrowest test:
+     the state would also refuse with `reset_on_logout` off and in LogonReceived, and 103's own ResendRequest runs
+     with `peer_logout_.phase` `pending` and the marker `none`. Its caller returns success, and no second
+     `Disconnected` entry is written (contract RR-5 item 6, "The leaf entry test").
+  2. `on_inbound_active_sending_time_reject_`'s step 3 can add a second `Disconnected` entry for a frame in flight
+     across a route-B reset point, with no refused call. It becomes conditional (T050's list). The enumeration of
+     that shape also found `on_inbound_active_poss_dup_`'s Arm D step 3, which is included the same way (accepted
+     by the orchestrator).
+  3. The class is enumerated by a recipe (contract RR-5 item 6), not by a count. Only
+     `inbound_resend_request_leaf_` needs the test; `inbound_logout_leaf_` already has one. Cell R-5f, with a
+     rol-off forced-hit arm. No further Gate A round: the change applies the converged RR-5 pattern, and it is
+     visible to the owner at Gate B.
+- Q: The same reading found a third case of one class, **work in flight across the write of `reached`** (after
+  T011's manager writers and T014's leaf). A frame that its store call had returned before the reset point was still
+  written after it, after the reply (research D11, "Frames in flight across `reached`"). QuickFIX never sends any
+  such frame. → A: **Ruling W** (contract RR-6).
+  1. Once a reset point has run (arm A, L or S, or the bound), fixpp transmits nothing more on that connection.
+     - The discriminator is a dedicated member, `wire_closed_by_reset_`, set in the reset point's turn with
+       `reached`. It is cleared at `install_reconnected_transport`.
+     - One test reads it, after the `write_gate_` grant in `live_write_serialized_`, and before the config-time
+       sink's `transport_send_`.
+     - On a hit: success with no transmit, the shape of the `transmit=false` exit. The number stays consumed, and no
+       second `Disconnected` is written.
+     - D-OUT-10 already covers a frame still in its store call. The test does not branch on `frozen`.
+  2. `close()`'s close-out is exempt. It runs no unit and does not write the member, so O13-r's endings and
+     B-563-5's are unchanged.
+  3. **Sub-ruling, the crossing.** Our own phase-1 Logout, already numbered when a peer Logout reaches arm A in
+     Active, is exempt from D-OUT-10 and from the test.
+     - The exemption is carried by one defaulted parameter of `store_then_emit` that only `run_logout_phase1`
+       passes. It lifts D-OUT-10 only while the member is set, so a reconcile's or a take-back's lowering still
+       refuses.
+     - Reason: QuickFIX has already written our Logout before it processes the peer's, so its ending is exactly one
+       Logout, ours. Without the exemption 104 would put none on the wire.
+     - Arm A still runs its unit and still sets the member, so every other in-flight frame is held back.
+  4. Research D11's "No new departure" holds under W. The suppression falls within QuickFIX's envelope: QuickFIX
+     C++ and QuickFIX/J user-thread sends, and QuickFIX/J's timer thread, can themselves race past the reply.
+     Cells R-5f, R-5g and R-5h, and R-5e's close-out sink assertion.
+
 ## User Scenarios & Testing *(mandatory)*
 
 The users are the operators and integrators of a fixpp session that talks to a QuickFIX-family counterparty.
@@ -429,7 +477,10 @@ matches what the lanes run, so a lane's figure is EVIDENCE again and not DIAGNOS
   refused write MUST leave both numbers unchanged. The writer MUST then emit nothing for a refused number and MUST
   call no `toAdmin` for it, and its handling of the refused return MUST add no second `Disconnected` entry to the
   state history. A write the writer makes for a store error it met before the refusal (`store_then_emit`'s failure
-  after a refused reconcile) keeps its existing handling. With `reset_on_logout` off nothing is frozen.
+  after a refused reconcile) keeps its existing handling. With `reset_on_logout` off nothing is frozen. After a
+  received Logout's reset point, fixpp MUST transmit nothing more on that connection, except its own
+  graceful-close Logout when the peer's Logout crossed it. In that case the wire MUST carry exactly one Logout,
+  fixpp's own (Clarifications 2026-11-18, ruling W; contract RR-6).
 
 **Unasked 141=Y acknowledgement (B107, #695)**
 

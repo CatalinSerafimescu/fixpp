@@ -65,8 +65,9 @@ comments.
   git grep -n -e fsm_visit_history -e fsm_visit_count -- tests
   ```
   For each `assign_outbound` caller, read whether `fire_to_admin_` precedes it and, if so, that no suspension
-  falls between its last state test (or its frame's entry turn) and its number. Read phase 1 after a receipt
-  reset (contract O22), including the inline start of `operator||`'s branch at the pinned asio
+  falls between its last test that fails while frozen (or its frame's start) and its number; a leaf reachable after
+  a suspension in its frame needs its own entry test (contract RR-5 item 6, "The leaf entry test"). Read phase 1
+  after a receipt reset (contract O22), including the inline start of `operator||`'s branch at the pinned asio
   (`grep -n co_spawn_dispatch <asio>/impl/co_spawn.hpp`). A reading that contradicts RR-5 or research D11 stops
   implementation (T014). The direct-`open()` overlap of RR-5 item 5's `hydrate` row is accepted, not a stop: record
   it as read, and stop only if its refused `hydrate` does not end through `disconnect_unless_superseded_` with
@@ -173,7 +174,7 @@ Cells with a forced-hit or a competing-timer element:
 | US1 AS6 | Logout in LogonSent resets; in NotConnected does not | R-1o |
 | US1 AS7 | processing ends before the reset point: no reset | R-1f, R-1g, R-1n |
 | US1 edges | too-high Logout (a duplicate included); races with `close()` and `Engine::stop()` (A beside a claimed bound included); a cancelled reply store; store failure; reconnect; emitters at the unit; a direct caller's cancellation at the reset point | R-1e, R-1h to R-1l, R-1p to R-1z |
-| US1, FR-019 | a writer in flight at the reset point (a route-B GapFill or Reject, a failed send's reconcile), and a Reject after `close()`'s close-out: refused by the manager freeze | R-5a, R-5b, R-5c, R-5e; the manager alone, R-5d |
+| US1, FR-019 | a writer in flight at the reset point (a route-B GapFill or Reject, a failed send's reconcile), and a Reject after `close()`'s close-out: refused by the manager freeze; nothing transmitted after a reset point but our crossing Logout (ruling W) | R-5a, R-5b, R-5c, R-5e, R-5f, R-5g, R-5h; the manager alone, R-5d |
 | US2 AS1/AS2 | unasked 141=Y at 34=1, lenient and unilateral | U-1, U-2 |
 | US2 AS3 | strict unchanged | U-3, existing `Initiator_Received141Ack_*` |
 | US2 AS4 | 141=Y at M > 1 | U-4, W8 re-pin |
