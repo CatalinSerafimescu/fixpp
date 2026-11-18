@@ -2,10 +2,13 @@
 //
 // tests/session/test_recovery_admin_span_gapfill.cpp — T015 [US1] Phase 3 RED
 //
-// Admin-span gap-fill: peer's ResendRequest covers a span [10..20] in which
-// all stored messages are admin (Heartbeat/TestRequest). The session MUST
-// collapse the entire span into ONE SequenceReset{NewSeqNo=21, GapFillFlag=Y}
-// (FIX-SL §4.3.5: admin messages cannot be replayed).
+// Admin-span gap-fill: peer's ResendRequest covers a span in which all stored
+// messages are admin (Heartbeat/TestRequest). The session MUST collapse the
+// entire span into ONE SequenceReset-GapFill (FIX-SL §4.3.5: admin messages
+// cannot be replayed). Since 104 (research D3.3a; contract U6, superseding 027
+// C3's explicit-end case by name) a span whose EndSeqNo reaches the next outbound
+// number ends at that number: the GapFill's NewSeqNo is the next outbound number,
+// never EndSeqNo + 1.
 //
 // Anchors: spec.md §US1 AC1 / FR-010..FR-012 / FR-013; data-model.md §D-3;
 //   plan.md §Test plan T015; [FIX-SL §4.3.5]; contracts/reconnect_fsm.hpp.
@@ -43,6 +46,7 @@
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/session_executor_of.hpp"
+#include "support/session_test_access.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -363,23 +367,27 @@ TEST_F(RecoveryAdminSpanGapfillTest, AllAdminSpanCollapsesToSingleGapFill) {
     fixpp::session::Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_active(sess)) << "Precondition: session must reach Active state";
 
-    // Inject ResendRequest from peer (they want us to replay [2..12]).
-    // Since our outbound store only has admin msgs in [2..12],
-    // we must collapse to SequenceReset{NewSeqNo=13, GapFillFlag=Y}.
+    // Inject ResendRequest from peer (they want us to replay [2..12]). Nothing at
+    // or above 2 has been sent, and EndSeqNo 12 reaches the next outbound number,
+    // so the span collapses to one SequenceReset-GapFill whose NewSeqNo is the
+    // next outbound number (104, research D3.3a), read here from the session.
+    const auto next_out =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_outbound_unsafe();
+    ASSERT_LE(next_out, 12U) << "setup: EndSeqNo must reach the next outbound number";
     auto rr = make_resend_request("FIX.4.2", 2, "TW", "ISLD", 2, 12);
     (void)feed(sess, rr);  // outcome checked below via emitted frames
 
-    // Check outbound for SequenceReset-GapFill with NewSeqNo=13.
+    // Check outbound for a SequenceReset-GapFill with NewSeqNo = the next outbound number.
     bool found_gapfill = false;
     for (const auto& frame : capture.frames) {
-        if (is_sequence_reset_gapfill(frame, 13)) {
+        if (is_sequence_reset_gapfill(frame, next_out)) {
             found_gapfill = true;
             break;
         }
     }
     EXPECT_TRUE(found_gapfill)
-        << "Expected ONE SequenceReset(4){GapFillFlag=Y, NewSeqNo=13} outbound "
-        << "when peer asks ResendRequest[2..12] all-admin span. "
+        << "Expected ONE SequenceReset(4){GapFillFlag=Y, NewSeqNo=" << next_out
+        << "} outbound when peer asks ResendRequest[2..12] all-admin span. "
         << "RED: reply_to_inbound_resend_request stub returns {} without emitting "
         << "any SequenceReset frame — this assertion FAILS RED per T015 design.";
 }

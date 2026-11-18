@@ -2314,12 +2314,16 @@ TEST(PersistentSeqnumHydrate, NoHeap_HydrateAndPersistPaths) {
 // ── INV-H1_Initiator_PeerAck141_NoOverPersist ────────────────────────────────
 //
 // Initiator hydrated {in=37, out=42} (persistent store). Peer Logon-ack carries
-// 141=Y at seq=37 (in-seq relative to manager=37 — so check_inbound succeeds and
-// advances manager 37→38, THEN the reset arm rewinds manager+store to 1).
+// 141=Y at seq=37, the hydrated NextNumIn; fixpp's own Logon carried no 141=Y.
 //
-// After the reset + 030 restore (the INITIATOR twin of the acceptor W9b pin):
-//   manager.next_inbound == 2  (consumed seq-37 reset-ack Logon is a surviving advance)
-//   store.durable_inbound == 2 (030 persists the surviving advance through to the store).
+// 104 (research D4, ruling O-2; contract U2) supersedes this cell's consumed-ack reading by
+// name: an unasked 141=Y acknowledgement takes no sequence check and is consumed only at
+// MsgSeqNum 1, so above 1 its unit resets both to 1 and nothing survives to restore. Read
+// against U-4's assertion of the same quantity (UnaskedResetAck104.AtMAbove1_NotConsumed_
+// ResendOnNextFrame: inbound next 1 after the reset):
+//   manager.next_inbound == 1 and store.durable_inbound == 1 (equality, no over-persist).
+//
+// The 029/030 history below describes the asked-or-consumed case this cell pinned before 104.
 //
 // 029 over-persist (the bug this witness was born to catch): reset set store=1, then an
 //   UNCONDITIONAL persist pushed store=2 while manager stayed at 1 — store(2) > manager(1),
@@ -2328,8 +2332,8 @@ TEST(PersistentSeqnumHydrate, NoHeap_HydrateAndPersistPaths) {
 //   clobber to the acceptor arm, FR-009), so the dedicated 030 arm-local persist takes
 //   BOTH manager and store to 2 → store(2) == manager(2). Equality, NOT over-persist.
 //
-// NOTE: seq must be 37 (the hydrated in-seq value). Using seq=1 would make
-//   check_inbound(1) against manager=37 → too-low → fatal → Disconnected (wrong path).
+// NOTE: seq is 37, the hydrated NextNumIn, so the frame would pass a sequence check against
+//   NextNumIn; the unasked rule compares it with 1 instead (104).
 // [[feedback_witness_asserts_named_postcondition_not_proxy]]
 // [[feedback_unconditional_persist_at_multiexit_gate_breaks_lowerbound]]
 // [029 INV-H1; triage root-cause #1 initiator arm; contracts C3.1; 030 FR-005/009]
@@ -2345,8 +2349,8 @@ TEST(PersistentSeqnumHydrate, INV_H1_Initiator_PeerAck141_NoOverPersist) {
     FaultStore* store = factory->last_store;
     ASSERT_NE(store, nullptr);
 
-    // Feed peer Logon-ack with 141=Y at seq=37 (in-seq → check_inbound succeeds,
-    // then reset arm fires → manager+store rewound to 1).
+    // Feed peer Logon-ack with 141=Y at seq=37: unasked, so no check_inbound; the reset unit
+    // rewinds manager and store to 1 and the frame is not consumed (104).
     // bilateral_lenient does NOT require we sent 141=Y first, so this is accepted.
     fix->feed(make_logon_reset("FIX.4.4", 37, "SRV", "CLI"));
 
@@ -2354,24 +2358,21 @@ TEST(PersistentSeqnumHydrate, INV_H1_Initiator_PeerAck141_NoOverPersist) {
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
         << "INV_H1_Initiator_PeerAck141: session must reach Active after peer-ack 141=Y";
 
-    // INV-H1 assertion (MANDATORY — not inside an if-Active guard):
-    // Post-reset + 030 restore: both store and manager must equal 2.
-    // 029 over-persist bug: store=2 (unconditional persist), manager=1 → INV-H1 violated.
-    // 030: the consumed seq-37 reset-ack Logon survives → store=2 == manager=2 (equality). ✓
+    // INV-H1 assertion (MANDATORY — not inside an if-Active guard): after the unasked reset
+    // above 1, both store and manager are 1, and the store never exceeds the manager.
     const seqnum_t manager_ni =
         fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe();
-    EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{2})
-        << "INV_H1_Initiator_PeerAck141 (INV-H1 / 030 FR-005/009): store.durable_inbound must "
-           "be 2 after 141=Y reset + 030 restore-to-2 of the consumed seq-37 reset-ack Logon. "
-           "029 over-persist RED: durable_inbound=2 with manager=1 (no surviving advance). "
-           "030 GREEN: durable_inbound=2 == manager=2 (consumed reset-ack Logon survives). "
-           "durable_inbound="
+    EXPECT_EQ(manager_ni, fixpp::session::seqnum_t{1})
+        << "INV_H1_Initiator_PeerAck141 (104, U2): an unasked 141=Y acknowledgement above 1 is "
+           "not consumed; manager.next_inbound="
+        << manager_ni;
+    EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{1})
+        << "INV_H1_Initiator_PeerAck141 (104, U2; INV-H1): store.durable_inbound must be 1 after "
+           "the unasked reset above 1; durable_inbound="
         << store->durable_inbound;
     EXPECT_LE(store->durable_inbound, manager_ni)
         << "INV_H1_Initiator_PeerAck141 (INV-H1): store.durable_inbound must be <= "
-           "manager.next_inbound. 029 over-persist bug: store(2) > manager(1). "
-           "030: store(2) == manager(2). "
-           "durable="
+           "manager.next_inbound. durable="
         << store->durable_inbound << " manager=" << manager_ni;
 }
 
