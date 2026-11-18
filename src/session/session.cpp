@@ -6949,9 +6949,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     // 104 (clarification N-8; contract U1, U2, U4m, U7): the unasked acknowledgement's unit,
     // after the mTLS gate, so a refused identity makes no reset. Its targets are next-in 2
     // when the acknowledgement was consumed, else 1, and next-out 1: 032 C1's next-out 2 needs
-    // the latch, which is clear here. The dispositions and the superseded test
-    // are the asked unit's (093 contract C-6 steps 5 to 7); the 789 honour below compares the
-    // peer's 789 with the number after the reset (research D3.2).
+    // the latch, which is clear here. The restore, the dispositions and the superseded test
+    // are the asked unit's (093 contract C-6). The 789 honour below compares the peer's 789
+    // with the number after the reset (research D3.2).
     if (unasked_reset_ack) {
         const seqnum_t unit_in = logon_inbound_advanced_init ? seqnum_min + 1 : seqnum_min;
         auto const unit = co_await run_reset_unit_(unit_in, seqnum_min);
