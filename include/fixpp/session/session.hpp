@@ -1465,6 +1465,11 @@ private:
         bool tic, std::span<const std::byte> frame) noexcept;
     [[nodiscard]] inbound_result_t on_inbound_logon_sent_(
         bool tic, std::span<const std::byte> frame) noexcept;
+    // The LogonSent arm's mTLS CompID-authorisation gate, both its arms: false when it
+    // refuses the identity (its event emitted, a live identity consumed; the caller records
+    // Disconnected), true when it admits it or the session is not mTLS. Its callers are the
+    // Logon-ack path and, 104, arm S's Logout branch.
+    [[nodiscard]] bool logon_sent_identity_admitted_() noexcept;
     // The Active arm's synchronous SendingTime(52) MaxLatency check.
     [[nodiscard]] bool inbound_sending_time_ok_(
         fixpp::session::detail::FrameHeader const& hdr) const noexcept;
@@ -1764,6 +1769,10 @@ private:
             logout_seen_ = receipt_marker::none;
         }
     }
+    // 104 (contract RR-2 items 2, 3 and 5): the marker's move at a receipt arm's reset point,
+    // called with reset_on_logout set, after the arm has reset its thread's cancellation state
+    // and immediately before the unit it starts. True when the caller runs the reset unit.
+    [[nodiscard]] bool enter_receipt_reset_point_() noexcept;
     class pending_receipt_owner {
     public:
         explicit pending_receipt_owner(Session& s) noexcept : s_(&s) {}
