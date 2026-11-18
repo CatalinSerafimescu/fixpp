@@ -457,7 +457,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - every other T004 kept hit of the first three key rows in `src/` and `include/`.
 
   Run `check-comment-claims.py` on the batch. Done: evidence file, "seventeenth run", T051.
-- [ ] T052 [US1] D8's measured half for D1 (research D8 step 4). In `$M` at `B0`, apply D1 alone as a diff, not as cherry-picked commits: `git diff bf294f00 <the commit after T051> -- src include`, applied to `B0`. That is D1 plus the inert asserts and seam; it includes T040's enum, and it does not conflict with T018. Under the sandbox lock, run the structural selection (orchestrator ruling 1 on the seventeenth run):
+- [X] T052 [US1] Done: evidence file, "Session of 2026-11-18, eighteenth run", its T052 section. D8's measured half for D1 (research D8 step 4). In `$M` at `B0`, apply D1 alone as a diff, not as cherry-picked commits: `git diff bf294f00 <the commit after T051> -- src include`, applied to `B0`. That is D1 plus the inert asserts and seam; it includes T040's enum, and it does not conflict with T018. Under the sandbox lock, run the structural selection (orchestrator ruling 1 on the seventeenth run):
   - **The selection.** It is the union of two sets, both read from `$M`'s build tree after the build, and never written by hand:
     - the entries that `ctest --preset linux-clang-debug -N` lists for `-L session`, `-L capi`, `-L config`, `-L interop` and `-R '^session_tc_'`, the quickstart §1 lines and the interop label;
     - every entry registered from `tests/session`, `tests/capi`, `tests/integration`, `tests/conformance`, `tests/alloc_guard` or `tests/interop`. Derive it from `ctest --preset linux-clang-debug -N --show-only=json-v1`: map each test to the directory of the deepest `CMakeLists.txt` under `tests/` in its backtrace.
@@ -468,13 +468,13 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - **The selection's known positive.** `session_reset_on_lifecycle` is in the derived list. A list without it is void, as a run whose known positive did not fail is.
   - An entry that needs an external peer and is skipped is recorded as skipped.
   - **The reading.** Each failing cell must already be a T004 kept hit. `ResetOnLifecycleTest.ResetOnLogout_LocalInitiated_Resets` must fail: it is the known positive. A measured run whose known positive did not fail is void: it is recorded as void, the cause is found, and the run is repeated; its zero failing cells are never read. A failing cell that is not a kept hit means a key is missing, and the key is added to T004 before the census is accepted.
-- [ ] T053 [US1] Re-pins in `tests/session/test_reset_on_lifecycle.cpp` (research D8, "Base reading of the cells"):
+- [X] T053 [US1] Done: evidence file, "Session of 2026-11-18, eighteenth run", its T053 section. Re-pins in `tests/session/test_reset_on_lifecycle.cpp` (research D8, "Base reading of the cells"):
   - `ResetOnLogout_LocalInitiated_Resets` is renamed for the answered close. It feeds a peer Logout in LogoutSent and asserts the reset at the reset point. Its unanswered half moves to R-1a.
   - `ResetOnLogout_BothRoles_Resets`' initiator arm gets the same change.
   - The comments of `ResetOnLogoutAndDisconnect_DoubleTrigger_OneStoreReset` ("which sets logout_seen_=true") and `ResetOnLogout_PeerInitiated_Resets` (the teardown) are reworded. Their assertions are unchanged.
 
   Run `ctest --preset linux-clang-debug -R '^session_reset_on_lifecycle$' --no-tests=error`, GREEN with a non-zero count. Record.
-- [ ] T054 [US1] The other D1 kept hits.
+- [X] T054 [US1] Done: evidence file, "Session of 2026-11-18, eighteenth run", its T054 section. The other D1 kept hits.
   - Re-aim `InboundFrameDispositionsOd29.ATerminalCloseAfterPhase1ResolvedJoinsWithNoEarlyCut` in `tests/session/inbound_frame_dispositions_test.cpp` to `reset_on_disconnect`.
   - Reword the comment above `GracefulLogoutStoreCancelled.ByTheGraceTimer_ResetOnLogout_NoResetForALogoutThatWasNotSent` in `tests/session/test_logout_not_sent.cpp` to "a local graceful close resets only when the peer's Logout is received (104, B-104-1)", with the renamed cell's name.
   - Handle `CallbackSend.ToAdminOfGracefulCloseStartsClose_Terminal_ResetOnLogout*`'s comments as T004 dispositioned them.
@@ -484,7 +484,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - Handle every other D1 kept hit of T004 and T052.
 
   Run each entry by `-R '^<entry>$' --no-tests=error`, each count non-zero. Record.
-- [ ] T055 [US1] US1 GREEN.
+- [X] T055 [US1] Done: evidence file, "Session of 2026-11-18, eighteenth run", its T055 section. US1 GREEN.
   - Every Phase 3 cell, with the same non-zero count as at T039, and R-5d (T049); `ctest -L 104 --no-tests=error`; and T053's and T054's entries, by `-R '^<entry>$' --no-tests=error`.
   - The SC-004 witnesses, unedited: `ResetOnLifecycleTest.ResetOnLogout_Off_Preserves`, `…_NextInitiatorLogon_Emits141` and `ResetOnDisconnect_*`; `ResetPolicyLogonInvariant103.*`; `Od26.CloseDrainingTheSeqnumMutexBeforeTheHydrateWritesNoState`; `GracefulLogoutStoreCancelled.*`.
   - T021's selection once more, with asserts silent.
