@@ -4286,6 +4286,24 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         co_return fixpp::core::expected_t<void>{};
     }
 
+    // 033 T023 (US2): surface 553/554 as logon_credentials to authorize_logon. Fired on the
+    // acceptor inbound-Logon path INDEPENDENTLY of mTLS (the mTLS-gated
+    // compid_authorization_policy.authorize() is unrelated). Default implementation: accept.
+    // asserted_compid = peer SenderCompID(49) = cfg_.target_comp_id. `result` is valid here.
+    // [033 contracts C7; research R6; data-model E5; FR-008/FR-008a]
+    // 104 (contract T8; clarification N-8): one callable, so a too-low Logon runs the same
+    // check before its Logout as an in-sequence one runs before LogonReceived.
+    auto const logon_credentials_admitted = [this, &result]() {
+        fixpp::session::logon_credentials creds;
+        if (result->username.has_value()) {
+            creds.username = std::string{*result->username};
+        }
+        if (result->password.has_value()) {
+            creds.password = std::string{*result->password};
+        }
+        return cfg_.compid_authorization_policy.authorize_logon(cfg_.target_comp_id, creds);
+    };
+
     // Valid Logon: read seqnum + 013 T027 ResetSeqNumFlag(141) from the arm's
     // header scan (hoisted to the top of the arm by 092).
     // The Logon must carry seq=1 on initial session (seqnum_mgr_ starts at 1).
@@ -4504,8 +4522,29 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
                 // Behind-side: tolerate. next_inbound_ stays at X (not advanced).
                 // Fall through to the existing acceptor reply-build path below.
                 // logon_inbound_advanced stays false (check_inbound did not advance).
+            } else if (chk.error() == fixpp::core::error::session_seqnum_too_low) {
+                // 104 (FR-012 to FR-014; research D5, D6; contract T2, T8) supersedes 103's
+                // spec row "A too-low frame in NotConnected or LogonSent still ends silently":
+                // once the identity gates pass, a too-low Logon draws QuickFIX's too-low
+                // Logout, whatever its 43, then Disconnected. The gates are the ones an
+                // in-sequence Logon meets below, through the same calls: the mTLS
+                // CompID-authorisation gate, then the credentials gate; a refusal ends the
+                // arm as it does there, silent and Disconnected (FIX-TC 1S(c)). 1137 is not
+                // reached. The Logout carries Text(58) only and the session's next outbound
+                // number; NextNumIn is not advanced; refuse_logon_with_logout_ gives the
+                // endings of a Logout that is not sent, and sets no receipt marker.
+                if (!logon_sent_identity_admitted_() || !logon_credentials_admitted()) {
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return fixpp::core::expected_t<void>{};
+                }
+                too_low_text_buffer text_buf{};
+                const std::string_view text{
+                    text_buf.data(), write_too_low_text(text_buf, seqnum_mgr_.next_inbound_unsafe(),
+                                                        parse_seqnum(hdr.msg_seq_num))};
+                co_return co_await refuse_logon_with_logout_(text, fsm_state::NotConnected);
             } else {
-                // Too-low OR knob off: session-fatal (I-2/I-4/[FIX-SL §4.1]).
+                // Too-high with the knob off, or a drained mutex: session-fatal, silent
+                // (I-2/I-4/[FIX-SL §4.1]).
                 record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
@@ -4554,59 +4593,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
     //   (3) Non-mTLS (one_way_ca / unset-but-passed-open-guard) → skip.
     // [015 T013/T020; data-model §E-4; FR-006/007/008/009; T-041; Gate A New-1/E-4]
     // [FR-019; FR-024 symmetric]
-    {
-        const bool is_mtls =
-            cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_ca ||
-            cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_pinned;
-
-        if (live_peer_id_.has_value() && is_mtls) {
-            // (1) Live acceptor path: use real handshake peer_id set by
-            //     attach_accepted_transport. Mirrors the initiator's live-reconnect
-            //     CompID-authorization arm.
-            const fixpp::tls::peer_identity& auth_pid = *live_peer_id_;
-            const std::string_view asserted_compid = cfg_.target_comp_id;
-            auto auth_r = cfg_.compid_authorization_policy.authorize(auth_pid, asserted_compid);
-            if (!auth_r) {
-                // Fail-closed: off-list or absent identity.
-                emit_event(fixpp::session::session_event_compid_authorization_failed{
-                    .cn = {},
-                    .asserted_compid = asserted_compid,
-                    .expected_compids = {},
-                    .principal_source = fixpp::session::bound_principal::source::CN,
-                });
-                live_peer_id_.reset();  // consume (one-shot)
-                record_state_transition_(fsm_state::Disconnected);
-                co_return fixpp::core::expected_t<void>{};
-            }
-            // Authorization succeeded: emit peer_identity_bound event.
-            // cn EMPTY: live_peer_id_.reset() frees backing store (UAF guard,
-            // matching the initiator arm's peer_identity_bound success path).
-            emit_event(fixpp::session::session_event_peer_identity_bound{
-                .cn = {},
-                .sans = {},
-                .sha256_fingerprint = auth_pid.leaf_fingerprint,
-                .cipher = {},
-                .bound_compid = asserted_compid,
-                .principal_source = auth_r->from,
-            });
-            live_peer_id_.reset();  // consume (one-shot per Logon)
-        } else if (is_mtls) {
-            // (2) mTLS + no peer_identity available → fail CLOSED.
-            // Peer_identity required for mTLS CompID binding but the live
-            // handshake identity is absent (happens-before violated, or a
-            // non-engine acceptor with no attach_accepted_transport call).
-            // Silent-admit here would bake a fail-open default. [triage RC#A]
-            const std::string_view asserted_compid = cfg_.target_comp_id;
-            emit_event(fixpp::session::session_event_compid_authorization_failed{
-                .cn = {},
-                .asserted_compid = asserted_compid,
-                .expected_compids = {},
-                .principal_source = fixpp::session::bound_principal::source::CN,
-            });
-            record_state_transition_(fsm_state::Disconnected);
-            co_return fixpp::core::expected_t<void>{};
-        }
-        // (3) Non-mTLS (one_way_ca): no client cert → gate skipped.
+    //
+    // 104 (contract T8): the gate runs through logon_sent_identity_admitted_(), whose arms are the
+    // ones above, so a too-low Logon above meets the same arms, events and one-shot consumption.
+    // A refusal records Disconnected here.
+    if (!logon_sent_identity_admitted_()) {
+        record_state_transition_(fsm_state::Disconnected);
+        co_return fixpp::core::expected_t<void>{};
     }
 
     // 033 T018 — FIXT acceptor: validate DefaultApplVerID(1137) (C4/C5).
@@ -4656,27 +4649,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         }
     }
 
-    // 033 T023 (US2): surface 553/554 as logon_credentials to authorize_logon.
-    // Fired on the acceptor inbound-Logon path INDEPENDENTLY of mTLS
-    // (the mTLS-gated compid_authorization_policy.authorize() is unrelated).
-    // Default implementation: accept. A future FR-008a validator may reject here.
-    // `result` is always valid here -- the earlier `if (!result)` returned.
-    // [033 contracts C7; research R6; data-model E5; FR-008/FR-008a]
-    {
-        fixpp::session::logon_credentials creds;
-        if (result->username.has_value()) {
-            creds.username = std::string{*result->username};
-        }
-        if (result->password.has_value()) {
-            creds.password = std::string{*result->password};
-        }
-        // asserted_compid = peer SenderCompID(49) = cfg_.target_comp_id.
-        if (!cfg_.compid_authorization_policy.authorize_logon(cfg_.target_comp_id, creds)) {
-            // Future: emit an authorization-failed event. For 033 (default-accept
-            // validator), this path is unreachable unless a custom validator rejects.
-            record_state_transition_(fsm_state::Disconnected);
-            co_return fixpp::core::expected_t<void>{};
-        }
+    // 033 T023 (US2): the credentials gate (logon_credentials_admitted, above). A future FR-008a
+    // validator may reject here.
+    if (!logon_credentials_admitted()) {
+        // Future: emit an authorization-failed event. For 033 (default-accept
+        // validator), this path is unreachable unless a custom validator rejects.
+        record_state_transition_(fsm_state::Disconnected);
+        co_return fixpp::core::expected_t<void>{};
     }
 
     // Valid Logon + in-seq: transition to LogonReceived, then emit
@@ -6561,7 +6540,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logout_sent_(
 // on_inbound_logon_sent_ so that arm S's Logout branch runs this same gate, both arms. It
 // returns false when the identity is refused, having emitted the gate's event and consumed a
 // live identity; the caller then records Disconnected. It returns true when the identity is
-// admitted, or when the session is not mTLS.
+// admitted, or when the session is not mTLS. 104 (contract T8): the acceptor's NotConnected arm
+// runs it too, for an in-sequence Logon and a too-low one; the asserted CompID is
+// cfg_.target_comp_id in both roles.
 bool Session::logon_sent_identity_admitted_() noexcept {
     const bool is_mtls =
         cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_ca ||
@@ -6851,8 +6832,27 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
             chk.error() == fixpp::core::error::session_seqnum_too_high) {
             // Behind-side: tolerate. Fall through to Active transition below.
             // logon_inbound_advanced_init stays false (manager not advanced).
+        } else if (chk.error() == fixpp::core::error::session_seqnum_too_low) {
+            // 104 (FR-012 to FR-014; research D5, D6; contract T1, T8) supersedes 103's spec
+            // row "A too-low frame in NotConnected or LogonSent still ends silently": once the
+            // mTLS CompID-authorisation gate passes, through the call an in-sequence
+            // acknowledgement meets below, a too-low acknowledgement draws QuickFIX's too-low
+            // Logout, whatever its 43, then Disconnected. A refused identity ends the arm as it
+            // does there, silent and Disconnected (FIX-TC 1S(c)). 1137, the strict test, the
+            // unit and 789 are not reached. The Logout carries Text(58) only and the session's
+            // next outbound number; NextNumIn is not advanced; refuse_logon_with_logout_ gives
+            // the endings of a Logout that is not sent, and sets no receipt marker.
+            if (!logon_sent_identity_admitted_()) {
+                record_state_transition_(fsm_state::Disconnected);
+                co_return fixpp::core::expected_t<void>{};
+            }
+            too_low_text_buffer text_buf{};
+            const std::string_view text{
+                text_buf.data(), write_too_low_text(text_buf, seqnum_mgr_.next_inbound_unsafe(),
+                                                    parse_seqnum(hdr.msg_seq_num))};
+            co_return co_await refuse_logon_with_logout_(text, fsm_state::LogonSent);
         } else {
-            // Too-low or too-high with knob off → fatal (I-2/I-4).
+            // Too-high with knob off, or a drained mutex → fatal, silent (I-2/I-4).
             record_state_transition_(fsm_state::Disconnected);
             co_return fixpp::core::expected_t<void>{};
         }
