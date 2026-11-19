@@ -98,6 +98,9 @@ constexpr auto kHoldWindow = std::chrono::duration_cast<std::chrono::millisecond
 constexpr auto kReleaseBudget =
     std::chrono::duration_cast<std::chrono::milliseconds>(kHoldBound) / 2;
 constexpr auto kSlice = std::chrono::milliseconds{1};
+// A Logout's MsgType(35), named so that a pump predicate reading it carries no string literal
+// (ci/pump-label-uniqueness.sh reads a literal inside a pump call as that site's label).
+constexpr std::string_view kLogoutMsgType = "5";
 
 // Runs the context in slices until done() or the budget passes; returns done().
 bool pump_until(asio::io_context& ioc, const std::function<bool()>& done,
@@ -1087,9 +1090,9 @@ void unanswered_timeout(session_role const role, store_kind const store, bool co
     ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
     auto const mark = s.sent.size();
     r.spawn_close(close_mode::graceful);
-    bool const emitted =
-        s.pump_until([&] { return s.state() == fsm_state::LogoutSent && s.count("5", mark) == 1U; },
-                     std::chrono::milliseconds{kGraceMs} / 4);
+    bool const emitted = s.pump_until(
+        [&] { return s.state() == fsm_state::LogoutSent && s.count(kLogoutMsgType, mark) == 1U; },
+        std::chrono::milliseconds{kGraceMs} / 4);
     // Before the timeout: the Logout was sent, so "no reset" cannot come from a not-sent route.
     ASSERT_TRUE(emitted) << "setup: no 35=5 captured in LogoutSent; the session wrote "
                          << s.written(mark) << " and is " << rg::state_name(s.state());
@@ -2236,7 +2239,8 @@ TEST(ResetOnLogout104, CloseNotHeldWhenReceiptEndsWithoutUnit_FromAdminThrow) {
 
         ASSERT_TRUE(held) << "setup: the reply's store was not held";
         EXPECT_EQ(r.app->from_admin_count("5"), 1) << "setup: fromAdmin did not run on the Logout";
-        EXPECT_EQ(close_reset_wait_expired_count(*s.session), 0) << "close_reset_wait_expired was emitted";
+        EXPECT_EQ(close_reset_wait_expired_count(*s.session), 0)
+            << "close_reset_wait_expired was emitted";
         EXPECT_TRUE(r.log().calls.empty()) << "a reset call: reset() " << r.log().reset_calls
                                            << ", reset_to " << r.log().reset_to_calls;
     }
@@ -2268,7 +2272,8 @@ TEST(ResetOnLogout104, CloseNotHeldWhenReceiptEndsWithoutUnit_StuckPending) {
         ASSERT_TRUE(held) << "setup: the reply's store was not held";
         EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the clock moved";
         EXPECT_TRUE(returned) << "close() did not return past logon_timeout_ms";
-        EXPECT_EQ(close_reset_wait_expired_count(*s.session), 1) << "close_reset_wait_expired events";
+        EXPECT_EQ(close_reset_wait_expired_count(*s.session), 1)
+            << "close_reset_wait_expired events";
     }
 }
 
@@ -2416,8 +2421,8 @@ TEST(ResetOnLogout104, LivenessDuringReceiptUnit_NumbersNothing) {
         auto const mark = s.sent.size();
         auto frame_fut = s.feed_spawn(s.logout(s.next_in()));
         // The base holds nothing, and its frame returns; the hold's window is the bound.
-        (void)s.pump_until(
-            [&] { return !r.log().calls.empty() || rg::Scene::ready(frame_fut); }, kHoldWindow);
+        (void)s.pump_until([&] { return !r.log().calls.empty() || rg::Scene::ready(frame_fut); },
+                           kHoldWindow);
         bool const held = first_call_is_reset_to(r);
         auto const after_reply = s.sent.size();
         // Two advances, each past one HeartBtInt, each followed by half a hold window.
@@ -2613,8 +2618,8 @@ namespace {
 // Every real-time pump from the hold's start to its release is a fraction of kHoldBound, and
 // their sum stays below it (the static_assert), so the hold is ended by the cell's release.
 // The mock clock's advance takes no real time and is not part of the sum.
-constexpr auto kStopOrderBudget = kHoldWindow;      // until the mark ran or close() began
-constexpr auto kStopSettle = kHoldWindow / 2;       // after the clock's advance
+constexpr auto kStopOrderBudget = kHoldWindow;        // until the mark ran or close() began
+constexpr auto kStopSettle = kHoldWindow / 2;         // after the clock's advance
 constexpr auto kStopNotDoneBudget = kHoldWindow / 2;  // the pump that must not see stop return
 static_assert(kHoldWindow + kStopOrderBudget + kStopSettle + kStopNotDoneBudget < kHoldBound);
 
@@ -2624,7 +2629,7 @@ TEST(ResetOnLogout104, EngineStopDuringReplyStore_JoinWaitsPastTheBound_OneReset
     bool mark_ran = false;  // declared before the session: the Engine's hook writes it
     struct StopRun {
         bool done = false;
-        std::vector<StoreLog::Call> calls_at_return;   // StoreLog::calls as stop() returned
+        std::vector<StoreLog::Call> calls_at_return;    // StoreLog::calls as stop() returned
         std::vector<StoreLog::Write> writes_at_return;  // StoreLog::writes as stop() returned
     };
     auto const stop_run = std::make_shared<StopRun>();
@@ -2741,7 +2746,8 @@ TEST(ResetOnLogout104, BothKnobs_PeerAnswers_TwoResets_EndsOneOne) {
 #else
     std::cout << "[ READING  ] the transport reading is not made on this platform\n";
 #endif
-    EXPECT_EQ(calls[1].kind, StoreLog::call_kind::reset) << "the second call was not the teardown's";
+    EXPECT_EQ(calls[1].kind, StoreLog::call_kind::reset)
+        << "the second call was not the teardown's";
     EXPECT_EQ(l.manager_numbers(), (Rol104::Numbers{.in = 1, .out = 1}));
     auto const st = l.store_numbers();
     ASSERT_TRUE(st.has_value()) << "the store's numbers were not read";
@@ -3358,8 +3364,8 @@ void cancelled_lower_send_before_logout_store(session_role const role, bool cons
     s.log->on_call = [&sig, f, cancel](fixpp::test_support::StoreCall const& c) {
         if (cancel && is_outbound_store_at(c, f + 1)) sig.emit(asio::cancellation_type::terminal);
     };
-    s.log->on_return = [&mgr, &mgr_out_at_logout_return, f](
-                           fixpp::test_support::StoreCall const& c) {
+    s.log->on_return = [&mgr, &mgr_out_at_logout_return,
+                        f](fixpp::test_support::StoreCall const& c) {
         if (is_outbound_store_at(c, f + 1)) mgr_out_at_logout_return = mgr.next_outbound_unsafe();
     };
     auto const ex = fixpp::test_support::session_executor_of(*s.session, s.ioc);
@@ -3378,9 +3384,8 @@ void cancelled_lower_send_before_logout_store(session_role const role, bool cons
             close_done = true;
         },
         asio::detached);
-    bool const logout_store_returned =
-        s.pump_until([&] { return send_done && mgr_out_at_logout_return.has_value(); },
-                     kReleaseBudget);
+    bool const logout_store_returned = s.pump_until(
+        [&] { return send_done && mgr_out_at_logout_return.has_value(); }, kReleaseBudget);
     auto const logouts = s.of_type("5", mark);
     if (!cancel && logouts.size() == 1U) {
         auto lo_fut = s.feed_spawn(s.logout(s.next_in()));
@@ -3422,8 +3427,7 @@ void cancelled_lower_send_before_logout_store(session_role const role, bool cons
     // Reach: F met the cancellation inside MemoryStore::store, which threw before its lock,
     // so the call was entered and never returned, and the send ended dispatch_aborted.
     EXPECT_TRUE(f_store->entered() && !f_store->returned())
-        << "F's store call: entered " << f_store->entered() << ", returned "
-        << f_store->returned();
+        << "F's store call: entered " << f_store->entered() << ", returned " << f_store->returned();
     EXPECT_TRUE(send_r.has_value() && !send_r->has_value() &&
                 send_r->error() == fixpp::core::error::dispatch_aborted)
         << "send() did not end dispatch_aborted";
@@ -3949,6 +3953,10 @@ void liveness_heartbeat_across_unit(session_role const role, liveness_arm const 
     std::future<fixpp::core::expected_t<void>> lo_fut;
     if (live) {
         st->arm_block();
+        // #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND F (fail-loud). A lost advance
+        // leaves `parked` false, so `reached` is false and the cell's "setup: the Heartbeat's
+        // store was not reached" assertion fails within kReachBudget: a named failure, not a
+        // hang.
         s.mock->advance(std::chrono::milliseconds{kBoundT} + std::chrono::milliseconds{1});
         bool const parked = s.pump_until([&] { return st->parked; }, kReachBudget);
         bool const is_reply = !st->recorded.empty() &&
@@ -3971,7 +3979,10 @@ void liveness_heartbeat_across_unit(session_role const role, liveness_arm const 
         } else {
             r.spawn_close(close_mode::graceful);
             bool const logout_sent = s.pump_until(
-                [&] { return s.state() == fsm_state::LogoutSent && s.count("5", sent_mark) == 1U; },
+                [&] {
+                    return s.state() == fsm_state::LogoutSent &&
+                           s.count(kLogoutMsgType, sent_mark) == 1U;
+                },
                 kInHoldBudget);
             lo_fut = s.feed_spawn(s.logout(n));
             during = logout_sent &&

@@ -2780,9 +2780,9 @@ TEST(PersistentSeqnumHydrate, W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous
 
     // 104 (research D4, ruling O-2; contract U2): an unasked 141=Y acknowledgement above 1
     // is not consumed, so NextNumIn is 1 after its reset.
-    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*manual_fix->session)
-                  .next_inbound_unsafe(),
-              fixpp::session::seqnum_t{1})
+    EXPECT_EQ(
+        fixpp::session::session_test_access::seqnum_mgr(*manual_fix->session).next_inbound_unsafe(),
+        fixpp::session::seqnum_t{1})
         << "W8: an unasked 141=Y acknowledgement above 1 is not consumed (104, U2)";
 }
 

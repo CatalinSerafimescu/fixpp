@@ -144,8 +144,7 @@ TEST_F(FixTcCoverageGaps, ResendRequestEndSeqNoBeyondLastOutbound_GapFills_Stays
     ASSERT_TRUE(drive_to_active(s));
 
     const std::size_t before = capture.frames.size();
-    const auto next_out =
-        fixpp::session::session_test_access::seqnum_mgr(s).next_outbound_unsafe();
+    const auto next_out = fixpp::session::session_test_access::seqnum_mgr(s).next_outbound_unsafe();
 
     // We (acceptor) have emitted only our Logon reply (outbound seq 1) and keep no
     // store. The peer asks for [1..100] — far beyond anything we can replay.
@@ -225,8 +224,7 @@ TEST_F(FixTcCoverageGaps, BodyFieldsArbitraryOrder_Accepted) {
     (void)feed(s, make_fix_frame("FIX.4.2", "1", /*seq=*/2, "TW", "ISLD", "112=TR-1\x01"));
     (void)feed(s, make_fix_frame("FIX.4.2", "1", /*seq=*/3, "TW", "ISLD", "112=TR-2\x01"));
     ASSERT_EQ(capture.count_msg_type("0"), 2U) << "setup: each TestRequest draws a Heartbeat";
-    const auto next_out =
-        fixpp::session::session_test_access::seqnum_mgr(s).next_outbound_unsafe();
+    const auto next_out = fixpp::session::session_test_access::seqnum_mgr(s).next_outbound_unsafe();
     ASSERT_GT(next_out, 3U) << "setup: the next outbound number must exceed EndSeqNo + 1";
     const std::size_t before = capture.frames.size();
 
@@ -455,8 +453,7 @@ TEST_F(FixTcCoverageGaps, SimultaneousResendRequest_ServicesPeerWhileAwaitingOwn
     // fills our first gap slot AND carries a ResendRequest([1..3]) payload fixpp must
     // service. (Storeless fixture → the reply collapses to a SequenceReset-GapFill.)
     const std::size_t before = capture.frames.size();
-    const auto next_out =
-        fixpp::session::session_test_access::seqnum_mgr(s).next_outbound_unsafe();
+    const auto next_out = fixpp::session::session_test_access::seqnum_mgr(s).next_outbound_unsafe();
     ASSERT_LE(next_out, 3U) << "setup: EndSeqNo must reach the next outbound number";
     (void)feed(s, make_resend_request("FIX.4.2", /*seq=*/2, "TW", "ISLD", /*begin=*/1, /*end=*/3));
 

@@ -21,12 +21,12 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -116,8 +116,8 @@ std::vector<std::byte> peer_frame(std::string_view begin_string, std::string_vie
     body += "52=" + std::string(sending_time) + "\x01";
     body += "56=ISLD\x01";
     body += std::string(extra);
-    std::string full = "8=" + std::string(begin_string) + "\x01" + "9=" +
-                       std::to_string(body.size()) + "\x01" + body;
+    std::string full = "8=" + std::string(begin_string) + "\x01" +
+                       "9=" + std::to_string(body.size()) + "\x01" + body;
     unsigned int cs = 0;
     for (unsigned char const c : full) cs += c;
     std::array<char, 8> csbuf{};
@@ -195,7 +195,8 @@ private:
 class SharedStoreDouble104U final : public fixpp::session::MessageStore {
 public:
     explicit SharedStoreDouble104U(std::shared_ptr<fixpp::session::test::StoreDouble> d) noexcept
-        : fixpp::session::MessageStore(flush_thunk_for<SharedStoreDouble104U>()), d_{std::move(d)} {}
+        : fixpp::session::MessageStore(flush_thunk_for<SharedStoreDouble104U>()),
+          d_{std::move(d)} {}
     asio::awaitable<fixpp::core::expected_t<void>> store(seqnum_t seq,
                                                          std::span<const std::byte> frame,
                                                          direction_t dir) noexcept override {
@@ -334,9 +335,9 @@ public:
             std::string{rg::kSideAndTime};
         payload.assign(reinterpret_cast<std::byte const*>(p.data()),
                        reinterpret_cast<std::byte const*>(p.data()) + p.size());
-        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
-                                  s.session->send(std::span<const std::byte>{payload}),
-                                  asio::use_future);
+        auto fut =
+            asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                           s.session->send(std::span<const std::byte>{payload}), asio::use_future);
         if (!s.pump_until([&] { return rg::Scene::ready(fut); })) return std::nullopt;
         return fut.get();
     }
@@ -521,8 +522,8 @@ TEST(UnaskedResetAck104, FollowUpResendRequest_GapFillOneOne) {
     (void)s.feed(r.peer("2", 2,
                         "7=1\x01"
                         "16=0\x01"));
-    ASSERT_EQ(s.sent.size(), mark + 1) << "frames written for the ResendRequest: "
-                                       << s.written(mark);
+    ASSERT_EQ(s.sent.size(), mark + 1)
+        << "frames written for the ResendRequest: " << s.written(mark);
     auto const& gf = s.sent.back();
     EXPECT_EQ(rg::field(gf, 35), "4") << "MsgType";
     EXPECT_EQ(rg::field(gf, 34), "1") << "MsgSeqNum";
@@ -557,10 +558,12 @@ TEST(UnaskedResetAck104, FollowUpResendRequest_ExplicitEnd_Clamped) {
         ASSERT_TRUE(r.open_to_logon_sent()) << "setup: the session did not reach LogonSent";
         (void)s.feed(r.ack(1));
         ASSERT_EQ(s.state(), fsm_state::Active)
-            << "setup: U-1's input did not leave the session Active: "
-            << rg::state_name(s.state());
+            << "setup: U-1's input did not leave the session Active: " << rg::state_name(s.state());
         auto const mark = s.sent.size();
-        (void)s.feed(r.peer("2", 2, "7=1\x01" "16=" + std::string{arm.end} + "\x01"));
+        (void)s.feed(r.peer("2", 2,
+                            "7=1\x01"
+                            "16=" +
+                                std::string{arm.end} + "\x01"));
         auto const gfs = s.of_type("4", mark);
         ASSERT_EQ(gfs.size(), 1U) << "GapFills written: " << s.written(mark);
         EXPECT_EQ(rg::field(gfs.front(), 34), "1") << "MsgSeqNum";
@@ -599,9 +602,9 @@ TEST(ResendAnswer104, ExplicitEndAboveNextOut_NoOvershoot) {
     for (Arm const arm : {Arm{kNextOut, 10}, Arm{10, 20}}) {
         SCOPED_TRACE("RR 7=" + std::to_string(arm.begin) + " 16=" + std::to_string(arm.end));
         auto const mark = s.sent.size();
-        (void)s.feed(s.frame("2", s.next_in(),
-                             "7=" + std::to_string(arm.begin) + "\x01" + "16=" +
-                                 std::to_string(arm.end) + "\x01"));
+        (void)s.feed(s.frame(
+            "2", s.next_in(),
+            "7=" + std::to_string(arm.begin) + "\x01" + "16=" + std::to_string(arm.end) + "\x01"));
         auto const gfs = s.of_type("4", mark);
         ASSERT_EQ(gfs.size(), 1U) << "GapFills written: " << s.written(mark);
         EXPECT_EQ(rg::field(gfs.front(), 34), std::to_string(arm.begin)) << "MsgSeqNum";
