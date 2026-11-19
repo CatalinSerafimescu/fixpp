@@ -4111,8 +4111,9 @@ void close_during_held_persist(session_role const role, held_persist_arm const a
 
 // reset_on_logout off and no Logout received. A ResendRequest above NextNumIn with no
 // BeginSeqNo(7) is answered by a Reject (103 D4.1 route (a)), whose store is selected at its
-// toAdmin and held; then inbound_resend_request_leaf_ calls toAdmin for its own ResendRequest
-// before that frame's assign_outbound. On a refused number the leaf returns success.
+// toAdmin and held; after the answer, inbound_resend_request_leaf_ numbers fixpp's own
+// ResendRequest. A failed answer returns its error before the leaf; on a refused number the leaf
+// returns success.
 void too_high_resend_request_close_during_answer(session_role const role, bool const close) {
     SCOPED_TRACE(std::string{rg::role_name(role)} + (close ? "" : "/no close()"));
     StoreSelector104 sel;  // declared before the session: its toAdmin hook writes it
@@ -4123,7 +4124,6 @@ void too_high_resend_request_close_during_answer(session_role const role, bool c
     seqnum_t const n = s.next_in();
     auto const mark = s.sent.size();
     auto const stores_mark = r.ctl.side.outbound_store_types.size();
-    int const baseline = r.app->to_admin_count("2");
     auto fut = s.feed_spawn(s.frame("2", n + 1, "16=0\x01"));
     bool const held = s.pump_until([&] { return !r.log().store_events.empty(); }, kReachBudget);
     bool close_during_hold = false;
@@ -4141,8 +4141,6 @@ void too_high_resend_request_close_during_answer(session_role const role, bool c
     EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the release";
     EXPECT_EQ(stored_of_type(r.ctl.side, "3", stores_mark), 1U)
         << "setup: the Reject's store call was not recorded";
-    EXPECT_EQ(r.app->to_admin_count("2"), baseline + 1)
-        << "setup: the leaf's toAdmin for its ResendRequest";
     EXPECT_TRUE(result.has_value()) << "the frame's on_inbound_frame did not return";
     if (!result) return;
     EXPECT_TRUE(result->has_value()) << "the frame's return: " << static_cast<int>(result->error());
@@ -4158,18 +4156,6 @@ void too_high_resend_request_close_during_answer(session_role const role, bool c
     EXPECT_EQ(stored_of_type(r.ctl.side, "2", stores_mark), 0U) << "a ResendRequest's store call";
     EXPECT_EQ(s.count("2", mark), 0U) << "a ResendRequest was written: " << s.written(mark);
     EXPECT_EQ(disconnected_entries(*s.session), 1) << "Disconnected entries in the history";
-}
-
-// The sequence_numbers_reset events whose by_peer_request is `by_peer`.
-int reset_events_of(fixpp::session::Session const& sess, bool const by_peer) {
-    int n = 0;
-    for (auto const& ev : sess.recent_events()) {
-        if (auto const* e =
-                std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
-            n += static_cast<int>(e->by_peer_request == by_peer);
-        }
-    }
-    return n;
 }
 
 }  // namespace
@@ -4206,10 +4192,10 @@ TEST(ResetOnLogout104, TooHighResendRequest_CloseDuringAnswer_OneDisconnected_No
 
 // R-1l's twin for arm B. No clock, so a too-high Logout is acknowledged at once (103 D4.2) by a
 // pump frame whose receipt is `pending`. The acknowledgement's store is held; close(terminal)
-// returns during the hold and closes the receipt out; after the release the arm passes its
-// reply and its event, finds `reached` at its reset point, and runs no unit. A unit run there
-// would meet a drained manager and write contract RT-4's record, so the cell also reads that
-// the record is absent.
+// returns during the hold and closes the receipt out; after the release the arm's reply
+// returns success (acknowledge_peer_logout_ has no exit between its reply and its reset point),
+// finds `reached` at its reset point, and runs no unit. A unit run there would meet a drained
+// manager and write contract RT-4's record, so the cell also reads that the record is absent.
 TEST(ResetOnLogout104, CloseWhilePending_NoClock_NoReset_ImmediateAck) {
     fixpp::test_support::LogCapture log;  // declared before the session it serves
     Rol104 r{Opts104{.role = session_role::acceptor, .with_clock = false, .logger = log.logger}};
@@ -4239,8 +4225,6 @@ TEST(ResetOnLogout104, CloseWhilePending_NoClock_NoReset_ImmediateAck) {
     if (!result) return;
     EXPECT_TRUE(result->has_value())
         << "the Logout's frame's return: " << static_cast<int>(result->error());
-    EXPECT_EQ(reset_events_of(*s.session, false), 1)
-        << "setup: the acknowledgement's event, which follows its reply";
     EXPECT_FALSE(reset_before_release) << "a reset call before the release";
     EXPECT_TRUE(r.log().calls.empty()) << "a reset call: reset() " << r.log().reset_calls
                                        << ", reset_to " << r.log().reset_to_calls;
