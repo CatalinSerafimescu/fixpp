@@ -770,7 +770,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 **Purpose**: the gates that read the whole tree. Gate B, the PR and the labels are pipeline steps; Gate B runs after T113 and before Phase 12.
 
 - [X] T106 Done: origin/main unmoved at `bf294f00`, no overlap, no open PR; nothing re-run; evidence file, "T106 — peers". Peers, per the Execution rules' recipe, against `origin/main` now. If it moved, integrate it by a merge commit. Then re-run every census, cell or mutant task that read an overlapping file, and T090 to T096 as they apply.
-- [X] T107 Done: S1 to S7 in `9fbbd203`, `29c85f37`, `21069741`, B-104-7 in `e7faec45`; D-1 to D-5 deferred; evidence file, "T107 — /simplify triage" and the "twenty-seventh run" section. **(orchestrator)** `/simplify` (pipeline step 11) over the implementation diff; the implementer applies the in-scope simplifications. If any code changes:
+- [X] T107 Done: orchestrator triage plus the twenty-seventh-run re-verification (evidence file, "T107 — /simplify triage", the "twenty-seventh run" section and "Orchestrator rulings on T107"); S1 to S7 in `9fbbd203`, `29c85f37`, `21069741`, B-104-7 in `e7faec45`; D-1 to D-5 deferred. **(orchestrator)** `/simplify` (pipeline step 11) over the implementation diff; the implementer applies the in-scope simplifications. If any code changes:
   - re-run the mutant tasks of the changed mechanism (T056 to T062, T076, T077, T088, T089);
   - re-run T090's targeted entries;
   - re-run T096's MSVC build of the touched targets.
