@@ -122,7 +122,7 @@ RR-5 item 4).
 | Member | Kind | Contract |
 |---|---|---|
 | the freeze flag (one private `bool`) | new, private | set while the session's receipt marker is `reached`; read by the six refused mutators, by `frozen(freeze_key)` for `Session`'s Debug asserts, and, in tests only, by `seqnum_manager_test_access` (T049; R-5d); no production branch tests it |
-| `SeqnumManager::freeze_key` | new, a passkey type | its constructor is private, with `Session` its friend, and its copy constructor is user-provided and private, so no other caller can construct one by any well-defined construction (the fixpp#511 friend `seqnum_manager_test_access` aside) |
+| `SeqnumManager::freeze_key` | new, a passkey type | its constructor is private, with `Session` its friend, and its copy constructor is user-provided and private, so no other caller can construct one |
 | `freeze(freeze_key)`, `thaw(freeze_key)` | new | set and clear the flag; no lock (strand-confined, as `take_back_outbound` and `peek_outbound` are) |
 | `[[nodiscard]] bool frozen(freeze_key) const noexcept` | new | reads the flag; called only by `Session`'s Debug asserts (contract RR-5 item 4), never by a production branch; inline, no lock, no data member |
 | `check_inbound`, `assign_outbound`, `hydrate` | changed | while frozen: `unexpected(session_already_closed)`, counters unchanged; the test sits after the lock grant, before any read or write of a counter |
@@ -300,10 +300,9 @@ New rows:
   flag can move `sizeof(SeqnumManager)`. So
   `sizeof(SeqnumManager)` may change, and `sizeof(Session)` with it, since `Session` holds the manager by value. The
   direction of each is written from phase 7's size reading, never from this text. No public function's signature
-  changes, and `freeze`, `thaw` and `frozen` cannot be called outside `Session` by any well-defined construction
-  (their key cannot be constructed there: its constructor and its user-provided copy constructor are private, so it
-  is not trivially copyable and `std::bit_cast` cannot make one), the fixpp#511 test-access friend
-  `seqnum_manager_test_access` aside, which reaches every private member. No
+  changes, and `freeze`, `thaw` and `frozen` cannot be called outside `Session` (their key cannot be constructed
+  there: its constructor and its user-provided copy constructor are private, so it is not trivially copyable and
+  `std::bit_cast` cannot make one). No
   test or source pins `sizeof(SeqnumManager)`: `git grep -nE 'sizeof ?\([^)]*SeqnumManager' -- tests include src`
   has no hit at the base. The C ABI does not expose `SeqnumManager`.
 - **B-104-8** — with `reset_on_logout`, from a received Logout's reset point, or from `close()`'s close-out of a
