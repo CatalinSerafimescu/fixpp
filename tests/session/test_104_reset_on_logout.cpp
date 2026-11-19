@@ -1765,8 +1765,6 @@ TEST(ResetOnLogout104, ReplyStoreCancelled_NoReset) {
 
 // ── T029: R-1h and R-1i ──────────────────────────────────────────────────────────────────
 
-namespace {}  // namespace
-
 // R-1h: a standalone initiator resets at the peer Logout's reset point; drive_reconnect() then
 // installs the factory's transport and writes the reconnect Logon (RR-4 does not refuse it),
 // the numbers advance, and close(terminal) on the new connection makes no reset. The first

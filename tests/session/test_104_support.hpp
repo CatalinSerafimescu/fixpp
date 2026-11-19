@@ -44,12 +44,11 @@ struct Numbers104 {
 }
 
 // A store's next inbound and outbound numbers, read through next_seqnum(dir, false) by a
-// coroutine spawned on `ioc`, then `pump_until(pred)` run until both reads return. Empty when
-// a read fails or `pump_until` returns false.
-template <class PumpUntil>
+// coroutine spawned on `ioc`, then `pump(pred)` run until both reads return. Empty when
+// a read fails or `pump` returns false.
+template <class Pump>
 [[nodiscard]] std::optional<Numbers104> read_store_numbers(fixpp::session::MessageStore* st,
-                                                           asio::io_context& ioc,
-                                                           PumpUntil&& pump_until) {
+                                                           asio::io_context& ioc, Pump&& pump) {
     if (st == nullptr) return std::nullopt;
     auto const read = std::make_shared<std::optional<Numbers104>>();
     auto const done = std::make_shared<bool>(false);
@@ -62,7 +61,7 @@ template <class PumpUntil>
             *done = true;
         },
         asio::detached);
-    if (!pump_until([done] { return *done; })) return std::nullopt;
+    if (!pump([done] { return *done; })) return std::nullopt;
     return *read;
 }
 
