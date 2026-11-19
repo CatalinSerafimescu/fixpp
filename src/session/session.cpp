@@ -3118,10 +3118,9 @@ void Session::note_reply_over_ceiling_(bool business_reject,
 // 104 (data-model "The too-low Logout text"; research D5 "The text"): QuickFIX's too-low Logout
 // text, "MsgSeqNum too low, expecting N but received M", written by one builder for 103's Arm B
 // (on_inbound_active_out_of_sequence_) and the Logon arms, so that they cannot diverge.
-// Every caller passes N as seqnum_mgr_.next_inbound_unsafe() and M as
-// parse_seqnum(hdr.msg_seq_num), both seqnum_t, so the static_assert below (two phrases and two
-// seqnum_t numbers at their widest) bounds every caller's text and no caller truncates. The
-// numbers are written by std::to_chars; the peer's bytes are not echoed.
+// N and M are seqnum_t parameters, so the static_assert below (two phrases and two seqnum_t
+// numbers at their widest) bounds the text, which cannot truncate. The numbers are written by
+// std::to_chars; the peer's bytes are not echoed.
 namespace {
 
 constexpr std::string_view kTooLowPhrase1 = "MsgSeqNum too low, expecting ";
@@ -3185,11 +3184,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout
 }
 
 // 104: the too-low Logout's text is built here, in this coroutine's own frame (its declaration
-// in session.hpp has the condition), then sent by refuse_logon_with_logout_.
+// in session.hpp has the condition), then sent by refuse_logon_with_logout_. NextNumIn is read
+// at the body's start, which runs inline in the caller's turn, before any suspension.
 asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_too_low_logon_(
-    seqnum_t expected, seqnum_t received, fsm_state arm) noexcept {
+    seqnum_t received, fsm_state arm) noexcept {
     too_low_text_buffer text_buf{};
-    const std::string_view text{text_buf.data(), write_too_low_text(text_buf, expected, received)};
+    const std::string_view text{
+        text_buf.data(), write_too_low_text(text_buf, seqnum_mgr_.next_inbound_unsafe(), received)};
     co_return co_await refuse_logon_with_logout_(text, arm);
 }
 
@@ -4311,21 +4312,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         co_return fixpp::core::expected_t<void>{};
     }
 
-    // 104 (contract T8; clarification N-8): the credentials gate of 033 T023 (its comment is at
-    // the in-sequence call below) as one callable, so a too-low Logon runs the same check before
-    // its Logout as an in-sequence one runs before LogonReceived.
-    auto const logon_credentials_admitted = [this, &result]() {
-        fixpp::session::logon_credentials creds;
-        if (result->username.has_value()) {
-            creds.username = std::string{*result->username};
-        }
-        if (result->password.has_value()) {
-            creds.password = std::string{*result->password};
-        }
-        // asserted_compid = peer SenderCompID(49) = cfg_.target_comp_id.
-        return cfg_.compid_authorization_policy.authorize_logon(cfg_.target_comp_id, creds);
-    };
-
     // Valid Logon: read seqnum + 013 T027 ResetSeqNumFlag(141) from the arm's
     // header scan (hoisted to the top of the arm by 092).
     // The Logon must carry seq=1 on initial session (seqnum_mgr_ starts at 1).
@@ -4555,13 +4541,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
                 // reached. The Logout carries Text(58) only and the session's next outbound
                 // number; NextNumIn is not advanced; refuse_logon_with_logout_ gives the
                 // endings of a Logout that is not sent, and sets no receipt marker.
-                if (!logon_sent_identity_admitted_() || !logon_credentials_admitted()) {
+                if (!logon_identity_admitted_() || !logon_credentials_admitted_(*result)) {
                     record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }
-                co_return co_await refuse_too_low_logon_(seqnum_mgr_.next_inbound_unsafe(),
-                                                         parse_seqnum(hdr.msg_seq_num),
-                                                         fsm_state::NotConnected);
+                co_return co_await refuse_too_low_logon_(seq, fsm_state::NotConnected);
             } else {
                 // Too-high with the knob off, or a drained mutex: session-fatal, silent
                 // (I-2/I-4/[FIX-SL §4.1]).
@@ -4614,10 +4598,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
     // [015 T013/T020; data-model §E-4; FR-006/007/008/009; T-041; Gate A New-1/E-4]
     // [FR-019; FR-024 symmetric]
     //
-    // 104 (contract T8): the gate runs through logon_sent_identity_admitted_(), whose arms are the
+    // 104 (contract T8): the gate runs through logon_identity_admitted_(), whose arms are the
     // ones above, so a too-low Logon above meets the same arms, events and one-shot consumption.
     // A refusal records Disconnected here.
-    if (!logon_sent_identity_admitted_()) {
+    if (!logon_identity_admitted_()) {
         record_state_transition_(fsm_state::Disconnected);
         co_return fixpp::core::expected_t<void>{};
     }
@@ -4675,7 +4659,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
     // Default implementation: accept. A future FR-008a validator may reject here.
     // `result` is always valid here -- the earlier `if (!result)` returned.
     // [033 contracts C7; research R6; data-model E5; FR-008/FR-008a]
-    if (!logon_credentials_admitted()) {
+    if (!logon_credentials_admitted_(*result)) {
         // Future: emit an authorization-failed event. For 033 (default-accept
         // validator), this path is unreachable unless a custom validator rejects.
         record_state_transition_(fsm_state::Disconnected);
@@ -5692,9 +5676,6 @@ Session::on_inbound_active_too_high_logout_(bool tic, seqnum_t seq) noexcept {
         // in acknowledge_peer_logout_ or its exit. The spawn and ignored branches below write
         // nothing to the marker: the bound's owed receipt is the 103 mark.
         pending_receipt_owner const receipt_owner{*this};
-        if (cfg_.reset_on_logout) {
-            logout_seen_ = receipt_marker::pending;
-        }
         FIXPP_INBOUND_SPLIT_AWAIT(ack, tic, acknowledge_peer_logout_(tic));
         co_return ack;
     }
@@ -6208,9 +6189,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
     // set, the receipt is `pending` from this arm's entry, owned by this frame, until its reset
     // point or its exit. In Active and LogonReceived alike.
     pending_receipt_owner const receipt_owner{*this};
-    if (cfg_.reset_on_logout) {
-        logout_seen_ = receipt_marker::pending;
-    }
     bool from_admin_rejected = false;
 
     if (fsm_state_ == fsm_state::Active) {
@@ -6509,9 +6487,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logout_sent_(
         // a receipt, `pending` and owned by this frame until its reset point or its exit. Any
         // other frame here leaves the marker untouched.
         pending_receipt_owner const receipt_owner{*this};
-        if (cfg_.reset_on_logout) {
-            logout_seen_ = receipt_marker::pending;
-        }
         record_state_transition_(fsm_state::Disconnected);
         // 104 (contract RR-1; RR-3, its Disconnected, reset-point and phase-1 wake steps),
         // superseding 024 C3.1's teardown reset for an answered Logout: arm L's reset point,
@@ -6566,7 +6541,22 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logout_sent_(
 // admitted, or when the session is not mTLS. 104 (contract T8): the acceptor's NotConnected arm
 // runs it too, for an in-sequence Logon and a too-low one; the asserted CompID is
 // cfg_.target_comp_id in both roles.
-bool Session::logon_sent_identity_admitted_() noexcept {
+// 104 (contract T8; clarification N-8): the credentials gate of 033 T023 (its comment is at
+// the NotConnected arm's in-sequence call), one member, so a too-low Logon runs the same check
+// before its Logout as an in-sequence one runs before LogonReceived.
+bool Session::logon_credentials_admitted_(logon_interpret_result const& logon) {
+    fixpp::session::logon_credentials creds;
+    if (logon.username.has_value()) {
+        creds.username = std::string{*logon.username};
+    }
+    if (logon.password.has_value()) {
+        creds.password = std::string{*logon.password};
+    }
+    // asserted_compid = peer SenderCompID(49) = cfg_.target_comp_id.
+    return cfg_.compid_authorization_policy.authorize_logon(cfg_.target_comp_id, creds);
+}
+
+bool Session::logon_identity_admitted_() noexcept {
     const bool is_mtls =
         cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_ca ||
         cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_pinned;
@@ -6728,8 +6718,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     // runs no fromAdmin and returns success, as the base's ending does (RU-2, O19, W10).
     if (cfg_.reset_on_logout && hdr.msg_type == "5") {
         pending_receipt_owner const receipt_owner{*this};
-        logout_seen_ = receipt_marker::pending;
-        if (!logon_sent_identity_admitted_()) {
+        if (!logon_identity_admitted_()) {
             record_state_transition_(fsm_state::Disconnected);
             co_return fixpp::core::expected_t<void>{};
         }
@@ -6862,13 +6851,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
             // unit and 789 are not reached. The Logout carries Text(58) only and the session's
             // next outbound number; NextNumIn is not advanced; refuse_logon_with_logout_ gives
             // the endings of a Logout that is not sent, and sets no receipt marker.
-            if (!logon_sent_identity_admitted_()) {
+            if (!logon_identity_admitted_()) {
                 record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
-            co_return co_await refuse_too_low_logon_(seqnum_mgr_.next_inbound_unsafe(),
-                                                     parse_seqnum(hdr.msg_seq_num),
-                                                     fsm_state::LogonSent);
+            co_return co_await refuse_too_low_logon_(seq, fsm_state::LogonSent);
         } else {
             // Too-high with knob off, or a drained mutex → fatal, silent (I-2/I-4).
             record_state_transition_(fsm_state::Disconnected);
@@ -6978,9 +6965,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     }
 
     // 014 T015 US2 / 013 T036 US2: CompID authorization BEFORE the FSM transition to Active,
-    // through logon_sent_identity_admitted_() (its comment has the arms). A refused identity
+    // through logon_identity_admitted_() (its comment has the arms). A refused identity
     // ends the arm Disconnected, returning success.
-    if (!logon_sent_identity_admitted_()) {
+    if (!logon_identity_admitted_()) {
         record_state_transition_(fsm_state::Disconnected);
         co_return fixpp::core::expected_t<void>{};
     }

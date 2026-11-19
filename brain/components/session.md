@@ -852,7 +852,7 @@ and what was not taken.
 - **A ResendRequest whose end reaches the next outbound number is answered through-current** (D3.3a),
   as QuickFIX C++ clamps EndSeqNo.
 - **A too-low Logon draws QuickFIX's too-low Logout once the identity gates pass** (D5, D6, #701). The
-  LogonSent arm's mTLS gate is one helper, `logon_sent_identity_admitted_`, which the NotConnected arm
+  LogonSent arm's mTLS gate is one helper, `logon_identity_admitted_`, which the NotConnected arm
   now calls too.
 - **The too-low Logout's text is built in a callee coroutine's own frame** (the T093 record in the 104
   evidence file): a 96-byte buffer held across the refusal's await in both Logon arms enlarged their

@@ -105,6 +105,8 @@ struct FrameHeader;
 
 namespace fixpp::session {
 
+struct logon_interpret_result;  // admin_messages.hpp; by reference only (no new include)
+
 // graceful: phase 1 (engine-internal FileStore::flush_for_session_close()
 // hook once → Logout exchange under a CHILD asio::cancellation_state below
 // the root) → phase 2 (root cancellation_type::total). terminal: skip phase 1
@@ -779,11 +781,11 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> refuse_logon_with_logout_(
         std::string_view reason_text, fsm_state arm) noexcept;
     // 104 (research D5; the T093 record in the 104 evidence file): a Logon arm's too-low Logout,
-    // its text written from `expected` (NextNumIn) and `received` (the frame's MsgSeqNum). The
-    // text buffer lives in this callee's frame, so a cold branch does not grow the Logon arms'
-    // frames. Its endings are refuse_logon_with_logout_'s.
+    // its text written from NextNumIn, read at the body's start, and `received` (the frame's
+    // MsgSeqNum). The text buffer lives in this callee's frame, so a cold branch does not grow
+    // the Logon arms' frames. Its endings are refuse_logon_with_logout_'s.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> refuse_too_low_logon_(
-        seqnum_t expected, seqnum_t received, fsm_state arm) noexcept;
+        seqnum_t received, fsm_state arm) noexcept;
 
     const fixpp::core::EngineConfig& engine_;
     SessionConfig cfg_;  // FR-001 / D-1 — by-value copy (W-5 lifetime fix, 010); caller may drop or
@@ -1480,8 +1482,14 @@ private:
     // The Logon path's mTLS CompID-authorisation gate, both its arms: false when it
     // refuses the identity (its event emitted, a live identity consumed; the caller records
     // Disconnected), true when it admits it or the session is not mTLS. Its callers, both Logon
-    // arms (104): `git grep -n 'logon_sent_identity_admitted_()' -- src`.
-    [[nodiscard]] bool logon_sent_identity_admitted_() noexcept;
+    // arms (104): `git grep -n 'logon_identity_admitted_()' -- src`.
+    [[nodiscard]] bool logon_identity_admitted_() noexcept;
+    // The acceptor's credentials gate (033 T023): the Logon's Username(553) and Password(554)
+    // through compid_authorization_policy.authorize_logon, the asserted CompID being the
+    // peer's SenderCompID (cfg_.target_comp_id). A member since 104 (contract T8), so a too-low
+    // Logon runs it before its Logout. Its callers:
+    // `git grep -n 'logon_credentials_admitted_(' -- src`.
+    [[nodiscard]] bool logon_credentials_admitted_(logon_interpret_result const& logon);
     // The Active arm's synchronous SendingTime(52) MaxLatency check.
     [[nodiscard]] bool inbound_sending_time_ok_(
         fixpp::session::detail::FrameHeader const& hdr) const noexcept;
@@ -1775,7 +1783,9 @@ private:
     // calls release_pending_receipt_() before any close() it calls itself, so close() never
     // waits for its own caller, and declares a pending_receipt_owner, which calls it on every
     // other exit, by return or by exception. Each acts only from `pending`: a `reached`
-    // marker is never undone. The too-high Logout's bound declares no owner.
+    // marker is never undone. The too-high Logout's bound declares no owner. The owner's
+    // constructor makes the `pending` write under reset_on_logout, so a write is never left
+    // without its release.
     void release_pending_receipt_() noexcept {
         if (logout_seen_ == receipt_marker::pending) {
             logout_seen_ = receipt_marker::none;
@@ -1813,7 +1823,11 @@ private:
     [[nodiscard]] bool enter_receipt_reset_point_() noexcept;
     class pending_receipt_owner {
     public:
-        explicit pending_receipt_owner(Session& s) noexcept : s_(&s) {}
+        explicit pending_receipt_owner(Session& s) noexcept : s_(&s) {
+            if (s.cfg_.reset_on_logout) {
+                s.logout_seen_ = receipt_marker::pending;
+            }
+        }
         pending_receipt_owner(pending_receipt_owner const&) = delete;
         pending_receipt_owner& operator=(pending_receipt_owner const&) = delete;
         pending_receipt_owner(pending_receipt_owner&&) = delete;

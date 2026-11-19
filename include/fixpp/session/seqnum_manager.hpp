@@ -220,8 +220,10 @@ public:
 private:
     seqnum_t next_inbound_ = seqnum_min;   // next expected inbound (starts at 1)
     seqnum_t next_outbound_ = seqnum_min;  // next outbound to assign (starts at 1)
-    fixpp::sync::async_mutex mutex_;       // serialises counter reads/writes (D-7)
-    bool frozen_ = false;                  // 104: the freeze (contract RR-5)
+    // 104: the freeze (contract RR-5), declared beside the counters it guards, ahead of
+    // mutex_, so the mutators' test of it reads next to the counters they then touch.
+    bool frozen_ = false;
+    fixpp::sync::async_mutex mutex_;  // serialises counter reads/writes (D-7)
 };
 
 }  // namespace fixpp::session
