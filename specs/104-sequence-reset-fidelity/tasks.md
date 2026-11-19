@@ -759,7 +759,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - #266, referenced for FR-017's re-record and never with a closing keyword: the closing set is fixpp#595, #695 and #701 only.
 
   Grep the body and every commit message on the branch for a closing keyword inside a negation, the sentence that names #266 included. GitHub links it anyway, and the oracle is `closingIssuesReferences`.
-- [ ] T105 Run `python3 PARENT/.claude/scripts/check-comment-claims.py --root "$T" --base origin/main` over the records batch (plan phase 9), and read by hand the added inventories and the runtime strings, the too-low text among them. Record.
+- [X] T105 Done: evidence file, "T105 — the comment-claims lint and the hand read". Run `python3 PARENT/.claude/scripts/check-comment-claims.py --root "$T" --base origin/main` over the records batch (plan phase 9), and read by hand the added inventories and the runtime strings, the too-low text among them. Record.
 
 **Checkpoint**: records match the code; L-103-2 and L-103-7 are only in the closed file.
 
