@@ -61,8 +61,11 @@
 #include <variant>
 #include <vector>
 
+#include "session/plain_engine_rig.hpp"
 #include "session/resend_gap_scene.hpp"
+#include "session/test_104_support.hpp"
 #include "support/hooked_store.hpp"
+#include "support/memory_store_test_access.hpp"
 #include "support/seqnum_manager_test_access.hpp"
 #include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
@@ -71,6 +74,8 @@
 namespace {
 
 namespace rg = fixpp::test_support::resend_gap;
+namespace plain_rig = fixpp::test_support::plain_rig;
+namespace t104 = fixpp::test_support::t104;
 using fixpp::session::direction_t;
 using fixpp::session::fsm_state;
 using fixpp::session::reset_seqnum_policy;
@@ -97,32 +102,6 @@ constexpr std::size_t kLogoutBufferBytes = 256;
 
 [[nodiscard]] char const* role_name(session_role r) {
     return r == session_role::initiator ? "initiator (LogonSent)" : "acceptor (NotConnected)";
-}
-
-// A frame from the peer `peer` to `us`: 35, 34, 49, 52, 56, then `extra`.
-std::vector<std::byte> peer_frame(std::string_view peer, std::string_view us,
-                                  std::string_view msg_type, seqnum_t seq,
-                                  std::string_view sending_time, std::string_view extra) {
-    std::string body;
-    body += "35=" + std::string(msg_type) + "\x01";
-    body += "34=" + std::to_string(seq) + "\x01";
-    body += "49=" + std::string(peer) + "\x01";
-    body += "52=" + std::string(sending_time) + "\x01";
-    body += "56=" + std::string(us) + "\x01";
-    body += std::string(extra);
-    std::string full =
-        "8=FIX.4.2\x01"
-        "9=" +
-        std::to_string(body.size()) + "\x01" + body;
-    unsigned int cs = 0;
-    for (unsigned char const c : full) cs += c;
-    std::array<char, 8> csbuf{};
-    std::snprintf(csbuf.data(), csbuf.size(), "%03u", cs & 0xFFU);
-    full += "10=" + std::string(csbuf.data()) + "\x01";
-    std::vector<std::byte> out;
-    out.reserve(full.size());
-    for (char const c : full) out.push_back(static_cast<std::byte>(c));
-    return out;
 }
 
 // What toAdmin saw: each call's MsgType(35) and Text(58), in order. With throw_on_logout set,
@@ -178,19 +157,8 @@ private:
 std::shared_ptr<fixpp::session::MemoryStore> seeded_memory_store() {
     auto st = std::make_shared<fixpp::session::MemoryStore>(
         fixpp::session::MemoryStore::Config{.policy = fixpp::session::capacity_policy::unbounded});
-    asio::io_context seed;
-    asio::co_spawn(
-        seed,
-        [st]() -> asio::awaitable<void> {
-            for (seqnum_t i = 1; i < kN; ++i) {
-                (void)co_await st->next_seqnum(direction_t::inbound, true);
-            }
-            for (seqnum_t i = 1; i < kOut; ++i) {
-                (void)co_await st->next_seqnum(direction_t::outbound, true);
-            }
-        },
-        asio::detached);
-    seed.run();
+    fixpp::session::memory_store_test_access::set_counter(*st, direction_t::inbound, kN);
+    fixpp::session::memory_store_test_access::set_counter(*st, direction_t::outbound, kOut);
     return st;
 }
 
@@ -253,14 +221,13 @@ public:
         if (opts.validator) {
             s.cfg.compid_authorization_policy.set_logon_validator(opts.validator);
         }
-        s.cfg.transport_send = [c = &ctl,
-                                sink = s.cfg.transport_send](std::span<const std::byte> f) {
-            std::string_view const v{reinterpret_cast<char const*>(f.data()), f.size()};
-            if (c->throw_on_logout_write && rg::field(v, 35) == "5") {
-                throw std::runtime_error("Rig: the sink's write of a Logout failed");
-            }
-            sink(f);
-        };
+        s.cfg.transport_send = t104::throwing_sink(
+            s.cfg.transport_send,
+            [c = &ctl](std::span<const std::byte> f) {
+                std::string_view const v{reinterpret_cast<char const*>(f.data()), f.size()};
+                return c->throw_on_logout_write && rg::field(v, 35) == "5";
+            },
+            "Rig: the sink's write of a Logout failed");
         s.session = std::make_unique<fixpp::session::Session>(s.engine, s.cfg);
     }
     Rig(Rig const&) = delete;
@@ -273,11 +240,11 @@ public:
     // 141=Y, then `extra`.
     [[nodiscard]] std::vector<std::byte> logon(seqnum_t seq, std::string_view extra = {},
                                                std::chrono::seconds offset = {}) const {
-        return peer_frame(opts.target, opts.sender, "A", seq, now_52(offset),
-                          "98=0\x01"
-                          "108=" +
-                              std::to_string(rg::kHeartBtInt.count()) + "\x01" +
-                              std::string{extra});
+        return plain_rig::to_bytes(plain_rig::message(
+            "FIX.4.2", "A", seq, opts.target, opts.sender, now_52(offset),
+            "98=0\x01"
+            "108=" +
+                std::to_string(rg::kHeartBtInt.count()) + "\x01" + std::string{extra}));
     }
     // The same Logon with PossDupFlag(43)=Y and OrigSendingTime(122) at SendingTime.
     [[nodiscard]] std::vector<std::byte> poss_dup_logon(seqnum_t seq) const {
@@ -287,7 +254,8 @@ public:
                          now_52() + "\x01");
     }
     [[nodiscard]] std::vector<std::byte> peer(std::string_view msg_type, seqnum_t seq) const {
-        return peer_frame(opts.target, opts.sender, msg_type, seq, now_52(), {});
+        return plain_rig::to_bytes(
+            plain_rig::message("FIX.4.2", msg_type, seq, opts.target, opts.sender, now_52()));
     }
 
     // open(): an initiator is then in LogonSent, having written its Logon; an acceptor stays in
@@ -301,12 +269,8 @@ public:
                                                                   : fsm_state::NotConnected);
     }
 
-    [[nodiscard]] seqnum_t next_in() const {
-        return session_test_access::seqnum_mgr(*s.session).next_inbound_unsafe();
-    }
-    [[nodiscard]] seqnum_t next_out() const {
-        return session_test_access::seqnum_mgr(*s.session).next_outbound_unsafe();
-    }
+    [[nodiscard]] seqnum_t next_in() const { return t104::manager_numbers(*s.session).in; }
+    [[nodiscard]] seqnum_t next_out() const { return t104::manager_numbers(*s.session).out; }
     void set_counters(seqnum_t in, seqnum_t out) {
         fixpp::session::seqnum_manager_test_access::set_counters(
             session_test_access::seqnum_mgr(*s.session), in, out);
@@ -314,19 +278,9 @@ public:
     // The store's next inbound number, read through next_seqnum(inbound, false), pumped. Empty
     // when the read fails or does not return.
     [[nodiscard]] std::optional<seqnum_t> store_next_in() {
-        auto const st = factory->log->inner;
-        auto const read = std::make_shared<std::optional<seqnum_t>>();
-        auto const done = std::make_shared<bool>(false);
-        asio::co_spawn(
-            s.ioc,
-            [st, read, done]() -> asio::awaitable<void> {
-                auto in = co_await st->next_seqnum(direction_t::inbound, false);
-                if (in) *read = *in;
-                *done = true;
-            },
-            asio::detached);
-        if (!s.pump_until([&] { return *done; })) return std::nullopt;
-        return *read;
+        auto const n = t104::read_store_numbers(factory->log->inner.get(), s);
+        if (!n) return std::nullopt;
+        return n->in;
     }
     // The outbound frame the store holds at `seq`, or empty.
     [[nodiscard]] std::optional<std::string> stored_outbound(seqnum_t seq) {
@@ -354,13 +308,6 @@ public:
     }
     [[nodiscard]] StoreLog const& log() const { return *factory->log; }
 };
-
-bool compid_authorization_failed(fixpp::session::Session const& sess) {
-    return std::ranges::any_of(sess.recent_events(), [](auto const& ev) {
-        return std::holds_alternative<fixpp::session::session_event_compid_authorization_failed>(
-            ev);
-    });
-}
 
 [[nodiscard]] std::string result_name(fixpp::core::expected_t<void> const& r) {
     return r.has_value() ? std::string{"success"} : std::to_string(static_cast<int>(r.error()));
@@ -738,7 +685,7 @@ TEST(LogonTooLow104, Precedence_MtlsAcceptorOffList) {
         << "frames written on the attached transport: " << stream->written.size();
     EXPECT_EQ(r.s.sent.size(), mark) << "frames written on the sink: " << r.s.written(mark);
     EXPECT_EQ(r.s.state(), fsm_state::Disconnected) << rg::state_name(r.s.state());
-    EXPECT_TRUE(compid_authorization_failed(*r.s.session)) << "no authorisation-failed event";
+    EXPECT_TRUE(t104::compid_authorization_failed(*r.s.session)) << "no authorisation-failed event";
 }
 
 // An acceptor whose credentials authorize_logon refuses: a counting refusing validator, called
@@ -767,5 +714,5 @@ TEST(LogonTooLow104, Precedence_DirectMtlsInitiator) {
     (void)r.s.feed(r.logon(kM));
     EXPECT_EQ(r.s.sent.size(), mark) << "frames written: " << r.s.written(mark);
     EXPECT_EQ(r.s.state(), fsm_state::Disconnected) << rg::state_name(r.s.state());
-    EXPECT_TRUE(compid_authorization_failed(*r.s.session)) << "no authorisation-failed event";
+    EXPECT_TRUE(t104::compid_authorization_failed(*r.s.session)) << "no authorisation-failed event";
 }

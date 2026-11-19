@@ -59,8 +59,11 @@
 #include <variant>
 #include <vector>
 
+#include "session/plain_engine_rig.hpp"
 #include "session/resend_gap_scene.hpp"
+#include "session/test_104_support.hpp"
 #include "support/hooked_store.hpp"
+#include "support/memory_store_test_access.hpp"
 #include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 #include "support/store_double.hpp"
@@ -68,6 +71,8 @@
 namespace {
 
 namespace rg = fixpp::test_support::resend_gap;
+namespace plain_rig = fixpp::test_support::plain_rig;
+namespace t104 = fixpp::test_support::t104;
 using fixpp::session::direction_t;
 using fixpp::session::fsm_state;
 using fixpp::session::reset_seqnum_policy;
@@ -81,53 +86,14 @@ using fixpp::test_support::StoreLog;
 constexpr seqnum_t kHydratedIn = 7;
 constexpr seqnum_t kHydratedOut = 4;
 
-struct Numbers {
-    seqnum_t in = 0;
-    seqnum_t out = 0;
-    bool operator==(Numbers const&) const = default;
-};
+using Numbers = t104::Numbers104;
 
 std::shared_ptr<fixpp::session::MemoryStore> hydrated_memory_store() {
     auto st = std::make_shared<fixpp::session::MemoryStore>(
         fixpp::session::MemoryStore::Config{.policy = fixpp::session::capacity_policy::unbounded});
-    asio::io_context seed;
-    asio::co_spawn(
-        seed,
-        [st]() -> asio::awaitable<void> {
-            for (seqnum_t i = 1; i < kHydratedIn; ++i) {
-                (void)co_await st->next_seqnum(direction_t::inbound, true);
-            }
-            for (seqnum_t i = 1; i < kHydratedOut; ++i) {
-                (void)co_await st->next_seqnum(direction_t::outbound, true);
-            }
-        },
-        asio::detached);
-    seed.run();
+    fixpp::session::memory_store_test_access::set_counter(*st, direction_t::inbound, kHydratedIn);
+    fixpp::session::memory_store_test_access::set_counter(*st, direction_t::outbound, kHydratedOut);
     return st;
-}
-
-// A frame from the peer TW to ISLD, in the session's BeginString: 35, 34, 49, 52, 56, `extra`.
-std::vector<std::byte> peer_frame(std::string_view begin_string, std::string_view msg_type,
-                                  seqnum_t seq, std::string_view sending_time,
-                                  std::string_view extra) {
-    std::string body;
-    body += "35=" + std::string(msg_type) + "\x01";
-    body += "34=" + std::to_string(seq) + "\x01";
-    body += "49=TW\x01";
-    body += "52=" + std::string(sending_time) + "\x01";
-    body += "56=ISLD\x01";
-    body += std::string(extra);
-    std::string full = "8=" + std::string(begin_string) + "\x01" +
-                       "9=" + std::to_string(body.size()) + "\x01" + body;
-    unsigned int cs = 0;
-    for (unsigned char const c : full) cs += c;
-    std::array<char, 8> csbuf{};
-    std::snprintf(csbuf.data(), csbuf.size(), "%03u", cs & 0xFFU);
-    full += "10=" + std::string(csbuf.data()) + "\x01";
-    std::vector<std::byte> out;
-    out.reserve(full.size());
-    for (char const c : full) out.push_back(static_cast<std::byte>(c));
-    return out;
 }
 
 // U-9's authorised twin: a TLS transport whose handshake reports a peer identity with a known
@@ -281,7 +247,8 @@ public:
 
     [[nodiscard]] std::vector<std::byte> peer(std::string_view msg_type, seqnum_t seq,
                                               std::string_view extra = {}) const {
-        return peer_frame(begin, msg_type, seq, s.sending_time(), extra);
+        return plain_rig::to_bytes(
+            plain_rig::message(begin, msg_type, seq, "TW", "ISLD", s.sending_time(), extra));
     }
     // The peer's Logon acknowledgement with ResetSeqNumFlag(141)=Y, then `extra`.
     [[nodiscard]] std::vector<std::byte> ack(seqnum_t seq, std::string_view extra = {}) const {
@@ -301,10 +268,7 @@ public:
         return fut.get().has_value() && s.state() == fsm_state::LogonSent;
     }
 
-    [[nodiscard]] Numbers manager() const {
-        auto& m = session_test_access::seqnum_mgr(*s.session);
-        return {.in = m.next_inbound_unsafe(), .out = m.next_outbound_unsafe()};
-    }
+    [[nodiscard]] Numbers manager() const { return t104::manager_numbers(*s.session); }
     // The store's next numbers: the StoreDouble's directly, the HookedStore's MemoryStore
     // through next_seqnum(dir, false), pumped. Empty when a read fails or does not return.
     [[nodiscard]] std::optional<Numbers> store_numbers(store_kind const k) {
@@ -312,21 +276,7 @@ public:
             return Numbers{.in = double_factory->store->current_next_inbound(),
                            .out = double_factory->store->current_next_outbound()};
         }
-        auto const st = factory->log->inner;
-        if (!st) return std::nullopt;
-        auto const read = std::make_shared<std::optional<Numbers>>();
-        auto const done = std::make_shared<bool>(false);
-        asio::co_spawn(
-            s.ioc,
-            [st, read, done]() -> asio::awaitable<void> {
-                auto in = co_await st->next_seqnum(direction_t::inbound, false);
-                auto out = co_await st->next_seqnum(direction_t::outbound, false);
-                if (in && out) *read = Numbers{.in = *in, .out = *out};
-                *done = true;
-            },
-            asio::detached);
-        if (!s.pump_until([&] { return *done; })) return std::nullopt;
-        return *read;
+        return t104::read_store_numbers(factory->log->inner.get(), s);
     }
     [[nodiscard]] StoreLog const& log() const { return *factory->log; }
 
@@ -356,13 +306,6 @@ std::vector<bool> reset_events(fixpp::session::Session const& sess) {
         }
     }
     return out;
-}
-
-bool compid_authorization_failed(fixpp::session::Session const& sess) {
-    return std::ranges::any_of(sess.recent_events(), [](auto const& ev) {
-        return std::holds_alternative<fixpp::session::session_event_compid_authorization_failed>(
-            ev);
-    });
 }
 
 bool visited(fixpp::session::Session const& sess, fsm_state const st) {
@@ -634,7 +577,8 @@ TEST(UnaskedResetAck104, Mtls_Unauthorised_NoReset) {
         EXPECT_EQ(r.manager(), before)
             << "the manager: " << r.manager().in << "/" << r.manager().out;
         EXPECT_EQ(s.state(), fsm_state::Disconnected) << rg::state_name(s.state());
-        EXPECT_TRUE(compid_authorization_failed(*s.session)) << "no authorisation-failed event";
+        EXPECT_TRUE(t104::compid_authorization_failed(*s.session))
+            << "no authorisation-failed event";
     }
     {
         SCOPED_TRACE("authorised twin, live identity through drive_reconnect()");
@@ -658,7 +602,8 @@ TEST(UnaskedResetAck104, Mtls_Unauthorised_NoReset) {
         auto const tos = reset_tos(r.log());
         EXPECT_EQ(tos, (std::vector<Numbers>{{.in = 2, .out = 1}}))
             << "reset_to calls: " << tos.size();
-        EXPECT_FALSE(compid_authorization_failed(*s.session)) << "an authorisation-failed event";
+        EXPECT_FALSE(t104::compid_authorization_failed(*s.session))
+            << "an authorisation-failed event";
     }
 }
 

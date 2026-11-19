@@ -69,16 +69,20 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
 #include "session/mock_reconnect_factory.hpp"
 #include "session/plain_engine_rig.hpp"
 #include "session/resend_gap_scene.hpp"
+#include "session/test_104_support.hpp"
 #include "support/blocking_write_transport.hpp"
 #include "support/engine_test_access.hpp"
+#include "support/extract_tag.hpp"
 #include "support/hooked_store.hpp"
 #include "support/log_capture.hpp"
+#include "support/memory_store_test_access.hpp"
 #include "support/seqnum_manager_test_access.hpp"
 #include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
@@ -356,17 +360,6 @@ void arm_write_starts(asio::io_context& ioc) {
     ASSERT_TRUE(r.has_value() && r->has_value()) << "arm4: the write failed";
 }
 
-// The value of `tag` in a recorded write's bytes (its first occurrence after a SOH), or empty.
-std::string recorded_field(std::vector<std::byte> const& bytes, std::string_view tag) {
-    std::string const wire(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-    std::string const needle = "\x01" + std::string{tag} + "=";
-    auto const at = wire.find(needle);
-    if (at == std::string::npos) return {};
-    auto const from = at + needle.size();
-    auto const end = wire.find('\x01', from);
-    return wire.substr(from, end == std::string::npos ? std::string::npos : end - from);
-}
-
 // Arm 5: the opt-in byte record (research D10, the fifth test-support addition). With
 // record_bytes set, two writes are recorded in write-start order, each with its MsgType, its
 // start index and its completion; with it clear, a write records nothing.
@@ -409,10 +402,14 @@ void arm_byte_record(asio::io_context& ioc) {
     EXPECT_TRUE(finished) << "arm5: the writes did not complete";
     EXPECT_EQ(state->starts, 3U) << "arm5: starts";
     ASSERT_EQ(state->recorded.size(), 2U) << "arm5: the record holds the two recorded writes";
-    EXPECT_EQ(recorded_field(state->recorded[0].bytes, "35"), "0") << "arm5: the first's 35";
-    EXPECT_EQ(recorded_field(state->recorded[0].bytes, "34"), "7") << "arm5: the first's 34";
-    EXPECT_EQ(recorded_field(state->recorded[1].bytes, "35"), "3") << "arm5: the second's 35";
-    EXPECT_EQ(recorded_field(state->recorded[1].bytes, "34"), "8") << "arm5: the second's 34";
+    EXPECT_EQ(fixpp::test_support::extract_tag(state->recorded[0].bytes, 35), "0")
+        << "arm5: the first's 35";
+    EXPECT_EQ(fixpp::test_support::extract_tag(state->recorded[0].bytes, 34), "7")
+        << "arm5: the first's 34";
+    EXPECT_EQ(fixpp::test_support::extract_tag(state->recorded[1].bytes, 35), "3")
+        << "arm5: the second's 35";
+    EXPECT_EQ(fixpp::test_support::extract_tag(state->recorded[1].bytes, 34), "8")
+        << "arm5: the second's 34";
     EXPECT_EQ(state->recorded[0].start, 1U) << "arm5: the first's start index";
     EXPECT_EQ(state->recorded[1].start, 2U) << "arm5: the second's start index";
     EXPECT_TRUE(state->recorded[0].completed) << "arm5: the first's completion";
@@ -449,6 +446,7 @@ TEST(HookedStoreRecord104, ResetAndResetToRecordedApart) {
 namespace {
 
 namespace rg = fixpp::test_support::resend_gap;
+namespace t104 = fixpp::test_support::t104;
 using fixpp::session::close_mode;
 using fixpp::session::session_role;
 using fixpp::session::session_test_access;
@@ -776,14 +774,12 @@ public:
             s.cfg.store_factory = std::make_shared<RefusingStoreFactory104>(
                 factory, &ctl.refuse_next_store, &ctl.side);
         }
-        s.cfg.transport_send = [c = &ctl,
-                                sink = s.cfg.transport_send](std::span<const std::byte> f) {
-            if (c->throw_next_write) {
-                c->throw_next_write = false;
-                throw std::runtime_error("Rol104: the sink's write failed");
-            }
-            sink(f);
-        };
+        s.cfg.transport_send = t104::throwing_sink(
+            s.cfg.transport_send,
+            [c = &ctl](std::span<const std::byte> /*frame*/) {
+                return std::exchange(c->throw_next_write, false);
+            },
+            "Rol104: the sink's write failed");
         s.session = std::make_unique<fixpp::session::Session>(s.engine, s.cfg);
         app->session = s.session.get();
     }
@@ -793,15 +789,8 @@ public:
 
     [[nodiscard]] StoreLog& log() const { return *factory->log; }
 
-    struct Numbers {
-        seqnum_t in = 0;
-        seqnum_t out = 0;
-        bool operator==(Numbers const&) const = default;
-    };
-    [[nodiscard]] Numbers manager_numbers() const {
-        auto& m = session_test_access::seqnum_mgr(*s.session);
-        return {.in = m.next_inbound_unsafe(), .out = m.next_outbound_unsafe()};
-    }
+    using Numbers = t104::Numbers104;
+    [[nodiscard]] Numbers manager_numbers() const { return t104::manager_numbers(*s.session); }
     // The store's next inbound and outbound numbers: a StoreDouble's directly, a MemoryStore's
     // (the HookedStore's inner one, or the session's own) through next_seqnum(dir, false),
     // pumped. Empty when a read fails or does not return.
@@ -813,20 +802,7 @@ public:
         fixpp::session::MessageStore* st = k == store_kind::hooked || k == store_kind::refusing
                                                ? factory->log->inner.get()
                                                : session_test_access::store(*s.session);
-        if (st == nullptr) return std::nullopt;
-        auto const read = std::make_shared<std::optional<Numbers>>();
-        auto const done = std::make_shared<bool>(false);
-        asio::co_spawn(
-            s.ioc,
-            [st, read, done]() -> asio::awaitable<void> {
-                auto in = co_await st->next_seqnum(direction_t::inbound, false);
-                auto out = co_await st->next_seqnum(direction_t::outbound, false);
-                if (in && out) *read = Numbers{.in = *in, .out = *out};
-                *done = true;
-            },
-            asio::detached);
-        if (!s.pump_until([&] { return *done; }, kReleaseBudget)) return std::nullopt;
-        return *read;
+        return t104::read_store_numbers(st, s, kReleaseBudget);
     }
     [[nodiscard]] int phase() const { return session_test_access::peer_logout_phase(*s.session); }
     [[nodiscard]] int bound_count() const {
@@ -1169,25 +1145,11 @@ void unanswered_transport_drop(bool const answered) {
     ASSERT_TRUE(emitted) << "setup: no 35=5 reached the peer in LogoutSent";
 
     auto read_store = [&]() -> std::optional<Numbers104> {
-        auto const st = factory->log->inner;
-        auto const out = std::make_shared<std::optional<Numbers104>>();
-        auto const done = std::make_shared<bool>(false);
-        asio::co_spawn(
-            rig.ioc,
-            [st, out, done]() -> asio::awaitable<void> {
-                auto in = co_await st->next_seqnum(direction_t::inbound, false);
-                auto o = co_await st->next_seqnum(direction_t::outbound, false);
-                if (in && o) *out = Numbers104{.in = *in, .out = *o};
-                *done = true;
-            },
-            asio::detached);
-        if (!rig.run_until([&] { return *done; }, kReleaseBudget)) return std::nullopt;
-        return *out;
+        return t104::read_store_numbers(factory->log->inner.get(), rig.ioc, [&](auto pred) {
+            return rig.run_until(std::move(pred), kReleaseBudget);
+        });
     };
-    auto mgr = [&] {
-        auto& m = session_test_access::seqnum_mgr(*sess);
-        return Numbers104{.in = m.next_inbound_unsafe(), .out = m.next_outbound_unsafe()};
-    };
+    auto mgr = [&] { return t104::manager_numbers(*sess); };
     Numbers104 const mgr_after_emit = mgr();
     auto const store_after_emit = read_store();
     ASSERT_TRUE(store_after_emit.has_value()) << "setup: the store's numbers were not read";
@@ -1300,25 +1262,11 @@ public:
     // The session's config, edited before start_to_active().
     [[nodiscard]] fixpp::session::SessionConfig& config() { return cfg_; }
     [[nodiscard]] StoreLog& log() const { return *factory->log; }
-    [[nodiscard]] Rol104::Numbers manager_numbers() const {
-        auto& m = session_test_access::seqnum_mgr(*sess);
-        return {.in = m.next_inbound_unsafe(), .out = m.next_outbound_unsafe()};
-    }
+    [[nodiscard]] Rol104::Numbers manager_numbers() const { return t104::manager_numbers(*sess); }
     [[nodiscard]] std::optional<Rol104::Numbers> store_numbers() {
-        auto const st = factory->log->inner;
-        auto const out = std::make_shared<std::optional<Rol104::Numbers>>();
-        auto const done = std::make_shared<bool>(false);
-        asio::co_spawn(
-            rig.ioc,
-            [st, out, done]() -> asio::awaitable<void> {
-                auto in = co_await st->next_seqnum(direction_t::inbound, false);
-                auto o = co_await st->next_seqnum(direction_t::outbound, false);
-                if (in && o) *out = Rol104::Numbers{.in = *in, .out = *o};
-                *done = true;
-            },
-            asio::detached);
-        if (!rig.run_until([&] { return *done; }, kReleaseBudget)) return std::nullopt;
-        return *out;
+        return t104::read_store_numbers(factory->log->inner.get(), rig.ioc, [&](auto pred) {
+            return rig.run_until(std::move(pred), kReleaseBudget);
+        });
     }
     [[nodiscard]] std::vector<std::string> peer_frames(std::string_view msg_type) const {
         return plain_rig::frames_of_type(rig.peer.received, msg_type);
@@ -1817,22 +1765,7 @@ TEST(ResetOnLogout104, ReplyStoreCancelled_NoReset) {
 
 // ── T029: R-1h and R-1i ──────────────────────────────────────────────────────────────────
 
-namespace {
-
-std::size_t count_frames(std::vector<std::byte> const& bytes, std::string_view msg_type) {
-    std::string const wire(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-    std::string const needle =
-        "\x01"
-        "35=" +
-        std::string{msg_type} + "\x01";
-    std::size_t n = 0;
-    for (auto pos = wire.find(needle); pos != std::string::npos; pos = wire.find(needle, pos + 1)) {
-        ++n;
-    }
-    return n;
-}
-
-}  // namespace
+namespace {}  // namespace
 
 // R-1h: a standalone initiator resets at the peer Logout's reset point; drive_reconnect() then
 // installs the factory's transport and writes the reconnect Logon (RR-4 does not refuse it),
@@ -1857,7 +1790,13 @@ TEST(ResetOnLogout104, PeerLogoutThenReconnect_NoResetOnNewConnection) {
     EXPECT_TRUE(rc.has_value()) << "drive_reconnect() failed: "
                                 << (rc ? 0 : static_cast<int>(rc.error()));
     ASSERT_NE(tf->last_transport, nullptr) << "no transport was installed";
-    EXPECT_EQ(count_frames(tf->last_transport->outbound_bytes_seen(), "A"), 1U)
+    auto const reconnect_bytes = tf->last_transport->outbound_bytes_seen();
+    EXPECT_EQ(plain_rig::frames_of_type(
+                  std::string_view{reinterpret_cast<char const*>(reconnect_bytes.data()),
+                                   reconnect_bytes.size()},
+                  "A")
+                  .size(),
+              1U)
         << "the reconnect Logon was not written on the new transport";
     EXPECT_EQ(r.manager_numbers().out, out_before + 1) << "the reconnect Logon's number";
     auto const calls_before_close = r.log().calls.size();
@@ -2293,24 +2232,8 @@ constexpr seqnum_t kHydratedN = 5;
 std::shared_ptr<fixpp::session::MemoryStore> hydrated_store() {
     auto st = std::make_shared<fixpp::session::MemoryStore>(
         fixpp::session::MemoryStore::Config{.policy = fixpp::session::capacity_policy::unbounded});
-    asio::io_context seed;
-    asio::co_spawn(
-        seed,
-        [st]() -> asio::awaitable<void> {
-            for (seqnum_t i = 1; i < kHydratedN; ++i) {
-                (void)co_await st->next_seqnum(direction_t::inbound, true);
-            }
-        },
-        asio::detached);
-    seed.run();
+    fixpp::session::memory_store_test_access::set_counter(*st, direction_t::inbound, kHydratedN);
     return st;
-}
-
-bool compid_authorization_failed(rg::Scene const& s) {
-    return std::ranges::any_of(s.session->recent_events(), [](auto const& ev) {
-        return std::holds_alternative<fixpp::session::session_event_compid_authorization_failed>(
-            ev);
-    });
 }
 
 enum class logon_sent_arm : std::uint8_t { resets, mtls_unauthorised, rol_off_mtls };
@@ -2347,11 +2270,13 @@ void logon_sent_logout(logon_sent_arm const arm) {
     EXPECT_TRUE(r.log().calls.empty()) << "a reset call: reset() " << r.log().reset_calls
                                        << ", reset_to " << r.log().reset_to_calls;
     if (arm == logon_sent_arm::mtls_unauthorised) {
-        EXPECT_TRUE(compid_authorization_failed(s)) << "no authorisation-failed event";
+        EXPECT_TRUE(t104::compid_authorization_failed(*s.session))
+            << "no authorisation-failed event";
     } else {
         EXPECT_EQ(s.count("5", mark), 0U) << "a 35=5 written by fixpp: " << s.written(mark);
         EXPECT_TRUE(res.has_value()) << "the arm did not return success";
-        EXPECT_FALSE(compid_authorization_failed(s)) << "an authorisation-failed event";
+        EXPECT_FALSE(t104::compid_authorization_failed(*s.session))
+            << "an authorisation-failed event";
     }
 }
 
@@ -3489,8 +3414,8 @@ std::vector<LiveFrame104> written_after(bwt::blocking_write_state const& st, std
     for (auto const& w : st.recorded) {
         if (!w.completed || w.start <= after) continue;
         out.push_back({.start = w.start,
-                       .type = recorded_field(w.bytes, "35"),
-                       .seq = recorded_field(w.bytes, "34")});
+                       .type = fixpp::test_support::extract_tag(w.bytes, 35),
+                       .seq = fixpp::test_support::extract_tag(w.bytes, 34)});
     }
     return out;
 }
@@ -3622,9 +3547,10 @@ void too_high_resend_request_across_bound_unit(bool const rol) {
     st->arm_block();
     s.mock->advance(std::chrono::milliseconds{kBoundT} + std::chrono::milliseconds{1});
     bool const reply_parked = s.pump_until([&] { return st->parked; }, kInHoldBudget);
-    bool const parked_is_reply = !st->recorded.empty() &&
-                                 recorded_field(st->recorded.back().bytes, "35") == "5" &&
-                                 !st->recorded.back().completed;
+    bool const parked_is_reply =
+        !st->recorded.empty() &&
+        fixpp::test_support::extract_tag(st->recorded.back().bytes, 35) == "5" &&
+        !st->recorded.back().completed;
     std::size_t const reply_start = st->recorded.empty() ? 0 : st->recorded.back().start;
     r.ctl.released = true;
     bool const at_gate = s.pump_until(
@@ -3959,9 +3885,10 @@ void liveness_heartbeat_across_unit(session_role const role, liveness_arm const 
         // hang.
         s.mock->advance(std::chrono::milliseconds{kBoundT} + std::chrono::milliseconds{1});
         bool const parked = s.pump_until([&] { return st->parked; }, kReachBudget);
-        bool const is_reply = !st->recorded.empty() &&
-                              recorded_field(st->recorded.back().bytes, "35") == "5" &&
-                              !st->recorded.back().completed;
+        bool const is_reply =
+            !st->recorded.empty() &&
+            fixpp::test_support::extract_tag(st->recorded.back().bytes, 35) == "5" &&
+            !st->recorded.back().completed;
         reply_start = st->recorded.empty() ? 0 : st->recorded.back().start;
         s.mock->advance(rg::kHeartBtInt);
         reached = parked && is_reply &&
