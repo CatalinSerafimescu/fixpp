@@ -4077,7 +4077,8 @@ void close_during_held_persist(session_role const role, held_persist_arm const a
 
     EXPECT_TRUE(held) << "setup: the frame's persist was not reached";
     EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the release";
-    ASSERT_TRUE(result.has_value()) << "the frame's on_inbound_frame did not return";
+    EXPECT_TRUE(result.has_value()) << "the frame's on_inbound_frame did not return";
+    if (!result) return;
     auto const rejects = s.of_type("3", mark);
 
     if (!close) {
@@ -4142,7 +4143,8 @@ void too_high_resend_request_close_during_answer(session_role const role, bool c
         << "setup: the Reject's store call was not recorded";
     EXPECT_EQ(r.app->to_admin_count("2"), baseline + 1)
         << "setup: the leaf's toAdmin for its ResendRequest";
-    ASSERT_TRUE(result.has_value()) << "the frame's on_inbound_frame did not return";
+    EXPECT_TRUE(result.has_value()) << "the frame's on_inbound_frame did not return";
+    if (!result) return;
     EXPECT_TRUE(result->has_value()) << "the frame's return: " << static_cast<int>(result->error());
 
     if (!close) {
@@ -4233,7 +4235,8 @@ TEST(ResetOnLogout104, CloseWhilePending_NoClock_NoReset_ImmediateAck) {
     EXPECT_EQ(s.count("2", mark), 0U) << "setup: a ResendRequest, so the acknowledgement was "
                                          "not immediate: "
                                       << s.written(mark);
-    ASSERT_TRUE(result.has_value()) << "the Logout's frame did not return";
+    EXPECT_TRUE(result.has_value()) << "the Logout's frame did not return";
+    if (!result) return;
     EXPECT_TRUE(result->has_value())
         << "the Logout's frame's return: " << static_cast<int>(result->error());
     EXPECT_EQ(reset_events_of(*s.session, false), 1)
