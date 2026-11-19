@@ -171,8 +171,8 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::hydrate(
 
 // ── reset_to_one ──────────────────────────────────────────────────────────────
 //
-// Acquire the mutex, reset both counters to seqnum_min (1).
-// Called on a successful ResetSeqNumFlag(141)=Y handshake (FR-017:150).
+// Acquire the mutex, reset both counters to seqnum_min (1), the manager half of a
+// sequence reset. Its callers: `git grep -n 'reset_to_one(' -- src`.
 // Production path — NOT FIXPP_TEST_HOOKS-gated.
 
 asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::reset_to_one() noexcept {
@@ -189,9 +189,9 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::reset_to_one() noe
 
 // ── set_next_inbound ────────────────────────────────────────────────────────
 //
-// Acquire the mutex, set next_inbound_ to n. Called when an inbound
-// SequenceReset(35=4) (GapFill or Reset mode) carries NewSeqNo(36) > expected.
-// Production path. Only the inbound counter moves.
+// Acquire the mutex, set next_inbound_ to n: an inbound SequenceReset(35=4) (GapFill or
+// Reset mode) whose NewSeqNo(36) > expected, or a reset unit's inbound target. Its callers:
+// `git grep -n 'set_next_inbound(' -- src`. Production path. Only the inbound counter moves.
 
 asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::set_next_inbound(
     seqnum_t n) noexcept {
@@ -211,9 +211,10 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::set_next_inbound(
 
 // ── set_next_outbound ────────────────────────────────────────────────────────
 //
-// Acquire the mutex, set next_outbound_ to n. Called by the 032 initiator
-// peer_ack_sent_reset_flag outbound restore (Mechanism A). Only the outbound
-// counter moves; mirrors set_next_inbound(). [032 contract C1/Mechanism A]
+// Acquire the mutex, set next_outbound_ to n: a reset unit's outbound target, the 032
+// initiator's restore-after-reset (Mechanism A) among them. Its callers:
+// `git grep -n 'set_next_outbound(' -- src`. Only the outbound counter moves; mirrors
+// set_next_inbound(). [032 contract C1/Mechanism A]
 
 asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::set_next_outbound(
     seqnum_t n) noexcept {

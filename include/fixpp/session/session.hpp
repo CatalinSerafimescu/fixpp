@@ -766,12 +766,13 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset_seqnums_to_one_durable(
         reset_disposition disposition) noexcept;  // wired in T007/T008/T014
 
-    // 070-fix44-closeout S-029: refuse an inbound Logon on a TestMessageIndicator(464)
-    // posture mismatch (or malformed 464). Emits a Logout(35=5) carrying reason_text
-    // (fire toAdmin → assign_outbound → store_then_emit), then transitions to
-    // Disconnected — the session never reaches Active. Mirrors the Logon-time
+    // 070-fix44-closeout S-029: a Logon arm's refusal with a Logout, first written for a
+    // TestMessageIndicator(464) posture mismatch (or malformed 464). Emits a Logout(35=5)
+    // carrying reason_text (fire toAdmin → assign_outbound → store_then_emit), then transitions
+    // to Disconnected — the session never reaches Active. Mirrors the Logon-time
     // Logout+disconnect disposition (session.cpp's 070-fix44-closeout S-029 posture-mismatch call
-    // site). Called from both the acceptor inbound-Logon and the initiator inbound-Logon-ack paths.
+    // site). Called by every Logon-arm refusal that sends a Logout, in both Logon arms:
+    // `git grep -n 'refuse_logon_with_logout_(' -- src` lists them.
     // [FR-002; D-F]
     // arm: the calling Logon arm's expected state (093 plan OD-26), passed to the
     // Logout's store_then_emit and to the Disconnected write after it.
@@ -1842,6 +1843,9 @@ private:
     // from the arm, then, only if that succeeded, the store's one reset_to. Plan OD-25
     // (superseding OD-14's in-place shield): the reset_to runs on an empty cancellation
     // slot, and the arm restores its own state after the unit (step 5).
+    // 104 (contract RR-1; RR-5 items 1 and 4): it is also the receipt reset unit at a received
+    // Logout's reset point; there, with the receipt marker `reached`, it freezes the manager
+    // after the manager set (its definition in session.cpp has the condition).
     struct reset_unit_result {
         fixpp::core::expected_t<void> manager;
         fixpp::core::expected_t<void> store;

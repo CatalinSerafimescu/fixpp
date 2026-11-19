@@ -173,28 +173,30 @@ public:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> hydrate(
         seqnum_t next_inbound, seqnum_t next_outbound) noexcept;
 
-    // reset_to_one(): reset both counters to seqnum_min (1) for a successful
-    // ResetSeqNumFlag(141)=Y handshake (FR-017 §150: "both sides advance
-    // next_expected_inbound and next_expected_outbound to 1").
+    // reset_to_one(): reset both counters to seqnum_min (1), the manager half of a sequence
+    // reset, a successful ResetSeqNumFlag(141)=Y handshake among them (FR-017 §150: "both
+    // sides advance next_expected_inbound and next_expected_outbound to 1"). Its callers:
+    // `git grep -n 'reset_to_one(' -- src`.
     // Mutex-guarded; production path — NOT test-hook-gated.
     // Must be called BEFORE the caller emits session_event_sequence_numbers_reset
     // so the event fires after post-reset state is consistent (FR-018).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset_to_one() noexcept;
 
-    // set_next_inbound(n): force next_inbound_ to n for an inbound
+    // set_next_inbound(n): force next_inbound_ to n, for an inbound
     // SequenceReset(35=4) NewSeqNo(36) application (FIX-SL §4.8 — GapFill or
-    // Reset mode, when NewSeqNo > current expected). Mutex-guarded; production
+    // Reset mode, when NewSeqNo > current expected) and for a reset unit's inbound target.
+    // Its callers: `git grep -n 'set_next_inbound(' -- src`. Mutex-guarded; production
     // path. Only the inbound counter moves (a SequenceReset affects the peer→us
     // stream only); store persistence — when applicable — is the session's
     // responsibility, mirroring reset_to_one()'s split.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> set_next_inbound(
         seqnum_t n) noexcept;
 
-    // set_next_outbound(n): force next_outbound_ to n for the 032 initiator
-    // peer_ack_sent_reset_flag outbound restore (Mechanism A: restore-after-reset).
-    // Mutex-guarded; production path. Only the outbound counter moves.
-    // Store persistence — when applicable — is the session's responsibility,
-    // mirroring set_next_inbound()'s split. [032 contract C1/Mechanism A]
+    // set_next_outbound(n): force next_outbound_ to n, for a reset unit's outbound target,
+    // the 032 initiator's restore-after-reset (Mechanism A) among them. Its callers:
+    // `git grep -n 'set_next_outbound(' -- src`. Mutex-guarded; production path. Only the
+    // outbound counter moves. Store persistence — when applicable — is the session's
+    // responsibility, mirroring set_next_inbound()'s split. [032 contract C1/Mechanism A]
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> set_next_outbound(
         seqnum_t n) noexcept;
 

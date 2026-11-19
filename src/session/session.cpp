@@ -3132,9 +3132,11 @@ static_assert(kTooLowPhrase1.size() + kTooLowPhrase2.size() +
 
 }  // namespace
 
-// 070-fix44-closeout S-029 — refuse an inbound Logon on a 464 posture mismatch (or
-// malformed 464): emit Logout(35=5) carrying reason_text, then Disconnected — the
-// session never reaches Active. Mirrors the Logon-time Logout+disconnect disposition
+// 070-fix44-closeout S-029 — a Logon arm's refusal with a Logout, first written for a 464
+// posture mismatch (or malformed 464): emit Logout(35=5) carrying reason_text, then
+// Disconnected — the session never reaches Active. Called by every Logon-arm refusal that
+// sends a Logout: `git grep -n 'refuse_logon_with_logout_(' -- src` lists them. Mirrors the
+// Logon-time Logout+disconnect disposition
 // at session.cpp (SendingTime-accuracy path). Defined after the file-local
 // stamp_sending_time helper so it is in scope. [FR-002; data-model D-F]
 asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout_(
@@ -4146,8 +4148,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_acceptor_reply_l
 //
 // Seqnum check (T031/T032/T035):
 //   Too-low  → session_seqnum_too_low (69)              → fatal: Disconnected, after
-//              QuickFIX's too-low Logout unless 43=Y (103, research D9; a too-low
-//              Heartbeat included, which supersedes T020-A's silent drop)
+//              QuickFIX's too-low Logout: in Active unless 43=Y (103, research D9; a
+//              too-low Heartbeat included, which supersedes T020-A's silent drop); in
+//              NotConnected and LogonSent whatever its 43, once the identity gates pass
+//              (104, research D5)
 //   Too-high → 013 FR-009: AwaitingResend + ResendRequest(2) via reconnect_fsm_
 //              (slot 70 session_seqnum_gap_unrecoverable deleted per 013 T006a;
 //               state owned by ReconnectFsm per data-model §E-1 / Fix1 T023)
@@ -6524,23 +6528,22 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logout_sent_(
     co_return fixpp::core::expected_t<void>{};
 }
 
-// 014 T015 US2 / 013 T036 US2: the LogonSent arm's CompID authorization, run BEFORE the FSM
+// 014 T015 US2 / 013 T036 US2: the Logon path's CompID authorization, run BEFORE the FSM
 // transition to Active (FR-006/FR-007/FR-008/FR-019/FR-020/FR-021/FR-024
 // symmetric initiator path).
-// Initiator: asserted CompID = peer SenderCompID(49) = cfg_.target_comp_id.
+// Asserted CompID = peer SenderCompID(49) = cfg_.target_comp_id, in both roles.
 //
 // Two-arm guard (015 T020 removed the seam arm from the T015 form):
-//   (1) live_peer_id_ set (live reconnect path, T014/T015) →
+//   (1) live_peer_id_ set (the live handshake identity, T014/T015, T020) →
 //       authorize with the real handshake peer_id, making the
 //       already-fail-CLOSED mTLS gate *operable* with a live identity
 //       (admit on-list; fail-close off-list/absent). FR-006/FR-008.
 //   (2) mTLS + no identity available → fail CLOSED. RC#A.
 //   (3) Non-mTLS → skip (backward compat, permissive). FR-019.
 //
-// live_peer_id_ is stored by install_reconnected_transport (T015) on a
-// successful reconnect handshake and reset() one-shot below once this
-// guard authorizes it. The acceptor site now binds a live identity too
-// (T020/T-041 CLOSED) — both roles are symmetric, the seam is gone.
+// live_peer_id_ is stored by install_reconnected_transport (T015) on the initiator and by
+// attach_accepted_transport on the acceptor (T020/T-041 CLOSED), and reset() one-shot
+// below whether arm (1) admits or refuses it — both roles are symmetric, the seam is gone.
 // [[feedback_half_restructure_symmetric_api]]: symmetric one-pass fix.
 // [data-model §E-2; contracts C2; FR-006; FR-007; FR-008; FR-009]
 //
@@ -6557,9 +6560,9 @@ bool Session::logon_sent_identity_admitted_() noexcept {
         cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_pinned;
 
     if (live_peer_id_.has_value() && is_mtls) {
-        // (1) Live reconnect path: use real handshake peer_id.
-        // Only active when mTLS is configured (binding gate applicable)
-        // AND a live peer_id was set by install_reconnected_transport.
+        // (1) A live handshake identity: use the real handshake peer_id, set by
+        // install_reconnected_transport on the initiator and by attach_accepted_transport on
+        // the acceptor. Only active when mTLS is configured (binding gate applicable).
         // Non-mTLS sessions skip to arm (4) permissive (no client cert).
         // FR-006: the identity source is the real handshake_result.peer_id
         // (no fabricated/stand-in identity on this path). FR-008: removes
@@ -6568,14 +6571,11 @@ bool Session::logon_sent_identity_admitted_() noexcept {
         const std::string_view asserted_compid = cfg_.target_comp_id;
         auto auth_r = cfg_.compid_authorization_policy.authorize(auth_pid, asserted_compid);
         if (!auth_r) {
-            // Fail-closed: emit event, Disconnected.
-            // On the open-Logon path (not reconnect), Disconnected
-            // is terminal. The reconnect-path auth fail is handled in
-            // reconnect_fsm.cpp step 7 BEFORE reaching here; this arm
-            // fires only if the open-Logon path somehow has a live peer_id
-            // (future: or if this guard is reached from the reconnect path
-            // after an auth-pass in the FSM — should not happen, but
-            // fail-closed is the safe default). [contracts C2; FR-007]
+            // Fail-closed: emit the event and return false; the caller records
+            // Disconnected. On the acceptor this is the refusal of an identity the policy
+            // does not bind to the asserted CompID. On the initiator the reconnect path's
+            // own authorisation runs in reconnect_fsm.cpp step 7, before this gate.
+            // [contracts C2; FR-007]
             // cn EMPTY: live_peer_id_.reset() below frees the backing
             // store, so a view into it would dangle in the persisted
             // recent_events_ ring. (Owned-cn fix + the success-arm cn
@@ -6602,9 +6602,9 @@ bool Session::logon_sent_identity_admitted_() noexcept {
             .bound_compid = asserted_compid,
             .principal_source = auth_r->from,
         });
-        live_peer_id_.reset();  // consume (one-shot per Logon-ack)
+        live_peer_id_.reset();  // consume (one-shot per Logon)
     } else if (is_mtls) {
-        // (2) mTLS + no peer_identity → fail CLOSED (same as acceptor arm).
+        // (2) mTLS + no peer_identity → fail CLOSED.
         const std::string_view asserted_compid = cfg_.target_comp_id;
         emit_event(fixpp::session::session_event_compid_authorization_failed{
             .cn = {},
