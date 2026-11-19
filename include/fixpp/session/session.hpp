@@ -773,8 +773,7 @@ private:
     // carrying reason_text (fire toAdmin → assign_outbound → store_then_emit), then transitions
     // to Disconnected — the session never reaches Active. Mirrors the Logon-time
     // Logout+disconnect disposition (session.cpp's 070-fix44-closeout S-029 posture-mismatch call
-    // site). Called by every Logon-arm refusal that sends a Logout, in both Logon arms:
-    // `git grep -n 'refuse_logon_with_logout_(' -- src` lists them.
+    // site). Its callers: `git grep -n 'refuse_logon_with_logout_(' -- src`.
     // [FR-002; D-F]
     // arm: the calling Logon arm's expected state (093 plan OD-26), passed to the
     // Logout's store_then_emit and to the Disconnected write after it.

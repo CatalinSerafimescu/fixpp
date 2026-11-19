@@ -18,7 +18,8 @@
 //   - 027 contracts/next-expected-msgseqnum.md C3's explicit-end case, NewSeqNo = EndSeqNo
 //     + 1: an end at or above the next outbound number is answered through the current
 //     number (contract U6, research D3.3a; B-104-5).
-// Each site that implements one names 104 in its own comment.
+// A site that implements one names 104 in its comment:
+// `git grep -n '104' -- src/session/session.cpp` lists them.
 #include <algorithm>
 #include <array>
 #include <asio/any_io_executor.hpp>
@@ -3145,8 +3146,8 @@ static_assert(kTooLowPhrase1.size() + kTooLowPhrase2.size() +
 
 // 070-fix44-closeout S-029 — a Logon arm's refusal with a Logout, first written for a 464
 // posture mismatch (or malformed 464): emit Logout(35=5) carrying reason_text, then
-// Disconnected — the session never reaches Active. Called by every Logon-arm refusal that
-// sends a Logout: `git grep -n 'refuse_logon_with_logout_(' -- src` lists them. Mirrors the
+// Disconnected — the session never reaches Active. Its callers:
+// `git grep -n 'refuse_logon_with_logout_(' -- src`. Mirrors the
 // Logon-time Logout+disconnect disposition
 // at session.cpp (SendingTime-accuracy path). Defined after the file-local
 // stamp_sending_time helper so it is in scope. [FR-002; data-model D-F]
