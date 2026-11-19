@@ -1588,7 +1588,9 @@ void receipt_ends_before_reset_point(session_role const role, receipt_end const 
         EXPECT_EQ(s.count("5", mark), 1U) << "A's reply: " << s.written(mark);
         if (end == receipt_end::from_admin_throw) {
             EXPECT_FALSE(res.has_value()) << "the throw's error";
-            if (!res) EXPECT_EQ(res.error(), fixpp::core::error::app_callback_threw);
+            if (!res) {
+                EXPECT_EQ(res.error(), fixpp::core::error::app_callback_threw);
+            }
             EXPECT_EQ(s.state(), fsm_state::Disconnected);
         } else if (end == receipt_end::from_admin_reject) {
             EXPECT_EQ(s.count("3", mark), 1U) << "the reject's Reject: " << s.written(mark);
