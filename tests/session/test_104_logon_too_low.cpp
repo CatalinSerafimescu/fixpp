@@ -169,6 +169,9 @@ struct RigOpts {
     reset_seqnum_policy policy = reset_seqnum_policy::bilateral_lenient;
     bool reset_on_logout = false;
     bool mtls = false;
+    // With mtls: the session's SecurityProfile kind.
+    fixpp::session::SecurityProfile::kind mtls_kind =
+        fixpp::session::SecurityProfile::kind::mtls_ca;
     std::string sender = "ISLD";
     std::string target = "TW";
     bool throw_to_admin_on_logout = false;
@@ -214,8 +217,7 @@ public:
             s.cfg.store_factory = std::make_shared<VolatileHookedFactory104>(factory);
         }
         if (opts.mtls) {
-            s.cfg.security_profile =
-                fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
+            s.cfg.security_profile = fixpp::session::SecurityProfile{opts.mtls_kind};
             s.cfg.compid_authorization_policy.add_binding("CN=TW-PROD-01,O=Peer,C=US", opts.target);
         }
         if (opts.validator) {
@@ -709,6 +711,18 @@ TEST(LogonTooLow104, Precedence_RefusedCredentials) {
 // closed in its arm (2): its event, and nothing written after fixpp's own Logon.
 TEST(LogonTooLow104, Precedence_DirectMtlsInitiator) {
     Rig r{RigOpts{.mtls = true}};
+    ASSERT_TRUE(open_hydrated(r)) << "setup";
+    auto const mark = r.s.sent.size();
+    (void)r.s.feed(r.logon(kM));
+    EXPECT_EQ(r.s.sent.size(), mark) << "frames written: " << r.s.written(mark);
+    EXPECT_EQ(r.s.state(), fsm_state::Disconnected) << rg::state_name(r.s.state());
+    EXPECT_TRUE(t104::compid_authorization_failed(*r.s.session)) << "no authorisation-failed event";
+}
+
+// The same direct initiator with an mtls_pinned profile: the gate's mTLS test names both mTLS
+// kinds, so its arm (2) fails closed here too.
+TEST(LogonTooLow104, Precedence_NoLiveIdentity_MtlsPinned) {
+    Rig r{RigOpts{.mtls = true, .mtls_kind = fixpp::session::SecurityProfile::kind::mtls_pinned}};
     ASSERT_TRUE(open_hydrated(r)) << "setup";
     auto const mark = r.s.sent.size();
     (void)r.s.feed(r.logon(kM));

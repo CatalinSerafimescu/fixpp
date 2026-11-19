@@ -27,6 +27,8 @@
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
+#include <asio/post.hpp>
+#include <asio/this_coro.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
@@ -39,6 +41,7 @@
 #include <fixpp/session/message_store_factory.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
 #include <fixpp/session/seqnum.hpp>
+#include <fixpp/session/seqnum_manager.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_event.hpp>
@@ -64,6 +67,7 @@
 #include "session/test_104_support.hpp"
 #include "support/hooked_store.hpp"
 #include "support/memory_store_test_access.hpp"
+#include "support/seqnum_manager_test_access.hpp"
 #include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 #include "support/store_double.hpp"
@@ -637,5 +641,94 @@ TEST(UnaskedResetAck104, PersistentStoreRefusesReset_Fatal) {
         EXPECT_FALSE(visited(*s.session, fsm_state::Active)) << "the session was Active";
         EXPECT_EQ(s.sent.size(), mark) << "frames after fixpp's Logon: " << s.written(mark);
         EXPECT_EQ(r.store_numbers(store_kind::store_double), before) << "the store's numbers";
+    }
+}
+
+// ── T108: U-11, the unasked unit's manager call drained (Article IX §1) ─────────────────
+
+namespace {
+
+// A holder of the manager's mutex: it takes the lock, then keeps it until `release` is set,
+// re-posting itself meanwhile. Its state is a parameter, so the coroutine owns no closure.
+struct MutexHold104 {
+    bool acquired = false;
+    bool release = false;
+    bool done = false;
+};
+asio::awaitable<void> hold_manager_mutex(fixpp::session::SeqnumManager* m, MutexHold104* h) {
+    auto guard = co_await fixpp::session::seqnum_manager_test_access::mutex(*m).async_lock();
+    if (guard.has_value()) {
+        h->acquired = true;
+        auto const ex = co_await asio::this_coro::executor;
+        while (!h->release) co_await asio::post(ex, asio::use_awaitable);
+    }
+    h->done = true;
+}
+
+// The window in which the arm runs to its unit's wait: it has no timer on that path.
+constexpr std::chrono::milliseconds kUnitWaitWindow{100};
+
+}  // namespace
+
+// U-11: the unasked arm calls no check_inbound, so its unit's reset_to_one is the arm's first
+// locked manager call. A holder keeps the mutex across the acknowledgement, so that call waits;
+// close(terminal) starts, and its drain cancels the wait while the holder still holds the lock.
+// The arm returns session_already_closed, the session never reaches Active, and no reset_to or
+// reset event is made. The forced hit releases the holder with no close(): the unit runs and
+// the session is Active. Every check after the holder's spawn is non-fatal, so the cell does not
+// return while the holder holds the lock.
+TEST(UnaskedResetAck104, ManagerDrainedAtUnit_Fatal) {
+    for (bool const close : {true, false}) {
+        SCOPED_TRACE(close ? "close() during the wait" : "no close()");
+        MutexHold104 hold;  // declared before the session whose mutex its holder locks
+        Rig r{RigOpts{}};
+        auto& s = r.s;
+        ASSERT_TRUE(r.open_to_logon_sent()) << "setup: the session did not reach LogonSent";
+        expect_own_logon_unasked(s);
+        auto const ex = fixpp::test_support::session_executor_of(*s.session, s.ioc);
+        asio::co_spawn(ex, hold_manager_mutex(&session_test_access::seqnum_mgr(*s.session), &hold),
+                       asio::detached);
+        bool const acquired = s.pump_until([&] { return hold.acquired; });
+        auto fut = s.feed_spawn(r.ack(1));
+        s.pump_for(kUnitWaitWindow);
+        bool const waiting = !rg::Scene::ready(fut) && s.state() == fsm_state::LogonSent &&
+                             r.manager().in == kHydratedIn;
+        std::future<fixpp::core::expected_t<void>> close_fut;
+        bool returned_while_held = false;
+        if (close) {
+            close_fut = asio::co_spawn(ex, s.session->close(fixpp::session::close_mode::terminal),
+                                       asio::use_future);
+            returned_while_held = s.pump_until([&] { return rg::Scene::ready(fut); });
+        }
+        hold.release = true;
+        bool const holder_done = s.pump_until([&] { return hold.done; });
+        bool const returned = s.pump_until([&] { return rg::Scene::ready(fut); });
+        bool const closed = !close || s.pump_until([&] { return rg::Scene::ready(close_fut); });
+        std::optional<fixpp::core::expected_t<void>> result;
+        if (returned) result = fut.get();
+
+        EXPECT_TRUE(acquired) << "setup: the holder did not take the lock";
+        EXPECT_TRUE(waiting) << "setup: the arm did not wait at its unit";
+        EXPECT_TRUE(holder_done) << "the holder did not end";
+        EXPECT_TRUE(closed) << "close() did not return";
+        EXPECT_TRUE(result.has_value()) << "the acknowledgement's on_inbound_frame did not return";
+        if (!result) continue;
+        if (!close) {
+            EXPECT_TRUE(result->has_value())
+                << "the arm's return: " << static_cast<int>(result->error());
+            EXPECT_EQ(s.state(), fsm_state::Active) << rg::state_name(s.state());
+            EXPECT_EQ(reset_events(*s.session), std::vector<bool>{true})
+                << "sequence_numbers_reset events (by_peer_request)";
+            continue;
+        }
+        EXPECT_TRUE(returned_while_held) << "the arm did not return while the holder held the lock";
+        EXPECT_TRUE(!result->has_value() &&
+                    result->error() == fixpp::core::error::session_already_closed)
+            << "the arm's return: "
+            << (result->has_value() ? std::string{"success"}
+                                    : std::to_string(static_cast<int>(result->error())));
+        EXPECT_FALSE(visited(*s.session, fsm_state::Active)) << "the session was Active";
+        EXPECT_TRUE(reset_tos(r.log()).empty()) << "a reset_to call";
+        EXPECT_TRUE(reset_events(*s.session).empty()) << "a sequence_numbers_reset event";
     }
 }

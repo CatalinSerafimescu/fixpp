@@ -457,13 +457,15 @@ constexpr int kNone = 0;                 // session_test_access::peer_logout_pha
 constexpr int kPending = 1;              // session_test_access::peer_logout_phase's `pending`
 
 // Counts fromAdmin calls by MsgType, as 103's TooHighLogoutState103 cells do. A cell can make
-// fromAdmin throw on or reject a Logout(35=5), make toAdmin throw on one or on a Reject(35=3),
-// run a hook at each toAdmin, read the manager's numbers inside onLogout, and read the state
-// inside onCreate.
+// fromAdmin throw on or reject a Logout(35=5) or reject one other MsgType, make toAdmin throw on
+// a Logout or on a Reject(35=3), run a hook at each toAdmin, read the manager's numbers inside
+// onLogout, and read the state inside onCreate.
 class AdminCountingApp104 final : public rg::GapApp {
 public:
     enum class on_logout_from_admin : std::uint8_t { accept, throw_, reject };
     on_logout_from_admin logout_from_admin = on_logout_from_admin::accept;
+    // When not empty, fromAdmin rejects a frame of this MsgType (app_do_not_send).
+    std::string reject_from_admin_type;
     bool throw_on_logout_to_admin = false;
     bool throw_on_reject_to_admin = false;
     // Run inside each toAdmin with its MsgType, after the call is counted and before a throw.
@@ -491,6 +493,9 @@ public:
             if (logout_from_admin == on_logout_from_admin::reject) {
                 return std::unexpected(fixpp::core::error::app_do_not_send);
             }
+        }
+        if (!reject_from_admin_type.empty() && msg.msg_type() == reject_from_admin_type) {
+            return std::unexpected(fixpp::core::error::app_do_not_send);
         }
         return {};
     }
@@ -4013,6 +4018,231 @@ TEST(ResetOnLogout104, LivenessHeartbeatAcrossBoundUnit_OneEnding_StoreHeld_RolO
     for (auto const role : kRoles) {
         liveness_heartbeat_across_unit(role, liveness_arm::store_held, false);
     }
+}
+
+// ── T108: a manager call refused after close()'s drain (contract RR-5 item 6) ─────────────
+//
+// Each cell holds one store call of an in-sequence frame and starts close(terminal) during the
+// hold; close() returns during it, having drained the manager. After the release the frame's
+// next manager call is refused, and its failure branch records no second Disconnected, since
+// the state is Disconnected already. The forced hit is the same input with no close().
+
+namespace {
+
+enum class held_persist_arm : std::uint8_t { from_admin_reject, gap_fill_above, gap_fill_below };
+
+std::string_view held_persist_arm_name(held_persist_arm const arm) {
+    switch (arm) {
+        case held_persist_arm::from_admin_reject:
+            return "Heartbeat, fromAdmin rejects";
+        case held_persist_arm::gap_fill_above:
+            return "GapFill, NewSeqNo above NextNumIn";
+        case held_persist_arm::gap_fill_below:
+            return "GapFill, NewSeqNo below NextNumIn";
+    }
+    return "?";
+}
+
+// reset_on_logout off and no Logout received, so nothing waits in close(). The frame's inbound
+// persist is held. A Heartbeat whose fromAdmin rejects is persisted before its Reject's
+// assign_outbound (emit_session_reject_); an in-sequence GapFill is persisted before
+// apply_inbound_sequence_reset, whose NewSeqNo above NextNumIn calls set_next_inbound and whose
+// NewSeqNo below it calls its Reject's assign_outbound.
+void close_during_held_persist(session_role const role, held_persist_arm const arm,
+                               bool const close) {
+    SCOPED_TRACE(std::string{rg::role_name(role)} + "/" + std::string{held_persist_arm_name(arm)} +
+                 (close ? "" : "/no close()"));
+    Rol104 r{Opts104{.role = role, .reset_on_logout = false}};
+    r.app->reject_from_admin_type = "0";
+    auto& s = r.s;
+    ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+    seqnum_t const n = s.next_in();
+    auto const mark = s.sent.size();
+    std::vector<std::byte> f = arm == held_persist_arm::from_admin_reject ? s.heartbeat(n)
+                               : arm == held_persist_arm::gap_fill_above  ? s.gap_fill(n, n + 5)
+                                                                          : s.gap_fill(n, n);
+    r.ctl.hold_next_persist = true;
+    auto fut = s.feed_spawn(std::move(f));
+    bool const held = s.pump_until([&] { return !r.ctl.hold_next_persist; }, kReachBudget);
+    bool close_during_hold = false;
+    if (close) {
+        r.spawn_close(close_mode::terminal);
+        close_during_hold = s.pump_until([&] { return r.close_run.done; }, kInHoldBudget);
+    }
+    bool const hold_in_place = !r.log().hold_timed_out;
+    r.ctl.released = true;
+    bool const returned = s.pump_until([&] { return rg::Scene::ready(fut); }, kReleaseBudget);
+    std::optional<fixpp::core::expected_t<void>> result;
+    if (returned) result = fut.get();
+
+    EXPECT_TRUE(held) << "setup: the frame's persist was not reached";
+    EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the release";
+    ASSERT_TRUE(result.has_value()) << "the frame's on_inbound_frame did not return";
+    auto const rejects = s.of_type("3", mark);
+
+    if (!close) {
+        EXPECT_TRUE(result->has_value())
+            << "the frame's return: " << static_cast<int>(result->error());
+        EXPECT_EQ(s.state(), fsm_state::Active) << rg::state_name(s.state());
+        if (arm == held_persist_arm::gap_fill_above) {
+            EXPECT_EQ(s.next_in(), n + 5) << "NextNumIn after the GapFill";
+            EXPECT_TRUE(rejects.empty()) << "a Reject was written: " << s.written(mark);
+            return;
+        }
+        ASSERT_EQ(rejects.size(), 1U) << "35=3 frames written: " << s.written(mark);
+        if (arm == held_persist_arm::gap_fill_below) {
+            EXPECT_EQ(rg::field(rejects.front(), 371), "36") << "RefTagID(371) of the Reject";
+        }
+        return;
+    }
+    EXPECT_TRUE(close_during_hold) << "close() did not return during the hold";
+    EXPECT_TRUE(!result->has_value() &&
+                result->error() == fixpp::core::error::session_already_closed)
+        << "the frame's return: "
+        << (result->has_value() ? std::string{"success"}
+                                : std::to_string(static_cast<int>(result->error())));
+    EXPECT_EQ(disconnected_entries(*s.session), 1) << "Disconnected entries in the history";
+    EXPECT_TRUE(rejects.empty()) << "a Reject was written: " << s.written(mark);
+    if (arm == held_persist_arm::gap_fill_above) {
+        EXPECT_EQ(s.next_in(), n + 1) << "NextNumIn: the refused set_next_inbound moved it";
+    }
+}
+
+// reset_on_logout off and no Logout received. A ResendRequest above NextNumIn with no
+// BeginSeqNo(7) is answered by a Reject (103 D4.1 route (a)), whose store is selected at its
+// toAdmin and held; then inbound_resend_request_leaf_ calls toAdmin for its own ResendRequest
+// before that frame's assign_outbound. On a refused number the leaf returns success.
+void too_high_resend_request_close_during_answer(session_role const role, bool const close) {
+    SCOPED_TRACE(std::string{rg::role_name(role)} + (close ? "" : "/no close()"));
+    StoreSelector104 sel;  // declared before the session: its toAdmin hook writes it
+    Rol104 r{Opts104{.role = role, .reset_on_logout = false, .store = store_kind::refusing}};
+    select_store_at_to_admin(r, sel, "3");
+    auto& s = r.s;
+    ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+    seqnum_t const n = s.next_in();
+    auto const mark = s.sent.size();
+    auto const stores_mark = r.ctl.side.outbound_store_types.size();
+    int const baseline = r.app->to_admin_count("2");
+    auto fut = s.feed_spawn(s.frame("2", n + 1, "16=0\x01"));
+    bool const held = s.pump_until([&] { return !r.log().store_events.empty(); }, kReachBudget);
+    bool close_during_hold = false;
+    if (close) {
+        r.spawn_close(close_mode::terminal);
+        close_during_hold = s.pump_until([&] { return r.close_run.done; }, kInHoldBudget);
+    }
+    bool const hold_in_place = !r.log().hold_timed_out;
+    r.ctl.released = true;
+    bool const returned = s.pump_until([&] { return rg::Scene::ready(fut); }, kReleaseBudget);
+    std::optional<fixpp::core::expected_t<void>> result;
+    if (returned) result = fut.get();
+
+    EXPECT_TRUE(held) << "setup: the Reject's store was not held";
+    EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the release";
+    EXPECT_EQ(stored_of_type(r.ctl.side, "3", stores_mark), 1U)
+        << "setup: the Reject's store call was not recorded";
+    EXPECT_EQ(r.app->to_admin_count("2"), baseline + 1)
+        << "setup: the leaf's toAdmin for its ResendRequest";
+    ASSERT_TRUE(result.has_value()) << "the frame's on_inbound_frame did not return";
+    EXPECT_TRUE(result->has_value()) << "the frame's return: " << static_cast<int>(result->error());
+
+    if (!close) {
+        EXPECT_EQ(stored_of_type(r.ctl.side, "2", stores_mark), 1U)
+            << "the ResendRequest's store call";
+        EXPECT_EQ(s.count("2", mark), 1U) << "35=2 frames written: " << s.written(mark);
+        EXPECT_EQ(disconnected_entries(*s.session), 0) << "Disconnected entries in the history";
+        return;
+    }
+    EXPECT_TRUE(close_during_hold) << "close() did not return during the hold";
+    EXPECT_EQ(stored_of_type(r.ctl.side, "2", stores_mark), 0U) << "a ResendRequest's store call";
+    EXPECT_EQ(s.count("2", mark), 0U) << "a ResendRequest was written: " << s.written(mark);
+    EXPECT_EQ(disconnected_entries(*s.session), 1) << "Disconnected entries in the history";
+}
+
+// The sequence_numbers_reset events whose by_peer_request is `by_peer`.
+int reset_events_of(fixpp::session::Session const& sess, bool const by_peer) {
+    int n = 0;
+    for (auto const& ev : sess.recent_events()) {
+        if (auto const* e =
+                std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+            n += static_cast<int>(e->by_peer_request == by_peer);
+        }
+    }
+    return n;
+}
+
+}  // namespace
+
+TEST(ResetOnLogout104, CloseDuringHeldPersist_Refused_OneDisconnected) {
+    for (auto const role : kRoles) {
+        for (auto const arm :
+             {held_persist_arm::from_admin_reject, held_persist_arm::gap_fill_above,
+              held_persist_arm::gap_fill_below}) {
+            close_during_held_persist(role, arm, true);
+        }
+    }
+}
+
+// The forced hit: the same inputs with no close().
+TEST(ResetOnLogout104, CloseDuringHeldPersist_Refused_OneDisconnected_NoClose) {
+    for (auto const role : kRoles) {
+        for (auto const arm :
+             {held_persist_arm::from_admin_reject, held_persist_arm::gap_fill_above,
+              held_persist_arm::gap_fill_below}) {
+            close_during_held_persist(role, arm, false);
+        }
+    }
+}
+
+TEST(ResetOnLogout104, TooHighResendRequest_CloseDuringAnswer_OneDisconnected) {
+    for (auto const role : kRoles) too_high_resend_request_close_during_answer(role, true);
+}
+
+// The forced hit: the same input with no close().
+TEST(ResetOnLogout104, TooHighResendRequest_CloseDuringAnswer_OneDisconnected_NoClose) {
+    for (auto const role : kRoles) too_high_resend_request_close_during_answer(role, false);
+}
+
+// R-1l's twin for arm B. No clock, so a too-high Logout is acknowledged at once (103 D4.2) by a
+// pump frame whose receipt is `pending`. The acknowledgement's store is held; close(terminal)
+// returns during the hold and closes the receipt out; after the release the arm passes its
+// reply and its event, finds `reached` at its reset point, and runs no unit. A unit run there
+// would meet a drained manager and write contract RT-4's record, so the cell also reads that
+// the record is absent.
+TEST(ResetOnLogout104, CloseWhilePending_NoClock_NoReset_ImmediateAck) {
+    fixpp::test_support::LogCapture log;  // declared before the session it serves
+    Rol104 r{Opts104{.role = session_role::acceptor, .with_clock = false, .logger = log.logger}};
+    auto& s = r.s;
+    ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+    seqnum_t const n = s.next_in();
+    auto const mark = s.sent.size();
+    r.ctl.hold_next_store = true;
+    auto fut = s.feed_spawn(s.logout(n + 3));
+    bool const reached = s.pump_until([&] { return !r.log().store_events.empty(); }, kHoldWindow);
+    r.spawn_close(close_mode::terminal);
+    bool const close_during_hold = s.pump_until([&] { return r.close_run.done; }, kHoldWindow);
+    bool const reset_before_release = !r.log().calls.empty();
+    bool const hold_in_place = !r.log().hold_timed_out;
+    r.ctl.released = true;
+    bool const returned = s.pump_until([&] { return rg::Scene::ready(fut); }, kReleaseBudget);
+    std::optional<fixpp::core::expected_t<void>> result;
+    if (returned) result = fut.get();
+
+    ASSERT_TRUE(reached) << "setup: the acknowledgement's store was not held";
+    EXPECT_TRUE(close_during_hold) << "close() did not return during the hold";
+    EXPECT_TRUE(hold_in_place) << "the hold reached its bound before the release";
+    EXPECT_EQ(s.count("2", mark), 0U) << "setup: a ResendRequest, so the acknowledgement was "
+                                         "not immediate: "
+                                      << s.written(mark);
+    ASSERT_TRUE(result.has_value()) << "the Logout's frame did not return";
+    EXPECT_TRUE(result->has_value())
+        << "the Logout's frame's return: " << static_cast<int>(result->error());
+    EXPECT_EQ(reset_events_of(*s.session, false), 1)
+        << "setup: the acknowledgement's event, which follows its reply";
+    EXPECT_FALSE(reset_before_release) << "a reset call before the release";
+    EXPECT_TRUE(r.log().calls.empty()) << "a reset call: reset() " << r.log().reset_calls
+                                       << ", reset_to " << r.log().reset_to_calls;
+    EXPECT_TRUE(log.records_of(FIXPP_FORMAT_ID(kReceiptResetFailedFormat)).empty())
+        << "a receipt reset failure record: the arm ran a unit after close()";
 }
 
 // ── T049: R-5d, the manager freeze on a SeqnumManager alone (contract RR-5 items 3 to 5) ──
