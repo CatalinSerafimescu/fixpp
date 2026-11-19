@@ -1124,7 +1124,7 @@ success, as QuickFIX C++'s `sendRaw` (`return true`) and QuickFIX/Go's `queueFor
     because its only suspension before the reset is `ensure_hydrated_`'s store reads, after which `hydrate` refuses
     on a frozen manager and the emit returns (contract RR-5 item 4).
   - `Session` sets and clears the flag, and reads it for its Debug asserts, through a passkey that only it can
-    construct.
+    construct [qualified at Gate B r1, see contract RR-5 item 4].
   - Debug asserts guard the order: the manager is not frozen at `run_reset_unit_`'s entry, nor after its
     manager set immediately before its freeze; and the manager is frozen if and only if the marker is `reached`
     after each of the three sites.
