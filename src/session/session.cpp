@@ -4512,8 +4512,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
             // resend [X, peer_N-1] arrives in-sequence through the Active path.
             // [contract C5, data-model I-NEX-5/12, research D-7]
             //
-            // Too-low: unchanged — session-fatal (I-2/[FIX-SL §4.1]).
-            // Knob-OFF: completely unchanged — fatal on too-high exactly as today.
+            // A too-low result takes the 104 branch below; any other refusal ends the
+            // session (I-2/[FIX-SL §4.1]).
             if (cfg_.enable_next_expected_msg_seq_num &&
                 chk.error() == fixpp::core::error::session_seqnum_too_high) {
                 // Behind-side: tolerate. next_inbound_ stays at X (not advanced).
@@ -6828,7 +6828,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
         // proactive resend [X, peer_N-1] is admitted in-sequence.
         // [contract C5, data-model I-NEX-5/12, research D-7]
         //
-        // Too-low OR knob off: fatal exactly as today.
+        // A too-low result takes the 104 branch below; any other refusal ends the session.
         if (cfg_.enable_next_expected_msg_seq_num &&
             chk.error() == fixpp::core::error::session_seqnum_too_high) {
             // Behind-side: tolerate. Fall through to Active transition below.
