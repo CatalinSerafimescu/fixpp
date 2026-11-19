@@ -747,7 +747,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - The body, as 103's T155 specified L-103-2's: the refusals that answer before the identity gates, per role (on an mTLS acceptor the posture, strict and SendingTime refusals and the 1137 Reject; on a direct mTLS initiator the posture and SendingTime Logouts); FIX-TC 1S(c)'s text, quoted from research D5; the configurations that reach it (an mTLS acceptor; a direct mTLS initiator; not an engine-managed initiator, which authorises at connect); QuickFIX's behaviour (no engine binds certificates to CompIDs, spec DQ-6); and L-104-3's ID. Grep the body for a closing keyword inside a negation before filing.
   - Confirm that `bug` and `follow-up` exist in `gh label list`, and file the issue with both labels at creation.
   - Record the number for T097's L-104-3 row and for the PR body.
-- [ ] T104 Draft the PR description in the evidence file:
+- [X] T104 Done: evidence file, "T104 — PR description draft", with its closing-keyword grep. Draft the PR description in the evidence file:
   - the closing set, fixpp#595, #695 and #701, by keyword;
   - the orchestrator rulings O-1 to O-3, E-1 to E-4, RU-1 to RU-3, N-8, D2 and D3.3a, plus the moved `close()` wait, for the owner's review;
   - B-104-7, the layout change with no C-ABI change;
