@@ -777,6 +777,12 @@ private:
     // Logout's store_then_emit and to the Disconnected write after it.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> refuse_logon_with_logout_(
         std::string_view reason_text, fsm_state arm) noexcept;
+    // 104 (research D5; the T093 record in the 104 evidence file): a Logon arm's too-low Logout,
+    // its text written from `expected` (NextNumIn) and `received` (the frame's MsgSeqNum). The
+    // text buffer lives in this callee's frame, so a cold branch does not grow the Logon arms'
+    // frames. Its endings are refuse_logon_with_logout_'s.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> refuse_too_low_logon_(
+        seqnum_t expected, seqnum_t received, fsm_state arm) noexcept;
 
     const fixpp::core::EngineConfig& engine_;
     SessionConfig cfg_;  // FR-001 / D-1 — by-value copy (W-5 lifetime fix, 010); caller may drop or

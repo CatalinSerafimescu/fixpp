@@ -3170,6 +3170,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout
     co_return fixpp::core::expected_t<void>{};
 }
 
+// 104: the too-low Logout's text is built here, in this coroutine's own frame (its declaration
+// in session.hpp has the condition), then sent by refuse_logon_with_logout_.
+asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_too_low_logon_(
+    seqnum_t expected, seqnum_t received, fsm_state arm) noexcept {
+    too_low_text_buffer text_buf{};
+    const std::string_view text{text_buf.data(), write_too_low_text(text_buf, expected, received)};
+    co_return co_await refuse_logon_with_logout_(text, arm);
+}
+
 // ── emit_session_reject_ ─────────────────────────────────────────────────────
 //
 // Builds and emits a session Reject(35=3, RefTagID=0, reason=3) for an inbound
@@ -4534,11 +4543,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
                     record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }
-                too_low_text_buffer text_buf{};
-                const std::string_view text{
-                    text_buf.data(), write_too_low_text(text_buf, seqnum_mgr_.next_inbound_unsafe(),
-                                                        parse_seqnum(hdr.msg_seq_num))};
-                co_return co_await refuse_logon_with_logout_(text, fsm_state::NotConnected);
+                co_return co_await refuse_too_low_logon_(seqnum_mgr_.next_inbound_unsafe(),
+                                                         parse_seqnum(hdr.msg_seq_num),
+                                                         fsm_state::NotConnected);
             } else {
                 // Too-high with the knob off, or a drained mutex: session-fatal, silent
                 // (I-2/I-4/[FIX-SL §4.1]).
@@ -6847,11 +6854,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
                 record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
-            too_low_text_buffer text_buf{};
-            const std::string_view text{
-                text_buf.data(), write_too_low_text(text_buf, seqnum_mgr_.next_inbound_unsafe(),
-                                                    parse_seqnum(hdr.msg_seq_num))};
-            co_return co_await refuse_logon_with_logout_(text, fsm_state::LogonSent);
+            co_return co_await refuse_too_low_logon_(seqnum_mgr_.next_inbound_unsafe(),
+                                                     parse_seqnum(hdr.msg_seq_num),
+                                                     fsm_state::LogonSent);
         } else {
             // Too-high with knob off, or a drained mutex → fatal, silent (I-2/I-4).
             record_state_transition_(fsm_state::Disconnected);
