@@ -6545,7 +6545,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logout_sent_(
 // 104 (contract T8; clarification N-8): the credentials gate of 033 T023 (its comment is at
 // the NotConnected arm's in-sequence call), one member, so a too-low Logon runs the same check
 // before its Logout as an in-sequence one runs before LogonReceived.
-bool Session::logon_credentials_admitted_(logon_interpret_result const& logon) {
+bool Session::logon_credentials_admitted_(logon_interpret_result const& logon) const {
     fixpp::session::logon_credentials creds;
     if (logon.username.has_value()) {
         creds.username = std::string{*logon.username};

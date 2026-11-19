@@ -1488,7 +1488,7 @@ private:
     // peer's SenderCompID (cfg_.target_comp_id). A member since 104 (contract T8), so a too-low
     // Logon runs it before its Logout. Its callers:
     // `git grep -n 'logon_credentials_admitted_(' -- src`.
-    [[nodiscard]] bool logon_credentials_admitted_(logon_interpret_result const& logon);
+    [[nodiscard]] bool logon_credentials_admitted_(logon_interpret_result const& logon) const;
     // The Active arm's synchronous SendingTime(52) MaxLatency check.
     [[nodiscard]] bool inbound_sending_time_ok_(
         fixpp::session::detail::FrameHeader const& hdr) const noexcept;
