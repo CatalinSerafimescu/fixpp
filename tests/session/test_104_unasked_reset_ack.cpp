@@ -21,6 +21,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
@@ -211,7 +212,9 @@ public:
         direction_t dir, bool increment) noexcept override {
         return d_->next_seqnum(dir, increment);
     }
-    asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override { return d_->reset(); }
+    asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
+        return (*d_).reset();
+    }
 
 private:
     std::shared_ptr<fixpp::session::test::StoreDouble> d_;
@@ -356,19 +359,14 @@ std::vector<bool> reset_events(fixpp::session::Session const& sess) {
 }
 
 bool compid_authorization_failed(fixpp::session::Session const& sess) {
-    for (auto const& ev : sess.recent_events()) {
-        if (std::holds_alternative<fixpp::session::session_event_compid_authorization_failed>(ev)) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(sess.recent_events(), [](auto const& ev) {
+        return std::holds_alternative<fixpp::session::session_event_compid_authorization_failed>(
+            ev);
+    });
 }
 
 bool visited(fixpp::session::Session const& sess, fsm_state const st) {
-    for (auto const v : sess.fsm_visit_history()) {
-        if (v == st) return true;
-    }
-    return false;
+    return std::ranges::any_of(sess.fsm_visit_history(), [st](auto const v) { return v == st; });
 }
 
 // The reset_to calls on the record, as (in, out), and whether any reset() was recorded.
@@ -551,7 +549,8 @@ TEST(UnaskedResetAck104, FollowUpResendRequest_ExplicitEnd_Clamped) {
         char const* begin_string;
         char const* end;
     };
-    for (Arm const arm : {Arm{"FIX.4.1", "999999"}, Arm{"FIX.4.4", "50"}}) {
+    for (Arm const arm : {Arm{.begin_string = "FIX.4.1", .end = "999999"},
+                          Arm{.begin_string = "FIX.4.4", .end = "50"}}) {
         SCOPED_TRACE(std::string{arm.begin_string} + " 16=" + arm.end);
         Rig r{RigOpts{.begin_string = arm.begin_string}};
         auto& s = r.s;
@@ -599,7 +598,7 @@ TEST(ResendAnswer104, ExplicitEndAboveNextOut_NoOvershoot) {
         seqnum_t begin;
         seqnum_t end;
     };
-    for (Arm const arm : {Arm{kNextOut, 10}, Arm{10, 20}}) {
+    for (Arm const arm : {Arm{.begin = kNextOut, .end = 10}, Arm{.begin = 10, .end = 20}}) {
         SCOPED_TRACE("RR 7=" + std::to_string(arm.begin) + " 16=" + std::to_string(arm.end));
         auto const mark = s.sent.size();
         (void)s.feed(s.frame(

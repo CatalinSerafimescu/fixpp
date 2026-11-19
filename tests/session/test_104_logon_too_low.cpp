@@ -21,6 +21,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
@@ -355,12 +356,10 @@ public:
 };
 
 bool compid_authorization_failed(fixpp::session::Session const& sess) {
-    for (auto const& ev : sess.recent_events()) {
-        if (std::holds_alternative<fixpp::session::session_event_compid_authorization_failed>(ev)) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(sess.recent_events(), [](auto const& ev) {
+        return std::holds_alternative<fixpp::session::session_event_compid_authorization_failed>(
+            ev);
+    });
 }
 
 [[nodiscard]] std::string result_name(fixpp::core::expected_t<void> const& r) {

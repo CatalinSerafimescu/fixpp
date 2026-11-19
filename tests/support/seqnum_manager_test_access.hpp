@@ -32,7 +32,7 @@ struct seqnum_manager_test_access {
 
     // 104 (contract RR-5): set and read the freeze flag without Session's passkey, for
     // R-5d's cell on a manager alone.
-    static void set_frozen(SeqnumManager& m, bool frozen) noexcept { m.frozen_ = frozen; }
+    static void set_frozen(SeqnumManager& m, bool on) noexcept { m.frozen_ = on; }
     [[nodiscard]] static bool frozen(SeqnumManager const& m) noexcept { return m.frozen_; }
 };
 

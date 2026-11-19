@@ -32,6 +32,7 @@
 // every exit path.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <asio/awaitable.hpp>
 #include <asio/bind_cancellation_slot.hpp>
@@ -469,7 +470,7 @@ public:
     bool throw_on_reject_to_admin = false;
     // Run inside each toAdmin with its MsgType, after the call is counted and before a throw.
     std::function<void(std::string_view)> to_admin_hook;
-    fixpp::session::Session const* session = nullptr;  // read inside onLogout and onCreate
+    fixpp::session::Session* session = nullptr;  // read inside onLogout and onCreate
     int on_create_calls = 0;
     std::optional<fsm_state> state_at_create;  // session->state() inside the first onCreate
     int on_logout_calls = 0;
@@ -515,7 +516,7 @@ public:
         ++on_logout_calls;
         if (on_logout_hook) on_logout_hook();
         if (session == nullptr) return;
-        auto& m = session_test_access::seqnum_mgr(const_cast<fixpp::session::Session&>(*session));
+        auto& m = session_test_access::seqnum_mgr(*session);
         on_logout_numbers.push_back(
             {.next_in = m.next_inbound_unsafe(), .next_out = m.next_outbound_unsafe()});
     }
@@ -546,7 +547,9 @@ public:
         direction_t dir, bool increment) noexcept override {
         return d_->next_seqnum(dir, increment);
     }
-    asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override { return d_->reset(); }
+    asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
+        return (*d_).reset();
+    }
 
 private:
     std::shared_ptr<fixpp::session::test::StoreDouble> d_;
@@ -621,7 +624,7 @@ public:
         return inner_->next_seqnum(dir, increment);
     }
     asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
-        return inner_->reset();
+        return (*inner_).reset();
     }
     asio::awaitable<fixpp::core::expected_t<void>> reset_to(seqnum_t next_in,
                                                             seqnum_t next_out) noexcept override {
@@ -880,13 +883,10 @@ public:
         return out;
     }
     [[nodiscard]] bool close_reset_wait_expired() const {
-        for (auto const& ev : s.session->recent_events()) {
-            if (std::holds_alternative<fixpp::session::session_event_close_reset_wait_expired>(
-                    ev)) {
-                return true;
-            }
-        }
-        return false;
+        return std::ranges::any_of(s.session->recent_events(), [](auto const& ev) {
+            return std::holds_alternative<fixpp::session::session_event_close_reset_wait_expired>(
+                ev);
+        });
     }
 };
 
@@ -1147,7 +1147,7 @@ void unanswered_transport_drop(bool const answered) {
 
     struct CloseRun {
         bool done = false;
-        std::chrono::steady_clock::time_point at{};
+        std::chrono::steady_clock::time_point at;
     };
     auto const run = std::make_shared<CloseRun>();
     auto const started = std::chrono::steady_clock::now();
@@ -1269,7 +1269,7 @@ public:
         };
         factory->hooks.release_when = [c = &ctl] { return c->released; };
         factory->log->call_snapshot = [this] {
-#if defined(FIXPP_TEST_PEER_HANG_UP_READING)
+#ifdef FIXPP_TEST_PEER_HANG_UP_READING
             bool const open = !plain_rig::peer_sees_hang_up(rig.peer);
 #else
             bool const open = false;
@@ -1368,7 +1368,7 @@ void expect_receipt_reset(StoreLog const& log) {
     ASSERT_TRUE(c.reading.has_value());
     EXPECT_EQ(c.reading->state, fsm_state::Disconnected)
         << "the state at the reset: " << rg::state_name(c.reading->state);
-#if defined(FIXPP_TEST_PEER_HANG_UP_READING)
+#ifdef FIXPP_TEST_PEER_HANG_UP_READING
     EXPECT_TRUE(c.reading->transport_open) << "the transport was closed at the reset";
 #else
     std::cout << "[ READING  ] the transport reading is not made on this platform\n";
@@ -1734,9 +1734,9 @@ TEST(ResetOnLogout104, LogonReceivedLogoutWhileClosing_ResetOnceByTheArm) {
     r.factory->hooks.flush_until = [&flush_released] { return flush_released; };
     auto& s = r.s;
     struct release_on_exit {
-        bool& f;
-        ~release_on_exit() { f = true; }
-    } const release_flush{flush_released};
+        bool* f;
+        ~release_on_exit() { *f = true; }
+    } const release_flush{&flush_released};
     auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
                                    s.session->open(), asio::use_future);
     ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(open_fut); }))
@@ -1945,7 +1945,7 @@ TEST(ResetOnLogout104, CloseWaitsForReceiptUnit) {
     EXPECT_EQ(c.kind, StoreLog::call_kind::reset_to) << "the held call was a reset()";
     ASSERT_TRUE(c.reading.has_value());
     EXPECT_EQ(c.reading->state, fsm_state::Disconnected) << rg::state_name(c.reading->state);
-#if defined(FIXPP_TEST_PEER_HANG_UP_READING)
+#ifdef FIXPP_TEST_PEER_HANG_UP_READING
     EXPECT_TRUE(c.reading->transport_open) << "the transport was closed at the held call";
 #else
     std::cout << "[ READING  ] the transport reading is not made on this platform\n";
@@ -2305,12 +2305,10 @@ std::shared_ptr<fixpp::session::MemoryStore> hydrated_store() {
 }
 
 bool compid_authorization_failed(rg::Scene const& s) {
-    for (auto const& ev : s.session->recent_events()) {
-        if (std::holds_alternative<fixpp::session::session_event_compid_authorization_failed>(ev)) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(s.session->recent_events(), [](auto const& ev) {
+        return std::holds_alternative<fixpp::session::session_event_compid_authorization_failed>(
+            ev);
+    });
 }
 
 enum class logon_sent_arm : std::uint8_t { resets, mtls_unauthorised, rol_off_mtls };
@@ -2741,7 +2739,7 @@ TEST(ResetOnLogout104, BothKnobs_PeerAnswers_TwoResets_EndsOneOne) {
     ASSERT_TRUE(calls[0].reading.has_value());
     EXPECT_EQ(calls[0].reading->state, fsm_state::Disconnected)
         << "the state at the reset_to: " << rg::state_name(calls[0].reading->state);
-#if defined(FIXPP_TEST_PEER_HANG_UP_READING)
+#ifdef FIXPP_TEST_PEER_HANG_UP_READING
     EXPECT_TRUE(calls[0].reading->transport_open) << "the transport was closed at the reset_to";
 #else
     std::cout << "[ READING  ] the transport reading is not made on this platform\n";
