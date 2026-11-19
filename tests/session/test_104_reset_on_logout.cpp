@@ -684,7 +684,77 @@ private:
     StoreSide104* side_;
 };
 
-enum class store_kind : std::uint8_t { hooked, memory, store_double, refusing };
+// The throwing-reset_to store double (contract RR-2 item 4, the close() wait): a HookedStore behind
+// a store whose reset_to suspends once, by a post, and then throws std::runtime_error, counting
+// each throw in `*throws`. The throw is inside the returned coroutine's body, so it reaches the
+// unit through the awaitable and not out of the noexcept override. Every other call goes to the
+// HookedStore.
+class ThrowingResetToStore104 final : public fixpp::session::MessageStore {
+public:
+    ThrowingResetToStore104(std::unique_ptr<HookedStore> inner, int* throws) noexcept
+        : fixpp::session::MessageStore(flush_thunk_for<ThrowingResetToStore104>()),
+          inner_{std::move(inner)},
+          throws_{throws} {}
+    asio::awaitable<fixpp::core::expected_t<void>> store(seqnum_t seq,
+                                                         std::span<const std::byte> frame,
+                                                         direction_t dir) noexcept override {
+        return inner_->store(seq, frame, dir);
+    }
+    asio::awaitable<fixpp::core::expected_t<void>> retrieve(
+        seqnum_t begin, seqnum_t end, direction_t dir,
+        fixpp::session::retrieve_visitor& visitor) noexcept override {
+        return inner_->retrieve(begin, end, dir, visitor);
+    }
+    asio::awaitable<fixpp::core::expected_t<seqnum_t>> next_seqnum(
+        direction_t dir, bool increment) noexcept override {
+        return inner_->next_seqnum(dir, increment);
+    }
+    asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
+        return (*inner_).reset();
+    }
+    asio::awaitable<fixpp::core::expected_t<void>> reset_to(
+        seqnum_t /*next_in*/, seqnum_t /*next_out*/) noexcept override {
+        // cppcheck-suppress throwInNoexceptFunction  // the body throws to the awaiter
+        return post_then_throw();
+    }
+    asio::awaitable<fixpp::core::expected_t<void>> flush_for_session_close() {
+        return inner_->flush_for_session_close();
+    }
+
+private:
+    asio::awaitable<fixpp::core::expected_t<void>> post_then_throw() {
+        co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+        throw_reset_to();
+        co_return fixpp::core::expected_t<void>{};
+    }
+    void throw_reset_to() {
+        ++*throws_;
+        throw std::runtime_error("ThrowingResetToStore104: reset_to threw");
+    }
+    std::unique_ptr<HookedStore> inner_;
+    int* throws_;
+};
+class ThrowingResetToStoreFactory104 final : public fixpp::session::MessageStoreFactory {
+public:
+    ThrowingResetToStoreFactory104(std::shared_ptr<HookedStoreFactory> hooked, int* throws)
+        : hooked_{std::move(hooked)}, throws_{throws} {}
+    [[nodiscard]] bool yields_persistent_store() const noexcept override { return true; }
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::session::MessageStore>> make(
+        std::string_view, std::string_view, std::pmr::memory_resource*, std::size_t,
+        asio::any_io_executor) noexcept override {
+        ++hooked_->log->stores_made;
+        return std::make_unique<ThrowingResetToStore104>(
+            std::make_unique<HookedStore>(hooked_->outbound_next, std::move(hooked_->hooks),
+                                          hooked_->log, hooked_->mode),
+            throws_);
+    }
+
+private:
+    std::shared_ptr<HookedStoreFactory> hooked_;
+    int* throws_;
+};
+
+enum class store_kind : std::uint8_t { hooked, memory, store_double, refusing, throwing_reset_to };
 
 // What a Rol104 builds; the defaults are R-1y's and R-1z's.
 struct Opts104 {
@@ -716,6 +786,7 @@ public:
         bool throw_next_write = false;  // the config-time sink throws on its next write
         refuse_mode refuse_next_store = refuse_mode::none;  // store_kind::refusing only
         StoreSide104 side;                                  // store_kind::refusing only
+        int reset_to_throws = 0;  // store_kind::throwing_reset_to only: its reset_to's throws
     };
     struct CloseRun {
         bool started = false;  // set when spawn_close() is called, and never cleared
@@ -778,6 +849,10 @@ public:
         if (o.store == store_kind::refusing) {
             s.cfg.store_factory = std::make_shared<RefusingStoreFactory104>(
                 factory, &ctl.refuse_next_store, &ctl.side);
+        }
+        if (o.store == store_kind::throwing_reset_to) {
+            s.cfg.store_factory =
+                std::make_shared<ThrowingResetToStoreFactory104>(factory, &ctl.reset_to_throws);
         }
         s.cfg.transport_send = t104::throwing_sink(
             s.cfg.transport_send,
@@ -1054,6 +1129,8 @@ std::string_view store_name(store_kind const k) {
             return "StoreDouble";
         case store_kind::refusing:
             return "RefusingStore";
+        case store_kind::throwing_reset_to:
+            return "ThrowingResetToStore";
     }
     return "?";
 }
@@ -1969,6 +2046,95 @@ TEST(ResetOnLogout104, CloseWaitsForLogonArmUnit_NoKnob) {
     EXPECT_FALSE(close_before_release) << "close() returned during the held reset_to";
     EXPECT_TRUE(close_returned) << "close() did not return after the release";
     EXPECT_FALSE(r.log().hold_timed_out) << "the hold ended by its bound, not its release";
+}
+
+// ── Contract RR-2 item 4: a reset unit whose reset_to throws leaves no unit in flight ──────
+//
+// The store's reset_to suspends once and then throws (ThrowingResetToStore104). The unit's
+// in-flight flag is read as soon as the frame's delivery ends, before close() starts; then
+// close(terminal) must return within the budget with no session_event_close_reset_wait_expired.
+// close_returned_within moves the mock clock past logon_timeout_ms when close() has not
+// returned, so a flag left set ends the cell on its assertions and not in close()'s poll.
+// Every assertion after close() starts is non-fatal. Each cell prints the delivery's ending:
+// the frame's return, or the exception that left on_inbound_frame.
+namespace {
+
+struct DeliveryEnding {
+    bool ended = false;
+    std::optional<fixpp::core::expected_t<void>> result;
+    std::optional<std::string> thrown;
+};
+
+DeliveryEnding delivery_ending(rg::Scene& s, std::future<fixpp::core::expected_t<void>>& fut) {
+    DeliveryEnding e;
+    if (!s.pump_until([&] { return rg::Scene::ready(fut); }, kReleaseBudget)) return e;
+    e.ended = true;
+    try {
+        e.result = fut.get();
+    } catch (std::exception const& ex) {
+        e.thrown = ex.what();
+    }
+    return e;
+}
+
+std::string describe(DeliveryEnding const& e) {
+    if (!e.ended) return "did not end";
+    if (e.thrown) return "threw: " + *e.thrown;
+    if (e.result && e.result->has_value()) return "returned success";
+    if (e.result) return "returned error " + std::to_string(static_cast<int>(e.result->error()));
+    return "?";
+}
+
+void expect_unit_left_no_flag(Rol104& r, session_role const role, DeliveryEnding const& ending,
+                              bool const in_flight) {
+    EXPECT_TRUE(ending.ended) << "the frame's delivery did not end";
+    EXPECT_EQ(r.ctl.reset_to_throws, 1) << "the reset unit's reset_to did not throw exactly once";
+    EXPECT_FALSE(in_flight) << "reset_unit_in_flight_ is set after the unit's reset_to threw";
+    r.spawn_close(close_mode::terminal);
+    EXPECT_TRUE(r.close_returned_within(kReleaseBudget)) << "close() did not return";
+    EXPECT_FALSE(r.close_reset_wait_expired()) << "close_reset_wait_expired was emitted";
+    std::cout << "[ ENDING   ] " << rg::role_name(role) << ": the delivery " << describe(ending)
+              << "\n";
+}
+
+}  // namespace
+
+// Cell 1: no reset knob; the Logon arm's 141=Y unit, on each role.
+TEST(ResetOnLogout104, ThrowingResetTo_LogonArmUnit_NoKnob_CloseNotHeld) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        Rol104 r{Opts104{
+            .role = role, .reset_on_logout = false, .store = store_kind::throwing_reset_to}};
+        auto& s = r.s;
+        auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                                       s.session->open(), asio::use_future);
+        ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(open_fut); }))
+            << "setup: open() did not return";
+        ASSERT_TRUE(open_fut.get().has_value()) << "setup: open() failed";
+        auto fut = s.feed_spawn(s.frame("A", 1,
+                                        "98=0\x01"
+                                        "108=" +
+                                            std::to_string(rg::kHeartBtInt.count()) +
+                                            "\x01"
+                                            "141=Y\x01"));
+        auto const ending = delivery_ending(s, fut);
+        bool const in_flight = session_test_access::reset_unit_in_flight(*s.session);
+        expect_unit_left_no_flag(r, role, ending, in_flight);
+    }
+}
+
+// Cell 2: reset_on_logout; a received Logout in Active, whose receipt unit runs after the reply.
+TEST(ResetOnLogout104, ThrowingResetTo_ReceiptUnit_CloseNotHeld) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        Rol104 r{Opts104{.role = role, .store = store_kind::throwing_reset_to}};
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        auto fut = s.feed_spawn(s.logout(s.next_in()));
+        auto const ending = delivery_ending(s, fut);
+        bool const in_flight = session_test_access::reset_unit_in_flight(*s.session);
+        expect_unit_left_no_flag(r, role, ending, in_flight);
+    }
 }
 
 // ── T031: R-1l, R-1u and R-1x ────────────────────────────────────────────────────────────
@@ -4196,6 +4362,9 @@ TEST(ResetOnLogout104, TooHighResendRequest_CloseDuringAnswer_OneDisconnected_No
 // returns success (acknowledge_peer_logout_ has no exit between its reply and its reset point),
 // finds `reached` at its reset point, and runs no unit. A unit run there would meet a drained
 // manager and write contract RT-4's record, so the cell also reads that the record is absent.
+// The cell alone cannot tell "the reset point was not reached" from "it was reached and ran no
+// unit"; its reach witness is the mutant row that forces the unit at the reset point, T108-5726
+// in the 104 evidence file's table of T108's Article IX cells.
 TEST(ResetOnLogout104, CloseWhilePending_NoClock_NoReset_ImmediateAck) {
     fixpp::test_support::LogCapture log;  // declared before the session it serves
     Rol104 r{Opts104{.role = session_role::acceptor, .with_clock = false, .logger = log.logger}};

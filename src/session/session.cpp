@@ -1391,7 +1391,8 @@ void Session::disconnect_unless_superseded_(std::optional<fsm_state> arm) noexce
 // inline on its uncontended fast path (L-518-1's condition), so nothing here suspends
 // before the store's reset_to. The first manager error stops the set and is returned;
 // the store is then not touched. Otherwise the store's one reset_to runs with
-// reset_unit_in_flight_ set, which close() polls (104 deletes the unit's completion signal).
+// reset_unit_in_flight_ set until it returns or throws, which close() polls (104 deletes the
+// unit's completion signal).
 // Plan OD-25 (supersedes OD-14's in-place shield, which an async_mutex grant replaces):
 // only the reset_to is co_spawned, on this strand, completing through a token bound to
 // an empty cancellation slot. Plan OD-26 names the two parts: running reset_to on its
@@ -1427,9 +1428,18 @@ asio::awaitable<Session::reset_unit_result> Session::run_reset_unit_(seqnum_t ne
         co_return r;
     }
     reset_unit_in_flight_ = true;
-    r.store = co_await asio::co_spawn(
-        co_await asio::this_coro::executor, store_->reset_to(next_in, next_out),
-        asio::bind_cancellation_slot(asio::cancellation_slot{}, asio::use_awaitable));
+    // 104 (contract RR-2 item 4): the flag is cleared on every resume, a return or an exception
+    // from the store's reset_to or from co_spawn's launch. It is cleared here and not by a scope
+    // guard, because a frame destroyed unresumed may outlive the Session once close()'s bounded
+    // wait has expired, and a guard's destructor would then write the destroyed Session.
+    try {
+        r.store = co_await asio::co_spawn(
+            co_await asio::this_coro::executor, store_->reset_to(next_in, next_out),
+            asio::bind_cancellation_slot(asio::cancellation_slot{}, asio::use_awaitable));
+    } catch (...) {
+        reset_unit_in_flight_ = false;
+        throw;
+    }
     reset_unit_in_flight_ = false;
     co_return r;
 }
