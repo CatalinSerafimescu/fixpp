@@ -12,6 +12,10 @@
 //   [FIX-SL §4.1] ordered-sequence integrity
 //   contracts/seqnum.hpp (shape oracle)
 //
+// 104-sequence-reset-fidelity (contract RR-5) adds the freeze: while Session holds the
+// manager frozen, only the reset writers change a counter (the freeze's comment in the
+// class).
+//
 // Responsibilities (E3):
 //   - Inbound: check_inbound(seq) — compare seq vs next-expected:
 //       in-seq  → advance next_inbound_, return ok

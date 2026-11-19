@@ -16,6 +16,10 @@
 // NO std::mutex — [const §XV.9].
 //
 // [arch §4.4 (session public types)]: see §4.4 entry added to architecture.md.
+//
+// 104-sequence-reset-fidelity (cell R-1t; B-104-7) adds the step-3 mark,
+// test_hook_before_role_loop_join_, a test-only hook stop() awaits before its role-loop
+// join. It supersedes no earlier decision.
 #pragma once
 
 #include <asio/any_io_executor.hpp>

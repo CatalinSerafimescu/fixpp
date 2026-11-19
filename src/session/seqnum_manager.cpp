@@ -12,6 +12,9 @@
 //   include/fixpp/session/seqnum_manager.hpp (interface)
 //   include/fixpp/core/sync/async_mutex.hpp (fixpp::sync::async_mutex)
 //
+// 104-sequence-reset-fidelity (contract RR-5): the freeze. Which mutators test it, and what
+// each does while frozen, is stated once, in seqnum_manager.hpp's class comment.
+//
 // async_mutex usage per [2f §7.3]:
 //   auto lk = co_await mutex_.async_lock();
 //   if (!lk) { ... handle sync_lock_aborted / sync_lock_drained ... }

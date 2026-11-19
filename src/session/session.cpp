@@ -7,6 +7,18 @@
 // resolution chain + linkable open()/close() placeholders. The 2d-owned
 // BEHAVIOUR is wired per user story (T020/T030/T037/T038/T039/T045/T050) —
 // each replaces the marked placeholder body, it is not additive guesswork.
+//
+// 104-sequence-reset-fidelity supersedes three decisions this file implemented, by name:
+//   - 024 contracts/reset-knobs.md C3.1, reset_on_logout on a Logout "in either direction":
+//     a Logout received from the peer resets at its arm's reset point, and no Logout fixpp
+//     sends resets (contract RR-1 and RR-2; B-104-1).
+//   - 093 contracts/inbound-frame-dispositions.md C-6's close() bullet, close() waiting
+//     "only when it is about to issue its teardown reset", event-driven: close() waits by a
+//     poll, whatever the knobs (contract RR-2 item 4, RT-5; B-104-2).
+//   - 027 contracts/next-expected-msgseqnum.md C3's explicit-end case, NewSeqNo = EndSeqNo
+//     + 1: an end at or above the next outbound number is answered through the current
+//     number (contract U6, research D3.3a; B-104-5).
+// Each site that implements one names 104 in its own comment.
 #include <algorithm>
 #include <array>
 #include <asio/any_io_executor.hpp>

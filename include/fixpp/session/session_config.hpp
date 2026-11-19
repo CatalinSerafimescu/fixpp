@@ -19,6 +19,11 @@
 // NO close_timeout field (D-9): the close-timeout VALUE lives in the
 // session-module Phase-4 spec (005), not 2d's frozen config shape; 2d wires
 // only the timeout mechanism ([2d §4.7] / [2d §6.7]'s cancellation_propagation_timeout notes).
+//
+// 104-sequence-reset-fidelity supersedes 024 contracts/reset-knobs.md C3.1's "in either
+// direction" for reset_on_logout by name (contract RR-1 and RR-2; B-104-1), and removes
+// reset_on_logout's term from close()'s teardown reset (contract RR-2 item 4): the two
+// knobs' comments below.
 #pragma once
 
 #include <asio/any_io_executor.hpp>

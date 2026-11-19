@@ -2259,15 +2259,21 @@ private:
     // into SequenceReset-GapFill(123=Y). Transmit-only (does NOT advance the live
     // outbound counter, not re-stored). [const §VIII.5]: fixed stack buffers.
     //
-    // TWO-VALUE END MODEL (data-model I-NEX-3, research D-5, contracts C3):
+    // TWO-VALUE END MODEL (data-model I-NEX-3, research D-5, contracts C3), with 104's
+    // clamp in front of it (research D3.3a; contract U6, which supersedes 027
+    // contracts/next-expected-msgseqnum.md C3's explicit-end case by name): after the
+    // gate's wait and the store tail read,
+    //   end_is_through_current = end_is_through_current || requested_end >= next
+    // where `next` is the tail read's next outbound number, or peek_outbound() with no
+    // store; then
     //   eff_end = (end_is_through_current || requested_end > our_last)
     //               ? our_last : requested_end   (store-walk upper bound)
     //   empty/short-store GapFill NewSeqNo =
     //               end_is_through_current ? peek_outbound() : (requested_end+1)
-    // A single (begin, end_inclusive) signature would lose requested_end and
-    // regress the shipped 013 ResendRequest GapFill NewSeqNo for an explicit-end
-    // beyond-store request. The EndSeqNo=0 => through-current resolution is
-    // conveyed via end_is_through_current (NOT re-derived inside the helper).
+    // A single (begin, end_inclusive) signature would lose requested_end, which the
+    // NewSeqNo of an explicit end below the next outbound number still needs. The
+    // EndSeqNo=0 => through-current resolution is conveyed via end_is_through_current
+    // (NOT re-derived inside the helper).
     //
     // Returns replay_outcome::completed on success (resend complete, remain in Active).
     // Returns replay_outcome::superseded when `arm` is set and logon_arm_superseded_(*arm)

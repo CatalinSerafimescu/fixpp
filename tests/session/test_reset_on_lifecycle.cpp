@@ -8,6 +8,11 @@
 // T015 no-heap witness uses alloc_guard_start/alloc_guard_end markers.
 // mallocnesia replaces these weak no-ops with its interceptor scope markers.
 // Run under tools/check_alloc.py; the command is at ResetKnobs_NoHeapOnResetPath below.
+//
+// 104-sequence-reset-fidelity (contract RR-1; B-104-1) supersedes 024
+// contracts/reset-knobs.md C3.1's "a Logout in either direction" by name: reset_on_logout
+// resets only for a Logout received from the peer, at its arm's reset point. Each cell
+// re-pinned for it names 104 in its own comment.
 
 #include "support/alloc_guard_markers.hpp"
 //
