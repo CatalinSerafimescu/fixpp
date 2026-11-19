@@ -1757,11 +1757,10 @@ void run_q25(sess::session_role role, bool teardown) {
 
 }  // namespace
 
-TEST(LogonCloseDuringSuspension, Q23_AcceptorCloseDrainsInsideTheUnitAndTheNextLogonAt2IsAccepted) {
+TEST(LogonCloseDuringSuspension, Q23_AcceptorCloseWaitsForTheUnitAndTheNextLogonAt2IsAccepted) {
     run_q23(sess::session_role::acceptor);
 }
-TEST(LogonCloseDuringSuspension,
-     Q23_InitiatorCloseDrainsInsideTheUnitAndTheNextLogonAt2IsAccepted) {
+TEST(LogonCloseDuringSuspension, Q23_InitiatorCloseWaitsForTheUnitAndTheNextLogonAt2IsAccepted) {
     run_q23(sess::session_role::initiator);
 }
 TEST(LogonCloseDuringSuspension, Q24_AcceptorTeardownResetLeavesOneOne) {
@@ -2192,11 +2191,11 @@ void run_q2324_file_store(sess::session_role role, bool teardown) {
 }  // namespace
 
 TEST(LogonCloseDuringSuspension,
-     Q23_FileStoreAcceptorCloseDrainsInsideTheUnitAndTheNextLogonAt2IsAccepted) {
+     Q23_FileStoreAcceptorCloseWaitsForTheUnitAndTheNextLogonAt2IsAccepted) {
     run_q2324_file_store(sess::session_role::acceptor, /*teardown=*/false);
 }
 TEST(LogonCloseDuringSuspension,
-     Q23_FileStoreInitiatorCloseDrainsInsideTheUnitAndTheNextLogonAt2IsAccepted) {
+     Q23_FileStoreInitiatorCloseWaitsForTheUnitAndTheNextLogonAt2IsAccepted) {
     run_q2324_file_store(sess::session_role::initiator, /*teardown=*/false);
 }
 TEST(LogonCloseDuringSuspension, Q24_FileStoreAcceptorTeardownResetLeavesOneOne) {
