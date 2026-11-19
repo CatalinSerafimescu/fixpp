@@ -769,7 +769,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
 
 **Purpose**: the gates that read the whole tree. Gate B, the PR and the labels are pipeline steps; Gate B runs after T113 and before Phase 12.
 
-- [ ] T106 Peers, per the Execution rules' recipe, against `origin/main` now. If it moved, integrate it by a merge commit. Then re-run every census, cell or mutant task that read an overlapping file, and T090 to T096 as they apply.
+- [X] T106 Done: origin/main unmoved at `bf294f00`, no overlap, no open PR; nothing re-run; evidence file, "T106 — peers". Peers, per the Execution rules' recipe, against `origin/main` now. If it moved, integrate it by a merge commit. Then re-run every census, cell or mutant task that read an overlapping file, and T090 to T096 as they apply.
 - [ ] T107 **(orchestrator)** `/simplify` (pipeline step 11) over the implementation diff; the implementer applies the in-scope simplifications. If any code changes:
   - re-run the mutant tasks of the changed mechanism (T056 to T062, T076, T077, T088, T089);
   - re-run T090's targeted entries;
