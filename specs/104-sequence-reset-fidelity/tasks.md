@@ -674,8 +674,8 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - Read the base-reading leads: `UnparseableFrameDisposition.D6Edge_*`, `DISABLED_TransportInteropConformance.TC009_LogonSeqNumTooLow` and `TcSeqnumTest.Tc2c_MsgSeqNumTooLow`, which is unchanged.
 - [X] T086 [US3] Done: evidence file, "Session of 2026-11-19, twenty-fourth run (phase-implementer; US3)", its T086 section. The D5 kept hits of T004 and T085. Each is re-pinned or reworded, and its entry is run by the Execution rules' selection form. Record.
 - [X] T087 [US3] Done: evidence file, "Session of 2026-11-19, twenty-fourth run (phase-implementer; US3)", its T087 section. US3 GREEN: T-1 to T-6 with their T082 counts; `ctest -L 104 --no-tests=error`; `*TooLowLogout103.*`; the conformance entries (`-R '^session_tc_' --no-tests=error`); T086's entries. Run `codegraph sync`. Record.
-- [ ] T088 [US3] Mutants for T084's T-1 to T-4f rows (protocol). Each overflow, throw and assign row is RED by its named assertion, with its forced hit GREEN.
-- [ ] T089 [US3] Mutants for T084's T-5 and T-6 rows (protocol), with T-5's arm-S forced hit GREEN.
+- [X] T088 [US3] Done: evidence file, "Session of 2026-11-19, twenty-fourth run (phase-implementer; US3)", its T088 and T089 section. Mutants for T084's T-1 to T-4f rows (protocol). Each overflow, throw and assign row is RED by its named assertion, with its forced hit GREEN.
+- [X] T089 [US3] Done: evidence file, "Session of 2026-11-19, twenty-fourth run (phase-implementer; US3)", its T088 and T089 section. Mutants for T084's T-5 and T-6 rows (protocol), with T-5's arm-S forced hit GREEN.
 
 **Checkpoint**: all three behavioural stories GREEN; every behavioural FR has its cell and its mutant recorded.
 
