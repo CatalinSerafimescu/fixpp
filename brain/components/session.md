@@ -47,6 +47,10 @@ refs:
   - specs/103-resend-logon-reset-fidelity/contracts/c-abi-1.17.md
   - specs/103-resend-logon-reset-fidelity/contracts/session-wire-endings.md
   - specs/103-resend-logon-reset-fidelity/contracts/constitution-xi3-amendment.md
+  - specs/104-sequence-reset-fidelity/spec.md
+  - specs/104-sequence-reset-fidelity/research.md
+  - specs/104-sequence-reset-fidelity/data-model.md
+  - specs/104-sequence-reset-fidelity/contracts/session-wire-endings-104.md
   - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2d-threading.md
@@ -229,7 +233,7 @@ The authority is therefore split three ways, and knowing the split is most of th
   - **Either unconditional form inside a 141=Y reset unit that `close()` interrupted** was rejected.
     - *Always completing the unit* (PR #522, Gate B round 1). Measured on the unguarded source, with `reset_on_disconnect` and a terminal close posted from the arm's peer reset: the arm's inbound persist landed after `close()`'s teardown reset, so the store ended at next-inbound 2 instead of 1, on both roles.
     - *Always stopping mid-unit* (PR #522, Gate B round 2). With no teardown reset configured nothing repairs the store, which is left expecting seq 1 after the consumed reset Logon, so a peer that next logs on at seq 2 without 141=Y is too high — fatal with the NextExpectedMsgSeqNum(789) tolerance off.
-    - *Keying the stop on `cfg_.reset_on_disconnect`* misses `reset_on_logout` (a graceful phase 1 sets `logout_seen_`) and stops needlessly when a teardown reset is configured but not yet issued.
+    - *Keying the stop on `cfg_.reset_on_disconnect`* misses `reset_on_logout` (a graceful phase 1 sets `logout_seen_`) and stops needlessly when a teardown reset is configured but not yet issued. *(104: phase 1 no longer sets `logout_seen_`, and `reset_on_logout` no longer resets at teardown; `B-104-1`.)*
     - *One atomic durable unit* (a store reset-to-values) needs a new `MessageStore` operation, outside the owner's rulings for #518. *(093 shipped exactly this for #524, under the owner's ruling R-3; see the #524 bullet below.)*
     - **What shipped (owner-approved, PR #522 Gate B round 2):** the unit stops mid-way only once `teardown_reset_done_` is set. `close()` sets it just before it awaits the teardown reset and never clears it; no Logon arm runs on a `Session` after its `close()` (L-518-1). Premise: the store applies operations in issue order (L-518-1). ⚠️ **Superseded by 093 (fixpp#524):** the in-unit stops are removed; the unit is one store operation that always completes, and `close()` waits for it. `teardown_reset_done_` survives only as `close()`'s single-fire latch.
   - **A check straight after `onLogon`, before the post-`Active` persist,** was rejected (PR #522, Gate B round 2). By then the peer's Logon has been consumed, answered and made `Active`, so skipping its persist leaves the store one behind the peer, and a peer that next logs on at the following sequence number is too high. The check follows the persist instead, before the liveness loop is spawned.
@@ -241,7 +245,7 @@ The authority is therefore split three ways, and knowing the split is most of th
   - **The store operation runs on its own awaitable thread, bound to an empty cancellation slot** (OD-25, OD-26). OD-14's in-place `reset_cancellation_state(disable)` shield was **wrong, and was replaced**: `async_mutex::async_lock()` resets the awaitable thread's state to terminal-only after every acquisition (and enables total cancellation during a contended wait), so after the manager set's first lock the disable had already been replaced, and a deleting mutant stayed GREEN on every cell. The separate thread is what keeps `Engine::stop()`'s total emission out (mutant "run it inline" is RED); the empty slot extends that to every emission kind (mutant "drop the binding" survives, priced). Rejected: an `async_mutex` mode that respects the caller's policy (asio exposes no filter getter, user and default-body stores would not get it, and it changes a core primitive); spawning the whole unit (`co_spawn`'s entry dispatch would make the manager set's no-suspension property depend on the launch path); disclosing the cancellation window instead.
   - **An engine-stop flag on the Session** (OD-15), set by `Engine::stop()`'s step 1 on the session's strand before it emits. It has two readers, both on that strand: `logon_arm_superseded_`, and since fixpp#563 (its OD-3) the body that `Engine::send` starts for a published session, which refuses a send that starts after step 1. Rejected: calling `close()` from stop's step 1 (it reorders the teardown that the join and the registry steps depend on); an atomic latch set on the control strand and read with acquire (same check-then-act gap; only running on the session strand gives the mutual exclusion). The guarantee is strand-ordered, not real-time.
   - **Every suspension-then-effect window in the Logon arms is checked** (OD-26), found by re-deriving the predicate sites transitively. Rejected: disclosing the error-path `Disconnected` writes as an L-row; the guarantee is a MUST and one helper covers them.
-  - **`close()`'s wait is bounded by `logon_timeout_ms`, event-driven** (OD-1). Rejected: `logout_disconnect_timeout_ms` (nothing validates it and TOML accepts 0, which would expire the wait at once); a `co_await asio::post` poll loop, which spins the strand for the whole bound. After expiry a default-body store may miss (1, 1) (`L-093-4`).
+  - **`close()`'s wait is bounded by `logon_timeout_ms`, event-driven** (OD-1). Rejected: `logout_disconnect_timeout_ms` (nothing validates it and TOML accepts 0, which would expire the wait at once); a `co_await asio::post` poll loop, which spins the strand for the whole bound. After expiry a default-body store may miss (1, 1) (`L-093-4`). ⚠️ **Superseded by 104 in its shape (contract RR-2 item 4, `B-104-2`):** the wait is a poll by post, whatever the knobs, with no waker. OD-1's reason against a poll stays as the historical half; 104 research D1 item 4 answers it.
   - Not BREAKING, under B-518-1's owner ruling (#523 and #524 are its follow-ups).
   - ⚠️ **Passages in 093's own bundle that still describe the replaced shield**, flagged here and not
     edited (each is a point-in-time record; the code follows the C-6 erratum and plan OD-25/OD-26):
@@ -509,7 +513,8 @@ For R-8 and R-9 (note §5, its last block, which names the prototype of each):
   the Logout was transmitted). Rejected by R-8.
 - **Skip the Logout's transmit and change nothing else.** The step would record a Logout as sent
   that never left, and with `reset_on_logout` set the teardown reset would fire against a peer
-  that saw no Logout.
+  that saw no Logout. *(104: no Logout fixpp sends triggers `reset_on_logout`, `B-104-1`, so the
+  second half of this reason no longer applies; the first still does.)*
 - **Keep the cut step in its wait and let `close()`'s join end it.** The join cancels the step
   once, and the stores' lock sequence clears a cancellation that arrives while the Logout's
   store call is queued at the lock; the step then waits out the logout timeout.
@@ -818,6 +823,91 @@ taken.
 - ⚠️ **Superseded by 103:** the #538 bullet's declined clamp and the #537 bullet's R-11 (flagged in
   place above), and fixpp#544's rejection of a session send gate, narrowed to a gate that
   serialises sends against each other (flagged in place above).
+
+## Sequence-reset fidelity (104)
+
+The design is `specs/104-sequence-reset-fidelity/` (spec.md, plan.md, research.md D1 to D11,
+data-model.md, contracts/session-wire-endings-104.md). Batch B53 (fixpp#595) with B107 (fixpp#695)
+and fixpp#701. What the code does is in the live B&L file's section `## 104`; this section keeps why,
+and what was not taken.
+
+**What was decided.**
+
+- **`reset_on_logout` resets at a received Logout's reset point; a Logout fixpp sends never resets**
+  (D1, #595; the owner's clarification Q3, "At receipt"). The receipt marker `logout_seen_` (`none`,
+  `pending`, `reached`) is set by the receipt arm and owned by that frame until its reset point,
+  where the marker's move and the unit's start are one strand turn. QuickFIX C++, QuickFIX/J and
+  QuickFIX/Go reset only on processing the peer's Logout (RU-1, RU-2).
+- **`close()` waits for a receipt short of its reset point and for any reset unit in flight, whatever
+  the knobs, by a poll by post with no waker** (D1 item 4, contract RR-2 item 4), so no exit from the
+  condition can be missed; a receipt it could not wait for is closed out with no reset.
+- **With both knobs a peer Logout makes two store resets** (D2): 024 C5.1 is kept as written.
+- **From a received Logout's reset point nothing but a reset changes the numbers, and nothing more is
+  transmitted on that connection** (D11, the owner's ruling of 2026-11-18; contract RR-5, the manager
+  freeze, and RR-6, ruling W): a passkey-gated freeze flag in `SeqnumManager`, and
+  `wire_closed_by_reset_`, which holds back frames after a reset point. fixpp's own phase-1 Logout in
+  a crossing carries the one exemption, so the wire carries exactly one Logout.
+- **An unasked 141=Y acknowledgement is a reset, compared with 1 and not with NextNumIn** (D3, #695
+  option (i)); its unit runs after the mTLS gate.
+- **A ResendRequest whose end reaches the next outbound number is answered through-current** (D3.3a),
+  as QuickFIX C++ clamps EndSeqNo.
+- **A too-low Logon draws QuickFIX's too-low Logout once the identity gates pass** (D5, D6, #701). The
+  LogonSent arm's mTLS gate is one helper, `logon_sent_identity_admitted_`, which the NotConnected arm
+  now calls too.
+- **The too-low Logout's text is built in a callee coroutine's own frame** (the T093 record in the 104
+  evidence file): a 96-byte buffer held across the refusal's await in both Logon arms enlarged their
+  coroutine frames, which perturbed asio's awaitable-frame recycler during the send bench's untimed
+  setup and slowed the timed sends; the callee, `refuse_too_low_logon_`, removed it.
+
+**What was rejected, and why.**
+
+- **D1:** keeping the teardown reset and only not setting the flag at emit (the owner's Q3); a
+  teardown backstop for a receipt whose processing failed (RU-1: QuickFIX makes no reset for a Logout it
+  did not process); gating the liveness loop and the ResendRequest leaf on `logout_in_flight_` during a
+  receipt reset (RU-3: it widens 103's FR-021 to admin frames); `reset_seqnums_to_one_durable(logged)`
+  at receipt (two store-facing steps, cancellable on a contended lock, and `close()` cannot order its
+  teardown reset after it); a reset at a too-high Logout's receipt, before its ResendRequest (the
+  ResendRequest and the bound's test would act in the reset space; erratum E-3); a retry after a failed
+  receipt reset (two endings for one condition); a separate "receipt in flight" member (the
+  three-valued marker carries it in the byte the `bool` occupied).
+- **D3:** skipping the sequence check for every 141=Y acknowledgement (it changes the strict and knob
+  paths, against FR-010); for M > 1, comparing with 1 and taking the too-high ending (a silent end, which
+  departs from all three engines), or sending the ResendRequest from the LogonSent arm before Active (a
+  new mechanism for a case no QuickFIX engine produces).
+- **D11:** a join before the receipt unit, (X) (a deadlock shape excluded only by enumeration); freezing
+  on the session state rather than the marker, (Y); a reset-scoped token passed to the unit's setters (it
+  changes 093's unit body); `friend class Session` (it gives `Session` the counters, so INV-Z would rest
+  on reading `session.cpp`); a Debug-only accessor (an ODR violation in an installed header).
+- **Ruling W's crossing (W-3):** a wait on an in-flight writer (T011), phase 1 writing `reached`, a
+  marker without a unit, and `pending` left to close-out.
+
+**Records this supersedes, flagged here and not edited** (frozen `specs/` are not rewritten).
+
+- ⚠️ **Superseded by 104:** `specs/024-reset-refresh-on-logon/contracts/reset-knobs.md` C3.1 (the
+  teardown `reset_on_logout` trigger, "sent OR received"), and 024's `data-model.md`, `research.md`,
+  `plan.md`, `quickstart.md`, `spec.md`, `tasks.md` and `checklists/session-reset-knobs.md` where they
+  state it (`B-104-1`). C5.1 is kept, read per teardown, so with both knobs a received Logout makes two
+  resets (`B-104-3`).
+- ⚠️ **Superseded by 104:** `specs/027-next-expected-msgseqnum/contracts/next-expected-msgseqnum.md`
+  C3's explicit-end case and its required test, and 027's `data-model.md`, `research.md`, `plan.md`,
+  `quickstart.md`, `tasks.md` and `checklists/recovery.md` where they state it (`B-104-5`).
+- ⚠️ **Superseded by 104:** `specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md`
+  C-6's `close()` bullet ("when it is about to issue its teardown reset") and its event-driven shape, and
+  093's `data-model.md`, `research.md`, `plan.md`, `spec.md`, `quickstart.md`, `tasks.md`,
+  `checklists/nfr.md` and `checklists/protocol.md` where they state it (`B-104-2`).
+- ⚠️ **Superseded by 104:** B&L `B-538-7`'s "a Logout that was sent still resets, answered or not" (the
+  row is amended in place), and `.specify/536-537-538-recovery-liveness.md`'s R-24 sentence and
+  `.specify/563-564-callback-send.md`'s `logout_seen_` site (a) (flagged on
+  [`graceful-logout`](./graceful-logout.md)).
+- ⚠️ **Superseded by 104:** 103's latch disclosure ("a Logout seen on the old connection still triggers
+  `reset_on_logout`'s teardown reset"; B&L `B-103-9`, amended in place), `L-103-2` and `L-103-7` (moved to
+  the closed file), and `specs/103-resend-logon-reset-fidelity/` `spec.md` ("A too-low frame in
+  NotConnected or LogonSent still ends silently"), `research.md` (the latch disclosure),
+  `contracts/session-wire-endings.md`, `plan.md`, `tasks.md` and `checklists/records.md`,
+  `checklists/session-protocol.md` and `checklists/concurrency.md` where they state them.
+- ⚠️ **Superseded by 104:** `specs/013-session-reconnect-binding/` `quickstart.md`, `spec.md` and
+  `tasks.md`'s `NewSeqNo=21` (an empty-range GapFill's NewSeqNo is the next outbound number, `B-104-5`).
+- ⚠️ **Superseded by 104 in its shape:** 093 OD-1's event-driven wait (the bullet above).
 
 ## Runtime flows
 

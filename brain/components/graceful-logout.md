@@ -7,6 +7,10 @@ refs:
   - include/fixpp/session/session.hpp
   - src/session/session.cpp
   - .specify/536-537-538-recovery-liveness.md
+  - specs/104-sequence-reset-fidelity/spec.md
+  - specs/104-sequence-reset-fidelity/research.md
+  - specs/104-sequence-reset-fidelity/data-model.md
+  - specs/104-sequence-reset-fidelity/contracts/session-wire-endings-104.md
   - spec/behaviors-and-limitations.md
 codegraph_entry: [run_logout_phase1, SeqnumManager, Session]
 ---
@@ -32,7 +36,7 @@ codegraph_entry: [run_logout_phase1, SeqnumManager, Session]
 |---|---|---|
 | **Outbound sequence numbers are read via `seqnum_mgr_.peek_outbound()` and advanced via `assign_outbound()` — the bare `next_outbound_seq_` field was DELETED** | ⭐ **the deletion IS the fix.** Two writers — the admin paths and `Session::send` — could diverge; removing the field made split-brain **unrepresentable** rather than merely unlikely | `SeqnumManager` is the only accessor [005 data-model E3; 009 FR-001(a)] |
 | **`logout_confirmed_` distinguishes a peer-confirmed close from a timeout** | a graceful logout that times out and one the peer acknowledged must not be reported identically — only the second proves the peer processed it | set on inbound Logout while in `LogoutSent`; `run_logout_phase1` polls it. **Single-writer on strand**. ⚠️ **"polls it" is superseded by fixpp#536** (`.specify/536-537-538-recovery-liveness.md`, D-536-3): the wait races this session's own wake, which the LogoutSent arm calls, against `detail::await_deadline`, and the outcome is read from `logout_confirmed_` after the race, never from which arm finished |
-| **`logout_seen_` is written only at Logout-specific sites, and the code enumerates them in place** | the teardown reset predicate in `close()` depends on it, so an unlisted write site would corrupt teardown | 024 T013 — ⚠️ **the comment states a COUNT of write sites. Counts rot.** Re-derive with a symbol search before relying on it; the durable part is that the set is *closed and named*, not how many are in it. ⚠️ **The local site moved (ruling R-24, below):** `run_logout_phase1` sets the flag only after its Logout's emit returned success. Since fixpp#590 the local site is skipped for a Logout that was cut (the next row): a Logout that was stored and not transmitted is not a Logout that was sent, so a configured `reset_on_logout` does not fire for it |
+| **`logout_seen_` is the receipt marker (`none`, `pending`, `reached`), written only for a Logout received from the peer: by the receipt arm at its receipt and at its reset point, by `close()`'s close-out of a receipt it could not wait for, and by the transport install; no Logout fixpp sends writes it** (104, data-model RO-1 to RO-3) | since 104 `reset_on_logout` resets at a received Logout's reset point and never at teardown (B&L `B-104-1`), and the marker decides when the manager freezes and frames in flight are held back (`B-104-8`), so an unlisted write site would reset, freeze or hold back at the wrong time | the `logout_seen_` comment in `include/fixpp/session/session.hpp` states the rule and its recipe; re-derive the writers with `git grep -n -F 'logout_seen_ = ' -- src include`. ⚠️ **Superseded by 104 (by name):** 024 T013's Logout-specific write sites, whose teardown reset read the flag, and R-24's moved local site (below): `run_logout_phase1` no longer writes the marker, so the cut Logout's no-reset (fixpp#590) now holds for every Logout fixpp sends |
 | **A Logout whose `toAdmin` started a terminal `close()` is CUT: the Logout step stores it, does not send it, and leaves at once** | one condition gets one ending (owner ruling R-8), and it is QuickFIX's: numbered, stored, not transmitted. Before it, on a `FileStore` with a live transport, timing decided whether that Logout reached the peer. The step writes `Disconnected` when the cut is decided, before the Logout takes its number, so nothing that arrives during the Logout's store call meets an Active session | `run_logout_phase1`: the two reads of `waited_terminal_closes_` around the Logout's `toAdmin`, the record `logout_cut_`, and `store_then_emit`'s `transmit` parameter. Design: `.specify/563-564-callback-send.md` §2.6; B&L `B-563-5` |
 
 | **Phase 1 does not decide the close alone — it RACES a real `asio::steady_timer`** | `close(graceful)` must terminate even when phase 1 wedges behind the write gate or `async_write`, so it cannot depend solely on a Clock the caller injects | `Session::close`, graceful branch: `co_await (run_logout_phase1() \|\| close_grace.async_wait(...))`, with `close_grace` armed for `cfg_.logout_disconnect_timeout_ms`. A terminal close that joins cancels `close_grace` (093 plan OD-29). **One case in which nothing cancels it** (fixpp#590, owner ruling R-9): for a Logout that was cut, the joining close does not call the wake. The cut step ends by itself when the Logout's store call returns; where that call has not returned at the timer's expiry, the timer ends the join. What the timer does not end is B&L `L-563-7` and `B-563-5`, "The bound" |
@@ -72,11 +76,11 @@ The design is `.specify/536-537-538-recovery-liveness.md` §10 (D-OUT-6, rulings
     timing, which keeps the connection until the logout timeout (QuickFIX C++ and QuickFIX/J mark the
     Logout as sent whatever their send returned; the owner kept "close at once" with that fact before
     them); a result of `store_then_emit` that tells "no transport" from "transmitted".
-- **No teardown reset for a Logout that was not sent (R-24), a change against `main`.** With
+- **No teardown reset for a Logout that was not sent (R-24), a change against `main`.** ⚠️ **Superseded by 104 (`B-104-1`):** no Logout fixpp sends resets, sent or not, answered or not; R-24's case is one case of the receipt rule, and `.specify/536-537-538-recovery-liveness.md`'s R-24 ("a Logout that was sent still resets", fixpp#595) and `.specify/563-564-callback-send.md`'s `logout_seen_` site (a) are superseded by name. What follows is the pre-104 record. With
   `reset_on_logout` set, the teardown reset in `close()` runs when `logout_seen_` is set; the phase now
   sets it only on the path where its Logout's emit returned success, so a close whose Logout was not
   sent keeps the store's numbers. On `main` the flag was set after the emit whatever it returned. A
-  Logout that was sent and never answered still resets: that case is fixpp#595. **Rejected:** keeping
+  Logout that was sent and never answered still reset before 104: that case was fixpp#595, resolved by 104. **Rejected:** keeping
   the reset. The reasons given with the ruling: the three QuickFIX engines reset for `ResetOnLogout`
   only when the peer's Logout is received, and 024's clause C3.1 names the local site as the Logout
   that was sent.
