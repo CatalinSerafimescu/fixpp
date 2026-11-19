@@ -739,7 +739,7 @@ MVP: Phases 1 to 4 (US1). Nothing ships at the MVP; the feature merges whole.
   - Re-run the recipe at `B0` as well: every known positive must still hit there.
   - Every test whose expected outcome `git diff origin/main..HEAD -- tests` changes is a T004, T005, T052, T071 or T085 kept hit, or a 104 cell (SC-004).
   - A changed expectation outside them stops for a decision. Record.
-- [ ] T102 Header-comment supersession pointers (issue #310; contract "Superseded by name").
+- [X] T102 Done: `3842c97d`; evidence file, "T102 — header-comment supersession pointers". Header-comment supersession pointers (issue #310; contract "Superseded by name").
   - The `logout_seen_` comment in `include/fixpp/session/session.hpp` is final. It states RO-1 to RO-3 as a condition plus the recipe, names 104, and supersedes 024 T013 / C3.1 by name.
   - Each file that implements a superseding rule names the superseded decision and 104 in its header comment: `src/session/session.cpp` (024 C3.1; 093 C-6's `close()` bullet; 027 C3's explicit-end case), `include/fixpp/session/session_config.hpp`, and `include/fixpp/session/engine.hpp` (the step-3 mark). So does each test file that re-pins a superseded rule's cell: `tests/session/test_next_expected_msgseqnum.cpp` (027 C3) and `tests/session/test_reset_on_lifecycle.cpp` (024 C3.1), plus `tests/support/hooked_store.hpp` for T015's record (104 only). `include/fixpp/session/seqnum_manager.hpp` and `src/session/seqnum_manager.cpp` name 104 and contract RR-5 (the freeze; 104 only).
   - If this task touches `src`, `include` or `tests`, rebuild the debug tree and re-run T090's targeted entries.
