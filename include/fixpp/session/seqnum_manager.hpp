@@ -86,12 +86,20 @@ public:
     // reset writers: `git grep -n 'reset_to_one(' -- src include`, each hit read.
     //
     // freeze_key is a passkey: its constructor is private and Session is its friend, so the
-    // three members below are callable where a key can be made, in Session. frozen() serves
-    // Session's Debug asserts, and no production branch tests it (a branch on it would be a
-    // refusal per call site, contract RR-5 item 4).
+    // three members below are callable where a key can be made, in Session. Its copy
+    // constructor is user-provided and private, so the key is not trivially copyable and
+    // std::bit_cast cannot make one; Session passes a prvalue, which needs no copy. Re-derive
+    // with the static_asserts at the top of tests/session/test_104_reset_on_logout.cpp.
+    // seqnum_manager_test_access (fixpp#511) is a friend of SeqnumManager, and a program that
+    // defines it reaches every private member, the flag included. frozen() serves Session's
+    // Debug asserts, and no production branch tests it (a branch on it would be a refusal per
+    // call site, contract RR-5 item 4).
     class freeze_key {
         friend class Session;
         freeze_key() noexcept = default;
+        // A defaulted copy constructor is trivial, so the key would be bit_cast-able again.
+        // NOLINTNEXTLINE(modernize-use-equals-default,hicpp-use-equals-default)
+        freeze_key(freeze_key const& /*other*/) noexcept {}
     };
     void freeze(freeze_key /*key*/) noexcept { frozen_ = true; }
     void thaw(freeze_key /*key*/) noexcept { frozen_ = false; }

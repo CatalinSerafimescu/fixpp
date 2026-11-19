@@ -411,9 +411,13 @@ accepts only the reset writers. RR-1 to RR-4, RU-1, RU-3 and construction A are 
    - **The interface.** `SeqnumManager` gains one private flag; two members that set and clear it, `freeze` and
      `thaw`; and one that reads it, `frozen`, for this item's Debug asserts. Each takes a passkey,
      `SeqnumManager::freeze_key`, which only `Session` can construct (its constructor is private, with `Session` its
-     friend). No other caller can freeze, thaw or query a manager. The three, and the key type `freeze_key` they
-     take, are public names. A C++ consumer can name them but cannot call the three, because it cannot construct
-     the key. No other public name is added. The six refused mutators
+     friend; its copy constructor is user-provided and private, so the key is not trivially copyable and
+     `std::bit_cast` cannot make one). No other caller can freeze, thaw or query a manager by any well-defined
+     construction, except through the fixpp#511 test-access friend `seqnum_manager_test_access`, which reaches every
+     private member. The three, and the key type `freeze_key` they take, are public names. A C++ consumer can name
+     them but cannot call the three, because it cannot construct the key (that friend aside). The `static_assert`s at
+     the top of `tests/session/test_104_reset_on_logout.cpp` re-derive the key's properties. No other public name is
+     added. The six refused mutators
      read the flag to refuse. `frozen` reads it only for the Debug asserts, and no production branch tests it: a
      branch on it would be a refusal per call site (research D11, (Y)). The layout change is B-104-7's. `frozen` is
      an inline member function and adds no data member.

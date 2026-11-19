@@ -41,6 +41,7 @@
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
+#include <bit>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -69,6 +70,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -98,6 +100,20 @@ using fixpp::test_support::CallReading;
 using fixpp::test_support::HookedStore;
 using fixpp::test_support::kHoldBound;
 using fixpp::test_support::StoreLog;
+
+// Contract RR-5 item 4: SeqnumManager::freeze_key cannot be made outside Session. Its copy
+// constructor is user-provided and private, so the key is neither trivially copyable (which
+// std::bit_cast needs) nor copy-constructible here. bit_castable is a template, so a type
+// bit_cast rejects makes it false rather than a hard error; int is its known positive.
+template <class T>
+concept bit_castable = requires { std::bit_cast<T>(std::array<std::byte, sizeof(T)>{}); };
+static_assert(bit_castable<int>, "bit_castable's known positive");
+static_assert(!std::is_trivially_copyable_v<fixpp::session::SeqnumManager::freeze_key>,
+              "freeze_key is trivially copyable, so std::bit_cast can forge one");
+static_assert(!std::is_copy_constructible_v<fixpp::session::SeqnumManager::freeze_key>,
+              "freeze_key is copy-constructible outside Session");
+static_assert(!bit_castable<fixpp::session::SeqnumManager::freeze_key>,
+              "std::bit_cast can make a freeze_key outside Session");
 
 constexpr auto kHoldWindow = std::chrono::duration_cast<std::chrono::milliseconds>(kHoldBound) / 4;
 constexpr auto kReleaseBudget =
