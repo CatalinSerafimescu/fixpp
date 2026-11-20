@@ -278,6 +278,12 @@ TEST(RunForResidualInstrument, NearDeadlineTransitionIsFlaggedInconclusive) {
     // 3000/20 = 150 ms and the transition sits 75 ms inside it:
     //   fires before the deadline  — tolerates up to 75 ms of timer lateness
     //   lands within the margin    — tolerates up to 75 ms of earliness
+    // Those slacks cover timer granularity only. They hold because the timer's
+    // expiry and the instrument's deadline are derived from one `start`
+    // instant, so a stall of the test thread between arming the timer and
+    // entering the instrument does not move the transition relative to the
+    // deadline (issue #712; NearDeadlineFlagSurvivesStallBeforeInstrumentStart
+    // forces that stall).
     // Duration is bounded by kFireAt, not kWindow: once the promise is set the
     // context is out of work, so the loop exits via exhausted-work at ~2.9 s.
     // Do NOT shrink these back toward the deadline without redoing that
@@ -289,11 +295,12 @@ TEST(RunForResidualInstrument, NearDeadlineTransitionIsFlaggedInconclusive) {
     std::promise<void> prom;
     std::future<void> fut = prom.get_future();
 
-    asio::steady_timer near_deadline_timer(ioc, kFireAt);
+    const auto start = std::chrono::steady_clock::now();
+    asio::steady_timer near_deadline_timer(ioc, start + kFireAt);
     near_deadline_timer.async_wait([&](const std::error_code&) { prom.set_value(); });
 
     const run_for_residual_measurement m =
-        measure_run_for_residual_ready(ioc, fut, kWindow, /*exclusive_driver=*/true);
+        measure_run_for_residual_ready(ioc, fut, start, kWindow, /*exclusive_driver=*/true);
 
     EXPECT_TRUE(m.ready_observed);
     EXPECT_TRUE(m.near_deadline_inconclusive);
@@ -302,7 +309,7 @@ TEST(RunForResidualInstrument, NearDeadlineTransitionIsFlaggedInconclusive) {
 // Issue #712: the same near-deadline transition, with the test thread stalled
 // between arming the timer and calling the instrument. The stall is longer
 // than the 75 ms slack inside the margin, so the flag holds only when the
-// timer's expiry and the instrument's deadline are measured from one start
+// timer's expiry and the instrument's deadline are derived from one start
 // instant; a timer armed relative to its own construction lands outside the
 // margin and the flag reads false.
 TEST(RunForResidualInstrument, NearDeadlineFlagSurvivesStallBeforeInstrumentStart) {
@@ -314,13 +321,14 @@ TEST(RunForResidualInstrument, NearDeadlineFlagSurvivesStallBeforeInstrumentStar
     std::promise<void> prom;
     std::future<void> fut = prom.get_future();
 
-    asio::steady_timer near_deadline_timer(ioc, kFireAt);
+    const auto start = std::chrono::steady_clock::now();
+    asio::steady_timer near_deadline_timer(ioc, start + kFireAt);
     near_deadline_timer.async_wait([&](const std::error_code&) { prom.set_value(); });
 
     std::this_thread::sleep_for(kStall);
 
     const run_for_residual_measurement m =
-        measure_run_for_residual_ready(ioc, fut, kWindow, /*exclusive_driver=*/true);
+        measure_run_for_residual_ready(ioc, fut, start, kWindow, /*exclusive_driver=*/true);
 
     EXPECT_TRUE(m.ready_observed);
     EXPECT_TRUE(m.near_deadline_inconclusive);
