@@ -2237,7 +2237,9 @@ TEST(ResetOnLogout104, ThrowingResetTo_ReceiptUnit_ArmL_Logged) {
         auto const mark = s.sent.size();
         r.spawn_close(close_mode::graceful);
         bool const logout_sent = s.pump_until(
-            [&] { return s.state() == fsm_state::LogoutSent && s.count("5", mark) == 1U; },
+            [&] {
+                return s.state() == fsm_state::LogoutSent && s.count(kLogoutMsgType, mark) == 1U;
+            },
             kHoldWindow);
         auto fut = s.feed_spawn(s.logout(r.manager_numbers().in));
         auto const ending = delivery_ending(s, fut);
