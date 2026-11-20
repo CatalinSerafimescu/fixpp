@@ -2236,11 +2236,16 @@ TEST(ResetOnLogout104, ThrowingResetTo_ReceiptUnit_ArmL_Logged) {
         ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
         auto const mark = s.sent.size();
         r.spawn_close(close_mode::graceful);
+        // Phase 1 is bounded by close_grace, a real-time timer of logout_disconnect_timeout_ms
+        // that the mock clock does not move. The wait for its Logout ends once the Logout is
+        // sent, and at the latest half-way through that grace, so the peer's Logout is fed
+        // while phase 1 still waits for it. After a miss the cell has not seen LogoutSent, so
+        // it cannot say which arm handled the peer's Logout; the setup check reports the miss.
         bool const logout_sent = s.pump_until(
             [&] {
                 return s.state() == fsm_state::LogoutSent && s.count(kLogoutMsgType, mark) == 1U;
             },
-            kHoldWindow);
+            std::chrono::milliseconds{s.cfg.logout_disconnect_timeout_ms} / 2);
         auto fut = s.feed_spawn(s.logout(r.manager_numbers().in));
         auto const ending = delivery_ending(s, fut);
         bool const in_flight = session_test_access::reset_unit_in_flight(*s.session);
