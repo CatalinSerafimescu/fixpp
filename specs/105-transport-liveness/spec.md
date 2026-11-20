@@ -77,6 +77,17 @@ A counterparty, and the operator running fixpp, see five groups of defects on th
 
 ## Clarifications
 
+### Open questions for `/speckit-clarify`
+
+- **OQ-1 (FR-007):** does a silent refusal before Active close the connection when it records `Disconnected`, or, as
+  today, at the establishment deadline? 092's O-1 kept D-1/D-2's handling. The engines close at once for a first
+  message that is not a Logon and for an unknown session on the acceptor, but differ on a garbled frame before Logon,
+  and QuickFIX C++'s initiator waits for its logon timeout after a bad-CompID acknowledgement.
+- **OQ-2 (FR-004):** during R-2's wait, how are inbound frames other than the peer's Logout handled? QuickFIX C++ and
+  /J process them (application messages reach `fromApp`, TestRequests are answered); QuickFIX/Go processes inbound but
+  drops every outbound reply; FIX-SL §4.10 row 16 says "handle new inbound messages and/or ResendRequest if possible".
+  fixpp's graceful `close()` already has a LogoutSent wait with its own handling.
+
 ### Session 2026-11-20 (owner rulings before the spec)
 
 The questions were asked with the comparison tables of the findings file (FIX-SL 2020, TC 2020, the three engines).
@@ -120,10 +131,11 @@ the bound the class allows, with no further inbound frame and no local API call.
    after its Logout.
 4. **Given** an Active session, **When** the peer sends a Logout, **Then** fixpp replies, runs its receipt reset point
    (B-104-1) to its end, and closes the connection.
-5. **Given** an acceptor, **When** the first frame is a Logon that the session refuses, **Then** the connection is
-   closed without waiting for the establishment deadline, and no establishment-timeout event is reported.
-6. **Given** a session before Active, **When** any refusal records `Disconnected`, **Then** the connection is closed
-   at once and the ending is not reported as an establishment timeout.
+5. **Given** an acceptor, **When** the first frame's dispatch returns an error, **Then** the connection is closed as
+   the read pump closes it for any later frame.
+6. **Given** a session before Active, **When** a refusal records `Disconnected`, **Then** the ending is not reported
+   as an establishment timeout. A refusal that sends a Logout closes by R-2; a silent one closes when FR-007's
+   clarification decides.
 7. **Given** an Active session, **When** the liveness loop's `toAdmin` throws, or its number assignment or
    store-and-emit fails, **Then** the connection is closed.
 8. **Given** a TLS session, **When** any of the endings above closes the connection, **Then** the close is the orderly
@@ -239,18 +251,25 @@ no comment claiming behaviour the code does not have.
   the peer's Logout. If the Logout cannot be sent, the session MUST still close. The ending MUST write one log record
   and MUST be observable through the session's existing ending surfaces with `session_test_request_unanswered`
   (slot 74). The plan decides which surface, and `unanswered_tr_` is then read by that surface or removed.
-- **FR-004 (R-2)**: After any other Logout fixpp sends that ends the session (at least the too-low Logout, the
-  gap-deadline Logout, and the SendingTime Reject that becomes a Logout; the census of FR-001 finds the rest), the
-  session MUST close when the peer's Logout arrives, or when `logout_disconnect_timeout_ms` runs out from the
-  Logout's write, whichever is first. Inbound frames other than the peer's Logout during the wait are ignored, as the
-  Disconnected arm ignores them today.
+- **FR-004 (R-2)**: After any other Logout fixpp sends that ends the session, before or after Active (at least the
+  too-low Logout in Active and in the Logon arms, B-103-10 and B-104-6, the gap-deadline Logout, and the SendingTime
+  Reject that becomes a Logout; the census of FR-001 finds the rest), the session MUST close when the peer's Logout
+  arrives, or when `logout_disconnect_timeout_ms` runs out counted from the write of fixpp's Logout, whichever is first.
+  The peer's Logout received during the wait is a Logout response: under `reset_on_logout` it resets at its reset
+  point, as a response in LogoutSent does (104 FR-003, B-104-1), and the close follows the reset unit. All three
+  engines reset on that Logout and disconnect. How other inbound frames are handled during the wait is a
+  clarification (see Clarifications, open questions).
+- **FR-004a (precedence)**: A refusal that sends a Logout falls under FR-004 (R-2), before Active as after. A refusal
+  that sends nothing falls under FR-007. R-1's Logout (FR-003) is the one Logout that closes after the write.
 - **FR-005**: When the session acknowledges the peer's Logout (in Active, in LogoutSent, and the too-high Logout's
   acknowledgement), it MUST close the transport after its reply Logout and after its receipt reset point under
   `reset_on_logout` (B-104-1) has run to its end.
 - **FR-006**: The acceptor MUST act on the result of the first frame's dispatch as the read pump acts on every later
   frame's: an error result closes the connection.
-- **FR-007**: A refusal before Active MUST close the connection when it records `Disconnected`, not at the
-  establishment deadline, and MUST NOT be reported as `session_event_establishment_timeout`. The establishment
+- **FR-007**: A refusal before Active that sends nothing MUST NOT be reported as
+  `session_event_establishment_timeout` (R-4). Whether it closes the connection when it records `Disconnected` or, as
+  today, at the establishment deadline is an open clarification: 092's owner ruling O-1 kept D-1/D-2's handling, and
+  the engines close at once on most silent pre-Logon refusals but not all (findings file, Q2 of the second reading). The establishment
   deadline's own expiry keeps its event (B-093-4).
 - **FR-008**: The closes of FR-001 MUST NOT cut store work the ending owns: the receipt reset (B-104-1, B-104-2) and a
   store call already issued run to their end, and `close()`'s and `Engine::stop()`'s existing waits keep their
@@ -258,16 +277,20 @@ no comment claiming behaviour the code does not have.
 
 **TestRequest answering with sequence validation off (#582)**
 
-- **FR-009**: With `validate_sequence_numbers` off, a Heartbeat whose TestReqID(112) matches the pending TestRequest
-  MUST answer it whatever its MsgSeqNum. A Heartbeat whose 112 does not match MUST end the session as an in-sequence
+- **FR-009**: With `validate_sequence_numbers` off, a Heartbeat whose TestReqID(112) matches the pending TestRequest,
+  or that carries no 112, MUST answer it whatever its MsgSeqNum, as an in-sequence Heartbeat with a matching or absent
+  112 answers it today. A Heartbeat whose 112 does not match MUST end the session as an in-sequence
   mismatch does. With the knob on, today's rules (B-537-3, 103's D6 rule) are unchanged.
 
 **TestRequest timing and `test_request_threshold` (#535, R-3)**
 
 - **FR-010**: The TestRequest MUST be sent after T of inbound silence, and an unanswered one MUST end the session after
   2T of inbound silence, where T is `SessionConfig::test_request_threshold` when set and 1.2×HeartBtInt otherwise. The
-  outbound Heartbeat cadence (1×HeartBtInt) and the gap deadline (B-537-2) are unchanged. HeartBtInt ≤ 0 disables both,
-  as today.
+  outbound Heartbeat cadence (1×HeartBtInt) and the gap deadline (B-537-2, 2×HeartBtInt) are unchanged. HeartBtInt ≤ 0
+  disables both, as today. Precedence: with the default T, the gap deadline (2×HeartBtInt) comes before the give-up
+  (2.4×HeartBtInt), so with a gap open a silent peer now always ends at the gap deadline with its Logout (then R-2),
+  never silently at the grace check. With a configured T below HeartBtInt the give-up can come first; both orders are
+  tested.
 - **FR-011**: The threshold MUST be validated where it is accepted (C++ `open()` and the TOML loader) for the edge
   values of the Edge Cases, with the rule the plan decides. The C ABI gains no setter (unchanged scope).
 - **FR-012**: The comment on `session_test_request_unanswered` in `error.hpp`, the QuickFIX parity-table row, and any
@@ -291,15 +314,36 @@ no comment claiming behaviour the code does not have.
 **Records and evidence**
 
 - **FR-016**: The live B&L file MUST be amended in this PR: L-103-5 retired; B-537-2's "transport stays open" clause,
-  B-537-3, L-093-1, L-093-6, B-093-4, B-092-5 and L-092-1 amended; new rows for the close rule (FR-001…FR-008), R-1's
+  B-537-2(b) (the silent ending at the grace check, whose reach the default T changes), B-537-3, L-093-1, L-093-6,
+  B-093-4, B-092-2, B-092-5 and L-092-1 amended; new rows for the close rule (FR-001…FR-008), R-1's
   departure from QuickFIX, the #582 rule and the TestRequest timing. L-103-5's statement of QuickFIX's behaviour holds
   only for the too-low path and is not carried forward as written.
 - **FR-017**: Every behaviour cell MUST be shown RED on the base `52aeed4e` before its fix, and every close cell MUST
   assert the peer-observed EOF, not an internal flag. Where a close is awaited with a bound, the bound MUST be derived
-  from the competing timeout, with the arm that forces the spurious close.
+  from the competing timeout, with the arm that forces the spurious close. A timing cell MUST discriminate the old
+  value from the new (today's T018 Cell B is named "1.2×" but passes at 1×, so it pins nothing).
 - **FR-018**: Comments that state a superseded rule (for example "Phase 6 US4 wires the Logout emission before
-  Disconnected", and 092's "D-1 and D-2 are a state transition, not a close") MUST be corrected or removed, naming this
-  feature's rule.
+  Disconnected", and 092's "D-1 and D-2 are a state transition, not a close" with its D-3 twin) MUST be corrected or
+  removed, naming this feature's rule.
+- **FR-019 (supersession)**: Every surface that states or pins a rule this feature changes MUST be superseded by name
+  or re-pinned, found by a census over `specs/`, `.specify/`, `brain/`, `spec/`, `tests/`, `include/` and `src/`
+  comments that is shown to find the known positives below. A merged feature's bundle is archival and is superseded by
+  naming it here, not edited.
+  - **Rulings superseded:** 536-537-538 note R-6 ("A Logout on the dead-peer ending. Not taken") by R-1; the C-3
+    disclosure of D-537-5 (the transport stays open after the gap-deadline Logout) by FR-004; 103 research Arm B's
+    disclosure and 104's DQ-8 (L-103-5) by FR-004; 093 FR-006 phase (b) and its contract C-4/C-7 (the establishment
+    deadline as the pre-Active close) as far as FR-007's clarification decides; 005 research D-8 (threshold = 1×
+    HeartBtInt) by R-3. 013 FR-004 (TestRequest at 1.2×, Logout and disconnect) is the older intent R-1 and R-3
+    restore in part.
+  - **Known-positive pins that must flip:** `GapDeadlineOutOfSequenceSite.FrameAtTheBoundDrawsTheLogoutAndTheTransportStaysOpen`
+    (helper `expect_logout_and_open_transport`), `Capi537Witness.Deadline_CompIdsLeaveNoRoomForTheLogout_EndsSilently`,
+    `InboundFrameDispositionsQ10.WithinCapMismatchInActive_DisconnectsWithoutALogout`, the #534-commented cells of
+    `SecondFrameInFlight.*` and `ReconcileAfterTheTakeBack.*`, `EstablishmentTimeoutQ16.AcceptorAfterRefusedLogon_*`
+    and `ResendAnswerStoreFailureEngine.Acceptor789Path_SlotReadFails_ConnectionStaysOpenUntilTheEstablishmentDeadline`
+    (if FR-007 closes at once), T018 `CellC_*_UnansweredTestRequestDisconnects` (R-3 moves the give-up), the 537
+    note's control cell "D-537-6, N", and `DriveLogoutStub_*` / `Initiator_DriveLogout_*` (FR-013).
+  - **Brain pages:** `brain/components/session.md` (R-6, and its deferral of the grace-check reading to B27) and
+    `brain/components/session-liveness-and-reconnect.md` (the `ReconnectFsm` correction block).
 
 ### Key Entities
 
@@ -349,7 +393,9 @@ no comment claiming behaviour the code does not have.
 |---|---|---|---|---|
 | Unanswered TestRequest | Logout with Text, then close (FIX-SL §4.5.5) | close, no Logout | close, no Logout | close, no Logout |
 | After a too-low Logout | wait for the peer's Logout, bounded by `logout_disconnect_timeout_ms` | close at once | close at once | wait, bounded by LogoutTimeout |
-| Answering Heartbeat's TestReqID | must match | not compared | not compared | not compared |
+| Answering Heartbeat's TestReqID | matching or absent answers; a different one ends the session | not compared | not compared | not compared |
+| Peer's Logout reply to fixpp's ending Logout | resets under `reset_on_logout`, then close | reset, close | reset, close | reset, close |
+| Bounded wait after fixpp's Logout counts from | the Logout's write | the last send (sliding) | the last send (sliding) | the Logout's write |
 | TestRequest timing | T (default 1.2×HeartBtInt), give up at 2T, one knob | 1.2× / 2.4×, fixed | 1.5× / 2.4×, two multipliers | 1.2× / 2.4×, fixed |
 | Out-of-sequence Heartbeat, validation off | answers with a matching 112 | no such switch | answers (any Heartbeat) | no such switch |
 
