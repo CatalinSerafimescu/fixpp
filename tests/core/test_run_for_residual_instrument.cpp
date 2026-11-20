@@ -187,12 +187,12 @@ TEST(RunForResidualInstrument, ReadyAtEntryMakesEveryDispatchedHandlerResidual) 
     EXPECT_EQ(m.residual_handlers, kHandlers);
 }
 
-// A readiness already observed at entry is timestamped at entry, not at
-// `start`: with `start` in the past, an entry that leaves less than the
-// window/20 margin before the deadline must be flagged inconclusive. The
-// context is empty, so `run_one_until` returns at once; a preemption only
-// shrinks the remainder further, so the arm cannot pass by being slow. The
-// control leaves far more than the margin.
+// Readiness at entry is timestamped at entry, not at `start`: with `start`
+// in the past, an entry that leaves less than the window/20 margin before the
+// deadline must be flagged inconclusive. The context is empty, so
+// `run_one_until` returns at once; a preemption only shrinks the remainder
+// further, so the arm cannot pass by being slow. The control leaves far more
+// than the margin.
 TEST(RunForResidualInstrument, ReadyAtEntryNearDeadlineIsFlaggedInconclusive) {
     constexpr auto kWindow = 3000ms;
 
@@ -308,11 +308,11 @@ TEST(RunForResidualInstrument, NearDeadlineTransitionIsFlaggedInconclusive) {
     // 3000/20 = 150 ms and the transition sits 75 ms inside it:
     //   fires before the deadline  — tolerates up to 75 ms of timer lateness
     //   lands within the margin    — tolerates up to 75 ms of earliness
-    // Those slacks cover timer granularity only. They hold because the timer's
-    // expiry and the instrument's deadline are derived from one `start`
-    // instant, so a stall of the test thread between arming the timer and
-    // entering the instrument does not move the transition relative to the
-    // deadline (issue #712; NearDeadlineFlagSurvivesStallBeforeInstrumentStart
+    // Those slacks cover timer granularity only. They are valid while the
+    // timer's expiry and the instrument's deadline are derived from one
+    // `start` instant; then a stall of the test thread between arming the
+    // timer and entering the instrument does not move the transition relative
+    // to the deadline (issue #712; NearDeadlineFlagSurvivesStallBeforeInstrumentStart
     // forces that stall).
     // Duration is bounded by kFireAt, not kWindow: once the promise is set the
     // context is out of work, so the loop exits via exhausted-work at ~2.9 s.
@@ -337,15 +337,14 @@ TEST(RunForResidualInstrument, NearDeadlineTransitionIsFlaggedInconclusive) {
 }
 
 // Issue #712: the same near-deadline transition, with the test thread stalled
-// between arming the timer and calling the instrument. The stall is longer
-// than the 75 ms slack inside the margin, so the flag holds only when the
-// timer's expiry and the instrument's deadline are derived from one start
-// instant; a timer armed relative to its own construction lands outside the
-// margin and the flag reads false.
+// between arming the timer and calling the instrument. The timer and the
+// instrument's deadline are both derived from `start`. kStall must exceed the
+// 75 ms slack inside the margin by more than any expected timer lateness, and
+// stay short enough that the instrument is entered before start + kWindow.
 TEST(RunForResidualInstrument, NearDeadlineFlagSurvivesStallBeforeInstrumentStart) {
     constexpr auto kWindow = 3000ms;
     constexpr auto kFireAt = 2925ms;  // 75 ms inside kWindow's 150 ms (5%) margin
-    constexpr auto kStall = 1000ms;   // > the 75 ms slack inside the margin
+    constexpr auto kStall = 1000ms;   // > the 75 ms slack; see the bound above
 
     asio::io_context ioc;
     std::promise<void> prom;
