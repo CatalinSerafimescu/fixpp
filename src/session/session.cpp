@@ -545,6 +545,28 @@ void Session::note_receipt_reset_failed_(reset_unit_result const& unit) noexcept
                fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(failure)));
 }
 
+// fixpp#708 (contract RT-4): a throw from the receipt reset unit's store reset_to. One
+// FIXPP_SLOG record naming the store part, as note_receipt_reset_failed_'s, with its own format
+// string (registered in src/log/format_registry.cpp) since a throw carries no error value.
+void Session::note_receipt_reset_threw_() noexcept {
+    FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
+               "received Logout's sequence reset threw, not retried: part={}", FIXPP_SLIT("store"));
+}
+
+// 104 (contract RT-4), fixpp#708: every receipt arm's reset point awaits this. A throw out of
+// run_reset_unit_ is the store part's: the manager set reports its failures by return, and the
+// unit clears reset_unit_in_flight_ before it rethrows. The throw is logged and rethrown
+// unchanged, so the arm's ending is the one it has without the record. The handler sits in this
+// coroutine's frame rather than in the arms' frames.
+asio::awaitable<void> Session::run_receipt_reset_unit_() noexcept {
+    try {
+        note_receipt_reset_failed_(co_await run_reset_unit_(seqnum_min, seqnum_min));
+    } catch (...) {
+        note_receipt_reset_threw_();
+        throw;
+    }
+}
+
 // ── 093-inbound-frame-dispositions — a frame over L (FR-013; data-model E-12) ──
 // One FIXPP_SLOG record carrying the failure kind and L, through the logger open()
 // resolved and with the session's trace_context; its format string is registered in
@@ -5734,9 +5756,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::acknowledge_peer_logout_
     if (cfg_.reset_on_logout) {
         co_await asio::this_coro::reset_cancellation_state();
         if (enter_receipt_reset_point_()) {
-            // RT-4: a manager or store failure of the unit is logged, then the arm proceeds
-            // with the ending it has without the failure; there is no retry.
-            note_receipt_reset_failed_(co_await run_reset_unit_(seqnum_min, seqnum_min));
+            // RT-4: a failure of the unit is logged and not retried. A returned one leaves the
+            // arm's ending as it is without it; a thrown one leaves the arm (fixpp#708).
+            co_await run_receipt_reset_unit_();
         }
         co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
     }
@@ -6298,9 +6320,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
         if (cfg_.reset_on_logout) {
             co_await asio::this_coro::reset_cancellation_state();
             if (enter_receipt_reset_point_()) {
-                // RT-4: a manager or store failure of the unit is logged, then the arm proceeds
-                // with the ending it has without the failure; there is no retry.
-                note_receipt_reset_failed_(co_await run_reset_unit_(seqnum_min, seqnum_min));
+                // RT-4: a failure of the unit is logged and not retried. A returned one leaves the
+                // arm's ending as it is without it; a thrown one leaves the arm (fixpp#708).
+                co_await run_receipt_reset_unit_();
             }
             co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
         }
@@ -6506,9 +6528,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logout_sent_(
         if (cfg_.reset_on_logout) {
             co_await asio::this_coro::reset_cancellation_state();
             if (enter_receipt_reset_point_()) {
-                // RT-4: a manager or store failure of the unit is logged, then the arm proceeds
-                // with the ending it has without the failure; there is no retry.
-                note_receipt_reset_failed_(co_await run_reset_unit_(seqnum_min, seqnum_min));
+                // RT-4: a failure of the unit is logged and not retried. A returned one leaves the
+                // arm's ending as it is without it; a thrown one leaves the arm (fixpp#708).
+                co_await run_receipt_reset_unit_();
             }
             co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
         }
@@ -6737,9 +6759,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
         // Arm S's reset point (contract RR-3); the branch runs only with the knob.
         co_await asio::this_coro::reset_cancellation_state();
         if (enter_receipt_reset_point_()) {
-            // RT-4: a manager or store failure of the unit is logged, then the arm proceeds
-            // with the ending it has without the failure; there is no retry.
-            note_receipt_reset_failed_(co_await run_reset_unit_(seqnum_min, seqnum_min));
+            // RT-4: a failure of the unit is logged and not retried. A returned one leaves the
+            // arm's ending as it is without it; a thrown one leaves the arm (fixpp#708).
+            co_await run_receipt_reset_unit_();
         }
         co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
         co_return fixpp::core::expected_t<void>{};
@@ -8220,7 +8242,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
         // the lowerings that need no reset point (a reconcile, a take-back) are R-19's.
         // The other lowering writers, read against "phase 1 has numbered its Logout":
         // `git grep -n -E
-        // 'seqnum_mgr_\.(take_back_outbound|hydrate|reset_to_one|set_next_outbound)\(|reset_seqnums_to_one_durable\(|run_reset_unit_\('
+        // 'seqnum_mgr_\.(take_back_outbound|hydrate|reset_to_one|set_next_outbound)\(|reset_seqnums_to_one_durable\(|run_reset_unit_\(|run_receipt_reset_unit_\('
         // -- src/session/session.cpp`.
         if (stamped_seq >= seqnum_mgr_.peek_outbound()) {
             if (!wire_closed_by_reset_) {

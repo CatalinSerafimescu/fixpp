@@ -47,6 +47,7 @@
 #include <cstdint>
 #include <deque>
 #include <fixpp/core/error.hpp>
+#include <fixpp/log/format_registry.hpp>
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
 #include <fixpp/session/direction.hpp>
@@ -2101,6 +2102,14 @@ std::string describe(DeliveryEnding const& e) {
     return "?";
 }
 
+// The HookedStore behind the throwing store sees only a forwarded reset(), the teardown reset;
+// ThrowingResetToStore104::reset_to never forwards, so a retried reset_to is pinned by the
+// cells' `reset_to_throws == 1` assertion, not here.
+void expect_no_reset_call_after_the_throw(Rol104& r) {
+    EXPECT_TRUE(r.log().calls.empty())
+        << "a forwarded reset() after the throw: reset() " << r.log().reset_calls;
+}
+
 void expect_unit_left_no_flag(Rol104& r, session_role const role, DeliveryEnding const& ending,
                               bool const in_flight) {
     EXPECT_TRUE(ending.ended) << "the frame's delivery did not end";
@@ -2109,18 +2118,69 @@ void expect_unit_left_no_flag(Rol104& r, session_role const role, DeliveryEnding
     r.spawn_close(close_mode::terminal);
     EXPECT_TRUE(r.close_returned_within(kReleaseBudget)) << "close() did not return";
     EXPECT_FALSE(r.close_reset_wait_expired()) << "close_reset_wait_expired was emitted";
+    expect_no_reset_call_after_the_throw(r);
     std::cout << "[ ENDING   ] " << rg::role_name(role) << ": the delivery " << describe(ending)
               << "\n";
 }
 
+// The delivery's ending with the unit's reset_to thrown: the frame returns dispatch_aborted
+// (093's exceptional ending) and nothing leaves on_inbound_frame.
+void expect_dispatch_aborted(DeliveryEnding const& ending) {
+    EXPECT_FALSE(ending.thrown.has_value()) << "the delivery " << describe(ending);
+    EXPECT_TRUE(ending.result.has_value() && !ending.result->has_value() &&
+                ending.result->error() == fixpp::core::error::dispatch_aborted)
+        << "the delivery " << describe(ending);
+}
+
+// The thrown receipt reset's record (contract RT-4; fixpp#708), spelled out here rather than taken
+// from the session, and its rendering spelled out too: format_record finds the text only through
+// src/log/format_registry.cpp, so a string the registry lacks fails the rendering check.
+constexpr char kReceiptResetThrewFormat[] =
+    "received Logout's sequence reset threw, not retried: part={}";
+
+struct ResetRecords104 {
+    std::vector<fixpp::log::Record> threw;
+    std::size_t failed = 0;  // kReceiptResetFailedFormat's records, the returned-error record
+};
+
+// Every record the logger received, once it is shut down, sorted into the two RT-4 records.
+ResetRecords104 receipt_reset_records(fixpp::test_support::LogCapture& log) {
+    (void)log.logger->shutdown();
+    ResetRecords104 out;
+    for (auto const& rec : log.sink->records()) {
+        if (rec.format_id == FIXPP_FORMAT_ID(kReceiptResetThrewFormat)) out.threw.push_back(rec);
+        if (rec.format_id == FIXPP_FORMAT_ID(kReceiptResetFailedFormat)) ++out.failed;
+    }
+    return out;
+}
+
+// One thrown-reset record, warn, category session, naming the store part; no returned-error
+// record.
+void expect_one_threw_record(fixpp::test_support::LogCapture& log) {
+    auto const records = receipt_reset_records(log);
+    EXPECT_EQ(records.failed, 0U) << "a returned-error record for the thrown reset_to";
+    EXPECT_EQ(records.threw.size(), 1U) << "thrown receipt reset records";
+    if (records.threw.empty()) return;
+    auto const& rec = records.threw.front();
+    EXPECT_EQ(rec.level, fixpp::log::Level::warn);
+    EXPECT_EQ(rec.category, fixpp::log::cat::session);
+    EXPECT_EQ(fixpp::log::detail::format_record(rec),
+              "received Logout's sequence reset threw, not retried: part=store")
+        << "the record's rendering";
+}
+
 }  // namespace
 
-// Cell 1: no reset knob; the Logon arm's 141=Y unit, on each role.
+// Cell 1: no reset knob; the Logon arm's 141=Y unit, on each role. That unit is not RT-4's, so
+// its throw writes neither RT-4 record.
 TEST(ResetOnLogout104, ThrowingResetTo_LogonArmUnit_NoKnob_CloseNotHeld) {
     for (auto const role : kRoles) {
         SCOPED_TRACE(rg::role_name(role));
-        Rol104 r{Opts104{
-            .role = role, .reset_on_logout = false, .store = store_kind::throwing_reset_to}};
+        fixpp::test_support::LogCapture log;  // declared before the session it serves
+        Rol104 r{Opts104{.role = role,
+                         .reset_on_logout = false,
+                         .store = store_kind::throwing_reset_to,
+                         .logger = log.logger}};
         auto& s = r.s;
         auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
                                        s.session->open(), asio::use_future);
@@ -2136,20 +2196,163 @@ TEST(ResetOnLogout104, ThrowingResetTo_LogonArmUnit_NoKnob_CloseNotHeld) {
         auto const ending = delivery_ending(s, fut);
         bool const in_flight = session_test_access::reset_unit_in_flight(*s.session);
         expect_unit_left_no_flag(r, role, ending, in_flight);
+        expect_dispatch_aborted(ending);
+        auto const records = receipt_reset_records(log);
+        EXPECT_TRUE(records.threw.empty()) << "a thrown receipt reset record for the Logon arm";
+        EXPECT_EQ(records.failed, 0U) << "a receipt reset failure record for the Logon arm";
     }
 }
 
-// Cell 2: reset_on_logout; a received Logout in Active, whose receipt unit runs after the reply.
+// Cell 2: reset_on_logout; a received Logout in Active, whose receipt unit runs after the reply
+// (arm A). The throw writes RT-4's record and the ending is the one without it (fixpp#708).
 TEST(ResetOnLogout104, ThrowingResetTo_ReceiptUnit_CloseNotHeld) {
     for (auto const role : kRoles) {
         SCOPED_TRACE(rg::role_name(role));
-        Rol104 r{Opts104{.role = role, .store = store_kind::throwing_reset_to}};
+        fixpp::test_support::LogCapture log;  // declared before the session it serves
+        Rol104 r{
+            Opts104{.role = role, .store = store_kind::throwing_reset_to, .logger = log.logger}};
         auto& s = r.s;
         ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
         auto fut = s.feed_spawn(s.logout(s.next_in()));
         auto const ending = delivery_ending(s, fut);
         bool const in_flight = session_test_access::reset_unit_in_flight(*s.session);
         expect_unit_left_no_flag(r, role, ending, in_flight);
+        expect_dispatch_aborted(ending);
+        expect_one_threw_record(log);
+    }
+}
+
+// The other receipt arms' reset points, each with the unit's reset_to thrown (fixpp#708): the
+// record, the flag cleared, and the delivery's ending, the one it has without the record.
+
+// Arm L: the peer's Logout answering fixpp's graceful-close Logout, in LogoutSent.
+TEST(ResetOnLogout104, ThrowingResetTo_ReceiptUnit_ArmL_Logged) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        fixpp::test_support::LogCapture log;  // declared before the session it serves
+        Rol104 r{
+            Opts104{.role = role, .store = store_kind::throwing_reset_to, .logger = log.logger}};
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        auto const mark = s.sent.size();
+        r.spawn_close(close_mode::graceful);
+        // Phase 1 is bounded by close_grace, a real-time timer of logout_disconnect_timeout_ms
+        // that the mock clock does not move. The wait for its Logout ends once the Logout is
+        // sent, and at the latest half-way through that grace, so the peer's Logout is fed
+        // while phase 1 still waits for it. After a miss the cell has not seen LogoutSent, so
+        // it cannot say which arm handled the peer's Logout; the setup check reports the miss.
+        bool const logout_sent = s.pump_until(
+            [&] {
+                return s.state() == fsm_state::LogoutSent && s.count(kLogoutMsgType, mark) == 1U;
+            },
+            std::chrono::milliseconds{s.cfg.logout_disconnect_timeout_ms} / 2);
+        auto fut = s.feed_spawn(s.logout(r.manager_numbers().in));
+        auto const ending = delivery_ending(s, fut);
+        bool const in_flight = session_test_access::reset_unit_in_flight(*s.session);
+        (void)r.close_returned_within(kReleaseBudget);
+
+        EXPECT_TRUE(logout_sent) << "setup: phase 1's Logout was not sent";
+        EXPECT_TRUE(ending.ended) << "the frame's delivery did not end";
+        EXPECT_EQ(r.ctl.reset_to_throws, 1) << "the reset unit's reset_to did not throw once";
+        EXPECT_FALSE(in_flight) << "reset_unit_in_flight_ is set after the unit's reset_to threw";
+        EXPECT_TRUE(r.close_run.done) << "close() did not return";
+        expect_no_reset_call_after_the_throw(r);
+        std::cout << "[ ENDING   ] " << rg::role_name(role) << ": the delivery " << describe(ending)
+                  << "\n";
+        expect_dispatch_aborted(ending);
+        expect_one_threw_record(log);
+    }
+}
+
+// Arm S: a Logout refusing fixpp's Logon, in LogonSent (an initiator only).
+TEST(ResetOnLogout104, ThrowingResetTo_ReceiptUnit_ArmS_Logged) {
+    fixpp::test_support::LogCapture log;  // declared before the session it serves
+    Rol104 r{Opts104{.role = session_role::initiator,
+                     .store = store_kind::throwing_reset_to,
+                     .logger = log.logger}};
+    auto& s = r.s;
+    auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                                   s.session->open(), asio::use_future);
+    ASSERT_TRUE(s.pump_until([&] { return rg::Scene::ready(open_fut); })) << "setup: open()";
+    ASSERT_TRUE(open_fut.get().has_value()) << "setup: open() failed";
+    ASSERT_EQ(s.state(), fsm_state::LogonSent) << "setup: not in LogonSent";
+    auto fut = s.feed_spawn(s.logout(s.next_in()));
+    auto const ending = delivery_ending(s, fut);
+    bool const in_flight = session_test_access::reset_unit_in_flight(*s.session);
+    expect_unit_left_no_flag(r, session_role::initiator, ending, in_flight);
+    EXPECT_EQ(s.state(), fsm_state::Disconnected);
+    expect_dispatch_aborted(ending);
+    expect_one_threw_record(log);
+}
+
+// Arm B: a too-high Logout on a session with no clock, so its acknowledgement is immediate and
+// its reset point is acknowledge_peer_logout_'s. With no clock close() does not wait, so the
+// close is pumped to its end rather than through close_returned_within.
+TEST(ResetOnLogout104, ThrowingResetTo_ReceiptUnit_ArmB_ImmediateAck_Logged) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        fixpp::test_support::LogCapture log;  // declared before the session it serves
+        Rol104 r{Opts104{.role = role,
+                         .store = store_kind::throwing_reset_to,
+                         .with_clock = false,
+                         .logger = log.logger}};
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        auto const mark = s.sent.size();
+        auto fut = s.feed_spawn(s.logout(s.next_in() + 3));
+        auto const ending = delivery_ending(s, fut);
+        bool const in_flight = session_test_access::reset_unit_in_flight(*s.session);
+        r.spawn_close(close_mode::terminal);
+        bool const close_returned = s.pump_until([&] { return r.close_run.done; }, kReleaseBudget);
+
+        EXPECT_EQ(s.count("2", mark), 0U)
+            << "a ResendRequest, so the acknowledgement was not immediate: " << s.written(mark);
+        EXPECT_TRUE(ending.ended) << "the frame's delivery did not end";
+        EXPECT_EQ(r.ctl.reset_to_throws, 1) << "the reset unit's reset_to did not throw once";
+        EXPECT_FALSE(in_flight) << "reset_unit_in_flight_ is set after the unit's reset_to threw";
+        EXPECT_TRUE(close_returned) << "close() did not return";
+        expect_no_reset_call_after_the_throw(r);
+        std::cout << "[ ENDING   ] " << rg::role_name(role) << ": the delivery " << describe(ending)
+                  << "\n";
+        expect_dispatch_aborted(ending);
+        expect_one_threw_record(log);
+    }
+}
+
+// Arm B by its bound: a too-high Logout whose gap a GapFill then fills, so the bound acknowledges
+// it and runs the unit. No frame carries that exception: the bound ends as it does on any
+// exception from its body, with the mark `none` and the session Disconnected. Its normal end
+// leaves the same state, so this cell reads the record and not the exception's propagation.
+TEST(ResetOnLogout104, ThrowingResetTo_ReceiptUnit_ArmB_Bound_Logged) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        fixpp::test_support::LogCapture log;  // declared before the session it serves
+        Rol104 r{
+            Opts104{.role = role, .store = store_kind::throwing_reset_to, .logger = log.logger}};
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        seqnum_t const n = s.next_in();
+        (void)s.feed(s.logout(n + 3));
+        ASSERT_EQ(r.phase(), kPending) << "setup: no pending mark";
+        auto fut = s.feed_spawn(s.gap_fill(n, n + 4));
+        bool const bound_ended = s.pump_until(
+            [&] { return r.ctl.reset_to_throws == 1 && r.phase() == kNone; }, kReleaseBudget);
+        bool const frame_returned =
+            s.pump_until([&] { return rg::Scene::ready(fut); }, kReleaseBudget);
+        bool const in_flight = session_test_access::reset_unit_in_flight(*s.session);
+        auto const state = s.state();
+        r.spawn_close(close_mode::terminal);
+        bool const close_returned = r.close_returned_within(kReleaseBudget);
+
+        EXPECT_TRUE(bound_ended) << "the bound's unit did not throw, or its mark stayed set";
+        EXPECT_TRUE(frame_returned) << "the GapFill's frame did not return";
+        EXPECT_EQ(r.ctl.reset_to_throws, 1) << "the reset unit's reset_to did not throw once";
+        EXPECT_FALSE(in_flight) << "reset_unit_in_flight_ is set after the unit's reset_to threw";
+        EXPECT_EQ(state, fsm_state::Disconnected) << rg::state_name(state);
+        EXPECT_TRUE(close_returned) << "close() did not return";
+        EXPECT_FALSE(r.close_reset_wait_expired()) << "close_reset_wait_expired was emitted";
+        expect_no_reset_call_after_the_throw(r);
+        expect_one_threw_record(log);
     }
 }
 

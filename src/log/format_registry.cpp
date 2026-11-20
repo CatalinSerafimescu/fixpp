@@ -99,6 +99,10 @@ static const std::unordered_map<std::uint32_t, std::string_view>& get_registry()
             {.id = static_cast<std::uint32_t>(crc32_str(
                  "received Logout's sequence reset failed, not retried: part={} error={}")),
              .fmt = "received Logout's sequence reset failed, not retried: part={} error={}"},
+            // fixpp#708 (contract RT-4): Session::note_receipt_reset_threw_.
+            {.id = static_cast<std::uint32_t>(
+                 crc32_str("received Logout's sequence reset threw, not retried: part={}")),
+             .fmt = "received Logout's sequence reset threw, not retried: part={}"},
             // 099 (research R-2, FR-004): the role loops' failed open(), in engine.cpp.
             {.id = static_cast<std::uint32_t>(
                  crc32_str("session role loop ended: Session::open() failed: begin_string={} "

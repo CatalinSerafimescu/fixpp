@@ -45,23 +45,26 @@
 # a preset this file does NOT list — say what it is and expect it to fire.
 #
 #   AFTER EDITING ANY LINE IN THIS FILE, RUN:
-#       bash ci/test-parallelism-verdict.sh      # 57 cells; T23/T24 read this file
+#       bash ci/test-parallelism-verdict.sh      # T23/T24 read this file
 #
-#   ⚠️ NOT `ci/test-peak-rss.sh`. That harness is the #266 peak-memory one, it
-#   passes 72/72 against a broken pin, and its name is the trap: it is the
-#   obvious choice for a file whose subject is the peak-memory basis, and it
-#   does not read this file at all. Running it and shipping is exactly how the
-#   2026-09-08 break reached `main`.
+#   ⚠️ NOT `ci/test-peak-rss.sh` alone. That harness is the #266 peak-memory one,
+#   and its name is the trap: it is the obvious choice for a file whose subject
+#   is the peak-memory basis. It copies this file into its fixtures and appends
+#   a fake preset line, and its cells exercise only that fake line, so it checks
+#   no real pin and passes against a broken one.
 #
 # ⚠️ A DERIVED BUMP IS A CLAIM, NOT A FACT. Adding one to a pin for a new
 # `add_test` is right only if the new test is eligible on every lane. Re-derive
 # rather than trusting the arithmetic:
 #     cmake --build <preset-dir> && ctest --test-dir <preset-dir> -N -LE packaging | tail -1
 #
-# RE-RECORDING. Read every lane's value off the CI logs of one push to `main`, by
-# the method in ci/ctest-parallelism-probe.md, and add a RE-RECORD section there
-# naming the runs, the commit and each lane's log line. That file's most recent
-# RE-RECORD section is the provenance of the values below; this file states none.
+# RE-RECORDING. Read every lane's value off the CI logs of one run of every tier
+# at a single commit, by the method in ci/ctest-parallelism-probe.md: a push to
+# `main`, or a `workflow_dispatch` of the tiers on a feature branch whose ctest
+# registrations will not change again before it merges. Add a RE-RECORD section
+# there naming the runs, the commit and each lane's log line. That file's most
+# recent RE-RECORD section is the provenance of the values below; this file
+# states none.
 #
 # ── WHY IT IS PER-LANE, AND NOT ONE NUMBER ───────────────────────────────────
 #
