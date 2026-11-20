@@ -4,8 +4,9 @@
 
 Phase 0 of `/speckit-plan`. Every behaviour claim below was re-read in source at the base and is cited by
 symbol. The re-derive in the parent repo (`research/findings/b27-rederive-2026-11-20.md`) and the SecondBrain
-pages were used as leads only. Owner rulings R-1 to R-4, clarifications Q1 and Q2, the rulings on SI-1 to SI-3, OQ-1 and L-105-b, and the
-Gate A round 1 decisions D-a to D-c (spec Clarifications) are final and are not re-opened here.
+pages were used as leads only. Owner rulings R-1 to R-4, clarifications Q1 and Q2, the rulings on SI-1 to SI-3, OQ-1 and L-105-b, the
+Gate A round 1 decisions D-a to D-c and the Gate A round 2 decisions D-d to D-f (spec Clarifications) are final and
+are not re-opened here.
 
 Abbreviations: S = `src/session/session.cpp`, E = `src/session/engine.cpp`. "The edge" is the
 `Disconnected` write in `Session::record_state_transition_`. "The pump" is `run_read_pump` in E.
@@ -68,7 +69,25 @@ Abbreviations: S = `src/session/session.cpp`, E = `src/session/engine.cpp`. "The
   only `fsm_state_ != fsm_state::Active`.
 - **F-14. A write has no timeout.** `live_write_serialized_` holds `write_gate_` across `async_write`'s completion,
   and neither transport's `async_write` is bounded. `send_body_` tests `logout_in_flight_` at entry and after a
-  replay-gate wake only; `store_then_emit` does not re-test it before the transmit.
+  replay-gate wake only; `store_then_emit` does not re-test it before the transmit. (105 limits the writes of the
+  ending Logouts only, D2 item 11; every other write keeps this property, L-105-f.)
+- **F-15. TestReqIDs are monotonic per Session.** `run_liveness_loop` builds each one as `TR` followed by
+  `std::to_chars` of `++next_test_request_id_`, a per-Session `std::uint32_t` ("Per-session TestRequest ID counter"
+  in `session.hpp`); `git grep next_test_request_id_ -- src include` finds that increment and the declaration only,
+  so nothing resets it, and `to_chars` writes no sign and no leading zero. Whether a TestReqID is an earlier one of
+  this connection is therefore decidable from its value and two integers (D5).
+- **F-16. A transport close returns a blocked write.** The plain transport has no `close_async` of its own
+  (`Transport::close_async`'s default is `co_return close();`), and `asio_plain_transport::close` closes the socket,
+  which completes a pending `async_write` with an error. `asio_tls_transport::close_async` sets `state_ = closed`,
+  then, while `ssl_op_suspended_()` (which reads `write_in_flight` as well as `read_in_flight` and
+  `handshake_in_flight`), calls `socket_.cancel()` and joins the op within `close_deadline`
+  (`std::chrono::steady_clock::now() + cfg_.tls_close_timeout`), then writes close_notify by `async_shutdown` under
+  the same deadline; at the deadline its timer cancels the shutdown, so the socket closes with no close_notify
+  written (B-348-1's abortive close). `live_write_serialized_` maps the
+  write's error to `dispatch_aborted` and its RAII guard releases `write_gate_`; a waiter at the gate then writes to a
+  closed transport and gets the same result. `close()`'s graceful phase already uses this unwind
+  (`close_grace`, "FQ-G: if phase 1 wedges behind write_gate_ / async_write, force-close the transport"), and
+  `drain_for_reconnect_` does at its bound.
 
 ## D1 — How a `Disconnected` edge gets the transport closed (FR-001, FR-002, FR-008)
 
@@ -77,18 +96,27 @@ Abbreviations: S = `src/session/session.cpp`, E = `src/session/engine.cpp`. "The
 1. **The latch.** A private member of `Session`, `connection_end_owed_`, holding the `conn_gen_` the close is owed
    on. One setter, `owe_connection_end_()`, sets it when all of these hold: `state_ == lifecycle::open` (not inside
    `close()`), `!reconnect_drain_in_flight_` (a new flag held only around `drain_for_reconnect_`'s call in
-   `drive_reconnect`, B-103-9), and no R-2 wait is `armed` (D2). It has three callers (data-model E-2): the edge, on
-   a transition **into** `Disconnected` from another state only, so a later write of `Disconnected` over
+   `drive_reconnect`, B-103-9), and no wait **armed before Active** is open (D2; Gate A round 2, root cause #1). A
+   wait armed after Active does not refuse the owe: the call ends that wait and owes (data-model E-3 row 12), so any
+   `Disconnected` written during it, from any root, closes the connection. It has three callers (data-model E-2): the
+   edge, on a transition **into** `Disconnected` from another state only, so a later write of `Disconnected` over
    `Disconnected` cannot owe a second close; the R-2 bound's expiry for a wait armed before Active; and the response
    to such a wait. The latter two exist because before Active the session is `Disconnected` already, so no edge
    runs. `reconnect_in_flight_` cannot serve: its holder in `drive_reconnect` stays alive across
    `co_await emit_initiator_logon_()`, so it would hide every Logon-emission ending of a direct initiator.
    `install_reconnected_transport` records only `LogonSent` (and nothing on its refusal path), so the narrower
-   window exposes no further write; the census re-reads it at the implementation head. The edge's call is made before
-   `onLogout` is fired. Setting it is two stores: no suspension, no allocation, no spawn (F-1).
+   window exposes no further write; the census re-reads it at the implementation head.
+   **Placement (N-4).** `record_state_transition_` returns at `if (engine_.application == nullptr) return;` before its
+   `onLogon`/`onLogout` block, and `EngineConfig::application` defaults to `nullptr`. The edge's call therefore sits
+   in the existing `new_state == fsm_state::Disconnected` block, beside `wake_peer_logout_bound_()`, using the prior
+   state captured at entry (the function already captures `was_active` there), so it runs before `onLogout` and for
+   a session with no application alike; one cell runs with no application. Setting it is two stores: no suspension,
+   no allocation, no spawn (F-1).
 2. **Consumer (a), the pump.** After every `on_inbound_frame` return, the pump closes as it closes on an error:
    `if (!r || session_engine_access::take_connection_end(session)) co_await stop_pump();`. `take_connection_end`
-   tests and clears the latch. The test runs after the arm has returned, so after its reply Logout, its persist
+   tests and clears the latch, and leaves it set while an ending Logout is being written by another root (data-model
+   E-3, "Other roots during `writing`"), so the pump does not cut that Logout; the writer's root consumes it after
+   the write. The error close (`!r`) does not defer, as on `main`. The test runs after the arm has returned, so after its reply Logout, its persist
    and its receipt reset unit (F-3, FR-005, FR-008). The close is `close(terminal)`, the path F-5 describes, so
    FR-002 holds by construction.
 3. **The acceptor's first frame goes through the pump.** `run_read_pump` gains a `first_frame` parameter
@@ -96,16 +124,22 @@ Abbreviations: S = `src/session/session.cpp`, E = `src/session/engine.cpp`. "The
    step 8 is deleted (F-9, FR-006). `run_connect_loop` passes an empty span. The first frame is delivered without
    the loop's `expired()` pre-check, as today: `read_first_frame_bounded` already bounded its read by the
    establishment time left, and a pre-check would turn a Logon read at the deadline's edge into a timeout.
-4. **Consumer (b), every non-pump root, at its exit.** `Session::release_connection_end_()`: when the latch is
-   set, its generation is `conn_gen_`, `state_ == lifecycle::open` and `inbound_depth_ == 0`, clear it and spawn
-   the close frame (item 5) on the session's executor, detached, holding a new join counter
-   `connection_close_counter_` (incremented before the spawn, as the liveness counter is, FQ-C). Every test is made
-   here, synchronously, so the frame decides nothing. The spawn is on `exec_.underlying()`, never the wrapper executor (the TSan class
-   `brain` records for wrapper spawns). When `inbound_depth_ != 0` the latch is left set: a frame is inside an arm, and the
-   pump consumes the latch when that arm returns (F-7), so no store work an arm owns is cut. A spawn that throws
-   leaves the latch set; the next consumer, `close()` or `Engine::stop()` closes the connection.
-5. **The close frame, `close_transport_(transport, counter)`**, a static coroutine that receives the transport's
-   `shared_ptr` and the counter's copy at the spawn, awaits `close_async()` on that transport, and touches no member
+4. **Consumer (b), every non-pump root, at its exit.** `Session::release_connection_end_() noexcept`: when the
+   latch is set, its generation is `conn_gen_`, `state_ == lifecycle::open` and `inbound_depth_ == 0`, it spawns the
+   close frame (item 5) on the session's executor, detached, and clears the latch after the spawn has returned. The
+   spawn follows `on_inbound_active_too_high_logout_`'s shape, not the liveness loop's: the join is the coroutine's
+   parameter (`connection_close_join`, which increments `connection_close_counter_` at construction and decrements it
+   at destruction, so a frame that is never published releases it), and the `co_spawn` sits in a `try` whose
+   `catch (...)` leaves the latch set and returns, so the count stays balanced and the next consumer, `close()` or
+   `Engine::stop()`, closes the connection (Gate A round 2, Codex #1). The liveness loop's spawn sites, which
+   `fetch_add` and then call a bare `co_spawn`, leak the count on a throw and are not copied; they are on `main` and
+   outside this feature's change. Every test is made here, synchronously, so the frame decides nothing. The spawn is
+   on `exec_.underlying()`, never the wrapper executor (the TSan class `brain` records for wrapper spawns). When
+   `inbound_depth_ != 0` the latch is left set: a frame is inside an arm, and the pump consumes the latch when that
+   arm returns (F-7), so no store work an arm owns is cut. While an ending Logout is being written
+   (`ending_wait_.phase == writing`) the latch is left set too, and the writer's root consumes it after the write.
+5. **The close frame, `close_transport_(join, transport)`**, a static coroutine that receives its join and the
+   transport's `shared_ptr` at the spawn, awaits `close_async()` on that transport, and touches no member
    of `Session` (data-model E-2). So it may outlive the Session, as the bound's join parameter may (B-103-13), and
    it widens no lifetime precondition. It runs on its own spawn chain, so `close_async`'s cancellation clobber
    stays there (F-6).
@@ -143,7 +177,7 @@ each reached from several roots.
 
 **Why it holds for the whole class.** Every `Disconnected` write goes through the edge, and the edge's call is
 `owe_connection_end_()`'s, whose predicate is the only one; its other two callers are the R-2 wait's own endings
-before Active (data-model E-3 rows 7 and 10). Every root that can reach a caller is a consumer or an exclusion. A new
+before Active (data-model E-3 rows 9 and 11). Every root that can reach a caller is a consumer or an exclusion. A new
 write site needs no change; a new root does, and the census recipe finds it. The setter census is
 `grep -n 'owe_connection_end_(' src/session/session.cpp` (known positive: the edge), each call site with a mutant
 that deletes it.
@@ -165,8 +199,9 @@ that deletes it.
 Gate A round 1 rewrote this decision: the round-0 design left the frames of the wait to the existing arms, so the
 checks that had started the wait ran again ahead of the peer's Logout (F-11), and the wait's setters and wake
 sources were spread over several sites. The observable rules are one table, contract C-2 "While the wait is armed"
-(W-1 to W-14); the state machine of the wait, the bound and the latch is one table, data-model E-3. This section is
-the mechanism.
+(W-1 to W-15); the state machine of the ending Logout (its write limit, the wait, the bound and the latch) is one
+table, data-model E-3. Gate A round 2 made that machine total (N-1: absorption by cause, item 4) and added the
+write limit of ruling D-e (item 11). This section is the mechanism.
 
 **Decision.**
 1. **One helper starts every R-2 ending and owns its ending write.** `Session::send_ending_logout_(text)` writes
@@ -176,7 +211,10 @@ the mechanism.
    caller's tail move into the helper: Arm B's unconditional write, `resend_gap_deadline_`'s
    `record_disconnected_unless_already_()`, `refuse_logon_with_logout_`'s `disconnect_unless_superseded_`, and the
    SendingTime and OrigSendingTime arms' writes. Without that move an absorbing helper would change nothing.
-   - **Armed only if the Logout was transmitted**, a clock is present and `logout_disconnect_timeout_ms > 0`. The
+   - **Armed only on leaving `writing`** (item 11; data-model E-3), so only when the bound was spawned, and only if the
+     Logout was transmitted, the ending claimed no pending too-high mark (below), and no other root ended the session
+     during the write (`fsm_state_` still the state the write started in). A clock and
+     `logout_disconnect_timeout_ms > 0` are the conditions of entering `writing`. The
      leaves return success also when nothing went out: the Logout did not build (`if (lo_result)` false, the long
      CompIDs case), its emit failed (`(void)emit_r`), or `store_then_emit` returned success without transmitting
      (a superseded Logon arm; a frame held back while `wire_closed_by_reset_` is set). So `store_then_emit` gains
@@ -184,8 +222,18 @@ the mechanism.
      `written` **with a live transport present** (it also returns `written` when there is none), or the direct
      sink returned success. The leaves pass it up. Timeout 0 and no clock arm nothing (contract C-2, "No wait is
      armed"; the too-high path's `logout_disconnect_timeout_ms == 0` branch is the precedent), and spawn no frame.
-   - **The order before Active** (data-model E-3 row 2): transmit, arm, the refusal's own `Disconnected` write
-     (`disconnect_unless_superseded_`, now in the helper), then the bound's spawn.
+   - **The order before Active** (data-model E-3 rows 1, 3, 6): enter `writing` and spawn the bound (item 11), the
+     Logout's write, arm, then the refusal's own `Disconnected` write (`disconnect_unless_superseded_`, now in the
+     helper). The bound is running when that edge wakes it; its wake is a re-test, and its pre-Active predicate
+     (`state_ == lifecycle::open`) holds, so it waits on.
+   - **The pending too-high mark (N-5).** `resend_gap_deadline_` and Arm B call `claim_peer_logout_none_()` before
+     their leaf ("its own Logout is the one"). The claim moves into the helper and reports whether it found the mark
+     `pending`. When it did, the peer's Logout has already been received, so the helper arms no wait: it records
+     `Disconnected` after the write and the connection closes then, as R-1's does (contract C-2.8). The claimed
+     mark's receipt does not reach its reset point under `reset_on_logout`, as on `main`, where both sites claim and
+     end at once; without this rule 105 would add a full bound of waiting for a second Logout a real peer does not
+     send. One cell: a too-high Logout while a resend is outstanding, then a non-advancing frame after the gap
+     deadline; the peer reads the deadline's Logout, then EOF with the mock clock frozen.
    - **The callers** are the fixpp-initiated ending Logouts: `resend_gap_deadline_`,
      `on_inbound_active_sending_time_reject_`, the OrigSendingTime branch of `on_inbound_active_poss_dup_`, Arm B
      of `on_inbound_active_out_of_sequence_`, and every caller of `refuse_logon_with_logout_`,
@@ -219,31 +267,40 @@ the mechanism.
      scans the frame's header; a frame with no fault, MsgType(35) third, the right BeginString and CompIDs and `35=5`
      sets `resolved` and calls `owe_connection_end_()`. No reset runs (owner ruling on OQ-1). The scan runs only
      while a wait is armed, so the row costs nothing otherwise.
-4. **Absorption** (W-8). While a wait armed after Active is open:
+4. **Absorption, by cause** (W-8; Gate A round 2, root cause #1). While an ending is in progress after Active
+   (`ending_in_progress_()`: the phase `writing` or `armed` with `from_active`):
    - `send_ending_logout_` writes nothing and records nothing. Whatever the arm wrote before calling it (the
      SendingTime arm's Reject) has been written, as in Active.
-   - The silent ending sites that return success go through one helper, `end_session_silently_()`, which records
-     `Disconnected` unless such a wait is armed: the BeginString and CompID guards, MsgSeqNum 0, the two TestReqID
-     mismatch sites (the in-sequence Heartbeat arm and `answer_pending_test_request_`), and D-3 of
-     `dispose_unparseable_`. Arm B's tail for a refusal that is not too-low (a drained sequence-number mutex) is
-     classed by the census like every other hit, with its own cell. Census: D1's write-site grep restricted to the frame arms, each hit
-     classed "returns success" (through the helper) or "returns an error" (W-9, not absorbed); known positive: the
-     BeginString guard of `on_inbound_active_`.
+   - The **peer-frame** silent endings go through one helper, `end_session_silently_()`, which records
+     `Disconnected` unless an ending is in progress: the BeginString and CompID guards, MsgSeqNum 0, the TestReqID
+     mismatch of C-5.4 (both sites, through `classify_test_req_id_`), and D-3 of `dispose_unparseable_`.
+   - **Nothing else is absorbed.** The absorbed set is these peer-frame conditions and `send_ending_logout_`'s
+     callers, never "a site that returns success". Every internal failure (a number assignment, a store, a persist,
+     an emit, a `toAdmin` throw) and every other root (a send admitted before the Logout whose store or emit fails,
+     `send_body_`'s handler, a liveness emit admitted before it, `run_peer_logout_bound_`'s handler) writes
+     `Disconnected` through the edge, and the edge ends the wait and owes the close (data-model E-3 row 12). So
+     `inbound_resend_request_leaf_`'s failed assignment, which records `Disconnected` and returns success, ends the
+     wait as FR-004 requires ("not absorbed"), and the pump closes on the latch. Arm B's tail for a refusal that is
+     not too-low (a drained sequence-number mutex) is an internal failure, not absorbed.
+   - Census: D1's write-site grep restricted to the frame arms, each hit classed by cause, "peer-frame condition"
+     (through the helper) or "internal failure" (through the edge); known positives: the BeginString guard of
+     `on_inbound_active_` (peer-frame) and `inbound_resend_request_leaf_`'s assignment failure (internal).
    - `resend_gap_deadline_` does not fire (it returns `nullopt`), so its frame takes the row it would take before
-     the deadline (W-7). The wait's own bound is the ending already running.
-   - The armed test is in these helpers, never in `record_state_transition_`, whose `Disconnected` write also
-     serves `close()`, the drain and the error arms (data-model E-3, its invariant).
+     the deadline (W-7). The wait's own ending is already running.
+   - The armed test is in `owe_connection_end_()` and in these two helpers, never in `record_state_transition_`'s
+     write, which also serves `close()`, the drain and the error arms (data-model E-3, its invariant).
+   Round 1 classed silent endings by return value ("returns success" absorbed); that absorbed an internal failure
+   FR-004 says is not absorbed, and, classed the other way, left the wait armed with nothing to close (N-1).
 5. **A frame above NextNumIn** with no resend outstanding (W-6) is processed as in Active (Q2; FR-004's "the sequence
    checks apply"): `on_inbound_active_too_high_` sends its ResendRequest, a reply to the peer's frame, as QuickFIX
    C++ does during its wait (`validLogonState` admits a non-Logout frame once `sentLogout` is set, and `verify`
    reaches `doTargetTooHigh`). Contract C-10's departure covers fixpp's own originations only (the liveness
    Heartbeat and TestRequest), not replies.
-6. **The liveness loop** (W-11) tests one predicate, `liveness_may_originate_()`, as its loop condition and after
-   every suspension: after the main sleep, after the Heartbeat's emit, and before and after the grace sleep
-   (data-model E-4). Round 0 changed only the loop condition, so a sleep that began before the wait and ended inside
-   it went on to a Heartbeat, a TestRequest or R-1 (F-13). The arming adds no wake: the predicate alone keeps the
-   loop from originating, and `close()` and the drain still join it. `root_cancel_.emit` is not used as a wake: it
-   reaches everything bound to the root slot.
+6. **The liveness loop** (W-11) tests one predicate, `liveness_may_originate_()` (Active and the ending phase
+   `none`; data-model E-4), as its loop condition and after every suspension: after its sleep and after each emit.
+   So nothing is originated from the start of an ending Logout's write, R-1's own included. The arming adds no wake:
+   the predicate alone keeps the loop from originating, and `close()` and the drain still join it.
+   `root_cancel_.emit` is not used as a wake: it reaches everything bound to the root slot.
 7. **Admitted frames** (contract C-2.3, L-105-e). A send, Heartbeat or TestRequest numbered before the Logout and
    still in its store call can reach the wire after it (F-14). The design narrows the promise to numbering and
    discloses the wire order, instead of a barrier: the race exists on `main` for every Logout ending, on the
@@ -251,26 +308,85 @@ the mechanism.
    on the too-low route its ResendRequest is below NextNumIn and is absorbed), and a barrier on `replay_gate_.shared` would have to
    exclude the waiter's own hold (R-1 runs inside the liveness loop's emits) and be bounded.
 8. **The bound.** `deadline = deadline_after(now, logout_disconnect_timeout_ms)` on `effective_clock_`, read once at
-   the arming (the Logout's write), never moved by a later send (FR-004; QuickFIX/Go's rule, not C++'s and /J's
-   sliding `lastSentTime`). Before Active on an Engine session the pump's establishment deadline still runs (a pump
-   local, keyed on `!has_reached_active`), so the connection closes at the earlier of the two, and at that deadline
-   the pump closes without the establishment-timeout event and record, because the session has recorded its own
-   ending (D4). A detached `run_ending_logout_bound_(join, gen)` waits on it, in the shape of
-   `run_peer_logout_bound_` (a join parameter that touches only `ending_logout_bound_counter_`, a published wake,
-   `detail::await_deadline` raced with a timer the wake cancels, a generation assert, an exception handler that ends
-   the wait closed). Its wake sources, its live predicate in full, and what each exit does are data-model E-3. The
-   predicate is not `run_peer_logout_bound_`'s `live()`: that one requires `fsm_state_ == Active` (false before
-   Active) and `!closing_or_stopped_()` (false under a graceful `close()`, which would leave nothing to clear the
-   Logout owner but the peer's Logout, and hand the close to `close()`'s wall-clock grace and its direct
-   `Transport::close()`, abortive on TLS).
-9. **`close()` and `Engine::stop()` during the wait** (W-13, W-14; data-model E-3 rows 6, 9, 12, 13). A graceful
+   the **start** of the Logout's write (item 11), never moved by a later send or by the write's completion (FR-004;
+   QuickFIX/Go's rule, not C++'s and /J's sliding `lastSentTime`): one budget for the write and the wait. Before
+   Active on an Engine session the pump's establishment deadline still runs (a pump local, keyed on
+   `!has_reached_active`), so the connection closes at the earlier of the two, and at that deadline the pump closes
+   without the establishment-timeout event and record, because the session has recorded its own ending (D4). A
+   Session driven without an Engine has no establishment deadline (`logon_timeout_ms` reaches `run_read_pump` only
+   through the accept and connect loops), so its pre-Active wait ends at the bound (Gate A round 2, Codex #4; contract
+   C-2.6). A detached `run_ending_logout_bound_(join, gen)` waits on it, in the shape of `run_peer_logout_bound_` (a
+   join parameter that touches only `ending_logout_bound_counter_`, a published wake, `detail::await_deadline` raced
+   with a timer the wake cancels, a generation assert, an exception handler that ends the wait closed), with one
+   difference: it loops, so a wake is a re-test of its live predicate, not an exit. Its spawn is in
+   `on_inbound_active_too_high_logout_`'s shape (the join as the parameter, a `catch` around `co_spawn`); a spawn that
+   throws sets the phase back to `none` and the ending proceeds as with timeout 0 (data-model E-3 row 2). Its wake
+   sources, its live predicate by phase, and what each exit does are data-model E-3. The predicate is not
+   `run_peer_logout_bound_`'s `live()`: that one requires `fsm_state_ == Active` (false before Active) and
+   `!closing_or_stopped_()` (false under a graceful `close()`, which would leave nothing to clear the Logout owner but
+   the peer's Logout, and hand the close to `close()`'s wall-clock grace and its direct `Transport::close()`,
+   abortive on TLS).
+9. **`close()` and `Engine::stop()` during the wait** (W-13, W-14; data-model E-3 rows 13 to 15). A graceful
    `close()` after Active poll-joins the Logout owner (103 D4.6) while the bound runs on; the response or the bound
    records `Disconnected`, which clears the owner, and `close()` proceeds to its own `close_async()` (contract
    C-8.4). A terminal `close()`, an escalation, `Engine::stop()` and the drain end the wait at once; `close()` and
    the drain join the bound's counter.
 10. **`onLogout`** fires at the `Disconnected` edge, as today. After Active that edge is the wait's end (the
-    response, the bound, an error arm, or `close()`), which is QuickFIX C++'s timing (`Session::disconnect` calls
+    response, the bound, any internal failure of E-3 row 12, a cut write, or `close()`), which is QuickFIX C++'s timing (`Session::disconnect` calls
     `onLogout`). Before Active it does not fire, as today: it fires only on an Active→!Active edge.
+
+11. **The write limit** (ruling D-e; contract C-2.7; data-model E-3 rows 1 to 5). Every Logout fixpp writes to end
+    a session enters the phase `writing` at its write point (`inbound_logout_leaf_`, where it claims the Logout
+    owner, after Active; the build-and-emit of `refuse_logon_with_logout_` and `inbound_logon_sent_logout_leaf_`
+    before it): R-1's (D3), every R-2 Logout (item 1), and the replies to the peer's Logout (`on_inbound_active_logout_`,
+    `acknowledge_peer_logout_`), so the limit holds by construction at every ending Logout, not at a list of callers.
+    The deadline is read and the bound spawned before the gate acquire, so a Logout queued at `write_gate_` behind a
+    blocked application send or Heartbeat is covered too. Census of the after-Active write point:
+    `grep -n 'inbound_logout_leaf_(tic' src/session/session.cpp`, each hit's enclosing function an ending (at the base:
+    `resend_gap_deadline_`, `on_inbound_active_sending_time_reject_`, `acknowledge_peer_logout_`,
+    `on_inbound_active_poss_dup_`, `on_inbound_active_out_of_sequence_`, `on_inbound_active_logout_`; known positive
+    `resend_gap_deadline_`), and `run_logout_phase1` reaching no such call (it builds `close()`'s own Logout). Including
+    the replies is this design's choice, by construction at the shared leaf; ruling D-e names R-1's and the R-2
+    Logouts.
+    - **The write starts at the owner claim**, so the limit can fire while the Logout is still inside its number
+      assignment or its store call. The transport closes at the bound and the peer sees EOF then; `Disconnected` and
+      `onLogout` follow when that store call returns (FR-008: a store call is not cut), not at the bound itself.
+    - **On expiry with the write not returned**, the bound spawns the close frame (D1 item 5) on the live transport,
+      testing only the generation and the transport's presence, then exits. The close frame runs `close_async()`,
+      which returns the blocked write with an error (F-16); `live_write_serialized_` returns `dispatch_aborted` and
+      releases `write_gate_`; a Logout waiting at the gate finds the transport closed. **Nothing is cancelled and no
+      frame is destroyed while suspended**: the leaf, the arm and the gate holder each resume and run to their end,
+      so the leaf's buffer, the gate's guard and every frame keep their lifetimes. The leaf then returns as for a
+      failed write (it discards the emit's result), the phase goes to `none`, and the site records `Disconnected`
+      ("Logout not sent"): R-1 at once, an R-2 ending with no wait, a reply before its reset unit as today. The
+      consumer that then runs (the pump's `close(terminal)`, the loop's release) finds the transport closed and is
+      subsumed (C-1.a).
+    - **This close runs while a frame is inside its arm** (the arm is the one suspended in the write), which is
+      data-model E-2 I-2's one exception and contract C-1.b's: it cuts no store work (durable-before-transmit; the
+      receipt reset unit is store-only).
+    - **No second wait.** A cut write is not transmitted, so the R-2 helper arms nothing; and since the wait would
+      have shared the deadline, a write that completes just before it leaves only what remains of the budget. One
+      budget from the write's start is this design's reading of D-e's "counted from the write's start" and R-2's
+      "from the write of fixpp's Logout"; it moves R-2's origin from the write's end to its start, observable only
+      when the write is slow.
+    - **Other roots during the write** (data-model E-3 rows 5a, 5b): a `Disconnected` written by another root owes the
+      close, but both latch consumers defer while `writing`, so the Logout is not cut; the writer's root consumes the
+      latch after the write. An arm's error close does not defer, as on `main`.
+    - **`close()`, `Engine::stop()` and the drain during the write** (E-3 row 5): each closes the transport itself
+      (`close()`'s `close_async`, stop's step 2, the drain's forced close at its bound), which returns the write; the
+      bound runs on until the leaf returns and is joined by `close()` and the drain after their transport close, so
+      the join does not wait for the deadline.
+    - **Timeout 0 and no clock**: no limit; the write is unbounded as on `main` (L-105-f). A 0 ms limit is not read as
+      "close at once" (`close_grace`'s reading), because it would cut every R-1 Logout.
+    - **TLS**: `close_async` cancels the write and then cannot write close_notify behind a peer that does not read;
+      it closes abortively at `tls_close_timeout` (contract C-8.5, L-105-g; permitted by ruling D-e).
+    - **What stays unbounded** (L-105-f, narrowed): every write that does not end the session.
+    - **Alternatives rejected.** *Racing only the Logout's own await* (`write || timer`): the first write to block is
+      usually an application send or a Heartbeat holding the gate, so the race would leave the holder blocked and the
+      socket open, and it would cancel a frame suspended in a store or a write. *A separate watchdog coroutine*: a
+      third detached frame with its own join and spawn-failure rule, where the R-2 bound already exists and needs the
+      same deadline. *The synchronous `Transport::close()`* (as `close_grace` and the drain use): abortive on TLS even
+      when the peer reads, which ruling D-e names `close_async` to avoid.
 
 **Rationale.** Staying Active with the existing Logout owner reuses every rule 103 built for "a Logout of the
 session is in flight" (send refusal, single Logout, close's poll-join, the too-high path) instead of adding a
@@ -300,36 +416,40 @@ refused peer needs (D-b).
 ## D3 — The unanswered TestRequest (FR-003, R-1)
 
 **Decision.**
-- At the give-up (D6), `run_liveness_loop` takes a replay-gate shared hold as its other emits do (103 D5′.4),
-  claims a pending too-high mark as the other ending Logouts do (`claim_peer_logout_none_`, 103 D4.6), and writes
-  a Logout through `inbound_logout_leaf_` (reached from a detached root as `run_peer_logout_bound_` reaches it
-  through `acknowledge_peer_logout_`) with Text(58) `TestRequest unanswered, TestReqID <id>`,
-  `<id>` being `pending_test_req_id_`. The phrase follows FIX-SL 2020 §4.5.5 ("a Logout(35=5) message with the
-  Text(58) field stating that the session was terminated due to lack of a response to a TestRequest(35=1)
-  message, followed by terminating the transport layer connection") and the shape of 537's "ResendRequest
-  unanswered, expecting MsgSeqNum N". The text is built in the loop's frame in a bounded buffer with a
-  `static_assert` on its size, as `resend_gap_deadline_`'s is.
-- Then `record_disconnected_unless_already_()`. The wait is not armed (R-1 is FR-004a's exception), so the edge
-  sets the latch, and the loop's exit calls `release_connection_end_()` (D1). The connection closes as soon as
-  the write has returned.
+- At the give-up (D6), `run_liveness_loop` first writes the slot-74 record (below), **before** the Logout's write, so
+  a write that never completes cannot lose it (ruling D-e). Then it takes a replay-gate shared hold as its other emits
+  do (103 D5′.4), claims a pending too-high mark as the other ending Logouts do (`claim_peer_logout_none_`, 103
+  D4.6), and writes a Logout through `inbound_logout_leaf_` (reached from a detached root as `run_peer_logout_bound_`
+  reaches it through `acknowledge_peer_logout_`) with Text(58) `TestRequest unanswered, TestReqID <id>`, `<id>` being
+  `pending_test_req_id_`. The phrase follows FIX-SL 2020 §4.5.5 ("a Logout(35=5) message with the Text(58) field
+  stating that the session was terminated due to lack of a response to a TestRequest(35=1) message, followed by
+  terminating the transport layer connection") and the shape of 537's "ResendRequest unanswered, expecting MsgSeqNum
+  N". The text is built in the loop's frame in a bounded buffer with a `static_assert` on its size, as
+  `resend_gap_deadline_`'s is.
+- **The write is limited** (D2 item 11; kind `r1`): the leaf enters `writing`, so the write is raced against
+  `logout_disconnect_timeout_ms` from its start, and at the deadline the transport is closed and the write returns
+  as a failed one. No wait follows in any case (R-1 is FR-004a's exception).
+- Then `record_disconnected_unless_already_()`. The edge sets the latch, and the loop's exit calls
+  `release_connection_end_()` (D1). The connection closes as soon as the write has returned, or at the limit.
 - **When the Logout cannot be written**, the leaf's own dispositions record `Disconnected` or leave it to the loop's
-  `record_disconnected_unless_already_()`, and the close follows the same way. Contract C-3.2's five classes, each
-  a cell asserting the slot-74 record's `logout_sent=0` and the peer's EOF, each with its own mutant: the buffer
-  cannot hold the CompIDs (`if (lo_result)` false); `toAdmin` throws (the leaf records `Disconnected` and returns
-  `app_callback_threw`); the number assignment fails (`record_disconnected_unless_already_()` and the error); the
-  store fails (on a persistent store `store_then_emit` returns the error, which the leaf discards; on a volatile
-  store the failure is logged and the write proceeds, so both are cells); the write fails (`live_write_serialized_`
-  returns `dispatch_aborted`, and the leaf discards it with `(void)emit_r`, so the leaf returns success and the
-  loop must still record and close). The assignment-failure cell is R-1's, not the liveness emission's
-  `LivenessAssignFails` (contract C-1 row 8).
-- **Observable surface for slot 74.** One `FIXPP_SLOG` warn record, written at the give-up whether or not the
-  Logout was written:
-  `session ended: TestRequest unanswered: test_req_id={} threshold_ms={} logout_sent={} error={}`, `logout_sent`
-  being the transmitted bit of D2 item 1, `error` being
-  `static_cast<uint64_t>(error::session_test_request_unanswered)`, registered in `src/log/format_registry.cpp`
-  beside 093's records. No rate bound: once per connection, as `note_establishment_timeout_`. The C ABI sees the
-  wire (the Logout, then EOF), the log through its logger, and `fixpp_session_is_established` turning false. No
-  call returns slot 74; that stays as today and is stated in B&L.
+  `record_disconnected_unless_already_()`, and the close follows the same way. Contract C-3.2's six classes, each a
+  cell asserting the slot-74 record, the wire (no complete Logout at the peer, except the volatile-store class) and
+  the peer's EOF, each with its own mutant: the buffer cannot hold the CompIDs (`if (lo_result)` false); `toAdmin`
+  throws (the leaf records `Disconnected` and returns `app_callback_threw`); the number assignment fails
+  (`record_disconnected_unless_already_()` and the error); the store fails (on a persistent store `store_then_emit`
+  returns the error, which the leaf discards; on a volatile store the failure is logged and the write proceeds, so
+  both are cells); the write fails (`live_write_serialized_` returns `dispatch_aborted`, and the leaf discards it with
+  `(void)emit_r`, so the leaf returns success and the loop must still record and close); the write does not complete
+  (a blocked transport write; D10's write-limit cells). The assignment-failure cell is R-1's, not the liveness
+  emission's `LivenessAssignFails` (contract C-1 row 8).
+- **Observable surface for slot 74.** One `FIXPP_SLOG` warn record, written at the give-up before the write:
+  `session ended: TestRequest unanswered: test_req_id={} threshold_ms={} error={}`, `error` being
+  `static_cast<uint64_t>(error::session_test_request_unanswered)`, registered in `src/log/format_registry.cpp` beside
+  093's records. Round 1's `logout_sent={}` field is dropped: it was the leaf's transmitted bit, so it could only be
+  written after the write, which is what a blocked write never reaches (Gate A round 2, Codex #5). Whether the Logout
+  went out is observable on the wire. No rate bound: once per connection, as `note_establishment_timeout_`. The C ABI
+  sees the wire (the Logout, then EOF), the log through its logger, and `fixpp_session_is_established` turning false.
+  No call returns slot 74; that stays as today and is stated in B&L.
 - **`unanswered_tr_` is deleted** (it has no reader; its writes in `answer_pending_test_request_`, the in-sequence
   Heartbeat arm of `on_inbound_active_` and the loop go with it), with its declaration comment in `session.hpp`.
   The "(Phase 6 US4 wires the Logout emission before Disconnected.)" comment is deleted (FR-018).
@@ -368,22 +488,48 @@ refused peer needs (D-b).
 **Alternatives rejected.** *Keeping the deadline as the close and relabelling its event* (a new "refused" event):
 it holds a refused connection for up to `logon_timeout_ms`, which Q1 rules out.
 
-## D5 — An out-of-sequence Heartbeat with sequence validation off (FR-009, #582)
+## D5 — An out-of-sequence Heartbeat with sequence validation off (FR-009, #582), and the TestReqID rule (ruling D-d)
 
-**Decision.** In `on_inbound_active_out_of_sequence_`'s Heartbeat branch, the call to
+**Decision (#582).** In `on_inbound_active_out_of_sequence_`'s Heartbeat branch, the call to
 `answer_pending_test_request_(hdr.test_req_id)` runs when a TestRequest is pending and either (the frame is too
 high and a resend is outstanding) or `!cfg_.validate_sequence_numbers`. The rest of the branch is unchanged: no
-advance, no persist, no `fromAdmin`, no echo. A matching or absent 112 answers; another 112 ends the session
-silently, as in sequence, and the pump closes it (D1). With the knob on, the predicate is today's (B-537-3,
-103's D6). The routine's existing comment ("Whether a TestRequest is pending is each caller's test") stands.
+advance, no persist, no `fromAdmin`, no echo. With the knob on, the predicate is today's (B-537-3, 103's D6). The
+routine's existing comment ("Whether a TestRequest is pending is each caller's test") stands.
+
+**Decision (D-d, the 112 rule on every Heartbeat route).** One predicate, `classify_test_req_id_(std::string_view)`,
+replaces the two comparisons that exist today, the in-sequence Heartbeat arm of `on_inbound_active_` ("We have an
+outstanding TestRequest. Check echo.") and `answer_pending_test_request_` (which the too-high Heartbeat route of
+`on_inbound_active_too_high_`, the Heartbeat branch of `on_inbound_active_out_of_sequence_` and #582's knob-off route
+call). It returns **answers** (absent, or equal to
+`pending_test_req_id_`), **earlier**, or **mismatch** (data-model E-4's table). Earlier: the 112 is `TR` followed by
+the canonical decimal of a number in the modular window `(test_request_id_floor_, next_test_request_id_]`, other than
+the pending one; the floor is a new per-Session `std::uint32_t` set to `next_test_request_id_` at every connection
+start (`open()`, `install_reconnected_transport`, `attach_accepted_transport`), so a reconnect starts a new set. The
+generator makes "earlier" decidable from the value (F-15), with bounded memory (two integers). An earlier 112 does
+not clear the pending TestRequest and does not end the session; the frame has refreshed liveness as every accepted
+frame does. A mismatch ends the session silently, `session_testreqid_mismatch`, through `end_session_silently_` (D2
+item 4), and the pump closes it (D1). `answer_pending_test_request_` returns false only for a mismatch. Edge cases:
+- No TestRequest pending: the 112 is not compared, as today (both sites test `!pending_test_req_id_.empty()` first).
+- An absent 112 answers, as today.
+- A 112 that is not `TR` plus canonical digits (a leading zero, a sign, letters, an overflowing number): never sent,
+  so a mismatch.
+- A 112 of a previous connection: outside the window, so a mismatch.
+- More than 2³² − 1 TestRequests on one connection: the window covers every value, so every canonical `TR<n>` reads
+  as earlier (B-105-5 states it; unreachable in practice).
+- It resolves the round-1 consequence of D-c (N-7): a late Heartbeat carrying TR1's 112 after TR2 was sent is now an
+  earlier answer, not an ending.
+Cells: each outcome on the in-sequence arm and on `answer_pending_test_request_` (a mutant per site that restores
+the plain comparison), the floor reset across `drive_reconnect`, a non-canonical 112, and the late-TR1 cell of D10.
 
 **Rationale.** It is the smallest change that makes the knob-off Heartbeat reach the TestReqID rule the knob-on
 paths already share. QuickFIX/J is the only engine with the knob, and it clears the pending TestRequest before
-its sequence checks (`state.clearTestRequestCounter()` on `Session.next(Message)`'s path); fixpp keeps the 112 comparison (FIX-SL §4.5.5, TC scenario 6),
-the split the spec's Departures table records.
+its sequence checks (`state.clearTestRequestCounter()` on `Session.next(Message)`'s path); fixpp keeps the 112
+comparison (FIX-SL §4.5.5, TC scenario 6), the split the spec's Departures table records. The owner's D-d keeps
+the comparison's purpose (a 112 fixpp never sent is a broken peer) without disconnecting a peer that answers late.
 
 **Alternatives rejected.** *Deliver the knob-off Heartbeat to the knob-off delivery arm* (`fromAdmin`): it changes
-what the application sees for every out-of-sequence Heartbeat, which #582 does not ask.
+what the application sees for every out-of-sequence Heartbeat, which #582 does not ask. *A set of sent TestReqIDs*:
+unbounded memory, where the generator's monotonic counter gives the same answer with two integers.
 
 ## D6 — TestRequest timing and `test_request_threshold` (FR-010 to FR-012, R-3)
 
@@ -393,23 +539,28 @@ what the application sees for every out-of-sequence Heartbeat, which #582 does n
   1.2 × HeartBtInt in milliseconds. HeartBtInt is whole seconds, so 1.2 × H is exactly `H × 1200` ms with no
   rounding; the product saturates at `milliseconds::max()` (a `detail` helper beside `deadline_after`, with
   `constexpr` cells).
-- **The two instants.** TestRequest at `deadline_after(last_inbound_steady_, T)`; give-up at
+- **The instants.** TestRequest at `deadline_after(last_inbound_steady_, T)`; give-up at
   `deadline_after(deadline_after(last_inbound_steady_, T), T)`, two saturating steps with no product formed, the
-  shape of `detail::resend_gap_deadline`. The outbound Heartbeat cadence (1 × HeartBtInt) and the gap deadline
-  (2 × HeartBtInt, B-537-2) are unchanged. The main sleep is the earlier of the Heartbeat instant and the
-  TestRequest instant; the "inbound arrived" test at the loop's top reads the TestRequest instant, not
-  `heartbt_int` as today.
-- **The give-up is measured from the last inbound frame** (clarification D-c; F-13). After the grace sleep the loop
-  re-reads `last_inbound_steady_` and gives up only when a TestRequest is pending and the clock is at or past the
-  give-up instant computed from that read. Otherwise it goes back to its top, which recomputes both instants, so
-  outbound Heartbeats resume; `pending_test_req_id_` stays set, so the TestReqID(112) rule still applies to a later
-  Heartbeat, and a further T of silence sends a new TestRequest whose TestReqID becomes the pending one (as the loop
-  assigns it today). Re-sleeping in the grace instead would leave fixpp outbound-silent for as long as a peer kept
-  sending without answering. This is QuickFIX C++'s observable (`Session::verify` ends every accepted frame with
-  `lastReceivedTime` and `testRequest(0)`, and `timedOut` is the time since the last receipt) and QuickFIX/Go's
-  (the peer timer reset on every frame); fixpp keeps the 112 comparison (spec Departures). Cell: application traffic
-  after the TestRequest and no Heartbeat; the session is Active at 2T after the TestRequest's instant and gives up at
-  2T after the last frame.
+  shape of `detail::resend_gap_deadline`; Heartbeat at `last_outbound_steady_ + H`. The outbound Heartbeat cadence
+  (1 × HeartBtInt) and the gap deadline (2 × HeartBtInt, B-537-2) are unchanged.
+- **One sleep per iteration** (Gate A round 2, N-2; data-model E-4). The loop sleeps until the earliest **eligible**
+  instant and acts on every eligible instant reached: while a TestRequest is pending with no inbound frame since it
+  was sent, only the give-up is eligible; otherwise the Heartbeat and the TestRequest are. The round-1 design kept
+  round 0's uninterruptible grace sleep and re-read `last_inbound_steady_` only after it, so with H = 10 s and
+  T = 12 s a frame at 13 s that does not answer TR1 left fixpp outbound-silent until about 24 s, though the next
+  Heartbeat was due at 22 s, against FR-010's "with inbound silent", C-6.3 and QuickFIX C++, where that frame's
+  `testRequest(0)` makes `needHeartbeat` true at 22 s.
+- **The give-up is measured from the last inbound frame** (clarification D-c; F-13). The give-up instant is computed
+  from the `last_inbound_steady_` read at the top of each iteration, and is eligible only while no inbound frame has
+  arrived since the pending TestRequest. A frame after the TestRequest therefore defers the give-up and makes the
+  Heartbeat and the next TestRequest eligible; `pending_test_req_id_` stays set, so the TestReqID(112) rule still
+  applies to a later Heartbeat (D5), and a further T of silence sends a new TestRequest whose TestReqID becomes the
+  pending one (as the loop assigns it today). This is QuickFIX C++'s observable (`Session::verify` ends every
+  accepted frame with `lastReceivedTime` and `testRequest(0)`, and `timedOut` is the time since the last receipt)
+  and QuickFIX/Go's (the peer timer reset on every frame); fixpp keeps the 112 comparison (spec Departures). Cells:
+  application traffic after the TestRequest and no Heartbeat answer, the session Active at 2T after the
+  TestRequest's instant and given up at 2T after the last frame; and N-2's cell (H = 10 s, T = 12 s, a frame at 13 s:
+  a Heartbeat at 22 s, TR2 at 25 s, no Heartbeat at 35 s, the give-up just after 37 s).
 - **The `+1ns` guard** is a third saturating step:
   `deadline_after(give_up_instant, std::chrono::nanoseconds{1})`. `deadline_after`'s template accepts any signed
   whole multiple of the time point's tick, and `fixpp::core::steady_time_point` is `std::chrono::steady_clock`'s, so
@@ -418,11 +569,11 @@ what the application sees for every out-of-sequence Heartbeat, which #582 does n
   equality does not run the give-up before a test can deliver its echo (`TR_DistinctNow`'s comment); it is R-3's
   "after 2T", within one tick. Cells: exactly 2T, the echo still wins; 2T + 1 ns, the give-up; a `constexpr` cell at
   the saturated value (`steady_time_point::max()` in, `max()` out).
-- **The Heartbeat during the grace window.** The loop sleeps through the grace with inbound silent and sends no
-  Heartbeat there, as today. With T = 1.2 × HeartBtInt that window is longer than HeartBtInt, so a Heartbeat due
-  inside it is skipped, which is QuickFIX C++'s rule (`needHeartbeat` requires `!testRequest()`). FR-010 and contract
-  C-6.3 state it, and a cell pins it (H = 10 s, a silent peer: a Heartbeat at 10 s, the TestRequest at 12 s, no
-  Heartbeat at 22 s, the give-up just after 24 s).
+- **No Heartbeat while the TestRequest waits on a silent peer.** With T = 1.2 × HeartBtInt the window from the
+  TestRequest to the give-up is longer than HeartBtInt, so a Heartbeat due inside it is not sent while inbound stays
+  silent, which is QuickFIX C++'s rule (`needHeartbeat` requires `!testRequest()`). FR-010 and contract C-6.3 state
+  it, and a cell pins it with a positive control (H = 10 s, a silent peer: a Heartbeat at 10 s, the TestRequest at
+  12 s, the session Active at 22 s with no Heartbeat, the give-up just after 24 s).
 - **The liveness predicate** `liveness_may_originate_()` is tested after every suspension (D2 item 6).
 - **Validation (FR-011).** A set threshold of zero or below is refused: `Session::open()` and
   `Engine::register_session` return `invalid_session_config`, as for `logon_timeout_ms == 0` (093); the TOML
@@ -541,20 +692,26 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
   (D8), `test_105_tls_close.cpp` (FR-002 on `loopback_tls_session_harness.hpp`), and `test_105_support.hpp`.
   Config cells extend `tests/config/test_load_negative_battery.cpp`; C-ABI cells extend
   `tests/capi/recovery_liveness_capi_witness_test.cpp`. `ReconnectFsm` removals are proven by the build.
-- **RED first on the base** for every behaviour cell (FR-017): the cell is written, run on `52aeed4e` and shown RED
-  for its stated reason before the fix.
+- **RED first on the base, or a guard with its mutant** (FR-017; Gate A round 2, N-3). A behaviour cell is written,
+  run on `52aeed4e` and shown RED for its stated reason before the fix. A regression guard (a rule the base already
+  keeps: B-093-4's establishment-deadline close, B-537-3's knob-on rule, HeartBtInt 0, the closes `close()` and the
+  drain own) is GREEN on the base by design; its RED is its named mutant. Quickstart section 3 marks every cell one
+  or the other. A cell whose oracle the base meets for another reason (the session already `Disconnected`) carries a
+  positive control at the instant it tests: `fixpp_session_is_established` or `fsm_state() == Active` true, and for
+  a timing cell the TestRequest on the wire.
 - **The close observable is the peer's.** Engine cells use `engine_loopback_harness.hpp` / `plain_engine_rig.hpp`
   and assert the peer's read ends (EOF, or the TLS close_notify on the TLS arm), never a session flag.
 - **Bounds from the competing timeout.** Every competing timeout (the establishment deadline, the liveness
   instants, `logout_disconnect_timeout_ms`) runs on the mock clock. A cell for an "at once" class (SC-001) holds
-  the mock clock still and pumps the executor until the peer's read ends or a wall cap passes. Four timers run on
+  the mock clock still and pumps the executor until the peer's read ends or a wall cap passes. Five timers run on
   wall time, not on the mock clock, and can also close a connection: the TLS handshake and first-frame deadlines,
-  `close()`'s grace timer (`close_grace`) and `drain_for_reconnect_`'s bound, each an `asio::steady_timer`. A cell
+  `close()`'s grace timer (`close_grace`) and `drain_for_reconnect_`'s bound, each an `asio::steady_timer`, and
+  `asio_tls_transport::close_async`'s `close_deadline` (`tls_close_timeout`, after which it closes abortively). A cell
   sets each one it can reach well above its wall cap (or does not reach it), so with the clock frozen a hit is the
   mechanism's. The spurious-hit arm: the same cell
   with the latch's consumer deleted (a mutant) must go RED, and a cell with a short `logon_timeout_ms` asserts the
   EOF arrives before the deadline and with no `session_event_establishment_timeout`.
-- **R-2 cells, one or more per row of contract C-2 "While the wait is armed"** (W-1 to W-14), each with the mutant
+- **R-2 cells, one or more per row of contract C-2 "While the wait is armed"** (W-1 to W-15), each with the mutant
   that deletes its mechanism:
   - W-1: the peer's Logout at the number a real peer uses (C-2.2): below NextNumIn after the too-low Logout, above it
     after the gap-deadline Logout, at NextNumIn after the SendingTime Reject's Logout; EOF follows it, with the reset
@@ -573,31 +730,67 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
     mismatch, MsgSeqNum 0), each followed by an application message (reaches `fromApp`) and the peer's Logout
     (resets under `reset_on_logout`), with `onLogout` counted once at the wait's end. Mutant: the silent-ending
     helper records `Disconnected` while armed.
-  - W-9: a store failure during the wait closes at once.
-  - W-10: `send()` refused. Numbering (C-2.3): a send held in its store call, the ending triggered, the store
+  - W-9, one cell per disposition of an internal failure during a wait armed after Active (Gate A round 2, root
+    cause #1), each asserting peer EOF with the mock clock frozen, the bound joined, `onLogout` once and no second
+    Logout: (1) an arm returns an error with `Disconnected` written (`StoreFailureDuringWait_EofAtOnce`); (2) an arm
+    returns an error without it (a persist failure of an in-sequence application message); (3) an arm returns success
+    with `Disconnected` written (`TooHighDuringWait_ResendRequestAssignFails_EofAtOnce`, `inbound_resend_request_leaf_`'s
+    failed assignment); (4) a failure in a non-pump root (`SendHeldInStoreAcrossTheEnding_StoreFails_EofAtOnce`, the
+    W-10 numbering setup with a failing store). Plus the direct-Session form of (1), closing at the next `send()`.
+    Mutant: the round-1 predicate (the owe refused whenever `armed`).
+  - W-10: `send()` refused, with the session shown Active (`fixpp_session_is_established` true) at the same instant,
+    since on the base the session is `Disconnected` and refuses the send with the same error. Numbering (C-2.3): a send held in its store call, the ending triggered, the store
     released; the send's number is below the Logout's (the wire order is not asserted; L-105-e).
   - W-11: the wait armed one tick before the Heartbeat instant, and one tick before the give-up instant; nothing
-    originated. Mutant: one post-suspension test reverted to `fsm_state_ != Active`.
+    originated, with the session shown Active at the instant tested (on the base the loop leaves at its state test
+    because the ending wrote `Disconnected`). Mutant: one post-suspension test reverted to `fsm_state_ != Active`.
   - W-12: EOF at exactly the bound, not before (advance to bound − 1 ms, assert open; advance 1 ms, assert EOF); the
     bound does not slide (a Heartbeat answering the peer's TestRequest mid-wait).
   - W-13: `close(graceful)` during the wait, on TLS, asserting close_notify and the close at the bound's instant on
-    the mock clock, with `close()`'s grace (wall time) set long; a cell that sees only EOF would pass through the
-    grace's abortive close. Mutant: the bound's live predicate tests `closing_or_stopped_()`.
+    the mock clock. `close()`'s grace is the same knob (`close_grace` expires after
+    `logout_disconnect_timeout_ms`), so the two are separated only through the clock split: the knob set long (well
+    above the wall cap) and the mock clock advanced to the bound well inside that wall time; a cell that sees only
+    EOF would pass through the grace's abortive close. Mutant: the bound's live predicate tests
+    `closing_or_stopped_()`.
   - W-14: `close(terminal)`, `Engine::stop()` and the drain during the wait: one close each.
   - The state machine (data-model E-3): before Active, the bound survives the refusal's own `Disconnected` write
-    (mutant: the bound spawned before that write; mutant: the arming after it); the bound's pre-Active expiry closes
-    (the second setter); timeout 0 and no clock arm nothing and close after the write; a second write of
-    `Disconnected` owes nothing (mutant: the edge's transition test deleted).
+    (mutant: the bound exits on any wake; mutant: the arming after that write); the bound's pre-Active expiry closes
+    (the second setter); timeout 0 and no clock arm nothing and close after the write. "A second write of
+    `Disconnected` owes nothing" has no peer-visible observable (data-model E-2 I-5) and is a census row, not a cell.
+  - The pending too-high mark (N-5; D2 item 1): a too-high Logout while a resend is outstanding, then a non-advancing
+    frame after the gap deadline; EOF after the deadline's Logout with the clock frozen. Mutant: the claim's result
+    ignored (the wait armed).
+  - No application (N-4): one class-P cell with `EngineConfig::application` null; EOF at once. Mutant: the edge's
+    owe moved below the no-application return.
+  - Spawn failures (Codex #1): an allocation-failure seam at each new spawn (the close frame, the bound), asserting
+    `close()` returns, both counters at 0, and, for the bound, that the ending proceeds as with timeout 0 (EOF after
+    the write).
+- **The write limit** (ruling D-e; D2 item 11), on a transport whose write can be held until the transport closes
+  (the scripted transport's `write_hold`, which `test_103_resend_state_reconnect.cpp` sets, or a seam in
+  `test_105_support.hpp`), and the TLS arm on a peer that stops reading (a zero window). RED on the base: the held
+  write never returns and nothing closes. Two shapes, each for R-1, an R-2 Logout after Active, an R-2 Logout before
+  Active and a reply: the Logout is itself the blocked write; and the Logout is queued at `write_gate_` behind a
+  blocked application send. Each asserts: open at the bound − 1 ms, no complete Logout at the peer, EOF at the bound
+  (plain), close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogout` once, no wait after it
+  (the peer's Logout sent after the bound changes nothing), and for R-1 the slot-74 record present. A control cell:
+  the write released at the bound − 1 ms, the Logout complete on the wire, then the R-2 wait's remaining budget, EOF
+  at the bound; the discriminating oracle is the wire (the Logout bytes and the close_notify present or absent), not
+  the EOF instant. The spurious-hit arm: delete the limit (mutant) and assert the connection still open past the
+  bound, which also shows that nothing else closes it (the liveness loop originates nothing during the write; before
+  Active the pump's establishment deadline cannot fire while the arm is suspended, and `logon_timeout_ms` is set well
+  above the bound; `close_grace` and the drain's bound are not reached). Timeout 0: the write unbounded (the held
+  write keeps the connection open past any instant, a guard with the mutant "0 read as close at once").
   - The pre-Active wait bounded by the establishment deadline, with no timeout event.
 - **Timing cells that discriminate.** H = 10 s on the mock clock: no TestRequest at 11 s (the base sends at 10 s),
   one at 12 s; Active at 23.9 s (the base ends near 20 s), ended at 24 s plus the guard (cell name
   `…EndedAt24sPlusGuard`). A set T (7 s): TestRequest at 7 s, give-up at 14 s plus the guard. Both roles. The guard
   cells of D6 (exactly 2T, 2T + 1 ns, the saturated `constexpr` cell); D-c's cell (traffic after the TestRequest,
-  no Heartbeat); D-c's consequence (traffic after TR1, then T of silence draws TR2, then a late Heartbeat with TR1's
-  112 ends the session, newly reachable and within the ruling); the skipped Heartbeat of the grace window; the two
-  precedence cells.
+  no Heartbeat); the late answer to TR1 (traffic after TR1, then T of silence draws TR2, then a Heartbeat with TR1's 112: the session
+  stays Active and TR2 stays pending, ruling D-d; the give-up then follows 2T after that frame); N-2's cell (a Heartbeat
+  at 22 s, TR2 at 25 s, none at 35 s, the give-up just after 37 s); the skipped Heartbeat of a silent peer, with the
+  session shown Active and the TestRequest at 12 s as its positive control; the two precedence cells.
 - **Lifetime cells** (ASan): a closed Session destroyed after each new frame has exited, the R-2 bound and the
-  close frame; the close frame outliving its Session is legal (it holds only the transport and the counter).
+  close frame; the close frame outliving its Session is legal (it holds only the transport and its join).
 - **Both roles** for every engine cell, by `INSTANTIATE_TEST_SUITE_P` over `session_role`, as 537's cells do.
 - **The cell recipe for moved timings:** `grep -rlnE 'TestRequest|35=1' tests/session tests/capi tests/conformance tests/interop`,
   read for a mock-clock advance across HeartBtInt; the whole `session` and `capi` suites are run, since a missed
@@ -606,11 +799,20 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
   confined; TSan proves it), gcc-release of the touched targets, and the MSVC build of the feature's targets before
   the first labelled push (the project's rule for a feature's own targets). The TLS arm runs on every lane that runs
   `loopback_tls_session_harness.hpp` today.
-- **Benchmarks (Article VIII §3).** Per message, only the pump's latch test is new. `on_inbound_frame_bench` calls
-  `on_inbound_frame` directly and bypasses the pump; the plan runs paired base-vs-candidate any bench that drives
-  `run_read_pump` (`grep -rln 'Engine\b\|run_read_pump' bench`; `bench/threading/bench_threading.cpp` and
-  `bench/session/engine_send_bench.cpp` are the candidates to read) and states in the evidence file if none does,
-  as 104 did for `engine_send_bench`.
+- **Benchmarks (Article VIII §2, §3; ruling D-f).** The per-frame cost is two tests, not one: the pump's latch test
+  (`run_read_pump`) and the ending-phase test in `on_inbound_active_` (the response test of D2 item 3, made on every
+  frame); per write, `store_then_emit`'s transmitted out-parameter; and members and frame state in the Active arms and
+  the liveness loop. Round 1's "only the pump's latch test is new" was false (Gate A round 2, Codex #2). 104's verify
+  record (step 8) is the reason the runs matter: a buffer held across a `co_await` cost +22 % on
+  `session_send_bench` through asio's frame recycler. Owed, paired base-vs-candidate A-B-A-B: `on_inbound_frame_bench`
+  (the per-frame test and the arms' frames), `session_send_bench` (`send_body_`, `store_then_emit`) and
+  `engine_send_bench`, plus **a new pump case in `engine_send_bench`'s harness**, which already holds a published
+  Active session whose read pump waits on a scripted read: the case feeds inbound Heartbeat and application frames
+  through `run_read_pump`, so the latch test is measured on the unarmed path. In `bench/ci-suite.txt`,
+  `engine_send_bench` is a `paired` entry, `on_inbound_frame_bench` is listed unpaired (execution-checked, no timing
+  limit) and `session_send_bench` is not listed, so the runs for those two are local and recorded in the verify
+  evidence; the new case is part of the `engine_send_bench` binary, so its paired entry covers it. No "none drives the pump"
+  statement is admissible (Article VIII §3: no perf change without a benchmark in the same PR).
 - **Supersession pins that flip** (FR-019): `GapDeadlineOutOfSequenceSite.FrameAtTheBoundDrawsTheLogoutAndTheTransportStaysOpen`
   and its helper `expect_logout_and_open_transport` (its `state_after_the_bound_frame == Disconnected` also flips:
   the state is Active during the wait), `Capi537Witness.Deadline_CompIdsLeaveNoRoomForTheLogout_EndsSilently`,
@@ -653,13 +855,21 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
     B-093-4 (the deadline no longer closes a refused connection), B-092-2 and B-092-5 (the grace window is 2T),
     B-103-10 ("then `Disconnected`" becomes "then the R-2 wait, and `Disconnected` at its end") and B-104-6 (still
     `Disconnected` at once, and the connection closes at the peer's Logout or the bound), and B-103-13 (the direct
-    driver's close-before-destroy precondition also covers the R-2 bound; the close frame is exempt, holding only
-    the transport and its counter).
+    driver's close-before-destroy precondition: run `close()` or `drive_reconnect` and let the R-2 bound,
+    `run_ending_logout_bound_`, exit before destroying the Session, as for the too-high Logout's bound; the close frame
+    is exempt, holding only the transport and its join; `Lifetime105.*` are its cells).
   - *New rows:* `B-105-1` the close rule by ending class (FR-001 to FR-008); `B-105-2` R-2's wait and its
-    observables; `B-105-3` R-1 and its departure from QuickFIX; `B-105-4` the #582 rule and its 112 split;
-    `B-105-5` the TestRequest timing and the threshold's validation; `B-105-6` the pre-session and listener records;
-    `B-105-7` BREAKING C-ABI 1.18 and the C++ layout changes; an `L-105-*` row for each disclosure of the
-    contract's "Disclosed" section (L-105-b to L-105-f; L-105-a was withdrawn in Gate A round 1 and is not used).
+    observables, and the write limit on every ending Logout (ruling D-e: one budget from the write's start; a cut
+    write closes the connection and counts as not sent); `B-105-3` R-1 and its departure from QuickFIX (the record
+    written before the write); `B-105-4` the #582 rule; `B-105-5` the TestRequest timing, the threshold's
+    validation and the TestReqID(112) rule of ruling D-d (an earlier 112 of this connection neither answers nor ends;
+    a 112 never sent ends; the set restarts at each connection; past 2³² − 1 TestRequests on one connection every
+    canonical `TR<n>` reads as earlier); `B-105-6` the pre-session and listener records; `B-105-7` BREAKING C-ABI 1.18
+    and the C++ layout changes; an `L-105-*` row for each disclosure of the contract's "Disclosed" section (L-105-b to
+    L-105-g; L-105-a was withdrawn in Gate A round 1 and is not used). L-105-f is written as narrowed by ruling D-e
+    (non-ending writes stay unbounded, including a liveness emit queued behind a blocked send, which never reaches
+    R-1), names the follow-up fixpp issue for bounding every write (filed before Gate B, labelled from
+    `gh label list`), and names the round-1 text it supersedes. L-105-g is the TLS abortive fallback of a cut write.
 - **Brain pages:** `brain/components/session.md` (R-6, and its deferral of the grace-check reading to B27),
   `brain/components/session-liveness-and-reconnect.md` (the `ReconnectFsm` correction block, and the liveness
   table's two thresholds as a pointer to source), `brain/components/engine-accept-path.md` (the first frame through
@@ -681,9 +891,10 @@ It is docs only; it touches no code and no test.
 
 - **R1. Two closes on one TLS transport** (`close_transport_` and `Engine::stop()`'s step 2). `close_async`
   subsumes the second caller (F-5), and stop's step 4 `close()` joins the counter. A TSan cell runs the race.
-- **R2. A latch left set with no consumer** (a spawn that threw; a direct Session whose application never calls
-  anything again). The connection then ends at `close()` or `Engine::stop()` as today; a Debug assert in
-  `close()` cannot help, so the census table's "every root" column is the control.
+- **R2. A latch left set with no consumer** (a close-frame spawn that threw; a direct Session whose application never
+  calls anything again). The spawn's `catch` leaves the latch set and the counter balanced, so the connection ends at
+  `close()` or `Engine::stop()` (L-105-b); the census table's "every root" column is the control, and each spawn has
+  an allocation-failure cell (D10).
 - **R3. Timing cells on real clocks.** Every competing timeout is on the mock clock (D10); the wall cap exists only to
   stop a broken cell.
 - **R4. Interop peers.** QuickFIX peers in `tests/interop` now see a Logout before EOF on the unanswered TestRequest
@@ -710,9 +921,9 @@ The spec is amended for each (Clarifications, FR-001, FR-004, FR-010, FR-013).
 
 ## Owner questions (Gate A round 1)
 
-- **OQ-3 (scope; review finding N-5): bound R-1's Logout write?** A write that never completes blocks every
-  Logout-first ending behind `write_gate_` (F-14), so such an ending closes only at `close()` or `Engine::stop()`.
-  This round discloses it (contract C-11 L-105-f) with a follow-up issue, which is in scope. The alternative is a
-  design addition: race R-1's leaf with `logout_disconnect_timeout_ms`, then `close_async`, which falls back to the
-  abortive close (B-348-1). It would also be the first write in the session with a bound, so it is the owner's call
-  whether it belongs to 105 or to the follow-up.
+- **OQ-3 (scope; round-1 finding N-5): closed by ruling D-e (owner, 2026-11-20).** Every Logout fixpp writes to end a
+  session is time-limited in 105 (D2 item 11, contract C-2.7); L-105-f narrows to non-ending writes and gets a
+  follow-up issue. The round-1 interim decision (disclose the blocked-write ending with a follow-up) is superseded by
+  D-e, and with it round 2's Codex #5 fix shape (FR-003 and FR-004 "except a write that never completes"): the
+  exemption is no longer needed, because FR-003's "if the Logout cannot be sent, the session MUST still close" now
+  holds by the limit.
