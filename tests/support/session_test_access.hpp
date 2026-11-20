@@ -42,6 +42,14 @@ struct session_test_access {
         return s.store_then_emit(stamped_seq, frame);
     }
 
+    // Drive persist_inbound_advance_ directly (104, cell R-1r's seam arms). No pump arm issues
+    // an inbound persist once a reset point has run, so contract RR-4's boundary in it is
+    // witnessed through this forwarder.
+    [[nodiscard]] static asio::awaitable<fixpp::core::expected_t<void>> persist_inbound_advance(
+        Session& s) noexcept {
+        return s.persist_inbound_advance_();
+    }
+
     // True iff the session validates: validate_inbound_messages and open() set a route with a
     // validator (099-fixt-appl-version-validation, data-model E-6). A FIXT session's route holds
     // one whether it validates or not. Lets 041 T016 (SC-005) prove the default path constructs
@@ -312,6 +320,14 @@ struct session_test_access {
         return s.waited_terminal_closes_;
     }
     [[nodiscard]] static bool logout_cut(Session const& s) noexcept { return s.logout_cut_; }
+
+    // 104 (data-model "`logout_seen_`"): the receipt marker, read by value, and its type
+    // under a name a cell can spell (the type is private to Session). Read it on the
+    // session's serialisation domain.
+    using receipt_marker = Session::receipt_marker;
+    [[nodiscard]] static receipt_marker logout_seen(Session const& s) noexcept {
+        return s.logout_seen_;
+    }
 };
 
 }  // namespace fixpp::session

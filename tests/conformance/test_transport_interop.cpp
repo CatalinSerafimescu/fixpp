@@ -73,7 +73,8 @@ TEST(DISABLED_TransportInteropConformance, TC008_SequenceResetReset) {
     GTEST_SKIP() << "[seam #1] Requires QuickFIX test peer — Phase 8 interop run";
 }
 
-// TC-009: MsgSeqNum too low on Logon → session reject.
+// TC-009: MsgSeqNum too low on Logon → a Logout whose Text(58) is "MsgSeqNum too low, expecting
+// <N> but received <M>", then disconnect (104, research D5; no Reject).
 TEST(DISABLED_TransportInteropConformance, TC009_LogonSeqNumTooLow) {
     GTEST_SKIP() << "[seam #1] Requires QuickFIX test peer — Phase 8 interop run";
 }

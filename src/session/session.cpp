@@ -7,6 +7,19 @@
 // resolution chain + linkable open()/close() placeholders. The 2d-owned
 // BEHAVIOUR is wired per user story (T020/T030/T037/T038/T039/T045/T050) —
 // each replaces the marked placeholder body, it is not additive guesswork.
+//
+// 104-sequence-reset-fidelity supersedes three decisions this file implemented, by name:
+//   - 024 contracts/reset-knobs.md C3.1, reset_on_logout on a Logout "in either direction":
+//     a Logout received from the peer resets at its arm's reset point, and no Logout fixpp
+//     sends resets (contract RR-1 and RR-2; B-104-1).
+//   - 093 contracts/inbound-frame-dispositions.md C-6's close() bullet, close() waiting
+//     "only when it is about to issue its teardown reset", event-driven: close() waits by a
+//     poll, whatever the knobs (contract RR-2 item 4, RT-5; B-104-2).
+//   - 027 contracts/next-expected-msgseqnum.md C3's explicit-end case, NewSeqNo = EndSeqNo
+//     + 1: an end at or above the next outbound number is answered through the current
+//     number (contract U6, research D3.3a; B-104-5).
+// A site that implements one names 104 in its comment:
+// `git grep -n '104' -- src/session/session.cpp` lists them.
 #include <algorithm>
 #include <array>
 #include <asio/any_io_executor.hpp>
@@ -514,6 +527,24 @@ void Session::note_establishment_timeout_() noexcept {
                fixpp::log::ArgValue::from_u64(cfg_.logon_timeout_ms));
 }
 
+// ── 104-sequence-reset-fidelity — a failed receipt reset (contract RT-4, O16) ──
+// At a received Logout's reset point, when the receipt reset unit returned an error: one
+// FIXPP_SLOG record carrying the part that failed (the manager set, or the store's reset_to)
+// and its error, through the logger open() resolved and with the session's trace_context; its
+// format string is registered in src/log/format_registry.cpp. No rate bound: a connection has
+// one receipt reset point. On a refusing persistent store the stored numbers keep their
+// pre-reset values (L-104-2).
+void Session::note_receipt_reset_failed_(reset_unit_result const& unit) noexcept {
+    if (unit.manager && unit.store) {
+        return;
+    }
+    auto const failure = !unit.manager ? unit.manager.error() : unit.store.error();
+    FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
+               "received Logout's sequence reset failed, not retried: part={} error={}",
+               !unit.manager ? FIXPP_SLIT("manager") : FIXPP_SLIT("store"),
+               fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(failure)));
+}
+
 // ── 093-inbound-frame-dispositions — a frame over L (FR-013; data-model E-12) ──
 // One FIXPP_SLOG record carrying the failure kind and L, through the logger open()
 // resolved and with the session's trace_context; its format string is registered in
@@ -824,6 +855,16 @@ bool Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Tr
     // connection exists (the drain waited for its counter), so the mark is cleared here.
     peer_logout_.phase = peer_logout_mark::phase_t::none;
     ++conn_gen_;
+    // 104 (contract RR-2 item 6, RR-6 item 2): a received Logout never resets a later
+    // connection, and ruling W's hold ends with the connection it was set on.
+    logout_seen_ = receipt_marker::none;
+    wire_closed_by_reset_ = false;
+    // 104 (contract RR-5 item 1): the thaw, with the marker's `none`, before LogonSent.
+    seqnum_mgr_.thaw(SeqnumManager::freeze_key{});
+    assert(seqnum_mgr_.frozen(SeqnumManager::freeze_key{}) ==
+               (logout_seen_ == receipt_marker::reached) &&
+           "104 RR-5 item 4: after install_reconnected_transport's thaw, frozen differs from the "
+           "marker reached");
 
     // 3. Re-enter LogonSent so on_inbound_frame drives back to Active.
     //    The session's next peer Logon-ack will be processed by the LogonSent
@@ -988,12 +1029,13 @@ std::shared_ptr<fixpp::transport::Transport> Session::live_transport_shared_() c
 // If no live transport is present, returns ok (no-op; pre-live path).
 // NEVER holds the gate across any read (write-submit→complete window only).
 // [transport.hpp's [2h §4.1] RC#3 in-flight contract; FQ-A D-6; gate-b/r2]
-asio::awaitable<fixpp::core::expected_t<void>> Session::live_write_serialized_(
-    std::span<const std::byte> frame) noexcept {
+asio::awaitable<fixpp::core::expected_t<Session::live_write_outcome>>
+Session::live_write_serialized_(std::span<const std::byte> frame,
+                                wire_reset_exemption exemption) noexcept {
     auto live = live_transport_shared_();
     if (!live) {
         // No live transport — pre-live path, no-op.
-        co_return fixpp::core::expected_t<void>{};
+        co_return live_write_outcome::written;
     }
 
     // Acquire the write gate across the completion (not just up to suspension).
@@ -1016,6 +1058,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::live_write_serialized_(
         co_return std::unexpected(fixpp::core::error::dispatch_aborted);
     }
 
+    // 104 (contract RR-6 item 3, ruling W): after the grant and before the write, so every
+    // frame granted the gate once a reset point has run, one that waited on it included, is
+    // held back; a write already handed to the transport before the reset point completes.
+    // The exemption is fixpp's own Logout in a crossing (RR-6 item 4).
+    if (wire_closed_by_reset_ && exemption != wire_reset_exemption::crossing_logout) {
+        co_return live_write_outcome::held_back;
+    }
+
     // Gate held — at most one async_write in-flight. `live` shared_ptr is the
     // keepalive so the transport cannot be freed while we are suspended here.
     fixpp::core::expected_t<std::size_t> write_r;
@@ -1031,7 +1081,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::live_write_serialized_(
     if (!write_r.has_value()) {
         co_return std::unexpected(fixpp::core::error::dispatch_aborted);
     }
-    co_return fixpp::core::expected_t<void>{};
+    co_return live_write_outcome::written;
 }
 
 // 015 T011 — Acceptor attach primitive.
@@ -1241,6 +1291,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::persist_inbound_advance_
     if (!store_is_persistent_) {
         co_return fixpp::core::expected_t<void>{};
     }
+    // 104 (contract RR-4, "By construction"): once the receipt marker is `reached`, no new
+    // inbound persist is issued; the caller continues as after a write. A persist issued
+    // earlier runs to its end (RR-2 item 5).
+    if (logout_seen_ == receipt_marker::reached) {
+        co_return fixpp::core::expected_t<void>{};
+    }
     auto r = co_await store_->next_seqnum(direction_t::inbound, /*increment=*/true);
     if (!r) {
         disconnect_unless_superseded_(arm);
@@ -1335,7 +1391,8 @@ void Session::disconnect_unless_superseded_(std::optional<fsm_state> arm) noexce
 // inline on its uncontended fast path (L-518-1's condition), so nothing here suspends
 // before the store's reset_to. The first manager error stops the set and is returned;
 // the store is then not touched. Otherwise the store's one reset_to runs with
-// reset_unit_in_flight_ set, and the unit signals close() when it clears it.
+// reset_unit_in_flight_ set until it returns or throws, which close() polls (104 deletes the
+// unit's completion signal).
 // Plan OD-25 (supersedes OD-14's in-place shield, which an async_mutex grant replaces):
 // only the reset_to is co_spawned, on this strand, completing through a token bound to
 // an empty cancellation slot. Plan OD-26 names the two parts: running reset_to on its
@@ -1347,21 +1404,69 @@ void Session::disconnect_unless_superseded_(std::optional<fsm_state> arm) noexce
 asio::awaitable<Session::reset_unit_result> Session::run_reset_unit_(seqnum_t next_in,
                                                                      seqnum_t next_out) noexcept {
     reset_unit_result r{};
+    assert(!seqnum_mgr_.frozen(SeqnumManager::freeze_key{}) &&
+           "104 RR-5 item 4: run_reset_unit_'s entry assert: the manager is frozen");
     r.manager = co_await seqnum_mgr_.reset_to_one();
     if (r.manager) r.manager = co_await seqnum_mgr_.set_next_inbound(next_in);
     if (r.manager) r.manager = co_await seqnum_mgr_.set_next_outbound(next_out);
+    assert(!seqnum_mgr_.frozen(SeqnumManager::freeze_key{}) &&
+           "104 RR-5 item 4: run_reset_unit_'s post-set assert: the manager is frozen");
+    // 104 (contract RR-5 items 1 and 4): a receipt's unit (the marker `reached`) freezes the
+    // manager after its manager set, whatever that set returned, and before its first
+    // suspension (reset_unit_in_flight_ and the store's reset_to) or its return with no store;
+    // the manager calls grant inline, so the marker's move, the set and the freeze are one
+    // strand turn. A Logon arm's 141=Y unit runs with the marker not `reached` and freezes
+    // nothing.
+    if (logout_seen_ == receipt_marker::reached) {
+        seqnum_mgr_.freeze(SeqnumManager::freeze_key{});
+    }
+    assert(seqnum_mgr_.frozen(SeqnumManager::freeze_key{}) ==
+               (logout_seen_ == receipt_marker::reached) &&
+           "104 RR-5 item 4: after run_reset_unit_'s freeze, frozen differs from the marker "
+           "reached");
     if (!r.manager || store_ == nullptr) {
         co_return r;
     }
     reset_unit_in_flight_ = true;
-    r.store = co_await asio::co_spawn(
-        co_await asio::this_coro::executor, store_->reset_to(next_in, next_out),
-        asio::bind_cancellation_slot(asio::cancellation_slot{}, asio::use_awaitable));
-    reset_unit_in_flight_ = false;
-    if (reset_unit_wake_) {
-        reset_unit_wake_();
+    // 104 (contract RR-2 item 4): the flag is cleared on every resume, a return or an exception
+    // from the store's reset_to or from co_spawn's launch. It is cleared here and not by a scope
+    // guard, because a frame destroyed unresumed may outlive the Session once close()'s bounded
+    // wait has expired, and a guard's destructor would then write the destroyed Session.
+    try {
+        r.store = co_await asio::co_spawn(
+            co_await asio::this_coro::executor, store_->reset_to(next_in, next_out),
+            asio::bind_cancellation_slot(asio::cancellation_slot{}, asio::use_awaitable));
+    } catch (...) {
+        reset_unit_in_flight_ = false;
+        throw;
     }
+    reset_unit_in_flight_ = false;
     co_return r;
+}
+
+// 104-sequence-reset-fidelity (contract RR-2 items 2, 3 and 5; RR-3 step 3): the receipt
+// marker's move at a receipt arm's reset point. Each caller resets its thread's cancellation
+// state, calls this, and starts run_reset_unit_ when it returns true, with no suspension and
+// no callback between, so the reset point is one strand turn. The too-high Logout's bound is
+// told apart by the 103 mark `acking` (INV-X): it finds `none` and makes its one write. A pump
+// frame finds its own `pending`, or `reached` when close() closed the receipt out, and then
+// runs no unit. Any other value fails the Debug assert.
+bool Session::enter_receipt_reset_point_() noexcept {
+    if (peer_logout_.phase == peer_logout_mark::phase_t::acking) {
+        assert(logout_seen_ == receipt_marker::none &&
+               "104 RR-2 item 5: the too-high Logout's bound found the receipt marker not none at "
+               "its reset point");
+        mark_reset_point_reached_();
+        return true;
+    }
+    assert(logout_seen_ != receipt_marker::none &&
+           "104 RR-2 item 5: a receipt arm's pump frame found the receipt marker none at its "
+           "reset point");
+    if (logout_seen_ == receipt_marker::reached) {
+        return false;
+    }
+    mark_reset_point_reached_();
+    return true;
 }
 
 // 015 T016(d) — initiator Logon emission, extracted from open()'s initiator arm.
@@ -1522,7 +1627,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
         if (!assign_r) {
             // Seqnum overflow — same disposition as build_logon failure above.
             // [W3.4 / /simplify B-8 fix]
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());  // overflow (I-8)
         }
         // 019 T014: toAdmin before transmitting the initiator Logon. [FR-008/010]
@@ -2461,7 +2566,45 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
         }
     }
 
-    // 024 T014 — teardown reset (reset_on_logout / reset_on_disconnect).
+    // 104-sequence-reset-fidelity (contract RR-2 item 4, RT-5; data-model "`Session::close`'s
+    // teardown"), superseding 093's event-driven wait (contract C-6 "close()"; plan OD-1),
+    // which sat inside the predicate block below and had one waker, the unit's completion:
+    // close() waits, after the joins above and before the teardown predicate, whatever the
+    // knobs, while a received Logout is `pending` short of its reset point or a reset unit's
+    // store operation is in flight (a receipt arm's or a Logon arm's). The too-high Logout's
+    // bound was joined above, so its receipt and unit are done by now. The wait is a poll by
+    // post, as the joins above are: each pass re-reads both terms and compares
+    // effective_clock_'s steady time with the bound, logon_timeout_ms from the wait's start
+    // (saturating), and the condition is tested before the first post, so a close() with
+    // nothing outstanding makes no pass. It needs no waker, so no exit from the condition can
+    // be missed. On expiry it records session_event_close_reset_wait_expired and proceeds.
+    // With no clock there is no wait.
+    if (effective_clock_) {
+        // Saturates at steady_time_point::max() when not representable.
+        auto const bound = detail::deadline_after(effective_clock_->steady_now(),
+                                                  std::chrono::milliseconds{cfg_.logon_timeout_ms});
+        while (logout_seen_ == receipt_marker::pending || reset_unit_in_flight_) {
+            if (effective_clock_->steady_now() >= bound) {
+                emit_event(session_event_close_reset_wait_expired{});
+                break;
+            }
+            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+        }
+    }
+    // 104 (contract RR-2 item 4): the close-out. A receipt still `pending` here (the wait
+    // expired, or there was no clock to wait with) never reached its reset point, so it is
+    // not reset under reset_on_logout (RR-1). It is set to `reached`, so that the arm, when it
+    // resumes, runs no unit and issues no further store call (RR-2 item 5).
+    if (logout_seen_ == receipt_marker::pending) {
+        logout_seen_ = receipt_marker::reached;
+        // 104 (contract RR-5 item 1): the freeze, in the turn of the marker's `reached`.
+        seqnum_mgr_.freeze(SeqnumManager::freeze_key{});
+    }
+    assert(seqnum_mgr_.frozen(SeqnumManager::freeze_key{}) ==
+               (logout_seen_ == receipt_marker::reached) &&
+           "104 RR-5 item 4: after close()'s close-out, frozen differs from the marker reached");
+
+    // 024 T014 — teardown reset (reset_on_disconnect).
     // Placement: BEFORE write_gate_.cancel_and_drain() (the first drain).
     // Binding constraint (analyze F1): reset_seqnums_to_one_durable() acquires the
     // seqnum async-mutex via reset_to_one(). If seqnum_mgr_.drain() has already run,
@@ -2469,50 +2612,28 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // silently no-oping without resetting counters. Must therefore run before BOTH
     // drains (write_gate_.cancel_and_drain() and seqnum_mgr_.drain()).
     //
-    // Single-fire guard (C5.1): teardown_reset_done_ prevents a logout+disconnect
-    // double-trigger (e.g. graceful Logout → timeout → terminal close via close()
-    // re-entry) from calling store_->reset() twice. FileStore::reset() is
+    // Single-fire guard (C5.1): teardown_reset_done_ prevents a double trigger (a
+    // re-entered close()) from calling store_->reset() twice. FileStore::reset() is
     // non-idempotent I/O (full atomic-rename + fdatasync + dir-fsync per call).
     //
-    // Predicate: (logout_seen_ && cfg_.reset_on_logout) || cfg_.reset_on_disconnect.
-    //   - reset_on_logout: fires when a Logout occurred in either direction
-    //     (local sent → run_logout_phase1 set logout_seen_; peer received →
-    //      on_inbound_frame 35=5 handler set logout_seen_). [C3.1]
-    //     A Logout that was cut is stored and not transmitted, and
-    //     run_logout_phase1 does not set logout_seen_ for it (fixpp#590;
-    //     `.specify/563-564-callback-send.md` §2.6, ruling R-8).
+    // Predicate: !teardown_reset_done_ && cfg_.reset_on_disconnect. 104-sequence-reset-fidelity
+    // (contract RR-2 item 4, RT-1) supersedes 024 C3.1's reset_on_logout term by name: a
+    // received Logout resets at its arm's reset point, and the teardown never resets a
+    // `pending` receipt (it was closed out above, with no reset). The one case the teardown
+    // would own under reset_on_logout, a receipt `reached` whose unit has not started, has no
+    // input, because the reset point is one strand turn (contract RR-2 item 3), so no term
+    // is coded for it. A change that splits that turn must add the term, and a way to observe
+    // "unit not started", which the three-valued marker does not have (contract RR-2 item 4;
+    // cell R-1u).
     //   - reset_on_disconnect: fires on ANY close() — graceful, terminal, or
     //     abnormal read-pump EOF → close(terminal). [C4.1, C4.2]
     //
     // Disposition: logged-then-proceed (I-07) — teardown store failure is not fatal;
-    // the session should still complete close() normally. [contracts C3.1, C4.1]
+    // the session should still complete close() normally. [contracts C4.1]
     //
-    // [contracts/reset-knobs.md C3.1, C4.1, C4.2, C5.1; plan.md Complexity row 3]
-    if (!teardown_reset_done_ &&
-        ((logout_seen_ && cfg_.reset_on_logout) || cfg_.reset_on_disconnect)) {
+    // [contracts/reset-knobs.md C4.1, C4.2, C5.1; plan.md Complexity row 3]
+    if (!teardown_reset_done_ && cfg_.reset_on_disconnect) {
         teardown_reset_done_ = true;
-        // 093 (contract C-6 "close()"; data-model E-10; plan OD-1): a 141=Y reset unit's
-        // store operation is in flight, so wait for it, or this reset could land before
-        // the unit's and be overwritten. Event-driven: the unit's completion signal
-        // raced against await_deadline on effective_clock_, which re-arms on a
-        // clock-wide cancel_sleeps() sweep, bounded by logon_timeout_ms. On expiry,
-        // record it and proceed.
-        if (reset_unit_in_flight_ && effective_clock_) {
-            using namespace asio::experimental::awaitable_operators;
-            asio::steady_timer unit_done{co_await asio::this_coro::executor,
-                                         asio::steady_timer::time_point::max()};
-            reset_unit_wake_ = [&unit_done] { unit_done.cancel(); };
-            // Saturates at steady_time_point::max() when not representable.
-            auto const bound = detail::deadline_after(
-                effective_clock_->steady_now(), std::chrono::milliseconds{cfg_.logon_timeout_ms});
-            auto const which =
-                co_await (unit_done.async_wait(asio::as_tuple(asio::use_awaitable)) ||
-                          detail::await_deadline(*effective_clock_, bound));
-            reset_unit_wake_ = nullptr;
-            if (which.index() == 1) {
-                emit_event(session_event_close_reset_wait_expired{});
-            }
-        }
         auto rst_r = co_await reset_seqnums_to_one_durable(reset_disposition::logged);
         (void)rst_r;  // I-07 logged-then-proceed: store failure does not abort close.
     }
@@ -3005,9 +3126,39 @@ void Session::note_reply_over_ceiling_(bool business_reject,
                business_reject ? FIXPP_SLIT("j") : FIXPP_SLIT("3"), len, suppressed);
 }
 
-// 070-fix44-closeout S-029 — refuse an inbound Logon on a 464 posture mismatch (or
-// malformed 464): emit Logout(35=5) carrying reason_text, then Disconnected — the
-// session never reaches Active. Mirrors the Logon-time Logout+disconnect disposition
+// 104 (data-model "The too-low Logout text"; research D5 "The text"): QuickFIX's too-low Logout
+// text, "MsgSeqNum too low, expecting N but received M", written by one builder for 103's Arm B
+// (on_inbound_active_out_of_sequence_) and the Logon arms, so that they cannot diverge.
+// N and M are seqnum_t parameters, so the static_assert below (two phrases and two seqnum_t
+// numbers at their widest) bounds the text, which cannot truncate. The numbers are written by
+// std::to_chars; the peer's bytes are not echoed.
+namespace {
+
+constexpr std::string_view kTooLowPhrase1 = "MsgSeqNum too low, expecting ";
+constexpr std::string_view kTooLowPhrase2 = " but received ";
+using too_low_text_buffer = std::array<char, 96>;
+static_assert(kTooLowPhrase1.size() + kTooLowPhrase2.size() +
+                  (2 * (std::numeric_limits<seqnum_t>::digits10 + 1)) <=
+              too_low_text_buffer{}.size());
+
+// Writes the text for NextNumIn `expected` and MsgSeqNum `received` into `buf`; returns its length.
+[[nodiscard]] std::size_t write_too_low_text(too_low_text_buffer& buf, seqnum_t expected,
+                                             seqnum_t received) noexcept {
+    char* const end = buf.data() + buf.size();
+    char* out = std::ranges::copy(kTooLowPhrase1, buf.data()).out;
+    out = std::to_chars(out, end, expected).ptr;
+    out = std::ranges::copy(kTooLowPhrase2, out).out;
+    out = std::to_chars(out, end, received).ptr;
+    return static_cast<std::size_t>(out - buf.data());
+}
+
+}  // namespace
+
+// 070-fix44-closeout S-029 — a Logon arm's refusal with a Logout, first written for a 464
+// posture mismatch (or malformed 464): emit Logout(35=5) carrying reason_text, then
+// Disconnected — the session never reaches Active. Its callers:
+// `git grep -n 'refuse_logon_with_logout_(' -- src`. Mirrors the
+// Logon-time Logout+disconnect disposition
 // at session.cpp (SendingTime-accuracy path). Defined after the file-local
 // stamp_sending_time helper so it is in scope. [FR-002; data-model D-F]
 asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout_(
@@ -3031,7 +3182,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout
         }
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
         auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm);
@@ -3041,6 +3192,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout
     // 093 plan OD-26: the Logout's store and write are suspensions.
     disconnect_unless_superseded_(arm);
     co_return fixpp::core::expected_t<void>{};
+}
+
+// 104: the too-low Logout's text is built here, in this coroutine's own frame (its declaration
+// in session.hpp has the condition), then sent by refuse_logon_with_logout_. NextNumIn is read
+// at the body's start, which runs inline in the caller's turn, before any suspension.
+asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_too_low_logon_(
+    seqnum_t received, fsm_state arm) noexcept {
+    too_low_text_buffer text_buf{};
+    const std::string_view text{
+        text_buf.data(), write_too_low_text(text_buf, seqnum_mgr_.next_inbound_unsafe(), received)};
+    co_return co_await refuse_logon_with_logout_(text, arm);
 }
 
 // ── emit_session_reject_ ─────────────────────────────────────────────────────
@@ -3077,7 +3239,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
     if (rj_r) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
         // 036 T015: ARM-1 — toAdmin observation before transmit (FR-001/FR-002).
@@ -3128,7 +3290,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
     if (rj_r) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
         // 036 T015: ARM-1 — toAdmin observation before transmit (FR-001/FR-002).
@@ -3663,7 +3825,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_reject_leaf_(
     if (rj_r) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
         // [[feedback_admin_emit_bypasses_fire_to_admin]]: toAdmin before transmit.
@@ -3735,7 +3897,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logout_leaf_(
         }
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
         auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
@@ -3758,7 +3920,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logon_sent_logou
     if (lo_result) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
         // 036 T023: ARM-1 — toAdmin observation before transmit (FR-001/FR-002).
@@ -3783,6 +3945,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logon_sent_logou
 asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_resend_request_leaf_(
     bool tic, seqnum_t begin_seqno, std::string_view sending_time) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
+    // 104 (contract RR-5 item 6, "The leaf entry test"; inbound_logout_leaf_'s pattern, B41
+    // D-OUT-2): this leaf calls toAdmin before its number, and its frame can reach it after a
+    // suspension in which a reset point ran. Once the receipt marker is `reached` it writes
+    // nothing: no toAdmin, no number, no store call, no state write. The condition: nothing
+    // suspends from this test to assign_outbound (the build and fire_to_admin_ are
+    // synchronous, the grant inline), so a leaf past it meets an unfrozen manager. It reads
+    // the marker, not the state and not the manager's flag.
+    if (logout_seen_ == receipt_marker::reached) {
+        co_return fixpp::core::expected_t<void>{};
+    }
     std::array<std::byte, 256> rr_buf{};
     const seqnum_t rr_seq = seqnum_mgr_.peek_outbound();
     auto rr_result = fixpp::session::build_resend_request(
@@ -3797,7 +3969,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_resend_request_l
         }
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
         } else {
             auto emit_r = co_await store_then_emit(rr_seq, *rr_result);
             if (!emit_r) {
@@ -3834,7 +4006,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_heartbeat_reply_
         if (!assign_r) {
             // Overflow or closed: session-fatal per 005 data-model.md's E3.
             // Do NOT emit with unassigned seq — skip and disconnect.
-            record_state_transition_(fsm_state::Disconnected);
+            record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
         auto emit_r = co_await store_then_emit(hb_seq, *hb_result);
@@ -3888,7 +4060,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_business_reject_
         if (!suppressed) {
             auto assign_r = co_await seqnum_mgr_.assign_outbound();
             if (!assign_r) {
-                record_state_transition_(fsm_state::Disconnected);
+                record_disconnected_unless_already_();
                 co_return std::unexpected(assign_r.error());
             }
             auto emit_r = co_await store_then_emit(bmr_seq, *bmr_r);
@@ -3956,7 +4128,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_acceptor_reply_l
     // Advance outbound counter through manager (RC#A: was ++next_outbound_seq_).
     auto assign_r = co_await seqnum_mgr_.assign_outbound();
     if (!assign_r) {
-        record_state_transition_(fsm_state::Disconnected);
+        record_disconnected_unless_already_();
         co_return std::unexpected(assign_r.error());
     }
     // 019 T014: toAdmin before transmitting the acceptor reply Logon. [FR-008/010]
@@ -4000,8 +4172,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_acceptor_reply_l
 //
 // Seqnum check (T031/T032/T035):
 //   Too-low  → session_seqnum_too_low (69)              → fatal: Disconnected, after
-//              QuickFIX's too-low Logout unless 43=Y (103, research D9; a too-low
-//              Heartbeat included, which supersedes T020-A's silent drop)
+//              QuickFIX's too-low Logout: in Active unless 43=Y (103, research D9; a
+//              too-low Heartbeat included, which supersedes T020-A's silent drop); in
+//              NotConnected and LogonSent whatever its 43, once the identity gates pass
+//              (104, research D5)
 //   Too-high → 013 FR-009: AwaitingResend + ResendRequest(2) via reconnect_fsm_
 //              (slot 70 session_seqnum_gap_unrecoverable deleted per 013 T006a;
 //               state owned by ReconnectFsm per data-model §E-1 / Fix1 T023)
@@ -4360,15 +4534,32 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
             // resend [X, peer_N-1] arrives in-sequence through the Active path.
             // [contract C5, data-model I-NEX-5/12, research D-7]
             //
-            // Too-low: unchanged — session-fatal (I-2/[FIX-SL §4.1]).
-            // Knob-OFF: completely unchanged — fatal on too-high exactly as today.
+            // A too-low result takes the 104 branch below; any other refusal ends the
+            // session (I-2/[FIX-SL §4.1]).
             if (cfg_.enable_next_expected_msg_seq_num &&
                 chk.error() == fixpp::core::error::session_seqnum_too_high) {
                 // Behind-side: tolerate. next_inbound_ stays at X (not advanced).
                 // Fall through to the existing acceptor reply-build path below.
                 // logon_inbound_advanced stays false (check_inbound did not advance).
+            } else if (chk.error() == fixpp::core::error::session_seqnum_too_low) {
+                // 104 (FR-012 to FR-014; research D5, D6; contract T2, T8) supersedes 103's
+                // spec row "A too-low frame in NotConnected or LogonSent still ends silently":
+                // once the identity gates pass, a too-low Logon draws QuickFIX's too-low
+                // Logout, whatever its 43, then Disconnected. The gates are the ones an
+                // in-sequence Logon meets below, through the same calls: the mTLS
+                // CompID-authorisation gate, then the credentials gate; a refusal ends the
+                // arm as it does there, silent and Disconnected (FIX-TC 1S(c)). 1137 is not
+                // reached. The Logout carries Text(58) only and the session's next outbound
+                // number; NextNumIn is not advanced; refuse_logon_with_logout_ gives the
+                // endings of a Logout that is not sent, and sets no receipt marker.
+                if (!logon_identity_admitted_() || !logon_credentials_admitted_(*result)) {
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return fixpp::core::expected_t<void>{};
+                }
+                co_return co_await refuse_too_low_logon_(seq, fsm_state::NotConnected);
             } else {
-                // Too-low OR knob off: session-fatal (I-2/I-4/[FIX-SL §4.1]).
+                // Too-high with the knob off, or a drained mutex: session-fatal, silent
+                // (I-2/I-4/[FIX-SL §4.1]).
                 record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
@@ -4417,59 +4608,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
     //   (3) Non-mTLS (one_way_ca / unset-but-passed-open-guard) → skip.
     // [015 T013/T020; data-model §E-4; FR-006/007/008/009; T-041; Gate A New-1/E-4]
     // [FR-019; FR-024 symmetric]
-    {
-        const bool is_mtls =
-            cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_ca ||
-            cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_pinned;
-
-        if (live_peer_id_.has_value() && is_mtls) {
-            // (1) Live acceptor path: use real handshake peer_id set by
-            //     attach_accepted_transport. Mirrors the initiator's live-reconnect
-            //     CompID-authorization arm.
-            const fixpp::tls::peer_identity& auth_pid = *live_peer_id_;
-            const std::string_view asserted_compid = cfg_.target_comp_id;
-            auto auth_r = cfg_.compid_authorization_policy.authorize(auth_pid, asserted_compid);
-            if (!auth_r) {
-                // Fail-closed: off-list or absent identity.
-                emit_event(fixpp::session::session_event_compid_authorization_failed{
-                    .cn = {},
-                    .asserted_compid = asserted_compid,
-                    .expected_compids = {},
-                    .principal_source = fixpp::session::bound_principal::source::CN,
-                });
-                live_peer_id_.reset();  // consume (one-shot)
-                record_state_transition_(fsm_state::Disconnected);
-                co_return fixpp::core::expected_t<void>{};
-            }
-            // Authorization succeeded: emit peer_identity_bound event.
-            // cn EMPTY: live_peer_id_.reset() frees backing store (UAF guard,
-            // matching the initiator arm's peer_identity_bound success path).
-            emit_event(fixpp::session::session_event_peer_identity_bound{
-                .cn = {},
-                .sans = {},
-                .sha256_fingerprint = auth_pid.leaf_fingerprint,
-                .cipher = {},
-                .bound_compid = asserted_compid,
-                .principal_source = auth_r->from,
-            });
-            live_peer_id_.reset();  // consume (one-shot per Logon)
-        } else if (is_mtls) {
-            // (2) mTLS + no peer_identity available → fail CLOSED.
-            // Peer_identity required for mTLS CompID binding but the live
-            // handshake identity is absent (happens-before violated, or a
-            // non-engine acceptor with no attach_accepted_transport call).
-            // Silent-admit here would bake a fail-open default. [triage RC#A]
-            const std::string_view asserted_compid = cfg_.target_comp_id;
-            emit_event(fixpp::session::session_event_compid_authorization_failed{
-                .cn = {},
-                .asserted_compid = asserted_compid,
-                .expected_compids = {},
-                .principal_source = fixpp::session::bound_principal::source::CN,
-            });
-            record_state_transition_(fsm_state::Disconnected);
-            co_return fixpp::core::expected_t<void>{};
-        }
-        // (3) Non-mTLS (one_way_ca): no client cert → gate skipped.
+    //
+    // 104 (contract T8): the gate runs through logon_identity_admitted_(), whose arms are the
+    // ones above, so a too-low Logon above meets the same arms, events and one-shot consumption.
+    // A refusal records Disconnected here.
+    if (!logon_identity_admitted_()) {
+        record_state_transition_(fsm_state::Disconnected);
+        co_return fixpp::core::expected_t<void>{};
     }
 
     // 033 T018 — FIXT acceptor: validate DefaultApplVerID(1137) (C4/C5).
@@ -4525,21 +4670,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
     // Default implementation: accept. A future FR-008a validator may reject here.
     // `result` is always valid here -- the earlier `if (!result)` returned.
     // [033 contracts C7; research R6; data-model E5; FR-008/FR-008a]
-    {
-        fixpp::session::logon_credentials creds;
-        if (result->username.has_value()) {
-            creds.username = std::string{*result->username};
-        }
-        if (result->password.has_value()) {
-            creds.password = std::string{*result->password};
-        }
-        // asserted_compid = peer SenderCompID(49) = cfg_.target_comp_id.
-        if (!cfg_.compid_authorization_policy.authorize_logon(cfg_.target_comp_id, creds)) {
-            // Future: emit an authorization-failed event. For 033 (default-accept
-            // validator), this path is unreachable unless a custom validator rejects.
-            record_state_transition_(fsm_state::Disconnected);
-            co_return fixpp::core::expected_t<void>{};
-        }
+    if (!logon_credentials_admitted_(*result)) {
+        // Future: emit an authorization-failed event. For 033 (default-accept
+        // validator), this path is unreachable unless a custom validator rejects.
+        record_state_transition_(fsm_state::Disconnected);
+        co_return fixpp::core::expected_t<void>{};
     }
 
     // Valid Logon + in-seq: transition to LogonReceived, then emit
@@ -5298,7 +5433,8 @@ asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::resend_ga
     if (!r) {
         co_return r;
     }
-    record_state_transition_(fsm_state::Disconnected);
+    // 104 (contract RR-5 item 6): the leaf returns success on Disconnected.
+    record_disconnected_unless_already_();
     co_return fixpp::core::expected_t<void>{};
 }
 
@@ -5383,8 +5519,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_sendin
             co_return r;
         }
     }
-    // Step 3: Disconnect.
-    record_state_transition_(fsm_state::Disconnected);
+    // Step 3: Disconnect. 104 (contract RR-5 item 6, "A frame in flight across a route-B
+    // reset point"): the leaf returns success on Disconnected.
+    record_disconnected_unless_already_();
     co_return fixpp::core::expected_t<void>{};
 }
 
@@ -5535,9 +5672,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_too_hi
 asio::awaitable<std::optional<fixpp::core::expected_t<void>>>
 Session::on_inbound_active_too_high_logout_(bool tic, seqnum_t seq) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
-    // As on_inbound_active_logout_ does first, so a configured reset_on_logout fires whichever
-    // ending follows.
-    logout_seen_ = true;
+    // 104 (contract RR-2, INV-T): a 35=5 frame reaches this arm in the strand turn of
+    // on_inbound_active_'s acking drain test, so the too-high Logout's bound is not acking here.
+    assert(peer_logout_.phase != peer_logout_mark::phase_t::acking);
     // 103 (spec FR-021's crossing clause; FIX-SL §4.6, §4.10.2): while the session is itself
     // ending, the bound could not acknowledge: its claim refuses while a Logout of the session
     // is in flight (the owner, research D4.6), and its "live" test while a close has begun or
@@ -5545,6 +5682,11 @@ Session::on_inbound_active_too_high_logout_(bool tic, seqnum_t seq) noexcept {
     // one is, with no mark, no bound and no ResendRequest; NextNumIn is not moved.
     if (cfg_.logout_disconnect_timeout_ms == 0 || !effective_clock_ || logout_in_flight_ ||
         closing_or_stopped_()) {
+        // 104 (contract RR-2 items 1 and 2): with reset_on_logout set, this immediate
+        // acknowledgement is a receipt, `pending` and owned by this frame until its reset point
+        // in acknowledge_peer_logout_ or its exit. The spawn and ignored branches below write
+        // nothing to the marker: the bound's owed receipt is the 103 mark.
+        pending_receipt_owner const receipt_owner{*this};
         FIXPP_INBOUND_SPLIT_AWAIT(ack, tic, acknowledge_peer_logout_(tic));
         co_return ack;
     }
@@ -5584,6 +5726,19 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::acknowledge_peer_logout_
     emit_event(fixpp::session::session_event_sequence_numbers_reset{.by_peer_request = false});
     if (fsm_state_ != fsm_state::Disconnected) {
         record_state_transition_(fsm_state::Disconnected);
+    }
+    // 104 (contract RR-1; RR-3, its Disconnected and reset-point steps): arm B's reset point,
+    // after its reply, its event and its Disconnected. Shared by the immediate acknowledgement
+    // (a pump frame, which set the marker `pending`) and the bound (the 103 mark `acking`; the
+    // marker `none`).
+    if (cfg_.reset_on_logout) {
+        co_await asio::this_coro::reset_cancellation_state();
+        if (enter_receipt_reset_point_()) {
+            // RT-4: a manager or store failure of the unit is logged, then the arm proceeds
+            // with the ending it has without the failure; there is no retry.
+            note_receipt_reset_failed_(co_await run_reset_unit_(seqnum_min, seqnum_min));
+        }
+        co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
     }
     co_return fixpp::core::expected_t<void>{};
 }
@@ -5799,8 +5954,9 @@ asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::on_inboun
                     co_return r;
                 }
             }
-            // Step 3: Disconnect.
-            record_state_transition_(fsm_state::Disconnected);
+            // Step 3: Disconnect. 104 (contract RR-5 item 6, "A frame in flight across a
+            // route-B reset point"): the leaf returns success on Disconnected.
+            record_disconnected_unless_already_();
             co_return fixpp::core::expected_t<void>{};
         }
         // else: equal or 122 < 52 → validated, fall through.
@@ -5963,19 +6119,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
     if (chk_error == fixpp::core::error::session_seqnum_too_low) {
         // 103 (research D4.6): Arm B claims a pending mark; its own Logout is the one.
         claim_peer_logout_none_();
-        static constexpr std::string_view kPhrase1 = "MsgSeqNum too low, expecting ";
-        static constexpr std::string_view kPhrase2 = " but received ";
-        std::array<char, 96> text_buf{};
-        static_assert(kPhrase1.size() + kPhrase2.size() +
-                          (2 * (std::numeric_limits<seqnum_t>::digits10 + 1)) <=
-                      text_buf.size());
-        char* const end = text_buf.data() + text_buf.size();
-        char* out = std::ranges::copy(kPhrase1, text_buf.data()).out;
-        out = std::to_chars(out, end, seqnum_mgr_.next_inbound_unsafe()).ptr;
-        out = std::ranges::copy(kPhrase2, out).out;
-        out = std::to_chars(out, end, parse_seqnum(hdr.msg_seq_num)).ptr;
+        // 104: the shared builder above refuse_logon_with_logout_.
+        too_low_text_buffer text_buf{};
         const std::string_view text{text_buf.data(),
-                                    static_cast<std::size_t>(out - text_buf.data())};
+                                    write_too_low_text(text_buf, seqnum_mgr_.next_inbound_unsafe(),
+                                                       parse_seqnum(hdr.msg_seq_num))};
         const auto st52 = effective_clock_
                               ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
                               : SendingTimeStamp{};
@@ -6045,13 +6193,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
     bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
     inbound_route const& route) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
-    // 024 T013 (site b): mark that a peer Logout was received.
-    // Set before any FSM action so close() can detect logout_seen_ even
-    // if later teardown arrives via terminal close after this transition.
-    // Both Active (emit-confirming-Logout → Disconnected) and LogonReceived
-    // (Disconnected directly per [FIX-SL §4.6]) paths are covered.
-    // [contracts/reset-knobs.md C3.1; plan.md Gate A convergence note (b)]
-    logout_seen_ = true;
+    // 104 (contract RR-2, INV-T): a 35=5 frame reaches this arm in the strand turn of
+    // on_inbound_active_'s acking drain test, so the too-high Logout's bound is not acking here.
+    assert(peer_logout_.phase != peer_logout_mark::phase_t::acking);
+    // 104 (contract RR-2 items 1 and 2), superseding 024 T013's site (b): with reset_on_logout
+    // set, the receipt is `pending` from this arm's entry, owned by this frame, until its reset
+    // point or its exit. In Active and LogonReceived alike.
+    pending_receipt_owner const receipt_owner{*this};
+    bool from_admin_rejected = false;
 
     if (fsm_state_ == fsm_state::Active) {
         // 103 (research D4.6): the in-sequence Logout claims a pending mark; its own
@@ -6089,6 +6238,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
             [&](auto& mv, auto& sid) { return engine_.application->fromAdmin(mv, sid); });
         // 092 contract C-6: a late parse failure closes the session.
         if (cb_r && *cb_r == dispatch_outcome::parse_failed) {
+            // 104 (contract RR-2 item 2): the receipt ends here, before the close() this frame
+            // calls, so that close() does not wait for its own caller.
+            release_pending_receipt_();
             co_return co_await close_on_late_parse_failure_();
         }
         if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
@@ -6101,6 +6253,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
         // Best-effort: proceed even if assign or emit fails (session disconnects
         // regardless).
         if (!cb_r) {
+            // 104 (contract RR-1): a fromAdmin reject ends the receipt before its reset point.
+            from_admin_rejected = true;
             const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
             const auto rj_st52 = effective_clock_ ? stamp_sending_time(*effective_clock_,
                                                                        cfg_.sending_time_precision)
@@ -6132,7 +6286,25 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
     }
     // Both Active and LogonReceived → Disconnected.
     // onLogout fires inside record_state_transition_ (INV-7 guard).
-    record_state_transition_(fsm_state::Disconnected);
+    // 104 (contract RR-5 item 6): the best-effort Reject may have skipped a refused number
+    // after a Disconnected edge, so the write is made only when the state is not that.
+    record_disconnected_unless_already_();
+    // 104 (contract RR-1; RR-3, its Disconnected and reset-point steps), superseding 024 C3.1's
+    // teardown reset for a received Logout: arm A's reset point, reached once the reply was
+    // attempted, the event emitted, fromAdmin returned with no throw, reject or late parse
+    // failure, and the persist succeeded. Disconnected is recorded first, so onLogout sees the
+    // pre-reset numbers.
+    if (!from_admin_rejected) {
+        if (cfg_.reset_on_logout) {
+            co_await asio::this_coro::reset_cancellation_state();
+            if (enter_receipt_reset_point_()) {
+                // RT-4: a manager or store failure of the unit is logged, then the arm proceeds
+                // with the ending it has without the failure; there is no retry.
+                note_receipt_reset_failed_(co_await run_reset_unit_(seqnum_min, seqnum_min));
+            }
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
+        }
+    }
     co_return fixpp::core::expected_t<void>{};
 }
 
@@ -6322,7 +6494,24 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logout_sent_(
         co_return co_await dispose_unparseable_(hdr, fsm_state::LogoutSent);
     }
     if (hdr.msg_type == "5") {  // Logout(35=5) confirms our Logout
+        // 104 (contract RR-2 items 1 and 2): with reset_on_logout set, the confirming Logout is
+        // a receipt, `pending` and owned by this frame until its reset point or its exit. Any
+        // other frame here leaves the marker untouched.
+        pending_receipt_owner const receipt_owner{*this};
         record_state_transition_(fsm_state::Disconnected);
+        // 104 (contract RR-1; RR-3, its Disconnected, reset-point and phase-1 wake steps),
+        // superseding 024 C3.1's teardown reset for an answered Logout: arm L's reset point,
+        // after Disconnected and before phase 1 is told. The frame's MsgSeqNum is not read and
+        // NextNumIn is not advanced.
+        if (cfg_.reset_on_logout) {
+            co_await asio::this_coro::reset_cancellation_state();
+            if (enter_receipt_reset_point_()) {
+                // RT-4: a manager or store failure of the unit is logged, then the arm proceeds
+                // with the ending it has without the failure; there is no retry.
+                note_receipt_reset_failed_(co_await run_reset_unit_(seqnum_min, seqnum_min));
+            }
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
+        }
         logout_confirmed_ = true;  // signal run_logout_phase1 coroutine
         // fixpp#536 (.specify/536-537-538-recovery-liveness.md, D-536-3), superseding
         // the Clock::cancel_sleeps() call that stood here: end run_logout_phase1's
@@ -6335,6 +6524,111 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logout_sent_(
     }
     // All other inbound frames: drained (no FSM change, no seqnum advance).
     co_return fixpp::core::expected_t<void>{};
+}
+
+// 014 T015 US2 / 013 T036 US2: the Logon path's CompID authorization, run BEFORE the FSM
+// transition to Active (FR-006/FR-007/FR-008/FR-019/FR-020/FR-021/FR-024
+// symmetric initiator path).
+// Asserted CompID = peer SenderCompID(49) = cfg_.target_comp_id, in both roles.
+//
+// Two-arm guard (015 T020 removed the seam arm from the T015 form):
+//   (1) live_peer_id_ set (the live handshake identity, T014/T015, T020) →
+//       authorize with the real handshake peer_id, making the
+//       already-fail-CLOSED mTLS gate *operable* with a live identity
+//       (admit on-list; fail-close off-list/absent). FR-006/FR-008.
+//   (2) mTLS + no identity available → fail CLOSED. RC#A.
+//   (3) Non-mTLS → skip (backward compat, permissive). FR-019.
+//
+// live_peer_id_ is stored by install_reconnected_transport (T015) on the initiator and by
+// attach_accepted_transport on the acceptor (T020/T-041 CLOSED), and reset() one-shot
+// below whether arm (1) admits or refuses it — both roles are symmetric, the seam is gone.
+// [[feedback_half_restructure_symmetric_api]]: symmetric one-pass fix.
+// [data-model §E-2; contracts C2; FR-006; FR-007; FR-008; FR-009]
+//
+// 104 (contract RR-1 "Arm S's branch and the knob"; research D1 item 3): extracted from
+// on_inbound_logon_sent_ so that arm S's Logout branch runs this same gate, both arms. It
+// returns false when the identity is refused, having emitted the gate's event and consumed a
+// live identity; the caller then records Disconnected. It returns true when the identity is
+// admitted, or when the session is not mTLS. 104 (contract T8): the acceptor's NotConnected arm
+// runs it too, for an in-sequence Logon and a too-low one; the asserted CompID is
+// cfg_.target_comp_id in both roles.
+// 104 (contract T8; clarification N-8): the credentials gate of 033 T023 (its comment is at
+// the NotConnected arm's in-sequence call), one member, so a too-low Logon runs the same check
+// before its Logout as an in-sequence one runs before LogonReceived.
+bool Session::logon_credentials_admitted_(logon_interpret_result const& logon) const {
+    fixpp::session::logon_credentials creds;
+    if (logon.username.has_value()) {
+        creds.username = std::string{*logon.username};
+    }
+    if (logon.password.has_value()) {
+        creds.password = std::string{*logon.password};
+    }
+    // asserted_compid = peer SenderCompID(49) = cfg_.target_comp_id.
+    return cfg_.compid_authorization_policy.authorize_logon(cfg_.target_comp_id, creds);
+}
+
+bool Session::logon_identity_admitted_() noexcept {
+    const bool is_mtls =
+        cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_ca ||
+        cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_pinned;
+
+    if (live_peer_id_.has_value() && is_mtls) {
+        // (1) A live handshake identity: use the real handshake peer_id, set by
+        // install_reconnected_transport on the initiator and by attach_accepted_transport on
+        // the acceptor. Only active when mTLS is configured (binding gate applicable).
+        // Non-mTLS sessions skip to arm (4) permissive (no client cert).
+        // FR-006: the identity source is the real handshake_result.peer_id
+        // (no fabricated/stand-in identity on this path). FR-008: removes
+        // the residual fabricated auth payload from the live path.
+        const fixpp::tls::peer_identity& auth_pid = *live_peer_id_;
+        const std::string_view asserted_compid = cfg_.target_comp_id;
+        auto auth_r = cfg_.compid_authorization_policy.authorize(auth_pid, asserted_compid);
+        if (!auth_r) {
+            // Fail-closed: emit the event and return false; the caller records
+            // Disconnected. On the acceptor this is the refusal of an identity the policy
+            // does not bind to the asserted CompID. On the initiator the reconnect path's
+            // own authorisation runs in reconnect_fsm.cpp step 7, before this gate.
+            // [contracts C2; FR-007]
+            // cn EMPTY: live_peer_id_.reset() below frees the backing
+            // store, so a view into it would dangle in the persisted
+            // recent_events_ ring. (Owned-cn fix + the success-arm cn
+            // lifetime are tracked in the 014 verify doc.)
+            emit_event(fixpp::session::session_event_compid_authorization_failed{
+                .cn = {},
+                .asserted_compid = asserted_compid,
+                .expected_compids = {},
+                .principal_source = fixpp::session::bound_principal::source::CN,
+            });
+            live_peer_id_.reset();  // consume the live identity (one-shot)
+            return false;
+        }
+        // Authorization succeeded: emit peer_identity_bound event.
+        // cn EMPTY: live_peer_id_.reset() below frees the backing store;
+        // owned-cn deferred — see verify doc. sha256_fingerprint (owned
+        // std::array) and bound_compid (config-stable) are safe. Matches
+        // the failure-arm precedent (gate-b/r2 FQ-2). claim-ok: moved unchanged, names a ruling
+        emit_event(fixpp::session::session_event_peer_identity_bound{
+            .cn = {},
+            .sans = {},
+            .sha256_fingerprint = auth_pid.leaf_fingerprint,
+            .cipher = {},
+            .bound_compid = asserted_compid,
+            .principal_source = auth_r->from,
+        });
+        live_peer_id_.reset();  // consume (one-shot per Logon)
+    } else if (is_mtls) {
+        // (2) mTLS + no peer_identity → fail CLOSED.
+        const std::string_view asserted_compid = cfg_.target_comp_id;
+        emit_event(fixpp::session::session_event_compid_authorization_failed{
+            .cn = {},
+            .asserted_compid = asserted_compid,
+            .expected_compids = {},
+            .principal_source = fixpp::session::bound_principal::source::CN,
+        });
+        return false;
+    }
+    // (4) Non-mTLS (one_way_ca): no client cert → gate skipped.
+    return true;
 }
 
 // LogonSent arm (initiator: the peer's Logon-ack).
@@ -6426,6 +6720,31 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
         }
     }
 
+    // 104 arm S (contract RR-1 "Arm S's branch and the knob"; RR-2 items 1 and 2): with
+    // reset_on_logout set, a Logout received here, past the guards above, is a receipt,
+    // `pending` and owned by this frame until its reset point or its exit. With the knob off
+    // the branch does not run and interpret_logon refuses the frame as a non-Logon.
+    // On an mTLS session the Logon path's gate runs first, both its arms; a refused identity
+    // draws its event and no reset. Either way the arm records Disconnected, sends no Logout,
+    // runs no fromAdmin and returns success, as the base's ending does (RU-2, O19, W10).
+    if (cfg_.reset_on_logout && hdr.msg_type == "5") {
+        pending_receipt_owner const receipt_owner{*this};
+        if (!logon_identity_admitted_()) {
+            record_state_transition_(fsm_state::Disconnected);
+            co_return fixpp::core::expected_t<void>{};
+        }
+        record_state_transition_(fsm_state::Disconnected);
+        // Arm S's reset point (contract RR-3); the branch runs only with the knob.
+        co_await asio::this_coro::reset_cancellation_state();
+        if (enter_receipt_reset_point_()) {
+            // RT-4: a manager or store failure of the unit is logged, then the arm proceeds
+            // with the ending it has without the failure; there is no retry.
+            note_receipt_reset_failed_(co_await run_reset_unit_(seqnum_min, seqnum_min));
+        }
+        co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
+        co_return fixpp::core::expected_t<void>{};
+    }
+
     auto result =
         fixpp::session::interpret_logon(frame, cfg_.target_comp_id, cfg_.sender_comp_id,
                                         cfg_.begin_string, session_hooks(interpret_logon_table_()));
@@ -6494,6 +6813,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
         }
     }
 
+    // 104 (FR-009, FR-010; research D3 and D4, ruling O-2; data-model "LogonSent
+    // acknowledgement: the 141 branch"): the acknowledgement's 141=Y and fixpp's own latch
+    // are read before the sequence check. An acknowledgement with 141=Y that fixpp's Logon
+    // did not ask for (the latch clear) is a reset, compared with 1 and not with NextNumIn:
+    // it takes no check_inbound, it is consumed only at 34=1, and its unit runs after the
+    // mTLS gate below. An asked one, and one without 141=Y, take the sequence check as before.
+    // peer_ack_sent_reset_flag is at case scope for the persist guard below (029 INV-H1).
+    const bool peer_ack_sent_reset_flag = (hdr.reset_seqnum_flag == "Y");
+    const bool own_logon_sent_reset_flag = own_logon_sent_reset_flag_;
+    const bool unasked_reset_ack = peer_ack_sent_reset_flag && !own_logon_sent_reset_flag;
+
     // ── Guard (4): seqnum check (T035 LogonSent row) ─────────────────
     const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
     if (seq == 0) {
@@ -6502,13 +6832,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     }
 
     // 029 gate-b/r1: hoisted to LogonSent case scope so the persist guard
-    // below can read them. Symmetric carried-bool approach (same as acceptor).
+    // below can read it. Symmetric carried-bool approach (same as acceptor).
     // [029 INV-H1 fix; triage root-cause #1/#2; contracts C3.1]
     bool logon_inbound_advanced_init = false;
-    bool peer_ack_sent_reset_flag = false;
 
-    auto chk = co_await seqnum_mgr_.check_inbound(seq);
-    if (!chk) {
+    if (unasked_reset_ack) {
+        // 104: consumed only when the acknowledgement is at 34=1 (ruling O-2).
+        logon_inbound_advanced_init = seq == seqnum_min;
+    } else if (auto chk = co_await seqnum_mgr_.check_inbound(seq); !chk) {
         // 027 T016 — behind-side tolerance (formulation A, I-NEX-5/D-7):
         // When the knob is on AND the failure is too-high (NOT too-low),
         // do NOT take the fatal branch. Leave next_inbound_ at X. Emit no
@@ -6516,13 +6847,28 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
         // proactive resend [X, peer_N-1] is admitted in-sequence.
         // [contract C5, data-model I-NEX-5/12, research D-7]
         //
-        // Too-low OR knob off: fatal exactly as today.
+        // A too-low result takes the 104 branch below; any other refusal ends the session.
         if (cfg_.enable_next_expected_msg_seq_num &&
             chk.error() == fixpp::core::error::session_seqnum_too_high) {
             // Behind-side: tolerate. Fall through to Active transition below.
             // logon_inbound_advanced_init stays false (manager not advanced).
+        } else if (chk.error() == fixpp::core::error::session_seqnum_too_low) {
+            // 104 (FR-012 to FR-014; research D5, D6; contract T1, T8) supersedes 103's spec
+            // row "A too-low frame in NotConnected or LogonSent still ends silently": once the
+            // mTLS CompID-authorisation gate passes, through the call an in-sequence
+            // acknowledgement meets below, a too-low acknowledgement draws QuickFIX's too-low
+            // Logout, whatever its 43, then Disconnected. A refused identity ends the arm as it
+            // does there, silent and Disconnected (FIX-TC 1S(c)). 1137, the strict test, the
+            // unit and 789 are not reached. The Logout carries Text(58) only and the session's
+            // next outbound number; NextNumIn is not advanced; refuse_logon_with_logout_ gives
+            // the endings of a Logout that is not sent, and sets no receipt marker.
+            if (!logon_identity_admitted_()) {
+                record_state_transition_(fsm_state::Disconnected);
+                co_return fixpp::core::expected_t<void>{};
+            }
+            co_return co_await refuse_too_low_logon_(seq, fsm_state::LogonSent);
         } else {
-            // Too-low or too-high with knob off → fatal (I-2/I-4).
+            // Too-high with knob off, or a drained mutex → fatal, silent (I-2/I-4).
             record_state_transition_(fsm_state::Disconnected);
             co_return fixpp::core::expected_t<void>{};
         }
@@ -6561,21 +6907,19 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     // We sent 141=Y in our outbound Logon (see open() above). If the peer's
     // Logon-ack omits 141=Y, reject with session_seqnum_reset_mismatch(116).
     // [spec.md FR-017; triage RC#C(b); [[feedback_half_restructure_symmetric_api]]]
-    // peer_ack_sent_reset_flag: hoisted to case scope for the persist guard.
-    // [029 gate-b/r1; INV-H1 fix; triage root-cause #1]
-    peer_ack_sent_reset_flag = (hdr.reset_seqnum_flag == "Y");
+    // peer_ack_sent_reset_flag is read above, before Guard (4) (104).
     {
         if (!peer_ack_sent_reset_flag &&
             cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) {
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(fixpp::core::error::session_seqnum_reset_mismatch);
         }
-        if (peer_ack_sent_reset_flag) {
-            // 032 T010(a): snapshot + one-shot clear the latch BEFORE the first
-            // co_await. All logic below uses the local (independent of
-            // reset/persist success — RC1 unconditional-assign invariant).
-            // [032 contract C4, data-model, RC1]
-            const bool own_logon_sent_reset_flag = own_logon_sent_reset_flag_;
+        // 104: the asked acknowledgement's unit, unchanged; the unasked one's follows the
+        // mTLS gate below.
+        if (peer_ack_sent_reset_flag && !unasked_reset_ack) {
+            // 032 T010(a): one-shot clear the latch, snapshotted above before Guard (4).
+            // All logic below uses the local (independent of reset/persist success — RC1
+            // unconditional-assign invariant). [032 contract C4, data-model, RC1]
             own_logon_sent_reset_flag_ = false;
             // 032 T010(b): capture pre-reset outbound BEFORE reset_seqnums_to_one_durable.
             // reset_before_send := (n_pre_outbound == seqnum_min+1) means fixpp's own
@@ -6631,91 +6975,36 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
         }
     }
 
-    // 014 T015 US2 / 013 T036 US2: CompID authorization BEFORE FSM
-    // transition to Active (FR-006/FR-007/FR-008/FR-019/FR-020/FR-021/FR-024
-    // symmetric initiator path).
-    // Initiator: asserted CompID = peer SenderCompID(49) = cfg_.target_comp_id.
-    //
-    // Two-arm guard (015 T020 removed the seam arm from the T015 form):
-    //   (1) live_peer_id_ set (live reconnect path, T014/T015) →
-    //       authorize with the real handshake peer_id, making the
-    //       already-fail-CLOSED mTLS gate *operable* with a live identity
-    //       (admit on-list; fail-close off-list/absent). FR-006/FR-008.
-    //   (2) mTLS + no identity available → fail CLOSED. RC#A.
-    //   (3) Non-mTLS → skip (backward compat, permissive). FR-019.
-    //
-    // live_peer_id_ is stored by install_reconnected_transport (T015) on a
-    // successful reconnect handshake and reset() one-shot below once this
-    // guard authorizes it. The acceptor site now binds a live identity too
-    // (T020/T-041 CLOSED) — both roles are symmetric, the seam is gone.
-    // [[feedback_half_restructure_symmetric_api]]: symmetric one-pass fix.
-    // [data-model §E-2; contracts C2; FR-006; FR-007; FR-008; FR-009]
-    {
-        const bool is_mtls =
-            cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_ca ||
-            cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_pinned;
+    // 014 T015 US2 / 013 T036 US2: CompID authorization BEFORE the FSM transition to Active,
+    // through logon_identity_admitted_() (its comment has the arms). A refused identity
+    // ends the arm Disconnected, returning success.
+    if (!logon_identity_admitted_()) {
+        record_state_transition_(fsm_state::Disconnected);
+        co_return fixpp::core::expected_t<void>{};
+    }
 
-        if (live_peer_id_.has_value() && is_mtls) {
-            // (1) Live reconnect path: use real handshake peer_id.
-            // Only active when mTLS is configured (binding gate applicable)
-            // AND a live peer_id was set by install_reconnected_transport.
-            // Non-mTLS sessions skip to arm (4) permissive (no client cert).
-            // FR-006: the identity source is the real handshake_result.peer_id
-            // (no fabricated/stand-in identity on this path). FR-008: removes
-            // the residual fabricated auth payload from the live path.
-            const fixpp::tls::peer_identity& auth_pid = *live_peer_id_;
-            const std::string_view asserted_compid = cfg_.target_comp_id;
-            auto auth_r = cfg_.compid_authorization_policy.authorize(auth_pid, asserted_compid);
-            if (!auth_r) {
-                // Fail-closed: emit event, Disconnected.
-                // On the open-Logon path (not reconnect), Disconnected
-                // is terminal. The reconnect-path auth fail is handled in
-                // reconnect_fsm.cpp step 7 BEFORE reaching here; this arm
-                // fires only if the open-Logon path somehow has a live peer_id
-                // (future: or if this guard is reached from the reconnect path
-                // after an auth-pass in the FSM — should not happen, but
-                // fail-closed is the safe default). [contracts C2; FR-007]
-                // cn EMPTY: live_peer_id_.reset() below frees the backing
-                // store, so a view into it would dangle in the persisted
-                // recent_events_ ring. (Owned-cn fix + the success-arm cn
-                // lifetime are tracked in the 014 verify doc.)
-                emit_event(fixpp::session::session_event_compid_authorization_failed{
-                    .cn = {},
-                    .asserted_compid = asserted_compid,
-                    .expected_compids = {},
-                    .principal_source = fixpp::session::bound_principal::source::CN,
-                });
-                live_peer_id_.reset();  // consume the live identity (one-shot)
-                record_state_transition_(fsm_state::Disconnected);
-                co_return fixpp::core::expected_t<void>{};
-            }
-            // Authorization succeeded: emit peer_identity_bound event.
-            // cn EMPTY: live_peer_id_.reset() below frees the backing store;
-            // owned-cn deferred — see verify doc. sha256_fingerprint (owned
-            // std::array) and bound_compid (config-stable) are safe. Matches
-            // the failure-arm precedent (gate-b/r2 FQ-2).
-            emit_event(fixpp::session::session_event_peer_identity_bound{
-                .cn = {},
-                .sans = {},
-                .sha256_fingerprint = auth_pid.leaf_fingerprint,
-                .cipher = {},
-                .bound_compid = asserted_compid,
-                .principal_source = auth_r->from,
-            });
-            live_peer_id_.reset();  // consume (one-shot per Logon-ack)
-        } else if (is_mtls) {
-            // (2) mTLS + no peer_identity → fail CLOSED (same as acceptor arm).
-            const std::string_view asserted_compid = cfg_.target_comp_id;
-            emit_event(fixpp::session::session_event_compid_authorization_failed{
-                .cn = {},
-                .asserted_compid = asserted_compid,
-                .expected_compids = {},
-                .principal_source = fixpp::session::bound_principal::source::CN,
-            });
-            record_state_transition_(fsm_state::Disconnected);
+    // 104 (clarification N-8; contract U1, U2, U4m, U7): the unasked acknowledgement's unit,
+    // after the mTLS gate, so a refused identity makes no reset. Its targets are next-in 2
+    // when the acknowledgement was consumed, else 1, and next-out 1: 032 C1's next-out 2 needs
+    // the latch, which is clear here. The restore, the dispositions and the superseded test
+    // are the asked unit's (093 contract C-6). The 789 honour below compares the peer's 789
+    // with the number after the reset (research D3.2).
+    if (unasked_reset_ack) {
+        const seqnum_t unit_in = logon_inbound_advanced_init ? seqnum_min + 1 : seqnum_min;
+        auto const unit = co_await run_reset_unit_(unit_in, seqnum_min);
+        co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
+        if (!unit.manager) {
+            disconnect_unless_superseded_(fsm_state::LogonSent);
+            co_return std::unexpected(unit.manager.error());
+        }
+        if (!unit.store && store_is_persistent_) {
+            disconnect_unless_superseded_(fsm_state::LogonSent);
+            co_return std::unexpected(unit.store.error());
+        }
+        if (logon_arm_superseded_(fsm_state::LogonSent)) {
             co_return fixpp::core::expected_t<void>{};
         }
-        // (4) Non-mTLS (one_way_ca): no client cert → gate skipped.
+        emit_event(fixpp::session::session_event_sequence_numbers_reset{.by_peer_request = true});
     }
 
     // T-041 CLOSED (015 US4): the acceptor guard above now binds the live
@@ -7633,7 +7922,7 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                     }
                     auto assign_r = co_await seqnum_mgr_.assign_outbound();
                     if (!assign_r) {
-                        record_state_transition_(fsm_state::Disconnected);
+                        record_disconnected_unless_already_();
                         co_return;
                     }
                     auto emit_r = co_await store_then_emit(hb_seq, *hb_result);
@@ -7700,7 +7989,7 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                         // Overflow or closed: session-fatal per 005 data-model.md §E3
                         // (Sequence-number state). Liveness loop is fire-and-forget (no expected_t
                         // return): log by transitioning to Disconnected and stopping the loop.
-                        record_state_transition_(fsm_state::Disconnected);
+                        record_disconnected_unless_already_();
                         co_return;
                     }
                     auto emit_r = co_await store_then_emit(tr_seq, *tr_result);
@@ -7788,7 +8077,7 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
 //  gate-b/r1-green: RC#B surfaces transport throws as dispatch_aborted]
 asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
     seqnum_t stamped_seq, std::span<const std::byte> frame, std::optional<fsm_state> arm,
-    bool transmit) {
+    bool transmit, wire_reset_exemption exemption) {
     // 034 T006 (C2 / R4): credential redaction at the single store boundary.
     // Mask the Password(554) value in a PRIVATE copy before it is persisted; the
     // wire path (Step 2) transmits the caller's ORIGINAL unmasked `frame`.
@@ -7837,6 +8126,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
 
     // Step 1: store (durable-before-transmit).
     if (store_ && !skip_store) {
+        // 104 (contract RR-4, "By construction"): once the receipt marker is `reached` (a
+        // reset point has run, or close() closed a receipt out), no new store call is issued:
+        // the number is taken back, as D-OUT-1 does for a cancelled call, and the call ends
+        // as one does, dispatch_aborted with no frame. A call issued before the marker became
+        // `reached` was not tested here and runs to its end (RR-2 item 5).
+        if (logout_seen_ == receipt_marker::reached) {
+            seqnum_mgr_.take_back_outbound(stamped_seq);
+            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+        }
         // The try takes what the store awaitable lets out: operation_aborted, when a
         // cancellation is met before the store's lock, and any exception of a store's
         // body.
@@ -7914,8 +8212,23 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
         // frame the store refused keeps 059's code; it is inside this branch, so that a
         // frame sent with no store call is not tested; and it is ahead of the superseded
         // test below. It returns a value: this frame's own store call was not cancelled.
+        // 104 (contract RR-6 item 3, loop 5's N-1 ruling): while a reset point has run on this
+        // connection, a frame refused here ends as one held back at the transmit does, with
+        // success and nothing transmitted, before the time of the last outbound frame;
+        // fixpp's own Logout in a crossing carries the exemption and is transmitted (RR-6
+        // item 4). While wire_closed_by_reset_ is clear, the refusal keeps dispatch_aborted:
+        // the lowerings that need no reset point (a reconcile, a take-back) are R-19's.
+        // The other lowering writers, read against "phase 1 has numbered its Logout":
+        // `git grep -n -E
+        // 'seqnum_mgr_\.(take_back_outbound|hydrate|reset_to_one|set_next_outbound)\(|reset_seqnums_to_one_durable\(|run_reset_unit_\('
+        // -- src/session/session.cpp`.
         if (stamped_seq >= seqnum_mgr_.peek_outbound()) {
-            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+            if (!wire_closed_by_reset_) {
+                co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+            }
+            if (exemption != wire_reset_exemption::crossing_logout) {
+                co_return fixpp::core::expected_t<void>{};
+            }
         }
     }
 
@@ -7951,11 +8264,20 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
     {
         if (live_transport_shared_()) {
             // Live path: serialized write through write_gate_.
-            auto write_r = co_await live_write_serialized_(frame);
+            auto write_r = co_await live_write_serialized_(frame, exemption);
             if (!write_r.has_value()) {
                 co_return std::unexpected(fixpp::core::error::dispatch_aborted);
             }
+            // 104 (contract RR-6 item 3): held back after a reset point; success with no
+            // transmit, as the transmit=false exit returns.
+            if (*write_r == live_write_outcome::held_back) {
+                co_return fixpp::core::expected_t<void>{};
+            }
         } else if (transport_send_) {
+            // 104 (contract RR-6 item 3): the config-time sink's site of ruling W's test.
+            if (wire_closed_by_reset_ && exemption != wire_reset_exemption::crossing_logout) {
+                co_return fixpp::core::expected_t<void>{};
+            }
             // Config-time sync sink (pre-live / test path).
             try {
                 transport_send_(frame);
@@ -7996,7 +8318,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_r
         // (Reset). [QuickFIX setNextTargetMsgSeqNum]
         auto sr = co_await seqnum_mgr_.set_next_inbound(new_seqno);
         if (!sr) {
-            record_state_transition_(fsm_state::Disconnected);
+            // 104 (contract RR-5 item 6): reached after close()'s seqnum_mgr_.drain().
+            record_disconnected_unless_already_();
             co_return std::unexpected(sr.error());
         }
         // If this completes an outstanding resend span, leave recovery.
@@ -8027,7 +8350,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_r
         if (rj_result) {
             auto assign_r = co_await seqnum_mgr_.assign_outbound();
             if (!assign_r) {
-                record_state_transition_(fsm_state::Disconnected);
+                record_disconnected_unless_already_();
                 co_return std::unexpected(assign_r.error());
             }
             // 036 T012: ARM-1 — toAdmin observation before transmit (FR-001/FR-002).
@@ -8134,8 +8457,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
 
     // D-OUT-6: what became of the Logout. It holds a value only when store_then_emit
     // returned success for it, which on the cut route (below) it does with its transmit
-    // skipped. Both early exits below, this one's and the cut route's, come before the
-    // assignment of logout_seen_.
+    // skipped.
     fixpp::core::expected_t<void> sent = std::unexpected(fixpp::core::error::dispatch_aborted);
     // fixpp#590 (`.specify/563-564-callback-send.md` §2.6 "The mechanism", ruling R-8):
     // set below when a terminal close was started inside this Logout's toAdmin. The
@@ -8193,17 +8515,23 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         // cancelled store call, among them. `sent` then keeps dispatch_aborted. Nothing
         // is awaited in the handler, nor after it on the path that leaves early.
         try {
-            sent = co_await store_then_emit(logout_seq, *logout_result, std::nullopt,
-                                            /*transmit=*/!cut);
+            // 104 (contract RR-6 item 4): the exemption's one origin, fixpp's own Logout in
+            // a crossing. Census by category: `git grep -n 'crossing_logout' -- src include`
+            // (the declaration; this origin; the pass-through to live_write_serialized_; the
+            // comparisons, D-OUT-10's lift and the sink test in store_then_emit, the grant
+            // test in live_write_serialized_).
+            sent =
+                co_await store_then_emit(logout_seq, *logout_result, std::nullopt,
+                                         /*transmit=*/!cut, wire_reset_exemption::crossing_logout);
         } catch (...) {  // NOLINT(bugprone-empty-catch): the outcome is in `sent`
         }
     }
     gate_hold.reset();
 
     // D-OUT-6: the Logout was not sent, so no reply to it can come. The phase leaves at
-    // once and arms no wait; close() goes on to its terminal part. logout_seen_ is not
-    // set on this path (ruling R-24): for reset_on_logout, a Logout that was not sent is
-    // not a Logout, and the teardown makes no reset for it.
+    // once and arms no wait; close() goes on to its terminal part. Ruling R-24's "a Logout
+    // that was not sent is not a Logout" for reset_on_logout is subsumed by 104: no Logout
+    // fixpp sends, sent or not, changes the receipt marker (data-model RO-2).
     if (!sent) {
         if (fsm_state_ != fsm_state::Disconnected) {
             record_state_transition_(fsm_state::Disconnected);
@@ -8214,10 +8542,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     // The cut route's exit (fixpp#590; `.specify/563-564-callback-send.md` §2.6 "The
     // mechanism", statement 4, "The exit"; ruling R-8). A Logout that was stored and not
     // transmitted is not a Logout that was sent, and no reply to it can come. So the
-    // step leaves at once: it does not set logout_seen_, does not record LogoutSent,
-    // arms no wait and posts nothing. The write of Disconnected is kept for a state
-    // that is not that already; on this route the decision point above made it.
-    // close() discards the value returned.
+    // step leaves at once: it does not record LogoutSent, arms no wait and posts nothing.
+    // The write of Disconnected is kept for a state that is not that already; on this
+    // route the decision point above made it. close() discards the value returned.
     if (cut) {
         if (fsm_state_ != fsm_state::Disconnected) {
             record_state_transition_(fsm_state::Disconnected);
@@ -8225,15 +8552,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         co_return std::unexpected(fixpp::core::error::dispatch_aborted);
     }
 
-    // 024 T013 (site a): mark that a Logout was sent on the local graceful path.
-    // Keyed here (after emit, before LogoutSent) so logout_seen_ is true whenever
-    // the Logout frame was actually placed on the wire. The teardown reset in close()
-    // reads this flag to distinguish a graceful-Logout teardown from an abnormal drop.
-    // [contracts/reset-knobs.md C3.1; plan.md Gate A convergence note (b)]
-    // A Logout that was cut is not placed on the wire and left by the exit above, so
-    // the set is skipped for it (fixpp#590; `.specify/563-564-callback-send.md` §2.6,
-    // ruling R-8).
-    logout_seen_ = true;
+    // 104-sequence-reset-fidelity (FR-002, data-model RO-2) supersedes 024 T013's site (a)
+    // and 024 contracts/reset-knobs.md C3.1's sent direction by name: the Logout this phase
+    // sends no longer marks logout_seen_, so a graceful close resets under reset_on_logout
+    // only when the peer's Logout reaches its reset point (arm L), and an unanswered one
+    // makes no reset.
 
     // 103 (research D4.6): an inbound ending recorded Disconnected while this Logout was in
     // its store call, so it was that ending's reply: no LogoutSent and no wait for one.
@@ -8256,7 +8579,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     // SessionState.logoutTimeoutMs). Wired from SessionConfig per FR-008 / RC#D.
     //
     // fixpp#536 (D-536-3): the wait is a race between a wake of this session's own and
-    // the deadline, the pattern close() uses for the reset unit (reset_unit_wake_).
+    // the deadline.
     //   - `confirmed` never expires by itself. The LogoutSent arm cancels it through
     //     logout_wait_wake_, and as_tuple turns that cancel into the arm's completion.
     //   - The deadline arm is await_deadline, so a Clock::cancel_sleeps() by anyone
@@ -8315,6 +8638,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
 //   empty/short-store GapFill NewSeqNo =
 //               end_is_through_current ? peek_outbound() : (requested_end + 1)
 //
+// 104 (research D3.3a; contract U6; data-model "`replay_outbound_range_`: the end model")
+// supersedes 027 contracts/next-expected-msgseqnum.md C3's explicit-end case by name: after
+// the gate's wait and the store tail read,
+//   end_is_through_current = end_is_through_current || requested_end >= next
+// where `next` is the tail read's next outbound number, or peek_outbound() with no store. A
+// request whose end reaches the next outbound number is answered as one through the current
+// number, as QuickFIX C++ clamps EndSeqNo, so a GapFill's NewSeqNo never passes that number.
+//
 // The helper NEVER calls record_state_transition_ — the CALLER owns all FSM
 // Disconnected transitions. Returns std::unexpected on all failure paths so
 // the caller can detect and handle them.
@@ -8350,10 +8681,15 @@ asio::awaitable<fixpp::core::expected_t<Session::replay_outcome>> Session::repla
     // for pre-live/test paths.
     const auto transmit_async = [&](std::span<const std::byte> f) -> asio::awaitable<bool> {
         if (live_transport_shared_()) {
+            // A frame held back by ruling W is a success (104, contract RR-6 item 3).
             auto wr = co_await live_write_serialized_(f);
             co_return wr.has_value();
         }
         if (!transport_send_) {
+            co_return true;
+        }
+        // 104 (contract RR-6 item 3): ruling W's test at the sink; it takes no exemption.
+        if (wire_closed_by_reset_) {
             co_return true;
         }
         try {
@@ -8445,6 +8781,9 @@ asio::awaitable<fixpp::core::expected_t<Session::replay_outcome>> Session::repla
     // Resolve the effective end: through-current or clamped to our last stored
     // sequence number. Mirrors the original rr_end resolution.
     seqnum_t our_last = 0;
+    // 104 (research D3.3a): the next outbound number the end model's clamp reads, the tail
+    // read's when there is a store, else the manager's.
+    seqnum_t next_outbound = seqnum_mgr_.peek_outbound();
     if (store_) {
         auto ns = co_await store_->next_seqnum(direction_t::outbound, false);
         // fixpp#538 (.specify/536-537-538-recovery-liveness.md, D-538-4, "The tail
@@ -8456,7 +8795,10 @@ asio::awaitable<fixpp::core::expected_t<Session::replay_outcome>> Session::repla
             co_return std::unexpected(ns.error());
         }
         our_last = (*ns > 0) ? (*ns - 1U) : 0;
+        next_outbound = *ns;
     }
+    // 104 (research D3.3a): the end model's clamp (the function header's formula).
+    end_is_through_current = end_is_through_current || requested_end >= next_outbound;
     const seqnum_t eff_end = (end_is_through_current || (our_last > 0 && requested_end > our_last))
                                  ? our_last
                                  : requested_end;

@@ -157,9 +157,10 @@ const KeyedRow kLogonSent[] = {
      .t = "R 0/5999 A 45=1 | stays | k | app=0 adm=0",
      .a = nullptr,
      .l = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
+    // 104 (contract "Superseded by name", the unasked 141=Y acknowledgement): kept, not consumed.
     {.cell = "LS-e",
      .input = "Logon 141=Y 1137=4",
-     .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0"},
+     .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
     {.cell = "LS-e", .input = "Logon 141=Y 1137=9", .t = "- | Active | c | app=0 adm=0"},
     {.cell = "LS-f", .input = "wrongBS Logon 1137=9", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "LS-f", .input = "wrongBS Logon 1137=4", .t = "- | Disc | k | app=0 adm=0"},
@@ -382,10 +383,16 @@ INSTANTIATE_TEST_SUITE_P(Named, W5PerShape, testing::Values(Shape::T, Shape::A, 
 // `141=Y` with `1137=4` on a validating initiator: refused ahead of the reset unit. The Reject
 // takes the number after open()'s Logon. Behind the reset unit, the reset moves the counter first,
 // so the two endings differ by this counter, and only that unit raises the event.
+// 104 (research D4; contract "Superseded by name") supersedes this cell's consumed ending by
+// name: fixpp's own Logon carried no 141=Y, so the acknowledgement is unasked and takes no
+// sequence check, and the refusal keeps NextNumIn ("k"). QuickFIX does the same: QuickFIX C++
+// v1.16.0 `Session::generateReject(const Message&, int, int)` increments only `if (msgType !=
+// MsgType_Logon && msgType != MsgType_SequenceReset && msgSeqNum == getExpectedTargetNum())`.
+// The ordinary acknowledgement without 141=Y still consumes (L-104-8).
 TEST_P(W5PerShape, Initiator141YWith1137_4_NoReset) {
     const CellRun run =
         run_keyed_cell(GetParam(), true, Arm::LogonSent, input("Logon 141=Y 1137=4"));
-    expect_ending(run, "R 5/1137 A 45=1 | Disc | c | app=0 adm=0");
+    expect_ending(run, "R 5/1137 A 45=1 | Disc | k | app=0 adm=0");
     if (run.setup_failure.empty()) {
         EXPECT_EQ(session_test_access::seqnum_mgr(*run.rig->sess).peek_outbound(), 3U);
         for (auto const& ev : run.rig->sess->recent_events()) {

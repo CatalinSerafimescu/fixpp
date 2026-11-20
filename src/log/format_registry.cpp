@@ -95,6 +95,10 @@ static const std::unordered_map<std::uint32_t, std::string_view>& get_registry()
                            "ref_msg_type_len={} suppressed={}")),
              .fmt = "inbound reply over the outbound ceiling not sent: msg_type={} "
                     "ref_msg_type_len={} suppressed={}"},
+            // 104-sequence-reset-fidelity (contract RT-4): Session::note_receipt_reset_failed_.
+            {.id = static_cast<std::uint32_t>(crc32_str(
+                 "received Logout's sequence reset failed, not retried: part={} error={}")),
+             .fmt = "received Logout's sequence reset failed, not retried: part={} error={}"},
             // 099 (research R-2, FR-004): the role loops' failed open(), in engine.cpp.
             {.id = static_cast<std::uint32_t>(
                  crc32_str("session role loop ended: Session::open() failed: begin_string={} "

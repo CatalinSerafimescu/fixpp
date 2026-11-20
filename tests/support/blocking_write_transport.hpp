@@ -14,8 +14,20 @@
 //   - its write chain matches `asio_plain_transport::async_write`
 //     (src/transport/asio_plain_transport.cpp) frame for frame: one coroutine, and one
 //     `use_awaitable` adapter where it suspends;
-//   - its write does not allocate: it records counts, never the bytes;
+//   - its write does not allocate while blocking_write_state::record_bytes is false (the
+//     default): it then records counts, never the bytes;
 //   - release() is called from the thread that runs the io_context.
+//
+// 104-sequence-reset-fidelity (tasks.md T015; research D10, the write-start count) adds
+// blocking_write_state::starts, counted as async_write's first statement, before the park
+// and before its closed test, so a cell can see a write that has started and not completed.
+//
+// 104-sequence-reset-fidelity (tasks.md T015; research D10, the fifth test-support addition)
+// adds an opt-in byte record: with blocking_write_state::record_bytes set, each async_write
+// appends a copy of its bytes with its start index (the value of `starts` it counted), and
+// marks the entry completed where it counts `writes`, so a cell can read each frame's 35 and
+// 34 in write-start order. It allocates; a cell that needs the no-allocation condition
+// leaves it off.
 #pragma once
 
 #include <asio/any_io_executor.hpp>
@@ -36,6 +48,7 @@
 #include <span>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "support/transport_double.hpp"
 
@@ -45,8 +58,18 @@ namespace fixpp::session::test {
 struct blocking_write_state {
     bool block_next = false;                  // the next write parks until release()
     bool parked = false;                      // a write is parked now
+    std::size_t starts = 0;                   // async_write calls begun (104)
     std::size_t writes = 0;                   // writes completed
     std::optional<asio::steady_timer> timer;  // the parked write's wait
+
+    // The opt-in byte record (104): one entry per async_write while record_bytes is set.
+    struct recorded_write {
+        std::size_t start = 0;   // the write's start index: `starts` as this write counted it
+        bool completed = false;  // set where `writes` counts this write
+        std::vector<std::byte> bytes;
+    };
+    bool record_bytes = false;
+    std::vector<recorded_write> recorded;  // in write-start order
 
     void arm_block() noexcept { block_next = true; }
     void release() {
@@ -75,6 +98,13 @@ public:
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_write(
         std::span<const std::byte> bytes) override {
+        ++state_->starts;
+        std::optional<std::size_t> rec;
+        if (state_->record_bytes) {
+            rec = state_->recorded.size();
+            state_->recorded.push_back(
+                {.start = state_->starts, .bytes = {bytes.begin(), bytes.end()}});
+        }
         if (closed_) co_return std::unexpected(fixpp::core::error::transport_already_closed);
         if (state_->block_next) {
             state_->parked = true;
@@ -87,6 +117,7 @@ public:
             if (closed_) co_return std::unexpected(fixpp::core::error::transport_already_closed);
         }
         ++state_->writes;
+        if (rec) state_->recorded[*rec].completed = true;
         co_return bytes.size();
     }
 

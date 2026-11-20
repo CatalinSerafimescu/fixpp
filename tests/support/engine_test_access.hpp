@@ -34,6 +34,13 @@ struct engine_test_access {
         e.test_hook_post_send_drain_ = std::move(hook);
     }
 
+    // 104 (cell R-1t): the step-3 mark. stop() co_awaits this on the control strand
+    // after step 2's close join and immediately before step 3's role-loop join.
+    static void set_before_role_loop_join_hook(Engine& e,
+                                               std::function<asio::awaitable<void>()> hook) {
+        e.test_hook_before_role_loop_join_ = std::move(hook);
+    }
+
     // fixpp#544 §2.1: a copy of a registered session's SessionEntry::session_strand, or
     // nullopt for an unknown id. It reads the registry unsynchronised, so call it only
     // while no thread runs the engine's io_context.

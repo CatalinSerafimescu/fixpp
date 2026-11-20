@@ -505,9 +505,10 @@ TEST(GracefulLogoutStoreCancelled, ByAnEscalatingTerminalClose_BothClosesReturnA
 
 // The timer input with reset_on_logout set (ruling R-24): a graceful close whose Logout
 // was not sent does not reset. The store's numbers are the ones the same close leaves
-// without reset_on_logout, and the teardown makes no reset() call. A local graceful
-// close whose Logout was sent still resets:
-// ResetOnLifecycleTest.ResetOnLogout_LocalInitiated_Resets (test_reset_on_lifecycle.cpp).
+// without reset_on_logout, and the teardown makes no reset() call. A local graceful close
+// resets only when the peer's Logout is received (104, B-104-1):
+// ResetOnLifecycleTest.ResetOnLogout_LocalInitiatedAnswered_Resets
+// (test_reset_on_lifecycle.cpp).
 TEST(GracefulLogoutStoreCancelled, ByTheGraceTimer_ResetOnLogout_NoResetForALogoutThatWasNotSent) {
     auto const o = run_logout_scene(LogoutInput::grace_timer_reset_on_logout);
     ASSERT_TRUE(logout_gate(o));

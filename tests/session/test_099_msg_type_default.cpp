@@ -812,6 +812,12 @@ std::string bad_1130_ending(Shape s) { return s == Shape::L ? kBad1130Gate() : k
 
 // `141=Y` with a bad 1130: refused ahead of the reset unit, as W-5's cell with a bad 1137 is. The
 // Reject takes the number after open()'s Logon, and only that unit raises the event.
+// 104 (research D4; contract "Superseded by name") supersedes the block's consumed ending for
+// this acknowledgement by name: it is unasked (fixpp's Logon carried no 141=Y), takes no sequence
+// check, and its refusal keeps NextNumIn on every shape, as QuickFIX C++ v1.16.0
+// `Session::generateReject(const Message&, int, int)` does for a Logon (it increments only `if
+// (msgType != MsgType_Logon && msgType != MsgType_SequenceReset && msgSeqNum ==
+// getExpectedTargetNum())`). The ordinary acknowledgement still consumes (L-104-8).
 TEST_P(W25Initiator, Reply141YWithBad1130_NoReset) {
     CellRun run = open_cell(shape_fixture(GetParam()), false, true);
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
@@ -820,7 +826,7 @@ TEST_P(W25Initiator, Reply141YWithBad1130_NoReset) {
                                        "141=Y\x01"
                                        "1137=9\x01" +
                                            count("1") + E("D", "99")));
-    expect_ending(run, bad_1130_ending(GetParam()));
+    expect_ending(run, "R 5/1130 A 45=1 | Disc | k | app=0 adm=0");
     EXPECT_EQ(session_test_access::seqnum_mgr(*r.sess).peek_outbound(), 3U);
     for (auto const& ev : r.sess->recent_events()) {
         EXPECT_FALSE(std::holds_alternative<session_event_sequence_numbers_reset>(ev))

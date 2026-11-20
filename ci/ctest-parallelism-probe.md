@@ -110,6 +110,44 @@ condition assumed:
   cannot reset it. Sampling around `ctest` needs no such concession — but it also
   means the new figures are **not** comparable to a cgroup one, had any existed.
 
+#### RE-RECORD — 104 (2026-11-20): every pinned lane, from one `workflow_dispatch` run at the branch head
+
+Every Linux lane rendered `DIAGNOSTIC ONLY` on the dispatch run at `c6755592`: 104 adds ctest entries, so
+the executed counts moved past the fixpp#675 pins below (the Windows lanes have no report step). Feature 104's FR-017 requires the basis to be read off a CI run
+at 104's head, so this section reads it there, not off a push to `main` (research D9, sequence (a)).
+
+**Basis:** the three `workflow_dispatch` runs at `c6755592`, the head after 104's last registration change,
+all created 2026-11-19: Tier 1 run `44621971639`, Tier 2 Windows run `44621976743` and Tier 3 libc++ run
+`44621981754`. `origin/main` was the merge-base at that head, so a `pull_request` run's merge ref holds the
+same registrations. **Method:** as the fixpp#675 section below: on Linux the `ran:` value of the lane's
+`ci/peak-memory-report.sh` line, cross-checked against ctest's `… out of <N>` for the step it sampled; on
+Windows the `out of <N>` of the lane's suite step. Nothing is added on top of the reading, so "read" and
+"now" are the same value. Re-check that the head adds the registrations 104 expects:
+`git diff origin/main c6755592 -- '*CMakeLists.txt' '*.cmake' | grep -E '^[+-].*(add_test|gtest_discover_tests|fixpp_add_[a-z_]*test|add_session_10[34]_bucket|add_dictionary_feature_bucket)'`.
+Per this document's rule, confirm each lane on the first run after this lands, by reading its count.
+
+**The coverage lane's Test step failed** on its first attempt, on one 103 cell that 104 does not touch
+(`SendDuringLogoutEngine103`, a setup miss after its pump budget). ctest counts a failed test in its total,
+so the count is the registered workload; the job was re-run. The Windows lanes have no
+`ci/peak-memory-report.sh` step, so their pins are re-recorded from the suite step and have no EVIDENCE reading.
+
+| lane | was | CI read at `c6755592` | now | log line |
+|---|---:|---:|---:|---|
+| `linux-clang-debug` | 511 | 519 | **519** | `[ran: 519/511]`; `100% tests passed, 0 tests failed out of 519` |
+| `linux-clang-release` | 552 | 561 | **561** | `[ran: 561/552]`; `100% tests passed, 0 tests failed out of 561` |
+| `linux-clang-asan` | 512 | 520 | **520** | `[ran: 520/512]`; `100% tests passed, 0 tests failed out of 520` |
+| `linux-clang-ubsan` | 480 | 488 | **488** | `[ran: 488/480]`; `100% tests passed, 0 tests failed out of 488` |
+| `linux-clang-tsan` | 480 | 488 | **488** | `[ran: 488/480]`; `100% tests passed, 0 tests failed out of 488` |
+| `linux-gcc-release` | 560 | 569 | **569** | `[ran: 569/560]`; `100% tests passed, 0 tests failed out of 569` |
+| `linux-clang-coverage` | 518 | 526 | **526** | attempt 1: `[ran: 526/518]`; `99% tests passed, 1 tests failed out of 526` (the 103 cell above) |
+| `linux-clang-libc++` | 506 | 514 | **514** | `[ran: 514/506]`; `100% tests passed, 0 tests failed out of 514` |
+| `linux-clang-libc++-asan` | 475 | 483 | **483** | `[ran: 483/475]`; `100% tests passed, 0 tests failed out of 483` |
+| `linux-clang-libc++-ubsan` | 475 | 483 | **483** | `[ran: 483/475]`; `100% tests passed, 0 tests failed out of 483` |
+| `linux-clang-libc++-tsan` | 475 | 483 | **483** | `[ran: 483/475]`; `100% tests passed, 0 tests failed out of 483` |
+| `windows-msvc-debug` | 436 | 444 | **444** | step `ctest --preset windows-msvc-debug --output-on-failure -LE packaging --timeout 1800`: `100% tests passed, 0 tests failed out of 444` |
+| `windows-msvc-release` | 444 | 452 | **452** | step `ctest --preset windows-msvc-release --output-on-failure --timeout 1800`: `100% tests passed, 0 tests failed out of 452` |
+| `windows-msvc-asan` | 435 | 443 | **443** | step `ctest --preset windows-msvc-asan --output-on-failure -LE packaging --timeout 1800`: `100% tests passed, 0 tests failed out of 443` |
+
 #### RE-RECORD — fixpp#675 (2026-11-14): every pinned lane, from one push to `main`, plus this branch's three entries
 
 Every lane had rendered `DIAGNOSTIC ONLY` on `main`: the executed counts had moved past the pins as

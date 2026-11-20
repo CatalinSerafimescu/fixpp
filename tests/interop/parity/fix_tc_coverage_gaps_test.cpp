@@ -132,8 +132,11 @@ TEST_F(FixTcCoverageGaps, TooHighInboundSeqnum_EmitsResendRequest_StaysActive) {
 // a range [1..100] whose EndSeqNo far exceeds anything we have emitted. This
 // fixture attaches NO message store, so replay_outbound_range_ takes the
 // store-absent branch of Session::replay_outbound_range_: the entire requested range collapses
-// into a SINGLE SequenceReset-GapFill(35=4) whose NewSeqNo(36)=requested_end+1
-// (here 101, in that same store-absent branch). The session stays Active — no error/disconnect.
+// into a SINGLE SequenceReset-GapFill(35=4). Since 104 (research D3.3a; contract U6,
+// superseding 027 C3's explicit-end case by name) an EndSeqNo at or above the next outbound
+// number is answered through the current number, so NewSeqNo(36) is the next outbound number,
+// as QuickFIX C++'s `nextResendRequest` clamps EndSeqNo. The session stays Active — no
+// error/disconnect.
 // (A store WITH stored app messages would instead clamp the effective end to the
 // last stored outbound and walk per-slot — a different cell; not exercised here.)
 TEST_F(FixTcCoverageGaps, ResendRequestEndSeqNoBeyondLastOutbound_GapFills_StaysActive) {
@@ -141,6 +144,7 @@ TEST_F(FixTcCoverageGaps, ResendRequestEndSeqNoBeyondLastOutbound_GapFills_Stays
     ASSERT_TRUE(drive_to_active(s));
 
     const std::size_t before = capture.frames.size();
+    const auto next_out = fixpp::session::session_test_access::seqnum_mgr(s).next_outbound_unsafe();
 
     // We (acceptor) have emitted only our Logon reply (outbound seq 1) and keep no
     // store. The peer asks for [1..100] — far beyond anything we can replay.
@@ -157,14 +161,15 @@ TEST_F(FixTcCoverageGaps, ResendRequestEndSeqNoBeyondLastOutbound_GapFills_Stays
     const auto& gf = capture.frames.back();
     EXPECT_TRUE(frame_has(gf, "35=4\x01")) << "the single reply must be a SequenceReset(35=4)";
     // DISCRIMINATING the over-range coverage on that SAME frame: it must be a
-    // GAP-FILL (123=Y), not a hard reset (123=N), and honor the full requested
-    // EndSeqNo so NewSeqNo(36)=requested_end+1=101. A witness asserting only
-    // "a 35=4 exists" would also pass on a [1..1] gap-fill (36=2), a reset-mode
-    // 35=4, or an unrelated SequenceReset — 36=101 + 123=Y pin the exact behavior.
+    // GAP-FILL (123=Y), not a hard reset (123=N), and end at the next outbound number
+    // (104's clamp), not at EndSeqNo + 1. A witness asserting only "a 35=4 exists"
+    // would also pass on a reset-mode 35=4 or an unrelated SequenceReset — the
+    // NewSeqNo and 123=Y pin the exact behavior.
     EXPECT_TRUE(frame_has(gf, "123=Y\x01"))
         << "the reply must be a SequenceReset-GapFill (123=Y), not a hard reset";
-    EXPECT_TRUE(frame_has(gf, "36=101\x01"))
-        << "store-absent over-range GapFill must carry NewSeqNo=EndSeqNo+1 (101)";
+    EXPECT_TRUE(frame_has(gf, "36=" + std::to_string(next_out) + "\x01"))
+        << "store-absent over-range GapFill must carry NewSeqNo = the next outbound number ("
+        << next_out << "), not EndSeqNo + 1";
 }
 
 // ── gap #7 / FIX-TC 2t — MsgType(35) not the third field → DISREGARDED ────────
@@ -206,41 +211,50 @@ TEST_F(FixTcCoverageGaps, HeaderFieldsOutOfOrder_MsgTypeNotThird_Disregarded) {
 // above. Instead use a ResendRequest, whose body fields are BeginSeqNo(7) and
 // EndSeqNo(16), and place EndSeqNo(16) BEFORE BeginSeqNo(7). fixpp parses them
 // order-independently: the resend range is read correctly and honored — proven by
-// the GapFill reply carrying NewSeqNo(36)=101 (= EndSeqNo 100 + 1). A parser that
-// enforced body-field order would Reject(35=3) and emit no GapFill.
+// the GapFill reply carrying NewSeqNo(36) = EndSeqNo + 1. Since 104 (research D3.3a) an
+// EndSeqNo at or above the next outbound number reads as through-current, so the cell first
+// raises the next outbound number with two TestRequests (each answered by a Heartbeat) and
+// asks for an EndSeqNo below it: an EndSeqNo that was not parsed reads as 0, through-current,
+// and would end the GapFill at the next outbound number instead. A parser that enforced
+// body-field order would Reject(35=3) and emit no GapFill.
 TEST_F(FixTcCoverageGaps, BodyFieldsArbitraryOrder_Accepted) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U);
+    (void)feed(s, make_fix_frame("FIX.4.2", "1", /*seq=*/2, "TW", "ISLD", "112=TR-1\x01"));
+    (void)feed(s, make_fix_frame("FIX.4.2", "1", /*seq=*/3, "TW", "ISLD", "112=TR-2\x01"));
+    ASSERT_EQ(capture.count_msg_type("0"), 2U) << "setup: each TestRequest draws a Heartbeat";
+    const auto next_out = fixpp::session::session_test_access::seqnum_mgr(s).next_outbound_unsafe();
+    ASSERT_GT(next_out, 3U) << "setup: the next outbound number must exceed EndSeqNo + 1";
     const std::size_t before = capture.frames.size();
 
-    // A ResendRequest(35=2, seq=2) with EndSeqNo(16) placed BEFORE BeginSeqNo(7) —
+    // A ResendRequest(35=2, seq=4) with EndSeqNo(16) placed BEFORE BeginSeqNo(7) —
     // body fields in non-canonical order.
     std::string body;
     body += field(35, "2");
-    body += field(34, "2");
+    body += field(34, "4");
     body += field(49, "TW");
     body += field(52, "20240101-00:00:00.000");
     body += field(56, "ISLD");
-    body += field(16, "100");  // EndSeqNo before BeginSeqNo (canonical is 7 then 16)
+    body += field(16, "2");  // EndSeqNo before BeginSeqNo (canonical is 7 then 16)
     body += field(7, "1");
     (void)feed(s, frame_from_body("FIX.4.2", body));
 
     EXPECT_EQ(s.state(), fixpp::session::fsm_state::Active)
         << "out-of-order body fields are accepted, session stays Active";
-    EXPECT_EQ(next_inbound(s), 3U) << "processed in-sequence (counter advances)";
+    EXPECT_EQ(next_inbound(s), 5U) << "processed in-sequence (counter advances)";
     EXPECT_EQ(capture.count_msg_type("3"), 0U)
         << "DIVERGENCE: no Reject for out-of-order body fields (QF emits 373=14)";
     // Prove BOTH reversed body fields were actually PARSED (not ignored): the
-    // resend range [1..100] was read from the reversed 16/7 and honored → a single
+    // resend range [1..2] was read from the reversed EndSeqNo and BeginSeqNo and honored → a single
     // GapFill whose gap starts at BeginSeqNo=1 (MsgSeqNum 34=1) and whose
-    // NewSeqNo(36)=EndSeqNo+1=101. 34=1 pins BeginSeqNo(7), 36=101 pins EndSeqNo(16).
+    // NewSeqNo(36)=EndSeqNo+1=3, below the next outbound number. 36=3 pins EndSeqNo(16).
     ASSERT_EQ(capture.frames.size(), before + 1U) << "exactly one GapFill reply expected";
     const auto& gf = capture.frames.back();
     EXPECT_TRUE(frame_has(gf, "34=1\x01"))
         << "reversed-order BeginSeqNo(7)=1 must be parsed (GapFill starts at seq 1)";
-    EXPECT_TRUE(frame_has(gf, "36=101\x01"))
-        << "reversed-order EndSeqNo(16)=100 must be parsed (NewSeqNo=101)";
+    EXPECT_TRUE(frame_has(gf, "36=3\x01"))
+        << "reversed-order EndSeqNo(16)=2 must be parsed (NewSeqNo=3)";
 }
 
 // ── gap #10 / FIX-TC validLogonState_MsgTypeLogoutAndLogonAlreadySent ─────────
@@ -439,18 +453,21 @@ TEST_F(FixTcCoverageGaps, SimultaneousResendRequest_ServicesPeerWhileAwaitingOwn
     // fills our first gap slot AND carries a ResendRequest([1..3]) payload fixpp must
     // service. (Storeless fixture → the reply collapses to a SequenceReset-GapFill.)
     const std::size_t before = capture.frames.size();
+    const auto next_out = fixpp::session::session_test_access::seqnum_mgr(s).next_outbound_unsafe();
+    ASSERT_LE(next_out, 3U) << "setup: EndSeqNo must reach the next outbound number";
     (void)feed(s, make_resend_request("FIX.4.2", /*seq=*/2, "TW", "ISLD", /*begin=*/1, /*end=*/3));
 
     // fixpp services the counter-request even though its OWN resend is still open:
-    // exactly one reply, a SequenceReset-GapFill(35=4, 123=Y) with NewSeqNo(36)=end+1=4.
+    // exactly one reply, a SequenceReset-GapFill(35=4, 123=Y). EndSeqNo reaches the next
+    // outbound number, so since 104 (research D3.3a; contract U6) NewSeqNo(36) is that number.
     ASSERT_EQ(capture.frames.size(), before + 1U)
         << "the peer ResendRequest must be serviced with exactly one reply mid-resend";
     const auto& reply = capture.frames.back();
     EXPECT_TRUE(frame_has(reply, "35=4\x01"))
         << "reply to the counter-request is a SequenceReset(35=4)";
     EXPECT_TRUE(frame_has(reply, "123=Y\x01")) << "storeless reply is a GapFill (123=Y)";
-    EXPECT_TRUE(frame_has(reply, "36=4\x01"))
-        << "GapFill NewSeqNo(36)=EndSeqNo+1=4 ties it to [1..3]";
+    EXPECT_TRUE(frame_has(reply, "36=" + std::to_string(next_out) + "\x01"))
+        << "GapFill NewSeqNo(36) = the next outbound number (" << next_out << ")";
     EXPECT_EQ(s.state(), fixpp::session::fsm_state::Active)
         << "servicing a counter-ResendRequest mid-resend must not tear the session down";
     EXPECT_EQ(next_inbound(s), 3U)

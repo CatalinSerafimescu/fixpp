@@ -7,6 +7,20 @@
 // Moved out of tests/session/test_session_plaintext_roundtrip.cpp (fixpp#518's
 // LogonCloseDuringSuspension cells) by 093-inbound-frame-dispositions (tasks.md T074a), so
 // a second executable can hold a store operation the same way.
+//
+// 104-sequence-reset-fidelity (tasks.md T015; research D10, its test-support additions) adds
+// these readings, which a cell takes without a production seam:
+//   - StoreLog::calls, an issue-time record of every reset() and reset_to call, taken at the
+//     call's entry before any hook, hold or forward, in every reset_to_mode, with the
+//     readings of StoreLog::call_snapshot, so a cell can tell the reset unit from the
+//     teardown's reset;
+//   - Hooks::on_inbound_persist_call, a per-call selector that holds a later inbound
+//     persist, where Hooks::on_inbound_persist is one-shot;
+//   - StoreLog::store_events, the two events of a held outbound store, each stamped with
+//     the size of StoreLog::writes at its append, so its order against a counter write is
+//     read from the stamps;
+//   - blocking_write_state::starts (tests/support/blocking_write_transport.hpp), the write
+//     count taken before the park.
 #pragma once
 
 #include <asio/co_spawn.hpp>
@@ -24,9 +38,11 @@
 #include <fixpp/session/message_store_factory.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
 #include <fixpp/session/seqnum.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <functional>
 #include <memory>
 #include <memory_resource>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -51,6 +67,13 @@ enum class reset_to_mode { forward, default_body, contended };
 // `hold_timed_out` instead of a settle miss.
 inline constexpr auto kHoldBound = std::chrono::seconds{1};
 
+// What a cell reads at a reset() or reset_to call, through StoreLog::call_snapshot: the
+// session's state and whether its transport is open (HookedStore cannot see the session).
+struct CallReading {
+    fixpp::session::fsm_state state{};
+    bool transport_open = false;
+};
+
 // The counter writes a HookedStore completed, and the MemoryStore behind it, which
 // outlives the session so a cell can read the final counters after stop().
 struct StoreLog {
@@ -60,6 +83,35 @@ struct StoreLog {
     };
     std::function<bool()> close_began;
     std::vector<Write> writes;  // in completion order
+
+    // One reset() or reset_to call, recorded at its entry (104). Under
+    // reset_to_mode::default_body a reset_to's body issues this store's own reset(), which
+    // is then recorded as a call of its own.
+    enum class call_kind { reset, reset_to };
+    struct Call {
+        call_kind kind = call_kind::reset;
+        // reset_to's targets; zero for a reset().
+        fixpp::session::seqnum_t next_in = 0;
+        fixpp::session::seqnum_t next_out = 0;
+        // call_snapshot's readings at the call; empty when the cell set no snapshot.
+        std::optional<CallReading> reading;
+    };
+    std::function<CallReading()> call_snapshot;
+    std::vector<Call> calls;  // in issue order
+    int reset_calls = 0;
+    int reset_to_calls = 0;
+
+    // A held outbound store's two events (104), appended by HookedStore::held_store only:
+    // store_applied right after the inner store returns, store_returned right before the
+    // held store returns. writes_at is writes.size() at the append, so an entry of writes
+    // at an index below writes_at was completed before the event.
+    enum class store_event_kind { store_applied, store_returned };
+    struct StoreEvent {
+        store_event_kind kind = store_event_kind::store_applied;
+        fixpp::session::seqnum_t seq = 0;
+        std::size_t writes_at = 0;
+    };
+    std::vector<StoreEvent> store_events;  // in append order
     int stores_made = 0;
     std::shared_ptr<fixpp::session::MemoryStore> inner;
     // reset() calls issued while close_began() was true.
@@ -73,6 +125,18 @@ struct StoreLog {
 
     void record(std::string op) {
         writes.push_back({.op = std::move(op), .after_close_began = close_began && close_began()});
+    }
+    void record_call(call_kind kind, fixpp::session::seqnum_t next_in,
+                     fixpp::session::seqnum_t next_out) {
+        calls.push_back({.kind = kind,
+                         .next_in = next_in,
+                         .next_out = next_out,
+                         .reading = call_snapshot ? std::optional<CallReading>{call_snapshot()}
+                                                  : std::nullopt});
+        ++(kind == call_kind::reset ? reset_calls : reset_to_calls);
+    }
+    void record_store_event(store_event_kind kind, fixpp::session::seqnum_t seq) {
+        store_events.push_back({.kind = kind, .seq = seq, .writes_at = writes.size()});
     }
 };
 
@@ -100,6 +164,10 @@ public:
         // hold_until_close_reset does (release_when, else a reset after close() began).
         std::function<bool()> on_outbound_read;
         std::function<bool()> on_outbound_store;
+        // Called on every next_seqnum(inbound, true), beside the one-shot
+        // on_inbound_persist (104); when one returns true, that operation completes and
+        // then holds, as on_outbound_store's does.
+        std::function<bool()> on_inbound_persist_call;
         // A held operation (any of the above that holds) returns store_io_failure once
         // released, in place of its result, as a store whose I/O failed while the session
         // was suspended on it.
@@ -172,9 +240,12 @@ public:
         const bool hooked =
             fire(dir == fixpp::session::direction_t::inbound ? hooks_.on_inbound_persist
                                                              : hooks_.on_outbound_persist);
-        return logged_increment(dir, hooked && holds());
+        const bool selected = dir == fixpp::session::direction_t::inbound &&
+                              hooks_.on_inbound_persist_call && hooks_.on_inbound_persist_call();
+        return logged_increment(dir, (hooked && holds()) || selected);
     }
     asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
+        log_->record_call(StoreLog::call_kind::reset, 0, 0);
         if (log_->close_began && log_->close_began()) ++log_->resets_issued_after_close_began;
         // The close the hook posts runs at the reset's leading post.
         const bool hooked = fire(hooks_.on_reset);
@@ -182,6 +253,7 @@ public:
     }
     asio::awaitable<fixpp::core::expected_t<void>> reset_to(
         fixpp::session::seqnum_t next_in, fixpp::session::seqnum_t next_out) noexcept override {
+        log_->record_call(StoreLog::call_kind::reset_to, next_in, next_out);
         if (mode_ == reset_to_mode::default_body) {
             return fixpp::session::MessageStore::reset_to(next_in, next_out);
         }
@@ -295,7 +367,9 @@ private:
                                                               std::span<const std::byte> frame,
                                                               fixpp::session::direction_t dir) {
         auto r = co_await inner_->store(seq, frame, dir);
+        log_->record_store_event(StoreLog::store_event_kind::store_applied, seq);
         co_await hold_until_close_reset();
+        log_->record_store_event(StoreLog::store_event_kind::store_returned, seq);
         if (hooks_.fail_held) co_return std::unexpected(fixpp::core::error::store_io_failure);
         co_return r;
     }

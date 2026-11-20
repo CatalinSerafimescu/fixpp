@@ -12,6 +12,9 @@
 //   include/fixpp/session/seqnum_manager.hpp (interface)
 //   include/fixpp/core/sync/async_mutex.hpp (fixpp::sync::async_mutex)
 //
+// 104-sequence-reset-fidelity (contract RR-5): the freeze. Which mutators test it, and what
+// each does while frozen, is stated once, in seqnum_manager.hpp's class comment.
+//
 // async_mutex usage per [2f §7.3]:
 //   auto lk = co_await mutex_.async_lock();
 //   if (!lk) { ... handle sync_lock_aborted / sync_lock_drained ... }
@@ -74,6 +77,10 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::check_inbound(seqn
     }
     // lk holds the scoped_lock; mutex is held until lk goes out of scope.
     auto lk = std::move(*lk_result);
+    // 104 (contract RR-5 item 5): refused while frozen, before any counter read.
+    if (frozen_) {
+        co_return std::unexpected(error::session_already_closed);
+    }
 
     if (seq < next_inbound_) {
         // Too-low: classified here, counter NOT advanced. Whether it is fatal is
@@ -124,6 +131,10 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> SeqnumManager::assign_outboun
         co_return std::unexpected(error::session_already_closed);
     }
     auto lk = std::move(*lk_result);
+    // 104 (contract RR-5 item 5): refused while frozen, before any counter read.
+    if (frozen_) {
+        co_return std::unexpected(error::session_already_closed);
+    }
 
     // Overflow check: at seqnum_max the next value would need to be
     // seqnum_max+1 which overflows. Detect at seqnum_max itself.
@@ -151,6 +162,10 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::hydrate(
         co_return std::unexpected(fixpp::core::error::session_already_closed);
     }
     auto lk = std::move(*lk_result);
+    // 104 (contract RR-5 item 5): refused while frozen, before any counter write.
+    if (frozen_) {
+        co_return std::unexpected(fixpp::core::error::session_already_closed);
+    }
 
     next_inbound_ = next_inbound;
     next_outbound_ = next_outbound;
@@ -159,8 +174,8 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::hydrate(
 
 // ── reset_to_one ──────────────────────────────────────────────────────────────
 //
-// Acquire the mutex, reset both counters to seqnum_min (1).
-// Called on a successful ResetSeqNumFlag(141)=Y handshake (FR-017:150).
+// Acquire the mutex, reset both counters to seqnum_min (1), the manager half of a
+// sequence reset. Its callers: `git grep -n 'reset_to_one(' -- src`.
 // Production path — NOT FIXPP_TEST_HOOKS-gated.
 
 asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::reset_to_one() noexcept {
@@ -177,9 +192,9 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::reset_to_one() noe
 
 // ── set_next_inbound ────────────────────────────────────────────────────────
 //
-// Acquire the mutex, set next_inbound_ to n. Called when an inbound
-// SequenceReset(35=4) (GapFill or Reset mode) carries NewSeqNo(36) > expected.
-// Production path. Only the inbound counter moves.
+// Acquire the mutex, set next_inbound_ to n: an inbound SequenceReset(35=4) (GapFill or
+// Reset mode) whose NewSeqNo(36) > expected, or a reset unit's inbound target. Its callers:
+// `git grep -n 'set_next_inbound(' -- src`. Production path. Only the inbound counter moves.
 
 asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::set_next_inbound(
     seqnum_t n) noexcept {
@@ -188,6 +203,10 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::set_next_inbound(
         co_return std::unexpected(fixpp::core::error::session_already_closed);
     }
     auto lk = std::move(*lk_result);
+    // 104 (contract RR-5 item 5): success with no write while frozen.
+    if (frozen_) {
+        co_return fixpp::core::expected_t<void>{};
+    }
 
     next_inbound_ = n;
     co_return fixpp::core::expected_t<void>{};
@@ -195,9 +214,10 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::set_next_inbound(
 
 // ── set_next_outbound ────────────────────────────────────────────────────────
 //
-// Acquire the mutex, set next_outbound_ to n. Called by the 032 initiator
-// peer_ack_sent_reset_flag outbound restore (Mechanism A). Only the outbound
-// counter moves; mirrors set_next_inbound(). [032 contract C1/Mechanism A]
+// Acquire the mutex, set next_outbound_ to n: a reset unit's outbound target, the 032
+// initiator's restore-after-reset (Mechanism A) among them. Its callers:
+// `git grep -n 'set_next_outbound(' -- src`. Only the outbound counter moves; mirrors
+// set_next_inbound(). [032 contract C1/Mechanism A]
 
 asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::set_next_outbound(
     seqnum_t n) noexcept {
@@ -206,6 +226,10 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::set_next_outbound(
         co_return std::unexpected(fixpp::core::error::session_already_closed);
     }
     auto lk = std::move(*lk_result);
+    // 104 (contract RR-5 item 5): success with no write while frozen.
+    if (frozen_) {
+        co_return fixpp::core::expected_t<void>{};
+    }
 
     next_outbound_ = n;
     co_return fixpp::core::expected_t<void>{};

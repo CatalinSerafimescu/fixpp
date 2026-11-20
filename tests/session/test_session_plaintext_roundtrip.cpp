@@ -1680,9 +1680,12 @@ LogonCloseOutcome run_next_logon(sess::session_role role, LogonCloseOutcome cons
     return role == sess::session_role::acceptor ? run_acceptor_case(c) : run_initiator_case(c);
 }
 
-// Q-23: no teardown reset. close() returns while the unit's store operation is held, so
-// its seqnum drain runs inside the unit. The durable counters are the unit's targets,
-// and the peer's next Logon at 34=2 without 141=Y is accepted (789 off): Active, with no
+// Q-23: no teardown reset. 104-sequence-reset-fidelity (contract RR-2 item 4, RT-5;
+// B-104-2) supersedes 093 C-6's "close() issues no teardown reset, so it does not wait for
+// the unit" by name: close() waits for a reset unit's store operation in flight whatever
+// the knobs. The hold lasts until close() returns, so close()'s wait makes it run out its
+// bound; the unit then completes. The durable counters are the unit's targets, and the
+// peer's next Logon at 34=2 without 141=Y is accepted (789 off): Active, with no
 // ResendRequest.
 void run_q23(sess::session_role role) {
     auto o = run_unit_case(role, {.hold_until_close_returned = true});
@@ -1690,8 +1693,8 @@ void run_q23(sess::session_role role) {
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
     ASSERT_TRUE(o.store_log);
-    EXPECT_FALSE(o.store_log->hold_timed_out)
-        << "close() did not return while the unit's store operation was held";
+    EXPECT_TRUE(o.store_log->hold_timed_out)
+        << "close() returned while the unit's store operation was held";
     expect_store_counters(o, kUnitIn, kUnitOut);
 
     auto next = run_next_logon(role, o);
@@ -1723,8 +1726,9 @@ void run_q24(sess::session_role role) {
 // Q-25: a default-body store. With a teardown reset, the unit's reset() holds until a
 // reset() is issued after close() began: close() waits for the unit instead, so the
 // hold waits out its bound, the unit completes, and the teardown reset then leaves
-// (1, 1). Without one, the hold ends when close() returns, and the durable counters are
-// the unit's targets.
+// (1, 1). Without one, the hold lasts until close() returns, and close() waits for the
+// unit there too (104, contract RR-2 item 4, RT-5), so the hold waits out its bound and
+// the durable counters are the unit's targets.
 void run_q25(sess::session_role role, bool teardown) {
     LogonCloseCase c{.reset_on_disconnect = teardown,
                      .store_mode = fixpp::test_support::reset_to_mode::default_body};
@@ -1745,19 +1749,18 @@ void run_q25(sess::session_role role, bool teardown) {
             << "no teardown reset; store writes: " << store_writes(o);
         expect_store_counters(o, sess::seqnum_min, sess::seqnum_min);
     } else {
-        EXPECT_FALSE(o.store_log->hold_timed_out)
-            << "close() did not return while the unit's reset() was held";
+        EXPECT_TRUE(o.store_log->hold_timed_out)
+            << "close() returned while the unit's reset() was held";
         expect_store_counters(o, kUnitIn, kUnitOut);
     }
 }
 
 }  // namespace
 
-TEST(LogonCloseDuringSuspension, Q23_AcceptorCloseDrainsInsideTheUnitAndTheNextLogonAt2IsAccepted) {
+TEST(LogonCloseDuringSuspension, Q23_AcceptorCloseWaitsForTheUnitAndTheNextLogonAt2IsAccepted) {
     run_q23(sess::session_role::acceptor);
 }
-TEST(LogonCloseDuringSuspension,
-     Q23_InitiatorCloseDrainsInsideTheUnitAndTheNextLogonAt2IsAccepted) {
+TEST(LogonCloseDuringSuspension, Q23_InitiatorCloseWaitsForTheUnitAndTheNextLogonAt2IsAccepted) {
     run_q23(sess::session_role::initiator);
 }
 TEST(LogonCloseDuringSuspension, Q24_AcceptorTeardownResetLeavesOneOne) {
@@ -1827,24 +1830,32 @@ TEST(HookedStoreResetTo, ForwardModeForwardsToTheInnerStoreAndFiresItsHook) {
 // close()'s bounded wait for an in-flight reset unit, on a mock clock. An acceptor
 // Session over a FileStore whose file-I/O executor is an io_context the cell runs only
 // when it chooses, so the unit's reset_to is held inside the store, with the store's
-// writer lock taken, for as long as the cell wants. reset_on_disconnect is set, so
-// close() is about to issue its teardown reset with the unit in flight and waits:
-// its completion signal raced against await_deadline on the session's clock, bounded by
-// logon_timeout_ms.
+// writer lock taken, for as long as the cell wants. close() waits with the unit in flight
+// (104-sequence-reset-fidelity, contract RR-2 item 4, RT-5, superseding 093's
+// event-driven wait by name): a poll by post that compares the session clock's steady
+// time with the bound, logon_timeout_ms from the wait's start; it has no sleep.
+// reset_on_disconnect is set, so close() then issues its teardown reset.
 //   - Expiry: once the clock reaches the bound, close() records
 //     session_event_close_reset_wait_expired and proceeds; its teardown reset queues on
 //     the FileStore's writer lock behind the unit, so a restart reads (1, 1).
-//   - Re-arm: a clock-wide cancel_sleeps() during the wait (close() does not sweep the
-//     clock, so the sweep is another caller's) records no expiry,
-//     and close() is still waiting, until the clock reaches the bound.
 // Time moves only by the cell's advance; drain_ready runs what an advance made ready.
+//
+// The pumps are bounded by real time (104-sequence-reset-fidelity, its research's census of
+// close() pumps). Once close() waits for a receipt or a reset unit by a poll by post
+// (contract RR-2 item 4), its pass keeps ioc's queue non-empty, so a poll() loop does not
+// return while that wait is outstanding, and an iteration cap around a poll() bounds
+// nothing. No real-time timer competes with these bounds: the cells' one timeout,
+// logon_timeout_ms (kQ27Bound), runs on the mock clock, which only a cell's advance moves.
+// So the drain window is stated as a ratio of kQ27Bound (a twentieth), and the loop's budget
+// is the shared kPumpBudget.
 namespace {
+
+constexpr std::uint32_t kQ27Bound = 1000;  // logon_timeout_ms
+constexpr auto kQ27DrainWindow = std::chrono::milliseconds{kQ27Bound} / 20;
 
 void drain_ready_q27(asio::io_context& ioc) {
     ioc.restart();
-    while (ioc.poll() > 0) {
-        ioc.restart();
-    }
+    (void)ioc.run_for(kQ27DrainWindow);
     ioc.restart();
 }
 
@@ -1853,8 +1864,6 @@ bool has_wait_expired_event(sess::Session const& s) {
         return std::holds_alternative<sess::session_event_close_reset_wait_expired>(ev);
     });
 }
-
-constexpr std::uint32_t kQ27Bound = 1000;  // logon_timeout_ms
 
 struct Q27Rig {
     asio::io_context ioc;
@@ -1918,14 +1927,17 @@ struct Q27Rig {
         return c;
     }
 
-    // Runs both io_contexts until `ready` holds or neither has work left.
+    // Runs both io_contexts until `ready` holds, neither has work left, or kPumpBudget of
+    // real time has passed: each turn polls the file-I/O executor, then runs ioc for one
+    // kPumpSlice.
     template <class Ready>
     bool run_both_until(Ready ready) {
-        for (int i = 0; i < 100000 && !ready(); ++i) {
+        auto const deadline = std::chrono::steady_clock::now() + fixpp::test_support::kPumpBudget;
+        while (!ready() && std::chrono::steady_clock::now() < deadline) {
             fio.restart();
             std::size_t const n = fio.poll();
             ioc.restart();
-            std::size_t const m = ioc.poll();
+            std::size_t const m = ioc.run_for(fixpp::test_support::kPumpSlice);
             if (n == 0 && m == 0 && !ready()) return false;
         }
         return ready();
@@ -2007,14 +2019,14 @@ TEST(LogonCloseDuringSuspension, Q27_TheWaitExpiresIsRecordedAndFileStoreStillEn
         if (!::testing::Test::HasFatalFailure()) {
             EXPECT_FALSE(has_wait_expired_event(s)) << "expired before the clock moved";
             // KIND D (ci/mock-clock-staging-sweep.sh): close()'s wait deadline is a stored
-            // anchor, taken when q27_start's drain left close() parked on it, so it predates
-            // the advance; nothing must fire at the bound minus 1 ms.
+            // anchor, taken when close() entered its wait in q27_start's drain, so it
+            // predates the advance; nothing must fire at the bound minus 1 ms.
             r.clock->advance(std::chrono::milliseconds{kQ27Bound - 1});
             drain_ready_q27(r.ioc);
             EXPECT_FALSE(has_wait_expired_event(s)) << "expired one millisecond before the bound";
             EXPECT_NE(run.close.wait_for(0s), std::future_status::ready);
-            // KIND D (ci/mock-clock-staging-sweep.sh): the same stored anchor, so a late arm
-            // fires at once.
+            // KIND D (ci/mock-clock-staging-sweep.sh): the same stored anchor, so the wait's
+            // next pass sees the bound reached.
             r.clock->advance(std::chrono::milliseconds{1});
             drain_ready_q27(r.ioc);
             EXPECT_TRUE(has_wait_expired_event(s))
@@ -2030,35 +2042,6 @@ TEST(LogonCloseDuringSuspension, Q27_TheWaitExpiresIsRecordedAndFileStoreStillEn
     }
     EXPECT_EQ(r.restart_counters(), (std::pair{sess::seqnum_min, sess::seqnum_min}))
         << "the teardown reset, queued behind the unit on the writer lock, must end at (1, 1)";
-}
-
-TEST(LogonCloseDuringSuspension, Q27_AClockWideSweepDuringTheWaitDoesNotEndIt) {
-    Q27Rig r;
-    Q27Run run;
-    {
-        sess::Session s{r.engine, r.cfg()};
-        q27_start(r, s, run);
-        if (!::testing::Test::HasFatalFailure()) {
-            r.clock->cancel_sleeps();
-            drain_ready_q27(r.ioc);
-            EXPECT_FALSE(has_wait_expired_event(s))
-                << "a clock-wide sweep ended close()'s wait as an expiry";
-            EXPECT_NE(run.close.wait_for(0s), std::future_status::ready)
-                << "a clock-wide sweep ended close()'s wait";
-            // KIND D (ci/mock-clock-staging-sweep.sh): the re-armed wait sleeps to the stored
-            // anchor taken before the sweep, so it predates the advance; nothing must fire
-            // at the bound minus 1 ms.
-            r.clock->advance(std::chrono::milliseconds{kQ27Bound - 1});
-            drain_ready_q27(r.ioc);
-            EXPECT_FALSE(has_wait_expired_event(s)) << "expired before the bound after the sweep";
-            // KIND D (ci/mock-clock-staging-sweep.sh): the same stored anchor, so a late arm
-            // fires at once.
-            r.clock->advance(std::chrono::milliseconds{1});
-            drain_ready_q27(r.ioc);
-            EXPECT_TRUE(has_wait_expired_event(s)) << "the re-armed wait expires at the bound";
-        }
-        q27_finish(r, run);
-    }
 }
 
 // The bound near the clock's representation limit: logon_timeout_ms at its largest
@@ -2086,7 +2069,7 @@ TEST(LogonCloseDuringSuspension, Q27_TheBoundSaturatesAtTheClockMax) {
             EXPECT_FALSE(has_wait_expired_event(s)) << "expired 1 ms short of max()";
             EXPECT_NE(run.close.wait_for(0s), std::future_status::ready);
             // KIND D (ci/mock-clock-staging-sweep.sh): close()'s wait deadline is a stored
-            // anchor predating the step, so a late arm fires at once.
+            // anchor predating the step, so the wait's next pass sees the bound reached.
             r.clock->step_to(max);
             drain_ready_q27(r.ioc);
             EXPECT_TRUE(has_wait_expired_event(s)) << "the wait did not expire at max()";
@@ -2106,8 +2089,9 @@ TEST(LogonCloseDuringSuspension, Q27_TheBoundSaturatesAtTheClockMax) {
 // Q27Rig's FileStore holds the unit's reset_to, with its writer lock taken, while the
 // cell does not run the file-I/O executor; close(terminal) begins there. The clock never
 // moves, so close()'s bounded wait cannot expire:
-//   - Q-23, no teardown reset: close() issues no teardown reset, so it does not wait for
-//     the unit and returns while the unit is held; a restart reads the unit's targets,
+//   - Q-23, no teardown reset: close() waits for the unit, so it has not returned while
+//     the unit is held (104, contract RR-2 item 4, RT-5, superseding 093 C-6's "issues no
+//     teardown reset, so it does not wait" by name); a restart reads the unit's targets,
 //     and a second session over the directory accepts the peer's next Logon at 34=2
 //     without 141=Y: Active, with no ResendRequest;
 //   - Q-24, a teardown reset: close() waits for the unit, then resets; a restart reads
@@ -2151,8 +2135,8 @@ void run_q2324_file_store(sess::session_role role, bool teardown) {
                           sess::session_test_access::reset_unit_in_flight(s);
         auto close = asio::co_spawn(r.ioc, s.close(sess::close_mode::terminal), asio::use_future);
         drain_ready_q27(r.ioc);
-        bool const close_returned_while_held = close.wait_for(0s) == std::future_status::ready &&
-                                               sess::session_test_access::reset_unit_in_flight(s);
+        bool const close_waiting_while_held = close.wait_for(0s) != std::future_status::ready &&
+                                              sess::session_test_access::reset_unit_in_flight(s);
         bool const done = r.run_both_until([&] {
             return close.wait_for(0s) == std::future_status::ready &&
                    feed.wait_for(0s) == std::future_status::ready;
@@ -2174,8 +2158,8 @@ void run_q2324_file_store(sess::session_role role, bool teardown) {
         EXPECT_TRUE(close.get().has_value()) << "close()";
         EXPECT_FALSE(has_wait_expired_event(s)) << "the wait expired, though the clock never moved";
         if (!teardown) {
-            EXPECT_TRUE(close_returned_while_held)
-                << "close() waited for the unit, though it issues no teardown reset";
+            EXPECT_TRUE(close_waiting_while_held)
+                << "close() did not wait for the unit's store operation held in flight";
         }
     }
     auto const want =
@@ -2207,11 +2191,11 @@ void run_q2324_file_store(sess::session_role role, bool teardown) {
 }  // namespace
 
 TEST(LogonCloseDuringSuspension,
-     Q23_FileStoreAcceptorCloseDrainsInsideTheUnitAndTheNextLogonAt2IsAccepted) {
+     Q23_FileStoreAcceptorCloseWaitsForTheUnitAndTheNextLogonAt2IsAccepted) {
     run_q2324_file_store(sess::session_role::acceptor, /*teardown=*/false);
 }
 TEST(LogonCloseDuringSuspension,
-     Q23_FileStoreInitiatorCloseDrainsInsideTheUnitAndTheNextLogonAt2IsAccepted) {
+     Q23_FileStoreInitiatorCloseWaitsForTheUnitAndTheNextLogonAt2IsAccepted) {
     run_q2324_file_store(sess::session_role::initiator, /*teardown=*/false);
 }
 TEST(LogonCloseDuringSuspension, Q24_FileStoreAcceptorTeardownResetLeavesOneOne) {

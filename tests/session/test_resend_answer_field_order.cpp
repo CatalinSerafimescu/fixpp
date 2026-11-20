@@ -1404,12 +1404,15 @@ TEST_F(ResendAnswerReplayTest, ResendAnswer_WriteFails_Aborts_AtEachTransmitSite
     // [1,2]: the GapFill flushed before the replay covers [1,2). Had slot 2 been
     // folded instead, the only GapFill would cover [1,3) and would not match.
     // [2,2]: the replay of 2. [1,1]: the trailing GapFill [1,2). [5,5] lies past
-    // the last stored message, so the only frame is the nothing-to-replay
-    // GapFill [5,6).
+    // the last stored message, so the only frame is the nothing-to-replay GapFill.
+    // Its EndSeqNo is at or above the next outbound number, so since 104 (research
+    // D3.3a; contract U6) the request is answered through the current number: the
+    // GapFill is MsgSeqNum 5, NewSeqNo the next outbound number, as QuickFIX C++'s
+    // `nextResendRequest` clamps EndSeqNo before `generateSequenceReset`.
     for (const Case c :
          {Case{"gapfill before a replay", 1, 2, {"4", "1", "2"}},
           Case{"replay", 2, 2, {"D", "2", ""}}, Case{"trailing gapfill", 1, 1, {"4", "1", "2"}},
-          Case{"nothing-to-replay gapfill", 5, 5, {"4", "5", "6"}}}) {
+          Case{"nothing-to-replay gapfill", 5, 5, {"4", "5", "3"}}}) {
         SCOPED_TRACE(c.name);
         bool armed = false;
         int attempts = 0;

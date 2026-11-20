@@ -121,6 +121,10 @@ in `run_reset_unit_` is `co_await`ed with `use_awaitable`, not `detached`.
 
 `close()` also waits, when it is about to issue its teardown reset and a unit is in flight, bounded by
 `logon_timeout_ms` (plan OD-1). That wait is about ordering the two resets, not about destruction.
+⚠️ **Superseded by 104 (`B-104-2`, contract RR-2 item 4):** since 104 `close()` waits for a unit in flight, and for a received Logout
+short of its reset point, whatever the knobs and before its teardown reset decision, by a poll bounded by
+`logon_timeout_ms`; 093 contract C-6's "when it is about to issue its teardown reset" and its event-driven
+shape are superseded by name. Re-derive from `close()` in `src/session/session.cpp`.
 
 Rejected for this unit (plan OD-14, OD-25): an in-place `reset_cancellation_state(disable)` shield,
 which `async_mutex::async_lock()` silently replaces after its first acquisition; and a store-side

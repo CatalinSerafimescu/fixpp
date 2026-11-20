@@ -12,6 +12,10 @@
 //   [FIX-SL §4.1] ordered-sequence integrity
 //   contracts/seqnum.hpp (shape oracle)
 //
+// 104-sequence-reset-fidelity (contract RR-5) adds the freeze: while Session holds the
+// manager frozen, only the reset writers change a counter (the freeze's comment in the
+// class).
+//
 // Responsibilities (E3):
 //   - Inbound: check_inbound(seq) — compare seq vs next-expected:
 //       in-seq  → advance next_inbound_, return ok
@@ -60,8 +64,47 @@ namespace fixpp::session {
 // its destructor's terminate-precondition is not triggered. The Session
 // manages the lifetime; the SeqnumManager object has no independent lifecycle.
 
+class Session;
+
 class SeqnumManager {
 public:
+    // ── 104-sequence-reset-fidelity: the freeze (contract RR-5, construction (Z)) ──
+    //
+    // While frozen, the manager accepts only the reset writers: check_inbound,
+    // assign_outbound and hydrate return session_already_closed after the lock grant and
+    // before any counter read or write; set_next_inbound and set_next_outbound return
+    // success with no write; take_back_outbound is a no-op. reset_to_one carries no freeze
+    // test. Session freezes the manager exactly while its receipt marker is `reached`, so a
+    // writer already in flight at a received Logout's reset point cannot change either
+    // number after it. The freeze holds by construction only while every write of the two
+    // counters is inside a mutator body (INV-Z); re-derive with
+    // `git grep -n -E '\bnext_(in|out)bound_\b *([-+*/%&|^]|<<|>>)?=[^=]|(\+\+|--)
+    // *next_(in|out)bound_\b|\bnext_(in|out)bound_\b
+    // *(\+\+|--)|&next_(in|out)bound_\b|exchange\(next_(in|out)bound_' -- src/session
+    // include/fixpp/session ':!include/fixpp/session/memory_store.hpp'` and read each hit (contract
+    // RR-5 item 3 gives the recipe's known positive). The callers of reset_to_one must be the two
+    // reset writers: `git grep -n 'reset_to_one(' -- src include`, each hit read.
+    //
+    // freeze_key is a passkey: its constructor is private and Session is its friend, so the
+    // three members below are callable where a key can be made, in Session. Its copy
+    // constructor is user-provided and private, so the key is not trivially copyable and
+    // std::bit_cast cannot make one; Session passes a prvalue, which needs no copy. Re-derive
+    // with the static_asserts at the top of tests/session/test_104_reset_on_logout.cpp.
+    // seqnum_manager_test_access (fixpp#511) is a friend of SeqnumManager, and a program that
+    // defines it reaches every private member, the flag included. frozen() serves Session's
+    // Debug asserts, and no production branch tests it (a branch on it would be a refusal per
+    // call site, contract RR-5 item 4).
+    class freeze_key {
+        friend class Session;
+        freeze_key() noexcept = default;
+        // A defaulted copy constructor is trivial, so the key would be bit_cast-able again.
+        // NOLINTNEXTLINE(modernize-use-equals-default,hicpp-use-equals-default)
+        freeze_key(freeze_key const& /*other*/) noexcept {}
+    };
+    void freeze(freeze_key /*key*/) noexcept { frozen_ = true; }
+    void thaw(freeze_key /*key*/) noexcept { frozen_ = false; }
+    [[nodiscard]] bool frozen(freeze_key /*key*/) const noexcept { return frozen_; }
+
     // Construct with initial counters at seqnum_min (1).
     SeqnumManager() noexcept = default;
 
@@ -112,7 +155,11 @@ public:
     //   Not a coroutine, and it takes no lock: ONLY safe to call on the session strand,
     //   under the condition peek_outbound() states.
     //   [.specify/536-537-538-recovery-liveness.md §10, D-OUT-3; ruling R-19]
+    //   104 (contract RR-5 item 5): a no-op while frozen.
     void take_back_outbound(seqnum_t k) noexcept {
+        if (frozen_) {
+            return;
+        }
         if (next_outbound_ > k) {
             next_outbound_ = k;
         }
@@ -138,28 +185,30 @@ public:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> hydrate(
         seqnum_t next_inbound, seqnum_t next_outbound) noexcept;
 
-    // reset_to_one(): reset both counters to seqnum_min (1) for a successful
-    // ResetSeqNumFlag(141)=Y handshake (FR-017 §150: "both sides advance
-    // next_expected_inbound and next_expected_outbound to 1").
+    // reset_to_one(): reset both counters to seqnum_min (1), the manager half of a sequence
+    // reset, a successful ResetSeqNumFlag(141)=Y handshake among them (FR-017 §150: "both
+    // sides advance next_expected_inbound and next_expected_outbound to 1"). Its callers:
+    // `git grep -n 'reset_to_one(' -- src`.
     // Mutex-guarded; production path — NOT test-hook-gated.
     // Must be called BEFORE the caller emits session_event_sequence_numbers_reset
     // so the event fires after post-reset state is consistent (FR-018).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset_to_one() noexcept;
 
-    // set_next_inbound(n): force next_inbound_ to n for an inbound
+    // set_next_inbound(n): force next_inbound_ to n, for an inbound
     // SequenceReset(35=4) NewSeqNo(36) application (FIX-SL §4.8 — GapFill or
-    // Reset mode, when NewSeqNo > current expected). Mutex-guarded; production
+    // Reset mode, when NewSeqNo > current expected) and for a reset unit's inbound target.
+    // Its callers: `git grep -n 'set_next_inbound(' -- src`. Mutex-guarded; production
     // path. Only the inbound counter moves (a SequenceReset affects the peer→us
     // stream only); store persistence — when applicable — is the session's
     // responsibility, mirroring reset_to_one()'s split.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> set_next_inbound(
         seqnum_t n) noexcept;
 
-    // set_next_outbound(n): force next_outbound_ to n for the 032 initiator
-    // peer_ack_sent_reset_flag outbound restore (Mechanism A: restore-after-reset).
-    // Mutex-guarded; production path. Only the outbound counter moves.
-    // Store persistence — when applicable — is the session's responsibility,
-    // mirroring set_next_inbound()'s split. [032 contract C1/Mechanism A]
+    // set_next_outbound(n): force next_outbound_ to n, for a reset unit's outbound target,
+    // the 032 initiator's restore-after-reset (Mechanism A) among them. Its callers:
+    // `git grep -n 'set_next_outbound(' -- src`. Mutex-guarded; production path. Only the
+    // outbound counter moves. Store persistence — when applicable — is the session's
+    // responsibility, mirroring set_next_inbound()'s split. [032 contract C1/Mechanism A]
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> set_next_outbound(
         seqnum_t n) noexcept;
 
@@ -179,7 +228,10 @@ public:
 private:
     seqnum_t next_inbound_ = seqnum_min;   // next expected inbound (starts at 1)
     seqnum_t next_outbound_ = seqnum_min;  // next outbound to assign (starts at 1)
-    fixpp::sync::async_mutex mutex_;       // serialises counter reads/writes (D-7)
+    // 104: the freeze (contract RR-5), declared beside the counters it guards, ahead of
+    // mutex_, so the mutators' test of it reads next to the counters they then touch.
+    bool frozen_ = false;
+    fixpp::sync::async_mutex mutex_;  // serialises counter reads/writes (D-7)
 };
 
 }  // namespace fixpp::session
