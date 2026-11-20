@@ -345,7 +345,7 @@ TEST(RunForResidualInstrument, NearDeadlineTransitionIsFlaggedInconclusive) {
 TEST(RunForResidualInstrument, NearDeadlineFlagSurvivesStallBeforeInstrumentStart) {
     constexpr auto kWindow = 3000ms;
     constexpr auto kFireAt = 2925ms;  // 75 ms inside kWindow's 150 ms (5%) margin
-    constexpr auto kStall = 200ms;    // > the 75 ms slack inside the margin
+    constexpr auto kStall = 1000ms;   // > the 75 ms slack inside the margin
 
     asio::io_context ioc;
     std::promise<void> prom;
