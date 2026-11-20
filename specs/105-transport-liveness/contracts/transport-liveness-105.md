@@ -285,7 +285,7 @@ Common rules:
   amended in place, "amended in C-ABI 1.18, 105". `version.h`'s 1.18 history carries the counterparty's side:
   every ending closes the connection; the unanswered TestRequest's Logout; the R-2 wait; the write limit on every
   ending Logout (C-2.7); the TestRequest at 1.2 × HeartBtInt; the TestReqID(112) rule of C-5.4.
-- **C++, BREAKING layout:** `sizeof(Session)` changes; `ReconnectFsm` loses members, `drive_logout` and two
+- **C++, BREAKING layout:** `sizeof(Session)` changes (FR-013 removes members; D1, D2 and D5 add them); `ReconnectFsm` loses members, `drive_logout` and two
   constructor parameters (an installed header). `SessionConfig` is unchanged. `SessionEvent` is unchanged.
 - **C++, a new installed implementation header:** `include/fixpp/session/detail/log_rate_gate.hpp` (the rate gate
   `session.hpp` holds by value, data-model E-7), with the status of `include/fixpp/session/detail/replay_gate.hpp`:

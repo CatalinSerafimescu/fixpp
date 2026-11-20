@@ -455,7 +455,8 @@ no comment claiming behaviour the code does not have.
   whose oracle the base meets for another reason MUST carry a positive control at the instant it tests. Every close
   cell MUST assert the peer-observed EOF, not an internal flag. Where a close is awaited with a bound, the bound MUST be derived
   from the competing timeout, with the arm that forces the spurious close. A timing cell MUST discriminate the old
-  value from the new (today's T018 Cell B is named "1.2×" but passes at 1×, so it pins nothing).
+  value from the new (today's `HeartbeatCadence8Cell.CellB_*` in `tests/session/test_heartbeat_cadence_8cell.cpp`, that
+  file's T018 Cell B, is named "1.2×" but passes at 1×, so it pins nothing).
 - **FR-018**: Comments that state a superseded rule (for example "Phase 6 US4 wires the Logout emission before
   Disconnected", and 092's "D-1 and D-2 are a state transition, not a close" with its D-3 twin) MUST be corrected or
   removed, naming this feature's rule.
@@ -474,7 +475,8 @@ no comment claiming behaviour the code does not have.
     `InboundFrameDispositionsQ10.WithinCapMismatchInActive_DisconnectsWithoutALogout`, the #534-commented cells of
     `SecondFrameInFlight.*` and `ReconcileAfterTheTakeBack.*`, `EstablishmentTimeoutQ16.AcceptorAfterRefusedLogon_*`
     and `ResendAnswerStoreFailureEngine.Acceptor789Path_SlotReadFails_ConnectionStaysOpenUntilTheEstablishmentDeadline`
-    (FR-007), T018 `CellC_*_UnansweredTestRequestDisconnects` (R-3 moves the give-up), the 537
+    (FR-007), `tests/session/test_heartbeat_cadence_8cell.cpp`'s T018 `HeartbeatCadence8Cell.CellC_*_UnansweredTestRequestDisconnects`
+    (R-3 moves the give-up), the 537
     note's control cell "D-537-6, N", and `DriveLogoutStub_*` / `Initiator_DriveLogout_*` (FR-013).
   - **Brain pages:** `brain/components/session.md` (R-6, and its deferral of the grace-check reading to B27) and
     `brain/components/session-liveness-and-reconnect.md` (the `ReconnectFsm` correction block).
@@ -526,7 +528,7 @@ no comment claiming behaviour the code does not have.
   reconnect is deferred), so "a reconnect is not blocked" is tested for a direct initiator through `drive_reconnect`
   and for the engine-managed loop's single cycle.
 - C ABI: no new function. The behaviour changes reach C callers; the plan decides whether the C-ABI minor moves.
-- C++: `sizeof(Session)` shrinks (FR-013); `SessionConfig` is unchanged.
+- C++: `sizeof(Session)` changes (FR-013 removes members; D1, D2 and D5 add them); `SessionConfig` is unchanged.
 
 ### Departures from QuickFIX
 

@@ -65,7 +65,7 @@ Batch B27 (lane S1): fixpp#534, #582, #535, #559 sites 2 and 3, and #687, with R
 6. **#687 (D8).** One rate-bounded record per pre-session reject, and one per listener bind failure, through the
    entry's logger; the Session's rate gate is hoisted into a detail type and reused.
 7. **Surfaces (D9).** C-ABI **1.18 BREAKING** (documented results change; no symbol change). C++ layout of `Session`
-   and `ReconnectFsm` changes; `ReconnectFsm`'s constructor loses two parameters; one new installed implementation
+   (`sizeof(Session)` changes: FR-013 removes members, D1, D2 and D5 add them) and `ReconnectFsm` changes; `ReconnectFsm`'s constructor loses two parameters; one new installed implementation
    header, `detail/log_rate_gate.hpp`.
 8. **Records (D11, D12).** The B&L delta, the supersession census, brain pages, header comments naming the new rule,
    and the owed brain half of the `<windows.h>` anti-pattern (docs task T-DOC-1 below).
@@ -149,7 +149,7 @@ harness for the latch test (research D10, contract C-12).
 | VI | Spec coverage: FIX-SL §3.1.25, §4.5.5, §4.6, §4.10 and TC 2c, 6 are cited by the spec | PASS |
 | VII / IX §1 | Every FR has a test path; coverage is diff-scoped (95/85, every uncovered error path assessed) | PASS, planned in D10 |
 | VIII §3, §5 | A per-frame change needs a benchmark; no hot-path allocation | PASS with the D10 bench obligation |
-| X §1, §6, §7 | C-ABI results change: `/clarify` done (Q1, Q2), `/analyze`, Gate A, owner sign-off needed; minor bump decided in D9 | PASS (controls scheduled) |
+| X §1, §6, §7 | C-ABI results change: `/clarify` done (Q1, Q2), `/analyze`, Gate A; the fourth Appendix A control, the user `/plan` sign-off ([const §X.6]), requested from the owner 2026-11-21, a hard precondition of Phase 3 (US1 part A); minor bump decided in D9 | PASS (controls scheduled; sign-off pending) |
 | XI §1–§3, §7 | Concurrency and cancellation touched: strand confinement, no `std::mutex`, all four controls | PASS (controls scheduled) |
 | XII §9 | Security surface (TLS close, unauthenticated pre-session peers): all four controls | PASS (controls scheduled) |
 | XIII §2–§3 | Logs are async `FIXPP_SLOG` records with the session or entry trace context | PASS |
@@ -175,11 +175,13 @@ harness for the latch test (research D10, contract C-12).
   classification is a new reading of a peer-supplied field's bytes (`TR` plus canonical decimal); by 027's precedent
   (a new field case in `scan_frame_header` met §7 by a seed extension of
   `tests/fuzz/fuzz_session_recovery_admin_parse.cpp`, not a new harness), it is treated as parser-touching, and that
-  harness's seeds gain Heartbeats carrying 112 forms (tasks.md T085). **PASS, conditional on T085's reach read**: the
-  classification runs only while a TestRequest is pending, which random bytes fed to `on_inbound_frame` do not create
-  without a clock advance, so if the harness cannot reach `classify_test_req_id_`, a reachable entry point (for example
-  the `TR`-plus-canonical-decimal parse as a free `detail` function the harness calls) is a design addition for the
-  orchestrator, not taken here.
+  harness's seeds gain Heartbeats carrying 112 forms (tasks.md T085). The classification runs only while a TestRequest
+  is pending, which random bytes fed to `on_inbound_frame` do not create without a clock advance, so the parse-and-classify
+  step (`TR` prefix, canonical decimal, window) is a free `constexpr` `detail` function,
+  `detail::is_earlier_test_req_id`, in `src/session/read_first_frame_bounded.hpp` (orchestrator decision on
+  `/speckit-analyze` C1; data-model E-4): `classify_test_req_id_` calls it, and the harness calls it directly on each fed
+  payload's 112 bytes, so the parse is fuzzed without a pending TestRequest. Its guard cells are tasks.md T086, its
+  mutants T088, and a libFuzzer run of at least 10 minutes is recorded (T148). **PASS (planned).**
 
 - **VIII §2, §3, §5 / XV §1.** Per inbound frame: two tests (the pump's latch, the ending-phase test in
   `on_inbound_active_`); per write, one out-parameter; per Heartbeat with a TestRequest pending, the 112
@@ -208,7 +210,8 @@ harness for the latch test (research D10, contract C-12).
   and the 112 rule included); no error code added or renumbered (slot 74 and `session_testreqid_mismatch` exist); the
   Python binding and pinned tests updated in the same PR (D9). Article X §7's predicate read empty at Gate A rounds 1
   and 2 and is re-read at the PR head as a precondition (D9). Each affected declaration has a C-driven witness (C-9).
-  **PASS, pending the Appendix A controls.**
+  **PASS, pending the Appendix A controls.** The fourth, the user `/plan` sign-off ([const §X.6]), is requested from the
+  owner 2026-11-21 and is a hard precondition of Phase 3 (US1 part A; tasks.md "Dependencies and execution order").
 - **XI §1, §2.** Each new coroutine is `asio::awaitable`. Both new spawns take
   `on_inbound_active_too_high_logout_`'s join-as-parameter shape (the join is released by its destructor if the frame
   is never published), with a `catch` that, unlike that precedent's (which rethrows), does not rethrow and fails
@@ -298,7 +301,7 @@ src/
     ├── engine.cpp                       # pump, accept loop, connect loop, records
     ├── session_engine_access.hpp        # take_connection_end, ended, set_establishment_deadline
     ├── reconnect_fsm.cpp                # ctor, drive_logout removed
-    └── read_first_frame_bounded.hpp     # default-threshold helper and TestReqID window function beside deadline_after
+    └── read_first_frame_bounded.hpp     # default-threshold helper, TestReqID window and parse functions beside deadline_after
                                          #   (or a sibling detail header)
 tests/
 ├── session/test_105_{connection_close,logout_wait,write_limit,liveness_timing,heartbeat_knob_off,
@@ -318,7 +321,7 @@ tests/
 ├── capi/version_test.cpp (+ every minor pin research D9's grep finds)   # MINOR 18
 ├── config/test_load_negative_battery.cpp          # T ≤ 0
 ├── config/test_quickfix_parity_table.cpp          # the TestRequest timing row (FR-012)
-└── fuzz/fuzz_session_recovery_admin_parse.cpp     # the stale drive_logout comment; 112 seeds ([const §VII.7])
+└── fuzz/fuzz_session_recovery_admin_parse.cpp     # the stale drive_logout comment; 112 seeds and a direct call of the 112 parse ([const §VII.7])
 ci/red-arms/{batch11-labels.txt,batch18-lost-advance.sh}   # names of retired or renamed cells
 bindings/python/                          # C-ABI minor expectations (D9 recipe)
 tools/capi_freeze.sha256                  # regenerated by its generator (tasks.md T012 finds it)
@@ -361,7 +364,9 @@ MSVC": a `brain/failure-classes.md` entry in that page's form (trigger and proce
 
 ## Open items carried to the orchestrator
 
-- None. **OQ-3** is closed by ruling D-e (spec Clarifications, Gate A round 2); SI-1, SI-2 and SI-3 = OQ-1 are ruled
+- **The user `/plan` sign-off** ([const §X.6], the fourth Appendix A control): requested from the owner 2026-11-21, a
+  hard precondition of Phase 3 (US1 part A, tasks.md T018 onward). Not given yet.
+- No open question. **OQ-3** is closed by ruling D-e (spec Clarifications, Gate A round 2); SI-1, SI-2 and SI-3 = OQ-1 are ruled
   (research "Spec issues for the orchestrator"). Owed before Gate B, not a question: the follow-up issues of the next
   section, filed and named where they are cited.
 

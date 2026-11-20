@@ -343,10 +343,18 @@ window `(floor, next]` is modular, so it is wrap-safe while fewer than 2³² Tes
 connection. After 2³² TestRequests on one connection the window no longer identifies the sent set: at exactly 2³²,
 `next == floor` and no value reads as earlier; past it, the window is the modular remainder (Gate A round 3,
 Codex #7). Unreachable in practice (2³² TestRequests at least T apart), and disclosed in B-105-5 as that condition.
-The window test is a free `constexpr` function of `(n, floor, next)` in a `detail` header (beside the default-threshold
-helper), test-visible, and `classify_test_req_id_` calls it after parsing the 112; `constexpr` cells pin that function
-at `UINT32_MAX`, across the wrap, and at one full cycle (guards, each with its mutant: a non-modular comparison; the
-full-cycle case dropped, `next == floor` read as a full window; Gate A loop 2 round 2, Codex #3).
+The window test is a free `constexpr` function of `(n, floor, next)` in `src/session/read_first_frame_bounded.hpp`
+(beside `deadline_after`, `resend_gap_deadline` and the default-threshold helper), test-visible; `constexpr` cells pin
+that function at `UINT32_MAX`, across the wrap, and at one full cycle (guards, each with its mutant: a non-modular
+comparison; the full-cycle case dropped, `next == floor` read as a full window; Gate A loop 2 round 2, Codex #3).
+The parse-and-classify step is a second free `constexpr` function in the same header,
+`detail::is_earlier_test_req_id(std::string_view id, std::uint32_t floor, std::uint32_t next)`: true when `id` is `TR`
+followed by the canonical decimal of an n that fits `std::uint32_t` and the window function holds for `(n, floor,
+next)` (orchestrator decision on `/speckit-analyze` C1). `classify_test_req_id_` answers for an absent 112 or
+`pending_test_req_id_`, and otherwise calls it (true: earlier; false: mismatch); the fuzz harness
+`tests/fuzz/fuzz_session_recovery_admin_parse.cpp` calls it directly, so the parse is fuzzed without a pending
+TestRequest (plan Constitution Check VII §7). `constexpr` guard cells pin it on a canonical earlier id, a leading zero,
+a sign, a number past `std::uint32_t` and `TR` alone, each with its mutant.
 `answer_pending_test_request_` returns false only for **mismatch**.
 
 **Validation of a set T** (`Session::open`, `Engine::register_session`, the TOML mapper): `T > 0`. No other bound.

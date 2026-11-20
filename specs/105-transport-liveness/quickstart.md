@@ -32,7 +32,9 @@ build volume); its `src/` and `include/` are identical to `52aeed4e`, where the 
 checks that before any reading (spec clarification "Session 2026-11-21"). Every cell in section 3 is marked:
 - **[RED]**: written first, run on the base, and must fail there by an assertion for its stated reason.
 - **[guard: <mutant>]**: a rule the base already keeps, GREEN on the base by design; it must fail under the named mutant
-  (section 5). A `constexpr` helper cell is a guard of this kind, in `test_105_seams.cpp`.
+  (section 5). A `constexpr` helper cell is a guard of this kind, in `test_105_seams.cpp`; its `static_assert`s sit under
+  `FIXPP_105_STATIC_GUARDS` (ON by default), which a mutant build turns OFF so that the runtime twin gives the RED
+  (tasks.md Execution rules, "Guard static_asserts").
 - **[seam: <mutant>]**: a behaviour cell that names a symbol the base lacks (an allocation-failure seam, the bound's
   in-body race seam, the listener-construction seam, a test-access read of a new member). It lives in
   `tests/session/test_105_seams.cpp`, ctest `session_105_seam_tests` (labels `session`, `105` and `105_seam`), which a base
@@ -73,6 +75,8 @@ Names are proposals; the implementer keeps the scenario, its assertion and its m
   (B-093-4 kept).
 - [RED] `ConnectionClose105.OnLogoutCallsClose_OneClose`, `...EngineStopRacesEndingClose_OneClose` (TSan lane).
 - [RED] `ConnectionClose105.DirectInitiator_EndingThenDriveReconnect_Reconnects`.
+- [RED] `ConnectionClose105.EngineInitiator_EndingOnConnectLoop_NoHeldTransport_CycleEnds` — an ending in Active on the
+  engine-managed connect loop: peer EOF with the clock frozen, no held transport, the single cycle ended (C-1.c).
 - [guard: the latch's `lifecycle` term deleted] `ConnectionClose105.InsideClose_NoSecondClose`; [guard: the drain flag
   deleted] `...InsideReconnectDrain_DrainKeepsItsBound`.
 - [seam: the fallback deleted] `ConnectionClose105.CloseFrameSpawnFails_<ReleaseAtLoopExit|WriteLimit|BoundExpiry>_PeerSeesEofWithNoLaterCall`
@@ -109,7 +113,7 @@ contract's table and per row of data-model E-3 (research D10 lists them):
   [RED] `...SendHeldInStoreAcrossTheEnding_NumberedBeforeTheLogout`.
 - [RED] `LogoutWait105.LivenessDuringWait_ArmedOneTickBeforeHeartbeat_SendsNothing`, `...ArmedOneTickBeforeGiveUp_SendsNothing`
   — positive control: `fsm_state() == Active` at the instant tested.
-- [RED] `LogoutWait105.TimeoutZero_NoWaitEofAfterWrite`, `...NoClock_NoWaitEofAfterWrite`.
+- [RED] `LogoutWait105.TimeoutZero_NoWaitEofAfterWrite`, `...NoClock_NoWait_ClosesAtNextCall`.
 - [RED] `TlsClose105.CloseGracefulDuringWait_CloseNotifyAtTheBound` — TLS; `logout_disconnect_timeout_ms` set long
   (well above the wall cap; `close()`'s grace is the same knob), the mock clock advanced to the bound; asserts
   close_notify and the close at the bound's mock-clock instant.
@@ -215,7 +219,8 @@ close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogou
   its own mutant. [seam: the bound's fail-closed `catch` replaced by round 2's] `LivenessTiming105.GiveUp_BoundSpawnFails_StillEof`
   (the slot-74 record, no Logout, EOF).
 - [RED] `LivenessTiming105.GiveUp_OneLogRecordWithSlot74` — capturing sink; the record precedes the Logout's write.
-- [RED] `LivenessTiming105.GapOpen_PeerSendsNonAdvancingFrame_DeadlineLogout`, `...GapOpen_PeerSilent_R1LogoutAt2T`.
+- [RED] `LivenessTiming105.GapOpen_PeerSendsNonAdvancingFrame_DeadlineLogout`, `...GapOpen_PeerSilent_R1LogoutAt2T`,
+  `...GapOpen_ThresholdAboveTwoH_PeerSilent_TestRequestAtT_R1LogoutAt2T` (T > 2H).
 - [guard: the loop's HeartBtInt test deleted] `LivenessTiming105.HeartBtIntZero_NoTestRequest`; [RED]
   `...HeartBtIntNegative_NoTestRequest` (mutant: the test reverted to `== 0`).
 - [RED] `LivenessTiming105.ThresholdOverflow_Saturates`; [guard: the product formed unsaturated]
@@ -223,7 +228,8 @@ close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogou
   `test_105_seams.cpp`.
 - Config: [RED] `LoadNegativeBattery.TestRequestThreshold_Zero_OutOfRange`; [guard: the duration parser's
   leading-digit refusal deleted] `...TestRequestThreshold_Negative_MalformedValue`; [RED] `SessionOpen105.Threshold<Zero|Negative>_InvalidConfig`,
-  `EngineRegister105.Threshold<Zero|Negative>_InvalidConfig`.
+  `EngineRegister105.Threshold<Zero|Negative>_InvalidConfig`; [guard: an upper bound on T added at `Session::open()`]
+  `SessionOpen105.ThresholdAboveGapDeadline_Accepted` (T > 2H accepted).
 
 **#582 and the 112 rule (C-5)** — `test_105_heartbeat_knob_off.cpp`:
 - [RED] `HeartbeatKnobOff105.AheadPeerAnswersTenCycles_StaysActive` (SC-003).
@@ -237,10 +243,15 @@ close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogou
   `...NoTestRequestPending_NotCompared`; [guard: a non-modular comparison; the full-cycle case dropped]
   `TestReqIdWindow105.<AtUint32Max|AcrossTheWrap|OneFullCycle_NoValueEarlier>`, `constexpr` cells (with runtime twins)
   over the free window function the member calls, in `test_105_seams.cpp` (data-model E-4; Gate A round 3, Codex #7;
-  tagged in loop 2 round 2, Codex #3).
+  tagged in loop 2 round 2, Codex #3); [guard: the parse's canonical-form, sign, overflow or `TR`-length test deleted]
+  `TestReqIdParse105.<Canonical_Earlier|LeadingZero_Mismatch|Sign_Mismatch|Overflow_Mismatch|PrefixAlone_Mismatch>`,
+  `constexpr` cells (with runtime twins) over `detail::is_earlier_test_req_id`, in `test_105_seams.cpp`. The fuzz harness
+  `tests/fuzz/fuzz_session_recovery_admin_parse.cpp` calls the same function directly; a run of at least 10 minutes is
+  recorded (tasks.md T148).
 
 **Records (C-7)** — `test_105_presession_log.cpp`, capturing sink:
-- [RED] `PreSessionLog105.<NotTls|TlsHandshake|NoTimeLeft|FirstFrameTimeout|FirstFrameOverBudget|FirstFrameOverLimit|NoIds|NoSession>_OneRecord`.
+- [RED] `PreSessionLog105.<NotTls|TlsHandshake|NoTimeLeft|FirstFrameTimeout|FirstFrameOverBudget|FirstFrameOverLimit|FirstFrameReadError|NoIds|NoSession>_OneRecord`
+  — each `FirstFrame*` cell asserts `reason=first_frame` and the read's error that tells it apart from the other three.
 - [RED] `PreSessionLog105.NoSession_RecordNamesCompIds`, `...LongCompIds_CutAt15Bytes`.
 - [RED] `PreSessionLog105.Flood_BoundedWithSuppressedCount`.
 - [RED] `PreSessionLog105.ListenerBindFails_OneRecord` (port in use; the `std::system_error` arm, the error's value).
@@ -264,7 +275,7 @@ Re-run each after the fix; each must now assert the new rule (renamed where its 
 `InboundFrameDispositionsQ10.WithinCapMismatchInActive_DisconnectsWithoutALogout`, the #534-commented
 `SecondFrameInFlight.*` and `ReconcileAfterTheTakeBack.*`, `EstablishmentTimeoutQ16.AcceptorAfterRefusedLogon_*`,
 `ResendAnswerStoreFailureEngine.Acceptor789Path_SlotReadFails_ConnectionStaysOpenUntilTheEstablishmentDeadline`,
-T018 `CellC_*_UnansweredTestRequestDisconnects`, the 537 control cell "D-537-6, N", any cell that pins a stale or
+`test_heartbeat_cadence_8cell.cpp`'s T018 `HeartbeatCadence8Cell.CellC_*_UnansweredTestRequestDisconnects`, the 537 control cell "D-537-6, N", any cell that pins a stale or
 earlier TestReqID as an ending (`git grep -nE 'stale|different' tests/session` near `test_req_id`, read), and the
 retired `DriveLogoutStub_*` / `Initiator_DriveLogout_*`.
 
@@ -314,6 +325,9 @@ Each must turn its cells RED, run unfiltered:
 - the #582 predicate set back (`AheadPeerAnswersTenCycles_*`);
 - each 112 site's plain comparison restored (`TestReqId105.*_EarlierId_*`, `SecondTestRequest_LateAnswerToTheFirst_*`);
 - the window function's comparison made non-modular, and its full-cycle case dropped (`TestReqIdWindow105.*`);
+- in `detail::is_earlier_test_req_id`, each of the canonical-form, sign, overflow and `TR`-length tests deleted, one per
+  mutant (`TestReqIdParse105.*`; the canonical-form one also `TestReqId105.LeadingZeroId_Mismatch`);
+- an upper bound on T added at `Session::open()` (`SessionOpen105.ThresholdAboveGapDeadline_Accepted`);
 - the default-threshold product formed unsaturated, and the 1 ns guard added by hand to a saturated instant
   (`LivenessTiming105.<DefaultThresholdHelper_Saturates|GuardAtTheSaturatedInstant>`).
 

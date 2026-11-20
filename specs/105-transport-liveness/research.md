@@ -574,7 +574,9 @@ item 4), and the pump closes it (D1). `answer_pending_test_request_` returns fal
   condition; it is unreachable in practice (Gate A round 3, Codex #7). The window test is a free `constexpr`
   function of `(n, floor, next)` in a `detail` header, test-visible, which `classify_test_req_id_` calls; `constexpr`
   guard cells pin it at `UINT32_MAX`, across the wrap and at one full cycle, with two mutants (a non-modular
-  comparison; the full-cycle case dropped) (Gate A loop 2 round 2, Codex #3).
+  comparison; the full-cycle case dropped) (Gate A loop 2 round 2, Codex #3). The parse (`TR`, canonical decimal) and
+  the window are one free `detail` function, `detail::is_earlier_test_req_id`, which `classify_test_req_id_` and the fuzz
+  harness both call (data-model E-4; orchestrator decision on `/speckit-analyze` C1).
 - It resolves the round-1 consequence of D-c (N-7): a late Heartbeat carrying TR1's 112 after TR2 was sent is now an
   earlier answer, not an ending.
 Cells: each outcome on the in-sequence arm and on `answer_pending_test_request_` (a mutant per site that restores
@@ -662,8 +664,8 @@ unbounded memory, where the generator's monotonic counter gives the same answer 
 - **Surfaces.** No C-ABI setter and no Python surface (FR-011): `grep -rn test_request_threshold bindings include/fix`
   finds none. The QuickFIX parity table row in `tests/config/test_quickfix_parity_table.cpp` and its TOML
   documentation state the rule; `SessionConfig::test_request_threshold`'s comment in `session_config.hpp` gains it.
-- **Cells that move:** T018 `CellB_*` and `CellC_*_UnansweredTestRequestDisconnects`
-  (`heartbeat_testrequest_test.cpp`, `test_heartbeat_cadence_8cell.cpp`), `ci/red-arms/batch18-lost-advance.sh`
+- **Cells that move:** `test_heartbeat_cadence_8cell.cpp`'s T018 cells `HeartbeatCadence8Cell.CellB_*` and
+  `CellC_*_UnansweredTestRequestDisconnects`, the moved timings of `heartbeat_testrequest_test.cpp`, `ci/red-arms/batch18-lost-advance.sh`
   which names one of them, and any cell that advances a mock clock across HeartBtInt expecting a TestRequest
   (recipe in D10).
 
@@ -752,8 +754,8 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
   `fixpp_session_close` (graceful and terminal) during the wait and callback delivery during the wait included.
 - In-repo consumers updated in the same PR (Article X §7): the Python binding's version expectations and every
   test pinned to the minor (`git grep -nE 'MINOR 17|1\.17' -- include tests bindings tools ci`).
-- **C++.** `sizeof(Session)` changes (members added in D1, D2; `unanswered_tr_` and `ReconnectFsm`'s members
-  removed). `ReconnectFsm`'s constructor signature and layout change (an installed header). `run_read_pump` is
+- **C++.** `sizeof(Session)` changes (members added in D1, D2 and D5; `unanswered_tr_` and `ReconnectFsm`'s members
+  removed, FR-013). `ReconnectFsm`'s constructor signature and layout change (an installed header). `run_read_pump` is
   internal. A new installed implementation header, `include/fixpp/session/detail/log_rate_gate.hpp` (D8), with
   `detail/replay_gate.hpp`'s status: the install rule ships `include/` whole, and 084's package-layout contract
   ships a `session/detail/` header a public header reaches. No `SessionConfig` field changes. BREAKING C++ layout, recorded in B&L as 103's B-103-9 and 104's
@@ -996,15 +998,16 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
   `InboundFrameDispositionsQ10.WithinCapMismatchInActive_DisconnectsWithoutALogout`, the #534-commented cells of
   `SecondFrameInFlight.*` and `ReconcileAfterTheTakeBack.*`, `EstablishmentTimeoutQ16.AcceptorAfterRefusedLogon_*`,
   `ResendAnswerStoreFailureEngine.Acceptor789Path_SlotReadFails_ConnectionStaysOpenUntilTheEstablishmentDeadline`,
-  T018 `CellC_*_UnansweredTestRequestDisconnects`, the 537 note's control cell "D-537-6, N", and `DriveLogoutStub_*` /
+  `test_heartbeat_cadence_8cell.cpp`'s T018 `HeartbeatCadence8Cell.CellC_*_UnansweredTestRequestDisconnects`, the 537 note's control cell "D-537-6, N", and `DriveLogoutStub_*` /
   `Initiator_DriveLogout_*`. Each is renamed where its name states the old rule.
 
 ## D11 — Supersession (FR-016, FR-018, FR-019)
 
 - **Census recipe** over `specs/`, `.specify/`, `brain/`, `spec/`, `tests/`, `include/`, `src/`, `ci/`:
-  `git grep -nE '#534|fixpp#534|stays open|transport stays open|1 ?× ?HeartBtInt|1×HB|test_request_threshold|Phase 6 US4|not a close|drive_logout|unanswered_tr_|parse_cn_from_dn_local|L-103-5|R-6|establishment (deadline|timeout)'`.
+  `git grep -nE '#534|fixpp#534|stays open|transport stays open|1 ?× ?HeartBtInt|1×HB|test_request_threshold|Phase 6 US4|not a close|drive_logout|unanswered_tr_|parse_cn_from_dn_local|L-103-5|R-6|establishment (deadline|timeout)|off only at'`.
   Known positives it must report: `tests/session/test_537_gap_deadline.cpp` ("fixpp#534"), `include/fixpp/core/error.hpp`
-  ("1×HeartBtInt"), `src/session/session.cpp` ("Phase 6 US4"). Each hit is classed: superseded by name (a merged
+  ("1×HeartBtInt"), `src/session/session.cpp` ("Phase 6 US4"), `src/session/read_first_frame_bounded.hpp` ("off only at
+  exactly 0", the comment above `detail::resend_gap_deadline`). Each hit is classed: superseded by name (a merged
   bundle, edited nowhere: `specs/005-*`, `specs/013-*`, `specs/092-*`, `specs/093-*`, `specs/103-*`, `specs/104-*`), a
   living surface rewritten, or not this rule.
 - **Rulings superseded by name in this bundle** (the spec's FR-019 list): 536-537-538 note R-6's "A Logout on the
@@ -1047,7 +1050,7 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
     a 112 never sent ends; the set restarts at each connection; after 2³² TestRequests on one connection the window
     no longer identifies the sent set; a Heartbeat due after a frame that follows the TestRequest goes at its instant
     or at the loop's next wake, at most max(0, T − H) late); `B-105-6` the pre-session and listener records; `B-105-7` BREAKING C-ABI 1.18,
-    the C++ layout changes, and the new installed implementation header `include/fixpp/session/detail/log_rate_gate.hpp`
+    the C++ layout changes (`sizeof(Session)` changes: FR-013 removes members, D1, D2 and D5 add them), and the new installed implementation header `include/fixpp/session/detail/log_rate_gate.hpp`
     (the status of `detail/replay_gate.hpp`); an `L-105-*` row for each disclosure of the contract's "Disclosed" section (L-105-b to
     L-105-h; L-105-a was withdrawn in Gate A round 1 and is not used). L-105-f is written as narrowed by ruling D-e
     (non-ending writes stay unbounded, including a liveness emit queued behind a blocked send, which never reaches
