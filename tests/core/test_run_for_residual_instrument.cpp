@@ -34,6 +34,7 @@
 namespace {
 
 using namespace std::chrono_literals;
+using fixpp::test_support::measure_run_for_residual;
 using fixpp::test_support::measure_run_for_residual_ready;
 using fixpp::test_support::run_for_residual_measurement;
 
@@ -253,6 +254,29 @@ TEST(RunForResidualInstrument, LocationAttributesToHelperCallerNotHelper) {
     // between the two; measure_via_fixture_helper is defined much earlier in
     // this file, so a location attributed to the HELPER (the bug this cell
     // exists to catch) would fail both bounds.
+    EXPECT_GT(m.location.line(), before.line());
+    EXPECT_LT(m.location.line(), after.line());
+}
+
+// The predicate form without `start` is otherwise instantiated by no caller;
+// this cell compiles it and pins its `location` forwarding to the caller.
+TEST(RunForResidualInstrument, PredicateFormWithoutStartForwardsLocation) {
+    asio::io_context ioc;
+    bool flag = false;
+    asio::post(ioc, [&] { flag = true; });
+    asio::post(ioc, [] {});
+
+    const std::source_location before = std::source_location::current();
+    const run_for_residual_measurement m =
+        measure_run_for_residual(ioc, [&flag] { return flag; }, 200ms, /*exclusive_driver=*/true);
+    const std::source_location after = std::source_location::current();
+
+    EXPECT_FALSE(m.ready_at_entry);
+    EXPECT_TRUE(m.ready_observed);
+    EXPECT_EQ(m.handlers_dispatched, 2U);
+    EXPECT_EQ(m.residual_handlers, 1U);
+    EXPECT_FALSE(m.near_deadline_inconclusive);
+    EXPECT_STREQ(m.location.file_name(), before.file_name());
     EXPECT_GT(m.location.line(), before.line());
     EXPECT_LT(m.location.line(), after.line());
 }
