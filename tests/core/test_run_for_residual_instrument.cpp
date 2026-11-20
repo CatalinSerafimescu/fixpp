@@ -187,6 +187,36 @@ TEST(RunForResidualInstrument, ReadyAtEntryMakesEveryDispatchedHandlerResidual) 
     EXPECT_EQ(m.residual_handlers, kHandlers);
 }
 
+// A readiness already observed at entry is timestamped at entry, not at
+// `start`: with `start` in the past, an entry that leaves less than the
+// window/20 margin before the deadline must be flagged inconclusive. The
+// context is empty, so `run_one_until` returns at once; a preemption only
+// shrinks the remainder further, so the arm cannot pass by being slow. The
+// control leaves far more than the margin.
+TEST(RunForResidualInstrument, ReadyAtEntryNearDeadlineIsFlaggedInconclusive) {
+    constexpr auto kWindow = 3000ms;
+
+    asio::io_context ioc;
+    std::promise<void> prom;
+    std::future<void> fut = prom.get_future();
+    prom.set_value();
+
+    const run_for_residual_measurement near = measure_run_for_residual_ready(
+        ioc, fut, std::chrono::steady_clock::now() - (kWindow - 75ms), kWindow,
+        /*exclusive_driver=*/true);
+
+    EXPECT_TRUE(near.ready_at_entry);
+    EXPECT_TRUE(near.ready_observed);
+    EXPECT_TRUE(near.near_deadline_inconclusive);
+
+    const run_for_residual_measurement far = measure_run_for_residual_ready(
+        ioc, fut, std::chrono::steady_clock::now() - 1000ms, kWindow, /*exclusive_driver=*/true);
+
+    EXPECT_TRUE(far.ready_at_entry);
+    EXPECT_TRUE(far.ready_observed);
+    EXPECT_FALSE(far.near_deadline_inconclusive);
+}
+
 // gate-b/r1 P1-b: `phase` is assigned but was never asserted anywhere.
 TEST(RunForResidualInstrument, PhaseLabelSurvives) {
     asio::io_context ioc;

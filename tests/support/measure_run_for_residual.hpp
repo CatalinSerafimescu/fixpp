@@ -155,7 +155,9 @@ template <class Ready>
 
     result.ready_at_entry = static_cast<bool>(ready());
     bool observed = result.ready_at_entry;
-    auto observed_at = start;
+    // Readiness at entry is timestamped at entry, not at `start`: a `start`
+    // in the past must not read an entry near the deadline as clean.
+    auto observed_at = std::chrono::steady_clock::now();
 
     for (;;) {
         const bool observed_before_step = observed;
