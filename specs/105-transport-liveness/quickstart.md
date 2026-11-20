@@ -27,8 +27,8 @@ Each census runs in a scratch copy, never committed. Results go in the evidence 
 
 ## 2. RED on the base, or a guard with its mutant
 
-Every cell in section 3 is marked. **[RED]**: written first, run on `52aeed4e` (a scratch worktree at the base, on
-the build volume), and must fail there for its stated reason. **[guard: <mutant>]**: a rule the base already keeps,
+Every cell in section 3 is marked. **[RED]**: written first, run on the branch's merge-base with `origin/main` (a scratch worktree at
+`git merge-base HEAD origin/main`, on the build volume), and must fail there for its stated reason. **[guard: <mutant>]**: a rule the base already keeps,
 GREEN on the base by design; it must fail under the named mutant (section 5). A [RED] cell whose oracle the base
 could meet for another reason (the session already `Disconnected`) carries the positive control named with it. The
 mechanism mutants of section 5 must fail too.
@@ -61,9 +61,11 @@ Names are proposals; the implementer keeps the scenario, its assertion and its m
 - [RED] `ConnectionClose105.DirectInitiator_EndingThenDriveReconnect_Reconnects`.
 - [guard: the latch's `lifecycle` term deleted] `ConnectionClose105.InsideClose_NoSecondClose`; [guard: the drain flag
   deleted] `...InsideReconnectDrain_DrainKeepsItsBound`.
-- [guard: the spawn's `catch` deleted] `ConnectionClose105.CloseFrameSpawnFails_CloseStillReturnsCounterZero` (an
-  allocation-failure seam at the close frame's spawn; `close()` returns, the counter is 0, the peer sees EOF from
-  `close()`).
+- [RED] `ConnectionClose105.CloseFrameSpawnFails_<ReleaseAtLoopExit|WriteLimit|BoundExpiry>_PeerSeesEofWithNoLaterCall`
+  (an allocation-failure seam at the close frame's spawn; an Engine session ended by a detached root while its pump
+  is parked in a read; the peer sees EOF with no inbound frame and no API call, by the synchronous fallback; the
+  counter is 0 after `close()`; on the TLS arm no close_notify, L-105-h; clarification D-g). Mutant: the fallback
+  deleted (the latch left for a later consumer, round 2's rule).
 - [RED] `TlsClose105.<each class>_PeerReceivesCloseNotify` — `test_105_tls_close.cpp` on the TLS loopback harness.
 
 **The R-2 wait (C-2)** — `test_105_logout_wait.cpp`, both roles; one or more cells per row W-1 to W-15 of the
@@ -101,9 +103,23 @@ contract's table and per row of data-model E-3 (research D10 lists them):
   `...PreActive_CloseDuringWait_OneClose`.
 - [RED] `LogoutWait105.PendingTooHighMark_GapDeadlineLogout_EofAfterWrite` (C-2.8, N-5).
 - [RED] `LogoutWait105.OnLogoutFiresAtWaitEnd`.
-- [guard: the bound spawn's `catch` deleted] `LogoutWait105.BoundSpawnFails_EndsAsTimeoutZero` — after Active and
-  before Active alike: no wait armed, EOF after the write.
-- [RED] `Lifetime105.<EndingLogoutBound|CloseFrame>_ClosedSessionDestroyedAfterExit` (ASan lane).
+- [RED] `LogoutWait105.BoundSpawnFails_<R2AfterActive|R2BeforeActive|Reply>_NoLogoutWritten_EofAtOnce` — an
+  allocation-failure seam at the bound's spawn: no Logout bytes at the peer, no wait, `Disconnected` and `onLogout`
+  once (after Active), EOF at once (clarification D-g). Mutant: the failure read as timeout 0 (a Logout on the
+  wire).
+- [RED] `LogoutWait105.Bound_ExpiresWhileResendAnswerBlocked_EofAtTheBound` — SendingTime-Reject route; the peer's
+  ResendRequest during the wait, its answer blocked in `async_write` (the peer stops reading); open at the bound −
+  1 ms, EOF at the bound (N-1). Mutant: rows 10 and 11 routed through `release_connection_end_`'s `inbound_depth_`
+  test.
+- [RED] `LogoutWait105.PreActive_<LogoutBlockedInWrite|LogoutHeldInStore>_ClosedAtEstablishmentDeadlineNoEvent`
+  (Engine; establishment time left below `logout_disconnect_timeout_ms`): open at the deadline − 1 ms, EOF at the
+  deadline, no `session_event_establishment_timeout` and no record; `...PreActive_ClockOverride_CapOnEngineClock`
+  (a second mock clock as `clock_override`; only the engine clock reaches the deadline). Mutant: the cap's arm
+  deleted.
+- [RED] `Lifetime105.<EndingLogoutBound|CloseFrame>_SessionDestroyedAfterClose` (ASan lane): the Session destroyed
+  after `close()` returns, including `...CloseFrame_SpawnedByWriteLimitDuringGracefulClose` (the mock clock advanced
+  to the bound well inside `close_grace`'s wall time: EOF at the bound, the counter 0 when `close()` returns). Mutant:
+  `close()`'s second join of the close frame's counter deleted.
 
 **The write limit (C-2.7, C-8.5)** — `test_105_write_limit.cpp`, both roles, on a transport whose write is held
 until it is closed (the scripted transport's `write_hold`, or a seam in `test_105_support.hpp`); the TLS arm on a peer
@@ -112,8 +128,10 @@ close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogou
 `logon_timeout_ms` set well above the bound:
 - [RED] `WriteLimit105.<R1|R2AfterActive|R2BeforeActive|Reply>_LogoutBlocked_ClosedAtTheBound` (the Logout is the
   blocked write); for R-1 the slot-74 record present.
-- [RED] `WriteLimit105.<R1|R2AfterActive>_LogoutQueuedBehindBlockedSend_ClosedAtTheBound` (the Logout waits at the
-  write gate).
+- [RED] `WriteLimit105.<R1|R2AfterActive|Reply>_LogoutQueuedBehindBlockedSend_ClosedAtTheBound` (the Logout waits at
+  the write gate; for `Reply` an application send blocked in `async_write` holding the gate, then the peer's Logout:
+  the receipt arm resumes, `onLogout` once, the reset unit run as 104 orders it). No pre-Active queued cell: that
+  shape is unreachable on an Engine session (research D10).
 - [RED] `TlsWriteLimit105.R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsCloseTimeout`.
 - [RED] `WriteLimit105.WriteReleasedBeforeTheBound_LogoutOnWire_WaitKeepsTheSameBudget` (the control: the Logout complete
   on the wire, EOF at the same bound).
@@ -133,11 +151,17 @@ close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogou
 - [RED] `LivenessTiming105.TrafficAfterTestRequestNoHeartbeat_NotGivenUpAt2T_GivenUpAt2TAfterLastFrame` (D-c).
 - [RED] `LivenessTiming105.SilentPeer_NoHeartbeatWhileTestRequestPending` — positive control: the TestRequest at
   12 s and the session Active at 22 s; no Heartbeat at 22 s; the give-up just after 24 s.
-- [RED] `LivenessTiming105.FrameAfterTestRequest_HeartbeatAt22s_TR2At25s_NoneAt35s_GiveUpAfter37s` (N-2).
+- [RED] `LivenessTiming105.FrameAfterTestRequest_HeartbeatAt22s_TR2At25s_NoneAt35s_GiveUpAfter37s` (N-2; the
+  construction proof of the sleep set, data-model E-4).
+- [RED] `LivenessTiming105.FrameAfterHeartbeatInstant_HeartbeatAtTheStaleGiveUpWake` — a frame at 23 s; the Heartbeat
+  just after 24 s, not before; positive control: none at 23 s.
+- [RED] `LivenessTiming105.SilentAfterTestRequest_NoSpin` — the mock clock's registered sleeps counted: one per wake,
+  a bounded number of loop iterations from TR1 to the give-up. Mutant: the passed, ineligible Heartbeat instant kept
+  in the sleep set.
 - [RED] `LivenessTiming105.SecondTestRequest_LateAnswerToTheFirst_StaysActive` (D-d: TR2 stays pending; the give-up
   2T after that frame).
 - [RED] `LivenessTiming105.GiveUp_LogoutTextPinned_ThenEof` — Text(58) spelled out in the cell.
-- [RED] `LivenessTiming105.GiveUp_<LogoutDoesNotFit|ToAdminThrows|AssignFails|StoreFailsPersistent|StoreFailsVolatile|WriteFails>_StillEof`
+- [RED] `LivenessTiming105.GiveUp_<LogoutDoesNotFit|ToAdminThrows|AssignFails|StoreFailsPersistent|StoreFailsVolatile|WriteFails|BoundSpawnFails>_StillEof`
   — each asserts the slot-74 record, the wire (no complete Logout, except `StoreFailsVolatile`) and EOF; each has
   its own mutant.
 - [RED] `LivenessTiming105.GiveUp_OneLogRecordWithSlot74` — capturing sink; the record precedes the Logout's write.
@@ -158,7 +182,8 @@ close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogou
 - [RED] `TestReqId105.<InSequenceArm|AnswerPendingRoute>_EarlierId_NeitherAnswersNorEnds`, each with the mutant that
   restores the plain comparison at that site; [RED] `...PreviousConnectionId_Mismatch` (across `drive_reconnect`);
   [guard: the canonical-form test deleted] `...LeadingZeroId_Mismatch`; [guard: the pending test deleted]
-  `...NoTestRequestPending_NotCompared`.
+  `...NoTestRequestPending_NotCompared`; `constexpr` cells of the window at `UINT32_MAX`, across the wrap and at one
+  full cycle of 2³² IDs (no value earlier), Gate A round 3, Codex #7.
 
 **Records (C-7)** — `test_105_presession_log.cpp`, capturing sink:
 - [RED] `PreSessionLog105.<NotTls|TlsHandshake|NoTimeLeft|FirstFrameTimeout|FirstFrameOverBudget|FirstFrameOverLimit|NoIds|NoSession>_OneRecord`.
@@ -206,6 +231,11 @@ Each must turn its cells RED, run unfiltered:
 - the claim's result ignored, so a wait is armed (`PendingTooHighMark_*`);
 - the write limit deleted (every `WriteLimit105.*` cell; the spurious-hit arm: the connection stays open past the bound);
 - the write limit's close made through the latch consumer's `inbound_depth_` test (`WriteLimit105.R2*` and `Reply_*`);
+- the bound's expiry close made through `release_connection_end_` (`Bound_ExpiresWhileResendAnswerBlocked_*`);
+- the establishment cap's arm deleted (`PreActive_*_ClosedAtEstablishmentDeadlineNoEvent`);
+- each spawn's fail-closed `catch` replaced by round 2's (`CloseFrameSpawnFails_*`, `BoundSpawnFails_*`);
+- `close()`'s second join deleted (`Lifetime105.CloseFrame_SpawnedByWriteLimitDuringGracefulClose`);
+- the passed, ineligible Heartbeat instant kept in the sleep set (`SilentAfterTestRequest_NoSpin`);
 - the latch consumers' `writing` deferral deleted (`R1WriteHeld_PeerLogoutArrives_*`);
 - the slot-74 record moved after the write (`WriteLimit105.R1_*`'s record assertion);
 - each `owe_connection_end_()` call site deleted;

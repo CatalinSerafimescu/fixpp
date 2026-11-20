@@ -6,7 +6,9 @@
 
 **Status**: Draft
 
-**Base**: `52aeed4e` (fixpp `main`, the squash of PR #711; the session code is 104's `20a45577` plus #711's receipt-reset log).
+**Base**: the branch's merge-base with `origin/main`. The mechanisms were re-derived at `52aeed4e` (the squash of PR #711; the
+session code is 104's `20a45577` plus #711's receipt-reset log); the branch was then rebased onto `310ff565` (#713), which
+changed tests only.
 
 **Input**: batch B27, lane S1 (`phases/phase-4/issue-batches.md` in the parent repo): fixpp#534, #582, #535, #559 (sites 2
 and 3) and #687, with the folds the owner approved on 2026-11-20 (R-4 below). The issues' mechanisms were re-derived
@@ -128,6 +130,15 @@ Decisions on the round-2 reviews (`research/reviews/codex_105-transport-liveness
 - Q (D-e, owner 2026-11-20; closes OQ-3): Is the write of a Logout that ends a session bounded? → A: yes, in 105. R-1's Logout and every R-2 ending Logout, before and after Active, is raced against `logout_disconnect_timeout_ms` counted from the write's start. If the write has not completed then, the session closes the transport through `close_async`, and the ending proceeds as "Logout not sent", with no wait after it. On TLS, where close_notify cannot be written behind a blocked write, the abortive fallback at `tls_close_timeout` is permitted and disclosed (L-105-g). R-1's slot-74 record is written before the Logout's write. With timeout 0 or no clock the write is not limited. Every other write stays unbounded (L-105-f, narrowed), with a follow-up issue filed before Gate B. This supersedes the round-1 interim decision (disclose the blocked-write ending as L-105-f, "Pre-existing on `main` for the TestRequest") by name (FR-003, FR-004b). Two points are the design's, not the ruling's (research D2 item 11): the replies to the peer's Logout are limited too, because they share the write point (`inbound_logout_leaf_`); and one budget from the write's start covers the write and the R-2 wait, which moves R-2's origin from the write's end to its start (FR-004).
 - Q (D-f, orchestrator, Article VIII §3): Which benchmarks does the PR owe? → A: paired base-vs-candidate runs of `on_inbound_frame_bench`, `session_send_bench` and `engine_send_bench`, and a new pump case for the per-frame latch test, added to `engine_send_bench`'s harness. No owner performance ruling is sought (plan Performance Goals; contract C-12).
 
+### Session 2026-11-20 (Gate A round 3, owner targeted edit)
+
+Decisions on the round-3 reviews (`research/reviews/codex_105-transport-liveness_gate_a_3_review.md` and
+`opus_105-transport-liveness_gate_a_3_adversarial_review.md` in the parent repo). The loop's round cap was reached at P1 0 /
+P2 4; the owner chose a targeted edit and one fresh round.
+
+- Q (D-g, owner 2026-11-20): What happens when the close task, or the ending Logout's bound, cannot be spawned because allocation fails? → A: the session fails closed. A close frame that cannot be spawned is replaced by the synchronous `Transport::close()` of the live transport, on the session strand, so the peer still observes EOF with no later call; on TLS with a read or write in flight that close is abortive (no close_notify). This departs from FR-002 and ruling D-e ("through `close_async`") on allocation failure only, and is disclosed (L-105-h). A bound that cannot be spawned means the Logout is not written: the ending proceeds as "Logout not sent" and the connection closes at once. Round 2's readings (a failed bound spawn proceeds as timeout 0, with an unbounded write; a failed close-frame spawn leaves the latch to a later consumer, L-105-b) are withdrawn (FR-002, FR-004b; round-3 root cause #1).
+- Q (scope, owner 2026-11-20): What does the targeted edit change? → A: exactly the round-3 Opus review's four root causes and its confirmed P3s: (1) spawn failure fails closed (D-g); (2) the R-2 bound's expiry closes the connection as the write limit does, whatever arm is in flight, and the Engine's establishment deadline is handed to the ending machine as a cap; (3) the liveness loop sleeps to the earliest instant of a set that keeps the not-yet-reached Heartbeat instant, with no spin; (4) the lifetime, accounting and test-plan lists. Nothing else is redesigned.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — A session that has ended closes its connection (Priority: P1)
@@ -160,7 +171,8 @@ the bound the class allows, with no further inbound frame and no local API call.
    store-and-emit fails, **Then** the connection is closed.
 8. **Given** a TLS session, **When** any of the endings above closes the connection, **Then** the close is the orderly
    TLS close wherever today's `close()` closes orderly; no ending introduces an abortive close, except the write limit
-   of scenario 9 behind a peer that does not read (ruling D-e, L-105-g).
+   of scenario 9 behind a peer that does not read (ruling D-e, L-105-g) and the synchronous close used when a close
+   cannot be spawned (an allocation failure; clarification D-g, L-105-h).
 9. **Given** a peer that has stopped reading, **When** a Logout that ends the session cannot be written, **Then** the
    connection closes `logout_disconnect_timeout_ms` after the start of that write, with no further wait.
 
@@ -279,9 +291,11 @@ no comment claiming behaviour the code does not have.
   is shown to find a known positive, and assign each to a class.
 - **FR-002**: The close MUST NOT be abortive where today's `close()` path is orderly. On TLS it MUST send close_notify
   wherever `close()` does today (B-348-1 and its amendments), and it MUST go through the same close path `close()`
-  uses, so the two cannot race to close one transport. One exception (clarification D-e): a Logout write cut by
-  FR-004b on TLS behind a peer that does not read, where `close_async` cannot write close_notify and closes
-  abortively at `tls_close_timeout` (L-105-g).
+  uses, so the two cannot race to close one transport. Two exceptions: a Logout write cut by FR-004b on TLS behind a peer
+  that does not read, where `close_async` cannot write close_notify and closes abortively at `tls_close_timeout`
+  (clarification D-e, L-105-g); and an allocation failure at the close's spawn, where the session closes with the
+  synchronous `Transport::close()` instead, abortive on TLS while a read or write is in flight (clarification D-g,
+  L-105-h).
 - **FR-003 (R-1)**: When a TestRequest goes unanswered, the session MUST send one Logout whose Text(58) states that the
   TestRequest was not answered, then close the transport as soon as the Logout has been written. It MUST NOT wait for
   the peer's Logout. If the Logout cannot be sent, or its write has not completed within the limit of FR-004b, the
@@ -294,7 +308,8 @@ no comment claiming behaviour the code does not have.
   arrives, or when `logout_disconnect_timeout_ms` runs out counted from the start of the write of fixpp's Logout,
   whichever is first. One budget covers the write (FR-004b) and the wait: the bound does not slide with later sends
   and does not restart when the write completes. On an Engine-managed session before Active the connection's
-  establishment deadline still closes it if that comes first (B-093-4); a Session driven without an Engine has no
+  establishment deadline caps the budget, during the Logout's store call and write as during the wait, and closes it
+  if that comes first (B-093-4; clarification "Gate A round 3", root cause #2); a Session driven without an Engine has no
   establishment deadline, and its pre-Active wait ends at the bound. When the ending claims a pending too-high
   Logout (103's mark, the peer's Logout already received), it waits for nothing: it closes after its write, as R-1's
   does. While the wait is armed:
@@ -329,8 +344,12 @@ no comment claiming behaviour the code does not have.
   included), the session MUST close the transport through the close path of FR-002, and the ending MUST proceed as
   "Logout not sent": no wait, `Disconnected` and `onLogout` once. Nothing may be cancelled or destroyed while
   suspended by that close, and no store work is cut (FR-008). With `logout_disconnect_timeout_ms` 0 or no clock the
-  write is not limited. `close()`, `Engine::stop()` and the reconnect drain during the write end it through their own
-  transport close. While such a write is in flight, an ending another root records MUST NOT close the connection
+  write is not limited. If the limit cannot be set up because its bound cannot be spawned (an allocation failure), the
+  Logout MUST NOT be written and the ending proceeds as "Logout not sent" (clarification D-g). A terminal `close()`
+  and `Engine::stop()` during the write end it through their own transport close; under a graceful `close()` and
+  the reconnect drain, which close the transport only at their own wall-clock bound, the write ends at this limit or
+  at that bound, whichever comes first. The budget starts at the Logout's owner claim, so it covers the Logout's
+  number assignment and store call too (disclosed in B-105-2). While such a write is in flight, an ending another root records MUST NOT close the connection
   before the write has returned (an arm that returns an error still closes at once, as today). Writes that do not end
   a session stay unbounded (L-105-f).
 - **FR-005**: When the session acknowledges the peer's Logout (in Active, in LogoutSent, and the too-high Logout's
@@ -345,8 +364,9 @@ no comment claiming behaviour the code does not have.
   deadline's own expiry keeps its event (B-093-4).
 - **FR-008**: The closes of FR-001 MUST NOT cut store work the ending owns: the receipt reset (B-104-1, B-104-2) and a
   store call already issued run to their end, and `close()`'s and `Engine::stop()`'s existing waits keep their
-  bounds. The write limit's close (FR-004b) is the one close made while a frame is inside its arm (the arm is the one
-  suspended in the write); it closes only the transport, so it too cuts no store work.
+  bounds. The ending Logout's deadlines are the closes made while a frame may be inside its arm: the write limit (FR-004b;
+  the arm is the one suspended in the write) and the R-2 bound's expiry (FR-004; for example a resend answer blocked
+  in its write during the wait). Each closes only the transport, so each cuts no store work.
 
 **TestRequest answering with sequence validation off (#582)**
 
@@ -366,7 +386,9 @@ no comment claiming behaviour the code does not have.
   Heartbeat with a matching or absent TestReqID(112) answers it; the 112 rule is FR-009's (clarification D-d). The outbound Heartbeat cadence (1×HeartBtInt) and the gap deadline (B-537-2, 2×HeartBtInt) are unchanged,
   except that no Heartbeat is sent while a TestRequest is pending with no inbound frame since it was sent, as QuickFIX
   C++'s `needHeartbeat` requires no TestRequest outstanding; a frame after the TestRequest makes the Heartbeat due
-  again at once, as QuickFIX C++'s `testRequest(0)` on every accepted frame does. HeartBtInt ≤ 0 disables the liveness loop
+  again, as QuickFIX C++'s `testRequest(0)` on every accepted frame does: it is sent at its instant, or, for a frame
+  that arrives after that instant, at the liveness loop's next wake, at most max(0, T − H) late (QuickFIX C++ acts at
+  its next one-second tick). HeartBtInt ≤ 0 disables the liveness loop
   and the gap deadline (today the loop is off only at 0; owner 2026-11-20). Precedence with a gap open: the gap
   deadline acts only when a frame arrives (it is tested in the inbound arms, not by a timer), and every frame that
   reaches it has refreshed liveness. So a peer that keeps sending frames that do not advance NextNumIn ends at the gap
@@ -397,13 +419,13 @@ no comment claiming behaviour the code does not have.
 - **FR-016**: The live B&L file MUST be amended in this PR, with the list equal to research D11's B&L plan: L-103-5
   retired; B-537-2's "transport stays open" clause, B-537-2(b) (the silent ending at the grace check, whose reach the
   default T changes), B-537-3, L-093-1, L-093-6, B-093-4, B-092-2, B-092-5, L-092-1, B-103-10, B-104-6 and B-103-13
-  amended (B-103-13: a direct driver runs `close()` or `drive_reconnect` and lets the R-2 bound exit before
-  destroying the Session; the close frame is exempt; the matching `session.hpp` caller-precondition comment states
-  the same); new rows for the close rule (FR-001…FR-008), the R-2 wait and the write limit (FR-004, FR-004b), R-1's
+  amended (B-103-13: a direct driver runs `close()` or `drive_reconnect` and lets the R-2 bound and the close frame
+  exit before destroying the Session; `close()` joins both, with no exemption; the matching `session.hpp`
+  caller-precondition comment states the same); new rows for the close rule (FR-001…FR-008), the R-2 wait and the write limit (FR-004, FR-004b), R-1's
   departure from QuickFIX, the #582 rule, the TestRequest timing and the TestReqID(112) rule (FR-009, FR-010), and
-  the limitations L-105-b to L-105-g, L-105-f naming its follow-up issue, filed before Gate B. L-103-5's statement of QuickFIX's behaviour holds
+  the limitations L-105-b to L-105-h, L-105-f naming its follow-up issue, filed before Gate B. L-103-5's statement of QuickFIX's behaviour holds
   only for the too-low path and is not carried forward as written.
-- **FR-017**: Every behaviour cell MUST be shown RED on the base `52aeed4e` before its fix; a regression guard (a rule
+- **FR-017**: Every behaviour cell MUST be shown RED on the base (the branch's merge-base with `origin/main`) before its fix; a regression guard (a rule
   the base already keeps) is GREEN on the base by design and MUST instead be shown RED under its named mutant; a cell
   whose oracle the base meets for another reason MUST carry a positive control at the instant it tests. Every close
   cell MUST assert the peer-observed EOF, not an internal flag. Where a close is awaited with a bound, the bound MUST be derived
@@ -449,7 +471,8 @@ no comment claiming behaviour the code does not have.
   the acceptor first frame and the detached-coroutine failures, where "at once" is the contract's definition (the
   close initiated with no further mock-clock advance, inbound frame or API call, once the executor has no ready work;
   plus completion of the transport's close, bounded by `tls_close_timeout` on TLS); at the earlier of the peer's
-  Logout and `logout_disconnect_timeout_ms` from the start of the Logout's write for R-2; and, for an ending Logout
+  Logout and `logout_disconnect_timeout_ms` from the start of the Logout's write for R-2 (before Active on an Engine
+  session, the establishment deadline when that is earlier); and, for an ending Logout
   whose write does not complete, at `logout_disconnect_timeout_ms` from that write's start (plus `tls_close_timeout`
   on TLS). Zero ending sites in the census are left without a cell or a named exemption (an exemption names its
   disclosed limitation).

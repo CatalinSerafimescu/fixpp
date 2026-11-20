@@ -6,6 +6,7 @@ description: "Task list for 105-transport-liveness"
 
 > **Non-operative (Gate A round 1, 2026-11-20):** generated before Gate A; to be regenerated from the corrected bundle after Gate A converges, without carrying these task numbers forward.
 > **Gate A round 2 (2026-11-20):** still non-operative; the round-2 rewrite (rulings D-d to D-f, data-model E-3's write limit) is not reflected here; regenerate after Gate A converges.
+> **Gate A round 3 targeted edit (2026-11-20):** still non-operative; ruling D-g and round-3 root causes #1 to #4 are not reflected here; regenerate from the corrected bundle after Gate A converges.
 
 **Input**: `specs/105-transport-liveness/`: spec.md (US1 to US5, FR-001 to FR-019, SC-001 to SC-006, Clarifications and owner rulings R-1 to R-4, Q1, Q2 and the 2026-11-20 rulings on OQ-1, SI-1, SI-2, L-105-b), plan.md ("Phases (for /speckit-tasks)", Project Structure, T-DOC-1), research.md (F-1 to F-10, D1 to D12, R1 to R4, "Owner rulings"), data-model.md (E-1 to E-9), contracts/transport-liveness-105.md (C-1 to C-11), quickstart.md. Where this file and the bundle differ, the bundle wins and the difference goes to the orchestrator.
 
