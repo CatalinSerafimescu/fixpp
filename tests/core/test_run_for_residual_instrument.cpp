@@ -27,6 +27,7 @@
 #include <future>
 #include <source_location>
 #include <string>
+#include <thread>
 
 #include "measure_run_for_residual.hpp"
 
@@ -290,6 +291,33 @@ TEST(RunForResidualInstrument, NearDeadlineTransitionIsFlaggedInconclusive) {
 
     asio::steady_timer near_deadline_timer(ioc, kFireAt);
     near_deadline_timer.async_wait([&](const std::error_code&) { prom.set_value(); });
+
+    const run_for_residual_measurement m =
+        measure_run_for_residual_ready(ioc, fut, kWindow, /*exclusive_driver=*/true);
+
+    EXPECT_TRUE(m.ready_observed);
+    EXPECT_TRUE(m.near_deadline_inconclusive);
+}
+
+// Issue #712: the same near-deadline transition, with the test thread stalled
+// between arming the timer and calling the instrument. The stall is longer
+// than the 75 ms slack inside the margin, so the flag holds only when the
+// timer's expiry and the instrument's deadline are measured from one start
+// instant; a timer armed relative to its own construction lands outside the
+// margin and the flag reads false.
+TEST(RunForResidualInstrument, NearDeadlineFlagSurvivesStallBeforeInstrumentStart) {
+    constexpr auto kWindow = 3000ms;
+    constexpr auto kFireAt = 2925ms;  // 75 ms inside kWindow's 150 ms (5%) margin
+    constexpr auto kStall = 200ms;    // > the 75 ms slack inside the margin
+
+    asio::io_context ioc;
+    std::promise<void> prom;
+    std::future<void> fut = prom.get_future();
+
+    asio::steady_timer near_deadline_timer(ioc, kFireAt);
+    near_deadline_timer.async_wait([&](const std::error_code&) { prom.set_value(); });
+
+    std::this_thread::sleep_for(kStall);
 
     const run_for_residual_measurement m =
         measure_run_for_residual_ready(ioc, fut, kWindow, /*exclusive_driver=*/true);
