@@ -27,12 +27,14 @@
 #include <future>
 #include <source_location>
 #include <string>
+#include <thread>
 
 #include "measure_run_for_residual.hpp"
 
 namespace {
 
 using namespace std::chrono_literals;
+using fixpp::test_support::measure_run_for_residual;
 using fixpp::test_support::measure_run_for_residual_ready;
 using fixpp::test_support::run_for_residual_measurement;
 
@@ -186,6 +188,36 @@ TEST(RunForResidualInstrument, ReadyAtEntryMakesEveryDispatchedHandlerResidual) 
     EXPECT_EQ(m.residual_handlers, kHandlers);
 }
 
+// Readiness at entry is timestamped at entry, not at `start`: with `start`
+// in the past, an entry that leaves less than the window/20 margin before the
+// deadline must be flagged inconclusive. The context is empty, so
+// `run_one_until` returns at once; a preemption only shrinks the remainder
+// further, so the arm cannot pass by being slow. The control leaves far more
+// than the margin.
+TEST(RunForResidualInstrument, ReadyAtEntryNearDeadlineIsFlaggedInconclusive) {
+    constexpr auto kWindow = 3000ms;
+
+    asio::io_context ioc;
+    std::promise<void> prom;
+    std::future<void> fut = prom.get_future();
+    prom.set_value();
+
+    const run_for_residual_measurement close_to_deadline = measure_run_for_residual_ready(
+        ioc, fut, std::chrono::steady_clock::now() - (kWindow - 75ms), kWindow,
+        /*exclusive_driver=*/true);
+
+    EXPECT_TRUE(close_to_deadline.ready_at_entry);
+    EXPECT_TRUE(close_to_deadline.ready_observed);
+    EXPECT_TRUE(close_to_deadline.near_deadline_inconclusive);
+
+    const run_for_residual_measurement clear_of_deadline = measure_run_for_residual_ready(
+        ioc, fut, std::chrono::steady_clock::now() - 1000ms, kWindow, /*exclusive_driver=*/true);
+
+    EXPECT_TRUE(clear_of_deadline.ready_at_entry);
+    EXPECT_TRUE(clear_of_deadline.ready_observed);
+    EXPECT_FALSE(clear_of_deadline.near_deadline_inconclusive);
+}
+
 // gate-b/r1 P1-b: `phase` is assigned but was never asserted anywhere.
 TEST(RunForResidualInstrument, PhaseLabelSurvives) {
     asio::io_context ioc;
@@ -222,6 +254,29 @@ TEST(RunForResidualInstrument, LocationAttributesToHelperCallerNotHelper) {
     // between the two; measure_via_fixture_helper is defined much earlier in
     // this file, so a location attributed to the HELPER (the bug this cell
     // exists to catch) would fail both bounds.
+    EXPECT_GT(m.location.line(), before.line());
+    EXPECT_LT(m.location.line(), after.line());
+}
+
+// The predicate form without `start` is otherwise instantiated by no caller;
+// this cell compiles it and pins its `location` forwarding to the caller.
+TEST(RunForResidualInstrument, PredicateFormWithoutStartForwardsLocation) {
+    asio::io_context ioc;
+    bool flag = false;
+    asio::post(ioc, [&] { flag = true; });
+    asio::post(ioc, [] {});
+
+    const std::source_location before = std::source_location::current();
+    const run_for_residual_measurement m =
+        measure_run_for_residual(ioc, [&flag] { return flag; }, 200ms, /*exclusive_driver=*/true);
+    const std::source_location after = std::source_location::current();
+
+    EXPECT_FALSE(m.ready_at_entry);
+    EXPECT_TRUE(m.ready_observed);
+    EXPECT_EQ(m.handlers_dispatched, 2U);
+    EXPECT_EQ(m.residual_handlers, 1U);
+    EXPECT_FALSE(m.near_deadline_inconclusive);
+    EXPECT_STREQ(m.location.file_name(), before.file_name());
     EXPECT_GT(m.location.line(), before.line());
     EXPECT_LT(m.location.line(), after.line());
 }
@@ -277,6 +332,12 @@ TEST(RunForResidualInstrument, NearDeadlineTransitionIsFlaggedInconclusive) {
     // 3000/20 = 150 ms and the transition sits 75 ms inside it:
     //   fires before the deadline  — tolerates up to 75 ms of timer lateness
     //   lands within the margin    — tolerates up to 75 ms of earliness
+    // Those slacks cover timer granularity only. They are valid while the
+    // timer's expiry and the instrument's deadline are derived from one
+    // `start` instant; then a stall of the test thread between arming the
+    // timer and entering the instrument does not move the transition relative
+    // to the deadline (issue #712; NearDeadlineFlagSurvivesStallBeforeInstrumentStart
+    // forces that stall).
     // Duration is bounded by kFireAt, not kWindow: once the promise is set the
     // context is out of work, so the loop exits via exhausted-work at ~2.9 s.
     // Do NOT shrink these back toward the deadline without redoing that
@@ -288,11 +349,39 @@ TEST(RunForResidualInstrument, NearDeadlineTransitionIsFlaggedInconclusive) {
     std::promise<void> prom;
     std::future<void> fut = prom.get_future();
 
-    asio::steady_timer near_deadline_timer(ioc, kFireAt);
+    const auto start = std::chrono::steady_clock::now();
+    asio::steady_timer near_deadline_timer(ioc, start + kFireAt);
     near_deadline_timer.async_wait([&](const std::error_code&) { prom.set_value(); });
 
     const run_for_residual_measurement m =
-        measure_run_for_residual_ready(ioc, fut, kWindow, /*exclusive_driver=*/true);
+        measure_run_for_residual_ready(ioc, fut, start, kWindow, /*exclusive_driver=*/true);
+
+    EXPECT_TRUE(m.ready_observed);
+    EXPECT_TRUE(m.near_deadline_inconclusive);
+}
+
+// Issue #712: the same near-deadline transition, with the test thread stalled
+// between arming the timer and calling the instrument. The timer and the
+// instrument's deadline are both derived from `start`. kStall must exceed the
+// 75 ms slack inside the margin by more than any expected timer lateness, and
+// stay short enough that the instrument is entered before start + kWindow.
+TEST(RunForResidualInstrument, NearDeadlineFlagSurvivesStallBeforeInstrumentStart) {
+    constexpr auto kWindow = 3000ms;
+    constexpr auto kFireAt = 2925ms;  // 75 ms inside kWindow's 150 ms (5%) margin
+    constexpr auto kStall = 1000ms;   // > the 75 ms slack; see the bound above
+
+    asio::io_context ioc;
+    std::promise<void> prom;
+    std::future<void> fut = prom.get_future();
+
+    const auto start = std::chrono::steady_clock::now();
+    asio::steady_timer near_deadline_timer(ioc, start + kFireAt);
+    near_deadline_timer.async_wait([&](const std::error_code&) { prom.set_value(); });
+
+    std::this_thread::sleep_for(kStall);
+
+    const run_for_residual_measurement m =
+        measure_run_for_residual_ready(ioc, fut, start, kWindow, /*exclusive_driver=*/true);
 
     EXPECT_TRUE(m.ready_observed);
     EXPECT_TRUE(m.near_deadline_inconclusive);

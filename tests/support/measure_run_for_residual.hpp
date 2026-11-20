@@ -94,6 +94,14 @@
 // residual as zero. This field is set whenever the transition (or
 // ready_at_entry) lands within 5% of `window` of the deadline — flag it as
 // unreliable rather than let a near-boundary zero be read as convertible.
+//
+// `start` (issue #712): each form has an overload taking the steady-clock
+// instant the measurement is anchored to, so a caller that schedules work
+// relative to the deadline (a timer meant to land inside the margin) can
+// derive both from one instant. The deadline is `start + window`, so a
+// `start` in the past shortens the remaining window by that much; `elapsed`
+// counts from `start` too. The overloads without `start` anchor it to
+// `steady_clock::now()` at entry.
 
 #pragma once
 
@@ -104,6 +112,7 @@
 #include <source_location>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace fixpp::test_support {
 
@@ -129,8 +138,8 @@ struct run_for_residual_measurement {
 // skips the measurement entirely.
 template <class Ready>
 [[nodiscard]] run_for_residual_measurement measure_run_for_residual(
-    asio::io_context& ioc, Ready&& ready, std::chrono::steady_clock::duration window,
-    bool exclusive_driver, std::string_view phase = {},
+    asio::io_context& ioc, Ready&& ready, std::chrono::steady_clock::time_point start,
+    std::chrono::steady_clock::duration window, bool exclusive_driver, std::string_view phase = {},
     std::source_location location = std::source_location::current()) {
     run_for_residual_measurement result;
     result.location = location;
@@ -141,13 +150,14 @@ template <class Ready>
         return result;
     }
 
-    const auto start = std::chrono::steady_clock::now();
     const auto deadline = start + window;
     const auto near_deadline_margin = window / 20;
 
     result.ready_at_entry = static_cast<bool>(ready());
     bool observed = result.ready_at_entry;
-    auto observed_at = start;
+    // Readiness at entry is timestamped at entry, not at `start`: a `start`
+    // in the past must not read an entry near the deadline as clean.
+    auto observed_at = std::chrono::steady_clock::now();
 
     for (;;) {
         const bool observed_before_step = observed;
@@ -173,17 +183,36 @@ template <class Ready>
     return result;
 }
 
+template <class Ready>
+[[nodiscard]] run_for_residual_measurement measure_run_for_residual(
+    asio::io_context& ioc, Ready&& ready, std::chrono::steady_clock::duration window,
+    bool exclusive_driver, std::string_view phase = {},
+    std::source_location location = std::source_location::current()) {
+    return measure_run_for_residual(ioc, std::forward<Ready>(ready),
+                                    std::chrono::steady_clock::now(), window, exclusive_driver,
+                                    phase, location);
+}
+
 // Future-shaped wrapper. The predicate is `fut.wait_for(0s) ==
 // std::future_status::ready`, matching pump_until_ready.hpp's
 // `pump_until_ready`.
 template <class Fut>
 [[nodiscard]] run_for_residual_measurement measure_run_for_residual_ready(
-    asio::io_context& ioc, Fut& fut, std::chrono::steady_clock::duration window,
-    bool exclusive_driver, std::string_view phase = {},
+    asio::io_context& ioc, Fut& fut, std::chrono::steady_clock::time_point start,
+    std::chrono::steady_clock::duration window, bool exclusive_driver, std::string_view phase = {},
     std::source_location location = std::source_location::current()) {
     return measure_run_for_residual(
         ioc, [&fut] { return fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready; },
-        window, exclusive_driver, phase, location);
+        start, window, exclusive_driver, phase, location);
+}
+
+template <class Fut>
+[[nodiscard]] run_for_residual_measurement measure_run_for_residual_ready(
+    asio::io_context& ioc, Fut& fut, std::chrono::steady_clock::duration window,
+    bool exclusive_driver, std::string_view phase = {},
+    std::source_location location = std::source_location::current()) {
+    return measure_run_for_residual_ready(ioc, fut, std::chrono::steady_clock::now(), window,
+                                          exclusive_driver, phase, location);
 }
 
 }  // namespace fixpp::test_support
