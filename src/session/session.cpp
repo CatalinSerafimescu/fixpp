@@ -8242,7 +8242,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
         // the lowerings that need no reset point (a reconcile, a take-back) are R-19's.
         // The other lowering writers, read against "phase 1 has numbered its Logout":
         // `git grep -n -E
-        // 'seqnum_mgr_\.(take_back_outbound|hydrate|reset_to_one|set_next_outbound)\(|reset_seqnums_to_one_durable\(|run_reset_unit_\('
+        // 'seqnum_mgr_\.(take_back_outbound|hydrate|reset_to_one|set_next_outbound)\(|reset_seqnums_to_one_durable\(|run_reset_unit_\(|run_receipt_reset_unit_\('
         // -- src/session/session.cpp`.
         if (stamped_seq >= seqnum_mgr_.peek_outbound()) {
             if (!wire_closed_by_reset_) {

@@ -2102,12 +2102,12 @@ std::string describe(DeliveryEnding const& e) {
     return "?";
 }
 
-// The throwing reset_to never reaches the HookedStore behind it, so a reset() or reset_to that
-// store logged is a later call: the unit's reset retried, or a teardown reset.
+// The HookedStore behind the throwing store sees only a forwarded reset(), the teardown reset;
+// ThrowingResetToStore104::reset_to never forwards, so a retried reset_to is pinned by the
+// cells' `reset_to_throws == 1` assertion, not here.
 void expect_no_reset_call_after_the_throw(Rol104& r) {
     EXPECT_TRUE(r.log().calls.empty())
-        << "a reset call after the throw: reset() " << r.log().reset_calls << ", reset_to "
-        << r.log().reset_to_calls;
+        << "a forwarded reset() after the throw: reset() " << r.log().reset_calls;
 }
 
 void expect_unit_left_no_flag(Rol104& r, session_role const role, DeliveryEnding const& ending,

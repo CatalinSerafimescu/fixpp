@@ -51,8 +51,7 @@
 #   and its name is the trap: it is the obvious choice for a file whose subject
 #   is the peak-memory basis. It copies this file into its fixtures and appends
 #   a fake preset line, and its cells exercise only that fake line, so it checks
-#   no real pin and passes against a broken one. Running it alone and shipping
-#   is how a broken pin has reached `main` before.
+#   no real pin and passes against a broken one.
 #
 # ⚠️ A DERIVED BUMP IS A CLAIM, NOT A FACT. Adding one to a pin for a new
 # `add_test` is right only if the new test is eligible on every lane. Re-derive
