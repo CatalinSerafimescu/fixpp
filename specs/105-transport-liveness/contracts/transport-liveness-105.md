@@ -5,7 +5,10 @@
 
 The observable rules of this feature, by ending class. "The peer observes EOF" means the peer's read of the
 connection ends (for TLS, after a close_notify where C-8 says so). "At once" means with no further mock-clock
-advance and no further inbound frame or local API call: the executor is run until it has no ready work. Every rule
+advance and no further inbound frame or local API call: the executor is run until it has no ready work. A cell for
+such a rule rules out the wall-clock timers that can also close a connection while the mock clock is frozen: the TLS
+handshake and first-frame deadlines, `close()`'s grace timer and `drain_for_reconnect_`'s bound (each an
+`asio::steady_timer` on wall time). Every rule
 names the requirement it discharges. Internals named here are the design's; a test asserts the observable, never
 the name.
 
@@ -13,7 +16,7 @@ the name.
 
 | # | Condition | Wire, from fixpp | The connection closes | Notes |
 |---|---|---|---|---|
-| 1 | An inbound frame's arm records `Disconnected` with no Logout sent and returns success (after Active: TestReqID mismatch, BeginString or CompID guard, MsgSeqNum 0, D-3, a too-low frame whose Logout did not fit) | nothing more | at once, after the arm returns | no event, as today |
+| 1 | An inbound frame's arm records `Disconnected` with no Logout sent and returns success (after Active: TestReqID mismatch, BeginString or CompID guard, MsgSeqNum 0, D-3, a too-low frame whose Logout did not fit) | nothing more | at once, after the arm returns | no event, as today; inside an R-2 wait such a frame is absorbed (C-2 W-8) |
 | 2 | An inbound frame's arm returns an error | whatever the arm wrote | at once, as today | unchanged |
 | 3 | The peer's Logout in Active or LogonReceived (a request) | the reply Logout | after the reply, the persist and, under `reset_on_logout`, the receipt reset unit | B-104-1's order kept; `onLogout` before the reset |
 | 4 | The peer's Logout in LogoutSent (`close()`'s exchange) | nothing | by `close()`, as today | excluded class X |
@@ -29,7 +32,9 @@ the name.
 | 14 | `drive_reconnect`'s drain from Active | as today | as today (B-103-9's bound) | class X |
 
 Common rules:
-- **C-1.a One close per ending.** A connection is closed once, through `close_async()` (C-8). An `onLogout` callback
+- **C-1.a One close per ending.** A connection is closed once, through `close_async()` (C-8). The design owes at
+  most one close per connection: the close is owed only on a transition into `Disconnected`, and a write of
+  `Disconnected` over `Disconnected` owes nothing (research D1). An `onLogout` callback
   that starts `close()`, and an `Engine::stop()` that races the close, produce no second close and no use after
   close.
 - **C-1.b The session's own work runs to its end.** No close in this table runs while a frame is inside an arm. A
@@ -40,8 +45,10 @@ Common rules:
   transport closed and stays open in `Disconnected`, so `drive_reconnect` can reconnect it. On a direct Session the
   rows reached from a detached root or an application call (5 by the bound, 7 to 10, and C-2's bound) close at
   that root's exit; the rows reached from an inbound frame (1 to 3, 11, 12) have no pump to consume them, and close
-  at the next detached-root or application-call exit, at `close()`, or at `drive_reconnect` (L-105-b).
-- **C-1.d** `onLogout` fires at the `Disconnected` edge, as today, once.
+  at the exit of a later, separately started detached root or application call, at `close()`, or at
+  `drive_reconnect`; the `on_inbound_frame` call that reached the ending does not close it (L-105-b).
+- **C-1.d** `onLogout` fires at the `Disconnected` edge, as today, once; during an R-2 wait after Active, that
+  edge is the wait's end (C-2.1).
 
 ## C-2. The R-2 wait (FR-004, FR-004a)
 
@@ -51,44 +58,67 @@ arm, the too-low Logout (B-103-10), and every Logon refusal with a Logout (the t
 TestMessageIndicator posture mismatch, the strict-reset refusal, LogonSent's Logout-with-Text). Replies to the
 peer's Logout are not in this list (C-1 rows 3 and 5).
 
-A Logout that was not transmitted (it did not fit its buffer, its emit failed, or it was held back) starts no
-wait: the session ends and the connection closes at once (C-1 rows 1 and 11).
+**No wait is armed** when the Logout was not transmitted (it did not fit its buffer, `toAdmin` threw, its number or
+store failed, its write failed, it was held back, or there was no transport to take it), when
+`logout_disconnect_timeout_ms` is 0, or when the session has no clock. The session then ends as the site ends today,
+and the connection closes at once (C-1 rows 1 and 11).
 
-**After Active.**
-- C-2.1 After the Logout's write the session stays Active (`fixpp_session_is_established` true) until the wait ends.
-- C-2.2 Every inbound frame is processed as in Active: an application message reaches `fromApp` and advances
-  NextNumIn; a TestRequest is answered with a Heartbeat; a ResendRequest is answered; a too-low or too-high frame
-  meets the sequence checks.
-- C-2.3 An application `send()` is refused with `session_invalid_state_for_send` from the write to the end (the
-  rule 103 gave every Logout ending).
-- C-2.4 fixpp originates nothing else: no Heartbeat, no TestRequest, no second Logout.
-- C-2.5 A frame that would itself end the session with a Logout sends none and starts no wait. A frame that would
-  end it silently moves the session to `Disconnected` and the connection stays open until the peer's Logout or the
-  bound. An arm that fails (an error result) closes at once (C-1 row 2).
-- C-2.6 **The peer's Logout ends the wait.** It is processed as a response: no reply; under `reset_on_logout` it
-  resets at its reset point (B-104-1); then the connection closes (C-1 row 3's order).
-- C-2.7 **The bound.** With no Logout from the peer, the connection closes `logout_disconnect_timeout_ms` after the
-  Logout's write, on the session's clock. A later send does not move the bound. `Disconnected` is recorded at that
-  instant, and `onLogout` fires then.
-- C-2.8 `logout_disconnect_timeout_ms` 0: no wait; the connection closes after the write. No clock (a direct
-  Session without one): the same.
-- C-2.9 `close(graceful)` during the wait waits for the wait's end within its own grace, then proceeds;
-  `close(terminal)` and `Engine::stop()` end the wait at once. One close either way.
+### While the wait is armed
 
-**Before Active.**
-- C-2.10 The refusal records `Disconnected` after the Logout's write, as today. Every frame is drained, except the
-  peer's Logout, which ends the wait; the connection then closes. The numbers are not reset (OQ-1's recommendation).
-- C-2.11 The bound is the earlier of `logout_disconnect_timeout_ms` after the write and the connection's
-  establishment deadline. Its expiry closes the connection with no `session_event_establishment_timeout` and no
-  establishment-timeout record.
+One table; each row is one observable rule. "Absorbed" means: no Logout written, no state change, no `onLogout`, no
+second wait, and the frame not delivered.
+
+| # | Frame or event | After Active (the session stays Active, a Logout of the session in flight) | Before Active (the session is `Disconnected`) |
+|---|---|---|---|
+| W-1 | The peer's Logout: no header fault, MsgType(35) third, past the validation gate where it runs, BeginString and CompIDs right, **any MsgSeqNum** | Ends the wait. No reply. When its MsgSeqNum is NextNumIn it advances NextNumIn and reaches `fromAdmin`, as an in-sequence Logout does today; otherwise neither. Under `reset_on_logout` the reset point runs (B-104-1). Then the connection closes, after the reset unit (C-1 row 3's order). | Ends the wait. Nothing delivered, nothing advanced, nothing reset. Then the connection closes. |
+| W-2 | An application message at NextNumIn | Reaches `fromApp`; NextNumIn advances. | Drained. |
+| W-3 | A TestRequest at NextNumIn | Answered with a Heartbeat. | Drained. |
+| W-4 | A ResendRequest at NextNumIn, or above it while a resend is outstanding | Answered, as today. | Drained. |
+| W-5 | A Heartbeat with a matching or absent TestReqID(112) | Answers a pending TestRequest, as today. | Drained. |
+| W-6 | A frame above NextNumIn with no resend outstanding | Processed as in Active: not delivered, NextNumIn kept, a ResendRequest for the gap, as today (QuickFIX C++ sends one during its wait too: `validLogonState` admits a non-Logout frame once `sentLogout` is set, and `verify` reaches `doTargetTooHigh`). | Drained. |
+| W-7 | A frame while a resend is outstanding and the gap deadline has passed | The gap deadline does not fire; the frame takes the row it takes before the deadline (W-4, W-6, W-8). | Drained. |
+| W-8 | Any other condition that ends the session today: with a Logout (a frame below NextNumIn without 43=Y, a SendingTime Reject, an OrigSendingTime Reject) or silently (a TestReqID mismatch, a BeginString or CompID mismatch, MsgSeqNum 0) | Absorbed. A Reject the arm writes before its Logout is written, as in Active; its Logout and its `Disconnected` are not. NextNumIn is left as the arm leaves it. | Drained. |
+| W-9 | An arm that returns an error (a store failure, an overflow) | Not absorbed: the wait ends, the session is `Disconnected`, the connection closes at once (C-1 row 2). | Not reached (nothing is processed). |
+| W-10 | An application `send()` | Refused, `session_invalid_state_for_send` (103's rule for a Logout ending). | Refused (not Active), as today. |
+| W-11 | The liveness loop | Originates nothing more; it leaves at its next test. | Not running. |
+| W-12 | The bound expires | `Disconnected`, `onLogout`, then the connection closes. | The connection closes. |
+| W-13 | `close(graceful)` | The wait runs on: `close()` proceeds at W-1 or W-12, within its own grace; one close, by `close()` (C-8.4). | As `close(terminal)`: `close()`'s Logout phase runs only from Active, as today. |
+| W-14 | `close(terminal)`, `Engine::stop()`, `drive_reconnect`'s drain | End the wait at once; one close, by the closer. | Same. |
+
+Common rules:
+- C-2.1 After Active the session stays Active (`fixpp_session_is_established` true) from the Logout's write until the
+  wait ends, and ends only at W-1, W-9, W-12, W-13 (at the wait's end) or W-14. `onLogout` fires once, at that end.
+  Before Active it does not fire, as today.
+- C-2.2 The cells send the peer's frames at the numbers a real peer uses. W-1: the peer's Logout below NextNumIn
+  after the too-low Logout, above it after the gap-deadline Logout, at NextNumIn after the SendingTime Reject's
+  Logout. W-2 to W-5 (frames at NextNumIn) are cells on the SendingTime-Reject route, where the peer's numbers are in
+  sequence; on the too-low route the peer's next frames are below NextNumIn and are cells of W-8 (absorbed), and on
+  the gap-deadline route they are above it (W-4, W-6, W-7).
+- C-2.3 **Numbering, not wire order.** No application frame, and no Heartbeat or TestRequest of the liveness loop, is
+  numbered after fixpp's Logout (W-10, W-11). A frame numbered before it and still inside its store call when the
+  Logout is written can reach the wire after the Logout. On the SendingTime-Reject and gap-deadline routes the peer
+  can ask for it by ResendRequest during the wait (W-4); on the too-low route its ResendRequest is below NextNumIn
+  and is absorbed (W-8). Disclosed as L-105-e; it exists on `main` for every Logout ending since 103.
+- C-2.4 fixpp originates nothing of its own during the wait: no Heartbeat on its cadence, no TestRequest, no second
+  Logout. Replies to the peer's frames are written as in Active: a Heartbeat answering a TestRequest, a resend
+  answer, a ResendRequest for a gap a frame opens (W-6), and a Reject a validation or an arm sends.
+- C-2.5 **The bound.** With no Logout from the peer, the connection closes `logout_disconnect_timeout_ms` after the
+  Logout's write, on the session's clock. A later send does not move the bound.
+- C-2.6 **Before Active** the bound is the earlier of `logout_disconnect_timeout_ms` after the write and the
+  connection's establishment deadline. Its expiry closes the connection with no `session_event_establishment_timeout`
+  and no establishment-timeout record. The numbers are not reset (owner ruling on OQ-1, 2026-11-20).
 
 ## C-3. The unanswered TestRequest (FR-003, R-1)
 
-- C-3.1 After 2T of inbound silence with the TestRequest unanswered (C-6), fixpp sends one Logout whose Text(58) is
+- C-3.1 After 2T of inbound silence, counted from the last inbound frame that refreshes liveness, with a TestRequest
+  pending (C-6.2), fixpp sends one Logout whose Text(58) is
   exactly `TestRequest unanswered, TestReqID <id>`, `<id>` being the TestReqID(112) of the TestRequest it sent, and
   the connection closes as soon as the write has returned. fixpp does not wait for the peer's Logout.
-- C-3.2 When the Logout cannot be sent (it does not fit the Logout buffer, `toAdmin` throws on it, the number
-  cannot be assigned, or the store or the write fails), the connection still closes at the same point.
+- C-3.2 When the Logout cannot be sent, the connection still closes at the same point, and the record of C-3.3
+  carries `logout_sent=0`. Five classes, each with its own cell: the Logout does not fit its buffer; `toAdmin`
+  throws on it; its number cannot be assigned; its store fails (on a persistent store the leaf returns the error, on
+  a volatile one it is logged and the write proceeds, so both are cells); its write fails (the leaf discards the
+  emit's result, so the loop must still record and close).
 - C-3.3 One warn log record, `session ended: TestRequest unanswered: test_req_id={} threshold_ms={} logout_sent={} error={}`,
   with `error` the numeric value of `fixpp::core::error::session_test_request_unanswered`, through the session's
   logger. No call returns that error.
@@ -119,16 +149,24 @@ wait: the session ends and the connection closes at once (C-1 rows 1 and 11).
 ## C-6. TestRequest timing (FR-010, FR-011, FR-012, R-3)
 
 - C-6.1 T is `SessionConfig::test_request_threshold` when set, else 1.2 × HeartBtInt (exactly H × 1200 ms).
-- C-6.2 A TestRequest is sent after T of inbound silence. The session gives up (C-3) after 2T of inbound silence,
-  2.4 × HeartBtInt by default. The instants saturate at the clock's range.
-- C-6.3 Unchanged: the outbound Heartbeat every HeartBtInt of outbound silence; the gap deadline at 2 × HeartBtInt
-  (B-537-2); every frame that refreshes inbound liveness today refreshes it.
-- C-6.4 HeartBtInt 0 disables both (and ≤ 0 if SI-2 is accepted).
-- C-6.5 Precedence with a gap open: with the default T the gap deadline (2H) comes before the give-up (2.4H), so the
-  session ends with the deadline's Logout and C-2; with T below H the give-up can come first.
-- C-6.6 A set T of zero or below is refused: `Session::open()` and `Engine::register_session` return
-  `invalid_session_config`; the TOML loader reports `out_of_range` at `session[i].test_request_threshold`. Any
-  positive T is accepted, T above 2H included.
+- C-6.2 A TestRequest is sent after T of inbound silence; its TestReqID becomes the pending one. The session gives up
+  (C-3) after 2T of inbound silence, 2.4 × HeartBtInt by default, counted from the last inbound frame that refreshes
+  liveness (clarification D-c): a frame after the TestRequest that does not answer it defers the give-up and leaves
+  the TestRequest pending, and a further T of silence sends a new TestRequest. The give-up runs strictly after the 2T
+  instant, by one clock tick (R-3's "after 2T"). Every instant, that tick included, saturates at the clock's range.
+- C-6.3 Unchanged: the outbound Heartbeat every HeartBtInt of outbound silence, except while a TestRequest is pending
+  and inbound is silent, when none is sent (QuickFIX C++'s `needHeartbeat` requires no TestRequest outstanding;
+  with the default T that window is longer than HeartBtInt); the gap deadline at 2 × HeartBtInt (B-537-2); every
+  frame that refreshes inbound liveness today refreshes it; the TestReqID(112) rule of C-3.4 and C-5.
+- C-6.4 HeartBtInt ≤ 0 disables the liveness loop and the gap deadline (owner ruling on SI-2, 2026-11-20).
+- C-6.5 Precedence with a gap open: the gap deadline is tested only when a frame arrives, and every frame that reaches
+  it has refreshed liveness. A peer that keeps sending frames that do not advance NextNumIn ends at the gap deadline
+  (2 × HeartBtInt) with its Logout and C-2, whatever T; a silent peer ends by C-3 at 2T.
+- C-6.6 A set T of zero or below is refused. C++: `Session::open()` and `Engine::register_session` return
+  `invalid_session_config` for zero and for a negative value. TOML: a zero duration reports `out_of_range` at
+  `session[i].test_request_threshold`; a negative token is refused earlier by the duration parser as
+  `malformed_value` ("duration must start with a numeric value"), unchanged. Any positive T is accepted, T above 2H
+  included.
 - C-6.7 No C-ABI setter and no Python surface for T.
 
 ## C-7. Records before a Session exists (FR-014, FR-015, #687)
@@ -151,13 +189,19 @@ wait: the session ends and the connection closes at once (C-1 rows 1 and 11).
   wherever `close()` sends one today (B-348-1 and its amendments), including when the pump is parked in a read.
 - C-8.2 No row of C-1 calls the synchronous `Transport::close()` on a live transport.
 - C-8.3 A `close()` that starts while a C-1 close is in flight waits for it before its own `close_async()`.
+- C-8.4 A `close(graceful)` during an R-2 wait after Active (C-2 W-13) reaches its own `close_async()` when the
+  wait ends, by the peer's Logout or by the bound. The bound began at the Logout's write, before the `close()` call,
+  and has the length of `close()`'s grace, so on a session whose clock is the wall clock the wait ends first and the
+  close is orderly. The grace's direct `Transport::close()` (abortive on TLS, B-348-1) is reached only when the
+  wait outlives the grace, as for any graceful close today.
 
 ## C-9. Surfaces
 
 - **C ABI: 1.18, BREAKING** (Article X §7). No symbol, type or error code changes. The observers, each with a 1.18
   clause in `include/fix/c_api/session.h`: `fixpp_session_is_established` (C-2.1, C-5.1, C-6.2),
-  `fixpp_session_send` (C-2.3), `fixpp_session_close` (C-2.9), `fixpp_session_register_callback` and
-  `fixpp_session_register_send_callback` (C-2.2, C-5.1). The 1.11, 1.12 and 1.17 sentences these change are
+  `fixpp_session_send` (C-2 W-10), `fixpp_session_close` (C-2 W-13, W-14), `fixpp_session_register_callback`
+  and `fixpp_session_register_send_callback` (C-2 W-1 to W-5, C-5.1). Each affected declaration has a C-driven
+  witness, close and callback delivery during the wait included. The 1.11, 1.12 and 1.17 sentences these change are
   amended in place, "amended in C-ABI 1.18, 105". `version.h`'s 1.18 history carries the counterparty's side:
   every ending closes the connection; the unanswered TestRequest's Logout; the R-2 wait; the TestRequest at
   1.2 × HeartBtInt.
@@ -174,14 +218,25 @@ The spec's table holds. This design adds:
 | Application send during the wait after fixpp's ending Logout | refused | sent (`Session::sendRaw` does not test `sentLogout`) | not read for this plan | dropped (the spec's second reading) |
 | Heartbeat and TestRequest originated during that wait | none | sent (`Session::next` goes on past `logoutTimedOut`) | sent (`Session.next()` goes on past `isLogoutTimedOut`) | not sent (`logoutState.Timeout` acts only on `LogoutTimeout`) |
 | The wait after a Logout refusing a Logon | bounded, then close; no reset | close at once (`doTargetTooLow`) | close at once | close at once |
+| NextNumIn for the peer's Logout response off NextNumIn | not advanced | advanced by one (`nextLogout`'s `incrNextTargetMsgSeqNum`) | not advanced (advanced only when it equals the expected number, QFJ-750) | not read for this plan |
 
 ## C-11. Disclosed
 
-- **L-105-a.** A silent ending during the R-2 wait leaves the connection open until the peer's Logout or the bound
-  (C-2.5); the peer's Logout then resets nothing (C-2.10's rule applies in `Disconnected`).
+- **L-105-a.** Withdrawn in Gate A round 1: a silent ending during the wait is absorbed (C-2 W-8), so the case it
+  disclosed no longer exists. The ID is not reused.
 - **L-105-b.** On a direct Session (no Engine pump), an ending reached from an inbound frame, and one whose
-  close a detached root deferred to a pump while a frame was inside an arm, close at the next detached-root or
-  application-call exit, at `close()` or at `drive_reconnect`; with no such call the connection stays open as
+  close a detached root deferred to a pump while a frame was inside an arm, close at the exit of a later,
+  separately started detached root or application call, at `close()` or at `drive_reconnect`; the
+  `on_inbound_frame` call that reached the ending is not such a call; with no such call the connection stays open as
   before 105. So does any ending whose close spawn failed.
 - **L-105-c.** Slot 74 is carried by a log record only; no API call returns it.
 - **L-105-d.** The CompIDs in a pre-session record are cut at 15 bytes.
+- **L-105-e.** A frame numbered before fixpp's ending Logout (an application send, or a liveness Heartbeat or
+  TestRequest) that is still inside its store call when the Logout is written can reach the wire after the Logout
+  (C-2.3). Nothing is numbered after the Logout. On the too-low route the peer cannot recover it during the wait. Pre-existing on `main` for every Logout ending (103 FR-021 promised
+  numbering, not wire order).
+- **L-105-f.** A write that never completes (a peer that stops reading, for example a TCP zero window) blocks every
+  Logout-first ending behind the session's write gate: R-1's Logout, every R-2 Logout, and the TestRequest before
+  them. No transport write has a timeout, so such an ending closes only at `close()` or `Engine::stop()`; a frame
+  inside its arm keeps the pump from closing too. Pre-existing on `main` for the TestRequest. A follow-up issue is
+  filed at implementation (bounding R-1's write is a design addition, research "Owner questions").

@@ -4,6 +4,8 @@ description: "Task list for 105-transport-liveness"
 
 # Tasks: Transport and liveness — a session that ends closes its connection; TestRequest timing and pre-session rejects
 
+> **Non-operative (Gate A round 1, 2026-11-20):** generated before Gate A; to be regenerated from the corrected bundle after Gate A converges, without carrying these task numbers forward.
+
 **Input**: `specs/105-transport-liveness/`: spec.md (US1 to US5, FR-001 to FR-019, SC-001 to SC-006, Clarifications and owner rulings R-1 to R-4, Q1, Q2 and the 2026-11-20 rulings on OQ-1, SI-1, SI-2, L-105-b), plan.md ("Phases (for /speckit-tasks)", Project Structure, T-DOC-1), research.md (F-1 to F-10, D1 to D12, R1 to R4, "Owner rulings"), data-model.md (E-1 to E-9), contracts/transport-liveness-105.md (C-1 to C-11), quickstart.md. Where this file and the bundle differ, the bundle wins and the difference goes to the orchestrator.
 
 **Preconditions not yet on record** (orchestrator): plan.md's Constitution Check schedules Gate A before `/speckit-tasks`; no `105-transport-liveness-gatea.md` exists under `.specify/decisions/` at the time of writing. `.specify/feature.json` `pinned_at` is a 105 spec commit, not the base; the base for every RED reading is `52aeed4e` (spec "Base", `git merge-base HEAD origin/main`).

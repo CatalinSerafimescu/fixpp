@@ -18,6 +18,12 @@ Each census runs in a scratch copy, never committed. Results go in the evidence 
 - **Size pins** (research D7): the narrow grep, then the wide grep that must report `ref_shape_test.cpp`.
 - **Moved timings** (research D10): the TestRequest grep, read for mock-clock advances across HeartBtInt.
 - **C-ABI minor pins** (research D9): `git grep -nE 'MINOR 17|1\.17' -- include tests bindings tools ci`.
+- **Article X §7 predicate** (research D9): `gh release list --exclude-drafts` at the PR head; empty keeps the MINOR
+  bump, and the result goes in the evidence file.
+- **Silent endings and the latch's setter** (research D2 item 4, D1): the silent-ending classification of the frame
+  arms' write sites (known positive: the BeginString guard of `on_inbound_active_`), and the
+  `owe_connection_end_(` call sites (known positive: the edge).
+- **`ReconnectFsm` stubs** (research D7): the caller census; known positive `drive_logout`'s test call.
 
 ## 2. RED on the base
 
@@ -51,33 +57,52 @@ Names are proposals; the implementer keeps the scenario and its assertion.
 - `ConnectionClose105.InsideClose_NoSecondClose`, `...InsideReconnectDrain_DrainKeepsItsBound`.
 - `TlsClose105.<each class>_PeerReceivesCloseNotify` — `test_105_tls_close.cpp` on the TLS loopback harness.
 
-**The R-2 wait (C-2)** — `test_105_logout_wait.cpp`, both roles:
-- `LogoutWait105.<TooLow|GapDeadline|SendingTimeReject|OrigSendingTimeReject>_PeerLogoutEndsWait` — EOF after the
-  peer's Logout, not before; with `reset_on_logout` the receipt resets.
+**The R-2 wait (C-2)** — `test_105_logout_wait.cpp`, both roles; one or more cells per row W-1 to W-14 of the
+contract's table and per row of data-model E-3 (research D10 lists them):
+- `LogoutWait105.TooLow_PeerLogoutBelowNextNumIn_EndsWaitAndResets`, `...GapDeadline_PeerLogoutAboveNextNumIn_EndsWaitAndResets`,
+  `...SendingTimeReject_PeerLogoutInSequence_EndsWait`, `...OrigSendingTimeReject_PeerLogoutEndsWait` — the peer's
+  Logout at the number a real peer uses (C-2.2); EOF after it, not before; with `reset_on_logout` the receipt resets;
+  NextNumIn advanced only for the in-sequence one.
 - `LogoutWait105.Bound_EofAtExactlyTheBound` — open at bound − 1 ms, EOF at the bound.
 - `LogoutWait105.Bound_DoesNotSlideWithAnAnswerSent` — a Heartbeat answering the peer's TestRequest mid-wait.
 - `LogoutWait105.AppMessageDuringWait_ReachesFromAppAndAdvances`, `...TestRequestDuringWait_Answered`,
-  `...ResendRequestDuringWait_Answered`, `...TooLowDuringWait_NoSecondLogout`, `...TooHighDuringWait_SequenceChecks`.
-- `LogoutWait105.SecondEndingDuringWait_NoSecondLogoutBoundHolds`, `...SilentEndingDuringWait_BoundHolds`.
-- `LogoutWait105.SendDuringWait_Refused`, `...LivenessDuringWait_SendsNothing`.
-- `LogoutWait105.TimeoutZero_EofAfterWrite`, `...NoClock_EofAfterWrite`.
-- `LogoutWait105.<CloseGraceful|CloseTerminal|EngineStop>DuringWait_OneClose`.
-- `LogoutWait105.PreActiveTooLowLogon_PeerLogoutEndsWaitNoReset` (OQ-1), `...PreActive_BoundCappedByDeadlineNoEvent`.
-- `LogoutWait105.OnLogoutFiresAtWaitEnd`.
+  `...ResendRequestDuringWait_Answered`, `...HeartbeatDuringWait_AnswersPendingTestRequest`,
+  `...TooHighDuringWait_NotDeliveredResendRequestSent`, `...GapDeadlinePassedDuringWait_NoSecondLogout` — the
+  in-sequence frames on the SendingTime-Reject route (C-2.2).
+- `LogoutWait105.Absorbed_<TooLow|SecondSendingTimeReject|TestReqIdMismatch|CompIdMismatch|MsgSeqNumZero>_ThenAppMessageAndPeerLogout`
+  — no second Logout, the application message reaches `fromApp`, the peer's Logout resets, `onLogout` once at the end;
+  and `...TooLowRoute_PeerFramesBelowNextNumIn_Absorbed` (a real peer's frames after the too-low Logout).
+- `LogoutWait105.StoreFailureDuringWait_EofAtOnce`.
+- `LogoutWait105.SendDuringWait_Refused`, `...SendHeldInStoreAcrossTheEnding_NumberedBeforeTheLogout`.
+- `LogoutWait105.LivenessDuringWait_ArmedOneTickBeforeHeartbeat_SendsNothing`, `...ArmedOneTickBeforeGiveUp_SendsNothing`.
+- `LogoutWait105.TimeoutZero_NoWaitEofAfterWrite`, `...NoClock_NoWaitEofAfterWrite`.
+- `TlsClose105.CloseGracefulDuringWait_CloseNotifyAtTheBound` — TLS, `close()`'s grace set long on wall time; asserts
+  close_notify and the close at the bound's mock-clock instant.
+- `LogoutWait105.<CloseTerminal|EngineStop|DriveReconnectDrain>DuringWait_OneClose`.
+- `LogoutWait105.PreActive_BoundSurvivesTheRefusalsOwnEdge`, `...PreActive_FramesDrained`,
+  `...PreActiveTooLowLogon_PeerLogoutEndsWaitNoReset` (OQ-1), `...PreActive_BoundExpiryCloses`,
+  `...PreActive_BoundCappedByDeadlineNoEvent`, `...PreActive_CloseDuringWait_OneClose`.
+- `LogoutWait105.OnLogoutFiresAtWaitEnd`; `ConnectionClose105.SecondDisconnectedWrite_OwesNothing`.
+- `Lifetime105.<EndingLogoutBound|CloseFrame>_ClosedSessionDestroyedAfterExit` (ASan lane).
 
 **R-1 and timing (C-3, C-6)** — `test_105_liveness_timing.cpp`, both roles, H = 10 s on the mock clock:
 - `LivenessTiming105.Default_NoTestRequestAt11s_OneAt12s` (RED: the base sends at 10 s).
-- `LivenessTiming105.Default_ActiveAt23900ms_EndedAt24s` (RED: the base ends near 20 s).
-- `LivenessTiming105.SetThreshold7s_TestRequestAt7s_GiveUpAt14s`.
-- `LivenessTiming105.GuardAtExactly2T_EchoWins`, `...At2TPlus1ns_GivesUp`.
+- `LivenessTiming105.Default_ActiveAt23900ms_EndedAt24sPlusGuard` (RED: the base ends near 20 s).
+- `LivenessTiming105.SetThreshold7s_TestRequestAt7s_GiveUpAt14sPlusGuard`.
+- `LivenessTiming105.GuardAtExactly2T_EchoWins`, `...At2TPlus1ns_GivesUp`; a `constexpr` cell of the guard at the
+  saturated instant.
+- `LivenessTiming105.TrafficAfterTestRequestNoHeartbeat_NotGivenUpAt2T_GivenUpAt2TAfterLastFrame` (D-c).
+- `LivenessTiming105.GraceWindow_NoHeartbeatWhileTestRequestPending` (no Heartbeat at 22 s).
+- `LivenessTiming105.SecondTestRequest_LateAnswerToTheFirst_EndsSession` (D-c's newly reachable consequence).
 - `LivenessTiming105.GiveUp_LogoutTextPinned_ThenEof` — Text(58) spelled out in the cell.
-- `LivenessTiming105.GiveUp_LogoutDoesNotFit_StillEof`, `...ToAdminThrows_StillEof`, `...StoreFails_StillEof`.
+- `LivenessTiming105.GiveUp_<LogoutDoesNotFit|ToAdminThrows|AssignFails|StoreFailsPersistent|StoreFailsVolatile|WriteFails>_StillEof`
+  — each asserts the record's `logout_sent=0` and EOF; each has its own mutant.
 - `LivenessTiming105.GiveUp_OneLogRecordWithSlot74` — capturing sink.
-- `LivenessTiming105.GapOpenDefaultT_DeadlineLogoutComesFirst`, `...ThresholdBelowH_GiveUpComesFirst`.
-- `LivenessTiming105.HeartBtIntZero_NoTestRequest` (and negative, if SI-2 is accepted).
+- `LivenessTiming105.GapOpen_PeerSendsNonAdvancingFrame_DeadlineLogout`, `...GapOpen_PeerSilent_R1LogoutAt2T`.
+- `LivenessTiming105.HeartBtIntZero_NoTestRequest`, `...HeartBtIntNegative_NoTestRequest`.
 - `LivenessTiming105.ThresholdOverflow_Saturates`; `constexpr` cells of the default-threshold helper.
-- Config: `LoadNegativeBattery.TestRequestThreshold_Zero_OutOfRange` (and negative), `SessionOpen105.ThresholdZero_InvalidConfig`,
-  `EngineRegister105.ThresholdZero_InvalidConfig`.
+- Config: `LoadNegativeBattery.TestRequestThreshold_Zero_OutOfRange`, `...TestRequestThreshold_Negative_MalformedValue`,
+  `SessionOpen105.Threshold<Zero|Negative>_InvalidConfig`, `EngineRegister105.Threshold<Zero|Negative>_InvalidConfig`.
 
 **#582 (C-5)** — `test_105_heartbeat_knob_off.cpp`:
 - `HeartbeatKnobOff105.AheadPeerAnswersTenCycles_StaysActive` (SC-003; RED on the base).
@@ -91,7 +116,8 @@ Names are proposals; the implementer keeps the scenario and its assertion.
 - `PreSessionLog105.ListenerBindFails_OneRecord` (port in use).
 
 **C ABI (C-9)** — extend `tests/capi/recovery_liveness_capi_witness_test.cpp`: the 1.18 observers through the C
-ABI, with a positive control (a well-formed message afterwards reaches `cb`, or the session is shown live first).
+ABI, `fixpp_session_close` (graceful and terminal) and callback delivery during the wait included, with a positive
+control (a well-formed message afterwards reaches `cb`, or the session is shown live first).
 
 ## 4. Supersession pins that flip
 
@@ -111,7 +137,13 @@ Each must turn its cells RED, run unfiltered:
 - `release_connection_end_` made a no-op (class D and A cells);
 - `expire()` without its `ended` test (the no-timeout-event cells);
 - the R-2 bound's deadline read from the last send instead of the write (`Bound_DoesNotSlideWithAnAnswerSent`);
-- `send_ending_logout_`'s absorb branch deleted (`SecondEndingDuringWait_*`);
+- the response test deleted, and moved below the too-high branch (the off-NextNumIn `*_EndsWaitAndResets` cells);
+- `send_ending_logout_`'s absorb branch deleted, and `end_session_silently_` recording while armed (`Absorbed_*`);
+- one post-suspension test of the liveness loop reverted to the state test alone (`LivenessDuringWait_*`);
+- the bound's live predicate testing `closing_or_stopped_()` (`CloseGracefulDuringWait_*`);
+- the bound spawned before the refusal's own `Disconnected` write, and the arming after it (`PreActive_BoundSurvives*`);
+- each `owe_connection_end_()` call site deleted, and the edge's transition test deleted (`SecondDisconnectedWrite_*`);
+- the give-up's re-read of `last_inbound_steady_` deleted (`TrafficAfterTestRequestNoHeartbeat_*`);
 - the default threshold set back to H (the timing cells);
 - the #582 predicate set back (`AheadPeerAnswersTenCycles_*`).
 

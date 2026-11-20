@@ -108,7 +108,16 @@ The questions were asked with the comparison tables of the findings file (FIX-SL
 - Q (plan SI-1): Remove the other caller-less `ReconnectFsm` stubs too? → A: yes, every stub with no caller (FR-013).
 - Q (plan SI-2): Does a negative HeartBtInt disable liveness? → A: yes, HeartBtInt ≤ 0 disables it (FR-010).
 - Q (plan SI-4): Must a Session driven without an Engine close on its own after an inbound-frame ending? → A: no; accepted as limitation L-105-b, FR-001 scoped to Engine-managed sessions.
-- Q: During the bounded wait after a Logout fixpp sent to end the session, what happens to frames other than the peer's Logout? → A: process them as in Active, like QuickFIX C++/J (FR-004); fixpp's own LogoutSent drain for `close()` is not reused for this wait.
+- Q: During the bounded wait after a Logout fixpp sent to end the session, what happens to frames other than the peer's Logout? → A: process them as in Active, like QuickFIX C++/J (FR-004); fixpp's own LogoutSent drain for `close()` is not reused for this wait. This answer covers the wait after Active only; before Active see D-b below (Gate A round 1).
+
+### Session 2026-11-20 (Gate A round 1)
+
+Decisions taken by the orchestrator on the round-1 reviews (`research/reviews/codex_105-transport-liveness_gate_a_review.md`
+and `opus_105-transport-liveness_gate_a_adversarial_review.md` in the parent repo).
+
+- Q (D-a, settled by evidence): After Active, does the peer's Logout end the R-2 wait when its MsgSeqNum is not NextNumIn (the too-low and gap-deadline routes, where a real peer's reply is off NextNumIn)? → A: yes. The peer's Logout ends the wait whatever its MsgSeqNum: it is recognised ahead of the sequence checks, Arm B and the gap-deadline handling, under `reset_on_logout` it resets at its reset point (104 RU-1 to RU-3), and then the connection closes. Evidence: QuickFIX C++ `Session::nextLogout` calls `verify(logout, false, false)` (no too-high or too-low test) and resets under `m_resetOnLogout`; QuickFIX/J `Session.nextLogout` calls `verify(logout, false, false)` and then `resetState()` under `resetOnLogout`; QuickFIX/Go `handleLogout` calls `verifySelect(msg, false, false, ...)`; FIX-SL 2020 is silent (FR-004).
+- Q (D-b, owner 2026-11-20): Before Active (a refused Logon), what happens during the R-2 wait to frames other than the peer's Logout? → A: they are drained: no delivery and no NextNumIn advance, as fixpp's LogoutSent arm drains. The peer's Logout or the bound ends the wait, and it resets nothing (the earlier OQ-1 ruling). Q2's "processed as in Active" applies after Active only (FR-004).
+- Q (D-c, settled by R-3's wording "2T of inbound silence", FIX-SL 2020 §4.10 row 14, and all three engines refreshing liveness on any accepted inbound frame): Is the give-up measured from the TestRequest, or from the last inbound frame? → A: from the last inbound frame that refreshes liveness today. An unanswered TestRequest with other inbound traffic after it does not end the session at 2T; the session gives up only after 2T of inbound silence. A Heartbeat whose TestReqID(112) does not match the pending one still ends the session (unchanged rule) (FR-010).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -244,8 +253,9 @@ no comment claiming behaviour the code does not have.
 
 - **FR-001**: Every transition to `Disconnected` of an Engine-managed session MUST end with the session's transport
   closed, so the peer observes the connection end, with no further inbound frame and no local API call. A Session
-  driven without an Engine closes at its next detached-root or application-call exit, `close()` or
-  `drive_reconnect` (limitation L-105-b, owner 2026-11-20). This holds on every path the re-derive
+  driven without an Engine closes at the exit of a later, separately started detached root or application call,
+  at `close()` or at `drive_reconnect`; the `on_inbound_frame` call that reached the ending is not such a call
+  (limitation L-105-b, owner 2026-11-20). This holds on every path the re-derive
   lists: inbound arms that return success, detached coroutines (the liveness loop, the peer-Logout bound), the pre-Active
   refusals, and the acceptor's first frame. Two paths keep the close they already own: `close()` (its Logout phase and
   terminal close), and `drain_for_reconnect_`. The plan MUST derive the full set of transition sites by a census that
@@ -262,15 +272,26 @@ no comment claiming behaviour the code does not have.
   too-low Logout in Active and in the Logon arms, B-103-10 and B-104-6, the gap-deadline Logout, and the SendingTime
   Reject that becomes a Logout; the census of FR-001 finds the rest), the session MUST close when the peer's Logout
   arrives, or when `logout_disconnect_timeout_ms` runs out counted from the write of fixpp's Logout, whichever is first.
-  The peer's Logout received during the wait is a Logout response: under `reset_on_logout` it resets at its reset
-  point, as a response in LogoutSent does (104 FR-003, B-104-1), and the close follows the reset unit. All three
-  engines reset on that Logout and disconnect. Before Active (a refused Logon) the peer's Logout resets nothing
-  (owner 2026-11-20). Every other inbound frame during the wait MUST be processed as it is
-  in Active (application messages reach `fromApp` and advance NextNumIn, a TestRequest is answered, sequence checks
-  apply), as QuickFIX C++ and /J do (clarification 2026-11-20 Q2). The wait's bound still counts from the write of
-  fixpp's Logout and does not slide with later sends. A frame during the wait that would itself end the session MUST
-  NOT start a second wait or send a second ending Logout; the first wait's bound holds. The state the session is in
-  during the wait, and when `onLogout` fires, are the plan's, with the observables above fixed.
+  The wait's bound does not slide with later sends. While the wait is armed:
+  - **The peer's Logout ends the wait whatever its MsgSeqNum** (clarification D-a): it is recognised once it has
+    passed the identity checks every frame meets (garble, header fault, the validation gate where it runs,
+    BeginString, CompIDs) and ahead of every sequence-number test, so a reply below NextNumIn after the too-low Logout, or above it after the gap-deadline
+    Logout, is the response. After Active it is a Logout response: under `reset_on_logout` it resets at its reset
+    point, as a response in LogoutSent does (104 FR-003, B-104-1), and the close follows the reset unit. All three
+    engines reset on that Logout and disconnect. NextNumIn advances for it only when its MsgSeqNum is NextNumIn
+    (QuickFIX/J's rule). Before Active the peer's Logout resets nothing (owner 2026-11-20).
+  - **After Active, every other inbound frame is processed as it is in Active** (clarification Q2): application
+    messages reach `fromApp` and advance NextNumIn, a TestRequest is answered, a ResendRequest is answered, and the
+    sequence checks apply (a frame above NextNumIn draws a ResendRequest, as QuickFIX C++'s does during its wait).
+    fixpp originates nothing of its own during the wait: no Heartbeat on its cadence, no TestRequest.
+  - **Before Active, every other inbound frame is drained** (clarification D-b): no delivery and no NextNumIn advance,
+    as fixpp's LogoutSent arm drains.
+  - **A second ending condition is absorbed**: a frame during the wait that would itself end the session, with a
+    Logout or silently, MUST NOT start a second wait, send a second ending Logout, change the session's state or
+    fire `onLogout`; the first wait's bound holds. An arm that fails with an error (a store failure, an overflow) is
+    not absorbed: the connection closes at once, as today.
+  The state the session is in during the wait, and when `onLogout` fires, are the plan's, with the observables above
+  fixed.
 - **FR-004a (precedence)**: A refusal that sends a Logout falls under FR-004 (R-2), before Active as after. A refusal
   that sends nothing falls under FR-007. R-1's Logout (FR-003) is the one Logout that closes after the write.
 - **FR-005**: When the session acknowledges the peer's Logout (in Active, in LogoutSent, and the too-high Logout's
@@ -297,12 +318,17 @@ no comment claiming behaviour the code does not have.
 **TestRequest timing and `test_request_threshold` (#535, R-3)**
 
 - **FR-010**: The TestRequest MUST be sent after T of inbound silence, and an unanswered one MUST end the session after
-  2T of inbound silence, where T is `SessionConfig::test_request_threshold` when set and 1.2×HeartBtInt otherwise. The
-  outbound Heartbeat cadence (1×HeartBtInt) and the gap deadline (B-537-2, 2×HeartBtInt) are unchanged. HeartBtInt ≤ 0
-  disables both (today only 0 does; owner 2026-11-20). Precedence: with the default T, the gap deadline (2×HeartBtInt) comes before the give-up
-  (2.4×HeartBtInt), so with a gap open a silent peer now always ends at the gap deadline with its Logout (then R-2),
-  never silently at the grace check. With a configured T below HeartBtInt the give-up can come first; both orders are
-  tested.
+  2T of inbound silence, where T is `SessionConfig::test_request_threshold` when set and 1.2×HeartBtInt otherwise.
+  The silence is measured from the last inbound frame that refreshes liveness today (clarification D-c): a frame
+  that arrives after the TestRequest, answering it or not, restarts it, and the TestRequest stays pending until a
+  Heartbeat with a matching or absent TestReqID(112) answers it; a Heartbeat with another 112 ends the session, as
+  today. The outbound Heartbeat cadence (1×HeartBtInt) and the gap deadline (B-537-2, 2×HeartBtInt) are unchanged,
+  except that no Heartbeat is sent while the session waits, with inbound silent, for the answer to its TestRequest,
+  as QuickFIX C++'s `needHeartbeat` requires no TestRequest outstanding. HeartBtInt ≤ 0 disables the liveness loop
+  and the gap deadline (today the loop is off only at 0; owner 2026-11-20). Precedence with a gap open: the gap
+  deadline acts only when a frame arrives (it is tested in the inbound arms, not by a timer), and every frame that
+  reaches it has refreshed liveness. So a peer that keeps sending frames that do not advance NextNumIn ends at the gap
+  deadline (2×HeartBtInt) with its Logout, then R-2, whatever T; a silent peer ends by R-1 at 2T. Both are tested.
 - **FR-011**: The threshold MUST be validated where it is accepted (C++ `open()` and the TOML loader) for the edge
   values of the Edge Cases, with the rule the plan decides. The C ABI gains no setter (unchanged scope).
 - **FR-012**: The comment on `session_test_request_unanswered` in `error.hpp`, the QuickFIX parity-table row, and any
@@ -374,9 +400,11 @@ no comment claiming behaviour the code does not have.
 - **SC-001**: For every ending class, a peer observes EOF within its bound: at once (within one scheduling round of the
   session's executor, measured as no further mock-clock advance) for R-1, the pre-Active refusals, the acceptor first
   frame and the detached-coroutine failures; at the earlier of the peer's Logout and `logout_disconnect_timeout_ms` for
-  R-2. Zero ending sites in the census are left without a cell or a named exemption.
+  R-2. Zero ending sites in the census are left without a cell or a named exemption (an exemption names its
+  disclosed limitation, as the blocked-write ending of contract C-11 does).
 - **SC-002**: A silent peer is disconnected at 2T of silence (2.4×HeartBtInt by default) and not before, on both roles,
-  in both the default and the set-threshold cells.
+  in both the default and the set-threshold cells. "At 2T" is within one clock tick: the give-up runs strictly after
+  the 2T instant (R-3's "after 2T"; research D6).
 - **SC-003**: With the knob off, a peer that answers each TestRequest with a matching TestReqID is never disconnected by
   the liveness loop in a run of at least 10 TestRequest cycles with its numbers ahead.
 - **SC-004**: Every pre-session reject reason produces exactly one log record per connection below the rate bound, and a
@@ -407,8 +435,10 @@ no comment claiming behaviour the code does not have.
 | Unanswered TestRequest | Logout with Text, then close (FIX-SL §4.5.5) | close, no Logout | close, no Logout | close, no Logout |
 | After a too-low Logout | wait for the peer's Logout, bounded by `logout_disconnect_timeout_ms` | close at once | close at once | wait, bounded by LogoutTimeout |
 | Answering Heartbeat's TestReqID | matching or absent answers; a different one ends the session | not compared | not compared | not compared |
-| Peer's Logout reply to fixpp's ending Logout | resets under `reset_on_logout`, then close | reset, close | reset, close | reset, close |
-| Other inbound frames during that wait | processed as in Active | processed | processed | processed; outbound replies dropped |
+| Peer's Logout reply to fixpp's ending Logout, after Active | ends the wait whatever its MsgSeqNum; resets under `reset_on_logout`, then close; NextNumIn advances only when in sequence | reset, close (`verify(logout, false, false)`; NextNumIn advanced) | reset, close (advanced only when in sequence) | reset, close |
+| The same reply before Active (a refused Logon) | ends the wait; no reset | not reached (close at once) | not reached | not reached |
+| Other inbound frames during that wait, after Active | processed as in Active; a second ending condition is absorbed | processed | processed | processed; outbound replies dropped |
+| Other inbound frames during that wait, before Active | drained | not reached | not reached | not reached |
 | Bounded wait after fixpp's Logout counts from | the Logout's write | the last send (sliding) | the last send (sliding) | the Logout's write |
 | TestRequest timing | T (default 1.2×HeartBtInt), give up at 2T, one knob | 1.2× / 2.4×, fixed | 1.5× / 2.4×, two multipliers | 1.2× / 2.4×, fixed |
 | Out-of-sequence Heartbeat, validation off | answers with a matching 112 | no such switch | answers (any Heartbeat) | no such switch |
