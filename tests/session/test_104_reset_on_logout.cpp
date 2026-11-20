@@ -2102,6 +2102,14 @@ std::string describe(DeliveryEnding const& e) {
     return "?";
 }
 
+// The throwing reset_to never reaches the HookedStore behind it, so a reset() or reset_to that
+// store logged is a later call: the unit's reset retried, or a teardown reset.
+void expect_no_reset_call_after_the_throw(Rol104& r) {
+    EXPECT_TRUE(r.log().calls.empty())
+        << "a reset call after the throw: reset() " << r.log().reset_calls << ", reset_to "
+        << r.log().reset_to_calls;
+}
+
 void expect_unit_left_no_flag(Rol104& r, session_role const role, DeliveryEnding const& ending,
                               bool const in_flight) {
     EXPECT_TRUE(ending.ended) << "the frame's delivery did not end";
@@ -2110,6 +2118,7 @@ void expect_unit_left_no_flag(Rol104& r, session_role const role, DeliveryEnding
     r.spawn_close(close_mode::terminal);
     EXPECT_TRUE(r.close_returned_within(kReleaseBudget)) << "close() did not return";
     EXPECT_FALSE(r.close_reset_wait_expired()) << "close_reset_wait_expired was emitted";
+    expect_no_reset_call_after_the_throw(r);
     std::cout << "[ ENDING   ] " << rg::role_name(role) << ": the delivery " << describe(ending)
               << "\n";
 }
@@ -2240,6 +2249,7 @@ TEST(ResetOnLogout104, ThrowingResetTo_ReceiptUnit_ArmL_Logged) {
         EXPECT_EQ(r.ctl.reset_to_throws, 1) << "the reset unit's reset_to did not throw once";
         EXPECT_FALSE(in_flight) << "reset_unit_in_flight_ is set after the unit's reset_to threw";
         EXPECT_TRUE(r.close_run.done) << "close() did not return";
+        expect_no_reset_call_after_the_throw(r);
         std::cout << "[ ENDING   ] " << rg::role_name(role) << ": the delivery " << describe(ending)
                   << "\n";
         expect_dispatch_aborted(ending);
@@ -2294,6 +2304,7 @@ TEST(ResetOnLogout104, ThrowingResetTo_ReceiptUnit_ArmB_ImmediateAck_Logged) {
         EXPECT_EQ(r.ctl.reset_to_throws, 1) << "the reset unit's reset_to did not throw once";
         EXPECT_FALSE(in_flight) << "reset_unit_in_flight_ is set after the unit's reset_to threw";
         EXPECT_TRUE(close_returned) << "close() did not return";
+        expect_no_reset_call_after_the_throw(r);
         std::cout << "[ ENDING   ] " << rg::role_name(role) << ": the delivery " << describe(ending)
                   << "\n";
         expect_dispatch_aborted(ending);
@@ -2303,7 +2314,8 @@ TEST(ResetOnLogout104, ThrowingResetTo_ReceiptUnit_ArmB_ImmediateAck_Logged) {
 
 // Arm B by its bound: a too-high Logout whose gap a GapFill then fills, so the bound acknowledges
 // it and runs the unit. No frame carries that exception: the bound ends as it does on any
-// exception from its body, with the mark `none` and the session Disconnected.
+// exception from its body, with the mark `none` and the session Disconnected. Its normal end
+// leaves the same state, so this cell reads the record and not the exception's propagation.
 TEST(ResetOnLogout104, ThrowingResetTo_ReceiptUnit_ArmB_Bound_Logged) {
     for (auto const role : kRoles) {
         SCOPED_TRACE(rg::role_name(role));
@@ -2332,6 +2344,7 @@ TEST(ResetOnLogout104, ThrowingResetTo_ReceiptUnit_ArmB_Bound_Logged) {
         EXPECT_EQ(state, fsm_state::Disconnected) << rg::state_name(state);
         EXPECT_TRUE(close_returned) << "close() did not return";
         EXPECT_FALSE(r.close_reset_wait_expired()) << "close_reset_wait_expired was emitted";
+        expect_no_reset_call_after_the_throw(r);
         expect_one_threw_record(log);
     }
 }
