@@ -4,11 +4,13 @@
 
 **Input**: Feature specification from `/specs/105-transport-liveness/spec.md`, with owner rulings R-1 to R-4 and the
 clarifications Q1 and Q2, the 2026-11-20 rulings on SI-1 to SI-3, OQ-1 and L-105-b, the Gate A round 1 decisions
-D-a to D-c and the Gate A round 2 decisions D-d to D-f, and the Gate A round 3 decision D-g and its scope ruling (final), and the loop 2 round 1 scope ruling (no new decision). **Base**: the branch's merge-base with `origin/main` (the source was read at `52aeed4e`, PR #711's squash; the
-branch is rebased onto `310ff565`, #713, tests only; the session and engine code is unchanged). Decisions D1 to D12, risks and the ruled spec
+D-a to D-c and the Gate A round 2 decisions D-d to D-f, and the Gate A round 3 decision D-g and its scope ruling (final), the loop 2 round 1 scope ruling (no new decision), and the
+post-Gate-A plan re-run's clarification "Session 2026-11-21" ([seam] and [guard] cells; the base). **Base**: the branch's
+merge-base with `origin/main`; its `src/` and `include/` are identical to `52aeed4e` (PR #711's squash), where the
+source was read; the rebase onto #713 changed tests only (tasks.md T001 re-checks the identity). Decisions D1 to D12, risks and the ruled spec
 issues (OQ-3 closed by ruling D-e) are in [research.md](research.md); the state is
 [data-model.md](data-model.md); the observable rules are [contracts/transport-liveness-105.md](contracts/transport-liveness-105.md)
-(C-1 to C-11); validation is [quickstart.md](quickstart.md).
+(C-1 to C-12); validation is [quickstart.md](quickstart.md).
 
 ## Summary
 
@@ -79,12 +81,17 @@ operators for the bound's race, as `run_peer_logout_bound_` uses them); OpenSSL 
 **Storage**: unchanged. The receipt reset unit (104, `run_reset_unit_`) runs before any close (C-1.b).
 
 **Testing**:
-- GoogleTest. New cells in `tests/session/test_105_*.cpp` under ctest `session_105_tests` (label `105`); config
-  cells in `tests/config/test_load_negative_battery.cpp`; C-ABI cells in
-  `tests/capi/recovery_liveness_capi_witness_test.cpp`.
-- Engine cells on `engine_loopback_harness.hpp` / `plain_engine_rig.hpp`; the TLS arm on
-  `loopback_tls_session_harness.hpp`. The close is asserted at the peer (EOF / close_notify), every competing
-  timeout on the mock clock (research D10).
+- GoogleTest. New cells in `tests/session/test_105_*.cpp` under ctest `session_105_tests` (label `105`); the [seam]
+  and [guard] cells that name a symbol the base lacks in `tests/session/test_105_seams.cpp` under a second ctest,
+  `session_105_seam_tests` (labels `session`, `105` and `105_seam`), which base readings exclude (`-LE 105_seam`)
+  and never build (spec clarification "Session 2026-11-21"); config cells in `tests/config/test_load_negative_battery.cpp`;
+  C-ABI cells in `tests/capi/recovery_liveness_capi_witness_test.cpp`.
+- Plaintext Engine cells on `plain_engine_rig.hpp` (mock engine clock, raw peer socket). TLS Engine cells on
+  `engine_loopback_harness.hpp` (`EngineLoopbackHarness`: a real `make_asio_tls_transport_factory` under
+  `mtls_ca`, the peer a `LoopbackTlsFixture::make_client` mTLS client as `engine_firstframe_test.cpp`'s
+  `probe_post_handshake` drives it), acceptor role, with a `mock_clock` passed in `EngineConfig::clock`. Direct-Session
+  TLS cells on `loopback_tls_session_harness.hpp` (an initiator Session fed through `on_inbound_frame`, no pump). The
+  close is asserted at the peer (EOF / close_notify), every competing timeout on the mock clock (research D10).
 - Re-pins listed in research D10 and quickstart section 4.
 
 **Target Platform**: Linux (clang, gcc, libc++), Windows MSVC — the Tier 1 to 3 matrices.
@@ -127,7 +134,7 @@ harness for the latch test (research D10, contract C-12).
 - `src/session/session_engine_access.hpp` (`set_establishment_deadline`), `include/fixpp/session/session.hpp`, `include/fixpp/session/reconnect_fsm.hpp`,
   `src/session/reconnect_fsm.cpp`, the installed `include/fixpp/session/detail/log_rate_gate.hpp` for the hoisted
   rate gate, `src/session/read_first_frame_bounded.hpp`
-  (or its sibling) for the saturating default-threshold helper, `src/config/scalar_mappers.cpp`,
+  (or its sibling) for the saturating default-threshold helper and the TestReqID window function (data-model E-4), `src/config/scalar_mappers.cpp`,
   `src/log/format_registry.cpp`, `include/fixpp/core/error.hpp` (comment), `include/fixpp/session/session_config.hpp`
   (comment), `include/fix/c_api/session.h` and `include/fix/c_api/version.h` (1.18).
 
@@ -149,9 +156,30 @@ harness for the latch test (research D10, contract C-12).
 | XIV §2 | No pluggable interface gains a method (`Transport::close_async` exists) | PASS |
 | XV §1, §5, §9 | No per-message allocation, no sync logging on the hot path, no `std::mutex` | PASS |
 | XVI §3, §4 | `/clarify` done; `/analyze` mandatory (session FSM, ABI, threading, security) | PASS (scheduled) |
-| XVII §1, §2, §7, §8 | Gate A triggered (public C++ API, C ABI, concurrency, session FSM, security); Gate B; local build; `/speckit-verify` | PASS (scheduled); see post-design for the tasks.md deviation |
+| XVII §1, §2, §7, §8 | Gate A triggered (public C++ API, C ABI, concurrency, session FSM, security); Gate B; local build; `/speckit-verify` | PASS (scheduled); see post-design for the tasks.md regeneration |
 
-### Post-design (against research, data-model and contract; re-run after the Gate A loop 2 round 1 pass)
+### Post-design (against research, data-model, contract and the regenerated tasks.md; re-run at the post-Gate-A plan re-run, 2026-11-21)
+
+- **VII §3, §8.** TDD: every behaviour cell is written and read RED before its mechanism (tasks.md: each story's RED
+  tasks precede its implementation tasks). The [seam] cells are the stated exception of clarification "Session
+  2026-11-21": their seam does not exist on the base, so they are written with the mechanism and read RED at the
+  implementation head under a mutant that removes exactly the mechanism the cell tests; where a [seam] cell twins a
+  peer-visible RED cell, that cell is read on the base first. The mutant reading is the failing test that precedes the
+  mechanism's acceptance, so §3 holds. §8: cells are selected by label (`-L 105`, `-L 105 -LE 105_seam` on the base),
+  never `-R`. The seam entry exists so that a base reading stays buildable, not for isolation; grouping its cells in one
+  binary is admissible because each seam is a hook its own cell arms and disarms, not a replacement of the global
+  allocator (the isolation class §8 keeps standalone). A seam that turns out to be process-global state is reset by
+  every cell that arms it, as 093's `file_store.cpp` fault-seam counters are, or its cell goes to a standalone entry.
+  **PASS.**
+- **VII §7.** The wire parser (the Framer, `scan_frame_header`, the offset table) is unchanged. The TestReqID(112)
+  classification is a new reading of a peer-supplied field's bytes (`TR` plus canonical decimal); by 027's precedent
+  (a new field case in `scan_frame_header` met §7 by a seed extension of
+  `tests/fuzz/fuzz_session_recovery_admin_parse.cpp`, not a new harness), it is treated as parser-touching, and that
+  harness's seeds gain Heartbeats carrying 112 forms (tasks.md T085). **PASS, conditional on T085's reach read**: the
+  classification runs only while a TestRequest is pending, which random bytes fed to `on_inbound_frame` do not create
+  without a clock advance, so if the harness cannot reach `classify_test_req_id_`, a reachable entry point (for example
+  the `TR`-plus-canonical-decimal parse as a free `detail` function the harness calls) is a design addition for the
+  orchestrator, not taken here.
 
 - **VIII §2, §3, §5 / XV §1.** Per inbound frame: two tests (the pump's latch, the ending-phase test in
   `on_inbound_active_`); per write, one out-parameter; per Heartbeat with a TestRequest pending, the 112
@@ -162,7 +190,7 @@ harness for the latch test (research D10, contract C-12).
   ("a recorded statement that none does") is withdrawn: Article VIII §3 admits no perf change without a benchmark in
   the same PR. **PASS (planned; the runs are evidence at the PR head).**
 - **IX §1, §2, §4.** Every new branch has a planned cell (research D3, D5, D6, D10; quickstart section 3), each marked
-  RED-on-base or guard-with-mutant: R-1's seven Logout-failure classes (contract C-3.2), each row W-1 to W-15 of the
+  RED on the base, [guard] with its mutant, or [seam] with its mutant (clarification "Session 2026-11-21"): R-1's seven Logout-failure classes (contract C-3.2), each row W-1 to W-15 of the
   overlay, each row of E-3 including the write limit's shapes where they are reachable (the Logout itself blocked,
   for R-1, R-2 before and after Active and a reply; the Logout queued at the write gate, for R-1, R-2 after Active
   and a reply; the queued shape before Active is unreachable on an Engine session, research D10) and its TLS arm,
@@ -173,7 +201,7 @@ harness for the latch test (research D10, contract C-12).
   Heartbeat instant, no spin, counted by a `Clock` decorator under a bounded drive so its RED arm terminates), the TestReqID window's boundary cells, the no-application cell, the 112 outcomes per site, the no-clock and zero-timeout endings,
   the listener catch's two arms (the `system_error` arm by a port in use, the generic arm by a listener-construction
   seam, since no configuration reaches it; research D8) and the saturating helpers. The verdict is a plan, not a result: it holds once those
-  cells exist at the implementation head, and the regenerated tasks.md carries them. ASan, UBSan and TSan run the
+  cells exist at the implementation head; the regenerated tasks.md carries them (its traceability tables). ASan, UBSan and TSan run the
   105 label (the latch, the close frame and the bound are strand-confined; TSan is the proof, R1). clang-tidy,
   clang-format, cppcheck and IWYU on the touched files. **PASS (planned).**
 - **X §1, §4, §6, §7.** C-ABI 1.18 BREAKING with in-place amendments and a `version.h` history entry (the write limit
@@ -199,6 +227,10 @@ harness for the latch test (research D10, contract C-12).
   nothing: they close the transport, so every suspended frame resumes and runs to its end (D2 item 11). A generation check (`conn_gen_`)
   keeps a stale close off a new connection. The bound's wake sources and live predicate by phase are stated in full
   (E-3). **PASS.**
+- **XI §6.** The two new coroutines (the close frame and the ending bound) are detached `co_spawn` frames, which HALO
+  cannot elide, as the precedent `run_peer_logout_bound_`'s is; each is spawned only at an ending, a bounded number of
+  times per connection (data-model E-2 I-5, E-3), never per message, and an allocation failure at either spawn fails
+  closed (ruling D-g). No per-awaiter frame is added on the per-frame path. **PASS.**
 - **XI §3.** No new mutex; the latch, the ending's state and the TestReqID floor are plain members written on the
   session strand. **PASS.**
 - **XII.** The TLS close stays `close_async` (orderly; C-8), except the allocation-failure fallback (C-8.6), including under a graceful `close()` during the wait
@@ -221,10 +253,10 @@ harness for the latch test (research D10, contract C-12).
 - **XIV.** No pluggable interface gains a method (`Transport::close_async` exists). The installed C++ surface gains
   one implementation header, `include/fixpp/session/detail/log_rate_gate.hpp`, with `detail/replay_gate.hpp`'s
   status, accounted in contract C-9 and B-105-7 (round 3, Codex #6). **PASS.**
-- **XVII §1, §8.** **Deviation, remedied.** `tasks.md` was generated before Gate A, against `.specify/pipeline.md`
-  step 4 ("blockers resolved BEFORE /tasks", `[const §XVII.1]`). It is non-operative review input: it is regenerated
-  from the corrected bundle after Gate A converges, without carrying its task numbers forward. Gate B and
-  `/speckit-verify` before labels are scheduled. **PASS after regeneration.**
+- **XVII §1, §8.** Gate A converged at loop 2 round 2 (P1 0, P2 0). The pre-Gate-A `tasks.md` (generated before Gate A,
+  against `.specify/pipeline.md` step 4 and `[const §XVII.1]`) was replaced by one regenerated from the converged
+  bundle, with no task number carried forward. Gate B, `/speckit-verify` (tasks.md T144) and the completeness audit
+  (T147) are scheduled before labels. **PASS.**
 
 No violation remains open; no owner question is open (OQ-3 closed by ruling D-e); Complexity Tracking is empty.
 
@@ -240,8 +272,8 @@ specs/105-transport-liveness/
 ├── data-model.md                        # E-1–E-9
 ├── quickstart.md                        # censuses, cells, mutants, lanes
 ├── contracts/
-│   └── transport-liveness-105.md        # C-1–C-11
-├── checklists/
+│   └── transport-liveness-105.md        # C-1–C-12
+├── checklists/requirements.md
 └── tasks.md                             # regenerated from the converged bundle after Gate A loop 2 round 2
 ```
 
@@ -264,27 +296,44 @@ src/
 └── session/
     ├── session.cpp                      # D1–D7 (functions listed under Scale/Scope)
     ├── engine.cpp                       # pump, accept loop, connect loop, records
-    ├── session_engine_access.hpp        # take_connection_end, ended
+    ├── session_engine_access.hpp        # take_connection_end, ended, set_establishment_deadline
     ├── reconnect_fsm.cpp                # ctor, drive_logout removed
-    └── read_first_frame_bounded.hpp     # default-threshold helper beside deadline_after (or a sibling detail header)
+    └── read_first_frame_bounded.hpp     # default-threshold helper and TestReqID window function beside deadline_after
+                                         #   (or a sibling detail header)
 tests/
-├── session/test_105_*.cpp, test_105_support.hpp   # new (quickstart section 3; test_105_write_limit.cpp included)
-├── session/CMakeLists.txt               # session_105_tests, label 105
+├── session/test_105_{connection_close,logout_wait,write_limit,liveness_timing,heartbeat_knob_off,
+│            presession_log,tls_close}.cpp   # new: ctest session_105_tests (quickstart section 3)
+├── session/test_105_seams.cpp           # new: [seam] and [guard] cells, ctest session_105_seam_tests
+├── session/test_105_support.hpp         # new: observers, bounded drive, counting Clock, held-write and
+│                                        #   deferred-completion transports, held/failing stores
+├── session/CMakeLists.txt               # session_105_tests (labels session, 105); session_105_seam_tests (+ 105_seam)
+├── session/engine_loopback_harness.hpp  # the Engine-over-TLS rig; touched only if a cell needs a hook it lacks
+├── support/session_test_access.hpp      # reads of the new members (phase, cut, counters) for reach proofs
+├── support/engine_test_access.hpp       # arming the listener-construction seam, if engine-side
 ├── session/{test_537_gap_deadline,inbound_frame_dispositions_test,test_cancelled_outbound_store_engine,
 │            test_538_resend_answer_store_failure_engine,engine_establishment_timeout_test,
 │            heartbeat_testrequest_test,test_heartbeat_cadence_8cell,test_logout_timeout,...}.cpp   # re-pins
 ├── session/<ReconnectFsm constructors>   # constructor call sites (D7 recipe)
 ├── capi/recovery_liveness_capi_witness_test.cpp   # 1.18 observers; Capi537Witness re-pin
+├── capi/version_test.cpp (+ every minor pin research D9's grep finds)   # MINOR 18
 ├── config/test_load_negative_battery.cpp          # T ≤ 0
-└── fuzz/fuzz_session_recovery_admin_parse.cpp     # comment only
+├── config/test_quickfix_parity_table.cpp          # the TestRequest timing row (FR-012)
+└── fuzz/fuzz_session_recovery_admin_parse.cpp     # the stale drive_logout comment; 112 seeds ([const §VII.7])
 ci/red-arms/{batch11-labels.txt,batch18-lost-advance.sh}   # names of retired or renamed cells
 bindings/python/                          # C-ABI minor expectations (D9 recipe)
+tools/capi_freeze.sha256                  # regenerated by its generator (tasks.md T012 finds it)
 bench/session/engine_send_bench.cpp       # the new pump case (D10, ruling D-f)
 spec/behaviors-and-limitations.md (+ -closed.md)   # D11 B&L plan
+spec/feature-catalogue.md, spec/coverage-index.md  # close-out (tasks.md T146)
 brain/{components/session.md,components/session-liveness-and-reconnect.md,components/engine-accept-path.md,
        failure-classes.md,log.md}         # D11, D12
 .specify/536-537-538-recovery-liveness.md          # erratum naming 105 (living design note)
 ```
+
+The production test seams (the allocation-failure seams at the close frame's and the bound's spawns, the bound's
+in-body race seam, the listener-construction seam) sit in `src/session/session.cpp` and `src/session/engine.cpp` in an
+existing seam idiom (093's unconditionally compiled fault seams in `src/session/file_store.cpp`, or 035's
+`FIXPP_TEST_HOOKS` probe), chosen at tasks.md T027.
 
 **Structure Decision**: single library project; the existing `src/`, `include/` and `tests/` layout. The list above
 is the expected set; the censuses of research D1, D2, D7, D9, D10 and D11 are what decide it at the implementation
@@ -293,7 +342,8 @@ head.
 ## Phases (for /speckit-tasks)
 
 1. **Censuses** (quickstart section 1) and the tasks.md ending-site table. No code.
-2. **RED cells** on the base for every behaviour (quickstart section 2), per user story.
+2. **RED cells** on the base for every behaviour (quickstart section 2), per user story; [seam] and [guard] cells read
+   under their mutants at the implementation head (clarification "Session 2026-11-21").
 3. **US1 core (P1):** D1 (latch, pump, first frame, roots, `close_transport_`, joins), D4 (`expire()`'s event test), D3 (R-1).
 4. **US1 R-2 (P1):** D2.
 5. **US2 (P2):** D5. **US3 (P2):** D6 with the config validation.
@@ -375,6 +425,11 @@ Each is a fixpp issue, labelled at creation, filed before Gate B and named where
   completing between the close frame's spawn and its `close_async()` reported transmitted and would arm a wait with
   no bound running. It has its own guard cell and mutant, and is for the next review to judge.
 - Loop 2 round 2 CONVERGED 2026-11-21: Codex P1=0 P2=0 P3=3; Opus post-judging P1=0 P2=0 P3=6; P3s applied post-convergence. Reviews: codex_105-transport-liveness_gate_a_5_review.md, opus_105-transport-liveness_gate_a_5_adversarial_review.md.
+- Post-Gate-A `/speckit-plan` re-run 2026-11-21 (consistency and amendment pass, no design change): the orchestrator's
+  [seam]/[guard] decision and the base wording (spec clarification "Session 2026-11-21"; FR-017; quickstart section 2;
+  tasks.md Execution rules), the Engine-over-TLS rig named (research D10), the Constitution Check re-derived against
+  the regenerated tasks.md (VII §3, §7, §8, XI §6 added), Project Structure completed, and tasks.md's contract-clause
+  traceability added.
 
 ### Round 1 — disagreements
 
@@ -405,8 +460,9 @@ Findings the Opus review marked "Disagree", or whose counter-proposal it rejecte
 
 ### Round 1 — not applied in this pass
 
-- **Codex #13** (tasks.md references T107 and T109) and **T010's evidence** for the Article X §7 predicate: tasks.md
-  is regenerated after convergence; the recipe is in research D9.
+- **Codex #13** (the pre-Gate-A tasks.md's references to its own T107 and T109) and **its T010's evidence** for the
+  Article X §7 predicate: tasks.md is regenerated after convergence, so those numbers name nothing now; the recipe is in
+  research D9 and the reading is the regenerated tasks.md's T134.
 - **Codex #14** (the requirements checklist certifies disproved claims): `checklists/requirements.md` is outside
   this pass's edit set; its "unambiguous" and "RED-first cell per FR" items are to be re-opened until the
   regenerated tasks agree.

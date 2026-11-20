@@ -1,7 +1,8 @@
 # Research: 105 transport and liveness (B27)
 
 **Feature**: [spec.md](spec.md) · **Plan**: [plan.md](plan.md) · **Base**: the branch's merge-base with `origin/main`
-(the source was read at `52aeed4e`; the rebase onto `310ff565`, #713, changed tests only).
+(its `src/` and `include/` are identical to `52aeed4e`, where the source was read; the rebase onto #713 changed tests
+only; tasks.md T001 re-checks the identity).
 
 Phase 0 of `/speckit-plan`. Every behaviour claim below was re-read in source at the base and is cited by
 symbol. The re-derive in the parent repo (`research/findings/b27-rederive-2026-11-20.md`) and the SecondBrain
@@ -705,7 +706,7 @@ shipped fixture and nothing requires it.
   (an implementation header with the status of `detail/replay_gate.hpp`, listed in contract C-9 and B-105-7; Gate A
   round 3, Codex #6), `include/fixpp/session/detail/log_rate_gate.hpp` (namespace `fixpp::session::detail`, the same fields, so the
   layout does not change), `Session` keeps the name by a member alias, and the admit logic becomes an inline
-  `admit(gate, now, window, occurrences)` there. `Session::admit_log_record_` forwards to it with its own clock and window (`max(HeartBtInt, 1 s)`), so the
+  `admit_log_record(gate, now, window, occurrences)` there (data-model E-7). `Session::admit_log_record_` forwards to it with its own clock and window (`max(HeartBtInt, 1 s)`), so the
   garble and reply-ceiling records keep their behaviour. The accept loop holds one gate as a local of
   `run_accept_loop`, which runs for the entry's accept lifetime; its clock is `engine_cfg.clock` and its window
   is `max(entry.config.heartbeat_interval or the default, 1 s)`. No member is added to `SessionEntry`
@@ -765,19 +766,45 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
 - **One ctest entry `session_105_tests`** (label `105`) over new files in `tests/session/`:
   `test_105_connection_close.cpp` (D1, D4; per root and per refusal), `test_105_logout_wait.cpp` (D2),
   `test_105_liveness_timing.cpp` (D3, D6), `test_105_heartbeat_knob_off.cpp` (D5), `test_105_presession_log.cpp`
-  (D8), `test_105_write_limit.cpp` (D2 item 11, contract C-2.7 and C-8.5), `test_105_tls_close.cpp` (FR-002 on
-  `loopback_tls_session_harness.hpp`), and `test_105_support.hpp`.
+  (D8), `test_105_write_limit.cpp` (D2 item 11, contract C-2.7 and C-8.5), `test_105_tls_close.cpp` (FR-002; the
+  rigs below), and `test_105_support.hpp`. A second ctest entry, `session_105_seam_tests` (labels `session`, `105`
+  and `105_seam`), holds `test_105_seams.cpp`: every cell, or reach-proof twin, that names a symbol 105 adds (the
+  allocation-failure seams, the bound's in-body race seam, the listener-construction seam, a test-access read of a new
+  member, the new `constexpr` helpers), so that a base reading, which builds only `session_105_tests` and runs
+  `-L 105 -LE 105_seam`, never meets a symbol the base lacks (spec clarification "Session 2026-11-21").
   Config cells extend `tests/config/test_load_negative_battery.cpp`; C-ABI cells extend
   `tests/capi/recovery_liveness_capi_witness_test.cpp`. `ReconnectFsm` removals are proven by the build.
-- **RED first on the base, or a guard with its mutant** (FR-017; Gate A round 2, N-3). A behaviour cell is written,
-  run on the branch's merge-base with `origin/main` and shown RED for its stated reason before the fix. A regression guard (a rule the base already
+- **RED first on the base, or a guard or seam cell with its mutant** (FR-017; Gate A round 2, N-3; spec clarification
+  "Session 2026-11-21"). A behaviour cell is written, run on the base (the branch's merge-base with `origin/main`; its
+  `src/` and `include/` identical to `52aeed4e`) and shown RED for its stated reason before the fix. A [seam] cell,
+  which names a symbol the base lacks, is read RED at the implementation head under the mutant that removes exactly its
+  mechanism, and that reading stands in for the base reading; a `constexpr` helper cell is a [guard] in the same file. A regression guard (a rule the base already
   keeps: B-093-4's establishment-deadline close, B-537-3's knob-on rule, HeartBtInt 0, the closes `close()` and the
   drain own) is GREEN on the base by design; its RED is its named mutant. Quickstart section 3 marks every cell one
   or the other. A cell whose oracle the base meets for another reason (the session already `Disconnected`) carries a
   positive control at the instant it tests: `fixpp_session_is_established` or `fsm_state() == Active` true, and for
   a timing cell the TestRequest on the wire.
-- **The close observable is the peer's.** Engine cells use `engine_loopback_harness.hpp` / `plain_engine_rig.hpp`
-  and assert the peer's read ends (EOF, or the TLS close_notify on the TLS arm), never a session flag.
+- **The close observable is the peer's.** Cells assert the peer's read ends (EOF, or the TLS close_notify on the TLS
+  arm), never a session flag. The rigs, read in source:
+  - *Plaintext Engine:* `tests/session/plain_engine_rig.hpp` (093): one plaintext Engine session over loopback TCP, a raw
+    peer socket, a `mock_clock` engine clock.
+  - *TLS Engine (the pump's TLS cells):* `tests/session/engine_loopback_harness.hpp`, `EngineLoopbackHarness::build`:
+    a real `make_asio_tls_transport_factory` under `mtls_ca` over `LoopbackTlsFixture`'s certificates; the peer is a
+    `LoopbackTlsFixture::make_client` mTLS client that connects to `server_endpoint()` and runs `async_handshake`, as
+    `engine_firstframe_test.cpp`'s `probe_post_handshake` does. `build()` installs `system_clock_source` only when
+    `EngineConfig::clock` is null, so the cells pass a `mock_clock`; `configure_acceptor` edits the acceptor's
+    `SessionConfig` only, and the registered initiator's endpoint is a placeholder, so the TLS Engine cells run in the
+    acceptor role (the close path under test is the transport's, which does not depend on the role). The harness
+    returns null and the cell skips when `FIXPP_TLS_FIXTURE_DIR` is not defined, so the ctest entry defines it (the
+    `add_session_104_bucket` shape does) and a reading with a skipped TLS cell is not a reading. The peer tells an
+    orderly close from an abortive one by its read's ending: `transport_read_eof` means close_notify was received
+    (`tests/transport/test_close_truncated_mapping.cpp` pins it apart from `transport_read_truncated`); any other
+    ending is abortive. A cell pins `transport_read_truncated` itself only where a reading has shown it, since behind a
+    peer that stopped reading the read can also end in a reset.
+    `test_compid_binding_mtls_fail_closed.cpp` is not such a rig (a mock-clock policy test with no transport).
+  - *TLS direct Session:* `tests/session/loopback_tls_session_harness.hpp`, an initiator Session over a real TLS
+    transport whose frames the cell delivers through `on_inbound_frame`, with no pump; only the classes that close at a
+    root's exit run there.
 - **Bounds from the competing timeout.** Every competing timeout (the establishment deadline, the liveness
   instants, `logout_disconnect_timeout_ms`) runs on the mock clock. A cell for an "at once" class (SC-001) holds
   the mock clock still and pumps the executor until the peer's read ends or a wall cap passes. Five timers run on
@@ -940,7 +967,8 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
   and the close frame), including a close frame spawned by the write limit during `close()`'s wait for the bound.
   The precondition is B-103-13's (`close()` before the Session is destroyed); `~Session` asserts both counters are
   zero, and no cell destroys a Session with a frame running.
-- **Both roles** for every engine cell, by `INSTANTIATE_TEST_SUITE_P` over `session_role`, as 537's cells do.
+- **Both roles** for every engine cell, by `INSTANTIATE_TEST_SUITE_P` over `session_role`, as 537's cells do, except
+  the TLS Engine cells, which run in the acceptor role on `EngineLoopbackHarness` (above).
 - **The cell recipe for moved timings:** `grep -rlnE 'TestRequest|35=1' tests/session tests/capi tests/conformance tests/interop`,
   read for a mock-clock advance across HeartBtInt; the whole `session` and `capi` suites are run, since a missed
   one fails there.

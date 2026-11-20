@@ -8,7 +8,8 @@ description: "Task list for 105-transport-liveness"
 spec.md (US1 to US5, FR-001 to FR-019, SC-001 to SC-006, rulings R-1 to R-4, Q1, Q2, D-a to D-g), plan.md (Summary,
 "Phases (for /speckit-tasks)", Project Structure, T-DOC-1, "Follow-ups to file before Gate B"), research.md (F-1 to
 F-16, D1 to D12, R1 to R4), data-model.md (E-1 to E-9), contracts/transport-liveness-105.md (C-1 to C-12),
-quickstart.md (sections 1 to 6). This file replaces the pre-Gate-A tasks.md entirely; no earlier task number is carried
+quickstart.md (sections 1 to 6), and the post-Gate-A `/speckit-plan` re-run (spec clarification "Session 2026-11-21":
+[seam] and [guard] cells, the base). This file replaces the pre-Gate-A tasks.md entirely; no earlier task number is carried
 forward. Where this file and the bundle differ, the bundle wins and the difference goes to the orchestrator.
 
 **Tests**: required (`[const §VII.3]`, FR-017). In every story phase the RED cells come first as their own tasks, then the
@@ -27,14 +28,16 @@ marked **(orchestrator)** is run or requested by the orchestrator; every other t
 ## Execution rules (apply to every task)
 
 - **Trees.** `$T` = the main checkout `PARENT/research/G19-fix-fpml-iso20022/library`, branch `105-transport-liveness`.
-  `$B` = `/mnt/wsl/fixppbuild/fixpp-105-base`, a detached worktree at `52aeed4e` (RED readings and bench bases only).
+  `$B` = `/mnt/wsl/fixppbuild/fixpp-105-base`, a detached worktree at the base, `git -C $T merge-base HEAD origin/main`
+  (RED readings and bench bases only).
   `$M` = `/mnt/wsl/fixppbuild/fixpp-105-mutants`, detached (mutants, census scratch edits, seeded known positives only).
   Never `git checkout`/`git switch` in `$T`, never `git stash`, never `--amend`, never `git commit -a`.
   `fixpp-parallel` and the MSVC sandbox are never `$B` or `$M`.
-- **The base.** "RED on the base 52aeed4e" means read on `$B`. The spec's base is the branch's merge-base with
-  `origin/main`; the two are equivalent for every cell only while
-  `git diff --stat 52aeed4e "$(git -C $T merge-base HEAD origin/main)" -- src include` prints nothing. T001 runs that
-  recipe and records its output; a non-empty output stops Phase 3 and goes to the orchestrator.
+- **The base.** "RED on the base" means read on `$B`, the branch's merge-base with `origin/main` (spec FR-017 and
+  clarification "Session 2026-11-21"). Its `src/` and `include/` must be identical to `52aeed4e`, where the design was
+  read: `git diff --stat 52aeed4e "$(git -C $T merge-base HEAD origin/main)" -- src include` prints nothing. T001 runs
+  that recipe and records its output; a non-empty output stops Phase 3 and goes to the orchestrator. No commit hash is
+  the base: a rebase moves the merge-base, and `$B` is then re-created at the new one and the recipe re-run.
 - **Builds.** One build or ctest process at a time on the machine, under `flock /tmp/fixpp-build.lock`; a long one
   detached (`setsid nohup … ; touch <marker>.done`) with one background waiter on the marker, never a foreground poll,
   never `pgrep -f`. `$B`, `$M` and every sanitizer, release, coverage and bench tree live on `/mnt/wsl/fixppbuild`
@@ -42,15 +45,20 @@ marked **(orchestrator)** is run or requested by the orchestrator; every other t
   `/mnt/c/temp/fixpp/.sandbox-lock` before any full ctest and before any MSVC run; a lock held by another owner means
   ask the owner.
 - **RED on the base.** Cells are committed in `$T` (commit `C`), overlaid on `$B` with
-  `git -C "$B" restore --source=C -- <cell files> tests/session/test_105_support.hpp tests/session/CMakeLists.txt`, built
-  and run there, and must fail by an assertion for the reason the task states. A compile failure, abort, crash, hang or
+  `git -C "$B" restore --source=C -- $(git -C $T ls-tree --name-only C tests/session/ | grep -E '^tests/session/test_105_') tests/session/CMakeLists.txt`
+  (every `test_105_*` file, `test_105_seams.cpp` and `test_105_support.hpp` included, since the CMakeLists registers them),
+  reconfigured (a reading counts only after the reconfigure returned 0: a failed one leaves the old registration), built
+  (target `session_105_tests` only) and run there with `ctest --preset <p> -L 105 -LE 105_seam --no-tests=error`, and must
+  fail by an assertion for the reason the task states. A TLS cell that skips (`FIXPP_TLS_FIXTURE_DIR` unset) is not a
+  reading: every reading records its skip count, and a non-zero one fails the step. A compile failure, abort, crash, hang or
   ctest timeout is not RED. A cell expected RED that reads GREEN on the base stops its task; the reading goes to the
   orchestrator.
 - **Cells that cannot compile on the base.** Every cell, or reach-proof twin, that names a symbol 105 adds (an
   allocation-failure seam, the bound's in-body race seam, the listener-construction seam, a new `constexpr` helper, a
   test-access read of a new member) lives in `tests/session/test_105_seams.cpp`, registered as its own ctest
-  `session_105_seam_tests` (label `105`, T003). A base reading overlays every `test_105_*` file and the CMakeLists, but builds
-  only the target `session_105_tests`, never the seam target, so a seam cell never breaks a later base reading. Its task
+  `session_105_seam_tests` (labels `105` and `105_seam`, T003). A base reading overlays every `test_105_*` file and the
+  CMakeLists, but builds only the target `session_105_tests` and excludes the seam entry by label (`-LE 105_seam`), so a
+  seam cell never breaks a later base reading and its unbuilt executable is never run there. Its task
   marks it **[seam]** or **[guard]** and names the mutant under which it must go RED at the implementation head; that RED
   stands in for the base reading and is recorded as such. A reach-proof twin repeats its RED cell's scenario and adds only
   the test-access read; the RED cell itself keeps its peer-visible oracle and stays in its story file. Any other cell that
@@ -68,7 +76,8 @@ marked **(orchestrator)** is run or requested by the orchestrator; every other t
 - **Liveness instants in US1 and US2 cells.** A US1 or US2 cell that reaches a liveness instant (the give-up, the
   Heartbeat instant) sets `test_request_threshold = HeartBtInt` and is driven by T004's wire reader, so its instants are
   the same on the base (which ignores the field), at the US1 head and at the final head, up to the 1 ns guard.
-- **Selection.** `ctest --preset <p> -L 105 --no-tests=error --output-on-failure`; one cell by the binary's
+- **Selection.** `ctest --preset <p> -L 105 --no-tests=error --output-on-failure` at the head (on `$B`, `-L 105 -LE 105_seam`);
+  one cell by the binary's
   `--gtest_filter='*<Suite>.<Cell>*'`. Every run records its reported test count; 0 fails the step. Never
   `ctest -R <cell>`.
 - **Mutant protocol.** Each mutant edits only `$M`'s copy of the file that holds the named mechanism
@@ -87,26 +96,36 @@ marked **(orchestrator)** is run or requested by the orchestrator; every other t
 ## Phase 1: Setup (no production code)
 
 - [ ] T001 Check `git -C $T rev-parse --abbrev-ref HEAD` is `105-transport-liveness`; run the base-equivalence recipe of
-  the Execution rules and record its output; `df -h /mnt/wsl/fixppbuild`, then create `$B` (at `52aeed4e`) and `$M` with
-  `git worktree add --detach`; run `codegraph sync` in `$T` and confirm `codegraph status --json` names `$T` with a nonzero
+  the Execution rules and record its output; `df -h /mnt/wsl/fixppbuild`, then create `$B` (at
+  `git -C $T merge-base HEAD origin/main`) and `$M` with `git worktree add --detach`; run `codegraph sync` in `$T` and confirm `codegraph status --json` names `$T` with a nonzero
   `fileCount`.
 - [ ] T002 Create `.specify/decisions/105-transport-liveness-evidence.md` with one section per census (T006 to T017), per
   RED reading, per mutant task and per bench run.
-- [ ] T003 Register ctest `session_105_tests` (label `105`) in `tests/session/CMakeLists.txt` after
+- [ ] T003 Register ctest `session_105_tests` (labels `session` and `105`) in `tests/session/CMakeLists.txt` after
   `add_session_104_bucket`'s shape, over `tests/session/test_105_connection_close.cpp`, `test_105_logout_wait.cpp`,
   `test_105_write_limit.cpp`, `test_105_liveness_timing.cpp`, `test_105_heartbeat_knob_off.cpp`,
-  `test_105_presession_log.cpp` and `test_105_tls_close.cpp` (research D10), and a second entry `session_105_seam_tests` (label `105`)
-  over `tests/session/test_105_seams.cpp` alone (Execution rules, "Cells that cannot compile on the base"). Find every list a new entry must join with
+  `test_105_presession_log.cpp` and `test_105_tls_close.cpp` (research D10), each created here as a compiling stub (an empty translation unit) so that configure succeeds in `$T` and
+  on `$B` before its cells exist, and a second entry `session_105_seam_tests` (labels `session`, `105` and `105_seam`)
+  over `tests/session/test_105_seams.cpp` alone, also created as a stub (Execution rules, "Cells that cannot compile on the base"). Find every list a new entry must join with
   `git grep -nE 'session_104_tests|add_session_104_bucket' -- ci tools .github tests` (known positive: the CMakeLists
-  entry); read `ci/pump-census.sh` against `ci/expected-pump-sites.txt` (the new files join its population, so they use
+  entry), and `git grep -nE '105_seam|expected-.*label|LABELS' -- ci tools .github` for any list that enumerates labels, which
+  the new `105_seam` label must join; read `ci/pump-census.sh` against `ci/expected-pump-sites.txt` (the new files join its population, so they use
   readiness-checked pumps, never `run_for(W); restart(); get()`); before placing `test_105_tls_close.cpp`, copy the
   registration form of an existing user of `loopback_tls_session_harness.hpp` (`git grep -l loopback_tls_session_harness
-  tests` and its CMake entry), including whether it is listed in `ci/expected-preset-conditional-tests.txt`. Also find the Engine-over-TLS rig (the TLS
-  mode of `engine_loopback_harness.hpp`, or the setup `test_compid_binding_mtls_fail_closed.cpp` uses): `loopback_tls_session_harness.hpp`
-  drives a direct initiator Session through `on_inbound_frame`, with no pump, so the pump-class TLS cells need the Engine
-  rig; if none exists, T024's Engine half goes to the orchestrator.
+  tests` and its CMake entry), including whether it is listed in `ci/expected-preset-conditional-tests.txt`. The Engine-over-TLS rig
+  is `tests/session/engine_loopback_harness.hpp` (`EngineLoopbackHarness::build`; research D10): a real
+  `make_asio_tls_transport_factory` under `mtls_ca`, the peer a `LoopbackTlsFixture::make_client` mTLS client as
+  `engine_firstframe_test.cpp`'s `probe_post_handshake` drives it, acceptor role (the registered initiator's endpoint is a
+  placeholder). `loopback_tls_session_harness.hpp` drives a direct initiator Session through `on_inbound_frame`, with no
+  pump, and serves only the direct-Session TLS cells. Both entries define `FIXPP_TLS_FIXTURE_DIR` and link `fixpp_tls` and
+  the OpenSSL and zlib libraries, as `add_session_104_bucket` does, so no TLS cell skips.
 - [ ] T004 Write `tests/session/test_105_support.hpp`, part 1: a peer-side observer of EOF and of close_notify on
-  `engine_loopback_harness.hpp`, `plain_engine_rig.hpp` and `loopback_tls_session_harness.hpp`; a frozen-clock "pump
+  `engine_loopback_harness.hpp` (a `mock_clock` passed in `EngineConfig::clock`, since `build()` installs
+  `system_clock_source` only for a null one; the acceptor's `SessionConfig` edited through `configure_acceptor`),
+  `plain_engine_rig.hpp` and `loopback_tls_session_harness.hpp`; on TLS the observer reads close_notify as
+  `transport_read_eof` (the ending `tests/transport/test_close_truncated_mapping.cpp` pins apart from
+  `transport_read_truncated`) and any other read ending as abortive, pinning `transport_read_truncated` only where a
+  reading has shown it; a frozen-clock "pump
   until the peer's read ends or the wall cap" helper whose cap fails as an assertion; a bounded drive (`run_one` × N per
   mock-clock step, never run-until-idle); a capturing log sink; a wire reader that advances the mock clock until a named
   MsgType is read, with a mock-clock cap above 2.4 × HeartBtInt plus the guard that fails as an assertion; an
@@ -224,30 +243,30 @@ and no local API call (SC-001).
   both roles, one cell per class-P silent ending after Active of the Ending-site table (TestReqID mismatch, BeginString
   guard, CompID guard, MsgSeqNum 0, D-3, a too-low frame whose Logout does not fit, a reply leaf whose number assignment
   fails; contract C-1 row 1), and `PumpSilentEnding_NoApplication_PeerSeesEofAtOnce` (`EngineConfig::application` null,
-  N-4): mock clock frozen; asserts the peer reads nothing more, then EOF; no event. RED on the base 52aeed4e before the
+  N-4): mock clock frozen; asserts the peer reads nothing more, then EOF; no event. RED on the base before the
   fix: the transport stays open past the wall cap.
 - [ ] T019 [US1] Same file, `PeerLogoutInActive_EofAfterReplyAndReset` (C-1 row 3, FR-005), both roles, `reset_on_logout`
   on: the peer reads the reply Logout, then EOF; the store reads (1, 1) before the EOF is observed; `onLogout` once. And
   `TooHighLogoutAcknowledged_EofAfterReset` (C-1 row 5; the too-high bound's route and the pump's at-once route): reply
-  Logout, reset unit complete, then EOF. RED on the base 52aeed4e before the fix: no EOF.
+  Logout, reset unit complete, then EOF. RED on the base before the fix: no EOF.
 - [ ] T020 [US1] Same file, the detached roots and application calls (C-1 rows 8, 9, 10; C-1.c), both roles where the
   root exists: `Liveness<ToAdminThrows|AssignFails|StoreFails>_EofAtOnce` (on a Heartbeat or TestRequest emission, with
   `test_request_threshold = HeartBtInt`, driven by the wire reader), `SendStoreFailure_EofAfterSendReturns`,
   `DirectInitiatorLogonEmitFails_<Open|DriveReconnect>_EofAfterTheCallReturns` and
   `DirectInitiator_EndingThenDriveReconnect_Reconnects` (the transport closed, the Session `Disconnected` and not closed,
   `drive_reconnect` installs a new transport that logs on). Each asserts peer EOF with the clock frozen once the root has
-  exited. RED on the base 52aeed4e before the fix: no EOF (the reconnect cell in its EOF half).
+  exited. RED on the base before the fix: no EOF (the reconnect cell in its EOF half).
 - [ ] T021 [US1] Same file, before Active and the acceptor's first frame (C-4, FR-006, FR-007), both roles where the
   refusal exists for the role: `PreActiveRefusal_<D-1|D-2|D-3|NotConnected|LogonSent|IdGuard|SeqNum0>_EofBeforeDeadlineNoTimeoutEvent`
   (a short `logon_timeout_ms`, clock frozen: EOF, no `session_event_establishment_timeout`, no
   `session not established within logon_timeout_ms={}` record), `AcceptorFirstFrameError_EofAtOnce`,
   `AcceptorFirstFrameRefused_EofAtOnceNoTimeoutEvent`, `AcceptorFirstFrameAcceptedLaterFrameRefused_EofAtOnce` (C-4.5), the
-  TLS handshake and first-frame deadlines set above the cap and named in each cell. RED on the base 52aeed4e before the fix:
+  TLS handshake and first-frame deadlines set above the cap and named in each cell. RED on the base before the fix:
   closed only at the deadline, with the event (the first frame's result discarded). Plus
   [guard: `expire()` closes without its event] `SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent` (C-4.3, B-093-4).
 - [ ] T022 [US1] Same file, one close per ending (C-1.a, class X): `OnLogoutCallsClose_OneClose` and
   `EngineStopRacesEndingClose_OneClose` (both on the TSan lane in T137; each asserts one EOF, no use after close, and the
-  close at once), RED on the base 52aeed4e before the fix in their EOF-timing half; [guard: the latch's `lifecycle` term
+  close at once), RED on the base before the fix in their EOF-timing half; [guard: the latch's `lifecycle` term
   deleted] `InsideClose_NoSecondClose`; [guard: the drain flag deleted] `InsideReconnectDrain_DrainKeepsItsBound`
   (B-103-9's bound).
 - [ ] T023 [P] [US1] `tests/session/test_105_liveness_timing.cpp`, R-1 (C-3), both roles, `test_request_threshold =
@@ -255,17 +274,16 @@ and no local API call (SC-001).
   `TestRequest unanswered, TestReqID <id>` spelled out in the cell, `<id>` the 112 of the TestRequest read, then EOF with
   the clock frozen and no Logout from the peer); `GiveUp_OneLogRecordWithSlot74` (capturing sink: one warn record of C-3.3's
   format with `error` the value of `error::session_test_request_unanswered`, written before the Logout's bytes reach the
-  peer); `GiveUp_<LogoutDoesNotFit|ToAdminThrows|AssignFails|StoreFailsPersistent|StoreFailsVolatile|WriteFails>_StillEof`
+  peer; no call returns slot 74, L-105-c); `GiveUp_<LogoutDoesNotFit|ToAdminThrows|AssignFails|StoreFailsPersistent|StoreFailsVolatile|WriteFails>_StillEof`
   (C-3.2: each asserts the record, the wire — no complete Logout, except `StoreFailsVolatile`, whose Logout is on the wire
-  — and EOF). RED on the base 52aeed4e before the fix: no Logout, no record, no EOF.
-- [ ] T024 [P] [US1] `tests/session/test_105_tls_close.cpp`, the real-TLS orderly close (C-8.1, FR-002). On the Engine-over-TLS
-  rig T003 found (an Engine session, so the pump consumes the latch):
+  — and EOF). RED on the base before the fix: no Logout, no record, no EOF.
+- [ ] T024 [P] [US1] `tests/session/test_105_tls_close.cpp`, the real-TLS orderly close (C-8.1, FR-002). On
+  `engine_loopback_harness.hpp`, acceptor role (an Engine session, so the pump consumes the latch; T003):
   `TlsClose105.<PumpSilentEnding|GiveUpWhilePumpParkedInRead|PreActiveSilentRefusal|PeerLogoutReply>_PeerReceivesCloseNotify`
   (the give-up cell is the B-348-1 case: a detached-root ending while the pump is parked in a TLS read). On
   `loopback_tls_session_harness.hpp` (a direct Session, no pump), only classes that close at a root's exit:
   `TlsClose105.DirectSession<GiveUp|SendStoreFailure>_PeerReceivesCloseNotify`. Each: the peer reads the frames the class
-  writes, then a close_notify, then EOF; the TLS handshake timeout and `tls_close_timeout` above the cap. RED on the base
-  52aeed4e before the fix: no close_notify and no EOF.
+  writes, then a close_notify, then EOF; the TLS handshake timeout and `tls_close_timeout` above the cap. RED on the base before the fix: no close_notify and no EOF.
 - [ ] T025 [US1] Commit the cells (`C1`); read T018 to T024 on `$B` (Execution rules "RED on the base"); record per cell its
   RED reason or guard status, and the test count.
 
@@ -368,40 +386,39 @@ does not complete closes the connection at the bound.
   `SendingTimeReject_PeerLogoutInSequence_EndsWait`, `OrigSendingTimeReject_PeerLogoutEndsWait` — the peer's Logout at the
   number a real peer uses; positive control: the connection open and `fixpp_session_is_established` true before it; then
   EOF after it, the receipt reset under `reset_on_logout` (store read before EOF), NextNumIn advanced only for the
-  in-sequence one, `onLogout` once. RED on the base 52aeed4e before the fix: the session is `Disconnected` at the Logout's
+  in-sequence one, `onLogout` once. RED on the base before the fix: the session is `Disconnected` at the Logout's
   write and the transport stays open.
 - [ ] T043 [US1] Same file, the bound (W-12, C-2.5, C-1.d): `Bound_EofAtExactlyTheBound` (open at the bound − 1 ms, EOF at the
   bound, `onLogout` then), `Bound_DoesNotSlideWithAnAnswerSent` (a Heartbeat answering the peer's TestRequest mid-wait),
   `OnLogoutFiresAtWaitEnd`; the liveness instants and the gap deadline set past the bound and named in each cell. RED on the
-  base 52aeed4e before the fix: no EOF at the bound.
+  base before the fix: no EOF at the bound.
 - [ ] T044 [US1] Same file, W-2 to W-7 on the SendingTime-Reject route (C-2.2), both roles:
   `AppMessageDuringWait_ReachesFromAppAndAdvances`, `TestRequestDuringWait_Answered`, `ResendRequestDuringWait_Answered`,
   `HeartbeatDuringWait_AnswersPendingTestRequest`, `TooHighDuringWait_NotDeliveredResendRequestSent`,
   `GapDeadlinePassedDuringWait_NoSecondLogout` — each asserts the wire reply (or its absence) and `fromApp` delivery, with the
-  session shown established at the frame. RED on the base 52aeed4e before the fix: the frames reach a `Disconnected` session
+  session shown established at the frame. RED on the base before the fix: the frames reach a `Disconnected` session
   and are drained.
 - [ ] T045 [US1] Same file, W-8 absorption: `Absorbed_<TooLow|SecondSendingTimeReject|TestReqIdMismatch|CompIdMismatch|MsgSeqNumZero>_ThenAppMessageAndPeerLogout`
   (no second Logout on the wire, the application message reaches `fromApp`, the peer's Logout resets under
   `reset_on_logout`, `onLogout` counted once at the wait's end, then EOF) and `TooLowRoute_PeerFramesBelowNextNumIn_Absorbed`.
-  RED on the base 52aeed4e before the fix.
+  RED on the base before the fix.
 - [ ] T046 [US1] Same file, W-9, one cell per disposition, each asserting EOF with the clock frozen, `onLogout` once and no
   second Logout: `StoreFailureDuringWait_EofAtOnce` (error, `Disconnected` written), `PersistFailureDuringWait_EofAtOnce`
   (error, none written), `TooHighDuringWait_ResendRequestAssignFails_EofAtOnce` (success, `Disconnected` written),
   `SendHeldInStoreAcrossTheEnding_StoreFails_EofAtOnce` (a non-pump root), and `DirectSession_StoreFailureDuringWait_ClosesAtNextSend`
-  (L-105-b's form). RED on the base 52aeed4e before the fix.
+  (L-105-b's form). RED on the base before the fix.
 - [ ] T047 [US1] Same file, W-10 and W-11 (C-2.3, C-2.4): `SendDuringWait_Refused` (`session_invalid_state_for_send`, with
   `fixpp_session_is_established` true at the same instant as positive control), `SendHeldInStoreAcrossTheEnding_NumberedBeforeTheLogout`
   (the send's number below the Logout's; the wire order not asserted, L-105-e),
   `LivenessDuringWait_ArmedOneTickBeforeHeartbeat_SendsNothing` and `LivenessDuringWait_ArmedOneTickBeforeGiveUp_SendsNothing`
-  (`test_request_threshold = HeartBtInt`; positive control `fsm_state() == Active` at the instant tested). RED on the base
-  52aeed4e before the fix: the session is `Disconnected`.
+  (`test_request_threshold = HeartBtInt`; positive control `fsm_state() == Active` at the instant tested). RED on the base before the fix: the session is `Disconnected`.
 - [ ] T048 [US1] Same file, no wait and the closers (C-2 "No wait is armed", W-13, W-14, C-2.8):
   `TimeoutZero_NoWaitEofAfterWrite`, `NoClock_NoWaitEofAfterWrite` (a direct Session, the only form with no clock, since `Engine::open` refuses a null
   `EngineConfig::clock`: no wait armed, so the next `send()` or `close()` closes, L-105-b's oracle as in
   `DirectSession_StoreFailureDuringWait_ClosesAtNextSend`), `<CloseTerminal|EngineStop|DriveReconnectDrain>DuringWait_OneClose`,
   `LogoutNotTransmitted_ClosesAtOnce` (the long-CompIDs Logout), `PendingTooHighMark_GapDeadlineLogout_EofAfterWrite` (a
   too-high Logout while a resend is outstanding, then a non-advancing frame after the gap deadline: the deadline's Logout,
-  then EOF with the clock frozen). RED on the base 52aeed4e before the fix where the base keeps the transport open; a cell
+  then EOF with the clock frozen). RED on the base before the fix where the base keeps the transport open; a cell
   the base already meets is marked [guard] with its mutant from T076 and recorded.
 - [ ] T049 [US1] Same file, before Active (W-1 to W-15's before-Active column, C-2.6, E-3 rows 6, 9, 11), both roles where
   the refusal exists: `PreActive_BoundSurvivesTheRefusalsOwnEdge`, `PreActive_FramesDrained`,
@@ -413,11 +430,11 @@ does not complete closes the connection at the bound.
   `PreActive_<LogoutBlockedInWrite|LogoutHeldInStore>_ClosedAtEstablishmentDeadlineNoEvent` (establishment time left below
   `logout_disconnect_timeout_ms`; open at the deadline − 1 ms, EOF at it, no event and no record) and
   `PreActive_ClockOverride_CapOnEngineClock` (a second mock clock as `clock_override`; only the engine clock reaches the
-  deadline). RED on the base 52aeed4e before the fix: closed at the deadline with the event, or never.
+  deadline). RED on the base before the fix: closed at the deadline with the event, or never.
 - [ ] T050 [US1] Same file, the bound's expiry under a blocked arm (rows 10, 11; N-1):
   `Bound_ExpiresWhileResendAnswerBlocked_EofAtTheBound` — SendingTime-Reject route, the peer's ResendRequest during the wait,
   its answer blocked in `async_write` behind a peer that stopped reading; open at the bound − 1 ms, EOF at the bound. RED on the
-  base 52aeed4e before the fix.
+  base before the fix.
 - [ ] T051 [P] [US1] `tests/session/test_105_write_limit.cpp` (C-2.7, FR-004b), both roles, on the held-write transport of
   T005, `logon_timeout_ms` well above the bound. Each `LogoutBlocked` and `LogoutQueuedBehindBlockedSend` cell asserts: open at the
   bound − 1 ms, no complete Logout at the peer, EOF at the bound, `onLogout` once, no wait after it (the peer's Logout sent
@@ -430,7 +447,7 @@ does not complete closes the connection at the bound.
   on the wire, EOF at the same bound); `R1WriteHeld_PeerLogoutArrives_LogoutCompleteThenEof` (the latch deferred to the
   writer); `R1WriteHeld_LimitFiresInsideStoreCall_EofAtBoundOnLogoutAfterStore` (EOF at the bound, `onLogout` when the store
   returns); and [guard: a 0 ms limit read as "close at once"] `TimeoutZero_WriteUnbounded`. R1 cells set
-  `test_request_threshold = HeartBtInt`. RED on the base 52aeed4e before the fix: the held write never returns and nothing
+  `test_request_threshold = HeartBtInt`. RED on the base before the fix: the held write never returns and nothing
   closes.
 - [ ] T052 [US1] `tests/session/test_105_seams.cpp` (it reads `cut` through test access), [guard: "Leaving `writing`" ignores `cut`]
   `WriteLimit105.DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed` on T005's deferred-completion transport, a
@@ -446,17 +463,17 @@ does not complete closes the connection at the bound.
   write held, the throw armed before the write. `Armed` (after Active, and before Active): the throw armed by the test only
   after the peer has read the whole Logout (the leaf has returned), so the first race, built in `writing`, never fires it.
   Each: EOF at once with the clock frozen, `onLogout` once (after Active), driven by the bounded drive so its RED arm
-  terminates. RED on the base 52aeed4e before the fix: no EOF. Its reach-proof twins (the phase the exit found) go in
+  terminates. RED on the base before the fix: no EOF. Its reach-proof twins (the phase the exit found) go in
   `test_105_seams.cpp` with T061.
 - [ ] T054 [P] [US1] `tests/session/test_105_tls_close.cpp`, TLS arms of part B (C-8.4, C-8.5):
   `TlsClose105.CloseGracefulDuringWait_CloseNotifyAtTheBound` (`logout_disconnect_timeout_ms` set well above the wall cap,
   the mock clock advanced to the bound: close_notify, then EOF, at the bound's mock instant) and
   `TlsWriteLimit105.R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsCloseTimeout` (no close_notify; the close within the
-  bound plus `tls_close_timeout`). RED on the base 52aeed4e before the fix.
+  bound plus `tls_close_timeout`; L-105-g). RED on the base before the fix.
 - [ ] T055 [US1] `test_105_logout_wait.cpp`, lifetime (ASan lane; B-103-13): `Lifetime105.CloseFrame_SpawnedByWriteLimitDuringGracefulClose`
   (the mock clock advanced to the bound well inside `close_grace`'s wall time: EOF at the bound, the Session destroyed after
-  `close()` returns), RED on the base 52aeed4e before the fix in its EOF-at-the-bound half; [guard: `close()`'s second join of
-  the close frame's counter deleted, and the bound's join deleted] `Lifetime105.<EndingLogoutBound|CloseFrame>_SessionDestroyedAfterClose`.
+  `close()` returns), RED on the base before the fix in its EOF-at-the-bound half; [guard: the bound's join deleted, and
+  the close frame's first join deleted] `Lifetime105.<EndingLogoutBound|CloseFrame>_SessionDestroyedAfterClose`.
 - [ ] T056 [US1] Commit the cells (`C2`); read T042 to T055 on `$B` (T052 excepted: a seam-file guard, written with T060);
   record per cell.
 
@@ -579,7 +596,9 @@ does not complete closes the connection at the bound.
 - [ ] T078 [US1] The deadlines' closes: the bound's expiry close made through `release_connection_end_`
   (`Bound_ExpiresWhileResendAnswerBlocked_*` RED); the cap's arm deleted (`PreActive_<LogoutBlockedInWrite|LogoutHeldInStore>_ClosedAtEstablishmentDeadlineNoEvent`,
   `PreActive_ClockOverride_CapOnEngineClock` RED: the close comes at the write limit); `close()`'s second join deleted
-  (`Lifetime105.CloseFrame_SpawnedByWriteLimitDuringGracefulClose` RED: the Debug assert, or the counter read after `close()`).
+  (`Lifetime105.CloseFrame_SpawnedByWriteLimitDuringGracefulClose` RED: the Debug assert, or the counter read after `close()`);
+  the bound's join deleted, and the close frame's first join deleted (`Lifetime105.<EndingLogoutBound|CloseFrame>_SessionDestroyedAfterClose`
+  RED, T055's guards).
 - [ ] T079 [US1] The failure exits and spawns: the bound's failure exit routed through `release_connection_end_`
   (`EndingBound_RaceThrows_Writing*`, `EndingBound_DeadlineArmAbsorbsException_Writing*` RED); the armed failure exit routed
   through `release_connection_end_` (`EndingBound_RaceThrows_Armed_ResendAnswerBlocked_EofAtOnce` RED); the early completion
@@ -606,12 +625,12 @@ the session stays Active past the give-up (SC-003).
   `test_request_threshold = HeartBtInt`: `HeartbeatKnobOff105.AheadPeerAnswersTenCycles_StaysActive` (at least 10 TestRequest
   cycles, each answered with the matching 112 at a number ahead of NextNumIn; the peer never reads a Logout or EOF and
   `fixpp_session_is_established` stays true), `MismatchedTestReqId_EndsAndCloses` (EOF at once, no Logout),
-  `AbsentTestReqId_Answers`, `BehindPeerAnswers`. RED on the base 52aeed4e before the fix: the session gives up at the grace
+  `AbsentTestReqId_Answers`, `BehindPeerAnswers`. RED on the base before the fix: the session gives up at the grace
   check. Plus [guard: the #582 predicate widened to the knob-on route] `KnobOn_Unchanged` (B-537-3's cells stay GREEN
   unedited).
 - [ ] T082 [US2] Same file, the 112 rule (C-5.4): `TestReqId105.<InSequenceArm|AnswerPendingRoute>_EarlierId_NeitherAnswersNorEnds`
   (a Heartbeat carrying TR1's 112 after TR2: no Logout, no EOF, TR2 still pending — the next give-up comes 2T after that
-  frame), `TestReqId105.PreviousConnectionId_Mismatch` (across `drive_reconnect`: EOF at once). RED on the base 52aeed4e before
+  frame), `TestReqId105.PreviousConnectionId_Mismatch` (across `drive_reconnect`: EOF at once). RED on the base before
   the fix: the earlier 112 ends the session. Plus [guard: the canonical-form test deleted] `TestReqId105.LeadingZeroId_Mismatch`
   and [guard: the pending test deleted] `TestReqId105.NoTestRequestPending_NotCompared`.
 - [ ] T083 [US2] Commit the cells; read T081 and T082 on `$B`; record.
@@ -626,7 +645,11 @@ the session stays Active past the give-up (SC-003).
   (answers / earlier / mismatch; `TR` plus canonical decimal that fits `std::uint32_t`) calls it, replacing both comparisons
   (the in-sequence Heartbeat arm of `on_inbound_active_` and `answer_pending_test_request_`); `test_request_id_floor_` set to
   `next_test_request_id_` at `open()`, `install_reconnected_transport` and `attach_accepted_transport`; a mismatch through
-  `end_session_silently_`; `answer_pending_test_request_` returns false only for a mismatch.
+  `end_session_silently_`; `answer_pending_test_request_` returns false only for a mismatch. Fuzzing (`[const §VII.7]`;
+  plan Constitution Check VII §7, 027's seed-extension precedent): extend `tests/fuzz/fuzz_session_recovery_admin_parse.cpp`'s
+  seeds with Heartbeats carrying 112 forms (canonical, a leading zero, a sign, letters, an overflowing number, `TR` alone);
+  the classification runs only while a TestRequest is pending, so record whether the harness reaches it (a coverage read of
+  `classify_test_req_id_` under the harness's corpus), and a harness that cannot reach it goes to the orchestrator.
 - [ ] T086 [US2] [guard: a non-modular comparison; the full-cycle case dropped, `next == floor` read as a full window]
   `TestReqIdWindow105.<AtUint32Max|AcrossTheWrap|OneFullCycle_NoValueEarlier>` in `tests/session/test_105_seams.cpp`:
   `constexpr` cells (`static_assert` plus a runtime twin so a mutant reports as a test failure, not a compile error) over
@@ -657,7 +680,7 @@ inbound silence, one sleep per iteration, T validated.
   unless named: `LivenessTiming105.Default_NoTestRequestAt11s_OneAt12s` (the base sends at 10 s),
   `Default_ActiveAt23900ms_EndedAt24sPlusGuard` (the base ends near 20 s), `SetThreshold7s_TestRequestAt7s_GiveUpAt14sPlusGuard`,
   `GuardAtExactly2T_EchoWins`, `At2TPlus1ns_GivesUp`. Each asserts the wire (the TestRequest, the Logout) and EOF at the named
-  mock instants. RED on the base 52aeed4e before the fix: TestRequest at 1 × HeartBtInt, give-up near 2 × HeartBtInt.
+  mock instants. RED on the base before the fix: TestRequest at 1 × HeartBtInt, give-up near 2 × HeartBtInt.
 - [ ] T090 [US3] Same file, the silence measure and the sleep set (clarification D-c, data-model E-4):
   `TrafficAfterTestRequestNoHeartbeat_NotGivenUpAt2T_GivenUpAt2TAfterLastFrame`;
   `SilentPeer_NoHeartbeatWhileTestRequestPending` (positive control: the TestRequest at 12 s and the session Active at 22 s;
@@ -665,17 +688,16 @@ inbound silence, one sleep per iteration, T validated.
   `FrameAfterHeartbeatInstant_HeartbeatAtTheStaleGiveUpWake` (a frame at 23 s; the Heartbeat just after 24 s; positive control:
   none at 23 s); `SilentAfterTestRequest_NoSpin` (T005's counting decorator as `clock_override`: one `sleep_until` per wake, a
   bounded count from TR1 to the give-up, under the bounded drive so its RED arm terminates as a failed count);
-  `SecondTestRequest_LateAnswerToTheFirst_StaysActive` (D-d: TR2 stays pending; the give-up 2T after that frame). RED on the base
-  52aeed4e before the fix.
+  `SecondTestRequest_LateAnswerToTheFirst_StaysActive` (D-d: TR2 stays pending; the give-up 2T after that frame). RED on the base before the fix.
 - [ ] T091 [US3] Same file, precedence and edges (FR-010, C-6.4, C-6.5): `GapOpen_PeerSendsNonAdvancingFrame_DeadlineLogout`,
   `GapOpen_PeerSilent_R1LogoutAt2T`, `HeartBtIntNegative_NoTestRequest`, `ThresholdOverflow_Saturates` (2T past the clock's
-  range: no give-up), RED on the base 52aeed4e before the fix; [guard: the loop's HeartBtInt test deleted]
+  range: no give-up), RED on the base before the fix; [guard: the loop's HeartBtInt test deleted]
   `HeartBtIntZero_NoTestRequest`.
 - [ ] T092 [P] [US3] `tests/config/test_load_negative_battery.cpp`: `LoadNegativeBattery.TestRequestThreshold_Zero_OutOfRange`
-  (an `out_of_range` diagnostic at `session[i].test_request_threshold`), RED on the base 52aeed4e before the fix; [guard: the
+  (an `out_of_range` diagnostic at `session[i].test_request_threshold`), RED on the base before the fix; [guard: the
   duration parser's leading-digit refusal deleted] `LoadNegativeBattery.TestRequestThreshold_Negative_MalformedValue`.
 - [ ] T093 [US3] `test_105_liveness_timing.cpp`: `SessionOpen105.Threshold<Zero|Negative>_InvalidConfig` and
-  `EngineRegister105.Threshold<Zero|Negative>_InvalidConfig` (`invalid_session_config`). RED on the base 52aeed4e before the fix.
+  `EngineRegister105.Threshold<Zero|Negative>_InvalidConfig` (`invalid_session_config`). RED on the base before the fix.
 - [ ] T094 [US3] Commit the cells; read T089 to T093 on `$B`; record.
 
 ### Implementation for US3
@@ -731,8 +753,8 @@ inbound silence, one sleep per iteration, T validated.
   `PreSessionLog105.<NotTls|TlsHandshake|NoTimeLeft|FirstFrameTimeout|FirstFrameOverBudget|FirstFrameOverLimit|NoIds|NoSession>_OneRecord`
   (exactly one warn record of C-7.1's format with that `reason`), `NoSession_RecordNamesCompIds`, `LongCompIds_CutAt15Bytes`,
   `Flood_BoundedWithSuppressedCount` (at most one record per window on the engine clock; the next carries the suppressed
-  count), `ListenerBindFails_OneRecord` (a port in use: one error record of C-7.3's format with the system error's value). RED on
-  the base 52aeed4e before the fix: no record.
+  count), `LongCompIds_CutAt15Bytes` asserting L-105-d's cut, `ListenerBindFails_OneRecord` (a port in use: one error record of C-7.3's format with the system error's value). RED on
+  the base before the fix: no record.
 - [ ] T103 [US4] Commit the cells; read T102 on `$B`; record.
 
 ### Implementation for US4
@@ -797,7 +819,7 @@ remaining reference.
   true during an R-2 wait after Active and false after its end; `fixpp_session_send` refused during the wait;
   `fixpp_session_close` graceful and terminal during the wait (one close each); `fixpp_session_register_callback` and
   `fixpp_session_register_send_callback` delivery during the wait; the peer's EOF after an ending through the C ABI. RED on the
-  base 52aeed4e before the fix (read with T025's procedure).
+  base before the fix (read with T025's procedure).
 - [ ] T115 `include/fix/c_api/version.h`: `FIXPP_C_ABI_VERSION_MINOR` 18 and the 1.18 history entry, the counterparty's side:
   every ending closes the connection; the unanswered TestRequest's Logout; the R-2 wait; the write limit on every ending
   Logout; the TestRequest at 1.2 × HeartBtInt; the TestReqID(112) rule. Never clang-format `include/fix/c_api/*.h`.
@@ -806,7 +828,9 @@ remaining reference.
 - [ ] T117 Move every "pins the minor" row of T012 (the capi tests, `tests/capi/CMakeLists.txt`, the support headers, the CI
   scripts it lists) and regenerate `tools/capi_freeze.sha256` by the generator T012 found; run `-L capi`.
 - [ ] T118 Python (Article X §7, in-repo consumers): run T012's grep over `bindings/` again at the head, its seeded known
-  positive first; move any pin it reports and record the result, a zero included.
+  positive first; move any pin it reports and record the result, a zero included. Then contract C-6.7's instrument, research
+  D6's `grep -rn test_request_threshold bindings include/fix`, seeded first in `$M`: it must report nothing (no C-ABI setter,
+  no Python surface).
 - [ ] T119 Run T114 GREEN and `-L capi`; commit `H7`.
 
 ---
@@ -905,8 +929,8 @@ remaining reference.
   B-105 rows; their state does not change.
 - [ ] T147 **Feature-completeness audit (MUST be the FINAL task)**: against the final head, (i) every row of this file is
   `[X]` or carries a waiver rationale; (ii) every FR and SC maps to a landed test and a landed implementation (the
-  traceability table below, re-read cell by cell), and every W-row and E-3 row maps to a landed cell (the design table
-  below); (iii) every feature-owned OFFICIAL catalogue row is `done` with its `coverage-index.md` entry. Record the verdict,
+  traceability table below, re-read cell by cell), every W-row and E-3 row maps to a landed cell (the design table
+  below), and every contract clause maps to a landed cell or its named instrument (the contract table below); (iii) every feature-owned OFFICIAL catalogue row is `done` with its `coverage-index.md` entry. Record the verdict,
   100 % or fully waived, in `.specify/decisions/105-transport-liveness-verify.md` under `## Completeness`.
 
 ---
@@ -973,6 +997,51 @@ remaining reference.
 | E-9 (`ReconnectFsm`) | T108 | T109 |
 | D-f benches (paired, plus the pump case) | — | T138 |
 | Follow-ups before Gate B | — | T120 |
+
+## Traceability: contract clauses → tasks
+
+W-rows are in the design table above. "Statement" marks a clause no cell can observe; its instrument is named.
+
+| Clause | Cells | Implementation / instrument |
+|---|---|---|
+| C-1 rows 1, 11 (silent endings after and before Active) | T018, T021 | T026, T029 |
+| C-1 row 2 (an arm returns an error) | unchanged from `main`; W-9's error dispositions T046 | T029 (`!r` kept first) |
+| C-1 rows 3, 5 (the peer's Logout; the too-high acknowledgement) | T019, T051 (`Reply`) | T029, T059 |
+| C-1 rows 4, 13, 14 (class X) | T022 | T026 (the latch's `lifecycle` and drain terms) |
+| C-1 rows 6, 12 (ending Logouts: C-2) | T042–T050 | T057–T066 |
+| C-1 row 7 (R-1) | T023, T051, T070 | T031 |
+| C-1 rows 8, 9, 10 (detached roots, application calls) | T020 | T027 |
+| C-1.a (one effective close) | T022 | T026–T028; census row I-5 (T006) |
+| C-1.b (store work not cut) | T019, T050, T051 | T027, T062 |
+| C-1.c (Engine terminal; direct Session) | T020, T046, T048 | T027, T029 |
+| C-1.d (`onLogout` once) | T043 | T060, T061 |
+| C-2 "Which Logouts", "No wait is armed" | T042, T048, T049, T051, T052, T070 | T059, T060, T063 |
+| C-2.1 (Active through the wait) | T042, T047, T114 | T063, T066 |
+| C-2.2 (the peer's numbers) | T042, T044 | T066 |
+| C-2.3, C-2.4 (numbering; nothing originated) | T047 | T068 |
+| C-2.5 (one budget from the write's start) | T043, T051 | T059, T061 |
+| C-2.6 (before Active; the establishment cap) | T049 | T058, T061 |
+| C-2.7 (the write limit) | T051–T054, T070 | T059–T062, T067; E-3 row 5b (an arm's error close cuts a Logout in flight, as on `main`): no new behaviour, no cell, disclosed in L-105-f (T123) |
+| C-2.8 (the pending too-high mark) | T048 | T063 |
+| C-3.1, C-3.2, C-3.3 (R-1) | T023, T051, T070, T089 | T031, T068, T095 |
+| C-3.4 (an answering or earlier 112) | T081, T082, T090 | T085 |
+| C-4.1 to C-4.5 | T021 | T029, T030 |
+| C-5.1 to C-5.3 (#582) | T081 | T084 |
+| C-5.4 (the 112 rule) | T082, T086 | T085 |
+| C-6.1 to C-6.5 (timing) | T089–T091, T097 | T095 |
+| C-6.6 (validation) | T092, T093 | T096 |
+| C-6.7 (no C-ABI setter, no Python surface) | statement | T118 (research D6's grep, seeded first) |
+| C-7.1 to C-7.3 (records) | T102, T106 | T104, T105 |
+| C-7.4 (no counter; garbles of a refused connection not counted) | statement | T105 adds none; L-093-6 amended in T122 |
+| C-8.1, C-8.2 (through `close_async`) | T024 | T027; mutant T039 |
+| C-8.3 (a `close()` waits for a close in flight) | T022 (`EngineStopRacesEndingClose_OneClose`), T055 (`Lifetime105.CloseFrame_SessionDestroyedAfterClose`) | T028, T069; mutant T078 |
+| C-8.4 (graceful `close()` during the wait) | T054 | T061, T069 |
+| C-8.5 (the write limit on TLS; L-105-g) | T054 | T062 |
+| C-8.6 (the synchronous fallback; L-105-h) | T034, T070 | T027, T062 |
+| C-9 (surfaces) | T114 | T104, T109, T115–T118 |
+| C-10 (departures) | T023 (R-1), T042 (the response), T047 (send, liveness), T049 (pre-Active), T051 (write limit), T082 (112) | T123 (copied, not re-derived) |
+| C-11 (L-105-b to L-105-h) | L-105-b T046, T048; L-105-c T023; L-105-d T102; L-105-e T047; L-105-f T051 (`TimeoutZero_WriteUnbounded`); L-105-g T054; L-105-h T034, T070 | T123 |
+| C-12 (benchmarks) | — | T014, T138 |
 
 ## Dependencies and execution order
 

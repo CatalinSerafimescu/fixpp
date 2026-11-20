@@ -25,16 +25,29 @@ Each census runs in a scratch copy, never committed. Results go in the evidence 
   `owe_connection_end_(` call sites (known positive: the edge).
 - **`ReconnectFsm` stubs** (research D7): the caller census; known positive `drive_logout`'s test call.
 
-## 2. RED on the base, or a guard with its mutant
+## 2. RED on the base, or a guard or seam cell with its mutant
 
-Every cell in section 3 is marked. **[RED]**: written first, run on the branch's merge-base with `origin/main` (a scratch worktree at
-`git merge-base HEAD origin/main`, on the build volume), and must fail there for its stated reason. **[guard: <mutant>]**: a rule the base already keeps,
-GREEN on the base by design; it must fail under the named mutant (section 5). A [RED] cell whose oracle the base
-could meet for another reason (the session already `Disconnected`) carries the positive control named with it. The
-mechanism mutants of section 5 must fail too.
+The base is the branch's merge-base with `origin/main` (a scratch worktree at `git merge-base HEAD origin/main`, on the
+build volume); its `src/` and `include/` are identical to `52aeed4e`, where the design was read, and tasks.md T001
+checks that before any reading (spec clarification "Session 2026-11-21"). Every cell in section 3 is marked:
+- **[RED]**: written first, run on the base, and must fail there by an assertion for its stated reason.
+- **[guard: <mutant>]**: a rule the base already keeps, GREEN on the base by design; it must fail under the named mutant
+  (section 5). A `constexpr` helper cell is a guard of this kind, in `test_105_seams.cpp`.
+- **[seam: <mutant>]**: a behaviour cell that names a symbol the base lacks (an allocation-failure seam, the bound's
+  in-body race seam, the listener-construction seam, a test-access read of a new member). It lives in
+  `tests/session/test_105_seams.cpp`, ctest `session_105_seam_tests` (labels `session`, `105` and `105_seam`), which a base
+  reading never builds; it must fail at the implementation head under the named mutant, which removes exactly its
+  mechanism, and that reading stands in for the base reading.
+
+A [RED] cell whose oracle the base could meet for another reason (the session already `Disconnected`) carries the
+positive control named with it. The mechanism mutants of section 5 must fail too.
 
 ```bash
+# on the base (the cell files overlaid): the seam entry is neither built nor run
 cmake --build --preset linux-clang-debug --target session_105_tests
+ctest --preset linux-clang-debug -L 105 -LE 105_seam --no-tests=error -V
+# at the implementation head: both entries
+cmake --build --preset linux-clang-debug --target session_105_tests session_105_seam_tests
 ctest --preset linux-clang-debug -L 105 --no-tests=error -V
 ```
 
@@ -42,7 +55,8 @@ ctest --preset linux-clang-debug -L 105 --no-tests=error -V
 
 Names are proposals; the implementer keeps the scenario, its assertion and its mark.
 
-**Connections close (C-1, C-4, C-8)** — `test_105_connection_close.cpp`, both roles:
+**Connections close (C-1, C-4, C-8)** — `test_105_connection_close.cpp`, both roles (the [seam] cells in
+`test_105_seams.cpp`):
 - [RED] `ConnectionClose105.PumpSilentEnding_<site>_PeerSeesEofAtOnce` — one cell per class-P site of the census table
   (TestReqID mismatch, BeginString guard, CompID guard, MsgSeqNum 0, D-3); mock clock frozen; assert peer EOF.
 - [RED] `ConnectionClose105.PumpSilentEnding_NoApplication_PeerSeesEofAtOnce` — `EngineConfig::application` null (N-4).
@@ -61,12 +75,15 @@ Names are proposals; the implementer keeps the scenario, its assertion and its m
 - [RED] `ConnectionClose105.DirectInitiator_EndingThenDriveReconnect_Reconnects`.
 - [guard: the latch's `lifecycle` term deleted] `ConnectionClose105.InsideClose_NoSecondClose`; [guard: the drain flag
   deleted] `...InsideReconnectDrain_DrainKeepsItsBound`.
-- [RED] `ConnectionClose105.CloseFrameSpawnFails_<ReleaseAtLoopExit|WriteLimit|BoundExpiry>_PeerSeesEofWithNoLaterCall`
+- [seam: the fallback deleted] `ConnectionClose105.CloseFrameSpawnFails_<ReleaseAtLoopExit|WriteLimit|BoundExpiry>_PeerSeesEofWithNoLaterCall`
   (an allocation-failure seam at the close frame's spawn; an Engine session ended by a detached root while its pump
   is parked in a read; the peer sees EOF with no inbound frame and no API call, by the synchronous fallback; the
   counter is 0 after `close()`; on the TLS arm no close_notify, L-105-h; clarification D-g). Mutant: the fallback
   deleted (the latch left for a later consumer, round 2's rule).
-- [RED] `TlsClose105.<each class>_PeerReceivesCloseNotify` — `test_105_tls_close.cpp` on the TLS loopback harness.
+- [RED] `TlsClose105.<each class>_PeerReceivesCloseNotify` — `test_105_tls_close.cpp`: the pump's classes on the
+  Engine-over-TLS rig `engine_loopback_harness.hpp` (acceptor role, a `LoopbackTlsFixture::make_client` peer, a
+  `mock_clock` in `EngineConfig::clock`), the classes that close at a root's exit also on
+  `loopback_tls_session_harness.hpp` (a direct Session); research D10.
 
 **The R-2 wait (C-2)** — `test_105_logout_wait.cpp`, both roles; one or more cells per row W-1 to W-15 of the
 contract's table and per row of data-model E-3 (research D10 lists them):
@@ -103,24 +120,26 @@ contract's table and per row of data-model E-3 (research D10 lists them):
   `...PreActive_CloseDuringWait_OneClose`.
 - [RED] `LogoutWait105.PendingTooHighMark_GapDeadlineLogout_EofAfterWrite` (C-2.8, N-5).
 - [RED] `LogoutWait105.OnLogoutFiresAtWaitEnd`.
-- [RED] `LogoutWait105.BoundSpawnFails_<R2AfterActive|R2BeforeActive|Reply>_NoLogoutWritten_EofAtOnce` — an
+- [seam: the failure read as timeout 0] `LogoutWait105.BoundSpawnFails_<R2AfterActive|R2BeforeActive|Reply>_NoLogoutWritten_EofAtOnce` — an
   allocation-failure seam at the bound's spawn: no Logout bytes at the peer, no wait, `Disconnected` and `onLogout`
   once (after Active), EOF at once (clarification D-g). Mutant: the failure read as timeout 0 (a Logout on the
   wire).
-- [RED] `LogoutWait105.EndingBound_RaceThrows_<Writing|Armed>_EofAtOnce` — an in-body seam throwing `std::bad_alloc`
+- [seam: the failure exit routed through `release_connection_end_`] `LogoutWait105.EndingBound_RaceThrows_<Writing|Armed>_EofAtOnce` — an in-body seam throwing `std::bad_alloc`
   where the bound builds its race, before it awaits the `||` expression, never inside an arm (data-model E-3 row 16). `Writing`: the Logout's write held behind a peer that does not
   read, EOF at once with the clock frozen, no wait after it, `onLogout` once; `...Writing_StoreHeld_EofAtOnce`, the
   Logout's store call still held when EOF is asserted. `Armed`: after Active and before Active, the seam armed by the
   test only after the leaf has returned and the phase reads `armed` (the first race is built in `writing`), the phase
   the exit found asserted through test access as the reach proof. Mutant: the failure exit routed through
   `release_connection_end_` (no EOF while the write is held).
-- [RED] `LogoutWait105.EndingBound_RaceThrows_Armed_ResendAnswerBlocked_EofAtOnce` — after Active on the
+- [seam: the armed failure exit routed through `release_connection_end_`] `LogoutWait105.EndingBound_RaceThrows_Armed_ResendAnswerBlocked_EofAtOnce` — after Active on the
   SendingTime-Reject route, the peer's ResendRequest answered during the wait, the answer blocked in `async_write` behind
   a peer that stopped reading, the seam armed in `armed`: EOF at once with the clock frozen. Mutant: the armed failure
   exit routed through `release_connection_end_` (no EOF while the answer is blocked; Gate A loop 2 round 2, N-2).
 - [RED] `LogoutWait105.EndingBound_DeadlineArmAbsorbsException_<Writing|Armed>_EofAtOnce` — the counting `Clock`
-  decorator of `test_105_support.hpp` as `clock_override`, throwing `std::bad_alloc` from `sleep_until` for the
-  bound's instant only (for `Armed`, armed by the test after the leaf has returned, as above); EOF at once. Mutant: the early completion read as a re-test (the decorator's count of the
+  decorator of `test_105_support.hpp` (a test-side instrument, so the cell builds on the base) as `clock_override`,
+  throwing `std::bad_alloc` from `sleep_until` for the bound's instant only (for `Armed`, armed by the test after the
+  leaf has returned, as above); EOF at once. Its reach-proof twins (the phase the exit found, read through test access)
+  are [seam] cells. Mutant: the early completion read as a re-test (the decorator's count of the
   bound's sleeps exceeds one per wake).
 - Both failure-exit cells drive the executor by a bounded number of handler runs (`run_one` × N, or `run_for`
   under a wall cap), so each RED arm terminates.
@@ -133,10 +152,11 @@ contract's table and per row of data-model E-3 (research D10 lists them):
   deadline, no `session_event_establishment_timeout` and no record; `...PreActive_ClockOverride_CapOnEngineClock`
   (a second mock clock as `clock_override`; only the engine clock reaches the deadline). Mutant: the cap's arm
   deleted.
-- [RED] `Lifetime105.<EndingLogoutBound|CloseFrame>_SessionDestroyedAfterClose` (ASan lane): the Session destroyed
-  after `close()` returns, including `...CloseFrame_SpawnedByWriteLimitDuringGracefulClose` (the mock clock advanced
-  to the bound well inside `close_grace`'s wall time: EOF at the bound, the counter 0 when `close()` returns). Mutant:
-  `close()`'s second join of the close frame's counter deleted.
+- [RED] `Lifetime105.CloseFrame_SpawnedByWriteLimitDuringGracefulClose` (ASan lane; the mock clock advanced to the
+  bound well inside `close_grace`'s wall time: EOF at the bound, the Session destroyed after `close()` returns, the
+  counter 0 then), RED on the base in its EOF-at-the-bound half; mutant: `close()`'s second join of the close frame's
+  counter deleted. [guard: the bound's join deleted, and the close frame's join deleted]
+  `Lifetime105.<EndingLogoutBound|CloseFrame>_SessionDestroyedAfterClose`.
 
 **The write limit (C-2.7, C-8.5)** — `test_105_write_limit.cpp`, both roles, on a transport whose write is held
 until it is closed (the scripted transport's `write_hold`, or a seam in `test_105_support.hpp`); the TLS arm on a peer
@@ -156,7 +176,8 @@ close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogou
 - [RED] `WriteLimit105.R1WriteHeld_PeerLogoutArrives_LogoutCompleteThenEof` — R-1's write held, the peer's
   in-sequence Logout delivered, the write released: the Logout complete on the wire, then EOF (the latch deferred to
   the writer; mutant: the pump's latch test without the `writing` deferral).
-- [guard: "Leaving `writing`" ignores `cut`] `WriteLimit105.DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed` — an R-2
+- [guard: "Leaving `writing`" ignores `cut`] `WriteLimit105.DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed`, in
+  `test_105_seams.cpp` (it reads `cut` through test access) — an R-2
   Logout's write on `test_105_support.hpp`'s deferred-completion transport (its `async_write` commits the bytes, then
   holds its success completion behind a second flag and returns success once released, even after a close). Schedule,
   pinned: advance the mock clock to the bound; `run_one` until the bound has taken row 4 (reach proof through
@@ -172,8 +193,8 @@ close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogou
 - [RED] `LivenessTiming105.Default_NoTestRequestAt11s_OneAt12s` (the base sends at 10 s).
 - [RED] `LivenessTiming105.Default_ActiveAt23900ms_EndedAt24sPlusGuard` (the base ends near 20 s).
 - [RED] `LivenessTiming105.SetThreshold7s_TestRequestAt7s_GiveUpAt14sPlusGuard`.
-- [RED] `LivenessTiming105.GuardAtExactly2T_EchoWins`, `...At2TPlus1ns_GivesUp`; a `constexpr` cell of the guard at
-  the saturated instant.
+- [RED] `LivenessTiming105.GuardAtExactly2T_EchoWins`, `...At2TPlus1ns_GivesUp`; [guard: the guard added by hand to a
+  saturated instant] `LivenessTiming105.GuardAtTheSaturatedInstant`, a `constexpr` cell in `test_105_seams.cpp`.
 - [RED] `LivenessTiming105.TrafficAfterTestRequestNoHeartbeat_NotGivenUpAt2T_GivenUpAt2TAfterLastFrame` (D-c).
 - [RED] `LivenessTiming105.SilentPeer_NoHeartbeatWhileTestRequestPending` — positive control: the TestRequest at
   12 s and the session Active at 22 s; no Heartbeat at 22 s; the give-up just after 24 s.
@@ -189,14 +210,17 @@ close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogou
 - [RED] `LivenessTiming105.SecondTestRequest_LateAnswerToTheFirst_StaysActive` (D-d: TR2 stays pending; the give-up
   2T after that frame).
 - [RED] `LivenessTiming105.GiveUp_LogoutTextPinned_ThenEof` — Text(58) spelled out in the cell.
-- [RED] `LivenessTiming105.GiveUp_<LogoutDoesNotFit|ToAdminThrows|AssignFails|StoreFailsPersistent|StoreFailsVolatile|WriteFails|BoundSpawnFails>_StillEof`
+- [RED] `LivenessTiming105.GiveUp_<LogoutDoesNotFit|ToAdminThrows|AssignFails|StoreFailsPersistent|StoreFailsVolatile|WriteFails>_StillEof`
   — each asserts the slot-74 record, the wire (no complete Logout, except `StoreFailsVolatile`) and EOF; each has
-  its own mutant.
+  its own mutant. [seam: the bound's fail-closed `catch` replaced by round 2's] `LivenessTiming105.GiveUp_BoundSpawnFails_StillEof`
+  (the slot-74 record, no Logout, EOF).
 - [RED] `LivenessTiming105.GiveUp_OneLogRecordWithSlot74` — capturing sink; the record precedes the Logout's write.
 - [RED] `LivenessTiming105.GapOpen_PeerSendsNonAdvancingFrame_DeadlineLogout`, `...GapOpen_PeerSilent_R1LogoutAt2T`.
 - [guard: the loop's HeartBtInt test deleted] `LivenessTiming105.HeartBtIntZero_NoTestRequest`; [RED]
   `...HeartBtIntNegative_NoTestRequest` (mutant: the test reverted to `== 0`).
-- [RED] `LivenessTiming105.ThresholdOverflow_Saturates`; `constexpr` cells of the default-threshold helper.
+- [RED] `LivenessTiming105.ThresholdOverflow_Saturates`; [guard: the product formed unsaturated]
+  `LivenessTiming105.DefaultThresholdHelper_Saturates`, `constexpr` cells of the default-threshold helper in
+  `test_105_seams.cpp`.
 - Config: [RED] `LoadNegativeBattery.TestRequestThreshold_Zero_OutOfRange`; [guard: the duration parser's
   leading-digit refusal deleted] `...TestRequestThreshold_Negative_MalformedValue`; [RED] `SessionOpen105.Threshold<Zero|Negative>_InvalidConfig`,
   `EngineRegister105.Threshold<Zero|Negative>_InvalidConfig`.
@@ -211,16 +235,18 @@ close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogou
   restores the plain comparison at that site; [RED] `...PreviousConnectionId_Mismatch` (across `drive_reconnect`);
   [guard: the canonical-form test deleted] `...LeadingZeroId_Mismatch`; [guard: the pending test deleted]
   `...NoTestRequestPending_NotCompared`; [guard: a non-modular comparison; the full-cycle case dropped]
-  `TestReqIdWindow105.<AtUint32Max|AcrossTheWrap|OneFullCycle_NoValueEarlier>`, `constexpr` cells over the free window
-  function the member calls (data-model E-4; Gate A round 3, Codex #7; tagged in loop 2 round 2, Codex #3).
+  `TestReqIdWindow105.<AtUint32Max|AcrossTheWrap|OneFullCycle_NoValueEarlier>`, `constexpr` cells (with runtime twins)
+  over the free window function the member calls, in `test_105_seams.cpp` (data-model E-4; Gate A round 3, Codex #7;
+  tagged in loop 2 round 2, Codex #3).
 
 **Records (C-7)** — `test_105_presession_log.cpp`, capturing sink:
 - [RED] `PreSessionLog105.<NotTls|TlsHandshake|NoTimeLeft|FirstFrameTimeout|FirstFrameOverBudget|FirstFrameOverLimit|NoIds|NoSession>_OneRecord`.
 - [RED] `PreSessionLog105.NoSession_RecordNamesCompIds`, `...LongCompIds_CutAt15Bytes`.
 - [RED] `PreSessionLog105.Flood_BoundedWithSuppressedCount`.
 - [RED] `PreSessionLog105.ListenerBindFails_OneRecord` (port in use; the `std::system_error` arm, the error's value).
-- [RED] `PreSessionLog105.ListenerConstructionThrowsNonSystemError_OneRecordErrorZero` — a listener-construction
-  seam in `run_accept_loop` throwing `std::bad_alloc` (no configuration reaches the generic arm; research D8).
+- [seam: the generic catch arm's record deleted] `PreSessionLog105.ListenerConstructionThrowsNonSystemError_OneRecordErrorZero`,
+  in `test_105_seams.cpp` — a listener-construction seam in `run_accept_loop` throwing `std::bad_alloc` (no
+  configuration reaches the generic arm; research D8).
 
 **C ABI (C-9)** — extend `tests/capi/recovery_liveness_capi_witness_test.cpp`: [RED] the 1.18 observers through the C
 ABI, `fixpp_session_close` (graceful and terminal) and callback delivery during the wait included, with a positive
@@ -272,7 +298,8 @@ Each must turn its cells RED, run unfiltered:
 - the bound's early deadline-arm completion read as a re-test (`EndingBound_DeadlineArmAbsorbsException_*`;
   terminates under the bounded drive);
 - each spawn's fail-closed `catch` replaced by round 2's (`CloseFrameSpawnFails_*`, `BoundSpawnFails_*`);
-- `close()`'s second join deleted (`Lifetime105.CloseFrame_SpawnedByWriteLimitDuringGracefulClose`);
+- `close()`'s second join deleted (`Lifetime105.CloseFrame_SpawnedByWriteLimitDuringGracefulClose`); the bound's join
+  deleted, and the close frame's first join deleted (the guards `Lifetime105.<EndingLogoutBound|CloseFrame>_SessionDestroyedAfterClose`);
 - the passed, ineligible Heartbeat instant kept in the sleep set (`SilentAfterTestRequest_NoSpin`; terminates
   under the bounded drive);
 - each listener catch arm's record deleted (`ListenerBindFails_OneRecord`,
@@ -286,13 +313,15 @@ Each must turn its cells RED, run unfiltered:
 - the default threshold set back to H (the timing cells);
 - the #582 predicate set back (`AheadPeerAnswersTenCycles_*`);
 - each 112 site's plain comparison restored (`TestReqId105.*_EarlierId_*`, `SecondTestRequest_LateAnswerToTheFirst_*`);
-- the window function's comparison made non-modular, and its full-cycle case dropped (`TestReqIdWindow105.*`).
+- the window function's comparison made non-modular, and its full-cycle case dropped (`TestReqIdWindow105.*`);
+- the default-threshold product formed unsaturated, and the 1 ns guard added by hand to a saturated instant
+  (`LivenessTiming105.<DefaultThresholdHelper_Saturates|GuardAtTheSaturatedInstant>`).
 
 ## 6. Lanes and full runs
 
 ```bash
 for p in linux-clang-debug linux-clang-asan linux-clang-ubsan linux-clang-tsan; do
-  cmake --build --preset "$p" --target session_105_tests && ctest --preset "$p" -L 105 --no-tests=error
+  cmake --build --preset "$p" --target session_105_tests session_105_seam_tests && ctest --preset "$p" -L 105 --no-tests=error
 done
 ctest --preset linux-clang-debug -L session --no-tests=error
 ctest --preset linux-clang-debug -L capi --no-tests=error

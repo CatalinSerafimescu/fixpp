@@ -6,9 +6,10 @@
 
 **Status**: Draft
 
-**Base**: the branch's merge-base with `origin/main`. The mechanisms were re-derived at `52aeed4e` (the squash of PR #711; the
-session code is 104's `20a45577` plus #711's receipt-reset log); the branch was then rebased onto `310ff565` (#713), which
-changed tests only.
+**Base**: the branch's merge-base with `origin/main` ("the base" everywhere in this bundle). Its `src/` and `include/` are
+identical to `52aeed4e` (the squash of PR #711; the session code is 104's `20a45577` plus #711's receipt-reset log), where
+the mechanisms were re-derived; the branch was then rebased onto #713, which changed tests only. tasks.md T001 re-checks
+that identity before any RED reading (clarification "Session 2026-11-21").
 
 **Input**: batch B27, lane S1 (`phases/phase-4/issue-batches.md` in the parent repo): fixpp#534, #582, #535, #559 (sites 2
 and 3) and #687, with the folds the owner approved on 2026-11-20 (R-4 below). The issues' mechanisms were re-derived
@@ -146,6 +147,14 @@ Decisions on the loop-2 round-1 reviews (`research/reviews/codex_105-transport-l
 
 - Q (scope, orchestrator 2026-11-20): What does this pass change? → A: exactly the Opus review's root causes 1 to 3 and its confirmed P3s: (1) the ending bound's own failure, its `catch (...)` or a deadline wait that completes early on an absorbed exception, closes as the bound's expiry closes in the same phase, never through the depth-gated release (FR-004b; data-model E-3, "The bound's exits", row 16); (2) the establishment cap's two waits are independent sleeps on an Engine session, stated as a condition with its re-derivation recipe; one wait when both clocks are one object is optional and not taken; (3) the test-plan instruments (the listener's generic arm, the no-spin counter and its bounded drive, the cap cell list) and the requirements checklist's D-g refresh.
 - Q (follow-ups, orchestrator 2026-11-20): Are the shared slot-pool timer of a direct driver that spawns on `sess.executor()`, and the read pump's establishment race re-racing an absorbed exception, 105 scope? → A: no. Both are pre-existing and become follow-up issues filed before Gate B, beside the L-105-f non-ending-writes issue (plan, "Follow-ups to file before Gate B").
+
+### Session 2026-11-21 (post-Gate-A plan re-run)
+
+Decisions of the orchestrator after Gate A converged (loop 2 round 2), recorded by the `/speckit-plan` consistency pass.
+No design change.
+
+- Q (FR-017, orchestrator 2026-11-21): A cell that names a symbol the base lacks (an allocation-failure seam, the ending bound's in-body race seam, the listener-construction seam, a test-access read of a member 105 adds, a new `constexpr` helper) cannot compile on the base, so it cannot be read RED there. How does FR-017 apply to it? → A: it is a **[seam]** cell (a behaviour cell) or a **[guard]** cell (a `constexpr` helper cell). It lives in its own test file and ctest entry, which a base reading never builds, and its RED is shown at the implementation head under its named mutant, which deletes or reverts exactly the mechanism the cell tests; that reading stands in for the base reading and is recorded as such. A reach-proof twin (a cell that repeats a RED cell's scenario and only adds a test-access read) is a [seam] cell; the RED cell it twins keeps its peer-visible oracle and its base reading (FR-017; quickstart section 2; tasks.md Execution rules).
+- Q (the base, orchestrator 2026-11-21): Which commit is "the base" of a RED reading? → A: the branch's merge-base with `origin/main`. Its `src/` and `include/` are identical to `52aeed4e`, where the design was read; tasks.md T001 checks and records that identity, and a difference stops the RED readings and goes to the orchestrator. No commit hash is pinned as the base: a rebase moves it.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -436,8 +445,13 @@ no comment claiming behaviour the code does not have.
   departure from QuickFIX, the #582 rule, the TestRequest timing and the TestReqID(112) rule (FR-009, FR-010), and
   the limitations L-105-b to L-105-h, L-105-f naming its follow-up issue, filed before Gate B. L-103-5's statement of QuickFIX's behaviour holds
   only for the too-low path and is not carried forward as written.
-- **FR-017**: Every behaviour cell MUST be shown RED on the base (the branch's merge-base with `origin/main`) before its fix; a regression guard (a rule
+- **FR-017**: Every behaviour cell MUST be shown RED on the base (the branch's merge-base with `origin/main`; its `src/`
+  and `include/` identical to `52aeed4e`) before its fix; a regression guard (a rule
   the base already keeps) is GREEN on the base by design and MUST instead be shown RED under its named mutant; a cell
+  that names a symbol the base lacks (a seam cell, a `constexpr` helper cell, a test-access read of a new member) is a
+  [seam] or [guard] cell, built in a separate ctest entry that base readings do not build, and MUST be shown RED at the
+  implementation head under its named mutant, which removes exactly the mechanism it tests (amended by clarification
+  "Session 2026-11-21"); a cell
   whose oracle the base meets for another reason MUST carry a positive control at the instant it tests. Every close
   cell MUST assert the peer-observed EOF, not an internal flag. Where a close is awaited with a bound, the bound MUST be derived
   from the competing timeout, with the arm that forces the spurious close. A timing cell MUST discriminate the old
