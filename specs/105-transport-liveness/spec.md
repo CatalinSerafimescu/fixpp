@@ -139,6 +139,14 @@ P2 4; the owner chose a targeted edit and one fresh round.
 - Q (D-g, owner 2026-11-20): What happens when the close task, or the ending Logout's bound, cannot be spawned because allocation fails? → A: the session fails closed. A close frame that cannot be spawned is replaced by the synchronous `Transport::close()` of the live transport, on the session strand, so the peer still observes EOF with no later call; on TLS with a read or write in flight that close is abortive (no close_notify). This departs from FR-002 and ruling D-e ("through `close_async`") on allocation failure only, and is disclosed (L-105-h). A bound that cannot be spawned means the Logout is not written: the ending proceeds as "Logout not sent" and the connection closes at once. Round 2's readings (a failed bound spawn proceeds as timeout 0, with an unbounded write; a failed close-frame spawn leaves the latch to a later consumer, L-105-b) are withdrawn (FR-002, FR-004b; round-3 root cause #1).
 - Q (scope, owner 2026-11-20): What does the targeted edit change? → A: exactly the round-3 Opus review's four root causes and its confirmed P3s: (1) spawn failure fails closed (D-g); (2) the R-2 bound's expiry closes the connection as the write limit does, whatever arm is in flight, and the Engine's establishment deadline is handed to the ending machine as a cap; (3) the liveness loop sleeps to the earliest instant of a set that keeps the not-yet-reached Heartbeat instant, with no spin; (4) the lifetime, accounting and test-plan lists. Nothing else is redesigned.
 
+### Session 2026-11-20 (Gate A loop 2 round 1)
+
+Decisions on the loop-2 round-1 reviews (`research/reviews/codex_105-transport-liveness_gate_a_4_review.md` and
+`opus_105-transport-liveness_gate_a_4_adversarial_review.md` in the parent repo). The orchestrator took no new decision.
+
+- Q (scope, orchestrator 2026-11-20): What does this pass change? → A: exactly the Opus review's root causes 1 to 3 and its confirmed P3s: (1) the ending bound's own failure, its `catch (...)` or a deadline wait that completes early on an absorbed exception, closes as the bound's expiry closes in the same phase, never through the depth-gated release (FR-004b; data-model E-3, "The bound's exits", row 16); (2) the establishment cap's two waits are independent sleeps on an Engine session, stated as a condition with its re-derivation recipe; one wait when both clocks are one object is optional and not taken; (3) the test-plan instruments (the listener's generic arm, the no-spin counter and its bounded drive, the cap cell list) and the requirements checklist's D-g refresh.
+- Q (follow-ups, orchestrator 2026-11-20): Are the shared slot-pool timer of a direct driver that spawns on `sess.executor()`, and the read pump's establishment race re-racing an absorbed exception, 105 scope? → A: no. Both are pre-existing and become follow-up issues filed before Gate B, beside the L-105-f non-ending-writes issue (plan, "Follow-ups to file before Gate B").
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — A session that has ended closes its connection (Priority: P1)
@@ -345,7 +353,9 @@ no comment claiming behaviour the code does not have.
   "Logout not sent": no wait, `Disconnected` and `onLogout` once. Nothing may be cancelled or destroyed while
   suspended by that close, and no store work is cut (FR-008). With `logout_disconnect_timeout_ms` 0 or no clock the
   write is not limited. If the limit cannot be set up because its bound cannot be spawned (an allocation failure), the
-  Logout MUST NOT be written and the ending proceeds as "Logout not sent" (clarification D-g). A terminal `close()`
+  Logout MUST NOT be written and the ending proceeds as "Logout not sent" (clarification D-g). If the bound fails after
+  it is set up, the connection MUST close as it closes at the limit or at the R-2 wait's bound, whatever frame is
+  being processed (Gate A loop 2 round 1). A terminal `close()`
   and `Engine::stop()` during the write end it through their own transport close; under a graceful `close()` and
   the reconnect drain, which close the transport only at their own wall-clock bound, the write ends at this limit or
   at that bound, whichever comes first. The budget starts at the Logout's owner claim, so it covers the Logout's

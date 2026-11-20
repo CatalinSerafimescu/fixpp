@@ -46,7 +46,8 @@ Common rules:
 - **C-1.b The session's own work runs to its end.** No close in this table runs while a frame is inside an arm,
   with one exception, the deadlines of an ending Logout: the write limit of C-2.7, which closes the transport while
   an arm is suspended in an ending Logout's write or queued behind another write at the session's write gate, and
-  the R-2 bound's expiry (C-2.5, C-2.6), which closes it whatever arm is in flight. They cut no store work: a store call
+  the R-2 bound's expiry (C-2.5, C-2.6), which closes it whatever arm is in flight; the ending bound's own failure
+  closes as the deadline of its phase would (C-2.7). They cut no store work: a store call
   completes before its frame's transmit, the receipt reset unit is store-only, and the close only makes the
   pending writes complete with an error. Otherwise a store call issued before the close returns before it; the
   receipt reset unit runs before rows 3 and 5 close.
@@ -70,7 +71,7 @@ TestMessageIndicator posture mismatch, the strict-reset refusal, LogonSent's Log
 peer's Logout are not in this list (C-1 rows 3 and 5).
 
 **No wait is armed** when the Logout was not transmitted (it did not fit its buffer, `toAdmin` threw, its number or
-store failed, its write failed, it was held back, there was no transport to take it, or the write limit of C-2.7 cut
+store failed, its write failed, it was held back, there was no transport to take it, or the write limit of C-2.7, or the bound's own failure during the write (C-2.7), cut
 it), when `logout_disconnect_timeout_ms` is 0, when the session has no clock, when the bound could not be spawned (an
 allocation failure: then no Logout is written at all and the ending proceeds as "Logout not sent", clarification
 D-g), when another root ended the session during the Logout's write, or when the ending claimed a pending too-high Logout's mark (C-2.8). The session then ends as the site ends today, and the connection closes at once
@@ -91,7 +92,7 @@ second wait, and the frame not delivered.
 | W-6 | A frame above NextNumIn with no resend outstanding | Processed as in Active: not delivered, NextNumIn kept, a ResendRequest for the gap, as today (QuickFIX C++ sends one during its wait too: `validLogonState` admits a non-Logout frame once `sentLogout` is set, and `verify` reaches `doTargetTooHigh`). | Drained. |
 | W-7 | A frame while a resend is outstanding and the gap deadline has passed | The gap deadline does not fire; the frame takes the row it takes before the deadline (W-4, W-6, W-8). | Drained. |
 | W-8 | A peer-frame condition that ends the session today: with a Logout (a frame below NextNumIn without 43=Y, a SendingTime Reject, an OrigSendingTime Reject) or silently (a TestReqID mismatch, a BeginString or CompID mismatch, MsgSeqNum 0, D-3). The set is defined by cause, not by the arm's return value. | Absorbed. A Reject the arm writes before its Logout is written, as in Active; its Logout and its `Disconnected` are not. NextNumIn is left as the arm leaves it. | Drained. |
-| W-9 | Any internal failure that writes `Disconnected`, from any root: an arm's store, persist, number-assignment or emit failure or `toAdmin` throw, whether the arm then returns an error or success (a reply leaf's failed assignment returns success); a send admitted before the Logout whose store or emit then fails; a liveness Heartbeat or TestRequest admitted before the Logout whose emit fails; the too-high Logout bound's handler | Not absorbed: that `Disconnected` ends the wait (`onLogout` once), and the connection closes at once: by the pump after the frame (on its error or on the latch), or at the failing root's exit (C-1 rows 2, 8, 9). | Not reached (nothing is processed; the other roots do not run before Active). |
+| W-9 | Any internal failure that writes `Disconnected`, from any root: an arm's store, persist, number-assignment or emit failure or `toAdmin` throw, whether the arm then returns an error or success (a reply leaf's failed assignment returns success); a send admitted before the Logout whose store or emit then fails; a liveness Heartbeat or TestRequest admitted before the Logout whose emit fails; the too-high Logout bound's handler | Not absorbed: that `Disconnected` ends the wait (`onLogout` once), and the connection closes at once: by the pump after the frame (on its error or on the latch), or at the failing root's exit (C-1 rows 2, 8, 9). An internal failure of the ending bound itself closes as W-12 does (as W-15 during the Logout's write), at the bound's exit, whatever frame is being processed (data-model E-3, "The bound's exits", row 16). | Not reached from the frame and application roots (nothing is processed; the other roots do not run before Active). The ending bound runs before Active: its own failure closes as W-12 and W-15 do before Active. |
 | W-10 | An application `send()` | Refused, `session_invalid_state_for_send` (103's rule for a Logout ending). | Refused (not Active), as today. |
 | W-11 | The liveness loop | Originates nothing more; it leaves at its next test. | Not running. |
 | W-12 | The bound expires | `Disconnected`, `onLogout`, and the connection closes at the bound, whatever frame is being processed (a resend answer blocked behind a peer that stopped reading included). | The connection closes at the bound, or on an Engine session at the establishment deadline when that is earlier (C-2.6). |
@@ -122,7 +123,7 @@ Common rules:
   (C-2.7), so it also covers the Logout's number assignment and store call: a persistent store slower than
   `logout_disconnect_timeout_ms` makes the Logout "not sent", and a write that completes late leaves the peer only
   the rest of the budget to answer (B-105-2). At the bound the connection closes whatever frame fixpp is processing,
-  as at the write limit (C-1.b).
+  as at the write limit (C-1.b), and so it does when the bound itself fails (C-2.7).
 - C-2.6 **Before Active** the bound is `logout_disconnect_timeout_ms` from the start of the Logout's write. On an
   Engine-managed session it is capped by the connection's establishment deadline (computed by the accept and connect
   loops from `logon_timeout_ms`, on the engine clock): the read pump hands that deadline to the Session once, and the
@@ -143,7 +144,9 @@ Common rules:
   wall-clock bound (`close_grace`; the drain's bound), so under them the write ends at this limit or at that bound,
   whichever comes first; this limit is the only bound on the session's clock there. When the limit cannot be set up
   because its bound cannot be spawned (an allocation failure), the Logout is not written and the ending proceeds as
-  "Logout not sent" (clarification D-g). The write starts at the Logout's owner claim, so the limit can fire while the Logout
+  "Logout not sent" (clarification D-g). When the bound fails after it is set up (an exception inside it, or a
+  deadline wait that completes early on an absorbed exception), the connection closes as at the bound, by the same
+  close, and no wait follows (Gate A loop 2 round 1, root cause #1). The write starts at the Logout's owner claim, so the limit can fire while the Logout
   is still inside its number assignment or store call: the peer sees EOF at the bound, and `Disconnected` and
   `onLogout` follow when that store call returns (a store call is not cut, C-1.b). While an ending Logout is being
   written, an ending another root records (the peer's Logout answered while the Logout owner is set, an internal

@@ -326,14 +326,16 @@ write limit of ruling D-e (item 11). This section is the mechanism.
    one store, data-model E-5), and the bound waits on both instants, each on its own clock (the bound's on
    `effective_clock_`, the establishment deadline on `engine_.clock`, which `SessionConfig::clock_override` does not
    move), so it closes at whichever passes first, during the store call and write (E-3 row 4) as during the wait
-   (row 11). The pump's `expire()` keeps the cap while it is in its read race. At either close no
+   (row 11). The two waits are independent sleeps on an Engine session; data-model E-3, "The establishment cap",
+   states that condition and its re-derivation recipe (Gate A loop 2 round 1, root cause #2). The pump's `expire()` keeps the cap while it is in its read race. At either close no
    establishment-timeout event or record is written, because the session has recorded its own ending (D4). A
    Session driven without an Engine has no establishment deadline (`logon_timeout_ms` reaches `run_read_pump` only
    through the accept and connect loops), so its pre-Active wait ends at the bound (Gate A round 2, Codex #4; contract
    C-2.6). A detached `run_ending_logout_bound_(join, gen)` waits on it, in the shape of `run_peer_logout_bound_` (a
    join parameter that touches only `ending_logout_bound_counter_`, a published wake, `detail::await_deadline` raced
-   with a timer the wake cancels, a generation assert, an exception handler that ends the wait closed), with one
-   difference: it loops, so a wake is a re-test of its live predicate, not an exit. Its spawn takes
+   with a timer the wake cancels, a generation assert, an exception handler that ends the wait closed), with two
+   differences: its failure exit closes as its expiry does, never through `release_connection_end_` (data-model
+   E-3, "The bound's exits", row 16; Gate A loop 2 round 1, root cause #1), and it loops, so a wake is a re-test of its live predicate, not an exit. Its spawn takes
    `on_inbound_active_too_high_logout_`'s join-as-parameter shape, with a `catch` around `co_spawn` that, unlike the
    precedent's, does not rethrow. A spawn that throws **fails closed** (Gate A round 3, root cause #1; clarification
    D-g): the phase goes back to `none` and the Logout is not written (the leaf's path for a Logout that cannot be
@@ -397,7 +399,13 @@ write limit of ruling D-e (item 11). This section is the mechanism.
       for `inbound_depth_ == 0`, so for an arm that may never return. The argument that lets the write limit close
       under a suspended arm does not depend on which deadline fires, so at its expiry the bound spawns the close frame
       testing the generation, a live transport and `state_ == lifecycle::open`, then clears the latch; the arm in
-      flight resumes with a write error, and the pump's later `close(terminal)` is subsumed. What stays deferred is
+      flight resumes with a write error, and the pump's later `close(terminal)` is subsumed. The bound's own failure closes the same way
+      (Gate A loop 2 round 1, root cause #1; Codex #2, N-1): its `catch (...)`, and a deadline arm that completed
+      while its clock reads before its instant (`detail::await_deadline`'s `catch (...)` absorbs every
+      non-`system_error` exception and completes the arm, which the loop would otherwise re-race at once), take the
+      expiry exit of the phase they find (data-model E-3, "The bound's exits"). Routing that failure through
+      `release_connection_end_` would defer it to a pump arm suspended in the Logout's write with nothing left to
+      limit the write. What stays deferred is
       an ending recorded by a root that is not a deadline (E-3 row 12): while an arm is blocked in a non-ending write
       it closes when that write returns (L-105-f).
     - **No second wait.** A cut write is not transmitted, so the R-2 helper arms nothing; and since the wait would
@@ -708,7 +716,11 @@ shipped fixture and nothing requires it.
 - **The listener.** `catch (...)` gives no error value. The catch becomes `catch (std::system_error const&)`
   recording its `code().value()`, then `catch (...)` recording 0, each writing one record
   `acceptor listener could not bind: begin_string={} sender_comp_id={} target_comp_id={} error={}` with no rate gate
-  (once per entry). Both formats are registered in `src/log/format_registry.cpp`.
+  (once per entry). Each arm has a cell: a port in use reaches the `system_error` arm; no configuration reaches the
+  generic arm (`asio_listener`'s constructor and `make_bind_endpoint` throw `std::system_error` for every bind,
+  listen and address failure, and leave only an allocation failure), so a listener-construction seam in
+  `run_accept_loop` (the allocation-failure seam family of D10) throws `std::bad_alloc` in place of the
+  construction (Gate A loop 2 round 1, Codex #3). Both formats are registered in `src/log/format_registry.cpp`.
 - **No counters** (deferred to the OTel plan, spec Assumptions).
 
 **Alternatives rejected.** *A gate per reason:* a flood can rotate reasons; one gate per entry bounds the total.
@@ -831,6 +843,20 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
     failing, after Active, before Active, for R-1 and for a reply: no Logout bytes at the peer, `Disconnected` and
     `onLogout` once, EOF at once. Mutants: the fallback deleted (the latch left set, round 2's rule: EOF never comes);
     the bound's failure read as timeout 0 (a Logout written: the wire oracle).
+  - The bound's failure exit (Gate A loop 2 round 1, root cause #1; data-model E-3 row 16), one cell per cause and
+    phase. The `catch (...)`: `LogoutWait105.EndingBound_RaceThrows_<Writing|Armed>_EofAtOnce`, an in-body seam of
+    the spawn seams' family throwing `std::bad_alloc` where the bound builds its race, before it awaits the `||`
+    expression (not inside an arm: a throwing arm cancels nothing, `await_deadline`'s note says, so on a frozen clock
+    the exception would never reach the `catch (...)`). `Writing`: the Logout's write held
+    behind a peer that does not read, EOF at once with the clock frozen, no wait after it, `onLogout` once, plus a
+    variant whose store call is still held when EOF is asserted; `Armed`: after Active and before Active, EOF at
+    once. The absorbed exception: `LogoutWait105.EndingBound_DeadlineArmAbsorbsException_<Writing|Armed>_EofAtOnce`,
+    the counting `Clock` decorator below set as `clock_override`, throwing `std::bad_alloc` from `sleep_until` for
+    the bound's instant only, so the liveness loop's sleeps are untouched; `detail::await_deadline` absorbs it and
+    completes the arm early. Each cell drives the executor by a bounded number of handler runs (`run_one` × N, or
+    `run_for` under a wall cap), so its RED arm terminates. Mutants: the failure exit routed through
+    `release_connection_end_` (the `Writing` cells: no EOF while the write is held); the early completion read as
+    a re-test (the decorator's count of the bound's sleeps exceeds one per wake within the bounded drive).
 - **The write limit** (ruling D-e; D2 item 11), on a transport whose write can be held until the transport closes
   (the scripted transport's `write_hold`, which `test_103_resend_state_reconnect.cpp` sets, or a seam in
   `test_105_support.hpp`), and the TLS arm on a peer that stops reading (a zero window). RED on the base: the held
@@ -855,14 +881,22 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
   - The establishment cap (Gate A round 3, root cause #2; Codex #3), on an Engine session with establishment time
     left below `logout_disconnect_timeout_ms`: a refusal Logout blocked in its write, and one held in its store call,
     each closed at the establishment deadline (open at deadline − 1 ms) with no `session_event_establishment_timeout`
-    and no establishment-timeout record; and the pre-Active wait still armed at that deadline, closed then, with no
-    event. A cell with `SessionConfig::clock_override` set to a second mock clock advances only the engine clock to
+    and no establishment-timeout record. The pre-Active wait still armed at that deadline is not a cap cell: no arm
+    is in flight then, so the pump is in its read race and its own `expire()` closes at the same instant, and the
+    cell cannot attribute its close to the cap. It is E-5's cell instead
+    (`LogoutWait105.PreActive_WaitArmedAtEstablishmentDeadline_ClosedNoEvent`, mutant: `expire()` without its
+    `ended` test; Gate A loop 2 round 1, N-3). A cell with `SessionConfig::clock_override` set to a second mock clock advances only the engine clock to
     the deadline, so the cap's arm on `engine_.clock` is the one that fires. Mutant: the cap's arm deleted (the
     close then comes at the write limit).
   - The bound's expiry while an arm is blocked (N-1): after Active on the SendingTime-Reject route, the peer's
     ResendRequest during the wait, its answer blocked in `async_write` behind a peer that stopped reading; open at
     the bound − 1 ms, EOF at the bound (`LogoutWait105.Bound_ExpiresWhileResendAnswerBlocked_EofAtTheBound`).
     Mutant: rows 10 and 11 routed through `release_connection_end_`'s `inbound_depth_` test.
+  - The write completing after the bound has fired (Gate A loop 2 round 1; data-model E-3, `ending_wait_.cut`): on a
+    direct Session, an R-2 Logout's write held, the clock advanced to the bound, the write released before the
+    executor is drained so its completion runs ahead of the close frame's `close_async()`; no wait armed,
+    `Disconnected` and `onLogout` once (`WriteLimit105.DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed`).
+    A guard (the base arms no wait); its RED is the mutant "Leaving `writing`" ignores `cut`.
   - `close(graceful)` during the write (N-3): the mock clock advanced to the bound well inside `close_grace`'s wall
     time, EOF at the bound, the close frame's counter 0 when `close()` returns. Mutant: the second join deleted
     (the Debug assert of `~Session`, or the counter read after `close()`).
@@ -873,7 +907,13 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
   no Heartbeat); the late answer to TR1 (traffic after TR1, then T of silence draws TR2, then a Heartbeat with TR1's 112: the session
   stays Active and TR2 stays pending, ruling D-d; the give-up then follows 2T after that frame); N-2's cell (a Heartbeat
   at 22 s, TR2 at 25 s, none at 35 s, the give-up just after 37 s); the skipped Heartbeat of a silent peer, with the
-  session shown Active and the TestRequest at 12 s as its positive control; the two precedence cells.
+  session shown Active and the TestRequest at 12 s as its positive control; the two precedence cells. The no-spin
+  cell (`SilentAfterTestRequest_NoSpin`; Gate A loop 2 round 1, N-2): `mock_clock` exposes no count of its sleeps,
+  so `test_105_support.hpp` provides a counting `Clock` decorator over `mock_clock` (it counts `sleep_until`
+  calls and forwards each to the mock), set as `clock_override`. Under the mutant every `sleep_until` meets a
+  passed deadline and `mock_clock` completes it at once, so a run-until-idle drive (`poll`, `run`) would never
+  return; the cell drives a bounded number of handler runs per mock-clock step and asserts the count, so its RED
+  arm terminates as a failed assertion, not as a hung binary.
 - **Lifetime cells** (ASan): a Session destroyed after `close()` has returned, for each new frame (the R-2 bound
   and the close frame), including a close frame spawned by the write limit during `close()`'s wait for the bound.
   The precondition is B-103-13's (`close()` before the Session is destroyed); `~Session` asserts both counters are
@@ -950,7 +990,7 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
     write closes the connection and counts as not sent; disclosed: the budget starts at the owner claim, so it covers
     the Logout's number assignment and store call, a persistent store slower than the budget makes the Logout "not
     sent", and a write that completes late leaves the peer only the rest of the budget to answer; the bound closes the
-    connection at its expiry whatever frame is being processed; before Active on an Engine session the establishment
+    connection at its expiry, and at its own failure, whatever frame is being processed; before Active on an Engine session the establishment
     deadline caps it); `B-105-3` R-1 and its departure from QuickFIX (the record
     written before the write); `B-105-4` the #582 rule; `B-105-5` the TestRequest timing, the threshold's
     validation and the TestReqID(112) rule of ruling D-d (an earlier 112 of this connection neither answers nor ends;

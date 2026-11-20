@@ -99,7 +99,7 @@ contract's table and per row of data-model E-3 (research D10 lists them):
 - [RED] `LogoutWait105.<CloseTerminal|EngineStop|DriveReconnectDrain>DuringWait_OneClose`.
 - [RED] `LogoutWait105.PreActive_BoundSurvivesTheRefusalsOwnEdge`, `...PreActive_FramesDrained`,
   `...PreActiveTooLowLogon_PeerLogoutEndsWaitNoReset` (OQ-1), `...PreActive_BoundExpiryCloses`,
-  `...PreActive_BoundCappedByDeadlineNoEvent` (Engine), `...PreActive_DirectSession_BoundAloneEndsWait`,
+  `...PreActive_WaitArmedAtEstablishmentDeadline_ClosedNoEvent` (Engine; no arm in flight, so the pump's own `expire()` closes at that instant: this is E-5's cell, not the cap's, research D10), `...PreActive_DirectSession_BoundAloneEndsWait`,
   `...PreActive_CloseDuringWait_OneClose`.
 - [RED] `LogoutWait105.PendingTooHighMark_GapDeadlineLogout_EofAfterWrite` (C-2.8, N-5).
 - [RED] `LogoutWait105.OnLogoutFiresAtWaitEnd`.
@@ -107,6 +107,17 @@ contract's table and per row of data-model E-3 (research D10 lists them):
   allocation-failure seam at the bound's spawn: no Logout bytes at the peer, no wait, `Disconnected` and `onLogout`
   once (after Active), EOF at once (clarification D-g). Mutant: the failure read as timeout 0 (a Logout on the
   wire).
+- [RED] `LogoutWait105.EndingBound_RaceThrows_<Writing|Armed>_EofAtOnce` — an in-body seam throwing `std::bad_alloc`
+  where the bound builds its race, before it awaits the `||` expression, never inside an arm (data-model E-3 row 16). `Writing`: the Logout's write held behind a peer that does not
+  read, EOF at once with the clock frozen, no wait after it, `onLogout` once; `...Writing_StoreHeld_EofAtOnce`, the
+  Logout's store call still held when EOF is asserted. `Armed`: after Active and before Active. Mutant: the failure
+  exit routed through `release_connection_end_` (no EOF while the write is held).
+- [RED] `LogoutWait105.EndingBound_DeadlineArmAbsorbsException_<Writing|Armed>_EofAtOnce` — the counting `Clock`
+  decorator of `test_105_support.hpp` as `clock_override`, throwing `std::bad_alloc` from `sleep_until` for the
+  bound's instant only; EOF at once. Mutant: the early completion read as a re-test (the decorator's count of the
+  bound's sleeps exceeds one per wake).
+- Both failure-exit cells drive the executor by a bounded number of handler runs (`run_one` × N, or `run_for`
+  under a wall cap), so each RED arm terminates.
 - [RED] `LogoutWait105.Bound_ExpiresWhileResendAnswerBlocked_EofAtTheBound` — SendingTime-Reject route; the peer's
   ResendRequest during the wait, its answer blocked in `async_write` (the peer stops reading); open at the bound −
   1 ms, EOF at the bound (N-1). Mutant: rows 10 and 11 routed through `release_connection_end_`'s `inbound_depth_`
@@ -139,6 +150,10 @@ close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogou
 - [RED] `WriteLimit105.R1WriteHeld_PeerLogoutArrives_LogoutCompleteThenEof` — R-1's write held, the peer's
   in-sequence Logout delivered, the write released: the Logout complete on the wire, then EOF (the latch deferred to
   the writer; mutant: the pump's latch test without the `writing` deferral).
+- [guard: "Leaving `writing`" ignores `cut`] `WriteLimit105.DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed` — an R-2 Logout's write held, the
+  mock clock advanced to the bound, the write released before the executor is drained, so its completion runs
+  ahead of the close frame's `close_async()` (bounded drive): no wait armed, `Disconnected` and `onLogout` once, the
+  session not left Active. GREEN on the base by design (no wait exists there); its RED is the mutant (data-model E-3).
 - [RED] `WriteLimit105.R1WriteHeld_LimitFiresInsideStoreCall_EofAtBoundOnLogoutAfterStore` — the limit fires while
   the Logout's store call is held: EOF at the bound, `onLogout` when the store returns.
 
@@ -155,9 +170,11 @@ close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogou
   construction proof of the sleep set, data-model E-4).
 - [RED] `LivenessTiming105.FrameAfterHeartbeatInstant_HeartbeatAtTheStaleGiveUpWake` — a frame at 23 s; the Heartbeat
   just after 24 s, not before; positive control: none at 23 s.
-- [RED] `LivenessTiming105.SilentAfterTestRequest_NoSpin` — the mock clock's registered sleeps counted: one per wake,
-  a bounded number of loop iterations from TR1 to the give-up. Mutant: the passed, ineligible Heartbeat instant kept
-  in the sleep set.
+- [RED] `LivenessTiming105.SilentAfterTestRequest_NoSpin` — a counting `Clock` decorator over `mock_clock` in
+  `test_105_support.hpp` (`mock_clock` exposes no count), set as `clock_override`: one `sleep_until` per wake, a
+  bounded number from TR1 to the give-up. The executor is driven by a bounded number of handler runs per mock-clock
+  step (`run_one` × N), never run-until-idle, because under the mutant every sleep completes at once. Mutant: the
+  passed, ineligible Heartbeat instant kept in the sleep set; its RED arm terminates as a failed count.
 - [RED] `LivenessTiming105.SecondTestRequest_LateAnswerToTheFirst_StaysActive` (D-d: TR2 stays pending; the give-up
   2T after that frame).
 - [RED] `LivenessTiming105.GiveUp_LogoutTextPinned_ThenEof` — Text(58) spelled out in the cell.
@@ -189,7 +206,9 @@ close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogou
 - [RED] `PreSessionLog105.<NotTls|TlsHandshake|NoTimeLeft|FirstFrameTimeout|FirstFrameOverBudget|FirstFrameOverLimit|NoIds|NoSession>_OneRecord`.
 - [RED] `PreSessionLog105.NoSession_RecordNamesCompIds`, `...LongCompIds_CutAt15Bytes`.
 - [RED] `PreSessionLog105.Flood_BoundedWithSuppressedCount`.
-- [RED] `PreSessionLog105.ListenerBindFails_OneRecord` (port in use).
+- [RED] `PreSessionLog105.ListenerBindFails_OneRecord` (port in use; the `std::system_error` arm, the error's value).
+- [RED] `PreSessionLog105.ListenerConstructionThrowsNonSystemError_OneRecordErrorZero` — a listener-construction
+  seam in `run_accept_loop` throwing `std::bad_alloc` (no configuration reaches the generic arm; research D8).
 
 **C ABI (C-9)** — extend `tests/capi/recovery_liveness_capi_witness_test.cpp`: [RED] the 1.18 observers through the C
 ABI, `fixpp_session_close` (graceful and terminal) and callback delivery during the wait included, with a positive
@@ -218,7 +237,8 @@ Each must turn its cells RED, run unfiltered:
 - `release_connection_end_` made a no-op (class D and A cells);
 - the owe refused whenever a wait is `armed` (round 1's predicate; the W-9 cells);
 - the edge's owe moved below the no-application return (`PumpSilentEnding_NoApplication_*`);
-- `expire()` without its `ended` test (the no-timeout-event cells);
+- `expire()` without its `ended` test (the no-timeout-event cells, `PreActive_WaitArmedAtEstablishmentDeadline_ClosedNoEvent`
+  included);
 - the R-2 bound's deadline read from the last send, or from the write's completion, instead of the write's start
   (`Bound_DoesNotSlideWithAnAnswerSent`, `WriteReleasedBeforeTheBound_*`);
 - the response test deleted, and moved below the too-high branch (the off-NextNumIn `*_EndsWaitAndResets` cells);
@@ -232,11 +252,20 @@ Each must turn its cells RED, run unfiltered:
 - the write limit deleted (every `WriteLimit105.*` cell; the spurious-hit arm: the connection stays open past the bound);
 - the write limit's close made through the latch consumer's `inbound_depth_` test (`WriteLimit105.R2*` and `Reply_*`);
 - the bound's expiry close made through `release_connection_end_` (`Bound_ExpiresWhileResendAnswerBlocked_*`);
-- the establishment cap's arm deleted (`PreActive_*_ClosedAtEstablishmentDeadlineNoEvent`);
+- the establishment cap's arm deleted (`PreActive_<LogoutBlockedInWrite|LogoutHeldInStore>_ClosedAtEstablishmentDeadlineNoEvent`,
+  `PreActive_ClockOverride_CapOnEngineClock`);
+- the bound's failure exit routed through `release_connection_end_` (`EndingBound_RaceThrows_Writing*`,
+  `EndingBound_DeadlineArmAbsorbsException_Writing*`);
+- the bound's early deadline-arm completion read as a re-test (`EndingBound_DeadlineArmAbsorbsException_*`;
+  terminates under the bounded drive);
 - each spawn's fail-closed `catch` replaced by round 2's (`CloseFrameSpawnFails_*`, `BoundSpawnFails_*`);
 - `close()`'s second join deleted (`Lifetime105.CloseFrame_SpawnedByWriteLimitDuringGracefulClose`);
-- the passed, ineligible Heartbeat instant kept in the sleep set (`SilentAfterTestRequest_NoSpin`);
+- the passed, ineligible Heartbeat instant kept in the sleep set (`SilentAfterTestRequest_NoSpin`; terminates
+  under the bounded drive);
+- each listener catch arm's record deleted (`ListenerBindFails_OneRecord`,
+  `ListenerConstructionThrowsNonSystemError_OneRecordErrorZero`);
 - the latch consumers' `writing` deferral deleted (`R1WriteHeld_PeerLogoutArrives_*`);
+- "Leaving `writing`" ignoring `cut` (`DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed`);
 - the slot-74 record moved after the write (`WriteLimit105.R1_*`'s record assertion);
 - each `owe_connection_end_()` call site deleted;
 - the give-up's eligibility ignoring inbound since the TestRequest (`TrafficAfterTestRequestNoHeartbeat_*`);

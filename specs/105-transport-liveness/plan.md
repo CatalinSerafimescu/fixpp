@@ -4,7 +4,7 @@
 
 **Input**: Feature specification from `/specs/105-transport-liveness/spec.md`, with owner rulings R-1 to R-4 and the
 clarifications Q1 and Q2, the 2026-11-20 rulings on SI-1 to SI-3, OQ-1 and L-105-b, the Gate A round 1 decisions
-D-a to D-c and the Gate A round 2 decisions D-d to D-f, and the Gate A round 3 decision D-g and its scope ruling (final). **Base**: the branch's merge-base with `origin/main` (the source was read at `52aeed4e`, PR #711's squash; the
+D-a to D-c and the Gate A round 2 decisions D-d to D-f, and the Gate A round 3 decision D-g and its scope ruling (final), and the loop 2 round 1 scope ruling (no new decision). **Base**: the branch's merge-base with `origin/main` (the source was read at `52aeed4e`, PR #711's squash; the
 branch is rebased onto `310ff565`, #713, tests only; the session and engine code is unchanged). Decisions D1 to D12, risks and the ruled spec
 issues (OQ-3 closed by ruling D-e) are in [research.md](research.md); the state is
 [data-model.md](data-model.md); the observable rules are [contracts/transport-liveness-105.md](contracts/transport-liveness-105.md)
@@ -47,7 +47,8 @@ Batch B27 (lane S1): fixpp#534, #582, #535, #559 sites 2 and 3, and #687, with R
    after the arming, every frame but the peer's Logout is drained, nothing is reset, and on an Engine session the
    pump hands its establishment deadline to the Session once, which caps the write and the wait on the engine clock (a
    direct Session has none). The bound's expiry, like the write limit, closes the transport whatever arm is in
-   flight; a bound that cannot be spawned means the Logout is not written (ruling D-g). One state machine (E-3) fixes the latch, the bound's wake sources and live predicate, and
+   flight; so does the bound's own failure (its `catch (...)`, or a deadline wait that completes early on an absorbed
+   exception), through the same expiry exit (loop 2 round 1, root cause #1); a bound that cannot be spawned means the Logout is not written (ruling D-g). One state machine (E-3) fixes the latch, the bound's wake sources and live predicate, and
    who closes, for graceful and terminal `close()`, `Engine::stop()` and the drain.
 3. **#582 (D5).** With `validate_sequence_numbers` off, an out-of-sequence Heartbeat reaches the TestReqID rule.
 4. **#535 (D6).** T = `test_request_threshold`, default 1.2 × HeartBtInt; TestRequest at T of inbound silence,
@@ -150,7 +151,7 @@ harness for the latch test (research D10, contract C-12).
 | XVI §3, §4 | `/clarify` done; `/analyze` mandatory (session FSM, ABI, threading, security) | PASS (scheduled) |
 | XVII §1, §2, §7, §8 | Gate A triggered (public C++ API, C ABI, concurrency, session FSM, security); Gate B; local build; `/speckit-verify` | PASS (scheduled); see post-design for the tasks.md deviation |
 
-### Post-design (against research, data-model and contract; re-run after the Gate A round 3 targeted edit)
+### Post-design (against research, data-model and contract; re-run after the Gate A loop 2 round 1 pass)
 
 - **VIII §2, §3, §5 / XV §1.** Per inbound frame: two tests (the pump's latch, the ending-phase test in
   `on_inbound_active_`); per write, one out-parameter; per Heartbeat with a TestRequest pending, the 112
@@ -166,9 +167,12 @@ harness for the latch test (research D10, contract C-12).
   for R-1, R-2 before and after Active and a reply; the Logout queued at the write gate, for R-1, R-2 after Active
   and a reply; the queued shape before Active is unreachable on an Engine session, research D10) and its TLS arm,
   the bound's expiry under a blocked arm, the establishment cap (write, store and wait), the four W-9 dispositions,
-  the spawn-failure seams (each asserting the peer's EOF), the liveness sleep set (a frame before and after the
-  Heartbeat instant, no spin), the TestReqID window's boundary cells, the no-application cell, the 112 outcomes per site, the no-clock and zero-timeout endings,
-  the listener catch's two arms and the saturating helpers. The verdict is a plan, not a result: it holds once those
+  the spawn-failure seams (each asserting the peer's EOF), the bound's failure exit per cause and phase
+  (`EndingBound_RaceThrows_*`, `EndingBound_DeadlineArmAbsorbsException_*`; loop 2 round 1, root cause #1), the `cut`
+  marker (`DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed`), the liveness sleep set (a frame before and after the
+  Heartbeat instant, no spin, counted by a `Clock` decorator under a bounded drive so its RED arm terminates), the TestReqID window's boundary cells, the no-application cell, the 112 outcomes per site, the no-clock and zero-timeout endings,
+  the listener catch's two arms (the `system_error` arm by a port in use, the generic arm by a listener-construction
+  seam, since no configuration reaches it; research D8) and the saturating helpers. The verdict is a plan, not a result: it holds once those
   cells exist at the implementation head, and the regenerated tasks.md carries them. ASan, UBSan and TSan run the
   105 label (the latch, the close frame and the bound are strand-confined; TSan is the proof, R1). clang-tidy,
   clang-format, cppcheck and IWYU on the touched files. **PASS (planned).**
@@ -185,6 +189,8 @@ harness for the latch test (research D10, contract C-12).
   ending is left without its close (round 3, root cause #1). The close
   frame holds only the transport's `shared_ptr` and its join, so it never dereferences the Session (data-model E-2);
   it runs on its own chain, so `close_async`'s `disable_cancellation` does not leak into the liveness loop (F-6). The
+  ending bound's own failure takes its expiry exit, never the depth-gated `release_connection_end_` (data-model E-3,
+  "The bound's exits"; loop 2 round 1, root cause #1), so it leaves no ending without its close. The
   ending bound captures `this` as `run_peer_logout_bound_` does, under a join that `close()` and
   `drain_for_reconnect_` join after their transport close, followed by a second join of the close frame's counter
   (round 3, N-3); `~Session`'s assert on it is Debug-only, so the
@@ -201,7 +207,9 @@ harness for the latch test (research D10, contract C-12).
   fallback when a close frame cannot be spawned (an allocation failure; ruling D-g, C-8.6, L-105-h). A refused,
   unauthenticated peer is held no longer than `logon_timeout_ms` on an Engine session (C-2.6): the establishment
   deadline now caps the refusal Logout's store call and write as well as the wait, by construction (round 3, root
-  cause #2); with `logout_disconnect_timeout_ms` 0 the refusal's write is unbounded as on `main` (L-105-f), and
+  cause #2), on the stated condition that the cap's wait and the bound's are independent sleeps, which holds on an
+  Engine session (its coroutines run on the type-erased session strand, never in `system_clock_source`'s per-session
+  slot; data-model E-3, "The establishment cap", gives the recipe; loop 2 round 1, root cause #2); with `logout_disconnect_timeout_ms` 0 the refusal's write is unbounded as on `main` (L-105-f), and
   before Active none of its frames is delivered (clarification D-b). A peer that stops reading can no longer hold
   an ending Logout's write (C-2.7); it can still hold a non-ending write (L-105-f, narrowed, with a follow-up issue).
   Peer-supplied CompIDs reach the log only through `ArgValue::from_inline`'s 15-byte copy, and records are
@@ -304,8 +312,27 @@ MSVC": a `brain/failure-classes.md` entry in that page's form (trigger and proce
 ## Open items carried to the orchestrator
 
 - None. **OQ-3** is closed by ruling D-e (spec Clarifications, Gate A round 2); SI-1, SI-2 and SI-3 = OQ-1 are ruled
-  (research "Spec issues for the orchestrator"). Owed before Gate B, not a question: the follow-up fixpp issue for
-  bounding every non-ending write (L-105-f), filed and named in the row.
+  (research "Spec issues for the orchestrator"). Owed before Gate B, not a question: the follow-up issues of the next
+  section, filed and named where they are cited.
+
+## Follow-ups to file before Gate B
+
+Each is a fixpp issue, labelled at creation, filed before Gate B and named where it is cited. None is 105 scope.
+
+- **Bounding every non-ending write** (L-105-f): a write that does not end the session stays unbounded; the issue
+  is named in L-105-f's row.
+- **The per-session timer slot under a direct driver** (`system_clock_source`; loop 2 round 1, Codex #1 downgraded,
+  root cause #2). `sleep_until` takes the per-session `SessionTimerSlot` when the awaiter's executor is exactly a
+  `session_executor` (`target<session_executor>()`), and that slot holds one timer, so a direct driver that spawns
+  a Session's coroutines on `sess.executor()` itself has concurrent sleeps of one Session reset each other's
+  expiry: 103's `run_peer_logout_bound_` beside a parked liveness sleep, `close()`'s wait, and 105's bound. The
+  `Clock::sleep_until` contract does not promise independent concurrent sleeps; the slot's own comment says the
+  design "implicitly requires user-side serialisation". Inferred from the code, not observed. Pre-existing on `main`; an Engine session does not reach it.
+- **The read pump's establishment race re-races an absorbed exception** (loop 2 round 1, N-1). In `run_read_pump`,
+  the establishment race's `outcome.index() == 1` takes `continue` ("The race only wakes a blocked read (C-4); the
+  loop head decides expiry"), and `detail::await_deadline`'s `catch (...)` completes that arm early on any
+  non-`system_error` exception, so a lasting allocation failure spins the session strand until the establishment
+  deadline. Pre-existing since 093. 105's ending bound does not copy the shape (data-model E-3, "The bound's loop").
 
 ## Gate A
 
@@ -335,6 +362,18 @@ MSVC": a `brain/failure-classes.md` entry in that page's form (trigger and proce
   (I-4, the second join), E-3 (the `writing` predicate, rows 5 and 5c), E-4 (the 2³² condition), E-7; research D1
   items 5 and 6, D2 items 9 and 11, D5, D8, D9, D10, D11; contract C-2.5 (the budget's origin), C-2.7, C-5.4, C-9;
   spec FR-016, FR-017 and the Base line; quickstart sections 2, 3 and 5.
+- Loop 2 round 1 applied 2026-11-20: Codex P1=1 P2=2 P3=1; Opus post-judging P1=0 P2=1 P3=6; rewrite addresses root causes #1 (D-g's fail-closed rule extended to the running bound: one failure exit, its `catch (...)` and a deadline arm completed before its instant, routed through the expiry exit of its phase, with the `cut` marker), #2 (the establishment cap's two waits stated as independent sleeps on an Engine session, with the condition and its recipe; the optional single wait not taken), #3 (the listener's generic-arm cell and seam, the no-spin counting decorator and bounded drive, the cap cell list aligned, the checklist's D-g refresh). Reviews: research/reviews/codex_105-transport-liveness_gate_a_4_review.md, research/reviews/opus_105-transport-liveness_gate_a_4_adversarial_review.md.
+- Where each loop-2 round-1 root cause landed: #1 data-model E-1 (class W), E-2 (the latch's clear list, the second
+  setter, the close frame's spawners, I-2's exception, I-5), E-3 (the field `ending_wait_.cut`, "Leaving
+  `writing`", "The bound's loop", "The bound's exits", rows 3, 4 and 16); research D2 items 8 and 11; contract C-1.b,
+  C-2 W-9, C-2.5, C-2.7; spec FR-004b; quickstart sections 3 and 5; Constitution Check XI and IX. #2 data-model E-3
+  ("The establishment cap"); research D2 item 8; Constitution Check XII; "Follow-ups to file before Gate B". #3
+  research D8 and D10; quickstart sections 3 and 5; Constitution Check IX; `checklists/requirements.md`. Two
+  follow-ups (the direct driver's shared timer slot, the pump's establishment-race spin) join L-105-f's in
+  "Follow-ups to file before Gate B". Beyond the review: the marker `ending_wait_.cut` (data-model E-3) is this
+  pass's addition. Routing the failure exit through row 4 exposed that row 4 itself had no decided "cut": a write
+  completing between the close frame's spawn and its `close_async()` reported transmitted and would arm a wait with
+  no bound running. It has its own guard cell and mutant, and is for the next review to judge.
 
 ### Round 1 — disagreements
 
@@ -442,6 +481,25 @@ did not take, are recorded here; Codex's fix is not applied in these forms.
   holds the gates by value, so the type must be complete in an installed header. The header is accounted instead.
 - **N-2, "read the deadline after the store step".** Not applied: R-1's limit and the pre-Active cap must hold for
   a Logout held in its store call. The two consequences are disclosed (C-2.5, B-105-2).
+
+### Round 4 — disagreements
+
+Loop 2 round 1 (review files suffixed `_4`). No finding of the Opus review is marked "Disagree". Codex's fix is not
+applied in these forms:
+
+- **Codex #1, severity and counter-proposal** ("two waits race on one single-slot clock timer", P1; "register one
+  `await_deadline` when the clocks are the same object", with a slot-faithful clock cell). Taken at P3 (Opus's
+  downgrade): an Engine session's coroutines run on the type-erased session strand, so `system_clock_source` gives
+  each sleep its own timer, and `mock_clock` keeps one waiter per sleep. The single wait is not a correctness fix: if
+  session coroutines did take the slot, the bound's wait would also clobber a parked liveness sleep and the pump's
+  establishment race, which one wait at `min()` does not close. The condition is stated instead (data-model E-3, "The
+  establishment cap"), the optional single wait is not taken, and the direct-driver case is a follow-up.
+- **Codex #2, input.** Taken at P2 with Opus's corrected input: a held store call alone only delays the close; the
+  unbounded case is a bound that fails while the Logout's write is held behind a peer that does not read. The fix is
+  Opus's shape (the failure exit is the expiry exit), not "spawn the transport-only close frame" for the `catch`
+  alone, so the absorbed-exception cause (N-1) takes the same exit.
+- **Codex #3, severity.** Taken at P3 (Opus's downgrade: Article IX §1 is assessed at `/speckit-verify`); the cell
+  and its seam are added rather than a waiver.
 
 ## Complexity Tracking
 
