@@ -479,7 +479,9 @@ refused peer needs (D-b).
   stating that the session was terminated due to lack of a response to a TestRequest(35=1) message, followed by
   terminating the transport layer connection") and the shape of 537's "ResendRequest unanswered, expecting MsgSeqNum
   N". The text is built in the loop's frame in a bounded buffer with a `static_assert` on its size, as
-  `resend_gap_deadline_`'s is.
+  `resend_gap_deadline_`'s is, sized for its longest content: `TestRequest unanswered, TestReqID TR` followed by the ten
+  digits of the largest `std::uint32_t`. So the Text cannot overflow; C-3.2's "does not fit its buffer" class is the
+  Logout frame's buffer (long CompIDs), not this one.
 - **The write is limited** (D2 item 11; kind `r1`): the leaf enters `writing`, so the write is raced against
   `logout_disconnect_timeout_ms` from its start, and at the deadline the transport is closed and the write returns
   as a failed one. No wait follows in any case (R-1 is FR-004a's exception).
@@ -716,9 +718,12 @@ shipped fixture and nothing requires it.
 - **One record per reject**, through a new anonymous-namespace `log_pre_session_reject` in E beside
   `log_role_loop_open_failure` (same logger resolution, same trace context), warn level, `cat::session`:
   `acceptor connection refused before a session: reason={} begin_string={} sender_comp_id={} target_comp_id={} error={} suppressed_since_last={}`.
-  `reason` is a `pre_session_reject` value (data-model); the CompIDs are those of the first frame when read
-  (empty otherwise), copied by `ArgValue::from_inline`, whose 15-byte copy bounds what an unauthenticated peer can
-  put in the log; `error` is the handshake's or the first-frame read's error code when there is one.
+  `reason` is a `pre_session_reject` value (data-model); the BeginString and CompIDs are those of the first frame when read
+  (empty otherwise), each byte outside printable ASCII (0x20 to 0x7E) replaced by `?`, then copied by
+  `ArgValue::from_inline`, whose 15-byte copy bounds the length: an unauthenticated peer can put neither a line break nor another control byte into the record. A search of
+  `src/log/` found no escaping step for them (re-derive by reading `src/log/file_sink.cpp`, `syslog_sink.cpp`,
+  `otlp_log_sink.cpp` and the drain's formatting in `logger.cpp`), so the replacement is the record's own (orchestrator review, step 9
+  checklist audit, nfr CHK029); `error` is the handshake's or the first-frame read's error code when there is one.
 - **The listener.** `catch (...)` gives no error value. The catch becomes `catch (std::system_error const&)`
   recording its `code().value()`, then `catch (...)` recording 0, each writing one record
   `acceptor listener could not bind: begin_string={} sender_comp_id={} target_comp_id={} error={}` with no rate gate
@@ -731,7 +736,7 @@ shipped fixture and nothing requires it.
 
 **Alternatives rejected.** *A gate per reason:* a flood can rotate reasons; one gate per entry bounds the total.
 *Logging CompID lengths only (101's choice for MsgType):* FR-014 asks for the CompIDs; the 15-byte bound and the
-file sink's escaping limit what they can carry.
+printable-ASCII replacement limit what they can carry (no escaping step was found in `src/log/`).
 
 ## D9 — C ABI and C++ surface
 
@@ -739,23 +744,57 @@ file sink's escaping limit what they can carry.
 predicate, "before the first public release" (the first GitHub Release, as the constitution's v-history note for
 §7 defines it): a MINOR bump only while no Release exists.
 `gh release list --exclude-drafts` on the fixpp repo returned nothing when Gate A round 1 read it; the predicate is
-re-read at the PR head as a precondition of the bump and its result goes in the evidence file, and a non-empty
-listing switches the action to the constitution's post-release rule. `include/fix/c_api/session.h`'s
+re-read at the PR head as a precondition of the bump (tasks.md T134) and its result goes in the evidence file. A
+non-empty listing stops the PR and goes to the orchestrator: from the first public release a breaking change needs a
+MAJOR bump, and the reset to `1.0.0` belongs to the release PR (Article X §7), neither of which this feature may take
+on by itself. `include/fix/c_api/session.h`'s
 1.11, 1.12 and 1.17 clauses state results this feature changes: an establishment refusal's connection "stayed
 open" to the deadline; endings "with no Logout"; a session "ends" when a TestRequest goes unanswered at today's
 timing; a too-low frame's Logout followed by the session's end. Article X §7 counts a changed documented result
-as breaking, and 103 bumped to 1.17 for the same kind of change. The observers (each gets a 1.18 clause, and the
+as breaking, and 103 bumped to 1.17 for the same kind of change. Read against `.specify/api-contract.md` §11, which §7
+makes the definition of a breaking change: the effect is "changing the meaning of a Stable-from-v1.0 C-ABI symbol" (the
+documented results of the five observers below), together with §7's own "a result other than the one documented". No
+other §11 effect applies: no symbol, type, error code, layout or calling convention changes; no documented ownership,
+lifetime or reentrancy rule changes (contract C-9); and no call fails where it used to succeed, because a send during
+the wait is refused with the code the base already returns at that point (the base's session is `Disconnected` there;
+contract C-2 W-10), and the new refusal of a set `test_request_threshold` ≤ 0 is not reachable from C (contract C-6.7:
+no setter, and the C ABI has no TOML entry point). `.specify/api-contract.md` §11 gets no "Updated
+(105-transport-liveness)" note: its preamble already routes a pre-release break to §7's consequence, and, as for 103's
+1.17, the record is `version.h`'s history, the declarations' 1.18 clauses and B-105-7 (099 added its note because its
+migration line lives in its own contract). MINOR moves 17 → 18 and MAJOR stays 1, so §4's downgrade frame stays
+continuous; no error code is added or renumbered, so a consumer pinned at minor 17 sees every code mapped as before. The observers (each gets a 1.18 clause, and the
 older sentences are amended in place): `fixpp_session_is_established` (true until the R-2 wait ends; stays true
 for a knob-off peer that answers; the TestRequest give-up at 2T), `fixpp_session_close`, `fixpp_session_send`
 (refused during the wait), `fixpp_session_register_callback` and `fixpp_session_register_send_callback`. What no
-declaration carries, the counterparty's side, goes in `version.h`'s 1.18 history: the connection closes at every
-ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtInt.
+What no
+ declaration carries, the counterparty's side, goes in `version.h`'s 1.18 history: every ending closes the
+connection; the unanswered TestRequest's Logout; the R-2 wait; the write limit on every ending Logout (contract C-2.7);
+the TestRequest at 1.2 × HeartBtInt; the TestReqID(112) rule of contract C-5.4 (the list of contract C-9 and tasks.md
+T115).
+- **The census of affected declarations** (re-run at the implementation head, tasks.md T116):
+  `git grep -nE 'TestRequest|HeartBtInt|heartbeat|logout_disconnect|Logout|stays open|stayed open|transport' -- include/fix/c_api`,
+  each hit mapped to the declaration its comment documents and classed "a result this feature changes" or "not this
+  rule". At the base it reports the five observers above (the known positives), the comments of the reset-policy
+  enumerators beside `fixpp_session_config_create` (what a strict acceptor refuses, not how its connection ends: not
+  this rule) and `version.h`'s history (history, never amended); `engine.h` reports nothing. A hit on any other
+  declaration gets its own 1.18 clause. The sentences amended in place are the census's hits in the observers' 1.11,
+  1.12 and 1.17 clauses, and in any older clause it reports, that state a connection that "stayed open", an ending "with
+  no Logout", the TestRequest's timing, or a too-low frame's Logout followed by the end; each carries "amended in C-ABI
+  1.18, 105", so `git grep -n 'amended in C-ABI 1.18' -- include/fix/c_api` lists them for review.
 - Each affected declaration gets a C-driven witness in `tests/capi/recovery_liveness_capi_witness_test.cpp`,
   `fixpp_session_close` (graceful and terminal) during the wait and callback delivery during the wait included.
 - In-repo consumers updated in the same PR (Article X §7): the Python binding's version expectations and every
-  test pinned to the minor (`git grep -nE 'MINOR 17|1\.17' -- include tests bindings tools ci`).
+  test pinned to the minor (tasks.md T012's grep), recorded per category §7 names: the Python binding (`bindings/`),
+  the tests (`tests/`, the `tests/interop` harnesses included), examples (no `examples/` tree exists at the base,
+  recorded as such) and the CI and tool scripts (`ci/`, `tools/`).
+- **Python.** The binding wraps the C ABI and states no session rule of its own, so these rules reach Python only
+  through the observers above. Its version expectations move (T118), the whole pytest suite runs (T140), and no new
+  pytest cell is owed: each changed result is witnessed at the C ABI the binding calls (T114). A pytest cell that fails
+  at T140 because it pinned an old result is re-pinned like any test pinned to the minor.
 - **C++.** `sizeof(Session)` changes (members added in D1, D2 and D5; `unanswered_tr_` and `ReconnectFsm`'s members
-  removed, FR-013). `ReconnectFsm`'s constructor signature and layout change (an installed header). `run_read_pump` is
+  removed, FR-013). `ReconnectFsm`'s constructor signature and layout change (an installed header); B-105-7 gives the migration line:
+  drop the `heartbeat_interval` and `logout_disconnect_timeout` arguments (they were stored and never read), and
+  `drive_logout` and the other removed stubs have no replacement (none had a caller in `src/`). `run_read_pump` is
   internal. A new installed implementation header, `include/fixpp/session/detail/log_rate_gate.hpp` (D8), with
   `detail/replay_gate.hpp`'s status: the install rule ships `include/` whole, and 084's package-layout contract
   ships a `session/detail/` header a public header reaches. No `SessionConfig` field changes. BREAKING C++ layout, recorded in B&L as 103's B-103-9 and 104's
@@ -976,8 +1015,13 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
   one fails there.
 - **Lanes.** linux-clang-debug, -asan, -ubsan, -tsan (the latch, the spawned close and the bound are strand
   confined; TSan proves it), gcc-release of the touched targets, and the MSVC build of the feature's targets before
-  the first labelled push (the project's rule for a feature's own targets). The TLS arm runs on every lane that runs
-  `loopback_tls_session_harness.hpp` today.
+  the first labelled push (the project's rule for a feature's own targets: a `-k 0` build of the touched targets and a
+  run of `-L 105`, TLS cells included; a TLS cell skipped there is recorded with its reason, not counted as a pass;
+  tasks.md T141). The TLS arm runs on every lane that runs `loopback_tls_session_harness.hpp` today, and a lane's run
+  whose TLS skip count is not zero is not a reading of that lane (the ctest entry defines `FIXPP_TLS_FIXTURE_DIR`).
+  Every sanitizer lane runs `-L 105` whole; the race cells `ConnectionClose105.EngineStopRacesEndingClose_OneClose`
+  and `ConnectionClose105.OnLogoutCallsClose_OneClose` and the TLS cells are read on TSan, and `Lifetime105.*` on
+  ASan (tasks.md T137).
 - **Benchmarks (Article VIII §2, §3; ruling D-f).** The per-frame cost is two tests, not one: the pump's latch test
   (`run_read_pump`) and the ending-phase test in `on_inbound_active_` (the response test of D2 item 3, made on every
   frame); per write, `store_then_emit`'s transmitted out-parameter; and members and frame state in the Active arms and
@@ -1010,8 +1054,7 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
   exactly 0", the comment above `detail::resend_gap_deadline`). Each hit is classed: superseded by name (a merged
   bundle, edited nowhere: `specs/005-*`, `specs/013-*`, `specs/092-*`, `specs/093-*`, `specs/103-*`, `specs/104-*`), a
   living surface rewritten, or not this rule.
-- **Rulings superseded by name in this bundle** (the spec's FR-019 list): 536-537-538 note R-6's "A Logout on the
-  dead-peer ending. Not taken" by R-1; D-537-5's C-3 disclosure ("the transport stays open") by FR-004; 103 Arm B's
+- **Rulings superseded by name in this bundle** (the spec's FR-019 list): 536-537-538 note R-6's "Not chosen: … a Logout on the dead-peer ending" by R-1; D-537-5's C-3 disclosure ("the transport stays open") by FR-004; 103 Arm B's
   disclosure and 104's DQ-8 (L-103-5) by FR-004; 093 FR-006 phase (b) and contract C-4/C-7 by FR-007; 092 contract
   C-2 O-1's close timing by FR-007; 005 research D-8 (threshold 1 × HeartBtInt) by R-3. The living
   `.specify/536-537-538-recovery-liveness.md` gets an erratum at its end naming 105 (that note is a design doc,
@@ -1044,19 +1087,25 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
     the Logout's number assignment and store call, a persistent store slower than the budget makes the Logout "not
     sent", and a write that completes late leaves the peer only the rest of the budget to answer; the bound closes the
     connection at its expiry, and at its own failure, whatever frame is being processed; before Active on an Engine session the establishment
-    deadline caps it); `B-105-3` R-1 and its departure from QuickFIX (the record
+    deadline caps it; the close at the bound comes before `Disconnected` and `onLogout` when the Logout is still in its
+    store call, and a store call that never returns leaves them unfired with the connection closed, as any hung store
+    call leaves its frame on `main`; a claimed pending too-high mark's receipt does not reset (contract C-2.8); and the
+    statement of QuickFIX's behaviour that replaces L-103-5's, per engine and path, as spec FR-016 gives it); `B-105-3` R-1 and its departure from QuickFIX (the record
     written before the write); `B-105-4` the #582 rule; `B-105-5` the TestRequest timing, the threshold's
     validation and the TestReqID(112) rule of ruling D-d (an earlier 112 of this connection neither answers nor ends;
     a 112 never sent ends; the set restarts at each connection; after 2³² TestRequests on one connection the window
     no longer identifies the sent set; a Heartbeat due after a frame that follows the TestRequest goes at its instant
-    or at the loop's next wake, at most max(0, T − H) late); `B-105-6` the pre-session and listener records; `B-105-7` BREAKING C-ABI 1.18,
-    the C++ layout changes (`sizeof(Session)` changes: FR-013 removes members, D1, D2 and D5 add them), and the new installed implementation header `include/fixpp/session/detail/log_rate_gate.hpp`
+    or at the loop's next wake, at most max(0, T − H) late); `B-105-6` the pre-session and listener records; `B-105-7` BREAKING C-ABI 1.18
+    (the observers of contract C-9), the C++ layout changes (`sizeof(Session)` changes: FR-013 removes members, D1, D2 and D5 add them), BREAKING C++
+    for `ReconnectFsm` (its constructor loses two parameters, and `drive_logout` and the other caller-less stubs go;
+    migration line: drop the two arguments, which were never read; the stubs have no replacement), and the new installed implementation header `include/fixpp/session/detail/log_rate_gate.hpp`
     (the status of `detail/replay_gate.hpp`); an `L-105-*` row for each disclosure of the contract's "Disclosed" section (L-105-b to
     L-105-h; L-105-a was withdrawn in Gate A round 1 and is not used). L-105-f is written as narrowed by ruling D-e
     (non-ending writes stay unbounded, including a liveness emit queued behind a blocked send, which never reaches
     R-1), names the follow-up fixpp issue for bounding every write (filed before Gate B, labelled from
     `gh label list`), and names the round-1 text it supersedes. L-105-g is the TLS abortive fallback of a cut write. L-105-h is the synchronous close when a close frame cannot be
-    spawned (clarification D-g). L-105-b carries no allocation-failure clause.
+    spawned (clarification D-g). L-105-b carries no allocation-failure clause. The spec's departures table and contract C-10's are copied into
+    the rows they belong to (tasks.md T123).
 - **Brain pages:** `brain/components/session.md` (R-6, and its deferral of the grace-check reading to B27),
   `brain/components/session-liveness-and-reconnect.md` (the `ReconnectFsm` correction block, and the liveness
   table's two thresholds as a pointer to source), `brain/components/engine-accept-path.md` (the first frame through
@@ -1085,7 +1134,11 @@ It is docs only; it touches no code and no test.
 - **R3. Timing cells on real clocks.** Every competing timeout is on the mock clock (D10); the wall cap exists only to
   stop a broken cell.
 - **R4. Interop peers.** QuickFIX peers in `tests/interop` now see a Logout before EOF on the unanswered TestRequest
-  and an R-2 wait; their cells are run.
+  and an R-2 wait; their cells are run. A QuickFIX C++ peer answers R-1's Logout as a request: `Session::nextLogout`
+  sends its own Logout when it has sent none, then disconnects (and resets under `ResetOnLogout`). fixpp has closed
+  after its write, so that reply meets a closed connection and the peer ends the session as it would have; a peer that
+  had already given fixpp up has disconnected first. fixpp's observable is the same either way: its Logout, then EOF
+  (tasks.md T139 reads it on the live cells).
 
 ## Spec issues for the orchestrator (all ruled 2026-11-20)
 

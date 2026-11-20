@@ -252,7 +252,8 @@ close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogou
 **Records (C-7)** — `test_105_presession_log.cpp`, capturing sink:
 - [RED] `PreSessionLog105.<NotTls|TlsHandshake|NoTimeLeft|FirstFrameTimeout|FirstFrameOverBudget|FirstFrameOverLimit|FirstFrameReadError|NoIds|NoSession>_OneRecord`
   — each `FirstFrame*` cell asserts `reason=first_frame` and the read's error that tells it apart from the other three.
-- [RED] `PreSessionLog105.NoSession_RecordNamesCompIds`, `...LongCompIds_CutAt15Bytes`.
+- [RED] `PreSessionLog105.NoSession_RecordNamesCompIds`, `...LongCompIds_CutAt15Bytes`,
+  `...ControlBytesInCompIds_WrittenAsQuestionMarks` (C-7.1: each byte outside printable ASCII written as `?`).
 - [RED] `PreSessionLog105.Flood_BoundedWithSuppressedCount`.
 - [RED] `PreSessionLog105.ListenerBindFails_OneRecord` (port in use; the `std::system_error` arm, the error's value).
 - [seam: the generic catch arm's record deleted] `PreSessionLog105.ListenerConstructionThrowsNonSystemError_OneRecordErrorZero`,
@@ -315,6 +316,7 @@ Each must turn its cells RED, run unfiltered:
   under the bounded drive);
 - each listener catch arm's record deleted (`ListenerBindFails_OneRecord`,
   `ListenerConstructionThrowsNonSystemError_OneRecordErrorZero`);
+- the pre-session record's printable-ASCII replacement deleted (`ControlBytesInCompIds_WrittenAsQuestionMarks`);
 - the latch consumers' `writing` deferral deleted (`R1WriteHeld_PeerLogoutArrives_*`);
 - "Leaving `writing`" ignoring `cut` (`DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed`);
 - the slot-74 record moved after the write (`WriteLimit105.R1_*`'s record assertion);

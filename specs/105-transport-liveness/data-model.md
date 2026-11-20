@@ -40,7 +40,11 @@ callers (a census row and a mutant each):
    state the function captures at its entry. The call sits in the existing `new_state == fsm_state::Disconnected`
    block beside `wake_peer_logout_bound_()`, **above** the `engine_.application == nullptr` return, so a session
    with no application owes its close too (093 placed `reached_active_` above that return for the same reason). A
-   write of `Disconnected` over `Disconnected` owes nothing.
+   write of `Disconnected` over `Disconnected` owes nothing. The order within the edge: the owe (which, during a wait
+   armed after Active, sets `phase = resolved`) and `wake_peer_logout_bound_()` run first, synchronously, then
+   `onLogout` fires. So an `onLogout` callback that calls `close()` finds the latch set and any wait armed after Active
+   resolved; `close()` clears the latch at its commit of `closing` and owns the one close (C-1.a; the cell
+   `ConnectionClose105.OnLogoutCallsClose_OneClose`).
 2. The bound at its expiry, or at its failure exit, for a wait armed before Active (the session is `Disconnected`
    already; E-3 rows 11 and 16).
 3. The pre-Active response, the peer's Logout during a wait armed before Active (E-3 row 9).
@@ -51,7 +55,9 @@ written (`ending_wait_.phase != writing`; E-3, "Other roots during `writing`"). 
 frame's join (`connection_close_join`, the shape of `peer_logout_bound_join`: it increments the counter at
 construction and decrements it at destruction, so a frame that is never published releases it), takes
 `live_transport_shared_()`, and spawns the static coroutine `close_transport_(join, std::shared_ptr<Transport>)` on
-`exec_.underlying()` inside a `try`, and clears the latch after `co_spawn` returns. **A spawn that throws fails
+`exec_.underlying()` (for an Engine session the session strand, `SessionEntry::session_strand`, on which the pump, the
+liveness loop and the transport's operations run; for a direct Session the executor the caller drives the Session on)
+inside a `try`, and clears the latch after `co_spawn` returns. **A spawn that throws fails
 closed** (Gate A round 3, root cause #1; clarification D-g): the `catch (...)` calls the synchronous
 `Transport::close()` of the transport it took, on the strand, and clears the latch; the join it constructed is
 destroyed unpublished, so the counter stays balanced and the peer still observes EOF with no later call. On the plain
@@ -83,7 +89,12 @@ clears the latch. These are I-2's exceptions.
   as a resend answer during the wait. No store work is cut by them: a store call completes before its frame's transmit (durable-before-transmit, `store_then_emit`'s I-3),
   and the receipt reset unit is store-only; the transport close only makes the pending writes complete with an
   error. A root that is not a deadline (E-3 row 12) gets no such exception: while an arm is blocked in a non-ending
-  write it defers to that arm, and the connection closes when that write returns (L-105-f).
+  write it defers to that arm, and the connection closes when that write returns (L-105-f). A deferral to the pump is
+  consumed on every pump exit, not only after a returned frame: `on_inbound_frame` reports an arm's failure by its
+  result, never by a throw past the pump, and every exit of `run_read_pump` (its error return, `expire()`, the
+  over-limit frame, a read ended by cancellation or by the transport's close) runs `close(terminal)`, which clears the
+  latch at its commit of `closing` and closes the transport (re-derive in `run_read_pump`: every `co_return` follows
+  `stop_pump`, `expire()` or `frame_too_large`).
 - I-3. The close frame's only effect is `close_async()` on the transport taken at the spawn; it never reads `this`.
 - I-4. `close()` never runs its own `close_async()` while a close frame spawned before its first join is in flight
   (the first join). A write-limit frame (E-3 row 4) can still be spawned after that join, while `close()` waits for
@@ -92,14 +103,36 @@ clears the latch. These are I-2's exceptions.
   closed, "Idempotent, exactly like close()"). `close()` and `drain_for_reconnect_` therefore join
   `connection_close_counter_` a second time, after the ending bound's counter: the bound spawns any row-4 or row-16 frame
   before it exits, so the second join collects it, and `~Session`'s assert holds after `close()` (Gate A round 3,
-  N-3).
+  N-3). `Engine::stop()` reaches every Session through `close()`: its step 2 dispatches the transport's close, its
+  step 4 runs `Session::close(terminal)` on the session strand after the loops' join (the step list of `Engine::stop`
+  in `src/session/engine.cpp`), so these joins and `~Session`'s assertions hold for every Engine session, a C-ABI one
+  included (`fixpp_engine_destroy` drives `Engine::stop()`; contract C-9). `~Session`'s assertions are Debug-only; in
+  a release build the guarantee is B-103-13's precondition (spec FR-016).
 - I-5. **One effective close per connection.** The latch is owed at most once per connection: the edge owes only on
   a transition into `Disconnected` (once per connection), and the wait's two direct callers fire only for a wait
   armed before Active, where no such transition follows. A later `close_async()` on the same transport (the pump's
   `close(terminal)` after a write-limit, bound-expiry, failure-exit or fallback close, `Engine::stop()`'s step 2) is subsumed, as
   F-5 describes; after the synchronous fallback (E-2) the transport is closed too, and both calls are idempotent. This is
   a census row, not a cell: every `Disconnected`-over-`Disconnected` write runs in the synchronous chain of the
-  first transition, before any consumer, so no peer-visible observable distinguishes it (Gate A round 2, N-3).
+  first transition, before any consumer, so no peer-visible observable distinguishes it (Gate A round 2, N-3). Its re-derivation recipe is tasks.md T006's:
+  each such write is recorded as a census row with its synchronous chain.
+- I-6. **At least once on an Engine session.** Every set is consumed by a consumer that runs after it: the pump after
+  the frame or on its exit (I-2), the root's own release at its exit (class D and A), the bound at its expiry or failure
+  exit (E-3), `close()` at its commit of `closing`, or the drain at its entry. A deferral hands the latch to a consumer
+  that tests it later: `inbound_depth_ != 0` to the pump after that arm (I-2), `writing` to the writer's root after the
+  write (E-3, "Other roots during `writing`"), each bounded by the write limit or the arm's return. The census table of
+  tasks.md (T006) is the control: every setter path's row names the consumer that runs after it.
+- I-7. **The generation.** `conn_gen_` is the existing per-Session connection counter, incremented in
+  `install_reconnected_transport`, the one place a Session's connection is replaced. The latch stores it at the set;
+  `release_connection_end_`, the bound's spawns (rows 4, 10, 11, 16) and the bound's live predicate compare it. A stale
+  close cannot reach a new connection: a set of connection n is refused by the comparison once n + 1 is installed, and
+  a close frame of connection n already spawned holds connection n's transport by its `shared_ptr` and closes only that
+  one. `drain_for_reconnect_` joins both counters before `install_reconnected_transport` runs, so no frame of
+  connection n is in flight at the increment, and no cell is owed for the stale case.
+- I-8. **The io_context.** Both frames run on the session's executor, so the io_context outlives them only by the
+  preconditions that already hold: `close()` (or `Engine::stop()`) joins both frames before the Session is destroyed
+  (B-103-13), and a Session holding a strand does not outlive its io_context. Destroying the io_context while either
+  frame is suspended is not supported; no cell does it.
 
 **Session-engine access.** `session_engine_access::take_connection_end(Session&) noexcept -> bool` (test and clear;
 it returns false and leaves the latch set while an ending Logout is being written), for the pump; `session_engine_access::ended(Session const&) noexcept -> bool` (`state() == Disconnected`), for the
@@ -131,7 +164,11 @@ nothing and enters nothing here), and before Active the build-and-emit of `refus
 
 **Entering `writing`** (all three kinds): only when a clock is present and `logout_disconnect_timeout_ms > 0`; then
 `phase = writing`, `cut = false`, the deadline is read, and the bound `run_ending_logout_bound_(join, gen)` is spawned **before the
-write**, in `on_inbound_active_too_high_logout_`'s shape: the join is the coroutine's parameter, and a `catch (...)`
+write**. The instant is the same step at every entry point: after Active, the leaf's claim of `logout_in_flight_`
+(R-1 from `run_liveness_loop`, R-2 from `send_ending_logout_`, the replies from `on_inbound_active_logout_` and
+`acknowledge_peer_logout_`, all through `inbound_logout_leaf_`), before its number peek, its store call and its gate
+acquire; before Active, the start of `refuse_logon_with_logout_`'s or `inbound_logon_sent_logout_leaf_`'s
+build-and-emit, before its number assignment and store call. The bound is spawned in `on_inbound_active_too_high_logout_`'s shape: the join is the coroutine's parameter, and a `catch (...)`
 around `co_spawn` sets `phase = none` and does not rethrow (the precedent's `catch` rethrows; this one must not).
 **A spawn that throws fails closed** (Gate A round 3, root cause #1; clarification D-g; row 2a): no Logout is
 written. The leaf takes the path it takes for a Logout that cannot be built (`inbound_logout_leaf_`'s "A frame that
@@ -233,12 +270,27 @@ later `close(terminal)` is subsumed. The failure exit never hands its close to `
 refuses while `inbound_depth_ != 0`: from `writing` the writer is usually a pump arm, and with the bound gone
 nothing else limits that write (Gate A loop 2 round 1, Codex #2). Every step of the expiry exit is `noexcept`
 (`record_state_transition_`, `owe_connection_end_()`, the close frame's spawn with its D-g fallback), so the
-failure exit cannot itself fail open. This is what makes contract C-2 W-9's "at the failing root's exit" hold for
+failure exit cannot itself fail open. The fallback's `Transport::close()` result is discarded, as `close()`'s grace
+discards its own direct close's: a transport whose close reports an error is not closed a second way, and the
+pump's later `close(terminal)` on it is subsumed (contract C-8.6).
+
+**Cancellation.** Neither new spawn binds a cancellation slot: each is `co_spawn(..., asio::detached)`, as
+`on_inbound_active_too_high_logout_`'s bound is, and runs on its own awaitable thread. So `root_cancel_` reaches
+neither, the bound's `||` race changes only the bound's own thread's cancellation filter, and `close_async`'s
+`disable_cancellation` stays on the close frame's thread (F-6); the liveness loop's and the pump's filters are not
+touched. W-13 and W-14 end the wait by a wake, never by cancelling the bound: the wake completes the race's wake arm,
+the `||` operator then cancels the deadline arm as in `run_peer_logout_bound_`, and that completion is read by its arm
+index as a re-test ("The bound's loop"). This is what makes contract C-2 W-9's "at the failing root's exit" hold for
 this root (row 16).
 
 **The bound's wake sources:** the `Disconnected` edge; the leaf's return from `writing`; `close()` at its first
 commit of `closing` (beside its `claim_peer_logout_none_()`); `drain_for_reconnect_` at its entry; the response
-(rows 8, 9).
+(rows 8, 9). `Engine::stop()` is not a separate source: its step 1 sets `engine_stop_requested_` (`note_engine_stop_`),
+and it reaches the bound through `Session::close(terminal)` at its step 4, whose commit of `closing` and whose
+`Disconnected` write (`close()` records it before its phase 2 when the session is not already `Disconnected`) wake it;
+after Active the re-test then fails on `!engine_stop_requested_` and on `fsm_state_ == Active`, before Active on
+`state_ == lifecycle::open` (row 15). Between steps 1 and 4 the bound runs on to its own instant at most; a wake there
+already finds the flag set.
 
 **Transitions.** "Owes" means `owe_connection_end_()` sets the latch (E-2); "no owe" means its predicate refuses.
 
@@ -252,7 +304,7 @@ commit of `closing` (beside its `claim_peer_logout_none_()`); `drain_for_reconne
 | 5 | any, any, `writing` | `close(terminal)`, an escalation, `Engine::stop()`; a graceful `close()` before Active (its phase 1 does not run there) | `writing` until the leaf returns | as row 3 or 4, whichever ends first | runs on until the leaf returns | the closer's own `close_async()` returns the write; `close()` joins the bound, then the close frame's counter again (E-2 I-4) |
 | 5c | Active, `closing` (graceful) or the drain flag, `writing` | `close(graceful)` after Active, `drive_reconnect`'s drain | `writing` until the leaf returns | as row 3 or 4 | runs on until the leaf returns | row 4's close frame at the bound, or the closer's direct `Transport::close()` when its wall-clock timer (`close_grace`; the drain's bound) wins first; the closer then proceeds and joins as row 5 |
 | 5a | any, open, `writing` | another root writes `Disconnected` (the peer's Logout answered while the owner is set; an internal failure) | `writing` until the leaf returns, then `none` (`fsm_state_` is no longer `entered_from`) | that transition owes; both consumers defer while `writing` | runs on until the leaf returns | the writer's root, after the write: the Logout is complete on the wire, then EOF |
-| 5b | any, open, `writing` | an arm returns an error (the pump's `!r`) | — | — | — | the pump's `close(terminal)` at once, as on `main`; it can cut the Logout in flight |
+| 5b | any, open, `writing` | an arm returns an error (the pump's `!r`) | — | — | — | the pump's `close(terminal)` at once, as on `main`; it can cut the Logout in flight. That close is row 5 for the write: `cut` is not set, because the closer owns the close, and no wait survives it: `close()` commits `closing` and records `Disconnected` (wake sources), so a wait the leaf arms from a write the close did not cut fails its live predicate (`fsm_state_ == Active` after Active, `lifecycle::open` before it) and the bound exits by row 15 |
 | 6 | NotConnected or LogonSent, open, `armed` | the refusal's own `Disconnected` write | `armed` | no owe (a wait armed before Active) | woken; its predicate holds; waits on | rows 9, 11, 15 |
 | 7 | Active, open, `armed` | a second ending from a peer frame (C-2 W-8): `send_ending_logout_` or `end_session_silently_` | `armed` | none (nothing recorded) | runs on | — |
 | 8 | Active, open, `armed` | the peer's Logout (W-1) | `resolved`, at the response arm's entry | the arm's `Disconnected` owes | woken, exits | the pump, after the arm returns (reset unit first) |
@@ -265,6 +317,15 @@ commit of `closing` (beside its `claim_peer_logout_none_()`); `drain_for_reconne
 | 15 | any, `closing` (terminal or escalated) or the stop flag or the drain, `armed` | `close(terminal)`, `Engine::stop()`, an escalation, `drive_reconnect`'s drain | `resolved` at the bound's exit | none (`closing` or the drain flag) | woken, exits; the closer joins it | the closer, as today |
 | 16 | any, any, any | the bound fails: its own `catch (...)`, or a deadline arm that completed while that arm's clock reads before its instant (`detail::await_deadline`'s absorbed exception) | as the expiry exit of the phase it finds ("The bound's exits"): `writing` with `cut` set until the leaf returns, then `none`; `armed` → `resolved` | as row 4 (`writing`), row 10, 11 or 14 (`armed`, live), or the ordinary exit (otherwise) | exits | as row 4 from `writing`; as rows 10, 11 or 14 from `armed`; the closer (row 15) or `release_connection_end_()` otherwise; never `release_connection_end_()` from `writing` or a live `armed` |
 | 17 | any, any, `resolved` or `none` | the next connection (`install_reconnected_transport`, `attach_accepted_transport`) | `none` (asserted `resolved` or `none` there); `establishment_cap_` reset | — | — | — |
+
+**Totality.** The table is total over the events that change `phase`. In `none` only rows 1, 2, 2a and 17 act; every
+other event leaves `phase` at `none` and is today's behaviour. In `writing`, rows 3 to 5c and 16: a peer frame the pump
+delivers while another root writes is processed by its arm (a `Disconnected` it records is row 5a; a second ending is
+absorbed, `ending_in_progress_()` holding during `writing` after Active), a frame cannot arrive while the writer is a
+pump arm (the pump is serial), and a reconnect cannot (row 17's `install_reconnected_transport` runs only after
+`drain_for_reconnect_`, row 5c, has waited for the leaf's return). In `armed`, rows 6 to 16 and contract C-2's W rows.
+In `resolved`, only row 17 acts: every other event finds the bound exiting and the latch's consumer or the closer
+already acting.
 
 **The order before Active** (rows 1, 3, 6): enter `writing` and spawn the bound; the Logout's write; `armed`; the
 refusal's own `Disconnected` write. Arming after that write would let the edge owe the close and end the wait before
@@ -321,7 +382,9 @@ TestRequest. With inbound silent since the TestRequest, nothing but the give-up 
 **One predicate**, `liveness_may_originate_()` = `fsm_state_ == fsm_state::Active && ending_wait_.phase == none`:
 the loop condition and every test after a suspension (after the sleep, after each emit). It is keyed on the
 ending's state, not on `logout_in_flight_`, because `run_logout_phase1` sets that flag before it records
-`LogoutSent`. The arming adds no wake: the predicate is what keeps the loop from originating, and `close()` and the
+`LogoutSent`. It does not block R-1: the loop tests it after its sleep, before it acts; the give-up then writes the
+slot-74 record, enters `writing` at the leaf (kind `r1`), and, when the leaf returns (`phase` back to `none`), records
+`Disconnected`, so the post-emit test fails on `fsm_state_` and the loop exits to its release (research D3). The arming adds no wake: the predicate is what keeps the loop from originating, and `close()` and the
 drain join the loop as today (research D2).
 
 The loop is off when H ≤ 0 (owner ruling on SI-2, 2026-11-20).
@@ -332,13 +395,16 @@ too-high Heartbeat route and #582's knob-off route call), and only while a TestR
 
 | 112 on the Heartbeat | Outcome |
 |---|---|
-| absent, or equal to `pending_test_req_id_` | **answers**: the pending TestRequest is cleared |
+| absent, or equal to `pending_test_req_id_` | **answers**: the pending TestRequest is cleared. "Absent" is the header scan's empty TestReqID, as today; whether a present but empty `112=` is a header fault or reads as absent is the scan's rule, unchanged by 105 (the fuzz seeds include it, tasks.md T085) |
 | `TR` followed by the canonical decimal (no sign, no leading zero, fits `std::uint32_t`) of an n with `(n − floor − 1) mod 2³² < (next − floor) mod 2³²`, other than the pending one | **earlier**: a TestRequest fixpp sent on this connection; neither answers nor ends; the frame refreshes liveness as every accepted frame does |
 | anything else | **mismatch**: ends the session silently, `session_testreqid_mismatch`, as today |
 
 `next` is `next_test_request_id_` (the per-Session counter the loop increments for each TestReqID, never reset in
 `src/`); `floor` is a new `std::uint32_t test_request_id_floor_`, set to `next_test_request_id_` at every connection
-start (`open()`, `install_reconnected_transport`, `attach_accepted_transport`). Memory is those two integers. The
+start (`open()`, `install_reconnected_transport`, `attach_accepted_transport`). Each start runs with no inbound frame
+inside an arm, so no classification straddles the reset: `open()` and `attach_accepted_transport` run before the
+pump's first delivery, and `install_reconnected_transport` runs after `drain_for_reconnect_` has quiesced the inbound
+chain (B-103-9). Memory is those two integers. The
 window `(floor, next]` is modular, so it is wrap-safe while fewer than 2³² TestRequests have been issued on one
 connection. After 2³² TestRequests on one connection the window no longer identifies the sent set: at exactly 2³²,
 `next == floor` and no value reads as earlier; past it, the window is the modular remainder (Gate A round 3,
@@ -392,16 +458,22 @@ Re-derive the branch list before coding: every `(void)transport->close(); contin
 
 | Entity | Where | Fields |
 |---|---|---|
-| `detail::log_rate_gate` | `include/fixpp/session/detail/log_rate_gate.hpp` (a new installed implementation header: `session.hpp` declares two gates; the status of `detail/replay_gate.hpp`, contract C-9) | `logged`, `next`, `unlogged` (Session's struct, moved; layout unchanged; `Session` keeps a member alias) |
+| `detail::log_rate_gate` | `include/fixpp/session/detail/log_rate_gate.hpp` (a new installed implementation header: `session.hpp` declares two gates; the status of `detail/replay_gate.hpp`, contract C-9) | `logged` (`bool`), `next` (`fixpp::core::steady_time_point`), `unlogged` (`std::uint64_t`, a count no flood reaches the range of) (Session's struct, moved; layout unchanged; `Session` keeps a member alias) |
 | `detail::admit_log_record(gate, now, window, occurrences)` | same, inline | returns the suppressed count since the last record and starts the next window, or counts and returns `nullopt` |
 | `Session::admit_log_record_` | unchanged signature | forwards with `effective_clock_` and `max(HeartBtInt, 1 s)` |
 | the accept loop's gate | a local of `run_accept_loop` | one per entry; clock `engine_cfg.clock`; window `max(entry's HeartBtInt or the default, 1 s)` |
 
 ## E-8. Log records added (each registered in `src/log/format_registry.cpp`)
 
+Each is a `FIXPP_SLOG` record: the producer stores the format's CRC32 id and its arguments and the drain thread
+formats it (`src/log/format_registry.cpp`'s header), so no synchronous I/O runs on the session strand (Article XV §5).
+The registry is the drain's only source of the format text, so each record cell, which asserts the rendered record
+through a capturing sink, fails on a format that is not registered; the registry's duplicate-id `static_assert` checks
+collisions.
+
 | Writer | Level | Format | Rate |
 |---|---|---|---|
-| `run_liveness_loop` (R-1), written **before** the Logout's write (ruling D-e), so a write that never completes cannot lose it | warn | `session ended: TestRequest unanswered: test_req_id={} threshold_ms={} error={}` | once per connection |
+| `run_liveness_loop` (R-1), written **before** the Logout's write (ruling D-e), so a write that never completes cannot lose it | warn | `session ended: TestRequest unanswered: test_req_id={} threshold_ms={} error={}` | once per connection; a connection reaches it only after an accepted Logon and 2T of inbound silence, so a flapping peer yields at most one per reconnect cycle, and no gate is added (as `note_establishment_timeout_`) |
 | `log_pre_session_reject` (E) | warn | `acceptor connection refused before a session: reason={} begin_string={} sender_comp_id={} target_comp_id={} error={} suppressed_since_last={}` | E-7's gate |
 | `run_accept_loop`'s listener catch | error | `acceptor listener could not bind: begin_string={} sender_comp_id={} target_comp_id={} error={}` | once per entry |
 

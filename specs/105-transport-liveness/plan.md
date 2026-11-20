@@ -111,7 +111,14 @@ harness for the latch test (research D10, contract C-12).
   the close frame (`close_transport_`) and its `co_spawn` (at most once per connection for the latch, once for a
   write-limit close and once for the bound's expiry; a spawn that fails falls back to a synchronous close, which
   allocates nothing), the ending bound's frame and spawn (once per ending Logout, at most once per connection), the
-  R-1 text (stack buffer).
+  R-1 text (stack buffer). Combined, per connection: at most one ending bound and at most two close frames (a
+  deadline's or the bound's failure exit's, then the latch's, which finds the transport closed and is subsumed),
+  since one ending per connection enters `writing` (data-model E-3's absorption) and the write limit, the expiry and
+  the failure exit are exits of that one bound. No cell counts them: they are off the per-message path Article XV §1
+  governs.
+- The existing allocation guards of the inbound path (`tests/alloc_guard`, the pump's active-read guard
+  `test_093_pump_active_read_alloc_guard.cpp` among them) run at the PR head in tasks.md T142's full ctest, with their
+  result recorded in the verify evidence; the per-frame changes are read against them, not argued "at endings only".
 - `record_state_transition_` stays `noexcept` and suspension-free; no spawn there.
 - One observable ending per condition; one close per connection.
 - QuickFIX's observable behaviour is kept except the departures the spec and contract C-10 list.
@@ -149,7 +156,7 @@ harness for the latch test (research D10, contract C-12).
 | VI | Spec coverage: FIX-SL §3.1.25, §4.5.5, §4.6, §4.10 and TC 2c, 6 are cited by the spec | PASS |
 | VII / IX §1 | Every FR has a test path; coverage is diff-scoped (95/85, every uncovered error path assessed) | PASS, planned in D10 |
 | VIII §3, §5 | A per-frame change needs a benchmark; no hot-path allocation | PASS with the D10 bench obligation |
-| X §1, §6, §7 | C-ABI results change: `/clarify` done (Q1, Q2), `/analyze`, Gate A; the fourth Appendix A control, the user `/plan` sign-off ([const §X.6]), requested from the owner 2026-11-21, a hard precondition of Phase 3 (US1 part A); minor bump decided in D9 | PASS (controls scheduled; sign-off pending) |
+| X §1, §6, §7 | C-ABI results change: `/clarify` done (Q1, Q2), `/analyze`, Gate A; the fourth Appendix A control, the user `/plan` sign-off ([const §X.6]), requested from the owner 2026-11-21, a hard precondition of Phase 3 (US1 part A); minor bump decided in D9 | PASS (controls scheduled; sign-off pending; evidence pointers in the post-design X entry) |
 | XI §1–§3, §7 | Concurrency and cancellation touched: strand confinement, no `std::mutex`, all four controls | PASS (controls scheduled) |
 | XII §9 | Security surface (TLS close, unauthenticated pre-session peers): all four controls | PASS (controls scheduled) |
 | XIII §2–§3 | Logs are async `FIXPP_SLOG` records with the session or entry trace context | PASS |
@@ -181,11 +188,17 @@ harness for the latch test (research D10, contract C-12).
   `detail::is_earlier_test_req_id`, in `src/session/read_first_frame_bounded.hpp` (orchestrator decision on
   `/speckit-analyze` C1; data-model E-4): `classify_test_req_id_` calls it, and the harness calls it directly on each fed
   payload's 112 bytes, so the parse is fuzzed without a pending TestRequest. Its guard cells are tasks.md T086, its
-  mutants T088, and a libFuzzer run of at least 10 minutes is recorded (T148). **PASS (planned).**
+  mutants T088, and a libFuzzer run of at least 10 minutes is recorded (T148). The other new reads of peer bytes are
+  not parser changes: W-1's response test and the pre-Active `Disconnected` row read the `FrameHeader` fields that
+  `scan_frame_header` already produces (the scan is unchanged; the row adds a call site, not a parser), and the
+  pre-session record copies the BeginString and CompIDs that `scan_first_frame_ids` already extracts (unchanged), with
+  each non-printable byte replaced (research D8). **PASS (planned).**
 
 - **VIII §2, §3, §5 / XV §1.** Per inbound frame: two tests (the pump's latch, the ending-phase test in
   `on_inbound_active_`); per write, one out-parameter; per Heartbeat with a TestRequest pending, the 112
-  classification (two integers, no allocation). Allocation only at endings (the close frame, the ending bound), each
+  classification (a bounded parse of at most twelve bytes, `TR` and ten digits, then the two-integer window; no
+  allocation). tasks.md T014 records whether `on_inbound_frame_bench`'s Heartbeat case runs with a TestRequest pending;
+  if it does not, the PR adds that case (Article VIII §3). Allocation only at endings (the close frame, the ending bound), each
   bounded per connection (data-model E-2 I-5, E-3); the spawn-failure fallback allocates nothing. The liveness
   loop's sleep set and the establishment hand-off (one store per connection) add no per-frame work. Benchmarks: the paired A-B-A-B runs of ruling D-f, with the new
   pump case written in this PR, so no site is left without a bench (research D10, contract C-12). Round 1's fallback
@@ -210,7 +223,10 @@ harness for the latch test (research D10, contract C-12).
   and the 112 rule included); no error code added or renumbered (slot 74 and `session_testreqid_mismatch` exist); the
   Python binding and pinned tests updated in the same PR (D9). Article X §7's predicate read empty at Gate A rounds 1
   and 2 and is re-read at the PR head as a precondition (D9). Each affected declaration has a C-driven witness (C-9).
-  **PASS, pending the Appendix A controls.** The fourth, the user `/plan` sign-off ([const §X.6]), is requested from the
+  Evidence of the controls: `/clarify`, the spec's Clarifications (sessions 2026-11-20 and 2026-11-21); `/analyze`, its
+  C1 decision (data-model E-4) and its re-run after the step 9 checklist audit's SPEC-FIXED edits (`.specify/pipeline.md`
+  step 9), which is part of this control; Codex Gate A, `## Gate A` below (converged at loop 2 round 2, the review paths
+  there). **PASS, pending the Appendix A controls.** The fourth, the user `/plan` sign-off ([const §X.6]), is requested from the
   owner 2026-11-21 and is a hard precondition of Phase 3 (US1 part A; tasks.md "Dependencies and execution order").
 - **XI §1, §2.** Each new coroutine is `asio::awaitable`. Both new spawns take
   `on_inbound_active_too_high_logout_`'s join-as-parameter shape (the join is released by its destructor if the frame
@@ -248,7 +264,7 @@ harness for the latch test (research D10, contract C-12).
   before Active none of its frames is delivered (clarification D-b). A peer that stops reading can no longer hold
   an ending Logout's write (C-2.7); it can still hold a non-ending write (L-105-f, narrowed, with a follow-up issue).
   Peer-supplied CompIDs reach the log only through `ArgValue::from_inline`'s 15-byte copy, and records are
-  rate-bounded per entry (D8). The 112 rule reads a peer value into two integer comparisons, with no allocation. No
+  rate-bounded per entry (D8). The 112 rule reads a peer value through a bounded parse into two integer comparisons, with no allocation. No
   new peer-controlled allocation. **PASS (with the disclosures).**
 - **XIII §2, §3.** Records go through the resolved logger with the session's trace context (R-1, written before the
   Logout's write) or the entry's initial trace context (pre-session, as `log_role_loop_open_failure`); formats
@@ -365,7 +381,12 @@ MSVC": a `brain/failure-classes.md` entry in that page's form (trigger and proce
 ## Open items carried to the orchestrator
 
 - **The user `/plan` sign-off** ([const §X.6], the fourth Appendix A control): requested from the owner 2026-11-21, a
-  hard precondition of Phase 3 (US1 part A, tasks.md T018 onward). Not given yet.
+  hard precondition of Phase 3 (US1 part A, tasks.md T018 onward). Not given yet. It counts only as the owner's own
+  statement, recorded in `.specify/decisions/105-transport-liveness-evidence.md` with its date, its words and the bundle
+  head it was given on; an orchestrator's or an agent's report of it does not count. It covers the bundle at that head:
+  a later edit that changes an observable rule (spec, contract, data-model, research) needs a fresh sign-off, and an
+  edit that changes no rule (a citation, a task's wording, a step 9 audit fix that only states what the bundle already
+  decides) does not; the orchestrator records which it is.
 - No open question. **OQ-3** is closed by ruling D-e (spec Clarifications, Gate A round 2); SI-1, SI-2 and SI-3 = OQ-1 are ruled
   (research "Spec issues for the orchestrator"). Owed before Gate B, not a question: the follow-up issues of the next
   section, filed and named where they are cited.

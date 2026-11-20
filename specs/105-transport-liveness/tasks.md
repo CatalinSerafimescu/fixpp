@@ -196,12 +196,18 @@ production code. **Blocks every story phase.**
   commit, every C-ABI file it touched being a row (version macros, `session.h` clauses, capi tests, `tools/capi_freeze.sha256`
   and the generator found by `git grep -n capi_freeze -- tools ci .github CMakeLists.txt`). Known positives:
   `include/fix/c_api/version.h` (`FIXPP_C_ABI_VERSION_MINOR`) and `tests/capi/version_test.cpp`. Run the same grep over
-  `bindings/` with a seeded known positive in `$M` so a zero there is an instrument that could report non-zero.
+  `bindings/` with a seeded known positive in `$M` so a zero there is an instrument that could report non-zero. Record
+  the result per consumer category of Article X §7 (research D9): the Python binding (`bindings/`), the tests (`tests/`,
+  the `tests/interop` harnesses named as their own row), examples (`ls -d examples`; none at the base, recorded as
+  such), and the CI and tool scripts (`ci/`, `tools/`), so a missed category shows as an empty row.
 - [ ] T013 [P] `ReconnectFsm` census (research D7, SI-1): the stub caller grep (known positive: `drive_logout`'s test call)
   and the constructor call-site grep (known positive `tests/session/test_logout_timeout.cpp`).
 - [ ] T014 [P] Bench census (research D10, ruling D-f): read `bench/session/engine_send_bench.cpp`'s harness (its published
   Active session whose read pump waits on a scripted read), `on_inbound_frame_bench` and `session_send_bench`, and
-  `bench/ci-suite.txt`'s entries for the three; record where the new pump case goes and how each is run.
+  `bench/ci-suite.txt`'s entries for the three; record where the new pump case goes and how each is run. Fix, before the first run, the new case's frame mix and
+  count (Heartbeat and application frames through `run_read_pump`, the unarmed path), identical on base and candidate;
+  and record whether `on_inbound_frame_bench`'s Heartbeat case runs with a TestRequest pending (plan Constitution Check
+  VIII): if it does not, T138 adds that case.
 - [ ] T015 [P] Pre-session reject census (data-model E-6): every `(void)transport->close(); continue;` in
   `run_accept_loop` before `open()` maps to one row of E-6, plus the listener `catch (...)`; a branch with no row is a
   table defect for the orchestrator.
@@ -320,7 +326,8 @@ and no local API call (SC-001).
   `live_transport_shared_()`; spawns on `exec_.underlying()` inside a `try`; clears the latch after `co_spawn` returns;
   its `catch (...)` calls the synchronous `Transport::close()` of the transport it took, clears the latch and does not
   rethrow — ruling D-g). Add the test-only allocation-failure seam at this spawn (the seam family research D10 names).
-  Call `release_connection_end_()` at the exit of every class D and A root of research D1 item 7: `run_liveness_loop`,
+  Call `release_connection_end_()` at the exit of every class D and A root of research D1 item 7, on every exit, a
+  refused call included (contract C-1.c): `run_liveness_loop`,
   `run_peer_logout_bound_`, `send_body_` / `send_deferred_` (`Session::send`, `Engine::send`), `drive_reconnect`, and
   `Session::open` where it emits a direct initiator's Logon. Do not copy the liveness loop's `fetch_add`-then-bare-`co_spawn`
   shape.
@@ -666,7 +673,8 @@ the session stays Active past the give-up (SC-003).
   `next_test_request_id_` at `open()`, `install_reconnected_transport` and `attach_accepted_transport`; a mismatch through
   `end_session_silently_`; `answer_pending_test_request_` returns false only for a mismatch. Fuzzing (`[const §VII.7]`;
   plan Constitution Check VII §7, 027's seed-extension precedent): extend `tests/fuzz/fuzz_session_recovery_admin_parse.cpp`'s
-  seeds with Heartbeats carrying 112 forms (canonical, a leading zero, a sign, letters, an overflowing number, `TR` alone),
+  seeds with Heartbeats carrying 112 forms (canonical, a leading zero, a sign, letters, an overflowing number, `TR` alone,
+  an empty value `112=`, and the canonical forms of the window's two bounds),
   and have the harness call `detail::is_earlier_test_req_id` directly on each fed payload's 112 bytes (including
   `session/read_first_frame_bounded.hpp`; check the target's include directories carry `src/`, and add it if not), so the
   parse is fuzzed whether or not a TestRequest is pending. The run is T148.
@@ -690,7 +698,8 @@ the session stays Active past the give-up (SC-003).
   the sign refusal deleted (`Sign_Mismatch`), the overflow test deleted (`Overflow_Mismatch`), the `TR`-length test deleted
   (`PrefixAlone_Mismatch`). Record the mutant table; every quickstart section 5 row for this story is RED, or stop.
 - [ ] T148 [US2] Fuzz run ([const §VII.7]): build `fuzz_session_recovery_admin_parse` at `H3` with T085's seeds and direct
-  call (`-DFIXPP_BUILD_FUZZ=ON`, a tree on `/mnt/wsl/fixppbuild`, under the build lock), show first that the run reaches
+  call (the `linux-clang-asan` preset, which sets `FIXPP_BUILD_FUZZ=ON` and builds the fuzz targets with
+  `-fsanitize=fuzzer,address,undefined`, a tree on `/mnt/wsl/fixppbuild`, under the build lock), show first that the run reaches
   `detail::is_earlier_test_req_id` (a coverage read or a counter, non-zero), then run it for at least 10 minutes
   (`-max_total_time=600` over its corpus directory). Record the command, the duration, the execution count and the
   outcome in the evidence file; a crash or a sanitizer report is a defect until disproven.
@@ -802,7 +811,8 @@ inbound silence, one sleep per iteration, T validated.
   read's error that tells it apart from the other three: timeout, over budget, over-limit frame, read error, the last by
   the peer resetting the connection inside its first frame), `NoSession_RecordNamesCompIds`,
   `Flood_BoundedWithSuppressedCount` (at most one record per window on the engine clock; the next carries the suppressed
-  count), `LongCompIds_CutAt15Bytes` asserting L-105-d's cut, `ListenerBindFails_OneRecord` (a port in use: one error record of C-7.3's format with the system error's value). RED on
+  count), `LongCompIds_CutAt15Bytes` asserting L-105-d's cut, `ControlBytesInCompIds_WrittenAsQuestionMarks` (a first frame whose
+  SenderCompID carries a line feed and another control byte: the record holds `?` for each and no line break; C-7.1), `ListenerBindFails_OneRecord` (a port in use: one error record of C-7.3's format with the system error's value). RED on
   the base before the fix: no record.
 - [ ] T103 [US4] Commit the cells; read T102 on `$B`; record.
 
@@ -813,13 +823,14 @@ inbound silence, one sleep per iteration, T validated.
   occurrences)`; `Session` keeps the name by a member alias and `admit_log_record_` forwards with `effective_clock_` and
   `max(HeartBtInt, 1 s)`.
 - [ ] T105 [US4] `src/session/engine.cpp`: `enum class pre_session_reject` (data-model E-6) and `log_pre_session_reject` beside
-  `log_role_loop_open_failure` (same logger resolution and trace context, warn, `cat::session`); one record per reject branch of
+  `log_role_loop_open_failure` (same logger resolution and trace context, warn, `cat::session`), each byte of the BeginString and CompIDs outside
+  printable ASCII (0x20 to 0x7E) replaced by `?` before `ArgValue::from_inline` (research D8); one record per reject branch of
   T015's census; one gate per entry as a local of `run_accept_loop` (clock `engine_cfg.clock`, window `max(HeartBtInt or the
   default, 1 s)`); the listener catch split into `catch (std::system_error const&)` (its `code().value()`) and `catch (...)`
   (0), each one error record; a listener-construction seam; both formats registered in `src/log/format_registry.cpp`.
 - [ ] T106 [US4] [seam] `PreSessionLog105.ListenerConstructionThrowsNonSystemError_OneRecordErrorZero` in `tests/session/test_105_seams.cpp` (the seam throws
   `std::bad_alloc` in place of the construction; one record, `error=0`). Not readable on `$B`.
-- [ ] T107 [US4] Run T102 and T106 GREEN and `-L 105`; commit `H5`. Mutants in `$M`: each listener catch arm's record deleted
+- [ ] T107 [US4] Run T102 and T106 GREEN and `-L 105`; commit `H5`. Mutants in `$M`: the printable-ASCII replacement deleted (`ControlBytesInCompIds_WrittenAsQuestionMarks` RED); each listener catch arm's record deleted
   (`ListenerBindFails_OneRecord`, `ListenerConstructionThrowsNonSystemError_*` RED); the accept-loop gate bypassed
   (`Flood_BoundedWithSuppressedCount` RED). Record the mutant table; every quickstart section 5 row for this story is RED, or
   stop.
@@ -868,7 +879,9 @@ remaining reference.
   control (the session shown live first, or a well-formed message afterwards reaching `cb`): `fixpp_session_is_established`
   true during an R-2 wait after Active and false after its end; `fixpp_session_send` refused during the wait;
   `fixpp_session_close` graceful and terminal during the wait (one close each); `fixpp_session_register_callback` and
-  `fixpp_session_register_send_callback` delivery during the wait; the peer's EOF after an ending through the C ABI. RED on the
+  `fixpp_session_register_send_callback` delivery during the wait; `fixpp_session_send` called from inside the
+  application callback during the wait, refused with `session_invalid_state_for_send` and returning (contract C-9,
+  reentrancy); the peer's EOF after an ending through the C ABI. RED on the
   base before the fix. Base reading (the Execution rules' overlay covers `tests/session/` only): overlay this file (and its
   support header, if this task edits it) on `$B` from the commit holding the cells, reconfigure (the reading counts only after
   it returned 0), build only its own target `capi_recovery_liveness_test`, and run it with the new cells filtered. Its labels
@@ -880,10 +893,16 @@ remaining reference.
   what no declaration carries), the counterparty's side:
   every ending closes the connection; the unanswered TestRequest's Logout; the R-2 wait; the write limit on every ending
   Logout; the TestRequest at 1.2 × HeartBtInt; the TestReqID(112) rule. Never clang-format `include/fix/c_api/*.h`.
-- [ ] T116 `include/fix/c_api/session.h`: a 1.18 clause on each observer of contract C-9, each clause marked **BREAKING** ([const §X.7]); the 1.11, 1.12 and 1.17 sentences
-  this feature changes amended in place, "amended in C-ABI 1.18, 105".
+- [ ] T116 `include/fix/c_api/session.h`: a 1.18 clause on each observer of contract C-9, each clause marked **BREAKING** ([const §X.7]), stating what contract
+  C-9 "What the 1.18 clauses say" gives it; the 1.11, 1.12 and 1.17 sentences this feature changes amended in place,
+  "amended in C-ABI 1.18, 105". First run research D9's census of affected declarations at the head and record it: its
+  known positives are the five observers; a hit on another declaration gets its own clause, and every sentence the
+  census classes "a result this feature changes" is amended (then `git grep -n 'amended in C-ABI 1.18' -- include/fix/c_api`
+  lists them for review).
 - [ ] T117 Move every "pins the minor" row of T012 (the capi tests, `tests/capi/CMakeLists.txt`, the support headers, the CI
-  scripts it lists) and regenerate `tools/capi_freeze.sha256` by the generator T012 found; run `-L capi`.
+  scripts it lists) and regenerate `tools/capi_freeze.sha256` by the generator T012 found (the manifest's own `sha256sum` format over
+  `include/fix/c_api.h` and every header under `include/fix/c_api/`, never edited by hand; contract C-9); then run
+  `bash tools/check_capi_freeze.sh` and `tools/check_capi_occupancy.sh` (both pass) and `-L capi`.
 - [ ] T118 Python (Article X §7, in-repo consumers): run T012's grep over `bindings/` again at the head, its seeded known
   positive first; move any pin it reports and record the result, a zero included. Then contract C-6.7's instrument, research
   D6's `grep -rn test_request_threshold bindings include/fix`, seeded first in `$M`: it must report nothing (no C-ABI setter,
@@ -955,7 +974,9 @@ remaining reference.
   the capi and config tests, `engine_send_bench`).
 - [ ] T137 Sanitizer lanes linux-clang-asan, -ubsan and -tsan: `-L 105` and `-L session` (every existing close, stop and
   reconnect entry included), and the touched `capi` and `config` entries (`EngineStopRacesEndingClose_OneClose`, `OnLogoutCallsClose_OneClose` and the TLS cells on TSan; `Lifetime105.*` on ASan); a
-  report is a defect until disproven by a reproduction or a client-path analysis.
+  report is a defect until disproven by a reproduction or a client-path analysis. The baseline is the base on the same
+  entries (spec SC-006). A lane's run whose TLS skip count is not zero is not a reading of that lane (research D10,
+  "Lanes"); record each lane's test count and skip count.
 - [ ] T138 Benchmarks (Article VIII §2, §3; ruling D-f; contract C-12): add the pump case to `bench/session/engine_send_bench.cpp`'s
   harness (inbound Heartbeat and application frames through `run_read_pump`, the unarmed path); then paired base-vs-candidate
   A-B-A-B runs of `on_inbound_frame_bench`, `session_send_bench` and `engine_send_bench` with the new case, the base a release
@@ -969,7 +990,14 @@ remaining reference.
   Step 0; release the lock after; never at the same time as a Linux build.
 - [ ] T142 One full `ctest --preset linux-clang-debug --no-tests=error` (Article XVII §7), after reading the sandbox lock; record
   the count and any failure.
-- [ ] T143 Coverage of added lines (Article IX §1): fresh per-binary profraw for the `session`, `log` and `config` modules; every
+- [ ] T143 Coverage of added lines (Article IX §1): fresh per-binary profraw, from every binary the `105` label runs (`session_105_seam_tests` included: the
+  allocation-failure catches, the listener's generic arm and the bound's failure exit are reached only there), for the
+  `session`, `log` and `config` modules and every other module whose `src/` the diff adds a reachable line to (`src/capi`
+  if a witness needs a change there; `include/fixpp/core/error.hpp` and `include/fix/c_api/*.h` change comments only and
+  add no line to measure); pre-assigned, each with its rationale in the verify record: the queued-shape Logout before
+  Active has no branch of its own (the shared write point, covered by the after-Active cells; research D10, "The write
+  limit"), a `Disconnected`-over-`Disconnected` write is I-5's census row (data-model E-2), and the 2³² window wrap is
+  reached by the window function's runtime twins (T086); every
   uncovered added line or branch tested, waived with a one-line rationale, or escalated to a filed, labelled issue, in
   `.specify/decisions/105-transport-liveness-verify.md`.
 - [ ] T144 **(orchestrator)** `/speckit-verify`; writes `.specify/decisions/105-transport-liveness-verify.md`. Re-run T130 to T135
@@ -1084,6 +1112,7 @@ W-rows are in the design table above. "Statement" marks a clause no cell can obs
 | C-2.6 (before Active; the establishment cap) | T049 | T058, T061 |
 | C-2.7 (the write limit) | T051–T054, T070 | T059–T062, T067; E-3 row 5b (an arm's error close cuts a Logout in flight, as on `main`): no new behaviour, no cell, disclosed in L-105-f (T123) |
 | C-2.8 (the pending too-high mark) | T048 | T063 |
+| C-2.9 (the peer's Logout under the other checks) | W-1's cells (T042, T049) | T066 (the response test ahead of the PossDup arm; the 35=5 exemptions are `main`'s) |
 | C-3.1, C-3.2, C-3.3 (R-1) | T023, T051, T070, T089 | T031, T068, T095 |
 | C-3.4 (an answering or earlier 112) | T081, T082, T090 | T085 |
 | C-4.1 to C-4.5 | T021 | T029, T030 |
@@ -1099,6 +1128,7 @@ W-rows are in the design table above. "Statement" marks a clause no cell can obs
 | C-8.4 (graceful `close()` during the wait) | T054 | T061, T069 |
 | C-8.5 (the write limit on TLS; L-105-g) | T054 | T062 |
 | C-8.6 (the synchronous fallback; L-105-h) | T034, T070 | T027, T062 |
+| C-8.7 (the outcome by row) | the cells of C-8.1 to C-8.6 | statement |
 | C-9 (surfaces) | T114 | T104, T109, T115–T118 |
 | C-10 (departures) | T023 (R-1), T042 (the response), T047 (send, liveness), T049 (pre-Active), T051 (write limit), T082 (112) | T123 (copied, not re-derived) |
 | C-11 (L-105-b to L-105-h) | L-105-b T046, T048; L-105-c T023; L-105-d T102; L-105-e T047; L-105-f T051 (`TimeoutZero_WriteUnbounded`); L-105-g T054; L-105-h T034, T070 | T123 |
@@ -1110,7 +1140,11 @@ W-rows are in the design table above. "Statement" marks a clause no cell can obs
   waited for regenerated tasks) and `/speckit-checklist-audit` (`.specify/pipeline.md`); the audit blocks implementation.
 - **Before T018 (owner)**: the user `/plan` sign-off ([const §X.6], the fourth Appendix A control), requested from the owner
   2026-11-21. It is a hard precondition of Phase 3 (US1 part A): no cell of T018 onward is written until it is recorded.
-  Not given yet.
+  Not given yet. It counts only as the owner's own statement, recorded in the evidence file with its date, its words and
+  the bundle head it was given on (plan "Open items carried to the orchestrator" states its scope and when a later edit
+  needs a fresh one).
+- **After the checklist audit (orchestrator)**: if `/speckit-checklist-audit` SPEC-FIXED any item, `/speckit-analyze`
+  is re-run before Phase 1 (`.specify/pipeline.md` step 9); that re-run is part of Article X §6's `/analyze` control.
 - **Phases**: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11. US1 to US3 all edit `src/session/session.cpp` and run in order,
   never in parallel.
 - **US1's close mechanism is foundational.** T026 to T029 (the latch, `release_connection_end_`, `close_transport_`, the pump's
