@@ -547,6 +547,10 @@ It is docs only; it touches no code and no test.
   session that never reached Active other than arm S (a Logout refusing fixpp's Logon in LogonSent). Taken to the
   owner as OQ-1.
 
+## Owner rulings on SI-1..SI-3, OQ-1 and L-105-b (2026-11-20)
+
+All as recommended: OQ-1/SI-3 no reset; SI-1 remove every caller-less `ReconnectFsm` stub; SI-2 HeartBtInt ≤ 0 disables; L-105-b accepted and FR-001 scoped to Engine-managed sessions. The spec is amended (Clarifications, FR-001, FR-004, FR-010, FR-013).
+
 ## Open questions for the owner
 
 - **OQ-1. With `reset_on_logout`, does the peer's Logout that answers a Logout fixpp sent to refuse a Logon (before

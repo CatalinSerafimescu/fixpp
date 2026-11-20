@@ -104,6 +104,10 @@ The questions were asked with the comparison tables of the findings file (FIX-SL
 ### Session 2026-11-20 (`/speckit-clarify`)
 
 - Q: When fixpp refuses a peer before Logon and sends nothing back, does it close at once or at the establishment deadline? → A: close at once (FR-007); the deadline still closes a peer that sends nothing.
+- Q (plan OQ-1/SI-3): With `reset_on_logout`, does the peer's Logout answering a Logout fixpp sent to refuse a Logon reset the numbers? → A: no reset; the wait ends and the connection closes (FR-004).
+- Q (plan SI-1): Remove the other caller-less `ReconnectFsm` stubs too? → A: yes, every stub with no caller (FR-013).
+- Q (plan SI-2): Does a negative HeartBtInt disable liveness? → A: yes, HeartBtInt ≤ 0 disables it (FR-010).
+- Q (plan SI-4): Must a Session driven without an Engine close on its own after an inbound-frame ending? → A: no; accepted as limitation L-105-b, FR-001 scoped to Engine-managed sessions.
 - Q: During the bounded wait after a Logout fixpp sent to end the session, what happens to frames other than the peer's Logout? → A: process them as in Active, like QuickFIX C++/J (FR-004); fixpp's own LogoutSent drain for `close()` is not reused for this wait.
 
 ## User Scenarios & Testing *(mandatory)*
@@ -238,8 +242,10 @@ no comment claiming behaviour the code does not have.
 
 **A session that ends closes its connection (#534, R-1, R-2, R-4)**
 
-- **FR-001**: Every transition to `Disconnected` MUST end with the session's transport closed, so the peer observes
-  the connection end, with no further inbound frame and no local API call. This holds on every path the re-derive
+- **FR-001**: Every transition to `Disconnected` of an Engine-managed session MUST end with the session's transport
+  closed, so the peer observes the connection end, with no further inbound frame and no local API call. A Session
+  driven without an Engine closes at its next detached-root or application-call exit, `close()` or
+  `drive_reconnect` (limitation L-105-b, owner 2026-11-20). This holds on every path the re-derive
   lists: inbound arms that return success, detached coroutines (the liveness loop, the peer-Logout bound), the pre-Active
   refusals, and the acceptor's first frame. Two paths keep the close they already own: `close()` (its Logout phase and
   terminal close), and `drain_for_reconnect_`. The plan MUST derive the full set of transition sites by a census that
@@ -258,7 +264,8 @@ no comment claiming behaviour the code does not have.
   arrives, or when `logout_disconnect_timeout_ms` runs out counted from the write of fixpp's Logout, whichever is first.
   The peer's Logout received during the wait is a Logout response: under `reset_on_logout` it resets at its reset
   point, as a response in LogoutSent does (104 FR-003, B-104-1), and the close follows the reset unit. All three
-  engines reset on that Logout and disconnect. Every other inbound frame during the wait MUST be processed as it is
+  engines reset on that Logout and disconnect. Before Active (a refused Logon) the peer's Logout resets nothing
+  (owner 2026-11-20). Every other inbound frame during the wait MUST be processed as it is
   in Active (application messages reach `fromApp` and advance NextNumIn, a TestRequest is answered, sequence checks
   apply), as QuickFIX C++ and /J do (clarification 2026-11-20 Q2). The wait's bound still counts from the write of
   fixpp's Logout and does not slide with later sends. A frame during the wait that would itself end the session MUST
@@ -292,7 +299,7 @@ no comment claiming behaviour the code does not have.
 - **FR-010**: The TestRequest MUST be sent after T of inbound silence, and an unanswered one MUST end the session after
   2T of inbound silence, where T is `SessionConfig::test_request_threshold` when set and 1.2×HeartBtInt otherwise. The
   outbound Heartbeat cadence (1×HeartBtInt) and the gap deadline (B-537-2, 2×HeartBtInt) are unchanged. HeartBtInt ≤ 0
-  disables both, as today. Precedence: with the default T, the gap deadline (2×HeartBtInt) comes before the give-up
+  disables both (today only 0 does; owner 2026-11-20). Precedence: with the default T, the gap deadline (2×HeartBtInt) comes before the give-up
   (2.4×HeartBtInt), so with a gap open a silent peer now always ends at the gap deadline with its Logout (then R-2),
   never silently at the grace check. With a configured T below HeartBtInt the give-up can come first; both orders are
   tested.
@@ -305,7 +312,8 @@ no comment claiming behaviour the code does not have.
 
 - **FR-013**: `ReconnectFsm`'s unread members (`attempt_index_`, `heartbeat_interval_`,
   `logout_disconnect_timeout_`), its unused members (`heartbeat_timer_`, `test_request_timer_`, `logout_timer_`,
-  `last_outbound_testreqid_`), the `drive_logout` stub and the false header comment MUST be removed, and so MUST
+  `last_outbound_testreqid_`), the `drive_logout` stub and every other `ReconnectFsm` stub with no caller (found by a caller census), and the false
+  header comment MUST be removed, and so MUST
   `parse_cn_from_dn_local`. The test that probes `drive_logout` is retired or re-pointed with a note. Every size pin
   of `Session` and `ReconnectFsm` in `tests/` and `ci/` MUST be updated, found by a whole-repo search and a full build.
 
