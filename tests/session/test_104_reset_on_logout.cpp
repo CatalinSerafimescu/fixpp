@@ -2200,8 +2200,8 @@ TEST(ResetOnLogout104, ThrowingResetTo_ReceiptUnit_CloseNotHeld) {
     for (auto const role : kRoles) {
         SCOPED_TRACE(rg::role_name(role));
         fixpp::test_support::LogCapture log;  // declared before the session it serves
-        Rol104 r{Opts104{
-            .role = role, .store = store_kind::throwing_reset_to, .logger = log.logger}};
+        Rol104 r{
+            Opts104{.role = role, .store = store_kind::throwing_reset_to, .logger = log.logger}};
         auto& s = r.s;
         ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
         auto fut = s.feed_spawn(s.logout(s.next_in()));
@@ -2221,8 +2221,8 @@ TEST(ResetOnLogout104, ThrowingResetTo_ReceiptUnit_ArmL_Logged) {
     for (auto const role : kRoles) {
         SCOPED_TRACE(rg::role_name(role));
         fixpp::test_support::LogCapture log;  // declared before the session it serves
-        Rol104 r{Opts104{
-            .role = role, .store = store_kind::throwing_reset_to, .logger = log.logger}};
+        Rol104 r{
+            Opts104{.role = role, .store = store_kind::throwing_reset_to, .logger = log.logger}};
         auto& s = r.s;
         ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
         auto const mark = s.sent.size();
@@ -2297,6 +2297,41 @@ TEST(ResetOnLogout104, ThrowingResetTo_ReceiptUnit_ArmB_ImmediateAck_Logged) {
         std::cout << "[ ENDING   ] " << rg::role_name(role) << ": the delivery " << describe(ending)
                   << "\n";
         expect_dispatch_aborted(ending);
+        expect_one_threw_record(log);
+    }
+}
+
+// Arm B by its bound: a too-high Logout whose gap a GapFill then fills, so the bound acknowledges
+// it and runs the unit. No frame carries that exception: the bound ends as it does on any
+// exception from its body, with the mark `none` and the session Disconnected.
+TEST(ResetOnLogout104, ThrowingResetTo_ReceiptUnit_ArmB_Bound_Logged) {
+    for (auto const role : kRoles) {
+        SCOPED_TRACE(rg::role_name(role));
+        fixpp::test_support::LogCapture log;  // declared before the session it serves
+        Rol104 r{
+            Opts104{.role = role, .store = store_kind::throwing_reset_to, .logger = log.logger}};
+        auto& s = r.s;
+        ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+        seqnum_t const n = s.next_in();
+        (void)s.feed(s.logout(n + 3));
+        ASSERT_EQ(r.phase(), kPending) << "setup: no pending mark";
+        auto fut = s.feed_spawn(s.gap_fill(n, n + 4));
+        bool const bound_ended = s.pump_until(
+            [&] { return r.ctl.reset_to_throws == 1 && r.phase() == kNone; }, kReleaseBudget);
+        bool const frame_returned =
+            s.pump_until([&] { return rg::Scene::ready(fut); }, kReleaseBudget);
+        bool const in_flight = session_test_access::reset_unit_in_flight(*s.session);
+        auto const state = s.state();
+        r.spawn_close(close_mode::terminal);
+        bool const close_returned = r.close_returned_within(kReleaseBudget);
+
+        EXPECT_TRUE(bound_ended) << "the bound's unit did not throw, or its mark stayed set";
+        EXPECT_TRUE(frame_returned) << "the GapFill's frame did not return";
+        EXPECT_EQ(r.ctl.reset_to_throws, 1) << "the reset unit's reset_to did not throw once";
+        EXPECT_FALSE(in_flight) << "reset_unit_in_flight_ is set after the unit's reset_to threw";
+        EXPECT_EQ(state, fsm_state::Disconnected) << rg::state_name(state);
+        EXPECT_TRUE(close_returned) << "close() did not return";
+        EXPECT_FALSE(r.close_reset_wait_expired()) << "close_reset_wait_expired was emitted";
         expect_one_threw_record(log);
     }
 }

@@ -1869,6 +1869,13 @@ private:
     // reset unit returned an error, carrying the part that failed and its error; nothing when
     // it succeeded. The arm proceeds either way.
     void note_receipt_reset_failed_(reset_unit_result const& unit) noexcept;
+    // 104 (contract RT-4), fixpp#708: the receipt reset unit as a receipt arm's reset point runs
+    // it. A returned result goes to note_receipt_reset_failed_; a throw from the store's reset_to
+    // goes to note_receipt_reset_threw_ and is then rethrown, so the arm ends as it would without
+    // the record. The Logon arms' 141=Y unit does not run through it.
+    [[nodiscard]] asio::awaitable<void> run_receipt_reset_unit_() noexcept;
+    // fixpp#708: one log record when the receipt reset unit's store reset_to threw.
+    void note_receipt_reset_threw_() noexcept;
     // Set across the unit's reset_to await and cleared after it, error paths included.
     // close() polls it (104, contract RR-2 item 4). Session strand only, as
     // teardown_reset_done_.
