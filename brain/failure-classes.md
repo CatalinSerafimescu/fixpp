@@ -1155,6 +1155,43 @@ object.
   commit marker published after the next fallible step): a publication whose placement relative to
   a fallible step decides what a failure looks like.
 
+### 24. A passkey that is trivially copyable restricts nothing
+
+An access restriction is expressed as a key type: an empty class whose default constructor is
+private and whose friend is the one caller allowed to act, so a function taking the key by value
+can be called only by that friend. If the key is trivially copyable, `std::bit_cast` makes one from
+bytes, which is well-defined C++, and anyone can call the function. The restriction the key's
+comment and the records describe is then false.
+- A user-provided private default constructor does not help.
+- A deleted copy and move is still accepted by clang's `bit_cast`.
+
+- **Trigger:** you write or review a tag or key type whose only purpose is to limit who can call a
+  function, or a record that claims "only `X` can …" on the strength of one.
+- **Procedure:**
+  - Give the key a user-provided private copy constructor (`key(key const&) noexcept {}`), and pass
+    the key by value.
+  - Pin it with `static_assert`s:
+    - the key is not trivially copyable;
+    - it is not copy-constructible outside its friend;
+    - it is not `bit_cast`-able, checked through a templated concept with a known-positive type
+      (an `int`), so that the check can fail.
+  - Prove the asserts can fire: put the unfixed header first on the include path and require them
+    to fail. Build on MSVC as well as gcc and clang.
+  - In the records, state the key's conditions. Never list "the only other routes": a list of
+    escape routes is a claim, and every entry in it can be wrong.
+- **Scanning heuristic:** grep the headers for a type named `*_token`, `*_key` or `passkey` with a
+  private default constructor and a `friend`, then check `std::is_trivially_copyable_v` on it.
+- **Instance (104-sequence-reset-fidelity, PR #706, Gate B rounds 1 and 2).**
+  - `SeqnumManager::freeze_key` in `include/fixpp/session/seqnum_manager.hpp` was empty and
+    trivially copyable, so the claim that only `Session` can freeze the numbers was false. The fix
+    is `57cf067a`.
+  - Round 2 found that both escape routes round 1's records had enumerated were wrong. They were
+    fixed by deleting the list (`c6755592`).
+  - The sibling `group_writer_token` in `include/fixpp/wire/writer.hpp` has the same shape:
+    fixpp#707.
+- **Sibling.** Class 17 (trust keyed on a textual proxy): a check that admits whatever shares the
+  proxy. Here the proxy is the key's type, and its bytes are the forgery.
+
 ## How to query the instances
 
 The corpus is private and machine-local. From the parent repo:

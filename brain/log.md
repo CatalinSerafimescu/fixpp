@@ -6,6 +6,11 @@ status: stable
 
 # Log
 
+- **2026-11-20 — 104-sequence-reset-fidelity close-out (PR #706), row 15: `failure-classes.md` gains class 24, a
+  passkey that is trivially copyable restricts nothing.** `SeqnumManager::freeze_key` could be forged with
+  `std::bit_cast`. The fix is a user-provided private copy constructor, plus `static_assert`s that are proven able to
+  fire, and records that state the key's conditions instead of enumerating escape routes. Owner-approved 2026-11-20
+  from the Gate B record's anti-pattern candidate, as a new class. #707 is the sibling instance.
 - **2026-11-17 — 103-resend-logon-reset-fidelity close-out (PR #698), row 15: `failure-classes.md` gains class 23, a
   reference published for a window must be withdrawn on every exit, unwinding included.** The too-high Logout bound
   published a wake capturing a frame local; its exception exit left it dangling, and an unconditional clearer would
