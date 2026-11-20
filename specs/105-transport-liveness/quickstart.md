@@ -110,11 +110,17 @@ contract's table and per row of data-model E-3 (research D10 lists them):
 - [RED] `LogoutWait105.EndingBound_RaceThrows_<Writing|Armed>_EofAtOnce` — an in-body seam throwing `std::bad_alloc`
   where the bound builds its race, before it awaits the `||` expression, never inside an arm (data-model E-3 row 16). `Writing`: the Logout's write held behind a peer that does not
   read, EOF at once with the clock frozen, no wait after it, `onLogout` once; `...Writing_StoreHeld_EofAtOnce`, the
-  Logout's store call still held when EOF is asserted. `Armed`: after Active and before Active. Mutant: the failure
-  exit routed through `release_connection_end_` (no EOF while the write is held).
+  Logout's store call still held when EOF is asserted. `Armed`: after Active and before Active, the seam armed by the
+  test only after the leaf has returned and the phase reads `armed` (the first race is built in `writing`), the phase
+  the exit found asserted through test access as the reach proof. Mutant: the failure exit routed through
+  `release_connection_end_` (no EOF while the write is held).
+- [RED] `LogoutWait105.EndingBound_RaceThrows_Armed_ResendAnswerBlocked_EofAtOnce` — after Active on the
+  SendingTime-Reject route, the peer's ResendRequest answered during the wait, the answer blocked in `async_write` behind
+  a peer that stopped reading, the seam armed in `armed`: EOF at once with the clock frozen. Mutant: the armed failure
+  exit routed through `release_connection_end_` (no EOF while the answer is blocked; Gate A loop 2 round 2, N-2).
 - [RED] `LogoutWait105.EndingBound_DeadlineArmAbsorbsException_<Writing|Armed>_EofAtOnce` — the counting `Clock`
   decorator of `test_105_support.hpp` as `clock_override`, throwing `std::bad_alloc` from `sleep_until` for the
-  bound's instant only; EOF at once. Mutant: the early completion read as a re-test (the decorator's count of the
+  bound's instant only (for `Armed`, armed by the test after the leaf has returned, as above); EOF at once. Mutant: the early completion read as a re-test (the decorator's count of the
   bound's sleeps exceeds one per wake).
 - Both failure-exit cells drive the executor by a bounded number of handler runs (`run_one` × N, or `run_for`
   under a wall cap), so each RED arm terminates.
@@ -150,10 +156,15 @@ close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogou
 - [RED] `WriteLimit105.R1WriteHeld_PeerLogoutArrives_LogoutCompleteThenEof` — R-1's write held, the peer's
   in-sequence Logout delivered, the write released: the Logout complete on the wire, then EOF (the latch deferred to
   the writer; mutant: the pump's latch test without the `writing` deferral).
-- [guard: "Leaving `writing`" ignores `cut`] `WriteLimit105.DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed` — an R-2 Logout's write held, the
-  mock clock advanced to the bound, the write released before the executor is drained, so its completion runs
-  ahead of the close frame's `close_async()` (bounded drive): no wait armed, `Disconnected` and `onLogout` once, the
-  session not left Active. GREEN on the base by design (no wait exists there); its RED is the mutant (data-model E-3).
+- [guard: "Leaving `writing`" ignores `cut`] `WriteLimit105.DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed` — an R-2
+  Logout's write on `test_105_support.hpp`'s deferred-completion transport (its `async_write` commits the bytes, then
+  holds its success completion behind a second flag and returns success once released, even after a close). Schedule,
+  pinned: advance the mock clock to the bound; `run_one` until the bound has taken row 4 (reach proof through
+  `session_test_access`: `cut` set, or the close-frame counter at 1); release the completion; drain by a bounded drive.
+  Positive control: the peer holds the whole Logout, and `cut` was set when the leaf returned. Then: no wait armed,
+  `Disconnected` and `onLogout` once, the session not left Active, EOF with no further advance. GREEN on the base by
+  design (no wait exists there); its RED is the mutant, under which the phase reads `armed` after the drain (asserted
+  through test access too; data-model E-3, `ending_wait_.cut`; Gate A loop 2 round 2, N-1).
 - [RED] `WriteLimit105.R1WriteHeld_LimitFiresInsideStoreCall_EofAtBoundOnLogoutAfterStore` — the limit fires while
   the Logout's store call is held: EOF at the bound, `onLogout` when the store returns.
 
@@ -199,8 +210,9 @@ close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogou
 - [RED] `TestReqId105.<InSequenceArm|AnswerPendingRoute>_EarlierId_NeitherAnswersNorEnds`, each with the mutant that
   restores the plain comparison at that site; [RED] `...PreviousConnectionId_Mismatch` (across `drive_reconnect`);
   [guard: the canonical-form test deleted] `...LeadingZeroId_Mismatch`; [guard: the pending test deleted]
-  `...NoTestRequestPending_NotCompared`; `constexpr` cells of the window at `UINT32_MAX`, across the wrap and at one
-  full cycle of 2³² IDs (no value earlier), Gate A round 3, Codex #7.
+  `...NoTestRequestPending_NotCompared`; [guard: a non-modular comparison; the full-cycle case dropped]
+  `TestReqIdWindow105.<AtUint32Max|AcrossTheWrap|OneFullCycle_NoValueEarlier>`, `constexpr` cells over the free window
+  function the member calls (data-model E-4; Gate A round 3, Codex #7; tagged in loop 2 round 2, Codex #3).
 
 **Records (C-7)** — `test_105_presession_log.cpp`, capturing sink:
 - [RED] `PreSessionLog105.<NotTls|TlsHandshake|NoTimeLeft|FirstFrameTimeout|FirstFrameOverBudget|FirstFrameOverLimit|NoIds|NoSession>_OneRecord`.
@@ -256,6 +268,7 @@ Each must turn its cells RED, run unfiltered:
   `PreActive_ClockOverride_CapOnEngineClock`);
 - the bound's failure exit routed through `release_connection_end_` (`EndingBound_RaceThrows_Writing*`,
   `EndingBound_DeadlineArmAbsorbsException_Writing*`);
+- the armed failure exit routed through `release_connection_end_` (`EndingBound_RaceThrows_Armed_ResendAnswerBlocked_EofAtOnce`);
 - the bound's early deadline-arm completion read as a re-test (`EndingBound_DeadlineArmAbsorbsException_*`;
   terminates under the bounded drive);
 - each spawn's fail-closed `catch` replaced by round 2's (`CloseFrameSpawnFails_*`, `BoundSpawnFails_*`);
@@ -272,7 +285,8 @@ Each must turn its cells RED, run unfiltered:
 - the Heartbeat's eligibility ignoring inbound since the TestRequest (`FrameAfterTestRequest_HeartbeatAt22s_*`);
 - the default threshold set back to H (the timing cells);
 - the #582 predicate set back (`AheadPeerAnswersTenCycles_*`);
-- each 112 site's plain comparison restored (`TestReqId105.*_EarlierId_*`, `SecondTestRequest_LateAnswerToTheFirst_*`).
+- each 112 site's plain comparison restored (`TestReqId105.*_EarlierId_*`, `SecondTestRequest_LateAnswerToTheFirst_*`);
+- the window function's comparison made non-modular, and its full-cycle case dropped (`TestReqIdWindow105.*`).
 
 ## 6. Lanes and full runs
 

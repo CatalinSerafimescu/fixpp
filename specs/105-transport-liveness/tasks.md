@@ -4,355 +4,1044 @@ description: "Task list for 105-transport-liveness"
 
 # Tasks: Transport and liveness — a session that ends closes its connection; TestRequest timing and pre-session rejects
 
-> **Non-operative (Gate A round 1, 2026-11-20):** generated before Gate A; to be regenerated from the corrected bundle after Gate A converges, without carrying these task numbers forward.
-> **Gate A round 2 (2026-11-20):** still non-operative; the round-2 rewrite (rulings D-d to D-f, data-model E-3's write limit) is not reflected here; regenerate after Gate A converges.
-> **Gate A round 3 targeted edit (2026-11-20):** still non-operative; ruling D-g and round-3 root causes #1 to #4 are not reflected here; regenerate from the corrected bundle after Gate A converges.
-> **Gate A loop 2 round 1 (2026-11-20):** still non-operative; the bound's failure exit, the cap's stated condition and the new cells are not reflected here; regenerate from the corrected bundle after Gate A converges.
+**Input**: the converged bundle `specs/105-transport-liveness/` (Gate A loop 2 round 2, P1 0 / P2 0, its P3s applied):
+spec.md (US1 to US5, FR-001 to FR-019, SC-001 to SC-006, rulings R-1 to R-4, Q1, Q2, D-a to D-g), plan.md (Summary,
+"Phases (for /speckit-tasks)", Project Structure, T-DOC-1, "Follow-ups to file before Gate B"), research.md (F-1 to
+F-16, D1 to D12, R1 to R4), data-model.md (E-1 to E-9), contracts/transport-liveness-105.md (C-1 to C-12),
+quickstart.md (sections 1 to 6). This file replaces the pre-Gate-A tasks.md entirely; no earlier task number is carried
+forward. Where this file and the bundle differ, the bundle wins and the difference goes to the orchestrator.
 
-**Input**: `specs/105-transport-liveness/`: spec.md (US1 to US5, FR-001 to FR-019, SC-001 to SC-006, Clarifications and owner rulings R-1 to R-4, Q1, Q2 and the 2026-11-20 rulings on OQ-1, SI-1, SI-2, L-105-b), plan.md ("Phases (for /speckit-tasks)", Project Structure, T-DOC-1), research.md (F-1 to F-10, D1 to D12, R1 to R4, "Owner rulings"), data-model.md (E-1 to E-9), contracts/transport-liveness-105.md (C-1 to C-11), quickstart.md. Where this file and the bundle differ, the bundle wins and the difference goes to the orchestrator.
-
-**Preconditions not yet on record** (orchestrator): plan.md's Constitution Check schedules Gate A before `/speckit-tasks`; no `105-transport-liveness-gatea.md` exists under `.specify/decisions/` at the time of writing. `.specify/feature.json` `pinned_at` is a 105 spec commit, not the base; the base for every RED reading is `52aeed4e` (spec "Base", `git merge-base HEAD origin/main`).
-
-**Tests**: required (`[const §VII.3]`, FR-017). In every story phase the RED cells come first as their own tasks, then the mechanism, then the mutant and spurious-hit arms.
+**Tests**: required (`[const §VII.3]`, FR-017). In every story phase the RED cells come first as their own tasks, then the
+mechanism, then the mutant and spurious-hit arms. Every close cell asserts the peer-observed EOF (or close_notify), a
+log record, or a timing on the mock clock, never an internal flag. Where a cell reads test access, that read is only
+the proof that the cell reached its path; its oracle stays peer- or application-visible.
 
 ## Format: `[ID] [P?] [Story] Description`
 
-`[P]`: a different file from every other open task of its phase and no dependency on an incomplete task (appending only its own section of the evidence file does not count as a shared file). `[US1]` to `[US5]`: story phases only. Paths are relative to the library root unless marked PARENT (`/home/catalin/Work/Programming/Antreprenoriat/`). A task marked **(orchestrator)** is run or requested by the orchestrator; every other task is the implementer's (`[const §XVI.6]`).
+`[P]`: a different file from every other open task of its phase and no dependency on an incomplete task (appending
+only one's own section of the evidence file does not count as a shared file). `[US1]` to `[US5]`: story phases only.
+Paths are relative to the library root unless marked PARENT (`/home/catalin/Work/Programming/Antreprenoriat/`). A task
+marked **(orchestrator)** is run or requested by the orchestrator; every other task is the implementer's
+(`[const §XVI.6]`).
 
 ## Execution rules (apply to every task)
 
-- **Trees.** `$T` = the main checkout `PARENT/research/G19-fix-fpml-iso20022/library`, branch `105-transport-liveness`. `$B` = `/mnt/wsl/fixppbuild/fixpp-105-base`, a detached worktree at `52aeed4e` (RED readings only). `$M` = `/mnt/wsl/fixppbuild/fixpp-105-mutants`, detached (mutants, census scratch edits, known-positive seeds only). Never `git checkout`/`git switch` in `$T`, never `git stash`, never `--amend`. `fixpp-parallel` and the MSVC sandbox are never `$B` or `$M`.
-- **Builds.** One build or ctest process at a time on the machine, under `flock /tmp/fixpp-build.lock`; a long one detached (`setsid nohup … ; touch <marker>.done`) with one background waiter on the marker, never a foreground poll, never `pgrep -f`. `$B`/`$M` and every sanitizer, release and bench tree live on `/mnt/wsl/fixppbuild` (`export CCACHE_DIR=/mnt/wsl/fixppbuild/ccache`). `$T`'s `build/linux-clang-debug` is built incrementally only. Read `/mnt/c/temp/fixpp/.sandbox-lock` before any full ctest and before any MSVC run; a lock held by another owner means ask the owner.
-- **RED on the base.** Cells are committed in `$T` (commit `C`), overlaid on `$B` with `git -C "$B" restore --source=C -- <cell files> tests/session/CMakeLists.txt`, built and run there, and must fail by an assertion for the reason the task states. A compile failure, abort, crash, hang or ctest timeout is not RED. A cell expected RED that reads GREEN on the base stops its task; the reading goes to the orchestrator. A cell the task marks *pin* is read GREEN on the base and says why.
-- **"At once" cells (SC-001).** The mock clock is held still, and the executor is pumped with the readiness-checked helpers of `tests/support/pump_until_ready.hpp` until the peer's read ends or a wall cap passes. The cap fails as an assertion. Each such cell names its competing real-time timers (the TLS handshake timeout, `read_first_frame_bounded`'s deadline) and either configures them longer than the cap or sets the cap below them.
-- **Bounds from the competing timeout (FR-017).** Every bounded close is asserted on both sides of its bound on the mock clock (bound − 1 ms open, bound EOF), and every cell has a spurious-hit arm: the mechanism under test deleted in `$M` turns it RED.
-- **Selection.** `ctest --preset <p> -L 105 --no-tests=error --output-on-failure`; one cell by the binary's `--gtest_filter='*<Suite>.<Cell>*'`. Every run records its reported test count; 0 fails the step. Never `ctest -R <cell>`.
-- **Mutant protocol.** At commit `H` holding the mechanism: `$M` at `H` with a clean status; apply only the named edit; build; run the named cells and then the `105` label unfiltered; record RED per cell; revert with `git -C "$M" restore . && git -C "$M" clean -fd`. A mutant applies to a fresh binary (`strings`-check a marker).
-- **Evidence.** Census outputs, RED readings and mutant tables go to `.specify/decisions/105-transport-liveness-evidence.md`, never into a code comment. Cite symbols, never line numbers.
+- **Trees.** `$T` = the main checkout `PARENT/research/G19-fix-fpml-iso20022/library`, branch `105-transport-liveness`.
+  `$B` = `/mnt/wsl/fixppbuild/fixpp-105-base`, a detached worktree at `52aeed4e` (RED readings and bench bases only).
+  `$M` = `/mnt/wsl/fixppbuild/fixpp-105-mutants`, detached (mutants, census scratch edits, seeded known positives only).
+  Never `git checkout`/`git switch` in `$T`, never `git stash`, never `--amend`, never `git commit -a`.
+  `fixpp-parallel` and the MSVC sandbox are never `$B` or `$M`.
+- **The base.** "RED on the base 52aeed4e" means read on `$B`. The spec's base is the branch's merge-base with
+  `origin/main`; the two are equivalent for every cell only while
+  `git diff --stat 52aeed4e "$(git -C $T merge-base HEAD origin/main)" -- src include` prints nothing. T001 runs that
+  recipe and records its output; a non-empty output stops Phase 3 and goes to the orchestrator.
+- **Builds.** One build or ctest process at a time on the machine, under `flock /tmp/fixpp-build.lock`; a long one
+  detached (`setsid nohup … ; touch <marker>.done`) with one background waiter on the marker, never a foreground poll,
+  never `pgrep -f`. `$B`, `$M` and every sanitizer, release, coverage and bench tree live on `/mnt/wsl/fixppbuild`
+  (`export CCACHE_DIR=/mnt/wsl/fixppbuild/ccache`). `$T`'s `build/linux-clang-debug` is built incrementally only. Read
+  `/mnt/c/temp/fixpp/.sandbox-lock` before any full ctest and before any MSVC run; a lock held by another owner means
+  ask the owner.
+- **RED on the base.** Cells are committed in `$T` (commit `C`), overlaid on `$B` with
+  `git -C "$B" restore --source=C -- <cell files> tests/session/test_105_support.hpp tests/session/CMakeLists.txt`, built
+  and run there, and must fail by an assertion for the reason the task states. A compile failure, abort, crash, hang or
+  ctest timeout is not RED. A cell expected RED that reads GREEN on the base stops its task; the reading goes to the
+  orchestrator.
+- **Cells that cannot compile on the base.** Every cell, or reach-proof twin, that names a symbol 105 adds (an
+  allocation-failure seam, the bound's in-body race seam, the listener-construction seam, a new `constexpr` helper, a
+  test-access read of a new member) lives in `tests/session/test_105_seams.cpp`, registered as its own ctest
+  `session_105_seam_tests` (label `105`, T003). A base reading overlays every `test_105_*` file and the CMakeLists, but builds
+  only the target `session_105_tests`, never the seam target, so a seam cell never breaks a later base reading. Its task
+  marks it **[seam]** or **[guard]** and names the mutant under which it must go RED at the implementation head; that RED
+  stands in for the base reading and is recorded as such. A reach-proof twin repeats its RED cell's scenario and adds only
+  the test-access read; the RED cell itself keeps its peer-visible oracle and stays in its story file. Any other cell that
+  fails to compile on `$B` stops its task.
+- **Guards.** A **[guard: <mutant>]** cell keeps a rule the base already keeps: GREEN on the base by design, and RED
+  under its named mutant.
+- **"At once" cells (SC-001, contract preamble).** The mock clock is held still, and the executor is pumped with the
+  readiness-checked helpers of `tests/support/pump_until_ready.hpp` (or T004's bounded drive) until the peer's read ends
+  or a wall cap passes; the cap fails as an assertion. Each such cell names the wall-clock timers that could also close
+  the connection (the TLS handshake and first-frame deadlines, `close_grace`, the drain's bound,
+  `asio_tls_transport::close_async`'s `close_deadline`) and sets each one it can reach well above its wall cap.
+- **Bounds from the competing timeout (FR-017).** Every bounded close is asserted on both sides of its bound on the mock
+  clock (the bound − 1 ms open, the bound EOF), and every cell has a spurious-hit arm: the mechanism under test deleted in
+  `$M` turns it RED. Every competing timeout runs on the mock clock and is set past the instant the cell tests.
+- **Liveness instants in US1 and US2 cells.** A US1 or US2 cell that reaches a liveness instant (the give-up, the
+  Heartbeat instant) sets `test_request_threshold = HeartBtInt` and is driven by T004's wire reader, so its instants are
+  the same on the base (which ignores the field), at the US1 head and at the final head, up to the 1 ns guard.
+- **Selection.** `ctest --preset <p> -L 105 --no-tests=error --output-on-failure`; one cell by the binary's
+  `--gtest_filter='*<Suite>.<Cell>*'`. Every run records its reported test count; 0 fails the step. Never
+  `ctest -R <cell>`.
+- **Mutant protocol.** Each mutant edits only `$M`'s copy of the file that holds the named mechanism
+  (`src/session/session.cpp` unless the task names `src/session/engine.cpp`, `src/config/scalar_mappers.cpp` or a test-side
+  instrument) and records its row in the evidence file. At commit `H` holding the mechanism: `$M` at `H` with a clean status; apply only the named edit;
+  `strings`-check a marker so the binary is fresh; build; run the named cells, then the `105` label unfiltered; record
+  RED per cell; revert with `git -C "$M" restore . && git -C "$M" clean -fd`. A CMake-touching mutant counts only after
+  its reconfigure returned 0.
+- **Evidence.** Census outputs, RED readings and mutant tables go to
+  `.specify/decisions/105-transport-liveness-evidence.md`, never into a code comment. A comment may record a procedure,
+  never a result. Cite symbols, never line numbers.
+- **CodeGraph.** `projectPath` = `$T` only; `codegraph sync` in `$T` after every code-changing phase.
 
 ---
 
 ## Phase 1: Setup (no production code)
 
-- [ ] T001 Check `git -C $T rev-parse --abbrev-ref HEAD` is `105-transport-liveness`; create `$B` and `$M` with `git worktree add --detach` on `/mnt/wsl/fixppbuild` (`df -h /mnt/wsl/fixppbuild` first); run `codegraph sync` in `$T` and confirm `codegraph status --json` names `$T` with a nonzero `fileCount`.
-- [ ] T002 Create `.specify/decisions/105-transport-liveness-evidence.md` with one section per census (T005 to T014), per RED reading and per mutant task.
-- [ ] T003 Register ctest `session_105_tests` (label `105`) in `tests/session/CMakeLists.txt` after `add_session_104_bucket`'s shape, over `tests/session/test_105_connection_close.cpp`, `test_105_logout_wait.cpp`, `test_105_liveness_timing.cpp`, `test_105_heartbeat_knob_off.cpp`, `test_105_presession_log.cpp`, `test_105_tls_close.cpp`. Find every list a new entry must join with `git grep -nE 'session_104_tests|add_session_104_bucket' -- ci tools .github tests` (known positive: the CMakeLists entry) and read `ci/pump-census.sh` against `ci/expected-pump-sites.txt`: the new files join its population, so they use readiness-checked pumps, never `run_for(W); restart(); get()`. Before putting `test_105_tls_close.cpp` in the bucket, copy the registration form of an existing user of `loopback_tls_session_harness.hpp` (`git grep -l loopback_tls_session_harness tests` and its CMake entry): bucket or standalone, and whether it is listed in `ci/expected-preset-conditional-tests.txt`.
-- [ ] T004 Write `tests/session/test_105_support.hpp`: a peer-side EOF / close_notify observer on `engine_loopback_harness.hpp`, `plain_engine_rig.hpp` and `loopback_tls_session_harness.hpp`; a frozen-clock "pump until the peer's read ends or the cap" helper whose cap fails as an assertion; a capturing log sink; a wire reader that advances the mock clock until a named MsgType is read (so cells are not tied to the TestRequest instant, which US3 moves), with a mock-clock cap that fails as an assertion; each cell names its cap, set above the latest instant any phase of this feature sends the awaited frame (above 2.4 × HeartBtInt plus the guard for the give-up; above 1.2 × HeartBtInt per cycle for US2), so a RED on the base terminates; an `INSTANTIATE_TEST_SUITE_P` over `session_role` as 537's cells use. No production symbol is read, so every cell compiles on `$B`.
+- [ ] T001 Check `git -C $T rev-parse --abbrev-ref HEAD` is `105-transport-liveness`; run the base-equivalence recipe of
+  the Execution rules and record its output; `df -h /mnt/wsl/fixppbuild`, then create `$B` (at `52aeed4e`) and `$M` with
+  `git worktree add --detach`; run `codegraph sync` in `$T` and confirm `codegraph status --json` names `$T` with a nonzero
+  `fileCount`.
+- [ ] T002 Create `.specify/decisions/105-transport-liveness-evidence.md` with one section per census (T006 to T017), per
+  RED reading, per mutant task and per bench run.
+- [ ] T003 Register ctest `session_105_tests` (label `105`) in `tests/session/CMakeLists.txt` after
+  `add_session_104_bucket`'s shape, over `tests/session/test_105_connection_close.cpp`, `test_105_logout_wait.cpp`,
+  `test_105_write_limit.cpp`, `test_105_liveness_timing.cpp`, `test_105_heartbeat_knob_off.cpp`,
+  `test_105_presession_log.cpp` and `test_105_tls_close.cpp` (research D10), and a second entry `session_105_seam_tests` (label `105`)
+  over `tests/session/test_105_seams.cpp` alone (Execution rules, "Cells that cannot compile on the base"). Find every list a new entry must join with
+  `git grep -nE 'session_104_tests|add_session_104_bucket' -- ci tools .github tests` (known positive: the CMakeLists
+  entry); read `ci/pump-census.sh` against `ci/expected-pump-sites.txt` (the new files join its population, so they use
+  readiness-checked pumps, never `run_for(W); restart(); get()`); before placing `test_105_tls_close.cpp`, copy the
+  registration form of an existing user of `loopback_tls_session_harness.hpp` (`git grep -l loopback_tls_session_harness
+  tests` and its CMake entry), including whether it is listed in `ci/expected-preset-conditional-tests.txt`. Also find the Engine-over-TLS rig (the TLS
+  mode of `engine_loopback_harness.hpp`, or the setup `test_compid_binding_mtls_fail_closed.cpp` uses): `loopback_tls_session_harness.hpp`
+  drives a direct initiator Session through `on_inbound_frame`, with no pump, so the pump-class TLS cells need the Engine
+  rig; if none exists, T024's Engine half goes to the orchestrator.
+- [ ] T004 Write `tests/session/test_105_support.hpp`, part 1: a peer-side observer of EOF and of close_notify on
+  `engine_loopback_harness.hpp`, `plain_engine_rig.hpp` and `loopback_tls_session_harness.hpp`; a frozen-clock "pump
+  until the peer's read ends or the wall cap" helper whose cap fails as an assertion; a bounded drive (`run_one` × N per
+  mock-clock step, never run-until-idle); a capturing log sink; a wire reader that advances the mock clock until a named
+  MsgType is read, with a mock-clock cap above 2.4 × HeartBtInt plus the guard that fails as an assertion; an
+  `INSTANTIATE_TEST_SUITE_P` over `session_role` as 537's cells use. No production symbol 105 adds is read, so it
+  compiles on `$B`.
+- [ ] T005 `tests/session/test_105_support.hpp`, part 2 (same file as T004): the counting `Clock` decorator over
+  `mock_clock` (counts `sleep_until` calls and forwards each; on request from the test, throws `std::bad_alloc` from
+  `sleep_until` for one named instant only), for `SessionConfig::clock_override`; the held-write transport (the scripted
+  transport's `write_hold` of `include/fixpp/transport/test/mock_transport.hpp`, as `test_103_resend_state_reconnect.cpp`
+  sets it); the **deferred-completion transport** (its `async_write` commits the bytes to the peer, then holds its success
+  completion behind a second flag and returns success once released, even after a close; data-model E-3,
+  `ending_wait_.cut`); a store whose call can be held and released, and one that fails on demand; a TLS peer that stops
+  reading (a zero window). All compile on `$B`.
 
 ---
 
 ## Phase 2: Foundational — censuses (read-only; plan phase 1; quickstart section 1)
 
-**Purpose**: fix the populations every story asserts over. Each census is run first on a seeded or known positive.
+**Purpose**: fix the populations every story asserts over, each census shown first to report its known positive. No
+production code. **Blocks every story phase.**
 
-- [ ] T005 [P] Ending-site census (research D1, "The census, by execution context"): run its write-site grep and root grep over `src/session/session.cpp` and `src/session/engine.cpp`, walk each site with `codegraph_callers` (`projectPath` = `$T`) to every root, and regenerate the **Ending-site table** below (one row per site, roots, class P/D/A/W/X of data-model E-1, cell task). The walk must reproduce the three known positives (the unanswered-TestRequest write under `run_liveness_loop`; Arm B of `on_inbound_active_out_of_sequence_` under the pump; `send_body_`'s failure write under the send root). A site with no cell and no named exemption fails SC-001.
-- [ ] T006 [P] R-2 caller census (research D2 item 1): run its grep; class every hit "initiates" or "replies"; `resend_gap_deadline_` must read "initiates", `on_inbound_active_logout_` "replies". Also run the receipt-arm grep of D2 item 4 (known positive `on_inbound_active_logout_`).
-- [ ] T007 [P] Supersession census (FR-019, research D11): run D11's `git grep` over `specs/ .specify/ brain/ spec/ tests/ include/ src/ ci/`; it must report the three known positives (`tests/session/test_537_gap_deadline.cpp` "fixpp#534", `include/fixpp/core/error.hpp` "1×HeartBtInt", `src/session/session.cpp` "Phase 6 US4"). Class each hit: merged bundle (superseded by name, never edited), living surface (rewritten by a named task below), or not this rule. Every FR-019 known-positive pin must appear; a living-surface hit with no task is added to T080.
-- [ ] T008 [P] Size-pin census (research D7): the narrow `sizeof\((Session|ReconnectFsm)` grep over `src include tests ci tools bench bindings`, then the wide grep that must report `tests/dictionary/ref_shape_test.cpp`'s `FieldRef` pin (instrument proof).
-- [ ] T009 [P] Moved-timing census (research D10): the TestRequest grep over `tests/session tests/capi tests/conformance tests/interop`, read for mock-clock advances across HeartBtInt that expect a TestRequest or a give-up; list each cell for T057.
-- [ ] T010 [P] C-ABI minor-pin census (research D9): `git grep -nE 'MINOR 17|1\.17' -- include tests bindings tools ci docs`, classed "pins the minor" (moved in T072) or "history" (unchanged); then the 103 bump itself: `git log --format=%h -S'FIXPP_C_ABI_VERSION_MINOR 17' -- include/fix/c_api/version.h` and `git show --name-only` on that commit, every file it touched (docs, changelog, bindings, tests) being a row. Known positives: `include/fix/c_api/version.h` (`FIXPP_C_ABI_VERSION_MINOR`) and `tests/capi/version_test.cpp`.
-- [ ] T011 [P] `ReconnectFsm` census (research D7, SI-1): the stub caller grep (known positive: `drive_logout`'s test call) and the constructor call-site grep (known positive `tests/session/test_logout_timeout.cpp`).
-- [ ] T012 [P] Bench census (research D10, Article VIII §3): `grep -rln 'Engine\b\|run_read_pump' bench`; read `bench/threading/bench_threading.cpp` and `bench/session/engine_send_bench.cpp`; record which bench drives `run_read_pump`, or that none does.
-- [ ] T013 [P] Pre-session reject census (data-model E-6): every `(void)transport->close(); continue;` in `run_accept_loop` before `open()` maps to one row of E-6, plus the listener `catch (...)`; a branch with no row is a table defect for the orchestrator.
-- [ ] T014 [P] `co_spawn` census: `grep -n 'co_spawn' src/session/session.cpp src/session/engine.cpp` at the base, kept for T107's audit of the new spawns.
+- [ ] T006 [P] Ending-site census (research D1, "The census, by execution context"): run its write-site grep and root
+  grep over `src/session/session.cpp` and `src/session/engine.cpp`, walk each site with `codegraph_callers` (`projectPath`
+  = `$T`) to every root, and regenerate the **Ending-site table** below (one row per site and root, class P/D/A/W/X of
+  data-model E-1, cell task). The walk must reproduce the three known positives (the unanswered-TestRequest write under
+  `run_liveness_loop`; Arm B of `on_inbound_active_out_of_sequence_` under the pump; `send_body_`'s failure write under
+  the send root). A site with no cell and no named exemption fails SC-001. Each write of `Disconnected` over
+  `Disconnected` is recorded as a census row with its synchronous chain (data-model E-2 I-5; no peer-visible observable, so no
+  cell).
+- [ ] T007 [P] R-2 caller and write-point census (research D2 items 1 and 11): D2 item 1's census grep (the four leaf and refusal
+  callers), each hit classed
+  "initiates" or "replies" (known positive: `resend_gap_deadline_` initiates, `on_inbound_active_logout_` replies); and
+  `grep -n 'inbound_logout_leaf_(tic' src/session/session.cpp`, each hit's enclosing function an ending, with
+  `run_logout_phase1` reaching no such call.
+- [ ] T008 [P] Silent-ending and absorption census (research D2 item 4): D1's write-site grep restricted to the frame
+  arms, each hit classed "peer-frame condition" (goes through `end_session_silently_`) or "internal failure" (stays on the
+  edge); known positives: the BeginString guard of `on_inbound_active_` (peer-frame) and `inbound_resend_request_leaf_`'s
+  assignment failure (internal).
+- [ ] T009 [P] Supersession census (FR-019, research D11): run D11's `git grep` over `specs/ .specify/ brain/ spec/ tests/
+  include/ src/ ci/`; it must report its three known positives (`tests/session/test_537_gap_deadline.cpp` "fixpp#534",
+  `include/fixpp/core/error.hpp` "1×HeartBtInt", `src/session/session.cpp` "Phase 6 US4"). Class each hit: merged bundle
+  (`specs/005-*`, `013-*`, `092-*`, `093-*`, `103-*`, `104-*`: superseded by name, never edited), living surface (rewritten
+  by a named task below), or not this rule. Every FR-019 known-positive pin must appear; a living-surface hit with no task
+  is added to T128.
+- [ ] T010 [P] Size-pin census (research D7): the narrow
+  `sizeof\((fixpp::session::)?(Session|ReconnectFsm)\b` grep over `src include tests ci tools bench bindings`, then the
+  wide grep that must report `tests/dictionary/ref_shape_test.cpp`'s `FieldRef` pin (the instrument's proof); list every
+  hit for T112.
+- [ ] T011 [P] Moved-timing census (research D10, "The cell recipe for moved timings"): the TestRequest grep over
+  `tests/session tests/capi tests/conformance tests/interop`, read for mock-clock advances across HeartBtInt that expect a
+  TestRequest or a give-up, plus `git grep -nE 'stale|different' tests/session` read near `test_req_id`; list each cell
+  for T099.
+- [ ] T012 [P] C-ABI minor-pin census (research D9): `git grep -nE 'MINOR 17|1\.17' -- include tests bindings tools ci
+  docs`, each hit classed "pins the minor" (moved in T117) or "history" (unchanged); then the 103 bump itself:
+  `git log --format=%h -S'FIXPP_C_ABI_VERSION_MINOR 17' -- include/fix/c_api/version.h` and `git show --name-only` on that
+  commit, every C-ABI file it touched being a row (version macros, `session.h` clauses, capi tests, `tools/capi_freeze.sha256`
+  and the generator found by `git grep -n capi_freeze -- tools ci .github CMakeLists.txt`). Known positives:
+  `include/fix/c_api/version.h` (`FIXPP_C_ABI_VERSION_MINOR`) and `tests/capi/version_test.cpp`. Run the same grep over
+  `bindings/` with a seeded known positive in `$M` so a zero there is an instrument that could report non-zero.
+- [ ] T013 [P] `ReconnectFsm` census (research D7, SI-1): the stub caller grep (known positive: `drive_logout`'s test call)
+  and the constructor call-site grep (known positive `tests/session/test_logout_timeout.cpp`).
+- [ ] T014 [P] Bench census (research D10, ruling D-f): read `bench/session/engine_send_bench.cpp`'s harness (its published
+  Active session whose read pump waits on a scripted read), `on_inbound_frame_bench` and `session_send_bench`, and
+  `bench/ci-suite.txt`'s entries for the three; record where the new pump case goes and how each is run.
+- [ ] T015 [P] Pre-session reject census (data-model E-6): every `(void)transport->close(); continue;` in
+  `run_accept_loop` before `open()` maps to one row of E-6, plus the listener `catch (...)`; a branch with no row is a
+  table defect for the orchestrator.
+- [ ] T016 [P] `co_spawn` census: `grep -n 'co_spawn' src/session/session.cpp src/session/engine.cpp` on `$B`, kept for
+  T135's `co-spawn-closure-audit` and for the spawn-shape review of T027 and T059.
+- [ ] T017 [P] Establishment-cap condition (data-model E-3, "The establishment cap"): re-derive in source the
+  `target<session_executor>()` test in `system_clock_source::sleep_until` and the executor `Engine::start` spawns
+  `run_accept_loop` and `run_connect_loop` on; record that an Engine session's sleeps are independent, or stop and report
+  to the orchestrator (the design's stated condition fails).
 
-**Checkpoint**: the Ending-site table is filled; every population has its known positive.
+**Checkpoint**: the Ending-site table is filled; every population has shown its known positive.
 
-### Ending-site table (seed; T005 regenerates it at the implementation head by D1's recipe)
+### Ending-site table (seed; T006 regenerates it at the implementation head by research D1's recipe)
 
-Function names only; a function may hold several writes and reach several roots. "multi" = reached from several roots; T005 splits it into one row per root.
+Function names only; a function may hold several writes and reach several roots. "multi" = reached from several roots;
+T006 splits it into one row per root.
 
-| Write site (function) | Root(s) | Class | Cell task |
+| Write site (function) | Root(s) | Class (E-1) | Cell task |
 |---|---|---|---|
-| `run_liveness_loop` | liveness loop | D (R-1: not W) | T019, T020 |
-| `run_peer_logout_bound_` | too-high Logout bound | D | T018 |
-| `resend_gap_deadline_` | pump | W | T038 |
-| `on_inbound_active_out_of_sequence_` (Arm B; #582 mismatch) | pump | W; P | T038; T050 |
-| `on_inbound_active_sending_time_reject_`, `on_inbound_active_poss_dup_` | pump | W | T038 |
-| `on_inbound_active_`, `answer_pending_test_request_` | pump | P | T016 |
-| `on_inbound_active_logout_`, `acknowledge_peer_logout_`, `inbound_logout_leaf_` | pump; bound; liveness | P / D | T017, T018, T019 |
-| `dispose_unparseable_` (D-1, D-2, D-3) | pump | P | T016, T021 |
-| `on_inbound_not_connected_`, `on_inbound_logon_sent_`, `refuse_logon_with_logout_`, `inbound_logon_sent_logout_leaf_` | pump (first frame included) | P; W | T021, T022, T040 |
-| `inbound_acceptor_reply_logon_leaf_`, `inbound_heartbeat_reply_leaf_`, `inbound_resend_request_leaf_`, `inbound_reject_leaf_`, `inbound_reject_best_effort_leaf_`, `inbound_business_reject_leaf_`, `answer_resend_request_`, `apply_inbound_sequence_reset`, `consume_rejected_seqnum_`, `persist_inbound_advance_`, `ensure_hydrated_` | multi | T005 | T005 |
-| `store_then_emit`, `emit_session_reject_`, `disconnect_unless_superseded_` | multi | T005 | T005 |
-| `send_body_` | send root | A | T023 |
-| `emit_initiator_logon_` | `open`, `drive_reconnect`, connect loop | A | T023 |
-| `on_inbound_logout_sent_`, `run_logout_phase1`, `close` | `close()` | X | T024 |
-| `drain_for_reconnect_` | `drive_reconnect` | X | T024 |
+| `run_liveness_loop` (R-1 give-up; emission failures) | liveness loop | W (R-1); D | T023, T051, T070; T020 |
+| `run_peer_logout_bound_` / `acknowledge_peer_logout_` | too-high Logout bound | D; W (reply) | T019, T051 |
+| `resend_gap_deadline_` | pump | W (R-2) | T042, T048 |
+| `on_inbound_active_out_of_sequence_` (Arm B; #582 mismatch) | pump | W (R-2); P | T042, T045; T081 |
+| `on_inbound_active_sending_time_reject_`, `on_inbound_active_poss_dup_` | pump | W (R-2) | T042, T044 |
+| `on_inbound_active_` (BeginString, CompID, MsgSeqNum 0, TestReqID mismatch), `answer_pending_test_request_` | pump | P | T018, T045, T081, T082 |
+| `on_inbound_active_logout_`, `inbound_logout_leaf_` | pump; bound; liveness | W (reply); P | T019, T051 |
+| `dispose_unparseable_` (D-1, D-2, D-3) | pump | P | T018, T021 |
+| `on_inbound_not_connected_`, `on_inbound_logon_sent_`, `refuse_logon_with_logout_`, `refuse_too_low_logon_`, `inbound_logon_sent_logout_leaf_` | pump (first frame included) | P; W (R-2 before Active) | T021, T049, T051 |
+| `inbound_acceptor_reply_logon_leaf_`, `inbound_heartbeat_reply_leaf_`, `inbound_resend_request_leaf_`, `inbound_reject_leaf_`, `inbound_reject_best_effort_leaf_`, `inbound_business_reject_leaf_`, `answer_resend_request_`, `apply_inbound_sequence_reset`, `consume_rejected_seqnum_`, `persist_inbound_advance_`, `ensure_hydrated_` | multi | T006 | T018, T046 |
+| `store_then_emit`, `emit_session_reject_`, `record_disconnected_unless_already_`, `disconnect_unless_superseded_` | multi | T006 | T006 |
+| `send_body_`, `send_deferred_` | send root (`Session::send`, `Engine::send`) | A | T020, T046 |
+| `emit_initiator_logon_` | `open`, `drive_reconnect`, connect loop | A | T020 |
+| `run_ending_logout_bound_` (new) | ending bound | D (E-3 rows 4, 10, 11, 16) | T043, T049, T050, T070 |
+| `on_inbound_logout_sent_`, `run_logout_phase1`, `close` | `close()` | X | T022 |
+| `drain_for_reconnect_` | `drive_reconnect` | X | T022 |
 
 ---
 
-## Phase 3: User Story 1, part 1 — every ending closes its connection (Priority: P1) 🎯 MVP (D1, D3, D4)
+## Phase 3: User Story 1, part A — every ending closes its connection (Priority: P1) 🎯 MVP (research D1, D3, D4)
 
-**Goal**: FR-001 to FR-003 and FR-005 to FR-008: every Engine-managed ending closes the transport through
-`close_async()`, and the unanswered TestRequest sends its Logout with Text and closes.
+**Goal**: FR-001 to FR-003 and FR-005 to FR-008 for the classes P, D and A: every Engine-managed ending closes the
+transport through `close_async()`, and the unanswered TestRequest sends its Logout with Text and closes. (The ending
+Logout's write limit and the R-2 wait are part B, Phase 4.)
 
-**Independent Test**: per ending class, the peer observes EOF within the class's bound with no further inbound frame and no local API call (SC-001).
+**Independent Test**: per ending class, the peer observes EOF within the class's bound with no further inbound frame
+and no local API call (SC-001).
 
-### RED cells for US1 part 1 (write first; RED on the base `52aeed4e` before the fix)
+### RED cells for US1 part A (write first)
 
-- [ ] T015 [US1] Commit point: the cells T016 to T025 are written in their files and committed (`C1`) before T026.
-- [ ] T016 [P] [US1] `tests/session/test_105_connection_close.cpp`, `ConnectionClose105.PumpSilentEnding_<site>_PeerSeesEofAtOnce`, both roles, one cell per class-P silent ending after Active of the Ending-site table (TestReqID mismatch, BeginString guard, CompID guard, MsgSeqNum 0, D-3, a too-low frame whose Logout does not fit): mock clock frozen, asserts the peer reads nothing more and then EOF; no event. RED on the base `52aeed4e` before the fix: the transport stays open.
-- [ ] T017 [US1] Same file, `PeerLogoutInActive_EofAfterReplyAndReset` (C-1 row 3, FR-005), both roles, with `reset_on_logout` on: the peer reads the reply Logout, then EOF; the store reads (1, 1) before the EOF is observed; `onLogout` fired once. RED on the base `52aeed4e` before the fix: no EOF.
-- [ ] T018 [US1] Same file, `TooHighLogoutAcknowledged_EofAfterReset` (C-1 row 5; the peer-Logout bound's route and the pump's at-once route): reply Logout, reset unit complete, then EOF. RED on the base `52aeed4e` before the fix.
-- [ ] T019 [P] [US1] `tests/session/test_105_liveness_timing.cpp`, R-1 cells (C-3), both roles, driven past the give-up by T004's wire reader (not by a fixed instant): `GiveUp_LogoutTextPinned_ThenEof` (exactly one 35=5 with `58=TestRequest unanswered, TestReqID <id>`, `<id>` the 112 of the TestRequest read, then EOF with the clock frozen and no Logout sent by the peer); `GiveUp_OneLogRecordWithSlot74` (capturing sink: one warn record of C-3.3's format with `error` = the value of `error::session_test_request_unanswered`). RED on the base `52aeed4e` before the fix: no Logout, no record, no EOF.
-- [ ] T020 [US1] Same file, `GiveUp_LogoutDoesNotFit_StillEof`, `GiveUp_ToAdminThrows_StillEof`, `GiveUp_StoreFails_StillEof` (C-3.2), and `ConnectionClose105.Liveness<ToAdminThrows|AssignFails|StoreFails>_EofAtOnce` in `test_105_connection_close.cpp` (C-1 row 8, on a Heartbeat or TestRequest emission): EOF after the loop exits. RED on the base `52aeed4e` before the fix.
-- [ ] T021 [US1] `test_105_connection_close.cpp`, `PreActiveRefusal_<D-1|D-2|D-3|NotConnected|LogonSent|IdGuard|SeqNum0>_EofBeforeDeadlineNoTimeoutEvent` (C-4.1, C-4.2, FR-007), both roles where the refusal exists for the role: a short `logon_timeout_ms`, clock frozen; EOF, and no `session_event_establishment_timeout` and no `session not established within logon_timeout_ms` record. Plus the *pin* `SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent` (C-4.3, B-093-4; GREEN on the base). RED on the base `52aeed4e` before the fix: closed only at the deadline, with the event.
-- [ ] T022 [US1] Same file, acceptor first frame (C-4.4, C-4.5, FR-006): `AcceptorFirstFrameError_EofAtOnce`, `AcceptorFirstFrameRefused_EofAtOnceNoTimeoutEvent`, `AcceptorFirstFrameAcceptedLaterFrameRefused_EofAtOnce`; the TLS handshake and first-frame deadlines configured longer than the cap (named in the cell). RED on the base `52aeed4e` before the fix (the first frame's result is discarded).
-- [ ] T023 [US1] Same file, application calls (C-1 rows 9, 10; C-1.c): `SendStoreFailure_EofAfterSendReturns`, `DirectInitiatorLogonEmitFails_EofAfterOpenReturns`, `DirectInitiatorLogonEmitFails_EofAfterDriveReconnectReturns`, `DirectInitiator_EndingThenDriveReconnect_Reconnects` (the transport closed, the Session `Disconnected` and not closed, `drive_reconnect` installs a new transport that logs on). RED on the base `52aeed4e` before the fix (no EOF; the reconnect cell's EOF half).
-- [ ] T024 [US1] Same file, one close (C-1.a, C-1.b, class X): `OnLogoutCallsClose_OneClose`, `EngineStopRacesEndingClose_OneClose` (run on the TSan lane by T109), `InsideClose_NoSecondClose`, `InsideReconnectDrain_DrainKeepsItsBound` (B-103-9's bound). The first two are RED on the base `52aeed4e` before the fix only in their EOF-timing half; the last two are *pins* (GREEN on the base), recorded as such.
-- [ ] T025 [P] [US1] `tests/session/test_105_tls_close.cpp` on `loopback_tls_session_harness.hpp`, the real-TLS cell (C-8, FR-002): `TlsClose105.GiveUpWhilePumpParkedInRead_PeerReceivesCloseNotify` — a detached-root ending (the R-1 give-up) while the pump is parked in a TLS read; the peer reads the Logout, then a close_notify, then EOF; and `TlsClose105.PumpSilentEnding_PeerReceivesCloseNotify`. The TLS handshake timeout is configured longer than the cap. RED on the base `52aeed4e` before the fix.
-- [ ] T026 [US1] Read T016 to T025 on `$B` (Execution rules "RED on the base"); record per cell its RED reason or *pin* status, and the test count.
+- [ ] T018 [P] [US1] `tests/session/test_105_connection_close.cpp`, `ConnectionClose105.PumpSilentEnding_<site>_PeerSeesEofAtOnce`,
+  both roles, one cell per class-P silent ending after Active of the Ending-site table (TestReqID mismatch, BeginString
+  guard, CompID guard, MsgSeqNum 0, D-3, a too-low frame whose Logout does not fit, a reply leaf whose number assignment
+  fails; contract C-1 row 1), and `PumpSilentEnding_NoApplication_PeerSeesEofAtOnce` (`EngineConfig::application` null,
+  N-4): mock clock frozen; asserts the peer reads nothing more, then EOF; no event. RED on the base 52aeed4e before the
+  fix: the transport stays open past the wall cap.
+- [ ] T019 [US1] Same file, `PeerLogoutInActive_EofAfterReplyAndReset` (C-1 row 3, FR-005), both roles, `reset_on_logout`
+  on: the peer reads the reply Logout, then EOF; the store reads (1, 1) before the EOF is observed; `onLogout` once. And
+  `TooHighLogoutAcknowledged_EofAfterReset` (C-1 row 5; the too-high bound's route and the pump's at-once route): reply
+  Logout, reset unit complete, then EOF. RED on the base 52aeed4e before the fix: no EOF.
+- [ ] T020 [US1] Same file, the detached roots and application calls (C-1 rows 8, 9, 10; C-1.c), both roles where the
+  root exists: `Liveness<ToAdminThrows|AssignFails|StoreFails>_EofAtOnce` (on a Heartbeat or TestRequest emission, with
+  `test_request_threshold = HeartBtInt`, driven by the wire reader), `SendStoreFailure_EofAfterSendReturns`,
+  `DirectInitiatorLogonEmitFails_<Open|DriveReconnect>_EofAfterTheCallReturns` and
+  `DirectInitiator_EndingThenDriveReconnect_Reconnects` (the transport closed, the Session `Disconnected` and not closed,
+  `drive_reconnect` installs a new transport that logs on). Each asserts peer EOF with the clock frozen once the root has
+  exited. RED on the base 52aeed4e before the fix: no EOF (the reconnect cell in its EOF half).
+- [ ] T021 [US1] Same file, before Active and the acceptor's first frame (C-4, FR-006, FR-007), both roles where the
+  refusal exists for the role: `PreActiveRefusal_<D-1|D-2|D-3|NotConnected|LogonSent|IdGuard|SeqNum0>_EofBeforeDeadlineNoTimeoutEvent`
+  (a short `logon_timeout_ms`, clock frozen: EOF, no `session_event_establishment_timeout`, no
+  `session not established within logon_timeout_ms={}` record), `AcceptorFirstFrameError_EofAtOnce`,
+  `AcceptorFirstFrameRefused_EofAtOnceNoTimeoutEvent`, `AcceptorFirstFrameAcceptedLaterFrameRefused_EofAtOnce` (C-4.5), the
+  TLS handshake and first-frame deadlines set above the cap and named in each cell. RED on the base 52aeed4e before the fix:
+  closed only at the deadline, with the event (the first frame's result discarded). Plus
+  [guard: `expire()` closes without its event] `SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent` (C-4.3, B-093-4).
+- [ ] T022 [US1] Same file, one close per ending (C-1.a, class X): `OnLogoutCallsClose_OneClose` and
+  `EngineStopRacesEndingClose_OneClose` (both on the TSan lane in T137; each asserts one EOF, no use after close, and the
+  close at once), RED on the base 52aeed4e before the fix in their EOF-timing half; [guard: the latch's `lifecycle` term
+  deleted] `InsideClose_NoSecondClose`; [guard: the drain flag deleted] `InsideReconnectDrain_DrainKeepsItsBound`
+  (B-103-9's bound).
+- [ ] T023 [P] [US1] `tests/session/test_105_liveness_timing.cpp`, R-1 (C-3), both roles, `test_request_threshold =
+  HeartBtInt`, driven past the give-up by the wire reader: `GiveUp_LogoutTextPinned_ThenEof` (exactly one 35=5 whose 58 is
+  `TestRequest unanswered, TestReqID <id>` spelled out in the cell, `<id>` the 112 of the TestRequest read, then EOF with
+  the clock frozen and no Logout from the peer); `GiveUp_OneLogRecordWithSlot74` (capturing sink: one warn record of C-3.3's
+  format with `error` the value of `error::session_test_request_unanswered`, written before the Logout's bytes reach the
+  peer); `GiveUp_<LogoutDoesNotFit|ToAdminThrows|AssignFails|StoreFailsPersistent|StoreFailsVolatile|WriteFails>_StillEof`
+  (C-3.2: each asserts the record, the wire — no complete Logout, except `StoreFailsVolatile`, whose Logout is on the wire
+  — and EOF). RED on the base 52aeed4e before the fix: no Logout, no record, no EOF.
+- [ ] T024 [P] [US1] `tests/session/test_105_tls_close.cpp`, the real-TLS orderly close (C-8.1, FR-002). On the Engine-over-TLS
+  rig T003 found (an Engine session, so the pump consumes the latch):
+  `TlsClose105.<PumpSilentEnding|GiveUpWhilePumpParkedInRead|PreActiveSilentRefusal|PeerLogoutReply>_PeerReceivesCloseNotify`
+  (the give-up cell is the B-348-1 case: a detached-root ending while the pump is parked in a TLS read). On
+  `loopback_tls_session_harness.hpp` (a direct Session, no pump), only classes that close at a root's exit:
+  `TlsClose105.DirectSession<GiveUp|SendStoreFailure>_PeerReceivesCloseNotify`. Each: the peer reads the frames the class
+  writes, then a close_notify, then EOF; the TLS handshake timeout and `tls_close_timeout` above the cap. RED on the base
+  52aeed4e before the fix: no close_notify and no EOF.
+- [ ] T025 [US1] Commit the cells (`C1`); read T018 to T024 on `$B` (Execution rules "RED on the base"); record per cell its
+  RED reason or guard status, and the test count.
 
-### Implementation for US1 part 1
+### Implementation for US1 part A
 
-- [ ] T027 [US1] D1 items 1 and 6 in `include/fixpp/session/session.hpp` and `src/session/session.cpp`: the latch `connection_end_owed_`, `reconnect_drain_in_flight_` (held only around `drain_for_reconnect_`'s call in `drive_reconnect`), `connection_close_counter_`; set at the `Disconnected` edge in `record_state_transition_` under data-model E-2's condition, before `onLogout`; one store, no suspension, no spawn (F-1). `close()` clears it at `closing` and joins the counter by post before its own `close_async()`; `drain_for_reconnect_` clears and joins; `~Session` asserts the counter is zero.
-- [ ] T028 [US1] D1 items 4 and 5 in `src/session/session.cpp`: `release_connection_end_()` (acts only when `inbound_depth_ == 0`; spawns `close_connection_(conn_gen_)` on `exec_.underlying()`, counter incremented before the spawn; a throwing spawn leaves the latch set) and `close_connection_` (`close_async()` only, under `state_ == lifecycle::open && conn_gen_ == gen`, on its own chain, F-6). Call it at the exit of every class D and A root of research D1 item 7.
-- [ ] T029 [US1] D1 items 2 and 3 in `src/session/engine.cpp` and `src/session/session_engine_access.hpp`: `take_connection_end` and `ended`; `run_read_pump` tests the latch after every `on_inbound_frame` return and runs `stop_pump()`; `run_read_pump` gains `first_frame`, delivered before the surplus without the `expired()` pre-check; `run_accept_loop` step 8 deleted; `run_connect_loop` passes an empty span.
-- [ ] T030 [US1] D4 in `src/session/engine.cpp`: the pump's `expire()` calls `note_establishment_timeout` only when `!session_engine_access::ended(session)`, then `stop_pump()` either way. Its discriminating cell is `PreActive_DeadlineBeforeBound_EofAtDeadlineNoEvent` (T040); its mutant is in T048.
-- [ ] T031 [US1] D3 in `src/session/session.cpp`, `src/log/format_registry.cpp`, `include/fixpp/session/session.hpp`: at the give-up, the replay-gate shared hold, `claim_peer_logout_none_`, the Logout through `inbound_logout_leaf_` with the C-3.1 Text built in a bounded stack buffer with a `static_assert` on its size, then `record_disconnected_unless_already_()`; the C-3.3 warn record (registered format) whether or not the Logout went out; `unanswered_tr_` and its writes deleted.
-- [ ] T032 [US1] Header comments naming the new rule (issue #310, FR-018): `record_state_transition_` ("105 D1: the edge sets the connection-end latch; its consumers"), `run_read_pump`'s disposition list, `dispose_unparseable_` (092's "D-1 and D-2 are a state transition, not a close" and its D-3 twin rewritten to name 105 FR-007), the deleted "(Phase 6 US4 wires the Logout emission before Disconnected.)", `pending_test_req_id_`'s comment, and the `unanswered_tr_` declaration comment removed.
-- [ ] T033 [US1] Re-pin the D1 flips (FR-019), renaming where the name states the old rule: `InboundFrameDispositionsQ10.WithinCapMismatchInActive_DisconnectsWithoutALogout` (open-transport half) and the #534-commented cells in `tests/session/inbound_frame_dispositions_test.cpp`; `SecondFrameInFlight.*` and `ReconcileAfterTheTakeBack.*` (#534-commented) in `tests/session/test_cancelled_outbound_store_engine.cpp`; `EstablishmentTimeoutQ16.AcceptorAfterRefusedLogon_*` in `tests/session/engine_establishment_timeout_test.cpp`; `ResendAnswerStoreFailureEngine.Acceptor789Path_SlotReadFails_ConnectionStaysOpenUntilTheEstablishmentDeadline` in `tests/session/test_538_resend_answer_store_failure_engine.cpp`; `Capi537Witness.Deadline_CompIdsLeaveNoRoomForTheLogout_EndsSilently` → "ends silently and closes at once" in `tests/capi/recovery_liveness_capi_witness_test.cpp`. Run each entry.
-- [ ] T034 [US1] Run T016 to T025 GREEN, then `ctest -L 105`, `-L session` and `-L capi` on linux-clang-debug. **R-2-class pins are expected RED here** (`GapDeadlineOutOfSequenceSite.FrameAtTheBoundDrawsTheLogoutAndTheTransportStaysOpen` and the 537 control cell "D-537-6, N"): they flip at D2 (T046); do not re-pin them to D1's behaviour. Commit `H1`.
+- [ ] T026 [US1] The latch (research D1 item 1, data-model E-2) in `include/fixpp/session/session.hpp` and
+  `src/session/session.cpp`: `connection_end_owed_` (the `conn_gen_` owed), `reconnect_drain_in_flight_` (held only around
+  `drain_for_reconnect_`'s call in `drive_reconnect`), and the one setter `owe_connection_end_() noexcept`
+  (`state_ == lifecycle::open && !reconnect_drain_in_flight_`; T065 adds the "no wait armed before Active" term). Its
+  first caller: `record_state_transition_`, on a transition **into** `Disconnected` from another state only (the prior
+  state captured at entry), in the `new_state == fsm_state::Disconnected` block beside `wake_peer_logout_bound_()`,
+  **above** the `engine_.application == nullptr` return; two stores, no suspension, no spawn (F-1).
+- [ ] T027 [US1] The close frame (research D1 items 4, 5; data-model E-2) in `src/session/session.cpp` and `session.hpp`:
+  `connection_close_counter_`, `connection_close_join` (`peer_logout_bound_join`'s shape: +1 at construction, −1 at
+  destruction), the static coroutine `close_transport_(join, std::shared_ptr<Transport>)` (awaits `close_async()` on the
+  transport it holds, touches no `Session` member), and `release_connection_end_() noexcept` (acts only when the latch is
+  set, its generation is `conn_gen_`, `state_ == lifecycle::open` and `inbound_depth_ == 0`; takes
+  `live_transport_shared_()`; spawns on `exec_.underlying()` inside a `try`; clears the latch after `co_spawn` returns;
+  its `catch (...)` calls the synchronous `Transport::close()` of the transport it took, clears the latch and does not
+  rethrow — ruling D-g). Add the test-only allocation-failure seam at this spawn (the seam family research D10 names).
+  Call `release_connection_end_()` at the exit of every class D and A root of research D1 item 7: `run_liveness_loop`,
+  `run_peer_logout_bound_`, `send_body_` / `send_deferred_` (`Session::send`, `Engine::send`), `drive_reconnect`, and
+  `Session::open` where it emits a direct initiator's Logon. Do not copy the liveness loop's `fetch_add`-then-bare-`co_spawn`
+  shape.
+- [ ] T028 [US1] Joins (research D1 item 6): `close()` clears the latch at its commit of `closing` and joins
+  `connection_close_counter_` by post before its own `close_async()`; `drain_for_reconnect_` clears the latch and joins the
+  counter before its step 3 quiescence test; `~Session` asserts the counter is zero. (The second join after the ending
+  bound's is T069.)
+- [ ] T029 [US1] Engine side (research D1 items 2, 3) in `src/session/engine.cpp` and `src/session/session_engine_access.hpp`:
+  `session_engine_access::take_connection_end(Session&) noexcept -> bool` and `ended(Session const&) noexcept -> bool`;
+  `run_read_pump` runs `if (!r || session_engine_access::take_connection_end(session)) co_await stop_pump();` after every
+  `on_inbound_frame` return; `run_read_pump` gains `std::span<const std::byte> first_frame`, delivered before
+  `initial_bytes` without the `expired()` pre-check; `run_accept_loop`'s step 8 (the discarded `deliver_r`) is deleted;
+  `run_connect_loop` passes an empty span.
+- [ ] T030 [US1] D4 in `src/session/engine.cpp`: the pump's `expire()` calls `note_establishment_timeout` only when
+  `!session_engine_access::ended(session)`, then `stop_pump()` either way (data-model E-5). Its discriminating cell is
+  `PreActive_WaitArmedAtEstablishmentDeadline_ClosedNoEvent` (T049), its mutant T076.
+- [ ] T031 [US1] D3 (R-1) in `src/session/session.cpp`, `src/log/format_registry.cpp` and `session.hpp`: at the give-up,
+  write the slot-74 warn record `session ended: TestRequest unanswered: test_req_id={} threshold_ms={} error={}` (format
+  registered) **before** the Logout's write; take the replay-gate shared hold; `claim_peer_logout_none_`; write the Logout
+  through `inbound_logout_leaf_` with Text `TestRequest unanswered, TestReqID <id>` built in a bounded stack buffer with a
+  `static_assert` on its size; then `record_disconnected_unless_already_()`; the loop's exit runs `release_connection_end_()`.
+  Delete `unanswered_tr_`, its writes (`answer_pending_test_request_`, the in-sequence Heartbeat arm of `on_inbound_active_`,
+  the loop) and its declaration comment.
+- [ ] T032 [US1] Comments naming the new rule (issue #310, FR-018), part A: `record_state_transition_` ("105 D1: the edge
+  sets the connection-end latch; its consumers …"), `run_read_pump`'s disposition list, `dispose_unparseable_` (092's "D-1
+  and D-2 are a state transition, not a close" and its D-3 twin rewritten to name 105 FR-007), the "(Phase 6 US4 wires the
+  Logout emission before Disconnected.)" comment deleted, `pending_test_req_id_`'s comment, and the
+  `session_test_request_unanswered` comment in `include/fixpp/core/error.hpp` rewritten without arithmetic ("inbound
+  silence of 2 × the TestRequest threshold with no answering Heartbeat; the session sends a Logout with Text and closes").
+- [ ] T033 [US1] Re-pin the class-P/D/A flips (FR-019), renaming where the name states the old rule:
+  `InboundFrameDispositionsQ10.WithinCapMismatchInActive_DisconnectsWithoutALogout` (its open-transport half) and the
+  #534-commented cells of `tests/session/inbound_frame_dispositions_test.cpp`; `SecondFrameInFlight.*` and
+  `ReconcileAfterTheTakeBack.*` (#534-commented) in `tests/session/test_cancelled_outbound_store_engine.cpp`;
+  `EstablishmentTimeoutQ16.AcceptorAfterRefusedLogon_*` in `tests/session/engine_establishment_timeout_test.cpp`;
+  `ResendAnswerStoreFailureEngine.Acceptor789Path_SlotReadFails_ConnectionStaysOpenUntilTheEstablishmentDeadline` in
+  `tests/session/test_538_resend_answer_store_failure_engine.cpp`; `Capi537Witness.Deadline_CompIdsLeaveNoRoomForTheLogout_EndsSilently`
+  ("ends silently and closes at once") in `tests/capi/recovery_liveness_capi_witness_test.cpp`. Run each entry.
+- [ ] T034 [US1] [seam] `ConnectionClose105.CloseFrameSpawnFails_ReleaseAtLoopExit_PeerSeesEofWithNoLaterCall` and its TLS
+  arm on the Engine-over-TLS rig, both in `tests/session/test_105_seams.cpp` (an Engine session ended by the liveness loop
+  while its pump is parked in a read; the seam of T027 fails the spawn): the peer sees EOF with no inbound frame and no API
+  call, the counter is 0 after `close()`; on TLS no close_notify (L-105-h). Not readable on `$B` (the seam is new); RED under
+  T041's mutant.
+- [ ] T035 [US1] Run T018 to T024 and T034 GREEN, then `-L 105`, `-L session` and `-L capi` on linux-clang-debug. **R-2-class
+  pins are expected RED here** (`GapDeadlineOutOfSequenceSite.FrameAtTheBoundDrawsTheLogoutAndTheTransportStaysOpen` and the
+  537 note's control cell "D-537-6, N"): they flip at T072; do not re-pin them to part A's behaviour. Commit `H1`;
+  `codegraph sync`.
 
-### Mutant and spurious-hit arms for US1 part 1 (in `$M` at `H1`)
+### Mutant and spurious-hit arms for US1 part A (in `$M` at `H1`)
 
-- [ ] T035 [US1] The pump's latch test deleted: T016, T017, T021 and T022 RED (the frozen clock leaves no competing close, so a GREEN would be spurious). (The `expire()` arm is T048's: no Phase 3 cell reaches `expire()` on a session that has recorded its own ending.)
-- [ ] T036 [US1] `release_connection_end_` a no-op: T018 (bound route), T019, T020, T023 RED.
-- [ ] T037 [US1] `close_connection_` calls the synchronous `Transport::close()` instead of `close_async()`: T025's close_notify assertion RED (C-8.2). And the R-1 Logout write deleted (keep the close): T019's Text cell RED.
+- [ ] T036 [US1] The pump's latch test deleted: T018, T019 (pump route) and T021 RED (the clock is frozen, so no competing
+  close can supply the EOF).
+- [ ] T037 [US1] `release_connection_end_` made a no-op: T019 (bound route), T020 and T023 RED.
+- [ ] T038 [US1] The edge's owe moved below the no-application return: `PumpSilentEnding_NoApplication_*` RED. Then the
+  setter census `grep -n 'owe_connection_end_(' src/session/session.cpp` (known positive: the edge) and, per call site at
+  `H1`, that call deleted: its cells RED.
+- [ ] T039 [US1] `close_transport_` calling the synchronous `Transport::close()` instead of `close_async()`: T024's
+  close_notify assertions RED (C-8.2). The R-1 Logout write deleted (the close kept): `GiveUp_LogoutTextPinned_ThenEof` RED.
+- [ ] T040 [US1] Guards: the latch's `lifecycle` term deleted (`InsideClose_NoSecondClose` RED); the drain flag deleted
+  (`InsideReconnectDrain_DrainKeepsItsBound` RED); `expire()` closing without its event (`SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent` RED).
+- [ ] T041 [US1] The close frame's fail-closed `catch` replaced by round 2's (the latch left set for a later consumer):
+  `CloseFrameSpawnFails_ReleaseAtLoopExit_*` RED within its wall cap.
 
-**Checkpoint**: every class P, D and A ending closes; R-2-class endings still close at once, pending part 2.
+**Checkpoint**: every class P, D and A ending closes; R-2-class endings still close at once, pending part B.
 
 ---
+## Phase 4: User Story 1, part B — the ending Logout: write limit, R-2 wait, bound and latch (Priority: P1) (research D2; contract C-2; data-model E-3)
 
-## Phase 4: User Story 1, part 2 — the R-2 wait (Priority: P1) (D2; contract C-2)
+**Goal**: FR-004, FR-004a, FR-004b, FR-005's limit and FR-008: every ending Logout's write is limited by
+`logout_disconnect_timeout_ms` from its start; after an R-2 Logout the session closes at the peer's Logout or at the same
+budget's end; the dispatch overlay W-1 to W-15 holds; the bound fails closed.
 
-**Goal**: FR-004, FR-004a: after fixpp's own ending Logout (except R-1's) the session closes at the peer's Logout or at
-`logout_disconnect_timeout_ms` from the write, whichever is first.
+**Independent Test**: EOF follows the peer's Logout, or comes at exactly the bound and not before; a Logout whose write
+does not complete closes the connection at the bound.
 
-**Independent Test**: EOF follows the peer's Logout, or comes at exactly the bound and not before.
+### RED cells for US1 part B (write first)
 
-### RED cells for US1 part 2 (write first; RED on the base `52aeed4e` before the fix)
+- [ ] T042 [P] [US1] `tests/session/test_105_logout_wait.cpp`, W-1 after Active (C-2.2, clarification D-a), both roles:
+  `LogoutWait105.TooLow_PeerLogoutBelowNextNumIn_EndsWaitAndResets`, `GapDeadline_PeerLogoutAboveNextNumIn_EndsWaitAndResets`,
+  `SendingTimeReject_PeerLogoutInSequence_EndsWait`, `OrigSendingTimeReject_PeerLogoutEndsWait` — the peer's Logout at the
+  number a real peer uses; positive control: the connection open and `fixpp_session_is_established` true before it; then
+  EOF after it, the receipt reset under `reset_on_logout` (store read before EOF), NextNumIn advanced only for the
+  in-sequence one, `onLogout` once. RED on the base 52aeed4e before the fix: the session is `Disconnected` at the Logout's
+  write and the transport stays open.
+- [ ] T043 [US1] Same file, the bound (W-12, C-2.5, C-1.d): `Bound_EofAtExactlyTheBound` (open at the bound − 1 ms, EOF at the
+  bound, `onLogout` then), `Bound_DoesNotSlideWithAnAnswerSent` (a Heartbeat answering the peer's TestRequest mid-wait),
+  `OnLogoutFiresAtWaitEnd`; the liveness instants and the gap deadline set past the bound and named in each cell. RED on the
+  base 52aeed4e before the fix: no EOF at the bound.
+- [ ] T044 [US1] Same file, W-2 to W-7 on the SendingTime-Reject route (C-2.2), both roles:
+  `AppMessageDuringWait_ReachesFromAppAndAdvances`, `TestRequestDuringWait_Answered`, `ResendRequestDuringWait_Answered`,
+  `HeartbeatDuringWait_AnswersPendingTestRequest`, `TooHighDuringWait_NotDeliveredResendRequestSent`,
+  `GapDeadlinePassedDuringWait_NoSecondLogout` — each asserts the wire reply (or its absence) and `fromApp` delivery, with the
+  session shown established at the frame. RED on the base 52aeed4e before the fix: the frames reach a `Disconnected` session
+  and are drained.
+- [ ] T045 [US1] Same file, W-8 absorption: `Absorbed_<TooLow|SecondSendingTimeReject|TestReqIdMismatch|CompIdMismatch|MsgSeqNumZero>_ThenAppMessageAndPeerLogout`
+  (no second Logout on the wire, the application message reaches `fromApp`, the peer's Logout resets under
+  `reset_on_logout`, `onLogout` counted once at the wait's end, then EOF) and `TooLowRoute_PeerFramesBelowNextNumIn_Absorbed`.
+  RED on the base 52aeed4e before the fix.
+- [ ] T046 [US1] Same file, W-9, one cell per disposition, each asserting EOF with the clock frozen, `onLogout` once and no
+  second Logout: `StoreFailureDuringWait_EofAtOnce` (error, `Disconnected` written), `PersistFailureDuringWait_EofAtOnce`
+  (error, none written), `TooHighDuringWait_ResendRequestAssignFails_EofAtOnce` (success, `Disconnected` written),
+  `SendHeldInStoreAcrossTheEnding_StoreFails_EofAtOnce` (a non-pump root), and `DirectSession_StoreFailureDuringWait_ClosesAtNextSend`
+  (L-105-b's form). RED on the base 52aeed4e before the fix.
+- [ ] T047 [US1] Same file, W-10 and W-11 (C-2.3, C-2.4): `SendDuringWait_Refused` (`session_invalid_state_for_send`, with
+  `fixpp_session_is_established` true at the same instant as positive control), `SendHeldInStoreAcrossTheEnding_NumberedBeforeTheLogout`
+  (the send's number below the Logout's; the wire order not asserted, L-105-e),
+  `LivenessDuringWait_ArmedOneTickBeforeHeartbeat_SendsNothing` and `LivenessDuringWait_ArmedOneTickBeforeGiveUp_SendsNothing`
+  (`test_request_threshold = HeartBtInt`; positive control `fsm_state() == Active` at the instant tested). RED on the base
+  52aeed4e before the fix: the session is `Disconnected`.
+- [ ] T048 [US1] Same file, no wait and the closers (C-2 "No wait is armed", W-13, W-14, C-2.8):
+  `TimeoutZero_NoWaitEofAfterWrite`, `NoClock_NoWaitEofAfterWrite` (a direct Session, the only form with no clock, since `Engine::open` refuses a null
+  `EngineConfig::clock`: no wait armed, so the next `send()` or `close()` closes, L-105-b's oracle as in
+  `DirectSession_StoreFailureDuringWait_ClosesAtNextSend`), `<CloseTerminal|EngineStop|DriveReconnectDrain>DuringWait_OneClose`,
+  `LogoutNotTransmitted_ClosesAtOnce` (the long-CompIDs Logout), `PendingTooHighMark_GapDeadlineLogout_EofAfterWrite` (a
+  too-high Logout while a resend is outstanding, then a non-advancing frame after the gap deadline: the deadline's Logout,
+  then EOF with the clock frozen). RED on the base 52aeed4e before the fix where the base keeps the transport open; a cell
+  the base already meets is marked [guard] with its mutant from T076 and recorded.
+- [ ] T049 [US1] Same file, before Active (W-1 to W-15's before-Active column, C-2.6, E-3 rows 6, 9, 11), both roles where
+  the refusal exists: `PreActive_BoundSurvivesTheRefusalsOwnEdge`, `PreActive_FramesDrained`,
+  `PreActiveTooLowLogon_PeerLogoutEndsWaitNoReset` (OQ-1), `PreActive_BoundExpiryCloses`,
+  `PreActive_WaitArmedAtEstablishmentDeadline_ClosedNoEvent` (Engine; no arm in flight, so this is E-5's cell, not the
+  cap's), `PreActive_DirectSession_BoundAloneEndsWait`, `PreActive_CloseDuringWait_OneClose`, one cell per Logon refusal with a
+  Logout (the too-low Logon of B-104-6, the TestMessageIndicator posture mismatch, the strict-reset refusal, LogonSent's
+  Logout-with-Text); and the establishment cap (E-3, "The establishment cap"; research D10):
+  `PreActive_<LogoutBlockedInWrite|LogoutHeldInStore>_ClosedAtEstablishmentDeadlineNoEvent` (establishment time left below
+  `logout_disconnect_timeout_ms`; open at the deadline − 1 ms, EOF at it, no event and no record) and
+  `PreActive_ClockOverride_CapOnEngineClock` (a second mock clock as `clock_override`; only the engine clock reaches the
+  deadline). RED on the base 52aeed4e before the fix: closed at the deadline with the event, or never.
+- [ ] T050 [US1] Same file, the bound's expiry under a blocked arm (rows 10, 11; N-1):
+  `Bound_ExpiresWhileResendAnswerBlocked_EofAtTheBound` — SendingTime-Reject route, the peer's ResendRequest during the wait,
+  its answer blocked in `async_write` behind a peer that stopped reading; open at the bound − 1 ms, EOF at the bound. RED on the
+  base 52aeed4e before the fix.
+- [ ] T051 [P] [US1] `tests/session/test_105_write_limit.cpp` (C-2.7, FR-004b), both roles, on the held-write transport of
+  T005, `logon_timeout_ms` well above the bound. Each `LogoutBlocked` and `LogoutQueuedBehindBlockedSend` cell asserts: open at the
+  bound − 1 ms, no complete Logout at the peer, EOF at the bound, `onLogout` once, no wait after it (the peer's Logout sent
+  after the bound changes nothing); the other cells state their own oracle:
+  `WriteLimit105.<R1|R2AfterActive|R2BeforeActive|Reply>_LogoutBlocked_ClosedAtTheBound` (for R1 the slot-74 record
+  present); `WriteLimit105.<R1|R2AfterActive|Reply>_LogoutQueuedBehindBlockedSend_ClosedAtTheBound` (for `Reply` an
+  application send blocked in `async_write` holding `write_gate_`, then the peer's Logout: the receipt arm resumes,
+  `onLogout` once, the reset unit run as 104 orders it; no pre-Active queued cell, unreachable on an Engine session);
+  `WriteReleasedBeforeTheBound_LogoutOnWire_WaitKeepsTheSameBudget` (control: released at the bound − 1 ms, the Logout complete
+  on the wire, EOF at the same bound); `R1WriteHeld_PeerLogoutArrives_LogoutCompleteThenEof` (the latch deferred to the
+  writer); `R1WriteHeld_LimitFiresInsideStoreCall_EofAtBoundOnLogoutAfterStore` (EOF at the bound, `onLogout` when the store
+  returns); and [guard: a 0 ms limit read as "close at once"] `TimeoutZero_WriteUnbounded`. R1 cells set
+  `test_request_threshold = HeartBtInt`. RED on the base 52aeed4e before the fix: the held write never returns and nothing
+  closes.
+- [ ] T052 [US1] `tests/session/test_105_seams.cpp` (it reads `cut` through test access), [guard: "Leaving `writing`" ignores `cut`]
+  `WriteLimit105.DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed` on T005's deferred-completion transport, a
+  direct Session, an R-2 Logout. Schedule, pinned in the cell: advance the mock clock to the bound; `run_one` until the bound
+  has taken E-3 row 4 (its write-limit close); release the completion; drain by the bounded drive. Positive control: the
+  peer holds the whole Logout. Oracle: EOF with no further advance, `Disconnected` and `onLogout` once, the session not left
+  Active. The reach proof (`cut` set when the leaf returned, or the close frame's counter at 1, through `session_test_access`)
+  is asserted before the oracle. GREEN on the base by design (no wait exists there), so it is written with T060 and read only
+  under T077's mutant.
+- [ ] T053 [US1] `test_105_logout_wait.cpp`, the bound's absorbed exception (E-3 row 16):
+  `LogoutWait105.EndingBound_DeadlineArmAbsorbsException_<Writing|Armed>_EofAtOnce`, T005's counting decorator as
+  `clock_override`, throwing `std::bad_alloc` from `sleep_until` for the bound's instant only. `Writing`: the R-2 Logout's
+  write held, the throw armed before the write. `Armed` (after Active, and before Active): the throw armed by the test only
+  after the peer has read the whole Logout (the leaf has returned), so the first race, built in `writing`, never fires it.
+  Each: EOF at once with the clock frozen, `onLogout` once (after Active), driven by the bounded drive so its RED arm
+  terminates. RED on the base 52aeed4e before the fix: no EOF. Its reach-proof twins (the phase the exit found) go in
+  `test_105_seams.cpp` with T061.
+- [ ] T054 [P] [US1] `tests/session/test_105_tls_close.cpp`, TLS arms of part B (C-8.4, C-8.5):
+  `TlsClose105.CloseGracefulDuringWait_CloseNotifyAtTheBound` (`logout_disconnect_timeout_ms` set well above the wall cap,
+  the mock clock advanced to the bound: close_notify, then EOF, at the bound's mock instant) and
+  `TlsWriteLimit105.R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsCloseTimeout` (no close_notify; the close within the
+  bound plus `tls_close_timeout`). RED on the base 52aeed4e before the fix.
+- [ ] T055 [US1] `test_105_logout_wait.cpp`, lifetime (ASan lane; B-103-13): `Lifetime105.CloseFrame_SpawnedByWriteLimitDuringGracefulClose`
+  (the mock clock advanced to the bound well inside `close_grace`'s wall time: EOF at the bound, the Session destroyed after
+  `close()` returns), RED on the base 52aeed4e before the fix in its EOF-at-the-bound half; [guard: `close()`'s second join of
+  the close frame's counter deleted, and the bound's join deleted] `Lifetime105.<EndingLogoutBound|CloseFrame>_SessionDestroyedAfterClose`.
+- [ ] T056 [US1] Commit the cells (`C2`); read T042 to T055 on `$B` (T052 excepted: a seam-file guard, written with T060);
+  record per cell.
 
-- [ ] T038 [US1] `tests/session/test_105_logout_wait.cpp`, both roles: `LogoutWait105.<TooLow|GapDeadline|SendingTimeReject|OrigSendingTimeReject>_PeerLogoutEndsWait` (EOF after the peer's Logout and not before it, with `reset_on_logout` the receipt resets, C-2.6) and `Bound_EofAtExactlyTheBound` (open at bound − 1 ms, EOF at the bound, `onLogout` fired then, C-2.7; the competing HeartBtInt liveness instants and the gap deadline configured well past the bound, named in the cell). RED on the base `52aeed4e` before the fix: the transport stays open past the bound.
-- [ ] T039 [US1] Same file, frames during the wait (C-2.1 to C-2.5): `StaysEstablishedDuringWait`, `AppMessageDuringWait_ReachesFromAppAndAdvances`, `TestRequestDuringWait_Answered`, `ResendRequestDuringWait_Answered`, `TooLowDuringWait_NoSecondLogout`, `TooHighDuringWait_SequenceChecks`, `SecondEndingDuringWait_NoSecondLogoutBoundHolds`, `SilentEndingDuringWait_BoundHolds` (L-105-a), `SendDuringWait_Refused` (`session_invalid_state_for_send`), `LivenessDuringWait_SendsNothing`, `Bound_DoesNotSlideWithAnAnswerSent` (a Heartbeat answering a TestRequest mid-wait). RED on the base `52aeed4e` before the fix (the session is `Disconnected` at the Logout's write).
-- [ ] T040 [US1] Same file, before Active (C-2.10, C-2.11, OQ-1): `PreActiveTooLowLogon_PeerLogoutEndsWaitNoReset`, `PreActive_BoundBeforeDeadline_EofAtBoundNoEvent`, `PreActive_DeadlineBeforeBound_EofAtDeadlineNoEvent`, and one cell per Logon refusal with a Logout of C-2's list (TestMessageIndicator posture mismatch, strict-reset refusal, LogonSent's Logout-with-Text). RED on the base `52aeed4e` before the fix (closed at the deadline with the event).
-- [ ] T041 [US1] Same file, edges (C-2.8, C-2.9): `TimeoutZero_EofAfterWrite`, `NoClock_EofAfterWrite` (direct Session), `<CloseGraceful|CloseTerminal|EngineStop>DuringWait_OneClose`, `OnLogoutFiresAtWaitEnd`, `LogoutNotTransmitted_ClosesAtOnce` (the long-CompIDs Logout, C-2 "not transmitted"). RED on the base `52aeed4e` before the fix where the base differs; cells equal on the base are *pins*, recorded.
-- [ ] T042 [US1] Commit the cells (`C2`) and read T038 to T041 on `$B`; record per cell.
+### Implementation for US1 part B
 
-### Implementation for US1 part 2
+- [ ] T057 [US1] `store_then_emit`'s private transmitted out-parameter (research D2 item 1): set only when
+  `live_write_serialized_` returned `written` with a live transport present, or the direct sink returned success; the Logout
+  leaves pass it up.
+- [ ] T058 [US1] The ending state (data-model E-3 fields) in `session.hpp`: `ending_wait_` (`phase` `{none, writing, armed,
+  resolved}`, `kind` `{r1, r2, reply}`, `entered_from`, `from_active`, `cut`, `deadline`), `establishment_cap_` (on
+  `engine_.clock`), `ending_logout_wake_` (`peer_logout_wake_`'s shape), `ending_logout_bound_counter_` and
+  `ending_logout_bound_join`. `session_engine_access::set_establishment_deadline(Session&, steady_time_point) noexcept` (one
+  store), called by `run_read_pump` before its first delivery when it holds `establish_deadline` (E-5).
+- [ ] T059 [US1] **Entering `writing`** at each write point (research D2 item 11, T007's census): `inbound_logout_leaf_` at its
+  owner claim (after Active; kinds `r1` from the liveness loop, `r2` from `send_ending_logout_`, `reply` from
+  `on_inbound_active_logout_` and `acknowledge_peer_logout_`), and before Active the build-and-emit of
+  `refuse_logon_with_logout_` and `inbound_logon_sent_logout_leaf_`. Only with a clock and `logout_disconnect_timeout_ms > 0`:
+  `phase = writing`, `cut = false`, `deadline = deadline_after(now, logout_disconnect_timeout_ms)` on `effective_clock_`, read
+  once at the owner claim (before the number assignment, the store call and the gate acquire); spawn
+  `run_ending_logout_bound_(join, gen)` **before the write** on `co_await asio::this_coro::executor` (never
+  `Session::executor()`), join as the parameter; the `catch (...)` around `co_spawn` sets `phase = none`, does not rethrow,
+  and the Logout is not written (row 2a: the leaf's "frame that cannot be built" path; the site records `Disconnected`).
+  Add the bound-spawn allocation-failure seam. Timeout 0 or no clock enters nothing (row 2).
+- [ ] T060 [US1] **Leaving `writing`** (E-3), on the strand with no suspension before the next step: `r2`, transmitted, `!cut`,
+  no pending too-high mark claimed, `fsm_state_ == entered_from` → `phase = armed` and the bound woken (it rebuilds its race in
+  `armed`); every other case → `phase = none`, the bound woken, and the site records `Disconnected` as today. Before Active the
+  order is: enter `writing` and spawn, the write, `armed`, then the refusal's own `Disconnected` write (rows 1, 3, 6). Add the
+  T052's cell to `test_105_seams.cpp`.
+- [ ] T061 [US1] `run_ending_logout_bound_(join, gen)` (research D2 item 8, data-model E-3 "The bound's loop" and "The bound's
+  exits"): publish the wake; loop: test the live predicate by phase (`writing`: `phase == writing && conn_gen_ == gen`;
+  `armed` after Active: `phase == armed`, generation, `!engine_stop_requested_`, `!reconnect_drain_in_flight_`,
+  `fsm_state_ == Active`, never `closing_or_stopped_()`; `armed` before Active: `phase == armed`, generation,
+  `state_ == lifecycle::open`, `!reconnect_drain_in_flight_`); race the wake against
+  `detail::await_deadline(*effective_clock_, deadline)` and, under the cap, `detail::await_deadline(*engine_.clock,
+  *establishment_cap_)`; read the completion by arm (a wake is a re-test; a deadline arm whose clock has reached its instant
+  is a re-test; one that completed before its instant is the failure exit). The three exits, each total over the phase it
+  finds: **expiry** (row 4 from `writing`: set `cut`, spawn the close frame tested on the generation and a live transport only;
+  rows 10, 11, 14 from a live `armed`: `resolved`, then after Active `Disconnected`, before Active `owe_connection_end_()`
+  called directly after `resolved`, then the close frame tested on the generation, a live transport and
+  `state_ == lifecycle::open`, then the latch cleared), **failure** (the `catch (...)` and the early completion: the expiry
+  exit of the phase it finds, never `release_connection_end_()` from `writing` or a live `armed`; row 16), **ordinary**
+  (`armed` → `resolved`, then `release_connection_end_()`). Every exit clears its wake. Add the in-body race seam that throws
+  `std::bad_alloc` before the `||` expression is awaited, never inside an arm; add T053's reach-proof twins in `test_105_seams.cpp`.
+- [ ] T062 [US1] The close frame spawned by the bound at rows 4, 10, 11 and 16, with T027's join and D-g fallback, testing
+  neither `inbound_depth_` nor the `writing` deferral (data-model E-2, I-2's exceptions); the spawn-failure seam covers these
+  spawns too.
+- [ ] T063 [US1] `send_ending_logout_(text)` (research D2 item 1): writes through the leaf for the state, then arms or records;
+  the `Disconnected` writes of Arm B, `resend_gap_deadline_` (`record_disconnected_unless_already_()`),
+  `refuse_logon_with_logout_` (`disconnect_unless_superseded_`) and the SendingTime and OrigSendingTime arms move into it;
+  `claim_peer_logout_none_()` moves into it and reports a pending mark, which arms no wait (C-2.8); every "initiates" caller of
+  T007 routed through it; while `ending_in_progress_()` it writes and records nothing (absorbed, W-8).
+- [ ] T064 [US1] `end_session_silently_()` (research D2 item 4) for the peer-frame silent endings of T008 (the BeginString and
+  CompID guards, MsgSeqNum 0, the TestReqID mismatch at both sites, D-3 of `dispose_unparseable_`), recording `Disconnected`
+  unless `ending_in_progress_()` (`phase == writing` or `armed`, with `from_active`); every internal failure stays on the edge.
+  While armed, `resend_gap_deadline_` returns `nullopt` (W-7).
+- [ ] T065 [US1] `owe_connection_end_()` gains the term "no wait armed before Active"; during a wait armed after Active the
+  edge's call sets `resolved` and owes (row 12); the second caller (the bound's expiry and failure exit before Active, after
+  `resolved`; rows 11, 16) and the third (the pre-Active response, row 9).
+- [ ] T066 [US1] The response test (research D2 item 3, W-1) in `on_inbound_active_`, after the garble test, the header-fault
+  disposition, the liveness refresh, the validation gate and the BeginString and CompID guards, and before the Reset-mode
+  SequenceReset bypass, MsgSeqNum 0, the too-high branch, the PossDup stage-1 arm and `check_inbound`: at NextNumIn today's
+  in-sequence route with `resolved` set at the arm's entry; off NextNumIn a response arm in `acknowledge_peer_logout_`'s shape
+  (`resolved`, a `pending_receipt_owner`, the leaf writing nothing, the event, `Disconnected`, the reset point under
+  `reset_on_logout`; no number consumed, no `persist_inbound_advance_`, no `fromAdmin`). Before Active, the new
+  `Disconnected`-row arm of `on_inbound_cold_`, reached only while a wait is armed: the header scan; `35=5` with no fault,
+  MsgType third and the right BeginString and CompIDs sets `resolved` and calls `owe_connection_end_()`; every other frame is
+  drained.
+- [ ] T067 [US1] The latch defers to the writer (E-3, "Other roots during `writing`"): `take_connection_end` returns false and
+  leaves the latch set while `phase == writing`; `release_connection_end_` returns without spawning then; the pump's error close
+  (`!r`) does not defer.
+- [ ] T068 [US1] `liveness_may_originate_()` = `fsm_state_ == fsm_state::Active && ending_wait_.phase == none` (data-model E-4):
+  the loop condition and the test after every suspension (after the sleep, after each emit); R-1's Logout goes through the
+  machine as kind `r1`.
+- [ ] T069 [US1] `close()` and the drain (E-3 rows 5, 5c, 13 to 15, 17; research D2 item 9): wake the bound at `close()`'s first
+  commit of `closing` (beside its `claim_peer_logout_none_()`) and at `drain_for_reconnect_`'s entry; after their transport
+  close, join `ending_logout_bound_counter_`, then join `connection_close_counter_` a second time (I-4); `~Session` asserts both
+  counters zero; at `install_reconnected_transport` and `attach_accepted_transport` assert `phase` is `resolved` or `none`,
+  set `none` and reset `establishment_cap_` (row 17).
+- [ ] T070 [US1] [seam] cells on the new seams, not readable on `$B`, each RED under its named mutant at `H2`:
+  `LogoutWait105.BoundSpawnFails_<R2AfterActive|R2BeforeActive|Reply>_NoLogoutWritten_EofAtOnce` (no Logout bytes at the peer,
+  no wait, `Disconnected` and `onLogout` once after Active, EOF at once) and `LivenessTiming105.GiveUp_BoundSpawnFails_StillEof`
+  (the slot-74 record, no Logout, EOF); `ConnectionClose105.CloseFrameSpawnFails_<WriteLimit|BoundExpiry>_PeerSeesEofWithNoLaterCall`;
+  `LogoutWait105.EndingBound_RaceThrows_<Writing|Writing_StoreHeld>_EofAtOnce` (the Logout's write, or its store call, held;
+  EOF at once with the clock frozen, no wait after it, `onLogout` once), `EndingBound_RaceThrows_Armed_EofAtOnce` after Active
+  and before Active (the seam armed by the test after the leaf has returned and the phase reads `armed`; the phase the exit
+  found asserted as the reach proof; oracle EOF at once), and `EndingBound_RaceThrows_Armed_ResendAnswerBlocked_EofAtOnce`
+  (after Active on the SendingTime-Reject route, the peer's ResendRequest answer blocked in `async_write`, so
+  `inbound_depth_ != 0`, the seam armed in `armed`: EOF at once). All in `tests/session/test_105_seams.cpp`.
+- [ ] T071 [US1] Comments naming the new rule, part B (issue #310): `resend_gap_deadline_` and Arm B (R-2, through
+  `send_ending_logout_`), `run_ending_logout_bound_` (its exits), and the caller preconditions on `drive_reconnect`'s
+  declaration in `session.hpp` (B-103-13: `close()` joins the too-high bound, the R-2 bound and the close frame; `~Session`
+  asserts each counter zero; no exemption).
+- [ ] T072 [US1] Re-pin the R-2-class flips (FR-019): `GapDeadlineOutOfSequenceSite.FrameAtTheBoundDrawsTheLogoutAndTheTransportStaysOpen`
+  and its helper `expect_logout_and_open_transport` in `tests/session/test_537_gap_deadline.cpp` (its
+  `state_after_the_bound_frame == Disconnected` flips too: Active during the wait), and the 537 note's control cell
+  "D-537-6, N"; rename where the name states the old rule.
+- [ ] T073 [US1] Run T042 to T055 and T070 GREEN, then `-L 105`, `-L session`, `-L capi` on linux-clang-debug and the
+  `Lifetime105.*` cells on linux-clang-asan; commit `H2`; `codegraph sync`.
 
-- [ ] T043 [US1] D2 items 1 and 5 in `src/session/session.cpp` and `include/fixpp/session/session.hpp`: `store_then_emit`'s private transmitted out-parameter, passed up by the leaves; `send_ending_logout_(text)` (arms only when transmitted; absorbs a second ending while armed); every "initiates" caller of T006 routed through it, no longer recording `Disconnected` after Active; the liveness loop's condition `fsm_state_ == Active && ending_wait_.phase != armed`.
-- [ ] T044 [US1] D2 items 2 to 4 and 6 to 9: `ending_wait_` (data-model E-3), `run_ending_logout_bound_` in the shape of `run_peer_logout_bound_` (join counter joined by `close()` and `drain_for_reconnect_`, published wake cleared on every exit, deadline race, generation assert, fail-closed handler, `release_connection_end_()` at exit); the receipt arms set `resolved` at entry; `on_inbound_cold_`'s armed `Disconnected` row (fault-free 35=5 with MsgType third → `resolved` and latch; no reset); timeout 0 and null clock arm nothing; `resolved`/`none` asserted at `install_reconnected_transport` and `attach_accepted_transport`.
-- [ ] T045 [US1] Header comments (issue #310): `resend_gap_deadline_` and Arm B of `on_inbound_active_out_of_sequence_` name 105 R-2 / FR-004; `store_then_emit`'s declaration comment in `session.hpp` names the transmitted bit.
-- [ ] T046 [US1] Re-pin the D2 flips (FR-019): `GapDeadlineOutOfSequenceSite.FrameAtTheBoundDrawsTheLogoutAndTheTransportStaysOpen` and its helper `expect_logout_and_open_transport` (renamed; `state_after_the_bound_frame` now Active during the wait, EOF at the peer's Logout or the bound) and the 537 note's control cell "D-537-6, N" in `tests/session/test_537_gap_deadline.cpp`. Run T038 to T041 GREEN, then `-L 105`, `-L session`, `-L capi`. Commit `H2`.
+### Mutant and spurious-hit arms for US1 part B (in `$M` at `H2`; quickstart section 5)
 
-### Mutant and spurious-hit arms for US1 part 2 (in `$M` at `H2`)
+- [ ] T074 [US1] The response test deleted, and moved below the too-high branch: the off-NextNumIn `*_EndsWaitAndResets` cells
+  of T042 RED.
+- [ ] T075 [US1] Absorption: `send_ending_logout_`'s absorb branch deleted, and `end_session_silently_` recording while armed
+  (`Absorbed_*` RED); `inbound_resend_request_leaf_`'s assignment failure routed through `end_session_silently_`
+  (`TooHighDuringWait_ResendRequestAssignFails_*` RED); the owe refused whenever a wait is `armed` (round 1's predicate: the
+  W-9 cells RED).
+- [ ] T076 [US1] The wait: the bound's deadline read from the last send, and from the write's completion
+  (`Bound_DoesNotSlideWithAnAnswerSent`, `WriteReleasedBeforeTheBound_*` RED); the bound exiting on any wake, and the arming
+  after the refusal's own `Disconnected` write (`PreActive_BoundSurvives*` RED); the live predicate testing
+  `closing_or_stopped_()` (`CloseGracefulDuringWait_*` RED); the claim's result ignored (`PendingTooHighMark_*` RED);
+  `expire()` without its `ended` test (`PreActive_WaitArmedAtEstablishmentDeadline_ClosedNoEvent` RED); one post-suspension
+  test of the liveness loop reverted to the state test alone (`LivenessDuringWait_*` RED).
+- [ ] T077 [US1] The write limit: deleted (every `WriteLimit105.*` RED; the spurious-hit arm: the connection still open past
+  the bound, which also shows nothing else closes it); its close made through the latch consumer's `inbound_depth_` test
+  (`WriteLimit105.R2*`, `Reply_*` RED); the latch consumers' `writing` deferral deleted (`R1WriteHeld_PeerLogoutArrives_*` RED);
+  the slot-74 record moved after the write (`WriteLimit105.R1_*`'s record assertion RED); "Leaving `writing`" ignoring `cut`
+  (`DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed` RED, the phase read `armed` after the drain); a 0 ms limit
+  read as "close at once" (`TimeoutZero_WriteUnbounded` RED).
+- [ ] T078 [US1] The deadlines' closes: the bound's expiry close made through `release_connection_end_`
+  (`Bound_ExpiresWhileResendAnswerBlocked_*` RED); the cap's arm deleted (`PreActive_<LogoutBlockedInWrite|LogoutHeldInStore>_ClosedAtEstablishmentDeadlineNoEvent`,
+  `PreActive_ClockOverride_CapOnEngineClock` RED: the close comes at the write limit); `close()`'s second join deleted
+  (`Lifetime105.CloseFrame_SpawnedByWriteLimitDuringGracefulClose` RED: the Debug assert, or the counter read after `close()`).
+- [ ] T079 [US1] The failure exits and spawns: the bound's failure exit routed through `release_connection_end_`
+  (`EndingBound_RaceThrows_Writing*`, `EndingBound_DeadlineArmAbsorbsException_Writing*` RED); the armed failure exit routed
+  through `release_connection_end_` (`EndingBound_RaceThrows_Armed_ResendAnswerBlocked_EofAtOnce` RED); the early completion
+  read as a re-test (`EndingBound_DeadlineArmAbsorbsException_*` RED as a failed count within the bounded drive); each
+  spawn's fail-closed `catch` replaced by round 2's (`CloseFrameSpawnFails_*` RED; `BoundSpawnFails_*` RED: a Logout on the
+  wire under "the failure read as timeout 0").
+- [ ] T080 [US1] Record the part-B mutant table; every quickstart section 5 mutant named in T036 to T041 and T074 to T079 has a
+  RED row, or the task stops.
 
-- [ ] T047 [US1] The bound's deadline read from the last send: `Bound_DoesNotSlideWithAnAnswerSent` RED. The absorb branch of `send_ending_logout_` deleted: `SecondEndingDuringWait_*` RED.
-- [ ] T048 [US1] `run_ending_logout_bound_` never spawned (forced miss): `Bound_EofAtExactlyTheBound` RED; and the spurious-hit arm: the bound set to `logout_disconnect_timeout_ms` + 1 ms, `Bound_EofAtExactlyTheBound` RED at the bound instant (the cell is not satisfied by another timer). The armed `Disconnected` row deleted: `PreActiveTooLowLogon_PeerLogoutEndsWaitNoReset` RED. `expire()`'s `ended` test deleted (D4): `PreActive_DeadlineBeforeBound_EofAtDeadlineNoEvent` RED on its no-event assertion.
-
-**Checkpoint**: US1 complete; SC-001 read from the Ending-site table (every row has a GREEN cell or a named exemption).
+**Checkpoint**: US1 complete; every ending class of the Ending-site table closes within its bound (SC-001).
 
 ---
+## Phase 5: User Story 2 — a peer that answers is not disconnected with sequence validation off (Priority: P2) (research D5)
 
-## Phase 5: User Story 2 — an out-of-sequence Heartbeat answers with validation off (Priority: P2) (D5; C-5)
+**Goal**: FR-009: with `validate_sequence_numbers` off an out-of-sequence Heartbeat reaches the TestReqID rule; on every
+Heartbeat route an earlier TestReqID of this connection neither answers nor ends (ruling D-d).
 
-**Goal**: FR-009. **Independent Test**: knob off, peer numbers ahead, ten TestRequest cycles answered, session Active.
+**Independent Test**: knob off, the peer's numbers ahead, fixpp sends a TestRequest, the peer answers with a matching 112;
+the session stays Active past the give-up (SC-003).
 
-### RED cells for US2 (write first; RED on the base `52aeed4e` before the fix)
+### RED cells for US2 (write first)
 
-- [ ] T049 [US2] `tests/session/test_105_heartbeat_knob_off.cpp`, both roles, every cycle driven by T004's wire reader (advance until a 35=1 is read, so US3's timing does not break it): `HeartbeatKnobOff105.AheadPeerAnswersTenCycles_StaysActive` (SC-003; NextNumIn unmoved, no `fromAdmin` for those Heartbeats), `AbsentTestReqId_Answers`, `BehindPeerAnswers`. RED on the base `52aeed4e` before the fix: the session ends at the grace check.
-- [ ] T050 [US2] Same file, `MismatchedTestReqId_EndsAndCloses` (C-5.2: no Logout, peer EOF at once; RED on the base `52aeed4e` before the fix on its EOF half) and the *pin* `KnobOn_Unchanged` (B-537-3's cells run unedited). Commit (`C3`); read T049 and T050 on `$B`.
+- [ ] T081 [P] [US2] `tests/session/test_105_heartbeat_knob_off.cpp`, both roles, driven by the wire reader with
+  `test_request_threshold = HeartBtInt`: `HeartbeatKnobOff105.AheadPeerAnswersTenCycles_StaysActive` (at least 10 TestRequest
+  cycles, each answered with the matching 112 at a number ahead of NextNumIn; the peer never reads a Logout or EOF and
+  `fixpp_session_is_established` stays true), `MismatchedTestReqId_EndsAndCloses` (EOF at once, no Logout),
+  `AbsentTestReqId_Answers`, `BehindPeerAnswers`. RED on the base 52aeed4e before the fix: the session gives up at the grace
+  check. Plus [guard: the #582 predicate widened to the knob-on route] `KnobOn_Unchanged` (B-537-3's cells stay GREEN
+  unedited).
+- [ ] T082 [US2] Same file, the 112 rule (C-5.4): `TestReqId105.<InSequenceArm|AnswerPendingRoute>_EarlierId_NeitherAnswersNorEnds`
+  (a Heartbeat carrying TR1's 112 after TR2: no Logout, no EOF, TR2 still pending — the next give-up comes 2T after that
+  frame), `TestReqId105.PreviousConnectionId_Mismatch` (across `drive_reconnect`: EOF at once). RED on the base 52aeed4e before
+  the fix: the earlier 112 ends the session. Plus [guard: the canonical-form test deleted] `TestReqId105.LeadingZeroId_Mismatch`
+  and [guard: the pending test deleted] `TestReqId105.NoTestRequestPending_NotCompared`.
+- [ ] T083 [US2] Commit the cells; read T081 and T082 on `$B`; record.
 
 ### Implementation for US2
 
-- [ ] T051 [US2] D5 in `on_inbound_active_out_of_sequence_` (`src/session/session.cpp`): the Heartbeat branch calls `answer_pending_test_request_(hdr.test_req_id)` when a TestRequest is pending and (too high with a resend outstanding, or `!cfg_.validate_sequence_numbers`); nothing else in the branch changes. Run US2 cells and `-L 537` cells GREEN. Commit `H3`.
-- [ ] T052 [US2] Mutant in `$M` at `H3`: the predicate set back: `AheadPeerAnswersTenCycles_StaysActive` RED.
+- [ ] T084 [US2] #582 in `on_inbound_active_out_of_sequence_`'s Heartbeat branch: `answer_pending_test_request_(hdr.test_req_id)`
+  runs when a TestRequest is pending and either (too high with a resend outstanding) or `!cfg_.validate_sequence_numbers`; the
+  rest of the branch unchanged (no advance, no persist, no `fromAdmin`).
+- [ ] T085 [US2] The TestReqID window (data-model E-4): a free `constexpr` function of `(n, floor, next)` in a `detail` header
+  beside the default-threshold helper, `(n − floor − 1) mod 2³² < (next − floor) mod 2³²`; `classify_test_req_id_(std::string_view)`
+  (answers / earlier / mismatch; `TR` plus canonical decimal that fits `std::uint32_t`) calls it, replacing both comparisons
+  (the in-sequence Heartbeat arm of `on_inbound_active_` and `answer_pending_test_request_`); `test_request_id_floor_` set to
+  `next_test_request_id_` at `open()`, `install_reconnected_transport` and `attach_accepted_transport`; a mismatch through
+  `end_session_silently_`; `answer_pending_test_request_` returns false only for a mismatch.
+- [ ] T086 [US2] [guard: a non-modular comparison; the full-cycle case dropped, `next == floor` read as a full window]
+  `TestReqIdWindow105.<AtUint32Max|AcrossTheWrap|OneFullCycle_NoValueEarlier>` in `tests/session/test_105_seams.cpp`:
+  `constexpr` cells (`static_assert` plus a runtime twin so a mutant reports as a test failure, not a compile error) over
+  T085's free function. Not readable on `$B` (new function).
+- [ ] T087 [US2] Run T081, T082 and T086 GREEN, `-L 105` and the B-537-3 cells; commit `H3`.
+
+### Mutant arms for US2 (in `$M` at `H3`)
+
+- [ ] T088 [US2] The #582 predicate set back (`AheadPeerAnswersTenCycles_*` RED); the #582 predicate widened to the knob-on
+  route (`KnobOn_Unchanged` RED); each 112 site's plain comparison restored (`TestReqId105.*_EarlierId_*` RED per site); the
+  canonical-form test and the pending test deleted (their guards RED); the window function made non-modular, and its
+  full-cycle case dropped (`TestReqIdWindow105.*` RED).
+
+**Checkpoint**: US2 complete.
 
 ---
 
-## Phase 6: User Story 3 — TestRequest timing and the threshold (Priority: P2) (D6; C-6)
+## Phase 6: User Story 3 — TestRequest timing is QuickFIX C++'s and the threshold works (Priority: P2) (research D6)
 
-**Goal**: FR-010 to FR-012. **Independent Test**: TestRequest at T, give-up at 2T (default T = 1.2 × HeartBtInt), both roles, default and set-threshold cells, discriminating the old instants from the new.
+**Goal**: FR-010 to FR-012: TestRequest at T of inbound silence (default 1.2 × HeartBtInt), give-up strictly after 2T of
+inbound silence, one sleep per iteration, T validated.
 
-### RED cells for US3 (write first; RED on the base `52aeed4e` before the fix)
+**Independent Test**: per role, the default cell and a set-threshold cell, both RED on the base (SC-002).
 
-- [ ] T053 [US3] `tests/session/test_105_liveness_timing.cpp`, both roles, H = 10 s on the mock clock: `LivenessTiming105.Default_NoTestRequestAt11s_OneAt12s` (RED on the base: it sends at 10 s), `Default_ActiveAt23900ms_EndedAt24s` (RED on the base: it ends near 20 s), `SetThreshold7s_TestRequestAt7s_GiveUpAt14s`, `GuardAtExactly2T_EchoWins` and `At2TPlus1ns_GivesUp`, `GapOpenDefaultT_DeadlineLogoutComesFirst`, `ThresholdBelowH_GiveUpComesFirst` (FR-010 precedence, both orders), `HeartBtIntNegative_NoTestRequest` (SI-2; C++ only) and the *pin* `HeartBtIntZero_NoTestRequest`, `ThresholdOverflow_Saturates`. RED on the base `52aeed4e` before the fix.
-- [ ] T054 [US3] Config cells: `LoadNegativeBattery.TestRequestThreshold_Zero_OutOfRange` (and the negative case if `parse_duration_to_ms` can yield one; pinned either way) in `tests/config/test_load_negative_battery.cpp`; `SessionOpen105.ThresholdZero_InvalidConfig` and `EngineRegister105.ThresholdZero_InvalidConfig` in `test_105_liveness_timing.cpp`; `test_load_happy_path.cpp`'s `"1h"` stays a *pin*. RED on the base `52aeed4e` before the fix. Commit (`C4`); read T053 and T054 on `$B`.
+### RED cells for US3 (write first)
+
+- [ ] T089 [P] [US3] `tests/session/test_105_liveness_timing.cpp`, both roles, H = 10 s on the mock clock, threshold unset
+  unless named: `LivenessTiming105.Default_NoTestRequestAt11s_OneAt12s` (the base sends at 10 s),
+  `Default_ActiveAt23900ms_EndedAt24sPlusGuard` (the base ends near 20 s), `SetThreshold7s_TestRequestAt7s_GiveUpAt14sPlusGuard`,
+  `GuardAtExactly2T_EchoWins`, `At2TPlus1ns_GivesUp`. Each asserts the wire (the TestRequest, the Logout) and EOF at the named
+  mock instants. RED on the base 52aeed4e before the fix: TestRequest at 1 × HeartBtInt, give-up near 2 × HeartBtInt.
+- [ ] T090 [US3] Same file, the silence measure and the sleep set (clarification D-c, data-model E-4):
+  `TrafficAfterTestRequestNoHeartbeat_NotGivenUpAt2T_GivenUpAt2TAfterLastFrame`;
+  `SilentPeer_NoHeartbeatWhileTestRequestPending` (positive control: the TestRequest at 12 s and the session Active at 22 s;
+  no Heartbeat at 22 s; the give-up just after 24 s); `FrameAfterTestRequest_HeartbeatAt22s_TR2At25s_NoneAt35s_GiveUpAfter37s`;
+  `FrameAfterHeartbeatInstant_HeartbeatAtTheStaleGiveUpWake` (a frame at 23 s; the Heartbeat just after 24 s; positive control:
+  none at 23 s); `SilentAfterTestRequest_NoSpin` (T005's counting decorator as `clock_override`: one `sleep_until` per wake, a
+  bounded count from TR1 to the give-up, under the bounded drive so its RED arm terminates as a failed count);
+  `SecondTestRequest_LateAnswerToTheFirst_StaysActive` (D-d: TR2 stays pending; the give-up 2T after that frame). RED on the base
+  52aeed4e before the fix.
+- [ ] T091 [US3] Same file, precedence and edges (FR-010, C-6.4, C-6.5): `GapOpen_PeerSendsNonAdvancingFrame_DeadlineLogout`,
+  `GapOpen_PeerSilent_R1LogoutAt2T`, `HeartBtIntNegative_NoTestRequest`, `ThresholdOverflow_Saturates` (2T past the clock's
+  range: no give-up), RED on the base 52aeed4e before the fix; [guard: the loop's HeartBtInt test deleted]
+  `HeartBtIntZero_NoTestRequest`.
+- [ ] T092 [P] [US3] `tests/config/test_load_negative_battery.cpp`: `LoadNegativeBattery.TestRequestThreshold_Zero_OutOfRange`
+  (an `out_of_range` diagnostic at `session[i].test_request_threshold`), RED on the base 52aeed4e before the fix; [guard: the
+  duration parser's leading-digit refusal deleted] `LoadNegativeBattery.TestRequestThreshold_Negative_MalformedValue`.
+- [ ] T093 [US3] `test_105_liveness_timing.cpp`: `SessionOpen105.Threshold<Zero|Negative>_InvalidConfig` and
+  `EngineRegister105.Threshold<Zero|Negative>_InvalidConfig` (`invalid_session_config`). RED on the base 52aeed4e before the fix.
+- [ ] T094 [US3] Commit the cells; read T089 to T093 on `$B`; record.
 
 ### Implementation for US3
 
-- [ ] T055 [US3] D6 in `run_liveness_loop` (`src/session/session.cpp`) and a saturating `default_test_request_threshold` helper beside `deadline_after` in `src/session/read_first_frame_bounded.hpp` (or a sibling detail header) with `constexpr` cells in `test_105_liveness_timing.cpp` (their RED source is T059's mutant): T computed once, TestRequest at `deadline_after(last_inbound_steady_, T)`, give-up at two saturating steps plus the `+1ns` guard re-derived, HeartBtInt `<= 0` disables (SI-2).
-- [ ] T056 [US3] FR-011 validation: `Session::open()` and `Engine::register_session` return `invalid_session_config` for T ≤ 0; `src/config/scalar_mappers.cpp` records `out_of_range` at `session[i].test_request_threshold`.
-- [ ] T057 [US3] Re-pin the moved timings (FR-017, FR-019): T018 `CellB_*` (made to discriminate 1× from 1.2×) and `CellC_*_UnansweredTestRequestDisconnects` (now 2T, Logout then EOF) in `tests/session/heartbeat_testrequest_test.cpp` and `tests/session/test_heartbeat_cadence_8cell.cpp`; `ci/red-arms/batch18-lost-advance.sh`'s cell name; every cell T009 listed.
-- [ ] T058 [US3] FR-012 comments and surfaces: slot 74's comment in `include/fixpp/core/error.hpp` (D3's wording, no arithmetic), `SessionConfig::test_request_threshold`'s comment in `include/fixpp/session/session_config.hpp`, `run_liveness_loop`'s algorithm block and its declaration comment in `session.hpp` (the "1 × HeartBtInt" steps and "grace window (1×heartbt_int)"), the QuickFIX parity row in `tests/config/test_quickfix_parity_table.cpp` and its TOML documentation (found by T007). Run US3 cells, `-L config`, `-L session` GREEN. Commit `H4`.
-- [ ] T059 [US3] Mutants in `$M` at `H4`: the default threshold set back to H: `Default_NoTestRequestAt11s_*`, `Default_ActiveAt23900ms_*` and the `constexpr` cells RED; the give-up at T instead of 2T: `SetThreshold7s_*` RED; the `+1ns` guard deleted: `GuardAtExactly2T_EchoWins` RED; validation deleted: T054's cells RED.
+- [ ] T095 [US3] `run_liveness_loop` (data-model E-4, research D6): T computed once before the loop,
+  `cfg_.test_request_threshold.value_or(default_test_request_threshold(H))`, the helper (H × 1200 ms, saturating at
+  `milliseconds::max()`) in a `detail` header beside `deadline_after` (`read_first_frame_bounded.hpp` or its sibling);
+  the TestRequest instant `deadline_after(last_inbound_steady_, T)`; the give-up instant three saturating steps (T, T, then
+  `std::chrono::nanoseconds{1}`); `tr_sent_at`; the eligibility rules (Heartbeat eligible with no TestRequest pending or an
+  inbound frame since it; give-up eligible with one pending and none since); **one sleep per iteration** to the earliest
+  instant of the sleep set (the Heartbeat instant when eligible or not yet reached, the TestRequest and give-up instants when
+  eligible), the Heartbeat instant reached while ineligible dropped (the spin trap); on waking act on every eligible
+  instant reached (give-up, else TestRequest, else Heartbeat); D-536-2's state test and filter reset before every sleep;
+  the loop and the gap deadline off at HeartBtInt ≤ 0 (`<= 0`).
+- [ ] T096 [US3] Validation (FR-011, C-6.6): `Session::open()` and `Engine::register_session` refuse a set T ≤ 0 with
+  `invalid_session_config`; `src/config/scalar_mappers.cpp` maps a zero duration to `out_of_range` (a negative token keeps the
+  parser's `malformed_value`).
+- [ ] T097 [US3] [guard: the product formed unsaturated; the guard added by hand to a saturated instant]
+  `LivenessTiming105.<DefaultThresholdHelper_Saturates|GuardAtTheSaturatedInstant>` in `tests/session/test_105_seams.cpp`: `constexpr` cells (with runtime twins)
+  of the default-threshold helper and of the 1 ns guard at `steady_time_point::max()`. Not readable on `$B` (new helper).
+- [ ] T098 [US3] FR-012 surfaces and comments: `SessionConfig::test_request_threshold`'s comment in
+  `include/fixpp/session/session_config.hpp`; `run_liveness_loop`'s algorithm block (its "1 × HeartBtInt" steps) and its
+  declaration comment in `session.hpp` ("after heartbt_int of no inbound data", "grace window (1×heartbt_int)"); the QuickFIX
+  parity-table row in `tests/config/test_quickfix_parity_table.cpp` and its TOML documentation; each states the new rule.
+- [ ] T099 [US3] Re-pin the moved timings (FR-019): T018 `CellB_*` and `CellC_*_UnansweredTestRequestDisconnects` in
+  `tests/session/heartbeat_testrequest_test.cpp` and `tests/session/test_heartbeat_cadence_8cell.cpp` (a Cell B that
+  discriminates 1 × from 1.2 ×), `ci/red-arms/batch18-lost-advance.sh` (the cell it names), every cell of T011's list, and any
+  cell pinning an earlier TestReqID as an ending; rename where the name states the old rule.
+- [ ] T100 [US3] Run T089 to T093 and T097 GREEN, then `-L 105`, `-L session` and `-L config`; commit `H4`; `codegraph sync`.
+
+### Mutant arms for US3 (in `$M` at `H4`)
+
+- [ ] T101 [US3] The default threshold set back to H (the timing cells RED); the give-up's eligibility ignoring inbound since
+  the TestRequest (`TrafficAfterTestRequestNoHeartbeat_*` RED); the Heartbeat's eligibility ignoring inbound since the
+  TestRequest (`FrameAfterTestRequest_HeartbeatAt22s_*` RED); the passed, ineligible Heartbeat instant kept in the sleep set
+  (`SilentAfterTestRequest_NoSpin` RED, terminating under the bounded drive); the HeartBtInt test reverted to `== 0`
+  (`HeartBtIntNegative_NoTestRequest` RED); the loop's HeartBtInt test deleted (`HeartBtIntZero_NoTestRequest` RED); the
+  duration parser's leading-digit refusal deleted (`TestRequestThreshold_Negative_MalformedValue` RED); T097's two mutants.
+
+**Checkpoint**: US3 complete.
 
 ---
 
-## Phase 7: User Story 4 — pre-session rejects are logged (Priority: P3) (D8; C-7)
+## Phase 7: User Story 4 — every acceptor connection refused before a session is logged (Priority: P3) (research D8)
 
-**Goal**: FR-014, FR-015. **Independent Test**: capturing sink, one record per refused connection naming its reason.
+**Goal**: FR-014, FR-015.
 
-### RED cells for US4 (write first; RED on the base `52aeed4e` before the fix)
+**Independent Test**: an acceptor with a capturing sink; one record per refused connection naming its reason (SC-004).
 
-- [ ] T060 [US4] `tests/session/test_105_presession_log.cpp`, capturing sink: `PreSessionLog105.<NotTls|TlsHandshake|NoTimeLeft|FirstFrameTimeout|FirstFrameOverBudget|FirstFrameOverLimit|NoIds|NoSession>_OneRecord` (exactly one C-7.1 record per connection, its `reason` name and `error`), `NoSession_RecordNamesCompIds`, `LongCompIds_CutAt15Bytes` (L-105-d), `Flood_BoundedWithSuppressedCount` (C-7.2 on the engine's mock clock: one record per window, the next carries the count), `ListenerBindFails_OneRecord` (port in use, C-7.3). Each reason cell's real timers are named and set. RED on the base `52aeed4e` before the fix: no record. Commit (`C5`); read on `$B`.
+### RED cells for US4 (write first)
+
+- [ ] T102 [P] [US4] `tests/session/test_105_presession_log.cpp`, capturing sink:
+  `PreSessionLog105.<NotTls|TlsHandshake|NoTimeLeft|FirstFrameTimeout|FirstFrameOverBudget|FirstFrameOverLimit|NoIds|NoSession>_OneRecord`
+  (exactly one warn record of C-7.1's format with that `reason`), `NoSession_RecordNamesCompIds`, `LongCompIds_CutAt15Bytes`,
+  `Flood_BoundedWithSuppressedCount` (at most one record per window on the engine clock; the next carries the suppressed
+  count), `ListenerBindFails_OneRecord` (a port in use: one error record of C-7.3's format with the system error's value). RED on
+  the base 52aeed4e before the fix: no record.
+- [ ] T103 [US4] Commit the cells; read T102 on `$B`; record.
 
 ### Implementation for US4
 
-- [ ] T061 [US4] Hoist the rate gate (D8, E-7): new installed `include/fixpp/session/detail/log_rate_gate.hpp` with `detail::log_rate_gate` (Session's fields, layout unchanged) and inline `admit_log_record`; `Session` keeps the name by a member alias and `admit_log_record_` forwards. The garble and reply-ceiling record cells run unedited GREEN. The new installed header joins every install manifest or packaging census that lists headers (find them with `git grep -n` on an existing `include/fixpp/session/detail/` header name as the known positive).
-- [ ] T062 [US4] `log_pre_session_reject` in `src/session/engine.cpp` beside `log_role_loop_open_failure` (same logger and trace context), one call per E-6 branch; the accept loop's local gate (window `max(HeartBtInt or default, 1 s)`, `engine_cfg.clock`); the listener catch split into `std::system_error` and `...`; both formats registered in `src/log/format_registry.cpp`. Run US4 cells GREEN. Commit `H5`.
-- [ ] T063 [US4] Mutants in `$M` at `H5`: the gate bypassed: `Flood_*` RED; the `no_session` call deleted: `NoSession_OneRecord` RED; the listener record deleted: `ListenerBindFails_OneRecord` RED.
+- [ ] T104 [US4] Hoist the rate gate (data-model E-7): `include/fixpp/session/detail/log_rate_gate.hpp` (new installed
+  implementation header, namespace `fixpp::session::detail`, the same fields), inline `admit_log_record(gate, now, window,
+  occurrences)`; `Session` keeps the name by a member alias and `admit_log_record_` forwards with `effective_clock_` and
+  `max(HeartBtInt, 1 s)`.
+- [ ] T105 [US4] `src/session/engine.cpp`: `enum class pre_session_reject` (data-model E-6) and `log_pre_session_reject` beside
+  `log_role_loop_open_failure` (same logger resolution and trace context, warn, `cat::session`); one record per reject branch of
+  T015's census; one gate per entry as a local of `run_accept_loop` (clock `engine_cfg.clock`, window `max(HeartBtInt or the
+  default, 1 s)`); the listener catch split into `catch (std::system_error const&)` (its `code().value()`) and `catch (...)`
+  (0), each one error record; a listener-construction seam; both formats registered in `src/log/format_registry.cpp`.
+- [ ] T106 [US4] [seam] `PreSessionLog105.ListenerConstructionThrowsNonSystemError_OneRecordErrorZero` in `tests/session/test_105_seams.cpp` (the seam throws
+  `std::bad_alloc` in place of the construction; one record, `error=0`). Not readable on `$B`.
+- [ ] T107 [US4] Run T102 and T106 GREEN and `-L 105`; commit `H5`. Mutants in `$M`: each listener catch arm's record deleted
+  (`ListenerBindFails_OneRecord`, `ListenerConstructionThrowsNonSystemError_*` RED); the accept-loop gate bypassed
+  (`Flood_BoundedWithSuppressedCount` RED).
+
+**Checkpoint**: US4 complete.
 
 ---
 
-## Phase 8: User Story 5 — dead state is gone (Priority: P3) (D7; E-9)
+## Phase 8: User Story 5 — dead state is gone (Priority: P3) (research D7)
 
-**Goal**: FR-013, SC-005. **Independent Test**: a warning-clean build with the markers removed, and a `git grep` that reports no remaining reference.
+**Goal**: FR-013, SC-005.
 
-### RED (instrument) for US5 (first, on the base `52aeed4e`)
+**Independent Test**: a `-k 0` build under the project's warning flags with the markers removed, and a `git grep` showing no
+remaining reference.
 
-- [ ] T064 [US5] Record on `$B` the instrument's RED: `git grep -nwE 'attempt_index_|heartbeat_interval_|logout_disconnect_timeout_|heartbeat_timer_|test_request_timer_|logout_timer_|last_outbound_testreqid_|drive_logout|run_heartbeat_cadence|run_inbound_liveness_watch|validate_inbound_heartbeat_testreqid|process_inbound_sequence_reset|reply_to_inbound_resend_request|parse_cn_from_dn_local' -- include/fixpp/session/reconnect_fsm.hpp src/session/reconnect_fsm.cpp src/session/session.cpp tests` (`-w`, so `logout_disconnect_timeout_ms` and other live members do not match; known positive: a hit in `reconnect_fsm.hpp`) and `git grep -nE -B2 -A2 'maybe_unused' -- src include | grep -E '559'` (known positive: a `ReconnectFsm` member) both report hits there.
+### Instrument first (US5)
+
+- [ ] T108 [US5] On `$B`, run the SC-005 instrument `git grep -n 'maybe_unused' -- src include` filtered to the #559 markers of
+  sites 2 and 3, and T013's caller census; both must report their known positives there (the instrument can report non-zero).
 
 ### Implementation for US5
 
-- [ ] T065 [US5] Remove from `include/fixpp/session/reconnect_fsm.hpp` and `src/session/reconnect_fsm.cpp` E-9's members, `drive_logout`, the caller-less stubs of T011 (SI-1 ruling) with their comments (including `run_inbound_liveness_watch`'s timing comment), the false header comment, and the two constructor parameters; update `Session::Session` and every constructor call site of T011.
-- [ ] T066 [US5] Remove `parse_cn_from_dn_local` from `src/session/session.cpp`.
-- [ ] T067 [US5] Retire `DriveLogoutStub_*` and `Initiator_DriveLogout_*` in `tests/session/test_logout_timeout.cpp` with a note naming 105 FR-013; remove their entry from `ci/red-arms/batch11-labels.txt`; correct the "triggers drive_logout path" comment in `tests/fuzz/fuzz_session_recovery_admin_parse.cpp` and every test comment naming a removed stub as a RED witness.
-- [ ] T068 [US5] Size pins (FR-013): re-run T008's two greps at the head and update every `sizeof(Session)` / `ReconnectFsm` pin found; then a full `-k 0` build of linux-clang-debug as the second instrument. T064's grep now reports no hit (SC-005).
+- [ ] T109 [US5] `include/fixpp/session/reconnect_fsm.hpp` and `src/session/reconnect_fsm.cpp`: remove `attempt_index_`,
+  `heartbeat_interval_`, `logout_disconnect_timeout_`, `heartbeat_timer_`, `test_request_timer_`, `logout_timer_`,
+  `last_outbound_testreqid_`, `drive_logout`, every caller-less stub T013 confirms (`run_heartbeat_cadence`,
+  `run_inbound_liveness_watch` with its timing comment, `validate_inbound_heartbeat_testreqid`,
+  `process_inbound_sequence_reset`, `reply_to_inbound_resend_request`), the constructor's `heartbeat_interval` and
+  `logout_disconnect_timeout` parameters and the false header comment; update `Session::Session` and every constructor call
+  site of T013.
+- [ ] T110 [US5] Remove `parse_cn_from_dn_local` from `src/session/session.cpp`.
+- [ ] T111 [US5] Retire `DriveLogoutStub_*` and `Initiator_DriveLogout_*` in `tests/session/test_logout_timeout.cpp` with a note
+  naming FR-013; remove their entry from `ci/red-arms/batch11-labels.txt`; correct the "triggers drive_logout path" comment in
+  `tests/fuzz/fuzz_session_recovery_admin_parse.cpp` and every test comment naming a removed stub as a RED witness.
+- [ ] T112 [US5] Size pins: re-run T010's two greps at the head and update every `sizeof(Session)` / `sizeof(ReconnectFsm)` pin
+  they report in `tests/` and `ci/`; the full `-k 0` build of T113 is the second instrument.
+- [ ] T113 [US5] Full `-k 0` build on linux-clang-debug and linux-gcc-release; T108's two instruments now report nothing; commit
+  `H6`; `codegraph sync`.
+
+**Checkpoint**: US5 complete.
 
 ---
 
-## Phase 9: Surfaces — C-ABI 1.18 and Python (D9; C-9)
+## Phase 9: Polish & cross-cutting — C ABI 1.18 and the Python surface (research D9; contract C-9)
 
-- [ ] T069 C-ABI witness cells first, in `tests/capi/recovery_liveness_capi_witness_test.cpp` (through `recovery_liveness_capi_support.hpp`), each with a positive control (the session shown live first, or a well-formed message afterwards reaching `cb`): `fixpp_session_is_established` true during an R-2 wait and false after the bound; `fixpp_session_send` refused during the wait; a knob-off answering peer stays established; the peer reads the R-1 Logout then EOF through a C-driven session. RED on the base `52aeed4e` before the fix.
-- [ ] T070 `include/fix/c_api/session.h`: a 1.18 clause on `fixpp_session_is_established`, `fixpp_session_close`, `fixpp_session_send`, `fixpp_session_register_callback` and `fixpp_session_register_send_callback`, and the 1.11, 1.12 and 1.17 sentences these change amended in place, "amended in C-ABI 1.18, 105" (found by T010 and by the 103 bump's clause sites: `git grep -n 'C-ABI 1.17' include/fix/c_api/session.h`). Not clang-formatted.
-- [ ] T071 `include/fix/c_api/version.h`: `FIXPP_C_ABI_VERSION_MINOR 18` and the 1.18 history entry (BREAKING, `[const §X.7]`; the counterparty's side: every ending closes the connection, the R-1 Logout, the R-2 wait, the TestRequest at 1.2 × HeartBtInt). Not clang-formatted.
-- [ ] T072 Move every "pins the minor" hit of T010 and update every other file the 103 bump touched that T010 lists (`tests/capi/version_test.cpp`; docs and changelog entries; the Python binding's version expectations only where T010 found a hit under `bindings/`), then run `-L capi` and `python3 -m pytest bindings/python/tests`.
+- [ ] T114 [P] RED first: C-driven witnesses in `tests/capi/recovery_liveness_capi_witness_test.cpp`, each with a positive
+  control (the session shown live first, or a well-formed message afterwards reaching `cb`): `fixpp_session_is_established`
+  true during an R-2 wait after Active and false after its end; `fixpp_session_send` refused during the wait;
+  `fixpp_session_close` graceful and terminal during the wait (one close each); `fixpp_session_register_callback` and
+  `fixpp_session_register_send_callback` delivery during the wait; the peer's EOF after an ending through the C ABI. RED on the
+  base 52aeed4e before the fix (read with T025's procedure).
+- [ ] T115 `include/fix/c_api/version.h`: `FIXPP_C_ABI_VERSION_MINOR` 18 and the 1.18 history entry, the counterparty's side:
+  every ending closes the connection; the unanswered TestRequest's Logout; the R-2 wait; the write limit on every ending
+  Logout; the TestRequest at 1.2 × HeartBtInt; the TestReqID(112) rule. Never clang-format `include/fix/c_api/*.h`.
+- [ ] T116 `include/fix/c_api/session.h`: a 1.18 clause on each observer of contract C-9; the 1.11, 1.12 and 1.17 sentences
+  this feature changes amended in place, "amended in C-ABI 1.18, 105".
+- [ ] T117 Move every "pins the minor" row of T012 (the capi tests, `tests/capi/CMakeLists.txt`, the support headers, the CI
+  scripts it lists) and regenerate `tools/capi_freeze.sha256` by the generator T012 found; run `-L capi`.
+- [ ] T118 Python (Article X §7, in-repo consumers): run T012's grep over `bindings/` again at the head, its seeded known
+  positive first; move any pin it reports and record the result, a zero included.
+- [ ] T119 Run T114 GREEN and `-L capi`; commit `H7`.
 
 ---
 
-## Phase 10: Records and supersession (FR-016, FR-018, FR-019; D11, D12)
+## Phase 10: Polish & cross-cutting — records, follow-ups and supersession (FR-016, FR-018, FR-019; research D11, D12)
 
-- [ ] T073 B&L, live file `spec/behaviors-and-limitations.md` (FR-016, D11): retire L-103-5 (its QuickFIX statement not carried forward as written) and move it to `spec/behaviors-and-limitations-closed.md` under that file's cut rule (only self-declared-resolved entries, marked "[RESOLVED in 105]").
-- [ ] T074 B&L amend in place, dated, naming 105: B-537-2 (the "transport stays open" clause and B-537-2(b)'s silent grace-check ending), B-537-3, L-093-1, L-093-6, B-093-4, B-092-2, B-092-5, L-092-1, B-103-10 and B-104-6.
-- [ ] T075 B&L new rows B-105-1 (close rule by ending class) to B-105-7 (BREAKING C-ABI 1.18 and the C++ layout of `Session` and `ReconnectFsm`), and L-105-a, L-105-b, L-105-c, L-105-d from contract C-11; the departures table of the spec and C-10 copied, not re-derived. Each row cites its cells by name.
-- [ ] T076 [P] `.specify/536-537-538-recovery-liveness.md`: an erratum at its end naming 105 (R-6 superseded by R-1; D-537-5's C-3 disclosure by FR-004).
-- [ ] T077 [P] Brain pages, each citing source (D11): `brain/components/session.md` (R-6; the grace-check deferral to B27), `brain/components/session-liveness-and-reconnect.md` (the `ReconnectFsm` correction block; the thresholds as a pointer to `run_liveness_loop`), `brain/components/engine-accept-path.md` (the first frame through the pump; the reject records), `brain/components/graceful-logout.md` if T007 hit a rule of it. Each page's superseded-docs list names 105's supersessions of 005, 013, 092, 093, 103 and 104 by name (merged bundles are not edited).
-- [ ] T078 [P] T-DOC-1 (D12): a `brain/failure-classes.md` entry in that page's form (trigger and procedure, no instance, no PR) for `<windows.h>` macro identifiers, its text sourced from PARENT `.claude/agents/phase-implementer.md` section "Cross-platform — `<windows.h>` macros rewrite common identifiers on MSVC": the trigger (a new identifier in code an MSVC lane compiles whose spelling a platform header defines as a macro), the procedure (descriptive names; `(std::max)(a, b)`; build the touched targets on MSVC before the first labelled push; a Linux-only green is no evidence for the class); and one `brain/log.md` line dated at the PR.
-- [ ] T079 Brain checks: `python3 tools/check_brain.py --self-test`, `python3 tools/check_brain.py gate` and `python3 tools/check_brain.py census` (and what `.github/workflows/brain-freshness.yml` runs, derived from it), then the WRAPPER PARENT `research/G19-fix-fpml-iso20022/tools/brain-external-sweep.sh` (never a bare `check_brain.py sweep`); record its execution count.
-- [ ] T080 Supersession close (FR-019): re-run T007's census at the head; every living-surface hit now states the new rule or names 105; every FR-019 pin of T033, T046, T057 and T067 asserts the new rule; T076 and T077 name every ruling of FR-019's list. Record the classed table in the evidence file.
+- [ ] T120 **(orchestrator)** File the three follow-up issues of plan "Follow-ups to file before Gate B" on fixpp, each
+  labelled at creation from `gh label list`: bounding every non-ending write (L-105-f); the per-session timer slot under a
+  direct driver (`system_clock_source`); the read pump's establishment race re-racing an absorbed exception. Record the issue
+  numbers in the evidence file. Precedes T123.
+- [ ] T121 `spec/behaviors-and-limitations.md` (live file only): retire L-103-5 (its QuickFIX statement is not carried forward
+  as written) and move it to `spec/behaviors-and-limitations-closed.md` under that file's cut rule (only self-declared-resolved
+  entries), marked resolved by 105. After T122, any amended L-row whose amendment leaves nothing live moves the same way.
+- [ ] T122 Amend in place, dated, naming 105: B-537-2 (the "transport stays open" clause and its silent grace-check ending,
+  B-537-2(b)), B-537-3 (#582), L-093-1 and L-092-1 (R-1's Logout and the close; the "or leaves a TestRequest unanswered"
+  clause removed), L-093-6 (the rejects are logged; garbles of a connection with no Session still not counted), B-093-4,
+  B-092-2 and B-092-5 (the grace window is 2T), B-103-10, B-104-6 and B-103-13 (the direct driver's precondition naming
+  `run_ending_logout_bound_` and the close frame; `Lifetime105.*` its cells).
+- [ ] T123 New rows: B-105-1 (the close rule by ending class) to B-105-7 (BREAKING C-ABI 1.18, the C++ layout of `Session` and
+  `ReconnectFsm`, the installed `detail/log_rate_gate.hpp`), with B-105-2 carrying research D11's disclosures; L-105-b to
+  L-105-h from contract C-11 (L-105-a was withdrawn in Gate A round 1 and is not used), L-105-f written as narrowed by ruling
+  D-e and naming T120's issue and the round-1 text it supersedes. The spec's and C-10's departure tables copied, not
+  re-derived. Each row cites its cells by name.
+- [ ] T124 [P] `.specify/536-537-538-recovery-liveness.md`: an erratum at its end naming 105 (R-6 superseded by R-1; D-537-5's
+  C-3 disclosure by FR-004).
+- [ ] T125 [P] Brain pages, each citing source (research D11): `brain/components/session.md` (R-6; the grace-check deferral to
+  B27), `brain/components/session-liveness-and-reconnect.md` (the `ReconnectFsm` correction block; the thresholds as a pointer
+  to `run_liveness_loop`), `brain/components/engine-accept-path.md` (the first frame through the pump; the reject records),
+  `brain/components/graceful-logout.md` if T009 hit a rule of it. Each page's superseded-docs list names 105's supersessions
+  of 005, 013, 092, 093, 103 and 104 by name.
+- [ ] T126 [P] T-DOC-1 (research D12): a `brain/failure-classes.md` entry in that page's form (trigger and procedure, no
+  instance, no PR) for `<windows.h>` macro identifiers, its text sourced from PARENT `.claude/agents/phase-implementer.md`
+  section "Cross-platform — `<windows.h>` macros rewrite common identifiers on MSVC": the trigger (a new identifier in code an
+  MSVC lane compiles whose spelling a platform header defines as a macro: `near`, `far`, `min`, `max`, `small`, `ERROR`, `IN`,
+  `OUT`), the procedure (a descriptive name; `(std::max)(a, b)`; build the touched targets on MSVC before the first labelled
+  push; a Linux-only green is no evidence for the class); and one `brain/log.md` line dated at the PR, naming the class.
+- [ ] T127 Brain checks: `python3 tools/check_brain.py --self-test`, `python3 tools/check_brain.py gate` and
+  `python3 tools/check_brain.py census` (and whatever `.github/workflows/brain-freshness.yml` runs, derived from it), then the
+  wrapper PARENT `research/G19-fix-fpml-iso20022/tools/brain-external-sweep.sh` (never a bare `check_brain.py sweep`); record
+  its execution count.
+- [ ] T128 Supersession close (FR-019): re-run T009's census at the head; every living-surface hit now states the new rule or
+  names 105; every FR-019 pin of T033, T072 and T099 and the retired probes of T111 assert the new rule; T124 and T125 name
+  every ruling of FR-019's list; `git grep -nE 'Phase 6 US4|not a close|unanswered_tr_' -- src include` reports no stale claim.
+  Record the classed table.
 
 ---
 
 ## Phase 11: Polish, verification and mandatory close-out
 
-- [ ] T081 [P] `/simplify` over the diff; any change re-runs `-L 105`.
-- [ ] T082 [P] Header-comment check (FR-018): `git grep -nE 'Phase 6 US4|not a close|unanswered_tr_' -- src include` reports no stale claim.
-- [ ] T083 clang-format on touched files only (never `specs/`, never `include/fix/c_api/*.h`): `git diff --name-only --diff-filter=d origin/main...HEAD -- src include tests | grep -E '\.(cpp|hpp|h)$' | grep -vE '^include/fix/c_api/' | xargs clang-format --dry-run --Werror`.
-- [ ] T084 clang-tidy, cppcheck (the local 2.22 on PATH) and IWYU on the touched `src/` and `include/` files (Article IX §4).
-- [ ] T085 Comment-claim lint: `PARENT/.claude/scripts/check-comment-claims.py --root PARENT/research/G19-fix-fpml-iso20022/library --base origin/main`; read added runtime strings and inventories by hand.
-- [ ] T086 Line-citation gate: `python3 tools/check_line_citations.py --range origin/main..HEAD` and its `--shift-audit origin/main..HEAD` (the bundle is charged by the range gate).
-- [ ] T087 Every buildless Tier 1 step run locally, derived from `.github/workflows/tier1.yml`: `ci-script-pins` (all its steps, including `check_co_spawn_lambda.py --self-test` and the gate), `check-layers`, and `co-spawn-closure-audit` (unconditional: `close_connection_` and `run_ending_logout_bound_` add spawns, T014); `ci/pump-census.sh` against `ci/expected-pump-sites.txt`.
-- [ ] T088 linux-gcc-release `-Werror` build of the touched targets (`session_105_tests`, the re-pinned entries, `fixpp_session`, the capi and config tests).
-- [ ] T089 Sanitizer lanes: linux-clang-asan, -ubsan, -tsan, each `-L 105` and the touched `session`, `capi` and `config` entries (`EngineStopRacesEndingClose_OneClose` and the TLS cells on TSan); any report is a defect until disproven.
-- [ ] T090 Interop (research R4): run the live QuickFIX interop cells of `tests/interop` (`ci/run-interop-live.py`'s selection): peers now see a Logout before EOF on the give-up and an R-2 wait.
-- [ ] T091 Article VIII §3: a paired base-vs-candidate run of every bench T012 found driving `run_read_pump`, base at `$B` padded to `$T`'s path length (`cmp` the `.text`), or the recorded statement that none does.
-- [ ] T092 **(orchestrator)** windows-msvc-debug build (`-k 0`) and run of the touched targets and `-L 105` in `/mnt/c/temp/fixpp`, after taking `.sandbox-lock` by PARENT `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md` Step 0; release the lock after. Never at the same time as a Linux build.
-- [ ] T093 The WHOLE pytest suite: `python3 -m pytest bindings/python/tests` (the behaviour reaches Python through the C ABI).
-- [ ] T094 One full `ctest --preset linux-clang-debug --no-tests=error` (Article XVII §7), after reading the sandbox lock; record the count and any failure.
-- [ ] T095 Coverage of added lines (Article IX §1): fresh per-binary profraw, `session`, `log` and `config` modules; every uncovered added line or branch tested, waived with a one-line rationale, or escalated to a filed, labelled issue, in `.specify/decisions/105-transport-liveness-verify.md`.
-- [ ] T096 **(orchestrator)** `/speckit-verify`; writes `.specify/decisions/105-transport-liveness-verify.md`. Re-run T083 to T087 as the last actions before any labelled push.
+- [ ] T129 `/simplify` over the diff; any change re-runs `-L 105`.
+- [ ] T130 clang-format on touched files only (never `specs/`, never `include/fix/c_api/*.h`):
+  `git diff --name-only --diff-filter=d origin/main...HEAD -- src include tests bench | grep -E '\.(cpp|hpp|h)$' | grep -vE '^include/fix/c_api/' | xargs clang-format --dry-run --Werror`.
+- [ ] T131 clang-tidy, cppcheck (the local 2.22 on PATH) and IWYU on the touched `src/` and `include/` files (Article IX §4); a
+  translation unit cppcheck abandons is not clean.
+- [ ] T132 Comment-claim lint: `PARENT/.claude/scripts/check-comment-claims.py --root PARENT/research/G19-fix-fpml-iso20022/library --base origin/main`;
+  read added runtime strings and inventories by hand.
+- [ ] T133 Line-citation gate: `python3 tools/check_line_citations.py --range origin/main..HEAD` and
+  `--shift-audit origin/main..HEAD` (the feature's own `specs/` bundle is charged by the range gate).
+- [ ] T134 Article X §7 predicate at the PR head: `gh release list --exclude-drafts` on the fixpp repo; empty keeps the MINOR
+  bump of T115; a non-empty listing stops and goes to the orchestrator. Record the result.
+- [ ] T135 Every buildless Tier 1 step run locally, derived from `.github/workflows/tier1.yml`: `ci-script-pins` (all its steps,
+  including `check_co_spawn_lambda.py --self-test` and its gate), `check-layers`, `co-spawn-closure-audit` (it applies: the new
+  spawns of T027 and T059, against T016's base list), and `ci/pump-census.sh` against `ci/expected-pump-sites.txt`.
+- [ ] T136 linux-gcc-release `-Werror` build of the touched targets (`session_105_tests`, every re-pinned entry, the library,
+  the capi and config tests, `engine_send_bench`).
+- [ ] T137 Sanitizer lanes linux-clang-asan, -ubsan and -tsan: `-L 105` and the touched `session`, `capi` and `config` entries
+  (`EngineStopRacesEndingClose_OneClose`, `OnLogoutCallsClose_OneClose` and the TLS cells on TSan; `Lifetime105.*` on ASan); a
+  report is a defect until disproven by a reproduction or a client-path analysis.
+- [ ] T138 Benchmarks (Article VIII §2, §3; ruling D-f; contract C-12): add the pump case to `bench/session/engine_send_bench.cpp`'s
+  harness (inbound Heartbeat and application frames through `run_read_pump`, the unarmed path); then paired base-vs-candidate
+  A-B-A-B runs of `on_inbound_frame_bench`, `session_send_bench` and `engine_send_bench` with the new case, the base a release
+  tree of `$B` with the bench file overlaid, its path padded to `$T`'s length (`cmp` the `.text`); the +5 % budget; results in
+  the verify evidence.
+- [ ] T139 Interop (research R4): the live QuickFIX interop cells of `tests/interop` (`ci/run-interop-live.py`'s selection):
+  peers now see a Logout before EOF on the give-up and an R-2 wait.
+- [ ] T140 The WHOLE pytest suite: `python3 -m pytest bindings/python/tests` (the behaviour reaches Python through the C ABI).
+- [ ] T141 **(orchestrator)** windows-msvc-debug build (`-k 0`) and run of the touched targets and `-L 105` in
+  `/mnt/c/temp/fixpp`, after taking `.sandbox-lock` by PARENT `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md`
+  Step 0; release the lock after; never at the same time as a Linux build.
+- [ ] T142 One full `ctest --preset linux-clang-debug --no-tests=error` (Article XVII §7), after reading the sandbox lock; record
+  the count and any failure.
+- [ ] T143 Coverage of added lines (Article IX §1): fresh per-binary profraw for the `session`, `log` and `config` modules; every
+  uncovered added line or branch tested, waived with a one-line rationale, or escalated to a filed, labelled issue, in
+  `.specify/decisions/105-transport-liveness-verify.md`.
+- [ ] T144 **(orchestrator)** `/speckit-verify`; writes `.specify/decisions/105-transport-liveness-verify.md`. Re-run T130 to T135
+  as the last actions before any labelled push.
+- [ ] T145 Remove the temporary worktrees `$B` and `$M` (`git worktree remove`, then `git worktree prune`) once every RED reading,
+  mutant and bench run is recorded; never `fixpp-parallel`, never the MSVC sandbox.
 
 ### Mandatory close-out tasks (ALWAYS emit — Gate-B preconditions, Article XVII §8)
 
-- [ ] T097 **Catalogue close-out**: read `spec/feature-catalogue.md` for every OFFICIAL row whose Feature column names 105 or whose subject is a 105 issue (`grep -nE '105-transport|#534|#535|#559|#582|#687'`); flip each such row to `done` with the PR and evidence, with its `spec/coverage-index.md` entry, or record "none owned" after the check. Rows this feature amends but does not own (S-003, S-004, S-015 by their subjects) get a dated "105 amends this row" note naming the B-105 rows; their state does not change.
-- [ ] T098 **Feature-completeness audit (MUST be the FINAL task)**: against the final head, (i) every row of this file is `[X]` or carries a waiver rationale; (ii) every FR and SC maps to a landed test and a landed implementation (the Requirement map below, re-read cell by cell); (iii) every feature-owned OFFICIAL row is `done` with its `coverage-index.md` entry. Record the verdict, 100 % or fully waived, in `.specify/decisions/105-transport-liveness-verify.md` under `## Completeness`.
+- [ ] T146 **Catalogue close-out**: read `spec/feature-catalogue.md` for every OFFICIAL row whose Feature column names 105 or
+  whose subject is a 105 issue (`grep -nE '105-transport|#534|#535|#559|#582|#687'`, then a read of the session rows by
+  subject); flip each feature-owned row to `done` with the PR and evidence, with its `spec/coverage-index.md` entry, or record
+  "none owned" after the check. Rows this feature amends but does not own get a dated "105 amends this row" note naming the
+  B-105 rows; their state does not change.
+- [ ] T147 **Feature-completeness audit (MUST be the FINAL task)**: against the final head, (i) every row of this file is
+  `[X]` or carries a waiver rationale; (ii) every FR and SC maps to a landed test and a landed implementation (the
+  traceability table below, re-read cell by cell), and every W-row and E-3 row maps to a landed cell (the design table
+  below); (iii) every feature-owned OFFICIAL catalogue row is `done` with its `coverage-index.md` entry. Record the verdict,
+  100 % or fully waived, in `.specify/decisions/105-transport-liveness-verify.md` under `## Completeness`.
 
 ---
 
-## Requirement map (FR/SC → tasks)
+## Traceability: FR/SC → tasks
 
 | Requirement | Cells | Implementation | Mutants / instrument |
 |---|---|---|---|
-| FR-001 (every ending closes) | T016–T024, T038 | T027–T029 | T035, T036; census T005 |
-| FR-002 (orderly close via `close_async`) | T024, T025 | T028 | T037 |
-| FR-003 (R-1 Logout, close, record, slot 74) | T019, T020, T025 | T031 | T036, T037 |
-| FR-004, FR-004a (R-2 wait) | T038–T041, T069 | T043, T044 | T047, T048; census T006 |
-| FR-005 (close after reply and reset) | T017, T018 | T027–T029 | T035, T036 |
-| FR-006 (acceptor first frame) | T022 | T029 | T035 |
-| FR-007 (silent pre-Active refusal at once) | T021, T022, T040 | T029, T030 | T035, T048 |
-| FR-008 (store work not cut) | T017, T018, T024 | T028 (`inbound_depth_`) | T035 |
-| FR-009 (#582) | T049, T050, T069 | T051 | T052 |
-| FR-010 (T, 2T, HeartBtInt ≤ 0, precedence) | T053 | T055 | T059 |
-| FR-011 (validation) | T054 | T056 | T059 |
-| FR-012 (comments and surfaces) | — | T058 | T080 |
-| FR-013 (dead state, size pins) | T064 (instrument) | T065–T068 | T064's grep, T068's build |
-| FR-014, FR-015 (records) | T060 | T061, T062 | T063 |
-| FR-016 (B&L) | — | T073–T075 | — |
-| FR-017 (RED first, peer EOF, discriminating bounds) | every RED task, T026, T042 | — | every mutant task |
-| FR-018 (superseded comments) | — | T032, T045, T058 | T082, T085 |
-| FR-019 (supersession) | T033, T046, T057, T067 | T076, T077, T080 | census T007 |
-| SC-001 | Ending-site table, T016–T025, T038–T041 | T027–T031, T043, T044 | T035–T037, T047, T048 |
-| SC-002 | T053 | T055 | T059 |
-| SC-003 | T049 | T051 | T052 |
-| SC-004 | T060 | T062 | T063 |
-| SC-005 | T064 | T065, T066 | T068 |
-| SC-006 | T089, T094 | — | — |
-| Article VIII §3 | T091 | — | — |
-| C-ABI 1.18 (D9) | T069 | T070–T072 | T010 |
+| FR-001 (every ending closes) | T018–T024, T042, T051 | T026–T029 | T036–T038; census T006 |
+| FR-002 (orderly close via `close_async`; D-e, D-g exceptions) | T024, T034, T054, T070 | T027, T062 | T039, T041, T079 |
+| FR-003 (R-1 Logout, record before the write, close, slot 74) | T023, T051, T070 | T031, T068 | T037, T039, T077 |
+| FR-004, FR-004a (R-2 wait, overlay, absorption) | T042–T050, T053, T114 | T057–T066 | T074–T076; census T007, T008 |
+| FR-004b (write limit, spawn failure, failure exit) | T051–T055, T070 | T059–T062, T067 | T077–T079 |
+| FR-005 (close after reply and reset; reply limited) | T019, T051 | T029, T059 | T036, T077 |
+| FR-006 (acceptor first frame) | T021 | T029 | T036 |
+| FR-007 (silent pre-Active refusal at once, no timeout event) | T021, T049 | T029, T030 | T036, T040, T076 |
+| FR-008 (store work not cut) | T019, T051, T050 | T027 (`inbound_depth_`), T062 | T036, T078 |
+| FR-009 (#582, the 112 rule) | T081, T082, T086 | T084, T085 | T088 |
+| FR-010 (T, 2T, sleep set, HeartBtInt ≤ 0, precedence) | T089–T091, T097 | T095 | T101 |
+| FR-011 (validation) | T092, T093 | T096 | T101 |
+| FR-012 (comments and surfaces) | — | T032, T098 | T128, T132 |
+| FR-013 (dead state, size pins) | T108 (instrument) | T109–T112 | T113 |
+| FR-014, FR-015 (records) | T102, T106 | T104, T105 | T107 |
+| FR-016 (B&L) | — | T120–T123 | — |
+| FR-017 (RED first, peer EOF, discriminating bounds) | every RED task, T025, T056, T083, T094, T103 | — | every mutant task |
+| FR-018 (superseded comments) | — | T032, T071, T098, T111 | T128, T132 |
+| FR-019 (supersession) | T033, T072, T099, T111 | T124, T125, T128 | census T009 |
+| SC-001 | Ending-site table, T018–T024, T042–T055 | T026–T031, T057–T069 | T036–T041, T074–T080 |
+| SC-002 | T089–T091 | T095 | T101 |
+| SC-003 | T081 | T084 | T088 |
+| SC-004 | T102 | T105 | T107 |
+| SC-005 | T108 | T109, T110 | T113 |
+| SC-006 | T137, T142 | — | — |
+| Article VIII §3 (ruling D-f) | T138 | T138 (pump case) | census T014 |
+| C-ABI 1.18 (D9) | T114 | T115–T118 | T012, T134 |
+| T-DOC-1 (D12) | — | T126 | T127 |
+
+## Traceability: design elements → tasks
+
+| Element | Cells | Implementation |
+|---|---|---|
+| W-1 (the peer's Logout, any MsgSeqNum; before Active, no reset) | T042, T049 | T066 |
+| W-2 to W-5 (frames at NextNumIn) | T044, T049 (drained) | T066 (overlay), T060 |
+| W-6, W-7 (above NextNumIn; gap deadline passed) | T044 | T064 |
+| W-8 (absorbed by cause) | T045 | T063, T064 |
+| W-9 (internal failure ends the wait; the bound's own failure) | T046, T053, T070 | T065, T061 |
+| W-10, W-11 (send refused; liveness originates nothing) | T047 | T068 |
+| W-12 (the bound; before Active capped) | T043, T049, T050 | T061, T062 |
+| W-13, W-14 (graceful, terminal, stop, drain) | T048, T054 | T069 |
+| W-15 (the Logout's own write cut at the bound) | T051, T052 | T059–T062 |
+| E-3 rows 1, 2, 2a (enter `writing`; timeout 0; bound spawn fails) | T051, T048, T070 | T059 |
+| E-3 row 3 (leaving `writing`; the wake on both branches) | T051, T052 | T060 |
+| E-3 row 4 (write limit; `cut`) | T051, T052, T070 | T061, T062 |
+| E-3 rows 5, 5a, 5b, 5c (closers and other roots during `writing`) | T048, T051, T055 | T067, T069 |
+| E-3 rows 6, 9, 11 (before Active) | T049 | T060, T065, T066 |
+| E-3 rows 7, 8, 10, 12 (after Active) | T045, T042, T043, T050, T046 | T063–T066, T061 |
+| E-3 rows 13, 14, 15 (under `close()`, stop, drain) | T048, T054 | T069 |
+| E-3 row 16 (failure exit, per phase) | T053, T070 | T061 |
+| E-3 row 17 (next connection) | T020, T082 | T069, T085 |
+| E-2 latch, setter, close frame, joins, I-4 | T018–T022, T034, T055 | T026–T029, T069 |
+| E-4 sleep set, `liveness_may_originate_`, 112 window | T047, T082, T086, T089, T090 | T068, T085, T095 |
+| E-5 `expire()` and the establishment hand-off | T021, T049 | T030, T058 |
+| E-6, E-7, E-8 (records, gate) | T023, T102, T106 | T031, T104, T105 |
+| E-9 (`ReconnectFsm`) | T108 | T109 |
+| D-f benches (paired, plus the pump case) | — | T138 |
+| Follow-ups before Gate B | — | T120 |
 
 ## Dependencies and execution order
 
-- **Pipeline before Phase 1**: Gate A, `/speckit-analyze`, `/speckit-checklist` and `/speckit-checklist-audit` (`.specify/pipeline.md`); the audit blocks implementation.
-- **Phases**: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11. Every story but US4 and US5 edits `src/session/session.cpp`, so stories run in order, never in parallel.
-- **US1's close mechanism is foundational**: T027 to T029 (the latch, `release_connection_end_`, `close_connection_`, the pump's consumer) are what US2's mismatch close (T050), US3's give-up path (`run_liveness_loop`'s R-1 exit, T053's ended-at cells) and the C-ABI cells (T069) observe. US3 must not start before T034. US3 changes the instants the R-1 cells reach, so T019, T020 and T049 are event-driven (T004).
-- **Within US1**: T015 → T016–T025 → T026 → T027 → T028 → T029 → T030 → T031 → T032 → T033 → T034 → T035–T037; then T038–T041 → T042 → T043 → T044 → T045 → T046 → T047, T048. The R-2-class pins are RED between T034 and T046 by design.
-- **US5** depends on T011 and T008 only; **US4** on T013 only; both after US3 because of the shared session strand files in review order, not by code dependency.
-- **Records** (Phase 10) after every mechanism; T080 after T073–T079. **T096** after T081–T095; **T097 → T098** last.
+- **Before Phase 1 (orchestrator)**: `/speckit-analyze`, `/speckit-checklist` refresh of `checklists/requirements.md` (its items that
+  waited for regenerated tasks) and `/speckit-checklist-audit` (`.specify/pipeline.md`); the audit blocks implementation.
+- **Phases**: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11. US1 to US3 all edit `src/session/session.cpp` and run in order,
+  never in parallel.
+- **US1's close mechanism is foundational.** T026 to T029 (the latch, `release_connection_end_`, `close_transport_`, the pump's
+  consumer) are what every later close cell observes: US2's mismatch close (T081, T082), US3's give-up (`run_liveness_loop`'s
+  R-1 exit, which T031 and T068 shape and T095 re-times) and the C-ABI cells (T114). US2 starts after T073; US3 after T087.
+  US3 moves the liveness instants, so every earlier cell that reaches one sets `test_request_threshold = HeartBtInt` and is
+  driven by the wire reader (Execution rules).
+- **Within US1**: T018–T024 → T025 → T026 → T027 → T028 → T029 → T030 → T031 → T032 → T033 → T034 → T035 → T036–T041; then
+  T042–T055 → T056 → T057 → T058 → T059 → T060 → T061 → T062 → T063 → T064 → T065 → T066 → T067 → T068 → T069 → T070 → T071
+  → T072 → T073 → T074–T080. The R-2-class pins are RED between T035 and T072 by design.
+- **US4** depends on T015 only; **US5** on T010 and T013 only; both run after US3 because they share review order and the
+  build, not code.
+- **Phase 9** after US1 to US3 (its witnesses observe their rules). **Phase 10**: T120 before T123; T128 after T121–T127.
+  **Phase 11**: T144 after T129–T143; T145 before T146; **T146 → T147 last**.
 
 ### Parallel opportunities
 
-- Phase 2: T005 to T014 are read-only and run in parallel.
-- Phase 3: T016 (`test_105_connection_close.cpp`), T019 (`test_105_liveness_timing.cpp`) and T025 (`test_105_tls_close.cpp`) are different files; the other cells of each file follow their file's first task.
-- Phase 4 and US2, US4: each story's cells share one file and run in order.
-- Phase 10: T076, T077 and T078 are different files (T073 to T075 share the B&L file and run in order).
-- Phase 11: T081 and T082 in parallel; no two builds ever run at once, so a parallel task never builds beside another.
+- Phase 2: T006 to T017 are read-only and run in parallel.
+- US1 part A: T018 (`test_105_connection_close.cpp`), T023 (`test_105_liveness_timing.cpp`) and T024 (`test_105_tls_close.cpp`);
+  the other cells of each file follow their file's first task.
+- US1 part B: T042 (`test_105_logout_wait.cpp`), T051 (`test_105_write_limit.cpp`) and T054 (`test_105_tls_close.cpp`).
+- US2: T081 is alone in its file. US3: T089 and T092 (different files). US4: T102. Phase 9: T114.
+- Phase 10: T124, T125 and T126 (different files); T121 to T123 share the B&L file and run in order.
+- Phase 11: the read-only checks T132 to T134 in parallel; no two builds ever run at once.
 
 ### Parallel examples
 
 ```bash
 # Phase 2 (read-only censuses):
-Task: "T005 ending-site census and table"
-Task: "T007 supersession census with known positives"
-Task: "T010 C-ABI minor-pin census"
-Task: "T013 pre-session reject branch census"
+Task: "T006 ending-site census and table"
+Task: "T009 supersession census with its three known positives"
+Task: "T012 C-ABI minor-pin census and the 103 bump's file list"
+Task: "T017 establishment-cap condition re-derived in source"
 
-# US1 part 1 RED cells (three files):
-Task: "T016 PumpSilentEnding cells in tests/session/test_105_connection_close.cpp"
-Task: "T019 R-1 give-up cells in tests/session/test_105_liveness_timing.cpp"
-Task: "T025 real-TLS close_notify cell in tests/session/test_105_tls_close.cpp"
+# US1 part A RED cells (three files):
+Task: "T018 PumpSilentEnding cells in tests/session/test_105_connection_close.cpp"
+Task: "T023 R-1 give-up cells in tests/session/test_105_liveness_timing.cpp"
+Task: "T024 real-TLS close_notify cells in tests/session/test_105_tls_close.cpp"
 
-# US3 / US5 (sequential within the story; shown for the hand-off order):
-Task: "T053 then T054 (timing cells, then config cells)"
-Task: "T065 then T066 then T067 (ReconnectFsm, parse_cn_from_dn_local, retired probes)"
+# US1 part B RED cells (three files):
+Task: "T042 W-1 cells in tests/session/test_105_logout_wait.cpp"
+Task: "T051 write-limit cells in tests/session/test_105_write_limit.cpp"
+Task: "T054 TLS graceful-close and abortive write-limit cells in tests/session/test_105_tls_close.cpp"
+
+# US2 / US3 / US4 (one file each):
+Task: "T081 knob-off cells in tests/session/test_105_heartbeat_knob_off.cpp"
+Task: "T089 default-timing cells in tests/session/test_105_liveness_timing.cpp"
+Task: "T092 TOML threshold cells in tests/config/test_load_negative_battery.cpp"
+Task: "T102 pre-session record cells in tests/session/test_105_presession_log.cpp"
 
 # Phase 10 records:
-Task: "T073 retire L-103-5 to the closed B&L file"
-Task: "T077 brain component pages"
-Task: "T078 T-DOC-1 failure-classes entry and log line"
+Task: "T124 erratum in .specify/536-537-538-recovery-liveness.md"
+Task: "T125 brain component pages"
+Task: "T126 T-DOC-1 failure-classes entry and log line"
 ```
 
 ## Implementation strategy
 
-- **Who executes.** A `phase-implementer` agent runs the implementer's tasks; the orchestrator runs the **(orchestrator)** tasks and commits only its own records.
-- **MVP = US1** (Phases 1 to 4): the only defect a peer can use to hold a connection and an acceptor slot open. STOP and VALIDATE at Phase 4's checkpoint (SC-001 from the Ending-site table). The feature still merges whole.
-- **Incremental**: US2, then US3, then US4 and US5; each story GREEN with its mutants before the next starts; then surfaces, records, polish and the close-out pair.
-- **Records before CI**: brain, B&L and T-DOC-1 edits go in the PR before its first labelled push (a late docs push re-runs the matrix).
-
-## Notes (hard rules)
-
-- Write recipes, not results: no pasted counts, no line numbers, no example values in code comments; cite symbols.
-- A merged feature's bundle is never edited; it is superseded by name (FR-019).
-- A gate result is scoped to the commits that existed when it ran.
+- **MVP = US1** (Phases 1 to 4): every ending closes its connection, the ending Logout is limited, and the R-2 wait holds.
+  It is the only peer-reachable defect of the batch (a held connection and acceptor slot). Part A alone (T018 to T041) is
+  an intermediate checkpoint, not a shippable state: R-2-class endings close at once there, against R-2.
+- **Then** US2 and US3 (P2), US4 and US5 (P3), the C-ABI surface, the records and the polish, in that order. One PR; no story
+  ships alone.
+- **Who executes.** A `phase-implementer` agent runs the implementer's tasks, one phase per invocation, each ending at its
+  commit (`H1` to `H7`); the orchestrator runs the tasks marked (orchestrator), reviews every RED reading and mutant table
+  before the next phase, and holds the MSVC sandbox lock.
+- **Before any labelled push**: T130 to T135 re-run last, then the final sign-off order (body, labels, wait, push last).

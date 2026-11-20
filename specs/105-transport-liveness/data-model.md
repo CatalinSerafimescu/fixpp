@@ -17,7 +17,7 @@ context"). The class fixes who closes the connection and when.
 | **P — pump frame** | `run_read_pump` (every frame, the acceptor's first frame included) | the pump: `stop_pump` → `close(terminal)` | after the frame's arm returns: after its reply, persist and receipt reset unit |
 | **D — detached root** | `run_liveness_loop`, `run_peer_logout_bound_`, `run_ending_logout_bound_` (E-3) | `close_transport_`, spawned at the root's exit; on an Engine session the pump then runs `close(terminal)` | at the root's exit when no frame is inside an arm; otherwise the pump, after that arm |
 | **A — application call** | `Session::send` and `Engine::send`'s session body (`send_body_`, `send_deferred_`), `Session::drive_reconnect`, `Session::open` (a direct initiator's Logon) | as class D | as class D |
-| **W — ending Logout** | any of the above, where the ending writes a Logout (R-1, every R-2 Logout, the replies to the peer's Logout; E-3) | as E-3's "Who closes" column: the pump after the response, the bound's close frame at its expiry (E-3 rows 10, 11), at the write limit (row 4) and at its failure exit (row 16), the closer for `close()`, `Engine::stop()` and the drain | at the peer's Logout, at the bound, or at the write limit |
+| **W — ending Logout** | any of the above, where the ending writes a Logout (R-1, every R-2 Logout, the replies to the peer's Logout; E-3) | as E-3's "Who closes" column: the pump after the response, the bound's close frame at its expiry (E-3 rows 10, 11), at the write limit (row 4) and at its failure exit (row 16), the closer for `close()`, `Engine::stop()` and the drain | at the peer's Logout, at the bound, or at the write limit; at the bound's failure it closes when the bound fails, not at its deadline, by the close its phase's deadline makes (row 16) |
 | **X — excluded** | `Session::close` and `run_logout_phase1` under it; `drain_for_reconnect_` under `drive_reconnect` | the close or drain that owns it, as today | as today (B-103-9's bounded waits kept) |
 
 A write reached from several roots takes the class of the root it runs under at that moment. The census table in
@@ -66,7 +66,7 @@ that keeps B-103-13's precondition (`close()` before the Session is destroyed) n
 frame running; the frame widens no lifetime precondition.
 
 The same frame, with the same join and the same fallback, is spawned by the ending bound at each of its deadlines
-(E-3 rows 4, 10 and 11), and at its failure exit (row 16, which closes as the deadline of its phase would), testing
+(E-3 rows 4, 10 and 11), and at its failure exit (row 16, which closes when the bound fails, not at its deadline, by the close its phase's deadline makes), testing
 neither `inbound_depth_` nor the `writing` deferral. At the write limit (row 4) it
 tests only the generation and a live transport, because the arm in flight is the one suspended in the write. At the
 bound's expiry (rows 10 and 11) it tests the generation, a live transport and `state_ == lifecycle::open`, then
@@ -78,7 +78,7 @@ clears the latch. These are I-2's exceptions.
   That is enough because a frame that enters after the edge finds the session `Disconnected` with no wait armed and
   is drained by the `Disconnected` row, with no store work. **The exception: the deadlines of E-3** (the write limit, row 4, and
   the bound's expiry, rows 10 and 11; Gate A round 3, root cause #2; and the bound's failure exit, row 16, which
-  takes its phase's deadline close; Gate A loop 2 round 1, root cause #1): each closes the transport while an arm may be
+  makes its phase's deadline close when the bound fails, not at the deadline; Gate A loop 2 round 1, root cause #1): each closes the transport while an arm may be
   suspended, in an ending Logout's write, behind it at `write_gate_`, or (rows 10, 11) in a non-ending write such
   as a resend answer during the wait. No store work is cut by them: a store call completes before its frame's transmit (durable-before-transmit, `store_then_emit`'s I-3),
   and the receipt reset unit is store-only; the transport close only makes the pending writes complete with an
@@ -123,7 +123,7 @@ nothing and enters nothing here), and before Active the build-and-emit of `refus
 | `ending_wait_.kind` | enum `{ r1, r2, reply }` (one byte) | which ending entered `writing`; only `r2` can reach `armed` |
 | `ending_wait_.entered_from` | `fsm_state` (one byte) | the FSM state when the write started; leaving `writing` arms a wait only if the session is still in it |
 | `ending_wait_.from_active` | `bool` | entered after Active (the session stays Active through an `r2` wait) or before it (the refusal records `Disconnected`) |
-| `ending_wait_.cut` | `bool` | set by the bound when it closes the transport during `writing` (row 4, and its failure exit from `writing`, row 16), before it spawns the close frame; cleared on entering `writing`. "Leaving `writing`" tests it: a cut write arms no wait, whatever the emit reported, because a write can complete between the close frame's spawn and its `close_async()` (Gate A loop 2 round 1, root cause #1) |
+| `ending_wait_.cut` | `bool` | set by the bound when it closes the transport during `writing` (row 4, and its failure exit from `writing`, row 16), before it spawns the close frame; cleared on entering `writing`. "Leaving `writing`" tests it: a cut write arms no wait, whatever the emit reported, because the write's success completion can already be queued when the bound acts (plain TCP: the reactor completed the write while the strand ran the bound, and asio does not withdraw a queued completion), or, on TLS, can arrive while `close_async` yields in its quiesce loop (Gate A loop 2 round 1, root cause #1; loop 2 round 2, N-1). Without it the leaf would arm a wait with no bound running |
 | `ending_wait_.deadline` | `fixpp::core::steady_time_point` | `deadline_after(now, logout_disconnect_timeout_ms)` on `effective_clock_`, read **once, at the start of the write** (the owner claim, before the number assignment, the store call and the gate acquire); it bounds the write and then the wait: one budget, as `close_async`'s one `close_deadline` bounds its whole call. Because `store_then_emit`'s Step 1 (the store) runs before `live_write_serialized_` acquires `write_gate_`, the budget covers the store too: a persistent store slower than the budget makes the Logout "not sent", and a write that completes late leaves the peer only the rest of the budget to answer (disclosed, B-105-2; Gate A round 3, N-2) |
 | `establishment_cap_` | `std::optional<fixpp::core::steady_time_point>`, on `engine_.clock` | the connection's establishment deadline, handed over once by an Engine pump (`session_engine_access::set_establishment_deadline`); empty on a direct Session; reset at every connection start (row 17) |
 | `ending_logout_wake_` | the shape of `peer_logout_wake_` | published by the bound while it waits |
@@ -176,7 +176,8 @@ unbounded before Active too, as on `main` (L-105-f).
 **Leaving `writing`**, when the leaf returns (on the strand, with no suspension before the next step). A wait is armed
 only here, so only when the bound exists:
 - `r2`, the Logout transmitted (D2 item 1's out-parameter), `!cut`, no pending too-high mark claimed by this ending (N-5;
-  D2 item 1), and `fsm_state_ == entered_from` (no other root ended the session during the write): `phase = armed`. After Active the session stays Active; before Active the refusal's own
+  D2 item 1), and `fsm_state_ == entered_from` (no other root ended the session during the write): `phase = armed`, and the bound is woken, so it rebuilds its
+  race in `armed` (a re-test). After Active the session stays Active; before Active the refusal's own
   `Disconnected` write follows (row 6).
 - every other case (`r1`, `reply`, an `r2` that was not transmitted, cut by the bound (`cut` set), that claimed a pending
   mark, or whose session another root ended during the write): `phase = none`, the bound is woken, and the site
@@ -246,7 +247,7 @@ commit of `closing` (beside its `claim_peer_logout_none_()`); `drain_for_reconne
 | 1 | any, open, `none` | an ending Logout's write starts, clock present, timeout > 0 | `writing` (kind, `from_active`, deadline) | none | spawned before the write | row 3, 4 or 5 |
 | 2 | any, open, `none` | an ending Logout's write starts with timeout 0 or no clock | `none` | the site's `Disconnected` after the write: owes | none | the root's consumer after the write (E-1); the write is unbounded (L-105-f) |
 | 2a | any, open, `none` | an ending Logout's write starts, clock present, timeout > 0, and the bound's spawn throws | `none` | the site's `Disconnected`, the Logout not written: owes | none | the root's consumer, at once (E-1); no Logout is written (clarification D-g) |
-| 3 | any, any, `writing` | the write returns before the deadline | `armed` (an `r2` transmitted, not cut, no mark claimed) or `none` (every other case) | `none`: the site's `Disconnected` owes; `armed` after Active: none; `armed` before Active: row 6 | `armed`: runs on; `none`: woken, exits | `armed`: rows 8 to 15; `none`: the root's consumer (R-1 at the loop's exit, a reply after its reset unit) |
+| 3 | any, any, `writing` | the write returns before the deadline | `armed` (an `r2` transmitted, not cut, no mark claimed) or `none` (every other case) | `none`: the site's `Disconnected` owes; `armed` after Active: none; `armed` before Active: row 6 | `armed`: woken, runs on (a re-test); `none`: woken, exits | `armed`: rows 8 to 15; `none`: the root's consumer (R-1 at the loop's exit, a reply after its reset unit) |
 | 4 | any, any, `writing` | the deadline passes, or before Active on an Engine session the establishment cap, the write not returned (the Logout in its store call, blocked in `async_write` or queued at `write_gate_`) | `writing` until the leaf returns, then `none` (row 3: `cut` set) | the site's `Disconnected` after the leaf returns: owes; its consumer finds the transport closed | sets `cut`, spawns the close frame (E-2) on the transport (its spawn failing: the synchronous close, E-2), then exits | the bound's close frame: `close_async()`; on TLS a close_notify that cannot be written falls back to the abortive close after `tls_close_timeout` (C-8.5, L-105-g) |
 | 5 | any, any, `writing` | `close(terminal)`, an escalation, `Engine::stop()`; a graceful `close()` before Active (its phase 1 does not run there) | `writing` until the leaf returns | as row 3 or 4, whichever ends first | runs on until the leaf returns | the closer's own `close_async()` returns the write; `close()` joins the bound, then the close frame's counter again (E-2 I-4) |
 | 5c | Active, `closing` (graceful) or the drain flag, `writing` | `close(graceful)` after Active, `drive_reconnect`'s drain | `writing` until the leaf returns | as row 3 or 4 | runs on until the leaf returns | row 4's close frame at the bound, or the closer's direct `Transport::close()` when its wall-clock timer (`close_grace`; the drain's bound) wins first; the closer then proceeds and joins as row 5 |
@@ -342,8 +343,11 @@ window `(floor, next]` is modular, so it is wrap-safe while fewer than 2³² Tes
 connection. After 2³² TestRequests on one connection the window no longer identifies the sent set: at exactly 2³²,
 `next == floor` and no value reads as earlier; past it, the window is the modular remainder (Gate A round 3,
 Codex #7). Unreachable in practice (2³² TestRequests at least T apart), and disclosed in B-105-5 as that condition.
-`constexpr` cells pin the predicate at `UINT32_MAX`, across the wrap, and at one full cycle. `answer_pending_test_request_` returns
-false only for **mismatch**.
+The window test is a free `constexpr` function of `(n, floor, next)` in a `detail` header (beside the default-threshold
+helper), test-visible, and `classify_test_req_id_` calls it after parsing the 112; `constexpr` cells pin that function
+at `UINT32_MAX`, across the wrap, and at one full cycle (guards, each with its mutant: a non-modular comparison; the
+full-cycle case dropped, `next == floor` read as a full window; Gate A loop 2 round 2, Codex #3).
+`answer_pending_test_request_` returns false only for **mismatch**.
 
 **Validation of a set T** (`Session::open`, `Engine::register_session`, the TOML mapper): `T > 0`. No other bound.
 

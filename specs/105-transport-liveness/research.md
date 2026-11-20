@@ -334,7 +334,7 @@ write limit of ruling D-e (item 11). This section is the mechanism.
    C-2.6). A detached `run_ending_logout_bound_(join, gen)` waits on it, in the shape of `run_peer_logout_bound_` (a
    join parameter that touches only `ending_logout_bound_counter_`, a published wake, `detail::await_deadline` raced
    with a timer the wake cancels, a generation assert, an exception handler that ends the wait closed), with two
-   differences: its failure exit closes as its expiry does, never through `release_connection_end_` (data-model
+   differences: its failure exit closes when the bound fails, not at its deadline, by the close its expiry makes, never through `release_connection_end_` (data-model
    E-3, "The bound's exits", row 16; Gate A loop 2 round 1, root cause #1), and it loops, so a wake is a re-test of its live predicate, not an exit. Its spawn takes
    `on_inbound_active_too_high_logout_`'s join-as-parameter shape, with a `catch` around `co_spawn` that, unlike the
    precedent's, does not rethrow. A spawn that throws **fails closed** (Gate A round 3, root cause #1; clarification
@@ -399,7 +399,7 @@ write limit of ruling D-e (item 11). This section is the mechanism.
       for `inbound_depth_ == 0`, so for an arm that may never return. The argument that lets the write limit close
       under a suspended arm does not depend on which deadline fires, so at its expiry the bound spawns the close frame
       testing the generation, a live transport and `state_ == lifecycle::open`, then clears the latch; the arm in
-      flight resumes with a write error, and the pump's later `close(terminal)` is subsumed. The bound's own failure closes the same way
+      flight resumes with a write error, and the pump's later `close(terminal)` is subsumed. The bound's own failure closes the same way, when it fails and not at its deadline
       (Gate A loop 2 round 1, root cause #1; Codex #2, N-1): its `catch (...)`, and a deadline arm that completed
       while its clock reads before its instant (`detail::await_deadline`'s `catch (...)` absorbs every
       non-`system_error` exception and completes the arm, which the loop would otherwise re-race at once), take the
@@ -408,7 +408,8 @@ write limit of ruling D-e (item 11). This section is the mechanism.
       limit the write. What stays deferred is
       an ending recorded by a root that is not a deadline (E-3 row 12): while an arm is blocked in a non-ending write
       it closes when that write returns (L-105-f).
-    - **No second wait.** A cut write is not transmitted, so the R-2 helper arms nothing; and since the wait would
+    - **No second wait.** A cut write is treated as not sent, even when its bytes reached the peer (data-model E-3,
+      `cut`), so the R-2 helper arms nothing; and since the wait would
       have shared the deadline, a write that completes just before it leaves only what remains of the budget. One
       budget from the write's start is this design's reading of D-e's "counted from the write's start" and R-2's
       "from the write of fixpp's Logout"; it moves R-2's origin from the write's end to its start, observable only
@@ -569,8 +570,10 @@ item 4), and the pump closes it (D1). `answer_pending_test_request_` returns fal
 - A 112 of a previous connection: outside the window, so a mismatch.
 - 2³² TestRequests or more on one connection: the window no longer identifies the sent set (at exactly 2³²,
   `next == floor` and nothing reads as earlier; past it, the window is the modular remainder). B-105-5 states that
-  condition; it is unreachable in practice (Gate A round 3, Codex #7). `constexpr` cells pin the predicate at
-  `UINT32_MAX`, across the wrap and at one full cycle.
+  condition; it is unreachable in practice (Gate A round 3, Codex #7). The window test is a free `constexpr`
+  function of `(n, floor, next)` in a `detail` header, test-visible, which `classify_test_req_id_` calls; `constexpr`
+  guard cells pin it at `UINT32_MAX`, across the wrap and at one full cycle, with two mutants (a non-modular
+  comparison; the full-cycle case dropped) (Gate A loop 2 round 2, Codex #3).
 - It resolves the round-1 consequence of D-c (N-7): a late Heartbeat carrying TR1's 112 after TR2 was sent is now an
   earlier answer, not an ending.
 Cells: each outcome on the in-sequence arm and on `answer_pending_test_request_` (a mutant per site that restores
@@ -762,7 +765,8 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
 - **One ctest entry `session_105_tests`** (label `105`) over new files in `tests/session/`:
   `test_105_connection_close.cpp` (D1, D4; per root and per refusal), `test_105_logout_wait.cpp` (D2),
   `test_105_liveness_timing.cpp` (D3, D6), `test_105_heartbeat_knob_off.cpp` (D5), `test_105_presession_log.cpp`
-  (D8), `test_105_tls_close.cpp` (FR-002 on `loopback_tls_session_harness.hpp`), and `test_105_support.hpp`.
+  (D8), `test_105_write_limit.cpp` (D2 item 11, contract C-2.7 and C-8.5), `test_105_tls_close.cpp` (FR-002 on
+  `loopback_tls_session_harness.hpp`), and `test_105_support.hpp`.
   Config cells extend `tests/config/test_load_negative_battery.cpp`; C-ABI cells extend
   `tests/capi/recovery_liveness_capi_witness_test.cpp`. `ReconnectFsm` removals are proven by the build.
 - **RED first on the base, or a guard with its mutant** (FR-017; Gate A round 2, N-3). A behaviour cell is written,
@@ -850,12 +854,21 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
     the exception would never reach the `catch (...)`). `Writing`: the Logout's write held
     behind a peer that does not read, EOF at once with the clock frozen, no wait after it, `onLogout` once, plus a
     variant whose store call is still held when EOF is asserted; `Armed`: after Active and before Active, EOF at
-    once. The absorbed exception: `LogoutWait105.EndingBound_DeadlineArmAbsorbsException_<Writing|Armed>_EofAtOnce`,
+    once. The `Armed` triggers are keyed on the armed phase: the test arms the seam (and the decorator below) only
+    after the leaf has returned from `writing` and the phase reads `armed`, so the first race, built while
+    `phase == writing`, never fires them, and each cell asserts the phase the exit found (through test access, as
+    the reach proof; the oracle is the peer's EOF). Plus
+    `LogoutWait105.EndingBound_RaceThrows_Armed_ResendAnswerBlocked_EofAtOnce`: after Active on the
+    SendingTime-Reject route, the peer's ResendRequest answer blocked in `async_write` behind a peer that stopped
+    reading (`inbound_depth_ != 0`), the seam armed in `armed`; EOF at once with the clock frozen (Gate A loop 2
+    round 2, N-2). The absorbed exception: `LogoutWait105.EndingBound_DeadlineArmAbsorbsException_<Writing|Armed>_EofAtOnce`,
     the counting `Clock` decorator below set as `clock_override`, throwing `std::bad_alloc` from `sleep_until` for
     the bound's instant only, so the liveness loop's sleeps are untouched; `detail::await_deadline` absorbs it and
     completes the arm early. Each cell drives the executor by a bounded number of handler runs (`run_one` × N, or
     `run_for` under a wall cap), so its RED arm terminates. Mutants: the failure exit routed through
-    `release_connection_end_` (the `Writing` cells: no EOF while the write is held); the early completion read as
+    `release_connection_end_` (the `Writing` cells: no EOF while the write is held); the armed failure exit routed
+    through `release_connection_end_` (`EndingBound_RaceThrows_Armed_ResendAnswerBlocked_EofAtOnce`: no EOF while
+    the resend answer is blocked); the early completion read as
     a re-test (the decorator's count of the bound's sleeps exceeds one per wake within the bounded drive).
 - **The write limit** (ruling D-e; D2 item 11), on a transport whose write can be held until the transport closes
   (the scripted transport's `write_hold`, which `test_103_resend_state_reconnect.cpp` sets, or a seam in
@@ -892,11 +905,20 @@ ending, the unanswered TestRequest's Logout, the TestRequest at 1.2 × HeartBtIn
     ResendRequest during the wait, its answer blocked in `async_write` behind a peer that stopped reading; open at
     the bound − 1 ms, EOF at the bound (`LogoutWait105.Bound_ExpiresWhileResendAnswerBlocked_EofAtTheBound`).
     Mutant: rows 10 and 11 routed through `release_connection_end_`'s `inbound_depth_` test.
-  - The write completing after the bound has fired (Gate A loop 2 round 1; data-model E-3, `ending_wait_.cut`): on a
-    direct Session, an R-2 Logout's write held, the clock advanced to the bound, the write released before the
-    executor is drained so its completion runs ahead of the close frame's `close_async()`; no wait armed,
-    `Disconnected` and `onLogout` once (`WriteLimit105.DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed`).
-    A guard (the base arms no wait); its RED is the mutant "Leaving `writing`" ignores `cut`.
+  - The write completing after the bound has fired (Gate A loop 2 round 1; data-model E-3, `ending_wait_.cut`;
+    schedule pinned in loop 2 round 2, N-1): on a direct Session, an R-2 Logout's write on the deferred-completion
+    transport of `test_105_support.hpp` (its `async_write` commits the bytes to the peer, then holds its success
+    completion behind a second flag and returns success once released, even after a close). Schedule: advance the
+    mock clock to the bound; `run_one` until the bound has taken row 4 (reach proof through `session_test_access`:
+    `cut` set, or the close-frame counter at 1); release the completion; drain by a bounded drive. Positive control
+    first: the peer holds the whole Logout, and `cut` was set when the leaf returned. Then the oracle: no wait armed
+    (the peer sees EOF with no further mock-clock advance), `Disconnected` and `onLogout` once, the session not left
+    Active (`WriteLimit105.DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed`). A guard (the base arms no
+    wait); its RED is the mutant "Leaving `writing`" ignores `cut`, under which the phase reads `armed` after the
+    drain (asserted through test access too). The schedule "release the hold right after the advance" does not reach
+    the race (the write's next poll completes it before the bound reaches row 4), and "release after row 4" on
+    `mock_transport` does not either (its `close()` is synchronous, so the held write returns
+    `transport_write_cancelled`); hence the deferred-completion transport.
   - `close(graceful)` during the write (N-3): the mock clock advanced to the bound well inside `close_grace`'s wall
     time, EOF at the bound, the close frame's counter 0 when `close()` returns. Mutant: the second join deleted
     (the Debug assert of `~Session`, or the counter read after `close()`).

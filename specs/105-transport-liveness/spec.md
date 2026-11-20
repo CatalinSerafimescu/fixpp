@@ -354,8 +354,8 @@ no comment claiming behaviour the code does not have.
   suspended by that close, and no store work is cut (FR-008). With `logout_disconnect_timeout_ms` 0 or no clock the
   write is not limited. If the limit cannot be set up because its bound cannot be spawned (an allocation failure), the
   Logout MUST NOT be written and the ending proceeds as "Logout not sent" (clarification D-g). If the bound fails after
-  it is set up, the connection MUST close as it closes at the limit or at the R-2 wait's bound, whatever frame is
-  being processed (Gate A loop 2 round 1). A terminal `close()`
+  it is set up, the connection MUST close when the bound fails, not at its deadline, by the close its phase's deadline
+  makes (data-model E-3 row 16), whatever frame is being processed (Gate A loop 2 round 1). A terminal `close()`
   and `Engine::stop()` during the write end it through their own transport close; under a graceful `close()` and
   the reconnect drain, which close the transport only at their own wall-clock bound, the write ends at this limit or
   at that bound, whichever comes first. The budget starts at the Logout's owner claim, so it covers the Logout's
@@ -374,9 +374,10 @@ no comment claiming behaviour the code does not have.
   deadline's own expiry keeps its event (B-093-4).
 - **FR-008**: The closes of FR-001 MUST NOT cut store work the ending owns: the receipt reset (B-104-1, B-104-2) and a
   store call already issued run to their end, and `close()`'s and `Engine::stop()`'s existing waits keep their
-  bounds. The ending Logout's deadlines are the closes made while a frame may be inside its arm: the write limit (FR-004b;
-  the arm is the one suspended in the write) and the R-2 bound's expiry (FR-004; for example a resend answer blocked
-  in its write during the wait). Each closes only the transport, so each cuts no store work.
+  bounds. The ending Logout's deadlines and its bound's failure exit are the closes made while a frame may be inside its
+  arm: the write limit (FR-004b; the arm is the one suspended in the write), the R-2 bound's expiry (FR-004; for example
+  a resend answer blocked in its write during the wait), and the bound's failure exit, which closes when the bound fails, not at its deadline, by the close its phase's deadline makes
+  (FR-004b; data-model E-3 row 16). Each closes only the transport, so each cuts no store work.
 
 **TestRequest answering with sequence validation off (#582)**
 

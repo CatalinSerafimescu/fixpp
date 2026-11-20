@@ -48,7 +48,7 @@ Batch B27 (lane S1): fixpp#534, #582, #535, #559 sites 2 and 3, and #687, with R
    pump hands its establishment deadline to the Session once, which caps the write and the wait on the engine clock (a
    direct Session has none). The bound's expiry, like the write limit, closes the transport whatever arm is in
    flight; so does the bound's own failure (its `catch (...)`, or a deadline wait that completes early on an absorbed
-   exception), through the same expiry exit (loop 2 round 1, root cause #1); a bound that cannot be spawned means the Logout is not written (ruling D-g). One state machine (E-3) fixes the latch, the bound's wake sources and live predicate, and
+   exception), when it fails and not at its deadline, through the same expiry exit (loop 2 round 1, root cause #1); a bound that cannot be spawned means the Logout is not written (ruling D-g). One state machine (E-3) fixes the latch, the bound's wake sources and live predicate, and
    who closes, for graceful and terminal `close()`, `Engine::stop()` and the drain.
 3. **#582 (D5).** With `validate_sequence_numbers` off, an out-of-sequence Heartbeat reaches the TestReqID rule.
 4. **#535 (D6).** T = `test_request_threshold`, default 1.2 × HeartBtInt; TestRequest at T of inbound silence,
@@ -242,7 +242,7 @@ specs/105-transport-liveness/
 ├── contracts/
 │   └── transport-liveness-105.md        # C-1–C-11
 ├── checklists/
-└── tasks.md                             # generated before Gate A: non-operative, regenerated after it converges
+└── tasks.md                             # regenerated from the converged bundle after Gate A loop 2 round 2
 ```
 
 ### Source Code (repository root)
@@ -374,6 +374,7 @@ Each is a fixpp issue, labelled at creation, filed before Gate B and named where
   pass's addition. Routing the failure exit through row 4 exposed that row 4 itself had no decided "cut": a write
   completing between the close frame's spawn and its `close_async()` reported transmitted and would arm a wait with
   no bound running. It has its own guard cell and mutant, and is for the next review to judge.
+- Loop 2 round 2 CONVERGED 2026-11-21: Codex P1=0 P2=0 P3=3; Opus post-judging P1=0 P2=0 P3=6; P3s applied post-convergence. Reviews: codex_105-transport-liveness_gate_a_5_review.md, opus_105-transport-liveness_gate_a_5_adversarial_review.md.
 
 ### Round 1 — disagreements
 

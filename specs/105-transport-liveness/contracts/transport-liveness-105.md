@@ -47,7 +47,7 @@ Common rules:
   with one exception, the deadlines of an ending Logout: the write limit of C-2.7, which closes the transport while
   an arm is suspended in an ending Logout's write or queued behind another write at the session's write gate, and
   the R-2 bound's expiry (C-2.5, C-2.6), which closes it whatever arm is in flight; the ending bound's own failure
-  closes as the deadline of its phase would (C-2.7). They cut no store work: a store call
+  closes when the bound fails, not at its deadline, by the close its phase's deadline makes (C-2.7; data-model E-3 row 16). They cut no store work: a store call
   completes before its frame's transmit, the receipt reset unit is store-only, and the close only makes the
   pending writes complete with an error. Otherwise a store call issued before the close returns before it; the
   receipt reset unit runs before rows 3 and 5 close.
@@ -92,13 +92,13 @@ second wait, and the frame not delivered.
 | W-6 | A frame above NextNumIn with no resend outstanding | Processed as in Active: not delivered, NextNumIn kept, a ResendRequest for the gap, as today (QuickFIX C++ sends one during its wait too: `validLogonState` admits a non-Logout frame once `sentLogout` is set, and `verify` reaches `doTargetTooHigh`). | Drained. |
 | W-7 | A frame while a resend is outstanding and the gap deadline has passed | The gap deadline does not fire; the frame takes the row it takes before the deadline (W-4, W-6, W-8). | Drained. |
 | W-8 | A peer-frame condition that ends the session today: with a Logout (a frame below NextNumIn without 43=Y, a SendingTime Reject, an OrigSendingTime Reject) or silently (a TestReqID mismatch, a BeginString or CompID mismatch, MsgSeqNum 0, D-3). The set is defined by cause, not by the arm's return value. | Absorbed. A Reject the arm writes before its Logout is written, as in Active; its Logout and its `Disconnected` are not. NextNumIn is left as the arm leaves it. | Drained. |
-| W-9 | Any internal failure that writes `Disconnected`, from any root: an arm's store, persist, number-assignment or emit failure or `toAdmin` throw, whether the arm then returns an error or success (a reply leaf's failed assignment returns success); a send admitted before the Logout whose store or emit then fails; a liveness Heartbeat or TestRequest admitted before the Logout whose emit fails; the too-high Logout bound's handler | Not absorbed: that `Disconnected` ends the wait (`onLogout` once), and the connection closes at once: by the pump after the frame (on its error or on the latch), or at the failing root's exit (C-1 rows 2, 8, 9). An internal failure of the ending bound itself closes as W-12 does (as W-15 during the Logout's write), at the bound's exit, whatever frame is being processed (data-model E-3, "The bound's exits", row 16). | Not reached from the frame and application roots (nothing is processed; the other roots do not run before Active). The ending bound runs before Active: its own failure closes as W-12 and W-15 do before Active. |
+| W-9 | Any internal failure that writes `Disconnected`, from any root: an arm's store, persist, number-assignment or emit failure or `toAdmin` throw, whether the arm then returns an error or success (a reply leaf's failed assignment returns success); a send admitted before the Logout whose store or emit then fails; a liveness Heartbeat or TestRequest admitted before the Logout whose emit fails; the too-high Logout bound's handler | Not absorbed: that `Disconnected` ends the wait (`onLogout` once), and the connection closes at once: by the pump after the frame (on its error or on the latch), or at the failing root's exit (C-1 rows 2, 8, 9). An internal failure of the ending bound itself closes when the bound fails, not at its deadline, by the close W-12 makes (W-15's during the Logout's write), at the bound's exit, whatever frame is being processed (data-model E-3, "The bound's exits", row 16). | Not reached from the frame and application roots (nothing is processed; the other roots do not run before Active). The ending bound runs before Active: its own failure closes when the bound fails, by row 11's close (row 4's during the Logout's write; data-model E-3 row 16), not at its deadline. |
 | W-10 | An application `send()` | Refused, `session_invalid_state_for_send` (103's rule for a Logout ending). | Refused (not Active), as today. |
 | W-11 | The liveness loop | Originates nothing more; it leaves at its next test. | Not running. |
 | W-12 | The bound expires | `Disconnected`, `onLogout`, and the connection closes at the bound, whatever frame is being processed (a resend answer blocked behind a peer that stopped reading included). | The connection closes at the bound, or on an Engine session at the establishment deadline when that is earlier (C-2.6). |
 | W-13 | `close(graceful)` | The wait runs on: `close()` proceeds at W-1 or W-12; one close, by `close()` (C-8.4). | As `close(terminal)`: `close()`'s Logout phase runs only from Active, as today. |
 | W-14 | `close(terminal)`, `Engine::stop()`, `drive_reconnect`'s drain | End the wait at once; one close, by the closer. | Same. |
-| W-15 | The Logout's own write has not completed at the bound (C-2.7) | No wait follows: the connection closes at the bound through `close_async()`, the ending proceeds as "Logout not sent", `Disconnected` and `onLogout` once. | The connection closes at the bound, or on an Engine session at the establishment deadline when that is earlier; nothing is reset. |
+| W-15 | The Logout's own write has not completed at the bound (C-2.7) | No wait follows: the connection closes at the bound through `close_async()`, the ending proceeds as "Logout not sent", `Disconnected` and `onLogout` once. A write that completes after the limit has fired is treated as not sent (data-model E-3, `cut`); the peer may have received it. | The connection closes at the bound, or on an Engine session at the establishment deadline when that is earlier; nothing is reset. A write that completes after the limit has fired is treated as not sent (data-model E-3, `cut`); the peer may have received it. |
 
 Common rules:
 - C-2.1 After Active the session stays Active (`fixpp_session_is_established` true) from the Logout's write until the
@@ -123,7 +123,7 @@ Common rules:
   (C-2.7), so it also covers the Logout's number assignment and store call: a persistent store slower than
   `logout_disconnect_timeout_ms` makes the Logout "not sent", and a write that completes late leaves the peer only
   the rest of the budget to answer (B-105-2). At the bound the connection closes whatever frame fixpp is processing,
-  as at the write limit (C-1.b), and so it does when the bound itself fails (C-2.7).
+  as at the write limit (C-1.b); when the bound itself fails, it closes then, not at its deadline, by the same close (C-2.7).
 - C-2.6 **Before Active** the bound is `logout_disconnect_timeout_ms` from the start of the Logout's write. On an
   Engine-managed session it is capped by the connection's establishment deadline (computed by the accept and connect
   loops from `logon_timeout_ms`, on the engine clock): the read pump hands that deadline to the Session once, and the
@@ -136,17 +136,18 @@ Common rules:
   section's list, before and after Active, and the replies of C-1 rows 3 and 5) is limited: its write is raced
   against `logout_disconnect_timeout_ms` counted from the write's start, before the session's write gate is
   acquired, so a Logout queued behind another blocked write is covered too. When the write has not completed at that
-  instant, the session closes the transport through `close_async()` (C-8); the blocked write then completes with an
+  instant, the session closes the transport through `close_async()` (C-8); the blocked write then completes, usually with an
   error, nothing is cancelled or destroyed while suspended, and the ending proceeds as "Logout not sent": no wait,
-  `Disconnected` and `onLogout` once, the connection closed. With timeout 0 or no clock the write is not limited.
+  `Disconnected` and `onLogout` once, the connection closed. A write that completes after the limit has fired is treated as not sent (data-model E-3, `cut`); the peer may have received it.
+  A peer-side cell therefore does not pin "no Logout bytes" for a write released at the limit. With timeout 0 or no clock the write is not limited.
   A terminal `close()` and `Engine::stop()` during the write close the transport themselves (`close_async`), which
   ends the write the same way. A graceful `close()` and `drive_reconnect`'s drain do not close it before their own
   wall-clock bound (`close_grace`; the drain's bound), so under them the write ends at this limit or at that bound,
   whichever comes first; this limit is the only bound on the session's clock there. When the limit cannot be set up
   because its bound cannot be spawned (an allocation failure), the Logout is not written and the ending proceeds as
   "Logout not sent" (clarification D-g). When the bound fails after it is set up (an exception inside it, or a
-  deadline wait that completes early on an absorbed exception), the connection closes as at the bound, by the same
-  close, and no wait follows (Gate A loop 2 round 1, root cause #1). The write starts at the Logout's owner claim, so the limit can fire while the Logout
+  deadline wait that completes early on an absorbed exception), the connection closes when the bound fails, not at its deadline, by the close its phase's deadline makes
+  (data-model E-3 row 16), and no wait follows (Gate A loop 2 round 1, root cause #1). The write starts at the Logout's owner claim, so the limit can fire while the Logout
   is still inside its number assignment or store call: the peer sees EOF at the bound, and `Disconnected` and
   `onLogout` follow when that store call returns (a store call is not cut, C-1.b). While an ending Logout is being
   written, an ending another root records (the peer's Logout answered while the Logout owner is set, an internal
