@@ -201,20 +201,20 @@ TEST(RunForResidualInstrument, ReadyAtEntryNearDeadlineIsFlaggedInconclusive) {
     std::future<void> fut = prom.get_future();
     prom.set_value();
 
-    const run_for_residual_measurement near = measure_run_for_residual_ready(
+    const run_for_residual_measurement close_to_deadline = measure_run_for_residual_ready(
         ioc, fut, std::chrono::steady_clock::now() - (kWindow - 75ms), kWindow,
         /*exclusive_driver=*/true);
 
-    EXPECT_TRUE(near.ready_at_entry);
-    EXPECT_TRUE(near.ready_observed);
-    EXPECT_TRUE(near.near_deadline_inconclusive);
+    EXPECT_TRUE(close_to_deadline.ready_at_entry);
+    EXPECT_TRUE(close_to_deadline.ready_observed);
+    EXPECT_TRUE(close_to_deadline.near_deadline_inconclusive);
 
-    const run_for_residual_measurement far = measure_run_for_residual_ready(
+    const run_for_residual_measurement clear_of_deadline = measure_run_for_residual_ready(
         ioc, fut, std::chrono::steady_clock::now() - 1000ms, kWindow, /*exclusive_driver=*/true);
 
-    EXPECT_TRUE(far.ready_at_entry);
-    EXPECT_TRUE(far.ready_observed);
-    EXPECT_FALSE(far.near_deadline_inconclusive);
+    EXPECT_TRUE(clear_of_deadline.ready_at_entry);
+    EXPECT_TRUE(clear_of_deadline.ready_observed);
+    EXPECT_FALSE(clear_of_deadline.near_deadline_inconclusive);
 }
 
 // gate-b/r1 P1-b: `phase` is assigned but was never asserted anywhere.
