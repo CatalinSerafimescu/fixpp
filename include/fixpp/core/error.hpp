@@ -324,10 +324,12 @@ enum class error : std::uint8_t {
                                               //   → FIXPP_ERR_SESSION_LIFECYCLE
     session_test_request_unanswered = 74,     // FR-006 (005 admin path) + 013 FR-004
                                               //   (FSM-driven inbound liveness watch) —
-                                              //   [FIX-SL §4.5.2]/§4.5.5 — inbound silence
-                                              //   exceeded test_request_threshold (1×HeartBtInt,
-                                              //   D-8) without a Heartbeat echo.
-                                              //   Session unhealthy → disconnect.
+                                              //   [FIX-SL §4.5.2]/§4.5.5 — 105 R-1: inbound
+                                              //   silence of 2 × the TestRequest threshold
+                                              //   with no answering Heartbeat; the session
+                                              //   sends a Logout with Text and closes. The
+                                              //   value is carried by the give-up's log
+                                              //   record; no call returns it.
                                               //   → FIXPP_ERR_SESSION_LIFECYCLE
     session_admin_not_supported = 75,         // FR-017, [FIX-SL §4.10] — deferred admin type
                                               //   received (ResendRequest/SequenceReset): defined

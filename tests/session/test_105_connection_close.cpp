@@ -103,8 +103,12 @@ struct Cell {
         : app{with_application ? std::make_shared<App105>() : nullptr}, rig{app} {}
 
     [[nodiscard]] SessionConfig cfg(session_role role) { return rig.cfg(role); }
+    // Active, and the session's Logon (the acceptor's reply) read by the peer, so a mark taken
+    // after this call holds every byte the establishment wrote.
     [[nodiscard]] bool start_active(SessionConfig c) {
-        return rig.start(std::move(c)) && rig.to_active();
+        return rig.start(std::move(c)) && rig.to_active() && rig.run_until([this] {
+            return !pr::frames_of_type(rig.peer.received, "A").empty();
+        });
     }
 
     [[nodiscard]] std::shared_ptr<fixpp::session::Session> session() const { return rig.session(); }
@@ -321,7 +325,8 @@ TEST_P(ConnectionClose105, PumpSilentEnding_TooLowLogoutDoesNotFit_PeerSeesEofAt
         up = rig.run_until([&] {
             auto const s = rig.session();
             return s && s->state() == fsm_state::Active &&
-                   session_test_access::seqnum_mgr(*s).next_inbound_unsafe() == 3U;
+                   session_test_access::seqnum_mgr(*s).next_inbound_unsafe() == 3U &&
+                   !pr::frames_of_type(rig.peer.received, "A").empty();
         });
     }
     r.active = up;

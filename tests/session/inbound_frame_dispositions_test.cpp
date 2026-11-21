@@ -1452,9 +1452,10 @@ TEST(InboundFrameDispositionsQ10, WithinCapMismatchInActive_DisconnectsWithoutAL
     EXPECT_TRUE(ended) << "a well-framed BeginString mismatch ends the session, as today";
     EXPECT_TRUE(plain_rig::frames_of_type(after, "5").empty()) << "no Logout is sent";
     EXPECT_EQ(o.count, 0U) << "a mismatch within the cap is not a garble";
-    // Today's Active handling writes Disconnected and leaves the transport open: entering
-    // Disconnected does not close it. fixpp#534 may change that, and this assertion with it.
-    EXPECT_FALSE(read_ended) << "the transport stays open";
+    // 105-transport-liveness (FR-001; research D1), resolving fixpp#534: entering
+    // Disconnected owes the connection's close, and the pump closes it once the frame's arm
+    // has returned.
+    EXPECT_TRUE(read_ended) << "the connection is still open after the session ended";
 }
 
 TEST(InboundFrameDispositionsQ10, WithinCapMismatchBeforeActive_Refused) {

@@ -197,17 +197,43 @@ void run_q16(Ctx c, bool send_garbage) {
     EXPECT_EQ(after.state, fsm_state::Disconnected) << "the FSM ends in Disconnected";
 }
 
+// 105-transport-liveness (FR-007; research D4), superseding 093 FR-006 phase (b) for a refused
+// Logon: the refusal closes the connection at once, with the clock still, and is not an
+// establishment timeout, so the deadline adds no event. A peer that would send garbage after
+// the refusal finds the connection closed, so both variants read the same.
+void run_q16_refused(Ctx c, bool send_garbage) {
+    SCOPED_TRACE(name_of(c));
+    SCOPED_TRACE(send_garbage ? "garbage-only peer" : "silent peer");
+    constexpr auto kT = 2000ms;
+    pr::Rig rig;
+    bool const up = reach(rig, c, kT);
+    bool closed_at_once = false;
+    Snapshot after;
+    if (up) {
+        closed_at_once = rig.run_until([&] { return snapshot(rig).read_ended; });
+        rig.clock->advance(kT);
+        rig.settle();
+        after = snapshot(rig);
+    }
+    rig.stop();
+
+    ASSERT_TRUE(up) << "the session did not reach its pre-Active context";
+    EXPECT_TRUE(closed_at_once) << "the refusal did not close the connection at once";
+    EXPECT_EQ(after.timeouts, 0U) << "a session_event_establishment_timeout for a refusal";
+    EXPECT_EQ(after.state, fsm_state::Disconnected) << "the FSM ends in Disconnected";
+}
+
 TEST(EstablishmentTimeoutQ16, InitiatorAfterLogon_GarbageOnlyPeer_ClosedAtTNotBefore) {
     run_q16(Ctx::initiator_after_logon, true);
 }
 TEST(EstablishmentTimeoutQ16, InitiatorAfterLogon_SilentPeer_ClosedAtTNotBefore) {
     run_q16(Ctx::initiator_after_logon, false);
 }
-TEST(EstablishmentTimeoutQ16, AcceptorAfterRefusedLogon_GarbageOnlyPeer_ClosedAtTNotBefore) {
-    run_q16(Ctx::acceptor_after_refused_logon, true);
+TEST(EstablishmentTimeoutQ16, AcceptorAfterRefusedLogon_GarbageOnlyPeer_ClosedAtOnceNoTimeout) {
+    run_q16_refused(Ctx::acceptor_after_refused_logon, true);
 }
-TEST(EstablishmentTimeoutQ16, AcceptorAfterRefusedLogon_SilentPeer_ClosedAtTNotBefore) {
-    run_q16(Ctx::acceptor_after_refused_logon, false);
+TEST(EstablishmentTimeoutQ16, AcceptorAfterRefusedLogon_SilentPeer_ClosedAtOnceNoTimeout) {
+    run_q16_refused(Ctx::acceptor_after_refused_logon, false);
 }
 TEST(EstablishmentTimeoutQ16, AcceptorAfterNonLogonFrame_GarbageOnlyPeer_ClosedAtTNotBefore) {
     run_q16(Ctx::acceptor_after_non_logon, true);

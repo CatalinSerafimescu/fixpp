@@ -250,6 +250,9 @@ Session::~Session() {
     // with one running was not closed first.
     assert(peer_logout_bound_counter_->load(std::memory_order_acquire) == 0 &&
            "Session destroyed with the too-high Logout's bound running (close() first)");
+    // 105 (research D1 item 5): close() joins the close frame, as it joins the bound.
+    assert(connection_close_counter_->load(std::memory_order_acquire) == 0 &&
+           "Session destroyed with a connection close frame running (close() first)");
     if (effective_clock_) {
         effective_clock_->forget_session(this);
     }
@@ -380,8 +383,13 @@ const void* Session::callback_thread_tag_() noexcept {
 // fsm_state_. The write index (fsm_visit_write_idx_) is a separate uint32 that
 // always advances; the public count (fsm_visit_count_) saturates at UINT8_MAX
 // to signal "≥255 transitions" without freezing the ring rotation.
+// 105 D1 (research D1 item 1; data-model E-2): the edge sets the connection-end latch; its
+// consumers are the pump after the frame (session_engine_access::take_connection_end) and
+// every detached root and application call at its exit (release_connection_end_). The owe runs
+// on a transition into Disconnected from another state only, above the no-application return.
 void Session::record_state_transition_(fsm_state new_state) noexcept {
     const bool was_active = (fsm_state_ == fsm_state::Active);
+    const fsm_state prior = fsm_state_;
 
     fsm_visit_history_[fsm_visit_write_idx_++ % 16] = new_state;
     if (fsm_visit_count_ < std::numeric_limits<std::uint8_t>::max()) {
@@ -394,6 +402,9 @@ void Session::record_state_transition_(fsm_state new_state) noexcept {
         replay_gate_.wake_all();
         // 103 (research D4.4, D4.6): the edge clears the Logout owner and wakes the bound.
         logout_in_flight_ = false;
+        if (prior != fsm_state::Disconnected) {
+            owe_connection_end_();
+        }
         wake_peer_logout_bound_();
     }
 
@@ -437,6 +448,53 @@ void Session::record_state_transition_(fsm_state new_state) noexcept {
         // No additional close(terminal) needed. app_callback_threw is silently
         // noted; the fire-once guard (onLogout_fired_) prevents re-entry.
         (void)r;
+    }
+}
+
+// 105 (data-model E-2, "The one setter"): see session.hpp.
+void Session::owe_connection_end_() noexcept {
+    if (state_ == lifecycle::open && !reconnect_drain_in_flight_) {
+        connection_end_owed_ = conn_gen_;
+    }
+}
+
+// 105 (research D1 item 4; data-model E-2, "The close frame"): see session.hpp. Every test is
+// made here, synchronously, on the strand; the frame decides nothing. The spawn follows
+// on_inbound_active_too_high_logout_'s shape for its join (the coroutine's parameter), not for
+// its catch: this catch fails closed and does not rethrow (clarification D-g).
+void Session::release_connection_end_() noexcept {
+    if (!connection_end_owed_ || *connection_end_owed_ != conn_gen_ || state_ != lifecycle::open ||
+        inbound_depth_ != 0) {
+        return;
+    }
+    auto transport = live_transport_shared_();
+    if (!transport) {
+        return;
+    }
+    try {
+        connection_close_join join{connection_close_counter_};
+        if (close_frame_spawn_fails_ && close_frame_spawn_fails_()) {
+            throw std::bad_alloc{};
+        }
+        asio::co_spawn(exec_.underlying(), close_transport_(std::move(join), transport),
+                       asio::detached);
+        connection_end_owed_.reset();
+    } catch (...) {
+        // The close cannot be spawned: the synchronous close of the transport taken above, as
+        // close()'s grace makes it (contract C-8.6; on TLS abortive while an SSL operation is
+        // suspended, L-105-h). Its result is discarded, as the grace's is.
+        (void)transport->close();
+        connection_end_owed_.reset();
+    }
+}
+
+// 105 (research D1 item 5): see session.hpp.
+asio::awaitable<void> Session::close_transport_(
+    [[maybe_unused]] connection_close_join join,
+    std::shared_ptr<fixpp::transport::Transport> transport) {
+    try {
+        (void)co_await transport->close_async();
+    } catch (...) {  // NOLINT(bugprone-empty-catch): a detached frame; nothing awaits it
     }
 }
 
@@ -912,6 +970,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::drain_for_reconnect_() n
         return cs.cancelled() != asio::cancellation_type::none;
     };
     try {
+        // 105 (research D1 item 6): the latch is cleared and the close frame joined before the
+        // old connection is left, so no close frame outlives its connection. The drain owns
+        // that connection's close (drive_reconnect holds reconnect_drain_in_flight_ around
+        // this call), so no close is owed here.
+        connection_end_owed_.reset();
+        {
+            auto const cc = connection_close_counter_;
+            while (cc->load(std::memory_order_acquire) > 0) {
+                co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+            }
+        }
         // Step 2: leave the old connection. The edge fires onLogout from Active and wakes
         // the bound and the gate's waiters; from here no emitter can start.
         if (fsm_state_ == fsm_state::Active || fsm_state_ == fsm_state::LogonReceived) {
@@ -981,6 +1050,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::drain_for_reconnect_() n
 // failure disposition. [data-model §E-1a; T016(b); FR-003/FR-004]
 asio::awaitable<fixpp::core::expected_t<void>> Session::drive_reconnect() noexcept {
     using fixpp::core::error;
+    // 105 (research D1 item 7): an application call; at every exit, a refused one included,
+    // the connection-end latch is released. Declared first, so it runs after every other
+    // holder of this frame.
+    connection_end_releaser const release_at_exit{*this};
     // 103 (research D1 step 0b): single flight, for the whole operation.
     if (reconnect_in_flight_) {
         co_return std::unexpected(error::session_already_open);
@@ -1007,8 +1080,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::drive_reconnect() noexce
         (cfg_.engine_managed && live_transport_shared_() != nullptr)) {
         co_return std::unexpected(error::session_already_open);
     }
-    // Steps 2 and 3, the drain.
-    if (auto drained = co_await drain_for_reconnect_(); !drained) {
+    // Steps 2 and 3, the drain. 105 (research D1 item 1): reconnect_drain_in_flight_ is held
+    // around this call only, so the drain's own Disconnected edge owes no close (B-103-9).
+    reconnect_drain_in_flight_ = true;
+    auto drained = co_await drain_for_reconnect_();
+    reconnect_drain_in_flight_ = false;
+    if (!drained) {
         co_return drained;
     }
     auto drive_r = co_await reconnect_fsm_.drive_reconnect_attempt();
@@ -2274,6 +2351,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
             // reset symmetrically. [[feedback_half_restructure_symmetric_api]]
             record_state_transition_(fsm_state::LogonSent);
             auto logon_r = co_await emit_initiator_logon_();
+            // 105 (research D1 item 7): open() where it emits a direct initiator's Logon is an
+            // application call, so the latch is released at this point of its exit.
+            release_connection_end_();
             if (!logon_r) {
                 // emit_initiator_logon_ has already transitioned to Disconnected.
                 co_return std::unexpected(logon_r.error());
@@ -2392,6 +2472,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
 
     // ── First close() on an OPEN session: run the two-phase body once ──────
     state_ = lifecycle::closing;
+    // 105 (research D1 item 6): close() owns the connection's close from here; the latch is
+    // cleared at the commit of closing, and owe_connection_end_ refuses while closing.
+    connection_end_owed_.reset();
     // 103 (research D5′; data-model "Replay gate", wake sources): immediately after the first
     // commit of closing, with no suspension between; a joining close() does not wake again.
     replay_gate_.wake_all();
@@ -2543,6 +2626,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // above with no suspension before the emit, so a loop that is not in a sleep now
     // finds the state changed when it next reaches one.
     root_cancel_.emit(asio::cancellation_type::total);
+    // 105 (research D1 item 6; contract C-8.3): a close frame spawned before this point runs
+    // close_async() on the same transport; close() waits for it, by post, as it joins the
+    // liveness loop below, so the two never run close_async on one transport at once.
+    {
+        auto const cc = connection_close_counter_;
+        while (cc->load(std::memory_order_acquire) > 0) {
+            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+        }
+    }
     if (auto live = live_transport_shared_()) {
         // #348 — close_async(), not close(). The Engine's read pump can still
         // have a read in flight at this instant: the emit above does not reach it
@@ -3739,7 +3831,10 @@ fixpp::wire::garble_summary header_out_of_order_garble(std::span<const std::byte
 // before calling this disposer, so D-8, and D-1/D-2 for that shape, are unreachable
 // here and this disposer only sees a faulty frame whose field 3 is 35.
 //   D-1/D-2 (NotConnected, LogonSent): the Logon refusal, as when interpret_logon
-//     refuses: Disconnected, nothing sent.
+//     refuses: Disconnected, nothing sent. 105 FR-007 (research D4): this Disconnected, and
+//     D-3's below, owe the connection's close at the edge, so the connection closes once the
+//     frame's arm returns, superseding 092's "D-1 and D-2 are a state transition, not a
+//     close" and its D-3 twin (the close timing of 092 contract C-2 O-1).
 //   D-9 (LogoutSent): disregarded; not the Logout reply, so the logout timeout runs.
 //   D-7 (34 not read): disregarded.
 //   D-3 (a Logon): silent Disconnected; no Reject, no Logout.
@@ -5200,7 +5295,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
                         }
                         // Matching or empty TestReqID: TR answered, clear flag.
                         pending_test_req_id_.clear();
-                        unanswered_tr_ = false;
                     }
                     // 029 T010 — PERSIST: inbound Heartbeat (35=0).
                     // check_inbound advanced next_inbound; fromAdmin dispatched above.
@@ -5470,7 +5564,6 @@ bool Session::answer_pending_test_request_(std::string_view test_req_id) noexcep
         return false;
     }
     pending_test_req_id_.clear();
-    unanswered_tr_ = false;
     return true;
 }
 
@@ -5773,6 +5866,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::acknowledge_peer_logout_
 // the frame. An exception that reaches the handler ends the bound closed.
 asio::awaitable<void> Session::run_peer_logout_bound_([[maybe_unused]] peer_logout_bound_join join,
                                                       std::uint32_t gen) noexcept {
+    try {
+        co_await run_peer_logout_bound_body_(gen);
+    } catch (...) {  // NOLINT(bugprone-empty-catch): the body handles its own; a cancellation
+                     // met at this await leaves the release below to decide
+    }
+    // 105 (research D1 item 7): a detached root; its exit releases the connection-end latch,
+    // the join still held.
+    release_connection_end_();
+}
+
+asio::awaitable<void> Session::run_peer_logout_bound_body_(std::uint32_t gen) noexcept {
     try {
         if (peer_logout_bound_hold_first_run_) {
             co_await peer_logout_bound_hold_first_run_();
@@ -7208,6 +7312,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
 asio::awaitable<fixpp::core::expected_t<void>> Session::send_body_(
     std::span<const std::byte> app_payload, send_depth_test depth_test) noexcept {
     using fixpp::core::error;
+    // 105 (research D1 item 7; contract C-1.c): Session::send and Engine::send's session body
+    // end here; at every exit, a refused send included, the connection-end latch is released.
+    connection_end_releaser const release_at_exit{*this};
 
     // FR-005 / D-3: FSM precondition — Session::send is only valid in Active.
     // spec.md US1 ACs all premise Active; sending while in LogonSent/NotConnected/
@@ -7334,6 +7441,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_body_(
 // the frame slot: send_body_ does both after the hop.
 asio::awaitable<fixpp::core::expected_t<void>> Session::send_deferred_(
     std::span<const std::byte> app_payload) {
+    // 105 (research D1 item 7): as send_body_'s, for the exits before send_body_ is reached.
+    connection_end_releaser const release_at_exit{*this};
     // "The payload": the build runs after the callback has returned, when the buffer the
     // caller's span points into may be gone.
     const std::vector<std::byte> payload(app_payload.begin(), app_payload.end());
@@ -7837,14 +7946,6 @@ fsm_state Session::state() const noexcept { return fsm_state_; }
 // HeartBtInt source: cfg_.heartbeat_interval (std::optional<seconds>, D-8).
 // Default: 30s if not set; HeartBtInt=0 disables.
 asio::awaitable<void> Session::run_liveness_loop() noexcept {
-    using namespace std::chrono_literals;
-
-    // [feedback_asio_cospawn_total_cancellation_default]: reset the coroutine's
-    // cancellation filter to accept total cancellation. The root slot was bound
-    // at co_spawn time (via bind_cancellation_slot), so this only changes the
-    // filter — it does not reassign the slot's backing storage.
-    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
-
     // FQ-C (gate-b/r3): spawn sites increment liveness_counter_ BEFORE co_spawn
     // publishes the detached frame, closing the pre-start close()/destroy race.
     // The coroutine body owns only the matching decrement, using a captured
@@ -7855,6 +7956,24 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
         std::shared_ptr<std::atomic<int>> ctr;
         ~liveness_dec() { ctr->fetch_sub(1, std::memory_order_release); }
     } live_dec_guard{live_ctr};
+    try {
+        co_await run_liveness_loop_body_();
+    } catch (...) {  // NOLINT(bugprone-empty-catch): the body handles its own; a cancellation
+                     // met at this await leaves the release below to decide
+    }
+    // 105 (research D1 item 7): a detached root; its exit releases the connection-end latch,
+    // while the loop is still counted.
+    release_connection_end_();
+}
+
+asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
+    using namespace std::chrono_literals;
+
+    // [feedback_asio_cospawn_total_cancellation_default]: reset the coroutine's
+    // cancellation filter to accept total cancellation. The root slot was bound
+    // at co_spawn time (via bind_cancellation_slot), so this only changes the
+    // filter — it does not reassign the slot's backing storage.
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
 
     // Resolve HeartBtInt from config (D-8 default: 30s; 0 = disabled).
     std::chrono::seconds heartbt_int = kDefaultHeartBtInt;
@@ -7882,7 +8001,8 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
     // Two independent cadences:
     //   (A) Outbound idle for heartbt_int  → emit Heartbeat(0)   [T018 Cell A / spec FR-003]
     //   (B) Inbound idle for heartbt_int   → emit TestRequest(1) [T018 Cell B / spec FR-004]
-    //       then grace window of heartbt_int; no reply → Disconnected [T018 Cell C]
+    //       then grace window of heartbt_int; no reply → 105 R-1: the record, a Logout
+    //       with Text, Disconnected [T018 Cell C]
     // Sleep until the EARLIEST of last_outbound + heartbt_int OR last_inbound + heartbt_int.
     try {
         while (fsm_state_ == fsm_state::Active) {
@@ -7987,7 +8107,6 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                                            ++next_test_request_id_);
             (void)ec;  // 32-byte buffer is sufficient for "TR" + max uint32_t (10 digits).
             pending_test_req_id_.assign(id_buf.data(), end);
-            unanswered_tr_ = false;
 
             // T042 (US4 retirement): emit the TestRequest frame via
             // store_then_emit (I-3 outbound half). Stack buffer; noexcept.
@@ -8050,12 +8169,51 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
 
             // Still Active after grace window. Did a Heartbeat arrive?
             if (!pending_test_req_id_.empty()) {
-                // No Heartbeat reply received — unanswered TestRequest.
-                // Per data-model Active row + [FIX-SL §4.5.5]:
-                // session_test_request_unanswered (slot 74) → Disconnected.
-                unanswered_tr_ = true;
-                record_state_transition_(fsm_state::Disconnected);
-                // (Phase 6 US4 wires the Logout emission before Disconnected.)
+                // 105 R-1 (research D3; contract C-3; [FIX-SL §4.5.5]), superseding the
+                // 536-537-538 note's R-6 ("Not chosen: … a Logout on the dead-peer ending"):
+                // the slot-74 record first, so a write that never completes cannot lose it
+                // (ruling D-e); then, under a replay-gate shared hold as this loop's other
+                // emits take one, with a pending too-high mark claimed as the other ending
+                // Logouts claim it, one Logout whose Text(58) names the TestRequest; then
+                // Disconnected. The connection closes at the loop's exit
+                // (run_liveness_loop's release_connection_end_).
+                FIXPP_SLOG(
+                    logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
+                    "session ended: TestRequest unanswered: test_req_id={} threshold_ms={} "
+                    "error={}",
+                    fixpp::log::ArgValue::from_inline(pending_test_req_id_),
+                    fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(threshold.count())),
+                    fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(
+                        fixpp::core::error::session_test_request_unanswered)));
+                while (replay_gate_.exclusive) {
+                    co_await replay_gate_.wait_for_wake();
+                    if (fsm_state_ != fsm_state::Active) {
+                        co_return;
+                    }
+                }
+                {
+                    const detail::replay_gate::shared_hold lo_hold{replay_gate_};
+                    claim_peer_logout_none_();
+                    // The Text, in a buffer sized for its longest content: the prefix, then a
+                    // TestReqID of "TR" and the ten digits of the largest std::uint32_t.
+                    constexpr std::string_view kPrefix = "TestRequest unanswered, TestReqID ";
+                    using text_buffer = std::array<char, 48>;
+                    static_assert(std::tuple_size_v<text_buffer> >= kPrefix.size() + 2 + 10,
+                                  "the give-up Text's buffer holds its longest content");
+                    text_buffer text_buf{};
+                    char* out = std::ranges::copy(kPrefix, text_buf.data()).out;
+                    std::size_t const id_bytes =
+                        (std::min)(pending_test_req_id_.size(), text_buf.size() - kPrefix.size());
+                    out = std::copy_n(pending_test_req_id_.data(), id_bytes, out);
+                    std::string_view const text{text_buf.data(),
+                                                static_cast<std::size_t>(out - text_buf.data())};
+                    const auto st52 =
+                        stamp_sending_time(*effective_clock_, cfg_.sending_time_precision);
+                    // What the leaf writes or refuses is its own; the ending is recorded
+                    // below either way (contract C-3.2).
+                    (void)co_await inbound_logout_leaf_(true, st52.value, text);
+                }
+                record_disconnected_unless_already_();
                 co_return;
             }
 

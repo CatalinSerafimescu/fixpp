@@ -426,10 +426,11 @@ TEST(Capi537Witness, Deadline_ResetBelowExpected_RejectsThenLogout) {
 //
 // Sampled from the peer's second frame until half an interval before the deadline,
 // fixpp_session_is_established stays true. After two intervals with no advance it
-// turns false, the peer has read no Logout, and the connection is still open.
+// turns false, the peer has read no Logout, and the connection closes at once
+// (105-transport-liveness, FR-001: no Logout was sent, so no wait is armed).
 // The control is Deadline_TooHighApplicationFrames_Logout: the same trace at CompIDs
 // that leave room, where the peer reads the Logout.
-TEST(Capi537Witness, Deadline_CompIdsLeaveNoRoomForTheLogout_EndsSilently) {
+TEST(Capi537Witness, Deadline_CompIdsLeaveNoRoomForTheLogout_EndsSilentlyAndClosesAtOnce) {
     Dictionary dict;
     auto const boundary = longest_sender_comp_id_with_logon(dict, kWindowHeartBtInt);
     ASSERT_TRUE(boundary.has_value())
@@ -457,9 +458,8 @@ TEST(Capi537Witness, Deadline_CompIdsLeaveNoRoomForTheLogout_EndsSilently) {
         << observed(scene.line, watch, scene.gap->at.lo, kSinceGap);
     EXPECT_FALSE(read_any(scene.line, "5"))
         << "the peer reads no Logout" << observed(scene.line, watch, scene.gap->at.lo, kSinceGap);
-    EXPECT_TRUE(scene.line.open_through(steady::now() + (kHb / 4)))
-        << "the connection is still open after the silent ending (fixpp#534 is where it "
-           "closes)";
+    EXPECT_FALSE(scene.line.open_through(steady::now() + (kHb / 4)))
+        << "the connection is still open after the silent ending";
 }
 
 // The row's sentence for an interval never set: such a session runs at the session's

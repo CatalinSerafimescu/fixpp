@@ -410,7 +410,7 @@ using fixpp::session::detail::scan_first_frame_ids;
 using fixpp::session::detail::read_first_frame_bounded;
 
 // ── Read-pump (US2 T015) ─────────────────────────────────────────────────────
-// Co-awaited inline from run_accept_loop after the first Logon is delivered.
+// Co-awaited inline from run_accept_loop with the acceptor's first frame (105 FR-006).
 // Runs on the accept loop's executor (== session strand in the single-executor
 // model used by the tests and the current engine). Reads subsequent frames,
 // parses them with a session-lifetime Framer + pmr_carry_buffer, and delivers
@@ -452,7 +452,17 @@ using fixpp::session::detail::read_first_frame_bounded;
 //                           by that exception. Engine::stop() closes the transport
 //                           (its step 2) and the session (its step 4).
 //   establishment deadline → note_establishment_timeout, close session terminal,
-//                           stop pump (093, C-4).
+//                           stop pump (093, C-4). 105 (research D4; data-model E-5): the
+//                           timeout's event and record only when the session has not
+//                           recorded its own ending; the close either way.
+//   connection-end latch   → 105 D1 (research D1 item 2), superseding the rule that a
+//                           frame's Disconnected leaves the transport open: after every
+//                           on_inbound_frame return the latch is tested and cleared
+//                           (session_engine_access::take_connection_end), and a set latch
+//                           closes the session terminally, as an error result does.
+//   first frame            → 105 (research D1 item 3; FR-006): the acceptor's first frame
+//                           is delivered here, before initial_bytes, with every later
+//                           frame's disposition and without the expired() pre-check.
 //
 // Natural backpressure: no inbound queue; each on_inbound_frame call must
 // complete before the next read_some is issued (SC-003 / US2 AC1).
@@ -466,8 +476,9 @@ using fixpp::session::detail::read_first_frame_bounded;
 
 asio::awaitable<void> run_read_pump(
     fixpp::transport::Transport& transport, fixpp::session::Session& session,
-    fixpp::session::SessionConfig const& cfg, std::span<const std::byte> initial_bytes,
-    fixpp::core::Clock& clock, std::optional<fixpp::core::steady_time_point> establish_deadline) {
+    fixpp::session::SessionConfig const& cfg, std::span<const std::byte> first_frame,
+    std::span<const std::byte> initial_bytes, fixpp::core::Clock& clock,
+    std::optional<fixpp::core::steady_time_point> establish_deadline) {
     using fixpp::session::session_engine_access;
     using namespace asio::experimental::awaitable_operators;
 
@@ -523,9 +534,24 @@ asio::awaitable<void> run_read_pump(
         return establishing() && clock.steady_now() >= *establish_deadline;
     };
     auto expire = [&]() -> asio::awaitable<void> {
-        session_engine_access::note_establishment_timeout(session);
+        if (!session_engine_access::ended(session)) {
+            session_engine_access::note_establishment_timeout(session);
+        }
         co_await stop_pump();
     };
+    // A frame's disposition: an error result, or the connection-end latch the frame's arm
+    // left set, closes the session (105 D1, research D1 item 2).
+    auto frame_ends = [&](fixpp::core::expected_t<void> const& r) noexcept {
+        return !r.has_value() || session_engine_access::take_connection_end(session);
+    };
+
+    if (!first_frame.empty()) {
+        auto deliver_r = co_await session.on_inbound_frame(first_frame);
+        if (frame_ends(deliver_r)) {
+            co_await stop_pump();
+            co_return;
+        }
+    }
 
     // Seed the framer with any surplus bytes carried over from the bounded
     // first-frame read (a coalesced Logon‖next-frame, F-015-002). Drain them
@@ -548,7 +574,7 @@ asio::awaitable<void> run_read_pump(
                     co_return;
                 }
                 auto deliver_r = co_await session.on_inbound_frame(frame.bytes());
-                if (!deliver_r.has_value()) {
+                if (frame_ends(deliver_r)) {
                     co_await stop_pump();
                     co_return;
                 }
@@ -615,9 +641,9 @@ asio::awaitable<void> run_read_pump(
                     co_return;
                 }
                 auto deliver_r = co_await session.on_inbound_frame(frame.bytes());
-                if (!deliver_r.has_value()) {
-                    // Session-fatal error from FSM (e.g. seqnum overflow, store I/O).
-                    // Per FR-012: close and stop. [T015]
+                if (frame_ends(deliver_r)) {
+                    // Session-fatal error from FSM (e.g. seqnum overflow, store I/O), or the
+                    // ending the frame's arm recorded (105 D1). Per FR-012: close and stop.
                     co_await stop_pump();
                     co_return;
                 }
@@ -1160,20 +1186,17 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             co_return;
         }
 
-        // Step 8: direct-deliver the first Logon (DR-7 / E-2) — ONLY the first
-        // frame, never any coalesced surplus (F-015-002).
-        {
-            auto deliver_r = co_await session->on_inbound_frame(first_frame);
-            (void)deliver_r;
-        }
+        // Step 8 (the first frame's direct delivery, whose result was discarded) is gone:
+        // 105 (research D1 item 3; FR-006) delivers the first frame through the pump, under
+        // every later frame's disposition, ahead of the coalesced surplus (F-015-002).
 
         // Step 9: run the real read-pump inline (T015).
         // Inline co_await means the pump is part of the counter_guard scope:
         // stop()'s total-cancel propagates into async_read_some, the pump unwinds,
         // and the counter only decrements after the pump co_returns. No second
         // counter or detached spawn needed. [T015 locked design decision #3]
-        co_await run_read_pump(*raw, *session, entry.config, surplus, *engine_cfg.clock,
-                               establish_deadline);
+        co_await run_read_pump(*raw, *session, entry.config, first_frame, surplus,
+                               *engine_cfg.clock, establish_deadline);
 
         // Step 10 (T013): unpublish on normal exit — reset entry.live_transport
         // (entry.session retained for lookup() terminal-visibility) on the control
@@ -1316,8 +1339,8 @@ asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_c
     // Inline co_await keeps the pump in the counter_guard scope (stop()'s
     // total-cancel propagates into async_read_some; the counter decrements only
     // after the pump co_returns — mirror of run_accept_loop step 9). [T015/T016(e)]
-    co_await run_read_pump(session->live_transport(), *session, entry.config, {}, *engine_cfg.clock,
-                           establish_deadline);
+    co_await run_read_pump(session->live_transport(), *session, entry.config, {}, {},
+                           *engine_cfg.clock, establish_deadline);
 
     // Step 6 (T013): unpublish on normal exit (read-pump EOF / error unwind). [INV-2]
     co_await asio::co_spawn(

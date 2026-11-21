@@ -85,6 +85,11 @@ static const std::unordered_map<std::uint32_t, std::string_view>& get_registry()
             {.id = static_cast<std::uint32_t>(
                  crc32_str("session not established within logon_timeout_ms={}")),
              .fmt = "session not established within logon_timeout_ms={}"},
+            // 105 (research D3; contract C-3.3): run_liveness_loop's give-up, before its Logout.
+            {.id = static_cast<std::uint32_t>(crc32_str(
+                 "session ended: TestRequest unanswered: test_req_id={} threshold_ms={} error={}")),
+             .fmt =
+                 "session ended: TestRequest unanswered: test_req_id={} threshold_ms={} error={}"},
             // 093 (data-model E-12): Session::note_frame_too_large_.
             {.id = static_cast<std::uint32_t>(
                  crc32_str("inbound frame over the limit closed the session: kind={} limit={}")),

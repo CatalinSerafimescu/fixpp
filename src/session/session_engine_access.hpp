@@ -63,6 +63,19 @@ struct session_engine_access {
     [[nodiscard]] static bool engine_stop_noted(Session const& s) noexcept {
         return s.engine_stop_requested_;
     }
+    // 105-transport-liveness (research D1 item 2; data-model E-2), consumer (a): after each
+    // on_inbound_frame return the pump tests and clears the connection-end latch, and closes
+    // the session when it was set. Session strand.
+    [[nodiscard]] static bool take_connection_end(Session& s) noexcept {
+        if (!s.connection_end_owed_) return false;
+        s.connection_end_owed_.reset();
+        return true;
+    }
+    // 105 (research D4; data-model E-5): whether the session has recorded its own ending, for
+    // the pump's establishment expiry. Session strand.
+    [[nodiscard]] static bool ended(Session const& s) noexcept {
+        return s.state() == fsm_state::Disconnected;
+    }
     // 099-fixt-appl-version-validation (data-model E-1): hands the Engine's route set to a FIXT
     // session, right after make_shared<Session> and before open(), which then walks nothing.
     static void adopt_routes(Session& s,

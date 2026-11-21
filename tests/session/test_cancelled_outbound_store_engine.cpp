@@ -401,11 +401,11 @@ TEST(SecondFrameInFlight, MemoryStore_InboundArm_PeerReadsNoReply) {
     ASSERT_TRUE(two_frame_gate(o, Second::inbound_arm));
 
     EXPECT_EQ(frames_of(o.wire, "3"), 0U) << "the peer read a Reject: " << wire_text(o.wire);
-    // fixpp#534 owns this boundary: what an inbound arm that is already running sends
-    // after the session has ended.
+    // 105-transport-liveness (fixpp#534; contract C-1.b) keeps this boundary: an inbound arm
+    // already running when the session ends runs to its end before the connection closes.
     // 103 (research D4.6): the Logout leaf skips once the session is no longer Active,
     // so the arm's Logout is not among the replies it still sends after the cancelled
-    // frame recorded Disconnected; fixpp#534's boundary is narrowed to the Reject.
+    // frame recorded Disconnected; 105 (fixpp#534) keeps the Reject on that boundary.
     EXPECT_TRUE(o.wire.empty()) << "the peer must read no frame; it read: " << wire_text(o.wire);
     EXPECT_EQ(o.next_outbound, static_cast<long long>(o.k))
         << "the next outbound number in memory is not the cancelled frame's own";
@@ -459,7 +459,7 @@ TEST(SecondFrameInFlight, FileStore_InboundArm_PeerReadsTheRejectAtTheCancelledN
 
     // 103 (research D4.6): the Logout leaf skips once the session is no longer Active,
     // so the arm's Logout is not among the replies it still sends after the cancelled
-    // frame recorded Disconnected; fixpp#534's boundary is narrowed to the Reject.
+    // frame recorded Disconnected; 105 (fixpp#534) keeps the Reject on that boundary.
     EXPECT_EQ(o.wire, (std::vector<WireFrame>{{"3", o.k}}))
         << "the peer must read the Reject alone, numbered k=" << o.k
         << "; it read: " << wire_text(o.wire);
@@ -760,7 +760,7 @@ TEST(ReconcileAfterTheTakeBack,
         << "; the peer read: " << wire_text(o.wire) << "; the store: " << o.store.text();
     // 103 (research D4.6): the Logout leaf skips once the session is no longer Active,
     // so the arm's Logout is not among the replies it still sends after the cancelled
-    // frame recorded Disconnected; fixpp#534's boundary is narrowed to the Reject.
+    // frame recorded Disconnected; 105 (fixpp#534) keeps the Reject on that boundary.
     EXPECT_EQ(o.arm_stores.size(), 1U)
         << "the arm made an outbound store call other than its Reject's";
     // With no Logout numbered after the Reject, the number in memory stays where the
@@ -777,10 +777,10 @@ TEST(ReconcileAfterTheTakeBack,
     ASSERT_TRUE(o.store.read) << "the store was not read";
     expect_cancelled_frame_ending(o);
 
-    // fixpp#534: this reading of the peer is the one that issue's batch flips.
+    // 105-transport-liveness (fixpp#534) keeps this reading: the arm runs to its end first.
     // 103 (research D4.6): the Logout leaf skips once the session is no longer Active,
     // so the arm's Logout is not among the replies it still sends after the cancelled
-    // frame recorded Disconnected; fixpp#534's boundary is narrowed to the Reject.
+    // frame recorded Disconnected; 105 (fixpp#534) keeps the Reject on that boundary.
     EXPECT_EQ(o.replies(), (std::vector<WireFrame>{{"3", o.k}}))
         << "the peer must read the Reject alone, at k=" << o.k
         << "; it read: " << wire_text(o.wire);
@@ -788,9 +788,8 @@ TEST(ReconcileAfterTheTakeBack,
         << "the store does not hold the Reject alone: " << o.store.text();
 }
 
-// The two orders differ on the wire. fixpp#534: once a Disconnected session stops
-// sending, they do not, and this cell is the one that issue's batch removes or flips. Of
-// Order 1's readings only "the store holds the Reject" can change with it.
+// The two orders differ on the wire. 105-transport-liveness (fixpp#534) closes the
+// connection after the arm in flight has returned, not inside it, so they still differ.
 TEST(ReconcileAfterTheTakeBack, TheTwoLockOrdersDifferInWhatThePeerReads) {
     auto const order1 = run_lock_order(Order::send_then_persist, /*cancel_k=*/true);
     ASSERT_TRUE(lock_order_gate(order1, Order::send_then_persist, true));

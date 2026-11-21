@@ -13,9 +13,9 @@
 //                                   connection at once;
 //   the Logon's 789 path,           the same: the Logon reply arrives through the pump;
 //   initiator
-//   the Logon's 789 path,           the first Logon is delivered by the accept loop,
-//   acceptor                        which discards the result: the connection stays
-//                                   open until the establishment deadline.
+//   the Logon's 789 path,           the same: 105 (FR-006) delivers the first Logon
+//   acceptor                        through the pump, whose failed-delivery branch
+//                                   closes the connection at once.
 //
 // The cells that hand the frame to a Session directly are in
 // test_538_resend_answer_store_failure.cpp.
@@ -298,12 +298,13 @@ TEST(ResendAnswerStoreFailureEngine, Initiator789Path_SlotReadFails_PeerConnecti
         << "the peer read a GapFill";
 }
 
-// D-538-4, "the 789 path, acceptor, under an Engine". The accept loop delivers the
-// first Logon itself and discards the result, and the 789 path runs inside that
-// delivery; the read pump then starts on a session that is Disconnected and never
-// reached Active, and closes it at the establishment deadline.
-TEST(ResendAnswerStoreFailureEngine,
-     Acceptor789Path_SlotReadFails_ConnectionStaysOpenUntilTheEstablishmentDeadline) {
+// D-538-4, "the 789 path, acceptor, under an Engine". 105-transport-liveness (FR-006,
+// FR-007; research D1 item 3, D4) supersedes this cell's earlier reading, under which the
+// accept loop delivered the first Logon itself, discarded the result, and the read pump
+// closed the never-Active session only at the establishment deadline: the first Logon now
+// goes through the read pump, whose error disposition closes the connection once the 789
+// path's failed slot read has returned, before the engine clock reaches the deadline.
+TEST(ResendAnswerStoreFailureEngine, Acceptor789Path_SlotReadFails_ConnectionClosesAtOnce) {
     constexpr std::uint32_t kLogonTimeoutMs = 2000;
     Outcome o;
     fsm_state state_at_the_abort = fsm_state::NotConnected;
@@ -370,17 +371,13 @@ TEST(ResendAnswerStoreFailureEngine,
     EXPECT_FALSE(reached(o.ring, fsm_state::Active))
         << "the session reached Active; ring: " << ring_text(o.ring);
 #if defined(FIXPP_TEST_PEER_HANG_UP_READING)
-    // fixpp#534 flips this assertion, if its change reaches this path: a session that
-    // is Disconnected then closes its transport before the establishment deadline.
-    EXPECT_FALSE(hang_up_at_the_abort)
-        << "the peer saw a hang-up when the first Logon's delivery had returned";
-#else
-    std::printf("the reading \"the peer sees a hang-up\" was not made on this platform\n");
+    // Whether the close has reached the peer when the delivery's handler has run is not
+    // this cell's reading (the pump closes right after it); the reading is kept, unasserted.
+    (void)hang_up_at_the_abort;
 #endif
-    EXPECT_FALSE(read_ended_before_the_deadline)
-        << "the peer's connection ended before the engine clock reached the deadline";
-    EXPECT_TRUE(read_ended_at_the_deadline)
-        << "the peer's connection was still open after the establishment deadline";
+    EXPECT_TRUE(read_ended_before_the_deadline)
+        << "the peer's connection was still open before the engine clock reached the deadline";
+    EXPECT_TRUE(read_ended_at_the_deadline) << "the peer's connection was still open";
     EXPECT_TRUE(plain_rig::frames_of_type(o.peer_received, "4").empty())
         << "the peer read a GapFill";
 }

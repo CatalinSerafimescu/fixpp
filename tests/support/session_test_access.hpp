@@ -227,6 +227,14 @@ struct session_test_access {
         return s.callback_depth_;
     }
     [[nodiscard]] static std::uint32_t conn_gen(Session const& s) noexcept { return s.conn_gen_; }
+    // 105 (research D10, the spawn-failure seams): the close frame's spawn fails while the
+    // predicate returns true; and the close frame's join counter.
+    static void set_close_frame_spawn_fails(Session& s, std::function<bool()> fails) {
+        s.close_frame_spawn_fails_ = std::move(fails);
+    }
+    [[nodiscard]] static int connection_close_count(Session const& s) noexcept {
+        return s.connection_close_counter_->load(std::memory_order_acquire);
+    }
     [[nodiscard]] static int peer_logout_bound_count(Session const& s) noexcept {
         return s.peer_logout_bound_counter_->load(std::memory_order_acquire);
     }
