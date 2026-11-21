@@ -512,7 +512,13 @@ and no local API call (SC-001).
   `InsideClose_NoSecondClose` (the pump's second `close()` there joins a graceful close whose phase 1 has already ended)
   and turns `InsideClose_EndingDuringItsLogoutStore_NoSecondClose` RED, both roles, by an assertion (no Logout written:
   the stray `close(terminal)` escalates the graceful close, OD-29, and its phase 1 is cancelled in the held store call),
-  rc 1, no abort. The guard is that cell (T022).
+  rc 1, no abort. The guard is that cell (T022). Recorded gaps (T035 ruling 4, measured): three more dedupe terms each
+  survive the whole `-L 105` suite at the head, both binaries unfiltered: the release's `lifecycle` term, the release's
+  generation check (data-model E-2 I-7) and `close()`'s clear of the latch at its commit of closing. No-observable
+  dispositions in part A, the terms kept as written: the owe's `lifecycle` term and `close()`'s clear mask the release's
+  term and each other; the drain's clear at its entry, the drain flag and the drain's wait for the old connection's
+  emitters mask the generation check, so I-7 has no witness in part A. Phase 4 adds the generation's other readers (the
+  bound's spawns and live predicate, T061 and T062), where a witness for I-7 is owed or the gap is restated.
 - [X] T041 [US1] The close frame's fail-closed `catch` replaced by round 2's (the latch left set for a later consumer):
   `CloseFrameSpawnFails_ReleaseAtLoopExit_*` RED within its wall cap.
 
