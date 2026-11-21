@@ -1338,9 +1338,21 @@ TEST(ReplayGate588, R588f4_ContendedSend_LivenessDisconnects_RefusedNothingWritt
     w.pump_for(kHeldWindow);
     ASSERT_FALSE(w.send_done(i)) << "setup: the send did not wait behind the held answer";
     w.s.f.clock->advance(kHb588 + std::chrono::seconds{1});
+    w.pump_for(kHeldWindow);  // the give-up is decided at this instant
+    // 105-transport-liveness (T059a; spec.md Clarifications, the Phase 3 implementation
+    // session): the give-up's budget, logout_disconnect_timeout_ms, counts from its decision
+    // while it waits for the walk's exclusive hold, so the session reaches Disconnected when
+    // the clock passes that budget, through the write limit and with no Logout written.
+    auto const budget = std::chrono::milliseconds{w.s.f.cfg.logout_disconnect_timeout_ms};
+    w.s.f.clock->advance(budget - std::chrono::milliseconds{1});
+    w.pump_for(kHeldWindow);
+    EXPECT_FALSE(w.send_done(i)) << "the contended send ended before the give-up's budget";
+    EXPECT_EQ(w.s.f.session->state(), fsm_state::Active) << "Disconnected before the budget";
+    w.s.f.clock->advance(std::chrono::milliseconds{1});
     EXPECT_TRUE(
         w.s.f.run_until([&] { return w.send_done(i); }, fixpp::test_support::kBodyHoldBound / 2))
         << "the contended send did not end after the liveness loop's Disconnected";
+    EXPECT_EQ(w.s.f.sent_count("5"), 0U) << "a Logout was written past the gate";
     EXPECT_EQ(w.s.f.session->state(), fsm_state::Disconnected);
     EXPECT_EQ(session_test_access::lifecycle_value(*w.s.f.session), 1)
         << "the session's lifecycle: 1 (open), no close() ran";
@@ -1348,6 +1360,51 @@ TEST(ReplayGate588, R588f4_ContendedSend_LivenessDisconnects_RefusedNothingWritt
         << w.live_calls[i].call_text();
     EXPECT_TRUE(live_frames(w.s.f.sent, "LIVE-L").empty()) << printable(w.s.f.sent);
     w.release();
+}
+
+// 105-transport-liveness (spec clarification "Session 2026-11-21 (implementation, Phase 4)"): a
+// give-up is final once decided. As R588f4 to the give-up, which then waits behind the held
+// walk with the mock clock still; the peer's Heartbeat answering the pending TestRequest
+// arrives during that wait; at the walk's release the give-up's Logout is written, with R-1's
+// Text, and the session is Disconnected.
+TEST(ReplayGate588, R588f5_GiveUpWaitingAtTheGate_AnswerArrives_GiveUpIsFinal) {
+    // What the Heartbeat's coroutine refers to is declared before the walk, so it outlives the
+    // walk's drain.
+    CallingThreadReadings hb_call;
+    asio::cancellation_signal hb_none;
+    std::vector<std::byte> hb_frame;
+    HeldWalk w{DirectAcceptor::Options{
+        .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
+    ASSERT_TRUE(w.start(is_slot_read(3), std::nullopt, /*request=*/false)) << "setup";
+    w.s.f.clock->advance(kHb588 + std::chrono::seconds{1});
+    ASSERT_TRUE(w.s.f.run_until([&] { return w.s.f.sent_count("1") != 0; }))
+        << "setup: no TestRequest was written:\n"
+        << printable(w.s.f.sent);
+    std::string test_req_id;
+    for (auto const& f : w.s.f.sent) {
+        if (plain_rig::field_value(f, "35") == "1") test_req_id = plain_rig::field_value(f, "112");
+    }
+    ASSERT_TRUE(w.feed_request()) << "setup: the walk did not reach the held read";
+    w.s.f.clock->advance(kHb588 + std::chrono::seconds{1});
+    w.pump_for(kHeldWindow);
+    ASSERT_EQ(w.s.f.session->state(), fsm_state::Active) << "setup: the give-up did not wait";
+    ASSERT_EQ(w.s.f.sent_count("5"), 0U) << "setup: a Logout before the walk's release";
+    hb_frame = w.s.f.msg("0", 3, "112=" + test_req_id + "\x01");
+    auto hb_fut = w.s.f.feed(hb_frame, hb_call, hb_none);
+    EXPECT_TRUE(w.s.f.run_until([&] { return DirectAcceptor::ready(hb_fut); }))
+        << "the peer's Heartbeat was not processed during the give-up's wait";
+    EXPECT_FALSE(session_test_access::test_request_pending(*w.s.f.session))
+        << "setup: the Heartbeat did not answer the TestRequest";
+    w.release();
+    EXPECT_TRUE(w.s.f.run_until([&] { return w.s.f.session->state() == fsm_state::Disconnected; }))
+        << "the answer undid the give-up: " << printable(w.s.f.sent);
+    std::vector<std::string> logouts;
+    for (auto const& f : w.s.f.sent) {
+        if (plain_rig::field_value(f, "35") == "5") logouts.push_back(f);
+    }
+    ASSERT_EQ(logouts.size(), 1U) << printable(w.s.f.sent);
+    EXPECT_EQ(plain_rig::field_value(logouts.front(), "58"),
+              "TestRequest unanswered, TestReqID " + test_req_id);
 }
 
 // (3): the send's own slot emits a terminal cancellation while it waits. It returns

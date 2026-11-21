@@ -178,8 +178,7 @@ GapRun run_gap_traffic(PeerLine& line, EstablishedWatch& watch, Gap const& gap,
 
 // The ending of §4.6's condition (a), as the row "With a heartbeat interval set" states
 // it for each of its witnesses: the peer reads a Logout with Text(58), no earlier than
-// two intervals after it opened the gap; fixpp_session_is_established turns false; and
-// the connection is still open.
+// two intervals after it opened the gap; then 105-transport-liveness's R-2 wait (below).
 void expect_deadline_logout(PeerLine& line, EstablishedWatch& watch, Gap const& gap,
                             GapRun const& run) {
     bool const logout_with_text = run.logout && !field(run.logout->frame, 58).empty();
@@ -193,13 +192,27 @@ void expect_deadline_logout(PeerLine& line, EstablishedWatch& watch, Gap const& 
         EXPECT_GE(ms_between(gap.at.lo, run.logout->at).count(), (2 * kHb).count())
             << "the Logout was read before two intervals had passed since the gap opened";
     }
-    // The Logout is written before the state changes, so the peer can read it first.
-    watch.watch_until(steady::now() + (kHb / 2));
-    EXPECT_TRUE(watch.first_false.has_value()) << "fixpp_session_is_established turns false"
-                                               << observed(line, watch, gap.at.lo, kSinceGap);
-    EXPECT_TRUE(line.open_through(steady::now() + (kHb / 4)))
-        << "the connection is still open after the deadline's Logout (fixpp#534 is where "
-           "it closes)";
+    // 105-transport-liveness (R-2, contract C-2) supersedes "fixpp_session_is_established
+    // turns false at the Logout, and the connection is still open (fixpp#534)": the session
+    // stays established and the connection open through the wait, and both end at its bound,
+    // kLogoutTimeout after the Logout's write started, which is no later than the peer's read
+    // of it. The band is kHb / 4 before that instant and kHb / 2 after it.
+    if (!run.logout) return;
+    auto const bound = run.logout->at + kLogoutTimeout;
+    EXPECT_TRUE(line.open_through(bound - (kHb / 4)))
+        << "the connection ended before the wait's bound"
+        << observed(line, watch, gap.at.lo, kSinceGap);
+    watch.sample();
+    EXPECT_FALSE(watch.first_false.has_value())
+        << "fixpp_session_is_established turned false before the wait's bound"
+        << observed(line, watch, gap.at.lo, kSinceGap);
+    EXPECT_FALSE(line.open_through(bound + (kHb / 2)))
+        << "no end of the connection at the wait's bound"
+        << observed(line, watch, gap.at.lo, kSinceGap);
+    watch.sample();
+    EXPECT_TRUE(watch.first_false.has_value())
+        << "fixpp_session_is_established did not turn false at the wait's bound"
+        << observed(line, watch, gap.at.lo, kSinceGap);
 }
 
 // One session at a two-second interval, established, with a gap its peer opened.
@@ -318,6 +331,30 @@ TEST(Capi537Witness, Deadline_TooHighApplicationFrames_Logout) {
         /*answer_test_requests=*/true);
     ASSERT_GE(run.written.size(), 1U) << "setup: no second frame above the expected number";
     expect_deadline_logout(scene.line, watch, *scene.gap, run);
+}
+
+// 105-transport-liveness (spec clarification "Session 2026-11-21 (implementation, Phase 4)", the
+// ~Session assertion): the C ABI's destroy during the R-2 wait. The scene, and with it
+// fixpp_engine_destroy, ends while the session still waits after the deadline's Logout (the
+// session established and the connection open there); the engine's stop closes the session,
+// whose close() joins the ending bound before the Session is destroyed. The discriminating
+// oracle is ~Session's assertion on the bound's counter, compiled in this build's assertions;
+// the cell's own assertions show the destroy is reached inside the wait.
+TEST(Capi537Witness, Deadline_DestroyDuringTheWait_NoBoundOutlivesTheSession) {
+    bool in_wait = false;
+    {
+        GapScene scene;
+        ASSERT_EQ(scene.open(), "") << "setup";
+        EstablishedWatch watch{scene.session()};
+        auto const run = run_gap_traffic(
+            scene.line, watch, *scene.gap,
+            [&](std::uint32_t seq) { return scene.line.wire.order(seq, "ABOVE"); },
+            /*answer_test_requests=*/true);
+        ASSERT_TRUE(run.logout.has_value()) << "setup: no deadline Logout";
+        watch.sample();
+        in_wait = !watch.first_false.has_value() && !scene.line.ended();
+    }
+    EXPECT_TRUE(in_wait) << "the destroy was not reached inside the wait";
 }
 
 // The two other forms of witness (1): every frame the peer writes after opening the

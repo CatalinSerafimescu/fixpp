@@ -26,6 +26,9 @@
 namespace fixpp::session::test099 {
 namespace {
 
+// 105-transport-liveness (R-2, contract C-2) supersedes `Disc` on the AC-g rows whose
+// SendingTime Reject draws a Logout: `wait`, the session Active through the wait and ended at
+// its bound (test_099_fixt_support.hpp's short_form).
 const KeyedRow kActiveOff[] = {
     {.cell = "AC-a",
      .input = "rep35 D..0 past seq+5",
@@ -58,20 +61,20 @@ const KeyedRow kActiveOff[] = {
     {.cell = "AC-f", .input = "wrongBS NOS", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "AC-g",
      .input = "stale Logon 1137=9",
-     .t = "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
+     .t = "R 10/52 A 45=2 + Logout | wait | k | app=0 adm=0"},
     {.cell = "AC-g",
      .input = "stale Logon 1137=99",
-     .t = "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
+     .t = "R 10/52 A 45=2 + Logout | wait | k | app=0 adm=0"},
     {.cell = "AC-g",
      .input = "stale Logon 1137=4",
-     .t = "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
+     .t = "R 10/52 A 45=2 + Logout | wait | k | app=0 adm=0"},
     {.cell = "AC-g",
      .input = "stale Logon 1137 absent",
-     .t = "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
-    {.cell = "AC-g", .input = "stale NOS", .t = "R 10/52 D 45=2 + Logout | Disc | c | app=0 adm=0"},
+     .t = "R 10/52 A 45=2 + Logout | wait | k | app=0 adm=0"},
+    {.cell = "AC-g", .input = "stale NOS", .t = "R 10/52 D 45=2 + Logout | wait | c | app=0 adm=0"},
     {.cell = "AC-g",
      .input = "stale Heartbeat",
-     .t = "R 10/52 0 45=2 + Logout | Disc | c | app=0 adm=0"},
+     .t = "R 10/52 0 45=2 + Logout | wait | c | app=0 adm=0"},
     {.cell = "AC-admin", .input = "Heartbeat 1128=99 hdr", .t = "- | stays | c | app=0 adm=1"},
     {.cell = "AC-admin", .input = "Heartbeat 1128=10 hdr", .t = "- | stays | c | app=0 adm=1"},
     {.cell = "AC-admin",

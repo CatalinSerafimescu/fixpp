@@ -57,6 +57,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/r2_wait_reading.hpp"
 #include "support/recording_store.hpp"
 #include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
@@ -275,6 +276,21 @@ public:
         // the other reader: the next delivered frame reads the clock on this thread.
         mock->advance(d);
         drain();
+    }
+
+    // 105-transport-liveness, the R-2 wait (contract C-2; tests/support/r2_wait_reading.hpp):
+    // the state after an ending Logout, at the bound - 1 ms and at the bound, read with the
+    // mock clock still at the instant the ending's write started.
+    [[nodiscard]] fixpp::test_support::r2_wait_reading read_r2_wait() {
+        auto const bound = std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms};
+        fixpp::test_support::r2_wait_reading r{.after_ending = session->state(),
+                                               .before_bound = session->state(),
+                                               .at_bound = session->state()};
+        pass(bound - std::chrono::milliseconds{1});
+        r.before_bound = session->state();
+        pass(std::chrono::milliseconds{1});
+        r.at_bound = session->state();
+        return r;
     }
 
     // ── The peer's frames ─────────────────────────────────────────────────────────────
@@ -539,9 +555,11 @@ struct Gap {
 
 // The ending of an unfilled gap whose peer keeps sending (note §4.6, condition (a)), read
 // after the frame at or after the bound: one Logout written since `mark`, with a Text(58);
-// Disconnected; on_inbound_frame returned success.
+// on_inbound_frame returned success; then, by 105-transport-liveness's R-2 wait (contract
+// C-2), which supersedes the Disconnected at the Logout: Active through the wait, Disconnected
+// at its bound (Scene::read_r2_wait moves the mock clock to that bound).
 [[nodiscard]] inline ::testing::AssertionResult deadline_logout_written(
-    Scene const& s, std::size_t mark, fixpp::core::expected_t<void> const& r) {
+    Scene& s, std::size_t mark, fixpp::core::expected_t<void> const& r) {
     const auto logouts = s.of_type("5", mark);
     if (logouts.size() != 1U) {
         return ::testing::AssertionFailure()
@@ -554,14 +572,19 @@ struct Gap {
                << "the Logout at the bound carries no Text(58); the session wrote "
                << s.written(mark);
     }
-    if (s.state() != fixpp::session::fsm_state::Disconnected) {
-        return ::testing::AssertionFailure()
-               << "after the deadline's Logout the session is " << state_name(s.state());
-    }
     if (!r) {
         return ::testing::AssertionFailure()
                << "on_inbound_frame returned error " << static_cast<int>(r.error())
                << " for the frame that drew the deadline's Logout";
+    }
+    auto const w = s.read_r2_wait();
+    if (w.after_ending != fixpp::session::fsm_state::Active ||
+        w.before_bound != fixpp::session::fsm_state::Active ||
+        w.at_bound != fixpp::session::fsm_state::Disconnected) {
+        return ::testing::AssertionFailure()
+               << "the deadline's Logout's wait (R-2): after it " << state_name(w.after_ending)
+               << ", at the bound - 1 ms " << state_name(w.before_bound) << ", at the bound "
+               << state_name(w.at_bound);
     }
     return ::testing::AssertionSuccess();
 }

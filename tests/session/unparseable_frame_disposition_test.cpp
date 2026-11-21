@@ -155,6 +155,7 @@
 #include <map>
 #include <memory>
 #include <memory_resource>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -162,9 +163,11 @@
 #include <vector>
 
 #include "plain_engine_rig.hpp"
+#include "support/close_before_destroy.hpp"
 #include "support/extract_tag.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/r2_wait_reading.hpp"
 #include "support/reify_test_frame.hpp"
 #include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
@@ -1028,6 +1031,8 @@ struct StateCell {
     std::unique_ptr<Session> sess;
     std::future<fixpp::core::expected_t<void>> logon;  // the acceptor's parked Logon exchange
     fsm_state held;
+    // Declared after sess, so it is destroyed first (tests/support/close_before_destroy.hpp).
+    std::optional<fixpp::test_support::close_before_destroy> closer;
 
     explicit StateCell(At at, bool validate = true)
         : held(at == At::active ? fsm_state::Active : fsm_state::LogonReceived) {
@@ -1038,6 +1043,7 @@ struct StateCell {
         }
         cfg.store_factory = factory;
         sess = std::make_unique<Session>(fix.engine, cfg);
+        closer.emplace(*sess, fix.ioc);
     }
 
     StateCell(StateCell const&) = delete;
@@ -1731,6 +1737,7 @@ TEST(UnparseableFrameDisposition, TooLowHeartbeat_TooLowLogoutThenDisconnected) 
     DispositionFixture fix;
     auto cfg = fix.make_cfg(false);
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
     if (::testing::Test::HasFatalFailure()) {
         return;
@@ -1745,7 +1752,13 @@ TEST(UnparseableFrameDisposition, TooLowHeartbeat_TooLowLogoutThenDisconnected) 
     }
     EXPECT_EQ(drawn, (std::vector<std::string>{"5"})) << "MsgType of each frame drawn";
     EXPECT_EQ(texts, (std::vector<std::string>{"MsgSeqNum too low, expecting 2 but received 1"}));
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // session stays Active through the wait and ends at its bound.
+    fixpp::test_support::expect_r2_wait(
+        fixpp::test_support::read_r2_wait(
+            sess, *fix.clock, std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            [&] { drain_ready(fix.ioc); }),
+        "the too-low Logout");
 }
 
 TEST(UnparseableFrameDisposition, Refresh_TooLowPossDupHeartbeat_NoTestRequestAtLogonInterval) {
@@ -3501,7 +3514,15 @@ void expect_unfilled_gap_ends_with_the_deadlines_logout(LateCell& c, std::uint32
     ASSERT_EQ(logouts.size(), 1U) << row << ": the frame at the bound drew no Logout";
     EXPECT_FALSE(extract_tag(logouts.front(), 58).empty())
         << row << ": the Logout carries no Text(58)";
-    EXPECT_EQ(c.sess->state(), fsm_state::Disconnected) << row << ": after the Logout";
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // session stays Active through the wait and ends at its bound (make_cfg leaves
+    // logout_disconnect_timeout_ms at its default).
+    fixpp::test_support::expect_r2_wait(
+        fixpp::test_support::read_r2_wait(
+            *c.sess, *c.fix.clock,
+            std::chrono::milliseconds{SessionConfig{}.logout_disconnect_timeout_ms},
+            [&] { drain_ready(c.fix.ioc); }),
+        std::string{row}.c_str());
 }
 
 // L-1: the peer sends a NewOrderSingle at N = 2 whose malformed tag precedes 34 (D-7),
@@ -3659,6 +3680,16 @@ void run_guard_precedence_cell(std::string_view begin_string, std::string_view t
         return;
     }
     k.fix.feed(*k.sess, guard_frame(begin_string, target, sending_time, {}));
+    if (control == GuardAction::sending_time_reject_logout) {
+        // 105-transport-liveness (R-2, contract C-2): the SendingTime Reject's Logout is
+        // followed by the wait, which ends at its bound.
+        fixpp::test_support::expect_r2_wait(
+            fixpp::test_support::read_r2_wait(
+                *k.sess, *k.fix.clock,
+                std::chrono::milliseconds{SessionConfig{}.logout_disconnect_timeout_ms},
+                [&] { drain_ready(k.fix.ioc); }),
+            ctl.c_str());
+    }
     EXPECT_EQ(k.sess->state(), fsm_state::Disconnected)
         << ctl << ": the guard must end the session";
     EXPECT_EQ(k.app->from_app, 0) << ctl << ": the frame must not reach fromApp";

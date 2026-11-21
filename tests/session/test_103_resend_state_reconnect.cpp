@@ -183,8 +183,16 @@ public:
                s.resend_outstanding() && s.state() == fsm_state::Active;
     }
 
-    // A too-low NewOrderSingle without PossDupFlag(43): Arm B ends the session.
-    void too_low_order() { (void)s.feed(s.order(1)); }
+    // A too-low NewOrderSingle without PossDupFlag(43): Arm B's Logout ends the session.
+    // 105-transport-liveness (R-2, contract C-2) supersedes its Disconnected at the Logout: the
+    // session stays Active through the wait, and the peer's Logout (W-1, numbered below
+    // NextNumIn as a peer on the too-low route numbers it) ends it, with no clock motion.
+    void too_low_order() {
+        (void)s.feed(s.order(1));
+        EXPECT_EQ(s.state(), fsm_state::Active)
+            << "the session did not stay Active through Arm B's wait (R-2)";
+        (void)s.feed(s.logout(1));
+    }
 
     // drive_reconnect(): the factory's mock transport is installed and the new Logon written
     // on it. Takes the reconnect mark first.

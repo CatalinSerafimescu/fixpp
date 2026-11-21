@@ -95,8 +95,9 @@ TEST(TooHighHeartbeatDuringTheGap, Q_AnswersTheTestRequestAndTheDeadlineEndsTheS
 
 // N, control for a peer that answers nothing: the same gap, nothing delivered, and the
 // clock past the grace deadline. The ending is the dead-peer one, with or without a gap:
-// Disconnected, and no Logout.
-TEST(TooHighHeartbeatDuringTheGap, N_Control_NothingDelivered_EndsSilentlyAtTheGraceCheck) {
+// 105-transport-liveness's R-1 (FR-003), which supersedes the silent ending: one Logout with
+// R-1's Text, then Disconnected, with no wait after it.
+TEST(TooHighHeartbeatDuringTheGap, N_Control_NothingDelivered_EndsWithTheGiveUpsLogout) {
     Scene s;
     const Gap g = open_gap(s);
     ASSERT_NE(g.n, 0U);
@@ -104,7 +105,10 @@ TEST(TooHighHeartbeatDuringTheGap, N_Control_NothingDelivered_EndsSilentlyAtTheG
 
     s.pass(kPastTheGrace);
     EXPECT_EQ(s.state(), fsm_state::Disconnected) << "past the grace deadline";
-    EXPECT_EQ(s.count("5", g.mark), 0U) << "the dead-peer ending wrote a Logout";
+    auto const logouts = s.of_type("5", g.mark);
+    ASSERT_EQ(logouts.size(), 1U) << "the give-up's Logout: " << s.written(g.mark);
+    EXPECT_EQ(field(logouts.front(), 58).rfind("TestRequest unanswered, TestReqID ", 0), 0U)
+        << "the give-up's Text(58): " << field(logouts.front(), 58);
     EXPECT_EQ(s.count("1"), 1U);
 }
 

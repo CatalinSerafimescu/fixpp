@@ -50,9 +50,11 @@
 #include <string>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/r2_wait_reading.hpp"
 #include "support/transport_double.hpp"
 
 using namespace std::chrono_literals;
@@ -440,6 +442,7 @@ TEST(SendingTimeIntegration, StaleSendingTimeInActiveTriggersRejectThenLogout) {
     SendingTimeFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_to_active(sess);
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
@@ -472,9 +475,18 @@ TEST(SendingTimeIntegration, StaleSendingTimeInActiveTriggersRejectThenLogout) {
     EXPECT_TRUE(found_logout)
         << "Q3: stale SendingTime in Active must emit Logout(35=5) after Reject";
 
-    // Session must be Disconnected after Reject+Logout.
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
-        << "Q3: session must be Disconnected after stale-SendingTime Reject+Logout";
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected after the
+    // Reject+Logout: the session stays Active through the wait and ends at its bound.
+    fixpp::test_support::expect_r2_wait(
+        fixpp::test_support::read_r2_wait(
+            sess, *f.clock, std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            [&f] {
+                for (int i = 0; i < 16; ++i) {
+                    f.ioc.restart();
+                    f.ioc.poll();
+                }
+            }),
+        "Q3: stale SendingTime in Active");
 }
 
 // ── Test 5: Q3 Logon-path — stale Logon SendingTime → Logout ONLY (no Reject)
@@ -489,6 +501,7 @@ TEST(SendingTimeIntegration, StaleLogonSendingTimeTriggersLogoutOnlyNoReject) {
     SendingTimeFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
 
     // Call open() — session goes to LogonSent.
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
@@ -587,10 +600,10 @@ std::vector<std::byte> make_frame_missing_sending_time(std::string_view begin_st
 // Helper: assert Reject(35=3, 371=52, 373=10) + Logout(35=5) in outbound frames
 // and session state == Disconnected.
 // Verifies the ordering guarantee: Reject is emitted before Logout.
-void assert_reject_then_logout_then_disconnected(const TransportDouble& transport,
-                                                 std::size_t before,
+void assert_reject_then_logout_then_disconnected(SendingTimeFixture& f, std::size_t before,
                                                  const fixpp::session::Session& sess,
                                                  const char* context) {
+    const TransportDouble& transport = f.transport;
     bool found_reject = false;
     bool found_logout = false;
     int reject_pos = -1;
@@ -620,8 +633,18 @@ void assert_reject_then_logout_then_disconnected(const TransportDouble& transpor
         EXPECT_LT(reject_pos, logout_pos) << context << ": Reject must be emitted before Logout";
     }
 
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
-        << context << ": session must be Disconnected after Reject+Logout path";
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // session stays Active through the wait and ends at its bound.
+    fixpp::test_support::expect_r2_wait(
+        fixpp::test_support::read_r2_wait(
+            sess, *f.clock, std::chrono::milliseconds{SessionConfig{}.logout_disconnect_timeout_ms},
+            [&f] {
+                for (int i = 0; i < 16; ++i) {
+                    f.ioc.restart();
+                    f.ioc.poll();
+                }
+            }),
+        context);
 }
 
 // T015 test 1: MissingSendingTimeInActiveRejects
@@ -631,6 +654,7 @@ TEST(SendingTimeIntegration, MissingSendingTimeInActiveRejects) {
     SendingTimeFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_to_active(sess);
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
@@ -640,7 +664,7 @@ TEST(SendingTimeIntegration, MissingSendingTimeInActiveRejects) {
     auto frame = make_frame_missing_sending_time("FIX.4.2", "0", 2, "TW", "ISLD");
     f.feed(sess, frame);
 
-    assert_reject_then_logout_then_disconnected(f.transport, before, sess,
+    assert_reject_then_logout_then_disconnected(f, before, sess,
                                                 "MissingSendingTimeInActiveRejects");
 }
 
@@ -651,6 +675,7 @@ TEST(SendingTimeIntegration, MalformedSendingTimeInActiveRejects) {
     SendingTimeFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_to_active(sess);
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
@@ -660,7 +685,7 @@ TEST(SendingTimeIntegration, MalformedSendingTimeInActiveRejects) {
     auto frame = make_frame_with_sending_time("FIX.4.2", "0", 2, "TW", "ISLD", "abc");
     f.feed(sess, frame);
 
-    assert_reject_then_logout_then_disconnected(f.transport, before, sess,
+    assert_reject_then_logout_then_disconnected(f, before, sess,
                                                 "MalformedSendingTimeInActiveRejects");
 }
 
@@ -674,6 +699,7 @@ TEST(SendingTimeIntegration, MissingSendingTimeInLogonReceivedRejects) {
     auto cfg = f.make_cfg("FIX.4.2");
     cfg.role = fixpp::session::session_role::acceptor;
     Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
 
     // open() as acceptor → NotConnected (stays).
     auto fut_open = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
@@ -706,7 +732,7 @@ TEST(SendingTimeIntegration, MissingSendingTimeInLogonReceivedRejects) {
     auto frame = make_frame_missing_sending_time("FIX.4.2", "0", 2, "TW", "ISLD");
     f.feed(sess, frame);
 
-    assert_reject_then_logout_then_disconnected(f.transport, before, sess,
+    assert_reject_then_logout_then_disconnected(f, before, sess,
                                                 "MissingSendingTimeInLogonReceivedRejects");
 }
 
@@ -750,6 +776,7 @@ TEST(SendingTimeIntegration, MissingSendingTimeOnLogonEmitsLogoutOnly) {
     SendingTimeFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
 
     // open() as initiator → LogonSent.
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
@@ -807,6 +834,7 @@ TEST(SendingTimeIntegration, MalformedSendingTimeOnLogonEmitsLogoutOnly) {
     SendingTimeFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
 
     // open() as initiator → LogonSent.
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
@@ -909,6 +937,7 @@ TEST(SendingTimeIntegration, Year4048SendingTimeOnLogonAckIsMalformed) {
     SendingTimeFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
 
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
@@ -937,6 +966,7 @@ TEST(SendingTimeIntegration, Year4048SendingTimeInActiveRejects) {
     SendingTimeFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_to_active(sess);
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
@@ -944,7 +974,7 @@ TEST(SendingTimeIntegration, Year4048SendingTimeInActiveRejects) {
     auto frame = make_frame_with_sending_time("FIX.4.2", "0", 2, "TW", "ISLD", kYear4048);
     f.feed(sess, frame);
 
-    assert_reject_then_logout_then_disconnected(f.transport, before, sess,
+    assert_reject_then_logout_then_disconnected(f, before, sess,
                                                 "Year4048SendingTimeInActiveRejects");
 }
 

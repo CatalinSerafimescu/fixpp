@@ -27,6 +27,9 @@ namespace {
 // dictionary (re-derive with the field-definition grep, `<field number=…>` per
 // dictionaries/*.xml and `<fixr:field id=…>` in the Orchestra file), so each is an undefined tag,
 // 373=0.
+// 105-transport-liveness (R-2, contract C-2) supersedes `Disc` on the AC-g rows whose
+// SendingTime Reject draws a Logout: `wait`, the session Active through the wait and ended at
+// its bound (test_099_fixt_support.hpp's short_form).
 const KeyedRow kActiveRows[] = {
     {.cell = "AC-a", .input = "rep35 D..0 past", .t = "R 14/35 D 45=2 | stays | c | app=0 adm=0"},
     {.cell = "AC-a", .input = "rep35 D..3 past", .t = "R 14/35 D 45=2 | stays | c | app=0 adm=0"},
@@ -110,19 +113,19 @@ const KeyedRow kActiveRows[] = {
     {.cell = "AC-f",
      .input = "wrongBS Logon 1137 absent",
      .t = "R 1/1137 A 45=2 | stays | k | app=0 adm=0"},
-    {.cell = "AC-g", .input = "stale NOS", .t = "R 10/52 D 45=2 + Logout | Disc | c | app=0 adm=0"},
+    {.cell = "AC-g", .input = "stale NOS", .t = "R 10/52 D 45=2 + Logout | wait | c | app=0 adm=0"},
     {.cell = "AC-g",
      .input = "stale Heartbeat",
-     .t = "R 10/52 0 45=2 + Logout | Disc | c | app=0 adm=0"},
+     .t = "R 10/52 0 45=2 + Logout | wait | c | app=0 adm=0"},
     {.cell = "AC-g",
      .input = "stale Logon 1137=9",
-     .t = "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
+     .t = "R 10/52 A 45=2 + Logout | wait | k | app=0 adm=0"},
     {.cell = "AC-g",
      .input = "stale Logon 1137=4",
-     .t = "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
+     .t = "R 10/52 A 45=2 + Logout | wait | k | app=0 adm=0"},
     {.cell = "AC-g",
      .input = "stale Logon 1137=99",
-     .t = "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0",
+     .t = "R 10/52 A 45=2 + Logout | wait | k | app=0 adm=0",
      .a = nullptr,
      .l = "R 5/1137 A 45=2 | stays | k | app=0 adm=0"},
     {.cell = "AC-g",

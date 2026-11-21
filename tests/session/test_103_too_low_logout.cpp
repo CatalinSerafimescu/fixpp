@@ -85,7 +85,7 @@ using fixpp::test_support::t103::TooLowApp;
 // What a too-low frame drew: B-1's assertions, for a frame at `m`, from `mark` (sent) and
 // `log_mark` (the store log), with `events_before` application events and `delivered_before`
 // fromApp calls before it.
-void expect_too_low_logout(rg::Scene const& s, TooLowApp const& app, std::size_t mark,
+void expect_too_low_logout(rg::Scene& s, TooLowApp const& app, std::size_t mark,
                            std::size_t log_mark, std::size_t events_before,
                            std::size_t delivered_before, seqnum_t m,
                            fixpp::core::expected_t<void> const& r) {
@@ -94,7 +94,9 @@ void expect_too_low_logout(rg::Scene const& s, TooLowApp const& app, std::size_t
     auto const logouts = s.of_type("5", mark);
     ASSERT_EQ(logouts.size(), 1U) << "the session wrote " << s.written(mark);
     EXPECT_EQ(rg::field(logouts.front(), 58), too_low_text(kN, m));
-    EXPECT_EQ(s.state(), fsm_state::Disconnected) << rg::state_name(s.state());
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // session stays Active through the wait and ends at its bound, onLogout then.
+    fixpp::test_support::expect_r2_wait(s.read_r2_wait(), "the too-low Logout");
     EXPECT_EQ(s.next_in(), kN) << "NextNumIn moved";
     if (s.log) {
         EXPECT_EQ(s.log->first_after(log_mark, is_inbound_persist), nullptr)
@@ -212,7 +214,8 @@ TEST_P(TooLowLogout103, B3_GapPastTheDeadlineThenATooLowFrame_OneLogoutWithTheDe
     ASSERT_EQ(logouts.size(), 1U) << "the session wrote " << s.written(mark);
     EXPECT_EQ(rg::field(logouts.front(), 58),
               "ResendRequest unanswered, expecting MsgSeqNum " + std::to_string(kN));
-    EXPECT_EQ(s.state(), fsm_state::Disconnected) << rg::state_name(s.state());
+    // 105 (R-2, contract C-2): the gap deadline's Logout, then the wait to its bound.
+    fixpp::test_support::expect_r2_wait(s.read_r2_wait(), "the gap deadline's Logout");
 }
 
 // ── B-4 (T139): toAdmin throws on the Logout ─────────────────────────────────────────────
@@ -322,7 +325,9 @@ TEST(TooLowLogoutLongCompIds103, B5_LogoutDoesNotFit_NoLogoutDisconnected_NearMi
     auto const logouts = near_miss.s.of_type("5", mark);
     ASSERT_EQ(logouts.size(), 1U) << "the near miss wrote " << near_miss.s.written(mark);
     EXPECT_EQ(rg::field(logouts.front(), 58), too_low_text(kN, 2));
-    EXPECT_EQ(near_miss.s.state(), fsm_state::Disconnected);
+    // 105 (R-2, contract C-2): the near miss's Logout is transmitted, so its wait runs to the
+    // bound; the Logout that does not fit arms none (above).
+    fixpp::test_support::expect_r2_wait(near_miss.s.read_r2_wait(), "the near miss");
 }
 
 // ── B-6 (T141): a frame at 34=N with the seqnum lock drained ────────────────────────────
