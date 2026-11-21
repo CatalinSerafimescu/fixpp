@@ -1222,14 +1222,13 @@ TEST(ReplayGate588, R588c_HeartbeatDuringTheAnswer_WrittenAfterItNextNumber) {
     }
 }
 
-// 105-transport-liveness (clarification D-c; data-model E-4; spec clarification "Session
-// 2026-11-21 (implementation, Phase 6)", which drops E-4's earlier "no inbound frame since it"
-// term on the give-up): the give-up is eligible whenever a TestRequest is pending, strictly after
-// two thresholds of inbound silence counted from the last frame, as QuickFIX C++'s
-// SessionState::timedOut. A frame after the TestRequest (the request that starts the held walk)
-// moves the give-up to two thresholds after it; held behind the walk past that instant, the loop
-// gives up after the release without writing a second TestRequest, and its Logout names the
-// pending one.
+// 105-transport-liveness (clarification D-c; data-model E-4; spec.md's Phase 6 implementation
+// clarification, which drops E-4's earlier "no inbound frame since it" term on the give-up): the
+// give-up is eligible whenever a TestRequest is pending, strictly after two thresholds of inbound
+// silence counted from the last frame, as QuickFIX C++'s SessionState::timedOut. A frame after the
+// TestRequest (the request that starts the held walk) moves the give-up to two thresholds after it;
+// held behind the walk past that instant, the loop gives up after the release without writing a
+// second TestRequest, and its Logout names the pending one.
 TEST(ReplayGate588, R588g_FrameAfterTheTestRequest_HeldPastTwoThresholds_GivesUpNamingThePending) {
     HeldWalk w{DirectAcceptor::Options{
         .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
