@@ -953,7 +953,8 @@ inbound silence, one sleep per iteration, T validated.
   `milliseconds::max()`) in a `detail` header beside `deadline_after` (`read_first_frame_bounded.hpp` or its sibling);
   the TestRequest instant `deadline_after(last_inbound_steady_, T)`; the give-up instant three saturating steps (T, T, then
   `std::chrono::nanoseconds{1}`); `tr_sent_at`; the eligibility rules (Heartbeat eligible with no TestRequest pending or an
-  inbound frame since it; give-up eligible with one pending and none since); **one sleep per iteration** to the earliest
+  inbound frame since it; give-up eligible with one pending and none since [superseded by spec clarification "Session 2026-11-21
+  (implementation, Phase 6)": eligible with one pending]); **one sleep per iteration** to the earliest
   instant of the sleep set (the Heartbeat instant when eligible or not yet reached, the TestRequest and give-up instants when
   eligible), the Heartbeat instant reached while ineligible dropped (the spin trap); on waking act on every eligible
   instant reached (give-up, else TestRequest, else Heartbeat); D-536-2's state test and filter reset before every sleep;
@@ -967,12 +968,15 @@ inbound silence, one sleep per iteration, T validated.
   `LivenessTiming105.<DefaultThresholdHelper_Saturates|GuardAtTheSaturatedInstant>` in `tests/session/test_105_seams.cpp`: `constexpr` cells (`static_assert` under
   `FIXPP_105_STATIC_GUARDS`, with runtime twins; Execution rules, "Guard static_asserts") of the default-threshold helper and of the 1 ns guard at `steady_time_point::max()`. Not readable on `$B` (new helper).
   Done: `1f1bfff0` (`tests/session/test_105_seams.cpp`, namespace `ltg`).
-- [ ] T098 [US3] FR-012 surfaces and comments: `SessionConfig::test_request_threshold`'s comment in
+- [X] T098 [US3] FR-012 surfaces and comments: `SessionConfig::test_request_threshold`'s comment in
   `include/fixpp/session/session_config.hpp`; `run_liveness_loop`'s algorithm block (its "1 × HeartBtInt" steps) and its
   declaration comment in `session.hpp` ("after heartbt_int of no inbound data", "grace window (1×heartbt_int)"); the comment
   above `detail::resend_gap_deadline` in `src/session/read_first_frame_bounded.hpp` ("off only at exactly 0"); the QuickFIX
   parity-table row in `tests/config/test_quickfix_parity_table.cpp` and its TOML documentation; each states the new rule.
-  Partial (`1f1bfff0`): the session_config.hpp, session.hpp, run_liveness_loop and resend_gap_deadline comments state the rule. Not done, escalated: `tests/config/test_quickfix_parity_table.cpp` has no `test_request_threshold` row (it lists the key in `kLoaderAccepted044Keys` only) and no TOML documentation page names the key (`git grep -n test_request_threshold -- ":!specs" ":!tests/session" ":!src" ":!include"`).
+  Done: `1f1bfff0` (the session_config.hpp, session.hpp, run_liveness_loop and resend_gap_deadline comments) and
+  `a60083ad` (orchestrator ruling, Phase 6: the parity table's `test_request_threshold` row, keyed on the QuickFIX
+  key HeartBtInt, since QuickFIX C++'s SessionSettings.h has no key of its own for the TestRequest timing). No TOML
+  documentation page names any session key; none exists, so none is updated (recipe: evidence file, Phase 6, T098).
 - [X] T099 [US3] Re-pin the moved timings (FR-019): `tests/session/test_heartbeat_cadence_8cell.cpp`'s T018 cells (that
   file's own task, not this bundle's T018) `HeartbeatCadence8Cell.CellB_*` and `CellC_*_UnansweredTestRequestDisconnects`
   (a Cell B that discriminates 1 × from 1.2 ×), `HbTrTest.UnansweredTestRequestDisconnects` in `tests/session/heartbeat_testrequest_test.cpp` where it crosses HeartBtInt, `ci/red-arms/batch18-lost-advance.sh` (the cell it names), every cell of T011's list, and any
@@ -983,8 +987,10 @@ inbound silence, one sleep per iteration, T validated.
 
 ### Mutant arms for US3 (in `$M` at `H4`)
 
-- [ ] T101 [US3] The default threshold set back to H (the timing cells RED); the give-up's eligibility ignoring inbound since
-  the TestRequest (`TrafficAfterTestRequestNoHeartbeat_*` RED); the Heartbeat's eligibility ignoring inbound since the
+- [X] T101 [US3] The default threshold set back to H (the timing cells RED); the give-up's eligibility ignoring inbound since
+  the TestRequest (`TrafficAfterTestRequestNoHeartbeat_*` RED) [superseded by spec clarification "Session 2026-11-21
+  (implementation, Phase 6)": that edit is now the design; its reverse, the term restored, is the mutant, RED by
+  `ReplayGate588.R588g_*`]; the Heartbeat's eligibility ignoring inbound since the
   TestRequest (`FrameAfterTestRequest_HeartbeatAt22s_*` RED); the passed, ineligible Heartbeat instant kept in the sleep set
   (`SilentAfterTestRequest_NoSpin` RED, terminating under the bounded drive); the HeartBtInt test reverted to `== 0`
   (`HeartBtIntNegative_NoTestRequest` RED); the loop's HeartBtInt test deleted (`HeartBtIntZero_NoTestRequest` RED); the
@@ -992,7 +998,11 @@ inbound silence, one sleep per iteration, T validated.
   added at `Session::open()` (`ThresholdAboveGapDeadline_Accepted` RED); each 112 site's plain comparison restored at `H4`
   (`SecondTestRequest_LateAnswerToTheFirst_StaysActive` RED); T097's two mutants (built per Execution rules, "Guard
   static_asserts"). Record the mutant table; every quickstart section 5 row for this story is RED, or stop.
-  Partial: evidence file, Phase 6, "T101 mutant table". RED: Mdef, Mcfg (the threshold-pinned cells), MhbElig, Mspin (by `SilentAfterTestRequest_NoSpin` filtered; the unfiltered binary hangs in a Scene cell), MhbDel (by `HeartBtIntZero_NoTestRequest` filtered), MupperT, M112, MguardHand. Not RED as named, escalated: MgiveElig (an equivalent survivor in `TrafficAfterTestRequestNoHeartbeat_*`; RED by the new `ReplayGate588.R588g_*`), MeqZero (aborts at `deadline_after`'s assert), MleadDel (equivalent survivor: `from_chars` refuses the same token), Munsat (rejected at compile time by `-Werror,-Winteger-overflow`).
+  Done: evidence file, Phase 6, "T101 mutant table" and "Phase 6 close (orchestrator rulings)". RED: Mdef, Mcfg,
+  MhbElig, Mspin, MhbDel, MupperT, M112, MguardHand, MgiveEligBack (the dropped term restored, `R588g_*`), MhbGate
+  (R588c's Heartbeat sibling). Dispositions by ruling: MeqZero aborts at `deadline_after`'s assert, a loud RED for a
+  debug-asserted precondition; MleadDel an equivalent survivor (`from_chars` refuses the same token); Munsat refused
+  at compile time (`-Werror,-Winteger-overflow`), no runtime reading owed.
 
 **Checkpoint**: US3 complete.
 
