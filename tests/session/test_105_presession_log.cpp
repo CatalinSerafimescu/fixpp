@@ -4,5 +4,5 @@
 //
 // Pre-session rejects and the listener records (research D8).
 //
-// Created by T003 as a translation unit with no cells, so that the ctest entry configures
-// before its cells exist; each cell task of tasks.md appends its cells here.
+// The ctest entry registers this file whether or not it holds cells yet, so it compiles on its
+// own, on the base as at the head; each cell task of tasks.md appends its cells here.
