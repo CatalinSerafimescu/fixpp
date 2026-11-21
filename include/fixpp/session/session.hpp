@@ -776,9 +776,11 @@ private:
     // site). Its callers: `git grep -n 'refuse_logon_with_logout_(' -- src`.
     // [FR-002; D-F]
     // arm: the calling Logon arm's expected state (093 plan OD-26), passed to the
-    // Logout's store_then_emit and to the Disconnected write after it.
+    // Logout's store_then_emit and to the Disconnected write after it. arms_wait: whether a
+    // transmitted Logout arms the R-2 wait (105, data-model E-3); false for a refusal whose arm
+    // returns an error, which closes the connection at once.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> refuse_logon_with_logout_(
-        std::string_view reason_text, fsm_state arm) noexcept;
+        std::string_view reason_text, fsm_state arm, bool arms_wait = true) noexcept;
     // 104 (research D5; the T093 record in the 104 evidence file): a Logon arm's too-low Logout,
     // its text written from NextNumIn, read at the body's start, and `received` (the frame's
     // MsgSeqNum). The text buffer lives in this callee's frame, so a cold branch does not grow

@@ -2697,20 +2697,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
         // cannot quiesce — so the worst case is the old behaviour.
         (void)co_await live->close_async();
     }
-    // 105 (research D2 item 9; data-model E-2 I-4): the ending Logout's bound, joined after the
-    // transport's close, then the close frame's counter again, which collects a frame the bound
-    // spawned after the first join.
-    {
-        auto const ebc = ending_logout_bound_counter_;
-        while (ebc->load(std::memory_order_acquire) > 0) {
-            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
-        }
-        auto const cc = connection_close_counter_;
-        while (cc->load(std::memory_order_acquire) > 0) {
-            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
-        }
-    }
-
     // T045: clear the session_local<trace_context> slot at close completion
     // (FR-014). Reached in BOTH graceful and terminal once the two phases
     // resolve; the slot stays valid until here (seam 17: never read through
@@ -2765,6 +2751,21 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
                 emit_event(session_event_close_reset_wait_expired{});
                 break;
             }
+            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+        }
+    }
+    // 105 (research D2 item 9; data-model E-2 I-4): the ending Logout's bound, joined after the
+    // transport's close, then the close frame's counter again, which collects a frame the bound
+    // spawned after the first join. It sits after 104's wait, whose bound is read at that wait's
+    // start: a bound whose Logout is held in a store call runs on to its own deadline, so a join
+    // before 104's wait would start that wait's bound late.
+    {
+        auto const ebc = ending_logout_bound_counter_;
+        while (ebc->load(std::memory_order_acquire) > 0) {
+            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+        }
+        auto const cc = connection_close_counter_;
+        while (cc->load(std::memory_order_acquire) > 0) {
             co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
         }
     }
@@ -3339,7 +3340,7 @@ static_assert(kTooLowPhrase1.size() + kTooLowPhrase2.size() +
 // at session.cpp (SendingTime-accuracy path). Defined after the file-local
 // stamp_sending_time helper so it is in scope. [FR-002; data-model D-F]
 asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout_(
-    std::string_view reason_text, fsm_state arm) noexcept {
+    std::string_view reason_text, fsm_state arm, bool arms_wait) noexcept {
     std::array<std::byte, 256> lo_buf{};
     const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
     // gate-b/r2 FQ-5: guard the clock deref — a clock-less direct-Session posture
@@ -3385,7 +3386,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout
         // What store_then_emit returns and when it throws: its declaration in session.hpp.
         (void)emit_r;
     }
-    (void)leave_ending_write_(transmitted, false);
+    // arms_wait false: the Logout is limited, and no wait follows it (the strict-reset refusal).
+    (void)leave_ending_write_(transmitted && arms_wait, false);
     // 093 plan OD-26: the Logout's store and write are suspensions.
     disconnect_unless_superseded_(arm);
     co_return fixpp::core::expected_t<void>{};
@@ -4774,8 +4776,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         if (!peer_sent_reset &&
             cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) {
             static constexpr std::string_view kStrictResetText = "ResetSeqNumFlag(141)=Y required";
-            auto refused =
-                co_await refuse_logon_with_logout_(kStrictResetText, fsm_state::NotConnected);
+            // 105 (clarification "Session 2026-11-21 (implementation, Phase 4)"): exempt from
+            // the R-2 wait. The arm's error closes the connection at once (data-model E-3 row
+            // 5b), so its Logout arms no wait.
+            auto refused = co_await refuse_logon_with_logout_(
+                kStrictResetText, fsm_state::NotConnected, /*arms_wait=*/false);
             if (!refused) {
                 co_return refused;
             }
@@ -6213,8 +6218,10 @@ bool Session::ending_bound_live_(std::uint32_t gen) const noexcept {
 // E-3, "The bound's exits", the expiry exit (rows 4, 10, 11, 14).
 void Session::expire_ending_wait_(std::uint32_t gen) noexcept {
     if (ending_wait_.phase == ending_wait_state::phase_t::writing) {
-        // Row 4: the write limit. The leaf clears the phase when its write returns.
+        // Row 4: the write limit. The leaf clears the phase when its write returns. A give-up
+        // waiting for the replay gate (T059a) re-tests at this wake and finds the cut.
         ending_wait_.cut = true;
+        replay_gate_.wake_all();
         if (conn_gen_ == gen) {
             spawn_connection_close_();
         }
@@ -8598,28 +8605,41 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                         co_return;
                     }
                 }
+                // The Text, in a buffer sized for its longest content: the prefix, then a
+                // TestReqID of "TR" and the ten digits of the largest std::uint32_t. Built at the
+                // decision, from the TestRequest the give-up names: the give-up is final, so a
+                // Heartbeat that answers it during the gate wait does not change the Text
+                // (clarification "Session 2026-11-21 (implementation, Phase 4)").
+                constexpr std::string_view kPrefix = "TestRequest unanswered, TestReqID ";
+                using text_buffer = std::array<char, 48>;
+                static_assert(std::tuple_size_v<text_buffer> >= kPrefix.size() + 2 + 10,
+                              "the give-up Text's buffer holds its longest content");
+                text_buffer text_buf{};
+                char* out = std::ranges::copy(kPrefix, text_buf.data()).out;
+                std::size_t const id_bytes =
+                    (std::min)(pending_test_req_id_.size(), text_buf.size() - kPrefix.size());
+                out = std::copy_n(pending_test_req_id_.data(), id_bytes, out);
+                std::string_view const text{text_buf.data(),
+                                            static_cast<std::size_t>(out - text_buf.data())};
                 while (replay_gate_.exclusive) {
                     co_await replay_gate_.wait_for_wake();
                     if (fsm_state_ != fsm_state::Active || ending_wait_.cut) {
                         break;
                     }
                 }
+                // A give-up the write limit cut, or whose session another root ended, while
+                // the walk still holds the gate: no shared hold and no Logout ("Logout not
+                // sent"), then Disconnected.
+                if (replay_gate_.exclusive) {
+                    if (owner_claimed) {
+                        (void)leave_ending_write_(false, false);
+                    }
+                    record_disconnected_unless_already_();
+                    co_return;
+                }
                 {
                     const detail::replay_gate::shared_hold lo_hold{replay_gate_};
                     claim_peer_logout_none_();
-                    // The Text, in a buffer sized for its longest content: the prefix, then a
-                    // TestReqID of "TR" and the ten digits of the largest std::uint32_t.
-                    constexpr std::string_view kPrefix = "TestRequest unanswered, TestReqID ";
-                    using text_buffer = std::array<char, 48>;
-                    static_assert(std::tuple_size_v<text_buffer> >= kPrefix.size() + 2 + 10,
-                                  "the give-up Text's buffer holds its longest content");
-                    text_buffer text_buf{};
-                    char* out = std::ranges::copy(kPrefix, text_buf.data()).out;
-                    std::size_t const id_bytes =
-                        (std::min)(pending_test_req_id_.size(), text_buf.size() - kPrefix.size());
-                    out = std::copy_n(pending_test_req_id_.data(), id_bytes, out);
-                    std::string_view const text{text_buf.data(),
-                                                static_cast<std::size_t>(out - text_buf.data())};
                     const auto st52 =
                         stamp_sending_time(*effective_clock_, cfg_.sending_time_precision);
                     // What the leaf writes or refuses is its own; the ending is recorded
