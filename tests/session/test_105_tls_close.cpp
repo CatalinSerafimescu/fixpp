@@ -485,10 +485,13 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
         "35=D\x01"
         "58=" +
         std::string(3000, 'x') + "\x01";
+    // Engine::send takes the SessionId by reference and runs after this full expression,
+    // so the id lives in a local that outlives every spawned send.
+    auto const acceptor_sid = h->acceptor_id();
     for (int i = 0; up && i < 4000 && !held; ++i) {
         sends.push_back(asio::co_spawn(
             ioc,
-            h->engine().send(h->acceptor_id(),
+            h->engine().send(acceptor_sid,
                              std::as_bytes(std::span{payload.data(), payload.size()})),
             asio::use_future));
         (void)fixpp::test_support::pump_until(
