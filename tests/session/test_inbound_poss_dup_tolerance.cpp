@@ -2,6 +2,12 @@
 //
 // tests/session/test_inbound_poss_dup_tolerance.cpp
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp.
+//
 // 021-inbound-possdup-origsendingtime T004 — Stage-2 Arm-A/Arm-B unit tests.
 //
 // Tests the too-low inbound possdup tolerance block (data-model.md §1 Stage 2,
@@ -27,7 +33,9 @@
 
 #include <gtest/gtest.h>
 
+#include "support/close_before_destroy.hpp"
 #include "support/possdup_test_support.hpp"
+#include "support/r2_wait_reading.hpp"
 #include "support/session_test_access.hpp"
 
 namespace fixpp::session::test {
@@ -43,6 +51,7 @@ class PossDupToleranceTest : public PossDupTestBase {};
 TEST_F(PossDupToleranceTest, ArmA_Admin_Ignored) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
 
     // Next expected = 2 after Logon.
@@ -83,6 +92,7 @@ TEST_F(PossDupToleranceTest, ArmA_App_Dropped) {
 
     auto cfg = make_cfg(/*redeliver=*/false);
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
 
     // Feed too-low app frame (35=D, seq=1) with 43=Y.
@@ -114,6 +124,7 @@ TEST_F(PossDupToleranceTest, ArmA_App_Redelivered) {
 
     auto cfg = make_cfg(/*redeliver=*/true);
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
 
     // Feed too-low app frame (35=D, seq=1) with 43=Y.
@@ -143,6 +154,7 @@ TEST_F(PossDupToleranceTest, ArmA_App_Redelivered) {
 TEST_F(PossDupToleranceTest, ArmA_Admin_Idempotent) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
 
     auto frame = make_possdup_frame("3", /*seq=*/1, "TW", "ISLD", /*poss_dup=*/true,
@@ -177,6 +189,7 @@ TEST_F(PossDupToleranceTest, ArmA_Admin_Idempotent) {
 TEST_F(PossDupToleranceTest, ArmB_TooLow_LogoutWithTextThenDisconnected) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
 
     // Too-low Reject (35=3, seq=1) without 43=Y — Arm B fatal path.
@@ -185,9 +198,18 @@ TEST_F(PossDupToleranceTest, ArmB_TooLow_LogoutWithTextThenDisconnected) {
                             "373=0\x01");
     feed(sess, frame);
 
-    // Session must transition to Disconnected.
-    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
-        << "Arm B: too-low non-possdup frame must transition to Disconnected";
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // session stays Active through the wait and ends at its bound.
+    fixpp::test_support::expect_r2_wait(
+        fixpp::test_support::read_r2_wait(
+            sess, *clock, std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            [this] {
+                for (int i = 0; i < 16; ++i) {
+                    ioc.restart();
+                    ioc.poll();
+                }
+            }),
+        "Arm B: too-low non-possdup frame");
 
     // FR-018: one Logout, with the text.
     std::vector<std::string> logout_texts;
@@ -219,6 +241,7 @@ TEST_F(PossDupToleranceTest, ArmB_TooLow_LogoutWithTextThenDisconnected) {
 TEST_F(PossDupToleranceTest, ArmA_Admin_NoSideEffects) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
 
     // Feed a too-low admin possdup frame. This is the Arm A admin-ignore path.
