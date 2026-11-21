@@ -345,8 +345,8 @@ and no local API call (SC-001).
   releases the flush only after the peer's Logout has been processed. Oracle: no 35=5 written by fixpp; the numbers reset as 104's reset point resets them (the store reads (1, 1)
   once the unit has run); the connection closed by the running `close()`, one close, `onLogout` once. GREEN on the base by
   design.
-  Done: `PeerLogoutInActive_EofAfterReplyAndReset`, `TooHighLogoutAcknowledged_<Bound|AtOnce>_EofAfterReset` (both roles) and the guard `ConnectionClose105Acceptor.PeerLogoutInLogonReceivedDuringClose_NoReplyLogout_ResetFollows104`. Escalated: that guard asserts `onLogout` 0, not once: the session never was Active, so no Active→!Active edge fires it (evidence, section T025).
-- [X] T020 [US1] Same file, the detached roots and application calls (C-1 rows 8, 9, 10; C-1.c), both roles where the
+  Done: `PeerLogoutInActive_EofAfterReplyAndReset`, `TooHighLogoutAcknowledged_<Bound|AtOnce>_EofAfterReset` (both roles) and the guard `ConnectionClose105Acceptor.PeerLogoutInLogonReceivedDuringClose_NoReplyLogout_ResetFollows104`. Escalated (a bundle-premise question, not settled): that guard asserts `onLogout` 0, not once: the session never was Active, so no Active→!Active edge fires it (evidence, section T025).
+- [ ] T020 [US1] Same file, the detached roots and application calls (C-1 rows 8, 9, 10; C-1.c), both roles where the
   root exists: `Liveness<ToAdminThrows|AssignFails|StoreFails>_EofAtOnce` (on a Heartbeat or TestRequest emission, with
   `test_request_threshold = HeartBtInt`, driven by the wire reader), `SendStoreFailure_EofAfterSendReturns`,
   `DirectInitiatorLogonEmitFails_<Open|DriveReconnect>_EofAfterTheCallReturns` and
@@ -357,8 +357,8 @@ and no local API call (SC-001).
   terminal and no second connect attempt; spec Assumptions; the ending is `toAdmin` throwing on the Heartbeat emission, as
   in `LivenessToAdminThrows_EofAtOnce`). Each asserts peer EOF with the clock frozen once the root has
   exited. RED on the base before the fix: no EOF (the reconnect cell in its EOF half; the connect-loop cell's transport held).
-  Done: `Liveness<ToAdminThrows|AssignFails|StoreFails>_EofAtOnce`, `SendStoreFailure_EofAfterSendReturns` (both roles), `ConnectionClose105Direct.DirectInitiatorLogonEmitFails_DriveReconnect_EofAfterTheCallReturns`, `ConnectionClose105Direct.DirectInitiator_EndingThenDriveReconnect_Reconnects`, `ConnectionClose105Engine.EngineInitiator_EndingOnConnectLoop_NoHeldTransport_CycleEnds`. Not written (escalated): `DirectInitiatorLogonEmitFails_Open_*` (a direct initiator's `open()` writes its Logon over `transport_send_` with no live transport, so there is no connection to close).
-- [X] T021 [US1] Same file, before Active and the acceptor's first frame (C-4, FR-006, FR-007), both roles where the
+  Open (escalated; the cells below are written and read): `Liveness<ToAdminThrows|AssignFails|StoreFails>_EofAtOnce`, `SendStoreFailure_EofAfterSendReturns` (both roles), `ConnectionClose105Direct.DirectInitiatorLogonEmitFails_DriveReconnect_EofAfterTheCallReturns`, `ConnectionClose105Direct.DirectInitiator_EndingThenDriveReconnect_Reconnects`, `ConnectionClose105Engine.EngineInitiator_EndingOnConnectLoop_NoHeldTransport_CycleEnds`. Not written (escalated): `DirectInitiatorLogonEmitFails_Open_*` (a direct initiator's `open()` writes its Logon over `transport_send_` with no live transport, so there is no connection to close).
+- [ ] T021 [US1] Same file, before Active and the acceptor's first frame (C-4, FR-006, FR-007), both roles where the
   refusal exists for the role: `PreActiveRefusal_<D-1|D-2|D-3|NotConnected|LogonSent|IdGuard|SeqNum0>_EofBeforeDeadlineNoTimeoutEvent`
   (a short `logon_timeout_ms`, clock frozen: EOF, no `session_event_establishment_timeout`, no
   `session not established within logon_timeout_ms={}` record), `AcceptorFirstFrameError_EofAtOnce`,
@@ -366,13 +366,13 @@ and no local API call (SC-001).
   TLS handshake and first-frame deadlines set above the cap and named in each cell. RED on the base before the fix:
   closed only at the deadline, with the event (the first frame's result discarded). Plus
   [guard: `expire()` closes without its event] `SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent` (C-4.3, B-093-4).
-  Done: `PreActive105.PreActiveRefusal_<D1D2_FaultyLogon|NotConnectedOrLogonSent_NotALogon|SeqNum0>_EofBeforeDeadlineNoTimeoutEvent` (both roles; D-1 is the acceptor's, D-2 the initiator's), `PreActive105Initiator.PreActiveRefusal_IdGuard_*`, `AcceptorFirstFrame105.<AcceptorFirstFrameError_EofAtOnce|AcceptorFirstFrameRefused_EofAtOnceNoTimeoutEvent|AcceptorFirstFrameAcceptedLaterFrameRefused_EofAtOnce>`, and the guard `PreActive105.SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent` (both roles). Not written (escalated): `PreActiveRefusal_D-3` (D-3's only pre-Active state is LogonReceived, which no frame the Engine pump delivers meets).
-- [X] T022 [US1] Same file, one close per ending (C-1.a, class X): `OnLogoutCallsClose_OneClose` and
+  Open (escalated; the cells below are written and read): `PreActive105.PreActiveRefusal_<D1D2_FaultyLogon|NotConnectedOrLogonSent_NotALogon|SeqNum0>_EofBeforeDeadlineNoTimeoutEvent` (both roles; D-1 is the acceptor's, D-2 the initiator's), `PreActive105Initiator.PreActiveRefusal_IdGuard_*`, `AcceptorFirstFrame105.<AcceptorFirstFrameError_EofAtOnce|AcceptorFirstFrameRefused_EofAtOnceNoTimeoutEvent|AcceptorFirstFrameAcceptedLaterFrameRefused_EofAtOnce>`, and the guard `PreActive105.SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent` (both roles). Not written (escalated): `PreActiveRefusal_D-3` (D-3's only pre-Active state is LogonReceived, which no frame the Engine pump delivers meets).
+- [ ] T022 [US1] Same file, one close per ending (C-1.a, class X): `OnLogoutCallsClose_OneClose` and
   `EngineStopRacesEndingClose_OneClose` (both on the TSan lane in T137; each asserts one EOF, no use after close, and the
   close at once), RED on the base before the fix in their EOF-timing half; [guard: the latch's `lifecycle` term
   deleted] `InsideClose_NoSecondClose`; [guard: the drain flag deleted] `InsideReconnectDrain_DrainKeepsItsBound`
   (B-103-9's bound).
-  Done: `OnLogoutCallsClose_OneClose`, `EngineStopRacesEndingClose_OneClose`, the guard `InsideClose_NoSecondClose` (both roles) and the guard `ConnectionClose105Direct.InsideReconnectDrain_DrainKeepsItsBound`. Escalated: the first two read GREEN on the base (the `close()` and `Engine::stop()` they start close the transport themselves); evidence, section T025.
+  Open (escalated, the Execution rules' "a cell expected RED that reads GREEN on the base stops its task"): `OnLogoutCallsClose_OneClose`, `EngineStopRacesEndingClose_OneClose`, the guard `InsideClose_NoSecondClose` (both roles) and the guard `ConnectionClose105Direct.InsideReconnectDrain_DrainKeepsItsBound`. Escalated: the first two read GREEN on the base (the `close()` and `Engine::stop()` they start close the transport themselves); evidence, section T025.
 - [X] T023 [P] [US1] `tests/session/test_105_liveness_timing.cpp`, R-1 (C-3), both roles, `test_request_threshold =
   HeartBtInt`, driven past the give-up by the wire reader: `GiveUp_LogoutTextPinned_ThenEof` (exactly one 35=5 whose 58 is
   `TestRequest unanswered, TestReqID <id>` spelled out in the cell, `<id>` the 112 of the TestRequest read, then EOF with
@@ -382,14 +382,14 @@ and no local API call (SC-001).
   (C-3.2: each asserts the record, the wire — no complete Logout, except `StoreFailsVolatile`, whose Logout is on the wire
   — and EOF). RED on the base before the fix: no Logout, no record, no EOF.
   Done: `LivenessTiming105.GiveUp_<LogoutTextPinned_ThenEof|OneLogRecordWithSlot74|ToAdminThrows|AssignFails|StoreFailsPersistent|StoreFailsVolatile|LogoutDoesNotFit>_*` (both roles) and `LivenessTiming105Direct.GiveUp_WriteFails_StillEof` (a direct initiator on a mock transport that cuts the Logout's write).
-- [X] T024 [P] [US1] `tests/session/test_105_tls_close.cpp`, the real-TLS orderly close (C-8.1, FR-002). On
+- [ ] T024 [P] [US1] `tests/session/test_105_tls_close.cpp`, the real-TLS orderly close (C-8.1, FR-002). On
   `engine_loopback_harness.hpp`, acceptor role (an Engine session, so the pump consumes the latch; T003):
   `TlsClose105.<PumpSilentEnding|GiveUpWhilePumpParkedInRead|PreActiveSilentRefusal|PeerLogoutReply>_PeerReceivesCloseNotify`
   (the give-up cell is the B-348-1 case: a detached-root ending while the pump is parked in a TLS read). On
   `loopback_tls_session_harness.hpp` (a direct Session, no pump), only classes that close at a root's exit:
   `TlsClose105.DirectSession<GiveUp|SendStoreFailure>_PeerReceivesCloseNotify`. Each: the peer reads the frames the class
   writes, then a close_notify, then EOF; the TLS handshake timeout and `tls_close_timeout` above the cap. RED on the base before the fix: no close_notify and no EOF.
-  Done: `TlsClose105.<PumpSilentEnding|GiveUpWhilePumpParkedInRead|PreActiveSilentRefusal|PeerLogoutReply>_PeerReceivesCloseNotify` on the Engine over TLS. Not written (escalated): `TlsClose105.DirectSession<GiveUp|SendStoreFailure>_*`: on `loopback_tls_session_harness.hpp`'s factory and listener `Session::drive_reconnect()` did not return within 5 s of wall time and 20 s of mock time (the harness's own Session too), so the rig gives no connected direct TLS Session.
+  Open (escalated; the Engine cells are written and read): `TlsClose105.<PumpSilentEnding|GiveUpWhilePumpParkedInRead|PreActiveSilentRefusal|PeerLogoutReply>_PeerReceivesCloseNotify` on the Engine over TLS. Not written (escalated): `TlsClose105.DirectSession<GiveUp|SendStoreFailure>_*`: on `loopback_tls_session_harness.hpp`'s factory and listener `Session::drive_reconnect()` did not return within 5 s of wall time and 20 s of mock time (the harness's own Session too), so the rig gives no connected direct TLS Session; no existing user of that header reaches Active through `Session::drive_reconnect()` (`grep -n 'drive_reconnect()'` over its three users is empty).
 - [X] T025 [US1] Commit the cells (`C1`); read T018 to T024 on `$B` (Execution rules "RED on the base"); record per cell its
   RED reason or guard status, and the test count.
   Done: `C1` = `62b290a4`; evidence file, section T025: 72 tests, 62 RED by an assertion for the stated reason, 10 GREEN (the guards, and the two T022 cells escalated above), 0 skipped.
@@ -434,14 +434,14 @@ and no local API call (SC-001).
   `!session_engine_access::ended(session)`, then `stop_pump()` either way (data-model E-5). Its discriminating cell is
   `PreActive_WaitArmedAtEstablishmentDeadline_ClosedNoEvent` (T049), its mutant T076.
   Done: `expire()` writes the timeout's event and record only when `!ended(session)`.
-- [X] T031 [US1] D3 (R-1) in `src/session/session.cpp`, `src/log/format_registry.cpp` and `session.hpp`: at the give-up,
+- [ ] T031 [US1] D3 (R-1) in `src/session/session.cpp`, `src/log/format_registry.cpp` and `session.hpp`: at the give-up,
   write the slot-74 warn record `session ended: TestRequest unanswered: test_req_id={} threshold_ms={} error={}` (format
   registered) **before** the Logout's write; take the replay-gate shared hold; `claim_peer_logout_none_`; write the Logout
   through `inbound_logout_leaf_` with Text `TestRequest unanswered, TestReqID <id>` built in a bounded stack buffer with a
   `static_assert` on its size; then `record_disconnected_unless_already_()`; the loop's exit runs `release_connection_end_()`.
   Delete `unanswered_tr_`, its writes (`answer_pending_test_request_`, the in-sequence Heartbeat arm of `on_inbound_active_`,
   the loop) and its declaration comment.
-  Done: the record, the replay-gate wait and shared hold, `claim_peer_logout_none_`, the Logout with Text through `inbound_logout_leaf_`, then `record_disconnected_unless_already_`; `unanswered_tr_` deleted. Escalated: while the replay gate is held exclusive at the give-up the loop waits for it (as `run_peer_logout_bound_` does) instead of ending at once; `ReplayGate588.R588f4_ContendedSend_LivenessDisconnects_RefusedNothingWritten` reads that wait (evidence, section T035).
+  Open (escalated, blocking T039's R-1 mutant): implemented as written: the record, the replay-gate wait and shared hold, `claim_peer_logout_none_`, the Logout with Text through `inbound_logout_leaf_`, then `record_disconnected_unless_already_`; `unanswered_tr_` deleted. Escalated: while the replay gate is held exclusive at the give-up the loop waits for it (as `run_peer_logout_bound_` does) instead of ending at once; `ReplayGate588.R588f4_ContendedSend_LivenessDisconnects_RefusedNothingWritten` reads that wait (evidence, section T035). The bundle states no rule for the give-up while a resend answer holds the gate exclusive, and Phase 4's write limit does not bound that wait: a peer that stopped reading behind a resend answer is never given up.
 - [X] T032 [US1] Comments naming the new rule (issue #310, FR-018), part A: `record_state_transition_` ("105 D1: the edge
   sets the connection-end latch; its consumers …"), `run_read_pump`'s disposition list, `dispose_unparseable_` (092's "D-1
   and D-2 are a state transition, not a close" and its D-3 twin rewritten to name 105 FR-007), the "(Phase 6 US4 wires the
@@ -457,7 +457,7 @@ and no local API call (SC-001).
   `ResendAnswerStoreFailureEngine.Acceptor789Path_SlotReadFails_ConnectionStaysOpenUntilTheEstablishmentDeadline` in
   `tests/session/test_538_resend_answer_store_failure_engine.cpp`; `Capi537Witness.Deadline_CompIdsLeaveNoRoomForTheLogout_EndsSilently`
   ("ends silently and closes at once") in `tests/capi/recovery_liveness_capi_witness_test.cpp`. Run each entry.
-  Done: `WithinCapMismatchInActive_DisconnectsWithoutALogout` flipped; `EstablishmentTimeoutQ16.AcceptorAfterRefusedLogon_<GarbageOnlyPeer|SilentPeer>_ClosedAtOnceNoTimeout` (renamed); `ResendAnswerStoreFailureEngine.Acceptor789Path_SlotReadFails_ConnectionClosesAtOnce` (renamed); `Capi537Witness.Deadline_CompIdsLeaveNoRoomForTheLogout_EndsSilentlyAndClosesAtOnce` (renamed); the #534 comments of `SecondFrameInFlight.*` and `ReconcileAfterTheTakeBack.*` rewritten (those cells keep their readings at H1). Each entry run: GREEN.
+  Done: `WithinCapMismatchInActive_DisconnectsWithoutALogout` flipped; `EstablishmentTimeoutQ16.AcceptorAfterRefusedLogon_<GarbageOnlyPeer|SilentPeer>_ClosedAtOnceNoTimeout` (renamed); `ResendAnswerStoreFailureEngine.Acceptor789Path_SlotReadFails_ConnectionClosesAtOnce` (renamed); `Capi537Witness.Deadline_CompIdsLeaveNoRoomForTheLogout_EndsSilentlyAndClosesAtOnce` (renamed); the #534 comments of `SecondFrameInFlight.*` and `ReconcileAfterTheTakeBack.*` rewritten (those cells keep their readings at H1). And, by T009's classing of `engine_establishment_timeout_test.cpp` under T033, the same FR-007 rule's other cells there: `EstablishmentTimeoutQ16.AcceptorAfterNonLogonFrame_<GarbageOnlyPeer|SilentPeer>_ClosedAtOnceNoTimeout`, `ReadableAcrossT_ValidNonLogonFrames_ClosedAtTheFirstRefusal` and `EstablishmentTimeoutNearClockMax.AcceptorAfterNonLogonFrame_RefusalClosesAtOnce` (renamed). Each entry run: GREEN.
 - [X] T034 [US1] [seam] `ConnectionClose105.CloseFrameSpawnFails_ReleaseAtLoopExit_PeerSeesEofWithNoLaterCall` and its TLS
   arm on the Engine-over-TLS rig, both in `tests/session/test_105_seams.cpp` (an Engine session ended by the liveness loop
   while its pump is parked in a read; the seam of T027 fails the spawn): the peer sees EOF with no inbound frame and no API

@@ -1167,6 +1167,8 @@ TEST(ConnectionClose105Direct, InsideReconnectDrain_DrainKeepsItsBound) {
     (void)fixpp::test_support::pump_until(
         d.s.ioc, [&] { return d.s.state() == fsm_state::Disconnected; },
         fixpp::test_support::kPumpBudget, fixpp::test_support::kPumpSlice, "drain step 2");
+    // The reach proof: the drain is still waiting for the held send when it is released.
+    EXPECT_FALSE(rg::Scene::ready(rfut)) << "setup: the drain did not wait for the held send";
     st->release_all();
     bool const reconnected = fixpp::test_support::pump_until(
         d.s.ioc, [&] { return rg::Scene::ready(rfut) && rg::Scene::ready(send_fut); },
