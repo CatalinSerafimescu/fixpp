@@ -154,13 +154,9 @@ Started start_ending(t105::DirectRig& d, ending e, bool queued) {
         if (e == ending::r1) {
             for (int i = 0; i < 12 && d.started("5") == 0U && !queued; ++i) d.pass(1s);
             if (queued) {
-                for (int i = 0; i < 12 && session_test_access::test_request_pending(*s.session);
-                     ++i) {
-                    d.pass(1s);
-                    if (d.s.session->state() != fsm_state::Active) break;
-                }
-                // The give-up has started: its Logout is queued behind the held send.
-                for (int i = 0; i < 12 && d.app->to_admin_count("5") == 0; ++i) d.pass(1s);
+                // The give-up's decision: its Logout's toAdmin, then the write queued at the
+                // gate. The clock stops at the step that reached it.
+                for (int i = 0; i < 30 && d.app->to_admin_count("5") == 0; ++i) d.pass(1s);
             }
         } else if (e == ending::r2_after_active) {
             st.frame = s.feed_spawn(queued ? s.heartbeat(2) : stale_heartbeat(s, 2));

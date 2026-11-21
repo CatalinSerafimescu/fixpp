@@ -498,14 +498,27 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
     }
     bool open_before = false;
     bool ended = false;
+    bool ended_by_bound = false;
     if (up && held) {
         peer->send(msg("0", 2));  // below NextNumIn: the too-low Logout, queued at the gate
-        (void)fixpp::test_support::pump_until(ioc, [] { return false; }, 100ms, 5ms, nullptr);
-        clock->advance(499ms);
-        (void)t105::drive_bounded(ioc, 256);
-        open_before = state() == fsm_state::Active;
-        clock->advance(1ms);
-        (void)t105::drive_bounded(ioc, 256);
+        // The session reads behind its own blocked write; real time lets the frame arrive.
+        (void)fixpp::test_support::pump_until(ioc, [] { return false; }, 300ms, 5ms, nullptr);
+        open_before = state() == fsm_state::Active && !peer->read_ended;
+        // The session reads the frame behind its own blocked write, so the instant its Logout's
+        // write starts is not observable from here: the mock clock moves in 50 ms steps, with
+        // wall time between them for the reads and for tls_close_timeout, until the session ends,
+        // at most 3 s of mock time (the bound is 500 ms from the Logout's start).
+        std::chrono::milliseconds advanced{0};
+        while (state() == fsm_state::Active && advanced < 3000ms) {
+            clock->advance(50ms);
+            advanced += 50ms;
+            (void)fixpp::test_support::pump_until(
+                ioc, [&] { return state() != fsm_state::Active; }, 60ms, 5ms, nullptr);
+        }
+        ended_by_bound =
+            state() != fsm_state::Active ||
+            fixpp::test_support::pump_until(
+                ioc, [&] { return state() != fsm_state::Active; }, 2500ms, 5ms, nullptr);
         // Past tls_close_timeout before the peer reads, so a close_notify could not be written
         // late into a reopened window.
         (void)fixpp::test_support::pump_until(ioc, [] { return false; }, 1500ms, 5ms, nullptr);
@@ -516,6 +529,8 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
     EXPECT_TRUE(up) << "setup";
     EXPECT_TRUE(held) << "setup: no application send was held behind the stalled peer";
     EXPECT_TRUE(open_before) << "the session ended before the bound";
+    EXPECT_TRUE(ended_by_bound)
+        << "the session did not end within the mock-clock cap after its Logout";
     EXPECT_TRUE(ended) << "the connection was not closed within the bound plus tls_close_timeout";
     EXPECT_EQ(peer ? peer->ending() : t105::peer_ending::open, t105::peer_ending::abortive)
         << "a close_notify behind a peer that stopped reading";
