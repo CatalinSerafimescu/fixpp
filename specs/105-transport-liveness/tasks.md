@@ -194,6 +194,12 @@ production code. **Blocks every story phase.**
   base), or not this rule. Every FR-019 known-positive pin must appear; a living-surface hit with no task
   is added to T128.
   Done: evidence file, section T009, and its addendum "Re-run after the ruling": with the `UnansweredTestRequestDisconnects` alternative added to D11's pattern (orchestrator ruling, 2026-11-21) the census reports every known positive and every FR-019 pin, `HeartbeatCadence8Cell.CellC_*_UnansweredTestRequestDisconnects` included; the classed table and the T128 additions are in the evidence file.
+  Widened again by the T035 ruling (orchestrator, 2026-11-21): the pins the H1 reading found outside FR-019's list, keyed on
+  their old claims, add the alternatives `(with|the|its) transport open`, `ends (the session|it),? silently`,
+  `ends at the grace check`, `session ends at the grace`, `written after the reply`, `one Disconnected entry` and
+  `Disconnected entries in the` (research D11). Run on `0ea8cbf7` (the tree before those re-pins), the widened pattern
+  reports the eight known positives the old one does not; every added hit is classed in the evidence file, section
+  "T035 — the ruling's adjudication".
 - [X] T010 [P] Size-pin census (research D7): the narrow
   `sizeof\((fixpp::session::)?(Session|ReconnectFsm)\b` grep over `src include tests ci tools bench bindings`, then the
   wide grep that must report `tests/dictionary/ref_shape_test.cpp`'s `FieldRef` pin (the instrument's proof); list every
@@ -343,10 +349,12 @@ and no local API call (SC-001).
   before the flush is released. The flush is the only suspension between `close()`'s commit of `closing` and its
   phase-1 state test, and `close()` writes its own Logout from LogonReceived once it passes that test, so the cell
   releases the flush only after the peer's Logout has been processed. Oracle: no 35=5 written by fixpp; the numbers reset as 104's reset point resets them (the store reads (1, 1)
-  once the unit has run); the connection closed by the running `close()`, one close, `onLogout` once. GREEN on the base by
-  design.
-  Done: `PeerLogoutInActive_EofAfterReplyAndReset`, `TooHighLogoutAcknowledged_<Bound|AtOnce>_EofAfterReset` (both roles) and the guard `ConnectionClose105Acceptor.PeerLogoutInLogonReceivedDuringClose_NoReplyLogout_ResetFollows104`. Escalated (a bundle-premise question, not settled): that guard asserts `onLogout` 0, not once: the session never was Active, so no Active→!Active edge fires it (evidence, section T025).
-- [ ] T020 [US1] Same file, the detached roots and application calls (C-1 rows 8, 9, 10; C-1.c), both roles where the
+  once the unit has run); the connection closed by the running `close()`, one close, and `onLogout` not called:
+  `record_state_transition_` calls it only on a transition out of Active (its `was_active` test, on the base as at the
+  head), and this session never was Active (text corrected to the source by the T035 ruling; re-derive: the `was_active`
+  test in `record_state_transition_`, `git -C $B show HEAD:src/session/session.cpp`). GREEN on the base by design.
+  Done: `PeerLogoutInActive_EofAfterReplyAndReset`, `TooHighLogoutAcknowledged_<Bound|AtOnce>_EofAfterReset` (both roles) and the guard `ConnectionClose105Acceptor.PeerLogoutInLogonReceivedDuringClose_NoReplyLogout_ResetFollows104`. The guard asserts `onLogout` 0, as the corrected text above states.
+- [X] T020 [US1] Same file, the detached roots and application calls (C-1 rows 8, 9, 10; C-1.c), both roles where the
   root exists: `Liveness<ToAdminThrows|AssignFails|StoreFails>_EofAtOnce` (on a Heartbeat or TestRequest emission, with
   `test_request_threshold = HeartBtInt`, driven by the wire reader), `SendStoreFailure_EofAfterSendReturns`,
   `DirectInitiatorLogonEmitFails_<Open|DriveReconnect>_EofAfterTheCallReturns` and
@@ -357,8 +365,8 @@ and no local API call (SC-001).
   terminal and no second connect attempt; spec Assumptions; the ending is `toAdmin` throwing on the Heartbeat emission, as
   in `LivenessToAdminThrows_EofAtOnce`). Each asserts peer EOF with the clock frozen once the root has
   exited. RED on the base before the fix: no EOF (the reconnect cell in its EOF half; the connect-loop cell's transport held).
-  Open (escalated; the cells below are written and read): `Liveness<ToAdminThrows|AssignFails|StoreFails>_EofAtOnce`, `SendStoreFailure_EofAfterSendReturns` (both roles), `ConnectionClose105Direct.DirectInitiatorLogonEmitFails_DriveReconnect_EofAfterTheCallReturns`, `ConnectionClose105Direct.DirectInitiator_EndingThenDriveReconnect_Reconnects`, `ConnectionClose105Engine.EngineInitiator_EndingOnConnectLoop_NoHeldTransport_CycleEnds`. Not written (escalated): `DirectInitiatorLogonEmitFails_Open_*` (a direct initiator's `open()` writes its Logon over `transport_send_` with no live transport, so there is no connection to close).
-- [ ] T021 [US1] Same file, before Active and the acceptor's first frame (C-4, FR-006, FR-007), both roles where the
+  Done: `Liveness<ToAdminThrows|AssignFails|StoreFails>_EofAtOnce`, `SendStoreFailure_EofAfterSendReturns` (both roles), `ConnectionClose105Direct.DirectInitiatorLogonEmitFails_DriveReconnect_EofAfterTheCallReturns`, `ConnectionClose105Direct.DirectInitiator_EndingThenDriveReconnect_Reconnects`, `ConnectionClose105Engine.EngineInitiator_EndingOnConnectLoop_NoHeldTransport_CycleEnds`, each RED on the base (T025). `DirectInitiatorLogonEmitFails_Open_*` dropped by the T035 ruling, with this census note: a direct initiator's `open()` writes its Logon over `transport_send_` with no live transport, so no connection exists to close (class G, no transport at open).
+- [X] T021 [US1] Same file, before Active and the acceptor's first frame (C-4, FR-006, FR-007), both roles where the
   refusal exists for the role: `PreActiveRefusal_<D-1|D-2|D-3|NotConnected|LogonSent|IdGuard|SeqNum0>_EofBeforeDeadlineNoTimeoutEvent`
   (a short `logon_timeout_ms`, clock frozen: EOF, no `session_event_establishment_timeout`, no
   `session not established within logon_timeout_ms={}` record), `AcceptorFirstFrameError_EofAtOnce`,
@@ -366,13 +374,13 @@ and no local API call (SC-001).
   TLS handshake and first-frame deadlines set above the cap and named in each cell. RED on the base before the fix:
   closed only at the deadline, with the event (the first frame's result discarded). Plus
   [guard: `expire()` closes without its event] `SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent` (C-4.3, B-093-4).
-  Open (escalated; the cells below are written and read): `PreActive105.PreActiveRefusal_<D1D2_FaultyLogon|NotConnectedOrLogonSent_NotALogon|SeqNum0>_EofBeforeDeadlineNoTimeoutEvent` (both roles; D-1 is the acceptor's, D-2 the initiator's), `PreActive105Initiator.PreActiveRefusal_IdGuard_*`, `AcceptorFirstFrame105.<AcceptorFirstFrameError_EofAtOnce|AcceptorFirstFrameRefused_EofAtOnceNoTimeoutEvent|AcceptorFirstFrameAcceptedLaterFrameRefused_EofAtOnce>`, and the guard `PreActive105.SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent` (both roles). Not written (escalated): `PreActiveRefusal_D-3` (D-3's only pre-Active state is LogonReceived, which no frame the Engine pump delivers meets).
-- [ ] T022 [US1] Same file, one close per ending (C-1.a, class X): `OnLogoutCallsClose_OneClose` and
+  Done (the cells below are written and read): `PreActive105.PreActiveRefusal_<D1D2_FaultyLogon|NotConnectedOrLogonSent_NotALogon|SeqNum0>_EofBeforeDeadlineNoTimeoutEvent` (both roles; D-1 is the acceptor's, D-2 the initiator's), `PreActive105Initiator.PreActiveRefusal_IdGuard_*`, `AcceptorFirstFrame105.<AcceptorFirstFrameError_EofAtOnce|AcceptorFirstFrameRefused_EofAtOnceNoTimeoutEvent|AcceptorFirstFrameAcceptedLaterFrameRefused_EofAtOnce>`, and the guard `PreActive105.SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent` (both roles). `PreActiveRefusal_D-3` recorded unreachable as an FR-007 refusal (T035 ruling): D-3's one pre-Active state, LogonReceived, is written only by the acceptor's Logon arm, which leaves it before it returns, for Active or Disconnected or through a supersede return (`logon_arm_superseded_`: `close()` committed, or the Engine's stop); so a frame meets LogonReceived only after a supersede return, where the running `close()` or `Engine::stop()` owns the connection's close, on an Engine or a direct Session alike (a frame fed while the arm is held overlaps `on_inbound_frame` calls, outside the Session contract). Re-check: `grep -n 'record_state_transition_(fsm_state::LogonReceived)' src/session/session.cpp`, then every return of that arm after the write.
+- [X] T022 [US1] Same file, one close per ending (C-1.a, class X): `OnLogoutCallsClose_OneClose` and
   `EngineStopRacesEndingClose_OneClose` (both on the TSan lane in T137; each asserts one EOF, no use after close, and the
   close at once), RED on the base before the fix in their EOF-timing half; [guard: the latch's `lifecycle` term
   deleted] `InsideClose_NoSecondClose`; [guard: the drain flag deleted] `InsideReconnectDrain_DrainKeepsItsBound`
   (B-103-9's bound).
-  Open (escalated, the Execution rules' "a cell expected RED that reads GREEN on the base stops its task"): `OnLogoutCallsClose_OneClose`, `EngineStopRacesEndingClose_OneClose`, the guard `InsideClose_NoSecondClose` (both roles) and the guard `ConnectionClose105Direct.InsideReconnectDrain_DrainKeepsItsBound`. Escalated: the first two read GREEN on the base (the `close()` and `Engine::stop()` they start close the transport themselves); evidence, section T025.
+  Done: `OnLogoutCallsClose_OneClose` and `EngineStopRacesEndingClose_OneClose` (both roles), GREEN on the base (the `close()` and `Engine::stop()` they start close the transport themselves): regression cells of C-1.a. They are not [guard] cells: every dedupe mutant tried at the head survives them (the owe's lifecycle term, the release's lifecycle term, the release's generation check, `close()`'s clear of the latch at its commit of closing; evidence, section "T035 — the ruling's adjudication"), because each closes through a terminal close, which no second close changes, and the pump takes the latch before any closer commits (the [guard] reading the ruling asked for is escalated). The [guard: the latch's `lifecycle` term deleted] is `InsideClose_EndingDuringItsLogoutStore_NoSecondClose` (both roles): a class P ending while a graceful `close()` is in its Logout's store call; GREEN on the base, RED under the mutant (the stray `close(terminal)` escalates the graceful close, OD-29, and cuts its phase 1 in the held store call: no Logout written). `InsideClose_NoSecondClose` stays as its control (no ending inside the close). [guard: the drain flag deleted] `ConnectionClose105Direct.InsideReconnectDrain_DrainKeepsItsBound`.
 - [X] T023 [P] [US1] `tests/session/test_105_liveness_timing.cpp`, R-1 (C-3), both roles, `test_request_threshold =
   HeartBtInt`, driven past the give-up by the wire reader: `GiveUp_LogoutTextPinned_ThenEof` (exactly one 35=5 whose 58 is
   `TestRequest unanswered, TestReqID <id>` spelled out in the cell, `<id>` the 112 of the TestRequest read, then EOF with
@@ -382,17 +390,17 @@ and no local API call (SC-001).
   (C-3.2: each asserts the record, the wire — no complete Logout, except `StoreFailsVolatile`, whose Logout is on the wire
   — and EOF). RED on the base before the fix: no Logout, no record, no EOF.
   Done: `LivenessTiming105.GiveUp_<LogoutTextPinned_ThenEof|OneLogRecordWithSlot74|ToAdminThrows|AssignFails|StoreFailsPersistent|StoreFailsVolatile|LogoutDoesNotFit>_*` (both roles) and `LivenessTiming105Direct.GiveUp_WriteFails_StillEof` (a direct initiator on a mock transport that cuts the Logout's write).
-- [ ] T024 [P] [US1] `tests/session/test_105_tls_close.cpp`, the real-TLS orderly close (C-8.1, FR-002). On
+- [X] T024 [P] [US1] `tests/session/test_105_tls_close.cpp`, the real-TLS orderly close (C-8.1, FR-002). On
   `engine_loopback_harness.hpp`, acceptor role (an Engine session, so the pump consumes the latch; T003):
   `TlsClose105.<PumpSilentEnding|GiveUpWhilePumpParkedInRead|PreActiveSilentRefusal|PeerLogoutReply>_PeerReceivesCloseNotify`
   (the give-up cell is the B-348-1 case: a detached-root ending while the pump is parked in a TLS read). On
   `loopback_tls_session_harness.hpp` (a direct Session, no pump), only classes that close at a root's exit:
   `TlsClose105.DirectSession<GiveUp|SendStoreFailure>_PeerReceivesCloseNotify`. Each: the peer reads the frames the class
   writes, then a close_notify, then EOF; the TLS handshake timeout and `tls_close_timeout` above the cap. RED on the base before the fix: no close_notify and no EOF.
-  Open (escalated; the Engine cells are written and read): `TlsClose105.<PumpSilentEnding|GiveUpWhilePumpParkedInRead|PreActiveSilentRefusal|PeerLogoutReply>_PeerReceivesCloseNotify` on the Engine over TLS. Not written (escalated): `TlsClose105.DirectSession<GiveUp|SendStoreFailure>_*`: on `loopback_tls_session_harness.hpp`'s factory and listener `Session::drive_reconnect()` did not return within 5 s of wall time and 20 s of mock time (the harness's own Session too), so the rig gives no connected direct TLS Session; no existing user of that header reaches Active through `Session::drive_reconnect()` (`grep -n 'drive_reconnect()'` over its three users is empty).
+  Done: the four Engine cells, and `TlsClose105.DirectSession<GiveUp|SendStoreFailure>_PeerReceivesCloseNotify` on a resend_gap::Scene Session over the TLS factory and fixture certificates `loopback_tls_session_harness.hpp` builds, the server end `TlsPeer::accept`, with a caller's reader on the installed transport (without one the TLS records the server end sends after the handshake stay unread and the close resets the socket: the peer read `transport_read_error`). RED on the base by assertion (no Logout at the give-up, no close). The earlier "`drive_reconnect()` does not return" re-run at 10 × (50 s) on `$B` and at the head: with the server end's handshake running it returns at once on both; with no server-end handshake it does not return within 50 s on both, so pre-existing, not 105's: a client TLS handshake against a peer that accepts and never handshakes is not bounded (plan, "Follow-ups to file before Gate B").
 - [X] T025 [US1] Commit the cells (`C1`); read T018 to T024 on `$B` (Execution rules "RED on the base"); record per cell its
   RED reason or guard status, and the test count.
-  Done: `C1` = `62b290a4`; evidence file, section T025: 72 tests, 62 RED by an assertion for the stated reason, 10 GREEN (the guards, and the two T022 cells escalated above), 0 skipped.
+  Done: `C1` = `62b290a4`; evidence file, section T025: 72 tests, 62 RED by an assertion for the stated reason, 10 GREEN (the guards, and the two T022 regression cells), 0 skipped. Re-read with the T035 ruling's cells (`1494eef8`): 76 tests, 64 RED (the two `TlsClose105.DirectSession*` cells added), 12 GREEN (`InsideClose_EndingDuringItsLogoutStore_NoSecondClose` added, both roles), 0 skipped (evidence, section "T025 re-read with the T035 ruling's cells").
 
 ### Implementation for US1 part A
 
@@ -434,14 +442,14 @@ and no local API call (SC-001).
   `!session_engine_access::ended(session)`, then `stop_pump()` either way (data-model E-5). Its discriminating cell is
   `PreActive_WaitArmedAtEstablishmentDeadline_ClosedNoEvent` (T049), its mutant T076.
   Done: `expire()` writes the timeout's event and record only when `!ended(session)`.
-- [ ] T031 [US1] D3 (R-1) in `src/session/session.cpp`, `src/log/format_registry.cpp` and `session.hpp`: at the give-up,
+- [X] T031 [US1] D3 (R-1) in `src/session/session.cpp`, `src/log/format_registry.cpp` and `session.hpp`: at the give-up,
   write the slot-74 warn record `session ended: TestRequest unanswered: test_req_id={} threshold_ms={} error={}` (format
   registered) **before** the Logout's write; take the replay-gate shared hold; `claim_peer_logout_none_`; write the Logout
   through `inbound_logout_leaf_` with Text `TestRequest unanswered, TestReqID <id>` built in a bounded stack buffer with a
   `static_assert` on its size; then `record_disconnected_unless_already_()`; the loop's exit runs `release_connection_end_()`.
   Delete `unanswered_tr_`, its writes (`answer_pending_test_request_`, the in-sequence Heartbeat arm of `on_inbound_active_`,
   the loop) and its declaration comment.
-  Open (escalated, blocking T039's R-1 mutant): implemented as written: the record, the replay-gate wait and shared hold, `claim_peer_logout_none_`, the Logout with Text through `inbound_logout_leaf_`, then `record_disconnected_unless_already_`; `unanswered_tr_` deleted. Escalated: while the replay gate is held exclusive at the give-up the loop waits for it (as `run_peer_logout_bound_` does) instead of ending at once; `ReplayGate588.R588f4_ContendedSend_LivenessDisconnects_RefusedNothingWritten` reads that wait (evidence, section T035). The bundle states no rule for the give-up while a resend answer holds the gate exclusive, and Phase 4's write limit does not bound that wait: a peer that stopped reading behind a resend answer is never given up.
+  Done (part A): the record, the replay-gate wait and shared hold, `claim_peer_logout_none_`, the Logout with Text through `inbound_logout_leaf_`, then `record_disconnected_unless_already_`; `unanswered_tr_` deleted. The Logout owner is tested and set before any suspension by both the leaf and `run_logout_phase1`, so a `close()` started during the gate wait cannot add a second 35=5. Its bounded half is moved to Phase 4 as T059a (T035 ruling 2; spec clarification "Session 2026-11-21 (implementation, Phase 3)"): until it lands the give-up waits for an exclusive hold with no bound, which `ReplayGate588.R588f4_*` reads RED (T072's list).
 - [X] T032 [US1] Comments naming the new rule (issue #310, FR-018), part A: `record_state_transition_` ("105 D1: the edge
   sets the connection-end latch; its consumers …"), `run_read_pump`'s disposition list, `dispose_unparseable_` (092's "D-1
   and D-2 are a state transition, not a close" and its D-3 twin rewritten to name 105 FR-007), the "(Phase 6 US4 wires the
@@ -464,13 +472,23 @@ and no local API call (SC-001).
   call, the counter is 0 after `close()`; on TLS no close_notify (L-105-h). Not readable on `$B` (the seam is new); RED under
   T041's mutant.
   Done: `ConnectionClose105.CloseFrameSpawnFails_ReleaseAtLoopExit_PeerSeesEofWithNoLaterCall` and `TlsClose105.CloseFrameSpawnFails_ReleaseAtLoopExit_AbortiveNoCloseNotify` in `test_105_seams.cpp`; RED reading under T041's mutant in the evidence file.
-- [ ] T035 [US1] Run T018 to T024 and T034 GREEN, then `-L 105`, `-L session` and `-L capi` on linux-clang-debug. **R-2-class
+- [X] T035 [US1] Run T018 to T024 and T034 GREEN, then `-L 105`, `-L session` and `-L capi` on linux-clang-debug. **R-2-class
   pins are expected RED here** (`GapDeadlineOutOfSequenceSite.FrameAtTheBoundDrawsTheLogoutAndTheTransportStaysOpen` and the
   537 note's control cell "D-537-6, N"): they flip at T072; do not re-pin them to part A's behaviour. Commit `H1`;
   `codegraph sync`.
-  Open (escalated): `-L 105` GREEN, `H1` committed, the R-2-class pins RED as predicted (also the six
-  `Capi537Witness.Deadline_*` cells, the same class at the C-ABI). `-L "session|capi"` also reads RED on pins of a
-  superseded rule outside T033's list, not re-pinned; each needs a ruling (evidence file, T035 sections).
+  Done: `-L 105` GREEN, `H1` committed. The pins of a superseded rule outside T033's list, adjudicated by the T035 ruling
+  (evidence, section "T035 — the ruling's adjudication"): each read GREEN ×3 on `$B` (none pre-existing) and RED ×3 at the
+  head; re-pinned under FR-019, each naming the 105 rule that predicts it: `InboundFrameDispositionsQ6.Disconnected_*` and
+  `InboundFrameDispositionsQ8Pump.Disconnected_*` (FR-007, renamed), `CapiC7Witness.Row3_*Disconnected*` and
+  `Row5_*Refused*` (FR-007, renamed; T128's entry), `ReconnectFence103.G10_*/InitiatorDisconnected` (FR-005; the arm's
+  connection closes at the peer's Logout, so B-103-9's order refuses with `session_already_closed`),
+  `ResetOnLogout104.LivenessHeartbeatAcrossBoundUnit_OneEnding_GateWait_RolOff` (FR-005: the close after the reply; the
+  Heartbeat's store call runs to its end, FR-008), `TooHighHeartbeatDuringTheGap.Control_HeartbeatBelowNextNumIn_*`
+  (R-1's Logout; its timing re-pins at T099, T011's list) and `CancelledOutboundStoreMeasurement.Returned_StoreCancelledAtItsLock`
+  (FR-001 and data-model E-2 I-5: the store outcomes equal the base's, measured; the held send's write finds the connection
+  closed and records Disconnected over Disconnected). None is a regression (each store outcome and the one close per
+  ending hold). `ReplayGate588.R588f4_*` stays RED for T059a (ruling 2). `-L "session|capi"` then reads RED on T072's
+  list and `R588f4` only. The census misses are found by the widened D11 pattern (T009's addendum).
 
 ### Mutant and spurious-hit arms for US1 part A (in `$M` at `H1`)
 
@@ -480,17 +498,21 @@ and no local API call (SC-001).
 - [X] T038 [US1] The edge's owe moved below the no-application return: `PumpSilentEnding_NoApplication_*` RED. Then the
   setter census `grep -n 'owe_connection_end_(' src/session/session.cpp` (known positive: the edge) and, per call site at
   `H1`, that call deleted: its cells RED.
-- [ ] T039 [US1] `close_transport_` calling the synchronous `Transport::close()` instead of `close_async()`: T024's
+- [X] T039 [US1] `close_transport_` calling the synchronous `Transport::close()` instead of `close_async()`: T024's
   close_notify assertions RED (C-8.2). The R-1 Logout write deleted (the close kept): `GiveUp_LogoutTextPinned_ThenEof` RED.
-  Open: the first half done (`GiveUpWhilePumpParkedInRead_PeerReceivesCloseNotify` RED; the pump-route TLS cells close
-  through `close(terminal)` and survive, as T036's reading shows); the R-1 half waits on T031's escalation.
-- [ ] T040 [US1] Guards: the latch's `lifecycle` term deleted (`InsideClose_NoSecondClose` RED); the drain flag deleted
+  Done (the first half): `GiveUpWhilePumpParkedInRead_PeerReceivesCloseNotify` RED, and at the T035 head the two
+  `TlsClose105.DirectSession*` cells RED too (abortive endings: the caller's reader has a read in flight); the pump-route
+  TLS cells close through `close(terminal)` and survive, as T036's reading shows. The R-1 half is moved to Phase 4 as T077a
+  (T035 ruling 2).
+- [X] T040 [US1] Guards: the latch's `lifecycle` term deleted (`InsideClose_NoSecondClose` RED); the drain flag deleted
   (`InsideReconnectDrain_DrainKeepsItsBound` RED); `expire()` closing without its event (`SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent` RED); the reply admitted in LogonReceived (the Active test
   around `inbound_logout_leaf_` in `on_inbound_active_logout_` and the leaf's own state test both widened to LogonReceived;
   `PeerLogoutInLogonReceivedDuringClose_NoReplyLogout_ResetFollows104` RED).
-  Open (escalated): the drain flag, `expire()` and LogonReceived arms RED; the `lifecycle` term's mutant SURVIVES
-  (`InsideClose_NoSecondClose` GREEN, also with the release's term deleted): the pump takes the latch and its second
-  `close()` call changes nothing the cell observes. The cell was not reshaped.
+  Done: the drain flag, `expire()` and LogonReceived arms RED. The `lifecycle` term (T035 ruling 3): its mutant survives
+  `InsideClose_NoSecondClose` (the pump's second `close()` there joins a graceful close whose phase 1 has already ended)
+  and turns `InsideClose_EndingDuringItsLogoutStore_NoSecondClose` RED, both roles, by an assertion (no Logout written:
+  the stray `close(terminal)` escalates the graceful close, OD-29, and its phase 1 is cancelled in the held store call),
+  rc 1, no abort. The guard is that cell (T022).
 - [X] T041 [US1] The close frame's fail-closed `catch` replaced by round 2's (the latch left set for a later consumer):
   `CloseFrameSpawnFails_ReleaseAtLoopExit_*` RED within its wall cap.
 
@@ -631,6 +653,14 @@ does not complete closes the connection at the bound.
   `Session::executor()`), join as the parameter; the `catch (...)` around `co_spawn` sets `phase = none`, does not rethrow,
   and the Logout is not written (row 2a: the leaf's "frame that cannot be built" path; the site records `Disconnected`).
   Add the bound-spawn allocation-failure seam. Timeout 0 or no clock enters nothing (row 2).
+- [ ] T059a [US1] (moved from T031, its bounded half; T035 ruling 2; spec clarification "Session 2026-11-21
+  (implementation, Phase 3)") R-1's budget counted from the give-up's decision, before the replay gate is taken: the
+  liveness loop's give-up enters the machine as kind `r1` with the deadline set at the decision, so a give-up that
+  still waits for an exclusive replay-gate hold at the deadline closes through the write-limit path as "Logout not
+  sent", writing nothing past the gate. Witnesses: `ReplayGate588.R588f4_ContendedSend_LivenessDisconnects_RefusedNothingWritten`
+  (`tests/session/test_538_resend_answer_store_failure.cpp`) GREEN, with no 35=5 written while the answer holds the gate;
+  it reaches Disconnected only once its mock clock passes the budget from the give-up, so it is re-read, and re-pinned
+  under FR-019 if its clock moves do not pass the budget; and a T051 R1 cell behind an exclusive hold.
 - [ ] T060 [US1] **Leaving `writing`** (E-3), on the strand with no suspension before the next step: `r2`, transmitted, `!cut`,
   no pending too-high mark claimed, `fsm_state_ == entered_from` → `phase = armed` and the bound woken (it rebuilds its race in
   `armed`); every other case → `phase = none`, the bound woken, and the site records `Disconnected` as today. Before Active the
@@ -703,7 +733,13 @@ does not complete closes the connection at the bound.
 - [ ] T072 [US1] Re-pin the R-2-class flips (FR-019): `GapDeadlineOutOfSequenceSite.FrameAtTheBoundDrawsTheLogoutAndTheTransportStaysOpen`
   and its helper `expect_logout_and_open_transport` in `tests/session/test_537_gap_deadline.cpp` (its
   `state_after_the_bound_frame == Disconnected` flips too: Active during the wait), and the 537 note's control cell
-  "D-537-6, N"; rename where the name states the old rule.
+  "D-537-6, N"; rename where the name states the old rule. Read RED at H1 and left RED for this task (T035): the cells
+  through `expect_logout_and_open_transport` (`GapDeadlineIntervalNeverSet.OutOfSequenceSite_FrameAtTwiceTheDefaultIntervalDrawsTheLogout`,
+  `GapDeadlineValidateGateSite.V_InvalidFrameAtTheBoundDrawsTheLogoutAndNoReject`), `BothRoles/GapDeadlineOutOfSequenceSite.FrameAtTheBoundDrawsTheLogoutAndTheTransportStaysOpen/{Initiator,Acceptor}`,
+  `TooHighHeartbeatDuringTheGap.N_Control_NothingDelivered_EndsSilentlyAtTheGraceCheck` (the control cell), and the C-ABI
+  twins `Capi537Witness.Deadline_<TooHighApplicationFrames|TooHighHeartbeats|TooHighPossDupFrames>_Logout`,
+  `Capi537Witness.Deadline_<PossDupWithoutOrigSendingTime|PossDupWithUnparseableOrigSendingTime|ResetBelowExpected>_RejectsThenLogout`
+  (`tests/capi/recovery_liveness_capi_witness_test.cpp`); and, for T059a, `ReplayGate588.R588f4_*`.
 - [ ] T073 [US1] Run T042 to T055 and T070 GREEN, then `-L 105`, `-L session`, `-L capi` on linux-clang-debug and the
   `Lifetime105.*` cells on linux-clang-asan; commit `H2`; `codegraph sync`.
 
@@ -728,6 +764,9 @@ does not complete closes the connection at the bound.
   the slot-74 record moved after the write (`WriteLimit105.R1_*`'s record assertion RED); "Leaving `writing`" ignoring `cut`
   (`DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed` RED, the phase read `armed` after the drain); a 0 ms limit
   read as "close at once" (`TimeoutZero_WriteUnbounded` RED).
+- [ ] T077a [US1] (moved from T039, its R-1 half; T035 ruling 2) The R-1 Logout write deleted (the close kept):
+  `LivenessTiming105.GiveUp_LogoutTextPinned_ThenEof` RED. T059a's budget counted from the gate's acquisition instead of
+  the give-up's decision: `ReplayGate588.R588f4_*` RED.
 - [ ] T078 [US1] The deadlines' closes: the bound's expiry close made through `release_connection_end_`
   (`Bound_ExpiresWhileResendAnswerBlocked_*` RED); the cap's arm deleted (`PreActive_<LogoutBlockedInWrite|LogoutHeldInStore>_ClosedAtEstablishmentDeadlineNoEvent`,
   `PreActive_ClockOverride_CapOnEngineClock` RED: the close comes at the write limit); `close()`'s second join deleted
@@ -1073,6 +1112,11 @@ remaining reference.
   refused-Logon cells and the "Rows 3 and 5 in Disconnected" cells, which state the refused session's transport stays open
   until the establishment deadline) and `tests/session/unparseable_frame_disposition_test.cpp` (the comments stating D-1,
   D-2 and D-3 are "a state transition, not a close").
+  The T035 ruling re-pinned in Phase 3 the "Rows 3 and 5 in Disconnected" cells and the Row 5 refused-Logon cells of the
+  first file (renamed `Row3_In<Disconnected|AnInitiatorsDisconnected>_TheRefusalClosesTheConnectionAtOnce`,
+  `Row5_<AnAcceptorWhoseLogonWasRefused|AnInitiatorWhoseLogonReplyWasRefused>IsClosedAtTheRefusal`); this task re-checks
+  them. Added by the T035 census widening (living surfaces with no task): `spec/coverage-index.md` row 13 (TC-009's "step 2's
+  wait with the transport open", which C-1 row 5 now closes after the acknowledgement).
 
 ---
 

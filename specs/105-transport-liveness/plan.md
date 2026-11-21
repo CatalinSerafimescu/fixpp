@@ -413,6 +413,10 @@ Each is a fixpp issue, labelled at creation, filed before Gate B and named where
   loop head decides expiry"), and `detail::await_deadline`'s `catch (...)` completes that arm early on any
   non-`system_error` exception, so a lasting allocation failure spins the session strand until the establishment
   deadline. Pre-existing since 093. 105's ending bound does not copy the shape (data-model E-3, "The bound's loop").
+- **An initiator's TLS handshake against a peer that accepts and never handshakes is not bounded** (tasks.md T024,
+  the T035 ruling). `Session::drive_reconnect()` over the real TLS factory, against a listener whose server end never
+  runs its handshake, does not return; measured at 10 × the cell's 5 s wall budget on the base and at the 105 head
+  alike, so pre-existing and not 105 scope. With the server end's handshake running it returns at once.
 
 ## Gate A
 

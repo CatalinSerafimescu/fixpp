@@ -1061,7 +1061,15 @@ T115).
   ("1×HeartBtInt"), `src/session/session.cpp` ("Phase 6 US4"), `src/session/read_first_frame_bounded.hpp` ("off only at
   exactly 0", the comment above `detail::resend_gap_deadline`), and `tests/session/test_heartbeat_cadence_8cell.cpp`
   ("UnansweredTestRequestDisconnects", the FR-019 pin `HeartbeatCadence8Cell.CellC_*_UnansweredTestRequestDisconnects`,
-  which no other alternative matches; orchestrator ruling on T009, 2026-11-21). Each hit is classed: superseded by name (a merged
+  which no other alternative matches; orchestrator ruling on T009, 2026-11-21). The T035 ruling (2026-11-21) widens it with
+  alternatives keyed on the old claims of the pins the H1 reading found outside FR-019's list:
+  `(with|the|its) transport open|ends (the session|it),? silently|ends at the grace check|session ends at the grace|written after the reply|one Disconnected entry|Disconnected entries in the`;
+  their known positives, which the narrower pattern misses: `tests/session/inbound_frame_dispositions_test.cpp`
+  ("Disconnected with the transport open"), `tests/session/test_103_reconnect_fence_engine.cpp` ("the transport open"),
+  `tests/capi/inbound_frame_dispositions_c7_witness_test.cpp` ("with its transport open"),
+  `tests/session/test_537_too_high_heartbeat.cpp` ("ends the session, silently"), `tests/session/test_104_reset_on_logout.cpp`
+  ("written after the reply") and `tests/session/test_cancelled_outbound_store_measurement.cpp` ("one Disconnected entry"),
+  each read on the tree before its re-pin. Each hit is classed: superseded by name (a merged
   bundle, edited nowhere: `specs/005-*`, `specs/013-*`, `specs/092-*`, `specs/093-*`, `specs/103-*`, `specs/104-*`), a
   living surface rewritten, or not this rule.
 - **Rulings superseded by name in this bundle** (the spec's FR-019 list): 536-537-538 note R-6's "Not chosen: … a Logout on the dead-peer ending" by R-1; D-537-5's C-3 disclosure ("the transport stays open") by FR-004; 103 Arm B's
@@ -1101,7 +1109,9 @@ T115).
     store call, and a store call that never returns leaves them unfired with the connection closed, as any hung store
     call leaves its frame on `main`; a claimed pending too-high mark's receipt does not reset (contract C-2.8); and the
     statement of QuickFIX's behaviour that replaces L-103-5's, per engine and path, as spec FR-016 gives it); `B-105-3` R-1 and its departure from QuickFIX (the record
-    written before the write); `B-105-4` the #582 rule; `B-105-5` the TestRequest timing, the threshold's
+    written before the write; the budget counted from the give-up's decision, so behind a resend answer that holds the
+    replay gate past the budget the session closes with no Logout, "Logout not sent", and the record is still written:
+    spec clarification "Session 2026-11-21 (implementation, Phase 3)"); `B-105-4` the #582 rule; `B-105-5` the TestRequest timing, the threshold's
     validation and the TestReqID(112) rule of ruling D-d (an earlier 112 of this connection neither answers nor ends;
     a 112 never sent ends; the set restarts at each connection; after 2³² TestRequests on one connection the window
     no longer identifies the sent set; a Heartbeat due after a frame that follows the TestRequest goes at its instant

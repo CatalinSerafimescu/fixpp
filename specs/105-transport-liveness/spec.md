@@ -173,6 +173,19 @@ a state in which the peer's Logout draws the reply Logout; it is corrected here.
   its re-check recipe; the cell is the [guard] `ConnectionClose105.PeerLogoutInLogonReceivedDuringClose_NoReplyLogout_ResetFollows104`
   (tasks.md T019, T040; quickstart section "Connections close").
 
+### Session 2026-11-21 (implementation, Phase 3)
+
+Ruling of the orchestrator on an implementation escalation (tasks.md T031), within the signed-off rulings D-e and R-1 and
+103's replay-gate exclusivity (constitution §XI.3); no new sign-off.
+
+- Q (R-1, ruling D-e, orchestrator 2026-11-21): The give-up is reached while a resend answer holds the replay gate
+  exclusive. When does the R-1 Logout's budget start, and what ends the session if the gate is still held? → A: The
+  budget of ruling D-e (`logout_disconnect_timeout_ms`) starts when the give-up is decided, before the replay gate is
+  acquired. If it runs out while the give-up still waits for the gate, the session closes through the write-limit path
+  and the ending proceeds as "Logout not sent": no Logout is written past the gate, so nothing interleaves with the
+  resend answer. The slot-74 record, written at the decision, is unchanged. This needs part B's write-limit machinery,
+  so it lands in Phase 4 (tasks.md T059a, T077a); until then part A waits for the gate with no bound (FR-003, FR-004b).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — A session that has ended closes its connection (Priority: P1)

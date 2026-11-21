@@ -111,7 +111,8 @@ Snapshot snapshot(pr::Rig& rig) {
 //
 // The initiator after its Logon; the acceptor after a matching first frame that leaves
 // it pre-Active: a refused Logon (no HeartBtInt(108)) or a non-Logon frame. Both
-// acceptor contexts leave the session in Disconnected with its transport open.
+// acceptor contexts refuse into Disconnected, and 105-transport-liveness (FR-007) closes the
+// connection at that refusal, superseding 093's "with its transport open" until the deadline.
 enum class Ctx { initiator_after_logon, acceptor_after_refused_logon, acceptor_after_non_logon };
 
 char const* name_of(Ctx c) {
