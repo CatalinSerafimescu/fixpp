@@ -8,6 +8,8 @@
 //     registered initiator's endpoint is a placeholder): the peer is test_105_support.hpp's
 //     TlsPeer::connect, an mTLS client of the acceptor's listener. The pump consumes the
 //     ending, so every class runs here.
+//   - a direct Session over TLS (the DirectTlsCell section below), for the classes that close at
+//     a root's exit.
 // The oracle: the peer reads the frames the class writes, then a close_notify (its read ends
 // with transport_read_eof), within the wall cap with the mock clock still. The wall-clock
 // timers: the TLS handshake timeout (the handshake completes before any cell's instant),
@@ -23,22 +25,31 @@
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/fix_time.hpp>
 #include <fixpp/session/application.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
+#include <fixpp/session/security_profile.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <fixpp/tls/file_cert_source.hpp>
+#include <fixpp/tls/security_profile.hpp>
+#include <fixpp/transport/transport_factory.hpp>
 #include <functional>
 #include <memory>
+#include <memory_resource>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 
 #include "session/engine_loopback_harness.hpp"
 #include "session/plain_engine_rig.hpp"
+#include "session/resend_gap_scene.hpp"
 #include "session/test_105_support.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_executor_of.hpp"
 
 namespace {
 
@@ -193,6 +204,185 @@ TEST(TlsClose105, PeerLogoutReply_PeerReceivesCloseNotify) {
         pr::frames_of_type(c.peer ? c.peer->received.substr(mark) : std::string{}, "5").size(), 1U)
         << "the reply Logout";
     EXPECT_TRUE(closed) << "no close_notify after the reply";
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+// The direct-Session TLS rig (C-8.1 for the classes that close at a root's exit): a
+// resend_gap::Scene's Session as a standalone initiator whose connection drive_reconnect() makes
+// through a real TLS transport factory to a LoopbackTlsFixture listener (the factory and the
+// fixture's certificates as tests/session/loopback_tls_session_harness.hpp builds them), whose
+// server end is TlsPeer::accept. The Session has no pump: inbound frames reach it through
+// on_inbound_frame (Scene::feed). The handshake completes only while the server end runs its
+// own, so the peer is accepted before drive_reconnect() is spawned. The caller's reader that a
+// standalone initiator needs (B-103-9) is reader(): it reads the installed transport and discards
+// what it reads, so the TLS records the server end sends after the handshake are consumed, as a
+// caller's reader consumes them; a socket closed with unread bytes is reset, which the peer
+// would read as an abortive ending whatever the session's close. The wall-clock timers: the
+// TLS handshake and tls_close_timeout, both met at once on loopback; the mock clock moves only
+// where a cell moves it.
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+namespace rg = fixpp::test_support::resend_gap;
+
+struct DirectTlsCell {
+    rg::Scene s;
+    std::unique_ptr<fixpp::transport::test::LoopbackTlsFixture> fx;
+    std::shared_ptr<t105::TlsPeer> peer;
+
+    // False when the fixture directory is not set: the caller skips.
+    [[nodiscard]] bool build(std::function<void(SessionConfig&)> const& tweak) {
+        char const* env = std::getenv("FIXPP_TLS_FIXTURE_DIR");
+        std::string const dir = env != nullptr ? env : FIXPP_TLS_FIXTURE_DIR;
+        if (dir.empty()) return false;
+        fx =
+            std::make_unique<fixpp::transport::test::LoopbackTlsFixture>(dir, s.ioc.get_executor());
+        fixpp::tls::file_cert_source::Config cs;
+        cs.leaf_path = dir + "/leaf_rsa2048.pem";
+        cs.private_key_path = dir + "/leaf_rsa2048.key";
+        cs.ca_bundle_path = dir + "/ca.pem";
+        auto source = fixpp::tls::file_cert_source::make_file_cert_source(
+            cs, std::pmr::new_delete_resource());
+        if (!source.has_value()) return false;
+        fixpp::tls::SslCtxConfig ssl;
+        ssl.profile = fixpp::tls::SecurityProfile::mtls_ca;
+        ssl.cs = std::move(*source);
+        ssl.clock = nullptr;
+        ssl.caps = fixpp::tls::CertSourceCaps{};
+        auto factory = fixpp::transport::make_asio_tls_transport_factory(
+            fixpp::transport::Transport::Config{}, ssl);
+        if (!factory.has_value()) return false;
+        s.cfg.transport_factory_override =
+            std::shared_ptr<fixpp::transport::TransportFactory>{std::move(*factory)};
+        s.cfg.reconnect_endpoint = fx->server_endpoint();
+        s.cfg.security_profile =
+            fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::one_way_ca};
+        if (tweak) tweak(s.cfg);
+        s.session = std::make_unique<fixpp::session::Session>(s.engine, s.cfg);
+        return true;
+    }
+
+    template <class Awaitable>
+    [[nodiscard]] std::optional<fixpp::core::expected_t<void>> run(Awaitable a, const char* site) {
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                                  std::move(a), asio::use_future);
+        if (!fixpp::test_support::pump_until(
+                s.ioc, [&] { return rg::Scene::ready(fut); }, 5s, 5ms, site)) {
+            return std::nullopt;
+        }
+        return fut.get();
+    }
+
+    // open(), the server end accepted, drive_reconnect(), the Logon read by the peer, then the
+    // peer's Logon fed: Active.
+    [[nodiscard]] bool to_active() {
+        auto const opened = run(s.session->open(), "open");
+        if (!opened || !opened->has_value()) return false;
+        peer = t105::TlsPeer::accept(s.ioc, *fx);
+        auto const connected = run(s.session->drive_reconnect(), "drive_reconnect");
+        if (!connected || !connected->has_value()) return false;
+        asio::co_spawn(s.ioc, reader(&s.session->live_transport()), asio::detached);
+        if (!fixpp::test_support::pump_until(
+                s.ioc,
+                [&] { return peer->ready && !pr::frames_of_type(peer->received, "A").empty(); }, 5s,
+                5ms, "the Logon at the peer")) {
+            return false;
+        }
+        (void)s.feed(s.logon(1));
+        return s.state() == fsm_state::Active;
+    }
+
+    [[nodiscard]] bool close_notify_at_once(const char* site) {
+        bool const ended = t105::pump_until_peer_read_ends(
+            s.ioc, [&] { return peer && peer->read_ended; }, kWallCap, site);
+        return ended && peer->ending() == t105::peer_ending::close_notify;
+    }
+
+    // The caller's reader: reads until its read fails (the transport closed).
+    static asio::awaitable<void> reader(fixpp::transport::Transport* t) {
+        std::array<std::byte, 4096> buf{};
+        for (;;) {
+            auto const r = co_await t->async_read_some(std::span<std::byte>{buf});
+            if (!r.has_value()) co_return;
+        }
+    }
+};
+
+#define FIXPP_105_DIRECT_TLS_CELL(cell, tweak) \
+    DirectTlsCell cell;                        \
+    if (!(cell).build(tweak)) GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set"
+
+// The liveness loop's give-up (R-1, class D) on a direct Session: the Logout, then the close at
+// the loop's exit, a close_notify.
+TEST(TlsClose105, DirectSessionGiveUp_PeerReceivesCloseNotify) {
+    FIXPP_105_DIRECT_TLS_CELL(c, [](SessionConfig& s) {
+        s.heartbeat_interval = kHb;
+        s.test_request_threshold = std::chrono::milliseconds{kHb};
+    });
+    bool const up = c.to_active();
+    bool tr = false;
+    bool ended = false;
+    bool closed = false;
+    std::size_t mark = 0;
+    if (up) {
+        mark = c.peer->received.size();
+        auto const read = t105::advance_until_msg_type(
+            *c.s.mock, c.s.ioc, [&] { return c.peer->received; }, "1", 0, 1s,
+            t105::liveness_wire_cap(kHb, 1s), "TlsClose105.DirectSessionGiveUp: the TestRequest");
+        tr = read.has_value();
+        std::chrono::nanoseconds advanced{0};
+        while (c.s.state() == fsm_state::Active && advanced < t105::liveness_wire_cap(kHb, 1s)) {
+            c.s.mock->advance(1s);
+            advanced += 1s;
+            (void)t105::drive_bounded(c.s.ioc, 64);
+        }
+        ended = c.s.state() == fsm_state::Disconnected;
+        closed = c.close_notify_at_once("TlsClose105.DirectSessionGiveUp");
+    }
+    EXPECT_TRUE(up && tr) << "setup";
+    EXPECT_TRUE(ended) << "setup: the give-up did not end the session";
+    EXPECT_EQ(
+        pr::frames_of_type(c.peer ? c.peer->received.substr(mark) : std::string{}, "5").size(), 1U)
+        << "the give-up's Logout";
+    EXPECT_TRUE(closed) << "no close_notify after the give-up; ending "
+                        << t105::peer_ending_name(c.peer ? c.peer->ending()
+                                                         : t105::peer_ending::open)
+                        << ", read error "
+                        << (c.peer && c.peer->read_error ? static_cast<int>(*c.peer->read_error)
+                                                         : -1);
+}
+
+// Session::send whose store call fails on a persistent store (class A): nothing transmitted,
+// the session ended, and the close at the call's exit, a close_notify.
+TEST(TlsClose105, DirectSessionSendStoreFailure_PeerReceivesCloseNotify) {
+    auto st = std::make_shared<t105::gate_store_state>();
+    FIXPP_105_DIRECT_TLS_CELL(c, [st](SessionConfig& s) {
+        s.store_factory = std::make_shared<t105::GateStoreFactory>(st);
+    });
+    bool const up = c.to_active();
+    bool failed = false;
+    bool closed = false;
+    std::size_t mark = 0;
+    if (up) {
+        mark = c.peer->received.size();
+        st->fail_when = [](t105::store_call k, fixpp::session::seqnum_t) {
+            return k == t105::store_call::store_outbound;
+        };
+        static constexpr char kPayload[] = "35=D\x01";
+        auto const r = c.run(
+            c.s.session->send(std::as_bytes(std::span{kPayload, sizeof(kPayload) - 1})), "send");
+        failed = r.has_value() && !r->has_value();
+        closed = c.close_notify_at_once("TlsClose105.DirectSessionSendStoreFailure");
+    }
+    EXPECT_TRUE(up) << "setup";
+    EXPECT_TRUE(failed) << "setup: the send did not fail";
+    EXPECT_GE(st->calls_failed, 1U) << "setup: the store call did not fail";
+    EXPECT_EQ(c.s.state(), fsm_state::Disconnected) << "setup: the send did not end the session";
+    EXPECT_TRUE(
+        pr::frames_of_type(c.peer ? c.peer->received.substr(mark) : std::string{}, "D").empty())
+        << "the message was transmitted";
+    EXPECT_TRUE(closed) << "no close_notify after the send returned; ending "
+                        << t105::peer_ending_name(c.peer ? c.peer->ending()
+                                                         : t105::peer_ending::open);
 }
 
 }  // namespace

@@ -930,6 +930,61 @@ TEST_P(ConnectionClose105, InsideClose_NoSecondClose) {
     EXPECT_EQ(c.app->logouts, 1) << "onLogout";
 }
 
+// [guard: the latch's lifecycle term deleted] A class P ending (the BeginString guard) recorded
+// while a graceful close() is in its Logout's store call. close() owns the connection from its
+// commit of closing, so the ending owes nothing and the pump does not close the session: the
+// Logout's store call runs to its end (FR-008), the Logout is written, and the close() that owns
+// the connection closes it and returns success. A second consumer of the ending would close the
+// session terminally inside the graceful close, which escalates it (093 OD-29) and cancels its
+// phase 1 in the held store call, so the Logout is not written. The wall-clock timers: close()'s
+// grace timer, set here above every wait of the cell, and none other (the GateStore hold is
+// released only by the cell).
+TEST_P(ConnectionClose105, InsideClose_EndingDuringItsLogoutStore_NoSecondClose) {
+    Cell c;
+    auto st = std::make_shared<t105::gate_store_state>();
+    auto cfg = c.cfg(GetParam());
+    cfg.store_factory = std::make_shared<t105::GateStoreFactory>(st);
+    cfg.logout_disconnect_timeout_ms = 30000;
+    bool const active = c.start_active(std::move(cfg));
+    bool held = false;
+    bool ended = false;
+    bool eof = false;
+    bool close_ok = false;
+    std::string after;
+    if (active) {
+        auto const mark = c.rig.peer.received.size();
+        auto s = c.session();
+        st->hold_when = [](t105::store_call k, seqnum_t) {
+            return k == t105::store_call::store_outbound;
+        };
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s, c.rig.ioc),
+                                  s->close(fixpp::session::close_mode::graceful), asio::use_future);
+        held = c.rig.run_until([&] { return st->parked == 1U; });
+        st->hold_when = nullptr;
+        c.rig.peer.send(pr::message("FIX.4.4", "0", 2, "TW", "ISLD", c.rig.sending_time()));
+        ended = c.rig.run_until([&] { return c.rig.state() == fsm_state::Disconnected; });
+        // The pump has returned from the ending's frame before the release, so a consumer of a
+        // latch the ending set has run by then.
+        c.rig.settle(std::chrono::milliseconds{50});
+        st->release_all();
+        eof = c.eof_at_once("InsideCloseEndingDuringItsLogoutStore");
+        bool const done =
+            c.rig.run_until([&] { return fut.wait_for(0s) == std::future_status::ready; });
+        close_ok = done && fut.get().has_value();
+        after = c.wire_since(mark);
+    }
+    st->release_all();
+    c.rig.stop();
+    EXPECT_TRUE(active) << "setup";
+    EXPECT_TRUE(held) << "setup: close()'s Logout was not held in its store call";
+    EXPECT_TRUE(ended) << "setup: the BeginString guard did not end the session";
+    EXPECT_EQ(pr::frames_of_type(after, "5").size(), 1U)
+        << "close()'s Logout, whose store call the ending did not cut: " << after;
+    EXPECT_TRUE(eof) << "the peer's read did not end in EOF";
+    EXPECT_TRUE(close_ok) << "close(graceful) did not return success";
+    EXPECT_EQ(c.app->logouts, 1) << "onLogout";
+}
+
 FIXPP_105_BOTH_ROLES(ConnectionClose105);
 
 // ════════════════════════════════════════════════════════════════════════════════════════
