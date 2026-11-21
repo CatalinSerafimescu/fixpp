@@ -2,6 +2,12 @@
 //
 // tests/session/test_537_unbuildable_frames.cpp
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
+//
 // fixpp#537, D-537-7 and D-537-5 (.specify/536-537-538-recovery-liveness.md §4.3; the rows
 // "D-537-7" and "D-537-5, a Logout that cannot be built" of §5): a frame the session cannot
 // build in its fixed frame buffer.

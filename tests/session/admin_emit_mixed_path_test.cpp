@@ -2,6 +2,12 @@
 //
 // tests/session/admin_emit_mixed_path_test.cpp
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
+//
 // 010-session-cfg-lifetime T019 / Phase 5 / US3.
 //
 // FR-008 / SC-005 — gated-emit permutations at admin emit sites 1+2 (RC#G

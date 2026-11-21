@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // tests/capi/recovery_liveness_capi_witness_test.cpp — fixpp#536, fixpp#537, fixpp#538: the
+//
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
 // C-ABI witnesses of the 1.12 clause (.specify/536-537-538-recovery-liveness.md §6.2,
 // owner ruling R-8). One cell per witness of that section's table; each cell's comment
 // names its row by the row's first words.

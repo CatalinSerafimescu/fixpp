@@ -2,11 +2,17 @@
 //
 // tests/session/test_103_too_low_logout.cpp — test-only.
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
+//
 // Feature 103 (specs/103-resend-logon-reset-fidelity/), fixpp#581, research D9 (FR-018) and
 // D6's too-low Heartbeat (tasks T136 to T143): in Active, a frame below NextNumIn without
 // PossDupFlag(43)=Y that reaches the sequence check draws QuickFIX's too-low Logout,
-// "MsgSeqNum too low, expecting <N> but received <M>", then Disconnected. The cells B-1 to
-// B-8.
+// "MsgSeqNum too low, expecting <N> but received <M>", then Disconnected at the end of its R-2
+// wait (above). The cells B-1 to B-8.
 //
 // Each cell runs a directly driven Session (resend_gap_scene.hpp's Scene); the cells drive
 // NextNumIn to 5 with in-sequence orders first. The cells B-1 to B-6 and B-8 read no 103

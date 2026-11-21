@@ -2,6 +2,12 @@
 //
 // tests/session/test_103_too_high_logout_state.cpp — test-only.
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
+//
 // Feature 103 (specs/103-resend-logon-reset-fidelity/), fixpp#577, the Logout half: TU2, the
 // cells that read 103 state (the pending-Logout mark's phase, the Logout owner, the bound's
 // join counter; research D4.2 to D4.7, "#577 — a too-high Logout"; tasks T080 onward). The

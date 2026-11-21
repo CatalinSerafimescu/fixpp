@@ -2,6 +2,12 @@
 //
 // tests/session/resend_gap_scene.hpp — test-only.
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
+//
 // fixpp#537 (.specify/536-537-538-recovery-liveness.md §4 and the #537 table of §5): one
 // directly driven Session, on either role, that a cell brings to Active and then feeds the
 // peer's frames by hand. No Engine. The cell's own coroutines call open() and

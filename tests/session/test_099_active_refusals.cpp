@@ -2,6 +2,12 @@
 //
 // tests/session/test_099_active_refusals.cpp
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
+//
 // 099-fixt-appl-version-validation, contracts/witnesses.md W-4 (tasks.md T011): data-model
 // E-7's AC row, `AC-a` to `AC-g`, every input of each column, on T, A and L, each literal from
 // E-7's `#### After`. `AC-admin` is the other admin frames of the keyed logs, whose After is

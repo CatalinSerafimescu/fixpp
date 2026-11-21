@@ -751,7 +751,7 @@ does not complete closes the connection at the bound.
 
 ### Mutant and spurious-hit arms for US1 part B (in `$M` at `H2`; quickstart section 5)
 
-- [X] T074 [US1] The response test deleted, and moved below the too-high branch: the off-NextNumIn `*_EndsWaitAndResets` cells
+- [ ] T074 [US1] The response test deleted, and moved below the too-high branch: the off-NextNumIn `*_EndsWaitAndResets` cells
   of T042 RED. The response test moved below the PossDup stage-1 arm: T042's `PeerLogoutPossDupY_<AtNextNumIn|BelowNextNumIn>_EndsWait`
   RED.
 - [X] T075 [US1] Absorption: `send_ending_logout_`'s absorb branch deleted, and `end_session_silently_` recording while armed
@@ -788,7 +788,9 @@ does not complete closes the connection at the bound.
 - [ ] T080 [US1] Record the part-B mutant table; every quickstart section 5 mutant named in T036 to T041 and T074 to T079 has a
   RED row, or the task stops.
 
-Phase 4 status (evidence file, "Phase 4 run 2"): T070, T078, T079 and T080 stay open. T070 lacks
+Phase 4 status (evidence file, "Phase 4 run 2"): T070, T074, T078, T079 and T080 stay open. T074's
+`GapDeadline_PeerLogoutAboveNextNumIn_EndsWaitAndResets` and `PeerLogoutPossDupY_AtNextNumIn_EndsWait` read GREEN under
+their named mutants (each route reaches the same ending by another arm; escalated). T070 lacks
 `EndingBound_RaceThrows_Armed_ResendAnswerBlocked_EofAtOnce` (the race seam has no wake to run at while the answer is
 blocked; escalated) and so T079's armed failure-exit mutant on it; T078's second and first close-frame joins of
 `close()` survive their mutants (no cell discriminates them); T080 stops on those survivors and on T074's two

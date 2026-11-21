@@ -2,6 +2,12 @@
 //
 // tests/session/sending_time_test.cpp
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
+//
 // Seam #8 — SendingTime(52) MaxLatency enforcement (Q3).
 // (005-session-establishment-fsm T051 / Phase 7 / US5)
 //

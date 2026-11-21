@@ -2,6 +2,12 @@
 //
 // tests/session/test_103_resend_state_reconnect.cpp — test-only.
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
+//
 // Feature 103 (specs/103-resend-logon-reset-fidelity/), fixpp#578: the resend state ends with
 // the connection. research.md "RED cells", "#578 — resend state across an in-place
 // reconnect"; tasks T018 (arms A, B, E and the fresh-Session control), T039 (arm C), T110

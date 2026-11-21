@@ -2,11 +2,18 @@
 //
 // tests/session/test_537_gap_deadline.cpp
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
+//
 // fixpp#537, D-537-5 and D-537-9 (.specify/536-537-538-recovery-liveness.md §4.3, §4.6,
 // §4.7 and the #537 table of §5): an unfilled gap has a deadline. When a frame that does
 // not advance NextNumIn arrives while a resend is outstanding, and NextNumIn has not
 // advanced for twice HeartBtInt, the session sends a Logout whose Text(58) names the
-// unanswered resend and records Disconnected (103 research D6 widened "above NextNumIn" to
+// unanswered resend and records Disconnected at the end of its R-2 wait (above; 103 research
+// D6 widened "above NextNumIn" to
 // every frame that does not advance it). The check runs where such a frame leaves the
 // inbound arm without ending the session, and nowhere else: no timer is added.
 //
