@@ -1,8 +1,198 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// tests/session/test_105_tls_close.cpp — 105-transport-liveness (tasks.md T003).
+// tests/session/test_105_tls_close.cpp — 105-transport-liveness: the close is orderly on TLS
+// (tasks.md T024; contract C-8.1; FR-002).
 //
-// The TLS close of an ending (FR-002; research D10, the TLS rigs).
+// The rig (research D10):
+//   - the Engine over TLS, tests/session/engine_loopback_harness.hpp, acceptor role (the
+//     registered initiator's endpoint is a placeholder): the peer is test_105_support.hpp's
+//     TlsPeer::connect, an mTLS client of the acceptor's listener. The pump consumes the
+//     ending, so every class runs here.
+// The oracle: the peer reads the frames the class writes, then a close_notify (its read ends
+// with transport_read_eof), within the wall cap with the mock clock still. The wall-clock
+// timers: the TLS handshake timeout (the handshake completes before any cell's instant),
+// tls_close_timeout (the close_notify is written at once when no SSL operation is suspended
+// past close_async's quiesce), and close()'s grace timer, which no cell reaches.
 //
-// The ctest entry registers this file whether or not it holds cells yet, so it compiles on its
-// own, on the base as at the head; each cell task of tasks.md appends its cells here.
+// No ASSERT_* runs between an engine's start() and its stop(), which engine_stop_guard owns.
+#include <gtest/gtest.h>
+
+#include <array>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
+#include <chrono>
+#include <cstddef>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/fix_time.hpp>
+#include <fixpp/session/application.hpp>
+#include <fixpp/session/compid_authorization_policy.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <functional>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+
+#include "session/engine_loopback_harness.hpp"
+#include "session/plain_engine_rig.hpp"
+#include "session/test_105_support.hpp"
+#include "support/pump_until_ready.hpp"
+
+namespace {
+
+using namespace std::chrono_literals;
+using fixpp::session::fsm_state;
+using fixpp::session::SessionConfig;
+namespace pr = fixpp::test_support::plain_rig;
+namespace t105 = fixpp::test_support::t105;
+
+constexpr std::chrono::milliseconds kWallCap{3000};
+constexpr std::chrono::seconds kHb{10};
+
+std::string stamp(fixpp::core::mock_clock const& clock) {
+    std::array<char, 32> buf{};
+    auto const r = fixpp::core::utc_time_to_fix_string(
+        clock.now(), fixpp::core::fix_time_precision::millis, std::span<char>{buf});
+    return r ? std::string{r->data(), r->size()} : std::string{};
+}
+
+// The Engine-over-TLS cell: the harness's acceptor with the cell's edits, the mock clock as the
+// engine clock, and the peer connected once the listener is bound.
+struct TlsEngineCell {
+    asio::io_context ioc;
+    std::shared_ptr<fixpp::core::mock_clock> clock = t105::make_mock_clock(ioc.get_executor());
+    std::unique_ptr<fixpp::test_support::EngineLoopbackHarness> h;
+    std::shared_ptr<t105::TlsPeer> peer;
+
+    // False when the harness could not be built (no fixture directory): the caller skips.
+    [[nodiscard]] bool build(std::function<void(SessionConfig&)> const& tweak) {
+        fixpp::core::EngineConfig ec;
+        ec.executor = ioc.get_executor();
+        ec.clock = clock;
+        h = fixpp::test_support::EngineLoopbackHarness::build(
+            ioc.get_executor(), std::move(ec), true, [&](SessionConfig& c) {
+                fixpp::session::CompIdAuthorizationPolicy authz;
+                authz.add_binding("fixpp-leaf-rsa2048", "INITIATOR");
+                c.compid_authorization_policy = authz;
+                if (tweak) tweak(c);
+            });
+        return h != nullptr;
+    }
+    [[nodiscard]] bool start_and_connect() {
+        if (!h->engine().start().has_value()) return false;
+        if (!fixpp::test_support::pump_until(
+                ioc, [&] { return h->server_endpoint().port != 0; }, 5s, 5ms, "bind")) {
+            return false;
+        }
+        peer = t105::TlsPeer::connect(ioc, h->transport_fixture(), h->server_endpoint());
+        return fixpp::test_support::pump_until(
+                   ioc, [&] { return peer->ready || peer->setup_failed; }, 5s, 5ms, "connect") &&
+               peer->ready;
+    }
+    [[nodiscard]] std::string msg(std::string_view type, unsigned seq,
+                                  std::string_view extra = {}) {
+        return pr::message("FIX.4.2", type, seq, "INITIATOR", "ACCEPTOR", stamp(*clock), extra);
+    }
+    [[nodiscard]] fsm_state state() {
+        auto s = h->engine().lookup(h->acceptor_id());
+        return s ? s->state() : fsm_state::NotConnected;
+    }
+    [[nodiscard]] bool logon(std::string_view hb = "30") {
+        peer->send(msg("A", 1,
+                       "98=0\x01"
+                       "108=" +
+                           std::string{hb} + "\x01"));
+        return fixpp::test_support::pump_until(
+            ioc, [&] { return state() == fsm_state::Active; }, 5s, 5ms, "logon");
+    }
+    [[nodiscard]] bool close_notify_at_once(const char* site) {
+        bool const ended =
+            t105::pump_until_peer_read_ends(ioc, [&] { return peer->read_ended; }, kWallCap, site);
+        return ended && peer->ending() == t105::peer_ending::close_notify;
+    }
+};
+
+#define FIXPP_105_TLS_ENGINE_CELL(cell, tweak)                                 \
+    TlsEngineCell cell;                                                        \
+    if (!(cell).build(tweak)) GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set"; \
+    fixpp::test_support::engine_stop_guard stop_guard_ { *(cell).h, (cell).ioc }
+
+TEST(TlsClose105, PumpSilentEnding_PeerReceivesCloseNotify) {
+    FIXPP_105_TLS_ENGINE_CELL(c, nullptr);
+    bool const up = c.start_and_connect() && c.logon();
+    bool closed = false;
+    if (up) {
+        c.peer->send(pr::message("FIX.4.4", "0", 2, "INITIATOR", "ACCEPTOR", stamp(*c.clock)));
+        closed = c.close_notify_at_once("TlsClose105.PumpSilentEnding");
+    }
+    EXPECT_TRUE(up) << "setup";
+    EXPECT_TRUE(closed) << "no close_notify at once; ending "
+                        << t105::peer_ending_name(c.peer ? c.peer->ending()
+                                                         : t105::peer_ending::open);
+}
+
+// The liveness loop's give-up while the pump is parked in a TLS read (B&L B-348-1's case).
+TEST(TlsClose105, GiveUpWhilePumpParkedInRead_PeerReceivesCloseNotify) {
+    FIXPP_105_TLS_ENGINE_CELL(c, [](SessionConfig& s) {
+        s.heartbeat_interval = kHb;
+        s.test_request_threshold = std::chrono::milliseconds{kHb};
+    });
+    bool const up = c.start_and_connect() && c.logon("10");
+    bool closed = false;
+    bool tr = false;
+    if (up) {
+        auto const read = t105::advance_until_msg_type(
+            *c.clock, c.ioc, [&] { return c.peer->received; }, "1", 0, 1s,
+            t105::liveness_wire_cap(kHb, 1s), "TlsClose105.GiveUp: the TestRequest");
+        tr = read.has_value();
+        std::chrono::nanoseconds advanced{0};
+        while (c.state() == fsm_state::Active && advanced < t105::liveness_wire_cap(kHb, 1s)) {
+            c.clock->advance(1s);
+            advanced += 1s;
+            (void)t105::drive_bounded(c.ioc, 64);
+        }
+        closed = c.close_notify_at_once("TlsClose105.GiveUp");
+    }
+    EXPECT_TRUE(up && tr) << "setup";
+    EXPECT_EQ(pr::frames_of_type(c.peer ? c.peer->received : std::string{}, "5").size(), 1U)
+        << "the give-up's Logout";
+    EXPECT_TRUE(closed) << "no close_notify after the give-up";
+}
+
+// A refusal before Active that sends nothing: the acceptor's first frame is a faulty Logon
+// (092's D-1).
+TEST(TlsClose105, PreActiveSilentRefusal_PeerReceivesCloseNotify) {
+    FIXPP_105_TLS_ENGINE_CELL(c, nullptr);
+    bool const up = c.start_and_connect();
+    bool closed = false;
+    if (up) {
+        c.peer->send(c.msg("A", 1,
+                           "98=0\x01"
+                           "108=30\x01"
+                           "9x9=1\x01"));
+        closed = c.close_notify_at_once("TlsClose105.PreActiveSilentRefusal");
+    }
+    EXPECT_TRUE(up) << "setup";
+    EXPECT_TRUE(closed) << "no close_notify at once after the refusal";
+}
+
+TEST(TlsClose105, PeerLogoutReply_PeerReceivesCloseNotify) {
+    FIXPP_105_TLS_ENGINE_CELL(c, nullptr);
+    bool const up = c.start_and_connect() && c.logon();
+    bool closed = false;
+    std::size_t mark = 0;
+    if (up) {
+        mark = c.peer->received.size();
+        c.peer->send(c.msg("5", 2));
+        closed = c.close_notify_at_once("TlsClose105.PeerLogoutReply");
+    }
+    EXPECT_TRUE(up) << "setup";
+    EXPECT_EQ(
+        pr::frames_of_type(c.peer ? c.peer->received.substr(mark) : std::string{}, "5").size(), 1U)
+        << "the reply Logout";
+    EXPECT_TRUE(closed) << "no close_notify after the reply";
+}
+
+}  // namespace
