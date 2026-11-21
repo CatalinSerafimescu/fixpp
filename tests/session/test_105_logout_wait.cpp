@@ -1480,6 +1480,9 @@ TEST(LogoutWait105Acceptor, PreActive_WaitArmedAtEstablishmentDeadline_ClosedNoE
     EXPECT_EQ(events, 0) << "an establishment-timeout event at the wait's close";
 }
 
+// [guard: the bound's pre-Active live predicate without its state_ == lifecycle::open term]: the
+// base already closes once here; under the mutant close() waits on the bound's join with the
+// mock clock still.
 TEST_P(LogoutWait105, PreActive_CloseDuringWait_OneClose) {
     PreActiveWait w{GetParam(), production_posture, "464=Y\x01"};
     EXPECT_TRUE(w.refused && w.open_after) << "setup";
@@ -1697,16 +1700,20 @@ TEST(LogoutWait105Acceptor, PreActive_ClockOverride_CapOnEngineClock) {
     bool const refused = up && refuse_before_active(c, "464=Y\x01", mark);
     bool open_before = false;
     bool eof = false;
+    int events = -1;
     if (refused) {
         c.advance(999ms);
         open_before = c.still_open();
         c.rig.clock->advance(1ms);
         eof = c.eof_at_once("ClockOverride");
+        if (auto s = c.rig.session()) events = establishment_timeouts(*s);
     }
     c.rig.stop();
     EXPECT_TRUE(refused) << "setup";
     EXPECT_TRUE(open_before) << "closed before the establishment deadline";
     EXPECT_TRUE(eof) << "the cap on the engine clock did not close the connection";
+    EXPECT_EQ(events, 0)
+        << "an establishment-timeout event: the pump's deadline closed it, not the cap";
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════
