@@ -143,7 +143,7 @@ marked **(orchestrator)** is run or requested by the orchestrator; every other t
   MsgType is read, with a mock-clock cap above 2.4 × HeartBtInt plus the guard that fails as an assertion; an
   `INSTANTIATE_TEST_SUITE_P` over `session_role` as 537's cells use. No production symbol 105 adds is read, so it
   compiles on `$B`.
-  Done: evidence file, section T004 / T005.
+  Done: evidence file, section T004 / T005. `test_105_connection_close.cpp` includes the header (it is not an empty TU), so every build of `session_105_tests`, on `$B` too, compiles it.
 - [X] T005 `tests/session/test_105_support.hpp`, part 2 (same file as T004): the counting `Clock` decorator over
   `mock_clock` (counts `sleep_until` calls and forwards each; on request from the test, throws `std::bad_alloc` from
   `sleep_until` for one named instant only), for `SessionConfig::clock_override`; the held-write transport (the scripted
@@ -221,7 +221,7 @@ production code. **Blocks every story phase.**
   count (Heartbeat and application frames through `run_read_pump`, the unarmed path), identical on base and candidate;
   and record whether `on_inbound_frame_bench`'s Heartbeat case runs with a TestRequest pending (plan Constitution Check
   VIII): if it does not, T138 adds that case.
-  Done: evidence file, section T014. Frame mix fixed there: one Heartbeat and one NewOrderSingle per iteration, `->Iterations(20000)`; `on_inbound_frame_bench` has no Heartbeat-with-TestRequest-pending case, so T138 adds it.
+  Done: evidence file, section T014. Frame mix fixed there: one Heartbeat and one NewOrderSingle per iteration, `->Iterations(20000)`; `on_inbound_frame_bench` has no Heartbeat-with-TestRequest-pending case, so T138 adds it. Escalated there: CI's paired `engine_send_bench` entry skips a benchmark only the candidate has, so the local A-B-A-B run is the pump case's only paired reading.
 - [X] T015 [P] Pre-session reject census (data-model E-6): every `(void)transport->close(); continue;` in
   `run_accept_loop` before `open()` maps to one row of E-6, plus the listener `catch (...)`; a branch with no row is a
   table defect for the orchestrator.

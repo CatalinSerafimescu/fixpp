@@ -25,6 +25,8 @@
 #include <array>
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
+#include <asio/bind_cancellation_slot.hpp>
+#include <asio/cancellation_signal.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/error.hpp>
@@ -473,8 +475,12 @@ struct HeldWrite {
 // ending_wait_.cut; research D10, "The write completing after the bound has fired"). Its
 // async_write commits the bytes to committed (the peer's view) at once, then, while
 // hold_completion is set, holds its success completion until release_completion(); once released
-// it returns success, even when the transport was closed meanwhile. That is the one difference
-// from mock_transport's write_hold, whose held write returns transport_write_cancelled at close.
+// it returns success, even when the transport was closed or the writer cancelled meanwhile (the
+// hold runs in a coroutine of its own with no cancellation slot, and the write awaits nothing
+// after it). That is the one difference from mock_transport's write_hold, whose held write
+// returns transport_write_cancelled at close. A write whose caller's cancellation was emitted
+// before it began meets it at the hold's await, as asio meets it in any coroutine, and throws
+// operation_aborted with its bytes already committed.
 struct deferred_completion_state {
     std::string committed;           // every byte written, in write order: the peer's view
     bool hold_completion = false;    // the next write holds its completion
@@ -528,16 +534,9 @@ public:
         for (std::byte const b : bytes) state_->committed.push_back(static_cast<char>(b));
         ++state_->writes_committed;
         if (state_->hold_completion) {
-            state_->completion_parked = true;
-            // NOLINTBEGIN(bugprone-unchecked-optional-access): the constructor emplaces the timer
-            state_->parked_timer->expires_at(asio::steady_timer::time_point::max());
-            while (state_->hold_completion) {
-                std::error_code ec;
-                co_await state_->parked_timer->async_wait(
-                    asio::redirect_error(asio::use_awaitable, ec));
-            }
-            // NOLINTEND(bugprone-unchecked-optional-access)
-            state_->completion_parked = false;
+            co_await asio::co_spawn(
+                co_await asio::this_coro::executor, hold_completion(state_),
+                asio::bind_cancellation_slot(asio::cancellation_slot{}, asio::use_awaitable));
         }
         ++state_->completions_returned;
         co_return bytes.size();
@@ -557,6 +556,28 @@ public:
     }
 
 private:
+    // The held completion, in a coroutine of its own spawned with no cancellation slot, so
+    // neither the writer's cancellation nor a close ends it: only release_completion() does.
+    static asio::awaitable<void> hold_completion(std::shared_ptr<deferred_completion_state> s) {
+        struct parked_flag {
+            deferred_completion_state& st;
+            explicit parked_flag(deferred_completion_state& state) : st{state} {
+                st.completion_parked = true;
+            }
+            parked_flag(parked_flag const&) = delete;
+            parked_flag& operator=(parked_flag const&) = delete;
+            ~parked_flag() { st.completion_parked = false; }
+        };
+        parked_flag const flag{*s};
+        // NOLINTBEGIN(bugprone-unchecked-optional-access): the constructor emplaces the timer
+        s->parked_timer->expires_at(asio::steady_timer::time_point::max());
+        while (s->hold_completion) {
+            std::error_code ec;
+            co_await s->parked_timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
+        }
+        // NOLINTEND(bugprone-unchecked-optional-access)
+    }
+
     std::shared_ptr<deferred_completion_state> state_;
 };
 
@@ -607,7 +628,11 @@ enum class store_call : std::uint8_t {
 // A GateStore's controls and readings, shared with the test. hold_when and fail_when are asked
 // at every call with the call's kind and its sequence number (store's seq, retrieve's begin, 0
 // elsewhere). A held call waits until release_all(), then proceeds, or fails when fail_held is
-// set; a failed call returns store_io_failure without reaching the inner store.
+// set; a failed call returns store_io_failure without reaching the inner store. A held call is
+// not cut by its caller's cancellation (a store call is not cut, FR-008): the hold runs in a
+// coroutine of its own with no cancellation slot. A cancellation emitted before the call, or
+// during the hold, is met at the call's next await, as asio meets it in any coroutine: the call
+// then ends with operation_aborted, a store call cancelled before it held its lock.
 struct gate_store_state {
     std::function<bool(store_call, fixpp::session::seqnum_t)> hold_when;
     std::function<bool(store_call, fixpp::session::seqnum_t)> fail_when;
@@ -619,7 +644,7 @@ struct gate_store_state {
     std::shared_ptr<fixpp::session::MemoryStore> inner =
         std::make_shared<fixpp::session::MemoryStore>(fixpp::session::MemoryStore::Config{
             .policy = fixpp::session::capacity_policy::unbounded});
-    std::vector<asio::steady_timer*> waiting;  // the held calls' waits
+    std::vector<asio::steady_timer*> waiting;  // the held calls' waits, each while it lives
     std::size_t releases = 0;                  // release_all() calls
 
     // Releases every call holding now; a call that begins a hold later waits for the next.
@@ -678,17 +703,9 @@ private:
         state_->calls.push_back(k);
         if (state_->hold_when && state_->hold_when(k, seq)) {
             ++state_->calls_held;
-            ++state_->parked;
-            asio::steady_timer t{co_await asio::this_coro::executor,
-                                 asio::steady_timer::time_point::max()};
-            state_->waiting.push_back(&t);
-            auto const releases = state_->releases;
-            while (state_->releases == releases) {
-                std::error_code ec;
-                co_await t.async_wait(asio::redirect_error(asio::use_awaitable, ec));
-            }
-            std::erase(state_->waiting, &t);
-            --state_->parked;
+            co_await asio::co_spawn(
+                co_await asio::this_coro::executor, hold_until_released(state_),
+                asio::bind_cancellation_slot(asio::cancellation_slot{}, asio::use_awaitable));
             if (state_->fail_held) {
                 ++state_->calls_failed;
                 co_return fixpp::core::error::store_io_failure;
@@ -700,6 +717,35 @@ private:
             co_return fixpp::core::error::store_io_failure;
         }
         co_return std::nullopt;
+    }
+
+    // The hold itself, in a coroutine of its own spawned with no cancellation slot, so the
+    // caller's cancellation does not reach its wait: only release_all() ends it. Its wait is
+    // registered in state.waiting for exactly its lifetime, whatever ends the frame (a release,
+    // or the frame's destruction with its io_context), so release_all() never meets a stale one.
+    static asio::awaitable<void> hold_until_released(std::shared_ptr<gate_store_state> s) {
+        asio::steady_timer t{co_await asio::this_coro::executor,
+                             asio::steady_timer::time_point::max()};
+        struct registration {
+            gate_store_state& st;
+            asio::steady_timer* timer;
+            registration(gate_store_state& state, asio::steady_timer* w) : st{state}, timer{w} {
+                st.waiting.push_back(timer);
+                ++st.parked;
+            }
+            registration(registration const&) = delete;
+            registration& operator=(registration const&) = delete;
+            ~registration() {
+                std::erase(st.waiting, timer);
+                --st.parked;
+            }
+        };
+        registration const reg{*s, &t};
+        auto const releases = s->releases;
+        while (s->releases == releases) {
+            std::error_code ec;
+            co_await t.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+        }
     }
 
     std::shared_ptr<gate_store_state> state_;
