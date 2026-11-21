@@ -103,13 +103,15 @@ marked **(orchestrator)** is run or requested by the orchestrator; every other t
 
 ## Phase 1: Setup (no production code)
 
-- [ ] T001 Check `git -C $T rev-parse --abbrev-ref HEAD` is `105-transport-liveness`; run the base-equivalence recipe of
+- [X] T001 Check `git -C $T rev-parse --abbrev-ref HEAD` is `105-transport-liveness`; run the base-equivalence recipe of
   the Execution rules and record its output; `df -h /mnt/wsl/fixppbuild`, then create `$B` (at
   `git -C $T merge-base HEAD origin/main`) and `$M` with `git worktree add --detach`; run `codegraph sync` in `$T` and confirm `codegraph status --json` names `$T` with a nonzero
   `fileCount`.
-- [ ] T002 Create `.specify/decisions/105-transport-liveness-evidence.md` with one section per census (T006 to T017), per
+  Done: evidence file, section T001. The base-equivalence recipe printed nothing.
+- [X] T002 Create `.specify/decisions/105-transport-liveness-evidence.md` with one section per census (T006 to T017), per
   RED reading, per mutant task and per bench run.
-- [ ] T003 Register ctest `session_105_tests` (labels `session` and `105`) in `tests/session/CMakeLists.txt` after
+  Done: evidence file, header and section skeleton.
+- [X] T003 Register ctest `session_105_tests` (labels `session` and `105`) in `tests/session/CMakeLists.txt` after
   `add_session_104_bucket`'s shape, over `tests/session/test_105_connection_close.cpp`, `test_105_logout_wait.cpp`,
   `test_105_write_limit.cpp`, `test_105_liveness_timing.cpp`, `test_105_heartbeat_knob_off.cpp`,
   `test_105_presession_log.cpp` and `test_105_tls_close.cpp` (research D10), each created here as a compiling stub (an empty translation unit) so that configure succeeds in `$T` and
@@ -128,7 +130,8 @@ marked **(orchestrator)** is run or requested by the orchestrator; every other t
   placeholder). `loopback_tls_session_harness.hpp` drives a direct initiator Session through `on_inbound_frame`, with no
   pump, and serves only the direct-Session TLS cells. Both entries define `FIXPP_TLS_FIXTURE_DIR` and link `fixpp_tls` and
   the OpenSSL and zlib libraries, as `add_session_104_bucket` does, so no TLS cell skips.
-- [ ] T004 Write `tests/session/test_105_support.hpp`, part 1: a peer-side observer of EOF and of close_notify on
+  Done: evidence file, section T003. `ci/expected-eligible-tests.txt` pins a per-lane ctest count the two entries move; its rules require a CI reading, so it is left to the PR's first CI run.
+- [X] T004 Write `tests/session/test_105_support.hpp`, part 1: a peer-side observer of EOF and of close_notify on
   `engine_loopback_harness.hpp` (a `mock_clock` passed in `EngineConfig::clock`, since `build()` installs
   `system_clock_source` only for a null one; the acceptor's `SessionConfig` edited through `configure_acceptor`),
   `plain_engine_rig.hpp` and `loopback_tls_session_harness.hpp`; on TLS the observer reads close_notify as
@@ -140,7 +143,8 @@ marked **(orchestrator)** is run or requested by the orchestrator; every other t
   MsgType is read, with a mock-clock cap above 2.4 × HeartBtInt plus the guard that fails as an assertion; an
   `INSTANTIATE_TEST_SUITE_P` over `session_role` as 537's cells use. No production symbol 105 adds is read, so it
   compiles on `$B`.
-- [ ] T005 `tests/session/test_105_support.hpp`, part 2 (same file as T004): the counting `Clock` decorator over
+  Done: evidence file, section T004 / T005.
+- [X] T005 `tests/session/test_105_support.hpp`, part 2 (same file as T004): the counting `Clock` decorator over
   `mock_clock` (counts `sleep_until` calls and forwards each; on request from the test, throws `std::bad_alloc` from
   `sleep_until` for one named instant only), for `SessionConfig::clock_override`; the held-write transport (the scripted
   transport's `write_hold` of `include/fixpp/transport/test/mock_transport.hpp`, as `test_103_resend_state_reconnect.cpp`
@@ -148,6 +152,7 @@ marked **(orchestrator)** is run or requested by the orchestrator; every other t
   completion behind a second flag and returns success once released, even after a close; data-model E-3,
   `ending_wait_.cut`); a store whose call can be held and released, and one that fails on demand; a TLS peer that stops
   reading (a zero window). All compile on `$B`.
+  Done: evidence file, section T004 / T005.
 
 ---
 
@@ -156,7 +161,7 @@ marked **(orchestrator)** is run or requested by the orchestrator; every other t
 **Purpose**: fix the populations every story asserts over, each census shown first to report its known positive. No
 production code. **Blocks every story phase.**
 
-- [ ] T006 [P] Ending-site census (research D1, "The census, by execution context"): run its write-site grep and root
+- [X] T006 [P] Ending-site census (research D1, "The census, by execution context"): run its write-site grep and root
   grep over `src/session/session.cpp` and `src/session/engine.cpp`, walk each site with `codegraph_callers` (`projectPath`
   = `$T`) to every root, and regenerate the **Ending-site table** below (one row per site and root, class P/D/A/W/X of
   data-model E-1, cell task). The walk must reproduce the three known positives (the unanswered-TestRequest write under
@@ -165,15 +170,18 @@ production code. **Blocks every story phase.**
   `Disconnected` is recorded as a census row with its synchronous chain (data-model E-2 I-5; no peer-visible observable, so no
   cell). Acceptance: no row of the regenerated table is left unclassed; each seed row reading "class: assigned by T006"
   gets P, D, A, W or X, or a named exemption.
-- [ ] T007 [P] R-2 caller and write-point census (research D2 items 1 and 11): D2 item 1's census grep (the four leaf and refusal
+  Done: evidence file, section T006. Escalated there: `honor_peer_next_expected_`'s two ending Logouts lie outside D2 item 1; data-model E-2 I-5's "synchronous chain" premise does not hold for an unguarded write after a suspension (its conclusion does).
+- [X] T007 [P] R-2 caller and write-point census (research D2 items 1 and 11): D2 item 1's census grep (the four leaf and refusal
   callers), each hit classed
   "initiates" or "replies" (known positive: `resend_gap_deadline_` initiates, `on_inbound_active_logout_` replies); and
   `grep -n 'inbound_logout_leaf_(tic' src/session/session.cpp`, each hit's enclosing function an ending, with
   `run_logout_phase1` reaching no such call.
-- [ ] T008 [P] Silent-ending and absorption census (research D2 item 4): D1's write-site grep restricted to the frame
+  Done: evidence file, section T007.
+- [X] T008 [P] Silent-ending and absorption census (research D2 item 4): D1's write-site grep restricted to the frame
   arms, each hit classed "peer-frame condition" (goes through `end_session_silently_`) or "internal failure" (stays on the
   edge); known positives: the BeginString guard of `on_inbound_active_` (peer-frame) and `inbound_resend_request_leaf_`'s
   assignment failure (internal).
+  Done: evidence file, section T008.
 - [ ] T009 [P] Supersession census (FR-019, research D11): run D11's `git grep` over `specs/ .specify/ brain/ spec/ tests/
   include/ src/ ci/`; it must report its three known positives (`tests/session/test_537_gap_deadline.cpp` "fixpp#534",
   `include/fixpp/core/error.hpp` "1×HeartBtInt", `src/session/session.cpp` "Phase 6 US4") and, by the pattern's
@@ -182,15 +190,18 @@ production code. **Blocks every story phase.**
   (rewritten by a named task below), this bundle (`specs/105-transport-liveness/`, where "off only at 0" describes the
   base), or not this rule. Every FR-019 known-positive pin must appear; a living-surface hit with no task
   is added to T128.
-- [ ] T010 [P] Size-pin census (research D7): the narrow
+  Open (escalated): the census reports its four known positives and every FR-019 pin but `HeartbeatCadence8Cell.CellC_*_UnansweredTestRequestDisconnects`, which no alternative of D11's pattern matches; the classed table and the T128 additions are in the evidence file, section T009.
+- [X] T010 [P] Size-pin census (research D7): the narrow
   `sizeof\((fixpp::session::)?(Session|ReconnectFsm)\b` grep over `src include tests ci tools bench bindings`, then the
   wide grep that must report `tests/dictionary/ref_shape_test.cpp`'s `FieldRef` pin (the instrument's proof); list every
   hit for T112.
-- [ ] T011 [P] Moved-timing census (research D10, "The cell recipe for moved timings"): the TestRequest grep over
+  Done: evidence file, section T010.
+- [X] T011 [P] Moved-timing census (research D10, "The cell recipe for moved timings"): the TestRequest grep over
   `tests/session tests/capi tests/conformance tests/interop`, read for mock-clock advances across HeartBtInt that expect a
   TestRequest or a give-up, plus `git grep -nE 'stale|different' tests/session` read near `test_req_id`; list each cell
   for T099.
-- [ ] T012 [P] C-ABI minor-pin census (research D9): `git grep -nE 'MINOR 17|1\.17' -- include tests bindings tools ci
+  Done: evidence file, section T011.
+- [X] T012 [P] C-ABI minor-pin census (research D9): `git grep -nE 'MINOR 17|1\.17' -- include tests bindings tools ci
   docs`, each hit classed "pins the minor" (moved in T117) or "history" (unchanged); then the 103 bump itself:
   `git log --format=%h -S'FIXPP_C_ABI_VERSION_MINOR 17' -- include/fix/c_api/version.h` and `git show --name-only` on that
   commit, every C-ABI file it touched being a row (version macros, `session.h` clauses, capi tests, `tools/capi_freeze.sha256`
@@ -200,49 +211,100 @@ production code. **Blocks every story phase.**
   the result per consumer category of Article X §7 (research D9): the Python binding (`bindings/`), the tests (`tests/`,
   the `tests/interop` harnesses named as their own row), examples (`ls -d examples`; none at the base, recorded as
   such), and the CI and tool scripts (`ci/`, `tools/`), so a missed category shows as an empty row.
-- [ ] T013 [P] `ReconnectFsm` census (research D7, SI-1): the stub caller grep (known positive: `drive_logout`'s test call)
+  Done: evidence file, section T012.
+- [X] T013 [P] `ReconnectFsm` census (research D7, SI-1): the stub caller grep (known positive: `drive_logout`'s test call)
   and the constructor call-site grep (known positive `tests/session/test_logout_timeout.cpp`).
-- [ ] T014 [P] Bench census (research D10, ruling D-f): read `bench/session/engine_send_bench.cpp`'s harness (its published
+  Done: evidence file, section T013. The constructor recipe misses `Session::Session`'s member initializer and one `std::make_unique` site; both are listed for T109.
+- [X] T014 [P] Bench census (research D10, ruling D-f): read `bench/session/engine_send_bench.cpp`'s harness (its published
   Active session whose read pump waits on a scripted read), `on_inbound_frame_bench` and `session_send_bench`, and
   `bench/ci-suite.txt`'s entries for the three; record where the new pump case goes and how each is run. Fix, before the first run, the new case's frame mix and
   count (Heartbeat and application frames through `run_read_pump`, the unarmed path), identical on base and candidate;
   and record whether `on_inbound_frame_bench`'s Heartbeat case runs with a TestRequest pending (plan Constitution Check
   VIII): if it does not, T138 adds that case.
-- [ ] T015 [P] Pre-session reject census (data-model E-6): every `(void)transport->close(); continue;` in
+  Done: evidence file, section T014. Frame mix fixed there: one Heartbeat and one NewOrderSingle per iteration, `->Iterations(20000)`; `on_inbound_frame_bench` has no Heartbeat-with-TestRequest-pending case, so T138 adds it.
+- [X] T015 [P] Pre-session reject census (data-model E-6): every `(void)transport->close(); continue;` in
   `run_accept_loop` before `open()` maps to one row of E-6, plus the listener `catch (...)`; a branch with no row is a
   table defect for the orchestrator.
-- [ ] T016 [P] `co_spawn` census: `grep -n 'co_spawn' src/session/session.cpp src/session/engine.cpp` on `$B`, kept for
+  Done: evidence file, section T015.
+- [X] T016 [P] `co_spawn` census: `grep -n 'co_spawn' src/session/session.cpp src/session/engine.cpp` on `$B`, kept for
   T135's `co-spawn-closure-audit` and for the spawn-shape review of T027 and T059.
-- [ ] T017 [P] Establishment-cap condition (data-model E-3, "The establishment cap"): re-derive in source the
+  Done: evidence file, section T016.
+- [X] T017 [P] Establishment-cap condition (data-model E-3, "The establishment cap"): re-derive in source the
   `target<session_executor>()` test in `system_clock_source::sleep_until` and the executor `Engine::start` spawns
   `run_accept_loop` and `run_connect_loop` on; record that an Engine session's sleeps are independent, or stop and report
   to the orchestrator (the design's stated condition fails).
+  Done: evidence file, section T017. The condition holds at the base.
 
 **Checkpoint**: the Ending-site table is filled; every population has shown its known positive.
 
-### Ending-site table (seed; T006 regenerates it at the implementation head by research D1's recipe)
+### Ending-site table (regenerated by T006 on the base by research D1's recipe; T006's recipe is re-run at the implementation head)
 
-Function names only; a function may hold several writes and reach several roots. "multi" = reached from several roots;
-T006 splits it into one row per root.
+Function names only, one row per write site's function and root. Roots: "pump" is `on_inbound_frame` as `run_read_pump` and
+`run_accept_loop`'s first-frame delivery call it (class P); the liveness loop and the too-high Logout bound are detached roots
+(D); the send root (`Session::send`, `send_deferred_` for `Engine::send`), `open` and `drive_reconnect` are application calls
+(A); `close()`, `run_logout_phase1` under it and the drain are excluded (X). "(T006)" marks a class this task assigned. The
+walk, its supplements and the `Disconnected`-over-`Disconnected` rows are in the evidence file (T006).
 
-| Write site (function) | Root(s) | Class (E-1) | Cell task |
+| Write site (function) | Root | Class (E-1) | Cell task |
 |---|---|---|---|
-| `run_liveness_loop` (R-1 give-up; emission failures) | liveness loop | W (R-1); D | T023, T051, T070; T020 |
-| `run_peer_logout_bound_` / `acknowledge_peer_logout_` | too-high Logout bound | D; W (reply) | T019, T051 |
+| `drain_for_reconnect_` | `drive_reconnect` (the drain) | X | T022 |
+| `ensure_hydrated_` | `drive_reconnect` | A (T006) | T020 |
+| `ensure_hydrated_` | `open` | A (T006) | T020 |
+| `ensure_hydrated_` | pump | P (T006) | T018 |
+| `persist_inbound_advance_` | pump | P (T006) | T018 |
+| `consume_rejected_seqnum_` | pump | P (T006) | T018 |
+| `disconnect_unless_superseded_` | liveness loop | D (T006) | T020 |
+| `disconnect_unless_superseded_` | `close()` (`run_logout_phase1`) | X (T006) | T022 |
+| `disconnect_unless_superseded_` | `drive_reconnect` | A (T006) | T020 |
+| `disconnect_unless_superseded_` | `open` | A (T006) | T020 |
+| `disconnect_unless_superseded_` | pump | P (T006) | T018 |
+| `disconnect_unless_superseded_` | send root | A (T006) | T020 |
+| `disconnect_unless_superseded_` | too-high Logout bound | D (T006) | T020 |
+| `emit_initiator_logon_` | `drive_reconnect` | A | T020 |
+| `emit_initiator_logon_` | `open` | A | T020 |
+| `close` | `close()` | X | T022 |
+| `refuse_logon_with_logout_` | pump | P; W (R-2 before Active) | T021, T049, T051 |
+| `emit_session_reject_` | pump | P (T006) | T018 |
+| `dispose_unparseable_` | pump | P | T018, T021 |
+| `inbound_reject_leaf_` | pump | P (T006) | T018 |
+| `inbound_reject_best_effort_leaf_` | pump | P (T006) | T018 |
+| `inbound_logout_leaf_` | too-high Logout bound | W (reply); D | T019, T051 |
+| `inbound_logout_leaf_` | pump | W (reply); P | T019, T051 |
+| `inbound_logon_sent_logout_leaf_` | pump | P; W (R-2 before Active) | T021, T049, T051 |
+| `inbound_resend_request_leaf_` | pump | P (T006) | T018, T046 |
+| `inbound_heartbeat_reply_leaf_` | pump | P (T006) | T018 |
+| `inbound_business_reject_leaf_` | pump | P (T006) | T018 |
+| `inbound_acceptor_reply_logon_leaf_` | pump | P (T006) | T018 |
+| `on_inbound_not_connected_` | pump | P; W (R-2 before Active) | T021, T049, T051 |
+| `on_inbound_active_` | pump | P | T018, T045, T081, T082 |
 | `resend_gap_deadline_` | pump | W (R-2) | T042, T048 |
-| `on_inbound_active_out_of_sequence_` (Arm B; #582 mismatch) | pump | W (R-2); P | T042, T045; T081 |
-| `on_inbound_active_sending_time_reject_`, `on_inbound_active_poss_dup_` | pump | W (R-2) | T042, T044 |
-| `on_inbound_active_` (BeginString, CompID, MsgSeqNum 0, TestReqID mismatch), `answer_pending_test_request_` | pump | P | T018, T045, T081, T082 |
-| `on_inbound_active_logout_`, `inbound_logout_leaf_` | pump; bound; liveness | W (reply); P | T019, T051 |
-| `dispose_unparseable_` (D-1, D-2, D-3) | pump | P | T018, T021 |
-| `on_inbound_not_connected_`, `on_inbound_logon_sent_`, `refuse_logon_with_logout_`, `refuse_too_low_logon_`, `inbound_logon_sent_logout_leaf_` | pump (first frame included) | P; W (R-2 before Active) | T021, T049, T051 |
-| `inbound_acceptor_reply_logon_leaf_`, `inbound_heartbeat_reply_leaf_`, `inbound_resend_request_leaf_`, `inbound_reject_leaf_`, `inbound_reject_best_effort_leaf_`, `inbound_business_reject_leaf_`, `answer_resend_request_`, `apply_inbound_sequence_reset`, `consume_rejected_seqnum_`, `persist_inbound_advance_`, `ensure_hydrated_` | multi | class: assigned by T006 | T018, T046 |
-| `store_then_emit`, `emit_session_reject_`, `record_disconnected_unless_already_`, `disconnect_unless_superseded_` | multi | class: assigned by T006 | T006 |
-| `send_body_`, `send_deferred_` | send root (`Session::send`, `Engine::send`) | A | T020, T046 |
-| `emit_initiator_logon_` | `open`, `drive_reconnect`, connect loop | A | T020 |
-| `run_ending_logout_bound_` (new) | ending bound | D (E-3 rows 4, 10, 11, 16) | T043, T049, T050, T070 |
-| `on_inbound_logout_sent_`, `run_logout_phase1`, `close` | `close()` | X | T022 |
-| `drain_for_reconnect_` | `drive_reconnect` | X | T022 |
+| `answer_pending_test_request_` | pump | P | T018, T045, T081, T082 |
+| `on_inbound_active_sending_time_reject_` | pump | W (R-2) | T042, T044 |
+| `acknowledge_peer_logout_` | too-high Logout bound | W (reply); D | T019, T051 |
+| `acknowledge_peer_logout_` | pump | W (reply) | T019, T051 |
+| `run_peer_logout_bound_` | too-high Logout bound | D | T019, T051 |
+| `on_inbound_active_poss_dup_` | pump | W (R-2) | T042, T044 |
+| `on_inbound_active_out_of_sequence_` | pump | W (R-2, Arm B); P (#582 mismatch) | T042, T045; T081 |
+| `on_inbound_active_logout_` | pump | W (reply); P | T019, T051 |
+| `answer_resend_request_` | pump | P (T006) | T018 |
+| `on_inbound_logout_sent_` | pump, while `close()` holds `closing` (LogoutSent is `close()`'s phase 1) | X: the latch's `lifecycle` term excludes it | T022 |
+| `on_inbound_logon_sent_` | pump | P; W (R-2 before Active) | T021, T049, T051 |
+| `send_body_` | send root | A | T020, T046 |
+| `run_liveness_loop` | liveness loop | W (R-1); D | T023, T051, T070; T020 |
+| `store_then_emit` | liveness loop | D (T006) | T020 |
+| `store_then_emit` | `close()` (`run_logout_phase1`) | X (T006) | T022 |
+| `store_then_emit` | `drive_reconnect` | A (T006) | T020 |
+| `store_then_emit` | `open` | A (T006) | T020 |
+| `store_then_emit` | send root | A (T006) | T020 |
+| `store_then_emit` | too-high Logout bound | D (T006) | T020 |
+| `store_then_emit` | pump | P (T006) | T018, T046 |
+| `apply_inbound_sequence_reset` | pump | P (T006) | T018 |
+| `run_logout_phase1` | `close()` (`run_logout_phase1`) | X | T022 |
+| `honor_peer_next_expected_` | pump | P (T006); its two Logouts are outside D2 item 1 (escalated) | T021, pending the ruling |
+| `record_disconnected_unless_already_` (its body in `session.hpp`) | each caller's root, rows above | each caller's class | each caller's cell task |
+| `refuse_too_low_logon_` | pump | no write site of its own at the base: it ends through `refuse_logon_with_logout_` | T021, T049, T051 |
+| `send_deferred_` | send root | no write site of its own at the base: it ends through `send_body_` | T020, T046 |
+| `run_ending_logout_bound_` (new) | ending bound | D (E-3 rows 4, 10, 11, 16); not on the base | T043, T049, T050, T070 |
 
 ---
 
@@ -977,6 +1039,10 @@ remaining reference.
   names 105; every FR-019 pin of T033, T072 and T099 and the retired probes of T111 assert the new rule; T124 and T125 name
   every ruling of FR-019's list; `git grep -nE 'Phase 6 US4|not a close|unanswered_tr_' -- src include` reports no stale claim.
   Record the classed table.
+  Added by T009 (living surfaces with no task): `tests/capi/inbound_frame_dispositions_c7_witness_test.cpp` (the Row 5
+  refused-Logon cells and the "Rows 3 and 5 in Disconnected" cells, which state the refused session's transport stays open
+  until the establishment deadline) and `tests/session/unparseable_frame_disposition_test.cpp` (the comments stating D-1,
+  D-2 and D-3 are "a state transition, not a close").
 
 ---
 
