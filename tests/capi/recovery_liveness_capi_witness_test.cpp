@@ -202,7 +202,9 @@ void expect_deadline_logout(PeerLine& line, EstablishedWatch& watch, Gap const& 
     // turns false at the Logout, and the connection is still open (fixpp#534)": the session
     // stays established and the connection open through the wait, and both end at its bound,
     // kLogoutTimeout after the Logout's write started, which is no later than the peer's read
-    // of it. The band is kHb / 4 before that instant and kHb / 2 after it.
+    // of it. The band is kHb / 4 before that instant and kHb / 2 after it, so a bound widened by
+    // less than kHb / 2 passes here: a priced survivor on this real-time cell, whose exact bound
+    // the mock-clock cells pin (LogoutWait105.Bound_EofAtExactlyTheBound).
     if (!run.logout) return;
     auto const bound = run.logout->at + kLogoutTimeout;
     EXPECT_TRUE(line.open_through(bound - (kHb / 4)))
