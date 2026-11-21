@@ -1540,8 +1540,8 @@ TEST_P(LogoutWait105, PreActiveRefusal_PostureMismatch_WaitThenEof) {
     expect_refusal_wait_then_eof(w, "PostureMismatch");
 }
 
-// The strict-reset refusal is exempt from the R-2 wait (clarification "Session 2026-11-21
-// (implementation, Phase 4)"; contract C-2 "Which Logouts"): its arm returns
+// The strict-reset refusal is exempt from the R-2 wait (spec.md Clarifications, the Phase 4
+// implementation session; contract C-2 "Which Logouts"): its arm returns
 // session_seqnum_reset_mismatch, and an arm's error closes the connection at once (data-model E-3
 // row 5b). The Logout, then EOF with the clock frozen.
 TEST(LogoutWait105Acceptor, PreActiveRefusal_StrictReset_NoWaitEofAtOnce) {

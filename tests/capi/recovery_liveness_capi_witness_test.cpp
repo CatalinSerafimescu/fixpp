@@ -333,7 +333,7 @@ TEST(Capi537Witness, Deadline_TooHighApplicationFrames_Logout) {
     expect_deadline_logout(scene.line, watch, *scene.gap, run);
 }
 
-// 105-transport-liveness (spec clarification "Session 2026-11-21 (implementation, Phase 4)", the
+// 105-transport-liveness (spec.md Clarifications, the Phase 4 implementation session; the
 // ~Session assertion): the C ABI's destroy during the R-2 wait. The scene, and with it
 // fixpp_engine_destroy, ends while the session still waits after the deadline's Logout (the
 // session established and the connection open there); the engine's stop closes the session,

@@ -26,6 +26,7 @@
 #include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <functional>
 #include <future>
 #include <memory>
 #include <optional>
@@ -406,7 +407,7 @@ void bound_spawn_fails_cell(bound_spawn_route route) {
 
 }  // namespace t070
 
-// [seam: the bound's spawn failure read as "timeout 0" (round 2's catch): a Logout is written]
+// [seam: the bound's spawn failure read as "timeout 0": a Logout is written]
 TEST(LogoutWait105, BoundSpawnFails_R2AfterActive_NoLogoutWritten_EofAtOnce) {
     t070::bound_spawn_fails_cell(t070::bound_spawn_route::r2_after_active);
 }
@@ -553,6 +554,75 @@ TEST(LogoutWait105, EndingBound_RaceThrows_Writing_StoreHeld_EofAtOnce) {
 TEST(LogoutWait105, EndingBound_RaceThrows_Armed_EofAtOnce) { race_throws_cell(race_route::armed); }
 TEST(LogoutWait105, EndingBound_RaceThrows_ArmedBeforeActive_EofAtOnce) {
     race_throws_cell(race_route::armed_before_active);
+}
+
+// [seam] T053's reach-proof twins (tasks.md T061): the cells of
+// LogoutWait105Direct.EndingBound_DeadlineArmAbsorbsException_*, with the phase the bound's
+// failure exit finds read through session_test_access before the drive that reaches it.
+namespace t053 {
+struct CountingDirect {
+    t105::DirectRig d;
+    std::shared_ptr<t105::CountingClock> cc;
+    explicit CountingDirect(fixpp::session::session_role role,
+                            std::function<void(SessionConfig&)> const& tweak = {})
+        : d{role, tweak} {
+        cc = std::make_shared<t105::CountingClock>(d.s.mock);
+        d.s.cfg.clock_override = cc;
+        d.s.session = std::make_unique<fixpp::session::Session>(d.s.engine, d.s.cfg);
+    }
+    [[nodiscard]] fixpp::core::steady_time_point bound_instant() const {
+        return d.s.mock->steady_now() +
+               std::chrono::milliseconds{d.s.cfg.logout_disconnect_timeout_ms};
+    }
+    [[nodiscard]] std::vector<std::byte> stale(fixpp::session::seqnum_t seq) {
+        return fixpp::test_support::resend_gap::Scene::raw(
+            "0", seq, "TW", d.s.sending_time(std::chrono::seconds{-600}));
+    }
+    [[nodiscard]] session_test_access::ending_phase phase() const {
+        return session_test_access::ending_wait_phase(*d.s.session);
+    }
+};
+}  // namespace t053
+
+TEST(LogoutWait105Direct, EndingBound_DeadlineArmAbsorbsException_Writing_ReachProof) {
+    t053::CountingDirect c{fixpp::session::session_role::acceptor};
+    ASSERT_TRUE(c.d.to_active()) << "setup";
+    c.cc->throw_once_at(c.bound_instant());
+    c.d.hold_write_of("5");
+    auto f = c.d.s.feed_spawn(c.stale(2));
+    c.d.s.drain();
+    // The throw is taken by the race built at the bound's first loop, during the write; only the
+    // exit from `writing` sets `cut`.
+    EXPECT_TRUE(session_test_access::ending_wait_cut(*c.d.s.session))
+        << "the reach proof: the failure exit did not find `writing`";
+    EXPECT_FALSE(c.cc->throw_pending()) << "the bound's sleep was never requested";
+    EXPECT_TRUE(c.d.closed()) << "the bound's failure during the write did not close at once";
+    c.d.release();
+    c.d.s.drain();
+    EXPECT_EQ(c.d.app->logouts, 1);
+    (void)c.d.run(c.d.s.session->close(fixpp::session::close_mode::terminal), "close");
+}
+
+TEST(LogoutWait105Direct, EndingBound_DeadlineArmAbsorbsException_Armed_ReachProof) {
+    t053::CountingDirect c{fixpp::session::session_role::acceptor};
+    ASSERT_TRUE(c.d.to_active()) << "setup";
+    auto const at = c.bound_instant();
+    auto f = c.d.s.feed_spawn(c.stale(2));
+    // Handlers one at a time until the frame returns, so the bound has not yet rebuilt its
+    // race after the leaf's wake.
+    for (int i = 0; i < 4096 && !fixpp::test_support::resend_gap::Scene::ready(f); ++i) {
+        if (c.d.s.ioc.run_one_for(std::chrono::milliseconds{1}) == 0) c.d.s.ioc.restart();
+    }
+    ASSERT_EQ(c.d.completed("5"), 1U) << "setup: the Logout is not on the wire";
+    EXPECT_EQ(c.phase(), session_test_access::ending_phase::armed) << "the phase the exit finds";
+    c.cc->throw_once_at(at);
+    (void)t105::drive_bounded(c.d.s.ioc, 4096);
+    EXPECT_FALSE(c.cc->throw_pending()) << "the armed bound's sleep was never requested";
+    EXPECT_FALSE(session_test_access::ending_wait_cut(*c.d.s.session))
+        << "the exit found `writing`, not `armed`";
+    EXPECT_TRUE(c.d.closed()) << "the bound's failure in the wait did not close at once";
+    EXPECT_EQ(c.d.app->logouts, 1);
+    (void)c.d.run(c.d.s.session->close(fixpp::session::close_mode::terminal), "close");
 }
 
 }  // namespace

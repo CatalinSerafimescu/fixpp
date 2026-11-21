@@ -4776,7 +4776,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         if (!peer_sent_reset &&
             cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) {
             static constexpr std::string_view kStrictResetText = "ResetSeqNumFlag(141)=Y required";
-            // 105 (clarification "Session 2026-11-21 (implementation, Phase 4)"): exempt from
+            // 105 (spec.md Clarifications, the Phase 4 implementation session): exempt from
             // the R-2 wait. The arm's error closes the connection at once (data-model E-3 row
             // 5b), so its Logout arms no wait.
             auto refused = co_await refuse_logon_with_logout_(
@@ -5693,11 +5693,14 @@ bool Session::inbound_sending_time_ok_(
 // ruling R-11's "above NextNumIn": the deadline acts on every frame that does not advance
 // NextNumIn. Returns nullopt when the deadline
 // has not expired, and the caller goes on. On expiry it sends a Logout whose Text(58)
-// names the unanswered resend and the expected MsgSeqNum, records Disconnected whether or
-// not that Logout could be built (ruling R-12), and returns the result its caller returns
-// at once: success, or the Logout leaf's error, which the leaf has already recorded
-// Disconnected for. No handler stands around the leaf: a cancelled store call of the
-// Logout ends the frame at on_inbound_active_'s catch (§10, D-OUT-2 and D-OUT-4).
+// names the unanswered resend and the expected MsgSeqNum, through send_ending_logout_, and
+// returns the result its caller returns at once: success, or the Logout leaf's error, which
+// the leaf has already recorded Disconnected for. 105-transport-liveness (R-2, contract C-2)
+// supersedes ruling R-12's "records Disconnected whether or not that Logout could be built":
+// a transmitted Logout arms the wait and the session stays Active until the peer's Logout or
+// the bound; one that was not transmitted records Disconnected as before. While a wait is
+// armed the deadline does not fire (W-7). No handler stands around the leaf: a cancelled store call
+// of the Logout ends the frame at on_inbound_active_'s catch (§10, D-OUT-2 and D-OUT-4).
 asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::resend_gap_deadline_(
     bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
@@ -6637,7 +6640,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
     // only; any other refusal that reaches here (a drained sequence-number mutex) stays a
     // silent Disconnected. The text names N, read here before any advance, and M as parsed;
     // the peer's bytes are not echoed. A Logout that does not fit the leaf's buffer is not
-    // sent, and the session still ends.
+    // sent, and the session still ends. 105-transport-liveness (R-2, contract C-2) supersedes
+    // "ends the session" for a Logout that is transmitted: the session stays Active through the
+    // wait and ends at the peer's Logout or the bound.
     if (chk_error == fixpp::core::error::session_seqnum_too_low) {
         // 104: the shared builder above refuse_logon_with_logout_.
         too_low_text_buffer text_buf{};
@@ -8609,7 +8614,7 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                 // TestReqID of "TR" and the ten digits of the largest std::uint32_t. Built at the
                 // decision, from the TestRequest the give-up names: the give-up is final, so a
                 // Heartbeat that answers it during the gate wait does not change the Text
-                // (clarification "Session 2026-11-21 (implementation, Phase 4)").
+                // (spec.md Clarifications, the Phase 4 implementation session).
                 constexpr std::string_view kPrefix = "TestRequest unanswered, TestReqID ";
                 using text_buffer = std::array<char, 48>;
                 static_assert(std::tuple_size_v<text_buffer> >= kPrefix.size() + 2 + 10,

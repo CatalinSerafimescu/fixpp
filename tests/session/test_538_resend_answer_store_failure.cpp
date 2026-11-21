@@ -1362,7 +1362,7 @@ TEST(ReplayGate588, R588f4_ContendedSend_LivenessDisconnects_RefusedNothingWritt
     w.release();
 }
 
-// 105-transport-liveness (spec clarification "Session 2026-11-21 (implementation, Phase 4)"): a
+// 105-transport-liveness (spec.md Clarifications, the Phase 4 implementation session): a
 // give-up is final once decided. As R588f4 to the give-up, which then waits behind the held
 // walk with the mock clock still; the peer's Heartbeat answering the pending TestRequest
 // arrives during that wait; at the walk's release the give-up's Logout is written, with R-1's

@@ -725,11 +725,13 @@ public:
     // nothing reads the new one (FR-006).
     // drive_reconnect must not be bound to root_cancellation_slot(): its own drain emits
     // that signal, which would cancel it (see `root_cancel_`; cell RS-1).
-    // Two caller preconditions every Session awaitable has, named here because the bound
+    // Two caller preconditions every Session awaitable has, named here because the bounds
     // and the gate make them checkable or load-bearing: close() runs before the Session is
-    // destroyed (~Session asserts the too-high Logout bound's counter is 0 in builds with
-    // assertions; a release build does not check, and a bound still alive then resumes
-    // into a destroyed Session, as the liveness loop already would); and research D1's
+    // destroyed (close() joins the too-high Logout's bound, 105's ending Logout bound and its
+    // close frame, and ~Session asserts each counter is 0 in builds with assertions, with no
+    // exemption (105-transport-liveness, contract C-9; B-103-13); a release build does not
+    // check, and a bound still alive then resumes into a destroyed Session, as the liveness
+    // loop already would); and research D1's
     // lifetime rule: a Session whose replay-gate timer exists, like one with a transport,
     // is destroyed before its execution context (B-103-13).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> drive_reconnect() noexcept;
