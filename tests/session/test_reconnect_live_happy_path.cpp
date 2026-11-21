@@ -299,7 +299,7 @@ protected:
 TEST_F(ReconnectLiveHappyPathTest, ConnectAndHandshakeCalledOnSuccessfulAttempt) {
     auto factory = std::make_shared<TrackingFactory>();
 
-    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(3), 30s, 2000ms);
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(3));
 
     auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(
@@ -448,8 +448,7 @@ TEST_F(ReconnectLiveHappyPathTest, LiveTlsReconnectReachesActive) {
     // (see make_handshaken_pair in test_inflight_exclusivity.cpp).
 
     // Reconnect FSM — drives the client side (connect + handshake).
-    fixpp::session::ReconnectFsm reconnect_fsm(session_factory_shared.get(), make_fast_policy(3),
-                                               30s, 2000ms);
+    fixpp::session::ReconnectFsm reconnect_fsm(session_factory_shared.get(), make_fast_policy(3));
     reconnect_fsm.set_reconnect_endpoint(server_ep);
     reconnect_fsm.set_session_owner(&session);
     // Session was built with mtls_ca profile (for the factory's SSL_CTX setup).
@@ -564,7 +563,7 @@ TEST_F(ReconnectLiveHappyPathTest, LiveTlsReconnectReachesActive) {
 // ─────────────────────────────────────────────────────────────────────────────
 TEST_F(ReconnectLiveHappyPathTest, PendingCancellationAnswersWithErrorValueNotAThrow_351) {
     auto factory = std::make_shared<ProbeFactory>();
-    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(3), 30s, 2000ms);
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(3));
 
     asio::cancellation_signal sig;
     std::optional<fixpp::core::expected_t<void>> result;
@@ -649,7 +648,7 @@ TEST_F(ReconnectLiveHappyPathTest, PendingCancellationAnswersWithErrorValueNotAT
 // ─────────────────────────────────────────────────────────────────────────────
 TEST_F(ReconnectLiveHappyPathTest, ParentOptOutYieldsFsmReapNotTheCertSourceReap_351) {
     auto factory = std::make_shared<ProbeFactory>();
-    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(3), 30s, 2000ms);
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(3));
 
     asio::cancellation_signal sig;
     std::optional<fixpp::core::expected_t<void>> result;

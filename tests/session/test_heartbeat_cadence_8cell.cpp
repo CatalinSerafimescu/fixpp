@@ -27,9 +27,9 @@
 // Production-shape: drives bytes through Session::on_inbound_frame();
 //   mock_clock::advance() for deterministic time.
 //
-// RED witness: run_heartbeat_cadence / run_inbound_liveness_watch stubs
-//   co_return {} (immediately) without arming any timer. All 8 assertions
-//   FAIL RED until T024 impl lands.
+// The liveness timing these cells read is Session::run_liveness_loop's; the
+// ReconnectFsm stubs this header once named as the RED witness were removed by
+// 105-transport-liveness (FR-013).
 
 #include <gtest/gtest.h>
 
@@ -225,8 +225,7 @@ TEST(HeartbeatCadence8Cell, CellA_Strand_NoOutboundHeartbeatEmitted) {
     // Advance clock beyond HeartBtInt (5s), short of 1.2 × HeartBtInt, with no outbound activity.
     fix.advance_time(5500ms);
 
-    // RED: run_heartbeat_cadence stub co_returns {} immediately without arming
-    // any timer. No Heartbeat is emitted → saw_heartbeat() returns false.
+    // RED when no Heartbeat is emitted: saw_heartbeat() returns false.
     EXPECT_TRUE(fix.saw_heartbeat())
         << "Cell A (strand): Heartbeat(0) must be emitted after 5s idle outbound. "
         << "RED: heartbeat cadence stub does not arm timer → FAILS RED per T018.";

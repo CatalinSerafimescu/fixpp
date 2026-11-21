@@ -40,14 +40,12 @@
 #include <array>
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
-#include <asio/steady_timer.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <functional>
 #include <memory>
-#include <optional>
 #include <string>
 
 #include "fixpp/core/error.hpp"  // error enum + expected_t<T>
@@ -108,9 +106,11 @@ namespace fixpp::session {
 using core::expected_t;
 
 // ReconnectFsm — driver layer on top of session_fsm. Owns the per-attempt
-// Transport mint via TransportFactory, the AwaitingResend transient flag on
-// Active (NOT a new fsm_state value per D-1), the Heartbeat / TestRequest
-// cadence timers, and the Logout / force-disconnect timeout.
+// Transport mint via TransportFactory and the AwaitingResend transient flag on
+// Active (NOT a new fsm_state value per D-1). The Heartbeat / TestRequest timing
+// and the Logout timeout are Session's (run_liveness_loop, the ending Logout);
+// 105-transport-liveness (FR-013) removed the unread timer members, the stored
+// HeartBtInt and Logout timeout, and the caller-less stubs that described them here.
 // [data-model §E-1]
 class ReconnectFsm {
 public:
@@ -123,8 +123,7 @@ public:
     // guarantees the factory outlives the FSM per [arch §5.6] frozen-at-open rule.
     // [data-model §E-1; 043 research.md D-13]
     ReconnectFsm(fixpp::transport::TransportFactory* factory,
-                 fixpp::transport::ReconnectPolicy policy, std::chrono::seconds heartbeat_interval,
-                 std::chrono::milliseconds logout_disconnect_timeout) noexcept;
+                 fixpp::transport::ReconnectPolicy policy) noexcept;
 
     // 014 T009 — Set the peer endpoint for reconnect attempts.
     // Called by Session::open() before the first drive_reconnect_attempt.
@@ -204,23 +203,6 @@ public:
     //   [[feedback_asio_cospawn_total_cancellation_default]]
     [[nodiscard]] asio::awaitable<expected_t<void>> drive_reconnect_attempt() noexcept;
 
-    // FR-003 / FR-005 — emit Heartbeat(0) outbound when no outbound traffic has
-    // been sent for HeartBtInt seconds. Armed on Active entry; rearmed on every
-    // outbound; cancelled on Disconnected entry.
-    [[nodiscard]] asio::awaitable<expected_t<void>> run_heartbeat_cadence() noexcept;
-
-    // FR-004 / FR-007 — emit TestRequest(1) when no inbound traffic for
-    // 1.2×HeartBtInt; if no inbound within 2×HeartBtInt total, Logout(5) and
-    // disconnect with session_test_request_unanswered (slot 74, 005-era reused
-    // per F1/D1 2026-05-28).
-    [[nodiscard]] asio::awaitable<expected_t<void>> run_inbound_liveness_watch() noexcept;
-
-    // FR-006 — validate inbound Heartbeat's TestReqID(112) matches the most
-    // recent outbound TestRequest's TestReqID. Mismatch → session_testreqid_mismatch
-    // (slot 118). [data-model §E-1]
-    [[nodiscard]] expected_t<void> validate_inbound_heartbeat_testreqid(
-        std::string_view inbound_testreqid) const noexcept;
-
     // FR-009 — enter AwaitingResend transient: set awaiting_resend_=true and
     // populate resend_state_ with [begin_seqno, end_seqno].
     // The caller (Session::on_inbound_frame) emits ResendRequest(2) inline
@@ -228,28 +210,6 @@ public:
     // STATE transition only. [data-model §E-1; spec.md FR-009; plan.md T023]
     [[nodiscard]] asio::awaitable<expected_t<void>> enter_awaiting_resend(
         std::uint32_t begin_seqno, std::uint32_t end_seqno) noexcept;
-
-    // FR-013 / FR-014 — process inbound SequenceReset(4). GapFillFlag=Y → advance
-    // next_expected_inbound to NewSeqNo without storing; GapFillFlag=N (forced reset)
-    // → advance + emit warning event.
-    [[nodiscard]] expected_t<void> process_inbound_sequence_reset(std::uint32_t new_seqno,
-                                                                  bool gap_fill_flag) noexcept;
-
-    // FR-010 / FR-011 / FR-012 — reply to inbound ResendRequest(2): walk
-    // MessageStore [BeginSeqNo, EndSeqNo] (EndSeqNo=0 → our_last_outbound per D-2);
-    // for each application message, emit with PossDupFlag(43)=Y + OrigSendingTime(122);
-    // collapse admin spans to SequenceReset-GapFill(4) per D-3; emit GapFill on
-    // store-horizon per D-4.
-    [[nodiscard]] asio::awaitable<expected_t<void>> reply_to_inbound_resend_request(
-        std::uint32_t begin_seqno, std::uint32_t end_seqno) noexcept;
-
-    // FR-008 / US1 AC5 — initiator-graceful Logout. Emits Logout(5), awaits peer
-    // reply for logout_disconnect_timeout_, closes Transport, transitions to
-    // Disconnected. Surfaces session_logout_timeout (slot 73, 005-era reused per
-    // F1/D1 2026-05-28) if elapsed before peer reply. Symmetric on acceptor side
-    // per [[feedback_half_restructure_symmetric_api]].
-    [[nodiscard]] asio::awaitable<expected_t<void>> drive_logout(
-        std::chrono::milliseconds timeout) noexcept;
 
     // Accessor — TRANSIENT FLAG, NOT a new fsm_state value per D-1 / [arch §5.6].
     [[nodiscard]] bool is_awaiting_resend() const noexcept;
@@ -278,9 +238,6 @@ private:
     // set_transport_factory() to the resolved effective factory. [043 T011; D-4]
     fixpp::transport::TransportFactory* factory_;
     fixpp::transport::ReconnectPolicy policy_;
-    [[maybe_unused]] std::uint32_t attempt_index_ = 0;                      // see fixpp#559
-    [[maybe_unused]] std::chrono::seconds heartbeat_interval_;              // see fixpp#559
-    [[maybe_unused]] std::chrono::milliseconds logout_disconnect_timeout_;  // see fixpp#559
 
     // 014 T009 — peer endpoint for async_connect (set by Session::open via
     // set_reconnect_endpoint before drive_reconnect_attempt is first called).
@@ -304,22 +261,11 @@ private:
     // skipped; the FSM proceeds connect → install → Logon. Set by Session::open()
     // via set_plaintext_profile(). Default false (TLS path unchanged). [§E-5; D-7]
     bool is_plaintext_ = false;
-    // Timers are optional so ReconnectFsm is constructible without an executor;
-    // populated at first use in Phase 3 (drive_reconnect_attempt binds the
-    // session executor at call time). [data-model §E-1 Phase 2 shape]
-    std::optional<asio::steady_timer> heartbeat_timer_;
-    std::optional<asio::steady_timer> test_request_timer_;
-    std::optional<asio::steady_timer> logout_timer_;
-
     // Transient bool on Active state — NOT a new fsm_state value per D-1.
     bool awaiting_resend_ = false;
 
     // Populated while awaiting_resend_ == true.
     ResendState resend_state_;
-
-    // TestReqID of the most recently emitted outbound TestRequest; nullopt
-    // when no TestRequest is outstanding.
-    std::optional<std::string> last_outbound_testreqid_;
 
     // 014 T017 — Credential-rotation detect state (data-model §E-3 / contracts C3).
     //

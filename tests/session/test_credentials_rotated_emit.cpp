@@ -329,7 +329,7 @@ TEST_F(CredentialsRotatedEmitTest, FirstLoadEmitsNoEvent) {
     // Capture emitted events.
     std::vector<fixpp::session::session_event_credentials_rotated> events;
 
-    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(), 30s, 2000ms);
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy());
 
     // Inject the emit callback — will be populated by T018 wiring.
     // For the standalone FSM test (no Session), we inject directly.
@@ -386,7 +386,7 @@ TEST_F(CredentialsRotatedEmitTest, RotationEmitBeforeMakeWithRealFingerprints) {
         factory->current_source = source_a;
         std::vector<fixpp::session::session_event_credentials_rotated> init_events;
 
-        fixpp::session::ReconnectFsm fsm_init(factory.get(), make_fast_policy(), 30s, 2000ms);
+        fixpp::session::ReconnectFsm fsm_init(factory.get(), make_fast_policy());
         fsm_init.set_emit_credentials_rotated(
             [&init_events](fixpp::session::session_event_credentials_rotated ev) {
                 init_events.push_back(ev);
@@ -423,7 +423,7 @@ TEST_F(CredentialsRotatedEmitTest, RotationEmitBeforeMakeWithRealFingerprints) {
     std::vector<fixpp::session::session_event_credentials_rotated> events;
     int event_order = -1;
 
-    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(5), 30s, 2000ms);
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(5));
 
     // Wire the emit callback; also record the sequence counter at emit time.
     fsm.set_emit_credentials_rotated(
@@ -516,7 +516,7 @@ TEST_F(CredentialsRotatedEmitTest, NoOpRotationStillEmits) {
 
     std::vector<fixpp::session::session_event_credentials_rotated> events;
 
-    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(5), 30s, 2000ms);
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(5));
 
     fsm.set_emit_credentials_rotated(
         [&events](fixpp::session::session_event_credentials_rotated ev) { events.push_back(ev); });
@@ -716,8 +716,7 @@ TEST_F(CredentialsRotatedEmitTest, LiveTlsRotationEmitRealFingerprint) {
     // state).  We must prime it by running one attempt with source_a (returns
     // no event, as per FR-009 SPEC-FIXED), then stage source_b and run a second
     // attempt to observe the rotation event.
-    fixpp::session::ReconnectFsm reconnect_fsm(session_factory.get(), make_fast_policy(5), 30s,
-                                               2000ms);
+    fixpp::session::ReconnectFsm reconnect_fsm(session_factory.get(), make_fast_policy(5));
     reconnect_fsm.set_reconnect_endpoint(server_ep);
     reconnect_fsm.set_session_owner(&session);
     reconnect_fsm.set_tls_profile(fixpp::tls::SecurityProfile::mtls_ca);
@@ -877,7 +876,7 @@ TEST_F(CredentialsRotatedEmitTest, ThrowingCallbackContained_AttemptProceeds_Bas
     int make_calls = 0;
     factory->factory_make_count = 0;
 
-    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(5), 30s, 2000ms);
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(5));
 
     // Inject a throwing callback. Pre-fix: the throw escapes the coroutine BODY → it is
     // delivered to the promise's unhandled_exception (NOT std::terminate — that is the
@@ -987,7 +986,7 @@ TEST_F(CredentialsRotatedEmitTest, NonThrowingCallback_BehaviourUnchanged) {
 
     std::vector<fixpp::session::session_event_credentials_rotated> events;
 
-    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(5), 30s, 2000ms);
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(5));
 
     // Non-throwing callback: just capture the event.
     fsm.set_emit_credentials_rotated(

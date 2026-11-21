@@ -160,8 +160,7 @@ protected:
 
     fixpp::core::expected_t<void> run_drive(fixpp::transport::TransportFactory* factory,
                                             std::uint32_t max_attempts) {
-        fixpp::session::ReconnectFsm fsm(factory, make_policy(max_attempts),
-                                         std::chrono::seconds{30}, 2000ms);
+        fixpp::session::ReconnectFsm fsm(factory, make_policy(max_attempts));
 
         auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 2s,
@@ -393,8 +392,7 @@ TEST_F(AuthFailReconnectCapTest, AuthFailConsumesAttemptsAndTerminatesAtCap) {
     // set_session_owner → install_reconnected_transport (T010) is callable.
     // After T014: the FSM calls authorize(hr.peer_id, ...) in step 7 before
     // calling install_reconnected_transport.
-    fixpp::session::ReconnectFsm reconnect_fsm(factory.get(), make_policy(kMaxAttempts),
-                                               std::chrono::seconds{30}, 2000ms);
+    fixpp::session::ReconnectFsm reconnect_fsm(factory.get(), make_policy(kMaxAttempts));
     reconnect_fsm.set_reconnect_endpoint(fixpp::transport::Endpoint{"127.0.0.1", 19877});
     reconnect_fsm.set_session_owner(&session);
     reconnect_fsm.set_tls_profile(fixpp::tls::SecurityProfile::mtls_ca);

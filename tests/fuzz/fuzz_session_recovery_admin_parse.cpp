@@ -9,10 +9,10 @@
 //   - Logon with ResetSeqNumFlag(141)=Y
 //   - Logon with NextExpectedMsgSeqNum(789) — well-formed, malformed, overflow
 //     (T026 extension: exercises the new case 789: in scan_frame_header)
-//   - ResendRequest(2) inbound (triggers reply_to_inbound_resend_request)
-//   - SequenceReset(4) with GapFillFlag (triggers process_inbound_sequence_reset)
-//   - Heartbeat(0) with TestReqID(112) (triggers validate_inbound_heartbeat_testreqid)
-//   - Logout(5) (triggers drive_logout path)
+//   - ResendRequest(2) inbound (the session's resend answer)
+//   - SequenceReset(4) with GapFillFlag (the session's inbound SequenceReset handling)
+//   - Heartbeat(0) with TestReqID(112) (the session's TestReqID rule)
+//   - Logout(5) (the session's inbound Logout handling)
 //
 // All paths must: no crash / no UB / no memory corruption / no deadlock.
 // The harness is NOT a behavioral correctness test; behavioral correctness is

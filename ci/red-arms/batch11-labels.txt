@@ -1,4 +1,5 @@
-# ci/red-arms/batch11-labels.txt -- the 82 site labels migrated by #289 batch 11.
+# ci/red-arms/batch11-labels.txt -- the site labels migrated by #289 batch 11, less those whose
+# cell was retired since (105-transport-liveness FR-013 retired DriveLogoutStub_EmitsNoLogoutFrame).
 #
 # Consumed by ci/pump-seam-arm.sh, which forces each through the runtime seam
 # (FIXPP_FORCE_WINDOW_MISS) rather than by rewriting source per site.
@@ -62,7 +63,6 @@ CompidPrincipalExtractionSessionTest::run_open
 DrainCalledByClose/1
 DrainCalledByClose/2
 DrainCalledByClose/3
-DriveLogoutStub_EmitsNoLogoutFrame
 DurableBeforeTransmitTest::open_sync
 EnumValidationLogonTest::feed_sync
 EnumValidationLogonTest::open_sync

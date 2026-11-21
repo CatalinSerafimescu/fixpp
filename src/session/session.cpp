@@ -225,10 +225,8 @@ Session::Session(const fixpp::core::EngineConfig& engine, const SessionConfig& c
       app_version_registry_(app_version_registry),
       reconnect_fsm_(
           cfg.transport_factory_override.get(),  // non-owning raw ptr; factory owned by cfg_
-          resolve_reconnect_policy(cfg, session_arena_),  // 016 T008: was empty
-                                                          // ReconnectPolicy{} (busy-spin)
-          cfg.heartbeat_interval.value_or(std::chrono::seconds{30}),
-          std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms}) {
+          resolve_reconnect_policy(cfg, session_arena_)) {  // 016 T008: was empty
+                                                            // ReconnectPolicy{} (busy-spin)
     // Resolution chain always terminates at std::pmr::get_default_resource()
     // (never null), so I-18's never-null contract holds for the lifetime.
     // reconnect_fsm_ owns AwaitingResend state (FR-009 per data-model §E-1).
@@ -3873,37 +3871,6 @@ fixpp::dict::application_version Session::msg_type_default_for_(
     std::string_view msg_type) const noexcept {
     auto const [at, found] = find_msg_type_default(msg_type_defaults_, msg_type);
     return found ? at->version : fixpp::dict::application_version::Unknown;
-}
-
-// ── 013 T036 US2 — Logon-time CompID authorization helpers ───────────────────
-//
-// parse_cn_from_dn_local: extract the first "CN=" value from an OpenSSL
-// text-form DN string. Mirrors the implementation in
-// compid_authorization_policy.cpp (which is in an anonymous namespace there).
-// Declared locally here to avoid cross-TU linkage of an internal helper.
-// noexcept — pure string scanning.
-[[nodiscard]] [[maybe_unused]] static std::string_view parse_cn_from_dn_local(  // see fixpp#559
-    std::string_view dn) noexcept {
-    std::size_t pos = 0;
-    while (pos < dn.size()) {
-        const auto found = dn.find("CN=", pos);
-        if (found == std::string_view::npos) return {};
-        if (found > 0) {
-            const char pre = dn[found - 1];
-            if (pre != ',' && pre != ' ' && pre != '/') {
-                pos = found + 3;
-                continue;
-            }
-        }
-        const std::size_t vstart = found + 3;
-        if (vstart >= dn.size()) return {};
-        std::size_t vend = vstart;
-        while (vend < dn.size() && dn[vend] != ',') ++vend;
-        const std::string_view value = dn.substr(vstart, vend - vstart);
-        if (!value.empty()) return value;
-        pos = vend;
-    }
-    return {};
 }
 
 namespace {
