@@ -156,7 +156,7 @@ harness for the latch test (research D10, contract C-12).
 | VI | Spec coverage: FIX-SL §3.1.25, §4.5.5, §4.6, §4.10 and TC 2c, 6 are cited by the spec | PASS |
 | VII / IX §1 | Every FR has a test path; coverage is diff-scoped (95/85, every uncovered error path assessed) | PASS, planned in D10 |
 | VIII §3, §5 | A per-frame change needs a benchmark; no hot-path allocation | PASS with the D10 bench obligation |
-| X §1, §6, §7 | C-ABI results change: `/clarify` done (Q1, Q2), `/analyze`, Gate A; the fourth Appendix A control, the user `/plan` sign-off ([const §X.6]), requested from the owner 2026-11-21, a hard precondition of Phase 3 (US1 part A); minor bump decided in D9 | PASS (controls scheduled; sign-off pending; evidence pointers in the post-design X entry) |
+| X §1, §6, §7 | C-ABI results change: `/clarify` done (Q1, Q2), `/analyze`, Gate A; the fourth Appendix A control, the user `/plan` sign-off ([const §X.6]), GIVEN by the owner 2026-11-21 on head `b63456a6` (record: decisions/speckit/105-transport-liveness-gatea.md); minor bump decided in D9 | PASS (all four controls done; evidence pointers in the post-design X entry) |
 | XI §1–§3, §7 | Concurrency and cancellation touched: strand confinement, no `std::mutex`, all four controls | PASS (controls scheduled) |
 | XII §9 | Security surface (TLS close, unauthenticated pre-session peers): all four controls | PASS (controls scheduled) |
 | XIII §2–§3 | Logs are async `FIXPP_SLOG` records with the session or entry trace context | PASS |
@@ -383,7 +383,7 @@ MSVC": a `brain/failure-classes.md` entry in that page's form (trigger and proce
 
 ## Open items carried to the orchestrator
 
-- **The user `/plan` sign-off** ([const §X.6], the fourth Appendix A control): requested from the owner 2026-11-21, a
+- **The user `/plan` sign-off** ([const §X.6], the fourth Appendix A control): GIVEN by the owner 2026-11-21 on head `b63456a6`; it was requested as a
   hard precondition of Phase 3 (US1 part A, tasks.md T018 onward). Not given yet. It counts only as the owner's own
   statement, recorded in `.specify/decisions/105-transport-liveness-evidence.md` with its date, its words and the bundle
   head it was given on; an orchestrator's or an agent's report of it does not count. It covers the bundle at that head:
