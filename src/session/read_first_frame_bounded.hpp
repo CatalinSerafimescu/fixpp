@@ -232,15 +232,16 @@ template <class Rep, class Period>
     static_assert(sizeof(Rep) <= sizeof(std::uint64_t));
     static_assert(scale::num <= std::numeric_limits<std::uint64_t>::max());
     assert(d >= duration::zero());
-    auto const headroom = static_cast<std::uint64_t>(time_point::max().time_since_epoch().count()) -
-                          static_cast<std::uint64_t>(now.time_since_epoch().count());
+    auto const headroom =
+        static_cast<std::uint64_t>(time_point::max().time_since_epoch().count()) -
+        static_cast<std::uint64_t>(now.time_since_epoch().count());
     auto const units = static_cast<std::uint64_t>(d.count());
     constexpr auto multiplier = static_cast<std::uint64_t>(scale::num);
     if (units > headroom / multiplier) {
         return time_point::max();
     }
-    auto const result =
-        static_cast<std::uint64_t>(now.time_since_epoch().count()) + units * multiplier;
+    auto const result = static_cast<std::uint64_t>(now.time_since_epoch().count()) +
+                        units * multiplier;
     return time_point{time_duration{static_cast<typename time_point::rep>(result)}};
 }
 
