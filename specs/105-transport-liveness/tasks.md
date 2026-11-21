@@ -746,31 +746,31 @@ does not complete closes the connection at the bound.
   twins `Capi537Witness.Deadline_<TooHighApplicationFrames|TooHighHeartbeats|TooHighPossDupFrames>_Logout`,
   `Capi537Witness.Deadline_<PossDupWithoutOrigSendingTime|PossDupWithUnparseableOrigSendingTime|ResetBelowExpected>_RejectsThenLogout`
   (`tests/capi/recovery_liveness_capi_witness_test.cpp`); and, for T059a, `ReplayGate588.R588f4_*`.
-- [ ] T073 [US1] Run T042 to T055 and T070 GREEN, then `-L 105`, `-L session`, `-L capi` on linux-clang-debug and the
+- [X] T073 [US1] Run T042 to T055 and T070 GREEN, then `-L 105`, `-L session`, `-L capi` on linux-clang-debug and the
   `Lifetime105.*` cells on linux-clang-asan; commit `H2`; `codegraph sync`.
 
 ### Mutant and spurious-hit arms for US1 part B (in `$M` at `H2`; quickstart section 5)
 
-- [ ] T074 [US1] The response test deleted, and moved below the too-high branch: the off-NextNumIn `*_EndsWaitAndResets` cells
+- [X] T074 [US1] The response test deleted, and moved below the too-high branch: the off-NextNumIn `*_EndsWaitAndResets` cells
   of T042 RED. The response test moved below the PossDup stage-1 arm: T042's `PeerLogoutPossDupY_<AtNextNumIn|BelowNextNumIn>_EndsWait`
   RED.
-- [ ] T075 [US1] Absorption: `send_ending_logout_`'s absorb branch deleted, and `end_session_silently_` recording while armed
+- [X] T075 [US1] Absorption: `send_ending_logout_`'s absorb branch deleted, and `end_session_silently_` recording while armed
   (`Absorbed_*` RED); `inbound_resend_request_leaf_`'s assignment failure routed through `end_session_silently_`
   (`TooHighDuringWait_ResendRequestAssignFails_*` RED); the owe refused whenever a wait is `armed` (round 1's predicate: the
   W-9 cells RED).
-- [ ] T076 [US1] The wait: the bound's deadline read from the last send, and from the write's completion
+- [X] T076 [US1] The wait: the bound's deadline read from the last send, and from the write's completion
   (`Bound_DoesNotSlideWithAnAnswerSent`, `WriteReleasedBeforeTheBound_*` RED); the bound exiting on any wake, and the arming
   after the refusal's own `Disconnected` write (`PreActive_BoundSurvives*` RED); the live predicate testing
   `closing_or_stopped_()` (`CloseGracefulDuringWait_*` RED); the claim's result ignored (`PendingTooHighMark_*` RED);
   `expire()` without its `ended` test (`PreActive_WaitArmedAtEstablishmentDeadline_ClosedNoEvent` RED); one post-suspension
   test of the liveness loop reverted to the state test alone (`LivenessDuringWait_*` RED).
-- [ ] T077 [US1] The write limit: deleted (every `WriteLimit105.*` RED; the spurious-hit arm: the connection still open past
+- [X] T077 [US1] The write limit: deleted (every `WriteLimit105.*` RED; the spurious-hit arm: the connection still open past
   the bound, which also shows nothing else closes it); its close made through the latch consumer's `inbound_depth_` test
   (`WriteLimit105.R2*`, `Reply_*` RED); the latch consumers' `writing` deferral deleted (`R1WriteHeld_PeerLogoutArrives_*` RED);
   the slot-74 record moved after the write (`WriteLimit105.R1_*`'s record assertion RED); "Leaving `writing`" ignoring `cut`
   (`DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed` RED, the phase read `armed` after the drain); a 0 ms limit
   read as "close at once" (`TimeoutZero_WriteUnbounded` RED).
-- [ ] T077a [US1] (moved from T039, its R-1 half; T035 ruling 2) The R-1 Logout write deleted (the close kept):
+- [X] T077a [US1] (moved from T039, its R-1 half; T035 ruling 2) The R-1 Logout write deleted (the close kept):
   `LivenessTiming105.GiveUp_LogoutTextPinned_ThenEof` RED. T059a's budget counted from the gate's acquisition instead of
   the give-up's decision: `ReplayGate588.R588f4_*` RED.
 - [ ] T078 [US1] The deadlines' closes: the bound's expiry close made through `release_connection_end_`
@@ -787,6 +787,12 @@ does not complete closes the connection at the bound.
   wire under "the failure read as timeout 0").
 - [ ] T080 [US1] Record the part-B mutant table; every quickstart section 5 mutant named in T036 to T041 and T074 to T079 has a
   RED row, or the task stops.
+
+Phase 4 status (evidence file, "Phase 4 run 2"): T070, T078, T079 and T080 stay open. T070 lacks
+`EndingBound_RaceThrows_Armed_ResendAnswerBlocked_EofAtOnce` (the race seam has no wake to run at while the answer is
+blocked; escalated) and so T079's armed failure-exit mutant on it; T078's second and first close-frame joins of
+`close()` survive their mutants (no cell discriminates them); T080 stops on those survivors and on T074's two
+equivalent routes, T077c2 and the three dedupe terms.
 
 **Checkpoint**: US1 complete; every ending class of the Ending-site table closes within its bound (SC-001).
 
