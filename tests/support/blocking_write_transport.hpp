@@ -71,6 +71,12 @@ struct blocking_write_state {
     bool record_bytes = false;
     std::vector<recorded_write> recorded;  // in write-start order
 
+    // 105-transport-liveness (tasks.md T035): the transport's closes, counted in close() (which
+    // Transport::close_async's default calls), and `starts` as the first one read it, so a cell
+    // can tell that the connection was closed and which writes had begun by then.
+    std::size_t closes = 0;
+    std::optional<std::size_t> starts_at_first_close;
+
     void arm_block() noexcept { block_next = true; }
     void release() {
         block_next = false;
@@ -124,6 +130,7 @@ public:
     [[nodiscard]] fixpp::core::expected_t<void> cancel() noexcept override { return {}; }
 
     [[nodiscard]] fixpp::core::expected_t<void> close() noexcept override {
+        if (state_->closes++ == 0) state_->starts_at_first_close = state_->starts;
         closed_ = true;
         state_->block_next = false;
         if (state_->timer) state_->timer->cancel();

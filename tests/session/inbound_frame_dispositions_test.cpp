@@ -1402,26 +1402,29 @@ TEST(InboundFrameDispositionsQ8Pump, LogoutSent_FramerGarbleCountedAndTheReplySt
     EXPECT_TRUE(confirmed) << "the pump read on past the garble, so the reply confirms the Logout";
 }
 
-// Disconnected with the transport open: an acceptor whose first frame is not a Logon
-// refuses it into Disconnected and the pump keeps reading. A Framer garble there is
-// counted, evented and logged (C-2's note: only the arm reads field 3).
-TEST(InboundFrameDispositionsQ8Pump, Disconnected_FramerGarbleIsCountedWhileThePumpRuns) {
+// 105-transport-liveness (FR-007, FR-001; research D4) supersedes this cell's "Disconnected
+// with the transport open" (093): an acceptor whose first frame is not a Logon refuses it into
+// Disconnected, and the refusal closes the connection at once, so on an Engine session no frame
+// reaches the pump in Disconnected and a Framer garble there does not arise. The cell pins the
+// close: after the refusal the peer reads nothing, its read ends in EOF with the mock clock
+// still, and no garble is counted.
+TEST(InboundFrameDispositionsQ8Pump, Disconnected_TheRefusalClosesBeforeAnyGarble) {
     PumpCell c;
     bool const connected = c.up && c.rig.connect_peer();
     bool const d1 = connected && c.rig.deliver(c.rig.heartbeat(1));
     bool const refused =
         d1 && c.rig.run_until([&] { return c.rig.state() == fsm_state::Disconnected; });
-    bool const d2 = refused && c.rig.deliver(junk());
+    bool const read_ended = refused && c.rig.run_until([&] { return c.rig.peer.read_ended; });
     auto const o = c.observe();
-    bool const read_ended = c.rig.peer.read_ended;
+    auto const ec = c.rig.peer.read_ec;
+    std::string const wire = c.rig.peer.received;
     c.rig.stop();
-    auto const records = garble_records(c.log);
 
-    ASSERT_TRUE(connected && d1 && refused && d2) << "setup";
-    EXPECT_FALSE(read_ended) << "a garble does not close the transport";
-    expect_one_garble(o, records,
-                      {.kind = fixpp::core::error::wire_framing_resync, .bytes = junk().size()},
-                      "Disconnected");
+    ASSERT_TRUE(connected && d1 && refused) << "setup";
+    EXPECT_TRUE(read_ended) << "the refusal did not close the connection";
+    EXPECT_EQ(ec, asio::error::eof) << "the connection did not end in EOF";
+    EXPECT_TRUE(wire.empty()) << "the refusal wrote a frame: " << wire;
+    EXPECT_EQ(o.count, 0U) << "a garble was counted";
 }
 
 // ── Q-10 (T031): BeginString(8) on each side of the W-2 cap ─────────────────
@@ -1832,8 +1835,10 @@ TEST(InboundFrameDispositionsQ14, ThroughTheEngineAShortCarryArenaRefusesTheConn
 // carries the failure kind and L. No callback runs, no Reject is sent, NextNumIn
 // does not move and no SessionEvent is emitted (plan OD-24). Run in Active and in each
 // state the pump reads in before Active: NotConnected (an acceptor whose first frame
-// was disregarded), LogonSent (an initiator) and Disconnected with the transport open
-// (an acceptor whose first frame was refused). Also in LogoutSent, entered by
+// was disregarded) and LogonSent (an initiator). 105-transport-liveness (FR-007; research D4)
+// supersedes the Disconnected row with the transport open (an acceptor whose first frame was
+// refused): the refusal closes the connection at once, so no frame of L+1 reaches that state,
+// and Disconnected_TheRefusalClosesBeforeAnyFrame pins the close. Also in LogoutSent, entered by
 // close(graceful) from Active with the peer never answering the Logout: there the close
 // must come well before the graceful close's grace timer could end LogoutSent, and the
 // graceful close's own caller completes with it. The record's format is spelled out here.
@@ -1891,7 +1896,7 @@ std::vector<fixpp::log::Record> over_limit_records(LogCapture& log) {
     return log.records_of(FIXPP_FORMAT_ID(kOverLimitRecordFormat));
 }
 
-enum class Q6State : std::uint8_t { active, not_connected, logon_sent, disconnected, logout_sent };
+enum class Q6State : std::uint8_t { active, not_connected, logon_sent, logout_sent };
 
 std::string_view q6_state_name(Q6State s) {
     switch (s) {
@@ -1901,8 +1906,6 @@ std::string_view q6_state_name(Q6State s) {
             return "NotConnected";
         case Q6State::logon_sent:
             return "LogonSent";
-        case Q6State::disconnected:
-            return "Disconnected";
         case Q6State::logout_sent:
             return "LogoutSent";
     }
@@ -1973,12 +1976,6 @@ void run_q6(Q6State at, OverL kind, std::uint32_t logout_timeout_ms = kQ6LogoutT
                        rig.state() == fsm_state::LogonSent;
             });
             want = fsm_state::LogonSent;
-            break;
-        case Q6State::disconnected:
-            // A first frame that is not a Logon: refused into Disconnected, the pump runs.
-            reached = reached && rig.connect_peer() && rig.deliver(rig.heartbeat(1)) &&
-                      rig.run_until([&] { return rig.state() == fsm_state::Disconnected; });
-            want = fsm_state::Disconnected;
             break;
         case Q6State::logout_sent:
             // close(graceful) from Active sends its Logout; the peer never answers it.
@@ -2121,14 +2118,24 @@ TEST(InboundFrameDispositionsQ6, LogonSent_FrameOfLPlusOneWithABadCheckSumCloses
 TEST(InboundFrameDispositionsQ6, LogonSent_OverLBodyLengthAtAResyncCandidateCloses) {
     run_q6(Q6State::logon_sent, OverL::body_length_at_candidate);
 }
-TEST(InboundFrameDispositionsQ6, Disconnected_FrameOfLPlusOneCloses) {
-    run_q6(Q6State::disconnected, OverL::frame);
-}
-TEST(InboundFrameDispositionsQ6, Disconnected_FrameOfLPlusOneWithABadCheckSumCloses) {
-    run_q6(Q6State::disconnected, OverL::bad_checksum);
-}
-TEST(InboundFrameDispositionsQ6, Disconnected_OverLBodyLengthAtAResyncCandidateCloses) {
-    run_q6(Q6State::disconnected, OverL::body_length_at_candidate);
+// 105-transport-liveness (FR-007; research D4): an acceptor's first frame that is not a Logon
+// is refused into Disconnected and the connection closes at once, with the mock clock still and
+// nothing written, so the Disconnected row of Q-6 has no frame of L+1 to read.
+TEST(InboundFrameDispositionsQ6, Disconnected_TheRefusalClosesBeforeAnyFrame) {
+    plain_rig::Rig rig;
+    auto cfg = rig.cfg(session_role::acceptor);
+    cfg.advertised_max_message_size = kQ6Limit;
+    bool const reached = rig.start(std::move(cfg)) && rig.connect_peer() &&
+                         rig.deliver(rig.heartbeat(1)) &&
+                         rig.run_until([&] { return rig.state() == fsm_state::Disconnected; });
+    bool const closed = reached && rig.run_until([&] { return rig.peer.read_ended; });
+    auto const ec = rig.peer.read_ec;
+    std::string const wire = rig.peer.received;
+    rig.stop();
+    ASSERT_TRUE(reached) << "setup: the refusal did not record Disconnected";
+    EXPECT_TRUE(closed) << "the refusal did not close the connection";
+    EXPECT_EQ(ec, asio::error::eof) << "the connection did not end in EOF";
+    EXPECT_TRUE(wire.empty()) << "the refusal wrote a frame: " << wire;
 }
 TEST(InboundFrameDispositionsQ6, LogoutSent_FrameOfLPlusOneCloses) {
     run_q6(Q6State::logout_sent, OverL::frame);

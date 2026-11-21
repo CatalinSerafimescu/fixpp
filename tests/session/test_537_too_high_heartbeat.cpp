@@ -9,8 +9,10 @@
 //
 // The cells are timelines of the liveness loop on a mock clock. HB is the Scene's
 // HeartBtInt and E the instant a gap opened. The loop writes a TestRequest when no frame
-// arrived for one HB, and ends the session, silently, when that TestRequest is still
-// pending one HB after it was due. So "the session is Active just past that instant" is
+// arrived for one HB, and ends the session when that TestRequest is still pending one HB
+// after it was due, with the Logout of 105-transport-liveness R-1 (FR-003), which supersedes
+// the silent ending (the 536-537-538 note's R-6, "Not chosen: … a Logout on the dead-peer
+// ending"). So "the session is Active just past that instant" is
 // the reading that tells an answered TestRequest from one a dropped Heartbeat left
 // pending, and each cell that makes it first reads that the TestRequest was written.
 
@@ -189,7 +191,13 @@ TEST(TooHighHeartbeatDuringTheGap, Control_HeartbeatBelowNextNumIn_LeavesTheTest
 
     s.pass(kPastTheGrace);
     EXPECT_EQ(s.state(), fsm_state::Disconnected) << "past the grace deadline";
-    EXPECT_EQ(s.count("5", g.mark), 0U);
+    // 105 R-1 (FR-003; research D3): the ending writes one Logout naming the TestRequest.
+    ASSERT_EQ(s.count("5", g.mark), 1U) << s.written(g.mark);
+    std::string logout;
+    for (std::size_t i = g.mark; i < s.sent.size(); ++i) {
+        if (field(s.sent[i], 35) == "5") logout = s.sent[i];
+    }
+    EXPECT_EQ(field(logout, 58), "TestRequest unanswered, TestReqID " + id) << logout;
 }
 
 // Bounds of the rule, second: with validate_sequence_numbers off no resend is ever

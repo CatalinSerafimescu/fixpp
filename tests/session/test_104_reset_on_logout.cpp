@@ -4350,14 +4350,27 @@ void liveness_heartbeat_across_unit(session_role const role, liveness_arm const 
     }
 
     if (!rol) {
-        // The forced hit: nothing is frozen, so the Heartbeat is written after the reply; on the
-        // live transport it is the first write started after it.
-        EXPECT_GE(heartbeats_after, 1U) << "written after the reply: " << after_text;
         if (live) {
+            // 105-transport-liveness (FR-005, FR-008; contract C-1 row 5) supersedes this arm's
+            // forced hit, a Heartbeat written after the reply on the open connection: the
+            // bound's reply Logout is written, the session ends, and the connection closes at
+            // the bound's exit, so the Heartbeat, whose store call has run (`reached` above), is
+            // not written after the reply.
             auto const w = written_after(*st, reply_start);
-            EXPECT_TRUE(!w.empty() && w.front().type == "0" && w.front().start == reply_start + 1)
-                << "written after the reply: " << describe(w);
+            EXPECT_TRUE(w.empty()) << "written after the reply: " << describe(w);
+            bool reply_completed = false;
+            for (auto const& rec : st->recorded) {
+                if (rec.start == reply_start) reply_completed = rec.completed;
+            }
+            EXPECT_TRUE(reply_completed) << "the reply Logout's write did not complete";
+            EXPECT_GE(st->closes, 1U) << "the connection was not closed after the reply";
+            EXPECT_TRUE(st->starts_at_first_close.has_value() &&
+                        *st->starts_at_first_close >= reply_start)
+                << "the connection was closed before the reply's write began";
+            return;
         }
+        // The forced hit: nothing is frozen, so the Heartbeat is written after the reply.
+        EXPECT_GE(heartbeats_after, 1U) << "written after the reply: " << after_text;
         return;
     }
     EXPECT_TRUE(after.empty()) << "written after the reply: " << after_text;
@@ -4394,7 +4407,9 @@ TEST(ResetOnLogout104, LivenessHeartbeatAcrossBoundUnit_OneEnding_StoreHeldAtArm
     }
 }
 
-// R-5h's forced hits, one per observation path: reset_on_logout off.
+// R-5h's forced hits, one per observation path: reset_on_logout off. On the live path
+// 105-transport-liveness (FR-005) closes the connection after the reply, so GateWait_RolOff
+// pins that close instead (liveness_heartbeat_across_unit).
 TEST(ResetOnLogout104, LivenessHeartbeatAcrossBoundUnit_OneEnding_GateWait_RolOff) {
     liveness_heartbeat_across_unit(session_role::acceptor, liveness_arm::gate_wait, false);
 }
