@@ -1103,7 +1103,11 @@ T115).
     `Disconnected` at once, and the connection closes at the peer's Logout or the bound), and B-103-13 (the direct
     driver's close-before-destroy precondition: run `close()` or `drive_reconnect` and let the R-2 bound,
     `run_ending_logout_bound_`, exit before destroying the Session, as for the too-high Logout's bound; `close()` also joins the close frame, so the precondition covers it with no
-    exemption; `Lifetime105.*` are its cells).
+    exemption; `Lifetime105.*` are its cells); and, by the Phase 4 readings, B-103-7 (its "waits for it inside its
+    grace": a `close(graceful)` that finds an R-2 Logout's wait armed proceeds at the peer's Logout or the bound, W-13;
+    witness `Lo1.*`) and L-103-6 (a `close(graceful)` whose in-flight Logout is held in a store call returns at that
+    Logout's write limit on the session's clock, not at the real-time grace, when the two clocks differ; witness
+    `TooHighLogoutState103.Lo3_*`; subject to the orchestrator's ruling on that Phase 4 escalation).
   - *New rows:* `B-105-1` the close rule by ending class (FR-001 to FR-008); `B-105-2` R-2's wait and its
     observables, and the write limit on every ending Logout (ruling D-e: one budget from the write's start; a cut
     write closes the connection and counts as not sent; disclosed: the budget starts at the owner claim, so it covers
