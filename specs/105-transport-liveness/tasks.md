@@ -878,14 +878,14 @@ the session stays Active past the give-up (SC-003).
 
 ### Mutant arms for US2 (in `$M` at `H3`)
 
-- [ ] T088 [US2] The #582 predicate set back (`AheadPeerAnswersTenCycles_*` RED); the #582 predicate widened to the knob-on
+- [X] T088 [US2] The #582 predicate set back (`AheadPeerAnswersTenCycles_*` RED); the #582 predicate widened to the knob-on
   route (`KnobOn_Unchanged` RED); each 112 site's plain comparison restored (`TestReqId105.*_EarlierId_*` RED per site); the
   canonical-form test and the pending test deleted (their guards RED); the window function made non-modular, and its
   full-cycle case dropped (`TestReqIdWindow105.*` RED); in `detail::is_earlier_test_req_id`, one mutant each: the
   canonical-form test deleted (`TestReqIdParse105.LeadingZero_Mismatch` and `TestReqId105.LeadingZeroId_Mismatch` RED),
   the sign refusal deleted (`Sign_Mismatch`), the overflow test deleted (`Overflow_Mismatch`), the `TR`-length test deleted
   (`PrefixAlone_Mismatch`). Record the mutant table; every quickstart section 5 row for this story is RED, or stop.
-- [ ] T148 [US2] Fuzz run ([const §VII.7]): build `fuzz_session_recovery_admin_parse` at `H3` with T085's seeds and direct
+- [X] T148 [US2] Fuzz run ([const §VII.7]): build `fuzz_session_recovery_admin_parse` at `H3` with T085's seeds and direct
   call (the `linux-clang-asan` preset, which sets `FIXPP_BUILD_FUZZ=ON` and builds the fuzz targets with
   `-fsanitize=fuzzer,address,undefined`, a tree on `/mnt/wsl/fixppbuild`, under the build lock), show first that the run reaches
   `detail::is_earlier_test_req_id` (a coverage read or a counter, non-zero), then run it for at least 10 minutes
