@@ -8584,7 +8584,7 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                     fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(
                         fixpp::core::error::session_test_request_unanswered)));
                 // 105 (T059a; spec.md Clarifications, the Phase 3 implementation session):
-                // the give-up is decided here and is final. R-1 claims the Logout owner and
+                // the give-up is decided here. R-1 claims the Logout owner and
                 // enters the ending state machine now, so its budget counts from the decision:
                 // a give-up still waiting for an exclusive replay-gate hold at the deadline is
                 // closed by the write limit and writes nothing past the gate ("Logout not
