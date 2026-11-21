@@ -403,6 +403,18 @@ TEST_F(HbTrTest, HeartBtIntZeroDisablesTimers) {
 // ──────────────────────────────────────────────────────────────────────────────
 TEST_F(HbTrTest, UnansweredTestRequestDisconnects) {
     auto cfg = make_cfg(1);  // 1s HeartBtInt for fast test
+    std::vector<std::string> sent;
+    cfg.transport_send = [&sent](std::span<const std::byte> b) {
+        sent.emplace_back(reinterpret_cast<const char*>(b.data()), b.size());
+    };
+    auto const saw_test_request = [&sent] {
+        for (auto const& f : sent) {
+            if (f.find("\x01"
+                       "35=1\x01") != std::string::npos)
+                return true;
+        }
+        return false;
+    };
     Session session{engine, cfg};
     ASSERT_TRUE(drive_to_active(session, 1));
 
@@ -441,9 +453,18 @@ TEST_F(HbTrTest, UnansweredTestRequestDisconnects) {
     // ⚠️ RE-DERIVE, DO NOT TRUST THIS: starve the window below to `run_for(0ms)`,
     // rebuild, and run the cell. GREEN means the disposition still holds; RED means it
     // has stopped holding and this comment is the thing that is wrong.
-    clock->advance(2s);
+    // 105-transport-liveness (R-3, research D6) supersedes 005 research D-8's 1 × HeartBtInt
+    // threshold this cell ran on: unset, test_request_threshold is 1.2 × HeartBtInt, so with
+    // HeartBtInt 1 s the TestRequest goes at 1.2 s (none at 1.1 s) and the give-up strictly
+    // after 2.4 s of inbound silence.
+    clock->advance(1100ms);
     ioc.run_for(20ms);
     ioc.restart();
+    EXPECT_FALSE(saw_test_request()) << "a TestRequest before 1.2 × HeartBtInt";
+    clock->advance(100ms);
+    ioc.run_for(20ms);
+    ioc.restart();
+    EXPECT_TRUE(saw_test_request()) << "no TestRequest at 1.2 × HeartBtInt";
 
     // Advance clock past the grace window (another 1s + buffer).
     // No Heartbeat reply → unanswered-TR → Disconnected.

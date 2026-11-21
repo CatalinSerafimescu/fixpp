@@ -197,7 +197,12 @@ TEST_P(TooLowLogout103, B2Control_KnobOff_HeartbeatBelowNextNumInDropped) {
 // The traffic that carries the session past the bound: the loop's TestRequest after one
 // quiet HeartBtInt, answered before the bound by a Heartbeat above NextNumIn (B-537-3).
 TEST_P(TooLowLogout103, B3_GapPastTheDeadlineThenATooLowFrame_OneLogoutWithTheDeadlinesText) {
-    rg::Scene s{rg::Options{.role = GetParam()}};
+    // 105-transport-liveness (R-3, research D6) supersedes 005 research D-8's 1 × HeartBtInt
+    // TestRequest threshold this cell's instants were read at: it sets
+    // test_request_threshold = HeartBtInt, so its TestRequest stays one HeartBtInt after the
+    // last inbound frame; tests/session/test_105_liveness_timing.cpp reads the default.
+    rg::Scene s{rg::Options{.role = GetParam(),
+                            .test_request_threshold = std::chrono::milliseconds{rg::kHeartBtInt}}};
     ASSERT_TRUE(s.open_to_active()) << "setup";
     ASSERT_TRUE(drive_to_n(s)) << "setup";
     auto const gap_mark = s.sent.size();

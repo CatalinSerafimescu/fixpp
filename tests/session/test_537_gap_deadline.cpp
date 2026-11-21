@@ -74,7 +74,20 @@ using fixpp::test_support::resend_gap::open_gap;
 using fixpp::test_support::resend_gap::Options;
 using fixpp::test_support::resend_gap::ResetRejectingApp;
 using fixpp::test_support::resend_gap::role_name;
-using fixpp::test_support::resend_gap::Scene;
+// 105-transport-liveness (R-3, research D6) supersedes 005 research D-8's 1 × HeartBtInt
+// TestRequest threshold: unset, test_request_threshold is 1.2 × HeartBtInt. This file's Scene
+// sets it to HeartBtInt, so its cells' TestRequest and give-up instants stay one and two
+// HeartBtInt after the last inbound frame; tests/session/test_105_liveness_timing.cpp reads the
+// default.
+struct Scene : fixpp::test_support::resend_gap::Scene {
+    explicit Scene(Options o = {}) : fixpp::test_support::resend_gap::Scene(pinned(o)) {}
+    static Options pinned(Options o) {
+        if (!o.test_request_threshold && o.heartbeat > std::chrono::seconds::zero()) {
+            o.test_request_threshold = std::chrono::milliseconds{o.heartbeat};
+        }
+        return o;
+    }
+};
 using fixpp::test_support::resend_gap::state_name;
 using orig = Scene::orig_time;
 

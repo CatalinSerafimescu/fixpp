@@ -2,6 +2,12 @@
 //
 // tests/session/unparseable_frame_disposition_test.cpp
 //
+// 105-transport-liveness (R-3, research D6) supersedes 005 research D-8's 1 × HeartBtInt
+// TestRequest threshold: unset, test_request_threshold is 1.2 × HeartBtInt. This file's fixture
+// sets it to HeartBtInt, so its cells' TestRequest and give-up instants stay one and two
+// HeartBtInt after the last inbound frame; tests/session/test_105_liveness_timing.cpp reads the
+// default.
+//
 // 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
 // "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
 // session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
@@ -250,6 +256,7 @@ struct DispositionFixture {
         cfg.target_comp_id = "TW";
         cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = 30s;
+        cfg.test_request_threshold = 30s;
         cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
         cfg.dictionary = fixpp::test_support::make_validation_test_dictionary();
         cfg.executor_override = ioc.get_executor();
@@ -1567,7 +1574,8 @@ TEST(UnparseableFrameDisposition, Liveness_Step1_Field3Not35_TestRequestAtInterv
 TEST(UnparseableFrameDisposition, Liveness_FramerGarble_TestRequestAtInterval) {
     namespace plain_rig = fixpp::test_support::plain_rig;
     plain_rig::Rig rig;
-    auto const cfg = rig.cfg();
+    auto cfg = rig.cfg();
+    cfg.test_request_threshold = std::chrono::seconds{30};
     ASSERT_TRUE(cfg.heartbeat_interval.has_value())
         << "precondition: the config carries a heartbeat interval";
     // The ASSERT_TRUE above returns on an empty optional; the check does not model it.

@@ -2,6 +2,12 @@
 //
 // tests/session/test_fixt_logon_establishment.cpp
 //
+// 105-transport-liveness (R-3, research D6) supersedes 005 research D-8's 1 × HeartBtInt
+// TestRequest threshold: unset, test_request_threshold is 1.2 × HeartBtInt. This file's fixture
+// sets it to HeartBtInt, so its cells' TestRequest and give-up instants stay one and two
+// HeartBtInt after the last inbound frame; tests/session/test_105_liveness_timing.cpp reads the
+// default.
+//
 // 033-fixt-fix50sp2-session — T002 (target creation) / T004 (RED render helper
 // test) / T005 (impl: make T004 green) / T014 (W4 — FIX.4.x regression guard) /
 // T016–T017 emit-half of W1 / T011/T012/T013/T015/T035 full inbound witnesses.
@@ -663,6 +669,7 @@ struct FixtSetup {
         cfg.target_comp_id = "TW";
         cfg.begin_string = "FIXT.1.1";
         cfg.heartbeat_interval = std::chrono::seconds{30};
+        cfg.test_request_threshold = std::chrono::seconds{30};
         cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
         cfg.dictionary = make_dict(kMinimalFix44Xml);  // session-layer dict (non-null)
         cfg.executor_override = ioc.get_executor();
@@ -680,6 +687,7 @@ struct FixtSetup {
         cfg.target_comp_id = "ISLD";
         cfg.begin_string = "FIXT.1.1";
         cfg.heartbeat_interval = std::chrono::seconds{30};
+        cfg.test_request_threshold = std::chrono::seconds{30};
         cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
         cfg.dictionary = make_dict(kMinimalFix44Xml);  // session-layer dict (non-null)
         cfg.executor_override = ioc.get_executor();

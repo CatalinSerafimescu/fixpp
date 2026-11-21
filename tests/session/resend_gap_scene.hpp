@@ -189,6 +189,9 @@ struct Options {
     // With recording_store: the store reports itself persistent, so the session persists
     // each inbound advance (persist_inbound_advance_) and a cell can hold that store call.
     bool recording_store_persistent = false;
+    // When set, SessionConfig::test_request_threshold; otherwise unset, so 1.2 × HeartBtInt
+    // (105-transport-liveness, R-3).
+    std::optional<std::chrono::milliseconds> test_request_threshold = std::nullopt;
 };
 
 // The peer is "TW" and the session "ISLD", FIX.4.2.
@@ -227,6 +230,7 @@ public:
         cfg.executor_override = ioc.get_executor();
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         if (o.logout_timeout_ms) cfg.logout_disconnect_timeout_ms = *o.logout_timeout_ms;
+        if (o.test_request_threshold) cfg.test_request_threshold = *o.test_request_threshold;
         if (o.recording_store) {
             auto const f = std::make_shared<fixpp::test_support::RecordingStoreFactory>(
                 std::make_shared<fixpp::session::MemoryStoreFactory>(

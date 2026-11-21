@@ -42,7 +42,20 @@ using fixpp::test_support::resend_gap::kGapWidth;
 using fixpp::test_support::resend_gap::kHeartBtInt;
 using fixpp::test_support::resend_gap::open_gap;
 using fixpp::test_support::resend_gap::Options;
-using fixpp::test_support::resend_gap::Scene;
+// 105-transport-liveness (R-3, research D6) supersedes 005 research D-8's 1 × HeartBtInt
+// TestRequest threshold: unset, test_request_threshold is 1.2 × HeartBtInt. This file's Scene
+// sets it to HeartBtInt, so its cells' TestRequest and give-up instants stay one and two
+// HeartBtInt after the last inbound frame; tests/session/test_105_liveness_timing.cpp reads the
+// default.
+struct Scene : fixpp::test_support::resend_gap::Scene {
+    explicit Scene(Options o = {}) : fixpp::test_support::resend_gap::Scene(pinned(o)) {}
+    static Options pinned(Options o) {
+        if (!o.test_request_threshold && o.heartbeat > std::chrono::seconds::zero()) {
+            o.test_request_threshold = std::chrono::milliseconds{o.heartbeat};
+        }
+        return o;
+    }
+};
 using fixpp::test_support::resend_gap::state_name;
 using orig = Scene::orig_time;
 
@@ -175,9 +188,14 @@ TEST(TooHighHeartbeatDuringTheGap, OtherTestReqId_EndsTheSessionAtThatFrame) {
 }
 
 // Bounds of the rule, first: a Heartbeat below NextNumIn does not clear a pending
-// TestRequest, even with its TestReqID. The session ends at the grace check. The Heartbeat
-// carries PossDupFlag(43)=Y, so the PossDup arm ignores it: without 43=Y it draws the
-// too-low Logout (103, FR-018), which is not this control's subject.
+// TestRequest, even with its TestReqID. 105-transport-liveness (clarification D-c; research
+// D6) supersedes "the session ends at the grace check": the frame restarts the inbound
+// silence, so past the old grace check the session is Active, and it gives up two thresholds
+// after the frame, naming the TestRequest. The frame arrives at the TestRequest's own instant,
+// so it is not "an inbound frame since the TestRequest" (data-model E-4) and no second
+// TestRequest goes. The Heartbeat carries PossDupFlag(43)=Y, so the PossDup arm ignores
+// it: without 43=Y it draws the too-low Logout (103, FR-018), which is not this control's
+// subject.
 TEST(TooHighHeartbeatDuringTheGap, Control_HeartbeatBelowNextNumIn_LeavesTheTestRequestPending) {
     Scene s;
     const Gap g = open_gap(s);
@@ -194,7 +212,13 @@ TEST(TooHighHeartbeatDuringTheGap, Control_HeartbeatBelowNextNumIn_LeavesTheTest
     EXPECT_EQ(s.state(), fsm_state::Active);
 
     s.pass(kPastTheGrace);
-    EXPECT_EQ(s.state(), fsm_state::Disconnected) << "past the grace deadline";
+    EXPECT_EQ(s.state(), fsm_state::Active) << "given up at the old grace check, before 2T of "
+                                               "inbound silence since the Heartbeat";
+    EXPECT_EQ(s.count("1"), 1U) << "a second TestRequest";
+    EXPECT_EQ(s.count("5", g.mark), 0U) << s.written(g.mark);
+
+    s.pass(kHeartBtInt);
+    EXPECT_EQ(s.state(), fsm_state::Disconnected) << "not given up 2T after the Heartbeat";
     // 105 R-1 (FR-003; research D3): the ending writes one Logout naming the TestRequest.
     ASSERT_EQ(s.count("5", g.mark), 1U) << s.written(g.mark);
     std::string logout;
