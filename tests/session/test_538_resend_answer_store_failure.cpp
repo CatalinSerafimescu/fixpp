@@ -1189,6 +1189,79 @@ TEST(ReplayGate588, R588c_LivenessDuringTheAnswer_NothingInsideItNextNumbersAfte
     }
 }
 
+// R-588-c's Heartbeat arm (FR-014): the clock moves past HeartBtInt but short of the threshold
+// while the answer is held, so only the Heartbeat falls due. It is not written inside the
+// answer; the loop waits at the gate from its Heartbeat arm and, after the release, writes the
+// Heartbeat with the next number.
+TEST(ReplayGate588, R588c_HeartbeatDuringTheAnswer_WrittenAfterItNextNumber) {
+    HeldWalk w{DirectAcceptor::Options{
+        .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
+    ASSERT_TRUE(w.start(is_slot_read(3))) << "setup: the walk did not reach the held read";
+    // KIND F: a lost advance writes no Heartbeat, which the ASSERT_GT after the release
+    // reports by name.
+    w.s.f.clock->advance(kHb588 + std::chrono::seconds{1});
+    w.pump_for(kHeldWindow);
+    EXPECT_EQ(w.s.f.sent_count("0") + w.s.f.sent_count("1"), 0U)
+        << "a liveness frame was written while the answer is held:\n"
+        << printable(w.s.f.sent);
+    w.release();
+    w.pump_for(kHeldWindow);
+    auto const& sent = w.s.f.sent;
+    ASSERT_GT(w.s.f.sent_count("0"), 0U)
+        << "setup: the liveness loop wrote no Heartbeat; the cell exercised no contention:\n"
+        << printable(sent);
+    EXPECT_EQ(w.s.f.sent_count("1"), 0U) << "a TestRequest before the threshold:\n"
+                                         << printable(sent);
+    auto const last = last_answer_index(sent);
+    auto next = answer_end(sent) + 1;
+    for (std::size_t k = 0; k < sent.size(); ++k) {
+        if (plain_rig::field_value(sent[k], "35") != "0") continue;
+        EXPECT_GT(k, last) << "a Heartbeat lies inside the answer:\n" << printable(sent);
+        EXPECT_EQ(plain_rig::field_value(sent[k], "34"), std::to_string(next)) << printable(sent);
+        ++next;
+    }
+}
+
+// 105-transport-liveness (clarification D-c; data-model E-4): the give-up is eligible only with
+// no inbound frame since the pending TestRequest. A frame after the TestRequest (the request that
+// starts the held walk) makes the next TestRequest due one threshold after it; held behind the
+// walk until past two thresholds after the frame, the loop writes that TestRequest after the
+// release, and only then gives up (the inbound silence has passed two thresholds), naming it.
+TEST(ReplayGate588,
+     R588g_FrameAfterTheTestRequest_HeldPastTwoThresholds_TestRequestBeforeTheGiveUp) {
+    HeldWalk w{DirectAcceptor::Options{
+        .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
+    ASSERT_TRUE(w.start(is_slot_read(3), std::nullopt, /*request=*/false)) << "setup";
+    w.s.f.clock->advance(kTr588 + std::chrono::seconds{1});
+    ASSERT_TRUE(w.s.f.run_until([&] { return w.s.f.sent_count("1") != 0; }))
+        << "setup: no TestRequest was written:\n"
+        << printable(w.s.f.sent);
+    w.s.f.clock->advance(std::chrono::seconds{1});
+    ASSERT_TRUE(w.feed_request()) << "setup: the walk did not reach the held read";
+    w.s.f.clock->advance(2 * kTr588 + std::chrono::seconds{1});
+    w.pump_for(kHeldWindow);
+    EXPECT_EQ(w.s.f.sent_count("1"), 1U) << "a TestRequest inside the held answer:\n"
+                                         << printable(w.s.f.sent);
+    EXPECT_EQ(w.s.f.sent_count("5"), 0U) << "a Logout inside the held answer";
+    w.release();
+    EXPECT_TRUE(w.s.f.run_until([&] { return w.s.f.session->state() == fsm_state::Disconnected; }))
+        << "not given up after the release:\n"
+        << printable(w.s.f.sent);
+    std::vector<std::string> trs;
+    std::vector<std::string> logouts;
+    for (auto const& f : w.s.f.sent) {
+        auto const t = plain_rig::field_value(f, "35");
+        if (t == "1") trs.push_back(plain_rig::field_value(f, "112"));
+        if (t == "5") logouts.push_back(f);
+    }
+    ASSERT_EQ(trs.size(), 2U) << "no TestRequest after the release, before the give-up:\n"
+                              << printable(w.s.f.sent);
+    ASSERT_EQ(logouts.size(), 1U) << printable(w.s.f.sent);
+    EXPECT_EQ(plain_rig::field_value(logouts.front(), "58"),
+              "TestRequest unanswered, TestReqID " + trs.back())
+        << "the give-up names a TestRequest the frame had made answerable";
+}
+
 // 103 tasks T058, R-588-d (FR-014): close(graceful) started while the answer is held writes
 // no Logout during it; once the answer ends the Logout follows it with the next number.
 TEST(ReplayGate588, R588d_GracefulCloseDuringTheAnswer_LogoutAfterIt) {

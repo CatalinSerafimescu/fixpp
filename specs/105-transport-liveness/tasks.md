@@ -905,12 +905,13 @@ inbound silence, one sleep per iteration, T validated.
 
 ### RED cells for US3 (write first)
 
-- [ ] T089 [P] [US3] `tests/session/test_105_liveness_timing.cpp`, both roles, H = 10 s on the mock clock, threshold unset
+- [X] T089 [P] [US3] `tests/session/test_105_liveness_timing.cpp`, both roles, H = 10 s on the mock clock, threshold unset
   unless named: `LivenessTiming105.Default_NoTestRequestAt11s_OneAt12s` (the base sends at 10 s),
   `Default_ActiveAt23900ms_EndedAt24sPlusGuard` (the base ends near 20 s), `SetThreshold7s_TestRequestAt7s_GiveUpAt14sPlusGuard`,
   `GuardAtExactly2T_EchoWins`, `At2TPlus1ns_GivesUp`. Each asserts the wire (the TestRequest, the Logout) and EOF at the named
   mock instants. RED on the base before the fix: TestRequest at 1 × HeartBtInt, give-up near 2 × HeartBtInt.
-- [ ] T090 [US3] Same file, the silence measure and the sleep set (clarification D-c, data-model E-4):
+  Done: evidence file, Phase 6 (US3); cells in `c179f57b`, the timeline's read-at-the-instant wait in `f636aebb`.
+- [X] T090 [US3] Same file, the silence measure and the sleep set (clarification D-c, data-model E-4):
   `TrafficAfterTestRequestNoHeartbeat_NotGivenUpAt2T_GivenUpAt2TAfterLastFrame`;
   `SilentPeer_NoHeartbeatWhileTestRequestPending` (positive control: the TestRequest at 12 s and the session Active at 22 s;
   no Heartbeat at 22 s; the give-up just after 24 s); `FrameAfterTestRequest_HeartbeatAt22s_TR2At25s_NoneAt35s_GiveUpAfter37s`;
@@ -918,13 +919,15 @@ inbound silence, one sleep per iteration, T validated.
   none at 23 s); `SilentAfterTestRequest_NoSpin` (T005's counting decorator as `clock_override`: one `sleep_until` per wake, a
   bounded count from TR1 to the give-up, under the bounded drive so its RED arm terminates as a failed count);
   `SecondTestRequest_LateAnswerToTheFirst_StaysActive` (D-d: TR2 stays pending; the give-up 2T after that frame). RED on the base before the fix.
-- [ ] T091 [US3] Same file, precedence and edges (FR-010, C-6.4, C-6.5): `GapOpen_PeerSendsNonAdvancingFrame_DeadlineLogout`,
+  Done: as T089.
+- [X] T091 [US3] Same file, precedence and edges (FR-010, C-6.4, C-6.5): `GapOpen_PeerSendsNonAdvancingFrame_DeadlineLogout`,
   `GapOpen_PeerSilent_R1LogoutAt2T`, `GapOpen_ThresholdAboveTwoH_PeerSilent_TestRequestAtT_R1LogoutAt2T` (T = 25 s > 2H with
   H = 10 s: no TestRequest before T, no gap-deadline Logout with no frame, R-1's Logout and EOF just after 2T; the base
   sends the TestRequest at H and ends near 2H), `HeartBtIntNegative_NoTestRequest`, `ThresholdOverflow_Saturates` (2T past
   the clock's range: no give-up), RED on the base before the fix; [guard: the loop's HeartBtInt test deleted]
   `HeartBtIntZero_NoTestRequest`.
-- [ ] T092 [P] [US3] `tests/config/test_load_negative_battery.cpp`: `LoadNegativeBattery.TestRequestThreshold_Zero_OutOfRange`
+  Done: as T089; the gap cells open the gap at 1 s, so their instants are 1 s later than a gap at Active.
+- [X] T092 [P] [US3] `tests/config/test_load_negative_battery.cpp`: `LoadNegativeBattery.TestRequestThreshold_Zero_OutOfRange`
   (an `out_of_range` diagnostic at `session[i].test_request_threshold`), RED on the base before the fix; [guard: the
   duration parser's leading-digit refusal deleted] `LoadNegativeBattery.TestRequestThreshold_Negative_MalformedValue`.
   Base reading (T094; the Execution rules' overlay covers `tests/session/` only): overlay this one file on `$B` from the
@@ -934,15 +937,18 @@ inbound silence, one sleep per iteration, T validated.
   only `config_044_tests`, run `GTEST_FILTER='LoadNegativeBattery.TestRequestThreshold_*' ctest --preset <p> -L '^044$'
   --no-tests=error -V`; otherwise run the binary with `--gtest_filter='LoadNegativeBattery.TestRequestThreshold_*'`. Record
   per cell its result and the reported count (0 fails the step). Never `-R`.
-- [ ] T093 [US3] `test_105_liveness_timing.cpp`: `SessionOpen105.Threshold<Zero|Negative>_InvalidConfig` and
+  Done: as T089, with fixtures `neg_test_request_threshold_{zero,negative}.toml`.
+- [X] T093 [US3] `test_105_liveness_timing.cpp`: `SessionOpen105.Threshold<Zero|Negative>_InvalidConfig` and
   `EngineRegister105.Threshold<Zero|Negative>_InvalidConfig` (`invalid_session_config`). RED on the base before the fix.
   [guard: an upper bound on T added at `Session::open()`] `SessionOpen105.ThresholdAboveGapDeadline_Accepted` (T = 25 s > 2H
   with H = 10 s: `open()` succeeds; FR-011, C-6.6: no bound but `T > 0`).
-- [ ] T094 [US3] Commit the cells; read T089 to T093 on `$B` (T092 by its own recipe); record.
+  Done: as T089.
+- [X] T094 [US3] Commit the cells; read T089 to T093 on `$B` (T092 by its own recipe); record.
+  Done: evidence file, Phase 6 (US3), T094 (read on `$B` from `c179f57b` and again from `f636aebb`: 39 ran, 36 RED, the 3 guards GREEN, no skip).
 
 ### Implementation for US3
 
-- [ ] T095 [US3] `run_liveness_loop` (data-model E-4, research D6): T computed once before the loop,
+- [X] T095 [US3] `run_liveness_loop` (data-model E-4, research D6): T computed once before the loop,
   `cfg_.test_request_threshold.value_or(default_test_request_threshold(H))`, the helper (H × 1200 ms, saturating at
   `milliseconds::max()`) in a `detail` header beside `deadline_after` (`read_first_frame_bounded.hpp` or its sibling);
   the TestRequest instant `deadline_after(last_inbound_steady_, T)`; the give-up instant three saturating steps (T, T, then
@@ -952,22 +958,28 @@ inbound silence, one sleep per iteration, T validated.
   eligible), the Heartbeat instant reached while ineligible dropped (the spin trap); on waking act on every eligible
   instant reached (give-up, else TestRequest, else Heartbeat); D-536-2's state test and filter reset before every sleep;
   the loop and the gap deadline off at HeartBtInt ≤ 0 (`<= 0`).
-- [ ] T096 [US3] Validation (FR-011, C-6.6): `Session::open()` and `Engine::register_session` refuse a set T ≤ 0 with
+  Done: `1f1bfff0` (`detail::default_test_request_threshold`, `detail::test_request_give_up_instant`).
+- [X] T096 [US3] Validation (FR-011, C-6.6): `Session::open()` and `Engine::register_session` refuse a set T ≤ 0 with
   `invalid_session_config`; `src/config/scalar_mappers.cpp` maps a zero duration to `out_of_range` (a negative token keeps the
   parser's `malformed_value`).
-- [ ] T097 [US3] [guard: the product formed unsaturated; the guard added by hand to a saturated instant]
+  Done: `1f1bfff0`.
+- [X] T097 [US3] [guard: the product formed unsaturated; the guard added by hand to a saturated instant]
   `LivenessTiming105.<DefaultThresholdHelper_Saturates|GuardAtTheSaturatedInstant>` in `tests/session/test_105_seams.cpp`: `constexpr` cells (`static_assert` under
   `FIXPP_105_STATIC_GUARDS`, with runtime twins; Execution rules, "Guard static_asserts") of the default-threshold helper and of the 1 ns guard at `steady_time_point::max()`. Not readable on `$B` (new helper).
+  Done: `1f1bfff0` (`tests/session/test_105_seams.cpp`, namespace `ltg`).
 - [ ] T098 [US3] FR-012 surfaces and comments: `SessionConfig::test_request_threshold`'s comment in
   `include/fixpp/session/session_config.hpp`; `run_liveness_loop`'s algorithm block (its "1 × HeartBtInt" steps) and its
   declaration comment in `session.hpp` ("after heartbt_int of no inbound data", "grace window (1×heartbt_int)"); the comment
   above `detail::resend_gap_deadline` in `src/session/read_first_frame_bounded.hpp` ("off only at exactly 0"); the QuickFIX
   parity-table row in `tests/config/test_quickfix_parity_table.cpp` and its TOML documentation; each states the new rule.
-- [ ] T099 [US3] Re-pin the moved timings (FR-019): `tests/session/test_heartbeat_cadence_8cell.cpp`'s T018 cells (that
+  Partial (`1f1bfff0`): the session_config.hpp, session.hpp, run_liveness_loop and resend_gap_deadline comments state the rule. Not done, escalated: `tests/config/test_quickfix_parity_table.cpp` has no `test_request_threshold` row (it lists the key in `kLoaderAccepted044Keys` only) and no TOML documentation page names the key (`git grep -n test_request_threshold -- ":!specs" ":!tests/session" ":!src" ":!include"`).
+- [X] T099 [US3] Re-pin the moved timings (FR-019): `tests/session/test_heartbeat_cadence_8cell.cpp`'s T018 cells (that
   file's own task, not this bundle's T018) `HeartbeatCadence8Cell.CellB_*` and `CellC_*_UnansweredTestRequestDisconnects`
   (a Cell B that discriminates 1 × from 1.2 ×), `HbTrTest.UnansweredTestRequestDisconnects` in `tests/session/heartbeat_testrequest_test.cpp` where it crosses HeartBtInt, `ci/red-arms/batch18-lost-advance.sh` (the cell it names), every cell of T011's list, and any
   cell pinning an earlier TestReqID as an ending; rename where the name states the old rule.
-- [ ] T100 [US3] Run T089 to T093 and T097 GREEN, then `-L 105`, `-L session` and `-L config`; commit `H4`; `codegraph sync`.
+  Done: `735aa11d`; the re-pin list and the T011-list classification: evidence file, Phase 6 (US3), T099.
+- [X] T100 [US3] Run T089 to T093 and T097 GREEN, then `-L 105`, `-L session` and `-L config`; commit `H4`; `codegraph sync`.
+  Done: `735aa11d` (H4): the gate population 249/249, `-L config` 4/4, `-L 105` 2/2; evidence file, Phase 6 (US3), T100.
 
 ### Mutant arms for US3 (in `$M` at `H4`)
 

@@ -6,10 +6,10 @@
 //
 // Every R-1 cell runs with HeartBtInt 10 s and test_request_threshold = HeartBtInt (tasks.md,
 // Execution rules, "Liveness instants"), so the TestRequest and the give-up instants are the
-// same with and without 105's timing change; the User Story 3 cells below say their own. The
-// TestRequest is read by test_105_support.hpp's wire reader; the give-up is reached by stepping the
-// mock clock, then the clock is held still while the close is awaited. The wall-clock timers: none
-// (plain rig, mock transport).
+// same with and without 105's timing change; the User Story 3 section below states its own
+// configuration. The TestRequest is read by test_105_support.hpp's wire reader; the give-up is
+// reached by stepping the mock clock, then the clock is held still while the close is awaited.
+// The wall-clock timers: none (plain rig, mock transport).
 //
 // No ASSERT_* runs between a rig's start() and its stop() (tasks.md, Execution rules).
 #include <gtest/gtest.h>
