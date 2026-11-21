@@ -122,7 +122,9 @@ TEST(ConnectionClose105, CloseFrameSpawnFails_ReleaseAtLoopExit_PeerSeesEofWithN
     EXPECT_TRUE(up && ended) << "setup";
     EXPECT_GE(seam_calls, 1) << "the reach proof: the close frame's spawn was not attempted";
     EXPECT_TRUE(eof) << "the peer's read did not end in EOF with no later call";
-    if (s) EXPECT_EQ(session_test_access::connection_close_count(*s), 0);
+    if (s) {
+        EXPECT_EQ(session_test_access::connection_close_count(*s), 0);
+    }
 }
 
 // The TLS arm, on the Engine over TLS (tests/session/engine_loopback_harness.hpp, acceptor):
@@ -408,7 +410,9 @@ void bound_spawn_fails_cell(bound_spawn_route route) {
     EXPECT_EQ(logouts_written, 0U) << "a Logout was written with no bound";
     EXPECT_TRUE(eof) << "no EOF at once";
     EXPECT_EQ(state, fsm_state::Disconnected);
-    if (route != bound_spawn_route::r2_before_active) EXPECT_EQ(app->logouts, 1) << "onLogout";
+    if (route != bound_spawn_route::r2_before_active) {
+        EXPECT_EQ(app->logouts, 1) << "onLogout";
+    }
 }
 
 }  // namespace t070
@@ -546,7 +550,9 @@ void race_throws_cell(race_route route) {
     EXPECT_EQ(*found, armed_route ? phase::armed : phase::writing) << "the phase the exit found";
     EXPECT_TRUE(closed_at_once) << "no EOF at once with the clock frozen";
     EXPECT_EQ(d.s.state(), fsm_state::Disconnected);
-    if (route != race_route::armed_before_active) EXPECT_EQ(d.app->logouts, 1) << "onLogout";
+    if (route != race_route::armed_before_active) {
+        EXPECT_EQ(d.app->logouts, 1) << "onLogout";
+    }
     EXPECT_EQ(session_test_access::ending_logout_bound_count(*d.s.session), 0)
         << "the bound outlived its failure";
     (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "close");

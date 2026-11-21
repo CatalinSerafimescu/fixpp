@@ -939,7 +939,9 @@ TEST_P(LogoutWait105, SendHeldInStoreAcrossTheEnding_StoreFails_EofAtOnce) {
         w.c.st->release_all();
         expect_w9(w, mark, "SendHeldStoreFails");
         EXPECT_TRUE(w.c.rig.run_until([&] { return rg_ready(send); }));
-        if (rg_ready(send)) EXPECT_FALSE(send.get().has_value()) << "the failed send succeeded";
+        if (rg_ready(send)) {
+            EXPECT_FALSE(send.get().has_value()) << "the failed send succeeded";
+        }
     }
     if (w.c.st) w.c.st->release_all();
     w.c.rig.stop();

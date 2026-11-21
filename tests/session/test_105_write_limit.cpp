@@ -228,7 +228,9 @@ void expect_limit(LimitReading const& r, bool after_active, const char* site,
     EXPECT_TRUE(r.open_before) << site << ": closed before the bound";
     EXPECT_TRUE(r.closed_at_bound) << site << ": the transport was not closed at the bound";
     EXPECT_EQ(r.completed_logouts, 0U) << site << ": a complete Logout reached the peer";
-    if (after_active) EXPECT_EQ(r.logouts_after, 1) << site << ": onLogout";
+    if (after_active) {
+        EXPECT_EQ(r.logouts_after, 1) << site << ": onLogout";
+    }
     EXPECT_TRUE(r.no_wait_after) << site << ": a wait followed the limit";
 }
 
