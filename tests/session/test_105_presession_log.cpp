@@ -64,9 +64,9 @@ constexpr char kBindFormat[] =
     "acceptor listener could not bind: begin_string={} sender_comp_id={} target_comp_id={} "
     "error={}";
 
-// How long a cell waits for a record to reach the capturing sink. Nothing else writes a record
-// of these formats, so the wait competes with no other mechanism; on a tree that writes none it
-// is what the cell spends before it reports the miss.
+// How long a cell waits for a record to reach the capturing sink before it reports the miss.
+// The writers of these formats, which the wait would also observe: git grep -n "acceptor
+// connection refused before\|acceptor listener could not bind" -- src.
 constexpr auto kRecordWait = std::chrono::seconds{2};
 
 std::string arg_text(fixpp::log::ArgValue const& a) {

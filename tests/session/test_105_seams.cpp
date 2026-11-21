@@ -43,6 +43,7 @@
 #include "session/resend_gap_scene.hpp"
 #include "session/test_105_direct_rig.hpp"
 #include "session/test_105_support.hpp"
+#include "support/engine_test_access.hpp"
 #include "support/log_capture.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/session_test_access.hpp"
@@ -764,6 +765,59 @@ TEST(LivenessTiming105, DefaultThresholdHelper_Saturates) {
 }
 TEST(LivenessTiming105, GuardAtTheSaturatedInstant) {
     EXPECT_TRUE(ltg::guard_at_the_saturated_instant());
+}
+
+// 105 (tasks.md T106) [seam], C-7.3's generic arm: no configuration makes the listener's
+// construction throw anything but std::system_error (asio_listener's constructor and
+// make_bind_endpoint throw it for every bind, listen and address failure), so the seam throws
+// std::bad_alloc in its place. One error record, error 0. Its mutant deletes the catch (...)
+// arm's record (tasks.md T107).
+TEST(PreSessionLog105, ListenerConstructionThrowsNonSystemError_OneRecordErrorZero) {
+    constexpr char kBindFormat[] =
+        "acceptor listener could not bind: begin_string={} sender_comp_id={} target_comp_id={} "
+        "error={}";
+    pr::Rig rig;
+    fixpp::test_support::LogCapture log;
+    auto c = rig.cfg();
+    c.logger_override = log.logger;
+    fixpp::core::EngineConfig ec;
+    ec.executor = rig.ioc.get_executor();
+    ec.clock = rig.clock;
+    rig.engine = std::make_unique<fixpp::session::Engine>(rig.ioc.get_executor(), std::move(ec));
+    int calls = 0;
+    fixpp::session::engine_test_access::set_listener_construction_fails(*rig.engine, [&calls] {
+        ++calls;
+        return true;
+    });
+    rig.id = fixpp::session::SessionId::from_config(c);
+    bool const registered = rig.engine->register_session(std::move(c)).has_value();
+    bool const started = registered && rig.engine->start().has_value();
+    EXPECT_TRUE(started) << "setup: the engine did not start";
+    if (started) {
+        (void)rig.run_until(
+            [&] {
+                for (auto const& r : log.sink->records()) {
+                    if (r.format_id == FIXPP_FORMAT_ID(kBindFormat)) return true;
+                }
+                return false;
+            },
+            std::chrono::seconds{2});
+    }
+    rig.stop();
+    auto const recs = log.records_of(FIXPP_FORMAT_ID(kBindFormat));
+    EXPECT_EQ(calls, 1) << "the seam was not consulted once";
+    ASSERT_EQ(recs.size(), 1U) << "the listener record";
+    EXPECT_EQ(recs.front().level, fixpp::log::Level::error);
+    ASSERT_EQ(recs.front().arg_count, 4U);
+    auto const text = [](fixpp::log::ArgValue const& a) {
+        return a.kind == fixpp::log::ArgValue::Kind::inline_str ? std::string{a.inl.data, a.inl.len}
+                                                                : std::string{"<not inline>"};
+    };
+    EXPECT_EQ(text(recs.front().args[0]), "FIX.4.2");
+    EXPECT_EQ(text(recs.front().args[1]), "ISLD");
+    EXPECT_EQ(text(recs.front().args[2]), "TW");
+    EXPECT_EQ(recs.front().args[3].kind, fixpp::log::ArgValue::Kind::i64);
+    EXPECT_EQ(recs.front().args[3].i64, 0) << "error";
 }
 
 }  // namespace

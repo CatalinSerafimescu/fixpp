@@ -50,14 +50,18 @@
 #if FIXPP_BUILD_OTEL
 #include <fixpp/otel/providers.hpp>
 #endif
+#include <fixpp/session/detail/log_rate_gate.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <fixpp/wire/framer.hpp>
 #include <memory>
+#include <new>
 #include <optional>
 #include <span>
+#include <string_view>
+#include <system_error>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -760,6 +764,103 @@ void log_role_loop_open_failure(fixpp::core::EngineConfig const& engine_cfg,
 }
 }  // namespace
 
+// ── 105-transport-liveness: the acceptor's records before a Session exists (FR-014, FR-015;
+// research D8; contract C-7; data-model E-6, E-7) ─────────────────────────────────────────────
+// One warn record per connection run_accept_loop refuses before open(), through the entry's
+// logger (logger_override, else the engine's) with the entry's initial trace context, as
+// log_role_loop_open_failure resolves them; at most one per window per entry (the loop's
+// detail::log_rate_gate), the next carrying the refusals not written since. The first frame's
+// BeginString and CompIDs come from an unauthenticated peer, so each byte outside printable
+// ASCII is written as '?', and ArgValue's inline copy cuts each at 15 bytes. Re-derive the
+// reasons from the code: every "(void)transport->close(); continue;" before open() in
+// run_accept_loop is one pre_session_reject value. Both format strings are registered in
+// src/log/format_registry.cpp.
+namespace {
+enum class pre_session_reject : std::uint8_t {
+    not_tls_transport,
+    tls_handshake_failed,
+    no_establishment_time,
+    first_frame_read_failed,
+    first_frame_without_ids,
+    compid_mismatch,
+};
+
+char const* pre_session_reject_name(pre_session_reject r) noexcept {
+    switch (r) {
+        case pre_session_reject::not_tls_transport:
+            return "not_tls";
+        case pre_session_reject::tls_handshake_failed:
+            return "tls_handshake";
+        case pre_session_reject::no_establishment_time:
+            return "no_time_left";
+        case pre_session_reject::first_frame_read_failed:
+            return "first_frame";
+        case pre_session_reject::first_frame_without_ids:
+            return "no_ids";
+        case pre_session_reject::compid_mismatch:
+            return "no_session";
+    }
+    return "unknown";
+}
+
+// A peer-supplied value as the record carries it: at most the inline copy's 15 bytes, each
+// byte outside printable ASCII (0x20 to 0x7E) replaced by '?'.
+fixpp::log::ArgValue printable_inline(std::string_view v) noexcept {
+    std::array<char, 15> buf{};
+    std::size_t const n = std::min(v.size(), buf.size());
+    for (std::size_t i = 0; i < n; ++i) {
+        auto const c = static_cast<unsigned char>(v[i]);
+        buf[i] = (c >= 0x20U && c <= 0x7EU) ? v[i] : '?';
+    }
+    return fixpp::log::ArgValue::from_inline(std::string_view{buf.data(), n});
+}
+
+// The first frame's identifiers, as read; empty before the first frame was read.
+struct pre_session_ids {
+    std::string_view begin_string;
+    std::string_view sender_comp_id;
+    std::string_view target_comp_id;
+};
+
+void log_pre_session_reject(fixpp::core::EngineConfig const& engine_cfg,
+                            SessionConfig const& session_cfg, detail::log_rate_gate& gate,
+                            pre_session_reject reason, pre_session_ids ids,
+                            std::uint64_t failure) noexcept {
+    auto const now = engine_cfg.clock->steady_now();
+    auto const heartbt = session_cfg.heartbeat_interval.value_or(detail::kDefaultHeartBtInt);
+    auto const suppressed = detail::admit_log_record(
+        gate, now, detail::deadline_after(now, std::max(heartbt, std::chrono::seconds{1})), 1);
+    if (!suppressed) {
+        return;
+    }
+    auto const& logger =
+        session_cfg.logger_override ? session_cfg.logger_override : engine_cfg.logger;
+    FIXPP_SLOG(logger.get(), warn, session_cfg.initial_trace_context, fixpp::log::cat::session,
+               "acceptor connection refused before a session: reason={} begin_string={} "
+               "sender_comp_id={} target_comp_id={} error={} suppressed_since_last={}",
+               fixpp::log::ArgValue::from_static(pre_session_reject_name(reason)),
+               printable_inline(ids.begin_string), printable_inline(ids.sender_comp_id),
+               printable_inline(ids.target_comp_id), fixpp::log::ArgValue::from_u64(failure),
+               fixpp::log::ArgValue::from_u64(*suppressed));
+}
+
+// C-7.3: the listener could not be built (bind or listen failed, or the construction threw
+// something else); one error record per start of the entry's accept loop, which then ends.
+// `failure` is the system error's value, or 0 when the exception carries none.
+void log_listener_bind_failure(fixpp::core::EngineConfig const& engine_cfg,
+                               SessionConfig const& session_cfg, std::int64_t failure) noexcept {
+    auto const& logger =
+        session_cfg.logger_override ? session_cfg.logger_override : engine_cfg.logger;
+    FIXPP_SLOG(logger.get(), error, session_cfg.initial_trace_context, fixpp::log::cat::session,
+               "acceptor listener could not bind: begin_string={} sender_comp_id={} "
+               "target_comp_id={} error={}",
+               fixpp::log::ArgValue::from_inline(session_cfg.begin_string),
+               fixpp::log::ArgValue::from_inline(session_cfg.sender_comp_id),
+               fixpp::log::ArgValue::from_inline(session_cfg.target_comp_id),
+               fixpp::log::ArgValue::from_i64(failure));
+}
+}  // namespace
+
 // ── run_accept_loop — T012/T013 production body ───────────────────────────────
 // Still inside namespace fixpp::session (the outer `namespace fixpp::session {`
 // opened at the top of this file). Defined here (not in the anonymous namespace)
@@ -861,9 +962,20 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
 
     std::unique_ptr<fixpp::transport::asio_listener> listener;
     try {
+        // 105 (research D8, tasks.md T106): the test seam stands in for an allocation failure
+        // of the construction; null outside tests.
+        if (engine.test_hook_listener_construction_fails_ &&
+            engine.test_hook_listener_construction_fails_()) {
+            throw std::bad_alloc{};
+        }
         listener = std::make_unique<fixpp::transport::asio_listener>(exec, lcfg);
+    } catch (std::system_error const& e) {
+        // listener bind/listen failed; loop exits (105 C-7.3: one error record).
+        log_listener_bind_failure(engine_cfg, entry.config, e.code().value());
+        co_return;
     } catch (...) {
-        co_return;  // listener bind/listen failed; loop exits
+        log_listener_bind_failure(engine_cfg, entry.config, 0);
+        co_return;
     }
 
     // T018 (D0/INV-0): store listener and bound endpoint on the CONTROL STRAND
@@ -938,6 +1050,10 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         co_return;
     }
 
+    // 105 (research D8; data-model E-7): the pre-session refusal record's gate, one per entry
+    // for the loop's lifetime.
+    detail::log_rate_gate reject_log_gate;
+
     // ── Accept loop ──────────────────────────────────────────────────────────
     // Session construction is LAZY + MATCH-GATED (FQ-2 / data-model C1 step 6):
     // the Session is constructed and open()'d ONLY after CompID resolution
@@ -989,6 +1105,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             if (!tls_transport) {
                 // Rejecting a pre-session connection: nothing consumes a close error.
                 (void)transport->close();
+                log_pre_session_reject(engine_cfg, entry.config, reject_log_gate,
+                                       pre_session_reject::not_tls_transport, {}, 0);
                 continue;  // not a TLS transport — config error; re-accept
             }
 
@@ -997,6 +1115,9 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
                 if (!hs_r.has_value()) {
                     // Rejecting a pre-session connection: nothing consumes a close error.
                     (void)transport->close();
+                    log_pre_session_reject(engine_cfg, entry.config, reject_log_gate,
+                                           pre_session_reject::tls_handshake_failed, {},
+                                           static_cast<std::uint64_t>(hs_r.error()));
                     continue;  // handshake failure → reclaim slot, re-accept
                 }
                 hr = std::move(*hs_r);
@@ -1013,6 +1134,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         if (establish_left <= std::chrono::milliseconds::zero()) {
             // Rejecting a pre-session connection: nothing consumes a close error.
             (void)transport->close();
+            log_pre_session_reject(engine_cfg, entry.config, reject_log_gate,
+                                   pre_session_reject::no_establishment_time, {}, 0);
             continue;
         }
 
@@ -1070,6 +1193,9 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             if (!read_r.has_value()) {
                 // Rejecting a pre-session connection: nothing consumes a close error.
                 (void)transport->close();
+                log_pre_session_reject(engine_cfg, entry.config, reject_log_gate,
+                                       pre_session_reject::first_frame_read_failed, {},
+                                       static_cast<std::uint64_t>(read_r.error()));
                 continue;  // timeout / over-budget / read-error → reclaim
             }
             first_frame_offset = read_r->offset;
@@ -1091,6 +1217,12 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         if (ids.begin_string.empty() || ids.sender_comp_id.empty() || ids.target_comp_id.empty()) {
             // Rejecting a pre-session connection: nothing consumes a close error.
             (void)transport->close();
+            log_pre_session_reject(engine_cfg, entry.config, reject_log_gate,
+                                   pre_session_reject::first_frame_without_ids,
+                                   {.begin_string = ids.begin_string,
+                                    .sender_comp_id = ids.sender_comp_id,
+                                    .target_comp_id = ids.target_comp_id},
+                                   0);
             continue;  // malformed first frame → reclaim
         }
 
@@ -1105,6 +1237,12 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             // close the transport and construct NO session. [FQ-2 / gate-b/r1]
             // Rejecting a pre-session connection: nothing consumes a close error.
             (void)transport->close();
+            log_pre_session_reject(engine_cfg, entry.config, reject_log_gate,
+                                   pre_session_reject::compid_mismatch,
+                                   {.begin_string = ids.begin_string,
+                                    .sender_comp_id = ids.sender_comp_id,
+                                    .target_comp_id = ids.target_comp_id},
+                                   0);
             continue;
         }
 

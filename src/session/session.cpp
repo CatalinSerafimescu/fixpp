@@ -131,8 +131,9 @@
 namespace fixpp::session {
 
 namespace {
-// The HeartBtInt a session runs when heartbeat_interval is unset (D-8).
-constexpr std::chrono::seconds kDefaultHeartBtInt{30};
+// The HeartBtInt a session runs when heartbeat_interval is unset (D-8); 105 (tasks.md T105)
+// moves the constant into read_first_frame_bounded.hpp, which engine.cpp includes too.
+using detail::kDefaultHeartBtInt;
 
 // 093 (data-model E-2): one block from a memory resource, max_align_t-aligned, freed
 // at scope exit unless release()d. Its allocation is noexcept: a bad_alloc leaves it
@@ -581,15 +582,12 @@ std::optional<std::uint64_t> Session::admit_log_record_(log_rate_gate& gate,
                                                         std::uint64_t occurrences) noexcept {
     auto const now =
         effective_clock_ ? effective_clock_->steady_now() : fixpp::core::steady_time_point{};
-    if (gate.logged && now < gate.next) {
-        gate.unlogged += occurrences;
-        return std::nullopt;
-    }
     auto const heartbt = cfg_.heartbeat_interval.value_or(kDefaultHeartBtInt);
-    // Saturates at steady_time_point::max() when not representable.
-    gate.next = detail::deadline_after(now, std::max(heartbt, std::chrono::seconds{1}));
-    gate.logged = true;
-    return std::exchange(gate.unlogged, 0);
+    // 105 (research D8; data-model E-7): the admit step is detail::admit_log_record. The window's
+    // end saturates at steady_time_point::max() when not representable.
+    return detail::admit_log_record(
+        gate, now, detail::deadline_after(now, std::max(heartbt, std::chrono::seconds{1})),
+        occurrences);
 }
 
 // ── 093-inbound-frame-dispositions — the establishment timeout (contract C-4;

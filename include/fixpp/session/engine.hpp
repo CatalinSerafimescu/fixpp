@@ -526,6 +526,12 @@ private:
     // installed); production code must not assign it.
     std::function<asio::awaitable<void>()> test_hook_before_role_loop_join_;
 
+    // 105-transport-liveness (research D8, tasks.md T106): when set and it returns true,
+    // run_accept_loop throws std::bad_alloc in place of the listener's construction. Null
+    // unless a test installs one through engine_test_access (tests/support/, never installed);
+    // production code must not assign it.
+    std::function<bool()> test_hook_listener_construction_fails_;
+
 #ifndef NDEBUG
     // T025 (INV-9a / FR-014 / R7): debug-only outstanding-lease counter.
     //

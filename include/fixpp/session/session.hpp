@@ -35,7 +35,8 @@
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/core/session_local.hpp>
 #include <fixpp/core/trace_context.hpp>
-#include <fixpp/session/detail/replay_gate.hpp>  // 103 (research D5′): replay_gate_
+#include <fixpp/session/detail/log_rate_gate.hpp>  // 105 (research D8): log_rate_gate
+#include <fixpp/session/detail/replay_gate.hpp>    // 103 (research D5′): replay_gate_
 // 066-dict-backed-inbound-parse T002: inbound_tv_ is a
 // std::optional<table_view> Session MEMBER (not a unique_ptr to an
 // incomplete type like validator_), so table_view must be complete here.
@@ -977,12 +978,9 @@ private:
     // The rate state of a session log record written at most once per max(HeartBtInt, 1 s) on
     // effective_clock_: whether one has been written, the earliest time of the next, and the
     // occurrences suppressed since the last. One instance per record; admit_log_record_ is its
-    // only writer.
-    struct log_rate_gate {
-        bool logged = false;
-        fixpp::core::steady_time_point next;
-        std::uint64_t unlogged = 0;
-    };
+    // only writer. 105 (research D8; data-model E-7) hoists the struct to
+    // detail/log_rate_gate.hpp, so the engine's accept loop holds one too; the name stays.
+    using log_rate_gate = detail::log_rate_gate;
     // Admits a record now, returning the occurrences suppressed since the previous one (and
     // starting the next window), or counts `occurrences` as suppressed and returns nullopt.
     [[nodiscard]] std::optional<std::uint64_t> admit_log_record_(

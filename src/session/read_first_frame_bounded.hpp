@@ -259,6 +259,11 @@ template <class Rep, class Period>
     return deadline_after(deadline_after(since, heartbt), heartbt);
 }
 
+// The HeartBtInt a session runs when heartbeat_interval is unset (005 research D-8). 105
+// (tasks.md T105) moves it here from session.cpp's file scope, so the accept loop's pre-session
+// record gate (engine.cpp) reads the same constant.
+inline constexpr std::chrono::seconds kDefaultHeartBtInt{30};
+
 // 105 (research D6; data-model E-4), superseding 005 research D-8's 1 × HeartBtInt: the
 // default test_request_threshold, 1.2 × HeartBtInt. HeartBtInt is whole seconds, so it is
 // exactly heartbt × 1200 ms; the product saturates at milliseconds::max(), and is zero at
