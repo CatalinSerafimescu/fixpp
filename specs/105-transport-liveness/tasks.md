@@ -992,6 +992,7 @@ inbound silence, one sleep per iteration, T validated.
   added at `Session::open()` (`ThresholdAboveGapDeadline_Accepted` RED); each 112 site's plain comparison restored at `H4`
   (`SecondTestRequest_LateAnswerToTheFirst_StaysActive` RED); T097's two mutants (built per Execution rules, "Guard
   static_asserts"). Record the mutant table; every quickstart section 5 row for this story is RED, or stop.
+  Partial: evidence file, Phase 6, "T101 mutant table". RED: Mdef, Mcfg (the threshold-pinned cells), MhbElig, Mspin (by `SilentAfterTestRequest_NoSpin` filtered; the unfiltered binary hangs in a Scene cell), MhbDel (by `HeartBtIntZero_NoTestRequest` filtered), MupperT, M112, MguardHand. Not RED as named, escalated: MgiveElig (an equivalent survivor in `TrafficAfterTestRequestNoHeartbeat_*`; RED by the new `ReplayGate588.R588g_*`), MeqZero (aborts at `deadline_after`'s assert), MleadDel (equivalent survivor: `from_chars` refuses the same token), Munsat (rejected at compile time by `-Werror,-Winteger-overflow`).
 
 **Checkpoint**: US3 complete.
 
