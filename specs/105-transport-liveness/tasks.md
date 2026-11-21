@@ -1025,15 +1025,27 @@ inbound silence, one sleep per iteration, T validated.
   count), `LongCompIds_CutAt15Bytes` asserting L-105-d's cut, `ControlBytesInCompIds_WrittenAsQuestionMarks` (a first frame whose
   SenderCompID carries a line feed and another control byte: the record holds `?` for each and no line break; C-7.1), `ListenerBindFails_OneRecord` (a port in use: one error record of C-7.3's format with the system error's value). RED on
   the base before the fix: no record.
-- [ ] T103 [US4] Commit the cells; read T102 on `$B`; record.
+  Partial: every named cell but `NotTls_OneRecord` in `d3f661db` (13 cells; evidence file, Phase 7). Not written,
+  escalated: `NotTls_OneRecord`. The branch is unreachable without a seam: on a TLS profile the listener mints its
+  connections through `asio_tls_transport_factory::make_accepted` (`asio_listener::async_accept`), which always yields
+  a `TlsTransport`; the record is written at the branch (T105) with no cell. Disclosed: `FirstFrameOverBudget` and
+  `FirstFrameOverLimit` carry the same read error, `wire_frame_too_large` (the budget check and the Framer's limit
+  both return it, `read_first_frame_bounded`), so the record tells those two apart from the timeout and the read error
+  but not from each other; each cell asserts that value.
+- [X] T103 [US4] Commit the cells; read T102 on `$B`; record.
+  Done: evidence file, Phase 7, T103 (13 ran, 13 RED by the record assertion, no skip, no abort).
 
 ### Implementation for US4
 
-- [ ] T104 [US4] Hoist the rate gate (data-model E-7): `include/fixpp/session/detail/log_rate_gate.hpp` (new installed
+- [X] T104 [US4] Hoist the rate gate (data-model E-7): `include/fixpp/session/detail/log_rate_gate.hpp` (new installed
   implementation header, namespace `fixpp::session::detail`, the same fields), inline `admit_log_record(gate, now, window,
   occurrences)`; `Session` keeps the name by a member alias and `admit_log_record_` forwards with `effective_clock_` and
   `max(HeartBtInt, 1 s)`.
-- [ ] T105 [US4] `src/session/engine.cpp`: `enum class pre_session_reject` (data-model E-6) and `log_pre_session_reject` beside
+  Done: `17a16832`. One departure from data-model E-7's parameter list: `admit_log_record(gate, now, window_end,
+  occurrences)` takes the window's end, computed by the caller with `detail::deadline_after` (in
+  `src/session/read_first_frame_bounded.hpp`, which an installed header cannot include), so the saturating step stays in
+  one helper; the behaviour is the one E-7 states.
+- [X] T105 [US4] `src/session/engine.cpp`: `enum class pre_session_reject` (data-model E-6) and `log_pre_session_reject` beside
   `log_role_loop_open_failure` (same logger resolution and trace context, warn, `cat::session`), each byte of the BeginString and CompIDs outside
   printable ASCII (0x20 to 0x7E) replaced by `?` before `ArgValue::from_inline` (research D8); one record per reject branch of
   T015's census; one gate per entry as a local of `run_accept_loop` (clock `engine_cfg.clock`, window `max(HeartBtInt or the
@@ -1041,12 +1053,16 @@ inbound silence, one sleep per iteration, T validated.
   shared `detail` header that holds the default-threshold helper (beside `default_test_request_threshold` in
   `read_first_frame_bounded.hpp`, T095), which `session.cpp` and `engine.cpp` both include: no second literal; the listener catch split into `catch (std::system_error const&)` (its `code().value()`) and `catch (...)`
   (0), each one error record; a listener-construction seam; both formats registered in `src/log/format_registry.cpp`.
-- [ ] T106 [US4] [seam] `PreSessionLog105.ListenerConstructionThrowsNonSystemError_OneRecordErrorZero` in `tests/session/test_105_seams.cpp` (the seam throws
+  Done: `17a16832` (`log_pre_session_reject`, `log_listener_bind_failure`, `Engine::test_hook_listener_construction_fails_`
+  set through `engine_test_access::set_listener_construction_fails`).
+- [X] T106 [US4] [seam] `PreSessionLog105.ListenerConstructionThrowsNonSystemError_OneRecordErrorZero` in `tests/session/test_105_seams.cpp` (the seam throws
   `std::bad_alloc` in place of the construction; one record, `error=0`). Not readable on `$B`.
-- [ ] T107 [US4] Run T102 and T106 GREEN and `-L 105`; commit `H5`. Mutants in `$M`: the printable-ASCII replacement deleted (`ControlBytesInCompIds_WrittenAsQuestionMarks` RED); each listener catch arm's record deleted
+  Done: `17a16832`; RED under T107's MgenRecDel.
+- [X] T107 [US4] Run T102 and T106 GREEN and `-L 105`; commit `H5`. Mutants in `$M`: the printable-ASCII replacement deleted (`ControlBytesInCompIds_WrittenAsQuestionMarks` RED); each listener catch arm's record deleted
   (`ListenerBindFails_OneRecord`, `ListenerConstructionThrowsNonSystemError_*` RED); the accept-loop gate bypassed
   (`Flood_BoundedWithSuppressedCount` RED). Record the mutant table; every quickstart section 5 row for this story is RED, or
   stop.
+  Done: `17a16832` (H5); evidence file, Phase 7, T107 (the four mutants RED, each in its named cell only).
 
 **Checkpoint**: US4 complete.
 
