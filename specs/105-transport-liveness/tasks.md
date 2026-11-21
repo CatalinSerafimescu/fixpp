@@ -468,22 +468,30 @@ and no local API call (SC-001).
   pins are expected RED here** (`GapDeadlineOutOfSequenceSite.FrameAtTheBoundDrawsTheLogoutAndTheTransportStaysOpen` and the
   537 note's control cell "D-537-6, N"): they flip at T072; do not re-pin them to part A's behaviour. Commit `H1`;
   `codegraph sync`.
+  Open (escalated): `-L 105` GREEN, `H1` committed, the R-2-class pins RED as predicted (also the six
+  `Capi537Witness.Deadline_*` cells, the same class at the C-ABI). `-L "session|capi"` also reads RED on pins of a
+  superseded rule outside T033's list, not re-pinned; each needs a ruling (evidence file, T035 sections).
 
 ### Mutant and spurious-hit arms for US1 part A (in `$M` at `H1`)
 
-- [ ] T036 [US1] The pump's latch test deleted: T018, T019 (pump route) and T021 RED (the clock is frozen, so no competing
+- [X] T036 [US1] The pump's latch test deleted: T018, T019 (pump route) and T021 RED (the clock is frozen, so no competing
   close can supply the EOF).
-- [ ] T037 [US1] `release_connection_end_` made a no-op: T019 (bound route), T020 and T023 RED.
-- [ ] T038 [US1] The edge's owe moved below the no-application return: `PumpSilentEnding_NoApplication_*` RED. Then the
+- [X] T037 [US1] `release_connection_end_` made a no-op: T019 (bound route), T020 and T023 RED.
+- [X] T038 [US1] The edge's owe moved below the no-application return: `PumpSilentEnding_NoApplication_*` RED. Then the
   setter census `grep -n 'owe_connection_end_(' src/session/session.cpp` (known positive: the edge) and, per call site at
   `H1`, that call deleted: its cells RED.
 - [ ] T039 [US1] `close_transport_` calling the synchronous `Transport::close()` instead of `close_async()`: T024's
   close_notify assertions RED (C-8.2). The R-1 Logout write deleted (the close kept): `GiveUp_LogoutTextPinned_ThenEof` RED.
+  Open: the first half done (`GiveUpWhilePumpParkedInRead_PeerReceivesCloseNotify` RED; the pump-route TLS cells close
+  through `close(terminal)` and survive, as T036's reading shows); the R-1 half waits on T031's escalation.
 - [ ] T040 [US1] Guards: the latch's `lifecycle` term deleted (`InsideClose_NoSecondClose` RED); the drain flag deleted
   (`InsideReconnectDrain_DrainKeepsItsBound` RED); `expire()` closing without its event (`SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent` RED); the reply admitted in LogonReceived (the Active test
   around `inbound_logout_leaf_` in `on_inbound_active_logout_` and the leaf's own state test both widened to LogonReceived;
   `PeerLogoutInLogonReceivedDuringClose_NoReplyLogout_ResetFollows104` RED).
-- [ ] T041 [US1] The close frame's fail-closed `catch` replaced by round 2's (the latch left set for a later consumer):
+  Open (escalated): the drain flag, `expire()` and LogonReceived arms RED; the `lifecycle` term's mutant SURVIVES
+  (`InsideClose_NoSecondClose` GREEN, also with the release's term deleted): the pump takes the latch and its second
+  `close()` call changes nothing the cell observes. The cell was not reshaped.
+- [X] T041 [US1] The close frame's fail-closed `catch` replaced by round 2's (the latch left set for a later consumer):
   `CloseFrameSpawnFails_ReleaseAtLoopExit_*` RED within its wall cap.
 
 **Checkpoint**: every class P, D and A ending closes; R-2-class endings still close at once, pending part B.
