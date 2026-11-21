@@ -71,7 +71,7 @@ std::string hb_with_id(pr::Rig const& rig, std::uint32_t seq, std::optional<std:
     return rig.msg("0", seq, "112=" + *id + "\x01");
 }
 
-// What a run of answered TestRequest cycles observed.
+// The readings of a run of answered TestRequest cycles.
 struct CycleReading {
     bool active = false;  // the session reached Active
     int cycles = 0;       // TestRequests read and answered with the session still Active
@@ -126,7 +126,7 @@ void expect_stays_active(CycleReading const& r, int count, const char* site) {
     EXPECT_FALSE(r.read_ended) << site << ": the peer's read ended";
 }
 
-// What one Heartbeat sent while a TestRequest is pending observed, with the clock held still.
+// The readings of one Heartbeat sent while a TestRequest is pending, with the clock held still.
 struct OneFrameReading {
     bool active = false;
     std::string tr_id;           // the pending TestRequest's 112
