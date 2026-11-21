@@ -402,8 +402,8 @@ eligible **or not yet reached**, the TestRequest instant when eligible, and the 
 Heartbeat instant is in the set before it is eligible because a frame can make it eligible during the sleep, and
 nothing on the inbound path wakes the sleep (the per-frame refresh writes `last_inbound_steady_` only; the loop
 suspends only in `effective_clock_->sleep_until`). An eligible instant already reached makes the sleep return at
-once. With T > 0 the TestRequest instant is before the give-up instant, so while the TestRequest instant is
-eligible it is the earlier of the two in the set. **The spin trap:** a Heartbeat instant that has been reached while ineligible is dropped from the set; kept, it
+once. With T > 0 the TestRequest instant is at or before the give-up instant (equal only when both saturate at
+`steady_time_point::max()`), so while the TestRequest instant is eligible the give-up is never the earlier of the two. **The spin trap:** a Heartbeat instant that has been reached while ineligible is dropped from the set; kept, it
 would make every sleep return at once. On waking the loop tests eligibility again and acts on every eligible instant
 the clock has reached: the give-up (C-3), else the TestRequest (its TestReqID becomes the pending one; `tr_sent_at`
 is the clock's reading), else the Heartbeat. D-536-2's state test and filter reset stay before every sleep.

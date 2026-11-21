@@ -247,7 +247,9 @@ Common rules:
 - C-6.2 A TestRequest is sent after T of inbound silence; its TestReqID becomes the pending one. The session gives up
   (C-3) after 2T of inbound silence, 2.4 × HeartBtInt by default, counted from the last inbound frame that refreshes
   liveness (clarification D-c): a frame after the TestRequest that does not answer it defers the give-up and leaves
-  the TestRequest pending, and a further T of silence sends a new TestRequest. The give-up runs strictly after the 2T
+  the TestRequest pending, and a further T of silence sends a new TestRequest. The give-up needs a TestRequest
+  pending, whatever arrived since it was sent (C-3.1; spec clarification "Session 2026-11-21 (implementation,
+  Phase 6)"). The give-up runs strictly after the 2T
   instant, by one clock tick (R-3's "after 2T"). Every instant, that tick included, saturates at the clock's range.
 - C-6.3 The outbound Heartbeat every HeartBtInt of outbound silence, as today, except while a TestRequest is pending
   with no inbound frame since it was sent, when none is sent. A frame that arrives after the TestRequest makes the

@@ -484,7 +484,8 @@ struct TlsCell {
     }
     [[nodiscard]] bool bound() {
         return fixpp::test_support::pump_until(
-            ioc, [&] { return h->server_endpoint().port != 0; }, 5s, 5ms, "bind");
+            ioc, [&] { return h->server_endpoint().port != 0; }, 5s, 5ms,
+            "PreSessionLog105::TlsCell/bind");
     }
     bool await_records(std::size_t n) {
         return fixpp::test_support::pump_until(

@@ -8421,7 +8421,8 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
     //   - the give-up instant is last_inbound + T + T + 1 ns, three saturating steps; it is
     //     eligible whenever a TestRequest is pending (QuickFIX C++'s SessionState::timedOut;
     //     spec.md's Phase 6 implementation clarification drops an earlier "no inbound frame
-    //     since it" term). With T > 0 the TestRequest instant is before it,
+    //     since it" term). With T > 0 the TestRequest instant is at or before it (equal only when both
+    //     saturate at steady_time_point::max()),
     //     so while the TestRequest instant is eligible the sleep set holds that one;
     //   - each iteration sleeps once, to the earliest instant of the sleep set: the Heartbeat
     //     instant when eligible or not yet reached (a frame during the sleep can make it
