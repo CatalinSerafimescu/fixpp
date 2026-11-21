@@ -722,7 +722,7 @@ does not complete closes the connection at the bound.
   close, join `ending_logout_bound_counter_`, then join `connection_close_counter_` a second time (I-4); `~Session` asserts both
   counters zero; at `install_reconnected_transport` and `attach_accepted_transport` assert `phase` is `resolved` or `none`,
   set `none` and reset `establishment_cap_` (row 17).
-- [ ] T070 [US1] [seam] cells on the new seams, not readable on `$B`, each RED under its named mutant at `H2`:
+- [X] T070 [US1] [seam] cells on the new seams, not readable on `$B`, each RED under its named mutant at `H2`:
   `LogoutWait105.BoundSpawnFails_<R2AfterActive|R2BeforeActive|Reply>_NoLogoutWritten_EofAtOnce` (no Logout bytes at the peer,
   no wait, `Disconnected` and `onLogout` once after Active, EOF at once) and `LivenessTiming105.GiveUp_BoundSpawnFails_StillEof`
   (the slot-74 record, no Logout, EOF); `ConnectionClose105.CloseFrameSpawnFails_<WriteLimit|BoundExpiry>_PeerSeesEofWithNoLaterCall`;
@@ -732,6 +732,12 @@ does not complete closes the connection at the bound.
   found asserted as the reach proof; oracle EOF at once), and `EndingBound_RaceThrows_Armed_ResendAnswerBlocked_EofAtOnce`
   (after Active on the SendingTime-Reject route, the peer's ResendRequest answer blocked in `async_write`, so
   `inbound_depth_ != 0`, the seam armed in `armed`: EOF at once). All in `tests/session/test_105_seams.cpp`.
+  **Disposition (orchestrator ruling closing Phase 4, 2026-11-21):** `EndingBound_RaceThrows_Armed_ResendAnswerBlocked_EofAtOnce`
+  is DROPPED. The race seam runs only when the bound builds its race, and while the wait is armed with a resend answer
+  blocked in `async_write` no wake reaches the bound (its wake sources are the leaf's leave, `close()`'s commit, the
+  drain's entry, the owe and the response arm), so a seam armed then is never evaluated; the armed failure exit it
+  would witness is the exit `EndingBound_RaceThrows_Armed_EofAtOnce` (after and before Active) and
+  `EndingBound_DeadlineArmAbsorbsException_Armed*` already reach (evidence, "Phase 4 run 2" and "Phase 4 close-out").
 - [X] T071 [US1] Comments naming the new rule, part B (issue #310): `resend_gap_deadline_` and Arm B (R-2, through
   `send_ending_logout_`), `run_ending_logout_bound_` (its exits), and the caller preconditions on `drive_reconnect`'s
   declaration in `session.hpp` (B-103-13: `close()` joins the too-high bound, the R-2 bound and the close frame; `~Session`
@@ -751,9 +757,15 @@ does not complete closes the connection at the bound.
 
 ### Mutant and spurious-hit arms for US1 part B (in `$M` at `H2`; quickstart section 5)
 
-- [ ] T074 [US1] The response test deleted, and moved below the too-high branch: the off-NextNumIn `*_EndsWaitAndResets` cells
+- [X] T074 [US1] The response test deleted, and moved below the too-high branch: the off-NextNumIn `*_EndsWaitAndResets` cells
   of T042 RED. The response test moved below the PossDup stage-1 arm: T042's `PeerLogoutPossDupY_<AtNextNumIn|BelowNextNumIn>_EndsWait`
-  RED.
+  RED. **Disposition (orchestrator ruling closing Phase 4, 2026-11-21):** two cells are *equivalent-ending survivors*,
+  another branch reaching the same observable ending: `GapDeadline_PeerLogoutAboveNextNumIn_EndsWaitAndResets` under
+  the deleted response test (the Logout above NextNumIn takes 103's too-high route, which during an ending acknowledges
+  at once with the owner set, writes nothing, reaches no `fromAdmin` and resets under `reset_on_logout`), and
+  `PeerLogoutPossDupY_AtNextNumIn_EndsWait` under the test moved below the PossDup stage-1 arm (at NextNumIn a PossDup
+  Logout with a valid OrigSendingTime passes stage 1 into the in-sequence Logout arm). Every other cell named here is
+  RED under its mutant (evidence, "Phase 4 run 2").
 - [X] T075 [US1] Absorption: `send_ending_logout_`'s absorb branch deleted, and `end_session_silently_` recording while armed
   (`Absorbed_*` RED); `inbound_resend_request_leaf_`'s assignment failure routed through `end_session_silently_`
   (`TooHighDuringWait_ResendRequestAssignFails_*` RED); the owe refused whenever a wait is `armed` (round 1's predicate: the
@@ -773,28 +785,31 @@ does not complete closes the connection at the bound.
 - [X] T077a [US1] (moved from T039, its R-1 half; T035 ruling 2) The R-1 Logout write deleted (the close kept):
   `LivenessTiming105.GiveUp_LogoutTextPinned_ThenEof` RED. T059a's budget counted from the gate's acquisition instead of
   the give-up's decision: `ReplayGate588.R588f4_*` RED.
-- [ ] T078 [US1] The deadlines' closes: the bound's expiry close made through `release_connection_end_`
+- [X] T078 [US1] The deadlines' closes: the bound's expiry close made through `release_connection_end_`
   (`Bound_ExpiresWhileResendAnswerBlocked_*` RED); the cap's arm deleted (`PreActive_<LogoutBlockedInWrite|LogoutHeldInStore>_ClosedAtEstablishmentDeadlineNoEvent`,
   `PreActive_ClockOverride_CapOnEngineClock` RED: the close comes at the write limit); `close()`'s second join deleted
   (`Lifetime105.CloseFrame_SpawnedByWriteLimitDuringGracefulClose` RED: the Debug assert, or the counter read after `close()`);
   the bound's join deleted, and the close frame's first join deleted (`Lifetime105.<EndingLogoutBound|CloseFrame>_SessionDestroyedAfterClose`
-  RED, T055's guards).
-- [ ] T079 [US1] The failure exits and spawns: the bound's failure exit routed through `release_connection_end_`
+  RED, T055's guards). **Disposition (orchestrator ruling closing Phase 4, 2026-11-21):** `close()`'s second and first
+  close-frame joins deleted (T078c, T078e), and with them T077c2 (`release_connection_end_`'s `writing` deferral
+  deleted), survive on linux-clang-debug and on linux-clang-asan (`-L 105` unfiltered, `Lifetime105.*`,
+  `Capi537Witness.Deadline_DestroyDuringTheWait_NoBoundOutlivesTheSession`): no observable. The code is kept, with
+  the lifetime invariant it defends recorded in data-model E-2 I-4a (I-4); the bound's join (T078d) is RED by
+  `~Session`'s Debug assert, on the C++ and the C-ABI destroy paths (evidence, "Phase 4 close-out").
+- [X] T079 [US1] The failure exits and spawns: the bound's failure exit routed through `release_connection_end_`
   (`EndingBound_RaceThrows_Writing*`, `EndingBound_DeadlineArmAbsorbsException_Writing*` RED); the armed failure exit routed
-  through `release_connection_end_` (`EndingBound_RaceThrows_Armed_ResendAnswerBlocked_EofAtOnce` RED); the early completion
+  through `release_connection_end_` (`EndingBound_RaceThrows_Armed_EofAtOnce`, after and before Active, RED; its
+  resend-answer-blocked variant is dropped, T070); the early completion
   read as a re-test (`EndingBound_DeadlineArmAbsorbsException_*` RED as a failed count within the bounded drive); each
   spawn's fail-closed `catch` replaced by round 2's (`CloseFrameSpawnFails_*` RED; `BoundSpawnFails_*` RED: a Logout on the
   wire under "the failure read as timeout 0").
-- [ ] T080 [US1] Record the part-B mutant table; every quickstart section 5 mutant named in T036 to T041 and T074 to T079 has a
-  RED row, or the task stops.
+- [X] T080 [US1] Record the part-B mutant table; every quickstart section 5 mutant named in T036 to T041 and T074 to T079 has a
+  RED row, or the task stops. **Disposition (orchestrator ruling closing Phase 4, 2026-11-21):** every row is RED but
+  the survivors the ruling dispositions: T074's two equivalent-ending survivors (T074), the dropped T070 cell (its
+  mutant read against `EndingBound_RaceThrows_Armed_EofAtOnce`, T079), and the no-observable guards T077c2, T078c,
+  T078e and D1 to D3, kept and recorded in data-model E-2 I-4a.
 
-Phase 4 status (evidence file, "Phase 4 run 2"): T070, T074, T078, T079 and T080 stay open. T074's
-`GapDeadline_PeerLogoutAboveNextNumIn_EndsWaitAndResets` and `PeerLogoutPossDupY_AtNextNumIn_EndsWait` read GREEN under
-their named mutants (each route reaches the same ending by another arm; escalated). T070 lacks
-`EndingBound_RaceThrows_Armed_ResendAnswerBlocked_EofAtOnce` (the race seam has no wake to run at while the answer is
-blocked; escalated) and so T079's armed failure-exit mutant on it; T078's second and first close-frame joins of
-`close()` survive their mutants (no cell discriminates them); T080 stops on those survivors and on T074's two
-equivalent routes, T077c2 and the three dedupe terms.
+Phase 4 status: closed by the orchestrator's rulings of 2026-11-21 (evidence file, "Phase 4 close-out").
 
 **Checkpoint**: US1 complete; every ending class of the Ending-site table closes within its bound (SC-001).
 

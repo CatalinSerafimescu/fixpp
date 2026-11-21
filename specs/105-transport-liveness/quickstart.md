@@ -300,8 +300,12 @@ Each must turn its cells RED, run unfiltered:
   included);
 - the R-2 bound's deadline read from the last send, or from the write's completion, instead of the write's start
   (`Bound_DoesNotSlideWithAnAnswerSent`, `WriteReleasedBeforeTheBound_*`);
-- the response test deleted, and moved below the too-high branch (the off-NextNumIn `*_EndsWaitAndResets` cells);
-- the response test moved below the PossDup stage-1 arm (`PeerLogoutPossDupY_<AtNextNumIn|BelowNextNumIn>_EndsWait`);
+- the response test deleted, and moved below the too-high branch (the off-NextNumIn `*_EndsWaitAndResets` cells;
+  `GapDeadline_PeerLogoutAboveNextNumIn_EndsWaitAndResets` is an equivalent-ending survivor: 103's too-high route reaches
+  the same ending, tasks.md T074);
+- the response test moved below the PossDup stage-1 arm (`PeerLogoutPossDupY_<AtNextNumIn|BelowNextNumIn>_EndsWait`;
+  `PeerLogoutPossDupY_AtNextNumIn_EndsWait` is an equivalent-ending survivor: stage 1 passes it into the in-sequence
+  Logout arm, the same ending, tasks.md T074);
 - `send_ending_logout_`'s absorb branch deleted, and `end_session_silently_` recording while armed (`Absorbed_*`);
 - `inbound_resend_request_leaf_`'s assignment failure routed through `end_session_silently_` (absorption by return
   value; `TooHighDuringWait_ResendRequestAssignFails_*`);
@@ -316,12 +320,15 @@ Each must turn its cells RED, run unfiltered:
   `PreActive_ClockOverride_CapOnEngineClock`);
 - the bound's failure exit routed through `release_connection_end_` (`EndingBound_RaceThrows_Writing*`,
   `EndingBound_DeadlineArmAbsorbsException_Writing*`);
-- the armed failure exit routed through `release_connection_end_` (`EndingBound_RaceThrows_Armed_ResendAnswerBlocked_EofAtOnce`);
+- the armed failure exit routed through `release_connection_end_` (`EndingBound_RaceThrows_Armed_EofAtOnce`, after and
+  before Active; the resend-answer-blocked variant is dropped, tasks.md T070);
 - the bound's early deadline-arm completion read as a re-test (`EndingBound_DeadlineArmAbsorbsException_*`;
   terminates under the bounded drive);
 - each spawn's fail-closed `catch` replaced by round 2's (`CloseFrameSpawnFails_*`, `BoundSpawnFails_*`);
 - `close()`'s second join deleted (`Lifetime105.CloseFrame_SpawnedByWriteLimitDuringGracefulClose`); the bound's join
-  deleted, and the close frame's first join deleted (the guards `Lifetime105.<EndingLogoutBound|CloseFrame>_SessionDestroyedAfterClose`);
+  deleted, and the close frame's first join deleted (the guards `Lifetime105.<EndingLogoutBound|CloseFrame>_SessionDestroyedAfterClose`;
+  the two close-frame joins have no observable on linux-clang-debug or linux-clang-asan and are kept for data-model
+  E-2 I-4a, tasks.md T078);
 - the passed, ineligible Heartbeat instant kept in the sleep set (`SilentAfterTestRequest_NoSpin`; terminates
   under the bounded drive);
 - each listener catch arm's record deleted (`ListenerBindFails_OneRecord`,

@@ -108,6 +108,19 @@ clears the latch. These are I-2's exceptions.
   in `src/session/engine.cpp`), so these joins and `~Session`'s assertions hold for every Engine session, a C-ABI one
   included (`fixpp_engine_destroy` drives `Engine::stop()`; contract C-9). `~Session`'s assertions are Debug-only; in
   a release build the guarantee is B-103-13's precondition (spec FR-016).
+- I-4a. **Guards kept with no observable of their own** (orchestrator ruling closing Phase 4, 2026-11-21). Six terms on
+  the close path repeat a guard another site already makes, so no 105 cell separates each from its twin: D1, the
+  `state_ == lifecycle::open` term of `release_connection_end_`, and D3, `close()`'s clear of the latch at its commit of
+  `closing`, each stand behind the other and behind `owe_connection_end_`'s refusal while `closing`; D2, the release's
+  generation test, stands behind the latch's clear before a new connection's install; `release_connection_end_`'s
+  `writing` deferral (tasks.md T077c2) stands behind the pump's own (E-3, "Other roots during `writing`"), which
+  no cell has a class D or A root reach while another root's Logout is in `writing`; and `close()`'s first and
+  second joins of `connection_close_counter_` (T078e, T078c) stand behind the schedules in which the frame has ended
+  before `close()`'s later joins and the destruction. Each is kept, not deleted: each defends I-4 (no close frame of
+  the connection is in flight at `close()`'s own `close_async()` or at the Session's destruction) or I-5, and removing a
+  guard on the close path is a design change. Re-derive the disposition by mutating each term in a scratch copy and
+  running `-L 105`, the `Lifetime105.*` cells and `Capi537Witness.Deadline_DestroyDuringTheWait_NoBoundOutlivesTheSession`
+  on linux-clang-debug and linux-clang-asan (tasks.md T078, T080; the evidence file holds the readings).
 - I-5. **One effective close per connection.** The latch is owed at most once per connection: the edge owes only on
   a transition into `Disconnected` (once per connection), and the wait's two direct callers fire only for a wait
   armed before Active, where no such transition follows. A later `close_async()` on the same transport (the pump's
