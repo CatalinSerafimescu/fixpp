@@ -37,6 +37,7 @@
 #include <optional>
 #include <ratio>
 #include <span>
+#include <string_view>
 #include <system_error>  // std::system_error — the shape Clock::sleep_until throws on cancel
 #include <type_traits>
 #include <vector>
@@ -231,16 +232,15 @@ template <class Rep, class Period>
     static_assert(sizeof(Rep) <= sizeof(std::uint64_t));
     static_assert(scale::num <= std::numeric_limits<std::uint64_t>::max());
     assert(d >= duration::zero());
-    auto const headroom =
-        static_cast<std::uint64_t>(time_point::max().time_since_epoch().count()) -
-        static_cast<std::uint64_t>(now.time_since_epoch().count());
+    auto const headroom = static_cast<std::uint64_t>(time_point::max().time_since_epoch().count()) -
+                          static_cast<std::uint64_t>(now.time_since_epoch().count());
     auto const units = static_cast<std::uint64_t>(d.count());
     constexpr auto multiplier = static_cast<std::uint64_t>(scale::num);
     if (units > headroom / multiplier) {
         return time_point::max();
     }
-    auto const result = static_cast<std::uint64_t>(now.time_since_epoch().count()) +
-                        units * multiplier;
+    auto const result =
+        static_cast<std::uint64_t>(now.time_since_epoch().count()) + units * multiplier;
     return time_point{time_duration{static_cast<typename time_point::rep>(result)}};
 }
 
@@ -256,6 +256,49 @@ template <class Rep, class Period>
         return std::nullopt;
     }
     return deadline_after(deadline_after(since, heartbt), heartbt);
+}
+
+// 105 (research D5; data-model E-4; ruling D-d): the TestReqID window. TestRequest numbers are
+// issued by incrementing a 32-bit counter, so the numbers issued on a connection are those in
+// (floor, next] modulo 2^32, where floor is the counter's value when the connection started and
+// next its last value. When 2^32 numbers have been issued on one connection next == floor and
+// the window is empty: no number is earlier.
+[[nodiscard]] constexpr bool test_req_id_in_window(std::uint32_t n, std::uint32_t floor,
+                                                   std::uint32_t next) noexcept {
+    return static_cast<std::uint32_t>(n - floor - 1U) < static_cast<std::uint32_t>(next - floor);
+}
+
+// 105 (research D5; contract C-5.4): whether id is a TestReqID(112) this connection issued, as
+// the liveness loop spells one: "TR" then the canonical decimal (no sign, no leading zero) of a
+// number that fits std::uint32_t and lies in test_req_id_in_window. The digits are read as a
+// signed decimal and then refused by form, so each refusal below is its own test.
+[[nodiscard]] constexpr bool is_earlier_test_req_id(std::string_view id, std::uint32_t floor,
+                                                    std::uint32_t next) noexcept {
+    if (id.size() <= 2 || id[0] != 'T' || id[1] != 'R') {
+        return false;  // not "TR", or "TR" alone
+    }
+    std::string_view const digits = id.substr(2);
+    bool const negative = !digits.empty() && digits.front() == '-';
+    std::size_t i = negative ? 1U : 0U;
+    constexpr std::int64_t kLimit = (std::numeric_limits<std::int64_t>::max() - 9) / 10;
+    std::int64_t v = 0;
+    for (; i < digits.size(); ++i) {
+        char const c = digits[i];
+        if (c < '0' || c > '9' || v > kLimit) {
+            return false;
+        }
+        v = v * 10 + (c - '0');
+    }
+    if (negative) {
+        return false;  // a sign
+    }
+    if (digits.size() > 1U && digits.front() == '0') {
+        return false;  // not canonical: a leading zero
+    }
+    if (v > std::int64_t{std::numeric_limits<std::uint32_t>::max()}) {
+        return false;  // past std::uint32_t
+    }
+    return test_req_id_in_window(static_cast<std::uint32_t>(v), floor, next);
 }
 
 // The non-negative time left until `deadline`: zero once `now` has reached or

@@ -205,8 +205,10 @@ TEST(TooHighHeartbeatDuringTheGap, Control_HeartbeatBelowNextNumIn_LeavesTheTest
 }
 
 // Bounds of the rule, second: with validate_sequence_numbers off no resend is ever
-// outstanding, and a Heartbeat above NextNumIn does not clear a pending TestRequest.
-TEST(TooHighHeartbeatDuringTheGap, Control_KnobOff_HeartbeatAboveNextNumIn_LeavesItPending) {
+// outstanding. 105 (research D5, #582; contract C-5.1) supersedes "a Heartbeat above NextNumIn
+// does not clear a pending TestRequest": with the knob off it answers it, by the TestReqID rule,
+// and still writes nothing and enters no AwaitingResend.
+TEST(TooHighHeartbeatDuringTheGap, Control_KnobOff_HeartbeatAboveNextNumIn_AnswersIt) {
     Scene s{Options{.validate_sequence_numbers = false}};
     ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
     const seqnum_t n = s.next_in();
@@ -217,9 +219,8 @@ TEST(TooHighHeartbeatDuringTheGap, Control_KnobOff_HeartbeatAboveNextNumIn_Leave
     (void)s.feed(s.heartbeat(n + 5, id));
     ASSERT_FALSE(s.resend_outstanding()) << "the knob-off session entered AwaitingResend";
     EXPECT_EQ(s.sent.size(), mark) << "the session wrote " << s.written(mark);
-    // fixpp#582 is the follow-up on this knob: its fix flips the next assertion.
-    EXPECT_TRUE(s.test_request_pending())
-        << "with the knob off, a Heartbeat above NextNumIn cleared the TestRequest";
+    EXPECT_FALSE(s.test_request_pending())
+        << "with the knob off, a Heartbeat above NextNumIn did not answer the TestRequest";
     EXPECT_EQ(s.state(), fsm_state::Active);
 }
 

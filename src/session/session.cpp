@@ -920,6 +920,9 @@ bool Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Tr
            "an ending Logout is in progress across a reconnect install");
     ending_wait_.phase = ending_wait_state::phase_t::none;
     establishment_cap_.reset();
+    // 105 (research D5; data-model E-4): a new connection starts a new set of earlier
+    // TestReqIDs.
+    test_request_id_floor_ = next_test_request_id_;
     assert(replay_gate_.shared == 0 && inbound_depth_ == 0 &&
            peer_logout_bound_counter_->load(std::memory_order_acquire) == 0 &&
            liveness_counter_->load(std::memory_order_acquire) == 0 &&
@@ -1257,6 +1260,9 @@ void Session::attach_accepted_transport(std::unique_ptr<fixpp::transport::Transp
            "an ending Logout is in progress at an accepted connection");
     ending_wait_.phase = ending_wait_state::phase_t::none;
     establishment_cap_.reset();
+    // 105 (research D5; data-model E-4): a new connection starts a new set of earlier
+    // TestReqIDs.
+    test_request_id_floor_ = next_test_request_id_;
     // 2. Take ownership of the transport.
     // FQ-A: no transport_send_ rebind needed — live_write_serialized_() picks
     // up accepted_transport_ via live_transport_shared_() at call time.
@@ -2292,6 +2298,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     inbound_entry_cap_ = detail::parse_capacity::entry_cap_for(inbound_limit_);
 
     state_ = lifecycle::open;
+    // 105 (research D5; data-model E-4): the first connection's set of earlier TestReqIDs.
+    test_request_id_floor_ = next_test_request_id_;
 
     // US4 (T046): capture transport_send from config (null if not set).
     // Called from store_then_emit() AFTER store(outbound) completes (I-3).
@@ -5473,17 +5481,21 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
                 // the other's beat). [self-paired heartbeat-storm fix]
                 if (hdr.msg_type == "0") {  // Heartbeat (35=0)
                     if (!pending_test_req_id_.empty()) {
-                        // We have an outstanding TestRequest. Check echo.
-                        if (!hdr.test_req_id.empty() && hdr.test_req_id != pending_test_req_id_) {
-                            // TestReqID mismatch: peer sent a Heartbeat echoing a
-                            // different (or stale) TestReqID than our outstanding one.
-                            // session_testreqid_mismatch=118 → Disconnected.
-                            // [spec.md FR-006; T018-D] 105: a peer-frame silent ending.
-                            end_session_silently_();
-                            co_return fixpp::core::expected_t<void>{};
+                        // We have an outstanding TestRequest. 105 (ruling D-d; contract
+                        // C-5.4) supersedes the plain comparison: an earlier TestRequest's id
+                        // neither answers nor ends; an id this connection never sent is
+                        // session_testreqid_mismatch(118), a peer-frame silent ending
+                        // [spec.md FR-006; T018-D].
+                        switch (classify_test_req_id_(hdr.test_req_id)) {
+                            case test_req_id_class::mismatch:
+                                end_session_silently_();
+                                co_return fixpp::core::expected_t<void>{};
+                            case test_req_id_class::answers:
+                                pending_test_req_id_.clear();
+                                break;
+                            case test_req_id_class::earlier:
+                                break;
                         }
-                        // Matching or empty TestReqID: TR answered, clear flag.
-                        pending_test_req_id_.clear();
                     }
                     // 029 T010 — PERSIST: inbound Heartbeat (35=0).
                     // check_inbound advanced next_inbound; fromAdmin dispatched above.
@@ -5749,17 +5761,38 @@ asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::resend_ga
 }
 
 // fixpp#537 (D-537-6, D-537-8): the in-sequence TestReqID(112) disposition, for a Heartbeat
-// above NextNumIn. An empty or matching TestReqID answers the pending TestRequest; another
-// one ends the session silently, as in sequence, and false is returned. Whether a
+// that does not advance NextNumIn. 105 (ruling D-d) supersedes "another one ends the
+// session": an empty or matching TestReqID answers the pending TestRequest, an earlier one of
+// this connection does neither, and any other ends the session silently, as in sequence, and
+// false is returned. Whether a
 // TestRequest is pending is each caller's test, not this routine's.
 bool Session::answer_pending_test_request_(std::string_view test_req_id) noexcept {
-    if (!test_req_id.empty() && test_req_id != pending_test_req_id_) {
-        // 105 (research D2 item 4): a peer-frame silent ending.
-        end_session_silently_();
-        return false;
+    switch (classify_test_req_id_(test_req_id)) {
+        case test_req_id_class::mismatch:
+            // 105 (research D2 item 4): a peer-frame silent ending.
+            end_session_silently_();
+            return false;
+        case test_req_id_class::answers:
+            pending_test_req_id_.clear();
+            return true;
+        case test_req_id_class::earlier:
+            // 105 (ruling D-d; contract C-5.4): an earlier TestRequest's id neither answers the
+            // pending one nor ends the session.
+            return true;
     }
-    pending_test_req_id_.clear();
     return true;
+}
+
+Session::test_req_id_class Session::classify_test_req_id_(
+    std::string_view test_req_id) const noexcept {
+    if (test_req_id.empty() || test_req_id == pending_test_req_id_) {
+        return test_req_id_class::answers;
+    }
+    if (detail::is_earlier_test_req_id(test_req_id, test_request_id_floor_,
+                                       next_test_request_id_)) {
+        return test_req_id_class::earlier;
+    }
+    return test_req_id_class::mismatch;
 }
 
 // fixpp#544 §2.2: the Active arm's sub-arms. Each is a branch of the arm moved verbatim
@@ -6531,10 +6564,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
     if (hdr.msg_type == "0" && (chk_error == fixpp::core::error::session_seqnum_too_high ||
                                 !cfg_.validate_sequence_numbers)) {
         // fixpp#537 (D-537-6, ruling R-6): while a resend is outstanding, a Heartbeat above
-        // NextNumIn answers a pending TestRequest by the in-sequence TestReqID rule. A
-        // mismatch has ended the session inside the routine.
-        if (chk_error == fixpp::core::error::session_seqnum_too_high &&
-            reconnect_fsm_.is_awaiting_resend() && !pending_test_req_id_.empty()) {
+        // NextNumIn answers a pending TestRequest by the in-sequence TestReqID rule. 105
+        // (research D5, #582; contract C-5.1) adds the knob-off route: with sequence
+        // validation off any out-of-sequence Heartbeat does too. A mismatch has ended the
+        // session inside the routine.
+        if (!pending_test_req_id_.empty() &&
+            ((chk_error == fixpp::core::error::session_seqnum_too_high &&
+              reconnect_fsm_.is_awaiting_resend()) ||
+             !cfg_.validate_sequence_numbers)) {
             (void)answer_pending_test_request_(hdr.test_req_id);
         }
         // No advance, no persist, no fromAdmin, no echo.

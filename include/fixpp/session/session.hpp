@@ -1577,9 +1577,16 @@ private:
     [[nodiscard]] inbound_continue_t resend_gap_deadline_(
         bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
     // fixpp#537 (D-537-6, D-537-8): the in-sequence TestReqID(112) disposition for a
-    // Heartbeat above NextNumIn. False: the TestReqID was another one and the session is
-    // Disconnected. The caller tests that a TestRequest is pending.
+    // Heartbeat that does not advance NextNumIn, by classify_test_req_id_ (105, ruling D-d).
+    // False only for a mismatch, and the session is then Disconnected. The caller tests that a
+    // TestRequest is pending.
     [[nodiscard]] bool answer_pending_test_request_(std::string_view test_req_id) noexcept;
+    // 105 (research D5; ruling D-d; contract C-5.4): the TestReqID(112) rule of every Heartbeat
+    // route, while a TestRequest is pending. An absent or the pending id answers it; the id of an
+    // earlier TestRequest of this connection neither answers nor ends; any other is a mismatch.
+    enum class test_req_id_class : std::uint8_t { answers, earlier, mismatch };
+    [[nodiscard]] test_req_id_class classify_test_req_id_(
+        std::string_view test_req_id) const noexcept;
     // Reply leaves (§2.2 class 2): each owns the buffer its reply frame is built in.
     [[nodiscard]] inbound_result_t inbound_reject_leaf_(
         bool tic, seqnum_t ref_seq, int ref_tag_id, std::string_view ref_msg_type, int reason,
@@ -1689,6 +1696,10 @@ private:
     // on the session strand; wrap-around at UINT32_MAX is acceptable
     // (within-session uniqueness contract per spec.md §Edge Cases / research.md D-3).
     std::uint32_t next_test_request_id_ = 0;
+    // 105 (research D5; data-model E-4): next_test_request_id_ when the current connection
+    // started (open(), install_reconnected_transport, attach_accepted_transport), the floor of
+    // detail::test_req_id_in_window, so a reconnect starts a new set of earlier ids.
+    std::uint32_t test_request_id_floor_ = 0;
 
     // ── US4 / T046 transport surface ─────────────────────────────────────────
     // transport_send_ — two uses:

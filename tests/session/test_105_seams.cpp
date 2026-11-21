@@ -38,6 +38,7 @@
 
 #include "session/engine_loopback_harness.hpp"
 #include "session/plain_engine_rig.hpp"
+#include "session/read_first_frame_bounded.hpp"
 #include "session/resend_gap_scene.hpp"
 #include "session/test_105_direct_rig.hpp"
 #include "session/test_105_support.hpp"
@@ -627,5 +628,92 @@ TEST(LogoutWait105Direct, EndingBound_DeadlineArmAbsorbsException_Armed_ReachPro
     EXPECT_EQ(c.d.app->logouts, 1);
     (void)c.d.run(c.d.s.session->close(fixpp::session::close_mode::terminal), "close");
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+// 105 T086 (research D5; data-model E-4; contract C-5.4): the TestReqID window and the parse of
+// detail::is_earlier_test_req_id. constexpr cells: each static_assert sits under
+// FIXPP_105_STATIC_GUARDS, and each cell's runtime twin asserts the same values with EXPECT_*, so
+// a mutant built with the option OFF reads as a test failure, not a compile error.
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+namespace trw {
+using fixpp::session::detail::is_earlier_test_req_id;
+using fixpp::session::detail::test_req_id_in_window;
+constexpr std::uint32_t kTop = 0xFFFFFFFFU;
+
+// [guard: a non-modular comparison] The window's top edge at std::uint32_t's maximum.
+constexpr bool window_at_uint32_max() {
+    return test_req_id_in_window(kTop, kTop - 15U, kTop) &&
+           test_req_id_in_window(kTop - 14U, kTop - 15U, kTop) &&
+           !test_req_id_in_window(kTop - 15U, kTop - 15U, kTop) &&
+           !test_req_id_in_window(0U, kTop - 15U, kTop);
+}
+// [guard: a non-modular comparison] Numbers issued across the wrap: floor kTop - 1, next 3.
+constexpr bool window_across_the_wrap() {
+    return test_req_id_in_window(kTop, kTop - 1U, 3U) && test_req_id_in_window(0U, kTop - 1U, 3U) &&
+           test_req_id_in_window(3U, kTop - 1U, 3U) && !test_req_id_in_window(4U, kTop - 1U, 3U) &&
+           !test_req_id_in_window(kTop - 1U, kTop - 1U, 3U);
+}
+// [guard: the full-cycle case dropped, next == floor read as a full window] After 2^32 numbers on
+// one connection next == floor and no number is in the window.
+constexpr bool window_one_full_cycle() {
+    return !test_req_id_in_window(7U, 7U, 7U) && !test_req_id_in_window(8U, 7U, 7U) &&
+           !test_req_id_in_window(6U, 7U, 7U) && !test_req_id_in_window(0U, 7U, 7U);
+}
+
+// The parse cells' window: floor kTop - 15 and next 5, so 0 to 5 and kTop - 14 to kTop are in it.
+constexpr std::uint32_t kFloor = kTop - 15U;
+constexpr std::uint32_t kNext = 5U;
+constexpr bool parse_canonical_earlier() {
+    return is_earlier_test_req_id("TR3", kFloor, kNext) &&
+           is_earlier_test_req_id("TR0", kFloor, kNext) &&
+           is_earlier_test_req_id("TR4294967295", kFloor, kNext) &&
+           !is_earlier_test_req_id("TR6", kFloor, kNext);
+}
+// [guard: the canonical-form test deleted]
+constexpr bool parse_leading_zero_mismatch() {
+    return !is_earlier_test_req_id("TR03", kFloor, kNext) &&
+           !is_earlier_test_req_id("TR00", kFloor, kNext);
+}
+// [guard: the sign refusal deleted]
+constexpr bool parse_sign_mismatch() {
+    return !is_earlier_test_req_id("TR-3", kFloor, kNext) &&
+           !is_earlier_test_req_id("TR+3", kFloor, kNext) &&
+           !is_earlier_test_req_id("TR-", kFloor, kNext);
+}
+// [guard: the overflow test deleted] 2^32 and 2^32 + 3 wrap to numbers in the window.
+constexpr bool parse_overflow_mismatch() {
+    return !is_earlier_test_req_id("TR4294967296", kFloor, kNext) &&
+           !is_earlier_test_req_id("TR4294967299", kFloor, kNext) &&
+           !is_earlier_test_req_id("TR99999999999999999999", kFloor, kNext);
+}
+// [guard: the TR-length test deleted] "TR" alone would read as 0, which is in the window.
+constexpr bool parse_prefix_alone_mismatch() {
+    return !is_earlier_test_req_id("TR", kFloor, kNext) &&
+           !is_earlier_test_req_id("T", kFloor, kNext) &&
+           !is_earlier_test_req_id("", kFloor, kNext) &&
+           !is_earlier_test_req_id("XR3", kFloor, kNext);
+}
+}  // namespace trw
+
+#if FIXPP_105_STATIC_GUARDS
+static_assert(trw::window_at_uint32_max());
+static_assert(trw::window_across_the_wrap());
+static_assert(trw::window_one_full_cycle());
+static_assert(trw::parse_canonical_earlier());
+static_assert(trw::parse_leading_zero_mismatch());
+static_assert(trw::parse_sign_mismatch());
+static_assert(trw::parse_overflow_mismatch());
+static_assert(trw::parse_prefix_alone_mismatch());
+#endif
+
+TEST(TestReqIdWindow105, AtUint32Max) { EXPECT_TRUE(trw::window_at_uint32_max()); }
+TEST(TestReqIdWindow105, AcrossTheWrap) { EXPECT_TRUE(trw::window_across_the_wrap()); }
+TEST(TestReqIdWindow105, OneFullCycle_NoValueEarlier) { EXPECT_TRUE(trw::window_one_full_cycle()); }
+TEST(TestReqIdParse105, Canonical_Earlier) { EXPECT_TRUE(trw::parse_canonical_earlier()); }
+TEST(TestReqIdParse105, LeadingZero_Mismatch) { EXPECT_TRUE(trw::parse_leading_zero_mismatch()); }
+TEST(TestReqIdParse105, Sign_Mismatch) { EXPECT_TRUE(trw::parse_sign_mismatch()); }
+TEST(TestReqIdParse105, Overflow_Mismatch) { EXPECT_TRUE(trw::parse_overflow_mismatch()); }
+TEST(TestReqIdParse105, PrefixAlone_Mismatch) { EXPECT_TRUE(trw::parse_prefix_alone_mismatch()); }
 
 }  // namespace
