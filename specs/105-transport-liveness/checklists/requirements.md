@@ -14,7 +14,7 @@
 ## Requirement Completeness
 
 - [x] No [NEEDS CLARIFICATION] markers remain — owner rulings R-1…R-4, the Gate A round 1 decisions D-a…D-c, the round 2 decisions D-d…D-f, the round 3 decision D-g (spawn failure fails closed) and the loop 2 round 1 scope ruling settle the open protocol and scope questions; OQ-3 is closed by D-e
-- [x] Requirements are testable and unambiguous — every FR has a planned cell marked RED on the base, [guard] with its mutant, or [seam] with its mutant (FR-017 as amended by clarification "Session 2026-11-21"; quickstart sections 2 and 3), including D-g's spawn-failure seams and the bound's failure exit (FR-004b); re-checked against the regenerated tasks.md (its FR/SC, design-element and contract-clause traceability tables)
+- [x] Requirements are testable and unambiguous — every FR has a planned cell marked RED on the base, [guard] with its mutant, or [seam] with its mutant (FR-017 as amended by clarification "Session 2026-11-21 (post-Gate-A plan re-run)"; quickstart sections 2 and 3), including D-g's spawn-failure seams and the bound's failure exit (FR-004b); re-checked against the regenerated tasks.md (its FR/SC, design-element and contract-clause traceability tables)
 - [x] Success criteria are measurable — SC-001's "at once" is the contract's single definition, with the TLS close's `tls_close_timeout` bound
 - [x] Success criteria are technology-agnostic (no implementation details) — stated as peer-observed EOF, timings in HeartBtInt multiples and configuration knobs, record counts
 - [x] All acceptance scenarios are defined — Story 1 scenario 9 (the write limit) and Story 2 scenario 2 (the TestReqID rule) added in round 2

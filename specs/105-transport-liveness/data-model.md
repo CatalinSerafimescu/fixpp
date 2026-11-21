@@ -179,6 +179,21 @@ With timeout 0 or no clock nothing is entered: the write is unbounded, as before
 wait is armed", C-11 L-105-f). A 0 ms limit is not used as "close at once", unlike `close()`'s `close_grace`,
 because it would cut every R-1 Logout.
 
+**LogonReceived never enters `writing`** (spec clarification "Session 2026-11-21 (analyze re-run)", which corrects the
+earlier text naming LogonReceived beside Active). The peer's Logout in LogonReceived reaches `on_inbound_active_logout_`,
+which writes no reply there, so no bound is spawned and no write limit applies. The arm still runs its persist, its
+`Disconnected` write and, under `reset_on_logout`, the 104 receipt reset (its `pending_receipt_owner` is declared for
+both states). The session is in LogonReceived at that frame only after a Logon arm's supersede return, while `close()`
+or `Engine::stop()` is already under way, and that closer owns the connection's close (contract C-1 row 3). Re-check
+recipe, in `src/session/session.cpp` and `include/fixpp/session/session.hpp`: read the `fsm_state_ == fsm_state::Active`
+test that encloses the `inbound_logout_leaf_` call in `on_inbound_active_logout_`; read the leaf's own entry test
+(its state test, which returns success without writing); then, in the acceptor Logon arm, read each return taken after
+`logon_arm_superseded_(fsm_state::LogonReceived)` holds, each `disconnect_unless_superseded_(fsm_state::LogonReceived)`
+return (which writes nothing when superseded), and the return on `*h789 != logon_789_outcome::in_sync_continue` against
+`logon_789_outcome`'s Outcomes comment, keeping the outcomes that write no state. Those returns are the ones that leave
+`fsm_state_` at LogonReceived; each is taken only when `logon_arm_superseded_` holds, and with `fsm_state_` still LogonReceived only
+its `closing` and `engine_stop_requested_` terms can make it hold. A change to any of these tests re-opens this paragraph.
+
 **The establishment cap** (Gate A round 3, root cause #2). Before Active on an Engine session
 (`establishment_cap_` set and `!from_active`) the bound has two instants, each on its own clock: `deadline` on
 `effective_clock_`, and `*establishment_cap_` on `engine_.clock`, the clock the pump reads the establishment deadline
@@ -474,8 +489,8 @@ collisions.
 | Writer | Level | Format | Rate |
 |---|---|---|---|
 | `run_liveness_loop` (R-1), written **before** the Logout's write (ruling D-e), so a write that never completes cannot lose it | warn | `session ended: TestRequest unanswered: test_req_id={} threshold_ms={} error={}` | once per connection; a connection reaches it only after an accepted Logon and 2T of inbound silence, so a flapping peer yields at most one per reconnect cycle, and no gate is added (as `note_establishment_timeout_`) |
-| `log_pre_session_reject` (E) | warn | `acceptor connection refused before a session: reason={} begin_string={} sender_comp_id={} target_comp_id={} error={} suppressed_since_last={}` | E-7's gate |
-| `run_accept_loop`'s listener catch | error | `acceptor listener could not bind: begin_string={} sender_comp_id={} target_comp_id={} error={}` | once per entry |
+| `log_pre_session_reject` (E); the BeginString and CompIDs with each byte outside printable ASCII (0x20 to 0x7E) replaced by `?` before `ArgValue::from_inline`'s 15-byte copy (contract C-7.1, research D8) | warn | `acceptor connection refused before a session: reason={} begin_string={} sender_comp_id={} target_comp_id={} error={} suppressed_since_last={}` | E-7's gate |
+| `run_accept_loop`'s listener catch | error | `acceptor listener could not bind: begin_string={} sender_comp_id={} target_comp_id={} error={}` | one error record per start of the entry's accept loop (the record is in the listener's catch, which ends that loop; contract C-7.3) |
 
 ## E-9. `ReconnectFsm` after FR-013
 

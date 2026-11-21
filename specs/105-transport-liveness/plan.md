@@ -5,7 +5,7 @@
 **Input**: Feature specification from `/specs/105-transport-liveness/spec.md`, with owner rulings R-1 to R-4 and the
 clarifications Q1 and Q2, the 2026-11-20 rulings on SI-1 to SI-3, OQ-1 and L-105-b, the Gate A round 1 decisions
 D-a to D-c and the Gate A round 2 decisions D-d to D-f, and the Gate A round 3 decision D-g and its scope ruling (final), the loop 2 round 1 scope ruling (no new decision), and the
-post-Gate-A plan re-run's clarification "Session 2026-11-21" ([seam] and [guard] cells; the base). **Base**: the branch's
+post-Gate-A plan re-run's clarification "Session 2026-11-21 (post-Gate-A plan re-run)" ([seam] and [guard] cells; the base). **Base**: the branch's
 merge-base with `origin/main`; its `src/` and `include/` are identical to `52aeed4e` (PR #711's squash), where the
 source was read; the rebase onto #713 changed tests only (tasks.md T001 re-checks the identity). Decisions D1 to D12, risks and the ruled spec
 issues (OQ-3 closed by ruling D-e) are in [research.md](research.md); the state is
@@ -84,7 +84,7 @@ operators for the bound's race, as `run_peer_logout_bound_` uses them); OpenSSL 
 - GoogleTest. New cells in `tests/session/test_105_*.cpp` under ctest `session_105_tests` (label `105`); the [seam]
   and [guard] cells that name a symbol the base lacks in `tests/session/test_105_seams.cpp` under a second ctest,
   `session_105_seam_tests` (labels `session`, `105` and `105_seam`), which base readings exclude (`-LE 105_seam`)
-  and never build (spec clarification "Session 2026-11-21"); config cells in `tests/config/test_load_negative_battery.cpp`;
+  and never build (spec clarification "Session 2026-11-21 (post-Gate-A plan re-run)"); config cells in `tests/config/test_load_negative_battery.cpp`;
   C-ABI cells in `tests/capi/recovery_liveness_capi_witness_test.cpp`.
 - Plaintext Engine cells on `plain_engine_rig.hpp` (mock engine clock, raw peer socket). TLS Engine cells on
   `engine_loopback_harness.hpp` (`EngineLoopbackHarness`: a real `make_asio_tls_transport_factory` under
@@ -205,7 +205,7 @@ harness for the latch test (research D10, contract C-12).
   ("a recorded statement that none does") is withdrawn: Article VIII §3 admits no perf change without a benchmark in
   the same PR. **PASS (planned; the runs are evidence at the PR head).**
 - **IX §1, §2, §4.** Every new branch has a planned cell (research D3, D5, D6, D10; quickstart section 3), each marked
-  RED on the base, [guard] with its mutant, or [seam] with its mutant (clarification "Session 2026-11-21"): R-1's seven Logout-failure classes (contract C-3.2), each row W-1 to W-15 of the
+  RED on the base, [guard] with its mutant, or [seam] with its mutant (clarification "Session 2026-11-21 (post-Gate-A plan re-run)"): R-1's seven Logout-failure classes (contract C-3.2), each row W-1 to W-15 of the
   overlay, each row of E-3 including the write limit's shapes where they are reachable (the Logout itself blocked,
   for R-1, R-2 before and after Active and a reply; the Logout queued at the write gate, for R-1, R-2 after Active
   and a reply; the queued shape before Active is unreachable on an Engine session, research D10) and its TLS arm,
@@ -256,14 +256,17 @@ harness for the latch test (research D10, contract C-12).
   (C-8.4). The new abortive closes are the write limit's behind a peer that does not read (C-8.5), permitted by
   ruling D-e and disclosed (L-105-g), before 105 that peer held the connection with no bound; and the synchronous
   fallback when a close frame cannot be spawned (an allocation failure; ruling D-g, C-8.6, L-105-h). A refused,
-  unauthenticated peer is held no longer than `logon_timeout_ms` on an Engine session (C-2.6): the establishment
+  unauthenticated peer is held on an Engine session no longer than the earlier of the establishment deadline
+  (`logon_timeout_ms` from the connection's establishment start) and `logout_disconnect_timeout_ms` from the refusal
+  Logout's owner claim, plus `tls_close_timeout` on TLS (C-2.6): the establishment
   deadline now caps the refusal Logout's store call and write as well as the wait, by construction (round 3, root
   cause #2), on the stated condition that the cap's wait and the bound's are independent sleeps, which holds on an
   Engine session (its coroutines run on the type-erased session strand, never in `system_clock_source`'s per-session
   slot; data-model E-3, "The establishment cap", gives the recipe; loop 2 round 1, root cause #2); with `logout_disconnect_timeout_ms` 0 the refusal's write is unbounded as on `main` (L-105-f), and
   before Active none of its frames is delivered (clarification D-b). A peer that stops reading can no longer hold
   an ending Logout's write (C-2.7); it can still hold a non-ending write (L-105-f, narrowed, with a follow-up issue).
-  Peer-supplied CompIDs reach the log only through `ArgValue::from_inline`'s 15-byte copy, and records are
+  Peer-supplied BeginString and CompIDs reach the log only with each byte outside printable ASCII (0x20 to 0x7E) replaced
+  by `?` and then through `ArgValue::from_inline`'s 15-byte copy (C-7.1), and records are
   rate-bounded per entry (D8). The 112 rule reads a peer value through a bounded parse into two integer comparisons, with no allocation. No
   new peer-controlled allocation. **PASS (with the disclosures).**
 - **XIII §2, §3.** Records go through the resolved logger with the session's trace context (R-1, written before the
@@ -362,7 +365,7 @@ head.
 
 1. **Censuses** (quickstart section 1) and the tasks.md ending-site table. No code.
 2. **RED cells** on the base for every behaviour (quickstart section 2), per user story; [seam] and [guard] cells read
-   under their mutants at the implementation head (clarification "Session 2026-11-21").
+   under their mutants at the implementation head (clarification "Session 2026-11-21 (post-Gate-A plan re-run)").
 3. **US1 core (P1):** D1 (latch, pump, first frame, roots, `close_transport_`, joins), D4 (`expire()`'s event test), D3 (R-1).
 4. **US1 R-2 (P1):** D2.
 5. **US2 (P2):** D5. **US3 (P2):** D6 with the config validation.
@@ -452,7 +455,7 @@ Each is a fixpp issue, labelled at creation, filed before Gate B and named where
   no bound running. It has its own guard cell and mutant, and is for the next review to judge.
 - Loop 2 round 2 CONVERGED 2026-11-21: Codex P1=0 P2=0 P3=3; Opus post-judging P1=0 P2=0 P3=6; P3s applied post-convergence. Reviews: codex_105-transport-liveness_gate_a_5_review.md, opus_105-transport-liveness_gate_a_5_adversarial_review.md.
 - Post-Gate-A `/speckit-plan` re-run 2026-11-21 (consistency and amendment pass, no design change): the orchestrator's
-  [seam]/[guard] decision and the base wording (spec clarification "Session 2026-11-21"; FR-017; quickstart section 2;
+  [seam]/[guard] decision and the base wording (spec clarification "Session 2026-11-21 (post-Gate-A plan re-run)"; FR-017; quickstart section 2;
   tasks.md Execution rules), the Engine-over-TLS rig named (research D10), the Constitution Check re-derived against
   the regenerated tasks.md (VII §3, §7, §8, XI §6 added), Project Structure completed, and tasks.md's contract-clause
   traceability added.

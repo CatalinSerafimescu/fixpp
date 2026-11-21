@@ -8,7 +8,7 @@ description: "Task list for 105-transport-liveness"
 spec.md (US1 to US5, FR-001 to FR-019, SC-001 to SC-006, rulings R-1 to R-4, Q1, Q2, D-a to D-g), plan.md (Summary,
 "Phases (for /speckit-tasks)", Project Structure, T-DOC-1, "Follow-ups to file before Gate B"), research.md (F-1 to
 F-16, D1 to D12, R1 to R4), data-model.md (E-1 to E-9), contracts/transport-liveness-105.md (C-1 to C-12),
-quickstart.md (sections 1 to 6), and the post-Gate-A `/speckit-plan` re-run (spec clarification "Session 2026-11-21":
+quickstart.md (sections 1 to 6), and the post-Gate-A `/speckit-plan` re-run (spec clarification "Session 2026-11-21 (post-Gate-A plan re-run)":
 [seam] and [guard] cells, the base). This file replaces the pre-Gate-A tasks.md entirely; no earlier task number is carried
 forward. Where this file and the bundle differ, the bundle wins and the difference goes to the orchestrator.
 
@@ -34,7 +34,7 @@ marked **(orchestrator)** is run or requested by the orchestrator; every other t
   Never `git checkout`/`git switch` in `$T`, never `git stash`, never `--amend`, never `git commit -a`.
   `fixpp-parallel` and the MSVC sandbox are never `$B` or `$M`.
 - **The base.** "RED on the base" means read on `$B`, the branch's merge-base with `origin/main` (spec FR-017 and
-  clarification "Session 2026-11-21"). Its `src/` and `include/` must be identical to `52aeed4e`, where the design was
+  clarification "Session 2026-11-21 (post-Gate-A plan re-run)"). Its `src/` and `include/` must be identical to `52aeed4e`, where the design was
   read: `git diff --stat 52aeed4e "$(git -C $T merge-base HEAD origin/main)" -- src include` prints nothing. T001 runs
   that recipe and records its output; a non-empty output stops Phase 3 and goes to the orchestrator. No commit hash is
   the base: a rebase moves the merge-base, and `$B` is then re-created at the new one and the recipe re-run.
@@ -266,7 +266,19 @@ and no local API call (SC-001).
 - [ ] T019 [US1] Same file, `PeerLogoutInActive_EofAfterReplyAndReset` (C-1 row 3, FR-005), both roles, `reset_on_logout`
   on: the peer reads the reply Logout, then EOF; the store reads (1, 1) before the EOF is observed; `onLogout` once. And
   `TooHighLogoutAcknowledged_EofAfterReset` (C-1 row 5; the too-high bound's route and the pump's at-once route): reply
-  Logout, reset unit complete, then EOF. RED on the base before the fix: no EOF.
+  Logout, reset unit complete, then EOF. RED on the base before the fix: no EOF. Plus [guard: the reply admitted in
+  LogonReceived, the Active test around `inbound_logout_leaf_` in `on_inbound_active_logout_` and the leaf's own state
+  test both widened to LogonReceived] `PeerLogoutInLogonReceivedDuringClose_NoReplyLogout_ResetFollows104` (C-1 row 3's
+  LogonReceived case, FR-005; spec clarification "Session 2026-11-21 (analyze re-run)"), acceptor role only (LogonReceived
+  is the acceptor's state), `reset_on_logout` on, the session's store a `HookedStore` (`tests/support/hooked_store.hpp`):
+  the acceptor's Logon arm held at a store operation by a `HookedStore` hold, a graceful `close()` started there and held
+  at its flush step by `Hooks::flush_until` (`flushes_begun` asserted 1), the arm released and its supersede return
+  leaving the session LogonReceived (asserted before the peer's Logout is delivered), and the peer's Logout delivered
+  before the flush is released. The flush is the only suspension between `close()`'s commit of `closing` and its
+  phase-1 state test, and `close()` writes its own Logout from LogonReceived once it passes that test, so the cell
+  releases the flush only after the peer's Logout has been processed. Oracle: no 35=5 written by fixpp; the numbers reset as 104's reset point resets them (the store reads (1, 1)
+  once the unit has run); the connection closed by the running `close()`, one close, `onLogout` once. GREEN on the base by
+  design.
 - [ ] T020 [US1] Same file, the detached roots and application calls (C-1 rows 8, 9, 10; C-1.c), both roles where the
   root exists: `Liveness<ToAdminThrows|AssignFails|StoreFails>_EofAtOnce` (on a Heartbeat or TestRequest emission, with
   `test_request_threshold = HeartBtInt`, driven by the wire reader), `SendStoreFailure_EofAfterSendReturns`,
@@ -386,7 +398,9 @@ and no local API call (SC-001).
 - [ ] T039 [US1] `close_transport_` calling the synchronous `Transport::close()` instead of `close_async()`: T024's
   close_notify assertions RED (C-8.2). The R-1 Logout write deleted (the close kept): `GiveUp_LogoutTextPinned_ThenEof` RED.
 - [ ] T040 [US1] Guards: the latch's `lifecycle` term deleted (`InsideClose_NoSecondClose` RED); the drain flag deleted
-  (`InsideReconnectDrain_DrainKeepsItsBound` RED); `expire()` closing without its event (`SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent` RED).
+  (`InsideReconnectDrain_DrainKeepsItsBound` RED); `expire()` closing without its event (`SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent` RED); the reply admitted in LogonReceived (the Active test
+  around `inbound_logout_leaf_` in `on_inbound_active_logout_` and the leaf's own state test both widened to LogonReceived;
+  `PeerLogoutInLogonReceivedDuringClose_NoReplyLogout_ResetFollows104` RED).
 - [ ] T041 [US1] The close frame's fail-closed `catch` replaced by round 2's (the latch left set for a later consumer):
   `CloseFrameSpawnFails_ReleaseAtLoopExit_*` RED within its wall cap.
 
@@ -409,8 +423,12 @@ does not complete closes the connection at the bound.
   `SendingTimeReject_PeerLogoutInSequence_EndsWait`, `OrigSendingTimeReject_PeerLogoutEndsWait` — the peer's Logout at the
   number a real peer uses; positive control: the connection open and `fixpp_session_is_established` true before it; then
   EOF after it, the receipt reset under `reset_on_logout` (store read before EOF), NextNumIn advanced only for the
-  in-sequence one, `onLogout` once. RED on the base before the fix: the session is `Disconnected` at the Logout's
-  write and the transport stays open.
+  in-sequence one, the count of `fromAdmin` calls for the peer's Logout asserted in each cell (one at NextNumIn, none
+  off it; W-1), `onLogout` once. And `LogoutWait105.PeerLogoutPossDupY_<AtNextNumIn|BelowNextNumIn>_EndsWait` (C-2.9,
+  research D2 item 3: the response test precedes the PossDup stage-1 arm), on the SendingTime-Reject route (at NextNumIn)
+  and the too-low route (below it), the peer's Logout carrying PossDupFlag(43)=Y: no Reject written, the wait ended, EOF
+  after it, NextNumIn advanced and `fromAdmin` called once at NextNumIn, neither below it. RED on the base before the fix:
+  the session is `Disconnected` at the Logout's write and the transport stays open.
 - [ ] T043 [US1] Same file, the bound (W-12, C-2.5, C-1.d): `Bound_EofAtExactlyTheBound` (open at the bound − 1 ms, EOF at the
   bound, `onLogout` then), `Bound_DoesNotSlideWithAnAnswerSent` (a Heartbeat answering the peer's TestRequest mid-wait),
   `OnLogoutFiresAtWaitEnd`; the liveness instants and the gap deadline set past the bound and named in each cell. RED on the
@@ -421,8 +439,9 @@ does not complete closes the connection at the bound.
   `GapDeadlinePassedDuringWait_NoSecondLogout` — each asserts the wire reply (or its absence) and `fromApp` delivery, with the
   session shown established at the frame. RED on the base before the fix: the frames reach a `Disconnected` session
   and are drained.
-- [ ] T045 [US1] Same file, W-8 absorption: `Absorbed_<TooLow|SecondSendingTimeReject|TestReqIdMismatch|CompIdMismatch|MsgSeqNumZero>_ThenAppMessageAndPeerLogout`
-  (no second Logout on the wire, the application message reaches `fromApp`, the peer's Logout resets under
+- [ ] T045 [US1] Same file, W-8 absorption: `Absorbed_<TooLow|SecondSendingTimeReject|OrigSendingTimeReject|TestReqIdMismatchInSequence|TestReqIdMismatchKnobOffOutOfSequence|TestReqIdMismatchTooHighAnswerPending|CompIdMismatch|MsgSeqNumZero>_ThenAppMessageAndPeerLogout`
+  (one cell per route of the TestReqID mismatch, contract C-2 W-8; NextNumIn asserted after each absorbed frame, by W-8's
+  rule for its cause and route; no second Logout on the wire, the application message reaches `fromApp`, the peer's Logout resets under
   `reset_on_logout`, `onLogout` counted once at the wait's end, then EOF) and `TooLowRoute_PeerFramesBelowNextNumIn_Absorbed`.
   RED on the base before the fix.
 - [ ] T046 [US1] Same file, W-9, one cell per disposition, each asserting EOF with the clock frozen, `onLogout` once and no
@@ -599,7 +618,8 @@ does not complete closes the connection at the bound.
 ### Mutant and spurious-hit arms for US1 part B (in `$M` at `H2`; quickstart section 5)
 
 - [ ] T074 [US1] The response test deleted, and moved below the too-high branch: the off-NextNumIn `*_EndsWaitAndResets` cells
-  of T042 RED.
+  of T042 RED. The response test moved below the PossDup stage-1 arm: T042's `PeerLogoutPossDupY_<AtNextNumIn|BelowNextNumIn>_EndsWait`
+  RED.
 - [ ] T075 [US1] Absorption: `send_ending_logout_`'s absorb branch deleted, and `end_session_silently_` recording while armed
   (`Absorbed_*` RED); `inbound_resend_request_leaf_`'s assignment failure routed through `end_session_silently_`
   (`TooHighDuringWait_ResendRequestAssignFails_*` RED); the owe refused whenever a wait is `armed` (round 1's predicate: the
@@ -826,7 +846,9 @@ inbound silence, one sleep per iteration, T validated.
   `log_role_loop_open_failure` (same logger resolution and trace context, warn, `cat::session`), each byte of the BeginString and CompIDs outside
   printable ASCII (0x20 to 0x7E) replaced by `?` before `ArgValue::from_inline` (research D8); one record per reject branch of
   T015's census; one gate per entry as a local of `run_accept_loop` (clock `engine_cfg.clock`, window `max(HeartBtInt or the
-  default, 1 s)`); the listener catch split into `catch (std::system_error const&)` (its `code().value()`) and `catch (...)`
+  default, 1 s)`), the default being `kDefaultHeartBtInt`, hoisted from `src/session/session.cpp`'s file scope into the
+  shared `detail` header that holds the default-threshold helper (beside `default_test_request_threshold` in
+  `read_first_frame_bounded.hpp`, T095), which `session.cpp` and `engine.cpp` both include: no second literal; the listener catch split into `catch (std::system_error const&)` (its `code().value()`) and `catch (...)`
   (0), each one error record; a listener-construction seam; both formats registered in `src/log/format_registry.cpp`.
 - [ ] T106 [US4] [seam] `PreSessionLog105.ListenerConstructionThrowsNonSystemError_OneRecordErrorZero` in `tests/session/test_105_seams.cpp` (the seam throws
   `std::bad_alloc` in place of the construction; one record, `error=0`). Not readable on `$B`.
@@ -925,8 +947,12 @@ remaining reference.
   clause removed), L-093-6 (the rejects are logged; garbles of a connection with no Session still not counted), B-093-4,
   B-092-2 and B-092-5 (the grace window is 2T), B-103-10, B-104-6 and B-103-13 (the direct driver's precondition naming
   `run_ending_logout_bound_` and the close frame; `Lifetime105.*` its cells).
-- [ ] T123 New rows: B-105-1 (the close rule by ending class) to B-105-7 (BREAKING C-ABI 1.18, the C++ layout of `Session` (`sizeof(Session)`
-  changes: FR-013 removes members, D1, D2 and D5 add them) and `ReconnectFsm`, the installed `detail/log_rate_gate.hpp`), with B-105-2 carrying research D11's disclosures; L-105-b to
+- [ ] T123 New rows: B-105-1 (the close rule by ending class) to B-105-7, B-105-7 copying research D11's text, not re-deriving it
+  (BREAKING C-ABI 1.18, the observers of contract C-9; the C++ layout changes, `sizeof(Session)` changing as FR-013 removes
+  members and D1, D2 and D5 add them; BREAKING C++ for `ReconnectFsm`, its constructor losing two parameters and `drive_logout`
+  and the other caller-less stubs going, with D11's migration line: drop the two arguments, which were never read; the stubs
+  have no replacement; the new installed implementation header `include/fixpp/session/detail/log_rate_gate.hpp`, with the
+  status of `detail/replay_gate.hpp`), with B-105-2 carrying research D11's disclosures; L-105-b to
   L-105-h from contract C-11 (L-105-a was withdrawn in Gate A round 1 and is not used), L-105-f written as narrowed by ruling
   D-e and naming T120's issue and the round-1 text it supersedes. The spec's and C-10's departure tables copied, not
   re-derived. Each row cites its cells by name.
@@ -978,7 +1004,9 @@ remaining reference.
   entries (spec SC-006). A lane's run whose TLS skip count is not zero is not a reading of that lane (research D10,
   "Lanes"); record each lane's test count and skip count.
 - [ ] T138 Benchmarks (Article VIII §2, §3; ruling D-f; contract C-12): add the pump case to `bench/session/engine_send_bench.cpp`'s
-  harness (inbound Heartbeat and application frames through `run_read_pump`, the unarmed path); then paired base-vs-candidate
+  harness (inbound Heartbeat and application frames through `run_read_pump`, the unarmed path), and a pending-TestRequest
+  Heartbeat case to `bench/session/on_inbound_frame_bench.cpp` (a Heartbeat arriving while a TestRequest is pending: C-5.4's
+  TestReqID classification runs only under that condition, and the existing Heartbeat case has none pending); then paired base-vs-candidate
   A-B-A-B runs of `on_inbound_frame_bench`, `session_send_bench` and `engine_send_bench` with the new case, the base a release
   tree of `$B` with the bench file overlaid, its path padded to `$T`'s length (`cmp` the `.text`); the +5 % budget; results in
   the verify evidence.
@@ -987,9 +1015,13 @@ remaining reference.
 - [ ] T140 The WHOLE pytest suite: `python3 -m pytest bindings/python/tests` (the behaviour reaches Python through the C ABI).
 - [ ] T141 **(orchestrator)** windows-msvc-debug build (`-k 0`) and run of the touched targets and `-L 105` in
   `/mnt/c/temp/fixpp`, after taking `.sandbox-lock` by PARENT `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md`
-  Step 0; release the lock after; never at the same time as a Linux build.
+  Step 0; release the lock after; never at the same time as a Linux build. The TLS cells run there too (research D10,
+  "Lanes"): a TLS cell that skips on MSVC is recorded with its reason and is not counted as a pass, and the run's test count
+  and skip count are recorded.
 - [ ] T142 One full `ctest --preset linux-clang-debug --no-tests=error` (Article XVII §7), after reading the sandbox lock; record
-  the count and any failure.
+  the count and any failure, and the result of every `tests/alloc_guard` entry by name (`ctest -N -L alloc_guard` lists them),
+  `alloc_guard_093_pump_active_read` (`tests/alloc_guard/test_093_pump_active_read_alloc_guard.cpp`, the pump's Active read
+  path, which 105's latch test runs on) among them.
 - [ ] T143 Coverage of added lines (Article IX §1): fresh per-binary profraw, from every binary the `105` label runs (`session_105_seam_tests` included: the
   allocation-failure catches, the listener's generic arm and the bound's failure exit are reached only there), for the
   `session`, `log` and `config` modules and every other module whose `src/` the diff adds a reachable line to (`src/capi`

@@ -9,7 +9,7 @@
 **Base**: the branch's merge-base with `origin/main` ("the base" everywhere in this bundle). Its `src/` and `include/` are
 identical to `52aeed4e` (the squash of PR #711; the session code is 104's `20a45577` plus #711's receipt-reset log), where
 the mechanisms were re-derived; the branch was then rebased onto #713, which changed tests only. tasks.md T001 re-checks
-that identity before any RED reading (clarification "Session 2026-11-21").
+that identity before any RED reading (clarification "Session 2026-11-21 (post-Gate-A plan re-run)").
 
 **Input**: batch B27, lane S1 (`phases/phase-4/issue-batches.md` in the parent repo): fixpp#534, #582, #535, #559 (sites 2
 and 3) and #687, with the folds the owner approved on 2026-11-20 (R-4 below). The issues' mechanisms were re-derived
@@ -155,6 +155,23 @@ No design change.
 
 - Q (FR-017, orchestrator 2026-11-21): A cell that names a symbol the base lacks (an allocation-failure seam, the ending bound's in-body race seam, the listener-construction seam, a test-access read of a member 105 adds, a new `constexpr` helper) cannot compile on the base, so it cannot be read RED there. How does FR-017 apply to it? → A: it is a **[seam]** cell (a behaviour cell) or a **[guard]** cell (a `constexpr` helper cell). It lives in its own test file and ctest entry, which a base reading never builds, and its RED is shown at the implementation head under its named mutant, which deletes or reverts exactly the mechanism the cell tests; that reading stands in for the base reading and is recorded as such. A reach-proof twin (a cell that repeats a RED cell's scenario and only adds a test-access read) is a [seam] cell; the RED cell it twins keeps its peer-visible oracle and its base reading (FR-017; quickstart section 2; tasks.md Execution rules).
 - Q (the base, orchestrator 2026-11-21): Which commit is "the base" of a RED reading? → A: the branch's merge-base with `origin/main`. Its `src/` and `include/` are identical to `52aeed4e`, where the design was read; tasks.md T001 checks and records that identity, and a difference stops the RED readings and goes to the orchestrator. No commit hash is pinned as the base: a rebase moves it.
+
+### Session 2026-11-21 (analyze re-run)
+
+Ruling of the orchestrator on a `/speckit-analyze` re-run finding, replacing its earlier ruling on the same point (C1),
+whose premise the source refuted. The earlier text of FR-005 and contract C-1 row 3 named LogonReceived beside Active as
+a state in which the peer's Logout draws the reply Logout; it is corrected here.
+
+- Q (FR-005, contract C-1 row 3, orchestrator 2026-11-21): Does fixpp reply to the peer's Logout in LogonReceived, and
+  what closes the connection there? → A: No reply. `on_inbound_active_logout_` calls `inbound_logout_leaf_` only in
+  Active, and the leaf returns without writing unless the session is Active, so nothing enters `writing` (data-model
+  E-3). The 104 receipt reset still runs under `reset_on_logout`: the arm's `pending_receipt_owner` is declared "In
+  Active and LogonReceived alike". The session is in LogonReceived at that frame only on a Logon arm's supersede return,
+  that is while `close()` or `Engine::stop()` is already under way, and that closer owns the connection's close.
+  FR-005 and C-1 row 3 name Active alone for the reply and state the LogonReceived case; Context & Problem item 1 does
+  not list LogonReceived among the endings that stay open; data-model E-3, "Entering `writing`", states the case with
+  its re-check recipe; the cell is the [guard] `ConnectionClose105.PeerLogoutInLogonReceivedDuringClose_NoReplyLogout_ResetFollows104`
+  (tasks.md T019, T040; quickstart section "Connections close").
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -374,10 +391,15 @@ no comment claiming behaviour the code does not have.
   number assignment and store call too (disclosed in B-105-2). While such a write is in flight, an ending another root records MUST NOT close the connection
   before the write has returned (an arm that returns an error still closes at once, as today). Writes that do not end
   a session stay unbounded (L-105-f).
-- **FR-005**: When the session acknowledges the peer's Logout (a request in Active or LogonReceived, and the too-high Logout's
+- **FR-005**: When the session acknowledges the peer's Logout (a request in Active, and the too-high Logout's
   acknowledgement; in LogoutSent the peer's Logout answers `close()`'s own Logout, draws no reply, and `close()` closes, contract
   C-1 rows 3 to 5), it MUST close the transport after its reply Logout and after its receipt reset point under
-  `reset_on_logout` (B-104-1) has run to its end. The reply's write is limited by FR-004b.
+  `reset_on_logout` (B-104-1) has run to its end. The reply's write is limited by FR-004b. In LogonReceived the peer's
+  Logout draws no reply Logout (`on_inbound_active_logout_` calls `inbound_logout_leaf_` only in Active, and the leaf
+  writes nothing unless the session is Active), so nothing enters `writing`; the 104 receipt reset still runs under
+  `reset_on_logout`. The session is in LogonReceived at that frame only after a Logon arm's supersede return, while
+  `close()` or `Engine::stop()` is already under way, and that closer owns the connection's close (contract C-1 row 3;
+  data-model E-3, "Entering `writing`"; clarification "Session 2026-11-21 (analyze re-run)").
 - **FR-006**: The acceptor MUST act on the result of the first frame's dispatch as the read pump acts on every later
   frame's: an error result closes the connection.
 - **FR-007**: A refusal before Active that sends nothing MUST close the connection when it records `Disconnected`,
@@ -464,7 +486,7 @@ no comment claiming behaviour the code does not have.
   that names a symbol the base lacks (a seam cell, a `constexpr` helper cell, a test-access read of a new member) is a
   [seam] or [guard] cell, built in a separate ctest entry that base readings do not build, and MUST be shown RED at the
   implementation head under its named mutant, which removes exactly the mechanism it tests (amended by clarification
-  "Session 2026-11-21"); a cell
+  "Session 2026-11-21 (post-Gate-A plan re-run)"); a cell
   whose oracle the base meets for another reason MUST carry a positive control at the instant it tests. Every close
   cell MUST assert the peer-observed EOF, not an internal flag. Where a close is awaited with a bound, the bound MUST be derived
   from the competing timeout, with the arm that forces the spurious close. A timing cell MUST discriminate the old
@@ -521,8 +543,8 @@ no comment claiming behaviour the code does not have.
 - **SC-002**: A silent peer is disconnected at 2T of silence (2.4×HeartBtInt by default) and not before, on both roles,
   in both the default and the set-threshold cells. "At 2T" is within one tick of `fixpp::core::steady_time_point`, the
   session's clock (the cells run on `mock_clock`): the give-up runs strictly after the 2T instant (R-3's "after 2T";
-  research D6), every instant saturating at the clock's range (contract C-6.2); research D6's guard cells pin exactly 2T,
-  2T + 1 ns and the saturated value.
+  research D6), every instant saturating at the clock's range (contract C-6.2); research D6's cells (exactly 2T and 2T + 1 ns, RED;
+  the saturated value, a [guard]).
 - **SC-003**: With the knob off, a peer that answers each TestRequest with a matching TestReqID is never disconnected by
   the liveness loop in a run of at least 10 TestRequest cycles with its numbers ahead of NextNumIn throughout (tasks.md T081: every
   answer at a number above NextNumIn, which does not move for such a frame with the knob off, so the gap grows with

@@ -29,7 +29,7 @@ Each census runs in a scratch copy, never committed. Results go in the evidence 
 
 The base is the branch's merge-base with `origin/main` (a scratch worktree at `git merge-base HEAD origin/main`, on the
 build volume); its `src/` and `include/` are identical to `52aeed4e`, where the design was read, and tasks.md T001
-checks that before any reading (spec clarification "Session 2026-11-21"). Every cell in section 3 is marked:
+checks that before any reading (spec clarification "Session 2026-11-21 (post-Gate-A plan re-run)"). Every cell in section 3 is marked:
 - **[RED]**: written first, run on the base, and must fail there by an assertion for its stated reason.
 - **[guard: <mutant>]**: a rule the base already keeps, GREEN on the base by design; it must fail under the named mutant
   (section 5). A `constexpr` helper cell is a guard of this kind, in `test_105_seams.cpp`; its `static_assert`s sit under
@@ -65,6 +65,11 @@ Names are proposals; the implementer keeps the scenario, its assertion and its m
 - [RED] `ConnectionClose105.PeerLogoutInActive_EofAfterReplyAndReset` — `reset_on_logout` on; the peer reads the
   reply, then EOF; the store holds (1, 1) before EOF.
 - [RED] `ConnectionClose105.TooHighLogoutAcknowledged_EofAfterReset` — the bound's route.
+- [guard: the reply admitted in LogonReceived, the Active test around `inbound_logout_leaf_` and the leaf's own state
+  test both widened] `ConnectionClose105.PeerLogoutInLogonReceivedDuringClose_NoReplyLogout_ResetFollows104` — acceptor
+  role, `reset_on_logout` on; the session LogonReceived after the Logon arm's supersede return under a graceful `close()`
+  held at its flush step (`HookedStore`'s `Hooks::flush_until`), so not yet at its phase-1 Logout test; the peer's Logout: no 35=5 written by fixpp, the numbers reset per 104 (the store
+  reads (1, 1)), the connection closed by the running `close()` (C-1 row 3's LogonReceived case).
 - [RED] `ConnectionClose105.LivenessToAdminThrows_EofAtOnce`, `...LivenessAssignFails_EofAtOnce`,
   `...LivenessStoreFails_EofAtOnce`.
 - [RED] `ConnectionClose105.SendStoreFailure_EofAfterSendReturns`.
@@ -94,15 +99,18 @@ contract's table and per row of data-model E-3 (research D10 lists them):
 - [RED] `LogoutWait105.TooLow_PeerLogoutBelowNextNumIn_EndsWaitAndResets`, `...GapDeadline_PeerLogoutAboveNextNumIn_EndsWaitAndResets`,
   `...SendingTimeReject_PeerLogoutInSequence_EndsWait`, `...OrigSendingTimeReject_PeerLogoutEndsWait` — the peer's
   Logout at the number a real peer uses (C-2.2); open before it (positive control), EOF after it; with
-  `reset_on_logout` the receipt resets; NextNumIn advanced only for the in-sequence one.
+  `reset_on_logout` the receipt resets; NextNumIn advanced, and `fromAdmin` called once, only for the in-sequence one.
+- [RED] `LogoutWait105.PeerLogoutPossDupY_<AtNextNumIn|BelowNextNumIn>_EndsWait` — the peer's Logout with
+  PossDupFlag(43)=Y at NextNumIn (SendingTime-Reject route) and below it (too-low route); no Reject, the wait ended, EOF;
+  NextNumIn advanced and `fromAdmin` once at NextNumIn, neither below it (C-2.9).
 - [RED] `LogoutWait105.Bound_EofAtExactlyTheBound` — open at bound − 1 ms, EOF at the bound.
 - [RED] `LogoutWait105.Bound_DoesNotSlideWithAnAnswerSent` — a Heartbeat answering the peer's TestRequest mid-wait.
 - [RED] `LogoutWait105.AppMessageDuringWait_ReachesFromAppAndAdvances`, `...TestRequestDuringWait_Answered`,
   `...ResendRequestDuringWait_Answered`, `...HeartbeatDuringWait_AnswersPendingTestRequest`,
   `...TooHighDuringWait_NotDeliveredResendRequestSent`, `...GapDeadlinePassedDuringWait_NoSecondLogout` — the
   in-sequence frames on the SendingTime-Reject route (C-2.2).
-- [RED] `LogoutWait105.Absorbed_<TooLow|SecondSendingTimeReject|TestReqIdMismatch|CompIdMismatch|MsgSeqNumZero>_ThenAppMessageAndPeerLogout`
-  — no second Logout, the application message reaches `fromApp`, the peer's Logout resets, `onLogout` once at the end;
+- [RED] `LogoutWait105.Absorbed_<TooLow|SecondSendingTimeReject|OrigSendingTimeReject|TestReqIdMismatchInSequence|TestReqIdMismatchKnobOffOutOfSequence|TestReqIdMismatchTooHighAnswerPending|CompIdMismatch|MsgSeqNumZero>_ThenAppMessageAndPeerLogout`
+  — NextNumIn asserted after each absorbed frame (W-8, one cell per route); no second Logout, the application message reaches `fromApp`, the peer's Logout resets, `onLogout` once at the end;
   and `...TooLowRoute_PeerFramesBelowNextNumIn_Absorbed` (a real peer's frames after the too-low Logout).
 - [RED] W-9, one per disposition, each EOF with the clock frozen, the bound joined, `onLogout` once, no second Logout:
   `LogoutWait105.StoreFailureDuringWait_EofAtOnce` (error, `Disconnected` written),
@@ -292,6 +300,7 @@ Each must turn its cells RED, run unfiltered:
 - the R-2 bound's deadline read from the last send, or from the write's completion, instead of the write's start
   (`Bound_DoesNotSlideWithAnAnswerSent`, `WriteReleasedBeforeTheBound_*`);
 - the response test deleted, and moved below the too-high branch (the off-NextNumIn `*_EndsWaitAndResets` cells);
+- the response test moved below the PossDup stage-1 arm (`PeerLogoutPossDupY_<AtNextNumIn|BelowNextNumIn>_EndsWait`);
 - `send_ending_logout_`'s absorb branch deleted, and `end_session_silently_` recording while armed (`Absorbed_*`);
 - `inbound_resend_request_leaf_`'s assignment failure routed through `end_session_silently_` (absorption by return
   value; `TooHighDuringWait_ResendRequestAssignFails_*`);

@@ -727,7 +727,8 @@ shipped fixture and nothing requires it.
 - **The listener.** `catch (...)` gives no error value. The catch becomes `catch (std::system_error const&)`
   recording its `code().value()`, then `catch (...)` recording 0, each writing one record
   `acceptor listener could not bind: begin_string={} sender_comp_id={} target_comp_id={} error={}` with no rate gate
-  (once per entry). Each arm has a cell: a port in use reaches the `system_error` arm; no configuration reaches the
+  (one error record per start of the entry's accept loop: the record is in the listener's catch, which ends that loop;
+  contract C-7.3). Each arm has a cell: a port in use reaches the `system_error` arm; no configuration reaches the
   generic arm (`asio_listener`'s constructor and `make_bind_endpoint` throw `std::system_error` for every bind,
   listen and address failure, and leave only an allocation failure), so a listener-construction seam in
   `run_accept_loop` (the allocation-failure seam family of D10) throws `std::bad_alloc` in place of the
@@ -812,11 +813,11 @@ T115).
   and `105_seam`), holds `test_105_seams.cpp`: every cell, or reach-proof twin, that names a symbol 105 adds (the
   allocation-failure seams, the bound's in-body race seam, the listener-construction seam, a test-access read of a new
   member, the new `constexpr` helpers), so that a base reading, which builds only `session_105_tests` and runs
-  `-L 105 -LE 105_seam`, never meets a symbol the base lacks (spec clarification "Session 2026-11-21").
+  `-L 105 -LE 105_seam`, never meets a symbol the base lacks (spec clarification "Session 2026-11-21 (post-Gate-A plan re-run)").
   Config cells extend `tests/config/test_load_negative_battery.cpp`; C-ABI cells extend
   `tests/capi/recovery_liveness_capi_witness_test.cpp`. `ReconnectFsm` removals are proven by the build.
 - **RED first on the base, or a guard or seam cell with its mutant** (FR-017; Gate A round 2, N-3; spec clarification
-  "Session 2026-11-21"). A behaviour cell is written, run on the base (the branch's merge-base with `origin/main`; its
+  "Session 2026-11-21 (post-Gate-A plan re-run)"). A behaviour cell is written, run on the base (the branch's merge-base with `origin/main`; its
   `src/` and `include/` identical to `52aeed4e`) and shown RED for its stated reason before the fix. A [seam] cell,
   which names a symbol the base lacks, is read RED at the implementation head under the mutant that removes exactly its
   mechanism, and that reading stands in for the base reading; a `constexpr` helper cell is a [guard] in the same file. A regression guard (a rule the base already
