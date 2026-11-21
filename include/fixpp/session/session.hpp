@@ -1503,6 +1503,7 @@ private:
             out_of_sequence,
             gap_fill,
             logout,
+            ending_response,
             from_admin_failed,
             test_request,
             resend_request,
@@ -1582,9 +1583,20 @@ private:
     [[nodiscard]] inbound_result_t inbound_reject_best_effort_leaf_(
         bool tic, seqnum_t ref_seq, std::string_view ref_msg_type,
         std::string_view sending_time) noexcept;
-    // `text` is Text(58), or empty for a Logout without one (fixpp#537, D-537-5).
+    // 105 (data-model E-3): the ending a Logout's leaf writes for. r1 is the liveness loop's
+    // give-up, which claims the Logout owner and enters the ending state machine at its decision;
+    // r2 an ending the session starts (send_ending_logout_ and the Logon refusals); reply the
+    // answer to the peer's Logout.
+    enum class ending_kind : std::uint8_t { r1, r2, reply };
+    // `text` is Text(58), or empty for a Logout without one (fixpp#537, D-537-5). 105: the leaf
+    // enters the ending state machine at its owner claim (kind r1 has entered at its decision),
+    // and leaves it when its write returns; *armed reports whether it armed the R-2 wait, and
+    // claimed_mark that the caller claimed a pending too-high mark (C-2.8).
     [[nodiscard]] inbound_result_t inbound_logout_leaf_(bool tic, std::string_view sending_time,
-                                                        std::string_view text) noexcept;
+                                                        std::string_view text,
+                                                        ending_kind kind = ending_kind::reply,
+                                                        bool* armed = nullptr,
+                                                        bool claimed_mark = false) noexcept;
     [[nodiscard]] inbound_result_t inbound_logon_sent_logout_leaf_(
         bool tic, std::string_view text, std::string_view sending_time) noexcept;
     // fixpp#537 (D-537-7) supersedes the success returned for a request that could not be
@@ -2124,6 +2136,114 @@ private:
     // through session_test_access.
     std::function<bool()> close_frame_spawn_fails_;
 
+    // ── 105-transport-liveness: the ending Logout (research D2; data-model E-3) ──
+    // One state machine for the write limit, the R-2 wait, the bound and the latch. Every
+    // Logout the session writes to end a session (R-1's, every R-2 Logout before and after
+    // Active, and the replies to the peer's Logout) enters it at its write point; close()'s own
+    // Logout (run_logout_phase1) does not. Supersedes, for those Logouts, the rule that the
+    // session records Disconnected after its Logout's write (the 536-537-538 note's endings and
+    // 103's too-low Logout, which then closed only at close() or Engine::stop()).
+    // Session strand only.
+    struct ending_wait_state {
+        enum class phase_t : std::uint8_t { none, writing, armed, resolved };
+        phase_t phase = phase_t::none;
+        ending_kind kind = ending_kind::reply;
+        fsm_state entered_from = fsm_state::NotConnected;
+        bool from_active = false;  // entered while the session was Active
+        bool cut = false;          // the bound closed the transport during the write
+        fixpp::core::steady_time_point deadline{};  // one budget for the write and the wait
+    };
+    ending_wait_state ending_wait_;
+    // The connection's establishment deadline on engine_.clock, handed over once by an Engine's
+    // read pump (session_engine_access::set_establishment_deadline); empty on a direct Session.
+    std::optional<fixpp::core::steady_time_point> establishment_cap_;
+    // The bound's wake, in peer_logout_wake_'s shape.
+    std::function<void()> ending_logout_wake_;
+    // The bound's join counter, in peer_logout_bound_counter_'s shape: close() and
+    // drain_for_reconnect_ join it after their transport close; ~Session asserts it is 0.
+    std::shared_ptr<std::atomic<int>> ending_logout_bound_counter_{
+        std::make_shared<std::atomic<int>>(0)};
+    class ending_logout_bound_join {
+    public:
+        explicit ending_logout_bound_join(std::shared_ptr<std::atomic<int>> counter) noexcept
+            : counter_{std::move(counter)} {
+            counter_->fetch_add(1, std::memory_order_relaxed);
+        }
+        ending_logout_bound_join(ending_logout_bound_join&&) noexcept = default;
+        ending_logout_bound_join(ending_logout_bound_join const&) = delete;
+        ending_logout_bound_join& operator=(ending_logout_bound_join const&) = delete;
+        ending_logout_bound_join& operator=(ending_logout_bound_join&&) = delete;
+        ~ending_logout_bound_join() {
+            if (counter_) {
+                counter_->fetch_sub(1, std::memory_order_release);
+            }
+        }
+
+    private:
+        std::shared_ptr<std::atomic<int>> counter_;
+    };
+    // What entering writing found: no limit (timeout 0 or no clock), the limit set up, or the
+    // bound's spawn refused (an allocation failure: the Logout is not written).
+    enum class ending_entry : std::uint8_t { unlimited, limited, refused };
+    // Enters writing for an ending Logout of the given kind, its deadline read now, and spawns
+    // the bound on ex (the entering coroutine's executor, never executor()). Synchronous.
+    [[nodiscard]] ending_entry enter_ending_write_(ending_kind kind,
+                                                   asio::any_io_executor const& ex) noexcept;
+    // Leaves writing when the Logout's leaf returns (E-3, "Leaving writing"): arms the wait for
+    // an r2 that was transmitted, not cut, claimed no pending mark and whose session is still in
+    // the state it entered from; otherwise none. Returns whether it armed. Synchronous.
+    bool leave_ending_write_(bool transmitted, bool claimed_mark) noexcept;
+    void wake_ending_logout_bound_() noexcept {
+        if (ending_logout_wake_) {
+            ending_logout_wake_();
+        }
+    }
+    // An ending is in progress after Active: its Logout being written, or the wait armed.
+    [[nodiscard]] bool ending_in_progress_() const noexcept {
+        return ending_wait_.from_active &&
+               (ending_wait_.phase == ending_wait_state::phase_t::writing ||
+                ending_wait_.phase == ending_wait_state::phase_t::armed);
+    }
+    // The liveness loop's one predicate (data-model E-4): it originates only while this holds.
+    [[nodiscard]] bool liveness_may_originate_() const noexcept {
+        return fsm_state_ == fsm_state::Active &&
+               ending_wait_.phase == ending_wait_state::phase_t::none;
+    }
+    // The bound (research D2 item 8; data-model E-3, "The bound's loop" and "The bound's
+    // exits"): a detached coroutine on the strand, its join counter held by its parameter.
+    asio::awaitable<void> run_ending_logout_bound_(ending_logout_bound_join join,
+                                                   std::uint32_t gen) noexcept;
+    // The bound's live predicate for the phase it finds.
+    [[nodiscard]] bool ending_bound_live_(std::uint32_t gen) const noexcept;
+    // The expiry exit of the phase the bound finds (rows 4, 10, 11, 14), which its failure exit
+    // takes too (row 16). Every step is noexcept.
+    void expire_ending_wait_(std::uint32_t gen) noexcept;
+    // The close frame on the live transport, with D-g's synchronous fallback; it tests nothing
+    // and leaves the latch alone (the bound's spawns, data-model E-2 I-2's exceptions).
+    void spawn_connection_close_() noexcept;
+    // The R-2 helper (research D2 item 1) after Active: claims a pending mark, writes the Logout
+    // through inbound_logout_leaf_, then arms the wait or records Disconnected; absorbed while an
+    // ending is in progress.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_ending_logout_(
+        bool tic, std::string_view sending_time, std::string_view text) noexcept;
+    // The peer-frame silent endings (research D2 item 4): Disconnected unless an ending is in
+    // progress after Active.
+    void end_session_silently_() noexcept {
+        if (ending_in_progress_()) {
+            return;
+        }
+        record_state_transition_(fsm_state::Disconnected);
+    }
+    // The peer's Logout off NextNumIn during a wait armed after Active (research D2 item 3).
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> on_inbound_ending_response_(
+        bool tic) noexcept;
+    // Test seams (research D10, the spawn-failure and in-body race seams): when set and they
+    // return true, the bound's spawn throws std::bad_alloc after its join is built, and the
+    // bound throws std::bad_alloc before it awaits its race. Set only through
+    // session_test_access.
+    std::function<bool()> ending_bound_spawn_fails_;
+    std::function<bool()> ending_bound_race_throws_;
+
     // ── 034-credential-store-redaction T004 — masker buffer bound ────────────
     // Upper bound for the coroutine-frame copy used in the masked-Logon persist
     // path (store_then_emit, T006). Bound to the build_logon builder's actual
@@ -2185,7 +2305,7 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store_then_emit(
         seqnum_t stamped_seq, std::span<const std::byte> frame,
         std::optional<fsm_state> arm = std::nullopt, bool transmit = true,
-        wire_reset_exemption exemption = wire_reset_exemption::none);
+        wire_reset_exemption exemption = wire_reset_exemption::none, bool* transmitted = nullptr);
 
     // fixpp#518, 093 (data-model E-13; contract C-6): true when a Logon arm must stop
     // after a resume, because the session left the state the arm expects while the arm

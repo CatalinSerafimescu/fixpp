@@ -68,8 +68,17 @@ struct session_engine_access {
     // the session when it was set. Session strand.
     [[nodiscard]] static bool take_connection_end(Session& s) noexcept {
         if (!s.connection_end_owed_) return false;
+        // 105 (data-model E-3, "Other roots during writing"): the latch defers to the writer of
+        // an ending Logout, whose root consumes it after the write.
+        if (s.ending_wait_.phase == Session::ending_wait_state::phase_t::writing) return false;
         s.connection_end_owed_.reset();
         return true;
+    }
+    // 105 (data-model E-3, "The establishment cap"; E-5): the pump's establishment deadline,
+    // handed to the Session once, before its first delivery. One store. Session strand.
+    static void set_establishment_deadline(Session& s,
+                                           fixpp::core::steady_time_point deadline) noexcept {
+        s.establishment_cap_ = deadline;
     }
     // 105 (research D4; data-model E-5): whether the session has recorded its own ending, for
     // the pump's establishment expiry. Session strand.

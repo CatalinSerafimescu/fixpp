@@ -235,6 +235,23 @@ struct session_test_access {
     [[nodiscard]] static int connection_close_count(Session const& s) noexcept {
         return s.connection_close_counter_->load(std::memory_order_acquire);
     }
+    // 105-transport-liveness (data-model E-3): the ending Logout's state and seams.
+    enum class ending_phase : std::uint8_t { none, writing, armed, resolved };
+    [[nodiscard]] static ending_phase ending_wait_phase(Session const& s) noexcept {
+        return static_cast<ending_phase>(s.ending_wait_.phase);
+    }
+    [[nodiscard]] static bool ending_wait_cut(Session const& s) noexcept {
+        return s.ending_wait_.cut;
+    }
+    [[nodiscard]] static int ending_logout_bound_count(Session const& s) noexcept {
+        return s.ending_logout_bound_counter_->load(std::memory_order_acquire);
+    }
+    static void set_ending_bound_spawn_fails(Session& s, std::function<bool()> fails) {
+        s.ending_bound_spawn_fails_ = std::move(fails);
+    }
+    static void set_ending_bound_race_throws(Session& s, std::function<bool()> throws) {
+        s.ending_bound_race_throws_ = std::move(throws);
+    }
     [[nodiscard]] static int peer_logout_bound_count(Session const& s) noexcept {
         return s.peer_logout_bound_counter_->load(std::memory_order_acquire);
     }

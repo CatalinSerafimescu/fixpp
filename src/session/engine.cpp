@@ -545,6 +545,12 @@ asio::awaitable<void> run_read_pump(
         return !r.has_value() || session_engine_access::take_connection_end(session);
     };
 
+    // 105 (data-model E-5): the establishment deadline, handed to the Session once before the
+    // first delivery, caps a pre-Active ending's wait (data-model E-3, "The establishment cap").
+    if (establish_deadline) {
+        session_engine_access::set_establishment_deadline(session, *establish_deadline);
+    }
+
     if (!first_frame.empty()) {
         auto deliver_r = co_await session.on_inbound_frame(first_frame);
         if (frame_ends(deliver_r)) {

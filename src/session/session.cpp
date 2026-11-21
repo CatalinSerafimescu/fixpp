@@ -253,6 +253,9 @@ Session::~Session() {
     // 105 (research D1 item 5): close() joins the close frame, as it joins the bound.
     assert(connection_close_counter_->load(std::memory_order_acquire) == 0 &&
            "Session destroyed with a connection close frame running (close() first)");
+    // 105 (data-model E-3): close() joins the ending Logout's bound.
+    assert(ending_logout_bound_counter_->load(std::memory_order_acquire) == 0 &&
+           "Session destroyed with the ending Logout's bound running (close() first)");
     if (effective_clock_) {
         effective_clock_->forget_session(this);
     }
@@ -452,7 +455,16 @@ void Session::record_state_transition_(fsm_state new_state) noexcept {
 }
 
 // 105 (data-model E-2, "The one setter"): see session.hpp.
+// 105 (data-model E-3): a wait armed before Active refuses the owe (the refusal's own
+// Disconnected, row 6); a wait armed after Active is ended by it (row 12).
 void Session::owe_connection_end_() noexcept {
+    if (ending_wait_.phase == ending_wait_state::phase_t::armed) {
+        if (!ending_wait_.from_active) {
+            return;
+        }
+        ending_wait_.phase = ending_wait_state::phase_t::resolved;
+        wake_ending_logout_bound_();
+    }
     if (state_ == lifecycle::open && !reconnect_drain_in_flight_) {
         connection_end_owed_ = conn_gen_;
     }
@@ -462,11 +474,21 @@ void Session::owe_connection_end_() noexcept {
 // made here, synchronously, on the strand; the frame decides nothing. The spawn follows
 // on_inbound_active_too_high_logout_'s shape for its join (the coroutine's parameter), not for
 // its catch: this catch fails closed and does not rethrow (clarification D-g).
+// 105 (data-model E-3, "Other roots during writing"): while an ending Logout is being written
+// the release defers to the writer's root.
 void Session::release_connection_end_() noexcept {
     if (!connection_end_owed_ || *connection_end_owed_ != conn_gen_ || state_ != lifecycle::open ||
-        inbound_depth_ != 0) {
+        inbound_depth_ != 0 || ending_wait_.phase == ending_wait_state::phase_t::writing) {
         return;
     }
+    if (!live_transport_shared_()) {
+        return;
+    }
+    spawn_connection_close_();
+    connection_end_owed_.reset();
+}
+
+void Session::spawn_connection_close_() noexcept {
     auto transport = live_transport_shared_();
     if (!transport) {
         return;
@@ -478,13 +500,11 @@ void Session::release_connection_end_() noexcept {
         }
         asio::co_spawn(exec_.underlying(), close_transport_(std::move(join), transport),
                        asio::detached);
-        connection_end_owed_.reset();
     } catch (...) {
         // The close cannot be spawned: the synchronous close of the transport taken above, as
         // close()'s grace makes it (contract C-8.6; on TLS abortive while an SSL operation is
         // suspended, L-105-h). Its result is discarded, as the grace's is.
         (void)transport->close();
-        connection_end_owed_.reset();
     }
 }
 
@@ -893,6 +913,13 @@ bool Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Tr
     // 103 (research D1 step 3, D4.6): the drain left the old connection quiescent, with no
     // Logout in flight and none of its detached coroutines running.
     assert(!logout_in_flight_ && "a Logout is in flight across a reconnect install");
+    // 105 (data-model E-3 row 17): the next connection starts with no ending Logout and no
+    // establishment cap.
+    assert((ending_wait_.phase == ending_wait_state::phase_t::none ||
+            ending_wait_.phase == ending_wait_state::phase_t::resolved) &&
+           "an ending Logout is in progress across a reconnect install");
+    ending_wait_.phase = ending_wait_state::phase_t::none;
+    establishment_cap_.reset();
     assert(replay_gate_.shared == 0 && inbound_depth_ == 0 &&
            peer_logout_bound_counter_->load(std::memory_order_acquire) == 0 &&
            liveness_counter_->load(std::memory_order_acquire) == 0 &&
@@ -975,6 +1002,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::drain_for_reconnect_() n
         // that connection's close (drive_reconnect holds reconnect_drain_in_flight_ around
         // this call), so no close is owed here.
         connection_end_owed_.reset();
+        // 105 (data-model E-3, the bound's wake sources): the ending Logout's bound re-tests at
+        // the drain's entry (its live predicate fails on reconnect_drain_in_flight_).
+        wake_ending_logout_bound_();
         {
             auto const cc = connection_close_counter_;
             while (cc->load(std::memory_order_acquire) > 0) {
@@ -1030,6 +1060,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::drain_for_reconnect_() n
         auto const lc = liveness_counter_;
         while (bc->load(std::memory_order_acquire) > 0 || lc->load(std::memory_order_acquire) > 0) {
             co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+        }
+        // 105 (research D2 item 9; data-model E-2 I-4, I-7): the ending Logout's bound, then the
+        // close frame's counter again, so no frame of the old connection is in flight at the
+        // install.
+        {
+            auto const ebc = ending_logout_bound_counter_;
+            auto const cc = connection_close_counter_;
+            while (ebc->load(std::memory_order_acquire) > 0 ||
+                   cc->load(std::memory_order_acquire) > 0) {
+                co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+            }
         }
         if (refused()) {
             co_return std::unexpected(error::session_already_closed);
@@ -1209,6 +1250,13 @@ void Session::attach_accepted_transport(std::unique_ptr<fixpp::transport::Transp
         live_peer_id_ = std::move(hr.peer_id);
     }
 
+    // 105 (data-model E-3 row 17): the connection starts with no ending Logout and no
+    // establishment cap.
+    assert((ending_wait_.phase == ending_wait_state::phase_t::none ||
+            ending_wait_.phase == ending_wait_state::phase_t::resolved) &&
+           "an ending Logout is in progress at an accepted connection");
+    ending_wait_.phase = ending_wait_state::phase_t::none;
+    establishment_cap_.reset();
     // 2. Take ownership of the transport.
     // FQ-A: no transport_send_ rebind needed — live_write_serialized_() picks
     // up accepted_transport_ via live_transport_shared_() at call time.
@@ -2481,6 +2529,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // 103 (research D4.4, D4.6): close() claims a pending mark and wakes the bound,
     // unconditionally, at the same position.
     claim_peer_logout_none_();
+    // 105 (data-model E-3, the bound's wake sources): the ending Logout's bound re-tests here.
+    wake_ending_logout_bound_();
     close_result_ = std::make_shared<std::optional<fixpp::core::expected_t<void>>>();
 
     // T037 phase 1 — graceful ONLY (terminal skips phase 1 entirely; the
@@ -2646,6 +2696,19 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
         // Config::tls_close_timeout and falling back to the abortive close if it
         // cannot quiesce — so the worst case is the old behaviour.
         (void)co_await live->close_async();
+    }
+    // 105 (research D2 item 9; data-model E-2 I-4): the ending Logout's bound, joined after the
+    // transport's close, then the close frame's counter again, which collects a frame the bound
+    // spawned after the first join.
+    {
+        auto const ebc = ending_logout_bound_counter_;
+        while (ebc->load(std::memory_order_acquire) > 0) {
+            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+        }
+        auto const cc = connection_close_counter_;
+        while (cc->load(std::memory_order_acquire) > 0) {
+            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+        }
     }
 
     // T045: clear the session_local<trace_context> slot at close completion
@@ -3284,25 +3347,45 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout
     const auto st = effective_clock_
                         ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
                         : SendingTimeStamp{};
+    // 105 (research D2 item 11): an R-2 ending before Active; its write starts here, and the
+    // order is: writing, the write, armed, then the refusal's own Disconnected (E-3 rows 1, 3,
+    // 6). A bound that cannot be spawned leaves the Logout unwritten (row 2a).
+    bool const write_refused =
+        enter_ending_write_(ending_kind::r2, co_await asio::this_coro::executor) ==
+        ending_entry::refused;
     auto lo_result = fixpp::session::build_logout(
         std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq, cfg_.sender_comp_id,
         cfg_.target_comp_id, reason_text, cfg_.begin_string, st.value);
-    if (lo_result) {
+    bool transmitted = false;
+    if (lo_result && !write_refused) {
+        struct leave_on_unwind {
+            Session* s;
+            int unwinding_at = std::uncaught_exceptions();
+            ~leave_on_unwind() {
+                if (std::uncaught_exceptions() > unwinding_at) {
+                    (void)s->leave_ending_write_(false, false);
+                }
+            }
+        } const leave_guard{.s = this};
         // toAdmin before transmit; a throwing callback → terminal-close +
         // app_callback_threw.
         if (!fire_to_admin_(*lo_result)) {
+            (void)leave_ending_write_(false, false);
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(fixpp::core::error::app_callback_threw);
         }
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
+            (void)leave_ending_write_(false, false);
             record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
-        auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm);
+        auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm, true,
+                                               wire_reset_exemption::none, &transmitted);
         // What store_then_emit returns and when it throws: its declaration in session.hpp.
         (void)emit_r;
     }
+    (void)leave_ending_write_(transmitted, false);
     // 093 plan OD-26: the Logout's store and write are suspensions.
     disconnect_unless_superseded_(arm);
     co_return fixpp::core::expected_t<void>{};
@@ -3870,8 +3953,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::dispose_unparseable_(
     if (ref_seq == 0) {  // D-7: no 34 read before the fault
         co_return fixpp::core::expected_t<void>{};
     }
-    if (hdr.fault_ref_msg_type == "A") {  // D-3
-        record_state_transition_(fsm_state::Disconnected);
+    if (hdr.fault_ref_msg_type == "A") {  // D-3; 105: a peer-frame silent ending
+        end_session_silently_();
         co_return fixpp::core::expected_t<void>{};
     }
     if (hdr.fault_ref_msg_type != "4") {  // D-5 at the expected number; D-6 otherwise
@@ -3990,36 +4073,74 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_reject_best_effo
 // returns the error; the emit's returned error is discarded (store_then_emit's declaration
 // in session.hpp says which errors those are).
 asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logout_leaf_(
-    bool tic, std::string_view sending_time, std::string_view text) noexcept {
+    bool tic, std::string_view sending_time, std::string_view text, ending_kind kind, bool* armed,
+    bool claimed_mark) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
+    // 105 (data-model E-3): a leaf that leaves the ending state machine on its own path; an
+    // exception (store_then_emit's operation_aborted for a cancelled store call) leaves it while
+    // it unwinds the frame, and a suspended frame destroyed unresumed touches nothing.
+    struct leave_on_unwind {
+        Session* s;
+        int unwinding_at = std::uncaught_exceptions();
+        ~leave_on_unwind() {
+            if (std::uncaught_exceptions() > unwinding_at) {
+                (void)s->leave_ending_write_(false, false);
+            }
+        }
+    };
     // 103 (research D4.6): the Logout owner, tested and set before the stamp's use, the
     // number peek and the first suspension. With a Logout already in flight, or the session
     // no longer Active, the leaf writes none and returns success. The only clear is
-    // record_state_transition_'s, on the edge into Disconnected.
-    if (logout_in_flight_ || fsm_state_ != fsm_state::Active) {
+    // record_state_transition_'s, on the edge into Disconnected. 105: R-1 claims the owner at
+    // its decision (run_liveness_loop_body_), so its leaf tests the state alone.
+    if ((kind != ending_kind::r1 && logout_in_flight_) || fsm_state_ != fsm_state::Active) {
+        if (kind == ending_kind::r1) {
+            (void)leave_ending_write_(false, false);
+        }
         co_return fixpp::core::expected_t<void>{};
     }
     logout_in_flight_ = true;
+    // 105 (research D2 item 11): the write starts at the owner claim; R-1's started at its
+    // decision. A bound that cannot be spawned, and a write the limit cut while R-1 waited for
+    // the replay gate, leave the Logout unwritten.
+    if (kind != ending_kind::r1) {
+        if (enter_ending_write_(kind, co_await asio::this_coro::executor) ==
+            ending_entry::refused) {
+            co_return fixpp::core::expected_t<void>{};
+        }
+    } else if (ending_wait_.cut) {
+        (void)leave_ending_write_(false, false);
+        co_return fixpp::core::expected_t<void>{};
+    }
+    leave_on_unwind const leave_guard{.s = this};
     std::array<std::byte, 256> lo_buf{};
     const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
     auto lo_result = fixpp::session::build_logout(
         std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq, cfg_.sender_comp_id,
         cfg_.target_comp_id, text, cfg_.begin_string, sending_time);
+    bool transmitted = false;
     if (lo_result) {
         // 019 T014: toAdmin before transmitting Logout. [FR-008/010]
         // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
         if (!fire_to_admin_(*lo_result)) {
+            (void)leave_ending_write_(false, false);
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(fixpp::core::error::app_callback_threw);
         }
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
+            (void)leave_ending_write_(false, false);
             record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
-        auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
+        auto emit_r = co_await store_then_emit(lo_seq, *lo_result, std::nullopt, true,
+                                               wire_reset_exemption::none, &transmitted);
         // What store_then_emit returns and when it throws: its declaration in session.hpp.
         (void)emit_r;
+    }
+    bool const is_armed = leave_ending_write_(transmitted, claimed_mark);
+    if (armed != nullptr) {
+        *armed = is_armed;
     }
     co_return fixpp::core::expected_t<void>{};
 }
@@ -4029,27 +4150,48 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logout_leaf_(
 asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logon_sent_logout_leaf_(
     bool tic, std::string_view text, std::string_view sending_time) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
+    // 105 (research D2 item 11): an R-2 ending before Active; its write starts here, before the
+    // number assignment and the store call. Its caller records Disconnected after the leaf, so
+    // the order is: writing, the write, armed, the refusal's own Disconnected (E-3 rows 1, 3, 6).
+    if (enter_ending_write_(ending_kind::r2, co_await asio::this_coro::executor) ==
+        ending_entry::refused) {
+        co_return fixpp::core::expected_t<void>{};
+    }
+    struct leave_on_unwind {
+        Session* s;
+        int unwinding_at = std::uncaught_exceptions();
+        ~leave_on_unwind() {
+            if (std::uncaught_exceptions() > unwinding_at) {
+                (void)s->leave_ending_write_(false, false);
+            }
+        }
+    } const leave_guard{.s = this};
     std::array<std::byte, 256> lo_buf{};
     const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
     auto lo_result = fixpp::session::build_logout(
         std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq, cfg_.sender_comp_id,
         cfg_.target_comp_id, text, cfg_.begin_string, sending_time);
+    bool transmitted = false;
     if (lo_result) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
+            (void)leave_ending_write_(false, false);
             record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
         // 036 T023: ARM-1 — toAdmin observation before transmit (FR-001/FR-002).
         // Throw arm: Disconnected + app_callback_threw (FR-003).
         if (!fire_to_admin_(*lo_result)) {
+            (void)leave_ending_write_(false, false);
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(fixpp::core::error::app_callback_threw);
         }
-        auto emit_r = co_await store_then_emit(lo_seq, *lo_result, fsm_state::LogonSent);
+        auto emit_r = co_await store_then_emit(lo_seq, *lo_result, fsm_state::LogonSent, true,
+                                               wire_reset_exemption::none, &transmitted);
         // What store_then_emit returns and when it throws: its declaration in session.hpp.
         (void)emit_r;
     }
+    (void)leave_ending_write_(transmitted, false);
     co_return fixpp::core::expected_t<void>{};
 }
 
@@ -4329,7 +4471,23 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_cold_(
             return on_inbound_logon_sent_(tic, frame);
         case fsm_state::LogonReceived:
         case fsm_state::Active:
+            break;
         case fsm_state::Disconnected:
+            // 105 (research D2 item 3; C-2 W-1 before Active): reached only while a wait armed
+            // before Active is open. A well-formed Logout with the right identity ends it; every
+            // other frame is drained. Nothing is delivered, advanced or reset.
+            if (ending_wait_.phase == ending_wait_state::phase_t::armed &&
+                !ending_wait_.from_active) {
+                auto const hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+                if (hdr.fault == fixpp::wire::field_fault::none && hdr.msg_type_is_third &&
+                    hdr.msg_type == "5" && hdr.begin_string == cfg_.begin_string &&
+                    (!cfg_.check_comp_id || (hdr.sender_comp_id == cfg_.target_comp_id &&
+                                             hdr.target_comp_id == cfg_.sender_comp_id))) {
+                    ending_wait_.phase = ending_wait_state::phase_t::resolved;
+                    owe_connection_end_();
+                    wake_ending_logout_bound_();
+                }
+            }
             break;
     }
     // Disconnected row: all inbound cells `ignored` per matrix.
@@ -5092,14 +5250,40 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
             // (028 T005 / S1, data-model S1, contract C1, FR-003).
             // Steady-state only: Logon-establishment CompID check (interpret_logon
             // at NotConnected) is untouched (FR-012 / I-VCT-6).
+            // 105 (research D2 item 4): the peer-frame silent endings go through
+            // end_session_silently_, absorbed while an ending is in progress (C-2 W-8).
             if (hdr.begin_string != cfg_.begin_string) {
-                record_state_transition_(fsm_state::Disconnected);
+                end_session_silently_();
                 co_return fixpp::core::expected_t<void>{};
             }
             if (cfg_.check_comp_id && (hdr.sender_comp_id != cfg_.target_comp_id ||
                                        hdr.target_comp_id != cfg_.sender_comp_id)) {
-                record_state_transition_(fsm_state::Disconnected);
+                end_session_silently_();
                 co_return fixpp::core::expected_t<void>{};
+            }
+
+            // 105 (research D2 item 3; C-2 W-1, C-2.9; clarification D-a): the response
+            // test. While a wait armed after Active is open, a well-formed Logout past the
+            // identity checks is the peer's response whatever its MsgSeqNum, ahead of the
+            // Reset-mode SequenceReset bypass, MsgSeqNum 0, the too-high branch, the PossDup
+            // stage-1 arm and check_inbound. At NextNumIn it takes the in-sequence route;
+            // off NextNumIn the response arm.
+            if (hdr.msg_type == "5" && ending_wait_.phase == ending_wait_state::phase_t::armed &&
+                ending_wait_.from_active) {
+                const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
+                if (seq != 0 && seq == seqnum_mgr_.next_inbound_unsafe()) {
+                    auto chk = co_await seqnum_mgr_.check_inbound(seq);
+                    if (!chk) {
+                        slow.k = inbound_slow_t::kind::out_of_sequence;
+                        slow.chk_error = chk.error();
+                        break;
+                    }
+                    note_inbound_advance_();
+                    slow.k = inbound_slow_t::kind::logout;
+                    break;
+                }
+                slow.k = inbound_slow_t::kind::ending_response;
+                break;
             }
 
             // ── Guard (3): SendingTime MaxLatency (Q3, T055/T056) ─────────────
@@ -5134,8 +5318,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
             {
                 const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
                 if (seq == 0) {
-                    // Cannot parse seq — session-fatal.
-                    record_state_transition_(fsm_state::Disconnected);
+                    // Cannot parse seq — session-fatal (105: a peer-frame silent ending).
+                    end_session_silently_();
                     co_return fixpp::core::expected_t<void>{};
                 }
 
@@ -5289,8 +5473,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
                             // TestReqID mismatch: peer sent a Heartbeat echoing a
                             // different (or stale) TestReqID than our outstanding one.
                             // session_testreqid_mismatch=118 → Disconnected.
-                            // [spec.md FR-006; T018-D]
-                            record_state_transition_(fsm_state::Disconnected);
+                            // [spec.md FR-006; T018-D] 105: a peer-frame silent ending.
+                            end_session_silently_();
                             co_return fixpp::core::expected_t<void>{};
                         }
                         // Matching or empty TestReqID: TR answered, clear flag.
@@ -5454,6 +5638,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_slow_(
             return on_inbound_active_gap_fill_(tic, frame, hdr, route);
         case kind::logout:
             return on_inbound_active_logout_(tic, frame, hdr, route);
+        case kind::ending_response:
+            return on_inbound_ending_response_(tic);
         case kind::from_admin_failed:
             return on_inbound_active_from_admin_failed_(tic, hdr, slow.cb_r);
         case kind::test_request:
@@ -5510,6 +5696,11 @@ bool Session::inbound_sending_time_ok_(
 asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::resend_gap_deadline_(
     bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
+    // 105 (C-2 W-7): while the wait is armed the deadline does not fire; the wait's own ending
+    // is already running.
+    if (ending_wait_.phase == ending_wait_state::phase_t::armed) {
+        co_return std::nullopt;
+    }
     // 1: the frame will not advance NextNumIn. Every call site runs before the frame's
     // consume, so "advances" is consume_rejected_seqnum_'s rule: at NextNumIn, and not a
     // Logon or a SequenceReset. A MsgSeqNum(34) that does not parse reads as 0.
@@ -5543,15 +5734,10 @@ asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::resend_ga
     const std::string_view text{text_buf.data(),
                                 static_cast<std::size_t>(text_end - text_buf.data())};
     const auto st52 = stamp_sending_time(*effective_clock_, cfg_.sending_time_precision);
-    // 103 (research D4.6): the deadline claims a pending mark; its own Logout is the one.
-    claim_peer_logout_none_();
-    FIXPP_INBOUND_SPLIT_AWAIT(r, tic, inbound_logout_leaf_(tic, st52.value, text));
-    if (!r) {
-        co_return r;
-    }
-    // 104 (contract RR-5 item 6): the leaf returns success on Disconnected.
-    record_disconnected_unless_already_();
-    co_return fixpp::core::expected_t<void>{};
+    // 105 (research D2 item 1): an R-2 ending, through send_ending_logout_, which claims a
+    // pending mark (103 research D4.6) and records Disconnected unless the wait was armed.
+    FIXPP_INBOUND_SPLIT_AWAIT(r, tic, send_ending_logout_(tic, st52.value, text));
+    co_return r;
 }
 
 // fixpp#537 (D-537-6, D-537-8): the in-sequence TestReqID(112) disposition, for a Heartbeat
@@ -5560,7 +5746,8 @@ asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::resend_ga
 // TestRequest is pending is each caller's test, not this routine's.
 bool Session::answer_pending_test_request_(std::string_view test_req_id) noexcept {
     if (!test_req_id.empty() && test_req_id != pending_test_req_id_) {
-        record_state_transition_(fsm_state::Disconnected);
+        // 105 (research D2 item 4): a peer-frame silent ending.
+        end_session_silently_();
         return false;
     }
     pending_test_req_id_.clear();
@@ -5627,17 +5814,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_sendin
             co_return r;
         }
     }
-    // Step 2: emit Logout(35=5).
-    {
-        FIXPP_INBOUND_SPLIT_AWAIT(r, tic, inbound_logout_leaf_(tic, st52.value, {}));
-        if (!r) {
-            co_return r;
-        }
-    }
-    // Step 3: Disconnect. 104 (contract RR-5 item 6, "A frame in flight across a route-B
-    // reset point"): the leaf returns success on Disconnected.
-    record_disconnected_unless_already_();
-    co_return fixpp::core::expected_t<void>{};
+    // Step 2: the Logout, and Step 3 the ending: 105 (research D2 item 1), an R-2 ending
+    // through send_ending_logout_, which records Disconnected unless the wait was armed.
+    FIXPP_INBOUND_SPLIT_AWAIT(r, tic, send_ending_logout_(tic, st52.value, {}));
+    co_return r;
 }
 
 // Inbound SequenceReset(35=4) in Reset mode (GapFillFlag ≠ Y).
@@ -5963,6 +6143,222 @@ asio::awaitable<void> Session::run_peer_logout_bound_body_(std::uint32_t gen) no
     }
 }
 
+// ── 105-transport-liveness: the ending Logout (research D2; data-model E-3) ──────────────
+
+// E-3 row 1 (row 2 with no clock or a 0 ms timeout, row 2a when the spawn throws): the
+// deadline is read once, here, at the write's start; the bound is spawned before the write, on
+// the entering coroutine's executor, its join the coroutine's parameter. The catch does not
+// rethrow (unlike on_inbound_active_too_high_logout_'s): a bound that cannot be spawned fails
+// closed, the Logout not written (clarification D-g).
+Session::ending_entry Session::enter_ending_write_(ending_kind kind,
+                                                   asio::any_io_executor const& ex) noexcept {
+    if (!effective_clock_ || cfg_.logout_disconnect_timeout_ms == 0) {
+        return ending_entry::unlimited;
+    }
+    ending_wait_ =
+        ending_wait_state{.phase = ending_wait_state::phase_t::writing,
+                          .kind = kind,
+                          .entered_from = fsm_state_,
+                          .from_active = fsm_state_ == fsm_state::Active,
+                          .cut = false,
+                          .deadline = detail::deadline_after(
+                              effective_clock_->steady_now(),
+                              std::chrono::milliseconds{cfg_.logout_disconnect_timeout_ms})};
+    try {
+        ending_logout_bound_join join{ending_logout_bound_counter_};
+        if (ending_bound_spawn_fails_ && ending_bound_spawn_fails_()) {
+            throw std::bad_alloc{};
+        }
+        asio::co_spawn(ex, run_ending_logout_bound_(std::move(join), conn_gen_), asio::detached);
+    } catch (...) {
+        ending_wait_.phase = ending_wait_state::phase_t::none;
+        return ending_entry::refused;
+    }
+    return ending_entry::limited;
+}
+
+// E-3, "Leaving writing": on the strand, with no suspension before the caller's next step.
+bool Session::leave_ending_write_(bool transmitted, bool claimed_mark) noexcept {
+    if (ending_wait_.phase != ending_wait_state::phase_t::writing) {
+        return false;
+    }
+    bool const arm = ending_wait_.kind == ending_kind::r2 && transmitted && !ending_wait_.cut &&
+                     !claimed_mark && fsm_state_ == ending_wait_.entered_from;
+    ending_wait_.phase = arm ? ending_wait_state::phase_t::armed : ending_wait_state::phase_t::none;
+    wake_ending_logout_bound_();
+    return arm;
+}
+
+// E-3, "The bound's loop": the live predicate by phase.
+bool Session::ending_bound_live_(std::uint32_t gen) const noexcept {
+    switch (ending_wait_.phase) {
+        case ending_wait_state::phase_t::writing:
+            assert(conn_gen_ == gen && "the ending Logout's bound outlived its connection");
+            return conn_gen_ == gen;
+        case ending_wait_state::phase_t::armed:
+            if (conn_gen_ != gen || reconnect_drain_in_flight_) {
+                return false;
+            }
+            if (ending_wait_.from_active) {
+                return !engine_stop_requested_ && fsm_state_ == fsm_state::Active;
+            }
+            return state_ == lifecycle::open;
+        case ending_wait_state::phase_t::none:
+        case ending_wait_state::phase_t::resolved:
+            break;
+    }
+    return false;
+}
+
+// E-3, "The bound's exits", the expiry exit (rows 4, 10, 11, 14).
+void Session::expire_ending_wait_(std::uint32_t gen) noexcept {
+    if (ending_wait_.phase == ending_wait_state::phase_t::writing) {
+        // Row 4: the write limit. The leaf clears the phase when its write returns.
+        ending_wait_.cut = true;
+        if (conn_gen_ == gen) {
+            spawn_connection_close_();
+        }
+        return;
+    }
+    // Rows 10, 11, 14: a live armed wait.
+    ending_wait_.phase = ending_wait_state::phase_t::resolved;
+    if (ending_wait_.from_active) {
+        record_state_transition_(fsm_state::Disconnected);
+    } else {
+        owe_connection_end_();
+    }
+    if (conn_gen_ == gen && state_ == lifecycle::open) {
+        spawn_connection_close_();
+        connection_end_owed_.reset();
+    }
+}
+
+// E-3, "The bound's loop" and "The bound's exits". A wake is a re-test; a deadline arm is a
+// re-test once its own clock has reached its instant; a deadline arm that completed before its
+// instant can only be an exception detail::await_deadline absorbed, the failure exit. Its join
+// counter is held by its parameter, which touches only the counter.
+asio::awaitable<void> Session::run_ending_logout_bound_(
+    [[maybe_unused]] ending_logout_bound_join join, std::uint32_t gen) noexcept {
+    enum class exit_t : std::uint8_t { ordinary, expiry, failure };
+    exit_t how = exit_t::ordinary;
+    try {
+        asio::steady_timer woken{co_await asio::this_coro::executor,
+                                 asio::steady_timer::time_point::max()};
+        // run_peer_logout_bound_body_'s backstop: it clears the wake only while an exception
+        // unwinds the frame; the explicit clear below disarms it.
+        struct wake_clearer {
+            Session* s;
+            int unwinding_at = std::uncaught_exceptions();
+            bool armed = true;
+            ~wake_clearer() {
+                if (armed && std::uncaught_exceptions() > unwinding_at) {
+                    s->ending_logout_wake_ = nullptr;
+                }
+            }
+        } wake_clear{.s = this};
+        ending_logout_wake_ = [&woken] { woken.cancel(); };
+        for (;;) {
+            if (!ending_bound_live_(gen)) {
+                break;
+            }
+            auto const deadline = ending_wait_.deadline;
+            bool const capped =
+                establishment_cap_.has_value() && !ending_wait_.from_active && engine_.clock;
+            if (effective_clock_->steady_now() >= deadline ||
+                (capped && engine_.clock->steady_now() >= *establishment_cap_)) {
+                how = exit_t::expiry;
+                break;
+            }
+            if (ending_bound_race_throws_ && ending_bound_race_throws_()) {
+                throw std::bad_alloc{};
+            }
+            woken.expires_at(asio::steady_timer::time_point::max());
+            using namespace asio::experimental::awaitable_operators;
+            if (capped) {
+                auto const cap = *establishment_cap_;
+                auto const r = co_await (woken.async_wait(asio::as_tuple(asio::use_awaitable)) ||
+                                         detail::await_deadline(*effective_clock_, deadline) ||
+                                         detail::await_deadline(*engine_.clock, cap));
+                if ((r.index() == 1 && effective_clock_->steady_now() < deadline) ||
+                    (r.index() == 2 && engine_.clock->steady_now() < cap)) {
+                    how = exit_t::failure;
+                    break;
+                }
+            } else {
+                auto const r = co_await (woken.async_wait(asio::as_tuple(asio::use_awaitable)) ||
+                                         detail::await_deadline(*effective_clock_, deadline));
+                if (r.index() == 1 && effective_clock_->steady_now() < deadline) {
+                    how = exit_t::failure;
+                    break;
+                }
+            }
+        }
+        ending_logout_wake_ = nullptr;
+        wake_clear.armed = false;
+    } catch (...) {
+        how = exit_t::failure;
+    }
+    // The expiry exit, which the failure exit takes for the phase it finds while that phase is
+    // writing or a live armed; never release_connection_end_() from those (row 16).
+    if (how != exit_t::ordinary &&
+        (ending_wait_.phase == ending_wait_state::phase_t::writing ||
+         (ending_wait_.phase == ending_wait_state::phase_t::armed && ending_bound_live_(gen)))) {
+        expire_ending_wait_(gen);
+        co_return;
+    }
+    // The ordinary exit.
+    if (ending_wait_.phase == ending_wait_state::phase_t::armed) {
+        ending_wait_.phase = ending_wait_state::phase_t::resolved;
+    }
+    release_connection_end_();
+}
+
+// Research D2 item 1, after Active. The Disconnected writes of its callers' tails are its own:
+// recorded unless the wait was armed.
+asio::awaitable<fixpp::core::expected_t<void>> Session::send_ending_logout_(
+    bool tic, std::string_view sending_time, std::string_view text) noexcept {
+    FIXPP_INBOUND_SPLIT_ENTRY(tic);
+    // W-8: a further ending during an ending in progress is absorbed.
+    if (ending_in_progress_()) {
+        co_return fixpp::core::expected_t<void>{};
+    }
+    // 103 (research D4.6): the ending claims a pending mark; its own Logout is the one, and a
+    // claimed mark arms no wait (C-2.8).
+    bool const claimed = peer_logout_.phase == peer_logout_mark::phase_t::pending;
+    claim_peer_logout_none_();
+    bool armed = false;
+    FIXPP_INBOUND_SPLIT_AWAIT(
+        r, tic, inbound_logout_leaf_(tic, sending_time, text, ending_kind::r2, &armed, claimed));
+    if (!r) {
+        co_return r;
+    }
+    if (!armed) {
+        record_disconnected_unless_already_();
+    }
+    co_return fixpp::core::expected_t<void>{};
+}
+
+// Research D2 item 3, off NextNumIn: acknowledge_peer_logout_'s shape, with no number consumed,
+// no persist and no fromAdmin. The leaf would write nothing (the owner is set), so it is not
+// called.
+asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_ending_response_(
+    bool tic) noexcept {
+    FIXPP_INBOUND_SPLIT_ENTRY(tic);
+    pending_receipt_owner const receipt_owner{*this};
+    ending_wait_.phase = ending_wait_state::phase_t::resolved;
+    wake_ending_logout_bound_();
+    emit_event(fixpp::session::session_event_sequence_numbers_reset{.by_peer_request = false});
+    record_disconnected_unless_already_();
+    if (cfg_.reset_on_logout) {
+        co_await asio::this_coro::reset_cancellation_state();
+        if (enter_receipt_reset_point_()) {
+            co_await run_receipt_reset_unit_();
+        }
+        co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
+    }
+    co_return fixpp::core::expected_t<void>{};
+}
+
 // PossDup Stage-1 (Arms C/D, RC#1). Returns the arm's result when an Arm answered the frame,
 // or nullopt when OrigSendingTime(122) validated and the arm continues to check_inbound.
 asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::on_inbound_active_poss_dup_(
@@ -6073,17 +6469,10 @@ asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::on_inboun
                     co_return r;
                 }
             }
-            // Step 2: emit Logout(35=5).
-            {
-                FIXPP_INBOUND_SPLIT_AWAIT(r, tic, inbound_logout_leaf_(tic, st52_d.value, {}));
-                if (!r) {
-                    co_return r;
-                }
-            }
-            // Step 3: Disconnect. 104 (contract RR-5 item 6, "A frame in flight across a
-            // route-B reset point"): the leaf returns success on Disconnected.
-            record_disconnected_unless_already_();
-            co_return fixpp::core::expected_t<void>{};
+            // Step 2: the Logout, and Step 3 the ending: 105 (research D2 item 1), an R-2
+            // ending through send_ending_logout_.
+            FIXPP_INBOUND_SPLIT_AWAIT(r, tic, send_ending_logout_(tic, st52_d.value, {}));
+            co_return r;
         }
         // else: equal or 122 < 52 → validated, fall through.
         // (parse failure of 52 while 122 parsed: only 35=3/5 reach here since
@@ -6243,8 +6632,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
     // the peer's bytes are not echoed. A Logout that does not fit the leaf's buffer is not
     // sent, and the session still ends.
     if (chk_error == fixpp::core::error::session_seqnum_too_low) {
-        // 103 (research D4.6): Arm B claims a pending mark; its own Logout is the one.
-        claim_peer_logout_none_();
         // 104: the shared builder above refuse_logon_with_logout_.
         too_low_text_buffer text_buf{};
         const std::string_view text{text_buf.data(),
@@ -6253,11 +6640,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
         const auto st52 = effective_clock_
                               ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
                               : SendingTimeStamp{};
-        FIXPP_INBOUND_SPLIT_AWAIT(r, tic, inbound_logout_leaf_(tic, st52.value, text));
-        if (!r) {
-            co_return r;
-        }
+        // 105 (research D2 item 1): an R-2 ending through send_ending_logout_, which claims a
+        // pending mark (103 research D4.6) and records Disconnected unless the wait was armed.
+        FIXPP_INBOUND_SPLIT_AWAIT(r, tic, send_ending_logout_(tic, st52.value, text));
+        co_return r;
     }
+    // Any other refusal (a drained sequence-number mutex) is an internal failure: through the
+    // edge (research D2 item 4).
     record_state_transition_(fsm_state::Disconnected);
     co_return fixpp::core::expected_t<void>{};
 }
@@ -6327,6 +6716,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
     // point or its exit. In Active and LogonReceived alike.
     pending_receipt_owner const receipt_owner{*this};
     bool from_admin_rejected = false;
+    // 105 (research D2 item 3): the peer's in-sequence response ends a wait armed after Active
+    // at this arm's entry; the leaf below writes nothing (the owner is set).
+    if (ending_wait_.phase == ending_wait_state::phase_t::armed) {
+        ending_wait_.phase = ending_wait_state::phase_t::resolved;
+        wake_ending_logout_bound_();
+    }
 
     if (fsm_state_ == fsm_state::Active) {
         // 103 (research D4.6): the in-sequence Logout claims a pending mark; its own
@@ -8005,7 +8400,10 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
     //       with Text, Disconnected [T018 Cell C]
     // Sleep until the EARLIEST of last_outbound + heartbt_int OR last_inbound + heartbt_int.
     try {
-        while (fsm_state_ == fsm_state::Active) {
+        // 105 (research D2 item 6; data-model E-4): the loop originates only while
+        // liveness_may_originate_() holds (Active, and no ending Logout in progress), tested as the
+        // loop condition and after every suspension.
+        while (liveness_may_originate_()) {
             // Compute earliest sleep deadline.
             const auto outbound_deadline = last_outbound_steady_ + heartbt_int;
             const auto inbound_deadline = last_inbound_steady_ + heartbt_int;
@@ -8031,7 +8429,7 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
             co_await effective_clock_->sleep_until(deadline);
 
             // Check if we're still Active after the sleep.
-            if (fsm_state_ != fsm_state::Active) {
+            if (!liveness_may_originate_()) {
                 co_return;
             }
 
@@ -8073,7 +8471,7 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                         co_return;
                     }
                 }
-                if (fsm_state_ != fsm_state::Active) {
+                if (!liveness_may_originate_()) {
                     co_return;
                 }
                 now = effective_clock_->steady_now();
@@ -8157,13 +8555,13 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
             // fixpp#536 (D-536-2): the state test and the filter reset, as before the
             // main sleep. The TestRequest's emit above suspended, so the state is
             // tested again here.
-            if (fsm_state_ != fsm_state::Active) {
+            if (!liveness_may_originate_()) {
                 co_return;
             }
             co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
             co_await effective_clock_->sleep_until(grace_deadline);
 
-            if (fsm_state_ != fsm_state::Active) {
+            if (!liveness_may_originate_()) {
                 co_return;
             }
 
@@ -8185,10 +8583,25 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                     fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(threshold.count())),
                     fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(
                         fixpp::core::error::session_test_request_unanswered)));
+                // 105 (T059a; spec clarification "Session 2026-11-21 (implementation, Phase 3)"):
+                // the give-up is decided here and is final. R-1 claims the Logout owner and
+                // enters the ending state machine now, so its budget counts from the decision:
+                // a give-up still waiting for an exclusive replay-gate hold at the deadline is
+                // closed by the write limit and writes nothing past the gate ("Logout not
+                // sent"). A bound that cannot be spawned writes no Logout (clarification D-g).
+                bool const owner_claimed = !logout_in_flight_;
+                if (owner_claimed) {
+                    logout_in_flight_ = true;
+                    if (enter_ending_write_(ending_kind::r1, co_await asio::this_coro::executor) ==
+                        ending_entry::refused) {
+                        record_disconnected_unless_already_();
+                        co_return;
+                    }
+                }
                 while (replay_gate_.exclusive) {
                     co_await replay_gate_.wait_for_wake();
-                    if (fsm_state_ != fsm_state::Active) {
-                        co_return;
+                    if (fsm_state_ != fsm_state::Active || ending_wait_.cut) {
+                        break;
                     }
                 }
                 {
@@ -8211,7 +8624,11 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                         stamp_sending_time(*effective_clock_, cfg_.sending_time_precision);
                     // What the leaf writes or refuses is its own; the ending is recorded
                     // below either way (contract C-3.2).
-                    (void)co_await inbound_logout_leaf_(true, st52.value, text);
+                    // With the owner held by another Logout, the leaf would write none.
+                    if (owner_claimed) {
+                        (void)co_await inbound_logout_leaf_(true, st52.value, text,
+                                                            ending_kind::r1);
+                    }
                 }
                 record_disconnected_unless_already_();
                 co_return;
@@ -8228,6 +8645,12 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
     } catch (...) {  // NOLINT(bugprone-empty-catch) — noexcept-window absorption per FR-15: a
                      // throwing user callback must trap, not propagate; nothing else to do here.
         // Any other exception: absorb (noexcept window).
+    }
+    // 105 (data-model E-3): a give-up that entered writing at its decision and left the loop by
+    // an exception (a cancellation of its replay-gate wait) leaves the ending state machine.
+    if (ending_wait_.phase == ending_wait_state::phase_t::writing &&
+        ending_wait_.kind == ending_kind::r1) {
+        (void)leave_ending_write_(false, false);
     }
 }
 
@@ -8257,7 +8680,7 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
 //  gate-b/r1-green: RC#B surfaces transport throws as dispatch_aborted]
 asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
     seqnum_t stamped_seq, std::span<const std::byte> frame, std::optional<fsm_state> arm,
-    bool transmit, wire_reset_exemption exemption) {
+    bool transmit, wire_reset_exemption exemption, bool* transmitted) {
     // 034 T006 (C2 / R4): credential redaction at the single store boundary.
     // Mask the Password(554) value in a PRIVATE copy before it is persisted; the
     // wire path (Step 2) transmits the caller's ORIGINAL unmasked `frame`.
@@ -8453,6 +8876,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
             if (*write_r == live_write_outcome::held_back) {
                 co_return fixpp::core::expected_t<void>{};
             }
+            // 105 (research D2 item 1): the live transport took the frame.
+            if (transmitted != nullptr) {
+                *transmitted = true;
+            }
         } else if (transport_send_) {
             // 104 (contract RR-6 item 3): the config-time sink's site of ruling W's test.
             if (wire_closed_by_reset_ && exemption != wire_reset_exemption::crossing_logout) {
@@ -8465,6 +8892,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
                 co_return std::unexpected(fixpp::core::error::dispatch_aborted);
             } catch (...) {
                 co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+            }
+            // 105 (research D2 item 1): the direct sink took the frame.
+            if (transmitted != nullptr) {
+                *transmitted = true;
             }
         }
     }
@@ -9139,22 +9570,40 @@ Session::honor_peer_next_expected_(std::string_view raw_789, bool /*present_789*
                 std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq, cfg_.sender_comp_id,
                 cfg_.target_comp_id, "NextExpectedMsgSeqNum invalid", cfg_.begin_string,
                 lo_st52.value);
-            if (lo_result) {
+            // 105 (ruling R-789; research D2 item 11): an R-2 ending before Active, entered
+            // here; armed before the Disconnected below (E-3 rows 1, 3, 6).
+            bool const write_refused =
+                enter_ending_write_(ending_kind::r2, co_await asio::this_coro::executor) ==
+                ending_entry::refused;
+            bool transmitted = false;
+            if (lo_result && !write_refused) {
+                struct leave_on_unwind {
+                    Session* s;
+                    int unwinding_at = std::uncaught_exceptions();
+                    ~leave_on_unwind() {
+                        if (std::uncaught_exceptions() > unwinding_at) {
+                            (void)s->leave_ending_write_(false, false);
+                        }
+                    }
+                } const leave_guard{.s = this};
                 // 019 FR-008/010: toAdmin before every engine-originated admin emit.
                 // [gate-b/r1 FQ-2: mirror the file-wide fire_to_admin_-before-assign_outbound
                 // admin-emit ordering]
                 if (!fire_to_admin_(*lo_result)) {
+                    (void)leave_ending_write_(false, false);
                     record_state_transition_(fsm_state::Disconnected);
                     co_return std::unexpected(fixpp::core::error::app_callback_threw);
                 }
                 auto assign_r = co_await seqnum_mgr_.assign_outbound();
                 if (assign_r) {
-                    auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm);
+                    auto emit_r = co_await store_then_emit(
+                        lo_seq, *lo_result, arm, true, wire_reset_exemption::none, &transmitted);
                     // What store_then_emit returns and when it throws: its declaration in
                     // session.hpp.
                     (void)emit_r;
                 }
             }
+            (void)leave_ending_write_(transmitted, false);
         }
         // 093 plan OD-25: the Logout's store and write are suspensions.
         if (logon_arm_superseded_(arm)) {
@@ -9189,22 +9638,40 @@ Session::honor_peer_next_expected_(std::string_view raw_789, bool /*present_789*
             auto lo_result = fixpp::session::build_logout(
                 std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq, cfg_.sender_comp_id,
                 cfg_.target_comp_id, text_sv, cfg_.begin_string, lo_st52.value);
-            if (lo_result) {
+            // 105 (ruling R-789; research D2 item 11): an R-2 ending before Active, entered
+            // here; armed before the Disconnected below (E-3 rows 1, 3, 6).
+            bool const write_refused =
+                enter_ending_write_(ending_kind::r2, co_await asio::this_coro::executor) ==
+                ending_entry::refused;
+            bool transmitted = false;
+            if (lo_result && !write_refused) {
+                struct leave_on_unwind {
+                    Session* s;
+                    int unwinding_at = std::uncaught_exceptions();
+                    ~leave_on_unwind() {
+                        if (std::uncaught_exceptions() > unwinding_at) {
+                            (void)s->leave_ending_write_(false, false);
+                        }
+                    }
+                } const leave_guard{.s = this};
                 // 019 FR-008/010: toAdmin before every engine-originated admin emit.
                 // [gate-b/r1 FQ-2: mirror the file-wide fire_to_admin_-before-assign_outbound
                 // admin-emit ordering]
                 if (!fire_to_admin_(*lo_result)) {
+                    (void)leave_ending_write_(false, false);
                     record_state_transition_(fsm_state::Disconnected);
                     co_return std::unexpected(fixpp::core::error::app_callback_threw);
                 }
                 auto assign_r = co_await seqnum_mgr_.assign_outbound();
                 if (assign_r) {
-                    auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm);
+                    auto emit_r = co_await store_then_emit(
+                        lo_seq, *lo_result, arm, true, wire_reset_exemption::none, &transmitted);
                     // What store_then_emit returns and when it throws: its declaration in
                     // session.hpp.
                     (void)emit_r;
                 }
             }
+            (void)leave_ending_write_(transmitted, false);
         }
         // 093 plan OD-25: the Logout's store and write are suspensions.
         if (logon_arm_superseded_(arm)) {
