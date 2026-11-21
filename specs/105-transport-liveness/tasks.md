@@ -824,26 +824,34 @@ the session stays Active past the give-up (SC-003).
 
 ### RED cells for US2 (write first)
 
-- [ ] T081 [P] [US2] `tests/session/test_105_heartbeat_knob_off.cpp`, both roles, driven by the wire reader with
+- [X] T081 [P] [US2] `tests/session/test_105_heartbeat_knob_off.cpp`, both roles, driven by the wire reader with
   `test_request_threshold = HeartBtInt`: `HeartbeatKnobOff105.AheadPeerAnswersTenCycles_StaysActive` (at least 10 TestRequest
   cycles, each answered with the matching 112 at a number ahead of NextNumIn; the peer never reads a Logout or EOF and
   `fixpp_session_is_established` stays true), `MismatchedTestReqId_EndsAndCloses` (EOF at once, no Logout),
   `AbsentTestReqId_Answers`, `BehindPeerAnswers`. RED on the base before the fix: the session gives up at the grace
   check. Plus [guard: the #582 predicate widened to the knob-on route] `KnobOn_Unchanged` (B-537-3's cells stay GREEN
-  unedited).
-- [ ] T082 [US2] Same file, the 112 rule (C-5.4): `TestReqId105.<InSequenceArm|AnswerPendingRoute>_EarlierId_NeitherAnswersNorEnds`
+  unedited). *Done (`a3012e44`):* "`fixpp_session_is_established` stays true" is read as the Engine session's
+  `state() == Active` (C++ cells); `KnobOn_Unchanged` is a Heartbeat below NextNumIn carrying the pending 112 with the
+  knob on (the too-low Logout, the TestRequest left pending), and its mutant widens the knob-off branch and its answer
+  to every out-of-sequence Heartbeat (T088). B-537-3's control cell that pinned #582 itself,
+  `TooHighHeartbeatDuringTheGap.Control_KnobOff_HeartbeatAboveNextNumIn_LeavesItPending`, flips by design and is
+  re-pinned as `..._AnswersIt` (FR-019; `b483f501`).
+- [X] T082 [US2] Same file, the 112 rule (C-5.4): `TestReqId105.<InSequenceArm|AnswerPendingRoute>_EarlierId_NeitherAnswersNorEnds`
   (a Heartbeat carrying TR1's 112 after TR2: no Logout, no EOF, TR2 still pending — the next give-up comes 2T after that
   frame), `TestReqId105.PreviousConnectionId_Mismatch` (across `drive_reconnect`: EOF at once). RED on the base before
   the fix: the earlier 112 ends the session. Plus [guard: the canonical-form test deleted] `TestReqId105.LeadingZeroId_Mismatch`
-  and [guard: the pending test deleted] `TestReqId105.NoTestRequestPending_NotCompared`.
-- [ ] T083 [US2] Commit the cells; read T081 and T082 on `$B`; record.
+  and [guard: the pending test deleted] `TestReqId105.NoTestRequestPending_NotCompared`. *Done (`a3012e44`):*
+  `PreviousConnectionId_Mismatch` is a direct initiator (`TestReqId105Direct`) and keeps the rule the US1 head keeps (its
+  mutant: the floor not reset at a connection, T088); it and `LeadingZeroId_Mismatch` read RED on the base for US1's
+  reason (the base closes no connection at a silent ending) and GREEN at the US1 head; the evidence holds both readings.
+- [X] T083 [US2] Commit the cells; read T081 and T082 on `$B`; record.
 
 ### Implementation for US2
 
-- [ ] T084 [US2] #582 in `on_inbound_active_out_of_sequence_`'s Heartbeat branch: `answer_pending_test_request_(hdr.test_req_id)`
+- [X] T084 [US2] #582 in `on_inbound_active_out_of_sequence_`'s Heartbeat branch: `answer_pending_test_request_(hdr.test_req_id)`
   runs when a TestRequest is pending and either (too high with a resend outstanding) or `!cfg_.validate_sequence_numbers`; the
   rest of the branch unchanged (no advance, no persist, no `fromAdmin`).
-- [ ] T085 [US2] The TestReqID window (data-model E-4): a free `constexpr` function of `(n, floor, next)` in
+- [X] T085 [US2] The TestReqID window (data-model E-4): a free `constexpr` function of `(n, floor, next)` in
   `src/session/read_first_frame_bounded.hpp`, beside `deadline_after` and `resend_gap_deadline` (and the default-threshold
   helper), `(n − floor − 1) mod 2³² < (next − floor) mod 2³²`; the parse-and-classify step a second free `constexpr`
   function there, `detail::is_earlier_test_req_id(std::string_view id, std::uint32_t floor, std::uint32_t next)` (`TR` plus
@@ -858,7 +866,7 @@ the session stays Active past the give-up (SC-003).
   and have the harness call `detail::is_earlier_test_req_id` directly on each fed payload's 112 bytes (including
   `session/read_first_frame_bounded.hpp`; check the target's include directories carry `src/`, and add it if not), so the
   parse is fuzzed whether or not a TestRequest is pending. The run is T148.
-- [ ] T086 [US2] [guard: a non-modular comparison; the full-cycle case dropped, `next == floor` read as a full window]
+- [X] T086 [US2] [guard: a non-modular comparison; the full-cycle case dropped, `next == floor` read as a full window]
   `TestReqIdWindow105.<AtUint32Max|AcrossTheWrap|OneFullCycle_NoValueEarlier>` in `tests/session/test_105_seams.cpp`:
   `constexpr` cells (`static_assert` under `FIXPP_105_STATIC_GUARDS` plus a runtime twin, so a mutant reports as a test
   failure, not a compile error; Execution rules, "Guard static_asserts") over T085's window function; and [guard: the
@@ -866,7 +874,7 @@ the session stays Active past the give-up (SC-003).
   `TestReqIdParse105.<Canonical_Earlier|LeadingZero_Mismatch|Sign_Mismatch|Overflow_Mismatch|PrefixAlone_Mismatch>` in the
   same file, `constexpr` cells of the same form over `detail::is_earlier_test_req_id` (a canonical earlier id, a leading
   zero, a sign, a number past `std::uint32_t`, `TR` alone). Not readable on `$B` (new functions).
-- [ ] T087 [US2] Run T081, T082 and T086 GREEN, `-L 105` and the B-537-3 cells; commit `H3`.
+- [X] T087 [US2] Run T081, T082 and T086 GREEN, `-L 105` and the B-537-3 cells; commit `H3`.
 
 ### Mutant arms for US2 (in `$M` at `H3`)
 
