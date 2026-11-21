@@ -76,6 +76,9 @@ struct blocking_write_state {
     // can tell that the connection was closed and which writes had begun by then.
     std::size_t closes = 0;
     std::optional<std::size_t> starts_at_first_close;
+    // 105-transport-liveness (tasks.md T052): a parked write that close() wakes completes with
+    // success, as a write whose completion was already queued when the transport was closed.
+    bool succeed_after_close = false;
 
     void arm_block() noexcept { block_next = true; }
     void release() {
@@ -120,7 +123,9 @@ public:
             co_await state_->timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
             // NOLINTEND(bugprone-unchecked-optional-access)
             state_->parked = false;
-            if (closed_) co_return std::unexpected(fixpp::core::error::transport_already_closed);
+            if (closed_ && !state_->succeed_after_close) {
+                co_return std::unexpected(fixpp::core::error::transport_already_closed);
+            }
         }
         ++state_->writes;
         if (rec) state_->recorded[*rec].completed = true;

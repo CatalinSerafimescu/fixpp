@@ -507,7 +507,8 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
         // The session reads the frame behind its own blocked write, so the instant its Logout's
         // write starts is not observable from here: the mock clock moves in 50 ms steps, with
         // wall time between them for the reads and for tls_close_timeout, until the session ends,
-        // at most 3 s of mock time (the bound is 500 ms from the Logout's start).
+        // at most 3 s of mock time (the bound is the harness's logout_disconnect_timeout_ms from
+        // the Logout's start; the seam twin in test_105_seams.cpp pins it on both sides).
         std::chrono::milliseconds advanced{0};
         while (state() == fsm_state::Active && advanced < 3000ms) {
             clock->advance(50ms);

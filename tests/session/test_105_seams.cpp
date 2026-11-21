@@ -11,24 +11,36 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
+#include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/fix_time.hpp>
+#include <fixpp/log/logger.hpp>
 #include <fixpp/session/application.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <future>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "session/engine_loopback_harness.hpp"
 #include "session/plain_engine_rig.hpp"
+#include "session/resend_gap_scene.hpp"
+#include "session/test_105_direct_rig.hpp"
 #include "session/test_105_support.hpp"
+#include "support/log_capture.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/session_test_access.hpp"
 
@@ -37,10 +49,19 @@ namespace {
 using namespace std::chrono_literals;
 using fixpp::session::fsm_state;
 using fixpp::session::session_test_access;
+using fixpp::session::SessionConfig;
 namespace pr = fixpp::test_support::plain_rig;
 namespace t105 = fixpp::test_support::t105;
 
 constexpr std::chrono::seconds kHb{10};
+
+// SendingTime(52) on the mock clock.
+std::string stamp_now(fixpp::core::mock_clock const& clock) {
+    std::array<char, 32> buf{};
+    auto const r = fixpp::core::utc_time_to_fix_string(
+        clock.now(), fixpp::core::fix_time_precision::millis, std::span<char>{buf});
+    return r ? std::string{r->data(), r->size()} : std::string{};
+}
 constexpr std::chrono::milliseconds kWallCap{3000};
 
 // Throws from toAdmin on a Heartbeat once armed: the liveness loop's emission fails and the
@@ -165,6 +186,373 @@ TEST(TlsClose105, CloseFrameSpawnFails_ReleaseAtLoopExit_AbortiveNoCloseNotify) 
     EXPECT_TRUE(read_ended) << "the peer's read did not end with no later call";
     EXPECT_NE(peer ? peer->ending() : t105::peer_ending::open, t105::peer_ending::close_notify)
         << "a close_notify, where the synchronous close with a read suspended sends none";
+}
+
+// [seam] The twin of
+// TlsWriteLimit105.R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsCloseTimeout (tasks.md
+// T054; orchestrator ruling 3 of Phase 4): the same scenario, with the instant the too-low Logout's
+// write starts read through session_test_access::ending_wait_phase, which that cell's file cannot
+// name. The bound is then pinned on both sides of the mock clock: at the bound
+// - 1 ms the phase is still `writing`, the session Active and the peer's read open; at the bound
+// the session ends. A widened or deleted write limit (T077) leaves the phase `writing` at the
+// bound.
+TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_SeamTwin_ClosedAtExactlyTheBound) {
+    asio::io_context ioc;
+    auto clock = t105::make_mock_clock(ioc.get_executor());
+    fixpp::core::EngineConfig ec;
+    ec.executor = ioc.get_executor();
+    ec.clock = clock;
+    auto h = fixpp::test_support::EngineLoopbackHarness::build(
+        ioc.get_executor(), std::move(ec), true, [](SessionConfig& c) {
+            fixpp::session::CompIdAuthorizationPolicy authz;
+            authz.add_binding("fixpp-leaf-rsa2048", "INITIATOR");
+            c.compid_authorization_policy = authz;
+            c.logout_disconnect_timeout_ms = 500;  // the bound this cell pins
+        });
+    if (!h) GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    fixpp::test_support::engine_stop_guard stop_guard{*h, ioc};
+    char const* env = std::getenv("FIXPP_TLS_FIXTURE_DIR");
+    std::string const dir = env != nullptr ? env : FIXPP_TLS_FIXTURE_DIR;
+    auto state = [&] {
+        auto s = h->engine().lookup(h->acceptor_id());
+        return s ? s->state() : fsm_state::NotConnected;
+    };
+    bool up = h->engine().start().has_value() &&
+              fixpp::test_support::pump_until(
+                  ioc, [&] { return h->server_endpoint().port != 0; }, 5s, 5ms, "bind");
+    std::shared_ptr<t105::StalledTlsPeer> peer;
+    if (up) {
+        peer = t105::StalledTlsPeer::connect(ioc, dir, h->server_endpoint(), 1024);
+        up = fixpp::test_support::pump_until(
+                 ioc, [&] { return peer->ready || peer->setup_failed; }, 5s, 5ms, "connect") &&
+             peer->ready;
+    }
+    auto msg = [&](std::string_view type, unsigned seq, std::string_view extra = {}) {
+        return pr::message("FIX.4.2", type, seq, "INITIATOR", "ACCEPTOR", stamp_now(*clock), extra);
+    };
+    if (up) {
+        peer->send(msg("A", 1,
+                       "98=0\x01"
+                       "108=30\x01"));
+        up = fixpp::test_support::pump_until(
+            ioc, [&] { return state() == fsm_state::Active; }, 5s, 5ms, "logon");
+    }
+    if (up) {
+        peer->send(msg("0", 2));
+        up = fixpp::test_support::pump_until(
+            ioc, [&] { return peer->writes_done == 2U; }, 5s, 5ms, "the Heartbeat at 2");
+        (void)t105::drive_bounded(ioc, 256);
+    }
+    // Fill the window: application sends until one does not complete within a settle.
+    bool held = false;
+    std::vector<std::future<fixpp::core::expected_t<void>>> sends;
+    std::string const payload =
+        "35=D\x01"
+        "58=" +
+        std::string(3000, 'x') + "\x01";
+    for (int i = 0; up && i < 4000 && !held; ++i) {
+        sends.push_back(asio::co_spawn(
+            ioc,
+            h->engine().send(h->acceptor_id(),
+                             std::as_bytes(std::span{payload.data(), payload.size()})),
+            asio::use_future));
+        (void)fixpp::test_support::pump_until(
+            ioc, [&] { return sends.back().wait_for(0s) == std::future_status::ready; }, 50ms, 5ms,
+            nullptr);
+        held = sends.back().wait_for(0s) != std::future_status::ready;
+    }
+    using phase = session_test_access::ending_phase;
+    auto phase_now = [&] {
+        auto s = h->engine().lookup(h->acceptor_id());
+        return s ? session_test_access::ending_wait_phase(*s) : phase::none;
+    };
+    bool writing = false;
+    bool writing_before = false;
+    bool open_before = false;
+    bool ended_at_bound = false;
+    if (up && held) {
+        peer->send(msg("0", 2));  // below NextNumIn: the too-low Logout, queued at the gate
+        writing = fixpp::test_support::pump_until(
+            ioc, [&] { return phase_now() == phase::writing; }, 3s, 5ms, nullptr);
+    }
+    if (writing) {
+        // The mock clock has not moved since the Logout's write started.
+        clock->advance(499ms);  // the bound - 1 ms
+        (void)fixpp::test_support::pump_until(ioc, [] { return false; }, 100ms, 5ms, nullptr);
+        writing_before = phase_now() == phase::writing;
+        open_before = state() == fsm_state::Active && !peer->read_ended;
+        clock->advance(1ms);
+        ended_at_bound = fixpp::test_support::pump_until(
+            ioc, [&] { return state() != fsm_state::Active; }, 2500ms, 5ms, nullptr);
+        peer->start_reading();
+        (void)t105::pump_until_peer_read_ends(
+            ioc, [&] { return peer->read_ended; }, 5s, "TlsWriteLimit105.SeamTwin");
+    }
+    EXPECT_TRUE(up) << "setup";
+    EXPECT_TRUE(held) << "setup: no application send was held behind the stalled peer";
+    EXPECT_TRUE(writing) << "setup: the too-low Logout's write did not start";
+    EXPECT_TRUE(writing_before) << "the Logout's write was not still limited at the bound - 1 ms";
+    EXPECT_TRUE(open_before) << "the session ended before the bound";
+    EXPECT_TRUE(ended_at_bound) << "the session did not end at the bound";
+}
+
+// [guard: "Leaving `writing`" ignores `cut`] T052 (data-model E-3, `ending_wait_.cut`; contract
+// C-2.7): a direct Session's R-2 Logout held in its write; the mock clock moved to the bound
+// without draining; the ready handlers run one at a time until the bound has taken row 4 (its
+// write-limit close: `cut` set); then the held write completes with success, as a completion
+// already queued when the bound acted; then the drain. The Logout is whole at the peer, and no
+// wait follows it: EOF with no further advance, Disconnected and onLogout once.
+TEST(WriteLimit105, DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed) {
+    t105::DirectRig d{fixpp::session::session_role::acceptor};
+    bool const up = d.to_active();
+    ASSERT_TRUE(up) << "setup";
+    d.bw->succeed_after_close = true;
+    d.hold_write_of("5");
+    auto frame = d.s.feed_spawn(fixpp::test_support::resend_gap::Scene::raw(
+        "0", 2, "TW", d.s.sending_time(std::chrono::seconds{-600})));
+    d.s.drain();
+    ASSERT_TRUE(d.parked()) << "setup: the R-2 Logout's write is not held";
+    d.s.mock->advance(std::chrono::milliseconds{d.s.cfg.logout_disconnect_timeout_ms});
+    bool cut = false;
+    for (int i = 0; i < 10000 && !cut; ++i) {
+        if (d.s.ioc.poll_one() == 0) d.s.ioc.restart();
+        cut = session_test_access::ending_wait_cut(*d.s.session);
+    }
+    d.release();
+    d.s.drain();
+    // The reach proof, then the oracle.
+    EXPECT_TRUE(cut) << "the reach proof: the bound did not take its write-limit close";
+    EXPECT_EQ(d.completed("5"), 1U) << "the positive control: the peer does not hold the Logout";
+    EXPECT_TRUE(d.closed()) << "no EOF with the clock still after the late completion";
+    EXPECT_EQ(d.s.state(), fsm_state::Disconnected) << "the session was left in a wait";
+    EXPECT_EQ(session_test_access::ending_wait_phase(*d.s.session),
+              session_test_access::ending_phase::none)
+        << "a wait was armed after the cut";
+    EXPECT_EQ(d.app->logouts, 1) << "onLogout";
+    (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "close");
+}
+
+// ── T070: the seams of part B (tasks.md T070) ──────────────────────────────────────────────
+
+namespace t070 {
+
+class CountingApp105 final : public fixpp::session::Application {
+public:
+    int logouts = 0;
+    void onLogout(const fixpp::session::SessionId& /*id*/) override { ++logouts; }
+};
+
+constexpr char kStaleSendingTime[] = "20200101-00:00:00.000";
+
+enum class bound_spawn_route : std::uint8_t { r2_after_active, r2_before_active, reply };
+
+// An Engine session whose ending bound cannot be spawned (clarification D-g, E-3 row 2a): the
+// ending's Logout is not written, no wait follows, and the connection closes at once.
+void bound_spawn_fails_cell(bound_spawn_route route) {
+    auto app = std::make_shared<CountingApp105>();
+    pr::Rig rig{app};
+    // Before Active the initiator, whose Session exists before the peer's Logon (LogonSent's
+    // posture refusal); after Active the acceptor.
+    bool const before_active = route == bound_spawn_route::r2_before_active;
+    auto cfg = rig.cfg(before_active ? fixpp::session::session_role::initiator
+                                     : fixpp::session::session_role::acceptor);
+    if (before_active) cfg.posture = fixpp::session::session_posture::production;
+    bool up = rig.start(std::move(cfg));
+    if (up && before_active) {
+        up = rig.run_until([&] { return !pr::frames_of_type(rig.peer.received, "A").empty(); });
+    } else if (up) {
+        up = rig.to_active();
+    }
+    int seam_calls = 0;
+    std::size_t mark = 0;
+    bool eof = false;
+    if (up) {
+        session_test_access::set_ending_bound_spawn_fails(*rig.session(), [&seam_calls] {
+            ++seam_calls;
+            return true;
+        });
+        mark = rig.peer.received.size();
+        switch (route) {
+            case bound_spawn_route::r2_after_active:
+                rig.peer.send(
+                    pr::message(rig.begin_string, "0", 2, "TW", "ISLD", kStaleSendingTime));
+                break;
+            case bound_spawn_route::r2_before_active:
+                rig.peer.send(rig.msg("A", 1,
+                                      "98=0\x01"
+                                      "108=30\x01"
+                                      "464=Y\x01"));
+                break;
+            case bound_spawn_route::reply:
+                rig.peer.send(rig.msg("5", 2));
+                break;
+        }
+        eof = t105::pump_until_peer_read_ends(
+                  rig.ioc, [&] { return rig.peer.read_ended; }, kWallCap, "BoundSpawnFails") &&
+              t105::ending_of(rig.peer) == t105::peer_ending::eof;
+    }
+    auto const logouts_written =
+        pr::frames_of_type(rig.peer.received.substr(std::min(mark, rig.peer.received.size())), "5")
+            .size();
+    auto const state = rig.state();
+    rig.stop();
+    EXPECT_TRUE(up) << "setup";
+    EXPECT_GE(seam_calls, 1) << "the reach proof: the bound's spawn was not attempted";
+    EXPECT_EQ(logouts_written, 0U) << "a Logout was written with no bound";
+    EXPECT_TRUE(eof) << "no EOF at once";
+    EXPECT_EQ(state, fsm_state::Disconnected);
+    if (route != bound_spawn_route::r2_before_active) EXPECT_EQ(app->logouts, 1) << "onLogout";
+}
+
+}  // namespace t070
+
+// [seam: the bound's spawn failure read as "timeout 0" (round 2's catch): a Logout is written]
+TEST(LogoutWait105, BoundSpawnFails_R2AfterActive_NoLogoutWritten_EofAtOnce) {
+    t070::bound_spawn_fails_cell(t070::bound_spawn_route::r2_after_active);
+}
+TEST(LogoutWait105, BoundSpawnFails_R2BeforeActive_NoLogoutWritten_EofAtOnce) {
+    t070::bound_spawn_fails_cell(t070::bound_spawn_route::r2_before_active);
+}
+TEST(LogoutWait105, BoundSpawnFails_Reply_NoLogoutWritten_EofAtOnce) {
+    t070::bound_spawn_fails_cell(t070::bound_spawn_route::reply);
+}
+
+// [seam] The give-up with the bound's spawn failing: the slot-74 record, no Logout, EOF.
+TEST(LivenessTiming105, GiveUp_BoundSpawnFails_StillEof) {
+    t105::LogCapture cap;
+    auto app = std::make_shared<t070::CountingApp105>();
+    pr::Rig rig{app};
+    auto cfg = rig.cfg(fixpp::session::session_role::acceptor);
+    cfg.heartbeat_interval = kHb;
+    cfg.test_request_threshold = std::chrono::milliseconds{kHb};
+    cfg.logger_override = cap.logger;
+    bool const up = rig.start(std::move(cfg)) && rig.to_active();
+    bool ended = false;
+    bool eof = false;
+    std::size_t mark = 0;
+    if (up) {
+        session_test_access::set_ending_bound_spawn_fails(*rig.session(), [] { return true; });
+        mark = rig.peer.received.size();
+        ended = step_until_ended(*rig.clock, rig.ioc, [&] { return rig.state(); });
+        eof =
+            t105::pump_until_peer_read_ends(
+                rig.ioc, [&] { return rig.peer.read_ended; }, kWallCap, "GiveUp_BoundSpawnFails") &&
+            t105::ending_of(rig.peer) == t105::peer_ending::eof;
+    }
+    auto const logouts_written =
+        pr::frames_of_type(rig.peer.received.substr(std::min(mark, rig.peer.received.size())), "5")
+            .size();
+    rig.stop();
+    EXPECT_TRUE(up && ended) << "setup: the give-up did not end the session";
+    EXPECT_EQ(
+        cap.records_of(FIXPP_FORMAT_ID("session ended: TestRequest unanswered: test_req_id={} "
+                                       "threshold_ms={} error={}"))
+            .size(),
+        1U)
+        << "the slot-74 record";
+    EXPECT_EQ(logouts_written, 0U) << "a Logout was written with no bound";
+    EXPECT_TRUE(eof) << "no EOF after the give-up";
+}
+
+// [seam] The close frame the bound spawns, its spawn failing (clarification D-g): the
+// synchronous close, so the peer sees EOF with no later call. WriteLimit: the R-2 Logout held in
+// its write at the bound (row 4); BoundExpiry: the armed wait at its bound (row 10).
+void close_frame_spawn_fails_at_the_bound(bool write_limit) {
+    t105::DirectRig d{fixpp::session::session_role::acceptor};
+    ASSERT_TRUE(d.to_active()) << "setup";
+    int seam_calls = 0;
+    session_test_access::set_close_frame_spawn_fails(*d.s.session, [&seam_calls] {
+        ++seam_calls;
+        return true;
+    });
+    if (write_limit) d.hold_write_of("5");
+    auto frame = d.s.feed_spawn(fixpp::test_support::resend_gap::Scene::raw(
+        "0", 2, "TW", d.s.sending_time(std::chrono::seconds{-600})));
+    d.s.drain();
+    EXPECT_EQ(write_limit ? d.parked() : d.completed("5") == 1U, true) << "setup: the Logout";
+    d.pass(std::chrono::milliseconds{d.s.cfg.logout_disconnect_timeout_ms});
+    EXPECT_GE(seam_calls, 1) << "the reach proof: the close frame's spawn was not attempted";
+    EXPECT_TRUE(d.closed()) << "the peer saw no EOF at the bound with no later call";
+    d.release();
+    d.s.drain();
+    EXPECT_EQ(d.s.state(), fsm_state::Disconnected);
+    EXPECT_EQ(d.app->logouts, 1) << "onLogout";
+    (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "close");
+}
+TEST(ConnectionClose105, CloseFrameSpawnFails_WriteLimit_PeerSeesEofWithNoLaterCall) {
+    close_frame_spawn_fails_at_the_bound(true);
+}
+TEST(ConnectionClose105, CloseFrameSpawnFails_BoundExpiry_PeerSeesEofWithNoLaterCall) {
+    close_frame_spawn_fails_at_the_bound(false);
+}
+
+// [seam] The bound's in-body race seam throws std::bad_alloc before its race is awaited (data-model
+// E-3 row 16): the failure exit of the phase it finds closes at once, with the clock frozen.
+enum class race_route : std::uint8_t { writing, writing_store_held, armed, armed_before_active };
+void race_throws_cell(race_route route) {
+    auto gst = std::make_shared<t105::gate_store_state>();
+    t105::DirectRig d{fixpp::session::session_role::acceptor, [&](SessionConfig& c) {
+                          if (route == race_route::writing_store_held) {
+                              c.store_factory = std::make_shared<t105::GateStoreFactory>(gst);
+                          }
+                          if (route == race_route::armed_before_active) {
+                              c.posture = fixpp::session::session_posture::production;
+                          }
+                      }};
+    using phase = session_test_access::ending_phase;
+    std::optional<phase> found;  // the phase the throwing iteration found: the reach proof
+    bool const armed_route = route == race_route::armed || route == race_route::armed_before_active;
+    session_test_access::set_ending_bound_race_throws(*d.s.session, [&] {
+        auto const p = session_test_access::ending_wait_phase(*d.s.session);
+        if (armed_route && p != phase::armed) return false;
+        if (!found) found = p;
+        return true;
+    });
+    if (route == race_route::armed_before_active) {
+        auto const opened = d.run(d.s.session->open(), "open");
+        ASSERT_TRUE(opened && opened->has_value()) << "setup: open()";
+        d.s.session->attach_accepted_transport(std::make_unique<t105::bwt::BlockingWriteTransport>(
+                                                   d.s.ioc.get_executor(), d.stream, d.bw),
+                                               fixpp::transport::handshake_result{});
+        (void)d.s.feed(d.s.frame("A", 1,
+                                 "98=0\x01"
+                                 "108=30\x01"
+                                 "464=Y\x01"));
+    } else {
+        ASSERT_TRUE(d.to_active()) << "setup";
+        if (route == race_route::writing) d.hold_write_of("5");
+        if (route == race_route::writing_store_held) {
+            gst->hold_after_inner = true;
+            gst->hold_when = [&d](t105::store_call k, fixpp::session::seqnum_t) {
+                return k == t105::store_call::store_outbound && d.app->to_admin_count("5") >= 1;
+            };
+        }
+        (void)d.s.feed_spawn(fixpp::test_support::resend_gap::Scene::raw(
+            "0", 2, "TW", d.s.sending_time(std::chrono::seconds{-600})));
+        d.s.drain();
+    }
+    bool const closed_at_once = d.closed();
+    d.release();
+    gst->release_all();
+    d.s.drain();
+    ASSERT_TRUE(found.has_value()) << "the reach proof: the race seam never ran";
+    EXPECT_EQ(*found, armed_route ? phase::armed : phase::writing) << "the phase the exit found";
+    EXPECT_TRUE(closed_at_once) << "no EOF at once with the clock frozen";
+    EXPECT_EQ(d.s.state(), fsm_state::Disconnected);
+    if (route != race_route::armed_before_active) EXPECT_EQ(d.app->logouts, 1) << "onLogout";
+    EXPECT_EQ(session_test_access::ending_logout_bound_count(*d.s.session), 0)
+        << "the bound outlived its failure";
+    (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "close");
+}
+TEST(LogoutWait105, EndingBound_RaceThrows_Writing_EofAtOnce) {
+    race_throws_cell(race_route::writing);
+}
+TEST(LogoutWait105, EndingBound_RaceThrows_Writing_StoreHeld_EofAtOnce) {
+    race_throws_cell(race_route::writing_store_held);
+}
+TEST(LogoutWait105, EndingBound_RaceThrows_Armed_EofAtOnce) { race_throws_cell(race_route::armed); }
+TEST(LogoutWait105, EndingBound_RaceThrows_ArmedBeforeActive_EofAtOnce) {
+    race_throws_cell(race_route::armed_before_active);
 }
 
 }  // namespace

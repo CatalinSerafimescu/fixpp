@@ -1288,6 +1288,30 @@ TEST(LogoutWait105Direct, PreActive_DirectSession_BoundAloneEndsWait) {
     (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "close");
 }
 
+// The strict-reset refusal's exemption on a direct Session, where no pump closes on the arm's
+// error: no wait follows its Logout, so the bound's exit releases the close at once, with the
+// clock frozen. A wait armed there would hold the connection until the bound
+// (PreActive_DirectSession_BoundAloneEndsWait).
+TEST(LogoutWait105Direct, PreActive_DirectSession_StrictReset_NoWaitClosedAtOnce) {
+    t105::DirectRig d{session_role::acceptor, [](SessionConfig& c) {
+                          c.reset_seqnum_policy_field =
+                              fixpp::session::reset_seqnum_policy::bilateral_strict;
+                      }};
+    auto const opened = d.run(d.s.session->open(), "open");
+    ASSERT_TRUE(opened && opened->has_value()) << "setup: open()";
+    d.s.session->attach_accepted_transport(
+        std::make_unique<t105::bwt::BlockingWriteTransport>(d.s.ioc.get_executor(), d.stream, d.bw),
+        fixpp::transport::handshake_result{});
+    (void)d.s.feed(d.s.frame("A", 1,
+                             "98=0\x01"
+                             "108=30\x01"));
+    d.s.drain();
+    EXPECT_EQ(d.completed("5"), 1U) << "setup: no refusal Logout";
+    EXPECT_EQ(d.s.state(), fsm_state::Disconnected);
+    EXPECT_TRUE(d.closed()) << "the strict-reset refusal's connection was not closed at once";
+    (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "close");
+}
+
 // T050, rows 10 and 11, N-1: the bound expires while the answer to the peer's ResendRequest is
 // blocked in its write behind a peer that stopped reading; the transport closes at the bound.
 TEST(LogoutWait105Direct, Bound_ExpiresWhileResendAnswerBlocked_EofAtTheBound) {
@@ -1516,17 +1540,21 @@ TEST_P(LogoutWait105, PreActiveRefusal_PostureMismatch_WaitThenEof) {
     expect_refusal_wait_then_eof(w, "PostureMismatch");
 }
 
-// Escalated (Phase 4 evidence, "Escalations"): the strict-reset refusal's arm returns
-// session_seqnum_reset_mismatch after its Logout, and an arm's error closes at once (data-model E-3
-// row 5b), so no wait can hold here without a change to that arm's result. Disabled until ruled.
-TEST(LogoutWait105Acceptor, DISABLED_PreActiveRefusal_StrictReset_WaitThenEof) {
-    PreActiveWait w{session_role::acceptor,
-                    [](SessionConfig& cfg) {
-                        cfg.reset_seqnum_policy_field =
-                            fixpp::session::reset_seqnum_policy::bilateral_strict;
-                    },
-                    ""};
-    expect_refusal_wait_then_eof(w, "StrictReset");
+// The strict-reset refusal is exempt from the R-2 wait (clarification "Session 2026-11-21
+// (implementation, Phase 4)"; contract C-2 "Which Logouts"): its arm returns
+// session_seqnum_reset_mismatch, and an arm's error closes the connection at once (data-model E-3
+// row 5b). The Logout, then EOF with the clock frozen.
+TEST(LogoutWait105Acceptor, PreActiveRefusal_StrictReset_NoWaitEofAtOnce) {
+    WaitCell c;
+    auto cfg = c.cfg(session_role::acceptor);
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_strict;
+    bool const up = c.rig.start(std::move(cfg));
+    std::size_t mark = 0;
+    bool const refused = up && refuse_before_active(c, "", mark);
+    bool const eof = refused && c.eof_at_once("StrictReset");
+    c.rig.stop();
+    EXPECT_TRUE(refused) << "setup: no refusal Logout";
+    EXPECT_TRUE(eof) << "the strict-reset refusal did not close the connection at once";
 }
 
 TEST(LogoutWait105Acceptor, PreActiveRefusal_TooLowLogon_WaitThenEof) {
@@ -1873,6 +1901,53 @@ TEST(Lifetime105, CloseFrame_SessionDestroyedAfterClose) {
                        d.s.session->close(fixpp::session::close_mode::terminal), asio::use_future);
     EXPECT_TRUE(d.s.pump_until([&] { return rg_ready(closing) && rg_ready(sent); }));
     destroy_then_drain(d);
+}
+
+// The Engine twin of WriteLimit105.R1WriteHeld_PeerLogoutArrives_LogoutCompleteThenEof (data-model
+// E-3, "Other roots during `writing`"; T077's mutant "the latch consumers' `writing` deferral
+// deleted" reads it): the give-up's Logout is held in its store call; the peer's Logout arrives,
+// its arm writes nothing (the owner is set) and records Disconnected, and the pump's after-frame
+// test leaves the latch to the writer, so the connection stays open, the Logout completes on the
+// wire when the store call returns, and then EOF. The mock clock stops at the step that reached
+// the give-up, short of the write limit.
+TEST_P(LogoutWait105, R1WriteHeld_PeerLogoutArrives_Engine_LogoutCompleteThenEof) {
+    WaitCell c;
+    auto cfg = c.cfg(GetParam());
+    cfg.reset_on_logout = false;
+    cfg.heartbeat_interval = 10s;
+    cfg.test_request_threshold = std::chrono::milliseconds{10s};
+    bool r1_logout_to_admin = false;
+    c.app->to_admin_hook = [&r1_logout_to_admin](std::string_view t) {
+        if (t == "5") r1_logout_to_admin = true;
+    };
+    bool const up = c.start_active(std::move(cfg));
+    auto const mark = c.rig.peer.received.size();
+    bool test_request = false;
+    for (int i = 0; up && i < 11 && !test_request; ++i) {
+        c.advance(1s);
+        test_request = c.count_since(mark, "1") != 0U;
+    }
+    c.st->hold_after_inner = true;
+    c.st->hold_when = [&r1_logout_to_admin](t105::store_call k, seqnum_t) {
+        return k == t105::store_call::store_outbound && r1_logout_to_admin;
+    };
+    for (int i = 0; test_request && i < 12 && c.st->parked == 0U; ++i) c.advance(1s);
+    bool const held = c.st->parked == 1U;
+    bool open_after_peer_logout = false;
+    bool eof = false;
+    if (held) {
+        c.rig.peer.send(c.rig.msg("5", 2));
+        open_after_peer_logout = c.still_open();
+        c.st->release_all();
+        eof = c.eof_at_once("R1WriteHeld_PeerLogoutArrives_Engine");
+    }
+    c.st->release_all();
+    c.rig.stop();
+    EXPECT_TRUE(up && test_request) << "setup: no TestRequest";
+    EXPECT_TRUE(held) << "setup: the give-up's Logout was not held in its store call";
+    EXPECT_TRUE(open_after_peer_logout) << "the peer's Logout cut the give-up's Logout";
+    EXPECT_TRUE(eof) << "no EOF after the give-up's Logout";
+    EXPECT_EQ(c.count_since(mark, "5"), 1U) << "the give-up's Logout did not complete on the wire";
 }
 
 FIXPP_105_BOTH_ROLES(LogoutWait105);
