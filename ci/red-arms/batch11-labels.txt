@@ -1,5 +1,5 @@
-# ci/red-arms/batch11-labels.txt -- the site labels migrated by #289 batch 11, less those whose
-# cell was retired since (105-transport-liveness FR-013 retired DriveLogoutStub_EmitsNoLogoutFrame).
+# ci/red-arms/batch11-labels.txt -- the site labels of #289 batch 11 whose cells exist;
+# a label leaves this list with its cell.
 #
 # Consumed by ci/pump-seam-arm.sh, which forces each through the runtime seam
 # (FIXPP_FORCE_WINDOW_MISS) rather than by rewriting source per site.

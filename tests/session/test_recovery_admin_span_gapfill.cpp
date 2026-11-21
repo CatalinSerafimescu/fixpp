@@ -386,8 +386,7 @@ TEST_F(RecoveryAdminSpanGapfillTest, AllAdminSpanCollapsesToSingleGapFill) {
     EXPECT_TRUE(found_gapfill)
         << "Expected ONE SequenceReset(4){GapFillFlag=Y, NewSeqNo=" << next_out
         << "} outbound when peer asks ResendRequest[2..12] all-admin span. "
-        << "RED: no SequenceReset frame was emitted "
-        << "— this assertion FAILS RED per T015 design.";
+        << "RED: no SequenceReset frame was emitted — this assertion FAILS RED per T015 design.";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

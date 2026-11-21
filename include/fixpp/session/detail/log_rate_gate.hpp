@@ -4,8 +4,9 @@
 //
 // Feature 105 (specs/105-transport-liveness/, research D8; data-model E-7): the rate state of a
 // log record written at most once per window, and its admit step. Hoisted from Session (its
-// nested log_rate_gate, 093/101), so the engine's accept loop holds one too for its pre-session
-// refusal record; Session keeps the name by a member alias, and the fields are unchanged.
+// nested log_rate_gate of features 093 and 101), so the engine's accept loop holds one too for its
+// pre-session refusal record; Session keeps the name by a member alias, and the fields are
+// unchanged.
 //
 // The window's end is computed by the caller (detail::deadline_after in
 // src/session/read_first_frame_bounded.hpp, which an installed header cannot include), so the
