@@ -189,7 +189,8 @@ Common rules:
 ## C-3. The unanswered TestRequest (FR-003, R-1)
 
 - C-3.1 After 2T of inbound silence, counted from the last inbound frame that refreshes liveness, with a TestRequest
-  pending and no inbound frame since it was sent (C-6.2), fixpp writes the record of C-3.3, then sends one Logout
+  pending, whether or not an inbound frame arrived since it was sent (C-6.2; spec clarification "Session 2026-11-21
+  (implementation, Phase 6)"), fixpp writes the record of C-3.3, then sends one Logout
   whose Text(58) is exactly `TestRequest unanswered, TestReqID <id>`, `<id>` being the TestReqID(112) of the
   TestRequest it sent, and the connection closes as soon as the write has returned. fixpp does not wait for the
   peer's Logout. The write is limited (C-2.7): when it has not returned `logout_disconnect_timeout_ms` after its

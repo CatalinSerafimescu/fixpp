@@ -214,6 +214,22 @@ D-a to D-g and R-1; no new sign-off.
   connection has its frame stored and not written, and returns `dispatch_aborted`, where the base wrote it after the
   ending. → A: Accepted and disclosed as a B-105 row (research D11's B&L plan).
 
+### Session 2026-11-21 (implementation, Phase 6)
+
+Ruling of the orchestrator on an implementation escalation of Phase 6 (tasks.md T101), within the signed-off rulings
+D-c and R-3; no new sign-off.
+
+- Q (FR-010, R-3, clarification D-c, orchestrator 2026-11-21): Is the give-up eligible only while no inbound frame has
+  arrived since the pending TestRequest (the term data-model E-4 carried until this ruling), or whenever a TestRequest
+  is pending? → A: Whenever a TestRequest is pending. The give-up runs strictly after 2T of inbound silence counted
+  from the last inbound frame, whether or not a frame arrived since the TestRequest: R-3's "2T of inbound silence",
+  D-c, and QuickFIX C++'s `SessionState::timedOut`, which compares the time since the last receipt with
+  2.4 × HeartBtInt and has no term for frames since the TestRequest. fixpp's give-up still needs a pending
+  TestRequest, whose TestReqID its Logout names (contract C-3.1). The dropped term decided only when the next
+  TestRequest could not be written before the give-up instant (held behind a resend answer): fixpp then wrote it and
+  gave up at once naming it; it now gives up naming the pending one. Data-model E-4, research D6 and contract C-3.1
+  state it; the cell is `ReplayGate588.R588g_FrameAfterTheTestRequest_HeldPastTwoThresholds_GivesUpNamingThePending`.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — A session that has ended closes its connection (Priority: P1)

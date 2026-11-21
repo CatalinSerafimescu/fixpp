@@ -617,7 +617,8 @@ unbounded memory, where the generator's monotonic counter gives the same answer 
   data-model E-4). The loop sleeps until the earliest instant of its sleep set (the Heartbeat instant when eligible
   or not yet reached, the TestRequest and give-up instants when eligible), tests eligibility on waking, and acts on
   every eligible instant reached: while a TestRequest is pending with no inbound frame since it was sent, only the
-  give-up is eligible; otherwise the Heartbeat and the TestRequest are. Round 2 slept to the earliest **eligible**
+  give-up is eligible; otherwise the Heartbeat and the TestRequest are, and the give-up too while a TestRequest is
+  pending. Round 2 slept to the earliest **eligible**
   instant, so right after TR1 it slept to the give-up and a frame at 13 s could not wake it: the Heartbeat due at
   22 s went at 24 s (`run_liveness_loop` suspends only in `effective_clock_->sleep_until`, and the per-frame refresh
   wakes nothing). Keeping the not-yet-eligible Heartbeat instant in the set fixes that; a Heartbeat instant reached
@@ -630,8 +631,10 @@ unbounded memory, where the generator's monotonic counter gives the same answer 
   Heartbeat was due at 22 s, against FR-010's "with inbound silent", C-6.3 and QuickFIX C++, where that frame's
   `testRequest(0)` makes `needHeartbeat` true at 22 s.
 - **The give-up is measured from the last inbound frame** (clarification D-c; F-13). The give-up instant is computed
-  from the `last_inbound_steady_` read at the top of each iteration, and is eligible only while no inbound frame has
-  arrived since the pending TestRequest. A frame after the TestRequest therefore defers the give-up and makes the
+  from the `last_inbound_steady_` read at the top of each iteration, and is eligible whenever a TestRequest is
+  pending (spec clarification "Session 2026-11-21 (implementation, Phase 6)" superseding this item's earlier "only
+  while no inbound frame has arrived since the pending TestRequest", which QuickFIX C++'s `SessionState::timedOut`
+  does not have). A frame after the TestRequest therefore defers the give-up and makes the
   Heartbeat and the next TestRequest eligible; `pending_test_req_id_` stays set, so the TestReqID(112) rule still
   applies to a later Heartbeat (D5), and a further T of silence sends a new TestRequest whose TestReqID becomes the
   pending one (as the loop assigns it today). This is QuickFIX C++'s observable (`Session::verify` ends every

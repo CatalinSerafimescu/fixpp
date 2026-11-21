@@ -338,7 +338,8 @@ Each must turn its cells RED, run unfiltered:
 - "Leaving `writing`" ignoring `cut` (`DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed`);
 - the slot-74 record moved after the write (`WriteLimit105.R1_*`'s record assertion);
 - each `owe_connection_end_()` call site deleted;
-- the give-up's eligibility ignoring inbound since the TestRequest (`TrafficAfterTestRequestNoHeartbeat_*`);
+- the give-up made eligible only with no inbound frame since the TestRequest, the term spec clarification "Session
+  2026-11-21 (implementation, Phase 6)" dropped (`ReplayGate588.R588g_*`);
 - the Heartbeat's eligibility ignoring inbound since the TestRequest (`FrameAfterTestRequest_HeartbeatAt22s_*`);
 - the default threshold set back to H (the timing cells);
 - the #582 predicate set back (`AheadPeerAnswersTenCycles_*`);

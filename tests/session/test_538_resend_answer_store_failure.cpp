@@ -1222,13 +1222,15 @@ TEST(ReplayGate588, R588c_HeartbeatDuringTheAnswer_WrittenAfterItNextNumber) {
     }
 }
 
-// 105-transport-liveness (clarification D-c; data-model E-4): the give-up is eligible only with
-// no inbound frame since the pending TestRequest. A frame after the TestRequest (the request that
-// starts the held walk) makes the next TestRequest due one threshold after it; held behind the
-// walk until past two thresholds after the frame, the loop writes that TestRequest after the
-// release, and only then gives up (the inbound silence has passed two thresholds), naming it.
-TEST(ReplayGate588,
-     R588g_FrameAfterTheTestRequest_HeldPastTwoThresholds_TestRequestBeforeTheGiveUp) {
+// 105-transport-liveness (clarification D-c; data-model E-4; spec clarification "Session
+// 2026-11-21 (implementation, Phase 6)", which drops E-4's earlier "no inbound frame since it"
+// term on the give-up): the give-up is eligible whenever a TestRequest is pending, strictly after
+// two thresholds of inbound silence counted from the last frame, as QuickFIX C++'s
+// SessionState::timedOut. A frame after the TestRequest (the request that starts the held walk)
+// moves the give-up to two thresholds after it; held behind the walk past that instant, the loop
+// gives up after the release without writing a second TestRequest, and its Logout names the
+// pending one.
+TEST(ReplayGate588, R588g_FrameAfterTheTestRequest_HeldPastTwoThresholds_GivesUpNamingThePending) {
     HeldWalk w{DirectAcceptor::Options{
         .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
     ASSERT_TRUE(w.start(is_slot_read(3), std::nullopt, /*request=*/false)) << "setup";
@@ -1254,12 +1256,12 @@ TEST(ReplayGate588,
         if (t == "1") trs.push_back(plain_rig::field_value(f, "112"));
         if (t == "5") logouts.push_back(f);
     }
-    ASSERT_EQ(trs.size(), 2U) << "no TestRequest after the release, before the give-up:\n"
+    ASSERT_EQ(trs.size(), 1U) << "a TestRequest after the release, before the give-up:\n"
                               << printable(w.s.f.sent);
     ASSERT_EQ(logouts.size(), 1U) << printable(w.s.f.sent);
     EXPECT_EQ(plain_rig::field_value(logouts.front(), "58"),
-              "TestRequest unanswered, TestReqID " + trs.back())
-        << "the give-up names a TestRequest the frame had made answerable";
+              "TestRequest unanswered, TestReqID TR1")
+        << "the give-up names the pending TestRequest";
 }
 
 // 103 tasks T058, R-588-d (FR-014): close(graceful) started while the answer is held writes

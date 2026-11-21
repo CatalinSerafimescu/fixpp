@@ -392,7 +392,7 @@ helpers; `record_state_transition_`'s `Disconnected` write also serves `close()`
 | "inbound since the TestRequest" | `last_inbound_steady_ > tr_sent_at` | — |
 | Heartbeat instant | `last_outbound_steady_ + H`, **eligible** when no TestRequest is pending, or one is pending and an inbound frame arrived since it | as today |
 | TestRequest instant | `deadline_after(last_inbound_steady_, T)`, eligible under the same condition | saturating |
-| Give-up instant | `deadline_after(deadline_after(deadline_after(last_inbound_steady_, T), T), std::chrono::nanoseconds{1})`, **eligible** when a TestRequest is pending and no inbound frame arrived since it | three saturating steps, no product; the guard is the third (`deadline_after`'s template takes nanoseconds, since `steady_time_point` is `std::chrono::steady_clock`'s and its static_asserts require a whole multiple of its tick) |
+| Give-up instant | `deadline_after(deadline_after(deadline_after(last_inbound_steady_, T), T), std::chrono::nanoseconds{1})`, **eligible** when a TestRequest is pending, whether or not an inbound frame arrived since it (spec clarification "Session 2026-11-21 (implementation, Phase 6)", which drops the "no inbound frame since it" term this row carried; QuickFIX C++'s `SessionState::timedOut`) | three saturating steps, no product; the guard is the third (`deadline_after`'s template takes nanoseconds, since `steady_time_point` is `std::chrono::steady_clock`'s and its static_asserts require a whole multiple of its tick) |
 | Gap deadline (unchanged, B-537-2) | `detail::resend_gap_deadline(started_at, H)` | as today |
 
 **One sleep per iteration** (Gate A round 2, N-2; the round-1 design's separate grace sleep is gone; the sleep set
@@ -402,7 +402,8 @@ eligible **or not yet reached**, the TestRequest instant when eligible, and the 
 Heartbeat instant is in the set before it is eligible because a frame can make it eligible during the sleep, and
 nothing on the inbound path wakes the sleep (the per-frame refresh writes `last_inbound_steady_` only; the loop
 suspends only in `effective_clock_->sleep_until`). An eligible instant already reached makes the sleep return at
-once. **The spin trap:** a Heartbeat instant that has been reached while ineligible is dropped from the set; kept, it
+once. With T > 0 the TestRequest instant is before the give-up instant, so while the TestRequest instant is
+eligible it is the earlier of the two in the set. **The spin trap:** a Heartbeat instant that has been reached while ineligible is dropped from the set; kept, it
 would make every sleep return at once. On waking the loop tests eligibility again and acts on every eligible instant
 the clock has reached: the give-up (C-3), else the TestRequest (its TestReqID becomes the pending one; `tr_sent_at`
 is the clock's reading), else the Heartbeat. D-536-2's state test and filter reset stay before every sleep.

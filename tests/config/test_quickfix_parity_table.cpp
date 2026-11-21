@@ -321,6 +321,16 @@ const std::vector<ParityRow> kParity = {
       "No loss of behavior; the guard fires equivalently." },
     { .qf_key="HeartBtInt",       .disposition=Disposition::Mapped,     .key_044="heartbeat_interval",
       .notes="scalar_mappers.cpp, map_scalars — SessionConfig::heartbeat_interval" },
+    // 105-transport-liveness (FR-012): QuickFIX C++ has no key of its own for the TestRequest
+    // timing; HeartBtInt sets it there, so the fixpp knob rides on the HeartBtInt row.
+    { .qf_key="HeartBtInt",       .disposition=Disposition::Mapped,     .key_044="test_request_threshold",
+      .notes="scalar_mappers.cpp, map_scalars — SessionConfig::test_request_threshold "
+      "(a Duration). The TestRequest goes after T of inbound silence, T being this value or "
+      "1.2 × HeartBtInt when unset; the session gives up after more than 2T of inbound "
+      "silence with a TestRequest pending (2.4 × HeartBtInt by default). A value of zero or "
+      "below is refused. QuickFIX C++ fixes both multipliers with no key: "
+      "SessionState::needTestRequest (1.2 × HeartBtInt) and SessionState::timedOut "
+      "(2.4 × HeartBtInt)." },
 
     // ── Socket / network ─────────────────────────────────────────────────────
     { .qf_key="SocketAcceptPort",     .disposition=Disposition::OutOfScope_ServerInfra, .key_044="",

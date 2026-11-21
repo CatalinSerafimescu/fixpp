@@ -8376,8 +8376,8 @@ fsm_state Session::state() const noexcept { return fsm_state_; }
 //   2. T = test_request_threshold, or 1.2 × HeartBtInt when unset, computed once.
 //   3. Loop while liveness_may_originate_(): sleep once, to the earliest instant of the sleep
 //      set (the body's comment states it), then act on the eligible instant reached:
-//      a. a TestRequest pending, no inbound frame since it, and 2T + 1 ns of inbound silence
-//         → the give-up: 105 R-1's record, Logout with Text, Disconnected → stop;
+//      a. a TestRequest pending and 2T + 1 ns of inbound silence, counted from the last
+//         inbound frame → the give-up: 105 R-1's record, Logout with Text, Disconnected → stop;
 //      b. else T of inbound silence → a TestRequest (its TestReqID becomes the pending one);
 //      c. else HeartBtInt of outbound silence → a Heartbeat.
 //      A TestRequest's TestReqID is answered by on_inbound_frame (the TestReqID rule of
@@ -8454,7 +8454,10 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
     //     last_inbound + T; both are eligible when no TestRequest is pending, or one is and an
     //     inbound frame arrived since it;
     //   - the give-up instant is last_inbound + T + T + 1 ns, three saturating steps; it is
-    //     eligible when a TestRequest is pending and no inbound frame arrived since it;
+    //     eligible whenever a TestRequest is pending (QuickFIX C++'s SessionState::timedOut;
+    //     spec clarification "Session 2026-11-21 (implementation, Phase 6)" drops an earlier
+    //     "no inbound frame since it" term). With T > 0 the TestRequest instant is before it,
+    //     so while the TestRequest instant is eligible the sleep set holds that one;
     //   - each iteration sleeps once, to the earliest instant of the sleep set: the Heartbeat
     //     instant when eligible or not yet reached (a frame during the sleep can make it
     //     eligible, and nothing on the inbound path wakes the sleep), the TestRequest and the
@@ -8510,8 +8513,9 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
             const auto now = effective_clock_->steady_now();
             const bool answerable =
                 pending_test_req_id_.empty() || last_inbound_steady_ > tr_sent_at;
-            const bool give_up = !answerable && now >= detail::test_request_give_up_instant(
-                                                           last_inbound_steady_, threshold);
+            const bool give_up =
+                !pending_test_req_id_.empty() &&
+                now >= detail::test_request_give_up_instant(last_inbound_steady_, threshold);
             const bool test_request =
                 answerable && now >= detail::deadline_after(last_inbound_steady_, threshold);
             const bool heartbeat =
@@ -8607,8 +8611,7 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                 continue;
             }
 
-            // The give-up: a TestRequest pending, no inbound frame since it, and the give-up
-            // instant reached.
+            // The give-up: a TestRequest pending and the give-up instant reached.
             if (give_up) {
                 // 105 R-1 (research D3; contract C-3; [FIX-SL §4.5.5]), superseding the
                 // 536-537-538 note's R-6 ("Not chosen: … a Logout on the dead-peer ending"):
