@@ -2095,6 +2095,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         co_return std::unexpected(error::invalid_session_config);
     }
 
+    // 105 (FR-011, contract C-6.6): a set test_request_threshold of zero or below is refused,
+    // as Engine::register_session refuses it. There is no upper bound.
+    if (cfg_.test_request_threshold.has_value() &&
+        *cfg_.test_request_threshold <= std::chrono::milliseconds::zero()) {
+        co_return std::unexpected(error::invalid_session_config);
+    }
+
     // 093-inbound-frame-dispositions (FR-010, plan OD-2): an advertised MaxMessageSize(383)
     // outside its range is refused, as Engine::register_session refuses it.
     if (!advertised_max_message_size_in_range(cfg_)) {
@@ -8363,19 +8370,18 @@ fsm_state Session::state() const noexcept { return fsm_state_; }
 // Runs on the session executor; cancelled via the root cancellation slot when
 // Session::close() fires.
 //
-// Algorithm:
-//   1. If HeartBtInt = 0 → return immediately (all liveness disabled, FR-006).
-//   2. Loop until the session is no longer Active or cancellation fires:
-//      a. Sleep until last_inbound_steady_ + heartbt_int.
-//      b. If session is no longer Active → stop.
-//      c. If inbound data arrived during the sleep (last_inbound_steady_
-//         updated past the deadline) → reset and loop (no TestRequest needed).
-//      d. No inbound data: emit TestRequest (record pending_test_req_id_).
-//      e. Sleep another heartbt_int.
-//      f. If still no inbound Heartbeat reply (pending_test_req_id_ still set):
-//         → session_test_request_unanswered → Disconnected → stop.
-//      g. If a Heartbeat was received (pending_test_req_id_ cleared by
-//         on_inbound_frame) → loop continues.
+// Algorithm (105, research D6 and data-model E-4, superseding 005 research D-8's
+// 1 × HeartBtInt steps):
+//   1. If HeartBtInt <= 0 → return immediately (all liveness disabled).
+//   2. T = test_request_threshold, or 1.2 × HeartBtInt when unset, computed once.
+//   3. Loop while liveness_may_originate_(): sleep once, to the earliest instant of the sleep
+//      set (the body's comment states it), then act on the eligible instant reached:
+//      a. a TestRequest pending, no inbound frame since it, and 2T + 1 ns of inbound silence
+//         → the give-up: 105 R-1's record, Logout with Text, Disconnected → stop;
+//      b. else T of inbound silence → a TestRequest (its TestReqID becomes the pending one);
+//      c. else HeartBtInt of outbound silence → a Heartbeat.
+//      A TestRequest's TestReqID is answered by on_inbound_frame (the TestReqID rule of
+//      research D5), which clears the pending one.
 //
 // Traps observed in project memory:
 //   [feedback_asio_cospawn_total_cancellation_default]: co_spawn defaults to
@@ -8388,7 +8394,7 @@ fsm_state Session::state() const noexcept { return fsm_state_; }
 //     clean return (not a crash).
 //
 // HeartBtInt source: cfg_.heartbeat_interval (std::optional<seconds>, D-8).
-// Default: 30s if not set; HeartBtInt=0 disables.
+// Default: 30s if not set; HeartBtInt <= 0 disables.
 asio::awaitable<void> Session::run_liveness_loop() noexcept {
     // FQ-C (gate-b/r3): spawn sites increment liveness_counter_ BEFORE co_spawn
     // publishes the detached frame, closing the pre-start close()/destroy race.
@@ -8425,8 +8431,8 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
         heartbt_int = *cfg_.heartbeat_interval;
     }
 
-    // HeartBtInt=0 → all liveness disabled (FR-006 / [FIX-SL §4.3.4]).
-    if (heartbt_int.count() == 0) {
+    // 105 (owner ruling on SI-2; data-model E-4): the loop is off at HeartBtInt <= 0.
+    if (heartbt_int.count() <= 0) {
         co_return;
     }
 
@@ -8434,35 +8440,53 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
         co_return;  // No clock (should not happen post-open(), but guard).
     }
 
-    // Test-request threshold: 1 × HeartBtInt (D-8 default).
-    std::chrono::milliseconds threshold =
-        std::chrono::duration_cast<std::chrono::milliseconds>(heartbt_int);
-    if (cfg_.test_request_threshold.has_value()) {
-        threshold = *cfg_.test_request_threshold;
-    }
+    // 105 (research D6; data-model E-4), superseding 005 research D-8's 1 × HeartBtInt: T is
+    // the configured test_request_threshold, or 1.2 × HeartBtInt, computed once.
+    const std::chrono::milliseconds threshold =
+        cfg_.test_request_threshold.value_or(detail::default_test_request_threshold(heartbt_int));
 
-    // Liveness loop.
-    // Two independent cadences:
-    //   (A) Outbound idle for heartbt_int  → emit Heartbeat(0)   [T018 Cell A / spec FR-003]
-    //   (B) Inbound idle for heartbt_int   → emit TestRequest(1) [T018 Cell B / spec FR-004]
-    //       then grace window of heartbt_int; no reply → 105 R-1: the record, a Logout
-    //       with Text, Disconnected [T018 Cell C]
-    // Sleep until the EARLIEST of last_outbound + heartbt_int OR last_inbound + heartbt_int.
+    // The clock's reading when the pending TestRequest was sent. "An inbound frame since the
+    // TestRequest" is last_inbound_steady_ > tr_sent_at.
+    fixpp::core::steady_time_point tr_sent_at = effective_clock_->steady_now();
+
+    // Liveness loop (data-model E-4, "One sleep per iteration"):
+    //   - the Heartbeat instant is last_outbound + HeartBtInt; the TestRequest instant is
+    //     last_inbound + T; both are eligible when no TestRequest is pending, or one is and an
+    //     inbound frame arrived since it;
+    //   - the give-up instant is last_inbound + T + T + 1 ns, three saturating steps; it is
+    //     eligible when a TestRequest is pending and no inbound frame arrived since it;
+    //   - each iteration sleeps once, to the earliest instant of the sleep set: the Heartbeat
+    //     instant when eligible or not yet reached (a frame during the sleep can make it
+    //     eligible, and nothing on the inbound path wakes the sleep), the TestRequest and the
+    //     give-up instants when eligible. A Heartbeat instant reached while ineligible is left
+    //     out, or every sleep would return at once;
+    //   - on waking it acts on the eligible instant reached: the give-up (105 R-1), else the
+    //     TestRequest, else the Heartbeat.
     try {
         // 105 (research D2 item 6; data-model E-4): the loop originates only while
         // liveness_may_originate_() holds (Active, and no ending Logout in progress), tested as the
         // loop condition and after every suspension.
         while (liveness_may_originate_()) {
-            // Compute earliest sleep deadline.
-            const auto outbound_deadline = last_outbound_steady_ + heartbt_int;
-            const auto inbound_deadline = last_inbound_steady_ + heartbt_int;
-            const auto deadline =
-                outbound_deadline < inbound_deadline ? outbound_deadline : inbound_deadline;
+            const auto set_now = effective_clock_->steady_now();
+            const bool set_answerable =
+                pending_test_req_id_.empty() || last_inbound_steady_ > tr_sent_at;
+            const auto set_hb = detail::deadline_after(last_outbound_steady_, heartbt_int);
+            auto deadline = fixpp::core::steady_time_point::max();
+            if (set_answerable || set_hb > set_now) {
+                deadline = std::min(deadline, set_hb);
+            }
+            if (set_answerable) {
+                deadline =
+                    std::min(deadline, detail::deadline_after(last_inbound_steady_, threshold));
+            } else {
+                deadline = std::min(deadline, detail::test_request_give_up_instant(
+                                                  last_inbound_steady_, threshold));
+            }
 
             // fixpp#536 (.specify/536-537-538-recovery-liveness.md, D-536-2): before each
-            // of its two sleeps the loop leaves if the session is no longer Active, and
-            // then resets its cancellation filter to total. Here the state test is the
-            // loop condition above; nothing suspends between it and this sleep.
+            // sleep the loop leaves if the session is no longer Active, and then resets its
+            // cancellation filter to total. Here the state test is the loop condition above;
+            // nothing suspends between it and this sleep.
             //   The reset. close() emits total. The reset at the top of this function
             //   does not last: every emit below takes the sequence-number lock, and the
             //   lock sequence leaves the whole coroutine thread with a terminal filter
@@ -8482,14 +8506,20 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                 co_return;
             }
 
-            auto now = effective_clock_->steady_now();
+            // Eligibility tested again on waking: a frame during the sleep changes it.
+            const auto now = effective_clock_->steady_now();
+            const bool answerable =
+                pending_test_req_id_.empty() || last_inbound_steady_ > tr_sent_at;
+            const bool give_up = !answerable && now >= detail::test_request_give_up_instant(
+                                                           last_inbound_steady_, threshold);
+            const bool test_request =
+                answerable && now >= detail::deadline_after(last_inbound_steady_, threshold);
+            const bool heartbeat =
+                answerable && now >= detail::deadline_after(last_outbound_steady_, heartbt_int);
 
-            // (A) Outbound idle → Heartbeat. T018 Cell A / spec FR-003:
-            // If no outbound for heartbt_int, emit Heartbeat(0) to tell peer we're alive.
-            // This updates last_outbound_steady_ via store_then_emit.
-            if (last_outbound_steady_ + heartbt_int <= now) {
+            if (heartbeat && !give_up && !test_request) {
                 // 103 (research D5′.4): a shared hold per emit; behind a resend answer the loop
-                // waits for its end and goes back to its top, which recomputes both deadlines.
+                // waits for its end and goes back to its top, which recomputes every instant.
                 if (replay_gate_.exclusive) {
                     co_await replay_gate_.wait_for_wake();
                     continue;
@@ -8520,44 +8550,32 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                         co_return;
                     }
                 }
-                if (!liveness_may_originate_()) {
-                    co_return;
+                continue;
+            }
+
+            if (test_request && !give_up) {
+                // 103 (research D5′.4): as the Heartbeat's; the hold covers the TestReqID's
+                // assignment and the emit.
+                if (replay_gate_.exclusive) {
+                    co_await replay_gate_.wait_for_wake();
+                    continue;
                 }
-                now = effective_clock_->steady_now();
-            }
+                const detail::replay_gate::shared_hold tr_hold{replay_gate_};
+                // Generate a unique TestReqID using the per-session counter
+                // (FR-010 / RC#6): ++next_test_request_id_ replaces the prior
+                // process-global `static tr_counter`. Single-writer on the session
+                // strand; wrap-around at UINT32_MAX is acceptable per research.md D-3.
+                std::array<char, 32> id_buf{};
+                id_buf[0] = 'T';
+                id_buf[1] = 'R';
+                auto [end, ec] = std::to_chars(id_buf.data() + 2, id_buf.data() + id_buf.size(),
+                                               ++next_test_request_id_);
+                (void)ec;  // 32-byte buffer is sufficient for "TR" + max uint32_t (10 digits).
+                pending_test_req_id_.assign(id_buf.data(), end);
+                tr_sent_at = now;
 
-            // (B) Inbound idle → TestRequest. T018 Cell B / spec FR-004:
-            // Did inbound data arrive during the sleep (updating last_inbound_steady_)?
-            if (last_inbound_steady_ + heartbt_int > now) {
-                // Inbound data arrived; the deadline was reset. Loop again.
-                continue;
-            }
-
-            // 103 (research D5′.4): as the Heartbeat's; the hold covers the TestReqID's
-            // assignment and the emit, and ends before the grace sleep, whose end depends on an
-            // inbound Heartbeat.
-            if (replay_gate_.exclusive) {
-                co_await replay_gate_.wait_for_wake();
-                continue;
-            }
-            std::optional<detail::replay_gate::shared_hold> tr_hold;
-            tr_hold.emplace(replay_gate_);
-            // No inbound data for heartbt_int: emit TestRequest.
-            // Generate a unique TestReqID using the per-session counter
-            // (FR-010 / RC#6): ++next_test_request_id_ replaces the prior
-            // process-global `static tr_counter`. Single-writer on the session
-            // strand; wrap-around at UINT32_MAX is acceptable per research.md D-3.
-            std::array<char, 32> id_buf{};
-            id_buf[0] = 'T';
-            id_buf[1] = 'R';
-            auto [end, ec] = std::to_chars(id_buf.data() + 2, id_buf.data() + id_buf.size(),
-                                           ++next_test_request_id_);
-            (void)ec;  // 32-byte buffer is sufficient for "TR" + max uint32_t (10 digits).
-            pending_test_req_id_.assign(id_buf.data(), end);
-
-            // T042 (US4 retirement): emit the TestRequest frame via
-            // store_then_emit (I-3 outbound half). Stack buffer; noexcept.
-            {
+                // T042 (US4 retirement): emit the TestRequest frame via
+                // store_then_emit (I-3 outbound half). Stack buffer; noexcept.
                 std::array<std::byte, 256> tr_buf{};
                 const auto st52 =
                     stamp_sending_time(*effective_clock_, cfg_.sending_time_precision);
@@ -8586,36 +8604,12 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                         co_return;
                     }
                 }
-            }
-            tr_hold.reset();
-
-            // Grace window: sleep until inbound_deadline + heartbt_int + 1ns.
-            // T018 Cell C fix: grace_deadline = inbound_deadline + heartbt_int
-            // NOT now + heartbt_int — the deadline was already in the past when
-            // we woke up, so using now would overshoot.
-            // +1ns guard: prevents mock_clock fire_now=true (asio::post immediate
-            // completion) when inbound_deadline + heartbt_int == clock exactly,
-            // which would fire the grace check before the test can deliver the
-            // Heartbeat echo. The 1ns offset preserves Cell C (advance 11s > 10s+1ns)
-            // while letting TR_DistinctNow's echo arrive before the grace fires.
-            // [T018 Cell C grace_deadline bug fix; admin_builder_distinct_now_test compat]
-            const auto grace_deadline =
-                inbound_deadline + heartbt_int + std::chrono::nanoseconds{1};
-            // fixpp#536 (D-536-2): the state test and the filter reset, as before the
-            // main sleep. The TestRequest's emit above suspended, so the state is
-            // tested again here.
-            if (!liveness_may_originate_()) {
-                co_return;
-            }
-            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
-            co_await effective_clock_->sleep_until(grace_deadline);
-
-            if (!liveness_may_originate_()) {
-                co_return;
+                continue;
             }
 
-            // Still Active after grace window. Did a Heartbeat arrive?
-            if (!pending_test_req_id_.empty()) {
+            // The give-up: a TestRequest pending, no inbound frame since it, and the give-up
+            // instant reached.
+            if (give_up) {
                 // 105 R-1 (research D3; contract C-3; [FIX-SL §4.5.5]), superseding the
                 // 536-537-538 note's R-6 ("Not chosen: … a Logout on the dead-peer ending"):
                 // the slot-74 record first, so a write that never completes cannot lose it
@@ -8696,8 +8690,7 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                 co_return;
             }
 
-            // Heartbeat was received (pending_test_req_id_ cleared by
-            // on_inbound_frame). Loop continues for the next window.
+            // No eligible instant reached: the loop sleeps again.
         }
     } catch (const std::system_error& e) {
         // operation_aborted from sleep_until cancellation (close() fired).

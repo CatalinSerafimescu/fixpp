@@ -238,6 +238,13 @@ expected_t<void> Engine::register_session(SessionConfig cfg) {
     // refused before any registry mutation, as Session::open() refuses it.
     if (cfg.logon_timeout_ms == 0) return std::unexpected(error::invalid_session_config);
 
+    // 105 (FR-011, contract C-6.6): a set test_request_threshold of zero or below is refused
+    // before any registry mutation, as Session::open() refuses it.
+    if (cfg.test_request_threshold.has_value() &&
+        *cfg.test_request_threshold <= std::chrono::milliseconds::zero()) {
+        return std::unexpected(error::invalid_session_config);
+    }
+
     // 093 (FR-010, plan OD-2): an advertised MaxMessageSize(383) outside its range is
     // refused before any registry mutation, as Session::open() refuses it.
     if (!fixpp::session::advertised_max_message_size_in_range(cfg)) {

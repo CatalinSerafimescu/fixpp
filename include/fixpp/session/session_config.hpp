@@ -234,7 +234,12 @@ struct SessionConfig {
     std::shared_ptr<const fixpp::dict::dictionary_snapshot>
         dict_snapshot;  // null → open() builds one
 
-    std::optional<std::chrono::seconds> heartbeat_interval;           // value owned by 005
+    std::optional<std::chrono::seconds> heartbeat_interval;  // value owned by 005
+    // 105 (FR-010 to FR-012; research D6), superseding 005 research D-8's 1 × HeartBtInt: the
+    // inbound silence after which the liveness loop sends a TestRequest; the session gives up
+    // strictly after twice it with that TestRequest unanswered and no inbound frame since.
+    // Unset: 1.2 × HeartBtInt. A set value of zero or below is refused by Session::open() and
+    // Engine::register_session (invalid_session_config); there is no upper bound.
     std::optional<std::chrono::milliseconds> test_request_threshold;  // value owned by 005
     std::optional<std::chrono::milliseconds> sending_time_threshold;  // value owned by 005
     RejectPolicy reject_policy{};                                     // owned by 005

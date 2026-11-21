@@ -28,6 +28,7 @@
 #include <fixpp/session/session_config.hpp>
 #include <functional>
 #include <future>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -715,5 +716,54 @@ TEST(TestReqIdParse105, LeadingZero_Mismatch) { EXPECT_TRUE(trw::parse_leading_z
 TEST(TestReqIdParse105, Sign_Mismatch) { EXPECT_TRUE(trw::parse_sign_mismatch()); }
 TEST(TestReqIdParse105, Overflow_Mismatch) { EXPECT_TRUE(trw::parse_overflow_mismatch()); }
 TEST(TestReqIdParse105, PrefixAlone_Mismatch) { EXPECT_TRUE(trw::parse_prefix_alone_mismatch()); }
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+// 105 T097 (research D6; data-model E-4): the default threshold helper and the give-up instant's
+// guard. constexpr cells: each static_assert sits under FIXPP_105_STATIC_GUARDS, and each cell's
+// runtime twin asserts the same values with EXPECT_*.
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+namespace ltg {
+using fixpp::session::detail::default_test_request_threshold;
+using fixpp::session::detail::test_request_give_up_instant;
+using std::chrono::milliseconds;
+using std::chrono::seconds;
+using tp = fixpp::core::steady_time_point;
+constexpr milliseconds::rep kLargestExact = std::numeric_limits<milliseconds::rep>::max() / 1200;
+
+// [guard: the product formed unsaturated] H × 1200 ms, exact below the saturation point and
+// milliseconds::max() above it.
+constexpr bool default_threshold_saturates() {
+    return default_test_request_threshold(seconds{10}) == milliseconds{12000} &&
+           default_test_request_threshold(seconds{1}) == milliseconds{1200} &&
+           default_test_request_threshold(seconds{kLargestExact}) ==
+               milliseconds{kLargestExact * 1200} &&
+           default_test_request_threshold(seconds{kLargestExact + 1}) == milliseconds::max() &&
+           default_test_request_threshold(seconds::max()) == milliseconds::max();
+}
+
+// [guard: the guard added by hand to a saturated instant] steady_time_point::max() in, max()
+// out; and the guard is one nanosecond where the instant is representable.
+constexpr bool guard_at_the_saturated_instant() {
+    return test_request_give_up_instant(tp::max(), milliseconds{0}) == tp::max() &&
+           test_request_give_up_instant(tp::max(), milliseconds{12000}) == tp::max() &&
+           test_request_give_up_instant(tp::max() - seconds{24}, milliseconds{12000}) ==
+               tp::max() &&
+           test_request_give_up_instant(tp{}, milliseconds{12000}) ==
+               tp{} + seconds{24} + std::chrono::nanoseconds{1};
+}
+}  // namespace ltg
+
+#if FIXPP_105_STATIC_GUARDS
+static_assert(ltg::default_threshold_saturates());
+static_assert(ltg::guard_at_the_saturated_instant());
+#endif
+
+TEST(LivenessTiming105, DefaultThresholdHelper_Saturates) {
+    EXPECT_TRUE(ltg::default_threshold_saturates());
+}
+TEST(LivenessTiming105, GuardAtTheSaturatedInstant) {
+    EXPECT_TRUE(ltg::guard_at_the_saturated_instant());
+}
 
 }  // namespace

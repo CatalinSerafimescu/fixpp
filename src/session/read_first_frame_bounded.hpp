@@ -248,15 +248,42 @@ template <class Rep, class Period>
 // fixpp#537 (`.specify/536-537-538-recovery-liveness.md` §4.3, D-537-5): the instant the
 // deadline of an unfilled resend gap expires, twice `heartbt` after `since`, or nullopt
 // when the deadline is off, which is at HeartBtInt <= 0. Each of the two steps saturates
-// as deadline_after does; a product of the interval is never formed. The liveness loop is
-// off only at exactly 0; this function states its own test because deadline_after
-// requires a non-negative duration.
+// as deadline_after does; a product of the interval is never formed. 105 (owner ruling on
+// SI-2) turns the liveness loop off at HeartBtInt <= 0 as well, the same test; this function
+// states its own because deadline_after requires a non-negative duration.
 [[nodiscard]] constexpr std::optional<fixpp::core::steady_time_point> resend_gap_deadline(
     fixpp::core::steady_time_point since, std::chrono::seconds heartbt) noexcept {
     if (heartbt <= std::chrono::seconds::zero()) {
         return std::nullopt;
     }
     return deadline_after(deadline_after(since, heartbt), heartbt);
+}
+
+// 105 (research D6; data-model E-4), superseding 005 research D-8's 1 × HeartBtInt: the
+// default test_request_threshold, 1.2 × HeartBtInt. HeartBtInt is whole seconds, so it is
+// exactly heartbt × 1200 ms; the product saturates at milliseconds::max(), and is zero at
+// HeartBtInt <= 0, where the liveness loop is off.
+[[nodiscard]] constexpr std::chrono::milliseconds default_test_request_threshold(
+    std::chrono::seconds heartbt) noexcept {
+    using rep = std::chrono::milliseconds::rep;
+    constexpr rep kPerSecond = 1200;
+    if (heartbt <= std::chrono::seconds::zero()) {
+        return std::chrono::milliseconds::zero();
+    }
+    if (heartbt.count() > std::numeric_limits<rep>::max() / kPerSecond) {
+        return std::chrono::milliseconds::max();
+    }
+    return std::chrono::milliseconds{static_cast<rep>(heartbt.count()) * kPerSecond};
+}
+
+// 105 (research D6; data-model E-4; R-3): the give-up instant, strictly after 2T of inbound
+// silence: since + T, + T, then the 1 ns guard, three saturating steps with no product
+// formed. The guard lets a peer's answer delivered at exactly 2T on a mock clock win.
+// Precondition: threshold >= 0.
+[[nodiscard]] constexpr fixpp::core::steady_time_point test_request_give_up_instant(
+    fixpp::core::steady_time_point since, std::chrono::milliseconds threshold) noexcept {
+    return deadline_after(deadline_after(deadline_after(since, threshold), threshold),
+                          std::chrono::nanoseconds{1});
 }
 
 // 105 (research D5; data-model E-4; ruling D-d): the TestReqID window. TestRequest numbers are

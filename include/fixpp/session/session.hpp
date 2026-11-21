@@ -1666,12 +1666,16 @@ private:
     // run_liveness_loop — co_spawned on the session executor when the session
     // first enters Active state (LogonSent → Active via peer Logon-ack, or
     // NotConnected → LogonReceived → Active via acceptor path). Drives:
-    //   1. Outbound idle: after heartbt_int of no outbound data → emit Heartbeat.
-    //   2. Inbound silence: after heartbt_int of no inbound data → emit TestRequest.
-    //   3. Unanswered TestRequest: after the grace window without an inbound Heartbeat
-    //      reply → 105 R-1 (research D3): the slot-74 record, a Logout with Text, then
-    //      Disconnected; the connection closes at the loop's exit (105 D1).
-    //   4. HeartBtInt=0: co_returns immediately (no timers armed — FR-006).
+    // 105 (research D6; data-model E-4) supersedes 005 research D-8's 1 × HeartBtInt
+    // TestRequest threshold. With T = test_request_threshold, or 1.2 × HeartBtInt when unset:
+    //   1. Outbound idle: after heartbt_int of no outbound data → emit Heartbeat, unless a
+    //      TestRequest is pending and no inbound frame arrived since it.
+    //   2. Inbound silence: after T of no inbound data → emit TestRequest.
+    //   3. Unanswered TestRequest: strictly after 2T of inbound silence with a TestRequest
+    //      pending and no inbound frame since it → 105 R-1 (research D3): the slot-74 record,
+    //      a Logout with Text, then Disconnected; the connection closes at the loop's exit
+    //      (105 D1).
+    //   4. HeartBtInt <= 0: co_returns immediately (no timers armed — FR-006).
     // Runs under the root cancellation slot; Session::close() cancels it.
     // [feedback_asio_cospawn_total_cancellation_default]: the coroutine resets to
     // enable_total_cancellation.
