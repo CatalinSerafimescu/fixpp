@@ -29,7 +29,7 @@
 // The suites:
 //   SessionNeverSweepsTheClock  D-536-1: no session calls Clock::cancel_sleeps().
 //   CloseAfterTheLoopSent       D-536-2, the filter reset before each of the loop's sleeps.
-//   CloseDuringTheLoopsEmit     D-536-2, the state test before the grace sleep.
+//   CloseDuringTheLoopsEmit     D-536-2, the state test before the sleep to the give-up.
 //   LogoutWaitWake              D-536-3: the peer's Logout ends the logout wait through a
 //                               wake of the session's own.
 //   LogoutWaitLifetime          D-536-3, what the wake leaves behind when the wait ends
@@ -591,7 +591,7 @@ TEST(CloseAfterTheLoopSent, AHeartbeat_CloseCompletesWithoutTheClock) {
            "whose liveness loop had sent a Heartbeat: close did not end the loop's main sleep";
 }
 
-// The loop sent a Heartbeat and a TestRequest and is parked in its grace sleep.
+// The loop sent a TestRequest and sleeps toward its give-up instant.
 TEST(CloseAfterTheLoopSent, ATestRequest_CloseCompletesWithoutTheClock) {
     Scene s;
     ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
@@ -606,15 +606,15 @@ TEST(CloseAfterTheLoopSent, ATestRequest_CloseCompletesWithoutTheClock) {
     auto closed = s.spawn_close(close_mode::terminal);
     EXPECT_TRUE(s.pump([&] { return Scene::ready(closed); }))
         << "close(terminal) did not complete, with the clock not advanced, for a session "
-           "whose liveness loop had sent a TestRequest: close did not end the loop's grace "
-           "sleep";
+           "whose liveness loop had sent a TestRequest: close did not end the loop's sleep "
+           "to the give-up";
 }
 
 // ── D-536-2, the state test: close runs while the loop's emit is suspended ──────────
 //
 // The loop's TestRequest is held in the store, once the store has the frame. close(terminal)
 // runs to its wait for the loop; the hold is then released. On the callback transport
-// the released emit succeeds, so the loop goes on to its grace sleep with close's
+// the released emit succeeds, so the loop goes on to its sleep to the give-up with close's
 // cancellation already emitted. The give-up instant is past the clock (the clock stands
 // one second after the threshold, and the give-up is strictly after twice it), so the loop
 // can only leave by itself.
@@ -650,11 +650,11 @@ TEST(CloseDuringTheLoopsEmit, TestRequestHeldInTheStore_CloseCompletesWithoutThe
         << "a cancellation was recorded on the liveness loop's thread during the hold";
     ASSERT_EQ(s.count("1"), 1)
         << "the released TestRequest was not transmitted, so the loop did not reach its "
-           "grace sleep and the cell says nothing about the state test before it";
+           "sleep to the give-up and the cell says nothing about the state test before it";
     EXPECT_TRUE(completed)
         << "close(terminal) did not complete, with the clock not advanced, after the "
            "liveness loop's held TestRequest emit was released: the loop went into its "
-           "grace sleep although the session was no longer Active";
+           "sleep to the give-up although the session was no longer Active";
 }
 
 // ── D-536-3: the peer's Logout ends the logout wait through the session's own wake ──
