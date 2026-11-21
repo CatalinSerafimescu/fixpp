@@ -1077,26 +1077,40 @@ remaining reference.
 
 ### Instrument first (US5)
 
-- [ ] T108 [US5] On `$B`, run the SC-005 instrument `git grep -n 'maybe_unused' -- src include` filtered to the #559 markers of
+- [X] T108 [US5] On `$B`, run the SC-005 instrument `git grep -n 'maybe_unused' -- src include` filtered to the #559 markers of
   sites 2 and 3, and T013's caller census; both must report their known positives there (the instrument can report non-zero).
+  Done: evidence file, Phase 8, T108 (four markers, the three `ReconnectFsm` members and `parse_cn_from_dn_local`; the
+  census's `drive_logout` test call).
 
 ### Implementation for US5
 
-- [ ] T109 [US5] `include/fixpp/session/reconnect_fsm.hpp` and `src/session/reconnect_fsm.cpp`: remove `attempt_index_`,
+- [X] T109 [US5] `include/fixpp/session/reconnect_fsm.hpp` and `src/session/reconnect_fsm.cpp`: remove `attempt_index_`,
   `heartbeat_interval_`, `logout_disconnect_timeout_`, `heartbeat_timer_`, `test_request_timer_`, `logout_timer_`,
   `last_outbound_testreqid_`, `drive_logout`, every caller-less stub T013 confirms (`run_heartbeat_cadence`,
   `run_inbound_liveness_watch` with its timing comment, `validate_inbound_heartbeat_testreqid`,
   `process_inbound_sequence_reset`, `reply_to_inbound_resend_request`), the constructor's `heartbeat_interval` and
   `logout_disconnect_timeout` parameters and the false header comment; update `Session::Session` and every constructor call
   site of T013.
-- [ ] T110 [US5] Remove `parse_cn_from_dn_local` from `src/session/session.cpp`.
-- [ ] T111 [US5] Retire `DriveLogoutStub_*` and `Initiator_DriveLogout_*` in `tests/session/test_logout_timeout.cpp` with a note
+  Done: `05bb1b2f` (22 test construction sites, `Session::Session`; the census widened to `bindings bench examples tools
+  docs` found no other).
+- [X] T110 [US5] Remove `parse_cn_from_dn_local` from `src/session/session.cpp`.
+  Done: `05bb1b2f`.
+- [X] T111 [US5] Retire `DriveLogoutStub_*` and `Initiator_DriveLogout_*` in `tests/session/test_logout_timeout.cpp` with a note
   naming FR-013; remove their entry from `ci/red-arms/batch11-labels.txt`; correct the "triggers drive_logout path" comment in
   `tests/fuzz/fuzz_session_recovery_admin_parse.cpp` and every test comment naming a removed stub as a RED witness.
-- [ ] T112 [US5] Size pins: re-run T010's two greps at the head and update every `sizeof(Session)` / `sizeof(ReconnectFsm)` pin
+  Done: `05bb1b2f`, `2f478e50` (test_logout_timeout.cpp, batch11-labels.txt, the fuzz harness, test_heartbeat_cadence_8cell.cpp,
+  test_recovery_admin_span_gapfill.cpp, test_recovery_store_horizon.cpp; `test_inbound_sequence_reset.cpp`'s past-tense
+  history kept as written).
+- [X] T112 [US5] Size pins: re-run T010's two greps at the head and update every `sizeof(Session)` / `sizeof(ReconnectFsm)` pin
   they report in `tests/` and `ci/`; the full `-k 0` build of T113 is the second instrument.
+  Done: no pin to update (evidence file, Phase 8, T112).
 - [ ] T113 [US5] Full `-k 0` build on linux-clang-debug and linux-gcc-release; T108's two instruments now report nothing; commit
   `H6`; `codegraph sync`.
+  Partial: linux-clang-debug full `-k 0` in `$M` at `05bb1b2f` rc 0, no compiler warning; the two instruments report
+  nothing; H6 `e2202e44`. linux-gcc-release: the full `-k 0` was stopped (its regenerated codegen builders ran at a rate
+  of hours) and the gcc-release build of every target compiling a C++ file the branch touches was run instead (rc 0
+  after `e2202e44` braced five gtest-macro ifs gcc refused under `-Werror=dangling-else`). Owed: the full gcc-release
+  `-k 0` (evidence file, Phase 8, T113).
 
 **Checkpoint**: US5 complete.
 
