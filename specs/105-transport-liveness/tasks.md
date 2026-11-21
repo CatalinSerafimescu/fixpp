@@ -536,7 +536,7 @@ does not complete closes the connection at the bound.
 
 ### RED cells for US1 part B (write first)
 
-- [ ] T042 [P] [US1] `tests/session/test_105_logout_wait.cpp`, W-1 after Active (C-2.2, clarification D-a), both roles:
+- [X] T042 [P] [US1] `tests/session/test_105_logout_wait.cpp`, W-1 after Active (C-2.2, clarification D-a), both roles:
   `LogoutWait105.TooLow_PeerLogoutBelowNextNumIn_EndsWaitAndResets`, `GapDeadline_PeerLogoutAboveNextNumIn_EndsWaitAndResets`,
   `SendingTimeReject_PeerLogoutInSequence_EndsWait`, `OrigSendingTimeReject_PeerLogoutEndsWait` — the peer's Logout at the
   number a real peer uses; positive control: the connection open and `fixpp_session_is_established` true before it; then
@@ -547,32 +547,32 @@ does not complete closes the connection at the bound.
   and the too-low route (below it), the peer's Logout carrying PossDupFlag(43)=Y: no Reject written, the wait ended, EOF
   after it, NextNumIn advanced and `fromAdmin` called once at NextNumIn, neither below it. RED on the base before the fix:
   the session is `Disconnected` at the Logout's write and the transport stays open.
-- [ ] T043 [US1] Same file, the bound (W-12, C-2.5, C-1.d): `Bound_EofAtExactlyTheBound` (open at the bound − 1 ms, EOF at the
+- [X] T043 [US1] Same file, the bound (W-12, C-2.5, C-1.d): `Bound_EofAtExactlyTheBound` (open at the bound − 1 ms, EOF at the
   bound, `onLogout` then), `Bound_DoesNotSlideWithAnAnswerSent` (a Heartbeat answering the peer's TestRequest mid-wait),
   `OnLogoutFiresAtWaitEnd`; the liveness instants and the gap deadline set past the bound and named in each cell. RED on the
   base before the fix: no EOF at the bound.
-- [ ] T044 [US1] Same file, W-2 to W-7 on the SendingTime-Reject route (C-2.2), both roles:
+- [X] T044 [US1] Same file, W-2 to W-7 on the SendingTime-Reject route (C-2.2), both roles:
   `AppMessageDuringWait_ReachesFromAppAndAdvances`, `TestRequestDuringWait_Answered`, `ResendRequestDuringWait_Answered`,
   `HeartbeatDuringWait_AnswersPendingTestRequest`, `TooHighDuringWait_NotDeliveredResendRequestSent`,
   `GapDeadlinePassedDuringWait_NoSecondLogout` — each asserts the wire reply (or its absence) and `fromApp` delivery, with the
   session shown established at the frame. RED on the base before the fix: the frames reach a `Disconnected` session
   and are drained.
-- [ ] T045 [US1] Same file, W-8 absorption: `Absorbed_<TooLow|SecondSendingTimeReject|OrigSendingTimeReject|TestReqIdMismatchInSequence|TestReqIdMismatchKnobOffOutOfSequence|TestReqIdMismatchTooHighAnswerPending|CompIdMismatch|MsgSeqNumZero>_ThenAppMessageAndPeerLogout`
+- [X] T045 [US1] Same file, W-8 absorption: `Absorbed_<TooLow|SecondSendingTimeReject|OrigSendingTimeReject|TestReqIdMismatchInSequence|TestReqIdMismatchKnobOffOutOfSequence|TestReqIdMismatchTooHighAnswerPending|CompIdMismatch|MsgSeqNumZero>_ThenAppMessageAndPeerLogout`
   (one cell per route of the TestReqID mismatch, contract C-2 W-8; NextNumIn asserted after each absorbed frame, by W-8's
   rule for its cause and route; no second Logout on the wire, the application message reaches `fromApp`, the peer's Logout resets under
   `reset_on_logout`, `onLogout` counted once at the wait's end, then EOF) and `TooLowRoute_PeerFramesBelowNextNumIn_Absorbed`.
   RED on the base before the fix.
-- [ ] T046 [US1] Same file, W-9, one cell per disposition, each asserting EOF with the clock frozen, `onLogout` once and no
+- [X] T046 [US1] Same file, W-9, one cell per disposition, each asserting EOF with the clock frozen, `onLogout` once and no
   second Logout: `StoreFailureDuringWait_EofAtOnce` (error, `Disconnected` written), `PersistFailureDuringWait_EofAtOnce`
   (error, none written), `TooHighDuringWait_ResendRequestAssignFails_EofAtOnce` (success, `Disconnected` written),
   `SendHeldInStoreAcrossTheEnding_StoreFails_EofAtOnce` (a non-pump root), and `DirectSession_StoreFailureDuringWait_ClosesAtNextSend`
   (L-105-b's form). RED on the base before the fix.
-- [ ] T047 [US1] Same file, W-10 and W-11 (C-2.3, C-2.4): `SendDuringWait_Refused` (`session_invalid_state_for_send`, with
+- [X] T047 [US1] Same file, W-10 and W-11 (C-2.3, C-2.4): `SendDuringWait_Refused` (`session_invalid_state_for_send`, with
   `fixpp_session_is_established` true at the same instant as positive control), `SendHeldInStoreAcrossTheEnding_NumberedBeforeTheLogout`
   (the send's number below the Logout's; the wire order not asserted, L-105-e),
   `LivenessDuringWait_ArmedOneTickBeforeHeartbeat_SendsNothing` and `LivenessDuringWait_ArmedOneTickBeforeGiveUp_SendsNothing`
   (`test_request_threshold = HeartBtInt`; positive control `fsm_state() == Active` at the instant tested). RED on the base before the fix: the session is `Disconnected`.
-- [ ] T048 [US1] Same file, no wait and the closers (C-2 "No wait is armed", W-13, W-14, C-2.8):
+- [X] T048 [US1] Same file, no wait and the closers (C-2 "No wait is armed", W-13, W-14, C-2.8):
   `TimeoutZero_NoWaitEofAfterWrite`, `NoClock_NoWait_ClosesAtNextCall` (a direct Session, the only form with no clock, since `Engine::open` refuses a null
   `EngineConfig::clock`: no wait armed, so the next `send()` or `close()` closes, L-105-b's oracle as in
   `DirectSession_StoreFailureDuringWait_ClosesAtNextSend`), `<CloseTerminal|EngineStop|DriveReconnectDrain>DuringWait_OneClose`,
@@ -580,7 +580,7 @@ does not complete closes the connection at the bound.
   too-high Logout while a resend is outstanding, then a non-advancing frame after the gap deadline: the deadline's Logout,
   then EOF with the clock frozen). RED on the base before the fix where the base keeps the transport open; a cell
   the base already meets is marked [guard] with its mutant from T076 and recorded.
-- [ ] T049 [US1] Same file, before Active (W-1 to W-15's before-Active column, C-2.6, E-3 rows 6, 9, 11), both roles where
+- [X] T049 [US1] Same file, before Active (W-1 to W-15's before-Active column, C-2.6, E-3 rows 6, 9, 11), both roles where
   the refusal exists: `PreActive_BoundSurvivesTheRefusalsOwnEdge`, `PreActive_FramesDrained`,
   `PreActiveTooLowLogon_PeerLogoutEndsWaitNoReset` (OQ-1), `PreActive_BoundExpiryCloses`,
   `PreActive_WaitArmedAtEstablishmentDeadline_ClosedNoEvent` (Engine; no arm in flight, so this is E-5's cell, not the
@@ -592,11 +592,11 @@ does not complete closes the connection at the bound.
   `logout_disconnect_timeout_ms`; open at the deadline − 1 ms, EOF at it, no event and no record) and
   `PreActive_ClockOverride_CapOnEngineClock` (a second mock clock as `clock_override`; only the engine clock reaches the
   deadline). RED on the base before the fix: closed at the deadline with the event, or never.
-- [ ] T050 [US1] Same file, the bound's expiry under a blocked arm (rows 10, 11; N-1):
+- [X] T050 [US1] Same file, the bound's expiry under a blocked arm (rows 10, 11; N-1):
   `Bound_ExpiresWhileResendAnswerBlocked_EofAtTheBound` — SendingTime-Reject route, the peer's ResendRequest during the wait,
   its answer blocked in `async_write` behind a peer that stopped reading; open at the bound − 1 ms, EOF at the bound. RED on the
   base before the fix.
-- [ ] T051 [P] [US1] `tests/session/test_105_write_limit.cpp` (C-2.7, FR-004b), both roles, on the held-write transport of
+- [X] T051 [P] [US1] `tests/session/test_105_write_limit.cpp` (C-2.7, FR-004b), both roles, on the held-write transport of
   T005, `logon_timeout_ms` well above the bound. Each `LogoutBlocked` and `LogoutQueuedBehindBlockedSend` cell asserts: open at the
   bound − 1 ms, no complete Logout at the peer, EOF at the bound, `onLogout` once, no wait after it (the peer's Logout sent
   after the bound changes nothing); the other cells state their own oracle:
@@ -618,7 +618,7 @@ does not complete closes the connection at the bound.
   Active. The reach proof (`cut` set when the leaf returned, or the close frame's counter at 1, through `session_test_access`)
   is asserted before the oracle. GREEN on the base by design (no wait exists there), so it is written with T060 and read only
   under T077's mutant.
-- [ ] T053 [US1] `test_105_logout_wait.cpp`, the bound's absorbed exception (E-3 row 16):
+- [X] T053 [US1] `test_105_logout_wait.cpp`, the bound's absorbed exception (E-3 row 16):
   `LogoutWait105.EndingBound_DeadlineArmAbsorbsException_<Writing|Armed>_EofAtOnce`, T005's counting decorator as
   `clock_override`, throwing `std::bad_alloc` from `sleep_until` for the bound's instant only. `Writing`: the R-2 Logout's
   write held, the throw armed before the write. `Armed` (after Active, and before Active): the throw armed by the test only
@@ -626,16 +626,16 @@ does not complete closes the connection at the bound.
   Each: EOF at once with the clock frozen, `onLogout` once (after Active), driven by the bounded drive so its RED arm
   terminates. RED on the base before the fix: no EOF. Its reach-proof twins (the phase the exit found) go in
   `test_105_seams.cpp` with T061.
-- [ ] T054 [P] [US1] `tests/session/test_105_tls_close.cpp`, TLS arms of part B (C-8.4, C-8.5):
+- [X] T054 [P] [US1] `tests/session/test_105_tls_close.cpp`, TLS arms of part B (C-8.4, C-8.5):
   `TlsClose105.CloseGracefulDuringWait_CloseNotifyAtTheBound` (`logout_disconnect_timeout_ms` set well above the wall cap,
   the mock clock advanced to the bound: close_notify, then EOF, at the bound's mock instant) and
   `TlsWriteLimit105.R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsCloseTimeout` (no close_notify; the close within the
   bound plus `tls_close_timeout`; L-105-g). RED on the base before the fix.
-- [ ] T055 [US1] `test_105_logout_wait.cpp`, lifetime (ASan lane; B-103-13): `Lifetime105.CloseFrame_SpawnedByWriteLimitDuringGracefulClose`
+- [X] T055 [US1] `test_105_logout_wait.cpp`, lifetime (ASan lane; B-103-13): `Lifetime105.CloseFrame_SpawnedByWriteLimitDuringGracefulClose`
   (the mock clock advanced to the bound well inside `close_grace`'s wall time: EOF at the bound, the Session destroyed after
   `close()` returns), RED on the base before the fix in its EOF-at-the-bound half; [guard: the bound's join deleted, and
   the close frame's first join deleted] `Lifetime105.<EndingLogoutBound|CloseFrame>_SessionDestroyedAfterClose`.
-- [ ] T056 [US1] Commit the cells (`C2`); read T042 to T055 on `$B` (T052 excepted: a seam-file guard, written with T060);
+- [X] T056 [US1] Commit the cells (`C2`); read T042 to T055 on `$B` (T052 excepted: a seam-file guard, written with T060);
   record per cell.
 
 ### Implementation for US1 part B
