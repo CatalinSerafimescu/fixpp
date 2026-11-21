@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // tests/session/test_105_liveness_timing.cpp — 105-transport-liveness: R-1, the unanswered
-// TestRequest (tasks.md T023; contract C-3; research D3).
+// TestRequest (tasks.md T023; contract C-3; research D3), and User Story 3, the TestRequest
+// timing and test_request_threshold (tasks.md T089 to T093; contract C-6; research D6).
 //
-// Every cell runs with HeartBtInt 10 s and test_request_threshold = HeartBtInt (tasks.md,
+// Every R-1 cell runs with HeartBtInt 10 s and test_request_threshold = HeartBtInt (tasks.md,
 // Execution rules, "Liveness instants"), so the TestRequest and the give-up instants are the
-// same with and without 105's timing change. The TestRequest is read by test_105_support.hpp's
-// wire reader; the give-up is reached by stepping the mock clock, then the clock is held still
-// while the close is awaited. The wall-clock timers: none (plain rig, mock transport).
+// same with and without 105's timing change; the User Story 3 cells below say their own. The
+// TestRequest is read by test_105_support.hpp's wire reader; the give-up is reached by stepping the
+// mock clock, then the clock is held still while the close is awaited. The wall-clock timers: none
+// (plain rig, mock transport).
 //
 // No ASSERT_* runs between a rig's start() and its stop() (tasks.md, Execution rules).
 #include <gtest/gtest.h>
@@ -29,6 +31,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -380,6 +383,555 @@ TEST(LivenessTiming105Direct, GiveUp_WriteFails_StillEof) {
     auto const records = log.records_of(FIXPP_FORMAT_ID(kGiveUpFormat));
     ASSERT_EQ(records.size(), 1U) << "the give-up record";
     EXPECT_EQ(record_test_req_id(records.front()), tr_id);
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+// User Story 3 (tasks.md T089 to T091, T093; research D6; data-model E-4; contract C-6):
+// TestRequest at T of inbound silence (T = test_request_threshold, default 1.2 × HeartBtInt),
+// the give-up strictly after 2T of inbound silence, one sleep per iteration. HeartBtInt is
+// 10 s; the threshold is unset unless the cell names it. Instants are mock-clock offsets from
+// the instant the session reached Active: the run advances the clock to each probe instant
+// (every whole second up to the cell's end, and the extra instants the cell names), drives
+// the io_context boundedly there, runs the peer's actions due at that instant, drives again,
+// and stamps every frame the peer then holds with that instant.
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+using ns = std::chrono::nanoseconds;
+
+struct TimedFrame {
+    std::string type;
+    ns at{0};
+    std::string frame;
+};
+
+struct Timeline {
+    bool active = false;
+    std::vector<TimedFrame> out;                  // the session's frames after Active
+    std::vector<std::pair<ns, fsm_state>> state;  // the state read at each probe instant
+    std::optional<ns> ended_at;                   // the first probe at which it left Active
+    bool eof = false;                             // EOF at once after it left Active
+
+    [[nodiscard]] std::vector<TimedFrame> of(std::string_view type) const {
+        std::vector<TimedFrame> r;
+        for (auto const& f : out) {
+            if (f.type == type) r.push_back(f);
+        }
+        return r;
+    }
+    [[nodiscard]] std::size_t count(std::string_view type, ns from, ns to) const {
+        std::size_t n = 0;
+        for (auto const& f : out) {
+            if (f.type == type && f.at >= from && f.at <= to) ++n;
+        }
+        return n;
+    }
+    [[nodiscard]] std::optional<fsm_state> state_at(ns at) const {
+        for (auto const& [t, s] : state) {
+            if (t == at) return s;
+        }
+        return std::nullopt;
+    }
+};
+
+struct PeerAction {
+    ns at{0};
+    std::function<void(pr::Rig&, Timeline const&)> act{};
+};
+
+struct TimelineSpec {
+    session_role role = session_role::acceptor;
+    std::function<void(SessionConfig&)> tweak{};
+    std::vector<PeerAction> actions{};
+    std::vector<ns> extra_probes{};
+    ns until{0};
+    ns step = 1s;
+    fixpp::core::steady_time_point steady_seed{};
+    std::shared_ptr<t105::CountingClock>* counting = nullptr;  // set: clock_override
+};
+
+Timeline run_timeline(TimelineSpec const& spec, const char* site) {
+    auto app = std::make_shared<LivenessApp>();
+    pr::Rig rig{app, spec.steady_seed};
+    auto cfg = rig.cfg(spec.role);
+    cfg.heartbeat_interval = kHb;
+    if (spec.counting != nullptr) {
+        *spec.counting = std::make_shared<t105::CountingClock>(rig.clock);
+        cfg.clock_override = *spec.counting;
+    }
+    if (spec.tweak) spec.tweak(cfg);
+    Timeline tl;
+    bool const started = rig.start(std::move(cfg));
+    tl.active = started && rig.to_active();
+    if (started && !tl.active) {
+        // The frames the session sent though it did not stay Active (the Logon is not read).
+        for (auto const* type : {"0", "1", "5"}) {
+            for (auto const& f : pr::frames_of_type(rig.peer.received, type)) {
+                tl.out.push_back({type, ns{0}, f});
+            }
+        }
+    }
+    if (tl.active) {
+        std::set<ns> probes(spec.extra_probes.begin(), spec.extra_probes.end());
+        for (ns t = spec.step; t <= spec.until; t += spec.step) probes.insert(t);
+        for (auto const& a : spec.actions) probes.insert(a.at);
+        std::size_t seen = rig.peer.received.size();
+        ns now{0};
+        auto collect = [&](ns at) {
+            auto const fresh = rig.peer.received.substr(seen);
+            for (auto const& f : pr::frames_of_type(fresh, "0")) tl.out.push_back({"0", at, f});
+            for (auto const& f : pr::frames_of_type(fresh, "1")) tl.out.push_back({"1", at, f});
+            for (auto const& f : pr::frames_of_type(fresh, "2")) tl.out.push_back({"2", at, f});
+            for (auto const& f : pr::frames_of_type(fresh, "5")) tl.out.push_back({"5", at, f});
+            // Only whole frames are consumed; a partial tail is read at the next probe.
+            auto const last = fresh.rfind(
+                "\x01"
+                "10=");
+            if (last != std::string::npos) {
+                auto const end = fresh.find('\x01', last + 1);
+                if (end != std::string::npos) seen += end + 1;
+            }
+        };
+        for (ns const t : probes) {
+            if (t > spec.until) break;
+            rig.clock->advance(t - now);
+            now = t;
+            (void)t105::drive_bounded(rig.ioc, 64);
+            for (auto const& a : spec.actions) {
+                if (a.at == t) a.act(rig, tl);
+            }
+            (void)t105::drive_bounded(rig.ioc, 64);
+            collect(t);
+            auto const st = rig.state();
+            tl.state.emplace_back(t, st);
+            if (st != fsm_state::Active) {
+                tl.ended_at = t;
+                tl.eof = t105::pump_until_peer_read_ends(
+                             rig.ioc, [&] { return rig.peer.read_ended; }, kWallCap, site) &&
+                         t105::ending_of(rig.peer) == t105::peer_ending::eof;
+                collect(t);
+                break;
+            }
+        }
+    }
+    rig.stop();
+    return tl;
+}
+
+constexpr ns sec(int s) { return std::chrono::seconds{s}; }
+constexpr ns kGuard = t105::kLivenessGuard;
+
+// The peer's frames, numbered from 2 (its Logon was 1).
+struct PeerSeq {
+    std::uint32_t next = 2;
+};
+
+std::string app_message(pr::Rig& rig, std::uint32_t seq) {
+    return rig.msg("D", seq,
+                   "11=ORD1\x01"
+                   "21=1\x01"
+                   "55=X\x01"
+                   "54=1\x01"
+                   "60=" +
+                       rig.sending_time() +
+                       "\x01"
+                       "40=1\x01");
+}
+
+PeerAction app_at(ns at, std::shared_ptr<PeerSeq> seq) {
+    return {at,
+            [seq](pr::Rig& rig, Timeline const&) { rig.peer.send(app_message(rig, seq->next++)); }};
+}
+
+// The TestReqID(112) of the n-th TestRequest the session sent (0-based), or "".
+std::string tr_id(Timeline const& tl, std::size_t n) {
+    auto const trs = tl.of("1");
+    return n < trs.size() ? pr::field_value(trs[n].frame, "112") : std::string{};
+}
+
+std::string give_up_text(Timeline const& tl) {
+    auto const lo = tl.of("5");
+    return lo.empty() ? std::string{} : pr::field_value(lo.back().frame, "58");
+}
+
+class LivenessTimingUs3105 : public ::testing::TestWithParam<session_role> {};
+
+// T089. The base sends the TestRequest at 1 × HeartBtInt (10 s).
+TEST_P(LivenessTimingUs3105, Default_NoTestRequestAt11s_OneAt12s) {
+    auto const tl = run_timeline({.role = GetParam(), .until = sec(12)}, "Default_TR");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_EQ(tl.count("1", ns{0}, sec(11)), 0U) << "a TestRequest at or before 11 s";
+    EXPECT_EQ(tl.count("1", sec(12), sec(12)), 1U) << "no TestRequest at 12 s";
+    EXPECT_EQ(tl.count("0", sec(10), sec(10)), 1U) << "the Heartbeat at 10 s (positive control)";
+}
+
+// T089. The base ends near 2 × HeartBtInt.
+TEST_P(LivenessTimingUs3105, Default_ActiveAt23900ms_EndedAt24sPlusGuard) {
+    auto const tl =
+        run_timeline({.role = GetParam(),
+                      .extra_probes = {ns{std::chrono::milliseconds{23900}}, sec(24) + kGuard},
+                      .until = sec(25)},
+                     "Default_GiveUp");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_EQ(tl.state_at(ns{std::chrono::milliseconds{23900}}), fsm_state::Active);
+    ASSERT_TRUE(tl.ended_at.has_value()) << "not given up";
+    EXPECT_EQ(*tl.ended_at, sec(24) + kGuard);
+    EXPECT_EQ(tl.count("5", sec(24) + kGuard, sec(24) + kGuard), 1U) << "R-1's Logout";
+    EXPECT_EQ(give_up_text(tl), "TestRequest unanswered, TestReqID " + tr_id(tl, 0));
+    EXPECT_TRUE(tl.eof) << "no EOF after the give-up";
+}
+
+TEST_P(LivenessTimingUs3105, SetThreshold7s_TestRequestAt7s_GiveUpAt14sPlusGuard) {
+    auto const tl = run_timeline(
+        {.role = GetParam(),
+         .tweak = [](SessionConfig& c) { c.test_request_threshold = std::chrono::seconds{7}; },
+         .extra_probes = {sec(14) + kGuard},
+         .until = sec(16)},
+        "SetThreshold7s");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_EQ(tl.count("1", ns{0}, sec(6)), 0U) << "a TestRequest before 7 s";
+    EXPECT_EQ(tl.count("1", sec(7), sec(7)), 1U) << "no TestRequest at 7 s";
+    EXPECT_EQ(tl.state_at(sec(14)), fsm_state::Active);
+    ASSERT_TRUE(tl.ended_at.has_value()) << "not given up";
+    EXPECT_EQ(*tl.ended_at, sec(14) + kGuard);
+    EXPECT_EQ(tl.count("5", sec(14) + kGuard, sec(14) + kGuard), 1U) << "R-1's Logout";
+    EXPECT_TRUE(tl.eof);
+}
+
+// At exactly 2T the give-up has not run, so the peer's answer delivered then wins.
+TEST_P(LivenessTimingUs3105, GuardAtExactly2T_EchoWins) {
+    auto seq = std::make_shared<PeerSeq>();
+    auto const tl = run_timeline(
+        {.role = GetParam(),
+         .actions = {{sec(24),
+                      [seq](pr::Rig& rig, Timeline const& t) {
+                          rig.peer.send(rig.msg("0", seq->next++, "112=" + tr_id(t, 0) + "\x01"));
+                      }}},
+         .extra_probes = {sec(24) + kGuard},
+         .until = sec(26)},
+        "GuardAtExactly2T");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_FALSE(tr_id(tl, 0).empty()) << "no TestRequest";
+    EXPECT_EQ(tl.state_at(sec(24) + kGuard), fsm_state::Active) << "given up after the echo";
+    EXPECT_EQ(tl.state_at(sec(26)), fsm_state::Active);
+    EXPECT_FALSE(tl.ended_at.has_value());
+    EXPECT_EQ(tl.count("5", ns{0}, sec(26)), 0U) << "a Logout";
+}
+
+TEST_P(LivenessTimingUs3105, At2TPlus1ns_GivesUp) {
+    auto const tl = run_timeline(
+        {.role = GetParam(), .extra_probes = {sec(24) + kGuard}, .until = sec(25)}, "At2TPlus1ns");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_EQ(tl.state_at(sec(24)), fsm_state::Active) << "given up at exactly 2T";
+    ASSERT_TRUE(tl.ended_at.has_value()) << "not given up";
+    EXPECT_EQ(*tl.ended_at, sec(24) + kGuard);
+    EXPECT_EQ(tl.count("5", sec(24) + kGuard, sec(24) + kGuard), 1U);
+}
+
+// T090 (clarification D-c). Application traffic after the TestRequest, no Heartbeat answer:
+// not given up 2T after the TestRequest's silence began, given up 2T after the last frame.
+TEST_P(LivenessTimingUs3105,
+       TrafficAfterTestRequestNoHeartbeat_NotGivenUpAt2T_GivenUpAt2TAfterLastFrame) {
+    auto seq = std::make_shared<PeerSeq>();
+    auto const tl = run_timeline({.role = GetParam(),
+                                  .actions = {app_at(sec(13), seq), app_at(sec(20), seq)},
+                                  .extra_probes = {sec(24) + kGuard, sec(44) + kGuard},
+                                  .until = sec(46)},
+                                 "TrafficAfterTestRequest");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_EQ(tl.count("1", sec(12), sec(12)), 1U) << "no TestRequest at 12 s";
+    EXPECT_EQ(tl.state_at(sec(24) + kGuard), fsm_state::Active) << "given up at 2T of TR1";
+    EXPECT_EQ(tl.state_at(sec(36)), fsm_state::Active);
+    EXPECT_EQ(tl.state_at(sec(44)), fsm_state::Active);
+    ASSERT_TRUE(tl.ended_at.has_value()) << "not given up";
+    EXPECT_EQ(*tl.ended_at, sec(44) + kGuard) << "not 2T after the last frame";
+}
+
+// A silent peer: the Heartbeat at 10 s, the TestRequest at 12 s, no Heartbeat while it waits,
+// the give-up just after 24 s.
+TEST_P(LivenessTimingUs3105, SilentPeer_NoHeartbeatWhileTestRequestPending) {
+    auto const tl = run_timeline(
+        {.role = GetParam(), .extra_probes = {sec(24) + kGuard}, .until = sec(25)}, "SilentPeer");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_EQ(tl.count("0", sec(10), sec(10)), 1U) << "no Heartbeat at 10 s";
+    EXPECT_EQ(tl.count("1", sec(12), sec(12)), 1U) << "no TestRequest at 12 s";
+    EXPECT_EQ(tl.state_at(sec(22)), fsm_state::Active);
+    EXPECT_EQ(tl.count("0", sec(12) + ns{1}, sec(24) + kGuard), 0U)
+        << "a Heartbeat while the TestRequest waited on a silent peer";
+    ASSERT_TRUE(tl.ended_at.has_value()) << "not given up";
+    EXPECT_EQ(*tl.ended_at, sec(24) + kGuard);
+}
+
+// A frame at 13 s: the Heartbeat at 22 s, TR2 at 25 s, no Heartbeat at 35 s, the give-up just
+// after 37 s.
+TEST_P(LivenessTimingUs3105,
+       FrameAfterTestRequest_HeartbeatAt22s_TR2At25s_NoneAt35s_GiveUpAfter37s) {
+    auto seq = std::make_shared<PeerSeq>();
+    auto const tl = run_timeline({.role = GetParam(),
+                                  .actions = {app_at(sec(13), seq)},
+                                  .extra_probes = {sec(37) + kGuard},
+                                  .until = sec(38)},
+                                 "FrameAfterTestRequest");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_EQ(tl.count("1", sec(12), sec(12)), 1U) << "no TR1 at 12 s";
+    EXPECT_EQ(tl.count("0", sec(22), sec(22)), 1U) << "no Heartbeat at 22 s";
+    EXPECT_EQ(tl.count("0", sec(13), sec(21)), 0U) << "a Heartbeat before 22 s";
+    EXPECT_EQ(tl.count("1", sec(25), sec(25)), 1U) << "no TR2 at 25 s";
+    EXPECT_EQ(tl.count("1", sec(13), sec(24)), 0U) << "a TestRequest before 25 s";
+    EXPECT_EQ(tl.count("0", sec(23), sec(37) + kGuard), 0U) << "a Heartbeat after TR2";
+    EXPECT_EQ(tl.state_at(sec(37)), fsm_state::Active);
+    ASSERT_TRUE(tl.ended_at.has_value()) << "not given up";
+    EXPECT_EQ(*tl.ended_at, sec(37) + kGuard);
+    EXPECT_EQ(give_up_text(tl), "TestRequest unanswered, TestReqID " + tr_id(tl, 1));
+}
+
+// A frame at 23 s, after the Heartbeat instant (22 s) the silent peer had made ineligible: the
+// Heartbeat goes at the loop's next wake, the stale give-up instant, not at 23 s.
+TEST_P(LivenessTimingUs3105, FrameAfterHeartbeatInstant_HeartbeatAtTheStaleGiveUpWake) {
+    auto seq = std::make_shared<PeerSeq>();
+    auto const tl = run_timeline({.role = GetParam(),
+                                  .actions = {app_at(sec(23), seq)},
+                                  .extra_probes = {sec(24) + kGuard},
+                                  .until = sec(26)},
+                                 "FrameAfterHeartbeatInstant");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_EQ(tl.count("1", sec(12), sec(12)), 1U) << "no TR1 at 12 s";
+    EXPECT_EQ(tl.count("0", sec(12) + ns{1}, sec(24)), 0U) << "a Heartbeat at or before 24 s";
+    EXPECT_EQ(tl.count("0", sec(24) + kGuard, sec(24) + kGuard), 1U)
+        << "no Heartbeat at the stale give-up wake";
+    EXPECT_EQ(tl.state_at(sec(26)), fsm_state::Active);
+    EXPECT_FALSE(tl.ended_at.has_value());
+}
+
+// After TR1 a silent peer: the loop sleeps once per wake, so the sleeps from TR1 to the give-up
+// are few; a loop that kept a reached, ineligible Heartbeat instant in its sleep set would
+// return from every sleep at once (the bounded drive stops it, and the count shows it).
+TEST_P(LivenessTimingUs3105, SilentAfterTestRequest_NoSpin) {
+    std::shared_ptr<t105::CountingClock> counting;
+    std::size_t at_tr1 = 0;
+    std::size_t at_give_up = 0;
+    auto const tl = run_timeline({.role = GetParam(),
+                                  .actions = {{sec(12),
+                                               [&](pr::Rig&, Timeline const&) {
+                                                   if (counting) at_tr1 = counting->sleep_calls();
+                                               }},
+                                              {sec(24) + kGuard,
+                                               [&](pr::Rig&, Timeline const&) {
+                                                   if (counting)
+                                                       at_give_up = counting->sleep_calls();
+                                               }}},
+                                  .until = sec(25),
+                                  .counting = &counting},
+                                 "NoSpin");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_EQ(tl.count("1", sec(12), sec(12)), 1U) << "no TR1 at 12 s";
+    ASSERT_TRUE(tl.ended_at.has_value()) << "not given up";
+    EXPECT_EQ(*tl.ended_at, sec(24) + kGuard);
+    // The sleeps from TR1's instant to the give-up's: the one to the Heartbeat instant, the one
+    // to the give-up instant, and the slack of the session's other sleeps on this clock.
+    EXPECT_GT(at_give_up, at_tr1) << "no sleep counted";
+    EXPECT_LE(at_give_up - at_tr1, 6U) << "the loop spun between TR1 and the give-up";
+}
+
+// D-d: TR1's late answer after TR2 neither answers nor ends; the give-up 2T after that frame.
+TEST_P(LivenessTimingUs3105, SecondTestRequest_LateAnswerToTheFirst_StaysActive) {
+    auto seq = std::make_shared<PeerSeq>();
+    auto const tl = run_timeline(
+        {.role = GetParam(),
+         .actions = {app_at(sec(13), seq),
+                     {sec(26),
+                      [seq](pr::Rig& rig, Timeline const& t) {
+                          rig.peer.send(rig.msg("0", seq->next++, "112=" + tr_id(t, 0) + "\x01"));
+                      }}},
+         .extra_probes = {sec(50) + kGuard},
+         .until = sec(51)},
+        "LateAnswerToTheFirst");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_EQ(tl.count("1", sec(25), sec(25)), 1U) << "no TR2 at 25 s";
+    EXPECT_EQ(tl.state_at(sec(26)), fsm_state::Active) << "TR1's answer ended the session";
+    EXPECT_EQ(tl.state_at(sec(50)), fsm_state::Active);
+    ASSERT_TRUE(tl.ended_at.has_value()) << "not given up";
+    EXPECT_EQ(*tl.ended_at, sec(50) + kGuard) << "not 2T after the late answer";
+}
+
+// T091. A gap open (a frame above NextNumIn at 1 s): a peer that keeps sending frames that do
+// not advance NextNumIn ends at the gap deadline (2H from the gap) with its Logout.
+TEST_P(LivenessTimingUs3105, GapOpen_PeerSendsNonAdvancingFrame_DeadlineLogout) {
+    auto seq = std::make_shared<PeerSeq>();
+    auto high = [](ns at, std::uint32_t n) {
+        return PeerAction{
+            at, [n](pr::Rig& rig, Timeline const&) { rig.peer.send(app_message(rig, n)); }};
+    };
+    auto const tl = run_timeline({.role = GetParam(),
+                                  .actions = {high(sec(1), 5), high(sec(11), 6), high(sec(22), 7)},
+                                  .until = sec(22)},
+                                 "GapOpen_NonAdvancing");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_EQ(tl.count("2", sec(1), sec(1)), 1U) << "setup: no ResendRequest for the gap";
+    EXPECT_EQ(tl.count("5", ns{0}, sec(21)), 0U) << "a Logout before the gap deadline's frame";
+    EXPECT_EQ(tl.count("5", sec(22), sec(22)), 1U) << "no gap-deadline Logout at 22 s";
+    EXPECT_EQ(give_up_text(tl), "ResendRequest unanswered, expecting MsgSeqNum 2")
+        << "the Logout at 22 s is not the gap deadline's";
+    EXPECT_FALSE(tl.ended_at.has_value()) << "ended at once: the gap deadline's Logout waits (R-2)";
+    EXPECT_EQ(tl.count("1", ns{0}, sec(22)), 0U) << "a TestRequest: the peer was never silent T";
+}
+
+// A gap open and the peer silent: R-1's Logout at 2T after its last frame.
+TEST_P(LivenessTimingUs3105, GapOpen_PeerSilent_R1LogoutAt2T) {
+    auto const tl = run_timeline(
+        {.role = GetParam(),
+         .actions = {{sec(1),
+                      [](pr::Rig& rig, Timeline const&) { rig.peer.send(app_message(rig, 5)); }}},
+         .extra_probes = {sec(25) + kGuard},
+         .until = sec(26)},
+        "GapOpen_Silent");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_EQ(tl.count("1", sec(13), sec(13)), 1U) << "no TestRequest at 13 s";
+    EXPECT_EQ(tl.state_at(sec(25)), fsm_state::Active);
+    ASSERT_TRUE(tl.ended_at.has_value()) << "not given up";
+    EXPECT_EQ(*tl.ended_at, sec(25) + kGuard);
+    EXPECT_EQ(give_up_text(tl), "TestRequest unanswered, TestReqID " + tr_id(tl, 0));
+    EXPECT_TRUE(tl.eof);
+}
+
+// T = 25 s > 2H: no TestRequest before T, no gap-deadline Logout with no frame, R-1's Logout
+// and EOF just after 2T.
+TEST_P(LivenessTimingUs3105, GapOpen_ThresholdAboveTwoH_PeerSilent_TestRequestAtT_R1LogoutAt2T) {
+    auto const tl = run_timeline(
+        {.role = GetParam(),
+         .tweak = [](SessionConfig& c) { c.test_request_threshold = std::chrono::seconds{25}; },
+         .actions = {{sec(1),
+                      [](pr::Rig& rig, Timeline const&) { rig.peer.send(app_message(rig, 5)); }}},
+         .extra_probes = {sec(51) + kGuard},
+         .until = sec(52)},
+        "GapOpen_ThresholdAboveTwoH");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_EQ(tl.count("1", ns{0}, sec(25)), 0U) << "a TestRequest before T";
+    EXPECT_EQ(tl.count("1", sec(26), sec(26)), 1U) << "no TestRequest at T";
+    EXPECT_EQ(tl.count("5", ns{0}, sec(51)), 0U) << "a Logout before 2T";
+    ASSERT_TRUE(tl.ended_at.has_value()) << "not given up";
+    EXPECT_EQ(*tl.ended_at, sec(51) + kGuard);
+    EXPECT_EQ(give_up_text(tl), "TestRequest unanswered, TestReqID " + tr_id(tl, 0));
+    EXPECT_TRUE(tl.eof);
+}
+
+TEST_P(LivenessTimingUs3105, HeartBtIntNegative_NoTestRequest) {
+    auto const tl = run_timeline(
+        {.role = GetParam(),
+         .tweak = [](SessionConfig& c) { c.heartbeat_interval = std::chrono::seconds{-10}; },
+         .until = sec(30)},
+        "HeartBtIntNegative");
+    EXPECT_EQ(tl.count("1", ns{0}, sec(30)), 0U) << "a TestRequest with HeartBtInt below 0";
+    EXPECT_EQ(tl.count("0", ns{0}, sec(30)), 0U) << "a Heartbeat with HeartBtInt below 0";
+    EXPECT_EQ(tl.count("5", ns{0}, sec(30)), 0U) << "a Logout with HeartBtInt below 0";
+    EXPECT_TRUE(tl.active) << "the session did not stay Active with HeartBtInt below 0";
+    EXPECT_FALSE(tl.ended_at.has_value());
+}
+
+// [guard: the loop's HeartBtInt test deleted]
+TEST_P(LivenessTimingUs3105, HeartBtIntZero_NoTestRequest) {
+    auto const tl = run_timeline(
+        {.role = GetParam(),
+         .tweak = [](SessionConfig& c) { c.heartbeat_interval = std::chrono::seconds{0}; },
+         .until = sec(30)},
+        "HeartBtIntZero");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_EQ(tl.count("1", ns{0}, sec(30)), 0U) << "a TestRequest with HeartBtInt 0";
+    EXPECT_EQ(tl.count("0", ns{0}, sec(30)), 0U) << "a Heartbeat with HeartBtInt 0";
+    EXPECT_FALSE(tl.ended_at.has_value());
+}
+
+// 2T past the clock's range: the give-up instant saturates at the clock's end, so it never runs.
+// The steady seed leaves T within the range and 2T beyond it.
+TEST_P(LivenessTimingUs3105, ThresholdOverflow_Saturates) {
+    auto const seed = fixpp::core::steady_time_point::max() - std::chrono::seconds{200};
+    auto const tl = run_timeline(
+        {.role = GetParam(),
+         .tweak = [](SessionConfig& c) { c.test_request_threshold = std::chrono::seconds{120}; },
+         .until = sec(190),
+         .step = sec(5),
+         .steady_seed = seed},
+        "ThresholdOverflow");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_EQ(tl.count("1", ns{0}, sec(115)), 0U) << "a TestRequest before T";
+    EXPECT_EQ(tl.count("1", sec(120), sec(120)), 1U) << "no TestRequest at T";
+    EXPECT_FALSE(tl.ended_at.has_value()) << "given up though 2T is past the clock's range";
+}
+
+FIXPP_105_BOTH_ROLES(LivenessTimingUs3105);
+
+// T093 (FR-011, contract C-6.6). A set threshold of zero or below is refused; no bound above.
+fixpp::core::expected_t<void> open_with_threshold(std::chrono::milliseconds t) {
+    rg::Scene s{rg::Options{.heartbeat = kHb}};
+    s.cfg.test_request_threshold = t;
+    s.session = std::make_unique<fixpp::session::Session>(s.engine, s.cfg);
+    auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                              s.session->open(), asio::use_future);
+    (void)fixpp::test_support::pump_until(
+        s.ioc, [&] { return rg::Scene::ready(fut); }, fixpp::test_support::kPumpBudget,
+        fixpp::test_support::kPumpSlice, "open_with_threshold");
+    if (!rg::Scene::ready(fut)) {
+        ADD_FAILURE() << "open() did not return";
+        return std::unexpected(fixpp::core::error::dispatch_aborted);
+    }
+    auto r = fut.get();
+    if (r.has_value()) {
+        auto c = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                                s.session->close(fixpp::session::close_mode::terminal),
+                                asio::use_future);
+        (void)fixpp::test_support::pump_until(
+            s.ioc, [&] { return rg::Scene::ready(c); }, fixpp::test_support::kPumpBudget,
+            fixpp::test_support::kPumpSlice, "open_with_threshold/close");
+    }
+    s.drain();
+    return r;
+}
+
+TEST(SessionOpen105, ThresholdZero_InvalidConfig) {
+    auto const r = open_with_threshold(std::chrono::milliseconds{0});
+    ASSERT_FALSE(r.has_value()) << "open() accepted test_request_threshold 0";
+    EXPECT_EQ(r.error(), fixpp::core::error::invalid_session_config);
+}
+
+TEST(SessionOpen105, ThresholdNegative_InvalidConfig) {
+    auto const r = open_with_threshold(std::chrono::milliseconds{-1});
+    ASSERT_FALSE(r.has_value()) << "open() accepted test_request_threshold -1 ms";
+    EXPECT_EQ(r.error(), fixpp::core::error::invalid_session_config);
+}
+
+// [guard: an upper bound on T added at Session::open()]
+TEST(SessionOpen105, ThresholdAboveGapDeadline_Accepted) {
+    auto const r = open_with_threshold(std::chrono::seconds{25});
+    EXPECT_TRUE(r.has_value()) << "open() refused T = 25 s with HeartBtInt 10 s";
+}
+
+fixpp::core::expected_t<void> register_with_threshold(std::chrono::milliseconds t) {
+    pr::Rig rig;
+    auto cfg = rig.cfg();
+    cfg.heartbeat_interval = kHb;
+    cfg.test_request_threshold = t;
+    fixpp::core::EngineConfig ec;
+    ec.executor = rig.ioc.get_executor();
+    ec.clock = rig.clock;
+    fixpp::session::Engine engine{rig.ioc.get_executor(), std::move(ec)};
+    auto r = engine.register_session(std::move(cfg));
+    auto fut = asio::co_spawn(rig.ioc, engine.stop(), asio::use_future);
+    if (!fixpp::test_support::pump_until_ready(rig.ioc, fut, fixpp::test_support::kPumpBudget,
+                                               "register_with_threshold/stop")) {
+        ADD_FAILURE() << "Engine::stop() did not return";
+    }
+    return r;
+}
+
+TEST(EngineRegister105, ThresholdZero_InvalidConfig) {
+    auto const r = register_with_threshold(std::chrono::milliseconds{0});
+    ASSERT_FALSE(r.has_value()) << "register_session accepted test_request_threshold 0";
+    EXPECT_EQ(r.error(), fixpp::core::error::invalid_session_config);
+}
+
+TEST(EngineRegister105, ThresholdNegative_InvalidConfig) {
+    auto const r = register_with_threshold(std::chrono::milliseconds{-1});
+    ASSERT_FALSE(r.has_value()) << "register_session accepted test_request_threshold -1 ms";
+    EXPECT_EQ(r.error(), fixpp::core::error::invalid_session_config);
 }
 
 }  // namespace

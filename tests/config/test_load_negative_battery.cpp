@@ -1701,3 +1701,23 @@ TEST(LoadNegativeBattery, LogonTimeoutNotAnIntegerIsMalformed) {
     expect_logon_timeout_refusal("neg_logon_timeout_not_integer.toml",
                                  fixpp::config::reason_class::malformed_value);
 }
+
+// ── 105-transport-liveness (FR-011, contract C-6.6): test_request_threshold ─────────────────
+// A zero duration is refused as out_of_range; a negative token keeps the duration parser's
+// leading-digit refusal, malformed_value.
+
+TEST(LoadNegativeBattery, TestRequestThreshold_Zero_OutOfRange) {
+    auto result = load(neg_fixture("neg_test_request_threshold_zero.toml"));
+    ASSERT_FALSE(result.has_value()) << "a zero test_request_threshold loaded";
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::out_of_range, "session[0].test_request_threshold"))
+        << "expected out_of_range at session[0].test_request_threshold";
+}
+
+TEST(LoadNegativeBattery, TestRequestThreshold_Negative_MalformedValue) {
+    auto result = load(neg_fixture("neg_test_request_threshold_negative.toml"));
+    ASSERT_FALSE(result.has_value()) << "a negative test_request_threshold loaded";
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::malformed_value, "session[0].test_request_threshold"))
+        << "expected malformed_value at session[0].test_request_threshold";
+}
