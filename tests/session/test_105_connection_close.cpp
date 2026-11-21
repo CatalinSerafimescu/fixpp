@@ -963,9 +963,11 @@ TEST_P(ConnectionClose105, InsideClose_EndingDuringItsLogoutStore_NoSecondClose)
         st->hold_when = nullptr;
         c.rig.peer.send(pr::message("FIX.4.4", "0", 2, "TW", "ISLD", c.rig.sending_time()));
         ended = c.rig.run_until([&] { return c.rig.state() == fsm_state::Disconnected; });
-        // The pump has returned from the ending's frame before the release, so a consumer of a
-        // latch the ending set has run by then.
-        c.rig.settle(std::chrono::milliseconds{50});
+        // The pump has returned from the ending's frame. The bounded drive runs every handler that
+        // is ready (it stops at the first wait in which none ran), so a consumer of a latch the
+        // ending set has run before the release: its chain is ready handlers only, and the
+        // GateStore hold has no timer.
+        (void)t105::drive_bounded(c.rig.ioc, 4096);
         st->release_all();
         eof = c.eof_at_once("InsideCloseEndingDuringItsLogoutStore");
         bool const done =
