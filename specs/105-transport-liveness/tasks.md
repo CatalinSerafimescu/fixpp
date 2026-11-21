@@ -167,10 +167,11 @@ production code. **Blocks every story phase.**
   data-model E-1, cell task). The walk must reproduce the three known positives (the unanswered-TestRequest write under
   `run_liveness_loop`; Arm B of `on_inbound_active_out_of_sequence_` under the pump; `send_body_`'s failure write under
   the send root). A site with no cell and no named exemption fails SC-001. Each write of `Disconnected` over
-  `Disconnected` is recorded as a census row with its synchronous chain (data-model E-2 I-5; no peer-visible observable, so no
+  `Disconnected` is recorded as a census row with the path that reaches it (data-model E-2 I-5; no peer-visible observable, so no
   cell). Acceptance: no row of the regenerated table is left unclassed; each seed row reading "class: assigned by T006"
   gets P, D, A, W or X, or a named exemption.
   Done: evidence file, section T006. Escalated there: `honor_peer_next_expected_`'s two ending Logouts lie outside D2 item 1; data-model E-2 I-5's "synchronous chain" premise does not hold for an unguarded write after a suspension (its conclusion does).
+  Ruled (orchestrator, 2026-11-21): the two Logouts are R-2 ending Logouts (ruling R-789; research D2 items 1 and 11, contract C-2 "Which Logouts", the table row below, T049, T051, T059, T063); E-2 I-5's premise corrected in data-model.md, its conclusion kept.
 - [X] T007 [P] R-2 caller and write-point census (research D2 items 1 and 11): D2 item 1's census grep (the four leaf and refusal
   callers), each hit classed
   "initiates" or "replies" (known positive: `resend_gap_deadline_` initiates, `on_inbound_active_logout_` replies); and
@@ -182,15 +183,17 @@ production code. **Blocks every story phase.**
   edge); known positives: the BeginString guard of `on_inbound_active_` (peer-frame) and `inbound_resend_request_leaf_`'s
   assignment failure (internal).
   Done: evidence file, section T008.
-- [ ] T009 [P] Supersession census (FR-019, research D11): run D11's `git grep` over `specs/ .specify/ brain/ spec/ tests/
+- [X] T009 [P] Supersession census (FR-019, research D11): run D11's `git grep` over `specs/ .specify/ brain/ spec/ tests/
   include/ src/ ci/`; it must report its three known positives (`tests/session/test_537_gap_deadline.cpp` "fixpp#534",
   `include/fixpp/core/error.hpp` "1×HeartBtInt", `src/session/session.cpp` "Phase 6 US4") and, by the pattern's
-  `off only at` alternative, `src/session/read_first_frame_bounded.hpp` ("off only at exactly 0"). Class each hit: merged
+  `off only at` alternative, `src/session/read_first_frame_bounded.hpp` ("off only at exactly 0"), and by its
+  `UnansweredTestRequestDisconnects` alternative (orchestrator ruling, 2026-11-21) `tests/session/test_heartbeat_cadence_8cell.cpp`'s
+  `HeartbeatCadence8Cell.CellC_*_UnansweredTestRequestDisconnects`. Class each hit: merged
   bundle (`specs/005-*`, `013-*`, `092-*`, `093-*`, `103-*`, `104-*`: superseded by name, never edited), living surface
   (rewritten by a named task below), this bundle (`specs/105-transport-liveness/`, where "off only at 0" describes the
   base), or not this rule. Every FR-019 known-positive pin must appear; a living-surface hit with no task
   is added to T128.
-  Open (escalated): the census reports its four known positives and every FR-019 pin but `HeartbeatCadence8Cell.CellC_*_UnansweredTestRequestDisconnects`, which no alternative of D11's pattern matches; the classed table and the T128 additions are in the evidence file, section T009.
+  Done: evidence file, section T009, and its addendum "Re-run after the ruling": with the `UnansweredTestRequestDisconnects` alternative added to D11's pattern (orchestrator ruling, 2026-11-21) the census reports every known positive and every FR-019 pin, `HeartbeatCadence8Cell.CellC_*_UnansweredTestRequestDisconnects` included; the classed table and the T128 additions are in the evidence file.
 - [X] T010 [P] Size-pin census (research D7): the narrow
   `sizeof\((fixpp::session::)?(Session|ReconnectFsm)\b` grep over `src include tests ci tools bench bindings`, then the
   wide grep that must report `tests/dictionary/ref_shape_test.cpp`'s `FieldRef` pin (the instrument's proof); list every
@@ -300,7 +303,7 @@ walk, its supplements and the `Disconnected`-over-`Disconnected` rows are in the
 | `store_then_emit` | pump | P (T006) | T018, T046 |
 | `apply_inbound_sequence_reset` | pump | P (T006) | T018 |
 | `run_logout_phase1` | `close()` (`run_logout_phase1`) | X | T022 |
-| `honor_peer_next_expected_` | pump | P (T006); its two Logouts are outside D2 item 1 (escalated) | T021, pending the ruling |
+| `honor_peer_next_expected_` | pump | P (T006) for its resend-failure ending; W (R-2 before Active) for its two NextExpectedMsgSeqNum(789) Logouts (ruling R-789) | T021, T033; T049, T051 |
 | `record_disconnected_unless_already_` (its body in `session.hpp`) | each caller's root, rows above | each caller's class | each caller's cell task |
 | `refuse_too_low_logon_` | pump | no write site of its own at the base: it ends through `refuse_logon_with_logout_` | T021, T049, T051 |
 | `send_deferred_` | send root | no write site of its own at the base: it ends through `send_body_` | T020, T046 |
@@ -530,7 +533,8 @@ does not complete closes the connection at the bound.
   `PreActive_WaitArmedAtEstablishmentDeadline_ClosedNoEvent` (Engine; no arm in flight, so this is E-5's cell, not the
   cap's), `PreActive_DirectSession_BoundAloneEndsWait`, `PreActive_CloseDuringWait_OneClose`, one cell per Logon refusal with a
   Logout (the too-low Logon of B-104-6, the TestMessageIndicator posture mismatch, the strict-reset refusal, LogonSent's
-  Logout-with-Text); and the establishment cap (E-3, "The establishment cap"; research D10):
+  Logout-with-Text), and `PreActive789_<Invalid|TooHigh>_WaitThenEof` for the two NextExpectedMsgSeqNum(789) Logouts of
+  `honor_peer_next_expected_` (both roles: LogonReceived for the acceptor, LogonSent for the initiator; ruling R-789); and the establishment cap (E-3, "The establishment cap"; research D10):
   `PreActive_<LogoutBlockedInWrite|LogoutHeldInStore>_ClosedAtEstablishmentDeadlineNoEvent` (establishment time left below
   `logout_disconnect_timeout_ms`; open at the deadline − 1 ms, EOF at it, no event and no record) and
   `PreActive_ClockOverride_CapOnEngineClock` (a second mock clock as `clock_override`; only the engine clock reaches the
@@ -543,8 +547,8 @@ does not complete closes the connection at the bound.
   T005, `logon_timeout_ms` well above the bound. Each `LogoutBlocked` and `LogoutQueuedBehindBlockedSend` cell asserts: open at the
   bound − 1 ms, no complete Logout at the peer, EOF at the bound, `onLogout` once, no wait after it (the peer's Logout sent
   after the bound changes nothing); the other cells state their own oracle:
-  `WriteLimit105.<R1|R2AfterActive|R2BeforeActive|Reply>_LogoutBlocked_ClosedAtTheBound` (for R1 the slot-74 record
-  present); `WriteLimit105.<R1|R2AfterActive|Reply>_LogoutQueuedBehindBlockedSend_ClosedAtTheBound` (for `Reply` an
+  `WriteLimit105.<R1|R2AfterActive|R2BeforeActive|R2BeforeActive789|Reply>_LogoutBlocked_ClosedAtTheBound` (for R1 the slot-74 record
+  present; `R2BeforeActive789` is a NextExpectedMsgSeqNum(789) Logout of `honor_peer_next_expected_`, ruling R-789); `WriteLimit105.<R1|R2AfterActive|Reply>_LogoutQueuedBehindBlockedSend_ClosedAtTheBound` (for `Reply` an
   application send blocked in `async_write` holding `write_gate_`, then the peer's Logout: the receipt arm resumes,
   `onLogout` once, the reset unit run as 104 orders it; no pre-Active queued cell, unreachable on an Engine session);
   `WriteReleasedBeforeTheBound_LogoutOnWire_WaitKeepsTheSameBudget` (control: released at the bound − 1 ms, the Logout complete
@@ -594,7 +598,8 @@ does not complete closes the connection at the bound.
 - [ ] T059 [US1] **Entering `writing`** at each write point (research D2 item 11, T007's census): `inbound_logout_leaf_` at its
   owner claim (after Active; kinds `r1` from the liveness loop, `r2` from `send_ending_logout_`, `reply` from
   `on_inbound_active_logout_` and `acknowledge_peer_logout_`), and before Active the build-and-emit of
-  `refuse_logon_with_logout_` and `inbound_logon_sent_logout_leaf_`. Only with a clock and `logout_disconnect_timeout_ms > 0`:
+  `refuse_logon_with_logout_` and `inbound_logon_sent_logout_leaf_`, and `honor_peer_next_expected_`'s two (ruling R-789;
+  research D2 item 11's `build_logout(` census). Only with a clock and `logout_disconnect_timeout_ms > 0`:
   `phase = writing`, `cut = false`, `deadline = deadline_after(now, logout_disconnect_timeout_ms)` on `effective_clock_`, read
   once at the owner claim (before the number assignment, the store call and the gate acquire); spawn
   `run_ending_logout_bound_(join, gen)` **before the write** on `co_await asio::this_coro::executor` (never
@@ -628,7 +633,7 @@ does not complete closes the connection at the bound.
   the `Disconnected` writes of Arm B, `resend_gap_deadline_` (`record_disconnected_unless_already_()`),
   `refuse_logon_with_logout_` (`disconnect_unless_superseded_`) and the SendingTime and OrigSendingTime arms move into it;
   `claim_peer_logout_none_()` moves into it and reports a pending mark, which arms no wait (C-2.8); every "initiates" caller of
-  T007 routed through it; while `ending_in_progress_()` it writes and records nothing (absorbed, W-8).
+  T007 routed through it, `honor_peer_next_expected_`'s two Logouts included (ruling R-789; research D2 item 1's widened census); while `ending_in_progress_()` it writes and records nothing (absorbed, W-8).
 - [ ] T064 [US1] `end_session_silently_()` (research D2 item 4) for the peer-frame silent endings of T008 (the BeginString and
   CompID guards, MsgSeqNum 0, the TestReqID mismatch at both sites, D-3 of `dispose_unparseable_`), recording `Disconnected`
   unless `ending_in_progress_()` (`phase == writing` or `armed`, with `from_active`); every internal failure stays on the edge.

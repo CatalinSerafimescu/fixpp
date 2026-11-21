@@ -113,9 +113,13 @@ clears the latch. These are I-2's exceptions.
   armed before Active, where no such transition follows. A later `close_async()` on the same transport (the pump's
   `close(terminal)` after a write-limit, bound-expiry, failure-exit or fallback close, `Engine::stop()`'s step 2) is subsumed, as
   F-5 describes; after the synchronous fallback (E-2) the transport is closed too, and both calls are idempotent. This is
-  a census row, not a cell: every `Disconnected`-over-`Disconnected` write runs in the synchronous chain of the
-  first transition, before any consumer, so no peer-visible observable distinguishes it (Gate A round 2, N-3). Its re-derivation recipe is tasks.md T006's:
-  each such write is recorded as a census row with its synchronous chain.
+  a census row, not a cell. At the base no write of `Disconnected` over `Disconnected` runs in the synchronous chain
+  of the first transition; one can run after a suspension, from a write that does not test the state first (for
+  example a liveness emit that fails after the pump has closed the session). Such a write owes nothing, because the
+  edge owes a close only on a transition into `Disconnected` from another state, so the connection still gets one
+  close and the write adds none the peer could observe (orchestrator ruling on E-2 I-5, 2026-11-21, correcting the
+  premise Gate A round 2, N-3, stated). Its re-derivation recipe is tasks.md T006's: each such write is recorded as a
+  census row with the path that reaches it.
 - I-6. **At least once on an Engine session.** Every set is consumed by a consumer that runs after it: the pump after
   the frame or on its exit (I-2), the root's own release at its exit (class D and A), the bound at its expiry or failure
   exit (E-3), `close()` at its commit of `closing`, or the drain at its entry. A deferral hands the latch to a consumer
@@ -146,8 +150,9 @@ goes through this machine: R-1's (`run_liveness_loop`), every R-2 Logout (`send_
 Active), and the replies to the peer's Logout (`on_inbound_active_logout_`, `acknowledge_peer_logout_`). The entry
 point is the write point each Logout leaf already has: `inbound_logout_leaf_` after Active, at the place where it
 claims the Logout owner `logout_in_flight_` (before its first suspension; a leaf that finds the owner set writes
-nothing and enters nothing here), and before Active the build-and-emit of `refuse_logon_with_logout_` and
-`inbound_logon_sent_logout_leaf_`. `close()`'s own Logout (`run_logout_phase1`) is class X and keeps
+nothing and enters nothing here), and before Active the build-and-emit of `refuse_logon_with_logout_`,
+`inbound_logon_sent_logout_leaf_` and `honor_peer_next_expected_`'s two NextExpectedMsgSeqNum(789) Logouts
+(orchestrator ruling R-789). `close()`'s own Logout (`run_logout_phase1`) is class X and keeps
 `close_grace` (B-348-1).
 
 | Field | Type | Meaning |
@@ -167,8 +172,8 @@ nothing and enters nothing here), and before Active the build-and-emit of `refus
 write**. The instant is the same step at every entry point: after Active, the leaf's claim of `logout_in_flight_`
 (R-1 from `run_liveness_loop`, R-2 from `send_ending_logout_`, the replies from `on_inbound_active_logout_` and
 `acknowledge_peer_logout_`, all through `inbound_logout_leaf_`), before its number peek, its store call and its gate
-acquire; before Active, the start of `refuse_logon_with_logout_`'s or `inbound_logon_sent_logout_leaf_`'s
-build-and-emit, before its number assignment and store call. The bound is spawned in `on_inbound_active_too_high_logout_`'s shape: the join is the coroutine's parameter, and a `catch (...)`
+acquire; before Active, the start of `refuse_logon_with_logout_`'s, `inbound_logon_sent_logout_leaf_`'s or
+`honor_peer_next_expected_`'s build-and-emit, before its number assignment and store call. The bound is spawned in `on_inbound_active_too_high_logout_`'s shape: the join is the coroutine's parameter, and a `catch (...)`
 around `co_spawn` sets `phase = none` and does not rethrow (the precedent's `catch` rethrows; this one must not).
 **A spawn that throws fails closed** (Gate A round 3, root cause #1; clarification D-g; row 2a): no Logout is
 written. The leaf takes the path it takes for a Logout that cannot be built (`inbound_logout_leaf_`'s "A frame that

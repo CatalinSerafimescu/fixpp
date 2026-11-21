@@ -69,7 +69,9 @@ Common rules:
 **Which Logouts.** Every Logout fixpp sends to end the session, before or after Active, except R-1's: the
 gap-deadline Logout (B-537-2), the SendingTime Reject's Logout, the OrigSendingTime Reject's Logout of the PossDup
 arm, the too-low Logout (B-103-10), and every Logon refusal with a Logout (the too-low Logon of B-104-6, the
-TestMessageIndicator posture mismatch, the strict-reset refusal, LogonSent's Logout-with-Text). Replies to the
+TestMessageIndicator posture mismatch, the strict-reset refusal, LogonSent's Logout-with-Text), and the two Logouts a
+Logon's NextExpectedMsgSeqNum(789) draws before Active when it is invalid or too high (`honor_peer_next_expected_`;
+orchestrator ruling R-789). Replies to the
 peer's Logout are not in this list (C-1 rows 3 and 5). This list is the census's result at the base (research D2 item
 1); at the implementation head the census (tasks.md T006, research D1's recipe) is authoritative, and a Logout it finds
 that is not listed here takes this section's rules.

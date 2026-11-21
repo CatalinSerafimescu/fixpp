@@ -127,7 +127,8 @@ harness for the latch test (research D10, contract C-12).
 - `src/session/session.cpp`: `record_state_transition_`, `close` (latch clear, two joins), `drain_for_reconnect_`
   (joins), `run_liveness_loop` (T, 2T, loop condition, R-1), `on_inbound_active_out_of_sequence_` (#582, Arm B),
   `resend_gap_deadline_`, `on_inbound_active_sending_time_reject_`, `on_inbound_active_poss_dup_`,
-  `refuse_logon_with_logout_` and its callers, `inbound_logon_sent_logout_leaf_`'s caller, the receipt arms (resolve
+  `refuse_logon_with_logout_` and its callers, `inbound_logon_sent_logout_leaf_`'s caller, `honor_peer_next_expected_`'s
+  two Logouts (ruling R-789), the receipt arms (resolve
   the wait), `on_inbound_cold_` (the armed `Disconnected` row), `answer_pending_test_request_` and the in-sequence Heartbeat arm
   (the 112 rule), `inbound_logout_leaf_` and the pre-Active Logout leaves (the write limit), `on_inbound_active_logout_`
   and `acknowledge_peer_logout_` (the reply's limit), `install_reconnected_transport` and `attach_accepted_transport`

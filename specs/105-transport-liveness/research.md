@@ -247,10 +247,14 @@ write limit of ruling D-e (item 11). This section is the mechanism.
    - **The callers** are the fixpp-initiated ending Logouts: `resend_gap_deadline_`,
      `on_inbound_active_sending_time_reject_`, the OrigSendingTime branch of `on_inbound_active_poss_dup_`, Arm B
      of `on_inbound_active_out_of_sequence_`, and every caller of `refuse_logon_with_logout_`,
-     `refuse_too_low_logon_` and `inbound_logon_sent_logout_leaf_`. The replies are not callers:
+     `refuse_too_low_logon_` and `inbound_logon_sent_logout_leaf_`, and before Active the two Logouts
+     `honor_peer_next_expected_` builds and emits itself for a Logon's NextExpectedMsgSeqNum(789) that is invalid or
+     too high (orchestrator ruling R-789, 2026-11-21: FR-004's "the census of FR-001 finds the rest", and D-e, every
+     Logout fixpp writes to end a session is limited). The replies are not callers:
      `on_inbound_active_logout_` and `acknowledge_peer_logout_` stay under FR-005. Census:
-     `grep -nE 'inbound_logout_leaf_\(|refuse_logon_with_logout_\(|refuse_too_low_logon_\(|inbound_logon_sent_logout_leaf_\(' src/session/session.cpp`,
-     each hit classed "initiates" or "replies"; known positive: `resend_gap_deadline_` initiates.
+     `grep -nE 'inbound_logout_leaf_\(|refuse_logon_with_logout_\(|refuse_too_low_logon_\(|inbound_logon_sent_logout_leaf_\(|honor_peer_next_expected_\(' src/session/session.cpp`,
+     each hit classed "initiates" or "replies"; known positives: `resend_gap_deadline_` initiates, and so do
+     `honor_peer_next_expected_`'s two callers (ruling R-789).
 2. **After Active the FSM stays `Active`** during the wait, under the existing Logout owner `logout_in_flight_`,
    set by the leaf: `send_body_` refuses an application send (F-8, 103 FR-021), the leaf writes no second Logout,
    and a graceful `close()` poll-joins it. **Before Active the FSM is `Disconnected`**, as each refusal records it
@@ -359,9 +363,12 @@ write limit of ruling D-e (item 11). This section is the mechanism.
 
 11. **The write limit** (ruling D-e; contract C-2.7; data-model E-3 rows 1 to 5). Every Logout fixpp writes to end
     a session enters the phase `writing` at its write point (`inbound_logout_leaf_`, where it claims the Logout
-    owner, after Active; the build-and-emit of `refuse_logon_with_logout_` and `inbound_logon_sent_logout_leaf_`
-    before it): R-1's (D3), every R-2 Logout (item 1), and the replies to the peer's Logout (`on_inbound_active_logout_`,
-    `acknowledge_peer_logout_`), so the limit holds by construction at every ending Logout, not at a list of callers.
+    owner, after Active; the build-and-emit of `refuse_logon_with_logout_` and `inbound_logon_sent_logout_leaf_`, and
+    `honor_peer_next_expected_`'s two (ruling R-789), before it): R-1's (D3), every R-2 Logout (item 1), and the replies
+    to the peer's Logout (`on_inbound_active_logout_`, `acknowledge_peer_logout_`), so the limit holds by construction at
+    every ending Logout, not at a list of callers. The before-Active write points by construction:
+    `grep -n 'build_logout(' src/session/session.cpp`, each hit's enclosing function a write point named here or
+    `run_logout_phase1` (`close()`'s own Logout, class X); known positive: `honor_peer_next_expected_`'s two.
     The deadline is read and the bound spawned before the gate acquire, so a Logout queued at `write_gate_` behind a
     blocked application send or Heartbeat is covered too. Census of the after-Active write point:
     `grep -n 'inbound_logout_leaf_(tic' src/session/session.cpp`, each hit's enclosing function an ending (at the base:
@@ -1049,10 +1056,12 @@ T115).
 ## D11 — Supersession (FR-016, FR-018, FR-019)
 
 - **Census recipe** over `specs/`, `.specify/`, `brain/`, `spec/`, `tests/`, `include/`, `src/`, `ci/`:
-  `git grep -nE '#534|fixpp#534|stays open|transport stays open|1 ?× ?HeartBtInt|1×HB|test_request_threshold|Phase 6 US4|not a close|drive_logout|unanswered_tr_|parse_cn_from_dn_local|L-103-5|R-6|establishment (deadline|timeout)|off only at'`.
+  `git grep -nE '#534|fixpp#534|stays open|transport stays open|1 ?× ?HeartBtInt|1×HB|test_request_threshold|Phase 6 US4|not a close|drive_logout|unanswered_tr_|parse_cn_from_dn_local|L-103-5|R-6|establishment (deadline|timeout)|off only at|UnansweredTestRequestDisconnects'`.
   Known positives it must report: `tests/session/test_537_gap_deadline.cpp` ("fixpp#534"), `include/fixpp/core/error.hpp`
   ("1×HeartBtInt"), `src/session/session.cpp` ("Phase 6 US4"), `src/session/read_first_frame_bounded.hpp` ("off only at
-  exactly 0", the comment above `detail::resend_gap_deadline`). Each hit is classed: superseded by name (a merged
+  exactly 0", the comment above `detail::resend_gap_deadline`), and `tests/session/test_heartbeat_cadence_8cell.cpp`
+  ("UnansweredTestRequestDisconnects", the FR-019 pin `HeartbeatCadence8Cell.CellC_*_UnansweredTestRequestDisconnects`,
+  which no other alternative matches; orchestrator ruling on T009, 2026-11-21). Each hit is classed: superseded by name (a merged
   bundle, edited nowhere: `specs/005-*`, `specs/013-*`, `specs/092-*`, `specs/093-*`, `specs/103-*`, `specs/104-*`), a
   living surface rewritten, or not this rule.
 - **Rulings superseded by name in this bundle** (the spec's FR-019 list): 536-537-538 note R-6's "Not chosen: … a Logout on the dead-peer ending" by R-1; D-537-5's C-3 disclosure ("the transport stays open") by FR-004; 103 Arm B's

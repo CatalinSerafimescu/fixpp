@@ -129,7 +129,8 @@ contract's table and per row of data-model E-3 (research D10 lists them):
 - [RED] `LogoutWait105.PreActive_BoundSurvivesTheRefusalsOwnEdge`, `...PreActive_FramesDrained`,
   `...PreActiveTooLowLogon_PeerLogoutEndsWaitNoReset` (OQ-1), `...PreActive_BoundExpiryCloses`,
   `...PreActive_WaitArmedAtEstablishmentDeadline_ClosedNoEvent` (Engine; no arm in flight, so the pump's own `expire()` closes at that instant: this is E-5's cell, not the cap's, research D10), `...PreActive_DirectSession_BoundAloneEndsWait`,
-  `...PreActive_CloseDuringWait_OneClose`.
+  `...PreActive_CloseDuringWait_OneClose`, `...PreActive789_<Invalid|TooHigh>_WaitThenEof` (both roles; the two
+  NextExpectedMsgSeqNum(789) Logouts, ruling R-789).
 - [RED] `LogoutWait105.PendingTooHighMark_GapDeadlineLogout_EofAfterWrite` (C-2.8, N-5).
 - [RED] `LogoutWait105.OnLogoutFiresAtWaitEnd`.
 - [seam: the failure read as timeout 0] `LogoutWait105.BoundSpawnFails_<R2AfterActive|R2BeforeActive|Reply>_NoLogoutWritten_EofAtOnce` — an
@@ -175,7 +176,7 @@ until it is closed (the scripted transport's `write_hold`, or a seam in `test_10
 that stops reading. Each: open at the bound − 1 ms, no complete Logout at the peer, EOF at the bound (plain) or the
 close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogout` once, no wait after it,
 `logon_timeout_ms` set well above the bound:
-- [RED] `WriteLimit105.<R1|R2AfterActive|R2BeforeActive|Reply>_LogoutBlocked_ClosedAtTheBound` (the Logout is the
+- [RED] `WriteLimit105.<R1|R2AfterActive|R2BeforeActive|R2BeforeActive789|Reply>_LogoutBlocked_ClosedAtTheBound` (the Logout is the
   blocked write); for R-1 the slot-74 record present.
 - [RED] `WriteLimit105.<R1|R2AfterActive|Reply>_LogoutQueuedBehindBlockedSend_ClosedAtTheBound` (the Logout waits at
   the write gate; for `Reply` an application send blocked in `async_write` holding the gate, then the peer's Logout:
