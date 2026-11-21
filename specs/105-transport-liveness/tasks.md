@@ -610,7 +610,7 @@ does not complete closes the connection at the bound.
   returns); and [guard: a 0 ms limit read as "close at once"] `TimeoutZero_WriteUnbounded`. R1 cells set
   `test_request_threshold = HeartBtInt`. RED on the base before the fix: the held write never returns and nothing
   closes.
-- [ ] T052 [US1] `tests/session/test_105_seams.cpp` (it reads `cut` through test access), [guard: "Leaving `writing`" ignores `cut`]
+- [X] T052 [US1] `tests/session/test_105_seams.cpp` (it reads `cut` through test access), [guard: "Leaving `writing`" ignores `cut`]
   `WriteLimit105.DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed` on T005's deferred-completion transport, a
   direct Session, an R-2 Logout. Schedule, pinned in the cell: advance the mock clock to the bound; `run_one` until the bound
   has taken E-3 row 4 (its write-limit close); release the completion; drain by the bounded drive. Positive control: the
@@ -640,15 +640,15 @@ does not complete closes the connection at the bound.
 
 ### Implementation for US1 part B
 
-- [ ] T057 [US1] `store_then_emit`'s private transmitted out-parameter (research D2 item 1): set only when
+- [X] T057 [US1] `store_then_emit`'s private transmitted out-parameter (research D2 item 1): set only when
   `live_write_serialized_` returned `written` with a live transport present, or the direct sink returned success; the Logout
   leaves pass it up.
-- [ ] T058 [US1] The ending state (data-model E-3 fields) in `session.hpp`: `ending_wait_` (`phase` `{none, writing, armed,
+- [X] T058 [US1] The ending state (data-model E-3 fields) in `session.hpp`: `ending_wait_` (`phase` `{none, writing, armed,
   resolved}`, `kind` `{r1, r2, reply}`, `entered_from`, `from_active`, `cut`, `deadline`), `establishment_cap_` (on
   `engine_.clock`), `ending_logout_wake_` (`peer_logout_wake_`'s shape), `ending_logout_bound_counter_` and
   `ending_logout_bound_join`. `session_engine_access::set_establishment_deadline(Session&, steady_time_point) noexcept` (one
   store), called by `run_read_pump` before its first delivery when it holds `establish_deadline` (E-5).
-- [ ] T059 [US1] **Entering `writing`** at each write point (research D2 item 11, T007's census): `inbound_logout_leaf_` at its
+- [X] T059 [US1] **Entering `writing`** at each write point (research D2 item 11, T007's census): `inbound_logout_leaf_` at its
   owner claim (after Active; kinds `r1` from the liveness loop, `r2` from `send_ending_logout_`, `reply` from
   `on_inbound_active_logout_` and `acknowledge_peer_logout_`), and before Active the build-and-emit of
   `refuse_logon_with_logout_` and `inbound_logon_sent_logout_leaf_`, and `honor_peer_next_expected_`'s two (ruling R-789;
@@ -659,7 +659,7 @@ does not complete closes the connection at the bound.
   `Session::executor()`), join as the parameter; the `catch (...)` around `co_spawn` sets `phase = none`, does not rethrow,
   and the Logout is not written (row 2a: the leaf's "frame that cannot be built" path; the site records `Disconnected`).
   Add the bound-spawn allocation-failure seam. Timeout 0 or no clock enters nothing (row 2).
-- [ ] T059a [US1] (moved from T031, its bounded half; T035 ruling 2; spec clarification "Session 2026-11-21
+- [X] T059a [US1] (moved from T031, its bounded half; T035 ruling 2; spec clarification "Session 2026-11-21
   (implementation, Phase 3)") R-1's budget counted from the give-up's decision, before the replay gate is taken: the
   liveness loop's give-up enters the machine as kind `r1` with the deadline set at the decision, so a give-up that
   still waits for an exclusive replay-gate hold at the deadline closes through the write-limit path as "Logout not
@@ -667,12 +667,12 @@ does not complete closes the connection at the bound.
   (`tests/session/test_538_resend_answer_store_failure.cpp`) GREEN, with no 35=5 written while the answer holds the gate;
   it reaches Disconnected only once its mock clock passes the budget from the give-up, so it is re-read, and re-pinned
   under FR-019 if its clock moves do not pass the budget; and a T051 R1 cell behind an exclusive hold.
-- [ ] T060 [US1] **Leaving `writing`** (E-3), on the strand with no suspension before the next step: `r2`, transmitted, `!cut`,
+- [X] T060 [US1] **Leaving `writing`** (E-3), on the strand with no suspension before the next step: `r2`, transmitted, `!cut`,
   no pending too-high mark claimed, `fsm_state_ == entered_from` → `phase = armed` and the bound woken (it rebuilds its race in
   `armed`); every other case → `phase = none`, the bound woken, and the site records `Disconnected` as today. Before Active the
   order is: enter `writing` and spawn, the write, `armed`, then the refusal's own `Disconnected` write (rows 1, 3, 6). Add the
   T052's cell to `test_105_seams.cpp`.
-- [ ] T061 [US1] `run_ending_logout_bound_(join, gen)` (research D2 item 8, data-model E-3 "The bound's loop" and "The bound's
+- [X] T061 [US1] `run_ending_logout_bound_(join, gen)` (research D2 item 8, data-model E-3 "The bound's loop" and "The bound's
   exits"): publish the wake; loop: test the live predicate by phase (`writing`: `phase == writing && conn_gen_ == gen`;
   `armed` after Active: `phase == armed`, generation, `!engine_stop_requested_`, `!reconnect_drain_in_flight_`,
   `fsm_state_ == Active`, never `closing_or_stopped_()`; `armed` before Active: `phase == armed`, generation,
@@ -687,22 +687,22 @@ does not complete closes the connection at the bound.
   exit of the phase it finds, never `release_connection_end_()` from `writing` or a live `armed`; row 16), **ordinary**
   (`armed` → `resolved`, then `release_connection_end_()`). Every exit clears its wake. Add the in-body race seam that throws
   `std::bad_alloc` before the `||` expression is awaited, never inside an arm; add T053's reach-proof twins in `test_105_seams.cpp`.
-- [ ] T062 [US1] The close frame spawned by the bound at rows 4, 10, 11 and 16, with T027's join and D-g fallback, testing
+- [X] T062 [US1] The close frame spawned by the bound at rows 4, 10, 11 and 16, with T027's join and D-g fallback, testing
   neither `inbound_depth_` nor the `writing` deferral (data-model E-2, I-2's exceptions); the spawn-failure seam covers these
   spawns too.
-- [ ] T063 [US1] `send_ending_logout_(text)` (research D2 item 1): writes through the leaf for the state, then arms or records;
+- [X] T063 [US1] `send_ending_logout_(text)` (research D2 item 1): writes through the leaf for the state, then arms or records;
   the `Disconnected` writes of Arm B, `resend_gap_deadline_` (`record_disconnected_unless_already_()`),
   `refuse_logon_with_logout_` (`disconnect_unless_superseded_`) and the SendingTime and OrigSendingTime arms move into it;
   `claim_peer_logout_none_()` moves into it and reports a pending mark, which arms no wait (C-2.8); every "initiates" caller of
   T007 routed through it, `honor_peer_next_expected_`'s two Logouts included (ruling R-789; research D2 item 1's widened census); while `ending_in_progress_()` it writes and records nothing (absorbed, W-8).
-- [ ] T064 [US1] `end_session_silently_()` (research D2 item 4) for the peer-frame silent endings of T008 (the BeginString and
+- [X] T064 [US1] `end_session_silently_()` (research D2 item 4) for the peer-frame silent endings of T008 (the BeginString and
   CompID guards, MsgSeqNum 0, the TestReqID mismatch at both sites, D-3 of `dispose_unparseable_`), recording `Disconnected`
   unless `ending_in_progress_()` (`phase == writing` or `armed`, with `from_active`); every internal failure stays on the edge.
   While armed, `resend_gap_deadline_` returns `nullopt` (W-7).
-- [ ] T065 [US1] `owe_connection_end_()` gains the term "no wait armed before Active"; during a wait armed after Active the
+- [X] T065 [US1] `owe_connection_end_()` gains the term "no wait armed before Active"; during a wait armed after Active the
   edge's call sets `resolved` and owes (row 12); the second caller (the bound's expiry and failure exit before Active, after
   `resolved`; rows 11, 16) and the third (the pre-Active response, row 9).
-- [ ] T066 [US1] The response test (research D2 item 3, W-1) in `on_inbound_active_`, after the garble test, the header-fault
+- [X] T066 [US1] The response test (research D2 item 3, W-1) in `on_inbound_active_`, after the garble test, the header-fault
   disposition, the liveness refresh, the validation gate and the BeginString and CompID guards, and before the Reset-mode
   SequenceReset bypass, MsgSeqNum 0, the too-high branch, the PossDup stage-1 arm and `check_inbound`: at NextNumIn today's
   in-sequence route with `resolved` set at the arm's entry; off NextNumIn a response arm in `acknowledge_peer_logout_`'s shape
@@ -711,13 +711,13 @@ does not complete closes the connection at the bound.
   `Disconnected`-row arm of `on_inbound_cold_`, reached only while a wait is armed: the header scan; `35=5` with no fault,
   MsgType third and the right BeginString and CompIDs sets `resolved` and calls `owe_connection_end_()`; every other frame is
   drained.
-- [ ] T067 [US1] The latch defers to the writer (E-3, "Other roots during `writing`"): `take_connection_end` returns false and
+- [X] T067 [US1] The latch defers to the writer (E-3, "Other roots during `writing`"): `take_connection_end` returns false and
   leaves the latch set while `phase == writing`; `release_connection_end_` returns without spawning then; the pump's error close
   (`!r`) does not defer.
-- [ ] T068 [US1] `liveness_may_originate_()` = `fsm_state_ == fsm_state::Active && ending_wait_.phase == none` (data-model E-4):
+- [X] T068 [US1] `liveness_may_originate_()` = `fsm_state_ == fsm_state::Active && ending_wait_.phase == none` (data-model E-4):
   the loop condition and the test after every suspension (after the sleep, after each emit); R-1's Logout goes through the
   machine as kind `r1`.
-- [ ] T069 [US1] `close()` and the drain (E-3 rows 5, 5c, 13 to 15, 17; research D2 item 9): wake the bound at `close()`'s first
+- [X] T069 [US1] `close()` and the drain (E-3 rows 5, 5c, 13 to 15, 17; research D2 item 9): wake the bound at `close()`'s first
   commit of `closing` (beside its `claim_peer_logout_none_()`) and at `drain_for_reconnect_`'s entry; after their transport
   close, join `ending_logout_bound_counter_`, then join `connection_close_counter_` a second time (I-4); `~Session` asserts both
   counters zero; at `install_reconnected_transport` and `attach_accepted_transport` assert `phase` is `resolved` or `none`,
@@ -732,11 +732,11 @@ does not complete closes the connection at the bound.
   found asserted as the reach proof; oracle EOF at once), and `EndingBound_RaceThrows_Armed_ResendAnswerBlocked_EofAtOnce`
   (after Active on the SendingTime-Reject route, the peer's ResendRequest answer blocked in `async_write`, so
   `inbound_depth_ != 0`, the seam armed in `armed`: EOF at once). All in `tests/session/test_105_seams.cpp`.
-- [ ] T071 [US1] Comments naming the new rule, part B (issue #310): `resend_gap_deadline_` and Arm B (R-2, through
+- [X] T071 [US1] Comments naming the new rule, part B (issue #310): `resend_gap_deadline_` and Arm B (R-2, through
   `send_ending_logout_`), `run_ending_logout_bound_` (its exits), and the caller preconditions on `drive_reconnect`'s
   declaration in `session.hpp` (B-103-13: `close()` joins the too-high bound, the R-2 bound and the close frame; `~Session`
   asserts each counter zero; no exemption).
-- [ ] T072 [US1] Re-pin the R-2-class flips (FR-019): `GapDeadlineOutOfSequenceSite.FrameAtTheBoundDrawsTheLogoutAndTheTransportStaysOpen`
+- [X] T072 [US1] Re-pin the R-2-class flips (FR-019): `GapDeadlineOutOfSequenceSite.FrameAtTheBoundDrawsTheLogoutAndTheTransportStaysOpen`
   and its helper `expect_logout_and_open_transport` in `tests/session/test_537_gap_deadline.cpp` (its
   `state_after_the_bound_frame == Disconnected` flips too: Active during the wait), and the 537 note's control cell
   "D-537-6, N"; rename where the name states the old rule. Read RED at H1 and left RED for this task (T035): the cells
