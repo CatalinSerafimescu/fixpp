@@ -1583,13 +1583,13 @@ private:
     [[nodiscard]] inbound_result_t inbound_reject_best_effort_leaf_(
         bool tic, seqnum_t ref_seq, std::string_view ref_msg_type,
         std::string_view sending_time) noexcept;
-    // 105 (data-model E-3): the ending a Logout's leaf writes for. r1 is the liveness loop's
+    // 105 (data-model E-3): the ending a Logout's leaf writes for. R-1 is the liveness loop's
     // give-up, which claims the Logout owner and enters the ending state machine at its decision;
-    // r2 an ending the session starts (send_ending_logout_ and the Logon refusals); reply the
+    // R-2 an ending the session starts (send_ending_logout_ and the Logon refusals); reply the
     // answer to the peer's Logout.
     enum class ending_kind : std::uint8_t { r1, r2, reply };
     // `text` is Text(58), or empty for a Logout without one (fixpp#537, D-537-5). 105: the leaf
-    // enters the ending state machine at its owner claim (kind r1 has entered at its decision),
+    // enters the ending state machine at its owner claim (an R-1 has entered at its decision),
     // and leaves it when its write returns; *armed reports whether it armed the R-2 wait, and
     // claimed_mark that the caller claimed a pending too-high mark (C-2.8).
     [[nodiscard]] inbound_result_t inbound_logout_leaf_(bool tic, std::string_view sending_time,
@@ -2190,7 +2190,7 @@ private:
     [[nodiscard]] ending_entry enter_ending_write_(ending_kind kind,
                                                    asio::any_io_executor const& ex) noexcept;
     // Leaves writing when the Logout's leaf returns (E-3, "Leaving writing"): arms the wait for
-    // an r2 that was transmitted, not cut, claimed no pending mark and whose session is still in
+    // an R-2 that was transmitted, not cut, claimed no pending mark and whose session is still in
     // the state it entered from; otherwise none. Returns whether it armed. Synchronous.
     bool leave_ending_write_(bool transmitted, bool claimed_mark) noexcept;
     void wake_ending_logout_bound_() noexcept {
