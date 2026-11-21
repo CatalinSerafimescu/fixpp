@@ -37,12 +37,14 @@
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <functional>
+#include <future>
 #include <memory>
 #include <memory_resource>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "session/engine_loopback_harness.hpp"
 #include "session/plain_engine_rig.hpp"
@@ -383,6 +385,140 @@ TEST(TlsClose105, DirectSessionSendStoreFailure_PeerReceivesCloseNotify) {
     EXPECT_TRUE(closed) << "no close_notify after the send returned; ending "
                         << t105::peer_ending_name(c.peer ? c.peer->ending()
                                                          : t105::peer_ending::open);
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+// 105 T054 — the TLS arms of US1 part B (contract C-8.4, C-8.5).
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+// A graceful close() during the R-2 wait runs on: the wait ends at the bound, on the mock clock,
+// and the peer reads close_notify then (C-8.4). logout_disconnect_timeout_ms 30000, so
+// close_grace's wall time (30 s) is far above the wall cap; the mock clock reaches the bound.
+TEST(TlsClose105, CloseGracefulDuringWait_CloseNotifyAtTheBound) {
+    FIXPP_105_TLS_ENGINE_CELL(c, [](SessionConfig& s) { s.logout_disconnect_timeout_ms = 30000; });
+    bool const up = c.start_and_connect() && c.logon();
+    bool logout = false;
+    bool open_before = false;
+    bool closed = false;
+    if (up) {
+        auto const mark = c.peer->received.size();
+        c.peer->send(
+            pr::message("FIX.4.2", "0", 2, "INITIATOR", "ACCEPTOR", "20230101-00:00:00.000"));
+        logout = fixpp::test_support::pump_until(
+            c.ioc,
+            [&] { return pr::frames_of_type(c.peer->received.substr(mark), "5").size() == 1U; }, 5s,
+            5ms, "the ending Logout");
+        auto s = c.h->engine().lookup(c.h->acceptor_id());
+        if (s) {
+            asio::co_spawn(s->executor().underlying(),
+                           s->close(fixpp::session::close_mode::graceful), asio::detached);
+        }
+        (void)t105::drive_bounded(c.ioc, 512);
+        c.clock->advance(29999ms);
+        (void)t105::drive_bounded(c.ioc, 512);
+        open_before = !c.peer->read_ended;
+        c.clock->advance(1ms);
+        closed = c.close_notify_at_once("TlsClose105.CloseGracefulDuringWait");
+    }
+    EXPECT_TRUE(up && logout) << "setup";
+    EXPECT_TRUE(open_before) << "the connection closed before the bound";
+    EXPECT_TRUE(closed) << "no close_notify at the bound; ending "
+                        << t105::peer_ending_name(c.peer ? c.peer->ending()
+                                                         : t105::peer_ending::open);
+}
+
+// The write limit on TLS behind a peer that stopped reading (C-8.5, L-105-g): application sends
+// fill the window until one is held in its write (holding the write gate); a too-low frame then
+// draws the R-2 Logout (Arm B writes no Reject first), which queues behind it. At the bound the
+// session closes; close_notify cannot be written, so the close is abortive within the bound plus
+// tls_close_timeout (1 s of wall time).
+TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsCloseTimeout) {
+    asio::io_context ioc;
+    auto clock = t105::make_mock_clock(ioc.get_executor());
+    fixpp::core::EngineConfig ec;
+    ec.executor = ioc.get_executor();
+    ec.clock = clock;
+    auto h = fixpp::test_support::EngineLoopbackHarness::build(
+        ioc.get_executor(), std::move(ec), true, [](SessionConfig& c) {
+            fixpp::session::CompIdAuthorizationPolicy authz;
+            authz.add_binding("fixpp-leaf-rsa2048", "INITIATOR");
+            c.compid_authorization_policy = authz;
+        });
+    if (!h) GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    fixpp::test_support::engine_stop_guard stop_guard{*h, ioc};
+    char const* env = std::getenv("FIXPP_TLS_FIXTURE_DIR");
+    std::string const dir = env != nullptr ? env : FIXPP_TLS_FIXTURE_DIR;
+    auto state = [&] {
+        auto s = h->engine().lookup(h->acceptor_id());
+        return s ? s->state() : fsm_state::NotConnected;
+    };
+    bool up = h->engine().start().has_value() &&
+              fixpp::test_support::pump_until(
+                  ioc, [&] { return h->server_endpoint().port != 0; }, 5s, 5ms, "bind");
+    std::shared_ptr<t105::StalledTlsPeer> peer;
+    if (up) {
+        peer = t105::StalledTlsPeer::connect(ioc, dir, h->server_endpoint(), 1024);
+        up = fixpp::test_support::pump_until(
+                 ioc, [&] { return peer->ready || peer->setup_failed; }, 5s, 5ms, "connect") &&
+             peer->ready;
+    }
+    auto msg = [&](std::string_view type, unsigned seq, std::string_view extra = {}) {
+        return pr::message("FIX.4.2", type, seq, "INITIATOR", "ACCEPTOR", stamp(*clock), extra);
+    };
+    if (up) {
+        peer->send(msg("A", 1,
+                       "98=0\x01"
+                       "108=30\x01"));
+        up = fixpp::test_support::pump_until(
+            ioc, [&] { return state() == fsm_state::Active; }, 5s, 5ms, "logon");
+    }
+    if (up) {
+        peer->send(msg("0", 2));
+        up = fixpp::test_support::pump_until(
+            ioc, [&] { return peer->writes_done == 2U; }, 5s, 5ms, "the Heartbeat at 2");
+        (void)t105::drive_bounded(ioc, 256);
+    }
+    // Fill the window: application sends until one does not complete within a settle.
+    bool held = false;
+    std::vector<std::future<fixpp::core::expected_t<void>>> sends;
+    std::string const payload =
+        "35=D\x01"
+        "58=" +
+        std::string(3000, 'x') + "\x01";
+    for (int i = 0; up && i < 4000 && !held; ++i) {
+        sends.push_back(asio::co_spawn(
+            ioc,
+            h->engine().send(h->acceptor_id(),
+                             std::as_bytes(std::span{payload.data(), payload.size()})),
+            asio::use_future));
+        (void)fixpp::test_support::pump_until(
+            ioc, [&] { return sends.back().wait_for(0s) == std::future_status::ready; }, 50ms, 5ms,
+            nullptr);
+        held = sends.back().wait_for(0s) != std::future_status::ready;
+    }
+    bool open_before = false;
+    bool ended = false;
+    if (up && held) {
+        peer->send(msg("0", 2));  // below NextNumIn: the too-low Logout, queued at the gate
+        (void)fixpp::test_support::pump_until(ioc, [] { return false; }, 100ms, 5ms, nullptr);
+        clock->advance(499ms);
+        (void)t105::drive_bounded(ioc, 256);
+        open_before = state() == fsm_state::Active;
+        clock->advance(1ms);
+        (void)t105::drive_bounded(ioc, 256);
+        // Past tls_close_timeout before the peer reads, so a close_notify could not be written
+        // late into a reopened window.
+        (void)fixpp::test_support::pump_until(ioc, [] { return false; }, 1500ms, 5ms, nullptr);
+        peer->start_reading();
+        ended = t105::pump_until_peer_read_ends(
+            ioc, [&] { return peer->read_ended; }, 5s, "TlsWriteLimit105");
+    }
+    EXPECT_TRUE(up) << "setup";
+    EXPECT_TRUE(held) << "setup: no application send was held behind the stalled peer";
+    EXPECT_TRUE(open_before) << "the session ended before the bound";
+    EXPECT_TRUE(ended) << "the connection was not closed within the bound plus tls_close_timeout";
+    EXPECT_EQ(peer ? peer->ending() : t105::peer_ending::open, t105::peer_ending::abortive)
+        << "a close_notify behind a peer that stopped reading";
 }
 
 }  // namespace

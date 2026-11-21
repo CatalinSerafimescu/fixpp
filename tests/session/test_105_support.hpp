@@ -637,6 +637,9 @@ struct gate_store_state {
     std::function<bool(store_call, fixpp::session::seqnum_t)> hold_when;
     std::function<bool(store_call, fixpp::session::seqnum_t)> fail_when;
     bool fail_held = false;
+    // 105 (tasks.md T046, T047): a store() call reaches the inner store first and is held after
+    // it, so a later call's number does not find an earlier one missing in the inner MemoryStore.
+    bool hold_after_inner = false;
     std::size_t calls_held = 0;     // calls that began a hold
     std::size_t parked = 0;         // calls holding now
     std::size_t calls_failed = 0;   // calls answered with store_io_failure
@@ -667,6 +670,11 @@ public:
         fixpp::session::direction_t dir) noexcept override {
         auto const k = dir == fixpp::session::direction_t::outbound ? store_call::store_outbound
                                                                     : store_call::store_inbound;
+        if (state_->hold_after_inner) {
+            auto r = co_await state_->inner->store(seq, frame, dir);
+            if (auto f = co_await gate(k, seq)) co_return std::unexpected(*f);
+            co_return r;
+        }
         if (auto f = co_await gate(k, seq)) co_return std::unexpected(*f);
         co_return co_await state_->inner->store(seq, frame, dir);
     }
@@ -815,7 +823,33 @@ public:
         (void)stream_.lowest_layer().close(ec);
     }
 
+    // 105 (tasks.md T054): writes what a cell sends, one write in flight at a time, while the
+    // peer reads nothing, so the peer can log on and drive the session with its window closed.
+    void send(std::string bytes) {
+        pending_.push_back(std::move(bytes));
+        if (!ready || writing_) return;
+        writing_ = true;
+        asio::co_spawn(*ioc_, run_writer(), asio::detached);
+    }
+    std::size_t writes_done = 0;
+
 private:
+    asio::awaitable<void> run_writer() {
+        auto self = shared_from_this();
+        while (!pending_.empty()) {
+            std::string const b = std::move(pending_.front());
+            pending_.pop_front();
+            std::error_code ec;
+            co_await asio::async_write(stream_, asio::buffer(b),
+                                       asio::redirect_error(asio::use_awaitable, ec));
+            ++writes_done;
+        }
+        writing_ = false;
+    }
+
+    std::deque<std::string> pending_;
+    bool writing_ = false;
+
     StalledTlsPeer(asio::io_context& ioc, std::string const& fixture_dir)
         : ioc_{&ioc}, ctx_{make_context(fixture_dir)}, stream_{ioc, ctx_} {}
 
