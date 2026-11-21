@@ -436,6 +436,7 @@ struct Timeline {
 struct PeerAction {
     ns at{0};
     std::function<void(pr::Rig&, Timeline const&)> act{};
+    bool sends = true;  // the action writes a frame the session reads
 };
 
 struct TimelineSpec {
@@ -496,8 +497,21 @@ Timeline run_timeline(TimelineSpec const& spec, const char* site) {
             rig.clock->advance(t - now);
             now = t;
             (void)t105::drive_bounded(rig.ioc, 64);
+            bool sent = false;
             for (auto const& a : spec.actions) {
-                if (a.at == t) a.act(rig, tl);
+                if (a.at == t) {
+                    a.act(rig, tl);
+                    sent = sent || a.sends;
+                }
+            }
+            if (sent) {
+                // The frame is read at this instant: wait until the session's last inbound
+                // instant is this one (the clock held still), or the pump budget passes.
+                (void)rig.run_until([&] {
+                    auto const s = rig.session();
+                    return rig.peer.all_written() && s &&
+                           session_test_access::last_inbound_steady(*s) == rig.clock->steady_now();
+                });
             }
             (void)t105::drive_bounded(rig.ioc, 64);
             collect(t);
@@ -546,6 +560,17 @@ PeerAction app_at(ns at, std::shared_ptr<PeerSeq> seq) {
 std::string tr_id(Timeline const& tl, std::size_t n) {
     auto const trs = tl.of("1");
     return n < trs.size() ? pr::field_value(trs[n].frame, "112") : std::string{};
+}
+
+// The frames as "<type>@<ms>", for a failure message.
+std::string dump(Timeline const& tl) {
+    std::string s;
+    for (auto const& f : tl.out) {
+        s += f.type + "@" +
+             std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(f.at).count()) +
+             " ";
+    }
+    return s;
 }
 
 std::string give_up_text(Timeline const& tl) {
@@ -642,7 +667,7 @@ TEST_P(LivenessTimingUs3105,
     EXPECT_EQ(tl.state_at(sec(24) + kGuard), fsm_state::Active) << "given up at 2T of TR1";
     EXPECT_EQ(tl.state_at(sec(36)), fsm_state::Active);
     EXPECT_EQ(tl.state_at(sec(44)), fsm_state::Active);
-    ASSERT_TRUE(tl.ended_at.has_value()) << "not given up";
+    ASSERT_TRUE(tl.ended_at.has_value()) << "not given up; frames: " << dump(tl);
     EXPECT_EQ(*tl.ended_at, sec(44) + kGuard) << "not 2T after the last frame";
 }
 
@@ -713,12 +738,14 @@ TEST_P(LivenessTimingUs3105, SilentAfterTestRequest_NoSpin) {
                                   .actions = {{sec(12),
                                                [&](pr::Rig&, Timeline const&) {
                                                    if (counting) at_tr1 = counting->sleep_calls();
-                                               }},
+                                               },
+                                               false},
                                               {sec(24) + kGuard,
                                                [&](pr::Rig&, Timeline const&) {
                                                    if (counting)
                                                        at_give_up = counting->sleep_calls();
-                                               }}},
+                                               },
+                                               false}},
                                   .until = sec(25),
                                   .counting = &counting},
                                  "NoSpin");
