@@ -71,7 +71,10 @@ gap-deadline Logout (B-537-2), the SendingTime Reject's Logout, the OrigSendingT
 arm, the too-low Logout (B-103-10), and every Logon refusal with a Logout (the too-low Logon of B-104-6, the
 TestMessageIndicator posture mismatch, the strict-reset refusal, LogonSent's Logout-with-Text), and the two Logouts a
 Logon's NextExpectedMsgSeqNum(789) draws before Active when it is invalid or too high (`honor_peer_next_expected_`;
-orchestrator ruling R-789). Replies to the
+orchestrator ruling R-789). **Disclosed exception: the strict-reset refusal arms no wait** (spec clarification "Session
+2026-11-21 (implementation, Phase 4)"): its Logon arm returns `session_seqnum_reset_mismatch`, so the connection closes
+at once after its Logout (data-model E-3 row 5b and "Leaving `writing`"), as QuickFIX C++, QuickFIX/J and QuickFIX/Go
+close at once after a pre-logon refusal; its write is limited as C-2.7 states. Replies to the
 peer's Logout are not in this list (C-1 rows 3 and 5). This list is the census's result at the base (research D2 item
 1); at the implementation head the census (tasks.md T006, research D1's recipe) is authoritative, and a Logout it finds
 that is not listed here takes this section's rules.

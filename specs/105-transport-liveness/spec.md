@@ -186,6 +186,34 @@ Ruling of the orchestrator on an implementation escalation (tasks.md T031), with
   resend answer. The slot-74 record, written at the decision, is unchanged. This needs part B's write-limit machinery,
   so it lands in Phase 4 (tasks.md T059a, T077a); until then part A waits for the gate with no bound (FR-003, FR-004b).
 
+### Session 2026-11-21 (implementation, Phase 4)
+
+Rulings of the orchestrator on implementation escalations of Phase 4 (tasks.md T057 to T073), within the signed-off rulings
+D-a to D-g and R-1; no new sign-off.
+
+- Q (FR-004, contract C-2 "Which Logouts", orchestrator 2026-11-21): The strict-reset refusal (`bilateral_strict`, a
+  Logon without ResetSeqNumFlag(141)=Y) returns `session_seqnum_reset_mismatch` after its Logout, and an arm's error
+  closes the connection at once (data-model E-3 row 5b). Does it wait? → A: No. It is exempt from the R-2 wait, a
+  disclosed exception: it keeps its error return and its immediate close, as QuickFIX C++, QuickFIX/J and QuickFIX/Go
+  close at once after a pre-logon refusal. Its Logout's write is limited as every ending Logout's is (C-2.7). Contract
+  C-2 "Which Logouts" and data-model E-3 "Leaving `writing`" state it; the cells are
+  `LogoutWait105Acceptor.PreActiveRefusal_StrictReset_NoWaitEofAtOnce` and
+  `LogoutWait105Direct.PreActive_DirectSession_StrictReset_NoWaitClosedAtOnce`.
+- Q (contract C-9, B-103-13, orchestrator 2026-11-21): `~Session` asserts the ending bound's counter is zero, and
+  test binaries that destroy a direct Session with an ending in progress abort. Is the assertion kept? → A: Yes: it is
+  the lifetime contract (a Session is not destroyed while its ending bound runs). A test that drives a Session directly
+  closes it before destroying it, through a shared helper (`tests/support/close_before_destroy.hpp`) or its fixture's
+  teardown. The Engine paths (`Engine::stop()`, the Engine's destruction, the C ABI's destroy) are shown by cells not to
+  destroy a Session with a running bound.
+- Q (R-1, ruling D-e, orchestrator 2026-11-21): A give-up is decided and waits for the replay gate; the peer's
+  Heartbeat answering the pending TestRequest arrives during that wait. Does it undo the give-up? → A: No: the give-up
+  is final once decided. Its record is already written (ruling D-e), and its Logout is written when the gate is free,
+  or not at all when the budget runs out first (the Phase 3 clarification above). The cell is
+  `ReplayGate588.R588f5_GiveUpWaitingAtTheGate_AnswerArrives_GiveUpIsFinal`.
+- Q (FR-008, contract C-1, orchestrator 2026-11-21): An application send in flight when another root's exit closes the
+  connection has its frame stored and not written, and returns `dispatch_aborted`, where the base wrote it after the
+  ending. → A: Accepted and disclosed as a B-105 row (research D11's B&L plan).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — A session that has ended closes its connection (Priority: P1)

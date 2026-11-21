@@ -239,6 +239,12 @@ only here, so only when the bound exists:
 - every other case (`r1`, `reply`, an `r2` that was not transmitted, cut by the bound (`cut` set), that claimed a pending
   mark, or whose session another root ended during the write): `phase = none`, the bound is woken, and the site
   records `Disconnected` as it does today (over `Disconnected`, it owes nothing), so the edge owes the close (E-2).
+- **The disclosed exception: the strict-reset refusal** (spec clarification "Session 2026-11-21 (implementation, Phase
+  4)"; contract C-2 "Which Logouts"). Its Logout enters `writing` as `r2` and is limited as every ending Logout is, but
+  leaving `writing` arms no wait (`refuse_logon_with_logout_`'s `arms_wait` false): its Logon arm returns
+  `session_seqnum_reset_mismatch`, so on an Engine session the pump closes the connection at once after the Logout
+  (row 5b), as all three QuickFIX engines close at once after a pre-logon refusal; on a direct Session the bound's
+  ordinary exit releases the close at once.
 
 **Other roots during `writing`: the latch defers to the writer.** While `phase == writing`, the two latch consumers
 leave the latch set: the pump's after-frame test (`take_connection_end` is not called) and `release_connection_end_`

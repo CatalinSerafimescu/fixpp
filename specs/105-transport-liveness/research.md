@@ -1069,7 +1069,12 @@ T115).
   `tests/capi/inbound_frame_dispositions_c7_witness_test.cpp` ("with its transport open"),
   `tests/session/test_537_too_high_heartbeat.cpp` ("ends the session, silently"), `tests/session/test_104_reset_on_logout.cpp`
   ("written after the reply") and `tests/session/test_cancelled_outbound_store_measurement.cpp` ("one Disconnected entry"),
-  each read on the tree before its re-pin. Each hit is classed: superseded by name (a merged
+  each read on the tree before its re-pin. The Phase 4 ruling (2026-11-21, census miss: the R-2-class pins of the
+  Phase 4 reading were outside both patterns) widens it again with alternatives keyed on the old claim "Logout, then
+  Disconnected at once":
+  `[Tt]hen Disconnected|must be Disconnected|Disconnected after|Reject\+Logout|Logout \| Disc|fsm_state::Disconnected\)? *<< *"setup: Arm B|Arm B ends the session|EndsSilently|session_is_established turns false|close\(\) did not return at the grace|Heartbeat's store was not reached|reach(es)? Disconnected|session is Disconnected|after the deadline's Logout the session`;
+  its known positives are the files of the measured R-2-class failures (the Phase 4 evidence lists them), each of which
+  the recipe must report on the tree before its re-pin. Each hit is classed: superseded by name (a merged
   bundle, edited nowhere: `specs/005-*`, `specs/013-*`, `specs/092-*`, `specs/093-*`, `specs/103-*`, `specs/104-*`), a
   living surface rewritten, or not this rule.
 - **Rulings superseded by name in this bundle** (the spec's FR-019 list): 536-537-538 note R-6's "Not chosen: … a Logout on the dead-peer ending" by R-1; D-537-5's C-3 disclosure ("the transport stays open") by FR-004; 103 Arm B's
@@ -1108,7 +1113,9 @@ T115).
     deadline caps it; the close at the bound comes before `Disconnected` and `onLogout` when the Logout is still in its
     store call, and a store call that never returns leaves them unfired with the connection closed, as any hung store
     call leaves its frame on `main`; a claimed pending too-high mark's receipt does not reset (contract C-2.8); and the
-    statement of QuickFIX's behaviour that replaces L-103-5's, per engine and path, as spec FR-016 gives it); `B-105-3` R-1 and its departure from QuickFIX (the record
+    statement of QuickFIX's behaviour that replaces L-103-5's, per engine and path, as spec FR-016 gives it; and its
+    disclosed exception, the strict-reset refusal, which arms no wait and closes at once after its Logout: spec
+    clarification "Session 2026-11-21 (implementation, Phase 4)"); `B-105-3` R-1 and its departure from QuickFIX (the record
     written before the write; the budget counted from the give-up's decision, so behind a resend answer that holds the
     replay gate past the budget the session closes with no Logout, "Logout not sent", and the record is still written:
     spec clarification "Session 2026-11-21 (implementation, Phase 3)"); `B-105-4` the #582 rule; `B-105-5` the TestRequest timing, the threshold's
@@ -1119,7 +1126,11 @@ T115).
     (the observers of contract C-9), the C++ layout changes (`sizeof(Session)` changes: FR-013 removes members, D1, D2 and D5 add them), BREAKING C++
     for `ReconnectFsm` (its constructor loses two parameters, and `drive_logout` and the other caller-less stubs go;
     migration line: drop the two arguments, which were never read; the stubs have no replacement), and the new installed implementation header `include/fixpp/session/detail/log_rate_gate.hpp`
-    (the status of `detail/replay_gate.hpp`); an `L-105-*` row for each disclosure of the contract's "Disclosed" section (L-105-b to
+    (the status of `detail/replay_gate.hpp`); `B-105-8` an application send in flight when another root's exit
+    closes the connection: its frame is stored and not written, and the send returns `dispatch_aborted`, where the
+    base wrote it after the ending (spec clarification "Session 2026-11-21 (implementation, Phase 4)"; witness
+    `CancelledOutboundStoreMeasurement.Returned_StoreCancelledAtItsLock`, whose held send's `dispatch_aborted` it
+    asserts); an `L-105-*` row for each disclosure of the contract's "Disclosed" section (L-105-b to
     L-105-h; L-105-a was withdrawn in Gate A round 1 and is not used). L-105-f is written as narrowed by ruling D-e
     (non-ending writes stay unbounded, including a liveness emit queued behind a blocked send, which never reaches
     R-1), names the follow-up fixpp issue for bounding every write (filed before Gate B, labelled from
