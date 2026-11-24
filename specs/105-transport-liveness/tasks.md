@@ -1016,7 +1016,7 @@ inbound silence, one sleep per iteration, T validated.
 
 ### RED cells for US4 (write first)
 
-- [ ] T102 [P] [US4] `tests/session/test_105_presession_log.cpp`, capturing sink:
+- [X] T102 [P] [US4] `tests/session/test_105_presession_log.cpp`, capturing sink:
   `PreSessionLog105.<NotTls|TlsHandshake|NoTimeLeft|FirstFrameTimeout|FirstFrameOverBudget|FirstFrameOverLimit|FirstFrameReadError|NoIds|NoSession>_OneRecord`
   (exactly one warn record of C-7.1's format with that `reason`; each `FirstFrame*` cell asserts `reason=first_frame` and the
   read's error that tells it apart from the other three: timeout, over budget, over-limit frame, read error, the last by
@@ -1032,6 +1032,10 @@ inbound silence, one sleep per iteration, T validated.
   `FirstFrameOverLimit` carry the same read error, `wire_frame_too_large` (the budget check and the Framer's limit
   both return it, `read_first_frame_bounded`), so the record tells those two apart from the timeout and the read error
   but not from each other; each cell asserts that value.
+  Done: `NotTls_OneRecord` not written (orchestrator ruling 2026-11-24): unreachable without a seam — a TLS listener
+  mints only `TlsTransport` via `asio_tls_transport_factory::make_accepted`; the branch is an uncovered defensive line,
+  dispositioned per Article IX §1 at T143/verify. The over-budget / over-limit same-reason premise is accepted; the
+  contract C-7.1 / data-model E-6 wording is amended in Phase 10.
 - [X] T103 [US4] Commit the cells; read T102 on `$B`; record.
   Done: evidence file, Phase 7, T103 (13 ran, 13 RED by the record assertion, no skip, no abort).
 
@@ -1104,13 +1108,16 @@ remaining reference.
 - [X] T112 [US5] Size pins: re-run T010's two greps at the head and update every `sizeof(Session)` / `sizeof(ReconnectFsm)` pin
   they report in `tests/` and `ci/`; the full `-k 0` build of T113 is the second instrument.
   Done: no pin to update (evidence file, Phase 8, T112).
-- [ ] T113 [US5] Full `-k 0` build on linux-clang-debug and linux-gcc-release; T108's two instruments now report nothing; commit
+- [X] T113 [US5] Full `-k 0` build on linux-clang-debug and linux-gcc-release; T108's two instruments now report nothing; commit
   `H6`; `codegraph sync`.
   Partial: linux-clang-debug full `-k 0` in `$M` at `05bb1b2f` rc 0, no compiler warning; the two instruments report
   nothing; H6 `e2202e44`. linux-gcc-release: the full `-k 0` was stopped (its regenerated codegen builders ran at a rate
   of hours) and the gcc-release build of every target compiling a C++ file the branch touches was run instead (rc 0
   after `e2202e44` braced five gtest-macro ifs gcc refused under `-Werror=dangling-else`). Owed: the full gcc-release
   `-k 0` (evidence file, Phase 8, T113).
+  Done (orchestrator ruling 2026-11-24): the full linux-gcc-release `-k 0` is not re-run locally (its codegen builders
+  run for hours). Discharged by the gcc-release build of every target compiling a touched C++ file (done, `e2202e44`),
+  T136 at the end of Phase 11, and CI's linux-gcc-release lane.
 
 **Checkpoint**: US5 complete.
 
