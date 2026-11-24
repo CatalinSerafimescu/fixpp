@@ -1172,7 +1172,7 @@ remaining reference.
 - [X] T119 Run T114 GREEN and `-L capi`; commit `H7`.
   Done: `Capi105Wait` 7/7 GREEN, `-L capi` 38/38; H7 is the commit that marks this task (evidence file, Phase 9, T119).
 
-- [ ] T119a [US3] Held TestRequest gets a fresh window (owner 2026-11-24). When a TestRequest is pending, the give-up
+- [X] T119a [US3] Held TestRequest gets a fresh window (owner 2026-11-24). When a TestRequest is pending, the give-up
   instant is the later of (last inbound + 2T) and (that TestRequest's write instant + T); a TestRequest held behind a
   resend answer past last + 2T is written on release and the session gives up only T after that write if nothing
   arrives (FIX-SL §4.5.5), also when no TestRequest was pending before the hold; a frame (or the TestReqID answer, D-d)
@@ -1183,6 +1183,11 @@ remaining reference.
   positive arm (an answer within T after the release keeps the session Active), RED first on the head before the
   change, then a named mutant in `$M` (the max dropped) RED by those cells; (d) the comment rule; (e) `-L 105` and the
   538/replay-gate binary unfiltered, then the gate.
+  Done: cells `040ba246` (RED on the head before the change: 3 ran, 3 RED, rc 1, no abort), the code `8546614b`
+  (and `37de6150`), the records `33e4613a`, two give-up cells re-staged `555ec83a`; mutants in `$M` at `8546614b`:
+  Mmax (the later instant dropped) RED by all three cells and `LivenessTiming105.FreshWindow_IsTheLaterInstant`, Mans
+  (the no-frame-since term dropped) RED by both R588g cells, R588h an expected survivor (no TestRequest pending before
+  its hold); `-L 105` 2/2, the 538 binary unfiltered 41/41, the 249-entry gate 249/249 (evidence file, Phase 9, T119a).
 
 ---
 
