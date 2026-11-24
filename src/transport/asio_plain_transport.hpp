@@ -127,8 +127,9 @@ public:
     //     cancel (#333; see Transport::cancel() for the vendored-header cite).
     [[nodiscard]] core::expected_t<void> cancel() noexcept override;
 
-    // (5) Close: socket_.close() directly. NO TLS bidi shutdown, NO
-    //     tls_close_timeout wait (D-2, FR-011). Idempotent.
+    // (5) Close: shutdown(send), then socket_.close() (105 T141a, B-105-9).
+    //     NO TLS bidi shutdown, NO tls_close_timeout wait (D-2, FR-011).
+    //     Idempotent.
     [[nodiscard]] core::expected_t<void> close() noexcept override;
 
     // ── Acceptor event sink (set_listener_events) ─────────────────────────────
