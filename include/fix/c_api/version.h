@@ -341,8 +341,10 @@
  *    is "TestRequest unanswered, TestReqID <id>", and the connection closes once that
  *    Logout's write has returned, with no wait for the peer's Logout;
  *  - after every other Logout the session sends to end it, before or after it established,
- *    it waits for the peer's Logout, at most logout_disconnect_timeout_ms from the start of
- *    that Logout's write, then closes the connection. During the wait after it established
+ *    but a STRICT acceptor's refusal of a Logon without 141=Y (whose connection closes once
+ *    its Logout is written), it waits for the peer's Logout, at most
+ *    logout_disconnect_timeout_ms from the start of that Logout's write, then closes the
+ *    connection. During the wait after it established
  *    it answers the peer's frames as while established (a Heartbeat for a TestRequest, a
  *    resend answer, a ResendRequest for a gap, a Reject) and originates nothing; a peer
  *    frame that would end the session is absorbed. The peer's Logout, at any MsgSeqNum(34),

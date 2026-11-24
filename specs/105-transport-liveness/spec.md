@@ -242,10 +242,13 @@ Owner ruling (handover item 7, option "fresh window"), tasks.md T119a.
   strictly after by one clock tick and saturating. In the usual case the TestRequest is written at the last inbound
   frame + T, so nothing changes. When it was held past the last inbound frame + 2T it is written on the release, and the
   session gives up only T after that write if nothing arrives; the same holds when no TestRequest was pending before
-  the hold. A frame, or the TestReqID answer (D-d), inside that window keeps the session. A TestRequest that falls due
-  (none pending, or an inbound frame since the pending one) is written before any give-up, so the give-up is eligible
-  only when no inbound frame arrived since the pending TestRequest. Supersedes, for that case, the Phase 6 answer
-  above. Data-model E-4, contract C-6.2 and C-3.1, research D6, `version.h`'s 1.18 history and
+  the hold. A frame, or the TestReqID answer (D-d), inside that window keeps the session. Supersedes, for that case,
+  the Phase 6 answer above.
+  *Implementation reading (T119a), for the orchestrator to confirm, not owner text:* so that the TestRequest the ruling
+  names is the one written on the release, a TestRequest that falls due (none pending, or an inbound frame since the
+  pending one) is written before any give-up, and the give-up is eligible only when no inbound frame arrived since the
+  pending TestRequest. Consequence measured at T119a: while a resend answer holds the gate and such a TestRequest is
+  due, no give-up is decided until the hold ends. Data-model E-4, contract C-6.2 and C-3.1, research D6, `version.h`'s 1.18 history and
   `fixpp_session_is_established`'s 1.18 clause state it; the cells are
   `ReplayGate588.R588g_FrameAfterTheTestRequest_HeldPastTwoThresholds_FreshWindowThenGivesUp`,
   `ReplayGate588.R588g_AnswerInsideTheFreshWindow_KeepsTheSession`,

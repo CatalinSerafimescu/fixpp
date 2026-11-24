@@ -54,7 +54,8 @@ Batch B27 (lane S1): fixpp#534, #582, #535, #559 sites 2 and 3, and #687, with R
    who closes, for graceful and terminal `close()`, `Engine::stop()` and the drain.
 3. **#582 (D5).** With `validate_sequence_numbers` off, an out-of-sequence Heartbeat reaches the TestReqID rule.
 4. **#535 (D6).** T = `test_request_threshold`, default 1.2 × HeartBtInt; TestRequest at T of inbound silence,
-   give-up after 2T of inbound silence counted from the last inbound frame (D-c), the 1 ns guard a third saturating
+   give-up after 2T of inbound silence counted from the last inbound frame (D-c; amended 2026-11-24, the owner's
+   fresh-window ruling: or T after the pending TestRequest's write when that is later, contract C-6.2), the 1 ns guard a third saturating
    step; one sleep per iteration to the earliest instant of a set that keeps the not-yet-reached Heartbeat instant (a
    Heartbeat instant passed while ineligible is dropped, so the loop cannot spin), so a frame after the TestRequest
    has the Heartbeat sent at its instant, or at the next wake, at most max(0, T − H) late (round 3, root cause #3); the

@@ -394,10 +394,12 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  *     closed, including one whose Logon was refused, where it stayed open; a
  *     peer that answers the Logon later than that no longer establishes
  *     (amended in C-ABI 1.18, 105: a refused Logon closes the connection
- *     itself, at once when the refusal sends nothing, and when it sends a
- *     Logout at the peer's Logout or logout_disconnect_timeout_ms after that
- *     Logout's write started, whichever comes first, and the establishment
- *     timeout if it comes earlier);
+ *     itself, at once when the refusal sends nothing or is a STRICT
+ *     acceptor's refusal of a Logon without 141=Y (once its Logout is
+ *     written), and when another refusal sends a Logout at the peer's Logout
+ *     or logout_disconnect_timeout_ms after that Logout's write started,
+ *     whichever comes first, and the establishment timeout if it comes
+ *     earlier);
  *   - every frame that passes the fault and third-field checks counts as
  *     inbound traffic for the heartbeat interval, where some that returned
  *     early did not (one above or below the expected MsgSeqNum(34), a
@@ -612,10 +614,12 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *     closed, including one whose Logon was refused, where it stayed open; a
  *     peer that answers the Logon later than that no longer establishes
  *     (amended in C-ABI 1.18, 105: a refused Logon closes the connection
- *     itself, at once when the refusal sends nothing, and when it sends a
- *     Logout at the peer's Logout or logout_disconnect_timeout_ms after that
- *     Logout's write started, whichever comes first, and the establishment
- *     timeout if it comes earlier);
+ *     itself, at once when the refusal sends nothing or is a STRICT
+ *     acceptor's refusal of a Logon without 141=Y (once its Logout is
+ *     written), and when another refusal sends a Logout at the peer's Logout
+ *     or logout_disconnect_timeout_ms after that Logout's write started,
+ *     whichever comes first, and the establishment timeout if it comes
+ *     earlier);
  *   - every frame that passes the fault and third-field checks counts as
  *     inbound traffic for the heartbeat interval, where some that returned
  *     early did not (one above or below the expected MsgSeqNum(34), a
@@ -714,9 +718,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  * BREAKING (C-ABI 1.18, [const §X.7]; 105): every ending closes the connection, where
  * some left it open. After a Logout the session sends to end it (the gap deadline's, a
  * SendingTime or OrigSendingTime Reject's, a too-low frame's, a Logon refusal's, among
- * others; not the unanswered TestRequest's, below), the session waits for the peer's
- * Logout, at most logout_disconnect_timeout_ms from the start of that Logout's write,
- * then closes the connection. During that wait after the session established,
+ * others; not the unanswered TestRequest's, below, nor a STRICT acceptor's refusal of a
+ * Logon without 141=Y, after whose Logout the connection closes at once), the session
+ * waits for the peer's Logout, at most logout_disconnect_timeout_ms from the start of
+ * that Logout's write, then closes the connection. During that wait after the session
+ * established,
  * *out_established stays true, where it turned false at the Logout, while
  * fixpp_session_send is refused: "established" does not mean a send is admitted then.
  * It turns false at the wait's end: the peer's Logout (at any MsgSeqNum(34)), the
@@ -904,10 +910,12 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  *     closed, including one whose Logon was refused, where it stayed open; a
  *     peer that answers the Logon later than that no longer establishes
  *     (amended in C-ABI 1.18, 105: a refused Logon closes the connection
- *     itself, at once when the refusal sends nothing, and when it sends a
- *     Logout at the peer's Logout or logout_disconnect_timeout_ms after that
- *     Logout's write started, whichever comes first, and the establishment
- *     timeout if it comes earlier);
+ *     itself, at once when the refusal sends nothing or is a STRICT
+ *     acceptor's refusal of a Logon without 141=Y (once its Logout is
+ *     written), and when another refusal sends a Logout at the peer's Logout
+ *     or logout_disconnect_timeout_ms after that Logout's write started,
+ *     whichever comes first, and the establishment timeout if it comes
+ *     earlier);
  *   - every frame that passes the fault and third-field checks counts as
  *     inbound traffic for the heartbeat interval, where some that returned
  *     early did not (one above or below the expected MsgSeqNum(34), a
@@ -1130,10 +1138,12 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  *     closed, including one whose Logon was refused, where it stayed open; a
  *     peer that answers the Logon later than that no longer establishes
  *     (amended in C-ABI 1.18, 105: a refused Logon closes the connection
- *     itself, at once when the refusal sends nothing, and when it sends a
- *     Logout at the peer's Logout or logout_disconnect_timeout_ms after that
- *     Logout's write started, whichever comes first, and the establishment
- *     timeout if it comes earlier);
+ *     itself, at once when the refusal sends nothing or is a STRICT
+ *     acceptor's refusal of a Logon without 141=Y (once its Logout is
+ *     written), and when another refusal sends a Logout at the peer's Logout
+ *     or logout_disconnect_timeout_ms after that Logout's write started,
+ *     whichever comes first, and the establishment timeout if it comes
+ *     earlier);
  *   - every frame that passes the fault and third-field checks counts as
  *     inbound traffic for the heartbeat interval, where some that returned
  *     early did not (one above or below the expected MsgSeqNum(34), a
@@ -1341,10 +1351,12 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  *     closed, including one whose Logon was refused, where it stayed open; a
  *     peer that answers the Logon later than that no longer establishes
  *     (amended in C-ABI 1.18, 105: a refused Logon closes the connection
- *     itself, at once when the refusal sends nothing, and when it sends a
- *     Logout at the peer's Logout or logout_disconnect_timeout_ms after that
- *     Logout's write started, whichever comes first, and the establishment
- *     timeout if it comes earlier);
+ *     itself, at once when the refusal sends nothing or is a STRICT
+ *     acceptor's refusal of a Logon without 141=Y (once its Logout is
+ *     written), and when another refusal sends a Logout at the peer's Logout
+ *     or logout_disconnect_timeout_ms after that Logout's write started,
+ *     whichever comes first, and the establishment timeout if it comes
+ *     earlier);
  *   - every frame that passes the fault and third-field checks counts as
  *     inbound traffic for the heartbeat interval, where some that returned
  *     early did not (one above or below the expected MsgSeqNum(34), a
