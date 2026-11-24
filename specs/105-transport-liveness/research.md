@@ -446,7 +446,8 @@ write limit of ruling D-e (item 11). This section is the mechanism.
     - **Timeout 0 and no clock**: no limit; the write is unbounded as on `main` (L-105-f). A 0 ms limit is not read as
       "close at once" (`close_grace`'s reading), because it would cut every R-1 Logout.
     - **TLS**: `close_async` cancels the write and then cannot write close_notify behind a peer that does not read;
-      it closes abortively at `tls_close_timeout` (contract C-8.5, L-105-g; permitted by ruling D-e).
+      it closes abortively at `tls_close_timeout` (contract C-8.5, L-105-g; permitted by ruling D-e), off Windows;
+      on Windows the held write completes with an error and close_notify follows (L-105-g, amended by T141).
     - **What stays unbounded** (L-105-f, narrowed): every write that does not end the session.
     - **Alternatives rejected.** *Racing only the Logout's own await* (`write || timer`): the first write to block is
       usually an application send or a Heartbeat holding the gate, so the race would leave the holder blocked and the
@@ -980,7 +981,7 @@ T115).
   `drive_reconnect` (`run_connect_loop` Step 3) before `run_read_pump` starts (Step 5), and the acceptor writes
   nothing before its refusal. It exists only for a direct initiator whose own reader runs before `open()` or
   `drive_reconnect` returns, and is covered by the shared write point, so it has no cell. Each asserts: open at the bound − 1 ms, no complete Logout at the peer, EOF at the bound
-  (plain), close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogout` once, no wait after it
+  (plain), close at the bound plus `tls_close_timeout` with no close_notify off Windows (TLS; L-105-g), `onLogout` once, no wait after it
   (the peer's Logout sent after the bound changes nothing), and for R-1 the slot-74 record present. A control cell:
   the write released at the bound − 1 ms, the Logout complete on the wire, then the R-2 wait's remaining budget, EOF
   at the bound; the discriminating oracle is the wire (the Logout bytes and the close_notify present or absent), not

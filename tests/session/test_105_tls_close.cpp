@@ -625,9 +625,8 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
     EXPECT_EQ(ending, t105::peer_ending::abortive)
         << "a close_notify behind a peer that stopped reading; " << reading.str();
 #else
-    // On Windows the held TLS write completes once close_async() cancels it, its record intact,
-    // so the close_notify that follows is written and the ending is not pinned here (L-105-g
-    // names it; re-derive by printing this cell's reading on a Windows build).
+    // The Windows ending is not pinned here: L-105-g names it, and the line below prints the
+    // reading.
     std::cout << "[ reading  ] TlsWriteLimit105: " << t105::peer_ending_name(ending) << "; "
               << reading.str() << std::endl;
 #endif

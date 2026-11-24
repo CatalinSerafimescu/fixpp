@@ -473,7 +473,7 @@ no comment claiming behaviour the code does not have.
   wherever `close()` does today (B-348-1 and its amendments), and it MUST go through the same close path `close()`
   uses, so the two cannot race to close one transport. Two exceptions: a Logout write cut by FR-004b on TLS behind a peer
   that does not read, where `close_async` cannot write close_notify and closes abortively at `tls_close_timeout`
-  (clarification D-e, L-105-g); and an allocation failure at the close's spawn, where the session closes with the
+  off Windows (clarification D-e, L-105-g, amended by T141); and an allocation failure at the close's spawn, where the session closes with the
   synchronous `Transport::close()` instead, abortive on TLS while a read or write is in flight (clarification D-g,
   L-105-h).
 - **FR-003 (R-1)**: When a TestRequest goes unanswered, the session MUST send one Logout whose Text(58) states that the

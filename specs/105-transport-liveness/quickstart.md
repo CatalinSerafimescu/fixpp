@@ -174,7 +174,7 @@ contract's table and per row of data-model E-3 (research D10 lists them):
 **The write limit (C-2.7, C-8.5)** — `test_105_write_limit.cpp`, both roles, on a transport whose write is held
 until it is closed (the scripted transport's `write_hold`, or a seam in `test_105_support.hpp`); the TLS arm on a peer
 that stops reading. Each: open at the bound − 1 ms, no complete Logout at the peer, EOF at the bound (plain) or the
-close at the bound plus `tls_close_timeout` with no close_notify (TLS), `onLogout` once, no wait after it,
+close at the bound plus `tls_close_timeout` with no close_notify off Windows (TLS; L-105-g), `onLogout` once, no wait after it,
 `logon_timeout_ms` set well above the bound:
 - [RED] `WriteLimit105.<R1|R2AfterActive|R2BeforeActive|R2BeforeActive789|Reply>_LogoutBlocked_ClosedAtTheBound` (the Logout is the
   blocked write); for R-1 the slot-74 record present.

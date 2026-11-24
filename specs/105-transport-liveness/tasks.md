@@ -629,7 +629,7 @@ does not complete closes the connection at the bound.
 - [X] T054 [P] [US1] `tests/session/test_105_tls_close.cpp`, TLS arms of part B (C-8.4, C-8.5):
   `TlsClose105.CloseGracefulDuringWait_CloseNotifyAtTheBound` (`logout_disconnect_timeout_ms` set well above the wall cap,
   the mock clock advanced to the bound: close_notify, then EOF, at the bound's mock instant) and
-  `TlsWriteLimit105.R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsCloseTimeout` (no close_notify; the close within the
+  `TlsWriteLimit105.R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsCloseTimeout` (no close_notify, off Windows since T141; the close within the
   bound plus `tls_close_timeout`; L-105-g). RED on the base before the fix.
 - [X] T055 [US1] `test_105_logout_wait.cpp`, lifetime (ASan lane; B-103-13): `Lifetime105.CloseFrame_SpawnedByWriteLimitDuringGracefulClose`
   (the mock clock advanced to the bound well inside `close_grace`'s wall time: EOF at the bound, the Session destroyed after
@@ -1388,7 +1388,9 @@ remaining reference.
   Done: the first run's two failure classes attributed (evidence file, "T141 (MSVC)" and the Phase 9 section after it);
   class 1 fixed by T141a; class 2 a platform difference by the orchestrator's ruling (2026-11-24): `TlsWriteLimit105`
   pins the abortive ending off Windows only, and L-105-g names the Windows ending. At `979cb146` on MSVC the set of
-  the ruling passed with no cell skipped (evidence file, Phase 9, T141a and T141 close).
+  the ruling passed with no cell skipped (evidence file, Phase 9, T141a and T141 close). The sandbox lock stays held at the
+  orchestrator's instruction, not released here. T141's 172 ctest entries re-run on MSVC at `979cb146`: all
+  passed.
 - [X] T141a The plain transport's close ends with FIN after fixpp's writes on every platform (orchestrator ruling
   2026-11-24; B-105-9): `asio_plain_transport::close()` shuts the send side down before `socket_.close()`; every
   other plaintext socket close is enumerated and dispositioned. RED first: `LogoutWait105.Bound_PeerReadsOnlyAfterTheClose_RejectAndLogoutThenEof`,

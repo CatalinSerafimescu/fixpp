@@ -334,10 +334,10 @@ Common rules:
   graceful close today. A cell separates the two only through the clock split: `logout_disconnect_timeout_ms` set
   long, and the mock clock advanced to the bound well inside that wall time.
 - C-8.5 **The write limit's close on TLS** (C-2.7). `close_async()` cancels the blocked write (its quiesce covers a
-  write in flight), then writes close_notify. Behind a peer that does not read, that alert cannot be written either,
+  write in flight), then writes close_notify. Off Windows, behind a peer that does not read, that alert cannot be written either,
   and `close_async()` falls back to the abortive close at its `tls_close_timeout` deadline. So on TLS a limited
-  Logout's connection closes within the bound (session clock) plus `tls_close_timeout` (wall time), and the close is
-  abortive when the peer stops reading. Permitted by ruling D-e and disclosed (L-105-g). On the plain transport
+  Logout's connection closes within the bound (session clock) plus `tls_close_timeout` (wall time), and, off Windows, the close is
+  abortive when the peer stops reading; on Windows the held write completes with an error and close_notify follows (L-105-g, amended by T141). Permitted by ruling D-e and disclosed (L-105-g). On the plain transport
   `close_async()` is `close()`, so the close is at the bound.
 - C-8.6 **A close that cannot be spawned** (an allocation failure at the close frame's spawn; clarification D-g).
   The session calls the synchronous `Transport::close()` on the strand instead, so the peer still observes EOF with
@@ -459,7 +459,7 @@ inapplicable.
   connection when that write returns. Follow-up: a fixpp issue for bounding every write, filed before Gate B and
   named in this row.
 - **L-105-g.** On TLS, a limited Logout's close (C-8.5) cannot write close_notify behind a peer that does not read;
-  `close_async()` then closes abortively at `tls_close_timeout`. Permitted by ruling D-e.
+  `close_async()` then closes abortively at `tls_close_timeout`, off Windows; on Windows the held write completes with an error and close_notify follows (L-105-g, amended by T141). Permitted by ruling D-e.
 - **L-105-h.** When a close frame cannot be spawned (an allocation failure), the session closes the transport with
   the synchronous `Transport::close()` (C-8.6); on TLS with a read or write in flight that close sends no
   close_notify. This departs from FR-002's single close path on allocation failure only (clarification D-g).

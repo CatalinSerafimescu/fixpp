@@ -255,7 +255,7 @@ harness for the latch test (research D10, contract C-12).
 - **XI §3.** No new mutex; the latch, the ending's state and the TestReqID floor are plain members written on the
   session strand. **PASS.**
 - **XII.** The TLS close stays `close_async` (orderly; C-8), except the allocation-failure fallback (C-8.6), including under a graceful `close()` during the wait
-  (C-8.4). The new abortive closes are the write limit's behind a peer that does not read (C-8.5), permitted by
+  (C-8.4). The new abortive closes are the write limit's behind a peer that does not read (C-8.5; off Windows, L-105-g), permitted by
   ruling D-e and disclosed (L-105-g), before 105 that peer held the connection with no bound; and the synchronous
   fallback when a close frame cannot be spawned (an allocation failure; ruling D-g, C-8.6, L-105-h). A refused,
   unauthenticated peer is held on an Engine session no longer than the earlier of the establishment deadline
