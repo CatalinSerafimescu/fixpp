@@ -1203,4 +1203,248 @@ TEST(Capi538Witness, SentAfterResetLogon_IsReplayed) { resend_after_logon_cell(t
 // The same exchange on a session that does not reset at its Logon.
 TEST(Capi538Witness, Control_NoResetLogon_SentMessageIsReplayed) { resend_after_logon_cell(false); }
 
+// ── 105-transport-liveness: the observers of contract C-9 during an R-2 wait ──
+
+// The cells of this section read the five observers contract C-9 gives a 1.18 clause
+// while an R-2 wait after Active runs (contract C-2). The route into the wait is the
+// SendingTime Reject's Logout: the peer's numbers stay in sequence on it (contract C-2.2),
+// so a frame the peer writes during the wait is at NextNumIn. The wait ends at the peer's
+// Logout (W-1) or at its bound, kLogoutTimeout after the Logout's write started, which is
+// no later than the peer's read of it. "At once" below is a quarter of that bound: a call
+// or an end that waited for the bound misses it by more than half the bound.
+constexpr std::chrono::milliseconds kAtOnce = kLogoutTimeout / 4;
+
+// A SendingTime(52) the session's SendingTime tolerance refuses on a real clock.
+constexpr char const* kStaleSendingTime = "20230101-00:00:00.000";
+
+std::string stale_heartbeat(Wire const& w, std::uint32_t seq) {
+    return frame44("35=0\x01" + fix_fields({{34, std::to_string(seq)},
+                                            {49, w.peer_comp_id},
+                                            {52, kStaleSendingTime},
+                                            {56, w.engine_comp_id}}));
+}
+
+std::size_t logouts_after(PeerLine const& line, time_point after) {
+    return static_cast<std::size_t>(std::ranges::count_if(
+        line.seen, [&](Seen const& s) { return s.at > after && is_type(s.frame, "5"); }));
+}
+
+// One session on a quiet interval, so that no liveness traffic runs during a cell. The
+// engine is held in an optional so that a cell can destroy it inside the wait.
+struct WaitScene {
+    Dictionary dict;
+    PeerLine line{one_session()};
+    std::optional<CEngine> engine;
+    std::optional<Seen> logout;  // the session's Logout, as the peer read it
+
+    WaitScene() { engine.emplace(dict, std::vector<SessionSpec>{line.spec(kQuietHeartBtInt)}); }
+
+    [[nodiscard]] CSession& session() { return engine->session(0); }
+
+    // Starts the engine, answers the Logon, and shows both callbacks working before the
+    // wait: the peer's order reaches the receive callback, and a send reaches the peer
+    // and the send callback. Empty on success, else the step that failed.
+    [[nodiscard]] std::string open() {
+        if (!engine->start()) return "the engine did not start";
+        if (!answer_logon(session(), line, kQuietHeartBtInt)) {
+            return "the session did not establish";
+        }
+        if (!line.write(line.wire.order(line.next_seq++, "BEFORE-WAIT"))) {
+            return "the peer could not write its order";
+        }
+        auto const until = steady::now() + kStepBudget;
+        while (!session().rec.received_id("BEFORE-WAIT")) {
+            if (steady::now() >= until) return "the receive callback did not see the peer's order";
+            std::this_thread::sleep_for(kSlice);
+        }
+        if (session().send_order("SENT-BEFORE-WAIT") != FIXPP_ERR_OK) {
+            return "fixpp_session_send failed before the wait";
+        }
+        auto const sent = line.read_until(
+            [](std::string const& f) {
+                return is_type(f, "D") && field(f, 11) == "SENT-BEFORE-WAIT";
+            },
+            steady::now() + kStepBudget);
+        if (!sent) return "the peer did not read the send before the wait";
+        if (session().rec.to_app.load() != 1) return "the send callback did not see the send";
+        return {};
+    }
+
+    // The peer writes a Heartbeat with a stale SendingTime(52) at NextNumIn, and reads the
+    // Reject it draws, then the session's Logout. Empty on success, else the step that failed.
+    [[nodiscard]] std::string enter_wait() {
+        if (!line.write(stale_heartbeat(line.wire, line.next_seq++))) {
+            return "the peer could not write the stale Heartbeat";
+        }
+        auto const until = steady::now() + kStepBudget;
+        if (!line.read_until([](std::string const& f) { return is_type(f, "3"); }, until)) {
+            return "the stale SendingTime drew no Reject";
+        }
+        logout = line.read_until([](std::string const& f) { return is_type(f, "5"); }, until);
+        if (!logout) return "no Logout after the Reject";
+        return {};
+    }
+
+    // The wait's bound, on the peer's side: no later than this.
+    [[nodiscard]] time_point bound() const { return logout->at + kLogoutTimeout; }
+};
+
+// fixpp_session_is_established is true from the Logout's write to the wait's end, and turns
+// false at the peer's Logout, before the bound (W-1, contract C-2.1).
+TEST(Capi105Wait, IsEstablished_TrueDuringTheWait_FalseAtThePeersLogout) {
+    WaitScene scene;
+    ASSERT_EQ(scene.open(), "") << "setup";
+    ASSERT_EQ(scene.enter_wait(), "") << "setup";
+    EstablishedWatch watch{scene.session()};
+    auto const mid = scene.logout->at + (kLogoutTimeout / 2);
+    while (steady::now() < mid && !scene.line.ended()) {
+        watch.sample();
+        (void)scene.line.read_next(std::min(mid, steady::now() + kSlice));
+    }
+    watch.sample();
+    EXPECT_FALSE(watch.first_false.has_value())
+        << "fixpp_session_is_established turned false inside the wait"
+        << observed(scene.line, watch, scene.logout->at, "the peer read the session's Logout");
+
+    ASSERT_TRUE(scene.line.write(scene.line.wire.logout(scene.line.next_seq++)))
+        << "setup: the peer could not write its Logout";
+    auto const answered = steady::now();
+    watch.watch_until(answered + kStepBudget);
+    ASSERT_TRUE(watch.first_false.has_value())
+        << "fixpp_session_is_established did not turn false after the peer's Logout";
+    EXPECT_LT(ms_between(answered, *watch.first_false).count(), kAtOnce.count())
+        << "fixpp_session_is_established turned false later than at once after the peer's "
+           "Logout (times in ms)";
+}
+
+// fixpp_session_send during the wait is refused with FIXPP_ERR_SESSION_INVALID_STATE and
+// returns at once (W-10); the session stays established through the call, and the peer
+// reads no message from it.
+TEST(Capi105Wait, Send_RefusedDuringTheWait_ReturnsAtOnce) {
+    WaitScene scene;
+    ASSERT_EQ(scene.open(), "") << "setup";
+    ASSERT_EQ(scene.enter_wait(), "") << "setup";
+    EXPECT_TRUE(scene.session().established())
+        << "fixpp_session_is_established is false inside the wait, before the send";
+    auto const called = steady::now();
+    fixpp_error_t const rc = scene.session().send_order("SENT-IN-WAIT");
+    auto const returned = steady::now();
+    EXPECT_EQ(rc, FIXPP_ERR_SESSION_INVALID_STATE) << "fixpp_session_send during the wait";
+    EXPECT_LT(ms_between(called, returned).count(), kAtOnce.count())
+        << "fixpp_session_send did not return at once (times in ms)";
+    EXPECT_TRUE(scene.session().established())
+        << "fixpp_session_is_established is false inside the wait, after the send";
+    (void)scene.line.open_through(scene.logout->at + (kLogoutTimeout / 2));
+    EXPECT_FALSE(std::ranges::any_of(scene.line.seen, [](Seen const& s) {
+        return is_type(s.frame, "D") && field(s.frame, 11) == "SENT-IN-WAIT";
+    })) << "the peer read the message the refused send carried";
+}
+
+// The send callback is not invoked for a send fixpp_session_send refuses during the wait;
+// it was invoked for the send before the wait (WaitScene::open).
+TEST(Capi105Wait, SendCallback_NotInvokedForASendDuringTheWait) {
+    WaitScene scene;
+    ASSERT_EQ(scene.open(), "") << "setup";
+    ASSERT_EQ(scene.enter_wait(), "") << "setup";
+    EXPECT_TRUE(scene.session().established())
+        << "fixpp_session_is_established is false inside the wait, before the send";
+    (void)scene.session().send_order("SENT-IN-WAIT");
+    EXPECT_TRUE(scene.session().established())
+        << "fixpp_session_is_established is false inside the wait, after the send";
+    EXPECT_EQ(scene.session().rec.to_app.load(), 1)
+        << "the send callback was invoked for the send during the wait";
+}
+
+// The receive callback is invoked for an application message at NextNumIn during the wait
+// (W-2), and the session stays established.
+TEST(Capi105Wait, ReceiveCallback_MessageAtNextNumIn_DeliveredDuringTheWait) {
+    WaitScene scene;
+    ASSERT_EQ(scene.open(), "") << "setup";
+    ASSERT_EQ(scene.enter_wait(), "") << "setup";
+    ASSERT_TRUE(scene.line.write(scene.line.wire.order(scene.line.next_seq++, "IN-WAIT")))
+        << "setup: the peer could not write its order";
+    auto const until = scene.logout->at + (kLogoutTimeout / 2);
+    while (!scene.session().rec.received_id("IN-WAIT") && steady::now() < until) {
+        (void)scene.line.read_next(std::min(until, steady::now() + kSlice));
+    }
+    EXPECT_TRUE(scene.session().rec.received_id("IN-WAIT"))
+        << "the receive callback was not invoked for the order at NextNumIn during the wait";
+    EXPECT_TRUE(scene.session().established())
+        << "fixpp_session_is_established is false inside the wait, after the order";
+}
+
+// fixpp_session_close (graceful) during the wait returns at the wait's end, the peer's
+// Logout, and not before it (W-13); the session writes no second Logout, and the peer reads
+// end-of-stream.
+TEST(Capi105Wait, Close_DuringTheWait_ReturnsAtThePeersLogout_OneClose) {
+    WaitScene scene;
+    ASSERT_EQ(scene.open(), "") << "setup";
+    ASSERT_EQ(scene.enter_wait(), "") << "setup";
+    EXPECT_TRUE(scene.session().established())
+        << "fixpp_session_is_established is false inside the wait, before the close";
+    BlockedClose close;
+    close.start(scene.session());
+    EXPECT_TRUE(scene.line.open_through(scene.logout->at + (kLogoutTimeout / 2)))
+        << "the connection ended inside the wait, before the peer's Logout";
+    EXPECT_FALSE(close.done()) << "fixpp_session_close returned inside the wait";
+    ASSERT_TRUE(scene.line.write(scene.line.wire.logout(scene.line.next_seq++)))
+        << "setup: the peer could not write its Logout";
+    auto const answered = steady::now();
+    auto const until = answered + kStepBudget;
+    while (!(close.done() && scene.line.ended()) && steady::now() < until) {
+        (void)scene.line.read_next(std::min(until, steady::now() + kSlice));
+    }
+    ASSERT_TRUE(close.done()) << "setup: fixpp_session_close did not return";
+    EXPECT_EQ(close.rc(), FIXPP_ERR_OK) << "fixpp_session_close";
+    EXPECT_LT(ms_between(answered, close.returned_at()).count(), kAtOnce.count())
+        << "fixpp_session_close did not return at once after the peer's Logout (times in ms)";
+    EXPECT_EQ(logouts_after(scene.line, scene.logout->at), 0U)
+        << "the session wrote a second Logout";
+    EXPECT_TRUE(scene.line.sock.eof()) << "the peer did not read end-of-stream";
+}
+
+// fixpp_engine_destroy, the C ABI's terminal close (Engine::stop runs Session::close(terminal),
+// contract C-9 "Lifetime at the C ABI"), during the wait ends it at once (W-14): the call
+// returns and the peer reads the end of its connection well before the bound, with no second
+// Logout.
+TEST(Capi105Wait, EngineDestroy_DuringTheWait_EndsItAtOnce_OneClose) {
+    WaitScene scene;
+    ASSERT_EQ(scene.open(), "") << "setup";
+    ASSERT_EQ(scene.enter_wait(), "") << "setup";
+    EXPECT_TRUE(scene.session().established())
+        << "fixpp_session_is_established is false inside the wait, before the destroy";
+    auto const called = steady::now();
+    scene.engine.reset();
+    auto const returned = steady::now();
+    EXPECT_LT(ms_between(called, returned).count(), kAtOnce.count())
+        << "fixpp_engine_destroy did not return at once (times in ms)";
+    (void)scene.line.open_through(returned + kAtOnce);
+    auto const ended = scene.line.sock.ended_at();
+    ASSERT_TRUE(ended.has_value()) << "the peer's connection did not end after the destroy";
+    EXPECT_LT(ms_between(called, *ended).count(), kAtOnce.count())
+        << "the peer's connection did not end at once after the destroy (times in ms)";
+    EXPECT_EQ(logouts_after(scene.line, scene.logout->at), 0U)
+        << "the session wrote a second Logout";
+}
+
+// An ending reached through the C ABI closes the connection: after the peer's Logout ends the
+// wait (W-1), the peer reads end-of-stream at once, and no frame of the session's before it.
+TEST(Capi105Wait, PeersLogout_EndsTheWait_PeerReadsEofAtOnce) {
+    WaitScene scene;
+    ASSERT_EQ(scene.open(), "") << "setup";
+    ASSERT_EQ(scene.enter_wait(), "") << "setup";
+    ASSERT_TRUE(scene.line.write(scene.line.wire.logout(scene.line.next_seq++)))
+        << "setup: the peer could not write its Logout";
+    auto const answered = steady::now();
+    (void)scene.line.open_through(answered + kStepBudget);
+    auto const ended = scene.line.sock.ended_at();
+    ASSERT_TRUE(ended.has_value()) << "the peer's connection did not end after its Logout";
+    EXPECT_TRUE(scene.line.sock.eof()) << "the connection ended otherwise than by end-of-stream";
+    EXPECT_LT(ms_between(answered, *ended).count(), kAtOnce.count())
+        << "the peer's connection did not end at once after its Logout (times in ms)";
+    EXPECT_FALSE(std::ranges::any_of(scene.line.seen, [&](Seen const& s) {
+        return s.at > answered;
+    })) << "the session wrote a frame after the peer's Logout";
+}
+
 }  // namespace
