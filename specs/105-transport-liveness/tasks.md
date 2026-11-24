@@ -1389,6 +1389,10 @@ remaining reference.
   the count and any failure, and the result of every `tests/alloc_guard` entry by name (`ctest -N -L alloc_guard` lists them),
   `alloc_guard_093_pump_active_read` (`tests/alloc_guard/test_093_pump_active_read_alloc_guard.cpp`, the pump's Active read
   path, which 105's latch test runs on) among them.
+  Not done, escalated: a full ctest needs every target of the E:-hosted debug tree built, and this branch's header
+  changes (`error.hpp`, `session.hpp`) leave a near-full rebuild there (2910 steps), which the owner's rule excludes;
+  the build was stopped before any ctest; a debug tree does not fit the free space on `/mnt/wsl/fixppbuild`. The
+  `-L alloc_guard` entries ran by name in the gate (evidence file, Phase 11, T142 and the gate).
 - [ ] T143 Coverage of added lines (Article IX §1): fresh per-binary profraw, from every binary the `105` label runs (`session_105_seam_tests` included: the
   allocation-failure catches, the listener's generic arm and the bound's failure exit are reached only there), for the
   `session`, `log` and `config` modules and every other module whose `src/` the diff adds a reachable line to (`src/capi`
@@ -1399,6 +1403,10 @@ remaining reference.
   reached by the window function's runtime twins (T086); every
   uncovered added line or branch tested, waived with a one-line rationale, or escalated to a filed, labelled issue, in
   `.specify/decisions/105-transport-liveness-verify.md`.
+  Measured, not done: per-binary profraw and exports (the one-export union discarded for mismatched data); every
+  uncovered added line and branch listed with a disposition (waived, a ruling, pre-existing moved, or escalated); the
+  escalated rows await one filed, labelled issue, and the table awaits T144's verify record (evidence file, Phase 11,
+  T143).
 - [ ] T144 **(orchestrator)** `/speckit-verify`; writes `.specify/decisions/105-transport-liveness-verify.md`. Re-run T130 to T135
   as the last actions before any labelled push.
 - [ ] T149 **(orchestrator)** The PR body declares C-ABI 1.18 **BREAKING** ([const §X.7]): the observers of contract C-9 and
