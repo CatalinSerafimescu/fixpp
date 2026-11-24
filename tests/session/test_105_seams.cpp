@@ -1143,7 +1143,7 @@ struct HeldAnswer {
 
 // [the held-cap wait's cancellation test] close(terminal) while the liveness loop waits at the
 // replay gate with a TestRequest pending: close() returns with the clock still and the loop writes
-// nothing more. Deleting the cancellation test leaves this cell green: close() wakes the gate and
+// nothing more. The cancellation test is not the only exit on this path: close() wakes the gate and
 // writes Disconnected before it emits, so the loop's next state test ends it as well.
 TEST(LivenessTiming105Direct, CloseTerminalDuringTheHeldCapWait_LoopEndsNothingWritten) {
     t143a::HeldAnswer h;
