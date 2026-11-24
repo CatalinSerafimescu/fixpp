@@ -272,6 +272,29 @@ Owner ruling (handover item 7, option "fresh window"), tasks.md T119a.
   (`tests/session/test_105_liveness_timing.cpp`, both roles) and
   `LivenessTiming105.HeldCap_IsThreeThresholdsAndTheGuard`.
 
+### Session 2026-11-24 (implementation, Phase 9)
+
+Ruling of the orchestrator on an implementation escalation of Phase 9 (tasks.md T142, T143b), within FR-004 and R-2;
+no new sign-off.
+
+- Q (FR-004, R-2, contract C-2 "Which Logouts", orchestrator 2026-11-24): The peer's own Logout below NextNumIn without
+  PossDupFlag(43)=Y, in Active, draws the too-low Logout (B-103-10). Does that Logout arm the R-2 wait? → A: No. The
+  wait exists to receive the peer's Logout, and here the frame that draws fixpp's Logout is the peer's Logout, so there
+  is nothing left to wait for. fixpp writes the Logout the base writes for that frame (its too-low Text(58)), its
+  write limited as every ending Logout's is (C-2.7), and the connection closes after the write, as after R-1's Logout.
+  QuickFIX C++ (`Session::nextLogout`: `verify(logout, false, false)`), QuickFIX/J (`nextLogout`:
+  `verify(logout, false, false)`) and QuickFIX/Go (`handleLogout`: `verifySelect(msg, false, false, true)`) skip
+  the too-low check for an inbound Logout: they answer it and disconnect. Their answer carries no Text(58), and under
+  their reset-on-logout setting they reset; fixpp keeps the base's Text and makes no reset, as the base does. Before
+  Active the shape does not arise: a Logout in NotConnected or LogonSent is refused before any sequence check
+  (`interpret_logon`, or arm S under `reset_on_logout`) and draws no Logout, at the base and at the head. Contract
+  C-2 "Which Logouts", data-model E-3 "Leaving `writing`", research D2 item 1, B-103-10, B-105-2, `version.h`'s 1.18
+  history and `fixpp_session_is_established`'s 1.18 clause state it; the cells are
+  `LogoutWait105.PeerLogoutBelowNextNumIn_TooLowLogoutNoWaitEofAtOnce` (both roles),
+  `LogoutWait105Direct.PeerLogoutBelowNextNumIn_TooLowLogoutNoWaitClosedAtOnce`,
+  `Capi105Wait.PeersLogoutBelowNextNumIn_TooLowLogoutThenEofAtOnce` and
+  `ThornyRecoveryFixture.Qfj750_LogoutTooLowSeqnumStillDisconnects`.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — A session that has ended closes its connection (Priority: P1)
@@ -291,7 +314,8 @@ the bound the class allows, with no further inbound frame and no local API call.
    peer reads one Logout whose Text states that the TestRequest was not answered, then EOF, with no wait for its Logout.
 2. **Given** an Active session, **When** the peer sends a frame below NextNumIn without PossDupFlag=Y, **Then** the
    peer reads the too-low Logout and EOF follows either its own Logout or `logout_disconnect_timeout_ms`, whichever
-   comes first.
+   comes first; when that frame is the peer's own Logout, EOF follows the too-low Logout's write (clarification
+   "Session 2026-11-24 (implementation, Phase 9)").
 3. **Given** an Active session with a gap open, **When** the gap deadline passes, **Then** the same R-2 rule applies
    after its Logout.
 4. **Given** an Active session, **When** the peer sends a Logout, **Then** fixpp replies, runs its receipt reset point
@@ -445,7 +469,8 @@ no comment claiming behaviour the code does not have.
   if that comes first (B-093-4; clarification "Gate A round 3", root cause #2); a Session driven without an Engine has no
   establishment deadline, and its pre-Active wait ends at the bound. When the ending claims a pending too-high
   Logout (103's mark, the peer's Logout already received), it waits for nothing: it closes after its write, as R-1's
-  does. Its claimed receipt does not reach its reset point under `reset_on_logout`, as on `main`, where both claiming sites
+  does. Nor does the too-low Logout that the peer's own Logout below NextNumIn draws: it closes after its write
+  (clarification "Session 2026-11-24 (implementation, Phase 9)"). Its claimed receipt does not reach its reset point under `reset_on_logout`, as on `main`, where both claiming sites
   end at once (contract C-2.8, B-105-2): the one exception to clarification D-a's reset, and not a change to B-104-1, since
   that Logout never reached its reset point on `main` either. While the wait is armed:
   - **The peer's Logout ends the wait whatever its MsgSeqNum** (clarification D-a): it is recognised once it has
@@ -684,6 +709,7 @@ no comment claiming behaviour the code does not have.
 |---|---|---|---|---|
 | Unanswered TestRequest | Logout with Text, then close (FIX-SL §4.5.5) | close, no Logout | close, no Logout | close, no Logout |
 | After a too-low Logout | wait for the peer's Logout, bounded by `logout_disconnect_timeout_ms` | close at once | close at once | wait, bounded by LogoutTimeout |
+| The peer's own Logout below NextNumIn, after Active | the too-low Logout, with its Text(58), and no wait; no reset, NextNumIn not advanced; close after the write | a Logout with no Text, a reset under ResetOnLogout, close (`verify(logout, false, false)`; NextNumIn advanced) | the same (`verify(logout, false, false)`; NextNumIn not advanced, QFJ-750) | the same (`verifySelect(msg, false, false, true)`; NextNumIn not advanced) |
 | Answering Heartbeat's TestReqID | matching or absent answers (an absent one departs from FIX-SL §4.5.5 and §9.1, which require it; kept as today, D-d); an earlier one of this connection neither answers nor ends; one fixpp never sent on this connection ends the session | not compared | not compared | not compared |
 | An ending Logout whose write does not complete | the connection closes `logout_disconnect_timeout_ms` after the write's start (abortive on TLS behind a peer that does not read) | not read for this plan | not read for this plan | not read for this plan |
 | Peer's Logout reply to fixpp's ending Logout, after Active | ends the wait whatever its MsgSeqNum; resets under `reset_on_logout`, then close; NextNumIn advances only when in sequence | reset, close (`verify(logout, false, false)`; NextNumIn advanced) | reset, close (advanced only when in sequence) | reset, close |

@@ -1410,7 +1410,8 @@ remaining reference.
   Done: per-binary profraw and exports (the one-export union discarded for mismatched data); every uncovered added line
   and branch listed with a disposition; re-measured after T143a's cells; the rows still owed are escalated in one list
   for the orchestrator's filed, labelled issue, and the table awaits T144's verify record (evidence file, Phase 11, T143,
-  and Phase 9 appended after Phase 11, T143 re-measured).
+  and Phase 9 appended after Phase 11, T143 re-measured). The structural waivers proposed there are approved (orchestrator
+  2026-11-24) and marked so in the table; the rows still owed are filed as fixpp#718.
 
 - [X] T143a The owed cells of T143's escalated rows (orchestrator ruling 2026-11-24): a cell for every row this file
   already maps to a cell, every row whose seam is "none needed", and every row whose named seam exists in the repo;
@@ -1420,6 +1421,22 @@ remaining reference.
   Done: cells in `test_105_seams.cpp` (section "105 T143a") and `test_105_presession_log.cpp`, each RED under its named
   mutant in `$M` (exit 1) or a priced survivor; the re-measure and the rows still owed in the evidence file (Phase 9
   appended after Phase 11, T143a and T143 re-measured).
+
+- [X] T143b The peer's own Logout below NextNumIn (orchestrator ruling 2026-11-24 on T142's failure, a 105 design gap;
+  spec.md Clarifications "Session 2026-11-24 (implementation, Phase 9)"): without PossDupFlag(43)=Y, in Active, it draws the Logout the base writes for it
+  (the too-low Text(58)), its write limited, and arms no R-2 wait; the connection closes after the write. RED first: the
+  thorny cell `ThornyRecoveryFixture.Qfj750_LogoutTooLowSeqnumStillDisconnects` and new cells
+  `LogoutWait105.PeerLogoutBelowNextNumIn_TooLowLogoutNoWaitEofAtOnce` (both roles),
+  `LogoutWait105Direct.PeerLogoutBelowNextNumIn_TooLowLogoutNoWaitClosedAtOnce` (`test_105_logout_wait.cpp`) and
+  `Capi105Wait.PeersLogoutBelowNextNumIn_TooLowLogoutThenEofAtOnce` (`recovery_liveness_capi_witness_test.cpp`), each
+  asserting the Logout on the wire with its Text, EOF at once with the clock still, and Disconnected; a named mutant in
+  `$M` (the exemption dropped) RED by every one, and one (the exemption widened to every too-low frame) RED by the
+  existing too-low route cells. Records: contract C-2 "Which Logouts", data-model E-3 "Leaving `writing`", research D2
+  item 1, spec.md FR-004, User Story 1 scenario 2 and "Departures from QuickFIX", B-103-10, B-105-2 and its table copy,
+  `version.h`'s 1.18 history and `fixpp_session_is_established`'s 1.18 clause. T009's census re-run for the
+  peer's-Logout-below-NextNumIn pins across `tests/`, `tests/interop` included. Before Active the shape does not
+  arise (a Logout there is refused before any sequence check and draws no Logout). Evidence file, Phase 9 appended
+  after the T143a section, T143b.
 - [ ] T144 **(orchestrator)** `/speckit-verify`; writes `.specify/decisions/105-transport-liveness-verify.md`. Re-run T130 to T135
   as the last actions before any labelled push.
 - [ ] T149 **(orchestrator)** The PR body declares C-ABI 1.18 **BREAKING** ([const §X.7]): the observers of contract C-9 and

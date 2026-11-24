@@ -258,6 +258,12 @@ only here, so only when the bound exists:
   `session_seqnum_reset_mismatch`, so on an Engine session the pump closes the connection at once after the Logout
   (row 5b), as all three QuickFIX engines close at once after a pre-logon refusal; on a direct Session the bound's
   ordinary exit releases the close at once.
+- **The disclosed exception: the too-low Logout the peer's own Logout draws** (spec clarification "Session 2026-11-24 (implementation, Phase 9)"; contract
+  C-2 "Which Logouts"). Arm B of `on_inbound_active_out_of_sequence_` passes `send_ending_logout_` the `reply` kind
+  for a frame whose MsgType(35) is 5, so its Logout enters `writing` and is limited, and leaving `writing` takes the
+  "every other case" row above: `phase = none`, `send_ending_logout_` records `Disconnected`, and the edge owes the
+  close. On an Engine session the pump consumes it after the frame; on a direct Session the bound's ordinary exit
+  releases it at once.
 
 **Other roots during `writing`: the latch defers to the writer.** While `phase == writing`, the two latch consumers
 leave the latch set: the pump's after-frame test (`take_connection_end` is not called) and `release_connection_end_`

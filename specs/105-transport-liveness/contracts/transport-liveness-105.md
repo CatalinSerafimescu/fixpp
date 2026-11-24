@@ -74,8 +74,15 @@ Logon's NextExpectedMsgSeqNum(789) draws before Active when it is invalid or too
 orchestrator ruling R-789). **Disclosed exception: the strict-reset refusal arms no wait** (spec clarification "Session
 2026-11-21 (implementation, Phase 4)"): its Logon arm returns `session_seqnum_reset_mismatch`, so the connection closes
 at once after its Logout (data-model E-3 row 5b and "Leaving `writing`"), as QuickFIX C++, QuickFIX/J and QuickFIX/Go
-close at once after a pre-logon refusal; its write is limited as C-2.7 states. Replies to the
-peer's Logout are not in this list (C-1 rows 3 and 5). This list is the census's result at the base (research D2 item
+close at once after a pre-logon refusal; its write is limited as C-2.7 states. **Disclosed exception: the too-low
+Logout that the peer's own Logout draws arms no wait** (spec clarification "Session 2026-11-24 (implementation, Phase 9)"): an inbound Logout below
+NextNumIn without PossDupFlag(43)=Y, in Active, draws the too-low Logout (B-103-10), and the frame the wait would
+receive has already arrived. Its Logout is the one the base writes for that frame (`inbound_logout_leaf_`'s `reply`
+kind, the too-low Text(58)), its write is limited as C-2.7 states, and the connection closes after the write (C-1
+rows 1 and 11), as QuickFIX C++ and QuickFIX/J (`nextLogout`: `verify(logout, false, false)`) and QuickFIX/Go
+(`handleLogout`: `verifySelect(msg, false, false, true)`) skip the too-low check for a Logout, answer it and
+disconnect. Before Active the shape does not arise: a Logout in NotConnected or LogonSent is refused before any
+sequence check and draws no Logout. Replies to the peer's Logout are not in this list (C-1 rows 3 and 5). This list is the census's result at the base (research D2 item
 1); at the implementation head the census (tasks.md T006, research D1's recipe) is authoritative, and a Logout it finds
 that is not listed here takes this section's rules.
 
