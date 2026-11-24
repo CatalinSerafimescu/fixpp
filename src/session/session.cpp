@@ -1002,7 +1002,7 @@ template <class... Counter>
 }
 }  // namespace
 // NOLINTBEGIN(cppcoreguidelines-macro-usage): see above
-#define FIXPP_JOIN_COUNTERS(...)              \
+#define FIXPP_JOIN_COUNTERS(...)          \
     while (any_counter_held(__VA_ARGS__)) \
     co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable)
 // NOLINTEND(cppcoreguidelines-macro-usage)

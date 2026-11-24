@@ -28,6 +28,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <exception>  // std::uncaught_exceptions: ending_write_unwind_guard
 #include <expected>
 #include <fixpp/core/clock.hpp>  // steady_time_point (T041 US3 liveness)
 #include <fixpp/core/detail/asio_recycler_config.hpp>
@@ -46,7 +47,6 @@
 // _corpus Tier-1 gate (tests/sync/CMakeLists.txt) covers this file.
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/session/message_store.hpp>  // 008-message-store — MessageStore complete type
-#include <exception>   // std::uncaught_exceptions: ending_write_unwind_guard
 #include <functional>
 #include <memory>
 #include <memory_resource>
