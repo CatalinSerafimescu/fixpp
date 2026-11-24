@@ -2235,11 +2235,13 @@ private:
     void spawn_connection_close_(std::shared_ptr<fixpp::transport::Transport> transport) noexcept;
     // The R-2 helper (research D2 item 1) after Active: claims a pending mark, writes the Logout
     // through inbound_logout_leaf_, then arms the wait or records Disconnected; absorbed while an
-    // ending is in progress. kind reply (T143b, contract C-2 "Which Logouts"): the Logout answers
-    // the peer's own Logout, its write limited and no wait armed.
+    // ending is in progress. `hdr` is the inbound frame that drew the ending, which every caller
+    // has in hand: when it is the peer's Logout, MsgType(35) 5, the Logout is the leaf's reply
+    // kind, its write limited and no wait armed (T143c, contract C-2 "Which Logouts"). Its
+    // callers: `git grep -n 'send_ending_logout_(' -- src`.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_ending_logout_(
-        bool tic, std::string_view sending_time, std::string_view text,
-        ending_kind kind = ending_kind::r2) noexcept;
+        bool tic, fixpp::session::detail::FrameHeader const& hdr, std::string_view sending_time,
+        std::string_view text) noexcept;
     // The peer-frame silent endings (research D2 item 4): Disconnected unless an ending is in
     // progress after Active.
     void end_session_silently_() noexcept {

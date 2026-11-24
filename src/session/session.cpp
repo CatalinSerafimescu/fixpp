@@ -5612,8 +5612,9 @@ bool Session::inbound_sending_time_ok_(
 // the leaf has already recorded Disconnected for. 105-transport-liveness (R-2, contract C-2)
 // supersedes ruling R-12's "records Disconnected whether or not that Logout could be built":
 // a transmitted Logout arms the wait and the session stays Active until the peer's Logout or
-// the bound; one that was not transmitted records Disconnected as before. While a wait is
-// armed the deadline does not fire (W-7). No handler stands around the leaf: a cancelled store call
+// the bound, unless the frame at the deadline is itself the peer's Logout (T143c), and one
+// that was not transmitted records Disconnected as before. While a wait is armed the deadline
+// does not fire (W-7). No handler stands around the leaf: a cancelled store call
 // of the Logout ends the frame at on_inbound_active_'s catch (§10, D-OUT-2 and D-OUT-4).
 asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::resend_gap_deadline_(
     bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept {
@@ -5657,8 +5658,9 @@ asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::resend_ga
                                 static_cast<std::size_t>(text_end - text_buf.data())};
     const auto st52 = stamp_sending_time(*effective_clock_, cfg_.sending_time_precision);
     // 105 (research D2 item 1): an R-2 ending, through send_ending_logout_, which claims a
-    // pending mark (103 research D4.6) and records Disconnected unless the wait was armed.
-    FIXPP_INBOUND_SPLIT_AWAIT(r, tic, send_ending_logout_(tic, st52.value, text));
+    // pending mark (103 research D4.6) and records Disconnected unless the wait was armed; the
+    // frame at the deadline decides the kind there (T143c).
+    FIXPP_INBOUND_SPLIT_AWAIT(r, tic, send_ending_logout_(tic, hdr, st52.value, text));
     co_return r;
 }
 
@@ -5759,7 +5761,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_sendin
     }
     // Step 2: the Logout, and Step 3 the ending: 105 (research D2 item 1), an R-2 ending
     // through send_ending_logout_, which records Disconnected unless the wait was armed.
-    FIXPP_INBOUND_SPLIT_AWAIT(r, tic, send_ending_logout_(tic, st52.value, {}));
+    FIXPP_INBOUND_SPLIT_AWAIT(r, tic, send_ending_logout_(tic, hdr, st52.value, {}));
     co_return r;
 }
 
@@ -6257,12 +6259,19 @@ asio::awaitable<void> Session::run_ending_logout_bound_(
 // Research D2 item 1, after Active. The Disconnected writes of its callers' tails are its own:
 // recorded unless the wait was armed.
 asio::awaitable<fixpp::core::expected_t<void>> Session::send_ending_logout_(
-    bool tic, std::string_view sending_time, std::string_view text, ending_kind kind) noexcept {
+    bool tic, fixpp::session::detail::FrameHeader const& hdr, std::string_view sending_time,
+    std::string_view text) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
     // W-8: a further ending during an ending in progress is absorbed.
     if (ending_in_progress_()) {
         co_return fixpp::core::expected_t<void>{};
     }
+    // 105 T143c (spec.md Clarifications, the Phase 9 implementation session; contract C-2 "Which
+    // Logouts"): the one decision for every ending an inbound frame draws after Active. When that
+    // frame is the peer's Logout, the frame the R-2 wait would wait for has arrived, so the Logout
+    // is the leaf's reply kind: its write is limited and it arms no wait. The predicate is the
+    // response test's (on_inbound_active_), MsgType(35) 5, the frame's first 35 for every reader.
+    auto const kind = hdr.msg_type == "5" ? ending_kind::reply : ending_kind::r2;
     // 103 (research D4.6): the ending claims a pending mark; its own Logout is the one, and a
     // claimed mark arms no wait (C-2.8).
     bool const claimed = peer_logout_.phase == peer_logout_mark::phase_t::pending;
@@ -6426,8 +6435,9 @@ asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::on_inboun
                 }
             }
             // Step 2: the Logout, and Step 3 the ending: 105 (research D2 item 1), an R-2
-            // ending through send_ending_logout_.
-            FIXPP_INBOUND_SPLIT_AWAIT(r, tic, send_ending_logout_(tic, st52_d.value, {}));
+            // ending through send_ending_logout_, which arms no wait when this frame is the
+            // peer's Logout (T143c).
+            FIXPP_INBOUND_SPLIT_AWAIT(r, tic, send_ending_logout_(tic, hdr, st52_d.value, {}));
             co_return r;
         }
         // else: equal or 122 < 52 → validated, fall through.
@@ -6604,13 +6614,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
                               : SendingTimeStamp{};
         // 105 (research D2 item 1): an R-2 ending through send_ending_logout_, which claims a
         // pending mark (103 research D4.6) and records Disconnected unless the wait was armed.
-        // 105 T143b (spec.md Clarifications, the Phase 9 implementation session; contract C-2
-        // "Which Logouts"): the peer's own Logout below NextNumIn draws the Logout the base writes
-        // for it, through the leaf's reply kind, and arms no wait, as QuickFIX C++ and QuickFIX/J
-        // (nextLogout) and QuickFIX/Go (handleLogout) skip the too-low check for a Logout: the
-        // frame the wait would wait for has arrived.
-        auto const kind = hdr.msg_type == "5" ? ending_kind::reply : ending_kind::r2;
-        FIXPP_INBOUND_SPLIT_AWAIT(r, tic, send_ending_logout_(tic, st52.value, text, kind));
+        // 105 T143b, T143c (spec.md Clarifications, the Phase 9 implementation session; contract
+        // C-2 "Which Logouts"): the peer's own Logout below NextNumIn draws the Logout the base
+        // writes for it and arms no wait, as QuickFIX C++ and QuickFIX/J (nextLogout) and
+        // QuickFIX/Go (handleLogout) skip the too-low check for a Logout; send_ending_logout_
+        // makes that decision from the frame.
+        FIXPP_INBOUND_SPLIT_AWAIT(r, tic, send_ending_logout_(tic, hdr, st52.value, text));
         co_return r;
     }
     // Any other refusal (a drained sequence-number mutex) is an internal failure: through the
