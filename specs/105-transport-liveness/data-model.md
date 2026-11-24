@@ -488,7 +488,7 @@ ending Logout at that deadline while the pump is suspended in the arm (E-3, "The
 | `not_tls_transport` | `not_tls` | the accepted transport is not a `TlsTransport` on a TLS profile | no | 0 |
 | `tls_handshake_failed` | `tls_handshake` | `async_handshake` failed | no | the handshake's error |
 | `no_establishment_time` | `no_time_left` | no establishment time left after the handshake | no | 0 |
-| `first_frame_read_failed` | `first_frame` | `read_first_frame_bounded` failed (timeout, over budget, an over-limit frame, a read error) | no | the read's error |
+| `first_frame_read_failed` | `first_frame` | `read_first_frame_bounded` failed (timeout, over budget, an over-limit frame, a read error) | no | the read's error; an over-budget and an over-limit first frame both report `wire_frame_too_large` (*amended 2026-11-24, orchestrator ruling, tasks.md T102's premise accepted*) |
 | `first_frame_without_ids` | `no_ids` | `scan_first_frame_ids` found no BeginString or no CompIDs | what was read | 0 |
 | `compid_mismatch` | `no_session` | the reversed SessionId does not match the entry | yes | 0 |
 
@@ -500,7 +500,7 @@ Re-derive the branch list before coding: every `(void)transport->close(); contin
 | Entity | Where | Fields |
 |---|---|---|
 | `detail::log_rate_gate` | `include/fixpp/session/detail/log_rate_gate.hpp` (a new installed implementation header: `session.hpp` declares two gates; the status of `detail/replay_gate.hpp`, contract C-9) | `logged` (`bool`), `next` (`fixpp::core::steady_time_point`), `unlogged` (`std::uint64_t`, a count no flood reaches the range of) (Session's struct, moved; layout unchanged; `Session` keeps a member alias) |
-| `detail::admit_log_record(gate, now, window, occurrences)` | same, inline | returns the suppressed count since the last record and starts the next window, or counts and returns `nullopt` |
+| `detail::admit_log_record(gate, now, window_end, occurrences)` | same, inline | returns the suppressed count since the last record and starts the next window, ending at `window_end`, or counts and returns `nullopt`. The caller computes `window_end` from `now` and the window with `detail::deadline_after` (saturating), which an installed header cannot include (*amended 2026-11-24, orchestrator ruling accepting T104's departure; it read `admit_log_record(gate, now, window, occurrences)`*) |
 | `Session::admit_log_record_` | unchanged signature | forwards with `effective_clock_` and `max(HeartBtInt, 1 s)` |
 | the accept loop's gate | a local of `run_accept_loop` | one per entry; clock `engine_cfg.clock`; window `max(entry's HeartBtInt or the default, 1 s)` |
 

@@ -1221,19 +1221,29 @@ remaining reference.
 
 ## Phase 10: Polish & cross-cutting — records, follow-ups and supersession (FR-016, FR-018, FR-019; research D11, D12)
 
-- [ ] T120 **(orchestrator)** File the three follow-up issues of plan "Follow-ups to file before Gate B" on fixpp, each
+- [X] T120 **(orchestrator)** File the three follow-up issues of plan "Follow-ups to file before Gate B" on fixpp, each
   labelled at creation from `gh label list`: bounding every non-ending write (L-105-f); the per-session timer slot under a
   direct driver (`system_clock_source`); the read pump's establishment race re-racing an absorbed exception. Record the issue
   numbers in the evidence file. Precedes T123.
-- [ ] T121 `spec/behaviors-and-limitations.md` (live file only): retire L-103-5 (its QuickFIX statement is not carried forward
+  Done (orchestrator): issues filed 2026-11-24, labelled: #714 (L-105-f non-ending writes unbounded), #715 (direct-driver
+  timer slot), #716 (run_read_pump establishment race spin), #717 (initiator TLS handshake unbounded); placed in parent
+  issue-batches.md (B124, B125, B48, B123). L-105-f's row names #714.
+- [X] T121 `spec/behaviors-and-limitations.md` (live file only): retire L-103-5 (its QuickFIX statement is not carried forward
   as written) and move it to `spec/behaviors-and-limitations-closed.md` under that file's cut rule (only self-declared-resolved
   entries), marked resolved by 105. After T122, any amended L-row whose amendment leaves nothing live moves the same way.
-- [ ] T122 Amend in place, dated, naming 105: B-537-2 (the "transport stays open" clause and its silent grace-check ending,
+  Done: L-103-5 moved to `spec/behaviors-and-limitations-closed.md` (comment header, status resolved (105); its
+  QuickFIX statement replaced by `B-105-2`'s). After T122 no amended L-row is left with nothing live: L-093-1 (the
+  stall), L-092-1 (wontfix), L-093-6 (garbles not counted) and L-103-6 stay.
+- [X] T122 Amend in place, dated, naming 105: B-537-2 (the "transport stays open" clause and its silent grace-check ending,
   B-537-2(b)), B-537-3 (#582), L-093-1 and L-092-1 (R-1's Logout and the close; the "or leaves a TestRequest unanswered"
   clause removed), L-093-6 (the rejects are logged; garbles of a connection with no Session still not counted), B-093-4,
   B-092-2 and B-092-5 (the grace window is 2T), B-103-10, B-104-6 and B-103-13 (the direct driver's precondition naming
   `run_ending_logout_bound_` and the close frame; `Lifetime105.*` its cells).
-- [ ] T123 New rows: B-105-1 (the close rule by ending class) to B-105-7, B-105-7 copying research D11's text, not re-deriving it
+  Done: each amended in place, dated 2026-11-24 and naming 105, with the old text recorded: B-537-2, B-537-3, L-093-1
+  (status disclosed: #534's half closed), L-092-1, L-093-6, B-093-4, B-092-2, B-092-5, B-103-10, B-104-6, B-103-13; by
+  research D11's plan also B-103-7 (`Lo1.*`) and L-103-6 (`TooHighLogoutState103.Lo3_*`); B-103-1's witness
+  citation now `CapiVersion.CApiVersionIsExactly_1_18_0`.
+- [X] T123 New rows: B-105-1 (the close rule by ending class) to B-105-7, B-105-7 copying research D11's text, not re-deriving it
   (BREAKING C-ABI 1.18, the observers of contract C-9; the C++ layout changes, `sizeof(Session)` changing as FR-013 removes
   members and D1, D2 and D5 add them; BREAKING C++ for `ReconnectFsm`, its constructor losing two parameters and `drive_logout`
   and the other caller-less stubs going, with D11's migration line: drop the two arguments, which were never read; the stubs
@@ -1242,24 +1252,46 @@ remaining reference.
   L-105-h from contract C-11 (L-105-a was withdrawn in Gate A round 1 and is not used), L-105-f written as narrowed by ruling
   D-e and naming T120's issue and the round-1 text it supersedes. The spec's and C-10's departure tables copied, not
   re-derived. Each row cites its cells by name.
-- [ ] T124 [P] `.specify/536-537-538-recovery-liveness.md`: an erratum at its end naming 105 (R-6 superseded by R-1; D-537-5's
+  Done: a "105 — transport liveness" section in the live file: the spec's and C-10's departure tables copied; B-105-1
+  to B-105-8 (B-105-8 by research D11's plan; B-105-7 with the `engine.hpp` test-hook member
+  `test_hook_listener_construction_fails_`; B-105-3 states the fresh window and its 3T cap, T119a and T119b);
+  L-105-b to L-105-h from contract C-11, L-105-f naming #714, the round-1 text it supersedes and the uncapped hold
+  with no TestRequest pending (T119b's escalation); a release note. Also (orchestrator rulings): contract C-7.1 and
+  data-model E-6 (over-budget and over-limit first frames both report `wire_frame_too_large`), data-model E-7
+  (`admit_log_record` takes the window's end).
+- [X] T124 [P] `.specify/536-537-538-recovery-liveness.md`: an erratum at its end naming 105 (R-6 superseded by R-1; D-537-5's
   C-3 disclosure by FR-004).
-- [ ] T125 [P] Brain pages, each citing source (research D11): `brain/components/session.md` (R-6; the grace-check deferral to
+  Done: "Erratum — 105-transport-liveness (2026-11-24)" at the note's end: R-6's "Not chosen: … a Logout on the
+  dead-peer ending" by R-1; D-537-5's C-3 disclosure by FR-004.
+- [X] T125 [P] Brain pages, each citing source (research D11): `brain/components/session.md` (R-6; the grace-check deferral to
   B27), `brain/components/session-liveness-and-reconnect.md` (the `ReconnectFsm` correction block; the thresholds as a pointer
   to `run_liveness_loop`), `brain/components/engine-accept-path.md` (the first frame through the pump; the reject records),
   `brain/components/graceful-logout.md` if T009 hit a rule of it. Each page's superseded-docs list names 105's supersessions
   of 005, 013, 092, 093, 103 and 104 by name.
-- [ ] T126 [P] T-DOC-1 (research D12): a `brain/failure-classes.md` entry in that page's form (trigger and procedure, no
+  Done: `brain/components/session.md` (refs; the R-6 and grace-check items of the #537 bullet marked superseded or
+  decided by 105; a "Transport liveness (105)" section with D1's and D2's rejected alternatives and the
+  supersessions of 005, 013, 092, 093, 103 and 104 by name), `session-liveness-and-reconnect.md` (the correction
+  block: the stubs are gone, with the re-derivation grep; the thresholds as a pointer to the helpers
+  `run_liveness_loop` uses), `engine-accept-path.md` (the first frame through the pump; the reject records;
+  `L-093-6`'s no-log-site claim superseded). `graceful-logout.md`: no T009 hit (the evidence file's T009 census
+  names it only through a B&L line), not edited.
+- [X] T126 [P] T-DOC-1 (research D12): a `brain/failure-classes.md` entry in that page's form (trigger and procedure, no
   instance, no PR) for `<windows.h>` macro identifiers, its text sourced from PARENT `.claude/agents/phase-implementer.md`
   section "Cross-platform — `<windows.h>` macros rewrite common identifiers on MSVC": the trigger (a new identifier in code an
   MSVC lane compiles whose spelling a platform header defines as a macro: `near`, `far`, `min`, `max`, `small`, `ERROR`, `IN`,
   `OUT`), the procedure (a descriptive name; `(std::max)(a, b)`; build the touched targets on MSVC before the first labelled
   push; a Linux-only green is no evidence for the class); and one `brain/log.md` line dated at the PR, naming the class.
-- [ ] T127 Brain checks: `python3 tools/check_brain.py --self-test`, `python3 tools/check_brain.py gate` and
+  Done: `brain/failure-classes.md` class 25 (trigger, procedure, scanning heuristic, sibling; no instance, no PR) and
+  one `brain/log.md` line dated 2026-11-24.
+- [X] T127 Brain checks: `python3 tools/check_brain.py --self-test`, `python3 tools/check_brain.py gate` and
   `python3 tools/check_brain.py census` (and whatever `.github/workflows/brain-freshness.yml` runs, derived from it), then the
   wrapper PARENT `research/G19-fix-fpml-iso20022/tools/brain-external-sweep.sh` (never a bare `check_brain.py sweep`); record
   its execution count.
-- [ ] T128 Supersession close (FR-019): re-run T009's census at the head; every living-surface hit now states the new rule or
+  Done: `check_brain.py --self-test` 11/11, `gate` rc 0 (a seeded missing ref in `session.md` reported, then
+  removed), `census` rc 0; the brain-freshness.yml steps `brain_link_decisions.py --self-test` 5/5,
+  `check_workflows.py --self-test` 7/7 and `.` OK; `tools/brain-external-sweep.sh` PASS (self-test ok, seeded break
+  detected, 121 external refs resolve) (evidence file, Phase 10).
+- [X] T128 Supersession close (FR-019): re-run T009's census at the head; every living-surface hit now states the new rule or
   names 105; every FR-019 pin of T033, T072 and T099 and the retired probes of T111 assert the new rule; T124 and T125 name
   every ruling of FR-019's list; `git grep -nE 'Phase 6 US4|not a close|unanswered_tr_' -- src include` reports no stale claim.
   Record the classed table.
@@ -1273,6 +1305,10 @@ remaining reference.
   them. Added by the T035 census widening (living surfaces with no task): `spec/coverage-index.md` row 13 (TC-009's "step 2's
   wait with the transport open", which C-1 row 5 now closes after the acknowledgement).
 
+  Done: T009's census re-run at the head; the living-surface hits of the old claims classed (evidence file, Phase 10,
+  T128): two rewritten (`unparseable_frame_disposition_test.cpp`'s D-1/D-2 and D-3 "not a close" comments now
+  name `close()` and 105's connection close; `spec/coverage-index.md` row 13 amended), the rest correct as written
+  or not this rule; the `git grep` over `src include` reports only lines naming 105 or not this rule.
 ---
 
 ## Phase 11: Polish, verification and mandatory close-out

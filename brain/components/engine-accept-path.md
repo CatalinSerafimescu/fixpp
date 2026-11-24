@@ -9,6 +9,8 @@ refs:
   - include/fixpp/transport/listener.hpp
   - src/session/session_strand.cpp
   - .specify/544-hot-path-zero-alloc.md
+  - specs/105-transport-liveness/research.md
+  - specs/105-transport-liveness/contracts/transport-liveness-105.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/pr331-330-asio-listener-executor-gateb.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/pr326-310-315-gateb.md
@@ -63,6 +65,14 @@ then returns.** There is no re-spin to `async_accept` after a successful handoff
 feature could change it without changing anything this page names. **Re-derive before relying on it:**
 read `run_accept_loop` in `src/session/engine.cpp` and check whether the accept call sits inside a
 loop that continues past a successful handoff.
+
+*(105-transport-liveness, a lead to verify:)* the acceptor's first frame is delivered to the Session through the read
+pump (`run_read_pump`'s `first_frame` parameter in `src/session/engine.cpp`), so its ending closes the connection
+like any other (B&L `B-105-1`). Each connection `run_accept_loop` refuses before a Session exists writes one
+rate-bounded warn record (`log_pre_session_reject`), and a listener that cannot bind (or cannot be built) writes one error record
+(B&L `B-105-6`; 105 contract C-7, research D8). Re-derive the refusal branches: every `(void)transport->close(); continue;`
+in `run_accept_loop` before `open()` (105 data-model E-6's recipe). This supersedes `L-093-6`'s "no out-of-session
+log site exists in `src/`".
 
 ## ⚠️ Documents that describe this component and are WRONG
 

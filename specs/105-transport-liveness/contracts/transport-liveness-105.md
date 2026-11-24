@@ -293,7 +293,8 @@ Common rules:
   `reason` is one of `not_tls`, `tls_handshake`, `no_time_left`, `first_frame`, `no_ids`, `no_session`. The BeginString
   and CompIDs are the first frame's when it was read, each at most 15 bytes, each byte outside printable ASCII (0x20 to
   0x7E) written as `?` (research D8); `error` is the handshake's or the first-frame
-  read's error code, or 0.
+  read's error code, or 0. An over-budget and an over-limit first frame both report `wire_frame_too_large`
+  (*amended 2026-11-24, orchestrator ruling, tasks.md T102's premise accepted*).
 - C-7.2 The records are bounded per entry: at most one per `max(HeartBtInt, 1 s)` of the engine clock; the next record carries in `suppressed_since_last` the refusals not written since the last one. The first refusal
   of a window is always written. A count suppressed after the last record is reported only by the next record: with no
   later refusal it is not reported, as for the Session's garble record. The bound is per entry: an acceptor with N

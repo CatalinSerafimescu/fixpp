@@ -1192,6 +1192,26 @@ comment and the records describe is then false.
 - **Sibling.** Class 17 (trust keyed on a textual proxy): a check that admits whatever shares the
   proxy. Here the proxy is the key's type, and its bytes are the forgery.
 
+### 25. A platform header's macro rewrites an identifier only on the platform that defines it
+
+`<windows.h>` defines `near`, `far`, `min`, `max`, `small`, `ERROR`, `IN` and `OUT` as macros (`near` and
+`far` as nothing), and asio and gtest include it on MSVC even when the file does not. An identifier with one of those
+spellings is rewritten before the compiler sees it there, and only there: `auto near = f();` reaches MSVC as
+`auto = f();`, and `std::max(a, b)` breaks without `NOMINMAX`. Clang and gcc on Linux define none of them, so every
+Linux lane is green.
+
+- **Trigger:** a new identifier, tests included, in code an MSVC lane compiles, whose spelling a platform header
+  defines as a macro (`near`, `far`, `min`, `max`, `small`, `ERROR`, `IN`, `OUT`).
+- **Procedure:**
+  - Give it a descriptive name (`close_to_deadline`, not `near`); call the standard function as
+    `(std::max)(a, b)`.
+  - Build the touched targets on MSVC before the first labelled push.
+  - A Linux-only green is no evidence for this class.
+- **Scanning heuristic:** `git diff origin/main...HEAD -- src include tests bench | grep -nwE '^\+.*\b(near|far|small|ERROR|IN|OUT)\b'`
+  over the added lines, and `std::(min|max)\(` not in parentheses.
+- **Sibling.** Class 1 (an instrument that cannot report): a lane that does not compile the platform's headers cannot
+  report this class.
+
 ## How to query the instances
 
 The corpus is private and machine-local. From the parent repo:

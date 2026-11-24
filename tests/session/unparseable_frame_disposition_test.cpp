@@ -3046,7 +3046,8 @@ TEST(UnparseableFrameDisposition, ScriptedPeer_MalformedTooHigh_ResendConverges_
 //
 // Before Active, a frame the header scan could not read is refused: the session ends
 // Disconnected, sends nothing (no Logon reply, no Reject) and delivers nothing. D-1 and
-// D-2 are a state transition, not a close, so is_open() is not asserted.
+// D-2 are a state transition, not a close(), so is_open() (the Session's lifecycle) is not
+// asserted; since 105-transport-liveness the edge closes the connection (contract C-1).
 //   LogonRefusal/*: a Logon whose malformed tag follows every field interpret_logon
 //     reads (98, 108 and, on FIXT.1.1, 1137), as acceptor (NotConnected) and as
 //     initiator (the reply, LogonSent), on FIX.4.2, FIX.4.4 and FIXT.1.1, with inbound
@@ -3163,8 +3164,9 @@ TEST(UnparseableFrameDisposition, PreActive_D8Logon_LogonSent_Disregarded) {
 //
 // A faulty Logon at the expected N=2 (field 3 is 35, 34 read before the fault), in both
 // fault shapes, in Active and in LogonReceived: the session ends Disconnected, and
-// sends no Reject(35=3) and no Logout(35=5). D-3 is a state transition, not a close,
-// so is_open() is not asserted. LogonReceived is reached through StateCell's parked
+// sends no Reject(35=3) and no Logout(35=5). D-3 is a state transition, not a close(),
+// so is_open() (the Session's lifecycle) is not asserted; since 105-transport-liveness the
+// edge closes the connection (contract C-1). LogonReceived is reached through StateCell's parked
 // Logon reply (the Engine awaits each on_inbound_frame, so in production no frame
 // reaches that arm while the exchange is in flight). The released reply resumes the
 // acceptor's Logon path in the NotConnected arm, which transitions to Active whatever

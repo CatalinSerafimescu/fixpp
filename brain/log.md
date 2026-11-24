@@ -6,6 +6,12 @@ status: stable
 
 # Log
 
+- **2026-11-24 — 105-transport-liveness, Phase 10 (tasks.md T125, T126): `failure-classes.md` gains class 25, a
+  platform header's macro rewrites an identifier only on the platform that defines it** (the `<windows.h>` macro
+  identifiers; trigger and procedure, the brain half of the parent's phase-implementer entry). `components/session.md`,
+  `components/session-liveness-and-reconnect.md` and `components/engine-accept-path.md` gain 105's decisions and
+  supersessions, each citing source.
+
 - **2026-11-20 — 104-sequence-reset-fidelity close-out (PR #706), row 15: `failure-classes.md` gains class 24, a
   passkey that is trivially copyable restricts nothing.** `SeqnumManager::freeze_key` could be forged with
   `std::bit_cast`. The fix is a user-provided private copy constructor, plus `static_assert`s that are proven able to
