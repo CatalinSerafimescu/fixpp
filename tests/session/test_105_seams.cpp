@@ -1129,10 +1129,13 @@ struct HeldAnswer {
         return d.s.state() == fsm_state::Active && phase_of(d) == phase::writing &&
                session_test_access::replay_gate(*d.s.session).exclusive;
     }
+    // Releases the held answer, then moves the clock past the write limit, so whatever the cell
+    // left in progress ends before the Scene's teardown.
     void release() {
         gst->hold_when = nullptr;
         gst->release_all();
         d.s.drain();
+        d.pass(std::chrono::milliseconds{d.s.cfg.logout_disconnect_timeout_ms});
     }
 };
 
@@ -1312,6 +1315,8 @@ TEST(LogoutWait105Direct, Logon789TooHigh_ToAdminThrows_NoLogoutClosedAtOnce) {
     (void)d.s.feed(t143a::logon_reply(d.s.sending_time(), "789=999\x01"));
     EXPECT_EQ(d.app->to_admin_count("5"), 1) << "the reach proof: toAdmin was not called";
     t143a::expect_no_logout(d, true, "789_ToAdminThrows");
+    // Past the bound, so an ending left in progress ends before close().
+    d.pass(std::chrono::milliseconds{d.s.cfg.logout_disconnect_timeout_ms});
     (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "T143a/close/789-ta");
 }
 
@@ -1349,6 +1354,8 @@ TEST(LogoutWait105Direct, Logon789TooHigh_LogoutDoesNotFit_NoLogoutClosedAtOnce)
                                             "789=999\x01")));
     EXPECT_EQ(d.app->to_admin_count("5"), 0) << "the Logout was built";
     t143a::expect_no_logout(d, true, "789_LogoutDoesNotFit");
+    // Past the bound, so an ending left in progress ends before close().
+    d.pass(std::chrono::milliseconds{d.s.cfg.logout_disconnect_timeout_ms});
     (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "T143a/close/789-fit");
 }
 
