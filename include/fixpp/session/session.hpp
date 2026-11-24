@@ -2245,9 +2245,11 @@ private:
         }
         record_state_transition_(fsm_state::Disconnected);
     }
-    // The peer's Logout off NextNumIn during a wait armed after Active (research D2 item 3).
+    // The peer's Logout during a wait armed after Active (research D2 item 3): at NextNumIn the
+    // in-sequence route (check_inbound, then on_inbound_active_logout_), off NextNumIn its own.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> on_inbound_ending_response_(
-        bool tic) noexcept;
+        bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+        inbound_route const& route) noexcept;
     // Test seams (research D10, the spawn-failure and in-body race seams): when set and they
     // return true, the bound's spawn throws std::bad_alloc after its join is built, and the
     // bound throws std::bad_alloc before it awaits its race. Set only through

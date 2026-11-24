@@ -5201,22 +5201,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
             // test. While a wait armed after Active is open, a well-formed Logout past the
             // identity checks is the peer's response whatever its MsgSeqNum, ahead of the
             // Reset-mode SequenceReset bypass, MsgSeqNum 0, the too-high branch, the PossDup
-            // stage-1 arm and check_inbound. At NextNumIn it takes the in-sequence route;
-            // off NextNumIn the response arm.
-            if (hdr.msg_type == "5" && ending_wait_.phase == ending_wait_state::phase_t::armed &&
+            // stage-1 arm and check_inbound. The sub-arm decides its route (at NextNumIn the
+            // in-sequence one), so this arm awaits nothing here; the one-byte phase is tested
+            // first.
+            if (ending_wait_.phase == ending_wait_state::phase_t::armed && hdr.msg_type == "5" &&
                 ending_wait_.from_active()) {
-                const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
-                if (seq != 0 && seq == seqnum_mgr_.next_inbound_unsafe()) {
-                    auto chk = co_await seqnum_mgr_.check_inbound(seq);
-                    if (!chk) {
-                        slow.k = inbound_slow_t::kind::out_of_sequence;
-                        slow.chk_error = chk.error();
-                        break;
-                    }
-                    note_inbound_advance_();
-                    slow.k = inbound_slow_t::kind::logout;
-                    break;
-                }
                 slow.k = inbound_slow_t::kind::ending_response;
                 break;
             }
@@ -5570,7 +5559,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_slow_(
         case kind::logout:
             return on_inbound_active_logout_(tic, frame, hdr, route);
         case kind::ending_response:
-            return on_inbound_ending_response_(tic);
+            return on_inbound_ending_response_(tic, frame, hdr, route);
         case kind::from_admin_failed:
             return on_inbound_active_from_admin_failed_(tic, hdr, slow.cb_r);
         case kind::test_request:
@@ -6291,12 +6280,28 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_ending_logout_(
     co_return fixpp::core::expected_t<void>{};
 }
 
-// Research D2 item 3, off NextNumIn: acknowledge_peer_logout_'s shape, with no number consumed,
-// no persist and no fromAdmin. The leaf would write nothing (the owner is set), so it is not
-// called.
+// Research D2 item 3. At NextNumIn, the in-sequence route. Off NextNumIn,
+// acknowledge_peer_logout_'s shape, with no number consumed, no persist and no fromAdmin. The leaf
+// would write nothing (the owner is set), so it is not called.
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_ending_response_(
-    bool tic) noexcept {
+    bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+    inbound_route const& route) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
+    // At NextNumIn the in-sequence route, as the Active arm's guard (4) takes it: check_inbound,
+    // then the Logout arm, or the out-of-sequence arm when check_inbound refuses.
+    const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
+    if (seq != 0 && seq == seqnum_mgr_.next_inbound_unsafe()) {
+        auto chk = co_await seqnum_mgr_.check_inbound(seq);
+        if (!chk) {
+            FIXPP_INBOUND_SPLIT_AWAIT(
+                r, tic, on_inbound_active_out_of_sequence_(tic, frame, hdr, chk.error(), route));
+            co_return r;
+        }
+        note_inbound_advance_();
+        FIXPP_INBOUND_SPLIT_AWAIT(r, tic, on_inbound_active_logout_(tic, frame, hdr, route));
+        co_return r;
+    }
+    // Off NextNumIn:
     pending_receipt_owner const receipt_owner{*this};
     resolve_ending_wait_();
     emit_event(fixpp::session::session_event_sequence_numbers_reset{.by_peer_request = false});
