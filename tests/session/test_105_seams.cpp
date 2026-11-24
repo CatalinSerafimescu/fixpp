@@ -1325,7 +1325,8 @@ TEST(LogoutWait105Direct, Logon789TooHigh_ToAdminThrows_NoLogoutClosedAtOnce) {
 // (the recipe of test_105_connection_close.cpp's too_low_fit).
 namespace t143a {
 constexpr std::size_t kLogoutBuffer = 256;  // honor_peer_next_expected_'s Logout buffer
-constexpr char k789Text[] = "NextExpectedMsgSeqNum too high, expecting 2 but received 999";
+// Its length is the Logout's Text(58) length for a one-digit expected number.
+constexpr char k789Text[] = "NextExpectedMsgSeqNum too high, expecting 3 but received 999";
 std::size_t overflowing_789_length(std::string const& st) {
     for (std::size_t len = 1; len < kLogoutBuffer; ++len) {
         std::string const p(len, 'P');
