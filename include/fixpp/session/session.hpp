@@ -1597,7 +1597,8 @@ private:
     // 105 (data-model E-3): the ending a Logout's leaf writes for. R-1 is the liveness loop's
     // give-up, which claims the Logout owner and enters the ending state machine at its decision;
     // R-2 an ending the session starts (send_ending_logout_ and the Logon refusals); reply the
-    // answer to the peer's Logout.
+    // answer to the peer's Logout, and send_ending_logout_'s Logout when the frame that drew the
+    // ending is the peer's Logout (T143c).
     enum class ending_kind : std::uint8_t { r1, r2, reply };
     // `text` is Text(58), or empty for a Logout without one (fixpp#537, D-537-5). 105: the leaf
     // enters the ending state machine at its owner claim (an R-1 has entered at its decision),

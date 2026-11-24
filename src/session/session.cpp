@@ -6267,10 +6267,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_ending_logout_(
         co_return fixpp::core::expected_t<void>{};
     }
     // 105 T143c (spec.md Clarifications, the Phase 9 implementation session; contract C-2 "Which
-    // Logouts"): the one decision for every ending an inbound frame draws after Active. When that
-    // frame is the peer's Logout, the frame the R-2 wait would wait for has arrived, so the Logout
-    // is the leaf's reply kind: its write is limited and it arms no wait. The predicate is the
-    // response test's (on_inbound_active_), MsgType(35) 5, the frame's first 35 for every reader.
+    // Logouts"): the kind of an ending an inbound frame draws after Active is decided here, for
+    // every caller (`git grep -n 'send_ending_logout_(' -- src`). When that frame is the peer's
+    // Logout, the frame the R-2 wait would wait for has arrived, so the Logout is the leaf's reply
+    // kind: its write is limited and it arms no wait. The predicate is the response test's
+    // (on_inbound_active_), MsgType(35) 5, the frame's first 35 for every reader.
     auto const kind = hdr.msg_type == "5" ? ending_kind::reply : ending_kind::r2;
     // 103 (research D4.6): the ending claims a pending mark; its own Logout is the one, and a
     // claimed mark arms no wait (C-2.8).
