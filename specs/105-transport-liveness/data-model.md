@@ -33,7 +33,7 @@ tasks.md lists each write site with every root that reaches it.
 
 **The one setter**, `owe_connection_end_() noexcept`: sets `connection_end_owed_ = conn_gen_` when
 `state_ == lifecycle::open && !reconnect_drain_in_flight_` and **no wait armed before Active is open**
-(`!(ending_wait_.phase == armed && !ending_wait_.from_active)`), else does nothing. A wait armed after Active does
+(`!(ending_wait_.phase == armed && !ending_wait_.from_active())`), else does nothing. A wait armed after Active does
 not refuse it: the call ends that wait (`phase = resolved`) and owes (Gate A round 2, root cause #1; E-3). Its
 callers (a census row and a mutant each):
 1. `record_state_transition_`, on a transition **into** `Disconnected` from another state only, using the prior
@@ -152,8 +152,8 @@ clears the latch. These are I-2's exceptions.
   frame is suspended is not supported; no cell does it.
 
 **Session-engine access.** `session_engine_access::take_connection_end(Session&) noexcept -> bool` (test and clear;
-it returns false and leaves the latch set while an ending Logout is being written), for the pump; `session_engine_access::ended(Session const&) noexcept -> bool` (`state() == Disconnected`), for the
-pump's `expire()` (E-5); `session_engine_access::set_establishment_deadline(Session&, fixpp::core::steady_time_point)
+it returns false and leaves the latch set while an ending Logout is being written), for the pump; the pump's `expire()` reads the public `state() == Disconnected` (E-5; T129 removed the
+`session_engine_access::ended` wrapper); `session_engine_access::set_establishment_deadline(Session&, fixpp::core::steady_time_point)
 noexcept` (one store), for the pump's hand-off of its establishment deadline (E-3, "The establishment cap"; E-5).
 
 ## E-3. The ending Logout: one state machine for the write limit, the R-2 wait, the bound and the latch
@@ -173,7 +173,7 @@ nothing and enters nothing here), and before Active the build-and-emit of `refus
 | `ending_wait_.phase` | enum `{ none, writing, armed, resolved }` (one byte) | `writing`: an ending Logout's write is in flight and limited; `armed`: the R-2 wait |
 | `ending_wait_.kind` | enum `{ r1, r2, reply }` (one byte) | which ending entered `writing`; only `r2` can reach `armed` |
 | `ending_wait_.entered_from` | `fsm_state` (one byte) | the FSM state when the write started; leaving `writing` arms a wait only if the session is still in it |
-| `ending_wait_.from_active` | `bool` | entered after Active (the session stays Active through an `r2` wait) or before it (the refusal records `Disconnected`) |
+| `ending_wait_.from_active()` | `bool`, derived: `entered_from == Active` (T129; a field before it) | entered after Active (the session stays Active through an `r2` wait) or before it (the refusal records `Disconnected`) |
 | `ending_wait_.cut` | `bool` | set by the bound when it closes the transport during `writing` (row 4, and its failure exit from `writing`, row 16), before it spawns the close frame; cleared on entering `writing`. "Leaving `writing`" tests it: a cut write arms no wait, whatever the emit reported, because the write's success completion can already be queued when the bound acts (plain TCP: the reactor completed the write while the strand ran the bound, and asio does not withdraw a queued completion), or, on TLS, can arrive while `close_async` yields in its quiesce loop (Gate A loop 2 round 1, root cause #1; loop 2 round 2, N-1). Without it the leaf would arm a wait with no bound running |
 | `ending_wait_.deadline` | `fixpp::core::steady_time_point` | `deadline_after(now, logout_disconnect_timeout_ms)` on `effective_clock_`, read **once, at the start of the write** (the owner claim, before the number assignment, the store call and the gate acquire); it bounds the write and then the wait: one budget, as `close_async`'s one `close_deadline` bounds its whole call. Because `store_then_emit`'s Step 1 (the store) runs before `live_write_serialized_` acquires `write_gate_`, the budget covers the store too: a persistent store slower than the budget makes the Logout "not sent", and a write that completes late leaves the peer only the rest of the budget to answer (disclosed, B-105-2; Gate A round 3, N-2) |
 | `establishment_cap_` | `std::optional<fixpp::core::steady_time_point>`, on `engine_.clock` | the connection's establishment deadline, handed over once by an Engine pump (`session_engine_access::set_establishment_deadline`); empty on a direct Session; reset at every connection start (row 17) |
@@ -470,7 +470,7 @@ a sign, a number past `std::uint32_t` and `TR` alone, each with its mutant.
 
 ## E-5. The pump's establishment test
 
-`establishing()` is unchanged. `expire()` calls `note_establishment_timeout` only when `!ended(session)`, and
+`establishing()` is unchanged. `expire()` calls `note_establishment_timeout` only when `session.state() != Disconnected`, and
 then `stop_pump()` either way: a session that has recorded its own ending (a refusal, or a pre-Active R-2 wait
 still open at the deadline) is closed at the deadline with no event and no record.
 
