@@ -1447,4 +1447,33 @@ TEST(Capi105Wait, PeersLogout_EndsTheWait_PeerReadsEofAtOnce) {
     })) << "the session wrote a frame after the peer's Logout";
 }
 
+// T143b (contract C-2 "Which Logouts"; spec.md clarification "Session 2026-11-24
+// (implementation, Phase 9)"): the peer's own Logout below NextNumIn draws the too-low Logout
+// and arms no wait. The peer reads that Logout, with the too-low Text(58), then end-of-stream
+// at once, where a wait would hold the connection open until its bound.
+TEST(Capi105Wait, PeersLogoutBelowNextNumIn_TooLowLogoutThenEofAtOnce) {
+    WaitScene scene;
+    ASSERT_EQ(scene.open(), "") << "setup";
+    ASSERT_EQ(scene.line.next_seq, 3U) << "setup: the Logon and the order are the peer's 1 and 2";
+    ASSERT_TRUE(scene.line.write(scene.line.wire.logout(2)))
+        << "setup: the peer could not write its Logout";
+    auto const written = steady::now();
+    (void)scene.line.open_through(written + kStepBudget);
+    auto const ended = scene.line.sock.ended_at();
+    std::vector<std::string> logouts;
+    for (Seen const& s : scene.line.seen) {
+        if (s.at > written && is_type(s.frame, "5")) logouts.push_back(s.frame);
+    }
+    EXPECT_EQ(logouts.size(), 1U) << "the too-low Logout was not read once";
+    EXPECT_TRUE(!logouts.empty() &&
+                field(logouts.front(), 58) == "MsgSeqNum too low, expecting 3 but received 2")
+        << "the Logout's Text(58): " << (logouts.empty() ? std::string{} : logouts.front());
+    ASSERT_TRUE(ended.has_value()) << "the peer's connection did not end after its Logout";
+    EXPECT_TRUE(scene.line.sock.eof()) << "the connection ended otherwise than by end-of-stream";
+    EXPECT_LT(ms_between(written, *ended).count(), kAtOnce.count())
+        << "the peer's connection did not end at once after its Logout (times in ms)";
+    EXPECT_FALSE(scene.session().established())
+        << "fixpp_session_is_established is true after the too-low Logout";
+}
+
 }  // namespace
