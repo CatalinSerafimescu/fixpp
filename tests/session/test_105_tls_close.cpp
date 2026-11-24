@@ -96,12 +96,14 @@ struct TlsEngineCell {
     [[nodiscard]] bool start_and_connect() {
         if (!h->engine().start().has_value()) return false;
         if (!fixpp::test_support::pump_until(
-                ioc, [&] { return h->server_endpoint().port != 0; }, 5s, 5ms, "bind")) {
+                ioc, [&] { return h->server_endpoint().port != 0; }, 5s, 5ms,
+                "TlsEngineCell::start_and_connect/bind")) {
             return false;
         }
         peer = t105::TlsPeer::connect(ioc, h->transport_fixture(), h->server_endpoint());
         return fixpp::test_support::pump_until(
-                   ioc, [&] { return peer->ready || peer->setup_failed; }, 5s, 5ms, "connect") &&
+                   ioc, [&] { return peer->ready || peer->setup_failed; }, 5s, 5ms,
+                   "TlsEngineCell::start_and_connect/connect") &&
                peer->ready;
     }
     [[nodiscard]] std::string msg(std::string_view type, unsigned seq,
@@ -118,7 +120,8 @@ struct TlsEngineCell {
                        "108=" +
                            std::string{hb} + "\x01"));
         return fixpp::test_support::pump_until(
-            ioc, [&] { return state() == fsm_state::Active; }, 5s, 5ms, "logon");
+            ioc, [&] { return state() == fsm_state::Active; }, 5s, 5ms,
+            "TlsEngineCell::logon/logon");
     }
     [[nodiscard]] bool close_notify_at_once(const char* site) {
         bool const ended =
@@ -277,10 +280,11 @@ struct DirectTlsCell {
     // open(), the server end accepted, drive_reconnect(), the Logon read by the peer, then the
     // peer's Logon fed: Active.
     [[nodiscard]] bool to_active() {
-        auto const opened = run(s.session->open(), "open");
+        auto const opened = run(s.session->open(), "DirectTlsCell::to_active/open");
         if (!opened || !opened->has_value()) return false;
         peer = t105::TlsPeer::accept(s.ioc, *fx);
-        auto const connected = run(s.session->drive_reconnect(), "drive_reconnect");
+        auto const connected =
+            run(s.session->drive_reconnect(), "DirectTlsCell::to_active/drive_reconnect");
         if (!connected || !connected->has_value()) return false;
         asio::co_spawn(s.ioc, reader(&s.session->live_transport()), asio::detached);
         if (!fixpp::test_support::pump_until(
@@ -370,8 +374,9 @@ TEST(TlsClose105, DirectSessionSendStoreFailure_PeerReceivesCloseNotify) {
             return k == t105::store_call::store_outbound;
         };
         static constexpr char kPayload[] = "35=D\x01";
-        auto const r = c.run(
-            c.s.session->send(std::as_bytes(std::span{kPayload, sizeof(kPayload) - 1})), "send");
+        auto const r =
+            c.run(c.s.session->send(std::as_bytes(std::span{kPayload, sizeof(kPayload) - 1})),
+                  "TlsClose105::DirectSessionSendStoreFailure/send");
         failed = r.has_value() && !r->has_value();
         closed = c.close_notify_at_once("TlsClose105.DirectSessionSendStoreFailure");
     }
@@ -454,12 +459,14 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
     };
     bool up = h->engine().start().has_value() &&
               fixpp::test_support::pump_until(
-                  ioc, [&] { return h->server_endpoint().port != 0; }, 5s, 5ms, "bind");
+                  ioc, [&] { return h->server_endpoint().port != 0; }, 5s, 5ms,
+                  "TlsWriteLimit105::R2AfterActive_PeerStopsReading_AbortiveAtBound/bind");
     std::shared_ptr<t105::StalledTlsPeer> peer;
     if (up) {
         peer = t105::StalledTlsPeer::connect(ioc, dir, h->server_endpoint(), 1024);
         up = fixpp::test_support::pump_until(
-                 ioc, [&] { return peer->ready || peer->setup_failed; }, 5s, 5ms, "connect") &&
+                 ioc, [&] { return peer->ready || peer->setup_failed; }, 5s, 5ms,
+                 "TlsWriteLimit105::R2AfterActive_PeerStopsReading_AbortiveAtBound/connect") &&
              peer->ready;
     }
     auto msg = [&](std::string_view type, unsigned seq, std::string_view extra = {}) {
@@ -470,12 +477,14 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
                        "98=0\x01"
                        "108=30\x01"));
         up = fixpp::test_support::pump_until(
-            ioc, [&] { return state() == fsm_state::Active; }, 5s, 5ms, "logon");
+            ioc, [&] { return state() == fsm_state::Active; }, 5s, 5ms,
+            "TlsWriteLimit105::R2AfterActive_PeerStopsReading_AbortiveAtBound/logon");
     }
     if (up) {
         peer->send(msg("0", 2));
         up = fixpp::test_support::pump_until(
-            ioc, [&] { return peer->writes_done == 2U; }, 5s, 5ms, "the Heartbeat at 2");
+            ioc, [&] { return peer->writes_done == 2U; }, 5s, 5ms,
+            "TlsWriteLimit105::R2AfterActive_PeerStopsReading_AbortiveAtBound/the Heartbeat at 2");
         (void)t105::drive_bounded(ioc, 256);
     }
     // Fill the window: application sends until one does not complete within a settle.

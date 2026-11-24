@@ -819,7 +819,7 @@ TEST_P(LogoutWait105, Absorbed_MsgSeqNumZero_ThenAppMessageAndPeerLogout) {
                   .frame = [](WaitCell& c) { return c.rig.heartbeat(0); },
                   .next_in_after = 3,
                   .rejects = 0},
-                 "MsgSeqNumZero");
+                 "LogoutWait105::Absorbed_MsgSeqNumZero");
 }
 
 // On the too-low route the peer's next frames are below NextNumIn: each is absorbed, and none

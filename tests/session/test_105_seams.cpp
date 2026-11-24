@@ -154,12 +154,14 @@ TEST(TlsClose105, CloseFrameSpawnFails_ReleaseAtLoopExit_AbortiveNoCloseNotify) 
     };
     bool up = h->engine().start().has_value() &&
               fixpp::test_support::pump_until(
-                  ioc, [&] { return h->server_endpoint().port != 0; }, 5s, 5ms, "bind");
+                  ioc, [&] { return h->server_endpoint().port != 0; }, 5s, 5ms,
+                  "TlsClose105::CloseFrameSpawnFails_ReleaseAtLoopExit/bind");
     std::shared_ptr<t105::TlsPeer> peer;
     if (up) {
         peer = t105::TlsPeer::connect(ioc, h->transport_fixture(), h->server_endpoint());
         up = fixpp::test_support::pump_until(
-                 ioc, [&] { return peer->ready || peer->setup_failed; }, 5s, 5ms, "connect") &&
+                 ioc, [&] { return peer->ready || peer->setup_failed; }, 5s, 5ms,
+                 "TlsClose105::CloseFrameSpawnFails_ReleaseAtLoopExit/connect") &&
              peer->ready;
     }
     if (up) {
@@ -171,7 +173,8 @@ TEST(TlsClose105, CloseFrameSpawnFails_ReleaseAtLoopExit_AbortiveNoCloseNotify) 
                                "98=0\x01"
                                "108=10\x01"));
         up = fixpp::test_support::pump_until(
-            ioc, [&] { return state() == fsm_state::Active; }, 5s, 5ms, "logon");
+            ioc, [&] { return state() == fsm_state::Active; }, 5s, 5ms,
+            "TlsClose105::CloseFrameSpawnFails_ReleaseAtLoopExit/logon");
     }
     bool ended = false;
     bool read_ended = false;
@@ -225,12 +228,14 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_SeamTwin_ClosedAtExactlyTh
     };
     bool up = h->engine().start().has_value() &&
               fixpp::test_support::pump_until(
-                  ioc, [&] { return h->server_endpoint().port != 0; }, 5s, 5ms, "bind");
+                  ioc, [&] { return h->server_endpoint().port != 0; }, 5s, 5ms,
+                  "TlsWriteLimit105::R2AfterActive_PeerStopsReading_SeamTwin/bind");
     std::shared_ptr<t105::StalledTlsPeer> peer;
     if (up) {
         peer = t105::StalledTlsPeer::connect(ioc, dir, h->server_endpoint(), 1024);
         up = fixpp::test_support::pump_until(
-                 ioc, [&] { return peer->ready || peer->setup_failed; }, 5s, 5ms, "connect") &&
+                 ioc, [&] { return peer->ready || peer->setup_failed; }, 5s, 5ms,
+                 "TlsWriteLimit105::R2AfterActive_PeerStopsReading_SeamTwin/connect") &&
              peer->ready;
     }
     auto msg = [&](std::string_view type, unsigned seq, std::string_view extra = {}) {
@@ -241,12 +246,14 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_SeamTwin_ClosedAtExactlyTh
                        "98=0\x01"
                        "108=30\x01"));
         up = fixpp::test_support::pump_until(
-            ioc, [&] { return state() == fsm_state::Active; }, 5s, 5ms, "logon");
+            ioc, [&] { return state() == fsm_state::Active; }, 5s, 5ms,
+            "TlsWriteLimit105::R2AfterActive_PeerStopsReading_SeamTwin/logon");
     }
     if (up) {
         peer->send(msg("0", 2));
         up = fixpp::test_support::pump_until(
-            ioc, [&] { return peer->writes_done == 2U; }, 5s, 5ms, "the Heartbeat at 2");
+            ioc, [&] { return peer->writes_done == 2U; }, 5s, 5ms,
+            "TlsWriteLimit105::R2AfterActive_PeerStopsReading_SeamTwin/the Heartbeat at 2");
         (void)t105::drive_bounded(ioc, 256);
     }
     // Fill the window: application sends until one does not complete within a settle.

@@ -214,7 +214,8 @@ TEST_P(ConnectionClose105, PumpSilentEnding_CompIdGuard_PeerSeesEofAtOnce) {
 TEST_P(ConnectionClose105, PumpSilentEnding_MsgSeqNumZero_PeerSeesEofAtOnce) {
     Cell c;
     auto const r = run_silent(
-        c, c.cfg(GetParam()), nullptr, [](Cell& x) { return x.rig.heartbeat(0); }, "MsgSeqNumZero");
+        c, c.cfg(GetParam()), nullptr, [](Cell& x) { return x.rig.heartbeat(0); },
+        "ConnectionClose105::PumpSilentEnding_MsgSeqNumZero");
     expect_silent_eof(r, "MsgSeqNumZero");
 }
 
@@ -1066,10 +1067,12 @@ struct DirectInitiator {
 TEST(ConnectionClose105Direct,
      DirectInitiatorLogonEmitFails_DriveReconnect_EofAfterTheCallReturns) {
     DirectInitiator d;
-    auto const opened = d.run(d.s.session->open(), "open");
+    auto const opened =
+        d.run(d.s.session->open(), "ConnectionClose105Direct::DirectInitiatorLogonEmitFails/open");
     ASSERT_TRUE(opened && opened->has_value()) << "setup: open()";
     d.app->throw_on = "A";
-    auto const r = d.run(d.s.session->drive_reconnect(), "drive_reconnect");
+    auto const r = d.run(d.s.session->drive_reconnect(),
+                         "ConnectionClose105Direct::DirectInitiatorLogonEmitFails/drive_reconnect");
     ASSERT_TRUE(r.has_value()) << "setup: drive_reconnect() did not return";
     EXPECT_FALSE(r->has_value()) << "setup: the Logon's toAdmin throw did not fail the call";
     EXPECT_EQ(d.factory->make_call_count.load(), 1) << "setup: no transport was made";
@@ -1084,9 +1087,13 @@ TEST(ConnectionClose105Direct,
 // that logs on.
 TEST(ConnectionClose105Direct, DirectInitiator_EndingThenDriveReconnect_Reconnects) {
     DirectInitiator d;
-    auto const opened = d.run(d.s.session->open(), "open");
+    auto const opened =
+        d.run(d.s.session->open(),
+              "ConnectionClose105Direct::DirectInitiator_EndingThenDriveReconnect/open");
     ASSERT_TRUE(opened && opened->has_value()) << "setup: open()";
-    auto const first = d.run(d.s.session->drive_reconnect(), "drive_reconnect 1");
+    auto const first = d.run(
+        d.s.session->drive_reconnect(),
+        "ConnectionClose105Direct::DirectInitiator_EndingThenDriveReconnect/drive_reconnect 1");
     ASSERT_TRUE(first && first->has_value()) << "setup: the first drive_reconnect()";
     (void)d.s.feed(d.s.logon(1));
     ASSERT_EQ(d.s.state(), fsm_state::Active) << "setup: not Active on the first connection";
@@ -1095,7 +1102,8 @@ TEST(ConnectionClose105Direct, DirectInitiator_EndingThenDriveReconnect_Reconnec
     EXPECT_EQ(d.s.state(), fsm_state::Disconnected) << "setup: the frame did not end the session";
     static constexpr char kPayload[] = "35=D\x01";
     auto const sent =
-        d.run(d.s.session->send(std::as_bytes(std::span{kPayload, sizeof(kPayload) - 1})), "send");
+        d.run(d.s.session->send(std::as_bytes(std::span{kPayload, sizeof(kPayload) - 1})),
+              "ConnectionClose105Direct::DirectInitiator_EndingThenDriveReconnect/send");
     EXPECT_TRUE(sent && !sent->has_value()) << "setup: the ended session admitted the send";
     EXPECT_TRUE(d.transport_closed(0)) << "the ended connection is still open after the later call";
     EXPECT_FALSE(session_test_access::is_closing(*d.s.session) ||
@@ -1200,9 +1208,11 @@ TEST(ConnectionClose105Direct, InsideReconnectDrain_DrainKeepsItsBound) {
     DirectInitiator d{[st](SessionConfig& cfg) {
         cfg.store_factory = std::make_shared<t105::GateStoreFactory>(st);
     }};
-    auto const opened = d.run(d.s.session->open(), "open");
+    auto const opened =
+        d.run(d.s.session->open(), "ConnectionClose105Direct::InsideReconnectDrain/open");
     ASSERT_TRUE(opened && opened->has_value()) << "setup: open()";
-    auto const first = d.run(d.s.session->drive_reconnect(), "drive_reconnect 1");
+    auto const first = d.run(d.s.session->drive_reconnect(),
+                             "ConnectionClose105Direct::InsideReconnectDrain/drive_reconnect 1");
     ASSERT_TRUE(first && first->has_value()) << "setup: the first drive_reconnect()";
     (void)d.s.feed(d.s.logon(1));
     ASSERT_EQ(d.s.state(), fsm_state::Active) << "setup";
