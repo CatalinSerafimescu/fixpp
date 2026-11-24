@@ -1476,4 +1476,38 @@ TEST(Capi105Wait, PeersLogoutBelowNextNumIn_TooLowLogoutThenEofAtOnce) {
         << "fixpp_session_is_established is true after the too-low Logout";
 }
 
+// T143c (contract C-2 "Which Logouts"; spec.md Clarifications, the Phase 9 implementation
+// session): the peer's own Logout as the frame that meets the gap's deadline draws the
+// deadline's Logout and arms no wait. The peer writes Heartbeats into the gap until two
+// intervals after it read the ResendRequest, then its Logout; it reads the deadline's Logout,
+// with its Text(58), then end-of-stream at once, where a wait would hold the connection open
+// until its bound.
+TEST(Capi105Wait, PeersLogoutAtTheGapDeadline_DeadlineLogoutThenEofAtOnce) {
+    GapScene scene;
+    ASSERT_EQ(scene.open(), "") << "setup";
+    EstablishedWatch watch{scene.session()};
+    auto const due = scene.gap->at.hi + (2 * kHb);
+    std::optional<time_point> logout_written;
+    auto const run = run_gap_traffic(scene.line, watch, *scene.gap, [&](std::uint32_t seq) {
+        if (steady::now() < due) return scene.line.wire.heartbeat(seq);
+        if (!logout_written) logout_written = steady::now();
+        return scene.line.wire.logout(seq);
+    });
+    ASSERT_TRUE(logout_written.has_value()) << "setup: the peer wrote no Logout at the deadline";
+    ASSERT_TRUE(run.logout.has_value())
+        << "the peer read no Logout" << observed(scene.line, watch, scene.gap->at.lo, kSinceGap);
+    EXPECT_EQ(field(run.logout->frame, 58),
+              "ResendRequest unanswered, expecting MsgSeqNum " + std::to_string(scene.gap->begin))
+        << "the Logout's Text(58): " << summary(run.logout->frame);
+    (void)scene.line.open_through(run.logout->at + kAtOnce);
+    auto const ended = scene.line.sock.ended_at();
+    ASSERT_TRUE(ended.has_value()) << "the peer's connection did not end after the Logout"
+                                   << observed(scene.line, watch, scene.gap->at.lo, kSinceGap);
+    EXPECT_TRUE(scene.line.sock.eof()) << "the connection ended otherwise than by end-of-stream";
+    EXPECT_LT(ms_between(*logout_written, *ended).count(), kAtOnce.count())
+        << "the peer's connection did not end at once after its Logout (times in ms)";
+    EXPECT_FALSE(scene.session().established())
+        << "fixpp_session_is_established is true after the deadline's Logout";
+}
+
 }  // namespace

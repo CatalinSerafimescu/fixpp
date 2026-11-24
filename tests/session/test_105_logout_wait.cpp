@@ -2058,6 +2058,203 @@ TEST(LogoutWait105Direct, PeerLogoutBelowNextNumIn_TooLowLogoutNoWaitClosedAtOnc
     (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "close");
 }
 
+// ════════════════════════════════════════════════════════════════════════════════════════
+// T143c — every R-2 ending an inbound Logout draws (spec.md Clarifications, the Phase 9
+// implementation session; contract C-2 "Which Logouts"). The rule T143b stated for the
+// too-low Logout holds for the class: whichever site writes the ending Logout, when the frame
+// that drew it is the peer's Logout no wait is armed, since the frame the wait would wait for
+// has arrived; the connection closes after the write. The site's own frames are unchanged:
+// the gap deadline's Logout with its Text(58) and no Reject, the OrigSendingTime Reject and
+// then a Logout without Text. Each cell holds the clock still after the stimulus, where a wait
+// would hold the connection open until the bound on the mock clock.
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+// The frames fixpp wrote to the peer, each closed by its CheckSum(10): the next outbound
+// number is one past them when no reset was made.
+[[nodiscard]] seqnum_t written_frames(WaitCell const& c) {
+    seqnum_t n = 0;
+    for (std::size_t at = c.rig.peer.received.find("\x01"
+                                                   "10=");
+         at != std::string::npos; at = c.rig.peer.received.find("\x01"
+                                                                "10=",
+                                                                at + 1)) {
+        ++n;
+    }
+    return n;
+}
+
+struct PeerLogoutEnding {
+    bool setup = false;                // the route reached its stimulus
+    std::string why;                   // the setup miss
+    std::vector<std::string> logouts;  // fixpp's Logouts after the stimulus
+    std::vector<std::string> rejects;  // fixpp's Rejects after the stimulus
+    bool eof = false;                  // EOF at once with the clock still
+    std::optional<fsm_state> state_at_eof;
+    seqnum_t next_in_at_eof = 0;
+    seqnum_t frames_at_eof = 0;
+    std::optional<std::pair<seqnum_t, seqnum_t>> store_at_eof;
+    int from_admin_logouts = 0;
+    int logouts_cb = 0;
+};
+
+// The gap-deadline route of drive_route, its last frame the peer's Logout that the callback
+// builds (given the number the route reaches, the peer's next frame above NextNumIn).
+PeerLogoutEnding run_logout_at_gap_deadline(
+    session_role role, std::function<std::string(WaitCell&, seqnum_t)> const& logout) {
+    WaitCell c;
+    PeerLogoutEnding o;
+    if (!c.start_active(route_cfg(c, role, route::gap_deadline)) || !open_gap(c)) {
+        o.why = "setup: Active, then the gap";
+        c.rig.stop();
+        return o;
+    }
+    seqnum_t seq = 6;
+    bool delivered = true;
+    for (int i = 0; i < 3 && delivered; ++i) {
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND A, the gap deadline is read from the
+        // clock by the next inbound frame's handler, with no waiter; a liveness sleep the
+        // advance may wake is not the oracle.
+        c.advance(heartbt_of(route::gap_deadline) / 2);
+        delivered = c.rig.deliver(c.rig.heartbeat(seq++));
+    }
+    std::size_t mark = 0;
+    if (delivered) {
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND A, as the loop's advance above: the
+        // frame after it reads the gap deadline from the clock.
+        c.advance(heartbt_of(route::gap_deadline) / 2);
+        mark = c.rig.peer.received.size();
+        o.setup = c.count_since(0, "5") == 0U;
+        if (!o.setup) o.why = "setup: a Logout before the stimulus";
+    } else {
+        o.why = "setup: a peer write before the deadline did not complete";
+    }
+    if (o.setup) {
+        c.rig.peer.send(logout(c, seq));
+        o.eof = c.eof_at_once("PeerLogoutAtGapDeadline", &o.store_at_eof);
+        o.state_at_eof = c.rig.state();
+        o.next_in_at_eof = c.next_in();
+        o.frames_at_eof = written_frames(c);
+        o.logouts = pr::frames_of_type(c.wire_since(mark), "5");
+        o.rejects = pr::frames_of_type(c.wire_since(mark), "3");
+    }
+    c.rig.stop();
+    o.from_admin_logouts = c.app->from_admin_logouts;
+    o.logouts_cb = c.app->logouts;
+    return o;
+}
+
+// The gap deadline's Logout at NextNumIn 2, no Reject, no wait.
+void expect_gap_deadline_logout_no_wait(PeerLogoutEnding const& o, const char* site) {
+    EXPECT_TRUE(o.setup) << site << ": " << o.why;
+    EXPECT_EQ(o.logouts.size(), 1U) << site << ": the deadline's Logout was not written once";
+    EXPECT_TRUE(!o.logouts.empty() &&
+                o.logouts.front().find("\x01"
+                                       "58=ResendRequest unanswered, expecting MsgSeqNum 2\x01") !=
+                    std::string::npos)
+        << site << ": the Logout's Text(58) is not the deadline's: "
+        << (o.logouts.empty() ? std::string{} : o.logouts.front());
+    EXPECT_TRUE(o.rejects.empty()) << site << ": a Reject was written at the deadline";
+    EXPECT_TRUE(o.eof) << site << ": no EOF at once after the deadline's Logout: a wait was armed";
+    EXPECT_EQ(o.state_at_eof, std::optional<fsm_state>{fsm_state::Disconnected}) << site;
+    EXPECT_EQ(o.next_in_at_eof, 2U) << site << ": NextNumIn moved for the peer's Logout";
+    EXPECT_EQ(o.store_at_eof,
+              (std::optional<std::pair<seqnum_t, seqnum_t>>{{2U, o.frames_at_eof + 1U}}))
+        << site << ": the store's numbers at EOF: a reset was made, or a number moved";
+    EXPECT_EQ(o.from_admin_logouts, 0) << site << ": fromAdmin for the peer's Logout";
+    EXPECT_EQ(o.logouts_cb, 1) << site << ": onLogout";
+}
+
+// Above NextNumIn, while the resend is outstanding: the out-of-sequence arm's deadline site.
+TEST_P(LogoutWait105, PeerLogoutAboveNextNumInAtGapDeadline_DeadlineLogoutNoWaitEofAtOnce) {
+    auto const o = run_logout_at_gap_deadline(
+        GetParam(), [](WaitCell& c, seqnum_t seq) { return c.rig.msg("5", seq); });
+    expect_gap_deadline_logout_no_wait(o, "AboveNextNumIn");
+}
+
+// Below NextNumIn: the same site, ahead of Arm B's too-low Logout.
+TEST_P(LogoutWait105, PeerLogoutBelowNextNumInAtGapDeadline_DeadlineLogoutNoWaitEofAtOnce) {
+    auto const o = run_logout_at_gap_deadline(
+        GetParam(), [](WaitCell& c, seqnum_t /*seq*/) { return c.rig.msg("5", 1); });
+    expect_gap_deadline_logout_no_wait(o, "BelowNextNumIn");
+}
+
+// With PossDupFlag(43)=Y and no OrigSendingTime(122), above NextNumIn: the PossDup arm's
+// deadline site, which writes no Reject at the deadline.
+TEST_P(LogoutWait105, PeerPossDupLogoutNoOrigSendingTimeAtGapDeadline_DeadlineLogoutNoWait) {
+    auto const o = run_logout_at_gap_deadline(
+        GetParam(), [](WaitCell& c, seqnum_t seq) { return c.rig.msg("5", seq, "43=Y\x01"); });
+    expect_gap_deadline_logout_no_wait(o, "PossDupNoOrigSendingTime");
+}
+
+// The OrigSendingTime Reject's site: the peer's Logout at NextNumIn with PossDupFlag(43)=Y and
+// an OrigSendingTime(122) later than its SendingTime(52). The Reject (371=122, 373=10) consumes
+// 2, then the Logout without Text, and no wait.
+TEST_P(LogoutWait105, PeerPossDupLogoutLateOrigSendingTime_RejectThenLogoutNoWaitEofAtOnce) {
+    WaitCell c;
+    PeerLogoutEnding o;
+    o.setup = c.start_active(route_cfg(c, GetParam(), route::orig_sending_time));
+    if (o.setup) {
+        auto const mark = c.rig.peer.received.size();
+        c.rig.peer.send(c.rig.msg("5", 2,
+                                  "43=Y\x01"
+                                  "122=" +
+                                      std::string{kLateOrigSendingTime} + "\x01"));
+        o.eof = c.eof_at_once("PeerPossDupLogoutLateOrigSendingTime", &o.store_at_eof);
+        o.state_at_eof = c.rig.state();
+        o.next_in_at_eof = c.next_in();
+        o.frames_at_eof = written_frames(c);
+        o.logouts = pr::frames_of_type(c.wire_since(mark), "5");
+        o.rejects = pr::frames_of_type(c.wire_since(mark), "3");
+    }
+    c.rig.stop();
+    EXPECT_TRUE(o.setup) << "setup: the session did not reach Active";
+    EXPECT_EQ(o.rejects.size(), 1U) << "the OrigSendingTime Reject was not written once";
+    EXPECT_TRUE(!o.rejects.empty() &&
+                o.rejects.front().find("\x01"
+                                       "371=122\x01") != std::string::npos &&
+                o.rejects.front().find("\x01"
+                                       "373=10\x01") != std::string::npos)
+        << "the Reject is not 371=122, 373=10: "
+        << (o.rejects.empty() ? std::string{} : o.rejects.front());
+    EXPECT_EQ(o.logouts.size(), 1U) << "the Logout was not written once";
+    EXPECT_TRUE(!o.logouts.empty() && o.logouts.front().find("\x01"
+                                                             "58=") == std::string::npos)
+        << "the Logout carries a Text(58): "
+        << (o.logouts.empty() ? std::string{} : o.logouts.front());
+    EXPECT_TRUE(o.eof) << "no EOF at once after the Logout: a wait was armed";
+    EXPECT_EQ(o.state_at_eof, std::optional<fsm_state>{fsm_state::Disconnected});
+    EXPECT_EQ(o.next_in_at_eof, 3U) << "the Reject did not consume 2, or a number moved";
+    EXPECT_EQ(o.store_at_eof,
+              (std::optional<std::pair<seqnum_t, seqnum_t>>{{3U, o.frames_at_eof + 1U}}))
+        << "the store's numbers at EOF: a reset was made, or a number moved";
+    EXPECT_EQ(c.app->from_admin_logouts, 0) << "fromAdmin for the peer's Logout";
+    EXPECT_EQ(c.app->logouts, 1) << "onLogout";
+}
+
+// The OrigSendingTime Reject's site on a direct Session: closed at the frame's exit.
+TEST(LogoutWait105Direct, PeerPossDupLogoutLateOrigSendingTime_RejectThenLogoutClosedAtOnce) {
+    t105::DirectRig d{session_role::acceptor};
+    ASSERT_TRUE(d.to_active()) << "setup";
+    (void)d.s.feed(d.s.frame("5", 2,
+                             "43=Y\x01"
+                             "122=" +
+                                 d.s.sending_time(std::chrono::seconds{3600}) + "\x01"));
+    d.s.drain();
+    std::string text = "(no Logout)";
+    for (auto const& w : d.bw->recorded) {
+        if (w.completed && fixpp::test_support::extract_tag(w.bytes, 35) == "5") {
+            text = fixpp::test_support::extract_tag(w.bytes, 58);
+        }
+    }
+    EXPECT_EQ(d.completed("3"), 1U) << "the OrigSendingTime Reject was not written once";
+    EXPECT_EQ(d.completed("5"), 1U) << "the Logout was not written once";
+    EXPECT_EQ(text, "") << "the Logout carries a Text(58)";
+    EXPECT_EQ(d.s.state(), fsm_state::Disconnected) << "a wait was armed";
+    EXPECT_TRUE(d.closed()) << "the connection was not closed at once";
+    EXPECT_EQ(d.app->from_admin_logouts, 0) << "fromAdmin for the peer's Logout";
+    (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "close");
+}
+
 FIXPP_105_BOTH_ROLES(LogoutWait105);
 
 }  // namespace
