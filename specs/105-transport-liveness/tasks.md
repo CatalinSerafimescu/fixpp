@@ -1437,6 +1437,24 @@ remaining reference.
   peer's-Logout-below-NextNumIn pins across `tests/`, `tests/interop` included. Before Active the shape does not
   arise (a Logout there is refused before any sequence check and draws no Logout). Evidence file, Phase 9 appended
   after the T143a section, T143b.
+
+- [X] T143c Every R-2 ending an inbound Logout draws (orchestrator ruling 2026-11-24 on T143b's escalations; spec.md
+  Clarifications "Session 2026-11-24 (implementation, Phase 9)", its second question): the census of every site that
+  writes an R-2 ending Logout for an inbound frame, each with whether a peer Logout can be that frame; the decision made
+  once, in `send_ending_logout_`, which takes the frame (MsgType(35) 5: the leaf's reply kind, limited, no wait), with
+  each site's Logout and Text kept. RED first: `LogoutWait105.PeerLogoutAboveNextNumInAtGapDeadline_DeadlineLogoutNoWaitEofAtOnce`,
+  `LogoutWait105.PeerLogoutBelowNextNumInAtGapDeadline_DeadlineLogoutNoWaitEofAtOnce`,
+  `LogoutWait105.PeerPossDupLogoutNoOrigSendingTimeAtGapDeadline_DeadlineLogoutNoWait`,
+  `LogoutWait105.PeerPossDupLogoutLateOrigSendingTime_RejectThenLogoutNoWaitEofAtOnce` (each both roles),
+  `LogoutWait105Direct.PeerPossDupLogoutLateOrigSendingTime_RejectThenLogoutClosedAtOnce` (`test_105_logout_wait.cpp`)
+  and `Capi105Wait.PeersLogoutAtTheGapDeadline_DeadlineLogoutThenEofAtOnce` (`recovery_liveness_capi_witness_test.cpp`);
+  in `$M` a mutant with the shared decision dropped RED by them and by T143b's cells, and one with it widened to every
+  frame RED by the existing route cells. Records: spec.md's clarification, FR-004 and User Story 1 scenario 3, contract
+  C-2 "Which Logouts", data-model E-3, research D2 item 1, B-105-2, B-537-2, `version.h`'s 1.18 history,
+  `fixpp_session_is_established`'s 1.18 clause and `brain/components/session.md`. Then the flake of T143b's runs and
+  its class (a direct Session destroyed without `close()` after a path that can spawn an ending bound or a close
+  frame): `tests/support/close_before_destroy.hpp` at every such Session the population recipe finds. Evidence file,
+  Phase 9 appended after the T143b section, T143c.
 - [ ] T144 **(orchestrator)** `/speckit-verify`; writes `.specify/decisions/105-transport-liveness-verify.md`. Re-run T130 to T135
   as the last actions before any labelled push.
 - [ ] T149 **(orchestrator)** The PR body declares C-ABI 1.18 **BREAKING** ([const §X.7]): the observers of contract C-9 and

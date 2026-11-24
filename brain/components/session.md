@@ -930,7 +930,10 @@ code is `Session::record_state_transition_`, `release_connection_end_`, `run_end
   the join); a latch the pump alone consumes; `co_await close()` at the end of each detached root (it deadlocks on
   the root's own join counter).
 - **An ending Logout waits for the peer's Logout, bounded (R-2), and every ending Logout's write is limited**
-  (`B-105-2`; ruling D-e: one budget from the write's start). Not taken (research D2, "Alternatives rejected"):
+  (`B-105-2`; ruling D-e: one budget from the write's start). Two disclosed exceptions arm no wait: the strict-reset
+  refusal, and an ending Logout drawn by the peer's own Logout, decided once in `send_ending_logout_` from the frame
+  (spec 105 clarifications "Session 2026-11-21 (implementation, Phase 4)" and "Session 2026-11-24 (implementation,
+  Phase 9)"). Not taken (research D2, "Alternatives rejected"):
   `LogoutSent` as the wait's state after Active; a new `fsm_state` value (a public C++ API change); site-by-site
   patches (one site missed is a swallowed response); a silent ending during the wait moving the session to
   `Disconnected`; processing frames as in Active before Active; reusing `run_peer_logout_bound_` or the liveness

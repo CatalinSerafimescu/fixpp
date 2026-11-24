@@ -274,8 +274,8 @@ Owner ruling (handover item 7, option "fresh window"), tasks.md T119a.
 
 ### Session 2026-11-24 (implementation, Phase 9)
 
-Ruling of the orchestrator on an implementation escalation of Phase 9 (tasks.md T142, T143b), within FR-004 and R-2;
-no new sign-off.
+Ruling of the orchestrator on implementation escalations of Phase 9 (tasks.md T142, T143b, T143c), within FR-004 and
+R-2; no new sign-off.
 
 - Q (FR-004, R-2, contract C-2 "Which Logouts", orchestrator 2026-11-24): The peer's own Logout below NextNumIn without
   PossDupFlag(43)=Y, in Active, draws the too-low Logout (B-103-10). Does that Logout arm the R-2 wait? → A: No. The
@@ -295,6 +295,27 @@ no new sign-off.
   `LogoutWait105Direct.PeerLogoutBelowNextNumIn_TooLowLogoutNoWaitClosedAtOnce`,
   `Capi105Wait.PeersLogoutBelowNextNumIn_TooLowLogoutThenEofAtOnce` and
   `ThornyRecoveryFixture.Qfj750_LogoutTooLowSeqnumStillDisconnects`.
+- Q (FR-004, R-2, contract C-2 "Which Logouts", orchestrator 2026-11-24, tasks.md T143c): Does the answer above hold
+  only for the too-low Logout? → A: No, it holds for the class: an ending Logout drawn by the peer's own Logout
+  (MsgType(35) 5) arms no wait; its write is limited, and the connection closes after it. Every ending Logout an
+  inbound frame draws after Active goes through one helper (`send_ending_logout_`), which takes that frame and makes
+  the decision there, with the predicate the response test uses (MsgType(35) 5, the frame's first 35 as every reader
+  takes it, B-101-2). The sites, from the census (evidence file, Phase 9, T143c): the gap deadline's Logout
+  (B-537-2), for a frame at any MsgSeqNum(34), reached from the out-of-sequence arm, from the PossDup arm without a
+  valid OrigSendingTime(122), and from the validate gate's refusal of a frame whose route or second MsgType it
+  refuses; the OrigSendingTime Reject's Logout of the PossDup arm (a Logout with PossDupFlag(43)=Y and an
+  OrigSendingTime later than its SendingTime); and the too-low Logout above. Each site writes the frames it writes
+  for any other frame: the gap deadline's Logout with its Text(58) and no Reject; the OrigSendingTime Reject
+  (371=122, 373=10), then a Logout without Text. Not reached by a Logout: the SendingTime Reject's Logout (the
+  SendingTime guard exempts MsgType 5), and before Active every Logon refusal with a Logout and the two Logouts of
+  NextExpectedMsgSeqNum(789), each written only after `interpret_logon` has accepted a Logon (MsgType A). A Logout
+  that arrives while a wait is armed still ends it (clarification D-a): the helper absorbs a further ending before it
+  decides (W-8). The cells: `LogoutWait105.PeerLogoutAboveNextNumInAtGapDeadline_DeadlineLogoutNoWaitEofAtOnce`,
+  `LogoutWait105.PeerLogoutBelowNextNumInAtGapDeadline_DeadlineLogoutNoWaitEofAtOnce`,
+  `LogoutWait105.PeerPossDupLogoutNoOrigSendingTimeAtGapDeadline_DeadlineLogoutNoWait` and
+  `LogoutWait105.PeerPossDupLogoutLateOrigSendingTime_RejectThenLogoutNoWaitEofAtOnce` (each both roles),
+  `LogoutWait105Direct.PeerPossDupLogoutLateOrigSendingTime_RejectThenLogoutClosedAtOnce` and
+  `Capi105Wait.PeersLogoutAtTheGapDeadline_DeadlineLogoutThenEofAtOnce`, with the cells of the answer above.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -318,7 +339,8 @@ the bound the class allows, with no further inbound frame and no local API call.
    comes first; when that frame is the peer's own Logout, EOF follows the too-low Logout's write (clarification
    "Session 2026-11-24 (implementation, Phase 9)").
 3. **Given** an Active session with a gap open, **When** the gap deadline passes, **Then** the same R-2 rule applies
-   after its Logout.
+   after its Logout; when the frame at the deadline is the peer's own Logout, EOF follows the deadline Logout's write
+   (clarification "Session 2026-11-24 (implementation, Phase 9)").
 4. **Given** an Active session, **When** the peer sends a Logout, **Then** fixpp replies, runs its receipt reset point
    (B-104-1) to its end, and closes the connection.
 5. **Given** an acceptor, **When** the first frame's dispatch returns an error, **Then** the connection is closed as
@@ -470,8 +492,8 @@ no comment claiming behaviour the code does not have.
   if that comes first (B-093-4; clarification "Gate A round 3", root cause #2); a Session driven without an Engine has no
   establishment deadline, and its pre-Active wait ends at the bound. When the ending claims a pending too-high
   Logout (103's mark, the peer's Logout already received), it waits for nothing: it closes after its write, as R-1's
-  does. Nor does the too-low Logout that the peer's own Logout below NextNumIn draws: it closes after its write
-  (clarification "Session 2026-11-24 (implementation, Phase 9)"). Its claimed receipt does not reach its reset point under `reset_on_logout`, as on `main`, where both claiming sites
+  does. Nor does an ending Logout drawn by the peer's own Logout (the too-low Logout, the gap deadline's, the
+  OrigSendingTime Reject's): it closes after its write (clarification "Session 2026-11-24 (implementation, Phase 9)"). Its claimed receipt does not reach its reset point under `reset_on_logout`, as on `main`, where both claiming sites
   end at once (contract C-2.8, B-105-2): the one exception to clarification D-a's reset, and not a change to B-104-1, since
   that Logout never reached its reset point on `main` either. While the wait is armed:
   - **The peer's Logout ends the wait whatever its MsgSeqNum** (clarification D-a): it is recognised once it has

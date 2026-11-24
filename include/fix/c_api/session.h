@@ -719,8 +719,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  * some left it open. After a Logout the session sends to end it (the gap deadline's, a
  * SendingTime or OrigSendingTime Reject's, a too-low frame's, a Logon refusal's, among
  * others; not the unanswered TestRequest's, below, nor a STRICT acceptor's refusal of a
- * Logon without 141=Y, nor the Logout answering the peer's own Logout below the expected
- * MsgSeqNum(34), after either of which the connection closes at once), the session
+ * Logon without 141=Y, nor a Logout the peer's own Logout draws (the one below the
+ * expected MsgSeqNum(34), the gap deadline's, an OrigSendingTime Reject's), after each of
+ * which the connection closes at once), the session
  * waits for the peer's Logout, at most logout_disconnect_timeout_ms from the start of
  * that Logout's write, then closes the connection. During that wait after the session
  * established,

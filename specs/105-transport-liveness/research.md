@@ -244,13 +244,12 @@ write limit of ruling D-e (item 11). This section is the mechanism.
      end at once; without this rule 105 would add a full bound of waiting for a second Logout a real peer does not
      send. One cell: a too-high Logout while a resend is outstanding, then a non-advancing frame after the gap
      deadline; the peer reads the deadline's Logout, then EOF with the mock clock frozen.
-   - **The peer's own Logout below NextNumIn** (spec clarification "Session 2026-11-24 (implementation, Phase 9)", tasks.md T143b): Arm B's too-low Logout
-     for a frame whose MsgType(35) is 5 goes through the helper with the leaf's `reply` kind (the base's Arm B called
-     the leaf with its frame and text and no kind, `ending_kind` being 105's; at the head that call resolves to the
-     leaf's default, `reply`), so it is limited and arms no wait, for the same reason as N-5: the peer's Logout has
-     been received. The cells are `LogoutWait105.PeerLogoutBelowNextNumIn_TooLowLogoutNoWaitEofAtOnce`,
-     `LogoutWait105Direct.PeerLogoutBelowNextNumIn_TooLowLogoutNoWaitClosedAtOnce` and
-     `Capi105Wait.PeersLogoutBelowNextNumIn_TooLowLogoutThenEofAtOnce`.
+   - **The peer's own Logout** (spec clarification "Session 2026-11-24 (implementation, Phase 9)", tasks.md T143b, T143c): the helper takes the inbound
+     frame that drew the ending, and when its MsgType(35) is 5 the Logout goes through the leaf's `reply` kind, so it
+     is limited and arms no wait, for the same reason as N-5: the peer's Logout has been received. The decision is the
+     helper's, not a caller's, so every caller takes it: the gap deadline, the OrigSendingTime branch, Arm B. For
+     Arm B, the base called the leaf with its frame and text and no kind (`ending_kind` being 105's; at the head that
+     call resolves to the leaf's default, `reply`). The cells are spec.md's for that clarification.
    - **The callers** are the fixpp-initiated ending Logouts: `resend_gap_deadline_`,
      `on_inbound_active_sending_time_reject_`, the OrigSendingTime branch of `on_inbound_active_poss_dup_`, Arm B
      of `on_inbound_active_out_of_sequence_`, and every caller of `refuse_logon_with_logout_`,
@@ -1143,8 +1142,9 @@ T115).
     call leaves its frame on `main`; a claimed pending too-high mark's receipt does not reset (contract C-2.8); and the
     statement of QuickFIX's behaviour that replaces L-103-5's, per engine and path, as spec FR-016 gives it; and its
     disclosed exception, the strict-reset refusal, which arms no wait and closes at once after its Logout: spec
-    clarification "Session 2026-11-21 (implementation, Phase 4)"; and the too-low Logout the peer's own Logout below
-    NextNumIn draws, which arms no wait and closes after its write: spec clarification "Session 2026-11-24 (implementation, Phase 9)"); `B-105-3` R-1 and its departure from QuickFIX (the record
+    clarification "Session 2026-11-21 (implementation, Phase 4)"; and an ending Logout drawn by the peer's own Logout
+    (the too-low Logout, the gap deadline's, the OrigSendingTime Reject's), which arms no wait and closes after its write:
+    spec clarification "Session 2026-11-24 (implementation, Phase 9)"); `B-105-3` R-1 and its departure from QuickFIX (the record
     written before the write; the budget counted from the give-up's decision, so behind a resend answer that holds the
     replay gate past the budget the session closes with no Logout, "Logout not sent", and the record is still written:
     spec clarification "Session 2026-11-21 (implementation, Phase 3)"); `B-105-4` the #582 rule; `B-105-5` the TestRequest timing, the threshold's
