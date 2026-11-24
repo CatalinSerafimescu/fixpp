@@ -552,8 +552,21 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
     EXPECT_TRUE(ended_by_bound)
         << "the session did not end within the mock-clock cap after its Logout";
     EXPECT_TRUE(ended) << "the connection was not closed within the bound plus tls_close_timeout";
+    // What the peer read and what the session was given to write, for the ending's message.
+    std::size_t sends_ready = 0;
+    for (auto const& f : sends) {
+        if (f.valid() && f.wait_for(0s) == std::future_status::ready) ++sends_ready;
+    }
+    std::string const got = peer ? peer->received : std::string{};
+    auto const buffers = peer ? peer->buffer_sizes() : std::pair<int, int>{-1, -1};
+    std::error_code const read_ec = peer ? peer->read_ec : std::error_code{};
     EXPECT_EQ(peer ? peer->ending() : t105::peer_ending::open, t105::peer_ending::abortive)
-        << "a close_notify behind a peer that stopped reading";
+        << "a close_notify behind a peer that stopped reading; read_ec " << read_ec.value() << " ["
+        << read_ec.category().name() << "] " << read_ec.message() << "; the peer read "
+        << got.size() << " bytes, " << pr::frames_of_type(got, "D").size() << " frames of type D, "
+        << pr::frames_of_type(got, "5").size() << " of type 5; sends spawned " << sends.size()
+        << ", completed " << sends_ready << ", each payload " << payload.size()
+        << " bytes; the peer's SO_RCVBUF " << buffers.first << ", SO_SNDBUF " << buffers.second;
 }
 
 }  // namespace

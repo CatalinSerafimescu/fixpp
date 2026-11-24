@@ -64,6 +64,7 @@
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <functional>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <memory_resource>
@@ -120,6 +121,38 @@ enum class peer_ending : std::uint8_t { open, eof, close_notify, abortive };
 [[nodiscard]] inline peer_ending ending_of(fixpp::test_support::plain_rig::Peer const& peer) {
     if (!peer.read_ended) return peer_ending::open;
     return peer.read_ec == asio::error::eof ? peer_ending::eof : peer_ending::abortive;
+}
+
+// The plaintext peer's ending as one line of text: the ending's name and, once the read has
+// ended, the read's error as value, category and message; then how many bytes the peer read and
+// the last of them, with SOH shown as '|'.
+[[nodiscard]] inline std::string describe_ending(fixpp::test_support::plain_rig::Peer const& peer) {
+    std::string out = peer_ending_name(ending_of(peer));
+    if (peer.read_ended) {
+        out += " read_ec=" + std::to_string(peer.read_ec.value()) + " [" +
+               peer.read_ec.category().name() + "] " + peer.read_ec.message();
+    }
+    constexpr std::size_t kTail = 160;
+    std::string const& got = peer.received;
+    out += "; " + std::to_string(got.size()) + " bytes read, ending with: ";
+    for (std::size_t i = got.size() > kTail ? got.size() - kTail : 0; i < got.size(); ++i) {
+        out += got[i] == '\x01' ? '|' : got[i];
+    }
+    return out;
+}
+
+// The EOF reading of a site whose cell asserts that the plaintext peer's read ended in EOF: true
+// when it did. When the read ended otherwise it prints the site and describe_ending() on stdout,
+// so the cell's failure has the ending beside it. The line is not an assertion: the verdict is
+// the caller's, on the value returned.
+[[nodiscard]] inline bool ended_in_eof(fixpp::test_support::plain_rig::Peer const& peer,
+                                       const char* site) {
+    peer_ending const e = ending_of(peer);
+    if (e == peer_ending::abortive) {
+        std::cout << "[ ending   ] " << (site != nullptr ? site : "?")
+                  << ": the peer's read ended, not in EOF: " << describe_ending(peer) << std::endl;
+    }
+    return e == peer_ending::eof;
 }
 
 // The ending of a read through a fixpp TLS Transport: transport_read_eof is close_notify.
@@ -821,6 +854,18 @@ public:
     void close() {
         std::error_code ec;
         (void)stream_.lowest_layer().close(ec);
+    }
+
+    // The peer socket's receive and send buffer sizes as the socket reports them, -1 for a size
+    // that could not be read.
+    [[nodiscard]] std::pair<int, int> buffer_sizes() {
+        std::error_code ec;
+        asio::socket_base::receive_buffer_size rcv;
+        asio::socket_base::send_buffer_size snd;
+        (void)stream_.lowest_layer().get_option(rcv, ec);
+        int const r = ec ? -1 : rcv.value();
+        (void)stream_.lowest_layer().get_option(snd, ec);
+        return {r, ec ? -1 : snd.value()};
     }
 
     // 105 (tasks.md T054): writes what a cell sends, one write in flight at a time, while the

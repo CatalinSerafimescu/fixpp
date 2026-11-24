@@ -122,7 +122,7 @@ TEST(ConnectionClose105, CloseFrameSpawnFails_ReleaseAtLoopExit_PeerSeesEofWithN
         ended = step_until_ended(*rig.clock, rig.ioc, [&] { return rig.state(); });
         eof = t105::pump_until_peer_read_ends(
                   rig.ioc, [&] { return rig.peer.read_ended; }, kWallCap, "CloseFrameSpawnFails") &&
-              t105::ending_of(rig.peer) == t105::peer_ending::eof;
+              t105::ended_in_eof(rig.peer, "CloseFrameSpawnFails");
     }
     rig.stop();
     EXPECT_TRUE(up && ended) << "setup";
@@ -414,7 +414,7 @@ void bound_spawn_fails_cell(bound_spawn_route route) {
         }
         eof = t105::pump_until_peer_read_ends(
                   rig.ioc, [&] { return rig.peer.read_ended; }, kWallCap, "BoundSpawnFails") &&
-              t105::ending_of(rig.peer) == t105::peer_ending::eof;
+              t105::ended_in_eof(rig.peer, "BoundSpawnFails");
     }
     auto const logouts_written =
         pr::frames_of_type(rig.peer.received.substr(std::min(mark, rig.peer.received.size())), "5")
@@ -464,7 +464,7 @@ TEST(LivenessTiming105, GiveUp_BoundSpawnFails_StillEof) {
         eof =
             t105::pump_until_peer_read_ends(
                 rig.ioc, [&] { return rig.peer.read_ended; }, kWallCap, "GiveUp_BoundSpawnFails") &&
-            t105::ending_of(rig.peer) == t105::peer_ending::eof;
+            t105::ended_in_eof(rig.peer, "GiveUp_BoundSpawnFails");
     }
     auto const logouts_written =
         pr::frames_of_type(rig.peer.received.substr(std::min(mark, rig.peer.received.size())), "5")
@@ -1400,12 +1400,12 @@ void capped_failure_cell(capped_arm arm) {
     bool const refused = up && rig.run_until([&] {
         return pr::frames_of_type(rig.peer.received.substr(mark), "5").size() == 1U;
     });
+    char const* const site =
+        arm == capped_arm::deadline ? "T143a/CappedFailure/deadline" : "T143a/CappedFailure/cap";
     bool const eof = refused &&
                      t105::pump_until_peer_read_ends(
-                         rig.ioc, [&] { return rig.peer.read_ended; }, kWallCap,
-                         arm == capped_arm::deadline ? "T143a/CappedFailure/deadline"
-                                                     : "T143a/CappedFailure/cap") &&
-                     t105::ending_of(rig.peer) == t105::peer_ending::eof;
+                         rig.ioc, [&] { return rig.peer.read_ended; }, kWallCap, site) &&
+                     t105::ended_in_eof(rig.peer, site);
     bool const thrown = !counting->throw_pending();
     rig.stop();
     EXPECT_TRUE(up) << "setup";

@@ -179,7 +179,7 @@ struct WaitCell {
                 return rig.peer.read_ended;
             },
             kWallCap, site);
-        return ended && t105::ending_of(rig.peer) == t105::peer_ending::eof;
+        return ended && t105::ended_in_eof(rig.peer, site);
     }
     // Steps the mock clock by step, then the bounded drive.
     void advance(std::chrono::nanoseconds step) {
@@ -1099,7 +1099,8 @@ TEST_P(LogoutWait105, EngineStopDuringWait_OneClose) {
     w.c.rig.stop();
     if (w.in_wait) {
         EXPECT_TRUE(w.c.rig.run_until([&] { return w.c.rig.peer.read_ended; }));
-        EXPECT_EQ(t105::ending_of(w.c.rig.peer), t105::peer_ending::eof);
+        EXPECT_EQ(t105::ending_of(w.c.rig.peer), t105::peer_ending::eof)
+            << t105::describe_ending(w.c.rig.peer);
         EXPECT_EQ(w.c.count_since(mark, "5"), 0U);
     }
     EXPECT_EQ(w.c.app->logouts, 1);

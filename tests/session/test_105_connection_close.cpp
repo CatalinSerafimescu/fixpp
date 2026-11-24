@@ -118,7 +118,7 @@ struct Cell {
     [[nodiscard]] bool eof_at_once(const char* site) {
         bool const ended = t105::pump_until_peer_read_ends(
             rig.ioc, [this] { return rig.peer.read_ended; }, kWallCap, site);
-        return ended && t105::ending_of(rig.peer) == t105::peer_ending::eof;
+        return ended && t105::ended_in_eof(rig.peer, site);
     }
     [[nodiscard]] std::string wire_since(std::size_t mark) const {
         return rig.peer.received.substr(std::min(mark, rig.peer.received.size()));
@@ -380,7 +380,7 @@ bool eof_reading_store(Cell& c, t105::gate_store_state& st,
             return c.rig.peer.read_ended;
         },
         kWallCap, site);
-    return ended && t105::ending_of(c.rig.peer) == t105::peer_ending::eof;
+    return ended && t105::ended_in_eof(c.rig.peer, site);
 }
 
 void expect_reply_then_eof_after_reset(LogoutReading const& r, const char* site) {

@@ -1394,13 +1394,20 @@ TEST(Capi105Wait, Close_DuringTheWait_ReturnsAtThePeersLogout_OneClose) {
     while (!(close.done() && scene.line.ended()) && steady::now() < until) {
         (void)scene.line.read_next(std::min(until, steady::now() + kSlice));
     }
+    // How the loop ended, for the end-of-stream assertion's message.
+    bool const budget_spent = steady::now() >= until;
+    std::error_code const end = scene.line.sock.end_code();
     ASSERT_TRUE(close.done()) << "setup: fixpp_session_close did not return";
     EXPECT_EQ(close.rc(), FIXPP_ERR_OK) << "fixpp_session_close";
     EXPECT_LT(ms_between(answered, close.returned_at()).count(), kAtOnce.count())
         << "fixpp_session_close did not return at once after the peer's Logout (times in ms)";
     EXPECT_EQ(logouts_after(scene.line, scene.logout->at), 0U)
         << "the session wrote a second Logout";
-    EXPECT_TRUE(scene.line.sock.eof()) << "the peer did not read end-of-stream";
+    EXPECT_TRUE(scene.line.sock.eof())
+        << "the peer did not read end-of-stream; at the loop's exit ended() " << scene.line.ended()
+        << ", read_failed " << scene.line.read_failed << ", end_code " << end.value() << " ["
+        << end.category().name() << "] " << end.message() << ", step budget "
+        << (budget_spent ? "spent" : "not spent");
 }
 
 // fixpp_engine_destroy, the C ABI's terminal close (Engine::stop runs Session::close(terminal),

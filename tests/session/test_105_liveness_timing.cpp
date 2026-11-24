@@ -149,7 +149,7 @@ GiveUpReading run_give_up(session_role role, std::function<void(SessionConfig&)>
             r.ended = rig.state() != fsm_state::Active;
             r.eof = t105::pump_until_peer_read_ends(
                         rig.ioc, [&] { return rig.peer.read_ended; }, kWallCap, site) &&
-                    t105::ending_of(rig.peer) == t105::peer_ending::eof;
+                    t105::ended_in_eof(rig.peer, site);
             r.after = rig.peer.received.substr(mark);
         }
     }
@@ -525,7 +525,7 @@ Timeline run_timeline(TimelineSpec const& spec, const char* site) {
                 tl.ended_at = t;
                 tl.eof = t105::pump_until_peer_read_ends(
                              rig.ioc, [&] { return rig.peer.read_ended; }, kWallCap, site) &&
-                         t105::ending_of(rig.peer) == t105::peer_ending::eof;
+                         t105::ended_in_eof(rig.peer, site);
                 collect(t);
                 break;
             }
@@ -1080,7 +1080,7 @@ HeldCapReading run_held_cap(session_role role, held_cap_scene scene, const char*
             r.ended = rig.state() != fsm_state::Active;
             r.eof = t105::pump_until_peer_read_ends(
                         rig.ioc, [&] { return rig.peer.read_ended; }, kWallCap, site) &&
-                    t105::ending_of(rig.peer) == t105::peer_ending::eof;
+                    t105::ended_in_eof(rig.peer, site);
             r.ended = rig.state() != fsm_state::Active;
         }
         r.end_state = rig.state();
