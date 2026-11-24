@@ -5402,22 +5402,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
                 // at RTT cadence when two fixpp sessions are paired (each echoes
                 // the other's beat). [self-paired heartbeat-storm fix]
                 if (hdr.msg_type == "0") {  // Heartbeat (35=0)
-                    if (!pending_test_req_id_.empty()) {
-                        // We have an outstanding TestRequest. 105 (ruling D-d; contract
-                        // C-5.4) supersedes the plain comparison: an earlier TestRequest's id
-                        // neither answers nor ends; an id this connection never sent is
-                        // session_testreqid_mismatch(118), a peer-frame silent ending
-                        // [spec.md FR-006; T018-D].
-                        switch (classify_test_req_id_(hdr.test_req_id)) {
-                            case test_req_id_class::mismatch:
-                                end_session_silently_();
-                                co_return fixpp::core::expected_t<void>{};
-                            case test_req_id_class::answers:
-                                pending_test_req_id_.clear();
-                                break;
-                            case test_req_id_class::earlier:
-                                break;
-                        }
+                    // With a TestRequest outstanding: 105 (ruling D-d; contract C-5.4)
+                    // supersedes the plain comparison: an earlier TestRequest's id neither
+                    // answers nor ends; an id this connection never sent is
+                    // session_testreqid_mismatch(118), a peer-frame silent ending, after which
+                    // answer_pending_test_request_ returns false [spec.md FR-006; T018-D].
+                    if (!pending_test_req_id_.empty() &&
+                        !answer_pending_test_request_(hdr.test_req_id)) {
+                        co_return fixpp::core::expected_t<void>{};
                     }
                     // 029 T010 — PERSIST: inbound Heartbeat (35=0).
                     // check_inbound advanced next_inbound; fromAdmin dispatched above.
