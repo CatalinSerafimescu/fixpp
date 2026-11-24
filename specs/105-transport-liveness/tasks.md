@@ -1139,25 +1139,50 @@ remaining reference.
   `ctest --preset <p> -N` with the chosen label, recorded first, lists this entry alone; otherwise run the binary with
   `--gtest_filter='<the new cells>'`, never `-R`. Record per cell its result and the reported count (0 fails the step). The witnesses name only C-ABI symbols present on the base (contract C-9: no symbol
   changes), so the file compiles there; a compile failure is not RED.
-- [ ] T115 `include/fix/c_api/version.h`: `FIXPP_C_ABI_VERSION_MINOR` 18 and the 1.18 history entry, marked **BREAKING** ([const §X.7]: the version comment carries
+  Partial: `59fc1ba1`, suite `Capi105Wait` (7 cells: `IsEstablished_TrueDuringTheWait_FalseAtThePeersLogout`,
+  `Send_RefusedDuringTheWait_ReturnsAtOnce`, `SendCallback_NotInvokedForASendDuringTheWait`,
+  `ReceiveCallback_MessageAtNextNumIn_DeliveredDuringTheWait`, `Close_DuringTheWait_ReturnsAtThePeersLogout_OneClose`,
+  `EngineDestroy_DuringTheWait_EndsItAtOnce_OneClose` (the C ABI's terminal close is `fixpp_engine_destroy`, W-14),
+  `PeersLogout_EndsTheWait_PeerReadsEofAtOnce`); on `$B` 7 ran, 7 RED, rc 1, no abort (evidence file, Phase 9, T114).
+  Not written, escalated: `fixpp_session_send` from inside the application callback during the wait. On the head the
+  call blocks (`fut.get()` on the engine's worker, which runs the callback), as `session.h`'s FR-013a annotation and
+  `send_recv_test.cpp`'s header state; contract C-9's reentrancy bullet says it returns.
+- [X] T115 `include/fix/c_api/version.h`: `FIXPP_C_ABI_VERSION_MINOR` 18 and the 1.18 history entry, marked **BREAKING** ([const §X.7]: the version comment carries
   what no declaration carries), the counterparty's side:
   every ending closes the connection; the unanswered TestRequest's Logout; the R-2 wait; the write limit on every ending
   Logout; the TestRequest at 1.2 × HeartBtInt; the TestReqID(112) rule. Never clang-format `include/fix/c_api/*.h`.
-- [ ] T116 `include/fix/c_api/session.h`: a 1.18 clause on each observer of contract C-9, each clause marked **BREAKING** ([const §X.7]), stating what contract
+  Done: `aca84d06` (evidence file, Phase 9, T115).
+- [X] T116 `include/fix/c_api/session.h`: a 1.18 clause on each observer of contract C-9, each clause marked **BREAKING** ([const §X.7]), stating what contract
   C-9 "What the 1.18 clauses say" gives it; the 1.11, 1.12 and 1.17 sentences this feature changes amended in place,
   "amended in C-ABI 1.18, 105". First run research D9's census of affected declarations at the head and record it: its
   known positives are the five observers; a hit on another declaration gets its own clause, and every sentence the
   census classes "a result this feature changes" is amended (then `git grep -n 'amended in C-ABI 1.18' -- include/fix/c_api`
   lists them for review).
-- [ ] T117 Move every "pins the minor" row of T012 (the capi tests, `tests/capi/CMakeLists.txt`, the support headers, the CI
+  Done: `aca84d06`; the census and its classes in the evidence file, Phase 9, T116.
+- [X] T117 Move every "pins the minor" row of T012 (the capi tests, `tests/capi/CMakeLists.txt`, the support headers, the CI
   scripts it lists) and regenerate `tools/capi_freeze.sha256` by the generator T012 found (the manifest's own `sha256sum` format over
   `include/fix/c_api.h` and every header under `include/fix/c_api/`, never edited by hand; contract C-9); then run
   `bash tools/check_capi_freeze.sh` and `tools/check_capi_occupancy.sh` (both pass) and `-L capi`.
-- [ ] T118 Python (Article X §7, in-repo consumers): run T012's grep over `bindings/` again at the head, its seeded known
+  Done: `d3c505a4`; `check_capi_freeze.sh` and `check_capi_occupancy.sh` rc 0, `-L capi` 38/38 (evidence file, Phase 9, T117).
+- [X] T118 Python (Article X §7, in-repo consumers): run T012's grep over `bindings/` again at the head, its seeded known
   positive first; move any pin it reports and record the result, a zero included. Then contract C-6.7's instrument, research
   D6's `grep -rn test_request_threshold bindings include/fix`, seeded first in `$M`: it must report nothing (no C-ABI setter,
   no Python surface).
-- [ ] T119 Run T114 GREEN and `-L capi`; commit `H7`.
+  Done: no pin in `bindings/` and C-6.7's instrument reports nothing at the head; both seeded first in `$M` (evidence file, Phase 9, T118).
+- [X] T119 Run T114 GREEN and `-L capi`; commit `H7`.
+  Done: `Capi105Wait` 7/7 GREEN, `-L capi` 38/38; H7 is the commit that marks this task (evidence file, Phase 9, T119).
+
+- [ ] T119a [US3] Held TestRequest gets a fresh window (owner 2026-11-24). When a TestRequest is pending, the give-up
+  instant is the later of (last inbound + 2T) and (that TestRequest's write instant + T); a TestRequest held behind a
+  resend answer past last + 2T is written on release and the session gives up only T after that write if nothing
+  arrives (FIX-SL §4.5.5), also when no TestRequest was pending before the hold; a frame (or the TestReqID answer, D-d)
+  inside that window keeps the session. (a) spec.md Clarifications "Session 2026-11-24", data-model E-4, contract C-6.2
+  and every place the give-up instant is specified, amended in place, dated, naming the ruling; (b) the code in
+  `run_liveness_loop` / `detail::test_request_give_up_instant` (or its caller), saturating; (c) `ReplayGate588.R588g`
+  re-pinned (the TestRequest written on release, no Logout before write + T, then R-1's Logout naming it) plus a
+  positive arm (an answer within T after the release keeps the session Active), RED first on the head before the
+  change, then a named mutant in `$M` (the max dropped) RED by those cells; (d) the comment rule; (e) `-L 105` and the
+  538/replay-gate binary unfiltered, then the gate.
 
 ---
 
