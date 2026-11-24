@@ -6051,6 +6051,22 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::acknowledge_peer_logout_
     co_return fixpp::core::expected_t<void>{};
 }
 
+namespace {
+// A bound's backstop for the wake it publishes: it clears *wake only while an exception unwinds
+// the frame, so a suspended frame destroyed unresumed touches no Session state; the bound's
+// explicit clear disarms it. Declared after the timer the wake cancels.
+struct wake_clearer {
+    std::function<void()>* wake;
+    int unwinding_at = std::uncaught_exceptions();
+    bool armed = true;
+    ~wake_clearer() {
+        if (armed && std::uncaught_exceptions() > unwinding_at) {
+            *wake = nullptr;
+        }
+    }
+};
+}  // namespace
+
 // 103 (research D4.4, amended by data-model "Pending-Logout mark", its fields paragraph and
 // exception rows): the bound. Its join counter is held by its `join` parameter, which touches
 // only the counter, so the frame may outlive the Session (FQ-C). The wake is published, then
@@ -6088,16 +6104,7 @@ asio::awaitable<void> Session::run_peer_logout_bound_body_(std::uint32_t gen) no
         // frame: a suspended frame destroyed unresumed touches no Session state here, since
         // its Session may be gone (research D4.4's reason for no exit guard).
         // The body's two clears disarm it.
-        struct wake_clearer {
-            Session* s;
-            int unwinding_at = std::uncaught_exceptions();
-            bool armed = true;
-            ~wake_clearer() {
-                if (armed && std::uncaught_exceptions() > unwinding_at) {
-                    s->peer_logout_wake_ = nullptr;
-                }
-            }
-        } wake_clear{.s = this};
+        wake_clearer wake_clear{.wake = &peer_logout_wake_};
         peer_logout_wake_ = [&woken] { woken.cancel(); };
         if (!live()) {
             peer_logout_wake_ = nullptr;
@@ -6259,18 +6266,8 @@ asio::awaitable<void> Session::run_ending_logout_bound_(
     try {
         asio::steady_timer woken{co_await asio::this_coro::executor,
                                  asio::steady_timer::time_point::max()};
-        // run_peer_logout_bound_body_'s backstop: it clears the wake only while an exception
-        // unwinds the frame; the explicit clear below disarms it.
-        struct wake_clearer {
-            Session* s;
-            int unwinding_at = std::uncaught_exceptions();
-            bool armed = true;
-            ~wake_clearer() {
-                if (armed && std::uncaught_exceptions() > unwinding_at) {
-                    s->ending_logout_wake_ = nullptr;
-                }
-            }
-        } wake_clear{.s = this};
+        // wake_clearer's backstop; the explicit clear below disarms it.
+        wake_clearer wake_clear{.wake = &ending_logout_wake_};
         ending_logout_wake_ = [&woken] { woken.cancel(); };
         for (;;) {
             if (!ending_bound_live_(gen)) {

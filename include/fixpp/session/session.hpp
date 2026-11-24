@@ -1962,21 +1962,23 @@ private:
     // counter (liveness_counter_'s pattern).
     std::shared_ptr<std::atomic<int>> peer_logout_bound_counter_{
         std::make_shared<std::atomic<int>>(0)};
-    // One hold on the bound's join counter: its constructor increments the counter and its
-    // destructor decrements it. It is the bound's parameter, so the frame owns it from its
+    // One hold on a detached frame's join counter: its constructor increments the counter and
+    // its destructor decrements it. It is the frame's parameter, so the frame owns it from its
     // creation and releases the counter whether or not the body ran, an unstarted frame that
-    // a throwing co_spawn destroys included. A moved-from hold releases nothing.
-    class peer_logout_bound_join {
+    // a throwing co_spawn destroys included. A moved-from hold releases nothing. It touches only
+    // the counter. 105 (T129) makes the too-high Logout bound's hold the one class for every such
+    // counter (the close frame's and the ending Logout bound's too); the names stay as aliases.
+    class counter_join {
     public:
-        explicit peer_logout_bound_join(std::shared_ptr<std::atomic<int>> counter) noexcept
+        explicit counter_join(std::shared_ptr<std::atomic<int>> counter) noexcept
             : counter_{std::move(counter)} {
             counter_->fetch_add(1, std::memory_order_relaxed);
         }
-        peer_logout_bound_join(peer_logout_bound_join&&) noexcept = default;
-        peer_logout_bound_join(peer_logout_bound_join const&) = delete;
-        peer_logout_bound_join& operator=(peer_logout_bound_join const&) = delete;
-        peer_logout_bound_join& operator=(peer_logout_bound_join&&) = delete;
-        ~peer_logout_bound_join() {
+        counter_join(counter_join&&) noexcept = default;
+        counter_join(counter_join const&) = delete;
+        counter_join& operator=(counter_join const&) = delete;
+        counter_join& operator=(counter_join&&) = delete;
+        ~counter_join() {
             if (counter_) {
                 counter_->fetch_sub(1, std::memory_order_release);
             }
@@ -1985,6 +1987,7 @@ private:
     private:
         std::shared_ptr<std::atomic<int>> counter_;
     };
+    using peer_logout_bound_join = counter_join;
     // The Logout owner (research D4.6): at most one Logout of an established session is
     // in flight. Session strand only.
     bool logout_in_flight_ = false;
@@ -2122,27 +2125,9 @@ private:
     // destructor. close() and drain_for_reconnect_ join it; ~Session asserts it is 0.
     std::shared_ptr<std::atomic<int>> connection_close_counter_{
         std::make_shared<std::atomic<int>>(0)};
-    // One hold on connection_close_counter_, in peer_logout_bound_join's shape: the close
-    // frame's parameter, so a frame that is never published releases the counter too.
-    class connection_close_join {
-    public:
-        explicit connection_close_join(std::shared_ptr<std::atomic<int>> counter) noexcept
-            : counter_{std::move(counter)} {
-            counter_->fetch_add(1, std::memory_order_relaxed);
-        }
-        connection_close_join(connection_close_join&&) noexcept = default;
-        connection_close_join(connection_close_join const&) = delete;
-        connection_close_join& operator=(connection_close_join const&) = delete;
-        connection_close_join& operator=(connection_close_join&&) = delete;
-        ~connection_close_join() {
-            if (counter_) {
-                counter_->fetch_sub(1, std::memory_order_release);
-            }
-        }
-
-    private:
-        std::shared_ptr<std::atomic<int>> counter_;
-    };
+    // One hold on connection_close_counter_ (counter_join): the close frame's parameter, so a
+    // frame that is never published releases the counter too.
+    using connection_close_join = counter_join;
     // The close frame (research D1 item 5): awaits close_async() on the transport it holds and
     // touches no member of Session, so its own spawn chain keeps close_async's cancellation
     // reset (research F-6).
@@ -2180,25 +2165,8 @@ private:
     // drain_for_reconnect_ join it after their transport close; ~Session asserts it is 0.
     std::shared_ptr<std::atomic<int>> ending_logout_bound_counter_{
         std::make_shared<std::atomic<int>>(0)};
-    class ending_logout_bound_join {
-    public:
-        explicit ending_logout_bound_join(std::shared_ptr<std::atomic<int>> counter) noexcept
-            : counter_{std::move(counter)} {
-            counter_->fetch_add(1, std::memory_order_relaxed);
-        }
-        ending_logout_bound_join(ending_logout_bound_join&&) noexcept = default;
-        ending_logout_bound_join(ending_logout_bound_join const&) = delete;
-        ending_logout_bound_join& operator=(ending_logout_bound_join const&) = delete;
-        ending_logout_bound_join& operator=(ending_logout_bound_join&&) = delete;
-        ~ending_logout_bound_join() {
-            if (counter_) {
-                counter_->fetch_sub(1, std::memory_order_release);
-            }
-        }
-
-    private:
-        std::shared_ptr<std::atomic<int>> counter_;
-    };
+    // One hold on ending_logout_bound_counter_ (counter_join): the bound's parameter.
+    using ending_logout_bound_join = counter_join;
     // What entering writing found: no limit (timeout 0 or no clock), the limit set up, or the
     // bound's spawn refused (an allocation failure: the Logout is not written).
     enum class ending_entry : std::uint8_t { unlimited, limited, refused };
