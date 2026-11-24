@@ -291,6 +291,20 @@ inline constexpr std::chrono::seconds kDefaultHeartBtInt{30};
                           std::chrono::nanoseconds{1});
 }
 
+// 105, owner ruling 2026-11-24 (spec.md Clarifications, "Session 2026-11-24": the held
+// TestRequest's fresh window; data-model E-4): the give-up instant of a TestRequest pending since
+// `written`, the later of the instant above and `written` + T + 1 ns, every step saturating. A
+// TestRequest written late (held behind a resend answer) leaves the peer a whole threshold to
+// answer. Precondition: threshold >= 0.
+[[nodiscard]] constexpr fixpp::core::steady_time_point test_request_give_up_instant(
+    fixpp::core::steady_time_point since, fixpp::core::steady_time_point written,
+    std::chrono::milliseconds threshold) noexcept {
+    auto const after_two = test_request_give_up_instant(since, threshold);
+    auto const after_write =
+        deadline_after(deadline_after(written, threshold), std::chrono::nanoseconds{1});
+    return after_two < after_write ? after_write : after_two;
+}
+
 // 105 (research D5; data-model E-4; ruling D-d): the TestReqID window. TestRequest numbers are
 // issued by incrementing a 32-bit counter, so the numbers issued on a connection are those in
 // (floor, next] modulo 2^32, where floor is the counter's value when the connection started and
