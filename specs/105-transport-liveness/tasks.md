@@ -1361,13 +1361,17 @@ remaining reference.
   Done, targeted per owner 2026-11-24: on asan, ubsan and tsan the `-L 105` entries and the entries of the binaries
   whose test sources the branch touched (the C-ABI witness and 538 binaries among them), 37/35/35 entries, all passed,
   no sanitizer report, 0 skipped cells (evidence file, Phase 11, T137).
-- [ ] T138 Benchmarks (Article VIII §2, §3; ruling D-f; contract C-12): add the pump case to `bench/session/engine_send_bench.cpp`'s
+- [X] T138 Benchmarks (Article VIII §2, §3; ruling D-f; contract C-12): add the pump case to `bench/session/engine_send_bench.cpp`'s
   harness (inbound Heartbeat and application frames through `run_read_pump`, the unarmed path), and a pending-TestRequest
   Heartbeat case to `bench/session/on_inbound_frame_bench.cpp` (a Heartbeat arriving while a TestRequest is pending: C-5.4's
   TestReqID classification runs only under that condition, and the existing Heartbeat case has none pending); then paired base-vs-candidate
   A-B-A-B runs of `on_inbound_frame_bench`, `session_send_bench` and `engine_send_bench` with the new case, the base a release
   tree of `$B` with the bench file overlaid, its path padded to `$T`'s length (`cmp` the `.text`); the +5 % budget; results in
   the verify evidence.
+  Done: the two cases `23a5fd9f`, their reach shown able to fire on the base; A-B-A-B against the padded base, the
+  reading of record the same-tree control (the padded worktree moved to the head): every case inside +5 % on both
+  pairs; a first run's +13 % to +22 % on `BM_Session_Send_Sequential` did not reproduce on the same binary and is
+  discarded (evidence file, Phase 11, T138). The padded worktree is removed.
 - [ ] T139 Interop (research R4): the live QuickFIX interop cells of `tests/interop` (`ci/run-interop-live.py`'s selection):
   peers now see a Logout before EOF on the give-up and an R-2 wait.
 - [ ] T140 The WHOLE pytest suite: `python3 -m pytest bindings/python/tests` (the behaviour reaches Python through the C ABI).
