@@ -1985,8 +1985,8 @@ TEST_P(LogoutWait105, R1WriteHeld_PeerLogoutArrives_Engine_LogoutCompleteThenEof
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════
-// T143b — the peer's Logout below NextNumIn (orchestrator ruling 2026-11-24, spec.md
-// Clarifications "Session 2026-11-24 (implementation, Phase 9)"; contract C-2 "Which Logouts").
+// T143b — the peer's Logout below NextNumIn (spec.md Clarifications, the Phase 9
+// implementation session; contract C-2 "Which Logouts").
 // Without PossDupFlag(43)=Y it draws the too-low Logout, with the base's Text(58), and arms no
 // wait: the frame the wait would wait for has arrived. The connection closes after the write,
 // with the clock still, where a wait would hold it open until the bound on the mock clock.

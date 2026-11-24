@@ -1447,8 +1447,8 @@ TEST(Capi105Wait, PeersLogout_EndsTheWait_PeerReadsEofAtOnce) {
     })) << "the session wrote a frame after the peer's Logout";
 }
 
-// T143b (contract C-2 "Which Logouts"; spec.md clarification "Session 2026-11-24
-// (implementation, Phase 9)"): the peer's own Logout below NextNumIn draws the too-low Logout
+// T143b (contract C-2 "Which Logouts"; spec.md Clarifications, the Phase 9 implementation
+// session): the peer's own Logout below NextNumIn draws the too-low Logout
 // and arms no wait. The peer reads that Logout, with the too-low Text(58), then end-of-stream
 // at once, where a wait would hold the connection open until its bound.
 TEST(Capi105Wait, PeersLogoutBelowNextNumIn_TooLowLogoutThenEofAtOnce) {
