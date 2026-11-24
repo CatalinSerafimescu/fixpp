@@ -1380,11 +1380,21 @@ remaining reference.
 - [X] T140 The WHOLE pytest suite: `python3 -m pytest bindings/python/tests` (the behaviour reaches Python through the C ABI).
   Done: the debug tree's module rebuilt (C-ABI 1.18); `pytest bindings/python/tests` 101 passed, 0 skipped (evidence file,
   Phase 11, T140).
-- [ ] T141 **(orchestrator)** windows-msvc-debug build (`-k 0`) and run of the touched targets and `-L 105` in
+- [X] T141 **(orchestrator)** windows-msvc-debug build (`-k 0`) and run of the touched targets and `-L 105` in
   `/mnt/c/temp/fixpp`, after taking `.sandbox-lock` by PARENT `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md`
   Step 0; release the lock after; never at the same time as a Linux build. The TLS cells run there too (research D10,
   "Lanes"): a TLS cell that skips on MSVC is recorded with its reason and is not counted as a pass, and the run's test count
   and skip count are recorded.
+  Done: the first run's two failure classes attributed (evidence file, "T141 (MSVC)" and the Phase 9 section after it);
+  class 1 fixed by T141a; class 2 a platform difference by the orchestrator's ruling (2026-11-24): `TlsWriteLimit105`
+  pins the abortive ending off Windows only, and L-105-g names the Windows ending. At `979cb146` on MSVC the set of
+  the ruling passed with no cell skipped (evidence file, Phase 9, T141a and T141 close).
+- [X] T141a The plain transport's close ends with FIN after fixpp's writes on every platform (orchestrator ruling
+  2026-11-24; B-105-9): `asio_plain_transport::close()` shuts the send side down before `socket_.close()`; every
+  other plaintext socket close is enumerated and dispositioned. RED first: `LogoutWait105.Bound_PeerReadsOnlyAfterTheClose_RejectAndLogoutThenEof`,
+  a peer that reads only after the bound's close, RED on MSVC at the base and GREEN on Linux there; then the fix,
+  the MSVC set of the ruling, the Linux gate, and in `$M` the mutant with the shutdown dropped (evidence file,
+  Phase 9, T141a).
 - [X] T142 One full `ctest --preset linux-clang-debug --no-tests=error` (Article XVII §7), after reading the sandbox lock; record
   the count and any failure, and the result of every `tests/alloc_guard` entry by name (`ctest -N -L alloc_guard` lists them),
   `alloc_guard_093_pump_active_read` (`tests/alloc_guard/test_093_pump_active_read_alloc_guard.cpp`, the pump's Active read

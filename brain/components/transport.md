@@ -109,6 +109,24 @@ awk '/^class Transport/,/^};/' include/fixpp/transport/transport.hpp | grep -c '
 awk '/^class Listener/,/^};/'  include/fixpp/transport/listener.hpp  | grep -c '= 0;'
 ```
 
+## The plain transport's close shuts the send side down first (105 T141a, `B-105-9`)
+
+`asio_plain_transport::close()` calls `socket_.shutdown(shutdown_send)` before `socket_.close()`.
+043's research D-2 ("close = socket_.close") is superseded in that respect. **Why:** on Windows a
+socket closed with an operation pending (the Engine's read pump parks in a read, so nearly every
+ending) resets the connection, and the peer's stack discards what it had not yet read, fixpp's final
+Logout included. Linux ends the same close with FIN, which is why the Linux suite could not see it;
+the Windows build of 105's EOF cells did.
+
+| Rejected | Why |
+|---|---|
+| cancel the pending operation and drain it before the close | needs a suspension, and `close()` is synchronous (FR-006); `shutdown` alone gives the peer every completed write and EOF with a read or a write pending |
+| the shutdown on the TLS abortive path too | that path's intent is the abortive close (`B-348-1`, `L-105-g`); a FIN there turns a reset into a truncated stream |
+
+⚠️ Two conditions still reset, as TCP does: inbound bytes fixpp never read, and SO_LINGER enabled
+with zero seconds. The witness reads only after the close: `LogoutWait105.Bound_PeerReadsOnlyAfterTheClose_RejectAndLogoutThenEof`;
+a peer that keeps a read posted takes the bytes before the reset arrives and cannot tell the two closes apart.
+
 ## A fresh `Transport` per connection attempt — never reused
 
 Every accept and every reconnect attempt mints a **new** `Transport`; the dead instance is destroyed

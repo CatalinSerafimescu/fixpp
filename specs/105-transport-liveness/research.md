@@ -79,7 +79,8 @@ Abbreviations: S = `src/session/session.cpp`, E = `src/session/engine.cpp`. "The
   so nothing resets it, and `to_chars` writes no sign and no leading zero. Whether a TestReqID is an earlier one of
   this connection is therefore decidable from its value and two integers (D5).
 - **F-16. A transport close returns a blocked write.** The plain transport has no `close_async` of its own
-  (`Transport::close_async`'s default is `co_return close();`), and `asio_plain_transport::close` closes the socket,
+  (`Transport::close_async`'s default is `co_return close();`), and `asio_plain_transport::close` closes the socket
+  (since tasks.md T141a after shutting its send side down, B-105-9),
   which completes a pending `async_write` with an error. `asio_tls_transport::close_async` sets `state_ = closed`,
   then, while `ssl_op_suspended_()` (which reads `write_in_flight` as well as `read_in_flight` and
   `handshake_in_flight`), calls `socket_.cancel()` and joins the op within `close_deadline`
