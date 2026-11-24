@@ -141,8 +141,8 @@ enum class peer_ending : std::uint8_t { open, eof, close_notify, abortive };
     return out;
 }
 
-// The EOF reading of a site whose cell asserts that the plaintext peer's read ended in EOF: true
-// when it did. When the read ended otherwise it prints the site and describe_ending() on stdout,
+// The EOF reading of a site that expects the plaintext peer's read to end in EOF: true when it
+// did. When the read ended otherwise it prints the site and describe_ending() on stdout,
 // so the cell's failure has the ending beside it. The line is not an assertion: the verdict is
 // the caller's, on the value returned.
 [[nodiscard]] inline bool ended_in_eof(fixpp::test_support::plain_rig::Peer const& peer,
