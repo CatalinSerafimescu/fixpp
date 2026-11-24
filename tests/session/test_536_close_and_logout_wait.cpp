@@ -906,8 +906,10 @@ TEST(ExplicitSweep, Control_EndsAnUnclosedSessionsLivenessLoop) {
     for (Scene* s : {&swept, &other}) {
         // Staging. The swept one: KIND C, as above. The other: KIND E, its loop sleeps to
         // the give-up instant, armed in the run that wrote the TestRequest the assertion
-        // above read; and the give-up instant is a stored instant, so KIND D as well.
-        s->mock->advance(kThreshold);
+        // above read; and the give-up instant is a stored instant, so KIND D as well. A second
+        // past a threshold: the TestRequest was written a second after its instant, and the
+        // give-up comes a threshold after that write (the owner's fresh-window ruling).
+        s->mock->advance(kThreshold + 1s);
         s->settle();
     }
     ASSERT_EQ(other.session->state(), fsm_state::Disconnected)

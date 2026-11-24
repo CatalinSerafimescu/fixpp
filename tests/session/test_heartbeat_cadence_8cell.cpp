@@ -288,8 +288,11 @@ TEST(HeartbeatCadence8Cell, CellC_Strand_UnansweredTestRequestDisconnects) {
     ASSERT_TRUE(fix.drive_to_active(sess));
 
     // Active at 11 s (past 2 × HeartBtInt); Disconnected just after 2 × 1.2 × HeartBtInt = 12s,
-    // without any inbound reply.
-    fix.advance_time(11000ms);
+    // without any inbound reply. The clock first steps to the TestRequest's instant (6 s), so the
+    // TestRequest is written there: the give-up is also counted from its write (the owner's
+    // fresh-window ruling, spec.md Clarifications), and one written late gets a later give-up.
+    fix.advance_time(6000ms);
+    fix.advance_time(5000ms);
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
         << "Cell C (strand): given up before 2 × 1.2×HeartBtInt (12s)";
     fix.advance_time(1001ms);
@@ -307,7 +310,9 @@ TEST(HeartbeatCadence8Cell, CellC_Direct_UnansweredTestRequestDisconnects) {
     fixpp::session::Session sess(fix.engine, cfg);
     ASSERT_TRUE(fix.drive_to_active(sess));
 
-    fix.advance_time(11000ms);
+    // As the strand cell: the clock steps to the TestRequest's instant first.
+    fix.advance_time(6000ms);
+    fix.advance_time(5000ms);
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
         << "Cell C (direct): given up before 2 × 1.2×HeartBtInt (12s)";
     fix.advance_time(1001ms);
