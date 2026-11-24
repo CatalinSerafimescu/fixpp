@@ -1372,8 +1372,11 @@ remaining reference.
   reading of record the same-tree control (the padded worktree moved to the head): every case inside +5 % on both
   pairs; a first run's +13 % to +22 % on `BM_Session_Send_Sequential` did not reproduce on the same binary and is
   discarded (evidence file, Phase 11, T138). The padded worktree is removed.
-- [ ] T139 Interop (research R4): the live QuickFIX interop cells of `tests/interop` (`ci/run-interop-live.py`'s selection):
+- [X] T139 Interop (research R4): the live QuickFIX interop cells of `tests/interop` (`ci/run-interop-live.py`'s selection):
   peers now see a Logout before EOF on the give-up and an R-2 wait.
+  Done: run locally as `interop-live.yml` does (the public counterparties image, its bundled harness): all 78 live
+  cells passed, none skipped; no cell in the selection drives a give-up or an R-2 wait, which the in-process peer-EOF
+  cells witness (evidence file, Phase 11, T139).
 - [ ] T140 The WHOLE pytest suite: `python3 -m pytest bindings/python/tests` (the behaviour reaches Python through the C ABI).
 - [ ] T141 **(orchestrator)** windows-msvc-debug build (`-k 0`) and run of the touched targets and `-L 105` in
   `/mnt/c/temp/fixpp`, after taking `.sandbox-lock` by PARENT `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md`
