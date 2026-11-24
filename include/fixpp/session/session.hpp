@@ -2235,9 +2235,11 @@ private:
     void spawn_connection_close_(std::shared_ptr<fixpp::transport::Transport> transport) noexcept;
     // The R-2 helper (research D2 item 1) after Active: claims a pending mark, writes the Logout
     // through inbound_logout_leaf_, then arms the wait or records Disconnected; absorbed while an
-    // ending is in progress.
+    // ending is in progress. kind reply (T143b, contract C-2 "Which Logouts"): the Logout answers
+    // the peer's own Logout, its write limited and no wait armed.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_ending_logout_(
-        bool tic, std::string_view sending_time, std::string_view text) noexcept;
+        bool tic, std::string_view sending_time, std::string_view text,
+        ending_kind kind = ending_kind::r2) noexcept;
     // The peer-frame silent endings (research D2 item 4): Disconnected unless an ending is in
     // progress after Active.
     void end_session_silently_() noexcept {

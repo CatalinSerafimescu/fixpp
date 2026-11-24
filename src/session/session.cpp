@@ -6257,7 +6257,7 @@ asio::awaitable<void> Session::run_ending_logout_bound_(
 // Research D2 item 1, after Active. The Disconnected writes of its callers' tails are its own:
 // recorded unless the wait was armed.
 asio::awaitable<fixpp::core::expected_t<void>> Session::send_ending_logout_(
-    bool tic, std::string_view sending_time, std::string_view text) noexcept {
+    bool tic, std::string_view sending_time, std::string_view text, ending_kind kind) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
     // W-8: a further ending during an ending in progress is absorbed.
     if (ending_in_progress_()) {
@@ -6268,8 +6268,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_ending_logout_(
     bool const claimed = peer_logout_.phase == peer_logout_mark::phase_t::pending;
     claim_peer_logout_none_();
     bool armed = false;
-    FIXPP_INBOUND_SPLIT_AWAIT(
-        r, tic, inbound_logout_leaf_(tic, sending_time, text, ending_kind::r2, &armed, claimed));
+    FIXPP_INBOUND_SPLIT_AWAIT(r, tic,
+                              inbound_logout_leaf_(tic, sending_time, text, kind, &armed, claimed));
     if (!r) {
         co_return r;
     }
@@ -6604,7 +6604,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
                               : SendingTimeStamp{};
         // 105 (research D2 item 1): an R-2 ending through send_ending_logout_, which claims a
         // pending mark (103 research D4.6) and records Disconnected unless the wait was armed.
-        FIXPP_INBOUND_SPLIT_AWAIT(r, tic, send_ending_logout_(tic, st52.value, text));
+        // 105 T143b (orchestrator ruling 2026-11-24; contract C-2 "Which Logouts"): the peer's own
+        // Logout below NextNumIn is answered as the base answers it, the leaf's reply kind, and
+        // arms no wait, as QuickFIX C++ and QuickFIX/J (nextLogout) and QuickFIX/Go (handleLogout)
+        // skip the too-low check for a Logout: the frame the wait would wait for has arrived.
+        auto const kind = hdr.msg_type == "5" ? ending_kind::reply : ending_kind::r2;
+        FIXPP_INBOUND_SPLIT_AWAIT(r, tic, send_ending_logout_(tic, st52.value, text, kind));
         co_return r;
     }
     // Any other refusal (a drained sequence-number mutex) is an internal failure: through the

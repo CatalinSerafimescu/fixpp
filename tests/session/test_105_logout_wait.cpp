@@ -1984,6 +1984,80 @@ TEST_P(LogoutWait105, R1WriteHeld_PeerLogoutArrives_Engine_LogoutCompleteThenEof
     EXPECT_EQ(c.count_since(mark, "5"), 1U) << "the give-up's Logout did not complete on the wire";
 }
 
+// ════════════════════════════════════════════════════════════════════════════════════════
+// T143b — the peer's Logout below NextNumIn (orchestrator ruling 2026-11-24, spec.md
+// Clarifications "Session 2026-11-24 (implementation, Phase 9)"; contract C-2 "Which Logouts").
+// Without PossDupFlag(43)=Y it draws the too-low Logout, with the base's Text(58), and arms no
+// wait: the frame the wait would wait for has arrived. The connection closes after the write,
+// with the clock still, where a wait would hold it open until the bound on the mock clock.
+// NextNumIn is not advanced, fromAdmin is not called and no receipt reset is made, although
+// WaitCell sets reset_on_logout.
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+// The Text(58) of the too-low Logout at NextNumIn 3 for a frame at 2, spelled out here.
+constexpr std::string_view kTooLowText32 =
+    "\x01"
+    "58=MsgSeqNum too low, expecting 3 but received 2\x01";
+
+TEST_P(LogoutWait105, PeerLogoutBelowNextNumIn_TooLowLogoutNoWaitEofAtOnce) {
+    WaitCell c;
+    bool const up = c.start_active(route_cfg(c, GetParam(), route::too_low));
+    bool advanced = false;
+    if (up) {
+        c.rig.peer.send(c.rig.heartbeat(2));
+        advanced = c.rig.run_until([&] { return c.next_in() == 3U; });
+    }
+    std::size_t mark = 0;
+    bool eof = false;
+    std::optional<std::pair<seqnum_t, seqnum_t>> store_at_eof;
+    std::optional<fsm_state> state_at_eof;
+    seqnum_t next_in_at_eof = 0;
+    if (advanced) {
+        mark = c.rig.peer.received.size();
+        c.rig.peer.send(c.rig.msg("5", 2));
+        eof = c.eof_at_once("PeerLogoutBelowNextNumIn", &store_at_eof);
+        state_at_eof = c.rig.state();
+        next_in_at_eof = c.next_in();
+    }
+    auto const logouts_written = pr::frames_of_type(c.wire_since(mark), "5");
+    c.rig.stop();
+    EXPECT_TRUE(advanced) << "setup: the Heartbeat at 2 did not advance NextNumIn";
+    EXPECT_EQ(logouts_written.size(), 1U) << "the too-low Logout was not written once";
+    EXPECT_TRUE(!logouts_written.empty() &&
+                logouts_written.front().find(kTooLowText32) != std::string::npos)
+        << "the Logout's Text(58) is not the too-low text: "
+        << (logouts_written.empty() ? std::string{} : logouts_written.front());
+    EXPECT_TRUE(eof) << "no EOF at once after the too-low Logout: a wait was armed";
+    EXPECT_EQ(state_at_eof, std::optional<fsm_state>{fsm_state::Disconnected});
+    EXPECT_EQ(next_in_at_eof, 3U) << "NextNumIn moved for the Logout below it";
+    EXPECT_EQ(store_at_eof, (std::optional<std::pair<seqnum_t, seqnum_t>>{{3U, 3U}}))
+        << "the store's numbers at EOF: a reset was made, or a number moved";
+    EXPECT_EQ(c.app->from_admin_logouts, 0) << "fromAdmin for the Logout below NextNumIn";
+    EXPECT_EQ(c.app->logouts, 1) << "onLogout";
+}
+
+// The same frame on a direct Session: the bound's ordinary exit releases the close at once, as
+// for the strict-reset refusal (PreActive_DirectSession_StrictReset_NoWaitClosedAtOnce).
+TEST(LogoutWait105Direct, PeerLogoutBelowNextNumIn_TooLowLogoutNoWaitClosedAtOnce) {
+    t105::DirectRig d{session_role::acceptor};
+    ASSERT_TRUE(d.to_active()) << "setup";
+    (void)d.s.feed(d.s.heartbeat(2));
+    (void)d.s.feed(d.s.frame("5", 2));
+    d.s.drain();
+    std::string text;
+    for (auto const& w : d.bw->recorded) {
+        if (w.completed && fixpp::test_support::extract_tag(w.bytes, 35) == "5") {
+            text = fixpp::test_support::extract_tag(w.bytes, 58);
+        }
+    }
+    EXPECT_EQ(d.completed("5"), 1U) << "the too-low Logout was not written once";
+    EXPECT_EQ(text, "MsgSeqNum too low, expecting 3 but received 2");
+    EXPECT_EQ(d.s.state(), fsm_state::Disconnected) << "a wait was armed";
+    EXPECT_TRUE(d.closed()) << "the connection was not closed at once";
+    EXPECT_EQ(d.app->from_admin_logouts, 0) << "fromAdmin for the Logout below NextNumIn";
+    (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "close");
+}
+
 FIXPP_105_BOTH_ROLES(LogoutWait105);
 
 }  // namespace
