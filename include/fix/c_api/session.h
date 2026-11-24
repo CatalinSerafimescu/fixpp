@@ -386,18 +386,27 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  *   - a frame the session admits always parses for dispatch (amended in C-ABI 1.15, 100: not one crafted
  *     against the index seed, whose index build exceeds its probe budget: it
  *     fails the parse and the session ends, with no Reject, no Logout and no
- *     callback), where one dense with fields could exhaust the parse buffer and
+ *     callback; amended in C-ABI 1.18, 105: and the connection closes at
+ *     once), where one dense with fields could exhaust the parse buffer and
  *     end the session;
  *   - a connection not logged on by the establishment timeout
  *     (fixpp_session_config_set_logon_timeout_ms; 10 s by default) is
  *     closed, including one whose Logon was refused, where it stayed open; a
- *     peer that answers the Logon later than that no longer establishes;
+ *     peer that answers the Logon later than that no longer establishes
+ *     (amended in C-ABI 1.18, 105: a refused Logon closes the connection
+ *     itself, at once when the refusal sends nothing, and when it sends a
+ *     Logout at the peer's Logout or logout_disconnect_timeout_ms after that
+ *     Logout's write started, whichever comes first, and the establishment
+ *     timeout if it comes earlier);
  *   - every frame that passes the fault and third-field checks counts as
  *     inbound traffic for the heartbeat interval, where some that returned
  *     early did not (one above or below the expected MsgSeqNum(34), a
  *     SequenceReset, a Reject, among others); the TestRequest such traffic
  *     drew is not sent, and a session that ended when it went unanswered
- *     stays up.
+ *     stays up (amended in C-ABI 1.18, 105: the TestRequest is sent after
+ *     1.2 times the heartbeat interval of inbound silence, and the session
+ *     ends after twice that silence with the TestRequest unanswered, with a
+ *     Logout; the 1.18 clause below).
  * close returns FIXPP_ERR_OK for a session that was established at least once
  * and FIXPP_ERR_THREAD_SESSION_LIFECYCLE, translated for the consumer's ABI
  * minor (fixpp_engine_create), for one that never was. So where one of these
@@ -427,7 +436,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  *     number draws a Logout carrying Text(58), and the session ends there
  *     (amended in C-ABI 1.17, 103: any frame that neither ends the session by
  *     another check nor advances the expected number, at, below or above it,
- *     draws that Logout).
+ *     draws that Logout; amended in C-ABI 1.18, 105: the session ends at the
+ *     end of that Logout's wait, the 1.18 clause below, not at the Logout).
  *     The deadline is tested only when such a frame arrives. A heartbeat
  *     interval of 0 turns it off; a session whose interval was never set
  *     (no call of fixpp_session_config_set_heartbeat_seconds) runs at the
@@ -435,18 +445,25 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  *     of the traces the amended 1.10 bullets describe;
  *   - where the session's CompIDs leave no room in its frame buffer for that
  *     Logout's text, the gap ends at the same frame with no Logout: the
- *     session ends silently;
+ *     session ends silently (amended in C-ABI 1.18, 105: and the connection
+ *     closes at once);
  *   - while a resend is outstanding and before that deadline, a too-high
  *     Heartbeat answers a TestRequest the session has sent and is waiting
  *     on, and the session stays established, where it ended when that wait
  *     ran out; one that carries a TestReqID(112) other than that
  *     TestRequest's ends the session at that Heartbeat, with no Logout,
- *     where it ended when the wait ran out;
+ *     where it ended when the wait ran out (amended in C-ABI 1.18, 105: one
+ *     carrying the TestReqID(112) of an earlier TestRequest the session sent
+ *     on this connection neither answers nor ends; any other ends the session
+ *     and the connection closes at once);
  *   - a too-high Heartbeat that opens a gap answers such a TestRequest the
  *     same way, and the ResendRequest follows, so the session survives the
  *     recovery, where it ended when the wait ran out; one that carries
  *     another TestReqID(112) ends the session at that Heartbeat, with no
- *     Logout and no ResendRequest;
+ *     Logout and no ResendRequest (amended in C-ABI 1.18, 105: the TestReqID
+ *     of an earlier TestRequest the session sent on this connection neither
+ *     answers nor ends; any other ends the session and the connection closes
+ *     at once);
  *   - a ResendRequest the session cannot build, because its CompIDs and the
  *     expected inbound sequence number make the frame longer than the
  *     session's frame buffer, ends the session, and fixpp closes the
@@ -479,6 +496,17 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  * a running resend answer, and for a Logout already in flight (a claimed
  * acknowledgement among them), inside the logout timeout, and sends no Logout when
  * that timeout runs out first.
+ *
+ * BREAKING (C-ABI 1.18, [const §X.7]; 105): a close during the wait for the peer's
+ * Logout that follows a Logout the session sent to end it (see
+ * fixpp_session_is_established's 1.18 clause), or during such a Logout's write,
+ * sends no Logout of its own and returns once the wait ends (the peer's Logout, or
+ * its bound) or the write ends at its limit: at most logout_disconnect_timeout_ms
+ * after the call, plus the TLS close timeout on a TLS session, beyond the waits of
+ * the 1.17 clause (the wait's bound started before the call, and close's own grace,
+ * the same timeout, starts at it). fixpp_engine_destroy, whose engine stop closes
+ * each session terminally, ends such a wait at once. The connection is closed once
+ * either way. close's return code does not change.
  *
  * Reentrancy: single-thread — non-callback / non-session-strand caller only; no
  * concurrent close on the same handle (the thunk posts onto the session domain
@@ -513,7 +541,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *     is not MsgType(35) is disregarded instead, and is not refused);
  *   - on an established session, a faulty Logon whose third field is
  *     MsgType(35) and whose MsgSeqNum(34) was read before the fault ends the
- *     session, with no Reject and no Logout;
+ *     session, with no Reject and no Logout (amended in C-ABI 1.18, 105: and
+ *     the connection closes at once);
  *   - on an established session, a faulty frame whose fault comes before its
  *     MsgSeqNum(34), or whose third field is not MsgType(35), and which was
  *     accepted and advanced the expected inbound sequence number, is
@@ -532,7 +561,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *     deadline of the 1.12 clause below);
  *   - with a heartbeat interval set, a faulty frame does not count as inbound
  *     traffic, so a peer whose frames over the heartbeat interval and the
- *     TestRequest grace window are all faulty ends the session;
+ *     TestRequest grace window are all faulty ends the session
+ *     (amended in C-ABI 1.18, 105: after 2.4 times the heartbeat interval,
+ *     with a Logout naming the TestRequest, and the connection closes);
  *   - on an established session, a frame the header scan finds fault-free but
  *     the session cannot parse for dispatch (one that exhausts the per-message
  *     parse arena, for example), which was dropped while the session
@@ -541,11 +572,13 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *     against the index seed, whose index build exceeds its probe budget), so
  *     this no longer occurs; amended in C-ABI 1.15, 100: that crafted frame fails
  *     the parse and ends the session, with no Reject, no Logout and no
- *     callback);
+ *     callback; amended in C-ABI 1.18, 105: and the connection closes at
+ *     once);
  *   - an inbound message that would advance the expected inbound sequence
  *     number past its maximum (4294967295), where that number wrapped to 0 and
  *     the session continued, ends the session with no Reject and no Logout
- *     (092 FR-019).
+ *     (092 FR-019; amended in C-ABI 1.18, 105: and the connection closes at
+ *     once).
  * For a session whose Logon is refused that way, *out_established stays false
  * where it became true; for a session any other of these effects ends, it
  * turns false where it stayed true.
@@ -571,18 +604,27 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *   - a frame the session admits always parses for dispatch (amended in C-ABI 1.15, 100: not one crafted
  *     against the index seed, whose index build exceeds its probe budget: it
  *     fails the parse and the session ends, with no Reject, no Logout and no
- *     callback), where one dense with fields could exhaust the parse buffer and
+ *     callback; amended in C-ABI 1.18, 105: and the connection closes at
+ *     once), where one dense with fields could exhaust the parse buffer and
  *     end the session;
  *   - a connection not logged on by the establishment timeout
  *     (fixpp_session_config_set_logon_timeout_ms; 10 s by default) is
  *     closed, including one whose Logon was refused, where it stayed open; a
- *     peer that answers the Logon later than that no longer establishes;
+ *     peer that answers the Logon later than that no longer establishes
+ *     (amended in C-ABI 1.18, 105: a refused Logon closes the connection
+ *     itself, at once when the refusal sends nothing, and when it sends a
+ *     Logout at the peer's Logout or logout_disconnect_timeout_ms after that
+ *     Logout's write started, whichever comes first, and the establishment
+ *     timeout if it comes earlier);
  *   - every frame that passes the fault and third-field checks counts as
  *     inbound traffic for the heartbeat interval, where some that returned
  *     early did not (one above or below the expected MsgSeqNum(34), a
  *     SequenceReset, a Reject, among others); the TestRequest such traffic
  *     drew is not sent, and a session that ended when it went unanswered
- *     stays up.
+ *     stays up (amended in C-ABI 1.18, 105: the TestRequest is sent after
+ *     1.2 times the heartbeat interval of inbound silence, and the session
+ *     ends after twice that silence with the TestRequest unanswered, with a
+ *     Logout; the 1.18 clause below).
  * Where one of these effects keeps a session up or lets it establish,
  * *out_established is true where it was false; where one ends a session or
  * keeps it from establishing, it is false where it was true.
@@ -608,7 +650,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *     number draws a Logout carrying Text(58), and the session ends there
  *     (amended in C-ABI 1.17, 103: any frame that neither ends the session by
  *     another check nor advances the expected number, at, below or above it,
- *     draws that Logout).
+ *     draws that Logout; amended in C-ABI 1.18, 105: the session ends at the
+ *     end of that Logout's wait, the 1.18 clause below, not at the Logout).
  *     The deadline is tested only when such a frame arrives. A heartbeat
  *     interval of 0 turns it off; a session whose interval was never set
  *     (no call of fixpp_session_config_set_heartbeat_seconds) runs at the
@@ -616,18 +659,25 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *     of the traces the amended 1.10 bullets describe;
  *   - where the session's CompIDs leave no room in its frame buffer for that
  *     Logout's text, the gap ends at the same frame with no Logout: the
- *     session ends silently;
+ *     session ends silently (amended in C-ABI 1.18, 105: and the connection
+ *     closes at once);
  *   - while a resend is outstanding and before that deadline, a too-high
  *     Heartbeat answers a TestRequest the session has sent and is waiting
  *     on, and the session stays established, where it ended when that wait
  *     ran out; one that carries a TestReqID(112) other than that
  *     TestRequest's ends the session at that Heartbeat, with no Logout,
- *     where it ended when the wait ran out;
+ *     where it ended when the wait ran out (amended in C-ABI 1.18, 105: one
+ *     carrying the TestReqID(112) of an earlier TestRequest the session sent
+ *     on this connection neither answers nor ends; any other ends the session
+ *     and the connection closes at once);
  *   - a too-high Heartbeat that opens a gap answers such a TestRequest the
  *     same way, and the ResendRequest follows, so the session survives the
  *     recovery, where it ended when the wait ran out; one that carries
  *     another TestReqID(112) ends the session at that Heartbeat, with no
- *     Logout and no ResendRequest;
+ *     Logout and no ResendRequest (amended in C-ABI 1.18, 105: the TestReqID
+ *     of an earlier TestRequest the session sent on this connection neither
+ *     answers nor ends; any other ends the session and the connection closes
+ *     at once);
  *   - a ResendRequest the session cannot build, because its CompIDs and the
  *     expected inbound sequence number make the frame longer than the
  *     session's frame buffer, ends the session, and fixpp closes the
@@ -657,7 +707,32 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  * false where the session stayed established: at a too-low Heartbeat without
  * PossDupFlag(43)=Y (after a Logout carrying Text(58)), at the gap deadline on any
  * frame that does not advance the expected number, and at a too-high Logout's
- * acknowledgement.
+ * acknowledgement (amended in C-ABI 1.18, 105: after the too-low Heartbeat's and the
+ * gap deadline's Logouts it turns false at the end of that Logout's wait, the 1.18
+ * clause below, not at the Logout).
+ *
+ * BREAKING (C-ABI 1.18, [const §X.7]; 105): every ending closes the connection, where
+ * some left it open. After a Logout the session sends to end it (the gap deadline's, a
+ * SendingTime or OrigSendingTime Reject's, a too-low frame's, a Logon refusal's, among
+ * others; not the unanswered TestRequest's, below), the session waits for the peer's
+ * Logout, at most logout_disconnect_timeout_ms from the start of that Logout's write,
+ * then closes the connection. During that wait after the session established,
+ * *out_established stays true, where it turned false at the Logout, while
+ * fixpp_session_send is refused: "established" does not mean a send is admitted then.
+ * It turns false at the wait's end: the peer's Logout (at any MsgSeqNum(34)), the
+ * bound, a terminal close or an internal failure. During the wait the session answers
+ * the peer's frames as while established and sends nothing of its own; a peer frame
+ * that would end the session by another rule of these clauses is absorbed. The
+ * session sends a TestRequest after 1.2 times the heartbeat interval of inbound
+ * silence; while one is pending, *out_established stays true until the give-up,
+ * strictly after twice that silence counted from the last inbound frame, and a frame
+ * that does not answer the TestRequest defers the give-up. The give-up sends a Logout
+ * whose Text(58) names the TestRequest and closes the connection once that Logout's
+ * write has returned, with no wait. While a TestRequest is pending, a Heartbeat whose
+ * TestReqID(112) is that of an earlier TestRequest the session sent on this
+ * connection neither answers it nor ends the session. The C ABI has no setter that
+ * turns sequence validation off, so the rules 105 gives a session without it do not
+ * reach a C caller.
  *
  * Reentrancy: thread-safe. O(1) lock-free (atomic reader snapshot).
  */
@@ -755,7 +830,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  *     is not MsgType(35) is disregarded instead, and is not refused);
  *   - on an established session, a faulty Logon whose third field is
  *     MsgType(35) and whose MsgSeqNum(34) was read before the fault ends the
- *     session, with no Reject and no Logout;
+ *     session, with no Reject and no Logout (amended in C-ABI 1.18, 105: and
+ *     the connection closes at once);
  *   - on an established session, a faulty frame whose fault comes before its
  *     MsgSeqNum(34), or whose third field is not MsgType(35), and which was
  *     accepted and advanced the expected inbound sequence number, is
@@ -774,7 +850,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  *     deadline of the 1.12 clause below);
  *   - with a heartbeat interval set, a faulty frame does not count as inbound
  *     traffic, so a peer whose frames over the heartbeat interval and the
- *     TestRequest grace window are all faulty ends the session;
+ *     TestRequest grace window are all faulty ends the session
+ *     (amended in C-ABI 1.18, 105: after 2.4 times the heartbeat interval,
+ *     with a Logout naming the TestRequest, and the connection closes);
  *   - on an established session, a frame the header scan finds fault-free but
  *     the session cannot parse for dispatch (one that exhausts the per-message
  *     parse arena, for example), which was dropped while the session
@@ -783,11 +861,13 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  *     against the index seed, whose index build exceeds its probe budget), so
  *     this no longer occurs; amended in C-ABI 1.15, 100: that crafted frame fails
  *     the parse and ends the session, with no Reject, no Logout and no
- *     callback);
+ *     callback; amended in C-ABI 1.18, 105: and the connection closes at
+ *     once);
  *   - an inbound message that would advance the expected inbound sequence
  *     number past its maximum (4294967295), where that number wrapped to 0 and
  *     the session continued, ends the session with no Reject and no Logout
- *     (092 FR-019).
+ *     (092 FR-019; amended in C-ABI 1.18, 105: and the connection closes at
+ *     once).
  * A send on a session one of these effects refused or ended, issued after
  * that effect, which returned FIXPP_ERR_OK, now returns
  * FIXPP_ERR_SESSION_INVALID_STATE, translated for the consumer's ABI minor
@@ -814,18 +894,27 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  *   - a frame the session admits always parses for dispatch (amended in C-ABI 1.15, 100: not one crafted
  *     against the index seed, whose index build exceeds its probe budget: it
  *     fails the parse and the session ends, with no Reject, no Logout and no
- *     callback), where one dense with fields could exhaust the parse buffer and
+ *     callback; amended in C-ABI 1.18, 105: and the connection closes at
+ *     once), where one dense with fields could exhaust the parse buffer and
  *     end the session;
  *   - a connection not logged on by the establishment timeout
  *     (fixpp_session_config_set_logon_timeout_ms; 10 s by default) is
  *     closed, including one whose Logon was refused, where it stayed open; a
- *     peer that answers the Logon later than that no longer establishes;
+ *     peer that answers the Logon later than that no longer establishes
+ *     (amended in C-ABI 1.18, 105: a refused Logon closes the connection
+ *     itself, at once when the refusal sends nothing, and when it sends a
+ *     Logout at the peer's Logout or logout_disconnect_timeout_ms after that
+ *     Logout's write started, whichever comes first, and the establishment
+ *     timeout if it comes earlier);
  *   - every frame that passes the fault and third-field checks counts as
  *     inbound traffic for the heartbeat interval, where some that returned
  *     early did not (one above or below the expected MsgSeqNum(34), a
  *     SequenceReset, a Reject, among others); the TestRequest such traffic
  *     drew is not sent, and a session that ended when it went unanswered
- *     stays up.
+ *     stays up (amended in C-ABI 1.18, 105: the TestRequest is sent after
+ *     1.2 times the heartbeat interval of inbound silence, and the session
+ *     ends after twice that silence with the TestRequest unanswered, with a
+ *     Logout; the 1.18 clause below).
  * Where one of these effects keeps a session up or lets it establish, a send on
  * that session issued after the effect, which returned
  * FIXPP_ERR_SESSION_INVALID_STATE, translated for the consumer's ABI minor
@@ -853,7 +942,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  *     number draws a Logout carrying Text(58), and the session ends there
  *     (amended in C-ABI 1.17, 103: any frame that neither ends the session by
  *     another check nor advances the expected number, at, below or above it,
- *     draws that Logout).
+ *     draws that Logout; amended in C-ABI 1.18, 105: the session ends at the
+ *     end of that Logout's wait, the 1.18 clause below, not at the Logout).
  *     The deadline is tested only when such a frame arrives. A heartbeat
  *     interval of 0 turns it off; a session whose interval was never set
  *     (no call of fixpp_session_config_set_heartbeat_seconds) runs at the
@@ -861,18 +951,25 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  *     of the traces the amended 1.10 bullets describe;
  *   - where the session's CompIDs leave no room in its frame buffer for that
  *     Logout's text, the gap ends at the same frame with no Logout: the
- *     session ends silently;
+ *     session ends silently (amended in C-ABI 1.18, 105: and the connection
+ *     closes at once);
  *   - while a resend is outstanding and before that deadline, a too-high
  *     Heartbeat answers a TestRequest the session has sent and is waiting
  *     on, and the session stays established, where it ended when that wait
  *     ran out; one that carries a TestReqID(112) other than that
  *     TestRequest's ends the session at that Heartbeat, with no Logout,
- *     where it ended when the wait ran out;
+ *     where it ended when the wait ran out (amended in C-ABI 1.18, 105: one
+ *     carrying the TestReqID(112) of an earlier TestRequest the session sent
+ *     on this connection neither answers nor ends; any other ends the session
+ *     and the connection closes at once);
  *   - a too-high Heartbeat that opens a gap answers such a TestRequest the
  *     same way, and the ResendRequest follows, so the session survives the
  *     recovery, where it ended when the wait ran out; one that carries
  *     another TestReqID(112) ends the session at that Heartbeat, with no
- *     Logout and no ResendRequest;
+ *     Logout and no ResendRequest (amended in C-ABI 1.18, 105: the TestReqID
+ *     of an earlier TestRequest the session sent on this connection neither
+ *     answers nor ends; any other ends the session and the connection closes
+ *     at once);
  *   - a ResendRequest the session cannot build, because its CompIDs and the
  *     expected inbound sequence number make the frame longer than the
  *     session's frame buffer, ends the session, and fixpp closes the
@@ -903,6 +1000,13 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  * send issued while a resend answer runs returns after the answer, numbered after it,
  * and returns FIXPP_ERR_SESSION_INVALID_STATE if the session closes, stops, ends or
  * receives such a Logout meanwhile.
+ *
+ * BREAKING (C-ABI 1.18, [const §X.7]; 105): during the wait for the peer's Logout that
+ * follows a Logout the session sent to end it (fixpp_session_is_established's 1.18
+ * clause), send returns FIXPP_ERR_SESSION_INVALID_STATE, translated for the
+ * consumer's ABI minor (fixpp_engine_create), at once: it does not wait for the wait's
+ * end. The code is the one send returned once the session had ended at that Logout;
+ * what changes is that fixpp_session_is_established reads true meanwhile.
  *
  * Reentrancy: thread-safe — callable from any consumer thread (the any-thread
  * Engine::send contract) EXCEPT from inside the receive callback, where the
@@ -953,7 +1057,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  *     is not MsgType(35) is disregarded instead, and is not refused);
  *   - on an established session, a faulty Logon whose third field is
  *     MsgType(35) and whose MsgSeqNum(34) was read before the fault ends the
- *     session, with no Reject and no Logout;
+ *     session, with no Reject and no Logout (amended in C-ABI 1.18, 105: and
+ *     the connection closes at once);
  *   - on an established session, a faulty frame whose fault comes before its
  *     MsgSeqNum(34), or whose third field is not MsgType(35), and which was
  *     accepted and advanced the expected inbound sequence number, is
@@ -972,7 +1077,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  *     deadline of the 1.12 clause below);
  *   - with a heartbeat interval set, a faulty frame does not count as inbound
  *     traffic, so a peer whose frames over the heartbeat interval and the
- *     TestRequest grace window are all faulty ends the session;
+ *     TestRequest grace window are all faulty ends the session
+ *     (amended in C-ABI 1.18, 105: after 2.4 times the heartbeat interval,
+ *     with a Logout naming the TestRequest, and the connection closes);
  *   - on an established session, a frame the header scan finds fault-free but
  *     the session cannot parse for dispatch (one that exhausts the per-message
  *     parse arena, for example), which was dropped while the session
@@ -981,11 +1088,13 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  *     against the index seed, whose index build exceeds its probe budget), so
  *     this no longer occurs; amended in C-ABI 1.15, 100: that crafted frame fails
  *     the parse and ends the session, with no Reject, no Logout and no
- *     callback);
+ *     callback; amended in C-ABI 1.18, 105: and the connection closes at
+ *     once);
  *   - an inbound message that would advance the expected inbound sequence
  *     number past its maximum (4294967295), where that number wrapped to 0 and
  *     the session continued, ends the session with no Reject and no Logout
- *     (092 FR-019).
+ *     (092 FR-019; amended in C-ABI 1.18, 105: and the connection closes at
+ *     once).
  * On a session one of these effects refused or ended, `cb` is not invoked for
  * any inbound application message after that effect; under 092 FR-019 it is
  * not invoked for the message that ends the session either.
@@ -1011,18 +1120,27 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  *   - a frame the session admits always parses for dispatch (amended in C-ABI 1.15, 100: not one crafted
  *     against the index seed, whose index build exceeds its probe budget: it
  *     fails the parse and the session ends, with no Reject, no Logout and no
- *     callback), where one dense with fields could exhaust the parse buffer and
+ *     callback; amended in C-ABI 1.18, 105: and the connection closes at
+ *     once), where one dense with fields could exhaust the parse buffer and
  *     end the session;
  *   - a connection not logged on by the establishment timeout
  *     (fixpp_session_config_set_logon_timeout_ms; 10 s by default) is
  *     closed, including one whose Logon was refused, where it stayed open; a
- *     peer that answers the Logon later than that no longer establishes;
+ *     peer that answers the Logon later than that no longer establishes
+ *     (amended in C-ABI 1.18, 105: a refused Logon closes the connection
+ *     itself, at once when the refusal sends nothing, and when it sends a
+ *     Logout at the peer's Logout or logout_disconnect_timeout_ms after that
+ *     Logout's write started, whichever comes first, and the establishment
+ *     timeout if it comes earlier);
  *   - every frame that passes the fault and third-field checks counts as
  *     inbound traffic for the heartbeat interval, where some that returned
  *     early did not (one above or below the expected MsgSeqNum(34), a
  *     SequenceReset, a Reject, among others); the TestRequest such traffic
  *     drew is not sent, and a session that ended when it went unanswered
- *     stays up.
+ *     stays up (amended in C-ABI 1.18, 105: the TestRequest is sent after
+ *     1.2 times the heartbeat interval of inbound silence, and the session
+ *     ends after twice that silence with the TestRequest unanswered, with a
+ *     Logout; the 1.18 clause below).
  * On a session one of these effects keeps up or lets establish, `cb` is invoked
  * for the inbound application messages after the effect, where it was not; on
  * one it ends or keeps from establishing, the reverse. `cb` is not invoked for
@@ -1050,7 +1168,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  *     number draws a Logout carrying Text(58), and the session ends there
  *     (amended in C-ABI 1.17, 103: any frame that neither ends the session by
  *     another check nor advances the expected number, at, below or above it,
- *     draws that Logout).
+ *     draws that Logout; amended in C-ABI 1.18, 105: the session ends at the
+ *     end of that Logout's wait, the 1.18 clause below, not at the Logout).
  *     The deadline is tested only when such a frame arrives. A heartbeat
  *     interval of 0 turns it off; a session whose interval was never set
  *     (no call of fixpp_session_config_set_heartbeat_seconds) runs at the
@@ -1058,18 +1177,25 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  *     of the traces the amended 1.10 bullets describe;
  *   - where the session's CompIDs leave no room in its frame buffer for that
  *     Logout's text, the gap ends at the same frame with no Logout: the
- *     session ends silently;
+ *     session ends silently (amended in C-ABI 1.18, 105: and the connection
+ *     closes at once);
  *   - while a resend is outstanding and before that deadline, a too-high
  *     Heartbeat answers a TestRequest the session has sent and is waiting
  *     on, and the session stays established, where it ended when that wait
  *     ran out; one that carries a TestReqID(112) other than that
  *     TestRequest's ends the session at that Heartbeat, with no Logout,
- *     where it ended when the wait ran out;
+ *     where it ended when the wait ran out (amended in C-ABI 1.18, 105: one
+ *     carrying the TestReqID(112) of an earlier TestRequest the session sent
+ *     on this connection neither answers nor ends; any other ends the session
+ *     and the connection closes at once);
  *   - a too-high Heartbeat that opens a gap answers such a TestRequest the
  *     same way, and the ResendRequest follows, so the session survives the
  *     recovery, where it ended when the wait ran out; one that carries
  *     another TestReqID(112) ends the session at that Heartbeat, with no
- *     Logout and no ResendRequest;
+ *     Logout and no ResendRequest (amended in C-ABI 1.18, 105: the TestReqID
+ *     of an earlier TestRequest the session sent on this connection neither
+ *     answers nor ends; any other ends the session and the connection closes
+ *     at once);
  *   - a ResendRequest the session cannot build, because its CompIDs and the
  *     expected inbound sequence number make the frame longer than the
  *     session's frame buffer, ends the session, and fixpp closes the
@@ -1086,7 +1212,18 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  * BREAKING (C-ABI 1.17, [const §X.7]; 103): `cb` is invoked for the inbound
  * application messages of a default session the STRICT default refused (see
  * fixpp_session_is_established's 1.17 clause), and is no longer invoked after the
- * endings that clause names.
+ * endings that clause names (amended in C-ABI 1.18, 105: those that send a Logout
+ * end at the end of its wait, the 1.18 clause below, and `cb` is invoked during it).
+ *
+ * BREAKING (C-ABI 1.18, [const §X.7]; 105): during the wait for the peer's Logout
+ * after the session established (fixpp_session_is_established's 1.18 clause), `cb` is
+ * invoked for each inbound application message at the expected inbound sequence
+ * number, where none was delivered once the session had ended at its Logout. A
+ * Heartbeat carrying the TestReqID(112) of an earlier TestRequest the session sent on
+ * this connection ends nothing, so `cb` goes on being invoked after it. No callback
+ * reports the wait's end or the unanswered TestRequest's ending: a C caller sees the
+ * Logout and the end of the connection on the wire, and fixpp_session_is_established
+ * turning false.
  *
  * Reentrancy: single-thread. THUNK: construction-time.
  */
@@ -1131,7 +1268,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  *     is not MsgType(35) is disregarded instead, and is not refused);
  *   - on an established session, a faulty Logon whose third field is
  *     MsgType(35) and whose MsgSeqNum(34) was read before the fault ends the
- *     session, with no Reject and no Logout;
+ *     session, with no Reject and no Logout (amended in C-ABI 1.18, 105: and
+ *     the connection closes at once);
  *   - on an established session, a faulty frame whose fault comes before its
  *     MsgSeqNum(34), or whose third field is not MsgType(35), and which was
  *     accepted and advanced the expected inbound sequence number, is
@@ -1150,7 +1288,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  *     deadline of the 1.12 clause below);
  *   - with a heartbeat interval set, a faulty frame does not count as inbound
  *     traffic, so a peer whose frames over the heartbeat interval and the
- *     TestRequest grace window are all faulty ends the session;
+ *     TestRequest grace window are all faulty ends the session
+ *     (amended in C-ABI 1.18, 105: after 2.4 times the heartbeat interval,
+ *     with a Logout naming the TestRequest, and the connection closes);
  *   - on an established session, a frame the header scan finds fault-free but
  *     the session cannot parse for dispatch (one that exhausts the per-message
  *     parse arena, for example), which was dropped while the session
@@ -1159,11 +1299,13 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  *     against the index seed, whose index build exceeds its probe budget), so
  *     this no longer occurs; amended in C-ABI 1.15, 100: that crafted frame fails
  *     the parse and ends the session, with no Reject, no Logout and no
- *     callback);
+ *     callback; amended in C-ABI 1.18, 105: and the connection closes at
+ *     once);
  *   - an inbound message that would advance the expected inbound sequence
  *     number past its maximum (4294967295), where that number wrapped to 0 and
  *     the session continued, ends the session with no Reject and no Logout
- *     (092 FR-019).
+ *     (092 FR-019; amended in C-ABI 1.18, 105: and the connection closes at
+ *     once).
  * On a session one of these effects refused or ended, `cb` is not invoked for
  * a send issued after that effect: fixpp_session_send refuses that send at the
  * engine's Active check, before it reaches the toApp path.
@@ -1189,18 +1331,27 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  *   - a frame the session admits always parses for dispatch (amended in C-ABI 1.15, 100: not one crafted
  *     against the index seed, whose index build exceeds its probe budget: it
  *     fails the parse and the session ends, with no Reject, no Logout and no
- *     callback), where one dense with fields could exhaust the parse buffer and
+ *     callback; amended in C-ABI 1.18, 105: and the connection closes at
+ *     once), where one dense with fields could exhaust the parse buffer and
  *     end the session;
  *   - a connection not logged on by the establishment timeout
  *     (fixpp_session_config_set_logon_timeout_ms; 10 s by default) is
  *     closed, including one whose Logon was refused, where it stayed open; a
- *     peer that answers the Logon later than that no longer establishes;
+ *     peer that answers the Logon later than that no longer establishes
+ *     (amended in C-ABI 1.18, 105: a refused Logon closes the connection
+ *     itself, at once when the refusal sends nothing, and when it sends a
+ *     Logout at the peer's Logout or logout_disconnect_timeout_ms after that
+ *     Logout's write started, whichever comes first, and the establishment
+ *     timeout if it comes earlier);
  *   - every frame that passes the fault and third-field checks counts as
  *     inbound traffic for the heartbeat interval, where some that returned
  *     early did not (one above or below the expected MsgSeqNum(34), a
  *     SequenceReset, a Reject, among others); the TestRequest such traffic
  *     drew is not sent, and a session that ended when it went unanswered
- *     stays up.
+ *     stays up (amended in C-ABI 1.18, 105: the TestRequest is sent after
+ *     1.2 times the heartbeat interval of inbound silence, and the session
+ *     ends after twice that silence with the TestRequest unanswered, with a
+ *     Logout; the 1.18 clause below).
  * On a session one of these effects keeps up or lets establish, `cb` is invoked
  * for a send issued after the effect, where fixpp_session_send refused that
  * send at the engine's Active check; on one it ends or keeps from
@@ -1227,7 +1378,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  *     number draws a Logout carrying Text(58), and the session ends there
  *     (amended in C-ABI 1.17, 103: any frame that neither ends the session by
  *     another check nor advances the expected number, at, below or above it,
- *     draws that Logout).
+ *     draws that Logout; amended in C-ABI 1.18, 105: the session ends at the
+ *     end of that Logout's wait, the 1.18 clause below, not at the Logout).
  *     The deadline is tested only when such a frame arrives. A heartbeat
  *     interval of 0 turns it off; a session whose interval was never set
  *     (no call of fixpp_session_config_set_heartbeat_seconds) runs at the
@@ -1235,18 +1387,25 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  *     of the traces the amended 1.10 bullets describe;
  *   - where the session's CompIDs leave no room in its frame buffer for that
  *     Logout's text, the gap ends at the same frame with no Logout: the
- *     session ends silently;
+ *     session ends silently (amended in C-ABI 1.18, 105: and the connection
+ *     closes at once);
  *   - while a resend is outstanding and before that deadline, a too-high
  *     Heartbeat answers a TestRequest the session has sent and is waiting
  *     on, and the session stays established, where it ended when that wait
  *     ran out; one that carries a TestReqID(112) other than that
  *     TestRequest's ends the session at that Heartbeat, with no Logout,
- *     where it ended when the wait ran out;
+ *     where it ended when the wait ran out (amended in C-ABI 1.18, 105: one
+ *     carrying the TestReqID(112) of an earlier TestRequest the session sent
+ *     on this connection neither answers nor ends; any other ends the session
+ *     and the connection closes at once);
  *   - a too-high Heartbeat that opens a gap answers such a TestRequest the
  *     same way, and the ResendRequest follows, so the session survives the
  *     recovery, where it ended when the wait ran out; one that carries
  *     another TestReqID(112) ends the session at that Heartbeat, with no
- *     Logout and no ResendRequest;
+ *     Logout and no ResendRequest (amended in C-ABI 1.18, 105: the TestReqID
+ *     of an earlier TestRequest the session sent on this connection neither
+ *     answers nor ends; any other ends the session and the connection closes
+ *     at once);
  *   - a ResendRequest the session cannot build, because its CompIDs and the
  *     expected inbound sequence number make the frame longer than the
  *     session's frame buffer, ends the session, and fixpp closes the
@@ -1262,6 +1421,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  * fixpp_session_register_callback's 1.17 clause, for a send: `cb` is invoked for a
  * send on a default session the STRICT default refused, and not for one that
  * fixpp_session_send's 1.17 clause refuses.
+ *
+ * BREAKING (C-ABI 1.18, [const §X.7]; 105): `cb` is not invoked for a send that
+ * fixpp_session_send's 1.18 clause refuses during the wait for the peer's Logout. The
+ * session's replies during the wait (a Heartbeat answering a TestRequest, a resend
+ * answer) are not originate-path application messages and are not surfaced, as before.
  *
  * Reentrancy: single-thread. THUNK: construction-time. The installed callback
  * runs on the session strand (see fixpp_send_cb typedef; [contracts/toapp-callback.md]).
