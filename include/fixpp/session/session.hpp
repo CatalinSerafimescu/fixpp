@@ -2183,6 +2183,11 @@ private:
     // an R-2 that was transmitted, not cut, claimed no pending mark and whose session is still in
     // the state it entered from; otherwise none. Returns whether it armed. Synchronous.
     bool leave_ending_write_(bool transmitted, bool claimed_mark) noexcept;
+    // An open wait's end: resolved, then the bound's wake, which re-tests. Synchronous.
+    void resolve_ending_wait_() noexcept {
+        ending_wait_.phase = ending_wait_state::phase_t::resolved;
+        wake_ending_logout_bound_();
+    }
     // An ending Logout's writer holds one from its write's start: while an exception unwinds the
     // frame (store_then_emit's operation_aborted for a cancelled store call) it leaves writing, as
     // leave_ending_write_(false, false); a suspended frame destroyed unresumed touches nothing.

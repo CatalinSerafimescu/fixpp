@@ -461,8 +461,7 @@ void Session::owe_connection_end_() noexcept {
         if (!ending_wait_.from_active) {
             return;
         }
-        ending_wait_.phase = ending_wait_state::phase_t::resolved;
-        wake_ending_logout_bound_();
+        resolve_ending_wait_();
     }
     if (state_ == lifecycle::open && !reconnect_drain_in_flight_) {
         connection_end_owed_ = conn_gen_;
@@ -4414,9 +4413,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_cold_(
                     hdr.msg_type == "5" && hdr.begin_string == cfg_.begin_string &&
                     (!cfg_.check_comp_id || (hdr.sender_comp_id == cfg_.target_comp_id &&
                                              hdr.target_comp_id == cfg_.sender_comp_id))) {
-                    ending_wait_.phase = ending_wait_state::phase_t::resolved;
+                    // The wake only cancels the bound's timer, so the owe after it is
+                    // recorded before the bound runs.
+                    resolve_ending_wait_();
                     owe_connection_end_();
-                    wake_ending_logout_bound_();
                 }
             }
             break;
@@ -6306,8 +6306,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_ending_respon
     bool tic) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
     pending_receipt_owner const receipt_owner{*this};
-    ending_wait_.phase = ending_wait_state::phase_t::resolved;
-    wake_ending_logout_bound_();
+    resolve_ending_wait_();
     emit_event(fixpp::session::session_event_sequence_numbers_reset{.by_peer_request = false});
     record_disconnected_unless_already_();
     if (cfg_.reset_on_logout) {
@@ -6686,8 +6685,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
     // 105 (research D2 item 3): the peer's in-sequence response ends a wait armed after Active
     // at this arm's entry; the leaf below writes nothing (the owner is set).
     if (ending_wait_.phase == ending_wait_state::phase_t::armed) {
-        ending_wait_.phase = ending_wait_state::phase_t::resolved;
-        wake_ending_logout_bound_();
+        resolve_ending_wait_();
     }
 
     if (fsm_state_ == fsm_state::Active) {
