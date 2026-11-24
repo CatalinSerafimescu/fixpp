@@ -1349,13 +1349,18 @@ remaining reference.
   spawns of T027 and T059, against T016's base list), and `ci/pump-census.sh` against `ci/expected-pump-sites.txt`.
   Done: every step rc 0 after `3c5390dc` (the mock-clock staging sweep's KIND dispositions for 105's escalation rows;
   rc 2 before it, rc 0 on `$B`); the co-spawn audit and its cross-check clean (evidence file, Phase 11, T135).
-- [ ] T136 linux-gcc-release `-Werror` build of the touched targets (`session_105_tests`, every re-pinned entry, the library,
+- [X] T136 linux-gcc-release `-Werror` build of the touched targets (`session_105_tests`, every re-pinned entry, the library,
   the capi and config tests, `engine_send_bench`).
-- [ ] T137 Sanitizer lanes linux-clang-asan, -ubsan and -tsan: `-L 105` and `-L session` (every existing close, stop and
+  Done: the targets compiling a C++ file the branch changes (the bench files of T138 included) and the `-L config`
+  executables, `ninja -k 0` rc 0, no error, no warning (evidence file, Phase 11, T136).
+- [X] T137 Sanitizer lanes linux-clang-asan, -ubsan and -tsan: `-L 105` and `-L session` (every existing close, stop and
   reconnect entry included), and the touched `capi` and `config` entries (`EngineStopRacesEndingClose_OneClose`, `OnLogoutCallsClose_OneClose` and the TLS cells on TSan; `Lifetime105.*` on ASan); a
   report is a defect until disproven by a reproduction or a client-path analysis. The baseline is the base on the same
   entries (spec SC-006). A lane's run whose TLS skip count is not zero is not a reading of that lane (research D10,
   "Lanes"); record each lane's test count and skip count.
+  Done, targeted per owner 2026-11-24: on asan, ubsan and tsan the `-L 105` entries and the entries of the binaries
+  whose test sources the branch touched (the C-ABI witness and 538 binaries among them), 37/35/35 entries, all passed,
+  no sanitizer report, 0 skipped cells (evidence file, Phase 11, T137).
 - [ ] T138 Benchmarks (Article VIII §2, §3; ruling D-f; contract C-12): add the pump case to `bench/session/engine_send_bench.cpp`'s
   harness (inbound Heartbeat and application frames through `run_read_pump`, the unarmed path), and a pending-TestRequest
   Heartbeat case to `bench/session/on_inbound_frame_bench.cpp` (a Heartbeat arriving while a TestRequest is pending: C-5.4's
