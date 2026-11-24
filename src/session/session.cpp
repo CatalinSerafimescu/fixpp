@@ -458,7 +458,7 @@ void Session::record_state_transition_(fsm_state new_state) noexcept {
 // Disconnected, row 6); a wait armed after Active is ended by it (row 12).
 void Session::owe_connection_end_() noexcept {
     if (ending_wait_.phase == ending_wait_state::phase_t::armed) {
-        if (!ending_wait_.from_active) {
+        if (!ending_wait_.from_active()) {
             return;
         }
         resolve_ending_wait_();
@@ -4407,7 +4407,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_cold_(
             // before Active is open. A well-formed Logout with the right identity ends it; every
             // other frame is drained. Nothing is delivered, advanced or reset.
             if (ending_wait_.phase == ending_wait_state::phase_t::armed &&
-                !ending_wait_.from_active) {
+                !ending_wait_.from_active()) {
                 auto const hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
                 if (hdr.fault == fixpp::wire::field_fault::none && hdr.msg_type_is_third &&
                     hdr.msg_type == "5" && hdr.begin_string == cfg_.begin_string &&
@@ -5203,7 +5203,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
             // stage-1 arm and check_inbound. At NextNumIn it takes the in-sequence route;
             // off NextNumIn the response arm.
             if (hdr.msg_type == "5" && ending_wait_.phase == ending_wait_state::phase_t::armed &&
-                ending_wait_.from_active) {
+                ending_wait_.from_active()) {
                 const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
                 if (seq != 0 && seq == seqnum_mgr_.next_inbound_unsafe()) {
                     auto chk = co_await seqnum_mgr_.check_inbound(seq);
@@ -6128,7 +6128,6 @@ Session::ending_entry Session::enter_ending_write_(ending_kind kind,
         ending_wait_state{.phase = ending_wait_state::phase_t::writing,
                           .kind = kind,
                           .entered_from = fsm_state_,
-                          .from_active = fsm_state_ == fsm_state::Active,
                           .cut = false,
                           .deadline = detail::deadline_after(
                               effective_clock_->steady_now(),
@@ -6168,7 +6167,7 @@ bool Session::ending_bound_live_(std::uint32_t gen) const noexcept {
             if (conn_gen_ != gen || reconnect_drain_in_flight_) {
                 return false;
             }
-            if (ending_wait_.from_active) {
+            if (ending_wait_.from_active()) {
                 return !engine_stop_requested_ && fsm_state_ == fsm_state::Active;
             }
             return state_ == lifecycle::open;
@@ -6193,7 +6192,7 @@ void Session::expire_ending_wait_(std::uint32_t gen) noexcept {
     }
     // Rows 10, 11, 14: a live armed wait.
     ending_wait_.phase = ending_wait_state::phase_t::resolved;
-    if (ending_wait_.from_active) {
+    if (ending_wait_.from_active()) {
         record_state_transition_(fsm_state::Disconnected);
     } else {
         owe_connection_end_();
@@ -6224,7 +6223,7 @@ asio::awaitable<void> Session::run_ending_logout_bound_(
             }
             auto const deadline = ending_wait_.deadline;
             bool const capped =
-                establishment_cap_.has_value() && !ending_wait_.from_active && engine_.clock;
+                establishment_cap_.has_value() && !ending_wait_.from_active() && engine_.clock;
             if (effective_clock_->steady_now() >= deadline ||
                 (capped && engine_.clock->steady_now() >= *establishment_cap_)) {
                 how = exit_t::expiry;

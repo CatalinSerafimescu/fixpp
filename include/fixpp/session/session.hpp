@@ -2152,9 +2152,12 @@ private:
         phase_t phase = phase_t::none;
         ending_kind kind = ending_kind::reply;
         fsm_state entered_from = fsm_state::NotConnected;
-        bool from_active = false;  // entered while the session was Active
-        bool cut = false;          // the bound closed the transport during the write
+        bool cut = false;  // the bound closed the transport during the write
         fixpp::core::steady_time_point deadline{};  // one budget for the write and the wait
+        // Entered while the session was Active.
+        [[nodiscard]] bool from_active() const noexcept {
+            return entered_from == fsm_state::Active;
+        }
     };
     ending_wait_state ending_wait_;
     // The connection's establishment deadline on engine_.clock, handed over once by an Engine's
@@ -2207,7 +2210,7 @@ private:
     }
     // An ending is in progress after Active: its Logout being written, or the wait armed.
     [[nodiscard]] bool ending_in_progress_() const noexcept {
-        return ending_wait_.from_active &&
+        return ending_wait_.from_active() &&
                (ending_wait_.phase == ending_wait_state::phase_t::writing ||
                 ending_wait_.phase == ending_wait_state::phase_t::armed);
     }
