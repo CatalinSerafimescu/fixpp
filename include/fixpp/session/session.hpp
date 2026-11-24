@@ -21,6 +21,7 @@
 #pragma once
 
 #include <array>
+#include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/cancellation_signal.hpp>
 #include <asio/post.hpp>
@@ -2152,8 +2153,8 @@ private:
         phase_t phase = phase_t::none;
         ending_kind kind = ending_kind::reply;
         fsm_state entered_from = fsm_state::NotConnected;
-        bool cut = false;  // the bound closed the transport during the write
-        fixpp::core::steady_time_point deadline{};  // one budget for the write and the wait
+        bool cut = false;                         // the bound closed the transport during the write
+        fixpp::core::steady_time_point deadline;  // one budget for the write and the wait
         // Entered while the session was Active.
         [[nodiscard]] bool from_active() const noexcept {
             return entered_from == fsm_state::Active;

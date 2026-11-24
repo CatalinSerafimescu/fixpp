@@ -61,6 +61,7 @@
 #include <fixpp/log/logger.hpp>              // 093 E-12: FIXPP_SLOG, the garble record
 #include <fixpp/session/admin_messages.hpp>  // 005 US1: interpret_logon / T046: build_logout
 #include <fixpp/session/config_byte_floor.hpp>  // 090-capi-refusals (fixpp#452): contains_forbidden_config_byte (D-5b/FR-013)
+#include <fixpp/session/detail/log_rate_gate.hpp>
 #include <fixpp/session/direction.hpp>  // 005 US4: direction_t (store outbound)
 #include <fixpp/session/logon_credentials.hpp>  // 034: frame_has_genuine_tag554 / mask_tag554_same_length_inplace
 #include <fixpp/session/message_store.hpp>          // 008-message-store — store_ unique_ptr dtor
@@ -5985,7 +5986,7 @@ namespace {
 // the frame, so a suspended frame destroyed unresumed touches no Session state; the bound's
 // explicit clear disarms it. Declared after the timer the wake cancels.
 struct wake_clearer {
-    std::function<void()>* wake;
+    std::function<void()>* wake = nullptr;
     int unwinding_at = std::uncaught_exceptions();
     bool armed = true;
     ~wake_clearer() {

@@ -9,6 +9,7 @@
 // and Session::open() stores it.
 
 #include <chrono>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/session/session_config.hpp>

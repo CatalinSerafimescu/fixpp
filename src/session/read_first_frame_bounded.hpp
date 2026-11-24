@@ -335,6 +335,7 @@ inline constexpr std::chrono::seconds kDefaultHeartBtInt{30};
 // the window is empty: no number is earlier.
 [[nodiscard]] constexpr bool test_req_id_in_window(std::uint32_t n, std::uint32_t floor,
                                                    std::uint32_t next) noexcept {
+    // NOLINTNEXTLINE(readability-redundant-casting): modular where int is wider than 32 bits
     return static_cast<std::uint32_t>(n - floor - 1U) < static_cast<std::uint32_t>(next - floor);
 }
 
@@ -357,7 +358,7 @@ inline constexpr std::chrono::seconds kDefaultHeartBtInt{30};
         if (c < '0' || c > '9' || v > kLimit) {
             return false;
         }
-        v = v * 10 + (c - '0');
+        v = (v * 10) + (c - '0');
     }
     if (negative) {
         return false;  // a sign

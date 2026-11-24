@@ -14,6 +14,7 @@
 // member of Session's installed surface.
 
 #include <cstdint>
+#include <fixpp/core/clock.hpp>
 #include <fixpp/session/session.hpp>
 #include <memory>
 #include <utility>

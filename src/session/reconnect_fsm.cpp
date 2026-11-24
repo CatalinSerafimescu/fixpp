@@ -27,6 +27,8 @@
 #include <asio/steady_timer.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
+#include <string>
+#include <string_view>
 // Full TransportFactory definition (forward-declared in the header to keep
 // tls/pinset.hpp's std::shared_mutex out of the asio::awaitable closure per
 // [const §XV.9]); needed here for factory_->make() + fixpp::tls::SslCtxConfig.
