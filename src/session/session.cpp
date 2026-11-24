@@ -988,6 +988,25 @@ Session::inbound_depth_holder::~inbound_depth_holder() {
     }
 }
 
+// 105 (T129): the one join of detached frames' counters, in drain_for_reconnect_ and close(): a
+// post on the caller's executor until every counter named reads 0, all of them re-read after each
+// post, and no await at all when none is held. A spin and not a wake: a waker would be a member
+// every hold's destructor reaches, and a hold is destroyed wherever its frame ends, at its
+// execution context's shutdown outside any handler included. A macro and not a coroutine, for
+// FIXPP_INBOUND_SPLIT_AWAIT's reason: a co_await of a helper is a cancellation check of its own,
+// made even when no counter is held.
+namespace {
+template <class... Counter>
+[[nodiscard]] bool any_counter_held(Counter const&... counter) noexcept {
+    return ((counter->load(std::memory_order_acquire) > 0) || ...);
+}
+}  // namespace
+// NOLINTBEGIN(cppcoreguidelines-macro-usage): see above
+#define FIXPP_JOIN_COUNTERS(...)              \
+    while (any_counter_held(__VA_ARGS__)) \
+    co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable)
+// NOLINTEND(cppcoreguidelines-macro-usage)
+
 // 103 (research D1 steps 2 and 3; data-model "Quiescent"): see session.hpp.
 asio::awaitable<fixpp::core::expected_t<void>> Session::drain_for_reconnect_() noexcept {
     using fixpp::core::error;
@@ -1004,12 +1023,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::drain_for_reconnect_() n
         // 105 (data-model E-3, the bound's wake sources): the ending Logout's bound re-tests at
         // the drain's entry (its live predicate fails on reconnect_drain_in_flight_).
         wake_ending_logout_bound_();
-        {
-            auto const cc = connection_close_counter_;
-            while (cc->load(std::memory_order_acquire) > 0) {
-                co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
-            }
-        }
+        FIXPP_JOIN_COUNTERS(connection_close_counter_);
         // Step 2: leave the old connection. The edge fires onLogout from Active and wakes
         // the bound and the gate's waiters; from here no emitter can start.
         if (fsm_state_ == fsm_state::Active || fsm_state_ == fsm_state::LogonReceived) {
@@ -1055,22 +1069,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::drain_for_reconnect_() n
         // cancellation close() uses (see `root_cancel_`; cell RS-1), and the bound was woken by
         // step 2's edge.
         root_cancel_.emit(asio::cancellation_type::total);
-        auto const bc = peer_logout_bound_counter_;
-        auto const lc = liveness_counter_;
-        while (bc->load(std::memory_order_acquire) > 0 || lc->load(std::memory_order_acquire) > 0) {
-            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
-        }
+        FIXPP_JOIN_COUNTERS(peer_logout_bound_counter_, liveness_counter_);
         // 105 (research D2 item 9; data-model E-2 I-4, I-7): the ending Logout's bound, then the
         // close frame's counter again, so no frame of the old connection is in flight at the
         // install.
-        {
-            auto const ebc = ending_logout_bound_counter_;
-            auto const cc = connection_close_counter_;
-            while (ebc->load(std::memory_order_acquire) > 0 ||
-                   cc->load(std::memory_order_acquire) > 0) {
-                co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
-            }
-        }
+        FIXPP_JOIN_COUNTERS(ending_logout_bound_counter_, connection_close_counter_);
         if (refused()) {
             co_return std::unexpected(error::session_already_closed);
         }
@@ -2690,12 +2693,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // 105 (research D1 item 6; contract C-8.3): a close frame spawned before this point runs
     // close_async() on the same transport; close() waits for it, by post, as it joins the
     // liveness loop below, so the two never run close_async on one transport at once.
-    {
-        auto const cc = connection_close_counter_;
-        while (cc->load(std::memory_order_acquire) > 0) {
-            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
-        }
-    }
+    FIXPP_JOIN_COUNTERS(connection_close_counter_);
     if (auto live = live_transport_shared_()) {
         // #348 — close_async(), not close(). The Engine's read pump can still
         // have a read in flight at this instant: the emit above does not reach it
@@ -2723,22 +2721,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // fully exited run_liveness_loop. This ensures registry_.clear() cannot destroy
     // the Session while the liveness coroutine is still touching Session members.
     // [feedback_detached_cospawn_write_not_in_join_counter; FQ-A D-6 F4]
-    {
-        auto lc = liveness_counter_;
-        while (lc->load(std::memory_order_acquire) > 0) {
-            // Yield one step; liveness loop's try/catch converts cancellation to
-            // a clean return, then the RAII guard decrements the counter.
-            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
-        }
-    }
+    // Each post yields one step; the liveness loop's try/catch converts cancellation to a clean
+    // return, then the RAII guard decrements the counter.
+    FIXPP_JOIN_COUNTERS(liveness_counter_);
     // 103 (research D4.4): the too-high Logout's bound, joined as the liveness loop is. Its
     // wake came from the claim at the first commit of closing.
-    {
-        auto bc = peer_logout_bound_counter_;
-        while (bc->load(std::memory_order_acquire) > 0) {
-            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
-        }
-    }
+    FIXPP_JOIN_COUNTERS(peer_logout_bound_counter_);
 
     // 104-sequence-reset-fidelity (contract RR-2 item 4, RT-5; data-model "`Session::close`'s
     // teardown"), superseding 093's event-driven wait (contract C-6 "close()"; plan OD-1),
@@ -2770,16 +2758,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // spawned after the first join. It sits after 104's wait, whose bound is read at that wait's
     // start: a bound whose Logout is held in a store call runs on to its own deadline, so a join
     // before 104's wait would start that wait's bound late.
-    {
-        auto const ebc = ending_logout_bound_counter_;
-        while (ebc->load(std::memory_order_acquire) > 0) {
-            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
-        }
-        auto const cc = connection_close_counter_;
-        while (cc->load(std::memory_order_acquire) > 0) {
-            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
-        }
-    }
+    FIXPP_JOIN_COUNTERS(ending_logout_bound_counter_);
+    FIXPP_JOIN_COUNTERS(connection_close_counter_);
     // 104 (contract RR-2 item 4): the close-out. A receipt still `pending` here (the wait
     // expired, or there was no clock to wait with) never reached its reset point, so it is
     // not reset under reset_on_logout (RR-1). It is set to `reached`, so that the arm, when it
