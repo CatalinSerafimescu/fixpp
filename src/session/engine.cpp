@@ -771,9 +771,9 @@ void log_role_loop_open_failure(fixpp::core::EngineConfig const& engine_cfg,
 // detail::log_rate_gate), the next carrying the refusals not written since. The first frame's
 // BeginString and CompIDs come from an unauthenticated peer, so each byte outside printable
 // ASCII is written as '?', and ArgValue's inline copy cuts each at 15 bytes. Re-derive the
-// reasons from the code: every "(void)transport->close(); continue;" before open() in
-// run_accept_loop is one pre_session_reject value. Both format strings are registered in
-// src/log/format_registry.cpp.
+// reasons from the code: every reject_pre_session call in run_accept_loop is one
+// pre_session_reject value, and it closes the transport before it writes the record. Both
+// format strings are registered in src/log/format_registry.cpp.
 namespace {
 enum class pre_session_reject : std::uint8_t {
     not_tls_transport,
@@ -814,21 +814,14 @@ fixpp::log::ArgValue printable_inline(std::string_view v) noexcept {
     return fixpp::log::ArgValue::from_inline(std::string_view{buf.data(), n});
 }
 
-// The first frame's identifiers, as read; empty before the first frame was read.
-struct pre_session_ids {
-    std::string_view begin_string;
-    std::string_view sender_comp_id;
-    std::string_view target_comp_id;
-};
-
+// ids: the first frame's identifiers, as read; empty before the first frame was read.
 void log_pre_session_reject(fixpp::core::EngineConfig const& engine_cfg,
                             SessionConfig const& session_cfg, detail::log_rate_gate& gate,
-                            pre_session_reject reason, pre_session_ids ids,
+                            pre_session_reject reason, detail::FirstFrameIds const& ids,
                             std::uint64_t failure) noexcept {
     auto const now = engine_cfg.clock->steady_now();
-    auto const heartbt = session_cfg.heartbeat_interval.value_or(detail::kDefaultHeartBtInt);
     auto const suppressed = detail::admit_log_record(
-        gate, now, detail::deadline_after(now, std::max(heartbt, std::chrono::seconds{1})), 1);
+        gate, now, detail::log_rate_window_end(now, session_cfg.heartbeat_interval), 1);
     if (!suppressed) {
         return;
     }
@@ -1089,6 +1082,15 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         assert_transport_on_session_strand(*transport, *entry.session_strand);
 
+        // A pre-session refusal: the transport closed, then the rate-bounded record. Nothing
+        // consumes a close error.
+        auto const reject_pre_session = [&](pre_session_reject reason,
+                                            detail::FirstFrameIds const& ids,
+                                            std::uint64_t failure) noexcept {
+            (void)transport->close();
+            log_pre_session_reject(engine_cfg, entry.config, reject_log_gate, reason, ids, failure);
+        };
+
         // Step 2: TLS handshake (skipped for plaintext).
         // 043 T014 site #3 (D-8/E-7): on insecure_plain_tcp the accepted transport
         // is asio_plain_transport (not TlsTransport). The dynamic_cast returns null,
@@ -1102,21 +1104,15 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             // dynamic_cast to TlsTransport to call async_handshake.
             auto* tls_transport = dynamic_cast<fixpp::transport::TlsTransport*>(transport.get());
             if (!tls_transport) {
-                // Rejecting a pre-session connection: nothing consumes a close error.
-                (void)transport->close();
-                log_pre_session_reject(engine_cfg, entry.config, reject_log_gate,
-                                       pre_session_reject::not_tls_transport, {}, 0);
+                reject_pre_session(pre_session_reject::not_tls_transport, {}, 0);
                 continue;  // not a TLS transport — config error; re-accept
             }
 
             {
                 auto hs_r = co_await tls_transport->async_handshake(ssl_cfg);
                 if (!hs_r.has_value()) {
-                    // Rejecting a pre-session connection: nothing consumes a close error.
-                    (void)transport->close();
-                    log_pre_session_reject(engine_cfg, entry.config, reject_log_gate,
-                                           pre_session_reject::tls_handshake_failed, {},
-                                           static_cast<std::uint64_t>(hs_r.error()));
+                    reject_pre_session(pre_session_reject::tls_handshake_failed, {},
+                                       static_cast<std::uint64_t>(hs_r.error()));
                     continue;  // handshake failure → reclaim slot, re-accept
                 }
                 hr = std::move(*hs_r);
@@ -1131,10 +1127,7 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         auto const establish_left = std::chrono::ceil<std::chrono::milliseconds>(
             fixpp::session::detail::duration_until(establish_now, establish_deadline));
         if (establish_left <= std::chrono::milliseconds::zero()) {
-            // Rejecting a pre-session connection: nothing consumes a close error.
-            (void)transport->close();
-            log_pre_session_reject(engine_cfg, entry.config, reject_log_gate,
-                                   pre_session_reject::no_establishment_time, {}, 0);
+            reject_pre_session(pre_session_reject::no_establishment_time, {}, 0);
             continue;
         }
 
@@ -1190,11 +1183,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
                 fixpp::session::detail::inbound_framer_config(
                     entry.config, fixpp::session::inbound_limit_for(entry.config)));
             if (!read_r.has_value()) {
-                // Rejecting a pre-session connection: nothing consumes a close error.
-                (void)transport->close();
-                log_pre_session_reject(engine_cfg, entry.config, reject_log_gate,
-                                       pre_session_reject::first_frame_read_failed, {},
-                                       static_cast<std::uint64_t>(read_r.error()));
+                reject_pre_session(pre_session_reject::first_frame_read_failed, {},
+                                   static_cast<std::uint64_t>(read_r.error()));
                 continue;  // timeout / over-budget / read-error → reclaim
             }
             first_frame_offset = read_r->offset;
@@ -1214,14 +1204,7 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // Step 4: parse CompIDs for reversed-CompID registry resolution.
         auto ids = scan_first_frame_ids(first_frame);
         if (ids.begin_string.empty() || ids.sender_comp_id.empty() || ids.target_comp_id.empty()) {
-            // Rejecting a pre-session connection: nothing consumes a close error.
-            (void)transport->close();
-            log_pre_session_reject(engine_cfg, entry.config, reject_log_gate,
-                                   pre_session_reject::first_frame_without_ids,
-                                   {.begin_string = ids.begin_string,
-                                    .sender_comp_id = ids.sender_comp_id,
-                                    .target_comp_id = ids.target_comp_id},
-                                   0);
+            reject_pre_session(pre_session_reject::first_frame_without_ids, ids, 0);
             continue;  // malformed first frame → reclaim
         }
 
@@ -1234,14 +1217,7 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             // No registry match — unknown acceptor session (slot 121).
             // Per data-model C1 step 6 and engine.hpp lookup() contract:
             // close the transport and construct NO session. [FQ-2 / gate-b/r1]
-            // Rejecting a pre-session connection: nothing consumes a close error.
-            (void)transport->close();
-            log_pre_session_reject(engine_cfg, entry.config, reject_log_gate,
-                                   pre_session_reject::compid_mismatch,
-                                   {.begin_string = ids.begin_string,
-                                    .sender_comp_id = ids.sender_comp_id,
-                                    .target_comp_id = ids.target_comp_id},
-                                   0);
+            reject_pre_session(pre_session_reject::compid_mismatch, ids, 0);
             continue;
         }
 

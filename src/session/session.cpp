@@ -580,12 +580,10 @@ std::optional<std::uint64_t> Session::admit_log_record_(log_rate_gate& gate,
                                                         std::uint64_t occurrences) noexcept {
     auto const now =
         effective_clock_ ? effective_clock_->steady_now() : fixpp::core::steady_time_point{};
-    auto const heartbt = cfg_.heartbeat_interval.value_or(kDefaultHeartBtInt);
-    // 105 (research D8; data-model E-7): the admit step is detail::admit_log_record. The window's
-    // end saturates at steady_time_point::max() when not representable.
+    // 105 (research D8; data-model E-7): the admit step is detail::admit_log_record, its window's
+    // end detail::log_rate_window_end.
     return detail::admit_log_record(
-        gate, now, detail::deadline_after(now, std::max(heartbt, std::chrono::seconds{1})),
-        occurrences);
+        gate, now, detail::log_rate_window_end(now, cfg_.heartbeat_interval), occurrences);
 }
 
 // ── 093-inbound-frame-dispositions — the establishment timeout (contract C-4;

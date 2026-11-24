@@ -264,6 +264,17 @@ template <class Rep, class Period>
 // record gate (engine.cpp) reads the same constant.
 inline constexpr std::chrono::seconds kDefaultHeartBtInt{30};
 
+// 105 (research D8; data-model E-7): the end of a rate-bounded log record's window opened at
+// `now`, max(HeartBtInt, 1 s) later, HeartBtInt being the configured heartbeat_interval or
+// kDefaultHeartBtInt; it saturates at steady_time_point::max() as deadline_after does. The
+// session's records (Session::admit_log_record_) and the accept loop's pre-session record read it.
+[[nodiscard]] constexpr fixpp::core::steady_time_point log_rate_window_end(
+    fixpp::core::steady_time_point now,
+    std::optional<std::chrono::seconds> heartbeat_interval) noexcept {
+    return deadline_after(
+        now, std::max(heartbeat_interval.value_or(kDefaultHeartBtInt), std::chrono::seconds{1}));
+}
+
 // 105 (research D6; data-model E-4), superseding 005 research D-8's 1 × HeartBtInt: the
 // default test_request_threshold, 1.2 × HeartBtInt. HeartBtInt is whole seconds, so it is
 // exactly heartbt × 1200 ms; the product saturates at milliseconds::max(), and is zero at
