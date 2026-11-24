@@ -1385,16 +1385,19 @@ remaining reference.
   Step 0; release the lock after; never at the same time as a Linux build. The TLS cells run there too (research D10,
   "Lanes"): a TLS cell that skips on MSVC is recorded with its reason and is not counted as a pass, and the run's test count
   and skip count are recorded.
-- [ ] T142 One full `ctest --preset linux-clang-debug --no-tests=error` (Article XVII §7), after reading the sandbox lock; record
+- [X] T142 One full `ctest --preset linux-clang-debug --no-tests=error` (Article XVII §7), after reading the sandbox lock; record
   the count and any failure, and the result of every `tests/alloc_guard` entry by name (`ctest -N -L alloc_guard` lists them),
   `alloc_guard_093_pump_active_read` (`tests/alloc_guard/test_093_pump_active_read_alloc_guard.cpp`, the pump's Active read
   path, which 105's latch test runs on) among them.
-  Not done, escalated: a full ctest needs every target of the E:-hosted debug tree built, and that tree's objects
-  outside the gate are stale (`_codegen` rewritten after them, and this branch's `error.hpp`), a near-full rebuild there
-  (2910 steps), which the owner's rule excludes;
-  the build was stopped before any ctest; a debug tree does not fit the free space on `/mnt/wsl/fixppbuild`. The
-  `-L alloc_guard` entries ran by name in the gate (evidence file, Phase 11, T142 and the gate).
-- [ ] T143 Coverage of added lines (Article IX §1): fresh per-binary profraw, from every binary the `105` label runs (`session_105_seam_tests` included: the
+  Done in `$M` (`/mnt/wsl/fixppbuild/fixpp-105-mutants`) at `71dc1e75`, the main checkout's E: tree not rebuilt per the
+  owner rule: reconfigured (rc 0), every target built (`-j5 -k 0`, rc 0), `ctest --preset linux-clang-debug
+  --no-tests=error -j3`: 527 of 528 passed; the one failure is `interop_thorny_recovery_us2_tests`
+  (`ThornyRecoveryFixture.Qfj750_LogoutTooLowSeqnumStillDisconnects` reads Active where it asserts Disconnected, then
+  `~Session`'s ending-bound assertion aborts), outside the gate's population (interop excluded); the same binary passes at
+  the base; escalated. Every `-L alloc_guard` entry passed, `alloc_guard_093_pump_active_read` among them; sandbox lock
+  absent before and after (evidence file, Phase 9 appended after Phase 11, T142).
+
+- [X] T143 Coverage of added lines (Article IX §1): fresh per-binary profraw, from every binary the `105` label runs (`session_105_seam_tests` included: the
   allocation-failure catches, the listener's generic arm and the bound's failure exit are reached only there), for the
   `session`, `log` and `config` modules and every other module whose `src/` the diff adds a reachable line to (`src/capi`
   if a witness needs a change there; `include/fixpp/core/error.hpp` and `include/fix/c_api/*.h` change comments only and
@@ -1404,15 +1407,19 @@ remaining reference.
   reached by the window function's runtime twins (T086); every
   uncovered added line or branch tested, waived with a one-line rationale, or escalated to a filed, labelled issue, in
   `.specify/decisions/105-transport-liveness-verify.md`.
-  Measured, not done: per-binary profraw and exports (the one-export union discarded for mismatched data); every
-  uncovered added line and branch listed with a disposition (waived, a ruling, pre-existing moved, or escalated); the
-  escalated rows await one filed, labelled issue, and the table awaits T144's verify record (evidence file, Phase 11,
-  T143).
-- [ ] T143a The owed cells of T143's escalated rows (orchestrator ruling 2026-11-24): a cell for every row this file
+  Done: per-binary profraw and exports (the one-export union discarded for mismatched data); every uncovered added line
+  and branch listed with a disposition; re-measured after T143a's cells; the rows still owed are escalated in one list
+  for the orchestrator's filed, labelled issue, and the table awaits T144's verify record (evidence file, Phase 11, T143,
+  and Phase 9 appended after Phase 11, T143 re-measured).
+
+- [X] T143a The owed cells of T143's escalated rows (orchestrator ruling 2026-11-24): a cell for every row this file
   already maps to a cell, every row whose seam is "none needed", and every row whose named seam exists in the repo;
   each row's uncovered side re-derived first with `llvm-cov show -show-branches=count` (T143's recipe), each cell
   asserting the row's observable ending and shown able to fail under a named mutant in `$M`; then the coverage
   re-measured by T143's per-binary method and T143's table updated: each row covered, or still owed with why.
+  Done: cells in `test_105_seams.cpp` (section "105 T143a") and `test_105_presession_log.cpp`, each RED under its named
+  mutant in `$M` (exit 1) or a priced survivor; the re-measure and the rows still owed in the evidence file (Phase 9
+  appended after Phase 11, T143a and T143 re-measured).
 - [ ] T144 **(orchestrator)** `/speckit-verify`; writes `.specify/decisions/105-transport-liveness-verify.md`. Re-run T130 to T135
   as the last actions before any labelled push.
 - [ ] T149 **(orchestrator)** The PR body declares C-ABI 1.18 **BREAKING** ([const §X.7]): the observers of contract C-9 and
