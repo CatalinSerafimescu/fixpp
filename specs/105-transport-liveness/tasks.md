@@ -1377,7 +1377,9 @@ remaining reference.
   Done: run locally as `interop-live.yml` does (the public counterparties image, its bundled harness): all 78 live
   cells passed, none skipped; no cell in the selection drives a give-up or an R-2 wait, which the in-process peer-EOF
   cells witness (evidence file, Phase 11, T139).
-- [ ] T140 The WHOLE pytest suite: `python3 -m pytest bindings/python/tests` (the behaviour reaches Python through the C ABI).
+- [X] T140 The WHOLE pytest suite: `python3 -m pytest bindings/python/tests` (the behaviour reaches Python through the C ABI).
+  Done: the debug tree's module rebuilt (C-ABI 1.18); `pytest bindings/python/tests` 101 passed, 0 skipped (evidence file,
+  Phase 11, T140).
 - [ ] T141 **(orchestrator)** windows-msvc-debug build (`-k 0`) and run of the touched targets and `-L 105` in
   `/mnt/c/temp/fixpp`, after taking `.sandbox-lock` by PARENT `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md`
   Step 0; release the lock after; never at the same time as a Linux build. The TLS cells run there too (research D10,
