@@ -909,16 +909,8 @@ bool Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Tr
     // 103 (research D1 step 3, D4.6): the drain left the old connection quiescent, with no
     // Logout in flight and none of its detached coroutines running.
     assert(!logout_in_flight_ && "a Logout is in flight across a reconnect install");
-    // 105 (data-model E-3 row 17): the next connection starts with no ending Logout and no
-    // establishment cap.
-    assert((ending_wait_.phase == ending_wait_state::phase_t::none ||
-            ending_wait_.phase == ending_wait_state::phase_t::resolved) &&
-           "an ending Logout is in progress across a reconnect install");
-    ending_wait_.phase = ending_wait_state::phase_t::none;
-    establishment_cap_.reset();
-    // 105 (research D5; data-model E-4): a new connection starts a new set of earlier
-    // TestReqIDs.
-    test_request_id_floor_ = next_test_request_id_;
+    // 105 (data-model E-3 row 17; research D5): the next connection's start.
+    begin_connection_();
     assert(replay_gate_.shared == 0 && inbound_depth_ == 0 &&
            peer_logout_bound_counter_->load(std::memory_order_acquire) == 0 &&
            liveness_counter_->load(std::memory_order_acquire) == 0 &&
@@ -978,6 +970,16 @@ bool Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Tr
     //    [data-model §E-1 step 8; FR-001; US1 AC1]
     record_state_transition_(fsm_state::LogonSent);
     return true;
+}
+
+// 105-transport-liveness: see session.hpp.
+void Session::begin_connection_() noexcept {
+    assert((ending_wait_.phase == ending_wait_state::phase_t::none ||
+            ending_wait_.phase == ending_wait_state::phase_t::resolved) &&
+           "an ending Logout is in progress at a connection's start");
+    ending_wait_.phase = ending_wait_state::phase_t::none;
+    establishment_cap_.reset();
+    test_request_id_floor_ = next_test_request_id_;
 }
 
 // 103 (research D1 step 3): see session.hpp.
@@ -1252,16 +1254,8 @@ void Session::attach_accepted_transport(std::unique_ptr<fixpp::transport::Transp
         live_peer_id_ = std::move(hr.peer_id);
     }
 
-    // 105 (data-model E-3 row 17): the connection starts with no ending Logout and no
-    // establishment cap.
-    assert((ending_wait_.phase == ending_wait_state::phase_t::none ||
-            ending_wait_.phase == ending_wait_state::phase_t::resolved) &&
-           "an ending Logout is in progress at an accepted connection");
-    ending_wait_.phase = ending_wait_state::phase_t::none;
-    establishment_cap_.reset();
-    // 105 (research D5; data-model E-4): a new connection starts a new set of earlier
-    // TestReqIDs.
-    test_request_id_floor_ = next_test_request_id_;
+    // 105 (data-model E-3 row 17; research D5): the accepted connection's start.
+    begin_connection_();
     // 2. Take ownership of the transport.
     // FQ-A: no transport_send_ rebind needed — live_write_serialized_() picks
     // up accepted_transport_ via live_transport_shared_() at call time.
@@ -2304,8 +2298,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     inbound_entry_cap_ = detail::parse_capacity::entry_cap_for(inbound_limit_);
 
     state_ = lifecycle::open;
-    // 105 (research D5; data-model E-4): the first connection's set of earlier TestReqIDs.
-    test_request_id_floor_ = next_test_request_id_;
+    // 105 (research D5; data-model E-4): the first connection's start. open() runs only from
+    // never_opened, so the ending state is none and the cap empty here already.
+    begin_connection_();
 
     // US4 (T046): capture transport_send from config (null if not set).
     // Called from store_then_emit() AFTER store(outbound) completes (I-3).

@@ -2160,6 +2160,10 @@ private:
     // The connection's establishment deadline on engine_.clock, handed over once by an Engine's
     // read pump (session_engine_access::set_establishment_deadline); empty on a direct Session.
     std::optional<fixpp::core::steady_time_point> establishment_cap_;
+    // A connection's start (open(), install_reconnected_transport, attach_accepted_transport):
+    // no ending Logout and no establishment cap (data-model E-3 row 17), and a new set of earlier
+    // TestReqIDs from test_request_id_floor_ (research D5; data-model E-4). Synchronous.
+    void begin_connection_() noexcept;
     // The bound's wake, in peer_logout_wake_'s shape.
     std::function<void()> ending_logout_wake_;
     // The bound's join counter, in peer_logout_bound_counter_'s shape: close() and
