@@ -1272,12 +1272,18 @@ TEST(ReplayGate588, R588g_FrameAfterTheTestRequest_HeldPastTwoThresholds_FreshWi
     held_past_two_thresholds_after_a_pending_test_request(w);
     if (HasFatalFailure()) return;
     // One second short of a threshold after the TestRequest's write.
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND C, the advance must fire nothing: it stays a
+    // second short of a threshold after the TestRequest's write, and no Logout with the session
+    // Active is the oracle.
     w.s.f.clock->advance(kTr588 - std::chrono::seconds{1});
     w.pump_for(kHeldWindow);
     EXPECT_EQ(w.s.f.sent_count("5"), 0U)
         << "a Logout inside a threshold after the TestRequest written on the release:\n"
         << printable(w.s.f.sent);
     EXPECT_EQ(w.s.f.session->state(), fsm_state::Active);
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the give-up instant is stored from the
+    // TestRequest's write, which predates this advance; run_until's bound makes a miss a named
+    // failure.
     w.s.f.clock->advance(std::chrono::seconds{2});
     EXPECT_TRUE(w.s.f.run_until([&] { return w.s.f.session->state() == fsm_state::Disconnected; }))
         << "not given up a threshold after the TestRequest written on the release:\n"
@@ -1297,11 +1303,15 @@ TEST(ReplayGate588, R588g_AnswerInsideTheFreshWindow_KeepsTheSession) {
         .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
     held_past_two_thresholds_after_a_pending_test_request(w);
     if (HasFatalFailure()) return;
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND C, the advance must fire nothing: it stays
+    // inside the fresh window, and the answer below is fed at that instant.
     w.s.f.clock->advance(kTr588 / 2);
     w.s.request_frame = w.s.f.msg("0", 3, "112=TR2\x01");
     CallingThreadReadings answer;
     ASSERT_TRUE(w.s.f.feed_plain(w.s.request_frame, answer))
         << "setup: the answer did not complete";
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND C, the advance must fire nothing: the
+    // TestRequest was answered, and Active with no Logout past the give-up instant is the oracle.
     w.s.f.clock->advance(kTr588 / 2 + std::chrono::seconds{1});
     w.pump_for(kHeldWindow);
     EXPECT_EQ(w.s.f.session->state(), fsm_state::Active)
@@ -1317,6 +1327,8 @@ TEST(ReplayGate588, R588h_NoTestRequestPending_HeldPastTwoThresholds_FreshWindow
     HeldWalk w{DirectAcceptor::Options{
         .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
     ASSERT_TRUE(w.start(is_slot_read(3))) << "setup: the walk did not reach the held read";
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND C, the advance must fire nothing while the
+    // answer is held, and no TestRequest or Logout inside it is the oracle.
     w.s.f.clock->advance(2 * kTr588 + std::chrono::seconds{1});
     w.pump_for(kHeldWindow);
     EXPECT_EQ(w.s.f.sent_count("1") + w.s.f.sent_count("5"), 0U)
@@ -1535,6 +1547,8 @@ TEST(ReplayGate588, R588f5_GiveUpWaitingAtTheGate_AnswerArrives_GiveUpIsFinal) {
     HeldWalk w{DirectAcceptor::Options{
         .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
     ASSERT_TRUE(w.start(is_slot_read(3), std::nullopt, /*request=*/false)) << "setup";
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the TestRequest instant is computed from
+    // the last inbound frame, a stored anchor; run_until's bound makes a miss a named failure.
     w.s.f.clock->advance(kTr588 + std::chrono::seconds{1});
     ASSERT_TRUE(w.s.f.run_until([&] { return w.s.f.sent_count("1") != 0; }))
         << "setup: no TestRequest was written:\n"

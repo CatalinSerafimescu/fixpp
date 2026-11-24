@@ -165,6 +165,10 @@ TEST(TlsClose105, GiveUpWhilePumpParkedInRead_PeerReceivesCloseNotify) {
         tr = read.has_value();
         std::chrono::nanoseconds advanced{0};
         while (c.state() == fsm_state::Active && advanced < t105::liveness_wire_cap(kHb, 1s)) {
+            // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the give-up instant is computed
+            // from stored anchors (the last inbound frame, the TestRequest's write); each step is
+            // followed by a bounded drive, and close_notify_at_once's cap makes a miss a named
+            // failure.
             c.clock->advance(1s);
             advanced += 1s;
             (void)t105::drive_bounded(c.ioc, 64);
@@ -337,6 +341,9 @@ TEST(TlsClose105, DirectSessionGiveUp_PeerReceivesCloseNotify) {
         tr = read.has_value();
         std::chrono::nanoseconds advanced{0};
         while (c.s.state() == fsm_state::Active && advanced < t105::liveness_wire_cap(kHb, 1s)) {
+            // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the give-up instant is computed
+            // from stored anchors (the last inbound frame, the TestRequest's write); each step is
+            // followed by a bounded drive, and the state after the loop's cap is asserted.
             c.s.mock->advance(1s);
             advanced += 1s;
             (void)t105::drive_bounded(c.s.ioc, 64);

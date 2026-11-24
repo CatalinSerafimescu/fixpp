@@ -509,6 +509,9 @@ TEST(SessionNeverSweepsTheClock, Traffic) {
     s.mock->advance(kHeartBtInt + 1s);
     ASSERT_TRUE(s.pump([&] { return s.count("0") == 2; }))
         << "setup: the liveness loop sent no Heartbeat";
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the TestRequest instant is computed from
+    // the last inbound frame, stamped before the first advance above; the pump below is bounded and
+    // asserted.
     s.mock->advance(kThreshold - kHeartBtInt);
     ASSERT_TRUE(s.pump([&] { return s.count("1") == 1; }))
         << "setup: the liveness loop sent no TestRequest";
@@ -898,6 +901,9 @@ TEST(ExplicitSweep, Control_EndsAnUnclosedSessionsLivenessLoop) {
         // anchors, which predate this advance.
         s->mock->advance(kHeartBtInt + 1s);
         s->settle();
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND C, for the swept session (the advance must
+        // fire nothing, its oracle), KIND D for the other (its loop sleeps from the Logon's
+        // anchors), as for the advance above.
         s->mock->advance(kThreshold - kHeartBtInt);
         s->settle();
     }

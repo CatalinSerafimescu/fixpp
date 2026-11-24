@@ -660,6 +660,9 @@ TEST_P(LogoutWait105, GapDeadlinePassedDuringWait_NoSecondLogout) {
               open_gap};
     expect_in_wait(w, "GapDeadlinePassed");
     if (w.in_wait) {
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND C, the advance must fire nothing: it stays
+        // inside the bound, and the gap deadline is read by the next frame, whose drawing no Logout
+        // is the oracle.
         w.c.advance(2500ms);
         auto const mark = w.c.rig.peer.received.size();
         EXPECT_TRUE(w.c.rig.deliver(w.c.rig.heartbeat(6)));
@@ -1184,9 +1187,14 @@ TEST_P(LogoutWait105, PendingTooHighMark_GapDeadlineLogout_EofAfterWrite) {
     if (up) {
         seqnum_t seq = 7;
         for (int i = 0; i < 3; ++i) {
+            // Staging (ci/mock-clock-staging-sweep.sh): KIND A, the gap deadline is read from the
+            // clock by the next inbound frame's handler, with no waiter; a liveness sleep the
+            // advance may wake is not the oracle.
             c.advance(5s);
             up = up && c.rig.deliver(c.rig.heartbeat(seq++));
         }
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND A, as the loop's advance above: the frame
+        // after it reads the gap deadline from the clock.
         c.advance(5s);
         auto const mark = c.rig.peer.received.size();
         c.rig.peer.send(c.rig.heartbeat(seq++));
@@ -1402,8 +1410,13 @@ TEST_P(LogoutWait105, PreActive_BoundSurvivesTheRefusalsOwnEdge) {
     EXPECT_TRUE(w.refused) << "setup: no refusal Logout";
     EXPECT_TRUE(w.open_after) << "the refusal's own Disconnected closed the connection";
     if (w.refused) {
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND C, the advance must fire nothing: it stays
+        // 1 ms inside the bound, and still_open() is the oracle.
         w.c.advance(499ms);
         EXPECT_TRUE(w.c.still_open()) << "closed before the bound";
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the bound sleeps until the deadline
+        // stored at the refusal Logout's write, which predates this advance; eof_at_once's wall cap
+        // makes a miss a named failure.
         w.c.rig.clock->advance(1ms);
         EXPECT_TRUE(w.c.eof_at_once("PreActive_BoundSurvives")) << "no EOF at the bound";
     }
@@ -1422,6 +1435,9 @@ TEST_P(LogoutWait105, PreActive_FramesDrained) {
             << "a frame drew a reply: " << w.c.wire_since(mark);
         EXPECT_EQ(w.c.app->from_app, 0);
         EXPECT_TRUE(w.c.still_open()) << "a drained frame closed the connection";
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the bound sleeps until the deadline
+        // stored at the refusal Logout's write, which predates this advance; eof_at_once's wall cap
+        // makes a miss a named failure.
         w.c.advance(500ms);
         EXPECT_TRUE(w.c.eof_at_once("PreActive_FramesDrained"));
     }
@@ -1496,8 +1512,13 @@ TEST(LogoutWait105Acceptor, PreActive_WaitArmedAtEstablishmentDeadline_ClosedNoE
     EXPECT_TRUE(w.refused && w.open_after) << "setup";
     int events = -1;
     if (w.refused) {
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND C, the advance must fire nothing: it stays
+        // 1 ms inside the establishment deadline, and still_open() is the oracle.
         w.c.advance(999ms);
         EXPECT_TRUE(w.c.still_open()) << "closed before the establishment deadline";
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the establishment deadline is stored at
+        // the connection's start, which predates this advance; eof_at_once's wall cap makes a miss
+        // a named failure.
         w.c.rig.clock->advance(1ms);
         EXPECT_TRUE(w.c.eof_at_once("PreActive_WaitArmedAtEstablishmentDeadline"));
         if (auto s = w.c.rig.session()) events = establishment_timeouts(*s);
@@ -1735,8 +1756,13 @@ TEST(LogoutWait105Acceptor, PreActive_ClockOverride_CapOnEngineClock) {
     bool eof = false;
     int events = -1;
     if (refused) {
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND C, the advance must fire nothing: it stays
+        // 1 ms inside the establishment deadline, and still_open() is the oracle.
         c.advance(999ms);
         open_before = c.still_open();
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the establishment deadline is stored at
+        // the connection's start, which predates this advance; eof_at_once's wall cap makes a miss
+        // a named failure.
         c.rig.clock->advance(1ms);
         eof = c.eof_at_once("ClockOverride");
         if (auto s = c.rig.session()) events = establishment_timeouts(*s);
@@ -1926,6 +1952,9 @@ TEST_P(LogoutWait105, R1WriteHeld_PeerLogoutArrives_Engine_LogoutCompleteThenEof
     auto const mark = c.rig.peer.received.size();
     bool test_request = false;
     for (int i = 0; up && i < 11 && !test_request; ++i) {
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the TestRequest instant is computed
+        // from the last inbound frame, a stored anchor; the loop steps again until it is read, and
+        // its cap leaves test_request false for the assertions below.
         c.advance(1s);
         test_request = c.count_since(mark, "1") != 0U;
     }
@@ -1933,6 +1962,9 @@ TEST_P(LogoutWait105, R1WriteHeld_PeerLogoutArrives_Engine_LogoutCompleteThenEof
     c.st->hold_when = [&r1_logout_to_admin](t105::store_call k, seqnum_t) {
         return k == t105::store_call::store_outbound && r1_logout_to_admin;
     };
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the give-up instant is computed from stored
+    // anchors (the last inbound frame, the TestRequest's write); the loop steps again until the
+    // store call parks, and its cap leaves held false for the assertions below.
     for (int i = 0; test_request && i < 12 && c.st->parked == 0U; ++i) c.advance(1s);
     bool const held = c.st->parked == 1U;
     bool open_after_peer_logout = false;

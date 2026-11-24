@@ -240,6 +240,9 @@ TEST(PreSessionLog105, FirstFrameTimeout_OneRecord) {
         // The first-frame read's deadline (5 s, below the default establishment time) on the
         // mock clock; the peer sends nothing.
         for (int i = 0; i < 60 && !p->read_ended; ++i) {
+            // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the first-frame deadline is stored
+            // at the accept, which predates these advances; each step is followed by a bounded
+            // run_until, and closed is asserted after the loop's cap.
             c.rig.clock->advance(100ms);
             (void)c.rig.run_until([&] { return p->read_ended; }, 20ms);
         }
@@ -376,10 +379,14 @@ TEST(PreSessionLog105, Flood_BoundedWithSuppressedCount) {
         (void)c.await_records(kRejectFormat, 1);
         c.rig.settle();
         in_window = sink_count(c.log, kRejectFormat);
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND A, the record's rate window is read from
+        // the clock by the next refusal's record, with no waiter.
         c.rig.clock->advance(30s - 1ms);
         EXPECT_TRUE(c.refuse_one(c.logon_from("XX", "ISLD")));
         c.rig.settle();
         before_edge = sink_count(c.log, kRejectFormat);
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND A, the record's rate window is read from
+        // the clock by the next refusal's record, with no waiter.
         c.rig.clock->advance(1ms);
         EXPECT_TRUE(c.refuse_one(c.logon_from("XX", "ISLD")));
         (void)c.await_records(kRejectFormat, 2);

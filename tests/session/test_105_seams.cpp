@@ -84,6 +84,10 @@ template <class State>
 bool step_until_ended(fixpp::core::mock_clock& clock, asio::io_context& ioc, State state) {
     std::chrono::nanoseconds advanced{0};
     while (state() == fsm_state::Active && advanced < t105::liveness_wire_cap(kHb, 1s)) {
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the give-up instant is computed from
+        // stored anchors (the last inbound frame, the TestRequest's write), so a sleep armed late
+        // names an instant already passed; each step is followed by a bounded drive, and the caller
+        // asserts the result.
         clock.advance(1s);
         advanced += 1s;
         (void)t105::drive_bounded(ioc, 64);
@@ -328,6 +332,9 @@ TEST(WriteLimit105, DirectSession_WriteCompletesAfterTheBoundFires_NoWaitArmed) 
         "0", 2, "TW", d.s.sending_time(std::chrono::seconds{-600})));
     d.s.drain();
     ASSERT_TRUE(d.parked()) << "setup: the R-2 Logout's write is not held";
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the bound sleeps until the deadline stored
+    // at the Logout's write start, which predates this advance; the poll loop's cap ends in the cut
+    // assertion.
     d.s.mock->advance(std::chrono::milliseconds{d.s.cfg.logout_disconnect_timeout_ms});
     bool cut = false;
     for (int i = 0; i < 10000 && !cut; ++i) {

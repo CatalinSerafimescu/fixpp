@@ -138,6 +138,10 @@ GiveUpReading run_give_up(session_role role, std::function<void(SessionConfig&)>
             std::chrono::nanoseconds advanced{0};
             while (rig.state() == fsm_state::Active &&
                    advanced < t105::liveness_wire_cap(kHb, 1s)) {
+                // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the give-up instant is computed
+                // from stored anchors (the last inbound frame, the TestRequest's write), so a sleep
+                // armed late names an instant already passed; each step is followed by a bounded
+                // drive, and the loop's cap ends in the reading's assertions.
                 rig.clock->advance(1s);
                 advanced += 1s;
                 (void)t105::drive_bounded(rig.ioc, 64);

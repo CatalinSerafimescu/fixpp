@@ -32,9 +32,14 @@ template <class Pump>
     r2_wait_reading r{.after_ending = s.state(),
                       .before_bound = fixpp::session::fsm_state::Disconnected,
                       .at_bound = fixpp::session::fsm_state::Active};
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND C, the advance must fire nothing: it stays 1
+    // ms inside the bound, and before_bound is the caller's oracle.
     clock.advance(bound - std::chrono::milliseconds{1});
     pump();
     r.before_bound = s.state();
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the bound sleeps until the deadline stored
+    // at the ending's write start, which predates this advance; the caller's pump runs after it and
+    // at_bound is asserted.
     clock.advance(std::chrono::milliseconds{1});
     pump();
     r.at_bound = s.state();
