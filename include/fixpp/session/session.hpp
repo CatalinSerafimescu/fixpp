@@ -2228,9 +2228,10 @@ private:
     // The expiry exit of the phase the bound finds (rows 4, 10, 11, 14), which its failure exit
     // takes too (row 16). Every step is noexcept.
     void expire_ending_wait_(std::uint32_t gen) noexcept;
-    // The close frame on the live transport, with D-g's synchronous fallback; it tests nothing
-    // and leaves the latch alone (the bound's spawns, data-model E-2 I-2's exceptions).
-    void spawn_connection_close_() noexcept;
+    // The close frame on `transport` (the live one, read by the caller; nothing when null), with
+    // D-g's synchronous fallback; it tests nothing else and leaves the latch alone (the bound's
+    // spawns, data-model E-2 I-2's exceptions).
+    void spawn_connection_close_(std::shared_ptr<fixpp::transport::Transport> transport) noexcept;
     // The R-2 helper (research D2 item 1) after Active: claims a pending mark, writes the Logout
     // through inbound_logout_leaf_, then arms the wait or records Disconnected; absorbed while an
     // ending is in progress.

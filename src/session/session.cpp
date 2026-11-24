@@ -479,15 +479,16 @@ void Session::release_connection_end_() noexcept {
         inbound_depth_ != 0 || ending_wait_.phase == ending_wait_state::phase_t::writing) {
         return;
     }
-    if (!live_transport_shared_()) {
+    auto transport = live_transport_shared_();
+    if (!transport) {
         return;
     }
-    spawn_connection_close_();
+    spawn_connection_close_(std::move(transport));
     connection_end_owed_.reset();
 }
 
-void Session::spawn_connection_close_() noexcept {
-    auto transport = live_transport_shared_();
+void Session::spawn_connection_close_(
+    std::shared_ptr<fixpp::transport::Transport> transport) noexcept {
     if (!transport) {
         return;
     }
@@ -499,7 +500,7 @@ void Session::spawn_connection_close_() noexcept {
         asio::co_spawn(exec_.underlying(), close_transport_(std::move(join), transport),
                        asio::detached);
     } catch (...) {
-        // The close cannot be spawned: the synchronous close of the transport taken above, as
+        // The close cannot be spawned: the synchronous close of the transport given, as
         // close()'s grace makes it (contract C-8.6; on TLS abortive while an SSL operation is
         // suspended, L-105-h). Its result is discarded, as the grace's is.
         (void)transport->close();
@@ -6186,7 +6187,7 @@ void Session::expire_ending_wait_(std::uint32_t gen) noexcept {
         ending_wait_.cut = true;
         replay_gate_.wake_all();
         if (conn_gen_ == gen) {
-            spawn_connection_close_();
+            spawn_connection_close_(live_transport_shared_());
         }
         return;
     }
@@ -6198,7 +6199,7 @@ void Session::expire_ending_wait_(std::uint32_t gen) noexcept {
         owe_connection_end_();
     }
     if (conn_gen_ == gen && state_ == lifecycle::open) {
-        spawn_connection_close_();
+        spawn_connection_close_(live_transport_shared_());
         connection_end_owed_.reset();
     }
 }
