@@ -244,8 +244,7 @@ expected_t<void> Engine::register_session(SessionConfig cfg) {
 
     // 105 (FR-011, contract C-6.6): a set test_request_threshold of zero or below is refused
     // before any registry mutation, as Session::open() refuses it.
-    if (cfg.test_request_threshold.has_value() &&
-        *cfg.test_request_threshold <= std::chrono::milliseconds::zero()) {
+    if (!fixpp::session::test_request_threshold_in_range(cfg)) {
         return std::unexpected(error::invalid_session_config);
     }
 

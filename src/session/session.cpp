@@ -2090,8 +2090,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
 
     // 105 (FR-011, contract C-6.6): a set test_request_threshold of zero or below is refused,
     // as Engine::register_session refuses it. There is no upper bound.
-    if (cfg_.test_request_threshold.has_value() &&
-        *cfg_.test_request_threshold <= std::chrono::milliseconds::zero()) {
+    if (!test_request_threshold_in_range(cfg_)) {
         co_return std::unexpected(error::invalid_session_config);
     }
 
