@@ -61,6 +61,12 @@ current list with `python3 tools/brain_inventory.py --census`, never from a list
 > `run_inbound_liveness_watch` and the other caller-less members of `ReconnectFsm` are deleted, with two of its
 > constructor's parameters (B&L `B-105-7`). The correction above stays as the record of why this page once
 > pointed at them. Re-derive: `git grep -nE 'drive_logout|run_heartbeat_cadence|run_inbound_liveness_watch' -- src include`.
+>
+> ⚠️ **Superseded by 105, by name** (frozen bundles, annotated here, not edited): `specs/005-session-establishment-fsm/research.md`
+> D-8's TestRequest threshold of 1 × HeartBtInt (now T, default 1.2 × HeartBtInt, the give-up at 2T, 105 research D6);
+> `specs/013-session-reconnect-binding/`'s readings that the transport stays open after a liveness or Logout ending
+> (every ending closes its connection, 105 contract C-1); 092 contract C-2 O-1 and 093 FR-006 phase (b) for a refused
+> connection's close (105 FR-007); 103 Arm B's disclosure and 104's DQ-8 (`L-103-5`, closed by 105's R-2 wait).
 
 ## Invariants, and where each is enforced
 

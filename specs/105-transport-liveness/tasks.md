@@ -1273,7 +1273,7 @@ remaining reference.
   supersessions of 005, 013, 092, 093, 103 and 104 by name), `session-liveness-and-reconnect.md` (the correction
   block: the stubs are gone, with the re-derivation grep; the thresholds as a pointer to the helpers
   `run_liveness_loop` uses), `engine-accept-path.md` (the first frame through the pump; the reject records;
-  `L-093-6`'s no-log-site claim superseded). `graceful-logout.md`: no T009 hit (the evidence file's T009 census
+  `L-093-6`'s no-log-site claim superseded); `engine-accept-path.md`'s WRONG table and `session-liveness-and-reconnect.md`'s correction block name 105's supersessions of 005, 013, 092, 093, 103 and 104 by name, as `session.md`'s section does. `graceful-logout.md`: no T009 hit (the evidence file's T009 census
   names it only through a B&L line), not edited.
 - [X] T126 [P] T-DOC-1 (research D12): a `brain/failure-classes.md` entry in that page's form (trigger and procedure, no
   instance, no PR) for `<windows.h>` macro identifiers, its text sourced from PARENT `.claude/agents/phase-implementer.md`

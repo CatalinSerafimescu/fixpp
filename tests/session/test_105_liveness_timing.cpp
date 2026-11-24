@@ -984,15 +984,16 @@ struct HeldCapReading {
     bool setup = false;  // Active, the first TestRequest read, the request's retrieve held
     std::string why;     // the setup step that failed
     std::string tr1;     // TestReqID(112) of the TestRequest before the request
-    std::uint64_t waits_before = 0;  // the gate's timer_waits once the request is held
-    std::uint64_t waits_parked = 0;  // ... after the parking step (parked scenes)
-    bool active_parked = false;      // Active after the parking step (parked scenes)
-    std::string sent_parked;         // what the peer read after the request, at that step
-    bool active_at_cap = false;      // Active after the step to the cap
-    std::size_t records_at_cap = 0;  // give-up records after the step to the cap
-    bool ended = false;              // not Active at the scene's end
-    bool eof = false;                // the peer's read ended in EOF
-    std::string after;               // what the peer read after the request
+    std::uint64_t waits_before = 0;           // the gate's timer_waits once the request is held
+    std::uint64_t waits_parked = 0;           // ... after the parking step (parked scenes)
+    bool active_parked = false;               // Active after the parking step (parked scenes)
+    std::string sent_parked;                  // what the peer read after the request, at that step
+    bool active_at_cap = false;               // Active after the step to the cap
+    std::size_t records_at_cap = 0;           // give-up records after the step to the cap
+    bool ended = false;                       // not Active at the scene's end
+    fsm_state end_state = fsm_state::Active;  // the state at the scene's end
+    bool eof = false;                         // the peer's read ended in EOF
+    std::string after;                        // what the peer read after the request
     std::vector<fixpp::log::Record> records;
 };
 
@@ -1078,6 +1079,7 @@ HeldCapReading run_held_cap(session_role role, held_cap_scene scene, const char*
                     t105::ending_of(rig.peer) == t105::peer_ending::eof;
             r.ended = rig.state() != fsm_state::Active;
         }
+        r.end_state = rig.state();
         r.after = rig.peer.received.substr(mark);
     }
     st->hold_when = nullptr;
@@ -1098,6 +1100,7 @@ void expect_capped(HeldCapReading const& r, const char* site) {
     EXPECT_EQ(r.records_at_cap, 1U) << site << ": no give-up decided at the cap";
     EXPECT_TRUE(r.active_at_cap) << site << ": the give-up did not wait for the held answer";
     EXPECT_TRUE(r.ended) << site << ": the session was not ended at the write limit";
+    EXPECT_EQ(r.end_state, fsm_state::Disconnected) << site;
     EXPECT_TRUE(r.eof) << site << ": the peer's read did not end in EOF";
     EXPECT_TRUE(pr::frames_of_type(r.after, "5").empty())
         << site << ": a Logout past the held answer: " << r.after;
@@ -1152,6 +1155,7 @@ TEST_P(HeldTestRequestCap105, GivenUpAtTheCap_ReleasedBeforeTheWriteLimit_Logout
     ASSERT_TRUE(r.setup) << "setup: " << r.why;
     EXPECT_EQ(r.records_at_cap, 1U) << "no give-up decided at the cap";
     EXPECT_TRUE(r.ended) << "the session was not ended";
+    EXPECT_EQ(r.end_state, fsm_state::Disconnected);
     EXPECT_TRUE(r.eof) << "the peer's read did not end in EOF";
     EXPECT_TRUE(pr::frames_of_type(r.after, "1").empty())
         << "a TestRequest after the give-up: " << r.after;

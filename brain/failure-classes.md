@@ -1207,8 +1207,12 @@ Linux lane is green.
     `(std::max)(a, b)`.
   - Build the touched targets on MSVC before the first labelled push.
   - A Linux-only green is no evidence for this class.
-- **Scanning heuristic:** `git diff origin/main...HEAD -- src include tests bench | grep -nwE '^\+.*\b(near|far|small|ERROR|IN|OUT)\b'`
-  over the added lines, and `std::(min|max)\(` not in parentheses.
+- **Scanning heuristic:** over the added lines,
+  `git diff -U0 origin/main...HEAD -- src include tests bench | grep -E '^\+' | grep -wE 'near|far|small|ERROR|IN|OUT'`,
+  and `grep -E '^\+.*[^(]std::(min|max)\('` over the same diff. Prove it first on a seeded line (`+    auto near = f();`
+  is reported, `nearest` and `(std::max)(a, b)` are not). `-w` also reports the words inside hyphenated strings and
+  comments (`SENT-IN-WAIT`); read each hit. The `std::min`/`std::max` half matters only where the build does not define
+  `NOMINMAX`; re-derive with `git grep -n NOMINMAX -- CMakeLists.txt cmake`.
 - **Sibling.** Class 1 (an instrument that cannot report): a lane that does not compile the platform's headers cannot
   report this class.
 
