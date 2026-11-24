@@ -544,7 +544,8 @@ asio::awaitable<void> run_read_pump(
         return establishing() && clock.steady_now() >= *establish_deadline;
     };
     auto expire = [&]() -> asio::awaitable<void> {
-        if (!session_engine_access::ended(session)) {
+        // 105 (research D4; data-model E-5): unless the session has recorded its own ending.
+        if (session.state() != fsm_state::Disconnected) {
             session_engine_access::note_establishment_timeout(session);
         }
         co_await stop_pump();

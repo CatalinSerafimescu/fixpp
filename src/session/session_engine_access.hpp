@@ -80,11 +80,6 @@ struct session_engine_access {
                                            fixpp::core::steady_time_point deadline) noexcept {
         s.establishment_cap_ = deadline;
     }
-    // 105 (research D4; data-model E-5): whether the session has recorded its own ending, for
-    // the pump's establishment expiry. Session strand.
-    [[nodiscard]] static bool ended(Session const& s) noexcept {
-        return s.state() == fsm_state::Disconnected;
-    }
     // 099-fixt-appl-version-validation (data-model E-1): hands the Engine's route set to a FIXT
     // session, right after make_shared<Session> and before open(), which then walks nothing.
     static void adopt_routes(Session& s,
