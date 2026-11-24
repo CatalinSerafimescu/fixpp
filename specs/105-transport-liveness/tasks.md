@@ -1313,7 +1313,19 @@ remaining reference.
 
 ## Phase 11: Polish, verification and mandatory close-out
 
-- [ ] T129 `/simplify` over the diff; any change re-runs `-L 105`.
+- [X] T129 `/simplify` over the diff; any change re-runs `-L 105`.
+  Done: the orchestrator's deduplicated list of the four reviewers' findings, every item applied, each
+  behaviour-neutral, in one commit per item or group (evidence file, Phase 11, T129): one `counter_join` hold (the
+  three join names aliases) and one `wake_clearer`; `FIXPP_JOIN_COUNTERS` for the post joins of
+  `drain_for_reconnect_` and `close()` (a macro, so no cancellation check is added where no counter is held; still a
+  spin, the wake left as escalated); `ending_write_unwind_guard` and one block for the two bad-789 Logouts;
+  `begin_connection_`; `resolve_ending_wait_`; `test_request_threshold_in_range`; the in-sequence Heartbeat through
+  `answer_pending_test_request_`; `from_active()` derived; `detail::FirstFrameIds`, `reject_pre_session` and
+  `detail::log_rate_window_end`; the ending-response route decided in `on_inbound_ending_response_` (no second
+  `check_inbound` await in the Active arm, the phase byte tested first); the liveness loop's `answerable_now` and its
+  ordered give-up, TestRequest, Heartbeat chain; `spawn_connection_close_` taking the transport; the test-access
+  phase alias; `session_engine_access::ended` removed. No cell added (Polish): the before and after readings, the
+  gate and a reach mutant of the moved ending-response route stand in for RED.
 - [ ] T130 clang-format on touched files only (never `specs/`, never `include/fix/c_api/*.h`):
   `git diff --name-only --diff-filter=d origin/main...HEAD -- src include tests bench | grep -E '\.(cpp|hpp|h)$' | grep -vE '^include/fix/c_api/' | xargs clang-format --dry-run --Werror`.
 - [ ] T131 clang-tidy, cppcheck (the local 2.22 on PATH) and IWYU on the touched `src/` and `include/` files (Article IX §4); a
