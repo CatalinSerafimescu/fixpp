@@ -27,6 +27,15 @@
 // because FIXT11 defines no NewOrderSingle and only route selection can deliver one. That is
 // what makes "fromApp ran once per frame, nothing sent" the reach proof for this case.
 //
+// 105-transport-liveness (contract C-12, ruling D-f): `..._HeartbeatAnswersPendingTestRequest` is
+// an in-sequence Heartbeat that arrives while a TestRequest is pending and carries that
+// TestRequest's TestReqID(112), so the session's TestReqID classification (contract C-5.4) runs on
+// every timed frame; with no TestRequest pending, as in the cases above, the 112 is not compared.
+// Before each timed frame, outside the timed region, the mock clock is stepped until the liveness
+// loop has sent a TestRequest; the frame's 112 is read from that TestRequest and its
+// SendingTime(52) is the mock clock's UTC. Reach: every frame completed with a value, a TestRequest
+// was pending before each frame and none after it, the session is still Active.
+//
 // Harness: the session test support used by tests/session/test_validate_gate_inbound.cpp
 // (a mock clock on one io_context, `transport_send` captured, the real FIX44
 // dictionary). Each iteration spawns one `on_inbound_frame` with a completion
@@ -70,6 +79,7 @@
 // bench/session/CMakeLists.txt.
 #include "tests/support/fix44_dictionary.hpp"
 #include "tests/support/minimal_security_profile.hpp"
+#include "tests/support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 
@@ -77,12 +87,13 @@ namespace {
 
 std::vector<std::byte> make_frame(std::string_view msg_type, std::uint32_t seq,
                                   std::string const& extra_body,
-                                  std::string_view begin_string = "FIX.4.4") {
+                                  std::string_view begin_string = "FIX.4.4",
+                                  std::string_view sending_time = "20240101-00:00:00.000") {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
     body += "49=TW\x01";
-    body += "52=20240101-00:00:00.000\x01";
+    body += "52=" + std::string(sending_time) + "\x01";
     body += "56=ISLD\x01";
     body += extra_body;
 
@@ -141,6 +152,45 @@ std::shared_ptr<const fixpp::dict::Dictionary> load_dictionary(char const* basen
 // in-sequence frame never waits on a timer or on I/O, so reaching it is a miss.
 constexpr int kMaxPolls = 10000;
 constexpr std::size_t kBatch = 4096;
+// Upper bound, in one-second mock-clock steps, on waiting for the liveness loop's TestRequest:
+// three times the sessions' HeartBtInt (30 s), past every instant the loop sends one at.
+constexpr int kMaxArmSteps = 90;
+// The timed frames of the pending-TestRequest case: a fixed count, the same on both sides of a
+// paired run, since every frame is preceded by an untimed TestRequest.
+constexpr benchmark::IterationCount kPendingTestRequestFrames = 20000;
+
+// The TestReqID(112) of `frame`, into `id`; false when the frame has none.
+bool test_req_id_of(std::string_view frame, std::string& id) {
+    constexpr std::string_view kTag =
+        "\x01"
+        "112=";
+    auto const at = frame.find(kTag);
+    if (at == std::string_view::npos) {
+        return false;
+    }
+    auto const begin = at + kTag.size();
+    auto const end = frame.find('\x01', begin);
+    if (end == std::string_view::npos || end == begin) {
+        return false;
+    }
+    id.assign(frame.substr(begin, end - begin));
+    return true;
+}
+
+// `t` as a FIX UTCTimestamp with milliseconds (YYYYMMDD-HH:MM:SS.sss).
+std::string fix_utc_timestamp(fixpp::core::utc_time_point t) {
+    using namespace std::chrono;
+    auto const day = floor<days>(t);
+    year_month_day const ymd{day};
+    hh_mm_ss const hms{floor<milliseconds>(t - day)};
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%04d%02u%02u-%02d:%02d:%02d.%03d",
+                  static_cast<int>(ymd.year()), static_cast<unsigned>(ymd.month()),
+                  static_cast<unsigned>(ymd.day()), static_cast<int>(hms.hours().count()),
+                  static_cast<int>(hms.minutes().count()), static_cast<int>(hms.seconds().count()),
+                  static_cast<int>(hms.subseconds().count()));
+    return buf;
+}
 
 struct InboundBench {
     asio::io_context ioc;
@@ -152,6 +202,8 @@ struct InboundBench {
     std::unique_ptr<fixpp::session::Session> sess;
     bool done = false;
     bool ok = false;
+    // The most recent TestRequest(35=1) the session sent.
+    std::string last_test_request;
 
     InboundBench() {
         auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
@@ -160,6 +212,32 @@ struct InboundBench {
         engine.clock = clk;
         engine.executor = ioc.get_executor();
         engine.application = app;
+    }
+
+    void record_sent(std::span<const std::byte> frame) {
+        ++sent;
+        std::string_view const text{reinterpret_cast<const char*>(frame.data()), frame.size()};
+        if (text.contains("\x01"
+                          "35=1\x01")) {
+            last_test_request.assign(text);
+        }
+    }
+
+    // Steps the mock clock one second at a time until the liveness loop has a TestRequest
+    // pending, and reads that TestRequest's TestReqID(112) into `id`. False when none is
+    // pending within kMaxArmSteps or the TestRequest it sent carries no 112.
+    bool arm_test_request(std::string& id) {
+        for (int i = 0; i < kMaxArmSteps; ++i) {
+            if (fixpp::session::session_test_access::test_request_pending(*sess)) {
+                return test_req_id_of(last_test_request, id);
+            }
+            clk->advance(1s);
+            if (ioc.stopped()) {
+                ioc.restart();
+            }
+            ioc.poll();
+        }
+        return false;
     }
 
     // Runs the io_context until the spawned operation completes or kMaxPolls is hit.
@@ -194,7 +272,7 @@ struct InboundBench {
         cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
         cfg.dictionary = fixpp::test_support::make_fix44_dictionary();
         cfg.executor_override = ioc.get_executor();
-        cfg.transport_send = [this](std::span<const std::byte>) { ++sent; };
+        cfg.transport_send = [this](std::span<const std::byte> f) { record_sent(f); };
         // The peer Logon below carries no ResetSeqNumFlag(141).
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         cfg.validate_inbound_messages = validate;
@@ -222,7 +300,7 @@ struct InboundBench {
         cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
         cfg.dictionary = load_dictionary("FIXT11.xml");
         cfg.executor_override = ioc.get_executor();
-        cfg.transport_send = [this](std::span<const std::byte>) { ++sent; };
+        cfg.transport_send = [this](std::span<const std::byte> f) { record_sent(f); };
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         cfg.validate_inbound_messages = true;
         sess = std::make_unique<fixpp::session::Session>(engine, cfg, &*registry);
@@ -340,5 +418,63 @@ BENCHMARK(BM_Session_OnInboundFrame_Fixt_Validated)
     ->Arg(static_cast<int>(frame_kind::heartbeat))
     ->Arg(static_cast<int>(frame_kind::nos))
     ->Arg(static_cast<int>(frame_kind::nos_1128));
+
+void BM_Session_OnInboundFrame_HeartbeatAnswersPendingTestRequest(benchmark::State& state) {
+    using fixpp::session::session_test_access;
+    InboundBench b;
+    if (!b.setup(false)) {
+        state.SkipWithError("session did not reach Active");
+        return;
+    }
+
+    std::uint32_t next_seq = 2;
+    std::size_t fed = 0;
+    std::size_t armed = 0;
+    std::size_t answered = 0;
+    bool all_ok = true;
+    std::string id;
+
+    // `_` is the google-benchmark loop idiom: the loop runs for the iteration, not the value.
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+    for (auto _ : state) {
+        state.PauseTiming();
+        if (fed != 0 && !session_test_access::test_request_pending(*b.sess)) {
+            ++answered;
+        }
+        if (b.arm_test_request(id)) {
+            ++armed;
+        }
+        auto const frame = make_frame("0", next_seq, "112=" + id + "\x01", "FIX.4.4",
+                                      fix_utc_timestamp(b.clk->now()));
+        ++next_seq;
+        state.ResumeTiming();
+        all_ok = b.feed(frame) && all_ok;
+        ++fed;
+    }
+    if (fed != 0 && !session_test_access::test_request_pending(*b.sess)) {
+        ++answered;
+    }
+
+    // Reach, after the timed loop. Each condition is tested on its own, and every one that
+    // does not hold is named.
+    std::string misses;
+    if (!all_ok) {
+        misses += " [an on_inbound_frame did not complete with a value]";
+    }
+    if (armed != fed) {
+        misses += " [a frame arrived with no TestRequest pending]";
+    }
+    if (answered != fed) {
+        misses += " [a frame left its TestRequest pending]";
+    }
+    if (b.sess->state() != fixpp::session::fsm_state::Active) {
+        misses += " [session left Active]";
+    }
+    if (!misses.empty()) {
+        state.SkipWithError("reach:" + misses);
+    }
+}
+BENCHMARK(BM_Session_OnInboundFrame_HeartbeatAnswersPendingTestRequest)
+    ->Iterations(kPendingTestRequestFrames);
 
 }  // namespace

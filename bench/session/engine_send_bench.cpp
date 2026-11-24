@@ -32,6 +32,15 @@
 // double whose read waits without a timer. Re-derive the count per send with
 // `strace -c -e trace=epoll_wait,epoll_pwait` over a run with a fixed iteration count.
 //
+// 105-transport-liveness (contract C-12, ruling D-f): `BM_Engine_ReadPump_HeartbeatAndNos` times
+// the read pump on the same harness. Each iteration pushes one chunk holding an in-sequence
+// Heartbeat(35=0) and an in-sequence NewOrderSingle(35=D) into the `ScriptedStream`, whose push
+// wakes the waiting read, and polls until the session's `fromApp` has run for that NewOrderSingle,
+// so both frames went through `run_read_pump` and `on_inbound_frame` on the unarmed path. A fixed
+// iteration count, so both sides of a paired run feed the same frames; the chunks are built before
+// the timed loop. Reach: `fromApp` ran once per iteration, the session is still Active and the
+// stream holds no write after setup's (a sequence gap or a Reject would write one).
+//
 // Reach: before the timed loop one well-formed send must complete with a value and reach
 // the stream as one write. After the loop, every timed send must have returned exactly
 // `app_payload_malformed`, the session must still be Active, and the stream must hold no
@@ -52,6 +61,7 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/application.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/security_profile.hpp>
 #include <fixpp/session/session.hpp>
@@ -83,16 +93,16 @@ std::vector<std::byte> to_bytes(std::string_view s) {
     return v;
 }
 
-// The peer's Logon. SendingTime(52) is the mock clock's initial UTC.
-std::vector<std::byte> make_peer_logon() {
+// A frame from the peer (49=TW, 56=ISLD). SendingTime(52) is the mock clock's initial UTC.
+std::string make_peer_frame(std::string_view msg_type, unsigned int seq,
+                            std::string_view extra_body) {
     std::string body;
-    body += "35=A\x01";
-    body += "34=1\x01";
+    body += "35=" + std::string(msg_type) + "\x01";
+    body += "34=" + std::to_string(seq) + "\x01";
     body += "49=TW\x01";
     body += "52=20240101-00:00:00.000\x01";
     body += "56=ISLD\x01";
-    body += "98=0\x01";
-    body += "108=30\x01";
+    body += extra_body;
 
     std::string msg = "8=FIX.4.4\x01";
     msg += "9=" + std::to_string(body.size()) + "\x01";
@@ -105,8 +115,40 @@ std::vector<std::byte> make_peer_logon() {
     char csbuf[5];
     std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     msg += "10=" + std::string(csbuf) + "\x01";
-    return to_bytes(msg);
+    return msg;
 }
+
+// The peer's Logon.
+std::vector<std::byte> make_peer_logon() {
+    return to_bytes(make_peer_frame("A", 1,
+                                    "98=0\x01"
+                                    "108=30\x01"));
+}
+
+// One read's chunk for the pump case: a Heartbeat at `seq`, then a NewOrderSingle at seq + 1.
+std::vector<std::byte> make_heartbeat_and_nos_chunk(unsigned int seq) {
+    return to_bytes(make_peer_frame("0", seq, {}) +
+                    make_peer_frame("D", seq + 1,
+                                    "11=ORD001\x01"
+                                    "21=1\x01"
+                                    "38=100\x01"
+                                    "40=2\x01"
+                                    "44=10.25\x01"
+                                    "54=1\x01"
+                                    "55=IBM\x01"
+                                    "60=20240101-00:00:00.000\x01"));
+}
+
+class CountingApplication final : public fixpp::session::Application {
+public:
+    fixpp::core::expected_t<void> fromApp(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+        const fixpp::session::SessionId& /*id*/) override {
+        ++from_app;
+        return {};
+    }
+    std::size_t from_app = 0;
+};
 
 // A NewOrderSingle body, as an application hands it to Engine::send.
 std::vector<std::byte> const& nos_payload() {
@@ -209,11 +251,13 @@ struct EngineSendBench {
     }
 
     // Registers the initiator and starts the engine; true once the session is published
-    // and Active and its read pump waits at the end of the script.
-    bool setup() {
+    // and Active and its read pump waits at the end of the script. `app`, when set, is the
+    // engine's Application.
+    bool setup(std::shared_ptr<fixpp::session::Application> app = nullptr) {
         fixpp::core::EngineConfig ec;
         ec.executor = ioc.get_executor();
         ec.clock = clk;
+        ec.application = std::move(app);
         engine = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ec));
 
         fixpp::session::SessionConfig cfg;
@@ -346,5 +390,66 @@ void BM_Engine_Send_Route(benchmark::State& state) {
     }
 }
 BENCHMARK(BM_Engine_Send_Route);
+
+// The frames the pump case feeds: a fixed count, the same on both sides of a paired run.
+constexpr benchmark::IterationCount kPumpChunks = 20000;
+
+void BM_Engine_ReadPump_HeartbeatAndNos(benchmark::State& state) {
+    auto const app = std::make_shared<CountingApplication>();
+    EngineSendBench b;
+    if (!b.setup(app)) {
+        state.SkipWithError("session did not reach Active with its read pump waiting");
+        return;
+    }
+    std::size_t const writes_after_setup = b.stream->written.size();
+
+    // Built before the timed loop; the peer's Logon was 1, so the first Heartbeat is 2.
+    auto const n = static_cast<std::size_t>(state.max_iterations);
+    std::vector<std::vector<std::byte>> chunks;
+    chunks.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        chunks.push_back(make_heartbeat_and_nos_chunk(static_cast<unsigned int>(2 + (2 * i))));
+    }
+    b.stream->chunks.reserve(b.stream->chunks.size() + n);
+
+    std::size_t pushed = 0;
+    bool all_delivered = true;
+
+    // `_` is the google-benchmark loop idiom: the loop runs for the iteration, not the value.
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+    for (auto _ : state) {
+        b.stream->push(std::move(chunks[pushed]));
+        ++pushed;
+        int polls = 0;
+        while (app->from_app != pushed && polls < kMaxPolls) {
+            if (b.ioc.stopped()) {
+                b.ioc.restart();
+            }
+            b.ioc.poll();
+            ++polls;
+        }
+        all_delivered = app->from_app == pushed && all_delivered;
+    }
+
+    // Reach, after the timed loop. Each condition is tested on its own, and every one that
+    // does not hold is named.
+    std::string misses;
+    if (!all_delivered || app->from_app != pushed) {
+        misses += " [a NewOrderSingle did not reach fromApp]";
+    }
+    if (!b.active()) {
+        misses += " [session left Active]";
+    }
+    if (b.stream->written.size() != writes_after_setup) {
+        misses += " [the stream holds a write after setup's]";
+    }
+    if (!b.stop()) {
+        misses += " [Engine::stop did not complete]";
+    }
+    if (!misses.empty()) {
+        state.SkipWithError("reach:" + misses);
+    }
+}
+BENCHMARK(BM_Engine_ReadPump_HeartbeatAndNos)->Iterations(kPumpChunks);
 
 }  // namespace
