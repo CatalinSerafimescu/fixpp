@@ -653,6 +653,10 @@ unbounded memory, where the generator's monotonic counter gives the same answer 
   equality does not run the give-up before a test can deliver its echo (`TR_DistinctNow`'s comment); it is R-3's
   "after 2T", within one tick. Cells: exactly 2T, the echo still wins; 2T + 1 ns, the give-up; a `constexpr` cell at
   the saturated value (`steady_time_point::max()` in, `max()` out).
+- *Amended 2026-11-24 (owner ruling, spec clarification "Session 2026-11-24", the held TestRequest's fresh window):* the
+  give-up instant is the later of that instant and the pending TestRequest's write + T + 1 ns, eligible only when no
+  inbound frame arrived since it (contract C-6.2), in `detail::test_request_give_up_instant`'s three-argument overload;
+  its `constexpr` cell is `LivenessTiming105.FreshWindow_IsTheLaterInstant`.
 - **No Heartbeat while the TestRequest waits on a silent peer.** With T = 1.2 × HeartBtInt the window from the
   TestRequest to the give-up is longer than HeartBtInt, so a Heartbeat due inside it is not sent while inbound stays
   silent, which is QuickFIX C++'s rule (`needHeartbeat` requires `!testRequest()`). FR-010 and contract C-6.3 state

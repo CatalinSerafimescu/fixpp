@@ -190,7 +190,9 @@ Common rules:
 
 - C-3.1 After 2T of inbound silence, counted from the last inbound frame that refreshes liveness, with a TestRequest
   pending, whether or not an inbound frame arrived since it was sent (C-6.2; spec clarification "Session 2026-11-21
-  (implementation, Phase 6)"), fixpp writes the record of C-3.3, then sends one Logout
+  (implementation, Phase 6)"; *amended 2026-11-24, owner ruling, spec clarification "Session 2026-11-24":* at the
+  give-up instant of C-6.2, the later of that and T after the pending TestRequest's write, with no inbound frame since
+  it), fixpp writes the record of C-3.3, then sends one Logout
   whose Text(58) is exactly `TestRequest unanswered, TestReqID <id>`, `<id>` being the TestReqID(112) of the
   TestRequest it sent, and the connection closes as soon as the write has returned. fixpp does not wait for the
   peer's Logout. The write is limited (C-2.7): when it has not returned `logout_disconnect_timeout_ms` after its
@@ -251,6 +253,13 @@ Common rules:
   pending, whatever arrived since it was sent (C-3.1; spec clarification "Session 2026-11-21 (implementation,
   Phase 6)"). The give-up runs strictly after the 2T
   instant, by one clock tick (R-3's "after 2T"). Every instant, that tick included, saturates at the clock's range.
+  *Amended 2026-11-24 (owner ruling, spec clarification "Session 2026-11-24", the held TestRequest's fresh window):* the
+  give-up instant is the later of (the last inbound frame + 2T) and (the pending TestRequest's write + T), each strictly
+  after by one tick and saturating; the give-up is eligible only when no inbound frame arrived since the pending
+  TestRequest, because a TestRequest that falls due is written first. In the usual case the TestRequest is written at
+  the last frame + T and nothing changes; a TestRequest held behind a resend answer past the last frame + 2T is written
+  on the release, and the session gives up T after that write if nothing arrives, also when none was pending before
+  the hold; a frame, or the TestReqID answer (C-5.4), inside that window keeps the session.
 - C-6.3 The outbound Heartbeat every HeartBtInt of outbound silence, as today, except while a TestRequest is pending
   with no inbound frame since it was sent, when none is sent. A frame that arrives after the TestRequest makes the
   Heartbeat due again, as in QuickFIX C++ (`Session::verify` runs `testRequest(0)` on every accepted frame, and
@@ -345,7 +354,9 @@ Common rules:
     with `session_invalid_state_for_send` (W-10), so "established" does not imply "send admitted" in that window. With
     `validate_sequence_numbers` off, a Heartbeat that answers the pending TestRequest at any MsgSeqNum(34) leaves it true
     (C-5.1). While a TestRequest is pending it stays true until the give-up, strictly after 2T of inbound silence, and a
-    frame that does not answer the TestRequest defers that give-up (C-6.2).
+    frame that does not answer the TestRequest defers that give-up (C-6.2; *amended 2026-11-24, owner ruling, spec
+    clarification "Session 2026-11-24":* or strictly after T from the TestRequest's write when it was written later,
+    held behind a resend answer).
   - `fixpp_session_send`: during an R-2 wait after Active it is refused with `session_invalid_state_for_send` (W-10) and
     returns at once; it does not wait for the wait's end.
   - `fixpp_session_close`: graceful during the wait or during an ending Logout's write, it returns once the wait ends

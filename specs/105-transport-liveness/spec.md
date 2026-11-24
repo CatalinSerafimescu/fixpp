@@ -229,6 +229,28 @@ D-c and R-3; no new sign-off.
   TestRequest could not be written before the give-up instant (held behind a resend answer): fixpp then wrote it and
   gave up at once naming it; it now gives up naming the pending one. Data-model E-4, research D6 and contract C-3.1
   state it; the cell is `ReplayGate588.R588g_FrameAfterTheTestRequest_HeldPastTwoThresholds_GivesUpNamingThePending`.
+  *[Superseded for a TestRequest held behind a resend answer by the owner ruling of "Session 2026-11-24" below.]*
+
+### Session 2026-11-24
+
+Owner ruling (handover item 7, option "fresh window"), tasks.md T119a.
+
+- Q (FR-010, FR-011, R-3, contract C-6.2; [FIX-SL §4.5.5]: send the TestRequest, then wait for its answer): When the
+  TestRequest is held behind a resend answer (the replay gate) past two thresholds of inbound silence, does the session
+  give up as soon as the hold ends, or does the peer get a window to answer? → A: A fresh window. When a TestRequest is
+  pending, the give-up instant is the later of (the last inbound frame + 2T) and (that TestRequest's write + T), each
+  strictly after by one clock tick and saturating. In the usual case the TestRequest is written at the last inbound
+  frame + T, so nothing changes. When it was held past the last inbound frame + 2T it is written on the release, and the
+  session gives up only T after that write if nothing arrives; the same holds when no TestRequest was pending before
+  the hold. A frame, or the TestReqID answer (D-d), inside that window keeps the session. A TestRequest that falls due
+  (none pending, or an inbound frame since the pending one) is written before any give-up, so the give-up is eligible
+  only when no inbound frame arrived since the pending TestRequest. Supersedes, for that case, the Phase 6 answer
+  above. Data-model E-4, contract C-6.2 and C-3.1, research D6, `version.h`'s 1.18 history and
+  `fixpp_session_is_established`'s 1.18 clause state it; the cells are
+  `ReplayGate588.R588g_FrameAfterTheTestRequest_HeldPastTwoThresholds_FreshWindowThenGivesUp`,
+  `ReplayGate588.R588g_AnswerInsideTheFreshWindow_KeepsTheSession`,
+  `ReplayGate588.R588h_NoTestRequestPending_HeldPastTwoThresholds_FreshWindowThenGivesUp` and
+  `LivenessTiming105.FreshWindow_IsTheLaterInstant`.
 
 ## User Scenarios & Testing *(mandatory)*
 
