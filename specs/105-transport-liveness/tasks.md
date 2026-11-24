@@ -1326,19 +1326,29 @@ remaining reference.
   ordered give-up, TestRequest, Heartbeat chain; `spawn_connection_close_` taking the transport; the test-access
   phase alias; `session_engine_access::ended` removed. No cell added (Polish): the before and after readings, the
   gate and a reach mutant of the moved ending-response route stand in for RED.
-- [ ] T130 clang-format on touched files only (never `specs/`, never `include/fix/c_api/*.h`):
+- [X] T130 clang-format on touched files only (never `specs/`, never `include/fix/c_api/*.h`):
   `git diff --name-only --diff-filter=d origin/main...HEAD -- src include tests bench | grep -E '\.(cpp|hpp|h)$' | grep -vE '^include/fix/c_api/' | xargs clang-format --dry-run --Werror`.
-- [ ] T131 clang-tidy, cppcheck (the local 2.22 on PATH) and IWYU on the touched `src/` and `include/` files (Article IX §4); a
+  Done: the literal command reports only `session_config.hpp` and `read_first_frame_bounded.hpp`, whose `origin/main`
+  copies fail with the same counts; `--lines` over this branch's hunks clean (evidence file, Phase 11, T130).
+- [X] T131 clang-tidy, cppcheck (the local 2.22 on PATH) and IWYU on the touched `src/` and `include/` files (Article IX §4); a
   translation unit cppcheck abandons is not clean.
-- [ ] T132 Comment-claim lint: `PARENT/.claude/scripts/check-comment-claims.py --root PARENT/research/G19-fix-fpml-iso20022/library --base origin/main`;
+  Done: `e046f055` (the clang-tidy, cppcheck and IWYU findings new against `$B` on the five touched TUs, each fixed or
+  dispositioned; seeded controls reported in every TU; evidence file, Phase 11, T131).
+- [X] T132 Comment-claim lint: `PARENT/.claude/scripts/check-comment-claims.py --root PARENT/research/G19-fix-fpml-iso20022/library --base origin/main`;
   read added runtime strings and inventories by hand.
-- [ ] T133 Line-citation gate: `python3 tools/check_line_citations.py --range origin/main..HEAD` and
+  Done: 0 findings at `96d0e648` and after `3c5390dc`; added strings read by recipe (evidence file, Phase 11, T132).
+- [X] T133 Line-citation gate: `python3 tools/check_line_citations.py --range origin/main..HEAD` and
   `--shift-audit origin/main..HEAD` (the feature's own `specs/` bundle is charged by the range gate).
-- [ ] T134 Article X §7 predicate at the PR head: `gh release list --exclude-drafts` on the fixpp repo; empty keeps the MINOR
+  Done: range gate OK, shift audit GATE PASSED (evidence file, Phase 11, T133).
+- [X] T134 Article X §7 predicate at the PR head: `gh release list --exclude-drafts` on the fixpp repo; empty keeps the MINOR
   bump of T115; a non-empty listing stops and goes to the orchestrator. Record the result.
-- [ ] T135 Every buildless Tier 1 step run locally, derived from `.github/workflows/tier1.yml`: `ci-script-pins` (all its steps,
+  Done: no published release (empty listing, `releases` length 0; known positive `-R cli/cli`); T115's MINOR bump
+  stands (evidence file, Phase 11, T134).
+- [X] T135 Every buildless Tier 1 step run locally, derived from `.github/workflows/tier1.yml`: `ci-script-pins` (all its steps,
   including `check_co_spawn_lambda.py --self-test` and its gate), `check-layers`, `co-spawn-closure-audit` (it applies: the new
   spawns of T027 and T059, against T016's base list), and `ci/pump-census.sh` against `ci/expected-pump-sites.txt`.
+  Done: every step rc 0 after `3c5390dc` (the mock-clock staging sweep's KIND dispositions for 105's escalation rows;
+  rc 2 before it, rc 0 on `$B`); the co-spawn audit and its cross-check clean (evidence file, Phase 11, T135).
 - [ ] T136 linux-gcc-release `-Werror` build of the touched targets (`session_105_tests`, every re-pinned entry, the library,
   the capi and config tests, `engine_send_bench`).
 - [ ] T137 Sanitizer lanes linux-clang-asan, -ubsan and -tsan: `-L 105` and `-L session` (every existing close, stop and
