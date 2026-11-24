@@ -22,6 +22,7 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/fix_time.hpp>
 #include <fixpp/log/logger.hpp>
+#include <fixpp/session/admin_messages.hpp>
 #include <fixpp/session/application.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/session/session.hpp>
@@ -46,6 +47,7 @@
 #include "support/engine_test_access.hpp"
 #include "support/log_capture.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/seqnum_manager_test_access.hpp"
 #include "support/session_test_access.hpp"
 
 namespace {
@@ -876,6 +878,543 @@ TEST(PreSessionLog105, ListenerConstructionThrowsNonSystemError_OneRecordErrorZe
     EXPECT_EQ(text(recs.front().args[2]), "TW");
     EXPECT_EQ(recs.front().args[3].kind, fixpp::log::ArgValue::Kind::i64);
     EXPECT_EQ(recs.front().args[3].i64, 0) << "error";
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+// 105 T143a (tasks.md): cells for added lines and branches that the coverage reading of T143
+// found unreached. Each comment names the branch it reaches and the observable ending it
+// asserts. Re-derive a branch's uncovered side as T143 does: llvm-cov show
+// -show-branches=count over the owning binary's own profdata, -sources the file.
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+namespace t143a {
+
+using phase = session_test_access::ending_phase;
+using fixpp::session::session_role;
+using rgs_scene = fixpp::test_support::resend_gap::Scene;
+// A Scene's HeartBtInt.
+constexpr auto kSceneHb = fixpp::test_support::resend_gap::kHeartBtInt;
+
+std::vector<std::byte> stale(t105::DirectRig& d, fixpp::session::seqnum_t seq) {
+    return rgs_scene::raw("0", seq, "TW", d.s.sending_time(std::chrono::seconds{-600}));
+}
+phase phase_of(t105::DirectRig const& d) {
+    return session_test_access::ending_wait_phase(*d.s.session);
+}
+
+// What the session wrote, for a failure message: MsgType(35), MsgSeqNum(34) and Text(58) of each
+// write, in write-start order, an incomplete write marked.
+std::string wire_of(t105::DirectRig const& d) {
+    std::string out;
+    for (auto const& w : d.bw->recorded) {
+        out += " [35=" + std::string{fixpp::test_support::extract_tag(w.bytes, 35)} +
+               " 34=" + std::string{fixpp::test_support::extract_tag(w.bytes, 34)};
+        auto const text = fixpp::test_support::extract_tag(w.bytes, 58);
+        if (!text.empty()) out += " 58=" + std::string{text};
+        out += w.completed ? "]" : " held]";
+    }
+    return out;
+}
+
+// The peer's Logon as a direct initiator's LogonSent arm reads it, with extra after 98 and 108.
+std::vector<std::byte> logon_reply(std::string_view sending_time, std::string_view extra = {}) {
+    return rgs_scene::raw("A", 1, "TW", sending_time,
+                          "98=0\x01"
+                          "108=30\x01" +
+                              std::string{extra});
+}
+
+// A direct initiator in LogonSent: open(), then drive_reconnect(), which writes its Logon.
+bool to_logon_sent(t105::DirectRig& d) {
+    auto const opened = d.run(d.s.session->open(), "T143a/open");
+    if (!opened || !opened->has_value()) return false;
+    auto const c = d.run(d.s.session->drive_reconnect(), "T143a/drive_reconnect");
+    return c && c->has_value() && d.s.state() == fsm_state::LogonSent && d.started("A") == 1U;
+}
+
+}  // namespace t143a
+
+// [Leaving writing, its entry-state side] An R-2 Logout whose write returns success after a
+// close(terminal) made during it: the session left Active while the Logout was written, so no
+// wait is armed for it.
+TEST(LogoutWait105Direct, LogoutWrittenAcrossCloseTerminal_NoWaitArmed) {
+    t105::DirectRig d{t143a::session_role::acceptor};
+    ASSERT_TRUE(d.to_active()) << "setup";
+    d.bw->succeed_after_close = true;
+    d.hold_write_of("5");
+    auto frame = d.s.feed_spawn(t143a::stale(d, 2));
+    d.s.drain();
+    bool const held = d.parked();
+    auto const closed =
+        d.run(d.s.session->close(fixpp::session::close_mode::terminal), "T143a/close/across");
+    d.s.drain();
+    EXPECT_TRUE(held) << "setup: the Logout's write is not held";
+    EXPECT_TRUE(closed.has_value()) << "close() did not return";
+    EXPECT_EQ(d.completed("5"), 1U) << "setup: the Logout's write did not complete";
+    EXPECT_EQ(t143a::phase_of(d), t143a::phase::none)
+        << "a wait was armed for a session that had left Active during the write";
+    EXPECT_EQ(d.s.state(), fsm_state::Disconnected);
+    EXPECT_EQ(d.app->logouts, 1) << "onLogout";
+}
+
+// [the ending response's route, MsgSeqNum(34) 0] A Logout with 34=0 during a wait armed after
+// Active takes the off-NextNumIn route: the wait ends at once, nothing is delivered and
+// NextNumIn does not move.
+TEST(LogoutWait105Direct, PeerLogoutMsgSeqNumZero_DuringWait_EndsWaitNoAdvance) {
+    t105::DirectRig d{t143a::session_role::acceptor};
+    ASSERT_TRUE(d.to_active()) << "setup";
+    (void)d.s.feed(t143a::stale(d, 2));
+    bool const armed = d.completed("5") == 1U && t143a::phase_of(d) == t143a::phase::armed;
+    bool const open_before = !d.closed();
+    auto const next_in = d.s.next_in();
+    (void)d.s.feed(t143a::rgs_scene::raw("5", 0, "TW", d.s.sending_time()));
+    EXPECT_TRUE(armed && open_before) << "setup: no wait armed after the ending Logout";
+    EXPECT_TRUE(d.closed()) << "the Logout with MsgSeqNum 0 did not end the wait at once";
+    EXPECT_EQ(d.s.state(), fsm_state::Disconnected);
+    EXPECT_EQ(d.s.next_in(), next_in) << "NextNumIn moved";
+    EXPECT_EQ(d.app->from_admin_logouts, 0) << "the Logout was delivered";
+    EXPECT_EQ(d.app->logouts, 1) << "onLogout";
+    (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "T143a/close/zero");
+}
+
+// [the ending response at NextNumIn, check_inbound refusing] NextNumIn at seqnum_max, where no
+// next value exists (092 FR-019): the Logout at NextNumIn is refused by check_inbound and takes
+// the out-of-sequence arm, so it is not delivered and the session ends at once.
+TEST(LogoutWait105Direct, PeerLogoutAtNextNumIn_CheckInboundRefuses_NotDelivered) {
+    t105::DirectRig d{t143a::session_role::acceptor};
+    ASSERT_TRUE(d.to_active()) << "setup";
+    (void)d.s.feed(t143a::stale(d, 2));
+    bool const armed = d.completed("5") == 1U && t143a::phase_of(d) == t143a::phase::armed;
+    auto& mgr = session_test_access::seqnum_mgr(*d.s.session);
+    fixpp::session::seqnum_manager_test_access::set_counters(mgr, fixpp::session::seqnum_max,
+                                                             mgr.peek_outbound());
+    (void)d.s.feed(
+        t143a::rgs_scene::raw("5", fixpp::session::seqnum_max, "TW", d.s.sending_time()));
+    EXPECT_TRUE(armed) << "setup: no wait armed after the ending Logout";
+    EXPECT_EQ(d.app->from_admin_logouts, 0) << "the refused Logout was delivered";
+    EXPECT_EQ(d.s.next_in(), fixpp::session::seqnum_max) << "NextNumIn moved";
+    EXPECT_TRUE(d.closed()) << "the session did not end at once";
+    EXPECT_EQ(d.s.state(), fsm_state::Disconnected);
+    (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "T143a/close/max");
+}
+
+// [the pre-Active wait's Logout test, each conjunct's failing side] A direct acceptor's posture
+// refusal arms a wait before Active; a Logout that fails exactly one conjunct of the test is
+// drained (the wait stays, the connection open), and the positive control, a well-formed Logout
+// with the right identity, then ends it. With check_comp_id off a Logout from another CompID
+// ends it.
+namespace t143a {
+enum class drained_frame : std::uint8_t {
+    faulted_header,  // a field whose tag is not a number
+    msg_type_not_third,
+    other_begin_string,
+    other_sender,
+    other_target,
+};
+
+std::vector<std::byte> drained(drained_frame k, std::string const& st) {
+    std::string const tail = "52=" + st + "\x01";
+    switch (k) {
+        case drained_frame::faulted_header:
+            return pr::to_bytes(pr::frame("FIX.4.2",
+                                          "35=5\x01"
+                                          "34=2\x01"
+                                          "49=TW\x01" +
+                                              tail + "56=ISLD\x01" + "X1=1\x01"));
+        case drained_frame::msg_type_not_third:
+            return pr::to_bytes(pr::frame("FIX.4.2",
+                                          "34=2\x01"
+                                          "35=5\x01"
+                                          "49=TW\x01" +
+                                              tail + "56=ISLD\x01"));
+        case drained_frame::other_begin_string:
+            return pr::to_bytes(pr::message("FIX.4.4", "5", 2, "TW", "ISLD", st));
+        case drained_frame::other_sender:
+            return pr::to_bytes(pr::message("FIX.4.2", "5", 2, "OTHER", "ISLD", st));
+        case drained_frame::other_target:
+            return pr::to_bytes(pr::message("FIX.4.2", "5", 2, "TW", "ELSEWHERE", st));
+    }
+    return {};
+}
+
+// The posture refusal on a direct acceptor; true once the refusal's Logout is written, the
+// session Disconnected and the wait armed before Active.
+bool refused_before_active(t105::DirectRig& d) {
+    auto const opened = d.run(d.s.session->open(), "T143a/open/acceptor");
+    if (!opened || !opened->has_value()) return false;
+    d.s.session->attach_accepted_transport(
+        std::make_unique<t105::bwt::BlockingWriteTransport>(d.s.ioc.get_executor(), d.stream, d.bw),
+        fixpp::transport::handshake_result{});
+    (void)d.s.feed(d.s.frame("A", 1,
+                             "98=0\x01"
+                             "108=30\x01"
+                             "464=Y\x01"));
+    return d.completed("5") == 1U && d.s.state() == fsm_state::Disconnected &&
+           phase_of(d) == phase::armed && !d.closed();
+}
+
+void drained_cell(drained_frame k) {
+    t105::DirectRig d{session_role::acceptor, [](SessionConfig& c) {
+                          c.posture = fixpp::session::session_posture::production;
+                      }};
+    ASSERT_TRUE(refused_before_active(d)) << "setup: no wait armed before Active";
+    (void)d.s.feed(drained(k, d.s.sending_time()));
+    EXPECT_FALSE(d.closed()) << "the frame ended the wait";
+    EXPECT_EQ(phase_of(d), phase::armed) << "the frame ended the wait";
+    (void)d.s.feed(rgs_scene::raw("5", 2, "TW", d.s.sending_time()));
+    EXPECT_TRUE(d.closed()) << "the positive control: the peer's Logout did not end the wait";
+    (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "T143a/close/drained");
+}
+}  // namespace t143a
+
+TEST(LogoutWait105Direct, PreActiveWait_FaultedHeaderLogout_Drained) {
+    t143a::drained_cell(t143a::drained_frame::faulted_header);
+}
+TEST(LogoutWait105Direct, PreActiveWait_MsgTypeNotThirdLogout_Drained) {
+    t143a::drained_cell(t143a::drained_frame::msg_type_not_third);
+}
+TEST(LogoutWait105Direct, PreActiveWait_OtherBeginStringLogout_Drained) {
+    t143a::drained_cell(t143a::drained_frame::other_begin_string);
+}
+TEST(LogoutWait105Direct, PreActiveWait_OtherSenderLogout_Drained) {
+    t143a::drained_cell(t143a::drained_frame::other_sender);
+}
+TEST(LogoutWait105Direct, PreActiveWait_OtherTargetLogout_Drained) {
+    t143a::drained_cell(t143a::drained_frame::other_target);
+}
+TEST(LogoutWait105Direct, PreActiveWait_CheckCompIdOff_OtherSenderLogoutEndsWait) {
+    t105::DirectRig d{t143a::session_role::acceptor, [](SessionConfig& c) {
+                          c.posture = fixpp::session::session_posture::production;
+                          c.check_comp_id = false;
+                      }};
+    ASSERT_TRUE(t143a::refused_before_active(d)) << "setup: no wait armed before Active";
+    (void)d.s.feed(t143a::drained(t143a::drained_frame::other_sender, d.s.sending_time()));
+    EXPECT_TRUE(d.closed()) << "with check_comp_id off a Logout from another CompID did not end it";
+    (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "T143a/close/compid");
+}
+
+// ── The give-up and the replay gate (T143a) ────────────────────────────────────────────────
+
+namespace t143a {
+
+// A direct acceptor whose answer to the peer's ResendRequest is held at its first retrieve (a
+// GateStore), with a TestRequest pending and the ResendRequest an inbound frame since it.
+// HeartBtInt and T are kSceneHb; the TestRequest is written at T, the request one second later.
+struct HeldAnswer {
+    std::shared_ptr<t105::gate_store_state> gst = std::make_shared<t105::gate_store_state>();
+    t105::DirectRig d;
+    std::future<fixpp::core::expected_t<void>> answer;
+    bool up = false;
+
+    HeldAnswer()
+        : d{session_role::acceptor, [this](SessionConfig& c) {
+                c.store_factory = std::make_shared<t105::GateStoreFactory>(gst);
+                c.test_request_threshold = std::chrono::milliseconds{kSceneHb};
+            }} {
+        if (!d.to_active()) return;
+        d.pass(kSceneHb);
+        if (d.started("1") != 1U || !d.s.test_request_pending()) return;
+        d.pass(std::chrono::seconds{1});
+        gst->hold_when = [](t105::store_call k, fixpp::session::seqnum_t) {
+            return k == t105::store_call::retrieve;
+        };
+        answer = d.s.feed_spawn(d.s.resend_request(d.s.next_in()));
+        d.s.drain();
+        up = gst->parked == 1U && session_test_access::replay_gate(*d.s.session).exclusive;
+    }
+    // From the request to strictly past the held TestRequest's cap (three thresholds and the
+    // guard after the request), in one step: the give-up is decided there and waits at the gate.
+    bool to_give_up_at_the_cap() {
+        d.pass(3 * kSceneHb + std::chrono::milliseconds{1});
+        return d.s.state() == fsm_state::Active && phase_of(d) == phase::writing &&
+               session_test_access::replay_gate(*d.s.session).exclusive;
+    }
+    void release() {
+        gst->hold_when = nullptr;
+        gst->release_all();
+        d.s.drain();
+    }
+};
+
+}  // namespace t143a
+
+// [the held-cap wait's cancellation test] close(terminal) while the liveness loop waits at the
+// replay gate with a TestRequest pending: close() returns with the clock still and the loop writes
+// nothing more. Deleting the cancellation test leaves this cell green: close() wakes the gate and
+// writes Disconnected before it emits, so the loop's next state test ends it as well.
+TEST(LivenessTiming105Direct, CloseTerminalDuringTheHeldCapWait_LoopEndsNothingWritten) {
+    t143a::HeldAnswer h;
+    ASSERT_TRUE(h.up) << "setup: the answer's retrieve is not held";
+    auto const waits = session_test_access::replay_gate(*h.d.s.session).timer_waits;
+    // The Heartbeat instant, one HeartBtInt after the TestRequest's write, falls behind the held
+    // answer with the TestRequest pending: the loop waits at the gate, bounded by the cap.
+    h.d.pass(t143a::kSceneHb - std::chrono::seconds{1});
+    bool const parked = session_test_access::replay_gate(*h.d.s.session).timer_waits > waits &&
+                        h.d.s.state() == fsm_state::Active;
+    auto const heartbeats = h.d.started("0");
+    auto const closed =
+        h.d.run(h.d.s.session->close(fixpp::session::close_mode::terminal), "T143a/close/heldcap");
+    bool const loop_ended = session_test_access::liveness_count(*h.d.s.session) == 0;
+    h.release();
+    EXPECT_TRUE(parked) << "setup: the loop did not wait at the gate";
+    EXPECT_TRUE(closed.has_value()) << "close() did not return with the clock still";
+    EXPECT_TRUE(loop_ended) << "the liveness loop outlived close()";
+    EXPECT_EQ(h.d.started("1"), 1U) << "a TestRequest after the held answer";
+    EXPECT_EQ(h.d.started("0"), heartbeats) << "a Heartbeat after close()";
+    EXPECT_EQ(h.d.started("5"), 0U) << "a Logout after close()";
+}
+
+// [session.hpp ending_in_progress_, its writing side; W-8 during R-1's write] The give-up decided
+// at the cap is in its write (waiting at the gate for the held answer) when a frame from another
+// CompID, an R-2 ending, arrives: it is absorbed, so the session stays Active with the give-up's
+// write in progress. Once the answer is released the give-up writes its one Logout.
+TEST(LivenessTiming105Direct, GiveUpWaitingAtTheGate_SecondEndingIsAbsorbed) {
+    t143a::HeldAnswer h;
+    ASSERT_TRUE(h.up) << "setup: the answer's retrieve is not held";
+    bool const decided = h.to_give_up_at_the_cap();
+    auto const r =
+        h.d.s.feed(t143a::rgs_scene::raw("0", h.d.s.next_in(), "OTHER", h.d.s.sending_time()));
+    auto const state = h.d.s.state();
+    auto const ph = t143a::phase_of(h.d);
+    bool const open = !h.d.closed();
+    auto const logouts_during = h.d.started("5");
+    h.release();
+    EXPECT_TRUE(decided) << "setup: no give-up waiting at the gate";
+    EXPECT_TRUE(r.has_value()) << "the absorbed ending returned an error";
+    EXPECT_EQ(state, fsm_state::Active)
+        << "the second ending ended the session during the give-up's write";
+    EXPECT_EQ(ph, t143a::phase::writing) << "the give-up's write did not stay in progress";
+    EXPECT_TRUE(open) << "the second ending closed the connection";
+    EXPECT_EQ(logouts_during, 0U) << "a Logout during the held answer:" << t143a::wire_of(h.d);
+    EXPECT_EQ(h.d.started("5"), 1U) << "the give-up's one Logout:" << t143a::wire_of(h.d);
+}
+
+// [the R-1 leaf, the session no longer Active] The give-up waits at the gate; the held retrieve
+// then fails, so the answer's walk ends, releasing the gate, and the session ends. The leaf finds
+// the session no longer Active, writes no Logout and leaves the ending state machine, so the
+// connection closes with the clock still.
+TEST(LivenessTiming105Direct, GiveUpWaitingAtTheGate_AnswerFails_LeafWritesNothingEofAtOnce) {
+    t143a::HeldAnswer h;
+    ASSERT_TRUE(h.up) << "setup: the answer's retrieve is not held";
+    bool const decided = h.to_give_up_at_the_cap();
+    bool const open_before = !h.d.closed();
+    h.gst->fail_held = true;
+    h.gst->release_all();
+    h.d.s.drain();
+    bool const closed = h.d.closed();
+    auto const state = h.d.s.state();
+    auto const ph = t143a::phase_of(h.d);
+    h.release();
+    EXPECT_TRUE(decided && open_before) << "setup: no give-up waiting at the gate";
+    EXPECT_EQ(h.gst->calls_failed, 1U) << "setup: the held retrieve did not fail";
+    EXPECT_TRUE(closed) << "the connection was not closed with the clock still";
+    EXPECT_EQ(state, fsm_state::Disconnected);
+    EXPECT_EQ(ph, t143a::phase::none) << "the give-up did not leave the ending state machine";
+    EXPECT_EQ(h.d.started("5"), 0U) << "a Logout";
+}
+
+// [the bound's live predicate, Engine::stop noted] Engine::stop's first step noted during a wait
+// armed after Active: at the bound the bound exits without its expiry, so it neither ends the
+// session nor closes the connection; Engine::stop's own close owns both.
+TEST(LogoutWait105Direct, EngineStopNotedDuringWait_BoundExitsWithoutItsExpiry) {
+    t105::DirectRig d{t143a::session_role::acceptor};
+    ASSERT_TRUE(d.to_active()) << "setup";
+    (void)d.s.feed(t143a::stale(d, 2));
+    bool const armed = d.completed("5") == 1U && t143a::phase_of(d) == t143a::phase::armed;
+    session_test_access::note_engine_stop(*d.s.session);
+    d.pass(std::chrono::milliseconds{d.s.cfg.logout_disconnect_timeout_ms});
+    EXPECT_TRUE(armed) << "setup: no wait armed after the ending Logout";
+    EXPECT_EQ(t143a::phase_of(d), t143a::phase::resolved) << "the bound did not exit at the bound";
+    EXPECT_EQ(d.s.state(), fsm_state::Active)
+        << "the bound ended the session with Engine::stop noted";
+    EXPECT_FALSE(d.closed()) << "the bound closed the connection with Engine::stop noted";
+    (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "T143a/close/stop");
+}
+
+// [the bound's live predicate, the drain] drive_reconnect during a wait armed before Active (a
+// direct initiator's LogonSent refusal): the drain's wake finds the drain in flight, so the bound
+// exits and the drain, which joins it, returns with the clock still and the reconnect writes its
+// Logon.
+TEST(LogoutWait105Direct, DriveReconnectDuringAPreActiveWait_BoundYieldsToTheDrain) {
+    t105::DirectRig d{t143a::session_role::initiator};
+    ASSERT_TRUE(t143a::to_logon_sent(d)) << "setup: not in LogonSent";
+    (void)d.s.feed(t143a::logon_reply(d.s.sending_time(std::chrono::seconds{-600})));
+    bool const armed = d.completed("5") == 1U && d.s.state() == fsm_state::Disconnected &&
+                       t143a::phase_of(d) == t143a::phase::armed;
+    auto const r = d.run(d.s.session->drive_reconnect(), "T143a/drive_reconnect/drain");
+    EXPECT_TRUE(armed) << "setup: no wait armed before Active";
+    EXPECT_TRUE(r.has_value() && r->has_value())
+        << "drive_reconnect did not return with the clock still";
+    EXPECT_EQ(d.started("A"), 2U) << "the reconnect wrote no Logon";
+    EXPECT_NE(t143a::phase_of(d), t143a::phase::armed) << "the wait outlived the drain";
+    (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "T143a/close/drain");
+}
+
+// ── Before Active: the bound that cannot be spawned, and the NextExpectedMsgSeqNum Logout ──
+
+namespace t143a {
+// The LogonSent refusals of a direct initiator; each writes no Logout here, and the session ends.
+// When a bound ran, its exit closes the connection at once; with no bound (its spawn refused) the
+// connection closes at the session's next call, as on every direct Session.
+void expect_no_logout(t105::DirectRig& d, bool closed_at_once, const char* site) {
+    EXPECT_EQ(d.started("5"), 0U) << site << ": a Logout was written:" << wire_of(d);
+    EXPECT_EQ(d.s.state(), fsm_state::Disconnected) << site;
+    if (closed_at_once) {
+        EXPECT_TRUE(d.closed()) << site << ": the connection was not closed at once";
+    }
+    EXPECT_EQ(phase_of(d), phase::none) << site << ": the ending state machine was not left";
+}
+}  // namespace t143a
+
+// [the LogonSent Logout leaf, its bound refused; clarification D-g] A Logon with an inaccurate
+// SendingTime(52), the bound's spawn failing: no Logout.
+TEST(LogoutWait105Direct, LogonSentSendingTimeRefusal_BoundSpawnFails_NoLogout) {
+    t105::DirectRig d{t143a::session_role::initiator};
+    ASSERT_TRUE(t143a::to_logon_sent(d)) << "setup: not in LogonSent";
+    int seam_calls = 0;
+    session_test_access::set_ending_bound_spawn_fails(*d.s.session, [&seam_calls] {
+        ++seam_calls;
+        return true;
+    });
+    (void)d.s.feed(t143a::logon_reply(d.s.sending_time(std::chrono::seconds{-600})));
+    EXPECT_GE(seam_calls, 1) << "the reach proof: the bound's spawn was not attempted";
+    t143a::expect_no_logout(d, false, "SendingTimeRefusal_BoundSpawnFails");
+    (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "T143a/close/st-dg");
+}
+
+namespace t143a {
+void with_789(SessionConfig& c) { c.enable_next_expected_msg_seq_num = true; }
+}  // namespace t143a
+
+// [the NextExpectedMsgSeqNum(789) Logout, its bound refused; ruling R-789, clarification D-g]
+TEST(LogoutWait105Direct, Logon789TooHigh_BoundSpawnFails_NoLogout) {
+    t105::DirectRig d{t143a::session_role::initiator, t143a::with_789};
+    ASSERT_TRUE(t143a::to_logon_sent(d)) << "setup: not in LogonSent";
+    int seam_calls = 0;
+    session_test_access::set_ending_bound_spawn_fails(*d.s.session, [&seam_calls] {
+        ++seam_calls;
+        return true;
+    });
+    (void)d.s.feed(t143a::logon_reply(d.s.sending_time(), "789=999\x01"));
+    EXPECT_GE(seam_calls, 1) << "the reach proof: the bound's spawn was not attempted";
+    t143a::expect_no_logout(d, false, "789_BoundSpawnFails");
+    (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "T143a/close/789-dg");
+}
+
+// [the NextExpectedMsgSeqNum(789) Logout, toAdmin throwing] The application's toAdmin throws on
+// the Logout: none is written, and the session ends with the connection closed at once.
+TEST(LogoutWait105Direct, Logon789TooHigh_ToAdminThrows_NoLogoutClosedAtOnce) {
+    t105::DirectRig d{t143a::session_role::initiator, t143a::with_789};
+    ASSERT_TRUE(t143a::to_logon_sent(d)) << "setup: not in LogonSent";
+    d.app->to_admin_hook = [](std::string_view m) {
+        if (m == "5") throw std::runtime_error("T143a: toAdmin on the Logout");
+    };
+    (void)d.s.feed(t143a::logon_reply(d.s.sending_time(), "789=999\x01"));
+    EXPECT_EQ(d.app->to_admin_count("5"), 1) << "the reach proof: toAdmin was not called";
+    t143a::expect_no_logout(d, true, "789_ToAdminThrows");
+    (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "T143a/close/789-ta");
+}
+
+// [the NextExpectedMsgSeqNum(789) Logout, which does not fit] The peer's CompID is long enough that
+// the Logout overflows honor_peer_next_expected_'s buffer while the session's Logon fits
+// (the recipe of test_105_connection_close.cpp's too_low_fit).
+namespace t143a {
+constexpr std::size_t kLogoutBuffer = 256;  // honor_peer_next_expected_'s Logout buffer
+constexpr char k789Text[] = "NextExpectedMsgSeqNum too high, expecting 2 but received 999";
+std::size_t overflowing_789_length(std::string const& st) {
+    for (std::size_t len = 1; len < kLogoutBuffer; ++len) {
+        std::string const p(len, 'P');
+        std::array<std::byte, 4096> big{};
+        auto const lo = fixpp::session::build_logout(big, 2, "ISLD", p, k789Text, "FIX.4.2", st);
+        if (lo && lo->size() > kLogoutBuffer) {
+            auto const on = fixpp::session::build_logon(big, 1, "ISLD", p, "FIX.4.2", 30, st);
+            return on && on->size() <= kLogoutBuffer ? len : 0U;
+        }
+    }
+    return 0U;
+}
+}  // namespace t143a
+
+TEST(LogoutWait105Direct, Logon789TooHigh_LogoutDoesNotFit_NoLogoutClosedAtOnce) {
+    t105::DirectRig d{t143a::session_role::initiator, t143a::with_789};
+    std::size_t const len = t143a::overflowing_789_length(d.s.sending_time());
+    ASSERT_NE(len, 0U) << "setup: no CompID length overflows the Logout and fits the Logon";
+    std::string const peer(len, 'P');
+    d.s.cfg.target_comp_id = peer;
+    d.s.session = std::make_unique<fixpp::session::Session>(d.s.engine, d.s.cfg);
+    ASSERT_TRUE(t143a::to_logon_sent(d)) << "setup: not in LogonSent";
+    (void)d.s.feed(pr::to_bytes(pr::message("FIX.4.2", "A", 1, peer, "ISLD", d.s.sending_time(),
+                                            "98=0\x01"
+                                            "108=30\x01"
+                                            "789=999\x01")));
+    EXPECT_EQ(d.app->to_admin_count("5"), 0) << "the Logout was built";
+    t143a::expect_no_logout(d, true, "789_LogoutDoesNotFit");
+    (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "T143a/close/789-fit");
+}
+
+// ── The establishment cap's failure exit (T143a) ───────────────────────────────────────────
+
+namespace t143a {
+
+// An Engine acceptor's posture refusal (TestMessageIndicator(464)=Y on a production session): its
+// wait before Active is capped by the establishment deadline on the engine clock. The clock that
+// arm names throws once at that arm's instant (the bound's instant on
+// SessionConfig::clock_override, the cap's on the engine clock), so the capped race completes
+// before its instant: the failure exit, which closes the connection at once with the clocks still.
+enum class capped_arm : std::uint8_t { deadline, cap };
+
+void capped_failure_cell(capped_arm arm) {
+    pr::Rig rig;
+    auto counting = std::make_shared<t105::CountingClock>(rig.clock);
+    auto cfg = rig.cfg(session_role::acceptor);
+    cfg.posture = fixpp::session::session_posture::production;
+    cfg.logon_timeout_ms = 10000;
+    if (arm == capped_arm::deadline) {
+        cfg.clock_override = counting;
+    } else {
+        rig.engine_clock_override = counting;
+    }
+    auto const instant =
+        rig.clock->steady_now() + std::chrono::milliseconds{arm == capped_arm::deadline
+                                                                ? cfg.logout_disconnect_timeout_ms
+                                                                : cfg.logon_timeout_ms};
+    bool const up = rig.start(std::move(cfg)) && rig.connect_peer();
+    auto const calls_before = counting->sleep_calls_at(instant);
+    if (up) counting->throw_once_at(instant);
+    auto const mark = rig.peer.received.size();
+    if (up) {
+        rig.peer.send(rig.msg("A", 1,
+                              "98=0\x01"
+                              "108=30\x01"
+                              "464=Y\x01"));
+    }
+    bool const refused = up && rig.run_until([&] {
+        return pr::frames_of_type(rig.peer.received.substr(mark), "5").size() == 1U;
+    });
+    bool const eof = refused &&
+                     t105::pump_until_peer_read_ends(
+                         rig.ioc, [&] { return rig.peer.read_ended; }, kWallCap,
+                         arm == capped_arm::deadline ? "T143a/CappedFailure/deadline"
+                                                     : "T143a/CappedFailure/cap") &&
+                     t105::ending_of(rig.peer) == t105::peer_ending::eof;
+    bool const thrown = !counting->throw_pending();
+    rig.stop();
+    EXPECT_TRUE(up) << "setup";
+    EXPECT_TRUE(refused) << "setup: no refusal Logout";
+    EXPECT_EQ(calls_before, 0U) << "setup: a sleep at the arm's instant before the bound's";
+    EXPECT_TRUE(thrown) << "the reach proof: the arm's sleep at its instant was never requested";
+    EXPECT_TRUE(eof) << "the capped race's failure exit did not close the connection at once";
+}
+
+}  // namespace t143a
+
+// [the capped bound's failure exit, its deadline arm]
+TEST(LogoutWait105Acceptor, PreActiveCappedWait_DeadlineArmFails_EofAtOnce) {
+    t143a::capped_failure_cell(t143a::capped_arm::deadline);
+}
+// [the capped bound's failure exit, its cap arm on the engine clock]
+TEST(LogoutWait105Acceptor, PreActiveCappedWait_CapArmFails_EofAtOnce) {
+    t143a::capped_failure_cell(t143a::capped_arm::cap);
 }
 
 }  // namespace

@@ -1408,6 +1408,11 @@ remaining reference.
   uncovered added line and branch listed with a disposition (waived, a ruling, pre-existing moved, or escalated); the
   escalated rows await one filed, labelled issue, and the table awaits T144's verify record (evidence file, Phase 11,
   T143).
+- [ ] T143a The owed cells of T143's escalated rows (orchestrator ruling 2026-11-24): a cell for every row this file
+  already maps to a cell, every row whose seam is "none needed", and every row whose named seam exists in the repo;
+  each row's uncovered side re-derived first with `llvm-cov show -show-branches=count` (T143's recipe), each cell
+  asserting the row's observable ending and shown able to fail under a named mutant in `$M`; then the coverage
+  re-measured by T143's per-binary method and T143's table updated: each row covered, or still owed with why.
 - [ ] T144 **(orchestrator)** `/speckit-verify`; writes `.specify/decisions/105-transport-liveness-verify.md`. Re-run T130 to T135
   as the last actions before any labelled push.
 - [ ] T149 **(orchestrator)** The PR body declares C-ABI 1.18 **BREAKING** ([const §X.7]): the observers of contract C-9 and

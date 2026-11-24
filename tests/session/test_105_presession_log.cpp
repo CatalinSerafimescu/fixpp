@@ -433,6 +433,20 @@ TEST(PreSessionLog105, ControlBytesInCompIds_WrittenAsQuestionMarks) {
     }
 }
 
+// C-7.1's upper edge (105 T143a): a byte above 0x7E (DEL, or a byte of a UTF-8 sequence) is
+// written as '?' too.
+TEST(PreSessionLog105, HighBytesInCompIds_WrittenAsQuestionMarks) {
+    PlainCell c;
+    EXPECT_TRUE(c.up) << "setup: the acceptor did not start";
+    if (c.up) {
+        EXPECT_TRUE(c.refuse_one(c.logon_from("T\x7FW\xC3\xA9", "IS\x80LD")));
+        (void)c.await_records(kRejectFormat, 1);
+    }
+    auto const recs = c.finish(kRejectFormat);
+    expect_one_reject(recs, reject_line("no_session", "FIX.4.2", "T?W??", "IS?LD", "0"),
+                      "HighBytes");
+}
+
 // C-7.3: a listener that cannot bind (its port is in use) writes one error record with the
 // system error's value.
 TEST(PreSessionLog105, ListenerBindFails_OneRecord) {
