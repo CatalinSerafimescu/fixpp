@@ -102,6 +102,7 @@ using FixTcCoverageGaps = ParityAcceptorFixture;
 // state==Active and never the ResendRequest emission — so the emit was unwitnessed.
 TEST_F(FixTcCoverageGaps, TooHighInboundSeqnum_EmitsResendRequest_StaysActive) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U) << "precondition: next-expected-inbound = 2";
 
@@ -141,6 +142,7 @@ TEST_F(FixTcCoverageGaps, TooHighInboundSeqnum_EmitsResendRequest_StaysActive) {
 // last stored outbound and walk per-slot — a different cell; not exercised here.)
 TEST_F(FixTcCoverageGaps, ResendRequestEndSeqNoBeyondLastOutbound_GapFills_StaysActive) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s));
 
     const std::size_t before = capture.frames.size();
@@ -183,6 +185,7 @@ TEST_F(FixTcCoverageGaps, ResendRequestEndSeqNoBeyondLastOutbound_GapFills_Stays
 // still scans order-independently (the BodyFieldsArbitraryOrder cell below).
 TEST_F(FixTcCoverageGaps, HeaderFieldsOutOfOrder_MsgTypeNotThird_Disregarded) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U);
     const std::size_t before = capture.frames.size();
@@ -219,6 +222,7 @@ TEST_F(FixTcCoverageGaps, HeaderFieldsOutOfOrder_MsgTypeNotThird_Disregarded) {
 // body-field order would Reject(35=3) and emit no GapFill.
 TEST_F(FixTcCoverageGaps, BodyFieldsArbitraryOrder_Accepted) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U);
     (void)feed(s, make_fix_frame("FIX.4.2", "1", /*seq=*/2, "TW", "ISLD", "112=TR-1\x01"));
@@ -272,6 +276,7 @@ TEST_F(FixTcCoverageGaps, BodyFieldsArbitraryOrder_Accepted) {
 // wire is not polluted — the frame is simply ignored.
 TEST_F(FixTcCoverageGaps, InboundLogonWhileLogoutSent_Drained_StaysLogoutSent) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s));
     const std::uint32_t inbound_before = next_inbound(s);
     const std::size_t logons_before = capture.count_msg_type("A");
@@ -348,6 +353,7 @@ TEST_F(FixTcCoverageGaps, InboundLogonWhileLogoutSent_Drained_StaysLogoutSent) {
 // the wrong path) — it reaches the PossDup validation and earns 373=1/371=122.
 TEST_F(FixTcCoverageGaps, RejectResentMessage_DuringResend_RejectsAndContinues) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U) << "precondition: next-expected-inbound = 2";
 
@@ -408,6 +414,7 @@ TEST_F(FixTcCoverageGaps, RejectResentMessage_DuringResend_RejectsAndContinues) 
 // dropped silently and the session would stall on the gap it already closed.
 TEST_F(FixTcCoverageGaps, RejectedResentFrame_FillingTheGap_EndsAwaitingResend) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U) << "precondition: next-expected-inbound = 2";
 
@@ -438,6 +445,7 @@ TEST_F(FixTcCoverageGaps, RejectedResentFrame_FillingTheGap_EndsAwaitingResend) 
 // deadlock/confusion between the two outstanding resends.
 TEST_F(FixTcCoverageGaps, SimultaneousResendRequest_ServicesPeerWhileAwaitingOwn) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U) << "precondition: next-expected-inbound = 2";
 

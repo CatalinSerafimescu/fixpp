@@ -27,6 +27,7 @@ using ThornyRecoveryFixture = fixpp::interop::parity::ParityAcceptorFixture;
 
 TEST_F(ThornyRecoveryFixture, Qfj271_LargeGapFillSequenceResetResynchronizesWithoutRecursion) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s)) << "precondition: session must reach Active";
     ASSERT_EQ(next_inbound(s), 2U);
 

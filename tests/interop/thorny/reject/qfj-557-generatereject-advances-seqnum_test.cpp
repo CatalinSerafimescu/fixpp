@@ -39,6 +39,7 @@ using ThornyRejectFixture = fixpp::interop::parity::ParityAcceptorFixture;
 //   - Session stays Active.
 TEST_F(ThornyRejectFixture, Qfj557_GenerateRejectAdvancesInboundSeqnumOverRun) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s)) << "precondition: session must reach Active";
     // After Logon(seq=1), next-expected-inbound = 2.
     ASSERT_EQ(next_inbound(s), 2U) << "precondition: next_inbound must be 2 after Logon";

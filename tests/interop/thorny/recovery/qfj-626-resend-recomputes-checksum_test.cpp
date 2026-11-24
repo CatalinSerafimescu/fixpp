@@ -296,6 +296,7 @@ protected:
 // asserting the replayed output has the CORRECT values.
 TEST_F(Qfj626Fixture, ResendReplay_RecomputesBodyLengthAndChecksum) {
     fixpp::session::Session s{engine, make_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s)) << "precondition: session must reach Active";
 
     // Feed a ResendRequest(35=2) asking for seq 2..2 from the peer.

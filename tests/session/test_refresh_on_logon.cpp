@@ -67,6 +67,7 @@
 #include <fixpp/transport/test/mock_transport.hpp>
 
 #include "session/mock_reconnect_factory.hpp"
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -1045,6 +1046,7 @@ TEST(RefreshOnLogon, W7_KnobOn_StoreReadFailure_Disconnected) {
         /*policy=*/fixpp::session::reset_seqnum_policy::bilateral_lenient,
         /*fail_on_nth_call=*/3);
     auto& fix = *result.fix;
+    fixpp::test_support::close_before_destroy const closer{*fix.session, fix.ioc};
     auto* store = result.store;
     ASSERT_NE(store, nullptr);
 

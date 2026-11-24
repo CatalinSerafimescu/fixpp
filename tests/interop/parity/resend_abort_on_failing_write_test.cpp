@@ -24,6 +24,7 @@ using ResendAbortOnFailingWrite = ParityAcceptorFixture;
 
 TEST_F(ResendAbortOnFailingWrite, FailedWriteMidResendAbortsAndDisconnects) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s)) << "precondition: session must reach Active";
     ASSERT_EQ(s.state(), fixpp::session::fsm_state::Active);
 

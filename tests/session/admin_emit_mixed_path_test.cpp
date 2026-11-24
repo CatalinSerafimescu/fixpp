@@ -360,6 +360,7 @@ TEST_F(AdminEmitMixedPathTest, Site1_RejectOk_LogoutFail_Disconnected) {
     // assign_outbound fails (Logout step) → Disconnected via error path.
     auto cfg = make_cfg(0);
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
     clear_handshake_captures();
 
@@ -425,6 +426,7 @@ TEST_F(AdminEmitMixedPathTest, Site2_LogoutOk_Disconnected) {
     // → Disconnected per matrix Active×Logout cell.
     auto cfg = make_cfg(0);
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
     clear_handshake_captures();
 
@@ -447,6 +449,7 @@ TEST_F(AdminEmitMixedPathTest, Site2_LogoutFail_Disconnected) {
     // (record_state_transition_(Disconnected) fires in the !assign_r branch).
     auto cfg = make_cfg(0);
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
     clear_handshake_captures();
 

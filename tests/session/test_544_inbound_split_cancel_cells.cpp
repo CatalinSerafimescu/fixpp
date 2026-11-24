@@ -60,6 +60,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -319,6 +320,7 @@ void expect_callback_then_abort(const CancelFixture& f, const FeedOutcome& o, Se
 TEST(B35InboundSplitCancel, SendingTimeGuardLogout_ToAdminRunsBeforeTheThrow) {
     CancelFixture f;
     Session s(f.engine, f.cfg());
+    fixpp::test_support::close_before_destroy const closer_s{s, f.ioc};
     ASSERT_TRUE(f.open_to_active(s));
     f.on_send = [&](std::span<const std::byte> fr) {
         if (field_of(fr, "35") == "3") f.cancel_chain();
@@ -333,6 +335,7 @@ TEST(B35InboundSplitCancel, SendingTimeGuardLogout_ToAdminRunsBeforeTheThrow) {
 TEST(B35InboundSplitCancel, PossDupArmDLogout_ToAdminRunsBeforeTheThrow) {
     CancelFixture f;
     Session s(f.engine, f.cfg());
+    fixpp::test_support::close_before_destroy const closer_s{s, f.ioc};
     ASSERT_TRUE(f.open_to_active(s));
     f.on_send = [&](std::span<const std::byte> fr) {
         if (field_of(fr, "35") == "3") f.cancel_chain();
@@ -366,6 +369,7 @@ TEST(B35InboundSplitCancel, TooHighResendRequest_ToAdminRunsBeforeTheThrow) {
 TEST(B35InboundSplitCancel, ConfirmingLogout_ToAdminRunsBeforeTheThrow) {
     CancelFixture f;
     Session s(f.engine, f.cfg());
+    fixpp::test_support::close_before_destroy const closer_s{s, f.ioc};
     ASSERT_TRUE(f.open_to_active(s));
     f.clock->on_now = [&](int n) {
         if (n == 1) f.cancel_chain();
@@ -415,6 +419,7 @@ TEST(B35InboundSplitCancel, LogonSentLogoutBuildFailure_DisconnectsWithoutThrow)
     f.sender = std::string(86, 'S');
     f.target = std::string(86, 'T');
     Session s(f.engine, f.cfg());
+    fixpp::test_support::close_before_destroy const closer_s{s, f.ioc};
     auto fut = asio::co_spawn(f.ioc, s.open(), asio::use_future);
     // On a miss, drain while `s` is alive: it is declared after `f`, so it dies before `f.ioc`.
     const bool opened = fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms);

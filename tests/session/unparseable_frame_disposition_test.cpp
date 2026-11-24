@@ -1479,6 +1479,7 @@ void run_liveness_cell(std::vector<std::byte> const& faulty, std::uint32_t next_
         std::chrono::duration_cast<std::chrono::milliseconds>(*cfg.heartbeat_interval);
     auto const fault_at = interval / 3;
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer_sess{sess, fix.ioc};
     fix.open_to_active(sess);
     if (::testing::Test::HasFatalFailure()) {
         return;

@@ -36,6 +36,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -145,7 +146,10 @@ struct OutboundCapture {
     }
 };
 
-// Acceptor session driven to Active over the sync transport_send_ path.
+// Acceptor session driven to Active over the sync transport_send_ path. A cell's Session declares a
+// fixpp::test_support::close_before_destroy right after it, so the Session is closed before it is
+// destroyed: an ending Logout's bound or a close frame the cell started may still be running when
+// the cell's last pump returns (105 contract C-9; tests/support/close_before_destroy.hpp).
 class ParityAcceptorFixture : public ::testing::Test {
 protected:
     asio::io_context ioc;

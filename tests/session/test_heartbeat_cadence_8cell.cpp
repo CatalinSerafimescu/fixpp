@@ -52,6 +52,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -285,6 +286,7 @@ TEST(HeartbeatCadence8Cell, CellC_Strand_UnansweredTestRequestDisconnects) {
     HeartbeatCadenceFixture fix;
     auto cfg = fix.make_cfg(fixpp::session::threading_mode::per_session_strand);
     fixpp::session::Session sess(fix.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, fix.ioc};
     ASSERT_TRUE(fix.drive_to_active(sess));
 
     // Active at 11 s (past 2 × HeartBtInt); Disconnected just after 2 × 1.2 × HeartBtInt = 12s,
@@ -308,6 +310,7 @@ TEST(HeartbeatCadence8Cell, CellC_Direct_UnansweredTestRequestDisconnects) {
     HeartbeatCadenceFixture fix;
     auto cfg = fix.make_cfg(fixpp::session::threading_mode::direct_executor);
     fixpp::session::Session sess(fix.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, fix.ioc};
     ASSERT_TRUE(fix.drive_to_active(sess));
 
     // As the strand cell: the clock steps to the TestRequest's instant first.

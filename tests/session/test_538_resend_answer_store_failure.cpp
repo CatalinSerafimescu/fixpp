@@ -66,6 +66,7 @@
 #include "session/plain_engine_rig.hpp"
 #include "session/test_103_support.hpp"
 #include "support/calling_thread_readings.hpp"
+#include "support/close_before_destroy.hpp"
 #include "support/fix44_dictionary.hpp"
 #include "support/recording_store.hpp"
 #include "support/seqnum_manager_test_access.hpp"
@@ -934,6 +935,9 @@ struct HeldWalk {
     std::deque<asio::cancellation_signal> live_signals;
     std::deque<std::future<void>> live_futs;
     ActiveSession s;
+    // Declared after `s`, so destroyed before it, after this fixture's drain: the session is
+    // closed before it is destroyed (tests/support/close_before_destroy.hpp).
+    fixpp::test_support::close_before_destroy closer{*s.f.session, s.f.ioc};
 
     HeldWalk() = default;
     HeldWalk(HeldWalk const&) = delete;

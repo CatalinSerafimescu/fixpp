@@ -902,6 +902,7 @@ TEST_F(FsmMatrixWitness, Active_InboundLogout_EmitsConfirmLogout_TransitionsToDi
     // FR-006: E07 from Active → emit Logout (35=5), → Disconnected.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
     clear_handshake_captures();
 

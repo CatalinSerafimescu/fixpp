@@ -52,6 +52,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -284,6 +285,7 @@ TEST(TC009Logout, Fix42_13b_UnsolicitedLogoutMessage) {
     SessionFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.2");
 
     // Verify session Logon reply was emitted (E:Logon).
@@ -324,6 +326,7 @@ TEST(TC009Logout, Fix44_13b_UnsolicitedLogoutMessage) {
     SessionFixture f;
     auto cfg = f.make_cfg("FIX.4.4");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.4");
 
     auto peer_logout = make_logout_frame("FIX.4.4", 2, "TW", "ISLD");

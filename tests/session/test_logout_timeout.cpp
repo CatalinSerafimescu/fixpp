@@ -53,6 +53,7 @@
 #include <variant>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -208,6 +209,7 @@ TEST_F(LogoutTimeoutTest, Existing005_Acceptor_PeerLogout_EchoesAndDisconnects) 
     capture.frames.clear();
     auto cfg = make_cfg(fixpp::session::session_role::acceptor);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess, "ISLD", "TW"));
 
     auto peer_logout = make_logout("FIX.4.2", 2, "TW", "ISLD");
@@ -248,6 +250,7 @@ TEST_F(LogoutTimeoutTest, ConfigurableTimeoutField_WiredInto013RecoveryFsm) {
     // is respected (200ms, not the hardcoded 2000ms).
     auto cfg = make_cfg(fixpp::session::session_role::acceptor, 200);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess, "ISLD", "TW"));
 
     // Trigger peer Logout → session echoes + 013 should arm timeout timer.
@@ -293,6 +296,7 @@ TEST_F(LogoutTimeoutTest, Acceptor_TimeoutFires_SurfacesLogoutTimeoutEvent) {
     capture.frames.clear();
     auto cfg = make_cfg(fixpp::session::session_role::acceptor, 300);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess, "ISLD", "TW"));
 
     // Peer sends Logout; acceptor echoes + should arm 300ms timeout.

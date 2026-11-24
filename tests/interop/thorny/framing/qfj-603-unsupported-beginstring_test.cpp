@@ -26,6 +26,7 @@ using ThornyFramingFixture = fixpp::interop::parity::ParityAcceptorFixture;
 
 TEST_F(ThornyFramingFixture, Qfj603_UnsupportedBeginStringRefusesLogon) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(run_open(s).has_value());
 
     (void)feed(s, fixpp::interop::parity::make_logon("FIX.3.9", /*seq=*/1, "TW", "ISLD"));

@@ -62,6 +62,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -417,6 +418,7 @@ TEST_F(HbTrTest, UnansweredTestRequestDisconnects) {
         return false;
     };
     Session session{engine, cfg};
+    fixpp::test_support::close_before_destroy const closer_session{session, ioc};
     ASSERT_TRUE(drive_to_active(session, 1));
 
     // Advance clock past inbound-silence threshold (1s + buffer).
