@@ -767,8 +767,8 @@ constexpr bool guard_at_the_saturated_instant() {
                tp{} + seconds{24} + std::chrono::nanoseconds{1};
 }
 
-// [guard: the later instant dropped] owner ruling 2026-11-24 (the held TestRequest's fresh
-// window): the give-up instant of a TestRequest written at `written` is the later of the
+// [guard: the later instant dropped] the owner's fresh-window ruling (the held TestRequest's
+// fresh window): the give-up instant of a TestRequest written at `written` is the later of the
 // two-threshold instant and `written` + T + 1 ns, each side saturating.
 constexpr bool fresh_window_is_the_later_instant() {
     constexpr auto ns1 = std::chrono::nanoseconds{1};

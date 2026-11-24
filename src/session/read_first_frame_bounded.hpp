@@ -291,8 +291,8 @@ inline constexpr std::chrono::seconds kDefaultHeartBtInt{30};
                           std::chrono::nanoseconds{1});
 }
 
-// 105, owner ruling 2026-11-24 (spec.md Clarifications, "Session 2026-11-24": the held
-// TestRequest's fresh window; data-model E-4): the give-up instant of a TestRequest pending since
+// 105, the owner's fresh-window ruling (spec.md Clarifications: the held TestRequest's fresh
+// window; data-model E-4): the give-up instant of a TestRequest pending since
 // `written`, the later of the instant above and `written` + T + 1 ns, every step saturating. A
 // TestRequest written late (held behind a resend answer) leaves the peer a whole threshold to
 // answer. Precondition: threshold >= 0.

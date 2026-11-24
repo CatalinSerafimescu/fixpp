@@ -8342,8 +8342,9 @@ fsm_state Session::state() const noexcept { return fsm_state_; }
 //   3. Loop while liveness_may_originate_(): sleep once, to the earliest instant of the sleep
 //      set (the body's comment states it), then act on the eligible instant reached:
 //      a. a TestRequest pending, no inbound frame since it, and its give-up instant (the later
-//         of 2T + 1 ns after the last inbound frame and T + 1 ns after its write; owner ruling
-//         2026-11-24) → the give-up: 105 R-1's record, Logout with Text, Disconnected → stop;
+//         of 2T + 1 ns after the last inbound frame and T + 1 ns after its write; the owner's
+//         fresh-window ruling) → the give-up: 105 R-1's record, Logout with Text, Disconnected
+//         → stop;
 //      b. else T of inbound silence → a TestRequest (its TestReqID becomes the pending one);
 //      c. else HeartBtInt of outbound silence → a Heartbeat.
 //      A TestRequest's TestReqID is answered by on_inbound_frame (the TestReqID rule of
@@ -8421,8 +8422,8 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
     //     inbound frame arrived since it;
     //   - the give-up instant is the later of last_inbound + T + T + 1 ns and the pending
     //     TestRequest's write + T + 1 ns, every step saturating; it is eligible when a TestRequest
-    //     is pending and no inbound frame arrived since it. Owner ruling 2026-11-24 (spec.md
-    //     Clarifications, "Session 2026-11-24"), superseding the Phase 6 implementation
+    //     is pending and no inbound frame arrived since it. The owner's fresh-window ruling
+    //     (spec.md Clarifications), superseding the Phase 6 implementation
     //     clarification for a TestRequest held behind a resend answer: a TestRequest that falls
     //     due is written before any give-up, after the hold when one holds it, and the peer then
     //     has T from that write to answer. With T > 0 the TestRequest instant is at or before

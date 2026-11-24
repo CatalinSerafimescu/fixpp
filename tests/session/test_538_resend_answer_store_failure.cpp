@@ -1237,8 +1237,8 @@ LivenessWritten liveness_written(std::vector<std::string> const& sent) {
     return out;
 }
 
-// 105-transport-liveness, owner ruling 2026-11-24 (spec.md Clarifications, "Session
-// 2026-11-24"; the held TestRequest's fresh window), superseding for this case the Phase 6
+// 105-transport-liveness, the owner's fresh-window ruling (spec.md Clarifications: the held
+// TestRequest's fresh window), superseding for this case the Phase 6
 // implementation clarification's give-up: with a TestRequest pending, the give-up instant is the
 // later of two thresholds after the last inbound frame and one threshold after that TestRequest's
 // write. Here a TestRequest is pending and the request that starts the held walk arrives after it,
