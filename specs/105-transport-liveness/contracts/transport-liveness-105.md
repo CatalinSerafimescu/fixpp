@@ -82,7 +82,7 @@ kind, the too-low Text(58)), its write is limited as C-2.7 states, and the conne
 rows 1 and 11), as QuickFIX C++ and QuickFIX/J (`nextLogout`: `verify(logout, false, false)`) and QuickFIX/Go
 (`handleLogout`: `verifySelect(msg, false, false, true)`) skip the too-low check for a Logout, answer it and
 disconnect. Before Active the shape does not arise: a Logout in NotConnected or LogonSent is refused before any
-sequence check and draws no Logout. Replies to the peer's Logout are not in this list (C-1 rows 3 and 5). This list is the census's result at the base (research D2 item
+sequence check and draws no Logout, and in LogonReceived the too-low Logout's leaf writes nothing. Replies to the peer's Logout are not in this list (C-1 rows 3 and 5). This list is the census's result at the base (research D2 item
 1); at the implementation head the census (tasks.md T006, research D1's recipe) is authoritative, and a Logout it finds
 that is not listed here takes this section's rules.
 

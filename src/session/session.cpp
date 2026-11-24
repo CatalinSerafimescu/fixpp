@@ -6605,10 +6605,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
         // 105 (research D2 item 1): an R-2 ending through send_ending_logout_, which claims a
         // pending mark (103 research D4.6) and records Disconnected unless the wait was armed.
         // 105 T143b (spec.md Clarifications, the Phase 9 implementation session; contract C-2
-        // "Which Logouts"): the peer's own Logout below NextNumIn is answered as the base answers
-        // it, the leaf's reply kind, and arms no wait, as QuickFIX C++ and QuickFIX/J (nextLogout)
-        // and QuickFIX/Go (handleLogout) skip the too-low check for a Logout: the frame the wait
-        // would wait for has arrived.
+        // "Which Logouts"): the peer's own Logout below NextNumIn draws the Logout the base writes
+        // for it, through the leaf's reply kind, and arms no wait, as QuickFIX C++ and QuickFIX/J
+        // (nextLogout) and QuickFIX/Go (handleLogout) skip the too-low check for a Logout: the
+        // frame the wait would wait for has arrived.
         auto const kind = hdr.msg_type == "5" ? ending_kind::reply : ending_kind::r2;
         FIXPP_INBOUND_SPLIT_AWAIT(r, tic, send_ending_logout_(tic, st52.value, text, kind));
         co_return r;

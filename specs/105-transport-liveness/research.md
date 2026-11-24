@@ -245,8 +245,9 @@ write limit of ruling D-e (item 11). This section is the mechanism.
      send. One cell: a too-high Logout while a resend is outstanding, then a non-advancing frame after the gap
      deadline; the peer reads the deadline's Logout, then EOF with the mock clock frozen.
    - **The peer's own Logout below NextNumIn** (spec clarification "Session 2026-11-24 (implementation, Phase 9)", tasks.md T143b): Arm B's too-low Logout
-     for a frame whose MsgType(35) is 5 goes through the helper with the leaf's `reply` kind, the kind the base's
-     Arm B called the leaf with, so it is limited and arms no wait, for the same reason as N-5: the peer's Logout has
+     for a frame whose MsgType(35) is 5 goes through the helper with the leaf's `reply` kind (the base's Arm B called
+     the leaf with its frame and text and no kind, `ending_kind` being 105's; at the head that call resolves to the
+     leaf's default, `reply`), so it is limited and arms no wait, for the same reason as N-5: the peer's Logout has
      been received. The cells are `LogoutWait105.PeerLogoutBelowNextNumIn_TooLowLogoutNoWaitEofAtOnce`,
      `LogoutWait105Direct.PeerLogoutBelowNextNumIn_TooLowLogoutNoWaitClosedAtOnce` and
      `Capi105Wait.PeersLogoutBelowNextNumIn_TooLowLogoutThenEofAtOnce`.

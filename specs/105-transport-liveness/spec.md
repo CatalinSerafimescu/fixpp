@@ -287,7 +287,8 @@ no new sign-off.
   the too-low check for an inbound Logout: they answer it and disconnect. Their answer carries no Text(58), and under
   their reset-on-logout setting they reset; fixpp keeps the base's Text and makes no reset, as the base does. Before
   Active the shape does not arise: a Logout in NotConnected or LogonSent is refused before any sequence check
-  (`interpret_logon`, or arm S under `reset_on_logout`) and draws no Logout, at the base and at the head. Contract
+  (`interpret_logon`, or arm S under `reset_on_logout`) and draws no Logout, and in LogonReceived the too-low Logout's
+  leaf writes nothing (it writes only in Active) and the session records `Disconnected`, at the base and at the head. Contract
   C-2 "Which Logouts", data-model E-3 "Leaving `writing`", research D2 item 1, B-103-10, B-105-2, `version.h`'s 1.18
   history and `fixpp_session_is_established`'s 1.18 clause state it; the cells are
   `LogoutWait105.PeerLogoutBelowNextNumIn_TooLowLogoutNoWaitEofAtOnce` (both roles),
