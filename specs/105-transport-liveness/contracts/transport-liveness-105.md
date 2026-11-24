@@ -191,7 +191,10 @@ Common rules:
 - C-3.1 At the give-up instant of C-6.2 (2T of inbound silence counted from the last inbound frame that refreshes
   liveness, or T after the pending TestRequest's write when that is later), with a TestRequest pending and no inbound
   frame since it (C-6.2; spec clarification "Session 2026-11-24"; *rewritten 2026-11-24 for the owner's fresh-window
-  ruling, where it read "whether or not an inbound frame arrived since it was sent"*), fixpp writes fixpp writes the record of C-3.3, then sends one Logout
+  ruling, where it read "whether or not an inbound frame arrived since it was sent"*), or at the held cap of C-6.2
+  (a TestRequest due and still held behind a resend answer strictly after 3T from the last inbound frame, with a
+  TestRequest pending; *added 2026-11-24, the owner's cap ruling, spec clarification "Session 2026-11-24", second
+  bullet*), fixpp writes the record of C-3.3, then sends one Logout
   whose Text(58) is exactly `TestRequest unanswered, TestReqID <id>`, `<id>` being the TestReqID(112) of the
   TestRequest it sent, and the connection closes as soon as the write has returned. fixpp does not wait for the
   peer's Logout. The write is limited (C-2.7): when it has not returned `logout_disconnect_timeout_ms` after its
@@ -256,7 +259,12 @@ Common rules:
   resend answer past the last frame + 2T is written on the release, and the session gives up T after that write if
   nothing arrives, also when none was pending before the hold; a frame, or the TestReqID answer (C-5.4), inside that
   window keeps the session. The give-up runs strictly after its instant, by one clock tick (R-3's "after 2T"). Every
-  instant, that tick included, saturates at the clock's range. *(Rewritten 2026-11-24 for the owner's ruling; until then
+  instant, that tick included, saturates at the clock's range. The hold is capped (the owner's cap ruling, spec
+  clarification "Session 2026-11-24", second bullet; *added 2026-11-24*): while a TestRequest is pending, a TestRequest
+  that fell due and is still held (not yet written) strictly after the last inbound frame + 3T is given up then, as
+  C-3.1, naming the pending TestRequest; the give-up is final and its Logout's write limit (C-2.7) counts from that
+  decision, before the replay-gate wait. One released and written before the cap keeps its fresh window. With no
+  TestRequest pending before the hold, the hold is not capped (an implementation reading of the ruling; L-105-f). *(Rewritten 2026-11-24 for the owner's ruling; until then
   this clause made the give-up eligible whatever arrived since the TestRequest, spec clarification "Session 2026-11-21
   (implementation, Phase 6)".)*
 - C-6.3 The outbound Heartbeat every HeartBtInt of outbound silence, as today, except while a TestRequest is pending
@@ -355,7 +363,8 @@ Common rules:
     (C-5.1). While a TestRequest is pending it stays true until the give-up, strictly after 2T of inbound silence, and a
     frame that does not answer the TestRequest defers that give-up (C-6.2; *amended 2026-11-24, owner ruling, spec
     clarification "Session 2026-11-24":* or strictly after T from the TestRequest's write when it was written later,
-    held behind a resend answer).
+    held behind a resend answer; *amended 2026-11-24, the owner's cap ruling:* or, when a TestRequest then due is still
+    held behind a resend answer, strictly after 3T from the last inbound frame).
   - `fixpp_session_send`: during an R-2 wait after Active it is refused with `session_invalid_state_for_send` (W-10) and
     returns at once; it does not wait for the wait's end.
   - `fixpp_session_close`: graceful during the wait or during an ending Logout's write, it returns once the wait ends
@@ -369,8 +378,12 @@ Common rules:
     `fixpp_session_is_established` turning false, and the record (L-105-c).
   - Reentrancy (Article X §5; `.specify/api-contract.md` §7.6): every annotation stays as it is.
     `fixpp_session_close` called from the logout callback that the wait's end fires is the existing reentrant case:
-    one close (C-1.a; `ConnectionClose105.OnLogoutCallsClose_OneClose`). `fixpp_session_send` called from the
-    application callback during the wait returns `session_invalid_state_for_send` (W-10), with no wait (tasks.md T114).
+    one close (C-1.a; `ConnectionClose105.OnLogoutCallsClose_OneClose`). `fixpp_session_send` is not called from
+    inside the application callback, during the wait as at any other time: it blocks on the engine's worker, which is
+    the thread running the callback, and so deadlocks (FR-013a, as `include/fix/c_api/session.h` and
+    `tests/capi/send_recv_test.cpp` state; unchanged by 105). *Corrected 2026-11-24 (orchestrator ruling, tasks.md
+    T114): this sentence read "`fixpp_session_send` called from the application callback during the wait returns
+    `session_invalid_state_for_send` (W-10), with no wait", which a probe showed false at the head.*
 - **Lifetime at the C ABI.** The C ABI has no Session destroy: `fixpp_engine_destroy` drives `Engine::stop()` to
   completion, and stop's step 4 runs `Session::close(terminal)` on each session after its join (the step list of
   `Engine::stop` in `src/session/engine.cpp`), so B-103-13's precondition (`close()` before destruction) holds for every

@@ -248,12 +248,29 @@ Owner ruling (handover item 7, option "fresh window"), tasks.md T119a.
   names is the one written on the release, a TestRequest that falls due (none pending, or an inbound frame since the
   pending one) is written before any give-up, and the give-up is eligible only when no inbound frame arrived since the
   pending TestRequest. Consequence measured at T119a: while a resend answer holds the gate and such a TestRequest is
-  due, no give-up is decided until the hold ends. Data-model E-4, contract C-6.2 and C-3.1, research D6, `version.h`'s 1.18 history and
+  due, no give-up is decided until the hold ends. *[Superseded for a hold past three thresholds by the owner's cap
+  ruling, the next bullet.]* Data-model E-4, contract C-6.2 and C-3.1, research D6, `version.h`'s 1.18 history and
   `fixpp_session_is_established`'s 1.18 clause state it; the cells are
   `ReplayGate588.R588g_FrameAfterTheTestRequest_HeldPastTwoThresholds_FreshWindowThenGivesUp`,
   `ReplayGate588.R588g_AnswerInsideTheFreshWindow_KeepsTheSession`,
   `ReplayGate588.R588h_NoTestRequestPending_HeldPastTwoThresholds_FreshWindowThenGivesUp` and
   `LivenessTiming105.FreshWindow_IsTheLaterInstant`.
+- Owner ruling (the consequence above escalated; option "cap at 3T"), tasks.md T119b. Q (FR-003, FR-010, R-1, R-3,
+  contract C-3.1, C-6.2): With the fresh window, a TestRequest held behind a resend answer that never finishes (a peer
+  that sends a ResendRequest and then stops reading) is never given up; is the hold bounded? → A: Cap at 3T. If the
+  TestRequest is still held (not yet written) when the clock is past the last inbound frame + 3T, the session gives
+  up then. The give-up is decided there and is final; its Logout goes through R-1's write limit, which counts from the
+  decision (before the replay-gate wait), and the connection closes. A TestRequest released and written before the
+  cap keeps its whole fresh window (the give-up is the later of the last inbound frame + 2T and the write + T).
+  Saturating arithmetic.
+  *Implementation reading (T119b), for the orchestrator to confirm, not owner text:* the cap is strictly after the
+  last inbound frame + 3T by one clock tick, as the other instants (R-3's "after"); it applies while a
+  TestRequest is pending and an inbound frame arrived since it, so the give-up's Text(58) and record name that pending
+  TestRequest, the one the session sent (C-3.1); a hold with no TestRequest pending before it is not capped, as on the
+  base (L-105-f). Data-model E-4, contract C-6.2 and C-3.1, research D6, `version.h`'s 1.18 history and
+  `fixpp_session_is_established`'s 1.18 clause state it; the cells are `HeldTestRequestCap105.*`
+  (`tests/session/test_105_liveness_timing.cpp`, both roles) and
+  `LivenessTiming105.HeldCap_IsThreeThresholdsAndTheGuard`.
 
 ## User Scenarios & Testing *(mandatory)*
 

@@ -733,8 +733,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  * silence; while one is pending, *out_established stays true until the give-up,
  * strictly after twice that silence counted from the last inbound frame, or strictly
  * after that threshold from the TestRequest's write when it was written later (held
- * behind a resend answer), and a frame that does not answer the TestRequest defers the
- * give-up. The give-up sends a Logout
+ * behind a resend answer), or, when a TestRequest then due is still held behind a resend
+ * answer, strictly after three times that threshold from the last inbound frame, and a
+ * frame that does not answer the TestRequest defers the give-up. The give-up sends a Logout
  * whose Text(58) names the TestRequest and closes the connection once that Logout's
  * write has returned, with no wait. While a TestRequest is pending, a Heartbeat whose
  * TestReqID(112) is that of an earlier TestRequest the session sent on this

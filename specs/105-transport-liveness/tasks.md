@@ -1125,13 +1125,13 @@ remaining reference.
 
 ## Phase 9: Polish & cross-cutting — C ABI 1.18 and the Python surface (research D9; contract C-9)
 
-- [ ] T114 [P] RED first, the cells committed before their base reading: C-driven witnesses in `tests/capi/recovery_liveness_capi_witness_test.cpp`, each with a positive
+- [X] T114 [P] RED first, the cells committed before their base reading: C-driven witnesses in `tests/capi/recovery_liveness_capi_witness_test.cpp`, each with a positive
   control (the session shown live first, or a well-formed message afterwards reaching `cb`): `fixpp_session_is_established`
   true during an R-2 wait after Active and false after its end; `fixpp_session_send` refused during the wait;
   `fixpp_session_close` graceful and terminal during the wait (one close each); `fixpp_session_register_callback` and
-  `fixpp_session_register_send_callback` delivery during the wait; `fixpp_session_send` called from inside the
+  `fixpp_session_register_send_callback` delivery during the wait; ~~`fixpp_session_send` called from inside the
   application callback during the wait, refused with `session_invalid_state_for_send` and returning (contract C-9,
-  reentrancy); the peer's EOF after an ending through the C ABI. RED on the
+  reentrancy)~~ (dropped, below); the peer's EOF after an ending through the C ABI. RED on the
   base before the fix. Base reading (the Execution rules' overlay covers `tests/session/` only): overlay this file (and its
   support header, if this task edits it) on `$B` from the commit holding the cells, reconfigure (the reading counts only after
   it returned 0), build only its own target `capi_recovery_liveness_test`, and run it with the new cells filtered. Its labels
@@ -1146,7 +1146,10 @@ remaining reference.
   `PeersLogout_EndsTheWait_PeerReadsEofAtOnce`); on `$B` 7 ran, 7 RED, rc 1, no abort (evidence file, Phase 9, T114).
   Not written, escalated: `fixpp_session_send` from inside the application callback during the wait. On the head the
   call blocks (`fut.get()` on the engine's worker, which runs the callback), as `session.h`'s FR-013a annotation and
-  `send_recv_test.cpp`'s header state; contract C-9's reentrancy bullet says it returns.
+  `send_recv_test.cpp`'s header state; contract C-9's reentrancy bullet said it returns.
+  Done: reentrancy cell dropped: C-9 corrected to FR-013a (orchestrator ruling 2026-11-24). `session.h` and
+  `version.h` carry no such claim (`git grep -n session_invalid_state_for_send -- include/fix/c_api` reports
+  nothing); checklist `c-abi.md` CHK011's disposition annotated.
 - [X] T115 `include/fix/c_api/version.h`: `FIXPP_C_ABI_VERSION_MINOR` 18 and the 1.18 history entry, marked **BREAKING** ([const §X.7]: the version comment carries
   what no declaration carries), the counterparty's side:
   every ending closes the connection; the unanswered TestRequest's Logout; the R-2 wait; the write limit on every ending
@@ -1188,8 +1191,31 @@ remaining reference.
   Mmax (the later instant dropped) RED by all three cells and `LivenessTiming105.FreshWindow_IsTheLaterInstant`, Mans
   (the no-frame-since term dropped) RED by both R588g cells, R588h an expected survivor (no TestRequest pending before
   its hold); `-L 105` 2/2, the 538 binary unfiltered 41/41, the 249-entry gate 249/249 (evidence file, Phase 9, T119a).
-  Escalated: the no-frame-since eligibility is an implementation reading; with it a hold that never ends is no longer
-  ended by the give-up (measured, evidence file, Phase 9, T119a).
+  Escalated: the no-frame-since eligibility is an implementation reading; its consequence for a hold that never ends
+  was ruled by the owner (the cap at 3T) and is T119b.
+- [X] T119b [US3] Held TestRequest capped at 3T (owner 2026-11-24, "cap at 3T"). If the TestRequest is still held (not
+  yet written) at the last inbound frame + 3T, the session gives up then: the give-up is decided (final) and R-1's
+  Logout goes through the existing R-1 budget and write limit (the budget starts at the decision, before the replay
+  gate), then the connection closes. One released and written before the cap keeps its fresh window (the later of
+  last + 2T and write + T). Saturating. (a) spec.md Clarifications "Session 2026-11-24" second bullet, data-model E-4,
+  contract C-6.2 and C-3.1, research D6, amended in place, plus `version.h`'s 1.18 history and
+  `fixpp_session_is_established`'s 1.18 clause (manifest regenerated); (b) RED first: the stuck-hold cell and a
+  boundary cell; (c) the code; (d) a named mutant in `$M` (the cap dropped) RED by the stuck-hold cells; R588g, R588h
+  and the FreshWindow guard GREEN.
+  Done: cells `a500c401` (`HeldTestRequestCap105.*`, both roles: three stuck-hold cells, one step past the cap,
+  parked in the TestRequest arm, parked in the Heartbeat arm; the boundary at exactly 3T; a release after the decision),
+  on the head before the change (`1c9015c9`'s `src/`): 10 ran, the 8 capping cells RED, the 2 boundary cells GREEN by
+  construction (the head never gives up there), rc 1, no abort. Code `d83ae13a` (`detail::held_test_request_cap`;
+  the give-up also at the held cap; one gate wait for the Heartbeat and TestRequest arms, joined with the cap while a
+  TestRequest is pending); [guard] `LivenessTiming105.HeldCap_IsThreeThresholdsAndTheGuard`. Mutants in `$M`
+  (the range applied as a patch, `-DFIXPP_105_STATIC_GUARDS=OFF`): Mcap (the cap dropped) RED by the 8 capping cells;
+  Mjoin (no join) RED by both parked cells; Mtronly (the Heartbeat arm's wait not joined) RED by the Heartbeat-parked
+  cell; Mlate (the guard 1 s) RED by the 8 capping cells and the guard cell; Mearly (no guard) and Mtwo (two
+  thresholds) RED by the boundary cells and the guard cell, Mtwo also by both R588g cells; every other cell GREEN
+  under each, R588g, R588h and `FreshWindow_IsTheLaterInstant` included (evidence file, Phase 9, T119b).
+  Escalated: the cap applies while a TestRequest is pending (the give-up names it); a hold with none pending before
+  it is not capped, as on the base (L-105-f, #714): whether the cap applies there, and what its Text(58) names, is
+  open (spec.md Clarifications "Session 2026-11-24", second bullet's implementation reading).
 
 ---
 

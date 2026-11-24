@@ -657,6 +657,14 @@ unbounded memory, where the generator's monotonic counter gives the same answer 
   give-up instant is the later of that instant and the pending TestRequest's write + T + 1 ns, eligible only when no
   inbound frame arrived since it (contract C-6.2), in `detail::test_request_give_up_instant`'s three-argument overload;
   its `constexpr` cell is `LivenessTiming105.FreshWindow_IsTheLaterInstant`.
+- *Amended 2026-11-24 (owner ruling, spec clarification "Session 2026-11-24", second bullet, the cap at 3T):* while a
+  TestRequest is pending, a TestRequest that fell due and is still held behind a resend answer strictly after the last
+  inbound frame + 3T is given up there (`detail::held_test_request_cap`, four saturating steps, the last the 1 ns
+  guard); the decision is final and enters R-1's ending, so its write limit counts from it; the loop's gate wait for
+  the Heartbeat and the TestRequest joins the gate's wake with `detail::await_deadline` on the session's clock at
+  that cap, and tests its own cancellation after the join, whose arms do not throw (contract C-6.2, C-3.1). With no
+  TestRequest pending before the hold there is no cap (L-105-f). Its `constexpr` cell is
+  `LivenessTiming105.HeldCap_IsThreeThresholdsAndTheGuard`; the cells are `HeldTestRequestCap105.*`.
 - **No Heartbeat while the TestRequest waits on a silent peer.** With T = 1.2 × HeartBtInt the window from the
   TestRequest to the give-up is longer than HeartBtInt, so a Heartbeat due inside it is not sent while inbound stays
   silent, which is QuickFIX C++'s rule (`needHeartbeat` requires `!testRequest()`). FR-010 and contract C-6.3 state

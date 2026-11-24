@@ -354,7 +354,9 @@
  *  - the session sends a TestRequest after 1.2 times HeartBtInt of inbound silence, where
  *    it sent one after HeartBtInt, and gives up after twice that silence, counted from the
  *    last inbound frame, or that threshold after the TestRequest's write when it was written
- *    later (held behind a resend answer);
+ *    later (held behind a resend answer); while a TestRequest is pending, one then due that
+ *    is still held behind a resend answer three times that threshold after the last inbound
+ *    frame is given up then, its Logout limited as above;
  *  - while a TestRequest is pending, a Heartbeat whose TestReqID(112) is that of an earlier
  *    TestRequest the session sent on this connection neither answers it nor ends the
  *    session; one the session never sent on this connection ends it, on every Heartbeat
