@@ -305,10 +305,11 @@ inline constexpr std::chrono::seconds kDefaultHeartBtInt{30};
     return after_two < after_write ? after_write : after_two;
 }
 
-// 105, the owner's cap ruling (spec.md Clarifications "Session 2026-11-24"; data-model E-4): the
-// instant at which a TestRequest that fell due and is still held behind a resend answer is given
-// up, strictly after three thresholds after `since`, the last inbound frame: since + T, + T, + T,
-// then the 1 ns guard, four saturating steps with no product formed. Precondition: threshold >= 0.
+// 105, the owner's cap ruling (spec.md Clarifications: the held TestRequest's cap; data-model E-4):
+// the instant at which a TestRequest that fell due and is still held behind a resend answer is
+// given up, strictly after three thresholds after `since`, the last inbound frame: since + T, + T,
+// + T, then the 1 ns guard, four saturating steps with no product formed.
+// Precondition: threshold >= 0.
 [[nodiscard]] constexpr fixpp::core::steady_time_point held_test_request_cap(
     fixpp::core::steady_time_point since, std::chrono::milliseconds threshold) noexcept {
     return deadline_after(

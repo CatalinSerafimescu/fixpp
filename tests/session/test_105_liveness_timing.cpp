@@ -962,13 +962,13 @@ TEST(EngineRegister105, ThresholdNegative_InvalidConfig) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════
-// T119b (tasks.md; the owner's cap ruling, spec.md Clarifications "Session 2026-11-24"; data-model
-// E-4; contract C-6.2, C-3.1): a TestRequest that fell due while a resend answer holds the replay
-// gate, with a TestRequest pending and an inbound frame since it, is given up once the clock is
-// strictly past three thresholds after the last inbound frame and it is still held; the give-up is
-// decided there and its Logout takes R-1's write limit from that decision. Here the peer's
-// ResendRequest is that inbound frame and its answer's retrieve is held in a GateStore until the
-// cell releases it. HeartBtInt and T are both kHb; instants are mock-clock offsets from the
+// T119b (tasks.md; the owner's cap ruling, spec.md Clarifications: the held TestRequest's cap;
+// data-model E-4; contract C-6.2, C-3.1): a TestRequest that fell due while a resend answer holds
+// the replay gate, with a TestRequest pending and an inbound frame since it, is given up once the
+// clock is strictly past three thresholds after the last inbound frame and it is still held; the
+// give-up is decided there and its Logout takes R-1's write limit from that decision. Here the
+// peer's ResendRequest is that inbound frame and its answer's retrieve is held in a GateStore until
+// the cell releases it. HeartBtInt and T are both kHb; instants are mock-clock offsets from the
 // ResendRequest. A held wait the loop parks in is shown by the gate's timer_waits.
 // ════════════════════════════════════════════════════════════════════════════════════════
 

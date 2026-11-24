@@ -8431,7 +8431,8 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
     //     has T from that write to answer. With T > 0 the TestRequest instant is at or before
     //     the give-up instant (equal only when both saturate at steady_time_point::max()),
     //     so while the TestRequest instant is eligible the sleep set holds that one;
-    //   - the owner's cap ruling (spec.md Clarifications "Session 2026-11-24"): a TestRequest
+    //   - the owner's cap ruling (spec.md Clarifications: the held TestRequest's cap): a
+    //   TestRequest
     //     that falls due while a resend answer holds the gate waits for the answer's end, and,
     //     with a TestRequest pending, for at most its cap, last_inbound + T + T + T + 1 ns,
     //     saturating; at the cap, still held, it is given up there, naming the pending one;
@@ -8492,9 +8493,9 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                 pending_test_req_id_.empty() || last_inbound_steady_ > tr_sent_at;
             const bool test_request =
                 answerable && now >= detail::deadline_after(last_inbound_steady_, threshold);
-            // 105, the owner's cap ruling (spec.md Clarifications "Session 2026-11-24"; data-model
-            // E-4): a TestRequest that fell due, with one pending and an inbound frame since it,
-            // and is still held behind a resend answer at its cap is given up there.
+            // 105, the owner's cap ruling (spec.md Clarifications: the held TestRequest's cap;
+            // data-model E-4): a TestRequest that fell due, with one pending and an inbound frame
+            // since it, and is still held behind a resend answer at its cap is given up there.
             const bool held_cap =
                 test_request && replay_gate_.exclusive && !pending_test_req_id_.empty() &&
                 now >= detail::held_test_request_cap(last_inbound_steady_, threshold);
