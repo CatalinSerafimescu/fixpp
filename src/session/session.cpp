@@ -3350,15 +3350,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout
         cfg_.target_comp_id, reason_text, cfg_.begin_string, st.value);
     bool transmitted = false;
     if (lo_result && !write_refused) {
-        struct leave_on_unwind {
-            Session* s;
-            int unwinding_at = std::uncaught_exceptions();
-            ~leave_on_unwind() {
-                if (std::uncaught_exceptions() > unwinding_at) {
-                    (void)s->leave_ending_write_(false, false);
-                }
-            }
-        } const leave_guard{.s = this};
+        ending_write_unwind_guard const leave_guard{.s = this};
         // toAdmin before transmit; a throwing callback → terminal-close +
         // app_callback_threw.
         if (!fire_to_admin_(*lo_result)) {
@@ -4038,18 +4030,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logout_leaf_(
     bool tic, std::string_view sending_time, std::string_view text, ending_kind kind, bool* armed,
     bool claimed_mark) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
-    // 105 (data-model E-3): a leaf that leaves the ending state machine on its own path; an
-    // exception (store_then_emit's operation_aborted for a cancelled store call) leaves it while
-    // it unwinds the frame, and a suspended frame destroyed unresumed touches nothing.
-    struct leave_on_unwind {
-        Session* s;
-        int unwinding_at = std::uncaught_exceptions();
-        ~leave_on_unwind() {
-            if (std::uncaught_exceptions() > unwinding_at) {
-                (void)s->leave_ending_write_(false, false);
-            }
-        }
-    };
     // 103 (research D4.6): the Logout owner, tested and set before the stamp's use, the
     // number peek and the first suspension. With a Logout already in flight, or the session
     // no longer Active, the leaf writes none and returns success. The only clear is
@@ -4074,7 +4054,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logout_leaf_(
         (void)leave_ending_write_(false, false);
         co_return fixpp::core::expected_t<void>{};
     }
-    leave_on_unwind const leave_guard{.s = this};
+    // 105 (data-model E-3): the leaf leaves the ending state machine on its own path, and by
+    // this guard while an exception unwinds the frame.
+    ending_write_unwind_guard const leave_guard{.s = this};
     std::array<std::byte, 256> lo_buf{};
     const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
     auto lo_result = fixpp::session::build_logout(
@@ -4119,15 +4101,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logon_sent_logou
         ending_entry::refused) {
         co_return fixpp::core::expected_t<void>{};
     }
-    struct leave_on_unwind {
-        Session* s;
-        int unwinding_at = std::uncaught_exceptions();
-        ~leave_on_unwind() {
-            if (std::uncaught_exceptions() > unwinding_at) {
-                (void)s->leave_ending_write_(false, false);
-            }
-        }
-    } const leave_guard{.s = this};
+    ending_write_unwind_guard const leave_guard{.s = this};
     std::array<std::byte, 256> lo_buf{};
     const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
     auto lo_result = fixpp::session::build_logout(
@@ -9589,70 +9563,20 @@ Session::honor_peer_next_expected_(std::string_view raw_789, bool /*present_789*
     // peer (789 = N_pre) would mis-classify as behind-by-one. The resend RANGE below
     // still reads the live peek_outbound() (INV-NEX-RANGE, below in this function).
     const seqnum_t n789 = next_outbound_ref;
-    if (x789 == 0) {
-        // Present-but-invalid (parse→0: empty / non-digit / overflow).
+    if (x789 == 0 || x789 > n789) {
+        // X == 0: present-but-invalid (parse→0: empty / non-digit / overflow).
         // Evaluated FIRST (D-10): a parse→0 value must never reach the X<N branch
         // (which would clamp begin to 1 and replay [1,N-1]).
         // [contract C6, I-NEX-9, D-10]
-        {
-            std::array<std::byte, 256> lo_buf{};
-            const auto lo_st52 = effective_clock_ ? stamp_sending_time(*effective_clock_,
-                                                                       cfg_.sending_time_precision)
-                                                  : SendingTimeStamp{};
-            const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
-            auto lo_result = fixpp::session::build_logout(
-                std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq, cfg_.sender_comp_id,
-                cfg_.target_comp_id, "NextExpectedMsgSeqNum invalid", cfg_.begin_string,
-                lo_st52.value);
-            // 105 (ruling R-789; research D2 item 11): an R-2 ending before Active, entered
-            // here; armed before the Disconnected below (E-3 rows 1, 3, 6).
-            bool const write_refused =
-                enter_ending_write_(ending_kind::r2, co_await asio::this_coro::executor) ==
-                ending_entry::refused;
-            bool transmitted = false;
-            if (lo_result && !write_refused) {
-                struct leave_on_unwind {
-                    Session* s;
-                    int unwinding_at = std::uncaught_exceptions();
-                    ~leave_on_unwind() {
-                        if (std::uncaught_exceptions() > unwinding_at) {
-                            (void)s->leave_ending_write_(false, false);
-                        }
-                    }
-                } const leave_guard{.s = this};
-                // 019 FR-008/010: toAdmin before every engine-originated admin emit.
-                // [gate-b/r1 FQ-2: mirror the file-wide fire_to_admin_-before-assign_outbound
-                // admin-emit ordering]
-                if (!fire_to_admin_(*lo_result)) {
-                    (void)leave_ending_write_(false, false);
-                    record_state_transition_(fsm_state::Disconnected);
-                    co_return std::unexpected(fixpp::core::error::app_callback_threw);
-                }
-                auto assign_r = co_await seqnum_mgr_.assign_outbound();
-                if (assign_r) {
-                    auto emit_r = co_await store_then_emit(
-                        lo_seq, *lo_result, arm, true, wire_reset_exemption::none, &transmitted);
-                    // What store_then_emit returns and when it throws: its declaration in
-                    // session.hpp.
-                    (void)emit_r;
-                }
-            }
-            (void)leave_ending_write_(transmitted, false);
-        }
-        // 093 plan OD-25: the Logout's store and write are suspensions.
-        if (logon_arm_superseded_(arm)) {
-            co_return logon_789_outcome::superseded;
-        }
-        record_state_transition_(fsm_state::Disconnected);
-        co_return logon_789_outcome::ended_disconnected;
-    } else if (x789 > n789) {
         // X > N: peer claims to have received frames we haven't sent yet.
         // Sequence-integrity violation: Logout(text) + disconnect.
         // [contract C6, I-NEX-4, D-6]
-        {
+        // The two endings differ only in the Logout's Text(58).
+        char text_buf[80];
+        std::string_view text_sv = "NextExpectedMsgSeqNum invalid";
+        if (x789 != 0) {
             // Build "NextExpectedMsgSeqNum too high, expecting N but received X".
             // Stack-only: use a fixed-size char buffer (N and X are seqnum_t ≤10 digits each).
-            char text_buf[80];
             char* tp = text_buf;
             const char* prefix = "NextExpectedMsgSeqNum too high, expecting ";
             for (const char* p = prefix; *p; ++p) *tp++ = *p;
@@ -9662,8 +9586,9 @@ Session::honor_peer_next_expected_(std::string_view raw_789, bool /*present_789*
             for (const char* p = mid; *p; ++p) *tp++ = *p;
             auto [x_end, x_ec] = std::to_chars(tp, text_buf + sizeof(text_buf), x789);
             if (x_ec == std::errc{}) tp = x_end;
-            const std::string_view text_sv{text_buf, static_cast<std::size_t>(tp - text_buf)};
-
+            text_sv = std::string_view{text_buf, static_cast<std::size_t>(tp - text_buf)};
+        }
+        {
             std::array<std::byte, 256> lo_buf{};
             const auto lo_st52 = effective_clock_ ? stamp_sending_time(*effective_clock_,
                                                                        cfg_.sending_time_precision)
@@ -9679,15 +9604,7 @@ Session::honor_peer_next_expected_(std::string_view raw_789, bool /*present_789*
                 ending_entry::refused;
             bool transmitted = false;
             if (lo_result && !write_refused) {
-                struct leave_on_unwind {
-                    Session* s;
-                    int unwinding_at = std::uncaught_exceptions();
-                    ~leave_on_unwind() {
-                        if (std::uncaught_exceptions() > unwinding_at) {
-                            (void)s->leave_ending_write_(false, false);
-                        }
-                    }
-                } const leave_guard{.s = this};
+                ending_write_unwind_guard const leave_guard{.s = this};
                 // 019 FR-008/010: toAdmin before every engine-originated admin emit.
                 // [gate-b/r1 FQ-2: mirror the file-wide fire_to_admin_-before-assign_outbound
                 // admin-emit ordering]

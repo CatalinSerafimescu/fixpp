@@ -46,6 +46,7 @@
 // _corpus Tier-1 gate (tests/sync/CMakeLists.txt) covers this file.
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/session/message_store.hpp>  // 008-message-store — MessageStore complete type
+#include <exception>   // std::uncaught_exceptions: ending_write_unwind_guard
 #include <functional>
 #include <memory>
 #include <memory_resource>
@@ -2178,6 +2179,18 @@ private:
     // an R-2 that was transmitted, not cut, claimed no pending mark and whose session is still in
     // the state it entered from; otherwise none. Returns whether it armed. Synchronous.
     bool leave_ending_write_(bool transmitted, bool claimed_mark) noexcept;
+    // An ending Logout's writer holds one from its write's start: while an exception unwinds the
+    // frame (store_then_emit's operation_aborted for a cancelled store call) it leaves writing, as
+    // leave_ending_write_(false, false); a suspended frame destroyed unresumed touches nothing.
+    struct ending_write_unwind_guard {
+        Session* s;
+        int unwinding_at = std::uncaught_exceptions();
+        ~ending_write_unwind_guard() {
+            if (std::uncaught_exceptions() > unwinding_at) {
+                (void)s->leave_ending_write_(false, false);
+            }
+        }
+    };
     void wake_ending_logout_bound_() noexcept {
         if (ending_logout_wake_) {
             ending_logout_wake_();
