@@ -1258,7 +1258,8 @@ TEST(LogoutWait105Direct, DriveReconnectDuringAPreActiveWait_BoundYieldsToTheDra
 namespace t143a {
 // The LogonSent refusals of a direct initiator; each writes no Logout here, and the session ends.
 // When a bound ran, its exit closes the connection at once; with no bound (its spawn refused) the
-// connection closes at the session's next call, as on every direct Session.
+// connection closes at the session's next call: a direct Session has no pump to close it
+// (contract C-1.c).
 void expect_no_logout(t105::DirectRig& d, bool closed_at_once, const char* site) {
     EXPECT_EQ(d.started("5"), 0U) << site << ": a Logout was written:" << wire_of(d);
     EXPECT_EQ(d.s.state(), fsm_state::Disconnected) << site;
