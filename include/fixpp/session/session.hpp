@@ -1967,8 +1967,8 @@ private:
     // its destructor decrements it. It is the frame's parameter, so the frame owns it from its
     // creation and releases the counter whether or not the body ran, an unstarted frame that
     // a throwing co_spawn destroys included. A moved-from hold releases nothing. It touches only
-    // the counter. 105 (T129) makes the too-high Logout bound's hold the one class for every such
-    // counter (the close frame's and the ending Logout bound's too); the names stay as aliases.
+    // the counter. 105 (T129): the one hold class for such counters; each counter's own hold name
+    // is an alias of it.
     class counter_join {
     public:
         explicit counter_join(std::shared_ptr<std::atomic<int>> counter) noexcept
@@ -2163,9 +2163,9 @@ private:
     // The connection's establishment deadline on engine_.clock, handed over once by an Engine's
     // read pump (session_engine_access::set_establishment_deadline); empty on a direct Session.
     std::optional<fixpp::core::steady_time_point> establishment_cap_;
-    // A connection's start (open(), install_reconnected_transport, attach_accepted_transport):
-    // no ending Logout and no establishment cap (data-model E-3 row 17), and a new set of earlier
-    // TestReqIDs from test_request_id_floor_ (research D5; data-model E-4). Synchronous.
+    // A connection's start: no ending Logout and no establishment cap (data-model E-3 row 17), and
+    // a new set of earlier TestReqIDs from test_request_id_floor_ (research D5; data-model E-4).
+    // Synchronous. Its callers: grep -n 'begin_connection_()' src/session/session.cpp
     void begin_connection_() noexcept;
     // The bound's wake, in peer_logout_wake_'s shape.
     std::function<void()> ending_logout_wake_;
@@ -2229,8 +2229,8 @@ private:
     // takes too (row 16). Every step is noexcept.
     void expire_ending_wait_(std::uint32_t gen) noexcept;
     // The close frame on `transport` (the live one, read by the caller; nothing when null), with
-    // D-g's synchronous fallback; it tests nothing else and leaves the latch alone (the bound's
-    // spawns, data-model E-2 I-2's exceptions).
+    // D-g's synchronous fallback. It leaves the latch alone and makes no test of the session's
+    // state (the bound's spawns, data-model E-2 I-2's exceptions).
     void spawn_connection_close_(std::shared_ptr<fixpp::transport::Transport> transport) noexcept;
     // The R-2 helper (research D2 item 1) after Active: claims a pending mark, writes the Logout
     // through inbound_logout_leaf_, then arms the wait or records Disconnected; absorbed while an

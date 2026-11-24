@@ -988,9 +988,10 @@ Session::inbound_depth_holder::~inbound_depth_holder() {
     }
 }
 
-// 105 (T129): the one join of detached frames' counters, in drain_for_reconnect_ and close(): a
-// post on the caller's executor until every counter named reads 0, all of them re-read after each
-// post, and no await at all when none is held. A spin and not a wake: a waker would be a member
+// 105 (T129): the one join of detached frames' counters (its users: grep -n
+// 'FIXPP_JOIN_COUNTERS(' src/session/session.cpp): a post on the caller's executor until every
+// counter named reads 0, all of them re-read after each post, and no await at all when none is
+// held. A spin and not a wake: a waker would be a member
 // every hold's destructor reaches, and a hold is destroyed wherever its frame ends, at its
 // execution context's shutdown outside any handler included. A macro and not a coroutine, for
 // FIXPP_INBOUND_SPLIT_AWAIT's reason: a co_await of a helper is a cancellation check of its own,
@@ -8608,7 +8609,7 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                     cfg_.target_comp_id, {}, cfg_.begin_string, st52_hb.value);
                 if (hb_result) {
                     // 019 T014: toAdmin before liveness Heartbeat. [FR-008/010]
-                    // FIX-3 (gate-b/r1): throw → terminal-close + co_return.
+                    // A throw → terminal-close + co_return.
                     if (!fire_to_admin_(*hb_result)) {
                         record_state_transition_(fsm_state::Disconnected);
                         co_return;

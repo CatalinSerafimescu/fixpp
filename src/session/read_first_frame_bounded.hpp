@@ -266,8 +266,8 @@ inline constexpr std::chrono::seconds kDefaultHeartBtInt{30};
 
 // 105 (research D8; data-model E-7): the end of a rate-bounded log record's window opened at
 // `now`, max(HeartBtInt, 1 s) later, HeartBtInt being the configured heartbeat_interval or
-// kDefaultHeartBtInt; it saturates at steady_time_point::max() as deadline_after does. The
-// session's records (Session::admit_log_record_) and the accept loop's pre-session record read it.
+// kDefaultHeartBtInt; it saturates at steady_time_point::max() as deadline_after does. Its
+// readers: git grep -n 'log_rate_window_end(' -- src
 [[nodiscard]] constexpr fixpp::core::steady_time_point log_rate_window_end(
     fixpp::core::steady_time_point now,
     std::optional<std::chrono::seconds> heartbeat_interval) noexcept {
