@@ -33,6 +33,7 @@
 
 #include <array>
 #include <asio/co_spawn.hpp>
+#include <asio/error.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
@@ -46,12 +47,15 @@
 #include <fixpp/session/session_event.hpp>
 #include <functional>
 #include <future>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <thread>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -485,6 +489,98 @@ TEST_P(LogoutWait105, Bound_DoesNotSlideWithAnAnswerSent) {
         250ms);
     EXPECT_EQ(o.answered_heartbeats, 1U) << "the TestRequest mid-wait was not answered";
     expect_bound(o, "Bound_DoesNotSlide");
+}
+
+// T141a — the bound's close behind a peer that reads only after it (B-105-9). The pump's read is
+// posted when the bound closes the connection. The peer pauses its read once Active, so the
+// Reject and the Logout wait unread in its socket, and reads again only after the close: it must
+// read both, then EOF. Where the close resets the connection instead of ending it, the peer's
+// socket discards what it had not read and the read ends in that reset. The pause is the peer's
+// own cancel(); it is a positive control that the cancel ended the read and that nothing was read
+// before the resume. Competing timeouts as T043's.
+struct LateReadReading {
+    bool up = false;
+    bool paused = false;            // the peer's read ended in operation_aborted at the pause
+    bool logout_handed = false;     // toAdmin saw the session's Logout
+    bool active_before = false;     // still Active at the bound - 1 ms
+    bool ended = false;             // left Active, onLogout once, before the resume
+    bool unread_at_resume = false;  // nothing read between the pause and the resume
+    bool hang_up_before_read = false;
+    bool eof = false;
+    std::string after;  // what the peer read after the resume
+    std::string why;
+};
+
+LateReadReading run_bound_late_read(session_role role, const char* site) {
+    WaitCell c;
+    LateReadReading o;
+    bool saw_logout = false;
+    c.app->to_admin_hook = [&](std::string_view type) {
+        if (type == "5") saw_logout = true;
+    };
+    auto cfg = route_cfg(c, role, route::sending_time_reject);
+    auto const bound = std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms};
+    o.up = c.start_active(std::move(cfg));
+    auto& peer = c.rig.peer;
+    std::size_t mark = 0;
+    if (o.up) {
+        (void)t105::drive_bounded(c.rig.ioc, 256);
+        std::error_code ec;
+        peer.sock.cancel(ec);
+        o.paused = c.rig.run_until([&] { return peer.read_ended; }) &&
+                   peer.read_ec == asio::error::operation_aborted;
+        peer.read_ended = false;
+        peer.read_ec = {};
+        mark = peer.received.size();
+    }
+    if (o.paused) {
+        // The SendingTime-Reject route: the stale Heartbeat at NextNumIn draws a Reject and the
+        // ending Logout, whose write starts with the clock still.
+        peer.send(pr::message(c.rig.begin_string, "0", 2, "TW", "ISLD", kStaleSendingTime));
+        o.logout_handed = c.rig.run_until([&] { return saw_logout && c.next_in() == 3U; });
+        c.rig.settle();
+        c.advance(bound - 1ms);
+        o.active_before = c.rig.state() == fsm_state::Active;
+        c.rig.clock->advance(1ms);
+        o.ended = c.rig.run_until(
+            [&] { return c.rig.state() != fsm_state::Active && c.app->logouts == 1; });
+        // Wall time for the close's segment, a FIN or a reset, to reach the peer's socket. A
+        // sleep, not settle(): run_for returns early once the io_context has no work left.
+        std::this_thread::sleep_for(std::chrono::milliseconds{300});
+        o.unread_at_resume = !peer.read_ended && peer.received.size() == mark;
+#if defined(FIXPP_TEST_PEER_HANG_UP_READING)
+        o.hang_up_before_read = pr::peer_sees_hang_up(peer);
+#endif
+        peer.start_reading();
+        o.eof = t105::pump_until_peer_read_ends(
+                    c.rig.ioc, [&] { return peer.read_ended; }, kWallCap, site) &&
+                t105::ended_in_eof(peer, site);
+        o.after = c.wire_since(mark);
+    }
+    c.rig.stop();
+    return o;
+}
+
+TEST_P(LogoutWait105, Bound_PeerReadsOnlyAfterTheClose_RejectAndLogoutThenEof) {
+    auto const o = run_bound_late_read(GetParam(), "Bound_PeerReadsOnlyAfterTheClose");
+    ASSERT_TRUE(o.up) << "setup: the session did not reach Active";
+    ASSERT_TRUE(o.paused) << "setup: the peer's cancel did not end its read";
+    EXPECT_TRUE(o.logout_handed) << "setup: the stale Heartbeat drew no Logout";
+    EXPECT_TRUE(o.active_before) << "the session left Active before the bound";
+    EXPECT_TRUE(o.ended) << "the session did not end at the bound";
+    EXPECT_TRUE(o.unread_at_resume) << "the peer read before the close";
+#if defined(FIXPP_TEST_PEER_HANG_UP_READING)
+    EXPECT_TRUE(o.hang_up_before_read) << "the connection was not closed before the peer read";
+#else
+    std::cout << "[ reading  ] Bound_PeerReadsOnlyAfterTheClose: the hang-up reading is not made "
+                 "on this platform"
+              << std::endl;
+#endif
+    EXPECT_EQ(pr::frames_of_type(o.after, "3").size(), 1U)
+        << "the Reject; the peer read: " << o.after;
+    EXPECT_EQ(pr::frames_of_type(o.after, "5").size(), 1U)
+        << "the Logout; the peer read: " << o.after;
+    EXPECT_TRUE(o.eof) << "the peer's read did not end in EOF after the Logout";
 }
 
 // onLogout fires at the wait's end, not at the Logout's write.
