@@ -1389,8 +1389,9 @@ remaining reference.
   the count and any failure, and the result of every `tests/alloc_guard` entry by name (`ctest -N -L alloc_guard` lists them),
   `alloc_guard_093_pump_active_read` (`tests/alloc_guard/test_093_pump_active_read_alloc_guard.cpp`, the pump's Active read
   path, which 105's latch test runs on) among them.
-  Not done, escalated: a full ctest needs every target of the E:-hosted debug tree built, and this branch's header
-  changes (`error.hpp`, `session.hpp`) leave a near-full rebuild there (2910 steps), which the owner's rule excludes;
+  Not done, escalated: a full ctest needs every target of the E:-hosted debug tree built, and that tree's objects
+  outside the gate are stale (`_codegen` rewritten after them, and this branch's `error.hpp`), a near-full rebuild there
+  (2910 steps), which the owner's rule excludes;
   the build was stopped before any ctest; a debug tree does not fit the free space on `/mnt/wsl/fixppbuild`. The
   `-L alloc_guard` entries ran by name in the gate (evidence file, Phase 11, T142 and the gate).
 - [ ] T143 Coverage of added lines (Article IX §1): fresh per-binary profraw, from every binary the `105` label runs (`session_105_seam_tests` included: the
