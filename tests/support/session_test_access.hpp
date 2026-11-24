@@ -236,9 +236,9 @@ struct session_test_access {
         return s.connection_close_counter_->load(std::memory_order_acquire);
     }
     // 105-transport-liveness (data-model E-3): the ending Logout's state and seams.
-    enum class ending_phase : std::uint8_t { none, writing, armed, resolved };
+    using ending_phase = Session::ending_wait_state::phase_t;
     [[nodiscard]] static ending_phase ending_wait_phase(Session const& s) noexcept {
-        return static_cast<ending_phase>(s.ending_wait_.phase);
+        return s.ending_wait_.phase;
     }
     [[nodiscard]] static bool ending_wait_cut(Session const& s) noexcept {
         return s.ending_wait_.cut;
