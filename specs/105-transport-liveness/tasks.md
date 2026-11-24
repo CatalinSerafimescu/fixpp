@@ -1188,6 +1188,8 @@ remaining reference.
   Mmax (the later instant dropped) RED by all three cells and `LivenessTiming105.FreshWindow_IsTheLaterInstant`, Mans
   (the no-frame-since term dropped) RED by both R588g cells, R588h an expected survivor (no TestRequest pending before
   its hold); `-L 105` 2/2, the 538 binary unfiltered 41/41, the 249-entry gate 249/249 (evidence file, Phase 9, T119a).
+  Escalated: the no-frame-since eligibility is an implementation reading; with it a hold that never ends is no longer
+  ended by the give-up (measured, evidence file, Phase 9, T119a).
 
 ---
 
