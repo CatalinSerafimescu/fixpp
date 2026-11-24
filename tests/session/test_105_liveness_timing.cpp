@@ -961,4 +961,205 @@ TEST(EngineRegister105, ThresholdNegative_InvalidConfig) {
     EXPECT_EQ(r.error(), fixpp::core::error::invalid_session_config);
 }
 
+// ════════════════════════════════════════════════════════════════════════════════════════
+// T119b (tasks.md; the owner's cap ruling, spec.md Clarifications "Session 2026-11-24"; data-model
+// E-4; contract C-6.2, C-3.1): a TestRequest that fell due while a resend answer holds the replay
+// gate, with a TestRequest pending and an inbound frame since it, is given up once the clock is
+// strictly past three thresholds after the last inbound frame and it is still held; the give-up is
+// decided there and its Logout takes R-1's write limit from that decision. Here the peer's
+// ResendRequest is that inbound frame and its answer's retrieve is held in a GateStore until the
+// cell releases it. HeartBtInt and T are both kHb; instants are mock-clock offsets from the
+// ResendRequest. A held wait the loop parks in is shown by the gate's timer_waits.
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+enum class held_cap_scene : std::uint8_t {
+    one_step,           // the clock passes the cap in one step from the request
+    parked_tr,          // the loop first waits at the gate in its TestRequest arm
+    parked_hb,          // the loop first waits at the gate in its Heartbeat arm
+    boundary,           // the clock at exactly three thresholds, then the answer released
+    release_after_cap,  // the give-up decided, then the answer released before the write limit
+};
+
+struct HeldCapReading {
+    bool setup = false;  // Active, the first TestRequest read, the request's retrieve held
+    std::string why;     // the setup step that failed
+    std::string tr1;     // TestReqID(112) of the TestRequest before the request
+    std::uint64_t waits_before = 0;  // the gate's timer_waits once the request is held
+    std::uint64_t waits_parked = 0;  // ... after the parking step (parked scenes)
+    bool active_parked = false;      // Active after the parking step (parked scenes)
+    std::string sent_parked;         // what the peer read after the request, at that step
+    bool active_at_cap = false;      // Active after the step to the cap
+    std::size_t records_at_cap = 0;  // give-up records after the step to the cap
+    bool ended = false;              // not Active at the scene's end
+    bool eof = false;                // the peer's read ended in EOF
+    std::string after;               // what the peer read after the request
+    std::vector<fixpp::log::Record> records;
+};
+
+HeldCapReading run_held_cap(session_role role, held_cap_scene scene, const char* site) {
+    auto app = std::make_shared<LivenessApp>();
+    pr::Rig rig{app};
+    t105::LogCapture log;
+    auto st = std::make_shared<t105::gate_store_state>();
+    auto cfg = rig.cfg(role);
+    cfg.heartbeat_interval = kHb;
+    cfg.test_request_threshold = std::chrono::milliseconds{kHb};
+    cfg.logger_override = log.logger;
+    cfg.store_factory = std::make_shared<t105::GateStoreFactory>(st);
+    auto const write_limit = std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms};
+    constexpr ns kT = kHb;
+    HeldCapReading r;
+    auto gate_waits = [&] {
+        auto const s = rig.session();
+        return s ? session_test_access::replay_gate(*s).timer_waits : 0U;
+    };
+    auto records_now = [&] { return log.records_of(FIXPP_FORMAT_ID(kGiveUpFormat)).size(); };
+    std::size_t mark = 0;
+    bool up = rig.start(std::move(cfg)) && rig.to_active();
+    if (!up) r.why = "not Active";
+    if (up) {
+        auto const tr = t105::advance_until_msg_type(
+            *rig.clock, rig.ioc, [&] { return rig.peer.received; }, "1", 0, 1s,
+            t105::liveness_wire_cap(kHb, 1s), site);
+        up = tr.has_value();
+        if (!up) r.why = "no first TestRequest";
+        if (up) r.tr1 = pr::field_value(tr->frame, "112");
+    }
+    if (up) {
+        // One second after the TestRequest, so the request is an inbound frame since it.
+        (void)t105::advance_and_drive(*rig.clock, rig.ioc, 1s, 64);
+        st->hold_when = [](t105::store_call k, seqnum_t) {
+            return k == t105::store_call::retrieve;
+        };
+        mark = rig.peer.received.size();
+        rig.peer.send(rig.msg("2", 2,
+                              "7=1\x01"
+                              "16=0\x01"));
+        up = rig.run_until([&] { return st->parked == 1U; });
+        if (!up) r.why = "the request's retrieve was not held";
+    }
+    if (up) {
+        r.setup = true;
+        r.waits_before = gate_waits();
+        ns at{0};
+        auto step_to = [&](ns target) {
+            rig.clock->advance(target - at);
+            at = target;
+            (void)t105::drive_bounded(rig.ioc, 256);
+        };
+        ns const cap = 3 * kT + 1ms;
+        if (scene == held_cap_scene::parked_tr || scene == held_cap_scene::parked_hb) {
+            step_to(scene == held_cap_scene::parked_tr ? kT + 1s : kT - 500ms);
+            r.waits_parked = gate_waits();
+            r.active_parked = rig.state() == fsm_state::Active;
+            r.sent_parked = rig.peer.received.substr(mark);
+        }
+        step_to(scene == held_cap_scene::boundary ? 3 * kT : cap);
+        r.active_at_cap = rig.state() == fsm_state::Active;
+        r.records_at_cap = records_now();
+        if (scene == held_cap_scene::boundary) {
+            st->hold_when = nullptr;
+            st->release_all();
+            // The clock held still: the TestRequest is written on the release itself.
+            (void)rig.run_until(
+                [&] { return !pr::frames_of_type(rig.peer.received.substr(mark), "1").empty(); },
+                kWallCap);
+            r.ended = rig.state() != fsm_state::Active;
+        } else {
+            if (scene == held_cap_scene::release_after_cap) {
+                st->hold_when = nullptr;
+                st->release_all();
+            } else {
+                step_to(cap + write_limit);
+            }
+            r.ended = rig.state() != fsm_state::Active;
+            r.eof = t105::pump_until_peer_read_ends(
+                        rig.ioc, [&] { return rig.peer.read_ended; }, kWallCap, site) &&
+                    t105::ending_of(rig.peer) == t105::peer_ending::eof;
+            r.ended = rig.state() != fsm_state::Active;
+        }
+        r.after = rig.peer.received.substr(mark);
+    }
+    st->hold_when = nullptr;
+    st->release_all();
+    rig.stop();
+    r.records = log.records_of(FIXPP_FORMAT_ID(kGiveUpFormat));
+    return r;
+}
+
+class HeldTestRequestCap105 : public ::testing::TestWithParam<session_role> {};
+
+// The decision at the cap and the write limit from it: one record naming the TestRequest that was
+// written, the session still Active while the Logout waits for the held answer, then the write
+// limit ends the session with no Logout written and the connection closed.
+void expect_capped(HeldCapReading const& r, const char* site) {
+    ASSERT_TRUE(r.setup) << site << ": setup: " << r.why;
+    ASSERT_FALSE(r.tr1.empty()) << site << ": setup";
+    EXPECT_EQ(r.records_at_cap, 1U) << site << ": no give-up decided at the cap";
+    EXPECT_TRUE(r.active_at_cap) << site << ": the give-up did not wait for the held answer";
+    EXPECT_TRUE(r.ended) << site << ": the session was not ended at the write limit";
+    EXPECT_TRUE(r.eof) << site << ": the peer's read did not end in EOF";
+    EXPECT_TRUE(pr::frames_of_type(r.after, "5").empty())
+        << site << ": a Logout past the held answer: " << r.after;
+    EXPECT_TRUE(pr::frames_of_type(r.after, "1").empty())
+        << site << ": a TestRequest after the request: " << r.after;
+    ASSERT_EQ(r.records.size(), 1U) << site << ": the give-up record";
+    EXPECT_EQ(record_test_req_id(r.records.front()), r.tr1) << site << ": test_req_id";
+}
+
+TEST_P(HeldTestRequestCap105, HeldPastThreeThresholds_OneStep_GivesUpThenWriteLimitCloses) {
+    auto const r = run_held_cap(GetParam(), held_cap_scene::one_step, "HeldCap/OneStep");
+    expect_capped(r, "HeldCap/OneStep");
+}
+
+TEST_P(HeldTestRequestCap105, HeldPastThreeThresholds_ParkedInTestRequestArm_GivesUp) {
+    auto const r = run_held_cap(GetParam(), held_cap_scene::parked_tr, "HeldCap/ParkedTr");
+    EXPECT_GT(r.waits_parked, r.waits_before) << "setup: the loop did not wait at the gate";
+    EXPECT_TRUE(r.active_parked) << "setup";
+    EXPECT_TRUE(r.sent_parked.empty())
+        << "setup: a frame inside the held answer: " << r.sent_parked;
+    expect_capped(r, "HeldCap/ParkedTr");
+}
+
+TEST_P(HeldTestRequestCap105, HeldPastThreeThresholds_ParkedInHeartbeatArm_GivesUp) {
+    auto const r = run_held_cap(GetParam(), held_cap_scene::parked_hb, "HeldCap/ParkedHb");
+    EXPECT_GT(r.waits_parked, r.waits_before) << "setup: the loop did not wait at the gate";
+    EXPECT_TRUE(r.active_parked) << "setup";
+    EXPECT_TRUE(r.sent_parked.empty())
+        << "setup: a frame inside the held answer: " << r.sent_parked;
+    expect_capped(r, "HeldCap/ParkedHb");
+}
+
+// The boundary: at exactly three thresholds the held TestRequest is not given up; released there,
+// it is written and the session stays Active.
+TEST_P(HeldTestRequestCap105, HeldAtExactlyThreeThresholds_NotGivenUp_WrittenOnRelease) {
+    auto const r = run_held_cap(GetParam(), held_cap_scene::boundary, "HeldCap/Boundary");
+    ASSERT_TRUE(r.setup) << "setup: " << r.why;
+    EXPECT_TRUE(r.active_at_cap) << "given up at exactly three thresholds";
+    EXPECT_EQ(r.records_at_cap, 0U) << "a give-up record at exactly three thresholds";
+    EXPECT_FALSE(r.ended) << "the session ended after the release";
+    EXPECT_EQ(pr::frames_of_type(r.after, "1").size(), 1U)
+        << "the held TestRequest was not written on the release: " << r.after;
+    EXPECT_TRUE(pr::frames_of_type(r.after, "5").empty()) << r.after;
+    EXPECT_TRUE(r.records.empty()) << "a give-up record";
+}
+
+// The give-up is final: the answer released after the decision and before the write limit, the
+// Logout is written naming the TestRequest that was written, no TestRequest follows, then EOF.
+TEST_P(HeldTestRequestCap105, GivenUpAtTheCap_ReleasedBeforeTheWriteLimit_LogoutThenEof) {
+    auto const r =
+        run_held_cap(GetParam(), held_cap_scene::release_after_cap, "HeldCap/ReleaseAfterCap");
+    ASSERT_TRUE(r.setup) << "setup: " << r.why;
+    EXPECT_EQ(r.records_at_cap, 1U) << "no give-up decided at the cap";
+    EXPECT_TRUE(r.ended) << "the session was not ended";
+    EXPECT_TRUE(r.eof) << "the peer's read did not end in EOF";
+    EXPECT_TRUE(pr::frames_of_type(r.after, "1").empty())
+        << "a TestRequest after the give-up: " << r.after;
+    auto const logouts = pr::frames_of_type(r.after, "5");
+    ASSERT_EQ(logouts.size(), 1U) << r.after;
+    EXPECT_EQ(pr::field_value(logouts.front(), "58"), "TestRequest unanswered, TestReqID " + r.tr1);
+}
+
+FIXPP_105_BOTH_ROLES(HeldTestRequestCap105);
+
 }  // namespace
