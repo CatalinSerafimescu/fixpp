@@ -305,6 +305,17 @@ inline constexpr std::chrono::seconds kDefaultHeartBtInt{30};
     return after_two < after_write ? after_write : after_two;
 }
 
+// 105, the owner's cap ruling (spec.md Clarifications "Session 2026-11-24"; data-model E-4): the
+// instant at which a TestRequest that fell due and is still held behind a resend answer is given
+// up, strictly after three thresholds after `since`, the last inbound frame: since + T, + T, + T,
+// then the 1 ns guard, four saturating steps with no product formed. Precondition: threshold >= 0.
+[[nodiscard]] constexpr fixpp::core::steady_time_point held_test_request_cap(
+    fixpp::core::steady_time_point since, std::chrono::milliseconds threshold) noexcept {
+    return deadline_after(
+        deadline_after(deadline_after(deadline_after(since, threshold), threshold), threshold),
+        std::chrono::nanoseconds{1});
+}
+
 // 105 (research D5; data-model E-4; ruling D-d): the TestReqID window. TestRequest numbers are
 // issued by incrementing a 32-bit counter, so the numbers issued on a connection are those in
 // (floor, next] modulo 2^32, where floor is the counter's value when the connection started and

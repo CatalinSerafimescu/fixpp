@@ -739,6 +739,7 @@ TEST(TestReqIdParse105, PrefixAlone_Mismatch) { EXPECT_TRUE(trw::parse_prefix_al
 
 namespace ltg {
 using fixpp::session::detail::default_test_request_threshold;
+using fixpp::session::detail::held_test_request_cap;
 using fixpp::session::detail::test_request_give_up_instant;
 using std::chrono::milliseconds;
 using std::chrono::seconds;
@@ -782,12 +783,26 @@ constexpr bool fresh_window_is_the_later_instant() {
            test_request_give_up_instant(tp::max() - seconds{5}, tp{}, milliseconds{12000}) ==
                tp::max();
 }
+
+// [guard: the held TestRequest's cap formed as a product, or without its guard] the owner's cap
+// ruling: three thresholds after the last inbound frame, then 1 ns, every step saturating.
+constexpr bool held_cap_is_three_thresholds_and_the_guard() {
+    constexpr auto ns1 = std::chrono::nanoseconds{1};
+    return held_test_request_cap(tp{}, milliseconds{12000}) == tp{} + seconds{36} + ns1 &&
+           held_test_request_cap(tp{} + seconds{7}, milliseconds{10000}) ==
+               tp{} + seconds{37} + ns1 &&
+           held_test_request_cap(tp{}, milliseconds{0}) == tp{} + ns1 &&
+           held_test_request_cap(tp::max(), milliseconds{0}) == tp::max() &&
+           held_test_request_cap(tp::max() - seconds{36}, milliseconds{12000}) == tp::max() &&
+           held_test_request_cap(tp{}, milliseconds::max()) == tp::max();
+}
 }  // namespace ltg
 
 #if FIXPP_105_STATIC_GUARDS
 static_assert(ltg::default_threshold_saturates());
 static_assert(ltg::guard_at_the_saturated_instant());
 static_assert(ltg::fresh_window_is_the_later_instant());
+static_assert(ltg::held_cap_is_three_thresholds_and_the_guard());
 #endif
 
 TEST(LivenessTiming105, DefaultThresholdHelper_Saturates) {
@@ -798,6 +813,9 @@ TEST(LivenessTiming105, GuardAtTheSaturatedInstant) {
 }
 TEST(LivenessTiming105, FreshWindow_IsTheLaterInstant) {
     EXPECT_TRUE(ltg::fresh_window_is_the_later_instant());
+}
+TEST(LivenessTiming105, HeldCap_IsThreeThresholdsAndTheGuard) {
+    EXPECT_TRUE(ltg::held_cap_is_three_thresholds_and_the_guard());
 }
 
 // 105 (tasks.md T106) [seam], C-7.3's generic arm: no configuration makes the listener's

@@ -8343,8 +8343,10 @@ fsm_state Session::state() const noexcept { return fsm_state_; }
 //      set (the body's comment states it), then act on the eligible instant reached:
 //      a. a TestRequest pending, no inbound frame since it, and its give-up instant (the later
 //         of 2T + 1 ns after the last inbound frame and T + 1 ns after its write; the owner's
-//         fresh-window ruling) → the give-up: 105 R-1's record, Logout with Text, Disconnected
-//         → stop;
+//         fresh-window ruling), or a TestRequest that fell due, with one pending, still held
+//         behind a resend answer strictly after three thresholds after the last inbound frame
+//         (the owner's cap ruling) → the give-up: 105 R-1's record, Logout with Text,
+//         Disconnected → stop;
 //      b. else T of inbound silence → a TestRequest (its TestReqID becomes the pending one);
 //      c. else HeartBtInt of outbound silence → a Heartbeat.
 //      A TestRequest's TestReqID is answered by on_inbound_frame (the TestReqID rule of
@@ -8429,6 +8431,10 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
     //     has T from that write to answer. With T > 0 the TestRequest instant is at or before
     //     the give-up instant (equal only when both saturate at steady_time_point::max()),
     //     so while the TestRequest instant is eligible the sleep set holds that one;
+    //   - the owner's cap ruling (spec.md Clarifications "Session 2026-11-24"): a TestRequest
+    //     that falls due while a resend answer holds the gate waits for the answer's end, and,
+    //     with a TestRequest pending, for at most its cap, last_inbound + T + T + T + 1 ns,
+    //     saturating; at the cap, still held, it is given up there, naming the pending one;
     //   - each iteration sleeps once, to the earliest instant of the sleep set: the Heartbeat
     //     instant when eligible or not yet reached (a frame during the sleep can make it
     //     eligible, and nothing on the inbound path wakes the sleep), the TestRequest and the
@@ -8484,21 +8490,46 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
             const auto now = effective_clock_->steady_now();
             const bool answerable =
                 pending_test_req_id_.empty() || last_inbound_steady_ > tr_sent_at;
-            const bool give_up = !pending_test_req_id_.empty() && !answerable &&
-                                 now >= detail::test_request_give_up_instant(last_inbound_steady_,
-                                                                             tr_sent_at, threshold);
             const bool test_request =
                 answerable && now >= detail::deadline_after(last_inbound_steady_, threshold);
+            // 105, the owner's cap ruling (spec.md Clarifications "Session 2026-11-24"; data-model
+            // E-4): a TestRequest that fell due, with one pending and an inbound frame since it,
+            // and is still held behind a resend answer at its cap is given up there.
+            const bool held_cap =
+                test_request && replay_gate_.exclusive && !pending_test_req_id_.empty() &&
+                now >= detail::held_test_request_cap(last_inbound_steady_, threshold);
+            const bool give_up =
+                held_cap || (!pending_test_req_id_.empty() && !answerable &&
+                             now >= detail::test_request_give_up_instant(last_inbound_steady_,
+                                                                         tr_sent_at, threshold));
             const bool heartbeat =
                 answerable && now >= detail::deadline_after(last_outbound_steady_, heartbt_int);
 
-            if (heartbeat && !give_up && !test_request) {
-                // 103 (research D5′.4): a shared hold per emit; behind a resend answer the loop
-                // waits for its end and goes back to its top, which recomputes every instant.
-                if (replay_gate_.exclusive) {
+            // 103 (research D5′.4): behind a resend answer the Heartbeat and the TestRequest wait
+            // for its end and go back to the top, which recomputes every instant. 105, the owner's
+            // cap ruling: with a TestRequest pending, that wait also ends at the held TestRequest's
+            // cap, where the top gives up. The join's arms both complete without throwing, so the
+            // loop tests its own cancellation after it.
+            if (!give_up && (heartbeat || test_request) && replay_gate_.exclusive) {
+                if (pending_test_req_id_.empty()) {
                     co_await replay_gate_.wait_for_wake();
-                    continue;
+                } else {
+                    using namespace asio::experimental::awaitable_operators;
+                    (void)co_await (replay_gate_.wait_for_wake() ||
+                                    detail::await_deadline(*effective_clock_,
+                                                           detail::held_test_request_cap(
+                                                               last_inbound_steady_, threshold)));
+                    if ((co_await asio::this_coro::cancellation_state).cancelled() !=
+                        asio::cancellation_type::none) {
+                        co_return;
+                    }
                 }
+                continue;
+            }
+
+            if (heartbeat && !give_up && !test_request) {
+                // 103 (research D5′.4): a shared hold per emit, taken with the gate open (the wait
+                // above).
                 const detail::replay_gate::shared_hold hb_hold{replay_gate_};
                 std::array<std::byte, 256> hb_buf{};
                 const auto st52_hb =
@@ -8531,10 +8562,6 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
             if (test_request && !give_up) {
                 // 103 (research D5′.4): as the Heartbeat's; the hold covers the TestReqID's
                 // assignment and the emit.
-                if (replay_gate_.exclusive) {
-                    co_await replay_gate_.wait_for_wake();
-                    continue;
-                }
                 const detail::replay_gate::shared_hold tr_hold{replay_gate_};
                 // Generate a unique TestReqID using the per-session counter
                 // (FR-010 / RC#6): ++next_test_request_id_ replaces the prior
@@ -8582,7 +8609,7 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                 continue;
             }
 
-            // The give-up: a TestRequest pending and the give-up instant reached.
+            // The give-up: a TestRequest pending and the give-up instant reached, or the held cap.
             if (give_up) {
                 // 105 R-1 (research D3; contract C-3; [FIX-SL §4.5.5]), superseding the
                 // 536-537-538 note's R-6 ("Not chosen: … a Logout on the dead-peer ending"):
