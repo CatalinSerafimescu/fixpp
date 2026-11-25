@@ -479,6 +479,39 @@ TEST(PreSessionLog105, ListenerBindFails_OneRecord) {
                   std::to_string(std::error_code{asio::error::address_in_use}.value()));
 }
 
+// C-7.3 with no logger_override: the session's sink is the engine's logger (EngineConfig::logger),
+// so the listener record is read there.
+TEST(PreSessionLog105, ListenerBindFails_EngineLogger_OneRecord) {
+    pr::Rig rig;
+    t105::LogCapture log;
+    asio::ip::tcp::acceptor holder{rig.ioc,
+                                   asio::ip::tcp::endpoint{asio::ip::make_address("127.0.0.1"), 0}};
+    auto const port = holder.local_endpoint().port();
+    auto c = rig.cfg();
+    c.logger_override = nullptr;
+    c.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", port};
+    fixpp::core::EngineConfig ec;
+    ec.executor = rig.ioc.get_executor();
+    ec.clock = rig.clock;
+    ec.logger = log.logger;
+    rig.engine = std::make_unique<fixpp::session::Engine>(rig.ioc.get_executor(), std::move(ec));
+    rig.id = fixpp::session::SessionId::from_config(c);
+    bool const registered = rig.engine->register_session(std::move(c)).has_value();
+    bool const started = registered && rig.engine->start().has_value();
+    EXPECT_TRUE(started) << "setup: the engine did not start";
+    if (started) {
+        (void)rig.run_until([&] { return sink_count(log, kBindFormat) >= 1; }, kRecordWait);
+    }
+    rig.stop();
+    auto const recs = log.records_of(FIXPP_FORMAT_ID(kBindFormat));
+    ASSERT_EQ(recs.size(), 1U) << "the listener record";
+    EXPECT_EQ(recs.front().level, fixpp::log::Level::error);
+    EXPECT_EQ(render(recs.front(), kBindFormat),
+              "acceptor listener could not bind: begin_string=FIX.4.2 sender_comp_id=ISLD "
+              "target_comp_id=TW error=" +
+                  std::to_string(std::error_code{asio::error::address_in_use}.value()));
+}
+
 // ── TLS reasons ──────────────────────────────────────────────────────────────────────────────
 
 // The Engine over TLS, acceptor ACCEPTOR for peer INITIATOR, with the capturing logger and the

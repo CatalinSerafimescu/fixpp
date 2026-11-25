@@ -988,6 +988,40 @@ TEST(PreSessionLog105, ListenerConstructionThrowsNonSystemError_OneRecordErrorZe
     EXPECT_EQ(recs.front().args[3].i64, 0) << "error";
 }
 
+// [seam] The listener-construction seam installed and answering false: the construction goes
+// ahead, the listener binds, and no listener record is written. The seam is consulted once.
+TEST(PreSessionLog105, ListenerConstructionSeamFalse_ListenerBinds) {
+    constexpr char kBindFormat[] =
+        "acceptor listener could not bind: begin_string={} sender_comp_id={} target_comp_id={} "
+        "error={}";
+    pr::Rig rig;
+    fixpp::test_support::LogCapture log;
+    auto c = rig.cfg();
+    c.logger_override = log.logger;
+    fixpp::core::EngineConfig ec;
+    ec.executor = rig.ioc.get_executor();
+    ec.clock = rig.clock;
+    rig.engine = std::make_unique<fixpp::session::Engine>(rig.ioc.get_executor(), std::move(ec));
+    int calls = 0;
+    fixpp::session::engine_test_access::set_listener_construction_fails(*rig.engine, [&calls] {
+        ++calls;
+        return false;
+    });
+    rig.id = fixpp::session::SessionId::from_config(c);
+    bool const registered = rig.engine->register_session(std::move(c)).has_value();
+    bool const started = registered && rig.engine->start().has_value();
+    EXPECT_TRUE(started) << "setup: the engine did not start";
+    bool bound = false;
+    if (started) {
+        bound =
+            rig.run_until([&] { return rig.engine->acceptor_bound_endpoint(rig.id).port != 0; });
+    }
+    rig.stop();
+    EXPECT_EQ(calls, 1) << "the seam was not consulted once";
+    EXPECT_TRUE(bound) << "the listener did not bind";
+    EXPECT_TRUE(log.records_of(FIXPP_FORMAT_ID(kBindFormat)).empty()) << "a listener record";
+}
+
 // ════════════════════════════════════════════════════════════════════════════════════════
 // 105 T143a (tasks.md): cells for added lines and branches that the coverage reading of T143
 // found unreached. Each comment names the branch it reaches and the observable ending it
