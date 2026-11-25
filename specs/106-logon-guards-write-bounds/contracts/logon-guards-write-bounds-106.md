@@ -1,7 +1,7 @@
 # Contract: 106 — what a peer, an operator and a caller observe
 
 Observable rules only. The mechanisms are in [../data-model.md](../data-model.md), and the decisions in
-[../research.md](../research.md) D1 to D9. "Base" means `origin/main` `9d81082a`. Each rule names the FR it serves.
+[../research.md](../research.md) D1 to D11. "Base" means `origin/main` `9d81082a`. Each rule names the FR it serves.
 
 ## C-1. An unauthorised identity is disconnected without a message (FR-003, FR-004, FR-005)
 
@@ -28,8 +28,13 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
   The connection closes at once (105 C-1 row 11). The mTLS refusal emits
   `session_event_compid_authorization_failed`, as on the base.
 - **C-1.4 Unreadable gate inputs fail closed and silent.** On an acceptor with a logon validator installed, a Logon
-  that `interpret_logon` refuses while the validate gate would answer it is refused silently. With the default
-  accept-all policy, the validate-first Reject is sent as on the base.
+  that `interpret_logon` refuses while the validate gate would answer it is refused silently. That holds for any
+  `interpret_logon` refusal (a non-Logon, a CompID or BeginString mismatch, a missing or negative HeartBtInt), even when
+  553/554 are readable and the mTLS identity is admitted (`B-106-1`). With the default accept-all policy, the
+  validate-first Reject is sent as on the base, and an admitted mTLS identity with no validator draws it whether or not
+  its CompIDs can be read.
+- **C-1.4a A Reject that disconnects** is written only after the consuming gate has admitted the identity. A Reject
+  that keeps the session in its arm follows the non-consuming precheck.
 - **C-1.5 An admitted identity:** every refusal's frame, number and ending are byte-for-byte the base's. A
   validate-first Reject that keeps the session in its arm leaves the identity unconsumed, so a following Logon on the
   same connection is judged afresh.
@@ -53,7 +58,8 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
 - **C-2.2 Unchanged by design:**
   - a reset that already ran in the arm: the acceptor's `reset_on_logon` reset (a too-high or S3 refusal after it
     leaves NextNumIn 1 and the store reset), or a 141=Y unit's targets, whatever follows the unit. Disclosed as
-    `L-106-a`, unless plan Q3 rules otherwise. QuickFIX C++ resets at the same place (`nextLogon`, before `verify`);
+    `L-106-a`. Such a reset runs only for an identity the gates admit. QuickFIX C++ resets at the same place
+    (`nextLogon`, before `verify`);
   - an acceptor whose reply Logon was written, after which its 789 honour, its `onLogon` or its persist fails:
     the Logon was answered, so its number is consumed;
   - an internal failure of the reply's build, number, `toAdmin` or write.
@@ -68,20 +74,22 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
   - a Reject;
   - a resend answer's frame.
 
-  A TestRequest whose store and write have not returned counts from its issue (`tr_issued_at`). A written one keeps
-  105's fresh window (`tr_written_at`).
-- **C-3.2 What it does.** First 105's slot-74 record. Then the Logout owner, and the Logout of 105 C-3.1 under 105's
+  While the liveness loop's own TestRequest or Heartbeat has not returned from its store and write, the instant is
+  the last inbound frame + 3T + 1 ns, the held cap (ruling R1). A written TestRequest keeps 105's fresh window
+  (`tr_written_at`).
+- **C-3.2 What it does** (with `logout_disconnect_timeout_ms` > 0 and a clock; with 0 or no clock the ending stays
+  unbounded, `L-105-f`). First the ending claim (C-4.6), then 105's slot-74 record. Then the Logout owner, and the Logout of 105 C-3.1 under 105's
   write limit (C-2.7), whose budget counts from the decision. The Logout is written once the writes ahead of it have
   completed. When the budget runs out first, the transport closes at the decision plus `logout_disconnect_timeout_ms`,
   with no complete Logout. The session ends `Disconnected` once, with `onLogout` once from Active.
 - **C-3.3 The blocked writes return.** When the session ends with a write blocked:
   - the blocked write returns an error;
   - every write waiting at the write gate returns an error;
-  - an application `send` returns `dispatch_aborted` (`FIXPP_ERR_CANCELLED` in C), as 105's B-105-8;
+  - an application `send` returns `dispatch_aborted` (`FIXPP_ERR_CANCELLED` in C), as 105's B-105-8, unchanged;
   - none of them hangs.
 - **C-3.4 The held cap without a pending TestRequest.** A TestRequest due and still held behind a resend answer
-  strictly after the last inbound frame + 3T is given up then, whether or not a TestRequest is pending. Its Text is
-  plan Q2's.
+  strictly after the last inbound frame + 3T is given up then, whether or not a TestRequest is pending. With none
+  pending, its Text(58) is `TestRequest unanswered`, without the TestReqID clause (Q2).
 - **C-3.5 A reading peer.** No liveness instant changes: when every write completes promptly, each TestRequest is
   written at its issue and 105's instants apply unchanged (spec US3 scenario 4).
 
@@ -100,10 +108,11 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
   - a ResendRequest.
 
   The clock starts when the write is handed to the transport. The wait at the session's write gate does not count.
-- **C-4.3 Expiry.** When a write has not completed within the limit, fixpp attempts no Logout. In order:
+- **C-4.3 Expiry.** When a write has not completed within the limit, and no other ending holds the claim (C-4.6),
+  fixpp attempts no Logout. With the claim held elsewhere, the expiry does nothing. In order:
   - it writes one warn record, `session ended: write timed out: limit_ms=<L> error=<n>`, with `<n>` the value of
     `session_write_timeout`;
-  - the session records `Disconnected` (`onLogout` once from Active);
+  - the session records `Disconnected` (`onLogout` once from Active; before Active, no `onLogout`);
   - the transport is closed at once.
 
   The write that timed out returns `session_write_timeout` to its caller (`FIXPP_ERR_TRANSPORT_IO` through
@@ -113,12 +122,14 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
   long the whole answer takes.
 - **C-4.5 Ending Logouts.** A Logout's write keeps 105's limit (`logout_disconnect_timeout_ms` from the Logout's
   write start, C-2.7), and `close()`'s Logout keeps its grace. Neither is cut by `write_timeout_ms`.
-- **C-4.6 One ending.** When the write limit, 105's ending limit and C-3's give-up could each end the session, the
-  first to close records the reason. No second record, no second `Disconnected` and no second close follow.
+- **C-4.6 One ending** (FR-017). The give-up, the write limit, 105's ending Logouts, the establishment deadline and
+  `close()` race for one claim per connection. The first to claim records the one reason and the one `Disconnected`;
+  the others record nothing and close nothing. 105's ending limit cuts for its claimant and records nothing. So one
+  ending has exactly one reason record and one `Disconnected` entry, and `onLogout` fires at most once.
 - **C-4.7 TOML.** `write_timeout_ms` in a `[[session]]` or `[default]` table:
   - an integer in `[0, UINT32_MAX]` loads;
   - an integer outside that range is `out_of_range`;
-  - another type follows plan Q4 (proposed: `malformed_value`).
+  - another type is `malformed_value`.
 
 ## C-5. The TLS handshake bounds (FR-013, FR-013a, FR-014)
 
@@ -134,9 +145,10 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
   - The TOML value follows C-5.1's checks.
   - At session scope the key is refused (`unknown_key` class, as `dialect_overlay` is at root).
   - A client that connects and never completes the handshake is dropped at the bound.
-- **C-5.3 The bounded attempt.** A peer that accepts TCP and never handshakes ends each connect attempt at the bound
-  with `transport_handshake_timeout`. With `max_attempts = 1`, `drive_reconnect()` returns after that one attempt.
-  The reconnect policy decides what follows; its default (unbounded attempts) is unchanged.
+- **C-5.3 The bounded attempt.** A peer that accepts TCP and never handshakes ends each connect attempt at the bound:
+  the transport's handshake returns `transport_handshake_timeout`. The attempt records no error of its own. With
+  `max_attempts = 1`, `drive_reconnect()` returns `transport_reconnect_limit_exceeded` (unchanged) within the bound
+  plus the margin. The reconnect policy decides what follows; its default (unbounded attempts) is unchanged.
 - **C-5.4** No C setter for either key.
 
 ## C-6. Surfaces (FR-015, D7)
@@ -173,15 +185,20 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
 - `L-106-b`: the write-timeout reason is carried by its record and by the cut call's return only.
 - `L-106-c`: C-1.6.
 - `L-106-d`: the session-level handshake key's scope.
+- `L-106-e`: C-9's allocation and own-wait claims hold on `system_clock_source`; a user `clock_override` of another
+  type is waited through its own `sleep_until`.
 
 ## C-9. Performance (Article VIII §2, §3)
 
-- **Per outbound live write:** one test of the knob (off). With the limit on: one clock read and two stores, plus, when
-  the watchdog is parked (spaced writes), one timer cancel and one re-armed clock wait (C-4; research D5).
+- **Per outbound live write:** one test of the knob (off). With the limit on: one clock read and three stores, plus,
+  when the connection bound is parked (spaced writes), one cancel and one re-arm of its own timer. On
+  `system_clock_source` that allocates nothing from the global heap, under `B-544-1`'s two conditions (research D3,
+  D9's mallocnesia cell).
   Measured by the paired `engine_send_bench` (a `paired` row of `bench/ci-suite.txt`, whose writes reach
   `live_write_serialized_`).
 - **Per Logon:** D1's callee and D2's second lock acquisition, on the establishment path only.
-- **Per liveness emit:** one `co_spawn` (D3), at liveness cadence.
+- **Per liveness emit:** one cancel and one re-arm of the connection bound's timer; no spawn (D3). **Per connection:**
+  one `co_spawn` of the connection bound.
 - Locally, the paired `session_send_bench` (not in `ci-suite`; its sends use `transport_send`, so it guards the arms'
   frame growth and `store_then_emit`'s new argument). The method is 105's T138: merge-base release tree, path padded,
   A-B-A-B, min per tree, +5 % one-sided.
