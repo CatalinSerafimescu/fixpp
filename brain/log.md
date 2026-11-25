@@ -6,6 +6,10 @@ status: stable
 
 # Log
 
+- **2026-11-25 — 105-transport-liveness, T141a and Gate B round 2: `components/transport.md` gains the plain
+  transport's close (the send side shut down before the close, `B-105-9`); `components/session-liveness-and-reconnect.md`
+  flags its TestReqID(112) invariant in place as superseded by 105 (contract C-5.4, `B-105-5`).**
+
 - **2026-11-24 — 105-transport-liveness, Phase 10 (tasks.md T125, T126): `failure-classes.md` gains class 25, a
   platform header's macro rewrites an identifier only on the platform that defines it** (the `<windows.h>` macro
   identifiers; trigger and procedure, the brain half of the parent's phase-implementer entry). `components/session.md`,
