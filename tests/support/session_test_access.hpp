@@ -192,7 +192,7 @@ struct session_test_access {
     }
 
     // Seeds the per-session TestReqID counter, as a Session that has issued that many
-    // TestRequests would hold it (105-transport-liveness, Gate B round 1, O-1). Session strand
+    // TestRequests would hold it (105-transport-liveness, contract C-1 row 8). Session strand
     // only.
     static void set_next_test_request_id(Session& s, std::uint32_t n) noexcept {
         s.next_test_request_id_ = n;

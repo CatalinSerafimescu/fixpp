@@ -1171,13 +1171,13 @@ TEST_P(HeldTestRequestCap105, GivenUpAtTheCap_ReleasedBeforeTheWriteLimit_Logout
 FIXPP_105_BOTH_ROLES(HeldTestRequestCap105);
 
 // ════════════════════════════════════════════════════════════════════════════════════════
-// Gate B round 1 (C-2(b), O-1; the owner's fresh-window ruling, spec.md Clarifications
-// "Session 2026-11-24"; data-model E-4; contract C-1 row 8, C-6.2): the TestRequest's two
-// readings. Its TestReqID is pending from its issue, before its number, store and write, so a
-// frame during them counts as a frame since it and an answer during them answers it; the
-// give-up counts T from the write's return. The TestRequest's store call is held in a GateStore
-// (test_105_support.hpp) from its issue until the cell releases it; HeartBtInt and T are kHb, so
-// the TestRequest is issued at 10 s. Instants are run_timeline's (offsets from Active).
+// 105 (the owner's fresh-window ruling, spec.md Clarifications: the held TestRequest's fresh
+// window; data-model E-4; contract C-1 row 8, C-6.2): the TestRequest's two readings. Its TestReqID
+// is pending from its issue, before its number, store and write, so a frame during them counts as a
+// frame since it and an answer during them answers it; the give-up counts T from the write's
+// return. The TestRequest's store call is held in a GateStore (test_105_support.hpp) from its issue
+// until the cell releases it; HeartBtInt and T are kHb, so the TestRequest is issued at 10 s.
+// Instants are run_timeline's (offsets from Active).
 // ════════════════════════════════════════════════════════════════════════════════════════
 
 // The held TestRequest's controls and the readings the scene's actions take.
@@ -1332,7 +1332,7 @@ TEST_P(LivenessTiming105, FreshWindow_AnswerDuringStore_Clears) {
     EXPECT_EQ(tl.count("5", ns{0}, sec(17)), 0U) << "a Logout: " << dump(tl);
 }
 
-// O-1 (contract C-1 row 8): a TestRequest that does not fit its buffer ends the session at its
+// Contract C-1 row 8: a TestRequest that does not fit its buffer ends the session at its
 // instant, as the loop's other emission failures do, with no give-up naming a TestReqID never
 // written. The TestReqID counter is seeded so its TestReqID is longer than the Logon's own
 // fields beyond the common header, and the peer's CompID long enough that the TestRequest

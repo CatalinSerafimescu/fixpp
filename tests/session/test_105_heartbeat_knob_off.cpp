@@ -424,8 +424,8 @@ TEST(TestReqId105Direct, PreviousConnectionId_Mismatch) {
     EXPECT_TRUE(pr::frames_of_type(wire().substr(mark), "5").empty()) << "a Logout was written";
 }
 
-// Gate B round 1 (C-1; contract C-3.1, C-5.4, C-6.2; research D5; data-model E-4, the connection
-// starts): a TestRequest is pending only on the connection that wrote it. A direct initiator on
+// 105 (contract C-3.1, C-5.4, C-6.2; research D5; data-model E-4, the connection starts): a
+// TestRequest is pending only on the connection that issued it. A direct initiator on
 // mock transports, HeartBtInt and T kHb, the clock stepped a second at a time; each connection's
 // wire is its own transport's byte record.
 class DirectReconnect105 {

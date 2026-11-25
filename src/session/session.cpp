@@ -8610,7 +8610,7 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                 pending_test_req_id_.assign(tr_id);
                 tr_issued_at = now;
                 // 019 T014: toAdmin before TestRequest. [FR-008/010]
-                // FIX-3 (gate-b/r1): throw → terminal-close + co_return.
+                // A throw → terminal-close + co_return.
                 if (!fire_to_admin_(*tr_result)) {
                     record_state_transition_(fsm_state::Disconnected);
                     co_return;
