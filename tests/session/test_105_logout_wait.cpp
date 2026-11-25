@@ -146,11 +146,14 @@ struct WaitCell {
         c.store_factory = std::make_shared<t105::GateStoreFactory>(st);
         return c;
     }
-    // Active, and the session's Logon (the acceptor's reply) read by the peer.
+    // Active, the session's Logon handling ended (t105::run_until_logon_handled), and the
+    // session's Logon (the acceptor's reply) read by the peer.
     [[nodiscard]] bool start_active(SessionConfig c) {
-        return rig.start(std::move(c)) && rig.to_active() && rig.run_until([this] {
-            return !pr::frames_of_type(rig.peer.received, "A").empty();
-        });
+        bool const loop_on = t105::liveness_on(c);
+        return rig.start(std::move(c)) && rig.to_active() &&
+               t105::run_until_logon_handled(rig, loop_on) && rig.run_until([this] {
+                   return !pr::frames_of_type(rig.peer.received, "A").empty();
+               });
     }
     [[nodiscard]] std::string wire_since(std::size_t mark) const {
         return rig.peer.received.substr(std::min(mark, rig.peer.received.size()));

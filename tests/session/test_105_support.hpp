@@ -81,6 +81,7 @@
 #include "session/plain_engine_rig.hpp"
 #include "support/log_capture.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_test_access.hpp"
 #include "transport/loopback_tls_fixture.hpp"
 
 namespace fixpp::test_support::t105 {
@@ -952,5 +953,28 @@ private:
     asio::ssl::stream<asio::ip::tcp::socket> stream_;
     bool reading_ = false;
 };
+
+// Whether a session with config c runs the liveness loop: HeartBtInt unset (the Session's default)
+// or above 0.
+[[nodiscard]] inline bool liveness_on(fixpp::session::SessionConfig const& c) {
+    return !c.heartbeat_interval.has_value() || c.heartbeat_interval->count() > 0;
+}
+
+// Runs the rig until its session's Logon handling has ended, or the rig's pump budget passes.
+// plain_rig::Rig::to_active() returns at the first pump slice that sees Active. On the initiator's
+// arm the inbound instant is stamped after Active, behind the Logon's persist, so a cell that moves
+// the mock clock right after to_active() can move it before that stamp, and every liveness instant
+// then counts from the moved one. Both Logon arms spawn the liveness loop as their last step, after
+// the stamp, so with the loop on a counted loop means the arm has ended; with it off (liveness_on
+// false) there is no such signal and this returns at once. The budget is a miss cap: the mock clock
+// does not move during the wait. Re-check the last step with:
+// grep -n "co_spawn(ex, run_liveness_loop()" src/session/session.cpp
+[[nodiscard]] inline bool run_until_logon_handled(plain_rig::Rig& rig, bool loop_on) {
+    if (!loop_on) return true;
+    return rig.run_until([&rig] {
+        auto const s = rig.session();
+        return s && fixpp::session::session_test_access::liveness_count(*s) >= 1;
+    });
+}
 
 }  // namespace fixpp::test_support::t105

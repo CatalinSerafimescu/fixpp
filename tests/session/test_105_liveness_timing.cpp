@@ -14,6 +14,7 @@
 // No ASSERT_* runs between a rig's start() and its stop() (tasks.md, Execution rules).
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
@@ -118,6 +119,7 @@ GiveUpReading run_give_up(session_role role, std::function<void(SessionConfig&)>
     cfg.logger_override = log.logger;
     if (tweak) tweak(cfg);
     GiveUpReading r;
+    bool const loop_on = t105::liveness_on(cfg);
     bool up = rig.start(std::move(cfg));
     if (up) {
         if (to_active) {
@@ -126,6 +128,7 @@ GiveUpReading run_give_up(session_role role, std::function<void(SessionConfig&)>
         } else {
             up = rig.to_active();
         }
+        up = up && t105::run_until_logon_handled(rig, loop_on);
     }
     r.active = up;
     if (up) {
@@ -397,8 +400,10 @@ TEST(LivenessTiming105Direct, GiveUp_WriteFails_StillEof) {
 // 10 s; the threshold is unset unless the cell names it. Instants are mock-clock offsets from
 // the instant the session reached Active: the run advances the clock to each probe instant
 // (every whole second up to the cell's end, and the extra instants the cell names), drives
-// the io_context boundedly there, runs the peer's actions due at that instant, drives again,
-// and stamps every frame the peer then holds with that instant.
+// the io_context boundedly there, runs the peer's actions due at that instant, waits for the
+// effect an action names (its until), drives again, and stamps every frame the peer then holds
+// with that instant. The run starts once the session's Logon handling has ended
+// (t105::run_until_logon_handled).
 // ════════════════════════════════════════════════════════════════════════════════════════
 
 using ns = std::chrono::nanoseconds;
@@ -442,6 +447,9 @@ struct PeerAction {
     ns at{0};
     std::function<void(pr::Rig&, Timeline const&)> act{};
     bool sends = true;  // the action writes a frame the session reads
+    // Set: what the action's effect is, waited for at the action's instant (the clock held still)
+    // before the frames there are stamped, or until the pump budget passes.
+    std::function<bool(pr::Rig&)> until{};
 };
 
 struct TimelineSpec {
@@ -466,8 +474,9 @@ Timeline run_timeline(TimelineSpec const& spec, const char* site) {
     }
     if (spec.tweak) spec.tweak(cfg);
     Timeline tl;
+    bool const loop_on = t105::liveness_on(cfg);
     bool const started = rig.start(std::move(cfg));
-    tl.active = started && rig.to_active();
+    tl.active = started && rig.to_active() && t105::run_until_logon_handled(rig, loop_on);
     if (started && !tl.active) {
         // The frames the session sent though it did not stay Active (the Logon is not read).
         for (auto const* type : {"0", "1", "5"}) {
@@ -503,11 +512,19 @@ Timeline run_timeline(TimelineSpec const& spec, const char* site) {
             now = t;
             (void)t105::drive_bounded(rig.ioc, 64);
             bool sent = false;
+            std::vector<std::function<bool(pr::Rig&)>> effects;
             for (auto const& a : spec.actions) {
                 if (a.at == t) {
                     a.act(rig, tl);
                     sent = sent || a.sends;
+                    if (a.until) effects.push_back(a.until);
                 }
+            }
+            if (!effects.empty()) {
+                (void)rig.run_until([&] {
+                    return std::all_of(effects.begin(), effects.end(),
+                                       [&](auto const& e) { return e(rig); });
+                });
             }
             if (sent) {
                 // The frame is read at this instant: wait until the session's last inbound
@@ -1021,7 +1038,9 @@ HeldCapReading run_held_cap(session_role role, held_cap_scene scene, const char*
     };
     auto records_now = [&] { return log.records_of(FIXPP_FORMAT_ID(kGiveUpFormat)).size(); };
     std::size_t mark = 0;
-    bool up = rig.start(std::move(cfg)) && rig.to_active();
+    bool const loop_on = t105::liveness_on(cfg);
+    bool up =
+        rig.start(std::move(cfg)) && rig.to_active() && t105::run_until_logon_handled(rig, loop_on);
     if (!up) r.why = "not Active";
     if (up) {
         auto const tr = t105::advance_until_msg_type(
@@ -1191,6 +1210,15 @@ struct HeldTrStore {
     bool active_after = false;        // Active after the release
 };
 
+// Whether bytes holds a whole frame (its "10=" field ended by SOH) at or after offset from.
+bool whole_frame_since(std::string const& bytes, std::size_t from) {
+    auto const tail = bytes.find(
+        "\x01"
+        "10=",
+        from);
+    return tail != std::string::npos && bytes.find('\x01', tail + 1) != std::string::npos;
+}
+
 // The scene: the hold armed at 9 s for the next outbound store call (the TestRequest's, at
 // 10 s), read at 10 s, then the extra actions, then the release at release_at.
 TimelineSpec held_tr_spec(session_role role, std::shared_ptr<HeldTrStore> const& h, ns release_at,
@@ -1218,12 +1246,21 @@ TimelineSpec held_tr_spec(session_role role, std::shared_ptr<HeldTrStore> const&
     spec.actions.push_back(
         {sec(10), [h](pr::Rig&, Timeline const&) { h->parked_at_issue = h->st->parked; }, false});
     for (auto& a : extra) spec.actions.push_back(std::move(a));
+    // The release's effect is the held call's return and a frame written after it; the wait ends
+    // at the first whole frame the peer reads after the release, so a second frame the release
+    // causes is still read at a later probe.
+    auto mark = std::make_shared<std::size_t>(0);
     spec.actions.push_back({release_at,
-                            [h](pr::Rig&, Timeline const&) {
+                            [h, mark](pr::Rig& rig, Timeline const&) {
+                                *mark = rig.peer.received.size();
                                 h->st->hold_when = nullptr;
                                 h->st->release_all();
                             },
-                            false});
+                            false,
+                            [h, mark](pr::Rig& rig) {
+                                return h->st->parked == 0 &&
+                                       whole_frame_since(rig.peer.received, *mark);
+                            }});
     return spec;
 }
 
