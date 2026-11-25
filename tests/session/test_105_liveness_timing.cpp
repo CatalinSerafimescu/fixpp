@@ -41,6 +41,7 @@
 #include "session/mock_reconnect_factory.hpp"
 #include "session/plain_engine_rig.hpp"
 #include "session/resend_gap_scene.hpp"
+#include "session/test_105_direct_rig.hpp"
 #include "session/test_105_support.hpp"
 #include "support/seqnum_manager_test_access.hpp"
 #include "support/session_executor_of.hpp"
@@ -1330,6 +1331,47 @@ TEST_P(LivenessTiming105, FreshWindow_AnswerDuringStore_Clears) {
     EXPECT_FALSE(h->pending_after) << "a TestRequest pending after the release";
     EXPECT_TRUE(h->active_after) << "the session left Active";
     EXPECT_EQ(tl.count("5", ns{0}, sec(17)), 0U) << "a Logout: " << dump(tl);
+}
+
+// The TestRequest's write is held a whole threshold (its store returns at once): the give-up is T
+// after the write's return, not at once. A direct Session whose connection is a
+// BlockingWriteTransport (test_105_direct_rig.hpp), HeartBtInt and T the Scene's kHeartBtInt.
+TEST_P(LivenessTiming105, FreshWindow_FromTheWrite_WriteDelayAtLeastT) {
+    constexpr ns kT = rg::kHeartBtInt;
+    t105::DirectRig d{GetParam(), [](SessionConfig& c) {
+                          c.test_request_threshold = std::chrono::milliseconds{rg::kHeartBtInt};
+                      }};
+    ASSERT_TRUE(d.to_active()) << "setup";
+    d.hold_write_of("1");
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the TestRequest instant is computed from
+    // the Logon's inbound instant, which predates the advance; started("1") is the oracle.
+    d.pass(kT);
+    ASSERT_EQ(d.started("1"), 1U) << "setup: no TestRequest at T";
+    ASSERT_TRUE(d.parked()) << "setup: the TestRequest's write is not held";
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND C, the advance must fire nothing: the loop
+    // is suspended in the held write, and no Logout started is the oracle.
+    d.pass(kT);
+    EXPECT_EQ(d.started("5"), 0U) << "a Logout while the TestRequest's write is held";
+    d.release();
+    d.pass(ns{0});
+    EXPECT_EQ(d.completed("1"), 1U) << "the TestRequest's write did not complete on the release";
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the give-up instant is computed from the
+    // write's return, which predates the advance; the state and the Logout are the oracle.
+    d.pass(kT);
+    EXPECT_EQ(d.s.state(), fsm_state::Active) << "given up inside T of the write's return";
+    EXPECT_EQ(d.started("5"), 0U) << "a Logout inside T of the write's return";
+    d.pass(kGuard);
+    EXPECT_NE(d.s.state(), fsm_state::Active) << "not given up T after the write's return";
+    std::string tr;
+    std::string text;
+    for (auto const& w : d.bw->recorded) {
+        auto const type = fixpp::test_support::extract_tag(w.bytes, 35);
+        if (type == "1") tr = fixpp::test_support::extract_tag(w.bytes, 112);
+        if (type == "5") text = fixpp::test_support::extract_tag(w.bytes, 58);
+    }
+    EXPECT_EQ(d.started("5"), 1U) << "R-1's Logout";
+    EXPECT_FALSE(tr.empty()) << "setup: the TestRequest's 112";
+    EXPECT_EQ(text, "TestRequest unanswered, TestReqID " + tr);
 }
 
 // Contract C-1 row 8: a TestRequest that does not fit its buffer ends the session at its
