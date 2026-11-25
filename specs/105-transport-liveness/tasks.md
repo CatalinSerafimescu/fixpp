@@ -1467,8 +1467,13 @@ remaining reference.
   its class (a direct Session destroyed without `close()` after a path that can spawn an ending bound or a close
   frame): `tests/support/close_before_destroy.hpp` at every such Session the population recipe finds. Evidence file,
   Phase 9 appended after the T143b section, T143c.
-- [ ] T144 **(orchestrator)** `/speckit-verify`; writes `.specify/decisions/105-transport-liveness-verify.md`. Re-run T130 to T135
+- [X] T144 **(orchestrator)** `/speckit-verify`; writes `.specify/decisions/105-transport-liveness-verify.md`. Re-run T130 to T135
   as the last actions before any labelled push.
+  Done: `.specify/decisions/105-transport-liveness-verify.md`, verdict GREEN: the full ctest in `$M` 528/528, the gate,
+  targeted ASan/UBSan/TSan, pytest, the live QuickFIX selection, gcc-release, the allocation gates, the 600 s fuzz run,
+  per-binary coverage with T143's table carried, the paired benches, static analysis over every touched C/C++ file, and
+  every buildless Tier 1 step. The C-ABI freeze manifest failed at `ee78e33b` and was re-recorded (`bee14267`).
+  T130 to T135 re-run after the last commit (evidence file, Phase 9, T144).
 - [ ] T149 **(orchestrator)** The PR body declares C-ABI 1.18 **BREAKING** ([const §X.7]): the observers of contract C-9 and
   the `version.h` history entry, with the B-105-7 row. It is written before the gate labels are applied and before CI runs
   (an edited body re-queues the matrix), in the final sign-off order (body, labels, wait, push last).
@@ -1487,11 +1492,15 @@ remaining reference.
   earlier features, and TC-002, TC-004 and TC-009 stay `backlog`. Each gains a dated "105 amends this row" note naming its
   B-105 rows and witnesses (cell names checked against the head binaries' `--gtest_list_tests`), and the coverage index's
   §4.5.1, §4.5.5, §4.6 and FIX-TC rows 2, 4, 6 and 12 the same; no row's state changes.
-- [ ] T147 **Feature-completeness audit (MUST be the FINAL task)**: against the final head, (i) every row of this file is
+- [X] T147 **Feature-completeness audit (MUST be the FINAL task)**: against the final head, (i) every row of this file is
   `[X]` or carries a waiver rationale; (ii) every FR and SC maps to a landed test and a landed implementation (the
   traceability table below, re-read cell by cell), every W-row and E-3 row maps to a landed cell (the design table
   below), and every contract clause maps to a landed cell or its named instrument (the contract table below); (iii) every feature-owned OFFICIAL catalogue row is `done` with its `coverage-index.md` entry. Record the verdict,
   100 % or fully waived, in `.specify/decisions/105-transport-liveness-verify.md` under `## Completeness`.
+  Done: `## Completeness` of the verify record, 100 % with T145 (deferred by the orchestrator until after Gate B) and
+  T149 (the orchestrator's PR body) waived-pending; the traceability tables' tasks all `[X]` but T149, their named cells
+  checked against the head binaries' `--gtest_list_tests`; T143's possible witness gaps resolved row by row; no
+  feature-owned catalogue row (T146).
 
 ---
 
