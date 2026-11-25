@@ -739,7 +739,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  * answer, strictly after three times that threshold from the last inbound frame, and a
  * frame that does not answer the TestRequest defers the give-up. The give-up sends a Logout
  * whose Text(58) names the TestRequest and closes the connection once that Logout's
- * write has returned, with no wait. While a TestRequest is pending, a Heartbeat whose
+ * write has returned, with no wait. Where the session's CompIDs leave no room in its
+ * frame buffer for the TestRequest, the session ends at the TestRequest's instant with
+ * no Logout, and the connection closes. While a TestRequest is pending, a Heartbeat whose
  * TestReqID(112) is that of an earlier TestRequest the session sent on this
  * connection neither answers it nor ends the session. The C ABI has no setter that
  * turns sequence validation off, so the rules 105 gives a session without it do not

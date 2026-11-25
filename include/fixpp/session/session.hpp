@@ -2053,9 +2053,10 @@ private:
     std::shared_ptr<fixpp::transport::TransportFactory> effective_transport_factory_;
 
     // Owns the AwaitingResend transient bool (NOT a new fsm_state per D-1),
-    // the ResendState, and FR-001..FR-016 recovery state. Constructed from
-    // cfg_.transport_factory_override (non-owning raw ptr), cfg_.reconnect_policy,
-    // cfg_.heartbeat_interval, and cfg_.logout_disconnect_timeout_ms.
+    // the ResendState, and FR-001..FR-016 recovery state. Constructed from the
+    // transport-factory pointer (non-owning) and the resolved reconnect policy;
+    // the heartbeat and TestRequest timing and the ending Logout's timeout are
+    // Session's (105 FR-013; data-model E-9, E-3, E-4).
     // Session::on_inbound_frame delegates state tracking to reconnect_fsm_;
     // the ResendRequest emit remains inline (has access to seqnum_mgr_ + store).
     // [data-model §E-1; contracts/reconnect_fsm.hpp]
