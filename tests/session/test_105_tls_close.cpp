@@ -454,12 +454,11 @@ TEST(TlsClose105, CloseGracefulDuringWait_CloseNotifyAtTheBound) {
 
 // Returns the SO_SNDBUF the OS reports for the engine acceptor's accepted TLS socket, or -1 when
 // the session, its TLS transport or the option is not there. On Windows it first sets the option
-// to windows_bytes. Elsewhere the option keeps the size the OS gives it; the Linux
-// CI comparison behind that choice is recorded in
-// .specify/decisions/105-transport-liveness-gateb.md (PR #720). The Engine's accept path builds the
-// accepted transport's Transport::Config itself (no SessionConfig or EngineConfig field reaches
-// tcp_send_buf_bytes there), so the cell reaches the option through the test-access friend.
-// Re-check with: grep -n accepted_transport_config src/session/engine.cpp
+// to windows_bytes. Elsewhere the option keeps the size the OS gives it. fixpp#722 records the
+// Windows readings with the option set. The Engine's accept path builds the accepted transport's
+// Transport::Config itself (no SessionConfig or EngineConfig field reaches tcp_send_buf_bytes
+// there), so the cell reaches the option through the test-access friend. Re-check with:
+// grep -n accepted_transport_config src/session/engine.cpp
 int session_send_buffer(fixpp::session::Engine& engine, fixpp::session::SessionId const& id,
                         [[maybe_unused]] int windows_bytes) {
     auto s = engine.lookup(id);
@@ -487,11 +486,13 @@ int session_send_buffer(fixpp::session::Engine& engine, fixpp::session::SessionI
 // session side's SO_SNDBUF is set to a fixed size once the session is Active, on Windows only. A
 // held send that completes ok means the window reopened and the R-2 Logout could be written. Off
 // Windows the cell then fails as a setup failure. On Windows (owner-approved for Windows only,
-// fixpp#722), when the success was first seen while the session was still Active, it prints the
-// reading and passes, and the checks that rest on the hold (no Logout read, the ending) are not
-// made; a success first seen at or after the session's end counts as held at the bound, and
-// those checks are made. The bound's checks (open before the bound, ended by the mock-clock cap,
-// the peer's read ended) are made on every platform.
+// fixpp#722), when the success was first seen while the session was Active and before the
+// bound's mock step (the step whose advance reaches logout_disconnect_timeout_ms, the earliest
+// the Logout's deadline can be), it prints the reading and passes, and the checks that rest on the
+// hold (no Logout read, the ending) are not made; a success first seen at or after that step, or
+// with the session no longer Active, counts as held at the bound, and those checks are made.
+// The bound's checks (open before the bound, ended by the mock-clock cap, the peer's read ended)
+// are made on every platform.
 // The bound (logout_disconnect_timeout_ms) is set to the seam twin's: that shortens the wall time
 // between the hold and the bound; it does not explain why a window can reopen. A held send seen
 // ready prints the mock-clock step and the wall time since the fill loop ended at which it was
@@ -693,11 +694,16 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
             << "; mock time advanced " << advanced.count() << " ms";
     auto const ending = peer ? peer->ending() : t105::peer_ending::open;
     // The precondition: the held send did not complete ok, so the window did not reopen before
-    // the write ended. On Windows a window reopened before the session's end is a reading, not a
-    // failure (the cell's comment states the condition; fixpp#722).
+    // the write ended. On Windows a window reopened before the bound's mock step is a reading, not
+    // a failure (the cell's comment states the condition; fixpp#722).
     bool const window_reopened = held_result == "ok";
 #if defined(_WIN32)
-    if (window_reopened && held_ready_while_active) {
+    // The mock step whose advance reaches the bound: the Logout's deadline is read at its write
+    // start, which is no earlier than the step loop's origin.
+    long long const bound_step =
+        static_cast<long long>(kWriteLimitBoundMs) / static_cast<long long>(step.count());
+    if (window_reopened && held_ready_while_active && held_ready_step >= 0 &&
+        held_ready_step < bound_step) {
         std::cout << "[ reading  ] TlsWriteLimit105: the window reopened, so the checks that rest "
                      "on the hold are not made; the held send completed in "
                   << held_ready_in << ", result " << held_result << "; " << reading.str()

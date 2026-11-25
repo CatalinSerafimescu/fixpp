@@ -216,12 +216,11 @@ TEST(TlsClose105, CloseFrameSpawnFails_ReleaseAtLoopExit_AbortiveNoCloseNotify) 
 
 // Returns the SO_SNDBUF the OS reports for the engine acceptor's accepted TLS socket, or -1 when
 // the session, its TLS transport or the option is not there. On Windows it first sets the option
-// to windows_bytes. Elsewhere the option keeps the size the OS gives it; the Linux
-// CI comparison behind that choice is recorded in
-// .specify/decisions/105-transport-liveness-gateb.md (PR #720). The Engine's accept path builds the
-// accepted transport's Transport::Config itself (no SessionConfig or EngineConfig field reaches
-// tcp_send_buf_bytes there), so the cell reaches the option through the test-access friend.
-// Re-check with: grep -n accepted_transport_config src/session/engine.cpp
+// to windows_bytes. Elsewhere the option keeps the size the OS gives it. fixpp#722 records the
+// Windows readings with the option set. The Engine's accept path builds the accepted transport's
+// Transport::Config itself (no SessionConfig or EngineConfig field reaches tcp_send_buf_bytes
+// there), so the cell reaches the option through the test-access friend. Re-check with:
+// grep -n accepted_transport_config src/session/engine.cpp
 int session_send_buffer(fixpp::session::Engine& engine, fixpp::session::SessionId const& id,
                         [[maybe_unused]] int windows_bytes) {
     auto s = engine.lookup(id);
@@ -827,10 +826,10 @@ TEST(TestReqIdParse105, RefusalsByForm_AtRunTime) {
     for (std::string_view const id : {"TR3", "TR0", "TR4294967295"}) {
         EXPECT_TRUE(trw::is_earlier_test_req_id(at_run_time(id), floor, next)) << id;
     }
-    // The refused ids, in the order of the refusals they reach in is_earlier_test_req_id: the
-    // length or prefix ("", "T", "TR", "XR3", "TX3"), a byte below '0' ("TR/3"), above '9'
-    // ("TR3x"), the sign ("TR-3"), the leading zero ("TR03"), past std::uint32_t ("TR4294967296"),
-    // past the digit limit ("TR99999999999999999999"), and the window ("TR12").
+    // The refused ids and the refusal each reaches in is_earlier_test_req_id: the length or prefix
+    // ("", "T", "TR", "XR3", "TX3"), a byte below '0' ("TR/3"), above '9' ("TR3x"), past the digit
+    // limit ("TR99999999999999999999"), the sign ("TR-3"), the leading zero ("TR03"), past
+    // std::uint32_t ("TR4294967296"), and the window ("TR12").
     for (std::string_view const id : {"", "T", "TR", "XR3", "TX3", "TR/3", "TR3x", "TR-3", "TR03",
                                       "TR4294967296", "TR99999999999999999999", "TR12"}) {
         EXPECT_FALSE(trw::is_earlier_test_req_id(at_run_time(id), floor, next)) << id;
