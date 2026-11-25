@@ -477,11 +477,13 @@ int fix_session_send_buffer(fixpp::session::Engine& engine, fixpp::session::Sess
 // session closes within the bound plus tls_close_timeout (1 s of wall time), with no Logout
 // written. Off Windows close_notify cannot be written behind the held write, so the close is
 // abortive; on Windows the ending is the one L-105-g names, and is printed, not pinned.
-// The condition the cell rests on: the held write stays held until the bound. The session side's
-// SO_SNDBUF is set to a fixed size once the session is Active, so the OS cannot grow the send
-// backlog (Windows' dynamic send buffering applies to a socket whose application has not set
-// SO_SNDBUF). A held send that completes ok means the window reopened and the R-2 Logout could
-// be written as designed; the cell then fails as a setup failure.
+// The condition the cell rests on: the held write stays held until the session closes it. The
+// session side's SO_SNDBUF is set to a fixed size once the session is Active; Microsoft documents
+// that setting SO_SNDBUF on a TCP socket disables Windows' dynamic send buffering for it. A held
+// send that completes ok means the window reopened and the R-2 Logout could be written; the cell
+// then fails as a setup failure. The bound's timing on both sides is pinned by the seam twin,
+// TlsWriteLimit105.R2AfterActive_PeerStopsReading_SeamTwin_ClosedAtExactlyTheBound in
+// test_105_seams.cpp.
 TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsCloseTimeout) {
     asio::io_context ioc;
     auto clock = t105::make_mock_clock(ioc.get_executor());
@@ -656,7 +658,8 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
             << held_ready_in << ", result " << held_result << "; mock time advanced "
             << advanced.count() << " ms";
     auto const ending = peer ? peer->ending() : t105::peer_ending::open;
-    // The precondition: the held send did not complete ok, so the window stayed closed.
+    // The precondition: the held send did not complete ok, so the window did not reopen before
+    // the write ended.
     bool const window_reopened = held_result == "ok";
     EXPECT_FALSE(window_reopened) << "setup: the window reopened; the held send completed in "
                                   << held_ready_in << ", result " << held_result << "; "

@@ -49,6 +49,17 @@
 #include "support/pump_until_ready.hpp"
 #include "support/seqnum_manager_test_access.hpp"
 #include "support/session_test_access.hpp"
+#include "transport/asio_tls_transport.hpp"
+
+// The friend src/transport/asio_tls_transport.hpp declares, for the write-limit twin's socket
+// option; the same definition as tests/session/test_engine_session_strand.cpp's and
+// tests/session/test_105_tls_close.cpp's, each in another binary.
+namespace fixpp::transport {
+class asio_tls_transport_test_access {
+public:
+    static asio::ip::tcp::socket& socket_of(asio_tls_transport& t) noexcept { return t.socket_; }
+};
+}  // namespace fixpp::transport
 
 namespace {
 
@@ -203,6 +214,26 @@ TEST(TlsClose105, CloseFrameSpawnFails_ReleaseAtLoopExit_AbortiveNoCloseNotify) 
         << "a close_notify, where the synchronous close with a read suspended sends none";
 }
 
+// Sets SO_SNDBUF on the engine acceptor's accepted TLS socket and returns the value the OS reports
+// back, or -1 when the session, its TLS transport or the option is not there. The Engine's accept
+// path builds the accepted transport's Transport::Config itself (no SessionConfig or EngineConfig
+// field reaches tcp_send_buf_bytes there), so the cell sets the option through the test-access
+// friend. Re-check with: grep -n accepted_transport_config src/session/engine.cpp
+int fix_session_send_buffer(fixpp::session::Engine& engine, fixpp::session::SessionId const& id,
+                            int bytes) {
+    auto s = engine.lookup(id);
+    if (!s) return -1;
+    auto* tls = dynamic_cast<fixpp::transport::asio_tls_transport*>(&s->live_transport());
+    if (tls == nullptr) return -1;
+    auto& sock = fixpp::transport::asio_tls_transport_test_access::socket_of(*tls);
+    asio::error_code ec;
+    sock.set_option(asio::socket_base::send_buffer_size{bytes}, ec);
+    if (ec) return -1;
+    asio::socket_base::send_buffer_size got;
+    sock.get_option(got, ec);
+    return ec ? -1 : got.value();
+}
+
 // [seam] The twin of
 // TlsWriteLimit105.R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsCloseTimeout (tasks.md
 // T054; orchestrator ruling 3 of Phase 4): the same scenario, with the instant the too-low Logout's
@@ -211,6 +242,11 @@ TEST(TlsClose105, CloseFrameSpawnFails_ReleaseAtLoopExit_AbortiveNoCloseNotify) 
 // - 1 ms the phase is still `writing`, the session Active and the peer's read open; at the bound
 // the session ends. A widened or deleted write limit (T077) leaves the phase `writing` at the
 // bound.
+// The condition the twin rests on, as that cell's: the held write stays held until the session
+// closes it. The session side's SO_SNDBUF is set to a fixed size once the session is Active;
+// Microsoft documents that setting SO_SNDBUF on a TCP socket disables Windows' dynamic send
+// buffering for it. A held send that completes ok means the window reopened; the twin then fails
+// as a setup failure.
 TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_SeamTwin_ClosedAtExactlyTheBound) {
     asio::io_context ioc;
     auto clock = t105::make_mock_clock(ioc.get_executor());
@@ -254,6 +290,11 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_SeamTwin_ClosedAtExactlyTh
         up = fixpp::test_support::pump_until(
             ioc, [&] { return state() == fsm_state::Active; }, 5s, 5ms,
             "TlsWriteLimit105::R2AfterActive_PeerStopsReading_SeamTwin/logon");
+    }
+    int session_sndbuf = -1;
+    if (up) {
+        session_sndbuf = fix_session_send_buffer(h->engine(), h->acceptor_id(), 65536);
+        up = session_sndbuf > 0;
     }
     if (up) {
         peer->send(msg("0", 2));
@@ -310,9 +351,21 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_SeamTwin_ClosedAtExactlyTh
         (void)t105::pump_until_peer_read_ends(
             ioc, [&] { return peer->read_ended; }, 5s, "TlsWriteLimit105.SeamTwin");
     }
-    EXPECT_TRUE(up) << "setup";
+    EXPECT_TRUE(up) << "setup; the session's SO_SNDBUF " << session_sndbuf;
     EXPECT_TRUE(held) << "setup: no application send was held behind the stalled peer";
     EXPECT_TRUE(writing) << "setup: the too-low Logout's write did not start";
+    // The precondition: the held send did not complete ok, so the window did not reopen before
+    // the write ended.
+    std::string held_result = "not ready";
+    if (!sends.empty() && sends.back().wait_for(0s) == std::future_status::ready) {
+        auto const r = sends.back().get();
+        held_result = r.has_value() ? std::string{"ok"}
+                                    : "error " + std::to_string(static_cast<int>(r.error()));
+    }
+    bool const window_reopened = held_result == "ok";
+    EXPECT_FALSE(window_reopened) << "setup: the window reopened; the held send's result "
+                                  << held_result << "; the session's SO_SNDBUF " << session_sndbuf;
+    if (window_reopened) return;
     EXPECT_TRUE(writing_before) << "the Logout's write was not still limited at the bound - 1 ms";
     EXPECT_TRUE(open_before) << "the session ended before the bound";
     EXPECT_TRUE(ended_at_bound) << "the session did not end at the bound";

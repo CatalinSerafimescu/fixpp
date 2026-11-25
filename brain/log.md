@@ -8,9 +8,11 @@ status: stable
 
 - **2026-11-25 — 105-transport-liveness close-out (PR #720), row 15: `failure-classes.md` gains class 26, a close
   that is orderly on one platform resets the connection on another (Windows RST with a pending read; shut down the send
-  side first), and class 27, state keyed to one connection's peer is reset in the connection-start helper or leaks
-  into the next connection (`pending_test_req_id_` in `begin_connection_()`).** Owner-approved 2026-11-25 from the
-  Gate B record's anti-pattern candidates, as new classes.
+  side first), and class 27, a member keyed to one connection is reset or seeded on every path that starts a
+  connection, before its first consumer there, or leaks into the next connection (`begin_connection_()` is the default
+  place; `pending_test_req_id_`).** Owner-approved 2026-11-25 from the
+  Gate B record's anti-pattern candidates, as new classes; class 27's rule narrowed at Gate B round 3 to every
+  connection-start path rather than the helper alone.
 
 - **2026-11-25 — 105-transport-liveness, T141a and Gate B round 2: `components/transport.md` gains the plain
   transport's close (the send side shut down before the close, `B-105-9`); `components/session-liveness-and-reconnect.md`

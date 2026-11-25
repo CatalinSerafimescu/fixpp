@@ -1238,25 +1238,32 @@ there and only there, so every Linux lane is green.
   (`B-105-9`), measured with a Winsock probe. See [components/transport](./components/transport.md).
 - **Sibling.** Class 25 (a platform header's macro): another defect only the platform that has it can report.
 
-### 27. State keyed to one connection's peer, reset anywhere but the connection-start helper, leaks into the next connection
+### 27. A member keyed to one connection, not reset or seeded on every path that starts a connection, leaks into the next connection
 
-A Session that reconnects keeps its members across connections. State that one connection's exchange sets (a pending
-TestRequest ID, a peer-Logout mark, a liveness anchor) and that is not reset when the next connection starts makes the
-new connection behave as if the old peer's exchange were still open. It sends no probe, accepts the old connection's
-answer, or gives up naming an ID it never sent. Single-connection tests cannot see it.
+A Session that reconnects keeps its members across connections. A member that one connection's exchange sets (a pending
+TestRequest ID, a peer-Logout mark, a liveness anchor) and that the next connection reads before anything resets or seeds
+it makes the new connection behave as if the old peer's exchange were still open. It sends no probe, accepts the old
+connection's answer, or gives up naming an ID it never sent. Single-connection tests cannot see it.
 
 - **Trigger:** you add or review a member that one connection sets, on a type that can run more than one connection.
 - **Procedure:**
-  - Reset it in the one helper every new connection goes through (`Session::begin_connection_()`), in the same commit
-    that adds the member, not at the site that first needed it.
+  - Reset or seed it on every path that starts a connection, before its first consumer on that connection, in the same
+    commit that adds the member. `Session::begin_connection_()` is the default place: the connection-start paths call
+    it. A reset placed elsewhere sits on every such path and says why at the site, as
+    `Session::install_reconnected_transport()` does for the peer-Logout mark. A member seeded where its consumer starts
+    (the liveness anchor `last_inbound_steady_`, seeded from the Logon acknowledgement that enters Active) needs no reset
+    at the connection's start.
   - Witness it with a reconnect cell: connection 1 leaves the state set, connection 2 asserts the fresh behaviour. Add a
     mutant that deletes the reset and turns the cell RED.
   - Say who can reach it. Here only a direct initiator that reconnects one Session can; an Engine-managed initiator gets
     one connection per Session.
-- **Scanning heuristic:** list the members the diff adds to the Session (`git diff origin/main...HEAD -- include/fixpp/session/session.hpp`)
-  and check each against the body of `begin_connection_()`.
-- **Instance (105-transport-liveness, PR #720 Gate B round 1, RC#1).** `pending_test_req_id_`; the witnesses are the
-  `TestReqId105Direct` reconnect cells. See [components/session-liveness-and-reconnect](./components/session-liveness-and-reconnect.md).
+- **Scanning heuristic:** list the members the diff adds to the Session (`git diff origin/main...HEAD -- include/fixpp/session/session.hpp`).
+  For each, find its first consumer on a new connection, and check that every connection-start path resets or seeds it
+  before that consumer: `git grep -n 'begin_connection_()' -- src/session/session.cpp` lists the paths through the
+  helper, and a reset outside it is read at its site.
+- **Instance (105-transport-liveness, PR #720 Gate B round 1, RC#1).** `pending_test_req_id_`, reset in
+  `begin_connection_()` with `test_request_id_floor_`; the witnesses are the `TestReqId105Direct` reconnect cells. See
+  [components/session-liveness-and-reconnect](./components/session-liveness-and-reconnect.md).
 - **Sibling.** Class 15 (a seam that outlives the window it observes) and class 23 (a reference withdrawn on every exit
   of its window): the same rule, that state must end with its window, for a connection rather than an install or a frame.
 
