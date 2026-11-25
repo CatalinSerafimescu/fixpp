@@ -25,6 +25,7 @@
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/fix_time.hpp>
@@ -485,8 +486,10 @@ int session_send_buffer(fixpp::session::Engine& engine, fixpp::session::SessionI
 // The condition the cell rests on: the held write stays held until the session closes it. The
 // session side's SO_SNDBUF is set to a fixed size once the session is Active, on Windows only. A
 // held send that completes ok means the window reopened and the R-2 Logout could be written; the
-// cell then fails as a setup failure. A held send seen ready prints the mock-clock step and the
-// wall time since the fill loop ended at which it was first seen.
+// cell then fails as a setup failure. The bound (logout_disconnect_timeout_ms) is set to the seam
+// twin's: that shortens the wall time between the hold and the bound; it does not explain why a
+// window can reopen. A held send seen ready prints the mock-clock step and the wall time since the
+// fill loop ended at which it was first seen.
 // Off Windows the tail's read ends only after the peer has drained what the session queued before
 // its close: the close is an ordinary close, with the FIN behind that queue. The read's cap (the
 // 5s at its pump) is a wall cap that nothing derives: a drain slower than it fails the cell at the
@@ -494,6 +497,7 @@ int session_send_buffer(fixpp::session::Engine& engine, fixpp::session::SessionI
 // The bound's timing on both sides is pinned by the seam twin,
 // TlsWriteLimit105.R2AfterActive_PeerStopsReading_SeamTwin_ClosedAtExactlyTheBound in
 // test_105_seams.cpp.
+constexpr std::uint32_t kWriteLimitBoundMs = 500;
 TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsCloseTimeout) {
     asio::io_context ioc;
     auto clock = t105::make_mock_clock(ioc.get_executor());
@@ -505,6 +509,7 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
             fixpp::session::CompIdAuthorizationPolicy authz;
             authz.add_binding("fixpp-leaf-rsa2048", "INITIATOR");
             c.compid_authorization_policy = authz;
+            c.logout_disconnect_timeout_ms = kWriteLimitBoundMs;
         });
     if (!h) GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
     fixpp::test_support::engine_stop_guard stop_guard{*h, ioc};
@@ -606,9 +611,10 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
         // The session reads the frame behind its own blocked write, so the instant its Logout's
         // write starts is not observable from here: the mock clock moves in 50 ms steps, with
         // wall time between them for the reads and for tls_close_timeout, until the session ends,
-        // at most 3 s of mock time (the bound is the harness's logout_disconnect_timeout_ms from
+        // at most the bound plus 1 s of mock time (the bound is logout_disconnect_timeout_ms from
         // the Logout's start; the seam twin in test_105_seams.cpp pins it on both sides).
-        while (state() == fsm_state::Active && advanced < 3000ms) {
+        auto const mock_cap = std::chrono::milliseconds{kWriteLimitBoundMs} + 1000ms;
+        while (state() == fsm_state::Active && advanced < mock_cap) {
             clock->advance(step);
             advanced += step;
             (void)fixpp::test_support::pump_until(
