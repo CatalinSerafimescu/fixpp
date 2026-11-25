@@ -485,11 +485,15 @@ int session_send_buffer(fixpp::session::Engine& engine, fixpp::session::SessionI
 // abortive; on Windows the ending is the one L-105-g names, and is printed, not pinned.
 // The condition the cell rests on: the held write stays held until the session closes it. The
 // session side's SO_SNDBUF is set to a fixed size once the session is Active, on Windows only. A
-// held send that completes ok means the window reopened and the R-2 Logout could be written; the
-// cell then fails as a setup failure. The bound (logout_disconnect_timeout_ms) is set to the seam
-// twin's: that shortens the wall time between the hold and the bound; it does not explain why a
-// window can reopen. A held send seen ready prints the mock-clock step and the wall time since the
-// fill loop ended at which it was first seen.
+// held send that completes ok means the window reopened and the R-2 Logout could be written. Off
+// Windows the cell then fails as a setup failure. On Windows (owner-approved for Windows only,
+// fixpp#722) it prints the reading and passes, and the checks that rest on the hold (no Logout
+// read, the ending) are not made; the bound's checks (open before the bound, ended by the
+// mock-clock cap, the peer's read ended) are made on every platform.
+// The bound (logout_disconnect_timeout_ms) is set to the seam twin's: that shortens the wall time
+// between the hold and the bound; it does not explain why a window can reopen. A held send seen
+// ready prints the mock-clock step and the wall time since the fill loop ended at which it was
+// first seen.
 // Off Windows the tail's read ends only after the peer has drained what the session queued before
 // its close: the close is an ordinary close, with the FIN behind that queue. The read's cap (the
 // 5s at its pump) is a wall cap that nothing derives: a drain slower than it fails the cell at the
@@ -684,12 +688,23 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
             << held_result << "; mock time advanced " << advanced.count() << " ms";
     auto const ending = peer ? peer->ending() : t105::peer_ending::open;
     // The precondition: the held send did not complete ok, so the window did not reopen before
-    // the write ended.
+    // the write ended. On Windows a reopened window is a reading, not a failure (the cell's comment
+    // states the condition; fixpp#722).
     bool const window_reopened = held_result == "ok";
+#if defined(_WIN32)
+    if (window_reopened) {
+        std::cout << "[ reading  ] TlsWriteLimit105: the window reopened, so the checks that rest "
+                     "on the hold are not made; the held send completed in "
+                  << held_ready_in << ", result " << held_result << "; " << reading.str()
+                  << std::endl;
+        return;
+    }
+#else
     EXPECT_FALSE(window_reopened) << "setup: the window reopened; the held send completed in "
                                   << held_ready_in << ", result " << held_result << "; "
                                   << reading.str();
     if (window_reopened) return;
+#endif
     // What both platforms share: the peer reads only after the session's end, so everything it
     // reads follows the too-low frame; no Logout among it, and the connection ended.
     EXPECT_EQ(pr::frames_of_type(got, "5").size(), 0U)
