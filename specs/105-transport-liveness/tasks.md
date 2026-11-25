@@ -952,7 +952,8 @@ inbound silence, one sleep per iteration, T validated.
   `cfg_.test_request_threshold.value_or(default_test_request_threshold(H))`, the helper (H × 1200 ms, saturating at
   `milliseconds::max()`) in a `detail` header beside `deadline_after` (`read_first_frame_bounded.hpp` or its sibling);
   the TestRequest instant `deadline_after(last_inbound_steady_, T)`; the give-up instant three saturating steps (T, T, then
-  `std::chrono::nanoseconds{1}`); `tr_sent_at`; the eligibility rules (Heartbeat eligible with no TestRequest pending or an
+  `std::chrono::nanoseconds{1}`); `tr_sent_at` [superseded at Gate B round 1 by two readings, `tr_issued_at` and
+  `tr_written_at`, data-model E-4]; the eligibility rules (Heartbeat eligible with no TestRequest pending or an
   inbound frame since it; give-up eligible with one pending and none since [superseded by spec clarification "Session 2026-11-21
   (implementation, Phase 6)": eligible with one pending]); **one sleep per iteration** to the earliest
   instant of the sleep set (the Heartbeat instant when eligible or not yet reached, the TestRequest and give-up instants when
