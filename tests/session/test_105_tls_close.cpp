@@ -451,21 +451,28 @@ TEST(TlsClose105, CloseGracefulDuringWait_CloseNotifyAtTheBound) {
                                                          : t105::peer_ending::open);
 }
 
-// Sets SO_SNDBUF on the engine acceptor's accepted TLS socket and returns the value the OS reports
-// back, or -1 when the session, its TLS transport or the option is not there. The Engine's accept
-// path builds the accepted transport's Transport::Config itself (no SessionConfig or EngineConfig
-// field reaches tcp_send_buf_bytes there), so the cell sets the option through the test-access
-// friend. Re-check with: grep -n accepted_transport_config src/session/engine.cpp
-int fix_session_send_buffer(fixpp::session::Engine& engine, fixpp::session::SessionId const& id,
-                            int bytes) {
+// Returns the SO_SNDBUF the OS reports for the engine acceptor's accepted TLS socket, or -1 when
+// the session, its TLS transport or the option is not there. On Windows it first sets the option
+// to windows_bytes: Microsoft documents that setting SO_SNDBUF on a TCP socket disables Windows'
+// dynamic send buffering for it. Elsewhere the option keeps the size the OS gives it: the
+// session's close (asio_tls_transport::close_async) is an ordinary close, so the peer's read ends
+// only after it has read everything the session's socket queued, and a larger send buffer
+// lengthens that drain. The Engine's accept path builds the accepted transport's
+// Transport::Config itself (no SessionConfig or EngineConfig field reaches tcp_send_buf_bytes
+// there), so the cell reaches the option through the test-access friend. Re-check with:
+// grep -n accepted_transport_config src/session/engine.cpp
+int session_send_buffer(fixpp::session::Engine& engine, fixpp::session::SessionId const& id,
+                        [[maybe_unused]] int windows_bytes) {
     auto s = engine.lookup(id);
     if (!s) return -1;
     auto* tls = dynamic_cast<fixpp::transport::asio_tls_transport*>(&s->live_transport());
     if (tls == nullptr) return -1;
     auto& sock = fixpp::transport::asio_tls_transport_test_access::socket_of(*tls);
     asio::error_code ec;
-    sock.set_option(asio::socket_base::send_buffer_size{bytes}, ec);
+#if defined(_WIN32)
+    sock.set_option(asio::socket_base::send_buffer_size{windows_bytes}, ec);
     if (ec) return -1;
+#endif
     asio::socket_base::send_buffer_size got;
     sock.get_option(got, ec);
     return ec ? -1 : got.value();
@@ -478,10 +485,14 @@ int fix_session_send_buffer(fixpp::session::Engine& engine, fixpp::session::Sess
 // written. Off Windows close_notify cannot be written behind the held write, so the close is
 // abortive; on Windows the ending is the one L-105-g names, and is printed, not pinned.
 // The condition the cell rests on: the held write stays held until the session closes it. The
-// session side's SO_SNDBUF is set to a fixed size once the session is Active; Microsoft documents
-// that setting SO_SNDBUF on a TCP socket disables Windows' dynamic send buffering for it. A held
-// send that completes ok means the window reopened and the R-2 Logout could be written; the cell
-// then fails as a setup failure. The bound's timing on both sides is pinned by the seam twin,
+// session side's SO_SNDBUF is set to a fixed size once the session is Active, on Windows only:
+// Microsoft documents that setting SO_SNDBUF on a TCP socket disables Windows' dynamic send
+// buffering for it. A held send that completes ok means the window reopened and the R-2 Logout
+// could be written; the cell then fails as a setup failure.
+// Off Windows the tail's read ends only after the peer has drained what the session queued before
+// its close: the close is an ordinary close, with the FIN behind that queue, so a fixed send
+// buffer there would lengthen the drain the tail waits for.
+// The bound's timing on both sides is pinned by the seam twin,
 // TlsWriteLimit105.R2AfterActive_PeerStopsReading_SeamTwin_ClosedAtExactlyTheBound in
 // test_105_seams.cpp.
 TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsCloseTimeout) {
@@ -529,7 +540,7 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
     }
     int session_sndbuf = -1;
     if (up) {
-        session_sndbuf = fix_session_send_buffer(h->engine(), h->acceptor_id(), 65536);
+        session_sndbuf = session_send_buffer(h->engine(), h->acceptor_id(), 65536);
         up = session_sndbuf > 0;
     }
     if (up) {
