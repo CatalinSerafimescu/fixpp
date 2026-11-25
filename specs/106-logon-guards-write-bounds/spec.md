@@ -142,7 +142,7 @@ An acceptor's Logon, or an initiator's ordinary Logon acknowledgement (no 141=Y)
 
 **Why this priority**: protocol fidelity on every FIXT session; it pairs with User Story 1's sequence-state guarantee.
 
-**Independent Test**: refuse a Logon on each role, at S3 and at each other refusal the plan lists, then read NextNumIn from the session and from the store.
+**Independent Test**: refuse a Logon on each role, at S3 and at each other refusal the plan lists, then read NextNumIn from the session and from the store, and compare them as FR-006 defines "unchanged".
 
 **Acceptance Scenarios**:
 
@@ -243,7 +243,7 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
 - **FR-003**: In every inbound-Logon arm (acceptor) and Logon-acknowledgement arm (direct initiator), no frame MUST be written and no sequence state MUST be changed (in memory or durably) before every identity gate that applies to the session has admitted the identity.
 - **FR-004**: A Logon or acknowledgement refused by an identity gate MUST end the session with no message, whatever other refusal would also have applied.
 - **FR-005**: For an identity the gates admit, every refusal's answer and ending MUST be as on `9d81082a`.
-- **FR-006**: A Logon (acceptor) or an ordinary Logon acknowledgement (initiator) refused at the S3 DefaultApplVerID/ApplVerID test MUST leave NextNumIn unchanged in memory and in the store, and so MUST every other refusal of a Logon or acknowledgement, on either role. One exception: a refusal that runs after a reset the arm already applied (a configured `reset_on_logon` reset, or a 141=Y reset unit) keeps that reset. Such a reset runs only for an identity the gates admit, as QuickFIX C++ resets at the same place; it is disclosed as L-106-a. The plan MUST list each refusal that runs after the inbound advance, with a cell for each.
+- **FR-006**: A Logon (acceptor) or an ordinary Logon acknowledgement (initiator) refused at the S3 DefaultApplVerID/ApplVerID test MUST leave NextNumIn unchanged in memory and in the store, and so MUST every other refusal of a Logon or acknowledgement, on either role. One exception: a refusal that runs after a reset the arm already applied (a configured `reset_on_logon` reset, or a 141=Y reset unit) keeps that reset. Such a reset runs only for an identity the gates admit, as QuickFIX C++ resets at the same place; it is disclosed as L-106-a. The plan MUST list each refusal that runs after the inbound advance, with a cell for each. "NextNumIn unchanged" means: the store's NextNumIn equals its value before the frame, and NextNumIn in memory equals the value the arm classified the frame against, not that value plus one. On a session hydrated before the frame, that is also its in-memory value before the frame. An acceptor's first Logon hydrates inside the arm, after the identity gates, so there the comparison is with the classified value and not with the unhydrated default read before the frame; an identity refusal precedes hydration and leaves the in-memory value as it was (SC-001).
 - **FR-007**: The identity-precedence cells pinned by 104 (`LogonTooLow104.Precedence_*`, `UnaskedResetAck104.Mtls_Unauthorised_NoReset`) MUST still pass, or be updated where this feature deliberately changes the order they pin, each update named in the plan.
 
 **B124 (#714)**
@@ -284,7 +284,7 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
 ### Measurable Outcomes
 
 - **SC-001**: In every cell of User Story 1, the unauthorised peer receives zero bytes after the TLS handshake, and both sequence numbers (in memory and in the store) equal their values before the Logon.
-- **SC-002**: In every cell of User Story 2, NextNumIn after the refusal equals NextNumIn before it, in memory and in the store. The exception is a reset already applied in the arm (FR-006, `L-106-a`): there NextNumIn equals the reset's target.
+- **SC-002**: In every cell of User Story 2, NextNumIn after the refusal is unchanged in FR-006's sense: the store's value equals its value before the frame, and the in-memory value equals the value the arm classified the frame against, not that value plus one. The exception is a reset already applied in the arm (FR-006, `L-106-a`): there NextNumIn equals the reset's target.
 - **SC-003**: With a peer that stops reading, `logout_disconnect_timeout_ms` > 0 and a clock, the session ends within the give-up instant plus `logout_disconnect_timeout_ms` plus the stated margin. This holds in 100% of the runs of each write-class cell, on every sanitizer lane the cells run on.
 - **SC-004**: With the per-write limit set and no other ending holding the claim, the session ends within the limit plus the stated margin in each write-class cell.
 - **SC-005**: A one-attempt reconnect against a never-handshaking peer returns `transport_reconnect_limit_exceeded` within the configured bound plus the stated margin. An Engine acceptor drops a never-handshaking client within its configured bound plus the stated margin.

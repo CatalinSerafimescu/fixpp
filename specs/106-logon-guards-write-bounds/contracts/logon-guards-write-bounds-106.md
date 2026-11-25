@@ -48,8 +48,8 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
 
 ## C-2. A refused Logon keeps NextNumIn (FR-006)
 
-- **C-2.1** A Logon (acceptor) or an acknowledgement (initiator) refused before its success path leaves NextNumIn, in
-  memory and in the store, at its value before the frame, except where a reset already ran in the arm (C-2.2). This holds whether the refusal sends a Reject, sends a
+- **C-2.1** A Logon (acceptor) or an acknowledgement (initiator) refused before its success path leaves NextNumIn
+  unchanged in FR-006's sense (the store at its value before the frame; in memory, the value the arm classified the frame against, which is the pre-frame value on a session hydrated before it), except where a reset already ran in the arm (C-2.2). This holds whether the refusal sends a Reject, sends a
   Logout or is silent. The refusals concerned are those of research D2's table marked "unchanged":
   - S3 / 1137, on both roles;
   - the initiator's strict refusal;

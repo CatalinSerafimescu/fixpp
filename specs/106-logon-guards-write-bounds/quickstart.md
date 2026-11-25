@@ -80,6 +80,7 @@ before the competing deadline (10 s, `logon_timeout_ms` from accept).
 | Mutant | Change | Must turn RED |
 |---|---|---|
 | M1 | the consuming mTLS gate before the stay-in-arm validate Reject | `IdentityFirst106.Admitted_StayInArmReject_NextLogonActive` |
+| M1a | the precheck's credentials half skipped when the session is not mTLS | `IdentityFirst106.ValidateFirst_RefusedCredentials_NonMtls` |
 | M2 | delete the loop's arming of the connection bound for its emit; and, separately, restore the cap's pending term | every `GiveUp106` cell except the guard; `GiveUp106.ResendHeldNoPending` |
 | M3 | take `write_started_at_` before the `write_gate_` acquire | `WriteTimeout106.QueuedWrite_CountsFromItsOwnStart`, `ResendWalk_ProgressNotCut` |
 | M3′ | delete the bound's write arming | every `WriteTimeout106.<Class>` cell |
@@ -91,7 +92,7 @@ before the competing deadline (10 s, `logon_timeout_ms` from accept).
 | M9′ | delete E-3's exit on a taken claim | with M9: `OneEnding106` pairs whose second decider is the bound |
 | M10 | the pump races `on_inbound_frame` against the establishment deadline, with M9 | `OneEnding106.Watchdog_PreActive_NoEstablishmentRecord` |
 | M11 | the `write_timeout_ms` mapper recognises the key and drops its value | `TomlWriteTimeout106.Set` |
-| M12 | per joiner of data-model E-3's table: the drain's wake and its `reconnect_drain_in_flight_` term; the `Disconnected` edge's wake; the drain term with `claim_ending_`'s drain refusal | `ConnectionBound106.Teardown_Drain_*`; `Teardown_ConnectionEnd_*`; `WriteExpiryDuringDrain_NoRecord` (its rig open for loop 2) |
+| M12 | per joiner of data-model E-3's table: the drain's wake and its `reconnect_drain_in_flight_` term; the `Disconnected` edge's wake; the drain term with `claim_ending_`'s drain refusal; `drive_reconnect`'s respawn after a failed drain | `ConnectionBound106.Teardown_Drain_*`; `Teardown_ConnectionEnd_*`; `WriteExpiryDuringDrain_NoRecord` (LogonSent, a Logon-arm Reject's write blocked: research D9); `DrainCancelled_RespawnsOnBlockedWrite` |
 | M6 | commit the advance at the classification (the base's `check_inbound`) | every `NextNumIn106` cell |
 | M7 | `tls_handshake_timeout_ms` read and dropped (the base's default `Transport::Config`) | `TomlHandshake106.SessionKey`, `SecondSessionDiverges` |
 | M7′ | `EngineConfig::acceptor_tls_handshake_timeout` ignored (the literal back) | the C++ `EngineHandshake106` twin |

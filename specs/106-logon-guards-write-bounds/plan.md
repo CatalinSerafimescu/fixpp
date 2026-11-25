@@ -176,11 +176,11 @@ src/capi/error.cpp                                # translate session_write_time
 src/log/format_registry.cpp                       # the write-timeout record
 include/fix/c_api/version.h                       # MINOR 19 + 1.19 history (comment)
 include/fix/c_api/session.h                       # 1.19 clauses (comments)
-tests/session/test_106_identity_first.cpp         # IdentityFirst106, NextNumIn106
+tests/session/test_106_identity_first.cpp         # IdentityFirst106, NextNumIn106 (all but CommitRefused_Disconnected)
 tests/session/test_106_give_up.cpp                # GiveUp106
 tests/session/test_106_seams.cpp                  # every cell naming a symbol the base lacks: WriteTimeout106, OneEnding106 (limit set), ConnectionBound106, ShippingClock106, both EngineHandshake106 cells, NextNumIn106.CommitRefused_Disconnected, TomlWriteTimeout106.Set
 tests/session/test_106_one_ending.cpp             # OneEnding106 pairs that need no new symbol
-tests/session/test_106_handshake.cpp              # HandshakeBound106, EngineHandshake106 (real TLS)
+tests/session/test_106_handshake.cpp              # HandshakeBound106 (real TLS)
 tests/alloc_guard/test_106_connection_bound.cpp   # alloc_guard_106_connection_bound_mallocnesia (Release)
 src/session/session_engine_access.hpp             # claim_ending (the establishment expiry)
 tests/config/…                                    # TomlWriteTimeout106.{OutOfRange, WrongType}, TomlHandshake106 (the config suite's file)
@@ -206,6 +206,7 @@ of D9) stay where they are.
 | `drive_reconnect`'s return | `ReconnectFsm::drive_reconnect_attempt` returns `transport_reconnect_limit_exceeded` | none: the requirement follows the FSM (R4) | `HandshakeBound106.*` |
 | the TOML handshake key | `asio_tls_transport_factory::cfg_` is private | none: observed through `make()` and `async_handshake` (D6) | `TomlHandshake106.*` |
 | the root handshake key | `EngineEstablishment` has no field; hosts copy it field by field into `EngineConfig` | the new field; the copy-site census (D6) | `EngineHandshake106.Acceptor_ClosesAtTheKey` |
+| the bound after a cancelled drain | `drive_reconnect`'s failed-drain return (`!drained`), which today only returns | the respawn of data-model E-3, after clearing `reconnect_drain_in_flight_` | `ConnectionBound106.DrainCancelled_RespawnsOnBlockedWrite` |
 | new symbols in cells | the base build | the seam file (D9) | every [seam] cell |
 
 ## Phases (for /speckit-tasks; order by blocking, owner 2026-11-25)
@@ -285,6 +286,13 @@ for a direct `open()` initiator (F-3); the F-9 edge case; Q4.
 - Loop 1 exhausted at round 3 (Codex P1=1 P2=1 P3=0; Opus P1=1 P2=3 P3=2). Step F (orchestrator, owner-delegated 2026-11-26): targeted edit applying round 3's exact text; loop 2 follows. Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_106-logon-guards-write-bounds_gate_a_3_review.md`,
   `research/G19-fix-fpml-iso20022/research/reviews/opus_106-logon-guards-write-bounds_gate_a_3_adversarial_review.md`.
 
+- Loop 2 round 1 applied 2026-11-26: Codex P1=2 P2=1 P3=1; Opus post-judging P1=1 P2=3 P3=6; rewrite addresses root causes
+  #1 (the identity matrix derived per gate, from where each gate applies) and #2 (the drain cells scripted from
+  `drain_for_reconnect_`'s step order). Reviews:
+  `research/G19-fix-fpml-iso20022/research/reviews/codex_106-logon-guards-write-bounds_gate_a_4_review.md`,
+  `research/G19-fix-fpml-iso20022/research/reviews/opus_106-logon-guards-write-bounds_gate_a_4_adversarial_review.md`.
+  Every P3 is applied in the bundle; none is deferred to tasks.md.
+
 ### Round 1 — disagreements
 
 None marked Disagree, so no Codex fix was refused. Three were applied as Opus corrected them, not as written:
@@ -301,3 +309,23 @@ None marked Disagree. Applied otherwise than written:
   Opus C-3's rule would demand cells for by-design rows; those rows of D2's 106 column now read "as the base".
 - Opus N-1: the disclosure is the new `L-106-f`, and the pre-Active cell's mutant is M10 (M9 alone never reaches the
   establishment expiry). N-5's row is initiator-only: the acceptor's superseded returns follow its commit.
+
+### Loop 2 round 1 — disagreements
+
+Two Codex fixes refused, as Opus judged:
+- Codex C-2's oracle ("the hydrated manager equals the stored value") is not taken: with a peer 141=Y the acceptor
+  withholds the inbound seed, so the manager reads 1 while the store holds N. FR-006 now defines "unchanged" against the
+  value the arm classified the frame against.
+- Codex C-3's counter-proposal (delete `WriteExpiryDuringDrain_NoRecord`; a seam calling `claim_ending_` directly) is not
+  taken: a drain from LogonSent with a Logon-arm Reject's write blocked parks at step 3 with the bound alive, and that
+  window tests the bound's exit term, which a seam probe would not.
+
+Applied otherwise than written:
+- Opus N-6: its text ("an arming that finds it not running spawns it again") never fires in that state, because later
+  writes queue at `write_gate_` and the liveness loop starts only at Active. The respawn is placed at
+  `drive_reconnect`'s failed-drain return (data-model E-3), with the cell `DrainCancelled_RespawnsOnBlockedWrite` and
+  its mutant.
+- Opus C-3's rig sets `logout_disconnect_timeout_ms` 1000 ms; every Drain cell sets 5000 ms, because step 3's
+  wall-clock bound is a competing ending that would end the bound under the `_Timing` mutant and read it GREEN.
+- C-1 and C-2 reach more surfaces than Opus's text: the paragraph after E-1's table and D1 item 2 state the credentials
+  half per gate, and INV-106-1 names the acceptor's hydration.

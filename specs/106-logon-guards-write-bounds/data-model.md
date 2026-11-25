@@ -15,17 +15,17 @@ strand, like the members 105 added. None is atomic except a join counter, as 103
 
 The precheck's result, per gate:
 
-| mTLS (`consume` = false) | Credentials (acceptor) | Result |
-|---|---|---|
-| not mTLS | — | admitted |
-| mTLS, `live_peer_id_` authorised for `cfg_.target_comp_id` | readable, `authorize_logon` true | admitted; no event, nothing consumed |
-| mTLS, not authorised, or no identity | any | refused |
-| admitted | readable, `authorize_logon` false | refused |
-| admitted | unreadable (`interpret_logon` refused) and `has_logon_validator()` | refused |
-| admitted | unreadable and no validator | admitted |
+The precheck is two independent halves. A half that does not apply admits and consumes nothing; the result is admitted only when every half that applies admits.
 
-A refused result ends the arm. The consuming form of the mTLS gate then runs, for its event, and the arm records
-`Disconnected` and returns success. An admitted result leads to the Reject:
+| Half | Applies when | Admits | Refuses |
+|---|---|---|---|
+| mTLS (`consume` = false) | `mtls_ca` or `mtls_pinned`, either role | `live_peer_id_` authorised for `cfg_.target_comp_id`; no event, nothing consumed | not authorised, or no identity |
+| credentials | the acceptor, whatever its security profile (plaintext and one-way TLS included) | readable and `authorize_logon` true; or unreadable (`interpret_logon` refused) and no validator | readable and `authorize_logon` false; or unreadable and `has_logon_validator()` |
+
+On a non-mTLS acceptor the credentials half alone decides; on an initiator the mTLS half alone decides.
+
+A refused result ends the arm with no frame written. When the mTLS half applies, the consuming form of the mTLS gate then runs, for its event; the arm records
+`Disconnected` and returns success. A non-mTLS acceptor refused by the credentials half ends the same way: no Reject, a silent `Disconnected`. An admitted result leads to the Reject:
 - If the Reject disconnects (`logon_reject_disconnects_`, computed before the send), the consuming form runs **before**
   the Reject is written, and a refusal there ends the arm silently (Gate A N-13.2).
 - If the Reject stays in the arm, nothing is consumed.
@@ -42,13 +42,13 @@ A refused result ends the arm. The consuming form of the mTLS gate then runs, fo
 | commit | `co_await seqnum_mgr_.check_inbound(seq)` | acceptor: after the 1137 block, before `LogonReceived`, when `logon_inbound_advanced`. Initiator: after the 789 honour and the superseded test, before `Active`, when `logon_inbound_advanced_init && !peer_ack_sent_reset_flag`. A refusal records `Disconnected` unless superseded and returns success. |
 
 Invariant **INV-106-1**: from the arm's entry to its commit point, nothing changes `next_inbound_` except a reset unit
-(absolute targets) and the acceptor's knob-driven reset that precedes classification. A refusal in between therefore
-leaves NextNumIn as it was before the Logon, in memory and in the store, unless one of those resets ran first. That
+(absolute targets), the acceptor's knob-driven reset that precedes classification, and the acceptor's hydration (`ensure_hydrated_`, which loads the store's value after the identity gates). A refusal in between therefore
+leaves NextNumIn unchanged in FR-006's sense (the store at its value before the frame; in memory, the value the arm classified the frame against), unless one of those resets ran first. That
 case is disclosed (`L-106-a`, research D2's residual rows).
 
 ## E-3. The connection bound (D3, D5; Gate A ruling R2)
 
-One coroutine per connection, `run_connection_bound_`. It is spawned at most once per connection, by the liveness
+One coroutine per connection, `run_connection_bound_`. It is spawned at most once per connection (one respawn point, below), by the liveness
 loop's start or by the first live write with the limit on, whichever comes first, on that coroutine's executor. It is
 joined by `connection_bound_counter_`. New `Session` members (private, strand-confined):
 
@@ -67,16 +67,18 @@ executor at the spawn.
 - Either branch returns to the re-test. The deadline is the earlier of G (E-4), when `emit_in_flight_`, and
   `write_started_at_` + `write_timeout_ms`, when `write_in_flight_` and the limit is on.
 
+**Respawn after a failed drain (Gate A loop 2 round 1, N-6).** A drain can fail after the bound left on the drain term: the caller's cancellation at a step-3 suspension (`dispatch_aborted`) leaves the old connection in LogonSent with its Logon-arm write still blocked. No later arming can follow (later writes queue at `write_gate_` and the liveness loop starts only at Active). So `drive_reconnect`, at its failed-drain return and after clearing `reconnect_drain_in_flight_`, spawns the bound again when `conn_gen_` has not moved, `closing_or_stopped_()` does not hold, and `write_in_flight_` or `emit_in_flight_` holds. The new bound re-arms on the in-flight write's own `write_started_at_`; a refused spawn fails closed as C-4's spawn failure. This is the one exception to "at most once per connection": at most one bound runs at a time.
+
 **Wakers:** the loop's guard (both edges); a live write's start, unless the bound is already armed on an earlier
-write's deadline; `close()`,
-`Engine::stop()`'s step 1 and `drain_for_reconnect_`, before their joins; the `Disconnected` edge.
+write's deadline; `close()` and
+`Engine::stop()`'s step 1, before their joins; `drain_for_reconnect_` at its entry, beside `wake_ending_logout_bound_()` (105's position), because from LogonSent with a Logon-arm write blocked the drain parks at its step 3 on `inbound_depth_` before any join; the `Disconnected` edge.
 
 **Joiners and their exit terms (Gate A round 3, N-1 and root cause #2).** Every coroutine that waits for the bound to
 end, what it waits on, and the exit term only it sets. Re-derive: `git grep -n 'FIXPP_JOIN_COUNTERS\|connection_bound_counter_' -- src/session/session.cpp`, each join read for the state the session can be in when it is reached, and `Engine::stop()`'s steps in `src/session/engine.cpp`.
 
 | Joiner | Waits on | Its exit term, set before its wake | Cell, and the mutant a hidden exit would mask |
 |---|---|---|---|
-| `drain_for_reconnect_` (`drive_reconnect`) | `FIXPP_JOIN_COUNTERS` on `connection_bound_counter_`, beside `ending_logout_bound_counter_` | `reconnect_drain_in_flight_`, set by `drive_reconnect` around the drain. From LogonSent the drain records no `Disconnected` (it records one only from Active or LogonReceived) and `conn_gen_` has not moved, so it is the only term | `ConnectionBound106.Teardown_Drain_*` from LogonSent; the wake and the term deleted, the counter never 0 |
+| `drain_for_reconnect_` (`drive_reconnect`) | `FIXPP_JOIN_COUNTERS` on `connection_bound_counter_`, beside `ending_logout_bound_counter_` | `reconnect_drain_in_flight_`, set by `drive_reconnect` around the drain. From LogonSent the drain records no `Disconnected` (it records one only from Active or LogonReceived) and `conn_gen_` has not moved, so it is the only term | `ConnectionBound106.Teardown_Drain_*` from LogonSent, scripted from the drain's step order (entry wake, step 2, step 3, joins): `_Parked` with the acknowledgement withheld, so no write is in flight and step 3 does not park; `_Timing` with a Logon-arm Reject's write blocked, so step 3 parks on `inbound_depth_` and only the entry wake ends the bound before the join. The bound binds no cancellation slot, so step 4's `root_cancel_.emit` does not end it. The wake and the term deleted, the counter never 0 |
 | `close()` | `FIXPP_JOIN_COUNTERS` after `root_cancel_.emit`, beside `liveness_counter_` | `state_ == lifecycle::closing`, in `closing_or_stopped_()` | none counted: `close()` records `Disconnected` (unless already) before `root_cancel_.emit` and its joins, in every state, so the edge also ends the bound. Its term's own observable is the decision during phase 1: `OneEnding106.CloseThenWatchdog`, under M9 with the closing term deleted from the exit row (the exit row precedes the expiry row) |
 | `Engine::stop()` | no join of its own: step 4's `Session::close(terminal)` joins | `engine_stop_requested_` (step 1, `note_engine_stop`), in `closing_or_stopped_()` | none counted: step 2 closes every session's transport, which fails an armed write or emit, and the `Disconnected` edge that follows ends the bound before step 4 joins. No test seam sits between step 1 and step 2 (`test_hook_post_send_drain_` runs in step 3, after the closes), so the term's decision side rests on `claim_ending_`'s refusal, with no cell |
 | the `Disconnected` edge (the connection's end) | no join: a later `close()` or drain finds the bound gone | `fsm_state_ == Disconnected`, and `ending_claim_` taken (the edge sets `internal`) | `Teardown_ConnectionEnd_*`, the counter read before any `close()`, drain or stop; the two terms are redundant, so the mutant deletes the edge's wake |
@@ -123,7 +125,7 @@ Rows 2 to 5 are the owner's "still held (not yet written)" state, with one insta
 ## E-5. The write limit's expiry (D5)
 
 With `cfg_.write_timeout_ms != 0`, `live_write_serialized_` sets E-3's write members before `live->async_write(frame)`
-and clears `write_in_flight_` when the write returns. A `logout`-class write (E-6) sets nothing.
+and clears `write_in_flight_` by an RAII guard on every exit of the write, both `catch` returns included; `begin_connection_()` clears it and `write_cut_epoch_` with `ending_claim_`. A `logout`-class write (E-6) sets nothing.
 
 At the bound's expiry, in order:
 1. `claim_ending_(write_timeout)`; when it is refused, nothing happens;
