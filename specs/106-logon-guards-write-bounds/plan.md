@@ -178,12 +178,13 @@ include/fix/c_api/version.h                       # MINOR 19 + 1.19 history (com
 include/fix/c_api/session.h                       # 1.19 clauses (comments)
 tests/session/test_106_identity_first.cpp         # IdentityFirst106, NextNumIn106
 tests/session/test_106_give_up.cpp                # GiveUp106
-tests/session/test_106_seams.cpp                  # every cell naming a symbol the base lacks: WriteTimeout106, OneEnding106 (limit set), ConnectionBound106, ShippingClock106, both EngineHandshake106 cells
+tests/session/test_106_seams.cpp                  # every cell naming a symbol the base lacks: WriteTimeout106, OneEnding106 (limit set), ConnectionBound106, ShippingClock106, both EngineHandshake106 cells, NextNumIn106.CommitRefused_Disconnected, TomlWriteTimeout106.Set
 tests/session/test_106_one_ending.cpp             # OneEnding106 pairs that need no new symbol
 tests/session/test_106_handshake.cpp              # HandshakeBound106, EngineHandshake106 (real TLS)
 tests/alloc_guard/test_106_connection_bound.cpp   # alloc_guard_106_connection_bound_mallocnesia (Release)
 src/session/session_engine_access.hpp             # claim_ending (the establishment expiry)
-tests/config/…                                    # TomlWriteTimeout106, TomlHandshake106 (the config suite's file)
+tests/config/…                                    # TomlWriteTimeout106.{OutOfRange, WrongType}, TomlHandshake106 (the config suite's file)
+tests/support/session_test_access.hpp             # the hooks: CommitRefused's freeze, connection_bound_spawn_fails_, connection_bound_wait_throws_
 tests/capi/expected_error_map.csv                 # + session_write_timeout row
 tests/session/CMakeLists.txt                      # the 106 binaries/labels
 spec/behaviors-and-limitations.md (+ -closed.md)  # D8
@@ -281,6 +282,8 @@ for a direct `open()` initiator (F-3); the F-9 edge case; Q4.
   new surface traced to its consumer). Reviews:
   `research/G19-fix-fpml-iso20022/research/reviews/codex_106-logon-guards-write-bounds_gate_a_2_review.md`,
   `research/G19-fix-fpml-iso20022/research/reviews/opus_106-logon-guards-write-bounds_gate_a_2_adversarial_review.md`.
+- Loop 1 exhausted at round 3 (Codex P1=1 P2=1 P3=0; Opus P1=1 P2=3 P3=2). Step F (orchestrator, owner-delegated 2026-11-26): targeted edit applying round 3's exact text; loop 2 follows. Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_106-logon-guards-write-bounds_gate_a_3_review.md`,
+  `research/G19-fix-fpml-iso20022/research/reviews/opus_106-logon-guards-write-bounds_gate_a_3_adversarial_review.md`.
 
 ### Round 1 — disagreements
 

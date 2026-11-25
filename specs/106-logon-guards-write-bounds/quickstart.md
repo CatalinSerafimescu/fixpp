@@ -72,7 +72,7 @@ tests, the transport tests and the C-ABI tests.
 Example: `ctest --preset linux-clang-debug -L 106 --output-on-failure`, then the same with `-L 105` and `-L 104`.
 
 Bounded waits use the mock clock with the budgets of research D9. The real-socket cells (P5) and the
-`ShippingClock106` cell use wall-clock budgets derived there: bound + 2 s; for `ShippingClock106`, W + 1 s and 2T. Each spurious-hit arm is checked
+`ShippingClock106` cell use wall-clock budgets derived there: bound + 2 s (the acceptor cell: EOF before 1.2 s, under its 1500 ms default); for `ShippingClock106`, W + 1 s against T = 2.4 s (HeartBtInt 2 s), with the write-timeout record asserted. Each spurious-hit arm is checked
 before the competing deadline (10 s, `logon_timeout_ms` from accept).
 
 ## 4. Mutants (in a scratch copy, never in the PR's worktree)
@@ -87,9 +87,11 @@ before the competing deadline (10 s, `logon_timeout_ms` from accept).
 | M4 | pass `write_class::ordinary` from every Logout site | `WriteTimeout106.EndingLogout_Keeps105Limit` |
 | M5 | spawn a coroutine per write and per emit | `alloc_guard_106_connection_bound_mallocnesia`: the send half non-zero (spaced sends; back-to-back sends would not show it), the emit half's delta against the base positive |
 | M8 | replace `connection_bound_wait_`'s shipping branch by `await_deadline(*effective_clock_, …)` | `ShippingClock106.DirectDriver_BoundBesideLiveness_TestRequestAtT` (the slot re-arm ends liveness); the mallocnesia cell (the per-call fallback allocates) |
-| M9 | delete `claim_ending_`'s test (always true) | every `OneEnding106` pair, with M9′ where the second decider meets E-3's exit |
+| M9 | delete `claim_ending_`'s test (always true) | every `OneEnding106` pair whose second decider reaches `claim_ending_`, with M9′ where the second decider meets E-3's exit on a taken claim; pairs stopped earlier by a state test or an exit row are guards or take the mutant research D9 names for them |
 | M9′ | delete E-3's exit on a taken claim | with M9: `OneEnding106` pairs whose second decider is the bound |
 | M10 | the pump races `on_inbound_frame` against the establishment deadline, with M9 | `OneEnding106.Watchdog_PreActive_NoEstablishmentRecord` |
+| M11 | the `write_timeout_ms` mapper recognises the key and drops its value | `TomlWriteTimeout106.Set` |
+| M12 | per joiner of data-model E-3's table: the drain's wake and its `reconnect_drain_in_flight_` term; the `Disconnected` edge's wake; the drain term with `claim_ending_`'s drain refusal | `ConnectionBound106.Teardown_Drain_*`; `Teardown_ConnectionEnd_*`; `WriteExpiryDuringDrain_NoRecord` (its rig open for loop 2) |
 | M6 | commit the advance at the classification (the base's `check_inbound`) | every `NextNumIn106` cell |
 | M7 | `tls_handshake_timeout_ms` read and dropped (the base's default `Transport::Config`) | `TomlHandshake106.SessionKey`, `SecondSessionDiverges` |
 | M7′ | `EngineConfig::acceptor_tls_handshake_timeout` ignored (the literal back) | the C++ `EngineHandshake106` twin |

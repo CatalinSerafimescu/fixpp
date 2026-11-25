@@ -57,7 +57,7 @@ joined by `connection_bound_counter_`. New `Session` members (private, strand-co
 | `connection_bound_` | struct: `running`, `gen` (the connection generation), `shipping` (the spawn's `dynamic_cast` result), `wake` (a callable that cancels the bound's own timer, as `ending_logout_wake_`) | the bound; `wake` by the bound only | the wakers |
 | `emit_in_flight_` | bool | the loop: set at an emit's start, cleared by an RAII guard in its frame at the return or an exception | the bound |
 | `write_started_at_` / `write_epoch_` / `write_in_flight_` / `write_cut_epoch_` | steady time point / `std::uint32_t` / bool / `std::uint32_t` | `live_write_serialized_`, just before `async_write`, with the limit on; the bound sets `write_cut_epoch_` at an expiry | the bound; the returning write, which returns `session_write_timeout` when its epoch is `write_cut_epoch_` |
-| `connection_bound_counter_` | `std::shared_ptr<std::atomic<int>>` | the bound's join (`counter_join`) | `close()` and `drain_for_reconnect_` wait for zero; `install_reconnected_transport` asserts it |
+| `connection_bound_counter_` | `std::shared_ptr<std::atomic<int>>` | the bound's join (`counter_join`) | `close()` and `drain_for_reconnect_` wait for zero; `install_reconnected_transport` and `~Session` assert it (N-4) |
 | `connection_bound_spawn_fails_`, `connection_bound_wait_throws_` | `std::function<bool()>` | `session_test_access` only | the spawn; the wait (105's seam shape) |
 
 **The wait** (`connection_bound_wait_(timer, deadline)`). The timer is a local of the bound's frame, constructed on its
@@ -71,13 +71,25 @@ executor at the spawn.
 write's deadline; `close()`,
 `Engine::stop()`'s step 1 and `drain_for_reconnect_`, before their joins; the `Disconnected` edge.
 
+**Joiners and their exit terms (Gate A round 3, N-1 and root cause #2).** Every coroutine that waits for the bound to
+end, what it waits on, and the exit term only it sets. Re-derive: `git grep -n 'FIXPP_JOIN_COUNTERS\|connection_bound_counter_' -- src/session/session.cpp`, each join read for the state the session can be in when it is reached, and `Engine::stop()`'s steps in `src/session/engine.cpp`.
+
+| Joiner | Waits on | Its exit term, set before its wake | Cell, and the mutant a hidden exit would mask |
+|---|---|---|---|
+| `drain_for_reconnect_` (`drive_reconnect`) | `FIXPP_JOIN_COUNTERS` on `connection_bound_counter_`, beside `ending_logout_bound_counter_` | `reconnect_drain_in_flight_`, set by `drive_reconnect` around the drain. From LogonSent the drain records no `Disconnected` (it records one only from Active or LogonReceived) and `conn_gen_` has not moved, so it is the only term | `ConnectionBound106.Teardown_Drain_*` from LogonSent; the wake and the term deleted, the counter never 0 |
+| `close()` | `FIXPP_JOIN_COUNTERS` after `root_cancel_.emit`, beside `liveness_counter_` | `state_ == lifecycle::closing`, in `closing_or_stopped_()` | none counted: `close()` records `Disconnected` (unless already) before `root_cancel_.emit` and its joins, in every state, so the edge also ends the bound. Its term's own observable is the decision during phase 1: `OneEnding106.CloseThenWatchdog`, under M9 with the closing term deleted from the exit row (the exit row precedes the expiry row) |
+| `Engine::stop()` | no join of its own: step 4's `Session::close(terminal)` joins | `engine_stop_requested_` (step 1, `note_engine_stop`), in `closing_or_stopped_()` | none counted: step 2 closes every session's transport, which fails an armed write or emit, and the `Disconnected` edge that follows ends the bound before step 4 joins. No test seam sits between step 1 and step 2 (`test_hook_post_send_drain_` runs in step 3, after the closes), so the term's decision side rests on `claim_ending_`'s refusal, with no cell |
+| the `Disconnected` edge (the connection's end) | no join: a later `close()` or drain finds the bound gone | `fsm_state_ == Disconnected`, and `ending_claim_` taken (the edge sets `internal`) | `Teardown_ConnectionEnd_*`, the counter read before any `close()`, drain or stop; the two terms are redundant, so the mutant deletes the edge's wake |
+| `install_reconnected_transport` | asserts zero, after `begin_connection_()` advances `conn_gen_`, with no suspension between | none: the `gen` term is defensive, since the assertion forbids a bound alive across the advance | none |
+| `~Session` | asserts zero, "close() first", as it asserts `ending_logout_bound_counter_` | none: `close()`'s join | none |
+
 | From | Event | To | Action |
 |---|---|---|---|
-| any | `gen` changed, `Disconnected`, `closing_or_stopped_()`, or `ending_claim_` taken | exit | none |
+| any | `gen` changed, `Disconnected`, `closing_or_stopped_()`, `reconnect_drain_in_flight_`, or `ending_claim_` taken | exit | none |
 | waiting | a wake or the deadline, nothing due | waiting | recompute the deadline and wait again |
 | waiting | `emit_in_flight_`, `liveness_may_originate_()`, the clock ≥ G | exit | `decide_give_up_()` (E-10's claim first; refused → nothing); the loop finds the claim when its emit returns |
 | waiting | `write_in_flight_`, the same epoch, the clock ≥ start + limit | exit | E-5's expiry (E-10's claim first; refused → nothing) |
-| waiting | the wait threw, or a deadline arm completed before its instant | exit | claim if free, `Disconnected`, close once (E-5 step 5's form); no record, no Logout |
+| waiting | the wait threw, or a deadline arm completed before its instant | exit | with the claim taken, nothing: no close, no record (the claimant owns the ending, R10); with it free, claim, `Disconnected`, close once (E-5 step 5's form); no record, no Logout |
 
 The rows are binding in order (N-7). At one re-test with both due, the give-up row is evaluated first (its Logout is
 the more informative ending, and 105's limit still cuts it); the write row then finds the claim taken
@@ -172,11 +184,11 @@ member functions only.
 | Item | Kind | Notes |
 |---|---|---|
 | `ending_claim_` | `enum class ending_claim : std::uint8_t { none, give_up, write_timeout, ending_logout, establishment_timeout, internal }` | strand-confined; reset to `none` in `begin_connection_()`; the `Disconnected` edge sets `internal` when it is `none` |
-| `claim_ending_(ending_claim who) noexcept` | private, synchronous | refuses when the claim is taken or `closing_or_stopped_()` holds; otherwise sets the claim and returns true. Taken once, at the decision: `run_logout_phase1` and `inbound_logout_leaf_` for kind `r1` write under their decider's claim and neither take nor test it |
+| `claim_ending_(ending_claim who) noexcept` | private, synchronous | refuses when the claim is taken, `closing_or_stopped_()` holds or `reconnect_drain_in_flight_` holds; otherwise sets the claim and returns true. Taken once, at the decision: `run_logout_phase1` and `inbound_logout_leaf_` for kind `r1` write under their decider's claim and neither take nor test it |
 | `session_engine_access::claim_ending` | test and Engine access | the pump's establishment expiry claims before `note_establishment_timeout` |
 
 Invariant **INV-106-2** (FR-017): per connection, exactly one `Disconnected` entry; exactly one reason record when the
-claimant is a recording decider (D11's table, rows 1 to 4: slot 74, the write-timeout record, an ending Logout's own,
-the establishment timeout's), none otherwise (`close()`, `Engine::stop()`, a bound failure exit). Every `Disconnected` write that
+claimant is a recording decider (D11's table, rows 1, 2 and 4: slot 74, the write-timeout record, the establishment
+timeout's), none otherwise (an ending Logout, `close()`, `Engine::stop()`, a bound failure exit). Every `Disconnected` write that
 a claimed ending's cut return or close reaches goes through `record_disconnected_unless_already_()` (research D11's
 census).
