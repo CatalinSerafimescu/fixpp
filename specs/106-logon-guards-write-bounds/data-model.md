@@ -77,7 +77,11 @@ write's deadline; `close()`,
 | waiting | a wake or the deadline, nothing due | waiting | recompute the deadline and wait again |
 | waiting | `emit_in_flight_`, `liveness_may_originate_()`, the clock ≥ G | exit | `decide_give_up_()` (E-10's claim first; refused → nothing); the loop finds the claim when its emit returns |
 | waiting | `write_in_flight_`, the same epoch, the clock ≥ start + limit | exit | E-5's expiry (E-10's claim first; refused → nothing) |
-| waiting | the wait threw, or a deadline arm completed before its instant | exit | claim if free, `Disconnected`, close; no record, no Logout |
+| waiting | the wait threw, or a deadline arm completed before its instant | exit | claim if free, `Disconnected`, close once (E-5 step 5's form); no record, no Logout |
+
+The rows are binding in order (N-7). At one re-test with both due, the give-up row is evaluated first (its Logout is
+the more informative ending, and 105's limit still cuts it); the write row then finds the claim taken
+(`OneEnding106.BothDueAtOneWake`).
 
 `decide_give_up_()` is one function for the loop's give-up block and the bound. It takes the claim, writes the slot-74
 record, takes the Logout owner and calls `enter_ending_write_(r1)`. The write half stays in the loop: the replay-gate
@@ -114,7 +118,8 @@ At the bound's expiry, in order:
 2. E-8's record;
 3. `write_cut_epoch_ = write_epoch_`;
 4. `record_disconnected_unless_already_()`: from Active, `onLogout` once; before Active, none;
-5. `spawn_connection_close_(live_transport_shared_())`.
+5. when `state_ == lifecycle::open`, `spawn_connection_close_(live_transport_shared_())` then
+   `connection_end_owed_.reset()`, as `expire_ending_wait_` does (105 E-2, one close; N-2).
 
 The cut write returns `session_write_timeout`. `store_then_emit` passes that value through, and every other live-write
 error stays `dispatch_aborted` (research D5, N-3).
@@ -138,7 +143,7 @@ arms the connection bound's write deadline (E-3).
 |---|---|---|---|
 | `SessionConfig::write_timeout_ms` / TOML session scalar `write_timeout_ms` | `std::uint32_t`, 0 (off) | any `uint32`; TOML out of range → `out_of_range`; another type → `malformed_value` (Q4, resolved) | C++, TOML; no C setter |
 | `[session.transport].tls_handshake_timeout_ms` → `Transport::Config::tls_handshake_timeout` | TOML integer; absent → 30 000 ms (unchanged) | 0 < v ≤ `UINT32_MAX`; else `out_of_range`; wrong type `malformed_value` | TOML; C++ already through `Transport::Config` |
-| `EngineConfig::acceptor_tls_handshake_timeout` / TOML root `acceptor_tls_handshake_timeout_ms` | `std::chrono::milliseconds`, 1500 | > 0; TOML as above; refused at session scope | C++, TOML; no C setter |
+| `EngineConfig::acceptor_tls_handshake_timeout` / TOML root `acceptor_tls_handshake_timeout_ms` → `fixpp::config::EngineEstablishment::acceptor_tls_handshake_timeout`, which the host copies into `EngineConfig` as it copies `clock` (research D6, C-2) | `std::chrono::milliseconds`, 1500 in both structs | > 0; TOML as above; refused at session scope | C++, TOML; no C setter |
 
 The TOML `kRecognized` set gains `write_timeout_ms` and `acceptor_tls_handshake_timeout_ms`. The sub-table key is
 read by `resolve_transport`, whose `build_tls_factory` gains a `Transport::Config` parameter.
@@ -157,6 +162,7 @@ read by `resolve_transport`, whose `build_tls_factory` gains a `Transport::Confi
 - `Session`: E-3's and E-10's members.
 - `SessionConfig`: `write_timeout_ms`.
 - `fixpp::core::EngineConfig`: `acceptor_tls_handshake_timeout`.
+- `fixpp::config::EngineEstablishment`: `acceptor_tls_handshake_timeout` (C-2; add it to F-8's size-pin recipe).
 
 The size-pin census (research F-8) runs before the first change. `SeqnumManager` and `CompIdAuthorizationPolicy` gain
 member functions only.
@@ -169,7 +175,8 @@ member functions only.
 | `claim_ending_(ending_claim who) noexcept` | private, synchronous | refuses when the claim is taken or `closing_or_stopped_()` holds; otherwise sets the claim and returns true. Taken once, at the decision: `run_logout_phase1` and `inbound_logout_leaf_` for kind `r1` write under their decider's claim and neither take nor test it |
 | `session_engine_access::claim_ending` | test and Engine access | the pump's establishment expiry claims before `note_establishment_timeout` |
 
-Invariant **INV-106-2**: per connection, at most one reason record (slot 74, the write-timeout record, an ending Logout's
-own, the establishment timeout's) and at most one `Disconnected` entry after a claim. Every `Disconnected` write that
+Invariant **INV-106-2** (FR-017): per connection, exactly one `Disconnected` entry; exactly one reason record when the
+claimant is a recording decider (D11's table, rows 1 to 4: slot 74, the write-timeout record, an ending Logout's own,
+the establishment timeout's), none otherwise (`close()`, `Engine::stop()`, a bound failure exit). Every `Disconnected` write that
 a claimed ending's cut return or close reaches goes through `record_disconnected_unless_already_()` (research D11's
 census).

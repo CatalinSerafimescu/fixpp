@@ -87,7 +87,7 @@ Rulings of the orchestrator; the owner delegated these design calls on 2026-11-2
   - On the shipping clock they never call `Clock::sleep_until`, and they allocate nothing per write or per emit, with the limit off and on.
   - On any other `Clock`, such as `mock_clock`, they wait through its `sleep_until` and stay deterministic.
   - fixpp#715 stays out of scope: 106's new waits never meet the per-session slot.
-- R3 (one ending): one ending claim per connection (research D11). The give-up, the write limit, 105's ending Logouts, the establishment deadline and `close()` race for it. The first claim records the one reason and the one `Disconnected`, and the others do nothing (FR-017).
+- R3 (one ending): one ending claim per connection (research D11). The give-up, the write limit, 105's ending Logouts, the establishment deadline, `close()` and `Engine::stop()` race for it. The first claim owns the one `Disconnected` and, when it is a recording decider, the one reason record, and the others do nothing (FR-017; restated in round 2, R6).
 - R4 (FR-014): the requirement is changed to what the code returns. The transport's handshake ends with `transport_handshake_timeout` at the bound, and `drive_reconnect()` with `max_attempts = 1` returns its unchanged `transport_reconnect_limit_exceeded` within the bound plus the margin. The reconnect FSM's final error is not changed.
 - R5: every other finding the Opus review confirmed or escalated is applied: Normative References, the error a blocked send returns, the TOML cell's observable, the seam file for cells the base cannot compile, the reconciliation of Q1–Q5, SC-002's reset exception, the malformed-CompID edge case, and the B&L amendments to `B-099-2` and `B-105-3`.
 - Plan Q1–Q5 (orchestrator resolutions, plan.md) are normative here:
@@ -97,6 +97,15 @@ Rulings of the orchestrator; the owner delegated these design calls on 2026-11-2
   - Q4: a wrong-typed `write_timeout_ms` is `malformed_value`.
   - Q5: the 3T held cap applies with none pending.
 - Testing scope (owner): targeted runs only, plus ONE full `ctest` on `linux-clang-debug`.
+
+### Session 2026-11-26 (Gate A round 2)
+
+Rulings of the orchestrator under the same delegation. Reviews: `research/reviews/codex_106-logon-guards-write-bounds_gate_a_2_review.md` and `research/reviews/opus_106-logon-guards-write-bounds_gate_a_2_adversarial_review.md` (parent repo).
+- R6 (C-1): FR-017 is re-derived from research D11's table and stated once; C-4.6, INV-106-2 and D9 quote it. `close()`, `Engine::stop()` and the bound's failure exits own the `Disconnected` with no reason record. Codex's alternative, `close()` as a recording claimant, is not taken: it adds a log record to every close.
+- R7 (N-1): the Engine tests the establishment deadline only between frames and while it reads, so it never races a blocked write. The establishment race cells are dropped. With the limit off, a write blocked before Active is not cut by `logon_timeout_ms`; that is pre-existing, disclosed as `L-106-f`, and not fixed by 106.
+- R8 (C-2): the root key `acceptor_tls_handshake_timeout_ms` lands in `fixpp::config::EngineEstablishment::acceptor_tls_handshake_timeout`, which the host copies into `EngineConfig` as it copies `clock`.
+- R9 (N-7): when the give-up and a write expiry are due at one re-test, the give-up claims.
+- R10 (N-8, N-9): a write expiry refused by the claim closes nothing, so `write_timeout_ms` never bounds an ending Logout (FR-011). The session handshake key stays tolerated on an acceptor or plaintext session, because `[default.transport]` is shared by both roles.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -212,7 +221,7 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
 - 104's too-low Logout already runs after the gates; it is unchanged.
 - A peer that stops reading but keeps sending: the give-up never fires, because inbound is live. Only User Story 4's limit cuts it. With the limit unset this stays open and is disclosed as a limitation, matching QuickFIX C++'s and Go's default.
 - The give-up fires while a resend walk holds the replay gate: 105's rule applies (no Logout past the gate, then Disconnected).
-- Both limits armed at once, for example an ending Logout queued behind a blocked non-ending write, or the write limit and the liveness give-up expiring close together. The first decider to take the ending claim records the one reason and the one `Disconnected`; the others do nothing (FR-017). An expiry after the claim writes no record and closes nothing.
+- Both limits armed at once, for example an ending Logout queued behind a blocked non-ending write, or the write limit and the liveness give-up expiring close together. FR-017 applies: the first decider to take the ending claim owns the one `Disconnected` and its own reason record; the others do nothing. Due at one re-test, the give-up claims (R9). An expiry after the claim writes no record and closes nothing.
 - `logout_disconnect_timeout_ms` = 0, or no clock: 105's ending limit is off, so a give-up decided while a write is blocked waits for that write. It stays open, as `L-105-f` discloses; the write limit does not cut it once the give-up holds the claim.
 
 ## Requirements *(mandatory)*
@@ -247,12 +256,12 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
   - `L-104-3` and `L-104-8` retired, and `L-105-f` narrowed;
   - `B-099-2` and `B-105-3` amended in the clauses 106 falsifies;
   - new B rows;
-  - the disclosed residuals: a peer that keeps sending but never reads, with the limit off, and the unbounded ending with `logout_disconnect_timeout_ms` 0.
+  - the disclosed residuals: a peer that keeps sending but never reads, with the limit off; the unbounded ending with `logout_disconnect_timeout_ms` 0; and, with the limit off, a write blocked before Active that `logon_timeout_ms` does not cut (`L-106-f`, R7).
 - **FR-016**: Every new test MUST be shown RED before it counts:
   - against `9d81082a`;
   - for a test that pins unchanged behaviour, against a named mutant;
   - for a cell that names a symbol the base lacks, against a named mutant at the head. Such cells live in the seam file (research D9): the base build lacks the field, so RED is shown on the mutant.
-- **FR-017**: One ending MUST have exactly one reason record and exactly one `Disconnected` entry, whichever of the give-up, the write limit, 105's ending Logouts, the establishment deadline and `close()` comes first (ruling R3). `onLogout` MUST fire at most once.
+- **FR-017**: Every ending MUST have exactly one `Disconnected` entry, and `onLogout` MUST fire at most once, whichever of the give-up, the write limit, 105's ending Logouts, the establishment deadline, `close()`, `Engine::stop()` and the connection bound's failure exits comes first (ruling R3). It MUST have exactly one reason record when the first claimant is the give-up, the write limit, an ending Logout or the establishment deadline, and none when `close()`, `Engine::stop()` or a bound failure exit comes first.
 
 ### Key Entities
 

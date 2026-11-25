@@ -55,7 +55,7 @@ Batches B129 (#724), B110 (#702, #703), B124 (#714) and B123 (#717), in one PR.
      `asio::steady_timer`, so it allocates nothing per write or per emit, and it never resets another sleeper (#715
      stays out of scope).
    - On `mock_clock` it waits through the clock, which keeps the cells deterministic.
-   - One claim per connection gives one ending one reason and one `Disconnected`.
+   - One claim per connection: one `Disconnected` per ending, a reason record only from a recording decider (FR-017).
 6. **Handshake bounds (#717; D6).**
    - Initiator: TOML `[session.transport].tls_handshake_timeout_ms` feeds the factory's
      `Transport::Config::tls_handshake_timeout` (the C++ half already exists), with the minting loop's divergence
@@ -120,7 +120,7 @@ enum and C-ABI map; `version.h` and `session.h` comments; new `tests/session/tes
 |---|---|---|
 | IV | C ABI is the licence seam, not the primary API | No new C symbol, constant or type. The three knobs are C++/TOML only (F-7: no C TOML entry). Python binding: version pins only (D7 census). |
 | VIII §2–3, §5 | +5 % paired budget; a bench in the same PR; zero allocation between parse and `fromApp`, which 2d extends to the heartbeat path | D1/D2 touch the establishment path only. D5 adds one branch per write (off). D3 allocates nothing per emit: one bound per connection (research D3). The mallocnesia cell binds it. The paired runs are owed (quickstart §6). |
-| IX §1 | diff-scoped coverage 95/85, no uncovered error path | Each new error path has a cell in research D9: the commit refusal; the bound's spawn failure at the loop and at a write; its wait failure; its teardown exits; the claim's race pairs; the TOML refusals. The verify record assesses the rest. |
+| IX §1 | diff-scoped coverage 95/85, no uncovered error path | Each new error path has a cell in research D9 (its "has a cell" census): the commit refusal (`CommitRefused_Disconnected`); the bound's spawn failure at the loop and at a write; its wait failure; its teardown exits; the claim's race pairs; the TOML refusals, the root key's included. The verify record assesses the rest. |
 | IX §2 | ASan, UBSan, TSan | targeted runs; TSan repeats the D3/D5 cells (quickstart §5) |
 | X §1, §4 | the versioned contract; append-only error codes | `session_write_timeout = 136` appended; maps to the existing `FIXPP_ERR_TRANSPORT_IO`; no numeric reuse; occupancy unchanged |
 | X §7 | BREAKING declared in `version.h`, the PR, B&L; in-repo consumers updated | D7: the `version.h` 1.19 entry, three `session.h` clauses, the MINOR-pin census, B-106-6 |
@@ -160,6 +160,7 @@ specs/106-logon-guards-write-bounds/
 ```text
 include/fixpp/core/error.hpp                      # session_write_timeout = 136; error_message
 include/fixpp/core/engine_config.hpp              # EngineConfig::acceptor_tls_handshake_timeout
+include/fixpp/config/config_bundle.hpp            # EngineEstablishment::acceptor_tls_handshake_timeout (C-2)
 include/fixpp/session/session.hpp                 # E-3, E-5 members; write_class; store_then_emit's argument; new private callees
 include/fixpp/session/session_config.hpp          # SessionConfig::write_timeout_ms
 include/fixpp/session/seqnum_manager.hpp          # classify_inbound
@@ -170,14 +171,14 @@ src/session/compid_authorization_policy.cpp       # has_logon_validator
 src/session/engine.cpp                            # listener bound from EngineConfig; the establishment expiry takes the claim
 src/config/scalar_mappers.cpp                     # write_timeout_ms
 src/config/toml_config_loader.cpp                 # kRecognized; the session-scope refusal of the acceptor key
-src/config/selector_resolver.cpp                  # tls_handshake_timeout_ms → Transport::Config; divergence; the root acceptor key → bundle.engine
+src/config/selector_resolver.cpp                  # tls_handshake_timeout_ms → Transport::Config; divergence; the root acceptor key → EngineEstablishment
 src/capi/error.cpp                                # translate session_write_timeout
 src/log/format_registry.cpp                       # the write-timeout record
 include/fix/c_api/version.h                       # MINOR 19 + 1.19 history (comment)
 include/fix/c_api/session.h                       # 1.19 clauses (comments)
 tests/session/test_106_identity_first.cpp         # IdentityFirst106, NextNumIn106
 tests/session/test_106_give_up.cpp                # GiveUp106
-tests/session/test_106_seams.cpp                  # every cell naming a symbol the base lacks: WriteTimeout106, OneEnding106 (limit set), ConnectionBound106, ShippingClock106, the C++ EngineHandshake106 twin
+tests/session/test_106_seams.cpp                  # every cell naming a symbol the base lacks: WriteTimeout106, OneEnding106 (limit set), ConnectionBound106, ShippingClock106, both EngineHandshake106 cells
 tests/session/test_106_one_ending.cpp             # OneEnding106 pairs that need no new symbol
 tests/session/test_106_handshake.cpp              # HandshakeBound106, EngineHandshake106 (real TLS)
 tests/alloc_guard/test_106_connection_bound.cpp   # alloc_guard_106_connection_bound_mallocnesia (Release)
@@ -203,6 +204,7 @@ of D9) stay where they are.
 | the bound's waits | `Clock::sleep_until` (#715, `L-093-13`) | not crossed on `system_clock_source` (D3) | `ShippingClock106.*`, the mallocnesia cell |
 | `drive_reconnect`'s return | `ReconnectFsm::drive_reconnect_attempt` returns `transport_reconnect_limit_exceeded` | none: the requirement follows the FSM (R4) | `HandshakeBound106.*` |
 | the TOML handshake key | `asio_tls_transport_factory::cfg_` is private | none: observed through `make()` and `async_handshake` (D6) | `TomlHandshake106.*` |
+| the root handshake key | `EngineEstablishment` has no field; hosts copy it field by field into `EngineConfig` | the new field; the copy-site census (D6) | `EngineHandshake106.Acceptor_ClosesAtTheKey` |
 | new symbols in cells | the base build | the seam file (D9) | every [seam] cell |
 
 ## Phases (for /speckit-tasks; order by blocking, owner 2026-11-25)
@@ -210,7 +212,9 @@ of D9) stay where they are.
 0. **Setup.** The censuses of quickstart §1. The base worktree on `fixppbuild`. The RED-on-base harness for the 106
    binaries.
 1. **P1 — B110 / #702 (security, first).** D1 in both arms. `has_logon_validator`. Delete the later gate calls.
-   Cells: `IdentityFirst106.*` RED → GREEN; M1; the 104 and 099 suites unfiltered.
+   Cells: `IdentityFirst106.*` RED → GREEN; M1; the 104 and 099 suites unfiltered. FR-007 update (N-3; research D9's
+   census): `LogonTooLow104.Precedence_MtlsAcceptorOffList`'s setup assertion becomes `EXPECT_EQ(r.next_in(), <the
+   value read before the feed>)`, because the refusal precedes hydration (D1 item 4).
 2. **P2 — #703 and the class ruling.** D2: `classify_inbound`, the two commit points. Cells: `NextNumIn106.*`; the
    census rows updated; M6.
 3. **P3 — #714a (D3, D4, D11).**
@@ -224,9 +228,9 @@ of D9) stay where they are.
      through `store_then_emit`, with its C mapping; the record.
    - Cells: `WriteTimeout106.*`; `OneEnding106.*` with the limit; `TomlWriteTimeout106.*`; the C-ABI map; the
      mallocnesia cell with the limit off and on.
-   - Mutants: M3 to M5, M8 and M9.
+   - Mutants: M3 to M5, M8, M9 with M9′, and M10.
 5. **P5 — #717 (D6).** The TOML session key, divergence, and the `EngineConfig` field and root key. Cells:
-   `TomlHandshake106.*`, `EngineHandshake106.*`, `HandshakeBound106.*`; M7.
+   `TomlHandshake106.*`, `EngineHandshake106.*`, `HandshakeBound106.*`; M7, M7′ to M7‴.
 6. **P6 — Surfaces and records.** The `version.h` 1.19 entry and the `session.h` clauses. The B&L delta (D8). The
    supersession comments (research table). The brain page `brain/components/session.md` gains a 106 section (why and
    what was rejected) in the PR before CI (the late-docs rule).
@@ -245,27 +249,16 @@ B129 needs no task beyond recording the PR's asan leg outcome (SC-006).
 
 ## Open questions for Gate A (only where the code cannot settle them; resolved, see the Resolutions and Gate A below)
 
-- **Q1 — the credentials accessor.** D1's fail-closed rule for unreadable credentials needs
-  `CompIdAuthorizationPolicy::has_logon_validator()`, a public C++ addition. The alternative passes empty credentials
-  to the validator, which cannot tell absent from unreadable. Accept the accessor?
-- **Q2 — the Text of a give-up with no TestRequest written.** Two cases: a blocked Heartbeat emit, and a hold with
-  none pending at the 3T cap. Proposed default: Text(58) `TestRequest unanswered` without the TestReqID clause; the
-  slot-74 record's `test_req_id` is empty. Alternatively, close with no Logout in those two cases, as QuickFIX C++
-  does at a heartbeat timeout.
-- **Q3 — refusals after a reset that already ran.** Two cases:
-  - the acceptor's `reset_on_logon` reset, followed by a too-high or S3 refusal: NextNumIn 1 and the store reset;
-  - on the initiator, the 789 refusal after an asked or unasked 141=Y unit, which keeps the unit's durable targets
-    (104 pins it in `UnaskedResetAck104.With789_TooHighAfterReset_Logout`).
-
-  Keeping NextNumIn in either needs the reset deferred past the refusal, which changes 024's, 093's and 104's
-  positions; moving S3 first breaks FR-005 (research D2). QuickFIX C++ resets at the same place. Proposed: keep the
-  resets where they are and disclose (`L-106-a`). Does the owner's class ruling ("every refusal") reach these
-  cases?
-- **Q4 — `write_timeout_ms`'s wrong-type case.** The spec says "refused with the loader's usual error, as
-  `logout_disconnect_timeout_ms` is", but that key's mapper ignores a non-integer silently. Proposed: refuse it with
-  `malformed_value` (`logon_timeout_ms`'s shape).
-- **Q5 — D3's 3T cap with none pending.** It applies the owner's T119b text over 105's implementation reading, which
-  capped only with one pending. Confirm.
+- **Q1 — the credentials accessor.** Accept `CompIdAuthorizationPolicy::has_logon_validator()` for D1's fail-closed
+  rule, over empty credentials, which the validator cannot tell from unreadable ones?
+- **Q2 — the Text of a give-up with no TestRequest written** (a blocked Heartbeat; a hold with none pending at the 3T
+  cap): Text(58) `TestRequest unanswered` without the TestReqID clause, or no Logout, as QuickFIX C++?
+- **Q3 — refusals after a reset that already ran** (the acceptor's `reset_on_logon` reset, then a too-high or S3 refusal;
+  an initiator's 789 refusal after a 141=Y unit, `UnaskedResetAck104.With789_TooHighAfterReset_Logout`): deferring the
+  resets moves 024's, 093's and 104's positions, and moving S3 first breaks FR-005. Keep and disclose (`L-106-a`)?
+- **Q4 — `write_timeout_ms`'s wrong type.** `logout_disconnect_timeout_ms`'s mapper ignores a non-integer silently.
+  Refuse with `malformed_value` (`logon_timeout_ms`'s shape)?
+- **Q5 — D3's 3T cap with none pending**, the owner's T119b text over 105's reading, which capped only with one pending.
 
 **Resolutions (orchestrator, 2026-11-25).** The owner pre-approved the plan and delegated these calls. Gate A may reopen any of them.
 - Q1: accept `has_logon_validator()`.
@@ -274,13 +267,8 @@ B129 needs no task beyond recording the PR's asan leg outcome (SC-006).
 - Q4: refuse a wrong-typed value with `malformed_value`.
 - Q5: confirmed. Without the cap with none pending, a resend walk whose write blocks holds the liveness loop for ever (US3 scenario 3).
 
-Spec findings for the orchestrator (applied to spec.md in the same commit as these resolutions):
-- FR-006 / SC-002 / US2 scenario 4 ("every other refusal … NextNumIn unchanged") cannot hold after a reset that ran
-  earlier in the arm (Q3). The acceptor's `reset_on_logon` reset precedes the too-high and S3 refusals.
-- F-3: US1 scenarios 4 and 6 for a direct `open()` initiator. There, every identity is unauthorised, so scenario 6
-  cannot arise.
-- F-9: the "CompIDs cannot be read … already silent" edge case does not hold on a validating session.
-- Q4 above.
+Spec findings applied with these resolutions: FR-006 / SC-002 / US2 scenario 4 narrowed for Q3; US1 scenarios 4 and 6
+for a direct `open()` initiator (F-3); the F-9 edge case; Q4.
 
 ## Gate A
 
@@ -288,12 +276,25 @@ Spec findings for the orchestrator (applied to spec.md in the same commit as the
   #1 (the clock that ships), #2 (one ending claim), #3 (the seams touched), #4 (the reconciliation after Q1–Q5).
   Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_106-logon-guards-write-bounds_gate_a_review.md`,
   `research/G19-fix-fpml-iso20022/research/reviews/opus_106-logon-guards-write-bounds_gate_a_adversarial_review.md`.
+- Round 2 applied 2026-11-26: Codex P1=1 P2=4 P3=0; Opus post-judging P1=1 P2=4 P3=10; rewrite addresses root causes
+  #1 (the invariant re-derived from D11's table), #2 (deciders the code serialises), #3 (the censuses run), #4 (each
+  new surface traced to its consumer). Reviews:
+  `research/G19-fix-fpml-iso20022/research/reviews/codex_106-logon-guards-write-bounds_gate_a_2_review.md`,
+  `research/G19-fix-fpml-iso20022/research/reviews/opus_106-logon-guards-write-bounds_gate_a_2_adversarial_review.md`.
 
 ### Round 1 — disagreements
 
-The Opus review marks no finding Disagree, so no Codex fix was refused. Three Codex fixes were applied as Opus corrected
-them, not as written:
+None marked Disagree, so no Codex fix was refused. Three were applied as Opus corrected them, not as written:
 - C-1: Codex's first option (preserve the last attempt's error in the reconnect FSM) is not taken (ruling R4).
 - C-2: Codex's merged "1B/1S" key is not a coverage-index key; the two exact keys are listed.
-- C-5: Codex's premise that 544's counter is a PMR counter is not used. The binding witness is a mallocnesia cell
-  in `tests/alloc_guard/` on the shipping clock.
+- C-5: 544's counter is not a PMR counter; the binding witness is a mallocnesia cell in `tests/alloc_guard/`.
+
+### Round 2 — disagreements
+
+None marked Disagree. Applied otherwise than written:
+- Codex C-1's first option (`close()` and the bound's failure exits as recording claimants) is not taken (R6). Codex
+  C-5, a P3 after Opus: no C-ABI trace test, since the C path is the same Session.
+- Opus C-2's recipe (`bundle.engine.clock`) misses `test_099_toml_live.cpp`'s `loaded->engine.clock`; D6's finds both.
+  Opus C-3's rule would demand cells for by-design rows; those rows of D2's 106 column now read "as the base".
+- Opus N-1: the disclosure is the new `L-106-f`, and the pre-Active cell's mutant is M10 (M9 alone never reaches the
+  establishment expiry). N-5's row is initiator-only: the acceptor's superseded returns follow its commit.

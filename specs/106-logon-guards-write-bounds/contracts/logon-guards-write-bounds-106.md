@@ -110,7 +110,7 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
   The clock starts when the write is handed to the transport. The wait at the session's write gate does not count.
 - **C-4.3 Expiry.** When a write has not completed within the limit, and no other ending holds the claim (C-4.6),
   fixpp attempts no Logout. With the claim held elsewhere, the expiry does nothing. In order:
-  - it writes one warn record, `session ended: write timed out: limit_ms=<L> error=<n>`, with `<n>` the value of
+  - it writes one warn record, `session ended: write timed out: limit_ms=<W> error=<n>`, with `<n>` the value of
     `session_write_timeout`;
   - the session records `Disconnected` (`onLogout` once from Active; before Active, no `onLogout`);
   - the transport is closed at once.
@@ -122,10 +122,8 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
   long the whole answer takes.
 - **C-4.5 Ending Logouts.** A Logout's write keeps 105's limit (`logout_disconnect_timeout_ms` from the Logout's
   write start, C-2.7), and `close()`'s Logout keeps its grace. Neither is cut by `write_timeout_ms`.
-- **C-4.6 One ending** (FR-017). The give-up, the write limit, 105's ending Logouts, the establishment deadline and
-  `close()` race for one claim per connection. The first to claim records the one reason and the one `Disconnected`;
-  the others record nothing and close nothing. 105's ending limit cuts for its claimant and records nothing. So one
-  ending has exactly one reason record and one `Disconnected` entry, and `onLogout` fires at most once.
+- **C-4.6 One ending** (FR-017, quoted). Every ending MUST have exactly one `Disconnected` entry, and `onLogout` MUST fire at most once, whichever of the give-up, the write limit, 105's ending Logouts, the establishment deadline, `close()`, `Engine::stop()` and the connection bound's failure exits comes first (ruling R3). It MUST have exactly one reason record when the first claimant is the give-up, the write limit, an ending Logout or the establishment deadline, and none when `close()`, `Engine::stop()` or a bound failure exit comes first. The claim is one per connection; a later decider records nothing and
+  closes nothing, and 105's ending limit cuts for its claimant and records nothing.
 - **C-4.7 TOML.** `write_timeout_ms` in a `[[session]]` or `[default]` table:
   - an integer in `[0, UINT32_MAX]` loads;
   - an integer outside that range is `out_of_range`;
@@ -141,7 +139,8 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
   - On a plaintext or acceptor session the key loads and has no effect (`L-106-d`).
 - **C-5.2 Acceptor.** `acceptor_tls_handshake_timeout_ms` at the TOML root, or `EngineConfig::acceptor_tls_handshake_timeout`
   in C++, sets the bound the Engine listener applies to every accepted TLS connection. The default is 1500 ms, as
-  on the base.
+  on the base. The loader puts the TOML value in `fixpp::config::EngineEstablishment::acceptor_tls_handshake_timeout`,
+  and the host copies it into `EngineConfig` as it copies `clock`.
   - The TOML value follows C-5.1's checks.
   - At session scope the key is refused (`unknown_key` class, as `dialect_overlay` is at root).
   - A client that connects and never completes the handshake is dropped at the bound.
@@ -155,11 +154,14 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
 
 - **C-ABI 1.19, BREAKING, behaviour only** (`[const §X.7]`). There is no new symbol, constant or type.
   - `version.h`: MINOR 19, with a 1.19 history entry naming C-1, C-2 and C-3.
-  - Clauses "amended in C-ABI 1.19, 106" in `fixpp_session_open`, `fixpp_session_is_established` and
-    `fixpp_session_send`.
+  - Clauses "amended in C-ABI 1.19, 106" in `fixpp_session_close` (a new `BREAKING (C-ABI 1.19, [const §X.7]; 106)`
+    block: an unauthorised identity's Logon draws nothing and changes nothing; a refused Logon or acknowledgement
+    keeps NextNumIn; and close's return code for a session that a now-silent refusal keeps from establishing),
+    `fixpp_session_is_established` (the give-up with a write blocked) and `fixpp_session_send` (a send blocked at the
+    give-up's close returns `FIXPP_ERR_CANCELLED`). `fixpp_session_open` is unchanged.
   - `session_write_timeout` maps to the existing `FIXPP_ERR_TRANSPORT_IO`.
-- **C++ BREAKING, layout:** `Session`, `SessionConfig` (+`write_timeout_ms`) and `fixpp::core::EngineConfig`
-  (+`acceptor_tls_handshake_timeout`).
+- **C++ BREAKING, layout:** `Session`, `SessionConfig` (+`write_timeout_ms`), `fixpp::core::EngineConfig` and
+  `fixpp::config::EngineEstablishment` (each +`acceptor_tls_handshake_timeout`).
 - **C++ additive:**
   - `SeqnumManager::classify_inbound`;
   - `CompIdAuthorizationPolicy::has_logon_validator`;
@@ -187,6 +189,10 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
 - `L-106-d`: the session-level handshake key's scope.
 - `L-106-e`: C-9's allocation and own-wait claims hold on `system_clock_source`; a user `clock_override` of another
   type is waited through its own `sleep_until`.
+- `L-106-f` (pre-existing, not fixed by 106): before Active, with the limit off, a write blocked inside the Logon arm
+  (the initiator's Logon in `open()`, the reply Logon, a 789 resend frame, a Logon-arm Reject) is not cut by
+  `logon_timeout_ms`, because the Engine tests that deadline only between deliveries and while it reads.
+  `write_timeout_ms` cuts it.
 
 ## C-9. Performance (Article VIII §2, §3)
 

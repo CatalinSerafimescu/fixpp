@@ -12,17 +12,19 @@ Each census has a known positive that must appear. A census that reports nothing
 shows.
 
 - **Size pins** (research F-8). Run the seeded grep first; it must report `tests/dictionary/ref_shape_test.cpp`.
-  Then the narrow grep for `Session`, `SessionConfig` and `EngineConfig`.
+  Then the narrow grep for `Session`, `SessionConfig`, `EngineConfig` and `EngineEstablishment`.
 - **Gate call sites** (D1): `git grep -n 'logon_identity_admitted_()\|logon_credentials_admitted_(' -- src/session`.
   On the base it shows the two arms' sites, both too-low branches and arm S. After D1, each arm keeps one consuming
   site, arm S keeps its own, and the precheck callee has its own.
 - **Refusals after the advance** (D2): walk each Logon arm from its `check_inbound` call to `Active` and list every
   `co_return`. The S3 Reject of both arms must appear. Compare the list with research D2's table, and add any new
-  row to the table and to the cells.
+  row to the table and to the cells (round 2's result at `9d81082a` is in research D2).
 - **Pinned consumed numbers** (D9): `git grep -nE 'next_in\(\)|next_inbound' -- tests/session/test_099_*.cpp tests/session/test_104_*.cpp`,
   read for assertions after a refusal ending.
 - **Logout sites** (data-model E-6): `git grep -n 'build_logout(' -- src/session`, each followed to its
   `store_then_emit`. The R-1 leaf and `run_logout_phase1` must appear.
+- **Bundle-to-`EngineConfig` copy sites** (D6, C-2): `git grep -nE '= *[a-z_]+(\.|->)engine\.clock' -- tests examples bindings bench`;
+  known positives `tests/config/test_098_dialect_overlay.cpp` and `tests/config/test_099_toml_live.cpp`.
 - **Last error enumerator** (D5): `git grep -n wire_undefined_tag -- include src tests tools bindings`.
 - **`dispatch_aborted` branches** (D5): `git grep -n 'dispatch_aborted' -- src/session/session.cpp`, keeping the `==` and
   `!=` lines; the known positive is `Session::send`'s F9 block.
@@ -48,7 +50,8 @@ worktrees on `fixppbuild`, removed when done). Every new cell is written first a
   a timeout.
 - **[guard: Mn]** cells are GREEN on the base by design. Each must fail under its named mutant (section 4).
 - **[seam: Mn]** cells name a symbol the base lacks (`write_timeout_ms`, `session_write_timeout`,
-  `EngineConfig::acceptor_tls_handshake_timeout`, a new member or seam). The base build lacks the field, so RED is shown
+  `EngineConfig::acceptor_tls_handshake_timeout`, `EngineEstablishment::acceptor_tls_handshake_timeout`, a new member
+  or seam). The base build lacks the field, so RED is shown
   on the named mutant at the head, and recorded as such. They live in `tests/session/test_106_seams.cpp` (ctest
   `session_106_seam_tests`, labels `106` and `106_seam`). A base reading builds only `session_106_tests` and runs
   `-LE 106_seam`.
@@ -69,7 +72,7 @@ tests, the transport tests and the C-ABI tests.
 Example: `ctest --preset linux-clang-debug -L 106 --output-on-failure`, then the same with `-L 105` and `-L 104`.
 
 Bounded waits use the mock clock with the budgets of research D9. The real-socket cells (P5) and the
-`ShippingClock106` cell use wall-clock budgets derived there: bound + 2 s, or T + 1 s. Each spurious-hit arm is checked
+`ShippingClock106` cell use wall-clock budgets derived there: bound + 2 s; for `ShippingClock106`, W + 1 s and 2T. Each spurious-hit arm is checked
 before the competing deadline (10 s, `logon_timeout_ms` from accept).
 
 ## 4. Mutants (in a scratch copy, never in the PR's worktree)
@@ -84,10 +87,13 @@ before the competing deadline (10 s, `logon_timeout_ms` from accept).
 | M4 | pass `write_class::ordinary` from every Logout site | `WriteTimeout106.EndingLogout_Keeps105Limit` |
 | M5 | spawn a coroutine per write and per emit | `alloc_guard_106_connection_bound_mallocnesia`: the send half non-zero (spaced sends; back-to-back sends would not show it), the emit half's delta against the base positive |
 | M8 | replace `connection_bound_wait_`'s shipping branch by `await_deadline(*effective_clock_, …)` | `ShippingClock106.DirectDriver_BoundBesideLiveness_TestRequestAtT` (the slot re-arm ends liveness); the mallocnesia cell (the per-call fallback allocates) |
-| M9 | delete `claim_ending_`'s test (always true) | every `OneEnding106` pair |
+| M9 | delete `claim_ending_`'s test (always true) | every `OneEnding106` pair, with M9′ where the second decider meets E-3's exit |
+| M9′ | delete E-3's exit on a taken claim | with M9: `OneEnding106` pairs whose second decider is the bound |
+| M10 | the pump races `on_inbound_frame` against the establishment deadline, with M9 | `OneEnding106.Watchdog_PreActive_NoEstablishmentRecord` |
 | M6 | commit the advance at the classification (the base's `check_inbound`) | every `NextNumIn106` cell |
 | M7 | `tls_handshake_timeout_ms` read and dropped (the base's default `Transport::Config`) | `TomlHandshake106.SessionKey`, `SecondSessionDiverges` |
 | M7′ | `EngineConfig::acceptor_tls_handshake_timeout` ignored (the literal back) | the C++ `EngineHandshake106` twin |
+| M7‴ | the host's copy of `EngineEstablishment::acceptor_tls_handshake_timeout` deleted | `EngineHandshake106.Acceptor_ClosesAtTheKey` |
 | M7″ | the factory's bound replaced by 60 s | `HandshakeBound106.DriveReconnect_OneAttempt` |
 
 A CMake mutant arm counts only when its reconfigure returned 0. Check the binary is fresh (`strings` for a
