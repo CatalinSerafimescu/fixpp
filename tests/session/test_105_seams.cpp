@@ -811,6 +811,31 @@ TEST(TestReqIdParse105, Sign_Mismatch) { EXPECT_TRUE(trw::parse_sign_mismatch())
 TEST(TestReqIdParse105, Overflow_Mismatch) { EXPECT_TRUE(trw::parse_overflow_mismatch()); }
 TEST(TestReqIdParse105, PrefixAlone_Mismatch) { EXPECT_TRUE(trw::parse_prefix_alone_mismatch()); }
 
+// The parse's refusals by form, each called with arguments read at run time (a std::string built
+// through a volatile length, and volatile window ends), so the call is not constant-evaluated and
+// the instrumented build runs each refusal. The window is the constexpr cells' (trw::kFloor,
+// trw::kNext); the first three ids are the positive controls, earlier and in the window.
+TEST(TestReqIdParse105, RefusalsByForm_AtRunTime) {
+    auto at_run_time = [](std::string_view s) {
+        volatile std::size_t n = s.size();
+        return std::string{s.data(), n};
+    };
+    volatile std::uint32_t floor_v = trw::kFloor;
+    volatile std::uint32_t next_v = trw::kNext;
+    std::uint32_t const floor = floor_v;
+    std::uint32_t const next = next_v;
+    for (std::string_view const id : {"TR3", "TR0", "TR4294967295"}) {
+        EXPECT_TRUE(trw::is_earlier_test_req_id(at_run_time(id), floor, next)) << id;
+    }
+    // Each refused id names the refusal it reaches: the length or prefix, a byte below '0', a
+    // byte above '9', the sign, the leading zero, past std::uint32_t, past the digit limit, and
+    // the window.
+    for (std::string_view const id : {"", "T", "TR", "XR3", "TX3", "TR/3", "TR3x", "TR-3", "TR03",
+                                      "TR4294967296", "TR99999999999999999999", "TR12"}) {
+        EXPECT_FALSE(trw::is_earlier_test_req_id(at_run_time(id), floor, next)) << id;
+    }
+}
+
 // ════════════════════════════════════════════════════════════════════════════════════════
 // 105 T097 (research D6; data-model E-4): the default threshold helper and the give-up instant's
 // guard. constexpr cells: each static_assert sits under FIXPP_105_STATIC_GUARDS, and each cell's
@@ -896,6 +921,18 @@ TEST(LivenessTiming105, FreshWindow_IsTheLaterInstant) {
 }
 TEST(LivenessTiming105, HeldCap_IsThreeThresholdsAndTheGuard) {
     EXPECT_TRUE(ltg::held_cap_is_three_thresholds_and_the_guard());
+}
+
+// The default threshold at HeartBtInt <= 0, where the liveness loop is off: zero, as
+// default_test_request_threshold documents. HeartBtInt is read at run time (volatile), so the call
+// is not constant-evaluated and the instrumented build runs that return.
+TEST(LivenessTiming105, DefaultThresholdHelper_ZeroAtHeartBtIntNotPositive) {
+    for (ltg::seconds::rep const h : {ltg::seconds::rep{0}, ltg::seconds::rep{-1},
+                                      std::numeric_limits<ltg::seconds::rep>::min()}) {
+        volatile ltg::seconds::rep h_v = h;
+        EXPECT_EQ(ltg::default_test_request_threshold(ltg::seconds{h_v}), ltg::milliseconds::zero())
+            << "HeartBtInt " << h;
+    }
 }
 
 // 105 (tasks.md T106) [seam], C-7.3's generic arm: no configuration makes the listener's
