@@ -63,6 +63,12 @@ What remains is configuration. Every factory built from TOML, and every test rig
 - Q: #714 design? → A: option (b). The liveness give-up and its close never wait behind a blocked write (QuickFIX-faithful), **plus** an opt-in per-write time limit, off by default, whose expiry closes the transport as 105's D-e cut does.
 - Q: Where is a new knob exposed? → A: C++ and TOML only, with no C-ABI setter (as `logout_disconnect_timeout_ms`).
 
+### Session 2026-11-25 (spec-time reading, not owner rulings)
+
+- The give-up instant counts from `tr_written_at` at `9d81082a`, so a blocked TestRequest never starts its clock. 106 counts an unwritten TestRequest from `tr_issued_at` (User Story 3, scenario 2). Gate A ratifies.
+- `authorize_logon(asserted_compid, creds)` reads SenderCompID(49) and Username(553)/Password(554). Unreadable inputs fail closed and silent (Edge Cases).
+- C-ABI 1.19 BREAKING, behaviour only, by §X.7 precedent (Assumptions).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — An unauthorised identity is disconnected without a message and changes nothing (Priority: P1)
@@ -106,12 +112,12 @@ A peer keeps its TCP connection open, stops reading, and stops sending. The sess
 
 **Why this priority**: peer-reachable denial (#714). Today a single blocked application write stops the liveness loop.
 
-**Independent Test**: use a peer that stops reading with a small receive window. Block an application write, and separately a Heartbeat, a TestRequest, a resend answer and a Reject. Assert that the session ends within the give-up instant plus `logout_disconnect_timeout_ms` plus a stated scheduling margin, and that every blocked write returns an error.
+**Independent Test**: use a transport whose write does not complete (105's `WriteLimit105` cells use `BlockingWriteTransport`; the rig is the plan's choice, and it must not depend on real socket buffers). Block an application write, and separately a Heartbeat, a TestRequest, a resend answer and a Reject. Assert that the session ends within the give-up instant plus `logout_disconnect_timeout_ms` plus a stated scheduling margin, and that every blocked write returns an error.
 
 **Acceptance Scenarios**:
 
 1. **Given** an Active session whose application write is blocked, **When** the peer sends nothing, **Then** the session ends at the give-up instant plus at most `logout_disconnect_timeout_ms` (plus the stated margin), and the blocked write returns an error.
-2. **Given** the liveness loop's own TestRequest or Heartbeat write is blocked, **Then** the give-up still fires at its instant. That instant counts from the TestRequest's issue, written or not, as on `9d81082a`.
+2. **Given** the liveness loop's own TestRequest or Heartbeat write is blocked, **Then** the give-up still fires. **This changes `9d81082a`.** There, the give-up instant counts from when the TestRequest's store and write returned (`tr_written_at`, data-model E-4 of 105), so a TestRequest whose write never returns never starts the give-up clock. In 106, a TestRequest whose write has not returned is given up at the instant counted from its issue (`tr_issued_at`). A TestRequest that was written keeps 105's instant.
 3. **Given** a resend answer (the walk holds the replay gate) whose write is blocked, **Then** the give-up still ends the session.
 4. **Given** a peer that reads normally, **Then** no liveness timing changes: the TestRequest instant and the give-up instant are as on `9d81082a`.
 
@@ -123,7 +129,7 @@ An operator who wants a slow consumer cut sooner than the liveness give-up sets 
 
 **Why this priority**: the owner's ruling (b). It covers the peer that keeps sending but never reads, which no liveness rule cuts.
 
-**Independent Test**: set the limit and, with a peer that stops reading but keeps sending Heartbeats, block one write of each class. Assert that the session ends within the limit plus the stated margin, records a distinct reason, and that the blocked write and every write queued behind it return an error.
+**Independent Test**: set the limit and, with a transport whose write does not complete and a peer that keeps sending Heartbeats, block one write of each class. Assert that the session ends within the limit plus the stated margin, records a distinct reason, and that the blocked write and every write queued behind it return an error.
 
 **Acceptance Scenarios**:
 
@@ -168,6 +174,8 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
 ### Edge Cases
 
 - A Logon whose CompIDs cannot be read: no gate can run, and it already disconnects silently. That is unchanged.
+- A Logon whose credentials-gate inputs (Username(553), Password(554)) cannot be read, on an acceptor with a credentials policy: the gate fails closed and the session disconnects silently (FIX-TC 1S(c)). An acceptor with the default accept-all policy sees no change.
+- The posture refusal tests TestMessageIndicator(464), not the TLS posture, so the identity is known when it runs, and moving it after the gates is always possible.
 - A session that is not mTLS and has no credentials policy: the gates admit every identity, so User Story 1 changes nothing for it.
 - 104's too-low Logout already runs after the gates; it is unchanged.
 - A peer that stops reading but keeps sending: the give-up never fires, because inbound is live. Only User Story 4's limit cuts it. With the limit unset this stays open and is disclosed as a limitation, matching QuickFIX C++'s and Go's default.
@@ -236,6 +244,7 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
   - the reconnect policy's default (unbounded attempts, QuickFIX-compatible);
   - `test_067_builder_roundtrip`'s duration (B93 / #664);
   - the Tier 2 sccache restore step's duration, a new finding filed separately.
-- The C-ABI version is not bumped for a new C-ABI surface, because there is none (owner ruling). Any C-ABI-visible behaviour change, such as a write limit ending a session, is recorded in `version.h`'s changelog if the plan finds one.
+- No new C-ABI symbol (owner ruling). C-ABI MINOR is still bumped to **1.19, BREAKING, behaviour only** ([const §X.7]; precedent 1.17 and 1.18). A C caller can observe the changes: an unauthorised Logon draws no answer, a blocked send returns an error at the give-up, and NextNumIn holds after an S3 refusal. Each changed observer in `session.h` gets a C-ABI 1.19 clause, as 105 did.
+- Before the plan adds a `SessionConfig` field, grep `tests/` for size pins on `SessionConfig` and `Session`.
 - Gate A applies (#702 is security-affecting; session behaviour changes). Gate B applies as usual.
 - QuickFIX readings: C++ v1.16.0, QuickFIX/J 3.0.2, QuickFIX/Go v0.9.12, from `reference-engines/` in the parent repo.
