@@ -216,8 +216,7 @@ TEST(TlsClose105, CloseFrameSpawnFails_ReleaseAtLoopExit_AbortiveNoCloseNotify) 
 
 // Returns the SO_SNDBUF the OS reports for the engine acceptor's accepted TLS socket, or -1 when
 // the session, its TLS transport or the option is not there. On Windows it first sets the option
-// to windows_bytes: Microsoft documents that setting SO_SNDBUF on a TCP socket disables Windows'
-// dynamic send buffering for it. Elsewhere the option keeps the size the OS gives it; the Linux
+// to windows_bytes. Elsewhere the option keeps the size the OS gives it; the Linux
 // CI comparison behind that choice is recorded in
 // .specify/decisions/105-transport-liveness-gateb.md (PR #720). The Engine's accept path builds the
 // accepted transport's Transport::Config itself (no SessionConfig or EngineConfig field reaches
@@ -249,8 +248,7 @@ int session_send_buffer(fixpp::session::Engine& engine, fixpp::session::SessionI
 // widened or deleted write limit (T077) leaves the phase `writing` at the bound.
 // The condition the twin rests on, as that cell's: the held write stays held until the session
 // closes it. The session side's SO_SNDBUF is set to a fixed size once the session is Active, on
-// Windows only: Microsoft documents that setting SO_SNDBUF on a TCP socket disables Windows'
-// dynamic send buffering for it. A held send that has completed by the bound - 1 ms, or that has
+// Windows only. A held send that has completed by the bound - 1 ms, or that has
 // completed ok by the bound, means the window reopened or the write ended early; the twin then
 // fails as a setup failure.
 // The twin's peer never reads: after the bound's observations the twin closes the peer's socket,

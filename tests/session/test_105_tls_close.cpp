@@ -453,8 +453,7 @@ TEST(TlsClose105, CloseGracefulDuringWait_CloseNotifyAtTheBound) {
 
 // Returns the SO_SNDBUF the OS reports for the engine acceptor's accepted TLS socket, or -1 when
 // the session, its TLS transport or the option is not there. On Windows it first sets the option
-// to windows_bytes: Microsoft documents that setting SO_SNDBUF on a TCP socket disables Windows'
-// dynamic send buffering for it. Elsewhere the option keeps the size the OS gives it; the Linux
+// to windows_bytes. Elsewhere the option keeps the size the OS gives it; the Linux
 // CI comparison behind that choice is recorded in
 // .specify/decisions/105-transport-liveness-gateb.md (PR #720). The Engine's accept path builds the
 // accepted transport's Transport::Config itself (no SessionConfig or EngineConfig field reaches
@@ -484,10 +483,10 @@ int session_send_buffer(fixpp::session::Engine& engine, fixpp::session::SessionI
 // written. Off Windows close_notify cannot be written behind the held write, so the close is
 // abortive; on Windows the ending is the one L-105-g names, and is printed, not pinned.
 // The condition the cell rests on: the held write stays held until the session closes it. The
-// session side's SO_SNDBUF is set to a fixed size once the session is Active, on Windows only:
-// Microsoft documents that setting SO_SNDBUF on a TCP socket disables Windows' dynamic send
-// buffering for it. A held send that completes ok means the window reopened and the R-2 Logout
-// could be written; the cell then fails as a setup failure.
+// session side's SO_SNDBUF is set to a fixed size once the session is Active, on Windows only. A
+// held send that completes ok means the window reopened and the R-2 Logout could be written; the
+// cell then fails as a setup failure. A held send seen ready prints the mock-clock step and the
+// wall time since the fill loop ended at which it was first seen.
 // Off Windows the tail's read ends only after the peer has drained what the session queued before
 // its close: the close is an ordinary close, with the FIN behind that queue. The read's cap (the
 // 5s at its pump) is a wall cap that nothing derives: a drain slower than it fails the cell at the
@@ -571,6 +570,7 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
             nullptr);
         held = sends.back().wait_for(0s) != std::future_status::ready;
     }
+    auto const fill_ended = std::chrono::steady_clock::now();
     bool open_before = false;
     bool ended = false;
     bool ended_by_bound = false;
@@ -578,13 +578,20 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
     // ready, and the mock time advanced when the session left Active. A wait's predicate notes
     // it and keeps its own answer, so the waits' lengths are unchanged.
     std::string held_ready_in = "none of the waits";
+    std::chrono::milliseconds advanced{0};
+    std::chrono::milliseconds const step{50};
+    long long held_ready_step = -1;
+    long long held_ready_wall_ms = -1;
     auto note_held = [&](const char* phase) {
         if (held_ready_in == "none of the waits" && !sends.empty() &&
             sends.back().wait_for(0s) == std::future_status::ready) {
             held_ready_in = phase;
+            held_ready_step = advanced / step;
+            held_ready_wall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                     std::chrono::steady_clock::now() - fill_ended)
+                                     .count();
         }
     };
-    std::chrono::milliseconds advanced{0};
     if (up && held) {
         peer->send(msg("0", 2));  // below NextNumIn: the too-low Logout, queued at the gate
         // The session reads behind its own blocked write; real time lets the frame arrive.
@@ -602,8 +609,8 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
         // at most 3 s of mock time (the bound is the harness's logout_disconnect_timeout_ms from
         // the Logout's start; the seam twin in test_105_seams.cpp pins it on both sides).
         while (state() == fsm_state::Active && advanced < 3000ms) {
-            clock->advance(50ms);
-            advanced += 50ms;
+            clock->advance(step);
+            advanced += step;
             (void)fixpp::test_support::pump_until(
                 ioc,
                 [&] {
@@ -666,8 +673,9 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
             << ", completed " << sends_ready << ", each payload " << payload.size()
             << " bytes; the peer's SO_RCVBUF " << buffers.first << ", SO_SNDBUF " << buffers.second
             << "; the session's SO_SNDBUF " << session_sndbuf << "; the held send completed in "
-            << held_ready_in << ", result " << held_result << "; mock time advanced "
-            << advanced.count() << " ms";
+            << held_ready_in << " (mock-clock step " << held_ready_step << ", "
+            << held_ready_wall_ms << " ms of wall time after the fill loop ended), result "
+            << held_result << "; mock time advanced " << advanced.count() << " ms";
     auto const ending = peer ? peer->ending() : t105::peer_ending::open;
     // The precondition: the held send did not complete ok, so the window did not reopen before
     // the write ended.
