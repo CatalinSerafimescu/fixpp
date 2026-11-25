@@ -104,15 +104,36 @@ Outcome run(Case const c) {
             return asio::any_io_executor{ex};
         };
     }
+    if (ending == Ending::gap_deadline) {
+        // No TestRequest falls due before the gap's deadline under this threshold, so the peer
+        // owes no answer inside the window and the liveness loop cannot end the session there.
+        // Re-derive with: the TestRequest instant is the last inbound frame plus
+        // test_request_threshold (run_liveness_loop_body_ in src/session/session.cpp); the
+        // deadline is resend_gap_deadline in src/session/read_first_frame_bounded.hpp.
+        scene.tweak_cfg = [](fixpp::session::SessionConfig& s) {
+            s.test_request_threshold = std::chrono::minutes{10};
+        };
+    }
     auto& rig = scene.rig;
+    // The frame types the peer read from `from` on, and the session's state, for a miss.
+    auto reading = [&rig](std::size_t from) {
+        std::string out;
+        for (char const* t : {"0", "1", "2", "3", "4", "5", "D"}) {
+            out +=
+                std::string{" 35="} + t + ":" +
+                std::to_string(plain_rig::frames_of_type(rig.peer.received.substr(from), t).size());
+        }
+        return out + "; state " + std::to_string(static_cast<int>(rig.state()));
+    };
+    std::size_t gap_rx = 0;
     [&] {
         if (!scene.setup(0)) return;
         std::uint32_t seq = 2;  // the Logon was 34=1
         std::string trip;
         if (ending == Ending::gap_deadline) {
             // A gap: a frame three above NextNumIn draws the session's ResendRequest, which
-            // is not answered. The liveness loop's TestRequests are answered with frames
-            // above NextNumIn, so the session stays up and NextNumIn does not advance.
+            // is not answered, so NextNumIn does not advance. The peer sends nothing more until
+            // the deadline's frame, and no TestRequest falls due before it (the threshold above).
             seq += 3;
             rig.peer.send(rig.heartbeat(seq));
             if (!rig.run_until(
@@ -120,22 +141,18 @@ Outcome run(Case const c) {
                 o.setup_miss = "the gap drew no ResendRequest";
                 return;
             }
-            std::size_t answered = 0;
-            for (int i = 0; i < 4; ++i) {
-                rig.clock->advance(kHeartBtInt / 2);
-                rig.settle();
-                auto const trs = plain_rig::frames_of_type(rig.peer.received, "1");
-                if (trs.size() > answered) {
-                    rig.peer.send(rig.msg(
-                        "0", ++seq, "112=" + plain_rig::field_value(trs.back(), "112") + "\x01"));
-                    rig.settle();
-                    ++answered;
-                }
-            }
-            rig.clock->advance(std::chrono::seconds{1});
-            rig.settle();
-            if (rig.state() != fixpp::session::fsm_state::Active) {
-                o.setup_miss = "the session ended before the deadline's frame";
+            // Past the deadline in one advance, with no real-time window in between: the
+            // session owes a Heartbeat for its outbound silence (more than HeartBtInt since the
+            // ResendRequest), and the cell waits until the peer has read it, so the liveness
+            // loop's work for this advance is done before the drain.
+            gap_rx = rig.peer.received.size();
+            rig.clock->advance(2 * kHeartBtInt + std::chrono::seconds{1});
+            if (!rig.run_until([&] {
+                    return !plain_rig::frames_of_type(rig.peer.received.substr(gap_rx), "0")
+                                .empty();
+                })) {
+                o.setup_miss =
+                    "no Heartbeat after the advance past the deadline;" + reading(gap_rx);
                 return;
             }
             trip = rig.heartbeat(++seq);
@@ -162,10 +179,19 @@ Outcome run(Case const c) {
             o.setup_miss = "the drain before the arm did not complete";
             return;
         }
+        // Immediately before the arm: the session is Active and has written no Logout, so the
+        // first offloaded write after the trip frame can be the ending's.
+        if (rig.state() != fixpp::session::fsm_state::Active ||
+            !plain_rig::frames_of_type(rig.peer.received.substr(gap_rx), "5").empty()) {
+            o.setup_miss = "the session ended before the deadline's frame;" + reading(gap_rx);
+            return;
+        }
+        auto const at_arm = reading(gap_rx);
         store_hold::arm();
         rig.peer.send(trip);
         if (!rig.run_until([] { return store_hold::holding(); })) {
-            o.setup_miss = "the ending's Logout store was not held";
+            o.setup_miss = "the ending's Logout store was not held; at the arm:" + at_arm +
+                           "; now:" + reading(rx);
             return;
         }
         o.hold_entered = true;
