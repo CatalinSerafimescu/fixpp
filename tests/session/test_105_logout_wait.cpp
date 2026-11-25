@@ -2031,11 +2031,12 @@ TEST(Lifetime105, CloseFrame_SessionDestroyedAfterClose) {
     destroy_then_drain(d);
 }
 
-// fixpp#718, the close frame's catch (contract C-8.3): the write limit's close frame meets a
-// close_async that throws. The frame swallows it, the throwing call closes nothing, and a later
-// close() closes the transport. asio::detached discards a spawned frame's exception, so the catch
-// is reached here but has no observable a cell can tell from its absence.
-TEST(Lifetime105, CloseFrame_CloseAsyncThrows_TheFrameSwallowsIt) {
+// fixpp#718, the close frame's catch (contract C-8.3), COVERAGE ONLY: the write limit's close
+// frame meets a close_async that throws. The cell asserts that the transport's close_async was
+// called and threw before closing anything, and that a later close() closes the transport. It
+// reaches close_transport_'s catch but does not test it: asio::detached discards a spawned
+// frame's exception, so deleting the catch is not observable here.
+TEST(Lifetime105, CloseFrame_CloseAsyncThrows_CoverageOnly_LaterCloseCloses) {
     t105::DirectRig d{session_role::acceptor};
     ASSERT_TRUE(d.to_active()) << "setup";
     d.bw->close_async_throws_when = [](std::size_t call) { return call == 1; };

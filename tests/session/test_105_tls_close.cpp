@@ -482,14 +482,16 @@ int session_send_buffer(fixpp::session::Engine& engine, fixpp::session::SessionI
 // draws the R-2 Logout (Arm B writes no Reject first), which queues behind it. At the bound the
 // session closes within the bound plus tls_close_timeout (1 s of wall time), with no Logout
 // written. Off Windows close_notify cannot be written behind the held write, so the close is
-// abortive; on Windows the ending is the one L-105-g names, and is printed, not pinned.
+// abortive; on Windows the ending is printed, not pinned.
 // The condition the cell rests on: the held write stays held until the session closes it. The
 // session side's SO_SNDBUF is set to a fixed size once the session is Active, on Windows only. A
 // held send that completes ok means the window reopened and the R-2 Logout could be written. Off
 // Windows the cell then fails as a setup failure. On Windows (owner-approved for Windows only,
-// fixpp#722) it prints the reading and passes, and the checks that rest on the hold (no Logout
-// read, the ending) are not made; the bound's checks (open before the bound, ended by the
-// mock-clock cap, the peer's read ended) are made on every platform.
+// fixpp#722), when the success was first seen while the session was still Active, it prints the
+// reading and passes, and the checks that rest on the hold (no Logout read, the ending) are not
+// made; a success first seen at or after the session's end counts as held at the bound, and
+// those checks are made. The bound's checks (open before the bound, ended by the mock-clock cap,
+// the peer's read ended) are made on every platform.
 // The bound (logout_disconnect_timeout_ms) is set to the seam twin's: that shortens the wall time
 // between the hold and the bound; it does not explain why a window can reopen. A held send seen
 // ready prints the mock-clock step and the wall time since the fill loop ended at which it was
@@ -591,10 +593,12 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
     std::chrono::milliseconds const step{50};
     long long held_ready_step = -1;
     long long held_ready_wall_ms = -1;
+    bool held_ready_while_active = false;
     auto note_held = [&](const char* phase) {
         if (held_ready_in == "none of the waits" && !sends.empty() &&
             sends.back().wait_for(0s) == std::future_status::ready) {
             held_ready_in = phase;
+            held_ready_while_active = state() == fsm_state::Active;
             held_ready_step = advanced / step;
             held_ready_wall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                      std::chrono::steady_clock::now() - fill_ended)
@@ -684,15 +688,16 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
             << " bytes; the peer's SO_RCVBUF " << buffers.first << ", SO_SNDBUF " << buffers.second
             << "; the session's SO_SNDBUF " << session_sndbuf << "; the held send completed in "
             << held_ready_in << " (mock-clock step " << held_ready_step << ", "
-            << held_ready_wall_ms << " ms of wall time after the fill loop ended), result "
-            << held_result << "; mock time advanced " << advanced.count() << " ms";
+            << held_ready_wall_ms << " ms of wall time after the fill loop ended, the session "
+            << (held_ready_while_active ? "Active" : "not Active") << "), result " << held_result
+            << "; mock time advanced " << advanced.count() << " ms";
     auto const ending = peer ? peer->ending() : t105::peer_ending::open;
     // The precondition: the held send did not complete ok, so the window did not reopen before
-    // the write ended. On Windows a reopened window is a reading, not a failure (the cell's comment
-    // states the condition; fixpp#722).
+    // the write ended. On Windows a window reopened before the session's end is a reading, not a
+    // failure (the cell's comment states the condition; fixpp#722).
     bool const window_reopened = held_result == "ok";
 #if defined(_WIN32)
-    if (window_reopened) {
+    if (window_reopened && held_ready_while_active) {
         std::cout << "[ reading  ] TlsWriteLimit105: the window reopened, so the checks that rest "
                      "on the hold are not made; the held send completed in "
                   << held_ready_in << ", result " << held_result << "; " << reading.str()
@@ -715,8 +720,7 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
     EXPECT_EQ(ending, t105::peer_ending::abortive)
         << "a close_notify behind a peer that stopped reading; " << reading.str();
 #else
-    // The Windows ending is not pinned here: L-105-g names it, and the line below prints the
-    // reading.
+    // The Windows ending is not pinned: the line below prints the reading.
     std::cout << "[ reading  ] TlsWriteLimit105: " << t105::peer_ending_name(ending) << "; "
               << reading.str() << std::endl;
 #endif
