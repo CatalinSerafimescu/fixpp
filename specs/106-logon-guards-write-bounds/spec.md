@@ -92,7 +92,7 @@ An operator runs an mTLS acceptor, or a direct mTLS initiator. A peer presents a
 3. **Given** an acceptor whose credentials policy refuses the Logon, **When** the Logon also fails a check that answers today, **Then** nothing is sent and nothing is changed.
 4. **Given** a direct mTLS initiator started by `open()` whose peer is not authorised, **When** the acknowledgement also fails the posture, SendingTime, validate-first or S3 check, or asks for a 141=Y reset, **Then** nothing is sent and no reset takes place.
 5. **Given** a Logon that is malformed in a way that draws a validate-first Reject today, from an unauthorised identity, **When** it arrives, **Then** the session disconnects silently.
-6. **Given** an identity the gates admit, **When** any of these refusals applies, **Then** its answer is exactly as on `9d81082a`.
+6. **Given** an identity the gates admit, **When** any of these refusals applies, **Then** its answer is exactly as on `9d81082a`. A direct mTLS initiator started by `open()` holds no peer identity, so its mTLS gate admits none and this scenario does not arise there.
 
 ---
 
@@ -109,7 +109,7 @@ An acceptor's Logon, or an initiator's ordinary Logon acknowledgement (no 141=Y)
 1. **Given** an acceptor with FIXT routing and inbound validation on, **When** a Logon is refused at S3, **Then** the Reject is sent (as today) and NextNumIn is unchanged in memory and in the store.
 2. **Given** a direct initiator, **When** its ordinary acknowledgement is refused at S3, **Then** NextNumIn is unchanged in memory and in the store.
 3. **Given** the unasked 141=Y acknowledgement refused at S3, **Then** the result is as today: NextNumIn is unchanged.
-4. **Given** any other refusal of a Logon or an acknowledgement, on either role, **Then** NextNumIn is unchanged in memory and in the store.
+4. **Given** any other refusal of a Logon or an acknowledgement, on either role, **Then** NextNumIn is unchanged in memory and in the store, except after a reset the arm already applied (FR-006, L-106-a).
 
 ---
 
@@ -144,7 +144,7 @@ An operator who wants a slow consumer cut sooner than the liveness give-up sets 
 2. **Given** the limit set and a resend answer of many frames, **Then** each frame's write is limited separately, and a walk that keeps making progress is not cut.
 3. **Given** the limit unset (the default), **Then** behaviour is User Story 3's.
 4. **Given** an ending Logout write, **Then** 105's `logout_disconnect_timeout_ms` limit applies to it, not this one.
-5. **Given** a TOML config with the key set, out of range, or of the wrong type, **Then** it loads, or is refused with the loader's usual error, as `logout_disconnect_timeout_ms` is.
+5. **Given** a TOML config with the key set, **Then** it loads. **Given** it out of range or of the wrong type, **Then** it is refused with `malformed_value`, as `logon_timeout_ms` is.
 
 ---
 
@@ -181,7 +181,7 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
 
 ### Edge Cases
 
-- A Logon whose CompIDs cannot be read: no gate can run, and it already disconnects silently. That is unchanged.
+- A Logon whose CompIDs cannot be read: no gate can run. On a non-validating session it already disconnects silently. On a validating session the validate-first Reject runs before the CompIDs are read today. 106 handles this case in D1: the identity is unknown, so the Reject is not sent and the session disconnects silently.
 - A Logon whose credentials-gate inputs (Username(553), Password(554)) cannot be read, on an acceptor with a credentials policy: the gate fails closed and the session disconnects silently (FIX-TC 1S(c)). An acceptor with the default accept-all policy sees no change.
 - The posture refusal tests TestMessageIndicator(464), not the TLS posture, so the identity is known when it runs, and moving it after the gates is always possible.
 - A session that is not mTLS and has no credentials policy: the gates admit every identity, so User Story 1 changes nothing for it.
@@ -203,7 +203,7 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
 - **FR-003**: In every inbound-Logon arm (acceptor) and Logon-acknowledgement arm (direct initiator), no frame MUST be written and no sequence state MUST be changed (in memory or durably) before every identity gate that applies to the session has admitted the identity.
 - **FR-004**: A Logon or acknowledgement refused by an identity gate MUST end the session with no message, whatever other refusal would also have applied.
 - **FR-005**: For an identity the gates admit, every refusal's answer and ending MUST be as on `9d81082a`.
-- **FR-006**: A Logon (acceptor) or an ordinary Logon acknowledgement (initiator) refused at the S3 DefaultApplVerID/ApplVerID test MUST leave NextNumIn unchanged in memory and in the store, and so MUST every other refusal of a Logon or acknowledgement, on either role. The plan MUST list each refusal that runs after the inbound advance, with a cell for each.
+- **FR-006**: A Logon (acceptor) or an ordinary Logon acknowledgement (initiator) refused at the S3 DefaultApplVerID/ApplVerID test MUST leave NextNumIn unchanged in memory and in the store, and so MUST every other refusal of a Logon or acknowledgement, on either role. One exception: a refusal that runs after a reset the arm already applied (a configured `reset_on_logon` reset, or a 141=Y reset unit) keeps that reset. Such a reset runs only for an identity the gates admit, as QuickFIX C++ resets at the same place; it is disclosed as L-106-a. The plan MUST list each refusal that runs after the inbound advance, with a cell for each.
 - **FR-007**: The identity-precedence cells pinned by 104 (`LogonTooLow104.Precedence_*`, `UnaskedResetAck104.Mtls_Unauthorised_NoReset`) MUST still pass, or be updated where this feature deliberately changes the order they pin, each update named in the plan.
 
 **B124 (#714)**
