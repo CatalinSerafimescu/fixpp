@@ -1477,11 +1477,16 @@ remaining reference.
 
 ### Mandatory close-out tasks (ALWAYS emit — Gate-B preconditions, Article XVII §8)
 
-- [ ] T146 **Catalogue close-out**: read `spec/feature-catalogue.md` for every OFFICIAL row whose Feature column names 105 or
+- [X] T146 **Catalogue close-out**: read `spec/feature-catalogue.md` for every OFFICIAL row whose Feature column names 105 or
   whose subject is a 105 issue (`grep -nE '105-transport|#534|#535|#559|#582|#687'`, then a read of the session rows by
   subject); flip each feature-owned row to `done` with the PR and evidence, with its `spec/coverage-index.md` entry, or record
   "none owned" after the check. Rows this feature amends but does not own get a dated "105 amends this row" note naming the
   B-105 rows; their state does not change.
+  Done: the recipe's grep finds no catalogue row naming 105 or its issues; the session, transport, C-ABI and conformance
+  rows read by subject. None is feature-owned: S-002, S-003, S-004, S-041, T-005, T-042, CA-004 and CA-005 are `done` rows of
+  earlier features, and TC-002, TC-004 and TC-009 stay `backlog`. Each gains a dated "105 amends this row" note naming its
+  B-105 rows and witnesses (cell names checked against the head binaries' `--gtest_list_tests`), and the coverage index's
+  §4.5.1, §4.5.5, §4.6 and FIX-TC rows 2, 4, 6 and 12 the same; no row's state changes.
 - [ ] T147 **Feature-completeness audit (MUST be the FINAL task)**: against the final head, (i) every row of this file is
   `[X]` or carries a waiver rationale; (ii) every FR and SC maps to a landed test and a landed implementation (the
   traceability table below, re-read cell by cell), every W-row and E-3 row maps to a landed cell (the design table
