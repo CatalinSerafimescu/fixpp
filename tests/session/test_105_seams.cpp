@@ -814,7 +814,7 @@ TEST(TestReqIdParse105, PrefixAlone_Mismatch) { EXPECT_TRUE(trw::parse_prefix_al
 // The parse's refusals by form, each called with arguments read at run time (a std::string built
 // through a volatile length, and volatile window ends), so the call is not constant-evaluated and
 // the instrumented build runs each refusal. The window is the constexpr cells' (trw::kFloor,
-// trw::kNext); the first three ids are the positive controls, earlier and in the window.
+// trw::kNext); the first loop's ids are the positive controls, earlier and in the window.
 TEST(TestReqIdParse105, RefusalsByForm_AtRunTime) {
     auto at_run_time = [](std::string_view s) {
         volatile std::size_t n = s.size();
@@ -827,9 +827,10 @@ TEST(TestReqIdParse105, RefusalsByForm_AtRunTime) {
     for (std::string_view const id : {"TR3", "TR0", "TR4294967295"}) {
         EXPECT_TRUE(trw::is_earlier_test_req_id(at_run_time(id), floor, next)) << id;
     }
-    // Each refused id names the refusal it reaches: the length or prefix, a byte below '0', a
-    // byte above '9', the sign, the leading zero, past std::uint32_t, past the digit limit, and
-    // the window.
+    // The refused ids, in the order of the refusals they reach in is_earlier_test_req_id: the
+    // length or prefix ("", "T", "TR", "XR3", "TX3"), a byte below '0' ("TR/3"), above '9'
+    // ("TR3x"), the sign ("TR-3"), the leading zero ("TR03"), past std::uint32_t ("TR4294967296"),
+    // past the digit limit ("TR99999999999999999999"), and the window ("TR12").
     for (std::string_view const id : {"", "T", "TR", "XR3", "TX3", "TR/3", "TR3x", "TR-3", "TR03",
                                       "TR4294967296", "TR99999999999999999999", "TR12"}) {
         EXPECT_FALSE(trw::is_earlier_test_req_id(at_run_time(id), floor, next)) << id;
