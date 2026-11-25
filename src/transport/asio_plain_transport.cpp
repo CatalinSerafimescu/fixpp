@@ -8,7 +8,8 @@
 //
 // Design anchors:
 //   specs/043-plaintext-tcp-transport/contracts/asio_plain_transport.hpp
-//   research.md D-1/D-2/D-12 — no handshake; close = socket_.close; same TCP knobs
+//   research.md D-1/D-2/D-12 — no handshake; same TCP knobs; close = socket_.close,
+//     superseded by 105 T141a (B-105-9): close = shutdown(send), then socket_.close
 //   data-model.md E-2 — field set and state transitions
 //   asio_tls_transport.cpp — canonical reference implementation pattern
 
@@ -268,6 +269,8 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     // close the socket again rather than publishing `connected` and leaving a
     // live socket behind a close() that already returned.
     if (state_ == state_t::closed) {
+        // Nothing was written on this socket and no operation is pending on it,
+        // so close() alone gives the peer EOF; no shutdown is needed (105 T141a).
         asio::error_code close_ec;
         socket_.close(close_ec);
         co_return std::unexpected{E::transport_already_closed};
@@ -424,10 +427,19 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     state_ = state_t::closed;
 
     // Plain transport: NO TLS close-notify / SSL_shutdown / tls_close_timeout
-    // wait (D-2, FR-011). Just close the socket directly.
+    // wait (D-2, FR-011).
+    //
+    // 105 T141a (B-105-9): the send side is shut down first, so the peer reads
+    // every write that completed here, then EOF. A bare close() with a read or
+    // a write pending (the Engine's pump parks in a read) makes Windows reset
+    // the connection, and the peer's stack then discards what it had not read.
+    // shutdown() is synchronous, so close() stays synchronous (FR-006). Two
+    // conditions still reset, as TCP does: inbound bytes this side never read,
+    // and SO_LINGER enabled with zero seconds (Config::so_linger_enabled).
+    // Best-effort; both results are ignored.
     asio::error_code ec;
+    socket_.shutdown(asio::ip::tcp::socket::shutdown_send, ec);
     socket_.close(ec);
-    // Best-effort; ignore ec.
 
     return {};
 }

@@ -111,7 +111,8 @@ Snapshot snapshot(pr::Rig& rig) {
 //
 // The initiator after its Logon; the acceptor after a matching first frame that leaves
 // it pre-Active: a refused Logon (no HeartBtInt(108)) or a non-Logon frame. Both
-// acceptor contexts leave the session in Disconnected with its transport open.
+// acceptor contexts refuse into Disconnected, and 105-transport-liveness (FR-007) closes the
+// connection at that refusal, superseding 093's "with its transport open" until the deadline.
 enum class Ctx { initiator_after_logon, acceptor_after_refused_logon, acceptor_after_non_logon };
 
 char const* name_of(Ctx c) {
@@ -197,23 +198,49 @@ void run_q16(Ctx c, bool send_garbage) {
     EXPECT_EQ(after.state, fsm_state::Disconnected) << "the FSM ends in Disconnected";
 }
 
+// 105-transport-liveness (FR-007; research D4), superseding 093 FR-006 phase (b) for a refused
+// Logon: the refusal closes the connection at once, with the clock still, and is not an
+// establishment timeout, so the deadline adds no event. A peer that would send garbage after
+// the refusal finds the connection closed, so both variants read the same.
+void run_q16_refused(Ctx c, bool send_garbage) {
+    SCOPED_TRACE(name_of(c));
+    SCOPED_TRACE(send_garbage ? "garbage-only peer" : "silent peer");
+    constexpr auto kT = 2000ms;
+    pr::Rig rig;
+    bool const up = reach(rig, c, kT);
+    bool closed_at_once = false;
+    Snapshot after;
+    if (up) {
+        closed_at_once = rig.run_until([&] { return snapshot(rig).read_ended; });
+        rig.clock->advance(kT);
+        rig.settle();
+        after = snapshot(rig);
+    }
+    rig.stop();
+
+    ASSERT_TRUE(up) << "the session did not reach its pre-Active context";
+    EXPECT_TRUE(closed_at_once) << "the refusal did not close the connection at once";
+    EXPECT_EQ(after.timeouts, 0U) << "a session_event_establishment_timeout for a refusal";
+    EXPECT_EQ(after.state, fsm_state::Disconnected) << "the FSM ends in Disconnected";
+}
+
 TEST(EstablishmentTimeoutQ16, InitiatorAfterLogon_GarbageOnlyPeer_ClosedAtTNotBefore) {
     run_q16(Ctx::initiator_after_logon, true);
 }
 TEST(EstablishmentTimeoutQ16, InitiatorAfterLogon_SilentPeer_ClosedAtTNotBefore) {
     run_q16(Ctx::initiator_after_logon, false);
 }
-TEST(EstablishmentTimeoutQ16, AcceptorAfterRefusedLogon_GarbageOnlyPeer_ClosedAtTNotBefore) {
-    run_q16(Ctx::acceptor_after_refused_logon, true);
+TEST(EstablishmentTimeoutQ16, AcceptorAfterRefusedLogon_GarbageOnlyPeer_ClosedAtOnceNoTimeout) {
+    run_q16_refused(Ctx::acceptor_after_refused_logon, true);
 }
-TEST(EstablishmentTimeoutQ16, AcceptorAfterRefusedLogon_SilentPeer_ClosedAtTNotBefore) {
-    run_q16(Ctx::acceptor_after_refused_logon, false);
+TEST(EstablishmentTimeoutQ16, AcceptorAfterRefusedLogon_SilentPeer_ClosedAtOnceNoTimeout) {
+    run_q16_refused(Ctx::acceptor_after_refused_logon, false);
 }
-TEST(EstablishmentTimeoutQ16, AcceptorAfterNonLogonFrame_GarbageOnlyPeer_ClosedAtTNotBefore) {
-    run_q16(Ctx::acceptor_after_non_logon, true);
+TEST(EstablishmentTimeoutQ16, AcceptorAfterNonLogonFrame_GarbageOnlyPeer_ClosedAtOnceNoTimeout) {
+    run_q16_refused(Ctx::acceptor_after_non_logon, true);
 }
-TEST(EstablishmentTimeoutQ16, AcceptorAfterNonLogonFrame_SilentPeer_ClosedAtTNotBefore) {
-    run_q16(Ctx::acceptor_after_non_logon, false);
+TEST(EstablishmentTimeoutQ16, AcceptorAfterNonLogonFrame_SilentPeer_ClosedAtOnceNoTimeout) {
+    run_q16_refused(Ctx::acceptor_after_non_logon, false);
 }
 
 // ── Q-16: the timeout's log record (data-model E-12) ────────────────────────
@@ -330,15 +357,21 @@ TEST(EstablishmentTimeoutQ16, ReadableAcrossT_GarbageStream_ClosedAtTheFirstLoop
     expect_closed_at_the_first_loop_head_after_t(r);
 }
 
-TEST(EstablishmentTimeoutQ16, ReadableAcrossT_ValidNonLogonFrames_ClosedAtTheFirstLoopHeadAfterT) {
-    // Heartbeats from the acceptor ("TW"), 34=1 on. The first takes the initiator from
-    // LogonSent to Disconnected with its transport open; the rest are read and ignored.
+// 105-transport-liveness (FR-007; research D4), superseding 093 FR-006 phase (b) for this
+// stream: the first Heartbeat refuses the initiator's LogonSent, and the refusal closes the
+// connection once that frame's arm has returned, with no establishment timeout.
+TEST(EstablishmentTimeoutQ16, ReadableAcrossT_ValidNonLogonFrames_ClosedAtTheFirstRefusal) {
+    // Heartbeats from the acceptor ("TW"), 34=1 on.
     std::vector<std::string> chunks;
     for (std::uint32_t i = 1; i <= kScriptChunks; ++i) {
         chunks.push_back(pr::message("FIX.4.2", "0", i, "TW", "ISLD", "20240101-00:00:00.000"));
     }
     auto const r = run_script(chunks);
-    expect_closed_at_the_first_loop_head_after_t(r);
+    ASSERT_TRUE(r.up);
+    EXPECT_TRUE(r.ended) << "the transport was never closed";
+    EXPECT_EQ(r.reads_served, 1U) << "a read was served after the refusing frame";
+    EXPECT_EQ(r.timeouts, 0U) << "an establishment timeout for a refusal";
+    EXPECT_EQ(r.state, fsm_state::Disconnected);
 }
 
 TEST(EstablishmentTimeoutQ16, ReadableAcrossT_NoFrameIsDeliveredOnceTheDeadlineHasPassed) {
@@ -795,8 +828,10 @@ void run_near_max(Ctx c) {
 TEST(EstablishmentTimeoutNearClockMax, Initiator_DeadlineSaturatesAtMax) {
     run_near_max(Ctx::initiator_after_logon);
 }
-TEST(EstablishmentTimeoutNearClockMax, AcceptorAfterNonLogonFrame_DeadlineSaturatesAtMax) {
-    run_near_max(Ctx::acceptor_after_non_logon);
+// 105-transport-liveness (FR-007): a refused acceptor closes at once, so its deadline, near
+// max() or not, closes nothing; the saturation is the initiator's cell above.
+TEST(EstablishmentTimeoutNearClockMax, AcceptorAfterNonLogonFrame_RefusalClosesAtOnce) {
+    run_q16_refused(Ctx::acceptor_after_non_logon, false);
 }
 
 }  // namespace

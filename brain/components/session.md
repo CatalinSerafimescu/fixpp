@@ -51,6 +51,10 @@ refs:
   - specs/104-sequence-reset-fidelity/research.md
   - specs/104-sequence-reset-fidelity/data-model.md
   - specs/104-sequence-reset-fidelity/contracts/session-wire-endings-104.md
+  - specs/105-transport-liveness/spec.md
+  - specs/105-transport-liveness/research.md
+  - specs/105-transport-liveness/data-model.md
+  - specs/105-transport-liveness/contracts/transport-liveness-105.md
   - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2d-threading.md
@@ -632,7 +636,9 @@ taken. Each item names the note's section that has the whole list.
   0); a second ResendRequest per extra frame; no longer refreshing liveness on a too-high frame (it
   reverses ruling R-1 on fixpp#516); no deadline; a timer for the deadline; two endings for a live
   peer; the grace check reading "any frame since the TestRequest" (it edits the liveness loop, B27's
-  surface); a Logout on the dead-peer ending; the check ahead of the BeginString, CompID and
+  surface; ⚠️ **decided by 105**: the give-up needs a TestRequest pending and no inbound frame since it, so a
+  peer that keeps sending is not given up, 105 research D6); a Logout on the dead-peer ending (⚠️ **superseded by
+  105's R-1**: the give-up sends a Logout naming the TestRequest, `B-105-3`); the check ahead of the BeginString, CompID and
   SendingTime guards; the check without its own too-high test (it would end a healthy slow replay); the
   check on every frame that does not advance (it would close `L-537-1`'s pattern; not chosen, R-11);
   ⚠️ **R-11 is superseded by 103** (research D6; the owner's ruling on fixpp#581, 2026-11-14): the
@@ -908,6 +914,42 @@ and what was not taken.
 - ⚠️ **Superseded by 104:** `specs/013-session-reconnect-binding/` `quickstart.md`, `spec.md` and
   `tasks.md`'s `NewSeqNo=21` (an empty-range GapFill's NewSeqNo is the next outbound number, `B-104-5`).
 - ⚠️ **Superseded by 104 in its shape:** 093 OD-1's event-driven wait (the bullet above).
+
+## Transport liveness (105)
+
+Source: `specs/105-transport-liveness/` (research D1 to D11, data-model E-3 and E-4, contract C-1 to C-11); the
+code is `Session::record_state_transition_`, `release_connection_end_`, `run_ending_logout_bound_` and
+`run_liveness_loop` in `src/session/session.cpp`, and `run_read_pump`, `run_accept_loop` and
+`log_pre_session_reject` in `src/session/engine.cpp`. Leads to verify against that source.
+
+- **Every ending closes its connection** (fixpp#534; B&L `B-105-1`). The `Disconnected` edge sets a
+  connection-end latch, and a root's exit releases it into one close per connection (research D1). Not taken
+  (research D1, "Alternatives rejected"): posting `close(terminal)` from the edge (it spawns inside a `noexcept`
+  function, could cut the reply Logout's write, and leaves a direct initiator permanently closed); a pump-side state
+  check with an active wake of the parked read (a coroutine frame per read on the hot path, or a TLS cancel without
+  the join); a latch the pump alone consumes; `co_await close()` at the end of each detached root (it deadlocks on
+  the root's own join counter).
+- **An ending Logout waits for the peer's Logout, bounded (R-2), and every ending Logout's write is limited**
+  (`B-105-2`; ruling D-e: one budget from the write's start). Two disclosed exceptions arm no wait: the strict-reset
+  refusal, and an ending Logout drawn by the peer's own Logout, decided once in `send_ending_logout_` from the frame
+  (spec 105 clarifications "Session 2026-11-21 (implementation, Phase 4)" and "Session 2026-11-24 (implementation,
+  Phase 9)"). Not taken (research D2, "Alternatives rejected"):
+  `LogoutSent` as the wait's state after Active; a new `fsm_state` value (a public C++ API change); site-by-site
+  patches (one site missed is a swallowed response); a silent ending during the wait moving the session to
+  `Disconnected`; processing frames as in Active before Active; reusing `run_peer_logout_bound_` or the liveness
+  loop as the timer; a bound sliding from the last send, as QuickFIX C++ and QuickFIX/J have it.
+- **The unanswered TestRequest is given up with a Logout naming it (R-1, FIX-SL §4.5.5)**, superseding the
+  536-537-538 note's R-6 ("Not chosen: … a Logout on the dead-peer ending"). The give-up is decided once and is
+  final; its budget counts from the decision. A TestRequest held behind a resend answer gets a fresh window from
+  its write, and while one is pending a held TestRequest is given up at three thresholds after the last inbound
+  frame (owner rulings 2026-11-24, spec.md Clarifications "Session 2026-11-24"; `B-105-3`).
+- **T = `test_request_threshold`, default 1.2 × HeartBtInt, give-up at 2T** (fixpp#535), superseding 005
+  research D-8's 1 × HeartBtInt; the TestReqID(112) rule of ruling D-d (`B-105-5`); with sequence validation off
+  an answering Heartbeat counts (fixpp#582, `B-105-4`).
+- **Superseded by name** (spec FR-019; frozen bundles, annotated nowhere): 005 research D-8; 013's
+  transport-stays-open readings; 092 contract C-2 O-1's close timing; 093 FR-006 phase (b) and contract C-4/C-7
+  (a refused connection now closes at its refusal); 103 Arm B's disclosure and 104's DQ-8 (`L-103-5`, closed); the
+  536-537-538 note's R-6 and D-537-5's C-3 disclosure (erratum at the note's end).
 
 ## Runtime flows
 

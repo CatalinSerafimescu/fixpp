@@ -2,6 +2,12 @@
 //
 // tests/session/test_admin_emit_toadmin_coverage.cpp
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp.
+//
 // 036-admin-emit-toadmin-coverage — FR-001/FR-002/FR-003/FR-006
 //
 // Exhaustive toAdmin coverage for the 9 admin Reject + Guard-3 Logout emit sites.
@@ -54,9 +60,11 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/r2_wait_reading.hpp"
 #include "support/session_test_access.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
@@ -726,6 +734,7 @@ TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto) {
     // Acceptor role: peer=TW sends, we=ISLD receive.
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess))
         << "Prerequisite: acceptor must reach Active before the provocation";
@@ -795,6 +804,7 @@ TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto) {
 TEST_F(AdminEmitNoAppCoverageTest, EmitSessionReject_NoAppUnknownType_NoOp) {
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: no-app acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
@@ -881,6 +891,7 @@ TEST_F(AdminEmitNoAppCoverageTest, EmitSessionReject_NoAppUnknownType_NoOp) {
 TEST_F(AdminEmitNoAppCoverageTest, Logout_Guard3_NoApp_ByteIdentical) {
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_initiator_to_logon_sent(sess))
         << "Prerequisite: no-app initiator must reach LogonSent";
@@ -956,6 +967,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_Q3SendingTimeAccuracy) {
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
@@ -974,8 +986,18 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_Q3SendingTimeAccuracy) {
     EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "5", frames_before), 1U)
         << "Q3 must emit exactly one Logout(35=5) in the window";
 
-    // Session must disconnect.
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected) << "Q3 must disconnect the session";
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // session stays Active through the wait and ends at its bound.
+    fixpp::test_support::expect_r2_wait(
+        fixpp::test_support::read_r2_wait(
+            sess, *clock, std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            [this] {
+                for (int i = 0; i < 16; ++i) {
+                    ioc.restart();
+                    ioc.poll();
+                }
+            }),
+        "Q3 stale SendingTime in Active");
 
     // toAdmin delta must be 2: Reject + Logout.
     // Pre-036: Reject not wired → delta==1 (Logout only) → RED.
@@ -1011,6 +1033,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SequenceResetVeto) {
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
@@ -1067,6 +1090,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmC_Malformed122) {
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
@@ -1116,6 +1140,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021RC1_Malformed122) {
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
@@ -1163,6 +1188,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmD) {
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
@@ -1181,8 +1207,18 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmD) {
     EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "5", frames_before), 1U)
         << "021 Arm D must emit exactly one Logout(35=5) in the window";
 
-    // Session must disconnect.
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected) << "021 Arm D must disconnect the session";
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // session stays Active through the wait and ends at its bound.
+    fixpp::test_support::expect_r2_wait(
+        fixpp::test_support::read_r2_wait(
+            sess, *clock, std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            [this] {
+                for (int i = 0; i < 16; ++i) {
+                    ioc.restart();
+                    ioc.poll();
+                }
+            }),
+        "021 Arm D in Active");
 
     // toAdmin delta: 2 (Reject + Logout).
     // Pre-036: Reject not wired → delta==1 → RED. Post-036: delta==2 → GREEN.
@@ -1223,6 +1259,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto) {
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
@@ -1290,6 +1327,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SeqResetNewSeqNoTooLow) {
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
@@ -1345,6 +1383,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Logout_Guard3LogonAckSendingTime) {
     // Initiator role: we=ISLD send, peer=TW responds.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_initiator_to_logon_sent(sess))
         << "Prerequisite: initiator must reach LogonSent before the provocation";
@@ -1429,6 +1468,7 @@ TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto_Throw) {
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess))
         << "Prerequisite: acceptor must reach Active (handshake Logon 35=A passes gate)";
@@ -1455,6 +1495,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_Q3SendingTimeAccuracy_Throw) {
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess));
 
@@ -1479,6 +1520,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SequenceResetVeto_Throw) {
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess));
 
@@ -1503,6 +1545,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmC_Malformed122_Throw) {
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess));
 
@@ -1527,6 +1570,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021RC1_Malformed122_Throw) {
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess));
 
@@ -1552,6 +1596,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmD_Throw) {
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess));
 
@@ -1587,6 +1632,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto_Throw) {
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess));
 
@@ -1613,6 +1659,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SeqResetNewSeqNoTooLow_Throw) {
 
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess));
 
@@ -1639,6 +1686,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Logout_Guard3LogonAckSendingTime_Throw) {
 
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_initiator_to_logon_sent(sess))
         << "Prerequisite: initiator must reach LogonSent";
@@ -1679,6 +1727,7 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_ToApp_Observed) {
 
     auto cfg = make_acceptor_cfg_with_store();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
@@ -1749,6 +1798,7 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_VetoSuppressed_PersistStillFires) {
 
     auto cfg = make_acceptor_cfg_with_store();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);
@@ -1825,6 +1875,7 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_Throw_TerminalClose) {
 
     auto cfg = make_acceptor_cfg_with_store();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     ASSERT_TRUE(open_acceptor_to_active(sess)) << "Prerequisite: acceptor must reach Active";
     ASSERT_EQ(sess.state(), fsm_state::Active);

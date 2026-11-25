@@ -2567,3 +2567,14 @@ A wording pass made on 2026-10-20, after the late `/analyze` pass 3 over v0.23, 
 - §8, the B41 bullet: mutant D's result on the merged tree (T6.31, at `1223139f`) written in; the gated arrival cells' names in this tree added beside B41's record names. Source: the mutant leg after `5c07e5f6`.
 - §5, "Statements with no RED arm": D-OUT-6's builder error kept in `sent`, unreachable, with the reason. Source: T6.7, the orchestrator's disposition of 2026-10-20 (the verify record, "T6.7 — coverage per changed line").
 - Not changed: every ruling and decision; the code comments, which an implementer edits with the deletion.
+
+### Erratum — 105-transport-liveness (2026-11-24)
+
+Feature 105 (`specs/105-transport-liveness/`, research D11; spec FR-019) supersedes two statements of this note.
+The note is otherwise unchanged.
+
+- **R-6's "Not chosen: … a Logout on the dead-peer ending"** is superseded by 105's R-1: an unanswered TestRequest is
+  given up with a Logout whose Text(58) names it, then the connection closes (105 contract C-3; B&L `B-105-3`).
+- **D-537-5's C-3 disclosure ("the transport stays open")** after the gap deadline's Logout is superseded by 105's
+  FR-004: the session waits for the peer's Logout, bounded by `logout_disconnect_timeout_ms`, and then closes the
+  connection (105 contract C-1, C-2; B&L `B-105-1`, `B-105-2`, `B-537-2` as amended).

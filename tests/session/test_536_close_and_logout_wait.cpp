@@ -2,6 +2,12 @@
 //
 // tests/session/test_536_close_and_logout_wait.cpp
 //
+// 105-transport-liveness (R-3, research D6) supersedes 005 research D-8's 1 × HeartBtInt
+// TestRequest threshold the liveness cells here ran on: unset, test_request_threshold is
+// 1.2 × HeartBtInt (kThreshold), the give-up comes strictly after twice it, and the loop acts
+// on one instant per wake (the give-up, else the TestRequest, else the Heartbeat), so a cell
+// that reads both liveness frames steps to the Heartbeat instant and then to the TestRequest's.
+//
 // fixpp#536 (.specify/536-537-538-recovery-liveness.md §3, decisions D-536-1 to D-536-4,
 // and §5, the #536 table): what a session's close does to the clock, how close ends the
 // session's own liveness loop, and what ends the wait of a graceful close for the peer's
@@ -23,7 +29,7 @@
 // The suites:
 //   SessionNeverSweepsTheClock  D-536-1: no session calls Clock::cancel_sleeps().
 //   CloseAfterTheLoopSent       D-536-2, the filter reset before each of the loop's sleeps.
-//   CloseDuringTheLoopsEmit     D-536-2, the state test before the grace sleep.
+//   CloseDuringTheLoopsEmit     D-536-2, the state test before the sleep to the give-up.
 //   LogoutWaitWake              D-536-3: the peer's Logout ends the logout wait through a
 //                               wake of the session's own.
 //   LogoutWaitLifetime          D-536-3, what the wake leaves behind when the wait ends
@@ -269,6 +275,8 @@ struct Options {
 };
 
 constexpr auto kHeartBtInt = std::chrono::seconds{30};
+// The default test_request_threshold, 1.2 × kHeartBtInt.
+constexpr auto kThreshold = std::chrono::milliseconds{kHeartBtInt} * 6 / 5;
 
 // One initiator Session, TW to ISLD, with HeartBtInt = kHeartBtInt, its clock and its
 // transport callback.
@@ -499,9 +507,15 @@ TEST(SessionNeverSweepsTheClock, Traffic) {
     // above with the clock not yet moved, so they predate this advance, and a sleep
     // armed late would name an instant already passed.
     s.mock->advance(kHeartBtInt + 1s);
+    ASSERT_TRUE(s.pump([&] { return s.count("0") == 2; }))
+        << "setup: the liveness loop sent no Heartbeat";
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the TestRequest instant is computed from
+    // the last inbound frame, stamped before the first advance above; the pump below is bounded and
+    // asserted.
+    s.mock->advance(kThreshold - kHeartBtInt);
     ASSERT_TRUE(s.pump([&] { return s.count("1") == 1; }))
         << "setup: the liveness loop sent no TestRequest";
-    ASSERT_EQ(s.count("0"), 2) << "setup: the liveness loop sent no Heartbeat";
+    ASSERT_EQ(s.count("0"), 2) << "setup: the liveness loop sent a second Heartbeat";
     // The peer's answer to it.
     const std::string id = s.first_test_req_id();
     ASSERT_FALSE(id.empty()) << "setup: the TestRequest carries no TestReqID(112)";
@@ -580,7 +594,7 @@ TEST(CloseAfterTheLoopSent, AHeartbeat_CloseCompletesWithoutTheClock) {
            "whose liveness loop had sent a Heartbeat: close did not end the loop's main sleep";
 }
 
-// The loop sent a Heartbeat and a TestRequest and is parked in its grace sleep.
+// The loop sent a TestRequest and sleeps toward its give-up instant.
 TEST(CloseAfterTheLoopSent, ATestRequest_CloseCompletesWithoutTheClock) {
     Scene s;
     ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
@@ -588,24 +602,24 @@ TEST(CloseAfterTheLoopSent, ATestRequest_CloseCompletesWithoutTheClock) {
 
     // Staging (ci/mock-clock-staging-sweep.sh): KIND D. The loop's sleep is armed from
     // the Logon's anchors, which predate this advance; nothing was delivered since.
-    s.mock->advance(kHeartBtInt + 1s);
+    s.mock->advance(kThreshold + 1s);
     ASSERT_TRUE(s.pump([&] { return s.count("1") == 1; }))
         << "setup: the liveness loop sent no TestRequest";
 
     auto closed = s.spawn_close(close_mode::terminal);
     EXPECT_TRUE(s.pump([&] { return Scene::ready(closed); }))
         << "close(terminal) did not complete, with the clock not advanced, for a session "
-           "whose liveness loop had sent a TestRequest: close did not end the loop's grace "
-           "sleep";
+           "whose liveness loop had sent a TestRequest: close did not end the loop's sleep "
+           "to the give-up";
 }
 
 // ── D-536-2, the state test: close runs while the loop's emit is suspended ──────────
 //
 // The loop's TestRequest is held in the store, once the store has the frame. close(terminal)
 // runs to its wait for the loop; the hold is then released. On the callback transport
-// the released emit succeeds, so the loop goes on to its grace sleep with close's
-// cancellation already emitted. The grace deadline is past the clock (the clock stands
-// one second after HeartBtInt, and the grace sleep ends at twice HeartBtInt), so the loop
+// the released emit succeeds, so the loop goes on to its sleep to the give-up with close's
+// cancellation already emitted. The give-up instant is past the clock (the clock stands
+// one second after the threshold, and the give-up is strictly after twice it), so the loop
 // can only leave by itself.
 TEST(CloseDuringTheLoopsEmit, TestRequestHeldInTheStore_CloseCompletesWithoutTheClock) {
     Scene s{Options{.holding_store = true}};
@@ -615,7 +629,7 @@ TEST(CloseDuringTheLoopsEmit, TestRequestHeldInTheStore_CloseCompletesWithoutThe
     s.hold->msg_type = "1";
     // Staging (ci/mock-clock-staging-sweep.sh): KIND D. The loop's sleep is armed from
     // the Logon's anchors, which predate this advance; nothing was delivered since.
-    s.mock->advance(kHeartBtInt + 1s);
+    s.mock->advance(kThreshold + 1s);
     ASSERT_TRUE(s.pump([&] { return s.hold->holding; }))
         << "setup: no TestRequest store() was held";
     ASSERT_EQ(s.count("1"), 0) << "setup: the TestRequest was transmitted before its store()";
@@ -639,11 +653,11 @@ TEST(CloseDuringTheLoopsEmit, TestRequestHeldInTheStore_CloseCompletesWithoutThe
         << "a cancellation was recorded on the liveness loop's thread during the hold";
     ASSERT_EQ(s.count("1"), 1)
         << "the released TestRequest was not transmitted, so the loop did not reach its "
-           "grace sleep and the cell says nothing about the state test before it";
+           "sleep to the give-up and the cell says nothing about the state test before it";
     EXPECT_TRUE(completed)
         << "close(terminal) did not complete, with the clock not advanced, after the "
            "liveness loop's held TestRequest emit was released: the loop went into its "
-           "grace sleep although the session was no longer Active";
+           "sleep to the give-up although the session was no longer Active";
 }
 
 // ── D-536-3: the peer's Logout ends the logout wait through the session's own wake ──
@@ -887,14 +901,21 @@ TEST(ExplicitSweep, Control_EndsAnUnclosedSessionsLivenessLoop) {
         // anchors, which predate this advance.
         s->mock->advance(kHeartBtInt + 1s);
         s->settle();
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND C, for the swept session (the advance must
+        // fire nothing, its oracle), KIND D for the other (its loop sleeps from the Logon's
+        // anchors), as for the advance above.
+        s->mock->advance(kThreshold - kHeartBtInt);
+        s->settle();
     }
     ASSERT_EQ(other.count("0"), 1) << "control: a running loop sent no Heartbeat in the window";
     ASSERT_EQ(other.count("1"), 1) << "control: a running loop sent no TestRequest in the window";
     for (Scene* s : {&swept, &other}) {
-        // Staging. The swept one: KIND C, as above. The other: KIND E, its loop is in
-        // its grace sleep, armed in the run that wrote the TestRequest the assertion
-        // above read; and the grace deadline is a stored instant, so KIND D as well.
-        s->mock->advance(kHeartBtInt);
+        // Staging. The swept one: KIND C, as above. The other: KIND E, its loop sleeps to
+        // the give-up instant, armed in the run that wrote the TestRequest the assertion
+        // above read; and the give-up instant is a stored instant, so KIND D as well. A second
+        // past a threshold: the TestRequest was written a second after its instant, and the
+        // give-up comes a threshold after that write (the owner's fresh-window ruling).
+        s->mock->advance(kThreshold + 1s);
         s->settle();
     }
     ASSERT_EQ(other.session->state(), fsm_state::Disconnected)

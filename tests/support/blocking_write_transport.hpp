@@ -28,12 +28,19 @@
 // marks the entry completed where it counts `writes`, so a cell can read each frame's 35 and
 // 34 in write-start order. It allocates; a cell that needs the no-allocation condition
 // leaves it off.
+//
+// 105-transport-liveness (fixpp#718; contract C-8.3) adds opt-in close_async behaviour: the
+// transport counts its close_async calls; the call close_async_throws_when names throws before it
+// closes anything, and a call close_async_holds_when names waits, before it closes, until
+// release_close(). With neither set, close_async is Transport's default, close().
 #pragma once
 
+#include <algorithm>
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/redirect_error.hpp>
 #include <asio/steady_timer.hpp>
+#include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <cstddef>
 #include <fixpp/core/error.hpp>
@@ -42,10 +49,12 @@
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <functional>
 #include <memory>
 #include <memory_resource>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -71,10 +80,42 @@ struct blocking_write_state {
     bool record_bytes = false;
     std::vector<recorded_write> recorded;  // in write-start order
 
+    // 105-transport-liveness (tasks.md T035): the transport's closes, counted in close() (which
+    // Transport::close_async's default calls), and `starts` as the first one read it, so a cell
+    // can tell that the connection was closed and which writes had begun by then.
+    std::size_t closes = 0;
+    std::optional<std::size_t> starts_at_first_close;
+    // 105-transport-liveness (tasks.md T052): a parked write that close() wakes completes with
+    // success, as a write whose completion was already queued when the transport was closed.
+    bool succeed_after_close = false;
+
     void arm_block() noexcept { block_next = true; }
     void release() {
         block_next = false;
         if (timer) timer->cancel();
+    }
+
+    // 105 (fixpp#718): close_async's calls, numbered from 1, and its two opt-in behaviours.
+    std::size_t close_async_calls = 0;
+    std::function<bool(std::size_t call)> close_async_throws_when;
+    std::function<bool(std::size_t call)> close_async_holds_when;
+    std::size_t close_async_parked = 0;             // calls holding now
+    std::size_t close_releases = 0;                 // release_close() calls
+    std::vector<std::size_t> close_released_calls;  // the calls release_close(call) named
+    std::vector<asio::steady_timer*> close_waits;   // the holding calls' waits, each while it lives
+    // Releases every close_async call holding now.
+    void release_close() {
+        ++close_releases;
+        for (auto* t : close_waits) t->cancel();
+    }
+    // Releases the close_async call numbered call, now or when it begins to hold.
+    void release_close(std::size_t call) {
+        close_released_calls.push_back(call);
+        for (auto* t : close_waits) t->cancel();
+    }
+    [[nodiscard]] bool close_call_released(std::size_t call) const {
+        return std::find(close_released_calls.begin(), close_released_calls.end(), call) !=
+               close_released_calls.end();
     }
 };
 
@@ -114,7 +155,9 @@ public:
             co_await state_->timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
             // NOLINTEND(bugprone-unchecked-optional-access)
             state_->parked = false;
-            if (closed_) co_return std::unexpected(fixpp::core::error::transport_already_closed);
+            if (closed_ && !state_->succeed_after_close) {
+                co_return std::unexpected(fixpp::core::error::transport_already_closed);
+            }
         }
         ++state_->writes;
         if (rec) state_->recorded[*rec].completed = true;
@@ -123,7 +166,41 @@ public:
 
     [[nodiscard]] fixpp::core::expected_t<void> cancel() noexcept override { return {}; }
 
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> close_async() override {
+        auto const call = ++state_->close_async_calls;
+        if (state_->close_async_throws_when && state_->close_async_throws_when(call)) {
+            throw std::runtime_error{"BlockingWriteTransport::close_async"};
+        }
+        if (state_->close_async_holds_when && state_->close_async_holds_when(call)) {
+            asio::steady_timer t{co_await asio::this_coro::executor,
+                                 asio::steady_timer::time_point::max()};
+            struct registration {
+                blocking_write_state& st;
+                asio::steady_timer* timer;
+                registration(blocking_write_state& s, asio::steady_timer* w) : st{s}, timer{w} {
+                    st.close_waits.push_back(timer);
+                    ++st.close_async_parked;
+                }
+                registration(registration const&) = delete;
+                registration& operator=(registration const&) = delete;
+                ~registration() {
+                    std::erase(st.close_waits, timer);
+                    --st.close_async_parked;
+                }
+            };
+            auto const state = state_;
+            registration const reg{*state, &t};
+            auto const releases = state->close_releases;
+            while (state->close_releases == releases && !state->close_call_released(call)) {
+                std::error_code ec;
+                co_await t.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+            }
+        }
+        co_return close();
+    }
+
     [[nodiscard]] fixpp::core::expected_t<void> close() noexcept override {
+        if (state_->closes++ == 0) state_->starts_at_first_close = state_->starts;
         closed_ = true;
         state_->block_next = false;
         if (state_->timer) state_->timer->cancel();

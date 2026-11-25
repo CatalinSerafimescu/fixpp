@@ -85,6 +85,11 @@ static const std::unordered_map<std::uint32_t, std::string_view>& get_registry()
             {.id = static_cast<std::uint32_t>(
                  crc32_str("session not established within logon_timeout_ms={}")),
              .fmt = "session not established within logon_timeout_ms={}"},
+            // 105 (research D3; contract C-3.3): run_liveness_loop's give-up, before its Logout.
+            {.id = static_cast<std::uint32_t>(crc32_str(
+                 "session ended: TestRequest unanswered: test_req_id={} threshold_ms={} error={}")),
+             .fmt =
+                 "session ended: TestRequest unanswered: test_req_id={} threshold_ms={} error={}"},
             // 093 (data-model E-12): Session::note_frame_too_large_.
             {.id = static_cast<std::uint32_t>(
                  crc32_str("inbound frame over the limit closed the session: kind={} limit={}")),
@@ -109,6 +114,19 @@ static const std::unordered_map<std::uint32_t, std::string_view>& get_registry()
                            "sender_comp_id={} target_comp_id={} error={}")),
              .fmt = "session role loop ended: Session::open() failed: begin_string={} "
                     "sender_comp_id={} target_comp_id={} error={}"},
+            // 105 (research D8, contract C-7.1): run_accept_loop's pre-session refusals.
+            {.id = static_cast<std::uint32_t>(
+                 crc32_str("acceptor connection refused before a session: reason={} "
+                           "begin_string={} sender_comp_id={} target_comp_id={} error={} "
+                           "suppressed_since_last={}")),
+             .fmt = "acceptor connection refused before a session: reason={} begin_string={} "
+                    "sender_comp_id={} target_comp_id={} error={} suppressed_since_last={}"},
+            // 105 (research D8, contract C-7.3): run_accept_loop's listener that could not bind.
+            {.id = static_cast<std::uint32_t>(
+                 crc32_str("acceptor listener could not bind: begin_string={} "
+                           "sender_comp_id={} target_comp_id={} error={}")),
+             .fmt = "acceptor listener could not bind: begin_string={} sender_comp_id={} "
+                    "target_comp_id={} error={}"},
         };
 
         std::unordered_map<std::uint32_t, std::string_view> m;

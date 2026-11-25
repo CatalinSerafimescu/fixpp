@@ -9,10 +9,10 @@
 //   - Logon with ResetSeqNumFlag(141)=Y
 //   - Logon with NextExpectedMsgSeqNum(789) — well-formed, malformed, overflow
 //     (T026 extension: exercises the new case 789: in scan_frame_header)
-//   - ResendRequest(2) inbound (triggers reply_to_inbound_resend_request)
-//   - SequenceReset(4) with GapFillFlag (triggers process_inbound_sequence_reset)
-//   - Heartbeat(0) with TestReqID(112) (triggers validate_inbound_heartbeat_testreqid)
-//   - Logout(5) (triggers drive_logout path)
+//   - ResendRequest(2) inbound (the session's resend answer)
+//   - SequenceReset(4) with GapFillFlag (the session's inbound SequenceReset handling)
+//   - Heartbeat(0) with TestReqID(112) (the session's TestReqID rule)
+//   - Logout(5) (the session's inbound Logout handling)
 //
 // All paths must: no crash / no UB / no memory corruption / no deadlock.
 // The harness is NOT a behavioral correctness test; behavioral correctness is
@@ -43,6 +43,13 @@
 // the first byte of each file under tests/fuzz/corpus/session_recovery_admin_parse/ other than this
 // feature's `seed_099_*`. Its counters are checked at exit, and a zero fails the process.
 //
+// 105-transport-liveness (tasks.md T085; [const §VII.7]): the TestReqID(112) parse. Every 112
+// field of the payload is handed straight to detail::is_earlier_test_req_id over three windows
+// and compared with a reference written another way (std::from_chars, the canonical spelling
+// re-derived by std::to_string, the window as an offset range), so the parse is fuzzed whether or
+// not a TestRequest is pending; a disagreement traps. The seeds are `seed_105_*`. Its counter is
+// checked at exit, and a zero fails the process.
+//
 // Build: cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON
 //   then: build/linux-clang-asan/bin/fuzz_session_recovery_admin_parse
 //         -max_len=512 -runs=10000
@@ -51,6 +58,7 @@
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -76,6 +84,7 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -90,6 +99,7 @@
 #include "session/fixt_route_set.hpp"
 #include "session/logon_msg_type_defaults.hpp"
 #include "session/peek_fixt_route.hpp"
+#include "session/read_first_frame_bounded.hpp"
 #include "session/scan_frame_header.hpp"
 #include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
@@ -153,6 +163,30 @@ void report_101_arms() {
 }
 
 [[maybe_unused]] const int g_101_report_registered = std::atexit(report_101_arms);
+
+// 105 (B-103-13's precondition; data-model E-2 I-4): close() runs before a Session is destroyed,
+// so its ending Logout's bound and its close frame have exited (~Session asserts both counters
+// zero). Declared right after the Session, so every return of the arm passes through it first.
+struct close_before_destroy {
+    fixpp::session::Session& s;
+    asio::io_context& io;
+    close_before_destroy(fixpp::session::Session& session, asio::io_context& ctx)
+        : s{session}, io{ctx} {}
+    close_before_destroy(close_before_destroy const&) = delete;
+    close_before_destroy& operator=(close_before_destroy const&) = delete;
+    ~close_before_destroy() {
+        try {
+            auto fut =
+                asio::co_spawn(fixpp::test_support::session_executor_of(s, io),
+                               s.close(fixpp::session::close_mode::terminal), asio::use_future);
+            if (fixpp::test_support::run_window_then_ready(io, fut, 50ms,
+                                                           "fuzz_admin_parse/close")) {
+                (void)fut.get();
+            }
+        } catch (...) {
+        }
+    }
+};
 
 std::string_view entry_value(std::span<const std::byte> buf, OffsetTable::entry const& e) {
     return {reinterpret_cast<char const*>(buf.data()) + e.offset, e.length};
@@ -479,6 +513,7 @@ void run_fixt_arm(std::uint8_t preamble, std::span<const std::byte> payload) {
     cfg.role = fixpp::session::session_role::acceptor;
 
     fixpp::session::Session sess(engine, cfg, fixture.registry.get());
+    close_before_destroy const close_guard{sess, ioc};
     fixpp::session::session_test_access::adopt_routes(sess, fixture.routes);
     {
         auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
@@ -554,6 +589,58 @@ void run_fixt_arm(std::uint8_t preamble, std::span<const std::byte> payload) {
 // The io_context + mock_clock are also fresh per call; they are lightweight
 // and the harness is expected to run O(10K) short paths.
 
+// 105 (tasks.md T085): calls of detail::is_earlier_test_req_id compared with the reference.
+std::uint64_t g_105_test_req_id_checked = 0;
+
+void report_105_arm() {
+    std::cerr << "[105 fuzz arm] TestReqID parse checks " << g_105_test_req_id_checked << "\n";
+    if (g_105_test_req_id_checked == 0) {
+        std::cerr << "[105 fuzz arm] a counter read zero\n";
+        std::_Exit(1);
+    }
+}
+
+[[maybe_unused]] const int g_105_report_registered = std::atexit(report_105_arm);
+
+bool reference_earlier_test_req_id(std::string_view id, std::uint32_t floor, std::uint32_t next) {
+    if (id.size() < 3 || id.substr(0, 2) != "TR") return false;
+    std::string_view const d = id.substr(2);
+    std::uint32_t n = 0;
+    auto const [end, ec] = std::from_chars(d.data(), d.data() + d.size(), n);
+    if (ec != std::errc{} || end != d.data() + d.size()) return false;
+    if (std::to_string(n) != d) return false;
+    std::uint64_t const issued =
+        (std::uint64_t{next} + (std::uint64_t{1} << 32) - floor) % (std::uint64_t{1} << 32);
+    std::uint64_t const offset =
+        (std::uint64_t{n} + (std::uint64_t{1} << 32) - floor) % (std::uint64_t{1} << 32);
+    return offset >= 1 && offset <= issued;
+}
+
+void check_test_req_id_parse(std::uint8_t preamble, std::string_view payload) {
+    std::uint32_t const derived = std::uint32_t{preamble} * 0x01010101U;
+    std::array<std::pair<std::uint32_t, std::uint32_t>, 3> const windows{
+        {{0U, 5U},
+         {0xFFFFFFF0U, 5U},
+         {derived, derived + static_cast<std::uint32_t>(payload.size())}}};
+    std::size_t at = 0;
+    while ((at = payload.find("112=", at)) != std::string_view::npos) {
+        if (at == 0 || payload[at - 1] == '\x01') {
+            std::size_t const v = at + 4;
+            std::size_t const stop = payload.find('\x01', v);
+            std::string_view const id =
+                payload.substr(v, stop == std::string_view::npos ? payload.size() - v : stop - v);
+            for (auto const& [floor, next] : windows) {
+                if (fixpp::session::detail::is_earlier_test_req_id(id, floor, next) !=
+                    reference_earlier_test_req_id(id, floor, next)) {
+                    __builtin_trap();
+                }
+                ++g_105_test_req_id_checked;
+            }
+        }
+        at += 4;
+    }
+}
+
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size) {
     if (size < 4) return 0;  // Need at least a tag-value pair
 
@@ -568,6 +655,8 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     // before any session code runs.
     check_scan_agrees_with_build(
         std::span<const std::byte>(reinterpret_cast<const std::byte*>(payload), payload_len));
+    check_test_req_id_parse(preamble,
+                            std::string_view{reinterpret_cast<const char*>(payload), payload_len});
 
     if ((preamble & kFixtArmBit) != 0) {
         run_fixt_arm(preamble, std::span<const std::byte>(
@@ -597,6 +686,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     cfg.role = fixpp::session::session_role::acceptor;
 
     fixpp::session::Session sess(engine, cfg);
+    close_before_destroy const close_guard{sess, ioc};
 
     // Open the session.
     {

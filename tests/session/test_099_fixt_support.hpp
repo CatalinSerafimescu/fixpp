@@ -21,6 +21,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
@@ -782,6 +783,9 @@ struct Ending {
     bool auth_failed = false;
     std::string err;
     Frames out;
+    // 105-transport-liveness, the R-2 wait (contract C-2): set when the frame left the session
+    // Active with a Logout written; the states at the wait's bound - 1 ms and at its bound.
+    std::optional<std::pair<fsm_state, fsm_state>> wait;
 };
 
 // Research R-18's log form, byte for byte.
@@ -796,11 +800,19 @@ inline std::string log_form(const Ending& e) {
 }
 
 // What a cell asserts: `<sent> | <state> | <k or c> | app=<n> adm=<n>[ | auth]`, where a
-// state is `stays` when unchanged and `Disc` for Disconnected.
+// state is `stays` when unchanged and `Disc` for Disconnected, and `wait` when an Active
+// session wrote a Logout and then stayed Active to the wait's bound - 1 ms and ended at its
+// bound (105-transport-liveness's R-2 wait, which supersedes `Disc` there).
 inline std::string short_form(const Ending& e) {
     std::string state = e.after == e.before                  ? "stays"
                         : e.after == fsm_state::Disconnected ? "Disc"
                                                              : state_name(e.after);
+    if (e.wait) {
+        state = e.wait->first == fsm_state::Active && e.wait->second == fsm_state::Disconnected
+                    ? std::string{"wait"}
+                    : std::string{"wait "} + state_name(e.wait->first) + "/" +
+                          state_name(e.wait->second);
+    }
     std::string s = short_form_frames(e.out) + " | " + state + " | " +
                     (e.next_in_after != e.next_in_before ? "c" : "k") +
                     " | app=" + std::to_string(e.from_app) +
@@ -956,10 +968,17 @@ public:
     Rig& operator=(Rig&&) = delete;
     // Finishes a close a LogoutSent cell left in flight. Reports nothing: a report here
     // could throw under --gtest_throw_on_failure, and the cell has already asserted.
+    // A Session is not destroyed while its ending bound runs (105, contract C-9; ~Session's
+    // assertion), so the teardown closes it terminally first: close() joins the bound.
     ~Rig() {
         if (close_fut) {
             clock->advance(std::chrono::seconds{21});
             (void)pump_ready(ioc, *close_fut, std::chrono::seconds{30});
+        }
+        if (sess) {
+            auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*sess, ioc),
+                                      sess->close(close_mode::terminal), asio::use_future);
+            (void)pump_ready(ioc, fut, std::chrono::seconds{30});
         }
         sess.reset();
     }
@@ -1052,6 +1071,25 @@ public:
             }
         }
         e.out = out;
+        bool const logout_written = std::any_of(
+            out.begin(), out.end(), [](const std::string& f) { return tag_value(f, 35) == "5"; });
+        if (e.after == fsm_state::Active && logout_written) {
+            // The wait's bound counts from the Logout's write start; the mock clock has not
+            // moved since the frame.
+            auto const bound = std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms};
+            const auto poll_all = [this] {
+                for (int i = 0; i < 8; ++i) {
+                    ioc.restart();
+                    ioc.poll();
+                }
+            };
+            clock->advance(bound - std::chrono::milliseconds{1});
+            poll_all();
+            auto const before_bound = sess->state();
+            clock->advance(std::chrono::milliseconds{1});
+            poll_all();
+            e.wait = std::pair{before_bound, sess->state()};
+        }
         return e;
     }
 

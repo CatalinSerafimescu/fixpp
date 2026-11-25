@@ -22,8 +22,11 @@
 # (the DETACHED liveness loop), the obvious barrier is the clock's own waiter count, and
 # a `mock_clock::pending_sleeps()` accessor was written for it. At BOTH candidate sites
 # it failed to discriminate, proven by running rather than by reading:
-#   * `HbTrTest.UnansweredTestRequestDisconnects` PASSES with its staging window starved
-#     to `run_for(0ms)` -- a candidate, read, and NOT a defect. ⚠️ THE MECHANISM IS THE
+#   * `HbTrTest.UnansweredTestRequestDisconnects` -- a candidate, read, and NOT a defect.
+#     Re-derive by starving the window after its first advance to `run_for(0ms)` and
+#     running the cell. 105-transport-liveness (R-3) re-timed the cell so that every window
+#     in it is followed by an assertion, so a starved window there also starves a
+#     collection window, the axis the next bullet names. ⚠️ THE MECHANISM IS THE
 #     ARM SHAPE, NOT MONOTONICITY (an earlier revision of this line said monotonicity and
 #     that was wrong): `sleep_until` fires immediately when `deadline <= steady`, so an
 #     arm taken from a STORED ANCHOR that predates the advance names an instant already

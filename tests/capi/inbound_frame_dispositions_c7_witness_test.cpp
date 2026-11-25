@@ -646,13 +646,14 @@ TEST(CapiC7Witness, Row3_AnOverLimitBodyLengthInLogoutSentEndsTheBlockingClose) 
     logout_sent_cell(c, peer, over_limit_header());
 }
 
-// ── Row 5: an acceptor whose Logon was refused is closed at the deadline ────
+// ── Row 5: an acceptor whose Logon was refused is closed at the refusal ────
 //
 // The C-ABI engine is the acceptor; the peer connects and sends a Logon without
-// HeartBtInt(108), which the session refuses, leaving it in Disconnected with its
-// transport open. The connection is closed at T, the default timeout.
-TEST(CapiC7Witness, Row5_AnAcceptorWhoseLogonWasRefusedIsClosedAtTheDeadline) {
-    constexpr std::chrono::milliseconds kLate = kDefaultLogonTimeout + 2000ms;
+// HeartBtInt(108), which the session refuses into Disconnected. 105-transport-liveness
+// (FR-007; research D4) supersedes 093's close at the deadline T for a refused connection: the
+// refusal closes the connection at once, so the peer reads EOF well before T.
+TEST(CapiC7Witness, Row5_AnAcceptorWhoseLogonWasRefusedIsClosedAtTheRefusal) {
+    constexpr std::chrono::milliseconds kSettle = kDefaultLogonTimeout / 5;
     RawAcceptor peer;
     CInitiator a{0, kHeartBtIntSeconds, {}, record_receive, nullptr, FIXPP_ROLE_ACCEPTOR};
     ASSERT_TRUE(a.start()) << "setup";
@@ -661,8 +662,8 @@ TEST(CapiC7Witness, Row5_AnAcceptorWhoseLogonWasRefusedIsClosedAtTheDeadline) {
     ASSERT_TRUE(peer.connect(port)) << "setup";
     auto const t0 = std::chrono::steady_clock::now();
     ASSERT_TRUE(peer.write(frame44("35=A\x01" + peer_header(1) + fix_fields({{98, "0"}}))));
-    bool const closed = peer.wait_eof(t0 + kLate);
-    EXPECT_TRUE(closed) << "the refused session's connection stayed open past T";
+    bool const closed = peer.wait_eof(t0 + kSettle);
+    EXPECT_TRUE(closed) << "the refused session's connection was not closed at the refusal";
     Observed const o = observe(a, peer, "none");
     EXPECT_FALSE(o.established);
     EXPECT_EQ(o.send_rc, FIXPP_ERR_SESSION_INVALID_STATE);
@@ -742,28 +743,23 @@ TEST(CapiC7Witness, Row3_AnOverLimitBodyLengthInTheAcceptorsFirstFrameEndsTheCon
     EXPECT_EQ(fixpp_session_close(a.session), FIXPP_ERR_THREAD_SESSION_LIFECYCLE);
 }
 
-// Row 3 in Disconnected: the rig of Row5_AnAcceptorWhoseLogonWasRefusedIsClosedAtTheDeadline,
-// whose refused Logon leaves the session in Disconnected with its transport open, until
-// the establishment deadline T closes it. C cannot see the refusal land, so the peer
-// waits a settle, during which the connection must stay open, then writes the header of
-// a frame over the limit in a write of its own. Both windows count from before the
-// connect, so from no later than the deadline's arming, and together they end before T:
-// the deadline close cannot satisfy the cell.
-TEST(CapiC7Witness, Row3_AnOverLimitBodyLengthInDisconnectedEndsTheConnection) {
+// Row 3 in Disconnected: the rig of Row5_AnAcceptorWhoseLogonWasRefusedIsClosedAtTheRefusal.
+// 105-transport-liveness (FR-007; research D4) supersedes this row's "Disconnected with its
+// transport open until the establishment deadline T": the refused Logon closes the connection
+// at once, so no over-limit frame reaches the session in Disconnected. The cell pins the close:
+// EOF within the settle, which counts from before the connect and ends well before T, so the
+// deadline close cannot satisfy it.
+TEST(CapiC7Witness, Row3_InDisconnected_TheRefusalClosesTheConnectionAtOnce) {
     constexpr std::chrono::milliseconds kSettle = kDefaultLogonTimeout / 5;
-    constexpr std::chrono::milliseconds kBound = kDefaultLogonTimeout / 5;
-    static_assert(kSettle + kBound < kDefaultLogonTimeout,
-                  "the bound must end before the deadline that would otherwise close it");
+    static_assert(kSettle < kDefaultLogonTimeout,
+                  "the settle must end before the deadline that would otherwise close it");
     RawAcceptor peer;
     CAcceptor a;
     auto const t0 = std::chrono::steady_clock::now();
     ASSERT_TRUE(start_and_connect(a, peer)) << "setup";
     ASSERT_TRUE(peer.write(frame44("35=A\x01" + peer_header(1) + fix_fields({{98, "0"}}))));
-    bool const closed_early = peer.wait_eof(t0 + kSettle);
-    bool const closed =
-        !closed_early && peer.write(over_limit_header()) && peer.wait_eof(t0 + kSettle + kBound);
-    EXPECT_FALSE(closed_early) << "the connection closed before the over-limit header";
-    EXPECT_TRUE(closed) << "the connection stayed open after an over-limit BodyLength";
+    bool const closed = peer.wait_eof(t0 + kSettle);
+    EXPECT_TRUE(closed) << "the refused Logon's connection was not closed at the refusal";
     Observed const o = observe(a, peer, "none");
     EXPECT_FALSE(o.established);
     EXPECT_EQ(o.send_rc, FIXPP_ERR_SESSION_INVALID_STATE);
@@ -996,32 +992,26 @@ TEST(CapiC7Witness, Row3_AnOverLimitBodyLengthInAnAcceptorsLogoutSentEndsTheBloc
 // ── Rows 3 and 5 on an initiator in Disconnected ────────────────────────────
 //
 // The peer answers the initiator's Logon with a Logon reply without HeartBtInt(108),
-// which the session refuses, leaving it in Disconnected with its transport open until the
-// establishment deadline T. As for the acceptor in Disconnected, C cannot see the refusal
-// land, so the peer waits a settle during which the connection must stay open and the
-// session not established. Windows count from before the engine starts, so from no later
-// than the deadline's arming.
+// which the session refuses into Disconnected. 105-transport-liveness (FR-007; research D4)
+// supersedes "with its transport open until the establishment deadline T": the refusal closes
+// the connection at once, so the peer reads EOF within a settle that counts from before the
+// engine starts and ends well before T, and the session never establishes.
 std::string refused_logon_reply() {
     return frame44("35=A\x01" + peer_header(1) + fix_fields({{98, "0"}}));
 }
 
-TEST(CapiC7Witness, Row3_AnOverLimitBodyLengthInAnInitiatorsDisconnectedEndsTheConnection) {
+TEST(CapiC7Witness, Row3_InAnInitiatorsDisconnected_TheRefusalClosesTheConnectionAtOnce) {
     constexpr std::chrono::milliseconds kSettle = kDefaultLogonTimeout / 5;
-    constexpr std::chrono::milliseconds kBound = kDefaultLogonTimeout / 5;
-    static_assert(kSettle + kBound < kDefaultLogonTimeout,
-                  "the bound must end before the deadline that would otherwise close it");
+    static_assert(kSettle < kDefaultLogonTimeout,
+                  "the settle must end before the deadline that would otherwise close it");
     RawAcceptor peer;
     CInitiator c{peer.port(), kHeartBtIntSeconds};
     auto const t0 = std::chrono::steady_clock::now();
     ASSERT_TRUE(c.start() && peer.accept() && peer.read_logon()) << "setup";
     ASSERT_TRUE(peer.write(refused_logon_reply()));
-    bool const closed_early = peer.wait_eof(t0 + kSettle);
-    bool const established_early = c.established();
-    bool const closed =
-        !closed_early && peer.write(over_limit_header()) && peer.wait_eof(t0 + kSettle + kBound);
-    EXPECT_FALSE(closed_early) << "the connection closed before the over-limit header";
-    EXPECT_FALSE(established_early) << "the refused Logon reply established the session";
-    EXPECT_TRUE(closed) << "the connection stayed open after an over-limit BodyLength";
+    bool const closed = peer.wait_eof(t0 + kSettle);
+    EXPECT_FALSE(c.established()) << "the refused Logon reply established the session";
+    EXPECT_TRUE(closed) << "the refused Logon reply's connection was not closed at the refusal";
     Observed const o = observe(c, peer, "none");
     EXPECT_FALSE(o.established);
     EXPECT_EQ(o.send_rc, FIXPP_ERR_SESSION_INVALID_STATE);
@@ -1029,20 +1019,16 @@ TEST(CapiC7Witness, Row3_AnOverLimitBodyLengthInAnInitiatorsDisconnectedEndsTheC
     EXPECT_EQ(o.close_rc, FIXPP_ERR_THREAD_SESSION_LIFECYCLE) << "the session never established";
 }
 
-TEST(CapiC7Witness, Row5_AnInitiatorWhoseLogonReplyWasRefusedIsClosedAtTheDeadline) {
+TEST(CapiC7Witness, Row5_AnInitiatorWhoseLogonReplyWasRefusedIsClosedAtTheRefusal) {
     constexpr std::chrono::milliseconds kSettle = kDefaultLogonTimeout / 5;
-    constexpr std::chrono::milliseconds kLate = kDefaultLogonTimeout + 2000ms;
     RawAcceptor peer;
     CInitiator c{peer.port(), kHeartBtIntSeconds};
     auto const t0 = std::chrono::steady_clock::now();
     ASSERT_TRUE(c.start() && peer.accept() && peer.read_logon()) << "setup";
     ASSERT_TRUE(peer.write(refused_logon_reply()));
-    bool const closed_early = peer.wait_eof(t0 + kSettle);
-    bool const established_early = c.established();
-    bool const closed = closed_early || peer.wait_eof(t0 + kLate);
-    EXPECT_FALSE(closed_early) << "the connection closed at the refusal, not at the deadline";
-    EXPECT_FALSE(established_early) << "the refused Logon reply established the session";
-    EXPECT_TRUE(closed) << "the refused session's connection stayed open past T";
+    bool const closed = peer.wait_eof(t0 + kSettle);
+    EXPECT_FALSE(c.established()) << "the refused Logon reply established the session";
+    EXPECT_TRUE(closed) << "the refused session's connection was not closed at the refusal";
     Observed const o = observe(c, peer, "none");
     EXPECT_FALSE(o.established);
     EXPECT_EQ(o.send_rc, FIXPP_ERR_SESSION_INVALID_STATE);

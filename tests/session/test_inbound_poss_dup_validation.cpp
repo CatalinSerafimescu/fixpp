@@ -2,6 +2,12 @@
 //
 // tests/session/test_inbound_poss_dup_validation.cpp
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp.
+//
 // 021-inbound-possdup-origsendingtime T007 — Stage-1 Arm-C/D/E validation tests.
 //
 // Cases from feature 021 (the full set is the TEST_F blocks below):
@@ -22,7 +28,9 @@
 
 #include <gtest/gtest.h>
 
+#include "support/close_before_destroy.hpp"
 #include "support/possdup_test_support.hpp"
+#include "support/r2_wait_reading.hpp"
 #include "support/session_test_access.hpp"
 
 namespace fixpp::session::test {
@@ -63,6 +71,7 @@ protected:
 TEST_F(PossDupValidationTest, ArmC_MissingOrigSendingTime) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
 
     // 43=Y, no 122 — Arm C: missing OrigSendingTime.
@@ -103,6 +112,7 @@ TEST_F(PossDupValidationTest, ArmC_MissingOrigSendingTime) {
 TEST_F(PossDupValidationTest, ArmD_OrigSendingTimeAfter52) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
 
     // 43=Y, 122 > 52 strict — Arm D.
@@ -112,9 +122,18 @@ TEST_F(PossDupValidationTest, ArmD_OrigSendingTimeAfter52) {
                             "122=20240101-00:00:01.000\x01");  // 122 > 52
     feed(sess, frame);
 
-    // Session must transition to Disconnected (Arm D is fatal).
-    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
-        << "Arm D: session must transition to Disconnected";
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // session stays Active through the wait and ends at its bound.
+    fixpp::test_support::expect_r2_wait(
+        fixpp::test_support::read_r2_wait(
+            sess, *clock, std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            [this] {
+                for (int i = 0; i < 16; ++i) {
+                    ioc.restart();
+                    ioc.poll();
+                }
+            }),
+        "Arm D");
 
     // A Reject(35=3) must be emitted.
     ASSERT_TRUE(any_reject()) << "Arm D: a Reject(35=3) must be emitted";
@@ -138,6 +157,7 @@ TEST_F(PossDupValidationTest, ArmD_OrigSendingTimeAfter52) {
 TEST_F(PossDupValidationTest, Boundary_122Equals52Accepted) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
 
     // 43=Y, 122 == 52 exactly — should be accepted (Stage-1 row 4 "else" fallthrough).
@@ -171,6 +191,7 @@ TEST_F(PossDupValidationTest, Boundary_122Equals52Accepted) {
 TEST_F(PossDupValidationTest, ArmE_SeqResetExempt) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
 
     // Build a Reset-mode SequenceReset (35=4) with 43=Y and no 122.
@@ -208,6 +229,7 @@ TEST_F(PossDupValidationTest, ArmE_SeqResetExempt) {
 TEST_F(PossDupValidationTest, AtExpected_ArmC_ConsumesSeqnum) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
 
     // After Logon(seq=1), next_expected = 2. Feed seq=2 with 43=Y, no 122.
@@ -243,6 +265,7 @@ TEST_F(PossDupValidationTest, AtExpected_ArmC_ConsumesSeqnum) {
 TEST_F(PossDupValidationTest, AtExpected_UnparseableOrigSendingTime_ConsumesSeqnum) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
     ASSERT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
               static_cast<fixpp::session::seqnum_t>(2));
@@ -270,6 +293,7 @@ TEST_F(PossDupValidationTest, AtExpected_UnparseableOrigSendingTime_ConsumesSeqn
 TEST_F(PossDupValidationTest, AtExpected_ArmD) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
 
     // Feed seq=2 (at-expected) with 43=Y and 122 > 52.
@@ -278,9 +302,18 @@ TEST_F(PossDupValidationTest, AtExpected_ArmD) {
                             "122=20240101-00:00:01.000\x01");  // 122 > 52
     feed(sess, frame);
 
-    // Session must transition to Disconnected (Arm D).
-    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
-        << "AS5: at-expected Arm D must transition to Disconnected";
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // session stays Active through the wait and ends at its bound.
+    fixpp::test_support::expect_r2_wait(
+        fixpp::test_support::read_r2_wait(
+            sess, *clock, std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            [this] {
+                for (int i = 0; i < 16; ++i) {
+                    ioc.restart();
+                    ioc.poll();
+                }
+            }),
+        "AS5: at-expected Arm D");
 
     // Reject with 371=122/373=10.
     ASSERT_TRUE(any_reject()) << "AS5: at-expected Arm D must emit Reject(35=3)";
@@ -308,6 +341,7 @@ TEST_F(PossDupValidationTest, AtExpected_ArmD) {
 TEST_F(PossDupValidationTest, TooHigh_EngineParity_Pin) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
 
     // After Logon(seq=1), next_expected=2. Feed seq=10 (too-high) with 43=Y, no 122.
@@ -348,6 +382,7 @@ TEST_F(PossDupValidationTest, TooHigh_EngineParity_Pin) {
 TEST_F(PossDupValidationTest, ArmC_MalformedOrigSendingTime) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
 
     const auto expected_before =
@@ -397,6 +432,7 @@ TEST_F(PossDupValidationTest, ArmC_MalformedOrigSendingTime) {
 TEST_F(PossDupValidationTest, StaleSendingTime_PossDup_KilledByMaxLatency) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
 
     // Mock clock is set to 2024-01-01T00:00:00 UTC (fixture SetUp: utc = 1704067200).
@@ -444,10 +480,18 @@ TEST_F(PossDupValidationTest, StaleSendingTime_PossDup_KilledByMaxLatency) {
         feed(sess, stale_frame);
     }
 
-    // Guard-3 fires: session → Disconnected (Reject 371=52/373=10 + Logout + Disconnect).
-    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
-        << "RC#3: stale-52 possdup must be killed by Guard-3 (Disconnected), not tolerated by Arm "
-           "A";
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // session stays Active through the wait and ends at its bound.
+    fixpp::test_support::expect_r2_wait(
+        fixpp::test_support::read_r2_wait(
+            sess, *clock, std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            [this] {
+                for (int i = 0; i < 16; ++i) {
+                    ioc.restart();
+                    ioc.poll();
+                }
+            }),
+        "RC#3: stale-52 possdup killed by Guard-3, not tolerated by Arm A");
 
     // A Reject(35=3) must be emitted by Guard-3 with 371=52/373=10.
     ASSERT_TRUE(any_reject()) << "RC#3: Guard-3 must emit Reject(35=3)";
@@ -482,6 +526,7 @@ TEST_F(PossDupValidationTest, AtExpected_Valid_ProcessedOnce_Advances) {
 
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
 
     // After Logon(seq=1), next_expected = 2. Feed seq=2 (at-expected) with
@@ -528,6 +573,7 @@ TEST_F(PossDupValidationTest, AtExpected_OutOfRangeOrigSendingTime_ArmC) {
 
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
     ASSERT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
               static_cast<fixpp::session::seqnum_t>(2));
@@ -557,6 +603,7 @@ TEST_F(PossDupValidationTest, AtExpected_OutOfRangeOrigSendingTime_ArmC) {
 TEST_F(PossDupValidationTest, AdminPossDup_OutOfRangeSendingTime_FallsThrough) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     drive_to_active(sess);
 
     // Boundary_122Equals52Accepted with only 52 changed, to the fuzz seed

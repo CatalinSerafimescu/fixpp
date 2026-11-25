@@ -128,6 +128,8 @@ struct Outcome {
     std::optional<fixpp::core::expected_t<void>> next_send_result;
     bool next_send_made_a_store_call = false;
     std::size_t disconnected_entries = 0;  // in the state ring, read before the stop
+    // Returned route: what the held send's Engine::send returned, once released.
+    std::optional<fixpp::core::expected_t<void>> held_result;
     // After the engine has stopped: a fresh FileStore on the directory, and a fresh
     // session on it.
     bool fresh_store_opened = false;
@@ -247,11 +249,14 @@ Outcome run_route(Route const route) {
                 o.release_mark = scene.log->mark();
                 store_hold::release();
             }
-            (void)rig.run_until([&] { return HeldFileStoreScene::ready(held_fut); });
+            if (rig.run_until([&] { return HeldFileStoreScene::ready(held_fut); })) {
+                o.held_result = held_fut.get();
+            }
             // The held send's own frame is read before the ResendRequest goes out, so
-            // it is not counted among the frames that follow the request.
+            // it is not counted among the frames that follow the request. Read only where the
+            // session stayed Active: after an ending its connection is closed (105 FR-001).
             auto const held_seq = std::to_string(scene.last + 1);
-            o.held_frame_read = rig.run_until([&] {
+            o.held_frame_read = o.state_after_send == fsm_state::Active && rig.run_until([&] {
                 for (auto const& f : plain_rig::frames_of_type(rig.peer.received, "D")) {
                     if (plain_rig::field_value(f, "34") == held_seq) return true;
                 }
@@ -365,7 +370,7 @@ std::string result_text(std::optional<fixpp::core::expected_t<void>> const& r) {
 
 // What both timings of a cancelled store read (D-OUT-1's table; the root
 // `Session::send, and so Engine::send`).
-void expect_cancelled_send_ending(Outcome const& o) {
+void expect_cancelled_send_ending(Outcome const& o, std::size_t want_disconnected_entries) {
     EXPECT_TRUE(o.stop_completed);
     EXPECT_TRUE(o.peer_read_ended);
 
@@ -389,8 +394,10 @@ void expect_cancelled_send_ending(Outcome const& o) {
     EXPECT_EQ(o.next_outbound_after_send, static_cast<long long>(o.seq))
         << "the session's next outbound number, in memory, is not the cancelled frame's own";
 
-    // One ending: one Disconnected entry in the state ring, read before the stop.
-    EXPECT_EQ(o.disconnected_entries, 1U) << "Disconnected entries in the state ring";
+    // The Disconnected entries in the state ring, read before the stop: the ending's, and on the
+    // Returned route also the held send's (below).
+    EXPECT_EQ(o.disconnected_entries, want_disconnected_entries)
+        << "Disconnected entries in the state ring";
 
     // One more send is refused at the session's state, and makes no store call.
     EXPECT_FALSE(o.resend_requested) << "the session stayed Active";
@@ -433,7 +440,17 @@ TEST(CancelledOutboundStoreMeasurement, Returned_StoreCancelledAtItsLock) {
         << " returned_at=" << call.returned_at << " release_mark=" << o.release_mark
         << " error=" << error_text(call.error);
 
-    expect_cancelled_send_ending(o);
+    // 105-transport-liveness (FR-001, FR-008; data-model E-2 I-5) supersedes this cell's "one
+    // Disconnected entry": the ending closes the connection at the cancelled send's exit, while
+    // the held send is still in its store call. That store call runs to its end, so the store
+    // holds the held send's frame (the fresh store's next outbound number, asserted below, is
+    // past it); its write then finds the connection closed, the call returns dispatch_aborted,
+    // and it records Disconnected over Disconnected, which owes nothing (I-5). So the ring holds
+    // two Disconnected entries for one ending and one close.
+    EXPECT_TRUE(o.held_result.has_value() && !o.held_result->has_value() &&
+                o.held_result->error() == error::dispatch_aborted)
+        << "the held Engine::send " << result_text(o.held_result);
+    expect_cancelled_send_ending(o, 2U);
 }
 
 TEST(CancelledOutboundStoreMeasurement, Thrown_CancelledAtTheStoreCallsFirstSuspension) {
@@ -450,7 +467,7 @@ TEST(CancelledOutboundStoreMeasurement, Thrown_CancelledAtTheStoreCallsFirstSusp
         << " cancel_mark=" << o.cancel_mark
         << " returned=" << (o.store_call.has_value() && o.store_call->returned());
 
-    expect_cancelled_send_ending(o);
+    expect_cancelled_send_ending(o, 1U);
 }
 
 // The Returned cell's setup, and no cancellation.

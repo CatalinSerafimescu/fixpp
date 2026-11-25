@@ -50,6 +50,7 @@
 #include <utility>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -481,6 +482,7 @@ TEST(ApplicationLifecycle, FromAdminFiresForInboundLogout) {
 
     auto cfg = f.make_cfg();
     Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, f.ioc};
     f.open_to_active(sess);
 
     // Feed inbound Logout from peer (seq=2).
@@ -530,6 +532,7 @@ TEST(ApplicationLifecycle, InboundLogout_FiresBothFromAdminAndOnLogout) {
 
     auto cfg = f.make_cfg();
     Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, f.ioc};
     f.open_to_active(sess);
 
     // Feed inbound Logout.

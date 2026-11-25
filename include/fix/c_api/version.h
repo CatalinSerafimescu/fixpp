@@ -328,8 +328,46 @@
  *  reconnect call). Migration: a consumer that wants the former default calls
  *  fixpp_session_config_set_reset_seqnum_policy with FIXPP_RESET_SEQNUM_BILATERAL_STRICT,
  *  whose 1.17 meaning fixpp_reset_seqnum_policy's clause states. */
+/*  1.18 (BREAKING, [const §X.7]; 105-transport-liveness): how a session ends, and when its
+ *  connection closes. No symbol, signature, type or error code changes. The observers, each
+ *  with a C-ABI 1.18 clause in session.h: fixpp_session_is_established, fixpp_session_send,
+ *  fixpp_session_close, fixpp_session_register_callback and
+ *  fixpp_session_register_send_callback. The 1.11, 1.12 and 1.17 sentences these change are
+ *  amended in place in each observer, marked "amended in C-ABI 1.18, 105". What no
+ *  declaration carries, the counterparty's side:
+ *  - every ending closes the connection, with or without a Logout, before or after the
+ *    session established, where some endings left it open;
+ *  - a TestRequest the peer leaves unanswered ends the session with a Logout whose Text(58)
+ *    is "TestRequest unanswered, TestReqID <id>", and the connection closes once that
+ *    Logout's write has returned, with no wait for the peer's Logout;
+ *  - after every other Logout the session sends to end it, before or after it established,
+ *    but a STRICT acceptor's refusal of a Logon without 141=Y and a Logout the peer's own
+ *    Logout draws (the one below the expected MsgSeqNum(34), the gap deadline's, an
+ *    OrigSendingTime Reject's; after each, the connection closes once that Logout is
+ *    written), it waits for the peer's Logout, at most
+ *    logout_disconnect_timeout_ms from the start of that Logout's write, then closes the
+ *    connection. During the wait after it established
+ *    it answers the peer's frames as while established (a Heartbeat for a TestRequest, a
+ *    resend answer, a ResendRequest for a gap, a Reject) and originates nothing; a peer
+ *    frame that would end the session is absorbed. The peer's Logout, at any MsgSeqNum(34),
+ *    ends the wait and draws no reply;
+ *  - every Logout the session writes to end a session is limited: a write that has not
+ *    completed logout_disconnect_timeout_ms after it started closes the connection then;
+ *  - the session sends a TestRequest after 1.2 times HeartBtInt of inbound silence, where
+ *    it sent one after HeartBtInt, and gives up after twice that silence, counted from the
+ *    last inbound frame, or that threshold after the TestRequest's write when it was written
+ *    later (held behind a resend answer); while a TestRequest is pending, one then due that
+ *    is still held behind a resend answer three times that threshold after the last inbound
+ *    frame is given up then, its Logout limited as above;
+ *  - while a TestRequest is pending, a Heartbeat whose TestReqID(112) is that of an earlier
+ *    TestRequest the session sent on this connection neither answers it nor ends the
+ *    session; one the session never sent on this connection ends it, on every Heartbeat
+ *    route.
+ *  Migration: no code change; a consumer that read fixpp_session_is_established false as
+ *  "a send is admitted no more" reads it during the wait as still true while sends are
+ *  refused. */
 #define FIXPP_C_ABI_VERSION_MAJOR 1
-#define FIXPP_C_ABI_VERSION_MINOR 17 /* 1.17: reset policy default, endings (103), BREAKING */
+#define FIXPP_C_ABI_VERSION_MINOR 18 /* 1.18: endings close the connection, R-2 wait (105), BREAKING */
 #define FIXPP_C_ABI_VERSION_PATCH 0
 
 /** Composite: (MAJOR<<16)|(MINOR<<8)|PATCH — single-integer compatibility check. */

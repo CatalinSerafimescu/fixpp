@@ -425,6 +425,63 @@ add_session_104_bucket(session_104_tests
   test_104_unasked_reset_ack.cpp                                        # 104 T063
   test_104_logon_too_low.cpp                                            # 104 T078
 )
+# 105-transport-liveness (tasks.md T003): the feature's Session cells, in add_session_104_bucket's
+# shape, so `ctest -L 105 --no-tests=error` selects them. Two entries: session_105_seam_tests
+# holds every cell that names a symbol 105 adds (label 105_seam), so a reading on the base builds
+# the target session_105_tests alone and runs `ctest -L 105 -LE 105_seam`. Both define
+# FIXPP_TLS_FIXTURE_DIR, so no TLS cell skips. Each cell task appends its cells to its file.
+# FIXPP_105_STATIC_GUARDS compiles the static_asserts of the [guard] cells in test_105_seams.cpp;
+# a mutant of such a cell reconfigures with it OFF, so the cell's runtime twin gives the reading
+# (tasks.md, Execution rules, "Guard static_asserts").
+option(FIXPP_105_STATIC_GUARDS "105: compile the static_asserts of test_105_seams.cpp's guard cells" ON)
+function(add_session_105_bucket name labels)
+  add_executable(${name} ${ARGN} $<TARGET_OBJECTS:session_test_support>)
+  target_link_libraries(${name} PRIVATE
+    fixpp_session
+    fixpp_capi
+    fixpp_mock_clock
+    fixpp_transport
+    fixpp_tls
+    "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+    "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_TRANSPORT_ZLIB_LIB}"
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(${name} PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_SOURCE_DIR}/src"
+  )
+  target_compile_definitions(${name} PRIVATE
+    FIXPP_TEST_BINARY_DIR="${CMAKE_BINARY_DIR}"
+    FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+    "FIXPP_098_FIXTURE_DIR=\"${CMAKE_SOURCE_DIR}/tests/dictionary/fixtures/098\""
+    # test_105_support.hpp includes the mock transport header, which refuses a target
+    # without this definition.
+    FIXPP_ALLOW_MOCK_TRANSPORT
+  )
+  add_test(NAME ${name} COMMAND ${name})
+  set_tests_properties(${name} PROPERTIES
+    ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+    LABELS "${labels}")
+endfunction()
+add_session_105_bucket(session_105_tests "session;105"
+  test_105_connection_close.cpp                                         # 105 T003
+  test_105_logout_wait.cpp                                              # 105 T003
+  test_105_write_limit.cpp                                              # 105 T003
+  test_105_liveness_timing.cpp                                          # 105 T003
+  test_105_heartbeat_knob_off.cpp                                       # 105 T003
+  test_105_presession_log.cpp                                           # 105 T003
+  test_105_tls_close.cpp                                                # 105 T003
+)
+add_session_105_bucket(session_105_seam_tests "session;105;105_seam"
+  test_105_seams.cpp                                                    # 105 T003
+)
+# 1 or 0, never undefined, so the test file's #if reads the option's value.
+target_compile_definitions(session_105_seam_tests PRIVATE
+  FIXPP_105_STATIC_GUARDS=$<IF:$<BOOL:${FIXPP_105_STATIC_GUARDS}>,1,0>)
 
 # 103 T023: test_reset_seqnum_policy_matrix.cpp's AS5 cells use mock_reconnect_factory.hpp's
 # FaultStoreFactory, whose header includes the mock transport.

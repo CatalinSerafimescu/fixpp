@@ -2,6 +2,12 @@
 //
 // tests/session/conformance/tc_sendingtime_test.cpp
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp.
+//
 // [FIX-TC] SendingTime conformance subset — 005-session-establishment-fsm T053
 // Phase 7 / US5.
 //
@@ -45,9 +51,11 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/r2_wait_reading.hpp"
 #include "support/seqnum_manager_test_access.hpp"
 #include "support/session_test_access.hpp"
 #include "support/store_double.hpp"
@@ -246,6 +254,7 @@ TEST(TCSendingTime, Fix42_1d_InvalidLogonBadSendingTime) {
     SendingTimeConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
 
     // open() → LogonSent
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
@@ -297,6 +306,7 @@ TEST(TCSendingTime, Fix44_1d_InvalidLogonBadSendingTime) {
     SendingTimeConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.4");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
 
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
@@ -342,6 +352,7 @@ TEST(TCSendingTime, Fix44_1d_InvalidLogonBadSendingTime_SeqnumOverflow_SurfacesE
     SendingTimeConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.4");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
 
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
@@ -399,6 +410,7 @@ TEST(TCSendingTime, Fix42_2o_SendingTimeValueOutOfRange) {
     SendingTimeConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_to_active(sess, "FIX.4.2");
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
@@ -437,8 +449,18 @@ TEST(TCSendingTime, Fix42_2o_SendingTimeValueOutOfRange) {
     }
     EXPECT_TRUE(found_reject) << "2o fix42: stale established SendingTime must emit Reject";
     EXPECT_TRUE(found_logout) << "2o fix42: stale established SendingTime must emit Logout";
-    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
-        << "2o fix42: session must be Disconnected after Reject+Logout";
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // session stays Active through the wait and ends at its bound.
+    fixpp::test_support::expect_r2_wait(
+        fixpp::test_support::read_r2_wait(
+            sess, *f.clock, std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            [&f] {
+                for (int i = 0; i < 16; ++i) {
+                    f.ioc.restart();
+                    f.ioc.poll();
+                }
+            }),
+        "2o fix42: Reject+Logout");
 }
 
 // ── 2o_SendingTimeValueOutOfRange (fix44) ────────────────────────────────────
@@ -446,6 +468,7 @@ TEST(TCSendingTime, Fix44_2o_SendingTimeValueOutOfRange) {
     SendingTimeConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.4");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_to_active(sess, "FIX.4.4");
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
@@ -480,7 +503,18 @@ TEST(TCSendingTime, Fix44_2o_SendingTimeValueOutOfRange) {
     }
     EXPECT_TRUE(found_reject) << "2o fix44: stale established SendingTime must emit Reject";
     EXPECT_TRUE(found_logout) << "2o fix44: stale established SendingTime must emit Logout";
-    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected);
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // session stays Active through the wait and ends at its bound.
+    fixpp::test_support::expect_r2_wait(
+        fixpp::test_support::read_r2_wait(
+            sess, *f.clock, std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            [&f] {
+                for (int i = 0; i < 16; ++i) {
+                    f.ioc.restart();
+                    f.ioc.poll();
+                }
+            }),
+        "2o fix44: Reject+Logout");
     // fixpp#423: the stale Heartbeat was the expected seq=2, so it is consumed
     // (FIX-SL 2020 §4.5.4) and a reconnect does not ResendRequest it.
     EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
@@ -492,6 +526,7 @@ TEST(TCSendingTime, Fix44_2o_SendingTimeValueOutOfRange_SeqnumOverflow_SurfacesE
     SendingTimeConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.4");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_to_active(sess, "FIX.4.4");
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 

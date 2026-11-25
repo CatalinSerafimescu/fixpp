@@ -231,8 +231,7 @@ protected:
     static std::unique_ptr<fixpp::session::ReconnectFsm> drive_to_logon_sent(
         asio::io_context& /*ioc*/, fixpp::session::Session& session, FactoryT* factory,
         fixpp::transport::Endpoint ep) {
-        auto fsm = std::make_unique<fixpp::session::ReconnectFsm>(factory, make_fast_policy(3), 30s,
-                                                                  2000ms);
+        auto fsm = std::make_unique<fixpp::session::ReconnectFsm>(factory, make_fast_policy(3));
         fsm->set_reconnect_endpoint(ep);
         fsm->set_session_owner(&session);
         fsm->set_tls_profile(fixpp::tls::SecurityProfile::mtls_ca);
@@ -290,7 +289,7 @@ TEST_F(LiveIdentityBindingTest, MockHandshakeIdentityDrivesAuthorization) {
     }
 
     // Drive reconnect via a standalone FSM (bypasses the initial open() path).
-    fixpp::session::ReconnectFsm reconnect_fsm(factory.get(), make_fast_policy(3), 30s, 2000ms);
+    fixpp::session::ReconnectFsm reconnect_fsm(factory.get(), make_fast_policy(3));
     reconnect_fsm.set_reconnect_endpoint(fixpp::transport::Endpoint{"127.0.0.1", 19876});
     reconnect_fsm.set_session_owner(&session);
     reconnect_fsm.set_tls_profile(fixpp::tls::SecurityProfile::mtls_ca);
@@ -463,8 +462,7 @@ TEST_F(LiveIdentityBindingTest, LiveTlsCertCnDrivesAuthorizationDecision) {
     }
 
     // Drive client + server sides concurrently.
-    fixpp::session::ReconnectFsm reconnect_fsm(session_factory_shared.get(), make_fast_policy(3),
-                                               30s, 2000ms);
+    fixpp::session::ReconnectFsm reconnect_fsm(session_factory_shared.get(), make_fast_policy(3));
     reconnect_fsm.set_reconnect_endpoint(server_ep);
     reconnect_fsm.set_session_owner(&session);
     reconnect_fsm.set_tls_profile(fixpp::tls::SecurityProfile::mtls_ca);

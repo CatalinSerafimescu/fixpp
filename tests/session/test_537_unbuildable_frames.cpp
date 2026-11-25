@@ -2,6 +2,12 @@
 //
 // tests/session/test_537_unbuildable_frames.cpp
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
+//
 // fixpp#537, D-537-7 and D-537-5 (.specify/536-537-538-recovery-liveness.md §4.3; the rows
 // "D-537-7" and "D-537-5, a Logout that cannot be built" of §5): a frame the session cannot
 // build in its fixed frame buffer.
@@ -140,6 +146,10 @@ struct ToTheBound {
     std::optional<fixpp::core::expected_t<void>> result;  // on_inbound_frame, at the bound
     std::vector<std::string> written;                     // every frame written for that frame
     fsm_state state = fsm_state::NotConnected;
+    // 105-transport-liveness, the R-2 wait after a Logout that was written (contract C-2): the
+    // state at the wait's bound - 1 ms and at its bound.
+    fsm_state state_before_the_wait_bound = fsm_state::NotConnected;
+    fsm_state state_at_the_wait_bound = fsm_state::NotConnected;
 };
 
 // The spacing of the peer's frames before the bound, inside every HeartBtInt, and the
@@ -276,7 +286,7 @@ protected:
     // no TestRequest. The last frame is at E + kGapBound. The peer's frames carry the
     // clock's seed as SendingTime(52), which stays inside the SendingTime threshold for a
     // clock moved by kGapBound.
-    [[nodiscard]] ToTheBound gap_to_the_bound(std::size_t comp_id_len) {
+    [[nodiscard]] ToTheBound gap_to_the_bound(std::size_t comp_id_len, bool read_the_wait = false) {
         ToTheBound out;
         Driven d{*this, comp_id_len};
         if (!d.logon_written()) {
@@ -331,6 +341,17 @@ protected:
         out.result = d.feed("1", ++seq, "112=PEER-TR\x01");
         out.written = d.cap->frames;
         out.state = d.session->state();
+        if (read_the_wait) {
+            // The wait's bound counts from the Logout's write start, the mock clock unmoved
+            // since; the cells leave logout_disconnect_timeout_ms at its default. The frames'
+            // SendingTime(52) is fixed, so this advance comes after every other run of the cell.
+            auto const wait_bound = std::chrono::milliseconds{
+                fixpp::session::SessionConfig{}.logout_disconnect_timeout_ms};
+            pass(wait_bound - 1ms);
+            out.state_before_the_wait_bound = d.session->state();
+            pass(1ms);
+            out.state_at_the_wait_bound = d.session->state();
+        }
         return out;
     }
 
@@ -468,9 +489,11 @@ TEST_P(UnbuildableFrames, AtTheBoundary_LogoutThatCannotBeBuilt_EndsTheSessionWi
         << "no SenderCompID length was found at which the session's own Logon is written "
            "and one byte more is not";
 
+    // The arm at the boundary runs first: the control's read of its wait moves the clock last.
+    auto const at = gap_to_the_bound(*boundary);
     // The control: far from the boundary, the same traffic draws the deadline's Logout.
     // Its Text(58) is the text a session with the same NextNumIn sends at the bound.
-    auto const control = gap_to_the_bound(/*comp_id_len=*/1);
+    auto const control = gap_to_the_bound(/*comp_id_len=*/1, /*read_the_wait=*/true);
     ASSERT_TRUE(control.setup_miss.empty()) << "short SenderCompID: " << control.setup_miss;
     ASSERT_TRUE(control.before_the_bound.empty())
         << "short SenderCompID: " << control.before_the_bound;
@@ -479,9 +502,15 @@ TEST_P(UnbuildableFrames, AtTheBoundary_LogoutThatCannotBeBuilt_EndsTheSessionWi
     ASSERT_EQ(field(control.written.front(), 35), "5");
     auto const text = field(control.written.front(), 58);
     ASSERT_FALSE(text.empty()) << "the Logout at the bound carries no Text(58)";
-    EXPECT_EQ(control.state, fsm_state::Disconnected);
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // control's Logout is written, so the session stays Active through the wait and ends at its
+    // bound. The Logout that cannot be built arms no wait (below).
+    EXPECT_EQ(control.state, fsm_state::Active) << "the control did not stay Active in the wait";
+    EXPECT_EQ(control.state_before_the_wait_bound, fsm_state::Active)
+        << "the control's wait ended before its bound";
+    EXPECT_EQ(control.state_at_the_wait_bound, fsm_state::Disconnected)
+        << "the control's wait did not end at its bound";
 
-    auto const at = gap_to_the_bound(*boundary);
     ASSERT_TRUE(at.setup_miss.empty()) << "at the boundary: " << at.setup_miss;
     ASSERT_TRUE(at.before_the_bound.empty()) << at.before_the_bound;
 

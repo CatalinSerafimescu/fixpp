@@ -8,6 +8,8 @@
 // SessionConfig alone, so the accept loop can compute it before a Session exists,
 // and Session::open() stores it.
 
+#include <chrono>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/session/session_config.hpp>
@@ -32,6 +34,14 @@ inline constexpr std::uint32_t kMaxAdvertisedMaxMessageSize = 262144U;
 [[nodiscard]] inline bool advertised_max_message_size_in_range(SessionConfig const& cfg) noexcept {
     auto const& v = cfg.advertised_max_message_size;
     return !v || (*v >= kMinAdvertisedMaxMessageSize && *v <= kMaxAdvertisedMaxMessageSize);
+}
+
+// 105 (FR-011, contract C-6.6): false when a set test_request_threshold is zero or below; there
+// is no upper bound. Engine::register_session and Session::open() refuse such a config
+// (invalid_session_config), as they refuse the range above.
+[[nodiscard]] inline bool test_request_threshold_in_range(SessionConfig const& cfg) noexcept {
+    auto const& t = cfg.test_request_threshold;
+    return !t || *t > std::chrono::milliseconds::zero();
 }
 
 namespace detail {

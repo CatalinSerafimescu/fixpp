@@ -41,6 +41,12 @@ struct engine_test_access {
         e.test_hook_before_role_loop_join_ = std::move(hook);
     }
 
+    // 105 (tasks.md T106): run_accept_loop throws std::bad_alloc in place of the listener's
+    // construction while the hook returns true. Install before start().
+    static void set_listener_construction_fails(Engine& e, std::function<bool()> hook) {
+        e.test_hook_listener_construction_fails_ = std::move(hook);
+    }
+
     // fixpp#544 §2.1: a copy of a registered session's SessionEntry::session_strand, or
     // nullopt for an unknown id. It reads the registry unsynchronised, so call it only
     // while no thread runs the engine's io_context.

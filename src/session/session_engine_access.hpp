@@ -14,6 +14,7 @@
 // member of Session's installed surface.
 
 #include <cstdint>
+#include <fixpp/core/clock.hpp>
 #include <fixpp/session/session.hpp>
 #include <memory>
 #include <utility>
@@ -62,6 +63,23 @@ struct session_engine_access {
     // (`.specify/563-564-callback-send.md` §6, OD-3). Session strand.
     [[nodiscard]] static bool engine_stop_noted(Session const& s) noexcept {
         return s.engine_stop_requested_;
+    }
+    // 105-transport-liveness (research D1 item 2; data-model E-2), consumer (a): after each
+    // on_inbound_frame return the pump tests and clears the connection-end latch, and closes
+    // the session when it was set. Session strand.
+    [[nodiscard]] static bool take_connection_end(Session& s) noexcept {
+        if (!s.connection_end_owed_) return false;
+        // 105 (data-model E-3, "Other roots during writing"): the latch defers to the writer of
+        // an ending Logout, whose root consumes it after the write.
+        if (s.ending_wait_.phase == Session::ending_wait_state::phase_t::writing) return false;
+        s.connection_end_owed_.reset();
+        return true;
+    }
+    // 105 (data-model E-3, "The establishment cap"; E-5): the pump's establishment deadline,
+    // handed to the Session once, before its first delivery. One store. Session strand.
+    static void set_establishment_deadline(Session& s,
+                                           fixpp::core::steady_time_point deadline) noexcept {
+        s.establishment_cap_ = deadline;
     }
     // 099-fixt-appl-version-validation (data-model E-1): hands the Engine's route set to a FIXT
     // session, right after make_shared<Session> and before open(), which then walks nothing.

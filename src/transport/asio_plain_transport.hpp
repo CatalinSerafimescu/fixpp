@@ -12,7 +12,8 @@
 //
 // Design anchors:
 //   specs/043-plaintext-tcp-transport/contracts/asio_plain_transport.hpp
-//   research.md D-1/D-2/D-12 — no handshake, close = socket_.close, same TCP knobs
+//   research.md D-1/D-2/D-12 — no handshake, same TCP knobs; close = socket_.close,
+//     superseded by 105 T141a (B-105-9): close = shutdown(send), then socket_.close
 //   data-model.md E-2 — field set and state transitions
 
 #pragma once
@@ -127,8 +128,9 @@ public:
     //     cancel (#333; see Transport::cancel() for the vendored-header cite).
     [[nodiscard]] core::expected_t<void> cancel() noexcept override;
 
-    // (5) Close: socket_.close() directly. NO TLS bidi shutdown, NO
-    //     tls_close_timeout wait (D-2, FR-011). Idempotent.
+    // (5) Close: shutdown(send), then socket_.close() (105 T141a, B-105-9).
+    //     NO TLS bidi shutdown, NO tls_close_timeout wait (D-2, FR-011).
+    //     Idempotent.
     [[nodiscard]] core::expected_t<void> close() noexcept override;
 
     // ── Acceptor event sink (set_listener_events) ─────────────────────────────

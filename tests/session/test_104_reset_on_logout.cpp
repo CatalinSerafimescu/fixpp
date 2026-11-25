@@ -4218,8 +4218,9 @@ static_assert(kReachBudget + kInHoldBudget + kInHoldBudget < kHoldBound);
 // R-5h. The Heartbeat's store is selected at its toAdmin. GateWait (C2, live transport,
 // HeartBtInt above logout_disconnect_timeout_ms): route B as R-5f's setup; the mock clock passes
 // logout_disconnect_timeout_ms with the next write armed to park, so the bound's reply parks;
-// then it passes HeartBtInt, and the Heartbeat, recorded with no hold, waits at the write gate;
-// then the reply's write is released. StoreHeld (C1, sink, HeartBtInt half of
+// before that, at HeartBtInt (below T), the Heartbeat's store is selected and held, and it is
+// released once the reply has parked, so the Heartbeat waits at the write gate; then the reply's
+// write is released. StoreHeld (C1, sink, HeartBtInt half of
 // logout_disconnect_timeout_ms): route B; the clock passes HeartBtInt, the Heartbeat's store is
 // held, then the clock passes logout_disconnect_timeout_ms (the loop is suspended in that
 // store), the bound acknowledges and runs its unit, and the store is released.
@@ -4236,12 +4237,13 @@ void liveness_heartbeat_across_unit(session_role const role, liveness_arm const 
     GateReadings104 g;  // declared before the session: its hooks write them
     StoreSelector104 sel;
     auto const st = std::make_shared<bwt::blocking_write_state>();
-    Rol104 r{Opts104{.role = role,
-                     .reset_on_logout = rol,
-                     .heartbeat = live ? rg::kHeartBtInt : kSmallHeartBtInt}};
+    // 105-transport-liveness (data-model E-4): every arm's HeartBtInt is below T, so the
+    // Heartbeat is numbered before the bound's reply claims the Logout owner; the liveness loop
+    // originates nothing once that ending is in progress.
+    Rol104 r{Opts104{.role = role, .reset_on_logout = rol, .heartbeat = kSmallHeartBtInt}};
     if (live) {
         install_gate_readings(r, g, st);
-        r.ctl.released = true;  // the selected store records both events with no hold
+        r.ctl.released = false;  // the selected store is held until the reply parks
     }
     select_store_at_to_admin(r, sel, "0");
     auto& s = r.s;
@@ -4271,15 +4273,18 @@ void liveness_heartbeat_across_unit(session_role const role, liveness_arm const 
         // leaves `parked` false, so `reached` is false and the cell's "setup: the Heartbeat's
         // store was not reached" assertion fails within kReachBudget: a named failure, not a
         // hang.
-        s.mock->advance(std::chrono::milliseconds{kBoundT} + std::chrono::milliseconds{1});
+        s.mock->advance(kSmallHeartBtInt + std::chrono::milliseconds{1});
+        bool const heartbeat_held =
+            s.pump_until([&] { return !r.log().store_events.empty(); }, kReachBudget);
+        s.mock->advance(std::chrono::milliseconds{kBoundT} - kSmallHeartBtInt);
         bool const parked = s.pump_until([&] { return st->parked; }, kReachBudget);
         bool const is_reply =
             !st->recorded.empty() &&
             fixpp::test_support::extract_tag(st->recorded.back().bytes, 35) == "5" &&
             !st->recorded.back().completed;
         reply_start = st->recorded.empty() ? 0 : st->recorded.back().start;
-        s.mock->advance(rg::kHeartBtInt);
-        reached = parked && is_reply &&
+        r.ctl.released = true;  // the Heartbeat's store returns; it waits at the write gate
+        reached = heartbeat_held && parked && is_reply &&
                   s.pump_until([&] { return r.log().store_events.size() == 2; }, kInHoldBudget);
         during = s.state() == fsm_state::Active;  // the reply is still in its write
         starts_before_release = st->starts;
@@ -4350,14 +4355,27 @@ void liveness_heartbeat_across_unit(session_role const role, liveness_arm const 
     }
 
     if (!rol) {
-        // The forced hit: nothing is frozen, so the Heartbeat is written after the reply; on the
-        // live transport it is the first write started after it.
-        EXPECT_GE(heartbeats_after, 1U) << "written after the reply: " << after_text;
         if (live) {
+            // 105-transport-liveness (FR-005, FR-008; contract C-1 row 5) supersedes this arm's
+            // forced hit, a Heartbeat written after the reply on the open connection: the
+            // bound's reply Logout is written, the session ends, and the connection closes at
+            // the bound's exit, so the Heartbeat, whose store call has run (`reached` above), is
+            // not written after the reply.
             auto const w = written_after(*st, reply_start);
-            EXPECT_TRUE(!w.empty() && w.front().type == "0" && w.front().start == reply_start + 1)
-                << "written after the reply: " << describe(w);
+            EXPECT_TRUE(w.empty()) << "written after the reply: " << describe(w);
+            bool reply_completed = false;
+            for (auto const& rec : st->recorded) {
+                if (rec.start == reply_start) reply_completed = rec.completed;
+            }
+            EXPECT_TRUE(reply_completed) << "the reply Logout's write did not complete";
+            EXPECT_GE(st->closes, 1U) << "the connection was not closed after the reply";
+            EXPECT_TRUE(st->starts_at_first_close.has_value() &&
+                        *st->starts_at_first_close >= reply_start)
+                << "the connection was closed before the reply's write began";
+            return;
         }
+        // The forced hit: nothing is frozen, so the Heartbeat is written after the reply.
+        EXPECT_GE(heartbeats_after, 1U) << "written after the reply: " << after_text;
         return;
     }
     EXPECT_TRUE(after.empty()) << "written after the reply: " << after_text;
@@ -4394,7 +4412,9 @@ TEST(ResetOnLogout104, LivenessHeartbeatAcrossBoundUnit_OneEnding_StoreHeldAtArm
     }
 }
 
-// R-5h's forced hits, one per observation path: reset_on_logout off.
+// R-5h's forced hits, one per observation path: reset_on_logout off. On the live path
+// 105-transport-liveness (FR-005) closes the connection after the reply, so GateWait_RolOff
+// pins that close instead (liveness_heartbeat_across_unit).
 TEST(ResetOnLogout104, LivenessHeartbeatAcrossBoundUnit_OneEnding_GateWait_RolOff) {
     liveness_heartbeat_across_unit(session_role::acceptor, liveness_arm::gate_wait, false);
 }

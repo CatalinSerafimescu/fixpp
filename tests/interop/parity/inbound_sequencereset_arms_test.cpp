@@ -39,6 +39,7 @@ using InboundSequenceResetArms = ParityAcceptorFixture;
 // bypasses the too-high gate (no ResendRequest, stays Active).
 TEST_F(InboundSequenceResetArms, NewSeqNoAboveExpectedAdvances) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U);
 
@@ -54,6 +55,7 @@ TEST_F(InboundSequenceResetArms, NewSeqNoAboveExpectedAdvances) {
 // Arm: NewSeqNo == expected is a no-op (no Reject, counter unchanged).
 TEST_F(InboundSequenceResetArms, NewSeqNoEqualExpectedIsNoOp) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U);
 
@@ -67,6 +69,7 @@ TEST_F(InboundSequenceResetArms, NewSeqNoEqualExpectedIsNoOp) {
 // Arm: NewSeqNo < expected → Reject(373=5), counter unmoved.
 TEST_F(InboundSequenceResetArms, NewSeqNoBelowExpectedRejects) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U);
 

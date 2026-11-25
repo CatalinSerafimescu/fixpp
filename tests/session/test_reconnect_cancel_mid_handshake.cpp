@@ -207,8 +207,7 @@ protected:
 TEST_F(ReconnectCancelMidHandshakeTest, TotalCancelMidHandshakeReleasesTransport) {
     auto factory = std::make_shared<SlowHandshakeFactory>(50ms);
 
-    fixpp::session::ReconnectFsm fsm(factory.get(), make_policy(100), std::chrono::seconds{30},
-                                     2000ms);
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_policy(100));
 
     asio::cancellation_signal cancel_sig;
 
@@ -268,8 +267,7 @@ TEST_F(ReconnectCancelMidHandshakeTest, RepeatedCancelsLeaveNoLeaksAcrossNAttemp
     auto factory = std::make_shared<SlowHandshakeFactory>(30ms);
 
     for (int i = 0; i < kAttempts; ++i) {
-        fixpp::session::ReconnectFsm fsm(factory.get(), make_policy(100), std::chrono::seconds{30},
-                                         2000ms);
+        fixpp::session::ReconnectFsm fsm(factory.get(), make_policy(100));
 
         asio::cancellation_signal cancel_sig;
 

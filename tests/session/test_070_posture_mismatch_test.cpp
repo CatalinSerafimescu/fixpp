@@ -41,6 +41,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -248,6 +249,7 @@ protected:
                   std::optional<std::string_view> tmi_464) {
         auto cfg = make_acceptor_cfg(posture);
         fixpp::session::Session sess(engine, cfg);
+        fixpp::test_support::close_before_destroy const closer{sess, ioc};
         EXPECT_TRUE(open_sync(sess).has_value());
         auto frame = make_logon_frame_464("FIX.4.4", 1, "TW", "ISLD", 30, tmi_464);
         feed_sync(sess, std::span<const std::byte>{frame});
@@ -307,6 +309,7 @@ TEST_F(PostureTest, ProductionRefusesMalformed464) {
 TEST_F(PostureTest, InitiatorRefusesPostureMismatchedLogonAck) {
     auto cfg = make_initiator_cfg(fixpp::session::session_posture::production);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(open_sync(sess).has_value());
     ASSERT_EQ(sess.state(), fsm_state::LogonSent);
     const auto frames_before_ack = captured_frames.size();  // the initial outbound Logon
@@ -338,6 +341,7 @@ TEST_F(PostureTest, AcceptorRefusalUsesDurableOutboundSeq) {
     auto cfg = make_acceptor_cfg(fixpp::session::session_posture::production);
     cfg.store_factory = factory;
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(open_sync(sess).has_value());
 
     auto frame = make_logon_frame_464("FIX.4.4", 1, "TW", "ISLD", 30, std::string_view{"Y"});

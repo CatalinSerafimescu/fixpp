@@ -2,6 +2,12 @@
 //
 // tests/session/admin_emit_mixed_path_test.cpp
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
+//
 // 010-session-cfg-lifetime T019 / Phase 5 / US3.
 //
 // FR-008 / SC-005 — gated-emit permutations at admin emit sites 1+2 (RC#G
@@ -54,9 +60,11 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/r2_wait_reading.hpp"
 #include "support/seqnum_manager_test_access.hpp"
 #include "support/session_test_access.hpp"
 
@@ -286,6 +294,7 @@ TEST_F(AdminEmitMixedPathTest, Site1_RejectOk_LogoutOk_Disconnected) {
     // reaches Disconnected per the matrix Active row.
     auto cfg = make_cfg(0);
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
     clear_handshake_captures();
 
@@ -294,9 +303,19 @@ TEST_F(AdminEmitMixedPathTest, Site1_RejectOk_LogoutOk_Disconnected) {
     auto stale_hb = build_stale_heartbeat(2, kTarget, kSender);
     (void)feed_sync(sess, stale_hb);
 
-    // Both Reject and Logout emitted; session transitions to Disconnected.
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
-        << "Site1 Reject-ok/Logout-ok: session must reach Disconnected via Q3 path";
+    // Both Reject and Logout emitted; session transitions to Disconnected at the wait's end.
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // session stays Active through the wait and ends at its bound.
+    fixpp::test_support::expect_r2_wait(
+        fixpp::test_support::read_r2_wait(
+            sess, *clock, std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            [&] {
+                for (int i = 0; i < 16; ++i) {
+                    ioc.restart();
+                    ioc.poll();
+                }
+            }),
+        "Site1 Reject-ok/Logout-ok");
 
     // W3.3 — gated-emit contract: BOTH Reject (35=3) and Logout (35=5) frames
     // must have been emitted via transport_send (assign_outbound succeeded for both).
@@ -341,6 +360,7 @@ TEST_F(AdminEmitMixedPathTest, Site1_RejectOk_LogoutFail_Disconnected) {
     // assign_outbound fails (Logout step) → Disconnected via error path.
     auto cfg = make_cfg(0);
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
     clear_handshake_captures();
 
@@ -406,6 +426,7 @@ TEST_F(AdminEmitMixedPathTest, Site2_LogoutOk_Disconnected) {
     // → Disconnected per matrix Active×Logout cell.
     auto cfg = make_cfg(0);
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
     clear_handshake_captures();
 
@@ -428,6 +449,7 @@ TEST_F(AdminEmitMixedPathTest, Site2_LogoutFail_Disconnected) {
     // (record_state_transition_(Disconnected) fires in the !assign_r branch).
     auto cfg = make_cfg(0);
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
     clear_handshake_captures();
 

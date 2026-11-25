@@ -66,6 +66,7 @@
 #include "session/plain_engine_rig.hpp"
 #include "session/test_103_support.hpp"
 #include "support/calling_thread_readings.hpp"
+#include "support/close_before_destroy.hpp"
 #include "support/fix44_dictionary.hpp"
 #include "support/recording_store.hpp"
 #include "support/seqnum_manager_test_access.hpp"
@@ -934,6 +935,9 @@ struct HeldWalk {
     std::deque<asio::cancellation_signal> live_signals;
     std::deque<std::future<void>> live_futs;
     ActiveSession s;
+    // Declared after `s`, so destroyed before it, after this fixture's drain: the session is
+    // closed before it is destroyed (tests/support/close_before_destroy.hpp).
+    fixpp::test_support::close_before_destroy closer{*s.f.session, s.f.ioc};
 
     HeldWalk() = default;
     HeldWalk(HeldWalk const&) = delete;
@@ -1014,6 +1018,11 @@ std::vector<std::string> live_frames(std::vector<std::string> const& frames,
 constexpr std::chrono::milliseconds kHeldWindow{50};
 // R-588-c's HeartBtInt.
 constexpr std::chrono::seconds kHb588{30};
+// 105-transport-liveness (R-3, research D6) supersedes 005 research D-8's 1 × HeartBtInt
+// TestRequest threshold the liveness cells below ran on: unset, test_request_threshold is
+// 1.2 × HeartBtInt (kTr588), the give-up comes strictly after twice it, and the loop acts on
+// one instant per wake (the give-up, else the TestRequest, else the Heartbeat).
+constexpr auto kTr588 = std::chrono::milliseconds{kHb588} * 6 / 5;
 
 // 103 tasks T055, R-588-a (FR-014, SC-005): a send started while the answer is held at
 // the read of slot 3 is not written while the hold lasts; once the answer ends, every frame
@@ -1151,18 +1160,18 @@ TEST(ReplayGate588, R588b_WalkWaitingForASend_CloseTerminal_EndsBeforeTheSendNot
 }
 
 // 103 tasks T057, R-588-c (FR-014): with a HeartBtInt, the liveness loop's Heartbeat and
-// TestRequest fall due while the answer is held (the clock moves past HeartBtInt, so both
-// the outbound and the inbound side are idle). Neither is written inside the answer; each
-// one written after it carries the next number. The loop waits at the gate from its
-// Heartbeat arm, and after the release writes the Heartbeat and then the TestRequest,
-// because both deadlines have passed.
+// TestRequest fall due while the answer is held (the clock moves past the threshold, so both
+// the outbound and the inbound side are idle). Neither is written inside the answer; the one
+// written after it carries the next number. The loop waits at the gate, and after the release
+// writes the TestRequest: with both instants passed, the loop acts on the TestRequest's
+// (105-transport-liveness, data-model E-4).
 TEST(ReplayGate588, R588c_LivenessDuringTheAnswer_NothingInsideItNextNumbersAfter) {
     HeldWalk w{DirectAcceptor::Options{
         .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
     ASSERT_TRUE(w.start(is_slot_read(3))) << "setup: the walk did not reach the held read";
-    // KIND F: a lost advance writes neither liveness frame, which the ASSERT_GTs after the
-    // release report by name.
-    w.s.f.clock->advance(kHb588 + std::chrono::seconds{1});
+    // KIND F: a lost advance writes neither liveness frame, which the ASSERT_GT after the
+    // release reports by name.
+    w.s.f.clock->advance(kTr588 + std::chrono::seconds{1});
     w.pump_for(kHeldWindow);
     EXPECT_EQ(w.s.f.sent_count("0") + w.s.f.sent_count("1"), 0U)
         << "a liveness frame was written while the answer is held:\n"
@@ -1170,9 +1179,6 @@ TEST(ReplayGate588, R588c_LivenessDuringTheAnswer_NothingInsideItNextNumbersAfte
     w.release();
     w.pump_for(kHeldWindow);
     auto const& sent = w.s.f.sent;
-    ASSERT_GT(w.s.f.sent_count("0"), 0U)
-        << "setup: the liveness loop wrote no Heartbeat; the cell exercised no contention:\n"
-        << printable(sent);
     ASSERT_GT(w.s.f.sent_count("1"), 0U)
         << "setup: the liveness loop wrote no TestRequest; the cell exercised no contention:\n"
         << printable(sent);
@@ -1185,6 +1191,174 @@ TEST(ReplayGate588, R588c_LivenessDuringTheAnswer_NothingInsideItNextNumbersAfte
         EXPECT_EQ(plain_rig::field_value(sent[k], "34"), std::to_string(next)) << printable(sent);
         ++next;
     }
+}
+
+// R-588-c's Heartbeat arm (FR-014): the clock moves past HeartBtInt but short of the threshold
+// while the answer is held, so only the Heartbeat falls due. It is not written inside the
+// answer; the loop waits at the gate from its Heartbeat arm and, after the release, writes the
+// Heartbeat with the next number.
+TEST(ReplayGate588, R588c_HeartbeatDuringTheAnswer_WrittenAfterItNextNumber) {
+    HeldWalk w{DirectAcceptor::Options{
+        .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
+    ASSERT_TRUE(w.start(is_slot_read(3))) << "setup: the walk did not reach the held read";
+    // KIND F: a lost advance writes no Heartbeat, which the ASSERT_GT after the release
+    // reports by name.
+    w.s.f.clock->advance(kHb588 + std::chrono::seconds{1});
+    w.pump_for(kHeldWindow);
+    EXPECT_EQ(w.s.f.sent_count("0") + w.s.f.sent_count("1"), 0U)
+        << "a liveness frame was written while the answer is held:\n"
+        << printable(w.s.f.sent);
+    w.release();
+    w.pump_for(kHeldWindow);
+    auto const& sent = w.s.f.sent;
+    ASSERT_GT(w.s.f.sent_count("0"), 0U)
+        << "setup: the liveness loop wrote no Heartbeat; the cell exercised no contention:\n"
+        << printable(sent);
+    EXPECT_EQ(w.s.f.sent_count("1"), 0U) << "a TestRequest before the threshold:\n"
+                                         << printable(sent);
+    auto const last = last_answer_index(sent);
+    auto next = answer_end(sent) + 1;
+    for (std::size_t k = 0; k < sent.size(); ++k) {
+        if (plain_rig::field_value(sent[k], "35") != "0") continue;
+        EXPECT_GT(k, last) << "a Heartbeat lies inside the answer:\n" << printable(sent);
+        EXPECT_EQ(plain_rig::field_value(sent[k], "34"), std::to_string(next)) << printable(sent);
+        ++next;
+    }
+}
+
+// The TestReqID(112) of each TestRequest the session wrote, and its Logouts, in order.
+struct LivenessWritten {
+    std::vector<std::string> trs;
+    std::vector<std::string> logouts;
+};
+LivenessWritten liveness_written(std::vector<std::string> const& sent) {
+    LivenessWritten out;
+    for (auto const& f : sent) {
+        auto const t = plain_rig::field_value(f, "35");
+        if (t == "1") out.trs.push_back(plain_rig::field_value(f, "112"));
+        if (t == "5") out.logouts.push_back(f);
+    }
+    return out;
+}
+
+// 105-transport-liveness, the owner's fresh-window ruling (spec.md Clarifications: the held
+// TestRequest's fresh window), superseding for this case the Phase 6
+// implementation clarification's give-up: with a TestRequest pending, the give-up instant is the
+// later of two thresholds after the last inbound frame and one threshold after that TestRequest's
+// write. Here a TestRequest is pending and the request that starts the held walk arrives after it,
+// so a new TestRequest falls due; held behind the walk past both instants, the loop writes it
+// after the release, and gives up only a threshold after that write, naming it.
+// HeldPastTwoThresholds is the walk's setup: the TestRequest, one second, the request, then the
+// clock past two thresholds after the request while the answer is held.
+void held_past_two_thresholds_after_a_pending_test_request(HeldWalk& w) {
+    ASSERT_TRUE(w.start(is_slot_read(3), std::nullopt, /*request=*/false)) << "setup";
+    w.s.f.clock->advance(kTr588 + std::chrono::seconds{1});
+    ASSERT_TRUE(w.s.f.run_until([&] { return w.s.f.sent_count("1") != 0; }))
+        << "setup: no TestRequest was written:\n"
+        << printable(w.s.f.sent);
+    w.s.f.clock->advance(std::chrono::seconds{1});
+    ASSERT_TRUE(w.feed_request()) << "setup: the walk did not reach the held read";
+    w.s.f.clock->advance(2 * kTr588 + std::chrono::seconds{1});
+    w.pump_for(kHeldWindow);
+    EXPECT_EQ(w.s.f.sent_count("1"), 1U) << "a TestRequest inside the held answer:\n"
+                                         << printable(w.s.f.sent);
+    EXPECT_EQ(w.s.f.sent_count("5"), 0U) << "a Logout inside the held answer";
+    w.release();
+    EXPECT_TRUE(w.s.f.run_until([&] { return w.s.f.sent_count("1") == 2U; }))
+        << "no TestRequest written after the release:\n"
+        << printable(w.s.f.sent);
+    w.pump_for(kHeldWindow);
+}
+
+TEST(ReplayGate588, R588g_FrameAfterTheTestRequest_HeldPastTwoThresholds_FreshWindowThenGivesUp) {
+    HeldWalk w{DirectAcceptor::Options{
+        .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
+    held_past_two_thresholds_after_a_pending_test_request(w);
+    if (HasFatalFailure()) return;
+    // One second short of a threshold after the TestRequest's write.
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND C, the advance must fire nothing: it stays a
+    // second short of a threshold after the TestRequest's write, and no Logout with the session
+    // Active is the oracle.
+    w.s.f.clock->advance(kTr588 - std::chrono::seconds{1});
+    w.pump_for(kHeldWindow);
+    EXPECT_EQ(w.s.f.sent_count("5"), 0U)
+        << "a Logout inside a threshold after the TestRequest written on the release:\n"
+        << printable(w.s.f.sent);
+    EXPECT_EQ(w.s.f.session->state(), fsm_state::Active);
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the give-up instant is stored from the
+    // TestRequest's write, which predates this advance; run_until's bound makes a miss a named
+    // failure.
+    w.s.f.clock->advance(std::chrono::seconds{2});
+    EXPECT_TRUE(w.s.f.run_until([&] { return w.s.f.session->state() == fsm_state::Disconnected; }))
+        << "not given up a threshold after the TestRequest written on the release:\n"
+        << printable(w.s.f.sent);
+    auto const written = liveness_written(w.s.f.sent);
+    EXPECT_EQ(written.trs, (std::vector<std::string>{"TR1", "TR2"})) << printable(w.s.f.sent);
+    ASSERT_EQ(written.logouts.size(), 1U) << printable(w.s.f.sent);
+    EXPECT_EQ(plain_rig::field_value(written.logouts.front(), "58"),
+              "TestRequest unanswered, TestReqID TR2")
+        << "the give-up names the TestRequest written on the release";
+}
+
+// The positive arm: the peer answers the TestRequest written on the release inside its window,
+// and the session stays Active past the instant at which an unanswered one is given up.
+TEST(ReplayGate588, R588g_AnswerInsideTheFreshWindow_KeepsTheSession) {
+    HeldWalk w{DirectAcceptor::Options{
+        .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
+    held_past_two_thresholds_after_a_pending_test_request(w);
+    if (HasFatalFailure()) return;
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND C, the advance must fire nothing: it stays
+    // inside the fresh window, and the answer below is fed at that instant.
+    w.s.f.clock->advance(kTr588 / 2);
+    w.s.request_frame = w.s.f.msg("0", 3, "112=TR2\x01");
+    CallingThreadReadings answer;
+    ASSERT_TRUE(w.s.f.feed_plain(w.s.request_frame, answer))
+        << "setup: the answer did not complete";
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND C, the advance must fire nothing: the
+    // TestRequest was answered, and Active with no Logout past the give-up instant is the oracle.
+    w.s.f.clock->advance(kTr588 / 2 + std::chrono::seconds{1});
+    w.pump_for(kHeldWindow);
+    EXPECT_EQ(w.s.f.session->state(), fsm_state::Active)
+        << "the answered TestRequest ended the session:\n"
+        << printable(w.s.f.sent);
+    EXPECT_EQ(w.s.f.sent_count("5"), 0U) << printable(w.s.f.sent);
+}
+
+// The same rule with no TestRequest pending before the hold: the request that starts the walk
+// is the last inbound frame, the TestRequest falls due while the answer is held, and it is
+// written after the release; the give-up comes a threshold after that write, not at once.
+TEST(ReplayGate588, R588h_NoTestRequestPending_HeldPastTwoThresholds_FreshWindowThenGivesUp) {
+    HeldWalk w{DirectAcceptor::Options{
+        .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
+    ASSERT_TRUE(w.start(is_slot_read(3))) << "setup: the walk did not reach the held read";
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND C, the advance must fire nothing while the
+    // answer is held, and no TestRequest or Logout inside it is the oracle.
+    w.s.f.clock->advance(2 * kTr588 + std::chrono::seconds{1});
+    w.pump_for(kHeldWindow);
+    EXPECT_EQ(w.s.f.sent_count("1") + w.s.f.sent_count("5"), 0U)
+        << "a TestRequest or a Logout inside the held answer:\n"
+        << printable(w.s.f.sent);
+    w.release();
+    EXPECT_TRUE(w.s.f.run_until([&] { return w.s.f.sent_count("1") == 1U; }))
+        << "no TestRequest written after the release:\n"
+        << printable(w.s.f.sent);
+    w.pump_for(kHeldWindow);
+    w.s.f.clock->advance(kTr588 - std::chrono::seconds{1});
+    w.pump_for(kHeldWindow);
+    EXPECT_EQ(w.s.f.sent_count("5"), 0U)
+        << "a Logout inside a threshold after the TestRequest written on the release:\n"
+        << printable(w.s.f.sent);
+    EXPECT_EQ(w.s.f.session->state(), fsm_state::Active);
+    w.s.f.clock->advance(std::chrono::seconds{2});
+    EXPECT_TRUE(w.s.f.run_until([&] { return w.s.f.session->state() == fsm_state::Disconnected; }))
+        << "not given up a threshold after the TestRequest written on the release:\n"
+        << printable(w.s.f.sent);
+    auto const written = liveness_written(w.s.f.sent);
+    EXPECT_EQ(written.trs, (std::vector<std::string>{"TR1"})) << printable(w.s.f.sent);
+    ASSERT_EQ(written.logouts.size(), 1U) << printable(w.s.f.sent);
+    EXPECT_EQ(plain_rig::field_value(written.logouts.front(), "58"),
+              "TestRequest unanswered, TestReqID TR1")
+        << "the give-up names the TestRequest written on the release";
 }
 
 // 103 tasks T058, R-588-d (FR-014): close(graceful) started while the answer is held writes
@@ -1320,7 +1494,7 @@ TEST(ReplayGate588, R588f2_ContendedSend_EngineStop_RefusedNothingWritten) {
 // grace expiry. Only the Disconnected edge's wake can end the send's wait before the release:
 // close()'s first-commit wake and the guard's release, which also wake it, are absent, so
 // the two edges do not cover each other here. The TestRequest is written before the request,
-// so the loop sleeps in its grace window, outside any hold, while the answer is held. The
+// so the loop sleeps toward its give-up instant, outside any hold, while the answer is held. The
 // bound is derived from the hold's own real-time bound, the other thing that can end the
 // walk and so wake the send.
 TEST(ReplayGate588, R588f4_ContendedSend_LivenessDisconnects_RefusedNothingWritten) {
@@ -1329,7 +1503,7 @@ TEST(ReplayGate588, R588f4_ContendedSend_LivenessDisconnects_RefusedNothingWritt
     ASSERT_TRUE(w.start(is_slot_read(3), std::nullopt, /*request=*/false)) << "setup";
     // KIND F: a lost advance writes no TestRequest, which the bounded run_until below
     // reports by name ("no TestRequest was written").
-    w.s.f.clock->advance(kHb588 + std::chrono::seconds{1});
+    w.s.f.clock->advance(kTr588 + std::chrono::seconds{1});
     ASSERT_TRUE(w.s.f.run_until([&] { return w.s.f.sent_count("1") != 0; }))
         << "setup: no TestRequest was written:\n"
         << printable(w.s.f.sent);
@@ -1337,10 +1511,23 @@ TEST(ReplayGate588, R588f4_ContendedSend_LivenessDisconnects_RefusedNothingWritt
     auto const i = w.spawn_send("LIVE-L");
     w.pump_for(kHeldWindow);
     ASSERT_FALSE(w.send_done(i)) << "setup: the send did not wait behind the held answer";
-    w.s.f.clock->advance(kHb588 + std::chrono::seconds{1});
+    // The give-up is strictly after 2T of inbound silence from the request frame.
+    w.s.f.clock->advance(2 * kTr588 + std::chrono::seconds{1});
+    w.pump_for(kHeldWindow);  // the give-up is decided at this instant
+    // 105-transport-liveness (T059a; spec.md Clarifications, the Phase 3 implementation
+    // session): the give-up's budget, logout_disconnect_timeout_ms, counts from its decision
+    // while it waits for the walk's exclusive hold, so the session reaches Disconnected when
+    // the clock passes that budget, through the write limit and with no Logout written.
+    auto const budget = std::chrono::milliseconds{w.s.f.cfg.logout_disconnect_timeout_ms};
+    w.s.f.clock->advance(budget - std::chrono::milliseconds{1});
+    w.pump_for(kHeldWindow);
+    EXPECT_FALSE(w.send_done(i)) << "the contended send ended before the give-up's budget";
+    EXPECT_EQ(w.s.f.session->state(), fsm_state::Active) << "Disconnected before the budget";
+    w.s.f.clock->advance(std::chrono::milliseconds{1});
     EXPECT_TRUE(
         w.s.f.run_until([&] { return w.send_done(i); }, fixpp::test_support::kBodyHoldBound / 2))
         << "the contended send did not end after the liveness loop's Disconnected";
+    EXPECT_EQ(w.s.f.sent_count("5"), 0U) << "a Logout was written past the gate";
     EXPECT_EQ(w.s.f.session->state(), fsm_state::Disconnected);
     EXPECT_EQ(session_test_access::lifecycle_value(*w.s.f.session), 1)
         << "the session's lifecycle: 1 (open), no close() ran";
@@ -1348,6 +1535,54 @@ TEST(ReplayGate588, R588f4_ContendedSend_LivenessDisconnects_RefusedNothingWritt
         << w.live_calls[i].call_text();
     EXPECT_TRUE(live_frames(w.s.f.sent, "LIVE-L").empty()) << printable(w.s.f.sent);
     w.release();
+}
+
+// 105-transport-liveness (spec.md Clarifications, the Phase 4 implementation session): a
+// give-up is final once decided. As R588f4 to the give-up, which then waits behind the held
+// walk with the mock clock still; the peer's Heartbeat answering the pending TestRequest
+// arrives during that wait; at the walk's release the give-up's Logout is written, with R-1's
+// Text, and the session is Disconnected.
+TEST(ReplayGate588, R588f5_GiveUpWaitingAtTheGate_AnswerArrives_GiveUpIsFinal) {
+    // What the Heartbeat's coroutine refers to is declared before the walk, so it outlives the
+    // walk's drain.
+    CallingThreadReadings hb_call;
+    asio::cancellation_signal hb_none;
+    std::vector<std::byte> hb_frame;
+    HeldWalk w{DirectAcceptor::Options{
+        .tweak_cfg = [](fixpp::session::SessionConfig& cfg) { cfg.heartbeat_interval = kHb588; }}};
+    ASSERT_TRUE(w.start(is_slot_read(3), std::nullopt, /*request=*/false)) << "setup";
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the TestRequest instant is computed from
+    // the last inbound frame, a stored anchor; run_until's bound makes a miss a named failure.
+    w.s.f.clock->advance(kTr588 + std::chrono::seconds{1});
+    ASSERT_TRUE(w.s.f.run_until([&] { return w.s.f.sent_count("1") != 0; }))
+        << "setup: no TestRequest was written:\n"
+        << printable(w.s.f.sent);
+    std::string test_req_id;
+    for (auto const& f : w.s.f.sent) {
+        if (plain_rig::field_value(f, "35") == "1") test_req_id = plain_rig::field_value(f, "112");
+    }
+    ASSERT_TRUE(w.feed_request()) << "setup: the walk did not reach the held read";
+    // The give-up is strictly after 2T of inbound silence from the request frame.
+    w.s.f.clock->advance(2 * kTr588 + std::chrono::seconds{1});
+    w.pump_for(kHeldWindow);
+    ASSERT_EQ(w.s.f.session->state(), fsm_state::Active) << "setup: the give-up did not wait";
+    ASSERT_EQ(w.s.f.sent_count("5"), 0U) << "setup: a Logout before the walk's release";
+    hb_frame = w.s.f.msg("0", 3, "112=" + test_req_id + "\x01");
+    auto hb_fut = w.s.f.feed(hb_frame, hb_call, hb_none);
+    EXPECT_TRUE(w.s.f.run_until([&] { return DirectAcceptor::ready(hb_fut); }))
+        << "the peer's Heartbeat was not processed during the give-up's wait";
+    EXPECT_FALSE(session_test_access::test_request_pending(*w.s.f.session))
+        << "setup: the Heartbeat did not answer the TestRequest";
+    w.release();
+    EXPECT_TRUE(w.s.f.run_until([&] { return w.s.f.session->state() == fsm_state::Disconnected; }))
+        << "the answer undid the give-up: " << printable(w.s.f.sent);
+    std::vector<std::string> logouts;
+    for (auto const& f : w.s.f.sent) {
+        if (plain_rig::field_value(f, "35") == "5") logouts.push_back(f);
+    }
+    ASSERT_EQ(logouts.size(), 1U) << printable(w.s.f.sent);
+    EXPECT_EQ(plain_rig::field_value(logouts.front(), "58"),
+              "TestRequest unanswered, TestReqID " + test_req_id);
 }
 
 // (3): the send's own slot emits a terminal cancellation while it waits. It returns

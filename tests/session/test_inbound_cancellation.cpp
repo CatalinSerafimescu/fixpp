@@ -55,6 +55,7 @@
 #include "session/logon_arm_fixtures.hpp"
 #include "session/plain_engine_rig.hpp"
 #include "support/calling_thread_readings.hpp"
+#include "support/close_before_destroy.hpp"
 #include "support/recording_store.hpp"
 #include "support/session_test_access.hpp"
 
@@ -948,6 +949,7 @@ TransmitOutcome run_transmit(std::function<std::vector<std::byte>(DirectAcceptor
     using fixpp::transport::test::Script;
     TransmitOutcome o;
     DirectAcceptor f{DirectAcceptor::Options{}};
+    fixpp::test_support::close_before_destroy const closer{*f.session, f.ioc};
     if (!f.open()) return o;
     Script script;
     script.write_latency = kWriteLatency;

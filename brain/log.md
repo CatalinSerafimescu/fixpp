@@ -6,6 +6,24 @@ status: stable
 
 # Log
 
+- **2026-11-25 — 105-transport-liveness close-out (PR #720), row 15: `failure-classes.md` gains class 26, a close
+  that is orderly on one platform resets the connection on another (Windows RST with a pending read; shut down the send
+  side first), and class 27, a member keyed to one connection is reset or seeded on every path that starts a
+  connection, before its first consumer there, or leaks into the next connection (`begin_connection_()` is the default
+  place; `pending_test_req_id_`).** Owner-approved 2026-11-25 from the
+  Gate B record's anti-pattern candidates, as new classes; class 27's rule narrowed at Gate B round 3 to every
+  connection-start path rather than the helper alone.
+
+- **2026-11-25 — 105-transport-liveness, T141a and Gate B round 2: `components/transport.md` gains the plain
+  transport's close (the send side shut down before the close, `B-105-9`); `components/session-liveness-and-reconnect.md`
+  flags its TestReqID(112) invariant in place as superseded by 105 (contract C-5.4, `B-105-5`).**
+
+- **2026-11-24 — 105-transport-liveness, Phase 10 (tasks.md T125, T126): `failure-classes.md` gains class 25, a
+  platform header's macro rewrites an identifier only on the platform that defines it** (the `<windows.h>` macro
+  identifiers; trigger and procedure, the brain half of the parent's phase-implementer entry). `components/session.md`,
+  `components/session-liveness-and-reconnect.md` and `components/engine-accept-path.md` gain 105's decisions and
+  supersessions, each citing source.
+
 - **2026-11-20 — 104-sequence-reset-fidelity close-out (PR #706), row 15: `failure-classes.md` gains class 24, a
   passkey that is trivially copyable restricts nothing.** `SeqnumManager::freeze_key` could be forged with
   `std::bit_cast`. The fix is a user-provided private copy constructor, plus `static_assert`s that are proven able to

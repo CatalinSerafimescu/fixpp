@@ -55,6 +55,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -668,6 +669,7 @@ TEST(ApplicationThrow, ToAdminConfirmingLogoutThrowTerminatesSession) {
 
     auto cfg = f.make_cfg();
     Session sess(f.engine_cfg, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, f.ioc};
     open_acceptor_to_active(f, sess);
     // toAdmin call #1 happened for the Logon reply.
     ASSERT_EQ(app->call_count, 1);

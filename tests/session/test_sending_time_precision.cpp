@@ -2,6 +2,12 @@
 //
 // tests/session/test_sending_time_precision.cpp
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp.
+//
 // 026-nanosecond-sendingtime (S-039) — session emit/inbound precision witnesses.
 // T005 session emit RED-first witnesses (US1):
 //   (4) SendingTimePrecision_Nanos_Emits27Char52
@@ -46,9 +52,11 @@
 #include <vector>
 
 #include "session/support/frame_field_extract.hpp"  // via -I tests/
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/r2_wait_reading.hpp"
 #include "support/session_executor_of.hpp"
 
 using namespace std::chrono_literals;
@@ -314,6 +322,7 @@ protected:
 TEST_F(SendingTimePrecisionTest, SendingTimePrecision_Nanos_Emits27Char52) {
     auto cfg = make_cfg(fixpp::core::fix_time_precision::nanos);
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     // Capture the Logon reply — it is the first emitted frame for an acceptor.
     auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
@@ -366,6 +375,7 @@ TEST_F(SendingTimePrecisionTest, SendingTimePrecision_Nanos_Emits27Char52) {
 TEST_F(SendingTimePrecisionTest, SendingTimePrecision_Micros_Emits24Char52) {
     auto cfg = make_cfg(fixpp::core::fix_time_precision::micros);
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
                               asio::use_future);
@@ -416,6 +426,7 @@ TEST_F(SendingTimePrecisionTest, SendingTimePrecision_DefaultMillis_ByteIdentica
     // Default cfg: sending_time_precision is millis (the default).
     auto cfg = make_cfg();  // no override → millis
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
                               asio::use_future);
@@ -485,6 +496,7 @@ TEST_F(SendingTimePrecisionTest, SendingTimePrecision_DefaultMillis_ByteIdentica
 TEST_F(SendingTimePrecisionTest, InboundNanos52_ParsedNotRejected) {
     auto cfg = make_cfg(fixpp::core::fix_time_precision::millis);
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     // Drive to Active with a normal millis Logon.
     drive_to_active(sess);
@@ -547,6 +559,7 @@ TEST_F(SendingTimePrecisionTest, MaxLatency_OnNanosInbound_BoundaryCorrect) {
     {
         auto cfg = make_cfg(fixpp::core::fix_time_precision::millis);
         Session sess(engine, cfg);
+        fixpp::test_support::close_before_destroy const closer{sess, ioc};
         drive_to_active(sess);
         ASSERT_EQ(sess.state(), fsm_state::Active);
 
@@ -577,6 +590,7 @@ TEST_F(SendingTimePrecisionTest, MaxLatency_OnNanosInbound_BoundaryCorrect) {
         auto cfg = make_cfg(fixpp::core::fix_time_precision::millis);
         cfg.sending_time_threshold = std::chrono::seconds{120};
         Session sess2(engine, cfg);
+        fixpp::test_support::close_before_destroy const closer_sess2{sess2, ioc};
         drive_to_active(sess2);
         ASSERT_EQ(sess2.state(), fsm_state::Active);
 
@@ -594,9 +608,18 @@ TEST_F(SendingTimePrecisionTest, MaxLatency_OnNanosInbound_BoundaryCorrect) {
         }
         (void)fut.get();
 
-        EXPECT_EQ(sess2.state(), fsm_state::Disconnected)
-            << "session must Disconnect: ns 52= beyond MaxLatency (121s > 120s); "
-               "[FR-007/SC-004/New-4]";
+        // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+        // session stays Active through the wait and ends at its bound.
+        fixpp::test_support::expect_r2_wait(
+            fixpp::test_support::read_r2_wait(
+                sess2, *clock, std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+                [this] {
+                    for (int i = 0; i < 16; ++i) {
+                        ioc.restart();
+                        ioc.poll();
+                    }
+                }),
+            "ns 52= beyond MaxLatency (121s > 120s); [FR-007/SC-004/New-4]");
     }
 }
 
@@ -631,6 +654,7 @@ TEST_F(SendingTimePrecisionTest, OrigSendingTime122_PreservedVerbatim_OnResend) 
     auto store_factory = std::make_shared<CapturingStoreFactory126>();
     auto cfg = make_cfg(fixpp::core::fix_time_precision::nanos, store_factory);
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     // Drive to Active. The Logon reply (seq=1, admin) is stored but will be
     // GapFilled on ResendRequest (admin not replayed — FIX-SL §4.3.5).

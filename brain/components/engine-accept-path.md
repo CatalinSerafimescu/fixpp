@@ -9,6 +9,8 @@ refs:
   - include/fixpp/transport/listener.hpp
   - src/session/session_strand.cpp
   - .specify/544-hot-path-zero-alloc.md
+  - specs/105-transport-liveness/research.md
+  - specs/105-transport-liveness/contracts/transport-liveness-105.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/pr331-330-asio-listener-executor-gateb.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/pr326-310-315-gateb.md
@@ -64,6 +66,14 @@ feature could change it without changing anything this page names. **Re-derive b
 read `run_accept_loop` in `src/session/engine.cpp` and check whether the accept call sits inside a
 loop that continues past a successful handoff.
 
+*(105-transport-liveness, a lead to verify:)* the acceptor's first frame is delivered to the Session through the read
+pump (`run_read_pump`'s `first_frame` parameter in `src/session/engine.cpp`), so its ending closes the connection
+like any other (B&L `B-105-1`). Each connection `run_accept_loop` refuses before a Session exists writes one
+rate-bounded warn record (`log_pre_session_reject`), and a listener that cannot bind (or cannot be built) writes one error record
+(B&L `B-105-6`; 105 contract C-7, research D8). Re-derive the refusal branches: every `(void)transport->close(); continue;`
+in `run_accept_loop` before `open()` (105 data-model E-6's recipe). This supersedes `L-093-6`'s "no out-of-session
+log site exists in `src/`".
+
 ## ⚠️ Documents that describe this component and are WRONG
 
 Listed because omitting them is the defect this page exists to prevent. **Do not fix code to match
@@ -77,6 +87,11 @@ them.** Tracked by **issue #334**; the verdict there is that the docs are what s
 | `specs/015-runtime-engine/research.md` R3 | *"`co_spawn` an accept loop **on the engine executor**"* and *"`co_spawn` a **read-pump** coroutine on that session's strand"*, recorded as a **Decision** | ✅ **AMENDED 2026-08-29** — both clauses **deleted**, not restated. Shipped: `co_spawn(*entry.session_strand, …)`, and the pump is **`co_await`ed inline**. *"Repeatedly accept"* is literally true (`while (!engine.stopped())`) but serialized — it re-accepts only after the previous pump returns. Rationale/Cancellation/Alternatives explicitly **unaffected** |
 | `specs/015-runtime-engine/data-model.md` §Accept loop | *"A coroutine `co_spawn`ed **on the engine executor** … attach … **spawn read-pump**"* — the SAME two clauses as `research.md` R3, in the SAME feature bundle | ✅ **AMENDED 2026-08-31** — both clauses **deleted**, replaced by the spawn-site recipe; the step sequence kept as structural. ⚠️ **This page did not list it, and the 2026-08-29 pass amended its sibling and missed it** — the exact failure this page exists to prevent, recurring inside the fix for it. Found only by searching the *original* vocabulary (`engine executor`) rather than the corrected one |
 | `specs/012-2h-transport/spec.md` | user-story narrative describing **one** `async_accept` loop on a service-strand executor for all counterparties | ⚠️ **STALE — LEFT AS-IS by decision, 2026-08-29.** The engine ships one listener per session. Rewriting it is a **spec change, not a citation fix**, so it is not folded into a doc-correction pass. Tracked by #334; listed here so it is never read as agreeing with the code |
+
+| `specs/093-inbound-frame-dispositions/` FR-006 phase (b), contract C-4 and C-7 | a pre-Active connection refused into `Disconnected` keeps its transport until the establishment deadline closes it | ⚠️ **SUPERSEDED by 105** (FR-007; contract C-1 row 11, C-4): a refusal before Active closes its connection at once, or after its Logout's bounded wait. Frozen bundle; annotated here, not edited (B&L `B-093-4`, amended) |
+| `specs/092-garbled-frame-reject/` contract C-2 O-1 | the close timing of a refused or D-3 frame (a state transition, the transport left open) | ⚠️ **SUPERSEDED by 105** (FR-007): the edge into `Disconnected` closes the connection (B&L `B-092-2`, amended). Frozen bundle; annotated here |
+| `specs/005-session-establishment-fsm/research.md` D-8; `specs/013-session-reconnect-binding/` | the TestRequest at 1 × HeartBtInt; a session that ended leaves its accepted transport open | ⚠️ **SUPERSEDED by 105** (R-3; contract C-1): T, default 1.2 × HeartBtInt, the give-up at 2T; every ending closes the connection the accept path handed over. Frozen bundles; annotated here |
+| `specs/103-resend-logon-reset-fidelity/` Arm B's disclosure; `specs/104-sequence-reset-fidelity/` DQ-8 | after a too-low Logout the transport stays open (`L-103-5`) | ⚠️ **SUPERSEDED by 105** (FR-004): the R-2 wait, then the close (`L-103-5`, closed; `B-105-2`). Frozen bundles; annotated here |
 
 ⚠️ **Re-derive these before quoting them** — they are claims about a moving tree, and #334 says so in
 its own words.

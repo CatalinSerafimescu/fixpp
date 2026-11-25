@@ -58,6 +58,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -504,6 +505,7 @@ TEST_F(AdminDistinctNowTest, Logout_DistinctNow_TwoLogoutsHaveDistinctSendingTim
             captured1.emplace_back(f.begin(), f.end());
         };
         Session sess1(engine, cfg1);
+        fixpp::test_support::close_before_destroy const closer_sess1{sess1, ioc};
         ASSERT_TRUE(drive_to_active(sess1));
 
         // Feed inbound Logout → Session emits confirming Logout(35=5).
@@ -527,6 +529,7 @@ TEST_F(AdminDistinctNowTest, Logout_DistinctNow_TwoLogoutsHaveDistinctSendingTim
             captured2.emplace_back(f.begin(), f.end());
         };
         Session sess2(engine, cfg2);
+        fixpp::test_support::close_before_destroy const closer_sess2{sess2, ioc};
         ASSERT_TRUE(drive_to_active(sess2));
 
         auto peer_lo = build_frame("5", 2, kTarget, kSender, kBeginStr, "20240101-00:00:01.000");

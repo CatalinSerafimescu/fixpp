@@ -15,10 +15,9 @@
 //
 // Production-shape: drives bytes through Session::on_inbound_frame().
 //
-// RED witness: ReconnectFsm::reply_to_inbound_resend_request is a Phase-2 stub
-//   returning {} without walking the store or emitting SequenceReset(4). The
-//   EXPECT for a SequenceReset-GapFill outbound frame FAILS RED until T026 impl
-//   lands.
+// RED witness: no SequenceReset-GapFill outbound frame. The answer is the
+//   session's resend answer; the ReconnectFsm stub this header once named was
+//   removed by 105-transport-liveness (FR-013).
 
 #include <gtest/gtest.h>
 
@@ -359,8 +358,7 @@ TEST_F(RecoveryGapfillNearCapacityTest, LargeCompId_GapFillOverflow_IsFailClosed
 //   All messages in that range are admin (Heartbeat/TestRequest) so the session
 //   MUST emit exactly ONE SequenceReset{GapFillFlag=Y, NewSeqNo=13}.
 //
-// RED: reply_to_inbound_resend_request stub returns {} without emitting
-//   SequenceReset. EXPECT for SequenceReset(4)+GapFillFlag=Y FAILS RED.
+// RED: no SequenceReset emitted. EXPECT for SequenceReset(4)+GapFillFlag=Y FAILS RED.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST_F(RecoveryAdminSpanGapfillTest, AllAdminSpanCollapsesToSingleGapFill) {
     auto cfg = make_acceptor_cfg();
@@ -388,8 +386,7 @@ TEST_F(RecoveryAdminSpanGapfillTest, AllAdminSpanCollapsesToSingleGapFill) {
     EXPECT_TRUE(found_gapfill)
         << "Expected ONE SequenceReset(4){GapFillFlag=Y, NewSeqNo=" << next_out
         << "} outbound when peer asks ResendRequest[2..12] all-admin span. "
-        << "RED: reply_to_inbound_resend_request stub returns {} without emitting "
-        << "any SequenceReset frame — this assertion FAILS RED per T015 design.";
+        << "RED: no SequenceReset frame was emitted — this assertion FAILS RED per T015 design.";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -2,6 +2,12 @@
 //
 // tests/session/test_103_resend_state_reconnect.cpp — test-only.
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
+//
 // Feature 103 (specs/103-resend-logon-reset-fidelity/), fixpp#578: the resend state ends with
 // the connection. research.md "RED cells", "#578 — resend state across an in-place
 // reconnect"; tasks T018 (arms A, B, E and the fresh-Session control), T039 (arm C), T110
@@ -183,8 +189,16 @@ public:
                s.resend_outstanding() && s.state() == fsm_state::Active;
     }
 
-    // A too-low NewOrderSingle without PossDupFlag(43): Arm B ends the session.
-    void too_low_order() { (void)s.feed(s.order(1)); }
+    // A too-low NewOrderSingle without PossDupFlag(43): Arm B's Logout ends the session.
+    // 105-transport-liveness (R-2, contract C-2) supersedes its Disconnected at the Logout: the
+    // session stays Active through the wait, and the peer's Logout (W-1, numbered below
+    // NextNumIn as a peer on the too-low route numbers it) ends it, with no clock motion.
+    void too_low_order() {
+        (void)s.feed(s.order(1));
+        EXPECT_EQ(s.state(), fsm_state::Active)
+            << "the session did not stay Active through Arm B's wait (R-2)";
+        (void)s.feed(s.logout(1));
+    }
 
     // drive_reconnect(): the factory's mock transport is installed and the new Logon written
     // on it. Takes the reconnect mark first.

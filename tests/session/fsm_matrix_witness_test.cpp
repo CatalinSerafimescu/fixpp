@@ -2,6 +2,12 @@
 //
 // tests/session/fsm_matrix_witness_test.cpp
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
+//
 // 010-session-cfg-lifetime T016+T017 / Phase 5 / US3.
 //
 // FR-006 / SC-002 — FSM matrix per-cell witness (positive and forbidden cells).
@@ -85,9 +91,11 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/r2_wait_reading.hpp"
 #include "support/session_executor_of.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
@@ -894,6 +902,7 @@ TEST_F(FsmMatrixWitness, Active_InboundLogout_EmitsConfirmLogout_TransitionsToDi
     // FR-006: E07 from Active → emit Logout (35=5), → Disconnected.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
     clear_handshake_captures();
 
@@ -961,6 +970,7 @@ TEST_F(FsmMatrixWitness, Active_SeqnumTooLow_FatalTransitionsToDisconnected) {
     // the session ends, as the cell's name says.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
     const auto mark = captured_frames.size();
 
@@ -968,7 +978,18 @@ TEST_F(FsmMatrixWitness, Active_SeqnumTooLow_FatalTransitionsToDisconnected) {
     auto hb_low = build_frame("0", 1, kTarget, kSender, kBeginStr);
     (void)feed_sync(sess, hb_low);
 
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // session stays Active through the wait and ends at its bound.
+    fixpp::test_support::expect_r2_wait(
+        fixpp::test_support::read_r2_wait(
+            sess, *clock, std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            [&] {
+                for (int i = 0; i < 16; ++i) {
+                    ioc.restart();
+                    ioc.poll();
+                }
+            }),
+        "a too-low Heartbeat without 43=Y");
     std::vector<std::string> logout_texts;
     for (std::size_t i = mark; i < captured_frames.size(); ++i) {
         const std::string wire(reinterpret_cast<const char*>(captured_frames[i].data()),

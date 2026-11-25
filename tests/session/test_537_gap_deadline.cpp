@@ -2,11 +2,18 @@
 //
 // tests/session/test_537_gap_deadline.cpp
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
+//
 // fixpp#537, D-537-5 and D-537-9 (.specify/536-537-538-recovery-liveness.md §4.3, §4.6,
 // §4.7 and the #537 table of §5): an unfilled gap has a deadline. When a frame that does
 // not advance NextNumIn arrives while a resend is outstanding, and NextNumIn has not
 // advanced for twice HeartBtInt, the session sends a Logout whose Text(58) names the
-// unanswered resend and records Disconnected (103 research D6 widened "above NextNumIn" to
+// unanswered resend and records Disconnected at the end of its R-2 wait (above; 103 research
+// D6 widened "above NextNumIn" to
 // every frame that does not advance it). The check runs where such a frame leaves the
 // inbound arm without ending the session, and nowhere else: no timer is added.
 //
@@ -67,7 +74,20 @@ using fixpp::test_support::resend_gap::open_gap;
 using fixpp::test_support::resend_gap::Options;
 using fixpp::test_support::resend_gap::ResetRejectingApp;
 using fixpp::test_support::resend_gap::role_name;
-using fixpp::test_support::resend_gap::Scene;
+// 105-transport-liveness (R-3, research D6) supersedes 005 research D-8's 1 × HeartBtInt
+// TestRequest threshold: unset, test_request_threshold is 1.2 × HeartBtInt. This file's Scene
+// sets it to HeartBtInt, so its cells' TestRequest and give-up instants stay one and two
+// HeartBtInt after the last inbound frame; tests/session/test_105_liveness_timing.cpp reads the
+// default.
+struct Scene : fixpp::test_support::resend_gap::Scene {
+    explicit Scene(Options o = {}) : fixpp::test_support::resend_gap::Scene(pinned(o)) {}
+    static Options pinned(Options o) {
+        if (!o.test_request_threshold && o.heartbeat > std::chrono::seconds::zero()) {
+            o.test_request_threshold = std::chrono::milliseconds{o.heartbeat};
+        }
+        return o;
+    }
+};
 using fixpp::test_support::resend_gap::state_name;
 using orig = Scene::orig_time;
 
@@ -202,6 +222,12 @@ struct SiteRun {
     bool peer_saw_hang_up = false;
     // The same reading after Engine::stop(), which closes the transport.
     bool peer_read_ended_after_stop = false;
+    // 105-transport-liveness, the R-2 wait after the deadline's Logout (contract C-2): at the
+    // bound - 1 ms the transport open and the session Active; at the bound EOF and Disconnected.
+    bool open_before_the_wait_bound = false;
+    fsm_state state_before_the_wait_bound = fsm_state::NotConnected;
+    bool eof_at_the_wait_bound = false;
+    fsm_state state_at_the_wait_bound = fsm_state::NotConnected;
 };
 
 // The three frames before the bound on the rig: E + 20 s, E + 40 s, and a millisecond
@@ -209,13 +235,12 @@ struct SiteRun {
 constexpr std::array<std::chrono::nanoseconds, 3> kRigStepsBeforeTheBound{20s, 20s,
                                                                           kGapBound - 40s - 1ms};
 
-void read_the_ending(plain_rig::Rig& rig, std::size_t mark, SiteRun& o) {
+void read_the_ending(plain_rig::Rig& rig, std::size_t mark, SiteRun& o,
+                     std::chrono::milliseconds const bound) {
+    (void)wait_on(rig, [&] {
+        return !plain_rig::frames_of_type(rig.peer.received.substr(mark), "5").empty();
+    });
     o.state_after_the_bound_frame = rig.state();
-    if (o.state_after_the_bound_frame == fsm_state::Disconnected) {
-        (void)wait_on(rig, [&] {
-            return !plain_rig::frames_of_type(rig.peer.received.substr(mark), "5").empty();
-        });
-    }
     rig.settle();
     o.logouts = plain_rig::frames_of_type(rig.peer.received.substr(mark), "5");
     o.test_requests = plain_rig::frames_of_type(rig.peer.received.substr(mark), "1").size();
@@ -223,6 +248,15 @@ void read_the_ending(plain_rig::Rig& rig, std::size_t mark, SiteRun& o) {
 #if defined(FIXPP_TEST_PEER_HANG_UP_READING)
     o.peer_saw_hang_up = plain_rig::peer_sees_hang_up(rig.peer);
 #endif
+    // The wait's bound (`bound`, the session's logout_disconnect_timeout_ms) counts from the
+    // Logout's write start; the mock clock has not moved since that frame.
+    rig.clock->advance(bound - std::chrono::milliseconds{1});
+    rig.settle();
+    o.open_before_the_wait_bound = !rig.peer.read_ended;
+    o.state_before_the_wait_bound = rig.state();
+    rig.clock->advance(std::chrono::milliseconds{1});
+    o.eof_at_the_wait_bound = wait_on(rig, [&] { return rig.peer.read_ended; });
+    o.state_at_the_wait_bound = rig.state();
 }
 
 void stop_and_read(plain_rig::Rig& rig, SiteRun& o) {
@@ -310,7 +344,7 @@ SiteRun run_out_of_sequence_site(session_role role, interval iv = interval::set)
         ++seq;
         rig.peer.send(rig.msg("D", seq, Scene::order_fields(seq)));
         (void)wait_on(rig, [&] { return rig.state() == fsm_state::Disconnected; });
-        read_the_ending(rig, mark, o);
+        read_the_ending(rig, mark, o, std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms});
     }();
     stop_and_read(rig, o);
     return o;
@@ -380,7 +414,7 @@ SiteRun run_validate_gate_site() {
         // The frame's effect is one of two: the session ends, or the gate Rejects once more.
         (void)wait_on(
             rig, [&] { return rig.state() == fsm_state::Disconnected || read("3") > rejects; });
-        read_the_ending(rig, mark, o);
+        read_the_ending(rig, mark, o, std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms});
         o.rejects_for_the_bound_frame = read("3") - rejects;
     }();
     stop_and_read(rig, o);
@@ -389,7 +423,7 @@ SiteRun run_validate_gate_site() {
 
 // The assertions both rig cells share. `text_must_hold` is what Text(58) must contain, or
 // empty.
-void expect_logout_and_open_transport(SiteRun const& o, std::string const& text_must_hold) {
+void expect_logout_then_the_wait(SiteRun const& o, std::string const& text_must_hold) {
     ASSERT_TRUE(o.setup_miss.empty()) << o.setup_miss;
     EXPECT_TRUE(o.peer_read_ended_after_stop)
         << "the reading cannot report: the peer's read did not end after Engine::stop()";
@@ -406,14 +440,22 @@ void expect_logout_and_open_transport(SiteRun const& o, std::string const& text_
             << "Text(58) does not hold the expected MsgSeqNum " << text_must_hold << ": \"" << text
             << "\"";
     }
-    EXPECT_EQ(o.state_after_the_bound_frame, fsm_state::Disconnected);
     EXPECT_EQ(o.test_requests, 0U) << "the liveness loop sent a TestRequest during the cell";
 
-    // fixpp#534: the transport stays open after the Logout, until the peer closes it or
-    // close() or Engine::stop() runs. That issue's fix flips this assertion.
+    // 105-transport-liveness (R-2, contract C-2) supersedes fixpp#534's "the transport stays
+    // open after the Logout, until the peer closes it or close() or Engine::stop() runs": the
+    // session stays Active and the transport open through the wait, and both end at its bound.
+    EXPECT_EQ(o.state_after_the_bound_frame, fsm_state::Active)
+        << "the session did not stay Active after the deadline's Logout (R-2)";
     EXPECT_FALSE(o.peer_read_ended || o.peer_saw_hang_up)
-        << "the transport was closed after the deadline's Logout (read ended: " << o.peer_read_ended
+        << "the transport was closed at the deadline's Logout (read ended: " << o.peer_read_ended
         << ", hang-up seen: " << o.peer_saw_hang_up << ")";
+    EXPECT_TRUE(o.open_before_the_wait_bound) << "the transport was closed before the wait's bound";
+    EXPECT_EQ(o.state_before_the_wait_bound, fsm_state::Active)
+        << "the session ended before the wait's bound";
+    EXPECT_TRUE(o.eof_at_the_wait_bound) << "no EOF at the wait's bound";
+    EXPECT_EQ(o.state_at_the_wait_bound, fsm_state::Disconnected)
+        << "the session did not end at the wait's bound";
 #if !defined(FIXPP_TEST_PEER_HANG_UP_READING)
     std::printf("the reading \"the peer sees a hang-up\" was not made on this platform\n");
 #endif
@@ -427,10 +469,9 @@ class GapDeadlineOutOfSequenceSite : public ::testing::TestWithParam<session_rol
 
 // A frame above NextNumIn before the bound is ignored, a millisecond before it included;
 // the one at the bound draws the Logout, whose Text(58) holds the expected MsgSeqNum.
-TEST_P(GapDeadlineOutOfSequenceSite, FrameAtTheBoundDrawsTheLogoutAndTheTransportStaysOpen) {
+TEST_P(GapDeadlineOutOfSequenceSite, FrameAtTheBoundDrawsTheLogoutThenTheWaitEndsAtItsBound) {
     const auto o = run_out_of_sequence_site(GetParam());
-    ASSERT_NO_FATAL_FAILURE(
-        expect_logout_and_open_transport(o, std::to_string(kDistinctNextNumIn)));
+    ASSERT_NO_FATAL_FAILURE(expect_logout_then_the_wait(o, std::to_string(kDistinctNextNumIn)));
     // The phrase is pinned here: spelled out and not read from the session, so that a
     // change of the session's text fails this cell. The number is kDistinctNextNumIn in
     // digits.
@@ -453,8 +494,7 @@ INSTANTIATE_TEST_SUITE_P(BothRoles, GapDeadlineOutOfSequenceSite,
 // interval unset, is Capi537Witness.IntervalNeverSet_LogonCarriesTheDefaultInterval.
 TEST(GapDeadlineIntervalNeverSet, OutOfSequenceSite_FrameAtTwiceTheDefaultIntervalDrawsTheLogout) {
     const auto o = run_out_of_sequence_site(session_role::acceptor, interval::never_set);
-    ASSERT_NO_FATAL_FAILURE(
-        expect_logout_and_open_transport(o, std::to_string(kDistinctNextNumIn)));
+    ASSERT_NO_FATAL_FAILURE(expect_logout_then_the_wait(o, std::to_string(kDistinctNextNumIn)));
     EXPECT_EQ(field(o.logouts.front(), 58), "ResendRequest unanswered, expecting MsgSeqNum 7341");
     EXPECT_EQ(o.rejects_for_the_bound_frame, 0U);
 }
@@ -465,7 +505,7 @@ TEST(GapDeadlineIntervalNeverSet, OutOfSequenceSite_FrameAtTwiceTheDefaultInterv
 // first at the bound draws the Logout and no Reject.
 TEST(GapDeadlineValidateGateSite, V_InvalidFrameAtTheBoundDrawsTheLogoutAndNoReject) {
     const auto o = run_validate_gate_site();
-    expect_logout_and_open_transport(o, {});
+    expect_logout_then_the_wait(o, {});
     EXPECT_EQ(o.rejects_for_the_bound_frame, 0U)
         << "the frame at the bound drew a Reject as well as the Logout";
 }
@@ -522,7 +562,9 @@ TEST(GapDeadlineGuards, G1_SendingTimeOutsideTheThresholdAfterTheBound_RejectThe
     const auto mark = s.sent.size();
     const auto r = s.feed(s.order_with_stale_sending_time(g.n + kGapWidth + 1));
     EXPECT_TRUE(r.has_value());
-    EXPECT_EQ(s.state(), fsm_state::Disconnected);
+    // 105-transport-liveness (R-2, contract C-2): the SendingTime Reject's Logout is followed by
+    // the wait, the session Active through it and Disconnected at its bound.
+    fixpp::test_support::expect_r2_wait(s.read_r2_wait(), "the SendingTime guard's Logout");
     ASSERT_EQ(s.sent.size(), mark + 2U)
         << "the SendingTime guard writes a Reject and a Logout; the session wrote "
         << s.written(mark);
@@ -1039,7 +1081,8 @@ TEST(GapDeadlineResidualPattern, HeartbeatsBelowNextNumIn_TooLowLogoutAtTheFirst
     const auto mark = s.sent.size();
     const auto r = s.feed(s.heartbeat(1));
     EXPECT_TRUE(r.has_value()) << "on_inbound_frame returned an error";
-    EXPECT_EQ(s.state(), fsm_state::Disconnected) << state_name(s.state());
+    // 105-transport-liveness (R-2, contract C-2): Arm B's Logout is followed by the wait.
+    fixpp::test_support::expect_r2_wait(s.read_r2_wait(), "Arm B's Logout");
     const auto logouts = s.of_type("5", mark);
     ASSERT_EQ(logouts.size(), 1U) << "the session wrote " << s.written(mark);
     EXPECT_EQ(field(logouts.front(), 58),

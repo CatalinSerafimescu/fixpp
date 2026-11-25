@@ -29,6 +29,7 @@ using ReplaySubsumesReorderQueue = ParityAcceptorFixture;
 // Active (AwaitingResend transient), then a peer GapFill resynchronizes it.
 TEST_F(ReplaySubsumesReorderQueue, TooHighInboundRecoversViaResendNotReorderQueue) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U);  // expecting seq 2
 

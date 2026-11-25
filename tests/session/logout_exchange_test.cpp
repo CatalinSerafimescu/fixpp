@@ -67,6 +67,7 @@
 #include <vector>
 
 #include "_fixtures_/store_temp_dir.hpp"
+#include "support/close_before_destroy.hpp"
 #include "support/keep_running.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -693,6 +694,7 @@ TEST_F(LogoutExchangeTest, FeedInboundSpansTheArenaCopyNotTheCallersBuffer) {
 
     Session sess(engine, cfg);
     quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     ASSERT_TRUE(drive_to_active_initiator(sess));
 
     std::future<fixpp::core::expected_t<void>> fut;
@@ -910,6 +912,7 @@ TEST_F(LogoutExchangeTest, NotConnectedInboundLogoutDisconnects) {
 TEST_F(LogoutExchangeTest, LogonReceivedInboundLogoutDisconnects) {
     auto cfg0 = make_cfg();
     Session sess(engine, cfg0);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
 
     // Drive to LogonReceived (acceptor path: NotConnected → LogonReceived).
     // For this we need to be in NotConnected, which is post-construction.
@@ -937,6 +940,7 @@ TEST_F(LogoutExchangeTest, LogonReceivedInboundLogoutDisconnects) {
 
     Session sess2(engine, cfg);
     quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
+    fixpp::test_support::close_before_destroy const closer_sess2{sess2, ioc};
 
     auto r = open_session(sess);
     ASSERT_TRUE(r.has_value()) << kPumpBudgetMiss
@@ -1013,6 +1017,7 @@ TEST_F(LogoutExchangeTest, ActiveInboundLogoutEmitsConfirmAndDisconnects) {
 
     Session sess(engine, cfg);
     quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     ASSERT_TRUE(drive_to_active_initiator(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
@@ -1034,6 +1039,7 @@ TEST_F(LogoutExchangeTest, ActiveInboundLogout_SeqnumOverflow_SurfacesError) {
 
     Session sess(engine, cfg);
     quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     ASSERT_TRUE(drive_to_active_initiator(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
 

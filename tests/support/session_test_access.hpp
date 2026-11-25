@@ -191,6 +191,13 @@ struct session_test_access {
         return !s.pending_test_req_id_.empty();
     }
 
+    // Seeds the per-session TestReqID counter, as a Session that has issued that many
+    // TestRequests would hold it (105-transport-liveness, contract C-1 row 8). Session strand
+    // only.
+    static void set_next_test_request_id(Session& s, std::uint32_t n) noexcept {
+        s.next_test_request_id_ = n;
+    }
+
     // Whether a resend is outstanding: the session sent a ResendRequest and NextNumIn has
     // not passed the gap it recorded (fixpp#537, D-537-5). Session strand only.
     [[nodiscard]] static bool resend_outstanding(Session const& s) noexcept {
@@ -227,6 +234,31 @@ struct session_test_access {
         return s.callback_depth_;
     }
     [[nodiscard]] static std::uint32_t conn_gen(Session const& s) noexcept { return s.conn_gen_; }
+    // 105 (research D10, the spawn-failure seams): the close frame's spawn fails while the
+    // predicate returns true; and the close frame's join counter.
+    static void set_close_frame_spawn_fails(Session& s, std::function<bool()> fails) {
+        s.close_frame_spawn_fails_ = std::move(fails);
+    }
+    [[nodiscard]] static int connection_close_count(Session const& s) noexcept {
+        return s.connection_close_counter_->load(std::memory_order_acquire);
+    }
+    // 105-transport-liveness (data-model E-3): the ending Logout's state and seams.
+    using ending_phase = Session::ending_wait_state::phase_t;
+    [[nodiscard]] static ending_phase ending_wait_phase(Session const& s) noexcept {
+        return s.ending_wait_.phase;
+    }
+    [[nodiscard]] static bool ending_wait_cut(Session const& s) noexcept {
+        return s.ending_wait_.cut;
+    }
+    [[nodiscard]] static int ending_logout_bound_count(Session const& s) noexcept {
+        return s.ending_logout_bound_counter_->load(std::memory_order_acquire);
+    }
+    static void set_ending_bound_spawn_fails(Session& s, std::function<bool()> fails) {
+        s.ending_bound_spawn_fails_ = std::move(fails);
+    }
+    static void set_ending_bound_race_throws(Session& s, std::function<bool()> throws) {
+        s.ending_bound_race_throws_ = std::move(throws);
+    }
     [[nodiscard]] static int peer_logout_bound_count(Session const& s) noexcept {
         return s.peer_logout_bound_counter_->load(std::memory_order_acquire);
     }

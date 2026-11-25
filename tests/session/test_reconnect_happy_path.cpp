@@ -307,7 +307,7 @@ TEST_F(ReconnectHappyPathTest, ReconnectFsmAccessorsCompile) {
     policy.schedule = {std::chrono::milliseconds{1000}, std::chrono::milliseconds{2000},
                        std::chrono::milliseconds{4000}};
 
-    ReconnectFsm fsm(nullptr, std::move(policy), std::chrono::seconds{30}, 2000ms);
+    ReconnectFsm fsm(nullptr, std::move(policy));
 
     EXPECT_FALSE(fsm.is_awaiting_resend())
         << "Default-constructed FSM must not be in AwaitingResend";
@@ -382,7 +382,7 @@ TEST_F(ReconnectHappyPathTest, ReconnectLoopMintsFreshTransport) {
     policy.schedule = {10ms, 20ms, 40ms};
 
     // Pass raw pointer — non-owning, factory_owner is the strong ref anchor.
-    ReconnectFsm fsm(factory_owner.get(), std::move(policy), std::chrono::seconds{30}, 2000ms);
+    ReconnectFsm fsm(factory_owner.get(), std::move(policy));
 
     // drive_reconnect_attempt() MUST call factory_->make(...) once per attempt
     // (FR-001 / FR-002). The Phase 2 stub returns {} without calling make() →

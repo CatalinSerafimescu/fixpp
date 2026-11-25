@@ -9,8 +9,10 @@
 //
 // The cells are timelines of the liveness loop on a mock clock. HB is the Scene's
 // HeartBtInt and E the instant a gap opened. The loop writes a TestRequest when no frame
-// arrived for one HB, and ends the session, silently, when that TestRequest is still
-// pending one HB after it was due. So "the session is Active just past that instant" is
+// arrived for one HB, and ends the session when that TestRequest is still pending one HB
+// after it was due, with the Logout of 105-transport-liveness R-1 (FR-003), which supersedes
+// the silent ending (the 536-537-538 note's R-6, "Not chosen: … a Logout on the dead-peer
+// ending"). So "the session is Active just past that instant" is
 // the reading that tells an answered TestRequest from one a dropped Heartbeat left
 // pending, and each cell that makes it first reads that the TestRequest was written.
 
@@ -40,7 +42,20 @@ using fixpp::test_support::resend_gap::kGapWidth;
 using fixpp::test_support::resend_gap::kHeartBtInt;
 using fixpp::test_support::resend_gap::open_gap;
 using fixpp::test_support::resend_gap::Options;
-using fixpp::test_support::resend_gap::Scene;
+// 105-transport-liveness (R-3, research D6) supersedes 005 research D-8's 1 × HeartBtInt
+// TestRequest threshold: unset, test_request_threshold is 1.2 × HeartBtInt. This file's Scene
+// sets it to HeartBtInt, so its cells' TestRequest and give-up instants stay one and two
+// HeartBtInt after the last inbound frame; tests/session/test_105_liveness_timing.cpp reads the
+// default.
+struct Scene : fixpp::test_support::resend_gap::Scene {
+    explicit Scene(Options o = {}) : fixpp::test_support::resend_gap::Scene(pinned(o)) {}
+    static Options pinned(Options o) {
+        if (!o.test_request_threshold && o.heartbeat > std::chrono::seconds::zero()) {
+            o.test_request_threshold = std::chrono::milliseconds{o.heartbeat};
+        }
+        return o;
+    }
+};
 using fixpp::test_support::resend_gap::state_name;
 using orig = Scene::orig_time;
 
@@ -93,8 +108,9 @@ TEST(TooHighHeartbeatDuringTheGap, Q_AnswersTheTestRequestAndTheDeadlineEndsTheS
 
 // N, control for a peer that answers nothing: the same gap, nothing delivered, and the
 // clock past the grace deadline. The ending is the dead-peer one, with or without a gap:
-// Disconnected, and no Logout.
-TEST(TooHighHeartbeatDuringTheGap, N_Control_NothingDelivered_EndsSilentlyAtTheGraceCheck) {
+// 105-transport-liveness's R-1 (FR-003), which supersedes the silent ending: one Logout with
+// R-1's Text, then Disconnected, with no wait after it.
+TEST(TooHighHeartbeatDuringTheGap, N_Control_NothingDelivered_EndsWithTheGiveUpsLogout) {
     Scene s;
     const Gap g = open_gap(s);
     ASSERT_NE(g.n, 0U);
@@ -102,7 +118,10 @@ TEST(TooHighHeartbeatDuringTheGap, N_Control_NothingDelivered_EndsSilentlyAtTheG
 
     s.pass(kPastTheGrace);
     EXPECT_EQ(s.state(), fsm_state::Disconnected) << "past the grace deadline";
-    EXPECT_EQ(s.count("5", g.mark), 0U) << "the dead-peer ending wrote a Logout";
+    auto const logouts = s.of_type("5", g.mark);
+    ASSERT_EQ(logouts.size(), 1U) << "the give-up's Logout: " << s.written(g.mark);
+    EXPECT_EQ(field(logouts.front(), 58).rfind("TestRequest unanswered, TestReqID ", 0), 0U)
+        << "the give-up's Text(58): " << field(logouts.front(), 58);
     EXPECT_EQ(s.count("1"), 1U);
 }
 
@@ -169,9 +188,14 @@ TEST(TooHighHeartbeatDuringTheGap, OtherTestReqId_EndsTheSessionAtThatFrame) {
 }
 
 // Bounds of the rule, first: a Heartbeat below NextNumIn does not clear a pending
-// TestRequest, even with its TestReqID. The session ends at the grace check. The Heartbeat
-// carries PossDupFlag(43)=Y, so the PossDup arm ignores it: without 43=Y it draws the
-// too-low Logout (103, FR-018), which is not this control's subject.
+// TestRequest, even with its TestReqID. 105-transport-liveness (clarification D-c; research
+// D6) supersedes "the session ends at the grace check": the frame restarts the inbound
+// silence, so past the old grace check the session is Active, and it gives up two thresholds
+// after the frame, naming the TestRequest. The frame arrives at the TestRequest's own instant,
+// so it is not "an inbound frame since the TestRequest" (data-model E-4) and no second
+// TestRequest goes. The Heartbeat carries PossDupFlag(43)=Y, so the PossDup arm ignores
+// it: without 43=Y it draws the too-low Logout (103, FR-018), which is not this control's
+// subject.
 TEST(TooHighHeartbeatDuringTheGap, Control_HeartbeatBelowNextNumIn_LeavesTheTestRequestPending) {
     Scene s;
     const Gap g = open_gap(s);
@@ -188,13 +212,27 @@ TEST(TooHighHeartbeatDuringTheGap, Control_HeartbeatBelowNextNumIn_LeavesTheTest
     EXPECT_EQ(s.state(), fsm_state::Active);
 
     s.pass(kPastTheGrace);
-    EXPECT_EQ(s.state(), fsm_state::Disconnected) << "past the grace deadline";
-    EXPECT_EQ(s.count("5", g.mark), 0U);
+    EXPECT_EQ(s.state(), fsm_state::Active) << "given up at the old grace check, before 2T of "
+                                               "inbound silence since the Heartbeat";
+    EXPECT_EQ(s.count("1"), 1U) << "a second TestRequest";
+    EXPECT_EQ(s.count("5", g.mark), 0U) << s.written(g.mark);
+
+    s.pass(kHeartBtInt);
+    EXPECT_EQ(s.state(), fsm_state::Disconnected) << "not given up 2T after the Heartbeat";
+    // 105 R-1 (FR-003; research D3): the ending writes one Logout naming the TestRequest.
+    ASSERT_EQ(s.count("5", g.mark), 1U) << s.written(g.mark);
+    std::string logout;
+    for (std::size_t i = g.mark; i < s.sent.size(); ++i) {
+        if (field(s.sent[i], 35) == "5") logout = s.sent[i];
+    }
+    EXPECT_EQ(field(logout, 58), "TestRequest unanswered, TestReqID " + id) << logout;
 }
 
 // Bounds of the rule, second: with validate_sequence_numbers off no resend is ever
-// outstanding, and a Heartbeat above NextNumIn does not clear a pending TestRequest.
-TEST(TooHighHeartbeatDuringTheGap, Control_KnobOff_HeartbeatAboveNextNumIn_LeavesItPending) {
+// outstanding. 105 (research D5, #582; contract C-5.1) supersedes "a Heartbeat above NextNumIn
+// does not clear a pending TestRequest": with the knob off it answers it, by the TestReqID rule,
+// and still writes nothing and enters no AwaitingResend.
+TEST(TooHighHeartbeatDuringTheGap, Control_KnobOff_HeartbeatAboveNextNumIn_AnswersIt) {
     Scene s{Options{.validate_sequence_numbers = false}};
     ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
     const seqnum_t n = s.next_in();
@@ -205,9 +243,8 @@ TEST(TooHighHeartbeatDuringTheGap, Control_KnobOff_HeartbeatAboveNextNumIn_Leave
     (void)s.feed(s.heartbeat(n + 5, id));
     ASSERT_FALSE(s.resend_outstanding()) << "the knob-off session entered AwaitingResend";
     EXPECT_EQ(s.sent.size(), mark) << "the session wrote " << s.written(mark);
-    // fixpp#582 is the follow-up on this knob: its fix flips the next assertion.
-    EXPECT_TRUE(s.test_request_pending())
-        << "with the knob off, a Heartbeat above NextNumIn cleared the TestRequest";
+    EXPECT_FALSE(s.test_request_pending())
+        << "with the knob off, a Heartbeat above NextNumIn did not answer the TestRequest";
     EXPECT_EQ(s.state(), fsm_state::Active);
 }
 

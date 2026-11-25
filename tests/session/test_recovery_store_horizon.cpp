@@ -343,7 +343,7 @@ TEST_F(RecoveryStoreHorizonTest, PreHorizonGapCollapsedToGapFill) {
     }
     EXPECT_TRUE(found_prehorizon_gapfill)
         << "Expected SequenceReset{GapFillFlag=Y, NewSeqNo=7} for pre-horizon "
-        << "gap [2..6]. RED: reply_to_inbound_resend_request stub emits nothing "
+        << "gap [2..6]. RED: no pre-horizon GapFill was emitted "
         << "— FAILS RED per T016 design.";
 }
 

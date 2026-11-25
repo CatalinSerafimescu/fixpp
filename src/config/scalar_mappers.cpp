@@ -282,7 +282,16 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
         std::string_view tok = n->as_string()->get();
         auto d = parse_duration_to_ms(tok, kp(key_prefix, "test_request_threshold"), acc,
                                       loc_for_key(raw_session, "test_request_threshold"));
-        if (d.ok) {
+        if (d.ok && d.value_ms == 0) {
+            // 105 (FR-011, contract C-6.6): a zero threshold is refused. A negative token never
+            // gets here: the parser refuses a token that does not start with a digit.
+            acc.add(LoadDiagnostic{
+                .key_path = kp(key_prefix, "test_request_threshold"),
+                .reason = reason_class::out_of_range,
+                .location = loc_for_key(raw_session, "test_request_threshold"),
+                .message = "test_request_threshold must be greater than zero",
+            });
+        } else if (d.ok) {
             out.test_request_threshold = std::chrono::milliseconds{d.value_ms};
         }
     }

@@ -2,6 +2,12 @@
 //
 // tests/session/test_099_validation_off.cpp
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
+//
 // 099-fixt-appl-version-validation, contracts/witnesses.md W-6 (tasks.md T013): with validation off
 // every W-4 input ends as research R-18's `off` line says, a literal per cell, whose mutants are
 // M-28 and M-29. `off-pair` and `off-hops` are the two the row states differ from that log's tree.
@@ -26,6 +32,9 @@
 namespace fixpp::session::test099 {
 namespace {
 
+// 105-transport-liveness (R-2, contract C-2) supersedes `Disc` on the AC-g rows whose
+// SendingTime Reject draws a Logout: `wait`, the session Active through the wait and ended at
+// its bound (test_099_fixt_support.hpp's short_form).
 const KeyedRow kActiveOff[] = {
     {.cell = "AC-a",
      .input = "rep35 D..0 past seq+5",
@@ -58,20 +67,20 @@ const KeyedRow kActiveOff[] = {
     {.cell = "AC-f", .input = "wrongBS NOS", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "AC-g",
      .input = "stale Logon 1137=9",
-     .t = "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
+     .t = "R 10/52 A 45=2 + Logout | wait | k | app=0 adm=0"},
     {.cell = "AC-g",
      .input = "stale Logon 1137=99",
-     .t = "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
+     .t = "R 10/52 A 45=2 + Logout | wait | k | app=0 adm=0"},
     {.cell = "AC-g",
      .input = "stale Logon 1137=4",
-     .t = "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
+     .t = "R 10/52 A 45=2 + Logout | wait | k | app=0 adm=0"},
     {.cell = "AC-g",
      .input = "stale Logon 1137 absent",
-     .t = "R 10/52 A 45=2 + Logout | Disc | k | app=0 adm=0"},
-    {.cell = "AC-g", .input = "stale NOS", .t = "R 10/52 D 45=2 + Logout | Disc | c | app=0 adm=0"},
+     .t = "R 10/52 A 45=2 + Logout | wait | k | app=0 adm=0"},
+    {.cell = "AC-g", .input = "stale NOS", .t = "R 10/52 D 45=2 + Logout | wait | c | app=0 adm=0"},
     {.cell = "AC-g",
      .input = "stale Heartbeat",
-     .t = "R 10/52 0 45=2 + Logout | Disc | c | app=0 adm=0"},
+     .t = "R 10/52 0 45=2 + Logout | wait | c | app=0 adm=0"},
     {.cell = "AC-admin", .input = "Heartbeat 1128=99 hdr", .t = "- | stays | c | app=0 adm=1"},
     {.cell = "AC-admin", .input = "Heartbeat 1128=10 hdr", .t = "- | stays | c | app=0 adm=1"},
     {.cell = "AC-admin",

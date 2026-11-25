@@ -50,14 +50,18 @@
 #if FIXPP_BUILD_OTEL
 #include <fixpp/otel/providers.hpp>
 #endif
+#include <fixpp/session/detail/log_rate_gate.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <fixpp/wire/framer.hpp>
 #include <memory>
+#include <new>
 #include <optional>
 #include <span>
+#include <string_view>
+#include <system_error>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -238,6 +242,12 @@ expected_t<void> Engine::register_session(SessionConfig cfg) {
     // refused before any registry mutation, as Session::open() refuses it.
     if (cfg.logon_timeout_ms == 0) return std::unexpected(error::invalid_session_config);
 
+    // 105 (FR-011, contract C-6.6): a set test_request_threshold of zero or below is refused
+    // before any registry mutation, as Session::open() refuses it.
+    if (!fixpp::session::test_request_threshold_in_range(cfg)) {
+        return std::unexpected(error::invalid_session_config);
+    }
+
     // 093 (FR-010, plan OD-2): an advertised MaxMessageSize(383) outside its range is
     // refused before any registry mutation, as Session::open() refuses it.
     if (!fixpp::session::advertised_max_message_size_in_range(cfg)) {
@@ -410,7 +420,7 @@ using fixpp::session::detail::scan_first_frame_ids;
 using fixpp::session::detail::read_first_frame_bounded;
 
 // ── Read-pump (US2 T015) ─────────────────────────────────────────────────────
-// Co-awaited inline from run_accept_loop after the first Logon is delivered.
+// Co-awaited inline from run_accept_loop with the acceptor's first frame (105 FR-006).
 // Runs on the accept loop's executor (== session strand in the single-executor
 // model used by the tests and the current engine). Reads subsequent frames,
 // parses them with a session-lifetime Framer + pmr_carry_buffer, and delivers
@@ -452,7 +462,17 @@ using fixpp::session::detail::read_first_frame_bounded;
 //                           by that exception. Engine::stop() closes the transport
 //                           (its step 2) and the session (its step 4).
 //   establishment deadline → note_establishment_timeout, close session terminal,
-//                           stop pump (093, C-4).
+//                           stop pump (093, C-4). 105 (research D4; data-model E-5): the
+//                           timeout's event and record only when the session has not
+//                           recorded its own ending; the close either way.
+//   connection-end latch   → 105 D1 (research D1 item 2), superseding the rule that a
+//                           frame's Disconnected leaves the transport open: after every
+//                           on_inbound_frame return the latch is tested and cleared
+//                           (session_engine_access::take_connection_end), and a set latch
+//                           closes the session terminally, as an error result does.
+//   first frame            → 105 (research D1 item 3; FR-006): the acceptor's first frame
+//                           is delivered here, before initial_bytes, with every later
+//                           frame's disposition and without the expired() pre-check.
 //
 // Natural backpressure: no inbound queue; each on_inbound_frame call must
 // complete before the next read_some is issued (SC-003 / US2 AC1).
@@ -466,8 +486,9 @@ using fixpp::session::detail::read_first_frame_bounded;
 
 asio::awaitable<void> run_read_pump(
     fixpp::transport::Transport& transport, fixpp::session::Session& session,
-    fixpp::session::SessionConfig const& cfg, std::span<const std::byte> initial_bytes,
-    fixpp::core::Clock& clock, std::optional<fixpp::core::steady_time_point> establish_deadline) {
+    fixpp::session::SessionConfig const& cfg, std::span<const std::byte> first_frame,
+    std::span<const std::byte> initial_bytes, fixpp::core::Clock& clock,
+    std::optional<fixpp::core::steady_time_point> establish_deadline) {
     using fixpp::session::session_engine_access;
     using namespace asio::experimental::awaitable_operators;
 
@@ -523,9 +544,31 @@ asio::awaitable<void> run_read_pump(
         return establishing() && clock.steady_now() >= *establish_deadline;
     };
     auto expire = [&]() -> asio::awaitable<void> {
-        session_engine_access::note_establishment_timeout(session);
+        // 105 (research D4; data-model E-5): unless the session has recorded its own ending.
+        if (session.state() != fsm_state::Disconnected) {
+            session_engine_access::note_establishment_timeout(session);
+        }
         co_await stop_pump();
     };
+    // A frame's disposition: an error result, or the connection-end latch the frame's arm
+    // left set, closes the session (105 D1, research D1 item 2).
+    auto frame_ends = [&](fixpp::core::expected_t<void> const& r) noexcept {
+        return !r.has_value() || session_engine_access::take_connection_end(session);
+    };
+
+    // 105 (data-model E-5): the establishment deadline, handed to the Session once before the
+    // first delivery, caps a pre-Active ending's wait (data-model E-3, "The establishment cap").
+    if (establish_deadline) {
+        session_engine_access::set_establishment_deadline(session, *establish_deadline);
+    }
+
+    if (!first_frame.empty()) {
+        auto deliver_r = co_await session.on_inbound_frame(first_frame);
+        if (frame_ends(deliver_r)) {
+            co_await stop_pump();
+            co_return;
+        }
+    }
 
     // Seed the framer with any surplus bytes carried over from the bounded
     // first-frame read (a coalesced Logon‖next-frame, F-015-002). Drain them
@@ -548,7 +591,7 @@ asio::awaitable<void> run_read_pump(
                     co_return;
                 }
                 auto deliver_r = co_await session.on_inbound_frame(frame.bytes());
-                if (!deliver_r.has_value()) {
+                if (frame_ends(deliver_r)) {
                     co_await stop_pump();
                     co_return;
                 }
@@ -615,9 +658,9 @@ asio::awaitable<void> run_read_pump(
                     co_return;
                 }
                 auto deliver_r = co_await session.on_inbound_frame(frame.bytes());
-                if (!deliver_r.has_value()) {
-                    // Session-fatal error from FSM (e.g. seqnum overflow, store I/O).
-                    // Per FR-012: close and stop. [T015]
+                if (frame_ends(deliver_r)) {
+                    // Session-fatal error from FSM (e.g. seqnum overflow, store I/O), or the
+                    // ending the frame's arm recorded (105 D1). Per FR-012: close and stop.
                     co_await stop_pump();
                     co_return;
                 }
@@ -718,6 +761,96 @@ void log_role_loop_open_failure(fixpp::core::EngineConfig const& engine_cfg,
                fixpp::log::ArgValue::from_inline(session_cfg.sender_comp_id),
                fixpp::log::ArgValue::from_inline(session_cfg.target_comp_id),
                fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(failure)));
+}
+}  // namespace
+
+// ── 105-transport-liveness: the acceptor's records before a Session exists (FR-014, FR-015;
+// research D8; contract C-7; data-model E-6, E-7) ─────────────────────────────────────────────
+// One warn record per connection run_accept_loop refuses before open(), through the entry's
+// logger (logger_override, else the engine's) with the entry's initial trace context, as
+// log_role_loop_open_failure resolves them; at most one per window per entry (the loop's
+// detail::log_rate_gate), the next carrying the refusals not written since. The first frame's
+// BeginString and CompIDs come from an unauthenticated peer, so each byte outside printable
+// ASCII is written as '?', and ArgValue's inline copy cuts each at 15 bytes. Re-derive the
+// reasons from the code: every reject_pre_session call in run_accept_loop is one
+// pre_session_reject value, and it closes the transport before it writes the record. Both
+// format strings are registered in src/log/format_registry.cpp.
+namespace {
+enum class pre_session_reject : std::uint8_t {
+    not_tls_transport,
+    tls_handshake_failed,
+    no_establishment_time,
+    first_frame_read_failed,
+    first_frame_without_ids,
+    compid_mismatch,
+};
+
+char const* pre_session_reject_name(pre_session_reject r) noexcept {
+    switch (r) {
+        case pre_session_reject::not_tls_transport:
+            return "not_tls";
+        case pre_session_reject::tls_handshake_failed:
+            return "tls_handshake";
+        case pre_session_reject::no_establishment_time:
+            return "no_time_left";
+        case pre_session_reject::first_frame_read_failed:
+            return "first_frame";
+        case pre_session_reject::first_frame_without_ids:
+            return "no_ids";
+        case pre_session_reject::compid_mismatch:
+            return "no_session";
+    }
+    return "unknown";
+}
+
+// A peer-supplied value as the record carries it: at most the inline copy's 15 bytes, each
+// byte outside printable ASCII (0x20 to 0x7E) replaced by '?'.
+fixpp::log::ArgValue printable_inline(std::string_view v) noexcept {
+    std::array<char, 15> buf{};
+    std::size_t const n = std::min(v.size(), buf.size());
+    for (std::size_t i = 0; i < n; ++i) {
+        auto const c = static_cast<unsigned char>(v[i]);
+        buf[i] = (c >= 0x20U && c <= 0x7EU) ? v[i] : '?';
+    }
+    return fixpp::log::ArgValue::from_inline(std::string_view{buf.data(), n});
+}
+
+// ids: the first frame's identifiers, as read; empty before the first frame was read.
+void log_pre_session_reject(fixpp::core::EngineConfig const& engine_cfg,
+                            SessionConfig const& session_cfg, detail::log_rate_gate& gate,
+                            pre_session_reject reason, detail::FirstFrameIds const& ids,
+                            std::uint64_t failure) noexcept {
+    auto const now = engine_cfg.clock->steady_now();
+    auto const suppressed = detail::admit_log_record(
+        gate, now, detail::log_rate_window_end(now, session_cfg.heartbeat_interval), 1);
+    if (!suppressed) {
+        return;
+    }
+    auto const& logger =
+        session_cfg.logger_override ? session_cfg.logger_override : engine_cfg.logger;
+    FIXPP_SLOG(logger.get(), warn, session_cfg.initial_trace_context, fixpp::log::cat::session,
+               "acceptor connection refused before a session: reason={} begin_string={} "
+               "sender_comp_id={} target_comp_id={} error={} suppressed_since_last={}",
+               fixpp::log::ArgValue::from_static(pre_session_reject_name(reason)),
+               printable_inline(ids.begin_string), printable_inline(ids.sender_comp_id),
+               printable_inline(ids.target_comp_id), fixpp::log::ArgValue::from_u64(failure),
+               fixpp::log::ArgValue::from_u64(*suppressed));
+}
+
+// C-7.3: the listener could not be built (bind or listen failed, or the construction threw
+// something else); one error record per start of the entry's accept loop, which then ends.
+// `failure` is the system error's value, or 0 when the exception carries none.
+void log_listener_bind_failure(fixpp::core::EngineConfig const& engine_cfg,
+                               SessionConfig const& session_cfg, std::int64_t failure) noexcept {
+    auto const& logger =
+        session_cfg.logger_override ? session_cfg.logger_override : engine_cfg.logger;
+    FIXPP_SLOG(logger.get(), error, session_cfg.initial_trace_context, fixpp::log::cat::session,
+               "acceptor listener could not bind: begin_string={} sender_comp_id={} "
+               "target_comp_id={} error={}",
+               fixpp::log::ArgValue::from_inline(session_cfg.begin_string),
+               fixpp::log::ArgValue::from_inline(session_cfg.sender_comp_id),
+               fixpp::log::ArgValue::from_inline(session_cfg.target_comp_id),
+               fixpp::log::ArgValue::from_i64(failure));
 }
 }  // namespace
 
@@ -822,9 +955,20 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
 
     std::unique_ptr<fixpp::transport::asio_listener> listener;
     try {
+        // 105 (research D8, tasks.md T106): the test seam stands in for an allocation failure
+        // of the construction; null outside tests.
+        if (engine.test_hook_listener_construction_fails_ &&
+            engine.test_hook_listener_construction_fails_()) {
+            throw std::bad_alloc{};
+        }
         listener = std::make_unique<fixpp::transport::asio_listener>(exec, lcfg);
+    } catch (std::system_error const& e) {
+        // listener bind/listen failed; loop exits (105 C-7.3: one error record).
+        log_listener_bind_failure(engine_cfg, entry.config, e.code().value());
+        co_return;
     } catch (...) {
-        co_return;  // listener bind/listen failed; loop exits
+        log_listener_bind_failure(engine_cfg, entry.config, 0);
+        co_return;
     }
 
     // T018 (D0/INV-0): store listener and bound endpoint on the CONTROL STRAND
@@ -899,6 +1043,10 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         co_return;
     }
 
+    // 105 (research D8; data-model E-7): the pre-session refusal record's gate, one per entry
+    // for the loop's lifetime.
+    detail::log_rate_gate reject_log_gate;
+
     // ── Accept loop ──────────────────────────────────────────────────────────
     // Session construction is LAZY + MATCH-GATED (FQ-2 / data-model C1 step 6):
     // the Session is constructed and open()'d ONLY after CompID resolution
@@ -935,6 +1083,15 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         assert_transport_on_session_strand(*transport, *entry.session_strand);
 
+        // A pre-session refusal: the transport closed, then the rate-bounded record. Nothing
+        // consumes a close error.
+        auto const reject_pre_session = [&](pre_session_reject reason,
+                                            detail::FirstFrameIds const& ids,
+                                            std::uint64_t failure) noexcept {
+            (void)transport->close();
+            log_pre_session_reject(engine_cfg, entry.config, reject_log_gate, reason, ids, failure);
+        };
+
         // Step 2: TLS handshake (skipped for plaintext).
         // 043 T014 site #3 (D-8/E-7): on insecure_plain_tcp the accepted transport
         // is asio_plain_transport (not TlsTransport). The dynamic_cast returns null,
@@ -948,16 +1105,15 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             // dynamic_cast to TlsTransport to call async_handshake.
             auto* tls_transport = dynamic_cast<fixpp::transport::TlsTransport*>(transport.get());
             if (!tls_transport) {
-                // Rejecting a pre-session connection: nothing consumes a close error.
-                (void)transport->close();
+                reject_pre_session(pre_session_reject::not_tls_transport, {}, 0);
                 continue;  // not a TLS transport — config error; re-accept
             }
 
             {
                 auto hs_r = co_await tls_transport->async_handshake(ssl_cfg);
                 if (!hs_r.has_value()) {
-                    // Rejecting a pre-session connection: nothing consumes a close error.
-                    (void)transport->close();
+                    reject_pre_session(pre_session_reject::tls_handshake_failed, {},
+                                       static_cast<std::uint64_t>(hs_r.error()));
                     continue;  // handshake failure → reclaim slot, re-accept
                 }
                 hr = std::move(*hs_r);
@@ -972,8 +1128,7 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         auto const establish_left = std::chrono::ceil<std::chrono::milliseconds>(
             fixpp::session::detail::duration_until(establish_now, establish_deadline));
         if (establish_left <= std::chrono::milliseconds::zero()) {
-            // Rejecting a pre-session connection: nothing consumes a close error.
-            (void)transport->close();
+            reject_pre_session(pre_session_reject::no_establishment_time, {}, 0);
             continue;
         }
 
@@ -1029,8 +1184,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
                 fixpp::session::detail::inbound_framer_config(
                     entry.config, fixpp::session::inbound_limit_for(entry.config)));
             if (!read_r.has_value()) {
-                // Rejecting a pre-session connection: nothing consumes a close error.
-                (void)transport->close();
+                reject_pre_session(pre_session_reject::first_frame_read_failed, {},
+                                   static_cast<std::uint64_t>(read_r.error()));
                 continue;  // timeout / over-budget / read-error → reclaim
             }
             first_frame_offset = read_r->offset;
@@ -1050,8 +1205,7 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // Step 4: parse CompIDs for reversed-CompID registry resolution.
         auto ids = scan_first_frame_ids(first_frame);
         if (ids.begin_string.empty() || ids.sender_comp_id.empty() || ids.target_comp_id.empty()) {
-            // Rejecting a pre-session connection: nothing consumes a close error.
-            (void)transport->close();
+            reject_pre_session(pre_session_reject::first_frame_without_ids, ids, 0);
             continue;  // malformed first frame → reclaim
         }
 
@@ -1064,8 +1218,7 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             // No registry match — unknown acceptor session (slot 121).
             // Per data-model C1 step 6 and engine.hpp lookup() contract:
             // close the transport and construct NO session. [FQ-2 / gate-b/r1]
-            // Rejecting a pre-session connection: nothing consumes a close error.
-            (void)transport->close();
+            reject_pre_session(pre_session_reject::compid_mismatch, ids, 0);
             continue;
         }
 
@@ -1160,20 +1313,17 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             co_return;
         }
 
-        // Step 8: direct-deliver the first Logon (DR-7 / E-2) — ONLY the first
-        // frame, never any coalesced surplus (F-015-002).
-        {
-            auto deliver_r = co_await session->on_inbound_frame(first_frame);
-            (void)deliver_r;
-        }
+        // Step 8 (the first frame's direct delivery, whose result was discarded) is gone:
+        // 105 (research D1 item 3; FR-006) delivers the first frame through the pump, under
+        // every later frame's disposition, ahead of the coalesced surplus (F-015-002).
 
         // Step 9: run the real read-pump inline (T015).
         // Inline co_await means the pump is part of the counter_guard scope:
         // stop()'s total-cancel propagates into async_read_some, the pump unwinds,
         // and the counter only decrements after the pump co_returns. No second
         // counter or detached spawn needed. [T015 locked design decision #3]
-        co_await run_read_pump(*raw, *session, entry.config, surplus, *engine_cfg.clock,
-                               establish_deadline);
+        co_await run_read_pump(*raw, *session, entry.config, first_frame, surplus,
+                               *engine_cfg.clock, establish_deadline);
 
         // Step 10 (T013): unpublish on normal exit — reset entry.live_transport
         // (entry.session retained for lookup() terminal-visibility) on the control
@@ -1316,8 +1466,8 @@ asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_c
     // Inline co_await keeps the pump in the counter_guard scope (stop()'s
     // total-cancel propagates into async_read_some; the counter decrements only
     // after the pump co_returns — mirror of run_accept_loop step 9). [T015/T016(e)]
-    co_await run_read_pump(session->live_transport(), *session, entry.config, {}, *engine_cfg.clock,
-                           establish_deadline);
+    co_await run_read_pump(session->live_transport(), *session, entry.config, {}, {},
+                           *engine_cfg.clock, establish_deadline);
 
     // Step 6 (T013): unpublish on normal exit (read-pump EOF / error unwind). [INV-2]
     co_await asio::co_spawn(

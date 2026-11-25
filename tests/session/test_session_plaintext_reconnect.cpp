@@ -167,7 +167,7 @@ TEST(PlaintextReconnectTest, PlaintextReconnectSkipsHandshakeAndLeavesPeerIdNull
     policy.max_attempts = 3;
     policy.schedule = {10ms, 20ms, 40ms};
 
-    fixpp::session::ReconnectFsm fsm(factory.get(), std::move(policy), 30s, 2000ms);
+    fixpp::session::ReconnectFsm fsm(factory.get(), std::move(policy));
     fsm.set_session_owner(&sess);
     fsm.set_transport_factory(factory.get());
     fsm.set_plaintext_profile(true);

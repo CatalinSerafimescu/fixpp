@@ -7,7 +7,8 @@
 // through Engine::lookup, while the Engine's read pump is parked in async_read_some on the
 // installed transport, is refused with session_already_open: nothing changes, nothing is
 // connected, and the pump keeps reading. A closed Session is refused with
-// session_already_closed first.
+// session_already_closed first; so is the post-acknowledgement Disconnected arm, whose
+// connection 105-transport-liveness (FR-005) closes at the peer's Logout.
 //
 // Each cell runs one session under an Engine on the plain transport, facing a raw peer, on
 // plain_engine_rig.hpp's Rig (a mock engine clock). A cell asserts nothing fatal while the
@@ -77,7 +78,7 @@ std::string text(Attempt const& a) {
 
 enum class Arm : std::uint8_t {
     initiator_active,        // (i)
-    initiator_disconnected,  // (ii) a post-acknowledgement Disconnected, the transport open
+    initiator_disconnected,  // (ii) a post-acknowledgement Disconnected (105: closed at once)
     acceptor_before_logon,   // (iii) published, its first Logon's reply held in its store
     acceptor_active          // (iv)
 };
@@ -176,11 +177,21 @@ TEST_P(ReconnectFence103, G10_DirectReconnectWithThePumpParked_AlreadyOpenNothin
     }();
     rig.stop();
     ASSERT_TRUE(setup_miss.empty()) << "setup: " << setup_miss;
-    EXPECT_TRUE(refused_with(a, error::session_already_open)) << "drive_reconnect " << text(a);
     EXPECT_EQ(state_after, state_before) << "a transition was recorded";
     EXPECT_FALSE(second_connection) << "a connect was attempted";
     EXPECT_TRUE(still_reads) << "the pump no longer reads the installed transport";
-    EXPECT_FALSE(peer_read_ended) << "the installed transport was closed";
+    if (arm == Arm::initiator_disconnected) {
+        // 105-transport-liveness (FR-005, FR-001; research D1) supersedes arm (ii)'s "the
+        // transport open": the peer's Logout in Active draws the reply and the connection
+        // closes, so the pump closes the session and drive_reconnect finds it closed
+        // (B-103-9's order: a closing or closed Session returns session_already_closed).
+        EXPECT_TRUE(refused_with(a, error::session_already_closed))
+            << "drive_reconnect " << text(a);
+        EXPECT_TRUE(peer_read_ended) << "the ended connection was not closed";
+    } else {
+        EXPECT_TRUE(refused_with(a, error::session_already_open)) << "drive_reconnect " << text(a);
+        EXPECT_FALSE(peer_read_ended) << "the installed transport was closed";
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(EveryArm, ReconnectFence103,

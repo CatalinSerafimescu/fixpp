@@ -8,21 +8,15 @@
 //   1. logout_disconnect_timeout_ms is wired into recent_events() — the
 //      session emits session_event_sequence_numbers_reset or surfaced via
 //      recent_events() ring: verifies the 013-introduced SessionEvent ring
-//      carries Logout-related events once the stub is replaced.
+//      carries Logout-related events.
 //
-//   2. ReconnectFsm::drive_logout respects the configurable timeout:
-//      configured 200ms → session stays Active until peer replies OR timeout
-//      (currently stub is no-op; the 005 session already handles inbound
-//      Logout → Disconnected but the NEW 013 path is that drive_logout
-//      arms the configurable timer — not the hardcoded 2000ms).
+//   2. The acceptor's Logout path surfaces a SessionEvent after the peer's
+//      Logout.
 //
-//   3. The ReconnectFsm::drive_logout stub does NOT emit any SessionEvent.
-//      Asserting that recent_events() contains a logout-related event FAILS
-//      RED because the stub is empty.
-//
-//   4. drive_logout stub: calling the stub directly confirms it returns {}
-//      immediately (no timer fired, no SessionEvent) — RED on the behavioral
-//      side.
+// 105-transport-liveness (FR-013) removed ReconnectFsm::drive_logout, a stub
+// nothing called, and retired the two cells that probed it
+// (DriveLogoutStub_EmitsNoLogoutFrame and
+// Initiator_DriveLogout_EmitsNoEvent_ConfirmStubSymmetry).
 //
 // Pre-existing 005 behavior (already GREEN — not RED cells):
 //   - Peer sends Logout → session echoes Logout → Disconnected.
@@ -33,12 +27,7 @@
 //   contracts/reconnect_fsm.hpp; [[feedback_half_restructure_symmetric_api]].
 //   session_event.hpp — SessionEvent ring (recent_events).
 //
-// Production-shape: drives bytes through Session::on_inbound_frame();
-//   ReconnectFsm::drive_logout called directly to probe stub behavior.
-//
-// RED witness: drive_logout stub co_returns {} immediately without emitting
-//   any SessionEvent via emit_event(). recent_events() returns empty span for
-//   logout-type events. EXPECT_GT(logout_events, 0) FAILS RED.
+// Production-shape: drives bytes through Session::on_inbound_frame().
 
 #include <gtest/gtest.h>
 
@@ -52,12 +41,10 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
-#include <fixpp/session/reconnect_fsm.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
-#include <fixpp/transport/reconnect_policy.hpp>
 #include <future>
 #include <memory>
 #include <span>
@@ -66,6 +53,7 @@
 #include <variant>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -221,6 +209,7 @@ TEST_F(LogoutTimeoutTest, Existing005_Acceptor_PeerLogout_EchoesAndDisconnects) 
     capture.frames.clear();
     auto cfg = make_cfg(fixpp::session::session_role::acceptor);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess, "ISLD", "TW"));
 
     auto peer_logout = make_logout("FIX.4.2", 2, "TW", "ISLD");
@@ -229,56 +218,6 @@ TEST_F(LogoutTimeoutTest, Existing005_Acceptor_PeerLogout_EchoesAndDisconnects) 
     // Pre-existing 005 behavior: already GREEN.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
         << "Acceptor: peer Logout → echo Logout → Disconnected (005 pre-existing behavior).";
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Cell 1 (RED): drive_logout stub — DIRECT stub probe.
-//   ReconnectFsm::drive_logout stub co_returns {} without emitting any
-//   outbound Logout or arming any timer. We call it directly and verify
-//   no outbound frames are produced (the stub is truly empty).
-//
-// The 013 impl should: emit Logout, start timer for logout_disconnect_timeout_ms,
-// then either (a) peer replies → clean, or (b) timeout → force-disconnect.
-//
-// RED: stub returns {} instantly with zero outbound frames, zero events.
-//   EXPECT_GT(capture.frames.size(), 0u) FAILS RED.
-// ─────────────────────────────────────────────────────────────────────────────
-TEST_F(LogoutTimeoutTest, DriveLogoutStub_EmitsNoLogoutFrame) {
-    capture.frames.clear();
-    // Construct a standalone ReconnectFsm to probe the stub directly.
-    using fixpp::session::ReconnectFsm;
-    using fixpp::transport::ReconnectPolicy;
-
-    ReconnectPolicy policy;
-    policy.max_attempts = 3;
-    policy.schedule = {std::chrono::milliseconds{1000}};
-
-    ReconnectFsm fsm(nullptr, std::move(policy), std::chrono::seconds{30}, 200ms);
-
-    // Call drive_logout directly — stub should co_return {} immediately.
-    auto fut = asio::co_spawn(ioc, fsm.drive_logout(200ms), asio::use_future);
-    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 100ms,
-                                                    "DriveLogoutStub_EmitsNoLogoutFrame")) {
-        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
-                                                        "DriveLogoutStub_EmitsNoLogoutFrame");
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "DriveLogoutStub_EmitsNoLogoutFrame";
-        return;
-    }
-    auto result = fut.get();
-
-    // Stub returns {} (success) without doing anything.
-    EXPECT_TRUE(result.has_value())
-        << "drive_logout stub must return expected_t<void>{} (success stub).";
-
-    // RED: stub emits NO outbound Logout frame. The capture is wired to
-    // the session cfg.transport_send, but since this FSM is standalone,
-    // the transport_send won't fire. This cell confirms the stub is
-    // completely empty (no side effects at all).
-    // The 013 impl will emit via the session's store_then_emit path.
-    EXPECT_EQ(capture.frames.size(), 0U)
-        << "drive_logout stub must not emit any frames directly "
-        << "(the 013 impl will use the session's store_then_emit). "
-        << "This confirms the stub shape is correct for RED phase.";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -302,7 +241,7 @@ TEST_F(LogoutTimeoutTest, DriveLogoutStub_EmitsNoLogoutFrame) {
 //
 // NOTE: The exact SessionEvent type for logout is not yet in the 013 contract
 //   (session_event_sequence_numbers_reset covers seqnum reset, not logout).
-//   The RED assertion here is that the drive_logout stub leaves recent_events()
+//   The RED assertion here is that the Logout path leaves recent_events()
 //   empty for the 013-new event type it would emit.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST_F(LogoutTimeoutTest, ConfigurableTimeoutField_WiredInto013RecoveryFsm) {
@@ -311,13 +250,14 @@ TEST_F(LogoutTimeoutTest, ConfigurableTimeoutField_WiredInto013RecoveryFsm) {
     // is respected (200ms, not the hardcoded 2000ms).
     auto cfg = make_cfg(fixpp::session::session_role::acceptor, 200);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess, "ISLD", "TW"));
 
     // Trigger peer Logout → session echoes + 013 should arm timeout timer.
     auto peer_logout = make_logout("FIX.4.2", 2, "TW", "ISLD");
     (void)feed(sess, peer_logout);  // outcome checked below via state/events
 
-    // The session has Disconnected (005 behavior). 013-new: drive_logout
+    // The session has Disconnected (005 behavior). 013-new: the Logout path
     // should have surfaced a SessionEvent with the timeout disposition.
     // Check recent_events() for any 013-new event type.
     auto events = sess.recent_events();
@@ -327,7 +267,7 @@ TEST_F(LogoutTimeoutTest, ConfigurableTimeoutField_WiredInto013RecoveryFsm) {
     // is emitted for Logout. Verify the ring is empty for logout-type events.
     //
     // The RED assertion: we assert at least one event was emitted (by the 013
-    // drive_logout impl) — which currently fails because the stub emits none.
+    // Logout path) — which currently fails because the stub emits none.
     std::size_t total_events =
         static_cast<std::size_t>(std::distance(events.begin(), events.end()));
 
@@ -337,14 +277,14 @@ TEST_F(LogoutTimeoutTest, ConfigurableTimeoutField_WiredInto013RecoveryFsm) {
     // For the RED cell: we assert total_events > 0 expecting the logout to
     // surface via recent_events(). The stub emits 0 events → FAILS RED.
     EXPECT_GT(total_events, 0U)
-        << "013-new: drive_logout must emit at least one SessionEvent into "
+        << "013-new: the Logout path must emit at least one SessionEvent into "
         << "recent_events() when the logout exchange completes or times out. "
         << "RED: stub emits no events → total_events=0 → FAILS RED per T019 design.";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Cell 3 (RED): Acceptor — after peer Logout, if peer doesn't TCP-close within
-//   logout_disconnect_timeout_ms, the 013 drive_logout impl should force-
+//   logout_disconnect_timeout_ms, the 013 Logout path should force-
 //   disconnect and surface session_logout_timeout(73) via recent_events().
 //
 //   Current stub: Disconnected immediately without any event.
@@ -356,6 +296,7 @@ TEST_F(LogoutTimeoutTest, Acceptor_TimeoutFires_SurfacesLogoutTimeoutEvent) {
     capture.frames.clear();
     auto cfg = make_cfg(fixpp::session::session_role::acceptor, 300);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess, "ISLD", "TW"));
 
     // Peer sends Logout; acceptor echoes + should arm 300ms timeout.
@@ -367,58 +308,26 @@ TEST_F(LogoutTimeoutTest, Acceptor_TimeoutFires_SurfacesLogoutTimeoutEvent) {
     // The comment above describes an acceptor arming a 300 ms disconnect timeout. That is
     // not what this cell exercises today: `Existing005_Acceptor_PeerLogout_EchoesAnd-
     // Disconnects` in this same file asserts the acceptor is already Disconnected once
-    // `feed(peer_logout)` returns, and `Initiator_DriveLogout_EmitsNoEvent_ConfirmStub-
-    // Symmetry` below asserts THIS cell's oracle -- a non-empty `recent_events()` -- with
-    // no clock advance at all. So the event comes from the feed, not from a timeout, and
-    // this advance fires nothing the oracle depends on.
-    // ⚠️ RE-DERIVE, DO NOT TRUST THIS: starve both lines below to `advance(0ms)` /
-    // `run_for(0ms)`, rebuild, run the cell. GREEN means it is still vestigial; RED means
-    // a timeout path has since become live and this comment is the thing that is wrong.
-    // Left in place rather than deleted: the intent it records (013's drive_logout
-    // timeout) is a real design point, and deleting the line would delete the only
-    // remaining trace of it.
+    // `feed(peer_logout)` returns, and `ConfigurableTimeoutField_WiredInto013RecoveryFsm` above
+    // asserts THIS cell's oracle -- a non-empty `recent_events()` -- with no clock advance at all.
+    // So the event comes from the feed, not from a timeout, and this advance fires nothing the
+    // oracle depends on. ⚠️ RE-DERIVE, DO NOT TRUST THIS: starve both lines below to `advance(0ms)`
+    // / `run_for(0ms)`, rebuild, run the cell. GREEN means it is still vestigial; RED means a
+    // timeout path has since become live and this comment is the thing that is wrong. Left in place
+    // rather than deleted: the intent it records (013's Logout timeout) is a real design point, and
+    // deleting the line would delete the only remaining trace of it.
     clock->advance(std::chrono::milliseconds{500});
     ioc.run_for(50ms);
     ioc.restart();
 
-    // 013 impl: drive_logout times out → emits an event to recent_events().
+    // 013 impl: the Logout timeout fires → emits an event to recent_events().
     // Stub: no event emitted.
     auto events = sess.recent_events();
     std::size_t total_events =
         static_cast<std::size_t>(std::distance(events.begin(), events.end()));
 
     EXPECT_GT(total_events, 0U)
-        << "013-new: after logout timeout (300ms), drive_logout must surface a "
+        << "013-new: after logout timeout (300ms), the Logout path must surface a "
         << "SessionEvent (timeout notification) via recent_events(). "
         << "RED: stub emits no events → FAILS RED per T019 design.";
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Cell 4 (RED): Initiator — symmetric cell per [[feedback_half_restructure_symmetric_api]].
-//   Tests that the initiator role path (via drive_logout stub) also produces
-//   zero events (confirming the stub doesn't distinguish roles).
-//
-// RED: drive_logout stub treats both roles identically (no events) → FAILS RED.
-// ─────────────────────────────────────────────────────────────────────────────
-TEST_F(LogoutTimeoutTest, Initiator_DriveLogout_EmitsNoEvent_ConfirmStubSymmetry) {
-    // Drive an acceptor session to verify the recent_events() ring is empty
-    // after logout — documenting the stub's symmetric no-op on both roles.
-    capture.frames.clear();
-    auto cfg = make_cfg(fixpp::session::session_role::acceptor, 500);
-    fixpp::session::Session sess(engine, cfg);
-    ASSERT_TRUE(drive_to_active(sess, "ISLD", "TW"));
-
-    auto peer_logout = make_logout("FIX.4.2", 2, "TW", "ISLD");
-    (void)feed(sess, peer_logout);  // outcome checked below via state/events
-
-    auto events = sess.recent_events();
-    std::size_t total_events =
-        static_cast<std::size_t>(std::distance(events.begin(), events.end()));
-
-    // Symmetry check: both initiator and acceptor paths must emit events.
-    // RED: stub emits 0 events for both → FAILS RED per T019 /
-    // [[feedback_half_restructure_symmetric_api]].
-    EXPECT_GT(total_events, 0U)
-        << "Symmetric cell: initiator drive_logout path must also emit SessionEvent. "
-        << "RED: stub emits 0 events (symmetrically no-op) → FAILS RED per T019.";
 }

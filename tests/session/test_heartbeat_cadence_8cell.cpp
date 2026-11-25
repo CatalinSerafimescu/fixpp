@@ -8,7 +8,16 @@
 // Cadence axes:
 //   A. No outbound for HeartBtInt → Heartbeat(0) emitted
 //   B. No inbound for 1.2×HeartBtInt → TestRequest(1) emitted
-//   C. No inbound reply within 2×HeartBtInt total → session_test_request_unanswered(74)
+//   C. No inbound reply strictly after 2 × 1.2×HeartBtInt of inbound silence →
+//      session_test_request_unanswered(74)
+//
+// 105-transport-liveness (R-3, research D6) supersedes 005 research D-8's 1 × HeartBtInt
+// TestRequest threshold the B and C cells ran on: the TestRequest goes at 1.2 × HeartBtInt
+// of inbound silence (6 s here) and the give-up strictly after twice it (12 s); the liveness
+// loop acts on one instant per wake (the give-up, else the TestRequest, else the Heartbeat),
+// so the A cells step to between the Heartbeat and TestRequest instants. Each B cell reads no
+// TestRequest before 6 s and one at 6 s; each C cell reads Active at 11 s and Disconnected
+// just after 12 s.
 //   D. Inbound Heartbeat TestReqID mismatch → session_testreqid_mismatch(118)
 //
 // Anchors: spec.md §US1 / FR-003..FR-007; data-model.md §E-1;
@@ -18,9 +27,9 @@
 // Production-shape: drives bytes through Session::on_inbound_frame();
 //   mock_clock::advance() for deterministic time.
 //
-// RED witness: run_heartbeat_cadence / run_inbound_liveness_watch stubs
-//   co_return {} (immediately) without arming any timer. All 8 assertions
-//   FAIL RED until T024 impl lands.
+// The liveness timing these cells read is Session::run_liveness_loop's; the
+// ReconnectFsm stubs this header once named as the RED witness were removed by
+// 105-transport-liveness (FR-013).
 
 #include <gtest/gtest.h>
 
@@ -43,6 +52,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -213,11 +223,10 @@ TEST(HeartbeatCadence8Cell, CellA_Strand_NoOutboundHeartbeatEmitted) {
     fixpp::session::Session sess(fix.engine, cfg);
     ASSERT_TRUE(fix.drive_to_active(sess)) << "Precondition: session must reach Active";
 
-    // Advance clock beyond HeartBtInt (5s) with no outbound activity.
-    fix.advance_time(6000ms);
+    // Advance clock beyond HeartBtInt (5s), short of 1.2 × HeartBtInt, with no outbound activity.
+    fix.advance_time(5500ms);
 
-    // RED: run_heartbeat_cadence stub co_returns {} immediately without arming
-    // any timer. No Heartbeat is emitted → saw_heartbeat() returns false.
+    // RED when no Heartbeat is emitted: saw_heartbeat() returns false.
     EXPECT_TRUE(fix.saw_heartbeat())
         << "Cell A (strand): Heartbeat(0) must be emitted after 5s idle outbound. "
         << "RED: heartbeat cadence stub does not arm timer → FAILS RED per T018.";
@@ -230,7 +239,7 @@ TEST(HeartbeatCadence8Cell, CellA_Direct_NoOutboundHeartbeatEmitted) {
     fixpp::session::Session sess(fix.engine, cfg);
     ASSERT_TRUE(fix.drive_to_active(sess));
 
-    fix.advance_time(6000ms);
+    fix.advance_time(5500ms);
 
     EXPECT_TRUE(fix.saw_heartbeat())
         << "Cell A (direct): Heartbeat(0) must be emitted after 5s idle outbound. "
@@ -244,8 +253,11 @@ TEST(HeartbeatCadence8Cell, CellB_Strand_NoInboundTestRequestEmitted) {
     fixpp::session::Session sess(fix.engine, cfg);
     ASSERT_TRUE(fix.drive_to_active(sess));
 
-    // Advance past 1.2 × 5s = 6s with no inbound traffic.
-    fix.advance_time(7000ms);
+    // No TestRequest at 5.5 s (past 1 × HeartBtInt); one at 1.2 × 5s = 6s.
+    fix.advance_time(5500ms);
+    EXPECT_FALSE(fix.saw_test_request())
+        << "Cell B (strand): a TestRequest before 1.2×HeartBtInt (6s)";
+    fix.advance_time(500ms);
 
     EXPECT_TRUE(fix.saw_test_request())
         << "Cell B (strand): TestRequest(1) must be emitted at 1.2×HeartBtInt (6s) "
@@ -259,7 +271,10 @@ TEST(HeartbeatCadence8Cell, CellB_Direct_NoInboundTestRequestEmitted) {
     fixpp::session::Session sess(fix.engine, cfg);
     ASSERT_TRUE(fix.drive_to_active(sess));
 
-    fix.advance_time(7000ms);
+    fix.advance_time(5500ms);
+    EXPECT_FALSE(fix.saw_test_request())
+        << "Cell B (direct): a TestRequest before 1.2×HeartBtInt (6s)";
+    fix.advance_time(500ms);
 
     EXPECT_TRUE(fix.saw_test_request())
         << "Cell B (direct): TestRequest(1) must be emitted at 1.2×HeartBtInt. "
@@ -271,14 +286,22 @@ TEST(HeartbeatCadence8Cell, CellC_Strand_UnansweredTestRequestDisconnects) {
     HeartbeatCadenceFixture fix;
     auto cfg = fix.make_cfg(fixpp::session::threading_mode::per_session_strand);
     fixpp::session::Session sess(fix.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, fix.ioc};
     ASSERT_TRUE(fix.drive_to_active(sess));
 
-    // Advance past 2 × HeartBtInt = 10s without any inbound reply.
-    fix.advance_time(11000ms);
+    // Active at 11 s (past 2 × HeartBtInt); Disconnected just after 2 × 1.2 × HeartBtInt = 12s,
+    // without any inbound reply. The clock first steps to the TestRequest's instant (6 s), so the
+    // TestRequest is written there: the give-up is also counted from its write (the owner's
+    // fresh-window ruling, spec.md Clarifications), and one written late gets a later give-up.
+    fix.advance_time(6000ms);
+    fix.advance_time(5000ms);
+    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
+        << "Cell C (strand): given up before 2 × 1.2×HeartBtInt (12s)";
+    fix.advance_time(1001ms);
 
     // Session must transition to Disconnected.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
-        << "Cell C (strand): no TR reply within 2×HeartBtInt → Disconnected "
+        << "Cell C (strand): no TR reply within 2 × 1.2×HeartBtInt → Disconnected "
         << "(session_test_request_unanswered=74). RED: stub never times out → FAILS RED.";
 }
 
@@ -287,12 +310,18 @@ TEST(HeartbeatCadence8Cell, CellC_Direct_UnansweredTestRequestDisconnects) {
     HeartbeatCadenceFixture fix;
     auto cfg = fix.make_cfg(fixpp::session::threading_mode::direct_executor);
     fixpp::session::Session sess(fix.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer_sess{sess, fix.ioc};
     ASSERT_TRUE(fix.drive_to_active(sess));
 
-    fix.advance_time(11000ms);
+    // As the strand cell: the clock steps to the TestRequest's instant first.
+    fix.advance_time(6000ms);
+    fix.advance_time(5000ms);
+    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
+        << "Cell C (direct): given up before 2 × 1.2×HeartBtInt (12s)";
+    fix.advance_time(1001ms);
 
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
-        << "Cell C (direct): no TR reply within 2×HeartBtInt → Disconnected. "
+        << "Cell C (direct): no TR reply within 2 × 1.2×HeartBtInt → Disconnected. "
         << "RED: FAILS RED per T018 design.";
 }
 

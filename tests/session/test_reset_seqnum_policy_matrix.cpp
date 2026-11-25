@@ -48,6 +48,7 @@
 #include <vector>
 
 #include "session/mock_reconnect_factory.hpp"
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -274,6 +275,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_PeerOmits141Y) {
     auto cfg2 = make_cfg(fixpp::session::session_role::acceptor,
                          fixpp::session::reset_seqnum_policy::bilateral_strict);
     fixpp::session::Session sess(engine, cfg2);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(run_open(sess).has_value());
 
     // Peer sends Logon WITHOUT 141=Y; bilateral_strict should reject.

@@ -2,6 +2,18 @@
 //
 // tests/session/unparseable_frame_disposition_test.cpp
 //
+// 105-transport-liveness (R-3, research D6) supersedes 005 research D-8's 1 × HeartBtInt
+// TestRequest threshold: unset, test_request_threshold is 1.2 × HeartBtInt. This file's fixture
+// sets it to HeartBtInt, so its cells' TestRequest and give-up instants stay one and two
+// HeartBtInt after the last inbound frame; tests/session/test_105_liveness_timing.cpp reads the
+// default.
+//
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
+//
 // 092-garbled-frame-reject — the session never acts on a frame it could not parse.
 //
 // Issue507Reproducer_* (tasks.md T005; spec SC-001; contract C-2 row D-4): fixpp#507's
@@ -155,6 +167,7 @@
 #include <map>
 #include <memory>
 #include <memory_resource>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -162,9 +175,11 @@
 #include <vector>
 
 #include "plain_engine_rig.hpp"
+#include "support/close_before_destroy.hpp"
 #include "support/extract_tag.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/r2_wait_reading.hpp"
 #include "support/reify_test_frame.hpp"
 #include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
@@ -241,6 +256,7 @@ struct DispositionFixture {
         cfg.target_comp_id = "TW";
         cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = 30s;
+        cfg.test_request_threshold = 30s;
         cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
         cfg.dictionary = fixpp::test_support::make_validation_test_dictionary();
         cfg.executor_override = ioc.get_executor();
@@ -1028,6 +1044,8 @@ struct StateCell {
     std::unique_ptr<Session> sess;
     std::future<fixpp::core::expected_t<void>> logon;  // the acceptor's parked Logon exchange
     fsm_state held;
+    // Declared after sess, so it is destroyed first (tests/support/close_before_destroy.hpp).
+    std::optional<fixpp::test_support::close_before_destroy> closer;
 
     explicit StateCell(At at, bool validate = true)
         : held(at == At::active ? fsm_state::Active : fsm_state::LogonReceived) {
@@ -1038,6 +1056,7 @@ struct StateCell {
         }
         cfg.store_factory = factory;
         sess = std::make_unique<Session>(fix.engine, cfg);
+        closer.emplace(*sess, fix.ioc);
     }
 
     StateCell(StateCell const&) = delete;
@@ -1460,6 +1479,7 @@ void run_liveness_cell(std::vector<std::byte> const& faulty, std::uint32_t next_
         std::chrono::duration_cast<std::chrono::milliseconds>(*cfg.heartbeat_interval);
     auto const fault_at = interval / 3;
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer_sess{sess, fix.ioc};
     fix.open_to_active(sess);
     if (::testing::Test::HasFatalFailure()) {
         return;
@@ -1555,7 +1575,8 @@ TEST(UnparseableFrameDisposition, Liveness_Step1_Field3Not35_TestRequestAtInterv
 TEST(UnparseableFrameDisposition, Liveness_FramerGarble_TestRequestAtInterval) {
     namespace plain_rig = fixpp::test_support::plain_rig;
     plain_rig::Rig rig;
-    auto const cfg = rig.cfg();
+    auto cfg = rig.cfg();
+    cfg.test_request_threshold = std::chrono::seconds{30};
     ASSERT_TRUE(cfg.heartbeat_interval.has_value())
         << "precondition: the config carries a heartbeat interval";
     // The ASSERT_TRUE above returns on an empty optional; the check does not model it.
@@ -1731,6 +1752,7 @@ TEST(UnparseableFrameDisposition, TooLowHeartbeat_TooLowLogoutThenDisconnected) 
     DispositionFixture fix;
     auto cfg = fix.make_cfg(false);
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
     if (::testing::Test::HasFatalFailure()) {
         return;
@@ -1745,7 +1767,13 @@ TEST(UnparseableFrameDisposition, TooLowHeartbeat_TooLowLogoutThenDisconnected) 
     }
     EXPECT_EQ(drawn, (std::vector<std::string>{"5"})) << "MsgType of each frame drawn";
     EXPECT_EQ(texts, (std::vector<std::string>{"MsgSeqNum too low, expecting 2 but received 1"}));
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // session stays Active through the wait and ends at its bound.
+    fixpp::test_support::expect_r2_wait(
+        fixpp::test_support::read_r2_wait(
+            sess, *fix.clock, std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            [&] { drain_ready(fix.ioc); }),
+        "the too-low Logout");
 }
 
 TEST(UnparseableFrameDisposition, Refresh_TooLowPossDupHeartbeat_NoTestRequestAtLogonInterval) {
@@ -3019,7 +3047,8 @@ TEST(UnparseableFrameDisposition, ScriptedPeer_MalformedTooHigh_ResendConverges_
 //
 // Before Active, a frame the header scan could not read is refused: the session ends
 // Disconnected, sends nothing (no Logon reply, no Reject) and delivers nothing. D-1 and
-// D-2 are a state transition, not a close, so is_open() is not asserted.
+// D-2 are a state transition, not a close(), so is_open() (the Session's lifecycle) is not
+// asserted; since 105-transport-liveness the edge closes the connection (contract C-1).
 //   LogonRefusal/*: a Logon whose malformed tag follows every field interpret_logon
 //     reads (98, 108 and, on FIXT.1.1, 1137), as acceptor (NotConnected) and as
 //     initiator (the reply, LogonSent), on FIX.4.2, FIX.4.4 and FIXT.1.1, with inbound
@@ -3136,8 +3165,9 @@ TEST(UnparseableFrameDisposition, PreActive_D8Logon_LogonSent_Disregarded) {
 //
 // A faulty Logon at the expected N=2 (field 3 is 35, 34 read before the fault), in both
 // fault shapes, in Active and in LogonReceived: the session ends Disconnected, and
-// sends no Reject(35=3) and no Logout(35=5). D-3 is a state transition, not a close,
-// so is_open() is not asserted. LogonReceived is reached through StateCell's parked
+// sends no Reject(35=3) and no Logout(35=5). D-3 is a state transition, not a close(),
+// so is_open() (the Session's lifecycle) is not asserted; since 105-transport-liveness the
+// edge closes the connection (contract C-1). LogonReceived is reached through StateCell's parked
 // Logon reply (the Engine awaits each on_inbound_frame, so in production no frame
 // reaches that arm while the exchange is in flight). The released reply resumes the
 // acceptor's Logon path in the NotConnected arm, which transitions to Active whatever
@@ -3501,7 +3531,15 @@ void expect_unfilled_gap_ends_with_the_deadlines_logout(LateCell& c, std::uint32
     ASSERT_EQ(logouts.size(), 1U) << row << ": the frame at the bound drew no Logout";
     EXPECT_FALSE(extract_tag(logouts.front(), 58).empty())
         << row << ": the Logout carries no Text(58)";
-    EXPECT_EQ(c.sess->state(), fsm_state::Disconnected) << row << ": after the Logout";
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // session stays Active through the wait and ends at its bound (make_cfg leaves
+    // logout_disconnect_timeout_ms at its default).
+    fixpp::test_support::expect_r2_wait(
+        fixpp::test_support::read_r2_wait(
+            *c.sess, *c.fix.clock,
+            std::chrono::milliseconds{SessionConfig{}.logout_disconnect_timeout_ms},
+            [&] { drain_ready(c.fix.ioc); }),
+        std::string{row}.c_str());
 }
 
 // L-1: the peer sends a NewOrderSingle at N = 2 whose malformed tag precedes 34 (D-7),
@@ -3659,6 +3697,16 @@ void run_guard_precedence_cell(std::string_view begin_string, std::string_view t
         return;
     }
     k.fix.feed(*k.sess, guard_frame(begin_string, target, sending_time, {}));
+    if (control == GuardAction::sending_time_reject_logout) {
+        // 105-transport-liveness (R-2, contract C-2): the SendingTime Reject's Logout is
+        // followed by the wait, which ends at its bound.
+        fixpp::test_support::expect_r2_wait(
+            fixpp::test_support::read_r2_wait(
+                *k.sess, *k.fix.clock,
+                std::chrono::milliseconds{SessionConfig{}.logout_disconnect_timeout_ms},
+                [&] { drain_ready(k.fix.ioc); }),
+            ctl.c_str());
+    }
     EXPECT_EQ(k.sess->state(), fsm_state::Disconnected)
         << ctl << ": the guard must end the session";
     EXPECT_EQ(k.app->from_app, 0) << ctl << ": the frame must not reach fromApp";

@@ -37,6 +37,7 @@
 #include <optional>
 #include <ratio>
 #include <span>
+#include <string_view>
 #include <system_error>  // std::system_error — the shape Clock::sleep_until throws on cancel
 #include <type_traits>
 #include <vector>
@@ -247,15 +248,128 @@ template <class Rep, class Period>
 // fixpp#537 (`.specify/536-537-538-recovery-liveness.md` §4.3, D-537-5): the instant the
 // deadline of an unfilled resend gap expires, twice `heartbt` after `since`, or nullopt
 // when the deadline is off, which is at HeartBtInt <= 0. Each of the two steps saturates
-// as deadline_after does; a product of the interval is never formed. The liveness loop is
-// off only at exactly 0; this function states its own test because deadline_after
-// requires a non-negative duration.
+// as deadline_after does; a product of the interval is never formed. 105 (owner ruling on
+// SI-2) turns the liveness loop off at HeartBtInt <= 0 as well, the same test; this function
+// states its own because deadline_after requires a non-negative duration.
 [[nodiscard]] constexpr std::optional<fixpp::core::steady_time_point> resend_gap_deadline(
     fixpp::core::steady_time_point since, std::chrono::seconds heartbt) noexcept {
     if (heartbt <= std::chrono::seconds::zero()) {
         return std::nullopt;
     }
     return deadline_after(deadline_after(since, heartbt), heartbt);
+}
+
+// The HeartBtInt a session runs when heartbeat_interval is unset (005 research D-8). 105
+// (tasks.md T105) moves it here from session.cpp's file scope, so the accept loop's pre-session
+// record gate (engine.cpp) reads the same constant.
+inline constexpr std::chrono::seconds kDefaultHeartBtInt{30};
+
+// 105 (research D8; data-model E-7): the end of a rate-bounded log record's window opened at
+// `now`, max(HeartBtInt, 1 s) later, HeartBtInt being the configured heartbeat_interval or
+// kDefaultHeartBtInt; it saturates at steady_time_point::max() as deadline_after does. Its
+// readers: git grep -n 'log_rate_window_end(' -- src
+[[nodiscard]] constexpr fixpp::core::steady_time_point log_rate_window_end(
+    fixpp::core::steady_time_point now,
+    std::optional<std::chrono::seconds> heartbeat_interval) noexcept {
+    return deadline_after(
+        now, std::max(heartbeat_interval.value_or(kDefaultHeartBtInt), std::chrono::seconds{1}));
+}
+
+// 105 (research D6; data-model E-4), superseding 005 research D-8's 1 × HeartBtInt: the
+// default test_request_threshold, 1.2 × HeartBtInt. HeartBtInt is whole seconds, so it is
+// exactly heartbt × 1200 ms; the product saturates at milliseconds::max(), and is zero at
+// HeartBtInt <= 0, where the liveness loop is off.
+[[nodiscard]] constexpr std::chrono::milliseconds default_test_request_threshold(
+    std::chrono::seconds heartbt) noexcept {
+    using rep = std::chrono::milliseconds::rep;
+    constexpr rep kPerSecond = 1200;
+    if (heartbt <= std::chrono::seconds::zero()) {
+        return std::chrono::milliseconds::zero();
+    }
+    if (heartbt.count() > std::numeric_limits<rep>::max() / kPerSecond) {
+        return std::chrono::milliseconds::max();
+    }
+    return std::chrono::milliseconds{static_cast<rep>(heartbt.count()) * kPerSecond};
+}
+
+// 105 (research D6; data-model E-4; R-3): the give-up instant, strictly after 2T of inbound
+// silence: since + T, + T, then the 1 ns guard, three saturating steps with no product
+// formed. The guard lets a peer's answer delivered at exactly 2T on a mock clock win.
+// Precondition: threshold >= 0.
+[[nodiscard]] constexpr fixpp::core::steady_time_point test_request_give_up_instant(
+    fixpp::core::steady_time_point since, std::chrono::milliseconds threshold) noexcept {
+    return deadline_after(deadline_after(deadline_after(since, threshold), threshold),
+                          std::chrono::nanoseconds{1});
+}
+
+// 105, the owner's fresh-window ruling (spec.md Clarifications: the held TestRequest's fresh
+// window; data-model E-4): the give-up instant of a TestRequest pending since
+// `written`, the later of the instant above and `written` + T + 1 ns, every step saturating. A
+// TestRequest written late (held behind a resend answer) leaves the peer a whole threshold to
+// answer. Precondition: threshold >= 0.
+[[nodiscard]] constexpr fixpp::core::steady_time_point test_request_give_up_instant(
+    fixpp::core::steady_time_point since, fixpp::core::steady_time_point written,
+    std::chrono::milliseconds threshold) noexcept {
+    auto const after_two = test_request_give_up_instant(since, threshold);
+    auto const after_write =
+        deadline_after(deadline_after(written, threshold), std::chrono::nanoseconds{1});
+    return after_two < after_write ? after_write : after_two;
+}
+
+// 105, the owner's cap ruling (spec.md Clarifications: the held TestRequest's cap; data-model E-4):
+// the instant at which a TestRequest that fell due and is still held behind a resend answer is
+// given up, strictly after three thresholds after `since`, the last inbound frame: since + T, + T,
+// + T, then the 1 ns guard, four saturating steps with no product formed.
+// Precondition: threshold >= 0.
+[[nodiscard]] constexpr fixpp::core::steady_time_point held_test_request_cap(
+    fixpp::core::steady_time_point since, std::chrono::milliseconds threshold) noexcept {
+    return deadline_after(
+        deadline_after(deadline_after(deadline_after(since, threshold), threshold), threshold),
+        std::chrono::nanoseconds{1});
+}
+
+// 105 (research D5; data-model E-4; ruling D-d): the TestReqID window. TestRequest numbers are
+// issued by incrementing a 32-bit counter, so the numbers issued on a connection are those in
+// (floor, next] modulo 2^32, where floor is the counter's value when the connection started and
+// next its last value. When 2^32 numbers have been issued on one connection next == floor and
+// the window is empty: no number is earlier.
+[[nodiscard]] constexpr bool test_req_id_in_window(std::uint32_t n, std::uint32_t floor,
+                                                   std::uint32_t next) noexcept {
+    // NOLINTNEXTLINE(readability-redundant-casting): modular where int is wider than 32 bits
+    return static_cast<std::uint32_t>(n - floor - 1U) < static_cast<std::uint32_t>(next - floor);
+}
+
+// 105 (research D5; contract C-5.4): whether id is a TestReqID(112) this connection issued, as
+// the liveness loop spells one: "TR" then the canonical decimal (no sign, no leading zero) of a
+// number that fits std::uint32_t and lies in test_req_id_in_window. The digits are read as a
+// signed decimal and then refused by form, so each refusal below is its own test.
+[[nodiscard]] constexpr bool is_earlier_test_req_id(std::string_view id, std::uint32_t floor,
+                                                    std::uint32_t next) noexcept {
+    if (id.size() <= 2 || id[0] != 'T' || id[1] != 'R') {
+        return false;  // not "TR", or "TR" alone
+    }
+    std::string_view const digits = id.substr(2);
+    bool const negative = !digits.empty() && digits.front() == '-';
+    std::size_t i = negative ? 1U : 0U;
+    constexpr std::int64_t kLimit = (std::numeric_limits<std::int64_t>::max() - 9) / 10;
+    std::int64_t v = 0;
+    for (; i < digits.size(); ++i) {
+        char const c = digits[i];
+        if (c < '0' || c > '9' || v > kLimit) {
+            return false;
+        }
+        v = (v * 10) + (c - '0');
+    }
+    if (negative) {
+        return false;  // a sign
+    }
+    if (digits.size() > 1U && digits.front() == '0') {
+        return false;  // not canonical: a leading zero
+    }
+    if (v > std::int64_t{std::numeric_limits<std::uint32_t>::max()}) {
+        return false;  // past std::uint32_t
+    }
+    return test_req_id_in_window(static_cast<std::uint32_t>(v), floor, next);
 }
 
 // The non-negative time left until `deadline`: zero once `now` has reached or

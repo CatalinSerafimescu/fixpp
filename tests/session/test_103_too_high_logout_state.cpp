@@ -2,6 +2,12 @@
 //
 // tests/session/test_103_too_high_logout_state.cpp — test-only.
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp or their fixture's form of it.
+//
 // Feature 103 (specs/103-resend-logon-reset-fidelity/), fixpp#577, the Logout half: TU2, the
 // cells that read 103 state (the pending-Logout mark's phase, the Logout owner, the bound's
 // join counter; research D4.2 to D4.7, "#577 — a too-high Logout"; tasks T080 onward). The
@@ -364,6 +370,23 @@ TEST_P(Lo1, InboundLogoutHeldThenCloseGraceful_ExactlyOneLogout) {
             << "close() recorded Disconnected under the Logout in flight";
     }
     s.log->release_hold();
+    bool const arms_a_wait =
+        !c.with_mark && (c.emitter == Emitter::sending_time_fatal || c.emitter == Emitter::arm_d ||
+                         c.emitter == Emitter::gap_deadline || c.emitter == Emitter::arm_b);
+    if (arms_a_wait) {
+        // 105-transport-liveness (R-2, contract C-2 W-13): the emitter's Logout is an R-2 ending,
+        // so the session waits for the peer's Logout or the bound, logout_disconnect_timeout_ms
+        // from the Logout's write start on the session's clock, and close(graceful) proceeds at
+        // that end. The mock clock has not moved since the write started; close()'s grace is a
+        // real-time timer of T, above every pump budget here.
+        EXPECT_TRUE(s.pump_until([&] { return rg::Scene::ready(feed_fut); }, kAfterReleaseBudget))
+            << "the delivery did not return";
+        s.mock->advance(std::chrono::milliseconds{kT} - std::chrono::milliseconds{1});
+        EXPECT_FALSE(
+            s.pump_until([&] { return rg::Scene::ready(close_fut); }, kAfterReleaseBudget / 4))
+            << "close() returned before the wait's bound: " << s.written(mark);
+        s.mock->advance(std::chrono::milliseconds{1});
+    }
     EXPECT_TRUE(
         s.pump_until([&] { return rg::Scene::ready(close_fut) && rg::Scene::ready(feed_fut); },
                      kAfterReleaseBudget))
@@ -809,9 +832,23 @@ TEST_P(TooHighLogoutState103, Lo3_InFlightLogoutOutlastsTheGrace_NoSecondLogout)
     auto feed_fut = s.feed_spawn(s.logout(n));
     ASSERT_TRUE(s.pump_until([&] { return s.log->holding(); })) << "setup: the ack was not held";
     auto close_fut = spawn_close(s, close_mode::graceful);
+    // 105-transport-liveness (data-model E-3 rows 4 and 5c; contract C-2.7): the reply's write
+    // limit, logout_disconnect_timeout_ms from its write start on the session's clock, bounds
+    // close() too. The real-time grace force-closes the transport, close() then joins the
+    // Logout's bound, and the bound ends at the limit while the store call is still held. With
+    // one clock the limit comes first (the write started before close()); here the session's
+    // clock is the mock, so close() returns when the mock reaches the limit.
+    EXPECT_FALSE(s.pump_until([&] { return rg::Scene::ready(close_fut); },
+                              4 * std::chrono::milliseconds{kShortT}))
+        << "close() returned with the write limit not reached on the session's clock";
+    s.mock->advance(std::chrono::milliseconds{kShortT} - std::chrono::milliseconds{1});
+    EXPECT_FALSE(s.pump_until([&] { return rg::Scene::ready(close_fut); },
+                              std::chrono::milliseconds{kShortT}))
+        << "close() returned before the write limit";
+    s.mock->advance(std::chrono::milliseconds{1});
     EXPECT_TRUE(s.pump_until([&] { return rg::Scene::ready(close_fut); },
                              4 * std::chrono::milliseconds{kShortT}))
-        << "close() did not return at the grace";
+        << "close() did not return at the write limit";
     s.log->release_hold();
     (void)s.pump_until([&] { return rg::Scene::ready(feed_fut); });
     EXPECT_LE(s.count("5", mark), 1U) << "a second Logout: " << s.written(mark);

@@ -42,6 +42,7 @@ using ThornyRecoveryFixture = fixpp::interop::parity::ParityAcceptorFixture;
 TEST_F(ThornyRecoveryFixture, Qfj750_LogoutTooHighSeqnum_RecoversTheGapThenAcknowledgesAtTheBound) {
     auto const cfg = make_acceptor_cfg();
     fixpp::session::Session s{engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s)) << "precondition: session must reach Active";
     ASSERT_EQ(next_inbound(s), 2U);
 
@@ -75,6 +76,7 @@ TEST_F(ThornyRecoveryFixture, Qfj750_LogoutTooHighSeqnum_RecoversTheGapThenAckno
 // Arm: inbound Logout with a too-LOW MsgSeqNum still disconnects.
 TEST_F(ThornyRecoveryFixture, Qfj750_LogoutTooLowSeqnumStillDisconnects) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s)) << "precondition: session must reach Active";
     ASSERT_EQ(next_inbound(s), 2U);
 

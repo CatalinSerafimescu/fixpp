@@ -18,8 +18,9 @@
 //      on a valid TestRequest). Verifies the echo-heartbeat FSM path (T041).
 //   6. HeartBtInt=0 disables all liveness timers (FR-006 / [FIX-SL §4.3.4]):
 //      session stays Active regardless of clock advance.
-//   7. Unanswered TestRequest after grace window → session_test_request_unanswered
-//      → session transitions to Disconnected (T039 + T041).
+//   7. Unanswered TestRequest strictly after 2 × 1.2 × HeartBtInt of inbound silence →
+//      session_test_request_unanswered → session transitions to Disconnected (T039 + T041;
+//      105-transport-liveness, R-3).
 //   8. Inbound Heartbeat in Active → counter advances, FSM stays Active.
 //
 // Infrastructure:
@@ -61,6 +62,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -341,11 +343,11 @@ TEST(HbTrBuilders, TestReqIDDistinctness) {
 // Negative-contrast multi-window assertion: with HeartBtInt=0 negotiated at
 // logon, NO timer arms — neither the heartbeat-emit nor the unanswered-TR
 // disconnect.  Companion test UnansweredTestRequestDisconnects proves that
-// with HeartBtInt=1s and no inbound, the session disconnects after a single
-// 1s window + 1s grace (=2s).  Here we negotiate HeartBtInt=0 and advance
-// the mock clock by 10 × 30s = 300s with ZERO inbound frames.  At a normal
-// HeartBtInt=30s the session would have disconnected after 60s (1×window +
-// 1×grace); at 300s we are 5× past that threshold.  The session remaining
+// with HeartBtInt=1s and no inbound, the session disconnects strictly after
+// 2 × 1.2 × HeartBtInt (2.4 s, 105-transport-liveness R-3).  Here we negotiate HeartBtInt=0
+// and advance the mock clock by 10 × 30s = 300s with ZERO inbound frames.  At a normal
+// HeartBtInt=30s the session would have disconnected after 72s (2 × 1.2 × HeartBtInt);
+// at 300s we are past that threshold several times over.  The session remaining
 // Active is direct observable evidence that the HeartBtInt=0 disable held.
 // ──────────────────────────────────────────────────────────────────────────────
 TEST_F(HbTrTest, HeartBtIntZeroDisablesTimers) {
@@ -392,10 +394,10 @@ TEST_F(HbTrTest, HeartBtIntZeroDisablesTimers) {
 //
 // Scenario:
 //   1. Active session with HeartBtInt=1s.
-//   2. Clock advances past inbound-silence threshold (1×HeartBtInt).
+//   2. Clock advances past the inbound-silence threshold (1.2 × HeartBtInt, 105 R-3).
 //      → Timer fires; session emits TestRequest.
 //   3. No Heartbeat reply arrives (no inbound frame).
-//   4. Clock advances past grace window (another 1×HeartBtInt).
+//   4. Clock advances past twice the threshold.
 //      → unanswered-TR: session_test_request_unanswered → Disconnected.
 //
 // This test exercises T039 (timer loop) + T041 (unanswered-TR disposition).
@@ -403,7 +405,20 @@ TEST_F(HbTrTest, HeartBtIntZeroDisablesTimers) {
 // ──────────────────────────────────────────────────────────────────────────────
 TEST_F(HbTrTest, UnansweredTestRequestDisconnects) {
     auto cfg = make_cfg(1);  // 1s HeartBtInt for fast test
+    std::vector<std::string> sent;
+    cfg.transport_send = [&sent](std::span<const std::byte> b) {
+        sent.emplace_back(reinterpret_cast<const char*>(b.data()), b.size());
+    };
+    auto const saw_test_request = [&sent] {
+        for (auto const& f : sent) {
+            if (f.find("\x01"
+                       "35=1\x01") != std::string::npos)
+                return true;
+        }
+        return false;
+    };
     Session session{engine, cfg};
+    fixpp::test_support::close_before_destroy const closer_session{session, ioc};
     ASSERT_TRUE(drive_to_active(session, 1));
 
     // Advance clock past inbound-silence threshold (1s + buffer).
@@ -441,19 +456,28 @@ TEST_F(HbTrTest, UnansweredTestRequestDisconnects) {
     // ⚠️ RE-DERIVE, DO NOT TRUST THIS: starve the window below to `run_for(0ms)`,
     // rebuild, and run the cell. GREEN means the disposition still holds; RED means it
     // has stopped holding and this comment is the thing that is wrong.
-    clock->advance(2s);
+    // 105-transport-liveness (R-3, research D6) supersedes 005 research D-8's 1 × HeartBtInt
+    // threshold this cell ran on: unset, test_request_threshold is 1.2 × HeartBtInt, so with
+    // HeartBtInt 1 s the TestRequest goes at 1.2 s (none at 1.1 s) and the give-up strictly
+    // after 2.4 s of inbound silence.
+    clock->advance(1100ms);
     ioc.run_for(20ms);
     ioc.restart();
+    EXPECT_FALSE(saw_test_request()) << "a TestRequest before 1.2 × HeartBtInt";
+    clock->advance(100ms);
+    ioc.run_for(20ms);
+    ioc.restart();
+    EXPECT_TRUE(saw_test_request()) << "no TestRequest at 1.2 × HeartBtInt";
 
-    // Advance clock past the grace window (another 1s + buffer).
+    // Advance clock past twice the threshold (2.4 s of inbound silence).
     // No Heartbeat reply → unanswered-TR → Disconnected.
     clock->advance(2s);
     ioc.run_for(20ms);
     ioc.restart();
 
-    // The session must be Disconnected after the grace window.
+    // The session must be Disconnected after twice the threshold.
     EXPECT_EQ(session.state(), fsm_state::Disconnected)
-        << "Unanswered TestRequest must cause Disconnected within grace window";
+        << "Unanswered TestRequest must cause Disconnected after 2 × 1.2 × HeartBtInt";
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -463,12 +487,12 @@ TEST_F(HbTrTest, UnansweredTestRequestDisconnects) {
 // Negative-contrast multi-window assertion: per data-model Active row,
 // inbound Heartbeat is a liveness event that resets the inactivity timer.
 // Companion test UnansweredTestRequestDisconnects proves that with
-// HeartBtInt=1s and NO inbound frame, the session disconnects after a
-// single 1s window + 1s grace (=2s).  Here we use HeartBtInt=1s and feed
+// HeartBtInt=1s and NO inbound frame, the session disconnects strictly after
+// 2 × 1.2 × HeartBtInt (2.4 s, 105 R-3).  Here we use HeartBtInt=1s and feed
 // an inbound Heartbeat at the start of each window across N=3 windows.
 // Each inbound HB must reset last_inbound_steady_ — if any one fails to
-// do so the unanswered-TR disconnect would fire by the end of that
-// window's grace.  Surviving ≥3 windows with state still Active is the
+// do so the unanswered-TR disconnect would fire 2.4 s after the last
+// inbound frame.  Surviving ≥3 windows with state still Active is the
 // observable evidence that inbound HB genuinely resets the timer.
 // ──────────────────────────────────────────────────────────────────────────────
 TEST_F(HbTrTest, InboundHeartbeatKeepsSessionActive) {

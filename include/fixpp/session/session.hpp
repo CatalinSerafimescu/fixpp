@@ -21,6 +21,7 @@
 #pragma once
 
 #include <array>
+#include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/cancellation_signal.hpp>
 #include <asio/post.hpp>
@@ -28,6 +29,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <exception>  // std::uncaught_exceptions: ending_write_unwind_guard
 #include <expected>
 #include <fixpp/core/clock.hpp>  // steady_time_point (T041 US3 liveness)
 #include <fixpp/core/detail/asio_recycler_config.hpp>
@@ -35,7 +37,8 @@
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/core/session_local.hpp>
 #include <fixpp/core/trace_context.hpp>
-#include <fixpp/session/detail/replay_gate.hpp>  // 103 (research D5′): replay_gate_
+#include <fixpp/session/detail/log_rate_gate.hpp>  // 105 (research D8): log_rate_gate
+#include <fixpp/session/detail/replay_gate.hpp>    // 103 (research D5′): replay_gate_
 // 066-dict-backed-inbound-parse T002: inbound_tv_ is a
 // std::optional<table_view> Session MEMBER (not a unique_ptr to an
 // incomplete type like validator_), so table_view must be complete here.
@@ -725,11 +728,13 @@ public:
     // nothing reads the new one (FR-006).
     // drive_reconnect must not be bound to root_cancellation_slot(): its own drain emits
     // that signal, which would cancel it (see `root_cancel_`; cell RS-1).
-    // Two caller preconditions every Session awaitable has, named here because the bound
+    // Two caller preconditions every Session awaitable has, named here because the bounds
     // and the gate make them checkable or load-bearing: close() runs before the Session is
-    // destroyed (~Session asserts the too-high Logout bound's counter is 0 in builds with
-    // assertions; a release build does not check, and a bound still alive then resumes
-    // into a destroyed Session, as the liveness loop already would); and research D1's
+    // destroyed (close() joins the too-high Logout's bound, 105's ending Logout bound and its
+    // close frame, and ~Session asserts each counter is 0 in builds with assertions, with no
+    // exemption (105-transport-liveness, contract C-9; B-103-13); a release build does not
+    // check, and a bound still alive then resumes into a destroyed Session, as the liveness
+    // loop already would); and research D1's
     // lifetime rule: a Session whose replay-gate timer exists, like one with a transport,
     // is destroyed before its execution context (B-103-13).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> drive_reconnect() noexcept;
@@ -776,9 +781,11 @@ private:
     // site). Its callers: `git grep -n 'refuse_logon_with_logout_(' -- src`.
     // [FR-002; D-F]
     // arm: the calling Logon arm's expected state (093 plan OD-26), passed to the
-    // Logout's store_then_emit and to the Disconnected write after it.
+    // Logout's store_then_emit and to the Disconnected write after it. arms_wait: whether a
+    // transmitted Logout arms the R-2 wait (105, data-model E-3); false for a refusal whose arm
+    // returns an error, which closes the connection at once.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> refuse_logon_with_logout_(
-        std::string_view reason_text, fsm_state arm) noexcept;
+        std::string_view reason_text, fsm_state arm, bool arms_wait = true) noexcept;
     // 104 (research D5; the T093 record in the 104 evidence file): a Logon arm's too-low Logout,
     // its text written from NextNumIn, read at the body's start, and `received` (the frame's
     // MsgSeqNum). The text buffer lives in this callee's frame, so a cold branch does not grow
@@ -973,12 +980,9 @@ private:
     // The rate state of a session log record written at most once per max(HeartBtInt, 1 s) on
     // effective_clock_: whether one has been written, the earliest time of the next, and the
     // occurrences suppressed since the last. One instance per record; admit_log_record_ is its
-    // only writer.
-    struct log_rate_gate {
-        bool logged = false;
-        fixpp::core::steady_time_point next;
-        std::uint64_t unlogged = 0;
-    };
+    // only writer. 105 (research D8; data-model E-7) hoists the struct to
+    // detail/log_rate_gate.hpp, so the engine's accept loop holds one too; the name stays.
+    using log_rate_gate = detail::log_rate_gate;
     // Admits a record now, returning the occurrences suppressed since the previous one (and
     // starting the next window), or counts `occurrences` as suppressed and returns nullopt.
     [[nodiscard]] std::optional<std::uint64_t> admit_log_record_(
@@ -1503,6 +1507,7 @@ private:
             out_of_sequence,
             gap_fill,
             logout,
+            ending_response,
             from_admin_failed,
             test_request,
             resend_request,
@@ -1572,9 +1577,16 @@ private:
     [[nodiscard]] inbound_continue_t resend_gap_deadline_(
         bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
     // fixpp#537 (D-537-6, D-537-8): the in-sequence TestReqID(112) disposition for a
-    // Heartbeat above NextNumIn. False: the TestReqID was another one and the session is
-    // Disconnected. The caller tests that a TestRequest is pending.
+    // Heartbeat that does not advance NextNumIn, by classify_test_req_id_ (105, ruling D-d).
+    // False only for a mismatch, and the session is then Disconnected. The caller tests that a
+    // TestRequest is pending.
     [[nodiscard]] bool answer_pending_test_request_(std::string_view test_req_id) noexcept;
+    // 105 (research D5; ruling D-d; contract C-5.4): the TestReqID(112) rule of every Heartbeat
+    // route, while a TestRequest is pending. An absent or the pending id answers it; the id of an
+    // earlier TestRequest of this connection neither answers nor ends; any other is a mismatch.
+    enum class test_req_id_class : std::uint8_t { answers, earlier, mismatch };
+    [[nodiscard]] test_req_id_class classify_test_req_id_(
+        std::string_view test_req_id) const noexcept;
     // Reply leaves (§2.2 class 2): each owns the buffer its reply frame is built in.
     [[nodiscard]] inbound_result_t inbound_reject_leaf_(
         bool tic, seqnum_t ref_seq, int ref_tag_id, std::string_view ref_msg_type, int reason,
@@ -1582,9 +1594,21 @@ private:
     [[nodiscard]] inbound_result_t inbound_reject_best_effort_leaf_(
         bool tic, seqnum_t ref_seq, std::string_view ref_msg_type,
         std::string_view sending_time) noexcept;
-    // `text` is Text(58), or empty for a Logout without one (fixpp#537, D-537-5).
+    // 105 (data-model E-3): the ending a Logout's leaf writes for. R-1 is the liveness loop's
+    // give-up, which claims the Logout owner and enters the ending state machine at its decision;
+    // R-2 an ending the session starts (send_ending_logout_ and the Logon refusals); reply the
+    // answer to the peer's Logout, and send_ending_logout_'s Logout when the frame that drew the
+    // ending is the peer's Logout (T143c).
+    enum class ending_kind : std::uint8_t { r1, r2, reply };
+    // `text` is Text(58), or empty for a Logout without one (fixpp#537, D-537-5). 105: the leaf
+    // enters the ending state machine at its owner claim (an R-1 has entered at its decision),
+    // and leaves it when its write returns; *armed reports whether it armed the R-2 wait, and
+    // claimed_mark that the caller claimed a pending too-high mark (C-2.8).
     [[nodiscard]] inbound_result_t inbound_logout_leaf_(bool tic, std::string_view sending_time,
-                                                        std::string_view text) noexcept;
+                                                        std::string_view text,
+                                                        ending_kind kind = ending_kind::reply,
+                                                        bool* armed = nullptr,
+                                                        bool claimed_mark = false) noexcept;
     [[nodiscard]] inbound_result_t inbound_logon_sent_logout_leaf_(
         bool tic, std::string_view text, std::string_view sending_time) noexcept;
     // fixpp#537 (D-537-7) supersedes the success returned for a request that could not be
@@ -1643,11 +1667,16 @@ private:
     // run_liveness_loop — co_spawned on the session executor when the session
     // first enters Active state (LogonSent → Active via peer Logon-ack, or
     // NotConnected → LogonReceived → Active via acceptor path). Drives:
-    //   1. Outbound idle: after heartbt_int of no outbound data → emit Heartbeat.
-    //   2. Inbound silence: after heartbt_int of no inbound data → emit TestRequest.
-    //   3. Unanswered TestRequest: after grace window (1×heartbt_int) without
-    //      inbound Heartbeat reply → session_test_request_unanswered → Disconnected.
-    //   4. HeartBtInt=0: co_returns immediately (no timers armed — FR-006).
+    // 105 (research D6; data-model E-4) supersedes 005 research D-8's 1 × HeartBtInt
+    // TestRequest threshold. With T = test_request_threshold, or 1.2 × HeartBtInt when unset:
+    //   1. Outbound idle: after heartbt_int of no outbound data → emit Heartbeat, unless a
+    //      TestRequest is pending and no inbound frame arrived since it.
+    //   2. Inbound silence: after T of no inbound data → emit TestRequest.
+    //   3. Unanswered TestRequest: strictly after 2T of inbound silence with a TestRequest
+    //      pending → 105 R-1 (research D3): the slot-74 record,
+    //      a Logout with Text, then Disconnected; the connection closes at the loop's exit
+    //      (105 D1).
+    //   4. HeartBtInt <= 0: co_returns immediately (no timers armed — FR-006).
     // Runs under the root cancellation slot; Session::close() cancels it.
     // [feedback_asio_cospawn_total_cancellation_default]: the coroutine resets to
     // enable_total_cancellation.
@@ -1661,23 +1690,22 @@ private:
     // Active. Single-writer on the per-session strand.
     fixpp::core::steady_time_point last_inbound_steady_;
 
-    // pending_test_req_id_ — the TestReqID of the most recently emitted
-    // TestRequest that has not yet been acknowledged by an inbound Heartbeat.
-    // Empty when no TestRequest is outstanding. When the liveness timer loop
-    // fires an unanswered-TR disconnect, this field holds the unacknowledged ID.
+    // pending_test_req_id_ — the TestReqID of the most recently issued
+    // TestRequest that has not yet been acknowledged by an inbound Heartbeat; issued is when the
+    // liveness loop built it, before its number, store and write (data-model E-4).
+    // Empty when no TestRequest is outstanding. At the liveness loop's give-up it is the
+    // TestReqID the slot-74 record and the Logout's Text(58) name (105 R-1, research D3).
     std::string pending_test_req_id_;
-
-    // unanswered_tr_ — set to true when a TestRequest has been emitted and the
-    // grace window (1×HeartBtInt) has elapsed without a Heartbeat reply.
-    // When true the liveness loop transitions the session to Disconnected with
-    // session_test_request_unanswered (error slot 74). Single-writer.
-    bool unanswered_tr_ = false;
 
     // Per-session TestRequest ID counter (FR-010, RC#6). Replaces the prior
     // process-global `static tr_counter` in run_liveness_loop. Single-writer
     // on the session strand; wrap-around at UINT32_MAX is acceptable
     // (within-session uniqueness contract per spec.md §Edge Cases / research.md D-3).
     std::uint32_t next_test_request_id_ = 0;
+    // 105 (research D5; data-model E-4): next_test_request_id_ when the current connection
+    // started (open(), install_reconnected_transport, attach_accepted_transport), the floor of
+    // detail::test_req_id_in_window, so a reconnect starts a new set of earlier ids.
+    std::uint32_t test_request_id_floor_ = 0;
 
     // ── US4 / T046 transport surface ─────────────────────────────────────────
     // transport_send_ — two uses:
@@ -1938,21 +1966,23 @@ private:
     // counter (liveness_counter_'s pattern).
     std::shared_ptr<std::atomic<int>> peer_logout_bound_counter_{
         std::make_shared<std::atomic<int>>(0)};
-    // One hold on the bound's join counter: its constructor increments the counter and its
-    // destructor decrements it. It is the bound's parameter, so the frame owns it from its
+    // One hold on a detached frame's join counter: its constructor increments the counter and
+    // its destructor decrements it. It is the frame's parameter, so the frame owns it from its
     // creation and releases the counter whether or not the body ran, an unstarted frame that
-    // a throwing co_spawn destroys included. A moved-from hold releases nothing.
-    class peer_logout_bound_join {
+    // a throwing co_spawn destroys included. A moved-from hold releases nothing. It touches only
+    // the counter. 105 (T129): the one hold class for such counters; each counter's own hold name
+    // is an alias of it.
+    class counter_join {
     public:
-        explicit peer_logout_bound_join(std::shared_ptr<std::atomic<int>> counter) noexcept
+        explicit counter_join(std::shared_ptr<std::atomic<int>> counter) noexcept
             : counter_{std::move(counter)} {
             counter_->fetch_add(1, std::memory_order_relaxed);
         }
-        peer_logout_bound_join(peer_logout_bound_join&&) noexcept = default;
-        peer_logout_bound_join(peer_logout_bound_join const&) = delete;
-        peer_logout_bound_join& operator=(peer_logout_bound_join const&) = delete;
-        peer_logout_bound_join& operator=(peer_logout_bound_join&&) = delete;
-        ~peer_logout_bound_join() {
+        counter_join(counter_join&&) noexcept = default;
+        counter_join(counter_join const&) = delete;
+        counter_join& operator=(counter_join const&) = delete;
+        counter_join& operator=(counter_join&&) = delete;
+        ~counter_join() {
             if (counter_) {
                 counter_->fetch_sub(1, std::memory_order_release);
             }
@@ -1961,6 +1991,7 @@ private:
     private:
         std::shared_ptr<std::atomic<int>> counter_;
     };
+    using peer_logout_bound_join = counter_join;
     // The Logout owner (research D4.6): at most one Logout of an established session is
     // in flight. Session strand only.
     bool logout_in_flight_ = false;
@@ -1995,6 +2026,10 @@ private:
     // (data-model "Pending-Logout mark", its exception rows).
     asio::awaitable<void> run_peer_logout_bound_(peer_logout_bound_join join,
                                                  std::uint32_t gen) noexcept;
+    // The bound's body; run_peer_logout_bound_ awaits it and then releases the
+    // connection-end latch (105 research D1 item 7), so the release runs only on an exit the
+    // bound resumed to.
+    asio::awaitable<void> run_peer_logout_bound_body_(std::uint32_t gen) noexcept;
 
     // Test seams of the bound (cells F1 and F2): when set, the bound awaits the first
     // before its first test, and the second between its publish-and-re-test and its
@@ -2018,9 +2053,10 @@ private:
     std::shared_ptr<fixpp::transport::TransportFactory> effective_transport_factory_;
 
     // Owns the AwaitingResend transient bool (NOT a new fsm_state per D-1),
-    // the ResendState, and FR-001..FR-016 recovery state. Constructed from
-    // cfg_.transport_factory_override (non-owning raw ptr), cfg_.reconnect_policy,
-    // cfg_.heartbeat_interval, and cfg_.logout_disconnect_timeout_ms.
+    // the ResendState, and FR-001..FR-016 recovery state. Constructed from the
+    // transport-factory pointer (non-owning) and the resolved reconnect policy;
+    // the heartbeat and TestRequest timing and the ending Logout's timeout are
+    // Session's (105 FR-013; data-model E-9, E-3, E-4).
     // Session::on_inbound_frame delegates state tracking to reconnect_fsm_;
     // the ResendRequest emit remains inline (has access to seqnum_mgr_ + store).
     // [data-model §E-1; contracts/reconnect_fsm.hpp]
@@ -2055,6 +2091,180 @@ private:
     // FSM state but before explicit teardown).
     // [feedback_detached_cospawn_write_not_in_join_counter; FQ-A D-6 F3/F4]
     std::shared_ptr<std::atomic<int>> liveness_counter_{std::make_shared<std::atomic<int>>(0)};
+    // The liveness loop's body; run_liveness_loop awaits it and then releases the
+    // connection-end latch, so the release runs only on an exit the loop resumed to.
+    [[nodiscard]] asio::awaitable<void> run_liveness_loop_body_() noexcept;
+
+    // ── 105-transport-liveness: the connection-end latch (research D1; data-model E-2) ──
+    // Supersedes, for the connection, the rule that writing Disconnected is a state
+    // transition and not a close (092's D-1/D-2/D-3 and 093 FR-006's establishment deadline
+    // as the pre-Active close; the bundle's FR-019 names them): the edge into Disconnected
+    // owes the connection's close, and the root that owns the ending consumes the owe.
+    // connection_end_owed_ holds the conn_gen_ the close is owed on. Session strand only.
+    std::optional<std::uint32_t> connection_end_owed_;
+    // Held only around drain_for_reconnect_'s call in drive_reconnect (B-103-9): the drain
+    // owns the old connection's close, so the edge it writes owes none.
+    bool reconnect_drain_in_flight_ = false;
+    // The one setter (data-model E-2): owes when the session is open and no drain is in flight.
+    // Re-derive its callers: grep -n 'owe_connection_end_(' src/session/session.cpp
+    void owe_connection_end_() noexcept;
+    // Consumer (b), at the exit of every detached root and application call (research D1
+    // item 7): when the latch is set on this connection, the session is open and no frame is
+    // inside an arm, spawns close_transport_ on the live transport, then clears the latch. A
+    // spawn that throws closes the transport synchronously instead (clarification D-g).
+    void release_connection_end_() noexcept;
+    // Runs release_connection_end_() when the frame that holds it ends: the application
+    // calls' exits (send_body_, send_deferred_, drive_reconnect). Its destructor touches the
+    // Session, as those frames' other holders do (the Session outlives the call).
+    class connection_end_releaser {
+    public:
+        explicit connection_end_releaser(Session& s) noexcept : s_{s} {}
+        connection_end_releaser(connection_end_releaser const&) = delete;
+        connection_end_releaser& operator=(connection_end_releaser const&) = delete;
+        ~connection_end_releaser() { s_.release_connection_end_(); }
+
+    private:
+        Session& s_;
+    };
+    // The close frame's join counter: +1 by connection_close_join's constructor, -1 by its
+    // destructor. close() and drain_for_reconnect_ join it; ~Session asserts it is 0.
+    std::shared_ptr<std::atomic<int>> connection_close_counter_{
+        std::make_shared<std::atomic<int>>(0)};
+    // One hold on connection_close_counter_ (counter_join): the close frame's parameter, so a
+    // frame that is never published releases the counter too.
+    using connection_close_join = counter_join;
+    // The close frame (research D1 item 5): awaits close_async() on the transport it holds and
+    // touches no member of Session, so its own spawn chain keeps close_async's cancellation
+    // reset (research F-6).
+    static asio::awaitable<void> close_transport_(
+        connection_close_join join, std::shared_ptr<fixpp::transport::Transport> transport);
+    // Test seam (research D10, the spawn-failure seams): when set and it returns true,
+    // release_connection_end_'s spawn throws std::bad_alloc after its join is built. Set only
+    // through session_test_access.
+    std::function<bool()> close_frame_spawn_fails_;
+
+    // ── 105-transport-liveness: the ending Logout (research D2; data-model E-3) ──
+    // One state machine for the write limit, the R-2 wait, the bound and the latch. Every
+    // Logout the session writes to end a session (R-1's, every R-2 Logout before and after
+    // Active, and the replies to the peer's Logout) enters it at its write point; close()'s own
+    // Logout (run_logout_phase1) does not. Supersedes, for those Logouts, the rule that the
+    // session records Disconnected after its Logout's write (the 536-537-538 note's endings and
+    // 103's too-low Logout, which then closed only at close() or Engine::stop()).
+    // Session strand only.
+    struct ending_wait_state {
+        enum class phase_t : std::uint8_t { none, writing, armed, resolved };
+        phase_t phase = phase_t::none;
+        ending_kind kind = ending_kind::reply;
+        fsm_state entered_from = fsm_state::NotConnected;
+        bool cut = false;                         // the bound closed the transport during the write
+        fixpp::core::steady_time_point deadline;  // one budget for the write and the wait
+        // Entered while the session was Active.
+        [[nodiscard]] bool from_active() const noexcept {
+            return entered_from == fsm_state::Active;
+        }
+    };
+    ending_wait_state ending_wait_;
+    // The connection's establishment deadline on engine_.clock, handed over once by an Engine's
+    // read pump (session_engine_access::set_establishment_deadline); empty on a direct Session.
+    std::optional<fixpp::core::steady_time_point> establishment_cap_;
+    // A connection's start: no ending Logout and no establishment cap (data-model E-3 row 17), no
+    // TestRequest pending and a new set of earlier TestReqIDs from test_request_id_floor_ (research
+    // D5; data-model E-4): a TestRequest is pending only on the connection that issued it.
+    // Synchronous. Its callers: grep -n 'begin_connection_()' src/session/session.cpp
+    void begin_connection_() noexcept;
+    // The bound's wake, in peer_logout_wake_'s shape.
+    std::function<void()> ending_logout_wake_;
+    // The bound's join counter, in peer_logout_bound_counter_'s shape: close() and
+    // drain_for_reconnect_ join it after their transport close; ~Session asserts it is 0.
+    std::shared_ptr<std::atomic<int>> ending_logout_bound_counter_{
+        std::make_shared<std::atomic<int>>(0)};
+    // One hold on ending_logout_bound_counter_ (counter_join): the bound's parameter.
+    using ending_logout_bound_join = counter_join;
+    // What entering writing found: no limit (timeout 0 or no clock), the limit set up, or the
+    // bound's spawn refused (an allocation failure: the Logout is not written).
+    enum class ending_entry : std::uint8_t { unlimited, limited, refused };
+    // Enters writing for an ending Logout of the given kind, its deadline read now, and spawns
+    // the bound on ex (the entering coroutine's executor, never executor()). Synchronous.
+    [[nodiscard]] ending_entry enter_ending_write_(ending_kind kind,
+                                                   asio::any_io_executor const& ex) noexcept;
+    // Leaves writing when the Logout's leaf returns (E-3, "Leaving writing"): arms the wait for
+    // an R-2 that was transmitted, not cut, claimed no pending mark and whose session is still in
+    // the state it entered from; otherwise none. Returns whether it armed. Synchronous.
+    bool leave_ending_write_(bool transmitted, bool claimed_mark) noexcept;
+    // An open wait's end: resolved, then the bound's wake, which re-tests. Synchronous.
+    void resolve_ending_wait_() noexcept {
+        ending_wait_.phase = ending_wait_state::phase_t::resolved;
+        wake_ending_logout_bound_();
+    }
+    // An ending Logout's writer holds one from its write's start: while an exception unwinds the
+    // frame (store_then_emit's operation_aborted for a cancelled store call) it leaves writing, as
+    // leave_ending_write_(false, false); a suspended frame destroyed unresumed touches nothing.
+    struct ending_write_unwind_guard {
+        Session* s;
+        int unwinding_at = std::uncaught_exceptions();
+        ~ending_write_unwind_guard() {
+            if (std::uncaught_exceptions() > unwinding_at) {
+                (void)s->leave_ending_write_(false, false);
+            }
+        }
+    };
+    void wake_ending_logout_bound_() noexcept {
+        if (ending_logout_wake_) {
+            ending_logout_wake_();
+        }
+    }
+    // An ending is in progress after Active: its Logout being written, or the wait armed.
+    [[nodiscard]] bool ending_in_progress_() const noexcept {
+        return ending_wait_.from_active() &&
+               (ending_wait_.phase == ending_wait_state::phase_t::writing ||
+                ending_wait_.phase == ending_wait_state::phase_t::armed);
+    }
+    // The liveness loop's one predicate (data-model E-4): it originates only while this holds.
+    [[nodiscard]] bool liveness_may_originate_() const noexcept {
+        return fsm_state_ == fsm_state::Active &&
+               ending_wait_.phase == ending_wait_state::phase_t::none;
+    }
+    // The bound (research D2 item 8; data-model E-3, "The bound's loop" and "The bound's
+    // exits"): a detached coroutine on the strand, its join counter held by its parameter.
+    asio::awaitable<void> run_ending_logout_bound_(ending_logout_bound_join join,
+                                                   std::uint32_t gen) noexcept;
+    // The bound's live predicate for the phase it finds.
+    [[nodiscard]] bool ending_bound_live_(std::uint32_t gen) const noexcept;
+    // The expiry exit of the phase the bound finds (rows 4, 10, 11, 14), which its failure exit
+    // takes too (row 16). Every step is noexcept.
+    void expire_ending_wait_(std::uint32_t gen) noexcept;
+    // The close frame on `transport` (the live one, read by the caller; nothing when null), with
+    // D-g's synchronous fallback. It leaves the latch alone and makes no test of the session's
+    // state (the bound's spawns, data-model E-2 I-2's exceptions).
+    void spawn_connection_close_(std::shared_ptr<fixpp::transport::Transport> transport) noexcept;
+    // The R-2 helper (research D2 item 1) after Active: claims a pending mark, writes the Logout
+    // through inbound_logout_leaf_, then arms the wait or records Disconnected; absorbed while an
+    // ending is in progress. `hdr` is the inbound frame that drew the ending, which every caller
+    // has in hand: when it is the peer's Logout, MsgType(35) 5, the Logout is the leaf's reply
+    // kind, its write limited and no wait armed (T143c, contract C-2 "Which Logouts"). Its
+    // callers: `git grep -n 'send_ending_logout_(' -- src`.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_ending_logout_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr, std::string_view sending_time,
+        std::string_view text) noexcept;
+    // The peer-frame silent endings (research D2 item 4): Disconnected unless an ending is in
+    // progress after Active.
+    void end_session_silently_() noexcept {
+        if (ending_in_progress_()) {
+            return;
+        }
+        record_state_transition_(fsm_state::Disconnected);
+    }
+    // The peer's Logout during a wait armed after Active (research D2 item 3): at NextNumIn the
+    // in-sequence route (check_inbound, then on_inbound_active_logout_), off NextNumIn its own.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> on_inbound_ending_response_(
+        bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+        inbound_route const& route) noexcept;
+    // Test seams (research D10, the spawn-failure and in-body race seams): when set and they
+    // return true, the bound's spawn throws std::bad_alloc after its join is built, and the
+    // bound throws std::bad_alloc before it awaits its race. Set only through
+    // session_test_access.
+    std::function<bool()> ending_bound_spawn_fails_;
+    std::function<bool()> ending_bound_race_throws_;
 
     // ── 034-credential-store-redaction T004 — masker buffer bound ────────────
     // Upper bound for the coroutine-frame copy used in the masked-Logon persist
@@ -2117,7 +2327,7 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store_then_emit(
         seqnum_t stamped_seq, std::span<const std::byte> frame,
         std::optional<fsm_state> arm = std::nullopt, bool transmit = true,
-        wire_reset_exemption exemption = wire_reset_exemption::none);
+        wire_reset_exemption exemption = wire_reset_exemption::none, bool* transmitted = nullptr);
 
     // fixpp#518, 093 (data-model E-13; contract C-6): true when a Logon arm must stop
     // after a resume, because the session left the state the arm expects while the arm

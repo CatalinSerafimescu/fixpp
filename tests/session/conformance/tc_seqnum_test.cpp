@@ -2,6 +2,12 @@
 //
 // tests/session/conformance/tc_seqnum_test.cpp
 //
+// 105-transport-liveness (the R-2 wait, contract C-2) supersedes, for every Logout on C-2's
+// "Which Logouts" list, the "Logout, then Disconnected at once" ending this file pinned: the
+// session stays Active until the peer's Logout or the bound (logout_disconnect_timeout_ms from
+// the Logout's write start), and ends there; the cells read it through
+// tests/support/r2_wait_reading.hpp.
+//
 // [FIX-TC] Seqnum conformance subset — 005-session-establishment-fsm T030
 // US2 Phase 4.
 //
@@ -41,9 +47,11 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/r2_wait_reading.hpp"
 #include "support/store_double.hpp"
 #include "support/transport_double.hpp"
 
@@ -253,6 +261,7 @@ protected:
 TEST_F(TcSeqnumTest, Tc2a_MsgSeqNumCorrect) {
     auto cfg = make_acceptor_cfg();
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     // Step 1: Logon with seq=1 (correct starting MsgSeqNum).
     ASSERT_TRUE(drive_to_active(sess))
@@ -286,6 +295,7 @@ TEST_F(TcSeqnumTest, Tc2c_MsgSeqNumTooLow) {
         sent.emplace_back(reinterpret_cast<const char*>(b.data()), b.size());
     };
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     // Drive to Active: Logon consumed seq=1; next expected = 2.
     ASSERT_TRUE(drive_to_active(sess)) << "2c: Failed to drive to Active";
@@ -311,9 +321,18 @@ TEST_F(TcSeqnumTest, Tc2c_MsgSeqNumTooLow) {
     EXPECT_EQ(logout_texts,
               (std::vector<std::string>{"MsgSeqNum too low, expecting 2 but received 1"}))
         << "2c: one Logout with the too-low text";
-    const auto st = sess.state();
-    EXPECT_EQ(st, fixpp::session::fsm_state::Disconnected)
-        << "2c: the session ends after the Logout; got state=" << static_cast<int>(st);
+    // 105-transport-liveness (R-2, contract C-2) supersedes the Disconnected at the Logout: the
+    // session stays Active through the wait and ends at its bound.
+    fixpp::test_support::expect_r2_wait(
+        fixpp::test_support::read_r2_wait(
+            sess, *clock, std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            [this] {
+                for (int i = 0; i < 16; ++i) {
+                    ioc.restart();
+                    ioc.poll();
+                }
+            }),
+        "2c: the too-low Logout");
 }
 
 // ── 2q_MsgTypeNotValid ────────────────────────────────────────────────────────
@@ -331,6 +350,7 @@ TEST_F(TcSeqnumTest, Tc2c_MsgSeqNumTooLow) {
 TEST_F(TcSeqnumTest, Tc2q_MsgTypeNotValid) {
     auto cfg = make_acceptor_cfg();
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess)) << "2q: Failed to drive to Active";
 
     // Send a message with an unknown MsgType "Z" (in-sequence seq=2).
@@ -364,6 +384,7 @@ TEST_F(TcSeqnumTest, Tc2q_MsgTypeNotValid) {
 TEST_F(TcSeqnumTest, Tc2r_UnregisteredMsgType) {
     auto cfg = make_acceptor_cfg();
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess)) << "2r: Failed to drive to Active";
 
     // Send a message with a completely unregistered MsgType (e.g., "XYZ").

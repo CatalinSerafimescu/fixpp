@@ -69,6 +69,7 @@
 #include <span>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -763,6 +764,7 @@ TEST(LiveOutboundSerializedTest, LivenessHeartbeatWriteErrorStopsLoop) {
     // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it), reusing
     // this test's real clock so its liveness-loop sleep is also cancelled.
     fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *clock};
+    fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
     auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc), sess.open(),
                                    asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
@@ -1264,6 +1266,7 @@ TEST(LiveOutboundSerializedTest, BudgetMissQuiescesBeforeSessionTeardown) {
             auto teardown_clock =
                 std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
             fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
+            fixpp::test_support::close_before_destroy const closer_sess{sess, ioc};
 
             auto open_fut = asio::co_spawn(fixpp::test_support::session_executor_of(sess, ioc),
                                            sess.open(), asio::use_future);

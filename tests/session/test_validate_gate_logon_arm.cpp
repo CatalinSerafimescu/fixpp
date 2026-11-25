@@ -69,6 +69,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/transport_double.hpp"
@@ -414,6 +415,7 @@ TEST(ValidateGateLogonArm, Row_A_DictInvalidLogon_ValidateFirst_NotConnected) {
     LogonArmFixture fix;
     auto cfg = fix.make_acceptor_cfg_with_validation();
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
 
     // dict-invalid Logon: has tag 44 (Price) not defined for 35=A.
     auto frame = make_dict_invalid_logon("FIX.4.2", 1, "TW", "ISLD");
@@ -437,6 +439,7 @@ TEST(ValidateGateLogonArm, Row_Ci_AbsentSendingTime_NotConnected_Reason1) {
     LogonArmFixture fix;
     auto cfg = fix.make_acceptor_cfg_with_validation();
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
 
     // Logon without 52 — absent required field.
     auto frame = make_logon_no_sending_time("FIX.4.2", 1, "TW", "ISLD");
@@ -460,6 +463,7 @@ TEST(ValidateGateLogonArm, Row_Cii_PresentMalformed52_NotConnected_Reason10) {
     LogonArmFixture fix;
     auto cfg = fix.make_acceptor_cfg_with_validation();
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
 
     // Logon with 52=NOTATIME — present but not a valid timestamp.
     auto frame = make_logon_with_malformed_52_in_body("FIX.4.2", "TW", "ISLD", 1);
@@ -487,6 +491,7 @@ TEST(ValidateGateLogonArm, Row_Ciii_PresentMalformed52_LogonSent_LogoutOnly) {
     LogonArmFixture fix;
     auto cfg = fix.make_cfg_with_validation();
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
 
     // Open to LogonSent, then feed Logon with malformed 52.
     auto frame = make_logon_with_malformed_52_in_body("FIX.4.2", "TW", "ISLD", 1);
@@ -512,6 +517,7 @@ TEST(ValidateGateLogonArm, Row_F_InboundReject_NoRejectLoop) {
     LogonArmFixture fix;
     auto cfg = fix.make_cfg_with_validation();
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
 
     // Open to Active.
     auto fut = asio::co_spawn(fix.ioc, sess.open(), asio::use_future);
@@ -583,6 +589,7 @@ TEST(ValidateGateLogonArm, Row_F_InboundLogout_NoRejectLoop) {
     LogonArmFixture fix;
     auto cfg = fix.make_cfg_with_validation();
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
 
     // Open to Active.
     auto fut = asio::co_spawn(fix.ioc, sess.open(), asio::use_future);
