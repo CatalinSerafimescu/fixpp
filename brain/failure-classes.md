@@ -1216,6 +1216,50 @@ Linux lane is green.
 - **Sibling.** Class 1 (an instrument that cannot report): a lane that does not compile the platform's headers cannot
   report this class.
 
+### 26. A close that is orderly on one platform resets the connection on another
+
+On Linux, `close()` on a TCP socket sends FIN, and the peer reads everything written before it. On Windows, closing a
+socket that still has an operation pending (a parked read, as a pump keeps one) aborts the connection with an RST, and
+the peer's stack discards every byte it had not yet read. The final Logout, written just before the close, is lost
+there and only there, so every Linux lane is green.
+
+- **Trigger:** a transport's close path, or any ending that writes a last frame and then closes, on a socket that may
+  have a read or a write pending.
+- **Procedure:**
+  - Shut down the send side before the close (`shutdown(shutdown_send)`, then `close()`, both results ignored), so the
+    peer reads every completed write and then EOF.
+  - Two conditions still reset, as TCP does: inbound bytes this side never read, and SO_LINGER enabled with zero seconds.
+    State them where the close is documented rather than claiming the close is always orderly.
+  - Witness it on Windows: a cell that writes a frame, closes with a read pending, and asserts the peer reads the frame.
+    A Linux-only green is no evidence for this class.
+- **Scanning heuristic:** `git grep -nE 'socket_?\.close\(' -- src` and check that each plaintext close with a possibly
+  pending operation is preceded by a send-side shutdown.
+- **Instance (105-transport-liveness, T141a).** `asio_plain_transport::close()` in `src/transport/asio_plain_transport.cpp`
+  (`B-105-9`), measured with a Winsock probe. See [components/transport](./components/transport.md).
+- **Sibling.** Class 25 (a platform header's macro): another defect only the platform that has it can report.
+
+### 27. State keyed to one connection's peer, reset anywhere but the connection-start helper, leaks into the next connection
+
+A Session that reconnects keeps its members across connections. State that one connection's exchange sets (a pending
+TestRequest ID, a peer-Logout mark, a liveness anchor) and that is not reset when the next connection starts makes the
+new connection behave as if the old peer's exchange were still open. It sends no probe, accepts the old connection's
+answer, or gives up naming an ID it never sent. Single-connection tests cannot see it.
+
+- **Trigger:** you add or review a member that one connection sets, on a type that can run more than one connection.
+- **Procedure:**
+  - Reset it in the one helper every new connection goes through (`Session::begin_connection_()`), in the same commit
+    that adds the member, not at the site that first needed it.
+  - Witness it with a reconnect cell: connection 1 leaves the state set, connection 2 asserts the fresh behaviour. Add a
+    mutant that deletes the reset and turns the cell RED.
+  - Say who can reach it. Here only a direct initiator that reconnects one Session can; an Engine-managed initiator gets
+    one connection per Session.
+- **Scanning heuristic:** list the members the diff adds to the Session (`git diff origin/main...HEAD -- include/fixpp/session/session.hpp`)
+  and check each against the body of `begin_connection_()`.
+- **Instance (105-transport-liveness, PR #720 Gate B round 1, RC#1).** `pending_test_req_id_`; the witnesses are the
+  `TestReqId105Direct` reconnect cells. See [components/session-liveness-and-reconnect](./components/session-liveness-and-reconnect.md).
+- **Sibling.** Class 15 (a seam that outlives the window it observes) and class 23 (a reference withdrawn on every exit
+  of its window): the same rule, that state must end with its window, for a connection rather than an install or a frame.
+
 ## How to query the instances
 
 The corpus is private and machine-local. From the parent repo:
