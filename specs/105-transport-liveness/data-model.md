@@ -449,7 +449,11 @@ too-high Heartbeat route and #582's knob-off route call), and only while a TestR
 
 `next` is `next_test_request_id_` (the per-Session counter the loop increments for each TestReqID, never reset in
 `src/`); `floor` is a new `std::uint32_t test_request_id_floor_`, set to `next_test_request_id_` at every connection
-start (`open()`, `install_reconnected_transport`, `attach_accepted_transport`). Each start runs with no inbound frame
+start (`open()`, `install_reconnected_transport`, `attach_accepted_transport`), and each start also clears
+`pending_test_req_id_`, so a TestRequest is pending only on the connection that issued it: a previous connection's 112
+is a mismatch on the new one, and the new connection's Heartbeat and TestRequest instants are eligible from its start
+(*added 2026-11-25, Gate B round 1, C-1; until then a TestRequest left unanswered, or given up, stayed pending into the
+next connection*). Each start runs with no inbound frame
 inside an arm, so no classification straddles the reset: `open()` and `attach_accepted_transport` run before the
 pump's first delivery, and `install_reconnected_transport` runs after `drain_for_reconnect_` has quiesced the inbound
 chain (B-103-9). Memory is those two integers. The

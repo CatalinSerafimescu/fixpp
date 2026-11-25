@@ -2165,8 +2165,9 @@ private:
     // The connection's establishment deadline on engine_.clock, handed over once by an Engine's
     // read pump (session_engine_access::set_establishment_deadline); empty on a direct Session.
     std::optional<fixpp::core::steady_time_point> establishment_cap_;
-    // A connection's start: no ending Logout and no establishment cap (data-model E-3 row 17), and
-    // a new set of earlier TestReqIDs from test_request_id_floor_ (research D5; data-model E-4).
+    // A connection's start: no ending Logout and no establishment cap (data-model E-3 row 17), no
+    // TestRequest pending and a new set of earlier TestReqIDs from test_request_id_floor_ (research
+    // D5; data-model E-4): a TestRequest is pending only on the connection that issued it.
     // Synchronous. Its callers: grep -n 'begin_connection_()' src/session/session.cpp
     void begin_connection_() noexcept;
     // The bound's wake, in peer_logout_wake_'s shape.

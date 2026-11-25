@@ -585,7 +585,9 @@ item 4), and the pump closes it (D1). `answer_pending_test_request_` returns fal
 - An absent 112 answers, as today.
 - A 112 that is not `TR` plus canonical digits (a leading zero, a sign, letters, an overflowing number): never sent,
   so a mismatch.
-- A 112 of a previous connection: outside the window, so a mismatch.
+- A 112 of a previous connection: outside the window, so a mismatch. Each connection start also clears the pending
+  TestRequest (*amended 2026-11-25, Gate B round 1, C-1*), so that 112 is not the pending one either, and the new
+  connection's TestRequest instant is eligible from its start.
 - 2³² TestRequests or more on one connection: the window no longer identifies the sent set (at exactly 2³²,
   `next == floor` and nothing reads as earlier; past it, the window is the modular remainder). B-105-5 states that
   condition; it is unreachable in practice (Gate A round 3, Codex #7). The window test is a free `constexpr`

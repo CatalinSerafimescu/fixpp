@@ -979,6 +979,7 @@ void Session::begin_connection_() noexcept {
     ending_wait_.phase = ending_wait_state::phase_t::none;
     establishment_cap_.reset();
     test_request_id_floor_ = next_test_request_id_;
+    pending_test_req_id_.clear();
 }
 
 // 103 (research D1 step 3): see session.hpp.

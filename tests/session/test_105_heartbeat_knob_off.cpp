@@ -424,4 +424,153 @@ TEST(TestReqId105Direct, PreviousConnectionId_Mismatch) {
     EXPECT_TRUE(pr::frames_of_type(wire().substr(mark), "5").empty()) << "a Logout was written";
 }
 
+// Gate B round 1 (C-1; contract C-3.1, C-5.4, C-6.2; research D5; data-model E-4, the connection
+// starts): a TestRequest is pending only on the connection that wrote it. A direct initiator on
+// mock transports, HeartBtInt and T kHb, the clock stepped a second at a time; each connection's
+// wire is its own transport's byte record.
+class DirectReconnect105 {
+public:
+    std::shared_ptr<rg::GapApp> app = std::make_shared<rg::GapApp>();
+    rg::Scene s{rg::Options{.heartbeat = kHb, .app = app}};
+    std::shared_ptr<fixpp::test_support::MockReconnectFactory> factory =
+        std::make_shared<fixpp::test_support::MockReconnectFactory>();
+    std::shared_ptr<std::atomic<bool>> closed = std::make_shared<std::atomic<bool>>(false);
+    std::uint32_t next_in = 1;  // MsgSeqNum(34) of the peer's next frame
+
+    DirectReconnect105() {
+        factory->tweak_script = [c = closed](fixpp::transport::test::Script& sc) {
+            sc.closed_flag = c;
+        };
+        s.cfg.transport_factory_override = factory;
+        s.cfg.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 19099};
+        s.cfg.test_request_threshold = std::chrono::milliseconds{kHb};
+        s.session = std::make_unique<fixpp::session::Session>(s.engine, s.cfg);
+    }
+
+    template <class Awaitable>
+    bool run(Awaitable a, const char* site) {
+        auto fut = asio::co_spawn(fixpp::test_support::session_executor_of(*s.session, s.ioc),
+                                  std::move(a), asio::use_future);
+        (void)fixpp::test_support::pump_until(
+            s.ioc, [&] { return rg::Scene::ready(fut); }, fixpp::test_support::kPumpBudget,
+            fixpp::test_support::kPumpSlice, site);
+        bool const ok = rg::Scene::ready(fut) && fut.get().has_value();
+        s.drain();
+        return ok;
+    }
+
+    // The current connection's wire.
+    [[nodiscard]] std::string wire() const {
+        auto const b = factory->last_transport->outbound_bytes_seen();
+        return std::string{reinterpret_cast<const char*>(b.data()), b.size()};
+    }
+
+    // drive_reconnect(), then the peer's Logon acknowledgement: true when the session is Active.
+    bool connect(const char* site) {
+        if (!run(s.session->drive_reconnect(), site)) return false;
+        closed->store(false);
+        (void)s.feed(s.frame("A", next_in++,
+                             "98=0\x01"
+                             "108=10\x01"));
+        return s.state() == fsm_state::Active;
+    }
+
+    [[nodiscard]] bool pending() const {
+        return session_test_access::test_request_pending(*s.session);
+    }
+
+    // Steps the clock a second at a time until the current wire holds a TestRequest, at most
+    // kCap steps; its TestReqID(112), or "".
+    std::string first_tr() {
+        constexpr std::size_t kCap = 30;
+        std::size_t steps = 0;
+        while (pr::frames_of_type(wire(), "1").empty() && steps++ < kCap) s.pass(1s);
+        auto const trs = pr::frames_of_type(wire(), "1");
+        return trs.empty() ? std::string{} : pr::field_value(trs.front(), "112");
+    }
+};
+
+// The second connection's TestRequest instant and the TestReqID rule: TR1 left unanswered on
+// the first connection, the second starts with nothing pending, writes TR2 at T of its inbound
+// silence (none before), and a Heartbeat carrying TR1's 112 there ends the session with no
+// Logout (a TestReqID the session never sent on this connection).
+TEST(TestReqId105Direct, UnansweredTr1_ReconnectSendsTr2) {
+    DirectReconnect105 d;
+    ASSERT_TRUE(d.run(d.s.session->open(), "UnansweredTr1/open")) << "setup: open()";
+    ASSERT_TRUE(d.connect("UnansweredTr1/first")) << "setup: Active on the first connection";
+    std::string const tr1 = d.first_tr();
+    ASSERT_EQ(tr1, "TR1") << "setup: the first connection's TestRequest";
+    ASSERT_TRUE(d.pending()) << "setup: TR1 is not pending";
+    ASSERT_TRUE(d.connect("UnansweredTr1/second")) << "setup: Active on the second connection";
+    EXPECT_FALSE(d.pending()) << "the first connection's TestRequest is pending on the second";
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the TestRequest instant is computed from
+    // the Logon's inbound instant, which predates each step; the count below is the oracle.
+    for (int k = 0; k < 9; ++k) d.s.pass(1s);
+    EXPECT_TRUE(pr::frames_of_type(d.wire(), "1").empty())
+        << "a TestRequest before T on the second connection: " << d.wire();
+    d.s.pass(1s);
+    auto const trs = pr::frames_of_type(d.wire(), "1");
+    ASSERT_EQ(trs.size(), 1U) << "no TestRequest at T on the second connection: " << d.wire();
+    EXPECT_EQ(pr::field_value(trs.front(), "112"), "TR2");
+    ASSERT_TRUE(d.pending()) << "setup: TR2 is not pending, so the 112 below is not compared";
+    auto const mark = d.wire().size();
+    (void)d.s.feed(d.s.frame("0", d.next_in++, "112=" + tr1 + "\x01"));
+    d.s.drain();
+    EXPECT_EQ(d.s.state(), fsm_state::Disconnected)
+        << "the first connection's 112 did not end the session on the second";
+    EXPECT_TRUE(pr::frames_of_type(d.wire().substr(mark), "5").empty()) << "a Logout was written";
+}
+
+// The second connection's peer is silent: the give-up there names the TestRequest it wrote, TR2,
+// strictly after 2T of its inbound silence.
+TEST(TestReqId105Direct, UnansweredTr1_SilentPeer_GiveUpNamesTr2) {
+    DirectReconnect105 d;
+    ASSERT_TRUE(d.run(d.s.session->open(), "SilentPeer/open")) << "setup: open()";
+    ASSERT_TRUE(d.connect("SilentPeer/first")) << "setup: Active on the first connection";
+    ASSERT_EQ(d.first_tr(), "TR1") << "setup: the first connection's TestRequest";
+    ASSERT_TRUE(d.connect("SilentPeer/second")) << "setup: Active on the second connection";
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D, every instant is computed from the
+    // Logon's inbound instant or the TestRequest's write, each before the step; the state and
+    // the wire below are the oracle.
+    for (int k = 0; k < 20; ++k) d.s.pass(1s);
+    EXPECT_EQ(d.s.state(), fsm_state::Active) << "given up at or before 2T";
+    d.s.pass(t105::kLivenessGuard);
+    EXPECT_EQ(d.s.state(), fsm_state::Disconnected) << "not given up strictly after 2T";
+    auto const trs = pr::frames_of_type(d.wire(), "1");
+    ASSERT_EQ(trs.size(), 1U) << "the second connection's TestRequests: " << d.wire();
+    EXPECT_EQ(pr::field_value(trs.front(), "112"), "TR2");
+    auto const logouts = pr::frames_of_type(d.wire(), "5");
+    ASSERT_EQ(logouts.size(), 1U) << d.wire();
+    EXPECT_EQ(pr::field_value(logouts.front(), "58"), "TestRequest unanswered, TestReqID TR2");
+}
+
+// The give-up path: the first connection's peer is silent and R-1 gives up naming TR1; the
+// reconnect that follows writes TR2 at T of the second connection's inbound silence.
+TEST(TestReqId105Direct, GiveUpThenReconnect_SendsTr2AtT) {
+    DirectReconnect105 d;
+    ASSERT_TRUE(d.run(d.s.session->open(), "GiveUpThenReconnect/open")) << "setup: open()";
+    ASSERT_TRUE(d.connect("GiveUpThenReconnect/first")) << "setup: Active on the first connection";
+    ASSERT_EQ(d.first_tr(), "TR1") << "setup: the first connection's TestRequest";
+    std::size_t steps = 0;
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D, the give-up instant is computed from
+    // stored anchors; the step cap ends in the setup assertion below.
+    while (d.s.state() == fsm_state::Active && steps++ < 30) d.s.pass(1s);
+    ASSERT_EQ(d.s.state(), fsm_state::Disconnected) << "setup: the first connection not given up";
+    auto const lo1 = pr::frames_of_type(d.wire(), "5");
+    ASSERT_EQ(lo1.size(), 1U) << "setup: the give-up's Logout: " << d.wire();
+    ASSERT_EQ(pr::field_value(lo1.front(), "58"), "TestRequest unanswered, TestReqID TR1")
+        << "setup";
+    ASSERT_TRUE(d.connect("GiveUpThenReconnect/second"))
+        << "setup: Active on the second connection";
+    EXPECT_FALSE(d.pending()) << "the given-up TestRequest is pending on the second connection";
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D, as above.
+    for (int k = 0; k < 9; ++k) d.s.pass(1s);
+    EXPECT_TRUE(pr::frames_of_type(d.wire(), "1").empty())
+        << "a TestRequest before T on the second connection: " << d.wire();
+    d.s.pass(1s);
+    auto const trs = pr::frames_of_type(d.wire(), "1");
+    ASSERT_EQ(trs.size(), 1U) << "no TestRequest at T on the second connection: " << d.wire();
+    EXPECT_EQ(pr::field_value(trs.front(), "112"), "TR2");
+}
+
 }  // namespace
