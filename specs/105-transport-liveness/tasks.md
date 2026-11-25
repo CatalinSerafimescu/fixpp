@@ -1498,7 +1498,8 @@ remaining reference.
   below), and every contract clause maps to a landed cell or its named instrument (the contract table below); (iii) every feature-owned OFFICIAL catalogue row is `done` with its `coverage-index.md` entry. Record the verdict,
   100 % or fully waived, in `.specify/decisions/105-transport-liveness-verify.md` under `## Completeness`.
   Done: `## Completeness` of the verify record, 100 % with T145 (deferred by the orchestrator until after Gate B) and
-  T149 (the orchestrator's PR body) waived-pending; the traceability tables' tasks all `[X]` but T149, their named cells
+  T149 (the orchestrator's PR body) waived-pending, and contract C-8.3's held-close-frame case waived by the Phase 4
+  ruling (T078c, T078e) and owed in fixpp#718; the traceability tables' tasks all `[X]` but T149, their named cells
   checked against the head binaries' `--gtest_list_tests`; T143's possible witness gaps resolved row by row; no
   feature-owned catalogue row (T146).
 
