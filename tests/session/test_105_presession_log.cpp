@@ -367,6 +367,43 @@ TEST(PreSessionLog105, NoSession_RecordNamesCompIds) {
     EXPECT_EQ(arg_text(recs.front().args[3]), "ELSEWHERE") << "target_comp_id";
 }
 
+// C-7.1 with no logger_override: the refusal's record goes to the engine's logger
+// (EngineConfig::logger), where the cell reads it.
+TEST(PreSessionLog105, NoSession_EngineLogger_OneRecord) {
+    pr::Rig rig;
+    t105::LogCapture log;
+    auto c = rig.cfg();
+    c.logger_override = nullptr;
+    fixpp::core::EngineConfig ec;
+    ec.executor = rig.ioc.get_executor();
+    ec.clock = rig.clock;
+    ec.application = rig.app;
+    ec.logger = log.logger;
+    rig.engine = std::make_unique<fixpp::session::Engine>(rig.ioc.get_executor(), std::move(ec));
+    rig.id = fixpp::session::SessionId::from_config(c);
+    bool const started =
+        rig.engine->register_session(std::move(c)).has_value() && rig.engine->start().has_value() &&
+        rig.run_until([&] { return rig.engine->acceptor_bound_endpoint(rig.id).port != 0; });
+    EXPECT_TRUE(started) << "setup: the acceptor did not start";
+    bool closed = false;
+    if (started) {
+        auto p = RawPeer::connect(rig.ioc, rig.engine->acceptor_bound_endpoint(rig.id).port);
+        (void)rig.run_until([&] { return p->connected || p->connect_failed; });
+        if (p->connected) {
+            p->send(pr::message("FIX.4.2", "A", 1, "XX", "ISLD", rig.sending_time(),
+                                "98=0\x01"
+                                "108=30\x01"));
+            closed = rig.run_until([&] { return p->read_ended; });
+        }
+        (void)rig.run_until([&] { return sink_count(log, kRejectFormat) >= 1; }, kRecordWait);
+    }
+    rig.stop();
+    auto const recs = log.records_of(FIXPP_FORMAT_ID(kRejectFormat));
+    EXPECT_TRUE(closed) << "the connection was not closed";
+    expect_one_reject(recs, reject_line("no_session", "FIX.4.2", "XX", "ISLD", "0"),
+                      "NoSession_EngineLogger");
+}
+
 // C-7.2: at most one record per max(HeartBtInt, 1 s) of the engine clock (30 s here); the next
 // carries the refusals not written since the last one. Both sides of the window are read.
 TEST(PreSessionLog105, Flood_BoundedWithSuppressedCount) {
