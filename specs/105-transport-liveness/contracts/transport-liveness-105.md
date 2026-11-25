@@ -6,8 +6,8 @@
 The observable rules of this feature, by ending class. "The peer observes EOF" means the peer's read of the
 connection ends (for TLS, after a close_notify where C-8 says so). "At once" means with no further mock-clock
 advance and no further inbound frame or local API call: the close is initiated when the executor has run until it
-has no ready work, and the peer observes it on the plain transport then; on TLS the peer observes it once
-`close_async` has completed, which is bounded by `tls_close_timeout` (wall time). One definition, used by SC-001 too.
+has no ready work, and the peer observes it on the plain transport then; on TLS fixpp's close has completed once
+`close_async` has, bounded by `tls_close_timeout` (wall time); the peer's read ends after it has read what was queued before that close. One definition, used by SC-001 too.
 On the plain transport fixpp's close shuts the socket's send side down before closing it, so the peer reads every
 write fixpp completed, then EOF, on every platform, with a read or a write pending on fixpp's side or not (B-105-9;
 tasks.md T141a).

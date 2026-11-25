@@ -454,13 +454,12 @@ TEST(TlsClose105, CloseGracefulDuringWait_CloseNotifyAtTheBound) {
 // Returns the SO_SNDBUF the OS reports for the engine acceptor's accepted TLS socket, or -1 when
 // the session, its TLS transport or the option is not there. On Windows it first sets the option
 // to windows_bytes: Microsoft documents that setting SO_SNDBUF on a TCP socket disables Windows'
-// dynamic send buffering for it. Elsewhere the option keeps the size the OS gives it: the
-// session's close (asio_tls_transport::close_async) is an ordinary close, so the peer's read ends
-// only after it has read everything the session's socket queued, and a larger send buffer
-// lengthens that drain. The Engine's accept path builds the accepted transport's
-// Transport::Config itself (no SessionConfig or EngineConfig field reaches tcp_send_buf_bytes
-// there), so the cell reaches the option through the test-access friend. Re-check with:
-// grep -n accepted_transport_config src/session/engine.cpp
+// dynamic send buffering for it. Elsewhere the option keeps the size the OS gives it; the Linux
+// CI comparison behind that choice is recorded in
+// .specify/decisions/105-transport-liveness-gateb.md (PR #720). The Engine's accept path builds the
+// accepted transport's Transport::Config itself (no SessionConfig or EngineConfig field reaches
+// tcp_send_buf_bytes there), so the cell reaches the option through the test-access friend.
+// Re-check with: grep -n accepted_transport_config src/session/engine.cpp
 int session_send_buffer(fixpp::session::Engine& engine, fixpp::session::SessionId const& id,
                         [[maybe_unused]] int windows_bytes) {
     auto s = engine.lookup(id);
@@ -490,8 +489,9 @@ int session_send_buffer(fixpp::session::Engine& engine, fixpp::session::SessionI
 // buffering for it. A held send that completes ok means the window reopened and the R-2 Logout
 // could be written; the cell then fails as a setup failure.
 // Off Windows the tail's read ends only after the peer has drained what the session queued before
-// its close: the close is an ordinary close, with the FIN behind that queue, so a fixed send
-// buffer there would lengthen the drain the tail waits for.
+// its close: the close is an ordinary close, with the FIN behind that queue. The read's cap (the
+// 5s at its pump) is a wall cap that nothing derives: a drain slower than it fails the cell at the
+// read.
 // The bound's timing on both sides is pinned by the seam twin,
 // TlsWriteLimit105.R2AfterActive_PeerStopsReading_SeamTwin_ClosedAtExactlyTheBound in
 // test_105_seams.cpp.
@@ -595,7 +595,7 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
                 return false;
             },
             300ms, 5ms, nullptr);
-        open_before = state() == fsm_state::Active && !peer->read_ended;
+        open_before = state() == fsm_state::Active;
         // The session reads the frame behind its own blocked write, so the instant its Logout's
         // write starts is not observable from here: the mock clock moves in 50 ms steps, with
         // wall time between them for the reads and for tls_close_timeout, until the session ends,
@@ -643,7 +643,7 @@ TEST(TlsWriteLimit105, R2AfterActive_PeerStopsReading_AbortiveAtBoundPlusTlsClos
     EXPECT_TRUE(open_before) << "the session ended before the bound";
     EXPECT_TRUE(ended_by_bound)
         << "the session did not end within the mock-clock cap after its Logout";
-    EXPECT_TRUE(ended) << "the connection was not closed within the bound plus tls_close_timeout";
+    EXPECT_TRUE(ended) << "the peer's read did not end within the wall cap after the session's end";
     // What the peer read and what the session was given to write, for the ending's message.
     std::size_t sends_ready = 0;
     for (auto const& f : sends) {
