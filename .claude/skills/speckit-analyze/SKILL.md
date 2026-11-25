@@ -59,6 +59,7 @@ You **MUST** consider the user input before proceeding (if not empty).
 
     Wait for the result of the hook command before proceeding to the Goal.
     ```
+    After emitting the block above you MUST actually invoke the hook and wait for it to finish before continuing. Run it the same way you would run the command yourself in this agent/session (the invocation may differ from the literal `{command}` id shown above, e.g. a skills-mode agent runs it as `/skill:speckit-...` or `$speckit-...`). Emitting the block alone does not run the hook.
 - If no hooks are registered or `.specify/extensions.yml` does not exist, skip silently
 
 ## Goal
@@ -67,7 +68,7 @@ Identify inconsistencies, duplications, ambiguities, and underspecified items ac
 
 ## Canonical executor — the `spec-analyzer` agent (LOCAL PATCH)
 
-Per pipeline.md **[I]** (2026-05-22), the canonical executor for this step is the `spec-analyzer` agent at `.claude/agents/spec-analyzer.md` (parent root). The Opus orchestrator does NOT walk detection passes A–F directly — the cross-artifact reasoning across `spec.md` / `plan.md` / `tasks.md` / constitution fits cleanly into one subagent context and frees the main session for triage. Spawn pattern:
+Per pipeline.md **[I]** (2026-05-22), the canonical executor for this step is the `spec-analyzer` agent at `.claude/agents/spec-analyzer.md` (parent root). The orchestrator does NOT walk detection passes A–F directly — the cross-artifact reasoning across `spec.md` / `plan.md` / `tasks.md` / constitution fits cleanly into one subagent context and frees the main session for triage. Spawn pattern:
 
 ```
 Agent(
@@ -273,6 +274,7 @@ After reporting, check if `.specify/extensions.yml` exists in the project root.
     Executing: `/{command}`
     EXECUTE_COMMAND: {command}
     ```
+    After emitting the block above you MUST actually invoke the hook and wait for it to finish before continuing. Run it the same way you would run the command yourself in this agent/session (the invocation may differ from the literal `{command}` id shown above, e.g. a skills-mode agent runs it as `/skill:speckit-...` or `$speckit-...`). Emitting the block alone does not run the hook.
 - If no hooks are registered or `.specify/extensions.yml` does not exist, skip silently
 
 ## Operating Principles

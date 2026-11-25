@@ -32,7 +32,7 @@ disable-model-invocation: false
 $ARGUMENTS
 ```
 
-You **MUST** consider the user input before proceeding (if not empty).
+Take the user input above into account (if not empty).
 
 ## Pre-Execution Checks
 
@@ -133,48 +133,11 @@ You **MUST** consider the user input before proceeding (if not empty).
    - **IF EXISTS**: Read quickstart.md for integration scenarios
 
 4. **Project Setup Verification**:
-   - **REQUIRED**: Create/verify ignore files based on actual project setup:
-
-   **Detection & Creation Logic**:
-   - Check if the following command succeeds to determine if the repository is a git repo (create/verify .gitignore if so):
-
-     ```sh
-     git rev-parse --git-dir 2>/dev/null
-     ```
-
-   - Check if Dockerfile* exists or Docker in plan.md → create/verify .dockerignore
-   - Check if .eslintrc* exists → create/verify .eslintignore
-   - Check if eslint.config.* exists → ensure the config's `ignores` entries cover required patterns
-   - Check if .prettierrc* exists → create/verify .prettierignore
-   - Check if .npmrc or package.json exists → create/verify .npmignore (if publishing)
-   - Check if terraform files (*.tf) exist → create/verify .terraformignore
-   - Check if .helmignore needed (helm charts present) → create/verify .helmignore
-
-   **If ignore file already exists**: Verify it contains essential patterns, append missing critical patterns only
-   **If ignore file missing**: Create with full pattern set for detected technology
-
-   **Common Patterns by Technology** (from plan.md tech stack):
-   - **Node.js/JavaScript/TypeScript**: `node_modules/`, `dist/`, `build/`, `*.log`, `.env*`
-   - **Python**: `__pycache__/`, `*.pyc`, `.venv/`, `venv/`, `dist/`, `*.egg-info/`
-   - **Java**: `target/`, `*.class`, `*.jar`, `.gradle/`, `build/`
-   - **C#/.NET**: `bin/`, `obj/`, `*.user`, `*.suo`, `packages/`
-   - **Go**: `*.exe`, `*.test`, `vendor/`, `*.out`
-   - **Ruby**: `.bundle/`, `log/`, `tmp/`, `*.gem`, `vendor/bundle/`
-   - **PHP**: `vendor/`, `*.log`, `*.cache`, `*.env`
-   - **Rust**: `target/`, `debug/`, `release/`, `*.rs.bk`, `*.rlib`, `*.prof*`, `.idea/`, `*.log`, `.env*`
-   - **Kotlin**: `build/`, `out/`, `.gradle/`, `.idea/`, `*.class`, `*.jar`, `*.iml`, `*.log`, `.env*`
-   - **C++**: `build/`, `bin/`, `obj/`, `out/`, `*.o`, `*.so`, `*.a`, `*.exe`, `*.dll`, `.idea/`, `*.log`, `.env*`
-   - **C**: `build/`, `bin/`, `obj/`, `out/`, `*.o`, `*.a`, `*.so`, `*.exe`, `*.dll`, `autom4te.cache/`, `config.status`, `config.log`, `.idea/`, `*.log`, `.env*`
-   - **Swift**: `.build/`, `DerivedData/`, `*.swiftpm/`, `Packages/`
-   - **R**: `.Rproj.user/`, `.Rhistory`, `.RData`, `.Ruserdata`, `*.Rproj`, `packrat/`, `renv/`
-   - **Universal**: `.DS_Store`, `Thumbs.db`, `*.tmp`, `*.swp`, `.vscode/`, `.idea/`
-
-   **Tool-Specific Patterns**:
-   - **Docker**: `node_modules/`, `.git/`, `Dockerfile*`, `.dockerignore`, `*.log*`, `.env*`, `coverage/`
-   - **ESLint**: `node_modules/`, `dist/`, `build/`, `coverage/`, `*.min.js`
-   - **Prettier**: `node_modules/`, `dist/`, `build/`, `coverage/`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`
-   - **Terraform**: `.terraform/`, `*.tfstate*`, `*.tfvars`, `.terraform.lock.hcl`
-   - **Kubernetes/k8s**: `*.secret.yaml`, `secrets/`, `.kube/`, `kubeconfig*`, `*.key`, `*.crt`
+   - If the plan adds a technology whose build outputs are not yet
+     ignored, add only those patterns to the existing ignore file.
+     Do not restructure it: this repository's `.gitignore` uses
+     ordered re-include/whitelist rules where a broad pattern changes
+     what is tracked.
 
 5. Parse tasks.md structure and extract:
    - **Task phases**: Setup, Tests, Core, Integration, Polish
@@ -217,27 +180,23 @@ You **MUST** consider the user input before proceeding (if not empty).
 
    **Between phases — CodeGraph freshness gate.** After each phase
    agent returns, BEFORE spawning the next phase's agent (or before
-   handing off to a reviewer in steps 11 / 14), the orchestrator
+   handing off to a reviewer in pipeline.md steps 11 (`/simplify`) / 14 (`/gate-b`)), the orchestrator
    verifies the index is fresh:
 
    1. The agent's reporting contract item #7 must confirm `codegraph
-      sync` ran. If missing or unclear, run it from the submodule:
+      sync` ran. If missing or unclear, run `cd <tree> && codegraph
+      sync` in the tree the brief names (the tree this phase edited).
+      If the brief names no tree, escalate; never default to the main
+      checkout.
 
-      ```bash
-      cd research/G19-fix-fpml-iso20022/library
-      codegraph sync
-      ```
-
-   2. Run `codegraph status` and confirm the file count is ≥188 (per
-      `[[project_codegraph_library_autoresolve]]`; new sources bump
-      it). A 0-file count means the index resolved against the empty
-      parent root — re-run from the submodule.
+   2. Run `cd <tree> && codegraph status --json` and confirm
+      `projectPath` is that tree. `fileCount` is not a health check.
 
    3. If the phase touched codegen (`fixpp-codegen` emitter changes,
-      `_codegen/` regeneration), prefer `codegraph index --force`
-      over `sync` per the parent CLAUDE.md rule for structural
-      changes — the file-count delta will be larger than `sync`
-      tolerates cleanly.
+      `_codegen/` regeneration), made a large refactor, or status
+      reports `reindexRecommended: true`, run `cd <tree> && codegraph
+      index` instead of `sync` (parent CLAUDE.md). `--force` is a
+      safety override, not a rebuild flag.
 
    4. Re-run the comment-claim lint yourself (the agent's report is
       not the evidence):
@@ -253,7 +212,8 @@ You **MUST** consider the user input before proceeding (if not empty).
       clean.
 
    A stale index between phases silently mislabels impact and
-   callers, so the next phase agent's `codegraph_impact` lookups
+   callers, so the next phase agent's `codegraph_explore` lookups
+   (the MCP tool, with `projectPath` = the tree)
    become unreliable. This gate is cheap (`sync` is incremental); do
    not skip it even when the diff "looks small."
 6. Execute implementation following the task plan:
