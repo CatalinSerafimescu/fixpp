@@ -2031,6 +2031,90 @@ TEST(Lifetime105, CloseFrame_SessionDestroyedAfterClose) {
     destroy_then_drain(d);
 }
 
+// fixpp#718, the close frame's catch (contract C-8.3): the write limit's close frame meets a
+// close_async that throws. The frame swallows it, the throwing call closes nothing, and a later
+// close() closes the transport. asio::detached discards a spawned frame's exception, so the catch
+// is reached here but has no observable a cell can tell from its absence.
+TEST(Lifetime105, CloseFrame_CloseAsyncThrows_TheFrameSwallowsIt) {
+    t105::DirectRig d{session_role::acceptor};
+    ASSERT_TRUE(d.to_active()) << "setup";
+    d.bw->close_async_throws_when = [](std::size_t call) { return call == 1; };
+    d.hold_write_of("5");
+    auto frame = d.s.feed_spawn(stale_frame(d.s, 2));
+    d.s.drain();
+    ASSERT_TRUE(d.parked()) << "setup: the Logout's write is not held";
+    d.pass(std::chrono::milliseconds{d.s.cfg.logout_disconnect_timeout_ms});
+    EXPECT_EQ(d.bw->close_async_calls, 1U) << "the close frame did not call close_async";
+    EXPECT_FALSE(d.closed()) << "the throwing close_async closed the transport";
+    auto const closed = d.run(d.s.session->close(fixpp::session::close_mode::terminal), "close");
+    EXPECT_TRUE(closed.has_value() && closed->has_value()) << "close() did not return its result";
+    EXPECT_TRUE(d.closed()) << "close() did not close the transport";
+}
+
+// fixpp#718, the drain's join (contract C-8.3, research D1 item 6): the write limit's close frame
+// held in close_async when drive_reconnect() starts. The drain does not leave the old connection
+// (its Disconnected edge, which fires onLogout) while the frame is held; once it is released, the
+// transport is closed, onLogout has fired, and drive_reconnect() returns. The drain posts while it
+// joins, so the cell drives the io_context boundedly.
+TEST(Lifetime105, CloseFrame_HeldInCloseAsync_TheDrainJoinsIt) {
+    t105::DirectRig d{session_role::initiator};
+    ASSERT_TRUE(d.to_active()) << "setup";
+    d.bw->close_async_holds_when = [](std::size_t call) { return call == 1; };
+    d.hold_write_of("5");
+    auto frame = d.s.feed_spawn(stale_frame(d.s, 2));
+    d.s.drain();
+    ASSERT_TRUE(d.parked()) << "setup: the Logout's write is not held";
+    d.pass(std::chrono::milliseconds{d.s.cfg.logout_disconnect_timeout_ms});
+    ASSERT_EQ(d.bw->close_async_parked, 1U) << "setup: the close frame is not held in close_async";
+    auto reconnect = asio::co_spawn(fixpp::test_support::session_executor_of(*d.s.session, d.s.ioc),
+                                    d.s.session->drive_reconnect(), asio::use_future);
+    (void)t105::drive_bounded(d.s.ioc, 4096);
+    EXPECT_FALSE(rg_ready(reconnect)) << "drive_reconnect() returned with the close frame held";
+    EXPECT_FALSE(d.closed()) << "the old connection was closed with the close frame held";
+    EXPECT_EQ(d.s.state(), fixpp::session::fsm_state::Active)
+        << "the drain left the old connection with the close frame held";
+    EXPECT_EQ(d.app->logouts, 0) << "onLogout with the close frame held";
+    d.bw->release_close();
+    EXPECT_TRUE(d.s.pump_until([&] { return rg_ready(reconnect); }, 3s))
+        << "drive_reconnect() did not return after the release";
+    EXPECT_TRUE(d.closed()) << "the old connection was not closed";
+    EXPECT_EQ(d.app->logouts, 1) << "onLogout after the release";
+    d.release();
+    (void)t105::drive_bounded(d.s.ioc, 4096);
+    (void)d.run(d.s.session->close(fixpp::session::close_mode::terminal), "close");
+}
+
+// fixpp#718, close()'s second join (data-model E-2 I-4): close(terminal) with the R-2 Logout's
+// write held; close()'s own close_async is held, so the write limit reaches its bound inside
+// close() and spawns a close frame after close()'s first join; that frame's close_async is held
+// too. Once close()'s own call is released, close() does not return while the frame is held,
+// and returns once it is released.
+TEST(Lifetime105, CloseFrame_SpawnedAfterTheFirstJoin_CloseJoinsItAgain) {
+    t105::DirectRig d{session_role::acceptor};
+    ASSERT_TRUE(d.to_active()) << "setup";
+    d.bw->close_async_holds_when = [](std::size_t call) { return call <= 2; };
+    d.hold_write_of("5");
+    auto frame = d.s.feed_spawn(stale_frame(d.s, 2));
+    d.s.drain();
+    ASSERT_TRUE(d.parked()) << "setup: the Logout's write is not held";
+    auto closing =
+        asio::co_spawn(fixpp::test_support::session_executor_of(*d.s.session, d.s.ioc),
+                       d.s.session->close(fixpp::session::close_mode::terminal), asio::use_future);
+    (void)t105::drive_bounded(d.s.ioc, 4096);
+    ASSERT_EQ(d.bw->close_async_parked, 1U) << "setup: close()'s close_async is not held";
+    (void)t105::advance_and_drive(
+        *d.s.mock, d.s.ioc, std::chrono::milliseconds{d.s.cfg.logout_disconnect_timeout_ms}, 4096);
+    EXPECT_EQ(d.bw->close_async_calls, 2U)
+        << "the write limit spawned no close frame inside close()";
+    d.bw->release_close(1);
+    (void)t105::drive_bounded(d.s.ioc, 4096);
+    EXPECT_FALSE(rg_ready(closing)) << "close() returned with the close frame held";
+    EXPECT_EQ(d.bw->close_async_parked, 1U) << "the close frame is not held";
+    d.bw->release_close();
+    EXPECT_TRUE(d.s.pump_until([&] { return rg_ready(closing); }, 3s))
+        << "close() did not return after the release";
+}
+
 // The Engine twin of WriteLimit105.R1WriteHeld_PeerLogoutArrives_LogoutCompleteThenEof (data-model
 // E-3, "Other roots during `writing`"; T077's mutant "the latch consumers' `writing` deferral
 // deleted" reads it): the give-up's Logout is held in its store call; the peer's Logout arrives,
