@@ -69,6 +69,12 @@ What remains is configuration. Every factory built from TOML, and every test rig
 - `authorize_logon(asserted_compid, creds)` reads SenderCompID(49) and Username(553)/Password(554). Unreadable inputs fail closed and silent (Edge Cases).
 - C-ABI 1.19 BREAKING, behaviour only, by §X.7 precedent (Assumptions).
 
+### Session 2026-11-25 (`/speckit-clarify`)
+
+- Q: When the opt-in per-write limit expires, close at once or try a Logout first? → A: close at once, with no Logout. The session ends at the limit, and the reason is logged and observable as a write timeout.
+- Q: Should every Logon or Logon-acknowledgement refusal leave NextNumIn unchanged, or only the S3 refusal? → A: every refusal (the class, as QuickFIX C++/J's Logon exemption). The plan lists each refusal that runs after the inbound advance, with a cell for each.
+- Q: Does the TOML handshake-timeout setting also replace the acceptor's hard-coded 1500 ms bound? → A: both roles. A session-level key sets the initiator's bound, with today's default. An Engine-level key sets the acceptor listener's bound, with 1500 ms as its default.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — An unauthorised identity is disconnected without a message and changes nothing (Priority: P1)
@@ -92,17 +98,18 @@ An operator runs an mTLS acceptor, or a direct mTLS initiator. A peer presents a
 
 ### User Story 2 — A refused Logon does not consume its MsgSeqNum (Priority: P1)
 
-An acceptor's Logon, or an initiator's ordinary Logon acknowledgement (no 141=Y), is refused at the S3 DefaultApplVerID/ApplVerID test. NextNumIn stays where it was, in memory and in the store, as QuickFIX's Logon exemption does.
+An acceptor's Logon, or an initiator's ordinary Logon acknowledgement (no 141=Y), is refused: at the S3 DefaultApplVerID/ApplVerID test (#703), or at any other refusal. NextNumIn stays where it was, in memory and in the store, as QuickFIX's Logon exemption does.
 
 **Why this priority**: protocol fidelity on every FIXT session; it pairs with User Story 1's sequence-state guarantee.
 
-**Independent Test**: refuse a Logon at S3 on each role, then read NextNumIn from the session and from the store.
+**Independent Test**: refuse a Logon on each role, at S3 and at each other refusal the plan lists, then read NextNumIn from the session and from the store.
 
 **Acceptance Scenarios**:
 
 1. **Given** an acceptor with FIXT routing and inbound validation on, **When** a Logon is refused at S3, **Then** the Reject is sent (as today) and NextNumIn is unchanged in memory and in the store.
 2. **Given** a direct initiator, **When** its ordinary acknowledgement is refused at S3, **Then** NextNumIn is unchanged in memory and in the store.
 3. **Given** the unasked 141=Y acknowledgement refused at S3, **Then** the result is as today: NextNumIn is unchanged.
+4. **Given** any other refusal of a Logon or an acknowledgement, on either role, **Then** NextNumIn is unchanged in memory and in the store.
 
 ---
 
@@ -133,7 +140,7 @@ An operator who wants a slow consumer cut sooner than the liveness give-up sets 
 
 **Acceptance Scenarios**:
 
-1. **Given** the limit set, **When** any non-ending write does not complete within it, counted from that write's start on the transport, **Then** the transport is closed, the session ends Disconnected, and the reason is logged and observable as a write timeout.
+1. **Given** the limit set, **When** any non-ending write does not complete within it, counted from that write's start on the transport, **Then** no Logout is attempted, the transport is closed at once, the session ends Disconnected, and the reason is logged and observable as a write timeout.
 2. **Given** the limit set and a resend answer of many frames, **Then** each frame's write is limited separately, and a walk that keeps making progress is not cut.
 3. **Given** the limit unset (the default), **Then** behaviour is User Story 3's.
 4. **Given** an ending Logout write, **Then** 105's `logout_disconnect_timeout_ms` limit applies to it, not this one.
@@ -141,9 +148,9 @@ An operator who wants a slow consumer cut sooner than the liveness give-up sets 
 
 ---
 
-### User Story 5 — An initiator's TLS handshake bound is proven and configurable (Priority: P2)
+### User Story 5 — The TLS handshake bounds are proven and configurable (Priority: P2)
 
-An operator can set how long an initiator's TLS handshake may take, from TOML, and a C++ user from the factory's configuration. A peer that accepts TCP and never handshakes ends the attempt at that bound with `transport_handshake_timeout`, and the reconnect policy then decides what happens next.
+An operator can set, from TOML, how long an initiator's TLS handshake may take, and separately the acceptor listener's bound. A C++ user can set both from the configuration the factory, or the Engine, is built from. A peer that accepts TCP and never handshakes ends the attempt at that bound with `transport_handshake_timeout`, and the reconnect policy then decides what happens next.
 
 **Why this priority**: closes #717 with evidence, and gives operators QuickFIX C++'s practical behaviour (a bounded handshake) at a chosen value.
 
@@ -155,6 +162,7 @@ An operator can set how long an initiator's TLS handshake may take, from TOML, a
 2. **Given** a TOML config that sets the initiator handshake bound, **When** the initiator connects to a peer that never handshakes, **Then** each attempt ends at that bound with `transport_handshake_timeout`.
 3. **Given** `max_attempts = 1`, **Then** `drive_reconnect()` returns after the one bounded attempt.
 4. **Given** an out-of-range or wrong-typed value, **Then** the loader refuses it with its usual error.
+5. **Given** an Engine acceptor, **When** no acceptor key is set, **Then** its bound is 1500 ms, as today. **When** the key is set, **Then** a client that connects and never handshakes is dropped at that bound.
 
 ---
 
@@ -182,7 +190,6 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
 - The give-up fires while a resend walk holds the replay gate: 105's rule applies (no Logout past the gate, then Disconnected).
 - Both limits armed at once, for example an ending Logout queued behind a blocked non-ending write: whichever expires first closes the transport, and the session ends once.
 - The write limit and the liveness give-up expire close together: one ending, one reason (the first to close).
-- The acceptor's handshake bound (set by the engine's listener, not by a session): out of scope, disclosed.
 
 ## Requirements *(mandatory)*
 
@@ -196,22 +203,23 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
 - **FR-003**: In every inbound-Logon arm (acceptor) and Logon-acknowledgement arm (direct initiator), no frame MUST be written and no sequence state MUST be changed (in memory or durably) before every identity gate that applies to the session has admitted the identity.
 - **FR-004**: A Logon or acknowledgement refused by an identity gate MUST end the session with no message, whatever other refusal would also have applied.
 - **FR-005**: For an identity the gates admit, every refusal's answer and ending MUST be as on `9d81082a`.
-- **FR-006**: A Logon (acceptor) or an ordinary Logon acknowledgement (initiator) refused at the S3 DefaultApplVerID/ApplVerID test MUST leave NextNumIn unchanged in memory and in the store. Every other refusal that runs after the inbound advance MUST be listed, with its disposition, in the plan.
+- **FR-006**: A Logon (acceptor) or an ordinary Logon acknowledgement (initiator) refused at the S3 DefaultApplVerID/ApplVerID test MUST leave NextNumIn unchanged in memory and in the store, and so MUST every other refusal of a Logon or acknowledgement, on either role. The plan MUST list each refusal that runs after the inbound advance, with a cell for each.
 - **FR-007**: The identity-precedence cells pinned by 104 (`LogonTooLow104.Precedence_*`, `UnaskedResetAck104.Mtls_Unauthorised_NoReset`) MUST still pass, or be updated where this feature deliberately changes the order they pin, each update named in the plan.
 
 **B124 (#714)**
 - **FR-008**: The TestRequest give-up MUST fire at its instant, and the session MUST end within `logout_disconnect_timeout_ms` of it, whether or not any write (the liveness loop's own included) is blocked.
 - **FR-009**: When the session ends with a write blocked, the blocked write and every write waiting behind it MUST return an error, not hang.
-- **FR-010**: A per-write time limit MUST be configurable, off by default. When set, a non-ending write that does not complete within it, counted from that write's start on the transport, MUST close the transport and end the session with a distinct, logged reason.
+- **FR-010**: A per-write time limit MUST be configurable, off by default. When set, a non-ending write that does not complete within it, counted from that write's start on the transport, MUST close the transport at once, with no Logout attempted, and end the session with a distinct, logged reason.
 - **FR-011**: Ending Logout writes MUST keep 105's limit (`logout_disconnect_timeout_ms`).
 - **FR-012**: The per-write limit MUST be settable from C++ and from TOML, with the loader's usual range and type checks, and MUST have no C-ABI setter (owner ruling).
 
 **B123 (#717)**
 - **FR-013**: An initiator's TLS handshake bound MUST be settable from TOML and from the C++ configuration a factory is built from. Its default MUST be today's.
+- **FR-013a**: An Engine acceptor's TLS handshake bound MUST be settable from TOML (Engine level) and from the C++ Engine configuration. Its default MUST stay 1500 ms. Neither key has a C-ABI setter.
 - **FR-014**: A session-level cell MUST show that `drive_reconnect()`, with one attempt, against a peer that never handshakes, returns `transport_handshake_timeout` within the configured bound.
 
 **Cross-cutting**
-- **FR-015**: Every behaviour change MUST be recorded in `spec/behaviors-and-limitations.md`: L-104-3, L-104-8 and L-105-f retired or narrowed, new B rows, and the disclosed residuals (a peer that keeps sending but never reads, with the limit off; the acceptor's handshake bound).
+- **FR-015**: Every behaviour change MUST be recorded in `spec/behaviors-and-limitations.md`: L-104-3, L-104-8 and L-105-f retired or narrowed, new B rows, and the disclosed residuals (a peer that keeps sending but never reads, with the limit off).
 - **FR-016**: Every new test MUST be shown RED against `9d81082a` (or, for a test that pins unchanged behaviour, against a mutant) before it counts.
 
 ### Key Entities
@@ -221,16 +229,17 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
 - **Write class**: the application send, Heartbeat, TestRequest, resend answer (many frames), Reject, Logon, and ending Logout.
 - **Per-write time limit**: the new opt-in knob (FR-010).
 - **Initiator handshake bound**: the knob that reaches the initiator factory's transport configuration (FR-013).
+- **Acceptor handshake bound**: the Engine-level knob that replaces the listener's hard-coded value (FR-013a).
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
 - **SC-001**: In every cell of User Story 1, the unauthorised peer receives zero bytes after the TLS handshake, and both sequence numbers (in memory and in the store) equal their values before the Logon.
-- **SC-002**: In every cell of User Story 2, NextNumIn after the S3 refusal equals NextNumIn before it, in memory and in the store.
+- **SC-002**: In every cell of User Story 2, NextNumIn after the refusal equals NextNumIn before it, in memory and in the store.
 - **SC-003**: With a peer that stops reading, the session ends within the give-up instant plus `logout_disconnect_timeout_ms` plus the stated margin, in 100% of the runs of each write-class cell, on every sanitizer lane the cells run on.
 - **SC-004**: With the per-write limit set, the session ends within the limit plus the stated margin in each write-class cell.
-- **SC-005**: A one-attempt reconnect against a never-handshaking peer returns within the configured bound plus the stated margin.
+- **SC-005**: A one-attempt reconnect against a never-handshaking peer returns within the configured bound plus the stated margin. An Engine acceptor drops a never-handshaking client within its configured bound plus the stated margin.
 - **SC-006**: This PR's `windows-msvc-asan` leg completes, green or red on its own steps, without reaching its cap.
 - **SC-007**: The existing session, transport, config and C-ABI suites pass unchanged, apart from the precedence cells that FR-007 names.
 
@@ -239,7 +248,6 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
 - Out of scope:
   - S3, which waits on Q2 and Q3;
   - S3a B126 (#719), which the owner did not add;
-  - the acceptor's handshake bound;
   - a configurable TCP connect timeout;
   - the reconnect policy's default (unbounded attempts, QuickFIX-compatible);
   - `test_067_builder_roundtrip`'s duration (B93 / #664);
