@@ -162,8 +162,8 @@ jobs:
     # Hung-job backstop, set per leg. windows-msvc-asan is the slowest leg and
     # gets its own value; windows-msvc-debug and windows-msvc-release keep the
     # original backstop, so a hung debug or release leg is still stopped at it
-    # rather than at the asan value. The owner set this value as permanent, so a
-    # cache fix is not a reason to lower it again.
+    # rather than at the asan value. The owner set both values as permanent, so
+    # a cache fix is not a reason to lower either.
     #
     # It must cover a COLD Build: when the sccache cache has been evicted at its
     # size cap, the asan leg recompiles every TU and then runs its full ctest.
