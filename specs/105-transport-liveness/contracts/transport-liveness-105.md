@@ -29,7 +29,7 @@ the name.
 | 5 | A too-high Logout's acknowledgement (by the bound or at once) | the reply Logout | after the reply and the reset unit | from the bound's exit, or the pump |
 | 6 | fixpp's own Logout that ends the session (C-2's list) | that Logout | by C-2 | |
 | 7 | The unanswered TestRequest (R-1) | the Logout of C-3 | at once after its write, or at the write limit (C-2.7) | not C-2's wait |
-| 8 | The liveness loop's `toAdmin` throw, number-assignment failure or store-and-emit failure | nothing, or a partly sent frame | at once after the loop exits | |
+| 8 | The liveness loop's `toAdmin` throw, number-assignment failure or store-and-emit failure, or a TestRequest that does not fit its buffer | nothing, or a partly sent frame | at once after the loop exits | the TestRequest that does not fit ends the session at its instant with no record and no Logout, and is never pending (added at Gate B round 1, O-1; until then it was pending and the give-up named it) |
 | 9 | An application `send()` or `Engine::send` ending the session (a store or emit failure) | nothing more | at once after the call returns, or after the arm in flight returns | |
 | 10 | A direct initiator's Logon emission failing in `Session::open` or `drive_reconnect` | nothing more | at once after the call returns | the Engine's connect loop also closes, as today |
 | 11 | A refusal before Active that sends nothing (C-4) | nothing | at once after the frame | not an establishment timeout |

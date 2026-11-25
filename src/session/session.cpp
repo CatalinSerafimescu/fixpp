@@ -8371,13 +8371,17 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
     const std::chrono::milliseconds threshold =
         cfg_.test_request_threshold.value_or(detail::default_test_request_threshold(heartbt_int));
 
-    // The clock's reading when the pending TestRequest was sent. "An inbound frame since the
-    // TestRequest" is last_inbound_steady_ > tr_sent_at.
-    fixpp::core::steady_time_point tr_sent_at = effective_clock_->steady_now();
+    // The pending TestRequest's two readings of the clock (data-model E-4). tr_issued_at: when its
+    // TestReqID became the pending one, before its number, store and write, so "an inbound frame
+    // since the TestRequest" (last_inbound_steady_ > tr_issued_at) counts a frame that arrives
+    // during them. tr_written_at: when its store and write returned, the instant the give-up
+    // counts T from (the owner's fresh-window ruling, spec.md Clarifications).
+    fixpp::core::steady_time_point tr_issued_at = effective_clock_->steady_now();
+    fixpp::core::steady_time_point tr_written_at = tr_issued_at;
     // Whether the Heartbeat and TestRequest instants are eligible: no TestRequest pending, or an
     // inbound frame since it. Read before each sleep and again on waking.
-    const auto answerable_now = [this, &tr_sent_at]() noexcept {
-        return pending_test_req_id_.empty() || last_inbound_steady_ > tr_sent_at;
+    const auto answerable_now = [this, &tr_issued_at]() noexcept {
+        return pending_test_req_id_.empty() || last_inbound_steady_ > tr_issued_at;
     };
 
     // Liveness loop (data-model E-4, "One sleep per iteration"):
@@ -8422,7 +8426,7 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                     std::min(deadline, detail::deadline_after(last_inbound_steady_, threshold));
             } else {
                 deadline = std::min(deadline, detail::test_request_give_up_instant(
-                                                  last_inbound_steady_, tr_sent_at, threshold));
+                                                  last_inbound_steady_, tr_written_at, threshold));
             }
 
             // fixpp#536 (.specify/536-537-538-recovery-liveness.md, D-536-2): before each
@@ -8462,7 +8466,7 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
             const bool give_up =
                 held_cap || (!pending_test_req_id_.empty() && !answerable &&
                              now >= detail::test_request_give_up_instant(last_inbound_steady_,
-                                                                         tr_sent_at, threshold));
+                                                                         tr_written_at, threshold));
             const bool heartbeat =
                 answerable && now >= detail::deadline_after(last_outbound_steady_, heartbt_int);
 
@@ -8582,8 +8586,8 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                 auto [end, ec] = std::to_chars(id_buf.data() + 2, id_buf.data() + id_buf.size(),
                                                ++next_test_request_id_);
                 (void)ec;  // 32-byte buffer is sufficient for "TR" + max uint32_t (10 digits).
-                pending_test_req_id_.assign(id_buf.data(), end);
-                tr_sent_at = now;
+                std::string_view const tr_id{id_buf.data(),
+                                             static_cast<std::size_t>(end - id_buf.data())};
 
                 // T042 (US4 retirement): emit the TestRequest frame via
                 // store_then_emit (I-3 outbound half). Stack buffer; noexcept.
@@ -8593,28 +8597,38 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                 const seqnum_t tr_seq = seqnum_mgr_.peek_outbound();
                 auto tr_result = fixpp::session::build_test_request(
                     std::span<std::byte>{tr_buf.data(), tr_buf.size()}, tr_seq, cfg_.sender_comp_id,
-                    cfg_.target_comp_id, pending_test_req_id_, cfg_.begin_string, st52.value);
-                if (tr_result) {
-                    // 019 T014: toAdmin before TestRequest. [FR-008/010]
-                    // FIX-3 (gate-b/r1): throw → terminal-close + co_return.
-                    if (!fire_to_admin_(*tr_result)) {
-                        record_state_transition_(fsm_state::Disconnected);
-                        co_return;
-                    }
-                    auto assign_r = co_await seqnum_mgr_.assign_outbound();
-                    if (!assign_r) {
-                        // Overflow or closed: session-fatal per 005 data-model.md §E3
-                        // (Sequence-number state). Liveness loop is fire-and-forget (no expected_t
-                        // return): log by transitioning to Disconnected and stopping the loop.
-                        record_disconnected_unless_already_();
-                        co_return;
-                    }
-                    auto emit_r = co_await store_then_emit(tr_seq, *tr_result);
-                    if (!emit_r) {
-                        record_state_transition_(fsm_state::Disconnected);
-                        co_return;
-                    }
+                    cfg_.target_comp_id, tr_id, cfg_.begin_string, st52.value);
+                // 105 (contract C-1 row 8): a TestRequest that does not fit its buffer ends the
+                // session as the loop's other emission failures do, so no give-up names a
+                // TestReqID that was never written.
+                if (!tr_result) {
+                    record_disconnected_unless_already_();
+                    co_return;
                 }
+                // Its TestReqID is the pending one from here, before the first suspension (the
+                // number's lock), so an answer during the number, the store or the write clears it.
+                pending_test_req_id_.assign(tr_id);
+                tr_issued_at = now;
+                // 019 T014: toAdmin before TestRequest. [FR-008/010]
+                // FIX-3 (gate-b/r1): throw → terminal-close + co_return.
+                if (!fire_to_admin_(*tr_result)) {
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return;
+                }
+                auto assign_r = co_await seqnum_mgr_.assign_outbound();
+                if (!assign_r) {
+                    // Overflow or closed: session-fatal per 005 data-model.md §E3
+                    // (Sequence-number state). Liveness loop is fire-and-forget (no expected_t
+                    // return): log by transitioning to Disconnected and stopping the loop.
+                    record_disconnected_unless_already_();
+                    co_return;
+                }
+                auto emit_r = co_await store_then_emit(tr_seq, *tr_result);
+                if (!emit_r) {
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return;
+                }
+                tr_written_at = effective_clock_->steady_now();
             } else if (heartbeat) {
                 // 103 (research D5′.4): as the TestRequest's.
                 const detail::replay_gate::shared_hold hb_hold{replay_gate_};

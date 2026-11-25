@@ -1170,4 +1170,261 @@ TEST_P(HeldTestRequestCap105, GivenUpAtTheCap_ReleasedBeforeTheWriteLimit_Logout
 
 FIXPP_105_BOTH_ROLES(HeldTestRequestCap105);
 
+// ════════════════════════════════════════════════════════════════════════════════════════
+// Gate B round 1 (C-2(b), O-1; the owner's fresh-window ruling, spec.md Clarifications
+// "Session 2026-11-24"; data-model E-4; contract C-1 row 8, C-6.2): the TestRequest's two
+// readings. Its TestReqID is pending from its issue, before its number, store and write, so a
+// frame during them counts as a frame since it and an answer during them answers it; the
+// give-up counts T from the write's return. The TestRequest's store call is held in a GateStore
+// (test_105_support.hpp) from its issue until the cell releases it; HeartBtInt and T are kHb, so
+// the TestRequest is issued at 10 s. Instants are run_timeline's (offsets from Active).
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+// The held TestRequest's controls and the readings the scene's actions take.
+struct HeldTrStore {
+    std::shared_ptr<t105::gate_store_state> st = std::make_shared<t105::gate_store_state>();
+    std::size_t parked_at_issue = 0;  // GateStore::parked read at the issue instant
+    bool pending_during = true;       // a TestRequest pending during the hold, after the frame
+    bool inbound_at_frame = false;    // last_inbound_steady() is the frame's instant
+    bool pending_after = true;        // a TestRequest pending after the release
+    bool active_after = false;        // Active after the release
+};
+
+// The scene: the hold armed at 9 s for the next outbound store call (the TestRequest's, at
+// 10 s), read at 10 s, then the extra actions, then the release at release_at.
+TimelineSpec held_tr_spec(session_role role, std::shared_ptr<HeldTrStore> const& h, ns release_at,
+                          ns until, std::vector<PeerAction> extra, std::vector<ns> probes) {
+    TimelineSpec spec{.role = role,
+                      .tweak =
+                          [h](SessionConfig& c) {
+                              c.test_request_threshold = std::chrono::milliseconds{kHb};
+                              c.store_factory = std::make_shared<t105::GateStoreFactory>(h->st);
+                          },
+                      .extra_probes = std::move(probes),
+                      .until = until};
+    spec.actions.push_back({sec(9),
+                            [h](pr::Rig&, Timeline const&) {
+                                auto armed = std::make_shared<bool>(false);
+                                h->st->hold_when = [armed](t105::store_call k, seqnum_t) {
+                                    if (*armed || k != t105::store_call::store_outbound) {
+                                        return false;
+                                    }
+                                    *armed = true;
+                                    return true;
+                                };
+                            },
+                            false});
+    spec.actions.push_back(
+        {sec(10), [h](pr::Rig&, Timeline const&) { h->parked_at_issue = h->st->parked; }, false});
+    for (auto& a : extra) spec.actions.push_back(std::move(a));
+    spec.actions.push_back({release_at,
+                            [h](pr::Rig&, Timeline const&) {
+                                h->st->hold_when = nullptr;
+                                h->st->release_all();
+                            },
+                            false});
+    return spec;
+}
+
+// The TestRequest written on the release, then the give-up a threshold after that write.
+void expect_given_up_from_the_write(Timeline const& tl, HeldTrStore const& h, ns release_at,
+                                    const char* site) {
+    ASSERT_TRUE(tl.active) << site << ": setup";
+    EXPECT_EQ(h.parked_at_issue, 1U) << site << ": setup: the TestRequest's store was not held";
+    EXPECT_EQ(tl.count("1", ns{0}, release_at - ns{1}), 0U)
+        << site << ": a TestRequest before the release: " << dump(tl);
+    EXPECT_EQ(tl.count("1", release_at, release_at), 1U)
+        << site << ": the TestRequest was not written on the release: " << dump(tl);
+    ns const window_end = release_at + kHb;
+    EXPECT_EQ(tl.count("5", ns{0}, window_end), 0U)
+        << site << ": a Logout inside T of the TestRequest's write: " << dump(tl);
+    EXPECT_EQ(tl.state_at(window_end), fsm_state::Active)
+        << site << ": given up inside T of the write";
+    ASSERT_TRUE(tl.ended_at.has_value()) << site << ": not given up; frames: " << dump(tl);
+    EXPECT_EQ(*tl.ended_at, window_end + kGuard) << site << ": not T after the write";
+    EXPECT_EQ(tl.count("5", window_end + kGuard, window_end + kGuard), 1U) << site << ": R-1's";
+    EXPECT_EQ(give_up_text(tl), "TestRequest unanswered, TestReqID TR1") << site;
+    EXPECT_TRUE(tl.eof) << site << ": no EOF after the give-up";
+}
+
+// The store and write take a whole threshold: the give-up is T after the write, not at once.
+TEST_P(LivenessTiming105, FreshWindow_FromTheWrite_StoreDelayAtLeastT) {
+    auto h = std::make_shared<HeldTrStore>();
+    ns const release_at = sec(20);
+    auto const tl = run_timeline(held_tr_spec(GetParam(), h, release_at, sec(32), {},
+                                              {release_at + kGuard, release_at + kHb + kGuard}),
+                                 "FreshWindow/StoreDelayAtLeastT");
+    expect_given_up_from_the_write(tl, *h, release_at, "FreshWindow/StoreDelayAtLeastT");
+}
+
+// Half a threshold: the give-up is at the write + T + 1 ns, not the issue + T + 1 ns.
+TEST_P(LivenessTiming105, FreshWindow_FromTheWrite_StoreDelayBelowT) {
+    auto h = std::make_shared<HeldTrStore>();
+    ns const release_at = sec(15);
+    auto const tl = run_timeline(held_tr_spec(GetParam(), h, release_at, sec(27), {},
+                                              {sec(20) + kGuard, release_at + kHb + kGuard}),
+                                 "FreshWindow/StoreDelayBelowT");
+    expect_given_up_from_the_write(tl, *h, release_at, "FreshWindow/StoreDelayBelowT");
+}
+
+// [guard] An application frame during the hold is a frame since the TestRequest: after the
+// release the next TestRequest is due T after that frame (research D6; contract C-6.3).
+TEST_P(LivenessTiming105, FreshWindow_FrameDuringStore_KeepsTodaysEligibility) {
+    auto h = std::make_shared<HeldTrStore>();
+    auto seq = std::make_shared<PeerSeq>();
+    std::vector<PeerAction> extra;
+    extra.push_back(app_at(sec(12), seq));
+    extra.push_back({sec(13),
+                     [h](pr::Rig& rig, Timeline const&) {
+                         auto const s = rig.session();
+                         h->inbound_at_frame =
+                             s && session_test_access::last_inbound_steady(*s) ==
+                                      rig.clock->steady_now() - std::chrono::seconds{1};
+                     },
+                     false});
+    auto const tl =
+        run_timeline(held_tr_spec(GetParam(), h, sec(15), sec(22), std::move(extra), {}),
+                     "FreshWindow/FrameDuringStore");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_EQ(h->parked_at_issue, 1U) << "setup: the TestRequest's store was not held";
+    EXPECT_TRUE(h->inbound_at_frame) << "setup: the frame during the hold was not read at 12 s";
+    EXPECT_EQ(tl.count("1", sec(15), sec(15)), 1U)
+        << "TR1 not written on the release: " << dump(tl);
+    EXPECT_EQ(tl.count("1", sec(16), sec(21)), 0U) << "a TestRequest before 22 s: " << dump(tl);
+    EXPECT_EQ(tl.count("1", sec(22), sec(22)), 1U)
+        << "no TestRequest T after the frame during the hold: " << dump(tl);
+    EXPECT_EQ(tr_id(tl, 1), "TR2");
+    EXPECT_EQ(tl.count("5", ns{0}, sec(22)), 0U) << "a Logout: " << dump(tl);
+}
+
+// [guard] A Heartbeat during the hold carrying the TestRequest's own 112 answers it: nothing is
+// pending during the hold or after the release, and the session stays Active.
+TEST_P(LivenessTiming105, FreshWindow_AnswerDuringStore_Clears) {
+    auto h = std::make_shared<HeldTrStore>();
+    auto seq = std::make_shared<PeerSeq>();
+    std::vector<PeerAction> extra;
+    extra.push_back({sec(12), [seq](pr::Rig& rig, Timeline const&) {
+                         rig.peer.send(rig.msg("0", seq->next++, "112=TR1\x01"));
+                     }});
+    extra.push_back({sec(13),
+                     [h](pr::Rig& rig, Timeline const&) {
+                         auto const s = rig.session();
+                         h->pending_during = !s || session_test_access::test_request_pending(*s);
+                     },
+                     false});
+    extra.push_back({sec(16),
+                     [h](pr::Rig& rig, Timeline const&) {
+                         auto const s = rig.session();
+                         h->pending_after = !s || session_test_access::test_request_pending(*s);
+                         h->active_after = rig.state() == fsm_state::Active;
+                     },
+                     false});
+    auto const tl =
+        run_timeline(held_tr_spec(GetParam(), h, sec(15), sec(17), std::move(extra), {}),
+                     "FreshWindow/AnswerDuringStore");
+    ASSERT_TRUE(tl.active) << "setup";
+    EXPECT_EQ(h->parked_at_issue, 1U) << "setup: the TestRequest's store was not held";
+    EXPECT_FALSE(h->pending_during) << "the answer during the hold did not clear the TestRequest";
+    EXPECT_EQ(tl.count("1", sec(15), sec(15)), 1U)
+        << "TR1 not written on the release: " << dump(tl);
+    EXPECT_FALSE(h->pending_after) << "a TestRequest pending after the release";
+    EXPECT_TRUE(h->active_after) << "the session left Active";
+    EXPECT_EQ(tl.count("5", ns{0}, sec(17)), 0U) << "a Logout: " << dump(tl);
+}
+
+// O-1 (contract C-1 row 8): a TestRequest that does not fit its buffer ends the session at its
+// instant, as the loop's other emission failures do, with no give-up naming a TestReqID never
+// written. The TestReqID counter is seeded so its TestReqID is longer than the Logon's own
+// fields beyond the common header, and the peer's CompID long enough that the TestRequest
+// overflows the 256-byte buffer while the Logons fit.
+namespace tr_does_not_fit {
+constexpr std::size_t kBuffer = 256;
+constexpr std::uint32_t kSeed = 4'294'967'000U;  // the TestRequest's TestReqID: TR<kSeed + 1>
+std::size_t test_request_size(std::string const& peer, std::string const& st) {
+    std::array<std::byte, 4096> big{};
+    auto const r = fixpp::session::build_test_request(
+        big, 3, "ISLD", peer, "TR" + std::to_string(kSeed + 1U), "FIX.4.2", st);
+    return r ? r->size() : 0U;
+}
+std::size_t logon_size(std::string const& peer, std::string const& st) {
+    std::array<std::byte, 4096> big{};
+    auto const r = fixpp::session::build_logon(big, 1, "ISLD", peer, "FIX.4.2", 10, st);
+    return r ? r->size() : 0U;
+}
+// The shortest peer CompID length at which the TestRequest overflows and the Logon fits, or 0.
+std::size_t overflowing_length(std::string const& st) {
+    for (std::size_t len = 1; len < kBuffer; ++len) {
+        std::string const p(len, 'P');
+        if (test_request_size(p, st) > kBuffer) return logon_size(p, st) <= kBuffer ? len : 0U;
+    }
+    return 0U;
+}
+}  // namespace tr_does_not_fit
+
+TEST_P(LivenessTiming105, TestRequestDoesNotFit_EndsAtItsInstant_NoGiveUp) {
+    std::string const st0 = [] {
+        pr::Rig probe;
+        return probe.sending_time();
+    }();
+    std::size_t const len = tr_does_not_fit::overflowing_length(st0);
+    ASSERT_NE(len, 0U) << "setup: no CompID length overflows the TestRequest and fits the Logon";
+    std::string const peer(len, 'P');
+    auto app = std::make_shared<LivenessApp>();
+    pr::Rig rig{app};
+    t105::LogCapture log;
+    auto cfg = rig.cfg(GetParam());
+    cfg.heartbeat_interval = kHb;
+    cfg.test_request_threshold = std::chrono::milliseconds{kHb};
+    cfg.logger_override = log.logger;
+    cfg.target_comp_id = peer;
+    bool up = rig.start(std::move(cfg));
+    if (up && rig.role_is_initiator()) {
+        up = rig.run_until([&] { return !pr::frames_of_type(rig.peer.received, "A").empty(); });
+    } else if (up) {
+        up = rig.connect_peer();
+    }
+    if (up) {
+        rig.peer.send(pr::message(rig.begin_string, "A", 1, peer, "ISLD", rig.sending_time(),
+                                  "98=0\x01"
+                                  "108=10\x01"));
+        up = rig.run_until([&] { return rig.state() == fsm_state::Active; });
+    }
+    bool seeded = false;
+    bool active_before = false;
+    std::optional<int> ended_at;
+    bool eof = false;
+    std::string after;
+    if (up) {
+        auto const mark = rig.peer.received.size();
+        if (auto const s = rig.session()) {
+            session_test_access::set_next_test_request_id(*s, tr_does_not_fit::kSeed);
+            seeded = true;
+        }
+        for (int t = 1; t <= 25 && !ended_at; ++t) {
+            // Staging (ci/mock-clock-staging-sweep.sh): KIND D, every instant is computed from
+            // stored anchors (the Logon's inbound and outbound instants), each before the step;
+            // the readings below are the oracle.
+            (void)t105::advance_and_drive(*rig.clock, rig.ioc, 1s, 64);
+            if (t == 9) active_before = rig.state() == fsm_state::Active;
+            if (rig.state() != fsm_state::Active) ended_at = t;
+        }
+        eof =
+            t105::pump_until_peer_read_ends(
+                rig.ioc, [&] { return rig.peer.read_ended; }, kWallCap, "TestRequestDoesNotFit") &&
+            t105::ended_in_eof(rig.peer, "TestRequestDoesNotFit");
+        after = rig.peer.received.substr(mark);
+    }
+    rig.stop();
+    auto const records = log.records_of(FIXPP_FORMAT_ID(kGiveUpFormat));
+    ASSERT_TRUE(up) << "setup: not Active with the long CompID";
+    ASSERT_TRUE(seeded) << "setup: the TestReqID counter was not seeded";
+    EXPECT_TRUE(active_before) << "setup: the session ended before the TestRequest instant";
+    ASSERT_TRUE(ended_at.has_value()) << "the session was not ended; the peer read: " << after;
+    EXPECT_EQ(*ended_at, 10) << "not ended at the TestRequest instant";
+    EXPECT_TRUE(eof) << "the peer's read did not end in EOF";
+    EXPECT_TRUE(pr::frames_of_type(after, "1").empty()) << "a TestRequest: " << after;
+    EXPECT_TRUE(pr::frames_of_type(after, "5").empty()) << "a Logout: " << after;
+    EXPECT_TRUE(records.empty()) << "a give-up record naming a TestReqID never written";
+}
+
 }  // namespace

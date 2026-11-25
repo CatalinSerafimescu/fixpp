@@ -191,6 +191,13 @@ struct session_test_access {
         return !s.pending_test_req_id_.empty();
     }
 
+    // Seeds the per-session TestReqID counter, as a Session that has issued that many
+    // TestRequests would hold it (105-transport-liveness, Gate B round 1, O-1). Session strand
+    // only.
+    static void set_next_test_request_id(Session& s, std::uint32_t n) noexcept {
+        s.next_test_request_id_ = n;
+    }
+
     // Whether a resend is outstanding: the session sent a ResendRequest and NextNumIn has
     // not passed the gap it recorded (fixpp#537, D-537-5). Session strand only.
     [[nodiscard]] static bool resend_outstanding(Session const& s) noexcept {

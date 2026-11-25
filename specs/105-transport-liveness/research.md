@@ -666,7 +666,11 @@ unbounded memory, where the generator's monotonic counter gives the same answer 
 - *Amended 2026-11-24 (owner ruling, spec clarification "Session 2026-11-24", the held TestRequest's fresh window):* the
   give-up instant is the later of that instant and the pending TestRequest's write + T + 1 ns, eligible only when no
   inbound frame arrived since it (contract C-6.2), in `detail::test_request_give_up_instant`'s three-argument overload;
-  its `constexpr` cell is `LivenessTiming105.FreshWindow_IsTheLaterInstant`.
+  its `constexpr` cell is `LivenessTiming105.FreshWindow_IsTheLaterInstant`. *Amended 2026-11-25 (Gate B round 1,
+  C-2(b)):* the write is the return of the TestRequest's store and write (`tr_written_at`); "an inbound frame since it"
+  counts from its issue, before its number, store and write (`tr_issued_at`), so a frame or an answer during them counts
+  (data-model E-4); cells `LivenessTiming105.FreshWindow_FromTheWrite_*`, `.FreshWindow_FrameDuringStore_*` and
+  `.FreshWindow_AnswerDuringStore_*`.
 - *Amended 2026-11-24 (owner ruling, spec clarification "Session 2026-11-24", second bullet, the cap at 3T):* while a
   TestRequest is pending, a TestRequest that fell due and is still held behind a resend answer strictly after the last
   inbound frame + 3T is given up there (`detail::held_test_request_cap`, four saturating steps, the last the 1 ns

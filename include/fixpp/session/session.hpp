@@ -1690,8 +1690,9 @@ private:
     // Active. Single-writer on the per-session strand.
     fixpp::core::steady_time_point last_inbound_steady_;
 
-    // pending_test_req_id_ — the TestReqID of the most recently emitted
-    // TestRequest that has not yet been acknowledged by an inbound Heartbeat.
+    // pending_test_req_id_ — the TestReqID of the most recently issued
+    // TestRequest that has not yet been acknowledged by an inbound Heartbeat; issued is when the
+    // liveness loop built it, before its number, store and write (data-model E-4).
     // Empty when no TestRequest is outstanding. At the liveness loop's give-up it is the
     // TestReqID the slot-74 record and the Logout's Text(58) name (105 R-1, research D3).
     std::string pending_test_req_id_;
