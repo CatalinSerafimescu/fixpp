@@ -35,9 +35,8 @@ namespace {
 // by the judging dictionary (re-derive with the field-definition grep, `<field number=…>` per
 // dictionaries/*.xml and `<fixr:field id=…>` in the Orchestra file), so each is an undefined tag,
 // 373=0.
-// 106 D2 supersedes 099 E-7's consumed number on a refused Logon, here, in kLogonSent, in
-// kNotConnectedOff and in the named cells below: the arm commits the Logon's MsgSeqNum only once
-// it is admitted, so every Reject or silent refusal in either Logon arm keeps NextNumIn ("k").
+// 106 D2 supersedes 099 E-7's consumed number on a refused Logon: the arm commits the Logon's
+// MsgSeqNum only once it is admitted, so every Logon-arm refusal keeps NextNumIn ("k").
 const KeyedRow kNotConnected[] = {
     {.cell = "NC-e", .input = "Logon 1137 absent", .t = "R 1/1137 A 45=1 | Disc | k | app=0 adm=0"},
     {.cell = "NC-e", .input = "Logon 1137=empty", .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},

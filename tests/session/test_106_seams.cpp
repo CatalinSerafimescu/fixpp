@@ -215,9 +215,10 @@ TEST(NextNumIn106, CommitRefused_Disconnected) {
 // NextNumIn106.Acceptor_ResetOnLogon_S3_KeepsTheReset (test_106_identity_first.cpp), which keeps
 // what the base also reads: with reset_on_logon on an acceptor whose store holds NextNumIn 5, the
 // knob's reset runs before the classification, the Logon at MsgSeqNum 1 is refused at S3, and the
-// in-memory NextNumIn is exactly 1 after the refusal: the reset's value, unconsumed (106 D2). The
-// store holds a value other than 1 before the feed, so a NextNumIn of 1 after it is the reset's,
-// not the hydrated one. Its mutant: M6a (the acceptor commits the advance at the classification).
+// in-memory NextNumIn is exactly 1 after the refusal: the reset's value, unconsumed (106 D2). An
+// acceptor that never hydrated also reads 1 in memory, so the cell shows that the reset ran by its
+// store-reset-call and store-counter assertions (the store holds 5 before the feed). Its mutant:
+// M6a (the acceptor commits the advance at the classification).
 TEST(NextNumIn106, Acceptor_ResetOnLogon_S3_InMemoryOne) {
     namespace t99 = fixpp::session::test099;
     using fixpp::session::direction_t;

@@ -114,8 +114,8 @@ constexpr const char* kActive = "Active";
 constexpr const char* kNone = "-";
 
 // E-10's literals. 106 D2 supersedes E-10's consumed number on the block's path: the Logon's
-// MsgSeqNum is committed only once it is admitted, so 1130's Reject keeps NextNumIn on the
-// block's path as on the gate's, and so do 384's, 372's and 385's.
+// MsgSeqNum is committed only once it is admitted, so every Logon-arm refusal keeps NextNumIn,
+// on the block's path as on the gate's.
 const std::string& kBad1130Block() {
     static const std::string value = "R 5/1130 A 45=1 | Disc | k | app=0 adm=0";
     return value;
