@@ -776,7 +776,10 @@ Tier 2 runs exercise the cap (SC-006). No further work; the PR evidence records 
   `close()`'s `run_logout_phase1`, and `inbound_logout_leaf_` for kind `r1` (the give-up's own Logout).
 - The first claimant owns the one `Disconnected` and, when it is a recording decider (rows 1, 2 and 4 below), the one
   reason record; an ending Logout, `close()`, `Engine::stop()`, a reconnect drain and the bound's failure exits record none. Every later decider records
-  nothing and closes nothing. FR-017 states this invariant once; C-4.6, INV-106-2 and D9 quote it.
+  nothing and closes nothing. Refined by R21 (spec.md Clarifications, the implementation session): a lost claim suppresses only the loser's reason
+  record and its `Disconnected` entry; it never suppresses a protocol reply the base sends, or a close the base performs. `inbound_logout_leaf_`
+  writes the reply to the peer's Logout (kind `reply`) whatever the claim's outcome (`B-103-15`); a Logout fixpp starts (kind `r2`) writes nothing
+  on a refused claim. FR-017 states this invariant once; C-4.6, INV-106-2 and D9 quote it.
 
 | Decider | Where it claims, before its reason record | Its reason record |
 |---|---|---|

@@ -290,7 +290,7 @@ shows). Re-derived at HEAD. **Blocks every later phase.**
 |---|---|---|
 | `run_liveness_loop_body_` (R-1: `logout_in_flight_ = true`, `enter_ending_write_(ending_kind::r1, …)`) | the give-up block | moves into `decide_give_up_()`, which claims `give_up` first (T082) |
 | `run_logout_phase1` | `close()`'s Logout | excluded: written under `closing`; takes and tests no claim |
-| `inbound_logout_leaf_` | sets the owner, enters writing (kind passed in) | kind `r1` excluded (the give-up's claim); every other kind claims `ending_logout` where it takes the owner (T080) |
+| `inbound_logout_leaf_` | sets the owner, enters writing (kind passed in) | kind `r1` excluded (the give-up's claim); every other kind claims `ending_logout` where it takes the owner (T080); kind `reply` writes on a refused claim, kind `r2` does not (R21, T169) |
 | `refuse_logon_with_logout_` | `enter_ending_write_(ending_kind::r2, …)` | claims `ending_logout` first (T080) |
 | `inbound_logon_sent_logout_leaf_` | `enter_ending_write_(ending_kind::r2, …)` | claims `ending_logout` first (T080) |
 | `honor_peer_next_expected_` | `enter_ending_write_(ending_kind::r2, …)` | claims `ending_logout` first (T080) |

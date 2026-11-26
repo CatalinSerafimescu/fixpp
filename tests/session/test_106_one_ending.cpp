@@ -65,7 +65,8 @@ TEST_P(OneEnding106, GiveUpThenClose) {
 }
 
 // tasks.md T167 (research D11 row 3: an ending Logout other than R-1 takes the ending claim before
-// the owner, and a refused claim writes nothing): Engine::stop()'s step 1 has run, so
+// the owner, and a refused claim writes nothing for a Logout fixpp starts; spec.md R21: the reply
+// to the peer's Logout is written whatever the claim's outcome): Engine::stop()'s step 1 has run, so
 // closing_or_stopped_() holds and claim_ending_() refuses every claim. A frame below NextNumIn then
 // draws an ending Logout other than R-1: its leaf writes no Logout, and the caller's tail records
 // the one Disconnected entry (send_ending_logout_: the Disconnected writes of its callers' tails are
