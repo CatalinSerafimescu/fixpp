@@ -44,7 +44,8 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
   that keeps the session in its arm follows the non-consuming precheck. Which one a Reject is, is decided before the send
   by `logon_reject_disconnects_`: on a FIXT session a validate-first Reject whose RefTagID is 1137, 1130 or 372
   disconnects, and every other one stays in the arm (research F-2).
-- **C-1.5 An admitted identity:** every refusal's frame, number and ending are byte-for-byte the base's. A
+- **C-1.5 An admitted identity:** every refusal's answer and ending are as the base's; NextNumIn follows FR-006 (C-2;
+  spec.md Clarifications, R16). A
   validate-first Reject that keeps the session in its arm leaves the identity unconsumed, so a following Logon on the
   same connection is judged afresh. 106 does not bound how many stay-in-arm Rejects one connection draws, as on the
   base; each consumes an outbound number and calls the validator again (`L-106-c`), and the establishment deadline

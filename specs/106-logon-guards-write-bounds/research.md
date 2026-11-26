@@ -690,7 +690,7 @@ each new row found is added here.
 Existing cells that pin the consumed number after an S3, strict or 789 refusal change to the unconsumed value, each
 named by tasks T009's census and re-pinned by T059 (plan.md P2's "census rows"; SC-007 names them as the expected
 changes). Census: `git grep -nE 'next_in\(\)|next_inbound' -- tests/session/test_099_*.cpp
-tests/session/test_104_*.cpp`, read for refusal endings; first candidate `W5Scan.NextNumInIsTheHeadersAndNoReset`.
+tests/session/test_104_*.cpp`, read for refusal endings; first candidate `W5Scan.NextNumInIsTheHeadersAndNoReset`. *(Amended by T059: that grep finds none of them; the second FR-007 census amendment below gives the run-based recipe and the population.)*
 
 **FR-007 census at `9d81082a`** (N-3). Recipe: `grep -n 'r.open()' tests/session/test_104_logon_too_low.cpp`, plus each
 acceptor cell there ending at a gate refusal (`open_hydrated` hydrates only the initiator), read for a NextNumIn
@@ -704,7 +704,7 @@ every cell that pins an answer or a consumed number the base produced ahead of a
 the 106 behaviour: a silent `Disconnected`, no frame written, no number consumed; each re-pinned cell's comment names
 "106 D1" and states the condition. The groups: 099's W5 tables' `NC-h` and `LS-h` rows (the mTLS off-list identity,
 in `kNotConnected`, `kLogonSent` and their validation-off twins, on every shape; `tests/session/test_099_establishment.cpp`),
-`W25Initiator.OffListIdentity_MtB_NoAuth` on every shape (`tests/session/test_099_msg_type_default.cpp`), and 038's
+`W25Initiator.OffListIdentity_MtB_SilentRefusal` on every shape (`tests/session/test_099_msg_type_default.cpp`), and 038's
 Cell 11, renamed `AcceptorLogonSendingTimeTest.Cell11_BadStalePlusBadCreds_CredsWin`
 (`tests/session/test_acceptor_logon_sending_time.cpp`; it also asserts the validator ran). Recipe: list the test
 sources that drive an identity gate (`git grep -lE 'attach_accepted_transport|set_logon_validator|add_binding|mtls_ca|mtls_pinned' -- tests`),
@@ -712,6 +712,21 @@ map each to its binary through `compile_commands.json`, and run each binary whol
 the re-pins reverted; every failing cell is in the list (known positive: the cells above, which fail there). T009's
 `next_in()` grep cannot see this population: 099 spells a consumed number as the trace line's `c`/`k` field and an
 answer as a frame pin. The instance list and its readings are in the evidence file's T051 section.
+
+**Second FR-007 census amendment (T059; the owner's class ruling, every Logon refusal keeps NextNumIn, FR-006;
+spec.md Clarifications, R17).** D2 falsifies every cell that pins the base's consumed NextNumIn after a refused Logon:
+099 spells it as the trace line's `c` field where the 106 behaviour reads `k`, with the frame and the ending
+unchanged. They are re-pinned to `k`; each re-pinned group's comment names "106 D2". The groups: the Logon-arm Reject
+rows of `kNotConnected`, `kLogonSent` and `kNotConnectedOff` on every shape, `W5Named.BlockTestsTheRegistry_*`,
+`W5Named.Optional1137_Absent_InitiatorBlockAnswers`, `W5RejectCannotGoOutS3.Initiator_TheErrorReturns` and
+`W5NoClock.InitiatorS3_RefusesAndStampsNothing` (`tests/session/test_099_establishment.cpp`), and E-10's literals
+`kBad1130Block`, `kCap`, `kLong372Block` and `kNo385` with the `W25Endings`, `W25Named`,
+`W25AfterARefusedEntry` and `W25Initiator.RefusedThenValid` cells that read them
+(`tests/session/test_099_msg_type_default.cpp`). Recipe: run the 099 binaries whole at the head of the commit change
+with the re-pins reverted; every failing cell must differ from its pin only in the trace line's NextNumIn field, `c`
+pinned and `k` read (known positive: `kNotConnected`'s NC-e "Logon 1137=empty" row, which fails there). A grep of
+the pins is not the instrument: one pin's answer is `-` (no frame), which a Reject-shaped pattern cannot see. The
+instance list and its readings are in the evidence file's T059 section.
 
 **"Has a cell" census at `9d81082a`.** Recipe: each bundle claim that an error path or refusal has a cell
 (`grep -n -i 'has a cell\|a cell for' *.md`, and plan.md's IX §1 row) is looked up in this table. Result: the commit
@@ -804,6 +819,7 @@ against FR-011 and C-4.5; the unbounded case stays disclosed (`L-105-f`).
 | engine.cpp's hard-coded 1500 ms (015 FR-014) | the listener's comment | `EngineConfig::acceptor_tls_handshake_timeout` (D6) |
 | 099 E-7's `NC-h` and `LS-h` endings: an off-list mTLS identity answered, or its number consumed, ahead of the gate | 099 data-model E-7; `tests/session/test_099_establishment.cpp`, `test_099_msg_type_default.cpp` | refused first, nothing written, NextNumIn kept (D1; D9's FR-007 census amendment) |
 | 038's simultaneous-bad ordering, a stale 52 with refused credentials: "52 wins" | 038 data-model Group 1; `tests/session/test_acceptor_logon_sending_time.cpp` Cell 11 | the credentials gate first, silent (D1) |
+| 099 E-7's and E-10's consumed NextNumIn (`c`) on a Logon refused at S3 | 099 data-model E-7, E-10; `tests/session/test_099_establishment.cpp`, `test_099_msg_type_default.cpp` | kept, `k` (D2; D9's second FR-007 census amendment) |
 
 ## Risks
 

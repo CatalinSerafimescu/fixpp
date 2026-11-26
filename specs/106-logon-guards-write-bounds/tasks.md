@@ -428,7 +428,8 @@ admits the identity before the arm writes a frame or changes sequence state (FR-
   unchanged in memory and store. RED on the base: the in-memory NextNumIn.
 - [X] T042 [US1] `tests/session/test_106_identity_first.cpp` (same file), admitted identities (research D9 row FR-005; contract C-1.5): `IdentityFirst106.Admitted_<Refusal>`
   over the refusals of T038 and T040 that an admitted identity can reach, each asserting the answer
-  byte-identical to the base's (the frame bytes captured on `$B` and pinned), the same numbers and the same ending —
+  and the ending as the base's (the frame bytes captured on `$B` and pinned); NextNumIn follows FR-006 (spec.md
+  Clarifications, R16) —
   [guard: M1b]; `IdentityFirst106.Admitted_StayInArmReject_NextLogonActive` (a validate-first Reject whose RefTagID keeps
   the session in its arm, F-2, then a corrected Logon on the same connection reaches Active) — [guard: M1];
   `IdentityFirst106.Admitted_UnreadableNoValidator_ValidateFirstReject` (a non-mTLS acceptor, inbound validation on, no
@@ -519,14 +520,16 @@ every refusal between keeps NextNumIn in FR-006's sense (FR-006, SC-002).
   acceptor row of research D2's table whose 106 column is "unchanged" or "unchanged; no unit runs" (as re-derived by
   T008): `NextNumIn106.Acceptor_S3_1137` *(proposed)* (FIXT routing, inbound validation on, spec US2 scenario 1: the
   Reject is sent), `NextNumIn106.Acceptor_Peer141_S3_NoAdvanceNoReset` (also asserts the store's `reset_to` not called),
-  `NextNumIn106.Acceptor_S3_RejectWriteFails` *(proposed)* (`inbound_reject_leaf_`'s error returned). Each asserts the
+  `NextNumIn106.Acceptor_S3_RejectAssignFails` *(proposed)* (`inbound_reject_leaf_`'s error returned). Each asserts the
   store's NextNumIn at its value before the frame and the in-memory NextNumIn equal to the value the arm classified the
   frame against (an acceptor hydrates inside the arm, so not a value read before the feed). RED on the base: consumed in
   memory. Plus [guard: the knob's reset moved after S3] `NextNumIn106.Acceptor_ResetOnLogon_S3_KeepsTheReset`, which
-  pins `L-106-a` (NextNumIn 1 and the store reset).
+  pins `L-106-a` (NextNumIn 1 and the store reset). Orchestrator ruling on the Phase 4 report: the guard stays as
+  written, and `NextNumIn106.Acceptor_ResetOnLogon_S3_InMemoryOne` [seam: M6a] (`tests/session/test_106_seams.cpp`)
+  pins the in-memory NextNumIn at exactly 1 after the reset.
 - [X] T057 [US2] `tests/session/test_106_identity_first.cpp` (same file), every initiator row "unchanged": `NextNumIn106.Initiator_S3` (an ordinary acknowledgement,
   spec US2 scenario 2), `NextNumIn106.Initiator_Asked141_S3_NoAdvanceNoReset` (also `reset_to` not called),
-  `NextNumIn106.Initiator_S3_RejectWriteFails`, `NextNumIn106.Initiator_Strict` (the `bilateral_strict` silent refusal),
+  `NextNumIn106.Initiator_S3_RejectAssignFails`, `NextNumIn106.Initiator_Strict` (the `bilateral_strict` silent refusal),
   `NextNumIn106.Initiator_789TooHigh`, `NextNumIn106.Initiator_789Invalid`, `NextNumIn106.Initiator_789Below_WalkFails`
   (the `!h789` error return included) and `NextNumIn106.Initiator_789Below_Superseded` (all *(proposed)* but
   `Initiator_S3`). Same oracle. RED on the base: consumed in memory. Spec US2 scenario 3 (the unasked 141=Y
@@ -539,13 +542,14 @@ every refusal between keeps NextNumIn in FR-006's sense (FR-006, SC-002).
 - [X] T058 [US2] `tests/session/test_106_seams.cpp`: `NextNumIn106.CommitRefused_Disconnected` [seam: the
   manager frozen between classification and commit through T031's hook] (research D9 row "FR-006 commit", N-4):
   `Disconnected` once, nothing sent after it, NextNumIn unconsumed in memory and store. Its mutant: T069.
-- [ ] T059 [US2] Every existing cell T009 classed "S3, strict or 789 refusal" changes its pinned number to the
+- [X] T059 [US2] Every existing cell T009 classed "S3, strict or 789 refusal" changes its pinned number to the
   unconsumed value, starting with `W5Scan.NextNumInIsTheHeadersAndNoReset` (`tests/session/test_099_establishment.cpp`);
   each re-pin is named in the evidence file with its old and new value and is RED on the base.
-  **Stopped (census contradiction, to the orchestrator):** T009 classed no cell; at H2 (`1860fa1a`) `-L 099` fails 134
-  cells, each differing from its pin only in the trace line's `c`→`k` (the Logon-arm Reject pins and E-10's
-  constants in `test_099_establishment.cpp` and `test_099_msg_type_default.cpp`). Not re-pinned; the evidence file's
-  T059 section has the list, the grep and run halves, and the proposed re-pin.
+  T009 classed no cell; at H2 `-L 099` failed 134 cells, each differing from its pin only in the trace line's
+  `c`→`k`. Orchestrator ruling on the Phase 4 report (the owner's class ruling: every Logon refusal keeps NextNumIn,
+  FR-006; spec.md Clarifications, R17): all 134 re-pinned to `k`, by the run-based recipe of research D9's second
+  FR-007 census amendment, each group's comment naming "106 D2". RED on `$B` reading the base's `c`, GREEN at the
+  head; the evidence file's T059 section has the list and the readings.
 - [X] T060 [US2] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C3`); read T056, T057 and T059 on `$B` (the 099 and 104 files
   overlaid as named); record per cell its RED reason or guard status and the counts.
 
@@ -569,9 +573,9 @@ every refusal between keeps NextNumIn in FR-006's sense (FR-006, SC-002).
 - [X] T065 [US2] `src/session/session.cpp`: Comments at both commit points naming the decision: "106 D2: the advance is committed here, so
   every refusal before it keeps NextNumIn (closes L-104-8)", and at the two locals: `logon_inbound_advanced(_init)` now
   means "classified in sequence; consumed at the commit". No result in a comment.
-- [ ] T066 [US2] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: At the head: `-L 106` (seam entry included), `-L 104`, `-L 099` unfiltered GREEN; record counts.
-  Commit `H2`; `codegraph sync`.
-  **Stopped on its 099 half (T059):** at H2 `-L 106` and `-L 104` GREEN, `-L 099` 13/15; H2 committed, `codegraph sync` done.
+- [X] T066 [US2] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: At the head: `-L 106` (seam entry included), `-L 104`, `-L 099` unfiltered GREEN; record counts.
+  Commit `H2`; `codegraph sync`. At H2 `-L 099` read 13/15 (T059); after T059's re-pins and the rulings' cells
+  (`01a586a4`) `-L 106`, `-L 104` and `-L 099` read GREEN.
 
 ### Mutant arms for US2 (in `$M` at `H2`)
 

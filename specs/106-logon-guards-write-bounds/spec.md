@@ -129,6 +129,12 @@ Ruling of the orchestrator under the same delegation, applying round 6's exact t
 - R15 (the R14 escalation; orchestrator ruling under the owner's delegation): R14's disclosure reading holds. On a user clock the base's liveness loop already waits through `Clock::sleep_until` once per cycle (`src/session/session.cpp`, `Session::run_liveness_loop_body_`, the `effective_clock_->sleep_until(deadline)` in its `while (liveness_may_originate_())` loop), so the emit half was never a zero on a user clock. R14 records that; its emit half is not a new `[const §XV.1]` deviation. Its `Session::send` half, with `write_timeout_ms` set on a user clock, stays a new conditional zero, flagged for the owner's review at merge (T178).
 - E1 (C-ABI, ruled unreachable): `fixpp_session_close`'s return code is the base's on every C session, because no C session reaches an identity gate that can refuse a Logon the base let establish (contract C-6's no-reach clause). The clause and its condition replace the `FIXPP_ERR_THREAD_SESSION_LIFECYCLE` change that C-6, research D7 and checklist c-abi CHK007 stated. No cell is owed while the condition holds.
 
+### Session 2026-11-26 (implementation)
+
+Rulings of the orchestrator under the owner's delegation, on the Phase 4 implementation report.
+- R16 (the two `Admitted_S3` cells): FR-005, contract C-1.5 and tasks T042 govern the answer and the ending: the frames and the `Disconnected`, as on the base. FR-006, contract C-2.1 and research D2 govern the inbound number: kept. `IdentityFirst106.Admitted_S3_1137_Acceptor` and `IdentityFirst106.Admitted_S3_Initiator` therefore pin NextNumIn 5, the frame the base wrote, and the base's ending. C-1.5's and T042's wording now reads "the answer and ending are as the base's; NextNumIn follows FR-006".
+- R17 (tasks T059; the owner's class ruling, every Logon refusal keeps NextNumIn, FR-006): the 099 cells that pinned a consumed NextNumIn after a refused Logon are re-pinned to kept, as research D9's second FR-007 census amendment records.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — An unauthorised identity is disconnected without a message and changes nothing (Priority: P1)
@@ -306,7 +312,7 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
 - **SC-004**: With the per-write limit set and no other ending holding the claim, the session ends within the limit plus the stated margin in each write-class cell.
 - **SC-005**: A one-attempt reconnect against a never-handshaking peer returns `transport_reconnect_limit_exceeded` within the configured bound plus the stated margin. An Engine acceptor drops a never-handshaking client within its configured bound plus the stated margin.
 - **SC-006**: This PR's `windows-msvc-asan` leg completes, green or red on its own steps, without reaching its cap. Its `sccache statistics` step shows whether the run was cold; a warm run is recorded as warm in the PR evidence and does not discharge the cold case, which then rests on the workflow comment's push:main recipe (FR-001).
-- **SC-007**: The existing session, transport, config and C-ABI suites pass unchanged, apart from the precedence cells that FR-007 names, the cells that pin an answer or a consumed number ahead of an identity gate, which research D9's FR-007 census amendment re-pins (tasks T051: 099's `NC-h`/`LS-h` rows, `W25Initiator.OffListIdentity_MtB_NoAuth`, 038's Cell 11), the cells research D9's census re-pins to the unconsumed NextNumIn (tasks T009, T059), and the pins of the slot after `wire_undefined_tag` that T013's census lists (the error-completeness and ABI-golden tests, the error-map CSV).
+- **SC-007**: The existing session, transport, config and C-ABI suites pass unchanged, apart from the precedence cells that FR-007 names, the cells that pin an answer or a consumed number ahead of an identity gate, which research D9's FR-007 census amendment re-pins (tasks T051: 099's `NC-h`/`LS-h` rows, `W25Initiator.OffListIdentity_MtB_SilentRefusal`, 038's Cell 11), the cells research D9's second FR-007 census amendment re-pins to the unconsumed NextNumIn (tasks T059: the 099 Logon-arm refusals that pinned a consumed number), and the pins of the slot after `wire_undefined_tag` that T013's census lists (the error-completeness and ABI-golden tests, the error-map CSV).
 
 ## Normative References
 
