@@ -81,12 +81,19 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
   unbounded, `L-105-f`). First the ending claim (C-4.6), then 105's slot-74 record. Then the Logout owner, and the Logout of 105 C-3.1 under 105's
   write limit (C-2.7), whose budget counts from the decision. The Logout is written once the writes ahead of it have
   completed. When the budget runs out first, the transport closes at the decision plus `logout_disconnect_timeout_ms`,
-  with no complete Logout. The session ends `Disconnected` once, with `onLogout` once from Active.
+  with no complete Logout. The session ends `Disconnected` once, with `onLogout` once from Active. When 105's ending
+  bound cannot be spawned (its clarification D-g), the session records `Disconnected` and closes the transport at the
+  decision itself, and writes no Logout.
 - **C-3.3 The blocked writes return.** When the session ends with a write blocked:
   - the blocked write returns an error;
   - every write waiting at the write gate returns an error;
   - an application `send` returns `dispatch_aborted` (`FIXPP_ERR_CANCELLED` in C), as 105's B-105-8, unchanged;
   - none of them hangs.
+
+  The exception is the liveness loop's own emit while it is still inside its `MessageStore::store` call: the close
+  does not fail it, and it returns when the store returns, which no peer controls. The give-up is still decided at the
+  instant and the transport still closes at the decision plus `logout_disconnect_timeout_ms`; `close()`'s and
+  `Engine::stop()`'s joins wait for the store (`L-093-12`, amended).
 - **C-3.4 The held cap without a pending TestRequest.** A TestRequest due and still held behind a resend answer
   strictly after the last inbound frame + 3T is given up then, whether or not a TestRequest is pending. With none
   pending, its Text(58) is `TestRequest unanswered`, without the TestReqID clause (Q2).

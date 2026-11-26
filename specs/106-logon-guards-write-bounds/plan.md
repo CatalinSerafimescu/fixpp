@@ -120,7 +120,7 @@ enum and C-ABI map; `version.h` and `session.h` comments; new `tests/session/tes
 |---|---|---|
 | IV | C ABI is the licence seam, not the primary API | No new C symbol, constant or type. The three knobs are C++/TOML only (F-7: no C TOML entry). Python binding: version pins only (D7 census). |
 | VIII §2–3, §5 | +5 % paired budget; a bench in the same PR; zero allocation between parse and `fromApp`, which 2d extends to the heartbeat path | D1/D2 touch the establishment path only. D5 adds one branch per write (off). D3 allocates nothing per emit: one bound per connection (research D3). The mallocnesia cell binds it. The paired runs are owed (quickstart §6). |
-| IX §1 | diff-scoped coverage 95/85, no uncovered error path | Each new error path has a cell in research D9 (its "has a cell" census): the commit refusal (`CommitRefused_Disconnected`); the bound's spawn failure at the loop and at a write; its wait failure; its teardown exits; the claim's race pairs; the TOML refusals, the root key's included. The verify record assesses the rest. |
+| IX §1 | diff-scoped coverage 95/85, no uncovered error path | Each new error path has a cell in research D9 (its "has a cell" census): the commit refusal (`CommitRefused_Disconnected`); the bound's spawn failure at the loop and at a write; 105's ending-bound spawn failure inside a give-up the bound decides (`GiveUp106.RejectBlocked_EndingBoundSpawnFails_ClosedAtG`); its wait failure; its teardown exits; the claim's race pairs; the TOML refusals, the root key's included. The verify record assesses the rest. |
 | IX §2 | ASan, UBSan, TSan | targeted runs; TSan repeats the D3/D5 cells (quickstart §5) |
 | X §1, §4 | the versioned contract; append-only error codes | `session_write_timeout = 136` appended; maps to the existing `FIXPP_ERR_TRANSPORT_IO`; no numeric reuse; occupancy unchanged |
 | X §7 | BREAKING declared in `version.h`, the PR, B&L; in-repo consumers updated | D7: the `version.h` 1.19 entry, three `session.h` clauses, the MINOR-pin census, B-106-6 |
@@ -178,7 +178,7 @@ include/fix/c_api/version.h                       # MINOR 19 + 1.19 history (com
 include/fix/c_api/session.h                       # 1.19 clauses (comments)
 tests/session/test_106_identity_first.cpp         # IdentityFirst106, NextNumIn106 (all but CommitRefused_Disconnected)
 tests/session/test_106_give_up.cpp                # GiveUp106
-tests/session/test_106_seams.cpp                  # every cell naming a symbol the base lacks: WriteTimeout106, OneEnding106 (limit set), ConnectionBound106, ShippingClock106, both EngineHandshake106 cells, NextNumIn106.CommitRefused_Disconnected, TomlWriteTimeout106.Set
+tests/session/test_106_seams.cpp                  # every cell naming a symbol the base lacks: WriteTimeout106, OneEnding106 (limit set), ConnectionBound106, ShippingClock106, both EngineHandshake106 cells, NextNumIn106.CommitRefused_Disconnected, TomlWriteTimeout106.Set, TomlWriteTimeout106.KeyAbsent_Off, TomlHandshake106.AcceptorKeyAbsent_Default1500
 tests/session/test_106_one_ending.cpp             # OneEnding106 pairs that need no new symbol
 tests/session/test_106_handshake.cpp              # HandshakeBound106 (real TLS)
 tests/alloc_guard/test_106_connection_bound.cpp   # alloc_guard_106_connection_bound_mallocnesia (Release)
@@ -214,15 +214,15 @@ of D9) stay where they are.
 0. **Setup.** The censuses of quickstart §1. The base worktree on `fixppbuild`. The RED-on-base harness for the 106
    binaries.
 1. **P1 — B110 / #702 (security, first).** D1 in both arms. `has_logon_validator`. Delete the later gate calls.
-   Cells: `IdentityFirst106.*` RED → GREEN; M1; the 104 and 099 suites unfiltered. FR-007 update (N-3; research D9's
+   Cells: `IdentityFirst106.*` RED → GREEN; M1, M1a, M1b, M1c; the 104 and 099 suites unfiltered. FR-007 update (N-3; research D9's
    census): `LogonTooLow104.Precedence_MtlsAcceptorOffList`'s setup assertion becomes `EXPECT_EQ(r.next_in(), <the
    value read before the feed>)`, because the refusal precedes hydration (D1 item 4).
 2. **P2 — #703 and the class ruling.** D2: `classify_inbound`, the two commit points. Cells: `NextNumIn106.*`; the
-   census rows updated; M6.
+   census rows updated; M6a, M6b.
 3. **P3 — #714a (D3, D4, D11).**
    - Code: the claim and the `Disconnected` census; extract `decide_give_up_()`; the connection bound with its own
      timer; the no-pending held cap.
-   - Cells: `GiveUp106.*` with M2's spurious-hit arms; `ConnectionBound106.*`; `ShippingClock106.*`;
+   - Cells: `GiveUp106.*` with M2's spurious-hit arms and M14; `ConnectionBound106.*`; `ShippingClock106.*`;
      `OneEnding106.*` without the limit.
    - Guards: the 105 and 538 suites, by label.
 4. **P4 — #714b (D5).**
@@ -230,9 +230,9 @@ of D9) stay where they are.
      through `store_then_emit`, with its C mapping; the record.
    - Cells: `WriteTimeout106.*`; `OneEnding106.*` with the limit; `TomlWriteTimeout106.*`; the C-ABI map; the
      mallocnesia cell with the limit off and on.
-   - Mutants: M3 to M5, M8, M9 with M9′, and M10.
+   - Mutants: M3 to M3‴, M4 per Logout site, M5, M8, M9 with M9′, M9″, M10, M11′, M13 per site, and M15.
 5. **P5 — #717 (D6).** The TOML session key, divergence, and the `EngineConfig` field and root key. Cells:
-   `TomlHandshake106.*`, `EngineHandshake106.*`, `HandshakeBound106.*`; M7, M7′ to M7‴.
+   `TomlHandshake106.*`, `EngineHandshake106.*`, `HandshakeBound106.*`; M7, M7′ to M7⁗.
 6. **P6 — Surfaces and records.** The `version.h` 1.19 entry and the `session.h` clauses. The B&L delta (D8). The
    supersession comments (research table). The brain page `brain/components/session.md` gains a 106 section (why and
    what was rejected) in the PR before CI (the late-docs rule).
@@ -272,6 +272,31 @@ B129 needs no task beyond recording the PR's asan leg outcome (SC-006).
 Spec findings applied with these resolutions: FR-006 / SC-002 / US2 scenario 4 narrowed for Q3; US1 scenarios 4 and 6
 for a direct `open()` initiator (F-3); the F-9 edge case; Q4.
 
+## Deferred to tasks.md
+
+Carriers of research D9's carrier sweep that have no cell in this bundle, each with its reason. `/speckit-tasks` gives
+each one a task that ends in a cell with its mutant, or in a named ruling.
+- **M4 at the Logout sites other than the R-1 leaf and `run_logout_phase1`.** Data-model E-6's census
+  (`git grep -n 'build_logout(' -- src/session`, each followed to its `store_then_emit`) is run at tasks time, and each
+  site's rig depends on its ending kind. Each site gets a `WriteTimeout106.EndingLogout_<Site>` cell with B > W, whose mutant is M4 at that site with M9 and
+  M9′ (each site writes under a claim, so M4 alone is masked), or is named as a site whose Logout write cannot be held
+  past W.
+- **D5's `dispatch_aborted` census.** Each `==` / `!=` line is ruled in tasks.md (research D5) with its cell and the
+  mutant that deletes its `session_write_timeout` arm, or named unreachable for a cut write. For `Session::send`'s F9
+  block the arm is redundant for the `Disconnected` record (data-model E-5 step 4 records first, and M13 covers the
+  tail), so the ruling names what else the block does on that value, or calls the arm redundant.
+- **M13 sites that no cell reaches**: named unreachable in tasks.md, from D11's census.
+- **The exact 30 s default of `tls_handshake_timeout_ms` when the key is absent.** Pinning it through the resolver needs
+  the factory accessor D6 rejects. The spurious arm (still pending at 2.3 s) catches a resolver that writes 0 or a short
+  sentinel, and `Transport::Config`'s default is a line 106 does not edit (Opus loop 2 round 2, C-3).
+- **The RAII clears on the exception and `catch` returns** (`emit_in_flight_`, `write_in_flight_`). A failed write is
+  followed by a `Disconnected` record whose edge exits the bound first, so a mutant of the clear is masked. Tasks.md
+  re-derives that every such return reaches the edge, and gives a cell to any return that does not.
+- **The loop's give-up block with the claim refused** (research D11, "the one change for a lone decider").
+  `liveness_may_originate_()` (Active, no ending phase) stops the write limit, the ending Logouts, the establishment
+  deadline and a drain from Active before the block. Tasks.md names the block reached (by `close()` between setting
+  `closing` and its `Disconnected` record) with a cell, or unreachable.
+
 ## Gate A
 
 - Round 1 applied 2026-11-25: Codex P1=2 P2=5 P3=2; Opus post-judging P1=2 P2=11 P3=9; rewrite addresses root causes
@@ -292,6 +317,7 @@ for a direct `open()` initiator (F-3); the F-9 edge case; Q4.
   `research/G19-fix-fpml-iso20022/research/reviews/codex_106-logon-guards-write-bounds_gate_a_4_review.md`,
   `research/G19-fix-fpml-iso20022/research/reviews/opus_106-logon-guards-write-bounds_gate_a_4_adversarial_review.md`.
   Every P3 is applied in the bundle; none is deferred to tasks.md.
+- Loop 2 round 2 applied 2026-11-26: Codex P1=0 P2=3 P3=0; Opus post-judging P1=0 P2=3 P3=5; rewrite addresses root causes #1 (what ends the loop's emit after each give-up step: 105's cut for a blocked write, a close inside `decide_give_up_()` when 105's ending bound cannot be spawned, nothing for a store call, disclosed under `L-093-12`) and #2 (each carrier the change passes through has a cell and a mutant, research D9's carrier sweep); sweep added 4 cells. Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_106-logon-guards-write-bounds_gate_a_5_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_106-logon-guards-write-bounds_gate_a_5_adversarial_review.md`. N-2 to N-5 are applied in the bundle; the sweep's remaining carriers are listed under "Deferred to tasks.md".
 
 ### Round 1 — disagreements
 
@@ -329,3 +355,16 @@ Applied otherwise than written:
   wall-clock bound is a competing ending that would end the bound under the `_Timing` mutant and read it GREEN.
 - C-1 and C-2 reach more surfaces than Opus's text: the paragraph after E-1's table and D1 item 2 state the credentials
   half per gate, and INV-106-1 names the acceptor's hydration.
+
+### Loop 2 round 2 — disagreements
+
+None refused. Applied otherwise than written, or beyond the text:
+- C-1: the optional guard `GiveUp106.EmitHeldInStore_GivesUpAtG_ClosesAtGPlusB` is taken, as the store phase's ending
+  path, so the sweep has a cell for it. Contract C-3.3 states the store-phase exception, and D8's census grep gains `L-093-12`.
+- N-1 reaches more surfaces than its text: research D3's "The loop after its emit" carves out the refused-spawn case, the
+  E-3 decision row tells the claim's refusal from the ending bound's, and contract C-3.2 states the close at the decision.
+- N-2: the inversion is taken (W = 2 s, `logon_timeout_ms` 1 s), not the relabel, so M10 fires alone.
+- The sweep splits M6 into M6a and M6b, one per commit point, and M4 into one arm per Logout site. Read against data-model
+  E-3's exit row, M4 alone is masked (every Logout is written under a claim or `closing`, which ends the bound first), so
+  each M4 arm runs with M9 and M9′, or with M9 and the closing term deleted for `run_logout_phase1`.
+- N-4 reaches research D3's Text paragraph and D4's answerable sentence as well as E-4 row 3.

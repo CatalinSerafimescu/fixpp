@@ -81,23 +81,33 @@ before the competing deadline (10 s, `logon_timeout_ms` from accept).
 |---|---|---|
 | M1 | the consuming mTLS gate before the stay-in-arm validate Reject | `IdentityFirst106.Admitted_StayInArmReject_NextLogonActive` |
 | M1a | the precheck's credentials half skipped when the session is not mTLS | `IdentityFirst106.ValidateFirst_RefusedCredentials_NonMtls` |
+| M1b | the consuming gate at D1 item 4 refuses an admitted identity | every `IdentityFirst106.Admitted_<Refusal>` cell (no answer) |
+| M1c | `has_logon_validator()` returns true whatever is installed | `IdentityFirst106.Admitted_UnreadableNoValidator_ValidateFirstReject` (no Reject) |
 | M2 | delete the loop's arming of the connection bound for its emit; and, separately, restore the cap's pending term | every `GiveUp106` cell except the guard; `GiveUp106.ResendHeldNoPending` |
 | M3 | take `write_started_at_` before the `write_gate_` acquire | `WriteTimeout106.QueuedWrite_CountsFromItsOwnStart`, `ResendWalk_ProgressNotCut` |
 | M3′ | delete the bound's write arming | every `WriteTimeout106.<Class>` cell |
 | M3″ | the expiry does not set `write_cut_epoch_` | every `WriteTimeout106.<Class>` cell (the cut call returns `dispatch_aborted`) |
-| M4 | pass `write_class::ordinary` from every Logout site | `WriteTimeout106.EndingLogout_Keeps105Limit` |
+| M3‴ | `store_then_emit`'s pass-through deleted (`session_write_timeout` flattened to `dispatch_aborted`) | `WriteTimeout106.Send` (the cut `send` returns through `send_impl`'s `store_then_emit`) |
+| M4 | one arm per `build_logout(` site (data-model E-6's census): that site passes `write_class::ordinary`, with M9 and M9′ (for `run_logout_phase1`, M9 and E-3's closing term deleted); alone it is masked, because every Logout is written under a claim or `closing`, which ends the bound first | the R-1 leaf: `WriteTimeout106.EndingLogout_Keeps105Limit`; `run_logout_phase1`: `WriteTimeout106.CloseLogout_KeepsGrace`; the other sites: plan.md "Deferred to tasks.md" |
 | M5 | spawn a coroutine per write and per emit | `alloc_guard_106_connection_bound_mallocnesia`: the send half non-zero (spaced sends; back-to-back sends would not show it), the emit half's delta against the base positive |
 | M8 | replace `connection_bound_wait_`'s shipping branch by `await_deadline(*effective_clock_, …)` | `ShippingClock106.DirectDriver_BoundBesideLiveness_TestRequestAtT` (the slot re-arm ends liveness); the mallocnesia cell (the per-call fallback allocates) |
 | M9 | delete `claim_ending_`'s test (always true) | every `OneEnding106` pair whose second decider reaches `claim_ending_`, with M9′ where the second decider meets E-3's exit on a taken claim; pairs stopped earlier by a state test or an exit row are guards or take the mutant research D9 names for them |
 | M9′ | delete E-3's exit on a taken claim | with M9: `OneEnding106` pairs whose second decider is the bound |
-| M10 | the pump races `on_inbound_frame` against the establishment deadline, with M9 | `OneEnding106.Watchdog_PreActive_NoEstablishmentRecord` |
+| M9″ | the establishment expiry's `claim_ending` always refused | `PreActive105.SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent` (no event) |
+| M10 | the pump races `on_inbound_frame` against the establishment deadline (alone, without M9) | `OneEnding106.Watchdog_PreActive_NoEstablishmentRecord` (W = 2 s, `logon_timeout_ms` 1 s: an establishment record and no write-timeout record) |
 | M11 | the `write_timeout_ms` mapper recognises the key and drops its value | `TomlWriteTimeout106.Set` |
+| M11′ | `SessionConfig::write_timeout_ms`'s default changed to 300 ms | `TomlWriteTimeout106.KeyAbsent_Off` |
 | M12 | per joiner of data-model E-3's table: the drain's wake and its `reconnect_drain_in_flight_` term; the `Disconnected` edge's wake; the drain term with `claim_ending_`'s drain refusal; `drive_reconnect`'s respawn after a failed drain | `ConnectionBound106.Teardown_Drain_*`; `Teardown_ConnectionEnd_*`; `WriteExpiryDuringDrain_NoRecord` (LogonSent, a Logon-arm Reject's write blocked: research D9); `DrainCancelled_RespawnsOnBlockedWrite` |
-| M6 | commit the advance at the classification (the base's `check_inbound`) | every `NextNumIn106` cell |
+| M13 | per site of research D11's `Disconnected` census that a cut write or a close returns through, one arm each: that site's `record_disconnected_unless_already_()` restored to the raw `record_state_transition_(fsm_state::Disconnected)` (the loop's TestRequest and Heartbeat tails after `store_then_emit`, `Session::send`'s F9 block, the Reject leaf's and each Logon-class write's failure tail) | the `WriteTimeout106.<Class>` cell whose cut returns through that site, and `GiveUp106.BehindBlockedSend` / `GiveUp106.RejectBlocked` for the F9 block and the Reject leaf: two `Disconnected` entries. A site no cell reaches is named unreachable in tasks.md |
+| M14 | `decide_give_up_()`'s `refused` branch records `Disconnected` and returns without the close | `GiveUp106.RejectBlocked_EndingBoundSpawnFails_ClosedAtG` |
+| M15 | `translate` maps `session_write_timeout` to `FIXPP_ERR_CANCELLED` | the error-map test of `tests/capi/error_surface_test.cpp` (the CSV row) |
+| M6a | the acceptor arm commits the advance at the classification (the base's `check_inbound`) | every `NextNumIn106.Acceptor_*` cell |
+| M6b | the initiator arm commits the advance at the classification | every `NextNumIn106.Initiator_*` cell |
 | M7 | `tls_handshake_timeout_ms` read and dropped (the base's default `Transport::Config`) | `TomlHandshake106.SessionKey`, `SecondSessionDiverges` |
 | M7′ | `EngineConfig::acceptor_tls_handshake_timeout` ignored (the literal back) | the C++ `EngineHandshake106` twin |
 | M7‴ | the host's copy of `EngineEstablishment::acceptor_tls_handshake_timeout` deleted | `EngineHandshake106.Acceptor_ClosesAtTheKey` |
 | M7″ | the factory's bound replaced by 60 s | `HandshakeBound106.DriveReconnect_OneAttempt` |
+| M7⁗ | `EngineEstablishment::acceptor_tls_handshake_timeout`'s default changed (0 ms, then 2500 ms); separately, `EngineConfig::acceptor_tls_handshake_timeout`'s | `TomlHandshake106.AcceptorKeyAbsent_Default1500` |
 
 A CMake mutant arm counts only when its reconfigure returned 0. Check the binary is fresh (`strings` for a
 mutant-specific literal) before believing a GREEN.
@@ -136,5 +146,6 @@ the author.
 - B&L:
   - `L-104-3` and `L-104-8` moved to the closed file;
   - `L-105-f` narrowed;
+  - `L-093-12` amended (the liveness loop's store call among those that hold the joins; research D8);
   - `B-099-2` and `B-105-3` amended, after the census of research D8, whose known positive is `B-099-2`'s line;
   - `B-106-*` and `L-106-*` added in the LIVE file, section `## 106`.

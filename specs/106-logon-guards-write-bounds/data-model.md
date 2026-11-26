@@ -67,7 +67,7 @@ executor at the spawn.
 - Either branch returns to the re-test. The deadline is the earlier of G (E-4), when `emit_in_flight_`, and
   `write_started_at_` + `write_timeout_ms`, when `write_in_flight_` and the limit is on.
 
-**Respawn after a failed drain (Gate A loop 2 round 1, N-6).** A drain can fail after the bound left on the drain term: the caller's cancellation at a step-3 suspension (`dispatch_aborted`) leaves the old connection in LogonSent with its Logon-arm write still blocked. No later arming can follow (later writes queue at `write_gate_` and the liveness loop starts only at Active). So `drive_reconnect`, at its failed-drain return and after clearing `reconnect_drain_in_flight_`, spawns the bound again when `conn_gen_` has not moved, `closing_or_stopped_()` does not hold, and `write_in_flight_` or `emit_in_flight_` holds. The new bound re-arms on the in-flight write's own `write_started_at_`; a refused spawn fails closed as C-4's spawn failure. This is the one exception to "at most once per connection": at most one bound runs at a time.
+**Respawn after a failed drain (Gate A loop 2 round 1, N-6).** A drain can fail after the bound left on the drain term: the caller's cancellation at a step-3 suspension (`dispatch_aborted`) leaves the old connection in LogonSent with its Logon-arm write still blocked. No later arming can follow (later writes queue at `write_gate_` and the liveness loop starts only at Active). So `drive_reconnect`, at its failed-drain return and after clearing `reconnect_drain_in_flight_`, spawns the bound again when `conn_gen_` has not moved, `closing_or_stopped_()` does not hold, `write_in_flight_` or `emit_in_flight_` holds, and `connection_bound_.running` is false (Gate A loop 2 round 2, N-5: on one strand the old bound's exit runs during step 3's park, so the term is defensive and has no cell; it states the invariant rather than inferring it from that order). The new bound re-arms on the in-flight write's own `write_started_at_`; a refused spawn fails closed as C-4's spawn failure. This is the one exception to "at most once per connection": at most one bound runs at a time.
 
 **Wakers:** the loop's guard (both edges); a live write's start, unless the bound is already armed on an earlier
 write's deadline; `close()` and
@@ -89,7 +89,7 @@ end, what it waits on, and the exit term only it sets. Re-derive: `git grep -n '
 |---|---|---|---|
 | any | `gen` changed, `Disconnected`, `closing_or_stopped_()`, `reconnect_drain_in_flight_`, or `ending_claim_` taken | exit | none |
 | waiting | a wake or the deadline, nothing due | waiting | recompute the deadline and wait again |
-| waiting | `emit_in_flight_`, `liveness_may_originate_()`, the clock ≥ G | exit | `decide_give_up_()` (E-10's claim first; refused → nothing); the loop finds the claim when its emit returns |
+| waiting | `emit_in_flight_`, `liveness_may_originate_()`, the clock ≥ G | exit | `decide_give_up_()` (E-10's claim first; the claim refused → nothing; 105's ending bound refused → `decide_give_up_()` closes at once, below); the loop finds the claim when its emit returns |
 | waiting | `write_in_flight_`, the same epoch, the clock ≥ start + limit | exit | E-5's expiry (E-10's claim first; refused → nothing) |
 | waiting | the wait threw, or a deadline arm completed before its instant | exit | with the claim taken, nothing: no close, no record (the claimant owns the ending, R10); with it free, claim, `Disconnected`, close once (E-5 step 5's form); no record, no Logout |
 
@@ -99,8 +99,13 @@ the more informative ending, and 105's limit still cuts it); the write row then 
 
 `decide_give_up_()` is one function for the loop's give-up block and the bound. It takes the claim, writes the slot-74
 record, takes the Logout owner and calls `enter_ending_write_(r1)`. The write half stays in the loop: the replay-gate
-wait, the shared hold, `inbound_logout_leaf_` and the `Disconnected` record. A spawn that fails fails closed, as
-105's clarification D-g (research D3).
+wait, the shared hold, `inbound_logout_leaf_` and the `Disconnected` record. When `enter_ending_write_` returns `refused` (105's ending bound cannot be spawned, clarification D-g), `decide_give_up_()` itself fails closed: it records `Disconnected` (unless already), then, when `state_ == lifecycle::open`, `spawn_connection_close_(live_transport_shared_())` and `connection_end_owed_.reset()` (research D3, "One close"), and returns. It does not leave the close to the loop's exit, as the base's give-up block does: when the bound decides, the loop is suspended in its emit and reaches its exit only after that emit returns, which on a blocked write needs the close. The loop, on its emit's return with the claim `give_up` and no ending phase entered, writes no Logout and returns. When the loop itself decides, the same function closes at the decision, so its exit finds `connection_end_owed_` reset and closes nothing (`LivenessTiming105.GiveUp_BoundSpawnFails_StillEof`, a guard). When `enter_ending_write_` returns `unlimited` (`logout_disconnect_timeout_ms` 0 or no clock), no close comes (`L-105-f`; `GiveUp106.ZeroLogoutTimeout_StaysOpen`). The connection bound's own spawn and wait failures are research D3's.
+
+What ends the loop's emit after each give-up step, per root cause #1 of Gate A loop 2 round 2:
+- the decision (claim, slot 74, owner, `enter_ending_write_(r1)`) runs in the decider, the bound or the loop;
+- the Logout write and the `Disconnected` record run in the loop after its emit returns; a blocked write is ended by 105's cut at G + B;
+- when 105's ending bound cannot be spawned, the close runs inside `decide_give_up_()` at G, which fails the blocked write;
+- an emit still inside its `MessageStore::store` call is ended by nothing 106 adds: it returns when the store returns (research D3, "The ending"; `L-093-12`, amended).
 
 **The held cap with none pending.** The loop's replay-gate wait, today `replay_gate_.wait_for_wake()` alone when
 `pending_test_req_id_` is empty, becomes the same `wait_for_wake() || await_deadline(held_test_request_cap(...))` that
@@ -116,7 +121,7 @@ T = `test_request_threshold` (default 1.2 × HeartBtInt), and L = `last_inbound_
 |---|---|---|---|
 | 1. a TestRequest pending and written | max(L + 2T, `tr_written_at` + T) + 1 ns | the loop (unchanged, 105) | `TestRequest unanswered, TestReqID <id>` |
 | 2. a TestRequest issued, its store and write not returned | L + 3T + 1 ns | the connection bound (new) | the same, naming the issued TestReqID |
-| 3. a Heartbeat emit not returned (answerable, so no unanswered TestRequest) | L + 3T + 1 ns | the connection bound (new) | `TestRequest unanswered`, no TestReqID clause (Q2) |
+| 3. a Heartbeat emit not returned (answerable: none pending, or a frame since the pending one) | L + 3T + 1 ns | the connection bound (new) | names the pending TestReqID when one is pending; otherwise `TestRequest unanswered` with no TestReqID clause (Q2) |
 | 4. a TestRequest due and held behind a resend answer, one pending | L + 3T + 1 ns | the loop (unchanged, 105's cap) | names the pending one |
 | 5. the same with none pending | L + 3T + 1 ns | the loop (new: the cap without the pending term) | `TestRequest unanswered`, no TestReqID clause (Q2) |
 
