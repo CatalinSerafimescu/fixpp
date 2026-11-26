@@ -340,7 +340,8 @@ ReconnectReading drive_one_attempt(std::chrono::milliseconds bound,
     auto const ex = fixpp::test_support::session_executor_of(*s.session, s.ioc);
     auto opened = asio::co_spawn(ex, s.session->open(), asio::use_future);
     if (!fixpp::test_support::pump_until(
-            s.ioc, [&] { return rg::Scene::ready(opened); }, 5s, 5ms, "open") ||
+            s.ioc, [&] { return rg::Scene::ready(opened); }, 5s, 5ms,
+            "Handshake106::drive_one_attempt/open") ||
         !opened.get().has_value()) {
         return out;
     }
@@ -365,7 +366,8 @@ ReconnectReading drive_one_attempt(std::chrono::milliseconds bound,
     auto closed = asio::co_spawn(sx, s.session->close(fixpp::session::close_mode::terminal),
                                  asio::use_future);
     (void)fixpp::test_support::pump_until(
-        s.ioc, [&] { return rg::Scene::ready(closed); }, 10s, 5ms, "close");
+        s.ioc, [&] { return rg::Scene::ready(closed); }, 10s, 5ms,
+        "Handshake106::drive_one_attempt/close");
     return out;
 }
 

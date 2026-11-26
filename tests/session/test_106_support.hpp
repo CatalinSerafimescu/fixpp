@@ -316,6 +316,10 @@ public:
     }
     // The mock clock stepped to t, then every handler that became ready run.
     void at(steady_time_point t) {
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND D. The sleepers a cell waits on here are
+        // armed to instants computed from stored anchors, never from the clock's reading when they
+        // arm, and mock_clock::sleep_until fires at once for a deadline already passed, so a sleep
+        // armed after this step completes in the drain() below.
         d.s.mock->step_to(t);
         d.s.drain();
     }

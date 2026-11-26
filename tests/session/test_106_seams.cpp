@@ -623,6 +623,12 @@ struct Staged {
     bool active = true;
 };
 
+// MsgType(35) values a pump's predicate waits on, named so that a pump_until call holds no
+// string literal that ci/pump-label-uniqueness.sh's site-label reader could take for its label.
+constexpr std::string_view kTestRequest = "1";
+constexpr std::string_view kLogout = "5";
+constexpr std::string_view kNewOrderSingle = "D";
+
 [[nodiscard]] bool parked_on(Rig& r, std::string_view type) {
     if (!r.d.parked() || r.d.bw->recorded.empty()) return false;
     return fixpp::test_support::extract_tag(r.d.bw->recorded.back().bytes, 35) == type;
@@ -709,7 +715,7 @@ Staged stage(Rig& r, wclass c) {
             r.d.hold_next_write();
             st.type = "D";
             st.cut.emplace(r.spawn_send("W106A"));
-            held = sc.pump_until([&] { return parked_on(r, "D"); });
+            held = sc.pump_until([&] { return parked_on(r, kNewOrderSingle); });
             break;
         case wclass::heartbeat:
             r.hold_write_of("0");
@@ -893,7 +899,8 @@ TEST_P(WriteLimit106, QueuedWrite_CountsFromItsOwnStart) {
     ASSERT_TRUE(r.d.to_active()) << "setup";
     r.d.hold_next_write();
     auto a = r.spawn_send("W106A");
-    ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, "D"); })) << "setup: A not held";
+    ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, kNewOrderSingle); }))
+        << "setup: A not held";
     auto const s_a = r.now();
     auto b = r.spawn_send("W106B");
     r.d.s.drain();
@@ -967,7 +974,7 @@ TEST_P(WriteLimit106, CloseLogout_KeepsGrace) {
     ASSERT_TRUE(r.d.to_active()) << "setup";
     r.hold_write_of("5");
     auto closing = r.spawn(r.session().close(fixpp::session::close_mode::graceful));
-    ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, "5"); }, 2s))
+    ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, kLogout); }, 2s))
         << "setup: close()'s Logout not held";
     auto const s = r.now();
     r.at(s + std::chrono::milliseconds{kW} + 1ms);
@@ -1018,7 +1025,8 @@ TEST_P(WriteLimit106, LivenessOff_BoundKeepsTimingWrites) {
     ASSERT_TRUE(r.d.to_active()) << "setup";
     r.d.hold_next_write();
     auto cut = r.spawn_send("W106L");
-    ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, "D"); })) << "setup: send not held";
+    ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, kNewOrderSingle); }))
+        << "setup: send not held";
     auto const s = r.now();
     r.at(s + std::chrono::milliseconds{kW} - ns{1});
     EXPECT_FALSE(r.d.closed()) << "closed before S + W";
@@ -1081,7 +1089,8 @@ TEST_P(WriteLimit106, ConnectionBound_Teardown_ConnectionEnd_Timing) {
     ASSERT_TRUE(r.d.to_active()) << "setup";
     r.d.hold_next_write();
     auto held = r.spawn_send("W106T");
-    ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, "D"); })) << "setup: send not held";
+    ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, kNewOrderSingle); }))
+        << "setup: send not held";
     ASSERT_EQ(session_test_access::connection_bound_count(r.session()), 1) << "setup: no bound";
     r.at(r.now() + 100ms);
     // The edge with no write before it: the reply Logout's toAdmin throws, which records
@@ -1176,7 +1185,7 @@ void expect_logout_keeps_its_limit(logout_site site) {
                 break;
         }
     }
-    ASSERT_TRUE(sc.pump_until([&] { return parked_on(r, "5"); }))
+    ASSERT_TRUE(sc.pump_until([&] { return parked_on(r, kLogout); }))
         << site_name(site) << ": setup: the Logout was not held";
     auto const s = r.now();
     r.at(s + std::chrono::milliseconds{kW});
@@ -1247,7 +1256,7 @@ public:
     [[nodiscard]] std::optional<std::future<expected_void>> hold_send(std::string_view id) {
         r.d.hold_next_write();
         auto f = r.spawn_send(id);
-        if (!r.d.s.pump_until([&] { return parked_on(r, "D"); })) return std::nullopt;
+        if (!r.d.s.pump_until([&] { return parked_on(r, kNewOrderSingle); })) return std::nullopt;
         return f;
     }
 };
@@ -1405,7 +1414,8 @@ TEST_P(OneEnding106, BothDueAtOneWake) {
     r.at(g - w);
     gate->hold_when = nullptr;
     gate->release_all();
-    ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, "1"); })) << "setup: TestRequest write";
+    ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, kTestRequest); }))
+        << "setup: TestRequest write";
     r.at(g - 1ms);
     ASSERT_EQ(r.records(), 0U) << "setup: a give-up record before G";
     r.at(g);
@@ -1681,7 +1691,7 @@ TEST_P(WriteLimit106, ShippingClock106_DirectDriver_BoundBesideLiveness_TestRequ
     int n = 0;
     while (!tr_seen && std::chrono::steady_clock::now() - logon_at < 2 * t) {
         sends.push_back(send_on_session("W106S" + std::to_string(++n)));
-        (void)sc.pump_until([&] { return r.d.completed("1") > 0; }, 300ms);
+        (void)sc.pump_until([&] { return r.d.completed(kTestRequest) > 0; }, 300ms);
         if (r.d.completed("1") > 0) tr_seen = std::chrono::steady_clock::now();
     }
     ASSERT_TRUE(tr_seen.has_value()) << "no TestRequest by 2T";
@@ -1695,7 +1705,8 @@ TEST_P(WriteLimit106, ShippingClock106_DirectDriver_BoundBesideLiveness_TestRequ
     // after the park follows S.
     auto const before_s = std::chrono::steady_clock::now();
     auto cut = send_on_session("W106SCUT");
-    ASSERT_TRUE(sc.pump_until([&] { return parked_on(r, "D"); }, 1s)) << "the send not held";
+    ASSERT_TRUE(sc.pump_until([&] { return parked_on(r, kNewOrderSingle); }, 1s))
+        << "the send not held";
     auto const after_s = std::chrono::steady_clock::now();
     EXPECT_TRUE(sc.pump_until([&] { return r.d.closed(); }, 200ms + 1s))
         << "not cut within W + 1 s";
