@@ -464,7 +464,8 @@ using fixpp::session::detail::read_first_frame_bounded;
 //   establishment deadline → note_establishment_timeout, close session terminal,
 //                           stop pump (093, C-4). 105 (research D4; data-model E-5): the
 //                           timeout's event and record only when the session has not
-//                           recorded its own ending; the close either way.
+//                           recorded its own ending; the close either way. 106 D11
+//                           and R22 replace that test (expire; claim-ok: a clarification id).
 //   connection-end latch   → 105 D1 (research D1 item 2), superseding the rule that a
 //                           frame's Disconnected leaves the transport open: after every
 //                           on_inbound_frame return the latch is tested and cleared
@@ -547,9 +548,9 @@ asio::awaitable<void> run_read_pump(
         // 105 (research D4; data-model E-5): unless the session has recorded its own ending.
         // 106 D11 supersedes 105's no-ending-recorded test: the claim decides (data-model E-10;
         // the Disconnected edge takes a free claim, so a session that ended itself refuses).
-        // 106 R22 (spec.md Clarifications): a claim refused because close(), Engine::stop() or
-        // a reconnect drain owns the ending still records, since those write no reason record;
-        // a claim held by another decider records nothing.
+        // 106 R22 (spec.md Clarifications; claim-ok: a clarification id): a claim refused
+        // because close(), Engine::stop() or a reconnect drain owns the ending still records,
+        // since those write no reason record; a claim held by another decider records nothing.
         if (session_engine_access::claim_ending(session) ||
             session_engine_access::ending_owned_without_record(session)) {
             session_engine_access::note_establishment_timeout(session);

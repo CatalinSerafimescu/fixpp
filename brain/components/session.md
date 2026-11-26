@@ -1012,7 +1012,7 @@ in `src/session/engine.cpp`. Leads to verify against that source.
   Logouts, the establishment deadline, `close()`, `Engine::stop()` and the bound's failure exits take one claim; a later
   decider records nothing and adds no `Disconnected` entry (R21, 106 spec.md Clarifications): a lost claim suppresses only the
   loser's reason record and its `Disconnected` entry, never a protocol reply the base sends (the confirming Logout of
-  `B-103-15`) or a close the base performs. Not taken (research D11, "Alternatives rejected"): per-decider predicates
+  `B-103-15`) or a close the base performs. The one exception (R22, 106 spec.md Clarifications): `close()`, `Engine::stop()` and a reconnect drain hold the ending but write no reason record, so when the establishment deadline expires while one of them holds it, the deadline's event and log record are that ending's one reason record, and the deadline closes the connection at once; when another decider holds the claim, the deadline records nothing. Not taken (research D11, "Alternatives rejected"): per-decider predicates
   (a watchdog deadline inside the give-up's budget wrote a second reason); "the first to close records the reason"
   (ruling D-e records at the decision); `close()` as a recording claimant (a log record on every close); a refused
   expiry that still closes (it would fail the claimant's Logout queued behind the write, so `write_timeout_ms` would

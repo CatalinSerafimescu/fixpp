@@ -108,7 +108,8 @@ marked **(orchestrator)** is run or requested by the orchestrator; every other t
 - **FR-017 assertions** (contract C-4.6, INV-106-2). Wherever a task says "FR-017": exactly one new `Disconnected`
   entry in `fsm_visit_history()`, `onLogout` at most once (once from Active, none before Active), one close, and the
   reason records FR-017 names (one for the give-up, the write limit or the establishment deadline; none for an ending
-  Logout, `close()`, `Engine::stop()`, a reconnect drain or a bound failure exit).
+  Logout, `close()`, `Engine::stop()`, a reconnect drain or a bound failure exit; and one for the establishment deadline
+  that expires while `close()`, `Engine::stop()` or a reconnect drain holds the ending, R22).
 - **Selection.** At the head `ctest --preset <p> -L 106 --no-tests=error --output-on-failure` (it takes in the seam
   entry), then `-L 105`, `-L 104`, `-L 099` as the task names; one cell by the binary's
   `--gtest_filter='*<Suite>.<Cell>*'`. Every run records its reported test count; 0 fails the step. Never

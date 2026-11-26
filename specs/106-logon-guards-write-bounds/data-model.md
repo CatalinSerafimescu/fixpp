@@ -217,6 +217,7 @@ member functions only.
 | `ending_claim_` | `enum class ending_claim : std::uint8_t { none, give_up, write_timeout, ending_logout, establishment_timeout, internal }` | strand-confined; reset to `none` in `begin_connection_()`; the `Disconnected` edge sets `internal` when it is `none` |
 | `claim_ending_(ending_claim who) noexcept` | private, synchronous | refuses when the claim is taken, `closing_or_stopped_()` holds or `reconnect_drain_in_flight_` holds; otherwise sets the claim and returns true. Taken once, at the decision: `run_logout_phase1` and `inbound_logout_leaf_` for kind `r1` write under their decider's claim and neither take nor test it. A refusal stops only the loser's reason record and its `Disconnected` entry, never a protocol reply the base sends or a close the base performs (spec.md R21): `inbound_logout_leaf_` writes the reply to the peer's Logout (kind `reply`) whatever the outcome, and a Logout fixpp starts (kind `r2`) not at all |
 | `session_engine_access::claim_ending` | test and Engine access | the pump's establishment expiry claims before `note_establishment_timeout` |
+| `session_engine_access::ending_owned_without_record` | Engine access | R22 (spec.md Clarifications): true when the claim is free and `claim_ending_` refuses it only on `closing_or_stopped_()` or `reconnect_drain_in_flight_`; the pump's establishment expiry then still calls `note_establishment_timeout` |
 
 Invariant **INV-106-2** (FR-017, restated with the same claimants): per connection, exactly one `Disconnected` entry and
 at most one `onLogout`; exactly one reason record when the claimant is a recording decider (D11's table, rows 1, 2 and
@@ -224,4 +225,4 @@ at most one `onLogout`; exactly one reason record when the claimant is a recordi
 `close()`, `Engine::stop()`, a reconnect drain, a bound failure exit). Every `Disconnected` write that
 a claimed ending's cut return or close reaches goes through `record_disconnected_unless_already_()` (research D11's
 census). Refined by R21 (spec.md Clarifications): a lost claim suppresses only the loser's reason record and its `Disconnected`
-entry, never a protocol reply the base sends or a close the base performs.
+entry, never a protocol reply the base sends or a close the base performs. The one exception (R22, spec.md Clarifications): `close()`, `Engine::stop()` and a reconnect drain hold the ending but write no reason record, so when the establishment deadline expires while one of them holds it, the deadline's event and log record are that ending's one reason record, and the deadline closes the connection at once; when another decider holds the claim, the deadline records nothing.
