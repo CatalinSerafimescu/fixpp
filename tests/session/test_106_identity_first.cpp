@@ -105,6 +105,8 @@ struct Spec {
     bool at_one = false;  // the frame at MsgSeqNum 1 rather than at the session's next number
     bool next_expected = false;  // enable_next_expected_msg_seq_num
     std::string extra{};  // when set, the frame is t99::logon_frame with these fields, not `input`
+    std::string sender{};  // when set, the frame's SenderCompID(49) in place of the peer's
+    std::string target{};  // when set, the frame's TargetCompID(56) in place of the session's
 };
 
 // What the session and its store hold, read between frames.
@@ -201,7 +203,10 @@ public:
     }
 
     void feed(std::string const& input_id) {
-        rig->feed(t99::input(input_id).make(rig->peer_ctx(frame_seq())), &err);
+        auto ctx = rig->peer_ctx(frame_seq());
+        if (!spec.sender.empty()) ctx.snd = spec.sender;
+        if (!spec.target.empty()) ctx.tgt = spec.target;
+        rig->feed(t99::input(input_id).make(ctx), &err);
     }
     void feed() {
         if (!spec.extra.empty()) {
@@ -400,6 +405,22 @@ TEST(IdentityFirst106, ValidateFirst_UnreadableCredentials_AdmittedMtls) {
     auto s = unreadable();
     s.profile = Kind::mtls_ca;
     s.peer = Peer::on_list;
+    unreadable_with_validator(std::move(s));
+}
+
+// The same rule on a CompID mismatch (contract C-1.4; B-106-1 names the CompID mismatch): the
+// frame's SenderCompID(49), or its TargetCompID(56), is not the one the session expects, so
+// interpret_logon refuses it, and its absent 1137 draws the validate-first Reject the base writes
+// (L-104-3). The refusal takes the same arm as the BeginString cells above, so these are width
+// cells, not new discriminators.
+TEST(IdentityFirst106, ValidateFirst_CompIdMismatch_WithValidator_Silent) {
+    auto s = validate_first();
+    s.sender = "WRONG-106";
+    unreadable_with_validator(std::move(s));
+}
+TEST(IdentityFirst106, ValidateFirst_TargetCompIdMismatch_WithValidator_Silent) {
+    auto s = validate_first();
+    s.target = "WRONG-106";
     unreadable_with_validator(std::move(s));
 }
 
