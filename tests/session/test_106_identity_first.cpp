@@ -575,11 +575,6 @@ TEST(IdentityFirst106, Admitted_UnreadableNoValidator_ValidateFirstReject) {
 
 namespace {
 
-[[nodiscard]] std::size_t count_state(fixpp::session::Session const& s, fsm_state st) {
-    auto const history = s.fsm_visit_history();
-    return static_cast<std::size_t>(std::count(history.begin(), history.end(), st));
-}
-
 void expect_kept(Cell& c, Reading const& before, seqnum_t classified) {
     auto const after = c.read();
     EXPECT_EQ(after.mgr.in, classified) << "NextNumIn in memory";
@@ -785,5 +780,5 @@ TEST(NextNumIn106, Initiator_789Below_Superseded) {
     EXPECT_EQ(after.mgr.in, classified) << "NextNumIn in memory";
     ASSERT_TRUE(before.store.has_value() && after.store.has_value()) << "the store was not read";
     EXPECT_EQ(after.store->in, before.store->in) << "NextNumIn in the store";
-    EXPECT_EQ(count_state(*c.rig->sess, fsm_state::Active), 0U) << "Active entries";
+    EXPECT_EQ(t106::count_state(*c.rig->sess, fsm_state::Active), 0U) << "Active entries";
 }

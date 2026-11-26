@@ -10,9 +10,11 @@
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
 #include <fixpp/log/sink.hpp>
+#include <future>
 #include <memory>
 #include <memory_resource>
 #include <mutex>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -55,6 +57,22 @@ struct LogCapture {
     // before the call is then counted.
     [[nodiscard]] std::vector<fixpp::log::Record> records_of(std::uint32_t format_id) {
         (void)logger->shutdown();
+        std::vector<fixpp::log::Record> out;
+        for (auto const& r : sink->records()) {
+            if (r.format_id == format_id) out.push_back(r);
+        }
+        return out;
+    }
+
+    // The records of one format the logger has emitted so far, read after a flush rather than a
+    // shutdown, so the capture keeps recording and a later read sees later records. Empty when
+    // the flush does not complete inside `budget`; the caller reports that.
+    [[nodiscard]] std::optional<std::vector<fixpp::log::Record>> flushed_records_of(
+        std::uint32_t format_id, std::chrono::milliseconds budget = std::chrono::seconds{10}) {
+        auto done = std::make_shared<std::promise<void>>();
+        auto fut = done->get_future();
+        logger->async_flush([done] { done->set_value(); });
+        if (fut.wait_for(budget) != std::future_status::ready) return std::nullopt;
         std::vector<fixpp::log::Record> out;
         for (auto const& r : sink->records()) {
             if (r.format_id == format_id) out.push_back(r);

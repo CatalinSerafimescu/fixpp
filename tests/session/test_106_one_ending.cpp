@@ -42,11 +42,11 @@ TEST_P(OneEnding106, GiveUpThenClose) {
     ASSERT_TRUE(r.d.to_active()) << "setup";
     auto const t0 = r.now();
     r.d.hold_write_of("1");
-    r.at(t106::saturating_add(t0, r.p.threshold));
+    r.at(t106::saturating_add(t0, r.threshold()));
     ASSERT_TRUE(r.d.parked() && r.d.started("1") == 1U) << "setup: the TestRequest is not held";
     auto const disconnected_before = r.disconnected();
     auto const logouts_before = r.d.app->logouts;
-    auto const g = t106::give_up_instant_emit_not_returned(r.last_inbound(), r.p.threshold);
+    auto const g = t106::give_up_instant_emit_not_returned(r.last_inbound(), r.threshold());
     r.at(g);
     EXPECT_EQ(r.records(), 1U) << "no give-up record at G";
     r.at(g + 100ms);
@@ -82,10 +82,10 @@ TEST_P(OneEnding106, CloseDuringGiveUpBlock_NoRecord) {
     t106::GiveUpRig r{GetParam(), p};
     ASSERT_TRUE(r.d.to_active()) << "setup";
     auto const l = r.last_inbound();
-    r.at(t106::saturating_add(l, r.p.threshold));
+    r.at(t106::saturating_add(l, r.threshold()));
     ASSERT_EQ(r.completed_since("1", 0), 1U) << "setup: the TestRequest was not written at L + T";
     auto const g =
-        t106::give_up_instant_written(l, r.p.threshold, t106::saturating_add(l, r.p.threshold));
+        t106::give_up_instant_written(l, r.threshold(), t106::saturating_add(l, r.threshold()));
     auto const c = g - 100ms;
     r.at(c);
     ASSERT_EQ(r.d.s.state(), fsm_state::Active) << "setup: the session ended before C";

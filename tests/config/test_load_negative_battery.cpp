@@ -35,11 +35,9 @@
 
 #include <algorithm>
 #include <asio/io_context.hpp>
-#include <atomic>
 #include <filesystem>
 #include <fixpp/config/load_diagnostic.hpp>
 #include <fixpp/config/toml_config_loader.hpp>
-#include <fstream>
 #include <set>
 #include <string>
 #include <string_view>
@@ -48,6 +46,7 @@
 
 // On Windows, route CRT abort()/assert() to stderr instead of a modal dialog so
 // the "...NoTerminate" gates below fail fast instead of hanging headless CI.
+#include "../support/toml_106_bundle.hpp"
 #include "../support/win_crt_no_dialog.hpp"
 
 #ifndef FIXPP_CONFIG_FIXTURE_DIR
@@ -1735,82 +1734,20 @@ TEST(LoadNegativeBattery, TestRequestThreshold_Negative_MalformedValue) {
 
 namespace {
 
-struct Toml106Parts {
-    std::string root;       // root keys, before the first table
-    std::string defaults;   // the [default] table's keys (no table when empty)
-    std::string session;    // extra [[session]] keys
-    std::string transport;  // extra [session.transport] keys
-};
+namespace toml106 = fixpp::test_support::toml106;
+using toml106::in_defaults;
+using toml106::in_root;
+using toml106::in_session;
+using toml106::in_transport;
 
-Toml106Parts in_root(std::string s) {
-    Toml106Parts p;
-    p.root = std::move(s);
-    return p;
-}
-Toml106Parts in_defaults(std::string s) {
-    Toml106Parts p;
-    p.defaults = std::move(s);
-    return p;
-}
-Toml106Parts in_session(std::string s) {
-    Toml106Parts p;
-    p.session = std::move(s);
-    return p;
-}
-Toml106Parts in_transport(std::string s) {
-    Toml106Parts p;
-    p.transport = std::move(s);
-    return p;
-}
-
-std::string toml_106(Toml106Parts const& p) {
-    std::string const dir =
-        std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}}.generic_string();
-    std::string t = p.root + "\n";
-    t += "[clock]\nkind = \"system\"\n\n[store]\nkind = \"memory\"\n\n";
-    t += "[cert_source]\nkind = \"file\"\ncert_file = '" + dir + "/leaf_ecdsa_p256.pem'\n";
-    t += "key_file = '" + dir + "/leaf_ecdsa_p256.key'\nca_file = '" + dir + "/ca.pem'\n\n";
-    t += "[dictionary]\nkind = \"path\"\npath = '" + dir + "/FIX44.xml'\n\n";
-    if (!p.defaults.empty()) t += "[default]\n" + p.defaults + "\n\n";
-    t += "[[session]]\nsender_comp_id = \"CLIENT1\"\ntarget_comp_id = \"SERVER1\"\n";
-    t += "begin_string = \"FIX.4.4\"\nrole = \"initiator\"\n" + p.session + "\n\n";
-    t += "[session.transport]\nkind = \"tls\"\nhost = \"fix.example.com\"\nport = 4321\n";
-    t += p.transport + "\n\n[session.security_profile]\nkind = \"mtls_ca\"\n";
-    return t;
-}
-
-// Loads the text through a temporary file, removed before return.
-fixpp::config::LoadResult load_text_106(std::string const& text) {
-    static std::atomic<unsigned> n{0};
-    auto const* info = ::testing::UnitTest::GetInstance()->current_test_info();
-    std::string const name = std::string{"fixpp_106_"} + (info ? info->name() : "cell") + "_" +
-                             std::to_string(n.fetch_add(1)) + ".toml";
-    auto const path = std::filesystem::temp_directory_path() / name;
-    {
-        std::ofstream out{path, std::ios::binary | std::ios::trunc};
-        out << text;
-    }
-    auto result = load(path);
-    std::error_code ec;
-    std::filesystem::remove(path, ec);
-    return result;
-}
-
-std::string seen_106(fixpp::config::LoadResult const& r) {
-    std::string seen;
-    if (r.has_value()) return " (the bundle loaded)";
-    for (auto const& d : r.error()) seen += " [" + d.key_path + ": " + d.message + "]";
-    return seen;
-}
-
-void expect_refusal_106(Toml106Parts const& parts, fixpp::config::reason_class rc,
+void expect_refusal_106(toml106::Parts const& parts, fixpp::config::reason_class rc,
                         std::string_view key_path, std::string_view value) {
-    auto const result = load_text_106(toml_106(parts));
+    auto const result = toml106::load_text(toml106::bundle(parts));
     EXPECT_FALSE(result.has_value()) << value << ": the bundle loaded";
     if (result.has_value()) return;
     EXPECT_TRUE(has_diag(result.error(), rc, key_path))
         << value << ": no diagnostic of the expected class on " << key_path << "; got"
-        << seen_106(result);
+        << toml106::seen(result);
 }
 
 // The values each OutOfRange / WrongType cell covers (contract C-4.7, C-5.1, C-5.2).

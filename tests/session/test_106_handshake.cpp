@@ -24,7 +24,6 @@
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -43,7 +42,6 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
-#include <fstream>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -55,6 +53,7 @@
 #include "session/test_106_support.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/session_executor_of.hpp"
+#include "support/toml_106_bundle.hpp"
 
 #ifndef FIXPP_CONFIG_FIXTURE_DIR
 #error "FIXPP_CONFIG_FIXTURE_DIR must be set by CMake"
@@ -68,6 +67,7 @@ using namespace std::chrono_literals;
 namespace {
 
 namespace t106 = fixpp::test_support::t106;
+namespace toml106 = fixpp::test_support::toml106;
 namespace rg = fixpp::test_support::resend_gap;
 using fixpp::core::error;
 
@@ -108,28 +108,9 @@ std::string hs_toml(std::vector<HsSession> const& sessions, std::string const& d
 
 // Loads `text» through a temporary file; the bundle's clock is bound to `ioc», which outlives it.
 fixpp::config::LoadResult load_hs(std::string const& text, asio::io_context& ioc) {
-    static std::atomic<unsigned> n{0};
-    auto const* info = ::testing::UnitTest::GetInstance()->current_test_info();
-    std::string const name = std::string{"fixpp_106_hs_"} + (info ? info->name() : "cell") + "_" +
-                             std::to_string(n.fetch_add(1)) + ".toml";
-    auto const path = std::filesystem::temp_directory_path() / name;
-    {
-        std::ofstream out{path, std::ios::binary | std::ios::trunc};
-        out << text;
-    }
     fixpp::config::LoadOptions opts;
     opts.engine_executor = ioc.get_executor();
-    auto result = fixpp::config::load_toml_config(path, opts);
-    std::error_code ec;
-    std::filesystem::remove(path, ec);
-    return result;
-}
-
-std::string seen(fixpp::config::LoadResult const& r) {
-    std::string s;
-    if (r.has_value()) return s;
-    for (auto const& d : r.error()) s += " [" + d.key_path + ": " + d.message + "]";
-    return s;
+    return toml106::load_text(text, opts);
 }
 
 // The factory a session's transports come from: its override, else the engine default.
@@ -238,7 +219,7 @@ TEST(TomlHandshake106, SessionKey) {
     auto const r = load_hs(
         hs_toml({{.sender = "CLIENT1", .target = "SERVER1", .transport_keys = key_line(kKey)}}, {}),
         ioc);
-    ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << seen(r);
+    ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << toml106::seen(r);
     ASSERT_EQ(r->sessions.size(), 1U);
     auto const f = factory_of(*r, 0);
     ASSERT_NE(f, nullptr) << "no TLS factory";
@@ -251,7 +232,7 @@ TEST(TomlHandshake106, SessionKeyAbsent_Pending) {
     asio::io_context ioc;
     auto const r = load_hs(
         hs_toml({{.sender = "CLIENT1", .target = "SERVER1", .transport_keys = {}}}, {}), ioc);
-    ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << seen(r);
+    ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << toml106::seen(r);
     ASSERT_EQ(r->sessions.size(), 1U);
     auto const f = factory_of(*r, 0);
     ASSERT_NE(f, nullptr) << "no TLS factory";
@@ -269,7 +250,7 @@ TEST(TomlHandshake106, SecondSessionDiverges) {
                  {.sender = "CLIENT2", .target = "SERVER2", .transport_keys = key_line(kKey)}},
                 {}),
         ioc);
-    ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << seen(r);
+    ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << toml106::seen(r);
     ASSERT_EQ(r->sessions.size(), 2U);
     EXPECT_NE(r->sessions[1].config.transport_factory_override, nullptr)
         << "session[1] got no factory of its own";
@@ -293,7 +274,7 @@ TEST(TomlHandshake106, DefaultTransport_MixedRoles_Accepted) {
                  {.sender = "CLIENT2", .target = "SERVER2", .transport_keys = {}}},
                 key_line(kKey)),
         ioc);
-    ASSERT_TRUE(r.has_value()) << "the mixed-role bundle did not load:" << seen(r);
+    ASSERT_TRUE(r.has_value()) << "the mixed-role bundle did not load:" << toml106::seen(r);
     ASSERT_EQ(r->sessions.size(), 2U);
     auto const f = factory_of(*r, 1);
     ASSERT_NE(f, nullptr) << "no TLS factory for the initiator";

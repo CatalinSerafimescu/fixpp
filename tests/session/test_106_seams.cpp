@@ -17,11 +17,9 @@
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <deque>
-#include <filesystem>
 #include <fixpp/config/config_bundle.hpp>
 #include <fixpp/config/load_diagnostic.hpp>
 #include <fixpp/config/toml_config_loader.hpp>
@@ -31,7 +29,6 @@
 #include <fixpp/session/memory_store.hpp>
 #include <fixpp/session/memory_store_factory.hpp>
 #include <fixpp/session/session_config.hpp>
-#include <fstream>
 #include <functional>
 #include <future>
 #include <memory>
@@ -53,6 +50,7 @@
 #include "support/seqnum_manager_test_access.hpp"
 #include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
+#include "support/toml_106_bundle.hpp"
 #include "support/validation_test_dictionary.hpp"
 
 #ifndef FIXPP_CONFIG_FIXTURE_DIR
@@ -67,70 +65,7 @@ using namespace std::chrono_literals;
 
 namespace {
 
-struct Toml106Parts {
-    std::string defaults;  // the [default] table's keys (no table when empty)
-    std::string session;   // extra [[session]] keys
-    std::string root;      // root (engine-scope) keys, ahead of every table
-};
-
-Toml106Parts in_defaults(std::string s) {
-    Toml106Parts p;
-    p.defaults = std::move(s);
-    return p;
-}
-Toml106Parts in_session(std::string s) {
-    Toml106Parts p;
-    p.session = std::move(s);
-    return p;
-}
-
-std::string toml_106(Toml106Parts const& p) {
-    std::string const dir =
-        std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}}.generic_string();
-    std::string t = p.root.empty() ? std::string{} : p.root + "\n\n";
-    t += "[clock]\nkind = \"system\"\n\n[store]\nkind = \"memory\"\n\n";
-    t += "[cert_source]\nkind = \"file\"\ncert_file = '" + dir + "/leaf_ecdsa_p256.pem'\n";
-    t += "key_file = '" + dir + "/leaf_ecdsa_p256.key'\nca_file = '" + dir + "/ca.pem'\n\n";
-    t += "[dictionary]\nkind = \"path\"\npath = '" + dir + "/FIX44.xml'\n\n";
-    if (!p.defaults.empty()) t += "[default]\n" + p.defaults + "\n\n";
-    t += "[[session]]\nsender_comp_id = \"CLIENT1\"\ntarget_comp_id = \"SERVER1\"\n";
-    t += "begin_string = \"FIX.4.4\"\nrole = \"initiator\"\n" + p.session + "\n\n";
-    t += "[session.transport]\nkind = \"tls\"\nhost = \"fix.example.com\"\nport = 4321\n\n";
-    t += "[session.security_profile]\nkind = \"mtls_ca\"\n";
-    return t;
-}
-
-// The bundle's clock is bound to `ex`'s context, which must outlive every use of the clock.
-fixpp::config::LoadResult load_text_106(std::string const& text, asio::any_io_executor const& ex) {
-    static std::atomic<unsigned> n{0};
-    auto const* info = ::testing::UnitTest::GetInstance()->current_test_info();
-    std::string const name = std::string{"fixpp_106_seam_"} + (info ? info->name() : "cell") + "_" +
-                             std::to_string(n.fetch_add(1)) + ".toml";
-    auto const path = std::filesystem::temp_directory_path() / name;
-    {
-        std::ofstream out{path, std::ios::binary | std::ios::trunc};
-        out << text;
-    }
-    fixpp::config::LoadOptions opts;
-    opts.engine_executor = ex;
-    auto result = fixpp::config::load_toml_config(path, opts);
-    std::error_code ec;
-    std::filesystem::remove(path, ec);
-    return result;
-}
-
-// A bundle whose clock no cell uses.
-fixpp::config::LoadResult load_text_106(std::string const& text) {
-    asio::io_context ctx;
-    return load_text_106(text, ctx.get_executor());
-}
-
-std::string seen_106(fixpp::config::LoadResult const& r) {
-    std::string seen;
-    if (r.has_value()) return {};
-    for (auto const& d : r.error()) seen += " [" + d.key_path + ": " + d.message + "]";
-    return seen;
-}
+namespace toml106 = fixpp::test_support::toml106;
 
 }  // namespace
 
@@ -139,15 +74,17 @@ std::string seen_106(fixpp::config::LoadResult const& r) {
 // from 0, so a mapper that drops the value, or reads one scope only, reads another number.
 TEST(TomlWriteTimeout106, Set) {
     {
-        auto const r = load_text_106(toml_106(in_session("write_timeout_ms = 300")));
-        ASSERT_TRUE(r.has_value()) << "the [[session]] bundle did not load:" << seen_106(r);
+        auto const r =
+            toml106::load_text(toml106::bundle(toml106::in_session("write_timeout_ms = 300")));
+        ASSERT_TRUE(r.has_value()) << "the [[session]] bundle did not load:" << toml106::seen(r);
         ASSERT_EQ(r->sessions.size(), 1U);
         EXPECT_EQ(r->sessions[0].config.write_timeout_ms, std::uint32_t{300})
             << "write_timeout_ms set in [[session]]";
     }
     {
-        auto const r = load_text_106(toml_106(in_defaults("write_timeout_ms = 4294967295")));
-        ASSERT_TRUE(r.has_value()) << "the [default] bundle did not load:" << seen_106(r);
+        auto const r = toml106::load_text(
+            toml106::bundle(toml106::in_defaults("write_timeout_ms = 4294967295")));
+        ASSERT_TRUE(r.has_value()) << "the [default] bundle did not load:" << toml106::seen(r);
         ASSERT_EQ(r->sessions.size(), 1U);
         EXPECT_EQ(r->sessions[0].config.write_timeout_ms, std::uint32_t{4294967295U})
             << "write_timeout_ms set in [default]";
@@ -157,8 +94,8 @@ TEST(TomlWriteTimeout106, Set) {
 // [seam: M11'] No key: the limit is off, in the loaded bundle and in a default SessionConfig.
 // Exact equality, not a window, so a changed default cannot pass inside one.
 TEST(TomlWriteTimeout106, KeyAbsent_Off) {
-    auto const r = load_text_106(toml_106({}));
-    ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << seen_106(r);
+    auto const r = toml106::load_text(toml106::bundle({}));
+    ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << toml106::seen(r);
     ASSERT_EQ(r->sessions.size(), 1U);
     EXPECT_EQ(r->sessions[0].config.write_timeout_ms, std::uint32_t{0}) << "the loaded bundle";
     EXPECT_EQ(fixpp::session::SessionConfig{}.write_timeout_ms, std::uint32_t{0})
@@ -170,8 +107,8 @@ TEST(TomlWriteTimeout106, KeyAbsent_Off) {
 // defaults. Exact equality, not a timing window, so a changed default cannot pass inside one
 // (a cell that reads the bound by timing accepts a window around it).
 TEST(TomlHandshake106, AcceptorKeyAbsent_Default1500) {
-    auto const r = load_text_106(toml_106({}));
-    ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << seen_106(r);
+    auto const r = toml106::load_text(toml106::bundle({}));
+    ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << toml106::seen(r);
     EXPECT_EQ(r->engine.acceptor_tls_handshake_timeout, 1500ms) << "the loaded bundle";
     fixpp::core::EngineConfig ec;
     ec.clock = r->engine.clock;
@@ -239,9 +176,11 @@ void expect_closed_in_window(AcceptorReading const& r, char const* cell) {
 }
 
 fixpp::config::LoadResult acceptor_key_bundle(std::string const& v, asio::io_context& ioc) {
-    Toml106Parts p;
+    toml106::Parts p;
     p.root = "acceptor_tls_handshake_timeout_ms = " + v;
-    return load_text_106(toml_106(p), ioc.get_executor());
+    fixpp::config::LoadOptions opts;
+    opts.engine_executor = ioc.get_executor();
+    return toml106::load_text(toml106::bundle(p), opts);
 }
 
 }  // namespace
@@ -252,7 +191,7 @@ fixpp::config::LoadResult acceptor_key_bundle(std::string const& v, asio::io_con
 TEST(EngineHandshake106, Acceptor_ClosesAtTheKey) {
     asio::io_context ioc;
     auto const r = acceptor_key_bundle("300", ioc);
-    ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << seen_106(r);
+    ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << toml106::seen(r);
     fixpp::core::EngineConfig ec;
     ec.clock = r->engine.clock;
     ec.acceptor_tls_handshake_timeout = r->engine.acceptor_tls_handshake_timeout;
@@ -265,7 +204,7 @@ TEST(EngineHandshake106, Acceptor_ClosesAtTheKey) {
 TEST(EngineHandshake106, Acceptor_LongKey_StillConnected) {
     asio::io_context ioc;
     auto const r = acceptor_key_bundle("60000", ioc);
-    ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << seen_106(r);
+    ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << toml106::seen(r);
     fixpp::core::EngineConfig ec;
     ec.clock = r->engine.clock;
     ec.acceptor_tls_handshake_timeout = r->engine.acceptor_tls_handshake_timeout;
@@ -522,39 +461,6 @@ using ns = std::chrono::nanoseconds;
 
 constexpr std::uint32_t kW = 300;
 
-// Counts onLogout; runs a hook from toAdmin with the frame's MsgType(35); optionally refuses one
-// administrative MsgType in fromAdmin (on_inbound_active_from_admin_failed_'s two-argument
-// Reject, SessionRejectReason 3) and every application message in fromApp (the
-// BusinessMessageReject).
-class App final : public rgs::GapApp {
-public:
-    int logouts = 0;
-    std::string refuse_admin_type;  // empty: fromAdmin accepts every administrative message
-    bool refuse_app = false;
-    std::function<void(std::string_view)> to_admin_hook;
-
-    void onLogout(const fixpp::session::SessionId& /*id*/) override { ++logouts; }
-    void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
-                 const fixpp::session::SessionId& id) override {
-        rgs::GapApp::toAdmin(msg, id);
-        if (to_admin_hook) to_admin_hook(msg.msg_type());
-    }
-    fixpp::core::expected_t<void> fromAdmin(
-        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
-        const fixpp::session::SessionId& /*id*/) override {
-        if (!refuse_admin_type.empty() && msg.msg_type() == refuse_admin_type) {
-            return std::unexpected(fixpp::core::error::app_do_not_send);
-        }
-        return {};
-    }
-    fixpp::core::expected_t<void> fromApp(
-        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
-        const fixpp::session::SessionId& id) override {
-        if (refuse_app) return std::unexpected(fixpp::core::error::app_do_not_send);
-        return rgs::GapApp::fromApp(msg, id);
-    }
-};
-
 struct Params {
     std::uint32_t write_ms = kW;
     std::chrono::seconds heartbeat{1};
@@ -562,76 +468,21 @@ struct Params {
     std::uint32_t logout_ms = 500;
 };
 
-class Rig {
+// t106::GiveUpRig with this section's defaults and SessionConfig::write_timeout_ms, which reaches
+// it through the tweak because the shared header names no symbol 106 adds.
+class Rig : public t106::GiveUpRig {
 public:
-    t106::LogCapture log;
-    std::shared_ptr<App> app = std::make_shared<App>();
-    t105::DirectRig d;
-
-    Rig(session_role role, Params p, std::function<void(SessionConfig&)> const& tweak = {})
-        : d{role, [this, p, &tweak](SessionConfig& c) {
-                c.heartbeat_interval = p.heartbeat;
-                if (p.threshold) c.test_request_threshold = *p.threshold;
-                c.logout_disconnect_timeout_ms = p.logout_ms;
-                c.write_timeout_ms = p.write_ms;
-                c.logger_override = log.logger;
-                if (tweak) tweak(c);
-            }} {
-        d.s.engine.application = app;
-        d.s.session = std::make_unique<fixpp::session::Session>(d.s.engine, d.s.cfg);
-    }
-    Rig(Rig const&) = delete;
-    Rig& operator=(Rig const&) = delete;
-    ~Rig() {
-        d.release();
-        d.s.drain();
-    }
-
-    fixpp::session::Session& session() { return *d.s.session; }
-    [[nodiscard]] t106::steady_time_point now() const { return d.s.mock->steady_now(); }
-    [[nodiscard]] t106::steady_time_point last_inbound() const {
-        return session_test_access::last_inbound_steady(*d.s.session);
-    }
-    void at(t106::steady_time_point t) {
-        d.s.mock->step_to(t);
-        d.s.drain();
-    }
-    // The write of the next frame of MsgType type is held: armed at its toAdmin.
-    void hold_write_of(std::string type) {
-        app->to_admin_hook = [b = d.bw.get(), t = std::move(type),
-                              armed = false](std::string_view m) mutable {
-            if (!armed && m == t) {
-                armed = true;
-                b->arm_block();
-            }
-        };
-    }
-    [[nodiscard]] std::size_t write_records() {
-        return t106::records_now(log, FIXPP_FORMAT_ID(t106::kWriteTimeoutRecordFormat));
-    }
-    [[nodiscard]] std::size_t give_up_records() { return t106::give_up_records_now(log); }
-    [[nodiscard]] std::size_t disconnected() const {
-        return t106::count_disconnected(*d.s.session);
-    }
-    // An application send, started and not awaited.
-    std::future<expected_void> spawn_send(std::string_view clordid) {
-        payloads_.push_back(
-            "35=D\x01"
-            "11=" +
-            std::string{clordid} + "\x01");
-        auto const& pl = payloads_.back();
-        return asio::co_spawn(fixpp::test_support::session_executor_of(*d.s.session, d.s.ioc),
-                              d.s.session->send(std::as_bytes(std::span{pl.data(), pl.size()})),
-                              asio::use_future);
-    }
-    template <class Awaitable>
-    std::future<expected_void> spawn(Awaitable a) {
-        return asio::co_spawn(fixpp::test_support::session_executor_of(*d.s.session, d.s.ioc),
-                              std::move(a), asio::use_future);
-    }
-
-private:
-    std::deque<std::string> payloads_;
+    Rig(session_role role, Params p, std::function<void(SessionConfig&)> const& tweak = {},
+        std::function<void(rgs::Scene&)> const& shape_scene = {})
+        : t106::GiveUpRig{
+              role,
+              t106::GiveUpParams{
+                  .heartbeat = p.heartbeat, .threshold = p.threshold, .logout_ms = p.logout_ms},
+              [&tweak, w = p.write_ms](SessionConfig& c) {
+                  c.write_timeout_ms = w;
+                  if (tweak) tweak(c);
+              },
+              shape_scene} {}
 };
 
 enum class wclass : std::uint8_t {
@@ -913,7 +764,7 @@ void expect_cut_at_s_plus_w(session_role role, wclass c) {
         << class_name(c) << ": new Disconnected entries";
     EXPECT_EQ(r.app->logouts - logouts_before, st.active ? 1 : 0)
         << class_name(c) << ": onLogout calls";
-    EXPECT_EQ(r.give_up_records(), 0U) << class_name(c) << ": give-up records";
+    EXPECT_EQ(r.records(), 0U) << class_name(c) << ": give-up records";
     EXPECT_EQ(r.write_records(), 1U) << class_name(c) << ": write-timeout records";
 }
 
@@ -1085,7 +936,7 @@ TEST_P(WriteLimit106, EndingLogout_Keeps105Limit) {
     r.at(s + 500ms);
     EXPECT_TRUE(r.d.closed()) << "not closed at S + B";
     EXPECT_EQ(r.write_records(), 0U) << "write-timeout records";
-    EXPECT_EQ(r.give_up_records(), 1U) << "give-up records";
+    EXPECT_EQ(r.records(), 1U) << "give-up records";
 }
 
 // Orchestrator ruling D (proposed name): with the liveness loop off (HeartBtInt 0) the loop leaves
@@ -1151,7 +1002,7 @@ TEST_P(WriteLimit106, ConnectionBound_SpawnFails_AtWrite) {
     EXPECT_TRUE(r.d.closed()) << "the transport is open";
     EXPECT_EQ(r.d.bw->closes, 1U) << "closes";
     EXPECT_EQ(r.write_records(), 0U) << "write-timeout records";
-    EXPECT_EQ(r.give_up_records(), 0U) << "give-up records";
+    EXPECT_EQ(r.records(), 0U) << "give-up records";
 }
 
 // T106 (research D9 row C-4, data-model E-3's joiner row "the Disconnected edge"): the bound armed
@@ -1322,7 +1173,7 @@ public:
         return {.disconnected = r.disconnected() - disconnected_before,
                 .logouts = r.app->logouts - logouts_before,
                 .closed = r.d.closed(),
-                .give_up = r.give_up_records(),
+                .give_up = r.records(),
                 .write_timeout = r.write_records()};
     }
     // A send held from now (S).
@@ -1359,7 +1210,7 @@ TEST_P(OneEnding106, GiveUpThenWatchdog) {
     auto held = p.hold_send("W106P");
     ASSERT_TRUE(held) << "setup: the send was not held";
     p.r.at(g);
-    EXPECT_EQ(p.r.give_up_records(), 1U) << "no give-up record at G";
+    EXPECT_EQ(p.r.records(), 1U) << "no give-up record at G";
     p.r.at(g + 200ms);
     EXPECT_EQ(p.r.write_records(), 0U) << "a write-timeout record at S + W";
     p.r.at(g + 500ms);
@@ -1460,7 +1311,8 @@ TEST_P(OneEnding106, CloseThenWatchdog) {
 // its store call until S = G − W, then its write held, so the bound is armed on both G = L + 3T + 1
 // ns and S + W = G; one step_to from G − 1 ms to G (the Instants rule's one exception): the give-up
 // row is evaluated first and claims, and its action is the bound's exit, so the write row is not
-// evaluated at that re-test (spec.md R18; the arm is the rows' order swapped).
+// evaluated at that re-test (the arm is the rows' order swapped; spec.md's clarification
+// R18, claim-ok: a clarification id).
 TEST_P(OneEnding106, BothDueAtOneWake) {
     auto gate = std::make_shared<t105::gate_store_state>();
     Rig r{GetParam(),
@@ -1488,9 +1340,9 @@ TEST_P(OneEnding106, BothDueAtOneWake) {
     gate->release_all();
     ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, "1"); })) << "setup: TestRequest write";
     r.at(g - 1ms);
-    ASSERT_EQ(r.give_up_records(), 0U) << "setup: a give-up record before G";
+    ASSERT_EQ(r.records(), 0U) << "setup: a give-up record before G";
     r.at(g);
-    EXPECT_EQ(r.give_up_records(), 1U) << "give-up records";
+    EXPECT_EQ(r.records(), 1U) << "give-up records";
     EXPECT_EQ(r.write_records(), 0U) << "write-timeout records";
     EXPECT_EQ(session_test_access::ending_claim(r.session()), 1)
         << "the claim is not the give-up's";
@@ -1685,7 +1537,7 @@ TEST(ConnectionBound106, DrainCancelled_RespawnFails_ClosedAtOnce) {
     EXPECT_EQ(d.r.disconnected() - disconnected_before, 1U) << "new Disconnected entries";
     EXPECT_TRUE(d.r.d.closed()) << "the transport is open";
     EXPECT_EQ(d.r.write_records(), 0U) << "write-timeout records";
-    EXPECT_EQ(d.r.give_up_records(), 0U) << "give-up records";
+    EXPECT_EQ(d.r.records(), 0U) << "give-up records";
     ASSERT_TRUE(rgs::Scene::ready(*d.delivery)) << "the Reject's delivery did not return";
     auto const dr = d.delivery->get();
     d.delivery.reset();
@@ -1710,10 +1562,12 @@ TEST_P(WriteLimit106, ShippingClock106_DirectDriver_BoundBesideLiveness_TestRequ
     p.write_ms = 200;
     p.logout_ms = 2000;
     Rig r{GetParam(), p,
-          [](SessionConfig& c) { c.sending_time_threshold = std::chrono::hours{24 * 365 * 10}; }};
+          [](SessionConfig& c) { c.sending_time_threshold = std::chrono::hours{24 * 365 * 10}; },
+          [](rgs::Scene& sc) {
+              sc.engine.clock =
+                  std::make_shared<fixpp::core::system_clock_source>(sc.ioc.get_executor());
+          }};
     auto& sc = r.d.s;
-    sc.engine.clock = std::make_shared<fixpp::core::system_clock_source>(sc.ioc.get_executor());
-    sc.session = std::make_unique<fixpp::session::Session>(sc.engine, sc.cfg);
     auto& sess = r.session();
     // After open(), every call runs on the session's own executor (session->executor(), the
     // session_executor the clock's per-session timer slot is keyed by), so the liveness loop's
@@ -1786,7 +1640,7 @@ TEST_P(WriteLimit106, ShippingClock106_DirectDriver_BoundBesideLiveness_TestRequ
     ASSERT_FALSE(cr.has_value()) << "the cut send succeeded";
     EXPECT_EQ(cr.error(), fixpp::core::error::session_write_timeout);
     EXPECT_EQ(r.write_records(), 1U) << "write-timeout records";
-    EXPECT_EQ(r.give_up_records(), 0U) << "give-up records";
+    EXPECT_EQ(r.records(), 0U) << "give-up records";
 }
 
 INSTANTIATE_TEST_SUITE_P(BothRoles, WriteLimit106,

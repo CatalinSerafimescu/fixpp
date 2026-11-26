@@ -62,19 +62,6 @@ using expected_void = fixpp::core::expected_t<void>;
 constexpr std::string_view kGiveUpText = "TestRequest unanswered";
 constexpr std::string_view kGiveUpTextPrefix = "TestRequest unanswered, TestReqID ";
 
-// An application whose fromApp refuses every application message, so the session answers it with
-// a BusinessMessageReject (35=j; on_inbound_active_from_app_failed_), and which counts onLogout.
-class RefusingApp final : public rgs::GapApp {
-public:
-    int logouts = 0;
-    void onLogout(const fixpp::session::SessionId& /*id*/) override { ++logouts; }
-    fixpp::core::expected_t<void> fromApp(
-        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
-        const fixpp::session::SessionId& /*id*/) override {
-        return std::unexpected(fixpp::core::error::app_do_not_send);
-    }
-};
-
 enum class scene : std::uint8_t {
     test_request_blocked,     // the loop's TestRequest write held
     heartbeat_blocked,        // the loop's Heartbeat write held, no TestRequest pending
@@ -114,7 +101,6 @@ struct Staged {
     std::string blocked_type;                                // the held write's MsgType(35)
     bool loop_emit_queued = false;  // the loop's emit waits behind the held write
     bool test_request_pending = true;
-    std::shared_ptr<RefusingApp> refusing_app;
 };
 
 void tweak_for(scene s, SessionConfig& c) {
@@ -124,20 +110,14 @@ void tweak_for(scene s, SessionConfig& c) {
     }
 }
 
-[[nodiscard]] int logouts_of(t106::GiveUpRig& r, Staged const& st) {
-    return st.refusing_app ? st.refusing_app->logouts : r.d.app->logouts;
-}
-
 // Reaches Active at t = 0 and stages the scene; returns what the readings need. The mock clock is
 // at the scene's last stage when it returns.
 Staged stage(t106::GiveUpRig& r, scene s) {
     Staged st;
     auto& sc = r.d.s;
-    if (s == scene::business_reject_blocked) {
-        st.refusing_app = std::make_shared<RefusingApp>();
-        sc.engine.application = st.refusing_app;
-        sc.session = std::make_unique<fixpp::session::Session>(sc.engine, sc.cfg);
-    }
+    // The BusinessMessageReject scene: fromApp refuses every application message, so the session
+    // answers it with a BusinessMessageReject (35=j; on_inbound_active_from_app_failed_).
+    if (s == scene::business_reject_blocked) r.app->refuse_app = true;
     if (!r.d.to_active()) {
         st.why = "not Active";
         return st;
@@ -207,7 +187,7 @@ Staged stage(t106::GiveUpRig& r, scene s) {
     // at 10 s, the last outbound instant + H).
     auto const first_emit = s == scene::heartbeat_blocked
                                 ? t0 + r.p.heartbeat
-                                : t106::saturating_add(st.last_inbound, r.p.threshold);
+                                : t106::saturating_add(st.last_inbound, r.threshold());
     r.at(first_emit);
     if (s == scene::test_request_blocked || s == scene::heartbeat_blocked) {
         if (r.d.started(st.blocked_type) != 1U || !r.d.parked()) {
@@ -215,10 +195,7 @@ Staged stage(t106::GiveUpRig& r, scene s) {
             return st;
         }
     } else if (st.loop_emit_queued) {
-        if (r.d.app->to_admin_count("1") +
-                    (st.refusing_app ? st.refusing_app->to_admin_count("1") : 0) !=
-                1 ||
-            r.d.started("1") != 0U) {
+        if (r.app->to_admin_count("1") != 1 || r.d.started("1") != 0U) {
             st.why = "the loop's TestRequest is not queued behind the held write";
             return st;
         }
@@ -246,8 +223,8 @@ void expect_closed_at_g_plus_b(session_role role, scene s) {
     Staged st = stage(r, s);
     ASSERT_TRUE(st.ok) << scene_name(s) << ": setup: " << st.why;
     auto const disconnected_before = r.disconnected();
-    auto const logouts_before = logouts_of(r, st);
-    auto const g = t106::give_up_instant_emit_not_returned(st.last_inbound, r.p.threshold);
+    auto const logouts_before = r.app->logouts;
+    auto const g = t106::give_up_instant_emit_not_returned(st.last_inbound, r.threshold());
     auto const b = std::chrono::milliseconds{r.p.logout_ms};
 
     r.at(g - t106::kInstantGuard);
@@ -280,7 +257,7 @@ void expect_closed_at_g_plus_b(session_role role, scene s) {
     EXPECT_EQ(r.d.s.state(), fsm_state::Disconnected) << scene_name(s);
     EXPECT_EQ(r.disconnected() - disconnected_before, 1U)
         << scene_name(s) << ": new Disconnected entries";
-    EXPECT_EQ(logouts_of(r, st) - logouts_before, 1) << scene_name(s) << ": onLogout calls";
+    EXPECT_EQ(r.app->logouts - logouts_before, 1) << scene_name(s) << ": onLogout calls";
     EXPECT_EQ(r.records(), 1U) << scene_name(s) << ": give-up records";
 }
 
@@ -291,7 +268,7 @@ void expect_logout_when_read_resumes(session_role role, scene s) {
     t106::GiveUpRig r{role, t106::GiveUpParams{}, [s](SessionConfig& c) { tweak_for(s, c); }};
     Staged st = stage(r, s);
     ASSERT_TRUE(st.ok) << scene_name(s) << ": setup: " << st.why;
-    auto const g = t106::give_up_instant_emit_not_returned(st.last_inbound, r.p.threshold);
+    auto const g = t106::give_up_instant_emit_not_returned(st.last_inbound, r.threshold());
     auto const b = std::chrono::milliseconds{r.p.logout_ms};
     auto const mark = r.d.bw->recorded.size() > 0 ? r.d.bw->recorded.size() - 1 : 0;
 
@@ -346,7 +323,7 @@ TEST_P(GiveUp106, ResendHeldNoPending_RecordNamesNoTestRequest) {
     t106::GiveUpRig r{GetParam(), t106::GiveUpParams{}};
     Staged st = stage(r, scene::resend_held_no_pending);
     ASSERT_TRUE(st.ok) << "setup: " << st.why;
-    r.at(t106::give_up_instant_emit_not_returned(st.last_inbound, r.p.threshold));
+    r.at(t106::give_up_instant_emit_not_returned(st.last_inbound, r.threshold()));
     ASSERT_EQ(r.records(), 1U) << "no give-up record at G";
     EXPECT_EQ(t106::give_up_record_test_req_id(r.log), "") << "the record's test_req_id";
 }
@@ -369,14 +346,14 @@ TEST_P(GiveUp106, ResendHeldPending) {
     t106::GiveUpRig r{GetParam(), t106::GiveUpParams{}};
     ASSERT_TRUE(r.d.to_active()) << "setup";
     auto const t0 = r.now();
-    r.at(t0 + r.p.threshold);
+    r.at(t0 + r.threshold());
     ASSERT_EQ(r.d.completed("1"), 1U) << "setup: no TestRequest at T";
-    r.at(t0 + r.p.threshold + 1s);
+    r.at(t0 + r.threshold() + 1s);
     r.d.hold_write_of("4");
     auto fut = r.d.s.feed_spawn(r.d.s.resend_request(2));
     ASSERT_TRUE(r.d.s.pump_until([&] { return r.d.parked(); })) << "setup: the GapFill not held";
     auto const l = r.last_inbound();
-    auto const g = t106::give_up_instant_emit_not_returned(l, r.p.threshold);
+    auto const g = t106::give_up_instant_emit_not_returned(l, r.threshold());
     auto const b = std::chrono::milliseconds{r.p.logout_ms};
     r.at(g - t106::kInstantGuard);
     EXPECT_EQ(r.records(), 0U) << "a give-up record before G";
@@ -398,7 +375,7 @@ TEST_P(GiveUp106, RejectBlocked_EndingBoundSpawnFails_ClosedAtG) {
     Staged st = stage(r, scene::reject_blocked);
     ASSERT_TRUE(st.ok) << "setup: " << st.why;
     auto const disconnected_before = r.disconnected();
-    auto const g = t106::give_up_instant_emit_not_returned(st.last_inbound, r.p.threshold);
+    auto const g = t106::give_up_instant_emit_not_returned(st.last_inbound, r.threshold());
     auto const b = std::chrono::milliseconds{r.p.logout_ms};
     r.at(g - t106::kInstantGuard);
     EXPECT_EQ(r.records(), 0U) << "a give-up record before G";
@@ -430,10 +407,10 @@ TEST_P(GiveUp106, EmitHeldInStore_GivesUpAtG_ClosesAtGPlusB) {
     gate->hold_when = [](t105::store_call k, fixpp::session::seqnum_t) {
         return k == t105::store_call::store_outbound;
     };
-    r.at(t0 + r.p.threshold);
+    r.at(t0 + r.threshold());
     ASSERT_EQ(gate->parked, 1U) << "setup: the TestRequest's store call is not held";
     auto const disconnected_before = r.disconnected();
-    auto const g = t106::give_up_instant_emit_not_returned(r.last_inbound(), r.p.threshold);
+    auto const g = t106::give_up_instant_emit_not_returned(r.last_inbound(), r.threshold());
     auto const b = std::chrono::milliseconds{r.p.logout_ms};
     r.at(g - t106::kInstantGuard);
     EXPECT_EQ(r.records(), 0U) << "a give-up record before G";
@@ -458,7 +435,7 @@ TEST_P(GiveUp106, ZeroLogoutTimeout_StaysOpen) {
     t106::GiveUpRig r{GetParam(), p};
     Staged st = stage(r, scene::test_request_blocked);
     ASSERT_TRUE(st.ok) << "setup: " << st.why;
-    auto const g = t106::give_up_instant_emit_not_returned(st.last_inbound, r.p.threshold);
+    auto const g = t106::give_up_instant_emit_not_returned(st.last_inbound, r.threshold());
     r.at(g + 10s);
     EXPECT_FALSE(r.d.closed()) << "closed with logout_disconnect_timeout_ms 0";
 }

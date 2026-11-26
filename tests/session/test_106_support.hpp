@@ -29,13 +29,16 @@
 #include <algorithm>
 #include <array>
 #include <asio/buffer.hpp>
+#include <asio/co_spawn.hpp>
 #include <asio/error.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ip/address.hpp>
 #include <asio/ip/tcp.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <fixpp/core/clock.hpp>
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
@@ -49,7 +52,9 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "session/plain_engine_rig.hpp"
@@ -60,6 +65,7 @@
 #include "support/blocking_write_transport.hpp"
 #include "support/extract_tag.hpp"
 #include "support/log_capture.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 namespace fixpp::test_support::t106 {
@@ -104,20 +110,18 @@ inline constexpr std::chrono::nanoseconds kInstantGuard{1};
     return saturating_add(std::max(from_inbound, from_write), kInstantGuard);
 }
 
-// A write's cut instant: S + W, S the write's start and W write_timeout_ms.
-[[nodiscard]] constexpr steady_time_point write_limit_instant(
-    steady_time_point write_start, std::chrono::milliseconds write_timeout) noexcept {
-    return saturating_add(write_start, write_timeout);
-}
+// ── State entries (FR-017, contract C-4.6) ────────────────────────────────────────────────────
 
-// ── Disconnected entries (FR-017, contract C-4.6) ─────────────────────────────────────────────
-
-// The Disconnected entries in the session's state history. A cell reads it before and after the
+// The entries of state st in the session's state history. A cell reads it before and after the
 // ending and asserts the difference.
-[[nodiscard]] inline std::size_t count_disconnected(fixpp::session::Session const& s) noexcept {
+[[nodiscard]] inline std::size_t count_state(fixpp::session::Session const& s,
+                                             fixpp::session::fsm_state st) noexcept {
     auto const history = s.fsm_visit_history();
-    return static_cast<std::size_t>(
-        std::count(history.begin(), history.end(), fixpp::session::fsm_state::Disconnected));
+    return static_cast<std::size_t>(std::count(history.begin(), history.end(), st));
+}
+// The Disconnected entries.
+[[nodiscard]] inline std::size_t count_disconnected(fixpp::session::Session const& s) noexcept {
+    return count_state(s, fixpp::session::fsm_state::Disconnected);
 }
 
 // ── Records ───────────────────────────────────────────────────────────────────────────────────
@@ -129,13 +133,6 @@ inline constexpr char kGiveUpRecordFormat[] =
 // call site, so a reworded record turns the matcher's cells RED.
 inline constexpr char kWriteTimeoutRecordFormat[] =
     "session ended: write timed out: limit_ms={} error={}";
-
-[[nodiscard]] inline std::size_t give_up_records(LogCapture& cap) {
-    return cap.records_of(FIXPP_FORMAT_ID(kGiveUpRecordFormat)).size();
-}
-[[nodiscard]] inline std::size_t write_timeout_records(LogCapture& cap) {
-    return cap.records_of(FIXPP_FORMAT_ID(kWriteTimeoutRecordFormat)).size();
-}
 
 // ── Sockets for the handshake cells (research D9 rows FR-013 to FR-014) ───────────────────────
 
@@ -240,7 +237,8 @@ private:
 //
 // A direct Session (t105::DirectRig: a BlockingWriteTransport whose next write can be held, the
 // mock clock, both roles) with HeartBtInt H, test_request_threshold T and
-// logout_disconnect_timeout_ms B, write_timeout_ms unset, and a LogCapture. Every instant is
+// logout_disconnect_timeout_ms B, write_timeout_ms unset unless a cell's tweak sets it (the write
+// limit cells of test_106_seams.cpp), and a LogCapture. Every instant is
 // reached with the mock clock's step_to and a drain, never a coarser advance.
 //
 // CONDITIONS this rig keeps, checked by reading:
@@ -252,58 +250,58 @@ private:
 // so the capture keeps recording. A flush that does not complete inside its wall budget is a
 // failure and reads as no record.
 [[nodiscard]] inline std::size_t records_now(LogCapture& cap, std::uint32_t format_id) {
-    auto done = std::make_shared<std::promise<void>>();
-    auto fut = done->get_future();
-    cap.logger->async_flush([done] { done->set_value(); });
-    if (fut.wait_for(std::chrono::seconds{10}) != std::future_status::ready) {
+    auto const recs = cap.flushed_records_of(format_id);
+    if (!recs) {
         ADD_FAILURE() << "records_now: the logger's flush did not complete";
         return 0;
     }
-    std::size_t n = 0;
-    for (auto const& r : cap.sink->records()) n += r.format_id == format_id ? 1U : 0U;
-    return n;
+    return recs->size();
 }
 [[nodiscard]] inline std::size_t give_up_records_now(LogCapture& cap) {
     return records_now(cap, FIXPP_FORMAT_ID(kGiveUpRecordFormat));
 }
 // The give-up record's test_req_id argument (its first), as 105's cells read it.
 [[nodiscard]] inline std::string give_up_record_test_req_id(LogCapture& cap) {
-    auto done = std::make_shared<std::promise<void>>();
-    auto fut = done->get_future();
-    cap.logger->async_flush([done] { done->set_value(); });
-    if (fut.wait_for(std::chrono::seconds{10}) != std::future_status::ready) return "<no flush>";
-    for (auto const& r : cap.sink->records()) {
-        if (r.format_id != FIXPP_FORMAT_ID(kGiveUpRecordFormat)) continue;
-        auto const& a = r.args[0];
-        if (a.kind == fixpp::log::ArgValue::Kind::inline_str)
-            return std::string{a.inl.data, a.inl.len};
-        if (a.kind == fixpp::log::ArgValue::Kind::static_str && a.static_ptr) return a.static_ptr;
-        return {};
-    }
-    return "<no record>";
+    auto const recs = cap.flushed_records_of(FIXPP_FORMAT_ID(kGiveUpRecordFormat));
+    if (!recs) return "<no flush>";
+    if (recs->empty()) return "<no record>";
+    auto const& a = recs->front().args[0];
+    if (a.kind == fixpp::log::ArgValue::Kind::inline_str) return std::string{a.inl.data, a.inl.len};
+    if (a.kind == fixpp::log::ArgValue::Kind::static_str && a.static_ptr) return a.static_ptr;
+    return {};
 }
 
 struct GiveUpParams {
     std::chrono::seconds heartbeat{10};
-    std::chrono::milliseconds threshold{10000};
+    // Unset: the session takes its default threshold.
+    std::optional<std::chrono::milliseconds> threshold{std::chrono::milliseconds{10000}};
     std::uint32_t logout_ms = 500;
 };
 
+// The session's application is DirectRig's (t105::DirectApp, `app`), whose knobs a cell sets
+// before the frames that read them, so no cell rebuilds the session. A setting this header cannot
+// name (a SessionConfig member 106 adds) comes through `tweak`; an EngineConfig change through
+// `shape_scene`, before the session is built.
 class GiveUpRig {
 public:
     LogCapture log;
     GiveUpParams p;
     DirectRig d;
+    std::shared_ptr<fixpp::test_support::t105::DirectApp> app = d.app;
 
     GiveUpRig(fixpp::session::session_role role, GiveUpParams params,
-              std::function<void(fixpp::session::SessionConfig&)> const& tweak = {})
-        : p{params}, d{role, [this, &tweak](fixpp::session::SessionConfig& c) {
-                           c.heartbeat_interval = p.heartbeat;
-                           c.test_request_threshold = p.threshold;
-                           c.logout_disconnect_timeout_ms = p.logout_ms;
-                           c.logger_override = log.logger;
-                           if (tweak) tweak(c);
-                       }} {}
+              std::function<void(fixpp::session::SessionConfig&)> const& tweak = {},
+              std::function<void(rgs::Scene&)> const& shape_scene = {})
+        : p{params},
+          d{role,
+            [this, &tweak](fixpp::session::SessionConfig& c) {
+                c.heartbeat_interval = p.heartbeat;
+                if (p.threshold) c.test_request_threshold = *p.threshold;
+                c.logout_disconnect_timeout_ms = p.logout_ms;
+                c.logger_override = log.logger;
+                if (tweak) tweak(c);
+            },
+            true, shape_scene} {}
     GiveUpRig(GiveUpRig const&) = delete;
     GiveUpRig& operator=(GiveUpRig const&) = delete;
     ~GiveUpRig() {
@@ -321,8 +319,33 @@ public:
         d.s.mock->step_to(t);
         d.s.drain();
     }
+    // T as set (the cells that read it set it; zero when the session takes its default).
+    [[nodiscard]] std::chrono::milliseconds threshold() const {
+        return p.threshold.value_or(std::chrono::milliseconds::zero());
+    }
+    // The write of the next frame of MsgType type is held: armed at its toAdmin.
+    void hold_write_of(std::string type) { d.hold_write_of(std::move(type)); }
     [[nodiscard]] std::size_t records() { return give_up_records_now(log); }
+    [[nodiscard]] std::size_t write_records() {
+        return records_now(log, FIXPP_FORMAT_ID(kWriteTimeoutRecordFormat));
+    }
     [[nodiscard]] std::size_t disconnected() const { return count_disconnected(*d.s.session); }
+    // An application send, started and not awaited.
+    std::future<fixpp::core::expected_t<void>> spawn_send(std::string_view clordid) {
+        payloads_.push_back(
+            "35=D\x01"
+            "11=" +
+            std::string{clordid} + "\x01");
+        auto const& pl = payloads_.back();
+        return asio::co_spawn(fixpp::test_support::session_executor_of(*d.s.session, d.s.ioc),
+                              d.s.session->send(std::as_bytes(std::span{pl.data(), pl.size()})),
+                              asio::use_future);
+    }
+    template <class Awaitable>
+    std::future<fixpp::core::expected_t<void>> spawn(Awaitable a) {
+        return asio::co_spawn(fixpp::test_support::session_executor_of(*d.s.session, d.s.ioc),
+                              std::move(a), asio::use_future);
+    }
     [[nodiscard]] std::size_t completed_since(std::string_view type, std::size_t from) const {
         std::size_t n = 0;
         for (std::size_t i = from; i < d.bw->recorded.size(); ++i) {
@@ -348,6 +371,9 @@ public:
         }
         return "<none>";
     }
+
+private:
+    std::deque<std::string> payloads_;  // the spawned sends' payloads, alive with the rig
 };
 
 }  // namespace fixpp::test_support::t106
