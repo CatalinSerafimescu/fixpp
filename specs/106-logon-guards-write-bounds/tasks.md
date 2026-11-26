@@ -1450,17 +1450,24 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   `ErrorMessage106.SessionWriteTimeout`, `NextNumIn106.CommitRefused_Initiator_Disconnected` and
   `OneEnding106.EngineStopStep1_ThenTooLow_NoLogout`, each RED as stated; `TomlHandshake106.TransportNotATable_RefusedByTheTransportCheck`
   (a guard, its branch side hit in a fresh coverage read); the no-clock write limit and the Heartbeat twin justified there.
-- [ ] T168 **(orchestrator)** windows-msvc-debug in `/mnt/c/temp/fixpp`, after taking `.sandbox-lock` (PARENT
+- [X] T168 **(orchestrator)** windows-msvc-debug in `/mnt/c/temp/fixpp`, after taking `.sandbox-lock` (PARENT
   `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md` Step 0), never at the same time as a Linux build: build
   the feature's own targets (`session_106_tests`, `session_106_seam_tests`, the touched config, transport and C-ABI test
   targets, the library) with `-k 0` before the first labelled push, and run them targeted (`-L 106`, the touched binaries'
   filters). Check new identifiers against the `<windows.h>` macro class (`near`, `far`, `min`, `max`, `small`, `ERROR`,
   `IN`, `OUT`). A TLS cell that skips is recorded with its reason and not counted as a pass. msvc-asan only if a change
   needs it. Release the lock after.
+  **Done** (at `ec1368f1`; evidence file, "T168"): lock taken and released; the 18 targets built `-k 0` rc 0, no warning;
+  18/18 entries passed, 0 skipped in the 106, 105, 104, 099 and 538 binaries (the config and C-ABI skips are by design);
+  msvc-asan not needed.
 - [ ] T169 One full `ctest --preset linux-clang-debug --no-tests=error -j3` (Article XVII §7), the last test run before
   the labelled push, in `$V` (Execution rules; created with `git worktree add --detach` at the head on
   `/mnt/wsl/fixppbuild`, clean status, reconfigured rc 0, every target built `-j5 -k 0`; never `$M`), after reading the sandbox lock; record the count, any failure and its
   attribution, and the SHA for the PR body's `local build: green on linux-clang-debug @ <sha>` line.
+  **RED, not done** (at `ec1368f1`; evidence file, "T169"): 518 of 531; twelve `~Session` aborts, fixed by
+  `close_before_destroy` at `e00ebd13` (the hidden cells re-run there, one more failure found); two STOPs to the
+  orchestrator: `Crossing103` (`B-103-15`) and `InboundFrameDispositionsOd29` (093's establishment-deadline record), each
+  RED at the head, GREEN on the base and GREEN under a mutant of 106's ending-claim gate.
 - [X] T170 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: `linux-gcc-release` `-Werror` build of the touched targets (the library, `session_106_tests`,
   `session_106_seam_tests`, the touched config, transport, C-ABI and alloc-guard targets, `engine_send_bench`),
   `ninja -k 0`, no error, no warning.
@@ -1484,9 +1491,11 @@ labelled push in the final sign-off order. One build or ctest at a time througho
 - [X] T174 Line-citation gate: `python3 tools/check_line_citations.py --range origin/main..HEAD` and
   `--shift-audit origin/main..HEAD` (the feature's own `specs/` bundle is charged by the range gate).
   **Done** (at `62ebd846`; evidence file, "T174"): both rc 0.
-- [ ] T175 B&L checks in the parent: PARENT `.claude/scripts/check_bl_citations.py` (every cell a B&L row cites exists in
+- [X] T175 B&L checks in the parent: PARENT `.claude/scripts/check_bl_citations.py` (every cell a B&L row cites exists in
   the head binaries' `--gtest_list_tests`) and `.claude/scripts/check_bl_delta.py gate --feature 106-logon-guards-write-bounds`
   (close-out row 2), each run with its self-test or a seeded miss first.
+  **Done** (at `ec1368f1`; evidence file, "T175"): 402 citations, 0 dangling; the delta PASS; every cell the 19 added or
+  amended rows cite listed by the head binaries (a seeded miss reported).
 - [X] T176 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Re-run T151 at the PR head and record it.
   **Done** (at `62ebd846`; evidence file, "T176"): no published release; the known positive lists two.
 - [ ] T177 **(orchestrator)** `/speckit-verify 106-logon-guards-write-bounds` (Article XVII §8), its plan targeted only
@@ -1511,6 +1520,7 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   B&L delta recorded); every fixer round re-runs the touched cells only, then T177's last actions.
 - [ ] T180 `/mnt/wsl/fixppbuild/fixpp-106-base`, `/mnt/wsl/fixppbuild/fixpp-106-mutants` and `/mnt/wsl/fixppbuild/fixpp-106-verify`: Remove `$B`, `$M` and `$V` (`git worktree remove`, then `git worktree prune`) once every RED reading, mutant,
   bench run and the full ctest of T169 is recorded; never `fixpp-parallel`, never the MSVC sandbox.
+  **Held** (evidence file, "T169"): the two T169 STOPs are open, and a fix would need `$B` and `$M` readings.
 - [ ] T181 **(orchestrator, post-merge)** Close-out per `.specify/close-out.md` §1 (rows 3b re-check, 4, 5, 9, 16, 17,
   copied into the Gate B record): a `CLAUDE-history.md` entry for `106-logon-guards-write-bounds` (newest first: the
   batches, the PR and squash SHA, the closed issues, the B-106 rows, C-ABI 1.19), and `CLAUDE.md`'s "Last merged FEATURE"
