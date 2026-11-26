@@ -1543,7 +1543,7 @@ labelled push in the final sign-off order. One build or ctest at a time througho
 
 ### Mandatory close-out tasks (ALWAYS emit — Gate-B preconditions, Article XVII §8)
 
-- [ ] T182 **Catalogue close-out**: read `spec/feature-catalogue.md` for every OFFICIAL row whose Feature column names 106
+- [X] T182 **Catalogue close-out**: read `spec/feature-catalogue.md` for every OFFICIAL row whose Feature column names 106
   or whose subject is a 106 issue (`grep -nE '106-logon|#702|#703|#714|#717|#724'`), then by subject the rows this feature's
   normative references name (`T-041` FIXS authorization linked to authentication; `TC-001` Logon 1B/1S; the
   `[FIX-SL §4.3.11]`, `§4.5.1`, `§4.5.5` and `§4.6.4` session rows); flip each feature-owned row to `done` with the PR and
@@ -1551,6 +1551,11 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   FIXS section's §4.4 row, also named in the "Added T-041" gap note), or record "none owned" after the check. Rows this feature amends but does not own get a dated
   "106 amends this row" note naming the B-106 rows and witnesses (cell names checked against the head binaries'
   `--gtest_list_tests`); their state does not change.
+  **Done** (evidence file, "T182 — catalogue close-out"): none owned (the grep reads no row; a seeded row is
+  found). 106 amends 15 OFFICIAL rows, each with a dated "106 amends this row" note, its state unchanged: T-041,
+  TC-001, S-009, S-014, S-025, S-003, S-004, TC-004, S-016, S-020, T-002, T-003, CA-004, CA-005, CA-006; and nine
+  coverage-index entries (FIX-SL §4.3.11, §4.5.1, §4.5.5, §4.6.4; FIXS §4.4; FIX-TC 1B, 1S, 4, 6). Every cell a note
+  names is listed by the head binaries' `--gtest_list_tests`.
 - [ ] T183 **Feature-completeness audit (MUST be the FINAL task)**: against the final head, (i) every row of this file is
   `[X]` or carries a waiver rationale (T147, T180 and T181 recorded as pending where the merge has not
   happened); (ii) every FR and SC maps to a landed cell and a landed implementation (the FR/SC table below, re-read cell by
