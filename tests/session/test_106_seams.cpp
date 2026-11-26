@@ -24,6 +24,7 @@
 #include <fstream>
 #include <string>
 #include <system_error>
+#include <utility>
 
 #ifndef FIXPP_CONFIG_FIXTURE_DIR
 #error "FIXPP_CONFIG_FIXTURE_DIR must be set by CMake"
@@ -41,6 +42,17 @@ struct Toml106Parts {
     std::string defaults;  // the [default] table's keys (no table when empty)
     std::string session;   // extra [[session]] keys
 };
+
+Toml106Parts in_defaults(std::string s) {
+    Toml106Parts p;
+    p.defaults = std::move(s);
+    return p;
+}
+Toml106Parts in_session(std::string s) {
+    Toml106Parts p;
+    p.session = std::move(s);
+    return p;
+}
 
 std::string toml_106(Toml106Parts const& p) {
     std::string const dir =
@@ -60,8 +72,8 @@ std::string toml_106(Toml106Parts const& p) {
 fixpp::config::LoadResult load_text_106(std::string const& text) {
     static std::atomic<unsigned> n{0};
     auto const* info = ::testing::UnitTest::GetInstance()->current_test_info();
-    std::string const name = std::string{"fixpp_106_seam_"} + (info ? info->name() : "cell") +
-                             "_" + std::to_string(n.fetch_add(1)) + ".toml";
+    std::string const name = std::string{"fixpp_106_seam_"} + (info ? info->name() : "cell") + "_" +
+                             std::to_string(n.fetch_add(1)) + ".toml";
     auto const path = std::filesystem::temp_directory_path() / name;
     {
         std::ofstream out{path, std::ios::binary | std::ios::trunc};
@@ -90,14 +102,14 @@ std::string seen_106(fixpp::config::LoadResult const& r) {
 // from 0, so a mapper that drops the value, or reads one scope only, reads another number.
 TEST(TomlWriteTimeout106, Set) {
     {
-        auto const r = load_text_106(toml_106({.session = "write_timeout_ms = 300"}));
+        auto const r = load_text_106(toml_106(in_session("write_timeout_ms = 300")));
         ASSERT_TRUE(r.has_value()) << "the [[session]] bundle did not load:" << seen_106(r);
         ASSERT_EQ(r->sessions.size(), 1U);
         EXPECT_EQ(r->sessions[0].config.write_timeout_ms, std::uint32_t{300})
             << "write_timeout_ms set in [[session]]";
     }
     {
-        auto const r = load_text_106(toml_106({.defaults = "write_timeout_ms = 4294967295"}));
+        auto const r = load_text_106(toml_106(in_defaults("write_timeout_ms = 4294967295")));
         ASSERT_TRUE(r.has_value()) << "the [default] bundle did not load:" << seen_106(r);
         ASSERT_EQ(r->sessions.size(), 1U);
         EXPECT_EQ(r->sessions[0].config.write_timeout_ms, std::uint32_t{4294967295U})

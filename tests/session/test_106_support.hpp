@@ -111,8 +111,8 @@ inline constexpr std::chrono::nanoseconds kInstantGuard{1};
 // ending and asserts the difference.
 [[nodiscard]] inline std::size_t count_disconnected(fixpp::session::Session const& s) noexcept {
     auto const history = s.fsm_visit_history();
-    return static_cast<std::size_t>(std::count(history.begin(), history.end(),
-                                               fixpp::session::fsm_state::Disconnected));
+    return static_cast<std::size_t>(
+        std::count(history.begin(), history.end(), fixpp::session::fsm_state::Disconnected));
 }
 
 // ── Records ───────────────────────────────────────────────────────────────────────────────────
@@ -184,7 +184,8 @@ struct peer_read_state {
 // instant of the end. start() begins the connect; a cell pumps until state->ended.
 class SilentClient {
 public:
-    explicit SilentClient(asio::io_context& ioc) : socket_{std::make_shared<asio::ip::tcp::socket>(ioc)} {}
+    explicit SilentClient(asio::io_context& ioc)
+        : socket_{std::make_shared<asio::ip::tcp::socket>(ioc)} {}
     SilentClient(SilentClient const&) = delete;
     SilentClient& operator=(SilentClient const&) = delete;
     ~SilentClient() {
@@ -216,14 +217,15 @@ private:
     static void read_more(std::shared_ptr<peer_read_state> const& st,
                           std::shared_ptr<asio::ip::tcp::socket> const& sock) {
         auto buf = std::make_shared<std::array<char, 4096>>();
-        sock->async_read_some(asio::buffer(*buf), [st, sock, buf](std::error_code ec, std::size_t n) {
-            st->bytes.append(buf->data(), n);
-            if (ec) {
-                finish(*st, ec);
-                return;
-            }
-            read_more(st, sock);
-        });
+        sock->async_read_some(asio::buffer(*buf),
+                              [st, sock, buf](std::error_code ec, std::size_t n) {
+                                  st->bytes.append(buf->data(), n);
+                                  if (ec) {
+                                      finish(*st, ec);
+                                      return;
+                                  }
+                                  read_more(st, sock);
+                              });
     }
 
     std::shared_ptr<asio::ip::tcp::socket> socket_;

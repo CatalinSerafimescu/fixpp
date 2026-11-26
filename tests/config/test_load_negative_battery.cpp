@@ -1742,8 +1742,30 @@ struct Toml106Parts {
     std::string transport;  // extra [session.transport] keys
 };
 
+Toml106Parts in_root(std::string s) {
+    Toml106Parts p;
+    p.root = std::move(s);
+    return p;
+}
+Toml106Parts in_defaults(std::string s) {
+    Toml106Parts p;
+    p.defaults = std::move(s);
+    return p;
+}
+Toml106Parts in_session(std::string s) {
+    Toml106Parts p;
+    p.session = std::move(s);
+    return p;
+}
+Toml106Parts in_transport(std::string s) {
+    Toml106Parts p;
+    p.transport = std::move(s);
+    return p;
+}
+
 std::string toml_106(Toml106Parts const& p) {
-    std::string const dir = std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}}.generic_string();
+    std::string const dir =
+        std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}}.generic_string();
     std::string t = p.root + "\n";
     t += "[clock]\nkind = \"system\"\n\n[store]\nkind = \"memory\"\n\n";
     t += "[cert_source]\nkind = \"file\"\ncert_file = '" + dir + "/leaf_ecdsa_p256.pem'\n";
@@ -1801,7 +1823,7 @@ const std::vector<std::string_view> kWrongTypes = {"\"300\"", "300.5"};
 TEST(TomlWriteTimeout106, OutOfRange) {
     using RC = fixpp::config::reason_class;
     for (std::string_view v : {kBelowZero, kAboveU32}) {
-        expect_refusal_106({.session = "write_timeout_ms = " + std::string{v}}, RC::out_of_range,
+        expect_refusal_106(in_session("write_timeout_ms = " + std::string{v}), RC::out_of_range,
                            "session[0].write_timeout_ms", v);
     }
 }
@@ -1809,15 +1831,15 @@ TEST(TomlWriteTimeout106, OutOfRange) {
 TEST(TomlWriteTimeout106, WrongType) {
     using RC = fixpp::config::reason_class;
     for (std::string_view v : kWrongTypes) {
-        expect_refusal_106({.session = "write_timeout_ms = " + std::string{v}},
-                           RC::malformed_value, "session[0].write_timeout_ms", v);
+        expect_refusal_106(in_session("write_timeout_ms = " + std::string{v}), RC::malformed_value,
+                           "session[0].write_timeout_ms", v);
     }
 }
 
 TEST(TomlHandshake106, OutOfRange) {
     using RC = fixpp::config::reason_class;
     for (std::string_view v : {std::string_view{"0"}, kBelowZero, kAboveU32}) {
-        expect_refusal_106({.transport = "tls_handshake_timeout_ms = " + std::string{v}},
+        expect_refusal_106(in_transport("tls_handshake_timeout_ms = " + std::string{v}),
                            RC::out_of_range, "session[0].transport.tls_handshake_timeout_ms", v);
     }
 }
@@ -1825,7 +1847,7 @@ TEST(TomlHandshake106, OutOfRange) {
 TEST(TomlHandshake106, WrongType) {
     using RC = fixpp::config::reason_class;
     for (std::string_view v : kWrongTypes) {
-        expect_refusal_106({.transport = "tls_handshake_timeout_ms = " + std::string{v}},
+        expect_refusal_106(in_transport("tls_handshake_timeout_ms = " + std::string{v}),
                            RC::malformed_value, "session[0].transport.tls_handshake_timeout_ms", v);
     }
 }
@@ -1833,7 +1855,7 @@ TEST(TomlHandshake106, WrongType) {
 TEST(TomlHandshake106, AcceptorKey_OutOfRange) {
     using RC = fixpp::config::reason_class;
     for (std::string_view v : {std::string_view{"0"}, kBelowZero, kAboveU32}) {
-        expect_refusal_106({.root = "acceptor_tls_handshake_timeout_ms = " + std::string{v}},
+        expect_refusal_106(in_root("acceptor_tls_handshake_timeout_ms = " + std::string{v}),
                            RC::out_of_range, "acceptor_tls_handshake_timeout_ms", v);
     }
 }
@@ -1841,7 +1863,7 @@ TEST(TomlHandshake106, AcceptorKey_OutOfRange) {
 TEST(TomlHandshake106, AcceptorKey_WrongType) {
     using RC = fixpp::config::reason_class;
     for (std::string_view v : kWrongTypes) {
-        expect_refusal_106({.root = "acceptor_tls_handshake_timeout_ms = " + std::string{v}},
+        expect_refusal_106(in_root("acceptor_tls_handshake_timeout_ms = " + std::string{v}),
                            RC::malformed_value, "acceptor_tls_handshake_timeout_ms", v);
     }
 }
@@ -1850,8 +1872,8 @@ TEST(TomlHandshake106, AcceptorKey_WrongType) {
 // session scope (tasks.md T037). A valid value, so only the scope can refuse it.
 TEST(TomlHandshake106, AcceptorKey_AtSessionScope_Refused) {
     using RC = fixpp::config::reason_class;
-    expect_refusal_106({.session = "acceptor_tls_handshake_timeout_ms = 300"}, RC::unknown_key,
+    expect_refusal_106(in_session("acceptor_tls_handshake_timeout_ms = 300"), RC::unknown_key,
                        "session[0].acceptor_tls_handshake_timeout_ms", "[[session]] 300");
-    expect_refusal_106({.defaults = "acceptor_tls_handshake_timeout_ms = 300"}, RC::unknown_key,
+    expect_refusal_106(in_defaults("acceptor_tls_handshake_timeout_ms = 300"), RC::unknown_key,
                        "default.acceptor_tls_handshake_timeout_ms", "[default] 300");
 }
