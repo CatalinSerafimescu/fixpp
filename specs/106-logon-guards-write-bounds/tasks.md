@@ -842,7 +842,7 @@ not name.
 
 ### Cells for US4 (write first; every one names `write_timeout_ms`, so [seam], `tests/session/test_106_seams.cpp` unless named)
 
-- [ ] T100 [US4] `tests/session/test_106_seams.cpp`: The pattern `WriteTimeout106.<Class>` (research D9 row FR-010; contract C-4.2, C-4.3; spec US4
+- [X] T100 [US4] `tests/session/test_106_seams.cpp`: The pattern `WriteTimeout106.<Class>` (research D9 row FR-010; contract C-4.2, C-4.3; spec US4
   scenario 1), one cell per class: Active `WriteTimeout106.Send`, `Heartbeat`, `TestRequest`, `ResendFrame`, `Reject`,
   `SequenceReset`, `ResendRequest`; pre-Active `WriteTimeout106.InitiatorLogon`, `ReplyLogon` and `Honor789Frame` (the
   `honor_peer_next_expected_` frame) — class names *(proposed)* but `Send`. The `Reject` class's rig draws the two-argument
@@ -857,20 +857,35 @@ not name.
   `session_write_timeout`, `dispatch_aborted` for the writes queued behind it, no Logout, and FR-017 (`onLogout` once
   from Active, none before Active). Mutants: M3′ and M3″ (T119, T120), M3‴ for `Send` (T121), and per class the M13
   arm of its tail (T130).
-- [ ] T101 [US4] `tests/session/test_106_seams.cpp`: The spurious-hit arm of every `WriteTimeout106.<Class>` cell (research D9 row "FR-010 spurious"):
+  **Done** (`2100cc67`, `1b03bc6d`; GREEN at H4 = `748db96f`): `WriteTimeout106.CutAtTheLimit/<Class>_<Role>`, both roles for every
+  Active class; the classes include `HeartbeatReply` and `BusinessReject`, added by orchestrator ruling B so that T098's two
+  leaf arms have a cell whose cut returns through them. The pre-Active classes `InitiatorLogon`, `ReplyLogon` and
+  `Honor789Frame` run on the direct rig (a proposed substitute: no seam holds an Engine acceptor's reply Logon write, the
+  T074 finding; on a direct Session no establishment deadline runs, so none competes). The cut call's
+  `session_write_timeout` is asserted where a caller observes the cut write's error (`Send`, `InitiatorLogon`, `Reject`,
+  `ResendRequest`, `HeartbeatReply`, `BusinessReject`, `ReplyLogon`); the loop's emits have no caller, and the walk's
+  frames (`ResendFrame`, `SequenceReset`, `Honor789Frame`) return through `replay_outbound_range_`'s own result, which keeps
+  `dispatch_aborted` (its contract), so those classes assert the record, the close and FR-017 only. Readings: evidence file,
+  "Phase 6".
+- [X] T101 [US4] `tests/session/test_106_seams.cpp`: The spurious-hit arm of every `WriteTimeout106.<Class>` cell (research D9 row "FR-010 spurious"):
   the same rig with `write_timeout_ms` 0, still open at S + 1.3 s (margins 200 ms and 500 ms against the TestRequest and
   give-up instants; pre-Active, before `logon_timeout_ms` 10 s); spec US4 scenario 3.
-- [ ] T102 [US4] `tests/session/test_106_seams.cpp`: `WriteTimeout106.QueuedWrite_CountsFromItsOwnStart` (W = 300 ms; B queued at A's start S_A; A
+  **Done**: `WriteTimeout106.LimitOff_StaysOpen/<Class>_<Role>` (the same staging, W = 0): open at S + 1.3 s, no
+  write-timeout record; GREEN at H4.
+- [X] T102 [US4] `tests/session/test_106_seams.cpp`: `WriteTimeout106.QueuedWrite_CountsFromItsOwnStart` (W = 300 ms; B queued at A's start S_A; A
   released at S_A + W − 1 ms; B then blocked and cut at its own start + W = S_A + 2W − 1 ms; M3's cut at S_A + W precedes
   it by 299 ms) and `WriteTimeout106.ResendWalk_ProgressNotCut` (three frames, each released at its own start + W − 1 ms;
   the walk completes in 897 ms, below T = 1.2 s; spec US4 scenario 2, contract C-4.4). Mutant: M3 (T118).
-- [ ] T103 [US4] `tests/session/test_106_seams.cpp`: Ending Logouts keep their limits (research D9 rows FR-011; contract C-4.5; spec US4 scenario 4):
+  **Done**: `WriteLimit106.QueuedWrite_CountsFromItsOwnStart` and `WriteLimit106.ResendWalk_ProgressNotCut` (both roles,
+  the suite `WriteLimit106`, both in `test_106_seams.cpp`), GREEN at H4. M3 reads at T118.
+- [X] T103 [US4] `tests/session/test_106_seams.cpp`: Ending Logouts keep their limits (research D9 rows FR-011; contract C-4.5; spec US4 scenario 4):
   `WriteTimeout106.CloseLogout_KeepsGrace` (W = 300 ms, B = 5000 ms; Active; `close()`'s `run_logout_phase1` Logout write
   blocked from S; the mock step to S + W + 1 ms issued at once after `close()`: no write-timeout record, still open) and
   `WriteTimeout106.EndingLogout_Keeps105Limit` (W = 300 ms, B = 500 ms; the give-up's Logout blocked from S = G; open at
   S + W and at S + B − 1 ns, closed at S + B). Mutants: M4 at each site with its unmasking companions (T123,
   T122).
-- [ ] T104 [US4] `tests/session/test_106_seams.cpp`: Deferred item (plan "Deferred to tasks.md", "M4 at the Logout sites other than the R-1 leaf and
+  **Done**: `WriteLimit106.CloseLogout_KeepsGrace`, `WriteLimit106.EndingLogout_Keeps105Limit` (both roles), GREEN at H4.
+- [X] T104 [US4] `tests/session/test_106_seams.cpp`: Deferred item (plan "Deferred to tasks.md", "M4 at the Logout sites other than the R-1 leaf and
   `run_logout_phase1`"): for each remaining row of the Logout-site table (T010), a cell
   `WriteTimeout106.EndingLogout_<Site>` with B > W — `EndingLogout_R2Leaf` (`inbound_logout_leaf_`, an R-2 kind, for
   example the gap deadline's Logout), `EndingLogout_RefuseLogon` (`refuse_logon_with_logout_`),
@@ -878,6 +893,10 @@ not name.
   (`honor_peer_next_expected_`), names *(proposed)* — each asserting no write-timeout record at S + W and the cut at
   S + B; or the site named in the evidence file as one whose Logout write cannot be held past W, with the reading that
   shows it. Mutant: T124.
+  **Done**: `WriteLimitLogoutSite106.EndingLogout_{R2Leaf, RefuseLogon, LogonSentLeaf, Honor789}` (the R-2 Logout of a
+  MsgSeqNum below NextNumIn; the posture-mismatch refusal; the LogonSent stale-SendingTime Logout; the too-high 789
+  Logout), each with B = 500 ms > W = 300 ms: no write-timeout record at S + W and the cut at S + B. GREEN at H4; no site is
+  named unheld.
 - [ ] T105 [US4] `tests/session/test_106_seams.cpp`: The `OneEnding106.<First>Then<Second>` pairs with the limit set (research D9 row FR-017; contract
   C-4.6), GiveUp106's H = T = 10 s, W = 300 ms, B = 500 ms unless stated, each with the suspension point it exercises and
   FR-017: `OneEnding106.GiveUpThenWatchdog` (S = G − 100 ms; G < S + W < G + B); `OneEnding106.WatchdogThenGiveUp` (S = G − 500 ms;
@@ -889,7 +908,15 @@ not name.
   `OneEnding106.Watchdog_PreActive_NoEstablishmentRecord` (Engine rig, the reply Logon blocked at S = 0, W = 2 s,
   `logon_timeout_ms` 1 s: at S + W one write-timeout record, no `session_event_establishment_timeout`, no `onLogout`; the
   same at S + W + 1 s). Plus any pair T075 left for this file. Mutants: T127, T128.
-- [ ] T106 [US4] `tests/session/test_106_seams.cpp`: The connection-bound cells that need a write armed (research D9 row C-4; data-model E-3's joiner
+  **Partly done** (`2100cc67`): `OneEnding106.{GiveUpThenWatchdog, WatchdogThenGiveUp, WatchdogThenEndingLimit,
+  EndingLimitThenWatchdog, WatchdogThenClose, CloseThenWatchdog, BothDueAtOneWake}` in `test_106_seams.cpp`, both roles,
+  GREEN at H4; the R-2 stimulus is a frame at MsgSeqNum 1 (below NextNumIn). FR-017's "one close" is read as the
+  transport's close (`closed()`), as the US3 cells read it: a give-up's cut and a later close of the same transport both
+  count in `blocking_write_state::closes`, with the limit off too. **Stopped:** `OneEnding106.Watchdog_PreActive_NoEstablishmentRecord`
+  needs an Engine acceptor's reply Logon write held, the T074 wall (ruling A dropped T074's twin); not written. Candidate
+  for the orchestrator: an Engine initiator whose write is held inside `on_inbound_logon_sent_` (a 789 resend frame or a
+  Logon-arm Reject), which is a different stimulus from the one research D9 names.
+- [X] T106 [US4] `tests/session/test_106_seams.cpp`: The connection-bound cells that need a write armed (research D9 row C-4; data-model E-3's joiner
   table), each [seam]: `ConnectionBound106.SpawnFails_AtWrite` (the write is not started and returns
   `dispatch_aborted`; claim, `Disconnected`, closed once, zero records); `ConnectionBound106.Teardown_Drain_Parked` (a
   direct initiator in LogonSent with `write_timeout_ms` set, its reconnected Logon written, the acknowledgement withheld,
@@ -907,12 +934,22 @@ not name.
   at that return, with the clock not advanced, the claim taken, `Disconnected`, closed once, zero reason records, and
   the Reject's write returns `dispatch_aborted`, its epoch not cut; RED with the refused-respawn path deleted: open, no
   `Disconnected`). Every Drain cell sets `logout_disconnect_timeout_ms` 5000 ms. Mutants: T129.
-- [ ] T107 [US4] `tests/session/test_106_seams.cpp`: `ShippingClock106.DirectDriver_BoundBesideLiveness_TestRequestAtT` [seam: M8] (research D9 row R2(b);
+  **Done** (`2100cc67`, `08431a85`, `1b03bc6d`): `WriteLimit106.ConnectionBound_SpawnFails_AtWrite` (HeartBtInt 0, the first
+  limited write is the initiator's Logon or the acceptor's reply Logon), `WriteLimit106.ConnectionBound_Teardown_ConnectionEnd_Timing`
+  (the edge with no write before it: the reply Logout's toAdmin throws), and `ConnectionBound106.{Teardown_Drain_Parked,
+  Teardown_Drain_Timing, WriteExpiryDuringDrain_NoRecord, DrainCancelled_RespawnsOnBlockedWrite,
+  DrainCancelled_RespawnFails_ClosedAtOnce}` on a direct initiator whose validate-first Reject (an acknowledgement without
+  EncryptMethod(98)) is held in LogonSent. `Teardown_Drain_Parked` reads the old bound's count at the new connection's first
+  spawn of the bound (the spawn seam as an observer): with the limit on, the reconnected Logon spawns the new connection's
+  bound, so the counter itself does not read 0 after the second `drive_reconnect()` returns. GREEN at H4.
+- [X] T107 [US4] `tests/session/test_106_seams.cpp`: `ShippingClock106.DirectDriver_BoundBesideLiveness_TestRequestAtT` [seam: M8] (research D9 row R2(b);
   placed in plan P3, written here because its rig needs D5's write arming): `system_clock_source`, the coroutines on
   `session->executor()`, HeartBtInt 2 s (T = 2.4 s), W = 200 ms, B = 2000 ms; app sends every 300 ms, the peer silent;
   every send completes until the TestRequest is observed at the peer in [T, 2T); the next send blocks at
   S ≤ `tr_written_at` + 300 ms plus scheduling and is cut within W + 1 s of S (1.5 s < T, 0.9 s margin); one write-timeout
   record, no slot-74 record, `session_write_timeout` from the cut send. Mutant: T126.
+  **Done** (`08431a85`, `1b03bc6d`): `WriteLimit106.ShippingClock106_DirectDriver_BoundBesideLiveness_TestRequestAtT` (both
+  roles), every call after `open()` on `session->executor()`; GREEN at H4; M8 at T126.
 - [ ] T108 [US4] `tests/alloc_guard/test_106_connection_bound.cpp`: `alloc_guard_106_connection_bound_mallocnesia`
   (research D9 row R2(a); Release, label `106`): a real Engine session over `system_clock_source` under `B-544-1`'s two
   conditions. Send half: HeartBtInt 30 s; after warm-up 20 spaced sends 100 ms apart, W = 50 ms, limit off and on: zero
@@ -920,15 +957,23 @@ not name.
   under identical traffic (research D9 row R2(a) defines it), must be 0, limit off and again limit on against the base's
   limit-off reading; the base half built on `$B` with `-DFIXPP_106_ALLOC_BASE=ON` (T004),
   the TU and `tests/alloc_guard/CMakeLists.txt` overlaid, the reconfigure rc 0. Known positives: M5 and M8 (T125, T126). The zero covers the connection bound only.
+  **Not done:** the cell needs a new TU on the run-thread Engine rig (`tests/support/run_thread_engine_rig.hpp`, the
+  `test_544_run_thread_windows.cpp` shape) over `system_clock_source`, a counting build for the emit half's differential (an
+  interceptor build exits on the first allocation in a window, so it cannot report a per-cycle count), and two Release
+  builds (`$T`'s `linux-clang-release` and `$B` with `-DFIXPP_106_ALLOC_BASE=ON`); not started in this round. T125 and T126's
+  mallocnesia half wait on it.
 - [ ] T109 [US4] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C5`); record that none builds on `$B` but the emit half's base build, and read
   each cell's RED under its mutant at `H4` (the mutant tasks below). Record the base emit-half count for T108.
 
+  **Partly done:** C5 committed (`2100cc67`, `08431a85`, `1b03bc6d`); every C5 cell is a seam cell, read under its mutant at
+  H4 (T118 to T130). The base emit-half count waits on T108.
 ### Implementation for US4
 
-- [ ] T110 [US4] `include/fixpp/session/session.hpp`, `src/session/session.cpp`: The write class (data-model E-6): `enum class write_class : std::uint8_t { ordinary, logout };` a
+- [X] T110 [US4] `include/fixpp/session/session.hpp`, `src/session/session.cpp`: The write class (data-model E-6): `enum class write_class : std::uint8_t { ordinary, logout };` a
   defaulted (`ordinary`) argument of `store_then_emit`, forwarded to `live_write_serialized_`; every row of the Logout-site
   table passes `logout`; a `logout` write never arms the write deadline.
-- [ ] T111 [US4] `include/fixpp/session/session.hpp`, `src/session/session.cpp`: The write arming (research D5; data-model E-5): with `cfg_.write_timeout_ms != 0`,
+  **Done** (`28cb7469`).
+- [X] T111 [US4] `include/fixpp/session/session.hpp`, `src/session/session.cpp`: The write arming (research D5; data-model E-5): with `cfg_.write_timeout_ms != 0`,
   `live_write_serialized_` sets `write_started_at_` (one `steady_now()`), bumps `write_epoch_` and sets
   `write_in_flight_` just before `live->async_write(frame)`, after the `write_gate_` grant and ruling W's hold-back test;
   an RAII guard clears `write_in_flight_` on every exit, both `catch` returns included; `begin_connection_()` clears it
@@ -936,18 +981,27 @@ not name.
   deadline. The first live write with the limit on spawns the bound when none runs (same executor rule); a refused spawn
   fails closed (the write not started, `dispatch_aborted`, claim, `Disconnected`, close). With the limit off: one test of
   the knob per write, nothing else.
-- [ ] T112 [US4] The bound's write row and the expiry (data-model E-3 row 4, E-5 steps 1 to 5): at a wake or its
+  **Done** (`28cb7469`): the flag's clear is explicit at both returns and by the guard's destructor only while unwinding
+  (`emit_in_flight_guard`'s shape), so a frame destroyed unresumed touches nothing; the clear does not wake the bound. The
+  wake on a write's start compares the bound's armed deadline (`connection_bound_.armed_until`) with the write's own
+  deadline. Spawned at most once per connection by the latch `connection_bound_.spawned`.
+- [X] T112 [US4] The bound's write row and the expiry (data-model E-3 row 4, E-5 steps 1 to 5): at a wake or its
   deadline, the same epoch in flight and the clock at or past `write_started_at_` + limit: `claim_ending_(write_timeout)`
   (refused: nothing), the warn record through the session logger (format registered in `src/log/format_registry.cpp`,
   data-model E-8), `write_cut_epoch_ = write_epoch_`, `record_disconnected_unless_already_()`, and the one close
   (`spawn_connection_close_(live_transport_shared_())` then `connection_end_owed_.reset()` when
   `state_ == lifecycle::open`). No Logout.
-- [ ] T113 [US4] `src/session/session.cpp`: The error through every seam it crosses (research D5, N-3): `live_write_serialized_` returns
+  **Done** (`28cb7469`): `expire_write_()`; the record is registered in `src/log/format_registry.cpp`.
+- [X] T113 [US4] `src/session/session.cpp`: The error through every seam it crosses (research D5, N-3): `live_write_serialized_` returns
   `session_write_timeout` for a write whose epoch is `write_cut_epoch_` once the close fails it (every other failure stays
   `dispatch_aborted`); `store_then_emit`'s live path passes it through unflattened; `send_body_`'s F9 block takes it as it
   takes `dispatch_aborted`, through `record_disconnected_unless_already_()`, per the `dispatch_aborted` ruling table. Every
   other `dispatch_aborted` line T014 found at HEAD is ruled in that table before this task closes.
-- [ ] T114 [US4] `src/session/session.cpp`: The respawn after a failed drain (data-model E-3, N-6): at `drive_reconnect`'s failed-drain return,
+  **Done** (`28cb7469`). T014's recipe at H4 finds the same one comparison (`send_body_`'s F9 block, now testing both values)
+  and its comment line; the `dispatch_aborted` ruling table is unchanged. `replay_outbound_range_`'s `transmit_async` keeps its
+  bool (its contract returns `dispatch_aborted` for a write error): the walk's cut frames are recorded by the expiry, not by
+  their return value.
+- [X] T114 [US4] `src/session/session.cpp`: The respawn after a failed drain (data-model E-3, N-6): at `drive_reconnect`'s failed-drain return,
   after clearing `reconnect_drain_in_flight_`, spawn the bound again when `conn_gen_` has not moved,
   `closing_or_stopped_()` does not hold, `write_in_flight_` or `emit_in_flight_` holds, and `connection_bound_.running` is
   false (that term defensive, no cell: data-model E-3); the new bound re-arms on the in-flight write's
@@ -955,42 +1009,81 @@ not name.
   E-3's respawn paragraph words it: the in-flight write is already started, so the session takes the claim, records
   `Disconnected` and closes (research D3, "One close"), and the close fails that write. Cell:
   `ConnectionBound106.DrainCancelled_RespawnFails_ClosedAtOnce` (T106); mutant: T129 arm (e).
-- [ ] T115 [US4] `src/session/session.cpp`: Deferred item ("The RAII clears"), for `write_in_flight_`: as T088, every exception and `catch`
+  **Done** (`28cb7469`): at `drive_reconnect`'s failed-drain return, with `fail_closed_without_bound_()` for a refused respawn.
+- [X] T115 [US4] `src/session/session.cpp`: Deferred item ("The RAII clears"), for `write_in_flight_`: as T088, every exception and `catch`
   return of `live_write_serialized_` re-derived to reach the `Disconnected` edge, or given a cell with the clear's mutant
   RED. Record it.
-- [ ] T116 [US4] `src/session/session.cpp`: Comments naming the decision at the write arming and the class argument: "106 D5 supersedes 105
+  **Done** (walk in the evidence file): both returns of `live_write_serialized_` after the arming clear explicitly; an
+  exception other than `asio::system_error` from `async_write` unwinds through the guard's destructor, which clears. The
+  normal-path clear's mutant reads RED (arm T115, H4): `OneEnding106.{BothDueAtOneWake, GiveUpThenWatchdog,
+  WatchdogThenGiveUp}` and the shipping-clock cell, both roles; the two cells first named for it (`QueuedWrite_*`,
+  `ResendWalk_*`) stay GREEN, since no clock step passes a completed write's deadline there.
+- [X] T116 [US4] `src/session/session.cpp`: Comments naming the decision at the write arming and the class argument: "106 D5 supersedes 105
   D-e's scope (only ending Logouts are limited): every non-Logout write is limited, opt-in; the clock starts at
   `async_write`, not at the gate (105's ending limit counts from the leaf's entry)".
+  **Done** (`28cb7469`, `748db96f`): at the arming in `live_write_serialized_` and at `write_class` in `session.hpp`.
 - [ ] T117 [US4] At the head: `-L 106` (seam entry included), `-L 105`, the C-ABI error entries, `-L config` GREEN;
   the mallocnesia cell on a `linux-clang-release` tree on `/mnt/wsl/fixppbuild` GREEN with its base half read. Record
   counts. Commit `H4`; `codegraph sync`.
 
+  **Partly done** (H4 = `748db96f`; readings in the evidence file): `-L 106`, `-L 105`, `-L 104`, `-L 099`, `-L 538`,
+  `-L config`, `capi_pure_tests` (the C-ABI error entries) GREEN; `codegraph sync` run. The mallocnesia cell waits on T108.
 ### Mutant and spurious-hit arms for US4 (in `$M` at `H4`)
 
 - [ ] T118 [US4] In `$M`'s `src/session/session.cpp`: M3: `write_started_at_` taken before the `write_gate_` acquire; RED:
   `WriteTimeout106.QueuedWrite_CountsFromItsOwnStart`, `WriteTimeout106.ResendWalk_ProgressNotCut`.
-- [ ] T119 [US4] In `$M`'s `src/session/session.cpp`: M3′: the bound's write arming deleted; RED: every `WriteTimeout106.<Class>` cell.
+  **Stopped (a cell expected RED read GREEN, to the orchestrator):** under M3 `QueuedWrite_CountsFromItsOwnStart` reads RED
+  (both roles); `ResendWalk_ProgressNotCut` reads GREEN (both roles): the walk's frames take the write gate uncontended, so
+  a start read before the gate's acquire equals the start read at `async_write`; that cell cannot see M3, and it stays GREEN
+  under T115's arm too. What it keeps is the walk's progress under the limit (spec US4 scenario 2).
+- [X] T119 [US4] In `$M`'s `src/session/session.cpp`: M3′: the bound's write arming deleted; RED: every `WriteTimeout106.<Class>` cell.
+  **Done**: M3′ (the write's flag not set) RED on every `WriteTimeout106.CutAtTheLimit` cell, both roles (evidence file).
 - [ ] T120 [US4] In `$M`'s `src/session/session.cpp`: M3″: the expiry does not set `write_cut_epoch_`; RED: every `WriteTimeout106.<Class>` cell (the cut call
   returns `dispatch_aborted`).
-- [ ] T121 [US4] In `$M`'s `src/session/session.cpp`: M3‴: `store_then_emit`'s pass-through deleted (`session_write_timeout` flattened to `dispatch_aborted`);
+  **Stopped (cells expected RED read GREEN, to the orchestrator):** under M3″ the classes whose cut call is observed
+  read RED (`Send`, `InitiatorLogon`, `Reject`, `ResendRequest`, `HeartbeatReply`, `BusinessReject`, `ReplyLogon`, both roles
+  where they run); `Heartbeat`, `TestRequest`, `ResendFrame`, `SequenceReset` and `Honor789Frame` read GREEN, since no
+  caller observes their cut write's error (T100's note). T120's "every `WriteTimeout106.<Class>` cell" holds only for the
+  first group.
+- [X] T121 [US4] In `$M`'s `src/session/session.cpp`: M3‴: `store_then_emit`'s pass-through deleted (`session_write_timeout` flattened to `dispatch_aborted`);
   RED: `WriteTimeout106.Send` (its cut `send` returns through `send_impl`'s `store_then_emit`).
-- [ ] T122 [US4] In `$M`'s `src/session/session.cpp`: M4 at the R-1 leaf (`inbound_logout_leaf_`, kind `r1`, passes `write_class::ordinary`) with M9 and M9′
+  **Done**: M3‴ RED on `WriteTimeout106.CutAtTheLimit/Send_*`.
+- [X] T122 [US4] In `$M`'s `src/session/session.cpp`: M4 at the R-1 leaf (`inbound_logout_leaf_`, kind `r1`, passes `write_class::ordinary`) with M9 and M9′
   (alone it is masked by the claim); RED: `WriteTimeout106.EndingLogout_Keeps105Limit` (closed at S + W).
-- [ ] T123 [US4] In `$M`'s `src/session/session.cpp`: M4 at `run_logout_phase1` with M9 and E-3's closing term deleted from the exit row (alone it is
+  **Done**: RED on `EndingLogout_Keeps105Limit` (both roles); M4 alone there GREEN (masked by the claim), as stated.
+- [X] T123 [US4] In `$M`'s `src/session/session.cpp`: M4 at `run_logout_phase1` with M9 and E-3's closing term deleted from the exit row (alone it is
   masked by `closing`); RED: `WriteTimeout106.CloseLogout_KeepsGrace` (a write-timeout record at S + W).
-- [ ] T124 [US4] In `$M`'s `src/session/session.cpp`: M4 at each other Logout site of T104, with M9 and M9′, one arm per site; RED: its
+  **Done**: RED on `CloseLogout_KeepsGrace` (both roles).
+- [X] T124 [US4] In `$M`'s `src/session/session.cpp`: M4 at each other Logout site of T104, with M9 and M9′, one arm per site; RED: its
   `WriteTimeout106.EndingLogout_<Site>` cell. A site ruled unheld in T104 has no arm.
+  **Done**: one arm per site, each RED on its `WriteLimitLogoutSite106.EndingLogout_<Site>` cell.
 - [ ] T125 [US4] In `$M`'s `src/session/session.cpp`: M5: a coroutine spawned per write and per emit; RED: `alloc_guard_106_connection_bound_mallocnesia` (the
   send half non-zero, the emit half's delta positive).
+  **Not done:** waits on T108.
 - [ ] T126 [US4] In `$M`'s `src/session/session.cpp`: M8: `connection_bound_wait_`'s shipping branch replaced by `await_deadline(*effective_clock_, …)`; RED:
   `ShippingClock106.DirectDriver_BoundBesideLiveness_TestRequestAtT` (no TestRequest by 2T) and the mallocnesia cell.
+  **Partly done:** M8 (the shipping branch's wait replaced by the mock branch's `timer || await_deadline(*effective_clock_, …)`,
+  so the bound's wait takes the clock's per-session slot) RED on the shipping-clock cell, both roles, by "no TestRequest by
+  2T", no abort. The literal form (`await_deadline` alone, no timer) also reads "no TestRequest by 2T" but then aborts at
+  `~Session`'s connection-bound assertion (the bound can no longer be woken), so it is not counted. The mallocnesia half
+  waits on T108.
 - [ ] T127 [US4] In `$M`'s `src/session/session.cpp`: M9 with M9′ over the T105 pairs whose second decider reaches `claim_ending_` or the bound's
   taken-claim exit; `CloseThenWatchdog` under M9 with the closing term deleted from E-3's exit row; RED: two reasons or
   two entries. The guards (`WatchdogThenEndingLimit`, `WatchdogThenGiveUp`, `WatchdogThenClose`, `GiveUpThenClose`) are
   not counted; a pair GREEN under every arm is reported as vacuous.
+  **Stopped (the bundle's guard labels contradict the code, to the orchestrator):** under M9 with M9′,
+  `GiveUpThenWatchdog` and `WatchdogThenEndingLimit` read RED and `EndingLimitThenWatchdog` GREEN (both roles): T080 has the
+  R-2 leaf claim at its entry (D), so in both orders the R-2 Logout holds the claim first; with W = 300 ms the bound's instant
+  S + W precedes D + B and meets the taken claim (RED once the test and the exit term are deleted), and with W = 1 s the cut at
+  D + B ends the connection first, so the bound leaves on `Disconnected`, a term M9′ keeps (a guard). The bundle labels the
+  first a guard and counts the second. `CloseThenWatchdog` under M9 with the closing term deleted: RED. `BothDueAtOneWake` is
+  GREEN under M9 with M9′ (the bound leaves after the give-up row's decision, so the write row is never evaluated at that
+  re-test); the arm that reaches its property, the two rows' order swapped (arm `RowSwap`), reads RED, both roles. The guards
+  `WatchdogThenGiveUp`, `WatchdogThenClose` and `GiveUpThenClose` read GREEN, as stated.
 - [ ] T128 [US4] In `$M`'s `src/session/engine.cpp`: M10, alone (without M9): the pump races `on_inbound_frame` against the establishment deadline; RED:
   `OneEnding106.Watchdog_PreActive_NoEstablishmentRecord` (an establishment record and no write-timeout record).
-- [ ] T129 [US4] In `$M`'s `src/session/session.cpp`: M12, one arm per joiner of data-model E-3's table: (a) the drain's entry wake and its
+  **Stopped:** its cell (`OneEnding106.Watchdog_PreActive_NoEstablishmentRecord`, T105) is not written.
+- [X] T129 [US4] In `$M`'s `src/session/session.cpp`: M12, one arm per joiner of data-model E-3's table: (a) the drain's entry wake and its
   `reconnect_drain_in_flight_` term deleted — RED `Teardown_Drain_Parked` and `Teardown_Drain_Timing` by the counter (never
   a hang); (b) the `Disconnected` edge's wake deleted — RED `Teardown_ConnectionEnd_Timing`; (c) the drain term and
   `claim_ending_`'s drain refusal deleted — RED `WriteExpiryDuringDrain_NoRecord` (a write-timeout record); (d)
@@ -998,7 +1091,11 @@ not name.
   record at S + W); (e) the respawn's refused-spawn path deleted (the refusal returns without the claim, the record or
   the close) — RED `DrainCancelled_RespawnFails_ClosedAtOnce` (open, no `Disconnected`). Plus the write-spawn seam's
   failure path deleted — RED `ConnectionBound106.SpawnFails_AtWrite`.
-- [ ] T130 [US4] In `$M`'s `src/session/session.cpp`: M13 per reachable site a `WriteTimeout106.<Class>` cut returns through (T015's table), one arm
+  **Done**: arms (a) to (e) and the write-spawn seam's failure path each RED on their named cells by assertion (no abort;
+  arm (d) read after its first build failed on an unused variable, the stale binary's reading discarded). The drain rig's
+  teardown closes the session before the rig's unbounded drain (`1b03bc6d`), after arm (a)'s first run kept a drain's join
+  spinning past the cell.
+- [X] T130 [US4] In `$M`'s `src/session/session.cpp`: M13 per reachable site a `WriteTimeout106.<Class>` cut returns through (T015's table), one arm
   each, the site's raw `record_state_transition_(fsm_state::Disconnected)` restored; RED: that class's cell (two
   `Disconnected` entries): `send_body_`'s F9 block by `WriteTimeout106.Send`, `emit_initiator_logon_`'s tail by
   `WriteTimeout106.InitiatorLogon`, the two-argument `emit_session_reject_`'s by `WriteTimeout106.Reject`,
@@ -1006,6 +1103,11 @@ not name.
   `WriteTimeout106.TestRequest` and `WriteTimeout106.Heartbeat`. Every reachable row of the table now has an
   arm here or in T098; a row with none is named unreachable in the table with its reason.
 
+  **Done**: one arm per site, each RED (two `Disconnected` entries) on its class's cell, both roles: the F9 block on `Send`,
+  `emit_initiator_logon_`'s tail on `InitiatorLogon`, the two-argument `emit_session_reject_` on `Reject`,
+  `inbound_resend_request_leaf_` on `ResendRequest`, the loop's tails on `TestRequest` and `Heartbeat`, and (ruling B) the
+  Heartbeat reply's and the BusinessMessageReject's tails on `HeartbeatReply` and `BusinessReject`. Every reachable row of
+  T015's table now has a RED arm here.
 **Checkpoint**: US4 GREEN, its mutants RED; the write limit and the one-ending invariant hold together.
 
 ---
