@@ -515,7 +515,7 @@ every refusal between keeps NextNumIn in FR-006's sense (FR-006, SC-002).
 
 ### RED cells for US2 (write first)
 
-- [ ] T056 [US2] `tests/session/test_106_identity_first.cpp`, the pattern `NextNumIn106.<Role>_<Refusal>` for every
+- [X] T056 [US2] `tests/session/test_106_identity_first.cpp`, the pattern `NextNumIn106.<Role>_<Refusal>` for every
   acceptor row of research D2's table whose 106 column is "unchanged" or "unchanged; no unit runs" (as re-derived by
   T008): `NextNumIn106.Acceptor_S3_1137` *(proposed)* (FIXT routing, inbound validation on, spec US2 scenario 1: the
   Reject is sent), `NextNumIn106.Acceptor_Peer141_S3_NoAdvanceNoReset` (also asserts the store's `reset_to` not called),
@@ -524,7 +524,7 @@ every refusal between keeps NextNumIn in FR-006's sense (FR-006, SC-002).
   frame against (an acceptor hydrates inside the arm, so not a value read before the feed). RED on the base: consumed in
   memory. Plus [guard: the knob's reset moved after S3] `NextNumIn106.Acceptor_ResetOnLogon_S3_KeepsTheReset`, which
   pins `L-106-a` (NextNumIn 1 and the store reset).
-- [ ] T057 [US2] `tests/session/test_106_identity_first.cpp` (same file), every initiator row "unchanged": `NextNumIn106.Initiator_S3` (an ordinary acknowledgement,
+- [X] T057 [US2] `tests/session/test_106_identity_first.cpp` (same file), every initiator row "unchanged": `NextNumIn106.Initiator_S3` (an ordinary acknowledgement,
   spec US2 scenario 2), `NextNumIn106.Initiator_Asked141_S3_NoAdvanceNoReset` (also `reset_to` not called),
   `NextNumIn106.Initiator_S3_RejectWriteFails`, `NextNumIn106.Initiator_Strict` (the `bilateral_strict` silent refusal),
   `NextNumIn106.Initiator_789TooHigh`, `NextNumIn106.Initiator_789Invalid`, `NextNumIn106.Initiator_789Below_WalkFails`
@@ -536,46 +536,51 @@ every refusal between keeps NextNumIn in FR-006's sense (FR-006, SC-002).
   unfiltered. The
   residual after a unit (`L-106-a`; Q3) keeps its base pin: `UnaskedResetAck104.With789_TooHighAfterReset_Logout`, run in
   `-L 104` unfiltered.
-- [ ] T058 [US2] `tests/session/test_106_seams.cpp`: `NextNumIn106.CommitRefused_Disconnected` [seam: the
+- [X] T058 [US2] `tests/session/test_106_seams.cpp`: `NextNumIn106.CommitRefused_Disconnected` [seam: the
   manager frozen between classification and commit through T031's hook] (research D9 row "FR-006 commit", N-4):
   `Disconnected` once, nothing sent after it, NextNumIn unconsumed in memory and store. Its mutant: T069.
 - [ ] T059 [US2] Every existing cell T009 classed "S3, strict or 789 refusal" changes its pinned number to the
   unconsumed value, starting with `W5Scan.NextNumInIsTheHeadersAndNoReset` (`tests/session/test_099_establishment.cpp`);
   each re-pin is named in the evidence file with its old and new value and is RED on the base.
-- [ ] T060 [US2] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C3`); read T056, T057 and T059 on `$B` (the 099 and 104 files
+  **Stopped (census contradiction, to the orchestrator):** T009 classed no cell; at H2 (`1860fa1a`) `-L 099` fails 134
+  cells, each differing from its pin only in the trace line's `c`→`k` (the Logon-arm Reject pins and E-10's
+  constants in `test_099_establishment.cpp` and `test_099_msg_type_default.cpp`). Not re-pinned; the evidence file's
+  T059 section has the list, the grep and run halves, and the proposed re-pin.
+- [X] T060 [US2] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C3`); read T056, T057 and T059 on `$B` (the 099 and 104 files
   overlaid as named); record per cell its RED reason or guard status and the counts.
 
 ### Implementation for US2
 
-- [ ] T061 [US2] `include/fixpp/session/seqnum_manager.hpp`, `src/session/seqnum_manager.cpp`:
+- [X] T061 [US2] `include/fixpp/session/seqnum_manager.hpp`, `src/session/seqnum_manager.cpp`:
   `SeqnumManager::classify_inbound(seq)` (data-model E-2: the body of `check_inbound` without the advance; the lock, a
   drained lock giving `session_already_closed`, `frozen_`, too low, too high, `seqnum_max`). A member function only.
   Its header comment, beside `check_inbound`'s, states E-2's contract: `noexcept`, the error per case above, no
   advance.
-- [ ] T062 [US2] `src/session/session.cpp`: `on_inbound_not_connected_`: the classification where `check_inbound` was; the commit
+- [X] T062 [US2] `src/session/session.cpp`: `on_inbound_not_connected_`: the classification where `check_inbound` was; the commit
   (`co_await seqnum_mgr_.check_inbound(seq)`) after the 1137 block, before `LogonReceived`, when
   `logon_inbound_advanced`, so the reply's 789 reads the advanced value (F-4); a refused commit records `Disconnected`
   unless superseded and returns success. INV-106-1 holds: from the arm's entry to the commit only a reset unit, the
   knob's reset and hydration change `next_inbound_`.
-- [ ] T063 [US2] `src/session/session.cpp`: `on_inbound_logon_sent_`: the classification; the commit after the 789 honour and its superseded
+- [X] T063 [US2] `src/session/session.cpp`: `on_inbound_logon_sent_`: the classification; the commit after the 789 honour and its superseded
   test, before `Active`, only when `logon_inbound_advanced_init && !peer_ack_sent_reset_flag` (the units keep writing
   absolute targets from the classification); a refused commit as in T062.
-- [ ] T064 [US2] `src/session/session.cpp`: The commit-freeze hook's call site between classification and commit in both arms (T031), a
+- [X] T064 [US2] `src/session/session.cpp`: The commit-freeze hook's call site between classification and commit in both arms (T031), a
   no-op when unset.
-- [ ] T065 [US2] `src/session/session.cpp`: Comments at both commit points naming the decision: "106 D2: the advance is committed here, so
+- [X] T065 [US2] `src/session/session.cpp`: Comments at both commit points naming the decision: "106 D2: the advance is committed here, so
   every refusal before it keeps NextNumIn (closes L-104-8)", and at the two locals: `logon_inbound_advanced(_init)` now
   means "classified in sequence; consumed at the commit". No result in a comment.
 - [ ] T066 [US2] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: At the head: `-L 106` (seam entry included), `-L 104`, `-L 099` unfiltered GREEN; record counts.
   Commit `H2`; `codegraph sync`.
+  **Stopped on its 099 half (T059):** at H2 `-L 106` and `-L 104` GREEN, `-L 099` 13/15; H2 committed, `codegraph sync` done.
 
 ### Mutant arms for US2 (in `$M` at `H2`)
 
-- [ ] T067 [US2] In `$M`'s `src/session/session.cpp`: M6a: the acceptor arm commits the advance at the classification (the base's `check_inbound`); RED: every
+- [X] T067 [US2] In `$M`'s `src/session/session.cpp`: M6a: the acceptor arm commits the advance at the classification (the base's `check_inbound`); RED: every
   `NextNumIn106.Acceptor_*` cell but the residual guard.
-- [ ] T068 [US2] In `$M`'s `src/session/session.cpp`: M6b: the initiator arm commits at the classification; RED: every `NextNumIn106.Initiator_*` cell.
-- [ ] T069 [US2] In `$M`'s `src/session/session.cpp`: The commit's result ignored (a refused commit proceeds to `LogonReceived` / `Active`); RED:
+- [X] T068 [US2] In `$M`'s `src/session/session.cpp`: M6b: the initiator arm commits at the classification; RED: every `NextNumIn106.Initiator_*` cell.
+- [X] T069 [US2] In `$M`'s `src/session/session.cpp`: The commit's result ignored (a refused commit proceeds to `LogonReceived` / `Active`); RED:
   `NextNumIn106.CommitRefused_Disconnected`.
-- [ ] T070 [US2] In `$M`'s `src/session/session.cpp`: The acceptor knob's `reset_on_logon` reset moved after S3; RED:
+- [X] T070 [US2] In `$M`'s `src/session/session.cpp`: The acceptor knob's `reset_on_logon` reset moved after S3; RED:
   `NextNumIn106.Acceptor_ResetOnLogon_S3_KeepsTheReset`.
 
 **Checkpoint**: US1 and US2 GREEN; the Logon arms are done.
