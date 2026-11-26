@@ -606,10 +606,14 @@ of both Logon arms' sequence check and of `on_inbound_active_out_of_sequence_` w
 lock gives two entries (T015's rows marked "open question"). If D11's ending claim or `record_disconnected_unless_already_()`
 removes it with a one-line change at each site, that change lands in this phase with a cell and is named in the bundle;
 otherwise it is recorded as an L-106 limitation with a follow-up issue.
+**Disposition (Phase 5):** recorded as `L-106-g` (research D8) with a follow-up issue to file (the evidence
+file's "Follow-ups to file"): the one-line change at each site is `record_disconnected_unless_already_()`, but a
+cell needs an arm held at the manager's lock while `close()` reaches `seqnum_mgr_.drain()`, a seam the bundle does
+not name.
 
 ### RED cells for US3 (write first)
 
-- [ ] T071 [P] [US3] `tests/session/test_106_give_up.cpp`: `GiveUp106.{TestRequestBlocked, HeartbeatBlocked,
+- [X] T071 \[P\] [US3] `tests/session/test_106_give_up.cpp`: `GiveUp106.{TestRequestBlocked, HeartbeatBlocked,
   BehindBlockedSend, ResendHeldNoPending, RejectBlocked}`, limit off, H = 10 s, T = 10 s, B = 500 ms, both roles where
   the rig allows (research D9 row FR-008; spec US3 scenarios 1 to 3; contract C-3.1 to C-3.4). Each: no slot-74 record
   at G − 1 ns and one at G; open at G + B − 1 ns, closed at G + B; no complete Logout at the peer; and, in a twin arm,
@@ -623,24 +627,24 @@ otherwise it is recorded as an L-106 limitation with a follow-up issue.
   `RejectBlocked`, the loop's give-up path in the emit cells). RED on the base (no close at G + B). Plus the guard
   `GiveUp106.ResendHeldPending` *(proposed name for "`ResendHeldNoPending`'s pending twin")*: the same hold with a
   TestRequest pending, given up at L + 3T + 1 ns on the base too.
-- [ ] T071a [US3] `tests/session/test_106_give_up.cpp` (same file): `GiveUp106.HeartbeatReplyBlocked` *(proposed)* (research D9
+- [X] T071a [US3] `tests/session/test_106_give_up.cpp` (same file): `GiveUp106.HeartbeatReplyBlocked` *(proposed)* (research D9
   row FR-009; T015's reachable row `inbound_heartbeat_reply_leaf_`): `RejectBlocked`'s parameters (limit off, H = T = 10 s,
   B = 500 ms). The peer's TestRequest at L draws the Heartbeat reply and that write blocks; the loop's first emit after L
   falls due by L + 10 s and queues behind it, so G = L + 3T + 1 ns = L + 30 s + 1 ns follows it by at least 20 s; the peer
   is silent after L, so nothing else closes by G + B. T071's readings at G and G + B; the blocked reply and the queued
   emit return an error (`dispatch_aborted`); FR-017 for the leaf's write tail (one new `Disconnected` entry). RED on the
   base (no close at G + B); M2 (T092); M13 at that tail (T098).
-- [ ] T071b [US3] `tests/session/test_106_give_up.cpp` (same file): `GiveUp106.BusinessRejectBlocked` *(proposed)* (research
+- [X] T071b [US3] `tests/session/test_106_give_up.cpp` (same file): `GiveUp106.BusinessRejectBlocked` *(proposed)* (research
   D9 row FR-009; T015's reachable row `inbound_business_reject_leaf_`): T071a's parameters and instants, with an
   application whose `fromApp` rejects the peer's NewOrderSingle at L, which draws the BusinessMessageReject (35=j) whose
   write blocks. The same readings and FR-017 for that leaf's write tail. RED on the base (no close at G + B); M2 (T092);
   M13 at that tail (T098).
-- [ ] T072 [US3] `tests/session/test_106_give_up.cpp` (same file): `GiveUp106.RejectBlocked_EndingBoundSpawnFails_ClosedAtG` (research D9 row "FR-008
+- [X] T072 [US3] `tests/session/test_106_give_up.cpp` (same file): `GiveUp106.RejectBlocked_EndingBoundSpawnFails_ClosedAtG` (research D9 row "FR-008
   spawn failure"): `RejectBlocked`'s rig with `session_test_access::set_ending_bound_spawn_fails` returning true. At G:
   one slot-74 record, the transport closed (the peer's read ends), one `Disconnected` entry, the blocked Reject write and
   the queued emit return an error, no Logout; the spurious check at G + B + 1 s has no competitor. RED on the base (no
   give-up at G); M14 (T094).
-- [ ] T073 [US3] `tests/session/test_106_give_up.cpp` (same file): `GiveUp106.EmitHeldInStore_GivesUpAtG_ClosesAtGPlusB` (research D9 row "FR-008 store
+- [X] T073 [US3] `tests/session/test_106_give_up.cpp` (same file): `GiveUp106.EmitHeldInStore_GivesUpAtG_ClosesAtGPlusB` (research D9 row "FR-008 store
   phase"; contract C-3.3's exception): the loop's TestRequest held inside its `MessageStore::store` call
   (`t105::GateStoreFactory`, as `LivenessTiming105.FreshWindow_FromTheWrite_StoreDelayAtLeastT` uses it); no slot-74 record
   at G − 1 ns, one at G; open at G + B − 1 ns, closed at G + B; no `Disconnected` and no join until the store returns
@@ -650,11 +654,13 @@ otherwise it is recorded as an L-106 limitation with a follow-up issue.
   `L-106-f`; a fix turns it RED) and `GiveUp106.ZeroLogoutTimeout_StaysOpen` (B = 0, emit blocked; still open at
   G + 10 s, which follows the default B a regression would use by 8 s; `L-105-f`) — [guard: an unconditional close at
   G] (T095).
-- [ ] T075 [P] [US3] `tests/session/test_106_one_ending.cpp`: the `OneEnding106.<First>Then<Second>` pairs whose rig
+  **Partly done:** `ZeroLogoutTimeout_StaysOpen` written (C4, GREEN on `$B` and at the head);
+  `PreActive_LimitOff_NotCutByEstablishment` (an Engine rig) not written.
+- [X] T075 \[P\] [US3] `tests/session/test_106_one_ending.cpp`: the `OneEnding106.<First>Then<Second>` pairs whose rig
   names no new symbol (write_timeout_ms unset), at least `OneEnding106.GiveUpThenClose` (`close()` at C = G + 100 ms < G + B,
   `logout_disconnect_timeout_ms` 5000 ms, the mock step issued at once after `close()`, a guard: `close()` takes no
   claim). Each asserts FR-017. A pair that needs the limit is written in T105. Record which pairs land here.
-- [ ] T076 [US3] `tests/session/test_106_seams.cpp`, the connection-bound cells whose rig needs no write limit
+- [X] T076 [US3] `tests/session/test_106_seams.cpp`, the connection-bound cells whose rig needs no write limit
   (research D9 row C-4), each [seam]: `ConnectionBound106.SpawnFails_AtLoop` (fail closed: the loop takes the claim,
   `Disconnected`, closed once, zero reason records), `ConnectionBound106.WaitThrows` (the claim free: claim,
   `Disconnected`, closed once; no record, no Logout), `ConnectionBound106.SpuriousWake_NoEnding` (a wake with nothing due
@@ -663,19 +669,19 @@ otherwise it is recorded as an L-106 limitation with a follow-up issue.
   reported as covered by the `Disconnected` edge (data-model E-3's joiner table) and not counted; the evidence file
   records that disposition. They compile only after T078 and T083 (the `session_test_access` reads of `ending_claim_`
   and the bound's counter).
-- [ ] T077 [US3] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C4`); read T071 to T075 on `$B` (`-L 106 -LE 106_seam`); record per
+- [X] T077 [US3] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C4`); read T071 to T075 on `$B` (`-L 106 -LE 106_seam`); record per
   cell its RED reason or guard status and the counts. The seam cells of T076 are read under their mutants
   (T099).
 
 ### Implementation for US3
 
-- [ ] T078 [US3] `include/fixpp/session/session.hpp`, `src/session/session.cpp`, `tests/support/session_test_access.hpp`: The ending claim (data-model E-10, research D11): `enum class ending_claim : std::uint8_t { none,
+- [X] T078 [US3] `include/fixpp/session/session.hpp`, `src/session/session.cpp`, `tests/support/session_test_access.hpp`: The ending claim (data-model E-10, research D11): `enum class ending_claim : std::uint8_t { none,
   give_up, write_timeout, ending_logout, establishment_timeout, internal }`, the strand-confined member `ending_claim_`,
   `claim_ending_(ending_claim who) noexcept` (refuses when taken, when `closing_or_stopped_()` holds, or when
   `reconnect_drain_in_flight_` holds; otherwise sets and returns true, no suspension between test and set); reset to
   `none` in `begin_connection_()`; the `Disconnected` edge in `record_state_transition_` takes it as `internal` when it is
   `none`. `tests/support/session_test_access.hpp` gains the read of `ending_claim_` the seam cells need.
-- [ ] T079 [US3] `src/session/session.cpp`: The `Disconnected` census applied (D11; T015's table): every row classed reachable
+- [X] T079 [US3] `src/session/session.cpp`: The `Disconnected` census applied (D11; T015's table): every row classed reachable
   becomes `record_disconnected_unless_already_()`: the liveness loop's TestRequest and Heartbeat `store_then_emit` failure
   tails in `run_liveness_loop_body_`, `send_body_`'s F9 block, `emit_initiator_logon_`'s write tail, the two-argument
   `emit_session_reject_`'s write tail, and the write tails of `inbound_resend_request_leaf_`,
@@ -683,16 +689,16 @@ otherwise it is recorded as an L-106 limitation with a follow-up issue.
   such site (its write tail discards `emit_r` and records nothing), and the reply Logon's and the 789 resend frames'
   failure tails are already conditional, so nothing changes there. Every row classed unreachable or already conditional
   is left as it is and keeps its reason in the table.
-- [ ] T080 [US3] `src/session/session.cpp`: 105's other ending Logouts claim (D11 row 3; the Ending-claimant table): `claim_ending_(ending_logout)`
+- [X] T080 [US3] `src/session/session.cpp`: 105's other ending Logouts claim (D11 row 3; the Ending-claimant table): `claim_ending_(ending_logout)`
   where each takes the Logout owner or enters writing, whichever comes first, in `inbound_logout_leaf_` (kinds other
   than `r1`), `refuse_logon_with_logout_`, `inbound_logon_sent_logout_leaf_` and `honor_peer_next_expected_`; a refused
   claim writes nothing and records nothing. `run_logout_phase1` and `inbound_logout_leaf_` for kind `r1` neither take nor
   test it. No reason record is added at these sites.
-- [ ] T081 [US3] The establishment deadline as a claimant (D11 row 4): `session_engine_access::claim_ending` in
+- [X] T081 [US3] The establishment deadline as a claimant (D11 row 4): `session_engine_access::claim_ending` in
   `src/session/session_engine_access.hpp`; the Engine pump's expiry in `src/session/engine.cpp` claims
   `establishment_timeout` before `note_establishment_timeout`, replacing 105's "the session recorded no ending of its own"
   test, with a comment naming "106 D11 supersedes 105's no-ending-recorded test: the claim decides".
-- [ ] T082 [US3] `include/fixpp/session/session.hpp`, `src/session/session.cpp`: `decide_give_up_()` extracted from the loop's give-up block (research D3 "The decision";
+- [X] T082 [US3] `include/fixpp/session/session.hpp`, `src/session/session.cpp`: `decide_give_up_()` extracted from the loop's give-up block (research D3 "The decision";
   data-model E-3): the claim first (refused: nothing, return false); the slot-74 record; the Logout owner;
   `enter_ending_write_(ending_kind::r1, …)` with its budget from the decision; on `refused` (105's ending bound cannot be
   spawned) it records `Disconnected` (unless already) and, when `state_ == lifecycle::open`,
@@ -715,6 +721,8 @@ otherwise it is recorded as an L-106 limitation with a follow-up issue.
   T019's list (one new spawn). Re-derive (research D3, "What it allocates"): the bound's only `co_spawn`
   (`git grep -n 'run_connection_bound_' -- src`), and a read of the shipping branch of `connection_bound_wait_` showing it
   names no `Clock` member; recorded in the evidence file.
+  **Implemented (`aa146ac7`); open:** the re-derivation reading (the bound's only `co_spawn`, the shipping
+  branch's Clock-free read) is not yet recorded in the evidence file.
 - [ ] T084 [US3] The bound's joiners, wakes and exit terms (data-model E-3's two tables, in their order): exit on
   `gen` changed, `Disconnected`, `closing_or_stopped_()`, `reconnect_drain_in_flight_` or `ending_claim_` taken; the
   give-up row before the write row at one re-test; wakes at the loop's guard (both edges), `close()` and
@@ -725,7 +733,11 @@ otherwise it is recorded as an L-106 limitation with a follow-up issue.
   `git grep -n 'FIXPP_JOIN_COUNTERS\|connection_bound_counter_' -- src/session/session.cpp`, each join read for the state
   the session can be in when it is reached, and `Engine::stop()`'s steps in `src/session/engine.cpp`; the result goes in
   the evidence file against data-model E-3's joiner table.
-- [ ] T085 [US3] `src/session/session.cpp`: The loop's arming (research D3 "The loop arms it", D4): `emit_in_flight_` set when a TestRequest or
+  **Implemented (`aa146ac7`) except the `~Session` assertion, to the orchestrator:** with it, test rigs that
+  destroy an Active session without `close()` abort (`W8RefusedOpenFrames_Control.*`,
+  `StoreAfterResetLogon.ResetLogon_ResendReplays`); the evidence file's Phase 5 section has the reading. The
+  joiner-table re-derivation is not yet recorded.
+- [X] T085 [US3] `src/session/session.cpp`: The loop's arming (research D3 "The loop arms it", D4): `emit_in_flight_` set when a TestRequest or
   Heartbeat emit starts (after its replay-gate shared hold, and for a TestRequest after `pending_test_req_id_` is set),
   with an RAII guard in the loop's frame that clears it and wakes the bound at the return or an exception; while it is
   set the bound's deadline is G = L + 3T + 1 ns (`detail::held_test_request_cap`), and at G with
@@ -733,10 +745,10 @@ otherwise it is recorded as an L-106 limitation with a follow-up issue.
   give-up's with an ending phase entered → its existing write path with the owner already claimed; the give-up's with
   none (refused bound) → no Logout, return; otherwise its failure branches through
   `record_disconnected_unless_already_()`. A written TestRequest keeps 105's instant (row 1 of data-model E-4).
-- [ ] T086 [US3] `src/session/session.cpp`: The held cap with none pending (research D3 "The resend-answer case"; data-model E-3): the loop's
+- [X] T086 [US3] `src/session/session.cpp`: The held cap with none pending (research D3 "The resend-answer case"; data-model E-3): the loop's
   replay-gate wait becomes `wait_for_wake() || await_deadline(held_test_request_cap(...))` with none pending too, and
   `held_cap` drops its `!pending_test_req_id_.empty()` term.
-- [ ] T087 [US3] `src/session/session.cpp`: Supersession comments (research "Supersession"; Execution rules "Comments"): at the bound's
+- [X] T087 [US3] `src/session/session.cpp`: Supersession comments (research "Supersession"; Execution rules "Comments"): at the bound's
   instant "106 D4 supersedes 105 E-4's `tr_written_at` count for an emit not returned (ruling R1)"; at the TestRequest
   fit check "106 D4 supersedes 105 C-1 row 8's stated reason; the rule stays"; at the held cap "106 D3 supersedes 105
   T119b's implementation reading: capped with none pending too"; at `decide_give_up_()` "106 D3 supersedes 103 D5′.4 /
@@ -763,6 +775,11 @@ otherwise it is recorded as an L-106 limitation with a follow-up issue.
 
 ### Mutant and spurious-hit arms for US3 (in `$M` at `H3`)
 
+  **Stopped (to the orchestrator):** at `aa146ac7` `-L 106`, `-L 105`, `-L 104`, `-L 099` pass; `-L 538` fails:
+  `ReplayGate588.R588c_*` (two) and `R588g_AnswerInsideTheFreshWindow_KeepsTheSession` fail at their teardown drain
+  (the bound's parked timer is outstanding work after a teardown with no `close()`), and
+  `CancelledOutboundStoreMeasurement.Returned_StoreCancelledAtItsLock` pins two `Disconnected` entries that T079's
+  conversion makes one. H3 not committed as such.
 - [ ] T092 [US3] In `$M`'s `src/session/session.cpp`: M2, arm 1: the loop's arming of the connection bound for its emit deleted; RED: every `GiveUp106` cell
   except the guards (nothing else closes by G + B: the spurious-hit arm of FR-008), `EmitHeldInStore_*` included.
 - [ ] T093 [US3] In `$M`'s `src/session/session.cpp`: M2, arm 2: the held cap's pending term restored; RED: `GiveUp106.ResendHeldNoPending`; the pending twin

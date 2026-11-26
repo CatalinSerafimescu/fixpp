@@ -584,6 +584,11 @@ the acceptor's reply Logon, `honor_peer_next_expected_`'s resend frames), and th
     arm (the initiator's Logon in `open()`, the reply Logon, a 789 resend frame, a Logon-arm Reject) is not cut by
     `logon_timeout_ms`: the Engine tests that deadline only between deliveries and while it reads. `write_timeout_ms`
     cuts it. Pinned by `GiveUp106.PreActive_LimitOff_NotCutByEstablishment`.
+  - `L-106-g` (tasks.md Phase 5, open Q1; pre-existing, not fixed by 106): the drained-mutex branches of both Logon
+    arms' sequence classification and of `on_inbound_active_out_of_sequence_` record `Disconnected` unconditionally;
+    `close()` records `Disconnected` before its `seqnum_mgr_.drain()`, so a `close()` that meets an arm suspended at
+    the manager's lock leaves two entries. Follow-up issue: the change is `record_disconnected_unless_already_()` at
+    each site, with a cell that needs an arm held at that lock (a seam 106 does not add).
 - **B129: `B&L delta: none`.** A CI job cap is not shipped behaviour.
 
 ## D9 — Test design (FR-016: RED against `9d81082a`, or a named mutant)
