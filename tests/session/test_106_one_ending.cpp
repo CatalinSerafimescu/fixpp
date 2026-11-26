@@ -64,6 +64,57 @@ TEST_P(OneEnding106, GiveUpThenClose) {
     EXPECT_EQ(r.records(), 1U) << "give-up records";
 }
 
+// tasks.md T089 (research D11 N-12): the loop's give-up block meets a claim held elsewhere in the
+// state that leaves it reachable, close() between setting closing and its Disconnected record.
+// The TestRequest is written at L + T, so the loop sleeps to G = L + 2T + 1 ns (105's instant for a
+// written TestRequest); close(graceful) is spawned at C = G - 100 ms and its phase 1 waits for the
+// peer's Logout, the session Active and closing. At G the loop wakes into the block, whose claim
+// is refused (closing_or_stopped_()): no slot-74 record, and the loop leaves there (its count drops
+// to 0 at G, the one return the loop takes at G). Inequalities: C + B = G + 1.9 s, so phase 1 is
+// still waiting at G; close()'s grace is a wall-clock timer of B, and the mock steps that follow
+// close() are issued at once. FR-017: one new Disconnected entry (close()'s), onLogout once, the
+// transport closed, no reason record.
+TEST_P(OneEnding106, CloseDuringGiveUpBlock_NoRecord) {
+    t106::GiveUpParams p;
+    p.logout_ms = 2000;
+    t106::GiveUpRig r{GetParam(), p};
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    auto const l = r.last_inbound();
+    r.at(t106::saturating_add(l, r.p.threshold));
+    ASSERT_EQ(r.completed_since("1", 0), 1U) << "setup: the TestRequest was not written at L + T";
+    auto const g =
+        t106::give_up_instant_written(l, r.p.threshold, t106::saturating_add(l, r.p.threshold));
+    auto const c = g - 100ms;
+    r.at(c);
+    ASSERT_EQ(r.d.s.state(), fsm_state::Active) << "setup: the session ended before C";
+    ASSERT_EQ(fixpp::session::session_test_access::liveness_count(r.session()), 1)
+        << "setup: the liveness loop is not running at C";
+    auto const disconnected_before = r.disconnected();
+    auto const logouts_before = r.d.app->logouts;
+    auto const mark = r.d.bw->recorded.size();
+    auto close_fut =
+        asio::co_spawn(fixpp::test_support::session_executor_of(r.session(), r.d.s.ioc),
+                       r.session().close(fixpp::session::close_mode::graceful), asio::use_future);
+    r.d.s.drain();
+    ASSERT_EQ(r.completed_since("5", mark), 1U) << "setup: close()'s phase 1 wrote no Logout";
+    r.at(g - 1ns);
+    ASSERT_EQ(fixpp::session::session_test_access::liveness_count(r.session()), 1)
+        << "setup: the liveness loop left before G";
+    r.at(g);
+    EXPECT_EQ(fixpp::session::session_test_access::liveness_count(r.session()), 0)
+        << "the liveness loop did not leave at G: the give-up block was not reached";
+    EXPECT_EQ(r.records(), 0U) << "the give-up block recorded with the claim held by close()";
+    r.at(c + std::chrono::milliseconds{r.p.logout_ms});
+    EXPECT_TRUE(r.d.s.pump_until([&] { return rgs::Scene::ready(close_fut); }, 15s))
+        << "close() did not return";
+    r.d.s.drain();
+    EXPECT_TRUE(r.d.closed()) << "the transport is open";
+    EXPECT_EQ(r.d.s.state(), fsm_state::Disconnected);
+    EXPECT_EQ(r.disconnected() - disconnected_before, 1U) << "new Disconnected entries";
+    EXPECT_EQ(r.d.app->logouts - logouts_before, 1) << "onLogout calls";
+    EXPECT_EQ(r.records(), 0U) << "give-up records";
+}
+
 INSTANTIATE_TEST_SUITE_P(BothRoles, OneEnding106,
                          ::testing::Values(session_role::acceptor, session_role::initiator),
                          [](::testing::TestParamInfo<session_role> const& i) {
