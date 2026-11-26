@@ -65,15 +65,17 @@ TEST_P(OneEnding106, GiveUpThenClose) {
 }
 
 // tasks.md T089 (research D11 N-12): the loop's give-up block meets a claim held elsewhere in the
-// state that leaves it reachable, close() between setting closing and its Disconnected record.
-// The TestRequest is written at L + T, so the loop sleeps to G = L + 2T + 1 ns (105's instant for a
-// written TestRequest); close(graceful) is spawned at C = G - 100 ms and its phase 1 waits for the
-// peer's Logout, the session Active and closing. At G the loop wakes into the block, whose claim
-// is refused (closing_or_stopped_()): no slot-74 record, and the loop leaves there (its count drops
-// to 0 at G, the one return the loop takes at G). Inequalities: C + B = G + 1.9 s, so phase 1 is
-// still waiting at G; close()'s grace is a wall-clock timer of B, and the mock steps that follow
-// close() are issued at once. FR-017: one new Disconnected entry (close()'s), onLogout once, the
-// transport closed, no reason record.
+// state that leaves it reachable: close() between setting closing and its Disconnected record,
+// with the session still Active. close()'s phase 1 leaves Active once its Logout has been written
+// (LogoutSent), so the cell holds that Logout's write. The TestRequest is written at L + T, so the
+// loop sleeps to G = L + 2T + 1 ns (105's instant for a written TestRequest); close(graceful) is
+// spawned at C = G - 100 ms and its Logout's write is held. At G the loop wakes into the block,
+// whose claim is refused (closing_or_stopped_()): no slot-74 record, and the loop leaves there (its
+// count drops to 0 at G, the one return the loop takes at G with the session Active and no ending
+// phase entered). Inequalities: close()'s grace is a wall-clock timer of B = 2000 ms and the mock
+// steps after close() are issued at once, so the grace has not run out at G; at its expiry close()
+// closes the transport, which fails the held Logout. FR-017: one new Disconnected entry
+// (close()'s), onLogout once, the transport closed, no reason record.
 TEST_P(OneEnding106, CloseDuringGiveUpBlock_NoRecord) {
     t106::GiveUpParams p;
     p.logout_ms = 2000;
@@ -91,20 +93,21 @@ TEST_P(OneEnding106, CloseDuringGiveUpBlock_NoRecord) {
         << "setup: the liveness loop is not running at C";
     auto const disconnected_before = r.disconnected();
     auto const logouts_before = r.d.app->logouts;
-    auto const mark = r.d.bw->recorded.size();
+    r.d.hold_write_of("5");
     auto close_fut =
         asio::co_spawn(fixpp::test_support::session_executor_of(r.session(), r.d.s.ioc),
                        r.session().close(fixpp::session::close_mode::graceful), asio::use_future);
     r.d.s.drain();
-    ASSERT_EQ(r.completed_since("5", mark), 1U) << "setup: close()'s phase 1 wrote no Logout";
+    ASSERT_TRUE(r.d.parked() && r.d.started("5") == 1U)
+        << "setup: close()'s Logout is not held in its write";
     r.at(g - 1ns);
+    ASSERT_EQ(r.d.s.state(), fsm_state::Active) << "setup: the session left Active before G";
     ASSERT_EQ(fixpp::session::session_test_access::liveness_count(r.session()), 1)
         << "setup: the liveness loop left before G";
     r.at(g);
     EXPECT_EQ(fixpp::session::session_test_access::liveness_count(r.session()), 0)
         << "the liveness loop did not leave at G: the give-up block was not reached";
     EXPECT_EQ(r.records(), 0U) << "the give-up block recorded with the claim held by close()";
-    r.at(c + std::chrono::milliseconds{r.p.logout_ms});
     EXPECT_TRUE(r.d.s.pump_until([&] { return rgs::Scene::ready(close_fut); }, 15s))
         << "close() did not return";
     r.d.s.drain();
