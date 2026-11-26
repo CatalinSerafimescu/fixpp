@@ -649,15 +649,16 @@ not name.
   (`t105::GateStoreFactory`, as `LivenessTiming105.FreshWindow_FromTheWrite_StoreDelayAtLeastT` uses it); no slot-74 record
   at G − 1 ns, one at G; open at G + B − 1 ns, closed at G + B; no `Disconnected` and no join until the store returns
   (`L-093-12`, amended); the store released at teardown. RED on the base (no slot-74 record at G); M2 (T092).
-- [ ] T074 [US3] `tests/session/test_106_give_up.cpp` (same file), the two disclosure guards: `GiveUp106.PreActive_LimitOff_NotCutByEstablishment` (Engine
+- [X] T074 [US3] `tests/session/test_106_give_up.cpp` (same file), the two disclosure guards: `GiveUp106.PreActive_LimitOff_NotCutByEstablishment` (Engine
   rig, limit off, the reply Logon's write blocked, `logon_timeout_ms` 1 s; still open at `logon_timeout_ms` + 1 s;
   `L-106-f`; a fix turns it RED) and `GiveUp106.ZeroLogoutTimeout_StaysOpen` (B = 0, emit blocked; still open at
   G + 10 s, which follows the default B a regression would use by 8 s; `L-105-f`) — [guard: an unconditional close at
   G] (T095).
-  **Partly done:** `ZeroLogoutTimeout_StaysOpen` written (C4, GREEN on `$B` and at the head);
-  `PreActive_LimitOff_NotCutByEstablishment` (an Engine rig) not written. **Stopped (Phase 5 remainder, to the
-  orchestrator):** the Engine's accept path mints its own TCP transport, so no rig or seam the bundle names blocks an
-  Engine acceptor's reply Logon write; the evidence file's T074 section lists the candidates.
+  **Done (orchestrator ruling A on the Phase 5 remainder report):** `ZeroLogoutTimeout_StaysOpen` written (C4, GREEN
+  on `$B` and at the head). `PreActive_LimitOff_NotCutByEstablishment` is dropped: no seam can block the Engine's own
+  accept-path write (the Engine's accept path mints its own TCP transport). `L-106-f` stays disclosed; its basis is the
+  code reading recorded in the evidence file's T074 section (the establishment deadline is tested only between frames
+  and while reading), and the cell is on T167's and research D9's no-cell list with that reason.
 - [X] T075 \[P\] [US3] `tests/session/test_106_one_ending.cpp`: the `OneEnding106.<First>Then<Second>` pairs whose rig
   names no new symbol (write_timeout_ms unset), at least `OneEnding106.GiveUpThenClose` (`close()` at C = G + 100 ms < G + B,
   `logout_disconnect_timeout_ms` 5000 ms, the mock step issued at once after `close()`, a guard: `close()` takes no
@@ -782,10 +783,14 @@ not name.
   (the bound's parked timer is outstanding work after a teardown with no `close()`), and
   `CancelledOutboundStoreMeasurement.Returned_StoreCancelledAtItsLock` pins two `Disconnected` entries that T079's
   conversion makes one. H3 not committed as such.
-- [ ] T092 [US3] In `$M`'s `src/session/session.cpp`: M2, arm 1: the loop's arming of the connection bound for its emit deleted; RED: every `GiveUp106` cell
+- [X] T092 [US3] In `$M`'s `src/session/session.cpp`: M2, arm 1: the loop's arming of the connection bound for its emit deleted; RED: every `GiveUp106` cell
   except the guards (nothing else closes by G + B: the spurious-hit arm of FR-008), `EmitHeldInStore_*` included.
-  **Stopped (to the orchestrator):** the three `ResendHeldNoPending*` cells read GREEN under arm 1 (T093's arm turns
-  them RED); every other named cell RED (evidence file, "T092 to T099").
+  **Done (orchestrator ruling B on the Phase 5 remainder report):** the diagnostic (a stderr line at
+  `emit_in_flight_guard`'s construction, `$M` at H3) reads no construction in any of the three
+  `ResendHeldNoPending*` cells, both roles: they do not reach the mutated site (the loop gives up through the held
+  cap before any emit starts). They are M2 arm 2's cells (T093, RED there), and T092's named set is every `GiveUp106`
+  cell except the guards and those three; every cell that reaches the site reads RED under arm 1 (evidence file,
+  "T092 to T099" and "Ruling B").
 - [X] T093 [US3] In `$M`'s `src/session/session.cpp`: M2, arm 2: the held cap's pending term restored; RED: `GiveUp106.ResendHeldNoPending`; the pending twin
   stays GREEN.
 - [X] T094 [US3] In `$M`'s `src/session/session.cpp`: M14: `decide_give_up_()`'s `refused` branch records `Disconnected` and returns without the close; RED:
@@ -798,15 +803,24 @@ not name.
 - [X] T097 [US3] In `$M`'s `src/session/session.cpp`: M9 (`claim_ending_`'s test deleted) with M9′ (E-3's exit on a taken claim deleted), over the pairs of
   T075: RED (two reasons or two entries), or the pair reported as a guard of its state test, not counted toward M9
   (research D9 row FR-017).
-- [ ] T098 [US3] In `$M`'s `src/session/session.cpp`: M13 per reachable site a US3 cell returns through (T015's table), one arm each: the site's
+- [X] T098 [US3] In `$M`'s `src/session/session.cpp`: M13 per reachable site a US3 cell returns through (T015's table), one arm each: the site's
   `record_disconnected_unless_already_()` restored to the raw `record_state_transition_(fsm_state::Disconnected)`; RED
   (two `Disconnected` entries): the F9 block by `GiveUp106.BehindBlockedSend`, the loop's TestRequest and Heartbeat tails
   by `GiveUp106.TestRequestBlocked` and `GiveUp106.HeartbeatBlocked`, `inbound_heartbeat_reply_leaf_`'s tail by
   `GiveUp106.HeartbeatReplyBlocked` and `inbound_business_reject_leaf_`'s by `GiveUp106.BusinessRejectBlocked`. The
   Reject leaf has no arm: its write tail records nothing, so `GiveUp106.RejectBlocked` keeps its FR-017 assertion (one
   `Disconnected`, the close's) without an M13 arm.
-  **Stopped (to the orchestrator):** all five arms read GREEN at their named cells (vacuous); the evidence file has the
-  readings and a diagnostic arm.
+  **Done (orchestrator ruling B on the Phase 5 remainder report):** the diagnostic (a stderr line at each of the five
+  sites with whether the state was already `Disconnected`, `$M` at H3) reads, both roles: the loop's TestRequest
+  and Heartbeat tails are not reached in `TestRequestBlocked` and `HeartbeatBlocked` (the loop's
+  `ending_claim_ == give_up` test precedes its `!emit_r` tail); the F9 block, the Heartbeat reply's and the
+  BusinessMessageReject's tails are reached once each, with the state not yet `Disconnected` (each is the first
+  recorder; the loop's give-up write half is the second, and it dedupes), so those three arms are EQUIVALENT in these
+  cells. The mutated code is not redundant: at a write-limit expiry the bound records `Disconnected` (data-model E-5,
+  step 4) before the close fails the cut write, so each of these tails is then the second recorder. Every arm is
+  therefore read at T130 on the `WriteTimeout106` cell whose cut returns through its site: `Send` (F9),
+  `TestRequest`, `Heartbeat`, and the two classes the ruling adds, `HeartbeatReply` and `BusinessReject`
+  (T100). The evidence file's "Ruling B" section has the diagnostic's readings.
 - [X] T099 [US3] In `$M`'s `src/session/session.cpp`: The US3 connection-bound arms: the spawn seam's failure path and the wait seam's failure path each
   deleted (the cells of T076 read RED: `SpawnFails_AtLoop` no close, `WaitThrows` no close); M12's
   `ConnectionEnd` arm (the `Disconnected` edge's wake deleted; its two exit terms are redundant): RED
@@ -1206,7 +1220,9 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   the `session`, `config`, `log`, `capi` and `core` modules the diff adds a reachable line to; every uncovered added line or
   branch tested, waived with a one-line rationale (the respawn's `connection_bound_.running` term, the
   `install_reconnected_transport` and `~Session` asserts, the `Engine::stop()` term's decision side, which data-model E-3
-  names defensive or seamless), or escalated to a filed, labelled issue, in
+  names defensive or seamless; and `L-106-f`'s guard `GiveUp106.PreActive_LimitOff_NotCutByEstablishment`, dropped by
+  orchestrator ruling A because no seam can block the Engine's own accept-path write, its basis the code reading in the
+  evidence file's T074 section), or escalated to a filed, labelled issue, in
   `.specify/decisions/106-logon-guards-write-bounds-verify.md`.
 - [ ] T168 **(orchestrator)** windows-msvc-debug in `/mnt/c/temp/fixpp`, after taking `.sandbox-lock` (PARENT
   `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md` Step 0), never at the same time as a Linux build: build
