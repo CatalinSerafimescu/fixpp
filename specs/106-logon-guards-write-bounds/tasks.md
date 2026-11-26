@@ -441,8 +441,13 @@ admits the identity before the arm writes a frame or changes sequence state (FR-
 ### Implementation for US1
 
 - [ ] T045 [US1] `include/fixpp/session/compid_authorization_policy.hpp` and `src/session/compid_authorization_policy.cpp`:
-  `CompIdAuthorizationPolicy::has_logon_validator() const noexcept`, true when `set_logon_validator` installed a callable
-  (pimpl: no layout change; data-model E-1; Q1).
+  `CompIdAuthorizationPolicy::has_logon_validator() const noexcept`, true when `set_logon_validator` installed a callable:
+  false when never set, true after a callable, false again after `set_logon_validator` with an empty one (the test
+  `authorize_logon` makes; pimpl: no layout change; data-model E-1; Q1). Its header comment, with
+  `set_logon_validator`'s, states E-1's obligations for a policy author: a frame `interpret_logon` refuses never
+  reaches the validator (it fails closed, `B-106-1`); an absent Username(553) or Password(554) reaches it as empty, and
+  a validator that requires them refuses that itself; the validator may be called twice per connection, after the bound
+  event (`L-106-c`).
 - [ ] T046 [US1] `include/fixpp/session/session.hpp`, `src/session/session.cpp`: the private callee
   `logon_identity_refuses_(frame, consume)` (data-model E-1's per-half table: the mTLS half applies on `mtls_ca` or
   `mtls_pinned` in either role, and with `consume` false emits no event and consumes nothing; the credentials half applies
@@ -529,6 +534,8 @@ every refusal between keeps NextNumIn in FR-006's sense (FR-006, SC-002).
 - [ ] T061 [US2] `include/fixpp/session/seqnum_manager.hpp`, `src/session/seqnum_manager.cpp`:
   `SeqnumManager::classify_inbound(seq)` (data-model E-2: the body of `check_inbound` without the advance; the lock, a
   drained lock giving `session_already_closed`, `frozen_`, too low, too high, `seqnum_max`). A member function only.
+  Its header comment, beside `check_inbound`'s, states E-2's contract: `noexcept`, the error per case above, no
+  advance.
 - [ ] T062 [US2] `src/session/session.cpp`: `on_inbound_not_connected_`: the classification where `check_inbound` was; the commit
   (`co_await seqnum_mgr_.check_inbound(seq)`) after the 1137 block, before `LogonReceived`, when
   `logon_inbound_advanced`, so the reply's 789 reads the advanced value (F-4); a refused commit records `Disconnected`
@@ -804,8 +811,12 @@ cells; `-L 105` and the 538 binary as guards.
   `Disconnected` from the bound, the counter 0, the write ended by the drain's own wall-clock bound within 5 s + 2 s);
   `ConnectionBound106.DrainCancelled_RespawnsOnBlockedWrite` (the same rig, the second `drive_reconnect()` cancelled
   through its cancellation slot while parked, so it returns `dispatch_aborted`; then `step_to(S + W)`: one write-timeout
-  record, `Disconnected`, closed once, `session_write_timeout` from the Reject's write). Every Drain cell sets
-  `logout_disconnect_timeout_ms` 5000 ms. Mutants: T129.
+  record, `Disconnected`, closed once, `session_write_timeout` from the Reject's write);
+  `ConnectionBound106.DrainCancelled_RespawnFails_ClosedAtOnce` (the same rig, `connection_bound_spawn_fails_` set
+  after the bound's first spawn (the Reject's write armed) and before the cancellation, so the respawn is refused:
+  at that return, with the clock not advanced, the claim taken, `Disconnected`, closed once, zero reason records, and
+  the Reject's write returns `dispatch_aborted`, its epoch not cut; RED with the refused-respawn path deleted: open, no
+  `Disconnected`). Every Drain cell sets `logout_disconnect_timeout_ms` 5000 ms. Mutants: T129.
 - [ ] T107 [US4] `tests/session/test_106_seams.cpp`: `ShippingClock106.DirectDriver_BoundBesideLiveness_TestRequestAtT` [seam: M8] (research D9 row R2(b);
   placed in plan P3, written here because its rig needs D5's write arming): `system_clock_source`, the coroutines on
   `session->executor()`, HeartBtInt 2 s (T = 2.4 s), W = 200 ms, B = 2000 ms; app sends every 300 ms, the peer silent;
@@ -850,7 +861,10 @@ cells; `-L 105` and the 538 binary as guards.
   after clearing `reconnect_drain_in_flight_`, spawn the bound again when `conn_gen_` has not moved,
   `closing_or_stopped_()` does not hold, `write_in_flight_` or `emit_in_flight_` holds, and `connection_bound_.running` is
   false (that term defensive, no cell: data-model E-3); the new bound re-arms on the in-flight write's
-  `write_started_at_`; a refused spawn fails closed as T111's.
+  `write_started_at_`. A refused respawn fails closed in T111's live-write form without its first step, as data-model
+  E-3's respawn paragraph words it: the in-flight write is already started, so the session takes the claim, records
+  `Disconnected` and closes (research D3, "One close"), and the close fails that write. Cell:
+  `ConnectionBound106.DrainCancelled_RespawnFails_ClosedAtOnce` (T106); mutant: T129 arm (e).
 - [ ] T115 [US4] `src/session/session.cpp`: Deferred item ("The RAII clears"), for `write_in_flight_`: as T088, every exception and `catch`
   return of `live_write_serialized_` re-derived to reach the `Disconnected` edge, or given a cell with the clear's mutant
   RED. Record it.
@@ -891,7 +905,9 @@ cells; `-L 105` and the 538 binary as guards.
   a hang); (b) the `Disconnected` edge's wake deleted — RED `Teardown_ConnectionEnd_Timing`; (c) the drain term and
   `claim_ending_`'s drain refusal deleted — RED `WriteExpiryDuringDrain_NoRecord` (a write-timeout record); (d)
   `drive_reconnect`'s respawn after a failed drain deleted — RED `DrainCancelled_RespawnsOnBlockedWrite` (no write-timeout
-  record at S + W). Plus the write-spawn seam's failure path deleted — RED `ConnectionBound106.SpawnFails_AtWrite`.
+  record at S + W); (e) the respawn's refused-spawn path deleted (the refusal returns without the claim, the record or
+  the close) — RED `DrainCancelled_RespawnFails_ClosedAtOnce` (open, no `Disconnected`). Plus the write-spawn seam's
+  failure path deleted — RED `ConnectionBound106.SpawnFails_AtWrite`.
 - [ ] T130 [US4] In `$M`'s `src/session/session.cpp`: M13 per reachable site a `WriteTimeout106.<Class>` cut returns through (T015's table), one arm
   each, the site's raw `record_state_transition_(fsm_state::Disconnected)` restored; RED: that class's cell (two
   `Disconnected` entries), `send_body_`'s F9 block by `WriteTimeout106.Send`. Every reachable row of the table now has an
@@ -989,7 +1005,9 @@ transport binary's `AsioTlsTransportErrorPaths.*` and `-L 105`'s `TlsClose105.*`
   `febad771` and `aea0d5a5`.
 - [ ] T147 [US6] **(orchestrator)** Record this PR's `windows-msvc-asan` leg outcome (completed, green or red on its own
   steps, not on the cap; SC-006) in the verify record and the Gate B record, from
-  `gh pr view <N> --json statusCheckRollup`. B&L: `B&L delta: none — a CI job cap is not shipped behaviour` (research D8),
+  `gh pr view <N> --json statusCheckRollup`, and read that leg's `sccache statistics` step from its log
+  (`gh run view --job <id> --log`): a warm run is recorded as warm and does not discharge the cold case, which then
+  rests on the workflow comment's push:main recipe (SC-006, FR-001). B&L: `B&L delta: none — a CI job cap is not shipped behaviour` (research D8),
   recorded for `check_bl_delta.py`.
 
 ---
@@ -998,14 +1016,25 @@ transport binary's `AsioTlsTransportErrorPaths.*` and `-L 105`'s `TlsClose105.*`
 
 - [ ] T148 [P] `include/fix/c_api/version.h`: `FIXPP_C_ABI_VERSION_MINOR` 19 and a 1.19 history entry marked
   **BREAKING** (`[const §X.7]`), behaviour only, no new symbol: an unauthorised identity's Logon draws nothing and changes
-  nothing (C-1); a refused Logon or acknowledgement keeps NextNumIn (C-2); the give-up fires with a write blocked, its
+  nothing (C-1; C++ and TOML behaviour with no reach from C, contract C-6's no-reach clause); a refused Logon or acknowledgement keeps NextNumIn (C-2); the give-up fires with a write blocked, its
   Logout limited as 105's (C-3); the C++/TOML-only write limit and handshake keys, unreachable from C (C-4.1, C-5.4).
 - [ ] T149 [P] `include/fix/c_api/session.h` (comments only; never clang-formatted): `fixpp_session_close` gains a
-  `BREAKING (C-ABI 1.19, [const §X.7]; 106)` block (an unauthorised identity's Logon draws nothing and changes nothing; a
-  refused Logon or acknowledgement keeps NextNumIn; close's return code for a session that a now-silent refusal keeps
-  from establishing); "amended in C-ABI 1.19, 106" clauses on `fixpp_session_is_established` (the give-up with a write
-  blocked) and `fixpp_session_send` (a send blocked at the give-up's close returns `FIXPP_ERR_CANCELLED`);
-  `fixpp_session_open` and the two callback registrations unchanged (D7's census, T018).
+  `BREAKING (C-ABI 1.19, [const §X.7]; 106)` block, and "amended in C-ABI 1.19, 106" clauses on
+  `fixpp_session_is_established` and `fixpp_session_send`, each clause's text as contract C-6 words it:
+  - the close block: a refused Logon or acknowledgement keeps NextNumIn; and C-6's no-reach clause, stated in the
+    form of the STRICT clause's "no reach as shipped": an unauthorised identity's Logon draws nothing and changes
+    nothing in C++ and TOML; no C session reaches an identity gate that can refuse a Logon the base let establish
+    (no C setter installs a logon validator or a CompID binding, and `FIXPP_SECURITY_TLS`'s `mtls_ca` policy is
+    empty, so default-deny on the base too); so close's return code is the base's on every C session; that holds while
+    C-6's `git grep` over `src/capi` and `include/fix/c_api` finds nothing;
+  - `fixpp_session_is_established`: the give-up with a write blocked. It reads false from the `onLogout` that the
+    `Disconnected` record fires, because the C slot's `established` flag follows the trampoline's `onLogon` and
+    `onLogout`. That record follows 105's cut at G + B at the latest, where on the base the flag stayed true while
+    the write hung (C-3.3's store-phase exception aside);
+  - `fixpp_session_send`: a send blocked at the give-up's close returns `FIXPP_ERR_CANCELLED`. The value is
+    `B-105-8`'s, unchanged. The clause is BREAKING because on the base that send hung: a call that "could already" be
+    made now returns "a result other than the one documented" (`[const §X.7]`).
+  `fixpp_session_open` and the two callback registrations are unchanged (D7's census, T018).
 - [ ] T150 Move every "pins the minor" row of T018 to 1.19 (the capi version tests, the Python binding's version
   pins, the CI and tool scripts; the Python binding gains nothing else, D7); re-record `tools/capi_freeze.sha256` through
   its generator if it hashes the touched headers (105 re-recorded it at verify), and run the freeze check.
@@ -1017,15 +1046,16 @@ transport binary's `AsioTlsTransportErrorPaths.*` and `-L 105`'s `TlsClose105.*`
 - [ ] T153 `spec/behaviors-and-limitations.md`: Same live file, amended in place, "(amended <the edit's date>, 106)", each changed clause named (research D8):
   `B-099-2` (title: the identity gates run first in both roles; its "Consume limit" clause: the gate Reject and the block
   both keep NextNumIn on every role; `L-104-8` cited as closed); `B-105-3` (a written TestRequest keeps the count from its
-  write's return; a TestRequest or Heartbeat whose write has not returned is given up at L + 3T; the held case capped
-  with one pending or none); `L-093-12` (the liveness loop's TestRequest or Heartbeat store call among those that hold
+  write's return; a TestRequest or Heartbeat whose write has not returned is given up at L + 3T + 1 ns; the held case
+  capped at L + 3T + 1 ns with one pending or none); `L-093-12` (the liveness loop's TestRequest or Heartbeat store call among those that hold
   `close()`'s and `stop()`'s joins; the give-up at G and the close at G + B still happen); `B-544-1`'s title and body and
   `L-497-1`'s title and condition (6) *Clock*, with D8's clause-by-clause text copied verbatim and ruling R14 flagged for
   the owner's review at merge; `L-105-f` narrowed (non-ending writes bounded when `write_timeout_ms` is set; the give-up
   no longer waits behind a blocked write; the held no-pending case capped; what stays open: the limit off with a peer
   that keeps sending and never reads, and B = 0 or no clock).
 - [ ] T154 `spec/behaviors-and-limitations.md`: Same live file, a section `## 106`: `B-106-1` (the identity gates first, silent, no state change, with the
-  credentials rule's width, N-11), `B-106-2` (NextNumIn kept on every Logon refusal, with D2's table), `B-106-3` (the
+  credentials rule's width, N-11; as research D8 words it: the observables of each refusal class, contract C-1.3, and that a
+  direct mTLS initiator started by `open()` holds no peer identity and never reaches Active, contract C-1.7), `B-106-2` (NextNumIn kept on every Logon refusal, with D2's table), `B-106-3` (the
   give-up with a write blocked, D4's instant, the one ending), `B-106-4` (`write_timeout_ms`), `B-106-5` (the two
   handshake keys), `B-106-6` (the surfaces: C-ABI 1.19 BREAKING behaviour only; the C++ layout of `Session`,
   `SessionConfig`, `EngineConfig`, `EngineEstablishment`; the additions `SeqnumManager::classify_inbound` and
@@ -1135,10 +1165,17 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   matrix): C-ABI 1.19 **BREAKING** (behaviour only) with the `version.h` history entry and `B-106-6`; the C++ layout changes,
   the C++ additions and the error enumerator (`B-106-6`'s list);
   the `local build: green on linux-clang-debug @ <sha>` line (T169); the Gate A outcome
-  (`.specify/decisions/106-logon-guards-write-bounds-gatea.md`) and, after it, the Gate B outcome; ruling R14 flagged for the
-  owner's review at merge; closing keywords only for #702, #703, #714, #717 and #724, with `closingIssuesReferences` read
+  (`.specify/decisions/106-logon-guards-write-bounds-gatea.md`) and, after it, the Gate B outcome; ruling R14 with its scope
+  named (spec.md Clarifications, R14 and R15): the `Session::send` half, with `write_timeout_ms` set on a user clock,
+  is a new conditional zero, flagged for the owner's review at merge; the emit half is a disclosure of base behaviour,
+  since the base's liveness loop already waits through `Clock::sleep_until` once per cycle on a user clock; closing keywords only for #702, #703, #714, #717 and #724, with `closingIssuesReferences` read
   back (a keyword fires inside a negation, in the body and in commit messages). Then the final sign-off order: body →
   labels in one API call → wait about 2 minutes → push last.
+- [ ] T178a **(orchestrator)** Gate B prep, before T179: re-run T050's reading at the head against the base (research
+  Risks, "Coroutine frame growth in the Logon arms"; contract C-9's per-Logon row). For each Logon arm the diff touches
+  (`on_inbound_not_connected_`, `on_inbound_logon_sent_`), list every local declared before a `co_await` that it
+  outlives, at the head and at `$B`; a new one fails the rule and moves into a callee. Record the two lists and the
+  ruling in `.specify/decisions/106-logon-guards-write-bounds-evidence.md`, cited in the Gate B record.
 - [ ] T179 **(orchestrator)** `/gate-b` on the PR (preconditions: the verify record non-RED, T183 non-failing, the
   B&L delta recorded); every fixer round re-runs the touched cells only, then T177's last actions.
 - [ ] T180 `/mnt/wsl/fixppbuild/fixpp-106-base`, `/mnt/wsl/fixppbuild/fixpp-106-mutants` and `/mnt/wsl/fixppbuild/fixpp-106-verify`: Remove `$B`, `$M` and `$V` (`git worktree remove`, then `git worktree prune`) once every RED reading, mutant,
@@ -1236,7 +1273,7 @@ the `install_reconnected_transport` and `~Session` asserts (T084, T167), `Teardo
 | M15 | T033 | the commit's result ignored | T069 |
 | an unconditional close at G | T095 | the knob's reset moved after S3 | T070 |
 | the key accepted at session scope | T037 | the key refused on an acceptor or plaintext session | T144 |
-| the spawn and wait seams | T099, T129 | the respawn deleted | T129 (arm d) |
+| the spawn and wait seams | T099, T129 | the respawn deleted; its refused spawn's path deleted | T129 (arms d, e) |
 | a wake ends the bound (`SpuriousWake_NoEnding`) | T099 | | |
 
 ## Traceability: contract clauses → tasks
@@ -1258,7 +1295,7 @@ the `install_reconnected_transport` and `~Session` asserts (T084, T167), `Teardo
 | C-6 | T024 | T148, T149, T150, T178 |
 | C-7 | statement | T154 (copied) |
 | C-8 | the cells each row names | T153, T154 |
-| C-9 | T108 | T164, T166 |
+| C-9 | T108 | T164, T166, T178a |
 
 ## Dependencies and execution order
 

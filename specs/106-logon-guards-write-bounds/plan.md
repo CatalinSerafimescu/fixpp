@@ -42,7 +42,7 @@ Batches B129 (#724), B110 (#702, #703), B124 (#714) and B123 (#717), in one PR.
 
    The loop writes the Logout when its emit returns, or 105's limit closes the transport at the decision plus
    `logout_disconnect_timeout_ms`, which fails every blocked write.
-   - An emit that has not returned is given up at L + 3T (ruling R1).
+   - An emit that has not returned is given up at L + 3T + 1 ns (ruling R1).
    - The 3T held cap applies with no TestRequest pending too, per the owner's T119b text.
 5. **The opt-in write limit (#714b; D5).** `write_timeout_ms` (C++ and TOML, 0 = off, no C setter) limits every
    non-Logout live write, counted from its `async_write` call.

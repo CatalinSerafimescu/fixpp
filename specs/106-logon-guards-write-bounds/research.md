@@ -504,9 +504,10 @@ the acceptor's reply Logon, `honor_peer_next_expected_`'s resend frames), and th
   - the give-up fires with a write blocked, its Logout limited as 105's;
   - the C++/TOML-only write limit and handshake keys, unreachable from C.
 - `session.h` clauses "amended in C-ABI 1.19, 106" (C-5): `fixpp_session_close` (a new `BREAKING (C-ABI 1.19,
-  [const §X.7]; 106)` block: an unauthorised identity's Logon draws nothing and changes nothing; a refused Logon or
-  acknowledgement keeps NextNumIn; and close's return code for a session that a now-silent refusal keeps from
-  establishing), `fixpp_session_is_established` (the give-up with a write blocked) and `fixpp_session_send` (a send
+  [const §X.7]; 106)` block: a refused Logon or acknowledgement keeps NextNumIn; and contract C-6's no-reach clause:
+  an unauthorised identity's Logon draws nothing and changes nothing in C++ and TOML, no C session reaches an identity
+  gate that can refuse a Logon the base let establish, and close's return code is the base's on every C session),
+  `fixpp_session_is_established` (the give-up with a write blocked) and `fixpp_session_send` (a send
   blocked at the give-up's close returns `FIXPP_ERR_CANCELLED`). `fixpp_session_open` is unchanged.
   - Census at `9d81082a`: `git grep -n 'amended in C-ABI 1.18\|BREAKING (C-ABI 1.18' include/fix/c_api/session.h`
     lands in the docs of `fixpp_session_close`, `_is_established`, `_send`, `_register_callback` and
@@ -518,9 +519,9 @@ the acceptor's reply Logon, `honor_peer_next_expected_`'s resend frames), and th
     finds clause text only), so FR-017's at-most-once `onLogout` changes no C clause.
 - Each change is breaking by `[const §X.7]`'s definition, "sees a call it could already make fail or return a result
   other than the one documented": `fixpp_session_send` blocked at the give-up returns `FIXPP_ERR_CANCELLED` where it
-  hung; `fixpp_session_is_established` turns false at the give-up's ending where it stayed true; `fixpp_session_close`
-  returns `FIXPP_ERR_THREAD_SESSION_LIFECYCLE` for a session a now-silent refusal keeps from establishing (contract
-  C-6); and the frames a C session's peer receives at a Logon change (C-1, C-2).
+  hung; `fixpp_session_is_established` turns false at the give-up's ending where it stayed true; and the frames a C
+  session's peer receives at a Logon change (C-2). `fixpp_session_close`'s return code is not among them, and C-1 has
+  no reach from C: contract C-6's no-reach clause, `/speckit-analyze` re-run finding E1, ruled unreachable.
 - §X.7's BREAKING marks, each with its task: the `version.h` history entry (T148), the documentation of each affected
   declaration in `session.h` (T149), the PR description (T178) and the B&L delta (`B-106-6`, T154).
 - MINOR pins census: `git grep -nE 'MINOR 18|1\.18' -- include tests bindings tools ci examples` (`tests/interop` is
@@ -541,10 +542,10 @@ the acceptor's reply Logon, `honor_peer_next_expected_`'s resend frames), and th
     roles" (D1). Its "Consume limit" clause says the gate Reject and the block both keep NextNumIn on every role (D2).
     It cites `L-104-8` as closed.
   - `B-105-3`. "The write counted from the return of the TestRequest's store and write" stays for a written
-    TestRequest. A TestRequest or Heartbeat whose write has not returned is given up at L + 3T (D4), and the Logout's
+    TestRequest. A TestRequest or Heartbeat whose write has not returned is given up at L + 3T + 1 ns (D4), and the Logout's
     Text names the issued TestReqID even when that TestRequest's write did not complete, so the peer may never have
     received it (D4, "Supersedes"). "With none pending before the hold there is no cap, `L-105-f`" becomes "capped at
-    L + 3T with one pending or none" (D3).
+    L + 3T + 1 ns with one pending or none" (D3).
   - `L-093-12`: the store calls that hold `close()`'s and `stop()`'s joins include the liveness loop's TestRequest or
     Heartbeat store call; the give-up at G and the close at G + B still happen (106).
   - `B-544-1`: its zero for a sequential `Session::send` gains a third condition: "and, when `write_timeout_ms` is set, the session's effective clock is `system_clock_source`" (106, `L-106-e`; ruled 2026-11-26 by the orchestrator under the owner's delegation (spec.md Clarifications, R14), flagged for the owner's review at merge). `L-497-1` gains condition (6) *Clock*, with `L-106-e`'s text. Clause by clause (live text → new text):
@@ -791,7 +792,7 @@ against FR-011 and C-4.5; the unbounded case stays disclosed (`L-105-f`).
 
 - **Coroutine frame growth in the Logon arms** (104 T093). D1's precheck and D2's classification live in callees, with
   no new local across an arm's await. That is a structural rule, checked by reading each arm's locals at review against
-  the base's: the paired benches' steady-state sends run no Logon arm, so they do not measure it.
+  the base's (T050 at `H1`, T178a at the head): the paired benches' steady-state sends run no Logon arm, so they do not measure it.
 - **The bound's re-arm.** A peer that sends without reading keeps moving G; each re-arm is one wait, no spawn.
 - **Two branches of one wait.** The mock cells cannot see the shipping branch; the two shipping-clock cells bind it, each
   RED under M8 first.

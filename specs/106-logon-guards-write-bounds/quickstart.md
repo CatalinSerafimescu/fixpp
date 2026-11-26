@@ -123,6 +123,10 @@ mutant-specific literal) before believing a GREEN.
 - **Sanitizers:** the same set on `linux-clang-asan`, `linux-clang-tsan` and `linux-clang-ubsan`. D3 and D5 add one
   strand-confined coroutine per connection, so TSan runs the `GiveUp106`, `WriteTimeout106`, `OneEnding106` and
   `ConnectionBound106` cells 50 times (`--repeat until-fail:50`).
+- **A sanitizer timing failure is not yet a hang:** a cell that misses a wall-clock budget or deadline on a sanitizer
+  lane is re-run once, alone, at that budget × 10. A pass at × 10 is recorded as sanitizer slowdown, with both runs, in
+  the evidence file; a failure at × 10 is a defect until disproven (the repo's sanitizer rule). Mock-clock instants are
+  exact and take no such re-run.
 - **Release:** `alloc_guard_106_connection_bound_mallocnesia` and the `-L 544` registrations, on `linux-clang-release`.
 - **Not test runs, but in the scope:** the `linux-gcc-release` `-Werror` build of the touched targets (T170); the whole
   pytest suite, `python3 -m pytest bindings/python/tests`, against the module rebuilt at C-ABI 1.19 (T171; Article XVII

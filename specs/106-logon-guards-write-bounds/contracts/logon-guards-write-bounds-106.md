@@ -205,13 +205,12 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
   changes below reach no C-visible type. Each amended symbol's `[const §X.5]` reentrancy contract is unchanged: the
   connection bound runs on the session's domain and adds no C entry point and no lock a C call waits on.
   - `version.h`: MINOR 19, with a 1.19 history entry naming C-1, C-2 and C-3, and the C++/TOML-only write limit and
-    handshake keys, unreachable from C (C-4.1, C-5.4). Research D7 and T148 give the same four items.
+    handshake keys, unreachable from C (C-4.1, C-5.4). C-1 is named as C++ and TOML behaviour with no reach from C
+    (the no-reach clause below). Research D7 and T148 give the same four items.
   - Clauses "amended in C-ABI 1.19, 106" in `fixpp_session_close` (a new `BREAKING (C-ABI 1.19, [const §X.7]; 106)`
-    block: an unauthorised identity's Logon draws nothing and changes nothing; a refused Logon or acknowledgement
-    keeps NextNumIn; and close's return code for a session that a now-silent refusal keeps from establishing:
-    `FIXPP_ERR_THREAD_SESSION_LIFECYCLE`, translated for the consumer's ABI minor, the never-established case of the
-    reaped-session contract, as the 1.9 to 1.11 clauses word it; it returned `FIXPP_ERR_OK` where the base's
-    stay-in-arm Reject let a later Logon establish, C-1.4),
+    block: a refused Logon or acknowledgement keeps NextNumIn; and the no-reach clause below, for an unauthorised
+    identity's Logon, which draws nothing and changes nothing in C++ and TOML, and for close's return code, which is
+    the base's on every C session),
     `fixpp_session_is_established` (the give-up with a write blocked: it reads false from the `onLogout` that the
     `Disconnected` record fires, since the C slot's `established` flag follows the trampoline's `onLogon` and
     `onLogout`; that record follows 105's cut at G + B at the latest, where on the base it stayed true while the write hung; C-3.3's
@@ -220,6 +219,23 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
     hung, a call that "could already" be made returning "a result other than the one documented", `[const §X.7]`).
     `fixpp_session_open` is unchanged.
   - `session_write_timeout` maps to the existing `FIXPP_ERR_TRANSPORT_IO`, through `translate` (C-4.3).
+  - **No reach from C: the identity gates, and close's return code** (`/speckit-analyze` re-run, finding E1, ruled
+    unreachable). No identity gate (C-1.1) can refuse a C session's Logon that the base let establish:
+    - A C acceptor's credentials half always admits, because no C setter installs a logon validator and the default
+      `authorize_logon` accepts.
+    - `FIXPP_SECURITY_TLS` maps to `mtls_ca` (`fixpp_session_config_set_security`), and no C setter adds a
+      `CompIdAuthorizationPolicy` binding. The empty policy is default-deny (`CompIdAuthorizationPolicy::authorize`),
+      so that identity is refused on the base as it is at 106, and the base's stay-in-arm Reject followed by a Logon
+      that establishes cannot happen.
+    So `fixpp_session_close`'s code, computed from `Session::close`'s `session_already_closed` and the slot's
+    `ever_established` latch (`src/capi/session.cpp`, `fixpp_session_close`), is the base's for every C session.
+    The `session.h` block and the `version.h` entry state the identity item as C++ and TOML behaviour with no reach
+    from C, in the form of the STRICT clause's "no reach as shipped" in `session.h`. The clause holds while
+    `git grep -n -e compid_authorization_policy -e set_logon_validator -- src/capi include/fix/c_api` finds nothing.
+    Its known positive is the same grep over `src/config`, which finds the TOML mapper. A C setter for either one
+    invalidates the clause, and it then owes a C-ABI cell: a silent refusal, then close returning
+    `FIXPP_ERR_THREAD_SESSION_LIFECYCLE`, RED on the base. There is no cell now. On the base and at 106 alike, every
+    C session that reaches a refusing gate never establishes, so such a cell could not read RED on the base.
 - **C++ BREAKING, layout:** `Session`, `SessionConfig` (+`write_timeout_ms`), `fixpp::core::EngineConfig` and
   `fixpp::config::EngineEstablishment` (each +`acceptor_tls_handshake_timeout`).
 - **C++ additive:**
@@ -277,11 +293,13 @@ Every engine cell above names the source read (versions in the heading).
   D9's mallocnesia cell).
   Measured by the paired `engine_send_bench` (a `paired` row of `bench/ci-suite.txt`, whose writes reach
   `live_write_serialized_`).
-- **Per Logon:** D1's callee and D2's second lock acquisition, on the establishment path only.
+- **Per Logon:** D1's callee and D2's second lock acquisition, on the establishment path only. No bench runs a Logon
+  arm, so this cost is not timed; the arms' locals are read against the base's at review (research Risks, "Coroutine
+  frame growth in the Logon arms"; T050, T178a).
 - **Per liveness emit:** one cancel and one re-arm of the connection bound's timer; no spawn (D3). **Per connection:**
   one `co_spawn` of the connection bound.
 - Locally, the paired `session_send_bench` (not in `ci-suite`; its sends use `transport_send`, so it guards
-  `store_then_emit`'s new argument) and `on_inbound_frame_bench` (the inbound dispatcher whose Logon arms D1 and D2
-  edit). The method is 105's T138: merge-base release tree, path padded, A-B-A-B, min per tree, +5 % one-sided.
+  `store_then_emit`'s new argument) and `on_inbound_frame_bench` (dispatcher frame growth: it times the inbound dispatcher whose
+  Logon arms D1 and D2 edit; its steady-state frames run no Logon arm, so it measures the dispatcher, not the arms). The method is 105's T138: merge-base release tree, path padded, A-B-A-B, min per tree, +5 % one-sided.
 - No bench row sets `write_timeout_ms`: the limit is off by default and the paired budget governs the default path. The
   limit-on cost above is bounded by the mallocnesia cell's zero and is not timed.

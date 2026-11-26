@@ -124,6 +124,11 @@ Ruling of the orchestrator under the same delegation, applying round 6's exact t
 
 - Owner ruling 2026-11-25: autonomous end-to-end work; local builds are pre-approved by the owner for this feature (`[const §XVII.7]` satisfied by that ruling). Scope rule (owner 2026-11-25): targeted tests only, plus ONE full ctest on linux -debug; one build at a time.
 
+### Session 2026-11-26 (analyze re-run)
+
+- R15 (the R14 escalation; orchestrator ruling under the owner's delegation): R14's disclosure reading holds. On a user clock the base's liveness loop already waits through `Clock::sleep_until` once per cycle (`src/session/session.cpp`, `Session::run_liveness_loop_body_`, the `effective_clock_->sleep_until(deadline)` in its `while (liveness_may_originate_())` loop), so the emit half was never a zero on a user clock. R14 records that; its emit half is not a new `[const §XV.1]` deviation. Its `Session::send` half, with `write_timeout_ms` set on a user clock, stays a new conditional zero, flagged for the owner's review at merge (T178).
+- E1 (C-ABI, ruled unreachable): `fixpp_session_close`'s return code is the base's on every C session, because no C session reaches an identity gate that can refuse a Logon the base let establish (contract C-6's no-reach clause). The clause and its condition replace the `FIXPP_ERR_THREAD_SESSION_LIFECYCLE` change that C-6, research D7 and checklist c-abi CHK007 stated. No cell is owed while the condition holds.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — An unauthorised identity is disconnected without a message and changes nothing (Priority: P1)
