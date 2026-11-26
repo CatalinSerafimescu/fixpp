@@ -1566,7 +1566,8 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   `.specify/decisions/106-logon-guards-write-bounds-verify.md` under `## Completeness`.
   **Done** (evidence file, "T183"; record `.specify/decisions/106-logon-guards-write-bounds-completeness.md`, which
   `/gate-b` 4d reads, with a pointer from the verify record's Completeness section): **fully waived** (W-T147 for
-  FR-001, FR-002 and SC-006; W-FULLCTEST for SC-007). Open by design: T147 (pending CI), T177 to T179 with T178a
+  FR-001, FR-002 and SC-006; W-FULLCTEST for SC-007; W-NA-BY-NATURE for FR-007's and FR-016's implementation column, FR-016's cell column and
+  SC-007's implementation column). Open by design: T147 (pending CI), T177 to T179 with T178a
   (orchestrator), T181 (post-merge). Re-checked after Gate B's fix rounds.
 
 ---
