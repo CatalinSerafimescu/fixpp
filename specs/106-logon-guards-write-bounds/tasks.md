@@ -138,13 +138,13 @@ marked **(orchestrator)** is run or requested by the orchestrator; every other t
 census shown first to report its known positive (a census that reports nothing is not believed until its positive
 shows). Re-derived at HEAD. **Blocks every later phase.**
 
-- [ ] T001 Check `git -C $T rev-parse --abbrev-ref HEAD` is `106-logon-guards-write-bounds`; run the base-equivalence
+- [X] T001 Check `git -C $T rev-parse --abbrev-ref HEAD` is `106-logon-guards-write-bounds`; run the base-equivalence
   recipe of the Execution rules and record its output; `df -h /mnt/wsl/fixppbuild`, then create `$B` (at
   `git -C $T merge-base HEAD origin/main`) and `$M` with `git worktree add --detach` on `/mnt/wsl/fixppbuild`; run
   `codegraph sync` in `$T` and confirm `codegraph status --json` names `$T` with a nonzero `fileCount`.
-- [ ] T002 Create `.specify/decisions/106-logon-guards-write-bounds-evidence.md` with one section per census, per RED
+- [X] T002 Create `.specify/decisions/106-logon-guards-write-bounds-evidence.md` with one section per census, per RED
   reading (C1 to C6), per mutant task, per bench run and per lane run of the Polish phase.
-- [ ] T003 Register ctest `session_106_tests` (labels `session` and `106`) in `tests/session/CMakeLists.txt` after
+- [X] T003 Register ctest `session_106_tests` (labels `session` and `106`) in `tests/session/CMakeLists.txt` after
   `add_session_105_bucket`'s shape, over `tests/session/test_106_identity_first.cpp`, `test_106_give_up.cpp`,
   `test_106_one_ending.cpp` and `test_106_handshake.cpp`, and a second entry `session_106_seam_tests` (labels `session`,
   `106` and `106_seam`) over `tests/session/test_106_seams.cpp` alone; create each file as a compiling stub so that
@@ -159,14 +159,14 @@ shows). Re-derived at HEAD. **Blocks every later phase.**
   precedent), the cells that mint a TLS transport (`TomlHandshake106.{SessionKey, SecondSessionDiverges,
   DefaultTransport_MixedRoles_Accepted}`) in a config-suite file only if that bucket links the TLS transport and the
   fixture directory, else in `tests/session/test_106_handshake.cpp`; each such file carries label `106`.
-- [ ] T004 Register `alloc_guard_106_connection_bound_mallocnesia` in `tests/alloc_guard/CMakeLists.txt` through
+- [X] T004 Register `alloc_guard_106_connection_bound_mallocnesia` in `tests/alloc_guard/CMakeLists.txt` through
   `fixpp_add_mallocnesia_test` (labels `alloc_guard` and `106`, the Release gating the other mallocnesia entries use),
   over a stub `tests/alloc_guard/test_106_connection_bound.cpp`, with a CMake option `FIXPP_106_ALLOC_BASE` (default
   OFF) passed as a compile definition: with it ON the TU compiles only the emit half with the limit off and names no
   symbol 106 adds, which is how `$B` builds the base half of the emit differential (T108): the base reading overlays
   `tests/alloc_guard/CMakeLists.txt` and the TU on `$B` and counts only after its reconfigure with
   `-DFIXPP_106_ALLOC_BASE=ON` returned 0 (without the overlaid CMakeLists the option does not exist there).
-- [ ] T005 Write `tests/session/test_106_support.hpp` (compiles on `$B`; names no production symbol 106 adds): the
+- [X] T005 Write `tests/session/test_106_support.hpp` (compiles on `$B`; names no production symbol 106 adds): the
   instants helper (G for an emit not returned or held, G for a written TestRequest, S + W) over `mock_clock`; reuse of
   `t105::DirectRig` (`tests/session/test_105_direct_rig.hpp`), `rgs::Scene`, `tests/support/blocking_write_transport.hpp`
   and `t105::GateStoreFactory`, an Engine rig of `PreActive105`'s shape, and the 104 Logon rigs
@@ -177,16 +177,16 @@ shows). Re-derived at HEAD. **Blocks every later phase.**
 
 ### Censuses (read-only, re-derived at HEAD; each with its known positive)
 
-- [ ] T006 [P] Size pins (research F-8, data-model E-9): run the seed `git grep -n 'static_assert(sizeof(' -- tests`
+- [X] T006 [P] Size pins (research F-8, data-model E-9): run the seed `git grep -n 'static_assert(sizeof(' -- tests`
   first (it must report `tests/dictionary/ref_shape_test.cpp`), then
   `git grep -nE 'sizeof\((fixpp::)?(core::|session::|config::)?(Session|SessionConfig|EngineConfig|EngineEstablishment)\b' -- tests src include bench bindings`;
   list every hit for T029 and T083.
-- [ ] T007 [P] Gate call sites (D1): `git grep -n 'logon_identity_admitted_()\|logon_credentials_admitted_(' -- src/session`.
+- [X] T007 [P] Gate call sites (D1): `git grep -n 'logon_identity_admitted_()\|logon_credentials_admitted_(' -- src/session`.
   On the base it must show the two arms' sites, both too-low branches and arm S; record each site's enclosing function
   for T049. Also rule research F-3's stale-identity path: whether `drive_reconnect()` can install a connection before the first
   `open()` and leave `live_peer_id_` unconsumed when it ends (`open()` itself refuses unless `never_opened`; read
   `drive_reconnect`'s preconditions and `git grep -n 'live_peer_id_' -- src/session`); unreachable, or a task that makes `begin_connection_()` reset `live_peer_id_`, with a cell.
-- [ ] T008 [P] `src/session/session.cpp`: The D2 walk (D2, "Returns after the base's advance"): walk `on_inbound_not_connected_` and
+- [X] T008 [P] `src/session/session.cpp`: The D2 walk (D2, "Returns after the base's advance"): walk `on_inbound_not_connected_` and
   `on_inbound_logon_sent_` from their `check_inbound` call to `record_state_transition_(fsm_state::Active)`, listing every
   `co_return`. The S3 Reject of both arms must appear. Compare the list with research D2's table row by row; a return
   with no row is added to the table (orchestrator) and to T056 / T057.
@@ -200,19 +200,19 @@ shows). Re-derived at HEAD. **Blocks every later phase.**
   cells that cover spec US2 scenario 3 (the unasked 141=Y acknowledgement refused at S3; NextNumIn kept) for T057:
   `W5PerShape.Initiator141YWith1137_4_NoReset` (shapes T, A, L) and the `kLogonSent` row LS-e `Logon 141=Y 1137=4`
   run by `W5LogonSent.Ending`, both in `tests/session/test_099_establishment.cpp`; class them "US2 sc.3: unchanged".
-- [ ] T010 [P] Logout sites (data-model E-6): `git grep -n 'build_logout(' -- src/session`, each followed to its
+- [X] T010 [P] Logout sites (data-model E-6): `git grep -n 'build_logout(' -- src/session`, each followed to its
   `store_then_emit`. The R-1 leaf (`inbound_logout_leaf_`, kind `r1`) and `run_logout_phase1` must appear. Re-derive the
   **Logout-site table** below at HEAD; a site not in it is added, with a cell task (T104) or an unreachable
   ruling.
-- [ ] T011 [P] Live write sites (D5): `git grep -n 'store_then_emit(\|live_write_serialized_(' -- src/session`, each
+- [X] T011 [P] Live write sites (D5): `git grep -n 'store_then_emit(\|live_write_serialized_(' -- src/session`, each
   followed to its write class of contract C-4.2 (known positive `run_logout_phase1`, class `logout`); every class of
   T100 must have at least one site, and every site a class.
-- [ ] T012 [P] Bundle-to-`EngineConfig` copy sites (D6, C-2):
+- [X] T012 [P] Bundle-to-`EngineConfig` copy sites (D6, C-2):
   `git grep -nE '= *[a-z_]+(\.|->)engine\.clock' -- tests examples bindings bench`; known positives
   `tests/config/test_098_dialect_overlay.cpp` and `tests/config/test_099_toml_live.cpp`. List each for T137.
-- [ ] T013 [P] `include/fixpp/core/error.hpp`: Last error enumerator (D5): `git grep -n wire_undefined_tag -- include src tests tools bindings`; every
+- [X] T013 [P] `include/fixpp/core/error.hpp`: Last error enumerator (D5): `git grep -n wire_undefined_tag -- include src tests tools bindings`; every
   site that names the last enumerator (an exact-set or count gate among them) is listed for T028.
-- [ ] T014 [P] `dispatch_aborted` branches (D5): `git grep -n 'dispatch_aborted' -- src/session/session.cpp`, keeping
+- [X] T014 [P] `dispatch_aborted` branches (D5): `git grep -n 'dispatch_aborted' -- src/session/session.cpp`, keeping
   the `==` and `!=` lines (known positive: `Session::send`'s F9 block in `send_body_`), then the same over `src/session`
   so a comparison in another file shows. Re-derive the **`dispatch_aborted` ruling table** below; a new line gets a
   ruling there.
@@ -230,14 +230,14 @@ shows). Re-derived at HEAD. **Blocks every later phase.**
   classes (`inbound_heartbeat_reply_leaf_`, `inbound_resend_request_leaf_`, `answer_resend_request_`,
   `emit_session_reject_`). The table is the list plan.md's "M13 sites that no cell reaches" asks tasks.md for: every
   row classed unreachable is named there with its reason.
-- [ ] T016 [P] Ending claimants (D11 row 3): `git grep -n 'logout_in_flight_ = true\|enter_ending_write_(' -- src/session/session.cpp`;
+- [X] T016 [P] Ending claimants (D11 row 3): `git grep -n 'logout_in_flight_ = true\|enter_ending_write_(' -- src/session/session.cpp`;
   known positives `run_liveness_loop_body_` (R-1) and `run_logout_phase1`. Re-derive the **Ending-claimant table** below
   at HEAD, and for each claimant site the base's record sites
   (`git grep -n 'FIXPP_SLOG\|session_event_' -- src/session/session.cpp`, read inside each site): none is expected, since
   an ending Logout's reason is its Text(58).
-- [ ] T017 [P] Sleepers (D3, #715): `git grep -n 'sleep_until\|await_deadline' -- src/session/session.cpp`, each hit
+- [X] T017 [P] Sleepers (D3, #715): `git grep -n 'sleep_until\|await_deadline' -- src/session/session.cpp`, each hit
   read for which coroutine sleeps there and what else of this Session sleeps at the same time; kept for T090.
-- [ ] T018 [P] C-ABI surfaces (D7): `git grep -nE 'MINOR 18|1\.18' -- include tests bindings tools ci examples`, each hit classed
+- [X] T018 [P] C-ABI surfaces (D7): `git grep -nE 'MINOR 18|1\.18' -- include tests bindings tools ci examples`, each hit classed
   "pins the minor" (moved in T150) or "history" (unchanged), recorded per consumer category of Article X §7 (the
   Python binding, the tests with `tests/interop` as its own row, examples, the CI and tool scripts), with a seeded known
   positive in `$M` for `bindings/` so a zero there could report non-zero; the generator of `tools/capi_freeze.sha256`
@@ -245,21 +245,21 @@ shows). Re-derived at HEAD. **Blocks every later phase.**
   `git grep -n 'amended in C-ABI 1.18\|BREAKING (C-ABI 1.18' include/fix/c_api/session.h` (known positives: the docs of
   `fixpp_session_close`, `_is_established`, `_send`, `_register_callback` and `_register_send_callback`, none in
   `_open`'s).
-- [ ] T019 [P] `co_spawn` census: `grep -n 'co_spawn' src/session/session.cpp src/session/engine.cpp` on `$B`, kept
+- [X] T019 [P] `co_spawn` census: `grep -n 'co_spawn' src/session/session.cpp src/session/engine.cpp` on `$B`, kept
   for the `co-spawn-closure-audit` of T172 and the spawn-shape review of T083.
-- [ ] T020 [P] B&L census (D8), run on the LIVE file before any edit:
+- [X] T020 [P] B&L census (D8), run on the LIVE file before any edit:
   `grep -n 'L-093-12\|L-104-3\|L-104-8\|L-105-f\|B-544-1\|L-497-1\|tr_written\|runs ahead of mTLS' spec/behaviors-and-limitations.md`
   (known positive: `B-099-2`'s line). Rule each hit in the evidence file as "amended by T153", "retired by
   T152", or "unaffected" with the reason; `B-105-3` and `B-544-1` must be classed amended. Confirm none of the
   rows to be amended sits in `spec/behaviors-and-limitations-closed.md` (read the live file; never grep across the pair).
-- [ ] T021 [P] "Has a cell" census (D9): `grep -n -i 'has a cell\|a cell for' specs/106-logon-guards-write-bounds/*.md`
+- [X] T021 [P] "Has a cell" census (D9): `grep -n -i 'has a cell\|a cell for' specs/106-logon-guards-write-bounds/*.md`
   and plan.md's IX §1 row, each claim looked up in the traceability tables at the end of this file; a claim with no
   task goes to the orchestrator.
-- [ ] T022 [P] Supersession sources (research "Supersession"): for each row, locate the code or comment the change
+- [X] T022 [P] Supersession sources (research "Supersession"): for each row, locate the code or comment the change
   touches at HEAD (by symbol: the two Logon arms, the too-low branches, `run_liveness_loop_body_`, the held cap, the
   listener's `accepted_transport_config` in `src/session/engine.cpp`) and list the task that writes its "106 D<n>
   supersedes …" comment; checked again by T158.
-- [ ] T023 [P] Bench census (Article VIII §2; contract C-9): read `bench/session/engine_send_bench.cpp` (its writes
+- [X] T023 [P] Bench census (Article VIII §2; contract C-9): read `bench/session/engine_send_bench.cpp` (its writes
   must reach `live_write_serialized_`), `session_send_bench` and `on_inbound_frame_bench`, and their rows in
   `bench/ci-suite.txt` (`engine_send_bench` is `paired`; the other two are run locally); record how each is run for
   T164. The plan requires all three paired runs (quickstart section 6).
