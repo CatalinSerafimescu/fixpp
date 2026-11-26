@@ -415,7 +415,10 @@ the acceptor's reply Logon, `honor_peer_next_expected_`'s resend frames), and th
 
 **The error, through every seam it crosses (N-3).**
 - `live_write_serialized_` returns `session_write_timeout` for a write whose epoch is `write_cut_epoch_`, once the
-  close fails it. Every other failure there stays `dispatch_aborted`.
+  close fails it. Every other failure there stays `dispatch_aborted`. *(Superseded 2026-11-27, Gate B round 1, finding
+  G-1: the condition "once the close fails it" no longer holds. A cut write whose completion was already queued when
+  the transport closed returns `session_write_timeout` too, so the cut call returns it whatever the transport's
+  outcome, as contract C-4.3 states. A write's epoch is never `0`, the never-cut value, finding G-4.)*
 - `store_then_emit`'s live path, today `if (!write_r.has_value()) co_return std::unexpected(dispatch_aborted)`, passes
   `session_write_timeout` through unflattened. Every other live-write error stays `dispatch_aborted`.
 - `Session::send`'s F9 block records `Disconnected` on `dispatch_aborted`. It goes through

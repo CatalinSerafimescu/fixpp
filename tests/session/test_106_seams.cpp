@@ -31,6 +31,7 @@
 #include <fixpp/session/session_config.hpp>
 #include <functional>
 #include <future>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -796,12 +797,19 @@ Staged stage(Rig& r, wclass c) {
 
 // T100: open at S + W − 1 ns, closed at S + W; one write-timeout record; the cut call's
 // session_write_timeout; dispatch_aborted for the send queued behind it; no Logout; FR-017.
-void expect_cut_at_s_plus_w(session_role role, wclass c) {
+// With completion_queued (contract C-4.3, finding G-1), the close wakes the held write with
+// success, as a write whose completion was already queued when the transport closed: the cut
+// call still returns session_write_timeout, and a pre-Active class records no Active edge
+// (so no onLogon).
+void expect_cut_at_s_plus_w(session_role role, wclass c, bool completion_queued = false) {
     Rig r{role, params_for(c, kW), [c](SessionConfig& cfg) { tweak_for(c, cfg); }};
     Staged st = stage(r, c);
     ASSERT_TRUE(st.ok) << class_name(c) << ": setup: " << st.why;
+    r.d.bw->succeed_after_close = completion_queued;
     auto const disconnected_before = r.disconnected();
     auto const logouts_before = r.app->logouts;
+    auto const logons_before = r.app->logons;
+    auto const writes_before = r.d.bw->writes;
     auto const w = std::chrono::milliseconds{kW};
 
     r.at(st.s + w - ns{1});
@@ -839,6 +847,16 @@ void expect_cut_at_s_plus_w(session_role role, wclass c) {
         << class_name(c) << ": onLogout calls";
     EXPECT_EQ(r.records(), 0U) << class_name(c) << ": give-up records";
     EXPECT_EQ(r.write_records(), 1U) << class_name(c) << ": write-timeout records";
+    if (completion_queued) {
+        EXPECT_GT(r.d.bw->writes, writes_before)
+            << class_name(c) << ": setup: the cut write's completion was not delivered as a success";
+        if (!st.active) {
+            EXPECT_EQ(r.app->logons, logons_before) << class_name(c) << ": onLogon calls";
+            auto const history = r.d.s.session->fsm_visit_history();
+            EXPECT_EQ(std::ranges::count(history, fsm_state::Active), 0)
+                << class_name(c) << ": an Active edge";
+        }
+    }
 }
 
 // T101, the spurious arm: the same staging with the limit off; still open at S + 1.3 s, with no
@@ -865,6 +883,10 @@ struct ClassCase {
 class WriteTimeout106 : public ::testing::TestWithParam<ClassCase> {};
 
 TEST_P(WriteTimeout106, CutAtTheLimit) { expect_cut_at_s_plus_w(GetParam().role, GetParam().c); }
+// Contract C-4.3 (finding G-1): the cut write's completion already queued when the close runs.
+TEST_P(WriteTimeout106, CompletionQueuedAtTheCut_ReturnsTimeout) {
+    expect_cut_at_s_plus_w(GetParam().role, GetParam().c, true);
+}
 TEST_P(WriteTimeout106, LimitOff_StaysOpen) {
     expect_open_with_limit_off(GetParam().role, GetParam().c);
 }
@@ -1753,6 +1775,30 @@ TEST_P(WriteLimit106, CloseAsyncThrows_CutStillCloses) {
         if (!qr) EXPECT_EQ(qr.error(), fixpp::core::error::dispatch_aborted);
     }
     EXPECT_EQ(r.disconnected() - disconnected_before, 1U) << "new Disconnected entries";
+}
+
+// Contract C-4.3 (finding G-4): an ordinary transport failure of the limited write whose epoch
+// counter wraps returns dispatch_aborted, not session_write_timeout, and draws no write-timeout
+// record: 0, the cut epoch's never-cut mark, is never a write's epoch.
+TEST_P(WriteLimit106, EpochWrap_TransportFailure_IsNotATimeout) {
+    Rig r{GetParam(), Params{}};
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    session_test_access::set_write_epoch(r.session(), std::numeric_limits<std::uint32_t>::max());
+    r.d.bw->fail_next_write = true;
+    auto sent = r.spawn_send("W106E");
+    r.d.s.drain();
+    EXPECT_FALSE(r.d.bw->fail_next_write) << "setup: the send's write did not reach the transport";
+    bool const returned = rgs::Scene::ready(sent);
+    EXPECT_TRUE(returned) << "the send did not return";
+    if (returned) {
+        auto const sr = sent.get();
+        EXPECT_FALSE(sr.has_value()) << "the failed send succeeded";
+        if (!sr) {
+            EXPECT_EQ(sr.error(), fixpp::core::error::dispatch_aborted)
+                << "the failed send's error " << static_cast<int>(sr.error());
+        }
+    }
+    EXPECT_EQ(r.write_records(), 0U) << "write-timeout records";
 }
 
 INSTANTIATE_TEST_SUITE_P(BothRoles, WriteLimit106,

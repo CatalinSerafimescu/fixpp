@@ -2359,7 +2359,8 @@ private:
     // 106 (research D5; data-model E-3, E-5): the write limit's state, written by
     // live_write_serialized_ just before its async_write with SessionConfig::write_timeout_ms
     // set (write_cut_epoch_ by the bound's expiry); begin_connection_() clears the flag and
-    // the cut epoch. Session strand only.
+    // the cut epoch. A write's epoch is never 0, so 0 in write_cut_epoch_ means no write of
+    // the connection was cut. Session strand only.
     fixpp::core::steady_time_point write_started_at_;
     std::uint32_t write_epoch_ = 0;
     bool write_in_flight_ = false;

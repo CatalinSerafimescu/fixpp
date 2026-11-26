@@ -1295,7 +1295,12 @@ Session::live_write_serialized_(std::span<const std::byte> frame, wire_reset_exe
             co_return std::unexpected(fixpp::core::error::dispatch_aborted);
         }
         write_started_at_ = effective_clock_->steady_now();
+        // An epoch is never 0, write_cut_epoch_'s never-cut mark, so a wrapped counter cannot
+        // match a connection whose bound never cut (data-model E-3).
         epoch = ++write_epoch_;
+        if (epoch == 0) {
+            epoch = ++write_epoch_;
+        }
         write_in_flight_ = true;
         in_flight.unwinding_at = std::uncaught_exceptions();
         in_flight.s = this;
@@ -1310,7 +1315,8 @@ Session::live_write_serialized_(std::span<const std::byte> frame, wire_reset_exe
     }
     // What a failed write returns: session_write_timeout when the bound cut this write (its
     // epoch marked before the close), dispatch_aborted for every other failure (research D5,
-    // N-3).
+    // N-3). A cut write whose completion was already queued at the close returns
+    // session_write_timeout too (contract C-4.3).
     auto const failed = [&]() noexcept {
         return limited && epoch == write_cut_epoch_ ? fixpp::core::error::session_write_timeout
                                                     : fixpp::core::error::dispatch_aborted;
@@ -1329,6 +1335,9 @@ Session::live_write_serialized_(std::span<const std::byte> frame, wire_reset_exe
     // guard destructor releases the gate when we leave this scope.
     if (!write_r.has_value()) {
         co_return std::unexpected(failed());
+    }
+    if (limited && epoch == write_cut_epoch_) {
+        co_return std::unexpected(fixpp::core::error::session_write_timeout);
     }
     co_return live_write_outcome::written;
 }

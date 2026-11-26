@@ -71,7 +71,8 @@ Each member has the one writer the table names. Each test-then-set (the claim, t
 runs with no suspension between the test and the set, on the session's serialised domain, on an Engine or a direct
 Session alike: every live write runs inside that domain under `write_gate_`.
 
-`write_epoch_` wraps only after 2^32 writes in one connection. A wrap cannot cut the wrong write: the expiry row also
+A write's epoch is never `0`, the value `begin_connection_()` gives `write_cut_epoch_` to mean that no write of the
+connection was cut, so a counter that wraps cannot make an uncut write read as cut. A wrap cannot cut the wrong write: the expiry row also
 tests the in-flight write's own `write_started_at_` + limit, so a write is never cut before its own limit, and a cut
 closes the transport, so no later write of that connection compares its epoch with `write_cut_epoch_` and succeeds.
 The write deadline `write_started_at_` + `write_timeout_ms` saturates like E-4's sums; at `UINT32_MAX` ms it is about

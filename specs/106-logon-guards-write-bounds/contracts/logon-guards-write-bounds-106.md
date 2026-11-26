@@ -107,6 +107,9 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
   - an application `send` returns `dispatch_aborted` (`FIXPP_ERR_CANCELLED` in C), as 105's B-105-8, unchanged;
   - none of them hangs.
 
+  A write whose completion was already queued when the close ran has completed, and returns as written; the queued
+  writes behind it still meet the closed transport.
+
   The close is made when the transport's `close_async()` throws too: the close frame then calls the synchronous
   `Transport::close()` (105 C-8.6 and `L-105-h`, as amended by ruling R23).
 

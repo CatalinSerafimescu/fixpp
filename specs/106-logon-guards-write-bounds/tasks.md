@@ -1017,7 +1017,8 @@ not name.
   `state_ == lifecycle::open`). No Logout.
   **Done** (`28cb7469`): `expire_write_()`; the record is registered in `src/log/format_registry.cpp`.
 - [X] T113 [US4] `src/session/session.cpp`: The error through every seam it crosses (research D5, N-3): `live_write_serialized_` returns
-  `session_write_timeout` for a write whose epoch is `write_cut_epoch_` once the close fails it (every other failure stays
+  `session_write_timeout` for a write whose epoch is `write_cut_epoch_` once the close fails it *(superseded 2026-11-27, Gate B
+  round 1, finding G-1: whatever the transport's outcome, research D5)* (every other failure stays
   `dispatch_aborted`); `store_then_emit`'s live path passes it through unflattened; `send_body_`'s F9 block takes it as it
   takes `dispatch_aborted`, through `record_disconnected_unless_already_()`, per the `dispatch_aborted` ruling table. Every
   other `dispatch_aborted` line T014 found at HEAD is ruled in that table before this task closes.

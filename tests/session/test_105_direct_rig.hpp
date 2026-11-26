@@ -52,12 +52,14 @@ namespace rgs = fixpp::test_support::resend_gap;
 // and every application message in fromApp (app_do_not_send); both off by default.
 class DirectApp final : public rgs::GapApp {
 public:
+    int logons = 0;
     int logouts = 0;
     int from_admin_logouts = 0;
     std::function<void(std::string_view)> to_admin_hook;
     std::string refuse_admin_type;  // empty: fromAdmin accepts every administrative message
     bool refuse_app = false;
 
+    void onLogon(const fixpp::session::SessionId& /*id*/) override { ++logons; }
     void onLogout(const fixpp::session::SessionId& /*id*/) override { ++logouts; }
     void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
                  const fixpp::session::SessionId& id) override {

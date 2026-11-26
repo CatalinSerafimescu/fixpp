@@ -459,6 +459,33 @@ TEST_P(GiveUp106, SendBlocked_CloseAsyncThrows_ClosedAtGPlusB) {
     EXPECT_EQ(r.disconnected() - disconnected_before, 1U) << "new Disconnected entries";
 }
 
+// B-106-3's queued completion (finding G-1, its give-up half): BehindBlockedSend, with the close at
+// G + B waking the held write with success, as a write whose completion was already queued when the
+// transport closed. The send returns as written; the transport is closed at G + B.
+TEST_P(GiveUp106, SendBlocked_CompletionQueuedAtTheClose_ReturnsWritten) {
+    t106::GiveUpRig r{GetParam(), t106::GiveUpParams{}};
+    Staged st = stage(r, scene::behind_blocked_send);
+    ASSERT_TRUE(st.ok) << "setup: " << st.why;
+    r.d.bw->succeed_after_close = true;
+    auto const writes_before = r.d.bw->writes;
+    auto const g = t106::give_up_instant_emit_not_returned(st.last_inbound, r.threshold());
+    auto const b = std::chrono::milliseconds{r.p.logout_ms};
+    r.at(g);
+    EXPECT_EQ(r.records(), 1U) << "no give-up record at G";
+    r.at(g + b);
+    EXPECT_TRUE(r.d.closed()) << "not closed at G + B";
+    EXPECT_GT(r.d.bw->writes, writes_before)
+        << "setup: the held write's completion was not delivered as a success";
+    bool const returned = st.blocked_call && rgs::Scene::ready(*st.blocked_call);
+    EXPECT_TRUE(returned) << "the held send did not return";
+    if (returned) {
+        auto const sr = st.blocked_call->get();
+        EXPECT_TRUE(sr.has_value()) << "the held send's error " << (sr ? 0 : static_cast<int>(sr.error()));
+    }
+    EXPECT_EQ(r.completed_since("5", 0), 0U) << "a complete Logout";
+    EXPECT_EQ(r.d.s.state(), fsm_state::Disconnected);
+}
+
 // tasks.md T074, the disclosure guard L-105-f: B = 0, so the give-up's ending is unlimited and
 // nothing closes. Still open at G + 10 s, which follows G + 2000 ms (the default B a regression
 // ignoring the 0 would use) by 8 s. [guard: an unconditional close at G]

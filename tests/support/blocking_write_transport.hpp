@@ -36,7 +36,9 @@
 //
 // 106-logon-guards-write-bounds (spec.md R23; contract C-4.3) adds close_async_calls_at_first_close,
 // the value of close_async_calls when close() first ran, so a cell can tell that the first close
-// was made during a close_async call that threw (that call never reaches its own close()).
+// was made during a close_async call that threw (that call never reaches its own close()); and
+// fail_next_write (contract C-4.3), which fails the next async_write with transport_write_error and
+// closes nothing, so the reader stays open.
 #pragma once
 
 #include <algorithm>
@@ -91,6 +93,8 @@ struct blocking_write_state {
     std::optional<std::size_t> starts_at_first_close;
     // 106 (spec.md R23): close_async_calls as the first close() read it.
     std::optional<std::size_t> close_async_calls_at_first_close;
+    // 106 (contract C-4.3): the next async_write fails with transport_write_error; one-shot.
+    bool fail_next_write = false;
     // 105-transport-liveness (tasks.md T052): a parked write that close() wakes completes with
     // success, as a write whose completion was already queued when the transport was closed.
     bool succeed_after_close = false;
@@ -153,6 +157,10 @@ public:
                 {.start = state_->starts, .bytes = {bytes.begin(), bytes.end()}});
         }
         if (closed_) co_return std::unexpected(fixpp::core::error::transport_already_closed);
+        if (state_->fail_next_write) {
+            state_->fail_next_write = false;
+            co_return std::unexpected(fixpp::core::error::transport_write_error);
+        }
         if (state_->block_next) {
             state_->parked = true;
             // NOLINTBEGIN(bugprone-unchecked-optional-access): the constructor emplaces the timer
