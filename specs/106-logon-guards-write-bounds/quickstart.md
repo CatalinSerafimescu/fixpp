@@ -53,7 +53,7 @@ worktrees on `fixppbuild`, removed when done). Every new cell is written first a
   `EngineConfig::acceptor_tls_handshake_timeout`, `EngineEstablishment::acceptor_tls_handshake_timeout`, a new member
   or seam). The base build lacks the field, so RED is shown
   on the named mutant at the head, and recorded as such. They live in `tests/session/test_106_seams.cpp` (ctest
-  `session_106_seam_tests`, labels `106` and `106_seam`). A base reading builds only `session_106_tests` and runs
+  `session_106_seam_tests`, labels `session`, `106` and `106_seam`). A base reading builds only `session_106_tests` and runs
   `-LE 106_seam`.
 
 Build only the touched targets (targeted rule): the session tests binary that holds `test_106_*.cpp`, the config
@@ -98,6 +98,7 @@ before the competing deadline (10 s, `logon_timeout_ms` from accept).
 | M11 | the `write_timeout_ms` mapper recognises the key and drops its value | `TomlWriteTimeout106.Set` |
 | M11′ | `SessionConfig::write_timeout_ms`'s default changed to 300 ms | `TomlWriteTimeout106.KeyAbsent_Off` |
 | M12 | per joiner of data-model E-3's table: the drain's wake and its `reconnect_drain_in_flight_` term; the `Disconnected` edge's wake; the drain term with `claim_ending_`'s drain refusal; `drive_reconnect`'s respawn after a failed drain | `ConnectionBound106.Teardown_Drain_*`; `Teardown_ConnectionEnd_*`; `WriteExpiryDuringDrain_NoRecord` (LogonSent, a Logon-arm Reject's write blocked: research D9); `DrainCancelled_RespawnsOnBlockedWrite` |
+| a wake ends the bound | the bound exits on a wake with no exit term true | `ConnectionBound106.SpuriousWake_NoEnding` |
 | M13 | per site of research D11's `Disconnected` census that a cut write or a close returns through, one arm each: that site's `record_disconnected_unless_already_()` restored to the raw `record_state_transition_(fsm_state::Disconnected)` (the loop's TestRequest and Heartbeat tails after `store_then_emit`, `Session::send`'s F9 block, the Reject leaf's and each Logon-class write's failure tail) | the `WriteTimeout106.<Class>` cell whose cut returns through that site, and `GiveUp106.BehindBlockedSend` / `GiveUp106.RejectBlocked` for the F9 block and the Reject leaf: two `Disconnected` entries. A site no cell reaches is named unreachable in tasks.md |
 | M14 | `decide_give_up_()`'s `refused` branch records `Disconnected` and returns without the close | `GiveUp106.RejectBlocked_EndingBoundSpawnFails_ClosedAtG` |
 | M15 | `translate` maps `session_write_timeout` to `FIXPP_ERR_CANCELLED` | the error-map test of `tests/capi/error_surface_test.cpp` (the CSV row) |

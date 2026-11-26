@@ -15,6 +15,21 @@ pattern and lists its instances; an instance name the bundle does not spell out 
 renamed at write time, the rename recorded in the evidence file. Where this file and the bundle differ, the bundle
 wins and the difference goes to the orchestrator.
 
+**Phase moves against plan.md "Phases (for /speckit-tasks)".** Each item below runs in a different phase than the plan
+gives it. Re-derive: walk plan.md's Phases items 0 to 7 against each task's phase heading; a new move is added here.
+- To Phase 2 (foundations), from plan P4: the `write_timeout_ms` field and TOML key (T029, T030), the
+  `session_write_timeout` enumerator and its C mapping (T024, T028), the `TomlWriteTimeout106.*` cells (T025, T026),
+  M11 (T034), M11′ (T035) and M15 (T033).
+- To Phase 2, from plan P5: the `EngineConfig` and `EngineEstablishment` fields and the root key (T029, T030), the range
+  and type checks of `[session.transport]`/`[default.transport]` `tls_handshake_timeout_ms` (T030; feeding the factory
+  stays in US5, T135), the `TomlHandshake106` refusal cells and `AcceptorKeyAbsent_Default1500` (T025, T026), M7⁗
+  (T036) and the session-scope refusal's mutant (T037).
+- To Phase 2, from plan P2 and P3: the test seams' hooks (T031); their call sites stay with their mechanisms.
+- To US3 (Phase 5), from plan P4: M9″ (T096), M9 with M9′ over the pairs without the limit (T097), and M13 for the sites a
+  US3 cell returns through (T098; the write-limit sites stay in US4, T130).
+- To US4 (Phase 6), from plan P3: the `ShippingClock106` cell (T107), with its mutant M8 (T126), which plan P4 already
+  lists; the `ConnectionBound106` cells that need a write armed (T106) and M12's arms over them (T129).
+
 **Tests**: required (`[const §VII.3]`, FR-016). In every story phase the cells come first as their own tasks and are
 shown RED (on the base, or under the named mutant for a [seam] or [guard] cell), then the mechanism, then the mutant
 and spurious-hit arms.
@@ -32,9 +47,11 @@ marked **(orchestrator)** is run or requested by the orchestrator; every other t
 - **Trees.** `$T` = the main checkout `PARENT/research/G19-fix-fpml-iso20022/library`, branch
   `106-logon-guards-write-bounds`. `$B` = `/mnt/wsl/fixppbuild/fixpp-106-base`, a detached worktree at
   `git -C $T merge-base HEAD origin/main` (RED readings and bench bases only). `$M` =
-  `/mnt/wsl/fixppbuild/fixpp-106-mutants`, detached (mutants, census scratch edits, seeded known positives only). Never
+  `/mnt/wsl/fixppbuild/fixpp-106-mutants`, detached (mutants, census scratch edits, seeded known positives only). `$V` =
+  `/mnt/wsl/fixppbuild/fixpp-106-verify`, a detached worktree at the head, created by T169 for the one full ctest only
+  (never a mutant, never a scratch edit; its readings are recorded in `$T`'s evidence file). Never
   `git checkout`/`git switch` in `$T`, never `git stash`, never `--amend`, never `git commit -a`. `fixpp-parallel` and
-  the MSVC sandbox are never `$B` or `$M`.
+  the MSVC sandbox are never `$B`, `$M` or `$V`.
 - **The base.** "RED on the base" means read on `$B`. Its `src/`, `include/` and `tests/` must equal `9d81082a`, where
   the bundle was read: `git diff --stat 9d81082a "$(git -C $T merge-base HEAD origin/main)" -- src include tests` prints
   nothing. The branch's own commits before the first code change touch only `specs/` and `.github/workflows/tier2.yml`
@@ -45,13 +62,16 @@ marked **(orchestrator)** is run or requested by the orchestrator; every other t
   background waiter on the marker, never a foreground poll, never `pgrep -f`. `$B`, `$M` and every sanitizer, release,
   coverage and bench tree live on `/mnt/wsl/fixppbuild` (`export CCACHE_DIR=/mnt/wsl/fixppbuild/ccache`); `$T`'s
   `build/linux-clang-debug` is built incrementally only (no full rebuild on E:). Read
-  `/mnt/c/temp/fixpp/.sandbox-lock` before the full ctest and before any MSVC run. The owner approves builds through the
-  orchestrator's brief (`[const §XVII.7]` resource gate).
+  `/mnt/c/temp/fixpp/.sandbox-lock` before the full ctest and before any MSVC run. Owner ruling 2026-11-25: autonomous
+  end-to-end work; local builds are pre-approved by the owner for this feature (`[const §XVII.7]` satisfied by that
+  ruling). Scope rule (owner 2026-11-25): targeted tests only, plus ONE full ctest on linux -debug; one build at a time
+  (the Test scope bullet below gives the detail).
 - **Test scope (owner, 2026-11-25, binding).** Targeted runs only: the feature's labels (`106`, `105`, `104`, `099`) and
   the binaries whose test sources the branch touches (the config, transport, C-ABI and 538 binaries, `-L 544` on the
-  release lane), selected by label or by binary filter. Sanitizer lanes (asan, ubsan, tsan) run the same targeted set,
-  never `-L session` or a full suite. Exactly **one** full `ctest`, on `linux-clang-debug`, as the last test run before
-  the labelled push (Article XVII §7's evidence). MSVC builds the feature's own targets with `-k 0` and runs their
+  release lane, and `-L alloc_guard` on the release lane (T166) because the branch touches `tests/alloc_guard/`), selected
+  by label or by binary filter. Sanitizer lanes (asan, ubsan, tsan) run the same targeted set,
+  never `-L session` or a full suite. Exactly **one** full `ctest`, on `linux-clang-debug` in `$V` (T169; never `$M`, the mutant
+  tree), as the last test run before the labelled push (Article XVII §7's evidence). MSVC builds the feature's own targets with `-k 0` and runs their
   targeted tests; msvc-asan only if a change needs it. After a small late fix only the touched cells re-run.
 - **RED on the base.** Cells are committed in `$T` (commit `C<n>`), overlaid on `$B` with
   `git -C "$B" restore --source=C<n> -- $(git -C $T ls-tree --name-only C<n> tests/session/ | grep -E '^tests/session/test_106_') tests/session/CMakeLists.txt`
@@ -167,7 +187,10 @@ shows). Re-derived at HEAD. **Blocks every later phase.**
   `grep -n 'r.open()' tests/session/test_104_logon_too_low.cpp` plus each acceptor cell there ending at a gate refusal,
   read for a NextNumIn assertion after the refusal (known positive: `LogonTooLow104.Precedence_MtlsAcceptorOffList`'s
   `next_in() == kN`). Each hit classed "S3, strict or 789 refusal: re-pinned by T059", "identity refusal: re-pinned
-  by T043", or "admitted path: unchanged".
+  by T043", or "admitted path: unchanged". Also list, with `--gtest_list_tests` on the 099 binary, the instances of the
+  cells that cover spec US2 scenario 3 (the unasked 141=Y acknowledgement refused at S3; NextNumIn kept) for T057:
+  `W5PerShape.Initiator141YWith1137_4_NoReset` (shapes T, A, L) and the `kLogonSent` row LS-e `Logon 141=Y 1137=4`
+  run by `W5LogonSent.Ending`, both in `tests/session/test_099_establishment.cpp`; class them "US2 sc.3: unchanged".
 - [ ] T010 [P] Logout sites (data-model E-6): `git grep -n 'build_logout(' -- src/session`, each followed to its
   `store_then_emit`. The R-1 leaf (`inbound_logout_leaf_`, kind `r1`) and `run_logout_phase1` must appear. Re-derive the
   **Logout-site table** below at HEAD; a site not in it is added, with a cell task (T104) or an unreachable
@@ -283,8 +306,12 @@ US5).
   (contract C-5.1; `OutOfRange` covers 0, −1 and `UINT32_MAX` + 1); `TomlHandshake106.AcceptorKey_OutOfRange`,
   `TomlHandshake106.AcceptorKey_WrongType` and `TomlHandshake106.AcceptorKey_AtSessionScope_Refused` for the root key `acceptor_tls_handshake_timeout_ms` (contract C-5.2; `OutOfRange` covers 0, −1
   and `UINT32_MAX` + 1; at session scope the `unknown_key` class, as `dialect_overlay` at root). Each asserts the
-  error kind and the key named in it. RED on the base: the key is unknown (an `unknown_key` refusal where the cell
-  asserts `out_of_range` or `malformed_value`); `AtSessionScope_Refused` is [guard] on the base (unknown there too) and
+  error kind and the key named in it. RED on the base: `TomlWriteTimeout106.*` and `AcceptorKey_{OutOfRange, WrongType}`
+  by an `unknown_key` refusal where the cell asserts `out_of_range` or `malformed_value` (the keys are table keys
+  `recognize_keys` does not know); `TomlHandshake106.{OutOfRange, WrongType}` by no diagnostic at all, because the base
+  silently ignores `tls_handshake_timeout_ms`: `recognize_keys` checks only a table's own keys, not those inside
+  `[session.transport]` or `[default.transport]`, and `build_tls_factory` always uses a default `Transport::Config
+  t_cfg{}`; `AtSessionScope_Refused` is [guard] on the base (unknown there too) and
   RED under its mutant (T037).
 - [ ] T026 [P] Seam cells in `tests/session/test_106_seams.cpp`: `TomlWriteTimeout106.Set` [seam: M11] (the
   resolved `SessionConfig::write_timeout_ms` equals the key, set in a `[[session]]` table and, separately, in
@@ -322,8 +349,8 @@ US5).
   `ending_bound_spawn_fails_` / `ending_bound_race_throws_` shape) and the commit-freeze hook of
   `NextNumIn106.CommitRefused_Disconnected` (a `std::function<void()>` run between the classification and the commit);
   in `tests/support/session_test_access.hpp` their setters (`set_connection_bound_spawn_fails`,
-  `set_connection_bound_wait_throws`, the freeze setter) and the reads the seam cells need (the connection bound's
-  counter, `ending_claim_`). The seams' call sites land with their mechanisms (T064, T083). A seam reached
+  `set_connection_bound_wait_throws`, the freeze setter), the hooks only: the reads of `ending_claim_` and of the
+  connection bound's counter land with those members (T078, T083), so `H0` compiles. The seams' call sites land with their mechanisms (T064, T083). A seam reached
   by no cell is a defect (each is named in research D9).
 - [ ] T032 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: At the head: `-L config`, the C-ABI error entries and `session_106_seam_tests` (T026) GREEN; record
   counts. Commit `H0`.
@@ -339,6 +366,9 @@ US5).
   `TomlHandshake106.AcceptorKeyAbsent_Default1500`.
 - [ ] T037 In `$M`'s `src/config/toml_config_loader.cpp`: The root key accepted at session scope (the refusal in `toml_config_loader.cpp` deleted); RED:
   `TomlHandshake106.AcceptorKey_AtSessionScope_Refused`.
+- [ ] T037a **(orchestrator)** Article X §6 `/plan` sign-off: owner pre-approved the plan 2026-11-25 (autonomous
+  end-to-end delegation); record in plan.md (Constitution Check, row XII §9, XI §7, X §6) with the date, the words and
+  the bundle head. Before T038.
 
 **Checkpoint**: the enumerator, the three fields and the keys load; every story may start.
 
@@ -469,7 +499,10 @@ every refusal between keeps NextNumIn in FR-006's sense (FR-006, SC-002).
   `NextNumIn106.Initiator_789TooHigh`, `NextNumIn106.Initiator_789Invalid`, `NextNumIn106.Initiator_789Below_WalkFails`
   (the `!h789` error return included) and `NextNumIn106.Initiator_789Below_Superseded` (all *(proposed)* but
   `Initiator_S3`). Same oracle. RED on the base: consumed in memory. Spec US2 scenario 3 (the unasked 141=Y
-  acknowledgement refused at S3) is as on the base: covered by the existing 099 cells, re-run unfiltered. The
+  acknowledgement refused at S3) is as on the base: covered by the existing 099 cells
+  `W5PerShape.Initiator141YWith1137_4_NoReset` (shapes T, A, L) and the `kLogonSent` row LS-e `Logon 141=Y 1137=4` run
+  by `W5LogonSent.Ending` (`tests/session/test_099_establishment.cpp`; instance names as T009 lists them), re-run
+  unfiltered. The
   residual after a unit (`L-106-a`; Q3) keeps its base pin: `UnaskedResetAck104.With789_TooHighAfterReset_Logout`, run in
   `-L 104` unfiltered.
 - [ ] T058 [US2] `tests/session/test_106_seams.cpp`: `NextNumIn106.CommitRefused_Disconnected` [seam: the
@@ -567,19 +600,20 @@ cells; `-L 105` and the 538 binary as guards.
   ends nothing), `ConnectionBound106.Teardown_ConnectionEnd_Parked` (the counter reads 0 after a bounded pump, read after
   the `Disconnected` edge and before any `close()`, drain or stop). `ConnectionBound106.Teardown_Close_*` and `ConnectionBound106.Teardown_EngineStop_*` are
   reported as covered by the `Disconnected` edge (data-model E-3's joiner table) and not counted; the evidence file
-  records that disposition.
+  records that disposition. They compile only after T078 and T083 (the `session_test_access` reads of `ending_claim_`
+  and the bound's counter).
 - [ ] T077 [US3] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C4`); read T071 to T075 on `$B` (`-L 106 -LE 106_seam`); record per
   cell its RED reason or guard status and the counts. The seam cells of T076 are read under their mutants
   (T099).
 
 ### Implementation for US3
 
-- [ ] T078 [US3] `include/fixpp/session/session.hpp`, `src/session/session.cpp`: The ending claim (data-model E-10, research D11): `enum class ending_claim : std::uint8_t { none,
+- [ ] T078 [US3] `include/fixpp/session/session.hpp`, `src/session/session.cpp`, `tests/support/session_test_access.hpp`: The ending claim (data-model E-10, research D11): `enum class ending_claim : std::uint8_t { none,
   give_up, write_timeout, ending_logout, establishment_timeout, internal }`, the strand-confined member `ending_claim_`,
   `claim_ending_(ending_claim who) noexcept` (refuses when taken, when `closing_or_stopped_()` holds, or when
   `reconnect_drain_in_flight_` holds; otherwise sets and returns true, no suspension between test and set); reset to
   `none` in `begin_connection_()`; the `Disconnected` edge in `record_state_transition_` takes it as `internal` when it is
-  `none`.
+  `none`. `tests/support/session_test_access.hpp` gains the read of `ending_claim_` the seam cells need.
 - [ ] T079 [US3] `src/session/session.cpp`: The `Disconnected` census applied (D11; T015's table): every site classed reachable becomes
   `record_disconnected_unless_already_()` (the liveness loop's four emit-failure tails, `send_body_`'s F9 block, the Reject
   leaf, each Logon-class write's failure tail, and every other row the table classes reachable); every row classed
@@ -605,7 +639,8 @@ cells; `-L 105` and the 538 binary as guards.
   coroutine per connection, spawned by the liveness loop at its start on the loop's executor (never `executor()`), with
   `connection_bound_spawn_fails_`'s seam (refused spawn: the loop takes the claim, records `Disconnected` and ends; the
   connection closes at its exit); the members `connection_bound_` (`running`, `gen`, `shipping`, `wake`) and
-  `connection_bound_counter_` (a `std::shared_ptr<std::atomic<int>>` joined by `counter_join`); the one waiting callee
+  `connection_bound_counter_` (a `std::shared_ptr<std::atomic<int>>` joined by `counter_join`), with its read in
+  `tests/support/session_test_access.hpp` for the seam cells; the one waiting callee
   `connection_bound_wait_(timer, deadline)` with the timer a local of the bound's frame: on `system_clock_source` (tested
   once at the spawn by `dynamic_cast`) `expires_at(deadline)` / `expires_at(max)` and one
   `async_wait(asio::as_tuple(asio::use_awaitable))`, never `Clock::sleep_until`; on any other `Clock`
@@ -872,7 +907,9 @@ transport binary's `AsioTlsTransportErrorPaths.*` and `-L 105`'s `TlsClose105.*`
   gets its own factory and its own bound), `TomlHandshake106.DefaultTransport_MixedRoles_Accepted` (the key in
   `[default.transport]`, one TLS initiator and one acceptor session: the bundle loads, and the initiator's minted
   transport times out at the key; `L-106-d`). Spurious arm (key absent): still pending at 2.3 s, which precedes the 30 s
-  default by 27.7 s. RED on the base (unknown key). Mutants: T140, T144.
+  default by 27.7 s. RED on the base: the base silently ignores the key (`recognize_keys` checks no key inside
+  `[session.transport]` or `[default.transport]`, and `build_tls_factory` always uses a default `Transport::Config
+  t_cfg{}`), so each minted transport keeps the 30 s default and is still pending at key + 2 s. Mutants: T140, T144.
 - [ ] T132 [US5] `tests/session/test_106_seams.cpp`: `EngineHandshake106.Acceptor_ClosesAtTheKey` [seam: M7‴] (the
   `EngineConfig` built from the loaded bundle, `EngineEstablishment::acceptor_tls_handshake_timeout` copied as `clock` is;
   key 300 ms, `logon_timeout_ms` 10 s; a TCP client that never handshakes sees EOF in [300 ms, 1.2 s); spurious arm (key
@@ -1055,8 +1092,8 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   `IN`, `OUT`). A TLS cell that skips is recorded with its reason and not counted as a pass. msvc-asan only if a change
   needs it. Release the lock after.
 - [ ] T169 One full `ctest --preset linux-clang-debug --no-tests=error -j3` (Article XVII §7), the last test run before
-  the labelled push, in a tree on `/mnt/wsl/fixppbuild` at the head (`$M` reset to the head, clean status, reconfigured
-  rc 0, every target built `-j5 -k 0`), after reading the sandbox lock; record the count, any failure and its
+  the labelled push, in `$V` (Execution rules; created with `git worktree add --detach` at the head on
+  `/mnt/wsl/fixppbuild`, clean status, reconfigured rc 0, every target built `-j5 -k 0`; never `$M`), after reading the sandbox lock; record the count, any failure and its
   attribution, and the SHA for the PR body's `local build: green on linux-clang-debug @ <sha>` line.
 - [ ] T170 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: `linux-gcc-release` `-Werror` build of the touched targets (the library, `session_106_tests`,
   `session_106_seam_tests`, the touched config, transport, C-ABI and alloc-guard targets, `engine_send_bench`),
@@ -1088,8 +1125,8 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   labels in one API call → wait about 2 minutes → push last.
 - [ ] T179 **(orchestrator)** `/gate-b` on the PR (preconditions: the verify record non-RED, T183 non-failing, the
   B&L delta recorded); every fixer round re-runs the touched cells only, then T177's last actions.
-- [ ] T180 `/mnt/wsl/fixppbuild/fixpp-106-base` and `/mnt/wsl/fixppbuild/fixpp-106-mutants`: Remove `$B` and `$M` (`git worktree remove`, then `git worktree prune`) once every RED reading, mutant and
-  bench run is recorded; never `fixpp-parallel`, never the MSVC sandbox.
+- [ ] T180 `/mnt/wsl/fixppbuild/fixpp-106-base`, `/mnt/wsl/fixppbuild/fixpp-106-mutants` and `/mnt/wsl/fixppbuild/fixpp-106-verify`: Remove `$B`, `$M` and `$V` (`git worktree remove`, then `git worktree prune`) once every RED reading, mutant,
+  bench run and the full ctest of T169 is recorded; never `fixpp-parallel`, never the MSVC sandbox.
 - [ ] T181 **(orchestrator, post-merge)** Close-out per `.specify/close-out.md` §1 (rows 3b re-check, 4, 5, 9, 16, 17,
   copied into the Gate B record): a `CLAUDE-history.md` entry for `106-logon-guards-write-bounds` (newest first: the
   batches, the PR and squash SHA, the closed issues, the B-106 rows, C-ABI 1.19), and `CLAUDE.md`'s "Last merged FEATURE"
@@ -1184,6 +1221,7 @@ the `install_reconnected_transport` and `~Session` asserts (T084, T167), `Teardo
 | an unconditional close at G | T095 | the knob's reset moved after S3 | T070 |
 | the key accepted at session scope | T037 | the key refused on an acceptor or plaintext session | T144 |
 | the spawn and wait seams | T099, T129 | the respawn deleted | T129 (arm d) |
+| a wake ends the bound (`SpuriousWake_NoEnding`) | T099 | | |
 
 ## Traceability: contract clauses → tasks
 
@@ -1211,7 +1249,7 @@ the `install_reconnected_transport` and `~Session` asserts (T084, T167), `Teardo
 - **Before Phase 1 (orchestrator)**: `/speckit-analyze`, the `checklists/requirements.md` refresh and
   `/speckit-checklist-audit` (`.specify/pipeline.md` step 9; it blocks implementation; a SPEC-FIXED item re-runs
   `/speckit-analyze`). The user's `/plan` sign-off (plan Constitution Check, the fourth control) is recorded by the
-  orchestrator with its date, words and bundle head before T038.
+  orchestrator with its date, words and bundle head in T037a, before T038.
 - **Phases**: 1 → 2 → 3 (US1) → 4 (US2) → 5 (US3) → 6 (US4) → 7 (US5) → 9 → 10. Phase 8 (US6) is done but
   T147, which follows the PR's first Tier 2 run. US1 to US4 all edit `src/session/session.cpp` and run in order,
   never in parallel. US2 follows US1 (both Logon arms). US4 depends on US3's bound and claim (T078 to T084).

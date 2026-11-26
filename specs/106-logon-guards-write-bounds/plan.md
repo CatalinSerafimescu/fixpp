@@ -192,7 +192,7 @@ spec/behaviors-and-limitations.md (+ -closed.md)  # D8
 
 **Structure Decision**: the existing single-library layout. The new cells go in new 106 files, as 104 and 105 did.
 Only the cells that name no new symbol build against the base. Every other cell is in `test_106_seams.cpp` (ctest
-`session_106_seam_tests`, labels `106` and `106_seam`). Base readings exclude it with `-LE 106_seam`, and each of its
+`session_106_seam_tests`, labels `session`, `106` and `106_seam`). Base readings exclude it with `-LE 106_seam`, and each of its
 cells shows RED on a named mutant at the head (research D9, 105's rule). Cells that change existing files (the census
 of D9) stay where they are.
 

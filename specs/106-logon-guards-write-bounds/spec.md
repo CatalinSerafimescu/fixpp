@@ -119,6 +119,10 @@ Rulings of the orchestrator under the same delegation, applying round 3's exact 
 Ruling of the orchestrator under the same delegation, applying round 6's exact text. Reviews: `research/reviews/codex_106-logon-guards-write-bounds_gate_a_6_review.md` and `research/reviews/opus_106-logon-guards-write-bounds_gate_a_6_adversarial_review.md` (parent repo).
 - R14 (C-1): Q: Does R-7's reading of §XV.1 (the 544 note's conditional zero) extend to a third condition, write_timeout_ms set with a user-supplied clock (clock_override or EngineConfig::clock)? → A: yes. The write limit is opt-in and off by default, and the zero holds on the shipping clock. With the limit set and a user clock, each spaced write may allocate through that clock's sleep_until and fixpp's wait group. This is disclosed in L-106-e, which amends B-544-1's condition list and L-497-1 in the same feature. Orchestrator ruling under the owner's delegation, flagged for the owner's review at merge.
 
+### Session 2026-11-26 (analyze)
+
+- Owner ruling 2026-11-25: autonomous end-to-end work; local builds are pre-approved by the owner for this feature (`[const §XVII.7]` satisfied by that ruling). Scope rule (owner 2026-11-25): targeted tests only, plus ONE full ctest on linux -debug; one build at a time.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — An unauthorised identity is disconnected without a message and changes nothing (Priority: P1)
@@ -189,7 +193,7 @@ An operator who wants a slow consumer cut sooner than the liveness give-up sets 
 2. **Given** the limit set and a resend answer of many frames, **Then** each frame's write is limited separately, and a walk that keeps making progress is not cut.
 3. **Given** the limit unset (the default), **Then** behaviour is User Story 3's.
 4. **Given** an ending Logout write, **Then** 105's `logout_disconnect_timeout_ms` limit applies to it, not this one.
-5. **Given** a TOML config with the key set, **Then** it loads. **Given** it out of range or of the wrong type, **Then** it is refused with `malformed_value`, as `logon_timeout_ms` is.
+5. **Given** a TOML config with the key set, **Then** it loads. **Given** it out of range, **Then** it is refused with `out_of_range`; **given** it of the wrong type, **Then** it is refused with `malformed_value`, as `logon_timeout_ms` is.
 
 ---
 
