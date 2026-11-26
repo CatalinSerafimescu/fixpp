@@ -545,7 +545,9 @@ asio::awaitable<void> run_read_pump(
     };
     auto expire = [&]() -> asio::awaitable<void> {
         // 105 (research D4; data-model E-5): unless the session has recorded its own ending.
-        if (session.state() != fsm_state::Disconnected) {
+        // 106 D11 supersedes 105's no-ending-recorded test: the claim decides (data-model E-10;
+        // the Disconnected edge takes a free claim, so a session that ended itself refuses).
+        if (session_engine_access::claim_ending(session)) {
             session_engine_access::note_establishment_timeout(session);
         }
         co_await stop_pump();

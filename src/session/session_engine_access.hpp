@@ -42,6 +42,11 @@ struct session_engine_access {
     // The establishment deadline passed before the first Active (contract C-4): the
     // event and the log record. The pump then closes the session. Session strand.
     static void note_establishment_timeout(Session& s) noexcept { s.note_establishment_timeout_(); }
+    // 106 D11 (data-model E-10): the establishment deadline takes the session's ending claim
+    // before its event and record; false when another ending holds it. Session strand.
+    [[nodiscard]] static bool claim_ending(Session& s) noexcept {
+        return s.claim_ending_(Session::ending_claim::establishment_timeout);
+    }
 
     // The carry open() allocated (data-model E-2, plan OD-13): L plus one read. The read
     // pump borrows it for the connection. Session strand.

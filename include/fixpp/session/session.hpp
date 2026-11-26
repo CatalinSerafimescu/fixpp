@@ -1959,6 +1959,9 @@ private:
         replay_gate_.wake_all();
         // 103 (research D4.4, D4.6): engine stop claims a pending mark and wakes the bound.
         claim_peer_logout_none_();
+        // 106 (data-model E-3, the wakers): Engine::stop()'s step 1 wakes the connection bound,
+        // which leaves on the closing_or_stopped_() term.
+        wake_connection_bound_();
     }
 
     // ── 103 (fixpp#577, research D4.2 to D4.6) — a too-high Logout ─────────────
@@ -2282,10 +2285,88 @@ private:
     std::function<bool()> ending_bound_race_throws_;
     // 106-logon-guards-write-bounds (research D9; data-model E-3): the connection bound's test
     // seams, in the shape of the two above. When set and they return true, the bound's spawn
-    // fails and the bound's wait throws. Set only through session_test_access; their call sites
-    // land with the bound (tasks.md T083).
+    // fails and the bound's wait throws. Set only through session_test_access.
     std::function<bool()> connection_bound_spawn_fails_;
     std::function<bool()> connection_bound_wait_throws_;
+
+    // ── 106-logon-guards-write-bounds: one ending claim (research D11; data-model E-10) ──────
+    // Who decided this connection's ending. Reset to none in begin_connection_(); the
+    // Disconnected edge takes it as internal when it is none, so a decider after any ending finds
+    // it taken. Session strand only.
+    enum class ending_claim : std::uint8_t {
+        none,
+        give_up,
+        write_timeout,
+        ending_logout,
+        establishment_timeout,
+        internal
+    };
+    ending_claim ending_claim_ = ending_claim::none;
+    // Takes the claim for who: refused when it is taken, when closing_or_stopped_() holds (a
+    // close() that has begun owns the ending) or while a reconnect drain owns the connection's
+    // close. No suspension between the test and the set. Synchronous.
+    [[nodiscard]] bool claim_ending_(ending_claim who) noexcept {
+        if (ending_claim_ != ending_claim::none || closing_or_stopped_() ||
+            reconnect_drain_in_flight_) {
+            return false;
+        }
+        ending_claim_ = who;
+        return true;
+    }
+
+    // ── 106: the connection bound (research D3, "The primitive"; data-model E-3) ──────────────
+    // One coroutine per connection, spawned by the liveness loop at its start on the loop's
+    // executor, joined by connection_bound_counter_. It decides the give-up while the loop is
+    // suspended in its own emit (emit_in_flight_). Session strand only.
+    struct connection_bound_state {
+        bool running = false;
+        std::uint32_t gen = 0;  // the connection generation it was spawned for
+        bool shipping = false;  // effective_clock_ is system_clock_source (tested at the spawn)
+        std::function<void()> wake;  // cancels the bound's own timer; set by the bound only
+    };
+    connection_bound_state connection_bound_;
+    // Set by the liveness loop while its TestRequest or Heartbeat emit has not returned; cleared
+    // by an RAII guard in the loop's frame at the return or an exception.
+    bool emit_in_flight_ = false;
+    std::shared_ptr<std::atomic<int>> connection_bound_counter_{
+        std::make_shared<std::atomic<int>>(0)};
+    using connection_bound_join = counter_join;
+    void wake_connection_bound_() noexcept {
+        if (connection_bound_.wake) {
+            connection_bound_.wake();
+        }
+    }
+    // Spawns the bound on ex for this connection; false when the spawn fails (the seam, or an
+    // allocation failure). Synchronous.
+    [[nodiscard]] bool spawn_connection_bound_(asio::any_io_executor const& ex,
+                                               std::chrono::milliseconds threshold) noexcept;
+    asio::awaitable<void> run_connection_bound_(connection_bound_join join, std::uint32_t gen,
+                                                std::chrono::milliseconds threshold) noexcept;
+    // The bound's one waiting callee, on the bound's own timer (an asio::steady_timer, a template
+    // parameter so this header names no timer type; defined and used in session.cpp only): false
+    // when a deadline arm completed before its instant.
+    template <class Timer>
+    asio::awaitable<bool> connection_bound_wait_(Timer& timer,
+                                                 fixpp::core::steady_time_point deadline);
+    // The bound's exit terms (data-model E-3, the exit row). Synchronous.
+    [[nodiscard]] bool connection_bound_exits_(std::uint32_t gen) const noexcept {
+        return conn_gen_ != gen || fsm_state_ == fsm_state::Disconnected || closing_or_stopped_() ||
+               reconnect_drain_in_flight_ || ending_claim_ != ending_claim::none;
+    }
+    // The give-up's decision (research D3, "The decision"; data-model E-3): the claim, the
+    // slot-74 record, the Text, the Logout owner and the R-1 Logout's enter_ending_write_; with
+    // 105's ending bound refused, Disconnected and the connection's close at the decision. Returns
+    // false when the claim is refused (nothing done). Synchronous.
+    [[nodiscard]] bool decide_give_up_(std::chrono::milliseconds threshold,
+                                       asio::any_io_executor const& ex) noexcept;
+    // What the decision left for the write half (the loop's, after its emit returns).
+    struct give_up_state {
+        bool owner_claimed = false;
+        bool closed = false;  // 105's ending bound was refused: closed at the decision
+        std::array<char, 48> text_buf{};
+        std::size_t text_len = 0;
+    };
+    give_up_state give_up_;
     // 106 (research D9 row "FR-006 commit"): run in a Logon arm between the classification of
     // the frame's MsgSeqNum and the commit of its advance, so a cell can freeze the manager there.
     // Set only through session_test_access; its call site lands with the commit (tasks.md T064).

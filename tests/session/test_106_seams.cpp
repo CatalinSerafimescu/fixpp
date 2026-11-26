@@ -254,3 +254,106 @@ TEST(NextNumIn106, Acceptor_ResetOnLogon_S3_InMemoryOne) {
         << "NextNumIn in memory";
     EXPECT_EQ(rig.sess->state(), fsm_state::Disconnected) << t99::state_name(rig.sess->state());
 }
+
+// ── T076: ConnectionBound106 (research D9 row C-4; data-model E-3) ─────────────────────────────
+// [seam] The connection bound's cells whose rig needs no write limit, on t106::GiveUpRig (H = T =
+// 10 s, B = 500 ms, a direct Session on a BlockingWriteTransport).
+// ConnectionBound106.Teardown_Close_* and Teardown_EngineStop_* are covered by the Disconnected
+// edge (data-model E-3's joiner table) and not written.
+
+namespace {
+
+namespace t106s = fixpp::test_support::t106;
+using fixpp::session::session_role;
+
+// open(), the connection, then the peer's Logon at 1, as t105::DirectRig::to_active() does, without
+// its Active check (a cell whose bound fails at the loop's start ends at Active).
+[[nodiscard]] bool connect_and_logon(t106s::GiveUpRig& r) {
+    auto& s = r.d.s;
+    auto const opened = r.d.run(s.session->open(), "open");
+    if (!opened || !opened->has_value()) return false;
+    if (r.d.role == session_role::initiator) {
+        auto const c = r.d.run(s.session->drive_reconnect(), "drive_reconnect");
+        if (!c || !c->has_value()) return false;
+    } else {
+        s.session->attach_accepted_transport(
+            std::make_unique<fixpp::session::test::BlockingWriteTransport>(s.ioc.get_executor(),
+                                                                           r.d.stream, r.d.bw),
+            fixpp::transport::handshake_result{});
+    }
+    (void)s.feed(s.logon(1));
+    return true;
+}
+
+class ConnectionBound106 : public ::testing::TestWithParam<session_role> {};
+
+// The spawn refused at the loop's start fails closed: the loop takes the claim, Disconnected once,
+// the transport closed, no give-up record, no Logout.
+TEST_P(ConnectionBound106, SpawnFails_AtLoop) {
+    t106s::GiveUpRig r{GetParam(), t106s::GiveUpParams{}};
+    fixpp::session::session_test_access::set_connection_bound_spawn_fails(r.session(),
+                                                                          [] { return true; });
+    ASSERT_TRUE(connect_and_logon(r)) << "setup";
+    r.d.s.drain();
+    EXPECT_NE(fixpp::session::session_test_access::ending_claim(r.session()), 0) << "no claim";
+    EXPECT_EQ(r.d.s.state(), fixpp::session::fsm_state::Disconnected);
+    EXPECT_EQ(r.disconnected(), 1U) << "Disconnected entries";
+    EXPECT_TRUE(r.d.closed()) << "the transport is open";
+    EXPECT_EQ(r.records(), 0U) << "give-up records";
+    EXPECT_EQ(r.completed_since("5", 0), 0U) << "a Logout";
+}
+
+// The bound's wait throws with the claim free: the bound takes it, Disconnected once, one close;
+// no record, no Logout.
+TEST_P(ConnectionBound106, WaitThrows) {
+    t106s::GiveUpRig r{GetParam(), t106s::GiveUpParams{}};
+    fixpp::session::session_test_access::set_connection_bound_wait_throws(r.session(),
+                                                                          [] { return true; });
+    ASSERT_TRUE(connect_and_logon(r)) << "setup";
+    r.d.s.drain();
+    EXPECT_NE(fixpp::session::session_test_access::ending_claim(r.session()), 0) << "no claim";
+    EXPECT_EQ(r.d.s.state(), fixpp::session::fsm_state::Disconnected);
+    EXPECT_EQ(r.disconnected(), 1U) << "Disconnected entries";
+    EXPECT_TRUE(r.d.closed()) << "the transport is open";
+    EXPECT_EQ(r.records(), 0U) << "give-up records";
+    EXPECT_EQ(r.completed_since("5", 0), 0U) << "a Logout";
+}
+
+// A wake with nothing due ends nothing: the bound is still counted, the session Active, no claim.
+TEST_P(ConnectionBound106, SpuriousWake_NoEnding) {
+    t106s::GiveUpRig r{GetParam(), t106s::GiveUpParams{}};
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    ASSERT_EQ(fixpp::session::session_test_access::connection_bound_count(r.session()), 1)
+        << "setup: the bound is not running";
+    fixpp::session::session_test_access::wake_connection_bound(r.session());
+    r.d.s.drain();
+    EXPECT_EQ(fixpp::session::session_test_access::connection_bound_count(r.session()), 1)
+        << "the wake ended the bound";
+    EXPECT_EQ(r.d.s.state(), fixpp::session::fsm_state::Active);
+    EXPECT_EQ(fixpp::session::session_test_access::ending_claim(r.session()), 0) << "a claim";
+}
+
+// The connection's end (the peer's Logout: the reply Logout, then Disconnected, with no close(),
+// drain or stop) ends a parked bound: its counter reads 0 after a bounded pump.
+TEST_P(ConnectionBound106, Teardown_ConnectionEnd_Parked) {
+    t106s::GiveUpRig r{GetParam(), t106s::GiveUpParams{}};
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    ASSERT_EQ(fixpp::session::session_test_access::connection_bound_count(r.session()), 1)
+        << "setup: the bound is not running";
+    (void)r.d.s.feed(r.d.s.logout(2));
+    ASSERT_EQ(r.d.s.state(), fixpp::session::fsm_state::Disconnected) << "setup";
+    EXPECT_TRUE(r.d.s.pump_until(
+        [&] {
+            return fixpp::session::session_test_access::connection_bound_count(r.session()) == 0;
+        },
+        std::chrono::seconds{2}))
+        << "the bound outlived the connection's end";
+}
+
+INSTANTIATE_TEST_SUITE_P(BothRoles, ConnectionBound106,
+                         ::testing::Values(session_role::acceptor, session_role::initiator),
+                         [](::testing::TestParamInfo<session_role> const& i) {
+                             return i.param == session_role::acceptor ? "Acceptor" : "Initiator";
+                         });
+
+}  // namespace

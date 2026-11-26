@@ -270,6 +270,15 @@ struct session_test_access {
     static void set_commit_freeze_hook(Session& s, std::function<void()> hook) {
         s.commit_freeze_hook_ = std::move(hook);
     }
+    // 106 (tasks.md T078, T083): the ending claim, as its enumerator's value (0 is none), and
+    // the connection bound's join counter, for the seam cells.
+    [[nodiscard]] static int ending_claim(Session const& s) noexcept {
+        return static_cast<int>(s.ending_claim_);
+    }
+    [[nodiscard]] static int connection_bound_count(Session const& s) noexcept {
+        return s.connection_bound_counter_->load(std::memory_order_acquire);
+    }
+    static void wake_connection_bound(Session& s) noexcept { s.wake_connection_bound_(); }
     [[nodiscard]] static int peer_logout_bound_count(Session const& s) noexcept {
         return s.peer_logout_bound_counter_->load(std::memory_order_acquire);
     }
