@@ -44,6 +44,7 @@
 #include <utility>
 #include <vector>
 
+#include "session/engine_loopback_harness.hpp"
 #include "session/test_099_fixt_support.hpp"
 #include "session/test_106_support.hpp"
 #include "support/extract_tag.hpp"
@@ -69,6 +70,7 @@ namespace {
 struct Toml106Parts {
     std::string defaults;  // the [default] table's keys (no table when empty)
     std::string session;   // extra [[session]] keys
+    std::string root;      // root (engine-scope) keys, ahead of every table
 };
 
 Toml106Parts in_defaults(std::string s) {
@@ -85,7 +87,8 @@ Toml106Parts in_session(std::string s) {
 std::string toml_106(Toml106Parts const& p) {
     std::string const dir =
         std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}}.generic_string();
-    std::string t = "[clock]\nkind = \"system\"\n\n[store]\nkind = \"memory\"\n\n";
+    std::string t = p.root.empty() ? std::string{} : p.root + "\n\n";
+    t += "[clock]\nkind = \"system\"\n\n[store]\nkind = \"memory\"\n\n";
     t += "[cert_source]\nkind = \"file\"\ncert_file = '" + dir + "/leaf_ecdsa_p256.pem'\n";
     t += "key_file = '" + dir + "/leaf_ecdsa_p256.key'\nca_file = '" + dir + "/ca.pem'\n\n";
     t += "[dictionary]\nkind = \"path\"\npath = '" + dir + "/FIX44.xml'\n\n";
@@ -97,7 +100,8 @@ std::string toml_106(Toml106Parts const& p) {
     return t;
 }
 
-fixpp::config::LoadResult load_text_106(std::string const& text) {
+// The bundle's clock is bound to `ex`'s context, which must outlive every use of the clock.
+fixpp::config::LoadResult load_text_106(std::string const& text, asio::any_io_executor const& ex) {
     static std::atomic<unsigned> n{0};
     auto const* info = ::testing::UnitTest::GetInstance()->current_test_info();
     std::string const name = std::string{"fixpp_106_seam_"} + (info ? info->name() : "cell") + "_" +
@@ -107,13 +111,18 @@ fixpp::config::LoadResult load_text_106(std::string const& text) {
         std::ofstream out{path, std::ios::binary | std::ios::trunc};
         out << text;
     }
-    asio::io_context ctx;
     fixpp::config::LoadOptions opts;
-    opts.engine_executor = ctx.get_executor();
+    opts.engine_executor = ex;
     auto result = fixpp::config::load_toml_config(path, opts);
     std::error_code ec;
     std::filesystem::remove(path, ec);
     return result;
+}
+
+// A bundle whose clock no cell uses.
+fixpp::config::LoadResult load_text_106(std::string const& text) {
+    asio::io_context ctx;
+    return load_text_106(text, ctx.get_executor());
 }
 
 std::string seen_106(fixpp::config::LoadResult const& r) {
@@ -172,6 +181,109 @@ TEST(TomlHandshake106, AcceptorKeyAbsent_Default1500) {
         << "a default EngineConfig";
     EXPECT_EQ(fixpp::config::EngineEstablishment{}.acceptor_tls_handshake_timeout, 1500ms)
         << "a default EngineEstablishment";
+}
+
+// ── T132: EngineHandshake106 (research D9 row FR-013a; contract C-5.2) ────────────────────────
+// The Engine listener's bound on a TLS accept: EngineLoopbackHarness's acceptor, logon_timeout_ms
+// 10 s, and a client that connects and never sends a byte (t106::SilentClient). Window
+// [300 ms, 1.2 s): the transport's timer starts after the accept, which follows the client's start
+// instant, so no correct close reads below the bound; the 1500 ms default lands 300 ms past the
+// window. The spurious arm's 2.3 s precedes logon_timeout_ms by 7.7 s.
+
+namespace {
+
+struct AcceptorReading {
+    bool built = false;
+    bool started = false;
+    bool bound = false;
+    bool ended = false;
+    std::chrono::milliseconds elapsed{};
+};
+
+AcceptorReading silent_client_against(asio::io_context& ioc, fixpp::core::EngineConfig eng_cfg,
+                                      std::chrono::steady_clock::duration budget) {
+    AcceptorReading out;
+    eng_cfg.executor = ioc.get_executor();
+    auto harness = fixpp::test_support::EngineLoopbackHarness::build(
+        ioc.get_executor(), std::move(eng_cfg), /*register_sessions=*/true,
+        [](fixpp::session::SessionConfig& c) { c.logon_timeout_ms = 10000; });
+    if (!harness) return out;
+    out.built = true;
+    out.started = harness->engine().start().has_value();
+    if (!out.started) return out;
+    fixpp::test_support::engine_stop_guard stop_guard{*harness, ioc};
+    (void)fixpp::test_support::pump_until(
+        ioc, [&] { return harness->server_endpoint().port != 0; }, 5s, 5ms, "the listener's bind");
+    auto const port = harness->server_endpoint().port;
+    out.bound = port != 0;
+    if (!out.bound) return out;
+    fixpp::test_support::t106::SilentClient client{ioc};
+    auto const t0 = std::chrono::steady_clock::now();
+    client.start(port);
+    (void)fixpp::test_support::pump_until(
+        ioc, [&] { return client.state->ended; }, budget, 5ms, "the silent client's end");
+    out.ended = client.state->ended;
+    if (out.ended && client.state->ended_at) {
+        out.elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(*client.state->ended_at - t0);
+    }
+    return out;
+}
+
+void expect_closed_in_window(AcceptorReading const& r, char const* cell) {
+    ASSERT_TRUE(r.started) << cell << ": engine.start() failed";
+    ASSERT_TRUE(r.bound) << cell << ": the acceptor listener did not bind";
+    ASSERT_TRUE(r.ended) << cell << ": the silent client's connection was not closed by 2.3 s";
+    EXPECT_GE(r.elapsed, 300ms) << cell << ": closed after " << r.elapsed.count() << " ms";
+    EXPECT_LT(r.elapsed, 1200ms) << cell << ": closed after " << r.elapsed.count() << " ms";
+}
+
+fixpp::config::LoadResult acceptor_key_bundle(std::string const& v, asio::io_context& ioc) {
+    Toml106Parts p;
+    p.root = "acceptor_tls_handshake_timeout_ms = " + v;
+    return load_text_106(toml_106(p), ioc.get_executor());
+}
+
+}  // namespace
+
+// [seam: M7‴] The EngineConfig built from the loaded bundle: the clock and
+// EngineEstablishment::acceptor_tls_handshake_timeout copied, as a host copies them (contract
+// C-5.2); the key 300 ms.
+TEST(EngineHandshake106, Acceptor_ClosesAtTheKey) {
+    asio::io_context ioc;
+    auto const r = acceptor_key_bundle("300", ioc);
+    ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << seen_106(r);
+    fixpp::core::EngineConfig ec;
+    ec.clock = r->engine.clock;
+    ec.acceptor_tls_handshake_timeout = r->engine.acceptor_tls_handshake_timeout;
+    auto const rd = silent_client_against(ioc, std::move(ec), 2300ms);
+    if (!rd.built) GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    expect_closed_in_window(rd, "the key 300 ms");
+}
+
+// Its spurious arm: the key 60 s, so the silent client is still connected at 2.3 s.
+TEST(EngineHandshake106, Acceptor_LongKey_StillConnected) {
+    asio::io_context ioc;
+    auto const r = acceptor_key_bundle("60000", ioc);
+    ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << seen_106(r);
+    fixpp::core::EngineConfig ec;
+    ec.clock = r->engine.clock;
+    ec.acceptor_tls_handshake_timeout = r->engine.acceptor_tls_handshake_timeout;
+    auto const rd = silent_client_against(ioc, std::move(ec), 2300ms);
+    if (!rd.built) GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    ASSERT_TRUE(rd.started) << "engine.start() failed";
+    ASSERT_TRUE(rd.bound) << "the acceptor listener did not bind";
+    EXPECT_FALSE(rd.ended) << "closed after " << rd.elapsed.count() << " ms, before 2.3 s";
+}
+
+// [seam: M7′] The C++ twin: EngineConfig::acceptor_tls_handshake_timeout set directly, 300 ms.
+TEST(EngineHandshake106, Acceptor_CxxField_ClosesAtTheField) {
+    asio::io_context ioc;
+    fixpp::core::EngineConfig ec;
+    ec.acceptor_tls_handshake_timeout = 300ms;
+    auto const rd = silent_client_against(ioc, std::move(ec), 2300ms);
+    if (!rd.built) GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    expect_closed_in_window(rd, "the field 300 ms");
 }
 
 // ── T058: NextNumIn106.CommitRefused_Disconnected (research D9 row "FR-006 commit", N-4) ───────

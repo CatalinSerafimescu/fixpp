@@ -503,6 +503,10 @@ add_session_105_bucket(session_106_seam_tests "session;106;106_seam"
 target_link_libraries(session_106_seam_tests PRIVATE fixpp::config_toml)
 target_compile_definitions(session_106_seam_tests PRIVATE
   FIXPP_CONFIG_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/config/fixtures")
+# 106 T131: the TOML cells of test_106_handshake.cpp mint a TLS transport from a loaded bundle.
+target_link_libraries(session_106_tests PRIVATE fixpp::config_toml)
+target_compile_definitions(session_106_tests PRIVATE
+  FIXPP_CONFIG_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/config/fixtures")
 
 # 103 T023: test_reset_seqnum_policy_matrix.cpp's AS5 cells use mock_reconnect_factory.hpp's
 # FaultStoreFactory, whose header includes the mock transport.
