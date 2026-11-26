@@ -6444,7 +6444,10 @@ asio::awaitable<void> Session::run_connection_bound_([[maybe_unused]] connection
                 auto const threshold = connection_bound_.threshold;
                 auto const g = detail::held_test_request_cap(last_inbound_steady_, threshold);
                 if (now >= g) {
-                    (void)decide_give_up_(threshold, co_await asio::this_coro::executor);
+                    // The executor is read first: gcc does not take the void cast of a call
+                    // whose argument holds a co_await (-Wunused-result).
+                    auto const ex = co_await asio::this_coro::executor;
+                    (void)decide_give_up_(threshold, ex);
                     break;
                 }
                 deadline = g;
