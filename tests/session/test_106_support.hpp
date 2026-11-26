@@ -40,7 +40,10 @@
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
 #include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <functional>
+#include <future>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -55,7 +58,9 @@
 #include "session/test_105_direct_rig.hpp"
 #include "session/test_105_support.hpp"
 #include "support/blocking_write_transport.hpp"
+#include "support/extract_tag.hpp"
 #include "support/log_capture.hpp"
+#include "support/session_test_access.hpp"
 
 namespace fixpp::test_support::t106 {
 
@@ -229,6 +234,120 @@ private:
     }
 
     std::shared_ptr<asio::ip::tcp::socket> socket_;
+};
+
+// ── The give-up cells' rig (tasks.md T071 to T075; research D9 rows FR-008, FR-009, FR-017) ──────
+//
+// A direct Session (t105::DirectRig: a BlockingWriteTransport whose next write can be held, the
+// mock clock, both roles) with HeartBtInt H, test_request_threshold T and
+// logout_disconnect_timeout_ms B, write_timeout_ms unset, and a LogCapture. Every instant is
+// reached with the mock clock's step_to and a drain, never a coarser advance.
+//
+// CONDITIONS this rig keeps, checked by reading:
+//   - the log is read through records_now(), which flushes the logger without shutting it down,
+//     so a record absent at one instant and present at a later one are both readable;
+//   - teardown releases every held write before the Scene closes the session.
+
+// The records of one format the logger has emitted so far, read after a flush (not a shutdown),
+// so the capture keeps recording. A flush that does not complete inside its wall budget is a
+// failure and reads as no record.
+[[nodiscard]] inline std::size_t records_now(LogCapture& cap, std::uint32_t format_id) {
+    auto done = std::make_shared<std::promise<void>>();
+    auto fut = done->get_future();
+    cap.logger->async_flush([done] { done->set_value(); });
+    if (fut.wait_for(std::chrono::seconds{10}) != std::future_status::ready) {
+        ADD_FAILURE() << "records_now: the logger's flush did not complete";
+        return 0;
+    }
+    std::size_t n = 0;
+    for (auto const& r : cap.sink->records()) n += r.format_id == format_id ? 1U : 0U;
+    return n;
+}
+[[nodiscard]] inline std::size_t give_up_records_now(LogCapture& cap) {
+    return records_now(cap, FIXPP_FORMAT_ID(kGiveUpRecordFormat));
+}
+// The give-up record's test_req_id argument (its first), as 105's cells read it.
+[[nodiscard]] inline std::string give_up_record_test_req_id(LogCapture& cap) {
+    auto done = std::make_shared<std::promise<void>>();
+    auto fut = done->get_future();
+    cap.logger->async_flush([done] { done->set_value(); });
+    if (fut.wait_for(std::chrono::seconds{10}) != std::future_status::ready) return "<no flush>";
+    for (auto const& r : cap.sink->records()) {
+        if (r.format_id != FIXPP_FORMAT_ID(kGiveUpRecordFormat)) continue;
+        auto const& a = r.args[0];
+        if (a.kind == fixpp::log::ArgValue::Kind::inline_str)
+            return std::string{a.inl.data, a.inl.len};
+        if (a.kind == fixpp::log::ArgValue::Kind::static_str && a.static_ptr) return a.static_ptr;
+        return {};
+    }
+    return "<no record>";
+}
+
+struct GiveUpParams {
+    std::chrono::seconds heartbeat{10};
+    std::chrono::milliseconds threshold{10000};
+    std::uint32_t logout_ms = 500;
+};
+
+class GiveUpRig {
+public:
+    LogCapture log;
+    GiveUpParams p;
+    DirectRig d;
+
+    GiveUpRig(fixpp::session::session_role role, GiveUpParams params,
+              std::function<void(fixpp::session::SessionConfig&)> const& tweak = {})
+        : p{params}, d{role, [this, &tweak](fixpp::session::SessionConfig& c) {
+                           c.heartbeat_interval = p.heartbeat;
+                           c.test_request_threshold = p.threshold;
+                           c.logout_disconnect_timeout_ms = p.logout_ms;
+                           c.logger_override = log.logger;
+                           if (tweak) tweak(c);
+                       }} {}
+    GiveUpRig(GiveUpRig const&) = delete;
+    GiveUpRig& operator=(GiveUpRig const&) = delete;
+    ~GiveUpRig() {
+        d.release();
+        d.s.drain();
+    }
+
+    fixpp::session::Session& session() { return *d.s.session; }
+    [[nodiscard]] steady_time_point now() const { return d.s.mock->steady_now(); }
+    [[nodiscard]] steady_time_point last_inbound() const {
+        return fixpp::session::session_test_access::last_inbound_steady(*d.s.session);
+    }
+    // The mock clock stepped to t, then every handler that became ready run.
+    void at(steady_time_point t) {
+        d.s.mock->step_to(t);
+        d.s.drain();
+    }
+    [[nodiscard]] std::size_t records() { return give_up_records_now(log); }
+    [[nodiscard]] std::size_t disconnected() const { return count_disconnected(*d.s.session); }
+    [[nodiscard]] std::size_t completed_since(std::string_view type, std::size_t from) const {
+        std::size_t n = 0;
+        for (std::size_t i = from; i < d.bw->recorded.size(); ++i) {
+            auto const& w = d.bw->recorded[i];
+            if (w.completed && fixpp::test_support::extract_tag(w.bytes, 35) == type) ++n;
+        }
+        return n;
+    }
+    // The MsgType(35) of each completed write from index from, in write-start order.
+    [[nodiscard]] std::vector<std::string> completed_types(std::size_t from = 0) const {
+        std::vector<std::string> out;
+        for (std::size_t i = from; i < d.bw->recorded.size(); ++i) {
+            auto const& w = d.bw->recorded[i];
+            if (w.completed) out.emplace_back(fixpp::test_support::extract_tag(w.bytes, 35));
+        }
+        return out;
+    }
+    [[nodiscard]] std::string completed_field(std::string_view type, int tag) const {
+        for (auto const& w : d.bw->recorded) {
+            if (w.completed && fixpp::test_support::extract_tag(w.bytes, 35) == type) {
+                return std::string{fixpp::test_support::extract_tag(w.bytes, tag)};
+            }
+        }
+        return "<none>";
+    }
 };
 
 }  // namespace fixpp::test_support::t106
