@@ -1010,7 +1010,7 @@ in `src/session/engine.cpp`. Leads to verify against that source.
   `[engine]` table (a new top-level structure for one key).
 - **One ending claim per connection** (ruling R3, FR-017; research D11). The give-up, the write limit, 105's ending
   Logouts, the establishment deadline, `close()`, `Engine::stop()` and the bound's failure exits take one claim; a later
-  decider records nothing and closes nothing. Refined by R21 (106 spec.md Clarifications): a lost claim suppresses only the
+  decider records nothing and adds no `Disconnected` entry (R21, 106 spec.md Clarifications): a lost claim suppresses only the
   loser's reason record and its `Disconnected` entry, never a protocol reply the base sends (the confirming Logout of
   `B-103-15`) or a close the base performs. Not taken (research D11, "Alternatives rejected"): per-decider predicates
   (a watchdog deadline inside the give-up's budget wrote a second reason); "the first to close records the reason"

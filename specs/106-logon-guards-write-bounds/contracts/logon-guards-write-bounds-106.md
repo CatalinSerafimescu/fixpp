@@ -158,7 +158,7 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
   differ on purpose (research D5): 105's counts from the Logout leaf's entry, before the write gate; this limit's
   (C-4.2) counts from the `async_write` call, after the gate.
 - **C-4.6 One ending** (FR-017, quoted). Every ending MUST have exactly one `Disconnected` entry, and `onLogout` MUST fire at most once, whichever of the give-up, the write limit, 105's ending Logouts, the establishment deadline, `close()`, `Engine::stop()` and the connection bound's failure exits comes first (ruling R3). It MUST have exactly one reason record when the first claimant is the give-up, the write limit or the establishment deadline, and none when an ending Logout, `close()`, `Engine::stop()`, a reconnect drain or a bound failure exit comes first. An ending Logout's reason is its Logout's Text(58) on the wire; the base writes no record at those sites, and 106 adds none. The claim is one per connection; a later decider records nothing and
-  closes nothing, and 105's ending limit cuts for its claimant and records nothing. Refined by R21 (spec.md Clarifications): a lost claim
+  adds no `Disconnected` entry, and 105's ending limit cuts for its claimant and records nothing. R21 (spec.md Clarifications): a lost claim
   suppresses only the loser's reason record and its `Disconnected` entry; it never suppresses a protocol reply the base sends, or a close the
   base performs. The reply to the peer's Logout is written on a refused claim (`B-103-15`); a Logout fixpp starts is not.
 - **C-4.7 TOML.** `write_timeout_ms` in a `[[session]]` or `[default]` table:
