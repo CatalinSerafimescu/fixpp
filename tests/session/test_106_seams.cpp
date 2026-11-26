@@ -46,9 +46,9 @@
 
 #include "session/test_099_fixt_support.hpp"
 #include "session/test_106_support.hpp"
+#include "support/extract_tag.hpp"
 #include "support/hooked_store.hpp"
 #include "support/memory_store_test_access.hpp"
-#include "support/extract_tag.hpp"
 #include "support/seqnum_manager_test_access.hpp"
 #include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
@@ -498,10 +498,15 @@ public:
         return t106::records_now(log, FIXPP_FORMAT_ID(t106::kWriteTimeoutRecordFormat));
     }
     [[nodiscard]] std::size_t give_up_records() { return t106::give_up_records_now(log); }
-    [[nodiscard]] std::size_t disconnected() const { return t106::count_disconnected(*d.s.session); }
+    [[nodiscard]] std::size_t disconnected() const {
+        return t106::count_disconnected(*d.s.session);
+    }
     // An application send, started and not awaited.
     std::future<expected_void> spawn_send(std::string_view clordid) {
-        payloads_.push_back("35=D\x01" "11=" + std::string{clordid} + "\x01");
+        payloads_.push_back(
+            "35=D\x01"
+            "11=" +
+            std::string{clordid} + "\x01");
         auto const& pl = payloads_.back();
         return asio::co_spawn(fixpp::test_support::session_executor_of(*d.s.session, d.s.ioc),
                               d.s.session->send(std::as_bytes(std::span{pl.data(), pl.size()})),
@@ -573,7 +578,8 @@ void tweak_for(wclass c, SessionConfig& cfg) {
     if (c == wclass::honor789_frame) cfg.enable_next_expected_msg_seq_num = true;
     if (c == wclass::resend_frame || c == wclass::honor789_frame) {
         cfg.store_factory = std::make_shared<fixpp::session::MemoryStoreFactory>(
-            fixpp::session::MemoryStore::Config{.policy = fixpp::session::capacity_policy::unbounded});
+            fixpp::session::MemoryStore::Config{.policy =
+                                                    fixpp::session::capacity_policy::unbounded});
     }
 }
 
@@ -628,8 +634,8 @@ Staged stage(Rig& r, wclass c) {
         }
         if (c == wclass::reply_logon) {
             sc.session->attach_accepted_transport(
-                std::make_unique<fixpp::session::test::BlockingWriteTransport>(sc.ioc.get_executor(),
-                                                                               r.d.stream, r.d.bw),
+                std::make_unique<fixpp::session::test::BlockingWriteTransport>(
+                    sc.ioc.get_executor(), r.d.stream, r.d.bw),
                 fixpp::transport::handshake_result{});
             r.d.hold_next_write();
             st.type = "A";
@@ -954,8 +960,7 @@ TEST_P(WriteLimit106, EndingLogout_Keeps105Limit) {
     auto const l = r.last_inbound();
     r.at(l + 10s);
     ASSERT_EQ(r.d.completed("1"), 1U) << "setup: no TestRequest at T";
-    auto const g =
-        t106::give_up_instant_written(l, std::chrono::milliseconds{10000}, r.now());
+    auto const g = t106::give_up_instant_written(l, std::chrono::milliseconds{10000}, r.now());
     r.hold_write_of("5");
     r.at(g);
     ASSERT_TRUE(parked_on(r, "5")) << "setup: the give-up's Logout not held at G";
@@ -1066,7 +1071,6 @@ TEST_P(WriteLimit106, ConnectionBound_Teardown_ConnectionEnd_Timing) {
     r.d.s.drain();
 }
 
-
 // T104 (plan "Deferred to tasks.md", M4 at the other Logout sites): each remaining Logout site's
 // Logout held from S, W = 300 ms < B = 500 ms: no write-timeout record at S + W, still open, and
 // closed at S + B by 105's ending limit (counted from the leaf's entry, S on the mock clock).
@@ -1108,8 +1112,8 @@ void expect_logout_keeps_its_limit(logout_site site) {
         ASSERT_TRUE(opened && opened->has_value()) << "setup: open()";
         if (role == session_role::acceptor) {
             sc.session->attach_accepted_transport(
-                std::make_unique<fixpp::session::test::BlockingWriteTransport>(sc.ioc.get_executor(),
-                                                                               r.d.stream, r.d.bw),
+                std::make_unique<fixpp::session::test::BlockingWriteTransport>(
+                    sc.ioc.get_executor(), r.d.stream, r.d.bw),
                 fixpp::transport::handshake_result{});
         } else {
             auto const c2 = r.d.run(sc.session->drive_reconnect(), "drive_reconnect");
@@ -1126,10 +1130,10 @@ void expect_logout_keeps_its_limit(logout_site site) {
                 break;
             case logout_site::logon_sent_leaf:
                 // SendingTime(52) ten minutes behind the clock: the LogonSent Logout.
-                fed.emplace(sc.feed_spawn(rgs::Scene::raw("A", 1, "TW",
-                                                          sc.sending_time(std::chrono::seconds{-600}),
-                                                          "98=0\x01"
-                                                          "108=30\x01")));
+                fed.emplace(sc.feed_spawn(
+                    rgs::Scene::raw("A", 1, "TW", sc.sending_time(std::chrono::seconds{-600}),
+                                    "98=0\x01"
+                                    "108=30\x01")));
                 break;
             case logout_site::honor789:
                 // NextExpectedMsgSeqNum(789) above the next outbound number: the too-high Logout.
@@ -1340,10 +1344,10 @@ TEST_P(OneEnding106, CloseThenWatchdog) {
     EXPECT_EQ(rd.write_timeout, 0U) << "write-timeout records";
 }
 
-// BothDueAtOneWake (N-7, R9): the loop's TestRequest held in its store call until S = G − W, then
-// its write held, so the bound is armed on both G = L + 3T + 1 ns and S + W = G; one step_to from
-// G − 1 ms to G (the Instants rule's one exception): the give-up row is evaluated first and
-// claims; the write row finds the claim taken.
+// BothDueAtOneWake (data-model E-3, the rows' order at one re-test): the loop's TestRequest held in
+// its store call until S = G − W, then its write held, so the bound is armed on both G = L + 3T + 1
+// ns and S + W = G; one step_to from G − 1 ms to G (the Instants rule's one exception): the give-up
+// row is evaluated first and claims; the write row finds the claim taken.
 TEST_P(OneEnding106, BothDueAtOneWake) {
     auto gate = std::make_shared<t105::gate_store_state>();
     Rig r{GetParam(),
@@ -1353,7 +1357,9 @@ TEST_P(OneEnding106, BothDueAtOneWake) {
               p.threshold = 10000ms;
               return p;
           }(),
-          [gate](SessionConfig& c) { c.store_factory = std::make_shared<t105::GateStoreFactory>(gate); }};
+          [gate](SessionConfig& c) {
+              c.store_factory = std::make_shared<t105::GateStoreFactory>(gate);
+          }};
     ASSERT_TRUE(r.d.to_active()) << "setup";
     auto const l = r.last_inbound();
     gate->hold_when = [](t105::store_call k, fixpp::session::seqnum_t) {
@@ -1373,7 +1379,8 @@ TEST_P(OneEnding106, BothDueAtOneWake) {
     r.at(g);
     EXPECT_EQ(r.give_up_records(), 1U) << "give-up records";
     EXPECT_EQ(r.write_records(), 0U) << "write-timeout records";
-    EXPECT_EQ(session_test_access::ending_claim(r.session()), 1) << "the claim is not the give-up's";
+    EXPECT_EQ(session_test_access::ending_claim(r.session()), 1)
+        << "the claim is not the give-up's";
 }
 
 INSTANTIATE_TEST_SUITE_P(BothRoles, OneEnding106,
@@ -1381,15 +1388,16 @@ INSTANTIATE_TEST_SUITE_P(BothRoles, OneEnding106,
                          role_name);
 
 // T106 (research D9 row C-4; data-model E-3's joiner row drain_for_reconnect_ and its respawn): a
-// direct initiator in LogonSent (its reconnected Logon written, drive_reconnect() returned), inbound
-// validation on (the validation test dictionary), W = 300 ms, logout_disconnect_timeout_ms 5000 ms
-// (the drain's step-3 wall-clock bound, a competing ending: the cells read long before it). An
-// acknowledgement without its required EncryptMethod(98) draws the validate-first Reject, whose
+// direct initiator in LogonSent (its reconnected Logon written, drive_reconnect() returned),
+// inbound validation on (the validation test dictionary), W = 300 ms, logout_disconnect_timeout_ms
+// 5000 ms (the drain's step-3 wall-clock bound, a competing ending: the cells read long before it).
+// An acknowledgement without its required EncryptMethod(98) draws the validate-first Reject, whose
 // write is held at S, so inbound_depth_ is 1; a second drive_reconnect() then enters the drain,
 // which records no Disconnected from LogonSent and parks at its step 3.
 class DrainRig {
 public:
-    Rig r{session_role::initiator, [] {
+    Rig r{session_role::initiator,
+          [] {
               Params p;
               p.logout_ms = 5000;
               return p;
@@ -1417,9 +1425,14 @@ public:
     [[nodiscard]] int bound_count() {
         return session_test_access::connection_bound_count(r.session());
     }
+    // A bounded teardown: the held write released, then close(), which wakes the bound (it leaves
+    // on closing), so a bound a mutant leaves running cannot keep a drain's join spinning past
+    // the cell; the rig's unbounded drain runs only after that.
     ~DrainRig() {
         r.d.release();
         if (delivery) (void)r.d.s.pump_until([&] { return rgs::Scene::ready(*delivery); }, 10s);
+        auto closing = r.spawn(r.session().close(fixpp::session::close_mode::terminal));
+        (void)r.d.s.pump_until([&] { return rgs::Scene::ready(closing); }, 10s);
     }
 };
 
@@ -1493,9 +1506,10 @@ TEST(ConnectionBound106, DrainCancelled_RespawnsOnBlockedWrite) {
     ASSERT_TRUE(d.reject_held()) << "setup: the Reject's write was not held";
     auto const disconnected_before = d.r.disconnected();
     asio::cancellation_signal sig;
-    auto second = asio::co_spawn(
-        fixpp::test_support::session_executor_of(d.r.session(), d.r.d.s.ioc),
-        d.r.session().drive_reconnect(), asio::bind_cancellation_slot(sig.slot(), asio::use_future));
+    auto second =
+        asio::co_spawn(fixpp::test_support::session_executor_of(d.r.session(), d.r.d.s.ioc),
+                       d.r.session().drive_reconnect(),
+                       asio::bind_cancellation_slot(sig.slot(), asio::use_future));
     ASSERT_TRUE(d.r.d.s.pump_until([&] { return d.bound_count() == 0; }, 2s))
         << "setup: the bound outlived the drain's entry";
     ASSERT_FALSE(rgs::Scene::ready(second)) << "setup: the drain did not park";
@@ -1531,9 +1545,10 @@ TEST(ConnectionBound106, DrainCancelled_RespawnFails_ClosedAtOnce) {
     ASSERT_TRUE(d.reject_held()) << "setup: the Reject's write was not held";
     auto const disconnected_before = d.r.disconnected();
     asio::cancellation_signal sig;
-    auto second = asio::co_spawn(
-        fixpp::test_support::session_executor_of(d.r.session(), d.r.d.s.ioc),
-        d.r.session().drive_reconnect(), asio::bind_cancellation_slot(sig.slot(), asio::use_future));
+    auto second =
+        asio::co_spawn(fixpp::test_support::session_executor_of(d.r.session(), d.r.d.s.ioc),
+                       d.r.session().drive_reconnect(),
+                       asio::bind_cancellation_slot(sig.slot(), asio::use_future));
     ASSERT_TRUE(d.r.d.s.pump_until([&] { return d.bound_count() == 0; }, 2s))
         << "setup: the bound outlived the drain's entry";
     session_test_access::set_connection_bound_spawn_fails(d.r.session(), [] { return true; });
@@ -1557,14 +1572,14 @@ TEST(ConnectionBound106, DrainCancelled_RespawnFails_ClosedAtOnce) {
     session_test_access::set_connection_bound_spawn_fails(d.r.session(), nullptr);
 }
 
-// T107 (research D9 row R2(b); [seam: M8]): the shipping clock. system_clock_source, the
-// coroutines on the session's executor, HeartBtInt 2 s (T = 2.4 s, the default threshold),
-// W = 200 ms, B = 2000 ms; the application sends every 300 ms and the peer sends nothing. Every
-// send completes until the TestRequest is seen at the peer, in [T, 2T) of wall time from the
-// Logon; the next send is then held, at S, and cut within W + 1 s of S: one write-timeout record, no
-// slot-74 record, session_write_timeout from the cut send. Inequality: the competing give-up is at
-// the TestRequest's write + T or later, and 300 ms + W + 1 s = 1.5 s < T leaves 0.9 s of
-// scheduling margin. The peer's frames are stamped from the Scene's mock clock, so
+// T107 (research D9, the shipping-clock row; its mutant M8): the shipping clock.
+// system_clock_source, the coroutines on the session's executor, HeartBtInt 2 s (T = 2.4 s, the
+// default threshold), W = 200 ms, B = 2000 ms; the application sends every 300 ms and the peer
+// sends nothing. Every send completes until the TestRequest is seen at the peer, in [T, 2T) of wall
+// time from the Logon; the next send is then held, at S, and cut within W + 1 s of S: one
+// write-timeout record, no slot-74 record, session_write_timeout from the cut send. Inequality: the
+// competing give-up is at the TestRequest's write + T or later, and 300 ms + W + 1 s = 1.5 s < T
+// leaves 0.9 s of scheduling margin. The peer's frames are stamped from the Scene's mock clock, so
 // sending_time_threshold is widened to accept them.
 TEST_P(WriteLimit106, ShippingClock106_DirectDriver_BoundBesideLiveness_TestRequestAtT) {
     Params p;
@@ -1574,35 +1589,73 @@ TEST_P(WriteLimit106, ShippingClock106_DirectDriver_BoundBesideLiveness_TestRequ
     Rig r{GetParam(), p, [](SessionConfig& c) {
               c.sending_time_threshold = std::chrono::hours{24 * 365 * 10};
           }};
-    r.d.s.engine.clock = std::make_shared<fixpp::core::system_clock_source>(r.d.s.ioc.get_executor());
-    r.d.s.session = std::make_unique<fixpp::session::Session>(r.d.s.engine, r.d.s.cfg);
+    auto& sc = r.d.s;
+    sc.engine.clock = std::make_shared<fixpp::core::system_clock_source>(sc.ioc.get_executor());
+    sc.session = std::make_unique<fixpp::session::Session>(sc.engine, sc.cfg);
+    auto& sess = r.session();
+    // After open(), every call runs on the session's own executor (session->executor(), the
+    // session_executor the clock's per-session timer slot is keyed by), so the liveness loop's
+    // sleep and the bound's wait run where they would share that slot.
+    auto const on_session = [&](auto awaitable, char const* what) {
+        auto f = asio::co_spawn(sess.executor(), std::move(awaitable), asio::use_future);
+        if (!sc.pump_until([&] { return rgs::Scene::ready(f); }, 5s)) {
+            ADD_FAILURE() << what << " did not return";
+            return false;
+        }
+        auto const v = f.get();
+        if (!v) ADD_FAILURE() << what << " failed: " << static_cast<int>(v.error());
+        return v.has_value();
+    };
+    auto const opened = r.d.run(sess.open(), "open");
+    ASSERT_TRUE(opened && opened->has_value()) << "setup: open()";
     // Read before the peer's Logon, so it does not follow the session's last inbound instant.
     auto const logon_at = std::chrono::steady_clock::now();
-    ASSERT_TRUE(r.d.to_active()) << "setup";
+    if (GetParam() == session_role::initiator) {
+        ASSERT_TRUE(on_session(sess.drive_reconnect(), "drive_reconnect()")) << "setup";
+    } else {
+        sess.attach_accepted_transport(
+            std::make_unique<fixpp::session::test::BlockingWriteTransport>(sc.ioc.get_executor(),
+                                                                           r.d.stream, r.d.bw),
+            fixpp::transport::handshake_result{});
+    }
+    auto const logon = sc.logon(1);
+    ASSERT_TRUE(on_session(sess.on_inbound_frame(logon), "the peer's Logon")) << "setup";
+    ASSERT_EQ(sc.state(), fsm_state::Active) << "setup";
     auto const t = 2400ms;
+    std::deque<std::string> payloads;
+    auto const send_on_session = [&](std::string id) {
+        payloads.push_back("35=D\x01" "11=" + id + "\x01");
+        auto const& pl = payloads.back();
+        return asio::co_spawn(sess.executor(),
+                              sess.send(std::as_bytes(std::span{pl.data(), pl.size()})),
+                              asio::use_future);
+    };
     std::optional<std::chrono::steady_clock::time_point> tr_seen;
     std::deque<std::future<expected_void>> sends;
     int n = 0;
     while (!tr_seen && std::chrono::steady_clock::now() - logon_at < 2 * t) {
-        sends.push_back(r.spawn_send("W106S" + std::to_string(++n)));
-        (void)r.d.s.pump_until([&] { return r.d.completed("1") > 0; }, 300ms);
+        sends.push_back(send_on_session("W106S" + std::to_string(++n)));
+        (void)sc.pump_until([&] { return r.d.completed("1") > 0; }, 300ms);
         if (r.d.completed("1") > 0) tr_seen = std::chrono::steady_clock::now();
     }
     ASSERT_TRUE(tr_seen.has_value()) << "no TestRequest by 2T";
     EXPECT_GE(*tr_seen - logon_at, t) << "the TestRequest came before T";
     for (auto& f : sends) {
-        ASSERT_TRUE(r.d.s.pump_until([&] { return rgs::Scene::ready(f); }, 1s)) << "a send";
+        ASSERT_TRUE(sc.pump_until([&] { return rgs::Scene::ready(f); }, 1s)) << "a send";
         EXPECT_TRUE(f.get().has_value()) << "a send before the TestRequest failed";
     }
     r.d.hold_next_write();
-    auto cut = r.spawn_send("W106SCUT");
-    ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, "D"); }, 1s)) << "the send not held";
-    auto const s = std::chrono::steady_clock::now();
-    EXPECT_TRUE(r.d.s.pump_until([&] { return r.d.closed(); }, 200ms + 1s))
+    // Read before the send starts, so it does not follow the held write's start S; the reading
+    // after the park follows S.
+    auto const before_s = std::chrono::steady_clock::now();
+    auto cut = send_on_session("W106SCUT");
+    ASSERT_TRUE(sc.pump_until([&] { return parked_on(r, "D"); }, 1s)) << "the send not held";
+    auto const after_s = std::chrono::steady_clock::now();
+    EXPECT_TRUE(sc.pump_until([&] { return r.d.closed(); }, 200ms + 1s))
         << "not cut within W + 1 s";
-    EXPECT_LT(std::chrono::steady_clock::now() - s, 200ms + 1s) << "cut after W + 1 s";
-    EXPECT_GE(std::chrono::steady_clock::now() - s, 200ms) << "cut before W";
-    ASSERT_TRUE(r.d.s.pump_until([&] { return rgs::Scene::ready(cut); }, 1s))
+    EXPECT_LT(std::chrono::steady_clock::now() - after_s, 200ms + 1s) << "cut after W + 1 s";
+    EXPECT_GE(std::chrono::steady_clock::now() - before_s, 200ms) << "cut before W";
+    ASSERT_TRUE(sc.pump_until([&] { return rgs::Scene::ready(cut); }, 1s))
         << "the cut send did not return";
     auto const cr = cut.get();
     ASSERT_FALSE(cr.has_value()) << "the cut send succeeded";
