@@ -980,6 +980,11 @@ not name.
   limit on 40), and under M8 it read GREEN in 3 of 3 (M8 adds the same allocations to both arms, so a differential between
   them cannot see it); M5k reads it RED in 3 of 3. Withdrawn again at `4f8d2a36` (printed counts, compared by hand).
   Readings: evidence file, "Phase 6-rest rulings".
+  **Ruling R-a (orchestrator, Phase 9):** asserted at `570b8119` in the same run: limit on at most limit off + 1, the
+  allowance the jitter between runs, two or more cycles in the window (`static_assert`); the counts stay printed. GREEN
+  in 10 of 10 clean runs; M5k RED 3 of 3 on it; M8 GREEN on it by construction (both arms move), its known positives the
+  interceptor's send half and the shipping-clock cell, both RED. Readings: evidence file, "T161 (/simplify) and the
+  Phase 9 rulings R-a to R-e".
 - [X] T109 [US4] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C5`); record that none builds on `$B` but the emit half's base build, and read
   each cell's RED under its mutant at `H4` (the mutant tasks below). Record the base emit-half count for T108.
 
@@ -1364,16 +1369,18 @@ transport binary's `AsioTlsTransportErrorPaths.*` and `-L 105`'s `TlsClose105.*`
   `research/G19-fix-fpml-iso20022/tools/brain-external-sweep.sh` (never a bare `check_brain.py sweep`); record its
   non-zero execution count.
   **Done**: the brain-freshness steps exit 0 (`check_brain.py --self-test`, `gate` after a ref-order fix in c-api.md, `census`; `brain_link_decisions.py --self-test`, `check_workflows.py --self-test` and `.`, `check_line_citations.py --self-test`); the wrapper `brain-external-sweep.sh` PASS with a non-zero execution count (evidence file).
-- [ ] T158 `src/` and `include/` (read), `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Supersession close (research "Supersession"; T022): at the head, both quickstart section 1's recipe
+- [X] T158 `src/` and `include/` (read), `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Supersession close (research "Supersession"; T022): at the head, both quickstart section 1's recipe
   `git grep -n '106 (' -- src include` and `git grep -n '106 D' -- src include` (the "106 D<n> supersedes …" form the
   Execution rules prescribe, after the brief's example; the quickstart recipe alone would miss it, and the evidence file
   records why both run), each hit read against the table; every row of the table is named by a comment at the code it changes, and no comment
   carries a result (T173).
   **Stopped (a census contradicting the bundle, to the orchestrator):** every row of research's Supersession table is named by a comment at its code (src and tests), and no comment found there carries a result; but four comments name supersessions the table does not list: `106 D11 supersedes 105's no-ending-recorded test` (`src/session/engine.cpp`), `106 D1 supersedes 013 T036's and 104 T8's position of the mTLS CompID-authorisation gate`, `106 D1 supersedes 033 T023's position of the credentials gate` and `106 D1 supersedes 014 T015's and 104 N-8's position of the mTLS CompID-authorisation gate` (`src/session/session.cpp`). Either the table gains the rows or the comments change; the bundle does not say which.
-- [ ] T159 Article XIX §5: re-derive `git grep -n logout_disconnect_timeout_ms docs examples` (no page names it, so no
+  **Done (ruling R-b, Phase 9):** the table gains the four rows; the comments stay (evidence file, T158).
+- [X] T159 Article XIX §5: re-derive `git grep -n logout_disconnect_timeout_ms docs examples` (no page names it, so no
   page is owed for the new keys) and that the Doxygen of `session.h`, `session_config.hpp` and `engine_config.hpp`
   regenerates without warning.
   **Stopped (the bundle's check cannot run as written):** both greps are empty (`logout_disconnect_timeout_ms`, and the three new keys, over `docs examples`), so no page is owed. The Doxygen half has no instrument: the tree has no Doxyfile and no Doxygen step (`docs/` is mdBook only, `.github/workflows/docs.yml`), and no `doxygen` binary is installed. To the orchestrator.
+  **Done (ruling R-c, Phase 9): N/A**, no Doxygen pipeline in the tree and both doc greps empty (evidence file, T159).
 - [X] T160 No C setter and no C TOML entry (FR-012, FR-013a; contract C-4.1, C-5.4; research F-7), a statement
   checked by grep with a seeded positive first (a scratch line naming `write_timeout` in `$M`'s `include/fix/c_api/session.h`
   must be reported): `git grep -n toml include/fix/c_api` is empty, and
@@ -1390,9 +1397,13 @@ transport binary's `AsioTlsTransportErrorPaths.*` and `-L 105`'s `TlsClose105.*`
 gcc-release, the whole pytest suite and every buildless Tier 1 step, re-run last → `/speckit-verify` → Gate B → the
 labelled push in the final sign-off order. One build or ctest at a time throughout.
 
-- [ ] T161 **(orchestrator)** `/simplify` over the implementation diff (`[const §XVI.7]`): the orchestrator triages
+- [X] T161 **(orchestrator)** `/simplify` over the implementation diff (`[const §XVI.7]`): the orchestrator triages
   the reviewers' findings; the implementer applies each accepted one, behaviour-neutral, one commit per item or group;
   after any change re-run `-L 106` and the touched labels.
+  **Done:** `dfd90b55` (items 1 to 7), `18c0e453` (item 8), `789ca458` (item 3's comments); three items deferred. The
+  triage table is the verify record's "/simplify"; the readings (cell names unchanged, the base build of the shared
+  headers, the targeted runs, the known positives M5k, M8, M1b and RowSwap) are the evidence file's "T161 (/simplify)
+  and the Phase 9 rulings R-a to R-e".
 - [ ] T162 clang-format on touched files only (never `specs/`, never `include/fix/c_api/*.h`):
   `git diff --name-only --diff-filter=d origin/main...HEAD -- src include tests bench | grep -E '\.(cpp|hpp|h)$' | grep -vE '^include/fix/c_api/' | xargs clang-format --dry-run --Werror`;
   a file whose `origin/main` copy fails with the same count is checked with `--lines` over this branch's hunks.

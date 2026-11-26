@@ -830,6 +830,10 @@ against FR-011 and C-4.5; the unbounded case stays disclosed (`L-105-f`).
 | 038's simultaneous-bad ordering, a stale 52 with refused credentials: "52 wins" | 038 data-model Group 1; `tests/session/test_acceptor_logon_sending_time.cpp` Cell 11 | the credentials gate first, silent (D1) |
 | 099 E-7's and E-10's consumed NextNumIn (`c`) on a Logon refused at S3 | 099 data-model E-7, E-10; `tests/session/test_099_establishment.cpp`, `test_099_msg_type_default.cpp` | kept, `k` (D2; D9's second FR-007 census amendment) |
 | 105's second `Disconnected` entry when a send held in its store call finds the connection closed ("Disconnected over Disconnected, which owes nothing") | 105 data-model E-2 I-5; `tests/session/test_cancelled_outbound_store_measurement.cpp` `Returned_StoreCancelledAtItsLock` | one entry: the F9 block records only when not already Disconnected (D11, FR-017; Phase 5 ruling 3) |
+| 105's establishment expiry: noted unless the session has recorded its own ending (`state() != Disconnected`) | 105 research D4, data-model E-5; `src/session/engine.cpp` `run_read_pump`'s expiry | the ending claim decides; the Disconnected edge takes a free claim, so a session that ended itself refuses (D11; data-model E-10) |
+| 013 T036 and 104 T8: the acceptor's mTLS CompID-authorisation gate after the sequence check, before the 1137 block | 013 tasks.md T036 (FR-019, FR-024); 104 contract T8 | once per arm, right after `interpret_logon`, still before the FSM leaves NotConnected (D1) |
+| 033 T023: the credentials gate after the 1137 block | 033 tasks.md T023 (033 contract C7, research R6) | right after the mTLS gate, so a refused credential draws no 1137 Reject (D1) |
+| 014 T015 and 104 N-8: the initiator's mTLS CompID-authorisation gate after the asked 141=Y unit, before Active | 014 tasks.md T015; 104 spec Clarifications N-8 | once per arm, right after `interpret_logon`, still before Active (D1) |
 
 ## Risks
 
