@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <asio/io_context.hpp>
 #include <atomic>
 #include <chrono>
@@ -25,6 +26,13 @@
 #include <string>
 #include <system_error>
 #include <utility>
+
+#include "session/test_099_fixt_support.hpp"
+#include "session/test_106_support.hpp"
+#include "support/hooked_store.hpp"
+#include "support/memory_store_test_access.hpp"
+#include "support/seqnum_manager_test_access.hpp"
+#include "support/session_test_access.hpp"
 
 #ifndef FIXPP_CONFIG_FIXTURE_DIR
 #error "FIXPP_CONFIG_FIXTURE_DIR must be set by CMake"
@@ -144,4 +152,58 @@ TEST(TomlHandshake106, AcceptorKeyAbsent_Default1500) {
         << "a default EngineConfig";
     EXPECT_EQ(fixpp::config::EngineEstablishment{}.acceptor_tls_handshake_timeout, 1500ms)
         << "a default EngineEstablishment";
+}
+
+// ── T058: NextNumIn106.CommitRefused_Disconnected (research D9 row "FR-006 commit", N-4) ───────
+// [seam: set_commit_freeze_hook] The manager is frozen between the classification and the commit,
+// so the commit is refused: the arm ends Disconnected once and silently, nothing is written after
+// the refusal, the arm never reaches LogonReceived, and NextNumIn is unconsumed in memory and in
+// the store. Its mutant: the commit's result ignored (tasks.md T069).
+
+TEST(NextNumIn106, CommitRefused_Disconnected) {
+    namespace t99 = fixpp::session::test099;
+    using fixpp::session::fsm_state;
+    using fixpp::session::memory_store_test_access;
+    using fixpp::session::seqnum_manager_test_access;
+    using fixpp::session::session_test_access;
+    auto store = std::make_shared<fixpp::test_support::HookedStoreFactory>();
+    t99::RigOptions opts;
+    opts.validate = true;
+    opts.role = fixpp::session::session_role::acceptor;
+    opts.tweak = [store](fixpp::session::SessionConfig& c) {
+        c.store_factory = store;
+        c.reset_on_disconnect = false;
+    };
+    t99::Rig rig{t99::shape_fixture(t99::Shape::T), std::move(opts)};
+    auto const opened = rig.open();
+    ASSERT_FALSE(opened.has_value()) << *opened;
+    auto& mgr = session_test_access::seqnum_mgr(*rig.sess);
+    bool hook_ran = false;
+    session_test_access::set_commit_freeze_hook(*rig.sess, [&mgr, &hook_ran] {
+        hook_ran = true;
+        seqnum_manager_test_access::set_frozen(mgr, true);
+    });
+    auto const in_store = [&store] {
+        return memory_store_test_access::counter(*store->log->inner,
+                                                 fixpp::session::direction_t::inbound);
+    };
+    auto const written_before = rig.out.size();
+    auto const disconnected_before = fixpp::test_support::t106::count_disconnected(*rig.sess);
+    auto const store_in_before = in_store();
+    std::string err;
+    rig.feed(t99::input("Logon 1137=9").make(rig.peer_ctx(1)), &err);
+    seqnum_manager_test_access::set_frozen(mgr, false);
+    session_test_access::set_commit_freeze_hook(*rig.sess, nullptr);
+
+    ASSERT_TRUE(hook_ran) << "the path was not exercised: the commit point was not reached";
+    EXPECT_EQ(err, "") << "the refused commit's return";
+    EXPECT_EQ(rig.sess->state(), fsm_state::Disconnected) << t99::state_name(rig.sess->state());
+    EXPECT_EQ(fixpp::test_support::t106::count_disconnected(*rig.sess) - disconnected_before, 1U)
+        << "new Disconnected entries";
+    auto const history = rig.sess->fsm_visit_history();
+    EXPECT_EQ(std::count(history.begin(), history.end(), fsm_state::LogonReceived), 0)
+        << "the arm went past its commit";
+    EXPECT_EQ(rig.out.size(), written_before) << "frames written after the refused commit";
+    EXPECT_EQ(mgr.next_inbound_unsafe(), 1U) << "NextNumIn in memory";
+    EXPECT_EQ(in_store(), store_in_before) << "NextNumIn in the store";
 }

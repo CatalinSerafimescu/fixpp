@@ -57,6 +57,8 @@
 #include "session/test_106_support.hpp"
 #include "support/hooked_store.hpp"
 #include "support/memory_store_test_access.hpp"
+#include "support/seqnum_manager_test_access.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 namespace {
@@ -100,6 +102,8 @@ struct Spec {
     bool reset_on_logon = false;
     std::string input;    // research R-18's input id (test_099_fixt_support.hpp's make_inputs)
     bool at_one = false;  // the frame at MsgSeqNum 1 rather than at the session's next number
+    bool next_expected = false;  // enable_next_expected_msg_seq_num
+    std::string extra;  // when set, the frame is t99::logon_frame with these fields, not `input`
 };
 
 // What the session and its store hold, read between frames.
@@ -137,6 +141,7 @@ public:
             c.security_profile = fixpp::session::SecurityProfile{spec.profile};
             c.reset_on_logon = spec.reset_on_logon;
             c.reset_on_disconnect = false;
+            c.enable_next_expected_msg_seq_num = spec.next_expected;
             if (spec.strict) c.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_strict;
             if (spec.validator != Validator::none) {
                 c.compid_authorization_policy.set_logon_validator(
@@ -197,7 +202,13 @@ public:
     void feed(std::string const& input_id) {
         rig->feed(t99::input(input_id).make(rig->peer_ctx(frame_seq())), &err);
     }
-    void feed() { feed(spec.input); }
+    void feed() {
+        if (!spec.extra.empty()) {
+            rig->feed(t99::logon_frame(rig->peer_ctx(frame_seq()), spec.extra), &err);
+            return;
+        }
+        feed(spec.input);
+    }
 
     [[nodiscard]] std::vector<std::string> written_since(std::size_t mark) const {
         std::vector<std::string> out;
@@ -451,10 +462,12 @@ const Answer kAdmittedResetOnLogonAcceptor{
     .mgr = {.in = 2, .out = 2},
     .store = {.in = 1, .out = 2},
     .state = fsm_state::Active};
+// 106 D2 supersedes the base's NextNumIn in the two S3 answers: the S3 Reject keeps it (the
+// frame was classified at 5 and not consumed); the frame is the base's.
 const Answer kAdmittedS31137Acceptor{
     .frames = {"8=FIXT.1.1|9=75|35=3|34=1|49=ISLD|52=20240101-00:00:00.000|56=TW|45=5|371=1137|372="
                "A|373=5|10=134|"},
-    .mgr = {.in = 6, .out = 2},
+    .mgr = {.in = 5, .out = 2},
     .store = {.in = 5, .out = 2},
     .state = fsm_state::Disconnected};
 const Answer kAdmittedValidateFirstInitiator{
@@ -477,7 +490,7 @@ const Answer kAdmittedSendingTimeInitiator{
     .state = fsm_state::Disconnected};
 const Answer kAdmittedS3Initiator{.frames = {"8=FIXT.1.1|9=75|35=3|34=2|49=TW|52=20240101-00:00:00."
                                              "000|56=ISLD|45=5|371=1137|372=A|373=5|10=135|"},
-                                  .mgr = {.in = 6, .out = 3},
+                                  .mgr = {.in = 5, .out = 3},
                                   .store = {.in = 5, .out = 3},
                                   .state = fsm_state::Disconnected};
 const Answer kAdmittedAsked141Initiator{.frames = {},
@@ -550,4 +563,226 @@ TEST(IdentityFirst106, Admitted_StayInArmReject_NextLogonActive) {
 // base (the credentials half admits an unreadable input when no validator is installed).
 TEST(IdentityFirst106, Admitted_UnreadableNoValidator_ValidateFirstReject) {
     run_admitted(unreadable(), kAdmittedUnreadableNoValidator);
+}
+
+// ── T056, T057: NextNumIn106 (research D2, D9 row FR-006; contract C-2; data-model E-2) ────────
+//
+// A refusal between the classification and the commit keeps NextNumIn in FR-006's sense: the
+// store's at its value before the frame, and the manager's at the value the arm classified the
+// frame against (the frame's MsgSeqNum; an acceptor hydrates inside the arm, so not a value read
+// before the feed).
+
+namespace {
+
+[[nodiscard]] std::size_t count_state(fixpp::session::Session const& s, fsm_state st) {
+    auto const history = s.fsm_visit_history();
+    return static_cast<std::size_t>(std::count(history.begin(), history.end(), st));
+}
+
+void expect_kept(Cell& c, Reading const& before, seqnum_t classified) {
+    auto const after = c.read();
+    EXPECT_EQ(after.mgr.in, classified) << "NextNumIn in memory";
+    ASSERT_TRUE(before.store.has_value() && after.store.has_value()) << "the store was not read";
+    EXPECT_EQ(after.store->in, before.store->in) << "NextNumIn in the store";
+    EXPECT_EQ(after.state, fsm_state::Disconnected) << t99::state_name(after.state);
+}
+
+// The frames written since `mark` are exactly one, of MsgType `type` and, when given, RefTagID.
+void expect_one_frame(Cell& c, std::size_t mark, std::string_view type,
+                      std::string_view ref_tag = {}) {
+    auto const written = c.written_since(mark);
+    ASSERT_EQ(written.size(), 1U) << "frames written for the frame";
+    EXPECT_EQ(t99::tag_value(c.rig->out[mark], 35), type) << written.front();
+    if (!ref_tag.empty()) {
+        EXPECT_EQ(t99::tag_value(c.rig->out[mark], 371), ref_tag) << written.front();
+    }
+}
+
+// The next outbound number at seqnum_max, so the Reject leaf's number assignment fails and the
+// leaf returns its error (inbound_reject_leaf_). The acceptor hydrates it from the store at its
+// Logon; the initiator, hydrated at open(), holds it in the manager.
+void outbound_at_max(Cell& c) {
+    if (c.spec.role == session_role::acceptor) {
+        fixpp::session::memory_store_test_access::set_counter(*c.store->log->inner,
+                                                              fixpp::session::direction_t::outbound,
+                                                              fixpp::session::seqnum_max);
+        return;
+    }
+    auto& m = fixpp::session::session_test_access::seqnum_mgr(*c.rig->sess);
+    fixpp::session::seqnum_manager_test_access::set_counters(m, m.next_inbound_unsafe(),
+                                                             fixpp::session::seqnum_max);
+}
+
+[[nodiscard]] Spec at_789(std::string value) {
+    Spec s = admitted_initiator(Spec{});
+    s.next_expected = true;
+    s.extra =
+        "1137=9\x01"
+        "789=" +
+        std::move(value) + "\x01";
+    return s;
+}
+
+}  // namespace
+
+TEST(NextNumIn106, Acceptor_S3_1137) {
+    Cell c{s3_1137()};
+    ASSERT_TRUE(c.open()) << "setup";
+    auto const before = c.read();
+    c.feed();
+    expect_one_frame(c, before.writes, "3", "1137");
+    expect_kept(c, before, kN);
+}
+
+// "No unit runs": the peer's 141=Y Reject precedes its reset unit, so no reset is issued.
+TEST(NextNumIn106, Acceptor_Peer141_S3_NoAdvanceNoReset) {
+    Cell c{Spec{.input = "Logon 141=Y 1137=4", .at_one = true}};
+    ASSERT_TRUE(c.open()) << "setup";
+    auto const before = c.read();
+    c.feed();
+    expect_one_frame(c, before.writes, "3", "1137");
+    expect_kept(c, before, 1);
+    EXPECT_EQ(c.read().store_resets, before.store_resets) << "store reset calls";
+}
+
+TEST(NextNumIn106, Acceptor_S3_RejectWriteFails) {
+    Cell c{s3_1137()};
+    ASSERT_TRUE(c.open()) << "setup";
+    outbound_at_max(c);
+    auto const before = c.read();
+    c.feed();
+    EXPECT_FALSE(c.err.empty()) << "the Reject leaf's error was not returned";
+    EXPECT_EQ(c.written_since(before.writes), std::vector<std::string>{}) << "frames written";
+    expect_kept(c, before, kN);
+}
+
+// [guard: the knob's reset moved after S3] L-106-a: the reset_on_logon reset runs before the
+// classification, so an S3 refusal after it leaves the reset standing: the store reset, its
+// NextNumIn 1, and the manager's NextNumIn the reset's value, not the hydrated one.
+TEST(NextNumIn106, Acceptor_ResetOnLogon_S3_KeepsTheReset) {
+    Cell c{Spec{.reset_on_logon = true, .input = "Logon 1137=99", .at_one = true}};
+    ASSERT_TRUE(c.open()) << "setup";
+    auto const before = c.read();
+    c.feed();
+    expect_one_frame(c, before.writes, "3", "1137");
+    auto const after = c.read();
+    EXPECT_GT(after.store_resets, before.store_resets) << "store reset calls";
+    ASSERT_TRUE(after.store.has_value()) << "the store was not read";
+    EXPECT_EQ(after.store->in, 1U) << "NextNumIn in the store";
+    EXPECT_LT(after.mgr.in, kN) << "NextNumIn in memory";
+    EXPECT_EQ(after.state, fsm_state::Disconnected) << t99::state_name(after.state);
+}
+
+TEST(NextNumIn106, Initiator_S3) {
+    Cell c{admitted_initiator(s3_initiator())};
+    ASSERT_TRUE(c.open()) << "setup";
+    auto const before = c.read();
+    auto const classified = c.frame_seq();
+    c.feed();
+    expect_one_frame(c, before.writes, "3", "1137");
+    expect_kept(c, before, classified);
+}
+
+TEST(NextNumIn106, Initiator_Asked141_S3_NoAdvanceNoReset) {
+    Cell c{admitted_initiator(Spec{.reset_on_logon = true, .input = "Logon 141=Y 1137=4"})};
+    ASSERT_TRUE(c.open()) << "setup";
+    auto const before = c.read();
+    auto const classified = c.frame_seq();
+    c.feed();
+    expect_one_frame(c, before.writes, "3", "1137");
+    expect_kept(c, before, classified);
+    EXPECT_EQ(c.read().store_resets, before.store_resets) << "store reset calls";
+}
+
+TEST(NextNumIn106, Initiator_S3_RejectWriteFails) {
+    Cell c{admitted_initiator(s3_initiator())};
+    ASSERT_TRUE(c.open()) << "setup";
+    outbound_at_max(c);
+    auto const before = c.read();
+    auto const classified = c.frame_seq();
+    c.feed();
+    EXPECT_FALSE(c.err.empty()) << "the Reject leaf's error was not returned";
+    EXPECT_EQ(c.written_since(before.writes), std::vector<std::string>{}) << "frames written";
+    expect_kept(c, before, classified);
+}
+
+TEST(NextNumIn106, Initiator_Strict) {
+    Cell c{admitted_initiator(strict())};
+    ASSERT_TRUE(c.open()) << "setup";
+    auto const before = c.read();
+    auto const classified = c.frame_seq();
+    c.feed();
+    EXPECT_EQ(c.written_since(before.writes), std::vector<std::string>{}) << "frames written";
+    expect_kept(c, before, classified);
+}
+
+TEST(NextNumIn106, Initiator_789TooHigh) {
+    Cell c{at_789("99")};
+    ASSERT_TRUE(c.open()) << "setup";
+    auto const before = c.read();
+    auto const classified = c.frame_seq();
+    c.feed();
+    expect_one_frame(c, before.writes, "5");
+    expect_kept(c, before, classified);
+}
+
+TEST(NextNumIn106, Initiator_789Invalid) {
+    Cell c{at_789("0")};
+    ASSERT_TRUE(c.open()) << "setup";
+    auto const before = c.read();
+    auto const classified = c.frame_seq();
+    c.feed();
+    expect_one_frame(c, before.writes, "5");
+    expect_kept(c, before, classified);
+}
+
+// 789 below fixpp's next outbound number: the walk replays from the store, and its read of the
+// store's outbound counter fails (HookedStore's held read, released at once, fail_held).
+TEST(NextNumIn106, Initiator_789Below_WalkFails) {
+    Cell c{at_789("1")};
+    auto armed = std::make_shared<bool>(false);
+    c.store->hooks.on_outbound_read = [armed] { return *armed; };
+    c.store->hooks.release_when = [] { return true; };
+    c.store->hooks.fail_held = true;
+    ASSERT_TRUE(c.open()) << "setup";
+    auto const before = c.read();
+    auto const classified = c.frame_seq();
+    *armed = true;
+    c.feed();
+    *armed = false;
+    EXPECT_FALSE(c.err.empty()) << "the walk's error was not returned";
+    expect_kept(c, before, classified);
+}
+
+// The walk superseded: its held read releases only after a close(terminal) was spawned, so the
+// arm returns through logon_arm_superseded_.
+TEST(NextNumIn106, Initiator_789Below_Superseded) {
+    Cell c{at_789("1")};
+    auto armed = std::make_shared<bool>(false);
+    auto spawned = std::make_shared<bool>(false);
+    auto* cell = &c;
+    c.store->hooks.on_outbound_read = [armed] { return *armed; };
+    c.store->hooks.release_when = [spawned, cell] {
+        if (*spawned) return true;
+        *spawned = true;
+        cell->rig->close_fut =
+            std::make_shared<std::future<fixpp::core::expected_t<void>>>(asio::co_spawn(
+                fixpp::test_support::session_executor_of(*cell->rig->sess, cell->rig->ioc),
+                cell->rig->sess->close(fixpp::session::close_mode::terminal), asio::use_future));
+        return false;
+    };
+    c.store->hooks.fail_held = true;
+    ASSERT_TRUE(c.open()) << "setup";
+    auto const before = c.read();
+    auto const classified = c.frame_seq();
+    *armed = true;
+    c.feed();
+    *armed = false;
+    ASSERT_TRUE(*spawned) << "the path was not exercised: the walk's read was not held";
+    EXPECT_EQ(c.err, "") << "the superseded arm's return";
+    auto const after = c.read();
+    EXPECT_EQ(after.mgr.in, classified) << "NextNumIn in memory";
+    ASSERT_TRUE(before.store.has_value() && after.store.has_value()) << "the store was not read";
+    EXPECT_EQ(after.store->in, before.store->in) << "NextNumIn in the store";
+    EXPECT_EQ(count_state(*c.rig->sess, fsm_state::Active), 0U) << "Active entries";
 }
