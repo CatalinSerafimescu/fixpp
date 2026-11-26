@@ -4872,7 +4872,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
     // while nothing from the arm's entry to here changes next_inbound_ but a reset unit, the knob's
     // reset and hydration; re-derive by listing the calls of set_next_inbound, reset_to(,
     // ensure_hydrated_(, run_reset_unit_(, reset_seqnums_to_one_durable( and hydrate( between the
-    // entry and this commit. A refused commit (the manager frozen or its lock drained) ends the arm
+    // entry and this point. A refused commit (the manager frozen or its lock drained) ends the arm
     // Disconnected unless superseded, silently.
     if (logon_inbound_advanced) {
         if (commit_freeze_hook_) {
