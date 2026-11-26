@@ -1461,7 +1461,7 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   **Done** (at `ec1368f1`; evidence file, "T168"): lock taken and released; the 18 targets built `-k 0` rc 0, no warning;
   18/18 entries passed, 0 skipped in the 106, 105, 104, 099 and 538 binaries (the config and C-ABI skips are by design);
   msvc-asan not needed.
-- [ ] T169 One full `ctest --preset linux-clang-debug --no-tests=error -j3` (Article XVII §7), the last test run before
+- [X] T169 One full `ctest --preset linux-clang-debug --no-tests=error -j3` (Article XVII §7), the last test run before
   the labelled push, in `$V` (Execution rules; created with `git worktree add --detach` at the head on
   `/mnt/wsl/fixppbuild`, clean status, reconfigured rc 0, every target built `-j5 -k 0`; never `$M`), after reading the sandbox lock; record the count, any failure and its
   attribution, and the SHA for the PR body's `local build: green on linux-clang-debug @ <sha>` line.
@@ -1474,6 +1474,11 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   12/12, its mutant RED; the sweep, SC-007 and `B-106-6` done; the targeted re-runs at `5297b28f` GREEN but Od29.
   `Od29` STOPPED again: the ruling's "only its record is suppressed" is the head's behaviour, which is what keeps Od29's
   last assertion (the establishment-timeout event) RED; the requested 106 cell would assert the opposite. Open until decided.
+  **Done, by the late-fix rule (Execution rules), ruling R22 at `b732c353`** (evidence file, "T169 — ruling R22 on `Od29`"):
+  the deadline records its event and record when `close()`, `Engine::stop()` or the drain owns the ending; the rescinded
+  cell replaced by `OneEnding106Deadline.DuringGracefulClose_ClosesAtOnceAndRecordsOnce`; Od29 9 of 9; both RED under the
+  mutant; the targeted re-runs at `91529844` GREEN. The full ctest's SHA stays `ec1368f1` (518 of 531, every failure fixed
+  by a late fix).
 - [X] T170 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: `linux-gcc-release` `-Werror` build of the touched targets (the library, `session_106_tests`,
   `session_106_seam_tests`, the touched config, transport, C-ABI and alloc-guard targets, `engine_send_bench`),
   `ninja -k 0`, no error, no warning.
@@ -1482,6 +1487,7 @@ labelled push in the final sign-off order. One build or ctest at a time througho
 - [X] T171 The WHOLE pytest suite: `python3 -m pytest bindings/python/tests` with the debug tree's module rebuilt at
   C-ABI 1.19; record passed and skipped.
   **Done** (at `dfa755df`; evidence file, "T171"): the debug tree's module (1.19) imported; 101 passed, 0 skipped.
+  **Re-run** at the R22 head (evidence file, "T171 re-run").
 - [ ] T172 Every buildless Tier 1 step, derived from `.github/workflows/tier1.yml` and run locally: `ci-script-pins`
   (all its steps, including `check_co_spawn_lambda.py --self-test` and its gate), `check-layers`, `co-spawn-closure-audit`
   (it applies: the connection bound's spawn, against T019's base list) and `ci/pump-census.sh` against
@@ -1524,11 +1530,12 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   ruling in `.specify/decisions/106-logon-guards-write-bounds-evidence.md`, cited in the Gate B record.
 - [ ] T179 **(orchestrator)** `/gate-b` on the PR (preconditions: the verify record non-RED, T183 non-failing, the
   B&L delta recorded); every fixer round re-runs the touched cells only, then T177's last actions.
-- [ ] T180 `/mnt/wsl/fixppbuild/fixpp-106-base`, `/mnt/wsl/fixppbuild/fixpp-106-mutants` and `/mnt/wsl/fixppbuild/fixpp-106-verify`: Remove `$B`, `$M` and `$V` (`git worktree remove`, then `git worktree prune`) once every RED reading, mutant,
+- [X] T180 `/mnt/wsl/fixppbuild/fixpp-106-base`, `/mnt/wsl/fixppbuild/fixpp-106-mutants` and `/mnt/wsl/fixppbuild/fixpp-106-verify`: Remove `$B`, `$M` and `$V` (`git worktree remove`, then `git worktree prune`) once every RED reading, mutant,
   bench run and the full ctest of T169 is recorded; never `fixpp-parallel`, never the MSVC sandbox.
   **Held** (evidence file, "T169"): the two T169 STOPs are open, and a fix would need `$B` and `$M` readings.
   **Partial** (evidence file, "T169 — the orchestrator's rulings", ruling 7): `$V` removed and pruned; `$B` and `$M` kept
   for the open `Od29` stop.
+  **Done** (evidence file, "T169 — ruling R22 on `Od29`", T180): `$B` and `$M` emptied, removed and pruned.
 - [ ] T181 **(orchestrator, post-merge)** Close-out per `.specify/close-out.md` §1 (rows 3b re-check, 4, 5, 9, 16, 17,
   copied into the Gate B record): a `CLAUDE-history.md` entry for `106-logon-guards-write-bounds` (newest first: the
   batches, the PR and squash SHA, the closed issues, the B-106 rows, C-ABI 1.19), and `CLAUDE.md`'s "Last merged FEATURE"
