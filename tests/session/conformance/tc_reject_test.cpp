@@ -72,6 +72,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -277,6 +278,7 @@ TEST(TC005Reject, Fix42_7_ReceiveReject_NoLoop) {
     RejectConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.2");
 
     const std::size_t before = f.transport.sent_count();
@@ -300,6 +302,7 @@ TEST(TC005Reject, Fix44_7_ReceiveReject_NoLoop) {
     RejectConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.4");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.4");
 
     const std::size_t before = f.transport.sent_count();
@@ -338,6 +341,7 @@ TEST(TC010Reject, Fix42_14a_BadField_UnknownMsgTypeTriggersReject) {
     RejectConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.2");
 
     const std::size_t before = f.transport.sent_count();
@@ -370,6 +374,7 @@ TEST(TC010Reject, Fix44_14a_BadField_UnknownMsgTypeTriggersReject) {
     RejectConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.4");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.4");
 
     const std::size_t before = f.transport.sent_count();
@@ -399,6 +404,7 @@ TEST(TC010Reject, Fix42_14b_RequiredFieldMissing) {
     RejectConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.2");
 
     const std::size_t before = f.transport.sent_count();
@@ -422,6 +428,7 @@ TEST(TC010Reject, Fix44_14b_RequiredFieldMissing) {
     RejectConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.4");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.4");
 
     const std::size_t before = f.transport.sent_count();
@@ -445,6 +452,7 @@ TEST(TC010Reject, Fix42_14c_TagNotDefinedForMsgType) {
     RejectConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.2");
 
     const std::size_t before = f.transport.sent_count();
@@ -467,6 +475,7 @@ TEST(TC010Reject, Fix44_14c_TagNotDefinedForMsgType) {
     RejectConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.4");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.4");
 
     const std::size_t before = f.transport.sent_count();
@@ -490,6 +499,7 @@ TEST(TC010Reject, Fix42_14d_TagSpecifiedWithoutValue) {
     RejectConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.2");
 
     const std::size_t before = f.transport.sent_count();
@@ -512,6 +522,7 @@ TEST(TC010Reject, Fix44_14d_TagSpecifiedWithoutValue) {
     RejectConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.4");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.4");
 
     const std::size_t before = f.transport.sent_count();
@@ -535,6 +546,7 @@ TEST(TC010Reject, Fix42_14e_IncorrectEnumValue) {
     RejectConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.2");
 
     const std::size_t before = f.transport.sent_count();
@@ -558,6 +570,7 @@ TEST(TC010Reject, Fix44_14e_IncorrectEnumValue) {
     RejectConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.4");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.4");
 
     const std::size_t before = f.transport.sent_count();
@@ -581,6 +594,7 @@ TEST(TC010Reject, Fix42_14f_IncorrectDataFormat) {
     RejectConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.2");
 
     const std::size_t before = f.transport.sent_count();
@@ -603,6 +617,7 @@ TEST(TC010Reject, Fix44_14f_IncorrectDataFormat) {
     RejectConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.4");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.4");
 
     const std::size_t before = f.transport.sent_count();
@@ -626,6 +641,7 @@ TEST(TC010Reject, Fix42_14g_HeaderBodyTrailerFieldsOutOfOrder) {
     RejectConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.2");
 
     const std::size_t before = f.transport.sent_count();
@@ -648,6 +664,7 @@ TEST(TC010Reject, Fix44_14g_HeaderBodyTrailerFieldsOutOfOrder) {
     RejectConformanceFixture f;
     auto cfg = f.make_cfg("FIX.4.4");
     fixpp::session::Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_and_drive_to_active(sess, "FIX.4.4");
 
     const std::size_t before = f.transport.sent_count();

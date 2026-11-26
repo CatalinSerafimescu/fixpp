@@ -38,6 +38,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -197,6 +198,7 @@ TEST_F(MaxMsgSizeTest, UnsetAdvertisesNo383AndTheLimitIsTheDefault) {
         sent.emplace_back(reinterpret_cast<const char*>(f.data()), f.size());
     };
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(open_sync(sess).has_value());
     auto logon = make_logon_frame("FIX.4.4", 1, "TW", "ISLD", 30, std::nullopt);
     feed_sync(sess, std::span<const std::byte>{logon});
@@ -213,6 +215,7 @@ TEST_F(MaxMsgSizeTest, UnsetAdvertisesNo383AndTheLimitIsTheDefault) {
 TEST_F(MaxMsgSizeTest, PeerAdvertised383Captured) {
     auto cfg = make_acceptor_cfg(std::nullopt);  // our advertise off; only capturing the peer's
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(open_sync(sess).has_value());
     auto logon =
         make_logon_frame("FIX.4.4", 1, "TW", "ISLD", 30, std::optional<std::uint32_t>{777});

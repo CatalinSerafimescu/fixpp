@@ -221,6 +221,7 @@ TEST(HeartbeatCadence8Cell, CellA_Strand_NoOutboundHeartbeatEmitted) {
     HeartbeatCadenceFixture fix;
     auto cfg = fix.make_cfg(fixpp::session::threading_mode::per_session_strand);
     fixpp::session::Session sess(fix.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     ASSERT_TRUE(fix.drive_to_active(sess)) << "Precondition: session must reach Active";
 
     // Advance clock beyond HeartBtInt (5s), short of 1.2 × HeartBtInt, with no outbound activity.
@@ -237,6 +238,7 @@ TEST(HeartbeatCadence8Cell, CellA_Direct_NoOutboundHeartbeatEmitted) {
     HeartbeatCadenceFixture fix;
     auto cfg = fix.make_cfg(fixpp::session::threading_mode::direct_executor);
     fixpp::session::Session sess(fix.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     ASSERT_TRUE(fix.drive_to_active(sess));
 
     fix.advance_time(5500ms);
@@ -251,6 +253,7 @@ TEST(HeartbeatCadence8Cell, CellB_Strand_NoInboundTestRequestEmitted) {
     HeartbeatCadenceFixture fix;
     auto cfg = fix.make_cfg(fixpp::session::threading_mode::per_session_strand);
     fixpp::session::Session sess(fix.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     ASSERT_TRUE(fix.drive_to_active(sess));
 
     // No TestRequest at 5.5 s (past 1 × HeartBtInt); one at 1.2 × 5s = 6s.
@@ -269,6 +272,7 @@ TEST(HeartbeatCadence8Cell, CellB_Direct_NoInboundTestRequestEmitted) {
     HeartbeatCadenceFixture fix;
     auto cfg = fix.make_cfg(fixpp::session::threading_mode::direct_executor);
     fixpp::session::Session sess(fix.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     ASSERT_TRUE(fix.drive_to_active(sess));
 
     fix.advance_time(5500ms);

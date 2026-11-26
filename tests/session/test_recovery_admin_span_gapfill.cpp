@@ -41,6 +41,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -363,6 +364,7 @@ TEST_F(RecoveryGapfillNearCapacityTest, LargeCompId_GapFillOverflow_IsFailClosed
 TEST_F(RecoveryAdminSpanGapfillTest, AllAdminSpanCollapsesToSingleGapFill) {
     auto cfg = make_acceptor_cfg();
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess)) << "Precondition: session must reach Active state";
 
     // Inject ResendRequest from peer (they want us to replay [2..12]). Nothing at
@@ -398,6 +400,7 @@ TEST_F(RecoveryAdminSpanGapfillTest, AllAdminSpanCollapsesToSingleGapFill) {
 TEST_F(RecoveryAdminSpanGapfillTest, EndSeqNoZeroMeansThrough) {
     auto cfg = make_acceptor_cfg();
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
 
     // Peer asks ResendRequest[2..0] meaning "all from 2 through current max".
@@ -429,6 +432,7 @@ TEST_F(RecoveryAdminSpanGapfillTest, EndSeqNoZeroMeansThrough) {
 TEST_F(RecoveryAdminSpanGapfillTest, SingleAdminSpanEmitsExactlyOneGapFill) {
     auto cfg = make_acceptor_cfg();
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
 
     auto rr = make_resend_request("FIX.4.2", 2, "TW", "ISLD", 2, 5);

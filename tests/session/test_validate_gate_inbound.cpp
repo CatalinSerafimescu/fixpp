@@ -65,6 +65,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/transport_double.hpp"
@@ -334,6 +335,7 @@ TEST(ValidateGateInbound, HeaderOutOfOrder_DisregardedUnderValidation) {
     ValidateGateFixture fix;
     auto cfg = fix.make_cfg_with_validation();
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
 
     // Build a frame where 35 appears after 49 (header out of order).
@@ -380,6 +382,7 @@ TEST(ValidateGateInbound, UnexpectedTag_Reason2) {
     ValidateGateFixture fix;
     auto cfg = fix.make_cfg_with_validation();
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
 
     // Heartbeat with an extra field 44 (Price) that is not defined for msg type "0".
@@ -404,6 +407,7 @@ TEST(ValidateGateInbound, RequiredFieldMissing_Reason1) {
     ValidateGateFixture fix;
     auto cfg = fix.make_cfg_with_validation();
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
 
     // NOS without ClOrdID(11) — all other required fields present.
@@ -430,6 +434,7 @@ TEST(ValidateGateInbound, TypeNonconformant_Int_Reason5) {
     ValidateGateFixture fix;
     auto cfg = fix.make_cfg_with_validation();
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
 
     // NOS with OrderQty(38)="abc" — not a valid INT.
@@ -454,6 +459,7 @@ TEST(ValidateGateInbound, FloatGarbageValue_Reason5) {
     ValidateGateFixture fix;
     auto cfg = fix.make_cfg_with_validation();
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
 
     // NOS with Price(44)="abc" — not a valid Float.
@@ -487,6 +493,7 @@ TEST(ValidateGateInbound, ConformantMessage_NoReject) {
     ValidateGateFixture fix;
     auto cfg = fix.make_cfg_with_validation();
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
 
     // Well-formed Heartbeat — no extra fields, no violations.
@@ -511,6 +518,7 @@ TEST(ValidateGateInbound, InSequenceReject_ConsumesSeqnum) {
     ValidateGateFixture fix;
     auto cfg = fix.make_cfg_with_validation();
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
 
     auto bad_frame = make_raw_frame("FIX.4.2", "0", 2, "TW", "ISLD",
@@ -557,6 +565,7 @@ TEST(ValidateGateInbound, RejectNotConsumed_OutOfSequenceLogonSequenceReset) {
         ValidateGateFixture fix;
         auto cfg = fix.make_cfg_with_validation();
         Session sess{fix.engine, cfg};
+        fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
         fix.open_to_active(sess);
 
         auto bad_frame = make_raw_frame("FIX.4.2", c.msg_type, c.seq, "TW", "ISLD", c.body);
@@ -617,6 +626,7 @@ TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
     ValidateGateFixture fix;
     auto cfg = fix.make_cfg_with_validation();
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
 
     // ── (a) Feed violation frame: 280 undefined tags → must produce Reject(373=0) ──

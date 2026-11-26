@@ -51,6 +51,7 @@
 #include <variant>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/identity_injecting_transport.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/pump_until_ready.hpp"
@@ -324,6 +325,7 @@ TEST_F(CompidPrincipalExtractionSessionTest, CnExtraction_EmitsBoundEvent_WithCn
     cfg.compid_authorization_policy.add_binding("TW-PROD-01", "TW");
 
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(run_open(sess).has_value());
 
     // Inject the live handshake identity with CN=TW-PROD-01.

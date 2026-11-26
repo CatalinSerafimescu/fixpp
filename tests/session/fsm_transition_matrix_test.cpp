@@ -46,6 +46,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -286,6 +287,7 @@ TEST_F(FsmTransitionMatrixTest, LogonSent_InboundResendRequestIsDefinedBoundedTr
 TEST_F(FsmTransitionMatrixTest, Active_InboundResendRequestIsDefinedBoundedTransition) {
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(open_sync(sess).has_value());
 
     // Drive LogonSent → Active via a peer Logon-ack with the negotiated

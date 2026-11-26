@@ -60,6 +60,7 @@
 #include <vector>
 
 #include "session/scan_frame_header.hpp"
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -506,6 +507,7 @@ TEST(SessionReject, NoRejectLoopOnInboundReject) {
     RejectFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_to_active(sess);
 
     // Record sent count before feeding the Reject.
@@ -536,6 +538,7 @@ TEST(SessionReject, MalformedInboundRejectIsRejected) {
     RejectFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_to_active(sess);
 
     const std::size_t before = f.transport.sent_count();
@@ -620,6 +623,7 @@ TEST(SessionReject, AppMessageInActiveTriggersReject) {
     RejectFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
     Session sess(f.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, f.ioc};
     f.open_to_active(sess);
 
     const std::size_t before = f.transport.sent_count();

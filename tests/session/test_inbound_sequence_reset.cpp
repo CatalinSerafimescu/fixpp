@@ -43,6 +43,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -212,6 +213,7 @@ protected:
 // ── Arm 1: GapFill (123=Y) advances next-expected past the filled gap ─────────
 TEST_F(InboundSequenceResetTest, GapFillAdvancesExpectedInbound) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U);
 
@@ -228,6 +230,7 @@ TEST_F(InboundSequenceResetTest, GapFillAdvancesExpectedInbound) {
 // ── Arm 2: Reset mode (123 absent) hard-resets AND bypasses seqnum ordering ───
 TEST_F(InboundSequenceResetTest, ResetModeHardResetsAndBypassesOrdering) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U);
 
@@ -249,6 +252,7 @@ TEST_F(InboundSequenceResetTest, ResetModeHardResetsAndBypassesOrdering) {
 // ── Arm 3: NewSeqNo < expected → Reject(SessionRejectReason=5) ────────────────
 TEST_F(InboundSequenceResetTest, NewSeqNoBelowExpectedRejects) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U);  // expected = 2
 
@@ -265,6 +269,7 @@ TEST_F(InboundSequenceResetTest, NewSeqNoBelowExpectedRejects) {
 // ── Arm 4: NewSeqNo == expected → no-op (no Reject, counter unchanged) ─────────
 TEST_F(InboundSequenceResetTest, NewSeqNoEqualExpectedIsNoOp) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
+    fixpp::test_support::close_before_destroy const closer{s, ioc};
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U);
 

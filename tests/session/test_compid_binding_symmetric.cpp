@@ -57,6 +57,7 @@
 #include <variant>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/identity_injecting_transport.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/pump_until_ready.hpp"
@@ -210,6 +211,7 @@ TEST_F(CompidBindingSymmetricTest, CellA_Acceptor_PeerClientCert_BindsSenderComp
     pid.san_dns_names_owned.emplace_back("tw-prod.example.com");
 
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(run_open(sess).has_value());
     fixpp::test_support::inject_live_identity(sess, std::move(pid));
 
@@ -268,6 +270,7 @@ TEST_F(CompidBindingSymmetricTest, CellB_Initiator_PeerServerCert_BindsTargetCom
     pid.subject_dn = "CN=ISLD-PROD-01,O=Exchange,C=US";
 
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(run_open(sess).has_value());
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
     fixpp::test_support::inject_live_identity(sess, std::move(pid));

@@ -397,6 +397,7 @@ TEST_F(FsmMatrixWitness, NC_InboundValidLogon_TransitionsToActive) {
     // FR-006: E02 from NotConnected: acceptor path transitions through LogonReceived to Active.
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_EQ(sess.state(), fsm_state::NotConnected);
     (void)open_sync(sess);
 
@@ -566,6 +567,7 @@ TEST_F(FsmMatrixWitness, LS_InboundValidLogon_TransitionsToActive) {
     // FR-006: E02 from LogonSent → Active.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     (void)open_sync(sess);
     ASSERT_EQ(sess.state(), fsm_state::LogonSent);
 
@@ -759,6 +761,7 @@ TEST_F(FsmMatrixWitness, LR_AcceptorPath_RecordsLogonReceivedTransient) {
     // LogonReceived even though the final state after feed_sync is Active.
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     (void)open_sync(sess);
     ASSERT_EQ(sess.state(), fsm_state::NotConnected);
 
@@ -791,6 +794,7 @@ TEST_F(FsmMatrixWitness, LR_Transient_FinalStateIsActive_HistoryContainsBoth) {
     // (same matrix row as LR for non-Logon inbound).
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     (void)open_sync(sess);
 
     auto logon = build_logon(kTarget, kSender);
@@ -833,6 +837,7 @@ TEST_F(FsmMatrixWitness, Active_InboundDupLogon_SessionReject_StaysActive) {
     // defensive choice — require explicit Logout→Disconnect→Logon sequencing.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
     clear_handshake_captures();
@@ -854,6 +859,7 @@ TEST_F(FsmMatrixWitness, Active_InboundHeartbeat_StaysActive) {
     // FR-006: E04 from Active → advance counter, remain Active.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
 
     // Seq=2 (seq=1 consumed by peer's Logon in drive_to_active).
@@ -868,6 +874,7 @@ TEST_F(FsmMatrixWitness, Active_InboundTestRequest_EmitsHeartbeat_StaysActive) {
     // FR-006: E05 from Active → emit Heartbeat(echo TestReqID), remain Active.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
     clear_handshake_captures();
 
@@ -889,6 +896,7 @@ TEST_F(FsmMatrixWitness, Active_InboundReject_LogOnly_StaysActive) {
     // FR-006: E06 from Active → log, no Reject-of-Reject (I-5), remain Active.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
 
     auto rj = build_frame("3", 2, kTarget, kSender, kBeginStr);
@@ -930,6 +938,7 @@ TEST_F(FsmMatrixWitness, Active_InboundOutOfScopeAdmin_SessionReject_StaysActive
     // that obligation — the 2e-recovery TODO is fully discharged by 013 Phase 3.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
     clear_handshake_captures();
 
@@ -954,6 +963,7 @@ TEST_F(FsmMatrixWitness, Active_SeqnumInSeq_AdvancesCounter_StaysActive) {
     // FR-006: E09 from Active → advance counter, remain Active.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
 
     // seq=2 is in-seq (last accepted was 1 from the Logon).
@@ -1018,6 +1028,7 @@ TEST_F(FsmMatrixWitness, Active_SeqnumTooHigh_FatalTransitionsToDisconnected) {
     // 013: slot 70 deleted; too-high → enter_awaiting_resend() + ResendRequest(2).
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
 
     // seq=99 when next-expected=2 → too-high → AwaitingResend, stays Active.
@@ -1033,6 +1044,7 @@ TEST_F(FsmMatrixWitness, Active_InvalidAppMsgType_SessionReject_StaysActive) {
     // App MsgType like "D" (NewOrderSingle) is not in is_session_admin → Reject+Active.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
     clear_handshake_captures();
 
@@ -1336,6 +1348,7 @@ TEST_F(FsmMatrixWitness, VisitHistory_InitiatorPath_RecordsLogonSentAndActive) {
     // FR-006: cross-row — visit_history captures LogonSent and Active in order.
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
 
     auto hist = sess.fsm_visit_history();
@@ -1349,6 +1362,7 @@ TEST_F(FsmMatrixWitness, VisitHistory_AcceptorPath_RecordsLogonReceivedAndActive
     // FR-006: cross-row — acceptor path records LogonReceived (transient) + Active.
     auto cfg = make_acceptor_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_acceptor_to_active(sess));
 
     auto hist = sess.fsm_visit_history();
