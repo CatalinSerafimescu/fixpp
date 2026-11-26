@@ -971,7 +971,7 @@ not name.
   counter binary's, its base half that binary built on `$B` with `-DFIXPP_106_ALLOC_BASE=ON`; its counts are printed and
   compared by hand (`ffc35c30` withdrew an in-process limit-on = limit-off assertion that read 39 against 40 on the clean
   head in 2 of 10 runs). GREEN on `linux-clang-release` at the head; the differential against the base 0 with the limit off
-  (every run) and 0 or −1 with it on (open question to the orchestrator). Known positives: M8 RED (T126); M5 GREEN, stopped
+  (every run) and 0 or −1 with it on (open question to the orchestrator). *(Annotated at the Phase 6-rest rulings: the later runs read the head's limit-off count 39 in 2 of 10 runs and 40 otherwise, so the limit-off count also varies by one; the by-hand comparison against the base is 0 or −1 in either arm; the base's 5 runs, all 40, are too few to show the same variance.)* Known positives: M8 RED (T126); M5 GREEN, stopped
   (T125). "No write-timeout record" is asserted as its consequence (Active, every send delivered, the socket open): the rig
   attaches no logger.
   **Ruling 3 (orchestrator, on the Phase 6-rest report):** the second registration is accepted (T004), and so is the send
