@@ -34,7 +34,8 @@
 // closes anything, and a call close_async_holds_when names waits, before it closes, until
 // release_close(). With neither set, close_async is Transport's default, close().
 //
-// 106-logon-guards-write-bounds (spec.md R23; contract C-4.3) adds close_async_calls_at_first_close,
+// 106-logon-guards-write-bounds (spec.md R23, claim-ok: a clarification id; contract C-4.3) adds
+// close_async_calls_at_first_close,
 // the value of close_async_calls when close() first ran, so a cell can tell that the first close
 // was made during a close_async call that threw (that call never reaches its own close()); and
 // fail_next_write (contract C-4.3), which fails the next async_write with transport_write_error and
@@ -91,7 +92,8 @@ struct blocking_write_state {
     // can tell that the connection was closed and which writes had begun by then.
     std::size_t closes = 0;
     std::optional<std::size_t> starts_at_first_close;
-    // 106 (spec.md R23): close_async_calls as the first close() read it.
+    // close_async_calls as the first close() read it
+    // (106 spec.md R23, claim-ok: a clarification id).
     std::optional<std::size_t> close_async_calls_at_first_close;
     // 106 (contract C-4.3): the next async_write fails with transport_write_error; one-shot.
     bool fail_next_write = false;

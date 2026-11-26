@@ -426,7 +426,8 @@ TEST_P(GiveUp106, EmitHeldInStore_GivesUpAtG_ClosesAtGPlusB) {
     r.d.s.drain();
 }
 
-// spec.md R23 (FR-009, contract C-3.3): BehindBlockedSend, with the close at G + B meeting a
+// spec.md R23 (claim-ok: a clarification id; FR-009, contract C-3.3): BehindBlockedSend, with the
+// close at G + B meeting a
 // close_async that throws before it closes anything. The synchronous close the close frame falls
 // back to closes the transport at G + B, and the held send returns dispatch_aborted.
 TEST_P(GiveUp106, SendBlocked_CloseAsyncThrows_ClosedAtGPlusB) {
@@ -453,7 +454,9 @@ TEST_P(GiveUp106, SendBlocked_CloseAsyncThrows_ClosedAtGPlusB) {
     if (returned) {
         auto const sr = st.blocked_call->get();
         EXPECT_FALSE(sr.has_value()) << "the held send succeeded";
-        if (!sr) EXPECT_EQ(sr.error(), fixpp::core::error::dispatch_aborted);
+        if (!sr) {
+            EXPECT_EQ(sr.error(), fixpp::core::error::dispatch_aborted);
+        }
     }
     EXPECT_EQ(r.d.s.state(), fsm_state::Disconnected);
     EXPECT_EQ(r.disconnected() - disconnected_before, 1U) << "new Disconnected entries";
@@ -480,7 +483,8 @@ TEST_P(GiveUp106, SendBlocked_CompletionQueuedAtTheClose_ReturnsWritten) {
     EXPECT_TRUE(returned) << "the held send did not return";
     if (returned) {
         auto const sr = st.blocked_call->get();
-        EXPECT_TRUE(sr.has_value()) << "the held send's error " << (sr ? 0 : static_cast<int>(sr.error()));
+        EXPECT_TRUE(sr.has_value())
+            << "the held send's error " << (sr ? 0 : static_cast<int>(sr.error()));
     }
     EXPECT_EQ(r.completed_since("5", 0), 0U) << "a complete Logout";
     EXPECT_EQ(r.d.s.state(), fsm_state::Disconnected);

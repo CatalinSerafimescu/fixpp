@@ -48,12 +48,13 @@ using rl::steady;
 using rl::time_point;
 
 constexpr std::uint32_t kHeartbeatS = 1;
-constexpr std::chrono::milliseconds kThreshold{1200};  // 1.2 x HeartBtInt (B-105-5)
+constexpr std::chrono::milliseconds kThreshold{1200};      // 1.2 x HeartBtInt (B-105-5)
 constexpr std::chrono::milliseconds kLogoutTimeout{2000};  // logout_disconnect_timeout_ms's default
 // A send in flight this long, with the peer silent and not reading, is parked in its write.
 constexpr std::chrono::milliseconds kParkedAfter{300};
 // Scheduling margin past G + B. Re-derive by reading returned_at - (hi + 3T + B) in this cell's
-// failure message on the slowest lane it runs on (asan, tsan, MSVC debug) and keeping this above it.
+// failure message on the slowest lane it runs on (asan, tsan, MSVC debug) and keeping this above
+// it.
 constexpr std::chrono::milliseconds kMargin{3000};
 // The peer's SO_RCVBUF.
 constexpr int kPeerReceiveBuffer = 4096;
@@ -116,8 +117,9 @@ private:
 
     void run(fixpp_session_t* handle) {
         for (std::uint64_t n = 0; !stop_.load(std::memory_order_acquire); ++n) {
-            std::string const p = fixpp::capi_test::ifd::order_payload("F106-" + std::to_string(n)) + "58=" +
-                                  std::string(kPadding, 'x') + "\x01";
+            std::string const p =
+                fixpp::capi_test::ifd::order_payload("F106-" + std::to_string(n)) +
+                "58=" + std::string(kPadding, 'x') + "\x01";
             in_call_since_.store(steady::now().time_since_epoch().count(),
                                  std::memory_order_release);
             fixpp_error_t const rc =
@@ -170,8 +172,8 @@ TEST(Capi106GiveUp, SendBlockedAtGiveUp_ReturnsCancelled_IsEstablishedFalse) {
 
     SendFlood flood{s, line};
     auto const parked = flood.wait_parked(give_up_lo);
-    ASSERT_TRUE(parked.has_value()) << "setup: no send call parked before L + 3T; calls returned "
-                                    << flood.calls();
+    ASSERT_TRUE(parked.has_value())
+        << "setup: no send call parked before L + 3T; calls returned " << flood.calls();
     bool const established_while_parked = s.established();
     bool const sampled_before_give_up = steady::now() < give_up_lo;
     ASSERT_TRUE(sampled_before_give_up) << "setup: the parked call was found after L + 3T";

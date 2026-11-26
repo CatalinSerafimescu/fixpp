@@ -281,7 +281,9 @@ struct session_test_access {
     static void wake_connection_bound(Session& s) noexcept { s.wake_connection_bound_(); }
     // 106 (contract C-4.3): the write limit's epoch counter, so a cell can place the next limited
     // write's epoch at the counter's wrap. Session strand only.
-    static void set_write_epoch(Session& s, std::uint32_t epoch) noexcept { s.write_epoch_ = epoch; }
+    static void set_write_epoch(Session& s, std::uint32_t epoch) noexcept {
+        s.write_epoch_ = epoch;
+    }
     [[nodiscard]] static int peer_logout_bound_count(Session const& s) noexcept {
         return s.peer_logout_bound_counter_->load(std::memory_order_acquire);
     }

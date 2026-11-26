@@ -2031,8 +2031,9 @@ TEST(Lifetime105, CloseFrame_SessionDestroyedAfterClose) {
     destroy_then_drain(d);
 }
 
-// fixpp#718, the close frame's catch (contract C-8.3; 106 spec.md R23, which widens C-8.6): the
-// write limit's close frame meets a close_async that throws before it closes anything. The catch
+// fixpp#718, the close frame's catch (contract C-8.3, and C-8.6 as 106 widens it): the write
+// limit's close frame meets a close_async that throws before it closes anything. 106's ruling
+// (spec.md R23, claim-ok: a clarification id): the catch
 // falls back to the synchronous Transport::close(), so the transport is closed at the bound and
 // the held Logout's write returns with no later close(). A later close() still returns.
 TEST(Lifetime105, CloseFrame_CloseAsyncThrows_FallsBackToClose) {

@@ -104,7 +104,7 @@ struct Spec {
     std::string input;    // research R-18's input id (test_099_fixt_support.hpp's make_inputs)
     bool at_one = false;  // the frame at MsgSeqNum 1 rather than at the session's next number
     bool next_expected = false;  // enable_next_expected_msg_seq_num
-    std::string extra{};  // when set, the frame is t99::logon_frame with these fields, not `input`
+    std::string extra{};   // when set, the frame is t99::logon_frame with these fields, not `input`
     std::string sender{};  // when set, the frame's SenderCompID(49) in place of the peer's
     std::string target{};  // when set, the frame's TargetCompID(56) in place of the session's
 };

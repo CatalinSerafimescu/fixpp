@@ -2167,8 +2167,9 @@ private:
     using connection_close_join = counter_join;
     // The close frame (research D1 item 5): awaits close_async() on the transport it holds and
     // touches no member of Session, so its own spawn chain keeps close_async's cancellation
-    // reset (research F-6). 106 (spec.md R23): when close_async() throws, the frame calls the
-    // synchronous Transport::close() instead (105's C-8.6 widened).
+    // reset (research F-6). When close_async() throws, the frame calls the synchronous
+    // Transport::close() instead: 105's C-8.6 widened by 106
+    // (spec.md R23, claim-ok: a clarification id).
     static asio::awaitable<void> close_transport_(
         connection_close_join join, std::shared_ptr<fixpp::transport::Transport> transport);
     // Test seam (research D10, the spawn-failure seams): when set and it returns true,

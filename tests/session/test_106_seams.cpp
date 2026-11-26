@@ -849,7 +849,8 @@ void expect_cut_at_s_plus_w(session_role role, wclass c, bool completion_queued 
     EXPECT_EQ(r.write_records(), 1U) << class_name(c) << ": write-timeout records";
     if (completion_queued) {
         EXPECT_GT(r.d.bw->writes, writes_before)
-            << class_name(c) << ": setup: the cut write's completion was not delivered as a success";
+            << class_name(c)
+            << ": setup: the cut write's completion was not delivered as a success";
         if (!st.active) {
             EXPECT_EQ(r.app->logons, logons_before) << class_name(c) << ": onLogon calls";
             auto const history = r.d.s.session->fsm_visit_history();
@@ -1743,7 +1744,8 @@ TEST_P(WriteLimit106, ShippingClock106_DirectDriver_BoundBesideLiveness_TestRequ
     EXPECT_EQ(r.records(), 0U) << "give-up records";
 }
 
-// spec.md R23 (contract C-4.3, "the transport is closed at once"): the Send class's cut, with the
+// spec.md R23 (claim-ok: a clarification id; contract C-4.3, "the transport is closed at once"):
+// the Send class's cut, with the
 // close frame meeting a close_async that throws before it closes anything. The synchronous close
 // it falls back to closes the transport at S + W; the cut send returns session_write_timeout and
 // the send queued behind it dispatch_aborted; one Disconnected entry, one write-timeout record.
@@ -1765,14 +1767,18 @@ TEST_P(WriteLimit106, CloseAsyncThrows_CutStillCloses) {
     if (cut_returned) {
         auto const cr = st.cut->get();
         EXPECT_FALSE(cr.has_value()) << "the cut send succeeded";
-        if (!cr) EXPECT_EQ(cr.error(), fixpp::core::error::session_write_timeout);
+        if (!cr) {
+            EXPECT_EQ(cr.error(), fixpp::core::error::session_write_timeout);
+        }
     }
     bool const queued_returned = st.queued && rgs::Scene::ready(*st.queued);
     EXPECT_TRUE(queued_returned) << "the queued send did not return";
     if (queued_returned) {
         auto const qr = st.queued->get();
         EXPECT_FALSE(qr.has_value()) << "the queued send succeeded";
-        if (!qr) EXPECT_EQ(qr.error(), fixpp::core::error::dispatch_aborted);
+        if (!qr) {
+            EXPECT_EQ(qr.error(), fixpp::core::error::dispatch_aborted);
+        }
     }
     EXPECT_EQ(r.disconnected() - disconnected_before, 1U) << "new Disconnected entries";
 }
