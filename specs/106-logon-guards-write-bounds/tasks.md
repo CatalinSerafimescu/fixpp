@@ -398,7 +398,7 @@ admits the identity before the arm writes a frame or changes sequence state (FR-
 
 ### RED cells for US1 (write first; `tests/session/test_106_identity_first.cpp`)
 
-- [ ] T038 [US1] Acceptor matrix, the pattern `IdentityFirst106.<Refusal>_<Gate>` (research D9 row FR-003/004; spec US1
+- [X] T038 [US1] Acceptor matrix, the pattern `IdentityFirst106.<Refusal>_<Gate>` (research D9 row FR-003/004; spec US1
   scenarios 1 to 3), instantiated over the refusals `ValidateFirst`, `Posture`, `SendingTime`, `Strict`, `ResetOnLogon`,
   `S3_1137` and the gates `OffListMtls` (an mTLS acceptor whose peer certificate is not authorised for the Logon's
   SenderCompID), `RefusedCredentials_NonMtls` (a plaintext acceptor whose logon validator refuses) and
@@ -409,23 +409,23 @@ admits the identity before the arm writes a frame or changes sequence state (FR-
   the assertion that fails on the base: the pre-gate action writes a frame, changes sequence or reset state, or both;
   for `ResetOnLogon` and `S3_1137_OffListMtls` (no frame on the base, its acceptor gate precedes 1137) the RED is the
   reset or the in-memory NextNumIn. `ValidateFirst_RefusedCredentials_NonMtls` is also RED under M1a (T053).
-- [ ] T039 [US1] `tests/session/test_106_identity_first.cpp` (same file), unreadable credentials with a validator installed (research D9 row FR-003/004; contract
+- [X] T039 [US1] `tests/session/test_106_identity_first.cpp` (same file), unreadable credentials with a validator installed (research D9 row FR-003/004; contract
   C-1.4; spec Edge Cases): `IdentityFirst106.ValidateFirst_UnreadableCredentials_NonMtls` and
   `IdentityFirst106.ValidateFirst_UnreadableCredentials_AdmittedMtls` *(proposed)*: a validating acceptor, a Logon that
   `interpret_logon` refuses and that draws the validate-first Reject on the base; zero frames, `Disconnected`. Only
   validate-first: every other refusal follows `interpret_logon`. RED on the base: the Reject is written.
-- [ ] T040 [US1] `tests/session/test_106_identity_first.cpp` (same file), a direct mTLS initiator started by `open()` (F-3; contract C-1.7; spec US1 scenario 4), the
+- [X] T040 [US1] `tests/session/test_106_identity_first.cpp` (same file), a direct mTLS initiator started by `open()` (F-3; contract C-1.7; spec US1 scenario 4), the
   pattern instantiated as `IdentityFirst106.<Refusal>_DirectMtlsOpen` *(proposed gate name)* over `ValidateFirst`,
   `Posture`, `SendingTime`, `S3` and `Asked141` (the credentials gate is acceptor-only): zero frames, both numbers
   unchanged in memory and store, no reset, `Disconnected`. RED on the base: the posture and SendingTime Logouts, the S3
   Reject, the validate-first Reject are written, or the asked unit resets (its RED is the reset).
-- [ ] T041 [US1] `tests/session/test_106_identity_first.cpp` (same file), the plain and strict refusals (research D9 row "FR-003 plain", N-5; spec US1 scenario
+- [X] T041 [US1] `tests/session/test_106_identity_first.cpp` (same file), the plain and strict refusals (research D9 row "FR-003 plain", N-5; spec US1 scenario
   7): `IdentityFirst106.Plain_<Role>_<Gate>` as `Plain_Acceptor_OffListMtls`, `Plain_Acceptor_RefusedCredentials` (on a
   plaintext acceptor) and `Plain_Initiator_DirectMtlsOpen` — a well-formed, in-sequence, unauthorised Logon or
   acknowledgement with no other fault; and `IdentityFirst106.Strict_Initiator_<Gate>` as
   `Strict_Initiator_DirectMtlsOpen` (the `bilateral_strict` silent refusal). Each asserts zero frames and NextNumIn
   unchanged in memory and store. RED on the base: the in-memory NextNumIn.
-- [ ] T042 [US1] `tests/session/test_106_identity_first.cpp` (same file), admitted identities (research D9 row FR-005; contract C-1.5): `IdentityFirst106.Admitted_<Refusal>`
+- [X] T042 [US1] `tests/session/test_106_identity_first.cpp` (same file), admitted identities (research D9 row FR-005; contract C-1.5): `IdentityFirst106.Admitted_<Refusal>`
   over the refusals of T038 and T040 that an admitted identity can reach, each asserting the answer
   byte-identical to the base's (the frame bytes captured on `$B` and pinned), the same numbers and the same ending —
   [guard: M1b]; `IdentityFirst106.Admitted_StayInArmReject_NextLogonActive` (a validate-first Reject whose RefTagID keeps
@@ -433,18 +433,18 @@ admits the identity before the arm writes a frame or changes sequence state (FR-
   `IdentityFirst106.Admitted_UnreadableNoValidator_ValidateFirstReject` (a non-mTLS acceptor, inbound validation on, no
   `set_logon_validator` call, a Logon `interpret_logon` refuses: the validate-first Reject, byte-identical) — [guard:
   M1c].
-- [ ] T043 [US1] `tests/session/test_104_logon_too_low.cpp`, the one FR-007 update (plan P1, research D9 "FR-007
+- [X] T043 [US1] `tests/session/test_104_logon_too_low.cpp`, the one FR-007 update (plan P1, research D9 "FR-007
   census"): `LogonTooLow104.Precedence_MtlsAcceptorOffList`'s setup assertion becomes
   `EXPECT_EQ(r.next_in(), <the value read before the feed>)`, because the refusal now precedes hydration (D1 item 4).
   RED on the base (the base reads `kN` after the refusal). Every other `LogonTooLow104.Precedence_*` cell and
   `UnaskedResetAck104.Mtls_Unauthorised_NoReset` stay as they are (FR-007; an initiator hydrated at open).
-- [ ] T044 [US1] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C2`); read T038 to T043 on `$B` (`session_106_tests` and the 104 binary
+- [X] T044 [US1] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C2`); read T038 to T043 on `$B` (`session_106_tests` and the 104 binary
   overlaid; `-L 106 -LE 106_seam` and the re-pinned cell by filter); record per cell its RED reason or guard status, the
   test count and the skip count (TLS cells: 0 skips).
 
 ### Implementation for US1
 
-- [ ] T045 [US1] `include/fixpp/session/compid_authorization_policy.hpp` and `src/session/compid_authorization_policy.cpp`:
+- [X] T045 [US1] `include/fixpp/session/compid_authorization_policy.hpp` and `src/session/compid_authorization_policy.cpp`:
   `CompIdAuthorizationPolicy::has_logon_validator() const noexcept`, true when `set_logon_validator` installed a callable:
   false when never set, true after a callable, false again after `set_logon_validator` with an empty one (the test
   `authorize_logon` makes; pimpl: no layout change; data-model E-1; Q1). Its header comment, with
@@ -452,42 +452,50 @@ admits the identity before the arm writes a frame or changes sequence state (FR-
   reaches the validator (it fails closed, `B-106-1`); an absent Username(553) or Password(554) reaches it as empty, and
   a validator that requires them refuses that itself; the validator may be called twice per connection, after the bound
   event (`L-106-c`).
-- [ ] T046 [US1] `include/fixpp/session/session.hpp`, `src/session/session.cpp`: the private callee
+- [X] T046 [US1] `include/fixpp/session/session.hpp`, `src/session/session.cpp`: the private callee
   `logon_identity_refuses_(frame, consume)` (data-model E-1's per-half table: the mTLS half applies on `mtls_ca` or
   `mtls_pinned` in either role, and with `consume` false emits no event and consumes nothing; the credentials half applies
   on the acceptor whatever its security profile, reads 553/554 through `interpret_logon`, and treats any
   `interpret_logon` refusal as unreadable, refusing it only when `has_logon_validator()`). Its locals stay in its own
   frame (104 T093).
-- [ ] T047 [US1] `src/session/session.cpp`: `on_inbound_not_connected_` (research D1 items 2 to 4): the validate-first Reject decided first,
+- [X] T047 [US1] `src/session/session.cpp`: `on_inbound_not_connected_` (research D1 items 2 to 4): the validate-first Reject decided first,
   then held until `logon_identity_refuses_` admits; where `logon_reject_disconnects_` holds, the consuming
   `logon_identity_admitted_()` runs before the Reject is written and a refusal there ends the arm silently (N-13.2);
   where the Reject stays in the arm, nothing is consumed. After `interpret_logon` succeeds and before
   `ensure_hydrated_`: `logon_identity_admitted_()` then `logon_credentials_admitted_(*result)`; a refusal records
   `Disconnected` and returns success. Posture, SendingTime, strict, `reset_on_logon`, the sequence check, the too-low
   Logout, S3/1137 and the reply now follow the gates.
-- [ ] T048 [US1] `src/session/session.cpp`: `on_inbound_logon_sent_` (research D1 items 2 to 4, "Moved checks"): the validate-first rule as
+- [X] T048 [US1] `src/session/session.cpp`: `on_inbound_logon_sent_` (research D1 items 2 to 4, "Moved checks"): the validate-first rule as
   in T047 (mTLS half only); `logon_identity_admitted_()` right after `interpret_logon`, before posture; the asked
   141=Y unit keeps its place after 099's S3 test, now after the gate. Arm S (the `reset_on_logout` Logout branch) is
   unchanged.
-- [ ] T049 [US1] `src/session/session.cpp`: Delete every later gate call T007 listed (research D1 item 5): the acceptor's after
+- [X] T049 [US1] `src/session/session.cpp`: Delete every later gate call T007 listed (research D1 item 5): the acceptor's after
   `check_inbound` and after the 1137 block, the initiator's after the asked unit, and both 104 too-low branches' own calls.
   Comments at each moved or deleted site name the decision: "106 D1 supersedes 104 N-8 (the asked path's unit before the
   gate)", "106 D1 supersedes 104 DQ-6 / L-104-3 (answers before the gates)", "106 D1 supersedes 104 T8 (the too-low
   branches' own gate calls): one gate site per arm".
-- [ ] T050 [US1] `src/session/session.cpp`: No new local held across an await in either arm (104 T093; plan Constraints): read the arms' diff
+- [X] T050 [US1] `src/session/session.cpp`: No new local held across an await in either arm (104 T093; plan Constraints): read the arms' diff
   for every local declared before a `co_await` that it outlives; any found moves into a callee. Record the reading.
 - [ ] T051 [US1] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: At the head: `-L 106`, `-L 104` and `-L 099` unfiltered GREEN; re-run T007 at the head (each arm
   keeps one consuming site, arm S its own, the precheck callee its own) and record it. Commit `H1`; `codegraph sync`.
+  **Stopped (census contradiction, to the orchestrator):** at H1 (`5b4e8c14`) `-L 106` and `-L 104` read GREEN and
+  `-L 099` reads RED in its mTLS off-list cells (`W5NotConnected`, `W5LogonSent`, their `Off` twins and
+  `W25Initiator.OffListIdentity_MtB_NoAuth`), and `AcceptorLogonSendingTimeTest.Cell11_BadStalePlusBadCreds_52Wins` reads
+  RED: each pins a base answer or consumed number before the gate. Not re-pinned; the evidence file's T051 section lists
+  them. T007's re-run and `codegraph sync` are done; H1 is committed.
 
 ### Mutant arms for US1 (in `$M` at `H1`)
 
-- [ ] T052 [US1] In `$M`'s `src/session/session.cpp`: M1: the consuming mTLS gate placed before the stay-in-arm validate Reject; RED:
+- [X] T052 [US1] In `$M`'s `src/session/session.cpp`: M1: the consuming mTLS gate placed before the stay-in-arm validate Reject; RED:
   `IdentityFirst106.Admitted_StayInArmReject_NextLogonActive`.
-- [ ] T053 [US1] In `$M`'s `src/session/session.cpp` (`logon_identity_refuses_`): M1a: the precheck's credentials half skipped when the session is not mTLS; RED:
+- [X] T053 [US1] In `$M`'s `src/session/session.cpp` (`logon_identity_refuses_`): M1a: the precheck's credentials half skipped when the session is not mTLS; RED:
   `IdentityFirst106.ValidateFirst_RefusedCredentials_NonMtls`.
 - [ ] T054 [US1] In `$M`'s `src/session/session.cpp`: M1b: the consuming gate at D1 item 4 refuses an admitted identity; RED: every
-  `IdentityFirst106.Admitted_<Refusal>` cell (no answer).
-- [ ] T055 [US1] In `$M`'s `src/session/compid_authorization_policy.cpp`: M1c: `has_logon_validator()` returns true whatever is installed; RED:
+  `IdentityFirst106.Admitted_<Refusal>` cell (no answer). **Read, not closed (to the orchestrator):** 9 of the 11
+  `Admitted_<Refusal>_<Role>` cells RED; `Admitted_ValidateFirst_Acceptor` and `Admitted_ValidateFirst_Initiator` GREEN,
+  since their frame never reaches item 4 (the held Reject's consuming gate guards them); an additional arm at that site
+  reads both RED (evidence file, T052 to T055).
+- [X] T055 [US1] In `$M`'s `src/session/compid_authorization_policy.cpp`: M1c: `has_logon_validator()` returns true whatever is installed; RED:
   `IdentityFirst106.Admitted_UnreadableNoValidator_ValidateFirstReject` (no Reject).
 
 **Checkpoint**: US1 is GREEN and every US1 mutant RED; the identity gates run first in both arms.
