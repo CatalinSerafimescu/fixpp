@@ -25,8 +25,9 @@
 //     Disconnected entries before its frame and compares after, so a cell does not depend on where
 //     the role hydrates;
 //   - an Admitted cell's expected answer is spelled out below, captured from the base's run
-//     (tasks.md T042) with SOH rendered as '|' (no frame here holds '|'); it is never built with a
-//     production builder or read from the session;
+//     (tasks.md T042) with SOH rendered as '|' (no frame here holds '|'), except the manager's
+//     NextNumIn of the two S3 answers, which 106 D2 keeps; it is never built with a production
+//     builder or read from the session;
 //   - a peer identity is a subject DN whose CN is, or is not, the principal 099's rig binds
 //     ("ON-LIST"), so the policy's CN extraction is the one that decides.
 
@@ -463,7 +464,7 @@ const Answer kAdmittedResetOnLogonAcceptor{
     .store = {.in = 1, .out = 2},
     .state = fsm_state::Active};
 // 106 D2 supersedes the base's NextNumIn in the two S3 answers: the S3 Reject keeps it (the
-// frame was classified at 5 and not consumed); the frame is the base's.
+// frame was classified at kN and not consumed); the frame is the base's.
 const Answer kAdmittedS31137Acceptor{
     .frames = {"8=FIXT.1.1|9=75|35=3|34=1|49=ISLD|52=20240101-00:00:00.000|56=TW|45=5|371=1137|372="
                "A|373=5|10=134|"},

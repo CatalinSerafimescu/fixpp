@@ -219,7 +219,9 @@ of D9) stay where they are.
 1. **P1 — B110 / #702 (security, first).** D1 in both arms. `has_logon_validator`. Delete the later gate calls.
    Cells: `IdentityFirst106.*` RED → GREEN; M1, M1a, M1b, M1c; the 104 and 099 suites unfiltered. FR-007 update (N-3; research D9's
    census): `LogonTooLow104.Precedence_MtlsAcceptorOffList`'s setup assertion becomes `EXPECT_EQ(r.next_in(), <the
-   value read before the feed>)`, because the refusal precedes hydration (D1 item 4).
+   value read before the feed>)`, because the refusal precedes hydration (D1 item 4). FR-007 census amendment (tasks
+   T051; research D9's "FR-007 census amendment"): the 099 `NC-h`/`LS-h` rows, `W25Initiator.OffListIdentity_MtB_NoAuth`
+   and 038's Cell 11 are re-pinned to the silent refusal.
 2. **P2 — #703 and the class ruling.** D2: `classify_inbound`, the two commit points. Cells: `NextNumIn106.*`; the
    census rows updated; M6a, M6b.
 3. **P3 — #714a (D3, D4, D11).**

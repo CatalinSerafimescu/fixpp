@@ -4868,9 +4868,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
     // runs once, right after the mTLS gate (above), so a refused credential draws no 1137 Reject.
 
     // 106 D2: the advance is committed here, so every refusal before it keeps NextNumIn (closes
-    // L-104-8); the reply's 789 reads the advanced value (F-4). From the arm's entry to here only
-    // the knob's reset and hydration change next_inbound_ (INV-106-1). A refused commit (the
-    // manager frozen or its lock drained) ends the arm Disconnected unless superseded, silently.
+    // L-104-8); the reply's 789 reads the advanced value (F-4). INV-106-1 (data-model E-2) holds
+    // while nothing from the arm's entry to here changes next_inbound_ but a reset unit, the knob's
+    // reset and hydration; re-derive by listing the calls of set_next_inbound, reset_to(,
+    // ensure_hydrated_(, run_reset_unit_(, reset_seqnums_to_one_durable( and hydrate( between the
+    // entry and this commit. A refused commit (the manager frozen or its lock drained) ends the arm
+    // Disconnected unless superseded, silently.
     if (logon_inbound_advanced) {
         if (commit_freeze_hook_) {
             commit_freeze_hook_();
@@ -7607,9 +7610,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
 
     // 106 D2: the advance is committed here, so every refusal before it keeps NextNumIn (closes
     // L-104-8). A reset-ack is not committed: its unit wrote absolute targets from the
-    // classification. From the arm's entry to here only a reset unit changes next_inbound_
-    // (INV-106-1). A refused commit (the manager frozen or its lock drained) ends the arm
-    // Disconnected unless superseded, silently.
+    // classification. INV-106-1 (data-model E-2) holds while nothing from the arm's entry to here
+    // changes next_inbound_ but a reset unit; re-derive as at the acceptor's commit. A refused
+    // commit (the manager frozen or its lock drained) ends the arm Disconnected unless superseded,
+    // silently.
     if (logon_inbound_advanced_init && !peer_ack_sent_reset_flag) {
         if (commit_freeze_hook_) {
             commit_freeze_hook_();
