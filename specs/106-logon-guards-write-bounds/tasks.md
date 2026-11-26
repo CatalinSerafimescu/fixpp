@@ -954,23 +954,27 @@ not name.
   record, no slot-74 record, `session_write_timeout` from the cut send. Mutant: T126.
   **Done** (`08431a85`, `1b03bc6d`): `WriteLimit106.ShippingClock106_DirectDriver_BoundBesideLiveness_TestRequestAtT` (both
   roles), every call after `open()` on `session->executor()`; GREEN at H4; M8 at T126.
-- [ ] T108 [US4] `tests/alloc_guard/test_106_connection_bound.cpp`: `alloc_guard_106_connection_bound_mallocnesia`
+- [X] T108 [US4] `tests/alloc_guard/test_106_connection_bound.cpp`: `alloc_guard_106_connection_bound_mallocnesia`
   (research D9 row R2(a); Release, label `106`): a real Engine session over `system_clock_source` under `B-544-1`'s two
   conditions. Send half: HeartBtInt 30 s; after warm-up 20 spaced sends 100 ms apart, W = 50 ms, limit off and on: zero
   global allocations and no write-timeout record. Emit half: allocations per Heartbeat cycle at the head minus the base's
   under identical traffic (research D9 row R2(a) defines it), must be 0, limit off and again limit on against the base's
   limit-off reading; the base half built on `$B` with `-DFIXPP_106_ALLOC_BASE=ON` (T004),
   the TU and `tests/alloc_guard/CMakeLists.txt` overlaid, the reconfigure rc 0. Known positives: M5 and M8 (T125, T126). The zero covers the connection bound only.
-  **Not done:** the cell needs a new TU on the run-thread Engine rig (`tests/support/run_thread_engine_rig.hpp`, the
-  `test_544_run_thread_windows.cpp` shape) over `system_clock_source`, a counting build for the emit half's differential (an
-  interceptor build exits on the first allocation in a window, so it cannot report a per-cycle count), and two Release
-  builds (`$T`'s `linux-clang-release` and `$B` with `-DFIXPP_106_ALLOC_BASE=ON`); not started in this round. T125 and T126's
-  mallocnesia half wait on it.
-- [ ] T109 [US4] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C5`); record that none builds on `$B` but the emit half's base build, and read
+  **Done** (`99f9ed56`; readings: evidence file, "Phase 6 remainder", ruling 6): one source, two binaries (544's
+  run-thread shape). `test_106_connection_bound` is the interceptor's (`alloc_guard_106_connection_bound_mallocnesia`, the
+  send half, limit off and on); `test_106_connection_bound_count` counts glibc's allocation entry points in-process for both
+  halves and is registered Release-only as `alloc_guard_106_connection_bound_count` (a proposed addition: the interceptor
+  exits on the first allocation in a window, so it cannot read the emit half's per-cycle count). The emit half is the
+  counter binary's, its base half that binary built on `$B` with `-DFIXPP_106_ALLOC_BASE=ON`. GREEN on `linux-clang-release`
+  at the head; the differential 0 against the base, limit off and on. Known positives: M8 RED (T126); M5 GREEN, stopped
+  (T125). "No write-timeout record" is asserted as its consequence (Active, every send delivered, the socket open): the rig
+  attaches no logger.
+- [X] T109 [US4] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C5`); record that none builds on `$B` but the emit half's base build, and read
   each cell's RED under its mutant at `H4` (the mutant tasks below). Record the base emit-half count for T108.
 
-  **Partly done:** C5 committed (`2100cc67`, `08431a85`, `1b03bc6d`); every C5 cell is a seam cell, read under its mutant at
-  H4 (T118 to T130). The base emit-half count waits on T108.
+  **Done:** C5 committed (`2100cc67`, `08431a85`, `1b03bc6d`); every C5 cell is a seam cell, read under its mutant at
+  H4 (T118 to T130). The base emit-half count is recorded for T108 (evidence file, "Phase 6 remainder", ruling 6).
 ### Implementation for US4
 
 - [X] T110 [US4] `include/fixpp/session/session.hpp`, `src/session/session.cpp`: The write class (data-model E-6): `enum class write_class : std::uint8_t { ordinary, logout };` a
@@ -1026,12 +1030,13 @@ not name.
   D-e's scope (only ending Logouts are limited): every non-Logout write is limited, opt-in; the clock starts at
   `async_write`, not at the gate (105's ending limit counts from the leaf's entry)".
   **Done** (`28cb7469`, `748db96f`): at the arming in `live_write_serialized_` and at `write_class` in `session.hpp`.
-- [ ] T117 [US4] At the head: `-L 106` (seam entry included), `-L 105`, the C-ABI error entries, `-L config` GREEN;
+- [X] T117 [US4] At the head: `-L 106` (seam entry included), `-L 105`, the C-ABI error entries, `-L config` GREEN;
   the mallocnesia cell on a `linux-clang-release` tree on `/mnt/wsl/fixppbuild` GREEN with its base half read. Record
   counts. Commit `H4`; `codegraph sync`.
 
-  **Partly done** (H4 = `748db96f`; readings in the evidence file): `-L 106`, `-L 105`, `-L 104`, `-L 099`, `-L 538`,
-  `-L config`, `capi_pure_tests` (the C-ABI error entries) GREEN; `codegraph sync` run. The mallocnesia cell waits on T108.
+  **Done** (H4 = `748db96f`; readings in the evidence file): `-L 106`, `-L 105`, `-L 104`, `-L 099`, `-L 538`,
+  `-L config`, `capi_pure_tests` (the C-ABI error entries) GREEN; `codegraph sync` run. The mallocnesia cell (`99f9ed56`)
+  GREEN on `linux-clang-release` with its base half read (evidence file, "Phase 6 remainder", ruling 6).
 ### Mutant and spurious-hit arms for US4 (in `$M` at `H4`)
 
 - [X] T118 [US4] In `$M`'s `src/session/session.cpp`: M3: `write_started_at_` taken before the `write_gate_` acquire; RED:
@@ -1051,13 +1056,18 @@ not name.
   `QueuedWrite_CountsFromItsOwnStart` stays M3's counted cell (RED, both roles).
 - [X] T119 [US4] In `$M`'s `src/session/session.cpp`: M3′: the bound's write arming deleted; RED: every `WriteTimeout106.<Class>` cell.
   **Done**: M3′ (the write's flag not set) RED on every `WriteTimeout106.CutAtTheLimit` cell, both roles (evidence file).
-- [ ] T120 [US4] In `$M`'s `src/session/session.cpp`: M3″: the expiry does not set `write_cut_epoch_`; RED: every `WriteTimeout106.<Class>` cell (the cut call
+- [X] T120 [US4] In `$M`'s `src/session/session.cpp`: M3″: the expiry does not set `write_cut_epoch_`; RED: every `WriteTimeout106.<Class>` cell (the cut call
   returns `dispatch_aborted`).
   **Stopped (cells expected RED read GREEN, to the orchestrator):** under M3″ the classes whose cut call is observed
   read RED (`Send`, `InitiatorLogon`, `Reject`, `ResendRequest`, `HeartbeatReply`, `BusinessReject`, `ReplyLogon`, both roles
   where they run); `Heartbeat`, `TestRequest`, `ResendFrame`, `SequenceReset` and `Honor789Frame` read GREEN, since no
   caller observes their cut write's error (T100's note). T120's "every `WriteTimeout106.<Class>` cell" holds only for the
   first group.
+  **Done (orchestrator ruling 3 on the Phase 6 report):** the five classes' cells already assert the ending (the one
+  `Disconnected`, the write-timeout record, the close, no Logout, FR-017); M3″ re-read at `42fb40e0` reads them GREEN, so
+  M3″ is recorded as EQUIVALENT on those classes, with the proof in the evidence file ("Phase 6 remainder", ruling 3): no
+  reader of `session_write_timeout` sits between their cut write and the ending (`git grep -n 'session_write_timeout' --
+  src`). The other seven classes stay RED under M3″.
 - [X] T121 [US4] In `$M`'s `src/session/session.cpp`: M3‴: `store_then_emit`'s pass-through deleted (`session_write_timeout` flattened to `dispatch_aborted`);
   RED: `WriteTimeout106.Send` (its cut `send` returns through `send_impl`'s `store_then_emit`).
   **Done**: M3‴ RED on `WriteTimeout106.CutAtTheLimit/Send_*`.
@@ -1072,14 +1082,19 @@ not name.
   **Done**: one arm per site, each RED on its `WriteLimitLogoutSite106.EndingLogout_<Site>` cell.
 - [ ] T125 [US4] In `$M`'s `src/session/session.cpp`: M5: a coroutine spawned per write and per emit; RED: `alloc_guard_106_connection_bound_mallocnesia` (the
   send half non-zero, the emit half's delta positive).
-  **Not done:** waits on T108.
-- [ ] T126 [US4] In `$M`'s `src/session/session.cpp`: M8: `connection_bound_wait_`'s shipping branch replaced by `await_deadline(*effective_clock_, …)`; RED:
+  **Stopped (a cell expected RED read GREEN, to the orchestrator):** M5 (a coroutine with a timer, spawned per limited
+  write, so per emit too with the limit on) reads GREEN on the send half (interceptor and counter both 0) and 39 against
+  40 on the emit half, below the limit-off count rather than above it. Under `B-544-1`'s two conditions asio's per-thread
+  recycler serves the spawned coroutine's frames, so a spawn per write allocates nothing in steady state. Readings:
+  evidence file, "Phase 6 remainder", ruling 6.
+- [X] T126 [US4] In `$M`'s `src/session/session.cpp`: M8: `connection_bound_wait_`'s shipping branch replaced by `await_deadline(*effective_clock_, …)`; RED:
   `ShippingClock106.DirectDriver_BoundBesideLiveness_TestRequestAtT` (no TestRequest by 2T) and the mallocnesia cell.
   **Partly done:** M8 (the shipping branch's wait replaced by the mock branch's `timer || await_deadline(*effective_clock_, …)`,
   so the bound's wait takes the clock's per-session slot) RED on the shipping-clock cell, both roles, by "no TestRequest by
   2T", no abort. The literal form (`await_deadline` alone, no timer) also reads "no TestRequest by 2T" but then aborts at
-  `~Session`'s connection-bound assertion (the bound can no longer be woken), so it is not counted. The mallocnesia half
-  waits on T108.
+  `~Session`'s connection-bound assertion (the bound can no longer be woken), so it is not counted. **Done:** the mallocnesia
+  half, the same counted arm at `99f9ed56` on `linux-clang-release`, RED: the interceptor fails the limit-on send half
+  (every interception through `malloc`), the counter reads it non-zero and the emit half's delta positive (evidence file).
 - [X] T127 [US4] In `$M`'s `src/session/session.cpp`: M9 with M9′ over the T105 pairs whose second decider reaches `claim_ending_` or the bound's
   taken-claim exit; `CloseThenWatchdog` under M9 with the closing term deleted from E-3's exit row; RED: two reasons or
   two entries. The guards (`EndingLimitThenWatchdog`, `WatchdogThenGiveUp`, `WatchdogThenClose`, `GiveUpThenClose`; spec.md R18) are
@@ -1144,7 +1159,7 @@ transport binary's `AsioTlsTransportErrorPaths.*` and `-L 105`'s `TlsClose105.*`
 
 ### RED cells for US5 (write first)
 
-- [ ] T131 [US5] `tests/session/test_106_handshake.cpp` or the config-suite file T003 names (`tests/config/`): In T003's file for the minting cells: `TomlHandshake106.SessionKey` (key 300 ms; the bundle's
+- [X] T131 [US5] `tests/session/test_106_handshake.cpp` or the config-suite file T003 names (`tests/config/`): In T003's file for the minting cells: `TomlHandshake106.SessionKey` (key 300 ms; the bundle's
   factory mints a transport whose `async_handshake` against the silent listener returns `transport_handshake_timeout`
   within key + 2 s), `TomlHandshake106.SecondSessionDiverges` (two TLS initiator sessions, the second's key differs: it
   gets its own factory and its own bound), `TomlHandshake106.DefaultTransport_MixedRoles_Accepted` (the key in
@@ -1153,57 +1168,86 @@ transport binary's `AsioTlsTransportErrorPaths.*` and `-L 105`'s `TlsClose105.*`
   default by 27.7 s. RED on the base: the base silently ignores the key (`recognize_keys` checks no key inside
   `[session.transport]` or `[default.transport]`, and `build_tls_factory` always uses a default `Transport::Config
   t_cfg{}`), so each minted transport keeps the 30 s default and is still pending at key + 2 s. Mutants: T140, T144.
-- [ ] T132 [US5] `tests/session/test_106_seams.cpp`: `EngineHandshake106.Acceptor_ClosesAtTheKey` [seam: M7‴] (the
+  **Done** (C6 = `efb24877`): the four cells in `tests/session/test_106_handshake.cpp` (`session_106_tests` now links
+  `fixpp::config_toml` and defines `FIXPP_CONFIG_FIXTURE_DIR`), the spurious arm as its own cell
+  `TomlHandshake106.SessionKeyAbsent_Pending` *(proposed)*. Each asserts `transport_handshake_timeout`, returned no earlier
+  than the key and within key + 2 s; `SecondSessionDiverges` also asserts session[1]'s own factory. RED on `$B` by
+  assertion (T134), GREEN at H5.
+- [X] T132 [US5] `tests/session/test_106_seams.cpp`: `EngineHandshake106.Acceptor_ClosesAtTheKey` [seam: M7‴] (the
   `EngineConfig` built from the loaded bundle, `EngineEstablishment::acceptor_tls_handshake_timeout` copied as `clock` is;
   key 300 ms, `logon_timeout_ms` 10 s; a TCP client that never handshakes sees EOF in [300 ms, 1.2 s); spurious arm (key
   60 s): still connected at 2.3 s) and its C++ field twin `EngineHandshake106.Acceptor_CxxField_ClosesAtTheField`
   *(proposed)* [seam: M7′] (`EngineConfig::acceptor_tls_handshake_timeout` set directly, same windows). Inequalities as
   research D9 row FR-013a (the 1500 ms default lands 300 ms after the window; 2.3 s precedes `logon_timeout_ms` by 7.7 s).
-- [ ] T133 [P] [US5] `tests/session/test_106_handshake.cpp`: `HandshakeBound106.DriveReconnect_OneAttempt` (research D9
+  **Done** (`efb24877`): the two cells and the spurious arm `EngineHandshake106.Acceptor_LongKey_StillConnected`
+  *(proposed)* in `test_106_seams.cpp`, on `EngineLoopbackHarness`'s TLS acceptor with `t106::SilentClient`; the TOML helper
+  gains root keys and a loader bound to the cell's io_context (the bundle's clock is the Engine's). GREEN at H5; RED under
+  M7′ and M7‴ (T141, T142).
+- [X] T133 [P] [US5] `tests/session/test_106_handshake.cpp`: `HandshakeBound106.DriveReconnect_OneAttempt` (research D9
   row FR-014; spec US5 scenario 3): the real TLS factory, `max_attempts` 1, bound 300 ms through
   `Transport::Config::tls_handshake_timeout`, the silent listener: `drive_reconnect()` returns
   `transport_reconnect_limit_exceeded` within 300 ms + 2 s (the FSM's final error unchanged; R4). [guard: spurious arm,
   bound 60 s, not returned at 2.3 s; M7″ (T143)].
-- [ ] T134 [US5] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C6`); read T131 and T133 on `$B`; record per cell its RED reason or
+  **Done** (`efb24877`): `HandshakeBound106.DriveReconnect_OneAttempt` and its spurious arm
+  `HandshakeBound106.DriveReconnect_LongBound_NotReturned` *(proposed)* on `resend_gap::Scene`'s direct initiator; the
+  verdict is read before the listener's close ends a pending attempt. GREEN on `$B` and at H5 (a guard); RED under M7″.
+- [X] T134 [US5] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C6`); read T131 and T133 on `$B`; record per cell its RED reason or
   guard status, and the skip count (0).
+  **Done**: C6 = `efb24877`; readings in the evidence file ("Phase 7").
 
 ### Implementation for US5
 
-- [ ] T135 [US5] `src/config/selector_resolver.cpp` (research D6 "Initiator"): `build_tls_factory` gains a
+- [X] T135 [US5] `src/config/selector_resolver.cpp` (research D6 "Initiator"): `build_tls_factory` gains a
   `Transport::Config` parameter; `resolve_transport` reads `tls_handshake_timeout_ms` (T030's checks) into
   `Transport::Config::tls_handshake_timeout`; the minting loop gains the third divergence term (the value differing from
   session[0]'s), so a later session's value is never dropped; on a plaintext or acceptor session the key loads and has no
   effect (`L-106-d`). No `SessionConfig` field; `TransportFactory` untouched (`[const §XIV.2]`).
-- [ ] T136 [US5] `src/session/engine.cpp` (research D6 "Acceptor"): the listener's
+  **Done** (H5 = `b7da8891`): `transport_config_of` reads the merged transport table's key (an in-range integer; any
+  other value is `check_transport_handshake_timeouts`' diagnostic); `build_tls_factory` takes the `Transport::Config`; the
+  minting loop's third term compares the bound with session[0]'s.
+- [X] T136 [US5] `src/session/engine.cpp` (research D6 "Acceptor"): the listener's
   `accepted_transport_config` reads `EngineConfig::acceptor_tls_handshake_timeout` in place of the 1500 ms literal, with
   the comment "106 D6 supersedes 015 FR-014's hard-coded 1500 ms: `EngineConfig::acceptor_tls_handshake_timeout` (default
   1500 ms)". The comment in `src/transport/asio_tls_transport.cpp` beside the handshake timer that states the accepted
   transport's 1500 ms literal now names the field and its default as a pointer (106 D6), not the value.
-- [ ] T137 [US5] Every bundle-to-`EngineConfig` copy site T012 found (`tests/config/test_098_dialect_overlay.cpp`,
+  **Done** (`b7da8891`): the listener reads `engine_cfg.acceptor_tls_handshake_timeout`; both comments name the field and
+  106 D6.
+- [X] T137 [US5] Every bundle-to-`EngineConfig` copy site T012 found (`tests/config/test_098_dialect_overlay.cpp`,
   `tests/config/test_099_toml_live.cpp`, and any other) copies `acceptor_tls_handshake_timeout` beside `clock` (contract
   C-5.2: the host copies it).
-- [ ] T138 [US5] `.specify/decisions/106-logon-guards-write-bounds-verify.md`: Deferred item (plan "Deferred to tasks.md", "The exact 30 s default of `tls_handshake_timeout_ms` when
+  **Done** (`b7da8891`): T012's two sites copy the field beside `clock` (re-derive: `git grep -nE
+  '= *[a-z_]+(\.|->)engine\.clock' -- tests examples bindings bench`; the 106 cells copy it as well).
+- [X] T138 [US5] `.specify/decisions/106-logon-guards-write-bounds-verify.md`: Deferred item (plan "Deferred to tasks.md", "The exact 30 s default of `tls_handshake_timeout_ms` when
   the key is absent"): no cell, by named ruling: pinning it through the resolver needs the factory accessor research D6
   rejects; the spurious arm of T131 catches a resolver that writes 0 or a short sentinel, and
   `Transport::Config`'s default is a default 106 does not edit (Gate A loop 2 round 2, C-3). Check whether an existing cell
   pins `Transport::Config{}.tls_handshake_timeout` (`git grep -n 'tls_handshake_timeout' -- tests`) and cite it in the
   verify record; record the ruling there.
-- [ ] T139 [US5] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: At the head: the US5 cells GREEN; guards unfiltered:
+  **Done:** ruled in `.specify/decisions/106-logon-guards-write-bounds-verify.md` (T138 section): no cell; no existing cell
+  pins `Transport::Config{}.tls_handshake_timeout`; `TomlHandshake106.SessionKeyAbsent_Pending` is the spurious arm.
+- [X] T139 [US5] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: At the head: the US5 cells GREEN; guards unfiltered:
   `AsioTlsTransportErrorPaths.HandshakeTimeoutMapsToTransportHandshakeTimeout` (the attempt's
   `transport_handshake_timeout`), `TlsClose105.*`, `EngineFirstFramePhaseATls.Q17_*` (builds `EngineConfig` directly; a close
   in its window); `-L config`. Record counts and skip counts. Commit `H5`; `codegraph sync`.
+  **Done** (`b7da8891`; readings in the evidence file, "Phase 7"): the US5 cells GREEN; the guards GREEN; `-L 106`,
+  `-L 105`, `-L 104`, `-L 099`, `-L config` GREEN; 0 skipped; `codegraph sync` run.
 
 ### Mutant arms for US5 (in `$M` at `H5`)
 
-- [ ] T140 [US5] In `$M`'s `src/config/selector_resolver.cpp`: M7: `tls_handshake_timeout_ms` read and dropped (the base's default `Transport::Config`); RED:
+- [X] T140 [US5] In `$M`'s `src/config/selector_resolver.cpp`: M7: `tls_handshake_timeout_ms` read and dropped (the base's default `Transport::Config`); RED:
   `TomlHandshake106.SessionKey`, `TomlHandshake106.SecondSessionDiverges`, `TomlHandshake106.DefaultTransport_MixedRoles_Accepted`.
-- [ ] T141 [US5] In `$M`'s `src/session/engine.cpp`: M7′: `EngineConfig::acceptor_tls_handshake_timeout` ignored (the literal back); RED: the C++ twin
+  **Done**: RED, the three cells (evidence file).
+- [X] T141 [US5] In `$M`'s `src/session/engine.cpp`: M7′: `EngineConfig::acceptor_tls_handshake_timeout` ignored (the literal back); RED: the C++ twin
   `EngineHandshake106.Acceptor_CxxField_ClosesAtTheField` and `EngineHandshake106.Acceptor_ClosesAtTheKey`.
-- [ ] T142 [US5] In `$M`'s `tests/session/test_106_seams.cpp` (the cell's host copy): M7‴: the host's copy of `EngineEstablishment::acceptor_tls_handshake_timeout` deleted (in the cell's
+  **Done**: RED, both cells (closed at the 1500 ms literal).
+- [X] T142 [US5] In `$M`'s `tests/session/test_106_seams.cpp` (the cell's host copy): M7‴: the host's copy of `EngineEstablishment::acceptor_tls_handshake_timeout` deleted (in the cell's
   copy, as the hosts copy); RED: `EngineHandshake106.Acceptor_ClosesAtTheKey`.
-- [ ] T143 [US5] In `$M`'s `src/transport/asio_tls_transport.cpp`: M7″: the factory's bound replaced by 60 s; RED: `HandshakeBound106.DriveReconnect_OneAttempt`.
-- [ ] T144 [US5] In `$M`'s `src/config/selector_resolver.cpp`: The key refused on an acceptor or plaintext session; RED:
+  **Done**: RED (closed at the 1500 ms default).
+- [X] T143 [US5] In `$M`'s `src/transport/asio_tls_transport.cpp`: M7″: the factory's bound replaced by 60 s; RED: `HandshakeBound106.DriveReconnect_OneAttempt`.
+  **Done**: RED (not returned at 300 ms + 2 s).
+- [X] T144 [US5] In `$M`'s `src/config/selector_resolver.cpp`: The key refused on an acceptor or plaintext session; RED:
   `TomlHandshake106.DefaultTransport_MixedRoles_Accepted`.
+  **Done**: RED (the mixed-role bundle does not load).
 
 **Checkpoint**: US5 GREEN; both handshake bounds configurable and proven.
 
