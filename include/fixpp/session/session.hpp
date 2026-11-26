@@ -731,7 +731,9 @@ public:
     // Two caller preconditions every Session awaitable has, named here because the bounds
     // and the gate make them checkable or load-bearing: close() runs before the Session is
     // destroyed (close() joins the too-high Logout's bound, 105's ending Logout bound and its
-    // close frame, and ~Session asserts each counter is 0 in builds with assertions, with no
+    // close frame, and 106's connection bound, which runs on every opened session's connection
+    // from its first limited write or its liveness loop's start, and ~Session asserts each
+    // counter is 0 in builds with assertions, with no
     // exemption (105-transport-liveness, contract C-9; B-103-13); a release build does not
     // check, and a bound still alive then resumes into a destroyed Session, as the liveness
     // loop already would); and research D1's
@@ -2111,7 +2113,9 @@ private:
     std::shared_ptr<std::atomic<int>> liveness_counter_{std::make_shared<std::atomic<int>>(0)};
     // The liveness loop's body; run_liveness_loop awaits it and then releases the
     // connection-end latch, so the release runs only on an exit the loop resumed to.
-    [[nodiscard]] asio::awaitable<void> run_liveness_loop_body_() noexcept;
+    // armed: set by the body once it has spawned or adopted the connection bound (106, the
+    // exit's loop_left).
+    [[nodiscard]] asio::awaitable<void> run_liveness_loop_body_(bool& armed) noexcept;
 
     // ── 105-transport-liveness: the connection-end latch (research D1; data-model E-2) ──
     // Supersedes, for the connection, the rule that writing Disconnected is a state
@@ -2315,19 +2319,45 @@ private:
     }
 
     // ── 106: the connection bound (research D3, "The primitive"; data-model E-3) ──────────────
-    // One coroutine per connection, spawned by the liveness loop at its start on the loop's
-    // executor, joined by connection_bound_counter_. It decides the give-up while the loop is
-    // suspended in its own emit (emit_in_flight_). Session strand only.
+    // One coroutine per connection, spawned by the liveness loop at its start or by the first
+    // live write with the limit on, whichever comes first, on that coroutine's executor; joined
+    // by connection_bound_counter_. It decides the give-up while the loop is suspended in its
+    // own emit (emit_in_flight_), and times every live write but a Logout's while
+    // SessionConfig::write_timeout_ms is set (106 D5). Session strand only.
     struct connection_bound_state {
         bool running = false;
         std::uint32_t gen = 0;  // the connection generation it was spawned for
         bool shipping = false;  // effective_clock_ is system_clock_source (tested at the spawn)
         std::function<void()> wake;  // cancels the bound's own timer; set by the bound only
-        // The liveness loop that spawned it has ended (set at the loop's exit, data-model E-3's
-        // joiner row "teardown without close()").
+        // A liveness loop that spawned or adopted it has ended (set at that loop's exit,
+        // data-model E-3's joiner row "teardown without close()"). A loop that leaves before
+        // its spawn point (HeartBtInt 0) sets nothing.
         bool loop_left = false;
+        // Spawned on this connection (reset by begin_connection_()): the first live write with
+        // the limit on spawns it only when none was, so it is spawned at most once per
+        // connection outside drive_reconnect's respawn (data-model E-3).
+        bool spawned = false;
+        // T, set by the liveness loop when it spawns or adopts the bound; read for G while the
+        // loop's emit is in flight.
+        std::chrono::milliseconds threshold{0};
+        // The deadline of the bound's current wait (max when parked); a live write's start
+        // wakes the bound only when this is later than the write's own deadline.
+        fixpp::core::steady_time_point armed_until = fixpp::core::steady_time_point::max();
     };
     connection_bound_state connection_bound_;
+    // 106 (research D5; data-model E-3, E-5): the write limit's state, written by
+    // live_write_serialized_ just before its async_write with SessionConfig::write_timeout_ms
+    // set (write_cut_epoch_ by the bound's expiry); begin_connection_() clears the flag and
+    // the cut epoch. Session strand only.
+    fixpp::core::steady_time_point write_started_at_{};
+    std::uint32_t write_epoch_ = 0;
+    bool write_in_flight_ = false;
+    std::uint32_t write_cut_epoch_ = 0;
+    // The write limit's expiry (data-model E-5, steps 1 to 5, in order). Synchronous.
+    void expire_write_() noexcept;
+    // The fail-closed ending of a connection whose bound cannot be spawned or respawned (research
+    // D3, "Spawn failure", "One close"): the claim, Disconnected and one close. Synchronous.
+    void fail_closed_without_bound_() noexcept;
     // Set by the liveness loop while its TestRequest or Heartbeat emit has not returned; cleared
     // by an RAII guard in the loop's frame at the return or an exception.
     bool emit_in_flight_ = false;
@@ -2341,10 +2371,9 @@ private:
     }
     // Spawns the bound on ex for this connection; false when the spawn fails (the seam, or an
     // allocation failure). Synchronous.
-    [[nodiscard]] bool spawn_connection_bound_(asio::any_io_executor const& ex,
-                                               std::chrono::milliseconds threshold) noexcept;
-    asio::awaitable<void> run_connection_bound_(connection_bound_join join, std::uint32_t gen,
-                                                std::chrono::milliseconds threshold) noexcept;
+    [[nodiscard]] bool spawn_connection_bound_(asio::any_io_executor const& ex) noexcept;
+    asio::awaitable<void> run_connection_bound_(connection_bound_join join,
+                                                std::uint32_t gen) noexcept;
     // The bound's one waiting callee, on the bound's own timer (an asio::steady_timer, a template
     // parameter so this header names no timer type; defined and used in session.cpp only): false
     // when a deadline arm completed before its instant.
@@ -2434,10 +2463,18 @@ private:
     //   at D-OUT-10 or at the transmit (no exemption) returns success with nothing
     //   transmitted, before the time of the last outbound frame is updated.
     enum class wire_reset_exemption : std::uint8_t { none, crossing_logout };
+    // 106 (research D5; data-model E-6): the write class. Every site that writes a Logout passes
+    //   logout (the sites: `git grep -n 'build_logout(' -- src/session`, each followed to its
+    //   store_then_emit); a logout write never arms the write limit, which every other live
+    //   write does when SessionConfig::write_timeout_ms is set. The live path returns
+    //   session_write_timeout for a write the limit cut, and dispatch_aborted for every other
+    //   live-write failure, as before.
+    enum class write_class : std::uint8_t { ordinary, logout };
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store_then_emit(
         seqnum_t stamped_seq, std::span<const std::byte> frame,
         std::optional<fsm_state> arm = std::nullopt, bool transmit = true,
-        wire_reset_exemption exemption = wire_reset_exemption::none, bool* transmitted = nullptr);
+        wire_reset_exemption exemption = wire_reset_exemption::none, bool* transmitted = nullptr,
+        write_class wclass = write_class::ordinary);
 
     // fixpp#518, 093 (data-model E-13; contract C-6): true when a Logon arm must stop
     // after a resume, because the session left the state the arm expects while the arm
@@ -2577,7 +2614,8 @@ private:
     enum class live_write_outcome : std::uint8_t { written, held_back };
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<live_write_outcome>>
     live_write_serialized_(std::span<const std::byte> frame,
-                           wire_reset_exemption exemption = wire_reset_exemption::none) noexcept;
+                           wire_reset_exemption exemption = wire_reset_exemption::none,
+                           write_class wclass = write_class::ordinary) noexcept;
 
     // run_logout_phase1: emit Logout frame, then wait for peer Logout-confirm
     // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a
