@@ -33,6 +33,10 @@
 // transport counts its close_async calls; the call close_async_throws_when names throws before it
 // closes anything, and a call close_async_holds_when names waits, before it closes, until
 // release_close(). With neither set, close_async is Transport's default, close().
+//
+// 106-logon-guards-write-bounds (spec.md R23; contract C-4.3) adds close_async_calls_at_first_close,
+// the value of close_async_calls when close() first ran, so a cell can tell that the first close
+// was made during a close_async call that threw (that call never reaches its own close()).
 #pragma once
 
 #include <algorithm>
@@ -85,6 +89,8 @@ struct blocking_write_state {
     // can tell that the connection was closed and which writes had begun by then.
     std::size_t closes = 0;
     std::optional<std::size_t> starts_at_first_close;
+    // 106 (spec.md R23): close_async_calls as the first close() read it.
+    std::optional<std::size_t> close_async_calls_at_first_close;
     // 105-transport-liveness (tasks.md T052): a parked write that close() wakes completes with
     // success, as a write whose completion was already queued when the transport was closed.
     bool succeed_after_close = false;
@@ -200,7 +206,10 @@ public:
     }
 
     [[nodiscard]] fixpp::core::expected_t<void> close() noexcept override {
-        if (state_->closes++ == 0) state_->starts_at_first_close = state_->starts;
+        if (state_->closes++ == 0) {
+            state_->starts_at_first_close = state_->starts;
+            state_->close_async_calls_at_first_close = state_->close_async_calls;
+        }
         closed_ = true;
         state_->block_next = false;
         if (state_->timer) state_->timer->cancel();

@@ -426,6 +426,39 @@ TEST_P(GiveUp106, EmitHeldInStore_GivesUpAtG_ClosesAtGPlusB) {
     r.d.s.drain();
 }
 
+// spec.md R23 (FR-009, contract C-3.3): BehindBlockedSend, with the close at G + B meeting a
+// close_async that throws before it closes anything. The synchronous close the close frame falls
+// back to closes the transport at G + B, and the held send returns dispatch_aborted.
+TEST_P(GiveUp106, SendBlocked_CloseAsyncThrows_ClosedAtGPlusB) {
+    t106::GiveUpRig r{GetParam(), t106::GiveUpParams{}};
+    r.d.bw->close_async_throws_when = [](std::size_t call) { return call == 1; };
+    Staged st = stage(r, scene::behind_blocked_send);
+    ASSERT_TRUE(st.ok) << "setup: " << st.why;
+    auto const disconnected_before = r.disconnected();
+    auto const g = t106::give_up_instant_emit_not_returned(st.last_inbound, r.threshold());
+    auto const b = std::chrono::milliseconds{r.p.logout_ms};
+    r.at(g);
+    EXPECT_EQ(r.records(), 1U) << "no give-up record at G";
+    r.at(g + b - t106::kInstantGuard);
+    EXPECT_FALSE(r.d.closed()) << "closed before G + B";
+    EXPECT_EQ(r.d.bw->close_async_calls, 0U) << "a close before G + B";
+    r.at(g + b);
+    // The first close is made during the first close_async call, the one that throws before it
+    // closes anything, so only the catch's fallback can have made it.
+    EXPECT_EQ(r.d.bw->close_async_calls_at_first_close, std::optional<std::size_t>{1})
+        << "the transport was not first closed by the throwing close_async's fallback";
+    EXPECT_TRUE(r.d.closed()) << "not closed at G + B";
+    bool const returned = st.blocked_call && rgs::Scene::ready(*st.blocked_call);
+    EXPECT_TRUE(returned) << "the held send did not return";
+    if (returned) {
+        auto const sr = st.blocked_call->get();
+        EXPECT_FALSE(sr.has_value()) << "the held send succeeded";
+        if (!sr) EXPECT_EQ(sr.error(), fixpp::core::error::dispatch_aborted);
+    }
+    EXPECT_EQ(r.d.s.state(), fsm_state::Disconnected);
+    EXPECT_EQ(r.disconnected() - disconnected_before, 1U) << "new Disconnected entries";
+}
+
 // tasks.md T074, the disclosure guard L-105-f: B = 0, so the give-up's ending is unlimited and
 // nothing closes. Still open at G + 10 s, which follows G + 2000 ms (the default B a regression
 // ignoring the 0 would use) by 8 s. [guard: an unconditional close at G]

@@ -1721,6 +1721,40 @@ TEST_P(WriteLimit106, ShippingClock106_DirectDriver_BoundBesideLiveness_TestRequ
     EXPECT_EQ(r.records(), 0U) << "give-up records";
 }
 
+// spec.md R23 (contract C-4.3, "the transport is closed at once"): the Send class's cut, with the
+// close frame meeting a close_async that throws before it closes anything. The synchronous close
+// it falls back to closes the transport at S + W; the cut send returns session_write_timeout and
+// the send queued behind it dispatch_aborted; one Disconnected entry, one write-timeout record.
+TEST_P(WriteLimit106, CloseAsyncThrows_CutStillCloses) {
+    Rig r{GetParam(), Params{}};
+    r.d.bw->close_async_throws_when = [](std::size_t call) { return call == 1; };
+    Staged st = stage(r, wclass::send);
+    ASSERT_TRUE(st.ok) << "setup: " << st.why;
+    auto const disconnected_before = r.disconnected();
+    r.at(st.s + std::chrono::milliseconds{kW});
+    // The first close is made during the first close_async call, the one that throws before it
+    // closes anything, so only the catch's fallback can have made it.
+    EXPECT_EQ(r.d.bw->close_async_calls_at_first_close, std::optional<std::size_t>{1})
+        << "the transport was not first closed by the throwing close_async's fallback";
+    EXPECT_TRUE(r.d.closed()) << "not closed at S + W";
+    EXPECT_EQ(r.write_records(), 1U) << "write-timeout records";
+    bool const cut_returned = st.cut && rgs::Scene::ready(*st.cut);
+    EXPECT_TRUE(cut_returned) << "the cut send did not return";
+    if (cut_returned) {
+        auto const cr = st.cut->get();
+        EXPECT_FALSE(cr.has_value()) << "the cut send succeeded";
+        if (!cr) EXPECT_EQ(cr.error(), fixpp::core::error::session_write_timeout);
+    }
+    bool const queued_returned = st.queued && rgs::Scene::ready(*st.queued);
+    EXPECT_TRUE(queued_returned) << "the queued send did not return";
+    if (queued_returned) {
+        auto const qr = st.queued->get();
+        EXPECT_FALSE(qr.has_value()) << "the queued send succeeded";
+        if (!qr) EXPECT_EQ(qr.error(), fixpp::core::error::dispatch_aborted);
+    }
+    EXPECT_EQ(r.disconnected() - disconnected_before, 1U) << "new Disconnected entries";
+}
+
 INSTANTIATE_TEST_SUITE_P(BothRoles, WriteLimit106,
                          ::testing::Values(session_role::acceptor, session_role::initiator),
                          role_name);

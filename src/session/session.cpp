@@ -519,12 +519,17 @@ void Session::spawn_connection_close_(
 }
 
 // 105 (research D1 item 5): see session.hpp.
+// 106 (spec.md R23): a close_async that throws falls back to the synchronous close (105's C-8.6
+// widened), so the connection is still closed; the frame still touches no member of Session.
 asio::awaitable<void> Session::close_transport_(
     [[maybe_unused]] connection_close_join join,
     std::shared_ptr<fixpp::transport::Transport> transport) {
     try {
         (void)co_await transport->close_async();
-    } catch (...) {  // NOLINT(bugprone-empty-catch): a detached frame; nothing awaits it
+    } catch (...) {
+        // A detached frame: nothing awaits it. Transport::close() is noexcept and idempotent,
+        // and its result is discarded, as C-8.6's spawn-failure close discards it.
+        (void)transport->close();
     }
 }
 

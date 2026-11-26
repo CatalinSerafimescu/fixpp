@@ -147,7 +147,9 @@ Abbreviations: S = `src/session/session.cpp`, E = `src/session/engine.cpp`. "The
    (`ending_wait_.phase == writing`) the latch is left set too, and the writer's root consumes it after the write.
 5. **The close frame, `close_transport_(join, transport)`**, a static coroutine that receives its join and the
    transport's `shared_ptr` at the spawn, awaits `close_async()` on that transport, and touches no member
-   of `Session` (data-model E-2). `close()` and `drain_for_reconnect_` join it (item 6) and `~Session` asserts its
+   of `Session` (data-model E-2). A close frame whose `close_async()` throws calls the synchronous
+   `Transport::close()` of the transport it holds instead (contract C-8.6; *(Amended 2026-11-27 by 106, spec.md R23.)*).
+   `close()` and `drain_for_reconnect_` join it (item 6) and `~Session` asserts its
    counter is zero, so a Session destroyed after `close()`, as B-103-13 requires, has no close frame running; the
    frame widens no lifetime precondition. It runs on its own spawn chain, so `close_async`'s cancellation clobber
    stays there (F-6).

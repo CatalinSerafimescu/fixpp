@@ -107,6 +107,9 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
   - an application `send` returns `dispatch_aborted` (`FIXPP_ERR_CANCELLED` in C), as 105's B-105-8, unchanged;
   - none of them hangs.
 
+  The close is made when the transport's `close_async()` throws too: the close frame then calls the synchronous
+  `Transport::close()` (105 C-8.6 and `L-105-h`, as amended by ruling R23).
+
   The exception is the liveness loop's own emit while it is still inside its `MessageStore::store` call: the close
   does not fail it, and it returns when the store returns, which no peer controls. The give-up is still decided at the
   instant and the transport still closes at the decision plus `logout_disconnect_timeout_ms`; `close()`'s and
@@ -140,7 +143,8 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
   - it writes one warn record, `session ended: write timed out: limit_ms=<W> error=<n>`, with `<n>` the value of
     `session_write_timeout`;
   - the session records `Disconnected` (`onLogout` once from Active; before Active, no `onLogout`);
-  - the transport is closed at once.
+  - the transport is closed at once, with the synchronous `Transport::close()` when its `close_async()` throws (105
+    C-8.6 and `L-105-h`, as amended by ruling R23).
 
   The write that timed out returns `session_write_timeout` to its caller. Its C value is `FIXPP_ERR_TRANSPORT_IO`,
   through `translate` in `src/capi/error.cpp`, the one map `fixpp_session_send` applies before its consumer-minor
@@ -278,6 +282,8 @@ Every engine cell above names the source read (versions in the heading).
   `close()` or `Engine::stop()`. QuickFIX C++'s and Go's defaults behave the same. A C session always runs with the
   limit off (C-4.1), so for a C caller this holds on every session: the knob is C++ and TOML only (owner ruling,
   `[const §IV]`).
+- `L-105-h`, widened (ruling R23): the synchronous `Transport::close()` is also the close of a close frame whose
+  `close_async()` throws, so on TLS with a read or write in flight that close sends no close_notify.
 - `L-106-a`: a refusal after a reset that already ran in the arm keeps that reset's numbers (C-2.2).
 - `L-106-b`: the write-timeout reason is carried by its record and by the cut call's return only.
 - `L-106-c`: C-1.6.

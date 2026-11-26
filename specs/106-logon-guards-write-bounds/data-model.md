@@ -157,7 +157,8 @@ At the bound's expiry, in order:
 4. `record_disconnected_unless_already_()`: from Active, `onLogout` once; before Active, none;
 5. when `state_ == lifecycle::open`, `spawn_connection_close_(live_transport_shared_())` then
    `connection_end_owed_.reset()`, as `expire_ending_wait_` does (105 E-2, one close; N-2). A refused close spawn falls
-   back to the synchronous `Transport::close()` of the live transport (105 clarification D-g, `L-105-h`); the cut
+   back to the synchronous `Transport::close()` of the live transport (105 clarification D-g, `L-105-h`), and so does a
+   close frame whose `close_async()` throws (spec.md R23); the cut
    write fails the same way and still returns `session_write_timeout`, its epoch having been marked at step 3.
 
 The order of steps 1 to 5 is binding.
