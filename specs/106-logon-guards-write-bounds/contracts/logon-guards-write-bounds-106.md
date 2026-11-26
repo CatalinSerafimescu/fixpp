@@ -299,7 +299,8 @@ Every engine cell above names the source read (versions in the heading).
 - **Per Logon:** D1's callee and D2's second lock acquisition, on the establishment path only. No bench runs a Logon
   arm, so this cost is not timed; the arms' locals are read against the base's at review (research Risks, "Coroutine
   frame growth in the Logon arms"; T050, T178a).
-- **Per liveness emit:** one cancel and one re-arm of the connection bound's timer; no spawn (D3). **Per connection:**
+- **Per liveness emit:** two wakes of the connection bound, one when the emit begins and one when it clears (data-model
+  E-3's wakers, the loop's guard on both edges), each one cancel and one re-arm of its timer; no spawn (D3). **Per connection:**
   one `co_spawn` of the connection bound.
 - Locally, the paired `session_send_bench` (not in `ci-suite`; its sends use `transport_send`, so it guards
   `store_then_emit`'s new argument) and `on_inbound_frame_bench` (dispatcher frame growth: it times the inbound dispatcher whose
