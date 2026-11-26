@@ -55,6 +55,10 @@ refs:
   - specs/105-transport-liveness/research.md
   - specs/105-transport-liveness/data-model.md
   - specs/105-transport-liveness/contracts/transport-liveness-105.md
+  - specs/106-logon-guards-write-bounds/spec.md
+  - specs/106-logon-guards-write-bounds/research.md
+  - specs/106-logon-guards-write-bounds/data-model.md
+  - specs/106-logon-guards-write-bounds/contracts/logon-guards-write-bounds-106.md
   - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2d-threading.md
@@ -637,7 +641,9 @@ taken. Each item names the note's section that has the whole list.
   reverses ruling R-1 on fixpp#516); no deadline; a timer for the deadline; two endings for a live
   peer; the grace check reading "any frame since the TestRequest" (it edits the liveness loop, B27's
   surface; ⚠️ **decided by 105**: the give-up needs a TestRequest pending and no inbound frame since it, so a
-  peer that keeps sending is not given up, 105 research D6); a Logout on the dead-peer ending (⚠️ **superseded by
+  peer that keeps sending is not given up, 105 research D6; ⚠️ **amended by 106**: a TestRequest due and held
+  behind a resend answer is given up at the last inbound frame + 3T + 1 ns with or without one pending, research D3,
+  `B-106-3`; a peer that keeps sending still is not); a Logout on the dead-peer ending (⚠️ **superseded by
   105's R-1**: the give-up sends a Logout naming the TestRequest, `B-105-3`); the check ahead of the BeginString, CompID and
   SendingTime guards; the check without its own too-high test (it would end a healthy slow replay); the
   check on every frame that does not advance (it would close `L-537-1`'s pattern; not chosen, R-11);
@@ -950,6 +956,76 @@ code is `Session::record_state_transition_`, `release_connection_end_`, `run_end
   transport-stays-open readings; 092 contract C-2 O-1's close timing; 093 FR-006 phase (b) and contract C-4/C-7
   (a refused connection now closes at its refusal); 103 Arm B's disclosure and 104's DQ-8 (`L-103-5`, closed); the
   536-537-538 note's R-6 and D-537-5's C-3 disclosure (erratum at the note's end).
+
+## Logon guards before any answer, write bounds, the handshake bounds (106)
+
+Source: `specs/106-logon-guards-write-bounds/` (research D1 to D11, data-model E-1 to E-10, contract C-1 to C-9);
+the code is `Session::logon_identity_refuses_`, `logon_identity_admitted_`, `logon_credentials_admitted_`,
+`live_write_serialized_`, `spawn_connection_bound_`, `connection_bound_wait_`, `expire_write_` and
+`decide_give_up_` in `src/session/session.cpp`, `SeqnumManager::classify_inbound`, and the listener's handshake bound
+in `src/session/engine.cpp`. Leads to verify against that source.
+
+- **The identity gates run first, by construction** (fixpp#702; B&L `B-106-1`). In both Logon arms the identity
+  is decided at the first point where the arm would send or change sequence state, and nothing before it sends or
+  changes state; the validate-first Reject is decided, then held back until the identity is known, so a frame is
+  written only to an identity the consuming gate admitted (research D1). Why: FIX-TC 1S(c) asks for a disconnect
+  with no message, and every answer before the gate consumed an outbound number and told an unauthorised peer which
+  tag of its Logon was wrong. Not taken (research D1, "Alternatives rejected"): authorising at `open()` (no
+  identity exists there); the mTLS gate before `interpret_logon` (every silently refused first frame would emit gate
+  events and consume the identity, for no protection); one consuming gate ahead of the stay-in-arm Reject (the
+  peer's corrected Logon would fail closed); holding the Reject until after `interpret_logon` in every case (a frame
+  `interpret_logon` refuses would lose the Reject it draws, for admitted identities too); passing unreadable
+  credentials to the validator as empty (an absent 553/554 is a readable "none", so it would not fail closed).
+- **NextNumIn is consumed only on the success path: a tentative advance** (fixpp#703 and the owner's class ruling;
+  `B-106-2`). `SeqnumManager::classify_inbound` classifies under the same lock and freeze as `check_inbound` without
+  advancing, and each arm commits at one point (research D2). Not taken (research D2, "Alternatives rejected"): a
+  restore at each refusal (every new refusal must remember it, and each restore is an await a cancellation can skip);
+  moving S3 ahead of the sequence check (a too-low Logon with a bad 1137 would draw the S3 Reject instead of 104's
+  too-low Logout); a Session-local comparison through `next_inbound_unsafe()` (it bypasses the lock and 104's
+  freeze).
+- **The give-up does not wait behind a blocked write: the connection bound, one per connection** (fixpp#714a;
+  `B-106-3`). A coroutine spawned once per connection waits on the session's executor and may decide the give-up
+  while the liveness loop is suspended in a write; with `write_timeout_ms` set it also cuts a write at its start +
+  the limit (research D3, D5). While the loop's own emit has not returned, the give-up instant is L + 3T + 1 ns
+  (research D4, ruling R1). Not taken (research D3, "Alternatives rejected"): racing the emit against the instant in
+  the loop with `||` (it cancels `store_then_emit`, which takes the number back and records `Disconnected` before any
+  slot-74 record, and a cancelled `async_write` need not complete); a `co_spawn` per emit (an allocation per liveness
+  emit); the bound sleeping through `Clock::sleep_until` (per-call allocation on an Engine session, and on a direct
+  driver it re-arms the Session's one slot timer, fixpp#715); fixing #715 inside `system_clock_source` (a sixth
+  `Clock` virtual, against `[const §XIV.2]`); detached emits (the loop would run beside its own emits, so its state
+  becomes shared); a close-only watchdog (it drops R-1's Logout). Research D4, "Alternatives rejected": counting from
+  `tr_issued_at` (it repeats 105 C-2(b)'s defect); keeping `tr_written_at` and bounding only the write (a TestRequest
+  blocked forever never starts its clock, the defect of #714).
+- **An opt-in limit on every non-ending write** (fixpp#714b; `B-106-4`). `write_timeout_ms`, counted from the
+  `async_write` call, closes with no Logout and returns `session_write_timeout` from the cut write (research D5; the
+  owner's ruling (b) that the limit ends the session). Not taken (research D5, "Alternatives rejected"): a `co_spawn`
+  bound per write (a per-write allocation on the send path 544 made allocation-free); `async_write || deadline` (the
+  deadline's cancellation need not complete a transport write; closing the transport is what ends it, 105 D-e); a
+  `Transport::Config` write timeout (per factory, not per session, on the transport's timer, and every pluggable
+  transport would need it); the liveness loop as the watchdog (it is off at HeartBtInt 0); `FIXPP_ERR_UNKNOWN` as the
+  C code (this code is returned by a call, and `translate` is a total switch).
+- **The handshake bounds are configurable** (fixpp#717, refuted as filed: the initiator's bound existed; `B-106-5`).
+  Not taken (research D6, "Alternatives rejected"): a `SessionConfig` field (it duplicates `Transport::Config`);
+  changing `TransportFactory::make` to take a per-session bound (a pluggable interface change, `[const §XIV.2]`); an
+  `[engine]` table (a new top-level structure for one key).
+- **One ending claim per connection** (ruling R3, FR-017; research D11). The give-up, the write limit, 105's ending
+  Logouts, the establishment deadline, `close()`, `Engine::stop()` and the bound's failure exits take one claim; a later
+  decider records nothing and closes nothing. Not taken (research D11, "Alternatives rejected"): per-decider predicates
+  (a watchdog deadline inside the give-up's budget wrote a second reason); "the first to close records the reason"
+  (ruling D-e records at the decision); `close()` as a recording claimant (a log record on every close); a refused
+  expiry that still closes (it would fail the claimant's Logout queued behind the write, so `write_timeout_ms` would
+  bound an ending Logout, against FR-011).
+- **Superseded by name** (research "Supersession"; each named in the code comment that changes it, "106 D<n>
+  supersedes …"): 104 N-8 (the asked path's order, unit before the gate) and 104 DQ-6 / `L-104-3` (answers before
+  the gates, closed); 104 T8 (the too-low branches run the gates themselves); 105 E-4 (the give-up counts T from
+  `tr_written_at`, while the emit has not returned), 105 C-1 row 8's reason, and 105 T119b's reading (the 3T cap
+  needs a TestRequest pending); 103 D5′ / 105 research D3 (the liveness loop alone decides the give-up); the
+  536-537-538 note §3 (the loop's emits awaited inline with no bound; still inline, now bounded); 105 D-e's scope
+  (only ending Logouts are limited); `engine.cpp`'s hard-coded 1500 ms (015 FR-014); 099 E-7's `NC-h` and `LS-h`
+  endings and 099 E-7's and E-10's consumed NextNumIn at S3; 038's "52 wins" ordering (stale 52 with refused
+  credentials); 105's second `Disconnected` entry for a send held in its store call (105 data-model E-2 I-5). The
+  103, 104 and 105 bundles listed in this page's refs are frozen and carry these decisions unannotated: read them with
+  this list.
 
 ## Runtime flows
 
