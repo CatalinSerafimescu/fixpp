@@ -1487,10 +1487,26 @@ private:
     // Disconnected), true when it admits it or the session is not mTLS. Its callers, both Logon
     // arms (104): `git grep -n 'logon_identity_admitted_()' -- src`.
     [[nodiscard]] bool logon_identity_admitted_() noexcept;
+    // 106 (research D1 item 2; data-model E-1): the identity decision a Logon arm's
+    // validate-first Reject is held behind. True when an identity gate that applies refuses:
+    // the mTLS half (mtls_ca or mtls_pinned, either role) evaluates the mTLS gate's arms with
+    // no event and nothing consumed; the credentials half (the acceptor, whatever its security
+    // profile) reads Username(553) and Password(554) through interpret_logon, refuses what
+    // authorize_logon refuses, and refuses a frame interpret_logon refuses when
+    // has_logon_validator(). With `consume` set, a refusal then runs the consuming mTLS gate, for
+    // its event. Its locals stay in its own frame, so none enters an arm's coroutine frame (104
+    // T093).
+    [[nodiscard]] bool logon_identity_refuses_(std::span<const std::byte> frame, bool consume);
+    // 106: the mTLS gate's one authorize computation, which logon_identity_admitted_() and
+    // logon_identity_refuses_() share. Precondition: live_peer_id_ holds a value.
+    [[nodiscard]] fixpp::core::expected_t<fixpp::session::bound_principal>
+    authorize_live_identity_() const noexcept;
+    // 106: the session's security profile is mtls_ca or mtls_pinned (the mTLS gate applies).
+    [[nodiscard]] bool mtls_gate_applies_() const noexcept;
     // The acceptor's credentials gate (033 T023): the Logon's Username(553) and Password(554)
     // through compid_authorization_policy.authorize_logon, the asserted CompID being the
-    // peer's SenderCompID (cfg_.target_comp_id). A member since 104 (contract T8), so a too-low
-    // Logon runs it before its Logout. Its callers:
+    // peer's SenderCompID (cfg_.target_comp_id). 106 D1: the acceptor's arm runs it once, after
+    // interpret_logon, and logon_identity_refuses_() for a held validate-first Reject. Its callers:
     // `git grep -n 'logon_credentials_admitted_(' -- src`.
     [[nodiscard]] bool logon_credentials_admitted_(logon_interpret_result const& logon) const;
     // The Active arm's synchronous SendingTime(52) MaxLatency check.

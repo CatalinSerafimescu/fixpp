@@ -368,4 +368,9 @@ void CompIdAuthorizationPolicy::set_logon_validator(logon_validator_fn validator
     impl_->logon_validator = std::move(validator);
 }
 
+// 106 (data-model E-1): the same test authorize_logon makes.
+[[nodiscard]] bool CompIdAuthorizationPolicy::has_logon_validator() const noexcept {
+    return static_cast<bool>(impl_->logon_validator);
+}
+
 }  // namespace fixpp::session

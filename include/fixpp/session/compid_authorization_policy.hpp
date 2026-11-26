@@ -115,8 +115,24 @@ public:
     // Setting nullptr restores default-accept behaviour.
     // NOT noexcept — the validator may be set at config-build time, not on the hot path.
     // [033 T021; FR-008a future validation knob; research R6]
+    //
+    // 106 (research D1 item 2; data-model E-1; B-106-1, L-106-c), for a policy author: the
+    // Logon arms judge the identity before they answer, so
+    //   - a Logon that interpret_logon refuses never reaches the validator: with a validator
+    //     installed, the session refuses such a frame itself (it fails closed);
+    //   - an absent Username(553) or Password(554) reaches the validator as empty, and a
+    //     validator that requires them refuses that itself;
+    //   - the validator may be called twice per connection (for a frame that draws a Reject
+    //     keeping the session in its Logon arm, then for the next Logon), after the
+    //     peer-identity-bound event.
     using logon_validator_fn = std::function<bool(std::string_view, logon_credentials const&)>;
     void set_logon_validator(logon_validator_fn validator);
+
+    // 106 (data-model E-1): true exactly when the stored validator is non-empty, the test
+    // authorize_logon makes: false when never set, true after set_logon_validator with a
+    // callable, false again after it with an empty one. The Logon arms read it to refuse an
+    // unreadable Logon only when a validator would have judged it (research D1 item 2).
+    [[nodiscard]] bool has_logon_validator() const noexcept;
 
 private:
     // Storage: std::pmr::unordered_map<std::pmr::string,

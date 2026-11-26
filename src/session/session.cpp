@@ -4494,6 +4494,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
                 co_return co_await close_on_late_parse_failure_();
             }
             if (v.outcome == validate_outcome::reject) {
+                // 106 D1 supersedes 104 DQ-6 / L-104-3 (answers before the gates): the Reject,
+                // decided here, is held until the identity is known (research D1 item 2). A
+                // refused identity ends the arm with nothing written. Where the Reject ends the
+                // arm (logon_reject_disconnects_), the consuming gate admits the identity before
+                // the write (N-13.2); where it stays in the arm, nothing is consumed, so the next
+                // Logon meets the full gate (F-2).
+                if (logon_identity_refuses_(frame, /*consume=*/true) ||
+                    (logon_reject_disconnects_(hdr, v.reject.ref_tag_id) &&
+                     !logon_identity_admitted_())) {
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return fixpp::core::expected_t<void>{};
+                }
                 auto rj = co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
                                                         v.reject.reason, v.reject.ref_tag_id,
                                                         session_reject_reason_text(v.reject.reason),
@@ -4526,6 +4538,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         // No MsgType discrimination: every refusal on this row lands in
         // Disconnected. Phase-3 "stays NotConnected" compromise removed
         // by T014 [US3] per spec.md FR-006 + opus_pr81_1_triage.md RC#3.
+        record_state_transition_(fsm_state::Disconnected);
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    // 106 D1 supersedes 104 DQ-6 / L-104-3 (answers before the gates): the identity gates run
+    // here, once, right after interpret_logon and before hydration (research D1 item 4): the mTLS
+    // CompID-authorisation gate (logon_identity_admitted_(), whose comment has its arms), then
+    // the credentials gate of 033 T023. A refusal records Disconnected and returns success with
+    // nothing written and no number changed, in memory or in the store; posture, SendingTime,
+    // strict, reset_on_logon, the sequence check, the too-low Logout, 1137 and the reply follow.
+    if (!logon_identity_admitted_() || !logon_credentials_admitted_(*result)) {
         record_state_transition_(fsm_state::Disconnected);
         co_return fixpp::core::expected_t<void>{};
     }
@@ -4754,18 +4777,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
             } else if (chk.error() == fixpp::core::error::session_seqnum_too_low) {
                 // 104 (FR-012 to FR-014; research D5, D6; contract T2, T8) supersedes 103's
                 // spec row "A too-low frame in NotConnected or LogonSent still ends silently":
-                // once the identity gates pass, a too-low Logon draws QuickFIX's too-low
-                // Logout, whatever its 43, then Disconnected. The gates are the ones an
-                // in-sequence Logon meets below, through the same calls: the mTLS
-                // CompID-authorisation gate, then the credentials gate; a refusal ends the
-                // arm as it does there, silent and Disconnected (FIX-TC 1S(c)). 1137 is not
-                // reached. The Logout carries Text(58) only and the session's next outbound
-                // number; NextNumIn is not advanced; refuse_logon_with_logout_ gives the
-                // endings of a Logout that is not sent, and sets no receipt marker.
-                if (!logon_identity_admitted_() || !logon_credentials_admitted_(*result)) {
-                    record_state_transition_(fsm_state::Disconnected);
-                    co_return fixpp::core::expected_t<void>{};
-                }
+                // a too-low Logon draws QuickFIX's too-low Logout, whatever its 43, then
+                // Disconnected. 106 D1 supersedes 104 T8 (the too-low branches' own gate calls):
+                // one gate site per arm; the identity gates ran right after interpret_logon, so
+                // the identity reaching here is admitted. 1137 is not reached. The Logout carries
+                // Text(58) only and the session's next outbound number; NextNumIn is not advanced;
+                // refuse_logon_with_logout_ gives the endings of a Logout that is not sent, and
+                // sets no receipt marker.
                 co_return co_await refuse_too_low_logon_(seq, fsm_state::NotConnected);
             } else {
                 // Too-high with the knob off, or a drained mutex: session-fatal, silent
@@ -4794,38 +4812,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         // run above via reset_seqnums_to_one_durable() when reset_on_logon.
     }
 
-    // 013 T036 US2: CompID authorization BEFORE FSM transition to
-    // LogonReceived/Active (FR-019/FR-020/FR-021/FR-024).
-    // Acceptor: asserted CompID = peer SenderCompID(49) = cfg_.target_comp_id.
-    //
-    // ACCEPTOR LIVE-BINDING (T-041 CLOSED, 015 US4):
-    //   The acceptor binds the REAL handshake identity from
-    //   attach_accepted_transport — the test seam is gone (T020/SC-006).
-    //   [[feedback_half_restructure_symmetric_api]]: both roles now bind a
-    //   live identity and fail CLOSED symmetrically (initiator guard below).
-    //
-    // Two-arm guard (015 T020 removed the seam arm from the T013 form):
-    //   (1) live_peer_id_ set + is_mtls → arm (1-live): authorize with the
-    //       real handshake peer_id from attach_accepted_transport (T011).
-    //       Happens-before invariant (Gate A New-1 / E-4): live_peer_id_ is
-    //       set by attach_accepted_transport STRICTLY-BEFORE the first
-    //       on_inbound_frame reaches this gate — guaranteed by run_accept_loop
-    //       calling attach_accepted_transport before co_awaiting on_inbound_frame.
-    //       Admit on-list / fail-CLOSED off-list-or-absent (T-041 acceptor path).
-    //   (2) mTLS + no identity available → FAIL CLOSED (RC#A). Fires when
-    //       is_mtls but live_peer_id_ is absent (happens-before violated
-    //       would land here — the safe default per Gate A New-1).
-    //   (3) Non-mTLS (one_way_ca / unset-but-passed-open-guard) → skip.
-    // [015 T013/T020; data-model §E-4; FR-006/007/008/009; T-041; Gate A New-1/E-4]
-    // [FR-019; FR-024 symmetric]
-    //
-    // 104 (contract T8): the gate runs through logon_identity_admitted_(), whose arms are the
-    // ones above, so a too-low Logon above meets the same arms, events and one-shot consumption.
-    // A refusal records Disconnected here.
-    if (!logon_identity_admitted_()) {
-        record_state_transition_(fsm_state::Disconnected);
-        co_return fixpp::core::expected_t<void>{};
-    }
+    // 106 D1 supersedes 013 T036's and 104 T8's position of the mTLS CompID-authorisation gate
+    // (after the sequence check, before 1137): it runs once, right after interpret_logon (above),
+    // still before the FSM leaves NotConnected (FR-019/FR-024).
 
     // 033 T018 — FIXT acceptor: validate DefaultApplVerID(1137) (C4/C5).
     // Gate: only for FIXT sessions AND when the serviceability registry is set.
@@ -4874,18 +4863,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
         }
     }
 
-    // 033 T023 (US2): surface 553/554 as logon_credentials to authorize_logon.
-    // Fired on the acceptor inbound-Logon path INDEPENDENTLY of mTLS
-    // (the mTLS-gated compid_authorization_policy.authorize() is unrelated).
-    // Default implementation: accept. A future FR-008a validator may reject here.
-    // `result` is always valid here -- the earlier `if (!result)` returned.
-    // [033 contracts C7; research R6; data-model E5; FR-008/FR-008a]
-    if (!logon_credentials_admitted_(*result)) {
-        // Future: emit an authorization-failed event. For 033 (default-accept
-        // validator), this path is unreachable unless a custom validator rejects.
-        record_state_transition_(fsm_state::Disconnected);
-        co_return fixpp::core::expected_t<void>{};
-    }
+    // 106 D1 supersedes 033 T023's position of the credentials gate (after the 1137 block): it
+    // runs once, right after the mTLS gate (above), so a refused credential draws no 1137 Reject.
 
     // Valid Logon + in-seq: transition to LogonReceived, then emit
     // the acceptor's own Logon reply and transition to Active.
@@ -7048,12 +7027,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logout_sent_(
 // on_inbound_logon_sent_ so that arm S's Logout branch runs this same gate, both arms. It
 // returns false when the identity is refused, having emitted the gate's event and consumed a
 // live identity; the caller then records Disconnected. It returns true when the identity is
-// admitted, or when the session is not mTLS. 104 (contract T8): the acceptor's NotConnected arm
-// runs it too, for an in-sequence Logon and a too-low one; the asserted CompID is
-// cfg_.target_comp_id in both roles.
-// 104 (contract T8; clarification N-8): the credentials gate of 033 T023 (its comment is at
-// the NotConnected arm's in-sequence call), one member, so a too-low Logon runs the same check
-// before its Logout as an in-sequence one runs before LogonReceived.
+// admitted, or when the session is not mTLS. The asserted CompID is cfg_.target_comp_id in both
+// roles. 106 D1 supersedes 104 T8's call sites: each Logon arm runs it once, right after
+// interpret_logon, and before a held validate-first Reject that ends the arm (research D1 items 2
+// and 4); arm S keeps its own call.
+// The credentials gate of 033 T023, one member: the acceptor runs it once, right after the mTLS
+// gate, and logon_identity_refuses_() runs it for a held validate-first Reject (106 D1).
 bool Session::logon_credentials_admitted_(logon_interpret_result const& logon) const {
     fixpp::session::logon_credentials creds;
     if (logon.username.has_value()) {
@@ -7066,10 +7045,18 @@ bool Session::logon_credentials_admitted_(logon_interpret_result const& logon) c
     return cfg_.compid_authorization_policy.authorize_logon(cfg_.target_comp_id, creds);
 }
 
+bool Session::mtls_gate_applies_() const noexcept {
+    return cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_ca ||
+           cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_pinned;
+}
+
+fixpp::core::expected_t<fixpp::session::bound_principal> Session::authorize_live_identity_()
+    const noexcept {
+    return cfg_.compid_authorization_policy.authorize(*live_peer_id_, cfg_.target_comp_id);
+}
+
 bool Session::logon_identity_admitted_() noexcept {
-    const bool is_mtls =
-        cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_ca ||
-        cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_pinned;
+    const bool is_mtls = mtls_gate_applies_();
 
     if (live_peer_id_.has_value() && is_mtls) {
         // (1) A live handshake identity: use the real handshake peer_id, set by
@@ -7081,7 +7068,7 @@ bool Session::logon_identity_admitted_() noexcept {
         // the residual fabricated auth payload from the live path.
         const fixpp::tls::peer_identity& auth_pid = *live_peer_id_;
         const std::string_view asserted_compid = cfg_.target_comp_id;
-        auto auth_r = cfg_.compid_authorization_policy.authorize(auth_pid, asserted_compid);
+        auto auth_r = authorize_live_identity_();
         if (!auth_r) {
             // Fail-closed: emit the event and return false; the caller records
             // Disconnected. On the acceptor this is the refusal of an identity the policy
@@ -7128,6 +7115,33 @@ bool Session::logon_identity_admitted_() noexcept {
     }
     // (4) Non-mTLS (one_way_ca): no client cert → gate skipped.
     return true;
+}
+
+// 106 (research D1 item 2; data-model E-1's per-half table): the decision a validate-first Reject
+// is held behind, made before the Reject is written. The halves are independent; one that does not
+// apply admits and consumes nothing, and the result admits only when every half that applies
+// admits. The mTLS half reads the same live identity and policy as the consuming gate, through
+// authorize_live_identity_(), so the two agree (nothing on one frame assigns live_peer_id_ between
+// them). The credentials half calls interpret_logon here, so its result stays in this frame, and
+// treats any interpret_logon refusal as unreadable credentials: refused only when a validator would
+// have judged them (B-106-1).
+bool Session::logon_identity_refuses_(std::span<const std::byte> frame, bool consume) {
+    bool refused = mtls_gate_applies_() &&
+                   (!live_peer_id_.has_value() || !authorize_live_identity_().has_value());
+    if (!refused && cfg_.role == session_role::acceptor) {
+        auto const logon = fixpp::session::interpret_logon(frame, cfg_.target_comp_id,
+                                                           cfg_.sender_comp_id, cfg_.begin_string,
+                                                           session_hooks(interpret_logon_table_()));
+        refused = logon ? !logon_credentials_admitted_(*logon)
+                        : cfg_.compid_authorization_policy.has_logon_validator();
+    }
+    if (refused && consume) {
+        // The consuming form, for its event and the one-shot consumption (data-model E-1): the
+        // failure event when the mTLS half refused, the bound event when only the credentials
+        // half did; nothing on a session the mTLS gate does not apply to.
+        (void)logon_identity_admitted_();
+    }
+    return refused;
 }
 
 // LogonSent arm (initiator: the peer's Logon-ack).
@@ -7206,6 +7220,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
                 co_return co_await close_on_late_parse_failure_();
             }
             if (v.outcome == validate_outcome::reject) {
+                // 106 D1 supersedes 104 DQ-6 / L-104-3 (answers before the gates): as in the
+                // acceptor's arm, the Reject is held until the identity is known (research D1
+                // item 2); on the initiator only the mTLS half applies.
+                if (logon_identity_refuses_(frame, /*consume=*/true) ||
+                    (logon_reject_disconnects_(hdr, v.reject.ref_tag_id) &&
+                     !logon_identity_admitted_())) {
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return fixpp::core::expected_t<void>{};
+                }
                 auto rj = co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
                                                         v.reject.reason, v.reject.ref_tag_id,
                                                         session_reject_reason_text(v.reject.reason),
@@ -7253,6 +7276,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
         // inbound (Heartbeat/TestRequest/Reject/out-of-scope admin /
         // invalid MsgType). Per matrix LogonSent row: every one of
         // these cells transitions to Disconnected (with Logout in US4).
+        record_state_transition_(fsm_state::Disconnected);
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    // 106 D1 supersedes 104 DQ-6 / L-104-3 (answers before the gates): the mTLS
+    // CompID-authorisation gate runs here, once, right after interpret_logon and before posture
+    // (research D1 item 4), through logon_identity_admitted_() (its comment has the arms). A
+    // refused identity ends the arm Disconnected, returning success, with nothing written and no
+    // number changed; posture, SendingTime, the sequence check, the too-low Logout, S3, strict,
+    // both 141=Y units and the 789 honour follow.
+    if (!logon_identity_admitted_()) {
         record_state_transition_(fsm_state::Disconnected);
         co_return fixpp::core::expected_t<void>{};
     }
@@ -7317,7 +7351,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     // are read before the sequence check. An acknowledgement with 141=Y that fixpp's Logon
     // did not ask for (the latch clear) is a reset, compared with 1 and not with NextNumIn:
     // it takes no check_inbound, it is consumed only at 34=1, and its unit runs after the
-    // mTLS gate below. An asked one, and one without 141=Y, take the sequence check as before.
+    // mTLS gate above. An asked one, and one without 141=Y, take the sequence check as before.
     // peer_ack_sent_reset_flag is at case scope for the persist guard below (029 INV-H1).
     const bool peer_ack_sent_reset_flag = (hdr.reset_seqnum_flag == "Y");
     const bool own_logon_sent_reset_flag = own_logon_sent_reset_flag_;
@@ -7353,18 +7387,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
             // logon_inbound_advanced_init stays false (manager not advanced).
         } else if (chk.error() == fixpp::core::error::session_seqnum_too_low) {
             // 104 (FR-012 to FR-014; research D5, D6; contract T1, T8) supersedes 103's spec
-            // row "A too-low frame in NotConnected or LogonSent still ends silently": once the
-            // mTLS CompID-authorisation gate passes, through the call an in-sequence
-            // acknowledgement meets below, a too-low acknowledgement draws QuickFIX's too-low
-            // Logout, whatever its 43, then Disconnected. A refused identity ends the arm as it
-            // does there, silent and Disconnected (FIX-TC 1S(c)). 1137, the strict test, the
-            // unit and 789 are not reached. The Logout carries Text(58) only and the session's
-            // next outbound number; NextNumIn is not advanced; refuse_logon_with_logout_ gives
-            // the endings of a Logout that is not sent, and sets no receipt marker.
-            if (!logon_identity_admitted_()) {
-                record_state_transition_(fsm_state::Disconnected);
-                co_return fixpp::core::expected_t<void>{};
-            }
+            // row "A too-low frame in NotConnected or LogonSent still ends silently": a too-low
+            // acknowledgement draws QuickFIX's too-low Logout, whatever its 43, then
+            // Disconnected. 106 D1 supersedes 104 T8 (the too-low branches' own gate calls): one
+            // gate site per arm; the mTLS gate ran right after interpret_logon, so the identity
+            // reaching here is admitted. 1137, the strict test, the unit and 789 are not reached.
+            // The Logout carries Text(58) only and the session's next outbound number; NextNumIn
+            // is not advanced; refuse_logon_with_logout_ gives the endings of a Logout that is not
+            // sent, and sets no receipt marker.
             co_return co_await refuse_too_low_logon_(seq, fsm_state::LogonSent);
         } else {
             // Too-high with knob off, or a drained mutex → fatal, silent (I-2/I-4).
@@ -7413,8 +7443,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(fixpp::core::error::session_seqnum_reset_mismatch);
         }
-        // 104: the asked acknowledgement's unit, unchanged; the unasked one's follows the
-        // mTLS gate below.
+        // 106 D1 supersedes 104 N-8 (the asked path's unit before the gate): the asked
+        // acknowledgement's unit keeps its place after 099's S3 test, now after the mTLS gate
+        // (above); so does the unasked one's (below).
         if (peer_ack_sent_reset_flag && !unasked_reset_ack) {
             // 032 T010(a): one-shot clear the latch, snapshotted above before Guard (4).
             // All logic below uses the local (independent of reset/persist success — RC1
@@ -7474,20 +7505,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
         }
     }
 
-    // 014 T015 US2 / 013 T036 US2: CompID authorization BEFORE the FSM transition to Active,
-    // through logon_identity_admitted_() (its comment has the arms). A refused identity
-    // ends the arm Disconnected, returning success.
-    if (!logon_identity_admitted_()) {
-        record_state_transition_(fsm_state::Disconnected);
-        co_return fixpp::core::expected_t<void>{};
-    }
+    // 106 D1 supersedes 014 T015's and 104 N-8's position of the mTLS CompID-authorisation gate
+    // (after the asked 141=Y unit): it runs once, right after interpret_logon (above), still
+    // before the FSM transition to Active.
 
     // 104 (clarification N-8; contract U1, U2, U4m, U7): the unasked acknowledgement's unit,
-    // after the mTLS gate, so a refused identity makes no reset. Its targets are next-in 2
-    // when the acknowledgement was consumed, else 1, and next-out 1: 032 C1's next-out 2 needs
-    // the latch, which is clear here. The restore, the dispositions and the superseded test
-    // are the asked unit's (093 contract C-6). The 789 honour below compares the peer's 789
-    // with the number after the reset (research D3.2).
+    // after the mTLS gate (106: right after interpret_logon), so a refused identity makes no reset.
+    // Its targets are next-in 2 when the acknowledgement was consumed, else 1, and next-out 1: 032
+    // C1's next-out 2 needs the latch, which is clear here. The restore, the dispositions and the
+    // superseded test are the asked unit's (093 contract C-6). The 789 honour below compares the
+    // peer's 789 with the number after the reset (research D3.2).
     if (unasked_reset_ack) {
         const seqnum_t unit_in = logon_inbound_advanced_init ? seqnum_min + 1 : seqnum_min;
         auto const unit = co_await run_reset_unit_(unit_in, seqnum_min);

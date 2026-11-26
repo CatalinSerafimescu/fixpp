@@ -403,7 +403,8 @@ TEST(IdentityFirst106, Asked141_DirectMtlsOpen) { run_refusal(direct_mtls_open(a
 
 // ── T041: the plain and strict refusals (research D9 row "FR-003 plain", N-5) ─────────────────
 //
-// A well-formed, in-sequence, unauthorised Logon or acknowledgement with no other fault.
+// A well-formed, in-sequence, unauthorised Logon or acknowledgement that draws no refusal of its
+// own.
 
 TEST(IdentityFirst106, Plain_Acceptor_OffListMtls) { run_refusal(off_list_mtls(plain())); }
 TEST(IdentityFirst106, Plain_Acceptor_RefusedCredentials) {
