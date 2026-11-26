@@ -64,6 +64,26 @@ TEST_P(OneEnding106, GiveUpThenClose) {
     EXPECT_EQ(r.records(), 1U) << "give-up records";
 }
 
+// tasks.md T167 (research D11 row 3; data-model E-3, Engine::stop()'s row): Engine::stop()'s step 1
+// has run, so closing_or_stopped_() holds and every later claim is refused. A frame below NextNumIn
+// then draws an ending Logout other than R-1, whose leaf takes the claim first: refused, it writes
+// no Logout, and the arm's tail records the one Disconnected entry. On the base the leaf writes the
+// too-low Logout. Its mutant: the leaf's claim test deleted (inbound_logout_leaf_).
+TEST_P(OneEnding106, EngineStopStep1_ThenTooLow_NoLogout) {
+    rgs::Scene s{rgs::Options{.role = GetParam()}};
+    ASSERT_TRUE(s.open_to_active()) << "setup";
+    ASSERT_GE(s.next_in(), 2U) << "setup: MsgSeqNum 1 is not below NextNumIn";
+    auto const mark = s.sent.size();
+    auto const disconnected_before = t106::count_disconnected(*s.session);
+    fixpp::session::session_test_access::note_engine_stop(*s.session);
+    (void)s.feed(s.heartbeat(1));
+    s.drain();
+    EXPECT_EQ(s.count("5", mark), 0U) << "a Logout after Engine::stop()'s step 1: " << s.written(mark);
+    EXPECT_EQ(s.state(), fsm_state::Disconnected) << "the too-low arm's ending did not run";
+    EXPECT_EQ(t106::count_disconnected(*s.session) - disconnected_before, 1U)
+        << "new Disconnected entries";
+}
+
 // tasks.md T089 (research D11 N-12): the loop's give-up block meets a claim held elsewhere in the
 // state that leaves it reachable: close() between setting closing and its Disconnected record,
 // with the session still Active. close()'s phase 1 leaves Active once its Logout has been written

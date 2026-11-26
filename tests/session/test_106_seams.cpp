@@ -279,6 +279,73 @@ TEST(NextNumIn106, CommitRefused_Disconnected) {
     EXPECT_EQ(in_store(), store_in_before) << "NextNumIn in the store";
 }
 
+// ── NextNumIn106.CommitRefused_Initiator_Disconnected (T167; research D9 row "FR-006 commit") ──
+// [seam: set_commit_freeze_hook] The initiator's twin of the cell above: the manager is frozen
+// between the acknowledgement's classification and its commit, so the commit is refused. The arm
+// ends Disconnected once and silently, nothing is written after the refusal, the session never
+// reaches Active, and NextNumIn is unconsumed in memory and in the store. Its mutant: the
+// initiator commit's result ignored (on_inbound_logon_sent_).
+TEST(NextNumIn106, CommitRefused_Initiator_Disconnected) {
+    namespace t99 = fixpp::session::test099;
+    using fixpp::session::fsm_state;
+    using fixpp::session::memory_store_test_access;
+    using fixpp::session::seqnum_manager_test_access;
+    using fixpp::session::session_test_access;
+    auto store = std::make_shared<fixpp::test_support::HookedStoreFactory>();
+    t99::RigOptions opts;
+    opts.validate = true;
+    opts.role = fixpp::session::session_role::initiator;
+    opts.tweak = [store](fixpp::session::SessionConfig& c) {
+        c.store_factory = store;
+        c.reset_on_disconnect = false;
+    };
+    t99::Rig rig{t99::shape_fixture(t99::Shape::T), std::move(opts)};
+    auto const opened = rig.open();
+    ASSERT_FALSE(opened.has_value()) << *opened;
+    ASSERT_EQ(rig.sess->state(), fsm_state::LogonSent) << t99::state_name(rig.sess->state());
+    auto& mgr = session_test_access::seqnum_mgr(*rig.sess);
+    bool hook_ran = false;
+    session_test_access::set_commit_freeze_hook(*rig.sess, [&mgr, &hook_ran] {
+        hook_ran = true;
+        seqnum_manager_test_access::set_frozen(mgr, true);
+    });
+    auto const in_store = [&store] {
+        return memory_store_test_access::counter(*store->log->inner,
+                                                 fixpp::session::direction_t::inbound);
+    };
+    auto const written_before = rig.out.size();
+    auto const disconnected_before = fixpp::test_support::t106::count_disconnected(*rig.sess);
+    auto const next_in_before = mgr.next_inbound_unsafe();
+    auto const store_in_before = in_store();
+    std::string err;
+    rig.feed(t99::input("Logon 1137=9").make(rig.peer_ctx(1)), &err);
+    seqnum_manager_test_access::set_frozen(mgr, false);
+    session_test_access::set_commit_freeze_hook(*rig.sess, nullptr);
+
+    ASSERT_TRUE(hook_ran) << "the path was not exercised: the commit point was not reached";
+    EXPECT_EQ(err, "") << "the refused commit's return";
+    EXPECT_EQ(rig.sess->state(), fsm_state::Disconnected) << t99::state_name(rig.sess->state());
+    EXPECT_EQ(fixpp::test_support::t106::count_disconnected(*rig.sess) - disconnected_before, 1U)
+        << "new Disconnected entries";
+    auto const history = rig.sess->fsm_visit_history();
+    EXPECT_EQ(std::count(history.begin(), history.end(), fsm_state::Active), 0)
+        << "the arm went past its commit";
+    EXPECT_EQ(rig.out.size(), written_before) << "frames written after the refused commit";
+    EXPECT_EQ(mgr.next_inbound_unsafe(), next_in_before) << "NextNumIn in memory";
+    EXPECT_EQ(in_store(), store_in_before) << "NextNumIn in the store";
+}
+
+// ── ErrorMessage106.SessionWriteTimeout (T167; contract C-4) ───────────────────────────────────
+// [seam: session_write_timeout] The enumerator's message, spelled out here rather than read from
+// the producer, and to_string's parity with it.
+TEST(ErrorMessage106, SessionWriteTimeout) {
+    using fixpp::core::error;
+    EXPECT_EQ(fixpp::core::error_message(error::session_write_timeout),
+              std::string_view{"session: write did not complete within write_timeout_ms"});
+    EXPECT_EQ(fixpp::core::to_string(error::session_write_timeout),
+              std::string_view{"session: write did not complete within write_timeout_ms"});
+}
+
 // ── NextNumIn106.Acceptor_ResetOnLogon_S3_InMemoryOne (the Phase 4 report's ruling) ────────────
 // [seam: M6a] A head-only pin beside the guard
 // NextNumIn106.Acceptor_ResetOnLogon_S3_KeepsTheReset (test_106_identity_first.cpp), which keeps
