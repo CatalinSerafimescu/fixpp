@@ -64,11 +64,13 @@ TEST_P(OneEnding106, GiveUpThenClose) {
     EXPECT_EQ(r.records(), 1U) << "give-up records";
 }
 
-// tasks.md T167 (research D11 row 3; data-model E-3, Engine::stop()'s row): Engine::stop()'s step 1
-// has run, so closing_or_stopped_() holds and every later claim is refused. A frame below NextNumIn
-// then draws an ending Logout other than R-1, whose leaf takes the claim first: refused, it writes
-// no Logout, and the arm's tail records the one Disconnected entry. On the base the leaf writes the
-// too-low Logout. Its mutant: the leaf's claim test deleted (inbound_logout_leaf_).
+// tasks.md T167 (research D11 row 3: an ending Logout other than R-1 takes the ending claim before
+// the owner, and a refused claim writes nothing): Engine::stop()'s step 1 has run, so
+// closing_or_stopped_() holds and claim_ending_() refuses every claim. A frame below NextNumIn then
+// draws an ending Logout other than R-1: its leaf writes no Logout, and the caller's tail records
+// the one Disconnected entry (send_ending_logout_: the Disconnected writes of its callers' tails are
+// their own). On the base the leaf writes the too-low Logout. Its mutant: the leaf's claim test
+// deleted (inbound_logout_leaf_).
 TEST_P(OneEnding106, EngineStopStep1_ThenTooLow_NoLogout) {
     rgs::Scene s{rgs::Options{.role = GetParam()}};
     ASSERT_TRUE(s.open_to_active()) << "setup";

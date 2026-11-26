@@ -1434,7 +1434,7 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   registrations, plus every `-L alloc_guard` entry by name (`ctest -N -L alloc_guard`); record each result.
   **Done** (at `23705cd7`; evidence file, "T166"): `-L 544` 75/75, `-L alloc_guard` 83/83, 0 skipped; the 106 interceptor
   and counter entries pass.
-- [X] T167 Coverage of added lines (Article IX §1): fresh per-binary profraw from every binary the `106` label runs
+- [ ] T167 Coverage of added lines (Article IX §1): fresh per-binary profraw from every binary the `106` label runs
   (`session_106_seam_tests` included: the spawn and wait failure exits and the commit refusal are reached only there), for
   the `session`, `config`, `log`, `capi` and `core` modules the diff adds a reachable line to; every uncovered added line or
   branch tested, waived with a one-line rationale (the respawn's `connection_bound_.running` term, the
@@ -1444,9 +1444,10 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   evidence file's T074 section; and `OneEnding106.Watchdog_PreActive_NoEstablishmentRecord`, dropped by ruling 1 on the
   Phase 6 report for the same reason, so M10 has no cell), or escalated to a filed, labelled issue, in
   `.specify/decisions/106-logon-guards-write-bounds-verify.md`.
-  **Done** (`7de1b3ce`; verify record, "T167 — resolution", ruling 6): cells `ErrorMessage106.SessionWriteTimeout`,
+  **Open** (`7de1b3ce`; verify record, "T167 — resolution", ruling 6): cells `ErrorMessage106.SessionWriteTimeout`,
   `NextNumIn106.CommitRefused_Initiator_Disconnected` and `OneEnding106.EngineStopStep1_ThenTooLow_NoLogout`, each RED as
-  stated and its lines hit in a fresh coverage read; every other row justified there.
+  stated and its lines hit in a fresh coverage read; the defensive rows justified there; three reachable rows outside the
+  ruling's cell groups go to the orchestrator.
 - [ ] T168 **(orchestrator)** windows-msvc-debug in `/mnt/c/temp/fixpp`, after taking `.sandbox-lock` (PARENT
   `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md` Step 0), never at the same time as a Linux build: build
   the feature's own targets (`session_106_tests`, `session_106_seam_tests`, the touched config, transport and C-ABI test

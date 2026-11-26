@@ -293,8 +293,8 @@ Every engine cell above names the source read (versions in the heading).
   `system_clock_source` that allocates nothing from the global heap, under `B-544-1`'s two conditions (research D3,
   D9's mallocnesia cell).
   No bench times it (ruling R19): `engine_send_bench`'s timed sends are refused before any write (its reach checks
-  require no write after the first, untimed send), and `session_send_bench`'s sends go to `transport_send`, so none
-  reaches `live_write_serialized_`. The limit-on cost is bounded by the mallocnesia cell's zero; the limit-off branch is
+  require no write after the first, untimed send), and `session_send_bench`'s session has no live transport, so
+  `store_then_emit` takes its `transport_send_` branch and never calls `live_write_serialized_`. The limit-on cost is bounded by the mallocnesia cell's zero; the limit-off branch is
   untimed.
 - **Per Logon:** D1's callee and D2's second lock acquisition, on the establishment path only. No bench runs a Logon
   arm, so this cost is not timed; the arms' locals are read against the base's at review (research Risks, "Coroutine
