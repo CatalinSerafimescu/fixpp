@@ -293,7 +293,7 @@ each one a task that ends in a cell with its mutant, or in a named ruling.
 - **M13 sites that no cell reaches**: named unreachable in tasks.md, from D11's census.
 - **The exact 30 s default of `tls_handshake_timeout_ms` when the key is absent.** Pinning it through the resolver needs
   the factory accessor D6 rejects. The spurious arm (still pending at 2.3 s) catches a resolver that writes 0 or a short
-  sentinel, and `Transport::Config`'s default is a line 106 does not edit (Opus loop 2 round 2, C-3).
+  sentinel, and `Transport::Config`'s default is one this feature does not edit (Opus loop 2 round 2, C-3).
 - **The RAII clears on the exception and `catch` returns** (`emit_in_flight_`, `write_in_flight_`). A failed write is
   followed by a `Disconnected` record whose edge exits the bound first, so a mutant of the clear is masked. Tasks.md
   re-derives that every such return reaches the edge, and gives a cell to any return that does not.
