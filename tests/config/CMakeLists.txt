@@ -192,3 +192,7 @@ set_tests_properties(config_099_toml_live_test PROPERTIES
 # APPEND, at the end of the file, so it follows every LABELS setter for these entries.
 set_property(TEST config_044_tests APPEND PROPERTY LABELS 103)
 set_property(TEST config_099_toml_live_test APPEND PROPERTY LABELS 103)
+# 106-logon-guards-write-bounds (tasks.md T003): label 106, for the TomlWriteTimeout106 and
+# TomlHandshake106 refusal cells in test_load_negative_battery.cpp. APPEND, at the end of the
+# file, so it follows every LABELS setter for this entry.
+set_property(TEST config_044_tests APPEND PROPERTY LABELS 106)
