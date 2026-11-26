@@ -267,7 +267,7 @@ shows). Re-derived at HEAD. **Blocks every later phase.**
   listener's `accepted_transport_config` in `src/session/engine.cpp`) and list the task that writes its "106 D<n>
   supersedes …" comment; checked again by T158.
 - [X] T023 [P] Bench census (Article VIII §2; contract C-9): read `bench/session/engine_send_bench.cpp` (its writes
-  must reach `live_write_serialized_`), `session_send_bench` and `on_inbound_frame_bench`, and their rows in
+  must reach `live_write_serialized_` [superseded by ruling R19: they do not; contract C-9]), `session_send_bench` and `on_inbound_frame_bench`, and their rows in
   `bench/ci-suite.txt` (`engine_send_bench` is `paired`; the other two are run locally); record how each is run for
   T164. The plan requires all three paired runs (quickstart section 6).
 

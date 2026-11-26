@@ -136,6 +136,11 @@ Rulings of the orchestrator under the owner's delegation, on the Phase 4 impleme
 - R17 (tasks T059; the owner's class ruling, every Logon refusal keeps NextNumIn, FR-006): the 099 cells that pinned a consumed NextNumIn after a refused Logon are re-pinned to kept, as research D9's second FR-007 census amendment records.
 - R18 (tasks T127; on the Phase 6 report): the code is followed. The R-2 leaf takes the ending claim at its entry (tasks T080), so in both of the R-2 pairs the R-2 Logout holds the claim first. `OneEnding106.WatchdogThenEndingLimit` (W = 300 ms) is counted toward M9 with M9′: the bound's instant S + W precedes 105's cut at D + B and meets the taken claim. `OneEnding106.EndingLimitThenWatchdog` (W = 1 s) is a guard: the cut at D + B ends the connection first, and the bound leaves on `Disconnected`, an exit term M9′ keeps. The cells keep their names. `OneEnding106.BothDueAtOneWake`'s arm is RowSwap (the bound's write row evaluated before its give-up row), in place of M9 with M9′: the give-up row's action is the bound's exit, so the write row is not evaluated at that re-test. Research D9 row FR-017, data-model E-3 and quickstart section 4 read so.
 
+### Session 2026-11-26 (Phase 10)
+
+A ruling of the orchestrator under the owner's delegation, on the T164 report.
+- R19 (tasks T164; a `[const §VIII.2]` measurement ruling): `session_send_bench` and `on_inbound_frame_bench` give their io_context a reactor, an unarmed `asio::steady_timer` constructed on it, because every production io_context runs one (any socket starts it). Without it the connection bound's timer starts the reactor in the head arm only: the base arm's mock-clock io_context has none and pays no `epoll_wait(0)` per poll, which the head arm does. The same bench source runs in both arms (overlaid on the base). Contract C-9's reach claim is corrected under the same ruling: `engine_send_bench`'s timed sends are refused before any write, and `session_send_bench`'s sends go to `transport_send`, so no bench times `live_write_serialized_`.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — An unauthorised identity is disconnected without a message and changes nothing (Priority: P1)

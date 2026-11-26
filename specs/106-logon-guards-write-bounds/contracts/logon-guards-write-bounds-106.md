@@ -292,8 +292,10 @@ Every engine cell above names the source read (versions in the heading).
   when the connection bound is parked (spaced writes), one cancel and one re-arm of its own timer. On
   `system_clock_source` that allocates nothing from the global heap, under `B-544-1`'s two conditions (research D3,
   D9's mallocnesia cell).
-  Measured by the paired `engine_send_bench` (a `paired` row of `bench/ci-suite.txt`, whose writes reach
-  `live_write_serialized_`).
+  No bench times it (ruling R19): `engine_send_bench`'s timed sends are refused before any write (its reach checks
+  require no write after the first, untimed send), and `session_send_bench`'s sends go to `transport_send`, so none
+  reaches `live_write_serialized_`. The limit-on cost is bounded by the mallocnesia cell's zero; the limit-off branch is
+  untimed.
 - **Per Logon:** D1's callee and D2's second lock acquisition, on the establishment path only. No bench runs a Logon
   arm, so this cost is not timed; the arms' locals are read against the base's at review (research Risks, "Coroutine
   frame growth in the Logon arms"; T050, T178a).
