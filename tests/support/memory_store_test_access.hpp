@@ -20,6 +20,11 @@ struct memory_store_test_access {
     static void set_counter(MemoryStore& store, direction_t dir, seqnum_t value) noexcept {
         store.counter_for(dir) = value;
     }
+    // One direction's seqnum counter, read without the store's lock.
+    // PRECONDITION: single-threaded, and no store operation in flight.
+    [[nodiscard]] static seqnum_t counter(MemoryStore& store, direction_t dir) noexcept {
+        return store.counter_for(dir);
+    }
 };
 
 }  // namespace fixpp::session

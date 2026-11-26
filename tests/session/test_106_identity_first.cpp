@@ -13,7 +13,8 @@
 // The rig is 099's FIXT rig (test_099_fixt_support.hpp, shape T: FIXT.1.1 on research R-18's
 // registry, the validate gate on, 1137=9 the serviceable version), with a HookedStore over a
 // MemoryStore that holds NextNumIn kN and next outbound kOut before open(). The acceptor hydrates
-// from it at its first Logon, the initiator at open().
+// from it at its first Logon, the initiator at open(). The store's counters are read through
+// memory_store_test_access between frames, with no store operation in flight.
 //
 // CONDITIONS these cells keep, checked by reading:
 //   - every frame the session writes reaches Rig::out: the config-time sink appends there, and so
@@ -54,7 +55,6 @@
 #include "session/test_106_support.hpp"
 #include "support/hooked_store.hpp"
 #include "support/memory_store_test_access.hpp"
-#include "support/pump_until_ready.hpp"
 #include "support/session_test_access.hpp"
 
 namespace {
@@ -69,11 +69,15 @@ using fixpp::session::session_role;
 using fixpp::test_support::HookedStoreFactory;
 using Kind = fixpp::session::SecurityProfile::kind;
 
-// The store's NextNumIn and next outbound number before open(): distinct from each other and from
-// the numbers a reset writes (1 and 2), so a number that moved cannot pass.
+// The store's NextNumIn and next outbound number before open(). NextNumIn differs from the numbers
+// a reset writes (1 and 2) and from the acceptor's NextNumIn before it hydrates (1), so hydration
+// and a consumed or reset NextNumIn each move it. Next outbound is 1 because the acceptor numbers
+// its validate-first Reject before its arm hydrates, so the frame and the store agree only there;
+// what the base writes under another seed is re-derived by seeding kOut otherwise and reading the
+// ValidateFirst_* cells on the base.
 constexpr seqnum_t kN = 5;
-constexpr seqnum_t kOut = 8;
-static_assert(kN != kOut && kN > 2 && kOut > 2);
+constexpr seqnum_t kOut = 1;
+static_assert(kN > 2 && kOut == 1);
 
 // The peer certificates' subjects: the CN of the first is the principal 099's rig binds to the
 // session's target CompID, the CN of the second is bound to nothing.
@@ -167,9 +171,13 @@ public:
     [[nodiscard]] Reading read() {
         Reading r;
         r.mgr = t104::manager_numbers(*rig->sess);
-        r.store = t104::read_store_numbers(store->log->inner.get(), rig->ioc, [this](auto pred) {
-            return fixpp::test_support::pump_until(rig->ioc, std::move(pred));
-        });
+        if (auto* st = store->log->inner.get()) {
+            using fixpp::session::memory_store_test_access;
+            r.store = t104::Numbers104{
+                .in = memory_store_test_access::counter(*st, fixpp::session::direction_t::inbound),
+                .out =
+                    memory_store_test_access::counter(*st, fixpp::session::direction_t::outbound)};
+        }
         r.store_resets = store->log->calls.size();
         r.writes = rig->out.size();
         r.disconnected = t106::count_disconnected(*rig->sess);
