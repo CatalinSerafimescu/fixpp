@@ -4,7 +4,8 @@
 // T108).
 //
 // The connection bound's zero-allocation cell, alloc_guard_106_connection_bound_mallocnesia
-// (research D9 row R2(a)): a real Engine session over system_clock_source, on the run-thread rig
+// (research D9's row R2(a); claim-ok: a research row id): a real Engine session over
+// system_clock_source, on the run-thread rig
 // (tests/support/run_thread_engine_rig.hpp), so B-544-1's two conditions hold (the Engine's
 // executor is io_context's own, and one thread stays inside io_context::run across messages).
 //
@@ -17,10 +18,11 @@
 //              each Heartbeat cycle is one emit and one loop sleep, and the loop's sleep takes
 //              the per-call fallback (L-093-13) on every cycle. The window opens and closes
 //              half a cycle after a Heartbeat reaches the peer, so it holds whole cycles only.
-//              The reading is the allocation count over the window and the cycles in it, printed
-//              and not asserted: the head's counts with the limit off and on and the base's
-//              (FIXPP_106_ALLOC_BASE, read on the base tree under the same parameters) are
-//              compared by hand, over repeated runs (research D9 row R2(a), tasks.md T108).
+//              The reading is the allocation count over the window, printed for each arm. With
+//              the limit on it is asserted at most the same run's limit-off count plus one (the
+//              allowance's condition is at the assertion). The base's count (FIXPP_106_ALLOC_BASE,
+//              built on the base tree under the same parameters) is printed only, for a reading
+//              against the head's (tasks.md T108).
 //
 // TWO BINARIES FROM THIS SOURCE, 544's shape (test_544_run_thread_windows.cpp). mallocnesia.c
 // refuses a process that defines the allocator names, so the interceptor runs the build without a
@@ -397,6 +399,17 @@ TEST(Alloc106ConnectionBound, EmitHalf_PerHeartbeatCycle) {
 #if !FIXPP_106_ALLOC_BASE
     auto const on = run_emit_half(kSendLimitMs);
     expect_emit_ran(on, "emit half, limit on");
+#if FIXPP_106_COUNTS && defined(NDEBUG)
+    // The limit adds no allocation per Heartbeat cycle: the limit-on count is at most the
+    // limit-off count of the same run plus one. The one allowed is the jitter between runs of the
+    // same traffic, by which either arm's count can move one allocation. An allocation per limited
+    // write adds one per cycle, so it exceeds the allowance while the window holds two cycles or
+    // more.
+    static_assert(kEmitMeasured >= 2, "the allowance of one needs two cycles in the window");
+    EXPECT_LE(on.count, off.count + 1)
+        << "the limit adds allocations per Heartbeat cycle: limit on " << on.count << ", limit off "
+        << off.count;
+#endif
 #endif
 }
 
