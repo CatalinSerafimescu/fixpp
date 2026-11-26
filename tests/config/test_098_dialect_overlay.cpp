@@ -128,6 +128,8 @@ TEST(DialectOverlay098, AS1_NoOverlay_SessionGetsTheEngineDictionaryAndOpens) {
     fixpp::core::EngineConfig engine;
     engine.executor = l.ioc.get_executor();
     engine.clock = bundle.engine.clock;
+    // 106 (contract C-5.2): the host copies the acceptor's handshake bound as it copies the clock.
+    engine.acceptor_tls_handshake_timeout = bundle.engine.acceptor_tls_handshake_timeout;
     engine.default_store_factory = bundle.engine.default_store_factory;
     engine.default_transport_factory = bundle.engine.default_transport_factory;
     fixpp::session::Session sess{engine, cfg};

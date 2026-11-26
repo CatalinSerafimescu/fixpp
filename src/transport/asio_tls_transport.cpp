@@ -1090,9 +1090,9 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // Engine::stop()'s `total` was forwarded as `total` and then silently dropped
     // by that inner terminal-only state: an in-flight handshake did not abort, and
     // stop()'s step-3 join on outstanding_counter_ could not retire until the
-    // accepted transport's tls_handshake_timeout (1500 ms at engine.cpp's accept
-    // path) ran out. The OUT filter maps any accepted cancellation to `terminal`
-    // for the forwarded child op.
+    // accepted transport's tls_handshake_timeout (EngineConfig::acceptor_tls_handshake_timeout
+    // at engine.cpp's accept path, 106 D6) ran out. The OUT filter maps any accepted cancellation
+    // to `terminal` for the forwarded child op.
     //
     // The timeout-vs-cancel classification below survives this: the state records
     // `cancelled_ = in_filter_(in)` and only THEN computes `out_filter_(cancelled_)`

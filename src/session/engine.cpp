@@ -944,8 +944,10 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
     }
     // FR-014: bound the TLS handshake with a short timeout so stalled or
     // non-TLS clients are rejected promptly (part of the bounded first-frame
-    // window). 1500ms is long enough for a real mTLS handshake on a loaded host
-    // and short enough that a non-TLS peer cannot hold an accept slot. This
+    // window). 106 D6 supersedes 015 FR-014's hard-coded 1500 ms:
+    // `EngineConfig::acceptor_tls_handshake_timeout` (default 1500 ms). The default is long
+    // enough for a real mTLS handshake on a loaded host and short enough that a non-TLS peer
+    // cannot hold an accept slot. This
     // bound is INDEPENDENT of the Step-3 kFirstFrameDeadline below: the
     // handshake timer is cancelled the moment async_handshake returns
     // (asio_tls_transport.cpp), so a peer that handshakes and then stalls is
@@ -953,7 +955,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
     // wording sized this bound against a test probe's self-deadline, and the
     // figure it quoted did not match the value.)
     // Unread on the plaintext path (D-12); left set unconditionally.
-    lcfg.accepted_transport_config.tls_handshake_timeout = std::chrono::milliseconds{1500};
+    lcfg.accepted_transport_config.tls_handshake_timeout =
+        engine_cfg.acceptor_tls_handshake_timeout;
 
     std::unique_ptr<fixpp::transport::asio_listener> listener;
     try {

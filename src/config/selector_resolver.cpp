@@ -664,10 +664,12 @@ static std::shared_ptr<tls::cert_source> build_file_cert_source(
 // build_tls_factory — assemble a TLS transport factory from a cert_source +
 // security_profile + clock.  Returns a shared_ptr; null + diagnostic on failure.
 // ─────────────────────────────────────────────────────────────────────────────
+// 106 D6 (contract C-5.1): `t_cfg` is the session's Transport::Config (transport_config_of), so
+// its tls_handshake_timeout_ms reaches the factory's transports.
 static std::shared_ptr<transport::TransportFactory> build_tls_factory(
     tls::SecurityProfile profile, const std::shared_ptr<tls::cert_source>& cs,
-    const std::shared_ptr<core::Clock>& clock, std::string_view key_prefix,
-    DiagnosticAccumulator& acc) {
+    const std::shared_ptr<core::Clock>& clock, const transport::Transport::Config& t_cfg,
+    std::string_view key_prefix, DiagnosticAccumulator& acc) {
     auto ssl_cfg_result = tls::make_ssl_ctx_config(profile, cs, clock);
     if (!ssl_cfg_result) {
         acc.add(LoadDiagnostic{
@@ -678,7 +680,6 @@ static std::shared_ptr<transport::TransportFactory> build_tls_factory(
         return nullptr;
     }
 
-    transport::Transport::Config t_cfg{};
     auto factory_result =
         transport::make_asio_tls_transport_factory(t_cfg, std::move(*ssl_cfg_result));
     if (!factory_result) {
@@ -794,6 +795,22 @@ static void validate_per_session_transport_kinds(
     }
 }
 
+// 106-logon-guards-write-bounds (research D6; contract C-5.1): a TLS session's Transport::Config
+// from its merged transport table, [session.transport] over [default.transport]:
+// tls_handshake_timeout_ms when it is an integer in range, else the struct's defaults. Any other
+// value is diagnosed by check_transport_handshake_timeouts, so its load fails.
+static transport::Transport::Config transport_config_of(const toml::table& transport_tbl) {
+    transport::Transport::Config t_cfg{};
+    if (const auto* n = transport_tbl.get("tls_handshake_timeout_ms");
+        n != nullptr && n->is_integer()) {
+        auto const v = n->as_integer()->get();
+        if (v > 0 && !std::cmp_greater(v, UINT32_MAX)) {
+            t_cfg.tls_handshake_timeout = std::chrono::milliseconds{v};
+        }
+    }
+    return t_cfg;
+}
+
 static void resolve_transport(const std::vector<const toml::table*>& merged_session_tables,
                               const std::filesystem::path& base_dir, const LoadOptions& opts,
                               ConfigBundle& bundle, DiagnosticAccumulator& acc) {
@@ -886,11 +903,12 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
         // Build engine-default TLS factory.
         // CRITICAL: pass bundle.engine.clock BY COPY (not move) so engine.clock
         // AND the factory's ssl_cfg_.clock both hold the shared_ptr → use_count > 1 (D-6).
+        const transport::Transport::Config default_t_cfg = transport_config_of(*transport_tbl);
         auto default_factory =
             build_tls_factory(tls_profile,
                               bundle.engine.default_cert_source,  // copy (shared_ptr)
                               bundle.engine.clock,  // copy (shared_ptr) — D-6 shared clock
-                              "session[0].transport", acc);
+                              default_t_cfg, "session[0].transport", acc);
 
         if (!default_factory) {
             return;  // diagnostic already added by build_tls_factory
@@ -942,8 +960,13 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
 
                 const bool cert_diverges = (s_cs_tbl != nullptr);
                 const bool profile_diverges = (s_profile != tls_profile);
+                // 106 D6 (F-6): the third term, the handshake bound differing from session[0]'s,
+                // so a later session's value is never dropped.
+                const transport::Transport::Config s_t_cfg = transport_config_of(*s_transport_tbl);
+                const bool timeout_diverges =
+                    (s_t_cfg.tls_handshake_timeout != default_t_cfg.tls_handshake_timeout);
 
-                if (!cert_diverges && !profile_diverges) {
+                if (!cert_diverges && !profile_diverges && !timeout_diverges) {
                     // Matches engine default TLS → leave override null.
                     continue;
                 }
@@ -962,7 +985,7 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
                 }
 
                 auto s_factory = build_tls_factory(s_profile, s_cert_source, bundle.engine.clock,
-                                                   s_prefix + ".transport", acc);
+                                                   s_t_cfg, s_prefix + ".transport", acc);
                 if (!s_factory) {
                     continue;  // diagnostic already added
                 }
