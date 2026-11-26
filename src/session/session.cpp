@@ -1257,7 +1257,7 @@ Session::live_write_serialized_(std::span<const std::byte> frame, wire_reset_exe
     // and the connection bound cuts it at its start + the limit (data-model E-5). The first
     // such write on a connection with no bound spawns it on this coroutine's executor; a spawn
     // that fails fails closed, the write not started (research D3, "Spawn failure"). With the
-    // limit off: the one test of the knob below, nothing else.
+    // limit off this adds only the knob's test below.
     // The flag's clear: explicit at each return below, and by the destructor only while an
     // exception unwinds the frame, as emit_in_flight_guard's (a frame destroyed unresumed, an
     // io_context torn down with no close(), touches nothing). The clear does not wake the
@@ -3462,9 +3462,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout
             record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
-        auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm, true,
-                                               wire_reset_exemption::none, &transmitted,
-                                               write_class::logout);
+        auto emit_r =
+            co_await store_then_emit(lo_seq, *lo_result, arm, true, wire_reset_exemption::none,
+                                     &transmitted, write_class::logout);
         // What store_then_emit returns and when it throws: its declaration in session.hpp.
         (void)emit_r;
     }
@@ -4182,9 +4182,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logout_leaf_(
             record_disconnected_unless_already_();
             co_return std::unexpected(assign_r.error());
         }
-        auto emit_r = co_await store_then_emit(lo_seq, *lo_result, std::nullopt, true,
-                                               wire_reset_exemption::none, &transmitted,
-                                               write_class::logout);
+        auto emit_r =
+            co_await store_then_emit(lo_seq, *lo_result, std::nullopt, true,
+                                     wire_reset_exemption::none, &transmitted, write_class::logout);
         // What store_then_emit returns and when it throws: its declaration in session.hpp.
         (void)emit_r;
     }
@@ -4230,9 +4230,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logon_sent_logou
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(fixpp::core::error::app_callback_threw);
         }
-        auto emit_r = co_await store_then_emit(lo_seq, *lo_result, fsm_state::LogonSent, true,
-                                               wire_reset_exemption::none, &transmitted,
-                                               write_class::logout);
+        auto emit_r =
+            co_await store_then_emit(lo_seq, *lo_result, fsm_state::LogonSent, true,
+                                     wire_reset_exemption::none, &transmitted, write_class::logout);
         // What store_then_emit returns and when it throws: its declaration in session.hpp.
         (void)emit_r;
     }
@@ -6489,7 +6489,7 @@ asio::awaitable<void> Session::run_connection_bound_([[maybe_unused]] connection
     }
 }
 
-// The write limit's expiry (research D5, "Expiry"; data-model E-5, steps 1 to 5 in order): the
+// The write limit's expiry (research D5, "Expiry"; data-model E-5's steps, in their order): the
 // claim, refused → nothing (the claimant owns the ending); the warn record (data-model E-8); the
 // cut epoch, so the cut write returns session_write_timeout; Disconnected (onLogout once from
 // Active, none before); one close. No Logout (owner ruling).
@@ -8169,9 +8169,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_body_(
         // return. [gate-b/r2 FQ-1; contracts/store-then-emit-disposition.md item 3]
         // 106 (research D5): a write the limit cut returns session_write_timeout, taken here as
         // dispatch_aborted is.
-        if (disconnect_required ||
-            (!impl_r && (impl_r.error() == error::dispatch_aborted ||
-                         impl_r.error() == error::session_write_timeout))) {
+        if (disconnect_required || (!impl_r && (impl_r.error() == error::dispatch_aborted ||
+                                                impl_r.error() == error::session_write_timeout))) {
             // [spec.md US1 AC3; F9 drift fix; gate-b/r2 FQ-1] claim-ok: a pre-existing citation
             // 106 D11: a cut write or another
             // ending's close returns here (FR-017).
@@ -9354,10 +9353,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
             if (!write_r.has_value()) {
                 // 106 (research D5, N-3): a write the limit cut keeps session_write_timeout;
                 // every other live-write failure stays dispatch_aborted.
-                co_return std::unexpected(
-                    write_r.error() == fixpp::core::error::session_write_timeout
-                        ? fixpp::core::error::session_write_timeout
-                        : fixpp::core::error::dispatch_aborted);
+                co_return std::unexpected(write_r.error() ==
+                                                  fixpp::core::error::session_write_timeout
+                                              ? fixpp::core::error::session_write_timeout
+                                              : fixpp::core::error::dispatch_aborted);
             }
             // 104 (contract RR-6 item 3): held back after a reset point; success with no
             // transmit, as the transmit=false exit returns.
@@ -10099,8 +10098,8 @@ Session::honor_peer_next_expected_(std::string_view raw_789, bool /*present_789*
                 auto assign_r = co_await seqnum_mgr_.assign_outbound();
                 if (assign_r) {
                     auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm, true,
-                                                           wire_reset_exemption::none,
-                                                           &transmitted, write_class::logout);
+                                                           wire_reset_exemption::none, &transmitted,
+                                                           write_class::logout);
                     // What store_then_emit returns and when it throws: its declaration in
                     // session.hpp.
                     (void)emit_r;

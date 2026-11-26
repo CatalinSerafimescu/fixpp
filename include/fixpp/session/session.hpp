@@ -2353,7 +2353,7 @@ private:
     std::uint32_t write_epoch_ = 0;
     bool write_in_flight_ = false;
     std::uint32_t write_cut_epoch_ = 0;
-    // The write limit's expiry (data-model E-5, steps 1 to 5, in order). Synchronous.
+    // The write limit's expiry (data-model E-5's steps, in their order). Synchronous.
     void expire_write_() noexcept;
     // The fail-closed ending of a connection whose bound cannot be spawned or respawned (research
     // D3, "Spawn failure", "One close"): the claim, Disconnected and one close. Synchronous.
@@ -2463,10 +2463,11 @@ private:
     //   at D-OUT-10 or at the transmit (no exemption) returns success with nothing
     //   transmitted, before the time of the last outbound frame is updated.
     enum class wire_reset_exemption : std::uint8_t { none, crossing_logout };
-    // 106 (research D5; data-model E-6): the write class. Every site that writes a Logout passes
-    //   logout (the sites: `git grep -n 'build_logout(' -- src/session`, each followed to its
-    //   store_then_emit); a logout write never arms the write limit, which every other live
-    //   write does when SessionConfig::write_timeout_ms is set. The live path returns
+    // 106 D5 supersedes 105 D-e's scope (only ending Logouts are limited): every non-Logout write
+    //   is limited, opt-in. The write class (research D5; data-model E-6): every site that writes
+    //   a Logout passes logout (the sites: `git grep -n 'build_logout(' -- src/session`, each
+    //   followed to its store_then_emit); a logout write never arms the write limit, which every
+    //   other live write does when SessionConfig::write_timeout_ms is set. The live path returns
     //   session_write_timeout for a write the limit cut, and dispatch_aborted for every other
     //   live-write failure, as before.
     enum class write_class : std::uint8_t { ordinary, logout };
