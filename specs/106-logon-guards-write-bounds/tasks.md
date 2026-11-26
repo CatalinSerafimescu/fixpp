@@ -216,7 +216,7 @@ shows). Re-derived at HEAD. **Blocks every later phase.**
   the `==` and `!=` lines (known positive: `Session::send`'s F9 block in `send_body_`), then the same over `src/session`
   so a comparison in another file shows. Re-derive the **`dispatch_aborted` ruling table** below; a new line gets a
   ruling there.
-- [ ] T015 [P] Unconditional `Disconnected` writes (D11):
+- [X] T015 [P] Unconditional `Disconnected` writes (D11):
   `git grep -n 'record_state_transition_(fsm_state::Disconnected)' -- src/session/session.cpp`. Known positives: the
   liveness loop's emit-failure branches in `run_liveness_loop_body_` (after `fire_to_admin_` and after
   `store_then_emit`, for the TestRequest and the Heartbeat) and `Session::send`'s F9 block (`send_body_`). Read every
@@ -229,7 +229,11 @@ shows). Re-derived at HEAD. **Blocks every later phase.**
   `inbound_acceptor_reply_logon_leaf_`, `honor_peer_next_expected_`'s resend frames), the leaves of the other write
   classes (`inbound_heartbeat_reply_leaf_`, `inbound_resend_request_leaf_`, `answer_resend_request_`,
   `emit_session_reject_`). The table is the list plan.md's "M13 sites that no cell reaches" asks tasks.md for: every
-  row classed unreachable is named there with its reason.
+  row classed unreachable is named there with its reason. Disposition (orchestrator ruling on the Phase 1–2 report):
+  the census is authoritative. Quickstart §4's M13 row and research D9's FR-009 row are rewritten from its table; the
+  Reject leaf's write-failure tail records nothing (`inbound_reject_leaf_` discards `emit_r`), so M13 has no arm there;
+  the reachable `inbound_heartbeat_reply_leaf_` and `inbound_business_reject_leaf_` tails gain T071a and T071b; the
+  two-argument `emit_session_reject_` is read by T100's `Reject` rig. The table is the evidence file's T015 section.
 - [X] T016 [P] Ending claimants (D11 row 3): `git grep -n 'logout_in_flight_ = true\|enter_ending_write_(' -- src/session/session.cpp`;
   known positives `run_liveness_loop_body_` (R-1) and `run_logout_phase1`. Re-derive the **Ending-claimant table** below
   at HEAD, and for each claimant site the base's record sites
@@ -575,6 +579,13 @@ FR-009, FR-017, SC-003).
 **Independent test**: `-L 106` with `GiveUp106.*`, `OneEnding106.*` (limit off) and the US3 `ConnectionBound106.*`
 cells; `-L 105` and the 538 binary as guards.
 
+**Open Q1 (the Phase 1–2 report; pre-existing; orchestrator ruling, decided in this phase).** The drained-mutex branches
+of both Logon arms' sequence check and of `on_inbound_active_out_of_sequence_` write `Disconnected` unconditionally;
+`close()` records `Disconnected` before its `seqnum_mgr_.drain()`, so `close()` plus an arm suspended at the manager's
+lock gives two entries (T015's rows marked "open question"). If D11's ending claim or `record_disconnected_unless_already_()`
+removes it with a one-line change at each site, that change lands in this phase with a cell and is named in the bundle;
+otherwise it is recorded as an L-106 limitation with a follow-up issue.
+
 ### RED cells for US3 (write first)
 
 - [ ] T071 [P] [US3] `tests/session/test_106_give_up.cpp`: `GiveUp106.{TestRequestBlocked, HeartbeatBlocked,
@@ -591,6 +602,18 @@ cells; `-L 105` and the 538 binary as guards.
   `RejectBlocked`, the loop's give-up path in the emit cells). RED on the base (no close at G + B). Plus the guard
   `GiveUp106.ResendHeldPending` *(proposed name for "`ResendHeldNoPending`'s pending twin")*: the same hold with a
   TestRequest pending, given up at L + 3T + 1 ns on the base too.
+- [ ] T071a [US3] `tests/session/test_106_give_up.cpp` (same file): `GiveUp106.HeartbeatReplyBlocked` *(proposed)* (research D9
+  row FR-009; T015's reachable row `inbound_heartbeat_reply_leaf_`): `RejectBlocked`'s parameters (limit off, H = T = 10 s,
+  B = 500 ms). The peer's TestRequest at L draws the Heartbeat reply and that write blocks; the loop's first emit after L
+  falls due by L + 10 s and queues behind it, so G = L + 3T + 1 ns = L + 30 s + 1 ns follows it by at least 20 s; the peer
+  is silent after L, so nothing else closes by G + B. T071's readings at G and G + B; the blocked reply and the queued
+  emit return an error (`dispatch_aborted`); FR-017 for the leaf's write tail (one new `Disconnected` entry). RED on the
+  base (no close at G + B); M2 (T092); M13 at that tail (T098).
+- [ ] T071b [US3] `tests/session/test_106_give_up.cpp` (same file): `GiveUp106.BusinessRejectBlocked` *(proposed)* (research
+  D9 row FR-009; T015's reachable row `inbound_business_reject_leaf_`): T071a's parameters and instants, with an
+  application whose `fromApp` rejects the peer's NewOrderSingle at L, which draws the BusinessMessageReject (35=j) whose
+  write blocks. The same readings and FR-017 for that leaf's write tail. RED on the base (no close at G + B); M2 (T092);
+  M13 at that tail (T098).
 - [ ] T072 [US3] `tests/session/test_106_give_up.cpp` (same file): `GiveUp106.RejectBlocked_EndingBoundSpawnFails_ClosedAtG` (research D9 row "FR-008
   spawn failure"): `RejectBlocked`'s rig with `session_test_access::set_ending_bound_spawn_fails` returning true. At G:
   one slot-74 record, the transport closed (the peer's read ends), one `Disconnected` entry, the blocked Reject write and
@@ -631,10 +654,14 @@ cells; `-L 105` and the 538 binary as guards.
   `reconnect_drain_in_flight_` holds; otherwise sets and returns true, no suspension between test and set); reset to
   `none` in `begin_connection_()`; the `Disconnected` edge in `record_state_transition_` takes it as `internal` when it is
   `none`. `tests/support/session_test_access.hpp` gains the read of `ending_claim_` the seam cells need.
-- [ ] T079 [US3] `src/session/session.cpp`: The `Disconnected` census applied (D11; T015's table): every site classed reachable becomes
-  `record_disconnected_unless_already_()` (the liveness loop's four emit-failure tails, `send_body_`'s F9 block, the Reject
-  leaf, each Logon-class write's failure tail, and every other row the table classes reachable); every row classed
-  unreachable is left as it is and keeps its reason in the table.
+- [ ] T079 [US3] `src/session/session.cpp`: The `Disconnected` census applied (D11; T015's table): every row classed reachable
+  becomes `record_disconnected_unless_already_()`: the liveness loop's TestRequest and Heartbeat `store_then_emit` failure
+  tails in `run_liveness_loop_body_`, `send_body_`'s F9 block, `emit_initiator_logon_`'s write tail, the two-argument
+  `emit_session_reject_`'s write tail, and the write tails of `inbound_resend_request_leaf_`,
+  `inbound_heartbeat_reply_leaf_` and `inbound_business_reject_leaf_`. The Reject leaf (`inbound_reject_leaf_`) holds no
+  such site (its write tail discards `emit_r` and records nothing), and the reply Logon's and the 789 resend frames'
+  failure tails are already conditional, so nothing changes there. Every row classed unreachable or already conditional
+  is left as it is and keeps its reason in the table.
 - [ ] T080 [US3] `src/session/session.cpp`: 105's other ending Logouts claim (D11 row 3; the Ending-claimant table): `claim_ending_(ending_logout)`
   where each takes the Logout owner or enters writing, whichever comes first, in `inbound_logout_leaf_` (kinds other
   than `r1`), `refuse_logon_with_logout_`, `inbound_logon_sent_logout_leaf_` and `honor_peer_next_expected_`; a refused
@@ -731,8 +758,11 @@ cells; `-L 105` and the 538 binary as guards.
   (research D9 row FR-017).
 - [ ] T098 [US3] In `$M`'s `src/session/session.cpp`: M13 per reachable site a US3 cell returns through (T015's table), one arm each: the site's
   `record_disconnected_unless_already_()` restored to the raw `record_state_transition_(fsm_state::Disconnected)`; RED
-  (two `Disconnected` entries): the F9 block by `GiveUp106.BehindBlockedSend`, the Reject leaf by `GiveUp106.RejectBlocked`,
-  the loop's TestRequest and Heartbeat tails by `GiveUp106.TestRequestBlocked` and `GiveUp106.HeartbeatBlocked`.
+  (two `Disconnected` entries): the F9 block by `GiveUp106.BehindBlockedSend`, the loop's TestRequest and Heartbeat tails
+  by `GiveUp106.TestRequestBlocked` and `GiveUp106.HeartbeatBlocked`, `inbound_heartbeat_reply_leaf_`'s tail by
+  `GiveUp106.HeartbeatReplyBlocked` and `inbound_business_reject_leaf_`'s by `GiveUp106.BusinessRejectBlocked`. The
+  Reject leaf has no arm: its write tail records nothing, so `GiveUp106.RejectBlocked` keeps its FR-017 assertion (one
+  `Disconnected`, the close's) without an M13 arm.
 - [ ] T099 [US3] In `$M`'s `src/session/session.cpp`: The US3 connection-bound arms: the spawn seam's failure path and the wait seam's failure path each
   deleted (the cells of T076 read RED: `SpawnFails_AtLoop` no close, `WaitThrows` no close); M12's
   `ConnectionEnd` arm (the `Disconnected` edge's wake deleted; its two exit terms are redundant): RED
@@ -757,7 +787,9 @@ cells; `-L 105` and the 538 binary as guards.
 - [ ] T100 [US4] `tests/session/test_106_seams.cpp`: The pattern `WriteTimeout106.<Class>` (research D9 row FR-010; contract C-4.2, C-4.3; spec US4
   scenario 1), one cell per class: Active `WriteTimeout106.Send`, `Heartbeat`, `TestRequest`, `ResendFrame`, `Reject`,
   `SequenceReset`, `ResendRequest`; pre-Active `WriteTimeout106.InitiatorLogon`, `ReplyLogon` and `Honor789Frame` (the
-  `honor_peer_next_expected_` frame) — class names *(proposed)* but `Send`. W = 300 ms, HeartBtInt 1 s; in Active the
+  `honor_peer_next_expected_` frame) — class names *(proposed)* but `Send`. The `Reject` class's rig draws the two-argument
+  `emit_session_reject_` (research D9 row FR-010: `on_inbound_active_from_admin_failed_`, or `on_inbound_active_unsupported_`),
+  shown by its frame's SessionRejectReason(373) = 3, so T130's arm at that form's write tail reads it. W = 300 ms, HeartBtInt 1 s; in Active the
   peer sends a Heartbeat every 1 s, so the give-up cannot fire; the `TestRequest` class sets `test_request_threshold`
   500 ms and blocks the first 35=1 write (S = L + 500 ms; the cut at L + 800 ms precedes the next peer frame at L + 1 s
   and the bound's give-up row at L + 1.5 s + 1 ns); every other class keeps T = 1.2 s (margin 200 ms). Pre-Active: an
@@ -910,7 +942,10 @@ cells; `-L 105` and the 538 binary as guards.
   failure path deleted — RED `ConnectionBound106.SpawnFails_AtWrite`.
 - [ ] T130 [US4] In `$M`'s `src/session/session.cpp`: M13 per reachable site a `WriteTimeout106.<Class>` cut returns through (T015's table), one arm
   each, the site's raw `record_state_transition_(fsm_state::Disconnected)` restored; RED: that class's cell (two
-  `Disconnected` entries), `send_body_`'s F9 block by `WriteTimeout106.Send`. Every reachable row of the table now has an
+  `Disconnected` entries): `send_body_`'s F9 block by `WriteTimeout106.Send`, `emit_initiator_logon_`'s tail by
+  `WriteTimeout106.InitiatorLogon`, the two-argument `emit_session_reject_`'s by `WriteTimeout106.Reject`,
+  `inbound_resend_request_leaf_`'s by `WriteTimeout106.ResendRequest`, the loop's TestRequest and Heartbeat tails by
+  `WriteTimeout106.TestRequest` and `WriteTimeout106.Heartbeat`. Every reachable row of the table now has an
   arm here or in T098; a row with none is named unreachable in the table with its reason.
 
 **Checkpoint**: US4 GREEN, its mutants RED; the write limit and the one-ending invariant hold together.
@@ -1216,7 +1251,7 @@ labelled push in the final sign-off order. One build or ctest at a time througho
 | FR-006 (NextNumIn kept) | T056, T057, T058, T059 | T061, T062, T063, T064 | T067, T068, T069, T070; census T008, T009 |
 | FR-007 (104 precedence cells) | T043, T051 (`-L 104` unfiltered) | — | census T009 |
 | FR-008 (give-up at its instant) | T071, T072, T073, T074 | T082, T083, T084, T085, T086 | T092, T093, T094, T095 |
-| FR-009 (blocked writes return) | T071, T072 | T082, T079 | T098 |
+| FR-009 (blocked writes return) | T071, T071a, T071b, T072 | T082, T079 | T098 |
 | FR-010 (the write limit) | T100, T101, T102 | T111, T112, T113 | T118, T119, T120, T121, T130 |
 | FR-011 (ending Logouts keep 105's limit) | T103, T104 | T110 | T122, T123, T124 |
 | FR-012 (C++ and TOML; no C setter) | T025, T026 | T029, T030 | T034, T035; statement T160 |
