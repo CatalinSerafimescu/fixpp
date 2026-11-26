@@ -46,8 +46,9 @@ TEST(Error101Completeness, ExactSetEquality) {
     EXPECT_EQ(static_cast<std::uint8_t>(error::wire_length_data_mismatch), 133U);
 
     // The slot after the block is 106's session_write_timeout, the next block's first
-    // (106 data-model E-8); the slot after that one is pinned "unknown" by the
-    // boundary gates (test_017/019/020 and abi_symbol_golden_test).
+    // (106 data-model E-8). The slot after the newest block's last enumerator is pinned
+    // "unknown" by the boundary gates; re-derive them with
+    // `git grep -n 'session_write_timeout) + 1U' -- tests`.
     EXPECT_EQ(static_cast<std::uint8_t>(error::session_write_timeout), 136U)
         << "slot 136 must be 106's session_write_timeout, appended after the 101 block";
 }

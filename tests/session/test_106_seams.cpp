@@ -118,7 +118,7 @@ TEST(TomlWriteTimeout106, Set) {
 }
 
 // [seam: M11'] No key: the limit is off, in the loaded bundle and in a default SessionConfig.
-// Exact equality: no timing cell loads the key absent.
+// Exact equality, not a window, so a changed default cannot pass inside one.
 TEST(TomlWriteTimeout106, KeyAbsent_Off) {
     auto const r = load_text_106(toml_106({}));
     ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << seen_106(r);
@@ -130,8 +130,8 @@ TEST(TomlWriteTimeout106, KeyAbsent_Off) {
 
 // [seam: M7''''] No acceptor_tls_handshake_timeout_ms key: 1500 ms in the bundle, in the
 // EngineConfig a host copies from it (as it copies the clock, contract C-2), and in both structs'
-// defaults. Exact equality: EngineFirstFramePhaseATls.Q17_* builds EngineConfig directly and
-// accepts a close in a window, and no other cell loads the key absent.
+// defaults. Exact equality, not a timing window, so a changed default cannot pass inside one
+// (a cell that reads the bound by timing accepts a window around it).
 TEST(TomlHandshake106, AcceptorKeyAbsent_Default1500) {
     auto const r = load_text_106(toml_106({}));
     ASSERT_TRUE(r.has_value()) << "the bundle did not load:" << seen_106(r);

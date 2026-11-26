@@ -555,8 +555,9 @@ endif()
 set_property(TEST alloc_guard_544_run_thread APPEND PROPERTY LABELS 103)
 
 # 106-logon-guards-write-bounds (tasks.md T004): the connection bound's zero-allocation cell
-# (research D9 row R2(a); tasks.md T108 writes its cases). Linux only, as every other interceptor
-# window here; the interceptor registration is Release-only, as the other mallocnesia gates'.
+# (research D9, the connection bound's zero-allocation row; tasks.md T108 writes its cases).
+# Linux only, as every other interceptor window here; the interceptor registration is
+# Release-only, as the other mallocnesia gates'.
 # FIXPP_106_ALLOC_BASE (default OFF) builds only the emit half with the limit off, naming no
 # symbol 106 adds: the base tree builds that half with this file and the TU overlaid and the
 # option ON (tasks.md T004, T108).

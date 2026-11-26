@@ -1076,8 +1076,7 @@ static void resolve_engine_acceptor_handshake_timeout(const toml::table& root_tb
 }
 
 // The range and type checks of each session's transport.tls_handshake_timeout_ms, set in
-// [session.transport] or inherited from [default.transport] by the merge. The value is read and
-// not yet used here: feeding it to the session's TLS factory is tasks.md T135's.
+// [session.transport] or inherited from [default.transport] by the merge. Checks only.
 static void check_transport_handshake_timeouts(
     const std::vector<const toml::table*>& merged_session_tables, DiagnosticAccumulator& acc) {
     for (std::size_t i = 0; i < merged_session_tables.size(); ++i) {
