@@ -7384,9 +7384,9 @@ bool Session::mtls_gate_applies_() const noexcept {
            cfg_.security_profile.k == fixpp::session::SecurityProfile::kind::mtls_pinned;
 }
 
-fixpp::core::expected_t<fixpp::session::bound_principal> Session::authorize_live_identity_()
-    const noexcept {
-    return cfg_.compid_authorization_policy.authorize(*live_peer_id_, cfg_.target_comp_id);
+fixpp::core::expected_t<fixpp::session::bound_principal> Session::authorize_live_identity_(
+    fixpp::tls::peer_identity const& pid) const noexcept {
+    return cfg_.compid_authorization_policy.authorize(pid, cfg_.target_comp_id);
 }
 
 bool Session::logon_identity_admitted_() noexcept {
@@ -7402,7 +7402,7 @@ bool Session::logon_identity_admitted_() noexcept {
         // the residual fabricated auth payload from the live path.
         const fixpp::tls::peer_identity& auth_pid = *live_peer_id_;
         const std::string_view asserted_compid = cfg_.target_comp_id;
-        auto auth_r = authorize_live_identity_();
+        auto auth_r = authorize_live_identity_(auth_pid);
         if (!auth_r) {
             // Fail-closed: emit the event and return false; the caller records
             // Disconnected. On the acceptor this is the refusal of an identity the policy
@@ -7460,8 +7460,8 @@ bool Session::logon_identity_admitted_() noexcept {
 // treats any interpret_logon refusal as unreadable credentials: refused only when a validator would
 // have judged them (B-106-1).
 bool Session::logon_identity_refuses_(std::span<const std::byte> frame) {
-    bool refused = mtls_gate_applies_() &&
-                   (!live_peer_id_.has_value() || !authorize_live_identity_().has_value());
+    bool refused = mtls_gate_applies_() && (!live_peer_id_.has_value() ||
+                                            !authorize_live_identity_(*live_peer_id_).has_value());
     if (!refused && cfg_.role == session_role::acceptor) {
         auto const logon = fixpp::session::interpret_logon(frame, cfg_.target_comp_id,
                                                            cfg_.sender_comp_id, cfg_.begin_string,
@@ -8951,7 +8951,8 @@ asio::awaitable<void> Session::run_liveness_loop_body_(bool& adopted_bound) noex
                 }
                 write_give_up = true;
                 break;
-            } else if (test_request) {
+            }
+            if (test_request) {
                 // 106 D3 bounds the inline emits of .specify/536-537-538-recovery-liveness.md §3:
                 // they stay inline, timed by the connection bound while they have not returned.
                 // 103 (research D5′.4): a shared hold per emit, taken with the gate open (the wait

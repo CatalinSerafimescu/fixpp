@@ -27,6 +27,7 @@
 #include <asio/post.hpp>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <exception>  // std::uncaught_exceptions: ending_write_unwind_guard
@@ -37,8 +38,9 @@
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/core/session_local.hpp>
 #include <fixpp/core/trace_context.hpp>
-#include <fixpp/session/detail/log_rate_gate.hpp>  // 105 (research D8): log_rate_gate
-#include <fixpp/session/detail/replay_gate.hpp>    // 103 (research D5′): replay_gate_
+#include <fixpp/session/compid_authorization_policy.hpp>  // bound_principal
+#include <fixpp/session/detail/log_rate_gate.hpp>         // 105 (research D8): log_rate_gate
+#include <fixpp/session/detail/replay_gate.hpp>           // 103 (research D5′): replay_gate_
 // 066-dict-backed-inbound-parse T002: inbound_tv_ is a
 // std::optional<table_view> Session MEMBER (not a unique_ptr to an
 // incomplete type like validator_), so table_view must be complete here.
@@ -1507,9 +1509,9 @@ private:
                                             fixpp::session::detail::FrameHeader const& hdr,
                                             int ref_tag_id);
     // 106: the mTLS gate's one authorize computation, which logon_identity_admitted_() and
-    // logon_identity_refuses_() share. Precondition: live_peer_id_ holds a value.
-    [[nodiscard]] fixpp::core::expected_t<fixpp::session::bound_principal>
-    authorize_live_identity_() const noexcept;
+    // logon_identity_refuses_() share; pid is the live handshake identity (*live_peer_id_).
+    [[nodiscard]] fixpp::core::expected_t<fixpp::session::bound_principal> authorize_live_identity_(
+        fixpp::tls::peer_identity const& pid) const noexcept;
     // 106: the session's security profile is mtls_ca or mtls_pinned (the mTLS gate applies).
     [[nodiscard]] bool mtls_gate_applies_() const noexcept;
     // The acceptor's credentials gate (033 T023): the Logon's Username(553) and Password(554)
@@ -2357,7 +2359,7 @@ private:
     // live_write_serialized_ just before its async_write with SessionConfig::write_timeout_ms
     // set (write_cut_epoch_ by the bound's expiry); begin_connection_() clears the flag and
     // the cut epoch. Session strand only.
-    fixpp::core::steady_time_point write_started_at_{};
+    fixpp::core::steady_time_point write_started_at_;
     std::uint32_t write_epoch_ = 0;
     bool write_in_flight_ = false;
     std::uint32_t write_cut_epoch_ = 0;
@@ -2376,6 +2378,8 @@ private:
     std::shared_ptr<std::atomic<int>> connection_bound_counter_{
         std::make_shared<std::atomic<int>>(0)};
     using connection_bound_join = counter_join;
+    // Not const: it resumes the bound, which writes this Session's state.
+    // NOLINTNEXTLINE(readability-make-member-function-const)
     void wake_connection_bound_() noexcept {
         if (connection_bound_.wake) {
             connection_bound_.wake();
