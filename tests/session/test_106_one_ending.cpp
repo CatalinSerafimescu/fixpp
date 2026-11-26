@@ -65,12 +65,13 @@ TEST_P(OneEnding106, GiveUpThenClose) {
 }
 
 // tasks.md T167 (research D11 row 3: an ending Logout other than R-1 takes the ending claim before
-// the owner, and a refused claim writes nothing for a Logout fixpp starts; spec.md R21: the reply
-// to the peer's Logout is written whatever the claim's outcome): Engine::stop()'s step 1 has run, so
+// the owner, and a refused claim writes nothing for a Logout fixpp starts; the reply to the peer's
+// Logout is written whatever the claim's outcome, spec.md R21, claim-ok: a clarification id):
+// Engine::stop()'s step 1 has run, so
 // closing_or_stopped_() holds and claim_ending_() refuses every claim. A frame below NextNumIn then
 // draws an ending Logout other than R-1: its leaf writes no Logout, and the caller's tail records
-// the one Disconnected entry (send_ending_logout_: the Disconnected writes of its callers' tails are
-// their own). On the base the leaf writes the too-low Logout. Its mutant: the leaf's claim test
+// the one Disconnected entry (send_ending_logout_: the Disconnected writes of its callers' tails
+// are their own). On the base the leaf writes the too-low Logout. Its mutant: the leaf's claim test
 // deleted (inbound_logout_leaf_).
 TEST_P(OneEnding106, EngineStopStep1_ThenTooLow_NoLogout) {
     rgs::Scene s{rgs::Options{.role = GetParam()}};
@@ -81,7 +82,8 @@ TEST_P(OneEnding106, EngineStopStep1_ThenTooLow_NoLogout) {
     fixpp::session::session_test_access::note_engine_stop(*s.session);
     (void)s.feed(s.heartbeat(1));
     s.drain();
-    EXPECT_EQ(s.count("5", mark), 0U) << "a Logout after Engine::stop()'s step 1: " << s.written(mark);
+    EXPECT_EQ(s.count("5", mark), 0U)
+        << "a Logout after Engine::stop()'s step 1: " << s.written(mark);
     EXPECT_EQ(s.state(), fsm_state::Disconnected) << "the too-low arm's ending did not run";
     EXPECT_EQ(t106::count_disconnected(*s.session) - disconnected_before, 1U)
         << "new Disconnected entries";

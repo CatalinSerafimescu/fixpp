@@ -1468,6 +1468,11 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   `close_before_destroy` at `e00ebd13` (the hidden cells re-run there, one more failure found); two STOPs to the
   orchestrator: `Crossing103` (`B-103-15`) and `InboundFrameDispositionsOd29` (093's establishment-deadline record), each
   RED at the head, GREEN on the base and GREEN under a mutant of 106's ending-claim gate.
+  **Rulings (orchestrator, owner-delegated; R21), at `5297b28f`; still not done** (evidence file, "T169 — the orchestrator's
+  rulings on the two stops"): `Crossing103` fixed (`3922e2b1`, the reply to the peer's Logout written on a refused claim),
+  12/12, its mutant RED; the sweep, SC-007 and `B-106-6` done; the targeted re-runs at `5297b28f` GREEN but Od29.
+  `Od29` STOPPED again: the ruling's "only its record is suppressed" is the head's behaviour, which is what keeps Od29's
+  last assertion (the establishment-timeout event) RED; the requested 106 cell would assert the opposite. Open until decided.
 - [X] T170 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: `linux-gcc-release` `-Werror` build of the touched targets (the library, `session_106_tests`,
   `session_106_seam_tests`, the touched config, transport, C-ABI and alloc-guard targets, `engine_send_bench`),
   `ninja -k 0`, no error, no warning.
@@ -1521,6 +1526,8 @@ labelled push in the final sign-off order. One build or ctest at a time througho
 - [ ] T180 `/mnt/wsl/fixppbuild/fixpp-106-base`, `/mnt/wsl/fixppbuild/fixpp-106-mutants` and `/mnt/wsl/fixppbuild/fixpp-106-verify`: Remove `$B`, `$M` and `$V` (`git worktree remove`, then `git worktree prune`) once every RED reading, mutant,
   bench run and the full ctest of T169 is recorded; never `fixpp-parallel`, never the MSVC sandbox.
   **Held** (evidence file, "T169"): the two T169 STOPs are open, and a fix would need `$B` and `$M` readings.
+  **Partial** (evidence file, "T169 — the orchestrator's rulings", ruling 7): `$V` removed and pruned; `$B` and `$M` kept
+  for the open `Od29` stop.
 - [ ] T181 **(orchestrator, post-merge)** Close-out per `.specify/close-out.md` §1 (rows 3b re-check, 4, 5, 9, 16, 17,
   copied into the Gate B record): a `CLAUDE-history.md` entry for `106-logon-guards-write-bounds` (newest first: the
   batches, the PR and squash SHA, the closed issues, the B-106 rows, C-ABI 1.19), and `CLAUDE.md`'s "Last merged FEATURE"
