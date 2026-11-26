@@ -1414,15 +1414,17 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   **Done** (`23705cd7`; evidence file, "T163"): seeded controls reported in all 10 TUs and `session.hpp`; four clang-tidy
   findings fixed or NOLINTed with a reason, one cppcheck `throwInNoexceptFunction` dispositioned as the base's coroutine
   class, two IWYU includes added; the touched cells re-run on `linux-clang-debug`.
-- [ ] T164 Paired benchmarks (Article VIII §2; contract C-9; quickstart section 6; T023): base-vs-candidate A-B-A-B
+- [X] T164 Paired benchmarks (Article VIII §2; contract C-9; quickstart section 6; T023): base-vs-candidate A-B-A-B
   runs of `engine_send_bench` (also CI-paired), `session_send_bench` and `on_inbound_frame_bench`, 105's T138 method: a
   release tree of `$B` on `/mnt/wsl/fixppbuild` whose path is padded to the candidate tree's length (`cmp` the `.text` of
   a same-source build to prove the layout matches), min per tree, +5 % one-sided. Results in the evidence file; a breach
   needs the measurement, a rationale and an approval by someone other than the author, or, where no independent approver
   exists, explicit user ratification recorded in the PR thread (`[const §VIII.2]`).
-  **Stopped** (`b7fdebc2`, ruling R19; evidence file, "T164 re-run"): the two equal-length pairs (84 and 90 characters) disagree
-  on `session_send_bench`; `HeartbeatAnswersPendingTestRequest` stays above budget in both (ruling 2's residual, its
-  prototype not applied). Both go to the orchestrator.
+  **Done** (`b7fdebc2`, rulings R19 and R20; evidence file, "T164 re-run" and "T164 — the Phase 10 rulings 1 and 2"):
+  both equal-length pairs recorded; `session_send_bench` within budget at the 90-character pair, its 84-character delta
+  attributed to code layout (the head's own source reads 15.7 % apart between the two paths);
+  `HeartbeatAnswersPendingTestRequest` (+13.3 %, +11.4 %) approved under `[const §VIII.2]` by ruling R20, attribution
+  open, flagged for the owner at merge.
 - [X] T165 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Targeted sanitizer lanes `linux-clang-asan`, `linux-clang-ubsan` and `linux-clang-tsan` (owner rule): only
   `-L 106`, `-L 105`, `-L 104`, `-L 099` and the binaries whose test sources the branch touches (config, transport,
   C-ABI, 538); on TSan the `GiveUp106`, `WriteTimeout106`, `OneEnding106` and `ConnectionBound106` cells also with
@@ -1434,7 +1436,7 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   registrations, plus every `-L alloc_guard` entry by name (`ctest -N -L alloc_guard`); record each result.
   **Done** (at `23705cd7`; evidence file, "T166"): `-L 544` 75/75, `-L alloc_guard` 83/83, 0 skipped; the 106 interceptor
   and counter entries pass.
-- [ ] T167 Coverage of added lines (Article IX §1): fresh per-binary profraw from every binary the `106` label runs
+- [X] T167 Coverage of added lines (Article IX §1): fresh per-binary profraw from every binary the `106` label runs
   (`session_106_seam_tests` included: the spawn and wait failure exits and the commit refusal are reached only there), for
   the `session`, `config`, `log`, `capi` and `core` modules the diff adds a reachable line to; every uncovered added line or
   branch tested, waived with a one-line rationale (the respawn's `connection_bound_.running` term, the
@@ -1444,10 +1446,10 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   evidence file's T074 section; and `OneEnding106.Watchdog_PreActive_NoEstablishmentRecord`, dropped by ruling 1 on the
   Phase 6 report for the same reason, so M10 has no cell), or escalated to a filed, labelled issue, in
   `.specify/decisions/106-logon-guards-write-bounds-verify.md`.
-  **Open** (`7de1b3ce`; verify record, "T167 — resolution", ruling 6): cells `ErrorMessage106.SessionWriteTimeout`,
-  `NextNumIn106.CommitRefused_Initiator_Disconnected` and `OneEnding106.EngineStopStep1_ThenTooLow_NoLogout`, each RED as
-  stated and its lines hit in a fresh coverage read; the defensive rows justified there; three reachable rows outside the
-  ruling's cell groups go to the orchestrator.
+  **Done** (`7de1b3ce`, `2ce99715`; verify record, "T167 — resolution" and "T167 — the Phase 10 ruling 3"): cells
+  `ErrorMessage106.SessionWriteTimeout`, `NextNumIn106.CommitRefused_Initiator_Disconnected` and
+  `OneEnding106.EngineStopStep1_ThenTooLow_NoLogout`, each RED as stated; `TomlHandshake106.TransportNotATable_RefusedByTheTransportCheck`
+  (a guard, its branch side hit in a fresh coverage read); the no-clock write limit and the Heartbeat twin justified there.
 - [ ] T168 **(orchestrator)** windows-msvc-debug in `/mnt/c/temp/fixpp`, after taking `.sandbox-lock` (PARENT
   `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md` Step 0), never at the same time as a Linux build: build
   the feature's own targets (`session_106_tests`, `session_106_seam_tests`, the touched config, transport and C-ABI test
