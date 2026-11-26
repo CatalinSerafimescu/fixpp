@@ -655,7 +655,9 @@ not name.
   G + 10 s, which follows the default B a regression would use by 8 s; `L-105-f`) — [guard: an unconditional close at
   G] (T095).
   **Partly done:** `ZeroLogoutTimeout_StaysOpen` written (C4, GREEN on `$B` and at the head);
-  `PreActive_LimitOff_NotCutByEstablishment` (an Engine rig) not written.
+  `PreActive_LimitOff_NotCutByEstablishment` (an Engine rig) not written. **Stopped (Phase 5 remainder, to the
+  orchestrator):** the Engine's accept path mints its own TCP transport, so no rig or seam the bundle names blocks an
+  Engine acceptor's reply Logon write; the evidence file's T074 section lists the candidates.
 - [X] T075 \[P\] [US3] `tests/session/test_106_one_ending.cpp`: the `OneEnding106.<First>Then<Second>` pairs whose rig
   names no new symbol (write_timeout_ms unset), at least `OneEnding106.GiveUpThenClose` (`close()` at C = G + 100 ms < G + B,
   `logout_disconnect_timeout_ms` 5000 ms, the mock step issued at once after `close()`, a guard: `close()` takes no
@@ -706,7 +708,7 @@ not name.
   close comes. The loop's give-up block calls it (N-12: with the claim held elsewhere the block now records nothing and
   exits). The Text is built from `pending_test_req_id_` as today; with none pending, `TestRequest unanswered` without the
   TestReqID clause (Q2; data-model E-4 rows 3 and 5).
-- [ ] T083 [US3] The connection bound (research D3 "The primitive"; data-model E-3): `run_connection_bound_`, one
+- [X] T083 [US3] The connection bound (research D3 "The primitive"; data-model E-3): `run_connection_bound_`, one
   coroutine per connection, spawned by the liveness loop at its start on the loop's executor (never `executor()`), with
   `connection_bound_spawn_fails_`'s seam (refused spawn: the loop takes the claim, records `Disconnected` and ends; the
   connection closes at its exit); the members `connection_bound_` (`running`, `gen`, `shipping`, `wake`) and
@@ -721,9 +723,8 @@ not name.
   T019's list (one new spawn). Re-derive (research D3, "What it allocates"): the bound's only `co_spawn`
   (`git grep -n 'run_connection_bound_' -- src`), and a read of the shipping branch of `connection_bound_wait_` showing it
   names no `Clock` member; recorded in the evidence file.
-  **Implemented (`aa146ac7`); open:** the re-derivation reading (the bound's only `co_spawn`, the shipping
-  branch's Clock-free read) is not yet recorded in the evidence file.
-- [ ] T084 [US3] The bound's joiners, wakes and exit terms (data-model E-3's two tables, in their order): exit on
+  **Implemented (`aa146ac7`); re-derivation recorded at H3 (evidence file, "T083 and T084").**
+- [X] T084 [US3] The bound's joiners, wakes and exit terms (data-model E-3's two tables, in their order): exit on
   `gen` changed, `Disconnected`, `closing_or_stopped_()`, `reconnect_drain_in_flight_` or `ending_claim_` taken; the
   give-up row before the write row at one re-test; wakes at the loop's guard (both edges), `close()` and
   `Engine::stop()`'s step 1 before their joins, `drain_for_reconnect_`'s entry beside `wake_ending_logout_bound_()`, and
@@ -733,10 +734,10 @@ not name.
   `git grep -n 'FIXPP_JOIN_COUNTERS\|connection_bound_counter_' -- src/session/session.cpp`, each join read for the state
   the session can be in when it is reached, and `Engine::stop()`'s steps in `src/session/engine.cpp`; the result goes in
   the evidence file against data-model E-3's joiner table.
-  **Implemented (`aa146ac7`) except the `~Session` assertion, to the orchestrator:** with it, test rigs that
-  destroy an Active session without `close()` abort (`W8RefusedOpenFrames_Control.*`,
-  `StoreAfterResetLogon.ResetLogon_ResendReplays`); the evidence file's Phase 5 section has the reading. The
-  joiner-table re-derivation is not yet recorded.
+  **Implemented (`aa146ac7`); orchestrator rulings 1 and 2 applied (`29626eb4`):** the liveness loop's exit sets
+  `connection_bound_.loop_left` and wakes the bound (data-model E-3's joiner row "teardown without `close()`");
+  `~Session` asserts the counter, as it asserts 105's bound; the rigs that destroy an Active session with neither
+  `close()` nor a drain declare `close_before_destroy`. Re-derivation recorded at H3 (evidence file).
 - [X] T085 [US3] `src/session/session.cpp`: The loop's arming (research D3 "The loop arms it", D4): `emit_in_flight_` set when a TestRequest or
   Heartbeat emit starts (after its replay-gate shared hold, and for a TestRequest after `pending_test_req_id_` is set),
   with an RAII guard in the loop's frame that clears it and wakes the bound at the return or an exception; while it is
@@ -755,19 +756,19 @@ not name.
   105 D3 (the loop alone decides the give-up): the connection bound decides while the loop is suspended in its own
   emit, under one claim (D11)"; at the loop's inline emits "106 D3 bounds the inline emits of
   .specify/536-537-538-recovery-liveness.md §3".
-- [ ] T088 [US3] Deferred item (plan "Deferred to tasks.md", "The RAII clears"), for `emit_in_flight_`: re-derive that
+- [X] T088 [US3] Deferred item (plan "Deferred to tasks.md", "The RAII clears"), for `emit_in_flight_`: re-derive that
   every exception and `catch` return of the loop's emit reaches the `Disconnected` edge (whose exit ends the bound first,
   so a mutant of the clear is masked); a return that does not reach it gets a cell in `tests/session/test_106_seams.cpp`
   with the clear's mutant RED. Record the walk and its result in the evidence file.
-- [ ] T089 [US3] `src/session/session.cpp`: Deferred item (plan "Deferred to tasks.md", "The loop's give-up block with the claim refused";
+- [X] T089 [US3] `src/session/session.cpp`: Deferred item (plan "Deferred to tasks.md", "The loop's give-up block with the claim refused";
   research D11 N-12): name the state in which the loop's give-up block meets a claim held elsewhere —
   `liveness_may_originate_()` stops the write limit, the ending Logouts, the establishment deadline and a drain from
   Active before the block, which leaves `close()` between setting `closing` and its `Disconnected` record — and either
   write the cell `OneEnding106.CloseDuringGiveUpBlock_NoRecord` *(proposed)* (no slot-74 record, one `Disconnected`) with
   the mutant "the block's claim test deleted" RED, or record the block unreachable with the reading that shows it.
-- [ ] T090 [US3] Re-run T017 at the head: the one new `sleep_until` / `await_deadline` caller is the held cap's
+- [X] T090 [US3] Re-run T017 at the head: the one new `sleep_until` / `await_deadline` caller is the held cap's
   wait (it replaces the loop's own sleep); no hit is the connection bound's shipping branch (#715 out of scope).
-- [ ] T091 [US3] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: At the head: `-L 106` (seam entry included) GREEN; guards unfiltered: `-L 105`
+- [X] T091 [US3] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: At the head: `-L 106` (seam entry included) GREEN; guards unfiltered: `-L 105`
   (`LivenessTiming105.*`, `HeldTestRequestCap105.*`, `WriteLimit105.*`,
   `PreActive105.SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent`, `LivenessTiming105.GiveUp_BoundSpawnFails_StillEof`)
   and the 538 binary (`ReplayGate588.R588g*`, `R588h*`); spec US3 scenario 4 (a reading peer: no instant moves). Record
@@ -775,23 +776,26 @@ not name.
 
 ### Mutant and spurious-hit arms for US3 (in `$M` at `H3`)
 
-  **Stopped (to the orchestrator):** at `aa146ac7` `-L 106`, `-L 105`, `-L 104`, `-L 099` pass; `-L 538` fails:
+  **Resolved by the orchestrator's rulings 1 to 3 (`29626eb4`); H3 = `05c21065`, its readings in the evidence file.** The
+  earlier stop read: at `aa146ac7` `-L 106`, `-L 105`, `-L 104`, `-L 099` pass; `-L 538` fails:
   `ReplayGate588.R588c_*` (two) and `R588g_AnswerInsideTheFreshWindow_KeepsTheSession` fail at their teardown drain
   (the bound's parked timer is outstanding work after a teardown with no `close()`), and
   `CancelledOutboundStoreMeasurement.Returned_StoreCancelledAtItsLock` pins two `Disconnected` entries that T079's
   conversion makes one. H3 not committed as such.
 - [ ] T092 [US3] In `$M`'s `src/session/session.cpp`: M2, arm 1: the loop's arming of the connection bound for its emit deleted; RED: every `GiveUp106` cell
   except the guards (nothing else closes by G + B: the spurious-hit arm of FR-008), `EmitHeldInStore_*` included.
-- [ ] T093 [US3] In `$M`'s `src/session/session.cpp`: M2, arm 2: the held cap's pending term restored; RED: `GiveUp106.ResendHeldNoPending`; the pending twin
+  **Stopped (to the orchestrator):** the three `ResendHeldNoPending*` cells read GREEN under arm 1 (T093's arm turns
+  them RED); every other named cell RED (evidence file, "T092 to T099").
+- [X] T093 [US3] In `$M`'s `src/session/session.cpp`: M2, arm 2: the held cap's pending term restored; RED: `GiveUp106.ResendHeldNoPending`; the pending twin
   stays GREEN.
-- [ ] T094 [US3] In `$M`'s `src/session/session.cpp`: M14: `decide_give_up_()`'s `refused` branch records `Disconnected` and returns without the close; RED:
+- [X] T094 [US3] In `$M`'s `src/session/session.cpp`: M14: `decide_give_up_()`'s `refused` branch records `Disconnected` and returns without the close; RED:
   `GiveUp106.RejectBlocked_EndingBoundSpawnFails_ClosedAtG` (still open at G + B + 1 s). Record that
   `LivenessTiming105.GiveUp_BoundSpawnFails_StillEof` stays GREEN under M14 (the loop's exit still closes): a guard of the
   base path only.
-- [ ] T095 [US3] In `$M`'s `src/session/session.cpp`: An unconditional close at G (the `unlimited` branch closes); RED: `GiveUp106.ZeroLogoutTimeout_StaysOpen`.
-- [ ] T096 [US3] In `$M`'s `src/session/engine.cpp` and `src/session/session_engine_access.hpp`: M9″: the establishment expiry's `claim_ending` always refused; RED:
+- [X] T095 [US3] In `$M`'s `src/session/session.cpp`: An unconditional close at G (the `unlimited` branch closes); RED: `GiveUp106.ZeroLogoutTimeout_StaysOpen`.
+- [X] T096 [US3] In `$M`'s `src/session/engine.cpp` and `src/session/session_engine_access.hpp`: M9″: the establishment expiry's `claim_ending` always refused; RED:
   `PreActive105.SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent` (no event).
-- [ ] T097 [US3] In `$M`'s `src/session/session.cpp`: M9 (`claim_ending_`'s test deleted) with M9′ (E-3's exit on a taken claim deleted), over the pairs of
+- [X] T097 [US3] In `$M`'s `src/session/session.cpp`: M9 (`claim_ending_`'s test deleted) with M9′ (E-3's exit on a taken claim deleted), over the pairs of
   T075: RED (two reasons or two entries), or the pair reported as a guard of its state test, not counted toward M9
   (research D9 row FR-017).
 - [ ] T098 [US3] In `$M`'s `src/session/session.cpp`: M13 per reachable site a US3 cell returns through (T015's table), one arm each: the site's
@@ -801,7 +805,9 @@ not name.
   `GiveUp106.HeartbeatReplyBlocked` and `inbound_business_reject_leaf_`'s by `GiveUp106.BusinessRejectBlocked`. The
   Reject leaf has no arm: its write tail records nothing, so `GiveUp106.RejectBlocked` keeps its FR-017 assertion (one
   `Disconnected`, the close's) without an M13 arm.
-- [ ] T099 [US3] In `$M`'s `src/session/session.cpp`: The US3 connection-bound arms: the spawn seam's failure path and the wait seam's failure path each
+  **Stopped (to the orchestrator):** all five arms read GREEN at their named cells (vacuous); the evidence file has the
+  readings and a diagnostic arm.
+- [X] T099 [US3] In `$M`'s `src/session/session.cpp`: The US3 connection-bound arms: the spawn seam's failure path and the wait seam's failure path each
   deleted (the cells of T076 read RED: `SpawnFails_AtLoop` no close, `WaitThrows` no close); M12's
   `ConnectionEnd` arm (the `Disconnected` edge's wake deleted; its two exit terms are redundant): RED
   `ConnectionBound106.Teardown_ConnectionEnd_Parked` by its counter assertion, never a hang; `SpuriousWake_NoEnding`
