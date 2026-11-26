@@ -646,7 +646,7 @@ TEST(NextNumIn106, Acceptor_Peer141_S3_NoAdvanceNoReset) {
     EXPECT_EQ(c.read().store_resets, before.store_resets) << "store reset calls";
 }
 
-TEST(NextNumIn106, Acceptor_S3_RejectWriteFails) {
+TEST(NextNumIn106, Acceptor_S3_RejectAssignFails) {
     Cell c{s3_1137()};
     ASSERT_TRUE(c.open()) << "setup";
     outbound_at_max(c);
@@ -695,7 +695,7 @@ TEST(NextNumIn106, Initiator_Asked141_S3_NoAdvanceNoReset) {
     EXPECT_EQ(c.read().store_resets, before.store_resets) << "store reset calls";
 }
 
-TEST(NextNumIn106, Initiator_S3_RejectWriteFails) {
+TEST(NextNumIn106, Initiator_S3_RejectAssignFails) {
     Cell c{admitted_initiator(s3_initiator())};
     ASSERT_TRUE(c.open()) << "setup";
     outbound_at_max(c);

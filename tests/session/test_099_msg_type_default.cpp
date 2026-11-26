@@ -840,7 +840,7 @@ TEST_P(W25Initiator, Reply141YWithBad1130_NoReset) {
 // E-7's LS-h ending here: the mTLS gate runs right after interpret_logon, ahead of S3's block, so
 // the off-list identity is refused with nothing written and NextNumIn kept, and the authorization
 // event is emitted.
-TEST_P(W25Initiator, OffListIdentity_MtB_NoAuth) {
+TEST_P(W25Initiator, OffListIdentity_MtB_SilentRefusal) {
     RigOptions o;
     o.mtls = true;
     CellRun run = open_cell(shape_fixture(GetParam()), false, true, std::move(o));

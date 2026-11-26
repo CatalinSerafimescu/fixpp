@@ -21,8 +21,10 @@
 #include <fixpp/config/load_diagnostic.hpp>
 #include <fixpp/config/toml_config_loader.hpp>
 #include <fixpp/core/engine_config.hpp>
+#include <fixpp/session/memory_store.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -206,4 +208,48 @@ TEST(NextNumIn106, CommitRefused_Disconnected) {
     EXPECT_EQ(rig.out.size(), written_before) << "frames written after the refused commit";
     EXPECT_EQ(mgr.next_inbound_unsafe(), 1U) << "NextNumIn in memory";
     EXPECT_EQ(in_store(), store_in_before) << "NextNumIn in the store";
+}
+
+// ── NextNumIn106.Acceptor_ResetOnLogon_S3_InMemoryOne (the Phase 4 report's ruling) ────────────
+// [seam: M6a] A head-only pin beside the guard
+// NextNumIn106.Acceptor_ResetOnLogon_S3_KeepsTheReset (test_106_identity_first.cpp), which keeps
+// what the base also reads: with reset_on_logon on an acceptor whose store holds NextNumIn 5, the
+// knob's reset runs before the classification, the Logon at MsgSeqNum 1 is refused at S3, and the
+// in-memory NextNumIn is exactly 1 after the refusal: the reset's value, unconsumed (106 D2). The
+// store holds a value other than 1 before the feed, so a NextNumIn of 1 after it is the reset's,
+// not the hydrated one. Its mutant: M6a (the acceptor commits the advance at the classification).
+TEST(NextNumIn106, Acceptor_ResetOnLogon_S3_InMemoryOne) {
+    namespace t99 = fixpp::session::test099;
+    using fixpp::session::direction_t;
+    using fixpp::session::fsm_state;
+    using fixpp::session::memory_store_test_access;
+    using fixpp::session::session_test_access;
+    constexpr fixpp::session::seqnum_t kStoredIn = 5;
+    auto inner = std::make_shared<fixpp::session::MemoryStore>(
+        fixpp::session::MemoryStore::Config{.policy = fixpp::session::capacity_policy::unbounded});
+    memory_store_test_access::set_counter(*inner, direction_t::inbound, kStoredIn);
+    memory_store_test_access::set_counter(*inner, direction_t::outbound, 1);
+    auto store = std::make_shared<fixpp::test_support::HookedStoreFactory>();
+    store->log->inner = inner;
+    t99::RigOptions opts;
+    opts.validate = true;
+    opts.role = fixpp::session::session_role::acceptor;
+    opts.tweak = [store](fixpp::session::SessionConfig& c) {
+        c.store_factory = store;
+        c.reset_on_logon = true;
+        c.reset_on_disconnect = false;
+    };
+    t99::Rig rig{t99::shape_fixture(t99::Shape::T), std::move(opts)};
+    auto const opened = rig.open();
+    ASSERT_FALSE(opened.has_value()) << *opened;
+    auto const resets_before = store->log->calls.size();
+    std::string err;
+    rig.feed(t99::input("Logon 1137=99").make(rig.peer_ctx(1)), &err);
+
+    EXPECT_GT(store->log->calls.size(), resets_before) << "store reset calls";
+    EXPECT_EQ(memory_store_test_access::counter(*inner, direction_t::inbound), 1U)
+        << "NextNumIn in the store";
+    EXPECT_EQ(session_test_access::seqnum_mgr(*rig.sess).next_inbound_unsafe(), 1U)
+        << "NextNumIn in memory";
+    EXPECT_EQ(rig.sess->state(), fsm_state::Disconnected) << t99::state_name(rig.sess->state());
 }
