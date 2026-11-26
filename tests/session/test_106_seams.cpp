@@ -472,17 +472,17 @@ struct Params {
 // it through the tweak because the shared header names no symbol 106 adds.
 class Rig : public t106::GiveUpRig {
 public:
-    Rig(session_role role, Params p, std::function<void(SessionConfig&)> const& tweak = {},
+    Rig(session_role role, Params params, std::function<void(SessionConfig&)> const& tweak = {},
         std::function<void(rgs::Scene&)> const& shape_scene = {})
-        : t106::GiveUpRig{
-              role,
-              t106::GiveUpParams{
-                  .heartbeat = p.heartbeat, .threshold = p.threshold, .logout_ms = p.logout_ms},
-              [&tweak, w = p.write_ms](SessionConfig& c) {
-                  c.write_timeout_ms = w;
-                  if (tweak) tweak(c);
-              },
-              shape_scene} {}
+        : t106::GiveUpRig{role,
+                          t106::GiveUpParams{.heartbeat = params.heartbeat,
+                                             .threshold = params.threshold,
+                                             .logout_ms = params.logout_ms},
+                          [&tweak, w = params.write_ms](SessionConfig& c) {
+                              c.write_timeout_ms = w;
+                              if (tweak) tweak(c);
+                          },
+                          shape_scene} {}
 };
 
 enum class wclass : std::uint8_t {
