@@ -257,6 +257,9 @@ Session::~Session() {
     // 105 (data-model E-3): close() joins the ending Logout's bound.
     assert(ending_logout_bound_counter_->load(std::memory_order_acquire) == 0 &&
            "Session destroyed with the ending Logout's bound running (close() first)");
+    // 106 (data-model E-3, the joiners): close() joins the connection bound, as it joins 105's.
+    assert(connection_bound_counter_->load(std::memory_order_acquire) == 0 &&
+           "Session destroyed with the connection bound running (close() first)");
     if (effective_clock_) {
         effective_clock_->forget_session(this);
     }
@@ -6301,6 +6304,7 @@ bool Session::spawn_connection_bound_(asio::any_io_executor const& ex,
             throw std::bad_alloc{};
         }
         connection_bound_.running = true;
+        connection_bound_.loop_left = false;
         connection_bound_.gen = conn_gen_;
         connection_bound_.shipping = dynamic_cast<fixpp::core::system_clock_source const*>(
                                          effective_clock_.get()) != nullptr;
@@ -8586,6 +8590,12 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
     } catch (...) {  // NOLINT(bugprone-empty-catch): the body handles its own; a cancellation
                      // met at this await leaves the release below to decide
     }
+    // 106 (data-model E-3, the joiner row "teardown without close()"): the loop's exit, on every
+    // path, ends the connection bound it spawned, which times only the loop's emits. A teardown
+    // with no close() that releases the loop's clock sleep (Clock::cancel_sleeps()) reaches the
+    // bound only through this wake: the bound's own timer is not registered with the clock.
+    connection_bound_.loop_left = true;
+    wake_connection_bound_();
     // 105 (research D1 item 7): a detached root; its exit releases the connection-end latch,
     // while the loop is still counted.
     release_connection_end_();

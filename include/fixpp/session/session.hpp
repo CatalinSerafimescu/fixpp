@@ -2323,6 +2323,9 @@ private:
         std::uint32_t gen = 0;  // the connection generation it was spawned for
         bool shipping = false;  // effective_clock_ is system_clock_source (tested at the spawn)
         std::function<void()> wake;  // cancels the bound's own timer; set by the bound only
+        // The liveness loop that spawned it has ended (set at the loop's exit, data-model E-3's
+        // joiner row "teardown without close()").
+        bool loop_left = false;
     };
     connection_bound_state connection_bound_;
     // Set by the liveness loop while its TestRequest or Heartbeat emit has not returned; cleared
@@ -2351,7 +2354,8 @@ private:
     // The bound's exit terms (data-model E-3, the exit row). Synchronous.
     [[nodiscard]] bool connection_bound_exits_(std::uint32_t gen) const noexcept {
         return conn_gen_ != gen || fsm_state_ == fsm_state::Disconnected || closing_or_stopped_() ||
-               reconnect_drain_in_flight_ || ending_claim_ != ending_claim::none;
+               reconnect_drain_in_flight_ || ending_claim_ != ending_claim::none ||
+               connection_bound_.loop_left;
     }
     // The give-up's decision (research D3, "The decision"; data-model E-3): the claim, the
     // slot-74 record, the Text, the Logout owner and the R-1 Logout's enter_ending_write_; with

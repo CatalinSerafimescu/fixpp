@@ -37,6 +37,7 @@
 #include <vector>
 
 #include "session/plain_engine_rig.hpp"
+#include "support/close_before_destroy.hpp"
 #include "support/log_capture.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/validation_test_dictionary.hpp"
@@ -423,6 +424,9 @@ TEST(W8RefusedOpenFrames_Control, TheSameLogonOnAnOpenedSessionEstablishes) {
     DirectRig rig;
     auto registry = make_registry({fixt11(), fix50sp2()});
     Session s{rig.engine, plain_fixt_config(rig.ioc, fixt11(), true, AV::v50sp2), registry.get()};
+    // 106 (data-model E-3, the joiners): ~Session asserts that the connection bound has been
+    // joined, which close() does, so the session is closed before it is destroyed.
+    fixpp::test_support::close_before_destroy closer{s, rig.ioc};
     ASSERT_TRUE(direct_open(rig.ioc, s).has_value());
     const std::string frame = input("Logon 1137=9").make(Ctx{.snd = "TW", .tgt = "ISLD", .seq = 1});
     auto fut = asio::co_spawn(rig.ioc,

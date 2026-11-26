@@ -269,7 +269,7 @@ one private callee that waits. It holds both branches below, and everything the 
   `L-497-1`'s conditions (1) and (2) already disclose. Re-derive: the bound's only `co_spawn` (`git grep -n 'run_connection_bound_' -- src`);
   the shipping branch names no `Clock` member. The binding witness is D9's mallocnesia cell; its known positive is M8.
 - **Its own wait slot (R2(b)).** No other sleeper arms the timer; its `expires_at` and `cancel` reach only its own
-  wait. Unregistered with the clock, it is not reached by `Clock::cancel_sleeps()`; every teardown wakes it.
+  wait. Unregistered with the clock, it is not reached by `Clock::cancel_sleeps()`; every teardown wakes it: `close()`, `Engine::stop()`'s step 1, a drain's entry, the `Disconnected` edge, and, at a teardown with no `close()` whose sweep releases the liveness loop's sleep, the loop's exit (Phase 5 amendment; data-model E-3, the joiner row "teardown without `close()`").
 - **#715 stays out of scope.** 106's new waits never call `Clock::sleep_until` on `system_clock_source`. The one new
   `sleep_until` caller, the held cap with none pending (data-model E-3), replaces the loop's own sleep at the gate, so
   it adds no concurrent sleeper. Re-derive: `git grep -n 'sleep_until\|await_deadline' -- src/session/session.cpp`, each
