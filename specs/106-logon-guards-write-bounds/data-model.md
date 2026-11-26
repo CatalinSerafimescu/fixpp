@@ -11,7 +11,7 @@ strand, like the members 105 added. None is atomic except a join counter, as 103
 | `logon_identity_refuses_(frame, consume)` | private callee of `Session` | both Logon arms, on the validate-first Reject path only | returns true when an applicable gate refuses. Its locals stay in its own frame (104 T093). |
 | `logon_identity_admitted_()` | existing | both arms, once, right after `interpret_logon` | consuming form: an event and the one-shot `live_peer_id_` reset, as today |
 | `logon_credentials_admitted_(result)` | existing | acceptor, once, right after the mTLS gate | unchanged body |
-| `CompIdAuthorizationPolicy::has_logon_validator() const noexcept` | new public accessor | the precheck's unreadable-credentials rule | true when `set_logon_validator` installed a callable. Pimpl, so no layout change. |
+| `CompIdAuthorizationPolicy::has_logon_validator() const noexcept` | new public accessor | the precheck's unreadable-credentials rule | true exactly when the stored `logon_validator_fn` is non-empty, the test `authorize_logon` makes: false when never set, true after `set_logon_validator` with a callable, false again after it with an empty one. The policy is `cfg_.compid_authorization_policy`, part of the session's own configuration, which no call replaces during a connection, so the precheck and the consuming gate read one policy. Pimpl, so no layout change. Its header comment, with `set_logon_validator`'s, states for a policy author: a frame `interpret_logon` refuses never reaches the validator (it fails closed, `B-106-1`); an absent Username(553) or Password(554) reaches it as empty, and a validator that requires them refuses that itself; and the validator may be called twice per connection, after the bound event (`L-106-c`). |
 
 The precheck's result, per gate:
 
@@ -33,16 +33,23 @@ A refused result ends the arm with no frame written. When the mTLS half applies,
 "Unreadable" is any `interpret_logon` refusal, not only an unreadable 553/554 (research D1, N-11; disclosed in
 `B-106-1`).
 
+The mTLS half with `consume` = false evaluates the same `authorize(live_peer_id_, cfg_.target_comp_id)` as the
+consuming form, over the same policy and the same `live_peer_id_` (nothing on one frame assigns it between the two), so
+the two agree. Only the credentials half calls user code, the logon validator, which may answer differently on a later
+call (an allow-list reloaded mid-Logon). That needs no purity condition: a disconnecting Reject's frame is judged by
+the consuming gate before the write (C-1.4a), and a stay-in-arm Reject's frame is judged once, by the precheck; the next
+Logon is judged afresh by the consuming gates.
+
 ## E-2. The tentative inbound advance (D2)
 
 | Item | Kind | Notes |
 |---|---|---|
-| `SeqnumManager::classify_inbound(seq)` | new member, `asio::awaitable<expected_t<void>>`, `noexcept` | the body of `check_inbound` without `++next_inbound_`: the lock (a drained one gives `session_already_closed`), `frozen_` (`session_already_closed`), too low (`session_seqnum_too_low`), too high (`session_seqnum_too_high`), `seqnum_max` (`store_seqnum_overflow`). An installed header; a member function only, so no layout change. |
+| `SeqnumManager::classify_inbound(seq)` | new member, `asio::awaitable<expected_t<void>>`, `noexcept` | the body of `check_inbound` without `++next_inbound_`: the lock (a drained one gives `session_already_closed`), `frozen_` (`session_already_closed`), too low (`session_seqnum_too_low`), too high (`session_seqnum_too_high`), `seqnum_max` (`store_seqnum_overflow`). An installed header; a member function only, so no layout change. Its header comment states that contract (`noexcept`, the error per case above, no advance) beside `check_inbound`'s. |
 | `logon_inbound_advanced` (acceptor), `logon_inbound_advanced_init` (initiator) | existing locals | now: "the classification found this Logon in sequence; its number is consumed at the commit". No new local in the arms. |
 | commit | `co_await seqnum_mgr_.check_inbound(seq)` | acceptor: after the 1137 block, before `LogonReceived`, when `logon_inbound_advanced`. Initiator: after the 789 honour and the superseded test, before `Active`, when `logon_inbound_advanced_init && !peer_ack_sent_reset_flag`. A refusal records `Disconnected` unless superseded and returns success. |
 
 Invariant **INV-106-1**: from the arm's entry to its commit point, nothing changes `next_inbound_` except a reset unit
-(absolute targets), the acceptor's knob-driven reset that precedes classification, and the acceptor's hydration (`ensure_hydrated_`, which loads the store's value after the identity gates). A refusal in between therefore
+(absolute targets), the acceptor's knob-driven reset that precedes classification and follows the identity gates (research D1), and the acceptor's hydration (`ensure_hydrated_`, which loads the store's value after the identity gates). A refusal in between therefore
 leaves NextNumIn unchanged in FR-006's sense (the store at its value before the frame; in memory, the value the arm classified the frame against), unless one of those resets ran first. That
 case is disclosed (`L-106-a`, research D2's residual rows).
 
@@ -60,6 +67,16 @@ joined by `connection_bound_counter_`. New `Session` members (private, strand-co
 | `connection_bound_counter_` | `std::shared_ptr<std::atomic<int>>` | the bound's join (`counter_join`) | `close()` and `drain_for_reconnect_` wait for zero; `install_reconnected_transport` and `~Session` assert it (N-4) |
 | `connection_bound_spawn_fails_`, `connection_bound_wait_throws_` | `std::function<bool()>` | `session_test_access` only | the spawn; the wait (105's seam shape) |
 
+Each member has the one writer the table names. Each test-then-set (the claim, the epoch bump, `connection_bound_.running`)
+runs with no suspension between the test and the set, on the session's serialised domain, on an Engine or a direct
+Session alike: every live write runs inside that domain under `write_gate_`.
+
+`write_epoch_` wraps only after 2^32 writes in one connection. A wrap cannot cut the wrong write: the expiry row also
+tests the in-flight write's own `write_started_at_` + limit, so a write is never cut before its own limit, and a cut
+closes the transport, so no later write of that connection compares its epoch with `write_cut_epoch_` and succeeds.
+The write deadline `write_started_at_` + `write_timeout_ms` saturates like E-4's sums; at `UINT32_MAX` ms it is about
+49.7 days past the start, inside `steady_clock`'s range.
+
 **The wait** (`connection_bound_wait_(timer, deadline)`). The timer is a local of the bound's frame, constructed on its
 executor at the spawn.
 - `shipping`: `timer.expires_at(deadline)` (max to park), then one `timer.async_wait(as_tuple(use_awaitable))`.
@@ -67,7 +84,7 @@ executor at the spawn.
 - Either branch returns to the re-test. The deadline is the earlier of G (E-4), when `emit_in_flight_`, and
   `write_started_at_` + `write_timeout_ms`, when `write_in_flight_` and the limit is on.
 
-**Respawn after a failed drain (Gate A loop 2 round 1, N-6).** A drain can fail after the bound left on the drain term: the caller's cancellation at a step-3 suspension (`dispatch_aborted`) leaves the old connection in LogonSent with its Logon-arm write still blocked. No later arming can follow (later writes queue at `write_gate_` and the liveness loop starts only at Active). So `drive_reconnect`, at its failed-drain return and after clearing `reconnect_drain_in_flight_`, spawns the bound again when `conn_gen_` has not moved, `closing_or_stopped_()` does not hold, `write_in_flight_` or `emit_in_flight_` holds, and `connection_bound_.running` is false (Gate A loop 2 round 2, N-5: on one strand the old bound's exit runs during step 3's park, so the term is defensive and has no cell; it states the invariant rather than inferring it from that order). The new bound re-arms on the in-flight write's own `write_started_at_`; a refused spawn fails closed as C-4's spawn failure. This is the one exception to "at most once per connection": at most one bound runs at a time.
+**Respawn after a failed drain (Gate A loop 2 round 1, N-6).** A drain can fail after the bound left on the drain term: the caller's cancellation at a step-3 suspension (`dispatch_aborted`) leaves the old connection in LogonSent with its Logon-arm write still blocked. No later arming can follow (later writes queue at `write_gate_` and the liveness loop starts only at Active). So `drive_reconnect`, at its failed-drain return and after clearing `reconnect_drain_in_flight_`, spawns the bound again when `conn_gen_` has not moved, `closing_or_stopped_()` does not hold, `write_in_flight_` or `emit_in_flight_` holds, and `connection_bound_.running` is false (Gate A loop 2 round 2, N-5: on one strand the old bound's exit runs during step 3's park, so the term is defensive and has no cell; it states the invariant rather than inferring it from that order). The new bound re-arms on the in-flight write's own `write_started_at_`. A refused respawn fails closed in the live-write form without its first step (the in-flight write is already started): the session takes the claim, records `Disconnected` and closes (research D3, "One close"), which fails that write. This is the one exception to "at most once per connection": at most one bound runs at a time.
 
 **Wakers:** the loop's guard (both edges); a live write's start, unless the bound is already armed on an earlier
 write's deadline; `close()` and
@@ -80,10 +97,10 @@ end, what it waits on, and the exit term only it sets. Re-derive: `git grep -n '
 |---|---|---|---|
 | `drain_for_reconnect_` (`drive_reconnect`) | `FIXPP_JOIN_COUNTERS` on `connection_bound_counter_`, beside `ending_logout_bound_counter_` | `reconnect_drain_in_flight_`, set by `drive_reconnect` around the drain. From LogonSent the drain records no `Disconnected` (it records one only from Active or LogonReceived) and `conn_gen_` has not moved, so it is the only term | `ConnectionBound106.Teardown_Drain_*` from LogonSent, scripted from the drain's step order (entry wake, step 2, step 3, joins): `_Parked` with the acknowledgement withheld, so no write is in flight and step 3 does not park; `_Timing` with a Logon-arm Reject's write blocked, so step 3 parks on `inbound_depth_` and only the entry wake ends the bound before the join. The bound binds no cancellation slot, so step 4's `root_cancel_.emit` does not end it. The wake and the term deleted, the counter never 0 |
 | `close()` | `FIXPP_JOIN_COUNTERS` after `root_cancel_.emit`, beside `liveness_counter_` | `state_ == lifecycle::closing`, in `closing_or_stopped_()` | none counted: `close()` records `Disconnected` (unless already) before `root_cancel_.emit` and its joins, in every state, so the edge also ends the bound. Its term's own observable is the decision during phase 1: `OneEnding106.CloseThenWatchdog`, under M9 with the closing term deleted from the exit row (the exit row precedes the expiry row) |
-| `Engine::stop()` | no join of its own: step 4's `Session::close(terminal)` joins | `engine_stop_requested_` (step 1, `note_engine_stop`), in `closing_or_stopped_()` | none counted: step 2 closes every session's transport, which fails an armed write or emit, and the `Disconnected` edge that follows ends the bound before step 4 joins. No test seam sits between step 1 and step 2 (`test_hook_post_send_drain_` runs in step 3, after the closes), so the term's decision side rests on `claim_ending_`'s refusal, with no cell |
+| `Engine::stop()` | no join of its own: step 4's `Session::close(terminal)` joins | `engine_stop_requested_` (step 1, `note_engine_stop`), in `closing_or_stopped_()` | none counted: step 2 closes every session's transport, which fails an armed write or emit, and the `Disconnected` edge that follows ends the bound before step 4 joins. A parked bound (nothing armed) wakes at step 1 and exits on the `closing_or_stopped_()` term; failing that, step 4's `close(terminal)` records `Disconnected` before its join, as `close()`'s row says. No test seam sits between step 1 and step 2 (`test_hook_post_send_drain_` runs in step 3, after the closes), so the term's decision side rests on `claim_ending_`'s refusal, with no cell |
 | the `Disconnected` edge (the connection's end) | no join: a later `close()` or drain finds the bound gone | `fsm_state_ == Disconnected`, and `ending_claim_` taken (the edge sets `internal`) | `Teardown_ConnectionEnd_*`, the counter read before any `close()`, drain or stop; the two terms are redundant, so the mutant deletes the edge's wake |
-| `install_reconnected_transport` | asserts zero, after `begin_connection_()` advances `conn_gen_`, with no suspension between | none: the `gen` term is defensive, since the assertion forbids a bound alive across the advance | none |
-| `~Session` | asserts zero, "close() first", as it asserts `ending_logout_bound_counter_` | none: `close()`'s join | none |
+| `install_reconnected_transport` | asserts zero, after `begin_connection_()` advances `conn_gen_`, with no suspension between; the drain's join, which `drive_reconnect` runs before the install, is what guarantees it. A Debug-only `assert`, as 105's | none: the `gen` term is defensive, since the assertion forbids a bound alive across the advance | none |
+| `~Session` | asserts zero, "close() first", as it asserts `ending_logout_bound_counter_`. A Debug-only `assert`; in a release build the guarantee is the existing precondition that `close()` runs before destruction, as 105 states for its own frames | none: `close()`'s join | none |
 
 | From | Event | To | Action |
 |---|---|---|---|
@@ -93,7 +110,7 @@ end, what it waits on, and the exit term only it sets. Re-derive: `git grep -n '
 | waiting | `write_in_flight_`, the same epoch, the clock ≥ start + limit | exit | E-5's expiry (E-10's claim first; refused → nothing) |
 | waiting | the wait threw, or a deadline arm completed before its instant | exit | with the claim taken, nothing: no close, no record (the claimant owns the ending, R10); with it free, claim, `Disconnected`, close once (E-5 step 5's form); no record, no Logout |
 
-The rows are binding in order (N-7). At one re-test with both due, the give-up row is evaluated first (its Logout is
+The rows are binding in order (N-7). A re-test reads the effective clock once and evaluates every row against that one reading, on either wait branch, so "due at one re-test" means both instants are at or before that reading. At one re-test with both due, the give-up row is evaluated first (its Logout is
 the more informative ending, and 105's limit still cuts it); the write row then finds the claim taken
 (`OneEnding106.BothDueAtOneWake`).
 
@@ -125,7 +142,7 @@ T = `test_request_threshold` (default 1.2 × HeartBtInt), and L = `last_inbound_
 | 4. a TestRequest due and held behind a resend answer, one pending | L + 3T + 1 ns | the loop (unchanged, 105's cap) | names the pending one |
 | 5. the same with none pending | L + 3T + 1 ns | the loop (new: the cap without the pending term) | `TestRequest unanswered`, no TestReqID clause (Q2) |
 
-Rows 2 to 5 are the owner's "still held (not yet written)" state, with one instant. Nothing new reads `tr_issued_at`.
+Rows 2 to 5 are the owner's "still held (not yet written)" state, with one instant. Nothing new reads `tr_issued_at`. While an emit has not returned, rows 2 and 3 govern, whatever row 1 would give: the loop, which decides row 1, is suspended in that emit.
 
 ## E-5. The write limit's expiry (D5)
 
@@ -138,7 +155,11 @@ At the bound's expiry, in order:
 3. `write_cut_epoch_ = write_epoch_`;
 4. `record_disconnected_unless_already_()`: from Active, `onLogout` once; before Active, none;
 5. when `state_ == lifecycle::open`, `spawn_connection_close_(live_transport_shared_())` then
-   `connection_end_owed_.reset()`, as `expire_ending_wait_` does (105 E-2, one close; N-2).
+   `connection_end_owed_.reset()`, as `expire_ending_wait_` does (105 E-2, one close; N-2). A refused close spawn falls
+   back to the synchronous `Transport::close()` of the live transport (105 clarification D-g, `L-105-h`); the cut
+   write fails the same way and still returns `session_write_timeout`, its epoch having been marked at step 3.
+
+The order of steps 1 to 5 is binding.
 
 The cut write returns `session_write_timeout`. `store_then_emit` passes that value through, and every other live-write
 error stays `dispatch_aborted` (research D5, N-3).
@@ -152,7 +173,8 @@ The allocation is decided by the mallocnesia cell (research D9), on the shipping
 ## E-6. The write class (D5, FR-011)
 
 `enum class write_class : std::uint8_t { ordinary, logout };` is a defaulted (`ordinary`) argument of
-`store_then_emit`, forwarded to `live_write_serialized_`. Every site that writes a Logout passes `logout`. Find them
+`store_then_emit`, forwarded to `live_write_serialized_`. It is declared in `Session`'s private section, beside
+`store_then_emit` (a private member), so it adds no public C++ name. Every site that writes a Logout passes `logout`. Find them
 with `git grep -n 'build_logout(' -- src/session`, each followed to its `store_then_emit`. A `logout` write never
 arms the connection bound's write deadline (E-3).
 
@@ -173,7 +195,8 @@ read by `resolve_transport`, whose `build_tls_factory` gains a `Transport::Confi
 |---|---|
 | `core::error::session_write_timeout` | 136, appended after `wire_undefined_tag`; `error_message`: "session: write did not complete within write_timeout_ms" |
 | C-ABI | `translate` → `FIXPP_ERR_TRANSPORT_IO`; CSV row `session_write_timeout,FIXPP_ERR_TRANSPORT_IO`; no new C constant |
-| log record (warn, `fixpp::log::cat::session`) | `session ended: write timed out: limit_ms={} error={}`, written before the close; registered in `src/log/format_registry.cpp` |
+| C-visible text | a C caller reads `fixpp_strerror(FIXPP_ERR_TRANSPORT_IO)`, "transport: I/O error", unchanged; the C++ `error_message` text is not C-visible |
+| log record (warn, `fixpp::log::cat::session`) | `session ended: write timed out: limit_ms={} error={}`, written before the close; registered in `src/log/format_registry.cpp` (a requirement, `[const §XIII.2]`). At most one per connection: only the holder of the `write_timeout` claim writes it |
 | give-up record | 105's `session ended: TestRequest unanswered: test_req_id={} threshold_ms={} error={}`, unchanged; written by `decide_give_up_()` whichever caller decides. Its `test_req_id` may be empty (E-4, rows 3 and 5). |
 
 ## E-9. Layout changes (C++ BREAKING, D7)
@@ -194,8 +217,9 @@ member functions only.
 | `claim_ending_(ending_claim who) noexcept` | private, synchronous | refuses when the claim is taken, `closing_or_stopped_()` holds or `reconnect_drain_in_flight_` holds; otherwise sets the claim and returns true. Taken once, at the decision: `run_logout_phase1` and `inbound_logout_leaf_` for kind `r1` write under their decider's claim and neither take nor test it |
 | `session_engine_access::claim_ending` | test and Engine access | the pump's establishment expiry claims before `note_establishment_timeout` |
 
-Invariant **INV-106-2** (FR-017): per connection, exactly one `Disconnected` entry; exactly one reason record when the
-claimant is a recording decider (D11's table, rows 1, 2 and 4: slot 74, the write-timeout record, the establishment
-timeout's), none otherwise (an ending Logout, `close()`, `Engine::stop()`, a bound failure exit). Every `Disconnected` write that
+Invariant **INV-106-2** (FR-017, restated with the same claimants): per connection, exactly one `Disconnected` entry and
+at most one `onLogout`; exactly one reason record when the claimant is a recording decider (D11's table, rows 1, 2 and
+4: the give-up's slot 74, the write limit's record, the establishment deadline's), none otherwise (an ending Logout,
+`close()`, `Engine::stop()`, a reconnect drain, a bound failure exit). Every `Disconnected` write that
 a claimed ending's cut return or close reaches goes through `record_disconnected_unless_already_()` (research D11's
 census).

@@ -18,7 +18,7 @@ Tier 2's `windows` matrix job carries one hung-job backstop shared by its three 
 
 ### B110 (#702, #703): what a Logon can cause before the identity gates
 
-The identity gates are the mTLS CompID-authorisation gate and the acceptor's credentials gate (`authorize_logon`). Neither sends anything when it refuses. FIX Test Cases 1S(c) (§4.4.1) asks that a Logon from an unauthenticated or non-configured identity be answered by "Disconnect without sending a message", because a Reject or a Logout would consume a MsgSeqNum. QuickFIX C++ and Go answer an unknown session's Logon with no message, and QuickFIX/J with no message and no close.
+The identity gates are the mTLS CompID-authorisation gate and the acceptor's credentials gate (`authorize_logon`). Neither sends anything when it refuses. FIX Test Cases scenario 1S(c) (`[FIX-TC §4 scenario 1S]`, section 4.4.1 of the June 2020 document) asks that a Logon from an unauthenticated or non-configured identity be answered by "Disconnect without sending a message", because a Reject or a Logout would consume a MsgSeqNum. QuickFIX C++ and Go answer an unknown session's Logon with no message, and QuickFIX/J with no message and no close.
 
 At `9d81082a`, these answer or change state before the gates:
 - **mTLS acceptor:**
@@ -96,7 +96,7 @@ Rulings of the orchestrator; the owner delegated these design calls on 2026-11-2
   - Q3: resets that already ran in the arm are kept and disclosed (`L-106-a`).
   - Q4: a wrong-typed `write_timeout_ms` is `malformed_value`.
   - Q5: the 3T held cap applies with none pending.
-- Testing scope (owner): targeted runs only, plus ONE full `ctest` on `linux-clang-debug`.
+- Testing scope (owner): targeted runs only, plus ONE full `ctest` on `linux-clang-debug`. The set is listed once, in quickstart §5 (with the `linux-gcc-release` build of the touched targets, the whole pytest suite and the buildless Tier 1 steps); every other restatement points there.
 
 ### Session 2026-11-26 (Gate A round 2)
 
@@ -118,6 +118,7 @@ Rulings of the orchestrator under the same delegation, applying round 3's exact 
 
 Ruling of the orchestrator under the same delegation, applying round 6's exact text. Reviews: `research/reviews/codex_106-logon-guards-write-bounds_gate_a_6_review.md` and `research/reviews/opus_106-logon-guards-write-bounds_gate_a_6_adversarial_review.md` (parent repo).
 - R14 (C-1): Q: Does R-7's reading of §XV.1 (the 544 note's conditional zero) extend to a third condition, write_timeout_ms set with a user-supplied clock (clock_override or EngineConfig::clock)? → A: yes. The write limit is opt-in and off by default, and the zero holds on the shipping clock. With the limit set and a user clock, each spaced write may allocate through that clock's sleep_until and fixpp's wait group. This is disclosed in L-106-e, which amends B-544-1's condition list and L-497-1 in the same feature. Orchestrator ruling under the owner's delegation, flagged for the owner's review at merge.
+  - Scope, amended at step 9 (checklist audit, 2026-11-26, nfr CHK007), under the same delegation: R14 covers both halves `L-106-e` discloses. (1) The send half: with `write_timeout_ms` set and a user clock, each spaced `Session::send` write arms one wait of the bound; `B-544-1` carries it as its third condition and `L-497-1` as condition (6). (2) The emit half: on a user clock each liveness-emit edge arms one such wait, with the limit on or off. That path is on no path `B-544-1` gates; it is the heartbeat path `[2d §8]` extends `[const §VIII.5]` to, a zero 2d realises through `system_clock_source`'s per-session slot, where the bound builds no `||` group. So `B-544-1` names only the send half, `L-497-1` (6) and `L-106-e` name both, and plan.md's XV §1 row is the justification `[const §VIII.5]` asks for. A refusal of R14 at merge reopens Gate A on the connection bound's non-shipping wait (research D3) before the merge.
 
 ### Session 2026-11-26 (analyze)
 
@@ -164,7 +165,7 @@ An acceptor's Logon, or an initiator's ordinary Logon acknowledgement (no 141=Y)
 
 ### User Story 3 — A peer that stops reading cannot hold the session (Priority: P1)
 
-A peer keeps its TCP connection open, stops reading, and stops sending. The session's writes back up. The TestRequest give-up still fires at its instant, and the session ends: a Logout under 105's ending-write limit, then the close. The close fails every blocked write.
+A peer keeps its TCP connection open, stops reading, and stops sending. The session's writes back up. The TestRequest give-up still fires at its instant, and the session ends: a Logout under 105's ending-write limit, then the close. The close fails every blocked write, apart from FR-009's store-phase exception.
 
 **Why this priority**: peer-reachable denial (#714). Today a single blocked application write stops the liveness loop.
 
@@ -173,9 +174,9 @@ A peer keeps its TCP connection open, stops reading, and stops sending. The sess
 **Acceptance Scenarios**:
 
 1. **Given** an Active session whose application write is blocked, with `logout_disconnect_timeout_ms` > 0 and a clock, **When** the peer sends nothing, **Then** the session ends at the give-up instant plus at most `logout_disconnect_timeout_ms` (plus the stated margin), and the blocked write returns `dispatch_aborted` (the value of `B-105-8`, unchanged).
-2. **Given** the liveness loop's own TestRequest or Heartbeat write is blocked, **Then** the give-up still fires. **This changes `9d81082a`.** There, the give-up instant counts from when the TestRequest's store and write returned (`tr_written_at`, data-model E-4 of 105), so a TestRequest whose write never returns never starts the give-up clock. In 106, a TestRequest or Heartbeat whose write has not returned is given up at the held cap, the last inbound frame + 3T (ruling R1). A TestRequest that was written keeps 105's instant.
+2. **Given** the liveness loop's own TestRequest or Heartbeat write is blocked, **Then** the give-up still fires. **This changes `9d81082a`.** There, the give-up instant counts from when the TestRequest's store and write returned (`tr_written_at`, data-model E-4 of 105), so a TestRequest whose write never returns never starts the give-up clock. In 106, a TestRequest or Heartbeat whose write has not returned is given up at the held cap, the last inbound frame + 3T + 1 ns (ruling R1; + 1 ns is 105's strictly-after guard). A TestRequest that was written keeps 105's instant.
 3. **Given** a resend answer (the walk holds the replay gate) whose write is blocked, **Then** the give-up still ends the session.
-4. **Given** a peer that reads normally, **Then** no liveness timing changes: the TestRequest instant and the give-up instant are as on `9d81082a`.
+4. **Given** a peer that reads normally, **Then** no liveness timing changes: the TestRequest instant and the give-up instant are as on `9d81082a`. The one exception is contract C-3.4's held cap with none pending, which applies only while a resend answer holds a due TestRequest past the last inbound frame + 3T.
 
 ---
 
@@ -233,7 +234,7 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
 - A Logon whose CompIDs cannot be read. On a non-validating session it already disconnects silently. On a validating session the validate-first Reject runs before the CompIDs are read. The mTLS precheck reads no Logon field, so it still runs: an unauthorised mTLS identity is disconnected silently. An admitted mTLS identity with no validator installed draws the Reject exactly as on `9d81082a`. With a validator installed the credentials cannot be read, so the gate fails closed and the session disconnects silently.
 - A Logon that `interpret_logon` refuses, on an acceptor with a logon validator installed (credentials policy). The gate treats the credentials as unreadable and fails closed, silently (FIX-TC 1S(c)). This covers every `interpret_logon` refusal (a non-Logon, a CompID or BeginString mismatch, a missing or negative HeartBtInt), even when Username(553) and Password(554) are readable, and it is disclosed in `B-106-1`. An acceptor with the default accept-all policy sees no change.
 - The posture refusal tests TestMessageIndicator(464), not the TLS posture, so the identity is known when it runs, and moving it after the gates is always possible.
-- A session that is not mTLS and has no credentials policy: the gates admit every identity, so User Story 1 changes nothing for it.
+- A session that is not mTLS and has no logon validator installed (the default accept-all policy, `has_logon_validator()` false): the gates admit every identity, so User Story 1 changes nothing for it.
 - 104's too-low Logout already runs after the gates; it is unchanged.
 - A peer that stops reading but keeps sending: the give-up never fires, because inbound is live. Only User Story 4's limit cuts it. With the limit unset this stays open and is disclosed as a limitation, matching QuickFIX C++'s and Go's default.
 - The give-up fires while a resend walk holds the replay gate: 105's rule applies (no Logout past the gate, then Disconnected).
@@ -245,19 +246,19 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
 ### Functional Requirements
 
 **B129 (#724)**
-- **FR-001**: The `windows-msvc-asan` leg's job cap MUST cover a cold-cache push:main run of the whole job with a margin, and stay below the hosted runner's per-job limit. The other two legs' cap MUST be unchanged.
+- **FR-001**: The `windows-msvc-asan` leg's job cap MUST cover a cold-cache push:main run of the whole job with a margin, and stay below the hosted runner's per-job limit. The other two legs' cap MUST be unchanged. The margin is not a fixed fraction: both values are owner-set and permanent (research D10, `aea0d5a5`), and the recipe checks that a cold-cache run's summed steps plus a margin stay below them. The per-job limit is GitHub's documented execution limit for hosted runners, which the workflow comment names.
 - **FR-002**: The workflow comment MUST state the re-derive procedure for the whole job and record no measured values.
 
 **B110 (#702, #703)**
-- **FR-003**: In every inbound-Logon arm (acceptor) and Logon-acknowledgement arm (direct initiator), no frame MUST be written and no sequence state MUST be changed (in memory or durably) before every identity gate that applies to the session has admitted the identity.
-- **FR-004**: A Logon or acknowledgement refused by an identity gate MUST end the session with no message, whatever other refusal would also have applied.
+- **FR-003**: In every inbound-Logon arm (acceptor) and Logon-acknowledgement arm (direct initiator), no frame MUST be written and no sequence state MUST be changed (in memory or durably) before every identity gate that applies to the session has admitted the identity. Sequence state means NextNumOut and NextNumIn in memory, the store's counters, and every reset (a `reset_on_logon` reset, a 141=Y reset unit); on the acceptor the store is not read either, because hydration follows the gates (research D1 item 4). Events, log records and logon-validator calls are not state changes under FR-003; their new order is disclosed (contract C-1.6, `L-106-c`).
+- **FR-004**: A Logon or acknowledgement refused by an identity gate MUST end the session with no message, whatever other refusal would also have applied. When that other refusal is itself silent (an `interpret_logon` refusal, research D1 item 3), it ends the arm first, with no gate call and no event, and the ending is the same: no message.
 - **FR-005**: For an identity the gates admit, every refusal's answer and ending MUST be as on `9d81082a`.
 - **FR-006**: A Logon (acceptor) or an ordinary Logon acknowledgement (initiator) refused at the S3 DefaultApplVerID/ApplVerID test MUST leave NextNumIn unchanged in memory and in the store, and so MUST every other refusal of a Logon or acknowledgement, on either role. One exception: a refusal that runs after a reset the arm already applied (a configured `reset_on_logon` reset, or a 141=Y reset unit) keeps that reset. Such a reset runs only for an identity the gates admit, as QuickFIX C++ resets at the same place; it is disclosed as L-106-a. The plan MUST list each refusal that runs after the inbound advance, with a cell for each. "NextNumIn unchanged" means: the store's NextNumIn equals its value before the frame, and NextNumIn in memory equals the value the arm classified the frame against, not that value plus one. On a session hydrated before the frame, that is also its in-memory value before the frame. An acceptor's first Logon hydrates inside the arm, after the identity gates, so there the comparison is with the classified value and not with the unhydrated default read before the frame; an identity refusal precedes hydration and leaves the in-memory value as it was (SC-001).
 - **FR-007**: The identity-precedence cells pinned by 104 (`LogonTooLow104.Precedence_*`, `UnaskedResetAck104.Mtls_Unauthorised_NoReset`) MUST still pass, or be updated where this feature deliberately changes the order they pin, each update named in the plan.
 
 **B124 (#714)**
-- **FR-008**: The TestRequest give-up MUST fire at its instant, whether or not any write (the liveness loop's own included) is blocked. While the liveness loop's own emit has not returned, that instant is the last inbound frame + 3T + 1 ns (ruling R1); otherwise it is 105's. With `logout_disconnect_timeout_ms` > 0 and a clock, the session MUST end within `logout_disconnect_timeout_ms` of it. With 0 or no clock the ending is unbounded and disclosed (`L-105-f`).
-- **FR-009**: When the session ends with a write blocked, the blocked write and every write waiting behind it MUST return an error, not hang.
+- **FR-008**: The TestRequest give-up MUST fire at its instant, whether or not any write (the liveness loop's own included) is blocked. While the liveness loop's own emit has not returned, that instant is the last inbound frame + 3T + 1 ns (ruling R1; + 1 ns is 105's strictly-after guard); otherwise it is 105's. When every write completes promptly, the TestRequest and give-up instants are 105's, unchanged (contract C-3.5), apart from C-3.4's held cap with none pending. With `logout_disconnect_timeout_ms` > 0 and a clock, the session MUST end within `logout_disconnect_timeout_ms` of it. With 0 or no clock the ending is unbounded and disclosed (`L-105-f`).
+- **FR-009**: When the session ends with a write blocked, the blocked write and every write waiting behind it MUST return an error, not hang. One exception, disclosed under `L-093-12` (amended): the liveness loop's own emit while it is still inside its `MessageStore::store` call is not yet a write. The close does not fail it, and it returns when the store returns, which no peer controls (contract C-3.3). The give-up is still decided at its instant and the transport still closes at the decision plus `logout_disconnect_timeout_ms`.
 - **FR-010**: A per-write time limit MUST be configurable, off by default. When set, a non-ending write that does not complete within it, counted from that write's start on the transport, MUST close the transport at once, with no Logout attempted, and end the session with a distinct, logged reason, unless another ending already holds the claim (FR-017).
 - **FR-011**: Ending Logout writes MUST keep 105's limit (`logout_disconnect_timeout_ms`).
 - **FR-012**: The per-write limit MUST be settable from C++ and from TOML, with the loader's usual range and type checks, and MUST have no C-ABI setter (owner ruling).
@@ -265,12 +266,12 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
 **B123 (#717)**
 - **FR-013**: An initiator's TLS handshake bound MUST be settable from TOML and from the C++ configuration a factory is built from. Its default MUST be today's.
 - **FR-013a**: An Engine acceptor's TLS handshake bound MUST be settable from TOML (Engine level) and from the C++ Engine configuration. Its default MUST stay 1500 ms. Neither key has a C-ABI setter.
-- **FR-014**: A session-level cell MUST show that `drive_reconnect()`, with `max_attempts = 1`, against a peer that never handshakes, returns `transport_reconnect_limit_exceeded` within the configured bound plus the stated margin. A transport-level cell MUST show that the attempt's handshake ends with `transport_handshake_timeout` at that bound. The reconnect FSM's final error MUST NOT change.
+- **FR-014**: A session-level cell MUST show that `drive_reconnect()`, with `max_attempts = 1`, against a peer that never handshakes, returns `transport_reconnect_limit_exceeded` within the configured bound plus the stated margin (research D9 row FR-014: bound + 2 s). A transport-level cell MUST show that the attempt's handshake ends with `transport_handshake_timeout` at that bound. The reconnect FSM's final error MUST NOT change.
 
 **Cross-cutting**
 - **FR-015**: Every behaviour change MUST be recorded in `spec/behaviors-and-limitations.md`:
   - `L-104-3` and `L-104-8` retired, and `L-105-f` narrowed;
-  - `B-099-2` and `B-105-3` amended in the clauses 106 falsifies;
+  - `B-099-2`, `B-105-3`, `L-093-12`, `B-544-1` and `L-497-1` amended in the clauses 106 changes (research D8);
   - new B rows;
   - the disclosed residuals: a peer that keeps sending but never reads, with the limit off; the unbounded ending with `logout_disconnect_timeout_ms` 0; and, with the limit off, a write blocked before Active that `logon_timeout_ms` does not cut (`L-106-f`, R7).
 - **FR-016**: Every new test MUST be shown RED before it counts:
@@ -281,9 +282,9 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
 
 ### Key Entities
 
-- **Identity gate**: the mTLS CompID-authorisation gate, and the acceptor's credentials gate. Each admits or refuses with no message.
-- **Refusal**: a check in a Logon arm that answers (Reject or Logout) or disconnects.
-- **Write class**: the application send, Heartbeat, TestRequest, resend answer (many frames), Reject, Logon, and ending Logout.
+- **Identity gate**: the mTLS CompID-authorisation gate, and the acceptor's credentials gate. Each admits or refuses with no message. The mTLS gate applies on a session with `mtls_ca` or `mtls_pinned`, in either role; the credentials gate applies on every acceptor, whatever its security profile (plaintext and one-way TLS included), and admits every Logon when no logon validator is installed (data-model E-1).
+- **Refusal**: a check in a Logon arm that answers (Reject or Logout) or disconnects before the arm's success path completes: the rows of research D2's returns table and the identity gates. A failure after an acceptor's reply Logon is written, and an internal failure (contract C-2.2), is not a refusal.
+- **Write class**: the application send, Heartbeat, TestRequest, resend answer (many frames), Reject, SequenceReset, ResendRequest, Logon and reply Logon, and ending Logout (contract C-4.2).
 - **Per-write time limit**: the new opt-in knob (FR-010).
 - **Initiator handshake bound**: the knob that reaches the initiator factory's transport configuration (FR-013).
 - **Acceptor handshake bound**: the Engine-level knob that replaces the listener's hard-coded value (FR-013a).
@@ -292,13 +293,15 @@ A cold-cache run of the `windows-msvc-asan` leg, on a PR or on push:main, comple
 
 ### Measurable Outcomes
 
-- **SC-001**: In every cell of User Story 1, the unauthorised peer receives zero bytes after the TLS handshake, and both sequence numbers (in memory and in the store) equal their values before the Logon.
+"The stated margin" in SC-003 to SC-005 and FR-014 is each cell's, from research D9's "Instants" paragraph and its row: exact instants on the mock clock; bound + 2 s for the real-socket cells (the acceptor cell's EOF before 1.2 s); W + 1 s for `ShippingClock106`.
+
+- **SC-001**: In every cell of User Story 1, the unauthorised peer receives zero bytes after the TLS handshake (on a plaintext session, after the accept), and both sequence numbers (in memory and in the store) equal their values before the Logon.
 - **SC-002**: In every cell of User Story 2, NextNumIn after the refusal is unchanged in FR-006's sense: the store's value equals its value before the frame, and the in-memory value equals the value the arm classified the frame against, not that value plus one. The exception is a reset already applied in the arm (FR-006, `L-106-a`): there NextNumIn equals the reset's target.
-- **SC-003**: With a peer that stops reading, `logout_disconnect_timeout_ms` > 0 and a clock, the session ends within the give-up instant plus `logout_disconnect_timeout_ms` plus the stated margin. This holds in 100% of the runs of each write-class cell, on every sanitizer lane the cells run on.
+- **SC-003**: With a peer that stops reading, `logout_disconnect_timeout_ms` > 0 and a clock, the session ends within the give-up instant plus `logout_disconnect_timeout_ms` plus the stated margin. This holds in 100% of the runs of each write-class cell, on every sanitizer lane the cells run on. The write-class cells run on the mock clock, so their instants are exact on every lane.
 - **SC-004**: With the per-write limit set and no other ending holding the claim, the session ends within the limit plus the stated margin in each write-class cell.
 - **SC-005**: A one-attempt reconnect against a never-handshaking peer returns `transport_reconnect_limit_exceeded` within the configured bound plus the stated margin. An Engine acceptor drops a never-handshaking client within its configured bound plus the stated margin.
-- **SC-006**: This PR's `windows-msvc-asan` leg completes, green or red on its own steps, without reaching its cap.
-- **SC-007**: The existing session, transport, config and C-ABI suites pass unchanged, apart from the precedence cells that FR-007 names.
+- **SC-006**: This PR's `windows-msvc-asan` leg completes, green or red on its own steps, without reaching its cap. Its `sccache statistics` step shows whether the run was cold; a warm run is recorded as warm in the PR evidence and does not discharge the cold case, which then rests on the workflow comment's push:main recipe (FR-001).
+- **SC-007**: The existing session, transport, config and C-ABI suites pass unchanged, apart from the precedence cells that FR-007 names, the cells research D9's census re-pins to the unconsumed NextNumIn (tasks T009, T059), and the pins of the slot after `wire_undefined_tag` that T013's census lists (the error-completeness and ABI-golden tests, the error-map CSV).
 
 ## Normative References
 
@@ -306,13 +309,15 @@ Entries are the exact keys of `spec/coverage-index.md` (Article VI §5), in the 
 
 - `[FIX-TC §4 scenario 1S] Receive Logon (Acceptor)`: sub-case 1S(c), an unauthenticated or non-configured identity is disconnected without a message (FR-003, FR-004).
 - `[FIX-TC §4 scenario 1B] Connect and Send Logon (Initiator)`: the acknowledgement's refusals, which 106 orders after the identity gate (FR-003, FR-006).
-- `[FIXS §4.4] Authorization linked to authentication`: the canonical Spec ref of catalogue row T-041; the coverage index has it only as the "Added T-041" gap row (FR-003, FR-004).
+- `[FIXS §4.4] Authorization linked to authentication (auth'd TLS identity ↔ FIX CompID)`: catalogue row T-041; the coverage index has it as a full row of its FIXS section, and also names it in the "Added T-041" gap note (FR-003, FR-004).
 - `[FIX-SL §4.3.11] Initial synchronization of messages (Logon seqnum check, ResendRequest on gap)`: the Logon's sequence check, whose advance 106 commits only on success (FR-006).
 - `[FIX-SL §4.5.1] FIX connection keep-alive (heartbeat)`: the Heartbeat emit the give-up no longer waits behind (FR-008).
 - `[FIX-SL §4.5.5] Test Request processing`: the TestRequest and its give-up (FR-008, FR-009).
-- `[FIX-SL §4.6.4] When to terminate without Logout(35=5) (invalid BeginString/CompID cases)`: the silent ending of an unauthorised identity (FR-004) and the write limit's close with no Logout (FR-010).
+- `[FIX-SL §4.6.4] When to terminate without Logout(35=5) (invalid BeginString/CompID cases)`: the silent ending of an unauthorised identity (FR-004). Its first exception terminates the transport without a Logout "when the BeginString(8), SenderCompID(49), TargetCompID(56), or IP address in the Logon(35=A) request of the session initiator is invalid", because "this logon attempt could be an unauthorized access attempt". It is not cited for FR-010: §4.6.4 asks for a Logout "in all other cases, if sending a Logout(35=5) message does not create risk", and no FIX-SL section addresses a peer that stops reading.
 
-Informative, not coverage-index entries: QuickFIX C++ v1.16.0, QuickFIX/J 3.0.2 and QuickFIX/Go v0.9.12 session source, for observable behaviour.
+The write limit's close with no Logout (FR-010) is anchored instead in `[const §XV.15]`'s `disconnect-and-recover` mode (terminate the session and rely on FIX ResendRequest semantics on reconnect; the peer's recovery is `[FIX-SL §4.3.11]`'s Logon sequence check and ResendRequest on gap). A Logout would queue behind the write that has not completed and could not reach the peer, so none is attempted (`/speckit-clarify`, 2026-11-25).
+
+Informative, not coverage-index entries: QuickFIX C++ v1.16.0, QuickFIX/J 3.0.2 and QuickFIX/Go v0.9.12 session source, for observable behaviour. The write limit's close follows QuickFIX/J's slow-consumer disconnect (`MaxScheduledWriteRequests`, `IoSessionResponder.send`).
 
 ## Assumptions
 
@@ -324,7 +329,7 @@ Informative, not coverage-index entries: QuickFIX C++ v1.16.0, QuickFIX/J 3.0.2 
   - `test_067_builder_roundtrip`'s duration (B93 / #664);
   - the Tier 2 sccache restore step's duration, a new finding filed separately;
   - fixpp#715 (one timer slot per Session under a direct driver): 106's new waits never call `Clock::sleep_until` on `system_clock_source`, so they never meet it (research D3).
-- No new C-ABI symbol (owner ruling). C-ABI MINOR is still bumped to **1.19, BREAKING, behaviour only** ([const §X.7]; precedent 1.17 and 1.18). A C caller can observe the changes: an unauthorised Logon draws no answer, a blocked send returns an error at the give-up, and NextNumIn holds after an S3 refusal. Each changed observer in `session.h` gets a C-ABI 1.19 clause, as 105 did.
+- No new C-ABI symbol (owner ruling). C-ABI MINOR is still bumped to **1.19, BREAKING, behaviour only** ([const §X.7]; precedent 1.17 and 1.18). A C caller can observe the changes: an unauthorised Logon draws no answer, a blocked send returns an error at the give-up, and NextNumIn holds after an S3 refusal. The C ABI has no NextNumIn accessor: a C caller sees the last one through the session's next Logon exchange (a peer Logon at the refused number is in sequence) and through a file store's contents. Each changed observer in `session.h` gets a C-ABI 1.19 clause, as 105 did.
 - Before the plan adds a `SessionConfig` field, grep `tests/` for size pins on `SessionConfig` and `Session`.
 - Gate A applies (#702 is security-affecting; session behaviour changes). Gate B applies as usual.
 - QuickFIX readings: C++ v1.16.0, QuickFIX/J 3.0.2, QuickFIX/Go v0.9.12, from `reference-engines/` in the parent repo.

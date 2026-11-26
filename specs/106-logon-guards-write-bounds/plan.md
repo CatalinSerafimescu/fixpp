@@ -90,8 +90,10 @@ labelled push).
 
 **Constraints**:
 - No allocation per write or per liveness emit, with the limit on or off, on `system_clock_source` (D3, D5; the
-  mallocnesia cell).
-- One `co_spawn` per connection, the connection bound (D3), and none per write or emit.
+  mallocnesia cell). The send path is `B-544-1`'s sequential `Session::send`; the emit path is the heartbeat path
+  `[2d §8]` extends `[const §VIII.5]` to. Both halves of the mallocnesia cell run under `B-544-1`'s two conditions.
+- One `co_spawn` per connection, the connection bound (D3), and none per write or emit. At most one bound runs at a
+  time: the one respawn, at `drive_reconnect`'s failed-drain return, replaces a bound that has exited (data-model E-3).
 - No new call of `Clock::sleep_until` on the shipping clock beside another sleeper of the Session (#715).
 - No new local held across an await in the Logon arms (104 T093).
 - No new mutex shape, and no new `replay_gate` use (`[const §XI.3]`).
@@ -109,7 +111,7 @@ enum and C-ABI map; `version.h` and `session.h` comments; new `tests/session/tes
 | Article | Requirement | Status |
 |---|---|---|
 | XVI §3 | `/clarify` before `/plan` (session FSM, security, error semantics, ABI) | PASS: three sessions recorded in spec.md |
-| XII §9, XI §7, X §6 | the four controls (`/clarify`, `/analyze`, Gate A, user `/plan` sign-off) | OWED: `/analyze` after `/tasks`; Gate A on this bundle; the user's `/plan` sign-off, which the orchestrator records (the owner said they would pre-approve the plan; this bundle does not satisfy the control) |
+| XII §9, XI §7, X §6 | the four controls (`/clarify`, `/analyze`, Gate A, user `/plan` sign-off) | `/clarify`: PASS (the Clarification sessions in spec.md). `/analyze`: ran after `/tasks` (findings remediated at `d9f458b5`); a re-run is owed after the step 9 checklist audit's SPEC-FIXED edits. Gate A: CONVERGED (loop 2 round 3, 2026-11-26). User `/plan` sign-off: SATISFIED. The owner pre-approved the plan on 2026-11-25 ("I'll pre-approve the plan"; autonomous end-to-end delegation, including the PR, its labels and the merge), as relayed by the orchestrator; recorded at step 9 (2026-11-26) at bundle head `edf0a758` (tasks T037a). |
 | XVII §1 | Gate A triggers: the session FSM, concurrency (new coroutines), the security surface (identity gates), the C ABI (behaviour) | Gate A REQUIRED |
 | X §7 | a breaking C-ABI change before the first release is declared | PLANNED: 1.19 BREAKING (D7); the predicate is `gh release list --exclude-drafts` |
 | IV §1–2 | the C++ library is primary; no new C symbol (owner) | PASS |
@@ -119,7 +121,7 @@ enum and C-ABI map; `version.h` and `session.h` comments; new `tests/session/tes
 | Article | Clause | Design's answer |
 |---|---|---|
 | IV | C ABI is the licence seam, not the primary API | No new C symbol, constant or type. The three knobs are C++/TOML only (F-7: no C TOML entry). Python binding: version pins only (D7 census). |
-| VIII §2–3, §5 | +5 % paired budget; a bench in the same PR; zero allocation between parse and `fromApp`, which 2d extends to the heartbeat path | D1/D2 touch the establishment path only. D5 adds one branch per write (off). D3 allocates nothing per emit: one bound per connection (research D3). The mallocnesia cell binds it. The paired runs are owed (quickstart §6). |
+| VIII §2–3, §5 | +5 % paired budget; a bench in the same PR; zero allocation between parse and `fromApp`, which 2d extends to the heartbeat path | D1/D2 touch the establishment path only. D5 adds one branch per write (off). D3 allocates nothing per emit: one bound per connection (research D3). The mallocnesia cell binds it. The paired runs are owed (quickstart §6). §VIII.3's benchmark in the same PR is the paired `engine_send_bench` (its writes reach `live_write_serialized_`, contract C-9) with the local pair; a bench of the connection bound alone is ruled unnecessary: with the limit off its per-write cost is one branch inside `engine_send_bench`'s timed path, and its per-emit cost occurs once per HeartBtInt. |
 | IX §1 | diff-scoped coverage 95/85, no uncovered error path | Each new error path has a cell in research D9 (its "has a cell" census): the commit refusal (`CommitRefused_Disconnected`); the bound's spawn failure at the loop and at a write; 105's ending-bound spawn failure inside a give-up the bound decides (`GiveUp106.RejectBlocked_EndingBoundSpawnFails_ClosedAtG`); its wait failure; its teardown exits; the claim's race pairs; the TOML refusals, the root key's included. The verify record assesses the rest. |
 | IX §2 | ASan, UBSan, TSan | targeted runs; TSan repeats the D3/D5 cells (quickstart §5) |
 | X §1, §4 | the versioned contract; append-only error codes | `session_write_timeout = 136` appended; maps to the existing `FIXPP_ERR_TRANSPORT_IO`; no numeric reuse; occupancy unchanged |
@@ -129,11 +131,12 @@ enum and C-ABI map; `version.h` and `session.h` comments; new `tests/session/tes
 | XII §5, §9 | explicit profiles; the security controls | D1 changes no TLS mechanism, only the order of the identity gates. FIX-TC 1S(c) (research D1). The four controls apply. |
 | XIII §2 | async logging | two warn records through the session logger (one new), registered in `format_registry.cpp` |
 | XIV §2 | pluggable interfaces ≤ 5 methods | no interface change: `TransportFactory` untouched (D6 rejects a per-session `make` argument) |
-| XV §1 | no per-message heap allocation on the hot path | None per write or per emit on `system_clock_source` (the mallocnesia cell, known positives M5 and M8). One spawn per connection. **A conditional zero, justified under `[const §VIII.5]` in the form of 544's R-6/R-7:** with `write_timeout_ms` set and an effective clock other than `system_clock_source`, a spaced write waits through that clock (`L-106-e`). That is a third condition on `B-544-1`'s zero. R2 is an orchestrator ruling and cannot widen R-6's conditions (544 note §5); the extension of R-7's reading of §XV.1 to it is ruling R14 (spec.md Clarifications, 2026-11-26, orchestrator under the owner's delegation), flagged for the owner's review at merge. |
+| XV §1 | no per-message heap allocation on the hot path | None per write or per emit on `system_clock_source` (the mallocnesia cell, known positives M5 and M8). One spawn per connection. **A conditional zero, justified under `[const §VIII.5]` in the form of 544's R-6/R-7:** with `write_timeout_ms` set and an effective clock other than `system_clock_source`, a spaced write waits through that clock (`L-106-e`). That is a third condition on `B-544-1`'s zero. R2 is an orchestrator ruling and cannot widen R-6's conditions (544 note §5); the extension of R-7's reading of §XV.1 to it is ruling R14 (spec.md Clarifications, 2026-11-26, orchestrator under the owner's delegation), flagged for the owner's review at merge. **The emit half (R14's step 9 scope):** on the same non-shipping clock each liveness-emit edge arms one such wait, with the limit on or off. That is the heartbeat path `[2d §8]` extends `[const §VIII.5]` to, not a path `B-544-1` gates. Its justification: 2d realises the heartbeat zero through `system_clock_source`'s per-session slot, where the bound takes no `||`; on a user clock the base claims no zero for that path either (its own per-cycle `sleep_until` is the clock's code), and the bound must wait through that clock so the mock cells stay deterministic (R2(c)). Disclosed in `L-106-e` and `L-497-1` (6). |
 | XV §9, §15 | no `std::mutex` in coroutines; no application-message drop | none added; D5 closes the session rather than dropping a frame (the disconnect-and-recover posture) |
 | XV §16 | QuickFIX CFG or TOML | TOML keys only; the QuickFIX CFG translation is unaffected |
 | XVI §6 | the orchestrator does not implement | this bundle is docs only; the implementer writes code and tests |
 | XVII §2, §8 | Gate B on every PR; `/speckit-verify` after `/implement` | planned |
+| VII §7 | fuzzing for parser-touching code | not triggered: 106 changes no parser (wire, dictionary, or `interpret_logon`'s reader). D1 and D2 reorder checks the Logon arms make over frames already parsed; the existing fuzzers run in CI's matrix as for any PR. |
 | XIX §5 | API pages regenerate | Doxygen of `session.h`, `session_config.hpp` and `engine_config.hpp` regenerate. No `docs/` page names `logout_disconnect_timeout_ms` today (re-derive: `git grep -n logout_disconnect_timeout_ms docs examples`), so no page is owed for the new keys. |
 
 No violation; one conditional zero (row XV §1), ruled under R14 and flagged for the owner's review at merge. Complexity Tracking records the two structural additions anyway.

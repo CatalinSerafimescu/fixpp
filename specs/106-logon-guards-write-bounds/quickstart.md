@@ -33,9 +33,11 @@ shows.
 - **Unconditional `Disconnected` writes** (D11): `git grep -n 'record_state_transition_(fsm_state::Disconnected)' --
   src/session/session.cpp`; known positives are the liveness loop's emit-failure branches and `Session::send`'s F9 block.
 - **Ending claimants** (D11): `git grep -n 'logout_in_flight_ = true\|enter_ending_write_(' -- src/session/session.cpp`.
+  Known positive: the give-up's own Logout site (`enter_ending_write_(ending_kind::r1`), one of D11's two exclusions;
+  every other hit is a claim site, listed in tasks.md's ending-claimant table.
 - **Sleepers** (D3, #715): `git grep -n 'sleep_until\|await_deadline' -- src/session/session.cpp`. After D3 no new hit
   may be the connection bound's shipping branch.
-- **C-ABI minor pins** (D7): `git grep -nE 'MINOR 18|1\.18' -- include tests bindings tools ci`. Then
+- **C-ABI minor pins** (D7): `git grep -nE 'MINOR 18|1\.18' -- include tests bindings tools ci examples`. Then
   `gh release list --exclude-drafts` at the PR head; an empty list keeps the MINOR bump.
 - **session.h observers** (D7): `git grep -n 'amended in C-ABI 1.18' include/fix/c_api/session.h`.
 - **Superseded records** (research, "Supersession"): each row's source is named in the comment that changes it.
@@ -122,9 +124,19 @@ mutant-specific literal) before believing a GREEN.
   strand-confined coroutine per connection, so TSan runs the `GiveUp106`, `WriteTimeout106`, `OneEnding106` and
   `ConnectionBound106` cells 50 times (`--repeat until-fail:50`).
 - **Release:** `alloc_guard_106_connection_bound_mallocnesia` and the `-L 544` registrations, on `linux-clang-release`.
-- **One full `ctest`**, on `linux-clang-debug` only, as the last run before the labelled push (Article XVII §7's
-  evidence).
-- **MSVC:** a build of the new test targets before the first labelled push (`-k 0`; sandbox lock first).
+- **Not test runs, but in the scope:** the `linux-gcc-release` `-Werror` build of the touched targets (T170); the whole
+  pytest suite, `python3 -m pytest bindings/python/tests`, against the module rebuilt at C-ABI 1.19 (T171; Article XVII
+  §7, because the MINOR pins reach `bindings/python/`); and every buildless Tier 1 step derived from
+  `.github/workflows/tier1.yml` (T172).
+- **One full `ctest`**, on `linux-clang-debug` only, in a clean worktree at the head (`$V`, never a mutant tree; T169),
+  as the last test run before the labelled push. Its evidence line is Article XVII §7's
+  `local build: green on linux-clang-debug @ <sha>`.
+- **What the targeted scope leaves to CI:** a suite whose test sources are untouched but whose production code changed
+  (every session and engine suite runs `src/session/session.cpp`) is covered locally only by the one full ctest, and on
+  the release and sanitizer lanes only by CI's full matrix. That residual risk is accepted by the owner's scope rule.
+- **MSVC:** a build of the new test targets before the first labelled push (`-k 0`; sandbox lock first), run targeted.
+  msvc-asan runs only if a change needs it: when the PR's CI `windows-msvc-asan` leg reports a failure that needs a
+  local reproduction, or a change targets a path only MSVC's ASan reaches.
 - `/speckit-verify`'s plan follows this scope.
 
 ## 6. Benchmarks (Article VIII §2)
@@ -137,7 +149,8 @@ Locally, paired base-vs-candidate (105's T138 method: merge-base release tree, p
 - `on_inbound_frame_bench`.
 
 Record each in the evidence file. A breach needs the measurement, a rationale and an approval by someone other than
-the author.
+the author, recorded as a GitHub PR approval or an explicit user statement in the PR thread; where no independent
+approver exists, explicit user ratification recorded in the PR thread (`[const §VIII.2]`).
 
 ## 7. Close-out checks
 

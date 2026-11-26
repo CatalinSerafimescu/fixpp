@@ -72,7 +72,14 @@ marked **(orchestrator)** is run or requested by the orchestrator; every other t
   by label or by binary filter. Sanitizer lanes (asan, ubsan, tsan) run the same targeted set,
   never `-L session` or a full suite. Exactly **one** full `ctest`, on `linux-clang-debug` in `$V` (T169; never `$M`, the mutant
   tree), as the last test run before the labelled push (Article XVII §7's evidence). MSVC builds the feature's own targets with `-k 0` and runs their
-  targeted tests; msvc-asan only if a change needs it. After a small late fix only the touched cells re-run.
+  targeted tests; msvc-asan only if a change needs it (quickstart §5 gives the condition). After a small late fix only the touched cells re-run. Quickstart §5 is the one list of the scope,
+  including T170's `linux-gcc-release` build, T171's whole pytest suite and T172's buildless Tier 1 steps. "The
+  binaries whose test sources the branch touches" is derived, not listed: `git diff --name-only "$(git merge-base HEAD
+  origin/main)" HEAD -- tests` mapped to the ctest entries of each file's CMake target. A suite whose test sources are
+  untouched but whose production code changed is covered only by the one full ctest and by CI's full matrix (quickstart
+  §5 states that residual). A late code fix after T169 leaves T169's evidence at its SHA: the PR body's line names the
+  SHA the full ctest ran at, and the late fix's targeted re-runs and T177's list are recorded against the new head; no
+  second full ctest (owner rule).
 - **RED on the base.** Cells are committed in `$T` (commit `C<n>`), overlaid on `$B` with
   `git -C "$B" restore --source=C<n> -- $(git -C $T ls-tree --name-only C<n> tests/session/ | grep -E '^tests/session/test_106_') tests/session/CMakeLists.txt`
   plus every other test file the task names (a re-pinned 104 or 099 cell, a config cell), reconfigured (a reading counts
@@ -176,7 +183,9 @@ shows). Re-derived at HEAD. **Blocks every later phase.**
   list every hit for T029 and T083.
 - [ ] T007 [P] Gate call sites (D1): `git grep -n 'logon_identity_admitted_()\|logon_credentials_admitted_(' -- src/session`.
   On the base it must show the two arms' sites, both too-low branches and arm S; record each site's enclosing function
-  for T049.
+  for T049. Also rule research F-3's stale-identity path: whether `drive_reconnect()` can install a connection before the first
+  `open()` and leave `live_peer_id_` unconsumed when it ends (`open()` itself refuses unless `never_opened`; read
+  `drive_reconnect`'s preconditions and `git grep -n 'live_peer_id_' -- src/session`); unreachable, or a task that makes `begin_connection_()` reset `live_peer_id_`, with a cell.
 - [ ] T008 [P] `src/session/session.cpp`: The D2 walk (D2, "Returns after the base's advance"): walk `on_inbound_not_connected_` and
   `on_inbound_logon_sent_` from their `check_inbound` call to `record_state_transition_(fsm_state::Active)`, listing every
   `co_return`. The S3 Reject of both arms must appear. Compare the list with research D2's table row by row; a return
@@ -228,7 +237,7 @@ shows). Re-derived at HEAD. **Blocks every later phase.**
   an ending Logout's reason is its Text(58).
 - [ ] T017 [P] Sleepers (D3, #715): `git grep -n 'sleep_until\|await_deadline' -- src/session/session.cpp`, each hit
   read for which coroutine sleeps there and what else of this Session sleeps at the same time; kept for T090.
-- [ ] T018 [P] C-ABI surfaces (D7): `git grep -nE 'MINOR 18|1\.18' -- include tests bindings tools ci`, each hit classed
+- [ ] T018 [P] C-ABI surfaces (D7): `git grep -nE 'MINOR 18|1\.18' -- include tests bindings tools ci examples`, each hit classed
   "pins the minor" (moved in T150) or "history" (unchanged), recorded per consumer category of Article X §7 (the
   Python binding, the tests with `tests/interop` as its own row, examples, the CI and tool scripts), with a seeded known
   positive in `$M` for `bindings/` so a zero there could report non-zero; the generator of `tools/capi_freeze.sha256`
@@ -366,9 +375,10 @@ US5).
   `TomlHandshake106.AcceptorKeyAbsent_Default1500`.
 - [ ] T037 In `$M`'s `src/config/toml_config_loader.cpp`: The root key accepted at session scope (the refusal in `toml_config_loader.cpp` deleted); RED:
   `TomlHandshake106.AcceptorKey_AtSessionScope_Refused`.
-- [ ] T037a **(orchestrator)** Article X §6 `/plan` sign-off: owner pre-approved the plan 2026-11-25 (autonomous
+- [x] T037a **(orchestrator)** Article X §6 `/plan` sign-off: owner pre-approved the plan 2026-11-25 (autonomous
   end-to-end delegation); record in plan.md (Constitution Check, row XII §9, XI §7, X §6) with the date, the words and
-  the bundle head. Before T038.
+  the bundle head. Before T038. Done at step 9 (checklist audit, 2026-11-26): plan.md's row records "I'll pre-approve
+  the plan" (owner, 2026-11-25, as relayed by the orchestrator) at bundle head `edf0a758`.
 
 **Checkpoint**: the enumerator, the three fields and the keys load; every story may start.
 
@@ -806,7 +816,8 @@ cells; `-L 105` and the 538 binary as guards.
   (research D9 row R2(a); Release, label `106`): a real Engine session over `system_clock_source` under `B-544-1`'s two
   conditions. Send half: HeartBtInt 30 s; after warm-up 20 spaced sends 100 ms apart, W = 50 ms, limit off and on: zero
   global allocations and no write-timeout record. Emit half: allocations per Heartbeat cycle at the head minus the base's
-  under identical traffic, limit off, must be 0; the base half built on `$B` with `-DFIXPP_106_ALLOC_BASE=ON` (T004),
+  under identical traffic (research D9 row R2(a) defines it), must be 0, limit off and again limit on against the base's
+  limit-off reading; the base half built on `$B` with `-DFIXPP_106_ALLOC_BASE=ON` (T004),
   the TU and `tests/alloc_guard/CMakeLists.txt` overlaid, the reconfigure rc 0. Known positives: M5 and M8 (T125, T126). The zero covers the connection bound only.
 - [ ] T109 [US4] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C5`); record that none builds on `$B` but the emit half's base build, and read
   each cell's RED under its mutant at `H4` (the mutant tasks below). Record the base emit-half count for T108.
@@ -1017,7 +1028,9 @@ transport binary's `AsioTlsTransportErrorPaths.*` and `-L 105`'s `TlsClose105.*`
   credentials rule's width, N-11), `B-106-2` (NextNumIn kept on every Logon refusal, with D2's table), `B-106-3` (the
   give-up with a write blocked, D4's instant, the one ending), `B-106-4` (`write_timeout_ms`), `B-106-5` (the two
   handshake keys), `B-106-6` (the surfaces: C-ABI 1.19 BREAKING behaviour only; the C++ layout of `Session`,
-  `SessionConfig`, `EngineConfig`, `EngineEstablishment`; the additions); `L-106-a` to `L-106-f` as research D8 and
+  `SessionConfig`, `EngineConfig`, `EngineEstablishment`; the additions `SeqnumManager::classify_inbound` and
+  `CompIdAuthorizationPolicy::has_logon_validator`; the error enumerator `session_write_timeout` (136) and its C
+  mapping); `L-106-a` to `L-106-f` as research D8 and
   contract C-8 word them (`L-106-f` pinned by `GiveUp106.PreActive_LimitOff_NotCutByEstablishment`); the C-7 departures
   table copied, not re-derived. Each row cites its cells by name.
 - [ ] T155 `spec/behaviors-and-limitations.md`: Close T020: re-run its grep on the edited live file; every hit is now amended, retired or ruled
@@ -1046,7 +1059,8 @@ transport binary's `AsioTlsTransportErrorPaths.*` and `-L 105`'s `TlsClose105.*`
   checked by grep with a seeded positive first (a scratch line naming `write_timeout` in `$M`'s `include/fix/c_api/session.h`
   must be reported): `git grep -n toml include/fix/c_api` is empty, and
   `git grep -nE 'write_timeout|handshake_timeout' -- include/fix/c_api src/capi bindings` reports nothing that sets either
-  value (the `session_write_timeout` mapping in `src/capi/error.cpp` is the one expected hit). Record the output.
+  value: every hit is read, and a hit that maps or names an error (such as the `session_write_timeout` case in
+  `translate`) is not a setter. Record the output.
 
 ---
 
@@ -1069,7 +1083,8 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   runs of `engine_send_bench` (also CI-paired), `session_send_bench` and `on_inbound_frame_bench`, 105's T138 method: a
   release tree of `$B` on `/mnt/wsl/fixppbuild` whose path is padded to the candidate tree's length (`cmp` the `.text` of
   a same-source build to prove the layout matches), min per tree, +5 % one-sided. Results in the evidence file; a breach
-  needs the measurement, a rationale and an approval by someone other than the author.
+  needs the measurement, a rationale and an approval by someone other than the author, or, where no independent approver
+  exists, explicit user ratification recorded in the PR thread (`[const §VIII.2]`).
 - [ ] T165 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Targeted sanitizer lanes `linux-clang-asan`, `linux-clang-ubsan` and `linux-clang-tsan` (owner rule): only
   `-L 106`, `-L 105`, `-L 104`, `-L 099` and the binaries whose test sources the branch touches (config, transport,
   C-ABI, 538); on TSan the `GiveUp106`, `WriteTimeout106`, `OneEnding106` and `ConnectionBound106` cells also with
@@ -1117,7 +1132,8 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   plus the ONE full ctest of T169; writes `.specify/decisions/106-logon-guards-write-bounds-verify.md`. Re-run
   T162, T173, T174, T172 and T175 as the last actions before any labelled push.
 - [ ] T178 **(orchestrator)** The PR body, written before the gate labels and before CI runs (an edited body re-queues the
-  matrix): C-ABI 1.19 **BREAKING** (behaviour only) with the `version.h` history entry and `B-106-6`; the C++ layout changes;
+  matrix): C-ABI 1.19 **BREAKING** (behaviour only) with the `version.h` history entry and `B-106-6`; the C++ layout changes,
+  the C++ additions and the error enumerator (`B-106-6`'s list);
   the `local build: green on linux-clang-debug @ <sha>` line (T169); the Gate A outcome
   (`.specify/decisions/106-logon-guards-write-bounds-gatea.md`) and, after it, the Gate B outcome; ruling R14 flagged for the
   owner's review at merge; closing keywords only for #702, #703, #714, #717 and #724, with `closingIssuesReferences` read
@@ -1139,7 +1155,7 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   normative references name (`T-041` FIXS authorization linked to authentication; `TC-001` Logon 1B/1S; the
   `[FIX-SL §4.3.11]`, `§4.5.1`, `§4.5.5` and `§4.6.4` session rows); flip each feature-owned row to `done` with the PR and
   evidence and its `spec/coverage-index.md` entry (the exact keys of spec.md's Normative References, `[FIXS §4.4]` as its
-  "Added T-041" gap row), or record "none owned" after the check. Rows this feature amends but does not own get a dated
+  FIXS section's §4.4 row, also named in the "Added T-041" gap note), or record "none owned" after the check. Rows this feature amends but does not own get a dated
   "106 amends this row" note naming the B-106 rows and witnesses (cell names checked against the head binaries'
   `--gtest_list_tests`); their state does not change.
 - [ ] T183 **Feature-completeness audit (MUST be the FINAL task)**: against the final head, (i) every row of this file is

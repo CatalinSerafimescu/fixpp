@@ -21,6 +21,14 @@ R1 to R5 (round 1) and R6 to R10 (round 2) are recorded in spec.md and applied h
   `open()` emits the Logon through `cfg_.transport_send` with no handshake of its own. On mTLS every acknowledgement
   on that path therefore fails closed in the gate's arm (2), as 104's `Precedence_DirectMtlsInitiator` and
   `UnaskedResetAck104.Mtls_Unauthorised_NoReset` pin. Such an initiator cannot reach Active over mTLS.
+  Every judgment MUST read the current connection's identity. Each `attach_accepted_transport` and
+  `install_reconnected_transport` assigns `live_peer_id_` from that connection's handshake, overwriting any earlier
+  value, and the consuming gate resets it, so a reconnected connection whose certificate differs is judged on its own
+  certificate. An engine-managed or `drive_reconnect()` initiator's second judgment, in the arm, reads the identity its
+  connect authorised. `open()` refuses unless the session was never opened (`session_already_open`), so the one path that could carry an
+  older value is a `drive_reconnect()` before the first `open()` whose connection ended with its identity unconsumed,
+  followed by `open()` over `cfg_.transport_send`. That ordering is pre-existing (the base's gate reads the same
+  member); tasks T007 rules it unreachable, or `begin_connection_()` resets `live_peer_id_`.
 - **F-4. The inbound advance has readers before Active.** The acceptor's reply Logon advertises
   `next_inbound_unsafe()` as its NextExpectedMsgSeqNum(789) (027 E-OBO: the advance has happened). The 141=Y reset
   units write absolute targets (`run_reset_unit_`), computed from `logon_inbound_advanced(_init)`.
@@ -52,7 +60,10 @@ change sequence state, and nothing before that point sends or changes state.
 1. **Unchanged, silent, ahead of everything:** the header scan, the garbled-frame accounting, `logon_arm_superseded_`,
    `dispose_unparseable_` (silent in NotConnected and LogonSent), `establishment_frame_refused_`, and the late-parse
    close of the validate gate (`close_on_late_parse_failure_`, terminal, sends nothing). On the initiator, 104's
-   arm S (the `reset_on_logout` Logout branch) already runs the gate first and is unchanged.
+   arm S (the `reset_on_logout` Logout branch) already runs the gate first and is unchanged. This is the whole list of
+   what runs before the gates at `9d81082a` (re-derive: walk each arm from its entry to `interpret_logon` and list every
+   call and `co_return`). Each sends nothing and changes no sequence number, counter or store (the garbled-frame
+   accounting counts frames, not sequence numbers), so FR-003 holds for each by construction.
 2. **The validate-first Reject is decided, then held back** until the identity is known. The new callee
    `logon_identity_refuses_(frame, consume)` returns the decision. It is a callee so that no new local enters the
    arms' coroutine frames (104's T093 measurement).
@@ -166,7 +177,7 @@ to `record_state_transition_(fsm_state::Active)`, listing every `co_return`; eac
 | initiator | mTLS gate refusal | consumed in memory | before the classification (D1) |
 | initiator | 789 too high or invalid: Logout, `Disconnected` | consumed in memory | unchanged |
 | initiator | 789 below: the walk fails (the `!h789` error return included) or is superseded | consumed in memory | unchanged |
-| initiator | the `logon_arm_superseded_` return before `Active` (`close()`, `Engine::stop()` or a reconnect drain) | consumed in memory | unconsumed: the commit did not run. Not a refusal: no cell, no FR-005 change (N-5) |
+| initiator | the `logon_arm_superseded_` return before `Active` (`close()`, `Engine::stop()` or a reconnect drain) | consumed in memory | unconsumed: the commit did not run. Not a refusal: no cell, no FR-005 change (N-5). The next connection sees NextNumIn at the frame's number, which is the store's value on the base too (the persist runs only after Active), so the change makes memory agree with the store; disclosed in `B-106-2` |
 | acceptor | a `logon_arm_superseded_` return after `LogonReceived` (after the unit, after the reply, before `Active`) | consumed in memory | as the base: the commit ran before `LogonReceived`. Not a refusal: no cell |
 | acceptor | a refusal after the `reset_on_logon` reset (too high: silent; S3 / 1137 Reject) | NextNumIn 1 and the store reset | as the base: the reset ran before the refusal (residual `L-106-a`; Q3, resolved) |
 | initiator | a refusal after a completed asked or unasked unit (the 789 ones; a superseded return after a unit) | the unit's targets stand | as the base: the unit's targets stand (residual `L-106-a`) |
@@ -200,7 +211,10 @@ N-9) replaced round 0's bound spawned per emit. The bound is shared with D5's wa
     return, when a cancelled drain left the connection with a write or emit in flight (data-model E-3); at most one
     bound runs at a time.
   - It runs on that coroutine's executor, by 105's rule for its own bound: the entering coroutine's executor, never
-    `executor()`.
+    `executor()`. Every spawner (the liveness loop, a live write in `live_write_serialized_`, `drive_reconnect`'s
+    respawn) runs on the session's serialised domain (`[const §XI.4]`; on a direct driver, the executor the user attests
+    serialised), because every live write runs inside it under `write_gate_`; so the bound's members stay
+    strand-confined whoever spawns it.
   - It is joined by its own counter, `connection_bound_counter_`. `close()` and `drain_for_reconnect_` wait for that
     counter to reach zero, `install_reconnected_transport` asserts that it is zero, and `~Session` asserts it is zero, as it asserts `ending_logout_bound_counter_` (N-4). Each joiner's exit term, derived from what it sets and waits on, is data-model E-3's joiner table.
 - **What it times.** Two strand-confined records arm it, each set by its writer with no suspension: the liveness emit
@@ -235,7 +249,9 @@ N-9) replaced round 0's bound spawned per emit. The bound is shared with D5's wa
 frame, constructed on its executor when the bound is spawned. `connection_bound_wait_(timer, deadline)` is the bound's
 one private callee that waits. It holds both branches below, and everything the bound decides is shared between them.
 - **On the shipping clock** (`effective_clock_` is `fixpp::core::system_clock_source`, a `final` class, tested once at
-  the spawn with a `dynamic_cast` on that cold path, as `engine.cpp` casts its transports):
+  the spawn with a `dynamic_cast` on that cold path, as `engine.cpp` casts its transports; `effective_clock_` is set
+  from `cfg_.clock_override`, else the Engine's clock, and nothing changes it during a connection, so one test per
+  spawn is enough):
   - The deadline is set on the timer directly. `system_clock_source::steady_now()` is `std::chrono::steady_clock::now()`,
     which is `asio::steady_timer`'s clock, so a deadline needs no conversion.
   - A park is `expires_at(time_point::max())`, a wake is the timer's `cancel()`, and each wait is one
@@ -248,7 +264,8 @@ one private callee that waits. It holds both branches below, and everything the 
   shipping-clock cells bind the timer branch.
 - **What it allocates (R2(a)).** Once per connection, at the spawn: the bound's frame, its timer inside it, and
   `co_spawn`'s state. Per wait on the shipping clock: one recycler block (a cache hit under `B-544-1`'s two conditions),
-  nothing from the global heap. Re-derive: the bound's only `co_spawn` (`git grep -n 'run_connection_bound_' -- src`);
+  nothing from the global heap. When either condition fails, the wait allocates as every gated path does there, which
+  `L-497-1`'s conditions (1) and (2) already disclose. Re-derive: the bound's only `co_spawn` (`git grep -n 'run_connection_bound_' -- src`);
   the shipping branch names no `Clock` member. The binding witness is D9's mallocnesia cell; its known positive is M8.
 - **Its own wait slot (R2(b)).** No other sleeper arms the timer; its `expires_at` and `cancel` reach only its own
   wait. Unregistered with the clock, it is not reached by `Clock::cancel_sleeps()`; every teardown wakes it.
@@ -256,12 +273,17 @@ one private callee that waits. It holds both branches below, and everything the 
   `sleep_until` caller, the held cap with none pending (data-model E-3), replaces the loop's own sleep at the gate, so
   it adds no concurrent sleeper. Re-derive: `git grep -n 'sleep_until\|await_deadline' -- src/session/session.cpp`, each
   hit read for which coroutine sleeps there and what else of this Session sleeps at the same time.
-- **The condition, disclosed (`L-106-e`; a third condition on `B-544-1`'s zero, in R-7's form, ruled 2026-11-26 by the orchestrator under the owner's delegation (spec.md Clarifications, R14), flagged for the owner's review at merge).** When the session's effective clock (`SessionConfig::clock_override` when set, else `EngineConfig::clock`) is not `system_clock_source`, each wait of the bound is `timer.async_wait(…) || detail::await_deadline(*effective_clock_, deadline)`. With `write_timeout_ms` set, each spaced write arms one such wait; each liveness-emit edge arms one with the limit on or off. No zero is claimed on that branch. That covers both the clock's `sleep_until`, which is the clock's code, and fixpp's own `||` group (its parallel-group state, its two spawned arms and `await_deadline`'s frame), which no cell gates. The base already waits through that clock once per liveness cycle (`run_liveness_loop`), so the clock's per-emit cost is pre-existing. New in 106 are the per-write cost and the `||` group on the uncontended write and emit paths; the base's only per-cycle `||` (`run_liveness_loop`, behind a held resend answer) is the cold path of `B-103-8`.
+- **The condition, disclosed (`L-106-e`; a third condition on `B-544-1`'s zero, in R-7's form, ruled 2026-11-26 by the orchestrator under the owner's delegation (spec.md Clarifications, R14), flagged for the owner's review at merge).** When the session's effective clock (`SessionConfig::clock_override` when set, else `EngineConfig::clock`) is not `system_clock_source`, each wait of the bound is `timer.async_wait(…) || detail::await_deadline(*effective_clock_, deadline)`. With `write_timeout_ms` set, each spaced write arms one such wait; each liveness-emit edge arms one with the limit on or off. No zero is claimed on that branch. R14 covers both halves (its step 9 scope, spec.md Clarifications): `B-544-1` names the send half as its third condition, because the send is a path it gates; the emit half is on the heartbeat path `[2d §8]` extends `[const §VIII.5]` to, which `B-544-1` does not gate, and `L-497-1` (6) and `L-106-e` name both. On such a clock the own-wait claim (R2(b)) is the clock's to keep: a user clock whose `sleep_until` keeps one timer per Session (the shipping clock's slot design, #715) would let the bound's wait re-arm the loop's sleep, as M8 shows on the shipping clock; `L-106-e` discloses it. That covers both the clock's `sleep_until`, which is the clock's code, and fixpp's own `||` group (its parallel-group state, its two spawned arms and `await_deadline`'s frame), which no cell gates. The base already waits through that clock once per liveness cycle (`run_liveness_loop`), so the clock's per-emit cost is pre-existing. New in 106 are the per-write cost and the `||` group on the uncontended write and emit paths; the base's only per-cycle `||` (`run_liveness_loop`, behind a held resend answer) is the cold path of `B-103-8`.
 
 **Cancellation and failure (C-4).**
 - **No cancellation slot.** The bound binds none and awaits no lock (fixpp#583's trap needs a lock). The shipping
   wait completes by its timer; the other branch's `||` retires the losing arm as 105's bounds do. Teardown is a wake
-  plus the strand-confined exit test, never an emitted signal.
+  plus the strand-confined exit test, never an emitted signal. The non-shipping branch's `||` group runs inside the
+  bound's own coroutine: it changes no other coroutine's cancellation filter (the liveness loop's, the pump's) and takes
+  no lock, so the trap of a lock leaving its coroutine thread's filter terminal does not reach it.
+- **No cancel of a write.** Nothing 106 adds cancels `store_then_emit` or an in-flight `async_write`. Cancelling
+  `store_then_emit` takes the number back and records `Disconnected` (D-OUT-2) before any slot-74 record, and a
+  cancelled `async_write` need not complete. A blocked write is ended only by the transport's close.
 - **One close** (N-2). Every close below, and D5's, is `spawn_connection_close_(live_transport_shared_())` then
   `connection_end_owed_.reset()`, when `state_ == lifecycle::open`, as `expire_ending_wait_` does (105 E-2).
 - **Spawn failure** (seam `connection_bound_spawn_fails_`, the shape of `ending_bound_spawn_fails_`) fails closed, as
@@ -402,14 +424,20 @@ the acceptor's reply Logon, `honor_peer_next_expected_`'s resend frames), and th
   it is named unreachable for a cut write. The known positive is `Session::send`'s F9 block.
 - **What a blocked send returns (R5).** At the give-up's close, `dispatch_aborted` (`FIXPP_ERR_CANCELLED` in C),
   unchanged (`B-105-8`). At the watchdog, the cut send returns `session_write_timeout` (new; `FIXPP_ERR_TRANSPORT_IO`
-  in `fixpp_session_send`'s map, unreachable from C while C-4.1 holds), and the writes queued behind it return
+  through `translate`, the one map `fixpp_session_send` applies; unreachable from C while C-4.1 holds), and the writes queued behind it return
   `dispatch_aborted`, unchanged.
 - The enumerator: `session_write_timeout = 136`, appended after `wire_undefined_tag` (`[const §X.4]`), with
   `error_message` and the translation in `src/capi/error.cpp`.
   - In C it maps to the existing `FIXPP_ERR_TRANSPORT_IO`, as `transport_write_error` does. There is no new C
     constant, so the occupancy file is untouched. The CSV `tests/capi/expected_error_map.csv` gains the row.
+  - `[const §X.4]`'s downgrade frame is not involved: `translate_for_consumer` keys on the C code's introducing minor
+    (`introducing_minor`, `src/capi/error.cpp`), and `FIXPP_ERR_TRANSPORT_IO` is a C-ABI 0.2.0 code, so no consumer
+    minor maps it to `FIXPP_ERR_UNKNOWN`. §X.4's append-only audit trail (`tools/abi_history/error_codes_v1.txt`)
+    lists published C codes and is untouched; the C++ append is pinned by the error-completeness tests T013's census
+    lists.
   - `FIXPP_ERR_UNKNOWN`, the precedent of slots 73 and 74, was not taken. This code is returned by a call, the cut
-    `send`; codes 73 and 74 are carried only by a log record.
+    `send`; codes 73 and 74 are carried only by a log record. `translate` is a total switch (`-Wswitch`), so the code
+    needs a mapping whether or not C can reach it, and that mapping is what a C caller would meet should C-4.1 change.
   - Recipe for every site that names the last enumerator: `git grep -n wire_undefined_tag -- include src tests tools
     bindings`.
 
@@ -485,7 +513,19 @@ the acceptor's reply Logon, `honor_peer_next_expected_`'s resend frames), and th
     `_register_send_callback`, none in `_open`'s. The two callback clauses are unchanged by 106: it changes which
     admin frames a Logon arm writes and when an ending comes, not which application messages are delivered or
     originated.
-- MINOR pins census: `git grep -nE 'MINOR 18|1\.18' -- include tests bindings tools ci`.
+  - No C callback carries `onLogout`: `fixpp_session_register_callback` is the inbound receive callback and
+    `fixpp_session_register_send_callback` the outbound `toApp` one (re-derive: `git grep -n -i logout include/fix/c_api`
+    finds clause text only), so FR-017's at-most-once `onLogout` changes no C clause.
+- Each change is breaking by `[const §X.7]`'s definition, "sees a call it could already make fail or return a result
+  other than the one documented": `fixpp_session_send` blocked at the give-up returns `FIXPP_ERR_CANCELLED` where it
+  hung; `fixpp_session_is_established` turns false at the give-up's ending where it stayed true; `fixpp_session_close`
+  returns `FIXPP_ERR_THREAD_SESSION_LIFECYCLE` for a session a now-silent refusal keeps from establishing (contract
+  C-6); and the frames a C session's peer receives at a Logon change (C-1, C-2).
+- §X.7's BREAKING marks, each with its task: the `version.h` history entry (T148), the documentation of each affected
+  declaration in `session.h` (T149), the PR description (T178) and the B&L delta (`B-106-6`, T154).
+- MINOR pins census: `git grep -nE 'MINOR 18|1\.18' -- include tests bindings tools ci examples` (`tests/interop` is
+  the interop harnesses' row; `examples` is in the path list so a pin there is found). "Python binding: version pins
+  only" is that census's reading for `bindings/`, recorded by T018 with a seeded positive.
 - Article X §7's predicate: `gh release list --exclude-drafts` is empty at the PR head, so the MINOR bump stands.
   The result is recorded in the evidence file.
 - **C++ BREAKING (public layout):** `SessionConfig` (+`write_timeout_ms`), `EngineConfig` and
@@ -501,15 +541,17 @@ the acceptor's reply Logon, `honor_peer_next_expected_`'s resend frames), and th
     roles" (D1). Its "Consume limit" clause says the gate Reject and the block both keep NextNumIn on every role (D2).
     It cites `L-104-8` as closed.
   - `B-105-3`. "The write counted from the return of the TestRequest's store and write" stays for a written
-    TestRequest. A TestRequest or Heartbeat whose write has not returned is given up at L + 3T (D4). "With none pending
-    before the hold there is no cap, `L-105-f`" becomes "capped at L + 3T with one pending or none" (D3).
+    TestRequest. A TestRequest or Heartbeat whose write has not returned is given up at L + 3T (D4), and the Logout's
+    Text names the issued TestReqID even when that TestRequest's write did not complete, so the peer may never have
+    received it (D4, "Supersedes"). "With none pending before the hold there is no cap, `L-105-f`" becomes "capped at
+    L + 3T with one pending or none" (D3).
   - `L-093-12`: the store calls that hold `close()`'s and `stop()`'s joins include the liveness loop's TestRequest or
     Heartbeat store call; the give-up at G and the close at G + B still happen (106).
   - `B-544-1`: its zero for a sequential `Session::send` gains a third condition: "and, when `write_timeout_ms` is set, the session's effective clock is `system_clock_source`" (106, `L-106-e`; ruled 2026-11-26 by the orchestrator under the owner's delegation (spec.md Clarifications, R14), flagged for the owner's review at merge). `L-497-1` gains condition (6) *Clock*, with `L-106-e`'s text. Clause by clause (live text → new text):
     - `B-544-1` title. Old: "… and a sequential `Session::send` make no global-heap allocation in steady state, on two conditions: the Engine's executor's target type is exactly `asio::io_context::executor_type`, and the thread that runs the session's handlers stays inside one scheduler call (`io_context::run`) across messages." New: "… and a sequential `Session::send` make no global-heap allocation in steady state, on two conditions: the Engine's executor's target type is exactly `asio::io_context::executor_type`, and the thread that runs the session's handlers stays inside one scheduler call (`io_context::run`) across messages; and, for `Session::send` only, on a third: when `write_timeout_ms` is set, the session's effective clock is `system_clock_source` (106, `L-106-e`)." The inbound read, the hydrate apply step and `MemoryStore::store` take no wait of the bound and keep the two conditions.
-    - `B-544-1` body. Old: "The two conditions are the `[const §VIII.5]` deviation's justification (`.specify/544-hot-path-zero-alloc.md` §5, owner ruling R-6); the slot-count obligation is a build precondition, not a third condition (owner ruling R-12)." New: "The two conditions are the `[const §VIII.5]` deviation's justification (`.specify/544-hot-path-zero-alloc.md` §5, owner ruling R-6); the third, on `Session::send` only, extends that justification under R-7's reading of §XV.1 (106 ruling R14, orchestrator under the owner's delegation, flagged for the owner's review at merge). The slot-count obligation is a build precondition, not a condition (owner ruling R-12)."
+    - `B-544-1` body. Old: "The two conditions are the `[const §VIII.5]` deviation's justification (`.specify/544-hot-path-zero-alloc.md` §5, owner ruling R-6); the slot-count obligation is a build precondition, not a third condition (owner ruling R-12)." New: "The two conditions are the `[const §VIII.5]` deviation's justification (`.specify/544-hot-path-zero-alloc.md` §5, owner ruling R-6); the third, on `Session::send` only, extends that justification under R-7's reading of §XV.1 (106 ruling R14, orchestrator under the owner's delegation, flagged for the owner's review at merge). The slot-count obligation is a build precondition, not a condition (owner ruling R-12). The liveness emit is on no path this row gates; on a non-shipping clock its per-emit-edge wait is `L-106-e`'s and `L-497-1` (6)'s."
     - `L-497-1` title. Old: "the zero allocation of `B-544-1` holds only under its two conditions and on the paths it gates". New: "the zero allocation of `B-544-1` holds only under its conditions and on the paths it gates".
-    - `L-497-1` body. Insert after condition (5) *TLS*'s sentence "… tracked as fixpp#565." and before "**Status: disclosed**": "(6) *Clock* (106, `L-106-e`). When `write_timeout_ms` is set and the session's effective clock (`SessionConfig::clock_override` when set, else `EngineConfig::clock`) is not `system_clock_source`, each spaced `Session::send` write arms one wait of the connection bound, `timer.async_wait(…) || detail::await_deadline(*effective_clock_, deadline)`. That wait may allocate per message, through the clock's `sleep_until` and fixpp's own `||` group (its parallel-group state, its two spawned arms and `await_deadline`'s frame); no zero is claimed for it. With the limit off, or on `system_clock_source`, the send path is as before."
+    - `L-497-1` body. Insert after condition (5) *TLS*'s sentence "… tracked as fixpp#565." and before "**Status: disclosed**": "(6) *Clock* (106, `L-106-e`). When `write_timeout_ms` is set and the session's effective clock (`SessionConfig::clock_override` when set, else `EngineConfig::clock`) is not `system_clock_source`, each spaced `Session::send` write arms one wait of the connection bound, `timer.async_wait(…) || detail::await_deadline(*effective_clock_, deadline)`; and, with the limit on or off, each liveness-emit edge arms one such wait. Each may allocate per message, through the clock's `sleep_until` and fixpp's own `||` group (its parallel-group state, its two spawned arms and `await_deadline`'s frame); no zero is claimed for it. With the limit off the send path is as before; on `system_clock_source` both paths are as before."
   - Census, run before the edit: `grep -n 'L-093-12\|L-104-3\|L-104-8\|L-105-f\|B-544-1\|L-497-1\|tr_written\|runs ahead of mTLS'
     spec/behaviors-and-limitations.md`. Its known positive is `B-099-2`'s line. Each hit is ruled in tasks.md: amended,
     or named as unaffected.
@@ -518,11 +560,12 @@ the acceptor's reply Logon, `honor_peer_next_expected_`'s resend frames), and th
   - The give-up no longer waits behind a blocked write, and the held no-pending case is capped (D3).
   - What stays open:
     - With the limit off, a peer that keeps sending and never reads holds a non-ending write until `close()` or
-      `Engine::stop()`, as QuickFIX C++'s and Go's defaults do.
+      `Engine::stop()`, as QuickFIX C++'s and Go's defaults do. A C session always runs with the limit off (contract
+      C-4.1), so for a C caller this holds on every session.
     - With `logout_disconnect_timeout_ms` 0 or no clock, ending Logouts stay unbounded, and so does a give-up decided
       while a write is blocked. The write limit does not cut that write once the give-up holds the claim (D11).
 - **New rows**, in section `## 106`:
-  - `B-106-1`: the identity gates first (silent, no state change), including the credentials rule's width (D1, N-11);
+  - `B-106-1`: the identity gates first (silent, no state change), including the credentials rule's width (D1, N-11), the observables of each refusal class (contract C-1.3), and that a direct mTLS initiator started by `open()` holds no peer identity and never reaches Active (contract C-1.7; start it with `drive_reconnect()`);
   - `B-106-2`: NextNumIn kept on every Logon refusal, with D2's table;
   - `B-106-3`: the give-up with a write blocked, D4's instant, and the one ending (D11);
   - `B-106-4`: `write_timeout_ms`;
@@ -534,7 +577,7 @@ the acceptor's reply Logon, `honor_peer_next_expected_`'s resend frames), and th
   - `L-106-b`: the write-timeout reason is carried only by its record and by the cut call's return, as `L-105-c`.
   - `L-106-c`: the bound event's new position, and a validator called twice per connection (D1).
   - `L-106-d`: the session-level handshake key has no effect on a plaintext or acceptor session.
-  - `L-106-e`: the zero-allocation and own-wait claims of D3 and D5 hold on `system_clock_source` only. When the session's effective clock (`clock_override`, else `EngineConfig::clock`) is another `Clock`, the connection bound waits through its `sleep_until` inside an `||` group: once per spaced write with `write_timeout_ms` set, and once per liveness-emit edge. That may allocate per message, and no zero is claimed for it. It is carried as a condition in `B-544-1` and `L-497-1` (amended rows above), under ruling R14 (2026-11-26, orchestrator under the owner's delegation, flagged for the owner's review at merge).
+  - `L-106-e`: the zero-allocation and own-wait claims of D3 and D5 hold on `system_clock_source` only. When the session's effective clock (`SessionConfig::clock_override` when set, else `EngineConfig::clock`) is another `Clock`, the connection bound waits through its `sleep_until` inside an `||` group: once per spaced write with `write_timeout_ms` set, and once per liveness-emit edge with the limit on or off. That may allocate per message, and no zero is claimed for it. `B-544-1` carries the send half as its third condition and `L-497-1` (6) carries both halves (amended rows above), under ruling R14 and its step 9 scope (2026-11-26, orchestrator under the owner's delegation, flagged for the owner's review at merge). On such a clock the own-wait claim is the clock's to keep: a user clock whose `sleep_until` keeps one timer per Session would let the bound's wait re-arm the liveness loop's sleep (#715's hazard); a user clock must serve concurrent sleepers of one Session independently, as `mock_clock` does.
   - `L-106-f` (N-1; pre-existing, not fixed by 106): before Active, with the limit off, a write blocked inside the Logon
     arm (the initiator's Logon in `open()`, the reply Logon, a 789 resend frame, a Logon-arm Reject) is not cut by
     `logon_timeout_ms`: the Engine tests that deadline only between deliveries and while it reads. `write_timeout_ms`
@@ -560,10 +603,13 @@ cell releases its blocked writes at teardown, so a base run fails by assertion, 
 - **Instants (mock-clock cells; C-4).** G := `detail::held_test_request_cap`'s value, L + 3T + 1 ns, for an emit not
   returned, or 105's max(L + 2T, `tr_written_at` + T) + 1 ns for a written TestRequest. `mock_clock::advance` and
   `step_to` set the new time before they complete the due waiters, so a woken decider reads the advanced instant: every
-  timer cell reaches G with `step_to(G)` and drains, never with a coarser `advance`. It asserts the slot-74 record
+  timer cell reaches G with `step_to(G)` and drains, never with a coarser `advance` (the one exception is
+  `OneEnding106.BothDueAtOneWake`, row FR-017). It asserts the slot-74 record
   absent at G − 1 ns and present at G, then open at G + B − 1 ns and closed at G + B. The write-limit cells do the same
   from the write's start S: open at S + W − 1 ns, closed at S + W. W is `write_timeout_ms`; L stays
-  `last_inbound_steady_` (N-6). The shipping-clock and real-socket cells keep their wall-clock budgets. Each timing row states its parameters and the inequality of its instant under test against the competing instant, with the margin (Gate A round 3, root cause #3).
+  `last_inbound_steady_` (N-6). The shipping-clock and real-socket cells keep their wall-clock budgets, on every lane they run on. A timing failure of
+  one on a sanitizer lane is re-run once with its budget × 10 before it is read as a defect or as a budget change (a
+  timeout is not a hang until then). Each timing row states its parameters and the inequality of its instant under test against the competing instant, with the margin (Gate A round 3, root cause #3).
 
 | FR | Cells | RED / mutant |
 |---|---|---|
@@ -591,7 +637,7 @@ cell releases its blocked writes at teardown, so a base run fails by assertion, 
 | FR-017 (D11) | `OneEnding106.<First>Then<Second>` [seam where the limit is set], each pair with the suspension point it exercises (root cause #2): GiveUp/Watchdog (the loop, sleeping, decides at G while a send is blocked and armed); Watchdog/GiveUp (the bound cuts the send at S + W < G; the loop wakes at G); Watchdog/EndingLimit, EndingLimit/Watchdog (an R-2 Logout queued behind a blocked send); Watchdog/Close, Close/Watchdog, GiveUp/Close (`close()` called with the send blocked). Parameters and inequalities: GiveUp106's H = T = 10 s, W = 300 ms, B = 500 ms. GiveUp/Watchdog: the send blocks at S = G − 100 ms, so G < S + W = G + 200 ms < G + B (margins 200 ms and 300 ms: the expiry comes while the give-up's Logout is still bounded). Watchdog/GiveUp: S = G − 500 ms, so S + W = G − 200 ms. Watchdog/EndingLimit: the R-2 decision at D = S + 100 ms, S + W = S + 300 ms < D + B = S + 600 ms (300 ms). EndingLimit/Watchdog: W = 1 s, D + B = S + 600 ms < S + W = S + 1 s (400 ms). Watchdog/Close: `close()` at C = S + W + 100 ms. Close/Watchdog: C = S + 100 ms, so C < S + W < C + B, `close()`'s grace (200 ms and 300 ms). `close()`'s grace is a wall-clock `asio::steady_timer`: the pairs with `close()` set `logout_disconnect_timeout_ms` 5000 ms and issue the mock step at once after `close()`, so the grace cannot expire first in wall time; the 105 ending limit's instants stay on the mock clock. GiveUp/Close: C = G + 100 ms < G + B. `OneEnding106.BothDueAtOneWake` (N-7): the loop in its TestRequest emit, that write armed; one `step_to` from below both G and S + W to an instant at or past both (the one exception to the Instants rule; S = G − W, the step from G − 1 ms to G, both below G + B); the give-up claims. `OneEnding106.Watchdog_PreActive_NoEstablishmentRecord` [seam] (N-1; order inverted in Gate A loop 2 round 2, N-2): Engine rig, the reply Logon blocked, W = 2 s, `logon_timeout_ms` 1 s; at S + W one write-timeout record, no `session_event_establishment_timeout`, no `onLogout`, and still one record and no establishment record at S + W + 1 s. Inequality: the Logon is delivered at 0 and the reply written at S = 0, so the establishment deadline at 1 s precedes the cut at S + W = 2 s by 1 s. On the head the pump does not test the deadline mid-write (R7, `L-106-f`), so the cut is the first decider, and the pump's next test, after the cut, finds the claim taken; the check at 3 s follows the cut by 1 s, with nothing else armed (the liveness loop runs only from Active). Under M10 alone the deadline claims at 1 s, closes and fails the write: an establishment record and no write-timeout record. Each asserts FR-017 as written: one `Disconnected` entry in `fsm_visit_history()` (public on the base), `onLogout` at most once, one close, and the reason records FR-017 names: one where the first claimant is the give-up, the write limit or the establishment deadline, none where it is an ending Logout or `close()`. a pair whose second party is stopped by a state test or is not a claimant is a guard of that test and is not counted toward M9: `WatchdogThenEndingLimit` (the expiry records `Disconnected` with no suspension, so a later R-2 leaf returns at its state test before claiming), `WatchdogThenGiveUp` (the loop, waking at G, fails `liveness_may_originate_()` and returns before `decide_give_up_()`), `WatchdogThenClose` and `GiveUpThenClose` (`close()` takes no claim). In `CloseThenWatchdog` the bound meets E-3's `closing_or_stopped_()` exit row before its expiry row, so its mutant is M9 with that term deleted from the exit row | M9 (the claim test deleted) with M9′ (E-3's exit on a taken claim deleted): two reasons or two entries; a pair GREEN under both is reported as vacuous, not counted. The pre-Active cell: M10 (the pump races `on_inbound_frame` against the establishment deadline), RED without M9 |
 | C-4 | `ConnectionBound106.{SpawnFails_AtLoop, SpawnFails_AtWrite, WaitThrows}` [seam]: fail closed, `Disconnected`, closed once, zero reason records (FR-017). `ConnectionBound106.Teardown_{Close, EngineStop, Drain, ConnectionEnd}_{Parked, Timing}`: the counter reads 0 after a bounded pump (N polls). Each cell starts in a state where its teardown's own wake and exit term are the only ones that end the bound. No `Disconnected` edge may come before the join, so `Drain` is a direct initiator in LogonSent with `write_timeout_ms` set, its reconnected Logon written and the acknowledgement withheld, and a second `drive_reconnect()` returns; that is `Teardown_Drain_Parked`, where no write is in flight and the drain's step 3 does not park. Every Drain cell sets `logout_disconnect_timeout_ms` 5000 ms: step 3's wall-clock bound is a competing ending (its force-close fails the blocked write, and the `Disconnected` that follows ends the bound), so the budget is derived from it and the pump reads the counter long before it. A teardown that has no such state is reported as covered by the `Disconnected` edge and is not counted: `Close` and `EngineStop` are (data-model E-3's joiner table). `_Timing`: the bound armed on a write at S, W = 300 ms, the teardown at S + 100 ms and the mock clock not advanced after it, so the armed deadline cannot end the bound during the pump. For `Drain` the armed write is a Logon-arm Reject blocked in LogonSent (`WriteExpiryDuringDrain_NoRecord`'s rig), the only write such a session makes after its Logon; the drain then parks at its step 3, so the counter reaches 0 during the pump only through the entry wake, and a wake placed at the join fails the cell. `Teardown_ConnectionEnd_*` reads the counter after the edge and before any `close()`, drain or stop. `ConnectionBound106.WriteExpiryDuringDrain_NoRecord` [seam]: a direct initiator in LogonSent (its reconnected Logon written and `drive_reconnect()` returned), FIXT with inbound validation on, W = 300 ms, `logout_disconnect_timeout_ms` 5000 ms. An acknowledgement fed through `on_inbound_frame` draws 099's S3 Reject (`NextNumIn106.Initiator_S3`'s rig) and the Reject's write blocks at S, so `inbound_depth_` is 1. A second `drive_reconnect()` then enters the drain, which records no `Disconnected` from LogonSent and parks at its step 3 on `inbound_depth_`. `step_to(S + W)` is issued as soon as the drain parks: no write-timeout record, no `Disconnected` from the bound, the bound's counter 0, and the Reject's write ended by the drain's own bound, a wall-clock `asio::steady_timer` that `step_to` does not reach (the cell waits at most 5 s + 2 s of wall time for it). Neither the reconnected Logon's write (`drive_reconnect` is single-flight and awaits `emit_initiator_logon_`) nor a drain from Active (its step 2 records `Disconnected` before step 3) gives this window. `ConnectionBound106.DrainCancelled_RespawnsOnBlockedWrite` [seam] (N-6, data-model E-3's respawn): the same rig, the second `drive_reconnect()` cancelled through its cancellation slot while the drain is parked at step 3, so it returns `dispatch_aborted`; then `step_to(S + W)`: one write-timeout record, `Disconnected`, closed once, and `session_write_timeout` from the Reject's write. `ConnectionBound106.SpuriousWake_NoEnding`: a wake with nothing due ends nothing | spawn and wait seams (105's shape); teardown: M12, one arm per joiner: that teardown's wake and its exit term deleted (for `Drain`, the `reconnect_drain_in_flight_` term; for `ConnectionEnd`, the edge's wake, since its two terms are redundant), fails the counter assertion (never a hang); `WriteExpiryDuringDrain`: the drain term and `claim_ending_`'s drain refusal deleted, a write-timeout record; `DrainCancelled_RespawnsOnBlockedWrite`: the failed-drain respawn deleted, no write-timeout record at S + W (the `WriteExpiryDuringDrain` and `DrainCancelled` arms are M12's too); `SpuriousWake_NoEnding`: "a wake ends the bound" (the bound exits on a wake with no exit term true), RED |
 | R2(b) | `ShippingClock106.DirectDriver_BoundBesideLiveness_TestRequestAtT` [seam]. `system_clock_source`, the coroutines on `session->executor()` (the slot path), HeartBtInt 2 s (T = 2.4 s, `default_test_request_threshold`; `test_request_threshold` unset), W = 200 ms, `logout_disconnect_timeout_ms` 2000 ms. App sends every 300 ms (the bound parks and re-arms each time), and the peer sends nothing. Every send completes until the TestRequest is observed at the peer, in [T, 2T); then the next send blocks, at S ≤ `tr_written_at` + 300 ms plus scheduling, and it is cut within W + 1 s of S. The competing give-up is at `tr_written_at` + T or later, and 300 ms + W + 1 s = 1.5 s < T = 2.4 s leaves 0.9 s of scheduling margin (N-10). The cell also asserts one write-timeout record, no slot-74 record, and `session_write_timeout` from the cut send, so a give-up ending cannot satisfy it | M8 (`connection_bound_wait_`'s shipping branch replaced by `await_deadline`): the slot re-arm cancels the loop's sleep, so there is no TestRequest by 2T |
-| R2(a) | `alloc_guard_106_connection_bound_mallocnesia` in `tests/alloc_guard/` (Release, label `106`): a real Engine session over `system_clock_source`, under `B-544-1`'s two conditions. **Send half:** HeartBtInt 30 s, longer than the counted window, so the loop's own sleep (the pre-existing per-call fallback, `L-093-13`) never re-arms in it; after warm-up, 20 spaced sends (100 ms apart, W = 50 ms), limit off and on: zero global allocations, and no write-timeout record. Inequality: the counted window, 20 × 100 ms = 2 s after warm-up, is below H = 30 s and T = 36 s, so neither the loop's sleep nor a TestRequest falls in it; each write to the reading peer completes inside W, and a cut would show as the record. **Emit half:** a differential, because every Heartbeat cycle re-arms the loop's own sleep on that fallback: allocations per Heartbeat cycle at the head minus the base's, under identical traffic, limit off, must be 0. The zero covers the connection bound only | M8 (the bound's wait on the fallback) and M5 (a spawn per write or emit) make the send half non-zero and the delta positive |
+| R2(a) | `alloc_guard_106_connection_bound_mallocnesia` in `tests/alloc_guard/` (Release, label `106`): a real Engine session over `system_clock_source`, under `B-544-1`'s two conditions. **Send half:** HeartBtInt 30 s, longer than the counted window, so the loop's own sleep (the pre-existing per-call fallback, `L-093-13`) never re-arms in it; after warm-up, 20 spaced sends (100 ms apart, W = 50 ms), limit off and on: zero global allocations, and no write-timeout record. Inequality: the counted window, 20 × 100 ms = 2 s after warm-up, is below H = 30 s and T = 36 s, so neither the loop's sleep nor a TestRequest falls in it; each write to the reading peer completes inside W, and a cut would show as the record. **Emit half:** a differential, because every Heartbeat cycle re-arms the loop's own sleep on that fallback: allocations per Heartbeat cycle at the head minus the base's, under identical traffic, must be 0, with the limit off and again with it on (the head's limit-on reading against the base's limit-off one; the base has no knob). Identical traffic means the same rig, HeartBtInt and cycle count on both trees, the base built on `$B` with `FIXPP_106_ALLOC_BASE` (T004), and the count read per cycle over the same window; the parameters are recorded in the evidence file (T108). The zero covers the connection bound only | M8 (the bound's wait on the fallback) and M5 (a spawn per write or emit) make the send half non-zero and the delta positive |
 | FR-013a TOML refusals | `TomlHandshake106.AcceptorKey_{OutOfRange, WrongType, AtSessionScope_Refused}` (config suite); `OutOfRange` covers 0, −1 and `UINT32_MAX` + 1 | RED on the base (unknown key at root; the session-scope cell's mutant: the key accepted at session scope) |
 | FR-013 | `TomlHandshake106.{SessionKey, SecondSessionDiverges, OutOfRange, WrongType}`; `OutOfRange` covers 0, −1 and `UINT32_MAX` + 1. `TomlHandshake106.DefaultTransport_MixedRoles_Accepted`: the key in `[default.transport]`, one TLS initiator and one acceptor session; the bundle loads, and the initiator's minted transport times out at the key as `SessionKey` does (N-9's tolerance; the same budgets). Its mutant: the key refused on an acceptor or plaintext session. The bundle's factory mints a transport; its `async_handshake` against a silent listener returns `transport_handshake_timeout` at key 300 ms + 2 s. Spurious arm: key absent, still pending at 2.3 s. Inequality: 2.3 s precedes `Transport::Config::tls_handshake_timeout`'s default 30 s by 27.7 s, so the default satisfies neither arm | RED on the base: `OutOfRange` and `WrongType` get no diagnostic, because the base silently ignores the key (`recognize_keys` checks only a table's own keys, none inside `[session.transport]` or `[default.transport]`, and `build_tls_factory` always uses a default `Transport::Config t_cfg{}`); `SessionKey`, `SecondSessionDiverges` and `DefaultTransport_MixedRoles_Accepted` are still pending at key + 2 s (the 30 s default). Then M7 |
 | FR-013a | `EngineHandshake106.Acceptor_ClosesAtTheKey` [seam] (C-2): the `EngineConfig` built from the loaded bundle, including `EngineEstablishment::acceptor_tls_handshake_timeout`; TOML key 300 ms, `logon_timeout_ms` 10 s; the bound read at the listener: a TCP client that never handshakes sees EOF in [300 ms, 1.2 s). Spurious arm (key 60 s): still connected at 2.3 s. Inequalities: the acceptor default, 1500 ms (what M7‴ and M7′ bring back), lands 300 ms after the main window, so the default cannot satisfy it, and 900 ms covers scheduling; the spurious check at 2.3 s follows 1500 ms by 800 ms and precedes `logon_timeout_ms` 10 s by 7.7 s. Its C++ field twin is [seam] too | M7‴ (the host's copy deleted); the twin under M7′ (field ignored) |
@@ -640,7 +686,8 @@ each new row found is added here.
 | refusal: `claim_ending_`'s taken, closing and drain terms | `OneEnding106.*`, `CloseThenWatchdog`, `WriteExpiryDuringDrain_NoRecord` | M9, as above, the drain refusal deleted |
 
 Existing cells that pin the consumed number after an S3, strict or 789 refusal change to the unconsumed value, each
-named in plan.md, P1. Census: `git grep -nE 'next_in\(\)|next_inbound' -- tests/session/test_099_*.cpp
+named by tasks T009's census and re-pinned by T059 (plan.md P2's "census rows"; SC-007 names them as the expected
+changes). Census: `git grep -nE 'next_in\(\)|next_inbound' -- tests/session/test_099_*.cpp
 tests/session/test_104_*.cpp`, read for refusal endings; first candidate `W5Scan.NextNumInIsTheHeadersAndNoReset`.
 
 **FR-007 census at `9d81082a`** (N-3). Recipe: `grep -n 'r.open()' tests/session/test_104_logon_too_low.cpp`, plus each
@@ -654,9 +701,12 @@ is an initiator, hydrated at open: unchanged.
 (`grep -n -i 'has a cell\|a cell for' *.md`, and plan.md's IX §1 row) is looked up in this table. Result: the commit
 refusal had none (N-4, added above) and the root key's refusals had none (`AcceptorKey_*`, added); the rest resolve.
 
-**Testing scope (owner, 2026-11-25).**
+**Testing scope (owner, 2026-11-25).** Quickstart §5 is the one list; this is its summary.
 - Targeted runs only: the labels `106`, `105`, `104` and `099`, and the touched binaries, on each lane that runs them.
   That includes `linux-clang-release` for the mallocnesia cell and the targeted sanitizer runs.
+- Buildless and build-scoped checks that are not test runs: the `linux-gcc-release` `-Werror` build of the touched
+  targets (T170), the whole pytest suite against the module rebuilt at C-ABI 1.19 (T171, `[const §XVII.7]`) and every
+  buildless Tier 1 step (T172).
 - One full `ctest`, on `linux-clang-debug` (Article XVII §7's evidence).
 
 ## D10 — B129 (#724) is done
@@ -675,6 +725,11 @@ Tier 2 runs exercise the cap (SC-006). No further work; the PR evidence records 
   `install_reconnected_transport`; `conn_gen_` advances only in the last). The `Disconnected` edge
   (`record_state_transition_`) takes it as `internal` when it is free, so a decider after any ending finds it taken,
   whatever state the connection began in.
+- No decider of one connection can claim after the next connection's reset: before `begin_connection_()` runs again the
+  bound is joined (`close()`, the drain) or asserted gone (`install_reconnected_transport`), and the loop's and 105's
+  deciders are joined the same way (data-model E-3's joiner table), so the generation term matters only across
+  `install_reconnected_transport`. A path that reaches `open()` or `attach_accepted_transport` with a decider of an
+  earlier connection alive is a defect the joins MUST prevent.
 - `claim_ending_(who) noexcept` refuses when the claim is taken, `closing_or_stopped_()` holds (a `close()` that has
   begun owns the ending), or `reconnect_drain_in_flight_` holds (the drain owns that connection's close). Otherwise it sets the claim and returns true, with no suspension between test and set.
 - The claim is taken once, at the decision. A Logout written under its decider's claim neither takes nor tests it:
@@ -735,7 +790,8 @@ against FR-011 and C-4.5; the unbounded case stays disclosed (`L-105-f`).
 ## Risks
 
 - **Coroutine frame growth in the Logon arms** (104 T093). D1's precheck and D2's classification live in callees, with
-  no new local across an arm's await; measured by the paired `engine_send_bench` and, locally, `session_send_bench`.
+  no new local across an arm's await. That is a structural rule, checked by reading each arm's locals at review against
+  the base's: the paired benches' steady-state sends run no Logon arm, so they do not measure it.
 - **The bound's re-arm.** A peer that sends without reading keeps moving G; each re-arm is one wait, no spawn.
 - **Two branches of one wait.** The mock cells cannot see the shipping branch; the two shipping-clock cells bind it, each
   RED under M8 first.
