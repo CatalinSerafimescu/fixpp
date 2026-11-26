@@ -113,9 +113,11 @@ Kept distinct_kept(int n) {
 constexpr const char* kActive = "Active";
 constexpr const char* kNone = "-";
 
-// E-10's literals. 1130's Reject consumes on the block's path and keeps on the gate's.
+// E-10's literals. 106 D2 supersedes E-10's consumed number on the block's path: the Logon's
+// MsgSeqNum is committed only once it is admitted, so 1130's Reject keeps NextNumIn on the
+// block's path as on the gate's, and so do 384's, 372's and 385's.
 const std::string& kBad1130Block() {
-    static const std::string value = "R 5/1130 A 45=1 | Disc | c | app=0 adm=0";
+    static const std::string value = "R 5/1130 A 45=1 | Disc | k | app=0 adm=0";
     return value;
 }
 const std::string& kBad1130Gate() {
@@ -123,11 +125,11 @@ const std::string& kBad1130Gate() {
     return value;
 }
 const std::string& kCap() {
-    static const std::string value = "R 5/384 A 45=1 | Disc | c | app=0 adm=0";
+    static const std::string value = "R 5/384 A 45=1 | Disc | k | app=0 adm=0";
     return value;
 }
 const std::string& kLong372Block() {
-    static const std::string value = "R 5/372 A 45=1 | Disc | c | app=0 adm=0";
+    static const std::string value = "R 5/372 A 45=1 | Disc | k | app=0 adm=0";
     return value;
 }
 const std::string& kLong372Gate() {
@@ -135,7 +137,7 @@ const std::string& kLong372Gate() {
     return value;
 }
 const std::string& kNo385() {
-    static const std::string value = "R 1/385 A 45=1 | Disc | c | app=0 adm=0";
+    static const std::string value = "R 1/385 A 45=1 | Disc | k | app=0 adm=0";
     return value;
 }
 const std::string& kCountWrong() {
@@ -817,7 +819,7 @@ std::string bad_1130_ending(Shape s) { return s == Shape::L ? kBad1130Gate() : k
 // check, and its refusal keeps NextNumIn on every shape, as QuickFIX C++ v1.16.0
 // `Session::generateReject(const Message&, int, int)` does for a Logon (it increments only `if
 // (msgType != MsgType_Logon && msgType != MsgType_SequenceReset && msgSeqNum ==
-// getExpectedTargetNum())`). The ordinary acknowledgement still consumes (L-104-8).
+// getExpectedTargetNum())`). 106 D2 keeps NextNumIn on the ordinary acknowledgement too.
 TEST_P(W25Initiator, Reply141YWithBad1130_NoReset) {
     CellRun run = open_cell(shape_fixture(GetParam()), false, true);
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
