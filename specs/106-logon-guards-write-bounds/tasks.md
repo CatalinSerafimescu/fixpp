@@ -1450,9 +1450,11 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   the labelled push, in `$V` (Execution rules; created with `git worktree add --detach` at the head on
   `/mnt/wsl/fixppbuild`, clean status, reconfigured rc 0, every target built `-j5 -k 0`; never `$M`), after reading the sandbox lock; record the count, any failure and its
   attribution, and the SHA for the PR body's `local build: green on linux-clang-debug @ <sha>` line.
-- [ ] T170 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: `linux-gcc-release` `-Werror` build of the touched targets (the library, `session_106_tests`,
+- [X] T170 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: `linux-gcc-release` `-Werror` build of the touched targets (the library, `session_106_tests`,
   `session_106_seam_tests`, the touched config, transport, C-ABI and alloc-guard targets, `engine_send_bench`),
   `ninja -k 0`, no error, no warning.
+  **Done** (`fc3942cd`; evidence file, "T170"): one gcc-only `-Werror=unused-result` in `run_connection_bound_` fixed; rc 0,
+  no error, no warning; the targeted entries 34/34 on gcc-release; `-L 106` re-run on `linux-clang-debug`.
 - [ ] T171 The WHOLE pytest suite: `python3 -m pytest bindings/python/tests` with the debug tree's module rebuilt at
   C-ABI 1.19; record passed and skipped.
 - [ ] T172 Every buildless Tier 1 step, derived from `.github/workflows/tier1.yml` and run locally: `ci-script-pins`
