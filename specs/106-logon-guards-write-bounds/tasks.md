@@ -1488,7 +1488,7 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   C-ABI 1.19; record passed and skipped.
   **Done** (at `dfa755df`; evidence file, "T171"): the debug tree's module (1.19) imported; 101 passed, 0 skipped.
   **Re-run** at the R22 head (evidence file, "T171 re-run").
-- [ ] T172 Every buildless Tier 1 step, derived from `.github/workflows/tier1.yml` and run locally: `ci-script-pins`
+- [X] T172 Every buildless Tier 1 step, derived from `.github/workflows/tier1.yml` and run locally: `ci-script-pins`
   (all its steps, including `check_co_spawn_lambda.py --self-test` and its gate), `check-layers`, `co-spawn-closure-audit`
   (it applies: the connection bound's spawn, against T019's base list) and `ci/pump-census.sh` against
   `ci/expected-pump-sites.txt`. Each rc 0, or the failure attributed.
