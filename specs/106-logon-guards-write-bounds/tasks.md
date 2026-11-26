@@ -196,7 +196,8 @@ shows). Re-derived at HEAD. **Blocks every later phase.**
   `grep -n 'r.open()' tests/session/test_104_logon_too_low.cpp` plus each acceptor cell there ending at a gate refusal,
   read for a NextNumIn assertion after the refusal (known positive: `LogonTooLow104.Precedence_MtlsAcceptorOffList`'s
   `next_in() == kN`). Each hit classed "S3, strict or 789 refusal: re-pinned by T059", "identity refusal: re-pinned
-  by T043", or "admitted path: unchanged". Also list, with `--gtest_list_tests` on the 099 binary, the instances of the
+  by T043", or "admitted path: unchanged". *(Amended by T051: this recipe cannot see 099's trace-line `c`/`k` field or
+  its frame pins; research D9's "FR-007 census amendment" gives the run-based recipe for the identity refusals.)* Also list, with `--gtest_list_tests` on the 099 binary, the instances of the
   cells that cover spec US2 scenario 3 (the unasked 141=Y acknowledgement refused at S3; NextNumIn kept) for T057:
   `W5PerShape.Initiator141YWith1137_4_NoReset` (shapes T, A, L) and the `kLogonSent` row LS-e `Logon 141=Y 1137=4`
   run by `W5LogonSent.Ending`, both in `tests/session/test_099_establishment.cpp`; class them "US2 sc.3: unchanged".
@@ -453,7 +454,7 @@ admits the identity before the arm writes a frame or changes sequence state (FR-
   a validator that requires them refuses that itself; the validator may be called twice per connection, after the bound
   event (`L-106-c`).
 - [X] T046 [US1] `include/fixpp/session/session.hpp`, `src/session/session.cpp`: the private callee
-  `logon_identity_refuses_(frame, consume)` (data-model E-1's per-half table: the mTLS half applies on `mtls_ca` or
+  `logon_identity_refuses_(frame, consume)` *(superseded: the parameter is removed, both callers consumed; data-model E-1)* (data-model E-1's per-half table: the mTLS half applies on `mtls_ca` or
   `mtls_pinned` in either role, and with `consume` false emits no event and consumes nothing; the credentials half applies
   on the acceptor whatever its security profile, reads 553/554 through `interpret_logon`, and treats any
   `interpret_logon` refusal as unreadable, refusing it only when `has_logon_validator()`). Its locals stay in its own
@@ -476,13 +477,14 @@ admits the identity before the arm writes a frame or changes sequence state (FR-
   branches' own gate calls): one gate site per arm".
 - [X] T050 [US1] `src/session/session.cpp`: No new local held across an await in either arm (104 T093; plan Constraints): read the arms' diff
   for every local declared before a `co_await` that it outlives; any found moves into a callee. Record the reading.
-- [ ] T051 [US1] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: At the head: `-L 106`, `-L 104` and `-L 099` unfiltered GREEN; re-run T007 at the head (each arm
+- [X] T051 [US1] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: At the head: `-L 106`, `-L 104` and `-L 099` unfiltered GREEN; re-run T007 at the head (each arm
   keeps one consuming site, arm S its own, the precheck callee its own) and record it. Commit `H1`; `codegraph sync`.
-  **Stopped (census contradiction, to the orchestrator):** at H1 (`5b4e8c14`) `-L 106` and `-L 104` read GREEN and
-  `-L 099` reads RED in its mTLS off-list cells (`W5NotConnected`, `W5LogonSent`, their `Off` twins and
-  `W25Initiator.OffListIdentity_MtB_NoAuth`), and `AcceptorLogonSendingTimeTest.Cell11_BadStalePlusBadCreds_52Wins` reads
-  RED: each pins a base answer or consumed number before the gate. Not re-pinned; the evidence file's T051 section lists
-  them. T007's re-run and `codegraph sync` are done; H1 is committed.
+  At H1 `-L 099` and 038's binary read RED in cells that pin an answer or a consumed number ahead of an identity gate;
+  T009's census had not listed them. Orchestrator ruling on the Phase 3 report: re-pinned to the 106 behaviour (a silent
+  `Disconnected`, nothing written, nothing consumed), each comment naming "106 D1", recorded as research D9's "FR-007
+  census amendment" with its re-derivation recipe; 038's Cell 11 renamed `Cell11_BadStalePlusBadCreds_CredsWin`. Each
+  re-pin RED on `$B` reading the base's answer, GREEN at the head; the evidence file's T051 section has the list and
+  the readings.
 
 ### Mutant arms for US1 (in `$M` at `H1`)
 
@@ -490,11 +492,13 @@ admits the identity before the arm writes a frame or changes sequence state (FR-
   `IdentityFirst106.Admitted_StayInArmReject_NextLogonActive`.
 - [X] T053 [US1] In `$M`'s `src/session/session.cpp` (`logon_identity_refuses_`): M1a: the precheck's credentials half skipped when the session is not mTLS; RED:
   `IdentityFirst106.ValidateFirst_RefusedCredentials_NonMtls`.
-- [ ] T054 [US1] In `$M`'s `src/session/session.cpp`: M1b: the consuming gate at D1 item 4 refuses an admitted identity; RED: every
-  `IdentityFirst106.Admitted_<Refusal>` cell (no answer). **Read, not closed (to the orchestrator):** 9 of the 11
-  `Admitted_<Refusal>_<Role>` cells RED; `Admitted_ValidateFirst_Acceptor` and `Admitted_ValidateFirst_Initiator` GREEN,
-  since their frame never reaches item 4 (the held Reject's consuming gate guards them); an additional arm at that site
-  reads both RED (evidence file, T052 to T055).
+- [X] T054 [US1] In `$M`'s `src/session/session.cpp`: M1b: the consuming gate at D1 item 4 refuses an admitted identity, with
+  the second arm (orchestrator ruling on the Phase 3 report) at the consuming gate in front of the held validate-first
+  Reject that disconnects; RED: every `IdentityFirst106.Admitted_<Refusal>` cell (no answer). The item-4 arm cannot
+  reach `Admitted_ValidateFirst_Acceptor` and `Admitted_ValidateFirst_Initiator` (their frames never pass
+  `interpret_logon`); the held-Reject arm is theirs. Both arms are quickstart §4's M1b row; readings in the evidence
+  file, T052 to T055.
+
 - [X] T055 [US1] In `$M`'s `src/session/compid_authorization_policy.cpp`: M1c: `has_logon_validator()` returns true whatever is installed; RED:
   `IdentityFirst106.Admitted_UnreadableNoValidator_ValidateFirstReject` (no Reject).
 
@@ -1302,7 +1306,7 @@ the `install_reconnected_transport` and `~Session` asserts (T084, T167), `Teardo
 |---|---|---|---|
 | M1 | T052 | M7 | T140 |
 | M1a | T053 | M7′ | T141 |
-| M1b | T054 | M7″ | T143 |
+| M1b (item-4 and held-Reject arms) | T054 | M7″ | T143 |
 | M1c | T055 | M7‴ | T142 |
 | M2 (both arms) | T092, T093 | M7⁗ (both arms) | T036 |
 | M3 | T118 | M8 | T126 |

@@ -8,7 +8,7 @@ strand, like the members 105 added. None is atomic except a join counter, as 103
 
 | Item | Kind | Owner | Notes |
 |---|---|---|---|
-| `logon_identity_refuses_(frame, consume)` | private callee of `Session` | both Logon arms, on the validate-first Reject path only | returns true when an applicable gate refuses. Its locals stay in its own frame (104 T093). |
+| `logon_identity_refuses_(frame)` | private callee of `Session` | both Logon arms, on the validate-first Reject path only | returns true when an applicable gate refuses. Its locals stay in its own frame (104 T093). |
 | `logon_identity_admitted_()` | existing | both arms, once, right after `interpret_logon` | consuming form: an event and the one-shot `live_peer_id_` reset, as today |
 | `logon_credentials_admitted_(result)` | existing | acceptor, once, right after the mTLS gate | unchanged body |
 | `CompIdAuthorizationPolicy::has_logon_validator() const noexcept` | new public accessor | the precheck's unreadable-credentials rule | true exactly when the stored `logon_validator_fn` is non-empty, the test `authorize_logon` makes: false when never set, true after `set_logon_validator` with a callable, false again after it with an empty one. The policy is `cfg_.compid_authorization_policy`, part of the session's own configuration, which no call replaces during a connection, so the precheck and the consuming gate read one policy. Pimpl, so no layout change. Its header comment, with `set_logon_validator`'s, states for a policy author: a frame `interpret_logon` refuses never reaches the validator (it fails closed, `B-106-1`); an absent Username(553) or Password(554) reaches it as empty, and a validator that requires them refuses that itself; and the validator may be called twice per connection, after the bound event (`L-106-c`). |
@@ -19,12 +19,12 @@ The precheck is two independent halves. A half that does not apply admits and co
 
 | Half | Applies when | Admits | Refuses |
 |---|---|---|---|
-| mTLS (`consume` = false) | `mtls_ca` or `mtls_pinned`, either role | `live_peer_id_` authorised for `cfg_.target_comp_id`; no event, nothing consumed | not authorised, or no identity |
+| mTLS | `mtls_ca` or `mtls_pinned`, either role | `live_peer_id_` authorised for `cfg_.target_comp_id`; no event, nothing consumed | not authorised, or no identity |
 | credentials | the acceptor, whatever its security profile (plaintext and one-way TLS included) | readable and `authorize_logon` true; or unreadable (`interpret_logon` refused) and no validator | readable and `authorize_logon` false; or unreadable and `has_logon_validator()` |
 
 On a non-mTLS acceptor the credentials half alone decides; on an initiator the mTLS half alone decides.
 
-A refused result ends the arm with no frame written. When the mTLS half applies, the consuming form of the mTLS gate then runs, for its event; the arm records
+A refused result ends the arm with no frame written. The callee then runs the consuming form of the mTLS gate, for its event (on a session the mTLS gate does not apply to it does nothing); it takes no flag for that, since every caller consumes. The arm records
 `Disconnected` and returns success. A non-mTLS acceptor refused by the credentials half ends the same way: no Reject, a silent `Disconnected`. An admitted result leads to the Reject:
 - If the Reject disconnects (`logon_reject_disconnects_`, computed before the send), the consuming form runs **before**
   the Reject is written, and a refusal there ends the arm silently (Gate A N-13.2).
@@ -33,7 +33,7 @@ A refused result ends the arm with no frame written. When the mTLS half applies,
 "Unreadable" is any `interpret_logon` refusal, not only an unreadable 553/554 (research D1, N-11; disclosed in
 `B-106-1`).
 
-The mTLS half with `consume` = false evaluates the same `authorize(live_peer_id_, cfg_.target_comp_id)` as the
+The mTLS half evaluates the same `authorize(live_peer_id_, cfg_.target_comp_id)` as the
 consuming form, over the same policy and the same `live_peer_id_` (nothing on one frame assigns it between the two), so
 the two agree. Only the credentials half calls user code, the logon validator, which may answer differently on a later
 call (an allow-list reloaded mid-Logon). That needs no purity condition: a disconnecting Reject's frame is judged by

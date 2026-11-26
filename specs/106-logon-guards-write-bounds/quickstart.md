@@ -83,7 +83,7 @@ before the competing deadline (10 s, `logon_timeout_ms` from accept).
 |---|---|---|
 | M1 | the consuming mTLS gate before the stay-in-arm validate Reject | `IdentityFirst106.Admitted_StayInArmReject_NextLogonActive` |
 | M1a | the precheck's credentials half skipped when the session is not mTLS | `IdentityFirst106.ValidateFirst_RefusedCredentials_NonMtls` |
-| M1b | the consuming gate at D1 item 4 refuses an admitted identity | every `IdentityFirst106.Admitted_<Refusal>` cell (no answer) |
+| M1b | two arms, applied together: (item 4) the consuming gate at D1 item 4 refuses an admitted identity; (held Reject) the consuming gate in front of the held validate-first Reject that disconnects refuses it | every `IdentityFirst106.Admitted_<Refusal>` cell (no answer): the item-4 arm reaches every one whose frame passes `interpret_logon`; `Admitted_ValidateFirst_Acceptor` and `Admitted_ValidateFirst_Initiator` never reach item 4, so the held-Reject arm is theirs |
 | M1c | `has_logon_validator()` returns true whatever is installed | `IdentityFirst106.Admitted_UnreadableNoValidator_ValidateFirstReject` (no Reject) |
 | M2 | delete the loop's arming of the connection bound for its emit; and, separately, restore the cap's pending term | every `GiveUp106` cell except the guard; `GiveUp106.ResendHeldNoPending` |
 | M3 | take `write_started_at_` before the `write_gate_` acquire | `WriteTimeout106.QueuedWrite_CountsFromItsOwnStart`, `ResendWalk_ProgressNotCut` |
