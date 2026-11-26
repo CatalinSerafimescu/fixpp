@@ -35,12 +35,16 @@
 
 #include <algorithm>
 #include <asio/io_context.hpp>
+#include <atomic>
+#include <filesystem>
 #include <fixpp/config/load_diagnostic.hpp>
 #include <fixpp/config/toml_config_loader.hpp>
+#include <fstream>
 #include <set>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 // On Windows, route CRT abort()/assert() to stderr instead of a modal dialog so
 // the "...NoTerminate" gates below fail fast instead of hanging headless CI.
@@ -1720,4 +1724,134 @@ TEST(LoadNegativeBattery, TestRequestThreshold_Negative_MalformedValue) {
     using RC = fixpp::config::reason_class;
     EXPECT_TRUE(has_diag(result.error(), RC::malformed_value, "session[0].test_request_threshold"))
         << "expected malformed_value at session[0].test_request_threshold";
+}
+
+// ── 106-logon-guards-write-bounds (tasks.md T025): the refusals of the three new keys ──────────
+// write_timeout_ms (contract C-4.7), [session.transport].tls_handshake_timeout_ms (C-5.1) and the
+// root key acceptor_tls_handshake_timeout_ms (C-5.2). Each cell asserts the reason class and the
+// key named in it, for every value its name covers. The bundle is written to a temporary file
+// from one template, so each value is one cell argument rather than one fixture file; the
+// template's relative paths name the fixture directory absolutely.
+
+namespace {
+
+struct Toml106Parts {
+    std::string root;       // root keys, before the first table
+    std::string defaults;   // the [default] table's keys (no table when empty)
+    std::string session;    // extra [[session]] keys
+    std::string transport;  // extra [session.transport] keys
+};
+
+std::string toml_106(Toml106Parts const& p) {
+    std::string const dir = std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}}.generic_string();
+    std::string t = p.root + "\n";
+    t += "[clock]\nkind = \"system\"\n\n[store]\nkind = \"memory\"\n\n";
+    t += "[cert_source]\nkind = \"file\"\ncert_file = '" + dir + "/leaf_ecdsa_p256.pem'\n";
+    t += "key_file = '" + dir + "/leaf_ecdsa_p256.key'\nca_file = '" + dir + "/ca.pem'\n\n";
+    t += "[dictionary]\nkind = \"path\"\npath = '" + dir + "/FIX44.xml'\n\n";
+    if (!p.defaults.empty()) t += "[default]\n" + p.defaults + "\n\n";
+    t += "[[session]]\nsender_comp_id = \"CLIENT1\"\ntarget_comp_id = \"SERVER1\"\n";
+    t += "begin_string = \"FIX.4.4\"\nrole = \"initiator\"\n" + p.session + "\n\n";
+    t += "[session.transport]\nkind = \"tls\"\nhost = \"fix.example.com\"\nport = 4321\n";
+    t += p.transport + "\n\n[session.security_profile]\nkind = \"mtls_ca\"\n";
+    return t;
+}
+
+// Loads the text through a temporary file, removed before return.
+fixpp::config::LoadResult load_text_106(std::string const& text) {
+    static std::atomic<unsigned> n{0};
+    auto const* info = ::testing::UnitTest::GetInstance()->current_test_info();
+    std::string const name = std::string{"fixpp_106_"} + (info ? info->name() : "cell") + "_" +
+                             std::to_string(n.fetch_add(1)) + ".toml";
+    auto const path = std::filesystem::temp_directory_path() / name;
+    {
+        std::ofstream out{path, std::ios::binary | std::ios::trunc};
+        out << text;
+    }
+    auto result = load(path);
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    return result;
+}
+
+std::string seen_106(fixpp::config::LoadResult const& r) {
+    std::string seen;
+    if (r.has_value()) return " (the bundle loaded)";
+    for (auto const& d : r.error()) seen += " [" + d.key_path + ": " + d.message + "]";
+    return seen;
+}
+
+void expect_refusal_106(Toml106Parts const& parts, fixpp::config::reason_class rc,
+                        std::string_view key_path, std::string_view value) {
+    auto const result = load_text_106(toml_106(parts));
+    EXPECT_FALSE(result.has_value()) << value << ": the bundle loaded";
+    if (result.has_value()) return;
+    EXPECT_TRUE(has_diag(result.error(), rc, key_path))
+        << value << ": no diagnostic of the expected class on " << key_path << "; got"
+        << seen_106(result);
+}
+
+// The values each OutOfRange / WrongType cell covers (contract C-4.7, C-5.1, C-5.2).
+constexpr std::string_view kBelowZero = "-1";
+constexpr std::string_view kAboveU32 = "4294967296";  // UINT32_MAX + 1
+const std::vector<std::string_view> kWrongTypes = {"\"300\"", "300.5"};
+
+}  // namespace
+
+TEST(TomlWriteTimeout106, OutOfRange) {
+    using RC = fixpp::config::reason_class;
+    for (std::string_view v : {kBelowZero, kAboveU32}) {
+        expect_refusal_106({.session = "write_timeout_ms = " + std::string{v}}, RC::out_of_range,
+                           "session[0].write_timeout_ms", v);
+    }
+}
+
+TEST(TomlWriteTimeout106, WrongType) {
+    using RC = fixpp::config::reason_class;
+    for (std::string_view v : kWrongTypes) {
+        expect_refusal_106({.session = "write_timeout_ms = " + std::string{v}},
+                           RC::malformed_value, "session[0].write_timeout_ms", v);
+    }
+}
+
+TEST(TomlHandshake106, OutOfRange) {
+    using RC = fixpp::config::reason_class;
+    for (std::string_view v : {std::string_view{"0"}, kBelowZero, kAboveU32}) {
+        expect_refusal_106({.transport = "tls_handshake_timeout_ms = " + std::string{v}},
+                           RC::out_of_range, "session[0].transport.tls_handshake_timeout_ms", v);
+    }
+}
+
+TEST(TomlHandshake106, WrongType) {
+    using RC = fixpp::config::reason_class;
+    for (std::string_view v : kWrongTypes) {
+        expect_refusal_106({.transport = "tls_handshake_timeout_ms = " + std::string{v}},
+                           RC::malformed_value, "session[0].transport.tls_handshake_timeout_ms", v);
+    }
+}
+
+TEST(TomlHandshake106, AcceptorKey_OutOfRange) {
+    using RC = fixpp::config::reason_class;
+    for (std::string_view v : {std::string_view{"0"}, kBelowZero, kAboveU32}) {
+        expect_refusal_106({.root = "acceptor_tls_handshake_timeout_ms = " + std::string{v}},
+                           RC::out_of_range, "acceptor_tls_handshake_timeout_ms", v);
+    }
+}
+
+TEST(TomlHandshake106, AcceptorKey_WrongType) {
+    using RC = fixpp::config::reason_class;
+    for (std::string_view v : kWrongTypes) {
+        expect_refusal_106({.root = "acceptor_tls_handshake_timeout_ms = " + std::string{v}},
+                           RC::malformed_value, "acceptor_tls_handshake_timeout_ms", v);
+    }
+}
+
+// [guard] on the base (the key is unknown at every scope there); its mutant accepts the key at
+// session scope (tasks.md T037). A valid value, so only the scope can refuse it.
+TEST(TomlHandshake106, AcceptorKey_AtSessionScope_Refused) {
+    using RC = fixpp::config::reason_class;
+    expect_refusal_106({.session = "acceptor_tls_handshake_timeout_ms = 300"}, RC::unknown_key,
+                       "session[0].acceptor_tls_handshake_timeout_ms", "[[session]] 300");
+    expect_refusal_106({.defaults = "acceptor_tls_handshake_timeout_ms = 300"}, RC::unknown_key,
+                       "default.acceptor_tls_handshake_timeout_ms", "[default] 300");
 }
