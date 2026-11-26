@@ -259,6 +259,17 @@ struct session_test_access {
     static void set_ending_bound_race_throws(Session& s, std::function<bool()> throws) {
         s.ending_bound_race_throws_ = std::move(throws);
     }
+    // 106-logon-guards-write-bounds (tasks.md T031): the connection bound's seams and the Logon
+    // arms' commit-freeze hook.
+    static void set_connection_bound_spawn_fails(Session& s, std::function<bool()> fails) {
+        s.connection_bound_spawn_fails_ = std::move(fails);
+    }
+    static void set_connection_bound_wait_throws(Session& s, std::function<bool()> throws) {
+        s.connection_bound_wait_throws_ = std::move(throws);
+    }
+    static void set_commit_freeze_hook(Session& s, std::function<void()> hook) {
+        s.commit_freeze_hook_ = std::move(hook);
+    }
     [[nodiscard]] static int peer_logout_bound_count(Session const& s) noexcept {
         return s.peer_logout_bound_counter_->load(std::memory_order_acquire);
     }

@@ -2265,6 +2265,16 @@ private:
     // session_test_access.
     std::function<bool()> ending_bound_spawn_fails_;
     std::function<bool()> ending_bound_race_throws_;
+    // 106-logon-guards-write-bounds (research D9; data-model E-3): the connection bound's test
+    // seams, in the shape of the two above. When set and they return true, the bound's spawn
+    // fails and the bound's wait throws. Set only through session_test_access; their call sites
+    // land with the bound (tasks.md T083).
+    std::function<bool()> connection_bound_spawn_fails_;
+    std::function<bool()> connection_bound_wait_throws_;
+    // 106 (research D9 row "FR-006 commit"): run in a Logon arm between the classification of
+    // the frame's MsgSeqNum and the commit of its advance, so a cell can freeze the manager there.
+    // Set only through session_test_access; its call site lands with the commit (tasks.md T064).
+    std::function<void()> commit_freeze_hook_;
 
     // ── 034-credential-store-redaction T004 — masker buffer bound ────────────
     // Upper bound for the coroutine-frame copy used in the masked-Logon persist

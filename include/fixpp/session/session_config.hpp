@@ -374,6 +374,16 @@ struct SessionConfig {
     // Session::open().
     std::uint32_t logon_timeout_ms{10000};
 
+    /// 106-logon-guards-write-bounds (contract C-4.1, C-4.2; data-model E-7): an opt-in limit,
+    /// in milliseconds, on every write the session makes on its live transport except a
+    /// Logout's: an application send, a Heartbeat, a TestRequest, a Reject, each frame of a
+    /// resend answer, a Logon or reply Logon, a SequenceReset and a ResendRequest. The clock
+    /// starts when the write is handed to the transport; the wait at the session's write gate
+    /// does not count. A write that has not completed within the limit ends the session
+    /// (contract C-4.3). 0, the default, is off. Any uint32 is accepted. There is no C setter:
+    /// a C session always runs with the limit off. TOML: the session scalar `write_timeout_ms`.
+    std::uint32_t write_timeout_ms{0};
+
     // FR-023 / Clarifications Q3=A — operator-supplied allow-list of
     // {principal → {compid_set}} bindings. Default-constructed = empty
     // allow-list = default-deny (rejects ALL Logons). Operator MUST enumerate

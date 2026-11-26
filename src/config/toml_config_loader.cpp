@@ -313,6 +313,9 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
         "refresh_on_logon",
         "logout_disconnect_timeout_ms",
         "logon_timeout_ms",  // 093 (data-model E-7)
+        "write_timeout_ms",  // 106 (data-model E-7)
+        // 106 (data-model E-7): a root key; refused at session scope below.
+        "acceptor_tls_handshake_timeout_ms",
         "redeliver_poss_dup",
         "allow_pos_dup",
         "sending_time_precision",
@@ -339,6 +342,16 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
                         "dialect_overlay is a session key; set it in [default] or [[session]]",
                 });
             }
+        } else if (k == "acceptor_tls_handshake_timeout_ms" && !key_prefix.empty()) {
+            // 106 (contract C-5.2): an engine key. Tolerated in [default] or [[session]] it
+            // would be a silent no-op, so it is refused there as an unknown key.
+            acc.add(LoadDiagnostic{
+                .key_path = std::move(path),
+                .reason = reason_class::unknown_key,
+                .location = loc_from_region(node.source()),
+                .message = "acceptor_tls_handshake_timeout_ms is an engine key; set it at the "
+                           "TOML root",
+            });
         } else if (kDeferred.contains(k)) {
             acc.add(LoadDiagnostic{
                 .key_path = std::move(path),

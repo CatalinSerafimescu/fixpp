@@ -14,6 +14,9 @@
 //   - Throwing calls: wrap in trap_throw_to_expected from loader_internal.hpp,
 //     whose comment block states the rule.
 
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <fixpp/config/config_bundle.hpp>
@@ -28,9 +31,12 @@
 #include <fixpp/transport/transport_factory.hpp>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "loader_internal.hpp"
 #include "mappers.hpp"
@@ -1029,6 +1035,64 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 106-logon-guards-write-bounds (data-model E-7; contract C-5.1, C-5.2): the two handshake
+// keys. Both take an integer in (0, UINT32_MAX] milliseconds; out of range is out_of_range and
+// another type is malformed_value.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Checks one handshake-timeout node; on success returns its value.
+static std::optional<std::chrono::milliseconds> check_handshake_timeout_ms(
+    const toml::node& n, const std::string& key_path, DiagnosticAccumulator& acc) {
+    if (!n.is_integer()) {
+        acc.add(LoadDiagnostic{
+            .key_path = key_path,
+            .reason = reason_class::malformed_value,
+            .message = key_path + " must be an integer number of milliseconds",
+        });
+        return std::nullopt;
+    }
+    auto const v = n.as_integer()->get();
+    if (v <= 0 || std::cmp_greater(v, UINT32_MAX)) {
+        acc.add(LoadDiagnostic{
+            .key_path = key_path,
+            .reason = reason_class::out_of_range,
+            .message = key_path + " must be in [1, 4294967295]",
+        });
+        return std::nullopt;
+    }
+    return std::chrono::milliseconds{v};
+}
+
+// The root key acceptor_tls_handshake_timeout_ms into EngineEstablishment; absent keeps the
+// struct's default. (Its refusal at session scope is recognize_keys'.)
+static void resolve_engine_acceptor_handshake_timeout(const toml::table& root_tbl,
+                                                      ConfigBundle& bundle,
+                                                      DiagnosticAccumulator& acc) {
+    if (const auto* n = root_tbl.get("acceptor_tls_handshake_timeout_ms"); n != nullptr) {
+        if (auto v = check_handshake_timeout_ms(*n, "acceptor_tls_handshake_timeout_ms", acc)) {
+            bundle.engine.acceptor_tls_handshake_timeout = *v;
+        }
+    }
+}
+
+// The range and type checks of each session's transport.tls_handshake_timeout_ms, set in
+// [session.transport] or inherited from [default.transport] by the merge. The value is read and
+// not yet used here: feeding it to the session's TLS factory is tasks.md T135's.
+static void check_transport_handshake_timeouts(
+    const std::vector<const toml::table*>& merged_session_tables, DiagnosticAccumulator& acc) {
+    for (std::size_t i = 0; i < merged_session_tables.size(); ++i) {
+        const auto* t_n = merged_session_tables[i]->get("transport");
+        if (t_n == nullptr || !t_n->is_table()) {
+            continue;
+        }
+        if (const auto* n = t_n->as_table()->get("tls_handshake_timeout_ms"); n != nullptr) {
+            (void)check_handshake_timeout_ms(
+                *n, "session[" + std::to_string(i) + "].transport.tls_handshake_timeout_ms", acc);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // resolve_selectors — public entry point (declared in mappers.hpp).
 //
 // Resolves engine-scope selectors (clock, store, cert_source, dictionary), then
@@ -1048,6 +1112,8 @@ void resolve_selectors(const toml::table& root_tbl,
     resolve_engine_cert_source(root_tbl, base_dir, opts, bundle, acc);
     std::filesystem::path dictionary_path;
     resolve_engine_dictionary(root_tbl, base_dir, opts, bundle, acc, dictionary_path);
+    resolve_engine_acceptor_handshake_timeout(root_tbl, bundle, acc);
+    check_transport_handshake_timeouts(merged_session_tables, acc);
     resolve_session_dictionaries(root_tbl, merged_session_tables, base_dir, dictionary_path, opts,
                                  bundle, acc);
 

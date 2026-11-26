@@ -5,6 +5,7 @@
 // 044-toml-session-config (FR-002 / data-model §E).
 #pragma once
 
+#include <chrono>
 #include <expected>
 #include <memory>
 #include <vector>
@@ -56,6 +57,10 @@ struct EngineEstablishment {
     // 045-observability-config (logging leg, E-2): null → engine logger no-op.
     // NO tracer/meter field this step (deferred — OTLP export unimplemented).
     std::shared_ptr<fixpp::log::Logger> logger;
+    // 106-logon-guards-write-bounds (contract C-5.2; data-model E-7): the root key
+    // `acceptor_tls_handshake_timeout_ms`, absent → the default below. The host copies it into
+    // fixpp::core::EngineConfig::acceptor_tls_handshake_timeout as it copies `clock`.
+    std::chrono::milliseconds acceptor_tls_handshake_timeout{1500};
 };
 
 struct ConfigBundle {

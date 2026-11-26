@@ -35,7 +35,7 @@ TEST(Error020Completeness, ExactSetEquality) {
 
     // Message-table boundary: slot 131 carries the 020 message. The forward
     // "unknown" boundary is the slot after the newest block's last enumerator
-    // (101's wire_undefined_tag; its own gate is test_101_*).
+    // (106's session_write_timeout; test_101_* pins its slot).
     EXPECT_NE(fixpp::core::error_message(error::app_payload_malformed),
               std::string_view{"unknown error"})
         << "slot 131 (app_payload_malformed) must carry a real message";
@@ -43,10 +43,10 @@ TEST(Error020Completeness, ExactSetEquality) {
     // assertion is that the slot has no message.
     // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     EXPECT_EQ(fixpp::core::error_message(
-                  static_cast<error>(static_cast<std::uint8_t>(error::wire_undefined_tag) + 1U)),
+                  static_cast<error>(static_cast<std::uint8_t>(error::session_write_timeout) + 1U)),
               std::string_view{"unknown error"})
-        << "the slot after wire_undefined_tag must be unknown — nothing "
-           "added beyond the 101 block";
+        << "the slot after session_write_timeout must be unknown — nothing "
+           "added beyond the 106 block";
 }
 
 // ── Message non-empty + to_string parity ──────────────────────────────────────
