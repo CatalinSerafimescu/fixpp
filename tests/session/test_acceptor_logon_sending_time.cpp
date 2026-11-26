@@ -17,7 +17,7 @@
 //   9. persistent-store inbound seeded-not-advanced (INV-4)
 //  10. stale-52 + extra 1137 field → rejects on 52 (genuine 52-vs-1137-GATE
 //      ordering is witnessed in the FIXT suite / US3, where the gate is reachable)
-//  11. bad-52 + bad-credentials → 52 wins (credential reject never reached)
+//  11. bad-52 + bad-credentials → the credentials refusal: no frame, nothing consumed (106 D1)
 //  12. bad-52 + too-high inbound seqnum → 52 wins (check_inbound never reached)
 //  13. conforming → Active (no regression)
 //  14. persistent-reconnect durable outbound N>1 → Reject carries 34=N
@@ -688,8 +688,9 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell9_PersistentStore_InboundNotAdvanced) {
 // added in the FIXT suite test_fixt_logon_establishment.cpp (US3 / T013), where
 // FixtSetup + the version registry + the 1137 reject path already live — it is NOT
 // duplicated here. The core "52 guard pre-empts downstream gates" ordering is already
-// witnessed discriminatingly by Cell 11 (vs credentials) and Cell 12 (vs check_inbound),
-// both reachable on FIX.4.4. [[feedback_witness_asserts_named_postcondition_not_proxy]]
+// witnessed discriminatingly by Cell 12 (vs check_inbound), reachable on FIX.4.4; the
+// credentials gate precedes the 52 guard (106 D1, Cell 11).
+// [[feedback_witness_asserts_named_postcondition_not_proxy]]
 // ═══════════════════════════════════════════════════════════════════════════════
 TEST_F(AcceptorLogonSendingTimeTest, Cell10_Stale52WithExtra1137Field_RejectsOn52) {
     auto cfg = make_cfg();
@@ -719,35 +720,37 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell10_Stale52WithExtra1137Field_RejectsOn5
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Cell 11 — bad-52 + rejecting credentials → 52 wins (authorize_logon not reached)
+// Cell 11 — bad-52 + rejecting credentials → the credentials refusal
 // ═══════════════════════════════════════════════════════════════════════════════
-TEST_F(AcceptorLogonSendingTimeTest, Cell11_BadStalePlusBadCreds_52Wins) {
+// 106 D1 supersedes 038's simultaneous-bad ordering for credentials: the credentials gate runs
+// right after interpret_logon, before the 52 guard, so a refused Logon draws a silent
+// Disconnected with no frame written and no number consumed in either direction. The validator's
+// call count tells the credentials path from any other silent refusal.
+TEST_F(AcceptorLogonSendingTimeTest, Cell11_BadStalePlusBadCreds_CredsWin) {
     auto cfg = make_cfg();
     // Always-reject credential validator.
+    int validator_calls = 0;
     cfg.compid_authorization_policy.set_logon_validator(
-        [](std::string_view, fixpp::session::logon_credentials const&) -> bool { return false; });
+        [&validator_calls](std::string_view, fixpp::session::logon_credentials const&) -> bool {
+            ++validator_calls;
+            return false;
+        });
     Session sess(engine_, cfg);
     open_session(sess);
     captured_frames_.clear();
+    auto& mgr = fixpp::session::session_test_access::seqnum_mgr(sess);
+    const seqnum_t in_before = mgr.next_inbound_unsafe();
+    const seqnum_t out_before = mgr.peek_outbound();
 
     auto logon = make_logon_with_time(kStalePast);
     (void)feed(sess, logon);  // outcome checked below via captured frames/state
 
-    // 52 guard fires first → Reject(371=52) + Disconnected.
-    assert_reject_no_logout("Cell11");
     assert_disconnected(sess, "Cell11");
-
-    bool found_reject_52 = false;
-    for (const auto& f : captured_frames_) {
-        auto sp = std::span<const std::byte>(f);
-        auto mt = extract_field(sp, 35);
-        if (mt && *mt == "3") {
-            auto r371 = extract_field(sp, 371);
-            if (r371 && *r371 == "52") found_reject_52 = true;
-        }
-    }
-    EXPECT_TRUE(found_reject_52)
-        << "Cell11: Reject(371=52) must be emitted (52 wins over credential check)";
+    EXPECT_TRUE(captured_frames_.empty())
+        << "Cell11: a refused identity is disconnected with no frame written";
+    EXPECT_EQ(validator_calls, 1) << "Cell11: the credentials gate must judge the Logon";
+    EXPECT_EQ(mgr.next_inbound_unsafe(), in_before) << "Cell11: NextNumIn must not be consumed";
+    EXPECT_EQ(mgr.peek_outbound(), out_before) << "Cell11: NextNumOut must not be consumed";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

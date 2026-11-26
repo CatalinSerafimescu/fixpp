@@ -1340,7 +1340,8 @@ set_tests_properties(session_admin_emit_observation_gate_selftest PROPERTIES
 # ── 038-acceptor-sendingtime-guard T001–T008 (Group 1 witness) ───────────────
 # 14 cells: stale-past/future, malformed, absent, empty 52; toAdmin-throw;
 # assign_outbound-fail; build-fail-closed; persistent-inbound-seeded; ordering
-# (52 wins vs 1137/creds/check_inbound); conforming; persistent-reconnect seq.
+# (52 wins vs 1137/check_inbound; credentials first, 106 D1); conforming;
+# persistent-reconnect seq.
 # Cell 7 injects overflow through tests/support/seqnum_manager_test_access.hpp.
 # Anchors: spec.md FR-002/FR-003/FR-004; contracts/acceptor-logon-sendingtime.md C-1;
 #          quickstart.md §Group-1; tasks.md T001-T008.

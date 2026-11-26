@@ -834,8 +834,10 @@ TEST_P(W25Initiator, Reply141YWithBad1130_NoReset) {
     }
 }
 
-// `LS-h`'s shape: a direct-constructed initiator, an off-list identity. S3's block stands ahead of
-// mTLS on this arm, so the entry answers and no authorization runs.
+// `LS-h`'s shape: a direct-constructed initiator, an off-list identity. 106 D1 supersedes 099
+// E-7's LS-h ending here: the mTLS gate runs right after interpret_logon, ahead of S3's block, so
+// the off-list identity is refused with nothing written and NextNumIn kept, and the authorization
+// event is emitted.
 TEST_P(W25Initiator, OffListIdentity_MtB_NoAuth) {
     RigOptions o;
     o.mtls = true;
@@ -843,7 +845,7 @@ TEST_P(W25Initiator, OffListIdentity_MtB_NoAuth) {
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     Rig& r = *run.rig;
     run.ending = r.deliver(reply(r, count("1") + E("D", "99")));
-    expect_ending(run, bad_1130_ending(GetParam()));
+    expect_ending(run, "- | Disc | k | app=0 adm=0 | auth");
 }
 
 std::function<void(SessionConfig&)> with_reconnect() {
