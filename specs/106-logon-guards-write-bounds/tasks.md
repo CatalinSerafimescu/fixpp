@@ -1556,7 +1556,7 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   TC-001, S-009, S-014, S-025, S-003, S-004, TC-004, S-016, S-020, T-002, T-003, CA-004, CA-005, CA-006; and nine
   coverage-index entries (FIX-SL §4.3.11, §4.5.1, §4.5.5, §4.6.4; FIXS §4.4; FIX-TC 1B, 1S, 4, 6). Every cell a note
   names is listed by the head binaries' `--gtest_list_tests`.
-- [ ] T183 **Feature-completeness audit (MUST be the FINAL task)**: against the final head, (i) every row of this file is
+- [X] T183 **Feature-completeness audit (MUST be the FINAL task)**: against the final head, (i) every row of this file is
   `[X]` or carries a waiver rationale (T147, T180 and T181 recorded as pending where the merge has not
   happened); (ii) every FR and SC maps to a landed cell and a landed implementation (the FR/SC table below, re-read cell by
   cell against `--gtest_list_tests`), every mutant of the mutant table maps to a recorded RED, every item of plan.md
@@ -1564,6 +1564,10 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   landed cell or its named instrument; (iii) every feature-owned OFFICIAL catalogue row is `done` with its
   `coverage-index.md` entry (T182). Record the verdict, 100 % or fully waived, in
   `.specify/decisions/106-logon-guards-write-bounds-verify.md` under `## Completeness`.
+  **Done** (evidence file, "T183"; record `.specify/decisions/106-logon-guards-write-bounds-completeness.md`, which
+  `/gate-b` 4d reads, with a pointer from the verify record's Completeness section): **fully waived** (W-T147 for
+  FR-001, FR-002 and SC-006; W-FULLCTEST for SC-007). Open by design: T147 (pending CI), T177 to T179 with T178a
+  (orchestrator), T181 (post-merge). Re-checked after Gate B's fix rounds.
 
 ---
 
