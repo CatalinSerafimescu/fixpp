@@ -12,6 +12,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <asio/bind_cancellation_slot.hpp>
+#include <asio/cancellation_signal.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
@@ -25,6 +27,7 @@
 #include <fixpp/config/toml_config_loader.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/memory_store.hpp>
 #include <fixpp/session/memory_store_factory.hpp>
 #include <fixpp/session/session_config.hpp>
@@ -49,6 +52,7 @@
 #include "support/seqnum_manager_test_access.hpp"
 #include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
+#include "support/validation_test_dictionary.hpp"
 
 #ifndef FIXPP_CONFIG_FIXTURE_DIR
 #error "FIXPP_CONFIG_FIXTURE_DIR must be set by CMake"
@@ -1375,6 +1379,237 @@ TEST_P(OneEnding106, BothDueAtOneWake) {
 INSTANTIATE_TEST_SUITE_P(BothRoles, OneEnding106,
                          ::testing::Values(session_role::acceptor, session_role::initiator),
                          role_name);
+
+// T106 (research D9 row C-4; data-model E-3's joiner row drain_for_reconnect_ and its respawn): a
+// direct initiator in LogonSent (its reconnected Logon written, drive_reconnect() returned), inbound
+// validation on (the validation test dictionary), W = 300 ms, logout_disconnect_timeout_ms 5000 ms
+// (the drain's step-3 wall-clock bound, a competing ending: the cells read long before it). An
+// acknowledgement without its required EncryptMethod(98) draws the validate-first Reject, whose
+// write is held at S, so inbound_depth_ is 1; a second drive_reconnect() then enters the drain,
+// which records no Disconnected from LogonSent and parks at its step 3.
+class DrainRig {
+public:
+    Rig r{session_role::initiator, [] {
+              Params p;
+              p.logout_ms = 5000;
+              return p;
+          }(),
+          [](SessionConfig& c) {
+              c.dictionary = fixpp::test_support::make_validation_test_dictionary();
+              c.validate_inbound_messages = true;
+          }};
+    std::optional<std::future<expected_void>> delivery;
+    t106::steady_time_point s{};
+
+    [[nodiscard]] bool logon_sent() {
+        auto const opened = r.d.run(r.session().open(), "open");
+        if (!opened || !opened->has_value()) return false;
+        auto const c = r.d.run(r.session().drive_reconnect(), "drive_reconnect");
+        return c && c->has_value() && r.d.s.state() == fsm_state::LogonSent;
+    }
+    [[nodiscard]] bool reject_held() {
+        r.hold_write_of("3");
+        delivery.emplace(r.d.s.feed_spawn(r.d.s.frame("A", 1, "108=30\x01")));
+        if (!r.d.s.pump_until([&] { return parked_on(r, "3"); })) return false;
+        s = r.now();
+        return r.d.s.state() == fsm_state::LogonSent;
+    }
+    [[nodiscard]] int bound_count() {
+        return session_test_access::connection_bound_count(r.session());
+    }
+    ~DrainRig() {
+        r.d.release();
+        if (delivery) (void)r.d.s.pump_until([&] { return rgs::Scene::ready(*delivery); }, 10s);
+    }
+};
+
+// _Parked: no write in flight (the acknowledgement withheld), so the drain's step 3 does not park;
+// the second drive_reconnect() returns, and at the new connection's first spawn of the bound (its
+// Logon's write) the old one's count was 0: the drain's entry wake and term ended it before the
+// join and the install.
+TEST(ConnectionBound106, Teardown_Drain_Parked) {
+    DrainRig d;
+    ASSERT_TRUE(d.logon_sent()) << "setup: not in LogonSent";
+    ASSERT_EQ(d.bound_count(), 1) << "setup: the Logon's write spawned no bound";
+    std::vector<int> old_at_spawn;
+    session_test_access::set_connection_bound_spawn_fails(d.r.session(), [&] {
+        old_at_spawn.push_back(d.bound_count() - 1);  // less the new spawn's own join
+        return false;
+    });
+    auto second = d.r.spawn(d.r.session().drive_reconnect());
+    EXPECT_TRUE(d.r.d.s.pump_until([&] { return rgs::Scene::ready(second); }, 2s))
+        << "the second drive_reconnect() did not return";
+    ASSERT_EQ(old_at_spawn.size(), 1U) << "spawns of the bound after the second drive_reconnect()";
+    EXPECT_EQ(old_at_spawn.front(), 0) << "the old bound outlived the drain's join";
+    session_test_access::set_connection_bound_spawn_fails(d.r.session(), nullptr);
+}
+
+// _Timing: the armed write a Logon-arm Reject held in LogonSent; the teardown at S + 100 ms, the
+// clock not advanced after it, so only the drain's entry wake ends the bound before the join (the
+// drain parks at step 3): the counter reads 0 after a bounded pump.
+TEST(ConnectionBound106, Teardown_Drain_Timing) {
+    DrainRig d;
+    ASSERT_TRUE(d.logon_sent()) << "setup: not in LogonSent";
+    ASSERT_TRUE(d.reject_held()) << "setup: the Reject's write was not held";
+    d.r.at(d.s + 100ms);
+    ASSERT_EQ(d.bound_count(), 1) << "setup: no bound armed on the Reject's write";
+    auto second = d.r.spawn(d.r.session().drive_reconnect());
+    EXPECT_TRUE(d.r.d.s.pump_until([&] { return d.bound_count() == 0; }, 2s))
+        << "the bound outlived the drain's entry";
+    EXPECT_FALSE(rgs::Scene::ready(second)) << "the drain did not park at its step 3";
+    d.r.d.release();
+    EXPECT_TRUE(d.r.d.s.pump_until([&] { return rgs::Scene::ready(second); }, 10s))
+        << "the second drive_reconnect() did not return after the release";
+}
+
+// WriteExpiryDuringDrain_NoRecord: the same rig, step_to(S + W) issued as soon as the drain parks:
+// no write-timeout record, no Disconnected from the bound, the counter 0; the Reject's write is
+// ended by the drain's own wall-clock bound (its force-close), within 5 s + 2 s.
+TEST(ConnectionBound106, WriteExpiryDuringDrain_NoRecord) {
+    DrainRig d;
+    ASSERT_TRUE(d.logon_sent()) << "setup: not in LogonSent";
+    ASSERT_TRUE(d.reject_held()) << "setup: the Reject's write was not held";
+    auto const disconnected_before = d.r.disconnected();
+    auto second = d.r.spawn(d.r.session().drive_reconnect());
+    ASSERT_TRUE(d.r.d.s.pump_until([&] { return d.bound_count() == 0; }, 2s))
+        << "setup: the bound outlived the drain's entry";
+    d.r.at(d.s + std::chrono::milliseconds{kW});
+    EXPECT_EQ(d.r.write_records(), 0U) << "a write-timeout record during the drain";
+    EXPECT_EQ(d.r.disconnected(), disconnected_before) << "Disconnected during the drain";
+    EXPECT_EQ(d.bound_count(), 0) << "a bound during the drain";
+    EXPECT_TRUE(d.r.d.s.pump_until([&] { return rgs::Scene::ready(*d.delivery); }, 7s))
+        << "the Reject's write was not ended by the drain's bound";
+    EXPECT_EQ(d.r.write_records(), 0U) << "write-timeout records";
+    (void)d.r.d.s.pump_until([&] { return rgs::Scene::ready(second); }, 10s);
+}
+
+// DrainCancelled_RespawnsOnBlockedWrite (N-6): the same rig, the second drive_reconnect()
+// cancelled through its cancellation slot while parked, so it returns dispatch_aborted; the bound
+// is spawned again on the still-held write, and step_to(S + W) cuts it: one write-timeout record,
+// Disconnected, the transport closed.
+TEST(ConnectionBound106, DrainCancelled_RespawnsOnBlockedWrite) {
+    DrainRig d;
+    ASSERT_TRUE(d.logon_sent()) << "setup: not in LogonSent";
+    ASSERT_TRUE(d.reject_held()) << "setup: the Reject's write was not held";
+    auto const disconnected_before = d.r.disconnected();
+    asio::cancellation_signal sig;
+    auto second = asio::co_spawn(
+        fixpp::test_support::session_executor_of(d.r.session(), d.r.d.s.ioc),
+        d.r.session().drive_reconnect(), asio::bind_cancellation_slot(sig.slot(), asio::use_future));
+    ASSERT_TRUE(d.r.d.s.pump_until([&] { return d.bound_count() == 0; }, 2s))
+        << "setup: the bound outlived the drain's entry";
+    ASSERT_FALSE(rgs::Scene::ready(second)) << "setup: the drain did not park";
+    sig.emit(asio::cancellation_type::terminal);
+    ASSERT_TRUE(d.r.d.s.pump_until([&] { return rgs::Scene::ready(second); }, 2s))
+        << "the cancelled drive_reconnect() did not return";
+    auto const sr = second.get();
+    ASSERT_FALSE(sr.has_value()) << "the cancelled drive_reconnect() succeeded";
+    EXPECT_EQ(sr.error(), fixpp::core::error::dispatch_aborted);
+    ASSERT_FALSE(d.r.d.closed()) << "setup: the cancellation closed the transport";
+    EXPECT_EQ(d.bound_count(), 1) << "no bound spawned again on the held write";
+    d.r.at(d.s + std::chrono::milliseconds{kW} - ns{1});
+    EXPECT_FALSE(d.r.d.closed()) << "closed before S + W";
+    d.r.at(d.s + std::chrono::milliseconds{kW});
+    EXPECT_EQ(d.r.write_records(), 1U) << "write-timeout records";
+    EXPECT_TRUE(d.r.d.closed()) << "not closed at S + W";
+    EXPECT_EQ(d.r.d.s.state(), fsm_state::Disconnected);
+    EXPECT_EQ(d.r.disconnected() - disconnected_before, 1U) << "new Disconnected entries";
+    ASSERT_TRUE(rgs::Scene::ready(*d.delivery)) << "the Reject's delivery did not return";
+    auto const dr = d.delivery->get();
+    d.delivery.reset();
+    ASSERT_FALSE(dr.has_value()) << "the Reject's delivery succeeded";
+    EXPECT_EQ(dr.error(), fixpp::core::error::session_write_timeout);
+}
+
+// DrainCancelled_RespawnFails_ClosedAtOnce: the same rig, the spawn seam set after the bound's
+// first spawn and before the cancellation, so the respawn is refused: at that return, with the
+// clock not advanced, the claim taken, Disconnected, the transport closed, zero reason records;
+// the Reject's write returns dispatch_aborted, its epoch not cut.
+TEST(ConnectionBound106, DrainCancelled_RespawnFails_ClosedAtOnce) {
+    DrainRig d;
+    ASSERT_TRUE(d.logon_sent()) << "setup: not in LogonSent";
+    ASSERT_TRUE(d.reject_held()) << "setup: the Reject's write was not held";
+    auto const disconnected_before = d.r.disconnected();
+    asio::cancellation_signal sig;
+    auto second = asio::co_spawn(
+        fixpp::test_support::session_executor_of(d.r.session(), d.r.d.s.ioc),
+        d.r.session().drive_reconnect(), asio::bind_cancellation_slot(sig.slot(), asio::use_future));
+    ASSERT_TRUE(d.r.d.s.pump_until([&] { return d.bound_count() == 0; }, 2s))
+        << "setup: the bound outlived the drain's entry";
+    session_test_access::set_connection_bound_spawn_fails(d.r.session(), [] { return true; });
+    sig.emit(asio::cancellation_type::terminal);
+    ASSERT_TRUE(d.r.d.s.pump_until([&] { return rgs::Scene::ready(second); }, 2s))
+        << "the cancelled drive_reconnect() did not return";
+    d.r.d.s.drain();
+    EXPECT_NE(session_test_access::ending_claim(d.r.session()), 0) << "no claim";
+    EXPECT_EQ(d.r.d.s.state(), fsm_state::Disconnected);
+    EXPECT_EQ(d.r.disconnected() - disconnected_before, 1U) << "new Disconnected entries";
+    EXPECT_TRUE(d.r.d.closed()) << "the transport is open";
+    EXPECT_EQ(d.r.write_records(), 0U) << "write-timeout records";
+    EXPECT_EQ(d.r.give_up_records(), 0U) << "give-up records";
+    ASSERT_TRUE(rgs::Scene::ready(*d.delivery)) << "the Reject's delivery did not return";
+    auto const dr = d.delivery->get();
+    d.delivery.reset();
+    if (!dr) {
+        EXPECT_EQ(dr.error(), fixpp::core::error::dispatch_aborted)
+            << "the Reject's error " << static_cast<int>(dr.error());
+    }
+    session_test_access::set_connection_bound_spawn_fails(d.r.session(), nullptr);
+}
+
+// T107 (research D9 row R2(b); [seam: M8]): the shipping clock. system_clock_source, the
+// coroutines on the session's executor, HeartBtInt 2 s (T = 2.4 s, the default threshold),
+// W = 200 ms, B = 2000 ms; the application sends every 300 ms and the peer sends nothing. Every
+// send completes until the TestRequest is seen at the peer, in [T, 2T) of wall time from the
+// Logon; the next send is then held, at S, and cut within W + 1 s of S: one write-timeout record, no
+// slot-74 record, session_write_timeout from the cut send. Inequality: the competing give-up is at
+// the TestRequest's write + T or later, and 300 ms + W + 1 s = 1.5 s < T leaves 0.9 s of
+// scheduling margin. The peer's frames are stamped from the Scene's mock clock, so
+// sending_time_threshold is widened to accept them.
+TEST_P(WriteLimit106, ShippingClock106_DirectDriver_BoundBesideLiveness_TestRequestAtT) {
+    Params p;
+    p.heartbeat = 2s;
+    p.write_ms = 200;
+    p.logout_ms = 2000;
+    Rig r{GetParam(), p, [](SessionConfig& c) {
+              c.sending_time_threshold = std::chrono::hours{24 * 365 * 10};
+          }};
+    r.d.s.engine.clock = std::make_shared<fixpp::core::system_clock_source>(r.d.s.ioc.get_executor());
+    r.d.s.session = std::make_unique<fixpp::session::Session>(r.d.s.engine, r.d.s.cfg);
+    // Read before the peer's Logon, so it does not follow the session's last inbound instant.
+    auto const logon_at = std::chrono::steady_clock::now();
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    auto const t = 2400ms;
+    std::optional<std::chrono::steady_clock::time_point> tr_seen;
+    std::deque<std::future<expected_void>> sends;
+    int n = 0;
+    while (!tr_seen && std::chrono::steady_clock::now() - logon_at < 2 * t) {
+        sends.push_back(r.spawn_send("W106S" + std::to_string(++n)));
+        (void)r.d.s.pump_until([&] { return r.d.completed("1") > 0; }, 300ms);
+        if (r.d.completed("1") > 0) tr_seen = std::chrono::steady_clock::now();
+    }
+    ASSERT_TRUE(tr_seen.has_value()) << "no TestRequest by 2T";
+    EXPECT_GE(*tr_seen - logon_at, t) << "the TestRequest came before T";
+    for (auto& f : sends) {
+        ASSERT_TRUE(r.d.s.pump_until([&] { return rgs::Scene::ready(f); }, 1s)) << "a send";
+        EXPECT_TRUE(f.get().has_value()) << "a send before the TestRequest failed";
+    }
+    r.d.hold_next_write();
+    auto cut = r.spawn_send("W106SCUT");
+    ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, "D"); }, 1s)) << "the send not held";
+    auto const s = std::chrono::steady_clock::now();
+    EXPECT_TRUE(r.d.s.pump_until([&] { return r.d.closed(); }, 200ms + 1s))
+        << "not cut within W + 1 s";
+    EXPECT_LT(std::chrono::steady_clock::now() - s, 200ms + 1s) << "cut after W + 1 s";
+    EXPECT_GE(std::chrono::steady_clock::now() - s, 200ms) << "cut before W";
+    ASSERT_TRUE(r.d.s.pump_until([&] { return rgs::Scene::ready(cut); }, 1s))
+        << "the cut send did not return";
+    auto const cr = cut.get();
+    ASSERT_FALSE(cr.has_value()) << "the cut send succeeded";
+    EXPECT_EQ(cr.error(), fixpp::core::error::session_write_timeout);
+    EXPECT_EQ(r.write_records(), 1U) << "write-timeout records";
+    EXPECT_EQ(r.give_up_records(), 0U) << "give-up records";
+}
 
 INSTANTIATE_TEST_SUITE_P(BothRoles, WriteLimit106,
                          ::testing::Values(session_role::acceptor, session_role::initiator),
