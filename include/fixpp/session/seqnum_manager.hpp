@@ -241,6 +241,10 @@ private:
     // mutex_, so the mutators' test of it reads next to the counters they then touch.
     bool frozen_ = false;
     fixpp::sync::async_mutex mutex_;  // serialises counter reads/writes (D-7)
+
+    // 106 D2: the refusals check_inbound and classify_inbound share, in their order; the
+    // counter unchanged. Precondition: the caller holds mutex_.
+    [[nodiscard]] fixpp::core::expected_t<void> classify_locked_(seqnum_t seq) const noexcept;
 };
 
 }  // namespace fixpp::session

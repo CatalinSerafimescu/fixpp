@@ -1256,15 +1256,16 @@ Session::live_write_serialized_(std::span<const std::byte> frame, wire_reset_exe
     // write marks its start, epoch and flag here, after the gate's grant and ruling W's test,
     // and the connection bound cuts it at its start + the limit (data-model E-5). The first
     // such write on a connection with no bound spawns it on this coroutine's executor; a spawn
-    // that fails fails closed, the write not started (research D3, "Spawn failure"). With the
-    // limit off this adds only the knob's test below.
+    // that fails fails closed, the write not started (research D3, "Spawn failure").
     // The flag's clear: explicit at each return below, and by the destructor only while an
-    // exception unwinds the frame, as emit_in_flight_guard's (a frame destroyed unresumed, an
-    // io_context torn down with no close(), touches nothing). The clear does not wake the
-    // bound: at its deadline it finds the write returned and parks.
+    // exception unwinds the frame, as emit_in_flight_guard's. A frame destroyed unresumed (an
+    // io_context torn down with no close()) clears nothing, provided no other exception is
+    // unwinding the destroying thread: the destructor compares the thread's count with the one
+    // taken at the mark. The clear does not wake the bound: at its deadline it finds the write
+    // returned and parks.
     struct write_in_flight_guard {
         Session* s = nullptr;  // the session while its limited write is in flight
-        int unwinding_at = std::uncaught_exceptions();
+        int unwinding_at = 0;  // std::uncaught_exceptions() at the mark, set with s
         write_in_flight_guard() noexcept = default;
         write_in_flight_guard(write_in_flight_guard const&) = delete;
         write_in_flight_guard& operator=(write_in_flight_guard const&) = delete;
@@ -1275,7 +1276,7 @@ Session::live_write_serialized_(std::span<const std::byte> frame, wire_reset_exe
             }
         }
         ~write_in_flight_guard() {
-            if (std::uncaught_exceptions() > unwinding_at) {
+            if (s != nullptr && std::uncaught_exceptions() > unwinding_at) {
                 clear();
             }
         }
@@ -1291,6 +1292,7 @@ Session::live_write_serialized_(std::span<const std::byte> frame, wire_reset_exe
         write_started_at_ = effective_clock_->steady_now();
         epoch = ++write_epoch_;
         write_in_flight_ = true;
+        in_flight.unwinding_at = std::uncaught_exceptions();
         in_flight.s = this;
         limited = true;
         // A bound armed on an earlier write's deadline (never later than this one's) re-tests
@@ -1314,8 +1316,7 @@ Session::live_write_serialized_(std::span<const std::byte> frame, wire_reset_exe
     fixpp::core::expected_t<std::size_t> write_r;
     try {
         write_r = co_await live->async_write(frame);
-    } catch (const asio::system_error& e) {
-        (void)e;
+    } catch (const asio::system_error&) {
         in_flight.clear();
         co_return std::unexpected(failed());
     }
@@ -4617,9 +4618,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
                 // arm (logon_reject_disconnects_), the consuming gate admits the identity before
                 // the write (N-13.2); where it stays in the arm, nothing is consumed, so the next
                 // Logon meets the full gate (F-2).
-                if (logon_identity_refuses_(frame) ||
-                    (logon_reject_disconnects_(hdr, v.reject.ref_tag_id) &&
-                     !logon_identity_admitted_())) {
+                if (held_reject_refused_(frame, hdr, v.reject.ref_tag_id)) {
                     record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }
@@ -6481,11 +6480,7 @@ asio::awaitable<void> Session::run_connection_bound_([[maybe_unused]] connection
     // R10; claim-ok: R10 names a Gate A ruling). No Logout, no
     // reason record.
     if (failed && conn_gen_ == gen && claim_ending_(ending_claim::internal)) {
-        record_disconnected_unless_already_();
-        if (state_ == lifecycle::open) {
-            spawn_connection_close_(live_transport_shared_());
-            connection_end_owed_.reset();
-        }
+        end_connection_now_();
     }
 }
 
@@ -6503,11 +6498,7 @@ void Session::expire_write_() noexcept {
                fixpp::log::ArgValue::from_u64(
                    static_cast<std::uint64_t>(fixpp::core::error::session_write_timeout)));
     write_cut_epoch_ = write_epoch_;
-    record_disconnected_unless_already_();
-    if (state_ == lifecycle::open) {
-        spawn_connection_close_(live_transport_shared_());
-        connection_end_owed_.reset();
-    }
+    end_connection_now_();
 }
 
 // research D3, "Spawn failure" and "One close": the connection's ending when its bound cannot be
@@ -6517,6 +6508,13 @@ void Session::expire_write_() noexcept {
 // record.
 void Session::fail_closed_without_bound_() noexcept {
     (void)claim_ending_(ending_claim::internal);
+    end_connection_now_();
+}
+
+// research D3, "One close": an ending its decider already holds (the claim taken or refused by
+// the caller's own test): Disconnected unless already, and while the session is open the
+// connection's close here, not at a root's exit.
+void Session::end_connection_now_() noexcept {
     record_disconnected_unless_already_();
     if (state_ == lifecycle::open) {
         spawn_connection_close_(live_transport_shared_());
@@ -6547,9 +6545,11 @@ bool Session::decide_give_up_(std::chrono::milliseconds threshold,
     give_up_ = give_up_state{};
     constexpr std::string_view kText = "TestRequest unanswered";
     constexpr std::string_view kClause = ", TestReqID ";
-    static_assert(
-        std::tuple_size_v<decltype(give_up_.text_buf)> >= kText.size() + kClause.size() + 2 + 10,
-        "the give-up Text's buffer holds its longest content");
+    // A TestReqID is "TR" and the decimal digits of a std::uint32_t, ten at most.
+    constexpr std::size_t kMaxTestReqIdLen = 2 + 10;
+    static_assert(std::tuple_size_v<decltype(give_up_.text_buf)> >=
+                      kText.size() + kClause.size() + kMaxTestReqIdLen,
+                  "the give-up Text's buffer holds its longest content");
     char* const begin = give_up_.text_buf.data();
     char* out = std::ranges::copy(kText, begin).out;
     if (!pending_test_req_id_.empty()) {
@@ -6564,11 +6564,7 @@ bool Session::decide_give_up_(std::chrono::milliseconds threshold,
         logout_in_flight_ = true;
         if (enter_ending_write_(ending_kind::r1, ex) == ending_entry::refused) {
             give_up_.closed = true;
-            record_disconnected_unless_already_();
-            if (state_ == lifecycle::open) {
-                spawn_connection_close_(live_transport_shared_());
-                connection_end_owed_.reset();
-            }
+            end_connection_now_();
         }
     }
     return true;
@@ -7482,6 +7478,12 @@ bool Session::logon_identity_refuses_(std::span<const std::byte> frame) {
     return refused;
 }
 
+bool Session::held_reject_refused_(std::span<const std::byte> frame,
+                                   fixpp::session::detail::FrameHeader const& hdr, int ref_tag_id) {
+    return logon_identity_refuses_(frame) ||
+           (logon_reject_disconnects_(hdr, ref_tag_id) && !logon_identity_admitted_());
+}
+
 // LogonSent arm (initiator: the peer's Logon-ack).
 // NOLINTNEXTLINE(readability-function-size,hicpp-function-size)
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
@@ -7561,9 +7563,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
                 // 106 D1 supersedes 104 DQ-6 / L-104-3 (answers before the gates): as in the
                 // acceptor's arm, the Reject is held until the identity is known (research D1
                 // item 2); on the initiator only the mTLS half applies.
-                if (logon_identity_refuses_(frame) ||
-                    (logon_reject_disconnects_(hdr, v.reject.ref_tag_id) &&
-                     !logon_identity_admitted_())) {
+                if (held_reject_refused_(frame, hdr, v.reject.ref_tag_id)) {
                     record_state_transition_(fsm_state::Disconnected);
                     co_return fixpp::core::expected_t<void>{};
                 }
@@ -8172,8 +8172,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_body_(
         if (disconnect_required || (!impl_r && (impl_r.error() == error::dispatch_aborted ||
                                                 impl_r.error() == error::session_write_timeout))) {
             // [spec.md US1 AC3; F9 drift fix; gate-b/r2 FQ-1] claim-ok: a pre-existing citation
-            // 106 D11: a cut write or another
-            // ending's close returns here (FR-017).
+            // 106 D11: a cut write or another ending's close returns here (FR-017).
             record_disconnected_unless_already_();
         }
         co_return impl_r;  // value un-coerced
@@ -8719,9 +8718,9 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
         std::shared_ptr<std::atomic<int>> ctr;
         ~liveness_dec() { ctr->fetch_sub(1, std::memory_order_release); }
     } live_dec_guard{live_ctr};
-    bool armed = false;
+    bool adopted_bound = false;
     try {
-        co_await run_liveness_loop_body_(armed);
+        co_await run_liveness_loop_body_(adopted_bound);
     } catch (...) {  // NOLINT(bugprone-empty-catch): the body handles its own; a cancellation
                      // met at this await leaves the release below to decide
     }
@@ -8734,7 +8733,7 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
     // it leaves. A teardown with no close() that releases the loop's clock sleep
     // (Clock::cancel_sleeps()) reaches the bound only through this wake: the bound's own timer
     // is not registered with the clock.
-    if (armed) {
+    if (adopted_bound) {
         connection_bound_.loop_left = true;
         wake_connection_bound_();
     }
@@ -8743,7 +8742,7 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
     release_connection_end_();
 }
 
-asio::awaitable<void> Session::run_liveness_loop_body_(bool& armed) noexcept {
+asio::awaitable<void> Session::run_liveness_loop_body_(bool& adopted_bound) noexcept {
     using namespace std::chrono_literals;
 
     // [feedback_asio_cospawn_total_cancellation_default]: reset the coroutine's
@@ -8782,12 +8781,14 @@ asio::awaitable<void> Session::run_liveness_loop_body_(bool& armed) noexcept {
         fail_closed_without_bound_();
         co_return;
     }
-    armed = true;
+    adopted_bound = true;
     // 106 D3: while one of the loop's emits has not returned, the bound times it (emit_in_flight_),
     // so the give-up is decided at its instant whether or not the emit's write is blocked.
     // The mark is cleared explicitly at each normal exit of an emit (clear()), and by the
-    // destructor only while an exception unwinds the frame: a frame destroyed unresumed (an
-    // io_context torn down with no close()) touches nothing, as ending_write_unwind_guard.
+    // destructor only while an exception unwinds the frame. A frame destroyed unresumed (an
+    // io_context torn down with no close()) clears nothing, provided no other exception is
+    // unwinding the destroying thread: the destructor compares the thread's count with the one
+    // taken at construction, as ending_write_unwind_guard's does.
     struct emit_in_flight_guard {
         Session& s;
         int unwinding_at = std::uncaught_exceptions();
@@ -9005,7 +9006,9 @@ asio::awaitable<void> Session::run_liveness_loop_body_(bool& armed) noexcept {
                 // 106 D3: a give-up the bound decided during the emit takes the loop's write half.
                 if (ending_claim_ == ending_claim::give_up) {
                     in_flight.clear();
-                    if (give_up_.closed) co_return;
+                    if (give_up_.closed) {
+                        co_return;
+                    }
                     write_give_up = true;
                     break;
                 }
@@ -9020,7 +9023,9 @@ asio::awaitable<void> Session::run_liveness_loop_body_(bool& armed) noexcept {
                 auto emit_r = co_await store_then_emit(tr_seq, *tr_result);
                 in_flight.clear();
                 if (ending_claim_ == ending_claim::give_up) {
-                    if (give_up_.closed) co_return;
+                    if (give_up_.closed) {
+                        co_return;
+                    }
                     write_give_up = true;
                     break;
                 }
@@ -9054,7 +9059,9 @@ asio::awaitable<void> Session::run_liveness_loop_body_(bool& armed) noexcept {
                     auto assign_r = co_await seqnum_mgr_.assign_outbound();
                     if (ending_claim_ == ending_claim::give_up) {
                         in_flight.clear();
-                        if (give_up_.closed) co_return;
+                        if (give_up_.closed) {
+                            co_return;
+                        }
                         write_give_up = true;
                         break;
                     }
@@ -9066,7 +9073,9 @@ asio::awaitable<void> Session::run_liveness_loop_body_(bool& armed) noexcept {
                     auto emit_r = co_await store_then_emit(hb_seq, *hb_result);
                     in_flight.clear();
                     if (ending_claim_ == ending_claim::give_up) {
-                        if (give_up_.closed) co_return;
+                        if (give_up_.closed) {
+                            co_return;
+                        }
                         write_give_up = true;
                         break;
                     }
@@ -9075,8 +9084,9 @@ asio::awaitable<void> Session::run_liveness_loop_body_(bool& armed) noexcept {
                         record_disconnected_unless_already_();
                         co_return;
                     }
+                } else {
+                    in_flight.clear();
                 }
-                in_flight.clear();
             }
 
             // After an emit, or with no eligible instant reached, the loop sleeps again.
@@ -9351,12 +9361,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
             // Live path: serialized write through write_gate_.
             auto write_r = co_await live_write_serialized_(frame, exemption, wclass);
             if (!write_r.has_value()) {
-                // 106 (research D5, N-3): a write the limit cut keeps session_write_timeout;
-                // every other live-write failure stays dispatch_aborted.
-                co_return std::unexpected(write_r.error() ==
-                                                  fixpp::core::error::session_write_timeout
-                                              ? fixpp::core::error::session_write_timeout
-                                              : fixpp::core::error::dispatch_aborted);
+                // 106 (research D5, N-3): the callee's error, passed through. It holds while
+                // live_write_serialized_ returns session_write_timeout for a write the limit cut
+                // and dispatch_aborted for every other failure; re-derive by reading its
+                // co_return std::unexpected sites.
+                co_return std::unexpected(write_r.error());
             }
             // 104 (contract RR-6 item 3): held back after a reset point; success with no
             // transmit, as the transmit=false exit returns.

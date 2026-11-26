@@ -799,12 +799,18 @@ static void validate_per_session_transport_kinds(
 // from its merged transport table, [session.transport] over [default.transport]:
 // tls_handshake_timeout_ms when it is an integer in range, else the struct's defaults. Any other
 // value is diagnosed by check_transport_handshake_timeouts, so its load fails.
+// The two handshake keys' range, (0, UINT32_MAX] milliseconds (data-model E-7; contract C-5.1,
+// C-5.2), which transport_config_of and check_handshake_timeout_ms share.
+static bool handshake_timeout_in_range(std::int64_t v) noexcept {
+    return v > 0 && !std::cmp_greater(v, UINT32_MAX);
+}
+
 static transport::Transport::Config transport_config_of(const toml::table& transport_tbl) {
     transport::Transport::Config t_cfg{};
     if (const auto* n = transport_tbl.get("tls_handshake_timeout_ms");
         n != nullptr && n->is_integer()) {
         auto const v = n->as_integer()->get();
-        if (v > 0 && !std::cmp_greater(v, UINT32_MAX)) {
+        if (handshake_timeout_in_range(v)) {
             t_cfg.tls_handshake_timeout = std::chrono::milliseconds{v};
         }
     }
@@ -1075,7 +1081,7 @@ static std::optional<std::chrono::milliseconds> check_handshake_timeout_ms(
         return std::nullopt;
     }
     auto const v = n.as_integer()->get();
-    if (v <= 0 || std::cmp_greater(v, UINT32_MAX)) {
+    if (!handshake_timeout_in_range(v)) {
         acc.add(LoadDiagnostic{
             .key_path = key_path,
             .reason = reason_class::out_of_range,

@@ -1498,6 +1498,14 @@ private:
     // has_logon_validator(). A refusal then runs the consuming mTLS gate, for its event. Its
     // locals stay in its own frame, so none enters an arm's coroutine frame (104 T093).
     [[nodiscard]] bool logon_identity_refuses_(std::span<const std::byte> frame);
+    // 106 (research D1 item 2): both Logon arms' test before a validate-first Reject. True when
+    // the arm ends with nothing written: logon_identity_refuses_() refuses, or the Reject ends the
+    // arm (logon_reject_disconnects_) and the consuming gate (logon_identity_admitted_()) refuses.
+    // Evaluated in that order, short-circuiting, so the consuming gate runs only on the second
+    // branch. Synchronous, so none of its locals enters an arm's coroutine frame (104 T093).
+    [[nodiscard]] bool held_reject_refused_(std::span<const std::byte> frame,
+                                            fixpp::session::detail::FrameHeader const& hdr,
+                                            int ref_tag_id);
     // 106: the mTLS gate's one authorize computation, which logon_identity_admitted_() and
     // logon_identity_refuses_() share. Precondition: live_peer_id_ holds a value.
     [[nodiscard]] fixpp::core::expected_t<fixpp::session::bound_principal>
@@ -2113,9 +2121,9 @@ private:
     std::shared_ptr<std::atomic<int>> liveness_counter_{std::make_shared<std::atomic<int>>(0)};
     // The liveness loop's body; run_liveness_loop awaits it and then releases the
     // connection-end latch, so the release runs only on an exit the loop resumed to.
-    // armed: set by the body once it has spawned or adopted the connection bound (106, the
-    // exit's loop_left).
-    [[nodiscard]] asio::awaitable<void> run_liveness_loop_body_(bool& armed) noexcept;
+    // adopted_bound: set by the body once it has spawned or adopted the connection bound (106,
+    // the exit's loop_left).
+    [[nodiscard]] asio::awaitable<void> run_liveness_loop_body_(bool& adopted_bound) noexcept;
 
     // ── 105-transport-liveness: the connection-end latch (research D1; data-model E-2) ──
     // Supersedes, for the connection, the rule that writing Disconnected is a state
@@ -2358,6 +2366,10 @@ private:
     // The fail-closed ending of a connection whose bound cannot be spawned or respawned (research
     // D3, "Spawn failure", "One close"): the claim, Disconnected and one close. Synchronous.
     void fail_closed_without_bound_() noexcept;
+    // The tail every decider of the connection's ending shares once it holds the claim (research
+    // D3, "One close"): Disconnected unless already, then, while the session is open, the
+    // connection's one close. The claim is the caller's. Synchronous.
+    void end_connection_now_() noexcept;
     // Set by the liveness loop while its TestRequest or Heartbeat emit has not returned; cleared
     // by an RAII guard in the loop's frame at the return or an exception.
     bool emit_in_flight_ = false;
@@ -2402,7 +2414,7 @@ private:
     give_up_state give_up_;
     // 106 (research D9 row "FR-006 commit"): run in a Logon arm between the classification of
     // the frame's MsgSeqNum and the commit of its advance, so a cell can freeze the manager there.
-    // Set only through session_test_access; its call site lands with the commit (tasks.md T064).
+    // Set only through session_test_access.
     std::function<void()> commit_freeze_hook_;
 
     // ── 034-credential-store-redaction T004 — masker buffer bound ────────────
