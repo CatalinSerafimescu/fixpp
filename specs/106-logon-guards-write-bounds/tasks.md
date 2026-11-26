@@ -166,6 +166,8 @@ shows). Re-derived at HEAD. **Blocks every later phase.**
   symbol 106 adds, which is how `$B` builds the base half of the emit differential (T108): the base reading overlays
   `tests/alloc_guard/CMakeLists.txt` and the TU on `$B` and counts only after its reconfigure with
   `-DFIXPP_106_ALLOC_BASE=ON` returned 0 (without the overlaid CMakeLists the option does not exist there).
+  **Ruling 3 (orchestrator, on the Phase 6-rest report):** the second Release registration,
+  `alloc_guard_106_connection_bound_count` (the in-process counter, T108), is accepted beside this one.
 - [X] T005 Write `tests/session/test_106_support.hpp` (compiles on `$B`; names no production symbol 106 adds): the
   instants helper (G for an emit not returned or held, G for a written TestRequest, S + W) over `mock_clock`; reuse of
   `t105::DirectRig` (`tests/session/test_105_direct_rig.hpp`), `rgs::Scene`, `tests/support/blocking_write_transport.hpp`
@@ -972,6 +974,12 @@ not name.
   (every run) and 0 or −1 with it on (open question to the orchestrator). Known positives: M8 RED (T126); M5 GREEN, stopped
   (T125). "No write-timeout record" is asserted as its consequence (Active, every send delivered, the socket open): the rig
   attaches no logger.
+  **Ruling 3 (orchestrator, on the Phase 6-rest report):** the second registration is accepted (T004), and so is the send
+  half's no-record check by consequence. **Ruling 2 (the emit half gated by a differential, limit on ≤ limit off, in-process):
+  stopped, to the orchestrator.** Re-added at `8eba9c3e`; on the clean head it read RED in 2 of 10 runs (limit off 39,
+  limit on 40), and under M8 it read GREEN in 3 of 3 (M8 adds the same allocations to both arms, so a differential between
+  them cannot see it); M5k reads it RED in 3 of 3. Withdrawn again at `4f8d2a36` (printed counts, compared by hand).
+  Readings: evidence file, "Phase 6-rest rulings".
 - [X] T109 [US4] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C5`); record that none builds on `$B` but the emit half's base build, and read
   each cell's RED under its mutant at `H4` (the mutant tasks below). Record the base emit-half count for T108.
 
@@ -1082,13 +1090,18 @@ not name.
 - [X] T124 [US4] In `$M`'s `src/session/session.cpp`: M4 at each other Logout site of T104, with M9 and M9′, one arm per site; RED: its
   `WriteTimeout106.EndingLogout_<Site>` cell. A site ruled unheld in T104 has no arm.
   **Done**: one arm per site, each RED on its `WriteLimitLogoutSite106.EndingLogout_<Site>` cell.
-- [ ] T125 [US4] In `$M`'s `src/session/session.cpp`: M5: a coroutine spawned per write and per emit; RED: `alloc_guard_106_connection_bound_mallocnesia` (the
+- [X] T125 [US4] In `$M`'s `src/session/session.cpp`: M5: a coroutine spawned per write and per emit; RED: `alloc_guard_106_connection_bound_mallocnesia` (the
   send half non-zero, the emit half's delta positive).
   **Stopped (a cell expected RED read GREEN, to the orchestrator):** M5 (a coroutine with a timer, spawned per limited
   write, so per emit too with the limit on) reads GREEN: the send half 0 (interceptor and counter), the emit half as the
   clean head reads it (40 and 40, or 40 and 39). The spawn is in the binary (`nm`). Interpretation, for the orchestrator:
   under `B-544-1`'s two conditions asio's per-thread recycler serves the spawned coroutine's frames, so a spawn per write
   allocates nothing in steady state. Readings: evidence file, "Phase 6 remainder", ruling 6.
+  **Done (ruling 1 on the Phase 6-rest report):** M5 is EQUIVALENT under `B-544-1`'s two conditions (asio's per-thread
+  recycler serves the spawn; the `nm` proof is ruling 6's), so it cannot be the cell's known positive. The seeded known
+  positive M5k (one leaked `new char[1]` per limited write, after the arming; freshness by `nm -C`, the sink's symbol in
+  both binaries) reads RED: the interceptor 20 allocations in `SendHalf_LimitOn`, the counter's send half on 20, the emit
+  half on 45 against off 40 or 39 (3 runs). Readings: evidence file, "Phase 6-rest rulings".
 - [X] T126 [US4] In `$M`'s `src/session/session.cpp`: M8: `connection_bound_wait_`'s shipping branch replaced by `await_deadline(*effective_clock_, …)`; RED:
   `ShippingClock106.DirectDriver_BoundBesideLiveness_TestRequestAtT` (no TestRequest by 2T) and the mallocnesia cell.
   **Partly done:** M8 (the shipping branch's wait replaced by the mock branch's `timer || await_deadline(*effective_clock_, …)`,
@@ -1271,16 +1284,18 @@ transport binary's `AsioTlsTransportErrorPaths.*` and `-L 105`'s `TlsClose105.*`
   (`gh run view --job <id> --log`): a warm run is recorded as warm and does not discharge the cold case, which then
   rests on the workflow comment's push:main recipe (SC-006, FR-001). B&L: `B&L delta: none — a CI job cap is not shipped behaviour` (research D8),
   recorded for `check_bl_delta.py`.
+  **Pending CI** (the PR's `windows-msvc-asan` leg); open until that leg has run.
 
 ---
 
 ## Phase 9: Surfaces and records (plan phase 6; research D7, D8; contract C-6, C-8)
 
-- [ ] T148 [P] `include/fix/c_api/version.h`: `FIXPP_C_ABI_VERSION_MINOR` 19 and a 1.19 history entry marked
+- [X] T148 [P] `include/fix/c_api/version.h`: `FIXPP_C_ABI_VERSION_MINOR` 19 and a 1.19 history entry marked
   **BREAKING** (`[const §X.7]`), behaviour only, no new symbol: an unauthorised identity's Logon draws nothing and changes
   nothing (C-1; C++ and TOML behaviour with no reach from C, contract C-6's no-reach clause); a refused Logon or acknowledgement keeps NextNumIn (C-2); the give-up fires with a write blocked, its
   Logout limited as 105's (C-3); the C++/TOML-only write limit and handshake keys, unreachable from C (C-4.1, C-5.4).
-- [ ] T149 [P] `include/fix/c_api/session.h` (comments only; never clang-formatted): `fixpp_session_close` gains a
+  **Done** (`4ef33a4e`): MINOR 19 and the 1.19 history entry naming C-1, C-2, C-3 and the C++/TOML-only keys (C-6).
+- [X] T149 [P] `include/fix/c_api/session.h` (comments only; never clang-formatted): `fixpp_session_close` gains a
   `BREAKING (C-ABI 1.19, [const §X.7]; 106)` block, and "amended in C-ABI 1.19, 106" clauses on
   `fixpp_session_is_established` and `fixpp_session_send`, each clause's text as contract C-6 words it:
   - the close block: a refused Logon or acknowledgement keeps NextNumIn; and C-6's no-reach clause, stated in the
@@ -1297,15 +1312,19 @@ transport binary's `AsioTlsTransportErrorPaths.*` and `-L 105`'s `TlsClose105.*`
     `B-105-8`'s, unchanged. The clause is BREAKING because on the base that send hung: a call that "could already" be
     made now returns "a result other than the one documented" (`[const §X.7]`).
   `fixpp_session_open` and the two callback registrations are unchanged (D7's census, T018).
-- [ ] T150 Move every "pins the minor" row of T018 to 1.19 (the capi version tests, the Python binding's version
+  **Done** (`4ef33a4e`): the three clauses, comments only, hand-edited (not clang-formatted); the no-reach clause names its condition (no C entry point installs a logon validator or a CompID binding) without the grep's own literals, so the clause does not match C-6's grep over `include/fix/c_api`.
+- [X] T150 Move every "pins the minor" row of T018 to 1.19 (the capi version tests, the Python binding's version
   pins, the CI and tool scripts; the Python binding gains nothing else, D7); re-record `tools/capi_freeze.sha256` through
   its generator if it hashes the touched headers (105 re-recorded it at verify), and run the freeze check.
-- [ ] T151 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Article X §7 predicate: `gh release list --exclude-drafts` on the fixpp repo (with a known positive, another
+  **Done** (`4ef33a4e`): the census re-run at the head (evidence file, "Phase 9"); `CapiVersion.CApiVersionIsExactly_1_19_0` and `CompositeMacroValue` pin 19; no Python, CI, tool or example pin; `tools/capi_freeze.sha256` re-recorded for `session.h` and `version.h` (no generator: `sha256sum`), `tools/check_capi_freeze.sh` PASS. `capi_pure_tests` GREEN on `linux-clang-debug`.
+- [X] T151 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Article X §7 predicate: `gh release list --exclude-drafts` on the fixpp repo (with a known positive, another
   repo's listing, so an empty answer is believed); empty keeps the MINOR bump; a non-empty listing stops and goes to the
   orchestrator. Record the result; re-run at the PR head by T176.
-- [ ] T152 `spec/behaviors-and-limitations.md` (the LIVE file): move `L-104-3` (closed by D1) and `L-104-8` (closed by
+  **Done**: `gh release list --exclude-drafts` on CatalinSerafimescu/fixpp empty, its known positive (`-R cli/cli`) lists releases; the MINOR bump stands. T176 re-runs it.
+- [X] T152 `spec/behaviors-and-limitations.md` (the LIVE file): move `L-104-3` (closed by D1) and `L-104-8` (closed by
   D2) to `spec/behaviors-and-limitations-closed.md` under its cut rule, each marked "closed by 106".
-- [ ] T153 `spec/behaviors-and-limitations.md`: Same live file, amended in place, "(amended <the edit's date>, 106)", each changed clause named (research D8):
+  **Done** (`aa64d069`): both rows moved with a `closed by 106` comment and status.
+- [X] T153 `spec/behaviors-and-limitations.md`: Same live file, amended in place, "(amended <the edit's date>, 106)", each changed clause named (research D8):
   `B-099-2` (title: the identity gates run first in both roles; its "Consume limit" clause: the gate Reject and the block
   both keep NextNumIn on every role; `L-104-8` cited as closed); `B-105-3` (a written TestRequest keeps the count from its
   write's return; a TestRequest or Heartbeat whose write has not returned is given up at L + 3T + 1 ns; the held case
@@ -1315,7 +1334,8 @@ transport binary's `AsioTlsTransportErrorPaths.*` and `-L 105`'s `TlsClose105.*`
   the owner's review at merge; `L-105-f` narrowed (non-ending writes bounded when `write_timeout_ms` is set; the give-up
   no longer waits behind a blocked write; the held no-pending case capped; what stays open: the limit off with a peer
   that keeps sending and never reads, and B = 0 or no clock).
-- [ ] T154 `spec/behaviors-and-limitations.md`: Same live file, a section `## 106`: `B-106-1` (the identity gates first, silent, no state change, with the
+  **Done** (`aa64d069`), dated 2026-11-26. Beyond D8's named clauses, `B-099-2`'s first clause (the block's order) and its Security clause are amended too: 106 D1 falsifies both (evidence file, "Phase 9").
+- [X] T154 `spec/behaviors-and-limitations.md`: Same live file, a section `## 106`: `B-106-1` (the identity gates first, silent, no state change, with the
   credentials rule's width, N-11; as research D8 words it: the observables of each refusal class, contract C-1.3, and that a
   direct mTLS initiator started by `open()` holds no peer identity and never reaches Active, contract C-1.7), `B-106-2` (NextNumIn kept on every Logon refusal, with D2's table), `B-106-3` (the
   give-up with a write blocked, D4's instant, the one ending), `B-106-4` (`write_timeout_ms`), `B-106-5` (the two
@@ -1323,11 +1343,14 @@ transport binary's `AsioTlsTransportErrorPaths.*` and `-L 105`'s `TlsClose105.*`
   `SessionConfig`, `EngineConfig`, `EngineEstablishment`; the additions `SeqnumManager::classify_inbound` and
   `CompIdAuthorizationPolicy::has_logon_validator`; the error enumerator `session_write_timeout` (136) and its C
   mapping); `L-106-a` to `L-106-f` as research D8 and
-  contract C-8 word them (`L-106-f` pinned by `GiveUp106.PreActive_LimitOff_NotCutByEstablishment`); the C-7 departures
+  contract C-8 word them (`L-106-f` with no cell, its basis the code reading, ruling A; the instruction said "pinned by
+  `GiveUp106.PreActive_LimitOff_NotCutByEstablishment`", a cell ruling A dropped); the C-7 departures
   table copied, not re-derived. Each row cites its cells by name.
-- [ ] T155 `spec/behaviors-and-limitations.md`: Close T020: re-run its grep on the edited live file; every hit is now amended, retired or ruled
+  **Done** (`aa64d069`): `L-106-g` (research D8) is included, though this task names `L-106-a` to `L-106-f`. The C-7 notes' row numbers 4 and 5 were off by one (they describe rows 5 and 6); corrected in the contract and the copy.
+- [X] T155 `spec/behaviors-and-limitations.md`: Close T020: re-run its grep on the edited live file; every hit is now amended, retired or ruled
   unaffected, and the evidence table is complete.
-- [ ] T156 [P] Brain pages, PRE-PUSH in the PR before CI (pipeline step 15a; close-out row 3; the late-docs rule):
+  **Done**: the grep re-run on the edited live file (evidence file, "Phase 9"); every hit amended, retired, new or ruled unaffected as at T020.
+- [X] T156 [P] Brain pages, PRE-PUSH in the PR before CI (pipeline step 15a; close-out row 3; the late-docs rule):
   `brain/components/session.md` gains a 106 section (why the gates run first, the tentative advance, the connection bound
   and the one claim, and what was rejected: each "Alternatives rejected" of research D1 to D6 and D11), and its list of
   documents flags the superseded 103, 104 and 105 decisions of research's Supersession table by name;
@@ -1335,25 +1358,30 @@ transport binary's `AsioTlsTransportErrorPaths.*` and `-L 105`'s `TlsClose105.*`
   `brain/components/config.md`, `transport.md` and `session-liveness-and-reconnect.md` for a statement 106 falsifies
   (the 1500 ms literal, the 3T cap's pending term, the loop alone deciding the give-up) and flag or amend each hit,
   citing source, not the page.
-- [ ] T157 Brain checks: `python3 tools/check_brain.py --self-test`, `gate` and `census`, the steps of
+  **Done** (`ea786b77`): session.md's 106 section and its superseded-by-name list; c-api.md's 1.19 section; session-liveness-and-reconnect.md's liveness row amended (the loop no longer decides the give-up alone) and session.md's 105 "needs a TestRequest pending" aside amended; config.md and transport.md read, no statement 106 falsifies.
+- [X] T157 Brain checks: `python3 tools/check_brain.py --self-test`, `gate` and `census`, the steps of
   `.github/workflows/brain-freshness.yml`, then the wrapper PARENT
   `research/G19-fix-fpml-iso20022/tools/brain-external-sweep.sh` (never a bare `check_brain.py sweep`); record its
   non-zero execution count.
+  **Done**: the brain-freshness steps exit 0 (`check_brain.py --self-test`, `gate` after a ref-order fix in c-api.md, `census`; `brain_link_decisions.py --self-test`, `check_workflows.py --self-test` and `.`, `check_line_citations.py --self-test`); the wrapper `brain-external-sweep.sh` PASS with a non-zero execution count (evidence file).
 - [ ] T158 `src/` and `include/` (read), `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Supersession close (research "Supersession"; T022): at the head, both quickstart section 1's recipe
   `git grep -n '106 (' -- src include` and `git grep -n '106 D' -- src include` (the "106 D<n> supersedes …" form the
   Execution rules prescribe, after the brief's example; the quickstart recipe alone would miss it, and the evidence file
   records why both run), each hit read against the table; every row of the table is named by a comment at the code it changes, and no comment
   carries a result (T173).
+  **Stopped (a census contradicting the bundle, to the orchestrator):** every row of research's Supersession table is named by a comment at its code (src and tests), and no comment found there carries a result; but four comments name supersessions the table does not list: `106 D11 supersedes 105's no-ending-recorded test` (`src/session/engine.cpp`), `106 D1 supersedes 013 T036's and 104 T8's position of the mTLS CompID-authorisation gate`, `106 D1 supersedes 033 T023's position of the credentials gate` and `106 D1 supersedes 014 T015's and 104 N-8's position of the mTLS CompID-authorisation gate` (`src/session/session.cpp`). Either the table gains the rows or the comments change; the bundle does not say which.
 - [ ] T159 Article XIX §5: re-derive `git grep -n logout_disconnect_timeout_ms docs examples` (no page names it, so no
   page is owed for the new keys) and that the Doxygen of `session.h`, `session_config.hpp` and `engine_config.hpp`
   regenerates without warning.
-- [ ] T160 No C setter and no C TOML entry (FR-012, FR-013a; contract C-4.1, C-5.4; research F-7), a statement
+  **Stopped (the bundle's check cannot run as written):** both greps are empty (`logout_disconnect_timeout_ms`, and the three new keys, over `docs examples`), so no page is owed. The Doxygen half has no instrument: the tree has no Doxyfile and no Doxygen step (`docs/` is mdBook only, `.github/workflows/docs.yml`), and no `doxygen` binary is installed. To the orchestrator.
+- [X] T160 No C setter and no C TOML entry (FR-012, FR-013a; contract C-4.1, C-5.4; research F-7), a statement
   checked by grep with a seeded positive first (a scratch line naming `write_timeout` in `$M`'s `include/fix/c_api/session.h`
   must be reported): `git grep -n toml include/fix/c_api` is empty, and
   `git grep -nE 'write_timeout|handshake_timeout' -- include/fix/c_api src/capi bindings` reports nothing that sets either
   value: every hit is read, and a hit that maps or names an error (such as the `session_write_timeout` case in
   `translate`) is not a setter. Record the output.
 
+  **Done**: the seeded line in `$M`'s `session.h` reported, then restored; at the head `git grep -n toml include/fix/c_api` empty; the second grep's hits (version.h's 1.19 entry naming the keys as unreachable from C, `translate`'s `session_write_timeout` and `transport_handshake_timeout` cases) set nothing (evidence file).
 ---
 
 ## Phase 10: Polish, verification and mandatory close-out (plan phase 7; quickstart sections 5 to 7)
