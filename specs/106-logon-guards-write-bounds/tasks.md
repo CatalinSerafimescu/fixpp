@@ -1404,12 +1404,16 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   triage table is the verify record's "/simplify"; the readings (cell names unchanged, the base build of the shared
   headers, the targeted runs, the known positives M5k, M8, M1b and RowSwap) are the evidence file's "T161 (/simplify)
   and the Phase 9 rulings R-a to R-e".
-- [ ] T162 clang-format on touched files only (never `specs/`, never `include/fix/c_api/*.h`):
+- [X] T162 clang-format on touched files only (never `specs/`, never `include/fix/c_api/*.h`):
   `git diff --name-only --diff-filter=d origin/main...HEAD -- src include tests bench | grep -E '\.(cpp|hpp|h)$' | grep -vE '^include/fix/c_api/' | xargs clang-format --dry-run --Werror`;
   a file whose `origin/main` copy fails with the same count is checked with `--lines` over this branch's hunks.
-- [ ] T163 clang-tidy, cppcheck (the local 2.22 first on PATH) and IWYU on the touched `src/` and `include/` files
+  **Done** (`f21cb586`; evidence file, "T162"): 47 files; `session_config.hpp`'s findings are `origin/main`'s, its hunk clean by `--lines`; the Rig adapter edit formatted.
+- [X] T163 clang-tidy, cppcheck (the local 2.22 first on PATH) and IWYU on the touched `src/` and `include/` files
   (Article IX §4), new findings against `$B` fixed or dispositioned; a seeded control reported in every TU; a TU cppcheck
   abandons is not clean.
+  **Done** (`23705cd7`; evidence file, "T163"): seeded controls reported in all 10 TUs and `session.hpp`; four clang-tidy
+  findings fixed or NOLINTed with a reason, one cppcheck `throwInNoexceptFunction` dispositioned as the base's coroutine
+  class, two IWYU includes added; the touched cells re-run on `linux-clang-debug`.
 - [ ] T164 Paired benchmarks (Article VIII §2; contract C-9; quickstart section 6; T023): base-vs-candidate A-B-A-B
   runs of `engine_send_bench` (also CI-paired), `session_send_bench` and `on_inbound_frame_bench`, 105's T138 method: a
   release tree of `$B` on `/mnt/wsl/fixppbuild` whose path is padded to the candidate tree's length (`cmp` the `.text` of
@@ -1421,8 +1425,10 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   C-ABI, 538); on TSan the `GiveUp106`, `WriteTimeout106`, `OneEnding106` and `ConnectionBound106` cells also with
   `--repeat until-fail:50` (D3 and D5 add a strand-confined coroutine per connection). A report is a defect until
   disproven by a reproduction or a client-path analysis. Record each lane's entries, test count and skip count (0).
-- [ ] T166 `linux-clang-release` (on `/mnt/wsl/fixppbuild`): `alloc_guard_106_connection_bound_mallocnesia` and the `-L 544`
+- [X] T166 `linux-clang-release` (on `/mnt/wsl/fixppbuild`): `alloc_guard_106_connection_bound_mallocnesia` and the `-L 544`
   registrations, plus every `-L alloc_guard` entry by name (`ctest -N -L alloc_guard`); record each result.
+  **Done** (at `23705cd7`; evidence file, "T166"): `-L 544` 75/75, `-L alloc_guard` 83/83, 0 skipped; the 106 interceptor
+  and counter entries pass.
 - [ ] T167 Coverage of added lines (Article IX §1): fresh per-binary profraw from every binary the `106` label runs
   (`session_106_seam_tests` included: the spawn and wait failure exits and the commit refusal are reached only there), for
   the `session`, `config`, `log`, `capi` and `core` modules the diff adds a reachable line to; every uncovered added line or
