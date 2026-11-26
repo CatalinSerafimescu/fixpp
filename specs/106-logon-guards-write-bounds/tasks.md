@@ -966,8 +966,10 @@ not name.
   send half, limit off and on); `test_106_connection_bound_count` counts glibc's allocation entry points in-process for both
   halves and is registered Release-only as `alloc_guard_106_connection_bound_count` (a proposed addition: the interceptor
   exits on the first allocation in a window, so it cannot read the emit half's per-cycle count). The emit half is the
-  counter binary's, its base half that binary built on `$B` with `-DFIXPP_106_ALLOC_BASE=ON`. GREEN on `linux-clang-release`
-  at the head; the differential 0 against the base, limit off and on. Known positives: M8 RED (T126); M5 GREEN, stopped
+  counter binary's, its base half that binary built on `$B` with `-DFIXPP_106_ALLOC_BASE=ON`; its counts are printed and
+  compared by hand (`ffc35c30` withdrew an in-process limit-on = limit-off assertion that read 39 against 40 on the clean
+  head in 2 of 10 runs). GREEN on `linux-clang-release` at the head; the differential against the base 0 with the limit off
+  (every run) and 0 or −1 with it on (open question to the orchestrator). Known positives: M8 RED (T126); M5 GREEN, stopped
   (T125). "No write-timeout record" is asserted as its consequence (Active, every send delivered, the socket open): the rig
   attaches no logger.
 - [X] T109 [US4] `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C5`); record that none builds on `$B` but the emit half's base build, and read
@@ -1083,10 +1085,10 @@ not name.
 - [ ] T125 [US4] In `$M`'s `src/session/session.cpp`: M5: a coroutine spawned per write and per emit; RED: `alloc_guard_106_connection_bound_mallocnesia` (the
   send half non-zero, the emit half's delta positive).
   **Stopped (a cell expected RED read GREEN, to the orchestrator):** M5 (a coroutine with a timer, spawned per limited
-  write, so per emit too with the limit on) reads GREEN on the send half (interceptor and counter both 0) and 39 against
-  40 on the emit half, below the limit-off count rather than above it. Under `B-544-1`'s two conditions asio's per-thread
-  recycler serves the spawned coroutine's frames, so a spawn per write allocates nothing in steady state. Readings:
-  evidence file, "Phase 6 remainder", ruling 6.
+  write, so per emit too with the limit on) reads GREEN: the send half 0 (interceptor and counter), the emit half as the
+  clean head reads it (40 and 40, or 40 and 39). The spawn is in the binary (`nm`). Interpretation, for the orchestrator:
+  under `B-544-1`'s two conditions asio's per-thread recycler serves the spawned coroutine's frames, so a spawn per write
+  allocates nothing in steady state. Readings: evidence file, "Phase 6 remainder", ruling 6.
 - [X] T126 [US4] In `$M`'s `src/session/session.cpp`: M8: `connection_bound_wait_`'s shipping branch replaced by `await_deadline(*effective_clock_, …)`; RED:
   `ShippingClock106.DirectDriver_BoundBesideLiveness_TestRequestAtT` (no TestRequest by 2T) and the mallocnesia cell.
   **Partly done:** M8 (the shipping branch's wait replaced by the mock branch's `timer || await_deadline(*effective_clock_, …)`,
