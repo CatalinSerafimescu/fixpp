@@ -825,6 +825,7 @@ against FR-011 and C-4.5; the unbounded case stays disclosed (`L-105-f`).
 | 099 E-7's `NC-h` and `LS-h` endings: an off-list mTLS identity answered, or its number consumed, ahead of the gate | 099 data-model E-7; `tests/session/test_099_establishment.cpp`, `test_099_msg_type_default.cpp` | refused first, nothing written, NextNumIn kept (D1; D9's FR-007 census amendment) |
 | 038's simultaneous-bad ordering, a stale 52 with refused credentials: "52 wins" | 038 data-model Group 1; `tests/session/test_acceptor_logon_sending_time.cpp` Cell 11 | the credentials gate first, silent (D1) |
 | 099 E-7's and E-10's consumed NextNumIn (`c`) on a Logon refused at S3 | 099 data-model E-7, E-10; `tests/session/test_099_establishment.cpp`, `test_099_msg_type_default.cpp` | kept, `k` (D2; D9's second FR-007 census amendment) |
+| 105's second `Disconnected` entry when a send held in its store call finds the connection closed ("Disconnected over Disconnected, which owes nothing") | 105 data-model E-2 I-5; `tests/session/test_cancelled_outbound_store_measurement.cpp` `Returned_StoreCancelledAtItsLock` | one entry: the F9 block records only when not already Disconnected (D11, FR-017; Phase 5 ruling 3) |
 
 ## Risks
 

@@ -444,9 +444,9 @@ TEST(CancelledOutboundStoreMeasurement, Returned_StoreCancelledAtItsLock) {
     // That store call runs to its end, so the store holds the held send's frame (the fresh
     // store's next outbound number, asserted below, is past it); its write then finds the
     // connection closed and the call returns dispatch_aborted.
-    // 106 D11 supersedes 105's second Disconnected entry here (FR-017; spec SC-007): the held
-    // send's F9 block records Disconnected only when the session is not already Disconnected, so
-    // the ring holds one entry for one ending and one close.
+    // 106 D11 supersedes 105 data-model E-2 I-5's second Disconnected entry here (FR-017; spec
+    // SC-007): the held send's F9 block records Disconnected only when the session is not already
+    // Disconnected, so the ring holds one entry for one ending and one close.
     EXPECT_TRUE(o.held_result.has_value() && !o.held_result->has_value() &&
                 o.held_result->error() == error::dispatch_aborted)
         << "the held Engine::send " << result_text(o.held_result);
