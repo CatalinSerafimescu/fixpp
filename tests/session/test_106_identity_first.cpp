@@ -13,8 +13,10 @@
 // The rig is 099's FIXT rig (test_099_fixt_support.hpp, shape T: FIXT.1.1 on research R-18's
 // registry, the validate gate on, 1137=9 the serviceable version), with a HookedStore over a
 // MemoryStore that holds NextNumIn kN and next outbound kOut before open(). The acceptor hydrates
-// from it at its first Logon, the initiator at open(). The store's counters are read through
-// memory_store_test_access between frames, with no store operation in flight.
+// from it at its first Logon, the initiator at open(). The cells read the store's counters through
+// memory_store_test_access between frames, without the store's lock: the accessor's precondition
+// (no store operation in flight) is a condition of these reads that they do not check; re-derive by
+// replacing the reads with t104::read_store_numbers and reading whether each returns.
 //
 // CONDITIONS these cells keep, checked by reading:
 //   - every frame the session writes reaches Rig::out: the config-time sink appends there, and so
