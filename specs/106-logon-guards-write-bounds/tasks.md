@@ -1466,21 +1466,29 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   `ninja -k 0`, no error, no warning.
   **Done** (`fc3942cd`; evidence file, "T170"): one gcc-only `-Werror=unused-result` in `run_connection_bound_` fixed; rc 0,
   no error, no warning; the targeted entries 34/34 on gcc-release; `-L 106` re-run on `linux-clang-debug`.
-- [ ] T171 The WHOLE pytest suite: `python3 -m pytest bindings/python/tests` with the debug tree's module rebuilt at
+- [X] T171 The WHOLE pytest suite: `python3 -m pytest bindings/python/tests` with the debug tree's module rebuilt at
   C-ABI 1.19; record passed and skipped.
+  **Done** (at `dfa755df`; evidence file, "T171"): the debug tree's module (1.19) imported; 101 passed, 0 skipped.
 - [ ] T172 Every buildless Tier 1 step, derived from `.github/workflows/tier1.yml` and run locally: `ci-script-pins`
   (all its steps, including `check_co_spawn_lambda.py --self-test` and its gate), `check-layers`, `co-spawn-closure-audit`
   (it applies: the connection bound's spawn, against T019's base list) and `ci/pump-census.sh` against
   `ci/expected-pump-sites.txt`. Each rc 0, or the failure attributed.
-- [ ] T173 Comment-claim lint: PARENT `.claude/scripts/check-comment-claims.py --root PARENT/research/G19-fix-fpml-iso20022/library --base origin/main`;
+  **Done** (`62ebd846`; evidence file, "T172"): the pump-label and staging-KIND failures on this branch's test files fixed;
+  every step rc 0 at the head but the SWIG pin's `pip install` line (PEP 668 on this host; its script alone rc 0); the
+  audit and cross-check clean, the connection bound's spawn the one new `src/` `co_spawn`.
+- [X] T173 Comment-claim lint: PARENT `.claude/scripts/check-comment-claims.py --root PARENT/research/G19-fix-fpml-iso20022/library --base origin/main`;
   read added runtime strings and inventories by hand (the write-timeout format string, the Doxygen added in
   T029).
-- [ ] T174 Line-citation gate: `python3 tools/check_line_citations.py --range origin/main..HEAD` and
+  **Done** (at `62ebd846`; evidence file, "T173"): rc 0, 0 findings, 6 suppressions; strings and Doxygen read, one phrase
+  to the orchestrator.
+- [X] T174 Line-citation gate: `python3 tools/check_line_citations.py --range origin/main..HEAD` and
   `--shift-audit origin/main..HEAD` (the feature's own `specs/` bundle is charged by the range gate).
+  **Done** (at `62ebd846`; evidence file, "T174"): both rc 0.
 - [ ] T175 B&L checks in the parent: PARENT `.claude/scripts/check_bl_citations.py` (every cell a B&L row cites exists in
   the head binaries' `--gtest_list_tests`) and `.claude/scripts/check_bl_delta.py gate --feature 106-logon-guards-write-bounds`
   (close-out row 2), each run with its self-test or a seeded miss first.
-- [ ] T176 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Re-run T151 at the PR head and record it.
+- [X] T176 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Re-run T151 at the PR head and record it.
+  **Done** (at `62ebd846`; evidence file, "T176"): no published release; the known positive lists two.
 - [ ] T177 **(orchestrator)** `/speckit-verify 106-logon-guards-write-bounds` (Article XVII §8), its plan targeted only
   plus the ONE full ctest of T169; writes `.specify/decisions/106-logon-guards-write-bounds-verify.md`. Re-run
   T162, T173, T174, T172 and T175 as the last actions before any labelled push.
