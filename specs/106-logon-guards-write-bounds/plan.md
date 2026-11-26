@@ -129,14 +129,14 @@ enum and C-ABI map; `version.h` and `session.h` comments; new `tests/session/tes
 | XII §5, §9 | explicit profiles; the security controls | D1 changes no TLS mechanism, only the order of the identity gates. FIX-TC 1S(c) (research D1). The four controls apply. |
 | XIII §2 | async logging | two warn records through the session logger (one new), registered in `format_registry.cpp` |
 | XIV §2 | pluggable interfaces ≤ 5 methods | no interface change: `TransportFactory` untouched (D6 rejects a per-session `make` argument) |
-| XV §1 | no per-message heap allocation on the hot path | None per write or per emit on `system_clock_source` (the mallocnesia cell, known positives M5 and M8). One spawn per connection. |
+| XV §1 | no per-message heap allocation on the hot path | None per write or per emit on `system_clock_source` (the mallocnesia cell, known positives M5 and M8). One spawn per connection. **A conditional zero, justified under `[const §VIII.5]` in the form of 544's R-6/R-7:** with `write_timeout_ms` set and an effective clock other than `system_clock_source`, a spaced write waits through that clock (`L-106-e`). That is a third condition on `B-544-1`'s zero. R2 is an orchestrator ruling and cannot widen R-6's conditions (544 note §5); the extension of R-7's reading of §XV.1 to it is ruling R14 (spec.md Clarifications, 2026-11-26, orchestrator under the owner's delegation), flagged for the owner's review at merge. |
 | XV §9, §15 | no `std::mutex` in coroutines; no application-message drop | none added; D5 closes the session rather than dropping a frame (the disconnect-and-recover posture) |
 | XV §16 | QuickFIX CFG or TOML | TOML keys only; the QuickFIX CFG translation is unaffected |
 | XVI §6 | the orchestrator does not implement | this bundle is docs only; the implementer writes code and tests |
 | XVII §2, §8 | Gate B on every PR; `/speckit-verify` after `/implement` | planned |
 | XIX §5 | API pages regenerate | Doxygen of `session.h`, `session_config.hpp` and `engine_config.hpp` regenerate. No `docs/` page names `logout_disconnect_timeout_ms` today (re-derive: `git grep -n logout_disconnect_timeout_ms docs examples`), so no page is owed for the new keys. |
 
-No violation. Complexity Tracking records the two structural additions anyway.
+No violation; one conditional zero (row XV §1), ruled under R14 and flagged for the owner's review at merge. Complexity Tracking records the two structural additions anyway.
 
 ## Project Structure
 
@@ -318,6 +318,7 @@ each one a task that ends in a cell with its mutant, or in a named ruling.
   `research/G19-fix-fpml-iso20022/research/reviews/opus_106-logon-guards-write-bounds_gate_a_4_adversarial_review.md`.
   Every P3 is applied in the bundle; none is deferred to tasks.md.
 - Loop 2 round 2 applied 2026-11-26: Codex P1=0 P2=3 P3=0; Opus post-judging P1=0 P2=3 P3=5; rewrite addresses root causes #1 (what ends the loop's emit after each give-up step: 105's cut for a blocked write, a close inside `decide_give_up_()` when 105's ending bound cannot be spawned, nothing for a store call, disclosed under `L-093-12`) and #2 (each carrier the change passes through has a cell and a mutant, research D9's carrier sweep); sweep added 4 cells. Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_106-logon-guards-write-bounds_gate_a_5_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_106-logon-guards-write-bounds_gate_a_5_adversarial_review.md`. N-2 to N-5 are applied in the bundle; the sweep's remaining carriers are listed under "Deferred to tasks.md".
+- Loop 2 round 3: Codex P1=1 P2=0 P3=0; Opus post-judging P1=0 P2=1 P3=0 (C-1 downgraded). Final targeted edit applied 2026-11-26 with the orchestrator's §XV.1 ruling; Gate A CONVERGED (P1=0 P2=0) by delegated owner ruling. Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_106-logon-guards-write-bounds_gate_a_6_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_106-logon-guards-write-bounds_gate_a_6_adversarial_review.md`.
 
 ### Round 1 — disagreements
 

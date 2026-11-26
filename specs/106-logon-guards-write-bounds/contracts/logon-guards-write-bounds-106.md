@@ -194,8 +194,7 @@ Observable rules only. The mechanisms are in [../data-model.md](../data-model.md
 - `L-106-b`: the write-timeout reason is carried by its record and by the cut call's return only.
 - `L-106-c`: C-1.6.
 - `L-106-d`: the session-level handshake key's scope.
-- `L-106-e`: C-9's allocation and own-wait claims hold on `system_clock_source`; a user `clock_override` of another
-  type is waited through its own `sleep_until`.
+- `L-106-e`: C-9's allocation and own-wait claims hold on `system_clock_source`. When the session's effective clock (`clock_override`, else `EngineConfig::clock`) is of another type, the bound waits through its `sleep_until` in an `||` group, per spaced write with the limit on and per emit edge. No zero is claimed there, and `B-544-1` carries it as a condition.
 - `L-106-f` (pre-existing, not fixed by 106): before Active, with the limit off, a write blocked inside the Logon arm
   (the initiator's Logon in `open()`, the reply Logon, a 789 resend frame, a Logon-arm Reject) is not cut by
   `logon_timeout_ms`, because the Engine tests that deadline only between deliveries and while it reads.

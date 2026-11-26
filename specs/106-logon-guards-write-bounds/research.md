@@ -242,7 +242,7 @@ one private callee that waits. It holds both branches below, and everything the 
     `async_wait(asio::as_tuple(asio::use_awaitable))`.
   - On this branch the bound never calls `Clock::sleep_until`. It never meets the per-session slot (#715) or the
     per-call fallback (`L-093-13`), and it builds no `||` group.
-- **On any other `Clock`** (`mock_clock` in every functional cell, or a user `clock_override`): the wait is 105's
+- **On any other `Clock`** (`mock_clock` in every functional cell, or a user `clock_override` or `EngineConfig::clock`): the wait is 105's
   idiom, `timer.async_wait(…) || detail::await_deadline(*effective_clock_, deadline)`, the timer parked at max as the
   wake. This is the seam that keeps the cells deterministic (R2(c)): the mock cells test the decisions, and D9's two
   shipping-clock cells bind the timer branch.
@@ -256,8 +256,7 @@ one private callee that waits. It holds both branches below, and everything the 
   `sleep_until` caller, the held cap with none pending (data-model E-3), replaces the loop's own sleep at the gate, so
   it adds no concurrent sleeper. Re-derive: `git grep -n 'sleep_until\|await_deadline' -- src/session/session.cpp`, each
   hit read for which coroutine sleeps there and what else of this Session sleeps at the same time.
-- **The condition, disclosed (`L-106-e`).** On a user `clock_override` that is not `system_clock_source`, the bound
-  waits through that clock's `sleep_until`; allocation and timer sharing then depend on that clock.
+- **The condition, disclosed (`L-106-e`; a third condition on `B-544-1`'s zero, in R-7's form, ruled 2026-11-26 by the orchestrator under the owner's delegation (spec.md Clarifications, R14), flagged for the owner's review at merge).** When the session's effective clock (`SessionConfig::clock_override` when set, else `EngineConfig::clock`) is not `system_clock_source`, each wait of the bound is `timer.async_wait(…) || detail::await_deadline(*effective_clock_, deadline)`. With `write_timeout_ms` set, each spaced write arms one such wait; each liveness-emit edge arms one with the limit on or off. No zero is claimed on that branch. That covers both the clock's `sleep_until`, which is the clock's code, and fixpp's own `||` group (its parallel-group state, its two spawned arms and `await_deadline`'s frame), which no cell gates. The base already waits through that clock once per liveness cycle (`run_liveness_loop`), so the clock's per-emit cost is pre-existing. New in 106 are the per-write cost and the `||` group on the uncontended write and emit paths; the base's only per-cycle `||` (`run_liveness_loop`, behind a held resend answer) is the cold path of `B-103-8`.
 
 **Cancellation and failure (C-4).**
 - **No cancellation slot.** The bound binds none and awaits no lock (fixpp#583's trap needs a lock). The shipping
@@ -506,7 +505,12 @@ the acceptor's reply Logon, `honor_peer_next_expected_`'s resend frames), and th
     before the hold there is no cap, `L-105-f`" becomes "capped at L + 3T with one pending or none" (D3).
   - `L-093-12`: the store calls that hold `close()`'s and `stop()`'s joins include the liveness loop's TestRequest or
     Heartbeat store call; the give-up at G and the close at G + B still happen (106).
-  - Census, run before the edit: `grep -n 'L-093-12\|L-104-3\|L-104-8\|L-105-f\|tr_written\|runs ahead of mTLS'
+  - `B-544-1`: its zero for a sequential `Session::send` gains a third condition: "and, when `write_timeout_ms` is set, the session's effective clock is `system_clock_source`" (106, `L-106-e`; ruled 2026-11-26 by the orchestrator under the owner's delegation (spec.md Clarifications, R14), flagged for the owner's review at merge). `L-497-1` gains condition (6) *Clock*, with `L-106-e`'s text. Clause by clause (live text → new text):
+    - `B-544-1` title. Old: "… and a sequential `Session::send` make no global-heap allocation in steady state, on two conditions: the Engine's executor's target type is exactly `asio::io_context::executor_type`, and the thread that runs the session's handlers stays inside one scheduler call (`io_context::run`) across messages." New: "… and a sequential `Session::send` make no global-heap allocation in steady state, on two conditions: the Engine's executor's target type is exactly `asio::io_context::executor_type`, and the thread that runs the session's handlers stays inside one scheduler call (`io_context::run`) across messages; and, for `Session::send` only, on a third: when `write_timeout_ms` is set, the session's effective clock is `system_clock_source` (106, `L-106-e`)." The inbound read, the hydrate apply step and `MemoryStore::store` take no wait of the bound and keep the two conditions.
+    - `B-544-1` body. Old: "The two conditions are the `[const §VIII.5]` deviation's justification (`.specify/544-hot-path-zero-alloc.md` §5, owner ruling R-6); the slot-count obligation is a build precondition, not a third condition (owner ruling R-12)." New: "The two conditions are the `[const §VIII.5]` deviation's justification (`.specify/544-hot-path-zero-alloc.md` §5, owner ruling R-6); the third, on `Session::send` only, extends that justification under R-7's reading of §XV.1 (106 ruling R14, orchestrator under the owner's delegation, flagged for the owner's review at merge). The slot-count obligation is a build precondition, not a condition (owner ruling R-12)."
+    - `L-497-1` title. Old: "the zero allocation of `B-544-1` holds only under its two conditions and on the paths it gates". New: "the zero allocation of `B-544-1` holds only under its conditions and on the paths it gates".
+    - `L-497-1` body. Insert after condition (5) *TLS*'s sentence "… tracked as fixpp#565." and before "**Status: disclosed**": "(6) *Clock* (106, `L-106-e`). When `write_timeout_ms` is set and the session's effective clock (`SessionConfig::clock_override` when set, else `EngineConfig::clock`) is not `system_clock_source`, each spaced `Session::send` write arms one wait of the connection bound, `timer.async_wait(…) || detail::await_deadline(*effective_clock_, deadline)`. That wait may allocate per message, through the clock's `sleep_until` and fixpp's own `||` group (its parallel-group state, its two spawned arms and `await_deadline`'s frame); no zero is claimed for it. With the limit off, or on `system_clock_source`, the send path is as before."
+  - Census, run before the edit: `grep -n 'L-093-12\|L-104-3\|L-104-8\|L-105-f\|B-544-1\|L-497-1\|tr_written\|runs ahead of mTLS'
     spec/behaviors-and-limitations.md`. Its known positive is `B-099-2`'s line. Each hit is ruled in tasks.md: amended,
     or named as unaffected.
 - **Narrowed: `L-105-f`.**
@@ -530,8 +534,7 @@ the acceptor's reply Logon, `honor_peer_next_expected_`'s resend frames), and th
   - `L-106-b`: the write-timeout reason is carried only by its record and by the cut call's return, as `L-105-c`.
   - `L-106-c`: the bound event's new position, and a validator called twice per connection (D1).
   - `L-106-d`: the session-level handshake key has no effect on a plaintext or acceptor session.
-  - `L-106-e`: the zero-allocation and own-wait claims of D3 and D5 hold on `system_clock_source` only. A user
-    `clock_override` that is another `Clock` is waited through its own `sleep_until`.
+  - `L-106-e`: the zero-allocation and own-wait claims of D3 and D5 hold on `system_clock_source` only. When the session's effective clock (`clock_override`, else `EngineConfig::clock`) is another `Clock`, the connection bound waits through its `sleep_until` inside an `||` group: once per spaced write with `write_timeout_ms` set, and once per liveness-emit edge. That may allocate per message, and no zero is claimed for it. It is carried as a condition in `B-544-1` and `L-497-1` (amended rows above), under ruling R14 (2026-11-26, orchestrator under the owner's delegation, flagged for the owner's review at merge).
   - `L-106-f` (N-1; pre-existing, not fixed by 106): before Active, with the limit off, a write blocked inside the Logon
     arm (the initiator's Logon in `open()`, the reply Logon, a 789 resend frame, a Logon-arm Reject) is not cut by
     `logon_timeout_ms`: the Engine tests that deadline only between deliveries and while it reads. `write_timeout_ms`
