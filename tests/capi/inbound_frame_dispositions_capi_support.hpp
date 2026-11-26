@@ -201,10 +201,18 @@ inline std::string frame44_of_size(std::string const& head, std::size_t size,
 
 class RawAcceptor {
 public:
-    RawAcceptor() {
+    RawAcceptor() : RawAcceptor(std::nullopt) {}
+
+    // 106 (contract C-6): with receive_buffer_bytes, SO_RCVBUF is set on the listener before it
+    // listens, so the accepted socket inherits it and a peer that stops reading closes its window
+    // after few bytes.
+    explicit RawAcceptor(std::optional<int> receive_buffer_bytes) {
         asio::ip::tcp::endpoint const any_port{asio::ip::make_address("127.0.0.1"), 0};
         std::error_code ec;
         listener_.open(any_port.protocol(), ec);
+        if (!ec && receive_buffer_bytes) {
+            listener_.set_option(asio::socket_base::receive_buffer_size{*receive_buffer_bytes}, ec);
+        }
         if (!ec) listener_.bind(any_port, ec);
         if (!ec) listener_.listen(asio::socket_base::max_listen_connections, ec);
         listening_ = !ec;

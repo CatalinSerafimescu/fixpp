@@ -781,6 +781,25 @@ add_test(NAME capi_recovery_liveness COMMAND capi_recovery_liveness_test)
 set_tests_properties(capi_recovery_liveness PROPERTIES
   LABELS "capi;536;537;538" TIMEOUT 700)
 
+# 106-logon-guards-write-bounds (contract C-6): the C-ABI witness of the give-up with a write
+# blocked. Standalone ([const §VII.8]): it runs a live C-ABI engine on a real-time clock over a
+# loopback socket and calls fixpp_session_send from a second thread, because the call blocks.
+# TIMEOUT is explicit. Re-derive by timing `ctest --test-dir build/<preset> -R '^capi_106_give_up$'`
+# on every lane /speckit-verify runs, with the cell failing (its band missed) and passing; set
+# TIMEOUT to five times the slowest, rounded up to the next 10 s.
+add_executable(capi_106_give_up_test capi_106_give_up_test.cpp)
+target_link_libraries(capi_106_give_up_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_106_give_up_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+target_compile_definitions(capi_106_give_up_test PRIVATE
+  "FIXPP_DICT_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+add_test(NAME capi_106_give_up COMMAND capi_106_give_up_test)
+set_tests_properties(capi_106_give_up PROPERTIES LABELS "capi;106" TIMEOUT 120)
+
 # 099-fixt-appl-version-validation W-20 (tasks.md T034), FR-028. Standalone ([const §VII.8]): it
 # replaces global operator new with a fail-at-N hook. Here and not in tests/session because its
 # C arm joins at tasks.md T108. TIMEOUT is explicit: a sweep is quadratic in the build's
