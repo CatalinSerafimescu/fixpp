@@ -12,28 +12,42 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <fixpp/config/config_bundle.hpp>
 #include <fixpp/config/load_diagnostic.hpp>
 #include <fixpp/config/toml_config_loader.hpp>
 #include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
 #include <fixpp/session/memory_store.hpp>
+#include <fixpp/session/memory_store_factory.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fstream>
+#include <functional>
+#include <future>
 #include <memory>
+#include <optional>
+#include <span>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "session/test_099_fixt_support.hpp"
 #include "session/test_106_support.hpp"
 #include "support/hooked_store.hpp"
 #include "support/memory_store_test_access.hpp"
+#include "support/extract_tag.hpp"
 #include "support/seqnum_manager_test_access.hpp"
+#include "support/session_executor_of.hpp"
 #include "support/session_test_access.hpp"
 
 #ifndef FIXPP_CONFIG_FIXTURE_DIR
@@ -355,5 +369,1017 @@ INSTANTIATE_TEST_SUITE_P(BothRoles, ConnectionBound106,
                          [](::testing::TestParamInfo<session_role> const& i) {
                              return i.param == session_role::acceptor ? "Acceptor" : "Initiator";
                          });
+
+}  // namespace
+
+// ── T100 to T103 and T106: the write limit (research D5; D9 rows FR-010, FR-011, C-4) ─────────
+// [seam] Every cell here names SessionConfig::write_timeout_ms. A direct Session (t105::DirectRig:
+// a BlockingWriteTransport whose next write can be held, the mock clock, both roles where the
+// class allows), HeartBtInt 1 s, logout_disconnect_timeout_ms B = 500 ms unless named, and a
+// LogCapture. S is the held write's start (the mock clock does not move while a cell pumps), W
+// write_timeout_ms. Every instant is reached with step_to and a drain.
+//
+// Inequalities (research D9 rows FR-010 and "FR-010 spurious"): W = 300 ms; the cut at S + W
+// precedes every competing instant of the cell. In Active, L is the instant of the last frame the
+// peer sent, at most S, and S is at most L + 1 s; the TestRequest instant L + T (T = 1.2 s) can
+// only queue a TestRequest behind the held write, and the bound's give-up row, L + 3T + 1 ns
+// (L + 1.5 s + 1 ns in the TestRequest class, T = 500 ms), follows S + W. The spurious arm (the
+// same staging with the limit off) reads at S + 1.3 s: an emit queued behind the held write
+// moves its give-up to L + 3T + 1 ns, and a give-up decided there is closed only at its
+// + B, so nothing closes by S + 1.3 s (in the TestRequest class G = L + 1.5 s + 1 ns, its close at
+// G + B = L + 2 s, after S + 1.3 s = L + 1.8 s).
+
+namespace {
+
+namespace w106 {
+
+using namespace std::chrono_literals;
+using fixpp::session::fsm_state;
+using fixpp::session::session_role;
+using fixpp::session::session_test_access;
+using fixpp::session::SessionConfig;
+namespace t105 = fixpp::test_support::t105;
+namespace t106 = fixpp::test_support::t106;
+namespace rgs = fixpp::test_support::resend_gap;
+using expected_void = fixpp::core::expected_t<void>;
+using ns = std::chrono::nanoseconds;
+
+constexpr std::uint32_t kW = 300;
+
+// Counts onLogout; runs a hook from toAdmin with the frame's MsgType(35); optionally refuses one
+// administrative MsgType in fromAdmin (on_inbound_active_from_admin_failed_'s two-argument
+// Reject, SessionRejectReason 3) and every application message in fromApp (the
+// BusinessMessageReject).
+class App final : public rgs::GapApp {
+public:
+    int logouts = 0;
+    std::string refuse_admin_type;  // empty: fromAdmin accepts every administrative message
+    bool refuse_app = false;
+    std::function<void(std::string_view)> to_admin_hook;
+
+    void onLogout(const fixpp::session::SessionId& /*id*/) override { ++logouts; }
+    void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
+                 const fixpp::session::SessionId& id) override {
+        rgs::GapApp::toAdmin(msg, id);
+        if (to_admin_hook) to_admin_hook(msg.msg_type());
+    }
+    fixpp::core::expected_t<void> fromAdmin(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
+        const fixpp::session::SessionId& /*id*/) override {
+        if (!refuse_admin_type.empty() && msg.msg_type() == refuse_admin_type) {
+            return std::unexpected(fixpp::core::error::app_do_not_send);
+        }
+        return {};
+    }
+    fixpp::core::expected_t<void> fromApp(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
+        const fixpp::session::SessionId& id) override {
+        if (refuse_app) return std::unexpected(fixpp::core::error::app_do_not_send);
+        return rgs::GapApp::fromApp(msg, id);
+    }
+};
+
+struct Params {
+    std::uint32_t write_ms = kW;
+    std::chrono::seconds heartbeat{1};
+    std::optional<std::chrono::milliseconds> threshold;
+    std::uint32_t logout_ms = 500;
+};
+
+class Rig {
+public:
+    t106::LogCapture log;
+    std::shared_ptr<App> app = std::make_shared<App>();
+    t105::DirectRig d;
+
+    Rig(session_role role, Params p, std::function<void(SessionConfig&)> const& tweak = {})
+        : d{role, [this, p, &tweak](SessionConfig& c) {
+                c.heartbeat_interval = p.heartbeat;
+                if (p.threshold) c.test_request_threshold = *p.threshold;
+                c.logout_disconnect_timeout_ms = p.logout_ms;
+                c.write_timeout_ms = p.write_ms;
+                c.logger_override = log.logger;
+                if (tweak) tweak(c);
+            }} {
+        d.s.engine.application = app;
+        d.s.session = std::make_unique<fixpp::session::Session>(d.s.engine, d.s.cfg);
+    }
+    Rig(Rig const&) = delete;
+    Rig& operator=(Rig const&) = delete;
+    ~Rig() {
+        d.release();
+        d.s.drain();
+    }
+
+    fixpp::session::Session& session() { return *d.s.session; }
+    [[nodiscard]] t106::steady_time_point now() const { return d.s.mock->steady_now(); }
+    [[nodiscard]] t106::steady_time_point last_inbound() const {
+        return session_test_access::last_inbound_steady(*d.s.session);
+    }
+    void at(t106::steady_time_point t) {
+        d.s.mock->step_to(t);
+        d.s.drain();
+    }
+    // The write of the next frame of MsgType type is held: armed at its toAdmin.
+    void hold_write_of(std::string type) {
+        app->to_admin_hook = [b = d.bw.get(), t = std::move(type),
+                              armed = false](std::string_view m) mutable {
+            if (!armed && m == t) {
+                armed = true;
+                b->arm_block();
+            }
+        };
+    }
+    [[nodiscard]] std::size_t write_records() {
+        return t106::records_now(log, FIXPP_FORMAT_ID(t106::kWriteTimeoutRecordFormat));
+    }
+    [[nodiscard]] std::size_t give_up_records() { return t106::give_up_records_now(log); }
+    [[nodiscard]] std::size_t disconnected() const { return t106::count_disconnected(*d.s.session); }
+    // An application send, started and not awaited.
+    std::future<expected_void> spawn_send(std::string_view clordid) {
+        payloads_.push_back("35=D\x01" "11=" + std::string{clordid} + "\x01");
+        auto const& pl = payloads_.back();
+        return asio::co_spawn(fixpp::test_support::session_executor_of(*d.s.session, d.s.ioc),
+                              d.s.session->send(std::as_bytes(std::span{pl.data(), pl.size()})),
+                              asio::use_future);
+    }
+    template <class Awaitable>
+    std::future<expected_void> spawn(Awaitable a) {
+        return asio::co_spawn(fixpp::test_support::session_executor_of(*d.s.session, d.s.ioc),
+                              std::move(a), asio::use_future);
+    }
+
+private:
+    std::deque<std::string> payloads_;
+};
+
+enum class wclass : std::uint8_t {
+    send,
+    heartbeat,
+    test_request,
+    resend_frame,
+    sequence_reset,
+    reject,
+    resend_request,
+    heartbeat_reply,
+    business_reject,
+    initiator_logon,
+    reply_logon,
+    honor789_frame,
+};
+
+[[nodiscard]] const char* class_name(wclass c) {
+    switch (c) {
+        case wclass::send:
+            return "Send";
+        case wclass::heartbeat:
+            return "Heartbeat";
+        case wclass::test_request:
+            return "TestRequest";
+        case wclass::resend_frame:
+            return "ResendFrame";
+        case wclass::sequence_reset:
+            return "SequenceReset";
+        case wclass::reject:
+            return "Reject";
+        case wclass::resend_request:
+            return "ResendRequest";
+        case wclass::heartbeat_reply:
+            return "HeartbeatReply";
+        case wclass::business_reject:
+            return "BusinessReject";
+        case wclass::initiator_logon:
+            return "InitiatorLogon";
+        case wclass::reply_logon:
+            return "ReplyLogon";
+        case wclass::honor789_frame:
+            return "Honor789Frame";
+    }
+    return "?";
+}
+
+[[nodiscard]] Params params_for(wclass c, std::uint32_t write_ms) {
+    Params p;
+    p.write_ms = write_ms;
+    if (c == wclass::test_request) p.threshold = 500ms;
+    return p;
+}
+
+void tweak_for(wclass c, SessionConfig& cfg) {
+    if (c == wclass::honor789_frame) cfg.enable_next_expected_msg_seq_num = true;
+    if (c == wclass::resend_frame || c == wclass::honor789_frame) {
+        cfg.store_factory = std::make_shared<fixpp::session::MemoryStoreFactory>(
+            fixpp::session::MemoryStore::Config{.policy = fixpp::session::capacity_policy::unbounded});
+    }
+}
+
+struct Staged {
+    bool ok = false;
+    std::string why;
+    t106::steady_time_point s{};                       // the held write's start
+    std::optional<std::future<expected_void>> cut;     // the call the cut write returns through
+    std::optional<std::future<expected_void>> queued;  // a send queued behind it at the gate
+    std::string type;                                  // the held write's MsgType(35)
+    bool active = true;
+};
+
+[[nodiscard]] bool parked_on(Rig& r, std::string_view type) {
+    if (!r.d.parked() || r.d.bw->recorded.empty()) return false;
+    return fixpp::test_support::extract_tag(r.d.bw->recorded.back().bytes, 35) == type;
+}
+
+// Brings the session to the class's held write; the mock clock stays at S when it returns.
+Staged stage(Rig& r, wclass c) {
+    Staged st;
+    auto& sc = r.d.s;
+    if (c == wclass::reject) r.app->refuse_admin_type = "0";
+    if (c == wclass::business_reject) r.app->refuse_app = true;
+    if (c == wclass::initiator_logon) {
+        st.active = false;
+        st.type = "A";
+        auto const opened = r.d.run(sc.session->open(), "open");
+        if (!opened || !opened->has_value()) {
+            st.why = "open() failed";
+            return st;
+        }
+        r.d.hold_next_write();
+        st.cut.emplace(r.spawn(sc.session->drive_reconnect()));
+        if (!sc.pump_until([&] { return parked_on(r, "A"); })) {
+            st.why = "the Logon's write was not held";
+            return st;
+        }
+        st.s = r.now();
+        st.ok = true;
+        return st;
+    }
+    // The pre-Active classes on the direct rig (proposed substitutes: research D9 names an Engine
+    // rig, whose acceptor's reply Logon no seam can hold; on a direct Session no establishment
+    // deadline runs, so none competes with the cut).
+    if (c == wclass::reply_logon || c == wclass::honor789_frame) {
+        st.active = false;
+        auto const opened = r.d.run(sc.session->open(), "open");
+        if (!opened || !opened->has_value()) {
+            st.why = "open() failed";
+            return st;
+        }
+        if (c == wclass::reply_logon) {
+            sc.session->attach_accepted_transport(
+                std::make_unique<fixpp::session::test::BlockingWriteTransport>(sc.ioc.get_executor(),
+                                                                               r.d.stream, r.d.bw),
+                fixpp::transport::handshake_result{});
+            r.d.hold_next_write();
+            st.type = "A";
+            st.cut.emplace(sc.feed_spawn(sc.logon(1)));
+        } else {
+            auto const c2 = r.d.run(sc.session->drive_reconnect(), "drive_reconnect");
+            if (!c2 || !c2->has_value()) {
+                st.why = "drive_reconnect() failed";
+                return st;
+            }
+            // The acknowledgement's NextExpectedMsgSeqNum(789) 1 is below the next outbound
+            // number, so the honour resends from 1: the Logon's GapFill.
+            r.hold_write_of("4");
+            st.type = "4";
+            st.cut.emplace(sc.feed_spawn(sc.frame("A", 1,
+                                                  "98=0\x01"
+                                                  "108=30\x01"
+                                                  "789=1\x01")));
+        }
+        if (!sc.pump_until([&] { return parked_on(r, st.type); })) {
+            st.why = std::string{"the "} + class_name(c) + " write was not held";
+            return st;
+        }
+        st.s = r.now();
+        st.ok = true;
+        return st;
+    }
+    if (!r.d.to_active()) {
+        st.why = "not Active";
+        return st;
+    }
+    auto const t0 = r.now();
+    auto const held_feed = [&](std::vector<std::byte> f, std::string type) {
+        st.type = std::move(type);
+        st.cut.emplace(sc.feed_spawn(std::move(f)));
+        return sc.pump_until([&] { return parked_on(r, st.type); });
+    };
+    bool held = false;
+    switch (c) {
+        case wclass::send:
+            r.d.hold_next_write();
+            st.type = "D";
+            st.cut.emplace(r.spawn_send("W106A"));
+            held = sc.pump_until([&] { return parked_on(r, "D"); });
+            break;
+        case wclass::heartbeat:
+            r.hold_write_of("0");
+            st.type = "0";
+            r.at(t0 + 1s);
+            held = parked_on(r, "0");
+            break;
+        case wclass::test_request:
+            r.hold_write_of("1");
+            st.type = "1";
+            r.at(r.last_inbound() + 500ms);
+            held = parked_on(r, "1");
+            break;
+        case wclass::resend_frame: {
+            auto sent = r.spawn_send("W106R");
+            if (!sc.pump_until([&] { return rgs::Scene::ready(sent); }) || !sent.get()) {
+                st.why = "the application send before the ResendRequest failed";
+                return st;
+            }
+            // The ResendRequest asks from the send's own MsgSeqNum, so its first answer is the
+            // send's replay.
+            std::string const from{
+                fixpp::test_support::extract_tag(r.d.bw->recorded.back().bytes, 34)};
+            r.d.hold_next_write();
+            held = held_feed(sc.frame("2", 2, "7=" + from + "\x01" + "16=0\x01"), "D");
+            break;
+        }
+        case wclass::sequence_reset:
+            r.hold_write_of("4");
+            held = held_feed(sc.resend_request(2), "4");
+            break;
+        case wclass::reject:
+            r.hold_write_of("3");
+            held = held_feed(sc.heartbeat(2), "3") &&
+                   fixpp::test_support::extract_tag(r.d.bw->recorded.back().bytes, 373) == "3";
+            break;
+        case wclass::resend_request:
+            r.hold_write_of("2");
+            held = held_feed(sc.heartbeat(5), "2");
+            break;
+        case wclass::heartbeat_reply:
+            r.hold_write_of("0");
+            held = held_feed(sc.test_request(2), "0");
+            break;
+        case wclass::business_reject:
+            r.d.hold_next_write();
+            held = held_feed(sc.order(2), "j");
+            break;
+        case wclass::initiator_logon:
+        case wclass::reply_logon:
+        case wclass::honor789_frame:
+            break;
+    }
+    if (!held) {
+        st.why = std::string{"the "} + class_name(c) + " write was not held";
+        return st;
+    }
+    st.s = r.now();
+    if (c == wclass::send || c == wclass::heartbeat || c == wclass::test_request ||
+        c == wclass::heartbeat_reply || c == wclass::business_reject || c == wclass::reject ||
+        c == wclass::resend_request) {
+        st.queued.emplace(r.spawn_send("W106Q"));
+        sc.drain();
+    }
+    st.ok = true;
+    return st;
+}
+
+// The classes whose cut write's error reaches the call that started it: the application's send,
+// drive_reconnect() (the initiator's Logon) and the inbound delivery for the leaves that return
+// their emit's error. The loop's emits have no caller; the walk's frames return through the walk's
+// own result, which keeps dispatch_aborted (replay_outbound_range_'s contract).
+[[nodiscard]] bool has_cut_call(wclass c) {
+    return c == wclass::send || c == wclass::initiator_logon || c == wclass::reject ||
+           c == wclass::resend_request || c == wclass::heartbeat_reply ||
+           c == wclass::business_reject || c == wclass::reply_logon;
+}
+
+// T100: open at S + W − 1 ns, closed at S + W; one write-timeout record; the cut call's
+// session_write_timeout; dispatch_aborted for the send queued behind it; no Logout; FR-017.
+void expect_cut_at_s_plus_w(session_role role, wclass c) {
+    Rig r{role, params_for(c, kW), [c](SessionConfig& cfg) { tweak_for(c, cfg); }};
+    Staged st = stage(r, c);
+    ASSERT_TRUE(st.ok) << class_name(c) << ": setup: " << st.why;
+    auto const disconnected_before = r.disconnected();
+    auto const logouts_before = r.app->logouts;
+    auto const w = std::chrono::milliseconds{kW};
+
+    r.at(st.s + w - ns{1});
+    EXPECT_EQ(r.write_records(), 0U) << class_name(c) << ": a write-timeout record before S + W";
+    EXPECT_FALSE(r.d.closed()) << class_name(c) << ": closed before S + W";
+    r.at(st.s + w);
+    EXPECT_EQ(r.write_records(), 1U) << class_name(c) << ": write-timeout records at S + W";
+    EXPECT_TRUE(r.d.closed()) << class_name(c) << ": not closed at S + W";
+
+    if (st.cut) {
+        ASSERT_TRUE(rgs::Scene::ready(*st.cut)) << class_name(c) << ": the cut call did not return";
+        auto const cr = st.cut->get();
+        if (has_cut_call(c)) {
+            EXPECT_FALSE(cr.has_value()) << class_name(c) << ": the cut call succeeded";
+            if (!cr) {
+                EXPECT_EQ(cr.error(), fixpp::core::error::session_write_timeout)
+                    << class_name(c) << ": the cut call's error " << static_cast<int>(cr.error());
+            }
+        }
+    }
+    if (st.queued) {
+        ASSERT_TRUE(rgs::Scene::ready(*st.queued)) << class_name(c) << ": the queued send";
+        auto const qr = st.queued->get();
+        EXPECT_FALSE(qr.has_value()) << class_name(c) << ": the queued send succeeded";
+        if (!qr) {
+            EXPECT_EQ(qr.error(), fixpp::core::error::dispatch_aborted)
+                << class_name(c) << ": the queued send's error " << static_cast<int>(qr.error());
+        }
+    }
+    EXPECT_EQ(r.d.started("5"), 0U) << class_name(c) << ": a Logout";
+    EXPECT_EQ(r.d.s.state(), fsm_state::Disconnected) << class_name(c);
+    EXPECT_EQ(r.disconnected() - disconnected_before, 1U)
+        << class_name(c) << ": new Disconnected entries";
+    EXPECT_EQ(r.app->logouts - logouts_before, st.active ? 1 : 0)
+        << class_name(c) << ": onLogout calls";
+    EXPECT_EQ(r.give_up_records(), 0U) << class_name(c) << ": give-up records";
+    EXPECT_EQ(r.write_records(), 1U) << class_name(c) << ": write-timeout records";
+}
+
+// T101, the spurious arm: the same staging with the limit off; still open at S + 1.3 s, with no
+// write-timeout record.
+void expect_open_with_limit_off(session_role role, wclass c) {
+    Rig r{role, params_for(c, 0), [c](SessionConfig& cfg) { tweak_for(c, cfg); }};
+    Staged st = stage(r, c);
+    ASSERT_TRUE(st.ok) << class_name(c) << ": setup: " << st.why;
+    r.at(st.s + 1300ms);
+    EXPECT_FALSE(r.d.closed()) << class_name(c) << ": closed at S + 1.3 s with the limit off";
+    EXPECT_EQ(r.write_records(), 0U) << class_name(c) << ": a write-timeout record";
+}
+
+struct ClassCase {
+    wclass c;
+    session_role role;
+};
+
+[[nodiscard]] std::string case_name(::testing::TestParamInfo<ClassCase> const& i) {
+    return std::string{class_name(i.param.c)} +
+           (i.param.role == session_role::acceptor ? "_Acceptor" : "_Initiator");
+}
+
+class WriteTimeout106 : public ::testing::TestWithParam<ClassCase> {};
+
+TEST_P(WriteTimeout106, CutAtTheLimit) { expect_cut_at_s_plus_w(GetParam().role, GetParam().c); }
+TEST_P(WriteTimeout106, LimitOff_StaysOpen) {
+    expect_open_with_limit_off(GetParam().role, GetParam().c);
+}
+
+[[nodiscard]] std::vector<ClassCase> all_cases() {
+    std::vector<ClassCase> v;
+    for (auto c : {wclass::send, wclass::heartbeat, wclass::test_request, wclass::resend_frame,
+                   wclass::sequence_reset, wclass::reject, wclass::resend_request,
+                   wclass::heartbeat_reply, wclass::business_reject}) {
+        v.push_back({c, session_role::acceptor});
+        v.push_back({c, session_role::initiator});
+    }
+    v.push_back({wclass::initiator_logon, session_role::initiator});
+    v.push_back({wclass::reply_logon, session_role::acceptor});
+    v.push_back({wclass::honor789_frame, session_role::initiator});
+    return v;
+}
+
+INSTANTIATE_TEST_SUITE_P(Classes, WriteTimeout106, ::testing::ValuesIn(all_cases()), case_name);
+
+class WriteLimit106 : public ::testing::TestWithParam<session_role> {};
+
+[[nodiscard]] std::string role_name(::testing::TestParamInfo<session_role> const& i) {
+    return i.param == session_role::acceptor ? "Acceptor" : "Initiator";
+}
+
+// T102 (research D9 row "FR-010 start"): the second send queued at the first's start S_A; the
+// first released at S_A + W − 1 ms, so the second starts there and is cut at its own start + W,
+// not at S_A + W (where a start taken at the gate, M3, would cut it, 299 ms earlier).
+TEST_P(WriteLimit106, QueuedWrite_CountsFromItsOwnStart) {
+    Rig r{GetParam(), Params{}};
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    r.d.hold_next_write();
+    auto a = r.spawn_send("W106A");
+    ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, "D"); })) << "setup: A not held";
+    auto const s_a = r.now();
+    auto b = r.spawn_send("W106B");
+    r.d.s.drain();
+    auto const w = std::chrono::milliseconds{kW};
+    r.at(s_a + w - 1ms);
+    r.d.release();
+    r.d.hold_next_write();
+    r.d.s.drain();
+    ASSERT_TRUE(rgs::Scene::ready(a)) << "A did not return after its release";
+    EXPECT_TRUE(a.get().has_value()) << "A failed";
+    ASSERT_TRUE(parked_on(r, "D") && r.d.started("D") == 2U) << "setup: B not held";
+    auto const s_b = r.now();
+    r.at(s_a + w);
+    EXPECT_FALSE(r.d.closed()) << "B cut at A's start + W";
+    EXPECT_EQ(r.write_records(), 0U) << "a write-timeout record at A's start + W";
+    r.at(s_b + w - ns{1});
+    EXPECT_FALSE(r.d.closed()) << "closed before B's start + W";
+    r.at(s_b + w);
+    EXPECT_TRUE(r.d.closed()) << "not closed at B's start + W";
+    EXPECT_EQ(r.write_records(), 1U) << "write-timeout records";
+    ASSERT_TRUE(rgs::Scene::ready(b)) << "B did not return";
+    auto const br = b.get();
+    ASSERT_FALSE(br.has_value()) << "B succeeded";
+    EXPECT_EQ(br.error(), fixpp::core::error::session_write_timeout);
+}
+
+// T102 (research D9 row "FR-010 walk"): a resend walk of three frames, each released at its own
+// start + W − 1 ms: the walk completes, nothing is cut (897 ms in all, below T = 1.2 s).
+TEST_P(WriteLimit106, ResendWalk_ProgressNotCut) {
+    Rig r{GetParam(), Params{}, [](SessionConfig& c) { tweak_for(wclass::resend_frame, c); }};
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    std::string from;
+    for (auto const* id : {"W106R1", "W106R2", "W106R3"}) {
+        auto f = r.spawn_send(id);
+        ASSERT_TRUE(r.d.s.pump_until([&] { return rgs::Scene::ready(f); }) && f.get())
+            << "setup: send " << id;
+        if (from.empty()) {
+            from = std::string{fixpp::test_support::extract_tag(r.d.bw->recorded.back().bytes, 34)};
+        }
+    }
+    auto const before = r.d.bw->recorded.size();
+    r.d.hold_next_write();
+    // From the first send's MsgSeqNum: the walk is the three sends' replays.
+    auto walk = r.d.s.feed_spawn(r.d.s.frame("2", 2, "7=" + from + "\x01" + "16=0\x01"));
+    auto const w = std::chrono::milliseconds{kW};
+    for (int k = 0; k < 3; ++k) {
+        ASSERT_TRUE(r.d.s.pump_until([&] { return r.d.parked(); }))
+            << "frame " << k << " of the walk was not held";
+        auto const s = r.now();
+        r.at(s + w - 1ms);
+        EXPECT_FALSE(r.d.closed()) << "frame " << k << " cut before its own start + W";
+        r.d.release();
+        if (k < 2) r.d.hold_next_write();
+        r.d.s.drain();
+    }
+    ASSERT_TRUE(rgs::Scene::ready(walk)) << "the walk did not complete";
+    EXPECT_TRUE(walk.get().has_value()) << "the ResendRequest's delivery failed";
+    EXPECT_EQ(r.d.bw->recorded.size() - before, 3U) << "frames written by the walk";
+    EXPECT_FALSE(r.d.closed()) << "closed";
+    EXPECT_EQ(r.write_records(), 0U) << "write-timeout records";
+    EXPECT_EQ(r.d.s.state(), fsm_state::Active);
+}
+
+// T103 (research D9 row "FR-011 close"): close()'s Logout write held from S, W = 300 ms,
+// B = 5000 ms; the mock step to S + W + 1 ms issued at once after close(): no write-timeout
+// record, still open (close()'s grace, a wall-clock timer of 5 s, cannot expire first).
+TEST_P(WriteLimit106, CloseLogout_KeepsGrace) {
+    Params p;
+    p.logout_ms = 5000;
+    Rig r{GetParam(), p};
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    r.hold_write_of("5");
+    auto closing = r.spawn(r.session().close(fixpp::session::close_mode::graceful));
+    ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, "5"); }, 2s))
+        << "setup: close()'s Logout not held";
+    auto const s = r.now();
+    r.at(s + std::chrono::milliseconds{kW} + 1ms);
+    EXPECT_EQ(r.write_records(), 0U) << "write-timeout records";
+    EXPECT_FALSE(r.d.closed()) << "closed at S + W + 1 ms";
+    r.d.release();
+    (void)r.d.s.pump_until([&] { return rgs::Scene::ready(closing); }, 10s);
+}
+
+// T103 (research D9 row FR-011): the give-up's Logout (H = T = 10 s, its TestRequest written)
+// held from S = G, W = 300 ms, B = 500 ms: open at S + W and at S + B − 1 ns, closed at S + B
+// (105's ending limit); S + B follows S + W by 200 ms, so an ordinary-class Logout would be cut
+// first.
+TEST_P(WriteLimit106, EndingLogout_Keeps105Limit) {
+    Params p;
+    p.heartbeat = 10s;
+    p.threshold = 10000ms;
+    Rig r{GetParam(), p};
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    auto const l = r.last_inbound();
+    r.at(l + 10s);
+    ASSERT_EQ(r.d.completed("1"), 1U) << "setup: no TestRequest at T";
+    auto const g =
+        t106::give_up_instant_written(l, std::chrono::milliseconds{10000}, r.now());
+    r.hold_write_of("5");
+    r.at(g);
+    ASSERT_TRUE(parked_on(r, "5")) << "setup: the give-up's Logout not held at G";
+    auto const s = r.now();
+    r.at(s + std::chrono::milliseconds{kW});
+    EXPECT_FALSE(r.d.closed()) << "closed at S + W";
+    EXPECT_EQ(r.write_records(), 0U) << "write-timeout records";
+    r.at(s + 500ms - ns{1});
+    EXPECT_FALSE(r.d.closed()) << "closed before S + B";
+    r.at(s + 500ms);
+    EXPECT_TRUE(r.d.closed()) << "not closed at S + B";
+    EXPECT_EQ(r.write_records(), 0U) << "write-timeout records";
+    EXPECT_EQ(r.give_up_records(), 1U) << "give-up records";
+}
+
+// Orchestrator ruling D (proposed name): with the liveness loop off (HeartBtInt 0) the loop leaves
+// at its guard, before its spawn point, so the bound the first limited write spawned (the
+// initiator's Logon, the acceptor's reply Logon) keeps timing the connection's writes: an
+// application send held at S is cut at S + W. A loop exit that ended the bound unconditionally
+// leaves the send uncut (the bound is spawned once per connection).
+TEST_P(WriteLimit106, LivenessOff_BoundKeepsTimingWrites) {
+    Params p;
+    p.heartbeat = 0s;
+    Rig r{GetParam(), p};
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    r.d.hold_next_write();
+    auto cut = r.spawn_send("W106L");
+    ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, "D"); })) << "setup: send not held";
+    auto const s = r.now();
+    r.at(s + std::chrono::milliseconds{kW} - ns{1});
+    EXPECT_FALSE(r.d.closed()) << "closed before S + W";
+    r.at(s + std::chrono::milliseconds{kW});
+    EXPECT_TRUE(r.d.closed()) << "not closed at S + W";
+    EXPECT_EQ(r.write_records(), 1U) << "write-timeout records";
+    ASSERT_TRUE(rgs::Scene::ready(cut)) << "the cut send did not return";
+    auto const cr = cut.get();
+    ASSERT_FALSE(cr.has_value()) << "the cut send succeeded";
+    EXPECT_EQ(cr.error(), fixpp::core::error::session_write_timeout);
+}
+
+// T106 (research D9 row C-4): the bound's spawn refused at a limited write's start (HeartBtInt 0,
+// so no loop spawns it first, and the seam set before the first write): the write is not
+// started and returns dispatch_aborted; the claim taken, Disconnected once, closed once, zero
+// reason records. The first limited write is the initiator's Logon (drive_reconnect() returns its
+// error) or the acceptor's reply Logon.
+TEST_P(WriteLimit106, ConnectionBound_SpawnFails_AtWrite) {
+    Params p;
+    p.heartbeat = 0s;
+    Rig r{GetParam(), p};
+    session_test_access::set_connection_bound_spawn_fails(r.session(), [] { return true; });
+    auto const opened = r.d.run(r.session().open(), "open");
+    ASSERT_TRUE(opened && opened->has_value()) << "setup: open()";
+    auto const disconnected_before = r.disconnected();
+    std::optional<expected_void> first;
+    if (GetParam() == session_role::initiator) {
+        first = r.d.run(r.session().drive_reconnect(), "drive_reconnect");
+    } else {
+        r.session().attach_accepted_transport(
+            std::make_unique<fixpp::session::test::BlockingWriteTransport>(r.d.s.ioc.get_executor(),
+                                                                           r.d.stream, r.d.bw),
+            fixpp::transport::handshake_result{});
+        first = r.d.s.feed(r.d.s.logon(1));
+    }
+    r.d.s.drain();
+    EXPECT_EQ(r.d.bw->starts, 0U) << "a write was started";
+    if (GetParam() == session_role::initiator) {
+        ASSERT_TRUE(first.has_value()) << "drive_reconnect() did not return";
+        EXPECT_FALSE(first->has_value()) << "drive_reconnect() succeeded";
+        if (!first->has_value()) {
+            EXPECT_EQ(first->error(), fixpp::core::error::dispatch_aborted);
+        }
+    }
+    EXPECT_NE(session_test_access::ending_claim(r.session()), 0) << "no claim";
+    EXPECT_EQ(r.d.s.state(), fsm_state::Disconnected);
+    EXPECT_EQ(r.disconnected() - disconnected_before, 1U) << "new Disconnected entries";
+    EXPECT_TRUE(r.d.closed()) << "the transport is open";
+    EXPECT_EQ(r.d.bw->closes, 1U) << "closes";
+    EXPECT_EQ(r.write_records(), 0U) << "write-timeout records";
+    EXPECT_EQ(r.give_up_records(), 0U) << "give-up records";
+}
+
+// T106 (research D9 row C-4, data-model E-3's joiner row "the Disconnected edge"): the bound armed
+// on a send held at S, the connection's end at S + 100 ms (the peer's Logout, with no close(),
+// drain or stop), the clock not advanced after it, so the armed deadline cannot end the bound:
+// its counter reads 0 after a bounded pump, through the edge's wake.
+TEST_P(WriteLimit106, ConnectionBound_Teardown_ConnectionEnd_Timing) {
+    Rig r{GetParam(), Params{}};
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    r.d.hold_next_write();
+    auto held = r.spawn_send("W106T");
+    ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, "D"); })) << "setup: send not held";
+    ASSERT_EQ(session_test_access::connection_bound_count(r.session()), 1) << "setup: no bound";
+    r.at(r.now() + 100ms);
+    // The edge with no write before it: the reply Logout's toAdmin throws, which records
+    // Disconnected before that Logout reaches the write gate (held behind the send).
+    r.app->to_admin_hook = [](std::string_view m) {
+        if (m == "5") throw std::runtime_error{"WriteLimit106: toAdmin"};
+    };
+    auto lo = r.d.s.feed_spawn(r.d.s.logout(2));
+    EXPECT_TRUE(r.d.s.pump_until(
+        [&] {
+            return r.d.s.state() == fsm_state::Disconnected &&
+                   session_test_access::connection_bound_count(r.session()) == 0;
+        },
+        2s))
+        << "the bound outlived the connection's end";
+    r.d.release();
+    r.d.s.drain();
+}
+
+
+// T104 (plan "Deferred to tasks.md", M4 at the other Logout sites): each remaining Logout site's
+// Logout held from S, W = 300 ms < B = 500 ms: no write-timeout record at S + W, still open, and
+// closed at S + B by 105's ending limit (counted from the leaf's entry, S on the mock clock).
+enum class logout_site : std::uint8_t { r2_leaf, refuse_logon, logon_sent_leaf, honor789 };
+
+[[nodiscard]] const char* site_name(logout_site s) {
+    switch (s) {
+        case logout_site::r2_leaf:
+            return "R2Leaf";
+        case logout_site::refuse_logon:
+            return "RefuseLogon";
+        case logout_site::logon_sent_leaf:
+            return "LogonSentLeaf";
+        case logout_site::honor789:
+            return "Honor789";
+    }
+    return "?";
+}
+
+void expect_logout_keeps_its_limit(logout_site site) {
+    auto const role = site == logout_site::refuse_logon || site == logout_site::r2_leaf
+                          ? session_role::acceptor
+                          : session_role::initiator;
+    Rig r{role, Params{}, [site](SessionConfig& c) {
+              if (site == logout_site::refuse_logon) {
+                  c.posture = fixpp::session::session_posture::production;
+              }
+              if (site == logout_site::honor789) c.enable_next_expected_msg_seq_num = true;
+          }};
+    auto& sc = r.d.s;
+    std::optional<std::future<expected_void>> fed;
+    if (site == logout_site::r2_leaf) {
+        ASSERT_TRUE(r.d.to_active()) << "setup";
+        r.hold_write_of("5");
+        // MsgSeqNum 1 again, below NextNumIn 2, without PossDupFlag: the R-2 Logout.
+        fed.emplace(sc.feed_spawn(sc.heartbeat(1)));
+    } else {
+        auto const opened = r.d.run(sc.session->open(), "open");
+        ASSERT_TRUE(opened && opened->has_value()) << "setup: open()";
+        if (role == session_role::acceptor) {
+            sc.session->attach_accepted_transport(
+                std::make_unique<fixpp::session::test::BlockingWriteTransport>(sc.ioc.get_executor(),
+                                                                               r.d.stream, r.d.bw),
+                fixpp::transport::handshake_result{});
+        } else {
+            auto const c2 = r.d.run(sc.session->drive_reconnect(), "drive_reconnect");
+            ASSERT_TRUE(c2 && c2->has_value()) << "setup: drive_reconnect()";
+        }
+        r.hold_write_of("5");
+        switch (site) {
+            case logout_site::refuse_logon:
+                // TestMessageIndicator(464) Y against the production posture.
+                fed.emplace(sc.feed_spawn(sc.frame("A", 1,
+                                                   "98=0\x01"
+                                                   "108=30\x01"
+                                                   "464=Y\x01")));
+                break;
+            case logout_site::logon_sent_leaf:
+                // SendingTime(52) ten minutes behind the clock: the LogonSent Logout.
+                fed.emplace(sc.feed_spawn(rgs::Scene::raw("A", 1, "TW",
+                                                          sc.sending_time(std::chrono::seconds{-600}),
+                                                          "98=0\x01"
+                                                          "108=30\x01")));
+                break;
+            case logout_site::honor789:
+                // NextExpectedMsgSeqNum(789) above the next outbound number: the too-high Logout.
+                fed.emplace(sc.feed_spawn(sc.frame("A", 1,
+                                                   "98=0\x01"
+                                                   "108=30\x01"
+                                                   "789=99\x01")));
+                break;
+            case logout_site::r2_leaf:
+                break;
+        }
+    }
+    ASSERT_TRUE(sc.pump_until([&] { return parked_on(r, "5"); }))
+        << site_name(site) << ": setup: the Logout was not held";
+    auto const s = r.now();
+    r.at(s + std::chrono::milliseconds{kW});
+    EXPECT_EQ(r.write_records(), 0U) << site_name(site) << ": a write-timeout record at S + W";
+    EXPECT_FALSE(r.d.closed()) << site_name(site) << ": closed at S + W";
+    r.at(s + 500ms - ns{1});
+    EXPECT_FALSE(r.d.closed()) << site_name(site) << ": closed before S + B";
+    r.at(s + 500ms);
+    EXPECT_TRUE(r.d.closed()) << site_name(site) << ": not closed at S + B";
+    EXPECT_EQ(r.write_records(), 0U) << site_name(site) << ": write-timeout records";
+}
+
+TEST(WriteLimitLogoutSite106, EndingLogout_R2Leaf) {
+    expect_logout_keeps_its_limit(logout_site::r2_leaf);
+}
+TEST(WriteLimitLogoutSite106, EndingLogout_RefuseLogon) {
+    expect_logout_keeps_its_limit(logout_site::refuse_logon);
+}
+TEST(WriteLimitLogoutSite106, EndingLogout_LogonSentLeaf) {
+    expect_logout_keeps_its_limit(logout_site::logon_sent_leaf);
+}
+TEST(WriteLimitLogoutSite106, EndingLogout_Honor789) {
+    expect_logout_keeps_its_limit(logout_site::honor789);
+}
+
+// T105 (research D9 row FR-017; contract C-4.6): the OneEnding106 pairs with the limit set,
+// GiveUp106's H = T = 10 s, W = 300 ms, B = 500 ms unless named. Each asserts FR-017: one new
+// Disconnected entry, onLogout at most once, the transport closed, and the reason records of the
+// first claimant (one for the give-up or the write limit, none for an ending Logout or close()).
+struct PairReading {
+    std::size_t disconnected = 0;
+    int logouts = 0;
+    bool closed = false;  // the transport's close (its count is not the reading: 105's close
+                          // frame and a later close of the same transport both count)
+    std::size_t give_up = 0;
+    std::size_t write_timeout = 0;
+};
+
+class PairRig {
+public:
+    explicit PairRig(session_role role, std::uint32_t write_ms = kW, std::uint32_t logout_ms = 500)
+        : r{role, [&] {
+                Params p;
+                p.heartbeat = 10s;
+                p.threshold = 10000ms;
+                p.write_ms = write_ms;
+                p.logout_ms = logout_ms;
+                return p;
+            }()} {}
+    Rig r;
+    std::size_t disconnected_before = 0;
+    int logouts_before = 0;
+
+    [[nodiscard]] bool active() {
+        if (!r.d.to_active()) return false;
+        disconnected_before = r.disconnected();
+        logouts_before = r.app->logouts;
+        return true;
+    }
+    [[nodiscard]] PairReading read() {
+        return {.disconnected = r.disconnected() - disconnected_before,
+                .logouts = r.app->logouts - logouts_before,
+                .closed = r.d.closed(),
+                .give_up = r.give_up_records(),
+                .write_timeout = r.write_records()};
+    }
+    // A send held from now (S).
+    [[nodiscard]] std::optional<std::future<expected_void>> hold_send(std::string_view id) {
+        r.d.hold_next_write();
+        auto f = r.spawn_send(id);
+        if (!r.d.s.pump_until([&] { return parked_on(r, "D"); })) return std::nullopt;
+        return f;
+    }
+};
+
+void expect_fr017(PairReading const& p, std::size_t give_up, std::size_t write_timeout,
+                  char const* cell) {
+    EXPECT_EQ(p.disconnected, 1U) << cell << ": new Disconnected entries";
+    EXPECT_EQ(p.logouts, 1) << cell << ": onLogout calls";
+    EXPECT_TRUE(p.closed) << cell << ": the transport is open";
+    EXPECT_EQ(p.give_up, give_up) << cell << ": give-up records";
+    EXPECT_EQ(p.write_timeout, write_timeout) << cell << ": write-timeout records";
+}
+
+class OneEnding106 : public ::testing::TestWithParam<session_role> {};
+
+// GiveUp/Watchdog: the TestRequest written at L + T, G = L + 2T + 1 ns; a send held from
+// S = G − 100 ms; the loop decides the give-up at G, its Logout queued behind the send; the
+// bound at S + W = G + 200 ms finds the claim taken; 105's limit cuts the Logout at G + B.
+TEST_P(OneEnding106, GiveUpThenWatchdog) {
+    PairRig p{GetParam()};
+    ASSERT_TRUE(p.active()) << "setup";
+    auto const l = p.r.last_inbound();
+    p.r.at(l + 10s);
+    ASSERT_EQ(p.r.d.completed("1"), 1U) << "setup: no TestRequest at T";
+    auto const g = t106::give_up_instant_written(l, std::chrono::milliseconds{10000}, p.r.now());
+    p.r.at(g - 100ms);
+    auto held = p.hold_send("W106P");
+    ASSERT_TRUE(held) << "setup: the send was not held";
+    p.r.at(g);
+    EXPECT_EQ(p.r.give_up_records(), 1U) << "no give-up record at G";
+    p.r.at(g + 200ms);
+    EXPECT_EQ(p.r.write_records(), 0U) << "a write-timeout record at S + W";
+    p.r.at(g + 500ms);
+    EXPECT_TRUE(p.r.d.closed()) << "not closed at G + B";
+    expect_fr017(p.read(), 1, 0, "GiveUpThenWatchdog");
+}
+
+// Watchdog/GiveUp: the send held from S = G − 500 ms, cut at S + W = G − 200 ms; the loop, waking
+// at G, finds the session no longer Active. [guard: the loop's liveness_may_originate_() test]
+TEST_P(OneEnding106, WatchdogThenGiveUp) {
+    PairRig p{GetParam()};
+    ASSERT_TRUE(p.active()) << "setup";
+    auto const l = p.r.last_inbound();
+    p.r.at(l + 10s);
+    ASSERT_EQ(p.r.d.completed("1"), 1U) << "setup: no TestRequest at T";
+    auto const g = t106::give_up_instant_written(l, std::chrono::milliseconds{10000}, p.r.now());
+    p.r.at(g - 500ms);
+    auto held = p.hold_send("W106P");
+    ASSERT_TRUE(held) << "setup: the send was not held";
+    p.r.at(g - 200ms);
+    EXPECT_TRUE(p.r.d.closed()) << "not closed at S + W";
+    p.r.at(g + 1s);
+    expect_fr017(p.read(), 0, 1, "WatchdogThenGiveUp");
+}
+
+// Watchdog/EndingLimit and EndingLimit/Watchdog: a send held from S; at D = S + 100 ms the peer's
+// MsgSeqNum 1 again (below NextNumIn) draws the R-2 Logout, which takes the ending claim at its
+// leaf's entry and queues behind the send. With W = 300 ms the bound's instant S + W precedes
+// 105's cut at D + B = S + 600 ms and finds the claim taken; with W = 1 s the cut at D + B comes
+// first. Either way the ending is the R-2 Logout's: no reason record.
+void ending_limit_pair(session_role role, std::uint32_t write_ms, char const* cell) {
+    PairRig p{role, write_ms};
+    ASSERT_TRUE(p.active()) << "setup";
+    auto held = p.hold_send("W106P");
+    ASSERT_TRUE(held) << "setup: the send was not held";
+    auto const s = p.r.now();
+    p.r.at(s + 100ms);
+    auto fed = p.r.d.s.feed_spawn(p.r.d.s.heartbeat(1));
+    p.r.d.s.drain();
+    ASSERT_NE(session_test_access::ending_claim(p.r.session()), 0) << "setup: no R-2 claim at D";
+    p.r.at(s + std::chrono::milliseconds{write_ms} < s + 600ms
+               ? s + std::chrono::milliseconds{write_ms}
+               : s + 300ms);
+    EXPECT_EQ(p.r.write_records(), 0U) << cell << ": a write-timeout record";
+    p.r.at(s + 600ms);
+    EXPECT_TRUE(p.r.d.closed()) << cell << ": not closed at D + B";
+    p.r.at(s + std::chrono::milliseconds{write_ms} + 100ms);
+    expect_fr017(p.read(), 0, 0, cell);
+}
+
+TEST_P(OneEnding106, WatchdogThenEndingLimit) {
+    ending_limit_pair(GetParam(), kW, "WatchdogThenEndingLimit");
+}
+TEST_P(OneEnding106, EndingLimitThenWatchdog) {
+    ending_limit_pair(GetParam(), 1000, "EndingLimitThenWatchdog");
+}
+
+// Watchdog/Close: the send cut at S + W; close() at C = S + W + 100 ms finds the ending recorded.
+// [guard: close() takes no claim]
+TEST_P(OneEnding106, WatchdogThenClose) {
+    PairRig p{GetParam(), kW, 5000};
+    ASSERT_TRUE(p.active()) << "setup";
+    auto held = p.hold_send("W106P");
+    ASSERT_TRUE(held) << "setup: the send was not held";
+    auto const s = p.r.now();
+    p.r.at(s + std::chrono::milliseconds{kW});
+    ASSERT_TRUE(p.r.d.closed()) << "not closed at S + W";
+    p.r.at(s + std::chrono::milliseconds{kW} + 100ms);
+    auto closed = p.r.d.run(p.r.session().close(fixpp::session::close_mode::graceful), "close");
+    EXPECT_TRUE(closed.has_value()) << "close() did not return";
+    expect_fr017(p.read(), 0, 1, "WatchdogThenClose");
+}
+
+// Close/Watchdog: close() at C = S + 100 ms, its Logout queued behind the held send; the mock step
+// to S + W issued at once after close() (close()'s grace is a wall-clock timer of B = 5 s): the
+// bound leaves on closing, so no write-timeout record. The held send is then released.
+TEST_P(OneEnding106, CloseThenWatchdog) {
+    PairRig p{GetParam(), kW, 5000};
+    ASSERT_TRUE(p.active()) << "setup";
+    auto held = p.hold_send("W106P");
+    ASSERT_TRUE(held) << "setup: the send was not held";
+    auto const s = p.r.now();
+    p.r.at(s + 100ms);
+    auto closing = p.r.spawn(p.r.session().close(fixpp::session::close_mode::graceful));
+    p.r.at(s + std::chrono::milliseconds{kW});
+    EXPECT_EQ(p.r.write_records(), 0U) << "a write-timeout record";
+    p.r.d.release();
+    EXPECT_TRUE(p.r.d.s.pump_until([&] { return rgs::Scene::ready(closing); }, 10s))
+        << "close() did not return";
+    auto const rd = p.read();
+    EXPECT_EQ(rd.disconnected, 1U) << "new Disconnected entries";
+    EXPECT_EQ(rd.logouts, 1) << "onLogout calls";
+    EXPECT_EQ(rd.give_up, 0U) << "give-up records";
+    EXPECT_EQ(rd.write_timeout, 0U) << "write-timeout records";
+}
+
+// BothDueAtOneWake (N-7, R9): the loop's TestRequest held in its store call until S = G − W, then
+// its write held, so the bound is armed on both G = L + 3T + 1 ns and S + W = G; one step_to from
+// G − 1 ms to G (the Instants rule's one exception): the give-up row is evaluated first and
+// claims; the write row finds the claim taken.
+TEST_P(OneEnding106, BothDueAtOneWake) {
+    auto gate = std::make_shared<t105::gate_store_state>();
+    Rig r{GetParam(),
+          [] {
+              Params p;
+              p.heartbeat = 10s;
+              p.threshold = 10000ms;
+              return p;
+          }(),
+          [gate](SessionConfig& c) { c.store_factory = std::make_shared<t105::GateStoreFactory>(gate); }};
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    auto const l = r.last_inbound();
+    gate->hold_when = [](t105::store_call k, fixpp::session::seqnum_t) {
+        return k == t105::store_call::store_outbound;
+    };
+    r.hold_write_of("1");
+    r.at(l + 10s);
+    ASSERT_EQ(gate->parked, 1U) << "setup: the TestRequest's store call is not held";
+    auto const g = t106::give_up_instant_emit_not_returned(l, std::chrono::milliseconds{10000});
+    auto const w = std::chrono::milliseconds{kW};
+    r.at(g - w);
+    gate->hold_when = nullptr;
+    gate->release_all();
+    ASSERT_TRUE(r.d.s.pump_until([&] { return parked_on(r, "1"); })) << "setup: TestRequest write";
+    r.at(g - 1ms);
+    ASSERT_EQ(r.give_up_records(), 0U) << "setup: a give-up record before G";
+    r.at(g);
+    EXPECT_EQ(r.give_up_records(), 1U) << "give-up records";
+    EXPECT_EQ(r.write_records(), 0U) << "write-timeout records";
+    EXPECT_EQ(session_test_access::ending_claim(r.session()), 1) << "the claim is not the give-up's";
+}
+
+INSTANTIATE_TEST_SUITE_P(BothRoles, OneEnding106,
+                         ::testing::Values(session_role::acceptor, session_role::initiator),
+                         role_name);
+
+INSTANTIATE_TEST_SUITE_P(BothRoles, WriteLimit106,
+                         ::testing::Values(session_role::acceptor, session_role::initiator),
+                         role_name);
+
+}  // namespace w106
 
 }  // namespace
