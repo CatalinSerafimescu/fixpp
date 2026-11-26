@@ -1420,16 +1420,21 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   a same-source build to prove the layout matches), min per tree, +5 % one-sided. Results in the evidence file; a breach
   needs the measurement, a rationale and an approval by someone other than the author, or, where no independent approver
   exists, explicit user ratification recorded in the PR thread (`[const §VIII.2]`).
-- [ ] T165 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Targeted sanitizer lanes `linux-clang-asan`, `linux-clang-ubsan` and `linux-clang-tsan` (owner rule): only
+  **Stopped** (`b7fdebc2`, ruling R19; evidence file, "T164 re-run"): the two equal-length pairs (84 and 90 characters) disagree
+  on `session_send_bench`; `HeartbeatAnswersPendingTestRequest` stays above budget in both (ruling 2's residual, its
+  prototype not applied). Both go to the orchestrator.
+- [X] T165 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Targeted sanitizer lanes `linux-clang-asan`, `linux-clang-ubsan` and `linux-clang-tsan` (owner rule): only
   `-L 106`, `-L 105`, `-L 104`, `-L 099` and the binaries whose test sources the branch touches (config, transport,
   C-ABI, 538); on TSan the `GiveUp106`, `WriteTimeout106`, `OneEnding106` and `ConnectionBound106` cells also with
   `--repeat until-fail:50` (D3 and D5 add a strand-confined coroutine per connection). A report is a defect until
   disproven by a reproduction or a client-path analysis. Record each lane's entries, test count and skip count (0).
+  **Done** (at `23705cd7`; evidence file, "T165", ruling 5): 28 entries per lane, 100 % passed, 0 sanitizer reports; the two
+  asan/tsan skips are the 099 cells that skip by design where the sanitizer owns `operator new`, not fixture skips.
 - [X] T166 `linux-clang-release` (on `/mnt/wsl/fixppbuild`): `alloc_guard_106_connection_bound_mallocnesia` and the `-L 544`
   registrations, plus every `-L alloc_guard` entry by name (`ctest -N -L alloc_guard`); record each result.
   **Done** (at `23705cd7`; evidence file, "T166"): `-L 544` 75/75, `-L alloc_guard` 83/83, 0 skipped; the 106 interceptor
   and counter entries pass.
-- [ ] T167 Coverage of added lines (Article IX §1): fresh per-binary profraw from every binary the `106` label runs
+- [X] T167 Coverage of added lines (Article IX §1): fresh per-binary profraw from every binary the `106` label runs
   (`session_106_seam_tests` included: the spawn and wait failure exits and the commit refusal are reached only there), for
   the `session`, `config`, `log`, `capi` and `core` modules the diff adds a reachable line to; every uncovered added line or
   branch tested, waived with a one-line rationale (the respawn's `connection_bound_.running` term, the
@@ -1439,6 +1444,9 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   evidence file's T074 section; and `OneEnding106.Watchdog_PreActive_NoEstablishmentRecord`, dropped by ruling 1 on the
   Phase 6 report for the same reason, so M10 has no cell), or escalated to a filed, labelled issue, in
   `.specify/decisions/106-logon-guards-write-bounds-verify.md`.
+  **Done** (`7de1b3ce`; verify record, "T167 — resolution", ruling 6): cells `ErrorMessage106.SessionWriteTimeout`,
+  `NextNumIn106.CommitRefused_Initiator_Disconnected` and `OneEnding106.EngineStopStep1_ThenTooLow_NoLogout`, each RED as
+  stated and its lines hit in a fresh coverage read; every other row justified there.
 - [ ] T168 **(orchestrator)** windows-msvc-debug in `/mnt/c/temp/fixpp`, after taking `.sandbox-lock` (PARENT
   `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md` Step 0), never at the same time as a Linux build: build
   the feature's own targets (`session_106_tests`, `session_106_seam_tests`, the touched config, transport and C-ABI test
