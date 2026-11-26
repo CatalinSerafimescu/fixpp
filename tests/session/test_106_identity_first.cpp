@@ -418,42 +418,75 @@ TEST(IdentityFirst106, Strict_Initiator_DirectMtlsOpen) { run_refusal(direct_mtl
 // base and spelled out here.
 
 namespace {
-// PIN kAdmittedValidateFirstAcceptor
 const Answer kAdmittedValidateFirstAcceptor{
-    .frames = {}, .mgr = {}, .store = {}, .state = fsm_state::NotConnected};
-// PIN kAdmittedPostureAcceptor
+    .frames = {"8=FIXT.1.1|9=99|35=3|34=1|49=ISLD|52=20240101-00:00:00.000|56=TW|45=5|371=1137|372="
+               "A|373=1|58=Required tag missing|10=234|"},
+    .mgr = {.in = 1, .out = 2},
+    .store = {.in = 5, .out = 2},
+    .state = fsm_state::Disconnected};
 const Answer kAdmittedPostureAcceptor{
-    .frames = {}, .mgr = {}, .store = {}, .state = fsm_state::NotConnected};
-// PIN kAdmittedSendingTimeAcceptor
+    .frames = {"8=FIXT.1.1|9=90|35=5|34=1|49=ISLD|52=20240101-00:00:00.000|56=TW|58="
+               "TestMessageIndicator posture mismatch|10=046|"},
+    .mgr = {.in = 5, .out = 2},
+    .store = {.in = 5, .out = 2},
+    .state = fsm_state::Disconnected};
 const Answer kAdmittedSendingTimeAcceptor{
-    .frames = {}, .mgr = {}, .store = {}, .state = fsm_state::NotConnected};
-// PIN kAdmittedStrictAcceptor
+    .frames = {"8=FIXT.1.1|9=74|35=3|34=1|49=ISLD|52=20240101-00:00:00.000|56=TW|45=5|371=52|372=A|"
+               "373=10|10=076|"},
+    .mgr = {.in = 5, .out = 2},
+    .store = {.in = 5, .out = 2},
+    .state = fsm_state::Disconnected};
 const Answer kAdmittedStrictAcceptor{
-    .frames = {}, .mgr = {}, .store = {}, .state = fsm_state::NotConnected};
-// PIN kAdmittedResetOnLogonAcceptor
+    .frames = {"8=FIXT.1.1|9=84|35=5|34=1|49=ISLD|52=20240101-00:00:00.000|56=TW|58="
+               "ResetSeqNumFlag(141)=Y required|10=091|"},
+    .mgr = {.in = 5, .out = 2},
+    .store = {.in = 5, .out = 2},
+    .state = fsm_state::Disconnected};
 const Answer kAdmittedResetOnLogonAcceptor{
-    .frames = {}, .mgr = {}, .store = {}, .state = fsm_state::NotConnected};
-// PIN kAdmittedS31137Acceptor
+    .frames = {"8=FIXT.1.1|9=68|35=A|34=1|49=ISLD|52=20240101-00:00:00.000|56=TW|98=0|108=30|1137="
+               "9|10=070|"},
+    .mgr = {.in = 2, .out = 2},
+    .store = {.in = 1, .out = 2},
+    .state = fsm_state::Active};
 const Answer kAdmittedS31137Acceptor{
-    .frames = {}, .mgr = {}, .store = {}, .state = fsm_state::NotConnected};
-// PIN kAdmittedValidateFirstInitiator
+    .frames = {"8=FIXT.1.1|9=75|35=3|34=1|49=ISLD|52=20240101-00:00:00.000|56=TW|45=5|371=1137|372="
+               "A|373=5|10=134|"},
+    .mgr = {.in = 6, .out = 2},
+    .store = {.in = 5, .out = 2},
+    .state = fsm_state::Disconnected};
 const Answer kAdmittedValidateFirstInitiator{
-    .frames = {}, .mgr = {}, .store = {}, .state = fsm_state::NotConnected};
-// PIN kAdmittedPostureInitiator
+    .frames = {"8=FIXT.1.1|9=99|35=3|34=2|49=TW|52=20240101-00:00:00.000|56=ISLD|45=5|371=1137|372="
+               "A|373=1|58=Required tag missing|10=235|"},
+    .mgr = {.in = 5, .out = 3},
+    .store = {.in = 5, .out = 3},
+    .state = fsm_state::Disconnected};
 const Answer kAdmittedPostureInitiator{
-    .frames = {}, .mgr = {}, .store = {}, .state = fsm_state::NotConnected};
-// PIN kAdmittedSendingTimeInitiator
+    .frames = {"8=FIXT.1.1|9=90|35=5|34=2|49=TW|52=20240101-00:00:00.000|56=ISLD|58="
+               "TestMessageIndicator posture mismatch|10=047|"},
+    .mgr = {.in = 5, .out = 3},
+    .store = {.in = 5, .out = 3},
+    .state = fsm_state::Disconnected};
 const Answer kAdmittedSendingTimeInitiator{
-    .frames = {}, .mgr = {}, .store = {}, .state = fsm_state::NotConnected};
-// PIN kAdmittedS3Initiator
-const Answer kAdmittedS3Initiator{
-    .frames = {}, .mgr = {}, .store = {}, .state = fsm_state::NotConnected};
-// PIN kAdmittedAsked141Initiator
-const Answer kAdmittedAsked141Initiator{
-    .frames = {}, .mgr = {}, .store = {}, .state = fsm_state::NotConnected};
-// PIN kAdmittedUnreadableNoValidator
+    .frames = {"8=FIXT.1.1|9=77|35=5|34=2|49=TW|52=20240101-00:00:00.000|56=ISLD|58=SendingTime(52)"
+               " accuracy|10=004|"},
+    .mgr = {.in = 5, .out = 3},
+    .store = {.in = 5, .out = 3},
+    .state = fsm_state::Disconnected};
+const Answer kAdmittedS3Initiator{.frames = {"8=FIXT.1.1|9=75|35=3|34=2|49=TW|52=20240101-00:00:00."
+                                             "000|56=ISLD|45=5|371=1137|372=A|373=5|10=135|"},
+                                  .mgr = {.in = 6, .out = 3},
+                                  .store = {.in = 5, .out = 3},
+                                  .state = fsm_state::Disconnected};
+const Answer kAdmittedAsked141Initiator{.frames = {},
+                                        .mgr = {.in = 2, .out = 2},
+                                        .store = {.in = 2, .out = 2},
+                                        .state = fsm_state::Active};
 const Answer kAdmittedUnreadableNoValidator{
-    .frames = {}, .mgr = {}, .store = {}, .state = fsm_state::NotConnected};
+    .frames = {"8=FIXT.1.1|9=99|35=3|34=1|49=ISLD|52=20240101-00:00:00.000|56=TW|45=5|371=1137|372="
+               "A|373=1|58=Required tag missing|10=234|"},
+    .mgr = {.in = 1, .out = 2},
+    .store = {.in = 5, .out = 2},
+    .state = fsm_state::Disconnected};
 }  // namespace
 
 TEST(IdentityFirst106, Admitted_ValidateFirst_Acceptor) {
