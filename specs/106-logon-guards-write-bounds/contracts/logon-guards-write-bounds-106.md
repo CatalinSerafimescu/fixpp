@@ -261,10 +261,10 @@ Notes on the rows:
   same reason (T154 copies this table).
 - Row 3: QuickFIX C++ and Go cut a silent peer at their own heartbeat timeout counted from the last inbound frame;
   fixpp's instant is data-model E-4's G (L + 3T + 1 ns while an emit has not returned, otherwise 105's).
-- Row 4: fixpp's knob closes, as QuickFIX/J's `MaxScheduledWriteRequests` does and its `SocketSynchronousWriteTimeout`
+- Row 5: fixpp's knob closes, as QuickFIX/J's `MaxScheduledWriteRequests` does and its `SocketSynchronousWriteTimeout`
   does not, because the owner's ruling (b) asks that the write limit end the session (spec Clarifications,
   2026-11-25).
-- Row 5: the 30 s default is the base's, a departure from QuickFIX C++'s fixed 10 s, now configurable (C-5.1).
+- Row 6: the 30 s default is the base's, a departure from QuickFIX C++'s fixed 10 s, now configurable (C-5.1).
   QuickFIX/J's LogonTimeout covers its handshake; fixpp's `logon_timeout_ms` does not cover the initiator's (C-5.3), so
   the handshake bound is the only bound on it.
 
