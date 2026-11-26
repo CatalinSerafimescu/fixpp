@@ -5,18 +5,26 @@
 // The one-ending cells (research D11; contract C-4.6) that compile on the base: write_timeout_ms
 // unset. A pair that needs the limit is written in tasks.md T105. Each asserts FR-017: one new
 // Disconnected entry, onLogout at most once (once from Active), one close, and the reason records
-// FR-017 names (one for the give-up; none for close()).
+// FR-017 names (one for the give-up or the establishment deadline; none for close()).
 
 #include <gtest/gtest.h>
 
 #include <asio/co_spawn.hpp>
+#include <asio/detached.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <fixpp/session/session.hpp>
+#include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <memory>
+#include <optional>
+#include <variant>
 
 #include "session/resend_gap_scene.hpp"
 #include "session/test_106_support.hpp"
+#include "support/hooked_store.hpp"
 #include "support/session_executor_of.hpp"
 
 namespace {
@@ -141,6 +149,148 @@ TEST_P(OneEnding106, CloseDuringGiveUpBlock_NoRecord) {
     EXPECT_EQ(r.disconnected() - disconnected_before, 1U) << "new Disconnected entries";
     EXPECT_EQ(r.d.app->logouts - logouts_before, 1) << "onLogout calls";
     EXPECT_EQ(r.records(), 0U) << "give-up records";
+}
+
+// spec.md R22 (claim-ok: a clarification id): the establishment deadline expires while a
+// close(graceful) waits in LogoutSent, before the session's first Active. close() owns the ending
+// and writes no reason record (research D11), so the deadline's event and log record are that
+// ending's one reason record, and the pump's expiry closes the connection at once. The rig is
+// Od29's (inbound_frame_dispositions_test.cpp): an acceptor's Logon held in its reset unit,
+// close(graceful) spawned there, the unit released. Instants: the deadline is D = A +
+// logon_timeout_ms, A the mock clock's steady_now() at accept, which nothing advances before D. At
+// D - 1 ns no event, no record, and the close still waits; at D the event once, the record once,
+// the call returned, the transport closed. The close-at-once budget is a quarter of close()'s
+// wall-clock grace (logout_disconnect_timeout_ms), so the grace timer cannot complete the call
+// inside it; the mock logout timeout (4000 ms) is never reached. FR-017: one new Disconnected
+// entry, no onLogout (the session never reached Active). Its mutant: the pump's record gated on the
+// claim alone (run_read_pump's expire).
+TEST(OneEnding106Deadline, DuringGracefulClose_ClosesAtOnceAndRecordsOnce) {
+    constexpr std::uint32_t kLogoutTimeoutMs = 4000;
+    constexpr std::uint32_t kEstablishmentTimeoutMs = 1000;
+    static_assert(kEstablishmentTimeoutMs < kLogoutTimeoutMs,
+                  "the deadline must precede the mock-clock logout timeout");
+    // The deadline's record, spelled out here, not taken from the production call site.
+    static constexpr char kEstablishmentRecordFormat[] =
+        "session not established within logon_timeout_ms={}";
+    std::chrono::milliseconds const bound{kLogoutTimeoutMs / 4};
+    auto const step = std::chrono::milliseconds{fixpp::test_support::kHoldBound} / 4;
+
+    auto const factory = std::make_shared<fixpp::test_support::HookedStoreFactory>();
+    auto const held = std::make_shared<bool>(false);
+    auto const release = std::make_shared<bool>(false);
+    factory->hooks.on_reset = [held] { *held = true; };
+    factory->hooks.release_when = [release] { return *release; };
+    auto const store_log = factory->log;
+
+    t106::LogCapture log;
+    auto const app = std::make_shared<t106::pr::CountingApp>();
+    t106::pr::Rig rig{app};
+    auto cfg = rig.cfg(session_role::acceptor);
+    cfg.logout_disconnect_timeout_ms = kLogoutTimeoutMs;
+    cfg.logon_timeout_ms = kEstablishmentTimeoutMs;
+    cfg.store_factory = factory;
+    cfg.logger_override = log.logger;
+    auto const accepted_at = rig.clock->steady_now();
+    auto const deadline = accepted_at + std::chrono::milliseconds{kEstablishmentTimeoutMs};
+
+    bool const up = rig.start(std::move(cfg)) && rig.connect_peer();
+    if (up) {
+        rig.peer.send(rig.msg("A", 1,
+                              "98=0\x01"
+                              "108=30\x01"
+                              "141=Y\x01"));
+    }
+    bool const holding = up && rig.run_until([&] { return *held; }, step);
+    auto const s = holding ? rig.session() : nullptr;
+    bool const clock_still = rig.clock->steady_now() == accepted_at;
+
+    struct Call {
+        bool done = false;
+        std::optional<fixpp::core::expected_t<void>> result;
+    };
+    auto const graceful = std::make_shared<Call>();
+    std::size_t disconnected_before = 0;
+    auto close_called = std::chrono::steady_clock::now();
+    bool logout_sent = false;
+    if (s) {
+        disconnected_before = t106::count_disconnected(*s);
+        close_called = std::chrono::steady_clock::now();
+        asio::co_spawn(
+            s->executor().underlying(),
+            [s, graceful]() -> asio::awaitable<void> {
+                graceful->result = co_await s->close(fixpp::session::close_mode::graceful);
+                graceful->done = true;
+            },
+            asio::detached);
+        logout_sent = rig.run_until([&] { return s->state() == fsm_state::LogoutSent; }, step);
+    }
+    if (logout_sent) {
+        *release = true;
+        rig.settle();
+    }
+    auto const events_of_timeout = [&] {
+        std::size_t n = 0;
+        for (auto const& ev : s->recent_events()) {
+            n += std::holds_alternative<fixpp::session::session_event_establishment_timeout>(ev)
+                     ? 1U
+                     : 0U;
+        }
+        return n;
+    };
+    auto const records_now = [&]() -> std::optional<std::size_t> {
+        auto const r = log.flushed_records_of(FIXPP_FORMAT_ID(kEstablishmentRecordFormat));
+        if (!r) return std::nullopt;
+        return r->size();
+    };
+
+    // D - 1 ns: nothing expired.
+    bool waiting_before = false;
+    std::size_t events_before = 0;
+    std::optional<std::size_t> records_before;
+    if (logout_sent) {
+        rig.clock->step_to(deadline - 1ns);
+        rig.settle();
+        waiting_before =
+            !graceful->done && s->state() == fsm_state::LogoutSent && !rig.peer.read_ended;
+        events_before = events_of_timeout();
+        records_before = records_now();
+    }
+
+    // D: the pump's expiry.
+    auto const left = [&] {
+        auto const l = close_called + bound - std::chrono::steady_clock::now();
+        return l > std::chrono::steady_clock::duration::zero()
+                   ? l
+                   : std::chrono::steady_clock::duration::zero();
+    };
+    if (logout_sent) rig.clock->step_to(deadline);
+    bool const returned = logout_sent && rig.run_until([&] { return graceful->done; }, left());
+    bool const closed = returned && rig.run_until([&] { return rig.peer.read_ended; }, left());
+    auto const state_after = s ? s->state() : fsm_state::NotConnected;
+    auto const disconnected_after = s ? t106::count_disconnected(*s) : 0U;
+    auto const events_after = s ? events_of_timeout() : 0U;
+    bool const hold_timed_out = store_log->hold_timed_out;
+    if (!graceful->done && logout_sent) {
+        rig.clock->advance(std::chrono::milliseconds{kLogoutTimeoutMs + 1U});
+        (void)rig.run_until([&] { return graceful->done; });
+    }
+    rig.stop();
+    auto const records_after = log.records_of(FIXPP_FORMAT_ID(kEstablishmentRecordFormat)).size();
+
+    ASSERT_TRUE(holding && s && logout_sent && clock_still) << "setup";
+    EXPECT_FALSE(hold_timed_out) << "the unit was released by the cell, not by its bound";
+    EXPECT_TRUE(waiting_before) << "the graceful close still waits in LogoutSent at D - 1 ns";
+    EXPECT_EQ(events_before, 0U) << "establishment-timeout events at D - 1 ns";
+    EXPECT_EQ(records_before, std::optional<std::size_t>{0U})
+        << "establishment-timeout records at D - 1 ns (nullopt: the flush did not complete)";
+    EXPECT_TRUE(returned) << "the graceful close's call returns within the bound after D";
+    EXPECT_TRUE(graceful->result && graceful->result->has_value()) << "the graceful close's result";
+    EXPECT_TRUE(closed) << "the transport closes within the bound after D";
+    EXPECT_EQ(state_after, fsm_state::Disconnected);
+    EXPECT_EQ(disconnected_after - disconnected_before, 1U) << "new Disconnected entries";
+    EXPECT_EQ(app->logouts, 0) << "onLogout calls (the session never reached Active)";
+    EXPECT_EQ(events_after, 1U) << "establishment-timeout events at D";
+    EXPECT_EQ(records_after, 1U) << "establishment-timeout records at D";
 }
 
 INSTANTIATE_TEST_SUITE_P(BothRoles, OneEnding106,
