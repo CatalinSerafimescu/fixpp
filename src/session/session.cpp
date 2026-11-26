@@ -1259,8 +1259,8 @@ Session::live_write_serialized_(std::span<const std::byte> frame, wire_reset_exe
     // that fails fails closed, the write not started (research D3, "Spawn failure").
     // The flag's clear: explicit at each return below, and by the destructor only while an
     // exception unwinds the frame, as emit_in_flight_guard's. A frame destroyed unresumed (an
-    // io_context torn down with no close()) clears nothing, provided no other exception is
-    // unwinding the destroying thread: the destructor compares the thread's count with the one
+    // io_context torn down with no close()) does not clear the flag while the destroying thread is
+    // not already unwinding an exception: the destructor compares the thread's count with the one
     // taken at the mark. The clear does not wake the bound: at its deadline it finds the write
     // returned and parks.
     struct write_in_flight_guard {
@@ -8786,8 +8786,8 @@ asio::awaitable<void> Session::run_liveness_loop_body_(bool& adopted_bound) noex
     // so the give-up is decided at its instant whether or not the emit's write is blocked.
     // The mark is cleared explicitly at each normal exit of an emit (clear()), and by the
     // destructor only while an exception unwinds the frame. A frame destroyed unresumed (an
-    // io_context torn down with no close()) clears nothing, provided no other exception is
-    // unwinding the destroying thread: the destructor compares the thread's count with the one
+    // io_context torn down with no close()) does not clear the mark while the destroying thread is
+    // not already unwinding an exception: the destructor compares the thread's count with the one
     // taken at construction, as ending_write_unwind_guard's does.
     struct emit_in_flight_guard {
         Session& s;
