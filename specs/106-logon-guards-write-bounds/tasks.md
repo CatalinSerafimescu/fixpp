@@ -1466,12 +1466,13 @@ the `install_reconnected_transport` and `~Session` asserts (T084, T167), `Teardo
 | M4 per Logout site | T122, T123, T124 | M10 | T128 |
 | M5 | T125 | M11, M11′ | T034, T035 |
 | M6a, M6b | T067, T068 | M12 (four joiner arms) | T099 (`ConnectionEnd`), T129 |
-| M13 per site | T098, T130 | M14 | T094 |
+| M13 per site | T130 (T098's arms read there, orchestrator ruling B) | M14 | T094 |
 | M15 | T033 | the commit's result ignored | T069 |
 | an unconditional close at G | T095 | the knob's reset moved after S3 | T070 |
 | the key accepted at session scope | T037 | the key refused on an acceptor or plaintext session | T144 |
 | the spawn and wait seams | T099, T129 | the respawn deleted; its refused spawn's path deleted | T129 (arms d, e) |
-| a wake ends the bound (`SpuriousWake_NoEnding`) | T099 | | |
+| a wake ends the bound (`SpuriousWake_NoEnding`) | T099 | the two rows' order swapped (RowSwap, proposed) | T127 |
+| the refused respawn marks the cut epoch (proposed) | T129 | the normal-path clear deleted | T115 |
 
 ## Traceability: contract clauses → tasks
 
