@@ -8637,17 +8637,26 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
     }
     // 106 D3: while one of the loop's emits has not returned, the bound times it (emit_in_flight_),
     // so the give-up is decided at its instant whether or not the emit's write is blocked.
+    // The mark is cleared explicitly at each normal exit of an emit (clear()), and by the
+    // destructor only while an exception unwinds the frame: a frame destroyed unresumed (an
+    // io_context torn down with no close()) touches nothing, as ending_write_unwind_guard.
     struct emit_in_flight_guard {
         Session& s;
+        int unwinding_at = std::uncaught_exceptions();
         explicit emit_in_flight_guard(Session& session) noexcept : s{session} {
             s.emit_in_flight_ = true;
             s.wake_connection_bound_();
         }
         emit_in_flight_guard(emit_in_flight_guard const&) = delete;
         emit_in_flight_guard& operator=(emit_in_flight_guard const&) = delete;
-        ~emit_in_flight_guard() {
+        void clear() const noexcept {
             s.emit_in_flight_ = false;
             s.wake_connection_bound_();
+        }
+        ~emit_in_flight_guard() {
+            if (std::uncaught_exceptions() > unwinding_at) {
+                clear();
+            }
         }
     };
     // Set when the give-up was decided (by the loop, or by the bound during an emit) and its
@@ -8840,17 +8849,20 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                 // 019 T014: toAdmin before TestRequest. [FR-008/010]
                 // A throw → terminal-close + co_return.
                 if (!fire_to_admin_(*tr_result)) {
+                    in_flight.clear();
                     record_state_transition_(fsm_state::Disconnected);
                     co_return;
                 }
                 auto assign_r = co_await seqnum_mgr_.assign_outbound();
                 // 106 D3: a give-up the bound decided during the emit takes the loop's write half.
                 if (ending_claim_ == ending_claim::give_up) {
+                    in_flight.clear();
                     if (give_up_.closed) co_return;
                     write_give_up = true;
                     break;
                 }
                 if (!assign_r) {
+                    in_flight.clear();
                     // Overflow or closed: session-fatal per 005 data-model.md §E3
                     // (Sequence-number state). Liveness loop is fire-and-forget (no expected_t
                     // return): log by transitioning to Disconnected and stopping the loop.
@@ -8858,6 +8870,7 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                     co_return;
                 }
                 auto emit_r = co_await store_then_emit(tr_seq, *tr_result);
+                in_flight.clear();
                 if (ending_claim_ == ending_claim::give_up) {
                     if (give_up_.closed) co_return;
                     write_give_up = true;
@@ -8886,20 +8899,24 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                     // 019 T014: toAdmin before liveness Heartbeat. [FR-008/010]
                     // A throw → terminal-close + co_return.
                     if (!fire_to_admin_(*hb_result)) {
+                        in_flight.clear();
                         record_state_transition_(fsm_state::Disconnected);
                         co_return;
                     }
                     auto assign_r = co_await seqnum_mgr_.assign_outbound();
                     if (ending_claim_ == ending_claim::give_up) {
+                        in_flight.clear();
                         if (give_up_.closed) co_return;
                         write_give_up = true;
                         break;
                     }
                     if (!assign_r) {
+                        in_flight.clear();
                         record_disconnected_unless_already_();
                         co_return;
                     }
                     auto emit_r = co_await store_then_emit(hb_seq, *hb_result);
+                    in_flight.clear();
                     if (ending_claim_ == ending_claim::give_up) {
                         if (give_up_.closed) co_return;
                         write_give_up = true;
@@ -8911,6 +8928,7 @@ asio::awaitable<void> Session::run_liveness_loop_body_() noexcept {
                         co_return;
                     }
                 }
+                in_flight.clear();
             }
 
             // After an emit, or with no eligible instant reached, the loop sleeps again.
