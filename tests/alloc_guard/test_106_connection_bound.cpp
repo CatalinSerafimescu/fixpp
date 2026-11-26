@@ -17,10 +17,11 @@
 //              each Heartbeat cycle is one emit and one loop sleep, and the loop's sleep takes
 //              the per-call fallback (L-093-13) on every cycle. The window opens and closes
 //              half a cycle after a Heartbeat reaches the peer, so it holds whole cycles only.
-//              The reading is the allocation count over the window and the cycles in it, printed
-//              and not asserted: the head's counts with the limit off and on and the base's
-//              (FIXPP_106_ALLOC_BASE, read on the base tree under the same parameters) are
-//              compared by hand, over repeated runs (research D9 row R2(a), tasks.md T108).
+//              The reading is the allocation count over the window and the cycles in it. In one
+//              run the head's count with the limit on must not exceed its count with the limit
+//              off (the limit adds nothing per emit); the base's count (FIXPP_106_ALLOC_BASE,
+//              read on the base tree under the same parameters) is compared with the head's by
+//              hand, over repeated runs (research D9 row R2(a), tasks.md T108).
 //
 // TWO BINARIES FROM THIS SOURCE, 544's shape (test_544_run_thread_windows.cpp). mallocnesia.c
 // refuses a process that defines the allocator names, so the interceptor runs the build without a
@@ -397,6 +398,12 @@ TEST(Alloc106ConnectionBound, EmitHalf_PerHeartbeatCycle) {
 #if !FIXPP_106_ALLOC_BASE
     auto const on = run_emit_half(kSendLimitMs);
     expect_emit_ran(on, "emit half, limit on");
+#if FIXPP_106_COUNTS && defined(NDEBUG)
+    // A differential, not an equality: the limit-on count may read below the limit-off count
+    // under identical traffic, never above it (tasks.md T108).
+    EXPECT_LE(on.count, off.count)
+        << "emit half: the limit adds allocations per Heartbeat cycle (limit on above limit off)";
+#endif
 #endif
 }
 
