@@ -112,6 +112,34 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::check_inbound(seqn
     co_return fixpp::core::expected_t<void>{};
 }
 
+// ── classify_inbound ──────────────────────────────────────────────────────────
+//
+// 106 D2 (data-model E-2): check_inbound's lock and refusals, in its order, with no advance.
+
+asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::classify_inbound(
+    seqnum_t seq) noexcept {
+    using fixpp::core::error;
+
+    FIXPP_DETAIL_CO_AWAIT_LOCK(lk_storage, lk_result, mutex_, nullptr);
+    if (!lk_result) {
+        co_return std::unexpected(error::session_already_closed);
+    }
+    auto lk = std::move(*lk_result);
+    if (frozen_) {
+        co_return std::unexpected(error::session_already_closed);
+    }
+    if (seq < next_inbound_) {
+        co_return std::unexpected(error::session_seqnum_too_low);
+    }
+    if (seq > next_inbound_) {
+        co_return std::unexpected(error::session_seqnum_too_high);
+    }
+    if (next_inbound_ == seqnum_max) {
+        co_return std::unexpected(error::store_seqnum_overflow);
+    }
+    co_return fixpp::core::expected_t<void>{};
+}
+
 // ── assign_outbound ───────────────────────────────────────────────────────────
 //
 // Acquire the mutex, check for overflow, assign next_outbound_, advance.

@@ -133,6 +133,15 @@ public:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> check_inbound(
         seqnum_t seq) noexcept;
 
+    // classify_inbound(seq): check_inbound's classification without the advance (106 D2;
+    // data-model E-2). The same lock and refusals, each with the counter unchanged: a drained
+    // lock or a frozen manager → session_already_closed; too low → session_seqnum_too_low; too
+    // high → session_seqnum_too_high; in sequence at seqnum_max → store_seqnum_overflow; in
+    // sequence → ok. A Logon arm classifies its frame with it and commits the advance later with
+    // check_inbound, so a refusal in between consumes nothing.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> classify_inbound(
+        seqnum_t seq) noexcept;
+
     // ── Outbound assign ──────────────────────────────────────────────────────
     //
     // peek_outbound(): synchronously read the NEXT outbound counter without advancing.

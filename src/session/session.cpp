@@ -4569,9 +4569,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
     bool peer_789_present = false;
     // 029 gate-b/r1: hoisted to case scope so the persist guard at the
     // Logon persist site (below) can read it. Set to chk.has_value() after
-    // check_inbound; false on the behind-side tolerated path (chk failure)
-    // and stays false on any early-return before check_inbound executes.
+    // the classification; false on the behind-side tolerated path (chk failure)
+    // and stays false on any early-return before the classification executes.
     // [029 INV-H1 fix; triage root-cause #1/#2; contracts C3.1]
+    // 106 D2: it means "classified in sequence; consumed at the commit".
     bool logon_inbound_advanced = false;
     {
         peer_789_raw = hdr.next_expected_msg_seq_num;
@@ -4756,16 +4757,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
             co_return fixpp::core::expected_t<void>{};
         }
 
-        auto chk = co_await seqnum_mgr_.check_inbound(seq);
+        // 106 D2: classified here; the advance is committed after the 1137 block.
+        auto chk = co_await seqnum_mgr_.classify_inbound(seq);
         if (!chk) {
             // 027 T016 — behind-side tolerance (formulation A, I-NEX-5/D-7):
             // When the knob is on AND the failure is too-high (NOT too-low),
             // do NOT take the fatal branch. Leave next_inbound_ at X (the
-            // handler did not advance it — check_inbound only advances on
-            // in-sequence). Do NOT call set_next_inbound. Emit no at-logon
-            // ResendRequest. Proceed toward Active so the peer's proactive
-            // resend [X, peer_N-1] arrives in-sequence through the Active path.
-            // [contract C5, data-model I-NEX-5/12, research D-7]
+            // classification does not advance it, and no commit runs). Do NOT call
+            // set_next_inbound. Emit no at-logon ResendRequest. Proceed toward Active so the peer's
+            // proactive resend [X, peer_N-1] arrives in-sequence through the Active path. [contract
+            // C5, data-model I-NEX-5/12, research D-7]
             //
             // A too-low result takes the 104 branch below; any other refusal ends the
             // session (I-2/[FIX-SL §4.1]).
@@ -4773,7 +4774,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
                 chk.error() == fixpp::core::error::session_seqnum_too_high) {
                 // Behind-side: tolerate. next_inbound_ stays at X (not advanced).
                 // Fall through to the existing acceptor reply-build path below.
-                // logon_inbound_advanced stays false (check_inbound did not advance).
+                // logon_inbound_advanced stays false (not in sequence: no commit).
             } else if (chk.error() == fixpp::core::error::session_seqnum_too_low) {
                 // 104 (FR-012 to FR-014; research D5, D6; contract T2, T8) supersedes 103's
                 // spec row "A too-low frame in NotConnected or LogonSent still ends silently":
@@ -4792,8 +4793,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
                 co_return fixpp::core::expected_t<void>{};
             }
         } else {
-            // check_inbound succeeded: next_inbound_ advanced by 1.
-            // Record this so the persist guard below can fire correctly.
+            // Classified in sequence; consumed at the commit below (106 D2).
+            // Record this so the commit and the persist guard below can fire correctly.
             // [029 gate-b/r1; INV-H1 fix; triage root-cause #1/#2]
             logon_inbound_advanced = true;
         }
@@ -4865,6 +4866,21 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
 
     // 106 D1 supersedes 033 T023's position of the credentials gate (after the 1137 block): it
     // runs once, right after the mTLS gate (above), so a refused credential draws no 1137 Reject.
+
+    // 106 D2: the advance is committed here, so every refusal before it keeps NextNumIn (closes
+    // L-104-8); the reply's 789 reads the advanced value (F-4). From the arm's entry to here only
+    // the knob's reset and hydration change next_inbound_ (INV-106-1). A refused commit (the
+    // manager frozen or its lock drained) ends the arm Disconnected unless superseded, silently.
+    if (logon_inbound_advanced) {
+        if (commit_freeze_hook_) {
+            commit_freeze_hook_();
+        }
+        if (auto const commit = co_await seqnum_mgr_.check_inbound(parse_seqnum(hdr.msg_seq_num));
+            !commit) {
+            disconnect_unless_superseded_(fsm_state::NotConnected);
+            co_return fixpp::core::expected_t<void>{};
+        }
+    }
 
     // Valid Logon + in-seq: transition to LogonReceived, then emit
     // the acceptor's own Logon reply and transition to Active.
@@ -7367,12 +7383,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     // 029 gate-b/r1: hoisted to LogonSent case scope so the persist guard
     // below can read it. Symmetric carried-bool approach (same as acceptor).
     // [029 INV-H1 fix; triage root-cause #1/#2; contracts C3.1]
+    // 106 D2: it means "classified in sequence; consumed at the commit".
     bool logon_inbound_advanced_init = false;
 
     if (unasked_reset_ack) {
         // 104: consumed only when the acknowledgement is at 34=1 (ruling O-2).
         logon_inbound_advanced_init = seq == seqnum_min;
-    } else if (auto chk = co_await seqnum_mgr_.check_inbound(seq); !chk) {
+    } else if (auto chk = co_await seqnum_mgr_.classify_inbound(seq); !chk) {  // 106 D2
         // 027 T016 — behind-side tolerance (formulation A, I-NEX-5/D-7):
         // When the knob is on AND the failure is too-high (NOT too-low),
         // do NOT take the fatal branch. Leave next_inbound_ at X. Emit no
@@ -7402,7 +7419,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
             co_return fixpp::core::expected_t<void>{};
         }
     } else {
-        // check_inbound succeeded: next_inbound_ advanced by 1.
+        // Classified in sequence; consumed at the commit before Active (106 D2).
         // [029 gate-b/r1; INV-H1 fix; triage root-cause #1/#2]
         logon_inbound_advanced_init = true;
     }
@@ -7586,6 +7603,21 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
     // fixpp#518: a close() may have run during the 789 honour's writes.
     if (logon_arm_superseded_(fsm_state::LogonSent)) {
         co_return fixpp::core::expected_t<void>{};
+    }
+
+    // 106 D2: the advance is committed here, so every refusal before it keeps NextNumIn (closes
+    // L-104-8). A reset-ack is not committed: its unit wrote absolute targets from the
+    // classification. From the arm's entry to here only a reset unit changes next_inbound_
+    // (INV-106-1). A refused commit (the manager frozen or its lock drained) ends the arm
+    // Disconnected unless superseded, silently.
+    if (logon_inbound_advanced_init && !peer_ack_sent_reset_flag) {
+        if (commit_freeze_hook_) {
+            commit_freeze_hook_();
+        }
+        if (auto const commit = co_await seqnum_mgr_.check_inbound(seq); !commit) {
+            disconnect_unless_superseded_(fsm_state::LogonSent);
+            co_return fixpp::core::expected_t<void>{};
+        }
     }
 
     // Valid Logon-ack + in-seq → Active (initiator handshake complete).
