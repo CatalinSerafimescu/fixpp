@@ -1408,6 +1408,18 @@ public:
           }};
     std::optional<std::future<expected_void>> delivery;
     t106::steady_time_point s{};
+    // A drive_reconnect() bound to sig's slot. Members after the rig, so destroyed before it; the
+    // teardown below waits for the call to return before either is destroyed, so no completion
+    // touches the signal after it dies.
+    asio::cancellation_signal sig;
+    std::optional<std::future<expected_void>> cancellable;
+    std::future<expected_void>& cancellable_drive_reconnect() {
+        cancellable.emplace(
+            asio::co_spawn(fixpp::test_support::session_executor_of(r.session(), r.d.s.ioc),
+                           r.session().drive_reconnect(),
+                           asio::bind_cancellation_slot(sig.slot(), asio::use_future)));
+        return *cancellable;
+    }
 
     [[nodiscard]] bool logon_sent() {
         auto const opened = r.d.run(r.session().open(), "open");
@@ -1432,7 +1444,12 @@ public:
         r.d.release();
         if (delivery) (void)r.d.s.pump_until([&] { return rgs::Scene::ready(*delivery); }, 10s);
         auto closing = r.spawn(r.session().close(fixpp::session::close_mode::terminal));
-        (void)r.d.s.pump_until([&] { return rgs::Scene::ready(closing); }, 10s);
+        (void)r.d.s.pump_until(
+            [&] {
+                return rgs::Scene::ready(closing) &&
+                       (!cancellable || !cancellable->valid() || rgs::Scene::ready(*cancellable));
+            },
+            10s);
     }
 };
 
@@ -1505,11 +1522,8 @@ TEST(ConnectionBound106, DrainCancelled_RespawnsOnBlockedWrite) {
     ASSERT_TRUE(d.logon_sent()) << "setup: not in LogonSent";
     ASSERT_TRUE(d.reject_held()) << "setup: the Reject's write was not held";
     auto const disconnected_before = d.r.disconnected();
-    asio::cancellation_signal sig;
-    auto second =
-        asio::co_spawn(fixpp::test_support::session_executor_of(d.r.session(), d.r.d.s.ioc),
-                       d.r.session().drive_reconnect(),
-                       asio::bind_cancellation_slot(sig.slot(), asio::use_future));
+    auto& second = d.cancellable_drive_reconnect();
+    auto& sig = d.sig;
     ASSERT_TRUE(d.r.d.s.pump_until([&] { return d.bound_count() == 0; }, 2s))
         << "setup: the bound outlived the drain's entry";
     ASSERT_FALSE(rgs::Scene::ready(second)) << "setup: the drain did not park";
@@ -1544,11 +1558,8 @@ TEST(ConnectionBound106, DrainCancelled_RespawnFails_ClosedAtOnce) {
     ASSERT_TRUE(d.logon_sent()) << "setup: not in LogonSent";
     ASSERT_TRUE(d.reject_held()) << "setup: the Reject's write was not held";
     auto const disconnected_before = d.r.disconnected();
-    asio::cancellation_signal sig;
-    auto second =
-        asio::co_spawn(fixpp::test_support::session_executor_of(d.r.session(), d.r.d.s.ioc),
-                       d.r.session().drive_reconnect(),
-                       asio::bind_cancellation_slot(sig.slot(), asio::use_future));
+    auto& second = d.cancellable_drive_reconnect();
+    auto& sig = d.sig;
     ASSERT_TRUE(d.r.d.s.pump_until([&] { return d.bound_count() == 0; }, 2s))
         << "setup: the bound outlived the drain's entry";
     session_test_access::set_connection_bound_spawn_fails(d.r.session(), [] { return true; });
@@ -1565,10 +1576,9 @@ TEST(ConnectionBound106, DrainCancelled_RespawnFails_ClosedAtOnce) {
     ASSERT_TRUE(rgs::Scene::ready(*d.delivery)) << "the Reject's delivery did not return";
     auto const dr = d.delivery->get();
     d.delivery.reset();
-    if (!dr) {
-        EXPECT_EQ(dr.error(), fixpp::core::error::dispatch_aborted)
-            << "the Reject's error " << static_cast<int>(dr.error());
-    }
+    ASSERT_FALSE(dr.has_value()) << "the Reject's delivery succeeded";
+    EXPECT_EQ(dr.error(), fixpp::core::error::dispatch_aborted)
+        << "the Reject's error " << static_cast<int>(dr.error());
     session_test_access::set_connection_bound_spawn_fails(d.r.session(), nullptr);
 }
 
@@ -1586,9 +1596,8 @@ TEST_P(WriteLimit106, ShippingClock106_DirectDriver_BoundBesideLiveness_TestRequ
     p.heartbeat = 2s;
     p.write_ms = 200;
     p.logout_ms = 2000;
-    Rig r{GetParam(), p, [](SessionConfig& c) {
-              c.sending_time_threshold = std::chrono::hours{24 * 365 * 10};
-          }};
+    Rig r{GetParam(), p,
+          [](SessionConfig& c) { c.sending_time_threshold = std::chrono::hours{24 * 365 * 10}; }};
     auto& sc = r.d.s;
     sc.engine.clock = std::make_shared<fixpp::core::system_clock_source>(sc.ioc.get_executor());
     sc.session = std::make_unique<fixpp::session::Session>(sc.engine, sc.cfg);
@@ -1624,7 +1633,10 @@ TEST_P(WriteLimit106, ShippingClock106_DirectDriver_BoundBesideLiveness_TestRequ
     auto const t = 2400ms;
     std::deque<std::string> payloads;
     auto const send_on_session = [&](std::string id) {
-        payloads.push_back("35=D\x01" "11=" + id + "\x01");
+        payloads.push_back(
+            "35=D\x01"
+            "11=" +
+            id + "\x01");
         auto const& pl = payloads.back();
         return asio::co_spawn(sess.executor(),
                               sess.send(std::as_bytes(std::span{pl.data(), pl.size()})),
