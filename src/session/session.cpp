@@ -4500,7 +4500,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
                 // arm (logon_reject_disconnects_), the consuming gate admits the identity before
                 // the write (N-13.2); where it stays in the arm, nothing is consumed, so the next
                 // Logon meets the full gate (F-2).
-                if (logon_identity_refuses_(frame, /*consume=*/true) ||
+                if (logon_identity_refuses_(frame) ||
                     (logon_reject_disconnects_(hdr, v.reject.ref_tag_id) &&
                      !logon_identity_admitted_())) {
                     record_state_transition_(fsm_state::Disconnected);
@@ -7125,7 +7125,7 @@ bool Session::logon_identity_admitted_() noexcept {
 // them). The credentials half calls interpret_logon here, so its result stays in this frame, and
 // treats any interpret_logon refusal as unreadable credentials: refused only when a validator would
 // have judged them (B-106-1).
-bool Session::logon_identity_refuses_(std::span<const std::byte> frame, bool consume) {
+bool Session::logon_identity_refuses_(std::span<const std::byte> frame) {
     bool refused = mtls_gate_applies_() &&
                    (!live_peer_id_.has_value() || !authorize_live_identity_().has_value());
     if (!refused && cfg_.role == session_role::acceptor) {
@@ -7135,7 +7135,7 @@ bool Session::logon_identity_refuses_(std::span<const std::byte> frame, bool con
         refused = logon ? !logon_credentials_admitted_(*logon)
                         : cfg_.compid_authorization_policy.has_logon_validator();
     }
-    if (refused && consume) {
+    if (refused) {
         // The consuming form, for its event and the one-shot consumption (data-model E-1): the
         // failure event when the mTLS half refused, the bound event when only the credentials
         // half did; nothing on a session the mTLS gate does not apply to.
@@ -7223,7 +7223,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
                 // 106 D1 supersedes 104 DQ-6 / L-104-3 (answers before the gates): as in the
                 // acceptor's arm, the Reject is held until the identity is known (research D1
                 // item 2); on the initiator only the mTLS half applies.
-                if (logon_identity_refuses_(frame, /*consume=*/true) ||
+                if (logon_identity_refuses_(frame) ||
                     (logon_reject_disconnects_(hdr, v.reject.ref_tag_id) &&
                      !logon_identity_admitted_())) {
                     record_state_transition_(fsm_state::Disconnected);

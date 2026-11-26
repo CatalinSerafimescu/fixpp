@@ -1493,10 +1493,9 @@ private:
     // no event and nothing consumed; the credentials half (the acceptor, whatever its security
     // profile) reads Username(553) and Password(554) through interpret_logon, refuses what
     // authorize_logon refuses, and refuses a frame interpret_logon refuses when
-    // has_logon_validator(). With `consume` set, a refusal then runs the consuming mTLS gate, for
-    // its event. Its locals stay in its own frame, so none enters an arm's coroutine frame (104
-    // T093).
-    [[nodiscard]] bool logon_identity_refuses_(std::span<const std::byte> frame, bool consume);
+    // has_logon_validator(). A refusal then runs the consuming mTLS gate, for its event. Its
+    // locals stay in its own frame, so none enters an arm's coroutine frame (104 T093).
+    [[nodiscard]] bool logon_identity_refuses_(std::span<const std::byte> frame);
     // 106: the mTLS gate's one authorize computation, which logon_identity_admitted_() and
     // logon_identity_refuses_() share. Precondition: live_peer_id_ holds a value.
     [[nodiscard]] fixpp::core::expected_t<fixpp::session::bound_principal>
