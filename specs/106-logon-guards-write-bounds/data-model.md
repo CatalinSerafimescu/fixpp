@@ -112,8 +112,8 @@ end, what it waits on, and the exit term only it sets. Re-derive: `git grep -n '
 | waiting | the wait threw, or a deadline arm completed before its instant | exit | with the claim taken, nothing: no close, no record (the claimant owns the ending, R10); with it free, claim, `Disconnected`, close once (E-5 step 5's form); no record, no Logout |
 
 The rows are binding in order (N-7). A re-test reads the effective clock once and evaluates every row against that one reading, on either wait branch, so "due at one re-test" means both instants are at or before that reading. At one re-test with both due, the give-up row is evaluated first (its Logout is
-the more informative ending, and 105's limit still cuts it); the write row then finds the claim taken
-(`OneEnding106.BothDueAtOneWake`).
+the more informative ending, and 105's limit still cuts it); that row's action is the bound's exit, so the write row is
+not evaluated at that re-test (`OneEnding106.BothDueAtOneWake`; its arm is RowSwap, the rows' order swapped, spec.md R18).
 
 `decide_give_up_()` is one function for the loop's give-up block and the bound. It takes the claim, writes the slot-74
 record, takes the Logout owner and calls `enter_ending_write_(r1)`. The write half stays in the loop: the replay-gate

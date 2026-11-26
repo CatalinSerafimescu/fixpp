@@ -1347,7 +1347,8 @@ TEST_P(OneEnding106, CloseThenWatchdog) {
 // BothDueAtOneWake (data-model E-3, the rows' order at one re-test): the loop's TestRequest held in
 // its store call until S = G − W, then its write held, so the bound is armed on both G = L + 3T + 1
 // ns and S + W = G; one step_to from G − 1 ms to G (the Instants rule's one exception): the give-up
-// row is evaluated first and claims; the write row finds the claim taken.
+// row is evaluated first and claims, and its action is the bound's exit, so the write row is not
+// evaluated at that re-test (spec.md R18; the arm is the rows' order swapped).
 TEST_P(OneEnding106, BothDueAtOneWake) {
     auto gate = std::make_shared<t105::gate_store_state>();
     Rig r{GetParam(),

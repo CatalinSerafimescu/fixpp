@@ -866,7 +866,7 @@ not name.
   `ResendRequest`, `HeartbeatReply`, `BusinessReject`, `ReplyLogon`); the loop's emits have no caller, and the walk's
   frames (`ResendFrame`, `SequenceReset`, `Honor789Frame`) return through `replay_outbound_range_`'s own result, which keeps
   `dispatch_aborted` (its contract), so those classes assert the record, the close and FR-017 only. Readings: evidence file,
-  "Phase 6".
+  "Phase 6". The pre-Active substitution is accepted (orchestrator ruling 5 on the Phase 6 report; research D9 row FR-010).
 - [X] T101 [US4] `tests/session/test_106_seams.cpp`: The spurious-hit arm of every `WriteTimeout106.<Class>` cell (research D9 row "FR-010 spurious"):
   the same rig with `write_timeout_ms` 0, still open at S + 1.3 s (margins 200 ms and 500 ms against the TestRequest and
   give-up instants; pre-Active, before `logon_timeout_ms` 10 s); spec US4 scenario 3.
@@ -897,11 +897,11 @@ not name.
   MsgSeqNum below NextNumIn; the posture-mismatch refusal; the LogonSent stale-SendingTime Logout; the too-high 789
   Logout), each with B = 500 ms > W = 300 ms: no write-timeout record at S + W and the cut at S + B. GREEN at H4; no site is
   named unheld.
-- [ ] T105 [US4] `tests/session/test_106_seams.cpp`: The `OneEnding106.<First>Then<Second>` pairs with the limit set (research D9 row FR-017; contract
+- [X] T105 [US4] `tests/session/test_106_seams.cpp`: The `OneEnding106.<First>Then<Second>` pairs with the limit set (research D9 row FR-017; contract
   C-4.6), GiveUp106's H = T = 10 s, W = 300 ms, B = 500 ms unless stated, each with the suspension point it exercises and
   FR-017: `OneEnding106.GiveUpThenWatchdog` (S = G − 100 ms; G < S + W < G + B); `OneEnding106.WatchdogThenGiveUp` (S = G − 500 ms;
-  guard: the loop fails `liveness_may_originate_()`); `OneEnding106.WatchdogThenEndingLimit` (R-2 decision at D = S + 100 ms; guard:
-  the later R-2 leaf returns at its state test); `OneEnding106.EndingLimitThenWatchdog` (W = 1 s; D + B = S + 600 ms < S + 1 s);
+  guard: the loop fails `liveness_may_originate_()`); `OneEnding106.WatchdogThenEndingLimit` (R-2 decision at D = S + 100 ms; counted,
+  spec.md R18); `OneEnding106.EndingLimitThenWatchdog` (W = 1 s; D + B = S + 600 ms < S + 1 s; guard, spec.md R18);
   `OneEnding106.WatchdogThenClose` (C = S + W + 100 ms; guard: `close()` takes no claim); `OneEnding106.CloseThenWatchdog` (C = S + 100 ms;
   `close()`'s grace a wall-clock timer, B = 5000 ms, the mock step issued at once); `OneEnding106.BothDueAtOneWake` (the
   loop in its TestRequest emit, that write armed, S = G − W, one `step_to` from G − 1 ms to G: the give-up claims, R9);
@@ -916,6 +916,9 @@ not name.
   needs an Engine acceptor's reply Logon write held, the T074 wall (ruling A dropped T074's twin); not written. Candidate
   for the orchestrator: an Engine initiator whose write is held inside `on_inbound_logon_sent_` (a 789 resend frame or a
   Logon-arm Reject), which is a different stimulus from the one research D9 names.
+  **Disposition (orchestrator ruling 1 on the Phase 6 report):** `Watchdog_PreActive_NoEstablishmentRecord` is dropped, for
+  T074's reason (no seam holds the Engine acceptor's own write); it is on T167's and research D9's no-cell list. The R-2
+  pairs' labels follow spec.md R18.
 - [X] T106 [US4] `tests/session/test_106_seams.cpp`: The connection-bound cells that need a write armed (research D9 row C-4; data-model E-3's joiner
   table), each [seam]: `ConnectionBound106.SpawnFails_AtWrite` (the write is not started and returns
   `dispatch_aborted`; claim, `Disconnected`, closed once, zero records); `ConnectionBound106.Teardown_Drain_Parked` (a
@@ -941,7 +944,8 @@ not name.
   DrainCancelled_RespawnFails_ClosedAtOnce}` on a direct initiator whose validate-first Reject (an acknowledgement without
   EncryptMethod(98)) is held in LogonSent. `Teardown_Drain_Parked` reads the old bound's count at the new connection's first
   spawn of the bound (the spawn seam as an observer): with the limit on, the reconnected Logon spawns the new connection's
-  bound, so the counter itself does not read 0 after the second `drive_reconnect()` returns. GREEN at H4.
+  bound, so the counter itself does not read 0 after the second `drive_reconnect()` returns. GREEN at H4. That substitution
+  is accepted (orchestrator ruling 5 on the Phase 6 report; research D9 row C-4).
 - [X] T107 [US4] `tests/session/test_106_seams.cpp`: `ShippingClock106.DirectDriver_BoundBesideLiveness_TestRequestAtT` [seam: M8] (research D9 row R2(b);
   placed in plan P3, written here because its rig needs D5's write arming): `system_clock_source`, the coroutines on
   `session->executor()`, HeartBtInt 2 s (T = 2.4 s), W = 200 ms, B = 2000 ms; app sends every 300 ms, the peer silent;
@@ -1030,12 +1034,21 @@ not name.
   `-L config`, `capi_pure_tests` (the C-ABI error entries) GREEN; `codegraph sync` run. The mallocnesia cell waits on T108.
 ### Mutant and spurious-hit arms for US4 (in `$M` at `H4`)
 
-- [ ] T118 [US4] In `$M`'s `src/session/session.cpp`: M3: `write_started_at_` taken before the `write_gate_` acquire; RED:
+- [X] T118 [US4] In `$M`'s `src/session/session.cpp`: M3: `write_started_at_` taken before the `write_gate_` acquire; RED:
   `WriteTimeout106.QueuedWrite_CountsFromItsOwnStart`, `WriteTimeout106.ResendWalk_ProgressNotCut`.
   **Stopped (a cell expected RED read GREEN, to the orchestrator):** under M3 `QueuedWrite_CountsFromItsOwnStart` reads RED
   (both roles); `ResendWalk_ProgressNotCut` reads GREEN (both roles): the walk's frames take the write gate uncontended, so
   a start read before the gate's acquire equals the start read at `async_write`; that cell cannot see M3, and it stays GREEN
   under T115's arm too. What it keeps is the walk's progress under the limit (spec US4 scenario 2).
+  **Done (orchestrator ruling 2 on the Phase 6 report):** `ResendWalk_ProgressNotCut` is reclassified as a guard; M3 is
+  equivalent there by construction. Proof (symbols): `replay_outbound_range_` constructs its
+  `detail::replay_gate::exclusive_guard` before its first frame and waits while `replay_gate_.shared` is non-zero; every
+  emitter that writes outside the walk (`send_body_`, the liveness loop's emits, `store_then_emit`'s numbered path) waits
+  while `replay_gate_.exclusive` holds and takes a shared hold before its write; and the walk runs inside the inbound arm
+  that drew it, so no inbound reply is written beside it. So no other write holds or requests `write_gate_` during the
+  walk, each frame's `write_gate_.async_lock()` is granted without suspending, and the start M3 reads before the acquire
+  is the start the head reads after the grant. Re-derive with `git grep -n 'replay_gate_' -- src/session/session.cpp`.
+  `QueuedWrite_CountsFromItsOwnStart` stays M3's counted cell (RED, both roles).
 - [X] T119 [US4] In `$M`'s `src/session/session.cpp`: M3′: the bound's write arming deleted; RED: every `WriteTimeout106.<Class>` cell.
   **Done**: M3′ (the write's flag not set) RED on every `WriteTimeout106.CutAtTheLimit` cell, both roles (evidence file).
 - [ ] T120 [US4] In `$M`'s `src/session/session.cpp`: M3″: the expiry does not set `write_cut_epoch_`; RED: every `WriteTimeout106.<Class>` cell (the cut call
@@ -1067,9 +1080,9 @@ not name.
   2T", no abort. The literal form (`await_deadline` alone, no timer) also reads "no TestRequest by 2T" but then aborts at
   `~Session`'s connection-bound assertion (the bound can no longer be woken), so it is not counted. The mallocnesia half
   waits on T108.
-- [ ] T127 [US4] In `$M`'s `src/session/session.cpp`: M9 with M9′ over the T105 pairs whose second decider reaches `claim_ending_` or the bound's
+- [X] T127 [US4] In `$M`'s `src/session/session.cpp`: M9 with M9′ over the T105 pairs whose second decider reaches `claim_ending_` or the bound's
   taken-claim exit; `CloseThenWatchdog` under M9 with the closing term deleted from E-3's exit row; RED: two reasons or
-  two entries. The guards (`WatchdogThenEndingLimit`, `WatchdogThenGiveUp`, `WatchdogThenClose`, `GiveUpThenClose`) are
+  two entries. The guards (`EndingLimitThenWatchdog`, `WatchdogThenGiveUp`, `WatchdogThenClose`, `GiveUpThenClose`; spec.md R18) are
   not counted; a pair GREEN under every arm is reported as vacuous.
   **Stopped (the bundle's guard labels contradict the code, to the orchestrator):** under M9 with M9′,
   `GiveUpThenWatchdog` and `WatchdogThenEndingLimit` read RED and `EndingLimitThenWatchdog` GREEN (both roles): T080 has the
@@ -1080,9 +1093,17 @@ not name.
   GREEN under M9 with M9′ (the bound leaves after the give-up row's decision, so the write row is never evaluated at that
   re-test); the arm that reaches its property, the two rows' order swapped (arm `RowSwap`), reads RED, both roles. The guards
   `WatchdogThenGiveUp`, `WatchdogThenClose` and `GiveUpThenClose` read GREEN, as stated.
-- [ ] T128 [US4] In `$M`'s `src/session/engine.cpp`: M10, alone (without M9): the pump races `on_inbound_frame` against the establishment deadline; RED:
+  **Done (orchestrator ruling 4 on the Phase 6 report; spec.md R18):** the code is followed. The bundle's labels are
+  swapped to match the observed winners: `WatchdogThenEndingLimit` is counted (RED under M9 with M9′, both roles) and
+  `EndingLimitThenWatchdog` is a guard (GREEN, as a guard reads); `BothDueAtOneWake`'s arm is RowSwap (RED, both roles) in
+  place of M9 with M9′. `CloseThenWatchdog`: RED under M9 with the closing term. Research D9 row FR-017, data-model E-3,
+  quickstart section 4 and the cell's comment read so.
+- [X] T128 [US4] In `$M`'s `src/session/engine.cpp`: M10, alone (without M9): the pump races `on_inbound_frame` against the establishment deadline; RED:
   `OneEnding106.Watchdog_PreActive_NoEstablishmentRecord` (an establishment record and no write-timeout record).
   **Stopped:** its cell (`OneEnding106.Watchdog_PreActive_NoEstablishmentRecord`, T105) is not written.
+  **Disposition (orchestrator ruling 1 on the Phase 6 report):** M10 has no cell by construction: its only cell needs the
+  Engine acceptor's reply Logon write held, and no seam holds the Engine acceptor's own write (T074's reason). Recorded so
+  in the evidence file's mutant table and in research D9's carrier table.
 - [X] T129 [US4] In `$M`'s `src/session/session.cpp`: M12, one arm per joiner of data-model E-3's table: (a) the drain's entry wake and its
   `reconnect_drain_in_flight_` term deleted — RED `Teardown_Drain_Parked` and `Teardown_Drain_Timing` by the counter (never
   a hang); (b) the `Disconnected` edge's wake deleted — RED `Teardown_ConnectionEnd_Timing`; (c) the drain term and
@@ -1324,7 +1345,8 @@ labelled push in the final sign-off order. One build or ctest at a time througho
   `install_reconnected_transport` and `~Session` asserts, the `Engine::stop()` term's decision side, which data-model E-3
   names defensive or seamless; and `L-106-f`'s guard `GiveUp106.PreActive_LimitOff_NotCutByEstablishment`, dropped by
   orchestrator ruling A because no seam can block the Engine's own accept-path write, its basis the code reading in the
-  evidence file's T074 section), or escalated to a filed, labelled issue, in
+  evidence file's T074 section; and `OneEnding106.Watchdog_PreActive_NoEstablishmentRecord`, dropped by ruling 1 on the
+  Phase 6 report for the same reason, so M10 has no cell), or escalated to a filed, labelled issue, in
   `.specify/decisions/106-logon-guards-write-bounds-verify.md`.
 - [ ] T168 **(orchestrator)** windows-msvc-debug in `/mnt/c/temp/fixpp`, after taking `.sandbox-lock` (PARENT
   `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md` Step 0), never at the same time as a Linux build: build
@@ -1463,7 +1485,7 @@ the `install_reconnected_transport` and `~Session` asserts (T084, T167), `Teardo
 | M3′ | T119 | M9 with M9′ | T097, T127 |
 | M3″ | T120 | M9 with the closing term | T127, T123 |
 | M3‴ | T121 | M9″ | T096 |
-| M4 per Logout site | T122, T123, T124 | M10 | T128 |
+| M4 per Logout site | T122, T123, T124 | M10 (no cell by construction) | T128 |
 | M5 | T125 | M11, M11′ | T034, T035 |
 | M6a, M6b | T067, T068 | M12 (four joiner arms) | T099 (`ConnectionEnd`), T129 |
 | M13 per site | T130 (T098's arms read there, orchestrator ruling B) | M14 | T094 |
@@ -1471,7 +1493,7 @@ the `install_reconnected_transport` and `~Session` asserts (T084, T167), `Teardo
 | an unconditional close at G | T095 | the knob's reset moved after S3 | T070 |
 | the key accepted at session scope | T037 | the key refused on an acceptor or plaintext session | T144 |
 | the spawn and wait seams | T099, T129 | the respawn deleted; its refused spawn's path deleted | T129 (arms d, e) |
-| a wake ends the bound (`SpuriousWake_NoEnding`) | T099 | the two rows' order swapped (RowSwap, proposed) | T127 |
+| a wake ends the bound (`SpuriousWake_NoEnding`) | T099 | the two rows' order swapped (RowSwap; spec.md R18) | T127 |
 | the refused respawn marks the cut epoch (proposed) | T129 | the normal-path clear deleted | T115 |
 
 ## Traceability: contract clauses → tasks
