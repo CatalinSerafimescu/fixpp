@@ -1805,6 +1805,29 @@ TEST(TomlHandshake106, AcceptorKey_WrongType) {
     }
 }
 
+// tasks.md T167 (Phase 10 ruling 3): a session whose `transport` is a scalar, not a table. The
+// handshake check (check_transport_handshake_timeouts) skips it, and resolve_transport refuses the
+// load for the missing [session.transport] table; no diagnostic names the handshake key. The
+// template's [session.transport] table is cut out, so the session's one `transport` key is the
+// scalar. [guard] on the base, which has no handshake check.
+TEST(TomlHandshake106, TransportNotATable_RefusedByTheTransportCheck) {
+    using RC = fixpp::config::reason_class;
+    std::string text = toml106::bundle(in_session("transport = \"tls\""));
+    auto const from = text.find("[session.transport]");
+    auto const to = text.find("[session.security_profile]");
+    ASSERT_TRUE(from != std::string::npos && to != std::string::npos && from < to)
+        << "setup: the template's transport table was not found";
+    text.erase(from, to - from);
+    auto const result = toml106::load_text(text);
+    ASSERT_FALSE(result.has_value()) << "the bundle loaded";
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[0].transport.kind"))
+        << "no missing_required on session[0].transport.kind; got" << toml106::seen(result);
+    for (auto const& d : result.error()) {
+        EXPECT_EQ(d.key_path.find("tls_handshake_timeout_ms"), std::string::npos)
+            << "a diagnostic names the handshake key: " << d.key_path;
+    }
+}
+
 // [guard] on the base (the key is unknown at every scope there); its mutant accepts the key at
 // session scope (tasks.md T037). A valid value, so only the scope can refuse it.
 TEST(TomlHandshake106, AcceptorKey_AtSessionScope_Refused) {
