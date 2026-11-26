@@ -4142,9 +4142,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logout_leaf_(
         }
         co_return fixpp::core::expected_t<void>{};
     }
-    // 106 D11 (row 3): an ending Logout other than R-1 takes the ending claim before the owner;
-    // a refused claim writes nothing. R-1's Logout writes under the give-up's claim.
-    if (kind != ending_kind::r1 && !claim_ending_(ending_claim::ending_logout)) {
+    // 106 D11 (row 3; spec.md R21): an ending Logout other than R-1 takes the ending claim before
+    // the owner. A refused claim writes nothing for a Logout fixpp starts (kind r2); the reply to
+    // the peer's Logout (kind reply) is written whatever the claim's outcome, as the base writes
+    // it (B-103-15): a lost claim suppresses only the loser's reason record and its Disconnected
+    // entry. R-1's Logout writes under the give-up's claim.
+    if (kind != ending_kind::r1 && !claim_ending_(ending_claim::ending_logout) &&
+        kind != ending_kind::reply) {
         co_return fixpp::core::expected_t<void>{};
     }
     logout_in_flight_ = true;
