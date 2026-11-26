@@ -190,7 +190,7 @@ shows). Re-derived at HEAD. **Blocks every later phase.**
   `on_inbound_logon_sent_` from their `check_inbound` call to `record_state_transition_(fsm_state::Active)`, listing every
   `co_return`. The S3 Reject of both arms must appear. Compare the list with research D2's table row by row; a return
   with no row is added to the table (orchestrator) and to T056 / T057.
-- [ ] T009 [P] Pinned consumed numbers (D9; FR-007 census): `git grep -nE 'next_in\(\)|next_inbound' -- tests/session/test_099_*.cpp tests/session/test_104_*.cpp`,
+- [X] T009 [P] Pinned consumed numbers (D9; FR-007 census): `git grep -nE 'next_in\(\)|next_inbound' -- tests/session/test_099_*.cpp tests/session/test_104_*.cpp`,
   read for assertions after a refusal ending (first candidate `W5Scan.NextNumInIsTheHeadersAndNoReset` in
   `tests/session/test_099_establishment.cpp`); then the FR-007 recipe
   `grep -n 'r.open()' tests/session/test_104_logon_too_low.cpp` plus each acceptor cell there ending at a gate refusal,
@@ -305,11 +305,11 @@ US5).
 
 ### RED cells for the foundations (write first)
 
-- [ ] T024 [P] `tests/capi/expected_error_map.csv`: add the row `session_write_timeout,FIXPP_ERR_TRANSPORT_IO`
+- [X] T024 [P] `tests/capi/expected_error_map.csv`: add the row `session_write_timeout,FIXPP_ERR_TRANSPORT_IO`
   (data-model E-8), and read `tests/capi/error_surface_test.cpp`'s error-map cell at the head before T028: it must fail
   by assertion (the row names an enumerator the enum lacks), not by a compile error. [seam: M15] for the mapping itself
   (T033).
-- [ ] T025 [P] `tests/config/test_load_negative_battery.cpp`: Config refusal cells (compile on the base; T003's placement): `TomlWriteTimeout106.OutOfRange` and
+- [X] T025 [P] `tests/config/test_load_negative_battery.cpp`: Config refusal cells (compile on the base; T003's placement): `TomlWriteTimeout106.OutOfRange` and
   `TomlWriteTimeout106.WrongType` (contract C-4.7; `OutOfRange` covers −1 and `UINT32_MAX` + 1, each `out_of_range`; `WrongType` a string and a
   float, each `malformed_value`, Q4); `TomlHandshake106.OutOfRange` and `TomlHandshake106.WrongType` for `[session.transport].tls_handshake_timeout_ms`
   (contract C-5.1; `OutOfRange` covers 0, −1 and `UINT32_MAX` + 1); `TomlHandshake106.AcceptorKey_OutOfRange`,
@@ -322,7 +322,7 @@ US5).
   `[session.transport]` or `[default.transport]`, and `build_tls_factory` always uses a default `Transport::Config
   t_cfg{}`; `AtSessionScope_Refused` is [guard] on the base (unknown there too) and
   RED under its mutant (T037).
-- [ ] T026 [P] Seam cells in `tests/session/test_106_seams.cpp`: `TomlWriteTimeout106.Set` [seam: M11] (the
+- [X] T026 [P] Seam cells in `tests/session/test_106_seams.cpp`: `TomlWriteTimeout106.Set` [seam: M11] (the
   resolved `SessionConfig::write_timeout_ms` equals the key, set in a `[[session]]` table and, separately, in
   `[default]`); `TomlWriteTimeout106.KeyAbsent_Off` [seam: M11′] (a bundle with no key resolves `write_timeout_ms == 0`,
   and `SessionConfig{}.write_timeout_ms == 0`; exact equality); `TomlHandshake106.AcceptorKeyAbsent_Default1500` [seam:
@@ -330,30 +330,30 @@ US5).
   `EngineConfig` the cell copies from it reads 1500 ms, and `EngineConfig{}.acceptor_tls_handshake_timeout` and
   `fixpp::config::EngineEstablishment{}.acceptor_tls_handshake_timeout` are each 1500 ms; exact equality, since
   `EngineFirstFramePhaseATls.Q17_*` accepts a window). They compile only after T029.
-- [ ] T027 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C1`); read T025 on `$B` (the config binary, overlaid) and T024 at the
+- [X] T027 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: Commit the cells (`C1`); read T025 on `$B` (the config binary, overlaid) and T024 at the
   head; record per cell the RED reason or guard status and the test count.
 
 ### Implementation for the foundations
 
-- [ ] T028 `include/fixpp/core/error.hpp`: `session_write_timeout = 136` appended after `wire_undefined_tag` (`[const §X.4]`:
+- [X] T028 `include/fixpp/core/error.hpp`: `session_write_timeout = 136` appended after `wire_undefined_tag` (`[const §X.4]`:
   append-only, no numeric reuse) with its `error_message` text of data-model E-8; `src/capi/error.cpp`: `translate` maps
   it to the existing `FIXPP_ERR_TRANSPORT_IO` (no new C constant; the occupancy file untouched); every site T013
   listed is updated in the same commit, so no exact-set gate goes red. T024 GREEN; `-L capi`'s error entries
   GREEN.
-- [ ] T029 Layout (C++ BREAKING, data-model E-9): `include/fixpp/session/session_config.hpp`
+- [X] T029 Layout (C++ BREAKING, data-model E-9): `include/fixpp/session/session_config.hpp`
   `SessionConfig::write_timeout_ms` (`std::uint32_t`, default 0 = off, Doxygen naming contract C-4.1: no C setter);
   `include/fixpp/core/engine_config.hpp` `EngineConfig::acceptor_tls_handshake_timeout` and
   `include/fixpp/config/config_bundle.hpp` `EngineEstablishment::acceptor_tls_handshake_timeout` (each
   `std::chrono::milliseconds{1500}`, Doxygen naming contract C-5.2). Every size pin T006 found is updated or
   shown unaffected.
-- [ ] T030 TOML plumbing (data-model E-7): `src/config/toml_config_loader.cpp` `kRecognized` gains `write_timeout_ms` and
+- [X] T030 TOML plumbing (data-model E-7): `src/config/toml_config_loader.cpp` `kRecognized` gains `write_timeout_ms` and
   `acceptor_tls_handshake_timeout_ms`, and the session-scope refusal of the root key; `src/config/scalar_mappers.cpp` the
   `write_timeout_ms` mapper (`logon_timeout_ms`'s shape: `out_of_range` outside `uint32`, `malformed_value` for another
   type); `src/config/selector_resolver.cpp` the root key into `EngineEstablishment::acceptor_tls_handshake_timeout` (> 0,
   same checks) and the range and type checks of `[session.transport].tls_handshake_timeout_ms` and
   `[default.transport].tls_handshake_timeout_ms` (0 < v ≤ `UINT32_MAX`). Feeding the latter into the factory is US5's
   (T135). T025 and T026 GREEN; `-L config` GREEN.
-- [ ] T031 Test seams (research D9, data-model E-3): in `include/fixpp/session/session.hpp` the
+- [X] T031 Test seams (research D9, data-model E-3): in `include/fixpp/session/session.hpp` the
   `std::function<bool()>` members `connection_bound_spawn_fails_` and `connection_bound_wait_throws_` (105's
   `ending_bound_spawn_fails_` / `ending_bound_race_throws_` shape) and the commit-freeze hook of
   `NextNumIn106.CommitRefused_Disconnected` (a `std::function<void()>` run between the classification and the commit);
@@ -361,19 +361,19 @@ US5).
   `set_connection_bound_wait_throws`, the freeze setter), the hooks only: the reads of `ending_claim_` and of the
   connection bound's counter land with those members (T078, T083), so `H0` compiles. The seams' call sites land with their mechanisms (T064, T083). A seam reached
   by no cell is a defect (each is named in research D9).
-- [ ] T032 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: At the head: `-L config`, the C-ABI error entries and `session_106_seam_tests` (T026) GREEN; record
+- [X] T032 `.specify/decisions/106-logon-guards-write-bounds-evidence.md`: At the head: `-L config`, the C-ABI error entries and `session_106_seam_tests` (T026) GREEN; record
   counts. Commit `H0`.
 
 ### Mutant arms for the foundations (in `$M` at `H0`)
 
-- [ ] T033 In `$M`'s `src/capi/error.cpp`: M15: `translate` maps `session_write_timeout` to `FIXPP_ERR_CANCELLED`; RED: the error-map cell of
+- [X] T033 In `$M`'s `src/capi/error.cpp`: M15: `translate` maps `session_write_timeout` to `FIXPP_ERR_CANCELLED`; RED: the error-map cell of
   `tests/capi/error_surface_test.cpp` over the CSV row.
-- [ ] T034 In `$M`'s `src/config/scalar_mappers.cpp`: M11: the `write_timeout_ms` mapper recognises the key and drops its value; RED: `TomlWriteTimeout106.Set`.
-- [ ] T035 In `$M`'s `include/fixpp/session/session_config.hpp`: M11′: `SessionConfig::write_timeout_ms`'s default changed to 300 ms; RED: `TomlWriteTimeout106.KeyAbsent_Off`.
-- [ ] T036 In `$M`'s `include/fixpp/config/config_bundle.hpp` and `include/fixpp/core/engine_config.hpp`: M7⁗, two arms run separately: `EngineEstablishment::acceptor_tls_handshake_timeout`'s default changed to 0 ms,
+- [X] T034 In `$M`'s `src/config/scalar_mappers.cpp`: M11: the `write_timeout_ms` mapper recognises the key and drops its value; RED: `TomlWriteTimeout106.Set`.
+- [X] T035 In `$M`'s `include/fixpp/session/session_config.hpp`: M11′: `SessionConfig::write_timeout_ms`'s default changed to 300 ms; RED: `TomlWriteTimeout106.KeyAbsent_Off`.
+- [X] T036 In `$M`'s `include/fixpp/config/config_bundle.hpp` and `include/fixpp/core/engine_config.hpp`: M7⁗, two arms run separately: `EngineEstablishment::acceptor_tls_handshake_timeout`'s default changed to 0 ms,
   then to 2500 ms; and, separately, `EngineConfig::acceptor_tls_handshake_timeout`'s default changed; RED in each:
   `TomlHandshake106.AcceptorKeyAbsent_Default1500`.
-- [ ] T037 In `$M`'s `src/config/toml_config_loader.cpp`: The root key accepted at session scope (the refusal in `toml_config_loader.cpp` deleted); RED:
+- [X] T037 In `$M`'s `src/config/toml_config_loader.cpp`: The root key accepted at session scope (the refusal in `toml_config_loader.cpp` deleted); RED:
   `TomlHandshake106.AcceptorKey_AtSessionScope_Refused`.
 - [x] T037a **(orchestrator)** Article X §6 `/plan` sign-off: owner pre-approved the plan 2026-11-25 (autonomous
   end-to-end delegation); record in plan.md (Constitution Check, row XII §9, XI §7, X §6) with the date, the words and
