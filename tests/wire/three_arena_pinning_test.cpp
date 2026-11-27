@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/wire/three_arena_pinning_test.cpp — T018 (US1, seam #13).
-// The three-arena lifetime model: the per-MESSAGE arena owns the offset
+// The arena lifetime model of [2b §6.6], two arenas since W1 dropped the writer-scratch one
+// (`.specify/688-707-559-wire-headroom-token.md` D-559-1): the per-MESSAGE arena owns the offset
 // table / overlay / sub-indices (all OffsetTable storage routes through the
 // memory_resource handed to parse(), never the global heap); the framer-
 // CARRY arena is session-lifetime; the parse->fromApp path performs zero
@@ -9,7 +10,7 @@
 // Active here: per-message arena PINNING — a counting resource proves every
 // OffsetTable allocation went through the supplied arena (and a fresh arena
 // per message keeps them isolated). The strict end-to-end "zero global
-// new/delete across parse->fromApp" assertion needs the full three-arena
+// new/delete across parse->fromApp" assertion needs the full arena
 // session wiring (framer carry pool) and a global-operator-new shim — that
 // is DISABLED below as the honest red marker.
 
@@ -80,7 +81,7 @@ TEST(WireThreeArenaPinning, OffsetTableStorageRoutesThroughPerMessageArena) {
 
     // entries_ + overlay_ are pmr-backed: at least one allocation MUST have
     // gone through the per-message arena (zero would mean it leaked to the
-    // global heap — a three-arena violation).
+    // global heap — a violation of the arena model).
     EXPECT_GT(arena.allocations, 0U);
     EXPECT_GT(arena.bytes, 0U);
 
@@ -127,7 +128,7 @@ TEST(WireThreeArenaPinning, PerMessageArenasAreIsolated) {
 // RED marker: the strict "zero global new/delete across the full
 // parse->fromApp window" guarantee depends on the framer session carry-arena
 // pool wiring (seam #13) plus a global operator-new interposer. Enable when
-// the three-arena session model is fully wired.
+// the session arena model is fully wired.
 TEST(WireThreeArenaPinning, DISABLED_ZeroGlobalNewAcrossParseToFromApp) {
     FAIL() << "pending framer session carry-arena wiring (seam #13)";
 }

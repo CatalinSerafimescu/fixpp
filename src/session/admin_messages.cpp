@@ -27,7 +27,6 @@
 #include <cstdint>
 #include <expected>
 #include <fixpp/core/error.hpp>
-#include <fixpp/core/pmr_arena_upstream.hpp>  // detail::arena_upstream (MSVC-debug proxy)
 #include <fixpp/dict/version_profile.hpp>     // render_appl_ver_id — T016/033
 #include <fixpp/session/admin_messages.hpp>
 #include <fixpp/session/seqnum.hpp>
@@ -39,7 +38,6 @@
 #include <fixpp/wire/length_data_carry.hpp>  // fixpp#426: counted Data values
 #include <fixpp/wire/tag_scan.hpp>  // accumulate_tag_digit (SC-004 / 040-inbound-tag-overflow)
 #include <fixpp/wire/writer.hpp>
-#include <memory_resource>
 #include <optional>
 #include <span>
 #include <string>  // NOLINT(misc-include-cleaner) — IWYU: std::char_traits via string_view ops
@@ -98,9 +96,7 @@ namespace {
     // (464 / 383 / 384-group). Emitted near the end (after 789) in contract
     // order 383 → 384-group → 464 (C-3.4). Empty opts ⇒ none emitted ⇒
     // byte-identical baseline (FR-012). US1 lands 464; US2/US3 land 383/384.
-    // Group scratch: no groups in Logon, so a bounded no-heap upstream
-    // (arena_upstream() = null on release/Linux, new_delete under MSVC debug).
-    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
+    fixpp::wire::Writer w(out);
 
     // 8=BeginString (first call: also injects the 9= placeholder).
     if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) {
@@ -528,7 +524,7 @@ namespace {
     // Fields: 8=begin_string, 35=5, 34=seq, 49=SenderCompID, 52=sending_time,
     //         56=TargetCompID, [58=text (optional)].
     // FR-002/FR-003/RC#4: begin_string + sending_time threaded through from caller.
-    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
+    fixpp::wire::Writer w(out);
 
     // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     {
@@ -603,7 +599,7 @@ namespace {
     std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // FR-002/FR-003/RC#4: begin_string + sending_time threaded through from caller.
-    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
+    fixpp::wire::Writer w(out);
 
     // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     {
@@ -678,7 +674,7 @@ namespace {
     std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // FR-002/FR-003/RC#4: begin_string + sending_time threaded through from caller.
-    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
+    fixpp::wire::Writer w(out);
 
     // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     {
@@ -772,7 +768,7 @@ namespace {
     std::string_view sending_time, std::string_view text) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // FR-002/FR-003/RC#4: begin_string + sending_time threaded through from caller.
-    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
+    fixpp::wire::Writer w(out);
 
     // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     {
@@ -892,7 +888,7 @@ namespace {
     int business_reject_reason, std::string_view begin_string,
     std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
-    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
+    fixpp::wire::Writer w(out);
 
     // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) {
@@ -987,7 +983,7 @@ namespace {
     std::string_view target_comp_id, seqnum_t begin_seqno, seqnum_t end_seqno,
     std::string_view begin_string, std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
-    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
+    fixpp::wire::Writer w(out);
 
     // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) {
@@ -1081,7 +1077,7 @@ namespace {
     std::string_view target_comp_id, seqnum_t new_seqno, std::string_view begin_string,
     std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
-    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
+    fixpp::wire::Writer w(out);
 
     // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) {

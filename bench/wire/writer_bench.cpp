@@ -16,7 +16,6 @@
 #include <cstdint>
 #include <cstring>
 #include <fixpp/wire/writer.hpp>
-#include <memory_resource>
 #include <span>
 #include <string_view>
 
@@ -38,13 +37,9 @@ using fixpp::wire::Writer;
 // [2b §6.6] ceiling ≤ 80 ns.
 static void BM_Writer_Commit_20tag(benchmark::State& state) {
     std::array<std::byte, 8 * 1024> dst{};
-    std::array<std::byte, 4 * 1024> scratch{};
 
     for (auto _ : state) {
-        std::pmr::monotonic_buffer_resource scratch_mr{scratch.data(), scratch.size(),
-                                                       std::pmr::null_memory_resource()};
-
-        Writer w{std::span<std::byte>{dst}, &scratch_mr};
+        Writer w{std::span<std::byte>{dst}};
 
         // BeginString (8) written first — triggers the 9= placeholder injection.
         (void)append_sv(w, 8, "FIX.4.4");
@@ -81,13 +76,9 @@ BENCHMARK(BM_Writer_Commit_20tag);
 // [2b §6.6] ceiling ≤ 800 ns.
 static void BM_Writer_Commit_200tag(benchmark::State& state) {
     std::array<std::byte, 64 * 1024> dst{};
-    std::array<std::byte, 4 * 1024> scratch{};
 
     for (auto _ : state) {
-        std::pmr::monotonic_buffer_resource scratch_mr{scratch.data(), scratch.size(),
-                                                       std::pmr::null_memory_resource()};
-
-        Writer w{std::span<std::byte>{dst}, &scratch_mr};
+        Writer w{std::span<std::byte>{dst}};
 
         (void)append_sv(w, 8, "FIX.4.4");
         (void)append_sv(w, 35, "W");

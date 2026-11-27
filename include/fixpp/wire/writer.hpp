@@ -9,14 +9,16 @@
 //   specs/004-wire-codec/contracts/writer.hpp
 //
 // Design summary:
-//   - Writer(dst, scratch_mr): aliases dst; scratch_mr for group bookkeeping.
+//   - Writer(dst): aliases dst. The writer keeps no group bookkeeping (open_group writes the
+//     count up front, and closing a group writes nothing), so it takes no scratch resource
+//     (W1, `.specify/688-707-559-wire-headroom-token.md` D-559-1, fixpp#559).
 //   - append_raw(tag, value_bytes): write "tag=value\x01" into dst.
 //   - append<T>(tag, v): delegate to the field's trait to_chars into dst.
 //   - open_group(no_tag, count): write "no_tag=count\x01", return group_writer.
 //   - commit() &&: backpatch digit-only 9=N and append 10=NNN\x01.
 //   - bytes_written(): bytes consumed so far (before commit).
 //
-// Zero-allocation for group-free messages (no heap between append and commit).
+// Zero-allocation: the writer writes into dst and allocates nothing, with or without groups.
 // (C1) every potentially-throwing trait call is fenced by core::detail::trap_throw
 //      so no exception escapes the noexcept boundary (FR-013, [arch §5.3]).
 
@@ -26,7 +28,6 @@
 #include <expected>                        // std::unexpect
 #include <fixpp/core/decimal_helpers.hpp>  // core::detail::trap_throw (C1)
 #include <fixpp/core/error.hpp>
-#include <memory_resource>
 #include <span>
 
 namespace fixpp::wire {
@@ -82,10 +83,8 @@ private:
 // ── Writer ────────────────────────────────────────────────────────────────────
 class Writer {
 public:
-    // Alias dst (caller-owned buffer); capture scratch_mr for group bookkeeping.
-    // Both must outlive the Writer.
-    explicit Writer(std::span<std::byte> dst [[clang::lifetimebound]],
-                    std::pmr::memory_resource* scratch_mr [[clang::lifetimebound]]) noexcept;
+    // Alias dst (caller-owned buffer), which must outlive the Writer.
+    explicit Writer(std::span<std::byte> dst [[clang::lifetimebound]]) noexcept;
 
     // Raw bytes append: writes "tag=value\x01" into dst.
     // Returns wire_field_value_truncated if dst is too small (no OOB write).
@@ -138,9 +137,6 @@ private:
     std::size_t bl_digit_count_ = 0;
     // Position of the first placeholder digit (inside the "9=NNN..." field).
     std::size_t bl_digit_pos_ = npos;
-
-    // Scratch memory resource for group bookkeeping (group_writer state).
-    [[maybe_unused]] std::pmr::memory_resource* scratch_mr_ = nullptr;  // see fixpp#559
 
     // Track whether we've hit a buffer-full error during appends.
     bool overflow_ = false;

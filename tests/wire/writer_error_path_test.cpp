@@ -34,7 +34,6 @@
 #include <cstring>
 #include <fixpp/core/error.hpp>
 #include <fixpp/wire/writer.hpp>
-#include <memory_resource>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -66,8 +65,7 @@ std::size_t write_large_body_message(std::size_t body_size, std::vector<std::byt
     // Upper bound: 8=FIX.4.4\x01 (10 bytes) + 9=NNNNNN\x01 (up to 14) +
     // body_size + 10=NNN\x01 (7).
     scratch.assign(body_size + 200, std::byte{0});
-    std::pmr::monotonic_buffer_resource mr;
-    Writer w{std::span<std::byte>{scratch.data(), scratch.size()}, &mr};
+    Writer w{std::span<std::byte>{scratch.data(), scratch.size()}};
 
     auto bs = bv("FIX.4.4");
     EXPECT_TRUE(w.append_raw(8, std::span<const std::byte>{bs.data(), bs.size()}).has_value());
@@ -94,8 +92,7 @@ std::size_t write_large_body_message(std::size_t body_size, std::vector<std::byt
 
 TEST(WriterErrorPath, BytesWrittenReturnsPosition) {
     std::array<std::byte, 256> buf{};
-    std::pmr::monotonic_buffer_resource mr;
-    Writer w{std::span<std::byte>{buf.data(), buf.size()}, &mr};
+    Writer w{std::span<std::byte>{buf.data(), buf.size()}};
 
     EXPECT_EQ(w.bytes_written(), 0U);
 
@@ -110,8 +107,7 @@ TEST(WriterErrorPath, BytesWrittenReturnsPosition) {
 
 TEST(WriterErrorPath, CommitWithNoFieldsReturnsError) {
     std::array<std::byte, 256> buf{};
-    std::pmr::monotonic_buffer_resource mr;
-    Writer w{std::span<std::byte>{buf.data(), buf.size()}, &mr};
+    Writer w{std::span<std::byte>{buf.data(), buf.size()}};
 
     // No fields written; body_start_ == npos → wire_field_value_truncated.
     auto result = std::move(w).commit();
@@ -126,8 +122,7 @@ TEST(WriterErrorPath, CommitWithNoFieldsReturnsError) {
 // on an empty span. A valid FIX field may legitimately carry an empty value.
 TEST(WriterErrorPath, EmptyValueFieldIsWellFormedNoUB) {
     std::array<std::byte, 256> buf{};
-    std::pmr::monotonic_buffer_resource mr;
-    Writer w{std::span<std::byte>{buf.data(), buf.size()}, &mr};
+    Writer w{std::span<std::byte>{buf.data(), buf.size()}};
 
     auto bs = bv("FIX.4.4");
     ASSERT_TRUE(w.append_raw(8, std::span<const std::byte>{bs.data(), bs.size()}).has_value());
@@ -152,8 +147,7 @@ TEST(WriterErrorPath, EmptyValueFieldIsWellFormedNoUB) {
 TEST(WriterErrorPath, CommitAfterOverflowReturnsError) {
     // Tiny buffer so the very first append overflows.
     std::array<std::byte, 2> tiny{};
-    std::pmr::monotonic_buffer_resource mr;
-    Writer w{std::span<std::byte>{tiny.data(), tiny.size()}, &mr};
+    Writer w{std::span<std::byte>{tiny.data(), tiny.size()}};
 
     auto bs = bv("FIX.4.4");
     // This will overflow immediately — the value doesn't fit.
@@ -176,8 +170,7 @@ TEST(WriterErrorPath, AppendRawWithOverflowAlreadySetReturnsError) {
     // "8=FIX.4.4\x01" = 11 bytes. The 9= placeholder needs 9 more bytes ("9=000000\x01").
     // Give exactly 5 bytes so the first write overflows mid-way.
     std::array<std::byte, 5> buf5{};
-    std::pmr::monotonic_buffer_resource mr5;
-    Writer w5{std::span<std::byte>{buf5.data(), buf5.size()}, &mr5};
+    Writer w5{std::span<std::byte>{buf5.data(), buf5.size()}};
 
     auto bs = bv("FIX.4.4");
     auto rc1 = w5.append_raw(8, std::span<const std::byte>{bs.data(), bs.size()});
@@ -205,8 +198,7 @@ TEST(WriterErrorPath, AppendRawWithOverflowAlreadySetReturnsError) {
 
 TEST(WriterErrorPath, CommitNoRoomForChecksumTrailerReturnsError) {
     std::array<std::byte, 25> buf25{};
-    std::pmr::monotonic_buffer_resource mr25;
-    Writer w25{std::span<std::byte>{buf25.data(), buf25.size()}, &mr25};
+    Writer w25{std::span<std::byte>{buf25.data(), buf25.size()}};
 
     auto bs = bv("FIX.4.4");
     auto d = bv("D");
@@ -243,8 +235,7 @@ TEST(WriterErrorPath, LargeBodyLength6Digits) {
 TEST(WriterErrorPath, OpenGroupAfterOverflowReturnsError) {
     // Write enough to overflow, then call open_group.
     std::array<std::byte, 3> buf{};
-    std::pmr::monotonic_buffer_resource mr;
-    Writer w{std::span<std::byte>{buf.data(), buf.size()}, &mr};
+    Writer w{std::span<std::byte>{buf.data(), buf.size()}};
 
     // Overflow immediately (3-byte buffer cannot hold "8=FIX.4.4\x01").
     auto bs = bv("FIX.4.4");
@@ -263,8 +254,7 @@ TEST(WriterErrorPath, OpenGroupAfterOverflowReturnsError) {
 TEST(WriterErrorPath, GroupWriterNullOwnerAppendIsNoOp) {
     // Build a valid group_writer first.
     std::array<std::byte, 512> buf{};
-    std::pmr::monotonic_buffer_resource mr;
-    Writer w{std::span<std::byte>{buf.data(), buf.size()}, &mr};
+    Writer w{std::span<std::byte>{buf.data(), buf.size()}};
 
     auto bs = bv("FIX.4.4");
     auto d = bv("D");
@@ -295,8 +285,7 @@ TEST(WriterErrorPath, AppendRawOverflowDuring9PlaceholderWrite) {
     // "8=FIX.4.4\x01" = 11. "9=" = 2. "0" = 1. "00000\x01" = 6.
     // Give exactly 14 bytes so "9=0" fits but "9=000000\x01" doesn't.
     std::array<std::byte, 14> buf14{};
-    std::pmr::monotonic_buffer_resource mr14;
-    Writer w14{std::span<std::byte>{buf14.data(), buf14.size()}, &mr14};
+    Writer w14{std::span<std::byte>{buf14.data(), buf14.size()}};
 
     auto bs = bv("FIX.4.4");
     auto rc = w14.append_raw(8, std::span<const std::byte>{bs.data(), bs.size()});
@@ -311,8 +300,7 @@ TEST(WriterErrorPath, AppendRawOverflowOnValueWrite) {
     // Write a valid 8= first so body_start_ is set; then write a body field
     // whose value overflows the remaining buffer space.
     std::array<std::byte, 40> buf40{};
-    std::pmr::monotonic_buffer_resource mr40;
-    Writer w40{std::span<std::byte>{buf40.data(), buf40.size()}, &mr40};
+    Writer w40{std::span<std::byte>{buf40.data(), buf40.size()}};
 
     auto bs = bv("FIX.4.4");
     ASSERT_TRUE(w40.append_raw(8, std::span<const std::byte>{bs.data(), bs.size()}).has_value());
@@ -334,8 +322,7 @@ TEST(WriterErrorPath, AppendRawOverflowOnValueWrite) {
 
 TEST(WriterErrorPath, AppendRawOverflowOnTrailingSOH) {
     std::array<std::byte, 23> buf23{};
-    std::pmr::monotonic_buffer_resource mr23;
-    Writer w23{std::span<std::byte>{buf23.data(), buf23.size()}, &mr23};
+    Writer w23{std::span<std::byte>{buf23.data(), buf23.size()}};
 
     auto bs = bv("FIX.4.4");
     ASSERT_TRUE(w23.append_raw(8, std::span<const std::byte>{bs.data(), bs.size()}).has_value());
@@ -356,8 +343,7 @@ TEST(WriterErrorPath, AppendRawOverflowOnTrailingSOH) {
 
 TEST(WriterErrorPath, WriteTagEqMemberOverflowCoversLines138to140) {
     std::array<std::byte, 24> buf24{};
-    std::pmr::monotonic_buffer_resource mr24;
-    Writer w24{std::span<std::byte>{buf24.data(), buf24.size()}, &mr24};
+    Writer w24{std::span<std::byte>{buf24.data(), buf24.size()}};
 
     auto bs = bv("FIX.4.4");
     ASSERT_TRUE(w24.append_raw(8, std::span<const std::byte>{bs.data(), bs.size()}).has_value())
@@ -378,8 +364,7 @@ TEST(WriterErrorPath, WriteTagEqMemberOverflowCoversLines138to140) {
 
 TEST(WriterErrorPath, AppendRaw9ByteWriteFailsCoversLines181to182) {
     std::array<std::byte, 10> buf10{};
-    std::pmr::monotonic_buffer_resource mr10;
-    Writer w10{std::span<std::byte>{buf10.data(), buf10.size()}, &mr10};
+    Writer w10{std::span<std::byte>{buf10.data(), buf10.size()}};
 
     auto bs = bv("FIX.4.4");
     // write_tag_eq(8): dc=1, 0+1+1=2 ≤ 10 ✓; write_span("FIX.4.4"): 7 ≤ 8 ✓;
@@ -396,8 +381,7 @@ TEST(WriterErrorPath, AppendRaw9ByteWriteFailsCoversLines181to182) {
 
 TEST(WriterErrorPath, AppendRawEqByteWriteFailsCoversLines184to186) {
     std::array<std::byte, 11> buf11{};
-    std::pmr::monotonic_buffer_resource mr11;
-    Writer w11{std::span<std::byte>{buf11.data(), buf11.size()}, &mr11};
+    Writer w11{std::span<std::byte>{buf11.data(), buf11.size()}};
 
     auto bs = bv("FIX.4.4");
     // After "8=FIX.4.4\x01" (10 bytes): pos=10. '9' at pos=10 < 11 ✓ → pos=11.
@@ -414,8 +398,7 @@ TEST(WriterErrorPath, AppendRawEqByteWriteFailsCoversLines184to186) {
 
 TEST(WriterErrorPath, AppendRawPlaceholderSOHFailsCoversLines200to201) {
     std::array<std::byte, 18> buf18{};
-    std::pmr::monotonic_buffer_resource mr18;
-    Writer w18{std::span<std::byte>{buf18.data(), buf18.size()}, &mr18};
+    Writer w18{std::span<std::byte>{buf18.data(), buf18.size()}};
 
     auto bs = bv("FIX.4.4");
     // After "8=FIX.4.4\x01" (10 bytes): pos=10.
@@ -438,8 +421,7 @@ TEST(WriterErrorPath, CommitBodyLengthExceedsPlaceholderWidthFrameTooLarge7Digit
     // Use a large scratch vector: header(19) + body(1000001) + trailer room(200).
     constexpr std::size_t kBodySize = 1'000'001;
     std::vector<std::byte> scratch(kBodySize + 300, std::byte{0});
-    std::pmr::monotonic_buffer_resource mr;
-    Writer w{std::span<std::byte>{scratch.data(), scratch.size()}, &mr};
+    Writer w{std::span<std::byte>{scratch.data(), scratch.size()}};
 
     auto bs = bv("FIX.4.4");
     ASSERT_TRUE(w.append_raw(8, std::span<const std::byte>{bs.data(), bs.size()}).has_value());
@@ -466,8 +448,7 @@ TEST(WriterErrorPath, CommitBodyLengthExceedsPlaceholderWidthFrameTooLarge7Digit
 TEST(WriterErrorPath, CommitBodyLengthExceedsPlaceholderWidthFrameTooLarge8Digits) {
     constexpr std::size_t kBodySize = 10'000'001;
     std::vector<std::byte> scratch(kBodySize + 300, std::byte{0});
-    std::pmr::monotonic_buffer_resource mr;
-    Writer w{std::span<std::byte>{scratch.data(), scratch.size()}, &mr};
+    Writer w{std::span<std::byte>{scratch.data(), scratch.size()}};
 
     auto bs = bv("FIX.4.4");
     ASSERT_TRUE(w.append_raw(8, std::span<const std::byte>{bs.data(), bs.size()}).has_value());
@@ -510,8 +491,7 @@ struct throwing_field_t {
 TEST(WriterErrorPath, AppendTypedTrapThrowFenceCatchesExceptionReturnsError) {
     // Buffer large enough so the standard header fits.
     std::array<std::byte, 256> buf{};
-    std::pmr::monotonic_buffer_resource mr;
-    Writer w{std::span<std::byte>{buf.data(), buf.size()}, &mr};
+    Writer w{std::span<std::byte>{buf.data(), buf.size()}};
 
     // Write the BeginString first so body_start_ is initialized.
     auto bs = bv("FIX.4.4");
@@ -562,8 +542,7 @@ TEST(WriterErrorPath, AppendTypedTrapThrowFenceCatchesExceptionReturnsError) {
 TEST(WriterErrorPath, GroupWriterNullOwnerRawAppendFieldDocumentedNotReachable) {
     // Build a Writer and open a group.
     std::array<std::byte, 512> buf{};
-    std::pmr::monotonic_buffer_resource mr;
-    Writer w{std::span<std::byte>{buf.data(), buf.size()}, &mr};
+    Writer w{std::span<std::byte>{buf.data(), buf.size()}};
 
     auto bs = bv("FIX.4.4");
     auto d = bv("D");

@@ -19,7 +19,6 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/wire/errors.hpp>
 #include <fixpp/wire/writer.hpp>
-#include <memory_resource>
 #include <span>
 #include <utility>
 
@@ -107,8 +106,7 @@ constexpr std::byte EQ_BYTE{static_cast<std::byte>('=')};
 }  // namespace
 
 // ── Writer constructor ────────────────────────────────────────────────────────
-Writer::Writer(std::span<std::byte> dst, std::pmr::memory_resource* scratch_mr) noexcept
-    : dst_{dst}, scratch_mr_{scratch_mr} {}
+Writer::Writer(std::span<std::byte> dst) noexcept : dst_{dst} {}
 
 // ── Writer::write_byte ────────────────────────────────────────────────────────
 bool Writer::write_byte(std::byte b) noexcept {
