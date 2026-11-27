@@ -1,7 +1,7 @@
 # fixpp#688, #707, #559 site 1 — the wire parser's unknown-field view, the writer's passkey and its scratch resource (lane W1 = B103 + B112)
 
-> **Status: v0.3, issue-mode design note, 2026-11-27. Gate A round 2 applied (round 1 before it);
-> round 2 review pending.** No code and no test is written yet. Branch
+> **Status: v0.4 — Gate A CONVERGED round 3 (2026-11-27): Codex P1/P2/P3 r1 3/7/2, r2 1/2/1, r3 0/2/1; Opus post-judging r1 1/9/7, r2 1/3/6, r3 0/0/9; 2 rewrites + this P3 pass. Owner-delegated sign-off (2026-11-27, parent decisions/speckit/pr-w1-688-707-559-owner-rulings.md).**
+> Issue-mode design note. No code and no test is written yet. Branch
 > `wire-688-707-559-headroom-token`, cut from `origin/main` at `b93b8a28`. What each round changed,
 > and what it declined, is in "Gate A".
 >
@@ -123,7 +123,7 @@
 | | Option | Outcome |
 |---|---|---|
 | **C** | **The filtered view of `[2b §4.8]`.** The view walks `OffsetTable::entries()` and yields each entry the dictionary does not define, classifying as it goes. Nothing is stored. | **Chosen (D-688-1).** The failure cannot occur, so there is nothing to report. It restores the locked design. |
-| A | A status on `unknown_fields_view` (`read_failed()`, as `group_view` has), set on exhaustion. | **Fallback**, if Gate A rejects C. The application learns the list failed but still cannot read it, where QuickFIX would have given it every field. It keeps the materialised list `[2b §4.8]` rejects. |
+| A | A status on `unknown_fields_view` (`read_failed()`, as `group_view` has), set on exhaustion. | **Fallback**, if Gate A rejects C, or if the owner declines an over-band bench row (§1.4). The application learns the list failed but still cannot read it, where QuickFIX would have given it every field. It keeps the materialised list `[2b §4.8]` rejects. |
 | B | A status-bearing sibling (`unknown_fields_status()`), as `group_slices_status()` is to `group_slices()`. | Rejected. It has A's shortcoming, and it leaves `unknown_fields()` ambiguous for every caller that does not switch. |
 | D | Size `kCallbackReadHeadroom` to hold the whole list. | Rejected. One `kv` per field at the entry cap is a large multiple of the term, on every session. It covers only the session's buffer, not a caller's own resource. 093 OD-18 rejected it already. |
 
@@ -144,11 +144,22 @@ in 093's bundle as history.
   - the frame's base pointer;
   - the classify function and its opaque dictionary, copied out of the view's `dict_hooks`;
   - `msg_type()`, as a `string_view`;
-  - the generation token.
+  - the generation token, in debug builds only (the generation check below).
 
   Nothing in it points at the `MessageView` object itself. A moved-from `MessageView` keeps its arena
   storage (the defaulted move carries the `pmr::vector` buffers), so a view outlives a move exactly as
   far as today's view does.
+- **The generation check (`[2b §6.4]`).** Carrying the token does nothing by itself: an accessor must
+  call the check.
+  - The iterator's copy of the token is debug-only, under `#ifndef NDEBUG` as `View::gen_` is, so
+    neither the view nor the iterator grows in release for it.
+  - `unknown_fields()` calls `MessageView`'s own `check_alive()` before its scan, because building
+    the view reads `entries()` and the frame to find the first unknown entry. That is the check
+    `bytes()` makes today.
+  - The iterator's `operator*` and `operator++` call the check, as `group_view`'s accessors do.
+  - The view's `begin()`, `end()` and `empty()` read no frame memory after construction, so they
+    do not check.
+  - The base iterator checks nowhere, so these checks are new (§1.6 items 5 and 6).
 - **The dictionary's lifetime condition widens.**
   - `opaque_dict` points at the caller's `table_view` on the borrowed route, or at the table the
     `Parser`'s owner holds on the owned route (fixpp#495).
@@ -274,6 +285,20 @@ in 093's bundle as history.
   binds `auto const&`, and all of these compile on both trees. So the PR's bench source is copied into
   a base worktree and both trees run A-B-A-B (min per tree), locally. The evidence file records the
   command and the numbers. The rows both trees share stay CI's paired comparison, as usual.
+
+  **The layout control.** Code layout alone can move a case past the band on identical source. 092's
+  evidence file (parent `decisions/speckit/092-garbled-frame-reject-evidence.md`, its "Invalid first
+  run, kept as evidence" block) read the scan cases past `[const §VIII.2]`'s band with the base
+  worktree at a path of another length, because a source-root path embedded in the binary moved every
+  later function. `bench/wire/CMakeLists.txt` passes the source root's `dictionaries` path as
+  `FIXPP_DICT_DATA_DIR`, so a bench binary that uses it embeds the root; `strings` on the built
+  binary shows whether a given one does. So:
+  - the base worktree is temporary, on `/mnt/wsl/fixppbuild`, at a path of the candidate root's
+    length, and it is removed after the run;
+  - an A-A round (the base source in both trees) runs first and its delta is recorded; the A-B rows
+    are judged against that spread, not against zero;
+  - the A-A pair's `.text` sections are compared (`objcopy --only-section=.text` on each binary,
+    then `cmp`), and the result is recorded, as 092 did.
 - **What a slowdown needs (R-W1-4 as amended twice).** Nothing is accepted in advance.
   - **The shapes expected to regress:** repeated `unknown_fields()` calls and repeated iteration of
     one view, and `unknown_fields().empty()` on a frame with no unknown fields. The single-pass arm is
@@ -288,6 +313,9 @@ in 093's bundle as history.
     (`decisions/speckit/106-logon-guards-write-bounds-gateb.md` in the parent, "the R20 owner flag").
     The delegation's "merge if green" does not cover an over-band row. If no row is over the band, no
     approval is needed.
+  - **If the owner declines a row,** the PR does not merge. The row's design is revisited: #688
+    returns to Gate A with Option A (`read_failed()` over the materialised list, §1.3) as the named
+    alternative, and D-707 and D-559 may then ship split out.
   - **An extra hard rule:** a regression past the band on the per-message dispatch path, which is
     CI's paired rows, blocks the merge and goes to the owner.
 
@@ -319,9 +347,14 @@ in 093's bundle as history.
   read inline by application code, so mixing objects built against the old and the new header is an ODR
   violation. That is the same "requires a rebuild" disclosure 093 made for `MessageStore::reset_to`.
   - fixpp has no C++ ABI golden: `.github/workflows/abi-golden.yml` checks the C-ABI symbol set only.
-  - Size pins: `git grep -n -E 'sizeof\((fixpp::)?(wire::)?(MessageView|unknown_fields_view)' -- .`
-    finds design text only. The codegen flyweight pin is `sizeof(Msg) == sizeof(MessageView const*)`,
-    a pointer, so it is untouched.
+  - Size pins, in `B-104-7`'s shape:
+    `git grep -n -E 'sizeof ?\([^)]*\b(MessageView|unknown_fields_view|Writer)\b' -- tests include src bench ':!.specify/688-707-559-wire-headroom-token.md'`.
+    The pathspec does not reach this note, so the recipe cannot match its own text. A hit that pins
+    the size of one of these types moves with the change. The codegen flyweight pin
+    (`tests/codegen/accessor_resolution_census_test.cpp`, `sizeof(Msg) == sizeof(MessageView const*)`)
+    is a pointer, so it is untouched.
+    - **Known positive:** the same pattern with `OffsetTable::entry` in place of the three names
+      prints hits, `tests/wire/offset_table_test.cpp` among them, so the pattern can report a pin.
 - **B(L)'s `kParseContainers` counts the `pmr::vector` members `MessageView<Index>` and `OffsetTable`
   construct from the parse resource**, times the view's moves (its recipe is the comment above it in
   `src/session/parse_capacity.hpp`).
@@ -412,6 +445,16 @@ in 093's bundle as history.
    - New: the `same_as` assert of §1.4, `operator*` returns `kv` by value. RED on the base.
    - New: a view iterated after its `Parser` is destroyed, with the dictionary alive, still classifies.
      This extends the existing post-`Parser`-destroy cell from the first call to iteration.
+   - New, debug only: the generation check (§1.4). In `tests/wire/lifetime_trap_test.cpp`, inside its
+     `#ifndef NDEBUG` block, beside `ParserViewTrapsAfterArenaRecycle`:
+     - parse a frame with one undefined tag, and bind `auto uf = mv.unknown_fields(); auto it =
+       uf.begin();`. The view is named so that the base compiles on clang and its RED is behavioural;
+     - `ASSERT_NE(it, uf.end())`, then `framer.recycle_pool()`;
+     - `EXPECT_DEATH((void)*it, "")` and `EXPECT_DEATH(++it, "")`.
+     - The condition that makes each death the check's: `Framer::recycle_pool` bumps the pool
+       generation and releases no storage, so nothing but the check can end the process. Re-read
+       `recycle_pool` at implementation.
+     - RED on the base, whose iterator never checks.
 6. **Mutants.**
    - Reintroduce a materialised list over the parse resource: cell 1's zero-upstream assertion goes RED.
    - Drop the classification (yield every entry): `DictBoundUnknownSplit` goes RED.
@@ -423,6 +466,8 @@ in 093's bundle as history.
      RED (§A.4, the `CACHED_REF` variant, on clang and gcc).
    - Restore `[[clang::lifetimebound]]` on `begin()` and `end()`: item 5's temporary-view cell
      stops compiling on clang (§A.4, the `KEEP_LB` variant).
+   - Remove the iterator's generation check from `operator*`, or from `operator++`: the matching
+     arm of item 5's generation cell goes RED, on a debug lane.
 7. **Fuzz** (`[const §VII.7]`, parser-adjacent). `tests/fuzz/fuzz_wire_parser.cpp` gains a property
    check. A differential against a filter that uses the same classifier would be tautological, so the
    check states the properties instead:
@@ -555,6 +600,13 @@ checked by trait:
   trivially copyable and only `Writer` can pass one. It names no "other routes" (104 round 2's lesson).
 - The key is implicit-lifetime (its defaulted default constructor is trivial), but no non-friend can copy
   it, so implicit object creation yields an lvalue nobody can pass. The trait TU pins that.
+- **The moved-from temporary.** The prvalue form materialises a `group_writer`, moves it into the
+  `expected` and destroys it at the end of the full-expression. `group_writer`'s defaulted move
+  clears neither `owner_` nor `closed_`, so the temporary's destructor runs `close_impl` with the
+  owner still set. The comment at `open_group` in `writer.hpp` states that condition: it is harmless
+  while `close_impl` writes nothing, and a `close_impl` that writes (the backpatch-at-close design
+  that `[2b §4.5]`'s comment still describes, §3.1) must first make a moved-from `group_writer`
+  inert. A user's own `std::move(*g)` already has this shape, so the hazard is not new in kind.
 
 ### 2.4 D-707-2 — `snapshot_key`
 
@@ -571,6 +623,17 @@ closed another way.
 
 - **Chosen: the last row**, `snapshot_key() noexcept {}` private and
   `snapshot_key(snapshot_key const&) noexcept {}` public.
+- **clang-tidy.** Both constructors have empty bodies, which `modernize-use-equals-default` and
+  `hicpp-use-equals-default` report, and `.clang-tidy` makes every warning an error for headers under
+  `include/fixpp/`. Each carries
+  `// NOLINTNEXTLINE(modernize-use-equals-default,hicpp-use-equals-default)` on the line above it,
+  with its own reason:
+  - the copy constructor, `freeze_key`'s reason: a defaulted copy constructor is trivial, so the key
+    would be `bit_cast`-able again;
+  - the default constructor: a defaulted one is trivial, so the key would be implicit-lifetime again
+    (the table's second row).
+  - The suppression sits on the line above, not as a trailing `// NOLINT(…)`. G1's exception
+    matches the declaration's exact form (below), which a trailing comment would change.
 - 215's description stays true: the key is "nameable and copyable" anywhere and mintable only by the
   factory.
 - 104's trio cannot apply whole. `!is_copy_constructible` is false by design here. The pins are:
@@ -752,7 +815,7 @@ closed another way.
   compiling. Recorded in the B&L (§4).
 - **Layout: rebuild required.** `sizeof(Writer)` shrinks, and the out-of-line constructor's mangled name
   changes (a link error for a stale object, not a silent mismatch). Size pins:
-  `git grep -n -E 'sizeof\((fixpp::)?(wire::)?Writer' -- .` finds none.
+  §1.5's recipe, which covers `Writer`, with its known positive.
 
 ### 3.5 Tests
 
@@ -779,6 +842,11 @@ and W1 does site 1, so **the W1 PR closes #559**, and its body names #735 as the
 
 ## 4. B&L delta
 
+- **Amended: `B-004-5`.** It says tags absent from the dictionary are exposed through
+  `unknown_fields()` and written back with zero allocation. Until W1 that was not what was built: the
+  set was the tags not declared for the MsgType (`field_valid_for`, §1.1), and the read allocated in
+  the parse resource. The row gains an "Amended (W1)" line saying so, and that since W1 the row holds
+  as written (`B-688-1`).
 - **Amended: `B-093-8`.**
   - Its "returns an empty view when its arena is exhausted" description is superseded.
   - The row keeps its history (the #540 terminate and its reproduction) and gains: since W1,
@@ -851,7 +919,8 @@ and W1 does site 1, so **the W1 PR closes #559**, and its body names #735 as the
 - Appendix A's "Wire format / parser" row ("offset-table semantics, framing rules, validator changes")
   fires on D-688-1, as this table's parser row says.
 - Their state, in the shape of `.specify/563-564-callback-send.md` §0a:
-  - **Codex Gate A:** this loop. Round 1 is applied in v0.2 and round 2 in v0.3 ("Gate A").
+  - **Codex Gate A:** this loop. Round 1 is applied in v0.2, round 2 in v0.3, and round 3, the converged round, in v0.4
+    ("Gate A").
   - **`/clarify`:** by hand. The rulings record is its record (R-W1-1 to R-W1-4).
   - **`/analyze`:** by the spec-analyzer over the converged note, after Gate A and before
     implementation. Pending.
@@ -870,15 +939,35 @@ Each list below comes from a recipe:
 - The test comments:
   `git grep -n -i -E 'unknown|classif' -- tests/wire/unknown_fields_test.cpp tests/dictionary/reify_shared_table_concurrency_test.cpp`.
 
+- The changed declarations (the iterator's attributes and return type, the passkey's constructors,
+  G1's mint pattern):
+  `git grep -n -E 'unknown_fields_view|iterator begin\(\)|snapshot_key\(\)|snapshot_key\(snapshot_key|G1_MINT|passkey' -- .specify specs brain include tools ':!.specify/688-707-559-wire-headroom-token.md'`.
+  - **Its known positives** are the records below that pin those declarations: `[2b §4.8]`'s
+    `begin()` and `[2b §6.4]`'s "Every `View`-derived type"; the `begin()` of
+    `specs/004-wire-codec/contracts/unknown_fields.hpp`; 215's `snapshot_key() = default;` and
+    `G1_MINT`; `brain/components/dictionary.md`'s "The passkey and the provenance check stand"; and
+    `include/fixpp/dict/dictionary_snapshot.hpp`'s "the pairing and the passkey below are unchanged".
+    A run that misses one of them is not this recipe.
+  - The other hits are dispositioned by kind. Gate A history tables and logs (2b's, 215's,
+    `brain/log.md`) are history. Other features' passkeys, tags and attorney patterns (`freeze_key`
+    in 104 and brain `session.md`, 057's, 495's `owned_route_key`, `reify.hpp`'s) and other types'
+    `begin()` are unrelated. `writer.hpp`'s passkey comment stays true. `brain/failure-classes.md`
+    class 24 is below.
+
 Re-run each recipe at implementation and disposition every hit.
 
 - **Amend in place, as 100 did:**
   - `.specify/2b-wire.md`: §4.5 (the constructor); §6.6 and §8, where the writer-scratch row goes,
-    leaving two arenas plus the validator's caller-supplied scratch; seam #13; and §4.8, which gets an
-    "as built since W1" line (the design itself is unchanged);
+    leaving two arenas plus the validator's caller-supplied scratch; seam #13; §4.8, which gets an
+    "as built since W1" line: `begin()` and `end()` without `[[clang::lifetimebound]]`, the
+    iterator's `operator*` returning `kv` by value, and why (§1.4, the iterator contract); and §6.4,
+    whose "called from every accessor" gets an "as built since W1" line naming the unknown-field
+    view's and iterator's check sites (§1.4, the generation check);
   - 093's contract C-8 L-5 and C-3 I-5: the `unknown_fields()` clause.
 - **Flag in brain `components/wire.md`'s "Superseded records, flagged in place"**, frozen and not
   edited:
+  - `specs/004-wire-codec/contracts/unknown_fields.hpp`, the shape oracle's `[[clang::lifetimebound]]`
+    on `begin()` and `end()`;
   - `specs/004-wire-codec`: contracts `writer.hpp`, data-model (`Writer::scratch_mr`), plan, research
     D-3, tasks, and checklists `nfr.md` CHK003's writer-scratch arena;
   - 093's plan OD-18, as the record of the catch D-688-1 replaces;
@@ -908,10 +997,19 @@ Re-run each recipe at implementation and disposition every hit.
     after the first call", which is no longer true of unknown fields;
   - the Q-33 frame comment (§1.6 item 2);
   - `writer.hpp`'s design summary and constructor comment, `three_arena_pinning_test.cpp`'s model line,
-    and `wire_alloc_guard_test.cpp`'s arena comment (§3).
+    and `wire_alloc_guard_test.cpp`'s arena comment (§3);
+  - `include/fixpp/dict/dictionary_snapshot.hpp`'s supersession header: its "the pairing and the
+    passkey below are unchanged" names W1 (D-707-2) for the passkey's shape, as the project rule asks
+    of a header whose decision is superseded;
+  - the G1 comment in `tools/check_dictionary_snapshot_exclusivity.sh` ("`snapshot_key() = default;`
+    is a DECLARATION"), which follows §2.4's filter.
 - **brain `wire.md`.** The "Every admitted frame parses … `unknown_fields()` that cannot terminate"
   section gets a "⚠️ Superseded in part by W1" line: the catch is gone because nothing allocates. The
   locked-decisions entry for `[2b §4.8]` gets W1's predicate as built.
+- **brain `components/dictionary.md`.** 215's entry, which says "The passkey and the provenance check
+  stand", gains: the passkey's shape is superseded by W1 (D-707-2); the pairing, the sole minter and the
+  provenance check stand. It names 215's §3 key declaration, its §5a `snapshot_key` row and §6 seam
+  7's `G1_MINT`.
 - **brain `failure-classes.md` class 24.** Its scanning heuristic becomes §2.2's recipe and condition.
   Its instance list gains `group_writer_token` (fixed) and `snapshot_key`, and the form gains the
   implicit-lifetime clause and the `make_shared` variant. That edit is the owner-approved form of
@@ -940,13 +1038,39 @@ delegation, flagged for the owner's review at merge.
 
 No technical question is left open. One owner act may be needed later, and it is conditional: the
 PR-thread ratification of an over-band bench row, if the measurement produces one. `[2b §4.8]`, R-W1-3 and the correctness rule settle #688. The
-measured compile matrix settles #707's shapes. The code settles #559.
+measured compile matrix settles #707's shapes. The code settles #559. If the owner declines an
+over-band row, the PR does not merge, and #688 returns to Gate A with Option A as the named
+alternative (§1.4).
 
 ## Gate A
 
 - Round 1 applied 2026-11-27: Codex P1=3 P2=7 P3=2; Opus post-judging P1=1 P2=9 P3=7; rewrite addresses root causes #1 (the classification predicate is `field_valid_for` where `[2b §4.8]` specifies "not defined by the dictionary"), #2 (re-derive recipes that did not reproduce every item the note names), #3 (perf evidence planned through an instrument that cannot time it). Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_1_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_1_wire_headroom_token_triage.md` (paths from the parent repository's root).
 
 - Round 2 applied 2026-11-27: Codex P1=1 P2=2 P3=1; Opus post-judging P1=1 P2=3 P3=6; rewrite addresses root causes #1 (an acceptance written ahead of its measurement and outside the PR thread), #2 (the by-value iterator is a public contract change whose attributes, witness and disclosure were not derived from the type), #3 (instruments not shown to be able to report non-zero). Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_2_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_2_wire_headroom_token_triage.md` (paths from the parent repository's root).
+
+- Round 3 — converged 2026-11-27: Codex P1=0 P2=2 P3=1; Opus post-judging P1=0 P2=0 P3=9; no rewrite: a P3 pass applies each finding's mechanical edit (v0.4). Root cause #1: the supersession sweep was keyed on the decisions' topics, not on the declarations they change. Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_1_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_1_wire_headroom_token_triage.md`, `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_2_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_2_wire_headroom_token_triage.md`, `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_3_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_3_wire_headroom_token_triage.md` (paths from the parent repository's root).
+
+### Round 3 — how each finding was applied
+
+| Finding | Root cause | Where v0.4 answers it |
+|---|---|---|
+| Codex F-2 (P3 after judging) | #1 | §6: the declaration-keyed recipe and its known positives; `[2b §4.8]` and `[2b §6.4]` amended; 004's `unknown_fields.hpp` contract flagged; brain `dictionary.md`; `dictionary_snapshot.hpp`'s header and the G1 comment |
+| Codex F-1 (P3 after judging) | — | §1.4 the generation check; §1.6 item 5 (the death cell) and item 6 (the mutant) |
+| Codex F-3 (P3) | — | Status block |
+| Opus NEW-1 (P3) | — | §4 `B-004-5` |
+| Opus NEW-2 (P3) | — | §2.4 clang-tidy: `NOLINTNEXTLINE` on both constructors |
+| Opus NEW-3 (P3) | — | §1.4 the layout control |
+| Opus NEW-4 (P3) | — | §1.3 Option A, §1.4 "If the owner declines a row", §7 |
+| Opus NEW-5 (P3) | — | §2.3 the moved-from temporary |
+| Opus NEW-6 (P3) | — | §1.5 and §3.4: the size recipe in `B-104-7`'s shape, with its known positive |
+
+### Round 3 — disagreements
+
+- **Codex F-1 and F-2, severity only (Codex P2; Opus P3).** The facts are right, and v0.4 applies both
+  fixes. For F-1, the base iterator already makes no check, so W1 did not regress, and the trap is a
+  debug diagnostic. For F-2, a reader who restored a stale record's shape would be caught loudly: the
+  `bit_cast` pins of §2.6 reject 215's defaulted key, and §A.4's `KEEP_LB` fails item 5's cell under
+  `-Werror`.
 
 ### Round 2 — how each finding was applied
 
