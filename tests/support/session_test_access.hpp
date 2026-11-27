@@ -284,6 +284,14 @@ struct session_test_access {
     static void set_write_epoch(Session& s, std::uint32_t epoch) noexcept {
         s.write_epoch_ = epoch;
     }
+    // 106 (data-model E-3): the two marks the connection bound reads, the liveness loop's emit
+    // not returned and a limited write in flight. Session strand only.
+    [[nodiscard]] static bool emit_in_flight(Session const& s) noexcept {
+        return s.emit_in_flight_;
+    }
+    [[nodiscard]] static bool write_in_flight(Session const& s) noexcept {
+        return s.write_in_flight_;
+    }
     [[nodiscard]] static int peer_logout_bound_count(Session const& s) noexcept {
         return s.peer_logout_bound_counter_->load(std::memory_order_acquire);
     }

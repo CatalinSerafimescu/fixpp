@@ -15,7 +15,12 @@
 #include <asio/bind_cancellation_slot.hpp>
 #include <asio/cancellation_signal.hpp>
 #include <asio/co_spawn.hpp>
+#include <asio/detached.hpp>
 #include <asio/io_context.hpp>
+#include <asio/redirect_error.hpp>
+#include <asio/steady_timer.hpp>
+#include <asio/this_coro.hpp>
+#include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstdint>
@@ -23,9 +28,11 @@
 #include <fixpp/config/config_bundle.hpp>
 #include <fixpp/config/load_diagnostic.hpp>
 #include <fixpp/config/toml_config_loader.hpp>
+#include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/system_clock_source.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/memory_store.hpp>
 #include <fixpp/session/memory_store_factory.hpp>
 #include <fixpp/session/session_config.hpp>
@@ -454,6 +461,64 @@ TEST_P(ConnectionBound106, WaitThrows) {
     EXPECT_TRUE(r.d.closed()) << "the transport is open";
     EXPECT_EQ(r.records(), 0U) << "give-up records";
     EXPECT_EQ(r.completed_since("5", 0), 0U) << "a Logout";
+}
+
+// A Clock over the Scene's mock clock whose next sleep_until to the never-reached instant
+// (steady_time_point::max(), the parked bound's wait) completes at once, as a clock whose
+// sleep_until returns before its deadline. Every other call is the mock clock's.
+class EarlyWakeClock final : public fixpp::core::Clock {
+public:
+    explicit EarlyWakeClock(std::shared_ptr<fixpp::core::mock_clock> mock)
+        : mock_{std::move(mock)} {}
+    bool arm_parked_wait = false;  // the next sleep_until(max()) completes at once; one-shot
+    bool woke_early = false;       // set when it did
+
+    [[nodiscard]] fixpp::core::utc_time_point now() const noexcept override { return mock_->now(); }
+    [[nodiscard]] fixpp::core::steady_time_point steady_now() const noexcept override {
+        return mock_->steady_now();
+    }
+    [[nodiscard]] asio::awaitable<void> sleep_until(fixpp::core::steady_time_point d) override {
+        if (arm_parked_wait && d == fixpp::core::steady_time_point::max()) {
+            arm_parked_wait = false;
+            woke_early = true;
+            co_return;
+        }
+        co_await mock_->sleep_until(d);
+    }
+    void cancel_sleeps() noexcept override { mock_->cancel_sleeps(); }
+    void forget_session(fixpp::session::Session* s) noexcept override { mock_->forget_session(s); }
+
+private:
+    std::shared_ptr<fixpp::core::mock_clock> mock_;
+};
+
+// The bound's wait completes before its deadline on a non-shipping clock (connection_bound_wait_
+// returns false): the failure exit with the claim free takes it, Disconnected once, one close; no
+// record, no Logout, and the bound has ended. Its mutant: the failure mark on that exit deleted
+// (the bound leaves with nothing ended).
+TEST_P(ConnectionBound106, WaitCompletesEarly_FailsClosed) {
+    std::shared_ptr<EarlyWakeClock> clock;
+    t106s::GiveUpRig r{
+        GetParam(), t106s::GiveUpParams{}, {}, [&clock](fixpp::test_support::resend_gap::Scene& s) {
+            clock = std::make_shared<EarlyWakeClock>(s.mock);
+            s.engine.clock = clock;
+        }};
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    ASSERT_EQ(fixpp::session::session_test_access::connection_bound_count(r.session()), 1)
+        << "setup: the bound is not running";
+    auto const disconnected_before = r.disconnected();
+    clock->arm_parked_wait = true;
+    fixpp::session::session_test_access::wake_connection_bound(r.session());
+    r.d.s.drain();
+    ASSERT_TRUE(clock->woke_early) << "setup: the bound's re-armed wait did not reach the clock";
+    EXPECT_NE(fixpp::session::session_test_access::ending_claim(r.session()), 0) << "no claim";
+    EXPECT_EQ(r.d.s.state(), fixpp::session::fsm_state::Disconnected);
+    EXPECT_EQ(r.disconnected() - disconnected_before, 1U) << "new Disconnected entries";
+    EXPECT_TRUE(r.d.closed()) << "the transport is open";
+    EXPECT_EQ(r.records(), 0U) << "give-up records";
+    EXPECT_EQ(r.completed_since("5", 0), 0U) << "a Logout";
+    EXPECT_EQ(fixpp::session::session_test_access::connection_bound_count(r.session()), 0)
+        << "the bound is still running";
 }
 
 // A wake with nothing due ends nothing: the bound is still counted, the session Active, no claim.
@@ -1807,10 +1872,418 @@ TEST_P(WriteLimit106, EpochWrap_TransportFailure_IsNotATimeout) {
     EXPECT_EQ(r.write_records(), 0U) << "write-timeout records";
 }
 
+// A limited write whose transport throws (blocking_write_state::throw_next_write): the send
+// returns dispatch_aborted, the session ends Disconnected, and the write's mark is cleared.
+void expect_write_throw_clears_the_mark(session_role role,
+                                        fixpp::session::test::blocking_write_state::write_throw t) {
+    Rig r{role, Params{}};
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    r.d.bw->throw_next_write = t;
+    auto sent = r.spawn_send("W106T");
+    r.d.s.drain();
+    EXPECT_TRUE(r.d.bw->throw_next_write ==
+                fixpp::session::test::blocking_write_state::write_throw::none)
+        << "setup: the send's write did not reach the transport";
+    bool const returned = rgs::Scene::ready(sent);
+    EXPECT_TRUE(returned) << "the send did not return";
+    if (returned) {
+        auto const sr = sent.get();
+        EXPECT_FALSE(sr.has_value()) << "the failed send succeeded";
+        if (!sr) {
+            EXPECT_EQ(sr.error(), fixpp::core::error::dispatch_aborted)
+                << "the failed send's error " << static_cast<int>(sr.error());
+        }
+    }
+    EXPECT_FALSE(session_test_access::write_in_flight(r.session())) << "the write's mark is set";
+    EXPECT_EQ(r.d.s.state(), fsm_state::Disconnected);
+}
+
+// live_write_serialized_'s catch: the limited write's transport throws asio::system_error. The send
+// returns dispatch_aborted, the session ends Disconnected (send_body_), and the write's mark is
+// cleared. Its mutant: the mark clear in the catch deleted.
+TEST_P(WriteLimit106, TransportThrows_ReturnsDispatchAborted_MarkCleared) {
+    expect_write_throw_clears_the_mark(
+        GetParam(), fixpp::session::test::blocking_write_state::write_throw::system_error);
+}
+
+// The limited write's transport throws an exception of another type, which no catch of
+// live_write_serialized_ takes: the write's mark is cleared while the exception unwinds its frame
+// (write_in_flight_guard's destructor), and send() ends the call as for any exception (D-OUT-9):
+// dispatch_aborted, Disconnected. Its mutant: the guard's clear while unwinding deleted.
+TEST_P(WriteLimit106, TransportThrowsOther_MarkClearedWhileUnwinding) {
+    expect_write_throw_clears_the_mark(
+        GetParam(), fixpp::session::test::blocking_write_state::write_throw::other);
+}
+
 INSTANTIATE_TEST_SUITE_P(BothRoles, WriteLimit106,
                          ::testing::Values(session_role::acceptor, session_role::initiator),
                          role_name);
 
 }  // namespace w106
+
+}  // namespace
+
+// ── Coverage of the liveness loop's emit and the write's throw (T167; research D3, D4; data-model
+// E-2, E-3) ──────────────────────────────────────────────────────────────────────────────────────
+// [seam: emit_in_flight, write_in_flight] Each cell reads one of 106's in-flight marks. A direct
+// Session (t106::GiveUpRig: H = 10 s, T = 10 s, B = 500 ms) in both roles. Where the loop's emit
+// waits for its number, a holder keeps the sequence manager's lock (seqnum_manager_test_access's
+// mutex), so the emit is suspended inside assign_outbound while the clock moves; the holder is
+// released before every reading that needs the number. Every instant is reached with step_to and
+// a drain.
+
+namespace {
+
+namespace e106 {
+
+using namespace std::chrono_literals;
+using fixpp::session::fsm_state;
+using fixpp::session::seqnum_manager_test_access;
+using fixpp::session::session_role;
+using fixpp::session::session_test_access;
+using fixpp::session::SessionConfig;
+namespace t105 = fixpp::test_support::t105;
+namespace t106 = fixpp::test_support::t106;
+namespace rgs = fixpp::test_support::resend_gap;
+
+constexpr std::string_view kGiveUpText = "TestRequest unanswered";
+constexpr std::string_view kGiveUpTextPrefix = "TestRequest unanswered, TestReqID ";
+constexpr std::string_view kTestRequest = "1";
+constexpr std::string_view kHeartbeat = "0";
+constexpr std::string_view kLogout = "5";
+
+// A holder of the manager's lock. It parks on a timer that only release() cancels, so a drain
+// (poll until no handler is ready) does not spin on it while it holds. Declared before the rig
+// that owns the io_context, and released by a HoldRelease declared after it.
+struct ManagerHold {
+    bool acquired = false;
+    bool released = false;
+    bool done = false;
+    asio::steady_timer* wait = nullptr;  // the holder's timer while it holds
+    void release() {
+        released = true;
+        if (wait != nullptr) wait->cancel();
+    }
+};
+
+asio::awaitable<void> hold_manager(fixpp::session::SeqnumManager* m, ManagerHold* h) {
+    auto guard = co_await seqnum_manager_test_access::mutex(*m).async_lock();
+    if (guard.has_value()) {
+        h->acquired = true;
+        asio::steady_timer t{co_await asio::this_coro::executor,
+                             asio::steady_timer::time_point::max()};
+        h->wait = &t;
+        while (!h->released) {
+            std::error_code ec;
+            co_await t.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+        }
+        h->wait = nullptr;
+    }
+    h->done = true;
+}
+
+// Releases the holder and runs what that makes ready, on every exit of the cell, before the rig's
+// teardown.
+struct HoldRelease {
+    ManagerHold& h;
+    rgs::Scene& s;
+    HoldRelease(ManagerHold& hold, rgs::Scene& scene) : h{hold}, s{scene} {}
+    HoldRelease(HoldRelease const&) = delete;
+    HoldRelease& operator=(HoldRelease const&) = delete;
+    ~HoldRelease() {
+        h.release();
+        s.drain();
+    }
+};
+
+// Starts the holder on the session's executor and runs it to the lock.
+[[nodiscard]] bool take_manager_lock(t106::GiveUpRig& r, ManagerHold& hold) {
+    asio::co_spawn(fixpp::test_support::session_executor_of(r.session(), r.d.s.ioc),
+                   hold_manager(&session_test_access::seqnum_mgr(r.session()), &hold),
+                   asio::detached);
+    r.d.s.drain();
+    return hold.acquired;
+}
+
+[[nodiscard]] std::size_t started_since(t106::GiveUpRig const& r, std::string_view type,
+                                        std::size_t from) {
+    std::size_t n = 0;
+    for (std::size_t i = from; i < r.d.bw->recorded.size(); ++i) {
+        if (fixpp::test_support::extract_tag(r.d.bw->recorded[i].bytes, 35) == type) ++n;
+    }
+    return n;
+}
+
+// Which of the loop's two emits a cell drives. TestRequest: due at L + T with the peer silent
+// after the Logon. Heartbeat: the peer's Heartbeat at 5 s moves L there, so the loop's Heartbeat
+// (10 s after its last write) falls due 5 s before the TestRequest (L + T = 15 s), with no
+// TestRequest pending.
+enum class emit : std::uint8_t { test_request, heartbeat };
+
+struct EmitCase {
+    session_role role;
+    emit e;
+};
+
+[[nodiscard]] std::string case_name(::testing::TestParamInfo<EmitCase> const& i) {
+    std::string n = i.param.role == session_role::acceptor ? "Acceptor" : "Initiator";
+    n += i.param.e == emit::test_request ? "_TestRequest" : "_Heartbeat";
+    return n;
+}
+
+[[nodiscard]] std::string_view type_of(emit e) {
+    return e == emit::test_request ? kTestRequest : kHeartbeat;
+}
+
+// Active at t0, then the case's peer frame; returns the instant the loop's emit falls due.
+[[nodiscard]] t106::steady_time_point stage_emit(t106::GiveUpRig& r, emit e) {
+    auto const t0 = r.now();
+    if (e == emit::test_request) return t0 + r.threshold();
+    r.at(t0 + 5s);
+    (void)r.d.s.feed(r.d.s.heartbeat(2));
+    return t0 + std::chrono::seconds{r.p.heartbeat};
+}
+
+class EmitNumber106 : public ::testing::TestWithParam<EmitCase> {};
+
+// The loop's emit waits for its number at the manager's lock; the bound decides the give-up at G
+// while it waits (research D3, "The decision"). Released, the number returns with the give-up
+// taken: the loop writes the give-up's Logout with the decision's Text and never the emit, and the
+// emit's mark is cleared. Its mutants: the give-up test after the number deleted (the emit is
+// written), and that block's mark clear deleted (the mark stays set).
+TEST_P(EmitNumber106, GiveUpWhileNumbered_WritesTheLogout) {
+    auto const [role, e] = GetParam();
+    ManagerHold hold;
+    t106::GiveUpRig r{role, t106::GiveUpParams{}};
+    HoldRelease const releaser{hold, r.d.s};
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    auto const due = stage_emit(r, e);
+    auto const l = r.last_inbound();
+    ASSERT_TRUE(take_manager_lock(r, hold)) << "setup: the holder did not take the lock";
+    auto const mark = r.d.bw->recorded.size();
+    r.at(due);
+    ASSERT_TRUE(session_test_access::emit_in_flight(r.session()))
+        << "setup: the loop's emit is not in flight at its instant";
+    ASSERT_EQ(started_since(r, type_of(e), mark), 0U) << "setup: the emit did not wait";
+    auto const g = t106::give_up_instant_emit_not_returned(l, r.threshold());
+    r.at(g - t106::kInstantGuard);
+    EXPECT_EQ(r.records(), 0U) << "a give-up record before G";
+    r.at(g);
+    EXPECT_EQ(r.records(), 1U) << "no give-up record at G";
+    hold.release();
+    r.d.s.drain();
+
+    EXPECT_TRUE(hold.done) << "the holder did not end";
+    EXPECT_EQ(started_since(r, type_of(e), mark), 0U) << "the emit was written after the give-up";
+    EXPECT_FALSE(session_test_access::emit_in_flight(r.session())) << "the emit's mark is set";
+    EXPECT_EQ(r.completed_since(kLogout, mark), 1U) << "the give-up's Logout";
+    auto const text = r.completed_field(kLogout, 58);
+    if (e == emit::test_request) {
+        EXPECT_TRUE(text.starts_with(kGiveUpTextPrefix) && text.size() > kGiveUpTextPrefix.size())
+            << "the Logout's Text: " << text;
+    } else {
+        EXPECT_EQ(text, kGiveUpText) << "the Logout's Text";
+    }
+}
+
+// As above with 105's ending bound refused: the decision closes at G, so when the number returns
+// the loop ends with nothing written, no Logout and no emit, and one Disconnected entry. Its
+// mutants: the give-up test after the number deleted (the emit's write is started), and that
+// block's mark clear deleted. The closed test's deletion is not one: the decision's close leaves
+// the session Disconnected, so the write half's leaf returns at its state test
+// (inbound_logout_leaf_) and writes nothing either.
+TEST_P(EmitNumber106, GiveUpWhileNumbered_EndingBoundSpawnFails_WritesNothing) {
+    auto const [role, e] = GetParam();
+    ManagerHold hold;
+    t106::GiveUpRig r{role, t106::GiveUpParams{}};
+    HoldRelease const releaser{hold, r.d.s};
+    session_test_access::set_ending_bound_spawn_fails(r.session(), [] { return true; });
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    auto const due = stage_emit(r, e);
+    auto const l = r.last_inbound();
+    ASSERT_TRUE(take_manager_lock(r, hold)) << "setup: the holder did not take the lock";
+    auto const mark = r.d.bw->recorded.size();
+    auto const disconnected_before = r.disconnected();
+    r.at(due);
+    ASSERT_TRUE(session_test_access::emit_in_flight(r.session()))
+        << "setup: the loop's emit is not in flight at its instant";
+    auto const g = t106::give_up_instant_emit_not_returned(l, r.threshold());
+    r.at(g);
+    EXPECT_EQ(r.records(), 1U) << "no give-up record at G";
+    EXPECT_TRUE(r.d.closed()) << "not closed at G";
+    hold.release();
+    r.d.s.drain();
+
+    EXPECT_TRUE(hold.done) << "the holder did not end";
+    EXPECT_EQ(r.d.bw->recorded.size(), mark) << "writes started after the give-up";
+    EXPECT_FALSE(session_test_access::emit_in_flight(r.session())) << "the emit's mark is set";
+    EXPECT_EQ(r.d.s.state(), fsm_state::Disconnected);
+    EXPECT_EQ(r.disconnected() - disconnected_before, 1U) << "new Disconnected entries";
+}
+
+// The emit's toAdmin throws (019 T014): the loop ends Disconnected with the emit unwritten and its
+// mark cleared. Its mutant: the mark clear in the toAdmin branch deleted.
+TEST_P(EmitNumber106, ToAdminThrows_MarkCleared) {
+    auto const [role, e] = GetParam();
+    t106::GiveUpRig r{role, t106::GiveUpParams{}};
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    auto const due = stage_emit(r, e);
+    auto const mark = r.d.bw->recorded.size();
+    bool threw = false;
+    r.app->to_admin_hook = [&threw, type = std::string{type_of(e)}](std::string_view m) {
+        if (m == type) {
+            threw = true;
+            throw std::runtime_error{"toAdmin"};
+        }
+    };
+    r.at(due);
+    r.app->to_admin_hook = nullptr;
+
+    ASSERT_TRUE(threw) << "setup: the emit's toAdmin did not run";
+    EXPECT_FALSE(session_test_access::emit_in_flight(r.session())) << "the emit's mark is set";
+    EXPECT_EQ(started_since(r, type_of(e), mark), 0U) << "the emit was written";
+    EXPECT_EQ(r.d.s.state(), fsm_state::Disconnected);
+}
+
+// The emit's number cannot be assigned (the outbound counter at its maximum): the loop ends
+// Disconnected with the emit unwritten and its mark cleared. Its mutant: the mark clear in the
+// assign-failure branch deleted.
+TEST_P(EmitNumber106, AssignFails_MarkCleared) {
+    auto const [role, e] = GetParam();
+    t106::GiveUpRig r{role, t106::GiveUpParams{}};
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    auto const due = stage_emit(r, e);
+    auto& mgr = session_test_access::seqnum_mgr(r.session());
+    seqnum_manager_test_access::set_counters(mgr, mgr.next_inbound_unsafe(),
+                                             std::numeric_limits<fixpp::session::seqnum_t>::max());
+    auto const mark = r.d.bw->recorded.size();
+    r.at(due);
+
+    EXPECT_FALSE(session_test_access::emit_in_flight(r.session())) << "the emit's mark is set";
+    EXPECT_EQ(started_since(r, type_of(e), mark), 0U) << "the emit was written";
+    EXPECT_EQ(r.d.s.state(), fsm_state::Disconnected);
+}
+
+// The emit is held in its MessageStore::store call; the give-up is decided at G with 105's ending
+// bound refused, so the decision closes at G. Released, the store returns with the give-up taken
+// and its close made: the loop ends with no Logout written and the emit's mark cleared. The closed
+// test after the store has no discriminating mutant here, for the reason the cell above gives.
+TEST_P(EmitNumber106, GiveUpWhileStored_EndingBoundSpawnFails_NoLogout) {
+    auto const [role, e] = GetParam();
+    auto gate = std::make_shared<t105::gate_store_state>();
+    t106::GiveUpRig r{role, t106::GiveUpParams{}, [gate](SessionConfig& c) {
+                          c.store_factory = std::make_shared<t105::GateStoreFactory>(gate);
+                      }};
+    session_test_access::set_ending_bound_spawn_fails(r.session(), [] { return true; });
+    ASSERT_TRUE(r.d.to_active()) << "setup";
+    auto const due = stage_emit(r, e);
+    auto const l = r.last_inbound();
+    gate->hold_when = [](t105::store_call k, fixpp::session::seqnum_t) {
+        return k == t105::store_call::store_outbound;
+    };
+    auto const mark = r.d.bw->recorded.size();
+    r.at(due);
+    ASSERT_EQ(gate->parked, 1U) << "setup: the emit's store call is not held";
+    auto const g = t106::give_up_instant_emit_not_returned(l, r.threshold());
+    r.at(g);
+    EXPECT_EQ(r.records(), 1U) << "no give-up record at G";
+    EXPECT_TRUE(r.d.closed()) << "not closed at G";
+    gate->hold_when = nullptr;
+    gate->release_all();
+    r.d.s.drain();
+
+    EXPECT_EQ(gate->parked, 0U) << "the store call did not return";
+    EXPECT_EQ(started_since(r, kLogout, mark), 0U) << "a Logout was started";
+    EXPECT_FALSE(session_test_access::emit_in_flight(r.session())) << "the emit's mark is set";
+    EXPECT_EQ(r.d.s.state(), fsm_state::Disconnected);
+}
+
+INSTANTIATE_TEST_SUITE_P(Cases, EmitNumber106,
+                         ::testing::Values(EmitCase{session_role::acceptor, emit::test_request},
+                                           EmitCase{session_role::acceptor, emit::heartbeat},
+                                           EmitCase{session_role::initiator, emit::test_request},
+                                           EmitCase{session_role::initiator, emit::heartbeat}),
+                         case_name);
+
+class ClassifyDrained106 : public ::testing::TestWithParam<session_role> {};
+
+// The Logon arm's classification waits at the manager's lock (a holder keeps it); close(terminal)
+// starts, and its drain refuses the wait (SeqnumManager::classify_inbound, data-model E-2). The arm
+// ends at its classification: it never reaches the point between the classification and the
+// commit (the commit-freeze hook does not run), nothing is written after the peer's Logon, the
+// session is never Active (nor LogonReceived), and NextNumIn is unconsumed. The Disconnected
+// entries are not read here (L-106-g). The forced hit releases the holder with no close(): the
+// hook runs and the session is Active. Its mutant: the drained lock's refusal replaced by the
+// classification, which the acceptor's arm reds (it goes on to the hook); the initiator's arm tests
+// its supersession by the close before its hook (on_inbound_logon_sent_), so it ends there under
+// that mutant too.
+TEST_P(ClassifyDrained106, CloseDuringTheWait_EndsAtTheClassification) {
+    for (bool const close : {true, false}) {
+        SCOPED_TRACE(close ? "close() during the wait" : "no close()");
+        ManagerHold hold;
+        t106::GiveUpRig r{GetParam(), t106::GiveUpParams{}};
+        HoldRelease const releaser{hold, r.d.s};
+        auto& s = r.d.s;
+        auto const opened = r.d.run(s.session->open(), "open");
+        ASSERT_TRUE(opened && opened->has_value()) << "setup: open()";
+        if (r.d.role == session_role::initiator) {
+            auto const c = r.d.run(s.session->drive_reconnect(), "drive_reconnect");
+            ASSERT_TRUE(c && c->has_value()) << "setup: drive_reconnect()";
+        } else {
+            s.session->attach_accepted_transport(
+                std::make_unique<fixpp::session::test::BlockingWriteTransport>(s.ioc.get_executor(),
+                                                                               r.d.stream, r.d.bw),
+                fixpp::transport::handshake_result{});
+        }
+        bool hook_ran = false;
+        session_test_access::set_commit_freeze_hook(r.session(), [&hook_ran] { hook_ran = true; });
+        auto& mgr = session_test_access::seqnum_mgr(r.session());
+        auto const next_in_before = mgr.next_inbound_unsafe();
+        ASSERT_TRUE(take_manager_lock(r, hold)) << "setup: the holder did not take the lock";
+        auto const mark = r.d.bw->recorded.size();
+        auto fed = s.feed_spawn(s.logon(1));
+        s.drain();
+        ASSERT_FALSE(rgs::Scene::ready(fed)) << "setup: the Logon arm did not wait at the lock";
+        if (!close) {
+            hold.release();
+            s.drain();
+            session_test_access::set_commit_freeze_hook(r.session(), nullptr);
+            EXPECT_TRUE(rgs::Scene::ready(fed)) << "the arm did not return";
+            EXPECT_TRUE(hook_ran) << "the arm did not reach its commit";
+            EXPECT_EQ(s.state(), fsm_state::Active);
+            continue;
+        }
+        auto closed = asio::co_spawn(fixpp::test_support::session_executor_of(r.session(), s.ioc),
+                                     s.session->close(fixpp::session::close_mode::terminal),
+                                     asio::use_future);
+        // Bounded pumps, not drain(): with close() waiting behind the held lock a drain() need not
+        // return.
+        bool const returned_while_held =
+            s.pump_until([&] { return rgs::Scene::ready(fed); }, std::chrono::seconds{2});
+        hold.release();
+        bool const close_returned =
+            s.pump_until([&] { return rgs::Scene::ready(closed); }, std::chrono::seconds{2});
+        s.drain();
+        session_test_access::set_commit_freeze_hook(r.session(), nullptr);
+
+        EXPECT_TRUE(returned_while_held) << "the arm did not return while the holder held the lock";
+        EXPECT_TRUE(close_returned) << "close() did not return";
+        EXPECT_FALSE(hook_ran) << "the arm went past its classification";
+        EXPECT_EQ(r.d.bw->recorded.size(), mark) << "writes started after the peer's Logon";
+        auto const history = s.session->fsm_visit_history();
+        EXPECT_EQ(std::count(history.begin(), history.end(), fsm_state::Active), 0) << "Active";
+        EXPECT_EQ(std::count(history.begin(), history.end(), fsm_state::LogonReceived), 0)
+            << "LogonReceived";
+        EXPECT_EQ(mgr.next_inbound_unsafe(), next_in_before) << "NextNumIn";
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(BothRoles, ClassifyDrained106,
+                         ::testing::Values(session_role::acceptor, session_role::initiator),
+                         [](::testing::TestParamInfo<session_role> const& i) {
+                             return i.param == session_role::acceptor ? "Acceptor" : "Initiator";
+                         });
+
+}  // namespace e106
 
 }  // namespace

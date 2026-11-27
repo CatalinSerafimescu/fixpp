@@ -39,17 +39,21 @@
 // the value of close_async_calls when close() first ran, so a cell can tell that the first close
 // was made during a close_async call that threw (that call never reaches its own close()); and
 // fail_next_write (contract C-4.3), which fails the next async_write with transport_write_error and
-// closes nothing, so the reader stays open.
+// closes nothing, so the reader stays open; throw_next_write makes the next async_write throw
+// instead (asio::system_error, or another type), as a transport whose write throws.
 #pragma once
 
 #include <algorithm>
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
+#include <asio/error.hpp>
 #include <asio/redirect_error.hpp>
 #include <asio/steady_timer.hpp>
+#include <asio/system_error.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <cstddef>
+#include <cstdint>
 #include <fixpp/core/error.hpp>
 #include <fixpp/tls/cert_source.hpp>
 #include <fixpp/tls/security_profile.hpp>
@@ -97,6 +101,10 @@ struct blocking_write_state {
     std::optional<std::size_t> close_async_calls_at_first_close;
     // 106 (contract C-4.3): the next async_write fails with transport_write_error; one-shot.
     bool fail_next_write = false;
+    // 106 (T167): the next async_write throws instead of returning, as a transport whose write
+    // throws: asio::system_error (connection_reset), or an exception of another type; one-shot.
+    enum class write_throw : std::uint8_t { none, system_error, other };
+    write_throw throw_next_write = write_throw::none;
     // 105-transport-liveness (tasks.md T052): a parked write that close() wakes completes with
     // success, as a write whose completion was already queued when the transport was closed.
     bool succeed_after_close = false;
@@ -162,6 +170,14 @@ public:
         if (state_->fail_next_write) {
             state_->fail_next_write = false;
             co_return std::unexpected(fixpp::core::error::transport_write_error);
+        }
+        if (auto const t =
+                std::exchange(state_->throw_next_write, blocking_write_state::write_throw::none);
+            t != blocking_write_state::write_throw::none) {
+            if (t == blocking_write_state::write_throw::system_error) {
+                throw asio::system_error{asio::error::connection_reset};
+            }
+            throw std::runtime_error{"BlockingWriteTransport::async_write"};
         }
         if (state_->block_next) {
             state_->parked = true;
