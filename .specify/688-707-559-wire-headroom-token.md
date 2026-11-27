@@ -1,6 +1,6 @@
 # fixpp#688, #707, #559 site 1 — the wire parser's unknown-field view, the writer's passkey and its scratch resource (lane W1 = B103 + B112)
 
-> **Status: v0.4 — Gate A CONVERGED round 3 (2026-11-27): Codex P1/P2/P3 r1 3/7/2, r2 1/2/1, r3 0/2/1; Opus post-judging r1 1/9/7, r2 1/3/6, r3 0/0/9; 2 rewrites + this P3 pass. Owner-delegated sign-off (2026-11-27, parent decisions/speckit/pr-w1-688-707-559-owner-rulings.md).**
+> **Status: v0.5 — the /analyze findings applied (R-W1-5, 2026-11-28) over v0.4. v0.4: Gate A CONVERGED round 3 (2026-11-27): Codex P1/P2/P3 r1 3/7/2, r2 1/2/1, r3 0/2/1; Opus post-judging r1 1/9/7, r2 1/3/6, r3 0/0/9; 2 rewrites + this P3 pass. Owner-delegated sign-off (2026-11-27, parent decisions/speckit/pr-w1-688-707-559-owner-rulings.md).**
 > Issue-mode design note. No code and no test is written yet. Branch
 > `wire-688-707-559-headroom-token`, cut from `origin/main` at `b93b8a28`. What each round changed,
 > and what it declined, is in "Gate A".
@@ -82,7 +82,8 @@
     decisions/speckit/004-wire-codec-*.md` in the parent. `unknown_fields.hpp`'s own header comment still says "no
   vector materialization". The failure #688 describes exists only because of that drift.
 - Re-derive the callers: `git grep -n 'unknown_fields()' -- src include tests bench bindings`.
-  - `src/` has none, and the C ABI has none (`git grep -n -i unknown -- include/fix src/capi`):
+  - `src/` has none, and the C ABI has none (`git grep -n unknown_fields -- include/fix src/capi`
+    prints one comment in `src/capi/message_write.cpp` and no call):
     `[2b §5]` keeps every wire type out of `<fix/c_api.h>`.
   - No binding calls it.
   - The callers are tests: `tests/wire/unknown_fields_test.cpp`,
@@ -252,10 +253,14 @@ in 093's bundle as history.
 - **The public constructor `unknown_fields_view(std::span<kv const>, detail::generation_token)` goes.**
   It is not in the shape oracle. Its only user builds a view by hand
   (`tests/wire/unknown_fields_test.cpp`, the iterator-order cell); that cell moves to the parser path.
-  `kv` stays a public nested type.
+  `kv` stays a public nested type. With the span gone, `unknown_fields.hpp` names no `std::span`, so
+  its `<span>` include goes (IWYU, R-W1-5 E2). An includer that used `std::span` through it must
+  include `<span>` itself; the Linux `all` builds and the MSVC list of §2.6 item 4 show any that did.
 
 **Cost** (`[const §VIII.3]`, a perf change, with a bench in the same PR):
 - Today the first call classifies every entry once and stores the result; later calls are O(1).
+- After D-688-1 a classification runs at every construction of the view (the scan to the first
+  unknown entry) and at every `++` (the scan to the next one) (R-W1-5 F2).
 - After D-688-1, building the view scans as far as the first unknown entry, and every full iteration
   classifies each remaining entry again. A frame with no unknown fields is scanned whole on each call.
 - **What one classification does changes; whether it gets cheaper is measured, not claimed.**
@@ -280,6 +285,20 @@ in 093's bundle as history.
   - `tools/bench_compare.py` compares only the benchmark names both trees have;
   - `[const §VIII.2a]` excludes a candidate-only row from timing for that PR;
   - the base has no such case.
+
+  **The host (R-W1-5 C2).** The cases are appended to `bench/wire/parser_bench.cpp`, after its
+  existing `BENCHMARK`s; the binary is `bench/wire/parser_bench`, already `paired` in
+  `bench/ci-suite.txt`, and `bench/ci-suite.txt` does not change.
+  - `[const §VIII.2a]` makes a `paired` entry irreversible, so W1 adds no manifest entry. On CI the
+    new rows are candidate-only: excluded from timing for this PR, and still gated on execution and
+    schema.
+  - They are appended after the existing cases so that the shared rows' code moves as little as
+    possible.
+  - They run over a table loaded from `dictionaries/FIX44.xml`, as `validator_bench` does, through
+    `FIXPP_DICT_DATA_DIR`. Over `parser_bench`'s empty `table_view tv{}` every non-framing tag is
+    unknown in both trees, so the no-unknown shape could not exist. So `bench/wire/CMakeLists.txt`
+    gives `parser_bench` that compile definition (`fixpp_dictionary` already reaches it through
+    `fixpp_wire`'s public link), and the base worktree gets the same CMake edit.
 
   The new cases use only `unknown_fields()`, `begin()`, `end()`, `empty()` and a range-`for` that
   binds `auto const&`, and all of these compile on both trees. So the PR's bench source is copied into
@@ -318,6 +337,13 @@ in 093's bundle as history.
     alternative, and D-707 and D-559 may then ship split out.
   - **An extra hard rule:** a regression past the band on the per-message dispatch path, which is
     CI's paired rows, blocks the merge and goes to the owner.
+  - **How CI's paired rows are read (R-W1-5 B1).** `parser_bench` and `writer_bench` are `paired` in
+    `bench/ci-suite.txt`. Their shared rows are read from the bench job's output against
+    `[const §VIII.2]`'s +5%; a green sentinel is not compliance. Any shared row above +5% follows the
+    PR-thread route above: its figures are posted with the orchestrator's recommendation, and the
+    owner's ratification there is a merge condition. CI's paired comparison has no A-A control, so a
+    shared row can pass the band on layout alone; such a row is still posted, with the local A-A
+    spread beside it.
 
 ### 1.5 API, C ABI and layout
 
@@ -407,6 +433,9 @@ in 093's bundle as history.
 3. **The predicate (R-W1-3).** Each new cell is RED on the base.
    - A tag the table defines only for another MsgType is not yielded. As a cross-check, the validator
      still answers `wire_unexpected_tag` on the same frame.
+   - Item 3's real-dictionary cells live in a new file, `tests/wire/unknown_fields_dict_test.cpp`, in
+     the `wire_dict_tests` bucket, which links `fixpp_dictionary` and defines `FIXPP_DICT_DATA_DIR`
+     as the source tree's `dictionaries/` (R-W1-5 C4).
    - A FIX 5.0 cell: load `dictionaries/FIX50SP2.xml`, parse a NewOrderSingle with the standard header
      and one undefined tag, and assert that only the undefined tag is yielded. Run it on the base first
      and record the RED. Until that run, the RED is a reading, not a measurement.
@@ -414,6 +443,11 @@ in 093's bundle as history.
      tag it is told anything about (the comment on `table_view::mark_defined`), so 35 and 34 are
      defined and 5000 is not.
 4. **Zero allocation.** Each instrument names what makes it report non-zero.
+   - **What it catches beyond item 1 (R-W1-5 A2).** Item 1's counter is the block's upstream, so it
+     sees an allocation only once the block is spent. An allocation that fits in what the block has
+     left (its alignment slack, or room a sweep step leaves) reaches no upstream. Item 4's counter is
+     the parse resource itself, so it sees every allocation `unknown_fields()` makes, whatever its
+     size, on a frame not sized at the edge.
    - **The wire cell.** A counter upstream of a block too large to exhaust is never called, so it
      could not report a list that creeps back. The counter is the parse resource itself:
      `fixpp::test_support::pmr_allocation_tracking_resource` over a monotonic block, its
@@ -443,6 +477,14 @@ in 093's bundle as history.
      `lifetimebound` choice (§1.4). On the base it fails to compile on clang under `-Werror`
      (`-Wdangling`); on gcc it compiles and passes, because the base iterator is valid at runtime.
    - New: the `same_as` assert of §1.4, `operator*` returns `kv` by value. RED on the base.
+   - New (R-W1-5 C5): the removed constructors stay removed.
+     `static_assert(!std::is_constructible_v<unknown_fields_view, std::span<unknown_fields_view::kv const>, detail::generation_token>)`
+     and `static_assert(!std::is_constructible_v<unknown_fields_view::iterator, unknown_fields_view::kv const*>)`,
+     both RED on the base. Known positive: `static_assert(std::is_nothrow_default_constructible_v<unknown_fields_view>)`.
+   - The static pins of this item and of §2.6 and §3.5 that are RED on the base sit in one sibling TU
+     of the grouped wire bucket, apart from the behavioural cells, because a pin that does not compile
+     on the base takes its whole TU down with it, and the behavioural cells must show their own RED
+     there.
    - New: a view iterated after its `Parser` is destroyed, with the dictionary alive, still classifies.
      This extends the existing post-`Parser`-destroy cell from the first call to iteration.
    - New, debug only: the generation check (§1.4). In `tests/wire/lifetime_trap_test.cpp`, inside its
@@ -457,8 +499,10 @@ in 093's bundle as history.
      - RED on the base, whose iterator never checks.
 6. **Mutants.**
    - Reintroduce a materialised list over the parse resource: cell 1's zero-upstream assertion goes RED.
-   - Drop the classification (yield every entry): `DictBoundUnknownSplit` goes RED.
-   - Drop the framing exemption: the framing-tag cell goes RED.
+   - Drop the classification (yield every entry): `DictBoundUnknownSplit` goes RED (35 and 34 are
+     yielded).
+   - Drop the framing exemption: `EmptyDictAllTagsUnknown` (its `has_framing` check) and
+     `DictBoundUnknownSplit` (exactly one tag yielded) go RED (R-W1-5 C3).
    - `tag_defined` back to `field_valid_for`: the predicate cells of item 3 go RED.
    - Skip group-contained entries, and deduplicate equal tags: item 5's group and duplicate cells go
      RED.
@@ -468,7 +512,10 @@ in 093's bundle as history.
      stops compiling on clang (§A.4, the `KEEP_LB` variant).
    - Remove the iterator's generation check from `operator*`, or from `operator++`: the matching
      arm of item 5's generation cell goes RED, on a debug lane.
-7. **Fuzz** (`[const §VII.7]`, parser-adjacent). `tests/fuzz/fuzz_wire_parser.cpp` gains a property
+7. **Fuzz** (`[const §VII.7]`, parser-adjacent). The properties' reference is the harness table's own
+   `tag_defined`, which the harness calls directly (R-W1-5 B3). So the check says that the view's
+   yield agrees with that predicate entry by entry, not that the predicate is right;
+   `TagDefined101`'s exact-set cells own the predicate. `tests/fuzz/fuzz_wire_parser.cpp` gains a property
    check. A differential against a filter that uses the same classifier would be tautological, so the
    check states the properties instead:
    - every yielded tag is one for which the dictionary's `tag_defined` is false, and none is 8, 9 or
@@ -559,7 +606,7 @@ checked by trait:
 | Hits (the class that holds the friend line, or the name-scan type) | Disposition |
 |---|---|
 | `wire::group_writer_token`, `dict::detail::snapshot_key` | Passkeys, and forgeable (below). |
-| `SeqnumManager::freeze_key` | A passkey, fixed by 104. The trait TU keeps it as the shape's regression row. |
+| `SeqnumManager::freeze_key` | A passkey, fixed by 104. Its pins stay where 104 put them (`tests/session/test_104_reset_on_logout.cpp`), and they are the shape's regression row; W1 does not repeat them. |
 | Classes with state and behaviour whose friends are owners, builders, loaders or `*_test_access` seams: `Dictionary`, `table_view`, `MessageView`, `OffsetTable`, `dict_hooks`, `Framer`, `Writer`, `group_writer`, `body_builder` with `group_handle` and `entry_handle`, `async_mutex`, `Session`, `Engine`, `SeqnumManager`, `MemoryStore`, `owning_message_handle` | Not passkeys. Each has data members and member functions. |
 | Guarded objects with a private constructor and data: `async_lock_guard`, `table_view`'s `valid_tag_set_view` | Not passkeys. The private constructor guards an object, not a call. |
 | `wire::frame_view`, `wire::field_view` | Not passkeys: flyweights (below). |
@@ -586,7 +633,10 @@ checked by trait:
   - `reserve_tag` is a private nested type, so only the class and its friends can name it;
   - `owned_route_key` is documented as constructible anywhere;
   - `shared_ctx_tag` is public and default-constructible by design.
-- **`SeqnumManager::freeze_key` was fixed by 104.** The trait TU keeps it as the shape's regression row.
+- **`SeqnumManager::freeze_key` was fixed by 104.** 104's own pins in
+  `tests/session/test_104_reset_on_logout.cpp` are the shape's regression row (R-W1-5 A1). A copy in
+  the W1 wire TU would duplicate them and pull a session header into `wire_pure_tests`, which links
+  `fixpp_wire` alone.
 
 ### 2.3 D-707-1 — `group_writer_token`
 
@@ -690,6 +740,12 @@ closed another way.
      concept can say yes for an empty friend-gated class.
    - Name every replica without the substring `snapshot_key`. G1's name census greps for that substring
      in every test file but its allowlisted one.
+   - **One shared guard header (R-W1-5 C1).** The guard and its `kHasTrait` live in one header,
+     `tests/support/implicit_lifetime_trait.hpp`, as `inline constexpr bool`, included by both pin
+     TUs: the `tests/wire` passkey TU and `tests/dictionary/dictionary_snapshot_test.cpp`. Its name
+     and its whole text contain no `snapshot_key` substring, because G1's name census greps the
+     contents of every file under `tests/` but its allowlisted one. Each of the two TUs has its own
+     per-lane `kHasTrait` cell, under distinct suite names.
    - **The implicit-lifetime guard has this shape** (§A.3):
      `#if defined(__has_builtin)`, then a nested `#if __has_builtin(__builtin_is_implicit_lifetime)`.
      If that leaves the trait undefined, a second branch tries `defined(__cpp_lib_is_implicit_lifetime)`
@@ -731,8 +787,22 @@ closed another way.
      replica as its known positive: for the replica the conjunction holds (§A.3).
 3. **Behaviour.** `writer_error_path_test` and `round_trip_property_test` (`open_group`) stay green,
    and so do the snapshot tests.
-4. **MSVC.** Build `windows-msvc-debug` with `-k 0` on the touched targets (the wire and dictionary
-   buckets, `fixpp_wire`, `fixpp_dict`), and run the per-lane trait cell of item 1. MSVC's
+4. **MSVC.** Build `windows-msvc-debug` with `-k 0` on one target list covering every target W1
+   touches (R-W1-5 E1), and run the per-lane trait cells of item 1.
+   - **The list:** the libraries `fixpp_wire`, `fixpp_dictionary` and `fixpp_session`
+     (`src/session/admin_messages.cpp` and `session.cpp` construct a `Writer`); `wire_pure_tests`
+     and `wire_dict_tests`; `dictionary_pure_tests` (`dictionary_snapshot_test.cpp`),
+     `dictionary_fixt_header_merge_test` and `dictionary_reify_shared_table_concurrency_test`;
+     `session_inbound_frame_dispositions` (Q-33, Sc007); `wire_alloc_guard_test`; and the targets
+     that compile `tests/interop/conversation/support/conv_wire.hpp`: `interop_conversation_test`,
+     `interop_hp_fixt50sp2_logon_hb_logout_test` and `interop_readback_witness_test`.
+   - `parser_bench` and `writer_bench` are not in it: `windows-msvc-debug` inherits `_base`, which
+     does not build benches (`FIXPP_BUILD_BENCH` in the sandbox's `CMakeCache.txt` shows it).
+   - **Re-derive the list** at implementation: for each file the diff touches under `src/`, `tests/`
+     and `bench/`, the target whose `compile_commands.json` entry compiles it, plus every target
+     that compiles a file including a touched `tests/` header; confirm each name with
+     `cmake --build <tree> --target help`.
+   - The `kParseContainers` recipe (§1.5) runs in the same sandbox session. MSVC's
    `std::bit_cast` and `std::expected` are the ones not probed in §A, and the build shows whether
    they compile. Whether the implicit-lifetime pins are evaluated there is the trait cell's answer,
    since a clean build is the outcome of both states.
@@ -795,6 +865,8 @@ closed another way.
 
 - `include/fixpp/wire/writer.hpp`:
   - drop the parameter, its `[[clang::lifetimebound]]` and the member;
+  - drop the `<memory_resource>` include, which nothing else in the header uses (IWYU, R-W1-5 E2;
+    an includer that used `std::pmr` through it must include it itself);
   - the design-summary comment and the constructor comment say `Writer(dst)`.
 - `src/wire/writer.cpp`: the constructor.
 - **Every caller**, re-derived with `git grep -n -E 'wire::Writer[ ]*[a-z_]*[({]|\bWriter [a-z_]+[({]' --
@@ -922,8 +994,9 @@ and W1 does site 1, so **the W1 PR closes #559**, and its body names #735 as the
   - **Codex Gate A:** this loop. Round 1 is applied in v0.2, round 2 in v0.3, and round 3, the converged round, in v0.4
     ("Gate A").
   - **`/clarify`:** by hand. The rulings record is its record (R-W1-1 to R-W1-4).
-  - **`/analyze`:** by the spec-analyzer over the converged note, after Gate A and before
-    implementation. Pending.
+  - **`/analyze`:** by the spec-analyzer over the converged v0.4 note, after Gate A and before
+    implementation. Its findings and their dispositions are R-W1-5 in the rulings record, and v0.5
+    applies them.
   - **Owner `/plan` sign-off:** the owner's delegation of 2026-11-27. The rulings record states that
     the delegation is the Article X §6 / XII §9 `/plan` sign-off for W1, as for 106 and 107.
 
@@ -963,7 +1036,10 @@ Re-run each recipe at implementation and disposition every hit.
     iterator's `operator*` returning `kv` by value, and why (§1.4, the iterator contract); and §6.4,
     whose "called from every accessor" gets an "as built since W1" line naming the unknown-field
     view's and iterator's check sites (§1.4, the generation check);
-  - 093's contract C-8 L-5 and C-3 I-5: the `unknown_fields()` clause.
+  - 093's contract C-8 L-5 and C-3 I-5: the `unknown_fields()` clause;
+  - 093's contract C-7 row 18 (`specs/093-inbound-frame-dispositions/contracts/`), the
+    `unknown_fields()` row "returns an empty view on arena exhaustion": an "Amended (W1)" line says
+    that since W1 it allocates nothing, so there is no exhaustion to report (R-W1-5 F3).
 - **Flag in brain `components/wire.md`'s "Superseded records, flagged in place"**, frozen and not
   edited:
   - `specs/004-wire-codec/contracts/unknown_fields.hpp`, the shape oracle's `[[clang::lifetimebound]]`
@@ -980,6 +1056,9 @@ Re-run each recipe at implementation and disposition every hit.
     set. Since W1 the parser classifies by `tag_defined`. The invariant itself, classification
     identical with strict validation on or off, still holds (§1.4).
 - **Code comments, amended in the PR:**
+  - `table_view::tag_defined`'s comment, which reads "Cold: the validator asks only after a tag
+    failed the message's set". It names both readers: the validator, as before, and
+    `unknown_fields()`, which asks for every non-framing entry it walks (R-W1-5 F1);
   - the comment above `table_view::is_fixt_framing_tag`, which gives "the inbound parser's
     `unknown_fields()` classification" as a reason to keep the framing tags out of `valid_`. The
     reason narrows to the validator's own accessors;
@@ -1010,15 +1089,20 @@ Re-run each recipe at implementation and disposition every hit.
   stand", gains: the passkey's shape is superseded by W1 (D-707-2); the pairing, the sole minter and the
   provenance check stand. It names 215's §3 key declaration, its §5a `snapshot_key` row and §6 seam
   7's `G1_MINT`.
+  - Its 101 entry ("a sorted `std::vector<std::uint16_t>`, binary-searched … the lookup is cold") is
+    flagged in place, not edited: since W1 `unknown_fields()` asks `tag_defined` for every
+    non-framing entry it walks, so the lookup is no longer cold for that reader. Whether the sorted
+    vector still stands is decided by the bench result (§1.4), not by this note (R-W1-5 F1).
 - **brain `failure-classes.md` class 24.** Its scanning heuristic becomes §2.2's recipe and condition.
   Its instance list gains `group_writer_token` (fixed) and `snapshot_key`, and the form gains the
-  implicit-lifetime clause and the `make_shared` variant. That edit is the owner-approved form of
-  104's anti-pattern candidate (close-out row 15); it lands only on that approval.
+  implicit-lifetime clause and the `make_shared` variant. **The edit is not made in this PR** (R-W1-5
+  F4): it is proposed to the owner at close-out (row 15), as anti-pattern candidates always are, and
+  lands only on that approval.
 
 ## 7. Rulings applied (no open design question)
 
 v0.1's Q-1 and Q-2 are answered. The rulings record (`decisions/speckit/pr-w1-688-707-559-owner-rulings.md`
-in the parent) holds each one; all four are orchestrator rulings under the owner's 2026-11-27
+in the parent) holds each one; each is an orchestrator ruling under the owner's 2026-11-27
 delegation, flagged for the owner's review at merge.
 
 - **R-W1-1 (Q-1):** `SessionConfig::message_arena` is split out as fixpp#735 (B31 / S8), and W1 closes
@@ -1035,6 +1119,12 @@ delegation, flagged for the owner's review at merge.
   condition; "merge if green" does not cover it. If no row is over the band, no approval is needed. A
   regression past the band on the dispatch path (CI's paired rows) blocks the merge and goes to the
   owner (§1.4).
+- **R-W1-5 (/analyze on v0.4):** applied in v0.5. B1: CI's paired `parser_bench` and `writer_bench`
+  rows are read from the job output against +5%, and a shared row above it takes the PR-thread route
+  (§1.4). C1: one shared implicit-lifetime guard header (§2.6 item 1). C2: the bench cases' host is
+  `parser_bench`, with no manifest change (§1.4). E1: one MSVC target list (§2.6 item 4). F1: the
+  `tag_defined` comment and brain `dictionary.md`'s rationale (§6). The LOWs A1, A2, B2, B3, C3, C4,
+  C5, E2, F2 and F3 are applied where each names; F4: the class-24 edit is not in this PR (§6).
 
 No technical question is left open. One owner act may be needed later, and it is conditional: the
 PR-thread ratification of an over-band bench row, if the measurement produces one. `[2b §4.8]`, R-W1-3 and the correctness rule settle #688. The
@@ -1245,8 +1335,8 @@ int main() {}
 Result: all three asserts fire for each of the four types. `frame_view` and `field_view` are
 dispositioned in §2.2 (flyweights with public minting seams).
 
-The PR's version of this TU keeps only the passkeys, with `SeqnumManager::freeze_key` added as the
-shape's regression row. `snapshot_key`'s pins go in `tests/dictionary/dictionary_snapshot_test.cpp`,
+The PR's version of this TU keeps only `group_writer_token`. `SeqnumManager::freeze_key`'s pins stay
+in 104's `tests/session/test_104_reset_on_logout.cpp` (§2.2). `snapshot_key`'s pins go in `tests/dictionary/dictionary_snapshot_test.cpp`,
 not here. G1's name census (`G1_ALLOW` in the exclusivity gate) admits that one test file, and naming
 the key in any other test fails it.
 
