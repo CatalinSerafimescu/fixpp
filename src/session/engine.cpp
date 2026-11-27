@@ -464,7 +464,8 @@ using fixpp::session::detail::read_first_frame_bounded;
 //   establishment deadline → note_establishment_timeout, close session terminal,
 //                           stop pump (093, C-4). 105 (research D4; data-model E-5): the
 //                           timeout's event and record only when the session has not
-//                           recorded its own ending; the close either way.
+//                           recorded its own ending; the close either way. 106 D11
+//                           and R22 replace that test (expire; claim-ok: a clarification id).
 //   connection-end latch   → 105 D1 (research D1 item 2), superseding the rule that a
 //                           frame's Disconnected leaves the transport open: after every
 //                           on_inbound_frame return the latch is tested and cleared
@@ -545,7 +546,13 @@ asio::awaitable<void> run_read_pump(
     };
     auto expire = [&]() -> asio::awaitable<void> {
         // 105 (research D4; data-model E-5): unless the session has recorded its own ending.
-        if (session.state() != fsm_state::Disconnected) {
+        // 106 D11 supersedes 105's no-ending-recorded test: the claim decides (data-model E-10;
+        // the Disconnected edge takes a free claim, so a session that ended itself refuses).
+        // 106 R22 (spec.md Clarifications; claim-ok: a clarification id): a claim refused
+        // because close(), Engine::stop() or a reconnect drain owns the ending still records,
+        // since those write no reason record; a claim held by another decider records nothing.
+        if (session_engine_access::claim_ending(session) ||
+            session_engine_access::ending_owned_without_record(session)) {
             session_engine_access::note_establishment_timeout(session);
         }
         co_await stop_pump();
@@ -942,16 +949,18 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
     }
     // FR-014: bound the TLS handshake with a short timeout so stalled or
     // non-TLS clients are rejected promptly (part of the bounded first-frame
-    // window). 1500ms is long enough for a real mTLS handshake on a loaded host
-    // and short enough that a non-TLS peer cannot hold an accept slot. This
-    // bound is INDEPENDENT of the Step-3 kFirstFrameDeadline below: the
-    // handshake timer is cancelled the moment async_handshake returns
+    // window). 106 D6 supersedes 015 FR-014's hard-coded 1500 ms:
+    // `EngineConfig::acceptor_tls_handshake_timeout` (default 1500 ms). The default is long
+    // enough for a real mTLS handshake on a loaded host and short enough that a non-TLS peer
+    // cannot hold an accept slot. This bound is INDEPENDENT of the Step-3 kFirstFrameDeadline
+    // below: the handshake timer is cancelled the moment async_handshake returns
     // (asio_tls_transport.cpp), so a peer that handshakes and then stalls is
     // reclaimed by kFirstFrameDeadline, not by this value. (#228 — the previous
     // wording sized this bound against a test probe's self-deadline, and the
     // figure it quoted did not match the value.)
     // Unread on the plaintext path (D-12); left set unconditionally.
-    lcfg.accepted_transport_config.tls_handshake_timeout = std::chrono::milliseconds{1500};
+    lcfg.accepted_transport_config.tls_handshake_timeout =
+        engine_cfg.acceptor_tls_handshake_timeout;
 
     std::unique_ptr<fixpp::transport::asio_listener> listener;
     try {

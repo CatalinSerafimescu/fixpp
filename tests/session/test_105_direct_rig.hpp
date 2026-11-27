@@ -23,6 +23,7 @@
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
+#include <fixpp/core/error.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/transport/endpoint.hpp>
@@ -47,13 +48,18 @@ namespace bwt = fixpp::session::test;
 namespace rgs = fixpp::test_support::resend_gap;
 
 // Counts the lifecycle callbacks; runs a hook from toAdmin with the frame's MsgType(35), before
-// the frame's number and store call.
+// the frame's number and store call. Optionally refuses one administrative MsgType in fromAdmin
+// and every application message in fromApp (app_do_not_send); both off by default.
 class DirectApp final : public rgs::GapApp {
 public:
+    int logons = 0;
     int logouts = 0;
     int from_admin_logouts = 0;
     std::function<void(std::string_view)> to_admin_hook;
+    std::string refuse_admin_type;  // empty: fromAdmin accepts every administrative message
+    bool refuse_app = false;
 
+    void onLogon(const fixpp::session::SessionId& /*id*/) override { ++logons; }
     void onLogout(const fixpp::session::SessionId& /*id*/) override { ++logouts; }
     void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
                  const fixpp::session::SessionId& id) override {
@@ -64,7 +70,16 @@ public:
         const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
         const fixpp::session::SessionId& /*id*/) override {
         if (msg.msg_type() == "5") ++from_admin_logouts;
+        if (!refuse_admin_type.empty() && msg.msg_type() == refuse_admin_type) {
+            return std::unexpected(fixpp::core::error::app_do_not_send);
+        }
         return {};
+    }
+    fixpp::core::expected_t<void> fromApp(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
+        const fixpp::session::SessionId& id) override {
+        if (refuse_app) return std::unexpected(fixpp::core::error::app_do_not_send);
+        return rgs::GapApp::fromApp(msg, id);
     }
 };
 
@@ -78,10 +93,12 @@ public:
     std::shared_ptr<bwt::blocking_write_state> bw = std::make_shared<bwt::blocking_write_state>();
     std::shared_ptr<bwt::ScriptedStream> stream = std::make_shared<bwt::ScriptedStream>();
 
-    // The session's config is the Scene's, logout_disconnect_timeout_ms 500, then tweak(cfg).
+    // The session's config is the Scene's, logout_disconnect_timeout_ms 500, then tweak(cfg);
+    // shape_scene(s), when set, runs last, before the session is built (an EngineConfig change).
     explicit DirectRig(fixpp::session::session_role r,
                        std::function<void(fixpp::session::SessionConfig&)> const& tweak = {},
-                       bool with_clock = true)
+                       bool with_clock = true,
+                       std::function<void(rgs::Scene&)> const& shape_scene = {})
         : role{r}, s{rgs::Options{.role = r, .with_clock = with_clock, .app = app}} {
         bw->record_bytes = true;
         stream->hold_open = true;
@@ -107,6 +124,7 @@ public:
             s.cfg.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 19099};
         }
         if (tweak) tweak(s.cfg);
+        if (shape_scene) shape_scene(s);
         s.session = std::make_unique<fixpp::session::Session>(s.engine, s.cfg);
     }
 

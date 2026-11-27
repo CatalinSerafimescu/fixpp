@@ -852,6 +852,13 @@ enum class error : std::uint8_t {
                                   //   (table_view::tag_defined). RefTagID is the tag.
                                   //   → SessionRejectReason 0;
                                   //   → C-ABI FIXPP_ERR_WIRE_CONFORMANCE
+    // ── 106-logon-guards-write-bounds ─────────────────────────────────────
+    //    specs/106-logon-guards-write-bounds/data-model.md E-8. Appended after the
+    //    101 block per [const §X.4] (append-only, no numeric reuse).
+    session_write_timeout = 136,  // contract C-4.3 — a live write did not complete
+                                  //   within SessionConfig::write_timeout_ms; the
+                                  //   write that was cut returns it.
+                                  //   → C-ABI FIXPP_ERR_TRANSPORT_IO
 };
 
 // ── 035-filestore-io-offload: FR-021 store_* error-set freeze guard ──────────
@@ -1118,6 +1125,9 @@ using expected_t = std::expected<T, error>;
             return "wire: invalid msg type";
         case error::wire_undefined_tag:
             return "wire: undefined tag";
+        // ── 106-logon-guards-write-bounds (slot 136) ──────────────────────
+        case error::session_write_timeout:
+            return "session: write did not complete within write_timeout_ms";
     }
     return "unknown error";
 }

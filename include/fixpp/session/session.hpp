@@ -27,6 +27,7 @@
 #include <asio/post.hpp>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <exception>  // std::uncaught_exceptions: ending_write_unwind_guard
@@ -37,8 +38,9 @@
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/core/session_local.hpp>
 #include <fixpp/core/trace_context.hpp>
-#include <fixpp/session/detail/log_rate_gate.hpp>  // 105 (research D8): log_rate_gate
-#include <fixpp/session/detail/replay_gate.hpp>    // 103 (research D5′): replay_gate_
+#include <fixpp/session/compid_authorization_policy.hpp>  // bound_principal
+#include <fixpp/session/detail/log_rate_gate.hpp>         // 105 (research D8): log_rate_gate
+#include <fixpp/session/detail/replay_gate.hpp>           // 103 (research D5′): replay_gate_
 // 066-dict-backed-inbound-parse T002: inbound_tv_ is a
 // std::optional<table_view> Session MEMBER (not a unique_ptr to an
 // incomplete type like validator_), so table_view must be complete here.
@@ -731,7 +733,9 @@ public:
     // Two caller preconditions every Session awaitable has, named here because the bounds
     // and the gate make them checkable or load-bearing: close() runs before the Session is
     // destroyed (close() joins the too-high Logout's bound, 105's ending Logout bound and its
-    // close frame, and ~Session asserts each counter is 0 in builds with assertions, with no
+    // close frame, and 106's connection bound, which runs on every opened session's connection
+    // from its first limited write or its liveness loop's start, and ~Session asserts each
+    // counter is 0 in builds with assertions, with no
     // exemption (105-transport-liveness, contract C-9; B-103-13); a release build does not
     // check, and a bound still alive then resumes into a destroyed Session, as the liveness
     // loop already would); and research D1's
@@ -1487,10 +1491,33 @@ private:
     // Disconnected), true when it admits it or the session is not mTLS. Its callers, both Logon
     // arms (104): `git grep -n 'logon_identity_admitted_()' -- src`.
     [[nodiscard]] bool logon_identity_admitted_() noexcept;
+    // 106 (research D1 item 2; data-model E-1): the identity decision a Logon arm's
+    // validate-first Reject is held behind. True when an identity gate that applies refuses:
+    // the mTLS half (mtls_ca or mtls_pinned, either role) evaluates the mTLS gate's arms with
+    // no event and nothing consumed; the credentials half (the acceptor, whatever its security
+    // profile) reads Username(553) and Password(554) through interpret_logon, refuses what
+    // authorize_logon refuses, and refuses a frame interpret_logon refuses when
+    // has_logon_validator(). A refusal then runs the consuming mTLS gate, for its event. Its
+    // locals stay in its own frame, so none enters an arm's coroutine frame (104 T093).
+    [[nodiscard]] bool logon_identity_refuses_(std::span<const std::byte> frame);
+    // 106 (research D1 item 2): both Logon arms' test before a validate-first Reject. True when
+    // the arm ends with nothing written: logon_identity_refuses_() refuses, or the Reject ends the
+    // arm (logon_reject_disconnects_) and the consuming gate (logon_identity_admitted_()) refuses.
+    // Evaluated in that order, short-circuiting, so the consuming gate runs only on the second
+    // branch. Synchronous, so none of its locals enters an arm's coroutine frame (104 T093).
+    [[nodiscard]] bool held_reject_refused_(std::span<const std::byte> frame,
+                                            fixpp::session::detail::FrameHeader const& hdr,
+                                            int ref_tag_id);
+    // 106: the mTLS gate's one authorize computation, which logon_identity_admitted_() and
+    // logon_identity_refuses_() share; pid is the live handshake identity (*live_peer_id_).
+    [[nodiscard]] fixpp::core::expected_t<fixpp::session::bound_principal> authorize_live_identity_(
+        fixpp::tls::peer_identity const& pid) const noexcept;
+    // 106: the session's security profile is mtls_ca or mtls_pinned (the mTLS gate applies).
+    [[nodiscard]] bool mtls_gate_applies_() const noexcept;
     // The acceptor's credentials gate (033 T023): the Logon's Username(553) and Password(554)
     // through compid_authorization_policy.authorize_logon, the asserted CompID being the
-    // peer's SenderCompID (cfg_.target_comp_id). A member since 104 (contract T8), so a too-low
-    // Logon runs it before its Logout. Its callers:
+    // peer's SenderCompID (cfg_.target_comp_id). 106 D1: the acceptor's arm runs it once, after
+    // interpret_logon, and logon_identity_refuses_() for a held validate-first Reject. Its callers:
     // `git grep -n 'logon_credentials_admitted_(' -- src`.
     [[nodiscard]] bool logon_credentials_admitted_(logon_interpret_result const& logon) const;
     // The Active arm's synchronous SendingTime(52) MaxLatency check.
@@ -1944,6 +1971,9 @@ private:
         replay_gate_.wake_all();
         // 103 (research D4.4, D4.6): engine stop claims a pending mark and wakes the bound.
         claim_peer_logout_none_();
+        // 106 (data-model E-3, the wakers): Engine::stop()'s step 1 wakes the connection bound,
+        // which leaves on the closing_or_stopped_() term.
+        wake_connection_bound_();
     }
 
     // ── 103 (fixpp#577, research D4.2 to D4.6) — a too-high Logout ─────────────
@@ -2093,7 +2123,9 @@ private:
     std::shared_ptr<std::atomic<int>> liveness_counter_{std::make_shared<std::atomic<int>>(0)};
     // The liveness loop's body; run_liveness_loop awaits it and then releases the
     // connection-end latch, so the release runs only on an exit the loop resumed to.
-    [[nodiscard]] asio::awaitable<void> run_liveness_loop_body_() noexcept;
+    // adopted_bound: set by the body once it has spawned or adopted the connection bound (106,
+    // the exit's loop_left).
+    [[nodiscard]] asio::awaitable<void> run_liveness_loop_body_(bool& adopted_bound) noexcept;
 
     // ── 105-transport-liveness: the connection-end latch (research D1; data-model E-2) ──
     // Supersedes, for the connection, the rule that writing Disconnected is a state
@@ -2135,7 +2167,9 @@ private:
     using connection_close_join = counter_join;
     // The close frame (research D1 item 5): awaits close_async() on the transport it holds and
     // touches no member of Session, so its own spawn chain keeps close_async's cancellation
-    // reset (research F-6).
+    // reset (research F-6). When close_async() throws, the frame calls the synchronous
+    // Transport::close() instead: 105's C-8.6 widened by 106
+    // (spec.md R23, claim-ok: a clarification id).
     static asio::awaitable<void> close_transport_(
         connection_close_join join, std::shared_ptr<fixpp::transport::Transport> transport);
     // Test seam (research D10, the spawn-failure seams): when set and it returns true,
@@ -2265,6 +2299,130 @@ private:
     // session_test_access.
     std::function<bool()> ending_bound_spawn_fails_;
     std::function<bool()> ending_bound_race_throws_;
+    // 106-logon-guards-write-bounds (research D9; data-model E-3): the connection bound's test
+    // seams, in the shape of the two above. When set and they return true, the bound's spawn
+    // fails and the bound's wait throws. Set only through session_test_access.
+    std::function<bool()> connection_bound_spawn_fails_;
+    std::function<bool()> connection_bound_wait_throws_;
+
+    // ── 106-logon-guards-write-bounds: one ending claim (research D11; data-model E-10) ──────
+    // Who decided this connection's ending. Reset to none in begin_connection_(); the
+    // Disconnected edge takes it as internal when it is none, so a decider after any ending finds
+    // it taken. Session strand only.
+    enum class ending_claim : std::uint8_t {
+        none,
+        give_up,
+        write_timeout,
+        ending_logout,
+        establishment_timeout,
+        internal
+    };
+    ending_claim ending_claim_ = ending_claim::none;
+    // Takes the claim for who: refused when it is taken, when closing_or_stopped_() holds (a
+    // close() that has begun owns the ending) or while a reconnect drain owns the connection's
+    // close. No suspension between the test and the set. Synchronous.
+    [[nodiscard]] bool claim_ending_(ending_claim who) noexcept {
+        if (ending_claim_ != ending_claim::none || closing_or_stopped_() ||
+            reconnect_drain_in_flight_) {
+            return false;
+        }
+        ending_claim_ = who;
+        return true;
+    }
+
+    // ── 106: the connection bound (research D3, "The primitive"; data-model E-3) ──────────────
+    // One coroutine per connection, spawned by the liveness loop at its start or by the first
+    // live write with the limit on, whichever comes first, on that coroutine's executor; joined
+    // by connection_bound_counter_. It decides the give-up while the loop is suspended in its
+    // own emit (emit_in_flight_), and times every live write but a Logout's while
+    // SessionConfig::write_timeout_ms is set (106 D5). Session strand only.
+    struct connection_bound_state {
+        bool running = false;
+        std::uint32_t gen = 0;  // the connection generation it was spawned for
+        bool shipping = false;  // effective_clock_ is system_clock_source (tested at the spawn)
+        std::function<void()> wake;  // cancels the bound's own timer; set by the bound only
+        // A liveness loop that spawned or adopted it has ended (set at that loop's exit,
+        // data-model E-3's joiner row "teardown without close()"). A loop that leaves before
+        // its spawn point (HeartBtInt 0) sets nothing.
+        bool loop_left = false;
+        // Spawned on this connection (reset by begin_connection_()): the first live write with
+        // the limit on spawns it only when none was, so it is spawned at most once per
+        // connection outside drive_reconnect's respawn (data-model E-3).
+        bool spawned = false;
+        // T, set by the liveness loop when it spawns or adopts the bound; read for G while the
+        // loop's emit is in flight.
+        std::chrono::milliseconds threshold{0};
+        // The deadline of the bound's current wait (max when parked); a live write's start
+        // wakes the bound only when this is later than the write's own deadline.
+        fixpp::core::steady_time_point armed_until = fixpp::core::steady_time_point::max();
+    };
+    connection_bound_state connection_bound_;
+    // 106 (research D5; data-model E-3, E-5): the write limit's state, written by
+    // live_write_serialized_ just before its async_write with SessionConfig::write_timeout_ms
+    // set (write_cut_epoch_ by the bound's expiry); begin_connection_() clears the flag and
+    // the cut epoch. A write's epoch is never 0, so 0 in write_cut_epoch_ means no write of
+    // the connection was cut. Session strand only.
+    fixpp::core::steady_time_point write_started_at_;
+    std::uint32_t write_epoch_ = 0;
+    bool write_in_flight_ = false;
+    std::uint32_t write_cut_epoch_ = 0;
+    // The write limit's expiry (data-model E-5's steps, in their order). Synchronous.
+    void expire_write_() noexcept;
+    // The fail-closed ending of a connection whose bound cannot be spawned or respawned (research
+    // D3, "Spawn failure", "One close"): the claim, Disconnected and one close. Synchronous.
+    void fail_closed_without_bound_() noexcept;
+    // The tail every decider of the connection's ending shares once it holds the claim (research
+    // D3, "One close"): Disconnected unless already, then, while the session is open, the
+    // connection's one close. The claim is the caller's. Synchronous.
+    void end_connection_now_() noexcept;
+    // Set by the liveness loop while its TestRequest or Heartbeat emit has not returned; cleared
+    // by an RAII guard in the loop's frame at the return or an exception.
+    bool emit_in_flight_ = false;
+    std::shared_ptr<std::atomic<int>> connection_bound_counter_{
+        std::make_shared<std::atomic<int>>(0)};
+    using connection_bound_join = counter_join;
+    // Not const: it resumes the bound, which writes this Session's state.
+    // NOLINTNEXTLINE(readability-make-member-function-const)
+    void wake_connection_bound_() noexcept {
+        if (connection_bound_.wake) {
+            connection_bound_.wake();
+        }
+    }
+    // Spawns the bound on ex for this connection; false when the spawn fails (the seam, or an
+    // allocation failure). Synchronous.
+    [[nodiscard]] bool spawn_connection_bound_(asio::any_io_executor const& ex) noexcept;
+    asio::awaitable<void> run_connection_bound_(connection_bound_join join,
+                                                std::uint32_t gen) noexcept;
+    // The bound's one waiting callee, on the bound's own timer (an asio::steady_timer, a template
+    // parameter so this header names no timer type; defined and used in session.cpp only): false
+    // when a deadline arm completed before its instant.
+    template <class Timer>
+    asio::awaitable<bool> connection_bound_wait_(Timer& timer,
+                                                 fixpp::core::steady_time_point deadline);
+    // The bound's exit terms (data-model E-3, the exit row). Synchronous.
+    [[nodiscard]] bool connection_bound_exits_(std::uint32_t gen) const noexcept {
+        return conn_gen_ != gen || fsm_state_ == fsm_state::Disconnected || closing_or_stopped_() ||
+               reconnect_drain_in_flight_ || ending_claim_ != ending_claim::none ||
+               connection_bound_.loop_left;
+    }
+    // The give-up's decision (research D3, "The decision"; data-model E-3): the claim, the
+    // slot-74 record, the Text, the Logout owner and the R-1 Logout's enter_ending_write_; with
+    // 105's ending bound refused, Disconnected and the connection's close at the decision. Returns
+    // false when the claim is refused (nothing done). Synchronous.
+    [[nodiscard]] bool decide_give_up_(std::chrono::milliseconds threshold,
+                                       asio::any_io_executor const& ex) noexcept;
+    // What the decision left for the write half (the loop's, after its emit returns).
+    struct give_up_state {
+        bool owner_claimed = false;
+        bool closed = false;  // 105's ending bound was refused: closed at the decision
+        std::array<char, 48> text_buf{};
+        std::size_t text_len = 0;
+    };
+    give_up_state give_up_;
+    // 106 (research D9 row "FR-006 commit"): run in a Logon arm between the classification of
+    // the frame's MsgSeqNum and the commit of its advance, so a cell can freeze the manager there.
+    // Set only through session_test_access.
+    std::function<void()> commit_freeze_hook_;
 
     // ── 034-credential-store-redaction T004 — masker buffer bound ────────────
     // Upper bound for the coroutine-frame copy used in the masked-Logon persist
@@ -2324,10 +2482,19 @@ private:
     //   at D-OUT-10 or at the transmit (no exemption) returns success with nothing
     //   transmitted, before the time of the last outbound frame is updated.
     enum class wire_reset_exemption : std::uint8_t { none, crossing_logout };
+    // 106 D5 supersedes 105 D-e's scope (only ending Logouts are limited): every non-Logout write
+    //   is limited, opt-in. The write class (research D5; data-model E-6): every site that writes
+    //   a Logout passes logout (the sites: `git grep -n 'build_logout(' -- src/session`, each
+    //   followed to its store_then_emit); a logout write never arms the write limit, which every
+    //   other live write does when SessionConfig::write_timeout_ms is set. The live path returns
+    //   session_write_timeout for a write the limit cut, and dispatch_aborted for every other
+    //   live-write failure, as before.
+    enum class write_class : std::uint8_t { ordinary, logout };
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store_then_emit(
         seqnum_t stamped_seq, std::span<const std::byte> frame,
         std::optional<fsm_state> arm = std::nullopt, bool transmit = true,
-        wire_reset_exemption exemption = wire_reset_exemption::none, bool* transmitted = nullptr);
+        wire_reset_exemption exemption = wire_reset_exemption::none, bool* transmitted = nullptr,
+        write_class wclass = write_class::ordinary);
 
     // fixpp#518, 093 (data-model E-13; contract C-6): true when a Logon arm must stop
     // after a resume, because the session left the state the arm expects while the arm
@@ -2467,7 +2634,8 @@ private:
     enum class live_write_outcome : std::uint8_t { written, held_back };
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<live_write_outcome>>
     live_write_serialized_(std::span<const std::byte> frame,
-                           wire_reset_exemption exemption = wire_reset_exemption::none) noexcept;
+                           wire_reset_exemption exemption = wire_reset_exemption::none,
+                           write_class wclass = write_class::ordinary) noexcept;
 
     // run_logout_phase1: emit Logout frame, then wait for peer Logout-confirm
     // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a

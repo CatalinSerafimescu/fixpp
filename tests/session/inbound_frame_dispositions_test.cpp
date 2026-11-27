@@ -64,6 +64,7 @@
 #include "plain_engine_rig.hpp"
 #include "session/parse_capacity.hpp"         // 093 E-2: N(L) and the overlay term
 #include "session/session_engine_access.hpp"  // 093 E-13: the engine-stop flag (Q-9 stop)
+#include "support/close_before_destroy.hpp"
 #include "support/fix44_dictionary.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/hooked_store.hpp"
@@ -1079,6 +1080,7 @@ void expect_step1_garble(DirectFixture& f, Session const& s, std::string const& 
 TEST(InboundFrameDispositionsQ8, NotConnected_MsgTypeNotThird_DisregardedAndTheLogonThenProcessed) {
     DirectFixture f;
     Session s{f.engine, f.cfg(session_role::acceptor)};
+    fixpp::test_support::close_before_destroy const closer{s, f.ioc};
     ASSERT_TRUE(f.open(s));
     ASSERT_EQ(s.state(), fsm_state::NotConnected);
     auto const bad = not_third("A", 1, kLogonFields);
@@ -1094,6 +1096,7 @@ TEST(InboundFrameDispositionsQ8, NotConnected_MsgTypeNotThird_DisregardedAndTheL
 TEST(InboundFrameDispositionsQ8, LogonSent_MsgTypeNotThird_DisregardedAndTheReplyThenProcessed) {
     DirectFixture f;
     Session s{f.engine, f.cfg(session_role::initiator)};
+    fixpp::test_support::close_before_destroy const closer{s, f.ioc};
     ASSERT_TRUE(f.open(s));
     ASSERT_EQ(s.state(), fsm_state::LogonSent);
     auto const bad = not_third("A", 1, kLogonFields);

@@ -76,6 +76,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/reserved_ports.hpp"
 #include "support/session_executor_of.hpp"
 #include "support/wait_until.hpp"
 
@@ -158,15 +159,7 @@ const char* get_fixture_dir() {
     return (env && env[0] != '\0') ? env : kDir;
 }
 
-uint16_t reserve_free_port(asio::io_context& ioc) {
-    asio::ip::tcp::acceptor a{ioc};
-    asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
-    a.open(ep.protocol());
-    a.bind(ep);
-    uint16_t port = a.local_endpoint().port();
-    a.close();
-    return port;
-}
+using fixpp::test_support::reserve_loopback_port;
 
 std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(const char* fixture_dir) {
     fixpp::tls::file_cert_source::Config cs_cfg;
@@ -801,7 +794,7 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
     // with fromApp (they can run on different threads).
     // Per [[feedback_single_threaded_harness_masks_strand_races]].
     asio::io_context ioc;
-    const uint16_t port = reserve_free_port(ioc);
+    const uint16_t port = reserve_loopback_port(ioc);
 
     auto fac = make_tls_factory(fixture_dir);
     ASSERT_NE(fac, nullptr) << "TLS factory build failed";

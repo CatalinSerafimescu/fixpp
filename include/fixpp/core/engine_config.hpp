@@ -17,6 +17,7 @@
 
 #include <asio/any_io_executor.hpp>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/detail/asio_recycler_config.hpp>
@@ -126,6 +127,18 @@ private:
 struct EngineConfig {
     asio::any_io_executor executor;
     std::shared_ptr<Clock> clock;  // rejected if null @ Engine::open
+
+    /// 106-logon-guards-write-bounds (contract C-5.2; data-model E-7): the TLS handshake bound
+    /// the Engine listener applies to every accepted TLS connection, counted from the start of
+    /// the handshake. A client that never completes the handshake is dropped at it. The default
+    /// is the base's value. No C setter: the C engine builds a default EngineConfig. TOML: the
+    /// root key `acceptor_tls_handshake_timeout_ms`, which the loader puts in
+    /// fixpp::config::EngineEstablishment and a host copies here as it copies `clock`.
+    /// Precondition: > 0, as for Transport::Config::tls_handshake_timeout. Neither
+    /// validate_engine_config nor Engine::start() checks it: a value <= 0 arms the handshake timer
+    /// to expire at once, so every accepted TLS connection ends at its handshake with
+    /// transport_handshake_timeout. The TOML loader refuses <= 0 (check_handshake_timeout_ms).
+    std::chrono::milliseconds acceptor_tls_handshake_timeout{1500};
 
     std::vector<std::shared_ptr<const fixpp::dict::Dictionary>> dictionaries;
 

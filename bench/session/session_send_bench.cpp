@@ -24,6 +24,7 @@
 
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
+#include <asio/steady_timer.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -122,6 +123,10 @@ constexpr std::size_t kBatch = 4096;
 
 struct SendBench {
     asio::io_context ioc;
+    // Production io_contexts always run a reactor (any socket starts one), so a bench whose
+    // io_context has none measures an io_context no deployment has. Constructing an asio timer
+    // starts the reactor; this one is never armed.
+    asio::steady_timer reactor_probe{ioc};
     std::shared_ptr<fixpp::core::mock_clock> clk;
     fixpp::core::EngineConfig engine;
     std::shared_ptr<CountingApplication> app;

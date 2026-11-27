@@ -44,6 +44,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -253,6 +254,7 @@ protected:
             td.capture_outbound(frame);
         };
         Session s(engine, cfg);
+        fixpp::test_support::close_before_destroy const closer{s, ioc};
         ASSERT_TRUE(open_session(s).has_value()) << "setup: open()";
         std::string const ack =
             "35=A\x01"

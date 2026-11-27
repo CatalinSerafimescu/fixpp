@@ -510,6 +510,21 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  * each session terminally, ends such a wait at once. The connection is closed once
  * either way. close's return code does not change.
  *
+ * BREAKING (C-ABI 1.19, [const §X.7]; 106): a Logon (acceptor) or an acknowledgement
+ * (initiator) the session refuses keeps NextNumIn, whether the refusal sends a Reject,
+ * sends a Logout or is silent: the refused frame's MsgSeqNum(34) is expected again,
+ * where it was consumed. The exception is a reset that already ran for that frame (the
+ * reset of fixpp_session_config_set_reset_on_logon, or a ResetSeqNumFlag(141)=Y reset),
+ * whose numbers stay. An unauthorised identity's Logon draws nothing and changes nothing
+ * in C++ and TOML: the identity gates run before any answer and any sequence change, and
+ * a refused identity is disconnected with no frame written. That has no reach as
+ * shipped: no C session reaches an identity gate that can refuse a Logon the session
+ * established before 1.19. No C setter installs a logon validator, so a C acceptor's
+ * credentials always admit; no C setter adds a CompID binding, so FIXPP_SECURITY_TLS's
+ * mutual-TLS policy is empty and refuses every identity, as before 1.19. So close's
+ * return code is 1.18's on every C session. That holds while no C entry point installs
+ * a logon validator or a CompID binding; a C setter for either invalidates this clause.
+ *
  * Reentrancy: single-thread — non-callback / non-session-strand caller only; no
  * concurrent close on the same handle (the thunk posts onto the session domain
  * and BLOCKS, so a callback/strand caller deadlocks — FR-013a).
@@ -746,6 +761,20 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  * connection neither answers it nor ends the session. The C ABI has no setter that
  * turns sequence validation off, so the rules 105 gives a session without it do not
  * reach a C caller.
+ *
+ * BREAKING (C-ABI 1.19, [const §X.7]; 106): the give-up fires while a write is blocked
+ * (the peer reads nothing): the session's own TestRequest or Heartbeat, an application
+ * send ahead of it, a Reject or a resend answer's frame. *out_established turns false at
+ * the give-up's ending, from the onLogout its Disconnected record fires (the C slot's
+ * established flag follows onLogon and onLogout), at the latest the give-up's decision
+ * plus logout_disconnect_timeout_ms, the 1.18 bound on its Logout's write; where it
+ * stayed true while the write was blocked. While the session's own TestRequest or
+ * Heartbeat has not returned from its write, the give-up is decided strictly after three
+ * times the TestRequest threshold from the last inbound frame; the 1.18 clause's count
+ * from a TestRequest's write starts only once that write has returned. The exception is
+ * the session's own emit while it is still
+ * inside its message-store call: the close does not fail it, and it returns when the
+ * store returns.
  *
  * Reentrancy: thread-safe. O(1) lock-free (atomic reader snapshot).
  */
@@ -1022,6 +1051,13 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  * consumer's ABI minor (fixpp_engine_create), at once: it does not wait for the wait's
  * end. The code is the one send returned once the session had ended at that Logout;
  * what changes is that fixpp_session_is_established reads true meanwhile.
+ *
+ * BREAKING (C-ABI 1.19, [const §X.7]; 106): a send blocked in its write (the peer reads
+ * nothing), or waiting behind such a write, when the give-up of an unanswered
+ * TestRequest closes the connection returns FIXPP_ERR_CANCELLED, where it hung: the
+ * give-up fires with a write blocked (fixpp_session_is_established's 1.19 clause). The
+ * value is the one a send in flight returns when another ending closes the connection
+ * (1.18); what changes is that the call returns.
  *
  * Reentrancy: thread-safe — callable from any consumer thread (the any-thread
  * Engine::send contract) EXCEPT from inside the receive callback, where the

@@ -498,6 +498,7 @@ TEST_F(HbTrTest, UnansweredTestRequestDisconnects) {
 TEST_F(HbTrTest, InboundHeartbeatKeepsSessionActive) {
     auto cfg = make_cfg(1);  // 1s HeartBtInt — same as UnansweredTR test
     Session session{engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{session, ioc};
     ASSERT_TRUE(drive_to_active(session, 1));
 
     // Drive through 3 HeartBtInt windows, feeding inbound HB at the start
@@ -547,6 +548,7 @@ TEST_F(HbTrTest, InboundHeartbeatEmitsNoEcho) {
         outbound.emplace_back(f.begin(), f.end());
     };
     Session session{engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{session, ioc};
     ASSERT_TRUE(drive_to_active(session, 30));
 
     outbound.clear();  // drop the Logon handshake frames

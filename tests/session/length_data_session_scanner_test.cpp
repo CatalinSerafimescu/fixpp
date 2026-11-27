@@ -43,6 +43,7 @@
 #include "session/scan_first_frame_ids.hpp"
 #include "session/scan_frame_header.hpp"
 #include "support/alloc_guard_markers.hpp"
+#include "support/close_before_destroy.hpp"
 #include "support/extract_tag.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -631,6 +632,7 @@ protected:
     arm_outcome state_after_peer_logon(session_role role, std::string_view length,
                                        std::string_view encrypt_method) {
         Session sess(engine, make_cfg(role));
+        fixpp::test_support::close_before_destroy const closer{sess, ioc};
         EXPECT_TRUE(run_sync(sess.open(), "LogonArmMalformedCount::open").has_value());
         fsm_state const expected_before =
             role == session_role::acceptor ? fsm_state::NotConnected : fsm_state::LogonSent;

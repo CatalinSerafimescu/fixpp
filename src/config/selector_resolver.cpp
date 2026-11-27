@@ -14,6 +14,9 @@
 //   - Throwing calls: wrap in trap_throw_to_expected from loader_internal.hpp,
 //     whose comment block states the rule.
 
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <fixpp/config/config_bundle.hpp>
@@ -28,9 +31,12 @@
 #include <fixpp/transport/transport_factory.hpp>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "loader_internal.hpp"
 #include "mappers.hpp"
@@ -658,10 +664,12 @@ static std::shared_ptr<tls::cert_source> build_file_cert_source(
 // build_tls_factory — assemble a TLS transport factory from a cert_source +
 // security_profile + clock.  Returns a shared_ptr; null + diagnostic on failure.
 // ─────────────────────────────────────────────────────────────────────────────
+// 106 D6 (contract C-5.1): `t_cfg` is the session's Transport::Config (transport_config_of), so
+// its tls_handshake_timeout_ms reaches the factory's transports.
 static std::shared_ptr<transport::TransportFactory> build_tls_factory(
     tls::SecurityProfile profile, const std::shared_ptr<tls::cert_source>& cs,
-    const std::shared_ptr<core::Clock>& clock, std::string_view key_prefix,
-    DiagnosticAccumulator& acc) {
+    const std::shared_ptr<core::Clock>& clock, const transport::Transport::Config& t_cfg,
+    std::string_view key_prefix, DiagnosticAccumulator& acc) {
     auto ssl_cfg_result = tls::make_ssl_ctx_config(profile, cs, clock);
     if (!ssl_cfg_result) {
         acc.add(LoadDiagnostic{
@@ -672,7 +680,6 @@ static std::shared_ptr<transport::TransportFactory> build_tls_factory(
         return nullptr;
     }
 
-    transport::Transport::Config t_cfg{};
     auto factory_result =
         transport::make_asio_tls_transport_factory(t_cfg, std::move(*ssl_cfg_result));
     if (!factory_result) {
@@ -788,6 +795,28 @@ static void validate_per_session_transport_kinds(
     }
 }
 
+// 106-logon-guards-write-bounds (research D6; contract C-5.1): a TLS session's Transport::Config
+// from its merged transport table, [session.transport] over [default.transport]:
+// tls_handshake_timeout_ms when it is an integer in range, else the struct's defaults. Any other
+// value is diagnosed by check_transport_handshake_timeouts, so its load fails.
+// The two handshake keys' range, (0, UINT32_MAX] milliseconds (data-model E-7; contract C-5.1,
+// C-5.2), which transport_config_of and check_handshake_timeout_ms share.
+static bool handshake_timeout_in_range(std::int64_t v) noexcept {
+    return v > 0 && !std::cmp_greater(v, UINT32_MAX);
+}
+
+static transport::Transport::Config transport_config_of(const toml::table& transport_tbl) {
+    transport::Transport::Config t_cfg{};
+    if (const auto* n = transport_tbl.get("tls_handshake_timeout_ms");
+        n != nullptr && n->is_integer()) {
+        auto const v = n->as_integer()->get();
+        if (handshake_timeout_in_range(v)) {
+            t_cfg.tls_handshake_timeout = std::chrono::milliseconds{v};
+        }
+    }
+    return t_cfg;
+}
+
 static void resolve_transport(const std::vector<const toml::table*>& merged_session_tables,
                               const std::filesystem::path& base_dir, const LoadOptions& opts,
                               ConfigBundle& bundle, DiagnosticAccumulator& acc) {
@@ -880,11 +909,12 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
         // Build engine-default TLS factory.
         // CRITICAL: pass bundle.engine.clock BY COPY (not move) so engine.clock
         // AND the factory's ssl_cfg_.clock both hold the shared_ptr → use_count > 1 (D-6).
+        const transport::Transport::Config default_t_cfg = transport_config_of(*transport_tbl);
         auto default_factory =
             build_tls_factory(tls_profile,
                               bundle.engine.default_cert_source,  // copy (shared_ptr)
                               bundle.engine.clock,  // copy (shared_ptr) — D-6 shared clock
-                              "session[0].transport", acc);
+                              default_t_cfg, "session[0].transport", acc);
 
         if (!default_factory) {
             return;  // diagnostic already added by build_tls_factory
@@ -936,8 +966,13 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
 
                 const bool cert_diverges = (s_cs_tbl != nullptr);
                 const bool profile_diverges = (s_profile != tls_profile);
+                // 106 D6 (F-6): the third term, the handshake bound differing from session[0]'s,
+                // so a later session's value is never dropped.
+                const transport::Transport::Config s_t_cfg = transport_config_of(*s_transport_tbl);
+                const bool timeout_diverges =
+                    (s_t_cfg.tls_handshake_timeout != default_t_cfg.tls_handshake_timeout);
 
-                if (!cert_diverges && !profile_diverges) {
+                if (!cert_diverges && !profile_diverges && !timeout_diverges) {
                     // Matches engine default TLS → leave override null.
                     continue;
                 }
@@ -956,7 +991,7 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
                 }
 
                 auto s_factory = build_tls_factory(s_profile, s_cert_source, bundle.engine.clock,
-                                                   s_prefix + ".transport", acc);
+                                                   s_t_cfg, s_prefix + ".transport", acc);
                 if (!s_factory) {
                     continue;  // diagnostic already added
                 }
@@ -1029,6 +1064,63 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 106-logon-guards-write-bounds (data-model E-7; contract C-5.1, C-5.2): the two handshake
+// keys. Both take an integer in (0, UINT32_MAX] milliseconds; out of range is out_of_range and
+// another type is malformed_value.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Checks one handshake-timeout node; on success returns its value.
+static std::optional<std::chrono::milliseconds> check_handshake_timeout_ms(
+    const toml::node& n, const std::string& key_path, DiagnosticAccumulator& acc) {
+    if (!n.is_integer()) {
+        acc.add(LoadDiagnostic{
+            .key_path = key_path,
+            .reason = reason_class::malformed_value,
+            .message = key_path + " must be an integer number of milliseconds",
+        });
+        return std::nullopt;
+    }
+    auto const v = n.as_integer()->get();
+    if (!handshake_timeout_in_range(v)) {
+        acc.add(LoadDiagnostic{
+            .key_path = key_path,
+            .reason = reason_class::out_of_range,
+            .message = key_path + " must be in [1, 4294967295]",
+        });
+        return std::nullopt;
+    }
+    return std::chrono::milliseconds{v};
+}
+
+// The root key acceptor_tls_handshake_timeout_ms into EngineEstablishment; absent keeps the
+// struct's default. (Its refusal at session scope is recognize_keys'.)
+static void resolve_engine_acceptor_handshake_timeout(const toml::table& root_tbl,
+                                                      ConfigBundle& bundle,
+                                                      DiagnosticAccumulator& acc) {
+    if (const auto* n = root_tbl.get("acceptor_tls_handshake_timeout_ms"); n != nullptr) {
+        if (auto v = check_handshake_timeout_ms(*n, "acceptor_tls_handshake_timeout_ms", acc)) {
+            bundle.engine.acceptor_tls_handshake_timeout = *v;
+        }
+    }
+}
+
+// The range and type checks of each session's transport.tls_handshake_timeout_ms, set in
+// [session.transport] or inherited from [default.transport] by the merge. Checks only.
+static void check_transport_handshake_timeouts(
+    const std::vector<const toml::table*>& merged_session_tables, DiagnosticAccumulator& acc) {
+    for (std::size_t i = 0; i < merged_session_tables.size(); ++i) {
+        const auto* t_n = merged_session_tables[i]->get("transport");
+        if (t_n == nullptr || !t_n->is_table()) {
+            continue;
+        }
+        if (const auto* n = t_n->as_table()->get("tls_handshake_timeout_ms"); n != nullptr) {
+            (void)check_handshake_timeout_ms(
+                *n, "session[" + std::to_string(i) + "].transport.tls_handshake_timeout_ms", acc);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // resolve_selectors — public entry point (declared in mappers.hpp).
 //
 // Resolves engine-scope selectors (clock, store, cert_source, dictionary), then
@@ -1048,6 +1140,8 @@ void resolve_selectors(const toml::table& root_tbl,
     resolve_engine_cert_source(root_tbl, base_dir, opts, bundle, acc);
     std::filesystem::path dictionary_path;
     resolve_engine_dictionary(root_tbl, base_dir, opts, bundle, acc, dictionary_path);
+    resolve_engine_acceptor_handshake_timeout(root_tbl, bundle, acc);
+    check_transport_handshake_timeouts(merged_session_tables, acc);
     resolve_session_dictionaries(root_tbl, merged_session_tables, base_dir, dictionary_path, opts,
                                  bundle, acc);
 

@@ -87,6 +87,7 @@
 #include <utility>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/extract_tag.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -746,6 +747,7 @@ TEST(FixtLogonEstablishment, W1_FullRoundTrip_BothActive_NegotiatedV50sp2) {
         acpt_frame_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, reg);
+    fixpp::test_support::close_before_destroy const closer_acceptor{acceptor, s.ioc};
 
     // Initiator: TW, default_appl = v50sp2
     auto init_cfg = s.make_initiator_cfg(application_version::v50sp2);
@@ -753,6 +755,7 @@ TEST(FixtLogonEstablishment, W1_FullRoundTrip_BothActive_NegotiatedV50sp2) {
         init_frame_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session initiator(s.engine, init_cfg, reg);
+    fixpp::test_support::close_before_destroy const closer_initiator{initiator, s.ioc};
 
     // Open acceptor (enters NotConnected waiting state)
     ASSERT_TRUE(run_sync(s, acceptor, [&] { return acceptor.open(); }).has_value());
@@ -833,6 +836,7 @@ TEST(FixtLogonEstablishment, InitiatorAbsent1137Ack_ReachesActive_NegotiatedUnkn
         init_frame_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session initiator(s.engine, init_cfg, reg);
+    fixpp::test_support::close_before_destroy const closer{initiator, s.ioc};
 
     ASSERT_TRUE(run_sync(s, initiator, [&] { return initiator.open(); }).has_value());
     ASSERT_FALSE(init_frame_out.empty()) << "Initiator should have emitted a Logon";
@@ -1024,6 +1028,7 @@ TEST(FixtLogonEstablishment, W5_VersionGeneral_V44_NegotiatesCorrectly) {
         acpt_frame_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
+    fixpp::test_support::close_before_destroy const closer{acceptor, s.ioc};
 
     ASSERT_TRUE(run_sync(s, acceptor, [&] { return acceptor.open(); }).has_value());
 
@@ -1053,6 +1058,7 @@ TEST(FixtLogonEstablishment, W5_VersionGeneral_V50sp2_NegotiatesCorrectly) {
         acpt_frame_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
+    fixpp::test_support::close_before_destroy const closer{acceptor, s.ioc};
 
     ASSERT_TRUE(run_sync(s, acceptor, [&] { return acceptor.open(); }).has_value());
 
@@ -1113,6 +1119,7 @@ TEST(FixtLogonEstablishment, W8_1128Tolerance_DeliveredDictFree_StaysActive) {
         acpt_frame_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
+    fixpp::test_support::close_before_destroy const closer{acceptor, s.ioc};
 
     ASSERT_TRUE(run_sync(s, acceptor, [&] { return acceptor.open(); }).has_value());
 
@@ -1857,6 +1864,8 @@ struct Acceptor097 {
     std::shared_ptr<W8CountingApp> app = std::make_shared<W8CountingApp>();
     Frames out;
     std::unique_ptr<fixpp::session::Session> sess;
+    // Declared after sess, so it is destroyed first (tests/support/close_before_destroy.hpp).
+    std::optional<fixpp::test_support::close_before_destroy> closer;
 
     Acceptor097(std::vector<std::shared_ptr<const fixpp::dict::Dictionary>> registry_dicts,
                 std::shared_ptr<const fixpp::dict::Dictionary> session_dict, bool validate,
@@ -1872,6 +1881,7 @@ struct Acceptor097 {
             out.emplace_back(f.begin(), f.end());
         };
         sess = std::make_unique<fixpp::session::Session>(s.engine, cfg, &s.registry);
+        closer.emplace(*sess, s.ioc);
     }
     Acceptor097(const Acceptor097&) = delete;
     Acceptor097& operator=(const Acceptor097&) = delete;
@@ -2003,6 +2013,9 @@ TEST(FixtLogonEstablishment097, W6d_BothRegistry_OneSessionPerPeer_EachNegotiate
     FixtSetup s{{fix50sp2, make_orchestra_latest_dict()}};
 
     std::vector<std::unique_ptr<Peer097>> peers;
+    // Declared after peers, so each is destroyed before its session
+    // (tests/support/close_before_destroy.hpp).
+    std::vector<std::unique_ptr<fixpp::test_support::close_before_destroy>> closers;
     peers.push_back(std::make_unique<Peer097>(Peer097{.comp_id = "PEER9",
                                                       .appl_ver_id = "9",
                                                       .own_dict = nullptr,
@@ -2034,6 +2047,8 @@ TEST(FixtLogonEstablishment097, W6d_BothRegistry_OneSessionPerPeer_EachNegotiate
             out->emplace_back(f.begin(), f.end());
         };
         p->sess = std::make_unique<fixpp::session::Session>(s.engine, cfg, &s.registry);
+        closers.push_back(
+            std::make_unique<fixpp::test_support::close_before_destroy>(*p->sess, s.ioc));
     }
 
     std::vector<bool> opened;
@@ -2079,6 +2094,7 @@ TEST(FixtLogonEstablishment097, W6e_Initiator_Ack10_NegotiatedVlatest_NoRegistry
         out.emplace_back(f.begin(), f.end());
     };
     fixpp::session::Session sess(s.engine, cfg, &s.registry);
+    fixpp::test_support::close_before_destroy const closer{sess, s.ioc};
     ASSERT_TRUE(run_sync(s, sess, [&] { return sess.open(); }).has_value());
     ASSERT_LT(find_msg_type(out, "A"), out.size()) << "the initiator sent no Logon";
     ASSERT_FALSE(s.registry.get(application_version::vlatest).has_value())

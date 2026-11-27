@@ -45,6 +45,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -327,6 +328,7 @@ protected:
 TEST_F(RecoveryStoreHorizonTest, PreHorizonGapCollapsedToGapFill) {
     auto cfg = make_acceptor_cfg();
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
 
     // Peer asks for [2..12]; our store horizon is 7 (seqs 2..6 missing/purged).
@@ -355,6 +357,7 @@ TEST_F(RecoveryStoreHorizonTest, PreHorizonGapCollapsedToGapFill) {
 TEST_F(RecoveryStoreHorizonTest, AvailableRangeReplaysCarryPossDupFlag) {
     auto cfg = make_acceptor_cfg();
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
 
     auto rr = make_resend_request("FIX.4.2", 2, "TW", "ISLD", 2, 8);
@@ -380,6 +383,7 @@ TEST_F(RecoveryStoreHorizonTest, AvailableRangeReplaysCarryPossDupFlag) {
 TEST_F(RecoveryStoreHorizonTest, ReplayFramesCarryOrigSendingTime) {
     auto cfg = make_acceptor_cfg();
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
 
     auto rr = make_resend_request("FIX.4.2", 2, "TW", "ISLD", 2, 8);
@@ -505,6 +509,7 @@ TEST_F(RecoveryStoreHorizonTest, LargeAppFrameReplayed_NotGapFilled) {
     auto cfg = make_acceptor_cfg();
     cfg.store_factory = std::make_shared<LargeFrameStoreFactory>(big_frame, kLargeSeq);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
 
     // Peer asks to resend [7..7].
@@ -557,6 +562,7 @@ TEST_F(RecoveryStoreHorizonTest, ResendBypassesToApp_DoNotSendInertOnReplay) {
 
     auto cfg = make_acceptor_cfg();
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
     ASSERT_EQ(app->to_app_calls, 0) << "precondition: establishment fires no toApp (admin only)";
 

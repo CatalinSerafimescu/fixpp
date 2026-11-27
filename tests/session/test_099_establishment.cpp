@@ -4,8 +4,9 @@
 //
 // 099-fixt-appl-version-validation, contracts/witnesses.md W-5 (tasks.md T012): data-model E-7's
 // `NC-e` to `NC-i` and `LS-e` to `LS-i`, every input on T, A and L, NotConnected as the acceptor
-// and LogonSent as the initiator, then the row's named cells. The double faults and the consume
-// split are asserted as E-7 writes them. Non-validating twins take research R-18's `off` lines.
+// and LogonSent as the initiator, then the row's named cells. The double faults are asserted as
+// E-7 writes them; E-7's consume split is not (106 D2, below). Non-validating twins take research
+// R-18's `off` lines.
 //
 // Each cell's trace line compares with the `on` logs. The `LS-h` cells stay direct-constructed,
 // delivered through attach_accepted_transport, and read against E-7's row: research R-18 lists that
@@ -34,20 +35,14 @@ namespace {
 // by the judging dictionary (re-derive with the field-definition grep, `<field number=…>` per
 // dictionaries/*.xml and `<fixr:field id=…>` in the Orchestra file), so each is an undefined tag,
 // 373=0.
+// 106 D2 supersedes 099 E-7's consumed number on a refused Logon: the arm commits the Logon's
+// MsgSeqNum only once it is admitted, so every Logon-arm refusal keeps NextNumIn ("k").
 const KeyedRow kNotConnected[] = {
     {.cell = "NC-e", .input = "Logon 1137 absent", .t = "R 1/1137 A 45=1 | Disc | k | app=0 adm=0"},
-    {.cell = "NC-e", .input = "Logon 1137=empty", .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0"},
-    {.cell = "NC-e",
-     .input = "Logon 1137=99",
-     .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0",
-     .a = nullptr,
-     .l = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
-    {.cell = "NC-e",
-     .input = "Logon 1137=abc",
-     .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0",
-     .a = nullptr,
-     .l = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
-    {.cell = "NC-e", .input = "Logon 1137=4", .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0"},
+    {.cell = "NC-e", .input = "Logon 1137=empty", .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
+    {.cell = "NC-e", .input = "Logon 1137=99", .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
+    {.cell = "NC-e", .input = "Logon 1137=abc", .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
+    {.cell = "NC-e", .input = "Logon 1137=4", .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
     {.cell = "NC-e", .input = "Logon 1137=9", .t = "Logon | Active | c | app=0 adm=0"},
     {.cell = "NC-e", .input = "Logon 1137=10", .t = "Logon | Active | c | app=0 adm=0"},
     {.cell = "NC-e",
@@ -69,7 +64,7 @@ const KeyedRow kNotConnected[] = {
      .l = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
     {.cell = "NC-e",
      .input = "Logon 141=Y 1137=4",
-     .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0"},
+     .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
     {.cell = "NC-e", .input = "Logon 141=Y 1137=9", .t = "Logon | Active | c | app=0 adm=0"},
     {.cell = "NC-f", .input = "wrongBS Logon 1137=9", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "NC-f", .input = "wrongBS Logon 1137=4", .t = "- | Disc | k | app=0 adm=0"},
@@ -94,20 +89,21 @@ const KeyedRow kNotConnected[] = {
      .t = "R 1/1137 A 45=1 | Disc | k | app=0 adm=0"},
     {.cell = "NC-g", .input = "stale NOS", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "NC-g", .input = "stale Heartbeat", .t = "- | Disc | k | app=0 adm=0"},
+    // 106 D1 supersedes 099 E-7's NC-h endings: the acceptor's mTLS gate runs right after
+    // interpret_logon, before any answer, so an off-list identity is refused with nothing
+    // written and NextNumIn kept, whatever the Logon's 1137 holds.
     {.cell = "NC-h",
      .input = "mTLS-offlist Logon 1137=9",
-     .t = "- | Disc | c | app=0 adm=0 | auth"},
+     .t = "- | Disc | k | app=0 adm=0 | auth"},
     {.cell = "NC-h",
      .input = "mTLS-offlist Logon 1137=4",
-     .t = "- | Disc | c | app=0 adm=0 | auth"},
+     .t = "- | Disc | k | app=0 adm=0 | auth"},
     {.cell = "NC-h",
      .input = "mTLS-offlist Logon 1137=99",
-     .t = "- | Disc | c | app=0 adm=0 | auth",
-     .a = nullptr,
-     .l = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
+     .t = "- | Disc | k | app=0 adm=0 | auth"},
     {.cell = "NC-h",
      .input = "mTLS-offlist Logon 1137 absent",
-     .t = "R 1/1137 A 45=1 | Disc | k | app=0 adm=0"},
+     .t = "- | Disc | k | app=0 adm=0 | auth"},
     {.cell = "NC-i",
      .input = "posture-mismatch Logon 1137=9",
      .t = "Logout | Disc | k | app=0 adm=0"},
@@ -126,18 +122,10 @@ const KeyedRow kNotConnected[] = {
 
 const KeyedRow kLogonSent[] = {
     {.cell = "LS-e", .input = "Logon 1137 absent", .t = "R 1/1137 A 45=1 | Disc | k | app=0 adm=0"},
-    {.cell = "LS-e", .input = "Logon 1137=empty", .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0"},
-    {.cell = "LS-e",
-     .input = "Logon 1137=99",
-     .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0",
-     .a = nullptr,
-     .l = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
-    {.cell = "LS-e",
-     .input = "Logon 1137=abc",
-     .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0",
-     .a = nullptr,
-     .l = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
-    {.cell = "LS-e", .input = "Logon 1137=4", .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0"},
+    {.cell = "LS-e", .input = "Logon 1137=empty", .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
+    {.cell = "LS-e", .input = "Logon 1137=99", .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
+    {.cell = "LS-e", .input = "Logon 1137=abc", .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
+    {.cell = "LS-e", .input = "Logon 1137=4", .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
     {.cell = "LS-e", .input = "Logon 1137=9", .t = "- | Active | c | app=0 adm=0"},
     {.cell = "LS-e", .input = "Logon 1137=10", .t = "- | Active | c | app=0 adm=0"},
     {.cell = "LS-e",
@@ -185,20 +173,21 @@ const KeyedRow kLogonSent[] = {
      .t = "R 1/1137 A 45=1 | Disc | k | app=0 adm=0"},
     {.cell = "LS-g", .input = "stale NOS", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "LS-g", .input = "stale Heartbeat", .t = "- | Disc | k | app=0 adm=0"},
+    // 106 D1 supersedes 099 E-7's LS-h endings: the initiator's mTLS gate runs right after
+    // interpret_logon, before any answer, so an off-list identity is refused with nothing
+    // written and NextNumIn kept, whatever the Logon's 1137 holds.
     {.cell = "LS-h",
      .input = "mTLS-offlist Logon 1137=9",
-     .t = "- | Disc | c | app=0 adm=0 | auth"},
+     .t = "- | Disc | k | app=0 adm=0 | auth"},
     {.cell = "LS-h",
      .input = "mTLS-offlist Logon 1137=4",
-     .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0"},
+     .t = "- | Disc | k | app=0 adm=0 | auth"},
     {.cell = "LS-h",
      .input = "mTLS-offlist Logon 1137=99",
-     .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0",
-     .a = nullptr,
-     .l = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
+     .t = "- | Disc | k | app=0 adm=0 | auth"},
     {.cell = "LS-h",
      .input = "mTLS-offlist Logon 1137 absent",
-     .t = "R 1/1137 A 45=1 | Disc | k | app=0 adm=0"},
+     .t = "- | Disc | k | app=0 adm=0 | auth"},
     {.cell = "LS-i",
      .input = "posture-mismatch Logon 1137=9",
      .t = "Logout | Disc | k | app=0 adm=0"},
@@ -238,12 +227,12 @@ INSTANTIATE_TEST_SUITE_P(On, W5LogonSent, testing::ValuesIn(on_every_shape(kLogo
 const KeyedRow kNotConnectedOff[] = {
     {.cell = "NC-e", .input = "Logon 1137=9", .t = "Logon | Active | c | app=0 adm=0"},
     {.cell = "NC-e", .input = "Logon 1137=10", .t = "Logon | Active | c | app=0 adm=0"},
-    {.cell = "NC-e", .input = "Logon 1137 absent", .t = "R 1/1137 A 45=1 | Disc | c | app=0 adm=0"},
-    {.cell = "NC-e", .input = "Logon 1137=empty", .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0"},
-    {.cell = "NC-e", .input = "Logon 1137=99", .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0"},
+    {.cell = "NC-e", .input = "Logon 1137 absent", .t = "R 1/1137 A 45=1 | Disc | k | app=0 adm=0"},
+    {.cell = "NC-e", .input = "Logon 1137=empty", .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
+    {.cell = "NC-e", .input = "Logon 1137=99", .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
     {.cell = "NC-e", .input = "Logon undeclared 5999", .t = "Logon | Active | c | app=0 adm=0"},
-    {.cell = "NC-e", .input = "Logon 1137=abc", .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0"},
-    {.cell = "NC-e", .input = "Logon 1137=4", .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0"},
+    {.cell = "NC-e", .input = "Logon 1137=abc", .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
+    {.cell = "NC-e", .input = "Logon 1137=4", .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
     {.cell = "NC-f", .input = "wrongBS Logon 1137=9", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "NC-f", .input = "wrongBS Logon 1137=99", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "NC-f", .input = "wrongBS Logon 1137=4", .t = "- | Disc | k | app=0 adm=0"},
@@ -261,32 +250,35 @@ const KeyedRow kNotConnectedOff[] = {
     {.cell = "NC-g", .input = "stale Heartbeat", .t = "- | Disc | k | app=0 adm=0"},
     {.cell = "NC-e",
      .input = "Logon 1137 absent + 5999 after",
-     .t = "R 1/1137 A 45=1 | Disc | c | app=0 adm=0"},
+     .t = "R 1/1137 A 45=1 | Disc | k | app=0 adm=0"},
     {.cell = "NC-e",
      .input = "Logon 5999 + 1137 absent",
-     .t = "R 1/1137 A 45=1 | Disc | c | app=0 adm=0"},
+     .t = "R 1/1137 A 45=1 | Disc | k | app=0 adm=0"},
     {.cell = "NC-e",
      .input = "Logon 1137=99 + 5999 after",
-     .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0"},
+     .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
     {.cell = "NC-e",
      .input = "Logon 1137=4 + 5999 after",
-     .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0"},
+     .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
     {.cell = "NC-e",
      .input = "Logon 141=Y 1137=4",
-     .t = "R 5/1137 A 45=1 | Disc | c | app=0 adm=0"},
+     .t = "R 5/1137 A 45=1 | Disc | k | app=0 adm=0"},
     {.cell = "NC-e", .input = "Logon 141=Y 1137=9", .t = "Logon | Active | c | app=0 adm=0"},
+    // 106 D1 supersedes 099 E-7's NC-h endings: the acceptor's mTLS gate runs right after
+    // interpret_logon, before any answer, so an off-list identity is refused with nothing
+    // written and NextNumIn kept, whatever the Logon's 1137 holds.
     {.cell = "NC-h",
      .input = "mTLS-offlist Logon 1137=9",
-     .t = "- | Disc | c | app=0 adm=0 | auth"},
+     .t = "- | Disc | k | app=0 adm=0 | auth"},
     {.cell = "NC-h",
      .input = "mTLS-offlist Logon 1137=99",
-     .t = "- | Disc | c | app=0 adm=0 | auth"},
+     .t = "- | Disc | k | app=0 adm=0 | auth"},
     {.cell = "NC-h",
      .input = "mTLS-offlist Logon 1137=4",
-     .t = "- | Disc | c | app=0 adm=0 | auth"},
+     .t = "- | Disc | k | app=0 adm=0 | auth"},
     {.cell = "NC-h",
      .input = "mTLS-offlist Logon 1137 absent",
-     .t = "- | Disc | c | app=0 adm=0 | auth"},
+     .t = "- | Disc | k | app=0 adm=0 | auth"},
     {.cell = "NC-i",
      .input = "posture-mismatch Logon 1137=9",
      .t = "Logout | Disc | k | app=0 adm=0"},
@@ -329,18 +321,21 @@ const KeyedRow kLogonSentOff[] = {
     {.cell = "LS-e", .input = "Logon 1137=4 + 5999 after", .t = "- | Active | c | app=0 adm=0"},
     {.cell = "LS-e", .input = "Logon 141=Y 1137=4", .t = "- | Active | c | app=0 adm=0"},
     {.cell = "LS-e", .input = "Logon 141=Y 1137=9", .t = "- | Active | c | app=0 adm=0"},
+    // 106 D1 supersedes 099 E-7's LS-h endings: the initiator's mTLS gate runs right after
+    // interpret_logon, before any answer, so an off-list identity is refused with nothing
+    // written and NextNumIn kept, whatever the Logon's 1137 holds.
     {.cell = "LS-h",
      .input = "mTLS-offlist Logon 1137=9",
-     .t = "- | Disc | c | app=0 adm=0 | auth"},
+     .t = "- | Disc | k | app=0 adm=0 | auth"},
     {.cell = "LS-h",
      .input = "mTLS-offlist Logon 1137=99",
-     .t = "- | Disc | c | app=0 adm=0 | auth"},
+     .t = "- | Disc | k | app=0 adm=0 | auth"},
     {.cell = "LS-h",
      .input = "mTLS-offlist Logon 1137=4",
-     .t = "- | Disc | c | app=0 adm=0 | auth"},
+     .t = "- | Disc | k | app=0 adm=0 | auth"},
     {.cell = "LS-h",
      .input = "mTLS-offlist Logon 1137 absent",
-     .t = "- | Disc | c | app=0 adm=0 | auth"},
+     .t = "- | Disc | k | app=0 adm=0 | auth"},
     {.cell = "LS-i",
      .input = "posture-mismatch Logon 1137=9",
      .t = "Logout | Disc | k | app=0 adm=0"},
@@ -388,7 +383,7 @@ INSTANTIATE_TEST_SUITE_P(Named, W5PerShape, testing::Values(Shape::T, Shape::A, 
 // sequence check, and the refusal keeps NextNumIn ("k"). QuickFIX does the same: QuickFIX C++
 // v1.16.0 `Session::generateReject(const Message&, int, int)` increments only `if (msgType !=
 // MsgType_Logon && msgType != MsgType_SequenceReset && msgSeqNum == getExpectedTargetNum())`.
-// The ordinary acknowledgement without 141=Y still consumes (L-104-8).
+// 106 D2 keeps NextNumIn on the ordinary acknowledgement's refusal too.
 TEST_P(W5PerShape, Initiator141YWith1137_4_NoReset) {
     const CellRun run =
         run_keyed_cell(GetParam(), true, Arm::LogonSent, input("Logon 141=Y 1137=4"));
@@ -451,14 +446,14 @@ TEST(W5Named, BlockTestsTheRegistry_Acceptor) {
     const CellRun run = run_own_cell(
         "W-5 base unregistered NC", a_with_base_unregistered(), true, Arm::NotConnected,
         [](const Rig& r) { return logon_frame(r.peer_ctx(1), "1137=9\x01"); });
-    expect_ending(run, "R 5/1137 A 45=1 | Disc | c | app=0 adm=0");
+    expect_ending(run, "R 5/1137 A 45=1 | Disc | k | app=0 adm=0");
 }
 
 TEST(W5Named, BlockTestsTheRegistry_Initiator) {
     const CellRun run =
         run_own_cell("W-5 base unregistered LS", a_with_base_unregistered(), true, Arm::LogonSent,
                      [](const Rig& r) { return logon_frame(r.peer_ctx(1), "1137=9\x01"); });
-    expect_ending(run, "R 5/1137 A 45=1 | Disc | c | app=0 adm=0");
+    expect_ending(run, "R 5/1137 A 45=1 | Disc | k | app=0 adm=0");
 }
 
 // A transport dictionary with 1137 optional: the gate passes an absent one, so the initiator's
@@ -478,7 +473,7 @@ TEST(W5Named, Optional1137_Absent_InitiatorBlockAnswers) {
     f.session_dict = optional_1137;
     const CellRun run = run_own_cell("W-5 optional 1137", std::move(f), true, Arm::LogonSent,
                                      [](const Rig& r) { return logon_frame(r.peer_ctx(1), ""); });
-    expect_ending(run, "R 1/1137 A 45=1 | Disc | c | app=0 adm=0");
+    expect_ending(run, "R 1/1137 A 45=1 | Disc | k | app=0 adm=0");
 }
 
 // ── Reconnect: a non-validating initiator's second reply has no 1137 ────────────────────
@@ -755,13 +750,13 @@ TEST_P(W5RejectCannotGoOut, GateReject_Undeclared_TheErrorReturns) {
     EXPECT_EQ(short_form(run.ending), "- | Disc | k | app=0 adm=0");
 }
 
-// S3's initiator block, on T where the gate passes the Logon: the check of the number has run, so
-// this consumes as `LS-e` does.
+// S3's initiator block, on T where the gate passes the Logon: the number was classified but not
+// committed, so this keeps NextNumIn as `LS-e` does (106 D2).
 TEST(W5RejectCannotGoOutS3, Initiator_TheErrorReturns) {
     const CellRun run = refused_with_throwing_to_admin(Shape::T, Arm::LogonSent, "Logon 1137=99");
     ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
     EXPECT_EQ(run.ending.err, app_callback_threw_err()) << log_form(run.ending);
-    EXPECT_EQ(short_form(run.ending), "- | Disc | c | app=0 adm=0");
+    EXPECT_EQ(short_form(run.ending), "- | Disc | k | app=0 adm=0");
 }
 
 // S3's initiator block with no clock: Session::open() resolves the clock and does not require one,
@@ -775,7 +770,7 @@ TEST(W5NoClock, InitiatorS3_RefusesAndStampsNothing) {
     const auto setup = r.open();
     ASSERT_FALSE(setup.has_value()) << setup.value_or("");
     const Ending e = r.deliver(input("Logon 1137=99").make(r.peer_ctx(1)));
-    EXPECT_EQ(short_form(e), "R 5/1137 A 45=1 | Disc | c | app=0 adm=0");
+    EXPECT_EQ(short_form(e), "R 5/1137 A 45=1 | Disc | k | app=0 adm=0");
     ASSERT_EQ(e.out.size(), 1U);
     EXPECT_TRUE(tag_value(e.out[0], 52).empty()) << tag_value(e.out[0], 52);
 }

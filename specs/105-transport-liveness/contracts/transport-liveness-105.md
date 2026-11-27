@@ -39,7 +39,7 @@ the name.
 
 Common rules:
 - **C-1.a One effective close per ending.** A connection is closed through `close_async()` (C-8), or through the
-  synchronous `Transport::close()` when the close cannot be spawned (C-8.6), and the first call is the one that
+  synchronous `Transport::close()` when the close cannot be spawned or its `close_async()` throws (C-8.6), and the first call is the one that
   closes it; a later call on the same transport (the pump's `close(terminal)` after a write-limit, bound-expiry or
   fallback close, `Engine::stop()`'s step 2) is subsumed, as `close_async`'s "Idempotent, exactly like close()"
   and `close()`'s "Idempotent: second close() returns {} without side-effects" make it (research F-5). The design owes at most one close per connection: the close is owed only on a
@@ -322,9 +322,9 @@ Common rules:
 
 ## C-8. The close is orderly where `close()` is (FR-002)
 
-- C-8.1 Every close of C-1 goes through `Transport::close_async()`, except the allocation-failure fallback of C-8.6. On TLS the peer receives a close_notify
+- C-8.1 Every close of C-1 goes through `Transport::close_async()`, except the synchronous fallback of C-8.6 (an allocation failure at the close frame's spawn, or a `close_async()` that throws; *(Amended 2026-11-27 by 106, spec.md R23.)*). On TLS the peer receives a close_notify
   wherever `close()` sends one today (B-348-1 and its amendments), including when the pump is parked in a read.
-- C-8.2 No row of C-1 calls the synchronous `Transport::close()` on a live transport, except the fallback of C-8.6.
+- C-8.2 No row of C-1 calls the synchronous `Transport::close()` on a live transport, except the fallback of C-8.6, on either of its two triggers *(Amended 2026-11-27 by 106, spec.md R23.)*
 - C-8.3 A `close()` that starts while a C-1 close is in flight waits for it before its own `close_async()`.
 - C-8.4 A `close(graceful)` during an R-2 wait after Active (C-2 W-13) reaches its own `close_async()` when the
   wait ends, by the peer's Logout or by the bound. `close()`'s grace (`close_grace`) and the bound are the same knob,
@@ -339,7 +339,7 @@ Common rules:
   Logout's connection closes within the bound (session clock) plus `tls_close_timeout` (wall time), and, off Windows, the close is
   abortive when the peer stops reading; the Windows ending is not pinned (L-105-g). Permitted by ruling D-e and disclosed (L-105-g). On the plain transport
   `close_async()` is `close()`, so the close is at the bound.
-- C-8.6 **A close that cannot be spawned** (an allocation failure at the close frame's spawn; clarification D-g).
+- C-8.6 **A close that cannot be spawned, or whose `close_async()` throws** (an allocation failure at the close frame's spawn; clarification D-g. The second trigger: *(Amended 2026-11-27 by 106, spec.md R23.)* A close frame whose `close_async()` throws calls the synchronous `Transport::close()` of the transport it holds instead, so the connection is still closed; on TLS with a read or write in flight that close sends no close_notify. Before the amendment the frame's catch closed nothing, and the transport stayed open until `close()` or `Engine::stop()`; 106's write limit and give-up close through this frame, and a write they cut must return, FR-009 there.)
   The session calls the synchronous `Transport::close()` on the strand instead, so the peer still observes EOF with
   no later call. On the plain transport it is the same close. On TLS `asio_tls_transport::close` sends close_notify
   only when no SSL operation is suspended, so with a read or a write in flight (the pump parked in a read, a blocked
@@ -352,7 +352,7 @@ Common rules:
 - C-8.7 **By row.** Every row of C-1 closes through `close_async()`, orderly where `close()` is (C-8.1). Rows 3, 5, 6, 7
   and 12, which write an ending Logout, can also reach C-8.5's abortive close at the write limit behind a peer that does
   not read; any row whose close a root's release or the ending bound spawns can reach C-8.6's synchronous close on an
-  allocation failure; W-13's graceful `close()` can reach the grace's direct close (C-8.4); rows 2, 4, 13 and 14 close as
+  allocation failure or a `close_async()` that throws (*(Amended 2026-11-27 by 106, spec.md R23.)*); W-13's graceful `close()` can reach the grace's direct close (C-8.4); rows 2, 4, 13 and 14 close as
   today.
 
 ## C-9. Surfaces
@@ -460,9 +460,9 @@ inapplicable.
   named in this row.
 - **L-105-g.** On TLS, a limited Logout's close (C-8.5) cannot write close_notify behind a peer that does not read;
   `close_async()` then closes abortively at `tls_close_timeout`, off Windows; the Windows ending is not pinned (fixpp#722). Permitted by ruling D-e.
-- **L-105-h.** When a close frame cannot be spawned (an allocation failure), the session closes the transport with
+- **L-105-h.** When a close frame cannot be spawned (an allocation failure), or its `close_async()` throws, the session closes the transport with
   the synchronous `Transport::close()` (C-8.6); on TLS with a read or write in flight that close sends no
-  close_notify. This departs from FR-002's single close path on allocation failure only (clarification D-g).
+  close_notify. This departs from FR-002's single close path on those two triggers only (clarification D-g; the second trigger *(Amended 2026-11-27 by 106, spec.md R23.)*).
 ## C-12. Performance (Article VIII §2, §3; ruling D-f)
 
 - Per inbound frame the feature adds two tests: the pump's latch test after every `on_inbound_frame` return

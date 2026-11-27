@@ -133,6 +133,7 @@
 #include <utility>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/keep_running.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -504,6 +505,9 @@ protected:
         Capture cap;
         auto cfg = make_cfg(cap, shape);
         Session s{engine, cfg};
+        // 106 (data-model E-3, the joiners): ~Session asserts that the connection bound has been
+        // joined, which close() does, so the session is closed before it is destroyed.
+        fixpp::test_support::close_before_destroy closer{s, ioc};
         std::string sent_a;
         std::string sent_b;
         ASSERT_NO_FATAL_FAILURE(establish_and_send_two(s, cap, shape, sent_a, sent_b));
@@ -534,6 +538,9 @@ protected:
         Capture cap;
         auto cfg = make_cfg(cap, shape);
         Session s{engine, cfg};
+        // 106 (data-model E-3, the joiners): ~Session asserts that the connection bound has been
+        // joined, which close() does, so the session is closed before it is destroyed.
+        fixpp::test_support::close_before_destroy closer{s, ioc};
         std::string sent_a;
         std::string sent_b;
         ASSERT_NO_FATAL_FAILURE(establish_and_send_two(s, cap, shape, sent_a, sent_b));
@@ -560,6 +567,9 @@ protected:
         Capture cap;
         auto cfg = make_cfg(cap, shape);
         Session s{engine, cfg};
+        // 106 (data-model E-3, the joiners): ~Session asserts that the connection bound has been
+        // joined, which close() does, so the session is closed before it is destroyed.
+        fixpp::test_support::close_before_destroy closer{s, ioc};
         ASSERT_NO_FATAL_FAILURE(establish(s, cap, shape));
         MessageStore* store_ptr = session_test_access::store(s);
         ASSERT_NE(store_ptr, nullptr) << "setup: the session must hold a store";

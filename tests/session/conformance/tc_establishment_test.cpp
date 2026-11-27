@@ -43,6 +43,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/frame_field_extract.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -234,6 +235,7 @@ TEST(TcEstablishment, Scenario1a_ValidLogon_fix42) {
     auto cfg = h.make_cfg_with_transport("ISLD", "TW", "FIX.4.2", 30);
     cfg.role = fixpp::session::session_role::acceptor;  // FR-005 / T012
     fixpp::session::Session sess(h.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, h.ioc};
 
     // open() with role=acceptor: lifecycle transitions to open, FSM stays NotConnected.
     ASSERT_TRUE(h.open_session(sess).has_value()) << "open() failed";
@@ -296,6 +298,7 @@ TEST(TcEstablishment, Scenario1a_ValidLogon_fix44) {
     auto cfg = h.make_cfg_with_transport("ISLD", "TW", "FIX.4.4", 30);
     cfg.role = fixpp::session::session_role::acceptor;  // FR-005 / T012
     fixpp::session::Session sess(h.engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, h.ioc};
 
     ASSERT_TRUE(h.open_session(sess).has_value()) << "open() failed";
     ASSERT_EQ(sess.state(), fsm_state::NotConnected)

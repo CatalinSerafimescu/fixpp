@@ -61,6 +61,7 @@
 #define FIXPP_ALLOW_MOCK_TRANSPORT
 #include <fixpp/transport/test/mock_transport.hpp>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -226,6 +227,7 @@ protected:
 TEST_F(ReconnectHappyPathTest, TooHighInboundSeqEntersAwaitingResend) {
     auto cfg = make_acceptor_cfg();
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess)) << "Precondition: session must reach Active state";
 
     // After Logon(seq=1) consumed, next expected = 2.
@@ -263,6 +265,7 @@ TEST_F(ReconnectHappyPathTest, TooHighInboundSeqEntersAwaitingResend) {
 TEST_F(ReconnectHappyPathTest, GapCloseRestoresActiveState) {
     auto cfg = make_acceptor_cfg();
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
 
     // Inject gap message (seq=5 when expected=2).

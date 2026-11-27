@@ -90,6 +90,10 @@ static const std::unordered_map<std::uint32_t, std::string_view>& get_registry()
                  "session ended: TestRequest unanswered: test_req_id={} threshold_ms={} error={}")),
              .fmt =
                  "session ended: TestRequest unanswered: test_req_id={} threshold_ms={} error={}"},
+            // 106 (research D5; data-model E-8): Session::expire_write_, before the close.
+            {.id = static_cast<std::uint32_t>(
+                 crc32_str("session ended: write timed out: limit_ms={} error={}")),
+             .fmt = "session ended: write timed out: limit_ms={} error={}"},
             // 093 (data-model E-12): Session::note_frame_too_large_.
             {.id = static_cast<std::uint32_t>(
                  crc32_str("inbound frame over the limit closed the session: kind={} limit={}")),

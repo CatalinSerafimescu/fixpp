@@ -259,6 +259,39 @@ struct session_test_access {
     static void set_ending_bound_race_throws(Session& s, std::function<bool()> throws) {
         s.ending_bound_race_throws_ = std::move(throws);
     }
+    // 106-logon-guards-write-bounds (tasks.md T031): the connection bound's seams and the Logon
+    // arms' commit-freeze hook.
+    static void set_connection_bound_spawn_fails(Session& s, std::function<bool()> fails) {
+        s.connection_bound_spawn_fails_ = std::move(fails);
+    }
+    static void set_connection_bound_wait_throws(Session& s, std::function<bool()> throws) {
+        s.connection_bound_wait_throws_ = std::move(throws);
+    }
+    static void set_commit_freeze_hook(Session& s, std::function<void()> hook) {
+        s.commit_freeze_hook_ = std::move(hook);
+    }
+    // 106 (tasks.md T078, T083): the ending claim, as its enumerator's value (0 is none), and
+    // the connection bound's join counter, for the seam cells.
+    [[nodiscard]] static int ending_claim(Session const& s) noexcept {
+        return static_cast<int>(s.ending_claim_);
+    }
+    [[nodiscard]] static int connection_bound_count(Session const& s) noexcept {
+        return s.connection_bound_counter_->load(std::memory_order_acquire);
+    }
+    static void wake_connection_bound(Session& s) noexcept { s.wake_connection_bound_(); }
+    // 106 (contract C-4.3): the write limit's epoch counter, so a cell can place the next limited
+    // write's epoch at the counter's wrap. Session strand only.
+    static void set_write_epoch(Session& s, std::uint32_t epoch) noexcept {
+        s.write_epoch_ = epoch;
+    }
+    // 106 (data-model E-3): the two marks the connection bound reads, the liveness loop's emit
+    // not returned and a limited write in flight. Session strand only.
+    [[nodiscard]] static bool emit_in_flight(Session const& s) noexcept {
+        return s.emit_in_flight_;
+    }
+    [[nodiscard]] static bool write_in_flight(Session const& s) noexcept {
+        return s.write_in_flight_;
+    }
     [[nodiscard]] static int peer_logout_bound_count(Session const& s) noexcept {
         return s.peer_logout_bound_counter_->load(std::memory_order_acquire);
     }

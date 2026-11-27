@@ -257,7 +257,8 @@ harness for the latch test (research D10, contract C-12).
 - **XII.** The TLS close stays `close_async` (orderly; C-8), except the allocation-failure fallback (C-8.6), including under a graceful `close()` during the wait
   (C-8.4). The new abortive closes are the write limit's behind a peer that does not read (C-8.5; off Windows, L-105-g), permitted by
   ruling D-e and disclosed (L-105-g), before 105 that peer held the connection with no bound; and the synchronous
-  fallback when a close frame cannot be spawned (an allocation failure; ruling D-g, C-8.6, L-105-h). A refused,
+  fallback when a close frame cannot be spawned (an allocation failure; ruling D-g, C-8.6, L-105-h), or, since 106's
+  ruling R23, when its `close_async()` throws *(Amended 2026-11-27 by 106, spec.md R23.)* A refused,
   unauthenticated peer is held on an Engine session no longer than the earlier of the establishment deadline
   (`logon_timeout_ms` from the connection's establishment start) and `logout_disconnect_timeout_ms` from the refusal
   Logout's owner claim, plus `tls_close_timeout` on TLS (C-2.6): the establishment

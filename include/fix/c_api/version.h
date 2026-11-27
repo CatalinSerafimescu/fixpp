@@ -366,8 +366,29 @@
  *  Migration: no code change; a consumer that read fixpp_session_is_established false as
  *  "a send is admitted no more" reads it during the wait as still true while sends are
  *  refused. */
+/*  1.19 (BREAKING, [const §X.7]; 106-logon-guards-write-bounds): behaviour only. No symbol,
+ *  signature, type, constant or error code changes. The observers, each with a C-ABI 1.19
+ *  clause in session.h: fixpp_session_close, fixpp_session_is_established and
+ *  fixpp_session_send. fixpp_session_open and the two callback registrations are
+ *  unchanged.
+ *  - An unauthorised identity's Logon draws nothing and changes nothing: the identity gates
+ *    (the mTLS CompID authorisation, and an acceptor's logon credentials) run before any
+ *    answer and any sequence change, and a refusal writes nothing and closes the
+ *    connection. That is C++ and TOML behaviour with no reach from C: no C setter installs
+ *    a logon validator or a CompID binding (fixpp_session_close's 1.19 clause).
+ *  - A refused Logon or acknowledgement keeps NextNumIn (the counterparty's side: the
+ *    refused frame's MsgSeqNum(34) is expected again), except where a reset already ran
+ *    for it.
+ *  - The give-up of an unanswered TestRequest fires while a write is blocked, its Logout
+ *    limited as 1.18's: fixpp_session_is_established reads false at its ending, where it
+ *    stayed true while the write was blocked, and a send blocked at its close returns
+ *    FIXPP_ERR_CANCELLED, where it hung.
+ *  - The write limit (write_timeout_ms) and the two TLS handshake keys are C++ and TOML
+ *    only, unreachable from C: a C session runs with the write limit off and keeps the
+ *    handshake bounds of 1.18.
+ *  Migration: no code change. */
 #define FIXPP_C_ABI_VERSION_MAJOR 1
-#define FIXPP_C_ABI_VERSION_MINOR 18 /* 1.18: endings close the connection, R-2 wait (105), BREAKING */
+#define FIXPP_C_ABI_VERSION_MINOR 19 /* 1.19: identity gates first, NextNumIn kept (106), BREAKING */
 #define FIXPP_C_ABI_VERSION_PATCH 0
 
 /** Composite: (MAJOR<<16)|(MINOR<<8)|PATCH — single-integer compatibility check. */

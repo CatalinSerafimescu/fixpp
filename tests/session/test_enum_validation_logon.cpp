@@ -46,6 +46,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/fix44_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -253,6 +254,7 @@ TEST_F(EnumValidationLogonTest, OutOfDomainEncryptMethod_RejectedAndNotEstablish
 TEST_F(EnumValidationLogonTest, InDomainEncryptMethod_EstablishesAsToday) {
     auto cfg = make_cfg();
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(open_sync(sess).has_value()) << "Session::open() failed";
 
     // Peer sends Logon with EncryptMethod(98)=0 (NONE) — declared, in-domain.

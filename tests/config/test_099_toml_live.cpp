@@ -141,6 +141,8 @@ TEST(W14Live, ReachesActive_1128Routes) {
     fixpp::core::EngineConfig ec;
     ec.executor = ioc.get_executor();
     ec.clock = loaded->engine.clock;
+    // 106 (contract C-5.2): the host copies the acceptor's handshake bound as it copies the clock.
+    ec.acceptor_tls_handshake_timeout = loaded->engine.acceptor_tls_handshake_timeout;
     ec.default_store_factory = loaded->engine.default_store_factory;
     ec.default_transport_factory = loaded->engine.default_transport_factory;
     ec.dictionaries = loaded->engine.dictionaries;

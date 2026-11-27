@@ -14,6 +14,7 @@ refs:
   - src/capi/config.cpp
   - include/fix/c_api/message.h
   - src/capi/message_read.cpp
+  - src/capi/error.cpp
   - .specify/2i-capi.md
   - .specify/447-458-452-capi-refusals.md
   - .specify/536-537-538-recovery-liveness.md
@@ -33,6 +34,8 @@ refs:
   - specs/099-fixt-appl-version-validation/research.md
   - specs/100-wire-group-read-integrity/contracts/capi-group-getters.md
   - specs/100-wire-group-read-integrity/research.md
+  - specs/106-logon-guards-write-bounds/research.md
+  - specs/106-logon-guards-write-bounds/contracts/logon-guards-write-bounds-106.md
   - spec/behaviors-and-limitations.md
   - tests/capi/recovery_liveness_capi_witness_test.cpp
   - tools/check_layers.py
@@ -430,6 +433,37 @@ CA-010 block carries. What follows is the half the headers do not state.
 - Retired by 100: `L-093-17` (the cursor shells' missing catch), in the closed B&L file.
 
 Re-derive: `grep -n '1\.15' include/fix/c_api/*.h`.
+
+## C-ABI 1.19: behaviour only (106, fixpp#702, #703, #714, #717)
+
+One MINOR bump, declared BREAKING (`[const §X.7]`), with no symbol, constant, type or error code added. The
+user-facing row is B&L `B-106-6`; `specs/106-logon-guards-write-bounds/contracts/logon-guards-write-bounds-106.md`
+C-6 holds the contract (research D7). This page does not record 1.16 to 1.18; `version.h`'s history entries do.
+What follows is the half the headers do not state.
+
+- **Why BREAKING with no surface change.** `[const §X.7]`'s definition is "sees a call it could already make fail or
+  return a result other than the one documented": `fixpp_session_send` blocked at the give-up's close returns
+  `FIXPP_ERR_CANCELLED` where it hung; `fixpp_session_is_established` turns false at that ending where it stayed
+  true; and the frames a C session's peer receives at a Logon change (a refused Logon keeps NextNumIn).
+- **What is not BREAKING, and why: the identity gates and close's return code.** No C setter installs a logon
+  validator or adds a CompID binding, so a C acceptor's credentials always admit, and `FIXPP_SECURITY_TLS`'s
+  `mtls_ca` policy is empty and refuses every identity on the base as at 106. So no C session reaches a gate that
+  refuses a Logon the base let establish, and `fixpp_session_close`'s code is the base's (`/speckit-analyze` finding
+  E1, ruled unreachable). The clause holds while
+  `git grep -n -e compid_authorization_policy -e set_logon_validator -- src/capi include/fix/c_api` finds nothing; its
+  known positive is the same grep over `src/config`. A C setter for either owes a C-ABI cell.
+- **`session_write_timeout` maps to `FIXPP_ERR_TRANSPORT_IO`,** through `translate` in `src/capi/error.cpp`, though no
+  C session can reach it (no C setter for `write_timeout_ms`). **Rejected** (research D5): `FIXPP_ERR_UNKNOWN`, the
+  precedent of slots 73 and 74, because this code is returned by a call, the cut send, where 73 and 74 are carried
+  only by a log record; `translate` is a total switch, so the code needs a mapping either way, and that mapping is
+  what a C caller would meet should a setter appear.
+- **No C setter, no C TOML entry** for `write_timeout_ms` and the two handshake keys (FR-012, FR-013a): a C engine
+  builds a default `EngineConfig` (`src/capi/engine.cpp`), so it keeps 1500 ms and 30 000 ms, with the write limit
+  off (owner ruling, `[const §IV]`).
+- The two callback registrations' clauses are unchanged: 106 changes which admin frames a Logon arm writes and when
+  an ending comes, not which application messages are delivered or originated; no C callback carries `onLogout`.
+
+Re-derive: `grep -n '1\.19' include/fix/c_api/*.h`.
 
 ## ⚠️ What the ABI gate actually checks — and what it does not
 

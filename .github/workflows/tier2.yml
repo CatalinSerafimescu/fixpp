@@ -159,16 +159,23 @@ jobs:
     permissions:
       contents: read
       packages: write  # save the rebuilt Conan cache + the sccache cache to GHCR
-    # Hung-job backstop, shared by all three legs; windows-msvc-asan is the leg
-    # to size it against. The owner set this value as permanent, so a cache fix
-    # is not a reason to lower it again.
+    # Hung-job backstop, set per leg. windows-msvc-asan is the slowest leg and
+    # gets its own value; windows-msvc-debug and windows-msvc-release keep the
+    # original backstop, so a hung debug or release leg is still stopped at it
+    # rather than at the asan value. The owner set both values as permanent, so
+    # a cache fix is not a reason to lower either.
     #
     # It must cover a COLD Build: when the sccache cache has been evicted at its
     # size cap, the asan leg recompiles every TU and then runs its full ctest.
-    # The cache cap is tracked in feature 103. To re-derive, read the asan leg's
-    # Build and Test step durations from a Tier 2 run whose `sccache statistics`
-    # step shows a cold cache, and keep their sum below this value.
-    timeout-minutes: 210
+    # The cache cap is tracked in feature 103. To re-derive the asan value, take
+    # a push:main Tier 2 run whose `sccache statistics` step shows a cold cache,
+    # sum the durations of EVERY step of the asan leg (the Conan and sccache
+    # restores, Configure, Build, the push:main Save step, Test, and the small
+    # steps between them), add a margin, and keep the result below this value.
+    # Keep the value itself below GitHub-hosted runners' per-job execution
+    # limit, which ends the job whatever this key says. Re-derive the debug and
+    # release value the same way, from their own legs.
+    timeout-minutes: ${{ matrix.preset == 'windows-msvc-asan' && 300 || 210 }}
     needs: filter
     if: needs.filter.outputs.should_run == 'true'
 

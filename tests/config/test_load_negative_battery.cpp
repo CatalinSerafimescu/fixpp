@@ -35,15 +35,18 @@
 
 #include <algorithm>
 #include <asio/io_context.hpp>
+#include <filesystem>
 #include <fixpp/config/load_diagnostic.hpp>
 #include <fixpp/config/toml_config_loader.hpp>
 #include <set>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 // On Windows, route CRT abort()/assert() to stderr instead of a modal dialog so
 // the "...NoTerminate" gates below fail fast instead of hanging headless CI.
+#include "../support/toml_106_bundle.hpp"
 #include "../support/win_crt_no_dialog.hpp"
 
 #ifndef FIXPP_CONFIG_FIXTURE_DIR
@@ -1720,4 +1723,117 @@ TEST(LoadNegativeBattery, TestRequestThreshold_Negative_MalformedValue) {
     using RC = fixpp::config::reason_class;
     EXPECT_TRUE(has_diag(result.error(), RC::malformed_value, "session[0].test_request_threshold"))
         << "expected malformed_value at session[0].test_request_threshold";
+}
+
+// ── 106-logon-guards-write-bounds (tasks.md T025): the refusals of the three new keys ──────────
+// write_timeout_ms (contract C-4.7), [session.transport].tls_handshake_timeout_ms (C-5.1) and the
+// root key acceptor_tls_handshake_timeout_ms (C-5.2). Each cell asserts the reason class and the
+// key named in it, for every value its name covers. The bundle is written to a temporary file
+// from one template, so each value is one cell argument rather than one fixture file; the
+// template's relative paths name the fixture directory absolutely.
+
+namespace {
+
+namespace toml106 = fixpp::test_support::toml106;
+using toml106::in_defaults;
+using toml106::in_root;
+using toml106::in_session;
+using toml106::in_transport;
+
+void expect_refusal_106(toml106::Parts const& parts, fixpp::config::reason_class rc,
+                        std::string_view key_path, std::string_view value) {
+    auto const result = toml106::load_text(toml106::bundle(parts));
+    EXPECT_FALSE(result.has_value()) << value << ": the bundle loaded";
+    if (result.has_value()) return;
+    EXPECT_TRUE(has_diag(result.error(), rc, key_path))
+        << value << ": no diagnostic of the expected class on " << key_path << "; got"
+        << toml106::seen(result);
+}
+
+// The values each OutOfRange / WrongType cell covers (contract C-4.7, C-5.1, C-5.2).
+constexpr std::string_view kBelowZero = "-1";
+constexpr std::string_view kAboveU32 = "4294967296";  // UINT32_MAX + 1
+const std::vector<std::string_view> kWrongTypes = {"\"300\"", "300.5"};
+
+}  // namespace
+
+TEST(TomlWriteTimeout106, OutOfRange) {
+    using RC = fixpp::config::reason_class;
+    for (std::string_view v : {kBelowZero, kAboveU32}) {
+        expect_refusal_106(in_session("write_timeout_ms = " + std::string{v}), RC::out_of_range,
+                           "session[0].write_timeout_ms", v);
+    }
+}
+
+TEST(TomlWriteTimeout106, WrongType) {
+    using RC = fixpp::config::reason_class;
+    for (std::string_view v : kWrongTypes) {
+        expect_refusal_106(in_session("write_timeout_ms = " + std::string{v}), RC::malformed_value,
+                           "session[0].write_timeout_ms", v);
+    }
+}
+
+TEST(TomlHandshake106, OutOfRange) {
+    using RC = fixpp::config::reason_class;
+    for (std::string_view v : {std::string_view{"0"}, kBelowZero, kAboveU32}) {
+        expect_refusal_106(in_transport("tls_handshake_timeout_ms = " + std::string{v}),
+                           RC::out_of_range, "session[0].transport.tls_handshake_timeout_ms", v);
+    }
+}
+
+TEST(TomlHandshake106, WrongType) {
+    using RC = fixpp::config::reason_class;
+    for (std::string_view v : kWrongTypes) {
+        expect_refusal_106(in_transport("tls_handshake_timeout_ms = " + std::string{v}),
+                           RC::malformed_value, "session[0].transport.tls_handshake_timeout_ms", v);
+    }
+}
+
+TEST(TomlHandshake106, AcceptorKey_OutOfRange) {
+    using RC = fixpp::config::reason_class;
+    for (std::string_view v : {std::string_view{"0"}, kBelowZero, kAboveU32}) {
+        expect_refusal_106(in_root("acceptor_tls_handshake_timeout_ms = " + std::string{v}),
+                           RC::out_of_range, "acceptor_tls_handshake_timeout_ms", v);
+    }
+}
+
+TEST(TomlHandshake106, AcceptorKey_WrongType) {
+    using RC = fixpp::config::reason_class;
+    for (std::string_view v : kWrongTypes) {
+        expect_refusal_106(in_root("acceptor_tls_handshake_timeout_ms = " + std::string{v}),
+                           RC::malformed_value, "acceptor_tls_handshake_timeout_ms", v);
+    }
+}
+
+// tasks.md T167 (Phase 10 ruling 3): a session whose `transport` is a scalar, not a table. The
+// handshake check (check_transport_handshake_timeouts) skips it, and resolve_transport refuses the
+// load for the missing [session.transport] table; no diagnostic names the handshake key. The
+// template's [session.transport] table is cut out, so the session's one `transport` key is the
+// scalar. [guard] on the base, which has no handshake check.
+TEST(TomlHandshake106, TransportNotATable_RefusedByTheTransportCheck) {
+    using RC = fixpp::config::reason_class;
+    std::string text = toml106::bundle(in_session("transport = \"tls\""));
+    auto const from = text.find("[session.transport]");
+    auto const to = text.find("[session.security_profile]");
+    ASSERT_TRUE(from != std::string::npos && to != std::string::npos && from < to)
+        << "setup: the template's transport table was not found";
+    text.erase(from, to - from);
+    auto const result = toml106::load_text(text);
+    ASSERT_FALSE(result.has_value()) << "the bundle loaded";
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[0].transport.kind"))
+        << "no missing_required on session[0].transport.kind; got" << toml106::seen(result);
+    for (auto const& d : result.error()) {
+        EXPECT_EQ(d.key_path.find("tls_handshake_timeout_ms"), std::string::npos)
+            << "a diagnostic names the handshake key: " << d.key_path;
+    }
+}
+
+// [guard] on the base (the key is unknown at every scope there); its mutant accepts the key at
+// session scope (tasks.md T037). A valid value, so only the scope can refuse it.
+TEST(TomlHandshake106, AcceptorKey_AtSessionScope_Refused) {
+    using RC = fixpp::config::reason_class;
+    expect_refusal_106(in_session("acceptor_tls_handshake_timeout_ms = 300"), RC::unknown_key,
+                       "session[0].acceptor_tls_handshake_timeout_ms", "[[session]] 300");
+    expect_refusal_106(in_defaults("acceptor_tls_handshake_timeout_ms = 300"), RC::unknown_key,
+                       "default.acceptor_tls_handshake_timeout_ms", "[default] 300");
 }

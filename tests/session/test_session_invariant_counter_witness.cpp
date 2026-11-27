@@ -59,6 +59,7 @@
 #include <vector>
 
 #include "loopback_tls_session_harness.hpp"
+#include "support/close_before_destroy.hpp"
 #include "support/identity_injecting_transport.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/pump_until_ready.hpp"
@@ -221,6 +222,7 @@ TEST_F(InvariantCounterWitnessTest, Acceptor_AuthorizeCalledExactlyOnce_PerLogon
         pid.subject_dn = "CN=TW-PROD-01,O=Acme,C=US";
 
         fixpp::session::Session sess(engine, cfg);
+        fixpp::test_support::close_before_destroy const closer{sess, ioc};
         ASSERT_TRUE(run_open(sess).has_value()) << "Session " << i << " open failed.";
         fixpp::test_support::inject_live_identity(sess, std::move(pid));
 
@@ -277,6 +279,7 @@ TEST_F(InvariantCounterWitnessTest, Initiator_AuthorizeCalledExactlyOnce_PerLogo
         pid.subject_dn = "CN=ISLD-PROD-01,O=Exchange,C=US";
 
         fixpp::session::Session sess(engine, cfg);
+        fixpp::test_support::close_before_destroy const closer{sess, ioc};
         ASSERT_TRUE(run_open(sess).has_value()) << "Session " << i << " open failed.";
         EXPECT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
         fixpp::test_support::inject_live_identity(sess, std::move(pid));

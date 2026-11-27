@@ -123,6 +123,7 @@ TEST(LogonCredentials, OperatorStream_BothAbsent) {
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/pump_until_ready.hpp"
 
 namespace fixpp_fixt_creds {
@@ -395,6 +396,7 @@ TEST(FixtCredentials, W6b_NoCreds_553and554Absent_EstablishmentUnaffected) {
         acpt_frame_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
+    fixpp::test_support::close_before_destroy const closer_acceptor{acceptor, s.ioc};
     ASSERT_TRUE(run_sync_creds(s, [&] { return acceptor.open(); }).has_value());
 
     // Initiator: NO credentials configured.
@@ -405,6 +407,7 @@ TEST(FixtCredentials, W6b_NoCreds_553and554Absent_EstablishmentUnaffected) {
         init_frame_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session initiator(s.engine, init_cfg, &s.registry);
+    fixpp::test_support::close_before_destroy const closer_initiator{initiator, s.ioc};
     ASSERT_TRUE(run_sync_creds(s, [&] { return initiator.open(); }).has_value());
 
     ASSERT_FALSE(init_frame_out.empty()) << "Initiator must emit a Logon";
@@ -474,6 +477,7 @@ TEST(FixtCredentials, W6c_InboundCreds_SurfacedToAuthorizeLogon) {
         acpt_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
+    fixpp::test_support::close_before_destroy const closer{acceptor, s.ioc};
     ASSERT_TRUE(run_sync_creds(s, [&] { return acceptor.open(); }).has_value());
 
     // Build an inbound FIXT Logon WITH 553/554.
@@ -533,6 +537,7 @@ TEST(FixtCredentials, W6d_CredentialFreeLogon_ReachesActive) {
         acpt_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
+    fixpp::test_support::close_before_destroy const closer{acceptor, s.ioc};
     ASSERT_TRUE(run_sync_creds(s, [&] { return acceptor.open(); }).has_value());
 
     // Logon WITHOUT 553/554.

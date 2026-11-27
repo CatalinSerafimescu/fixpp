@@ -2031,12 +2031,12 @@ TEST(Lifetime105, CloseFrame_SessionDestroyedAfterClose) {
     destroy_then_drain(d);
 }
 
-// fixpp#718, the close frame's catch (contract C-8.3), COVERAGE ONLY: the write limit's close
-// frame meets a close_async that throws. The cell asserts that the transport's close_async was
-// called and threw before closing anything, and that a later close() closes the transport. It
-// reaches close_transport_'s catch but does not test it: asio::detached discards a spawned
-// frame's exception, so deleting the catch is not observable here.
-TEST(Lifetime105, CloseFrame_CloseAsyncThrows_CoverageOnly_LaterCloseCloses) {
+// fixpp#718, the close frame's catch (contract C-8.3, and C-8.6 as 106 widens it): the write
+// limit's close frame meets a close_async that throws before it closes anything. 106's ruling
+// (spec.md R23, claim-ok: a clarification id): the catch
+// falls back to the synchronous Transport::close(), so the transport is closed at the bound and
+// the held Logout's write returns with no later close(). A later close() still returns.
+TEST(Lifetime105, CloseFrame_CloseAsyncThrows_FallsBackToClose) {
     t105::DirectRig d{session_role::acceptor};
     ASSERT_TRUE(d.to_active()) << "setup";
     d.bw->close_async_throws_when = [](std::size_t call) { return call == 1; };
@@ -2046,7 +2046,11 @@ TEST(Lifetime105, CloseFrame_CloseAsyncThrows_CoverageOnly_LaterCloseCloses) {
     ASSERT_TRUE(d.parked()) << "setup: the Logout's write is not held";
     d.pass(std::chrono::milliseconds{d.s.cfg.logout_disconnect_timeout_ms});
     EXPECT_EQ(d.bw->close_async_calls, 1U) << "the close frame did not call close_async";
-    EXPECT_FALSE(d.closed()) << "the throwing close_async closed the transport";
+    EXPECT_EQ(d.bw->close_async_calls_at_first_close, std::optional<std::size_t>{1})
+        << "the transport was not first closed by the throwing close_async's fallback";
+    EXPECT_TRUE(d.closed()) << "the throwing close_async left the transport open";
+    EXPECT_TRUE(d.s.pump_until([&] { return rg_ready(frame); }, 1s))
+        << "the held Logout's write did not return after the close";
     auto const closed = d.run(d.s.session->close(fixpp::session::close_mode::terminal), "close");
     EXPECT_TRUE(closed.has_value() && closed->has_value()) << "close() did not return its result";
     EXPECT_TRUE(d.closed()) << "close() did not close the transport";

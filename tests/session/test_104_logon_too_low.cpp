@@ -681,8 +681,11 @@ TEST(LogonTooLow104, Precedence_MtlsAcceptorOffList) {
     r.s.session->attach_accepted_transport(
         std::make_unique<fixpp::session::test::ScriptedReadTransport>(stream), std::move(hr));
     auto const mark = r.s.sent.size();
+    // 106 D1 supersedes 104 T8's order here: the refusal precedes hydration (research D1 item 4),
+    // so NextNumIn is the value read before the feed.
+    auto const next_in_before = r.next_in();
     (void)r.s.feed(r.logon(kM));
-    ASSERT_EQ(r.next_in(), kN) << "setup: NextNumIn was not hydrated to " << kN;
+    EXPECT_EQ(r.next_in(), next_in_before) << "NextNumIn after the refusal";
     EXPECT_TRUE(stream->written.empty())
         << "frames written on the attached transport: " << stream->written.size();
     EXPECT_EQ(r.s.sent.size(), mark) << "frames written on the sink: " << r.s.written(mark);

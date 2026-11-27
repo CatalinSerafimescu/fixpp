@@ -33,16 +33,27 @@
 // transport counts its close_async calls; the call close_async_throws_when names throws before it
 // closes anything, and a call close_async_holds_when names waits, before it closes, until
 // release_close(). With neither set, close_async is Transport's default, close().
+//
+// 106-logon-guards-write-bounds (spec.md R23, claim-ok: a clarification id; contract C-4.3) adds
+// close_async_calls_at_first_close,
+// the value of close_async_calls when close() first ran, so a cell can tell that the first close
+// was made during a close_async call that threw (that call never reaches its own close()); and
+// fail_next_write (contract C-4.3), which fails the next async_write with transport_write_error and
+// closes nothing, so the reader stays open; throw_next_write makes the next async_write throw
+// instead (asio::system_error, or another type), as a transport whose write throws.
 #pragma once
 
 #include <algorithm>
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
+#include <asio/error.hpp>
 #include <asio/redirect_error.hpp>
 #include <asio/steady_timer.hpp>
+#include <asio/system_error.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <cstddef>
+#include <cstdint>
 #include <fixpp/core/error.hpp>
 #include <fixpp/tls/cert_source.hpp>
 #include <fixpp/tls/security_profile.hpp>
@@ -85,6 +96,15 @@ struct blocking_write_state {
     // can tell that the connection was closed and which writes had begun by then.
     std::size_t closes = 0;
     std::optional<std::size_t> starts_at_first_close;
+    // close_async_calls as the first close() read it
+    // (106 spec.md R23, claim-ok: a clarification id).
+    std::optional<std::size_t> close_async_calls_at_first_close;
+    // 106 (contract C-4.3): the next async_write fails with transport_write_error; one-shot.
+    bool fail_next_write = false;
+    // 106 (T167): the next async_write throws instead of returning, as a transport whose write
+    // throws: asio::system_error (connection_reset), or an exception of another type; one-shot.
+    enum class write_throw : std::uint8_t { none, system_error, other };
+    write_throw throw_next_write = write_throw::none;
     // 105-transport-liveness (tasks.md T052): a parked write that close() wakes completes with
     // success, as a write whose completion was already queued when the transport was closed.
     bool succeed_after_close = false;
@@ -147,6 +167,18 @@ public:
                 {.start = state_->starts, .bytes = {bytes.begin(), bytes.end()}});
         }
         if (closed_) co_return std::unexpected(fixpp::core::error::transport_already_closed);
+        if (state_->fail_next_write) {
+            state_->fail_next_write = false;
+            co_return std::unexpected(fixpp::core::error::transport_write_error);
+        }
+        if (auto const t =
+                std::exchange(state_->throw_next_write, blocking_write_state::write_throw::none);
+            t != blocking_write_state::write_throw::none) {
+            if (t == blocking_write_state::write_throw::system_error) {
+                throw asio::system_error{asio::error::connection_reset};
+            }
+            throw std::runtime_error{"BlockingWriteTransport::async_write"};
+        }
         if (state_->block_next) {
             state_->parked = true;
             // NOLINTBEGIN(bugprone-unchecked-optional-access): the constructor emplaces the timer
@@ -200,7 +232,10 @@ public:
     }
 
     [[nodiscard]] fixpp::core::expected_t<void> close() noexcept override {
-        if (state_->closes++ == 0) state_->starts_at_first_close = state_->starts;
+        if (state_->closes++ == 0) {
+            state_->starts_at_first_close = state_->starts;
+            state_->close_async_calls_at_first_close = state_->close_async_calls;
+        }
         closed_ = true;
         state_->block_next = false;
         if (state_->timer) state_->timer->cancel();

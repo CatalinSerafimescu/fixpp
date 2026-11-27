@@ -483,6 +483,31 @@ add_session_105_bucket(session_105_seam_tests "session;105;105_seam"
 target_compile_definitions(session_105_seam_tests PRIVATE
   FIXPP_105_STATIC_GUARDS=$<IF:$<BOOL:${FIXPP_105_STATIC_GUARDS}>,1,0>)
 
+# 106-logon-guards-write-bounds (tasks.md T003): the feature's Session cells, in
+# add_session_105_bucket's shape, so `ctest -L 106 --no-tests=error` selects them. Two entries:
+# session_106_seam_tests holds every cell that names a symbol 106 adds (label 106_seam), so a
+# reading on the base builds the target session_106_tests alone and runs
+# `ctest -L 106 -LE 106_seam`. Both define FIXPP_TLS_FIXTURE_DIR, so no TLS cell skips. Each cell
+# task appends its cells to its file.
+add_session_105_bucket(session_106_tests "session;106"
+  test_106_identity_first.cpp                                           # 106 T003
+  test_106_give_up.cpp                                                  # 106 T003
+  test_106_one_ending.cpp                                               # 106 T003
+  test_106_handshake.cpp                                                # 106 T003
+)
+add_session_105_bucket(session_106_seam_tests "session;106;106_seam"
+  test_106_seams.cpp                                                    # 106 T003
+)
+# The TOML cells of test_106_seams.cpp load a bundle whose cert and dictionary files are the
+# config suite's fixtures.
+target_link_libraries(session_106_seam_tests PRIVATE fixpp::config_toml)
+target_compile_definitions(session_106_seam_tests PRIVATE
+  FIXPP_CONFIG_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/config/fixtures")
+# 106 T131: the TOML cells of test_106_handshake.cpp mint a TLS transport from a loaded bundle.
+target_link_libraries(session_106_tests PRIVATE fixpp::config_toml)
+target_compile_definitions(session_106_tests PRIVATE
+  FIXPP_CONFIG_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/config/fixtures")
+
 # 103 T023: test_reset_seqnum_policy_matrix.cpp's AS5 cells use mock_reconnect_factory.hpp's
 # FaultStoreFactory, whose header includes the mock transport.
 set_source_files_properties(test_reset_seqnum_policy_matrix.cpp PROPERTIES
@@ -1319,7 +1344,8 @@ set_tests_properties(session_admin_emit_observation_gate_selftest PROPERTIES
 # ── 038-acceptor-sendingtime-guard T001–T008 (Group 1 witness) ───────────────
 # 14 cells: stale-past/future, malformed, absent, empty 52; toAdmin-throw;
 # assign_outbound-fail; build-fail-closed; persistent-inbound-seeded; ordering
-# (52 wins vs 1137/creds/check_inbound); conforming; persistent-reconnect seq.
+# (52 wins vs 1137/check_inbound; credentials first, 106 D1); conforming;
+# persistent-reconnect seq.
 # Cell 7 injects overflow through tests/support/seqnum_manager_test_access.hpp.
 # Anchors: spec.md FR-002/FR-003/FR-004; contracts/acceptor-logon-sendingtime.md C-1;
 #          quickstart.md §Group-1; tasks.md T001-T008.

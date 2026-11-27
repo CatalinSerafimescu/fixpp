@@ -63,6 +63,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/session_test_access.hpp"
@@ -272,6 +273,7 @@ TEST(ValidateGateDefaultOff, T015_HeaderOutOfOrder_Disregarded) {
     ValidateDefaultOffFixture fix;
     auto cfg = fix.make_cfg_default();
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
 
     // Violation stimulus: 49= before 35= (header out of order).
@@ -323,6 +325,7 @@ TEST(ValidateGateDefaultOff, T015_UndefinedTag_Accepted) {
     ValidateDefaultOffFixture fix;
     auto cfg = fix.make_cfg_default();
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
 
     // Violation: Heartbeat(35=0) with extra tag 44 (Price, not in Heartbeat).
@@ -380,6 +383,7 @@ TEST(ValidateGateDefaultOff, T015_RequiredFieldMissing_NoValidationReject) {
     ValidateDefaultOffFixture fix;
     auto cfg = fix.make_cfg_default();
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
 
     // Violation: NewOrderSingle without required ClOrdID(11).

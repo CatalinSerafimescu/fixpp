@@ -234,6 +234,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Acceptor_PeerSends141Y) {
     auto cfg = make_cfg(fixpp::session::session_role::acceptor,
                         fixpp::session::reset_seqnum_policy::bilateral_strict);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(run_open(sess).has_value());
 
     // Peer (initiator) sends Logon with ResetSeqNumFlag(141)=Y.
@@ -309,6 +310,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_PeerSends141Y) {
     auto cfg = make_cfg(fixpp::session::session_role::acceptor,
                         fixpp::session::reset_seqnum_policy::bilateral_lenient);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(run_open(sess).has_value());
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
@@ -332,6 +334,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_PeerOmits141Y) {
     auto cfg = make_cfg(fixpp::session::session_role::acceptor,
                         fixpp::session::reset_seqnum_policy::bilateral_lenient);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(run_open(sess).has_value());
 
     // Peer sends Logon WITHOUT 141=Y; bilateral_lenient should accept anyway.
@@ -360,6 +363,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_PeerConfirms141Y) 
     auto cfg = make_cfg(fixpp::session::session_role::initiator,
                         fixpp::session::reset_seqnum_policy::bilateral_strict);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(run_open(sess).has_value());
     // Initiator open() emits Logon with 141=Y (bilateral_strict) → state=LogonSent.
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
@@ -442,6 +446,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_PeerSends141Y) {
     auto cfg = make_cfg(fixpp::session::session_role::acceptor,
                         fixpp::session::reset_seqnum_policy::unilateral);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(run_open(sess).has_value());
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
@@ -477,6 +482,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Acceptor_ReplyContains141Y) 
     auto cfg = make_cfg(fixpp::session::session_role::acceptor,
                         fixpp::session::reset_seqnum_policy::bilateral_strict);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(run_open(sess).has_value());
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
@@ -502,6 +508,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_ReplyContains141Y)
     auto cfg = make_cfg(fixpp::session::session_role::acceptor,
                         fixpp::session::reset_seqnum_policy::bilateral_lenient);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(run_open(sess).has_value());
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
@@ -530,6 +537,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_ReplyDoesNotContain141Y)
     auto cfg = make_cfg(fixpp::session::session_role::acceptor,
                         fixpp::session::reset_seqnum_policy::unilateral);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(run_open(sess).has_value());
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
@@ -584,6 +592,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Acceptor_CountersResetToOne)
     auto cfg = make_cfg(fixpp::session::session_role::acceptor,
                         fixpp::session::reset_seqnum_policy::bilateral_strict);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(run_open(sess).has_value());
 
     // Pre-advance outbound counter to 10 so the reset is non-trivial.
@@ -616,6 +625,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_CountersResetToOne
     auto cfg = make_cfg(fixpp::session::session_role::acceptor,
                         fixpp::session::reset_seqnum_policy::bilateral_lenient);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(run_open(sess).has_value());
 
     // Pre-advance outbound counter to 10 so the reset is non-trivial.
@@ -642,6 +652,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_CountersResetToOne
     auto cfg = make_cfg(fixpp::session::session_role::initiator,
                         fixpp::session::reset_seqnum_policy::bilateral_strict);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     // Set counters before open() so the outbound Logon uses seq=10 (non-trivial).
     fixpp::session::seqnum_manager_test_access::set_counters(
         fixpp::session::session_test_access::seqnum_mgr(sess), 1, 10);
@@ -711,6 +722,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_CountersResetToOne) {
     auto cfg = make_cfg(fixpp::session::session_role::acceptor,
                         fixpp::session::reset_seqnum_policy::unilateral);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(run_open(sess).has_value());
 
     // Pre-advance outbound counter to 10 so the reset is non-trivial.
@@ -745,6 +757,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_PeerSends141Y_NoOurFlag)
     auto cfg = make_cfg(fixpp::session::session_role::acceptor,
                         fixpp::session::reset_seqnum_policy::unilateral);
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(run_open(sess).has_value());
 
     // Peer sends 141=Y; we honour it (unilateral).
@@ -787,6 +800,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
                         fixpp::session::reset_seqnum_policy::bilateral_lenient);
     cfg.reset_on_logon = true;
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     // open() emits initiator Logon with 141=Y (reset_on_logon=true + seqnums_at_one=true
     // at {1,1}) → latch own_logon_sent_reset_flag_=true.
@@ -840,6 +854,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
                         fixpp::session::reset_seqnum_policy::bilateral_lenient);
     cfg.reset_on_logon = false;
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     // Pre-seed outbound to 10 before open() so the Logon goes at seq=10.
     // Inbound stays at 1 (peer will send Logon-ack seq=1).
@@ -920,6 +935,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
                         fixpp::session::reset_seqnum_policy::bilateral_lenient);
     cfg.reset_on_logon = false;
     fixpp::session::Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     // open() at {1,1} bilateral_lenient: initr_reset_seqnum=false → latch=false.
     // Logon goes at seq=1 → n_pre_outbound==2 at the arm (outbound advanced 1→2).

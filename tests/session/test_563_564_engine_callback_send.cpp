@@ -218,6 +218,7 @@
 #include "support/engine_test_access.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/reserved_ports.hpp"
 #include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
@@ -301,15 +302,7 @@ const char* get_fixture_dir() {
     return (env && env[0] != '\0') ? env : kDir;
 }
 
-uint16_t reserve_free_port(asio::io_context& ioc) {
-    asio::ip::tcp::acceptor a{ioc};
-    asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
-    a.open(ep.protocol());
-    a.bind(ep);
-    uint16_t port = a.local_endpoint().port();
-    a.close();
-    return port;
-}
+using fixpp::test_support::reserve_loopback_port;
 
 std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(const char* fixture_dir) {
     fixpp::tls::file_cert_source::Config cs_cfg;
@@ -590,7 +583,7 @@ Readings run_cell(Shape shape, SpawnOn spawn_on,
     ecfg.clock = make_mock_clock(ioc);
     Engine engine{ioc.get_executor(), std::move(ecfg)};
 
-    const uint16_t port = reserve_free_port(ioc);
+    const uint16_t port = reserve_loopback_port(ioc);
     auto acc_cfg = make_session_cfg(ioc, fac, "ACCEPTOR", "INITIATOR", session_role::acceptor,
                                     "INITIATOR", port);
     auto ini_cfg = make_session_cfg(ioc, fac, "INITIATOR", "ACCEPTOR", session_role::initiator,
@@ -1647,7 +1640,7 @@ void run_mt_cell(bool busy, MtReadings& o) {
     ecfg.clock = make_mock_clock(ioc);
     Engine engine{ioc.get_executor(), std::move(ecfg)};
 
-    const uint16_t port = reserve_free_port(ioc);
+    const uint16_t port = reserve_loopback_port(ioc);
     const std::size_t capacity = n + 64;
     auto acc_cfg = make_session_cfg(ioc, fac, "ACCEPTOR", "INITIATOR", session_role::acceptor,
                                     "INITIATOR", port, capacity);
@@ -2015,7 +2008,7 @@ struct PlainPair {
     bool stopped = false;
 
     PlainPair() : engine{ioc.get_executor(), engine_cfg()} {
-        const uint16_t port = reserve_free_port(ioc);
+        const uint16_t port = reserve_loopback_port(ioc);
         auto acc_cfg =
             make_plain_session_cfg(ioc, "ACCEPTOR", "INITIATOR", session_role::acceptor, port);
         auto ini_cfg =
@@ -2386,7 +2379,7 @@ MissReadings run_miss_path_cell() {
     auto engine = std::make_unique<Engine>(ioc.get_executor(), std::move(ecfg));
 
     auto acc_cfg = make_plain_session_cfg(ioc, "ACCEPTOR", "INITIATOR", session_role::acceptor,
-                                          reserve_free_port(ioc));
+                                          reserve_loopback_port(ioc));
     const SessionId registered_id = SessionId::from_config(acc_cfg);
     SessionConfig nobody_cfg;
     nobody_cfg.sender_comp_id = "NOBODY";

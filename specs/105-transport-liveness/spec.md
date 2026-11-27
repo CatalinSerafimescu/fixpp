@@ -352,7 +352,7 @@ the bound the class allows, with no further inbound frame and no local API call.
 8. **Given** a TLS session, **When** any of the endings above closes the connection, **Then** the close is the orderly
    TLS close wherever today's `close()` closes orderly; no ending introduces an abortive close, except the write limit
    of scenario 9 behind a peer that does not read (ruling D-e, L-105-g) and the synchronous close used when a close
-   cannot be spawned (an allocation failure; clarification D-g, L-105-h).
+   cannot be spawned (an allocation failure; clarification D-g, L-105-h) or its `close_async()` throws *(Amended 2026-11-27 by 106, spec.md R23.)*
 9. **Given** a peer that has stopped reading, **When** a Logout that ends the session cannot be written, **Then** the
    connection closes `logout_disconnect_timeout_ms` after the start of that write, with no further wait.
 
@@ -475,7 +475,7 @@ no comment claiming behaviour the code does not have.
   that does not read, where `close_async` cannot write close_notify and closes abortively at `tls_close_timeout`
   off Windows (clarification D-e, L-105-g, amended by T141); and an allocation failure at the close's spawn, where the session closes with the
   synchronous `Transport::close()` instead, abortive on TLS while a read or write is in flight (clarification D-g,
-  L-105-h).
+  L-105-h); the same synchronous close follows a close frame whose `close_async()` throws *(Amended 2026-11-27 by 106, spec.md R23.)*
 - **FR-003 (R-1)**: When a TestRequest goes unanswered, the session MUST send one Logout whose Text(58) states that the
   TestRequest was not answered, then close the transport as soon as the Logout has been written. It MUST NOT wait for
   the peer's Logout. If the Logout cannot be sent, or its write has not completed within the limit of FR-004b, the

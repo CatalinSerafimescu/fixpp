@@ -394,8 +394,7 @@ void expect_cancelled_send_ending(Outcome const& o, std::size_t want_disconnecte
     EXPECT_EQ(o.next_outbound_after_send, static_cast<long long>(o.seq))
         << "the session's next outbound number, in memory, is not the cancelled frame's own";
 
-    // The Disconnected entries in the state ring, read before the stop: the ending's, and on the
-    // Returned route also the held send's (below).
+    // The Disconnected entries in the state ring, read before the stop: the ending's.
     EXPECT_EQ(o.disconnected_entries, want_disconnected_entries)
         << "Disconnected entries in the state ring";
 
@@ -440,17 +439,18 @@ TEST(CancelledOutboundStoreMeasurement, Returned_StoreCancelledAtItsLock) {
         << " returned_at=" << call.returned_at << " release_mark=" << o.release_mark
         << " error=" << error_text(call.error);
 
-    // 105-transport-liveness (FR-001, FR-008; data-model E-2 I-5) supersedes this cell's "one
-    // Disconnected entry": the ending closes the connection at the cancelled send's exit, while
-    // the held send is still in its store call. That store call runs to its end, so the store
-    // holds the held send's frame (the fresh store's next outbound number, asserted below, is
-    // past it); its write then finds the connection closed, the call returns dispatch_aborted,
-    // and it records Disconnected over Disconnected, which owes nothing (I-5). So the ring holds
-    // two Disconnected entries for one ending and one close.
+    // 105-transport-liveness (FR-001, FR-008; data-model E-2 I-5): the ending closes the
+    // connection at the cancelled send's exit, while the held send is still in its store call.
+    // That store call runs to its end, so the store holds the held send's frame (the fresh
+    // store's next outbound number, asserted below, is past it); its write then finds the
+    // connection closed and the call returns dispatch_aborted.
+    // 106 D11 supersedes 105 data-model E-2 I-5's second Disconnected entry here (FR-017; spec
+    // SC-007): the held send's F9 block records Disconnected only when the session is not already
+    // Disconnected, so the ring holds one entry for one ending and one close.
     EXPECT_TRUE(o.held_result.has_value() && !o.held_result->has_value() &&
                 o.held_result->error() == error::dispatch_aborted)
         << "the held Engine::send " << result_text(o.held_result);
-    expect_cancelled_send_ending(o, 2U);
+    expect_cancelled_send_ending(o, 1U);
 }
 
 TEST(CancelledOutboundStoreMeasurement, Thrown_CancelledAtTheStoreCallsFirstSuspension) {

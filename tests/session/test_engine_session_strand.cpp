@@ -158,6 +158,7 @@
 #include "session/session_strand.hpp"  // fixpp#544: V-10's fast-path strand type
 #include "support/engine_test_access.hpp"
 #include "support/minimal_dictionary.hpp"
+#include "support/reserved_ports.hpp"
 #include "support/wait_until.hpp"
 #include "transport/asio_tls_transport.hpp"
 
@@ -250,17 +251,8 @@ fixpp::session::SessionConfig make_session_cfg(
     return c;
 }
 
-// Reserve a free loopback port by binding a temporary acceptor to port 0.
-uint16_t reserve_free_port(asio::io_context& ioc) {
-    asio::ip::tcp::acceptor a{ioc};
-    asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
-    a.open(ep.protocol());
-    a.set_option(asio::ip::tcp::acceptor::reuse_address{true});
-    a.bind(ep);
-    uint16_t port = a.local_endpoint().port();
-    a.close();
-    return port;
-}
+using fixpp::test_support::reserve_loopback_port;
+using fixpp::test_support::reserve_loopback_ports;
 
 // Wait until pred() is true, driving ioc.run_for(50ms) per iteration.
 // Returns pred() at exit.
@@ -403,7 +395,7 @@ TEST(EngineSessionStrand, V1_PerSessionTeardown_TransportCloseSerializedWithRead
     if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
-    const uint16_t port = reserve_free_port(ioc);
+    const uint16_t port = reserve_loopback_port(ioc);
     auto fac = make_tls_factory(fixture_dir);
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
@@ -515,8 +507,9 @@ TEST(EngineSessionStrand, V3_TwoSessionsMT_IndependentProgress) {
     if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
-    const uint16_t port1 = reserve_free_port(ioc);
-    const uint16_t port2 = reserve_free_port(ioc);
+    const auto ports = reserve_loopback_ports(ioc, 2);
+    const uint16_t port1 = ports[0];
+    const uint16_t port2 = ports[1];
 
     auto fac = make_tls_factory(fixture_dir);
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
@@ -621,7 +614,7 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
     if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
-    const uint16_t port = reserve_free_port(ioc);
+    const uint16_t port = reserve_loopback_port(ioc);
     auto fac = make_tls_factory(fixture_dir);
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
@@ -851,7 +844,7 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
     if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
-    const uint16_t port = reserve_free_port(ioc);
+    const uint16_t port = reserve_loopback_port(ioc);
     auto fac = make_tls_factory(fixture_dir);
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
@@ -1062,7 +1055,7 @@ TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
     auto fac = make_tls_factory(fixture_dir);
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
-    const uint16_t port = reserve_free_port(ioc);
+    const uint16_t port = reserve_loopback_port(ioc);
 
     // Register an acceptor session: the accept loop writes listener_endpoints_[id]
     // at startup (no peer needed to trigger that write).
@@ -1275,7 +1268,7 @@ TEST(EngineSessionStrand, V12_StopBeforeAwaitedPublish) {
     if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
-    const uint16_t port = reserve_free_port(ioc);
+    const uint16_t port = reserve_loopback_port(ioc);
     auto fac = make_tls_factory(fixture_dir);
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
@@ -1381,7 +1374,7 @@ TEST(EngineSessionStrand, V12b_StopBeforePublish_WithLiveTransport) {
     if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
-    const uint16_t port = reserve_free_port(ioc);
+    const uint16_t port = reserve_loopback_port(ioc);
     auto fac = make_tls_factory(fixture_dir);
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
@@ -1691,7 +1684,7 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
     if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
-    const uint16_t port = reserve_free_port(ioc);
+    const uint16_t port = reserve_loopback_port(ioc);
     auto fac = make_tls_factory(fixture_dir);
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
@@ -1912,7 +1905,7 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
     // an initiator connects).  Reuses the main ioc (restart after Part 1).
     {
         ioc.restart();
-        const uint16_t port2 = reserve_free_port(ioc);
+        const uint16_t port2 = reserve_loopback_port(ioc);
         fixpp::core::EngineConfig ecfg2;
         ecfg2.executor = ioc.get_executor();
         ecfg2.clock = make_mock_clock(ioc);
@@ -1981,7 +1974,7 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
 #ifndef NDEBUG
     {
         ioc.restart();
-        const uint16_t port3 = reserve_free_port(ioc);
+        const uint16_t port3 = reserve_loopback_port(ioc);
         fixpp::core::EngineConfig ecfg3;
         ecfg3.executor = ioc.get_executor();
         ecfg3.clock = make_mock_clock(ioc);
@@ -2072,7 +2065,7 @@ TEST(EngineSessionStrand, V13_SendVsFsmTransition_NoRace) {
     if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
-    const uint16_t port = reserve_free_port(ioc);
+    const uint16_t port = reserve_loopback_port(ioc);
     auto fac = make_tls_factory(fixture_dir);
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
@@ -2252,8 +2245,9 @@ TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
     // Register 2 acceptors to widen the spawn loop (more spawns = wider TOCTOU).
-    const uint16_t port1 = reserve_free_port(ioc);
-    const uint16_t port2 = reserve_free_port(ioc);
+    const auto ports = reserve_loopback_ports(ioc, 2);
+    const uint16_t port1 = ports[0];
+    const uint16_t port2 = ports[1];
 
     fixpp::core::EngineConfig ecfg;
     ecfg.executor = ioc.get_executor();
@@ -2417,7 +2411,7 @@ TEST(EngineSessionStrand, V15_SendCounterEnrolledBeforeControlHop_NoUAF) {
     if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
-    const uint16_t port = reserve_free_port(ioc);
+    const uint16_t port = reserve_loopback_port(ioc);
     auto fac = make_tls_factory(fixture_dir);
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
@@ -2544,7 +2538,7 @@ TEST(EngineSessionStrand, V16_PostDrainLateSendFastFails_WithoutPosting) {
     if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
-    const uint16_t port = reserve_free_port(ioc);
+    const uint16_t port = reserve_loopback_port(ioc);
     auto fac = make_tls_factory(fixture_dir);
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
@@ -2699,7 +2693,7 @@ TEST(EngineSessionStrand, V17_OrphanEntryStopEmit_NoUAF) {
 
     asio::io_context ioc;
     // A free port with NOTHING listening → initiator connect is refused.
-    const uint16_t port = reserve_free_port(ioc);
+    const uint16_t port = reserve_loopback_port(ioc);
     auto fac = make_tls_factory(fixture_dir);
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 

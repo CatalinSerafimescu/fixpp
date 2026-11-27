@@ -52,6 +52,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/close_before_destroy.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/transport_double.hpp"
@@ -265,6 +266,7 @@ TEST(SessionDictSnapshotProvenance, MatchingSnapshotAcceptedAtOpen) {
     ASSERT_EQ(cfg.dict_snapshot->source(), cfg.dictionary);
 
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     auto r = fix.run_open(sess);
     ASSERT_TRUE(r.has_value()) << "the config's own dictionary paired with its own snapshot must "
                                   "not be refused (open() error: "

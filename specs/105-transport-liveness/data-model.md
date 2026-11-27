@@ -66,7 +66,9 @@ is suspended and otherwise closes the socket without it, so with the pump parked
 (L-105-h). The join-as-parameter half follows `on_inbound_active_too_high_logout_`'s spawn; the `catch` half does
 not: that precedent restores the mark and rethrows (`throw;`), while this `catch` must not rethrow (the function is
 `noexcept`). The liveness loop's spawn sites, whose `fetch_add` before a bare `co_spawn` leaks the count on a throw,
-are not copied. The frame awaits `close_async()` on the transport it holds and touches no member of `Session`. It
+are not copied. The frame awaits `close_async()` on the transport it holds and touches no member of `Session`. A
+close frame whose `close_async()` throws calls the synchronous `Transport::close()` of the transport it holds instead
+(contract C-8.6; *(Amended 2026-11-27 by 106, spec.md R23.)*). It
 is joined by `close()` and `drain_for_reconnect_` (I-4), and `~Session` asserts its counter is zero, so a caller
 that keeps B-103-13's precondition (`close()` before the Session is destroyed) never destroys a Session with the
 frame running; the frame widens no lifetime precondition.

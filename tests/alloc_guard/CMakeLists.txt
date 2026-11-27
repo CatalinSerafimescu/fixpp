@@ -553,3 +553,47 @@ endif()
 # sources a 103 task edits (re-derive from tasks.md's paths; tasks.md T167 re-derives the set).
 # APPEND, at the end of the file, so it follows every LABELS setter for these entries.
 set_property(TEST alloc_guard_544_run_thread APPEND PROPERTY LABELS 103)
+
+# 106-logon-guards-write-bounds (tasks.md T004): the connection bound's zero-allocation cell
+# (research D9, the connection bound's zero-allocation row; tasks.md T108 writes its cases).
+# Linux only, as every other interceptor window here; the interceptor registration is
+# Release-only, as the other mallocnesia gates'.
+# FIXPP_106_ALLOC_BASE (default OFF) builds only the emit half with the limit off, naming no
+# symbol 106 adds: the base tree builds that half with this file and the TU overlaid and the
+# option ON (tasks.md T004, T108).
+option(FIXPP_106_ALLOC_BASE "106: build only the base half of test_106_connection_bound.cpp" OFF)
+# One source, two binaries (tasks.md T108), 544's run-thread shape: mallocnesia.c refuses a
+# process that defines the allocator names, so the interceptor runs test_106_connection_bound
+# (FIXPP_106_TU_COUNTER 0, the send half), and test_106_connection_bound_count
+# (FIXPP_106_TU_COUNTER 1) counts glibc's allocation entry points itself, for both halves; the
+# emit half's base reading is that binary built on the base tree with FIXPP_106_ALLOC_BASE ON.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  foreach(_t106 test_106_connection_bound test_106_connection_bound_count)
+    add_executable(${_t106} test_106_connection_bound.cpp)
+    target_link_libraries(${_t106} PRIVATE
+      fixpp_session
+      fixpp_mock_clock
+      GTest::gtest
+      GTest::gtest_main
+    )
+    target_include_directories(${_t106} PRIVATE
+      "${CMAKE_SOURCE_DIR}/tests" "${CMAKE_SOURCE_DIR}/src")
+    # 1 or 0, never undefined, so the TU's #if reads the option's value.
+    target_compile_definitions(${_t106} PRIVATE
+      FIXPP_106_ALLOC_BASE=$<IF:$<BOOL:${FIXPP_106_ALLOC_BASE}>,1,0>)
+    set_target_properties(${_t106} PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+  endforeach()
+  target_compile_definitions(test_106_connection_bound PRIVATE FIXPP_106_TU_COUNTER=0)
+  target_compile_definitions(test_106_connection_bound_count PRIVATE FIXPP_106_TU_COUNTER=1)
+  # Release only, as every interceptor gate and counter assertion here.
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    fixpp_add_mallocnesia_test(
+      NAME alloc_guard_106_connection_bound_mallocnesia
+      TARGET test_106_connection_bound
+      LABELS "alloc_guard;106")
+    add_test(NAME alloc_guard_106_connection_bound_count COMMAND test_106_connection_bound_count)
+    set_tests_properties(alloc_guard_106_connection_bound_count PROPERTIES
+      LABELS "alloc_guard;106" TIMEOUT 300)
+  endif()
+endif()

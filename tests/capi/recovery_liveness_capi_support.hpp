@@ -322,6 +322,8 @@ struct PeerLine {
     bool read_failed = false;
 
     explicit PeerLine(Wire w) : wire(std::move(w)) {}
+    // 106 (contract C-6): a peer whose socket's receive buffer is receive_buffer_bytes.
+    PeerLine(Wire w, int receive_buffer_bytes) : wire(std::move(w)), sock(receive_buffer_bytes) {}
 
     [[nodiscard]] SessionSpec spec(std::uint32_t heartbeat_s, bool reset_on_logon = true) const {
         return {wire.engine_comp_id, wire.peer_comp_id, sock.port(), heartbeat_s, reset_on_logon};

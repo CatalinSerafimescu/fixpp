@@ -361,6 +361,7 @@ bool probe_draws_resend(DispositionFixture& fix, Session& sess) {
 void run_issue507_cell(std::string const& garbled, bool validate, ExpectedReject expected) {
     DispositionFixture fix;
     Session sess{fix.engine, fix.make_cfg(validate)};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
     if (::testing::Test::HasFatalFailure()) {
         return;
@@ -426,6 +427,7 @@ TEST(UnparseableFrameDisposition, Issue507Reproducer_MalformedTag_ValidationOff)
 TEST(UnparseableFrameDisposition, Issue507Reproducer_ProbeControl) {
     DispositionFixture fix;
     Session sess{fix.engine, fix.make_cfg(/*validate=*/true)};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
     if (::testing::Test::HasFatalFailure()) {
         return;
@@ -638,10 +640,13 @@ struct ActiveCell {
     DispositionFixture fix;
     std::shared_ptr<CountingApplication> app = std::make_shared<CountingApplication>();
     std::unique_ptr<Session> sess;
+    // Declared after sess, so it is destroyed first (tests/support/close_before_destroy.hpp).
+    std::optional<fixpp::test_support::close_before_destroy> closer;
 
     explicit ActiveCell(bool validate = true) {
         fix.engine.application = app;
         sess = std::make_unique<Session>(fix.engine, fix.make_cfg(validate));
+        closer.emplace(*sess, fix.ioc);
     }
 };
 
@@ -956,6 +961,7 @@ TEST(UnparseableFrameDisposition, ReplayGuard_StoredAdminFrameFaultInField2_GapF
     auto cfg = fix.make_cfg(/*validate=*/false);
     cfg.store_factory = factory;
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
     if (::testing::Test::HasFatalFailure()) {
         return;
@@ -1658,6 +1664,7 @@ void run_refresh_cell(RefreshCase const& rc, std::string_view row) {
         std::chrono::duration_cast<std::chrono::milliseconds>(*cfg.heartbeat_interval);
     auto const t1 = interval / 3;
     Session sess{fix.engine, cfg};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
     if (::testing::Test::HasFatalFailure()) {
         return;
@@ -1900,6 +1907,8 @@ struct ProfileCell {
     std::unique_ptr<fixpp::dict::version_registry> registry;
     std::string begin_string;
     std::unique_ptr<Session> sess;
+    // Declared after sess, so it is destroyed first (tests/support/close_before_destroy.hpp).
+    std::optional<fixpp::test_support::close_before_destroy> closer;
 
     ProfileCell(Profile profile, session_role role, bool validate, bool with_app)
         : dict(make_profile_dictionary(profile)), begin_string(begin_string_of(profile)) {
@@ -1922,6 +1931,7 @@ struct ProfileCell {
             registry = std::make_unique<fixpp::dict::version_registry>(std::move(dicts));
         }
         sess = std::make_unique<Session>(fix.engine, cfg, registry.get());
+        closer.emplace(*sess, fix.ioc);
     }
 
     ProfileCell(ProfileCell const&) = delete;
@@ -2962,6 +2972,7 @@ TEST(UnparseableFrameDisposition, ScriptedPeer_MalformedTooHigh_ResendConverges_
     auto const app = std::make_shared<ClOrdIdApplication>();
     fix.engine.application = app;
     Session sess{fix.engine, fix.make_cfg(/*validate=*/false)};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
     if (::testing::Test::HasFatalFailure()) {
         return;
@@ -3808,6 +3819,7 @@ TEST(UnparseableFrameDisposition, ToAdmin_D5Reject_ObservedOnce) {
     auto const app = std::make_shared<ToAdminRecordingApplication>();
     fix.engine.application = app;
     Session sess{fix.engine, fix.make_cfg(/*validate=*/true)};
+    fixpp::test_support::close_before_destroy const closer{sess, fix.ioc};
     fix.open_to_active(sess);
     if (::testing::Test::HasFatalFailure()) {
         return;

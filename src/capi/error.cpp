@@ -88,6 +88,10 @@ fixpp_error_t translate(error e) noexcept {
             return FIXPP_ERR_WIRE_CONFORMANCE;
         case error::wire_field_value_truncated:
             return FIXPP_ERR_DECIMAL_PRECISION_LOSS;
+        // 106 (data-model E-8): a cut live write is a transport I/O failure to a C
+        // caller; no C code is added.
+        case error::session_write_timeout:
+            return FIXPP_ERR_TRANSPORT_IO;
 
         // ── sync (slots 43-46) ─────────────────────────────────────────────
         case error::sync_lock_aborted:  // "Joins FIXPP_ERR_CANCELLED" (error.hpp's

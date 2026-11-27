@@ -248,6 +248,7 @@ protected:
 TEST_F(SeqnumGapFatalTest, ActiveTooHighBecomesSessionFatal) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
 
     // Drive to Active (seq #1 consumed).
     ASSERT_TRUE(drive_to_active(sess)) << "Failed to drive session to Active/LogonReceived state";
@@ -275,6 +276,7 @@ TEST_F(SeqnumGapFatalTest, ActiveTooHighBecomesSessionFatal) {
 TEST_F(SeqnumGapFatalTest, NoResendRequestEmittedOnTooHighGap) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
+    fixpp::test_support::close_before_destroy const closer{sess, ioc};
     ASSERT_TRUE(drive_to_active(sess));
 
     // Too-high gap.
