@@ -30,7 +30,6 @@
 #include <fixpp/core/decimal_alias.hpp>    // fixpp::decimal_t (2a/001 trait)
 #include <fixpp/core/decimal_helpers.hpp>  // core::detail::trap_throw (C1)
 #include <fixpp/core/error.hpp>
-#include <fixpp/core/pmr_arena_upstream.hpp>  // detail::arena_upstream (MSVC-debug proxy)
 // 066-dict-backed-inbound-parse T003: MessageView::membership_copy() (below)
 // returns an OWNED table_view by value, needing it complete. table_view.hpp
 // has a deliberately minimal include graph (no mutex, no heavy asio — see
@@ -43,7 +42,6 @@
 #include <fixpp/dict/version_profile.hpp>  // 099: resolved_application_version()
 #include <memory>
 #include <memory_resource>
-#include <new>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -138,8 +136,7 @@ public:
                frame.token()},  // [2b §6.4] thread real pool token
           table_{frame, mr, hooks},
           mr_{mr},
-          hooks_{hooks},
-          unk_items_{mr} {
+          hooks_{hooks} {
         // Gate B PR#176 r1 root cause #1: seed the ROOT group_context ({msg_type,
         // path=[]}) HERE, unconditionally, rather than lazily only in group<>()
         // below. Every root group read, whichever entry point makes it, must
@@ -172,8 +169,7 @@ private:
                frame.token()},  // [2b §6.4] thread real pool token
           table_{frame, mr, cfg, hooks, reserve_entries},
           mr_{mr},
-          hooks_{hooks},
-          unk_items_{mr} {
+          hooks_{hooks} {
         // The same root group_context seed as the public dict-aware ctors.
         table_.set_group_context(group_context{.msg_type = msg_type()});
     }
@@ -184,8 +180,7 @@ public:
         : View{frame.bytes().data(), frame.bytes().size(),
                frame.token()},  // [2b §6.4] thread real pool token
           table_{frame, mr},
-          mr_{mr},
-          unk_items_{mr} {}
+          mr_{mr} {}
 
     explicit MessageView(frame_view const& frame) noexcept
         requires(Mode == access_mode::Iter)
@@ -381,53 +376,22 @@ public:
 
     // [2b §4.8] Contract: unknown_fields() uses the dict pointer threaded from the
     // Parser that constructed this MessageView — no caller-supplied argument.
-    // Walks the offset table and yields entries whose tag is not `field_valid_for`-
-    // known in the dict, exempting framing tags 8/9/10. Builds and caches the kv
-    // list in the per-message arena (mr_) on first call; idempotent.
     // ([PR68-02] fix — the dict is captured at Parser construction time.)
-    // When dict_ptr_ is null (default/dict-free construction), no tag is classified
-    // as known so all non-framing tags are yielded as unknown.
+    // W1 (`.specify/688-707-559-wire-headroom-token.md` D-688-1, fixpp#688): the filtered view
+    // of [2b §4.8]. It walks the offset table's entries as it is iterated and yields each one the
+    // dictionary does not define (the classify hook, table_view::tag_defined since ruling
+    // R-W1-3), framing tags 8/9/10 exempt. It stores and allocates nothing, so no state of the
+    // parse resource changes what it yields (it supersedes 093's catch, FR-015, which returned an
+    // empty view on exhaustion). With no classify hook (dict-free construction) every non-framing
+    // tag is unknown. The view copies its context out of this MessageView, not a pointer to it;
+    // the dictionary must outlive every iteration.
     [[nodiscard]] unknown_fields_view unknown_fields() const noexcept
         [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
-            if (unk_items_built_) {
-                return unknown_fields_view{
-                    std::span<unknown_fields_view::kv const>{unk_items_.data(), unk_items_.size()},
-                    token()};
-            }
-            unk_items_built_ = true;
-            std::string_view const mtype = msg_type();
-            auto const raw = bytes();
-            // Framing tags 8/9/10 are always exempt from unknown classification.
-            constexpr std::uint16_t kBeginString = 8;
-            constexpr std::uint16_t kBodyLength = 9;
-            constexpr std::uint16_t kCheckSum = 10;
-            // 093-inbound-frame-dispositions (FR-015, fixpp#540): the list grows in the
-            // view's parse resource, whose upstream may refuse (null_memory_resource). A
-            // bad_alloc here used to leave this noexcept function: std::terminate. On
-            // exhaustion the partial list is cleared and the built flag stays set, so this
-            // call and every later one return the same empty view, which cannot be told
-            // from a frame with no unknown fields (contract L-5).
-            try {
-                for (auto const& e : table_.entries()) {
-                    if (e.tag == kBeginString || e.tag == kBodyLength || e.tag == kCheckSum) {
-                        continue;  // framing — never unknown
-                    }
-                    // hooks_.classify_fn() is nullptr for dict-free views (all
-                    // non-framing = unknown); otherwise classify via the bound
-                    // fn + opaque dict.
-                    bool const known = (hooks().classify_fn() != nullptr) &&
-                                       hooks().classify_fn()(hooks().opaque_dict(), mtype, e.tag);
-                    if (!known) {
-                        unk_items_.push_back(unknown_fields_view::kv{
-                            .tag = e.tag, .data = raw.data() + e.offset, .len = e.length});
-                    }
-                }
-            } catch (std::bad_alloc const&) {
-                unk_items_.clear();
-            }
-            return unknown_fields_view{
-                std::span<unknown_fields_view::kv const>{unk_items_.data(), unk_items_.size()},
-                token()};
+            check_alive();  // [2b §6.4]: building the view reads the table and the frame
+            auto const ents = table_.entries();
+            return unknown_fields_view::scan(ents.data(), ents.data() + ents.size(), data_ptr(),
+                                             hooks().classify_fn(), hooks().opaque_dict(),
+                                             msg_type(), token());
         }
 
     // ⚠️ Superseded at both copy sites by shared_membership() below (fixpp#495,
@@ -544,8 +508,7 @@ private:
     struct empty_t {};
     [[no_unique_address]] std::conditional_t<Mode == access_mode::Index, OffsetTable, empty_t>
         table_{};
-    // Index-mode extras. mr_ declared BEFORE unk_items_ so it is initialised
-    // first.
+    // Index-mode extras.
     std::pmr::memory_resource* mr_ = std::pmr::null_memory_resource();
     // [2b §4.3] / [2b §4.8] fixpp#426: the dict_hooks bundle threaded from the
     // Parser (replaces the separate opaque_dict_/classify_fn_/
@@ -566,18 +529,6 @@ private:
         }
     }
     hooks_holder_t hooks_{no_hooks()};
-    // unk_items_: lazily built unknown-fields kv list in the per-message arena.
-    // An Index-mode ctor overrides this default with the real arena
-    // (`unk_items_{mr}`), but a default-constructed view and EVERY Iter-mode view
-    // fall through to this initializer. The default backing is arena_upstream()
-    // (null on release/Linux, new_delete under MSVC debug): MSVC's debug STL
-    // heap-allocates a _Container_proxy for this vector AT CONSTRUCTION, and
-    // null_memory_resource would throw bad_alloc there -> noexcept ctor ->
-    // std::terminate (a silent Windows-debug abort). unk_items_ is only ever
-    // *built* on the Index-mode unknown-fields path (which threads the real
-    // arena), so behaviour is unchanged on every lane.
-    mutable std::pmr::vector<unknown_fields_view::kv> unk_items_{::fixpp::detail::arena_upstream()};
-    mutable bool unk_items_built_ = false;
     // 099 (data-model E-5): Index mode only, as `dict_owner_` is, so an Iter view stores nothing.
     struct no_resolved_version_t {};
     [[no_unique_address]] std::conditional_t<Mode == access_mode::Index,
@@ -797,8 +748,12 @@ struct message_view_resolved_access {
 inline dict_hooks dict_hooks::for_table_view(fixpp::dict::table_view const& dict) noexcept {
     return dict_hooks{
         std::addressof(dict),
-        [](void const* d, std::string_view mt, std::uint16_t t) noexcept -> bool {
-            return static_cast<fixpp::dict::table_view const*>(d)->field_valid_for(mt, t);
+        // W1 (`.specify/688-707-559-wire-headroom-token.md` ruling R-W1-3): "known" is "the
+        // dictionary defines the tag", as [2b §4.8] specifies, not "this MsgType declares it";
+        // a defined tag the MsgType does not declare is the validator's wire_unexpected_tag.
+        // The MsgType parameter stays in classify_fn_t and is unused here.
+        [](void const* d, std::string_view /*mt*/, std::uint16_t t) noexcept -> bool {
+            return static_cast<fixpp::dict::table_view const*>(d)->tag_defined(t);
         },
         // 063 T015: resolves via the stored `group_context` (msg_type +
         // bounded parent-no_tag path) — the context-scoped membership key

@@ -74,7 +74,8 @@ TEST(WireAllocGuard, ParseSerializeLoopNoHeapAlloc) {
         "38=100\x01"
         "40=2\x01"
         "44=185.25\x01"
-        "59=0\x01");
+        "59=0\x01"
+        "5000=UNDEFINED\x01");
 
     auto fv = fixpp::wire::test::make_frame_view(frame);
     ASSERT_TRUE(fv.has_value());
@@ -100,6 +101,16 @@ TEST(WireAllocGuard, ParseSerializeLoopNoHeapAlloc) {
         ASSERT_TRUE(cl_ord_id.has_value());
         auto symbol = mv->template get<55>();
         ASSERT_TRUE(symbol.has_value());
+
+        // W1 (`.specify/688-707-559-wire-headroom-token.md` §1.6 item 4): the unknown-field view
+        // and its iteration, inside the window. The parser is dict-free, so every non-framing
+        // field is unknown: the twelve body fields above, 5000 among them.
+        std::size_t unknown = 0;
+        for (auto const& kv : mv->unknown_fields()) {
+            (void)kv;
+            ++unknown;
+        }
+        ASSERT_EQ(unknown, 12U);
 
         // Full serialize path: dict-free Iter walk → Writer → commit.
         Parser<access_mode::Iter> itp{};

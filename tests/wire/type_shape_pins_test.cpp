@@ -96,3 +96,65 @@ TEST(WireTypeShapePins, GroupWriterTokenImplicitLifetimePinIsEvaluatedOnThisLane
 }
 
 }  // namespace
+
+// ── fixpp#688 (D-688-1): the unknown-field view and its iterator ────────────────────────────
+// operator* returns kv by value: the iterator holds its scan state, not a kv, so a reference
+// into it would dangle across ++.
+static_assert(std::same_as<decltype(*std::declval<fixpp::wire::unknown_fields_view::iterator const&>()),
+                           fixpp::wire::unknown_fields_view::kv>,
+              "operator* returns kv by value");
+// The view is built by MessageView::unknown_fields() alone: the span and pointer constructors of
+// the materialised list are gone.
+static_assert(!std::is_constructible_v<fixpp::wire::unknown_fields_view,
+                                       std::span<fixpp::wire::unknown_fields_view::kv const>,
+                                       fixpp::wire::detail::generation_token>,
+              "unknown_fields_view is still constructible from a kv span");
+static_assert(!std::is_constructible_v<fixpp::wire::unknown_fields_view::iterator,
+                                       fixpp::wire::unknown_fields_view::kv const*>,
+              "the iterator is still constructible from a kv pointer");
+static_assert(std::is_nothrow_default_constructible_v<fixpp::wire::unknown_fields_view>,
+              "the known positive: a default view still constructs");
+
+namespace {
+
+std::vector<std::byte> make_raw_frame(std::string const& body) {
+    std::string const full =
+        "8=FIX.4.4\x01" + ("9=" + std::to_string(body.size()) + "\x01") + body + "10=000\x01";
+    std::vector<std::byte> out(full.size());
+    std::memcpy(out.data(), full.data(), full.size());
+    return out;
+}
+
+// An iterator taken from a temporary view stays valid while the MessageView lives: it holds its
+// own scan state and points at the MessageView's parse storage, not at the view. begin() and
+// end() therefore carry no [[clang::lifetimebound]], which would make clang reject this idiom
+// under -Werror (-Wdangling).
+TEST(WireTypeShapePins, IteratorFromATemporaryViewStaysValidWhileTheMessageViewLives) {
+    fixpp::dict::table_view_builder b;
+    b.add_valid("D", 35).add_valid("D", 34);
+    fixpp::dict::table_view const dict = std::move(b).build();
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "5000=first\x01"
+        "5001=second\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{dict};
+    auto mv = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv.has_value());
+
+    auto it = mv->unknown_fields().begin();
+    auto const end = mv->unknown_fields().end();
+    std::vector<std::pair<std::uint16_t, std::string>> seen;
+    for (; !(it == end); ++it) {
+        auto const kv = *it;
+        seen.emplace_back(kv.tag, std::string{reinterpret_cast<char const*>(kv.data), kv.len});
+    }
+    std::vector<std::pair<std::uint16_t, std::string>> const expected{{5000, "first"},
+                                                                      {5001, "second"}};
+    EXPECT_EQ(seen, expected);
+}
+
+}  // namespace

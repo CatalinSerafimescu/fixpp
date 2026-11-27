@@ -28,6 +28,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <fixpp/wire/framer.hpp>
 #include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/parser.hpp>
@@ -40,6 +42,8 @@
 #include "support/mock_dict_table.hpp"
 // Test-only factory — friend of frame_view.
 #include "support/frame_view_factory.hpp"
+// W1: the parse resource is the allocation counter for the unknown-field properties below.
+#include "support/pmr_allocation_tracking_resource.hpp"
 // detail::set_overlay_seed_for_testing (W-P3-2) — declaration lives here, not
 // in the installed public offset_table.hpp.
 #include "support/wire_test_hooks.hpp"
@@ -92,13 +96,20 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     static fixpp::dict::table_view const tv = [] {
         fixpp::dict::table_view_builder tvb;
         tvb.set_group_first(453, 448).add_group_member(453, 447);  // NoPartyIDs group
+        // W1 (`.specify/688-707-559-wire-headroom-token.md` §1.6 item 7): a few common tags,
+        // which add_valid_tag marks defined, so both sides of the unknown-field predicate fire
+        // on ordinary frames, not only on a frame that carries a group tag.
+        tvb.add_valid_tag("D", 34).add_valid_tag("D", 35).add_valid_tag("D", 49).add_valid_tag(
+            "D", 55);
         return std::move(tvb).build();
     }();
     Parser<access_mode::Index> p{tv};
+    // W1: every allocation the parse resource serves is counted, the arena behind it unchanged.
+    fixpp::test_support::pmr_allocation_tracking_resource counted{&arena};
 
     // parse() is noexcept; any exception escape -> std::terminate -> libFuzzer
     // crash report.
-    auto result = p.parse(fv, &arena);
+    auto result = p.parse(fv, &counted);
 
     if (result) {
         auto const& mv = *result;
@@ -126,6 +137,39 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         // Touch msg_type() / msg_seq_num().
         (void)mv.msg_type();
         (void)mv.msg_seq_num();
+
+        // W1 (`.specify/688-707-559-wire-headroom-token.md` §1.6 item 7): unknown_fields().
+        // The counter check runs first, with its own message, so a failure names the counter.
+        // The properties' reference is the harness table's own tag_defined, called directly
+        // here: the check is that the view's yield agrees with that predicate entry by entry,
+        // not that the predicate is right.
+        std::size_t const before = counted.allocate_calls();
+        auto const uf = mv.unknown_fields();
+        for (auto const& kv : uf) (void)kv;
+        if (counted.allocate_calls() != before) {
+            std::fprintf(stderr, "unknown_fields() allocated from the parse resource\n");
+            std::abort();
+        }
+        auto const* const base = mv.bytes().data();
+        auto it = uf.begin();
+        for (auto const& e : tbl.entries()) {
+            bool const framing = e.tag == 8U || e.tag == 9U || e.tag == 10U;
+            if (framing || tv.tag_defined(e.tag)) continue;
+            if (it == uf.end()) {
+                std::fprintf(stderr, "unknown_fields() missed an undefined entry\n");
+                std::abort();
+            }
+            auto const kv = *it;
+            if (kv.tag != e.tag || kv.data != base + e.offset || kv.len != e.length) {
+                std::fprintf(stderr, "unknown_fields() yielded another entry, or out of order\n");
+                std::abort();
+            }
+            ++it;
+        }
+        if (!(it == uf.end())) {
+            std::fprintf(stderr, "unknown_fields() yielded a defined or framing tag\n");
+            std::abort();
+        }
     }
     // else: a wire_* error from parse() — correct rejection of malformed input.
 

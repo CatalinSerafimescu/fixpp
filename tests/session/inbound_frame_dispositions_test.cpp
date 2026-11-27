@@ -2819,14 +2819,18 @@ TEST(InboundFrameDispositionsQ6, Control_FrameOfExactlyLIsDelivered) {
 
 // ── Q-33 (T060): lazy reads at headroom exhaustion inside a callback ────────
 //
-// A FIX 4.4 NewOrderSingle of exactly L = 65536 bytes: a NoPartyIDs(453) group whose
-// slices outgrow the callback headroom, then "2=<SOH>" fields (tag 2 is not a
-// NewOrderSingle field, so each is an unknown field) to fill the frame and the
-// overlay. Inside fromApp the callback reads group_slices(453), then unknown_fields().
-// The assertions branch at runtime on the library's own condition, the parse arena's
-// upstream (fixpp::detail::arena_upstream()); no arm is skipped:
-//   - null upstream: each read reports its exhaustion (an empty span, an empty view);
-//   - forwarding upstream (MSVC debug): each read succeeds and the spill is recorded.
+// A FIX 4.4 NewOrderSingle of exactly L = 65536 bytes: three fields whose tags FIX44.xml does
+// not define (kQ33UnknownTags; re-check with `grep -c "number='5000'" dictionaries/FIX44.xml`,
+// which must print 0), a NoPartyIDs(453) group whose slices outgrow the callback headroom, then
+// "2=<SOH>" fields to fill the frame and the overlay. Tag 2 (AdvId) is defined by FIX44.xml, so
+// since W1 (`.specify/688-707-559-wire-headroom-token.md` D-688-1, ruling R-W1-3) the fillers are
+// not unknown fields: only the three undefined tags are. Inside fromApp the callback reads
+// group_slices(453), then unknown_fields(). The assertions branch at runtime on the library's own
+// condition, the parse arena's upstream (fixpp::detail::arena_upstream()); no arm is skipped:
+//   - null upstream: group_slices() reports its exhaustion (an empty span);
+//   - forwarding upstream (MSVC debug): group_slices() succeeds and the spill is recorded.
+// unknown_fields() allocates nothing, so on both lanes it yields exactly the three undefined
+// tags, in document order.
 // Either way the session stays Active and processes the next frame. The C arms are
 // T091's (Phase 8).
 //
@@ -2834,6 +2838,7 @@ TEST(InboundFrameDispositionsQ6, Control_FrameOfExactlyLIsDelivered) {
 // 16 KiB stack arena, the frame does not parse at all, so the base run uses a scratch
 // variant sized for that arena.
 constexpr std::size_t kQ33PartyInstances = 2000;
+constexpr std::array<std::uint16_t, 3> kQ33UnknownTags{5000, 5001, 5002};
 
 std::string q33_party_group() {
     std::string g = "453=" + std::to_string(kQ33PartyInstances) + "\x01";
@@ -2853,7 +2858,10 @@ std::string q33_frame(plain_rig::Rig const& rig, std::uint32_t seq, std::size_t 
                            "55=X\x01"
                            "54=1\x01"
                            "60=20240101-00:00:00.000\x01"
-                           "40=1\x01" +
+                           "40=1\x01"
+                           "5000=U0\x01"
+                           "5001=U1\x01"
+                           "5002=U2\x01" +
                                q33_party_group(),
                            size, "2", true);
 }
@@ -2910,24 +2918,22 @@ TEST(InboundFrameDispositionsQ33, GroupSlicesAtHeadroomExhaustion) {
 
 // unknown_fields(), after group_slices() has spent what it could, under EXPECT_EXIT:
 // a terminate (fixpp#540) is a recorded failure of this cell, not a crashed binary.
-// Exit codes: 0 = the lane's expected outcome; 1 = the unknown-field view was not the
-// lane's; 2 = the session did not carry on; 3 = setup failed; 4 = no spill recorded on
-// the forwarding lane.
+// Exit codes: 0 = the lane's expected outcome; 1 = the view did not yield exactly
+// kQ33UnknownTags in order; 2 = the session did not carry on; 3 = setup failed; 4 = no
+// spill recorded on the forwarding lane (group_slices() alone spills there).
 [[noreturn]] void unknown_fields_at_headroom_exhaustion() {
-    std::size_t unknown = ~std::size_t{0};
+    std::vector<std::uint16_t> unknown;
     auto const r = run_q33([&](auto const& mv) {
         (void)mv.offsets().group_slices(453);
-        std::size_t n = 0;
-        auto const uf = mv.unknown_fields();
-        for (auto it = uf.begin(); !(it == uf.end()); ++it) ++n;
-        unknown = n;
+        for (auto const& kv : mv.unknown_fields()) unknown.push_back(kv.tag);
     });
+    std::vector<std::uint16_t> const expected(kQ33UnknownTags.begin(), kQ33UnknownTags.end());
     // std::exit reports this death-test child's verdict as its exit code.
     // NOLINTBEGIN(concurrency-mt-unsafe)
     if (!r.up || !r.delivered) std::exit(3);
     if (!r.next || r.state != fsm_state::Active) std::exit(2);
-    if (q33_null_upstream()) std::exit(unknown == 0U ? 0 : 1);
-    if (unknown == 0U) std::exit(1);
+    if (unknown != expected) std::exit(1);
+    if (q33_null_upstream()) std::exit(0);
     std::exit(r.spills > 0U ? 0 : 4);
     // NOLINTEND(concurrency-mt-unsafe)
 }

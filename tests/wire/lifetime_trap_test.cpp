@@ -15,6 +15,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <fixpp/wire/field_view.hpp>
 #include <fixpp/wire/framer.hpp>
@@ -123,6 +124,54 @@ TEST(WireLifetimeTrapDeath, ParserViewTrapsAfterArenaRecycle) {
 
     // After recycling: any bytes() call must abort (use-after-buffer-reuse).
     EXPECT_DEATH((void)mv.bytes(), "") << "must trap after pool recycle";
+}
+
+// W1 (`.specify/688-707-559-wire-headroom-token.md` D-688-1, [2b §6.4]): the unknown-field
+// iterator walks the frame as it goes, so its operator* and operator++ check the generation, as
+// the other accessors do. Framer::recycle_pool() bumps the pool's generation and releases no
+// storage, so nothing but the check can end the child. The view is named so that the iterator
+// comes from an lvalue.
+TEST(WireLifetimeTrapDeath, UnknownFieldsIteratorTrapsAfterArenaRecycle) {
+    std::string body{
+        "35=D\x01"
+        "5000=x\x01"};
+    std::string nine = "9=" + std::to_string(body.size()) + "\x01";
+    std::string pre = "8=FIX.4.4\x01" + nine + body;
+    unsigned chksum = 0;
+    for (unsigned char c : pre) {
+        chksum += c;
+    }
+    char chk[16];
+    std::snprintf(chk, sizeof(chk), "10=%03u\x01", chksum % 256U);
+    std::string full = pre + chk;
+    std::vector<std::byte> raw(full.size());
+    std::memcpy(raw.data(), full.data(), full.size());
+
+    fixpp::wire::Framer framer;
+    fixpp::wire::pmr_carry_buffer carry{1024, std::pmr::get_default_resource()};
+    std::array<fixpp::wire::frame_view, 4> out_buf{};
+    auto frames = framer.feed(raw, carry, std::span<fixpp::wire::frame_view>{out_buf});
+    ASSERT_TRUE(frames.has_value()) << "feed must succeed";
+    ASSERT_GE(frames->size(), 1U) << "must have produced at least one frame";
+
+    // A one-tag table defines 35 only, so 5000 is the frame's one unknown field.
+    fixpp::dict::table_view_builder b;
+    b.add_valid("D", 35);
+    fixpp::dict::table_view const dict = std::move(b).build();
+    std::pmr::monotonic_buffer_resource arena;
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{dict};
+    auto mv = parser.parse((*frames)[0], &arena);
+    ASSERT_TRUE(mv.has_value()) << "parse must succeed";
+
+    auto uf = mv->unknown_fields();
+    auto it = uf.begin();
+    ASSERT_FALSE(it == uf.end()) << "the frame's unknown field must be found";
+    ASSERT_EQ((*it).tag, 5000U) << "before the recycle the iterator reads";
+
+    framer.recycle_pool();
+
+    EXPECT_DEATH((void)*it, "") << "operator* must trap after pool recycle";
+    EXPECT_DEATH(++it, "") << "operator++ must trap after pool recycle";
 }
 #else
 TEST(WireLifetimeTrap, ReleaseStripsTokenNoTrapMachinery) {
