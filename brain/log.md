@@ -6,6 +6,13 @@ status: stable
 
 # Log
 
+- **2026-11-27 — 106-logon-guards-write-bounds close-out (PR #725), row 15: `failure-classes.md` gains class 28, the
+  first asio timer or I/O object on an io_context starts its reactor, and changes what every poll costs (a bench arm with
+  no reactor is not comparable; strace both arms), and class 29, a new "one ending wins" arbitration makes its loser
+  skip what the base did, not only what the arbitration owns (a lost claim skips the loser's own record, never a base
+  reply or close).** Owner-approved 2026-11-27 from the Gate B record's anti-pattern candidates, as new classes;
+  rulings R19, R21 and R22 in the 106 spec's Clarifications.
+
 - **2026-11-25 — 105-transport-liveness close-out (PR #720), row 15: `failure-classes.md` gains class 26, a close
   that is orderly on one platform resets the connection on another (Windows RST with a pending read; shut down the send
   side first), and class 27, a member keyed to one connection is reset or seeded on every path that starts a

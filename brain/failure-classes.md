@@ -1267,6 +1267,70 @@ connection's answer, or gives up naming an ID it never sent. Single-connection t
 - **Sibling.** Class 15 (a seam that outlives the window it observes) and class 23 (a reference withdrawn on every exit
   of its window): the same rule, that state must end with its window, for a connection rather than an install or a frame.
 
+### 28. The first asio timer or I/O object on an io_context starts its reactor, and changes what every poll costs
+
+An asio io_context creates its reactor (on Linux, epoll with a timerfd) when the first service that needs one is
+constructed: the first socket, or the first timer, armed or not (`deadline_timer_service`'s constructor calls
+`scheduler_.init_task()`). From then on every `poll()` or `run_one()` also runs the reactor, an `epoll_wait` with a zero
+timeout when polling. Every production io_context has one, because every connection is a socket. A bench or test
+io_context with no socket (a mock clock, a scripted transport) has none until a change adds a timer to the path it
+drives. Then the head arm pays a reactor pass per poll that the base arm never paid, and the delta reads as the change's
+cost when the rig caused it. It runs the other way too: a timer the change parks at the head of the reactor's timer
+queue means a timer armed after it, expiring later, no longer re-arms the timerfd, and the head reads faster than the base.
+
+- **Trigger:** a bench or test delta, of either sign, on a path where the change adds the first asio timer or I/O
+  object, or on an io_context that has no socket.
+- **Procedure:**
+  - Before attributing the delta, check the reactor in both arms: `strace -f -c` the same bench binary built in each
+    arm and compare the `epoll_wait` and `timerfd_settime` calls. A syscall that one arm makes and the other does not
+    is the rig, not the code.
+  - Give the rig the reactor production has, in both arms: an unarmed `asio::steady_timer` constructed on the
+    io_context is enough. Put it in the bench source and overlay that same source on the base, so both arms run one
+    source. Record it as a measurement ruling.
+  - Re-read the strace after the fix: the reactor syscalls should now match between the arms.
+- **Scanning heuristic:** for each io_context a bench or test constructs, check whether anything on it creates a
+  socket or a timer before the timed region: `git grep -nE 'io_context|steady_timer|ip::tcp::socket' -- bench`. One
+  with neither is reactor-less, and a timer added to the code it drives changes its cost.
+- **Instance (106-logon-guards-write-bounds, T164, ruling R19).** The connection bound's `asio::steady_timer` in the
+  Session started the reactor in the head arm only; `session_send_bench` and `on_inbound_frame_bench` now construct an
+  unarmed timer on their io_context. The reverse form is `engine_send_bench`'s read-pump case. See
+  [components/session](./components/session.md).
+- **Sibling.** Class 10 (an assessment scoped to one of a change's effects): here the effect outside the assessment is
+  on the rig, not on the code.
+
+### 29. A new "one ending wins" arbitration makes its loser skip what the base did, not only what the arbitration owns
+
+When a change adds an arbitration between paths that used to act on their own (a claim, a flag, a compare-and-swap:
+the first one wins), the loser's refused branch usually returns early. That return skips everything after the test,
+not only what the arbitration exists to decide. 106's ending claim was meant to give each ending one reason record and
+one `Disconnected` entry. Its refused branch in the Logout leaf also skipped the reply to the peer's Logout that the
+base writes while `close()` or `Engine::stop()` is ending the session, so a protocol reply the base sends was gone
+in exactly the races the new tests did not drive.
+
+- **Trigger:** you add or review a first-one-wins claim between paths that each had side effects on the base.
+- **Procedure:**
+  - Write down what the arbitration owns, and make the loser skip exactly that. In 106 a lost claim skips the loser's
+    own reason record and its `Disconnected` entry. It never skips a reply the base sends to the peer, or a close the
+    base performs. A Logout fixpp starts on its own still writes nothing on a refused claim: the split is by what the
+    write is, not by its MsgType.
+  - Check the converse: the loser writes no record only when the holder writes, or will write, its own. A holder that
+    records nothing (`close()`, `Engine::stop()`, a reconnect drain) would otherwise leave the ending with no reason
+    record at all (R22).
+  - Enumerate the claim sites mechanically and tabulate, for each, what losing skips against what the base did at that
+    site. Each row is clean, owned by the arbitration, or a decision recorded with the ruling that made it.
+  - Run the base's suites for the crossings unchanged, for each race arm, and diff the replies and closes the base
+    makes in each. A base suite that turns RED and is not in the feature's re-pin list is this defect until a ruling
+    says otherwise. Add a mutant that re-adds the over-broad return and turns the base crossing cells RED.
+- **Scanning heuristic:** `git grep -n "claim_ending\|ending_claim_ =\|ending_claim::" -- src include`, then read each
+  site's refused branch for a write or a close that the base performs.
+- **Instance (106-logon-guards-write-bounds, T169, rulings R21 and R22).** `inbound_logout_leaf_` returns without writing
+  on a refused claim only for a Logout fixpp starts; the reply to the peer's Logout is written whatever the claim's
+  outcome (`B-103-15`, the `Crossing103` cells). The establishment deadline in `run_read_pump` records its event and
+  record when the claim is refused only because a recordless ending holds it (the `Od29` cells). Both base suites went
+  RED under the first claim and were in no re-pin list. See [components/session](./components/session.md).
+- **Sibling.** Class 10 (an assessment scoped to one of a change's effects certifies a site the other effect breaks)
+  and class 20 (enumerate every site mechanically, then fix by construction).
+
 ## How to query the instances
 
 The corpus is private and machine-local. From the parent repo:
