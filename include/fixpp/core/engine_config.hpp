@@ -134,6 +134,10 @@ struct EngineConfig {
     /// is the base's value. No C setter: the C engine builds a default EngineConfig. TOML: the
     /// root key `acceptor_tls_handshake_timeout_ms`, which the loader puts in
     /// fixpp::config::EngineEstablishment and a host copies here as it copies `clock`.
+    /// Precondition: > 0, as for Transport::Config::tls_handshake_timeout. Neither
+    /// validate_engine_config nor Engine::start() checks it: a value <= 0 arms the handshake timer
+    /// to expire at once, so every accepted TLS connection ends at its handshake with
+    /// transport_handshake_timeout. The TOML loader refuses <= 0 (check_handshake_timeout_ms).
     std::chrono::milliseconds acceptor_tls_handshake_timeout{1500};
 
     std::vector<std::shared_ptr<const fixpp::dict::Dictionary>> dictionaries;
