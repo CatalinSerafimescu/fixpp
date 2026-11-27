@@ -803,3 +803,16 @@ TEST(NextNumIn106, Initiator_789Below_Superseded) {
     EXPECT_EQ(after.store->in, before.store->in) << "NextNumIn in the store";
     EXPECT_EQ(t106::count_state(*c.rig->sess, fsm_state::Active), 0U) << "Active entries";
 }
+
+// The accessor's three states (data-model E-1), on a bare policy: no rig, no session. The third
+// state separates an accessor that tests the stored validator from a setter that keeps an earlier
+// callable when handed an empty one.
+TEST(CompIdAuthorizationPolicy106, HasLogonValidator_ThreeStates) {
+    fixpp::session::CompIdAuthorizationPolicy policy;
+    EXPECT_FALSE(policy.has_logon_validator()) << "never set";
+    policy.set_logon_validator(
+        [](std::string_view, fixpp::session::logon_credentials const&) { return true; });
+    EXPECT_TRUE(policy.has_logon_validator()) << "set with a callable";
+    policy.set_logon_validator(fixpp::session::CompIdAuthorizationPolicy::logon_validator_fn{});
+    EXPECT_FALSE(policy.has_logon_validator()) << "set again with an empty validator";
+}
