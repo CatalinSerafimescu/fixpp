@@ -1275,25 +1275,27 @@ constructed: the first socket, or the first timer, armed or not (`deadline_timer
 timeout when polling. Every production io_context has one, because every connection is a socket. A bench or test
 io_context with no socket (a mock clock, a scripted transport) has none until a change adds a timer to the path it
 drives. Then the head arm pays a reactor pass per poll that the base arm never paid, and the delta reads as the change's
-cost when the rig caused it. It runs the other way too: a timer the change parks at the head of the reactor's timer
-queue means a timer armed after it, expiring later, no longer re-arms the timerfd, and the head reads faster than the base.
+cost when the rig caused it. A delta can also be the code's own with the reactor in both arms: a timer the change parks
+at the head of the reactor's timer queue means a timer armed after it, expiring later, no longer re-arms the timerfd,
+and the head reads faster than the base. The strace tells the two apart.
 
 - **Trigger:** a bench or test delta, of either sign, on a path where the change adds the first asio timer or I/O
   object, or on an io_context that has no socket.
 - **Procedure:**
   - Before attributing the delta, check the reactor in both arms: `strace -f -c` the same bench binary built in each
-    arm and compare the `epoll_wait` and `timerfd_settime` calls. A syscall that one arm makes and the other does not
-    is the rig, not the code.
+    arm and compare the `epoll_wait` and `timerfd_settime` calls. An arm with no `epoll_wait` has no reactor, and that
+    delta is the rig. With `epoll_wait` in both arms, a `timerfd_settime` difference that remains is the change's own
+    timer queue, and belongs to the code.
   - Give the rig the reactor production has, in both arms: an unarmed `asio::steady_timer` constructed on the
     io_context is enough. Put it in the bench source and overlay that same source on the base, so both arms run one
     source. Record it as a measurement ruling.
-  - Re-read the strace after the fix: the reactor syscalls should now match between the arms.
+  - Re-read the strace after the fix: `epoll_wait` should now match between the arms.
 - **Scanning heuristic:** for each io_context a bench or test constructs, check whether anything on it creates a
   socket or a timer before the timed region: `git grep -nE 'io_context|steady_timer|ip::tcp::socket' -- bench`. One
   with neither is reactor-less, and a timer added to the code it drives changes its cost.
 - **Instance (106-logon-guards-write-bounds, T164, ruling R19).** The connection bound's `asio::steady_timer` in the
   Session started the reactor in the head arm only; `session_send_bench` and `on_inbound_frame_bench` now construct an
-  unarmed timer on their io_context. The reverse form is `engine_send_bench`'s read-pump case. See
+  unarmed timer on their io_context. The code's own timer-queue effect is `engine_send_bench`'s read-pump case. See
   [components/session](./components/session.md).
 - **Sibling.** Class 10 (an assessment scoped to one of a change's effects): here the effect outside the assessment is
   on the rig, not on the code.

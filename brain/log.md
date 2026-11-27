@@ -6,6 +6,10 @@ status: stable
 
 # Log
 
+- **2026-11-27 — 106 close-out, row 15: class 28 narrowed.** Its strace test now reads `epoll_wait` (is there a reactor)
+  as the rig's signature, and a `timerfd_settime` difference left with the reactor in both arms as the change's own timer
+  queue, as 106's read-pump case shows.
+
 - **2026-11-27 — 106-logon-guards-write-bounds close-out (PR #725), row 15: `failure-classes.md` gains class 28, the
   first asio timer or I/O object on an io_context starts its reactor, and changes what every poll costs (a bench arm with
   no reactor is not comparable; strace both arms), and class 29, a new "one ending wins" arbitration makes its loser
