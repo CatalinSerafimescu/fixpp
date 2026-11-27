@@ -67,14 +67,14 @@ tests, the transport tests and the C-ABI tests.
 |---|---|---|
 | P1 (D1) | `IdentityFirst106.*`; `LogonTooLow104.Precedence_*`; `UnaskedResetAck104.*`; the 099 W5 suites | session tests, labels `106`, `104`, `099` |
 | P2 (D2) | `NextNumIn106.*`; the census rows of section 1 | session tests |
-| P3 (D3, D4, D11) | `GiveUp106.*`; `ConnectionBound106.*`; `ShippingClock106.*`; `OneEnding106.*` (limit off); `LivenessTiming105.*`; `HeldTestRequestCap105.*`; `ReplayGate588.R588g*` and `R588h*`; `WriteLimit105.*` | session tests and the seam entry, labels `106`, `105`; the 538 binary |
+| P3 (D3, D4, D11) | `GiveUp106.*`; `ConnectionBound106.*`; `WriteLimit106.ShippingClock106_*`; `OneEnding106.*` (limit off); `LivenessTiming105.*`; `HeldTestRequestCap105.*`; `ReplayGate588.R588g*` and `R588h*`; `WriteLimit105.*` | session tests and the seam entry, labels `106`, `105`; the 538 binary |
 | P4 (D5) | `WriteTimeout106.*`; `OneEnding106.*` (limit on); `TomlWriteTimeout106.*`; the C-ABI error-map test (`tests/capi/error_surface_test.cpp`); `alloc_guard_106_connection_bound_mallocnesia` | session seam entry, config, capi; the mallocnesia cell on `linux-clang-release` |
 | P5 (D6) | `TomlHandshake106.*`; `EngineHandshake106.*`; `HandshakeBound106.*`; `AsioTlsTransportErrorPaths.HandshakeTimeoutMapsToTransportHandshakeTimeout`; `TlsClose105.*` | config, session, transport |
 
 Example: `ctest --preset linux-clang-debug -L 106 --output-on-failure`, then the same with `-L 105` and `-L 104`.
 
 Bounded waits use the mock clock with the budgets of research D9. The real-socket cells (P5) and the
-`ShippingClock106` cell use wall-clock budgets derived there: bound + 2 s (the acceptor cell: EOF before 1.2 s, under its 1500 ms default); for `ShippingClock106`, W + 1 s against T = 2.4 s (HeartBtInt 2 s), with the write-timeout record asserted. Each spurious-hit arm is checked
+`WriteLimit106.ShippingClock106_*` cell use wall-clock budgets derived there: bound + 2 s (the acceptor cell: EOF before 1.2 s, under its 1500 ms default); for that cell, W + 1 s against T = 2.4 s (HeartBtInt 2 s), with the write-timeout record asserted. Each spurious-hit arm is checked
 before the competing deadline (10 s, `logon_timeout_ms` from accept).
 
 ## 4. Mutants (in a scratch copy, never in the PR's worktree)
@@ -86,13 +86,13 @@ before the competing deadline (10 s, `logon_timeout_ms` from accept).
 | M1b | two arms, applied together: (item 4) the consuming gate at D1 item 4 refuses an admitted identity; (held Reject) the consuming gate in front of the held validate-first Reject that disconnects refuses it | every `IdentityFirst106.Admitted_<Refusal>` cell (no answer): the item-4 arm reaches every one whose frame passes `interpret_logon`; `Admitted_ValidateFirst_Acceptor` and `Admitted_ValidateFirst_Initiator` never reach item 4, so the held-Reject arm is theirs |
 | M1c | `has_logon_validator()` returns true whatever is installed | `IdentityFirst106.Admitted_UnreadableNoValidator_ValidateFirstReject` (no Reject) |
 | M2 | delete the loop's arming of the connection bound for its emit; and, separately, restore the cap's pending term | every `GiveUp106` cell except the guard; `GiveUp106.ResendHeldNoPending` |
-| M3 | take `write_started_at_` before the `write_gate_` acquire | `WriteTimeout106.QueuedWrite_CountsFromItsOwnStart`; `ResendWalk_ProgressNotCut` is a guard, M3 equivalent there by construction (research D9 row FR-010 walk) |
+| M3 | take `write_started_at_` before the `write_gate_` acquire | `WriteLimit106.QueuedWrite_CountsFromItsOwnStart`; `ResendWalk_ProgressNotCut` is a guard, M3 equivalent there by construction (research D9 row FR-010 walk) |
 | M3′ | delete the bound's write arming | every `WriteTimeout106.<Class>` cell |
 | M3″ | the expiry does not set `write_cut_epoch_` | every `WriteTimeout106.<Class>` cell whose cut call a caller observes (it returns `dispatch_aborted`); for Heartbeat, TestRequest, ResendFrame, SequenceReset and Honor789Frame the ending (the one `Disconnected`, the record, the close), each class GREEN there recorded as EQUIVALENT with its proof (tasks T120) |
 | M3‴ | `store_then_emit`'s pass-through deleted (`session_write_timeout` flattened to `dispatch_aborted`) | `WriteTimeout106.Send` (the cut `send` returns through `send_impl`'s `store_then_emit`) |
-| M4 | one arm per `build_logout(` site (data-model E-6's census): that site passes `write_class::ordinary`, with M9 and M9′ (for `run_logout_phase1`, M9 and E-3's closing term deleted); alone it is masked, because every Logout is written under a claim or `closing`, which ends the bound first | the R-1 leaf: `WriteTimeout106.EndingLogout_Keeps105Limit`; `run_logout_phase1`: `WriteTimeout106.CloseLogout_KeepsGrace`; the other sites: plan.md "Deferred to tasks.md" |
+| M4 | one arm per `build_logout(` site (data-model E-6's census): that site passes `write_class::ordinary`, with M9 and M9′ (for `run_logout_phase1`, M9 and E-3's closing term deleted); alone it is masked, because every Logout is written under a claim or `closing`, which ends the bound first | the R-1 leaf: `WriteLimit106.EndingLogout_Keeps105Limit`; `run_logout_phase1`: `WriteLimit106.CloseLogout_KeepsGrace`; the other sites: plan.md "Deferred to tasks.md" |
 | M5 | spawn a coroutine per write and per emit | `alloc_guard_106_connection_bound_mallocnesia`: the send half non-zero (spaced sends; back-to-back sends would not show it), the emit half's delta against the base positive |
-| M8 | replace `connection_bound_wait_`'s shipping branch by `await_deadline(*effective_clock_, …)` | `ShippingClock106.DirectDriver_BoundBesideLiveness_TestRequestAtT` (the slot re-arm ends liveness); the mallocnesia cell (the per-call fallback allocates) |
+| M8 | replace `connection_bound_wait_`'s shipping branch by `await_deadline(*effective_clock_, …)` | `WriteLimit106.ShippingClock106_DirectDriver_BoundBesideLiveness_TestRequestAtT` (the slot re-arm ends liveness); the mallocnesia cell (the per-call fallback allocates) |
 | M9 | delete `claim_ending_`'s test (always true) | every `OneEnding106` pair whose second decider reaches `claim_ending_`, with M9′ where the second decider meets E-3's exit on a taken claim; pairs stopped earlier by a state test or an exit row are guards or take the mutant research D9 names for them |
 | M9′ | delete E-3's exit on a taken claim | with M9: `OneEnding106` pairs whose second decider is the bound |
 | M9″ | the establishment expiry's `claim_ending` always refused | `PreActive105.SilentPeer_StillClosedAtEstablishmentDeadlineWithEvent` (no event) |
