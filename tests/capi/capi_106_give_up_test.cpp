@@ -76,6 +76,9 @@ constexpr std::chrono::milliseconds kKeepalive{400};
 // How long one call stays in flight, with no Heartbeat written, before the cell takes it as parked
 // and re-bases.
 constexpr std::chrono::milliseconds kParkedFor{300};
+// How long the cell waits for a call of the flood to park; longer than the fill on the slowest lane
+// the cell runs on, which the setup failure's message reports by its count of returned calls.
+constexpr std::chrono::milliseconds kParkBudget{20000};
 // The peer's SO_RCVBUF.
 constexpr int kPeerReceiveBuffer = 4096;
 // The Text(58) padding of each flood frame, which keeps the frame under the session's outbound
@@ -184,10 +187,10 @@ struct Rebase {
 // kParkedFor, and the last Heartbeat was written kParkedFor ago, then the re-base; returns it once
 // the same call is still in flight kParkedFor after the re-base was received. A call that completes
 // in the meantime makes it re-base again. Nullopt when the flood ends, a write or the re-base's
-// receipt fails, or no park holds within kStepBudget.
+// receipt fails, or no park holds within kParkBudget.
 std::optional<Rebase> rebase_once_parked(rl::CSession& s, rl::PeerLine& line,
                                          SendFlood const& flood) {
-    auto const until = steady::now() + rl::kStepBudget;
+    auto const until = steady::now() + kParkBudget;
     auto keepalive_at = steady::now() - kKeepalive;
     std::optional<Rebase> rebase;
     for (std::uint64_t k = 0;;) {
